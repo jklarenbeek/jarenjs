@@ -531,9 +531,10 @@ export class Sequence {
     };
   }
 
-  /** What a run binds, unchecked ({@link RUN_BINDINGS}): for `live()`,
-   * which checks the list rule against the externals it registers, and
-   * the source the chain was built over. */
+  /** What a run binds, unchecked ({@link RUN_BINDINGS}): for a handle's
+   * `live()`, `execute()`, `query()` and `explain()`, which check the list
+   * rule against the externals they hand the store, and the source the
+   * chain was built over. */
   [RUN_BINDINGS]() {
     return {
       bindings: snapshot(Object.fromEntries(this.#params)),

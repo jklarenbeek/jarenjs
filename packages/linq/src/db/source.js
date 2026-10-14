@@ -7,8 +7,8 @@
  * be a query over the wrong collection. The client therefore records, for
  * the providers it fronts (the store's own set or collection, the handle
  * around it, and the synchronous twin the store offers), the kind and the
- * name they stand for, and a handle's `live()` compares the name a chain
- * reports against its own.
+ * name they stand for, and a handle's `live()`, `execute()`, `query()` and
+ * `explain()` compare the name a chain reports against its own.
  *
  * The comparison is by name within the model, never by object: a chain
  * over the same-named source of another client of the model, or from a
@@ -16,7 +16,7 @@
  * store source (over rows in memory) is a document builder, and a source
  * the client has not recorded (a view the host opened on the raw store,
  * another transaction's, a hand-written provider) is not another source it
- * can name; both register as they always did.
+ * can name; both are taken as they always were.
  *
  * The client's own handles are recorded when they are built, so a chain
  * from any client of the model is known; a transaction's are built per
@@ -49,7 +49,7 @@ const ROOT_STEPS = new WeakMap();
  * @returns {{
  *   bind: (kind: 'entity' | 'collection', name: string, handle: object) => void,
  *   record: () => void,
- *   handleOf: (kind: 'entity' | 'collection', name: string) => (source: object) => void }}
+ *   handleOf: (kind: 'entity' | 'collection', name: string, method: string) => (source: object) => void }}
  */
 export function createSourceScope(view, owner) {
   /** @type {{ kind: 'entity' | 'collection', name: string, handle: object }[]} */
@@ -102,14 +102,14 @@ export function createSourceScope(view, owner) {
       named.push({ kind, name, handle });
     },
     record: bindProviders,
-    handleOf(kind, name) {
+    handleOf(kind, name, method) {
       return (source) => {
         const key = keyOf(source);
         // names are unique across kinds (two objects of one database cannot
         // share a table name), so the name settles which source it is
         if (key !== undefined && key.name !== name) {
           throw new LinqBuildError('JL0005',
-            `live() on ${kind} '${name}' was handed a chain built over ${key.kind} '${key.name}' — `
+            `${method}() on ${kind} '${name}' was handed a chain built over ${key.kind} '${key.name}' — `
             + 'a chain runs against the source it was built over; build it from this handle, '
             + 'or hand it to the handle it was built from');
         }

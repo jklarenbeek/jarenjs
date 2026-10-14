@@ -9,43 +9,11 @@
  * not a query document — is `JD0033`, and a store opened without capture
  * refuses (`JD0050`) as it does for a document. The chain's `params()`
  * bindings are the externals, fixed at registration; `options.externals`
- * adds to them.
- * The merged set is what the store runs, so it is the set a parameter an
- * `in()` reads whole as its list must be an array in (`JL0004`): a
- * placeholder the options override is not checked, and an override is.
- * A chain carries the source it was built over, and a handle registers
- * only a chain over its own (`JL0005`): the document names rows of that
- * source and nothing else, so another source's chain would be a query
- * over the wrong rows.
+ * adds to them, and `chain.js` reads a chain the same way for `execute`,
+ * `query` and `explain`.
  */
 
-import { isPlainOptions } from '@jarenjs/core/object';
-
-import { RUN_BINDINGS } from '../document.js';
-import { requireListBindings } from '../expression.js';
-
-/** Whether a source is a chain: a document and an explanation to give. */
-const isChain = (source) => source !== null && typeof source === 'object'
-  && typeof source.toDocument === 'function' && typeof source.explain === 'function';
-
-/**
- * The document a source stands for, the values it bound and the
- * parameters its `in()` calls read whole as lists — unchecked, because
- * what the store runs is decided only once the options are merged in.
- * @param {any} source - a chain (either surface) or a query document
- * @returns {{ document: any, bindings: Record<string, unknown>, lists: readonly string[],
- *   source?: object | null }} `source` is the provider the chain was
- *   built over (`null`: rows in memory), absent when the source
- *   is a document or a chain-like this package did not build
- */
-function documentOf(source) {
-  if (!isChain(source)) return { document: source, bindings: {}, lists: [] };
-  // a chain split by a host callback has no document; its own refusal
-  // (`JL0005`) names why
-  const document = source.toDocument();
-  // a chain-like this package did not build gives its own explanation
-  return { document, ...(source[RUN_BINDINGS]?.() ?? { bindings: source.explain().bindings, lists: [] }) };
-}
+import { resolveSource } from './chain.js';
 
 /**
  * Register a live query through the store's own registration.
@@ -58,19 +26,10 @@ function documentOf(source) {
  *   a chain built over another collection or entity than its own
  * @returns {Promise<any>} the store's live query
  */
-export function registerLive(register, source, options = {}, onlyOwn = undefined) {
+export function registerLive(register, source, options = undefined, onlyOwn = undefined) {
   try {
-    const { document, bindings, lists, source: builtOver } = documentOf(source);
-    if (builtOver != null) onlyOwn?.(builtOver);
-    // options the store would refuse reach it as they were given: merging
-    // would read `null` options as a TypeError, spread a string into
-    // members and an array into `0`, `1`, ... and so accept them
-    if (!isPlainOptions(options) || !(options.externals == null || isPlainOptions(options.externals))) {
-      return register(document, options);
-    }
-    const externals = { ...bindings, ...options.externals };
-    requireListBindings(lists, new Map(Object.entries(externals)));
-    return register(document, { ...options, externals });
+    const resolved = resolveSource(source, options, onlyOwn);
+    return register(resolved.document, resolved.options);
   }
   catch (error) {
     // the store answers its refusals by a rejected promise, so a chain's

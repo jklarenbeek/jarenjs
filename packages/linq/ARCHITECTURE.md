@@ -173,19 +173,21 @@ declaration file of both packages, for every import spelling).
 store's entity set spread in, the chain start generated from
 `AsyncSequence.prototype` so nothing is duplicated (`explain()` is the
 one overload: the empty chain's without a document, the store's with
-one), and `include`, `link`/`unlink`, `live` beside them. `include.js`
+one, and `execute` and `query` read a chain's document as well as a
+query document), and `include`, `link`/`unlink`, `live` beside them. `include.js`
 is a builder that EMITS the store's `load` spec: the relation member
 captured to its name, every callback captured over `$it` through the
 same recording proxy with no parameters, the nested includes resolved
 over the scope's relation tables, the spec deep-frozen in a fixed
 member order. `membership.js` reads the relation table before the store
-records a link (`JL0107` names the kind); `live.js` hands a chain's
-document and bindings, the registration's own `externals` merged over
-them, to the store's own registration — holding a parameter an `in()`
-reads whole to an array in that merged set, which is what the store
-runs. `source.js` records, for each provider a client fronts, the kind and the
+records a link (`JL0107` names the kind); `chain.js` reads a chain for
+a handle: its document and bindings, the call's own `externals` merged
+over them — holding a parameter an `in()` reads whole to an array in that
+merged set, which is what the store runs — and the source check; `live.js`
+hands that to the store's own registration, and a handle's `execute`,
+`query` and `explain` hand it to the store's member of that name. `source.js` records, for each provider a client fronts, the kind and the
 name it stands for, and the chain reports the provider it was built over,
-so a handle registers only a chain over its own collection or entity by
+so a handle takes only a chain over its own collection or entity by
 name (`JL0005` otherwise).
 Nothing here runs a query, plans one or keeps state beyond that record: the store stays
 the engine, and every read is one its `explain()` can name.

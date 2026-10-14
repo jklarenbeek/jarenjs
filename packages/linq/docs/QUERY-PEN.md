@@ -1384,7 +1384,7 @@ proves that too, so the exclusion cannot hide a chain refusal).
 | `JL0002` | an expression proxy was used outside the capture it belongs to |
 | `JL0003` | `ofType`/`cast` compiled a schema operator with no type-test compiler injected |
 | `JL0004` | a parameter was read undeclared, declared under a reserved or invalid name, bound to a non-JSON value, bound to two values by one join, or read whole as an `in()` list while bound to something other than an array; or the parameters argument itself was embedded as a value or spread |
-| `JL0005` | an operator was used invalidly at build time: a value the document cannot carry, a stage in the wrong place, a bad argument, an option outside a closed option bag, an async-surface rule, a chain handed to the `live()` of a source it was not built over |
+| `JL0005` | an operator was used invalidly at build time: a value the document cannot carry, a stage in the wrong place, a bad argument, an option outside a closed option bag, an async-surface rule, a chain handed to the `live()`, `execute()`, `query()` or `explain()` of a source it was not built over |
 | `JL0006` | an operator §4 records as `unsupported` was invoked |
 | `JL0007` | a provider serves several entity roots and has none of its own |
 | `JL0105` | a relation hop cannot lower to a phrase |

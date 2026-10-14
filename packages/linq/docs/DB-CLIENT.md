@@ -101,6 +101,7 @@ decides which document answers a question about behaviour.
 | `include(pick, spec?)` | the store's `load(spec)` (MODEL-FORMAT §10.4, §10.5) | opens a graph that EMITS the spec (§2.4, §3), typed `Loaded<>` by what it included |
 | `link(own, member, target)`, `unlink(…)` | the store's membership API (MODEL-FORMAT §11.7) | reads the relation table first — the member must be a many-to-many relation (`JL0107`, naming the kind it is, or the members that are) — then records through the store; `saveChanges()` writes the join rows |
 | `live(chain \| document, options?)` | the store's registration — `store.live` for an entity root, `collection.live` for a collection (LIVE-FORMAT §7) | hands over the chain's document and its `params()` bindings as the externals (`options.externals` merge over them, and a parameter an `in()` reads whole must be an array in the merged set — `JL0004`, so a placeholder the options override registers and a non-array override, which used to register unchecked, does not; options the store would refuse — `null`, a string, `externals` that is not a plain object — reach it as given and it refuses them with `JD0013`, where the merge used to accept an array or a string as bindings named `0`, `1`, …); a handle's `live` registers only a chain built over its own collection or entity (by name) — a chain over another one is `JL0005`, where it used to register its document over the handle's rows; the strategy, the reason and the maintenance are the store's |
+| `execute(chain \| document, options?)`, `query(…)`, `explain(…)` | the store's own members, on a collection handle and on an entity handle (a collection has `query`; an entity set has none) | a chain is handed over as `live()` hands it (`execute` answers the document's own shape: several rows an array, one row the row, none `undefined`): its document runs with its `params()` bindings as the externals (`options.externals` merge over them and a parameter an `in()` reads whole must be an array in the merged set — `JL0004`), and a chain built over another collection or entity is `JL0005` (`execute() on collection 'orders' was handed a chain built over collection 'users'`). A chain answers exactly what its `toDocument()` answers on the same member; a document, with or without options, goes to the store untouched. `explain()` with nothing is still the empty chain's explanation. A refusal of the chain is answered as the store answers a refused document on that member: `execute` and `query` throw, `explain` rejects. They used to read a chain as a document with no clauses: a collection answered `{}` for `execute(chain)` and `[{}]` for `query(chain)`, and an entity refused with `JD0033` |
 | `client.collections.<name>` | the store's collection | the same chain start and `live`, typed from the pen's collection schema (§2.5) |
 | `saveChanges()`, `transaction(fn, options?)`, `close()`, `capabilities`, `store` | the store's | pass-throughs; `saveChanges` and `live` exist exactly when the model declares entities, as on the store; `store` is the escape hatch, typed `TypedStore` |
 
@@ -275,7 +276,8 @@ A collection handle is 49 members: 11 from the store's collection
 (resolved by arity, as on an entity handle) and `all` (resolved by the
 argument: a predicate is the chain's quantifier and answers a boolean;
 nothing, or the collection's `all()` options, is every document, always an
-array). It has no `include`, no `link`/`unlink` and no unit of work,
+array). `execute`, `query` and `explain` take a chain as well as a query
+document (§6). It has no `include`, no `link`/`unlink` and no unit of work,
 because a collection has no relations and no tracking — and neither does
 its client: a collections-only model opens a client with no
 `saveChanges` and no `live` of its own, exactly as the store does.
@@ -655,8 +657,9 @@ itself (`the include spec at posts.comments`), because a spec is not
 assembled node by node the way a pen's document is.
 
 Two codes the client does NOT raise, and a reader will meet both. `JL0004`
-and `JL0005` are the chain's (the one `JL0005` the client adds is a `live()`
-handed a chain built over another source, §6), and they reach a graph unchanged — a load
+and `JL0005` are the chain's (the one `JL0005` the client adds is a handle's
+`live()`, `execute()`, `query()` or `explain()` handed a chain built over
+another source, §6), and they reach a graph unchanged — a load
 clause that binds an external is `JL0004` (`parameter 'x' is not
 declared`), and a `thenBy()` with no `orderBy` before it is `JL0005`, as is an ordering's
 `options` argument that is not a plain object or names a member outside `empty` and `collation`.
@@ -918,6 +921,27 @@ over a provider the client cannot name (a view opened on the raw store,
 another transaction's handle, a provider written by hand) is registered
 as before. The client's own `live` takes a chain over any entity of its
 store; a chain over a collection is still the store's `JD0033`.
+
+**A handle's `execute`, `query` and `explain` take a chain.**
+`client.collections.orders.execute(orders.where(…))` runs the chain's
+document, as `live()` does, and `query(chain)` yields its rows and
+`explain(chain)` explains it; the same members of an entity handle, and of
+the handles of a transaction client, do the same. The source rule is
+`live()`'s: a chain built over another collection or entity is `JL0005`
+(`execute() on collection 'orders' was handed a chain built over collection
+'users'`), and a chain with no store source, the same-named source of
+another client or a hand-written document is taken. A chain over rows in
+memory (`from(rows).where(…)`) names no collection, so it runs over the
+handle's rows and its own rows are ignored, as `live()` ignores them.
+`execute` answers the engine's shape for the document, not `toArray()`'s:
+several rows are an array, one row is the row itself and none is
+`undefined`; `query` and `toArray()` are the array-shaped spellings. They
+used to treat a
+chain as a document with no clauses: `execute` answered `{}` and `query`
+`[{}]` on a collection, `explain` explained the whole collection, and an
+entity refused with `JD0033`. A call that relied on that passes a document
+(`chain.toDocument()` with `{ externals: chain.explain().bindings }`) or,
+better, the chain.
 
 **An `include()` chain is a load specification, not a live document.**
 `live()` over one is the store's `JD0033`: a load specification names no

@@ -75,14 +75,17 @@ export type TypedLiveQuery<T> = Omit<LiveQuery, 'result'> & {
 
 /** The chain start: every `AsyncSequence` member, delegated to
  * `fromAsync(handle)`; `explain()` without a document explains the empty
- * chain (the handle's own `explain(document)` is the store's). */
+ * chain (the handle's own `explain(source)` is the store's, of a chain or a
+ * document). */
 export type ChainStart<T> = Omit<AsyncSequence<T, {}>, 'explain'> & {
   explain(): AsyncExplanation;
 };
 
 /** A collection handle: the collection, the chain start, and a `live`
  * that takes a chain over this collection (its document and bound
- * params; a chain over another source is `JL0005`) or a document.
+ * params; a chain over another source is `JL0005`) or a document. Its
+ * `execute`, `query` and `explain` take a chain the same way (its document,
+ * its params as the externals) or a document.
  * `all` is told apart by its argument: nothing (or `AllOptions`) is the
  * collection's every document, always an array; a predicate is the
  * chain's quantifier. */

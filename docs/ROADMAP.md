@@ -458,19 +458,19 @@ what each does is its own documentation's job
   asking in JavaScript. Wanted: a root for a join table, so a membership can be
   filtered, counted and joined in one document
   ([DB-CLIENT §6](../packages/linq/docs/DB-CLIENT.md)).
-- [ ] **A collection handle's `execute`, `query` and `explain` take a chain and
-  answer nothing real.** `client.collections.orders.execute(orders.where(...))`
-  answers `{}` and `query(chain)` yields `[{}]` (the store's members take a
-  query document; a chain is not one, of any source). Wanted: refuse a chain
-  there with a coded error naming `toDocument()`, or accept it as `live()` does.
-- [ ] **`live()` cannot tell some chains from the collection's own.** A chain
+- [ ] **A handle cannot tell some chains from its own collection's.** A chain
   over rows in memory carries no collection, so
   `orders.live(from(rows).where(..))` registers its document over `orders` and
-  ignores `rows` (the empty `from([])` builder is the same shape); a chain over
-  a view the client does not record (a view opened on the raw store, another
-  transaction's handle, a hand-written provider) is accepted for the same
-  reason. Wanted: the store's collection and entity views carry their own name,
-  and a chain over non-empty rows is refused.
+  ignores `rows` (the empty `from([])` builder is the same shape), and
+  `orders.execute(from(rows).where(..))`, `query(..)` and `explain(..)` run
+  that document over the handle's stored rows the same way; a chain over a
+  view the client does not record (a view opened on the raw store, another
+  transaction's handle, a hand-written provider) is accepted by all four for
+  the same reason. Wanted: the store's collection and entity views carry their
+  own name, and a chain over non-empty rows is refused by `live()`, `execute`,
+  `query` and `explain` alike. The store's own members
+  (`client.store.collection('orders').execute(chain)`) still read a chain as
+  a document with no clauses and answer `{}`.
 - [ ] **Lone surrogates and NUL in native projections.** A lone surrogate written
   as a JavaScript escape comes back from a native projection, group key or
   distinct as three U+FFFD, and `$ends-with` and `$contains` over NUL or lone
