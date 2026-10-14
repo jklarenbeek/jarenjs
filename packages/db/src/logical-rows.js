@@ -28,6 +28,11 @@ export function createLogicalRows({ connection, shapes, collectionCore, entityCo
     return parts;
   };
   const where = (keys, offset = 0) => keys.map((key, i) => `${q(key)} = ${p(offset + i + 1)}`).join(' AND ');
+  /** The parameters a statement names a row by: an entity's key as its
+   * columns hold it (an instant kept as an epoch column binds its epoch), a
+   * membership row's as written. @param {any} shape @param {string} table @param {any} key */
+  const boundKey = (shape, table, key) => (shape.kind === 'entity'
+    ? entityCore(table).plan.storedKey(partsOf(shape, key)) : partsOf(shape, key));
   const entityKey = (shape, key) => Object.fromEntries(keyColumns(shape).map((name, i) => [name, partsOf(shape, key)[i]]));
   const read = (table, key) => {
     const shape = shapeOf(table);
@@ -70,8 +75,8 @@ export function createLogicalRows({ connection, shapes, collectionCore, entityCo
       : before === null ? `INSERT INTO ${q(table)} (${names.map(q).join(', ')}) VALUES (${expressions.join(', ')})`
         : `UPDATE ${q(table)} SET ${names.map((name, i) => `${q(name)} = ${expressions[i]}`).join(', ')} WHERE ${where(keys, params.length)}`;
     return chain(after === null && shape.kind === 'entity' ? captureCascade?.(table, partsOf(shape, key)) : null,
-      (closure) => chain(statement(sql, 'run', after === null ? partsOf(shape, key)
-      : before === null ? params : [...params, ...partsOf(shape, key)]), (result) => {
+      (closure) => chain(statement(sql, 'run', after === null ? boundKey(shape, table, key)
+      : before === null ? params : [...params, ...boundKey(shape, table, key)]), (result) => {
       if (capture.mode !== 'journal') return;
       capture.record(table, partsOf(shape, key), before, after);
       // the rows the database's foreign-key actions changed, once the delete removed its row

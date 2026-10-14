@@ -404,24 +404,37 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
   // row on either engine (see `namesNoNumber`), and a write under one — an
   // insert, a staged removal, a membership — is refused before any statement
   const numericKey = keys.map((name) => ['integer', 'number'].includes(entity.properties.get(name)?.type));
-  /** A physical key column's encoding of one key part, or NULL — which
-   * matches no row — for a part its codec refuses (`JD2003`): no row is
-   * stored under a key the column could not hold, so a read answers absent
-   * (§6). @param {number} i @param {any} part */
-  const encodedKeyOrNull = (i, part) => {
-    try { return columnByName.get(keys[i]).codecPlan.encode(part); }
+  // an instant key kept as an epoch column (`column: "integer"`): its column
+  // holds the epoch, so a key part binds as the epoch the write stored
+  const epochKey = keys.map((name) => scalarColumns.some((column) => column.name === name && column.epoch));
+  /** One key part as its column holds it — the encoding a write gives the
+   * member ({@link encodeColumn}): a physical column's codec, the epoch of an
+   * instant kept as an epoch column (a number there already is one), the
+   * value itself otherwise. Throws what that encoding refuses (`JD2003`).
+   * @param {number} i @param {any} part */
+  const keyColumnValue = (i, part) => (epochKey[i] && typeof part === 'number' ? part : encodeColumn(keys[i], part));
+  /** {@link keyColumnValue}, or NULL — which matches no row — for a part no
+   * row is stored under: text that names no number under a numeric key
+   * column, a part the column's encoding refuses (§6): a read answers
+   * absent. @param {number} i @param {any} part */
+  const storedKeyPart = (i, part) => {
+    if (!physical && numericKey[i] && namesNoNumber(part)) return null;
+    try { return keyColumnValue(i, part); }
     catch (error) {
       if (/** @type {any} */ (error)?.code === 'JD2003') return null;
       throw error;
     }
   };
-  /** The parameters a statement names a row by. @param {any} key */
-  const keyParts = (key) => normalizeKeyArg(key).map((v, i) => (physical ? encodedKeyOrNull(i, v)
-    : numericKey[i] && namesNoNumber(v) ? null : v));
+  /** The parameters a statement names a row by: each part of a key as its
+   * column holds it ({@link storedKeyPart}). @param {any[]} parts */
+  const storedKey = (parts) => parts.map((part, i) => storedKeyPart(i, part));
+  /** {@link storedKey} for a key argument. @param {any} key */
+  const keyParts = (key) => storedKey(normalizeKeyArg(key));
   /** Refuse the parts of a key to write that no write could hold, and answer
    * them: under a numeric key column, a string that names no number
-   * (`JD2002` — see `noNumberKeyReason`); under a physical key column, a
-   * value its codec refuses (its own `JD2003`, as an insert meets it) — at
+   * (`JD2002` — see `noNumberKeyReason`); a value the key column's encoding
+   * refuses (its own `JD2003`, as an insert meets it: a physical column's
+   * codec, an epoch column's instant) — at
    * the call that stages the write, never at every save after it. `member`
    * names the many-to-many member of another entity a membership key came
    * from. @param {any[]} parts @param {string} [member] @returns {any[]} */
@@ -431,11 +444,9 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
   };
   /** {@link refuseUnnumbered} for one part. @param {any} part @param {number} i @param {string} [member] */
   const refusePart = (part, i, member = undefined) => {
-    if (!physical) {
-      if (numericKey[i] && namesNoNumber(part))
-        throw new DbRuntimeError('JD2002', noNumberKeyReason(part, member), { docPath, collection: entity.name, key: part });
-    }
-    else if (part !== undefined) columnByName.get(keys[i]).codecPlan.encode(part);
+    if (!physical && numericKey[i] && namesNoNumber(part))
+      throw new DbRuntimeError('JD2002', noNumberKeyReason(part, member), { docPath, collection: entity.name, key: part });
+    if (part !== undefined) keyColumnValue(i, part);
   };
   /** {@link refuseUnnumbered} for a document to insert, which refuses
    * (`JD2002`) a key member left absent too, unless the database allocates
@@ -461,20 +472,28 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
       refusePart(part, i);
     }
   };
-  const decimalKeys = !physical && numericKey.some(Boolean);
+  const valuedKeys = !physical && (numericKey.some(Boolean) || epochKey.some(Boolean));
   /** The parts of a key as the values they name (§6): decimal text under a
    * numeric key column is the number it spells, so `'16'`, `' 16'`, `'16.0'`
-   * and `16` are one key wherever the unit of work files or compares one.
-   * Text spelling a number no double holds exactly stays as it is.
-   * @param {any[]} parts @returns {any[]} */
+   * and `16` are one key wherever the unit of work files or compares one,
+   * and an instant under an epoch key column is the epoch it names, so
+   * `'2026-03-01T00:00:00Z'` and `'2026-03-01T00:00:00.000Z'` are one key.
+   * Text spelling a number no double holds exactly, or no instant, stays as
+   * it is. @param {any[]} parts @returns {any[]} */
   const keyValues = (parts) => {
-    if (!decimalKeys) return parts;
+    if (!valuedKeys) return parts;
     let out = parts;
     for (let i = 0; i < parts.length; i++) {
       const part = parts[i];
-      if (typeof part !== 'string' || !numericKey[i] || namesNoNumber(part)) continue;
-      const value = Number(part);
-      if (!Number.isFinite(value) || (Number.isInteger(value) && !Number.isSafeInteger(value))) continue;
+      if (typeof part !== 'string') continue;
+      let value;
+      if (epochKey[i]) value = storedKeyPart(i, part);
+      else {
+        if (!numericKey[i] || namesNoNumber(part)) continue;
+        value = Number(part);
+        if (!Number.isFinite(value) || (Number.isInteger(value) && !Number.isSafeInteger(value))) continue;
+      }
+      if (value === null) continue;
       if (out === parts) out = [...parts];
       out[i] = value;
     }
@@ -540,7 +559,7 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
     () => ({ tableSql, columns: keyColumns.map(q),
       // the values the INSERT bound; a key the database allocates, or one its codec refused, names no row
       rows: docs.map((doc) => keys.map((name, i) => (doc[name] === undefined || doc[name] === null ? null
-        : physical ? encodedKeyOrNull(i, doc[name]) : doc[name]))).filter((row) => row.every((part) => part !== null)) }));
+        : storedKeyPart(i, doc[name])))).filter((row) => row.every((part) => part !== null)) }));
   /**
    * A write in a transaction of its own — a savepoint inside the caller's.
    * A bracket that cannot open, on a PostgreSQL transaction an earlier
@@ -651,6 +670,7 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
       encodeColumn,
       refuseUnnumbered,
       keyValues,
+      storedKey,
       /** A membership's key to this entity, as a write names it: refused
        * where no write could hold it ({@link refuseUnnumbered}), otherwise
        * the value it names ({@link keyValues}).

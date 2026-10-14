@@ -41,14 +41,18 @@ RFC 6901 (`~` → `~0`, `/` → `~1`):
 - `<key>`: a SINGLE key renders as its scalar text (integers in
   decimal); a COMPOSITE key renders as the JSON text of its parts
   array (`["ada","math"]`), then escaped as one token. The encoding is
-  deterministic: parts appear in declared key order.
+  deterministic: parts appear in declared key order. An instant key
+  kept as an epoch column (`column: "integer"`) renders as the string
+  its document keeps, in both capture modes (session capture rendered
+  the epoch its column holds, journal capture the string).
 - `<path…>` is the document-relative remainder, RFC 6901 as always.
 
 The contract is stable — consumers depend on it. Join-table rows are
 tiny documents under the join table's name (`/Label_User/["admin","u1"]`
 → `{ "Label_key": "admin", "User_key": "u1" }`, columns in the sorted
 pair order): membership changes are part of the stream, not a blind
-spot.
+spot. A join row holds its columns' values: the end that names an
+instant key kept as an epoch column holds the epoch, in both modes.
 
 **Op order within a record is UNSPECIFIED.** A commit carries one net
 op per row (SQLite sessions coalesce insert+update, drop
@@ -61,7 +65,7 @@ same ops differently; they MUST agree as sets.
 
 | Row change | Patch |
 |---|---|
-| INSERT | `add` at `/<table>/<key>` with the full document (mapped columns folded back: booleans as `true`/`false`, SQL `NULL` absent, derived epoch columns skipped — the document string is authoritative) |
+| INSERT | `add` at `/<table>/<key>` with the full document (mapped columns folded back: booleans as `true`/`false`, SQL `NULL` absent, derived epoch columns — a key or a foreign key among them — skipped: the document string is authoritative) |
 | DELETE | `remove` at `/<table>/<key>` |
 | UPDATE, document column changed | old JSONB diffed against new (`createJSONPatch`) → minimal nested ops under `/<table>/<key>` |
 | UPDATE, mapped scalar/foreign-key column changed | property-level op at `/<table>/<key>/<property>`: `replace` (both present), `add` (was `NULL`), `remove` (now `NULL` — absent per MODEL-FORMAT §9.3) |
@@ -92,7 +96,9 @@ them).
   already knows what it wrote. **Less complete, stated plainly**: it
   cannot see writes made through raw SQL, triggers, or another
   connection; a journal-mode delete of a row the store never read
-  emits its `remove` without having seen the old document; a keyed
+  emits its `remove` without having seen the old document, under the
+  key it was given (`/N/16.0` for a row keyed 16 removed as `'16.0'`) —
+  any other delete is recorded under the key the stored row holds; a keyed
   `put` reads the stored document first, so it emits the `replace`
   session mode emits and a `put` that changes nothing emits nothing.
   It reconstructs the database's own `ON DELETE` actions: before a

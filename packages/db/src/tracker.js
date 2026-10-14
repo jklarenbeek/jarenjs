@@ -537,7 +537,8 @@ export function createTracker(context) {
       : [...new Set(extract(memberValue).map(endpoints.targetValue))];
     return {
       ...endpoints,
-      ownKey,
+      // the own key as its join column holds it, as a link() files it
+      ownKey: ownKey === undefined ? undefined : coreFor(entityName).plan.keyValues([ownKey])[0],
       beforeKeys,
       // the keys the save writes, each one the target could hold
       afterKeys: [...new Set(extract(after[member],
@@ -846,7 +847,7 @@ export function createTracker(context) {
           const plan = coreFor(entityName).plan;
           for (const removal of list) {
             if (removal.entity !== entityName) continue;
-            const params = removal.parts.map((v, i) => plan.encodeColumn(plan.keys[i], v));
+            const params = plan.storedKey(removal.parts);
             const wheres = plan.keys.map((key, i) => `${q(plan.physicalName(key))} = ${parameterAt(i + 1)}`);
             const snapshotVersion = plan.version !== null && removal.snapshot !== null
               ? Number(removal.snapshot[plan.version]) || 0 : null;
@@ -905,9 +906,9 @@ export function createTracker(context) {
           params.push(snapshotVersion + 1);
           assigned.push(plan.version);
         }
-        const wheres = plan.keys.map((key) => {
-          params.push(plan.encodeColumn(key, record.snapshot[key]));
-          return `${q(plan.physicalName(key))} = ${parameterAt(params.length)}`;
+        const wheres = plan.storedKey(plan.keys.map((/** @type {string} */ key) => record.snapshot[key])).map((/** @type {any} */ part, /** @type {number} */ i) => {
+          params.push(part);
+          return `${q(plan.physicalName(plan.keys[i]))} = ${parameterAt(params.length)}`;
         });
         if (plan.version !== null) {
           params.push(snapshotVersion);
@@ -1493,8 +1494,11 @@ export function createTracker(context) {
         records.delete(removedKey);
         if (removals.get(removedKey) === removal) removals.delete(removedKey);
         if ((statement.deletedRows ?? 0) > 0) {
-          captureRecord?.(removal.entity, removal.parts,
-            removal.snapshot ?? undefined, null);
+          // under the key a row read holds, as its insert recorded it; a
+          // removal of a row never read has only the key it was given
+          captureRecord?.(removal.entity, removal.snapshot === null ? removal.parts
+            : coreFor(removal.entity).plan.keys.map((/** @type {string} */ key) => removal.snapshot[key]),
+          removal.snapshot ?? undefined, null);
           // the rows the database's foreign-key actions changed with it
           for (const entry of statement.cascade ?? []) {
             captureRecord?.(entry.table, entry.keyParts, entry.before, entry.after);

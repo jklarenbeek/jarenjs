@@ -89,11 +89,22 @@ export function mergeEntityRow(entityMapping, row, docField = 'doc') {
     if (value === null || value === undefined) continue;
     setObjectMember(doc, column.name, column.storage === 'boolean' ? value === 1 : value);
   }
+  foldForeignKeys(entityMapping, row, doc);
+  return doc;
+}
+
+/**
+ * Fold a row's foreign-key columns into its document: a column a mapped
+ * member owns was folded with the members — an epoch column's document keeps
+ * the instant's string, never the epoch the column holds.
+ * @param {any} entityMapping @param {any} row @param {any} doc
+ */
+function foldForeignKeys(entityMapping, row, doc) {
   for (const fk of entityMapping.foreignKeys) {
+    if (entityMapping.columns.some((/** @type {any} */ column) => column.name === fk.column)) continue;
     const value = row[fk.column];
     if (value !== null && value !== undefined) setObjectMember(doc, fk.column, value);
   }
-  return doc;
 }
 
 /**
@@ -143,10 +154,7 @@ function parseGraphChild(node, child, sizes) {
     if (value === null || value === undefined) continue;
     setObjectMember(doc, column.name, column.storage === 'boolean' ? value === 1 : value);
   }
-  for (const fk of node.entityMapping.foreignKeys) {
-    const value = child[fk.column];
-    if (value !== null && value !== undefined) setObjectMember(doc, fk.column, value);
-  }
+  foldForeignKeys(node.entityMapping, child, doc);
   for (const include of node.includes) {
     const raw = child[include.field];
     if (include.count === true) {

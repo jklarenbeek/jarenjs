@@ -3115,18 +3115,23 @@ export function openStore(model, options) {
             for (const [entityName, entity] of (mapping === null ? [] : entities)) {
               const em = mapping.entities[entityName];
               const fkNames = new Set(em.foreignKeys.map((fk) => fk.column));
+              // an epoch column, a key or a foreign key among them, holds the
+              // epoch of the instant its document keeps as a string
+              const epochs = new Set(em.columns.filter((column) => column.source === 'epoch(document)')
+                .map((column) => column.name));
               const columns = [];
               for (const column of em.columns) {
                 if (fkNames.has(column.name)) continue;
                 columns.push({
                   name: column.name,
                   role: column.key ? 'key'
-                    : column.source === 'epoch(document)' ? 'epoch' : 'scalar',
+                    : epochs.has(column.name) ? 'epoch' : 'scalar',
                   storage: column.storage,
+                  ...(epochs.has(column.name) ? { epoch: true } : {}),
                 });
               }
               for (const fk of em.foreignKeys)
-                columns.push({ name: fk.column, role: 'fk' });
+                columns.push({ name: fk.column, role: 'fk', ...(epochs.has(fk.column) ? { epoch: true } : {}) });
               columns.push({ name: 'doc', role: 'doc' });
               captureShapes.set(entityName, {
                 kind: 'entity',
@@ -3480,7 +3485,10 @@ export function openStore(model, options) {
                   chain(closure === null ? core.get(key) : closure.root, (before) =>
                     chain(core.delete(key), (deleted) => {
                       if (deleted && before !== undefined) {
-                        capture.record(entityName, core.normalizeKey(key),
+                        // under the key the stored row holds, as its create
+                        // recorded it — never another spelling of it ('16.0',
+                        // an instant's epoch) the delete was called with
+                        capture.record(entityName, keysOf(before),
                           stripRelations(entityName, before), null);
                         if (closure !== null) recordCascade(closure.entries);
                       }
@@ -3706,7 +3714,8 @@ export function openStore(model, options) {
               return out;
             };
             const attach = (made, memberships) => {
-              const ownKey = made[mapping.entities[name].keys[0]];
+              // the own key as its join column holds it (an instant kept as an epoch: the epoch)
+              const ownKey = core.plan.keyValues([made[mapping.entities[name].keys[0]]])[0];
               const next = (i) => {
                 if (i >= memberships.length) return null;
                 const { table, join, own, target, keys } = memberships[i];

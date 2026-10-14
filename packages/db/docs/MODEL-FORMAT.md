@@ -1738,7 +1738,23 @@ a pending insert no key could discard. Under a `physical` layout the key
 column's codec decides (§12): a key it refuses is its `JD2003` where
 `remove` stages it — the save failed on it every time until `discard` —
 and a read by it answers absent (a `physical` entity is no membership's
-endpoint, so no `link` names one).
+endpoint, so no `link` names one). An instant key kept as an epoch column
+(`column: "integer"` on a `date-time` or `date` key, §10.3) names its row by
+the instant: every statement binds the key as its column holds it — `get`,
+`update` and `delete`, alone or as part of a composite key, the unit of work,
+a foreign key or membership that references the row, and replication's
+writer — so `'2026-03-01T00:00:00Z'`, `'2026-03-01T00:00:00.000Z'` and the
+epoch `1772323200000` name one row, and the unit of work files them as one.
+A text no such key could hold (an offset form, junk) names no row, and is
+refused (`JD2003`) where `remove` or `link` stages it. Such a row used to be
+stored and then named by no statement: SQLite's `get` answered `undefined`,
+`update` refused `JD2006` and `delete` answered `false`, PostgreSQL refused
+`JD2005`, as did a membership naming the row and, under replication, every
+create (`JD2104`); a referencing member read back as the epoch, and session
+capture rendered the row under its epoch. A member that references such a key
+declares `column: "integer"` itself; without it the member's column holds
+the epoch while the member is a string, and a write naming the row is
+refused (`JD2005`).
 For allocated identities, `put(doc, key)` updates
 a known document and `put(doc)` allocates. On a caller-keyed collection
 the document's key is the key: `put(doc, key)` whose `key` names another
@@ -3306,6 +3322,9 @@ Two rules keep that column honest:
   operators, presence tests and non-family literals simply ride the
   guarded document forms. `$orderby` over an instant path sorts the
   document string, never the integer column, for the same reason.
+- **The key.** On a key, the column is the row's identity: a statement
+  that names the row binds the key's epoch, and capture renders the row
+  under the string its document keeps (§6).
 
 ### 10.4 One-statement graph loading
 

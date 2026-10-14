@@ -194,9 +194,14 @@ const pointerOf = (table, token, path = '') =>
 /**
  * @typedef {{ kind: 'collection' | 'entity' | 'join',
  *   columns: { name: string, role: 'key'|'doc'|'scalar'|'fk'|'epoch',
- *     storage?: string }[],
+ *     storage?: string, epoch?: boolean }[],
  *   keyIndexes: number[], docIndex: number }} TableShape
+ * An `epoch` column — a key or a foreign key flagged `epoch` among them —
+ * holds the epoch of an instant its document keeps as a string.
  */
+
+/** Whether a column derives from the document's instant string. @param {any} column */
+const derivedEpoch = (column) => column.role === 'epoch' || column.epoch === true;
 
 /** Decode one stored column value to its DOCUMENT-level value. */
 function documentValue(column, value) {
@@ -229,10 +234,11 @@ export function translateOperations(connection, shapes, operations) {
     const shape = shapes.get(operation.table);
     if (shape === undefined) return null; // an internal table
     const record = operation.newValues ?? operation.oldValues ?? [];
-    const token = keyToken(shape.keyIndexes.map((index) =>
+    const keyValues = shape.keyIndexes.map((index) =>
       (operation.op === 'update'
         ? operation.oldValues?.[index]
-        : record[index])));
+        : record[index]));
+    const token = keyToken(keyValues);
 
     if (shape.kind === 'join') {
       // membership rows are tiny documents under the join table's name
@@ -248,12 +254,33 @@ export function translateOperations(connection, shapes, operations) {
       return null;
     }
 
+    // an instant key kept as an epoch column is rendered as its document
+    // keeps it, the string journal capture records it under — never as the
+    // epoch the column holds (LIVE-FORMAT §2)
+    const epochKeyed = shape.keyIndexes.some((index) => shape.columns[index].epoch === true);
+    /** The row's key token, read from its document. @param {any} doc */
+    const tokenOf = (doc) => keyToken(shape.keyIndexes.map((index, i) => {
+      const name = shape.columns[index].name;
+      return shape.columns[index].epoch === true && typeof doc?.[name] === 'string' ? doc[name] : keyValues[i];
+    }));
+    /** The document an update leaves stored, for its key token: the
+     * changeset carries the document only where the update changed it. */
+    const storedDocument = () => {
+      const docColumn = shape.columns[shape.docIndex].name;
+      const q = connection.dialect.quoteIdentifier;
+      const where = shape.keyIndexes.map((index, i) =>
+        `${q(shape.columns[index].name)} = ${connection.dialect.parameterRef(i + 1, 'v')}`).join(' AND ');
+      return chain(useStatementOnce(connection,
+        `SELECT ${connection.dialect.jsonText(q(docColumn))} AS ${q('t')} FROM ${q(operation.table)} WHERE ${where}`,
+        (statement) => statement.get(keyValues)), (row) => (row === undefined ? null : JSON.parse(row.t)));
+    };
+
     const buildDocument = (values) => chain(
       jsonOf(values[shape.docIndex]), (doc) => {
         const out = doc ?? {};
         for (let c = 0; c < shape.columns.length; c++) {
           const column = shape.columns[c];
-          if (column.role === 'doc' || column.role === 'epoch') continue;
+          if (column.role === 'doc' || derivedEpoch(column)) continue;
           // a collection's key column is physical bookkeeping — the
           // document carries its own key member per the model
           if (shape.kind === 'collection' && column.role === 'key') continue;
@@ -266,25 +293,31 @@ export function translateOperations(connection, shapes, operations) {
 
     if (operation.op === 'insert') {
       return chain(buildDocument(record), (doc) => {
-        ops.push({ op: 'add', path: pointerOf(operation.table, token), value: doc });
+        ops.push({ op: 'add', path: pointerOf(operation.table, epochKeyed ? tokenOf(doc) : token), value: doc });
         return null;
       });
     }
     if (operation.op === 'delete') {
+      if (epochKeyed) {
+        return chain(jsonOf(record[shape.docIndex]), (doc) => {
+          ops.push({ op: 'remove', path: pointerOf(operation.table, tokenOf(doc)) });
+          return null;
+        });
+      }
       ops.push({ op: 'remove', path: pointerOf(operation.table, token) });
       return null;
     }
     // update: property-level ops from the CHANGED columns; the doc
     // column diffs old against new for a minimal nested patch
-    const columnOps = () => {
+    const columnOps = (rowToken) => {
       for (let c = 0; c < shape.columns.length; c++) {
         const column = shape.columns[c];
         const newValue = operation.newValues[c];
         if (newValue === undefined || column.role === 'doc') continue;
-        if (column.role === 'epoch') continue; // derived; the doc string decides
+        if (derivedEpoch(column)) continue; // derived; the doc string decides
         if (shape.kind === 'collection' && column.role === 'key') continue;
         const oldValue = operation.oldValues[c];
-        const path = pointerOf(operation.table, token, `/${encodeJSONPointerSegment(column.name)}`);
+        const path = pointerOf(operation.table, rowToken, `/${encodeJSONPointerSegment(column.name)}`);
         if (newValue === null) {
           if (oldValue !== null) ops.push({ op: 'remove', path });
         }
@@ -298,13 +331,20 @@ export function translateOperations(connection, shapes, operations) {
     };
     const newDocBlob = operation.newValues[shape.docIndex];
     if (newDocBlob === undefined) {
-      columnOps();
+      if (epochKeyed) {
+        return chain(storedDocument(), (doc) => {
+          columnOps(tokenOf(doc));
+          return null;
+        });
+      }
+      columnOps(token);
       return null;
     }
     return chain(jsonOf(operation.oldValues[shape.docIndex]), (oldDoc) =>
       chain(jsonOf(newDocBlob), (newDoc) => {
-        columnOps();
-        const prefix = pointerOf(operation.table, token);
+        const rowToken = epochKeyed ? tokenOf(oldDoc) : token;
+        columnOps(rowToken);
+        const prefix = pointerOf(operation.table, rowToken);
         for (const op of createJSONPatch(oldDoc ?? {}, newDoc ?? {})) {
           ops.push({ ...op, path: `${prefix}${op.path}`,
             ...(op.from !== undefined ? { from: `${prefix}${op.from}` } : {}) });

@@ -536,21 +536,15 @@ what each does is its own documentation's job
   before a removal and after it — refuses `JD2005` or `JD2104`. A store on
   several PostgreSQL sessions (`sessions` above 1) refuses `replication`
   (`JD0009`): its pages, snapshots and applies are qualified on one session.
-- [ ] **Instant keys kept as epoch columns.** A `date-time` or `date` key
-  declared `column: "integer"` is stored — the column holds the epoch, the
-  document the string — but no later statement names its row: `get`, `update`
-  and `delete` bind the string against the integer key column, so SQLite finds
-  no row (`get` answers `undefined`, `update` refuses `JD2006`, `delete` answers
-  `false`) and PostgreSQL refuses `JD2005`; a foreign key or membership naming
-  such a row refuses `JD2005` on both engines; session capture records the row
-  under its epoch where journal capture records the string; and under
-  replication every create refuses `JD2104`. Wanted: every key binding — the
-  entity core, the unit of work, foreign-key and membership columns, session
-  capture's key decoding and the replication writer — encodes the instant
-  through the column's codec, as its column stores it. A refusal of an epoch key
-  (`JD0005`) was rejected: an append-only log keyed by the instant and queried
-  by range answers right today (create, load, ordered load, range predicates),
-  and the refusal would stop it opening.
+- [ ] **A journal removal of a row never read records the key it was given.**
+  A unit-of-work `remove()` of a row no read loaded, by another spelling of
+  its key (`'16.0'` for 16; another spelling of an instant, or its epoch,
+  under a key kept as an epoch column), deletes the row, but journal capture
+  records the `remove` under that spelling (`/N/16.0`, `/E/1772323200000`)
+  where session capture records the stored key, and under replication the
+  transaction refuses `JD0060`. Wanted: the delete reads the stored key of the
+  row it removes (as it reads the rows its foreign keys change) and journal
+  capture records under it.
 - [ ] **Store rules judge only the store's own statements.** A row the
   database's foreign-key actions remove or null runs none of its entity's rules
   (a child's delete rule refuses its own `delete()` yet a cascading parent
