@@ -55,7 +55,13 @@ Every parse returns a fresh, never-mutated object:
 Two sources merge into `config` (plain JSON), in source order:
 
 1. A leading `---` front-matter block (a YAML subset): `title` lifts to
-   `meta.title`, `config:` merges into `config`.
+   `meta.title`, `config:` merges into `config`, and a top-level
+   `displayMode:` is copied to `config.gantt.displayMode` after that merge,
+   so it wins over a `displayMode` written under `config:` (Mermaid's
+   shorthand for the compact Gantt, §4.4). The value is kept as its text
+   and an empty or false one writes nothing. This happens for every diagram
+   type, as in Mermaid, so `toMermaid` writes the member back in the `init`
+   header it prints for the config.
 2. `%%{init: { … }}%%` directives (relaxed JSON: single quotes and bare
    keys tolerated).
 
@@ -141,8 +147,8 @@ answer rather than only what the source said.
 ```
 
 `meta` holds the header lines **verbatim** (`title`, `dateFormat`,
-`axisFormat`, `excludes`, `includes`, `inclusiveEndDates`, `tickInterval`,
-`weekday`, `weekend`, `todayMarker`), which is what keeps `printGantt` a
+`axisFormat`, `excludes`, `includes`, `inclusiveEndDates`, `topAxis`,
+`tickInterval`, `weekday`, `weekend`, `todayMarker`), which is what keeps `printGantt` a
 fixed point. `rules` holds the same directives *interpreted*:
 `{ dateFormat, axisFormat, tick, weekStart, weekendStart, excludes,
 includes, inclusiveEndDates, todayMarker }`, where `tick` is
@@ -243,7 +249,47 @@ extra day is added before anything that follows reads the end, so an
 `after` successor starts a day later too. The date end stays "the
 author's answer": the extra day is not pushed past `excludes` either.
 
-#### Four deliberate divergences from Mermaid
+#### The two switches that live in the config
+
+`topAxis` and `displayMode: compact` live in the diagram's config in
+Mermaid — `gantt.topAxis` and `gantt.displayMode`, set by an `%%{init}%%`
+directive or by the front matter's `config` — and so they do here: they
+arrive in layout as the document's `config.gantt` and never enter the AST,
+so a document with and without them parses to the same tree. (The one
+exception is a bare `topAxis` header line, below.) A top-level
+front-matter `displayMode: compact` is Mermaid's shorthand for
+`config.gantt.displayMode`; it wins over that member, and an init
+directive wins over both. `toMermaid` writes
+the config back as an init directive, so the switch survives a round
+trip.
+
+`displayMode` must be exactly `compact` (`Compact` is not). `topAxis` is
+a truthiness test, as in Mermaid, so `true` and the string `"false"` both
+turn it on and `false`, `0` and `""` leave it off.
+
+**Compact mode** packs each section's tasks into the fewest rows. They
+are taken in start order, source order breaking a tie, and each goes into
+the first row whose last task has ended by its start, so a task that
+starts the instant another ends shares its row. The end compared is the
+task's resolved `end`, after `excludes` has pushed it. Each section packs
+from its own first row, and its height is its row count times the row
+height. A row now holds several tasks, so a name no longer has a line of
+the label column to itself: it is centred on its bar when it fits,
+otherwise it starts after the bar, and when that would run past the right
+edge it ends before the bar, and only then is it cut, to the room left of
+the bar. A name that fits is drawn whole. In the scene, a row's `lane` is its row
+within its section, `labelAnchor` is `start`, `middle` or `end`, and the
+scene's `compact` says which mode laid it out.
+
+**`topAxis`** adds a second row of date labels, with the same ticks and
+the same labels, and an axis line under it. Mermaid draws its axis below
+the rows and `topAxis` adds one above; this engine has always drawn its
+axis above the rows, so with the switch on both engines show a row on each
+side, and with it off the engines differ in which side the single row is
+on. In the scene, `bottomAxis` is `null`, or `{ y, labelY }`, and the
+height grows to hold the row.
+
+#### Six deliberate divergences from Mermaid
 
 1. **No clock.** Mermaid starts an undated first task *today*. This
    engine has no clock anywhere (`docs/ROADMAP.md`, "there is no now"),
@@ -260,7 +306,23 @@ author's answer": the extra day is not pushed past `excludes` either.
    task, so `includes the API docs : a1, 2024-01-05, 3d` vanishes
    there. Here a line that starts with `includes` or `inclusiveEndDates`
    and holds a colon that is not inside a time (`10:00`) is a task row,
-   which is what such a line was before the words were directives.
+   which is what such a line was before the words were directives. A
+   line that starts with `topAxis` and holds such a colon is a task row
+   too, where Mermaid fails on it.
+5. **A bare `topAxis` header line is honoured.** Mermaid's grammar
+   recognises the word and then calls a database method that does not
+   exist (`yy.TopAxis is not a function`), so the line fails there. Here
+   it is a no-argument directive like `inclusiveEndDates`: it stays in
+   `meta` (so the printer keeps it) and turns the second axis on, exactly
+   as `gantt.topAxis` in the config does; anything after the word is
+   ignored. This engine accepts a line Mermaid rejects, and renders what
+   the line asks for.
+6. **Compact sections keep their own rows and their own order.** Mermaid
+   groups the tasks of a compact chart by section *name* and walks the
+   groups in JavaScript key order, so two sections with the same name pack
+   together and an integer-looking name (`section 2024`) jumps in front of
+   the others. Here a section is a place in the document: it packs on its
+   own and keeps its position.
 
 ### 4.5 Secondary types, and the pie renderer
 

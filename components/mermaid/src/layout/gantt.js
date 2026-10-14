@@ -12,7 +12,7 @@
  * document's `axisFormat` compiled once here. A second tick ladder in a
  * renderer would be a second set of positions.
  *
- * Two decisions are made here rather than in the renderer, because both
+ * Four decisions are made here rather than in the renderer, because all
  * are geometry:
  *
  * - **Tick labels thin out.** `tickInterval 1day` over two years is 730
@@ -21,6 +21,17 @@
  * - **Row names elide.** A name wider than the label column is cut with
  *   an ellipsis at layout time, so the measured width and the drawn text
  *   are the same string.
+ * - **Compact mode packs rows.** With `displayMode: compact` in the
+ *   document's config, the tasks of a section that do not overlap in time
+ *   share a row, and each name moves from the label column onto its bar.
+ * - **`topAxis` repeats the labels.** The axis here is drawn above the
+ *   rows; Mermaid draws it below and `topAxis` adds the other one. Both
+ *   engines end up with a row of date labels on each side when it is on,
+ *   so the switch adds the row that was missing here.
+ *
+ * Both switches are Mermaid config (`gantt.displayMode`, `gantt.topAxis`),
+ * so they arrive as `options.config`; only a `topAxis` header line is in
+ * the AST, as a `meta` member.
  */
 
 import { textWidth } from '@jarenjs/view/helpers';
@@ -45,15 +56,19 @@ const TICK_LABEL_GAP = 12;
 const MILESTONE_R = 7;
 const MIN_BAR_W = 2;
 const LINK_INSET = 6;
+const LABEL_GAP = 5;
 
 /**
  * @param {any} ast gantt AST (`parser/gantt.js`)
- * @param {{ dateNames?: import('@jarenjs/core/dates').DateNames }} [options]
+ * @param {{ dateNames?: import('@jarenjs/core/dates').DateNames,
+ *   config?: any }} [options] - `config` is the document's config record,
+ *   whose `gantt` member holds `displayMode` and `topAxis`
  * @returns {any} PositionedDiagram
  */
 export function layoutGantt(ast, options = {}) {
   const rules = ast.rules;
   const title = ast.meta.title ?? null;
+  const switches = ganttSwitches(options.config, ast.meta);
 
   // --- the label column
   let labelW = 0;
@@ -84,7 +99,14 @@ export function layoutGantt(ast, options = {}) {
     const named = section.name !== null && section.name !== '';
     const sectionTop = y;
     if (named) y += SECTION_H;
-    for (const task of section.tasks) {
+    const rowsTop = y;
+    const laneOf = switches.compact ? packLanes(section.tasks) : null;
+    let laneCount = 0;
+    for (let ti = 0; ti < section.tasks.length; ti++) {
+      const task = section.tasks[ti];
+      const lane = laneOf === null ? ti : laneOf[ti];
+      laneCount = Math.max(laneCount, lane + 1);
+      const rowY = rowsTop + lane * ROW_H;
       const milestone = task.flags.includes('milestone');
       const barW = milestone ? 0 : Math.max(MIN_BAR_W, xOf(task.end) - xOf(task.start));
       // a task far shorter than a pixel still has to be visible, and the
@@ -93,32 +115,45 @@ export function layoutGantt(ast, options = {}) {
       const barX = milestone
         ? xOf((task.start + task.end) / 2)
         : Math.min(xOf(task.start), plotX + plotW - barW);
+      const x = round(barX);
+      const w = round(barW);
+      // a milestone is a diamond centred on its instant, so its span is the diamond's
+      const label = switches.compact
+        ? placeLabel(task.name, milestone ? x - MILESTONE_R : x, milestone ? x + MILESTONE_R : x + w,
+          width - MARGIN)
+        : {
+          name: elide(task.name, labelW - 2 * LABEL_PAD),
+          labelX: MARGIN + LABEL_PAD,
+          labelAnchor: 'start',
+        };
       const row = {
         index,
         id: task.id,
-        name: elide(task.name, labelW - 2 * LABEL_PAD),
+        name: label.name,
         line: task.line,
         start: task.start,
         end: task.end,
         milestone,
         flags: task.flags,
         after: task.after,
-        y,
+        lane,
+        y: rowY,
         h: ROW_H,
-        labelX: MARGIN + LABEL_PAD,
-        labelY: round(y + ROW_H / 2),
-        x: round(barX),
-        w: round(barW),
-        barY: round(y + (ROW_H - BAR_H) / 2),
+        labelX: label.labelX,
+        labelAnchor: label.labelAnchor,
+        labelY: round(rowY + ROW_H / 2),
+        x,
+        w,
+        barY: round(rowY + (ROW_H - BAR_H) / 2),
         barH: BAR_H,
         r: MILESTONE_R,
         classes: classesFor(task.flags),
       };
       rows.push(row);
       byId.set(task.id, row);
-      y += ROW_H;
       index++;
     }
+    y = rowsTop + laneCount * ROW_H;
     sections.push({
       name: named ? section.name : null,
       index: si,
@@ -129,7 +164,12 @@ export function layoutGantt(ast, options = {}) {
     });
   }
   const plotBottom = Math.max(y, top);
-  const height = plotBottom + MARGIN;
+  // the second row of labels hangs under the plot with the same gap the
+  // first one has above it
+  const bottomAxis = switches.topAxis
+    ? { y: plotBottom, labelY: plotBottom + MARGIN + 8 }
+    : null;
+  const height = plotBottom + MARGIN + (bottomAxis === null ? 0 : AXIS_H);
 
   // --- ticks, positions from the core kernel and labels from axisFormat
   const ticks = planTicks(domain, rules, xOf, options.dateNames);
@@ -147,6 +187,8 @@ export function layoutGantt(ast, options = {}) {
     domain,
     plot: { x: plotX, y: top, w: plotW, h: plotBottom - top },
     axisY: (title === null ? 0 : TITLE_H) + AXIS_H,
+    bottomAxis,
+    compact: switches.compact,
     titleY: title === null ? 0 : 22,
     labelWidth: labelW,
     ticks,
@@ -155,6 +197,121 @@ export function layoutGantt(ast, options = {}) {
     rows,
     links,
   };
+}
+
+/**
+ * The two Mermaid config switches this layout reads, from the document's
+ * config as Mermaid reads them: `displayMode` must be exactly `compact`,
+ * and `topAxis` is a JavaScript truthiness test, so the string `"false"`
+ * turns it on. A `gantt` member that is not an object holds neither. A
+ * `topAxis` header line, kept in the AST's `meta`, turns the second axis
+ * on too.
+ * @param {any} config
+ * @param {Record<string, string>} meta
+ * @returns {{ compact: boolean, topAxis: boolean }}
+ */
+function ganttSwitches(config, meta) {
+  const line = meta.topAxis !== undefined;
+  const gantt = config?.gantt;
+  if (gantt === null || typeof gantt !== 'object') return { compact: false, topAxis: line };
+  return { compact: gantt.displayMode === 'compact', topAxis: line || Boolean(gantt.topAxis) };
+}
+
+/**
+ * The row of each task when a section is packed: tasks in start order
+ * (source order breaking ties), each into the first row whose last task
+ * has ended by its start, so a task starting the instant another ends
+ * shares its row. First-fit by scanning the rows is quadratic in the
+ * rows; two heaps — rows in use by the time they free up, rows free by
+ * their number — give the same answer in n log n.
+ * @param {{ start: number, end: number }[]} tasks
+ * @returns {number[]} the row per task, in the tasks' own order
+ */
+function packLanes(tasks) {
+  const order = tasks.map((_, i) => i).sort((a, b) => tasks[a].start - tasks[b].start || a - b);
+  /** @type {{ end: number, lane: number }[]} */
+  const busy = [];
+  /** @type {number[]} */
+  const free = [];
+  const byEnd = (a, b) => a.end - b.end || a.lane - b.lane;
+  const byLane = (a, b) => a - b;
+  const lanes = new Array(tasks.length);
+  let opened = 0;
+  for (const i of order) {
+    const { start, end } = tasks[i];
+    while (busy.length > 0 && busy[0].end <= start) heapPush(free, heapPop(busy, byEnd).lane, byLane);
+    const lane = free.length > 0 ? heapPop(free, byLane) : opened++;
+    lanes[i] = lane;
+    heapPush(busy, { end, lane }, byEnd);
+  }
+  return lanes;
+}
+
+/**
+ * @template T
+ * @param {T[]} heap
+ * @param {T} item
+ * @param {(a: T, b: T) => number} cmp
+ */
+function heapPush(heap, item, cmp) {
+  let i = heap.length;
+  heap.push(item);
+  while (i > 0) {
+    const parent = (i - 1) >> 1;
+    if (cmp(heap[parent], item) <= 0) break;
+    heap[i] = heap[parent];
+    i = parent;
+  }
+  heap[i] = item;
+}
+
+/**
+ * @template T
+ * @param {T[]} heap non-empty
+ * @param {(a: T, b: T) => number} cmp
+ * @returns {T}
+ */
+function heapPop(heap, cmp) {
+  const top = heap[0];
+  const last = /** @type {T} */ (heap.pop());
+  if (heap.length > 0) {
+    let i = 0;
+    for (;;) {
+      let child = 2 * i + 1;
+      if (child >= heap.length) break;
+      if (child + 1 < heap.length && cmp(heap[child + 1], heap[child]) < 0) child++;
+      if (cmp(last, heap[child]) <= 0) break;
+      heap[i] = heap[child];
+      i = child;
+    }
+    heap[i] = last;
+  }
+  return top;
+}
+
+/**
+ * Where a compact row's name goes, by Mermaid's rule: centred on the bar
+ * when it fits, otherwise after the bar, otherwise — when that would run
+ * off the right edge — before it. Only a name placed before its bar is cut
+ * (to the room left of the bar), so it cannot leave the diagram; Mermaid
+ * cuts nothing, and a name that fits is drawn whole.
+ * @param {string} name
+ * @param {number} left - the bar's left edge
+ * @param {number} right - the bar's right edge
+ * @param {number} limit - the right-most x a name may reach
+ * @returns {{ name: string, labelX: number, labelAnchor: 'start' | 'middle' | 'end' }}
+ */
+function placeLabel(name, left, right, limit) {
+  const wide = textWidth(name, FONT_SIZE);
+  if (wide <= right - left) return { name, labelX: round((left + right) / 2), labelAnchor: 'middle' };
+  if (right + LABEL_GAP + wide > limit) {
+    return {
+      name: elide(name, left - LABEL_GAP - MARGIN),
+      labelX: round(left - LABEL_GAP),
+      labelAnchor: 'end',
+    };
+  }
+  return { name, labelX: round(right + LABEL_GAP), labelAnchor: 'start' };
 }
 
 /**

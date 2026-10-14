@@ -197,10 +197,35 @@ from `@jarenjs/core/dates` — the same ladder the chart component's time
 axis reads — so a timeline and a chart cannot disagree about where a
 week begins.
 
+Two more switches are Mermaid *config*, not header lines, and are read the
+way Mermaid reads them. `gantt.topAxis` (a second row of date labels under
+the rows) and `gantt.displayMode: compact` (tasks that do not overlap share
+a row, with the name on the bar) go in the front matter's `config` or an
+`%%{init}%%` directive, and a top-level front-matter `displayMode: compact`
+is the shorthand for the second:
+
+```mermaid
+---
+displayMode: compact
+config:
+  gantt:
+    topAxis: true
+---
+gantt
+dateFormat YYYY-MM-DD
+section Build
+Design : a1, 2024-01-01, 3d
+Review : a2, 2024-01-02, 2d
+Launch : a3, 2024-01-04, 2d
+```
+
+A bare `topAxis` line in the diagram's body does the same here, though Mermaid
+11.16.1 fails on it.
+
 Each task carries `{ id, flags, start, end, duration, after, line }`
 beside its raw `info`, with `start`/`end` as epoch milliseconds and the
 interval half-open. The grammar, the vendored conformance table and the
-four deliberate divergences from Mermaid are in
+six deliberate divergences from Mermaid are in
 [docs/MERMAID-FORMAT.md §4.4](./docs/MERMAID-FORMAT.md). The load-bearing
 one: **there is no clock here**, so a schedule with no dated anchor is a
 line-aware error rather than a diagram whose meaning changes daily.
@@ -437,8 +462,13 @@ a gantt `includes` line (dates that stay working days whatever `excludes` says) 
 ignored text and now change the schedule of every document that carries them; a
 trailing `%%` comment on `excludes` is skipped where it used to be refused as an
 unknown term; `inclusiveEndDates` followed by anything but a comment is an error,
-as in Mermaid; and a task row whose name starts with `includes` or
-`inclusiveEndDates` stays a task row.
+as in Mermaid; a task row whose name starts with `includes` or
+`inclusiveEndDates` stays a task row; a bare `topAxis` line in a gantt used to
+be dropped and now draws the second row of date labels; a top-level front-matter
+`displayMode` now lands in `config.gantt.displayMode` for every diagram type
+(so `toMermaid` prints it back in the `init` header, even for a flowchart) and
+a gantt that sets it to `compact` packs its rows; and a gantt scene gained
+`compact` and `bottomAxis` members and its rows gained `lane` and `labelAnchor`.
 
 ## Exports
 

@@ -1011,13 +1011,14 @@ thing to avoid.
 
 - [ ] **Mermaid gantt: the directives that are still only text.**
   `dateFormat`, `axisFormat`, `tickInterval`, `excludes`, `includes`,
-  `inclusiveEndDates`, `weekday` and `weekend` are interpreted, the tasks
-  resolve to half-open intervals with dependencies and working-day arithmetic,
-  and gantt renders a real timeline — the grammar, the vendored conformance
-  table and the divergences are in `components/mermaid/docs/MERMAID-FORMAT.md`
+  `inclusiveEndDates`, `weekday`, `weekend`, `topAxis` and `displayMode:
+  compact` are interpreted (the last two as Mermaid reads them, from the
+  diagram's config, and `topAxis` also as a header line), the tasks resolve
+  to half-open intervals with dependencies and working-day arithmetic, and
+  gantt renders a real timeline — the grammar, the vendored conformance table
+  and the divergences are in `components/mermaid/docs/MERMAID-FORMAT.md`
   §4.4, and the kernel's half is `compileDateParser` in
-  `packages/core/docs/DATES.md`. What is left is the remaining header
-  vocabulary: `topAxis`, `displayMode: compact` and the `click` interaction
+  `packages/core/docs/DATES.md`. What is left is the `click` interaction
   statements — plus the eight d3 axis specifiers the conformance table now
   names as refusals rather than passing off as unknown (`%f`, `%g`, `%G`,
   `%q`, `%Q`, `%s`, `%u`, `%V`): a week-based year and a week number are a
@@ -1026,7 +1027,6 @@ thing to avoid.
   list and never will be — it needs a clock, and there is none (see the
   constraint above); a host that wants "now" on a diagram supplies the instant
   as data.
-
 ## Geospatial (cross-package)
 
 Geography is a capability every surface of the suite can spell, and the shipped

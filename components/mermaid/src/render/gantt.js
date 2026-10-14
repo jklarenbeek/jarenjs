@@ -70,6 +70,19 @@ export function renderGantt(scene, theme, hash) {
   children.push(path(`M${num(plot.x)},${num(plot.y)} H${num(plot.x + plot.w)}`, {
     class: 'mm-gantt-axis', stroke: t.lineColor, 'stroke-width': 1,
   }));
+  // the second axis (`topAxis`): the same ticks and labels under the rows
+  if (scene.bottomAxis !== null) {
+    children.push(path(`M${num(plot.x)},${num(scene.bottomAxis.y)} H${num(plot.x + plot.w)}`, {
+      class: 'mm-gantt-axis', stroke: t.lineColor, 'stroke-width': 1, key: 'axis-bottom',
+    }));
+    for (let i = 0; i < scene.ticks.length; i++) {
+      const tick = scene.ticks[i];
+      if (tick.label === null) continue;
+      children.push(textAt(tick.x, scene.bottomAxis.labelY, tick.label, fs - 1, {
+        class: 'mm-gantt-tick', 'text-anchor': 'middle', fill: t.nodeText, key: 'tick-bottom-' + i,
+      }));
+    }
+  }
 
   // Dependency connectors, under the bars.
   for (let i = 0; i < scene.links.length; i++) {
@@ -94,6 +107,8 @@ export function renderGantt(scene, theme, hash) {
     children.push(group({ class: row.classes, key: 'row-' + row.id, 'data-id': row.id }, [
       textAt(row.labelX, row.labelY + 4, row.name, fs, {
         class: 'mm-gantt-label', fill: t.nodeText,
+        // a compact name is centred on or placed beside its bar
+        ...(row.labelAnchor === 'start' ? {} : { 'text-anchor': row.labelAnchor }),
       }),
       row.milestone
         ? polygon(diamond(row.x, row.labelY, row.r), {

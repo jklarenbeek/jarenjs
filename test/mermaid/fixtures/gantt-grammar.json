@@ -6,7 +6,7 @@
     "recorded": "2026-08-26",
     "url": "https://mermaid.js.org/syntax/gantt.html",
     "source": "node_modules/mermaid/dist/chunks/mermaid.esm.min/ganttDiagram-2QTCJSNI.mjs",
-    "note": "The dateFormat token table is dayjs' customParseFormat vocabulary (moment's spelling), the axisFormat table is d3-time-format's strftime vocabulary, and the tickInterval and duration grammars are the two regular expressions the shipped chunk executes. The `excludes`, `includes` and `inclusiveEndDates` entries are read from the chunk's gantt database (`isInvalidDate`, `checkTaskDates`, `getEndDate`, `mergeTokens`) and its lexer."
+    "note": "The dateFormat token table is dayjs' customParseFormat vocabulary (moment's spelling), the axisFormat table is d3-time-format's strftime vocabulary, and the tickInterval and duration grammars are the two regular expressions the shipped chunk executes. The `excludes`, `includes` and `inclusiveEndDates` entries are read from the chunk's gantt database (`isInvalidDate`, `checkTaskDates`, `getEndDate`, `mergeTokens`) and its lexer. The `topAxis` and `displayMode` entries are read from the chunk's renderer (`makeGrid`, `getMaxIntersections`), from the lexer rule and parser action for `topAxis`, and from the front-matter step that copies a top-level `displayMode` into the gantt config."
   },
   "dateFormat": {
     "default": "YYYY-MM-DD",
@@ -124,6 +124,19 @@
     "argument": false,
     "note": "An end written as a date in `dateFormat` names the last day worked, so the task ends one day after it; a duration and `until` are unchanged."
   },
+  "topAxis": {
+    "keyword": "topAxis",
+    "headerLine": false,
+    "config": "gantt.topAxis",
+    "note": "The renderer draws a second axis, with the same ticks and labels, when the gantt config's `topAxis` is truthy: the string \"false\" turns it on. The grammar lexes a `topAxis` line but its action calls a database method that is not there, so the line itself fails with `yy.TopAxis is not a function` and the config is the only way to turn the axis on there."
+  },
+  "displayMode": {
+    "config": "gantt.displayMode",
+    "frontMatterKey": "displayMode",
+    "values": ["compact"],
+    "headerLine": false,
+    "note": "The renderer packs a section's tasks into rows when the gantt config's `displayMode` is exactly `compact`: tasks in start order, source order breaking ties, each into the first row whose last task has ended by its start (the effective end, after `excludes` has pushed it), so a task that starts the instant another ends shares its row. A top-level front-matter `displayMode` is copied into `config.gantt.displayMode` and wins over a `config` member there; an init directive wins over both. The lexer has no rule for a `displayMode` line, so one reads as a task row."
+  },
   "status": {
     "flags": ["done", "active", "crit", "milestone"],
     "note": "Flags lead the task data, in any order, before the id and the dates."
@@ -158,6 +171,18 @@
       "mermaid": "the whole line is the directive and the task is dropped",
       "jaren": "a line holding a colon that is not inside a time is a task row, as it was before the words were directives",
       "why": "a task named in plain words should not vanish, or be refused, because its first word is also a directive"
+    },
+    {
+      "what": "a bare topAxis header line",
+      "mermaid": "the grammar lexes it and then fails with `yy.TopAxis is not a function`",
+      "jaren": "the line is kept in meta and turns the second axis on, as the config's topAxis does; anything after the word is ignored",
+      "why": "the line is the directive's evident spelling, a document carrying it already rendered here, and a refusal would break it for no gain"
+    },
+    {
+      "what": "compact mode with two sections of the same name, or with section names that are integers",
+      "mermaid": "the renderer groups the tasks by section name and walks the groups in JavaScript key order, so same-named sections pack together and an integer-looking name jumps to the front",
+      "jaren": "every section packs on its own and the sections keep their source order",
+      "why": "a section is a position in the document, and a name that sorts differently from where it was written would move rows away from their headings"
     }
   ]
 }

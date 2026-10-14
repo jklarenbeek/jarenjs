@@ -30,7 +30,7 @@ export function layoutDiagram(doc) {
     case 'flowchart': return layoutFlowchart(doc.ast);
     case 'state': return layoutState(doc.ast);
     case 'sequence': return layoutSequence(doc.ast);
-    case 'gantt': return layoutGantt(doc.ast);
+    case 'gantt': return layoutGantt(doc.ast, { config: doc.config });
     default: return null;
   }
 }
@@ -85,7 +85,7 @@ export function diagramToVnode(docOrSource, options = {}) {
           : renderPlaceholder('pie', theme, hash, 'parsed — no pie renderer was injected');
       }
       case 'gantt':
-        return renderGantt(layoutGantt(doc.ast, options), theme, hash);
+        return renderGantt(layoutGantt(doc.ast, { ...options, config: doc.config }), theme, hash);
       case 'class':
       case 'er': {
         const { title, sections } = structuredSections(doc.diagram, doc.ast);

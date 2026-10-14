@@ -3,8 +3,8 @@
  * @file Gantt grammar → gantt AST: a schedule, resolved.
  *
  * Header directives (`title`, `dateFormat`, `axisFormat`, `excludes`,
- * `includes`, `inclusiveEndDates`, `tickInterval`, `weekday`, `weekend`,
- * `todayMarker`) are kept verbatim in `meta` so the printer stays a
+ * `includes`, `inclusiveEndDates`, `topAxis`, `tickInterval`, `weekday`,
+ * `weekend`, `todayMarker`) are kept verbatim in `meta` so the printer stays a
  * fixed point, and are *also* interpreted into `rules` — a compiled
  * date parser, an axis pattern, a tick step, a working calendar. `section` groups tasks; a task row
  * keeps its raw metadata string (`:done, id, 2014-01-06, 3d`) in `info`
@@ -15,6 +15,13 @@
  * The AST stays geometry-free and plain JSON: no compiled closure and
  * no coordinate crosses this boundary. Layout re-compiles the axis
  * pattern from `rules`, once per diagram.
+ *
+ * `displayMode` is not a header line: Mermaid reads it from the
+ * diagram's config, so the document's `config.gantt` carries it to
+ * layout and the AST does not. `topAxis` is both: Mermaid turns the
+ * second axis on from the config, and its grammar has a `topAxis` line
+ * whose action fails there; this reader keeps the line in `meta` like
+ * `inclusiveEndDates` and layout reads it from there.
  *
  * Three refusals are the whole difference from a permissive reader, and
  * each one is a `JM` error carrying its source line:
@@ -43,17 +50,20 @@ import { createExcluder, pushEndPastExclusions, dayIndexOf, DAY_MS } from '../ga
 
 const HEADER_KEYS = new Set([
   'title', 'dateFormat', 'axisFormat', 'excludes', 'includes', 'inclusiveEndDates',
-  'todayMarker', 'tickInterval', 'weekday', 'weekend',
+  'todayMarker', 'tickInterval', 'weekday', 'weekend', 'topAxis',
 ]);
 
 /**
- * The two directives added after the task-row rule was fixed: a line
- * that starts with one of these words and still reads as `Name : data`
- * (a colon that is not inside a time such as `10:00`) is a task row, as
- * it was before the words were directives. Mermaid reads such a line as
- * the directive and drops the task; keeping the task is the divergence.
+ * The words a line may start with and still be a task: a line that
+ * starts with one of these and reads as `Name : data` (a colon that is
+ * not inside a time such as `10:00`) is a task row, as it was before the
+ * words were directives. Mermaid reads such a line as the directive and
+ * drops the task; keeping the task is the divergence.
  */
-const ROW_LIKE_KEYS = new Set(['includes', 'inclusiveEndDates']);
+const ROW_LIKE_KEYS = new Set(['includes', 'inclusiveEndDates', 'topAxis']);
+
+/** The directives that take no argument: a trailing `%%` comment is not one. */
+const NO_ARGUMENT_KEYS = new Set(['inclusiveEndDates', 'topAxis']);
 
 /**
  * @param {string} key - first word of the line
@@ -136,7 +146,7 @@ function scan(lines, offset) {
         // placed now so the printer keeps the header order; joined once below
         meta[key] = '';
       }
-      else meta[key] = key === 'inclusiveEndDates' ? beforeComment(value) : value;
+      else meta[key] = NO_ARGUMENT_KEYS.has(key) ? beforeComment(value) : value;
       metaLine[key] = at;
       continue;
     }

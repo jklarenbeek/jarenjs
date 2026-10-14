@@ -2,7 +2,8 @@
 /**
  * @file Config extraction: the leading `---` front-matter block and any
  * `%%{init: {...}}%%` directives → a plain-JSON `config` (MERMAID-FORMAT
- * §3).
+ * §3). A top-level front-matter `displayMode` is read as the gantt's
+ * `config.gantt.displayMode`, as Mermaid reads it.
  *
  * The raw source is never consumed here — this returns the cleaned body
  * (front-matter, init directives and `%%` comments removed) plus the
@@ -57,6 +58,12 @@ export function parseMermaidConfig(source, options = {}) {
         if (typeof parsed.title === 'string') title = parsed.title;
         if (parsed.config && typeof parsed.config === 'object') {
           config = mergeConfig(config, parsed.config);
+        }
+        // a top-level `displayMode` is the front-matter spelling of
+        // `config.gantt.displayMode`, and it wins over that member; an
+        // init directive then wins over both
+        if (parsed.displayMode) {
+          config = mergeConfig(config, { gantt: { displayMode: String(parsed.displayMode) } });
         }
       }
       rest = rest.slice(closeAt.end);
