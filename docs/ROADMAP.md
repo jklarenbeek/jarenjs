@@ -735,14 +735,6 @@ what each does is its own documentation's job
   the statement does the engine's work and a sort besides and is slower than
   the engine, on PostgreSQL more than on SQLite. Wanted: a cost signal (a
   distinct-count estimate or a bounded-group run-time fallback).
-- [ ] **PostgreSQL groups a number apart that the engine holds equal.** A number
-  a foreign writer stores with more digits than a double holds
-  (`1.0000000000000001`), or two spellings of one denormal, groups apart on
-  PostgreSQL, whose `numeric` is exact; on Bun an integer text beyond 2^53 that
-  a JavaScript store cannot write reads back as its neighbour's double and
-  answers a duplicate item. A store writes canonical text, so only trusted SQL
-  or a foreign writer reaches it. Wanted: read a number key as `double
-  precision` on PostgreSQL, measured.
 - [ ] **Member paths outside ASCII identifiers in entity indexes, index
   conditions and database rules.** Entity index paths, index conditions and
   rule operands name members as `$.<member>` over ASCII identifiers. A member

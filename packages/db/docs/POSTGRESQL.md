@@ -244,6 +244,14 @@ reads `JD2005` naming it. A PostgreSQL failure aborts its transaction, so the
 store never reads the key after one; on SQLite it does, after a unique failure
 that does not name the key.
 
+A number group key or distinct leaf is read as PostgreSQL's exact `numeric`,
+so a number a foreign writer or trusted SQL stored with more digits than a
+double holds (`1.0000000000000001`), or two spellings of one denormal, groups
+apart where the engine, which compares doubles, holds them equal. Every number
+the store itself writes is canonical, so the store's own data groups as the
+engine groups. Reading the key as `double precision` was measured and made
+every number grouping slower, so it is not done.
+
 ## The writer lock and the lock family
 
 `store.transaction(fn, { mode: 'immediate' })` runs `BEGIN`, then takes the
