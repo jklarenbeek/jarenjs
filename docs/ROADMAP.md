@@ -630,9 +630,6 @@ what each does is its own documentation's job
   answers `[]`, where JavaScript's `'abc'.at(0)` is `'a'`: `at()` lowers to an
   array index, which a string does not have, and the capture cannot tell a string
   member from an array one. `x.s.substring(0, 1)` is the character.
-- [ ] **An indexed relation is not a list for `in()`.** `u.id.in(u.posts.at(0).tags)`
-  is refused `JL0005`: `at()` off a relation is an operator result, where the
-  path form `x.in(it.items.at(0).tags)` answers.
 - [ ] **A PostgreSQL table keeps the unguarded definitions of an open-container
   index path until its index is dropped and declared again; a comparison,
   ordering or grouping over such a path reads the guarded document and does not

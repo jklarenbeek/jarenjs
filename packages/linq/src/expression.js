@@ -471,7 +471,10 @@ const associative = (op) => function (/** @type {any} */ record, /** @type {any}
  * of a relation target is a list by the same rule: `p.author.tags` is
  * every element (the phrase returning `$r1.tags[*]`), and a hop fanned
  * anywhere along it (`p.author.tags.all()`, `u.posts.all().label`) is
- * its phrase as it stands; the relation itself is rows, not a list. A
+ * its phrase as it stands; the relation itself is rows, not a list. An
+ * integer index off a relation keeps that rule ({@link indexedOf}):
+ * `u.posts.at(0).tags` is every element of the first related row's
+ * `tags`, as `it.items.at(0).tags` is `$it.items[0].tags[*]`. A
  * parameter read whole as the list is recorded for the capture's runner,
  * which requires its binding to be an array ({@link requireListBindings}).
  * @param {any} record @param {any} values
@@ -480,14 +483,15 @@ function membership(record, values) {
   const list = nodeOf(values);
   if (list !== undefined) {
     assertLive(list);
-    if (list.hop !== undefined ? !readsMember(list.hop) : list.seq === undefined && !list.pathable) {
+    const hop = list.indexed === undefined ? list.hop : indexedHop(list.indexed);
+    if (hop !== undefined ? !readsMember(hop) : list.seq === undefined && !list.pathable) {
       throw new LinqBuildError('JL0005',
         'in() takes an array of values or a PATH to one (a parameter p.ids, a member it.tags); '
         + 'it cannot follow an operator result or a relation');
     }
     if (list.param !== undefined) listStack[listStack.length - 1]?.push(list.param);
     // an unfanned path or hop member is every element; a fanned one is its sequence
-    const items = list.hop !== undefined && !list.hop.fan ? hopDocument(list.hop.chain, `${list.hop.ret}[*]`)
+    const items = hop !== undefined ? hopDocument(hop.chain, hop.fan ? hop.ret : `${hop.ret}[*]`)
       : list.seq ?? (list.fanned ? list.doc : `${list.doc}[*]`);
     return makeExpr({ $eq: [record.doc, items] }, record.epoch, false);
   }
@@ -717,14 +721,17 @@ const METHODS = {
     if (record.pathable && Number.isInteger(index)) {
       return makeExpr(`${record.doc}[${index}]`, record.epoch, true, { fanned: record.fanned });
     }
-    return makeExpr({ $get: [record.doc, toExpression(index)] }, record.epoch, false);
+    const doc = { $get: [record.doc, toExpression(index)] };
+    return makeExpr(doc, record.epoch, false,
+      Number.isInteger(index) ? { indexed: indexedOf(record, doc, `[${index}]`) } : undefined);
   },
   all(record) {
     // a hop's related rows, fanned: the phrase itself, a sequence; an
     // array MEMBER of a hop's target fans as a path member does, the
-    // phrase returning `$r1.tags[*]`
-    if (record.hop !== undefined) {
-      const { hop } = record;
+    // phrase returning `$r1.tags[*]`; a value indexed off a relation
+    // fans as its hop
+    const hop = record.indexed === undefined ? record.hop : indexedHop(record.indexed);
+    if (hop !== undefined) {
       return makeHop(readsMember(hop) ? { ...hop, ret: `${hop.ret}[*]`, fan: true } : { ...hop, fan: true },
         record.epoch, record.nav);
     }
@@ -747,7 +754,8 @@ const METHODS = {
       if (record.hop !== undefined) return extendHop(record, bracketName(name));
       if (record.pathable) return pathStep(record, name, bracketName(name));
     }
-    return makeExpr({ $get: [record.doc, toExpression(name)] }, record.epoch, false);
+    return makeExpr({ $get: [record.doc, toExpression(name)] }, record.epoch, false,
+      typeof name === 'string' ? { indexed: stepIndexed(record.indexed, bracketName(name)) } : undefined);
   },
 };
 
@@ -846,7 +854,8 @@ function hopDocument(chain, ret) {
  * bare phrase, a sequence the aggregates and `exists()` range over. The
  * fanned twin is the phrase in every case, so `count()`/`exists()` on
  * the value count the rows, as they do on a group-join's group.
- * @param {{ chain: any[], ret: string, many: boolean, fan: boolean }} hop
+ * @param {{ chain: any[], ret: string, many: boolean, fan: boolean, sink: any }} hop -
+ *   `sink`: the capture's hop sink, which numbers a binding the hop adds later
  * @param {number} epoch
  * @param {any} nav - the target entity's navigation, while `ret` is its root
  * @param {string} [hostMethod] - the array- or string-method name a member READ spelled
@@ -864,6 +873,49 @@ function makeHop(hop, epoch, nav, hostMethod = undefined) {
  * @param {{ chain: any[], ret: string }} hop
  */
 const readsMember = (hop) => hop.ret !== '$' + hop.chain[hop.chain.length - 1].binding;
+
+/**
+ * What an integer index off a relation is to `in()` and `all()`, which
+ * read it by the path form's rule (`it.items.at(0).tags` is the path
+ * `$it.items[0].tags`, a list for `in()` and a fan for `all()`). As a
+ * VALUE it stays the `$get` the index lowers to; for those two it is a
+ * hop: an index into a member of the hop's target extends the phrase's
+ * return path (`p.author.nest.at(0)` returns `$r1.nest[0]`), and an
+ * index into a to-many hop's array of rows binds the one row it picks
+ * (`u.posts.at(0)`, `{ $for: { r2: { $get: [[<phrase>], 0] } } }`), whose
+ * members the return path then reads. The row's binding is allocated
+ * when `in()` or `all()` reads it ({@link indexedHop}), so a value read
+ * numbers the capture's other bindings as before. Anything else — a
+ * computed index, an index into the related rows fanned — is no list.
+ * @param {any} record - the value indexed
+ * @param {any} doc - the `$get` the index lowers to
+ * @param {string} step - the index as a path step (`[0]`)
+ * @returns {{ hop?: any, row?: any, sink?: any, path: string } | undefined}
+ */
+function indexedOf(record, doc, step) {
+  if (record.indexed !== undefined) return stepIndexed(record.indexed, step);
+  const { hop } = record;
+  if (hop === undefined) return undefined;
+  if (readsMember(hop)) return { hop, path: step };
+  return hop.many && !hop.fan ? { row: doc, sink: hop.sink, path: '' } : undefined;
+}
+
+/**
+ * One more path step on a value indexed off a relation, if the value is one.
+ * @param {{ path: string } | undefined} indexed @param {string} step
+ */
+const stepIndexed = (indexed, step) => (indexed === undefined ? undefined : { ...indexed, path: indexed.path + step });
+
+/**
+ * The hop a value indexed off a relation stands for ({@link indexedOf}).
+ * @param {{ hop?: any, row?: any, sink?: any, path: string }} indexed
+ */
+function indexedHop(indexed) {
+  if (indexed.hop !== undefined) return { ...indexed.hop, ret: indexed.hop.ret + indexed.path };
+  const binding = `r${indexed.sink.next++}`;
+  return { chain: [{ binding, source: indexed.row }], ret: `$${binding}${indexed.path}`,
+    many: false, fan: false, sink: indexed.sink };
+}
 
 /**
  * Record one hop: `member` is a relation of the rows `target` stands
@@ -910,7 +962,7 @@ function startHop(target, member) {
         `$${joinBinding}${memberSegment(relation.targetColumn)}`] } });
     sink.hops.push({ member, kind: relation.kind, binding });
     const manyTarget = resolve(relation.to);
-    return makeHop({ chain, ret: '$' + binding, many: true, fan },
+    return makeHop({ chain, ret: '$' + binding, many: true, fan, sink },
       target.epoch,
       manyTarget === undefined ? undefined : { table: manyTarget, resolve, sink });
   }
@@ -922,7 +974,7 @@ function startHop(target, member) {
   sink.hops.push({ member, kind: relation.kind, binding });
   const targetTable = resolve(relation.to);
   return makeHop(
-    { chain, ret: '$' + binding, many: many || relation.kind === 'oneToMany', fan },
+    { chain, ret: '$' + binding, many: many || relation.kind === 'oneToMany', fan, sink },
     target.epoch,
     targetTable === undefined ? undefined : { table: targetTable, resolve, sink });
 }
@@ -1165,7 +1217,7 @@ function refuseHostMethod(name) {
  * @param {boolean} pathable - whether `doc` is a pure path string that
  *   member access may extend
  * @param {{ seq?: any, nav?: any, navOnFan?: boolean, hop?: any,
- *   group?: string, fanned?: boolean, param?: string, hostMethod?: string }} [extra] -
+ *   group?: string, fanned?: boolean, param?: string, hostMethod?: string, indexed?: any }} [extra] -
  *   `seq`: for a value standing for an array or a hop, the fanned form
  *   its aggregates range over (`'$g[*]'`, a hop's phrase); `nav`: the
  *   relation table of the rows the value stands for, with the resolver
@@ -1175,6 +1227,8 @@ function refuseHostMethod(name) {
  *   aggregates therefore range over the rows; `fanned`: the path fans
  *   (`all()`) somewhere along it, so it is already a sequence; `param`:
  *   the declared parameter this value reads whole (`p.ids`, its fan);
+ *   `indexed`: what `in()` and `all()` read a value indexed off a relation
+ *   as ({@link indexedOf});
  *   `hostMethod`: the array- or string-method name this member read spells
  *   ({@link ARRAY_METHODS}, {@link STRING_METHODS}), which makes the proxy
  *   callable for the one purpose of refusing the call
@@ -1184,7 +1238,7 @@ function makeExpr(doc, epoch, pathable, extra = undefined) {
   const record = {
     doc, epoch, pathable,
     seq: extra?.seq, nav: extra?.nav, navOnFan: extra?.navOnFan === true, hop: extra?.hop,
-    group: extra?.group, fanned: extra?.fanned === true, param: extra?.param,
+    group: extra?.group, fanned: extra?.fanned === true, param: extra?.param, indexed: extra?.indexed,
   };
   /** @type {ProxyHandler<any>} */
   const handler = {
@@ -1247,7 +1301,8 @@ function member(target, prop) {
   const hostMethod = ARRAY_METHODS[prop] === undefined && STRING_METHODS[prop] === undefined ? undefined : prop;
   if (target.hop !== undefined) return extendHop(target, memberSegment(prop), hostMethod);
   if (target.pathable) return pathStep(target, prop, memberSegment(prop), hostMethod);
-  return makeExpr({ $get: [target.doc, embedString(prop)] }, target.epoch, false, { hostMethod });
+  return makeExpr({ $get: [target.doc, embedString(prop)] }, target.epoch, false,
+    { hostMethod, indexed: stepIndexed(target.indexed, memberSegment(prop)) });
 }
 
 /**

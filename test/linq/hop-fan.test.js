@@ -9,8 +9,11 @@
  * related rows) is unchanged. The same member is the list of `in()` as a path
  * member is: unfanned it is every element (`$r1.tags[*]`), fanned anywhere
  * along it it is the sequence as it stands; and `.all().all()` fans twice on
- * both. A store run is SQLite always, PostgreSQL where JAREN_PG_URL names a
- * server.
+ * both. An integer index off the relation keeps that rule, as the path form
+ * `it.items.at(0).tags` (`$it.items[0].tags`) does: `u.posts.at(0).tags` is
+ * every element of the first related row's `tags`, and `p.author.nest.at(0)`
+ * returns `$r1.nest[0][*]`. A store run is SQLite always, PostgreSQL where
+ * JAREN_PG_URL names a server.
  */
 
 import { after, before, describe, it } from 'node:test';
@@ -39,12 +42,12 @@ const TABLES = Object.freeze({
 /** Users with array members (one with an empty `tags`), posts with and without an author. */
 const ROOT = {
   User: [
-    { id: 'u1', name: 'ada', tags: ['a', 'b'], items: [{ sku: 'x', qty: 1 }, { sku: 'y', qty: 2 }], nest: [['a'], ['b', 'c']] },
-    { id: 'u2', name: 'lin', tags: ['c'], items: [], nest: [] },
-    { id: 'u3', name: 'kid', tags: [], items: [{ sku: 'x', qty: 5 }], nest: [['x']] },
+    { id: 'u1', name: 'ada', motto: 'q', tags: ['a', 'b'], items: [{ sku: 'x', qty: 1 }, { sku: 'y', qty: 2 }], nest: [['a'], ['b', 'c']] },
+    { id: 'u2', name: 'lin', motto: 's', tags: ['c'], items: [], nest: [] },
+    { id: 'u3', name: 'kid', motto: 'q', tags: [], items: [{ sku: 'x', qty: 5 }], nest: [['x']] },
   ],
   Post: [
-    { pid: 1, authorId: 'u1', label: 'a', tags: ['q'] },
+    { pid: 1, authorId: 'u1', label: 'a', tags: ['q'], grid: [['q'], ['a', 'c']] },
     { pid: 2, authorId: 'u2', label: 'c', tags: ['r', 's'] },
     { pid: 3, authorId: 'u1', label: 'z', tags: [] },
     { pid: 4, label: 'a', tags: [] },
@@ -67,6 +70,8 @@ const users = () => from(entitySet('User'));
 const author = (ret) => ({ $for: { r1: '$.User[*]' }, $where: { $eq: ['$r1.id', '$it.authorId'] }, $return: ret });
 /** The phrase from a user to its posts returning `ret`. @param {string} ret */
 const authored = (ret) => ({ $for: { r1: '$.Post[*]' }, $where: { $eq: ['$r1.authorId', '$it.id'] }, $return: ret });
+/** The phrase binding a user's post at `index` as `r2`, returning `ret`. @param {number} index @param {string} ret */
+const nth = (index, ret) => ({ $for: { r2: { $get: [[authored('$r1')], index] } }, $return: ret });
 
 /** Every chain here, by name: the build, the document it must emit and the rows it answers. */
 const CASES = [
@@ -105,6 +110,22 @@ const CASES = [
     { $for: { it: '$.User[*]' }, $where: { $eq: ['$it.tags[0]', authored('$r1.label')] }, $return: '$it.id' }, ['u1', 'u2']],
   ['the member fanned twice', (/** @type {any} */ f) => f('Post').select((p) => [p.author.nest.all().all()]),
     { $for: { it: '$.Post[*]' }, $return: [author('$r1.nest[*][*]')] }, [['a', 'b', 'c'], [], ['a', 'b', 'c'], [], ['x']]],
+  ['a value in a member of an indexed relation is every element', (/** @type {any} */ f) => f('User').where((u) => u.motto.in(u.posts.at(0).tags)).select((u) => u.id),
+    { $for: { it: '$.User[*]' }, $where: { $eq: ['$it.motto', nth(0, '$r2.tags[*]')] }, $return: '$it.id' }, ['u1', 'u2']],
+  ['the index picks the related row', (/** @type {any} */ f) => f('User').where((u) => u.motto.in(u.posts.at(-1).tags)).select((u) => u.id),
+    { $for: { it: '$.User[*]' }, $where: { $eq: ['$it.motto', nth(-1, '$r2.tags[*]')] }, $return: '$it.id' }, ['u2']],
+  ['a value in a member of an indexed relation, fanned', (/** @type {any} */ f) => f('User').where((u) => u.motto.in(u.posts.at(0).tags.all())).select((u) => u.id),
+    { $for: { it: '$.User[*]' }, $where: { $eq: ['$it.motto', nth(0, '$r2.tags[*]')] }, $return: '$it.id' }, ['u1', 'u2']],
+  ['a member of an indexed relation fans', (/** @type {any} */ f) => f('User').where((u) => u.posts.at(0).tags.all().eq('s')).select((u) => u.id),
+    null, ['u2']],
+  ['an index into a member of an indexed relation', (/** @type {any} */ f) => f('User').where((u) => u.motto.in(u.posts.at(0).grid.at(0))).select((u) => u.id),
+    { $for: { it: '$.User[*]' }, $where: { $eq: ['$it.motto', nth(0, '$r2.grid[0][*]')] }, $return: '$it.id' }, ['u1']],
+  ['get() spells the indexed relation\'s member', (/** @type {any} */ f) => f('User').where((u) => u.motto.in(u.posts.at(0).get('tags'))).select((u) => u.id),
+    { $for: { it: '$.User[*]' }, $where: { $eq: ['$it.motto', nth(0, "$r2['tags'][*]")] }, $return: '$it.id' }, ['u1', 'u2']],
+  ['a value in an indexed member of a relation target', (/** @type {any} */ f) => f('Post').where((p) => p.label.in(p.author.nest.at(0))).select((p) => p.pid),
+    { $for: { it: '$.Post[*]' }, $where: { $eq: ['$it.label', author('$r1.nest[0][*]')] }, $return: '$it.pid' }, [1]],
+  ['a value in an indexed member of the related rows, fanned', (/** @type {any} */ f) => f('User').where((u) => u.motto.in(u.posts.all().tags.at(1))).select((u) => u.id),
+    { $for: { it: '$.User[*]' }, $where: { $eq: ['$it.motto', authored('$r1.tags[1]')] }, $return: '$it.id' }, ['u2']],
 ];
 
 describe('.all() on a relation target\'s array member fans it as on a path member', () => {
@@ -147,6 +168,28 @@ describe('.all() on a relation target\'s array member fans it as on a path membe
     }
     assert.throws(() => users().where((u) => u.name.in(u.posts.all())), (/** @type {any} */ e) => e.code === 'JL0005');
   });
+
+  it('an indexed related row is a row, and a computed index no list, as on the path form', () => {
+    const refusal = (/** @type {any} */ e) => e instanceof LinqBuildError && e.code === 'JL0005'
+      && /it cannot follow an operator result or a relation/.test(e.message);
+    assert.throws(() => users().where((u) => u.motto.in(u.posts.at(0))), refusal);
+    // the related rows fanned are a sequence of rows, which an index does not pick one of
+    assert.throws(() => users().where((u) => u.motto.in(u.posts.all().at(0).tags)), refusal);
+    assert.throws(() => users().where((u) => u.motto.in(u.posts.at(u.items.count()).tags)), refusal);
+    assert.throws(() => users().where((u) => u.motto.in(u.items.at(u.items.count()).tags)), refusal);
+  });
+
+  it('a value read off an indexed relation keeps its document and the capture\'s binding numbers', () => {
+    const chain = users().select((u) => ({ label: u.posts.at(0).label, tags: [u.posts.at(0).tags.all()], n: u.posts.all().count() }));
+    const postsOf = (/** @type {string} */ r) => ({ $for: { [r]: '$.Post[*]' }, $where: { $eq: [`$${r}.authorId`, '$it.id'] }, $return: `$${r}` });
+    // the index binds its row (r3) when all() reads it, after the hop it indexes (r2) and before the next hop (r4)
+    assert.deepStrictEqual(chain.toDocument().$return, {
+      label: { $get: [{ $get: [[postsOf('r1')], 0] }, 'label'] },
+      tags: [{ $for: { r3: { $get: [[postsOf('r2')], 0] } }, $return: '$r3.tags[*]' }],
+      n: { $count: postsOf('r4') },
+    });
+    assert.deepStrictEqual(chain.toArray(), [{ label: 'a', tags: ['q'], n: 2 }, { label: 'c', tags: ['r', 's'], n: 1 }, { label: 'a', tags: [], n: 1 }]);
+  });
 });
 
 describe('the array-method refusal on a relation target names a spelling that runs', () => {
@@ -185,6 +228,7 @@ describe('the array-method refusal on a relation target names a spelling that ru
 const User = m.object({
   id: m.string().key(),
   name: m.string(),
+  motto: m.string(),
   tags: m.array(m.string()),
   items: m.array(m.object({ sku: m.string(), qty: m.integer() })),
   nest: m.array(m.array(m.string())),
@@ -195,6 +239,7 @@ const Post = m.object({
   authorId: m.string().optional(),
   label: m.string(),
   tags: m.array(m.string()),
+  grid: m.array(m.array(m.string())).optional(),
   author: m.rel.hasOne('User', { via: 'authorId', onDelete: 'setNull' }),
 });
 const model = m.defineModel({ entities: { User, Post } });
