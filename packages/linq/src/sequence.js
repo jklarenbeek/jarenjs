@@ -21,7 +21,7 @@ import {
 } from './expression.js';
 import {
   emitDocument, wrapTerminal, snapshot, fanProjection, isReservedBinding, RESERVED_BINDINGS_TEXT,
-  PROJECTING_STAGES, requireNonNegativeInteger, readOptions, orderSpec, RUN_BINDINGS, mergeBindings,
+  PROJECTING_STAGES, requireNonNegativeInteger, requireNoArgument, readOptions, orderSpec, RUN_BINDINGS, mergeBindings,
 } from './document.js';
 import {
   classifySource, compileDocument, executeInMemory, providerRoot, providerRelations, sharesScope,
@@ -597,28 +597,44 @@ export class Sequence {
     return w.length === 0 ? defaultValue : w[0];
   }
 
-  count() {
+  /** The number of items. Reads no argument: `where(pred).count()` counts
+   * the ones a predicate keeps (`JL0005` otherwise).
+   * @param {...undefined} unread */
+  count(...unread) {
+    requireNoArgument(unread, 'count', 'where(pred).count()');
     return this.#execute('count');
   }
 
-  sum() {
+  /** Reads no argument: `select(sel).sum()` folds a projection (`JL0005` otherwise).
+   * @param {...undefined} unread */
+  sum(...unread) {
+    requireNoArgument(unread, 'sum', 'select(sel).sum()');
     return this.#execute('sum');
   }
 
-  /** C#: `Average()` over an empty sequence throws. */
-  average() {
+  /** C#: `Average()` over an empty sequence throws. Reads no argument:
+   * `select(sel).average()` (`JL0005` otherwise).
+   * @param {...undefined} unread */
+  average(...unread) {
+    requireNoArgument(unread, 'average', 'select(sel).average()');
     const v = this.#execute('average');
     if (v === undefined) throw new LinqRuntimeError('JL2001', 'average() of an empty sequence');
     return v;
   }
 
-  min() {
+  /** Reads no argument: `select(sel).min()` (`JL0005` otherwise).
+   * @param {...undefined} unread */
+  min(...unread) {
+    requireNoArgument(unread, 'min', 'select(sel).min()');
     const v = this.#execute('min');
     if (v === undefined) throw new LinqRuntimeError('JL2001', 'min() of an empty sequence');
     return v;
   }
 
-  max() {
+  /** Reads no argument: `select(sel).max()` (`JL0005` otherwise).
+   * @param {...undefined} unread */
+  max(...unread) {
+    requireNoArgument(unread, 'max', 'select(sel).max()');
     const v = this.#execute('max');
     if (v === undefined) throw new LinqRuntimeError('JL2001', 'max() of an empty sequence');
     return v;

@@ -266,7 +266,7 @@ is part of THIS design.
 | `Skip` / `Take` | `$subsequence` | native | `(n: number)` → `Seq<T>` |
 | `Distinct` | `$distinct` (deep structural equality — the grouping relation) | native | `()` → `Seq<T>` |
 | `Reverse` | `$reverse` | native | `()` → `Seq<T>` |
-| `Count` / `Sum` / `Average` / `Min` / `Max` | §8.8 aggregates (`Average` → `$avg`) | native | `count(): number`; `sum(): number`; `average/min/max(): number` (throw `JL2001` on empty; `min`/`max` follow the operand family) |
+| `Count` / `Sum` / `Average` / `Min` / `Max` | §8.8 aggregates (`Average` → `$avg`) | native | `count(): number`; `sum(): number`; `average/min/max(): number` (throw `JL2001` on empty; `min`/`max` follow the operand family); none reads an argument, and one handed an argument is `JL0005` naming `where(pred).count()` or `select(sel).sum()` |
 | `Any()` | `$exists` | native | `(): boolean` |
 | `Any(pred)` / `All(pred)` | `$some` / `$every` quantifier phrase | native | `(pred): boolean` (`all` vacuously true on empty) |
 | `Aggregate(seed, fn)` | `$fold` — the accumulator clause; the result is a sequence of exactly ONE accumulated value (`.first()` reads it) | native | `(seed: A, (acc: Expr<A>, e: Expr<T>) => Expr<A>)` → `Seq<A>` |
@@ -464,6 +464,15 @@ The real C# semantics, because getting these wrong is how a
 - `average()`, `min()` and `max()` over an empty sequence throw
   `JL2001` (C# `InvalidOperationException`); `sum()` of nothing is `0`;
   `count()` of nothing is `0`.
+- `count()`, `sum()`, `average()`, `min()` and `max()` read no argument:
+  `count((r) => r.n > 3)` is `JL0005` naming `where(pred).count()`, and
+  `sum((r) => r.n)` names `select(sel).sum()`. They used to build — the
+  callback was never called, so `count(pred)` counted every row and
+  `sum(sel)` folded the items it was meant to project (`JQ2001` over
+  objects, the unprojected total over numbers). An `undefined` argument is
+  not an argument, so a caller that forwards an optional one it did not
+  receive is unchanged; `fromAsync()` refuses the same way, as a rejected
+  promise.
 - `any()` is existence; `all(pred)` is vacuously true over the empty
   sequence.
 
@@ -1484,6 +1493,7 @@ that preserves it, so there is no spelling that is allowed to.
 | `select((r) => r.v.all().rolling(spec))` where `spec` reads the row | `rolling() takes a plain literal spec object, not an expression or captured value` | a literal spec |
 | `select((u) => u.tags.at(2 ** 53))` | `at() takes a safe integer index, got 9007199254740992` | an index within ±(2^53 − 1), which an array can have |
 | `groupBy(…).select((g) => g.items.sum((r) => r.score))`; the same with `count`, `avg`, `min`, `max`, `exists`, `isEmpty` or a predicate | `sum() takes no argument — it reads none, so the one passed would be ignored; to aggregate a member of each row fan the rows first: .all().<member>.sum()` | `g.items.all().score.sum()` (§13.3) |
+| `from(rows).count((r) => r.n > 3)`; `sum`, `average`, `min`, `max` handed a selector; `fromAsync(rows)` likewise | `count() takes no argument — it reads none, so the one passed would be ignored; filter or project first: where(pred).count()` (`select(sel).sum()` for the others) | `from(rows).where((r) => r.n.gt(3)).count()`, `from(rows).select((r) => r.n).sum()` |
 | `from(rows, { limit: { steps: 3 } })` | `from() does not take 'limit' — did you mean 'limits'?` | `{ limits: { steps: 3 } }` |
 | `from(rows, { bogus: 1 })` | `from() does not take 'bogus'; the options are compileTypeTest, functions, collations, pathFunctions, limits, registry` | one of the six (§8.1); `fromAsync()` and `fromDocument()` refuse the same way, by their own names |
 | `from(rows, 'x')`, `from(rows, null)` | `from() takes a plain options object` | an object literal, or no second argument |

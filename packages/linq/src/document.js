@@ -54,6 +54,26 @@ export function requireNonNegativeInteger(value, what) {
 }
 
 /**
+ * Refuse an argument a terminal does not read. An aggregate terminal
+ * folds the sequence it ends: `count((r) => r.n > 3)` would count every
+ * row and `sum((r) => r.n)` would fold the unprojected items, the
+ * callback never called, so the one passed is `JL0005` naming the
+ * spelling that does what it was written to do. An `undefined` is a
+ * caller forwarding an optional argument it did not receive, not an
+ * argument.
+ * @param {readonly any[]} args - what the terminal was handed
+ * @param {string} name - the terminal's spelling, for the refusal
+ * @param {string} instead - the chain that reads the argument
+ */
+export function requireNoArgument(args, name, instead) {
+  if (args.some((arg) => arg !== undefined)) {
+    throw new LinqBuildError('JL0005',
+      `${name}() takes no argument — it reads none, so the one passed would be ignored; `
+      + `filter or project first: ${instead}`);
+  }
+}
+
+/**
  * The parameter bindings of a sequence and of the sequence it embeds whole
  * (a `join`, `groupJoin` or `concat` side), as ONE document carries them.
  * A name both sides bind must bind to the same value: the same reference,

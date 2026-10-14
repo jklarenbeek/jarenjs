@@ -464,14 +464,13 @@ what each does is its own documentation's job
   asking in JavaScript. Wanted: a root for a join table, so a membership can be
   filtered, counted and joined in one document
   ([DB-CLIENT §6](../packages/linq/docs/DB-CLIENT.md)).
-- [ ] **A Sequence terminal ignores an argument it does not read.**
-  `from(rows).count((r) => r.n > 3)` answers every row (`3` for the three rows
-  where the predicate means `2`) and `from(rows).sum((r) => r.n)` fails
-  `JQ2001`: `count`, `sum`, `average`, `min` and `max` on `from()`/`fromAsync()`
-  take no selector or predicate (`any(pred)` is the predicate spelling) and drop
-  what they are handed, where the captured value's aggregates now refuse it.
-  Wanted: the same JL0005 refusal naming `where(pred).count()` /
-  `select(sel).sum()`.
+- [ ] **More Sequence members drop an argument.** On `from()`: `first(pred)`,
+  `last(pred)`, `firstOrDefault`/`lastOrDefault(pred)`, `toArray(x)`,
+  `reverse(x)` and `distinct(selector)` answer as if the argument were never
+  written (`from(rows).first((r) => r.n.gt(3))` is the first row, not the first
+  match; `single(pred)` fails `JL2002`), and `fromAsync()` was not checked.
+  Wanted: the same `JL0005` refusal naming `where(pred).first()` /
+  `select(sel).distinct()`.
 - [ ] **A collection handle's `execute`, `query` and `explain` take a chain and
   answer nothing real.** `client.collections.orders.execute(orders.where(...))`
   answers `{}` and `query(chain)` yields `[{}]` (the store's members take a

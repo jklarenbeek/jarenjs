@@ -486,3 +486,56 @@ describe('an aggregate method on a captured value reads no argument, so it is re
     assert.deepStrictEqual(rows((g) => g.items.all().n.sum(maybe, undefined)), [6, 7]);
   });
 });
+
+describe('a Sequence terminal reads no argument, so it is refused when given one', () => {
+  const ROWS = [{ n: 1 }, { n: 5 }, { n: 7 }];
+  const SPELLING = {
+    count: 'where(pred).count()', sum: 'select(sel).sum()', average: 'select(sel).average()',
+    min: 'select(sel).min()', max: 'select(sel).max()',
+  };
+  const refused = (name) => coded('JL0005', new RegExp(
+    `^JL0005: ${name}\\(\\) takes no argument — it reads none, so the one passed would be ignored; `
+    + `filter or project first: ${SPELLING[name].replace(/[().]/g, '\\$&')}$`));
+
+  it('count handed a predicate answered every row, the predicate never read', () => {
+    assert.strictEqual(from(ROWS).count(), 3);
+    assert.throws(() => from(ROWS).count((r) => r.n.gt(3)), refused('count'));
+    assert.throws(() => from(ROWS).count((r) => r.n > 3), refused('count'));
+    assert.throws(() => from(ROWS).count(undefined, (r) => r.n.gt(3)), refused('count'));
+  });
+
+  it('sum, average, min and max handed a selector failed JQ2001, or answered the unprojected items', () => {
+    for (const name of ['sum', 'average', 'min', 'max']) {
+      assert.throws(() => from(ROWS)[name]((r) => r.n), refused(name));
+      // over numbers the selector was ignored without an error: 13, never 26
+      assert.throws(() => from([1, 5, 7])[name]((x) => x.mul(2)), refused(name));
+    }
+  });
+
+  it('the async surface refuses the same way', async () => {
+    for (const name of ['count', 'sum', 'average', 'min', 'max']) {
+      await assert.rejects(fromAsync(ROWS)[name]((r) => r.n), refused(name));
+      await assert.rejects(fromAsync([1, 5, 7])[name]((x) => x.mul(2)), refused(name));
+    }
+  });
+
+  it('a terminal inside a projection is refused at the build as well', () => {
+    assert.throws(() => from(ROWS).select(() => ({ n: from(ROWS).count((r) => r.n.gt(3)) })), refused('count'));
+  });
+
+  it('the spellings the refusal names answer, and so does a call with no argument or an undefined one', async () => {
+    assert.strictEqual(from(ROWS).where((r) => r.n.gt(3)).count(), 2);
+    assert.strictEqual(from(ROWS).select((r) => r.n).sum(), 13);
+    assert.strictEqual(from(ROWS).select((r) => r.n).min(), 1);
+    assert.strictEqual(from(ROWS).select((r) => r.n).max(), 7);
+    assert.strictEqual(from(ROWS).select((r) => r.n).average(), 13 / 3);
+    assert.strictEqual(await fromAsync(ROWS).where((r) => r.n.gt(3)).count(), 2);
+    assert.strictEqual(await fromAsync(ROWS).select((r) => r.n).sum(), 13);
+    // a caller that forwards an optional argument it did not receive
+    const maybe = undefined;
+    assert.strictEqual(from(ROWS).count(maybe), 3);
+    assert.strictEqual(from([1, 5, 7]).sum(maybe, undefined), 13);
+    assert.strictEqual(await fromAsync(ROWS).count(maybe), 3);
+    assert.strictEqual(await fromAsync([1, 5, 7]).max(maybe), 7);
+  });
+});

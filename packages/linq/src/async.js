@@ -46,7 +46,7 @@ import {
 } from './provider.js';
 import {
   emitDocument, wrapTerminal, snapshot, fanProjection, isReservedBinding, RESERVED_BINDINGS_TEXT,
-  PROJECTING_STAGES, requireNonNegativeInteger, readOptions, orderSpec, RUN_BINDINGS, mergeBindings,
+  PROJECTING_STAGES, requireNonNegativeInteger, requireNoArgument, readOptions, orderSpec, RUN_BINDINGS, mergeBindings,
 } from './document.js';
 import { adaptAsyncSource } from './sources.js';
 import { applyMapAsync, normalizeMapAsyncOptions } from './concurrency.js';
@@ -760,7 +760,11 @@ export class AsyncSequence {
     return w.length === 0 ? defaultValue : w[0];
   }
 
-  async count() {
+  /** The number of items. Reads no argument: `where(pred).count()` counts
+   * the ones a predicate keeps (`JL0005` otherwise).
+   * @param {...undefined} unread */
+  async count(...unread) {
+    requireNoArgument(unread, 'count', 'where(pred).count()');
     if (this.#pushable()) return this.#pushTerminal('count');
     let n = 0;
     // eslint-disable-next-line no-unused-vars
@@ -780,21 +784,35 @@ export class AsyncSequence {
     return compiled(items, values);
   }
 
-  async sum() { return this.#aggregateTerminal('sum'); }
+  /** Reads no argument: `select(sel).sum()` folds a projection (`JL0005` otherwise).
+   * @param {...undefined} unread */
+  async sum(...unread) {
+    requireNoArgument(unread, 'sum', 'select(sel).sum()');
+    return this.#aggregateTerminal('sum');
+  }
 
-  async average() {
+  /** Reads no argument: `select(sel).average()` (`JL0005` otherwise).
+   * @param {...undefined} unread */
+  async average(...unread) {
+    requireNoArgument(unread, 'average', 'select(sel).average()');
     const v = await this.#aggregateTerminal('average');
     if (v === undefined) throw new LinqRuntimeError('JL2001', 'average() of an empty sequence');
     return v;
   }
 
-  async min() {
+  /** Reads no argument: `select(sel).min()` (`JL0005` otherwise).
+   * @param {...undefined} unread */
+  async min(...unread) {
+    requireNoArgument(unread, 'min', 'select(sel).min()');
     const v = await this.#aggregateTerminal('min');
     if (v === undefined) throw new LinqRuntimeError('JL2001', 'min() of an empty sequence');
     return v;
   }
 
-  async max() {
+  /** Reads no argument: `select(sel).max()` (`JL0005` otherwise).
+   * @param {...undefined} unread */
+  async max(...unread) {
+    requireNoArgument(unread, 'max', 'select(sel).max()');
     const v = await this.#aggregateTerminal('max');
     if (v === undefined) throw new LinqRuntimeError('JL2001', 'max() of an empty sequence');
     return v;
