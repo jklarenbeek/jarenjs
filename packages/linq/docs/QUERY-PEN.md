@@ -202,9 +202,10 @@ value becomes the expression:
   `JL0108` too (the capture has no value to serialize yet), and `u.toJSON`
   is that refusal rather than a member read: a document member named
   `toJSON` is read with `u.get('toJSON')`. Host method calls are outside the
-  capture DSL: `u.toString()` can raise a plain `TypeError`. An array
-  method on a member (`u.tags.includes('a')`, `u.items.map(…)`) is refused
-  with `JL0108` naming the spelling that works (§14.9); `toString` remains
+  capture DSL: `u.toString()` can raise a plain `TypeError`. An array or a
+  string method on a member (`u.tags.includes('a')`, `u.items.map(…)`,
+  `u.name.toUpperCase()`) is refused with `JL0108` naming the spelling that
+  works, or saying there is none (§14.9); `toString` remains
   an ordinary data-member name. A method name read without its call
   (`u.tags.length`, `u.name.upper`) is a function, and `>`, `+`, `==`, a
   template literal or `String()` over it is `JL0108` naming the method and
@@ -712,7 +713,7 @@ the normative home, this table mirrors it):
 | `JL0105` | a relation hop on the chain cannot lower: a many-to-many member (its join table is not a queryable root), a composite or undeclared key, or a malformed relation entry (§3, §4 "relation navigation") |
 | `JL0106` | a migration step names a table the target model does not declare, or a draft it cannot match |
 | `JL0107` | the client (`@jarenjs/linq/db`, [DB-CLIENT.md](DB-CLIENT.md)) named a member that is not the relation kind the operation needs: `include()` over a member that is not a declared relation, `link()`/`unlink()` over a relation that is not many-to-many |
-| `JL0108` | a captured expression — in any pen's callback, or the chain's — was converted to a JavaScript primitive (`==`, `+`, a template literal or `<` met the capture proxy, or met a method read without its call, `u.name.length > 0`), met `JSON.stringify`, or had an array method called on a member (`u.tags.includes('a')`) (§14.9) |
+| `JL0108` | a captured expression — in any pen's callback, or the chain's — was converted to a JavaScript primitive (`==`, `+`, a template literal or `<` met the capture proxy, or met a method read without its call, `u.name.length > 0`), met `JSON.stringify`, or had an array or a string method called on a member (`u.tags.includes('a')`) (§14.9) |
 | `JL0109` | a captured callback — in any pen, or the chain — read its argument and answered a plain JavaScript boolean: `===`, `!==`, `!`, `typeof` or `== null` tested the capture proxy, never the value (§14.10) |
 
 Runtime errors (`LinqRuntimeError`):
@@ -1396,7 +1397,7 @@ proves that too, so the exclusion cannot hide a chain refusal).
 | `JL0006` | an operator §4 records as `unsupported` was invoked |
 | `JL0007` | a provider serves several entity roots and has none of its own |
 | `JL0105` | a relation hop cannot lower to a phrase |
-| `JL0108` | a captured expression was converted to a JavaScript primitive (`==`, `+`, a template literal or `<` met the capture proxy), or a method read without its call (`u.name.length`) was; met `JSON.stringify`, or had an array method called on a member |
+| `JL0108` | a captured expression was converted to a JavaScript primitive (`==`, `+`, a template literal or `<` met the capture proxy), or a method read without its call (`u.name.length`) was; met `JSON.stringify`, or had an array or a string method called on a member |
 | `JL0109` | a callback read its argument and answered a plain JavaScript boolean: `===`, `!==`, `!`, `typeof` or `== null` tested the capture proxy |
 | `JL2001` | `first`/`single`/`last`, or `average`/`min`/`max`, over an empty sequence |
 | `JL2002` | `single`/`singleOrDefault` over two or more elements |
@@ -1647,13 +1648,25 @@ capture answers the same coded message instead of recursing until a
 `RangeError`), and the CALL of an array method on a member — `includes`,
 `indexOf`, `lastIndexOf`, `some`, `every`, `filter`, `find`, `findIndex`,
 `findLast`, `findLastIndex`, `map`, `flatMap`, `reduce`, `reduceRight`,
-`forEach`, `slice`, `join`, `sort` and `reverse` — where the member would have
-thrown `u.tags.includes is not a function`. Reading such a name is still
+`forEach`, `slice`, `join`, `sort`, `reverse`, `flat`, `entries`, `keys`,
+`values`, `fill`, `copyWithin`, `push`, `pop`, `shift`, `unshift`, `splice`,
+`toSorted`, `toReversed`, `toSpliced` and `with` — where the member would have
+thrown `u.tags.includes is not a function`. The call of a string method on a
+member is refused the same way, the message calling it a string method:
+`toUpperCase` and `toLocaleUpperCase` name `.upper()`, `toLowerCase` and
+`toLocaleLowerCase` name `.lower()`, `replaceAll` names `.replace(pattern,
+replacement)` (which replaces every match of an I-Regexp pattern), `charAt`
+names `.substring(i, 1)`, `match` and `search` name `.matches(pattern)` and
+`.contains(v)`, `localeCompare` names `.lt()`, `.eq()` and `.gt()`, and
+`split`, `trim`, `trimStart`, `trimEnd`, `padStart`, `padEnd`, `repeat` and
+`normalize`, which have no operator, say so. Each of these calls used to be the
+raw `TypeError`. Reading such a name is still
 the member read it always was (a document may hold a field called
-`filter`), and `get('includes')` is that member explicitly; only a member
-named like an array method is callable, for the refusal, so `typeof` of
+`filter`, `keys` or `with`), and `get('includes')` is that member explicitly; only a member
+named like an array or a string method is callable, for the refusal, so `typeof` of
 every other capture is `'object'` as before. A name that is already an
-operator method (`at`, `concat`, `contains`, `count`, …) is that method.
+operator method (`at`, `concat`, `contains`, `count`, `startsWith`,
+`endsWith`, `substring`, `replace`, …) is that method.
 Read without its call (`u.name.upper`, `u.tags.length`) it is still a
 function, so `u.name.length > 0`, `u.name.upper + '!'`, `${u.name.upper}`,
 `u.name.upper == 'A'` and `String(u.name.upper)` coerce a function and would
@@ -1671,6 +1684,11 @@ follow an operator result or a relation'); it now answers. A chain that spelled
 `.all()` on a relation target's array member before it fanned read the whole
 array as one value and matched nothing off it; it now reads the elements, and
 matches the rows whose elements match.
+Off a to-many relation (`u.posts.some((p) => p.published)`), where the related
+rows are an array no member can be read off unfanned, the `JL0005` names the
+same spelling over the fanned rows — `u.posts.all().published.eq(true)` holds
+when any related post is published, `u.posts.all().published.ne(true).not()`
+when every one is — where it used to name only the member read `.all().some`.
 
 | The spelling that trips it | The message | The spelling that works |
 |---|---|---|
@@ -1683,7 +1701,12 @@ matches the rows whose elements match.
 | `(v) => v.items.some((i) => i.qty)`, `.every`, `.filter`, `.find`, `.findIndex` | the message names the fanned comparison | `(v) => v.items.all().qty.eq(0)` for `some`; `(v) => v.items.all().qty.ne(0).not()` for `every` (no element differs, an empty array holds); `.at(i)` indexes one element |
 | `(v) => v.items.map((i) => i.sku)`, `.flatMap` | the message names the fanned member | `(v) => v.items.all().sku`; `[v.items.all().sku]` keeps them as one array value |
 | `(v) => v.items.reduce((a, i) => a + i.qty, 0)`, `.reduceRight` | the message names the aggregates | `(v) => v.items.all().qty.sum()`, `.count()`, `.min()`, `.max()`, `.avg()` |
-| `.forEach`, `.slice`, `.join`, `.sort`, `.reverse` | the message says what a capture does instead | `.all()` and a named member; `.at(i)`; the chain's `orderBy()` |
+| `.forEach`, `.slice`, `.join`, `.sort`, `.reverse` | the message says what a capture does instead | `.all()` and a named member; `.at(i)`; `.substring(start, length)` on a string member; the chain's `orderBy()` |
+| `(v) => v.nest.flat()` | the message names the fan of each level | `(v) => [v.nest.all().all()]` |
+| `.entries`, `.keys`, `.values`; `.push`, `.pop`, `.shift`, `.unshift`, `.splice`, `.fill`, `.copyWithin`; `.toSpliced`, `.with`; `.toSorted`, `.toReversed` | the message says what a capture does instead | `.all()`; `.at(0)` and `.at(-1)` read the first and the last element; the chain's `orderBy()` |
+| `(v) => v.name.toUpperCase()`, `.toLowerCase()` | `.toUpperCase() is a JavaScript string method, and a captured expression has none …` and the spelling | `(v) => v.name.upper()`, `(v) => v.name.lower()` |
+| `(v) => v.name.charAt(1)`, `.replaceAll('.', '-')`, `.match(/a/)` | the message names the capture's own operator | `(v) => v.name.substring(1, 1)`; `(v) => v.name.replace('\\.', '-')`; `(v) => v.name.matches('a.*')` |
+| `(u) => u.posts.some((p) => p.published)` (a to-many relation) | `JL0005`: `.some is read off a to-many relation, … and .some() is a JavaScript array method …` and the spelling over the fanned rows | `(u) => u.posts.all().published.eq(true)` |
 
 Some spellings cannot be trapped, because JavaScript never asks the
 proxy for anything:

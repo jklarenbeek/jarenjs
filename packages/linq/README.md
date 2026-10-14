@@ -126,8 +126,9 @@ you out of the traps:
 1. **Spell comparisons and logic as methods.** `u.age.gt(21)`,
    `a.and(b)`, `x.not()`, `s.eq('')`. A proxy cannot overload
    JavaScript's own operators: `u.age > 21` is refused with `JL0108`
-   (so is an array method on a member, `u.tags.includes('a')`, the message
-   naming `u.tags.all().eq('a')`), and `a && b`, `cond ? x : y` or `a === b` evaluate against the proxy
+   (so is an array or a string method on a member, `u.tags.includes('a')`
+   or `u.name.toUpperCase()`, the message naming `u.tags.all().eq('a')` or
+   `u.name.upper()`), and `a && b`, `cond ? x : y` or `a === b` evaluate against the proxy
    object — a callback that answers such a boolean itself
    (`(u) => u.deleted === null`) is refused with `JL0109`, and one that
    only uses it produces a wrong document silently. Destructuring a

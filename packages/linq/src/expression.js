@@ -35,7 +35,8 @@ const NODE = Symbol('jaren-linq-node');
 /**
  * The internal record of an expression proxy, or `undefined` for any other
  * value. A proxy is an object — or a function, for a member named like an
- * array method ({@link ARRAY_METHODS}) — so both are asked.
+ * array or a string method ({@link ARRAY_METHODS}, {@link STRING_METHODS}) —
+ * so both are asked.
  * @param {any} value
  * @returns {any}
  */
@@ -848,12 +849,12 @@ function hopDocument(chain, ret) {
  * @param {{ chain: any[], ret: string, many: boolean, fan: boolean }} hop
  * @param {number} epoch
  * @param {any} nav - the target entity's navigation, while `ret` is its root
- * @param {string} [arrayMethod] - the array-method name a member READ spelled
+ * @param {string} [hostMethod] - the array- or string-method name a member READ spelled
  */
-function makeHop(hop, epoch, nav, arrayMethod = undefined) {
+function makeHop(hop, epoch, nav, hostMethod = undefined) {
   const phrase = hopDocument(hop.chain, hop.ret);
   return makeExpr(hop.many && !hop.fan ? [phrase] : phrase, epoch, false,
-    { seq: phrase, nav, hop, arrayMethod });
+    { seq: phrase, nav, hop, hostMethod });
 }
 
 /**
@@ -933,16 +934,23 @@ function startHop(target, member) {
  * where the same read off a stored array would answer nothing.
  * @param {any} target
  * @param {string} segment - the spelled path step (`.email`, `['odd key']`)
- * @param {string} [arrayMethod] - the array-method name a member READ spelled
+ * @param {string} [hostMethod] - the array- or string-method name a member READ spelled
  */
-function extendHop(target, segment, arrayMethod = undefined) {
+function extendHop(target, segment, hostMethod = undefined) {
   const hop = target.hop;
   if (hop.many && !hop.fan) {
-    throw new LinqBuildError('JL0005',
-      `${segment} is read off a to-many relation, which holds an array of related rows — `
-      + `fan them first (.all()${segment}), index one (.at(0)), or aggregate the array`);
+    // the reader's `u.posts.some(…)`: the related rows spell the call the
+    // way an array member's elements do, once fanned
+    const spelling = hostMethod === undefined ? undefined : ARRAY_METHODS[hostMethod];
+    throw new LinqBuildError('JL0005', spelling === undefined
+      ? `${segment} is read off a to-many relation, which holds an array of related rows — `
+        + `fan them first (.all()${segment}), index one (.at(0)), or aggregate the array`
+      : `${segment} is read off a to-many relation, which holds an array of related rows, and .${hostMethod}() `
+        + 'is a JavaScript array method a captured expression does not have — fan the related rows with .all() '
+        + `and spell it as on an array member: ${spelling} (a member named ${hostMethod} of each related row is `
+        + `.all()${segment})`);
   }
-  return makeHop({ ...hop, ret: `${hop.ret}${segment}` }, target.epoch, undefined, arrayMethod);
+  return makeHop({ ...hop, ret: `${hop.ret}${segment}` }, target.epoch, undefined, hostMethod);
 }
 
 /**
@@ -1052,18 +1060,32 @@ const ELEMENT_MEMBER = 'name the member of each element off the fan — x.items.
 const ELEMENT_FOLD = 'aggregate the fanned member — x.items.all().qty.sum(), .count(), .min(), '
   + '.max() or .avg()';
 
-/** The spelling of an ORDER, shared by `sort` and `reverse`. */
+/** The spelling of an ORDER, shared by `sort`, `reverse` and their copying twins. */
 const ELEMENT_ORDER = 'order the rows with the chain\'s orderBy(); a capture never reorders a member';
+
+/** The spelling of an ITERATOR, shared by `entries`, `keys` and `values`. */
+const ELEMENT_ITERATE = 'a capture has no iterator over an array; x.tags.all() fans its elements and .at(i) '
+  + 'indexes one';
+
+/** The spelling of an in-place CHANGE, shared by the methods that write the array. */
+const ELEMENT_WRITE = 'a capture reads a value and never changes one; index an element with .at(i) — .at(0) is '
+  + 'the first, .at(-1) the last — and change the array where its document is written';
+
+/** The spelling of a changed COPY, shared by `toSpliced` and `with`. */
+const ELEMENT_COPY = 'a capture builds no changed copy of an array; index an element with .at(i), or name the '
+  + 'new array\'s elements in the projection ([x.a, x.b])';
 
 /**
  * The array methods a reader reaches for on a captured array
  * (`u.tags.includes('a')`), name → the query-language spelling the refusal
- * names. A member read of one of these names is still the member (a
- * document may hold a field called `filter`), but its proxy is callable so
- * the CALL is a coded refusal ({@link refuseArrayMethod}) and not a host
- * `TypeError`; any other capture stays a plain object. A name in
- * {@link METHODS} is a method already and never reaches this table.
- * Null prototype: `constructor` and `toString` must stay plain members.
+ * names. A member read of one of these names — or of a {@link STRING_METHODS}
+ * name — is still the member (a document may hold a field called `filter`
+ * or `keys`), but its proxy is callable so the CALL is a coded refusal
+ * ({@link refuseHostMethod}) and not a host `TypeError`; any other capture
+ * stays a plain object. A name in {@link METHODS} is a method already and
+ * never reaches this table. Null prototype: `constructor` and `toString`
+ * must stay plain members (and `then` is never listed: a callable `then`
+ * would make every capture of such a member a thenable).
  * @type {Record<string, string>}
  */
 const ARRAY_METHODS = {
@@ -1076,23 +1098,64 @@ const ARRAY_METHODS = {
   reduce: ELEMENT_FOLD, reduceRight: ELEMENT_FOLD,
   forEach: 'a capture computes a value and runs no loop or side effect; fan the array with '
     + '.all() and name the member you want',
-  slice: 'index one element with .at(i); a capture has no sub-array',
+  slice: 'index one element with .at(i); a capture has no sub-array (on a string member, '
+    + '.substring(start, length) is the part from a 0-based start)',
   join: 'a capture has no join over an array; .concat(x) joins two strings, and the finished '
     + 'rows are joined in JavaScript after the chain runs',
-  sort: ELEMENT_ORDER, reverse: ELEMENT_ORDER,
+  sort: ELEMENT_ORDER, reverse: ELEMENT_ORDER, toSorted: ELEMENT_ORDER, toReversed: ELEMENT_ORDER,
+  flat: 'fan each level with .all() — x.nest.all().all() is every inner element, and '
+    + '[x.nest.all().all()] keeps them as one array value',
+  entries: ELEMENT_ITERATE, keys: ELEMENT_ITERATE, values: ELEMENT_ITERATE,
+  fill: ELEMENT_WRITE, copyWithin: ELEMENT_WRITE, push: ELEMENT_WRITE, pop: ELEMENT_WRITE,
+  shift: ELEMENT_WRITE, unshift: ELEMENT_WRITE, splice: ELEMENT_WRITE,
+  toSpliced: ELEMENT_COPY, with: ELEMENT_COPY,
+};
+
+/** The spelling of a string operator the capture does not have. */
+const STRING_ABSENT = 'a capture has no such operator; compute it in JavaScript over the finished rows';
+
+/**
+ * The string methods a reader reaches for on a captured string
+ * (`u.name.toUpperCase()`), name → the query-language spelling the refusal
+ * names, the same way {@link ARRAY_METHODS} does for an array. The string
+ * methods the capture has as its own (`startsWith`, `endsWith`,
+ * `substring`, `replace`, `concat`, `at`) are {@link METHODS} and never
+ * reach this table; the ones a string shares with an array (`includes`,
+ * `indexOf`, `slice`) are in {@link ARRAY_METHODS}, whose spelling names
+ * the string member's too.
+ * @type {Record<string, string>}
+ */
+const STRING_METHODS = {
+  __proto__: null,
+  toUpperCase: 'the capture\'s own .upper() is the upper-case value',
+  toLocaleUpperCase: 'the capture\'s own .upper() is the upper-case value',
+  toLowerCase: 'the capture\'s own .lower() is the lower-case value',
+  toLocaleLowerCase: 'the capture\'s own .lower() is the lower-case value',
+  replaceAll: 'the capture\'s own .replace(pattern, replacement) replaces every match — its pattern is an '
+    + 'I-Regexp, so a literal . is written \\.',
+  charAt: '.substring(i, 1) is the character at the 0-based index i',
+  match: '.matches(pattern) tests the whole value against an I-Regexp pattern (x.name.matches(\'a.*\') holds '
+    + 'when it starts with a), and .contains(v) tests for a part',
+  search: '.contains(v) tests for a part, and .matches(pattern) tests the whole value against an I-Regexp pattern',
+  localeCompare: '.lt(v), .eq(v) and .gt(v) compare two strings',
+  split: 'a capture has no split; store the parts as an array member and fan it with .all(), or split the '
+    + 'value in JavaScript after the chain runs',
+  trim: STRING_ABSENT, trimStart: STRING_ABSENT, trimEnd: STRING_ABSENT,
+  padStart: STRING_ABSENT, padEnd: STRING_ABSENT, repeat: STRING_ABSENT, normalize: STRING_ABSENT,
 };
 
 /**
- * The call of a member named like an array method: a coded refusal
- * (`JL0108`) naming the query-language spelling, where the member's host
- * value would have thrown `x.tags.includes is not a function`.
+ * The call of a member named like an array or a string method: a coded
+ * refusal (`JL0108`) naming the query-language spelling, where the
+ * member's host value would have thrown `x.tags.includes is not a function`.
  * @param {string} name
  * @returns {never}
  */
-function refuseArrayMethod(name) {
+function refuseHostMethod(name) {
+  const array = ARRAY_METHODS[name];
   throw new LinqBuildError('JL0108',
-    `.${name}() is a JavaScript array method, and a captured expression has none — it stands for `
-    + `a value the engine computes later; ${ARRAY_METHODS[name]}`);
+    `.${name}() is a JavaScript ${array === undefined ? 'string' : 'array'} method, and a captured `
+    + `expression has none — it stands for a value the engine computes later; ${array ?? STRING_METHODS[name]}`);
 }
 
 /**
@@ -1102,7 +1165,7 @@ function refuseArrayMethod(name) {
  * @param {boolean} pathable - whether `doc` is a pure path string that
  *   member access may extend
  * @param {{ seq?: any, nav?: any, navOnFan?: boolean, hop?: any,
- *   group?: string, fanned?: boolean, param?: string, arrayMethod?: string }} [extra] -
+ *   group?: string, fanned?: boolean, param?: string, hostMethod?: string }} [extra] -
  *   `seq`: for a value standing for an array or a hop, the fanned form
  *   its aggregates range over (`'$g[*]'`, a hop's phrase); `nav`: the
  *   relation table of the rows the value stands for, with the resolver
@@ -1112,9 +1175,9 @@ function refuseArrayMethod(name) {
  *   aggregates therefore range over the rows; `fanned`: the path fans
  *   (`all()`) somewhere along it, so it is already a sequence; `param`:
  *   the declared parameter this value reads whole (`p.ids`, its fan);
- *   `arrayMethod`: the array-method name this member read spells
- *   ({@link ARRAY_METHODS}), which makes the proxy callable for the one
- *   purpose of refusing the call
+ *   `hostMethod`: the array- or string-method name this member read spells
+ *   ({@link ARRAY_METHODS}, {@link STRING_METHODS}), which makes the proxy
+ *   callable for the one purpose of refusing the call
  * @returns {any}
  */
 function makeExpr(doc, epoch, pathable, extra = undefined) {
@@ -1153,14 +1216,14 @@ function makeExpr(doc, epoch, pathable, extra = undefined) {
       return member(record, prop);
     },
   };
-  const arrayMethod = extra?.arrayMethod;
-  if (arrayMethod === undefined) return new Proxy(record, handler);
-  // a member NAMED like an array method is still a member, but a call of it
+  const hostMethod = extra?.hostMethod;
+  if (hostMethod === undefined) return new Proxy(record, handler);
+  // a member NAMED like an array or a string method is still a member, but a call of it
   // is the reader's `x.tags.includes(v)`: only such a proxy is callable, so
   // every other capture keeps `typeof` 'object'
   const refuse = () => {
     assertLive(record);
-    return refuseArrayMethod(arrayMethod);
+    return refuseHostMethod(hostMethod);
   };
   handler.apply = refuse;
   handler.construct = refuse;
@@ -1181,10 +1244,10 @@ function makeExpr(doc, epoch, pathable, extra = undefined) {
  */
 function member(target, prop) {
   if (navigates(target, prop)) return startHop(target, prop);
-  const arrayMethod = ARRAY_METHODS[prop] === undefined ? undefined : prop;
-  if (target.hop !== undefined) return extendHop(target, memberSegment(prop), arrayMethod);
-  if (target.pathable) return pathStep(target, prop, memberSegment(prop), arrayMethod);
-  return makeExpr({ $get: [target.doc, embedString(prop)] }, target.epoch, false, { arrayMethod });
+  const hostMethod = ARRAY_METHODS[prop] === undefined && STRING_METHODS[prop] === undefined ? undefined : prop;
+  if (target.hop !== undefined) return extendHop(target, memberSegment(prop), hostMethod);
+  if (target.pathable) return pathStep(target, prop, memberSegment(prop), hostMethod);
+  return makeExpr({ $get: [target.doc, embedString(prop)] }, target.epoch, false, { hostMethod });
 }
 
 /**
@@ -1198,13 +1261,13 @@ function member(target, prop) {
  * `all()` fans it — so only the aggregates change, and only for the one
  * member the emitter writes the group into.
  * @param {any} target @param {string|number} prop @param {string} segment
- * @param {string} [arrayMethod] - the array-method name a member READ spelled
+ * @param {string} [hostMethod] - the array- or string-method name a member READ spelled
  *   (never an explicit `get()`)
  */
-function pathStep(target, prop, segment, arrayMethod = undefined) {
+function pathStep(target, prop, segment, hostMethod = undefined) {
   const doc = `${target.doc}${segment}`;
   return makeExpr(doc, target.epoch, true, target.group === prop
-    ? { seq: `${doc}[*]`, fanned: target.fanned } : { fanned: target.fanned, arrayMethod });
+    ? { seq: `${doc}[*]`, fanned: target.fanned } : { fanned: target.fanned, hostMethod });
 }
 
 /** The parameters proxy embedded as a value — a select member, an

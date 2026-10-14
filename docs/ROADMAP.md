@@ -618,17 +618,10 @@ what each does is its own documentation's job
   `IN (SELECT …)` term already excludes, so it raised a false `JQ2001`, and the
   count reads every row lacking the member, turning a seek on a sparse member
   into a table scan.
-- [ ] **A capture answers most array methods with a coded refusal, but not all,
-  and not on a to-many relation.** `u.tags.includes('a')` and 18 more (includes,
-  indexOf, lastIndexOf, some, every, filter, find, findIndex, findLast,
-  findLastIndex, map, flatMap, reduce, reduceRight, forEach, slice, join, sort,
-  reverse) answer `JL0108` naming the query spelling. Still a raw `TypeError`:
-  `flat`, `entries`, `keys`, `values`, `fill`, `copyWithin`, `push`, `pop`,
-  `shift`, `unshift`, `splice`, `toSorted`, `toReversed`, `toSpliced`, `with`
-  and the string methods (`toUpperCase`, `trim`, `split`, ...). An array method
-  on a to-many relation (`u.posts.some(...)`, `.filter`, `.map`) is `JL0005`
-  ("fan them first (.all().some)"), advice that points at a member spelling, not
-  at the predicate the reader wrote.
+- [ ] **`at(i)` on a string member answers nothing.** `from([{ s: 'abc' }]).select((x) => x.s.at(0))`
+  answers `[]`, where JavaScript's `'abc'.at(0)` is `'a'`: `at()` lowers to an
+  array index, which a string does not have, and the capture cannot tell a string
+  member from an array one. `x.s.substring(0, 1)` is the character.
 - [ ] **An indexed relation is not a list for `in()`.** `u.id.in(u.posts.at(0).tags)`
   is refused `JL0005`: `at()` off a relation is an operator result, where the
   path form `x.in(it.items.at(0).tags)` answers.

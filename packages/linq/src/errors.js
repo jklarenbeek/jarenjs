@@ -31,7 +31,7 @@ export const LINQ_CODES = /* @__PURE__ */ Object.freeze({
   JL0105: 'a relation hop cannot lower: a composite or undeclared key, an incomplete many-to-many entry, or a malformed relation record',
   JL0106: 'a migration step names a table the target model does not declare, or a draft it cannot match',
   JL0107: 'a client operation named a member that is not the relation kind it needs',
-  JL0108: 'a captured expression or a method read without its call was converted to a JavaScript primitive, serialized with JSON.stringify, or had an array method called on a member',
+  JL0108: 'a captured expression or a method read without its call was converted to a JavaScript primitive, serialized with JSON.stringify, or had an array or a string method called on a member',
   JL0109: 'a captured callback read its argument and answered a JavaScript boolean',
   JL2001: 'first/single found no element',
   JL2002: 'single found more than one element',
@@ -136,9 +136,10 @@ export const LINQ_CODES = /* @__PURE__ */ Object.freeze({
  *    comparisons; `===` and truthiness test the proxy, never the value
  *    (`JL0109`). `JSON.stringify` of a capture is refused with it too
  *    (the capture has no value to serialize until the engine computes it).
- *    The call of an array method on a member (`u.tags.includes('a')`,
- *    `u.items.map(…)`) is the same code: the capture has no array methods,
- *    and the message names the spelling that works (`u.tags.all().eq('a')`).
+ *    The call of an array or a string method on a member
+ *    (`u.tags.includes('a')`, `u.items.map(…)`, `u.name.toUpperCase()`) is
+ *    the same code: the capture has none of them, and the message names the
+ *    spelling that works (`u.tags.all().eq('a')`, `u.name.upper()`).
  *    So is a method name read without its call and then coerced
  *    (`u.name.length > 0`, `${u.name.upper}`): it is a function, and the
  *    message names the method and its call (`.length(…)`)
