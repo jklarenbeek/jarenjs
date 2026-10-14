@@ -295,12 +295,14 @@ describe('compact mode packs the tasks of a section into the fewest rows', () =>
       + Array.from({ length: n }, (_, i) => `T${i} : t${i}, 2024-01-01, 400d`).join('\n');
     const small = parseMermaid(build(500));
     const large = parseMermaid(build(4000));
-    // `layoutDiagram` memoizes per document, so time the layout itself
+    // `layoutDiagram` memoizes per document, so time the layout itself, and
+    // repeat it: one layout of 500 rows is well under a millisecond, which
+    // coverage and a loaded host turn into noise
     const time = (doc) => {
       let best = Infinity;
       for (let i = 0; i < 3; i++) {
         const t0 = process.hrtime.bigint();
-        layoutGantt(doc.ast, { config: doc.config });
+        for (let r = 0; r < 20; r++) layoutGantt(doc.ast, { config: doc.config });
         best = Math.min(best, Number(process.hrtime.bigint() - t0));
       }
       return best;
