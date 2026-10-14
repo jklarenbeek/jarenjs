@@ -60,7 +60,7 @@ delete it or fix it.
   operator first: `fn:tokenize` with a regular-expression pattern or flags (an I-Regexp split; the plain-text
   mapping probes every position, so it is quadratic in the text length and bounded by the sequence guards),
   `substring-before`/`-after` and `translate` (nothing finds a position in a string).
-- [ ] **1-based positional *outputs*** — `at`/`count`/`fn:index-of` surface the format's 0-based D6 values, so QT3 asserts them as wrong-value; `fn:index-of` has a cheap local emission fix, `at`/`count` would need reference rewriting. Revisit if the scorecard noise starts to matter.
+- [ ] **1-based positional *outputs*** — `at`/`count` surface the format's 0-based D6 values, so QT3 asserts them as wrong-value; fixing them would need reference rewriting. Revisit if the scorecard noise starts to matter.
 ## @jarenjs/validate
 
 - [ ] **Per-scope static evaluated-set analysis for `unevaluated*`** — the shipped

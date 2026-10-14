@@ -391,7 +391,10 @@ describe('XQuery front-end parser', () => {
       parses('reverse($xs)', { '$reverse': '$xs' });
       parses('head($xs)', { '$head': '$xs' });
       parses('tail($xs)', { '$tail': '$xs' });
-      parses('index-of($xs, 3)', { '$index-of': ['$xs', 3] });
+      parses('index-of($xs, 3)', {
+        '$for': { 'io_at': { '$index-of': ['$xs', 3] } },
+        '$return': { '$add': ['$io_at', 1] },
+      });
       parses('not($x)', { '$not': '$x' });
       parses('boolean($x)', { '$boolean': '$x' });
       parses('string($x)', { '$string': '$x' });

@@ -167,7 +167,7 @@ describe('XQuery front-end roundtrips', () => {
 
     it('should evaluate sequence functions with the D6 positions', () => {
       assert.deepStrictEqual(run('subsequence((1,2,3,4), 2, 2)'), [2, 3]);
-      assert.deepStrictEqual(run('index-of((10, 20, 10), 10)'), [0, 2]); // 0-based results
+      assert.deepStrictEqual(run('index-of((10, 20, 10), 10)'), [1, 3]); // 1-based results
       assert.deepStrictEqual(run('reverse((1,2,3))'), [3, 2, 1]);
       assert.deepStrictEqual(run('distinct-values((1,2,1,3))'), [1, 2, 3]);
       assert.strictEqual(run('head((7,8))'), 7);

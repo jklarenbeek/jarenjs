@@ -22,8 +22,9 @@
 // 1-based/0-based rule (D6, documented in XQUERY-FRONTEND.md): positional
 // *inputs* are adjusted at parse time so XQuery text means what it says
 // (`?N` lookups, substring/subsequence starts, array:get indexes emit
-// N-1); positional *outputs* keep the JSON format's 0-based convention
-// (`at $i`, `count $c`, fn:index-of results).
+// N-1); fn:index-of results are shifted to 1-based in the emission; the
+// positional *bindings* keep the JSON format's 0-based convention
+// (`at $i`, `count $c`).
 
 //#region imports & shared tables
 
@@ -171,6 +172,20 @@ function fnAdjustedStart(op) {
     },
   };
 }
+
+// fn:index-of: the engine's $index-of answers 0-based positions (D6); each
+// one is shifted to F&O's 1-based position. The operands are evaluated in
+// the binding, outside the scope of the name the shift introduces.
+const INDEX_VAR = 'io_at';
+
+const indexOfFunction = Object.freeze({
+  min: 2,
+  max: 2,
+  emit: (args) => ({
+    '$for': { [INDEX_VAR]: { '$index-of': args } },
+    '$return': { '$add': ['$' + INDEX_VAR, 1] },
+  }),
+});
 
 //#region xs: constructors and fn:tokenize
 
@@ -503,8 +518,7 @@ const FN_TABLE = Object.freeze({
   // fn:matches tests a *substring* match (F&O), which is `$search`;
   // `$match` is the anchored RFC 9535 match() - see XQUERY-FRONTEND.md
   'matches': fnPair('$search'),
-  // fn:index-of *results* stay 0-based (D6) - the positional-output rule
-  'index-of': fnPair('$index-of'),
+  'index-of': indexOfFunction,
   'concat': { min: 2, max: Infinity, emit: (args) => ({ '$concat': args }) },
   'string-join': { min: 1, max: 2, emit: (args) => ({ '$string-join': args }) },
   'replace': { min: 3, max: 3, emit: (args) => ({ '$replace': args }) },

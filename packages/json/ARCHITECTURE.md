@@ -256,7 +256,7 @@ Compilation wraps only errors crossing a language boundary: invalid match paths 
 
 - The output is always a valid query document (every emission validates against the schema); where XQuery and the JSON format disagree, the JSON format's semantics win, and the mapping is documented per-construct in [docs/XQUERY-FRONTEND.md](./docs/XQUERY-FRONTEND.md).
 - Constructs outside the subset fail with stable `unsupported ...` messages (`XQuerySyntaxError` with `source`/`position`), which is what lets the QT3 harness (`benchmark/qt3-runner.js`) classify tens of thousands of suite cases mechanically.
-- Positional 1-based/0-based mismatches (XQuery vs D6) follow one rule: **positional inputs are adjusted at parse time** (`?N` lookups, `fn:substring` starts), **positional outputs are not** (`$at`, `count`, `fn:index-of` results surface 0-based).
+- Positional 1-based/0-based mismatches (XQuery vs D6) follow one rule: **positional inputs are adjusted at parse time** (`?N` lookups, `fn:substring` starts), **`fn:index-of` results are shifted to 1-based in the emission**, while the positional *bindings* are not (`$at` and `count` surface 0-based).
 
 ## Testing and benchmarks
 

@@ -87,7 +87,8 @@ compileXQuery(text)(null, { doc: inputDocument });
 >
 > RFC 9535 and the JSON query format are 0-based (deviation **D6**);
 > XQuery is 1-based. The front-end splits the difference along a single
-> rule — **positional inputs are adjusted, positional outputs are not**:
+> rule — **positional inputs and `fn:index-of` results are adjusted, positional
+> bindings are not**:
 >
 > **Adjusted at parse time** (the text means what XQuery says it means):
 > - `?N` lookups: `$b?1` → `"$b[0]"` (`?0` is an `unsupported lookup index` error);
@@ -95,14 +96,22 @@ compileXQuery(text)(null, { doc: inputDocument });
 >   → `{"$substring": ["hello", 1]}` (a non-literal start emits
 >   `{"$sub": [start, 1]}`; length arguments are counts and pass through);
 > - `array:get`: `array:get($a, 1)` → `{"$get": ["$a", 0]}`
->   (`map:get` keys are values, not positions — never adjusted).
+>   (`map:get` keys are values, not positions — never adjusted);
+> - `fn:index-of` *results*: each position the engine's `$index-of` answers is
+>   shifted in the emission, `index-of($xs, 3)` →
+>   `{"$for": {"io_at": {"$index-of": ["$xs", 3]}}, "$return": {"$add": ["$io_at", 1]}}`
+>   (the operands are read outside the binding, so a variable named `io_at`
+>   in the query is never captured).
 >
 > **Not adjusted — 0-based values surface** (deviation carried into the
-> front-end, because these are *bindings and results* the parser cannot
-> locally rewrite):
+> front-end, because these are *bindings* the parser cannot locally rewrite):
 > - `for $x at $i in ...` — `$i` counts from **0**, not 1;
-> - `count $c` — `$c` counts from **0**;
-> - `fn:index-of` — returned positions count from **0**.
+> - `count $c` — `$c` counts from **0**.
+>
+> *Upgrade: `fn:index-of` used to answer the engine's 0-based positions, so
+> `index-of((10, 20), 20)` answered `1`; it now answers `2`. A query that
+> compensated with `+ 1` must drop it, and the emitted document is no longer a
+> bare `$index-of`.*
 
 > ### ⚠ Value comparisons are mapped to general comparisons
 >
@@ -269,7 +278,7 @@ Any other prefix, any name not listed, or any arity not listed is an error
 | `distinct-values` | 1 | `{"$distinct": e}` |
 | `reverse`, `head`, `tail` | 1 | `$reverse`, `$head`, `$tail` |
 | `subsequence` | 2–3 | `{"$subsequence": [seq, start−1, len?]}` (**start adjusted**, §3) |
-| `index-of` | 2 | `{"$index-of": [seq, item]}` (**results 0-based**, §3) |
+| `index-of` | 2 | a `$for` over `{"$index-of": [seq, item]}` adding 1 to each position (**results adjusted to 1-based**, §3) |
 | `true`, `false` | 0 | the literals `true` / `false` |
 | `map:get` | 2 | `{"$get": [map, key]}` (key never adjusted) |
 | `array:get` | 2 | `{"$get": [array, pos−1]}` (**position adjusted**, §3) |

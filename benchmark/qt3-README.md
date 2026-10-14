@@ -118,7 +118,7 @@ Divergences from XDM to keep in mind when triaging:
     compares structurally, never atomized), `D3` EBV of arrays/objects is true,
     `D5` I-Regexp not XSD regex (invalid patterns → `false`, no captures/
     back-refs/anchors/flags, literal replacements), `D6` 0-based positions
-    (`index-of` results, `at`/`count` variables).
+    (`at`/`count` variables).
   - **Engine rules** (QUERY-FORMAT.md §§8.4–8.10): `E1` only numbers order with
     numbers and strings with strings — every other pair (booleans, mixed types)
     compares `false` or is `JQ2001`/`JQ2005`, never XQuery's answer; `E2` no XDM

@@ -1,7 +1,7 @@
 {
  "$comment": "QT3 baseline: every attributed tier-A failure (see benchmark/qt3-README.md). Deviation ids: D1-D7 QUERY-FORMAT.md section 11; E1/E2 engine rules (comparison/no-atomization, sections 8.4-8.10); E3 resource guards (section 8.9); E4 NaN ordering (section 6.6); F1-F6 front-end approximations (XQUERY-FRONTEND.md section 3). skip: fatal resource exhaustion, never run in-process.",
  "summary": {
-  "pass": 3378,
+  "pass": 3394,
   "unsupported-syntax": 19190
  },
  "tests": {
@@ -294,16 +294,6 @@
    "status": "deviation",
    "id": "D1",
    "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
-  },
-  "K-SeqIndexOfFunc-12": {
-   "status": "deviation",
-   "id": "D6",
-   "note": "fn:index-of results are 0-based"
-  },
-  "K-SeqIndexOfFunc-14": {
-   "status": "deviation",
-   "id": "D6",
-   "note": "fn:index-of results are 0-based"
   },
   "K-SeqSubsequenceFunc-27": {
    "status": "deviation",
@@ -865,11 +855,6 @@
    "id": "D1",
    "note": "xs:float is an IEEE double here: no single-precision value, range or serialization"
   },
-  "cbcl-fn-indexof-1": {
-   "status": "deviation",
-   "id": "D6",
-   "note": "fn:index-of results are 0-based"
-  },
   "cbcl-hash-join-009": {
    "status": "deviation",
    "id": "E1",
@@ -1255,41 +1240,6 @@
    "id": "E1",
    "note": "booleans/mixed types do not order; value comparisons over empty sequences are false, not empty (F1)"
   },
-  "fn-indexof-mix-args-001": {
-   "status": "deviation",
-   "id": "D6",
-   "note": "fn:index-of results are 0-based"
-  },
-  "fn-indexof-mix-args-003": {
-   "status": "deviation",
-   "id": "D6",
-   "note": "fn:index-of results are 0-based"
-  },
-  "fn-indexof-mix-args-004": {
-   "status": "deviation",
-   "id": "D6",
-   "note": "fn:index-of results are 0-based"
-  },
-  "fn-indexof-mix-args-016": {
-   "status": "deviation",
-   "id": "D6",
-   "note": "fn:index-of results are 0-based"
-  },
-  "fn-indexof-mix-args-017": {
-   "status": "deviation",
-   "id": "D6",
-   "note": "fn:index-of results are 0-based"
-  },
-  "fn-indexof-mix-args-020": {
-   "status": "deviation",
-   "id": "D6",
-   "note": "fn:index-of results are 0-based"
-  },
-  "fn-indexof-mix-args-021": {
-   "status": "deviation",
-   "id": "D6",
-   "note": "fn:index-of results are 0-based"
-  },
   "fn-matches-25": {
    "status": "deviation",
    "id": "D5",
@@ -1670,20 +1620,10 @@
    "id": "D1",
    "note": "equality is the engine's (equalsJson): NaN equals nothing, where fn:deep-equal treats NaN as equal to itself"
   },
-  "fo-test-fn-index-of-002": {
-   "status": "deviation",
-   "id": "D6",
-   "note": "fn:index-of results are 0-based"
-  },
-  "fo-test-fn-index-of-003": {
-   "status": "deviation",
-   "id": "D6",
-   "note": "fn:index-of results are 0-based"
-  },
   "fo-test-fn-index-of-005": {
    "status": "deviation",
-   "id": "D6",
-   "note": "fn:index-of results are 0-based"
+   "id": "D2",
+   "note": "fn:index-of compares an array item structurally; XQuery atomizes the array into its members"
   },
   "fo-test-fn-max-002": {
    "status": "deviation",
@@ -1724,26 +1664,6 @@
    "status": "deviation",
    "id": "E2",
    "note": "aggregates treat an array as one item (no atomization), JQ2001"
-  },
-  "functx-fn-index-of-1": {
-   "status": "deviation",
-   "id": "D6",
-   "note": "fn:index-of results are 0-based"
-  },
-  "functx-fn-index-of-3": {
-   "status": "deviation",
-   "id": "D6",
-   "note": "fn:index-of results are 0-based"
-  },
-  "functx-fn-index-of-4": {
-   "status": "deviation",
-   "id": "D6",
-   "note": "fn:index-of results are 0-based"
-  },
-  "functx-fn-index-of-5": {
-   "status": "deviation",
-   "id": "D6",
-   "note": "fn:index-of results are 0-based"
   },
   "functx-fn-replace-10": {
    "status": "deviation",
