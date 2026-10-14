@@ -1,8 +1,8 @@
 {
  "$comment": "QT3 baseline: every attributed tier-A failure (see benchmark/qt3-README.md). Deviation ids: D1-D7 QUERY-FORMAT.md section 11; E1/E2 engine rules (comparison/no-atomization, sections 8.4-8.10); E3 resource guards (section 8.9); E4 NaN ordering (section 6.6); F1-F6 front-end approximations (XQUERY-FRONTEND.md section 3). skip: fatal resource exhaustion, never run in-process.",
  "summary": {
-  "pass": 3376,
-  "unsupported-syntax": 19192
+  "pass": 3378,
+  "unsupported-syntax": 19190
  },
  "tests": {
   "ArrayTest-044": {
