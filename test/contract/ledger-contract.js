@@ -13,7 +13,8 @@
  * (both suite ledgers carry them): a failure for good carries the
  * response it replays, a `started` claim blocks its key only for its
  * lease (`startedTtlMs`), and `inFlight` / `release` find and free the
- * claims an interrupted request left behind.
+ * claims an interrupted request left behind, and `sweep(now, { limit })`
+ * bounds one call.
  */
 
 import { describe, it } from 'node:test';
@@ -274,6 +275,94 @@ export const cases = {
     });
   },
 
+  /** `sweep(now, { limit })` bounds one call: at most `limit` records, the
+   * longest expired first; repeated calls drain the backlog, each record
+   * once, and an answer below `limit` says none remain. */
+  async boundedSweep(factory) {
+    const under = await factory({ ttlMs: 100, now: () => 1000 });
+    await using(under, async () => {
+      const { ledger } = under;
+      // claimed out of expiry order: a take in claim order is not the oldest first
+      for (const [key, at] of [['c', 30], ['a', 10], ['e', 50], ['b', 20], ['f', 60], ['d', 40], ['live', 950]]) {
+        const claimed = await ledger.claim({ ...CLAIM, key: String(key), now: Number(at) });
+        await ledger.commit(claimed.ref, RESPONSE, Number(at));
+      }
+      // each record is probed before its own expiry, so the probe drops nothing
+      const kept = async () => {
+        const out = [];
+        for (const [key, at] of [['a', 10], ['b', 20], ['c', 30], ['d', 40], ['e', 50], ['f', 60], ['live', 950]]) {
+          if ((await ledger.lookup({ ...CLAIM, key: String(key), now: Number(at) })) !== null) out.push(key);
+        }
+        return out;
+      };
+      assert.strictEqual(await ledger.sweep(1000, { limit: 2 }), 2, 'a full batch: more may remain');
+      assert.deepStrictEqual(await kept(), ['c', 'd', 'e', 'f', 'live'], 'the longest expired first');
+      assert.strictEqual(await ledger.sweep(1000, { limit: 2 }), 2);
+      assert.deepStrictEqual(await kept(), ['e', 'f', 'live']);
+      assert.strictEqual(await ledger.sweep(1000, { limit: 2 }), 2, 'a backlog that is a multiple of the limit ends on a full batch');
+      assert.strictEqual(await ledger.sweep(1000, { limit: 2 }), 0, '... and one more call that answers 0');
+      assert.deepStrictEqual(await kept(), ['live'], 'a record that has not expired is never swept');
+    });
+  },
+
+  /** Equal expiries are each taken once, whatever order a ledger breaks the tie in;
+   * a limit larger than the backlog takes all of it. */
+  async boundedSweepDrain(factory) {
+    const under = await factory({ ttlMs: 100, now: () => 1000 });
+    await using(under, async () => {
+      const { ledger } = under;
+      const keys = ['z', 'm', 'a', 'q', 'k'];
+      for (const key of keys) await ledger.claim({ ...CLAIM, key, now: 10 });
+      const answers = [];
+      for (let call = 0; call < 3; call++) answers.push(await ledger.sweep(1000, { limit: 2 }));
+      assert.deepStrictEqual(answers, [2, 2, 1], 'five tied records in batches of two');
+      for (const key of keys) assert.strictEqual(await ledger.lookup({ ...CLAIM, key, now: 10 }), null, `${key} was swept`);
+      for (const key of keys) await ledger.claim({ ...CLAIM, key, now: 500 });
+      assert.strictEqual(await ledger.sweep(1000, { limit: 1_000_000 }), 5, 'a limit past the backlog takes it all');
+      assert.strictEqual(await ledger.sweep(1000, { limit: 1 }), 0);
+    });
+  },
+
+  /** A malformed `limit` is refused before anything is dropped; every
+   * spelling of "no bound" sweeps as an unbounded call always did. */
+  async sweepLimitRefused(factory) {
+    const under = await factory({ ttlMs: 100, now: () => 1000 });
+    await using(under, async () => {
+      const { ledger } = under;
+      await ledger.claim({ ...CLAIM, now: 10 });
+      for (const limit of [0, -3, 1.5, '2', Infinity, NaN, null, 2 ** 53]) {
+        await assert.rejects(async () => ledger.sweep(1000, { limit }),
+          (/** @type {any} */ err) => err instanceof TypeError && /ledger\.sweep: limit is a whole number from 1/.test(err.message), String(limit));
+      }
+      await assert.rejects(async () => ledger.sweep(1000, { limt: 2 }),
+        (/** @type {any} */ err) => err instanceof TypeError && /ledger\.sweep: 'limt' is not a member it reads/.test(err.message));
+      for (const options of [[], 5]) {
+        await assert.rejects(async () => ledger.sweep(1000, options),
+          (/** @type {any} */ err) => err instanceof TypeError && /ledger\.sweep: the second argument is \{ limit\? \}/.test(err.message), JSON.stringify(options));
+      }
+      assert.notStrictEqual(await ledger.lookup({ ...CLAIM, now: 10 }), null, 'a refused sweep dropped nothing');
+      // unbounded, however it is spelled
+      const unbounded = /** @type {((now: number) => Promise<number>)[]} */ ([
+        async (now) => ledger.sweep(now),
+        async (now) => ledger.sweep(now, undefined),
+        async (now) => ledger.sweep(now, null),
+        async (now) => ledger.sweep(now, {}),
+        async (now) => ledger.sweep(now, { limit: undefined }),
+      ]);
+      let round = 0;
+      for (const sweep of unbounded) {
+        const at = 2000 * ++round;
+        for (const key of ['x', 'y', 'z']) await ledger.claim({ ...CLAIM, key: `${key}${round}`, now: at });
+        await ledger.claim({ ...CLAIM, key: `live${round}`, now: 1_000_000 + round });
+        assert.strictEqual(await sweep(at + 500), round === 1 ? 4 : 3, `round ${round}`);
+      }
+      // with no instant, the ledger's clock judges
+      await ledger.claim({ ...CLAIM, key: 'clock', now: 10 });
+      assert.strictEqual(await ledger.sweep(), 1);
+      assert.strictEqual(await ledger.sweep(2_000_000), unbounded.length, 'one live claim per round, swept once they expire');
+    });
+  },
+
   /** A lease is whole milliseconds on every ledger. */
   async wholeMilliseconds(factory) {
     for (const options of [{ ttlMs: 1000.5 }, { ttlMs: 1000, startedTtlMs: 100.5 }, { ttlMs: 2 ** 53 }]) {
@@ -369,5 +458,8 @@ export function ledgerLifecycleContract(name, factory) {
     it('inFlight lists the claims still blocking their key, oldest first, narrowed by op, scope, olderThan and limit', () => cases.inFlight(factory));
     it('release frees one interrupted claim as a server fault would, once, and only its own generation', () => cases.release(factory));
     it('a lease is whole milliseconds: a fraction is refused when the ledger is made', () => cases.wholeMilliseconds(factory));
+    it('sweep(now, { limit }) drops at most limit records, the longest expired first, until an answer below the limit', () => cases.boundedSweep(factory));
+    it('a bounded sweep takes tied expiries each once across calls; a limit past the backlog takes it all', () => cases.boundedSweepDrain(factory));
+    it('a malformed sweep limit is refused and drops nothing; an absent one sweeps every expired record', () => cases.sweepLimitRefused(factory));
   });
 }

@@ -1272,7 +1272,7 @@ is the same request. The binding then calls the ledger:
   "fail":   "(ref, retryable, response?, now?) → void",
   "lookup": "({ op, scope, key, now? }) → record | null",
   // optional: the binding never calls them, both suite ledgers carry them
-  "sweep":    "(now?) → count",
+  "sweep":    "(now?, { limit? }?) → count",
   "inFlight": "({ op?, scope?, olderThan?, limit?, now? }?) → [{ op, scope, key, generation, claimedAt }]",
   "release":  "({ op, scope, key, generation?, now? }) → boolean" }
 ```
@@ -1351,12 +1351,30 @@ whatever `retryAfterMs` says, and neither does its replay.
 `createMemoryLedger({ ttlMs = 86_400_000, startedTtlMs = ttlMs, now, runtime })`
 (`@jarenjs/contract/ledger`) is the reference implementation over a
 `Map`: synchronous, single-process, expiring on `claim` and `lookup`,
-with `sweep(now?)` for a host timer and `size`. Built without `now` or
+with `sweep(now?, { limit? })` for a host timer and `size`. Built without `now` or
 `runtime` it keeps time by the instants the binding passes it (a
 host-side `lookup`/`sweep` that passes none uses the latest one); built
 with either, that clock judges every record; the runtime record's `uuid`
 mints each generation, and `lookup` answers a copy. Its options are a
 closed set (a `TypeError` names an unknown one).
+
+**A sweep can be bounded.** `sweep(now?)` drops every expired record and
+answers how many; `sweep(now?, { limit })` — `limit` a whole number from
+1 — drops at most that many, the longest expired first, and answers the
+count, on the memory ledger and on `createDbLedger` alike. An answer
+equal to `limit` says more MAY remain and a smaller one that none do, so
+a host drains a backlog by calling again until the answer falls below
+the limit (a backlog that is an exact multiple of the limit costs one
+more call, which answers 0). A malformed second argument — not a plain
+object, a member other than `limit`, or a `limit` that is not a whole
+number from 1 — is a `TypeError`, and nothing is dropped. The memory
+ledger used to ignore the second argument and drop every expired
+record; it now honours the bound, so a host that passed a `limit` sees
+at most that many dropped per call, and a malformed second argument it
+used to ignore (`null` among them) is now refused, as `createDbLedger`
+refuses it. A host ledger of its own that keeps
+`sweep(now)` still fits the `Ledger` type; a caller that bounds it sees
+the bound ignored as an answer above `limit`.
 
 **A claim's lease and a key's retention are two numbers.** `ttlMs` is how
 long a settled key is kept (and replayed); `startedTtlMs` — at most
@@ -1448,8 +1466,9 @@ record's id AND the generation the claim minted — persisted with the
 record — so a stale ref matches no row and is refused `JC1011` rather
 than settling over a record a later claim re-created. Everything else
 mirrors `createMemoryLedger` exactly: the same `ledgerId`, expiry on
-`claim` and `lookup`, `sweep()` for a host timer, mismatch before
-status, a retryable failure handing the key back, a non-retryable one
+`claim` and `lookup`, `sweep()` for a host timer (unbounded: the
+example's `sweep` takes no `limit`, which the two suite ledgers honour),
+mismatch before status, a retryable failure handing the key back, a non-retryable one
 replaying its stored response; the shared ledger contract in the test
 suite runs all three. Remember the boundary (§8): this ledger
 deduplicates DELIVERY — the domain's own durable records stay

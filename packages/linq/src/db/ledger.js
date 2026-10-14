@@ -116,8 +116,9 @@ function readInFlightQuery(query) {
  */
 function readSweepOptions(options) {
   const spelling = 'ledger.sweep';
-  if (options === undefined) return {};
-  if (options === null || typeof options !== 'object' || Array.isArray(options))
+  // no options, however a caller spells it, is an unbounded sweep
+  if (options === undefined || options === null) return {};
+  if (typeof options !== 'object' || Array.isArray(options))
     throw new TypeError(`${spelling}: the second argument is { limit? }`);
   refuseUnknown(options, ['limit'], (key, list) =>
     `${spelling}: '${key}' is not a member it reads; it reads ${list}`);

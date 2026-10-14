@@ -84,9 +84,12 @@ import { ContractHostError } from './errors.js';
  * @property {(ref: unknown, response: any, now?: number) => void | Promise<void>} commit
  * @property {(ref: unknown, retryable: boolean, response?: any, now?: number) => void | Promise<void>} fail
  * @property {(key: { op: string, scope: string, key: string, now?: number }) => LedgerRecord | null | Promise<LedgerRecord | null>} lookup
- * @property {(now?: number) => number | Promise<number>} [sweep] - drop every
- *   expired record and answer how many; optional — the binding never calls
- *   it (retention is the host's schedule), and both suite ledgers carry it
+ * @property {(now?: number, options?: SweepOptions) => number | Promise<number>} [sweep] - drop
+ *   the expired records and answer how many: every one, or with `limit` at
+ *   most that many, the longest expired first — an answer equal to `limit`
+ *   says more may remain, a smaller one that none do; optional — the
+ *   binding never calls it (retention is the host's schedule), and both
+ *   suite ledgers carry it
  * @property {(query?: InFlightQuery) => InFlightClaim[] | Promise<InFlightClaim[]>} [inFlight] -
  *   the claims still `started` and blocking their key, oldest first;
  *   optional — the binding never calls it, and both suite ledgers carry it
@@ -99,6 +102,13 @@ import { ContractHostError } from './errors.js';
  * failure could replay nothing, and a ledger that freed the key instead
  * re-ran a command that had failed for good — it is refused (`JC1015` on
  * the memory ledger), and the claim stays `started`.
+ */
+
+/**
+ * What `sweep` reads beside its instant — a closed set: `limit`, a whole
+ * number from 1, bounds one call (a refused `limit` is a `TypeError`,
+ * and nothing is dropped).
+ * @typedef {{ limit?: number }} SweepOptions
  */
 
 /**
@@ -143,6 +153,25 @@ function readInFlightQuery(query, spelling) {
   }
   if (!Number.isInteger(limit) || limit < 1) throw new TypeError(`${spelling}: limit is a whole number from 1`);
   return { op, scope, olderThan, limit, now };
+}
+
+/**
+ * Read `sweep`'s second argument (a closed set): `limit`, a whole number
+ * from 1, bounds the call; absent, the call drops every expired record.
+ * @param {unknown} options
+ * @param {string} spelling
+ * @returns {{ limit?: number }}
+ */
+function readSweepOptions(options, spelling) {
+  // no options, however a caller spells it, is an unbounded sweep
+  if (options === undefined || options === null) return {};
+  if (typeof options !== 'object' || Array.isArray(options))
+    throw new TypeError(`${spelling}: the second argument is { limit? }`);
+  refuseUnknownMembers(options, ['limit'], (key, hint) =>
+    new TypeError(`${spelling}: '${key}' is not a member it reads${hint}`));
+  const { limit } = /** @type {any} */ (options);
+  if (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 1)) throw new TypeError(`${spelling}: limit is a whole number from 1`);
+  return { limit };
 }
 
 /**
@@ -203,7 +232,8 @@ function staleSettlement(ref) {
  * The reference ledger over a `Map`: synchronous, single-process,
  * expiring on `claim` (a record past `expiresAt` is dropped and the key
  * is `new` again). `sweep()` drops every expired record — a host may
- * call it on a timer.
+ * call it on a timer; `sweep(now, { limit })` drops at most `limit`, the
+ * longest expired first, as `createDbLedger`'s does.
  * ONE clock judges a record from claim to expiry. The ledger's own clock
  * is `now`, else the runtime record's `now` (`@jarenjs/core/runtime`);
  * given neither, the ledger has no clock of its own and FOLLOWS the
@@ -224,7 +254,7 @@ function staleSettlement(ref) {
  * that lease; a settled one's is `createdAt + ttlMs`.
  * @param {{ ttlMs?: number, startedTtlMs?: number, now?: () => number,
  *   runtime?: Partial<import('@jarenjs/core/runtime').Runtime> }} [options]
- * @returns {Ledger & { sweep(now?: number): number, size: number,
+ * @returns {Ledger & { sweep(now?: number, options?: SweepOptions): number, size: number,
  *   inFlight(query?: InFlightQuery): InFlightClaim[],
  *   release(claim: { op: string, scope: string, key: string, generation?: string, now?: number }): boolean }}
  */
@@ -336,16 +366,25 @@ export function createMemoryLedger(options = {}) {
       }
       return { ...record };
     },
-    sweep(now = undefined) {
+    sweep(now = undefined, options = undefined) {
+      const { limit } = readSweepOptions(options, 'ledger.sweep');
       const at = instant(now);
-      let dropped = 0;
-      for (const [id, record] of records) {
-        if (record.expiresAt <= at) {
-          records.delete(id);
-          dropped++;
+      if (limit === undefined) {
+        let dropped = 0;
+        for (const [id, record] of records) {
+          if (record.expiresAt <= at) {
+            records.delete(id);
+            dropped++;
+          }
         }
+        return dropped;
       }
-      return dropped;
+      // a bounded call takes the longest expired first (a stable sort:
+      // equal expiries in the order their claims were made)
+      const expired = [...records.values()].filter((record) => record.expiresAt <= at)
+        .sort((a, b) => a.expiresAt - b.expiresAt).slice(0, limit);
+      for (const record of expired) records.delete(record.id);
+      return expired.length;
     },
     inFlight(query = undefined) {
       const { op, scope, olderThan, limit, now } = readInFlightQuery(query, 'ledger.inFlight');

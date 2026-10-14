@@ -2,8 +2,9 @@
 /**
  * @file `createMemoryLedger` under the shared ledger contract, plus the
  * proof that the contract is not vacuous: a ledger whose generation
- * fence is removed FAILS the fence case, and a ledger that spells the
- * legacy id fails the id case.
+ * fence is removed FAILS the fence case, a ledger that spells the
+ * legacy id fails the id case, and a ledger whose sweep ignores its
+ * bound fails the bounded-sweep cases.
  */
 
 import { describe, it } from 'node:test';
@@ -67,5 +68,26 @@ describe('the harness holds the fence', () => {
       };
     };
     await assert.rejects(() => cases.ids(legacy), (/** @type {any} */ err) => err.name === 'AssertionError');
+  });
+
+  it('a ledger whose sweep ignores its bound fails the bounded-sweep cases', async () => {
+    /** @type {import('./ledger-contract.js').LedgerFactory} */
+    const unbounded = (options) => {
+      const inner = createMemoryLedger(options);
+      return {
+        staleCode: 'JC1011',
+        ledger: {
+          claim: (/** @type {any} */ c) => inner.claim(c),
+          lookup: (/** @type {any} */ k) => inner.lookup(k),
+          commit: (/** @type {any} */ ref, /** @type {any} */ response, /** @type {any} */ now) => inner.commit(ref, response, now),
+          fail: (/** @type {any} */ ref, /** @type {any} */ retryable, /** @type {any} */ response, /** @type {any} */ now) => inner.fail(ref, retryable, response, now),
+          // the second argument dropped, as the structural shape once allowed
+          sweep: (/** @type {any} */ now) => inner.sweep(now),
+        },
+      };
+    };
+    for (const name of ['boundedSweep', 'boundedSweepDrain', 'sweepLimitRefused']) {
+      await assert.rejects(() => cases[name](unbounded), (/** @type {any} */ err) => err.name === 'AssertionError', name);
+    }
   });
 });

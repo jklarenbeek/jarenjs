@@ -351,7 +351,6 @@ describe('createDbLedger — sweep(now, { limit })', () => {
       [{ limit: Infinity }, /limit is a whole number from 1/],
       [{ limit: null }, /limit is a whole number from 1/],
       [{ limt: 2 }, /ledger\.sweep: 'limt' is not a member it reads; it reads 'limit'/],
-      [null, /ledger\.sweep: the second argument is \{ limit\? \}/],
       [[], /the second argument is \{ limit\? \}/],
       [5, /the second argument is \{ limit\? \}/],
     ])) {

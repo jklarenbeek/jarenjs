@@ -737,13 +737,6 @@ what each does is its own documentation's job
   a flipped comparison (`5 < n` and `n > 5`), redundant parentheses and the
   server's casts and literal spellings, and it is a stated stricter refusal at
   open (a minor).
-- [ ] **The ledger shape carries no sweep bound.** `createDbLedger().sweep(now?, { limit })` bounds
-  one call (an ordered, index-read take of at most `limit` expired records; an answer equal to
-  `limit` says more may remain). `@jarenjs/contract`'s `Ledger.sweep(now?) -> count`, its
-  conformance kit and the in-memory ledger carry no limit (the memory ledger ignores a second
-  argument), so a host holding only the structural shape cannot bound a sweep, and "more remain"
-  is implicit (count === limit; an exact multiple costs one extra call). Wanted: a `limit` in the
-  structural shape and the kit, or a result that says whether more remain (a shape change).
 
 ## Lexical search (cross-package)
 
