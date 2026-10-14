@@ -262,11 +262,22 @@ function cases(engine) {
     assert.deepEqual((await items().explain(overItems({ $ne: ['$it.n', NaN] }))).params, []);
   });
 
-  it('a string a JSON list cannot carry stays its own comparison: a lone surrogate beside other terms', async () => {
+  it('a lone surrogate beside other terms keeps the disjunction in the engine: a driver binds it as U+FFFD', async () => {
     const predicate = { $or: [{ $eq: ['$it.s', '\ud800'] }, { $eq: ['$it.s', 'b'] }, { $gt: ['$it.n', 8] }] };
-    const expected = await agrees(predicate, 'lone surrogate');
+    const store = engine.store();
+    const expected = sorted(await items().execute(overItems(predicate), { pushdown: false }));
     assert.ok(expected.length > 0);
-    assert.equal((await items().explain(overItems(predicate))).params.length, 3);
+    assert.deepEqual(sorted(await items().execute(overItems(predicate))), expected);
+    const rows = sorted(await store.execute(overItem(predicate), { pushdown: false }));
+    assert.deepEqual(sorted(await store.execute(overItem(predicate))), rows);
+    for (const plan of [await items().explain(overItems(predicate)), await store.explain(overItem(predicate))]) {
+      if (plan.mode === 'native') {
+        // the deterministic-function hatch: the whole `$or` is one function, which reads the literal as written
+        assert.equal(plan.udfs.length, 1);
+        assert.ok(!plan.params.some((/** @type {any} */ param) => param.literal === '\ud800'));
+      }
+      else assert.equal(reasonId((plan.reasons ?? plan.residual.reasons)[0].reason), 'predicate.loneSurrogate');
+    }
   });
 
   it('instant equalities keep their epoch narrowing beside other terms: no list, the column\'s index seeks', async () => {

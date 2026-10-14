@@ -505,10 +505,18 @@ count. Over such a constructor on a collection the window rides in the statement
 (the row residual), and a `$count` is a `COUNT(*)` that reads no row; on an
 entity only the count lowers, because the entity planner has no row residual, so
 a window over an operator projection runs in the engine (`entity.projection`). A
-collection's window or count also stays in the engine when a pushed conjunct
-runs as a registered function (`plan.registeredFunction`): the database stops
-evaluating one once the window is full, or once a cheaper conjunct has refused
-the row, and the engine evaluates every row. A document whose rows violate their schema is outside this
+collection's window also stays in the engine when a pushed conjunct runs as a
+registered function (`plan.registeredFunction`): the database stops evaluating
+one once the window is full, and the engine evaluates every row; so does a count
+of such a constructor, which no longer needs to. The engine evaluates a
+`$where`'s conjuncts in order, stopping at the first false one, so from the
+first conjunct that can raise (one the engine decides, or one that runs as a
+registered function, unless it is an `$eq` or `$ne` of literals, member paths and
+the operators above, an `$exists` or `$empty`, or an `$and`, `$or` or `$not` of
+those) no later conjunct narrows the rows: it runs as a
+registered function, evaluated after the earlier one, or stays in the residual
+(`predicate.afterRaising`), since an index seek on it would never visit a row
+the earlier one raises on. The conjuncts before it keep narrowing. A document whose rows violate their schema is outside this
 proof: the engine would raise `JQ2001` on a row the statement never reads. So is
 a row of an adopted table that its codec cannot decode (invalid text in a `date`
 or `datetime` column, which only trusted SQL writes): the engine raises `JD2003`

@@ -168,6 +168,35 @@ does a window over an operator projection of an entity, which has no row
 residual (a collection's window over such a constructor is pushed: MODEL-FORMAT
 §10.6).
 
+The engine evaluates a `$where`'s conjuncts in order, stopping at the first false
+one, so on a collection, from the first conjunct that can raise — one the planner leaves to the
+engine, or one that runs as a registered function — no later conjunct narrows the
+rows (`predicate.afterRaising`): it runs as a registered function, which the
+statement evaluates after the earlier one, or stays in the engine, because an index
+seek on it would never visit a row the earlier one raises on. A conjunct the engine
+decides that cannot raise leaves the later ones narrowing: an `$eq` or `$ne` of
+literals, member paths and the operators a pushed count accepts, an `$exists` or an
+`$empty`, and an `$and`, `$or` or `$not` of those. The conjuncts before it keep
+narrowing, a seek staying a seek, so the selective conjunct goes first. A window
+beside a registered function stays in the engine too (`plan.registeredFunction`): the
+statement stops once the window is full, and the engine evaluates every row.
+
+A string literal reaches the database through the driver as UTF-8, which has no
+spelling for a lone surrogate: it arrives as U+FFFD and the database compares that
+in its place, so a comparison or a string operator over one stays in the engine
+(`predicate.loneSurrogate`; on SQLite it runs as a registered function, which reads
+the literal as written), as does a disjunction that holds one. PostgreSQL's text and
+jsonb hold no U+0000, so there a literal holding one, or a membership list item
+holding U+0000 or a lone surrogate, sends a collection's document to the engine
+(`bind.serverText`); such a list rides the statement on SQLite, whose JSON reads the
+escape as it read the stored document. SQLite's `$ends-with` compares bytes, so a
+U+0000 in the pattern or in the stored value answers as the engine does. **A named
+deviation:** a lone surrogate that SQLite stores (PostgreSQL refuses the document)
+reads back from a native projection, group key or distinct as three U+FFFD, where the
+engine and the live strategies read the surrogate itself; reading it exactly would
+test every text leaf of every such statement, which slows the reads of text that
+never holds one.
+
 Safe identity/object projection chains, including a projected join followed by
 filtering and ordering, flatten without crossing windows, grouping or inner
 ordering. Standalone min/max over supported scalar columns and sum/avg over safe

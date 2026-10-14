@@ -496,17 +496,29 @@ what each does is its own documentation's job
   addresses (a socket and TCP) give the two stores different names, so the
   chain is refused `JL0005` though it would answer right
   ([DB-CLIENT §6](../packages/linq/docs/DB-CLIENT.md)).
-- [ ] **Lone surrogates and NUL in native projections.** A lone surrogate written
-  as a JavaScript escape comes back from a native projection, group key or
-  distinct as three U+FFFD, and `$ends-with` and `$contains` over NUL or lone
-  surrogates answer differently from the engine, while the live strategies keep
-  the true value, so a live result and `execute` differ. Wanted: those operands
-  stay residual, or the dialect encodes them exactly.
-  An exact read of a stored lone surrogate would guard every SQLite text leaf
-  of a projection, group key or distinct with a byte-pattern test, which makes
-  those reads measurably slower for text that never holds one, and an
-  `$ends-with` that compares bytes to survive a U+0000 answers false under
-  `$not` for the empty string; both mechanisms were tried and withdrawn.
+- [ ] **Lone surrogates outside a collection query's literals.** A lone surrogate
+  SQLite stores comes back from a native projection, group key or distinct as three
+  U+FFFD while the engine and the live strategies keep it (a deviation NATIVE-PLANS
+  names: an exact read would test every SQLite text leaf of those statements, and
+  was measured slower and withdrawn). An external string holding one is bound as
+  U+FFFD (the bind check admits any string), and a graph `load({ where })` or a
+  native mutation whose predicate compares one runs natively, where neither has a
+  residual to send it to. On PostgreSQL an entity query's literal holding U+0000
+  still fails `JD2005` where the engine answers. Wanted: externals divert at bind
+  like any value the database cannot bind; the residual-less surfaces refuse with a
+  code (a minor); the entity emitter demotes as the collection one does.
+- [ ] **A native `query()` cursor yields rows before the row a registered function
+  raises on.** Over `$where: { $eq: [{ $upper: '$it.u' }, 'X'] }` ordered by an
+  indexed `o`, rows a(u:'x'), b(u:5), the native cursor yields `'a'` and raises
+  `JQ2001` at b, where the engine's cursor raises before its first item; a
+  consumer that stops after one item reads an answer the engine never gives.
+  Wanted: a cursor beside a registered function reads its statement whole before
+  the first item, or names the streaming deviation.
+- [ ] **An entity's text column stores a lone surrogate as U+FFFD.** Creating an
+  entity whose mapped `string` column member holds `'x\uD800'` stores `'x�'`
+  (the driver's UTF-8 encoding), so `get` reads back another string than was
+  written, while a document member keeps the surrogate (its JSON escape). Wanted:
+  refuse such a value with a code on a text column, or store it exactly.
 - [ ] **A diverted collection call binds NULL for the store predicate's
   externals.** Under a profile predicate `$eq ['$it.tenant','$tenant']`, a call
   the store diverts to a full scan binds only its literal slots: with
@@ -682,17 +694,6 @@ what each does is its own documentation's job
   policy is read natively (`nativeQuery` is false for it), so the grouped sum,
   mean and extreme there also stay in the engine; qualifying such a column would
   close both.
-- [ ] **A conjunct that runs as a registered function can go unevaluated where
-  the engine evaluates it and raises.** An ordered index stops at the window,
-  and an index on a cheaper conjunct never visits the row, so a native window,
-  count or fetch beside such a conjunct answers on SQLite where the engine
-  raises (`plan.registeredFunction` keeps a window or a count over a
-  constructor in the engine, but the plain-member and bare-binding plans stay
-  exposed). A string operator over a member of several kinds besides `null`,
-  or over a `null: 'null'` column, runs the same way, so it raises only where
-  the row reaches it.
-  Wanted: prove the conjunct cannot raise, or keep the engine's order of
-  evaluation.
 - [ ] **A native statement never reads a column its codec cannot decode.** A
   row an adopted table holds that its codec cannot decode (invalid text in a
   `date` or `datetime` column, a PostgreSQL `double precision` NaN or Infinity,

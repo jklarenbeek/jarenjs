@@ -102,13 +102,37 @@ const physicalValueType = (ref, sql, dialect) => ref.codec !== undefined
 
 /**
  * A promoted path the dialect's JSON path grammar cannot spell (a
- * member name holding a double quote or a control character). The
- * planner promotes by SCHEMA, not by grammar, so the query engines
- * catch this and run the document in the set residual instead; a
- * statement that has no residual (a graph load) refuses it with its
- * own code.
+ * member name holding a double quote or a control character) — or, in
+ * a collection's statement, a fold over a member the schema does not
+ * type on an engine with no untyped column, or a string literal the
+ * server cannot hold ({@link serverHolds}). The planner promotes by
+ * SCHEMA, not by grammar, so the query engines catch this and run the
+ * document in the set residual instead; a statement that has no
+ * residual (a graph load) refuses it with its own code.
  */
 export class UnrepresentablePath extends Error {}
+
+/**
+ * Whether the server behind a dialect holds a string bound as a value.
+ * PostgreSQL's text and jsonb hold no U+0000 (the server refuses the
+ * statement), and its jsonb refuses the escape of a lone surrogate, which
+ * a membership list's JSON text spells one as; no document it stores
+ * holds either. SQLite holds both. A lone surrogate bound as text reaches
+ * either server as U+FFFD, which the planner keeps out of the statement.
+ * @param {any} dialect
+ * @param {string} text
+ * @param {boolean} asJson - bound inside a JSON value
+ * @returns {boolean}
+ */
+function serverHolds(dialect, text, asJson) {
+  if (dialect.name !== 'postgres') return true;
+  return !text.includes('\u0000') && (!asJson || text.isWellFormed());
+}
+
+/** The reason a literal the server cannot hold sends a collection's
+ * document to the set residual. */
+const SERVER_TEXT = 'a string literal holding U+0000, or a list item holding U+0000 or a lone surrogate, '
+  + 'is not a value this server holds; the call runs in the residual over the whole collection';
 
 /**
  * A table that takes every spelling of the dialect's row identity as a
@@ -437,6 +461,8 @@ export function emitPlan(plan, dialect, physical) {
   // beside the main statement numbers from one again
   let sink = slots;
   const param = (slot) => {
+    if (typeof slot.literal === 'string' && !serverHolds(dialect, slot.literal, false))
+      throw new UnrepresentablePath(SERVER_TEXT);
     sink.push(slot);
     return dialect.parameterRef(sink.length, slotName(slot));
   };
@@ -678,6 +704,7 @@ export function emitPlan(plan, dialect, physical) {
     }
     const texts = pred.operand.list.filter((value) => typeof value === 'string');
     const numbers = pred.operand.list.filter((value) => typeof value === 'number');
+    if (texts.some((text) => !serverHolds(dialect, text, true))) throw new UnrepresentablePath(SERVER_TEXT);
     const branches = [];
     if (texts.length > 0) branches.push(branch('text', param({ literal: JSON.stringify(texts) })));
     if (numbers.length > 0)

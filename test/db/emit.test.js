@@ -106,7 +106,8 @@ describe('golden SQL (the truth-table forms)', () => {
       $return: '$it',
     }, sqliteDialect);
     assert.match(sql, /\(jsonb_extract\("doc", '\$\."name"'\) >= \? AND jsonb_extract\("doc", '\$\."name"'\) < \?\)/);
-    assert.match(sql, /\(length\(\?\) = 0 OR substr\(jsonb_extract\("doc", '\$\."name"'\), -length\(\?\)\) = \?\)/);
+    // a suffix compares bytes, which a U+0000 does not cut short
+    assert.match(sql, /\(length\(CAST\(\? AS BLOB\)\) = 0 OR substr\(CAST\(jsonb_extract\("doc", '\$\."name"'\) AS BLOB\), -length\(CAST\(\? AS BLOB\)\)\) IS CAST\(\? AS BLOB\)\)/);
     assert.match(sql, /instr\(jsonb_extract\("doc", '\$\."name"'\), \?\) > 0/);
     assert.strictEqual(slots.length, 6, 'starts:2 + ends:3 + contains:1');
     assert.deepStrictEqual(slots[0], { literal: 'a' }, 'the prefix is the lower bound');

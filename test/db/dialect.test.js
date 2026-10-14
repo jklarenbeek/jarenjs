@@ -131,8 +131,8 @@ describe('SQLite dialect goldens', () => {
     assert.strictEqual(sqliteDialect.strStartsWithExact('"gx_name"', '?', '?'),
       'substr("gx_name", 1, length(?)) = ?');
     assert.strictEqual(sqliteDialect.strEndsWith('"gx_name"', '?', '?', '?'),
-      '(length(?) = 0 OR substr("gx_name", -length(?)) = ?)',
-      'unchanged: no sargable form exists');
+      '(length(CAST(? AS BLOB)) = 0 OR substr(CAST("gx_name" AS BLOB), -length(CAST(? AS BLOB))) IS CAST(? AS BLOB))',
+      'no sargable form exists; it compares bytes, which a U+0000 does not cut short');
     assert.strictEqual(sqliteDialect.strContains('"gx_name"', '?'),
       'instr("gx_name", ?) > 0', 'unchanged: no sargable form exists');
   });

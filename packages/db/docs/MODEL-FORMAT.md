@@ -3231,10 +3231,11 @@ pre-filter — keeps its place and its order; mixed types, opposite
 directions and different members never share a bound; and an `$or`
 holding an item the planner refuses (a compound literal, an operator
 over a member) stays whole in the engine with that item's reason:
-nothing is split between the statement and the engine. Three literal
+nothing is split between the statement and the engine, and so does one
+holding a comparison against a string with a lone surrogate, which a
+driver binds as U+FFFD (`predicate.loneSurrogate`). Two literal
 comparisons keep their place although their member regroups: one
-against an infinity or a string that is no JSON text (a
-lone surrogate), which no bound could carry exactly, and an equality on
+against an infinity, which no bound could carry exactly, and an equality on
 an entity's instant column, whose own comparison narrows the column's
 index by an epoch range that a list of document strings cannot (its
 rays still fold, and the folded bound keeps that range). A NaN literal
@@ -3680,6 +3681,21 @@ a number appears only where `capabilities.rowEstimates` is filled):
   `COUNT(*)`; a collection's window or count stays in the engine where a pushed
   conjunct runs as a registered function (`plan.registeredFunction`), which the
   database may leave unevaluated on a row the engine evaluates and raises on;
+- a collection's conjunct after one that can raise — one the engine decides,
+  or one that runs as a registered function — which runs as a registered function itself
+  where the driver registers one, else in the engine (`predicate.afterRaising`):
+  the engine evaluates a `$where`'s conjuncts in order, stopping at the first
+  false one, and an index seek on the later one would never visit a row the
+  earlier one raises on; the conjuncts before it keep narrowing, and so do the
+  ones after a conjunct proven total (an `$eq` or `$ne` of literals, member
+  paths and the operators a pushed count accepts, an `$exists` or `$empty`,
+  and an `$and`, `$or` or `$not` of those);
+- a comparison or a string operator against a string literal holding a lone
+  surrogate, which a driver binds as U+FFFD (`predicate.loneSurrogate`), and on
+  PostgreSQL a collection's literal holding U+0000, or a membership list item
+  holding U+0000 or a lone surrogate, which the server cannot hold
+  (`bind.serverText`; NATIVE-PLANS names the stored lone surrogate a native
+  projection reads as U+FFFD);
 - a navigation hop out of shape (`entity.hopShape`): a hop out of a hop,
   one with an inner `$orderby`, `$let`, grouping or window, one correlated
   by an inequality, or with equalities across comparison families or over

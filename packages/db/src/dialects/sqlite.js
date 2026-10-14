@@ -443,8 +443,16 @@ export const sqliteDialect = createDialect({
     `(${valueSql} >= ${lowerParamSql} AND ${valueSql} < ${upperParamSql})`,
   strStartsWithExact: (valueSql, patternA, patternB) =>
     `substr(${valueSql}, 1, length(${patternA})) = ${patternB}`,
+  // over the bytes: a text's `length` stops at its first U+0000, so a
+  // pattern that begins with one read as empty and a value that holds one
+  // was cut short before its suffix was taken. A byte suffix as long as
+  // the pattern's bytes starts where a character does (the pattern's
+  // first byte leads one; on a UTF-16 file both lengths are whole units);
+  // `IS`, because the suffix of an empty blob is NULL, which a `NOT`
+  // would keep NULL
   strEndsWith: (valueSql, patternA, patternB, patternC) =>
-    `(length(${patternA}) = 0 OR substr(${valueSql}, -length(${patternB})) = ${patternC})`,
+    `(length(CAST(${patternA} AS BLOB)) = 0 OR substr(CAST(${valueSql} AS BLOB), `
+    + `-length(CAST(${patternB} AS BLOB))) IS CAST(${patternC} AS BLOB))`,
   strContains: (valueSql, patternSql) => `instr(${valueSql}, ${patternSql}) > 0`,
   orderNulls: (nullsFirst) => (nullsFirst ? ' NULLS FIRST' : ' NULLS LAST'),
   // the fixed bucket ladder, in integer arithmetic all the way down.

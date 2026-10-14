@@ -86,15 +86,17 @@ describe('the hatch on a capable driver', () => {
       $return: '$it.id',
     };
     await users.execute(reordered);
-    assert.strictEqual(store.stats().udfRegistrations, 1,
-      'contentKey-shared registration');
+    // the comparison after the shared fragment registers too: it runs as a
+    // function, so that no index on it skips a row the fragment is evaluated on
+    assert.strictEqual(store.stats().udfRegistrations, 2,
+      'contentKey-shared registration, plus the conjunct after it');
     // a different fragment registers separately
     await users.execute({
       $for: { it: '$[*]' },
       $where: { $match: ['$it.name', '.*nn.*'] },
       $return: '$it.id',
     });
-    assert.strictEqual(store.stats().udfRegistrations, 2);
+    assert.strictEqual(store.stats().udfRegistrations, 3);
     await store.close();
   });
 

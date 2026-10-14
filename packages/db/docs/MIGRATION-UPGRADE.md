@@ -2342,6 +2342,42 @@ into a new database created with the default UTF-8 encoding, and open that.
   answered no rows on PostgreSQL, where the query engine refuses an unbound
   external (`JQ2006`); it is now refused `JD0011`, as on an entity.
 
+## 30. Native reads that evaluate as the engine does
+
+- A collection `$where` whose conjunct can raise — one the engine decides, or
+  one that runs as a registered function on SQLite — beside a later conjunct
+  over an indexed member answered where the engine raises: the index seek on
+  the later one never visited the row the earlier one raises on
+  (`{ $and: [{ $eq: [{ $upper: '$it.n' }, 'X'] }, { $eq: ['$it.id', 'none'] }] }`
+  counted 0 where the engine raises `JQ2001` on a numeric `n`). A conjunct after
+  one that can raise no longer narrows the rows: on SQLite it runs as a
+  registered function, evaluated after the earlier one, else in the engine
+  (`predicate.afterRaising`), so it scans where it sought, and with no
+  registered function `explain()` names `set` mode where it named `native` and
+  `strict: true` refuses it `JD0010`, and a profile's `maxRows` counts every row
+  the scan fetches. A conjunct before the one that can raise keeps its seek, and
+  so does one after a conjunct the engine decides that cannot raise (an `$eq` or
+  `$ne` of literals and member paths, an `$exists` or `$empty`, or an `$and`,
+  `$or` or `$not` of those): write the selective conjunct first.
+- A window (`$subsequence`) of a member path or an object of member paths,
+  beside a conjunct that runs as a registered function, stopped at the window's
+  last row, so a later row the function raises on went unevaluated; it now runs
+  in the engine (`plan.registeredFunction`), as a window of a constructor did,
+  and raises as the engine does; `strict: true` refuses it `JD0010`.
+- A comparison or a string operator against a string literal holding a lone
+  surrogate compared U+FFFD, the driver's encoding of it, and a `$contains` of a
+  lone surrogate missed the half of a pair the engine matches; it now runs as a
+  registered function on SQLite, else in the engine (`predicate.loneSurrogate`).
+  On PostgreSQL a collection's literal holding U+0000, or a membership list item
+  holding U+0000 or a lone surrogate, failed `JD2005` (`invalid byte sequence`,
+  `unsupported Unicode escape sequence`) and now runs in the engine
+  (`bind.serverText`). On SQLite a `$ends-with` whose pattern begins with U+0000
+  matched every row, and one over a stored value holding U+0000 read the value
+  cut short at it; the suffix now compares bytes and answers as the engine
+  does. A lone surrogate that SQLite stores still reads back from a native
+  projection, group key or distinct as three U+FFFD (a named deviation:
+  [NATIVE-PLANS](NATIVE-PLANS.md#reads)).
+
 ## Measured costs
 
 Exact identity stores complete canonical documents and model endpoints, so

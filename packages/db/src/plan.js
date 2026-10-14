@@ -114,6 +114,11 @@ const PREDICATE_REASONS = {
     + "(an external pattern's type is unknowable at plan time)",
   emptyPattern: "the empty pattern's vacuous-truth corner (true even on a missing member) "
     + 'is not translated',
+  loneSurrogate: 'a string literal holding a lone surrogate reaches the database as U+FFFD, which it '
+    + 'compares in its place, and the engine matches a lone surrogate against half of a pair',
+  afterRaising: 'a conjunct after one that can raise does not narrow the rows: the engine evaluates '
+    + 'the conjuncts in order on every row, and a row the later one would have skipped is one the '
+    + 'earlier one can raise on',
   noSpelling: 'no native spelling of this operator is proven equivalent',
   termBound: 'the filter has more predicate terms than this dialect compiles into one statement',
 };
@@ -153,8 +158,7 @@ const PLAN_REASONS = {
     + 'over the whole collection',
   registeredFunction: 'a window, a count, or a distinct of a constructor or ordered by other paths, beside a '
     + 'conjunct that runs as a registered function, stays in the engine, which evaluates the function on '
-    + 'every row (the database stops evaluating one once the window is full or a cheaper conjunct has '
-    + 'refused the row)',
+    + 'every row (the database stops evaluating one once a window is full)',
 };
 
 /**
@@ -402,6 +406,26 @@ function countsFromTheEnd(ref) {
 function stringSubjectRaises(ref, shape) {
   if (ref.mixed === true) return true;
   return shape.entityFlavors?.get(canonicalOf(ref.segments))?.nullPolicy === 'null';
+}
+
+/**
+ * Whether a planned predicate binds a string literal that holds a lone
+ * surrogate as the operand of a comparison or a string operator. A driver
+ * encodes such a string as UTF-8 with U+FFFD in the surrogate's place, so
+ * the database compares another string than the document names. A
+ * membership list is bound as JSON text, whose escape SQLite decodes as it
+ * decoded the stored document; that it is no value PostgreSQL holds is the
+ * emitter's to say.
+ * @param {any} pred
+ * @returns {boolean}
+ */
+function bindsLoneSurrogate(pred) {
+  switch (pred.p) {
+    case 'and': case 'or': return pred.items.some(bindsLoneSurrogate);
+    case 'not': return bindsLoneSurrogate(pred.item);
+    case 'cmp': case 'strop': return typeof pred.operand.lit === 'string' && !pred.operand.lit.isWellFormed();
+    default: return false;
+  }
 }
 
 /** Whether a reference holds a boolean: by its schema type, or by what its
@@ -1455,6 +1479,8 @@ export const PLANNER_REASONS = Object.freeze({
   // the sentence itself is the dialect's, raised where the path is
   // spelled; the vocabulary claims its stable opening
   'bind.path': { prefix: 'a member name the dialect' },
+  // likewise raised where the literal is bound: text the server cannot hold
+  'bind.serverText': { prefix: 'a string literal holding U+0000' },
   // likewise raised where the order is spelled: a table naming every
   // spelling of the row identity as a column
   'bind.identity': { prefix: 'a table with columns named rowid' },
@@ -3098,6 +3124,37 @@ function cannotRaise(op, resolve) {
 }
 
 /**
+ * Whether a `$where` conjunct cannot raise in the engine, whatever a row
+ * holds. A general equality or inequality (`$eq`, `$ne`) compares any two
+ * sequences — objects and arrays deeply, a `null` or an absent member as
+ * itself — and raises on none, so over operands that are literals, the
+ * binding, its singular member paths or operators {@link cannotRaise}
+ * accepts, it is total; so are `$exists` and `$empty` of such an operand,
+ * and `$and`, `$or` and `$not` of such conjuncts. An ordering raises on
+ * operands it cannot order, and anything else is assumed to raise.
+ * @param {any} node
+ * @param {number} itSlot
+ * @param {any} shape
+ * @returns {boolean}
+ */
+function conjunctCannotRaise(node, itSlot, shape) {
+  if (node.kind !== 'op') return false;
+  const resolve = (/** @type {any} */ arg) => {
+    const found = pathRef(arg, itSlot, shape);
+    return found === null ? null : { ref: found, schema: shape.schema };
+  };
+  const operand = (/** @type {any} */ arg) => arg.kind === 'literal' || isItVar(arg, itSlot)
+    || pathRef(arg, itSlot, shape) !== null || (arg.kind === 'op' && cannotRaise(arg, resolve));
+  switch (node.name) {
+    case '$and': case '$or': return node.args.every((/** @type {any} */ arg) => conjunctCannotRaise(arg, itSlot, shape));
+    case '$not': return conjunctCannotRaise(node.args[0], itSlot, shape);
+    case '$exists': case '$empty': return node.args.length === 1 && operand(node.args[0]);
+    case '$eq': case '$ne': return node.args.length === 2 && node.args.every(operand);
+    default: return false;
+  }
+}
+
+/**
  * The projection TREE one `$return` compiles to, or `null` when the
  * shape is not one the plan can rebuild. Object and array constructors,
  * literals, whole collection bindings and singular member paths compose;
@@ -3219,9 +3276,10 @@ function rawConjunctsOf(rawWhere, mount) {
  *   is a constructor that yields one item per row and cannot raise: the
  *   rows are then its items, and a count or a window may leave rows
  *   unevaluated unless a conjunct runs as a registered function (`udfs`),
- *   which the database stops evaluating once the window is full, or once a
- *   cheaper conjunct has refused the row, where the engine evaluates it on
- *   every row and raises where it does
+ *   which the database stops evaluating once the window is full, where the
+ *   engine evaluates it on every row and raises where it does. No conjunct
+ *   after one that can raise narrows the rows (`afterRaising`), so a count
+ *   evaluates it on every row the engine does
  */
 function planFlwor(node, shape, rawFlwor, udfHook) {
   const reasons = [];
@@ -3299,50 +3357,60 @@ function planFlwor(node, shape, rawFlwor, udfHook) {
     const found = split ? rawConjunctsOf(rawWhere, '/$where') : [{ fragment: rawWhere, mount: '/$where' }];
     // the fragments line up with the normalized conjuncts or ride no hatch
     const rawConjuncts = found.length === conjuncts.length ? found : [];
+    // the conjunct's own place in the caller's document rides the call
+    // as a literal, so the shared function can report an engine error
+    // where the caller wrote the fragment
+    const hatched = (/** @type {number} */ i) => {
+      const promoted = udfHook !== undefined && rawConjuncts[i]?.fragment !== undefined
+        ? udfHook(rawConjuncts[i].fragment, itName)
+        : null;
+      if (promoted === null) return false;
+      plan.filter = conjoin(plan.filter,
+        { p: 'udf', name: promoted.name, key: promoted.key, mount: rawConjuncts[i].mount });
+      udfs.push(promoted.name);
+      return true;
+    };
+    // The engine evaluates the conjuncts in order and stops at the first
+    // false one. From the first conjunct that can raise — one the engine
+    // decides, or one that runs as a registered function, unless it is
+    // proven total — a later conjunct must not narrow the rows, since an
+    // index seek on it never visits a row the earlier one raises on: it
+    // runs as a registered function, which the statement evaluates after
+    // the earlier one, or stays in the residual. A translated conjunct
+    // cannot raise (one refused for a lone surrogate was translated), so
+    // the ones before keep narrowing
+    let raising = false;
     for (let i = 0; i < conjuncts.length; i++) {
-      const outcome = planPredicate(conjuncts[i], itSlot, shape);
+      const construct = conjuncts[i].kind === 'op' ? conjuncts[i].name : '$where';
+      let outcome = raising ? { refusal: refusal(construct, PREDICATE_REASONS.afterRaising) }
+        : planPredicate(conjuncts[i], itSlot, shape);
+      const translated = !('refusal' in outcome);
+      if (translated && bindsLoneSurrogate(outcome.pred))
+        outcome = { refusal: refusal(construct, PREDICATE_REASONS.loneSurrogate) };
       if ('refusal' in outcome) {
-        const promoted = udfHook !== undefined && rawConjuncts[i]?.fragment !== undefined
-          ? udfHook(rawConjuncts[i].fragment, itName)
-          : null;
-        if (promoted !== null) {
-          // the conjunct's own place in the caller's document rides the
-          // call as a literal, so the shared function can report an
-          // engine error where the caller wrote the fragment
-          plan.filter = conjoin(plan.filter,
-            { p: 'udf', name: promoted.name, key: promoted.key, mount: rawConjuncts[i].mount });
-          udfs.push(promoted.name);
-        }
-        else {
+        if (!translated && !conjunctCannotRaise(conjuncts[i], itSlot, shape)) raising = true;
+        if (!hatched(i)) {
           reasons.push(outcome.refusal);
           whereFullyPushed = false;
         }
+        continue;
       }
-      else {
-        plan.filter = conjoin(plan.filter, outcome.pred);
-        prefilters.push(...outcome.prefilters);
-        // an IMPLIED conjunct narrows and leaves the original predicate
-        // to be decided — by the residual, or, when the hatch takes the
-        // same fragment, by the engine's own operator IN the statement.
-        // The composition is the ordinary index-friendly one: the cheap
-        // conjunct prunes, the exact one decides, and every row the
-        // exact one would RAISE on is still handed to it. Only the
-        // interval promotion asks for it today; the spatial ones have
-        // not been proven under the hatch and keep their residual
-        const composed = outcome.refinements.length > 0 && outcome.composable === true
-          && udfHook !== undefined && rawConjuncts[i]?.fragment !== undefined
-          ? udfHook(rawConjuncts[i].fragment, itName)
-          : null;
-        if (composed !== null) {
-          plan.filter = conjoin(plan.filter,
-            { p: 'udf', name: composed.name, key: composed.key, mount: rawConjuncts[i].mount });
-          udfs.push(composed.name);
-          continue;
-        }
-        for (const refinement of outcome.refinements) {
-          reasons.push(refinement);
-          whereFullyPushed = false;
-        }
+      plan.filter = conjoin(plan.filter, outcome.pred);
+      prefilters.push(...outcome.prefilters);
+      if (outcome.refinements.length === 0) continue;
+      // an IMPLIED conjunct narrows and leaves the original predicate
+      // to be decided — by the residual, or, when the hatch takes the
+      // same fragment, by the engine's own operator IN the statement.
+      // The composition is the ordinary index-friendly one: the cheap
+      // conjunct prunes, the exact one decides, and every row the
+      // exact one would RAISE on is still handed to it. Only the
+      // interval promotion asks for it today; the spatial ones have
+      // not been proven under the hatch and keep their residual
+      raising = true;
+      if (outcome.composable === true && hatched(i)) continue;
+      for (const refinement of outcome.refinements) {
+        reasons.push(refinement);
+        whereFullyPushed = false;
       }
     }
   }
@@ -3882,7 +3950,16 @@ function planCollectionPhrase(document, analysis, shape, options) {
       ? PLAN_REASONS.windowedAccumulation : PLAN_REASONS.windowedGroup));
   }
 
-  if (!groupedResidual && fullyPushed && flwor.projectionNative
+  // A window stops the statement once it is full, so a row past it never
+  // meets a conjunct that runs as a registered function, which the engine
+  // evaluates on every row: a window of a projection, or of a constructor
+  // whose rows are its items, stays in the engine beside one, and names
+  // that cause first
+  const windowBesideFunction = !groupedResidual && fullyPushed && windows.length > 0
+    && flwor.udfs.length > 0 && (flwor.projectionNative || flwor.totalReturn);
+  if (windowBesideFunction) flwor.reasons.unshift(refusal('$subsequence', PLAN_REASONS.registeredFunction));
+
+  if (!groupedResidual && fullyPushed && flwor.projectionNative && !windowBesideFunction
     && (windows.length === 0 || plan.window !== null)) {
     if (flwor.projectedPath !== null) {
       plan.project = { path: flwor.projectedPath };
@@ -3898,12 +3975,7 @@ function planCollectionPhrase(document, analysis, shape, options) {
   }
 
   // the row residual: everything but the projection pushed. A window rides
-  // along only where the rows are the items; one that only a registered
-  // function holds back names that cause first
-  if (!groupedResidual && fullyPushed && !flwor.projectionNative && windows.length > 0
-    && flwor.totalReturn && !rowsAreItems) {
-    flwor.reasons.unshift(refusal('$subsequence', PLAN_REASONS.registeredFunction));
-  }
+  // along only where the rows are the items
   if (!groupedResidual && fullyPushed && !flwor.projectionNative
     && (windows.length === 0 || rowsAreItems)) {
     const rawFlwor = rawInner;
@@ -4823,7 +4895,9 @@ function planEntityQueryCore(document, entities, mapping, operators) {
     }
     const slot = [...slots][0];
     const binding = byName.get(slot);
-    const outcome = planEntityPredicate(conjunct, slot, binding.shape);
+    const planned = planEntityPredicate(conjunct, slot, binding.shape);
+    const outcome = 'refusal' in planned || !bindsLoneSurrogate(planned.pred) ? planned
+      : { refusal: refusal(conjunct.kind === 'op' ? conjunct.name : '$where', PREDICATE_REASONS.loneSurrogate) };
     if ('refusal' in outcome) {
       reasons.push(outcome.refusal);
       whereFullyPushed = false;

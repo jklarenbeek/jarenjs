@@ -602,6 +602,8 @@ describe('the planner\'s reason vocabulary', () => {
     'predicate.stringSubject': [collection, F({ $where: { $contains: ['$it.n', 'a'] } })],
     'predicate.stringPattern': [collection, F({ $where: { $contains: ['$it.s', '$pat'] } })],
     'predicate.emptyPattern': [collection, F({ $where: { $contains: ['$it.s', ''] } })],
+    'predicate.loneSurrogate': [collection, F({ $where: { $contains: ['$it.s', '\ud800'] } })],
+    'predicate.afterRaising': [collection, F({ $where: { $and: [{ $call: ['flag', '$it.s'] }, { $eq: ['$it.n', 1] }] } })],
     'predicate.noSpelling': [collection, F({ $where: { $match: ['$it.s', 'a'] } })],
     'flwor.binding': [collection, { $for: { a: '$[*]', b: '$[*]' }, $return: '$a' }],
     'flwor.as': [collection, F({ $as: { it: 'object' } })],
@@ -722,6 +724,7 @@ describe('the planner\'s reason vocabulary', () => {
       + 'entity engine (group-order-aggregates.test.js, over a store-owned PostgreSQL table)',
     'bind.entityGroupWhole': "an entity grouping's cursor barrier, classified by the entity engine",
     'bind.path': 'a member name the dialect cannot spell (the hostile suite)',
+    'bind.serverText': 'a string literal PostgreSQL cannot hold, decided by the emitter (the server-text suite)',
     'bind.identity': 'a table that takes every spelling of the row identity, decided by the entity emitter '
       + '(row-identity.test.js)',
     'interval.overlap': 'the promotion itself needs a declared interval (the interval suite)',
@@ -1068,12 +1071,10 @@ describe('a disjunction regrouped by member', () => {
       { p: 'cmp', op: 'eq', ref: AGE, operand: { lit: -Infinity } },
       { p: 'cmp', op: 'eq', ref: AGE, operand: { lit: 3 } },
     ] });
-    // a lone surrogate is no JSON text: it cannot ride the one bound list
-    assert.deepStrictEqual(filterOf({ $or: [name('\ud800'), name('b'), age('$gt', 8)] }), { p: 'or', items: [
-      { p: 'cmp', op: 'eq', ref: NAME, operand: { lit: '\ud800' } },
-      { p: 'cmp', op: 'eq', ref: NAME, operand: { lit: 'b' } },
-      { p: 'cmp', op: 'gt', ref: AGE, operand: { lit: 8 } },
-    ] });
+    // a lone surrogate binds as U+FFFD wherever it stands, so the disjunction that compares one stays in the engine
+    const planned = planQuery(where({ $or: [name('\ud800'), name('b'), age('$gt', 8)] }), SHAPE);
+    assert.strictEqual(planned.plan.filter, null);
+    assert.deepStrictEqual(planned.reasons.map((reason) => reasonId(reason.reason)), ['predicate.loneSurrogate']);
   });
 
   it('a NaN literal is no bound: it equals nothing and orders against nothing, and differs from every present member', () => {
