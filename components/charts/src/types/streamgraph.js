@@ -19,7 +19,7 @@
 import { svgRoot, coord } from '@jarenjs/view/helpers';
 import { clamp01 } from '@jarenjs/core/math';
 import { scaleLinear } from '../core/scale.js';
-import { axisTicksLinear, formatTickValue } from '../core/axis.js';
+import { axisTicksLinear, formatTickValues } from '../core/axis.js';
 import { cartesianFrame, annotateChart } from '../core/cartesian.js';
 import { measurableSpan, measurableUnit } from '../core/domain.js';
 import { CATEGORICAL, seriesColor } from '../core/palette.js';
@@ -104,9 +104,10 @@ export function buildStreamgraphAST(data, config = {}) {
   const tickValues = xExtent !== null
     ? axisTicksLinear(xExtent[0], xExtent[1], 5)
     : axisTicksLinear(0, Math.max(0, count - 1), Math.min(5, Math.max(1, count - 1)));
-  const ticks = tickValues.map((v) => ({
+  const tickLabels = formatTickValues(tickValues);
+  const ticks = tickValues.map((v, i) => ({
     pos: xs !== null ? clamp01(uOf(v)) : count <= 1 ? 0.5 : clamp01(v / (count - 1)),
-    label: formatTickValue(v),
+    label: tickLabels[i],
   }));
 
   return {

@@ -39,7 +39,7 @@ import { svgRoot, line as svgLine, coord } from '@jarenjs/view/helpers';
 import { clamp01 } from '@jarenjs/core/math';
 import { scaleLinear, scaleTime } from '../core/scale.js';
 import {
-  axisTicksLinear, axisTicksTime, niceTimeStep, formatTickValue, formatTimeTick,
+  axisTicksLinear, axisTicksTime, niceTimeStep, formatTickValues, formatTimeTick,
   compileTimeTickFormat,
 } from '../core/axis.js';
 import { cartesianFrame, annotateChart } from '../core/cartesian.js';
@@ -182,6 +182,7 @@ export function buildCandlestickAST(data, config = {}) {
   const policy = normalizeDomainPolicy(config.domain);
   const ext = scanCandleExtremes(data?.candles, policy);
   const domains = resolveCandleDomains(ext, policy);
+  const yLabels = formatTickValues(domains.yTickValues);
   const xScale = scaleTime(domains.x[0], domains.x[1]);
   const yScale = scaleLinear(domains.y[0], domains.y[1]);
   const timeLabel = compileTimeTickFormat({
@@ -201,7 +202,7 @@ export function buildCandlestickAST(data, config = {}) {
       label: config.xLabel ?? null,
     },
     y: {
-      ticks: domains.yTickValues.map((v) => ({ pos: clamp01(yScale(v)), label: formatTickValue(v) })),
+      ticks: domains.yTickValues.map((v, i) => ({ pos: clamp01(yScale(v)), label: yLabels[i] })),
       label: config.yLabel ?? null,
     },
     domain: { x: domains.x, y: domains.y },

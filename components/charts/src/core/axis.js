@@ -76,6 +76,36 @@ export function formatTickValue(v) {
   return label + UNIT_SUFFIX[unit];
 }
 
+/** Whether two neighbouring labels print the same text. */
+function repeatsNeighbour(labels) {
+  for (let i = 1; i < labels.length; i++) if (labels[i] === labels[i - 1]) return true;
+  return false;
+}
+
+/**
+ * The labels of one axis's ticks, in tick order. Each tick prints as
+ * {@link formatTickValue} does, unless two neighbouring ticks would print
+ * the same text: three significant digits cannot tell 81,600 from 81,620.
+ * Such an axis prints every tick in the unit of its largest magnitude
+ * with the fewest decimals that tell neighbours apart (`81.60k`,
+ * `81.62k`, …), so its labels share one precision. An axis whose labels
+ * already differ is labelled exactly as `formatTickValue` labels it.
+ * @param {readonly number[]} values - Tick values, in axis order
+ * @returns {string[]}
+ */
+export function formatTickValues(values) {
+  const labels = values.map(formatTickValue);
+  if (!repeatsNeighbour(labels)) return labels;
+  const top = Math.max(...values.map(Math.abs));
+  const unit = top >= 1e9 ? 3 : top >= 1e6 ? 2 : top >= 1e3 ? 1 : 0;
+  for (let digits = 1; digits <= 20; digits++) {
+    const fixed = values.map((v) => (v / UNIT_SIZE[unit]).toFixed(digits) + UNIT_SUFFIX[unit]);
+    if (!repeatsNeighbour(fixed)) return fixed;
+  }
+  // ticks closer than twenty decimals of their unit: no precision helps
+  return labels;
+}
+
 /**
  * The label patterns a time axis compiles, keyed by the granularity of
  * the step the ticks were laid on. Every default is numeric, so an axis

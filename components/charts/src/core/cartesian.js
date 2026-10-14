@@ -68,8 +68,10 @@ export function chartTitle(x, y, text, fontSize, tokens) {
  */
 
 /**
- * The legend swatch row, laid out right-to-left from `right` so the last
- * entry ends at the plot's right edge. Returns the vnodes rather than
+ * The legend swatch row, laid out right-to-left from `right`: the last
+ * entry's label ends 10px past `right`, and each swatch sits 18px before
+ * its own label and 4px after the previous entry's (the estimated label
+ * widths decide both). Returns the vnodes rather than
  * drawing, so a chart with no cartesian frame at all (the map) can place
  * the same row itself.
  * @param {LegendEntry[]} legend
@@ -129,6 +131,8 @@ export function rampLegend(domain, ramp) {
  * @param {{name: string, swatch?: number, tone?: 'win'|'loss'|null}[]|null} [params.legend]
  * @param {AxisAST} [params.xAxis] ticks along the bottom edge
  * @param {AxisAST} [params.yAxis] ticks along the left edge
+ * @param {AxisAST} [params.y2Axis] ticks along the right edge: a second
+ *  value axis with its own label and no gridlines (the left axis owns them)
  * @param {'x'|'y'|'xy'|'none'} [params.grid] which tick sets draw grid lines
  * @param {number} [params.width]
  * @param {number} [params.plotHeight]
@@ -143,10 +147,18 @@ export function cartesianFrame(params) {
   const yAxis = params.yAxis ?? { ticks: [] };
   const grid = params.grid ?? 'y';
   const legend = params.legend ?? null;
-  const yTickW = Math.max(0, ...yAxis.ticks.map((tk) => textWidth(tk.label, FS_TICK)));
-  const left = Math.ceil(Math.max(30, Math.min(230, yTickW) + 14)) + (yAxis.label ? 18 : 0);
-  const top = (params.title ? 34 : 14) + (legend !== null && legend.length !== 0 ? 22 : 0);
-  const right = 16;
+  const y2Axis = params.y2Axis ?? null;
+  // a value axis's margin: its widest tick label, and room for its label
+  const valueMargin = (axis) => Math.ceil(Math.max(30,
+    Math.min(230, Math.max(0, ...axis.ticks.map((tk) => textWidth(tk.label, FS_TICK)))) + 14))
+    + (axis.label ? 18 : 0);
+  const left = valueMargin(yAxis);
+  // the legend row ends where the right axis's top tick label starts, so
+  // with a right axis it sits clear above that label
+  const legendRise = y2Axis === null ? 10 : 16;
+  const top = (params.title ? 34 : 14)
+    + (legend !== null && legend.length !== 0 ? 12 + legendRise : 0);
+  const right = y2Axis === null ? 16 : valueMargin(y2Axis);
   const bottom = 32 + (xAxis.label ? 18 : 0);
   const plotH = params.plotHeight ?? 220;
   const height = top + plotH + bottom;
@@ -158,7 +170,7 @@ export function cartesianFrame(params) {
   }
 
   if (legend !== null && legend.length !== 0) {
-    children.push(...legendRow(legend, plot.x + plot.w, plot.y - 10, params.theme, params.palette));
+    children.push(...legendRow(legend, plot.x + plot.w, plot.y - legendRise, params.theme, params.palette));
   }
 
   for (const tick of yAxis.ticks) {
@@ -167,6 +179,13 @@ export function cartesianFrame(params) {
       children.push(svgLine(plot.x, y, plot.x + plot.w, y, { stroke: t.grid, 'stroke-width': 1, class: 'chart-grid' }));
     children.push(textAt(plot.x - 6, y + 4, fitLabel(tick.label, 230, FS_TICK), FS_TICK,
       { 'text-anchor': 'end', fill: t.muted, class: 'chart-tick' }));
+  }
+  if (y2Axis !== null) {
+    for (const tick of y2Axis.ticks) {
+      children.push(textAt(plot.x + plot.w + 6, plot.y + (1 - tick.pos) * plot.h + 4,
+        fitLabel(tick.label, 230, FS_TICK), FS_TICK,
+        { 'text-anchor': 'start', fill: t.muted, class: 'chart-tick' }));
+    }
   }
   for (const tick of xAxis.ticks) {
     const x = plot.x + tick.pos * plot.w;
@@ -179,6 +198,10 @@ export function cartesianFrame(params) {
 
   children.push(svgLine(plot.x, plot.y, plot.x, plot.y + plot.h, { stroke: t.axis, 'stroke-width': 1, class: 'chart-axis' }));
   children.push(svgLine(plot.x, plot.y + plot.h, plot.x + plot.w, plot.y + plot.h, { stroke: t.axis, 'stroke-width': 1, class: 'chart-axis' }));
+  if (y2Axis !== null) {
+    children.push(svgLine(plot.x + plot.w, plot.y, plot.x + plot.w, plot.y + plot.h,
+      { stroke: t.axis, 'stroke-width': 1, class: 'chart-axis' }));
+  }
 
   if (xAxis.label) {
     children.push(textAt(plot.x + plot.w / 2, height - 8, xAxis.label, FS_LABEL,
@@ -190,6 +213,14 @@ export function cartesianFrame(params) {
       transform: `rotate(-90) translate(${num(-(plot.y + plot.h / 2))} 12)`,
       class: 'chart-axis-label',
     }, String(yAxis.label)]);
+  }
+  if (y2Axis !== null && y2Axis.label) {
+    // read top to bottom, mirroring the left label across the plot
+    children.push(['text', {
+      x: 0, y: 0, 'font-size': FS_LABEL, fill: t.muted, 'text-anchor': 'middle',
+      transform: `rotate(90) translate(${num(plot.y + plot.h / 2)} ${num(-(width - 12))})`,
+      class: 'chart-axis-label',
+    }, String(y2Axis.label)]);
   }
 
   return { width, height, plot, children };

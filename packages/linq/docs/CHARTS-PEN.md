@@ -33,7 +33,7 @@ Nested series and axis fragments use the shapes shared by the public grammar.
 | `.log(value)`, `.catLabel(text)`, `.valLabel(text)` | members on kinds that declare them | same kind | native |
 | `.series(values)` | the kind's series shape | same kind | native |
 | `.x(value)`, `.markers(value)`, `.sampling(value)` | line members | line | native |
-| `.xLabel(text)`, `.yLabel(text)`, `.domain(spec)`, `.dateNames(names)`, `.timeFormats(formats)` | axis members on their declared kinds | same kind | native |
+| `.xLabel(text)`, `.yLabel(text)`, `.y2(axis)`, `.domain(spec)`, `.dateNames(names)`, `.timeFormats(formats)` | axis members on their declared kinds (`y2` on a line) | same kind | native |
 | `.xLog(value)`, `.yLog(value)`, `.refY(value)`, `.refLabel(text)` | scatter members | scatter | native |
 | `.points(values)`, `.candles(values)` | the kind's point/candle data | same kind | native |
 | `.axes(values)`, `.max(value)`, `.min(value)` | radar/gauge members | same kind | native |

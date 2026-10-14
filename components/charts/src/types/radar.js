@@ -18,7 +18,7 @@ import {
   svgRoot, rect, line as svgLine, textAt, textWidth, num, coord, polarPoint, anchorForAngle,
 } from '@jarenjs/view/helpers';
 import { clamp01 } from '@jarenjs/core/math';
-import { axisTicksLinear, niceStep, formatTickValue } from '../core/axis.js';
+import { axisTicksLinear, niceStep, formatTickValues } from '../core/axis.js';
 import { FS_TICK, FS_LABEL, annotateChart, chartTitle } from '../core/cartesian.js';
 import { measurableSpan } from '../core/domain.js';
 import { CATEGORICAL, seriesColor } from '../core/palette.js';
@@ -68,9 +68,9 @@ export function buildRadarAST(data, config = {}) {
   }
 
   const angleOf = (i) => -Math.PI / 2 + (i / Math.max(1, n)) * Math.PI * 2;
-  const rings = axisTicksLinear(0, top, 4)
-    .filter((v) => v > 0)
-    .map((v) => ({ r: clamp01(v / top), label: formatTickValue(v) }));
+  const ringValues = axisTicksLinear(0, top, 4).filter((v) => v > 0);
+  const ringLabels = formatTickValues(ringValues);
+  const rings = ringValues.map((v, i) => ({ r: clamp01(v / top), label: ringLabels[i] }));
 
   const series = input.map((s) => ({
     name: String(s.name ?? ''),

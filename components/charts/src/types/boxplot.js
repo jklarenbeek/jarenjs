@@ -18,7 +18,7 @@
 import { svgRoot, line as svgLine, coord } from '@jarenjs/view/helpers';
 import { clamp01 } from '@jarenjs/core/math';
 import { scaleLinear, scaleBand } from '../core/scale.js';
-import { axisTicksLinear, formatTickValue } from '../core/axis.js';
+import { axisTicksLinear, formatTickValue, formatTickValues } from '../core/axis.js';
 import { cartesianFrame, annotateChart } from '../core/cartesian.js';
 import { measurableSpan } from '../core/domain.js';
 import { CATEGORICAL, seriesColor } from '../core/palette.js';
@@ -126,6 +126,7 @@ export function buildBoxplotAST(data, config = {}) {
   if (!Number.isFinite(lo)) { lo = 0; hi = 1; }
   [lo, hi] = measurableSpan(lo, hi);
   const ticks = axisTicksLinear(lo, hi, 5);
+  const tickLabels = formatTickValues(ticks);
   const sLo = Math.min(lo, ticks[0] ?? lo);
   const sHi = Math.max(hi, ticks[ticks.length - 1] ?? hi);
   const scale = scaleLinear(sLo, sHi === sLo ? sLo + 1 : sHi);
@@ -157,7 +158,7 @@ export function buildBoxplotAST(data, config = {}) {
       label: config.catLabel ?? null,
     },
     val: {
-      ticks: ticks.map((v) => ({ pos: clamp01(scale(v)), label: formatTickValue(v) })),
+      ticks: ticks.map((v, i) => ({ pos: clamp01(scale(v)), label: tickLabels[i] })),
       label: config.valLabel ?? null,
     },
     boxes,

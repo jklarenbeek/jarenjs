@@ -12,7 +12,7 @@
 import { svgRoot, line as svgLine, textAt, coord } from '@jarenjs/view/helpers';
 import { clamp01 } from '@jarenjs/core/math';
 import { scaleLinear, scaleLog } from '../core/scale.js';
-import { axisTicksLinear, axisTicksLog, formatTickValue } from '../core/axis.js';
+import { axisTicksLinear, axisTicksLog, formatTickValues } from '../core/axis.js';
 import { cartesianFrame, toneColor, annotateChart, FS_TICK } from '../core/cartesian.js';
 import { measurableSpan, measurableDecades } from '../core/domain.js';
 import { CATEGORICAL } from '../core/palette.js';
@@ -62,12 +62,14 @@ export function buildScatterAST(data, config = {}) {
   }
 
   const ref = refY !== null ? { v: clamp01(yScale(refY)), label: config.refLabel ?? null } : null;
+  const xLabels = formatTickValues(xTicks);
+  const yLabels = formatTickValues(yTicks);
 
   return {
     type: 'scatter',
     title: config.title ?? null,
-    x: { ticks: xTicks.map((v) => ({ pos: clamp01(xScale(v)), label: formatTickValue(v) })), label: config.xLabel ?? null },
-    y: { ticks: yTicks.map((v) => ({ pos: clamp01(yScale(v)), label: formatTickValue(v) })), label: config.yLabel ?? null },
+    x: { ticks: xTicks.map((v, i) => ({ pos: clamp01(xScale(v)), label: xLabels[i] })), label: config.xLabel ?? null },
+    y: { ticks: yTicks.map((v, i) => ({ pos: clamp01(yScale(v)), label: yLabels[i] })), label: config.yLabel ?? null },
     points,
     ref,
   };

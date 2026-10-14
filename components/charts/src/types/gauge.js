@@ -17,7 +17,7 @@ import {
   svgRoot, path as svgPath, line as svgLine, textAt, coord, polarPoint, anchorForAngle,
 } from '@jarenjs/view/helpers';
 import { clamp01 } from '@jarenjs/core/math';
-import { axisTicksLinear, formatTickValue } from '../core/axis.js';
+import { axisTicksLinear, formatTickValue, formatTickValues } from '../core/axis.js';
 import { FS_TICK, toneColor, annotateChart, chartTitle } from '../core/cartesian.js';
 import { measurableSpan } from '../core/domain.js';
 import { CATEGORICAL } from '../core/palette.js';
@@ -49,9 +49,11 @@ export function buildGaugeAST(data, config = {}) {
   if (max <= min) max = min + 1;
   [min, max] = measurableSpan(min, max);
   const frac = clamp01((value - min) / (max - min));
-  const ticks = axisTicksLinear(min, max, 4).map((v) => ({
+  const tickValues = axisTicksLinear(min, max, 4);
+  const tickLabels = formatTickValues(tickValues);
+  const ticks = tickValues.map((v, i) => ({
     frac: clamp01((v - min) / (max - min)),
-    label: formatTickValue(v),
+    label: tickLabels[i],
   }));
   return {
     type: 'gauge',

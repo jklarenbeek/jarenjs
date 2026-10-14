@@ -39,7 +39,7 @@ import {
 } from '../types/bar.js';
 import {
   buildLineASTResolved, buildLineRender, scanLineExtremes, resolveLineDomains,
-  lineScales, lineVertex, lineSeriesRender, lineSeriesChildren,
+  lineScales, lineVertex, lineSeriesRender, lineSeriesChildren, rightAxisSeries,
 } from '../types/line.js';
 import {
   buildHeatmapAST, buildHeatmapRender, heatCellRender, heatDrawable,
@@ -273,6 +273,10 @@ function createHeatmapSession(config, source, options) {
  * rendering byte-equal to `compileChart` of the same data. Retention
  * (`maxPoints`) is what keeps a streaming line under the threshold;
  * `sampling: false` is what keeps a long one incremental.
+ *
+ * A series on the right axis (`config.y2`) extends and is scaled by the
+ * right axis's extremes; the frame is still only while BOTH value
+ * domains are, so a tick that moves only the right domain rebuilds.
  * @param {any} config @param {ChartSessionSource} source @param {any} options
  * @returns {ChartSession}
  */
@@ -281,6 +285,7 @@ function createLineSession(config, source, options) {
   const log = config.log === true;
   const markers = config.markers === true;
   const policy = normalizeDomainPolicy(config.domain);
+  const right = rightAxisSeries(config);
   const sampling = normalizeSampling(config.sampling);
   const palette = options.palette ?? CATEGORICAL;
   const tooltip = normalizeTooltip(options.tooltip);
@@ -290,7 +295,7 @@ function createLineSession(config, source, options) {
   /** @type {any} */ let vnode = null;
   /** @type {any} */ let ast = null;
   /** @type {{svg:any, plot:any, chromeLen:number, series:any[]}|null} */ let render = null;
-  /** @type {{x0:number,x1:number,y0:number,y1:number}|null} */ let ext = null;
+  /** @type {import('../types/line.js').LineExtremes|null} */ let ext = null;
   /** @type {number|null} the current window low bound */ let xDrop = null;
   /** Filtering source series changes the indices in the compiled AST. */
   let filteredSeries = false;
@@ -299,7 +304,7 @@ function createLineSession(config, source, options) {
     const data = dataMaybe ?? source.getData();
     const input = (data?.series ?? []).filter((s) => Array.isArray(s.points));
     filteredSeries = input.length !== (data?.series ?? []).length;
-    ext = scanLineExtremes(input, policy, log);
+    ext = scanLineExtremes(input, policy, log, right);
     const domains = resolveLineDomains(ext, policy, time, log);
     ast = buildLineASTResolved(input, config, domains);
     render = buildLineRender(ast, theme, hash, options);
@@ -308,8 +313,8 @@ function createLineSession(config, source, options) {
     return { vnode, mode: /** @type {const} */ ('rebuilt') };
   }
 
-  /** Extend the extremes with one appended sample (the scan's rules). */
-  function extend(e, pt) {
+  /** Extend the extremes with one sample appended to series `si` (the scan's rules). */
+  function extend(e, pt, si) {
     const px = numOf(pt?.x);
     const py = numOf(pt?.y);
     if (!Number.isFinite(px) || !Number.isFinite(py)) return;
@@ -318,6 +323,11 @@ function createLineSession(config, source, options) {
     if (log && py <= 0) return;
     // under a window, only in-window samples may pin the y extremes
     if (xDrop !== null && px < xDrop) return;
+    if (ast.series[si].axis === 'right') {
+      if (py < e.r0) e.r0 = py;
+      if (py > e.r1) e.r1 = py;
+      return;
+    }
     if (py < e.y0) e.y0 = py;
     if (py > e.y1) e.y1 = py;
   }
@@ -368,24 +378,25 @@ function createLineSession(config, source, options) {
     if (hasEvict) {
       truth = source.getData();
       const input = (truth?.series ?? []).filter((s) => Array.isArray(s.points));
-      nextExt = scanLineExtremes(input, policy, log);
+      nextExt = scanLineExtremes(input, policy, log, right);
     }
     else {
       nextExt = { ...ext };
       for (const step of steps) {
-        if (!step.evict) extend(nextExt, step.pt);
+        if (!step.evict) extend(nextExt, step.pt, step.si);
       }
     }
     const domains = resolveLineDomains(nextExt, policy, time, log);
     const d = ast.domain;
     if (domains.x[0] !== d.x[0] || domains.x[1] !== d.x[1]
-      || domains.y[0] !== d.y[0] || domains.y[1] !== d.y[1]) {
+      || domains.y[0] !== d.y[0] || domains.y[1] !== d.y[1]
+      || domains.y2?.[0] !== d.y2?.[0] || domains.y2?.[1] !== d.y2?.[1]) {
       return rebuild(truth);
     }
 
     // Still frame: apply the point traffic to the AST and the series
     // render parts; untouched series keep their vnode references.
-    const { xScale, yScale } = lineScales(domains, time, log);
+    const { xScale, yScale, y2Scale } = lineScales(domains, time, log);
     const { plot } = render;
     const touched = new Set();
     const evicted = new Set();
@@ -396,7 +407,8 @@ function createLineSession(config, source, options) {
         evicted.add(step.si);
         continue;
       }
-      const vertex = lineVertex(step.pt, domains.xDrop, xScale, yScale);
+      const vertex = lineVertex(step.pt, domains.xDrop, xScale,
+        ast.series[step.si].axis === 'right' ? y2Scale : yScale);
       ast.series[step.si].points.push(vertex);
       if (evicted.has(step.si)) continue; // that series re-emits wholesale below
       const parts = render.series[step.si];

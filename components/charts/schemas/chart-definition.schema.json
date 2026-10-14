@@ -61,6 +61,7 @@
           "markers": { "type": "boolean" },
           "xLabel": { "type": ["string", "null"] },
           "yLabel": { "type": ["string", "null"] },
+          "y2": { "$ref": "#/$defs/rightAxis" },
           "domain": { "$ref": "#/$defs/domainPolicy" },
           "sampling": { "$ref": "#/$defs/samplingPolicy" },
           "dateNames": { "$ref": "#/$defs/dateNames" },
@@ -493,6 +494,18 @@
         "day": { "type": "string" },
         "month": { "type": "string" },
         "year": { "type": "string" }
+      }
+    },
+    "rightAxis": {
+      "description": "a second value axis on the right edge: the named series read it, its domain is scanned over them alone, and it carries its own ticks and label but no gridlines. A name no series carries draws nothing until such a series arrives.",
+      "type": "object",
+      "required": ["series"],
+      "properties": {
+        "series": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "label": { "type": ["string", "null"] }
       }
     },
     "domainPolicy": {

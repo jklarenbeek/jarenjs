@@ -42,6 +42,8 @@ export class ChartBuilder extends DocumentBuilder {
   xLabel(value) { return this.options({ xLabel: value }); }
   /** `yLabel`. @param {any} value */
   yLabel(value) { return this.options({ yLabel: value }); }
+  /** `y2`. @param {any} value */
+  y2(value) { return this.options({ y2: value }); }
   /** `domain`. @param {any} value */
   domain(value) { return this.options({ domain: value }); }
   /** `sampling`. @param {any} value */

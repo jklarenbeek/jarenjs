@@ -26,6 +26,7 @@ export const CHART_FIELDS = Object.freeze({
     "markers",
     "xLabel",
     "yLabel",
+    "y2",
     "domain",
     "sampling",
     "dateNames",

@@ -66,7 +66,7 @@ separate `data` argument). The type-specific fields, briefly:
 |---|---|
 | `pie` | `slices: [{label, value}]`; `donut: true` or a hole fraction in (0, 1) |
 | `bar` | `categories`, `series: [{name, values}]`; `stacked`, `log`, `orient` |
-| `line` | `series: [{name, points: [{x, y}]}]`; `x: 'time'`, `log`, `markers` |
+| `line` | `series: [{name, points: [{x, y}]}]`; `x: 'time'`, `log`, `markers`, `y2: {series, label}` (a right value axis) |
 | `scatter` | `points: [{x, y, tone?}]`; `xLog`/`yLog`, `refY`/`refLabel` |
 | `candlestick` | `candles: [{t, open, high, low, close}]` |
 | `radar` | `axes: string[]`, `series: [{name, values}]`; `max` pins the domain, `labelEvery` the spoke-label stride |
@@ -118,6 +118,54 @@ tiles and ribbons at `NaN`. A log axis tops out at 1e308: rounding data
 near the largest double up a decade used to lay decades toward
 `Infinity` until the tick array overflowed, and `axisTicksLog` now
 refuses an infinite bound with a `RangeError` at once.
+
+## Two value axes (line)
+
+Two series at price levels far apart share one value axis badly: on a
+scale from 2,510 to 81,655 a series moving by tens draws as a flat line
+along one edge. `y2` names the series that read a second value axis on
+the right edge:
+
+```js
+import { compileChart } from '@jarenjs/charts';
+
+const t0 = Date.UTC(2026, 9, 14, 12);
+const data = { series: [
+  { name: 'BTCUSDT', points: [81612.5, 81655.0, 81598.4].map((y, i) => ({ x: t0 + i * 2000, y })) },
+  { name: 'ETHUSDT', points: [2512.4, 2518.6, 2510.2].map((y, i) => ({ x: t0 + i * 2000, y })) },
+] };
+const chart = compileChart({
+  type: 'line', x: 'time',
+  yLabel: 'BTCUSDT (USDT)',
+  y2: { series: ['ETHUSDT'], label: 'ETHUSDT (USDT)' },
+}, data);
+
+chart.ast.domain.y;       // [81598.4, 81655]  scanned over BTCUSDT alone
+chart.ast.domain.y2;      // [2510.2, 2518.6]  scanned over ETHUSDT alone
+chart.ast.series[1].axis; // 'right'
+chart.ast.series.map((s) => s.points.map((p) => p.v.toFixed(2)));
+// [['0.25', '1.00', '0.00'], ['0.26', '1.00', '0.00']]  both lines span the plot
+// without y2 the same data reads [['1.00', '1.00', '1.00'], ['0.00', '0.00', '0.00']]
+```
+
+The right axis has its own domain, nice ticks and label (drawn on the
+right edge, reading top to bottom) and draws no gridlines: the left axis
+owns them. The legend marks each right-axis series `(right axis)`, and so
+does the series' hover text; a tooltip binding's payload carries
+`axis: 'right'`. The x axis, `log` and a `domain: { y: 'step' }` policy
+apply to both value axes; a pinned `domain.y` (`{ min, max }`) is in the
+left axis's units and pins only the left one. A name in `y2.series` that
+no series carries is not an error — a live feed delivers its series one
+at a time — and a chart none of whose series `y2` names renders exactly
+as it does without `y2`. A `y2` that is not `{ series: string[], label?:
+string | null }` is refused with a `CodedError` `CH0002` naming the
+member's JSON Pointer (`/y2`, `/y2/series/1`, `/y2/label`), by
+`compileChart`, `buildLineAST` and `createChartSession` alike; the schema
+refuses the same shapes. *Upgrade: a line definition whose `y2` member
+had another shape used to compile with the member ignored; it is now
+refused `CH0002`.* The incremental session keeps a right-axis series
+incremental while both value domains hold still, and rebuilds when a
+tick moves either one.
 
 ## Hover text and tooltips
 
@@ -470,6 +518,13 @@ position in `categories`, where two categories sharing a label (`['a', 'a', 'b']
 were drawn in one band, one over the other, with the first band empty;
 `scaleBand` gained `start(index)` for that. `formatTickValue` carries into the next
 unit when rounding reaches 1000 of this one (999,999 reads `1M`, not `1000k`).
+A value axis whose neighbouring ticks would print the same three significant
+digits prints every tick in the unit of its largest one with the fewest decimals
+that tell them apart: ticks 81,600 to 81,680 by 20 used to read `81.6k` three times
+and `81.7k` twice and now read `81.60k`, `81.62k`, … `81.68k`; 2,510 to 2,520 by 2
+reads `2.510k` … `2.520k`. Every axis (line, bar, scatter, candlestick, boxplot,
+streamgraph, gauge, radar) labels this way; an axis whose labels already differed
+prints exactly as before.
 Axes built on `axisTicksLinear` keep the tick at either end of a raw domain when
 the quotient rounds just short of a whole number (`[0, 0.3]` gains its `0.3`,
 `[0.1, 0.7]` its `0.7`); the bar, line, scatter and gauge builders nice the

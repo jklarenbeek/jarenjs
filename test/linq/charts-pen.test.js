@@ -14,7 +14,7 @@ const validate = new JarenValidator().compile(schema);
 const CORPUS = [
   { type: 'pie', donut: true, slices: [{ label: 'A', value: 2 }] },
   { type: 'bar', stacked: true, log: false, orient: 'h', catLabel: 'Group', valLabel: 'Value', categories: ['a'], series: [{ name: 'S', values: [2], tone: 'win', tones: ['win'] }] },
-  { type: 'line', x: 'time', log: false, markers: true, xLabel: 'Time', yLabel: 'Value', domain: { y: 'step' }, sampling: false, dateNames: {}, timeFormats: { day: 'yyyy-MM-dd' }, series: [{ name: 'S', points: [{ x: 0, y: 1 }, { x: 86400000, y: 2 }] }] },
+  { type: 'line', x: 'time', log: false, markers: true, xLabel: 'Time', yLabel: 'Value', y2: { series: ['S'], label: 'Right' }, domain: { y: 'step' }, sampling: false, dateNames: {}, timeFormats: { day: 'yyyy-MM-dd' }, series: [{ name: 'S', points: [{ x: 0, y: 1 }, { x: 86400000, y: 2 }] }] },
   { type: 'scatter', xLog: false, yLog: false, refY: 2, refLabel: 'Target', xLabel: 'X', yLabel: 'Y', points: [{ x: 1, y: 2, tone: 'loss' }] },
   { type: 'candlestick', xLabel: 'Time', yLabel: 'Price', domain: { y: { min: 0, max: 10 } }, dateNames: {}, timeFormats: { day: 'yyyy-MM-dd' }, candles: [{ t: 0, open: 2, high: 4, low: 1, close: 3 }] },
   { type: 'radar', max: 10, axes: ['a', 'b', 'c'], series: [{ name: 'S', values: [1, 2, 3] }] },

@@ -18,7 +18,7 @@
 import { svgRoot, coord } from '@jarenjs/view/helpers';
 import { clamp01 } from '@jarenjs/core/math';
 import { scaleLinear, scaleLog, scaleBand } from '../core/scale.js';
-import { axisTicksLinear, axisTicksLog, niceStep, formatTickValue } from '../core/axis.js';
+import { axisTicksLinear, axisTicksLog, niceStep, formatTickValues } from '../core/axis.js';
 import { cartesianFrame, toneColor, annotateChart } from '../core/cartesian.js';
 import { measurableSpan, measurableDecades } from '../core/domain.js';
 import { CATEGORICAL } from '../core/palette.js';
@@ -165,6 +165,7 @@ export function buildBarAST(data, config = {}) {
   const domains = resolveBarDomains(scanBarExtremes(data, stacked, log), log);
   const scale = barScale(domains.domain, log);
   const valTicks = domains.tickValues;
+  const valLabels = formatTickValues(valTicks);
 
   const band = scaleBand(categories, 0.25);
   const groups = stacked ? 1 : Math.max(1, series.length);
@@ -219,7 +220,7 @@ export function buildBarAST(data, config = {}) {
       label: config.catLabel ?? null,
     },
     val: {
-      ticks: valTicks.map((v) => ({ pos: clamp01(scale(v)), label: formatTickValue(v) })),
+      ticks: valTicks.map((v, i) => ({ pos: clamp01(scale(v)), label: valLabels[i] })),
       label: config.valLabel ?? null,
     },
     legend: series.length > 1 ? series.map((s, i) => ({ name: s.name, swatch: i })) : null,

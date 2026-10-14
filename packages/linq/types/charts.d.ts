@@ -230,6 +230,16 @@ export interface TimeFormats {
 }
 
 
+/**
+ * a second value axis on the right edge: the named series read it, its domain is scanned over them alone, and it carries its own ticks and label but no gridlines. A name no series carries draws nothing until such a series arrives.
+ */
+export interface RightAxis {
+  series: Array<string>;
+  label?: string | null;
+  [key: string]: unknown;
+}
+
+
 export interface DomainPolicyX {
   /**
    * Schema constraints this type cannot express: exclusiveMinimum=0
@@ -289,6 +299,7 @@ export interface LineChart {
   markers?: boolean;
   xLabel?: string | null;
   yLabel?: string | null;
+  y2?: RightAxis;
   domain?: DomainPolicy;
   sampling?: SamplingPolicy;
   dateNames?: DateNames;

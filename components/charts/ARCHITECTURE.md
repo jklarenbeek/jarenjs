@@ -40,7 +40,11 @@ returns cached projections (`ast`, `toVnode()`, `toSvgString()`), the
 Thirteen types follow the contract: the original five (`pie` — donut
 variant included — `bar`, `line`, `scatter`, `candlestick`) plus
 `radar`, `gauge`, `boxplot`, `heatmap`, `treemap`, `streamgraph`,
-`sankey` and `map`. Cartesian types share `cartesianFrame`;
+`sankey` and `map`. Cartesian types share `cartesianFrame`, which
+draws a second value axis on the right edge when a type hands it one
+(the line's `y2`: its own ticks and label, no gridlines, and a legend
+row raised clear of its top tick label; a frame without one is laid
+out as before);
 `radar`/`gauge` are polar around their own centers;
 `treemap`/`sankey`/`map` lay out in the unit square with `y` growing
 downward (no axes — reading order wins).
@@ -82,7 +86,9 @@ scaled — enough to draw the mark, not enough to name it.
 
 Two marks deliberately differ. A **line series** takes one `<title>` on
 its `<g>` rather than one per vertex: a live line carries tens of
-thousands of vertices, and no reader can aim at one. A **gauge** takes
+thousands of vertices, and no reader can aim at one. The title names
+the series, marked `(right axis)` when it reads the right value axis,
+so a reader knows which scale its values are on. A **gauge** takes
 none at all — it already prints its value in 30px type, and with no
 chart title the root's `aria-label` is that same value.
 
@@ -107,7 +113,10 @@ map outside `[0,1]` (linear/log/time) or to `NaN` (ordinal/band);
 `NaN` out of emitted strings. `scaleLog` rejects a non-positive
 *domain* once, at construction. Axis tick generators return domain
 values: nice-number steps (`1/2/5 × 10^k`) for linear axes, decade
-powers for log axes, band centers for ordinal axes.
+powers for log axes, band centers for ordinal axes. An axis's labels
+are made together (`formatTickValues`), not tick by tick: three
+significant digits are the default, and an axis whose neighbours would
+print the same text takes the precision its step needs.
 
 ## Colors and theming
 
@@ -147,7 +156,8 @@ properties make it sound rather than merely fast:
    (`scanLineExtremes`/`resolveLineDomains`, `scanBarExtremes`/
    `resolveBarDomains`, `scanHeatmapExtent`, `scanCandleExtremes`/
    `resolveCandleDomains`) and compares against the AST's recorded
-   `domain`. One implementation
+   `domain` — both value domains for a line with a right axis, whose
+   series extend and are scaled by their own axis. One implementation
    of the bounds decision, so the two paths cannot drift.
 2. **Anything unclassifiable rebuilds.** Only in-place mark traffic
    (line appends/evictions, bar value updates, heatmap cell counts,

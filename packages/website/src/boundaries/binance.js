@@ -47,6 +47,18 @@ const STREAMS = [
   `${KLINE_SYMBOL.toLowerCase()}@kline_1m`,
 ];
 
+/** The live price chart definition. The two symbols trade at price
+ * levels far apart, so each reads its own value axis: on one shared
+ * scale the higher one draws as a flat line along the top and the lower
+ * one as a flat line along the bottom. */
+const PRICE_CONFIG = {
+  type: 'line',
+  title: 'Live price (miniTicker)',
+  x: 'time',
+  yLabel: `${SYMBOLS[0]} (USDT)`,
+  y2: { series: [SYMBOLS[1]], label: `${SYMBOLS[1]} (USDT)` },
+};
+
 /** The kline chart definition. The step-quantized y domain keeps the
  * scales still while the open candle's prices wiggle inside it, so the
  * incremental session patches one candle group per update instead of
@@ -162,13 +174,9 @@ export function binanceNodes(feed, status, note) {
   ];
   const priceData = feed.priceData();
   if (priceData.series.length > 0) {
-    nodes.push(chart(null, compileChart({
-      type: 'line',
-      title: 'Live price (miniTicker)',
-      x: 'time',
-      yLabel: 'USDT',
-    }, priceData, { theme: 'host' }).toVnode(),
-    'Each point is one WebSocket message, parsed by createJsonxStreamReader in strict-JSON mode.'));
+    nodes.push(chart(null, compileChart(PRICE_CONFIG, priceData, { theme: 'host' }).toVnode(),
+      'Each point is one WebSocket message, parsed by createJsonxStreamReader in strict-JSON mode. '
+      + `${SYMBOLS[0]} reads the left axis and ${SYMBOLS[1]} the right, each scaled to its own range so both moves show.`));
   }
   const klineData = feed.klineData();
   if (klineData.candles.length > 0) {

@@ -132,6 +132,28 @@ describe('binance feed (offline, vendored payloads)', function () {
     assert.ok(charts.every((n) => n.vnode[0] === 'svg'));
   });
 
+  it('the price chart reads BTCUSDT on the left axis and ETHUSDT on the right', function () {
+    const feed = createBinanceFeed();
+    const prices = { BTCUSDT: [81612.5, 81655.0, 81598.4], ETHUSDT: [2512.4, 2518.6, 2510.2] };
+    for (let i = 0; i < 3; i++) {
+      feed.handleMessage(MINITICKER('BTCUSDT', 1000 + i, prices.BTCUSDT[i]));
+      feed.handleMessage(MINITICKER('ETHUSDT', 1000 + i, prices.ETHUSDT[i]));
+    }
+    const price = binanceNodes(feed, 'live').filter((n) => n.kind === 'chart')[0];
+    const svg = renderToString(price.vnode);
+    assert.match(svg, /class="chart-axis-label">BTCUSDT \(USDT\)</);
+    assert.match(svg, /rotate\(90\)[^"]*" class="chart-axis-label">ETHUSDT \(USDT\)</);
+    assert.match(svg, /<title>ETHUSDT \(right axis\)<\/title>/);
+    assert.match(price.note, /BTCUSDT reads the left axis and ETHUSDT the right/);
+    // each line climbs the whole plot: its lowest and highest vertex sit on the plot's bottom and top
+    const lines = svg.match(/<path d="([^"]+)"[^>]*class="chart-line"/g) ?? [];
+    assert.equal(lines.length, 2);
+    for (const d of lines) {
+      const ys = [...d.matchAll(/[ML][\d.]+ ([\d.]+)/g)].map((m) => Number(m[1]));
+      assert.equal(Math.max(...ys) - Math.min(...ys), 220, d);
+    }
+  });
+
   it('the invitation never connects by itself', function () {
     const nodes = binanceInvitation();
     assert.match(JSON.stringify(nodes), /sends your IP address to Binance/);
