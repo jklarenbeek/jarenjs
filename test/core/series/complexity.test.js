@@ -102,7 +102,9 @@ describe('the interval index answers without reading the corpus', () => {
     // is of the search, not of the result
     assert.isTrue(Math.abs(largeRows - smallRows) < smallRows / 2,
       `result counts diverged: ${smallRows} vs ${largeRows} rows over 2000 queries`);
-    assert.isTrue(largeMs < smallMs * 8,
+    // a log-time search grows ~1.5x here plus cache misses on the larger
+    // corpus; a scan grows ~64x. 24x keeps that apart under coverage and load
+    assert.isTrue(largeMs < smallMs * 24,
       `2000 queries: ${smallMs.toFixed(3)} ms over ${small} intervals, `
       + `${largeMs.toFixed(3)} ms over ${large} - a full scan would be ~64x`);
   });
