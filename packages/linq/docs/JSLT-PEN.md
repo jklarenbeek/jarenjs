@@ -944,7 +944,7 @@ non-judgement is itself gated.
 
 ## 7. Cost
 
-`@jarenjs/linq/jslt` builds to **<!--fact:bundle.jslt-->24,466<!--/fact--> bytes** as a minified,
+`@jarenjs/linq/jslt` builds to **<!--fact:bundle.jslt-->24,445<!--/fact--> bytes** as a minified,
 tree-shaken ESM bundle — the figure `scripts/check-tree-shaking.js`
 measures and `npm run test:tree-shaking` reports, published rounded
 (<!--fact:bundle.jslt.kb-->24<!--/fact--> kB) beside the other subpath prices in
@@ -973,8 +973,8 @@ source. That makes it one of the smallest pen bundles, and the reason is
 that a stylesheet is mostly bodies, and a body is the shared machine
 every capturing pen already pays for.
 
-Two figures worth reading beside it: `./migration` (<!--fact:bundle.migration-->30,598<!--/fact--> bytes)
+Two figures worth reading beside it: `./migration` (<!--fact:bundle.migration-->30,578<!--/fact--> bytes)
 carries this pen's `body()` and pays for it, which is why the two prices
-sit so close; and `./flow` (<!--fact:bundle.flow-->24,566<!--/fact--> bytes) is within 60 bytes of this one
+sit so close; and `./flow` (<!--fact:bundle.flow-->24,544<!--/fact--> bytes) is within 60 bytes of this one
 despite writing two formats, because it shares the same capture and adds
 almost nothing but member checks and their messages.

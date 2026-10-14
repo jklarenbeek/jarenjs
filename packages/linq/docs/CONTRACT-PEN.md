@@ -1193,7 +1193,7 @@ to write, and reaching them means one import of `@jarenjs/contract` over
 
 ## 7. Cost
 
-`@jarenjs/linq/contract` builds to **<!--fact:bundle.contract-->55,463<!--/fact--> bytes** as a minified,
+`@jarenjs/linq/contract` builds to **<!--fact:bundle.contract-->55,444<!--/fact--> bytes** as a minified,
 tree-shaken ESM bundle — the figure `scripts/check-tree-shaking.js`
 measures and `npm run test:tree-shaking` reports, published rounded
 (<!--fact:bundle.contract.kb-->55<!--/fact--> kB) beside the other subpath prices in
@@ -1205,7 +1205,7 @@ them:
 
 - **the schema pen is included, and that is the ceiling.** A contract's
   inputs and outputs are schemas, so the two are measured together and
-  the bundle carries <!--fact:bundle.schema-->41,891<!--/fact--> of its <!--fact:bundle.contract-->55,463<!--/fact--> bytes as the schema pen's own.
+  the bundle carries <!--fact:bundle.schema-->41,872<!--/fact--> of its <!--fact:bundle.contract-->55,444<!--/fact--> bytes as the schema pen's own.
   The contract pen's own share is the remaining ~13 kB, most of it the
   refusal messages §4 lists;
 - **no chain module** — none of `sequence.js`, `document.js`, `async.js`,
