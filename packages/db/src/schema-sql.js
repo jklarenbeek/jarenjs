@@ -1,5 +1,6 @@
 //@ts-check
 /** Conservative SQLite declaration identity. Quoted bytes are never formatting. */
+import { QUOTE, SIMPLE, SPACE, WORD_PART, WORD_START, scannerFor } from './dialects/check-read.js';
 
 /** @typedef {{ kind: string, text: string }} SqlToken */
 /** @typedef {{ columnOrder?: 'preserve' | 'ignore' }} DeclaredSqlOptions */
@@ -9,76 +10,31 @@ function invalid(reason) {
   throw new TypeError(`SQL declaration cannot be compared: ${reason}`);
 }
 
-/** SQLite whitespace excludes Unicode identifier characters and vertical tab. */
-const whitespace = (/** @type {number} */ code) => code === 32 || code === 9
-  || code === 10 || code === 12 || code === 13;
-const wordStart = (/** @type {number} */ code) => code >= 128 || code === 95
-  || code >= 65 && code <= 90 || code >= 97 && code <= 122;
-const wordPart = (/** @type {number} */ code) => wordStart(code) || code === 36
-  || code >= 48 && code <= 57;
+/** SQLite's own lexical grammar, strictly: whitespace excludes Unicode
+ * characters and vertical tab, every non-ASCII character is a word character,
+ * and text it cannot read is refused rather than guessed at.
+ * @type {import('./dialects/check-read.js').SqlGrammar} */
+const DECLARATION_GRAMMAR = Object.freeze({
+  classOf: (code) => code === 32 || code === 9 || code === 10 || code === 12 || code === 13 ? SPACE
+    : code >= 128 || code === 95 || code >= 65 && code <= 90 || code >= 97 && code <= 122 ? WORD_START | WORD_PART
+      : code === 39 || code === 34 || code === 96 || code === 91 ? QUOTE
+        : code === 36 || code >= 48 && code <= 57 ? WORD_PART : '(),.;+*/%~&'.includes(String.fromCharCode(code)) ? SIMPLE : 0,
+  blob: true,
+  number: /(?:0[xX][0-9a-fA-F](?:_?[0-9a-fA-F])*|(?:[0-9](?:_?[0-9])*(?:\.(?:[0-9](?:_?[0-9])*)?)?|\.[0-9](?:_?[0-9])*)(?:[eE][+-]?[0-9](?:_?[0-9])*)?)/y,
+  closedNumbers: true,
+  symbol: /->>|->|\|\||<<|>>|<=|>=|==|!=|<>|[(),.;+*/%~&|=<>-]/y,
+  nulAnywhere: false,
+  declaration: true,
+  refuse: invalid,
+});
+
+const scanDeclaration = scannerFor(DECLARATION_GRAMMAR);
 
 /** Lex before discarding comments or whitespace; retain each quoted token raw.
  * @param {string} sql @returns {SqlToken[]} */
 function tokensOf(sql) {
   if (typeof sql !== 'string') invalid('text is required');
-  /** @type {SqlToken[]} */
-  const tokens = [];
-  let depth = 0;
-  for (let i = 0; i < sql.length;) {
-    const start = i, c = sql[i];
-    if (whitespace(sql.charCodeAt(i))) { i++; continue; }
-    if (sql.startsWith('--', i)) {
-      const end = sql.indexOf('\n', i + 2);
-      i = end < 0 ? sql.length : end + 1;
-      continue;
-    }
-    if (sql.startsWith('/*', i)) {
-      const end = sql.indexOf('*/', i + 2);
-      if (end < 0) invalid('unterminated comment');
-      i = end + 2;
-      continue;
-    }
-    const blob = (c === 'x' || c === 'X') && sql[i + 1] === "'";
-    if (blob) i++;
-    const quote = sql[i];
-    if (blob || quote === "'" || quote === '"' || quote === '`' || quote === '[') {
-      const close = quote === '[' ? ']' : quote;
-      let closed = false;
-      for (i++; i < sql.length; i++) {
-        if (sql.charCodeAt(i) === 0) invalid('NUL in quoted text');
-        if (sql[i] !== close) continue;
-        if (quote !== '[' && sql[i + 1] === close) { i++; continue; }
-        i++; closed = true; break;
-      }
-      if (!closed) invalid('unterminated quoted token');
-      const text = sql.slice(start, i);
-      if (blob && !/^[xX]'(?:[0-9a-fA-F]{2})*'$/.test(text)) invalid('invalid blob literal');
-      tokens.push({ kind: blob ? 'blob' : quote === "'" ? 'string' : 'identifier', text });
-      continue;
-    }
-    if (wordStart(sql.charCodeAt(i))) {
-      while (++i < sql.length && wordPart(sql.charCodeAt(i))) { /* whole identifier */ }
-      tokens.push({ kind: 'word', text: sql.slice(start, i) });
-      continue;
-    }
-    const number = /^(?:0[xX][0-9a-fA-F](?:_?[0-9a-fA-F])*|(?:[0-9](?:_?[0-9])*(?:\.(?:[0-9](?:_?[0-9])*)?)?|\.[0-9](?:_?[0-9])*)(?:[eE][+-]?[0-9](?:_?[0-9])*)?)/.exec(sql.slice(i));
-    if (number !== null) {
-      tokens.push({ kind: 'number', text: number[0] });
-      i += number[0].length;
-      if (wordPart(sql.charCodeAt(i)) || sql[i] === '.') invalid('invalid numeric token');
-      continue;
-    }
-    const operator = /^(?:->>|->|\|\||<<|>>|<=|>=|==|!=|<>|[(),.;+*/%~&|=<>-])/.exec(sql.slice(i));
-    if (operator === null) invalid(`unsupported token at ${i}`);
-    const text = operator[0];
-    if (text === '(') depth++;
-    else if (text === ')' && --depth < 0) invalid('unbalanced parentheses');
-    tokens.push({ kind: 'symbol', text });
-    i += text.length;
-  }
-  if (depth !== 0) invalid('unbalanced parentheses');
-  if (tokens.length === 0) invalid('empty declaration');
-  return tokens;
+  return scanDeclaration(sql);
 }
 
 /** @param {SqlToken | undefined} token @param {string} word */

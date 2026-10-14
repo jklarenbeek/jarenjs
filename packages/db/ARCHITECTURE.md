@@ -1315,7 +1315,12 @@ Application-owned inventories include retained programs while unrelated
 tables stay outside the selected scope. `schema-sql.js` is the single
 literal-aware comparison owner: physical order is strict, and safe managed
 named-column comparison opts into a narrow relaxation. Exact source
-snapshots and checksums never use relaxed comparison.
+snapshots and checksums never use relaxed comparison. Its token stream is the
+one scanner the catalog reader walks (`scannerFor` in `dialects/check-read.js`,
+one scanner built per grammar) under SQLite's own strict grammar: bracketed identifiers, blob literals, hex
+and underscored numbers and multi-character operators are tokens, and text the
+grammar cannot read is refused, where the catalog reader's grammar answers no
+tokens.
 
 `foreign-key-scope.js` brackets FK/legacy settings around the driver's
 IMMEDIATE transaction. Nested work shares savepoints. Owned handles close

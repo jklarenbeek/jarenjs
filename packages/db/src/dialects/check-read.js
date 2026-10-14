@@ -4,54 +4,181 @@
  * one literal reader, and each engine injects its spelling; unfamiliar SQL
  * remains a loss, never a guess. */
 
-/** Tokenize catalog SQL without treating quoted text or comments as syntax.
+/** What a character is to a grammar: a bit set of these. `QUOTE` opens a quoted token; `SIMPLE` is a
+ * symbol of its own, one that no longer symbol starts with. */
+export const SPACE = 1, WORD_START = 2, WORD_PART = 4, QUOTE = 8, SIMPLE = 16;
+
+/**
+ * One lexical grammar for SQL text: what is whitespace and what makes a word,
+ * which quotes open a quoted token, how a number and a symbol are spelled, and
+ * what a token looks like. `scannerFor` is the one scanner both grammars run
+ * through, so a comment, a quoted token and a doubled close quote are read in
+ * one place.
+ * @typedef {object} SqlGrammar
+ * @property {(code: number) => number} classOf - the `SPACE`, `WORD_START`, `WORD_PART`, `QUOTE` and `SIMPLE` bits of a character
+ * @property {boolean} blob - whether `x'..'` is one blob token
+ * @property {RegExp} number - sticky; a number (starting with a digit or a point)
+ * @property {boolean} closedNumbers - whether a word character or a point may not follow a number
+ * @property {RegExp} symbol - sticky; a symbol (one that never matches refuses the text)
+ * @property {boolean} nulAnywhere - whether a NUL anywhere refuses the text, not only inside quotes
+ * @property {boolean} declaration - a declaration's grammar: parentheses must balance, the text must not be
+ *   empty, and a token is `{ kind, text }` with the text as written; otherwise a token is `{ kind, value, at }`
+ *   with the decoded text of a quoted or native token and the offset it starts at
+ * @property {(reason: string) => never} refuse - how a text this grammar cannot read ends the scan
+ */
+
+/** The end of a sticky pattern's match at `at`, or -1 when it does not match there.
+ * @param {RegExp} pattern @param {string} sql @param {number} at */
+const matchEnd = (pattern, sql, at) => { pattern.lastIndex = at; return pattern.test(sql) ? pattern.lastIndex : -1; };
+
+const BLOB_LITERAL = /^[xX]'(?:[0-9a-fA-F]{2})*'$/;
+
+/**
+ * The scanner for one grammar: SQL into tokens without treating quoted text or
+ * comments as syntax. The grammar decides what a token looks like and how a
+ * text it cannot read ends the scan (`refuse` never returns). A native token
+ * reader runs before block comments and quotes, and returns `undefined` for
+ * text it does not own, `null` for text it owns and cannot read, or the token
+ * it read. The ASCII characters are classified once per grammar, so the loop
+ * calls nothing grammar-specific per character and runs both grammars as fast
+ * as it runs either.
+ * @param {SqlGrammar} grammar
+ * @returns {(sql: string, nativeToken?: (sql: string, at: number) => any) => any[]} the tokens the grammar made
+ */
+export const scannerFor = (grammar) => {
+  const { refuse, classOf, blob: blobs, number: numbers, closedNumbers, symbol: symbols, nulAnywhere, declaration } = grammar;
+  const ascii = Uint8Array.from({ length: 128 }, (_, code) => classOf(code));
+  return function scanSql(sql, nativeToken) {
+    const tokens = [], length = sql.length;
+    if (nulAnywhere && sql.includes('\0')) refuse('NUL in text');
+    let depth = 0, other = 0;
+    for (let i = 0; i < length;) {
+      const start = i, code = sql.charCodeAt(i), kind = code < 128 ? ascii[code] : classOf(code);
+      if (kind & SPACE) {
+        while (++i < length && ((other = sql.charCodeAt(i)) < 128 ? ascii[other] : classOf(other)) & SPACE) { /* the whole run */ }
+        continue;
+      }
+      if (code === 45 && sql.charCodeAt(i + 1) === 45) {
+        const end = sql.indexOf('\n', i + 2); i = end < 0 ? length : end + 1; continue;
+      }
+      if (nativeToken !== undefined) {
+        const native = nativeToken(sql, i);
+        if (native === null) refuse('unreadable native token');
+        if (native) {
+          if (native.kind !== 'comment') {
+            tokens.push(declaration ? { kind: native.kind, text: sql.slice(i, native.end) }
+              : { kind: native.kind, value: native.value, at: i });
+          }
+          i = native.end; continue;
+        }
+      }
+      if (code === 47 && sql.charCodeAt(i + 1) === 42) {
+        const end = sql.indexOf('*/', i + 2);
+        if (end < 0) refuse('unterminated comment');
+        i = end + 2; continue;
+      }
+      const blob = blobs && (code === 120 || code === 88) && sql.charCodeAt(i + 1) === 39;
+      if (blob || kind & QUOTE) {
+        const open = blob ? i + 1 : i, quoted = quotedSqlToken(sql, open);
+        // A NUL anywhere already refused the text when the grammar says so; otherwise
+        // one inside this token (all of the rest of the text, if it never closes) does.
+        if (!nulAnywhere && (quoted ? quoted.value.includes('\0') : sql.includes('\0', open))) refuse('NUL in quoted text');
+        if (!quoted) refuse('unterminated quoted token');
+        if (blob && !BLOB_LITERAL.test(sql.slice(start, quoted.end))) refuse('invalid blob literal');
+        const quotedKind = blob ? 'blob' : quoted.kind;
+        tokens.push(declaration ? { kind: quotedKind, text: sql.slice(start, quoted.end) }
+          : { kind: quotedKind, value: quoted.value, at: start });
+        i = quoted.end; continue;
+      }
+      // A number starts with a digit or a point.
+      if ((code >= 48 && code <= 57 || code === 46) && (i = matchEnd(numbers, sql, i)) >= 0) {
+        tokens.push(declaration ? { kind: 'number', text: sql.slice(start, i) }
+          : { kind: 'number', value: sql.slice(start, i), at: start });
+        if (closedNumbers && i < length && ((other = sql.charCodeAt(i)) === 46
+          || ((other < 128 ? ascii[other] : classOf(other)) & WORD_PART))) refuse('invalid numeric token');
+        continue;
+      }
+      i = start;
+      if (kind & WORD_START) {
+        while (++i < length && ((other = sql.charCodeAt(i)) < 128 ? ascii[other] : classOf(other)) & WORD_PART) { /* the whole word */ }
+        tokens.push(declaration ? { kind: 'word', text: sql.slice(start, i) }
+          : { kind: 'word', value: sql.slice(start, i), at: start });
+        continue;
+      }
+      i = kind & SIMPLE ? start + 1 : matchEnd(symbols, sql, start);
+      if (i < 0) refuse(`unsupported token at ${start}`);
+      if (declaration) {
+        if (sql.charCodeAt(start) === 40) depth++;
+        else if (sql.charCodeAt(start) === 41 && --depth < 0) refuse('unbalanced parentheses');
+      }
+      tokens.push(declaration ? { kind: 'symbol', text: sql.slice(start, i) }
+        : { kind: 'symbol', value: sql.slice(start, i), at: start });
+    }
+    if (declaration) {
+      if (depth !== 0) refuse('unbalanced parentheses');
+      if (tokens.length === 0) refuse('empty declaration');
+    }
+    return tokens;
+  };
+};
+
+/** What `sqlTokens` throws to give up on a text, so no half-read stream escapes. */
+const UNREADABLE = Symbol('unreadable catalog SQL');
+
+/** JavaScript's `\s`: what a catalog text may put between tokens.
+ * @param {number} code */
+const isCatalogSpace = (code) => code === 32 || code >= 9 && code <= 13 || code === 160 || code === 0x1680
+  || code >= 0x2000 && code <= 0x200a || code === 0x2028 || code === 0x2029 || code === 0x202f
+  || code === 0x205f || code === 0x3000 || code === 0xfeff;
+
+/** @type {SqlGrammar} Catalog text as PostgreSQL and SQLite write it back: Unicode whitespace, ASCII words, `::`, one character per symbol. */
+const CATALOG_GRAMMAR = Object.freeze({
+  classOf: (code) => isCatalogSpace(code) ? SPACE
+    : code === 95 || code >= 65 && code <= 90 || code >= 97 && code <= 122 ? WORD_START | WORD_PART
+      : code === 39 || code === 34 || code === 96 ? QUOTE
+        : code === 36 || code >= 48 && code <= 57 ? WORD_PART | SIMPLE : code === 58 ? 0 : SIMPLE,
+  blob: false,
+  number: /(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?/y,
+  closedNumbers: false,
+  symbol: /::|[^]/y,
+  nulAnywhere: true,
+  declaration: false,
+  refuse: () => { throw UNREADABLE; },
+});
+
+const scanCatalog = scannerFor(CATALOG_GRAMMAR);
+
+/** Tokenize catalog SQL without treating quoted text or comments as syntax;
+ * `[]` for text it cannot read.
  * @param {string} sql @param {(sql:string,at:number)=>any} [nativeToken]
  * @returns {{ kind: string, value: string, at: number }[]} each token with the offset it starts at */
 export function sqlTokens(sql, nativeToken) {
-  const tokens = [];
-  if (sql.includes('\0')) return [];
-  for (let i = 0; i < sql.length;) {
-    const c = sql[i];
-    if (/\s/.test(c)) { i++; continue; }
-    if (sql.startsWith('--', i)) {
-      const end = sql.indexOf('\n', i + 2); i = end < 0 ? sql.length : end + 1; continue;
-    }
-    const native = nativeToken?.(sql, i);
-    if (native === null) return [];
-    if (native) {
-      if (native.kind !== 'comment') tokens.push({ kind: native.kind, value: native.value, at: i });
-      i = native.end; continue;
-    }
-    if (sql.startsWith('/*', i)) {
-      const end = sql.indexOf('*/', i + 2);
-      if (end < 0) return [];
-      i = end + 2; continue;
-    }
-    if (c === "'" || c === '"' || c === '`') {
-      const quoted = quotedSqlToken(sql, i);
-      if (!quoted) return [];
-      tokens.push({ kind: quoted.kind, value: quoted.value, at: i }); i = quoted.end; continue;
-    }
-    const number = /^(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?/.exec(sql.slice(i));
-    if (number) { tokens.push({ kind: 'number', value: number[0], at: i }); i += number[0].length; continue; }
-    const word = /^[A-Za-z_][A-Za-z_0-9$]*/.exec(sql.slice(i));
-    if (word) { tokens.push({ kind: 'word', value: word[0], at: i }); i += word[0].length; continue; }
-    const value = sql.startsWith('::', i) ? '::' : c;
-    tokens.push({ kind: 'symbol', value, at: i }); i += value.length;
+  try { return scanCatalog(sql, nativeToken); }
+  catch (error) {
+    if (error === UNREADABLE) return [];
+    throw error;
   }
-  return tokens;
 }
 
-/** One quote owner for catalog identifiers, SQL strings and native escape strings.
+/** One quote owner for catalog identifiers, SQL strings and native escape strings;
+ * a bracketed identifier closes at the first `]`, with no doubling.
  * @param {string} sql @param {number} at @param {boolean} [escaped] @returns {any} */
 export function quotedSqlToken(sql, at, escaped = false) {
-  const quote = sql[at];
+  const quote = sql[at], close = quote === '[' ? ']' : quote, kind = quote === "'" ? 'string' : 'identifier';
   let value = '';
-  for (let i = at + 1; i < sql.length; i++) {
-    if (escaped && sql[i] === '\\') { value += sql.slice(i, i + 2); i++; continue; }
-    if (sql[i] !== quote) { value += sql[i]; continue; }
-    if (sql[i + 1] === quote) { value += quote; i++; continue; }
-    return { kind: quote === "'" ? 'string' : 'identifier', value, end: i + 1 };
+  for (let i = at + 1; i < sql.length;) {
+    if (escaped) {
+      if (sql[i] === '\\') { value += sql.slice(i, i + 2); i += 2; continue; }
+      if (sql[i] !== close) { value += sql[i++]; continue; }
+    }
+    else {
+      const end = sql.indexOf(close, i);
+      if (end < 0) return null;
+      value += sql.slice(i, end);
+      i = end;
+    }
+    if (quote !== '[' && sql[i + 1] === close) { value += close; i += 2; continue; }
+    return { kind, value, end: i + 1 };
   }
   return null;
 }

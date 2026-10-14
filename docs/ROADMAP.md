@@ -761,9 +761,6 @@ what each does is its own documentation's job
   a flipped comparison (`5 < n` and `n > 5`), redundant parentheses and the
   server's casts and literal spellings, and it is a stated stricter refusal at
   open (a minor).
-- [ ] **Two catalog tokenizers.** `schema-sql.js` and `dialects/check-read.js`
-  each tokenize catalog SQL (`tokensOf`, `sqlTokens`); one could serve both.
-
 - [ ] **The ledger shape carries no sweep bound.** `createDbLedger().sweep(now?, { limit })` bounds
   one call (an ordered, index-read take of at most `limit` expired records; an answer equal to
   `limit` says more may remain). `@jarenjs/contract`'s `Ledger.sweep(now?) -> count`, its
