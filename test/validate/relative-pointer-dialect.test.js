@@ -1,6 +1,7 @@
 //@ts-check
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { JarenValidator, ValidationOptions, ValidatorOptions } from '@jarenjs/validate';
 import { jsonFormats } from '@jarenjs/formats';
 
@@ -172,5 +173,32 @@ describe('relativePointerDialect: the option', () => {
         { name: 'TypeError', message: /relativePointerDialect must be 'handrews-01' or 'bhutton-00'/ },
         JSON.stringify(bad));
     }
+  });
+});
+
+describe('relativePointerDialect: the $data reference meta-schema', () => {
+  // The meta-schema of a `$data` reference object names two formats; the
+  // validator that checks a schema against it hands them its own dialect.
+  /** @type {{ $id: string }} */
+  const meta = JSON.parse(readFileSync(new URL('../../packages/refs/src/data.json', import.meta.url), 'utf8'));
+  const pointers = ['0+1', '1-1/name', '0-1#', '1/name', '0#', '/name', '+1/foo/bar', '0+', 'x'];
+  const options = { formatAssertion: true, formats: jsonFormats };
+
+  it('takes index manipulation under bhutton-00 and refuses it by default, directly', () => {
+    const verdicts = (/** @type {object} */ dialect) => pointers.map((p) => compile({ ...options, ...dialect }, meta)({ $data: p }));
+    assert.deepEqual(verdicts({}), [false, false, false, true, true, true, false, false, false]);
+    assert.deepEqual(verdicts(HANDREWS), verdicts({}));
+    assert.deepEqual(verdicts(BHUTTON), [true, true, true, true, true, true, false, false, false]);
+  });
+
+  it('takes the same dialect when another schema references it', () => {
+    const wrapper = { $id: 'https://example.com/pointer-holder', type: 'object', properties: { pointer: { $ref: meta.$id } } };
+    const verdicts = (/** @type {object} */ dialect) => {
+      const validator = new JarenValidator({ ...options, ...dialect }).addSchema(meta);
+      const validate = validator.compile(wrapper);
+      return pointers.map((p) => validate({ pointer: { $data: p } }));
+    };
+    assert.deepEqual(verdicts({}), [false, false, false, true, true, true, false, false, false]);
+    assert.deepEqual(verdicts(BHUTTON), [true, true, true, true, true, true, false, false, false]);
   });
 });

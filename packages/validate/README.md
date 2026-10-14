@@ -290,6 +290,12 @@ last item's `0+1`) finds no value and asserts nothing. Any value other than
 `'handrews-01'` or `'bhutton-00'` throws a `TypeError` when a schema compiles,
 so a misspelling cannot leave the default grammar in force unnoticed.
 
+A meta-schema that asserts the `relative-json-pointer` format (the `$data`
+reference meta-schema `@jarenjs/refs` keeps in `src/data.json` does) is checked
+in the grammar of the validator that compiles it, so a `$data` of `0+1` passes
+that meta-schema under `'bhutton-00'` and fails it by default; a validator that
+checks schemas for another application must be given the same option.
+
 See also:
 - [$data](https://github.com/json-schema-org/json-schema-spec/issues/51)
 - [Ajv $data spec](https://github.com/ajv-validator/ajv/tree/master/spec/extras/%24data)

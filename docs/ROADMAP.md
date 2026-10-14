@@ -37,12 +37,6 @@ delete it or fix it.
 (RFC 6902) and Merge Patch (RFC 7396). See
 [`packages/json/ARCHITECTURE.md`](../packages/json/ARCHITECTURE.md).
 
-- [ ] **The `data` meta-schema rejects a `bhutton-00` relative pointer.** The
-  validator reads `0+1`, `1-1/name` and `0-1#` in `data`/`$data` under
-  `relativePointerDialect: 'bhutton-00'`, but the data-2022 meta-schema
-  (`packages/refs/src/data.json`) still refuses such a pointer, so a schema
-  validated against it fails before it compiles. Wanted: a dialect-aware
-  meta-schema or a note that the option skips that check.
 ## @jarenjs/json — JSLT
 
 - [ ] **JSLT matcher optimizer (single-walk)** — replace per-rule path pre-passes with a single multi-pattern walk, specialize location tracking by reachable modes, and use input-schema knowledge to prune impossible shape rules. The benchmark quantifies the gap: dense pure-path transforms pay ~9–12× over the raw path scan, and hand-written native JS stays 3–139× faster on real transformations — this is the main JSLT performance workstream.
