@@ -476,11 +476,19 @@ what each does is its own documentation's job
   what they are handed, where the captured value's aggregates now refuse it.
   Wanted: the same JL0005 refusal naming `where(pred).count()` /
   `select(sel).sum()`.
-- [ ] **A chain handed to another source's `live()` runs against the wrong
-  collection.** `client.collections.orders.live(<a chain over users>)` registers
-  the users chain's document against `orders`: a chain's run bindings carry no
-  source. Wanted: the chain carries its source and `live()` refuses a chain over
-  another source.
+- [ ] **A collection handle's `execute`, `query` and `explain` take a chain and
+  answer nothing real.** `client.collections.orders.execute(orders.where(...))`
+  answers `{}` and `query(chain)` yields `[{}]` (the store's members take a
+  query document; a chain is not one, of any source). Wanted: refuse a chain
+  there with a coded error naming `toDocument()`, or accept it as `live()` does.
+- [ ] **`live()` cannot tell some chains from the collection's own.** A chain
+  over rows in memory carries no collection, so
+  `orders.live(from(rows).where(..))` registers its document over `orders` and
+  ignores `rows` (the empty `from([])` builder is the same shape); a chain over
+  a view the client does not record (a view opened on the raw store, another
+  transaction's handle, a hand-written provider) is accepted for the same
+  reason. Wanted: the store's collection and entity views carry their own name,
+  and a chain over non-empty rows is refused.
 - [ ] **Lone surrogates and NUL in native projections.** A lone surrogate written
   as a JavaScript escape comes back from a native projection, group key or
   distinct as three U+FFFD, and `$ends-with` and `$contains` over NUL or lone
@@ -627,12 +635,27 @@ what each does is its own documentation's job
   over a member typed `string` alone. Wanted: a guarded native form that raises
   on the null row (a native count of the rows holding a null beside the seek),
   or a decision that the native answer is the contract for a nullable string.
-- [ ] **A capture argument answers array methods with a raw host error.**
-  `x.tags.includes('a')` on a capture argument is a raw `TypeError` instead of
-  a coded refusal (`JSON.stringify(x)` already answers `JL0108`). Wanted: an
-  `apply` trap that answers a coded refusal naming the query-language
-  spelling, without turning every capture into a callable proxy (which would
-  change `typeof` on every captured value).
+- [ ] **A capture answers most array methods with a coded refusal, but not all,
+  and not on a to-many relation.** `u.tags.includes('a')` and 18 more (includes,
+  indexOf, lastIndexOf, some, every, filter, find, findIndex, findLast,
+  findLastIndex, map, flatMap, reduce, reduceRight, forEach, slice, join, sort,
+  reverse) answer `JL0108` naming the query spelling. Still a raw `TypeError`:
+  `flat`, `entries`, `keys`, `values`, `fill`, `copyWithin`, `push`, `pop`,
+  `shift`, `unshift`, `splice`, `toSorted`, `toReversed`, `toSpliced`, `with`
+  and the string methods (`toUpperCase`, `trim`, `split`, ...). An array method
+  on a to-many relation (`u.posts.some(...)`, `.filter`, `.map`) is `JL0005`
+  ("fan them first (.all().some)"), advice that points at a member spelling, not
+  at the predicate the reader wrote.
+- [ ] **A method name read as a value is a function, so `>`, `+` or a template
+  literal over it answers a wrong value silently.** `x.tags.length > 0` inside
+  `.and()` embeds the constant `false`, and `` `${x.name.upper}` `` embeds the
+  closure's source text (the method table returns a function for every
+  operator-method name). Wanted: a `Symbol.toPrimitive` on the returned method
+  that answers `JL0108` naming the method and its call.
+- [ ] **`.all()` on a relation-hop member does not fan.**
+  `p.author.tags.all().eq('a')` emits `$r1.tags` (no `[*]`), so the fanned
+  comparison the array-method refusal names matches nothing off a hop target's
+  array member; the same spelling works on a path member.
 - [ ] **A PostgreSQL table keeps the unguarded definitions of an open-container
   index path until its index is dropped and declared again; a comparison,
   ordering or grouping over such a path reads the guarded document and does not

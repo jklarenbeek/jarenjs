@@ -31,7 +31,7 @@ export const LINQ_CODES = /* @__PURE__ */ Object.freeze({
   JL0105: 'a relation hop cannot lower: a composite or undeclared key, an incomplete many-to-many entry, or a malformed relation record',
   JL0106: 'a migration step names a table the target model does not declare, or a draft it cannot match',
   JL0107: 'a client operation named a member that is not the relation kind it needs',
-  JL0108: 'a captured expression was converted to a JavaScript primitive or serialized with JSON.stringify',
+  JL0108: 'a captured expression was converted to a JavaScript primitive, serialized with JSON.stringify, or had an array method called on a member',
   JL0109: 'a captured callback read its argument and answered a JavaScript boolean',
   JL2001: 'first/single found no element',
   JL2002: 'single found more than one element',
@@ -73,8 +73,9 @@ export const LINQ_CODES = /* @__PURE__ */ Object.freeze({
  *    negative `skip`/`take`, an `at()` index beyond a safe integer, an
  *    argument handed to an aggregate (`count`, `sum`, `avg`, `min`,
  *    `max`, `exists`, `isEmpty`), which reads none, a value that cannot
- *    embed in a document — a sparse array among them — or an option
- *    outside one of the chain's closed option bags)
+ *    embed in a document — a sparse array among them — an option
+ *    outside one of the chain's closed option bags, or a chain handed to
+ *    the `live()` of a source it was not built over)
  *  - `JL0006` — an operator the mapping table records as
  *    `unsupported` was invoked (`zip`); the table names the reason
  *  - `JL0007` — `from()`/`fromAsync()` received a provider that serves
@@ -129,7 +130,10 @@ export const LINQ_CODES = /* @__PURE__ */ Object.freeze({
  *    later). `.eq()`, `.lt()`, `.concat()` and `.exists()` write those
  *    comparisons; `===` and truthiness test the proxy, never the value
  *    (`JL0109`). `JSON.stringify` of a capture is refused with it too
- *    (the capture has no value to serialize until the engine computes it)
+ *    (the capture has no value to serialize until the engine computes it).
+ *    The call of an array method on a member (`u.tags.includes('a')`,
+ *    `u.items.map(…)`) is the same code: the capture has no array methods,
+ *    and the message names the spelling that works (`u.tags.all().eq('a')`)
  *  - `JL0109` — a captured callback read its argument and answered a
  *    plain JavaScript boolean: `===`, `!==`, `!`, `typeof` and `== null`
  *    test the capture proxy, never the value, so the document would hold

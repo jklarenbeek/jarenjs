@@ -81,7 +81,8 @@ export type ChainStart<T> = Omit<AsyncSequence<T, {}>, 'explain'> & {
 };
 
 /** A collection handle: the collection, the chain start, and a `live`
- * that takes a chain (its document and bound params) or a document.
+ * that takes a chain over this collection (its document and bound
+ * params; a chain over another source is `JL0005`) or a document.
  * `all` is told apart by its argument: nothing (or `AllOptions`) is the
  * collection's every document, always an array; a predicate is the
  * chain's quantifier. */
@@ -227,7 +228,8 @@ export type EntityHandle<E extends MetaMap<E>, M extends EntityMeta> =
      * continuation and the page over the rows alone. */
     graph(): Graph<E, M, {}>;
     /** A live query over a chain of this set (the whole set when none
-     * is given), through the store's entity-root registration. */
+     * is given; a chain over another source is `JL0005`), through the
+     * store's entity-root registration. */
     live<T = M['doc']>(source?: AsyncSequence<T, any> | object, options?: LiveOptions): Promise<TypedLiveQuery<T>>;
   };
 

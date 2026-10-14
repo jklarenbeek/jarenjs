@@ -32,6 +32,18 @@ import { GROUP_ITEMS } from './document.js';
 /** The unwrap key: proxy → its internal record. */
 const NODE = Symbol('jaren-linq-node');
 
+/**
+ * The internal record of an expression proxy, or `undefined` for any other
+ * value. A proxy is an object — or a function, for a member named like an
+ * array method ({@link ARRAY_METHODS}) — so both are asked.
+ * @param {any} value
+ * @returns {any}
+ */
+function nodeOf(value) {
+  return value !== null && (typeof value === 'object' || typeof value === 'function')
+    ? value[NODE] : undefined;
+}
+
 /** The key a callback's parameters argument answers — the chain's
  * parameters proxy, a pen's externals proxy — with its own coded refusal:
  * the argument NAMES values (`p.tenantId`) and is not one, so embedding it
@@ -366,12 +378,12 @@ export function toExpression(value, fold = true) {
     }
     return value;
   }
+  const record = nodeOf(value);
+  if (record !== undefined) {
+    assertLive(record);
+    return record.doc;
+  }
   if (t === 'object') {
-    const record = value[NODE];
-    if (record !== undefined) {
-      assertLive(record);
-      return record.doc;
-    }
     // a parameters argument names values and is not one: its own refusal
     value[PARAMETERS]?.();
     if (fold && isPlainJson(value)) {
@@ -460,7 +472,7 @@ const associative = (op) => function (/** @type {any} */ record, /** @type {any}
  * @param {any} record @param {any} values
  */
 function membership(record, values) {
-  const list = values !== null && typeof values === 'object' ? values[NODE] : undefined;
+  const list = nodeOf(values);
   if (list !== undefined) {
     assertLive(list);
     if (list.hop !== undefined || (list.seq === undefined && !list.pathable)) {
@@ -477,7 +489,7 @@ function membership(record, values) {
       'in() takes an array of values — x.in([a, b, c]) — or a path to one: x.in(p.ids)');
   }
   const items = requireDense(values).map((value) => {
-    if (value !== null && typeof value === 'object' && value[NODE] === undefined) {
+    if (value !== null && typeof value === 'object' && nodeOf(value) === undefined) {
       throw new LinqBuildError('JL0005',
         'in() takes scalar values — a string, a number, a boolean or null, or a captured one');
     }
@@ -824,11 +836,12 @@ function hopDocument(chain, ret) {
  * @param {{ chain: any[], ret: string, many: boolean, fan: boolean }} hop
  * @param {number} epoch
  * @param {any} nav - the target entity's navigation, while `ret` is its root
+ * @param {string} [arrayMethod] - the array-method name a member READ spelled
  */
-function makeHop(hop, epoch, nav) {
+function makeHop(hop, epoch, nav, arrayMethod = undefined) {
   const phrase = hopDocument(hop.chain, hop.ret);
   return makeExpr(hop.many && !hop.fan ? [phrase] : phrase, epoch, false,
-    { seq: phrase, nav, hop });
+    { seq: phrase, nav, hop, arrayMethod });
 }
 
 /**
@@ -900,15 +913,16 @@ function startHop(target, member) {
  * where the same read off a stored array would answer nothing.
  * @param {any} target
  * @param {string} segment - the spelled path step (`.email`, `['odd key']`)
+ * @param {string} [arrayMethod] - the array-method name a member READ spelled
  */
-function extendHop(target, segment) {
+function extendHop(target, segment, arrayMethod = undefined) {
   const hop = target.hop;
   if (hop.many && !hop.fan) {
     throw new LinqBuildError('JL0005',
       `${segment} is read off a to-many relation, which holds an array of related rows — `
       + `fan them first (.all()${segment}), index one (.at(0)), or aggregate the array`);
   }
-  return makeHop({ ...hop, ret: `${hop.ret}${segment}` }, target.epoch, undefined);
+  return makeHop({ ...hop, ret: `${hop.ret}${segment}` }, target.epoch, undefined, arrayMethod);
 }
 
 /**
@@ -983,6 +997,73 @@ function toJSON() {
     + 'document member named toJSON is read with get(\'toJSON\'))');
 }
 
+/** The spelling for an array member of a relation target, whichever method was called. */
+const HOP_MEMBER = 'a relation target\'s array member cannot be fanned in a capture, so index one '
+  + 'element with .at(i) — p.author.tags.at(0).eq(v) — and test it';
+
+/** The spelling of an element TEST, shared by the methods that search. */
+const ELEMENT_TEST = 'test the elements with a fanned comparison — x.tags.all().eq(v) holds when any '
+  + 'element equals v (on a string member, x.name.contains(v)); for a scalar in a list write '
+  + 'v.in([a, b]) or v.in(x.tags)';
+
+/** The spelling of a per-element PREDICATE, shared by the methods that take one. */
+const ELEMENT_PREDICATE = 'a capture has no per-element predicate; compare a fanned member '
+  + 'instead — x.items.all().sku.eq(v) holds when any element\'s sku equals v, '
+  + 'x.items.all().qty.ne(0).not() when none differs from 0 — or index one with .at(i)';
+
+/** The spelling of a per-element PROJECTION, shared by `map` and `flatMap`. */
+const ELEMENT_MEMBER = 'name the member of each element off the fan — x.items.all().sku is every '
+  + 'element\'s sku, and [x.items.all().sku] keeps them as one array value';
+
+/** The spelling of a FOLD, shared by `reduce` and `reduceRight`. */
+const ELEMENT_FOLD = 'aggregate the fanned member — x.items.all().qty.sum(), .count(), .min(), '
+  + '.max() or .avg()';
+
+/** The spelling of an ORDER, shared by `sort` and `reverse`. */
+const ELEMENT_ORDER = 'order the rows with the chain\'s orderBy(); a capture never reorders a member';
+
+/**
+ * The array methods a reader reaches for on a captured array
+ * (`u.tags.includes('a')`), name → the query-language spelling the refusal
+ * names. A member read of one of these names is still the member (a
+ * document may hold a field called `filter`), but its proxy is callable so
+ * the CALL is a coded refusal ({@link refuseArrayMethod}) and not a host
+ * `TypeError`; any other capture stays a plain object. A name in
+ * {@link METHODS} is a method already and never reaches this table.
+ * Null prototype: `constructor` and `toString` must stay plain members.
+ * @type {Record<string, string>}
+ */
+const ARRAY_METHODS = {
+  __proto__: null,
+  includes: ELEMENT_TEST, indexOf: ELEMENT_TEST, lastIndexOf: ELEMENT_TEST,
+  some: ELEMENT_PREDICATE, every: ELEMENT_PREDICATE, filter: ELEMENT_PREDICATE,
+  find: ELEMENT_PREDICATE, findIndex: ELEMENT_PREDICATE, findLast: ELEMENT_PREDICATE,
+  findLastIndex: ELEMENT_PREDICATE,
+  map: ELEMENT_MEMBER, flatMap: ELEMENT_MEMBER,
+  reduce: ELEMENT_FOLD, reduceRight: ELEMENT_FOLD,
+  forEach: 'a capture computes a value and runs no loop or side effect; fan the array with '
+    + '.all() and name the member you want',
+  slice: 'index one element with .at(i); a capture has no sub-array',
+  join: 'a capture has no join over an array; .concat(x) joins two strings, and the finished '
+    + 'rows are joined in JavaScript after the chain runs',
+  sort: ELEMENT_ORDER, reverse: ELEMENT_ORDER,
+};
+
+/**
+ * The call of a member named like an array method: a coded refusal
+ * (`JL0108`) naming the query-language spelling, where the member's host
+ * value would have thrown `x.tags.includes is not a function`.
+ * @param {string} name
+ * @param {boolean} [hop] - the member is read off a relation target, whose
+ *   array members cannot be fanned in a capture (`.all()` lowers without a fan)
+ * @returns {never}
+ */
+function refuseArrayMethod(name, hop = false) {
+  throw new LinqBuildError('JL0108',
+    `.${name}() is a JavaScript array method, and a captured expression has none — it stands for `
+    + `a value the engine computes later; ${hop ? HOP_MEMBER : ARRAY_METHODS[name]}`);
+}
+
 /**
  * Build one expression proxy.
  * @param {any} doc - the expression JSON so far
@@ -990,7 +1071,7 @@ function toJSON() {
  * @param {boolean} pathable - whether `doc` is a pure path string that
  *   member access may extend
  * @param {{ seq?: any, nav?: any, navOnFan?: boolean, hop?: any,
- *   group?: string, fanned?: boolean, param?: string }} [extra] -
+ *   group?: string, fanned?: boolean, param?: string, arrayMethod?: string }} [extra] -
  *   `seq`: for a value standing for an array or a hop, the fanned form
  *   its aggregates range over (`'$g[*]'`, a hop's phrase); `nav`: the
  *   relation table of the rows the value stands for, with the resolver
@@ -999,7 +1080,10 @@ function toJSON() {
  *   `group`: the member this value carries a GROUP's rows in, whose
  *   aggregates therefore range over the rows; `fanned`: the path fans
  *   (`all()`) somewhere along it, so it is already a sequence; `param`:
- *   the declared parameter this value reads whole (`p.ids`, its fan)
+ *   the declared parameter this value reads whole (`p.ids`, its fan);
+ *   `arrayMethod`: the array-method name this member read spells
+ *   ({@link ARRAY_METHODS}), which makes the proxy callable for the one
+ *   purpose of refusing the call
  * @returns {any}
  */
 function makeExpr(doc, epoch, pathable, extra = undefined) {
@@ -1008,9 +1092,10 @@ function makeExpr(doc, epoch, pathable, extra = undefined) {
     seq: extra?.seq, nav: extra?.nav, navOnFan: extra?.navOnFan === true, hop: extra?.hop,
     group: extra?.group, fanned: extra?.fanned === true, param: extra?.param,
   };
-  return new Proxy(record, {
-    get(target, prop) {
-      if (prop === NODE) return target;
+  /** @type {ProxyHandler<any>} */
+  const handler = {
+    get(_target, prop) {
+      if (prop === NODE) return record;
       // `==`, `+`, a template literal and `<` ask for a primitive; the
       // proxy stands for a value the engine computes later, so the answer
       // is a coded refusal naming the spelling, not a raw TypeError
@@ -1020,18 +1105,33 @@ function makeExpr(doc, epoch, pathable, extra = undefined) {
       const method = METHODS[prop];
       if (method !== undefined) {
         // a method name read is a read; a dead or enclosing proxy is refused when it is called
-        noteRead(target.epoch);
+        noteRead(record.epoch);
         return (...args) => {
-          assertLive(target);
-          return method(target, ...args);
+          assertLive(record);
+          return method(record, ...args);
         };
       }
       // a member read the liveness rule refuses is no read
-      assertLive(target);
-      noteRead(target.epoch);
-      return member(target, prop);
+      assertLive(record);
+      noteRead(record.epoch);
+      return member(record, prop);
     },
-  });
+  };
+  const arrayMethod = extra?.arrayMethod;
+  if (arrayMethod === undefined) return new Proxy(record, handler);
+  // a member NAMED like an array method is still a member, but a call of it
+  // is the reader's `x.tags.includes(v)`: only such a proxy is callable, so
+  // every other capture keeps `typeof` 'object'
+  const refuse = () => {
+    assertLive(record);
+    return refuseArrayMethod(arrayMethod, record.hop !== undefined);
+  };
+  handler.apply = refuse;
+  handler.construct = refuse;
+  // the target is a fresh callable carrying the record's own keys, so that
+  // spreading it, `Object.keys` and `in` read what they read on a plain
+  // capture; no code of it ever runs
+  return new Proxy(Object.assign(Object.bind(), record), handler);
 }
 
 /**
@@ -1045,9 +1145,10 @@ function makeExpr(doc, epoch, pathable, extra = undefined) {
  */
 function member(target, prop) {
   if (navigates(target, prop)) return startHop(target, prop);
-  if (target.hop !== undefined) return extendHop(target, memberSegment(prop));
-  if (target.pathable) return pathStep(target, prop, memberSegment(prop));
-  return makeExpr({ $get: [target.doc, embedString(prop)] }, target.epoch, false);
+  const arrayMethod = ARRAY_METHODS[prop] === undefined ? undefined : prop;
+  if (target.hop !== undefined) return extendHop(target, memberSegment(prop), arrayMethod);
+  if (target.pathable) return pathStep(target, prop, memberSegment(prop), arrayMethod);
+  return makeExpr({ $get: [target.doc, embedString(prop)] }, target.epoch, false, { arrayMethod });
 }
 
 /**
@@ -1061,11 +1162,13 @@ function member(target, prop) {
  * `all()` fans it — so only the aggregates change, and only for the one
  * member the emitter writes the group into.
  * @param {any} target @param {string|number} prop @param {string} segment
+ * @param {string} [arrayMethod] - the array-method name a member READ spelled
+ *   (never an explicit `get()`)
  */
-function pathStep(target, prop, segment) {
+function pathStep(target, prop, segment, arrayMethod = undefined) {
   const doc = `${target.doc}${segment}`;
   return makeExpr(doc, target.epoch, true, target.group === prop
-    ? { seq: `${doc}[*]`, fanned: target.fanned } : { fanned: target.fanned });
+    ? { seq: `${doc}[*]`, fanned: target.fanned } : { fanned: target.fanned, arrayMethod });
 }
 
 /** The parameters proxy embedded as a value — a select member, an
@@ -1173,7 +1276,7 @@ export function captureExpression(fn, roots, declaredParams, fold = true, kind =
  * @returns {boolean}
  */
 export function isExpression(value) {
-  return value !== null && typeof value === 'object' && value[NODE] !== undefined;
+  return nodeOf(value) !== undefined;
 }
 
 /**

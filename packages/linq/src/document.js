@@ -101,11 +101,14 @@ export function readOptions(options, known, what) {
 
 /**
  * The key both chain classes answer, unchecked, with what a run of the
- * chain binds: `{ bindings, lists }` — its own parameter bindings and the
- * parameters its `in()` calls read whole as lists. The caller is `live()`,
- * which registers the chain under externals of its own merged over those
- * bindings, so it holds the list rule to the merged set; `explain()` and
- * the terminals check the bindings they run with themselves.
+ * chain binds: `{ bindings, lists, source }` — its own parameter bindings,
+ * the parameters its `in()` calls read whole as lists, and the provider
+ * it was built over (`null` over rows in memory). The caller is
+ * `live()`, which registers the chain under externals of its own merged
+ * over those bindings, so it holds the list rule to the merged set, and
+ * which registers the chain's document only over the source it names;
+ * `explain()` and the terminals check the bindings they run with
+ * themselves.
  */
 export const RUN_BINDINGS = Symbol();
 

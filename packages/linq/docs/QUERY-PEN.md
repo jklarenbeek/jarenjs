@@ -202,11 +202,11 @@ value becomes the expression:
   `JL0108` too (the capture has no value to serialize yet), and `u.toJSON`
   is that refusal rather than a member read: a document member named
   `toJSON` is read with `u.get('toJSON')`. Host method calls are outside the
-  capture DSL: `u.toString()` can raise a plain `TypeError`, and so can an
-  array method on a member (`u.tags.includes('a')`, which is not a
-  function: the capture has no array methods); `toString` remains an
-  ordinary data-member name. Serialize the finished chain's `toDocument()`
-  result, after capture, to inspect or persist a query.
+  capture DSL: `u.toString()` can raise a plain `TypeError`. An array
+  method on a member (`u.tags.includes('a')`, `u.items.map(…)`) is refused
+  with `JL0108` naming the spelling that works (§14.9); `toString` remains
+  an ordinary data-member name. Serialize the finished chain's
+  `toDocument()` result, after capture, to inspect or persist a query.
 - **The parameters argument is not a value.** A callback's last
   argument is the parameters proxy (§7): `p.tenantId` reads one declared
   parameter, and the proxy itself embedded anywhere — a projection
@@ -656,7 +656,7 @@ the normative home, this table mirrors it):
 | `JL0105` | a relation hop on the chain cannot lower: a many-to-many member (its join table is not a queryable root), a composite or undeclared key, or a malformed relation entry (§3, §4 "relation navigation") |
 | `JL0106` | a migration step names a table the target model does not declare, or a draft it cannot match |
 | `JL0107` | the client (`@jarenjs/linq/db`, [DB-CLIENT.md](DB-CLIENT.md)) named a member that is not the relation kind the operation needs: `include()` over a member that is not a declared relation, `link()`/`unlink()` over a relation that is not many-to-many |
-| `JL0108` | a captured expression — in any pen's callback, or the chain's — was converted to a JavaScript primitive (`==`, `+`, a template literal or `<` met the capture proxy) or met `JSON.stringify` (§14.9) |
+| `JL0108` | a captured expression — in any pen's callback, or the chain's — was converted to a JavaScript primitive (`==`, `+`, a template literal or `<` met the capture proxy), met `JSON.stringify`, or had an array method called on a member (`u.tags.includes('a')`) (§14.9) |
 | `JL0109` | a captured callback — in any pen, or the chain — read its argument and answered a plain JavaScript boolean: `===`, `!==`, `!`, `typeof` or `== null` tested the capture proxy, never the value (§14.10) |
 
 Runtime errors (`LinqRuntimeError`):
@@ -1336,11 +1336,11 @@ proves that too, so the exclusion cannot hide a chain refusal).
 | `JL0002` | an expression proxy was used outside the capture it belongs to |
 | `JL0003` | `ofType`/`cast` compiled a schema operator with no type-test compiler injected |
 | `JL0004` | a parameter was read undeclared, declared under a reserved or invalid name, bound to a non-JSON value, bound to two values by one join, or read whole as an `in()` list while bound to something other than an array; or the parameters argument itself was embedded as a value or spread |
-| `JL0005` | an operator was used invalidly at build time: a value the document cannot carry, a stage in the wrong place, a bad argument, an option outside a closed option bag, an async-surface rule |
+| `JL0005` | an operator was used invalidly at build time: a value the document cannot carry, a stage in the wrong place, a bad argument, an option outside a closed option bag, an async-surface rule, a chain handed to the `live()` of a source it was not built over |
 | `JL0006` | an operator §4 records as `unsupported` was invoked |
 | `JL0007` | a provider serves several entity roots and has none of its own |
 | `JL0105` | a relation hop cannot lower to a phrase |
-| `JL0108` | a captured expression was converted to a JavaScript primitive (`==`, `+`, a template literal or `<` met the capture proxy) or met `JSON.stringify` |
+| `JL0108` | a captured expression was converted to a JavaScript primitive (`==`, `+`, a template literal or `<` met the capture proxy), met `JSON.stringify`, or had an array method called on a member |
 | `JL0109` | a callback read its argument and answered a plain JavaScript boolean: `===`, `!==`, `!`, `typeof` or `== null` tested the capture proxy |
 | `JL2001` | `first`/`single`/`last`, or `average`/`min`/`max`, over an empty sequence |
 | `JL2002` | `single`/`singleOrDefault` over two or more elements |
@@ -1480,6 +1480,7 @@ that preserves it, so there is no spelling that is allowed to.
 | `from(rows).join([], …)` | `join takes another sequence as its inner side` | `from(sameSource)` |
 | `from(a).join(from(b), …)` | `join's other side must derive from the same source, or from two providers sharing one scope (one store's entity sets) — a query document reads one input; load both collections under one root, or join two entity sets of one store` | one source, or one store's two entity sets (§13.2) |
 | `from(rows).concat(42)` | `concat takes a sequence or a constant array` | a sequence over the same source, or an array |
+| `client.collections.orders.live(client.collections.users.where(…))` | `live() on collection 'orders' was handed a chain built over collection 'users' — a chain runs against the source it was built over; build it from this handle, or hand it to the handle it was built from` — the same for an entity handle | the chain from the handle it is registered on (`client.collections.users.live(…)`) (DB-CLIENT.md §6) |
 | `select((r) => r.v.all().rolling(spec))` where `spec` reads the row | `rolling() takes a plain literal spec object, not an expression or captured value` | a literal spec |
 | `select((u) => u.tags.at(2 ** 53))` | `at() takes a safe integer index, got 9007199254740992` | an index within ±(2^53 − 1), which an array can have |
 | `groupBy(…).select((g) => g.items.sum((r) => r.score))`; the same with `count`, `avg`, `min`, `max`, `exists`, `isEmpty` or a predicate | `sum() takes no argument — it reads none, so the one passed would be ignored; to aggregate a member of each row fan the rows first: .all().<member>.sum()` | `g.items.all().score.sum()` (§13.3) |
@@ -1578,7 +1579,19 @@ primitive value`. That covers loose equality against a string, a number
 or a boolean, `+`, a template literal and a relational comparison. It
 also refuses `JSON.stringify` of a capture (`toJSON` is read first, and the
 capture answers the same coded message instead of recursing until a
-`RangeError`).
+`RangeError`), and the CALL of an array method on a member — `includes`,
+`indexOf`, `lastIndexOf`, `some`, `every`, `filter`, `find`, `findIndex`,
+`findLast`, `findLastIndex`, `map`, `flatMap`, `reduce`, `reduceRight`,
+`forEach`, `slice`, `join`, `sort` and `reverse` — where the member would have
+thrown `u.tags.includes is not a function`. Reading such a name is still
+the member read it always was (a document may hold a field called
+`filter`), and `get('includes')` is that member explicitly; only a member
+named like an array method is callable, for the refusal, so `typeof` of
+every other capture is `'object'` as before. A name that is already an
+operator method (`at`, `concat`, `contains`, `count`, …) is that method.
+Off a relation target (`p.author.tags.includes('a')`) the message names
+`.at(i)` instead, because an array member of a relation target cannot be
+fanned in a capture: `p.author.tags.at(0).eq('a')` tests the first element.
 
 | The spelling that trips it | The message | The spelling that works |
 |---|---|---|
@@ -1586,6 +1599,11 @@ capture answers the same coded message instead of recursing until a
 | `` (v) => `${v.first} ${v.last}` `` | the same message | `(v) => v.first.concat(' ').concat(v.last)` |
 | `(v) => v.n + 1`, `(v) => v.n < 2` | the same message | `(v) => v.n.add(1)`, `(v) => v.n.lt(2)` |
 | `(v) => JSON.stringify(v.tags)` | a message naming `JSON.stringify` | `(v) => ({ tags: v.tags })`; `JSON.stringify(chain.toDocument())` for the finished chain |
+| `(v) => v.tags.includes('a')` | `.includes() is a JavaScript array method, and a captured expression has none …` and the spelling | `(v) => v.tags.all().eq('a')` holds when any element equals `'a'`; `v.name.contains('a')` on a string member; `v.sku.in(v.tags)` for a scalar in a list |
+| `(v) => v.items.some((i) => i.qty)`, `.every`, `.filter`, `.find`, `.findIndex` | the message names the fanned comparison | `(v) => v.items.all().qty.eq(0)` for `some`; `(v) => v.items.all().qty.ne(0).not()` for `every` (no element differs, an empty array holds); `.at(i)` indexes one element |
+| `(v) => v.items.map((i) => i.sku)`, `.flatMap` | the message names the fanned member | `(v) => v.items.all().sku`; `[v.items.all().sku]` keeps them as one array value |
+| `(v) => v.items.reduce((a, i) => a + i.qty, 0)`, `.reduceRight` | the message names the aggregates | `(v) => v.items.all().qty.sum()`, `.count()`, `.min()`, `.max()`, `.avg()` |
+| `.forEach`, `.slice`, `.join`, `.sort`, `.reverse` | the message says what a capture does instead | `.all()` and a named member; `.at(i)`; the chain's `orderBy()` |
 
 Some spellings cannot be trapped, because JavaScript never asks the
 proxy for anything:

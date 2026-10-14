@@ -497,9 +497,14 @@ export class AsyncSequence {
   }
 
   /** What a run binds, unchecked ({@link RUN_BINDINGS}): for `live()`,
-   * which checks the list rule against the externals it registers. */
+   * which checks the list rule against the externals it registers, and
+   * the source the chain was built over. */
   [RUN_BINDINGS]() {
-    return { bindings: snapshot(Object.fromEntries(this.#params)), lists: this.#lists() };
+    return {
+      bindings: snapshot(Object.fromEntries(this.#params)),
+      lists: this.#lists(),
+      source: this.#origin.kind === 'provider' ? this.#origin.source : null,
+    };
   }
 
   //#endregion

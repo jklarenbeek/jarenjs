@@ -49,9 +49,11 @@ function chainStart(provider, members) {
  * The handle over one entity set.
  * @param {any} store - the opened store
  * @param {string} name - the entity
+ * @param {import('./source.js').SourceScope} sources - the store
+ *   view's record of the sources its handles front
  * @returns {any}
  */
-export function createEntityHandle(store, name) {
+export function createEntityHandle(store, name, sources) {
   const set = store.entity(name);
   /** @type {Record<string | symbol, any>} */
   const members = { ...set };
@@ -70,17 +72,21 @@ export function createEntityHandle(store, name) {
     set.unlink(own, member, target);
   };
   members.live = (source = fromAsync(set), options = undefined) =>
-    registerLive(store.live, source, options);
-  return Object.freeze(members);
+    registerLive(store.live, source, options, sources.handleOf('entity', name));
+  const handle = Object.freeze(members);
+  sources.bind('entity', name, handle);
+  return handle;
 }
 
 /**
  * The handle over one collection.
  * @param {any} store - the opened store
  * @param {string} name - the collection
+ * @param {import('./source.js').SourceScope} sources - the store
+ *   view's record of the sources its handles front
  * @returns {any}
  */
-export function createCollectionHandle(store, name) {
+export function createCollectionHandle(store, name, sources) {
   const collection = store.collection(name);
   /** @type {Record<string | symbol, any>} */
   const members = { ...collection };
@@ -93,6 +99,8 @@ export function createCollectionHandle(store, name) {
   members.all = (/** @type {any} */ arg, /** @type {any[]} */ ...rest) =>
     (typeof arg === 'function' ? quantifier(arg, ...rest) : collection.all(arg));
   members.live = (source = fromAsync(collection), options = undefined) =>
-    registerLive(collection.live, source, options);
-  return Object.freeze(members);
+    registerLive(collection.live, source, options, sources.handleOf('collection', name));
+  const handle = Object.freeze(members);
+  sources.bind('collection', name, handle);
+  return handle;
 }

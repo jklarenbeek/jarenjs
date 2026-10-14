@@ -13,6 +13,10 @@
  * The merged set is what the store runs, so it is the set a parameter an
  * `in()` reads whole as its list must be an array in (`JL0004`): a
  * placeholder the options override is not checked, and an override is.
+ * A chain carries the source it was built over, and a handle registers
+ * only a chain over its own (`JL0005`): the document names rows of that
+ * source and nothing else, so another source's chain would be a query
+ * over the wrong rows.
  */
 
 import { isPlainOptions } from '@jarenjs/core/object';
@@ -29,7 +33,10 @@ const isChain = (source) => source !== null && typeof source === 'object'
  * parameters its `in()` calls read whole as lists — unchecked, because
  * what the store runs is decided only once the options are merged in.
  * @param {any} source - a chain (either surface) or a query document
- * @returns {{ document: any, bindings: Record<string, unknown>, lists: readonly string[] }}
+ * @returns {{ document: any, bindings: Record<string, unknown>, lists: readonly string[],
+ *   source?: object | null }} `source` is the provider the chain was
+ *   built over (`null`: rows in memory), absent when the source
+ *   is a document or a chain-like this package did not build
  */
 function documentOf(source) {
   if (!isChain(source)) return { document: source, bindings: {}, lists: [] };
@@ -47,11 +54,14 @@ function documentOf(source) {
  * @param {any} source - a chain or a document
  * @param {any} [options] - LIVE-FORMAT §7 options; `externals` merge over
  *   the chain's bindings
+ * @param {(chainSource: object) => void} [onlyOwn] - a handle's refusal of
+ *   a chain built over another collection or entity than its own
  * @returns {Promise<any>} the store's live query
  */
-export function registerLive(register, source, options = {}) {
+export function registerLive(register, source, options = {}, onlyOwn = undefined) {
   try {
-    const { document, bindings, lists } = documentOf(source);
+    const { document, bindings, lists, source: builtOver } = documentOf(source);
+    if (builtOver != null) onlyOwn?.(builtOver);
     // options the store would refuse reach it as they were given: merging
     // would read `null` options as a TypeError, spread a string into
     // members and an array into `0`, `1`, ... and so accept them

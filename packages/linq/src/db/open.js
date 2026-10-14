@@ -20,6 +20,7 @@ import { isPlainOptions, setObjectMember } from '@jarenjs/core/object';
 
 import { createEntityHandle, createCollectionHandle } from './handle.js';
 import { registerLive } from './live.js';
+import { createSourceScope } from './source.js';
 
 /**
  * A client transaction's options with the client's default unit of work:
@@ -84,14 +85,18 @@ export async function open(model, options) {
    * @param {any} over
    */
   const handlesOf = (over) => {
+    const sources = createSourceScope(over, store);
     const entities = {};
     for (const name of over.roots ?? []) {
-      setObjectMember(entities, name, createEntityHandle(over, name));
+      setObjectMember(entities, name, createEntityHandle(over, name, sources));
     }
     const collections = {};
     for (const name of Object.keys(model.collections ?? {})) {
-      setObjectMember(collections, name, createCollectionHandle(over, name));
+      setObjectMember(collections, name, createCollectionHandle(over, name, sources));
     }
+    // the client's own handles are recorded now, so another client's chain
+    // is known; a transaction's wait for the first lookup that needs them
+    if (over === store) sources.record();
     return { entities: Object.freeze(entities), collections: Object.freeze(collections) };
   };
 

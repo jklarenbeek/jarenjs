@@ -183,8 +183,11 @@ records a link (`JL0107` names the kind); `live.js` hands a chain's
 document and bindings, the registration's own `externals` merged over
 them, to the store's own registration — holding a parameter an `in()`
 reads whole to an array in that merged set, which is what the store
-runs.
-Nothing here runs a query, plans one or keeps state: the store stays
+runs. `source.js` records, for each provider a client fronts, the kind and the
+name it stands for, and the chain reports the provider it was built over,
+so a handle registers only a chain over its own collection or entity by
+name (`JL0005` otherwise).
+Nothing here runs a query, plans one or keeps state beyond that record: the store stays
 the engine, and every read is one its `explain()` can name.
 
 ## The provider seam (`src/provider.js`)
