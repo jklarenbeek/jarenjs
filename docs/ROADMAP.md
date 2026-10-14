@@ -630,12 +630,6 @@ what each does is its own documentation's job
   on a to-many relation (`u.posts.some(...)`, `.filter`, `.map`) is `JL0005`
   ("fan them first (.all().some)"), advice that points at a member spelling, not
   at the predicate the reader wrote.
-- [ ] **A method name read as a value is a function, so `>`, `+` or a template
-  literal over it answers a wrong value silently.** `x.tags.length > 0` inside
-  `.and()` embeds the constant `false`, and `` `${x.name.upper}` `` embeds the
-  closure's source text (the method table returns a function for every
-  operator-method name). Wanted: a `Symbol.toPrimitive` on the returned method
-  that answers `JL0108` naming the method and its call.
 - [ ] **A hop member cannot be the list of `in`.** `x.in(p.author.tags.all())`
   is refused `JL0005` ('cannot follow an operator result or a relation'), where
   `.all().eq(v)` on the same hop member now fans; and `.all().all()` on a hop

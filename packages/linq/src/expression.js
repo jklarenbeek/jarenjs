@@ -998,6 +998,22 @@ function toPrimitive() {
 }
 
 /**
+ * A method read without its call and then coerced (`x.tags.length > 0`,
+ * `${x.name.upper}`): always a refusal (JL0108), naming the method and its
+ * call. The function itself is untouched — calling it, `typeof` and passing
+ * it around are as before; only its conversion to a primitive is refused.
+ * @param {string} name - the method name that was read
+ * @returns {never}
+ */
+function refuseMethodValue(name) {
+  throw new LinqBuildError('JL0108',
+    `.${name} is a method of a captured expression, read here without its call, so it is a `
+    + `function and not the value — ==, +, a template literal, String() and < would act on the `
+    + `function itself; call it as .${name}(…), or read a document member of that name with `
+    + `get('${name}')`);
+}
+
+/**
  * The capture proxy's `toJSON`: always a refusal (JL0108). `JSON.stringify(x)`
  * reads `toJSON` first; without this the walk would list the record's names
  * and recurse through member proxies until a `RangeError`. A document member
@@ -1120,10 +1136,15 @@ function makeExpr(doc, epoch, pathable, extra = undefined) {
       if (method !== undefined) {
         // a method name read is a read; a dead or enclosing proxy is refused when it is called
         noteRead(record.epoch);
-        return (...args) => {
+        const read = (...args) => {
           assertLive(record);
           return method(record, ...args);
         };
+        // read without its call it is still a function, which `>`, `+`, `==`,
+        // a template literal and `String()` would turn into a wrong value
+        // (`false`, the closure's source): coercing it is the refusal
+        Object.defineProperty(read, Symbol.toPrimitive, { value: () => refuseMethodValue(prop) });
+        return read;
       }
       // a member read the liveness rule refuses is no read
       assertLive(record);

@@ -205,7 +205,10 @@ value becomes the expression:
   capture DSL: `u.toString()` can raise a plain `TypeError`. An array
   method on a member (`u.tags.includes('a')`, `u.items.map(…)`) is refused
   with `JL0108` naming the spelling that works (§14.9); `toString` remains
-  an ordinary data-member name. Serialize the finished chain's
+  an ordinary data-member name. A method name read without its call
+  (`u.tags.length`, `u.name.upper`) is a function, and `>`, `+`, `==`, a
+  template literal or `String()` over it is `JL0108` naming the method and
+  its call (§14.9), not the constant `false` or the closure's source text. Serialize the finished chain's
   `toDocument()` result, after capture, to inspect or persist a query.
 - **The parameters argument is not a value.** A callback's last
   argument is the parameters proxy (§7): `p.tenantId` reads one declared
@@ -704,7 +707,7 @@ the normative home, this table mirrors it):
 | `JL0105` | a relation hop on the chain cannot lower: a many-to-many member (its join table is not a queryable root), a composite or undeclared key, or a malformed relation entry (§3, §4 "relation navigation") |
 | `JL0106` | a migration step names a table the target model does not declare, or a draft it cannot match |
 | `JL0107` | the client (`@jarenjs/linq/db`, [DB-CLIENT.md](DB-CLIENT.md)) named a member that is not the relation kind the operation needs: `include()` over a member that is not a declared relation, `link()`/`unlink()` over a relation that is not many-to-many |
-| `JL0108` | a captured expression — in any pen's callback, or the chain's — was converted to a JavaScript primitive (`==`, `+`, a template literal or `<` met the capture proxy), met `JSON.stringify`, or had an array method called on a member (`u.tags.includes('a')`) (§14.9) |
+| `JL0108` | a captured expression — in any pen's callback, or the chain's — was converted to a JavaScript primitive (`==`, `+`, a template literal or `<` met the capture proxy, or met a method read without its call, `u.name.length > 0`), met `JSON.stringify`, or had an array method called on a member (`u.tags.includes('a')`) (§14.9) |
 | `JL0109` | a captured callback — in any pen, or the chain — read its argument and answered a plain JavaScript boolean: `===`, `!==`, `!`, `typeof` or `== null` tested the capture proxy, never the value (§14.10) |
 
 Runtime errors (`LinqRuntimeError`):
@@ -1388,7 +1391,7 @@ proves that too, so the exclusion cannot hide a chain refusal).
 | `JL0006` | an operator §4 records as `unsupported` was invoked |
 | `JL0007` | a provider serves several entity roots and has none of its own |
 | `JL0105` | a relation hop cannot lower to a phrase |
-| `JL0108` | a captured expression was converted to a JavaScript primitive (`==`, `+`, a template literal or `<` met the capture proxy), met `JSON.stringify`, or had an array method called on a member |
+| `JL0108` | a captured expression was converted to a JavaScript primitive (`==`, `+`, a template literal or `<` met the capture proxy), or a method read without its call (`u.name.length`) was; met `JSON.stringify`, or had an array method called on a member |
 | `JL0109` | a callback read its argument and answered a plain JavaScript boolean: `===`, `!==`, `!`, `typeof` or `== null` tested the capture proxy |
 | `JL2001` | `first`/`single`/`last`, or `average`/`min`/`max`, over an empty sequence |
 | `JL2002` | `single`/`singleOrDefault` over two or more elements |
@@ -1646,6 +1649,14 @@ the member read it always was (a document may hold a field called
 named like an array method is callable, for the refusal, so `typeof` of
 every other capture is `'object'` as before. A name that is already an
 operator method (`at`, `concat`, `contains`, `count`, …) is that method.
+Read without its call (`u.name.upper`, `u.tags.length`) it is still a
+function, so `u.name.length > 0`, `u.name.upper + '!'`, `${u.name.upper}`,
+`u.name.upper == 'A'` and `String(u.name.upper)` coerce a function and would
+embed `false` or the closure's source text; converting it to a primitive is
+refused with `JL0108`, the message naming the method (`.length`) and its call
+(`.length(…)`). Calling it builds the expression as before, `typeof` of it is
+`'function'`, and a document member that shares the method's name is read with
+`get('length')`.
 Off a relation target (`p.author.tags.includes('a')`) the element-test
 message names the fanned comparison alone, because `in()` over the member is
 refused off a relation: `p.author.tags.all().eq('a')` holds when any element
@@ -1659,6 +1670,7 @@ matches the rows whose elements match.
 | `(v) => v.tab == 'labels'` | `a captured expression is not a JavaScript value yet — ==, +, a template literal and < compare or join the capture itself; write the comparison with .eq(x), .ne(x), .lt(x), .exists() or .isEmpty(), and a string join with .concat(…) (=== and if (v) test the proxy, never the value, and a callback that answers such a boolean is refused JL0109)` | `(v) => v.tab.eq('labels')` |
 | `` (v) => `${v.first} ${v.last}` `` | the same message | `(v) => v.first.concat(' ').concat(v.last)` |
 | `(v) => v.n + 1`, `(v) => v.n < 2` | the same message | `(v) => v.n.add(1)`, `(v) => v.n.lt(2)` |
+| `(v) => v.name.length > 0`, `` (v) => `${v.name.upper}` `` | `.length is a method of a captured expression, read here without its call, so it is a function and not the value …` naming the call | `(v) => v.name.length().gt(0)`, `(v) => v.name.upper()`; `v.get('length')` for a member called `length` |
 | `(v) => JSON.stringify(v.tags)` | a message naming `JSON.stringify` | `(v) => ({ tags: v.tags })`; `JSON.stringify(chain.toDocument())` for the finished chain |
 | `(v) => v.tags.includes('a')` | `.includes() is a JavaScript array method, and a captured expression has none …` and the spelling | `(v) => v.tags.all().eq('a')` holds when any element equals `'a'`; `v.name.contains('a')` on a string member; `v.sku.in(v.tags)` for a scalar in a list |
 | `(v) => v.items.some((i) => i.qty)`, `.every`, `.filter`, `.find`, `.findIndex` | the message names the fanned comparison | `(v) => v.items.all().qty.eq(0)` for `some`; `(v) => v.items.all().qty.ne(0).not()` for `every` (no element differs, an empty array holds); `.at(i)` indexes one element |
