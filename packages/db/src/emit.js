@@ -51,6 +51,43 @@ export function inListSql(dialect, valueSql, listSql, kind) {
   return dialect.inList(valueSql, listSql, kind);
 }
 
+/**
+ * Whether a comparison's number is an integer past ±(2^53 - 1). The engine
+ * compares the doubles both sides are, where SQLite reads an integer text
+ * as the exact integer it names — and a document spells a double past 2^53
+ * by its shortest digits (`1152921504606847000` is 2^60 to the engine and
+ * 2^60 + 24 to SQLite). Where one side is a safe integer or a fraction the
+ * exact comparison and the double one agree, so only such a number reads
+ * the member as the double (`numberRead`) and no other statement changes.
+ * @param {unknown} value
+ * @returns {boolean}
+ */
+const beyondSafeInteger = (value) => typeof value === 'number' && Number.isInteger(value)
+  && !Number.isSafeInteger(value);
+
+/**
+ * The member a comparison reads: as the double the engine holds where the
+ * other side holds an integer past 2^53 ({@link beyondSafeInteger}), as
+ * itself otherwise — and so through its index.
+ * @param {any} dialect @param {string} valueSql @param {boolean} wide
+ * @returns {string}
+ */
+const comparedAs = (dialect, valueSql, wide) => (wide ? dialect.numberRead(valueSql) : valueSql);
+
+/**
+ * A membership list's numbers as one JSON parameter. A list holding an
+ * integer past 2^53 spells each such integer with an exponent
+ * (`1.152921504606847e+18`), which SQLite's JSON reads as the double and
+ * not as the integer the shortest digits name (PostgreSQL reads both
+ * spellings as one `numeric`); the member is then read as a double too
+ * ({@link comparedAs}).
+ * @param {number[]} numbers
+ * @returns {string}
+ */
+const numberList = (numbers) => (numbers.some(beyondSafeInteger)
+  ? `[${numbers.map((value) => (beyondSafeInteger(value) ? value.toExponential() : JSON.stringify(value))).join(',')}]`
+  : JSON.stringify(numbers));
+
 /** Physical text expressions must not inherit an application's collation:
  * the one rule every comparison and ordering over a mapped column follows
  * (a uuid column is text there, compared by the spelling it stores).
@@ -372,7 +409,8 @@ function probeEdge(probe, param, axis) {
  * Emit one plan as SQL plus its ordered parameter slots.
  * @param {import('./algebra.js').Plan} plan
  * @param {any} dialect
- * @param {{ table: string, keyColumn: string, docColumn: string }} physical
+ * @param {{ table: string, keyColumn: string, docColumn: string, doubleColumns?: Set<string> }} physical - the
+ *   table's names, and the generated columns that hold a number as a double
  * @returns {{ sql: string, slots: ParamSlot[], seeks?: any[], columns: string[] }} `columns`
  *   are the generated columns the statements spell
  */
@@ -427,6 +465,18 @@ export function emitPlan(plan, dialect, physical) {
       && !(ref.unpinned === true && docOf(ref) !== docColumn)
       ? col(ref.column)
       : dialect.jsonExtract(docOf(ref), pathText(ref), kind));
+  /**
+   * A ref's value read as a comparison beside an integer past 2^53 reads it
+   * (`wide`, {@link comparedAs}): a generated column that holds a number as
+   * the double already (`physical.doubleColumns`) is compared bare, so that
+   * it still seeks.
+   * @param {any} ref @param {'text' | 'number'} kind @param {boolean} wide
+   */
+  const comparedValue = (ref, kind, wide) => {
+    const value = valueOf(ref, kind);
+    return comparedAs(dialect, value, wide
+      && !(value === q(ref.column) && physical.doubleColumns?.has(ref.column) === true));
+  };
   const pathText = (ref) => pathTextOf(dialect, ref);
   /** The document a query reads a ref's member from: guarded where the
    * engine's path text would read the member off the wrong container. */
@@ -556,7 +606,7 @@ export function emitPlan(plan, dialect, physical) {
     if ('lit' in pred.operand) {
       const lit = pred.operand.lit;
       const kind = typeof lit === 'number' ? 'number' : 'text';
-      const value = valueOf(pred.ref, kind);
+      const value = comparedValue(pred.ref, kind, beyondSafeInteger(lit));
       if (dialect.typedExtract === true) {
         return pred.op === 'ne'
           ? typedDiffers(dialect.jsonExtract(docOf(pred.ref), pathText(pred.ref)), value, param({ literal: lit }))
@@ -613,8 +663,8 @@ export function emitPlan(plan, dialect, physical) {
    */
   const emitIn = (pred) => {
     const jt = typeOf(pred.ref);
-    const branch = (/** @type {'text' | 'number'} */ kind, /** @type {string} */ listSql) => {
-      const value = valueOf(pred.ref, kind);
+    const branch = (/** @type {'text' | 'number'} */ kind, /** @type {string} */ listSql, wide = false) => {
+      const value = comparedValue(pred.ref, kind, wide);
       // an external's list is typed per branch by its own filter; the
       // member keeps the discriminator beside it, as every external does
       if (dialect.typedExtract === true && !('ext' in pred.operand))
@@ -630,7 +680,8 @@ export function emitPlan(plan, dialect, physical) {
     const numbers = pred.operand.list.filter((value) => typeof value === 'number');
     const branches = [];
     if (texts.length > 0) branches.push(branch('text', param({ literal: JSON.stringify(texts) })));
-    if (numbers.length > 0) branches.push(branch('number', param({ literal: JSON.stringify(numbers) })));
+    if (numbers.length > 0)
+      branches.push(branch('number', param({ literal: numberList(numbers) }), numbers.some(beyondSafeInteger)));
     return branches.length === 1 ? branches[0] : `(${branches.join(' OR ')})`;
   };
 
@@ -1063,8 +1114,8 @@ export function createEntityPredicateEmitters(dialect, param, related = undefine
     const typed = dialect.typedExtract === true;
     if (pred.p === 'in') {
       // the collection's membership form, over the entity's document
-      const branch = (/** @type {'text' | 'number'} */ kind, /** @type {string} */ listSql) => {
-        const value = memberAt(docSql, pred.ref, kind);
+      const branch = (/** @type {'text' | 'number'} */ kind, /** @type {string} */ listSql, wide = false) => {
+        const value = comparedAs(dialect, memberAt(docSql, pred.ref, kind), wide);
         if (typed) return typedTotal(value, inListSql(dialect, value, listSql, kind));
         const guard = kind === 'number' ? `${jt} IN ${NUMERIC()}` : `${jt} = ${sl('text')}`;
         return `(${jt} IS NOT NULL AND ${guard} AND ${inListSql(dialect, value, listSql, kind)})`;
@@ -1073,7 +1124,8 @@ export function createEntityPredicateEmitters(dialect, param, related = undefine
       const numbers = pred.operand.list.filter((/** @type {any} */ value) => typeof value === 'number');
       const branches = [];
       if (texts.length > 0) branches.push(branch('text', param({ literal: JSON.stringify(texts) })));
-      if (numbers.length > 0) branches.push(branch('number', param({ literal: JSON.stringify(numbers) })));
+      if (numbers.length > 0)
+        branches.push(branch('number', param({ literal: numberList(numbers) }), numbers.some(beyondSafeInteger)));
       return branches.length === 1 ? branches[0] : `(${branches.join(' OR ')})`;
     }
     if (pred.p === 'typeIs') {
@@ -1094,7 +1146,7 @@ export function createEntityPredicateEmitters(dialect, param, related = undefine
     const lit = pred.operand.lit;
     const symbol = { eq: '=', ne: '<>', lt: '<', le: '<=', gt: '>', ge: '>=' }[pred.op];
     const kind = typeof lit === 'number' ? 'number' : 'text';
-    const value = memberAt(docSql, pred.ref, kind);
+    const value = comparedAs(dialect, memberAt(docSql, pred.ref, kind), beyondSafeInteger(lit));
     if (typed) {
       return pred.op === 'ne'
         ? typedDiffers(memberAt(docSql, pred.ref, undefined), value, param({ literal: lit }))
@@ -1144,7 +1196,8 @@ export function createEntityPredicateEmitters(dialect, param, related = undefine
       const values = pred.operand.list.filter((/** @type {any} */ value) =>
         (kind === 'text' ? typeof value === 'string' : typeof value === 'number'));
       if (values.length === 0) return dialect.booleanLiteral(false);
-      return `(${column} IS NOT NULL AND ${inListSql(dialect, column, param({ literal: JSON.stringify(values) }), kind)})`;
+      const list = kind === 'text' ? JSON.stringify(values) : numberList(values);
+      return `(${column} IS NOT NULL AND ${inListSql(dialect, column, param({ literal: list }), kind)})`;
     }
     const symbol = { eq: '=', ne: '<>', lt: '<', le: '<=', gt: '>', ge: '>=' }[pred.op];
     if ('ext' in pred.operand) {

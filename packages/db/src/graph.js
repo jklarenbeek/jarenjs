@@ -19,7 +19,7 @@ import { setObjectMember } from '@jarenjs/core/object';
 import { utf8ByteLength } from '@jarenjs/core/string';
 import { columnCodec } from './physical.js';
 
-import { DbRuntimeError } from './errors.js';
+import { DbRuntimeError, refuseRoundedInteger } from './errors.js';
 import { jsonBytes, decodeCountedJson } from './json-bytes.js';
 
 /**
@@ -74,7 +74,8 @@ function checkBounds(node, include, keyed, raw, sizes) {
  * @param {any} row - a row carrying the entity's columns plus the
  *   rendered document text
  * @param {string} [docField] - the column the document text rides in
- * @returns {any}
+ * @returns {any} the document; an `integer` column whose stored integer its
+ *   driver rounded refuses it (`JD2003` once the driver error is coded)
  */
 export function mergeEntityRow(entityMapping, row, docField = 'doc') {
   const doc = entityMapping.document === false ? {} : JSON.parse(row[docField]);
@@ -87,6 +88,7 @@ export function mergeEntityRow(entityMapping, row, docField = 'doc') {
     }
     const value = row[column.name];
     if (value === null || value === undefined) continue;
+    if (column.storage === 'integer') refuseRoundedInteger(row, column.name);
     setObjectMember(doc, column.name, column.storage === 'boolean' ? value === 1 : value);
   }
   foldForeignKeys(entityMapping, row, doc);

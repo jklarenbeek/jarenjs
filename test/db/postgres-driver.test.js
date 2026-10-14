@@ -18,7 +18,7 @@ import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
 import { setTimeout as delay } from 'node:timers/promises';
 
-import { openStore, createEntityQueryEngine, createQueryState } from '@jarenjs/db';
+import { openStore, createEntityQueryEngine, createQueryState, mergeEntityRow } from '@jarenjs/db';
 import { relational, sql } from '@jarenjs/db/relational';
 import { compileEntityModel } from '@jarenjs/db/model';
 import { entityCore } from '@jarenjs/db/entity';
@@ -462,6 +462,37 @@ describe('the injected PostgreSQL driver', () => {
         9007199254740993n, 9007199254740992]) {
         await assert.rejects(readBack(fields, [{ key: value }]),
           (error) => error.code === 'JD2005' && /safe JavaScript integer range/.test(error.reason));
+      }
+    });
+
+    it('a numeric table column\'s integer the number would round is refused by an integer member, as SQLite\'s driver refuses it', async () => {
+      const fields = [{ name: 'v', dataTypeID: 1700, tableID: 16384, columnID: 2 }, { name: 'doc', dataTypeID: 25 }];
+      /** The row as an entity with `v` mapped as `storage` merges it. @param {string} text @param {string} storage */
+      const merged = async (text, storage, columnFields = fields) => {
+        const [row] = await readBack(columnFields, [{ v: text, doc: '{}' }]);
+        return mergeEntityRow({ columns: [{ name: 'v', storage }], foreignKeys: [] }, row);
+      };
+      // safe integers, fractions, integers a double holds exactly and the
+      // digits a JavaScript number writes (2^60, 1e21, 2^70) read as numbers
+      for (const [text, number] of [['9007199254740991', 9007199254740991], ['-9007199254740991', -9007199254740991],
+        ['1.5', 1.5], ['9007199254740994', 9007199254740994], ['1152921504606846976', 2 ** 60],
+        ['1152921504606847000', 2 ** 60], ['-4611686018427388000', -(2 ** 62)], ['1000000000000000000000', 1e21],
+        ['1180591620717411300000', 2 ** 70]]) {
+        assert.deepStrictEqual(await merged(text, 'integer'), { v: number }, text);
+      }
+      // the refusal is node:sqlite's own, which every public read codes
+      // `JD2003` (class `data`) on both engines; a `number` member reads the
+      // nearest double, and so does a numeric a statement computes (no table
+      // named), as the engine reads the member it is computed from
+      for (const text of ['9007199254740993', '-9007199254740993', '1152921504606846977', `1${'0'.repeat(400)}`]) {
+        await assert.rejects(merged(text, 'integer'), (error) => error instanceof RangeError
+          && /** @type {any} */ (error).code === 'ERR_OUT_OF_RANGE'
+          && error.message === `Value is too large to be represented as a JavaScript number: ${text}`);
+        assert.deepStrictEqual(await merged(text, 'number'), { v: Number(text) }, text);
+        for (const tableID of [0, undefined]) {
+          assert.deepStrictEqual(await merged(text, 'integer', [{ name: 'v', dataTypeID: 1700, tableID }, fields[1]]),
+            { v: Number(text) }, `${text} computed`);
+        }
       }
     });
 

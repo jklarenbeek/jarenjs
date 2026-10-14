@@ -893,6 +893,12 @@ export function planCollection(name, collection, dialect, options = undefined) {
      * types. A column a table holds in one of the member's types is not one
      * (see {@link adoptLegacyColumns}). */
     anyKindColumns: new Set(generated.filter((g) => g.legacyTypes !== undefined).map((g) => g.name)),
+    /** The generated columns that hold a number as the double the engine
+     * holds: one declared as a `number` member's column is, and so is one
+     * whose read casts a number to it (`kind: 'key'`, a number-first union).
+     * A comparison with an integer past 2^53 compares such a column bare. */
+    doubleColumns: new Set(generated.filter((g) => g.kind === 'key'
+      || g.type === dialect.typeFor('number', 'generated')).map((g) => g.name)),
     virtualTables,
     createSql,
     objects,

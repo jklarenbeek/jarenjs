@@ -673,6 +673,23 @@ generated column where one exists), `?` = the bound operand:
 | `$ends-with` path, string | `jt = 'text' AND (length(?) = 0 OR substr(v, -length(?)) = ?)` |
 | `$contains` path, string | `jt = 'text' AND instr(v, ?) > 0` |
 
+**A number past 2^53 is compared as the double it is.** The engine compares
+the doubles both sides are; a document spells a double past 2^53 by its
+shortest digits (2^60 is `1152921504606847000`), and SQLite reads those digits
+as the exact integer they name, which is not the double, and compares it
+exactly. So a comparison or a `$seq` membership whose literal list holds an
+integer past ±(2^53 − 1) reads the member as `CAST(v AS REAL)` (the dialect's
+`numberRead`), and such a list spells each of those integers with an exponent
+(`1.152921504606847e+18`), which `json_each` reads as the double. Against a
+safe integer or a fraction the exact comparison and the double one agree, so
+those statements are unchanged and seek as before; a generated column that
+already holds the double (a `number` member's `REAL` column, or the cast read
+of a union whose first type is `number`) is compared bare and seeks too, and
+every other indexed member reads the cast and does not seek. PostgreSQL reads
+both spellings of the digits as one `numeric` and changes nothing. An
+external operand is not covered: its value is known only when it binds, and
+its comparison keeps the exact form (the ROADMAP lists it).
+
 **A path against a path is decided by the family of the two values.**
 Only members the schema types as scalars qualify — `string`, `number`,
 `integer` and `boolean`, each optionally with `null` — because those never

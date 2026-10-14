@@ -2287,6 +2287,26 @@ into a new database created with the default UTF-8 encoding, and open that.
   that would change one of them waits for the delete's commit. A delete that
   reaches no row a store rule judges reads nothing more than before.
 
+## 28. A number past 2^53 compares, and reads back, as the engine reads it
+
+- On SQLite a comparison (`$eq`, `$ne`, `$lt`, `$le`, `$gt`, `$ge`) or a `$seq`
+  membership whose literal is an integer past ±(2^53 − 1) now answers as the
+  query engine does, which compares doubles: a member storing 2^60 matched no
+  `$eq` of 2^60, because SQLite read the document's digits
+  (`1152921504606847000`) as an integer other than the double and compared
+  exactly. Such a comparison reads the member as a double, and over an indexed
+  member whose column holds integers it no longer seeks its index
+  ([ARCHITECTURE](../ARCHITECTURE.md#the-type-truth-table)). A comparison with a
+  safe integer or a fraction keeps its statement and its seek. PostgreSQL
+  answered right and is unchanged. An external operand still compares exactly.
+- On PostgreSQL a read of an entity row whose `integer` member's `numeric`
+  column holds an integer a JavaScript number would round — one trusted SQL
+  wrote, `9007199254740993` — is now refused `JD2003` (class `data`) as SQLite
+  refuses it, where it read back as `9007199254740992`
+  ([POSTGRESQL](POSTGRESQL.md)). Everything within ±(2^53 − 1), every number
+  the store wrote, and every `number` member read as before; code that read
+  such a row repairs the stored value.
+
 ## Measured costs
 
 Exact identity stores complete canonical documents and model endpoints, so

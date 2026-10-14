@@ -420,8 +420,15 @@ what each does is its own documentation's job
 - [ ] **A rebuild that casts a number to text spells it as the engine does.**
   `5` is `5.0` on SQLite and `5` on PostgreSQL, a boolean is `1` or `0`. Wanted:
   one spelling.
-- [ ] **An integer past 2^53 is stored and cast exactly but read back as
-  `JD2003` on SQLite and rounded without a word on PostgreSQL.**
+- [ ] **An integer past 2^53 in an `integer` column answers differently on the
+  two engines.** A stored integer a JavaScript number would round is refused
+  `JD2003` on both where a row is read whole; but one the store wrote
+  (2**53+2, 2**60) reads back exactly on PostgreSQL (`numeric`) and is refused
+  on SQLite (`INTEGER`), whose create accepts it, and on PostgreSQL a native
+  statement that projects the member alone (`$return: '$it.v'`), an included
+  child, and change capture still read a rounding one as the nearest double.
+  Wanted: one answer for an integer past ±(2^53 − 1), at the write or at every
+  read.
 - [ ] **A retype check does not see a text number below the double range.**
   `1e-400`, which SQLite casts to `0.0`, passes; PostgreSQL's `0x10` and `1_000`
   spellings are refused although its cast reads them.
@@ -657,10 +664,14 @@ what each does is its own documentation's job
   index, and it still refuses the documents the column's type cannot hold. A plan that changes the union's types rebuilds the column; a plan between identical models
   plans nothing. Wanted: a plan, or an open option, that retypes the column from the live catalog without changing the model.
 - [ ] **On PostgreSQL the generated column of an indexed union member is the first type's, so a comparison of another kind reads the document and does not seek.** Wanted: a typed column per kind or an expression index.
-- [ ] **An integer past 2^53 compares exactly in SQLite where the engine compares doubles.** Observed identically before this change: on every indexed union member whose column is not
-  number-first (string-first, integer-first, boolean-first, `['integer','number']`), on an indexed `integer` column, and on every unindexed path, `$eq`, `$ne`, `$le` and `$gt` of
-  2**60 or -(2**62) differ from the engine; and a `$seq` membership list holding such an integer misses on every number column, number-first unions included (the list element is
-  an INTEGER and the column holds the double). Wanted: read both sides of a comparison as the doubles the engine compares, and bind a membership list's numbers as doubles.
+- [ ] **An external past 2^53 compares exactly in SQLite where the engine
+  compares doubles.** A comparison against an external holding an integer past
+  ±(2^53 − 1) (`$eq`/`$lt` of `$x` = 2**60 or -(2**62) over an unindexed
+  member, an indexed `integer` member or a string-first union) misses the row
+  the engine finds: the value is known only when it binds, and the statement
+  keeps the exact form so that a safe external still seeks (MULTI-INDEX OR).
+  Wanted: send such an external to the engine at bind time, as a value the
+  database cannot bind is, or a seekable double form.
 - [ ] **A grouping ordered by a key that reads a NULL as a present `null` runs
   in the engine.** A column whose policy reads a NULL as a present `null`
   (`null: 'null'`) used as a group key under an `$orderby` makes the engine

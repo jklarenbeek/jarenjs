@@ -20,7 +20,10 @@
  *  - `int8` and `numeric` arrive as STRINGS, because they can exceed
  *    what a double holds. The store's contract is JavaScript numbers —
  *    so they are converted. An `int8` outside the safe integer range
- *    refuses rather than returning a rounded key or count.
+ *    refuses rather than returning a rounded key or count; a `numeric`
+ *    table column's integer that the number rounds is noted on the row
+ *    (`ROUNDED_INTEGERS`), which an `integer` member refuses (`JD2003`, as
+ *    SQLite's driver refuses one).
  *  - `json`/`jsonb` arrive PARSED, because the client's type parsers
  *    are the host's configuration. Every document read is already
  *    `::text` (the dialect's `jsonText`), but a graph load's built
@@ -34,7 +37,7 @@
 import { chain, openConnection, baseCapabilities } from '../driver.js';
 import { createAsyncContext } from './async-context.js';
 import { postgresDialect } from '../dialects/postgres.js';
-import { DbCompileError, DbRuntimeError, wrapDriverError, connectionLost, isConnectionLoss } from '../errors.js';
+import { DbCompileError, DbRuntimeError, wrapDriverError, connectionLost, isConnectionLoss, ROUNDED_INTEGERS } from '../errors.js';
 import { workerQueue } from './worker-queue.js';
 import { rowBytes, queueFailure } from './worker-protocol.js';
 import { postgresSettings, postgresChannel, POSTGRES_DEFAULTS, POSTGRES_ADAPTER_OPTIONS } from './postgres-options.js';
@@ -65,6 +68,40 @@ export function postgresNotifications(source, options) {
  * and the two it hands back as text for width alone. The store's
  * contract is JavaScript numbers throughout. */
 const NUMERIC_OIDS = new Set([21, 23, 26, 700, 701, 1700]);
+/** `numeric`: an entity's `integer` and `number` columns, held exactly. */
+const NUMERIC_OID = 1700;
+
+/**
+ * The full decimal a double spells: its shortest spelling, with an
+ * exponent (`1e+21`) written out as the digits it stands for.
+ * @param {number} number
+ * @returns {string}
+ */
+function spelledInFull(number) {
+  const text = String(number);
+  const exponent = /^(-?)(\d)(?:\.(\d+))?e\+(\d+)$/.exec(text);
+  if (exponent === null) return text;
+  const digits = exponent[2] + (exponent[3] ?? '');
+  return exponent[1] + digits + '0'.repeat(Number(exponent[4]) - digits.length + 1);
+}
+
+/**
+ * Whether a stored `numeric`'s JavaScript number rounds the integer it
+ * holds: the number is neither the stored integer nor spelled by its digits
+ * (an integer past the double range is neither). Every integer within
+ * ±(2^53 - 1), every fraction, every integer a double holds exactly, and
+ * every integer a JavaScript number wrote (its digits ARE that number's
+ * spelling: 2^60 is written `1152921504606847000`) does not.
+ * @param {any} value - the wire's text
+ * @returns {boolean}
+ */
+function roundsInteger(value) {
+  if (typeof value !== 'string' || !/^-?\d+$/.test(value)) return false;
+  const number = Number(value);
+  return !Number.isSafeInteger(number)
+    && !(Number.isFinite(number) && (BigInt(value) === BigInt(number) || spelledInFull(number) === value));
+}
+
 /** `json` and `jsonb`: parsed by the client unless the host said
  * otherwise, and the row decoder reads text. */
 const JSON_OIDS = new Set([114, 3802]);
@@ -126,21 +163,34 @@ function converterFor(dataTypeID) {
  * Normalize a result's rows in place. Nothing is copied where no column
  * needs converting, which is the common case: a document read is
  * already text and a key is already a string.
- * @param {{ rows?: any[], fields?: { name: string, dataTypeID: number }[] }} result
+ * @param {{ rows?: any[], fields?: { name: string, dataTypeID: number, tableID?: number }[] }} result
  * @returns {any[]}
  */
 function normalizeRows(result) {
   const rows = result.rows ?? [];
   const fields = result.fields ?? [];
-  /** @type {{ name: string, convert: (value: any) => any }[]} */
+  /** @type {{ name: string, convert: (value: any) => any, stored: boolean }[]} */
   const converters = [];
   for (const field of fields) {
     const convert = converterFor(field.dataTypeID);
-    if (convert !== null) converters.push({ name: field.name, convert });
+    // a `numeric` read straight from a table column (the server names its
+    // table) is a stored value: an integer its number rounds is noted on the
+    // row, which an `integer` member refuses as SQLite does (`JD2003`); one a
+    // statement computes — an aggregate, a cast of a document member — is the
+    // double nearest to it, as the engine reads the member it comes from
+    const stored = field.dataTypeID === NUMERIC_OID && Number.isInteger(field.tableID) && field.tableID !== 0;
+    if (convert !== null) converters.push({ name: field.name, convert, stored });
   }
   if (converters.length === 0) return rows;
   for (const row of rows) {
-    for (const { name, convert } of converters) row[name] = convert(row[name]);
+    for (const { name, convert, stored } of converters) {
+      const value = row[name];
+      if (stored && roundsInteger(value)) {
+        if (!Object.hasOwn(row, ROUNDED_INTEGERS)) Object.defineProperty(row, ROUNDED_INTEGERS, { value: {} });
+        row[ROUNDED_INTEGERS][name] = value;
+      }
+      row[name] = convert(value);
+    }
   }
   return rows;
 }

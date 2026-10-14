@@ -252,6 +252,26 @@ the store itself writes is canonical, so the store's own data groups as the
 engine groups. Reading the key as `double precision` was measured and made
 every number grouping slower, so it is not done.
 
+An entity's `integer` and `number` columns are `numeric`, which holds an
+integer past 2^53 exactly. An `integer` member read from its column is refused
+`JD2003` (class `data`, the reason SQLite's refusal of an integer its driver
+cannot hand over carries) when the JavaScript number it reads as would round
+it: the number is neither the stored integer nor spelled by its digits, as
+`9007199254740993` written by trusted SQL is. Every integer within
+±(2^53 − 1), every integer a double holds exactly and every integer a
+JavaScript number wrote (2^60 is stored as `1152921504606847000`) reads as the
+number, so the store's own data reads as before. SQLite refuses every integer
+past ±(2^53 − 1) its `INTEGER` column holds, the store's own writes included;
+PostgreSQL refuses only the read that would change the value. A `number`
+member reads the double nearest to its column's value, as SQLite's `REAL`
+column holds it, and so does a `numeric` a statement computes (an aggregate, a
+cast of a document member), as the engine reads the member it comes from. The
+driver tells a stored value from a computed one by the table the server names
+for a result column; a client that names none reads every `numeric` as the
+nearest double. The refusal is made where a row is read whole (`get`, `load`,
+`page`, a query that returns the entity); a native statement that projects the
+`integer` member alone still answers the nearest double.
+
 ## The writer lock and the lock family
 
 `store.transaction(fn, { mode: 'immediate' })` runs `BEGIN`, then takes the

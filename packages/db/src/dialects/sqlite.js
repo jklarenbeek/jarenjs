@@ -464,7 +464,8 @@ export const sqliteDialect = createDialect({
     ? 'COUNT(*)'
     : `${{ sum: 'SUM', avg: 'AVG', min: 'MIN', max: 'MAX' }[fn]}(${valueSql})`),
   // an integer text past 2^53 is stored as an INTEGER the driver refuses to
-  // hand back (JD2003), where the engine holds the double nearest to it
+  // hand back (JD2003) and compares exactly, where the engine holds and
+  // compares the double nearest to it
   numberRead: (sql) => `CAST(${sql} AS REAL)`,
   rowIdentity,
   // membership of the row identity in a bound list — the fetch of a

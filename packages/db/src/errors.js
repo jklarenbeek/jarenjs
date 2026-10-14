@@ -566,11 +566,42 @@ function resultCodeOf(error) {
   return null;
 }
 
-/** node:sqlite refuses to materialize an int64 that a Number would round.
- * Other host RangeErrors remain host errors. @param {any} error */
+/** node:sqlite refuses to materialize an int64 that a Number would round,
+ * and a driver that decodes a stored integer itself refuses one in the same
+ * shape ({@link integerReadFailure}). Other host RangeErrors remain host
+ * errors. @param {any} error */
 const isIntegerReadFailure = (error) => error?.code === 'ERR_OUT_OF_RANGE'
   && typeof error.message === 'string'
   && /^Value is too large to be represented as a JavaScript number: -?\d+$/.test(error.message);
+
+/**
+ * The refusal of a stored integer that a JavaScript number would round,
+ * spelled as node:sqlite raises it, so that every engine's read of one is
+ * classified alike: `JD2003`, class `data`, not retryable.
+ * @param {string} text - the stored integer's decimal digits, signed
+ * @returns {Error}
+ */
+export function integerReadFailure(text) {
+  const error = /** @type {any} */ (new RangeError(`Value is too large to be represented as a JavaScript number: ${text}`));
+  error.code = 'ERR_OUT_OF_RANGE';
+  return error;
+}
+
+/** Where a driver that decodes a stored number itself notes, on the row, each
+ * column whose stored integer the number it hands back rounds — by the
+ * stored digits. A column the store maps as an `integer` refuses such a value
+ * ({@link refuseRoundedInteger}); a `number` reads the nearest double. */
+export const ROUNDED_INTEGERS = Symbol('jaren.roundedIntegers');
+
+/**
+ * Refuse an `integer` column's value that its driver rounded
+ * ({@link ROUNDED_INTEGERS}), as SQLite's driver refuses one.
+ * @param {any} row @param {string} name - the column
+ */
+export function refuseRoundedInteger(row, name) {
+  const text = row[ROUNDED_INTEGERS]?.[name];
+  if (text !== undefined) throw integerReadFailure(text);
+}
 
 /** The text a database invariant's refusal starts with (MODEL-FORMAT §13). */
 export const INVARIANT_MARKER = 'jaren invariant:';

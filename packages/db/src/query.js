@@ -873,6 +873,7 @@ export function createQueryEngine(context) {
     table: physicalPlan.table,
     keyColumn: physicalPlan.keyColumn,
     docColumn: physicalPlan.docColumn,
+    doubleColumns: physicalPlan.doubleColumns,
   };
   /** The k-nearest counters `stats()` reports: how many rows the
    * fetch scored and how many candidates the cut kept, so a

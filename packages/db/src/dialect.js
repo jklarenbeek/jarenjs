@@ -986,10 +986,13 @@ export function createDialect(spec) {
     physicalDifferent: spec.physicalDifferent,
     numberCast: spec.numberCast ?? ((sql) => `CAST(${sql} AS REAL)`),
     /**
-     * A JSON number a statement hands BACK to the host, as the double the
-     * engine holds. An engine whose driver cannot return an integer past
-     * 2^53 as a JavaScript number casts it here; an engine that answers a
-     * number as it stores it leaves the expression alone.
+     * A JSON number a statement hands BACK to the host, or compares with
+     * an integer past 2^53, as the double the engine holds. An engine that
+     * holds an integer text past 2^53 as the exact integer — which its
+     * driver cannot return as a JavaScript number, and which compares
+     * unequal to the double the text spells — casts it here; an engine that
+     * answers and compares a number as it stores it leaves the expression
+     * alone.
      */
     numberRead: spec.numberRead ?? ((sql) => sql),
     distinct: spec.distinct ?? ((left, right) => `${left} IS NOT ${right}`),
