@@ -454,9 +454,13 @@ Semantics and composition:
   `$ref`-overrides-siblings rule stands, so a `$query` written beside a `$ref`
   is ignored on that node.
 - Query **runtime** errors (`JQ2xxx` — e.g. arithmetic on a non-number, the
-  EBV of a multi-item result) are validation **failures**, never throws; in
+  EBV of a multi-item result) are validation **failures**; in
   `collectErrors` mode the error params carry the `code` and the query
-  `docPath`. Malformed query documents and free externals other than
+  `docPath`. The one exception is `JQ2009`, a descendant segment (`$..`) over
+  a value nested deeper than 1000 levels: it decides nothing about the
+  instance, so it is thrown, never reported as a failure that `not` would
+  turn into success. *Upgrade: such an instance overflowed the call stack
+  with an uncoded `RangeError`.* Malformed query documents and free externals other than
   `root`/`path` fail fast at `compile()`.
 - Schema literals inside the query (`$valid`/`$assert`/`$as`,
   QUERY-FORMAT §8.11) compile against the **same validator instance**, so
@@ -488,6 +492,7 @@ shared factory rather than inheriting.
 | `contentValidation` | auto by draft | Whether `contentEncoding`/`contentMediaType` assert |
 | `propertyDependencies` | **`false`** | Whether the proposed `propertyDependencies` keyword asserts or is an unknown keyword |
 | `relativePointerDialect` | **`'handrews-01'`** | Which Relative JSON Pointer grammar `data`, `$data` and the `relative-json-pointer` format speak; `'bhutton-00'` also accepts index manipulation (`0+1`, `1-1/name`, `0-1#`) |
+| `maxReferenceDepth` | **`256`** | How many schema references one validation may nest before it throws `JK2001`; fixed by default so every host answers alike, raising it lets the host's call stack decide again |
 
 ### The return shape is `collectErrors`
 
@@ -601,17 +606,42 @@ type passes it; inside a `not` or an `anyOf` branch it is satisfiable. *Upgrade:
 compile error.*
 
 A schema whose `$ref` leads back to itself without reading the instance is refused when
-the schema is compiled. A reference to itself (`{ "$ref": "#" }`, with or without siblings,
+the schema is compiled, with a `SchemaCompileError` whose `code` is `JK0001`. A reference
+to itself (`{ "$ref": "#" }`, with or without siblings,
 `{ "properties": { "a": { "$ref": "#/properties/a" } } }`, or a `$defs` entry that refers to
-itself) fails with `$ref cycle: <id> refers to itself and never reads the instance`; a ring
-of definitions fails naming every hop, `$ref cycle: <a> -> <b> -> <a> never reads the
-instance`, whether or not anything refers to the ring. A ring of top-level
+itself) fails with `JK0001: $ref cycle: <id> refers to itself and never reads the instance`;
+a ring of definitions fails naming every hop, `JK0001: $ref cycle: <a> -> <b> -> <a> never
+reads the instance`, whether or not anything refers to the ring. A ring of top-level
 registrations is refused by `addSchema`, where the second member is added; a ring inside
 a registered document is refused when something compiled reaches it, and does not affect
 other compiles. *Upgrade: a reference to itself used to overflow the call stack when it validated, and a
-loop through other references compiled to the empty schema and answered `true`.*
-A reference that passes through `properties`, `items` or another applicator before it comes
-back is recursion and is unchanged.
+loop through other references compiled to the empty schema and answered `true`; the
+refusal was a plain `Error` whose message began `$ref cycle:`.*
+A root schema is refused the same way when the loop runs through the in-place applicator
+it evaluates first on every instance: `{ "allOf": [{ "$ref": "#" }] }` fails with
+`JK0001: $ref cycle: <id># -> <id>#/allOf/0 -> <id># never reads the instance`
+(the rule is in [ERROR-MESSAGES.md §9](docs/ERROR-MESSAGES.md#9-coded-refusals)).
+*Upgrade: it compiled, and every validation overflowed the call stack.* A loop that only
+some instances reach still compiles and answers every instance that does not reach it —
+`{ "anyOf": [{ "type": "string" }, { "$ref": "#" }] }` accepts `"a"` — and a reference that
+passes through `properties`, `items` or another applicator that descends into the
+instance before it comes back is recursion and is unchanged.
+
+One validation nests at most 256 schema references (a `$ref` resolved on first use, a
+`$dynamicRef` or a `$recursiveRef`); one more throws a `SchemaRuntimeError` whose `code`
+is `JK2001`, naming the reference, before the host's call stack can overflow. The
+`maxReferenceDepth` option moves the bound (`new JarenValidator({ maxReferenceDepth: 2000 })`,
+which also bounds `validateSchema`); a value that is not a positive safe integer is refused
+`JK0002` when a schema compiles. The default is fixed so the answer is the same on every
+host; raising it lets the host's call stack decide again. Every
+recursion passes such a reference, so the bound refuses an instance nested deeper than
+the schema follows (an array 257 levels deep against `{ "items": { "$ref": "#" } }`) and an
+instance that reaches a loop never reading it (`1` against the `anyOf` above). It throws
+rather than failing, because a `false` under `not` would read as success. *Upgrade: such
+an instance overflowed the call stack with an uncoded `RangeError`, and an instance
+nested between the bound and the host's stack limit used to validate, and validates again
+with `maxReferenceDepth` raised; the default is fixed so the answer is the same on every
+host.*
 
 An uncompilable reference in the `data` keyword (`{ "data": { "minimum": "abc" } }`) is
 refused when the schema is compiled, as it is for `$data`. *Upgrade: the keyword compiled

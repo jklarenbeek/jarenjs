@@ -54,11 +54,11 @@ export function isRecursiveQueryCompileError(error) {
  * schema literals inside the query (`$valid`/`$assert`/`$as`) may `$ref`
  * schemas registered on that instance with `addSchema`. Malformed query
  * documents (`JQ0xxx`) and externals other than `root`/`path` throw here,
- * at schema compile time. At validation time the query never throws:
- * a `JsonQueryRuntimeError` (`JQ2xxx` - a data-shaped failure such as the
- * EBV of a multi-item result or arithmetic on a non-number) reports as a
- * validation failure whose error params carry the `code` and the query
- * `docPath`.
+ * at schema compile time. At validation time a `JsonQueryRuntimeError`
+ * (`JQ2xxx` - a data-shaped failure such as the EBV of a multi-item result
+ * or arithmetic on a non-number) reports as a validation failure whose
+ * error params carry the `code` and the query `docPath`; only `JQ2009`, a
+ * descendant segment past its nesting bound, is thrown.
  *
  * @param {object} schemaObj - The validation object
  * @param {object} jsonSchema - The JSON schema containing the '$query' keyword
@@ -110,10 +110,12 @@ export function compileQuerySchema(schemaObj, jsonSchema) {
       return query.ebv(data, ext) || addError(data, dataPath);
     }
     catch (e) {
-      // Validators must not throw on data: a runtime error is a failed
-      // assertion. Compile-time checks left JQ2003 (multi-item EBV) and
-      // JQ2001-class operator errors as the reachable conditions here.
-      if (e instanceof JsonQueryRuntimeError)
+      // A data-shaped runtime error (JQ2003 multi-item EBV, a JQ2001-class
+      // operator error) is a failed assertion. An execution limit (JQ2009: a
+      // descendant segment past its nesting bound) decides nothing about the
+      // instance, so it is thrown: folded into a failure, `not` would turn it
+      // into success.
+      if (e instanceof JsonQueryRuntimeError && e.code !== 'JQ2009')
         return addError(data, dataPath, e.code, e.docPath);
       throw e;
     }

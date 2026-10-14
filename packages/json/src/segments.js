@@ -20,6 +20,8 @@ import {
   CC_0,
   isDigitCode,
 } from '@jarenjs/core/scan';
+import { DATA_DEPTH_CEILING } from './errors.js';
+import { JsonQueryRuntimeError } from './query/errors.js';
 
 /**
  * Sentinel for the absence of a value ("Nothing" in RFC 9535 terms), as
@@ -579,17 +581,77 @@ export function compileSelectorNodeV(sel) {
   }
 }
 
-export function descendV(v, output, root, apply) {
-  apply(v, output, root);
-  if (Array.isArray(v)) {
-    for (let i = 0; i < v.length; i++)
-      descendV(v[i], output, root, apply);
+// The descendant walks recurse once per level of the data. The eager walks
+// (values and nodes mode) are synchronous, so one count covers them and every
+// walk a filter starts inside them; the lazy walk is a generator a consumer
+// may abandon mid-way, so it carries its depth as an argument instead. Each
+// walk compares with the ceiling its segment was compiled under.
+let descentDepth = 0;
+
+// The ceiling the segments compiled right now take: DATA_DEPTH_CEILING
+// unless a caller compiles under its own (withDescentCeiling). Module scope
+// like pendingResets: set and restored around one synchronous compile.
+let compileCeiling = DATA_DEPTH_CEILING;
+
+/**
+ * Run `compile` with the descendant segments it compiles bounded at
+ * `ceiling` levels of nesting instead of `DATA_DEPTH_CEILING`.
+ * @template T
+ * @param {number} ceiling - A positive safe integer
+ * @param {() => T} compile
+ * @returns {T}
+ */
+export function withDescentCeiling(ceiling, compile) {
+  const saved = compileCeiling;
+  compileCeiling = ceiling;
+  try {
+    return compile();
   }
-  else if (typeof v === 'object' && v !== null) {
-    for (const key in v) {
-      if (hasOwn(v, key))
-        descendV(v[key], output, root, apply);
+  finally {
+    compileCeiling = saved;
+  }
+}
+
+/**
+ * Refuse a descendant ceiling option that is not a positive safe integer.
+ * @param {unknown} value - The option, `undefined` or `null` when not given
+ * @param {string} name - The option's name, for the refusal
+ * @returns {number} the ceiling to compile under
+ */
+export function descentCeilingOption(value, name) {
+  if (value == null)
+    return DATA_DEPTH_CEILING;
+  if (!Number.isSafeInteger(value) || value < 1)
+    throw new TypeError(`${name} must be a positive safe integer`);
+  return value;
+}
+
+function descentTooDeep(ceiling) {
+  return new JsonQueryRuntimeError('JQ2009',
+    `a descendant segment reaches a value nested deeper than ${ceiling} levels`, '');
+}
+
+export function descendV(v, output, root, apply, ceiling) {
+  apply(v, output, root);
+  if (typeof v !== 'object' || v === null)
+    return;
+  if (descentDepth >= ceiling)
+    throw descentTooDeep(ceiling);
+  descentDepth++;
+  try {
+    if (Array.isArray(v)) {
+      for (let i = 0; i < v.length; i++)
+        descendV(v[i], output, root, apply, ceiling);
     }
+    else {
+      for (const key in v) {
+        if (hasOwn(v, key))
+          descendV(v[key], output, root, apply, ceiling);
+      }
+    }
+  }
+  finally {
+    descentDepth--;
   }
 }
 
@@ -609,9 +671,10 @@ function compileSelectorsV(seg) {
 export function compileSegmentV(seg) {
   const apply = compileSelectorsV(seg);
   if (seg.descendant) {
+    const ceiling = compileCeiling;
     return (input, output, root) => {
       for (let i = 0; i < input.length; i++)
-        descendV(input[i], output, root, apply);
+        descendV(input[i], output, root, apply, ceiling);
     };
   }
   return (input, output, root) => {
@@ -719,16 +782,20 @@ function compileSelectorNodeG(sel) {
   }
 }
 
-function* descendG(v, root, apply) {
+function* descendG(v, root, apply, depth, ceiling) {
   yield* apply(v, root);
+  if (typeof v !== 'object' || v === null)
+    return;
+  if (depth >= ceiling)
+    throw descentTooDeep(ceiling);
   if (Array.isArray(v)) {
     for (let i = 0; i < v.length; i++)
-      yield* descendG(v[i], root, apply);
+      yield* descendG(v[i], root, apply, depth + 1, ceiling);
   }
-  else if (typeof v === 'object' && v !== null) {
+  else {
     for (const key in v) {
       if (hasOwn(v, key))
-        yield* descendG(v[key], root, apply);
+        yield* descendG(v[key], root, apply, depth + 1, ceiling);
     }
   }
 }
@@ -747,8 +814,10 @@ export function compileSegmentG(seg) {
       for (let i = 0; i < fns.length; i++)
         yield* fns[i](v, root);
     };
-  if (seg.descendant)
-    return function* segmentDescendantG(v, root) { yield* descendG(v, root, apply); };
+  if (seg.descendant) {
+    const ceiling = compileCeiling;
+    return function* segmentDescendantG(v, root) { yield* descendG(v, root, apply, 0, ceiling); };
+  }
   return apply;
 }
 
@@ -905,17 +974,27 @@ export function compileSelectorNodeP(sel) {
   }
 }
 
-export function descendP(v, p, outV, outP, root, apply) {
+export function descendP(v, p, outV, outP, root, apply, ceiling) {
   apply(v, p, outV, outP, root);
-  if (Array.isArray(v)) {
-    for (let i = 0; i < v.length; i++)
-      descendP(v[i], p + '[' + i + ']', outV, outP, root, apply);
-  }
-  else if (typeof v === 'object' && v !== null) {
-    for (const key in v) {
-      if (hasOwn(v, key))
-        descendP(v[key], appendName(p, key), outV, outP, root, apply);
+  if (typeof v !== 'object' || v === null)
+    return;
+  if (descentDepth >= ceiling)
+    throw descentTooDeep(ceiling);
+  descentDepth++;
+  try {
+    if (Array.isArray(v)) {
+      for (let i = 0; i < v.length; i++)
+        descendP(v[i], p + '[' + i + ']', outV, outP, root, apply, ceiling);
     }
+    else {
+      for (const key in v) {
+        if (hasOwn(v, key))
+          descendP(v[key], appendName(p, key), outV, outP, root, apply, ceiling);
+      }
+    }
+  }
+  finally {
+    descentDepth--;
   }
 }
 
@@ -929,9 +1008,10 @@ export function compileSegmentP(seg) {
         fns[i](v, p, outV, outP, root);
     };
   if (seg.descendant) {
+    const ceiling = compileCeiling;
     return (inV, inP, outV, outP, root) => {
       for (let i = 0; i < inV.length; i++)
-        descendP(inV[i], inP[i], outV, outP, root, apply);
+        descendP(inV[i], inP[i], outV, outP, root, apply, ceiling);
     };
   }
   return (inV, inP, outV, outP, root) => {

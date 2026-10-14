@@ -1,5 +1,6 @@
 //@ts-check
 
+import { boundReference } from './errors.js';
 import {
   isObjectType,
   getStringType,
@@ -121,7 +122,7 @@ function compileRecursiveRef(schemaObj, jsonSchema) {
   // If it does, we need to use the dynamic scope; otherwise, treat like normal $ref
   const useDynamicScope = isObjectClass(initialTargetSchema) && initialTargetSchema.$recursiveAnchor === true;
 
-  return function validateRecursiveRef(data, dataPath, dataRoot) {
+  return boundReference(schemaObj.path, schemaObj.options.maxReferenceDepth, function validateRecursiveRef(data, dataPath, dataRoot) {
     if (useDynamicScope) {
       // The initial target has $recursiveAnchor: true
       // Look up the dynamic scope for the outermost $recursiveAnchor
@@ -141,7 +142,7 @@ function compileRecursiveRef(schemaObj, jsonSchema) {
     }
 
     return addError(data, dataPath);
-  };
+  });
 }
 
 /**
@@ -173,7 +174,7 @@ function compileDynamicAnchorRef(schemaObj, jsonSchema) {
   // also names a resource. Plain-name fragments use the same dynamic lookup
   // for relative, absolute and fragment-only references.
   if (anchorName?.startsWith('/')) {
-    return function validateDynamicRefPointer(data, dataPath, dataRoot) {
+    return boundReference(schemaObj.path, schemaObj.options.maxReferenceDepth, function validateDynamicRefPointer(data, dataPath, dataRoot) {
       let targetObj;
       try {
         targetObj = root.resolveObject(initialTargetUri, baseUri, { $ref: initialTargetUri });
@@ -183,7 +184,7 @@ function compileDynamicAnchorRef(schemaObj, jsonSchema) {
       return targetObj
         ? targetObj.validate(data, dataPath, dataRoot)
         : addError(data, dataPath);
-    };
+    });
   }
 
   // Look up the initial target schema by its URI
@@ -196,7 +197,7 @@ function compileDynamicAnchorRef(schemaObj, jsonSchema) {
   // If it does, we need to use the dynamic scope; otherwise, treat like normal $ref
   const hasDynamicAnchor = isObjectClass(initialTargetSchema) && initialTargetSchema.$dynamicAnchor === anchorName;
 
-  return function validateDynamicRef(data, dataPath, dataRoot) {
+  return boundReference(schemaObj.path, schemaObj.options.maxReferenceDepth, function validateDynamicRef(data, dataPath, dataRoot) {
     if (hasDynamicAnchor) {
       // The initial target has matching $dynamicAnchor
       // Look up the dynamic scope for the outermost $dynamicAnchor with this name
@@ -243,7 +244,7 @@ function compileDynamicAnchorRef(schemaObj, jsonSchema) {
     }
 
     return addError(data, dataPath);
-  };
+  });
 }
 
 function compileRequired(schemaObj, jsonSchema) {

@@ -19,6 +19,14 @@ import { CodedError } from '@jarenjs/core/errors';
 export const NESTING_CEILING = 256;
 
 /**
+ * The deepest data nesting the package's recursive walkers descend - the
+ * JSONPath descendant segment (`..`) and the canonical serializer - before
+ * they refuse the value instead of overflowing the host's call stack. Fixed,
+ * so a refusal is the same on every host.
+ */
+export const DATA_DEPTH_CEILING = 1000;
+
+/**
  * Base for errors that carry a stable `code` and a `docPath`, an RFC
  * 6901 JSON Pointer into the offending document. A wrapped error is
  * exposed through the native `cause` option when one is given. This is

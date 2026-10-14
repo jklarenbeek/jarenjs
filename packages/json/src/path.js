@@ -39,6 +39,8 @@ import {
   runSegmentsP,
   scanArrayIndex,
   appendName,
+  withDescentCeiling,
+  descentCeilingOption,
 } from './segments.js';
 import {
   parseJSONPointer,
@@ -295,6 +297,11 @@ function functionTableOf(options) {
  * @property {Record<string, JSONPathFunction>} [pathFunctions] - Custom
  *   function extensions, by name. A name must match the RFC's
  *   `function-name` production and must not redefine a built-in.
+ * @property {number} [maxDescentDepth] - The deepest nesting a descendant
+ *   segment descends before the query throws `JQ2009` (default 1000).
+ *   Fixed by default so the answer is the same on every host; a larger
+ *   value lets the host's call stack decide again. Not a positive safe
+ *   integer: a `TypeError` when the query compiles.
  */
 
 /**
@@ -994,11 +1001,18 @@ export function parseJSONPath(source, options = undefined) {
  * - `query.ast` - the parsed query AST (deeply frozen; the lazily
  *   compiled path mode must agree with the eagerly compiled value mode)
  *
+ * A descendant segment descends at most `options.maxDescentDepth` levels
+ * of nesting (default 1000); the returned functions refuse a value nested
+ * deeper with a `JsonQueryRuntimeError` `JQ2009` (the walks a filter
+ * starts inside a descent count toward the same bound in values and
+ * nodes mode).
+ *
  * @param {string} source - The JSONPath expression
  * @param {JSONPathOptions} [options] - Compile options
  * @returns {JSONPathQuery} The compiled query function
  * @throws {JSONPathSyntaxError} When the query is not valid RFC 9535
- * @throws {TypeError} When `options.pathFunctions` is not a valid registry
+ * @throws {TypeError} When `options.pathFunctions` is not a valid registry,
+ *   or `options.maxDescentDepth` is not a positive safe integer
  * @example
  * const q = compileJSONPath('$.store.book[?@.price < 10].title');
  * q(data); // ['Sayings of the Century', 'Moby Dick']
@@ -1007,6 +1021,7 @@ export function parseJSONPath(source, options = undefined) {
 export function compileJSONPath(source, options = undefined) {
   const ast = deepFreeze(parseJSONPath(source, options));
   const segments = ast.segments;
+  const ceiling = descentCeilingOption(options?.maxDescentDepth, 'options.maxDescentDepth');
 
   let values, first, exists, iterate;
   if (isSingularSegments(segments)) {
@@ -1027,7 +1042,7 @@ export function compileJSONPath(source, options = undefined) {
     };
   }
   else {
-    const segs = segments.map(compileSegmentV);
+    const segs = withDescentCeiling(ceiling, () => segments.map((seg) => compileSegmentV(seg)));
     values = (data) => runSegmentsV(segs, data, data);
     // the lazy chain is a second compilation of the same selectors, so
     // it is built on first use - a query that only ever calls values()
@@ -1035,7 +1050,7 @@ export function compileJSONPath(source, options = undefined) {
     let gens = null;
     iterate = (data) => {
       if (gens === null)
-        gens = segments.map(compileSegmentG);
+        gens = withDescentCeiling(ceiling, () => segments.map((seg) => compileSegmentG(seg)));
       return runSegmentsG(gens, 0, data, data);
     };
     first = (data) => {
@@ -1049,7 +1064,7 @@ export function compileJSONPath(source, options = undefined) {
   let segsP = null;
   function runNodes(data) {
     if (segsP === null)
-      segsP = segments.map(compileSegmentP);
+      segsP = withDescentCeiling(ceiling, () => segments.map((seg) => compileSegmentP(seg)));
     return runSegmentsP(segsP, data, '$', data);
   }
 
@@ -1089,13 +1104,18 @@ const boundedCacheFor = () => createBoundedCache(512);
  * @param {JSONPathOptions} [options] - Compile options
  * @returns {any[]} Array of matched values
  * @throws {JSONPathSyntaxError} When the query is not valid RFC 9535
+ * @throws {JsonQueryRuntimeError} `JQ2009` when a descendant segment
+ *   reaches a value nested deeper than `options.maxDescentDepth` (1000)
  */
 export function queryJSONPath(source, data, options = undefined) {
   const functions = options == null ? null : options.pathFunctions;
   const cache = functions == null
     ? QUERY_CACHE
     : REGISTRY_CACHES.getOrCreate(functions, boundedCacheFor);
-  const query = cache.getOrCreate(source, (src) => compileJSONPath(src, options));
+  // a non-default descent bound compiles differently, so it keys apart
+  const depth = options == null ? null : options.maxDescentDepth;
+  const key = depth == null ? source : `${source}\u0000${String(depth)}`;
+  const query = cache.getOrCreate(key, () => compileJSONPath(source, options));
   return query(data);
 }
 

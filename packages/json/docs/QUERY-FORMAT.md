@@ -299,6 +299,12 @@ by RFC 9535 (children of an object in member order, of an array in index
 order; descendant traversal per RFC 9535 §2.5.2). That node sequence then
 flows through the query as an ordinary XQuery sequence.
 
+A descendant segment descends at most `limits.descentDepth` levels of
+nesting (default 1000), counting the descents a filter inside it starts: a
+value nested deeper is `JQ2009`, raised before the host's call stack can
+overflow. The default is fixed so the refusal is the same on every host;
+raising it lets the host's call stack decide again (§8.12).
+
 A variable-rooted path evaluates its segments against each item of the
 variable's bound sequence, in order, concatenating results. For the common
 case of a `$for` variable the binding is a single item.
@@ -1367,7 +1373,7 @@ accumulation.
   (`JQ2009`), checked after evaluation; `first()`, `exists()` and
   `ebv()` deliberately bypass it.
 
-The other two bound the **query** rather than its output:
+The other three bound the **query** and its descent rather than its output:
 
 - `steps` — bounds **expression-node evaluations** (`JQ2009`). A step is
   one node evaluation, not one primitive operation: a node that loops
@@ -1388,6 +1394,12 @@ The other two bound the **query** rather than its output:
   expression levels, even when `limits.depth` is omitted or larger.
   Nesting is checked while compiling, before the host stack can overflow;
   an associative chain flattened into its parent still adds no level.
+- `descentDepth` — bounds the **data nesting** a descendant path segment
+  descends (`JQ2009`, §5.1). Unlike the others it applies when omitted, at
+  1000 levels, so a deep document is refused the same way on every host
+  rather than wherever the host's call stack runs out; raising it lets the
+  stack decide again. It must be a positive safe integer, and `explain()`
+  does not report it.
 
 An unknown limit name, or a value that is not a positive integer, is a
 host programming error (`TypeError`), because an accepted-but-unenforced
@@ -2082,7 +2094,7 @@ a query error raised inside a formula keeps its own message, a reference in
 | `JQ2006` | Reference to an unbound external parameter (§9) | XPDY0002 |
 | `JQ2007` | Resource guard: an operator result exceeding an implementation limit (materialized `$range` over 1,000,000 items, or a lower `sequenceItems` limit, §8.9) | XPDY0130 |
 | `JQ2008` | Schema assertion failure: an item rejected by `$assert`'s schema, or a bound variable rejected by its `$as` schema (§6.8, §8.11) | XPTY0004 |
-| `JQ2009` | An execution limit exceeded: `limits.sequenceItems` on a phrase materialization, `limits.resultItems` at the query boundary, or `limits.steps` expression evaluations (§8.12) | XPDY0130 |
+| `JQ2009` | An execution limit exceeded: `limits.sequenceItems` on a phrase materialization, `limits.resultItems` at the query boundary, `limits.steps` expression evaluations (§8.12), or a descendant segment past `limits.descentDepth` levels of nesting, default 1000 (§5.1) | XPDY0130 |
 | `JQ2010` | A registered `$call` function threw (§8.12) | FOER0000 |
 | `JQ2011` | The input document is `undefined`, which is not a JSON value (§2.1) | XPDY0002 |
 | `JQ2012` | Lexical provider threw or returned an invalid result | — |

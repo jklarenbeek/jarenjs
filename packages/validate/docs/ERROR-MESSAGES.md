@@ -4,7 +4,8 @@
 message-key space, the `MessageSpec` value type, the `errorMessage`
 keyword, catalogs, and the resolution precedence chain implemented by
 `@jarenjs/validate` (src/messages.js) and mirrored by `@jarenjs/forms`
-(src/messages.js). Locale packs live in `@jarenjs/locales`.
+(src/messages.js), and the coded refusals the validator throws where it
+cannot answer (§9). Locale packs live in `@jarenjs/locales`.
 
 The design premise: **the validator and the forms engine are not the place
 where prose is born.** Every failure is identified by a stable message key
@@ -262,3 +263,55 @@ with no runtime dependency beyond the platform, and with full generality.
 in a major runtime. At that point, MF2 syntax could become a supported
 catalog *entry format* (compiled by `compileMessageCatalog`) without
 changing the catalog contract.
+
+## 9. Coded refusals
+
+A schema the validator cannot decide is not answered `true` or `false`: it
+is refused with a thrown error carrying a stable `code` (the suite's coded
+error contract, `@jarenjs/core/errors`). A refusal is never folded into a
+failed validation, because a `false` under `not` would read as success.
+`VALIDATE_CODES` is the runtime table of the codes below.
+
+| Code | Class | Meaning |
+|---|---|---|
+| `JK0001` | `SchemaCompileError` | A loop of references and in-place applicators never reads the instance: refused by `compile()` |
+| `JK0002` | `SchemaCompileError` | The `maxReferenceDepth` option is not a positive safe integer: refused when a schema compiles |
+| `JK2001` | `SchemaRuntimeError` | Validation nests schema references deeper than `maxReferenceDepth` (default 256): refused where the bound is crossed |
+
+**`JK0001` — a loop that never reads the instance.** A `$ref` that leads
+back to itself through `$ref`s alone is refused wherever it sits in the
+document. A root schema is also refused when following, from the root, the
+`$ref` (evaluated before its siblings) or the one in-place applicator a
+schema evaluates first on every instance — the first member of its only
+`allOf`, `anyOf` or `oneOf`, its only `not`, or its `if` beside a `then` or
+an `else`, with nothing else asserting beside it — comes back to a schema
+already on the way: such a validator decides nothing on any instance. The
+message names every schema location on the loop:
+
+```text
+JK0001: $ref cycle: http://loop.test/a# -> http://loop.test/a#/allOf/0 -> http://loop.test/a# never reads the instance
+```
+
+A loop that only some instances reach still compiles, and answers every
+instance that does not reach it: `{ "anyOf": [{ "type": "string" }, { "$ref": "#" }] }`
+accepts `"a"`, and is refused `JK2001` on `1`.
+
+**`JK2001` — the reference depth bound.** One validation enters at most
+`maxReferenceDepth` (default 256) nested schema references: a `$ref` resolved
+on first use, a `$dynamicRef` or a `$recursiveRef`. Every recursion through a schema passes one, so the bound
+holds an instance nested deeper than the schema can follow (an array 257
+levels deep against `{ "items": { "$ref": "#" } }`) and a loop that never
+descends into the instance alike, before the host's call stack can overflow.
+The default is fixed, so the refusal is the same on every host; a schema that
+descends several levels per reference admits a deeper instance, and one that
+validates a meta-schema reference per level admits a shallower one. The
+message names the reference where the bound was crossed.
+
+**`JK0002` — the option.** `new JarenValidator({ maxReferenceDepth: 2000 })`
+raises the bound for every schema that validator compiles, `validateSchema`
+included, so an application with legitimately deep data gets its answers
+back. Raising it hands the decision back to the host: past the default, a
+deep enough instance can overflow the call stack again, at a depth that
+differs from host to host. Anything but a positive safe integer is refused
+`JK0002` when a schema compiles; `null` or absent means the default.
+

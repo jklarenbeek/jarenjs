@@ -34,6 +34,8 @@ import {
   admitsPropertyDependencies,
 } from './schema-keywords.js';
 
+import { SchemaCompileError } from './errors.js';
+
 function encodeJsonPointerKey(key) {
   return encodeURIComponent(encodeJSONPointerSegment(key));
 }
@@ -371,14 +373,14 @@ export function resolveRefSchemaShallow(schemas, refUri, baseUri, opts = new Jso
 }
 
 /**
- * A loop of references that never reads the instance. The compile paths that
- * tolerate a reference not resolvable yet must not tolerate this one: no later
- * resolution changes it.
+ * A loop of references that never reads the instance (`JK0001`). The compile
+ * paths that tolerate a reference not resolvable yet must not tolerate this
+ * one: no later resolution changes it.
  */
-export class RefCycleError extends Error {
+export class RefCycleError extends SchemaCompileError {
   /** @param {string[]} ids - the ids on the loop, the first repeated at the end */
   constructor(ids) {
-    super(ids.length === 2 && ids[0] === ids[1]
+    super('JK0001', ids.length === 2 && ids[0] === ids[1]
       ? `$ref cycle: ${ids[0]} refers to itself and never reads the instance`
       : `$ref cycle: ${ids.join(' -> ')} never reads the instance`);
   }
@@ -537,4 +539,97 @@ export function resolveRefSchemaDeep(schemas, baseUri, refschema, opts = new Tra
   }
 
   throw new Error(`The json schema '${baseUri}' can not be resolved!`);
+}
+
+// Keywords that neither assert nor apply a subschema: a schema holding only
+// these beside one in-place applicator evaluates that applicator first.
+const INERT_KEYWORDS = new Set([
+  '$id', '$schema', '$anchor', '$dynamicAnchor', '$recursiveAnchor', '$defs', 'definitions',
+  '$comment', '$vocabulary', 'title', 'description', 'default', 'examples', 'deprecated',
+  'readOnly', 'writeOnly',
+]);
+
+/**
+ * The subschema a schema object evaluates first on every instance, without
+ * descending into it and before anything else it asserts can decide the
+ * answer: the first member of its only `allOf`, `anyOf` or `oneOf`, its only
+ * `not`, or its `if` when a `then` or an `else` is beside it. A schema with
+ * any other keyword answers before reaching it on some instance.
+ * @param {Record<string, any>} schema
+ * @returns {[string, any] | undefined} the subschema's pointer suffix and value
+ */
+function firstInPlaceSubschema(schema) {
+  let first;
+  for (const key of Object.keys(schema)) {
+    if (INERT_KEYWORDS.has(key)) continue;
+    if ((key === 'then' || key === 'else') && Object.hasOwn(schema, 'if')) continue;
+    if (first !== undefined) return undefined;
+    if (key === 'allOf' || key === 'anyOf' || key === 'oneOf') {
+      const members = schema[key];
+      if (!Array.isArray(members) || members.length === 0) return undefined;
+      first = [`${key}/0`, members[0]];
+    }
+    else if (key === 'not') first = ['not', schema.not];
+    else if (key === 'if' && (Object.hasOwn(schema, 'then') || Object.hasOwn(schema, 'else')))
+      first = ['if', schema.if];
+    else return undefined;
+  }
+  return first;
+}
+
+/**
+ * Refuses a root schema whose evaluation, on every instance, comes back to a
+ * schema it is still evaluating without having read the instance: following
+ * the `$ref` (always evaluated first) or the one in-place applicator each
+ * schema evaluates first returns to a schema already on the way. Such a
+ * validator decides nothing on any instance. A loop that only some instances
+ * reach is not refused here; the reference depth bound refuses it where an
+ * instance reaches it.
+ * @param {Map<string, any>} schemas - The schema map
+ * @param {string} rootId - The id the root schema is compiled under
+ * @param {any} root - The root schema
+ * @param {TraverseOptions} [opts]
+ * @throws {RefCycleError} naming the schema locations on the loop
+ */
+export function assertRootReadsInstance(schemas, rootId, root, opts = new TraverseOptions()) {
+  /** @type {Map<object, Map<string, number>>} */
+  const visited = new Map();
+  const ids = [];
+  let schema = root;
+  let base = rootId;
+  let at = rootId;
+  // Each step visits a new (schema, base) pair, of which a document has
+  // finitely many; the cap only ends a walk whose bases never repeat.
+  for (let steps = 0; steps <= schemas.size * 4 + 64; steps++) {
+    if (!isObjectClass(schema)) return;
+    if (isStringType(schema.$id) && !isStringWhiteSpace(schema.$id)) {
+      base = createJsonPointer(schema.$id, base, opts).id;
+      at = base;
+    }
+    const location = at.includes('#') ? at : at + '#';
+    let bases = visited.get(schema);
+    const seen = bases?.get(base);
+    if (seen !== undefined)
+      throw new RefCycleError([...ids.slice(seen), location]);
+    if (bases === undefined) visited.set(schema, bases = new Map());
+    bases.set(base, ids.length);
+    ids.push(location);
+
+    if (hasSchemaReference(schema, '$ref')) {
+      let target;
+      try {
+        target = resolveRefSchemaShallow(schemas, schema.$ref, base, opts);
+      }
+      catch {
+        return; // a target not loaded is reported where it is used
+      }
+      schema = target.schema;
+      base = at = target.id;
+      continue;
+    }
+    const first = firstInPlaceSubschema(schema);
+    if (first === undefined) return;
+    at = `${location}/${first[0]}`;
+    schema = first[1];
+  }
 }

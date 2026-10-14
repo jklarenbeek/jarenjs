@@ -68,12 +68,14 @@ delete it or fix it.
 - [ ] **Unprefixed `query` alias / vocabulary registration** — register `$query` through a custom vocabulary and meta-schema (json-everything style) instead of only as an extension keyword.
 - [ ] **A reference keeps instance locations on** — once a `$data`, `data` or `$query` reader exists anywhere in the compilation, a subtree holding a `$ref`, `$dynamicRef` or `$recursiveRef` still extends member and item locations even when what it references reads none; resolving references during the compile-time scan would let those subtrees skip too.
 
-- [ ] **Recursion depth is the JavaScript stack.** `canonicalizeJson`, JSONPath
-  `$..*`, validation of a deeply nested instance and a reference loop through
-  an applicator (`allOf: [{ "$ref": "#" }]`, `anyOf: [{ "type": "string" },
-  { "$ref": "#" }]` on a non-string) throw `RangeError` instead of a coded
-  refusal; a depth option would turn them into one.
-
+- [ ] **Other recursive walkers still recurse per level of data or schema.**
+  `equalsJson`, `stableStringify`, `createJSONPatch` and `createMergePatch` over a
+  100,000-deep value, and compiling a schema nested 20,000 levels deep, throw
+  `RangeError` instead of a coded refusal; the depth bounds that now guard
+  `canonicalizeJson`, the JSONPath descendant segment and validation (`JK2001`)
+  do not reach them. `canonicalizeJson`'s 1000-level bound is fixed (the
+  function takes no options), where validation (`maxReferenceDepth`) and the
+  descendant segment (`maxDescentDepth`, `limits.descentDepth`) can raise theirs.
 ## @jarenjs/view & @jarenjs/app
 
 Reusable host helpers now cover [bounded file tokens and route subscriptions](../packages/app/docs/APP-FORMAT.md),

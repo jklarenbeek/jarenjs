@@ -19,7 +19,7 @@
 // collected in order of first appearance.
 
 import { parseJSONPath, JSONPathSyntaxError, RE_JSONPATH_VARIABLE_HEAD } from '../path.js';
-import { isSingularSegments } from '../segments.js';
+import { isSingularSegments, descentCeilingOption } from '../segments.js';
 import { encodeJSONPointerSegment } from '../pointer.js';
 import { NESTING_CEILING } from '../errors.js';
 import { JsonQueryCompileError } from './errors.js';
@@ -1426,7 +1426,7 @@ export function validateDecimalFormats(value) {
 // The known limits (section 8.12). Only limits the engine actually
 // enforces are accepted - an accepted-but-unenforced limit would be a
 // silent false guarantee - and a refusal names the nearest known one.
-const LIMIT_NAMES = Object.freeze(['sequenceItems', 'resultItems', 'steps', 'depth']);
+const LIMIT_NAMES = Object.freeze(['sequenceItems', 'resultItems', 'steps', 'depth', 'descentDepth']);
 
 function validateLimits(value) {
   if (!isJsonObject(value))
@@ -1443,6 +1443,8 @@ function validateLimits(value) {
     resultItems: value.resultItems ?? null,
     steps: value.steps ?? null,
     depth: value.depth ?? null,
+    descentDepth: value.descentDepth == null ? null
+      : descentCeilingOption(value.descentDepth, 'options.limits.descentDepth'),
   });
 }
 

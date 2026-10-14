@@ -70,7 +70,7 @@ describe('query execution limits', function () {
     const refuses = (/** @type {any} */ limits, /** @type {string} */ message) =>
       assert.throws(() => compileJsonQuery('$', { limits }), (err) => err instanceof TypeError && err.message === message);
     refuses({ maxSteps: 3 },
-      'options.limits.maxSteps is not a known limit; the options are sequenceItems, resultItems, steps, depth');
+      'options.limits.maxSteps is not a known limit; the options are sequenceItems, resultItems, steps, depth, descentDepth');
     refuses({ step: 3 }, "options.limits.step is not a known limit — did you mean 'steps'?");
     refuses({ resultItem: 3 }, "options.limits.resultItem is not a known limit — did you mean 'resultItems'?");
     refuses({ steps: '3' }, 'options.limits.steps must be a positive integer');

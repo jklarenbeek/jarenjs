@@ -23,6 +23,7 @@
 // every input that is not JSON data is an error, never a guess.
 
 import { encodeJSONPointerSegment } from './pointer.js';
+import { DATA_DEPTH_CEILING } from './errors.js';
 
 const hasOwn = Object.hasOwn;
 
@@ -97,6 +98,9 @@ function serializeValue(value, path, stack) {
 
   if (stack.has(value))
     fail('a circular reference cannot be canonicalized', path);
+  // `stack` holds the containers open around this one: its size is the depth
+  if (stack.size >= DATA_DEPTH_CEILING)
+    fail(`a value nested deeper than ${DATA_DEPTH_CEILING} levels cannot be canonicalized`, path);
   stack.add(value);
 
   let out;
@@ -155,6 +159,11 @@ function serializeValue(value, path, stack) {
  * because a canonicalizer that quietly rewrote its input would produce
  * a signature over a document nobody sent.
  *
+ * A value nested deeper than 1000 levels (`DATA_DEPTH_CEILING`) is
+ * refused too, at the first container past the bound, before the
+ * host's call stack can overflow; the bound is the same on every host
+ * and, as the function takes no options, fixed.
+ *
  * @param {any} value - The JSON value to canonicalize
  * @returns {string} The canonical JSON text
  * @throws {JsonCanonicalizeError} When the value is not JSON data
@@ -172,6 +181,8 @@ export function canonicalizeJson(value) {
  * nothing is shared with the original, members come out in RFC 8785 order, and
  * a value that is not JSON data is refused before any copy exists. A
  * `__proto__` member survives as an own data member.
+ *
+ * The nesting bound of {@link canonicalizeJson} applies.
  *
  * @param {any} value - The JSON value to copy
  * @returns {any} A structurally equal, unshared value
@@ -193,7 +204,8 @@ const HEX = '0123456789abcdef';
  * collides. Asynchronous because it rides the platform's
  * `globalThis.crypto.subtle` (Node ≥ 20, Bun, browsers, workers); the
  * canonicalization itself is synchronous and its refusals
- * (`JsonCanonicalizeError`) surface as the rejection.
+ * (`JsonCanonicalizeError`, the nesting bound included) surface as the
+ * rejection.
  *
  * @param {any} value - The JSON value to identify
  * @returns {Promise<string>} 64 lowercase hex characters

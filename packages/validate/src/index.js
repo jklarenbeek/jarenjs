@@ -14,6 +14,7 @@ import {
   restoreSchemaRefsInMap,
   isRefCycleError,
   RefCycleError,
+  assertRootReadsInstance,
   resolveRefSchemaDeep,
   traverseOptionsFor,
   encodeJsonPointerPath,
@@ -34,6 +35,7 @@ import { registerFormatCompiler, registerFormatCompilers } from './format.js';
 import { mergeMap } from '@jarenjs/core/object';
 import { hasRecursiveAnchor, getDynamicAnchorName, collectDynamicAnchors, collectDynamicAnchorsDeep } from './dynamic-ref.js';
 import { isRecursiveQueryCompileError } from './query-keyword.js';
+import { boundReference, assertReferenceDepth, REFERENCE_DEPTH_CEILING } from './errors.js';
 import { TRAVERSE_SCHEMA_MAP_MAPS, detectSchemaDraft } from './schema-keywords.js';
 
 export {
@@ -55,6 +57,8 @@ export {
 
 
 export { TraverseOptions };
+
+export { SchemaCompileError, SchemaRuntimeError, VALIDATE_CODES } from './errors.js';
 
 /**
  * Ajv-style $data reference object.
@@ -247,6 +251,7 @@ export class ValidationOptions {
    * @param {'error'|'ignore'} [unknownFormats='ignore'] - What to do when an ASSERTING `format` names something no compiler is registered for: 'ignore' (the default, and what the specification requires) accepts it as an annotation; 'error' throws at COMPILE time. Never affects instance validation, and never applies where format is annotation-only anyway.
    * @param {boolean} [propertyDependencies=false] - Whether the `propertyDependencies` proposal keyword asserts. Off, it is an unknown keyword like any other; on, it applies in documents of draft 2020-12 (and the draft-next dialect) and in documents that declare no draft.
    * @param {'handrews-01'|'bhutton-00'} [relativePointerDialect='handrews-01'] - Which Relative JSON Pointer grammar the `data` and `$data` keywords and the `relative-json-pointer` format speak: `'handrews-01'` is draft-handrews-relative-json-pointer-01 (what the format suite asserts); `'bhutton-00'` is draft-bhutton-relative-json-pointer-00, which also accepts index manipulation (`0+1`, `1-1/name`, `0-1#`). Any other value is a TypeError when a schema compiles.
+   * @param {number} [maxReferenceDepth=256] - The deepest nesting of schema references one validation enters before it throws `JK2001` (a positive safe integer, else `JK0002` when a schema compiles). Fixed by default so the answer is the same on every host; raising it lets the host's call stack decide again.
    */
   constructor(
     skipErrors = true,
@@ -259,7 +264,8 @@ export class ValidationOptions {
     messages = true,
     unknownFormats = 'ignore',
     propertyDependencies = false,
-    relativePointerDialect = 'handrews-01'
+    relativePointerDialect = 'handrews-01',
+    maxReferenceDepth = REFERENCE_DEPTH_CEILING
   ) {
     /** @type {boolean} Whether to stop at first error or continue */
     this.skipErrors = skipErrors;
@@ -283,6 +289,8 @@ export class ValidationOptions {
     this.propertyDependencies = propertyDependencies;
     /** @type {'handrews-01'|'bhutton-00'} The Relative JSON Pointer grammar of `data`, `$data` and the `relative-json-pointer` format */
     this.relativePointerDialect = relativePointerDialect;
+    /** @type {number} The deepest nesting of schema references one validation enters */
+    this.maxReferenceDepth = maxReferenceDepth;
   }
 }
 
@@ -517,6 +525,7 @@ export class ValidationRoot {
     this.#formats = formats;
 
     assertRelativePointerDialect(opts.relativePointerDialect);
+    assertReferenceDepth(opts.maxReferenceDepth);
     this.#options = opts;
     this.#traverse = traverseOptionsFor(traverse, opts.propertyDependencies);
     this.#owner = owner;
@@ -972,8 +981,9 @@ export class ValidationObject {
     // and list.items has $dynamicRef that should resolve to root.$defs.foo's anchor.
     const sourceDynamicAnchors = draftVersion >= 2020 ? collectDynamicAnchors(schema) : [];
 
-    // Since refs are now pre-compiled at compile time,
-    // we should always find the target immediately
+    // A target already built is called directly. A target still under
+    // construction - a reference back into a schema that encloses this one -
+    // or not built yet is resolved when it is first used, below.
     const resolved = root.unresolvedObject(ref);
     if (resolved != null) {
       const refValidator = resolved.validate;
@@ -1071,7 +1081,9 @@ export class ValidationObject {
       return refValidator;
     }
 
-    // Fallback for edge cases (e.g., recursive refs that weren't pre-compiled)
+    // Resolved on first use. Every loop through references passes at least
+    // one reference compiled here: the one that closes the loop finds its
+    // target still under construction.
     // Pre-bind values to avoid closure overhead in hot path
     const rootRef = root;
     const boundRef = ref;
@@ -1084,7 +1096,10 @@ export class ValidationObject {
     // Memoized state of the first resolution - the target never changes.
     let resolvedState = null;
 
-    return wrapUnevaluated(self, schema, function resolveSchemaCompiler(data, dataPath, dataRoot) {
+    // Every loop through schemas passes a reference resolved on first use, so
+    // the reference depth bound holds a deep instance and a loop that never
+    // descends into it alike.
+    return wrapUnevaluated(self, schema, boundReference(path, root.options.maxReferenceDepth, function resolveSchemaCompiler(data, dataPath, dataRoot) {
       if (resolvedState === null) {
         const obj = rootRef.resolveObject(boundRef, boundRefBase, boundSchema);
         const resolvedSchema = obj.schema;
@@ -1151,7 +1166,7 @@ export class ValidationObject {
           rootRef.popDynamicAnchorValidator(enterAnchors[i].name);
         }
       }
-    });
+    }));
   }
 
   /** @type {ValidationRoot} The root validation context */
@@ -1434,7 +1449,7 @@ export class ValidatorOptions {
       /** @type {object[]} Initial schemas to register */
       this.schemas = opts.schemas || [];
       // If collectErrors is passed directly, create ValidationOptions with it
-      if (opts.collectErrors != null || opts.skipErrors != null || opts.useGrapheme != null || opts.contentValidation != null || opts.draftVersion != null || opts.formatAssertion != null || opts.messages != null || opts.unknownFormats != null || opts.propertyDependencies != null || opts.relativePointerDialect != null) {
+      if (opts.collectErrors != null || opts.skipErrors != null || opts.useGrapheme != null || opts.contentValidation != null || opts.draftVersion != null || opts.formatAssertion != null || opts.messages != null || opts.unknownFormats != null || opts.propertyDependencies != null || opts.relativePointerDialect != null || opts.maxReferenceDepth != null) {
         const collectErrors = opts.collectErrors ?? false;
         this.validation = new ValidationOptions(
           // collecting errors implies actually recording them
@@ -1451,7 +1466,8 @@ export class ValidatorOptions {
           opts.messages ?? true,
           opts.unknownFormats ?? 'ignore',
           opts.propertyDependencies ?? false,
-          opts.relativePointerDialect ?? 'handrews-01'
+          opts.relativePointerDialect ?? 'handrews-01',
+          opts.maxReferenceDepth ?? REFERENCE_DEPTH_CEILING
         );
       } else {
         /** @type {ValidationOptions} Validation behavior options */
@@ -1505,6 +1521,7 @@ export class ValidatorOptions {
  * @property {'error'|'ignore'} [unknownFormats] - What an ASSERTING `format` with no registered compiler does: 'ignore' (default, per spec) accepts it as an annotation, 'error' throws at compile time
  * @property {boolean} [propertyDependencies] - Assert the `propertyDependencies` proposal keyword (default false: it is an unknown keyword); applies in draft 2020-12 (and draft-next) documents and in documents that declare no draft
  * @property {'handrews-01'|'bhutton-00'} [relativePointerDialect] - The Relative JSON Pointer grammar of `data`, `$data` and the `relative-json-pointer` format: `'handrews-01'` (default) or `'bhutton-00'`, which also accepts index manipulation (`0+1`, `1-1/name`, `0-1#`)
+ * @property {number} [maxReferenceDepth] - The deepest nesting of schema references one validation enters before it throws `JK2001` (default 256, the same on every host; a larger value lets the host's call stack decide again). Also bounds `validateSchema`. Not a positive safe integer: `JK0002` when a schema compiles
  */
 
 /**
@@ -2041,7 +2058,10 @@ export class JarenValidator {
    * @template [T=unknown]
    * @param {JSONSchemaLike | boolean} schema - The schema to compile
    * @param {(JSONSchemaLike | boolean)[]} [schemas] - Additional schemas to reference during compilation
-   * @returns {TCollect extends true ? CompiledCollector : CompiledPredicate<T>} A validation function
+   * @returns {TCollect extends true ? CompiledCollector : CompiledPredicate<T>} A validation function;
+   *   it throws `SchemaRuntimeError` `JK2001` for an instance that nests more than 256 schema
+   *   references (a deep instance, or one that reaches a loop that never reads it)
+   * @throws {SchemaCompileError} `JK0001` when a loop of references never reads the instance
    * @example
    * const validate = validator.compile({
    *   type: 'object',
@@ -2064,6 +2084,9 @@ export class JarenValidator {
    */
   compile(schema, schemas = undefined) {
     const { origin, map } = JarenValidator.#traverseSchema(schema, schemas, this.#schemas, this.#traverse);
+    // A root that loops back to itself before reading the instance decides
+    // nothing on any instance: refused here rather than when it validates.
+    assertRootReadsInstance(map, origin, schema, this.#traverse);
 
     // Detect draft version from schema and update validation options
     const draftVersion = detectSchemaDraft(schema);
@@ -2108,7 +2131,8 @@ export class JarenValidator {
       existingValidation.messages ?? true,
       existingValidation.unknownFormats ?? 'ignore',
       existingValidation.propertyDependencies ?? false,
-      existingValidation.relativePointerDialect ?? 'handrews-01'
+      existingValidation.relativePointerDialect ?? 'handrews-01',
+      existingValidation.maxReferenceDepth ?? REFERENCE_DEPTH_CEILING
     );
 
     // Pre-compile all refs before returning the validator

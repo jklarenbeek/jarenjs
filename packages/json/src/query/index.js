@@ -18,6 +18,8 @@ import { normalizeQuery, deepFreezeCopy, NODE_KINDS } from './normalize.js';
 import { compileQueryRoot, UNBOUND } from './compile.js';
 import { EMPTY, Seq, ebv } from './runtime.js';
 import { queryRuntimeError } from './messages.js';
+import { withDescentCeiling } from '../segments.js';
+import { DATA_DEPTH_CEILING } from '../errors.js';
 
 export { JsonQueryCompileError, JsonQueryRuntimeError, QUERY_CODES } from './errors.js';
 export { queryMessagesEn, queryCatalogEn, renderQueryMessage } from './messages.js';
@@ -55,6 +57,12 @@ const hasOwn = Object.hasOwn;
  *   compile time (`JQ0011`). The language has no recursion, so the
  *   compiled closure tree's evaluation depth IS the document's static
  *   nesting: checking it once is exact and costs nothing to evaluate.
+ * @property {number} [descentDepth] - The deepest data nesting a
+ *   descendant path segment (`..`) descends before `JQ2009` (default
+ *   1000, a positive safe integer). Unlike the others it is set by
+ *   default: fixed so the answer is the same on every host; a larger
+ *   value lets the host's call stack decide again. Not reported by
+ *   `explain()`.
  */
 
 /**
@@ -232,8 +240,10 @@ export function compileJsonQuery(doc, options = {}) {
     normalizeQuery(doc, options, false);
   const { root, frameSize, externals, limits, stepSlot, usedOps, usedFunctions, usedCollations } =
     normalized;
-  const get = compileQueryRoot(root,
-    stepSlot < 0 ? null : { slot: stepSlot, limit: limits.steps });
+  // descendant segments compile under the query's own nesting bound
+  const get = withDescentCeiling(
+    limits !== null && limits.descentDepth !== null ? limits.descentDepth : DATA_DEPTH_CEILING,
+    () => compileQueryRoot(root, stepSlot < 0 ? null : { slot: stepSlot, limit: limits.steps }));
   const extCount = externals.length;
   const resultCap = limits !== null && limits.resultItems !== null ? limits.resultItems : 0;
 
