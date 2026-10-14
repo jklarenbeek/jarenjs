@@ -12,7 +12,9 @@
 
 import { toWord, toBase } from '@jarenjs/core/math';
 import { programmerEnv } from '../env.js';
-import { fit, isFiniteValue } from '../exact.js';
+import { fit, isFiniteValue, truncated } from '../exact.js';
+
+/** @typedef {import('../exact.js').ExactValue} ExactValue */
 
 export const BASES = ['HEX', 'DEC', 'OCT', 'BIN'];
 export const WORD_SIZES = [8, 16, 32, 64];
@@ -31,12 +33,13 @@ export const KEYPAD = [
 /**
  * The word a finite value stands for: truncated toward zero, then wrapped
  * to `wordBits` (two's complement when `signed`). An exact `bigint` is
- * wrapped as it is; a `Number` past 2^53 has already rounded.
- * @param {number | bigint} value @param {number} wordBits @param {boolean} signed
+ * wrapped as it is and a `Ratio` by its exact whole part; a `Number` past
+ * 2^53 has already rounded.
+ * @param {ExactValue} value @param {number} wordBits @param {boolean} signed
  * @returns {bigint}
  */
 function wordOf(value, wordBits, signed) {
-  return toWord(typeof value === 'bigint' ? value : BigInt(Math.trunc(value)), wordBits, signed);
+  return toWord(truncated(value), wordBits, signed);
 }
 
 /**
@@ -44,16 +47,16 @@ function wordOf(value, wordBits, signed) {
  * exact `bigint` once it is beyond 2^53, so what a programmer-mode result
  * commits as `ans` is the value the user saw rather than the unwrapped
  * float. A non-finite value has no word and is returned as it is.
- * @param {number | bigint} value @param {number} [wordBits] @param {boolean} [signed]
+ * @param {ExactValue} value @param {number} [wordBits] @param {boolean} [signed]
  * @returns {number | bigint}
  */
 export function wordExact(value, wordBits = 32, signed = false) {
-  return isFiniteValue(value) ? fit(wordOf(value, wordBits, signed)) : value;
+  return isFiniteValue(value) ? fit(wordOf(value, wordBits, signed)) : /** @type {number} */ (value);
 }
 
 /**
- * The four-base view of an integer value, a `Number` or an exact `bigint`.
- * @param {number | bigint} value @param {number} wordBits @param {boolean} signed
+ * The four-base view of a value, a `Number`, an exact `bigint` or a `Ratio`.
+ * @param {ExactValue} value @param {number} wordBits @param {boolean} signed
  * @returns {{ hex: string, dec: string, oct: string, bin: string }}
  */
 export function viewsOf(value, wordBits, signed) {
@@ -79,9 +82,9 @@ export function wordViews(value, wordBits = 32, signed = false) {
 }
 
 /**
- * The primary display of a value, a `Number` or an exact `bigint`, in the
- * currently-selected base.
- * @param {number | bigint} value @param {any} [state]
+ * The primary display of a value, a `Number`, an exact `bigint` or a
+ * `Ratio`, in the currently-selected base.
+ * @param {ExactValue} value @param {any} [state]
  * @returns {string}
  */
 export function formatWord(value, state) {

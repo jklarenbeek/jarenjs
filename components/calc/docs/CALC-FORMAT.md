@@ -36,6 +36,12 @@ postfix `! %` → primary. Power binds tighter than unary minus
 `parseExpression(toExpression(ast))` deep-equals `ast` across the fixture
 corpus, and `toExpression` is idempotent on its own output. Parentheses
 are emitted from precedence/associativity only where they change the parse.
+A number prints as the shortest decimal of its `Number`, except an integer
+beyond 2^53 that text would not read back as: it prints as the exact
+integer (`9007199254740993` and `0x7FFFFFFFFFFFFFFF` print as
+`9007199254740993` and `9223372036854775807`, where they printed the nearest
+double's `9007199254740992` and `9223372036854776000`), so the programmer
+environment compiles the printed text to the integer it compiled before.
 
 ## Compilation & evaluation
 
@@ -69,19 +75,48 @@ two safe values is the float operation it always was (`7/2` is `3.5`, `7/2*2`
 is `7`), and a function with no integer meaning (`sqrt`, `sin`, `!`,
 rounding to digits) takes the nearest `Number` of a big operand.
 
+**A division keeps its remainder.** `/` is division, not integer division,
+past 2^53 as below it: when an operand is beyond the safe range (a `bigint`,
+or a whole `Number` past it) or is itself such a fraction, and neither is a
+fractional `Number`, a quotient that is not whole is held as the exact
+fraction, so it multiplies back to the dividend as `7/2*2` is `7`:
+`(2^53+1)/2*2` is `9007199254740993` and `0xFFFFFFFFFFFFFFFF/2*2` displays
+`0xFFFF FFFF FFFF FFFF`, where the quotient was truncated and they were
+`9007199254740992` and `0xFFFF FFFF FFFF FFFE`. The fraction stays exact
+through `+ - * /`, unary `-`, `^` by a whole non-negative exponent, `abs`,
+`min` and `max`; `trunc`/`floor`/`ceil`/`round` of it are exact whole numbers
+(`round` half toward +∞, as `Math.round`); a word reads its whole part,
+truncated toward zero, as a word reads a `Number`, so the display and the
+committed `ans` are the word of the truncated quotient, as they were; a
+fractional `Number` operand (`0.5`), a root and every other float function
+take its nearest `Number`. A fraction too large for a double is `±Infinity`.
+Two safe values still divide as floats. Those answers changed with it:
+`ceil((2^53+1)/2)` and `round((2^53+1)/2)` are `4503599627370497`, they were
+`4503599627370496`, and `((2^53+1)/2)^2*4` is
+`81129638414606699710187514626049`, it was
+`81129638414606681695789005144064`.
+
 The public `compileExpr` and `evaluate` answer a `Number` whatever the
 environment is, so a big programmer value reads as the nearest double
 (`0xFFFFFFFFFFFFFFFF` evaluates to 18446744073709552000); the exact value is
 what the calculator component formats. The `Number` a programmer-mode
 `evaluate` answers past 2^53 changed as a defect fix: an exact power is
-rounded once (`10^23` is `1e+23`, it was `1.0000000000000001e+23`) and the
+rounded once (`10^23` is `1e+23`, it was `1.0000000000000001e+23`), the
 word operations are exact (`~~5` on a 64-bit word is `5`, it was
-`18446744073709552000`). The limits that remain: a division
-with a remainder whose quotient is beyond 2^53 is truncated, which is all a
-double that large holds of it; a scope value must be a `Number` (or, in the
-programmer environment, a decimal-integer string, below), and a `bigint` is
-refused, as it always was; and `toExpression` prints a literal beyond 2^53 as
-that nearest `Number`.
+`18446744073709552000`), and an exact fraction is rounded once to its
+nearest `Number` (`(2^55+6)/4` is `9007199254740994`, the double nearest
+`9007199254740993.5`, where the truncated quotient gave `9007199254740992`;
+`0x7FFFFFFFFFFFFFFF/0x1000000000000000` is `8`, it was `7`, and its word is
+still `7`).
+
+**A scope value** is a `Number`, or, in the programmer environment, also a
+`bigint` or a decimal-integer string (below), each read as the integer it
+holds, exactly (`x: 2n ** 63n - 1n` is `9223372036854775807`; a `bigint`
+within ±(2^53 − 1) is the `Number` it equals, and one past what a double
+holds is `±Infinity`). Every other environment computes in doubles and
+refuses a `bigint`, as it always did: `evaluate('x', { x: 5n })` answers
+`{ ok: false }` with the engine's message (`Cannot convert a BigInt value to
+a number`), rather than converting it.
 
 **The state slice keeps the exact word.** `ans` and `memory` stay JSON numbers
 (the nearest double). A programmer-mode word beyond ±(2^53 − 1) is also written

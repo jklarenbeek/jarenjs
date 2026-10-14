@@ -15,7 +15,8 @@
  * values may be exact integers past 2^53 (`programmerEnv`) sets `exact`:
  * the compiler then reads an integer literal as the integer written, and
  * its operators answer a `bigint` where a `Number` could not hold the
- * result (see `exact.js`).
+ * result, and a `Ratio` for a division on the exact path that is not whole
+ * (see `exact.js`).
  */
 
 import {
@@ -29,8 +30,10 @@ import {
 } from '@jarenjs/core/math';
 import { CONSTANTS } from './ast.js';
 import {
-  fit, toNumber, add, subtract, multiply, divide, power, negate, magnitude, extreme,
+  fit, toNumber, truncated, roundExact, add, subtract, multiply, divide, power, negate, magnitude, extreme,
 } from './exact.js';
+
+/** @typedef {import('./exact.js').ExactValue} ExactValue */
 
 /** Convert a user angle to radians per the scope's angle mode. */
 function toRad(x, scope) {
@@ -48,22 +51,20 @@ function fromRad(x, scope) {
 }
 
 /**
- * A word operand as a BigInt integer. A non-finite one has no integer to
- * become, and is refused in the calculator's terms rather than in the
- * engine's ("cannot be converted to a BigInt").
- * @param {number | bigint} v
+ * A word operand as a BigInt integer, truncated toward zero. A non-finite
+ * one has no integer to become, and is refused in the calculator's terms
+ * rather than in the engine's ("cannot be converted to a BigInt").
+ * @param {ExactValue} v
  * @returns {bigint}
  */
 function integer(v) {
-  if (typeof v === 'bigint') return v;
-  const n = +v;
-  if (!Number.isFinite(n)) throw new RangeError(`a word operand must be a finite number, got ${n}`);
-  return BigInt(Math.trunc(n));
+  if (typeof v === 'number' && !Number.isFinite(v)) throw new RangeError(`a word operand must be a finite number, got ${v}`);
+  return truncated(v);
 }
 
 /**
  * Coerce to a BigInt word using the scope's word size/sign.
- * @param {number | bigint} v
+ * @param {ExactValue} v
  * @param {any} scope
  * @returns {bigint}
  */
@@ -178,7 +179,7 @@ export function defaultEnv() {
  * and sign, the result in the programmer environment's canonical form (a
  * `Number` while it is safe, the exact `bigint` past that).
  * @param {(a: bigint, b: bigint, bits: number, signed: boolean) => bigint} op
- * @returns {(a: number | bigint, b: number | bigint, scope: any) => number | bigint}
+ * @returns {(a: ExactValue, b: ExactValue, scope: any) => number | bigint}
  */
 function wordBinop(op) {
   return (a, b, s) => fit(op(big(a, s), big(b, s), s?.wordBits ?? 32, s?.signed ?? false));
@@ -188,7 +189,7 @@ function wordBinop(op) {
  * A binary word operation whose second operand is a count (`<<`, `>>`,
  * `shl`, `shr`, `rol`, `ror`) rather than a word.
  * @param {(a: bigint, n: bigint, bits: number, signed: boolean) => bigint} op
- * @returns {(a: number | bigint, n: number | bigint, scope: any) => number | bigint}
+ * @returns {(a: ExactValue, n: ExactValue, scope: any) => number | bigint}
  */
 function countBinop(op) {
   return (a, n, s) => fit(op(big(a, s), integer(n), s?.wordBits ?? 32, s?.signed ?? false));
@@ -196,8 +197,8 @@ function countBinop(op) {
 
 /**
  * The function form of a binary operation.
- * @param {(a: number | bigint, b: number | bigint, scope: any) => number | bigint} op
- * @returns {(args: (number | bigint)[], scope: any) => number | bigint}
+ * @param {(a: ExactValue, b: ExactValue, scope: any) => ExactValue} op
+ * @returns {(args: ExactValue[], scope: any) => ExactValue}
  */
 function asFunction(op) {
   return (a, s) => op(a[0], a[1], s);
@@ -205,23 +206,24 @@ function asFunction(op) {
 
 /**
  * A float function applied to `Number` arguments, as the programmer
- * environment passes it a value that may be an exact `bigint`.
+ * environment passes it a value that may be an exact `bigint` or `Ratio`.
  * @param {(args: number[], scope: any) => number} fn
- * @returns {(args: (number | bigint)[], scope: any) => number}
+ * @returns {(args: ExactValue[], scope: any) => number}
  */
 function floating(fn) {
-  return (a, s) => fn(a.some((v) => typeof v === 'bigint') ? a.map(toNumber) : /** @type {number[]} */ (a), s);
+  return (a, s) => fn(a.every((v) => typeof v === 'number') ? /** @type {number[]} */ (a) : a.map(toNumber), s);
 }
 
 /**
- * A function that is the identity on a whole number: a `bigint` given alone
- * is its own answer, anything else is the float function's.
+ * A rounding function: an exact value (a `bigint` or a `Ratio`) given alone
+ * is rounded exactly by `how`, anything else is the float function's.
  * @param {(args: number[], scope: any) => number} fn
- * @returns {(args: (number | bigint)[], scope: any) => number | bigint}
+ * @param {'trunc' | 'floor' | 'ceil' | 'round'} how
+ * @returns {(args: ExactValue[], scope: any) => ExactValue}
  */
-function wholeIdentity(fn) {
+function exactRounding(fn, how) {
   const float = floating(fn);
-  return (a, s) => (a.length === 1 && typeof a[0] === 'bigint' ? a[0] : float(a, s));
+  return (a, s) => (a.length === 1 && typeof a[0] !== 'number' ? roundExact(a[0], how) : float(a, s));
 }
 
 const wordAnd = wordBinop(wAnd);
@@ -230,30 +232,30 @@ const wordShl = countBinop(wShl);
 const wordShr = countBinop(wShr);
 
 /**
- * @param {number | bigint} a @param {any} s
+ * @param {ExactValue} a @param {any} s
  * @returns {number | bigint}
  */
 function wordNot(a, s) {
   return fit(wNot(big(a, s), s?.wordBits ?? 32, s?.signed ?? false));
 }
 
-/** @type {Record<string, (a: any, scope: any) => number | bigint>} */
+/** @type {Record<string, (a: any, scope: any) => ExactValue>} */
 const WORD_UNOPS = { '-': negate, '+': (a) => a, '~': wordNot };
 
 /**
  * Word-aware programmer functions: `Number` while the result is safe, an
  * exact `bigint` past 2^53.
- * @type {Record<string, (args: any[], scope: any) => number | bigint>}
+ * @type {Record<string, (args: any[], scope: any) => ExactValue>}
  */
 const WORD_FUNCS = {
   ...Object.fromEntries(Object.entries(FLOAT_FUNCS).map(([name, fn]) => [name, floating(fn)])),
   abs: (a) => magnitude(a[0], mathf64_abs),
   min: (a) => extreme(a, true, mathf64_min),
   max: (a) => extreme(a, false, mathf64_max),
-  trunc: wholeIdentity(FLOAT_FUNCS.trunc),
-  floor: wholeIdentity(FLOAT_FUNCS.floor),
-  ceil: wholeIdentity(FLOAT_FUNCS.ceil),
-  round: wholeIdentity(FLOAT_FUNCS.round),
+  trunc: exactRounding(FLOAT_FUNCS.trunc, 'trunc'),
+  floor: exactRounding(FLOAT_FUNCS.floor, 'floor'),
+  ceil: exactRounding(FLOAT_FUNCS.ceil, 'ceil'),
+  round: exactRounding(FLOAT_FUNCS.round, 'round'),
   pow: asFunction(power),
   and: asFunction(wordAnd),
   or: asFunction(wordOr),
@@ -272,7 +274,7 @@ const WORD_ARITY = Object.freeze({
   and: TWO, or: TWO, xor: TWO, not: ONE, shl: TWO, shr: TWO, rol: TWO, ror: TWO, mod: TWO,
 });
 
-/** @type {Record<string, (a: any, b: any, scope: any) => number | bigint>} */
+/** @type {Record<string, (a: any, b: any, scope: any) => ExactValue>} */
 const WORD_BINOPS = {
   '+': add,
   '-': subtract,
@@ -285,7 +287,7 @@ const WORD_BINOPS = {
   '>>': wordShr,
 };
 
-/** @type {Record<string, (a: any, scope: any) => number | bigint>} */
+/** @type {Record<string, (a: any, scope: any) => ExactValue>} */
 const WORD_POSTOPS = {
   '!': (a) => Float64.factorial(toNumber(a)),
   '%': (a) => divide(a, 100),
@@ -297,8 +299,9 @@ const WORD_POSTOPS = {
  * scope's `wordBits`/`signed`. Its integers are exact past 2^53 (`exact`):
  * a value is a `number` while it is safe and a `bigint` beyond, so
  * `0xFFFFFFFFFFFFFFFF`, `2^64 - 1` and `not(0)` on a 64-bit word are the
- * words they name. Fractions, roots and every other float operation are
- * the float answers they always were.
+ * words they name, and a division on that exact path keeps its remainder
+ * as a `Ratio`. Fractions of safe values, roots and every other float
+ * operation are the float answers they always were.
  * @returns {any}
  */
 export function programmerEnv() {

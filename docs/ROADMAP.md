@@ -157,11 +157,6 @@ establish registry publication or downstream acceptance.
 ## @jarenjs/calc
 
 - [ ] **Interactive plots** — drag-to-rotate for x·y·z and pan/zoom for x·y are a `hydrate` enhancement (out of scope for v1; the static SVG render is complete).
-- [ ] **Programmer 64-bit remainders** — a division with a remainder whose
-  quotient is beyond 2^53 truncates (a double holds no fraction there), a scope
-  value must still be a `Number` or, in the programmer environment, a
-  decimal-integer string (a `bigint` is refused), and `toExpression` prints a
-  literal beyond 2^53 as its nearest double.
 - [ ] **More rate providers** — additional API-key-free tickers beyond CoinGecko and Binance; websocket/streaming rates are deliberately out of v1 (REST polling only).
 
 ## @jarenjs/play

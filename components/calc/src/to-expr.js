@@ -5,8 +5,12 @@
  * `ast` for every AST the parser can produce. Parentheses are emitted
  * from operator precedence/associativity only where removing them would
  * change the parse; numbers print in canonical decimal (the AST never
- * carried their original radix).
+ * carried their original radix). An integer beyond 2^53 prints as the
+ * exact integer it stands for, so an exact environment reads back the
+ * integer it compiled rather than the nearest double's digits.
  */
+
+import { exactOf } from './ast.js';
 
 /** Printing precedence per node, matching the grammar in parser/index.js. */
 const PREC = {
@@ -29,16 +33,25 @@ function precOf(node) {
 }
 
 /**
- * Print a number canonically (finite → `String`, non-finite → the named
- * constants the parser recognizes).
- * @param {number} v
+ * Print a numeric node canonically: non-finite as the named constants the
+ * parser recognizes, otherwise the shortest `String` of its value, unless
+ * the node stands for an exact integer that text would not read back as
+ * (`9007199254740993` is not `9007199254740992`, and the `Number` 2^64
+ * prints as `18446744073709552000`), when it prints that integer's digits.
+ * Exponent text (`1e+300`) reads back as the integer its double is.
+ * @param {{ value: number }} node
  * @returns {string}
  */
-function printNum(v) {
+function printNum(node) {
+  const v = node.value;
   if (Number.isNaN(v)) return 'nan';
   if (v === Infinity) return 'inf';
   if (v === -Infinity) return '-inf';
-  return String(v);
+  const text = String(v);
+  const exact = exactOf(node);
+  if (exact === undefined) return text;
+  const reads = text.includes('e') ? BigInt(v) : BigInt(text);
+  return reads === exact ? text : String(exact);
 }
 
 /**
@@ -50,7 +63,7 @@ export function toExpression(node) {
     throw new TypeError('toExpression: not an AST node');
   }
   switch (node.type) {
-    case 'num': return printNum(node.value);
+    case 'num': return printNum(node);
     case 'const': return node.name;
     case 'var': return node.name;
     case 'call':

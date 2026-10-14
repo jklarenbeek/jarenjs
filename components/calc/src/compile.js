@@ -11,7 +11,8 @@
  * false, error }` result so the app/render path never throws.
  *
  * An exact environment (`env.exact`, the programmer one) computes with a
- * `bigint` wherever a `Number` could not hold the integer. The public
+ * `bigint` wherever a `Number` could not hold the integer, and with a
+ * `Ratio` for a division on that exact path that is not whole. The public
  * `compileExpr` and `evaluate` answer a `Number` regardless, rounding such a
  * value once at the end; `compileExact` and `evaluateExact` answer the value
  * itself, for the calculator's word display.
@@ -22,6 +23,8 @@ import { defaultEnv } from './env.js';
 import { CalcParseError, errorAt } from './errors.js';
 import { siteOf, exactOf } from './ast.js';
 import { DECIMAL_INTEGER, fit, toNumber } from './exact.js';
+
+/** @typedef {import('./exact.js').ExactValue} ExactValue */
 
 /**
  * Compile an AST against an environment.
@@ -37,10 +40,11 @@ export function compileExpr(ast, opts = {}) {
 
 /**
  * Compile an AST and answer the value itself: a `bigint` where the
- * environment is exact and the integer is past what a `Number` holds.
+ * environment is exact and the integer is past what a `Number` holds, a
+ * `Ratio` where it is an exact fraction.
  * @param {any} ast
  * @param {{ env?: any }} [opts]
- * @returns {(scope?: any) => number | bigint}
+ * @returns {(scope?: any) => ExactValue}
  */
 export function compileExact(ast, opts = {}) {
   return build(ast, opts.env ?? defaultEnv());
@@ -49,7 +53,7 @@ export function compileExact(ast, opts = {}) {
 /**
  * @param {any} node
  * @param {any} env
- * @returns {(scope?: any) => number | bigint}
+ * @returns {(scope?: any) => ExactValue}
  */
 function build(node, env) {
   switch (node.type) {
@@ -65,18 +69,10 @@ function build(node, env) {
     }
     case 'var': {
       const name = node.name;
-      // an exact environment reads a decimal-integer string as the integer it
-      // spells, where `+v` would round it to a double past 2^53
-      const exact = env.exact === true;
+      const read = env.exact === true ? exactScopeValue : (/** @type {any} */ v) => +v;
       return (scope) => {
         const v = scope ? scope[name] : undefined;
-        if (v === undefined) return NaN;
-        if (exact && typeof v === 'string' && DECIMAL_INTEGER.test(v)) {
-          // only a word a Number cannot hold takes the integer: a safe one reads as `+v` does
-          const word = fit(BigInt(v));
-          if (typeof word === 'bigint') return word;
-        }
-        return +v;
+        return v === undefined ? NaN : read(v);
       };
     }
     case 'unary': {
@@ -109,6 +105,25 @@ function build(node, env) {
     default:
       throw new CalcParseError(`cannot compile node '${node.type}'`);
   }
+}
+
+/**
+ * A scope value as an exact environment reads it: a `bigint` or a
+ * decimal-integer string is the integer it holds, exactly, where `+v`
+ * would refuse the one and round the other to a double past 2^53; a safe
+ * integer is the `Number` `+v` gives (a `'-0'` string included), and any
+ * other value reads as `+v` does. Every other environment reads `+v`, so a
+ * `bigint` there is refused, as it always was.
+ * @param {any} v
+ * @returns {number | bigint}
+ */
+function exactScopeValue(v) {
+  if (typeof v === 'bigint') return fit(v);
+  if (typeof v === 'string' && DECIMAL_INTEGER.test(v)) {
+    const word = fit(BigInt(v));
+    if (typeof word === 'bigint') return word;
+  }
+  return +v;
 }
 
 /**
@@ -151,7 +166,7 @@ function checkArity(node, arity) {
 /**
  * @typedef {object} ExactOk
  * @property {true} ok
- * @property {number | bigint} value
+ * @property {ExactValue} value
  */
 /**
  * @typedef {object} EvalErr
@@ -161,7 +176,8 @@ function checkArity(node, arity) {
 
 /**
  * Parse + compile + evaluate a source expression, error-safe. A value an
- * exact environment holds as a `bigint` is answered as the nearest `Number`.
+ * exact environment holds as a `bigint` or a `Ratio` is answered as the
+ * nearest `Number`, rounded once.
  * @param {string} source
  * @param {any} [scope]
  * @param {{ env?: any }} [opts]
@@ -175,7 +191,7 @@ export function evaluate(source, scope = {}, opts = {}) {
 /**
  * Parse + compile + evaluate a source expression, error-safe, answering the
  * value itself: a `bigint` where the environment is exact and the integer is
- * past what a `Number` holds.
+ * past what a `Number` holds, a `Ratio` where it is an exact fraction.
  * @param {string} source
  * @param {any} [scope]
  * @param {{ env?: any }} [opts]

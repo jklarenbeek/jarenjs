@@ -131,7 +131,21 @@ component's effects by name must register, as `calcEditEffects` does). A
 programmer-mode `evaluate` answer past 2^53 changed too: an exact power is
 rounded once and the word operations are exact, and a scope value written as a
 decimal-integer string (`ans: '18446744073709551615'`) is the integer it spells,
-where it was rounded to a double (see CALC-FORMAT).
+where it was rounded to a double (see CALC-FORMAT). A programmer division
+past 2^53 keeps its remainder as an exact fraction, so `(2^53+1)/2*2` is
+`9007199254740993` and `0xFFFFFFFFFFFFFFFF/2*2` displays
+`0xFFFF FFFF FFFF FFFF`, where the truncated quotient made them
+`9007199254740992` and `0xFFFF FFFF FFFF FFFE`; `evaluate` rounds such a
+fraction once (`0x7FFFFFFFFFFFFFFF/0x1000000000000000` is `8`, it was `7`),
+`ceil` and `round` of one are exact (`ceil((2^53+1)/2)` is `4503599627370497`,
+it was `4503599627370496`), and its power by a whole exponent is the exact
+power of the fraction (`((2^53+1)/2)^2*4` is `81129638414606699710187514626049`,
+it was `81129638414606681695789005144064`, four times the truncated
+quotient's square).
+A programmer-mode scope value may be a `bigint`, the integer it holds, where
+it was refused (other modes still refuse one); and `toExpression` prints an
+integer beyond 2^53 as the exact integer (`9007199254740993`, where it
+printed `9007199254740992`).
 
 See `docs/CALC-FORMAT.md` and `ARCHITECTURE.md` for the full contract.
 

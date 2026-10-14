@@ -34,13 +34,16 @@ constant-vs-variable factors.
   module-const sticky regexes, `fail → CalcParseError{line,column}`.
 - `ast.js` — monomorphic node constructors; `astEqual` for round-trip.
 - `to-expr.js` — canonical printer; `parseExpression(toExpression(ast))`
-  deep-equals `ast` (a fixed point) and is idempotent.
+  deep-equals `ast` (a fixed point) and is idempotent; an integer beyond
+  2^53 prints as the exact integer it stands for.
 - `env.js` / `compile.js` — the binding environments (float / programmer
   word-math) and the compile-to-closure second stage; `evaluate` is the
-  error-safe front door. `exact.js` is the programmer environment's integer
-  algebra: a `number`, or a `bigint` once a whole number leaves the safe
-  range, so a 64-bit result is exact; the public entry points still answer a
-  `Number`, and the component formats the exact value.
+  error-safe front door. `exact.js` is the programmer environment's exact
+  algebra: a `number`, a `bigint` once a whole number leaves the safe
+  range, or a `Ratio`, the exact fraction a division on that path answers
+  when it is not whole, so a 64-bit result is exact and a quotient keeps its
+  remainder; the public entry points still answer a `Number` (rounded once),
+  and the component formats the exact value's word.
 - `modes/*` — the five data-driven mode kernels (keypad + env + formatter).
   `financial` orchestrates `core/finance` (no formulas); `converter`
   orchestrates `core/convert` and `convertCurrency`; its one dimension core's
