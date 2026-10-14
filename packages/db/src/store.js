@@ -36,7 +36,8 @@ import { isPlainOptions, refuseUnknownMembers, refuseUnknownModelMembers, readOp
 import { canonicalKeyText, namesNoNumber, noNumberKeyReason } from './key-text.js';
 import { planCollection, planEntity, planJoinTable, refuseNameCollisions, verifyShape, compileIndexPath, canonicalOf, creationOrder } from './ddl.js';
 import { translatePatch } from './patch-sql.js';
-import { createQueryEngine, createQueryState, createEntityQueryEngine, createLoadEngine } from './query.js';
+import { createQueryEngine, createQueryState, createEntityQueryEngine, createLoadEngine, refuseChain } from './query.js';
+import { sqliteDatabasePath } from './migration-target.js';
 import { CLOSED_UNDER, admitCursor, admitSyncCursor, createCursor, createSyncCursor, shareCursor } from './cursor.js';
 import { refuseUnsupportedPragmaKeys, resolvePragmaRequests, configurePragmas, PRAGMA_NAMES } from './pragmas.js';
 import { createMaintenance } from './maintenance.js';
@@ -1425,22 +1426,47 @@ function untrackedPageOptions(options) {
   return readOptions;
 }
 
+/** The database a connection reads, as a value two connections share
+ * exactly when they read one database: PostgreSQL's server address and
+ * port, database and schema (the dialect's migration identity statement);
+ * SQLite's canonical filename (absolute, symbolic links resolved by the
+ * engine). `null` where no second connection can name the database (a
+ * private in-memory one) or the dialect gives no identity.
+ * @param {any} connection @returns {any} value-or-promise of string or null */
+function databaseTarget(connection) {
+  const { dialect } = connection;
+  if (dialect.migration?.identity) {
+    return useStatementOnce(connection, dialect.migration.identity, (statement) => chain(statement.get([]),
+      (row) => (row === undefined || row === null ? null
+        : `${dialect.name}:${JSON.stringify([row.address, row.port, row.database, row.schema])}`)));
+  }
+  if (dialect.name !== 'sqlite' || typeof dialect.introspect?.pragma !== 'function') return null;
+  return chain(sqliteDatabasePath(connection), (path) => (path === null ? null : `sqlite:${path}`));
+}
+
 /**
  * The member every collection and entity view of a store carries its own
- * source under: `{ kind: 'collection' | 'entity', name }`, the same on the
- * store's view, a transaction's, the synchronous twin and any surface
- * spread from them. A chain built over a view reports it, so a reader
- * handed the chain can tell which rows its document names.
+ * source under: `{ kind: 'collection' | 'entity', name, store }`, the same
+ * on the store's view, a transaction's, the synchronous twin and any
+ * surface spread from them. `store` names the database the view reads,
+ * compared by value: SQLite's canonical filename, PostgreSQL's server,
+ * database and schema (as strings), so two stores over one database are
+ * one source and two databases are two; a database no second store can
+ * name (a private in-memory one) gets a symbol of the store's own. A
+ * chain built over a view reports it, so a reader handed the chain can
+ * tell which rows its document names.
  */
 export const STORE_SOURCE = Symbol.for('@jarenjs/db/store-source');
 
 /** The source a view carries under {@link STORE_SOURCE}.
+ * @param {string | symbol} store - the database the store reads
  * @param {'collection' | 'entity'} kind @param {string} name */
-const sourceOf = (kind, name) => Object.freeze({ kind, name });
+const sourceOf = (store, kind, name) => Object.freeze({ kind, name, store });
 
 /**
  * The asynchronous collection surface over a core.
- * @param {string} name - the collection
+ * @param {Readonly<{ kind: 'collection', name: string, store: string | symbol }>} source -
+ *   the collection, as the view carries it under {@link STORE_SOURCE}
  * @param {any} core
  * @param {Function | null} live - the store-level live registration
  *   for this collection (null when the store has no capture)
@@ -1448,9 +1474,9 @@ const sourceOf = (kind, name) => Object.freeze({ kind, name });
  *   the core's, as the store's profile lets a caller see it
  * @returns {any}
  */
-function asyncCollection(name, core, live, read) {
+function asyncCollection(source, core, live, read) {
   return Object.freeze({
-    [STORE_SOURCE]: sourceOf('collection', name),
+    [STORE_SOURCE]: source,
     stats: () => core.stats(),
     get: lift(read),
     insert: lift(core.insert),
@@ -1975,6 +2001,12 @@ export function openStore(model, options) {
   // the explicit option wins over the record's member, and an explicit
   // `null` is a deliberate "none" rather than a fall-through
   const zoneProvider = options.zoneProvider !== undefined ? options.zoneProvider : runtime.zoneProvider;
+  // the database every view of this store names in its STORE_SOURCE: the
+  // one it reads (databaseTarget), set by the open sequence, so two stores
+  // over one database are one source; a database no second store can name
+  // (in memory) keeps this token of the store's own
+  /** @type {string | symbol} */
+  let storeIdentity = Symbol('@jarenjs/db store');
 
   // API misuse (above) throws; a defective MODEL rejects, per the
   // asynchronous contract
@@ -3016,7 +3048,13 @@ export function openStore(model, options) {
           && Number(opened.capabilities.poolReaders) > 0)) return;
         throw parallelReadsError(options.driver.name, opened.capabilities.pooling === true ? ' opened no reader' : ' has no readers');
       };
-      const opening = () => { refuseParallelReadsHere(); return openSequence(); };
+      const opening = () => {
+        refuseParallelReadsHere();
+        return chain(databaseTarget(connection), (target) => {
+          if (target !== null) storeIdentity = target;
+          return openSequence();
+        });
+      };
       // every native text comparison, order and page assumes SQLite's BINARY
       // collation is code point order, which only a UTF-8 file makes true
       const requireUtf8Text = () => requireCodePointText(connection,
@@ -3278,6 +3316,7 @@ export function openStore(model, options) {
           };
           const registerCollectionLive = (core, document, liveOptions) => {
             readOptions(liveOptions, LIVE_OPTIONS, 'live');
+            refuseChain(document, `collection('${core.model.name}').live`);
             const externals = liveOptions?.externals ?? {};
             const keyed = core.model.keySegments !== null;
             const eventTime = normalizeEventTime(liveOptions, core.model.name);
@@ -3817,7 +3856,7 @@ export function openStore(model, options) {
                       ? (entity, doc) => tracker.register(entity, doc) : undefined),
                   explain: lift((document, queryOptions) => entityEngine.explain(document, queryOptions)),
                   root: entityRoot(name),
-                  [STORE_SOURCE]: sourceOf('entity', name),
+                  [STORE_SOURCE]: sourceOf(storeIdentity, 'entity', name),
                   scope: entityEngine,
                   relations: entityEngine.relations[name],
                 });
@@ -3860,7 +3899,7 @@ export function openStore(model, options) {
                   execute: (document, queryOptions) => entityEngine.execute(document, queryOptions),
                   explain: (document, queryOptions) => entityEngine.explain(document, queryOptions),
                   root: entityRoot(name),
-                  [STORE_SOURCE]: sourceOf('entity', name),
+                  [STORE_SOURCE]: sourceOf(storeIdentity, 'entity', name),
                   scope: entityEngine,
                   relations: entityEngine.relations[name],
                 });
@@ -3890,7 +3929,7 @@ export function openStore(model, options) {
           function boundCollection(name) {
             let handle = asyncHandles.get(name);
             if (handle === undefined) {
-              handle = asyncCollection(name, coreFor(name),
+              handle = asyncCollection(sourceOf(storeIdentity, 'collection', name), coreFor(name),
                 liveRegistry === null ? null : registerCollectionLive, profiledRead(name, coreFor(name)));
               asyncHandles.set(name, handle);
             }
@@ -3921,6 +3960,7 @@ export function openStore(model, options) {
                 'live queries require change capture — open the store with { capture: true }');
             }
             readOptions(liveOptions, LIVE_OPTIONS, 'live');
+            refuseChain(document, 'store.live');
             if (liveOptions?.eventTime !== undefined) {
               throw new DbCompileError('JD0053',
                 'live eventTime maintains a collection view — an entity document re-runs, '
@@ -5041,7 +5081,7 @@ export function openStore(model, options) {
               if (handle === undefined) {
                 const core = coreFor(name);
                 handle = Object.freeze({
-                  [STORE_SOURCE]: sourceOf('collection', name),
+                  [STORE_SOURCE]: sourceOf(storeIdentity, 'collection', name),
                   stats: () => core.stats(),
                   get: profiledRead(name, core),
                   insert: (/** @type {any} */ doc, /** @type {any} */ o) => core.insert(doc, o),

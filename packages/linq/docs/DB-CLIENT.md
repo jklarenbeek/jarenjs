@@ -908,17 +908,31 @@ built over collection 'users'`), and so is `client.entities.Post.live(…)`
 over an `entities.Tag` chain. It used to register the chain's document
 against the handle it was handed to, which ran it over the wrong rows; an
 upgrade that did that on purpose registers the chain on the handle it was
-built from, or writes the document by hand. The source is told by name
-within the model, so every view of it is the same source: the handle,
-`fromAsync(handle)`, the store's own collection or entity set, the
-synchronous twin under `store.sync`, the handle of a transaction client,
-and the same-named collection of another client opened over the model —
-all of which answered right and register as before. Every view of a
-store carries its own name (`STORE_SOURCE`, MODEL-FORMAT §10.1), so a
-view the client never built is told the same way: a chain over another
-store's `users`, or over a `users` view a finished transaction handed
-out, is `JL0005` on `orders.live()`; those used to register over
-`orders` too. A chain over rows in memory is `JL0005` naming them
+built from, or writes the document by hand. The source is told by its
+name and by the database its store reads, so every view of it over this
+database is the same source: the handle, `fromAsync(handle)`, the store's
+own collection or entity set, the synchronous twin under `store.sync`, the
+handle of a transaction client, and the same-named collection of another
+client opened over the same database (one SQLite file, or one PostgreSQL
+server, database and schema) — all of which answered right and register
+as before. Every view of a store carries its own name and the database it
+reads (`STORE_SOURCE`, MODEL-FORMAT §10.1), so a view the client never
+built is told the same way: a chain over another store's `users`, or over
+a `users` view a finished transaction handed out, is `JL0005` on
+`orders.live()`; those used to register over `orders` too. So is a chain
+over the same-named source of a store over another database — another
+file, another schema, or another private in-memory database
+(`live() on collection 'orders' was handed a chain built over collection
+'orders' of another store`): it registered its document over this
+store's rows and answered from them, never from its own. An upgrade that
+did that on purpose builds the chain from this client's handle; one that
+meant the other database's rows registers it there. A private in-memory
+database has no name a second store could share, so two stores over
+in-memory databases are always two sources. The client's own `live()`,
+and a transaction client's, refuse a chain over any entity of a store
+over another database the same way (`live() on the client was handed a
+chain built over entity 'Post' of another store`).
+A chain over rows in memory is `JL0005` naming them
 (`live() on collection 'orders' was handed a chain built over 2 rows in
 memory`): the handle ran its document over the handle's rows and ignored
 the chain's, so `orders.live(from(rows).where(…))` answered from
@@ -943,9 +957,13 @@ document, as `live()` does, and `query(chain)` yields its rows and
 the handles of a transaction client, do the same. The source rule is
 `live()`'s: a chain built over another collection or entity is `JL0005`
 (`execute() on collection 'orders' was handed a chain built over collection
-'users'`), and so is a chain over rows in memory; a chain over no rows
-(`from([])`), the same-named source of another client or a hand-written
-document is taken. A chain over rows in memory (`from(rows).where(…)`)
+'users'`), and so are a chain over the same-named source of a store over
+another database and a chain over rows in memory; a chain over no rows
+(`from([])`), over the same source from any view of a store over this
+database (another client of the same file or schema included), or a
+hand-written document is taken. A chain over the same-named source of a
+client over another database used to be taken and ran over this store's
+rows. A chain over rows in memory (`from(rows).where(…)`)
 used to run over the handle's rows with its own rows ignored, as
 `live()` ran it.
 `execute` answers the engine's shape for the document, not `toArray()`'s:
@@ -956,7 +974,12 @@ chain as a document with no clauses: `execute` answered `{}` and `query`
 `[{}]` on a collection, `explain` explained the whole collection, and an
 entity refused with `JD0033`. A call that relied on that passes a document
 (`chain.toDocument()` with `{ externals: chain.explain().bindings }`) or,
-better, the chain.
+better, the chain. The store's own members took a chain the same way
+after that — `client.store.collection('orders').execute(chain)` answered
+`{}` and `query(chain)` `[{}]` — and now refuse it with the store's
+`JD0039` naming the member and `toDocument()` (MODEL-FORMAT §10.1), on
+every view and for `execute`, `query`, `explain`, `live` and an entity
+set's `cursor` alike: the handle takes the chain, the store its document.
 
 **An `include()` chain is a load specification, not a live document.**
 `live()` over one is the store's `JD0033`: a load specification names no

@@ -572,6 +572,25 @@ function projectedTreeItems(project, row, prefix = '') {
   }
 
 /**
+ * Refuse a chain where a store member takes a query document (`JD0039`).
+ * A `@jarenjs/linq` chain keeps its clauses behind methods, so read as a
+ * document it was one with no clauses: `execute` answered `{}` and
+ * `query` `[{}]`. It is recognised by its `toDocument()` method (this
+ * package does not import linq), which no document can carry: a query
+ * document is JSON, and JSON holds no function.
+ * @param {any} document
+ * @param {string} spelling - the member, as the reason names it
+ */
+export function refuseChain(document, spelling) {
+  if (document !== null && typeof document === 'object' && typeof document.toDocument === 'function') {
+    throw new DbCompileError('JD0039',
+      `${spelling} takes a query document and was handed a chain — pass the chain's document, `
+      + 'toDocument() with { externals: chain.explain().bindings }, or hand the chain to the '
+      + 'handle it was built from, which runs it');
+  }
+}
+
+/**
  * The query engine for one collection.
  * @param {{ connection: any, state: any, collection: any,
  *   physicalPlan: any, profile?: any }} context - `collection` is the
@@ -1314,6 +1333,7 @@ export function createQueryEngine(context) {
   const execute = (document, options = undefined) => {
     const spelling = `collection('${collection.name}').execute`;
     readCallOptions(options, DOCUMENT_CALL_OPTIONS, spelling);
+    refuseChain(document, spelling);
     refuseWholeStreaming(options, spelling, 'query()');
     requireCallable(options, state.now);
     const { externals, strict, profile, pushdown } = callState(options);
@@ -1437,7 +1457,9 @@ export function createQueryEngine(context) {
    *   synchronous twin); the asynchronous one otherwise
    */
   const query = (document, options = undefined, cursorFactory = createCursor) => {
-    readCallOptions(options, DOCUMENT_CALL_OPTIONS, `collection('${collection.name}').query`);
+    const spelling = `collection('${collection.name}').query`;
+    readCallOptions(options, DOCUMENT_CALL_OPTIONS, spelling);
+    refuseChain(document, spelling);
     requireCallable(options, state.now);
     const { externals, strict, profile, pushdown } = callState(options);
     const entry = entryFor(document, strict, profile, pushdown);
@@ -1544,7 +1566,9 @@ export function createQueryEngine(context) {
    */
   const explain = (document, options = undefined) => {
     // the options of the call it explains, an execute's or a cursor's
-    readCallOptions(options, DOCUMENT_CALL_OPTIONS, `collection('${collection.name}').explain`);
+    const spelling = `collection('${collection.name}').explain`;
+    readCallOptions(options, DOCUMENT_CALL_OPTIONS, spelling);
+    refuseChain(document, spelling);
     const { externals, strict, profile, profileSource, pushdown } = callState(options);
     const entry = entryFor(document, strict, profile, pushdown);
     // the run this call would make: bound against the externals it was
@@ -2164,6 +2188,7 @@ export function createEntityQueryEngine(context) {
   const execute = (document, options = undefined) => {
     readCallOptions(options, DOCUMENT_CALL_OPTIONS, 'entity execute()');
     refuseWholeStreaming(options, 'entity execute()', 'cursor()');
+    refuseChain(document, 'entity execute()');
     return run(document, options);
   };
 
@@ -2341,6 +2366,7 @@ export function createEntityQueryEngine(context) {
    */
   const query = (document, options = undefined, register = undefined, cursorFactory = createCursor) => {
     readCallOptions(options, ENTITY_CURSOR_OPTIONS, 'entity cursor()');
+    refuseChain(document, 'entity cursor()');
     requireCallable(options, state.now);
     const { externals, strict, pushdown, profile } = callState(options);
     const entry = entryFor(document, pushdown, profile);
@@ -2426,6 +2452,7 @@ export function createEntityQueryEngine(context) {
   const explain = (document, options = undefined) => {
     // the options of the call it explains, an execute's or a cursor's
     readCallOptions(options, ENTITY_CURSOR_OPTIONS, 'entity explain()');
+    refuseChain(document, 'entity explain()');
     const { pushdown, profile, profileSource } = callState(options);
     const entry = entryFor(document, pushdown, profile);
     // bound against the externals it was given: a value the database

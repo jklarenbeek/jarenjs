@@ -4,13 +4,19 @@
  * handle registers only a chain over that collection or entity: a chain
  * over another one used to register its document against the handle it
  * was handed to, which ran it over the wrong rows. A chain over the same
- * name, from any view of it or from another client of the same model, and
- * a chain over no rows (a document builder), register as they always did;
- * a chain over rows in memory, whose rows were ignored, is refused.
+ * name, from any view of a store over the same database (another client
+ * of one file included), and a chain over no rows (a document builder),
+ * register as they always did; a chain over rows in memory, whose rows
+ * were ignored, is refused, and so is a chain over the same-named source
+ * of a store over another database (here: another in-memory one), which
+ * ran over this store's rows.
  */
 
 import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import { open } from '@jarenjs/linq/db';
 import { from, fromAsync } from '@jarenjs/linq';
@@ -160,7 +166,7 @@ describe('a collection handle registers only a chain over its own collection', (
     });
   });
 
-  it('a view of another store carries its own name, its synchronous twin too', async () => {
+  it('a view of another store is refused by its name, or by its store under the same name, its synchronous twin too', async () => {
     await withClient(async (client) => {
       const raw = await openStore(model, { driver: nodeDriver(), capture: true });
       try {
@@ -171,9 +177,19 @@ describe('a collection handle registers only a chain over its own collection', (
         const tags = from(raw.sync.entity('Tag')).where((t) => t.weight.gt(1));
         assert.match((await rejection(() => client.entities.Post.live(tags))).message,
           /^JL0005: live\(\) on entity 'Post' was handed a chain built over entity 'Tag' — /);
+        // the same name of another store ran over this store's rows: raw holds no order
+        for (const orders of [fromAsync(raw.collection('orders')), from(raw.sync.collection('orders'))]) {
+          const sameName = orders.where((o) => o.total.gt(1));
+          assert.deepStrictEqual(await sameName.toArray(), []);
+          assert.strictEqual((await rejection(() => client.collections.orders.live(sameName))).message,
+            "JL0005: live() on collection 'orders' was handed a chain built over collection 'orders' of another store — "
+            + 'a chain runs against the source it was built over; build it from this handle, '
+            + 'or hand it to the handle it was built from');
+        }
+        const posts = from(raw.sync.entity('Post')).where((p) => p.stars.gt(1));
+        assert.match((await rejection(() => client.entities.Post.live(posts))).message,
+          /^JL0005: live\(\) on entity 'Post' was handed a chain built over entity 'Post' of another store — /);
         assert.strictEqual(liveCount(client), 0);
-        const sameName = await client.collections.orders.live(fromAsync(raw.collection('orders')).where((o) => o.total.gt(1)));
-        assert.deepStrictEqual(sameName.result.rows, [{ id: 'o1', total: 5 }]);
       }
       finally { await raw.close(); }
     });
@@ -230,26 +246,60 @@ describe('the client registers a chain over one of its own entities', () => {
     });
   });
 
-  it('a chain over another client\'s same-named source answered right and registers; a different name is refused', async () => {
+  it('a chain over another in-memory client\'s source is JL0005, its same-named source too; this client\'s own registers', async () => {
     await withClient(async (client) => {
       await withClient(async (other) => {
-        const post = other.entities.Post.where((p) => p.stars.gt(1));
-        for (const register of [
-          () => client.live(post),
-          () => client.entities.Post.live(post),
-          () => client.transaction((tx) => tx.live(post)),
-        ]) {
-          assert.deepStrictEqual((await register()).result.rows, [{ pid: 1, stars: 4 }]);
-        }
-        const orders = await client.collections.orders.live(other.collections.orders.where((o) => o.total.gt(1)));
-        assert.deepStrictEqual(orders.result.rows, [{ id: 'o1', total: 5 }]);
-        assert.strictEqual(liveCount(client), 4);
+        await other.collections.orders.insert({ id: 'o9', total: 70 });
+        await other.entities.Post.create({ stars: 8 });
+        const post = other.entities.Post.where((p) => p.stars.gt(4));
+        // its own rows; registered on client, its document ran over client's Post and answered []
+        assert.deepStrictEqual(await post.toArray(), [{ pid: 2, stars: 8 }]);
+        const clientLive = "JL0005: live() on the client was handed a chain built over entity 'Post' of another store — "
+          + "a chain runs against the store it was built over; build it from this client's handles, "
+          + 'or hand it to the client it was built from';
+        assert.strictEqual((await rejection(() => client.live(post))).message, clientLive);
+        assert.strictEqual((await rejection(() => client.transaction((tx) => tx.live(post)))).message, clientLive);
+        assert.match((await rejection(() => client.entities.Post.live(post))).message,
+          /^JL0005: live\(\) on entity 'Post' was handed a chain built over entity 'Post' of another store — /);
+        const orders = other.collections.orders.where((o) => o.total.gt(1));
+        assert.match((await rejection(() => client.collections.orders.live(orders))).message,
+          /^JL0005: live\(\) on collection 'orders' was handed a chain built over collection 'orders' of another store — /);
         const users = other.collections.users.where((u) => u.age.gt(30));
         const error = await rejection(() => client.collections.orders.live(users));
         assert.strictEqual(error.code, 'JL0005');
         assert.match(error.message, /collection 'orders' was handed a chain built over collection 'users' — /);
-        assert.strictEqual(liveCount(client), 4);
+        assert.strictEqual(liveCount(client), 0);
+        // a chain over this client's own entities, from a transaction's view too, registers as before
+        const own = client.entities.Post.where((p) => p.stars.gt(1));
+        assert.deepStrictEqual((await client.live(own)).result.rows, [{ pid: 1, stars: 4 }]);
+        await client.transaction(async (tx) => {
+          assert.deepStrictEqual((await tx.live(tx.entities.Post.where((p) => p.stars.gt(1)))).result.rows, [{ pid: 1, stars: 4 }]);
+        });
+        assert.strictEqual(liveCount(client), 2);
       });
     });
+  });
+
+  it('a chain over another client of the same file answered right and registers, on a handle and on the client', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jaren-live-source-'));
+    const path = join(dir, 'one.sqlite');
+    const client = await open(model, { driver: nodeDriver(), path, capture: true, validator: null });
+    const other = await open(model, { driver: nodeDriver(), path, capture: true, validator: null });
+    try {
+      await client.collections.orders.insert({ id: 'o1', total: 5 });
+      await client.entities.Post.create({ stars: 4 });
+      const orders = other.collections.orders.where((o) => o.total.gt(1));
+      assert.deepStrictEqual(await orders.toArray(), [{ id: 'o1', total: 5 }]);
+      assert.deepStrictEqual((await client.collections.orders.live(orders)).result.rows, [{ id: 'o1', total: 5 }]);
+      const post = other.entities.Post.where((p) => p.stars.gt(1));
+      assert.deepStrictEqual((await client.entities.Post.live(post)).result.rows, [{ pid: 1, stars: 4 }]);
+      assert.deepStrictEqual((await client.live(post)).result.rows, [{ pid: 1, stars: 4 }]);
+      assert.strictEqual(liveCount(client), 3);
+    }
+    finally {
+      await other.close();
+      await client.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

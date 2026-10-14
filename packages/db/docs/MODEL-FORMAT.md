@@ -1832,6 +1832,7 @@ error.
 | `JD0036` | a snapshot page needs an immutable ordering |
 | `JD0037` | strictStreaming refused a plan that buffers |
 | `JD0038` | the native mutation document is unsupported or invalid |
+| `JD0039` | a member that takes a query document was handed a chain |
 | `JD0040` | the save spans a relation cycle |
 | `JD0050` | live queries require change capture |
 | `JD0051` | the demanded live mode is unavailable |
@@ -2944,12 +2945,32 @@ reads through it for collections (`["$[*]"]`) and entities alike.
 
 Every collection and entity view carries its own source under the
 symbol **`STORE_SOURCE`** (exported by `@jarenjs/db`): a frozen
-`{ kind: 'collection' | 'entity', name }`, the same on the store's view,
-a transaction's and the synchronous twin, and on any surface spread from
-one. A chain built over a view reports the view, so a reader handed the
-chain can tell which rows its document names without having built the
-view itself: `@jarenjs/linq`'s handles refuse a chain over another
-collection or entity by it ([DB-CLIENT §6](../../linq/docs/DB-CLIENT.md)).
+`{ kind: 'collection' | 'entity', name, store }`, the same on the store's
+view, a transaction's and the synchronous twin, and on any surface spread
+from one. `store` names the database the store reads, compared by value:
+`sqlite:` and the file's canonical name as SQLite reports it (absolute,
+symbolic links resolved), or `postgres:` and the server address, port,
+database and schema the store's connection reads. Two stores over one
+database are one source and two databases are two. A private in-memory
+SQLite database has no name a second store could share: its stores carry
+a symbol of their own, so two of them are always two sources. A chain
+built over a view reports the view, so a reader handed the chain can tell
+which rows its document names without having built the view itself:
+`@jarenjs/linq`'s handles refuse a chain over another collection or
+entity, or over the same-named one of a store over another database, by
+it ([DB-CLIENT §6](../../linq/docs/DB-CLIENT.md)).
+
+A member that takes a query document — a collection's `execute`, `query`,
+`explain` and `live`, an entity set's `execute`, `explain` and `cursor`, the
+store's `execute`, `explain` and `live`, on every view — refuses a
+`@jarenjs/linq` chain with `JD0039` naming the member. A chain is told
+by its `toDocument()` method, which no query document carries (JSON
+holds no function). It used to be read as a document with no clauses, so
+`store.collection('orders').execute(chain)` answered `{}` and
+`query(chain)` `[{}]`, and an entity member refused it with `JD0033`. A
+call that meant the chain passes its document, `chain.toDocument()` with
+`{ externals: chain.explain().bindings }`, or hands the chain to the
+`@jarenjs/linq` handle it was built from, which takes it.
 
 An entity set is a provider (QUERY-PEN §8): `store.entity(name)` and
 `store.sync.entity(name)` carry `execute(document, options)` and

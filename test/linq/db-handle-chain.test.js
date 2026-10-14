@@ -6,15 +6,20 @@
  * on the same member. They answered `{}` for a chain on a collection (the
  * chain object was read as a document with no clauses) and `JD0033` on an
  * entity. A chain built over another collection or entity, from any view
- * of the store, or over rows in memory, is `JL0005`, as `live()` answers
- * it; a chain over no rows (the `from([])` document builder), or over the
- * same-named source of another client, is taken. A document is handed to
- * the store untouched. A store run is SQLite always, PostgreSQL where
+ * of the store, over the same-named source of a store over another
+ * database (another file, another in-memory database, another schema), or
+ * over rows in memory, is `JL0005`, as `live()` answers it; a chain over
+ * no rows (the `from([])` document builder), or over the same source from
+ * any view of a store over this database (another client of one file or
+ * schema included), is taken. A document is handed to the store untouched. A store run is SQLite always, PostgreSQL where
  * JAREN_PG_URL names a server.
  */
 
 import { after, before, describe, it } from 'node:test';
 import * as assert from 'node:assert';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import { from, fromAsync } from '@jarenjs/linq';
 import { open } from '@jarenjs/linq/db';
@@ -61,6 +66,9 @@ after(async () => {
   }
 });
 
+/** The schema each PostgreSQL driver opens its store in. @type {WeakMap<object, string>} */
+const schemaOf = new WeakMap();
+
 /** @param {boolean} postgres */
 async function driverFor(postgres) {
   if (!postgres) return nodeDriver();
@@ -68,12 +76,17 @@ async function driverFor(postgres) {
   const schema = `jaren_handlechain_${process.pid}_${counter}`;
   await admin.query(`CREATE SCHEMA "${schema}"`);
   schemas.push(schema);
-  return postgresDriver(pool, { schema });
+  const driver = postgresDriver(pool, { schema });
+  schemaOf.set(driver, schema);
+  return driver;
 }
 
 /** @param {boolean} postgres */
 async function openClient(postgres) {
-  const client = await open(model, { driver: await driverFor(postgres), capture: true, validator: null });
+  const driver = await driverFor(postgres);
+  const client = await open(model, { driver, capture: true, validator: null });
+  const schema = schemaOf.get(driver);
+  if (schema !== undefined) schemaOf.set(client, schema);
   for (const [id, total] of [['o1', 5], ['o2', 12], ['o3', 30]]) await client.collections.orders.insert({ id, total });
   await client.collections.users.insert({ id: 'u1', age: 40 });
   for (const stars of [4, 9, 2]) await client.entities.Post.create({ stars });
@@ -103,6 +116,12 @@ async function rejection(call) {
 const foreign = (/** @type {string} */ method, /** @type {string} */ kind,
   /** @type {string} */ own, /** @type {string} */ other) =>
   `JL0005: ${method}() on ${kind} '${own}' was handed a chain built over ${kind} '${other}' — `
+  + 'a chain runs against the source it was built over; build it from this handle, '
+  + 'or hand it to the handle it was built from';
+
+/** The message `JL0005` carries for a chain over the same-named source of another store. */
+const anotherStore = (/** @type {string} */ method, /** @type {string} */ kind, /** @type {string} */ own) =>
+  `JL0005: ${method}() on ${kind} '${own}' was handed a chain built over ${kind} '${own}' of another store — `
   + 'a chain runs against the source it was built over; build it from this handle, '
   + 'or hand it to the handle it was built from';
 
@@ -221,7 +240,7 @@ for (const host of HOSTS) {
       assert.deepStrictEqual(await rows(orders.query(over(fromAsync([])))), OVER_SIX);
     });
 
-    it('a view the client never built carries its own name: another store\'s, an escaped transaction\'s', async () => {
+    it('a view the client never built carries its own source: another store\'s, an escaped transaction\'s', async () => {
       const { orders } = client.collections;
       const raw = await openStore(model, { driver: await driverFor(host.postgres) });
       try {
@@ -231,34 +250,81 @@ for (const host of HOSTS) {
         assert.strictEqual((await rejection(() => orders.explain(adults))).message, foreign('explain', 'collection', 'orders', 'users'));
         const tags = fromAsync(raw.entity('Tag')).where((/** @type {any} */ t) => t.weight.gt(1));
         assert.throws(() => client.entities.Post.execute(tags), (/** @type {any} */ e) => e.message === foreign('execute', 'entity', 'Post', 'Tag'));
-        // the same name answered right and still does
+        // the same name of another store ran over this store's rows (OVER_SIX); raw holds none
         const sameName = fromAsync(raw.collection('orders')).where((/** @type {any} */ o) => o.total.gt(6)).orderBy((/** @type {any} */ o) => o.total);
-        assert.deepStrictEqual(await orders.execute(sameName), OVER_SIX);
+        assert.deepStrictEqual(await sameName.toArray(), []);
+        assert.throws(() => orders.execute(sameName), (/** @type {any} */ e) => e.code === 'JL0005'
+          && e.message === anotherStore('execute', 'collection', 'orders'));
+        assert.throws(() => orders.query(sameName), (/** @type {any} */ e) => e.message === anotherStore('query', 'collection', 'orders'));
+        assert.strictEqual((await rejection(() => orders.explain(sameName))).message, anotherStore('explain', 'collection', 'orders'));
+        const posts = fromAsync(raw.entity('Post')).where((/** @type {any} */ p) => p.stars.gt(3));
+        assert.throws(() => client.entities.Post.execute(posts), (/** @type {any} */ e) => e.message === anotherStore('execute', 'entity', 'Post'));
+        assert.strictEqual((await rejection(() => client.entities.Post.explain(posts))).message, anotherStore('explain', 'entity', 'Post'));
       }
       finally { await raw.close(); }
       /** @type {any} */
       let escaped;
-      await client.transaction(async (/** @type {any} */ tx) => { escaped = tx.store.collection('users'); });
+      /** @type {any} */
+      let escapedOrders;
+      await client.transaction(async (/** @type {any} */ tx) => {
+        escaped = tx.store.collection('users');
+        escapedOrders = tx.store.collection('orders');
+      });
       assert.throws(() => orders.execute(fromAsync(escaped).where((/** @type {any} */ u) => u.age.gt(30))),
         (/** @type {any} */ e) => e.message === foreign('execute', 'collection', 'orders', 'users'));
+      // a transaction's view is a view of this store: its same name is this source
+      const viaTransaction = fromAsync(escapedOrders).where((/** @type {any} */ o) => o.total.gt(6)).orderBy((/** @type {any} */ o) => o.total);
+      assert.deepStrictEqual(await orders.execute(viaTransaction), OVER_SIX);
     });
 
-    it('the synchronous twin of a collection is the same source by name (SQLite only: PostgreSQL has none)', { skip: host.postgres }, async () => {
+    it('the synchronous twin of a collection is the same source (SQLite only: PostgreSQL has none)', { skip: host.postgres }, async () => {
       const { orders, users } = client.collections;
       const twin = from(client.store.sync.collection('users')).where((/** @type {any} */ u) => u.age.gt(30));
       assert.throws(() => orders.execute(twin), (/** @type {any} */ e) => e.code === 'JL0005');
       assert.deepStrictEqual(await users.execute(twin), { id: 'u1', age: 40 });
     });
 
-    it('a chain with no store source, or over the same-named source of another client, is taken', async () => {
+    it('a chain over the same-named source of another client answers right over one database, and is JL0005 over another', async () => {
       const builder = from([]).where((/** @type {any} */ o) => o.total.gt(6)).orderBy((/** @type {any} */ o) => o.total);
       assert.deepStrictEqual(await client.collections.orders.execute(builder), OVER_SIX);
-      const twin = await open(model, { driver: nodeDriver(), validator: null });
-      try {
-        const sameName = twin.collections.orders.where((/** @type {any} */ o) => o.total.gt(6)).orderBy((/** @type {any} */ o) => o.total);
-        assert.deepStrictEqual(await client.collections.orders.execute(sameName), OVER_SIX);
+      const over = (/** @type {any} */ c) => c.collections.orders.where((/** @type {any} */ o) => o.total.gt(6)).orderBy((/** @type {any} */ o) => o.total);
+      if (host.postgres) {
+        // one server, database and schema: the twin's rows are the client's
+        const twin = await open(model, { driver: postgresDriver(pool, { schema: schemaOf.get(client) }), validator: null });
+        try {
+          assert.deepStrictEqual(await over(twin).toArray(), OVER_SIX);
+          assert.deepStrictEqual(await client.collections.orders.execute(over(twin)), OVER_SIX);
+          assert.deepStrictEqual(await rows(client.collections.orders.query(over(twin))), OVER_SIX);
+        }
+        finally { await twin.close(); }
+        return; // another schema is refused above, by the store a view the client never built reads
       }
-      finally { await twin.close(); }
+      const dir = mkdtempSync(join(tmpdir(), 'jaren-handle-chain-'));
+      const first = await open(model, { driver: nodeDriver(), path: join(dir, 'one.sqlite'), validator: null });
+      const second = await open(model, { driver: nodeDriver(), path: join(dir, 'one.sqlite'), validator: null });
+      const elsewhere = await open(model, { driver: nodeDriver(), path: join(dir, 'two.sqlite'), validator: null });
+      const memory = await open(model, { driver: nodeDriver(), validator: null });
+      try {
+        for (const [id, total] of [['o1', 5], ['o2', 12], ['o3', 30]]) await first.collections.orders.insert({ id, total });
+        // one file: the second client's rows are the first's, and the chain answers them
+        assert.deepStrictEqual(await over(second).toArray(), OVER_SIX);
+        assert.deepStrictEqual(await first.collections.orders.execute(over(second)), OVER_SIX);
+        assert.deepStrictEqual(await rows(first.collections.orders.query(over(second))), OVER_SIX);
+        await first.transaction(async (/** @type {any} */ tx) => {
+          assert.deepStrictEqual(await tx.collections.orders.execute(over(second)), OVER_SIX);
+        });
+        // another file, or another in-memory database: its own rows are none, and this
+        // client's handle ran its document over OVER_SIX
+        for (const other of [elsewhere, memory]) {
+          assert.deepStrictEqual(await over(other).toArray(), []);
+          assert.throws(() => first.collections.orders.execute(over(other)), (/** @type {any} */ e) => e.code === 'JL0005'
+            && e.message === anotherStore('execute', 'collection', 'orders'));
+        }
+      }
+      finally {
+        for (const opened of [first, second, elsewhere, memory]) await opened.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
     });
 
     it('a chain split by a host callback is its own JL0005, and a list parameter is checked in the merged set', async () => {
@@ -318,6 +384,22 @@ for (const host of HOSTS) {
       assert.deepStrictEqual((await client.entities.Post.explain()).barriers, []);
       assert.throws(() => orders.execute({ $bogus: 1 }), (/** @type {any} */ e) => e.code === 'JQ0002');
       assert.throws(() => client.entities.Post.execute({ $bogus: 1 }), (/** @type {any} */ e) => e.code === 'JQ0002');
+    });
+
+    it('the store\'s own members refuse a chain (JD0039); the handle takes it, and the store its document', async () => {
+      const chain = bound(client);
+      const raw = client.store.collection('orders');
+      // read as a document with no clauses, these answered {} and [{}]
+      assert.throws(() => raw.execute(chain), (/** @type {any} */ e) => e.code === 'JD0039'
+        && e.message.startsWith("JD0039: collection('orders').execute takes a query document and was handed a chain — "));
+      assert.throws(() => raw.query(chain), (/** @type {any} */ e) => e.code === 'JD0039');
+      assert.strictEqual((await rejection(() => raw.explain(chain))).code, 'JD0039');
+      assert.strictEqual((await rejection(() => raw.live(chain))).code, 'JD0039');
+      const posts = client.entities.Post.where((/** @type {any} */ p) => p.stars.gt(3));
+      assert.strictEqual((await rejection(() => client.store.explain(posts))).code, 'JD0039');
+      assert.strictEqual((await rejection(() => client.store.live(posts))).code, 'JD0039');
+      assert.deepStrictEqual(await raw.execute(chain.toDocument(), { externals: chain.explain().bindings }), OVER_SIX);
+      assert.deepStrictEqual(await client.collections.orders.execute(chain), OVER_SIX);
     });
   });
 }

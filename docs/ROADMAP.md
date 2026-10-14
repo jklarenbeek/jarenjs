@@ -452,6 +452,21 @@ what each does is its own documentation's job
   asking in JavaScript. Wanted: a root for a join table, so a membership can be
   filtered, counted and joined in one document
   ([DB-CLIENT §6](../packages/linq/docs/DB-CLIENT.md)).
+- [ ] **The store reads a non-plain object as a document.**
+  `store.collection('orders').execute(new Date())` answers `{}`: the query
+  compiler walks a document's own members and refuses a function there
+  (`JQ0003`), so an object whose state is not its own enumerable members is
+  read as a document with no clauses. Wanted: refuse a document that is not
+  JSON (a class instance) with a coded refusal, as `JD0039` refuses a chain
+  ([MODEL-FORMAT §10.1](../packages/db/docs/MODEL-FORMAT.md)).
+- [ ] **A handle refuses a chain over one database a second store names
+  differently.** A handle takes a chain over another store's view when both
+  read one database (one SQLite file by its canonical path, one PostgreSQL
+  address, port, database and schema), but a shared-cache in-memory SQLite
+  database, one file through two hard links, or one server through two
+  addresses (a socket and TCP) give the two stores different names, so the
+  chain is refused `JL0005` though it would answer right
+  ([DB-CLIENT §6](../packages/linq/docs/DB-CLIENT.md)).
 - [ ] **A handle takes a chain over rows it cannot count.** A handle refuses a
   chain over another collection or entity (from any view of the store) and
   over rows in memory it can count (`JL0005`), but a chain over a generator,
@@ -460,17 +475,6 @@ what each does is its own documentation's job
   handle's rows. Wanted: a decision — refuse every in-memory source but a
   countable empty one (an empty generator answered right), or count by a peek
   the chain can replay ([DB-CLIENT §6](../packages/linq/docs/DB-CLIENT.md)).
-- [ ] **A handle takes a chain over another store's view of the same name.**
-  Views carry their collection's name, not their store's, so a chain over
-  `other.collection('orders')` passes `orders`' check on this store and runs
-  its document over this store's rows
-  ([DB-CLIENT §6](../packages/linq/docs/DB-CLIENT.md)).
-- [ ] **The store reads a chain as a document with no clauses.**
-  `client.store.collection('orders').execute(chain)` answers `{}` and
-  `query(chain)` `[{}]`: the store's own members take any object as a
-  document. Wanted: the store refuses a chain where it takes a document, with
-  a code naming `toDocument()`
-  ([DB-CLIENT §6](../packages/linq/docs/DB-CLIENT.md)).
 - [ ] **Lone surrogates and NUL in native projections.** A lone surrogate written
   as a JavaScript escape comes back from a native projection, group key or
   distinct as three U+FFFD, and `$ends-with` and `$contains` over NUL or lone

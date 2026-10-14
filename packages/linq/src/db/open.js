@@ -20,6 +20,7 @@ import { isPlainOptions, setObjectMember } from '@jarenjs/core/object';
 
 import { createEntityHandle, createCollectionHandle } from './handle.js';
 import { registerLive } from './live.js';
+import { onlyThisStore } from './source.js';
 
 /**
  * A client transaction's options with the client's default unit of work:
@@ -133,7 +134,8 @@ export async function open(model, options) {
     };
     if (tx.saveChanges !== undefined) {
       inner.saveChanges = () => tx.saveChanges();
-      inner.live = (source, liveOptions) => registerLive(tx.live, source, liveOptions);
+      const onlyThis = onlyThisStore(tx);
+      inner.live = (source, liveOptions) => registerLive(tx.live, source, liveOptions, onlyThis);
     }
     return Object.freeze(inner);
   };
@@ -156,7 +158,8 @@ export async function open(model, options) {
   // model declares entities — as on the store
   if (store.saveChanges !== undefined) {
     client.saveChanges = () => store.saveChanges();
-    client.live = (source, liveOptions) => registerLive(store.live, source, liveOptions);
+    const onlyThis = onlyThisStore(store);
+    client.live = (source, liveOptions) => registerLive(store.live, source, liveOptions, onlyThis);
   }
   return Object.freeze(client);
 }

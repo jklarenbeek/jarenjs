@@ -49,8 +49,8 @@ function chainStart(provider, members) {
  * The handle's members that take a query document, which take a chain as
  * well: the chain's document runs with its `params()` bindings as the
  * externals, exactly as `live()` hands them over (`chain.js`), and a chain
- * built over another collection or entity, or over rows in memory, is
- * `JL0005` (`source.js`). A document is
+ * built over another collection or entity, the same-named one of another
+ * store, or rows in memory, is `JL0005` (`source.js`). A document is
  * handed to the store untouched. `explain()` with nothing is the empty
  * chain's explanation, the chain's own. A refusal of the chain is
  * answered as the store answers a refusal of a document on that member:
@@ -59,15 +59,13 @@ function chainStart(provider, members) {
  * promise elsewhere.
  * @param {any} provider - the store's handle (a collection or an entity set)
  * @param {Record<string | symbol, any>} members - the handle being built
- * @param {'entity' | 'collection'} kind
- * @param {string} name
  * @param {readonly string[]} thrown - the members that throw a refusal
  */
-function acceptChains(provider, members, kind, name, thrown) {
+function acceptChains(provider, members, thrown) {
   for (const method of ['execute', 'query', 'explain']) {
     const read = provider[method];
     if (read === undefined) continue;
-    const onlyOwn = onlyOwnSource(kind, name, method);
+    const onlyOwn = onlyOwnSource(provider, method);
     members[method] = (source, options) => {
       if (method === 'explain' && source === undefined) return fromAsync(provider).explain();
       if (!isChain(source)) return read(source, options);
@@ -93,7 +91,7 @@ export function createEntityHandle(store, name) {
   /** @type {Record<string | symbol, any>} */
   const members = { ...set };
   chainStart(set, members);
-  acceptChains(set, members, 'entity', name, ['execute']);
+  acceptChains(set, members, ['execute']);
   members.include = (pick, spec) => new Graph(set, name).include(pick, spec);
   // the graph with nothing included: the root clauses, the keyset and
   // the page over the rows alone
@@ -108,7 +106,7 @@ export function createEntityHandle(store, name) {
     set.unlink(own, member, target);
   };
   members.live = (source = fromAsync(set), options = undefined) =>
-    registerLive(store.live, source, options, onlyOwnSource('entity', name, 'live'));
+    registerLive(store.live, source, options, onlyOwnSource(set, 'live'));
   return Object.freeze(members);
 }
 
@@ -123,7 +121,7 @@ export function createCollectionHandle(store, name) {
   /** @type {Record<string | symbol, any>} */
   const members = { ...collection };
   chainStart(collection, members);
-  acceptChains(collection, members, 'collection', name, ['execute', 'query']);
+  acceptChains(collection, members, ['execute', 'query']);
   // `all` is two things on a collection handle, told apart by the
   // argument: a predicate is the chain's quantifier (does every document
   // satisfy it?); nothing, or all()'s options, is the collection's every
@@ -132,6 +130,6 @@ export function createCollectionHandle(store, name) {
   members.all = (/** @type {any} */ arg, /** @type {any[]} */ ...rest) =>
     (typeof arg === 'function' ? quantifier(arg, ...rest) : collection.all(arg));
   members.live = (source = fromAsync(collection), options = undefined) =>
-    registerLive(collection.live, source, options, onlyOwnSource('collection', name, 'live'));
+    registerLive(collection.live, source, options, onlyOwnSource(collection, 'live'));
   return Object.freeze(members);
 }

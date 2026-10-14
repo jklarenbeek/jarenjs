@@ -51,6 +51,7 @@ export const DB_CODES = Object.freeze({
   JD0036: 'a snapshot page needs an immutable ordering',
   JD0037: 'strictStreaming refused a plan that buffers',
   JD0038: 'the native mutation document is unsupported or invalid',
+  JD0039: 'a member that takes a query document was handed a chain',
   JD0040: 'the save spans a relation cycle',
   JD0050: 'live queries require change capture',
   JD0051: 'the demanded live mode is unavailable',
@@ -205,6 +206,10 @@ export const DB_CODES = Object.freeze({
  *  - `JD0033` — a document handed to `store.execute()` or `store.live()`
  *    over entities ranges over no declared entity array (`$.<Entity>[*]`);
  *    the root is the map of entity arrays, so there are no rows to answer
+ *  - `JD0039` — a member that takes a query document (`execute`,
+ *    `query`, `explain`, `live`, an entity set's and the store's alike)
+ *    was handed a `@jarenjs/linq` chain (anything with `toDocument()`):
+ *    the reason names the member and the chain's own document
  *  - `JD0032` — a graph-load include specification is invalid: an
  *    unknown relation, a cycle, an untranslatable filter, or the
  *    depth bound exceeded (the bound is printed, never silent); or a
