@@ -155,7 +155,7 @@ the table and stale in the paragraph that cites it:
 
 | Subpath | Bundle | What rides along |
 |---|---:|---|
-| `.` | <!--fact:bundle.chain.kb-->230<!--/fact--> kB | the query engine — a chain's document has to run somewhere |
+| `.` | <!--fact:bundle.chain.kb-->231<!--/fact--> kB | the query engine — a chain's document has to run somewhere |
 | `./schema` | <!--fact:bundle.schema.kb-->45<!--/fact--> kB | the builders and the recording proxy `check()` captures through |
 | `./model` | <!--fact:bundle.model.kb-->57<!--/fact--> kB | the schema pen it subclasses |
 | `./jslt` | <!--fact:bundle.jslt.kb-->28<!--/fact--> kB | the body capture; of the schema pen, only the builder brand |
@@ -169,7 +169,7 @@ the table and stale in the paragraph that cites it:
 | `./jtlt` | <!--fact:bundle.jtlt.kb-->25<!--/fact--> kB | text template capture; no renderer |
 | `./project` | <!--fact:bundle.project.kb-->5<!--/fact--> kB | project files; no Studio engine |
 | `./charts` | <!--fact:bundle.charts.kb-->7<!--/fact--> kB | chart definitions; no chart engine |
-| `./db` | <!--fact:bundle.db.kb-->993<!--/fact--> kB | the store, the validator and the formats, by construction |
+| `./db` | <!--fact:bundle.db.kb-->1003<!--/fact--> kB | the store, the validator and the formats, by construction |
 
 Read the last row as the honest one: the front door costs what the store
 costs, because it *is* the store. The tree-shaking gate holds both

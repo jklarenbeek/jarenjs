@@ -238,7 +238,8 @@ if (chainEdgeLeak.length > 0)
 // Raised to 229,300 (measured 229209): a handle's check of the source a chain was built over add 65.
 // Raised to 229,900 (measured 229858): the shared capture's reading of an index off a relation as a hop for in() and all() add 649.
 // Raised to 230,500 (measured 230428): the chart pen's right value axis and the shared capture's bounds add 570.
-if (chainBytes > 230500)
+// Raised to 230,600 (measured 230506): the descent refusal's message id and docPath add 78.
+if (chainBytes > 230600)
   throw new Error(`The chain bundle grew to ${chainBytes} bytes.`);
 
 console.log(`Tree-shaking smoke test passed (${chainBytes} byte chain bundle; no schema-pen module, no client module, no store/validator/formats bytes).`);
@@ -628,7 +629,8 @@ if (asyncLiveLeak.length)
 // Raised to 982,700 (measured 982682): the database a store reads, named in its views' source, and the store's coded refusal of a chain where it takes a document add 1640.
 // Raised to 984,600 (measured 984578): the shared capture's reading of an index off a relation as a hop, the handle's refusal of rows it cannot count and the store's refusal of a document it cannot read add 1896.
 // Raised to 993,000 (measured 992989): the store's refusal of a non-JSON compared external, epoch-key binding on every key path, the judging of rows a foreign-key action changes, and the double comparison and rounded-read refusal of an integer past 2^53 add 8411.
-if (clientBytes > 993000)
+// Raised to 1,002,600 (measured 1002519): the store profile as a floor on every read, the engine's evaluation order after a raising conjunct, live replace records for a row stored again, the rebuild's String() spelling, and the stored-key capture, scaled-integer and explain refusals add 9530.
+if (clientBytes > 1002600)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 
