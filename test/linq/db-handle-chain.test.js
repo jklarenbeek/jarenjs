@@ -8,7 +8,8 @@
  * entity. A chain built over another collection or entity, from any view
  * of the store, over the same-named source of a store over another
  * database (another file, another in-memory database, another schema), or
- * over rows in memory, is `JL0005`, as `live()` answers it; a chain over
+ * over rows in memory (a generator, a cursor or a queue too, never read to
+ * count them), is `JL0005`, as `live()` answers it; a chain over
  * no rows (the `from([])` document builder), or over the same source from
  * any view of a store over this database (another client of one file or
  * schema included), is taken. A document is handed to the store untouched. A store run is SQLite always, PostgreSQL where
@@ -21,7 +22,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { from, fromAsync } from '@jarenjs/linq';
+import { createPushQueue, from, fromAsync } from '@jarenjs/linq';
 import { open } from '@jarenjs/linq/db';
 import * as m from '@jarenjs/linq/model';
 import { openStore } from '@jarenjs/db';
@@ -132,6 +133,12 @@ const inMemory = (/** @type {string} */ method, /** @type {string} */ kind,
   + "a handle runs a chain's document over its own rows, never the chain's; build it from "
   + 'this handle (or from([]) to write a document), or run it over its rows with toArray()';
 
+/** The message `JL0005` carries for a chain over rows whose count is read only by consuming them. */
+const uncounted = (/** @type {string} */ method, /** @type {string} */ kind, /** @type {string} */ own) =>
+  `JL0005: ${method}() on ${kind} '${own}' was handed a chain built over rows in memory it cannot count without reading them — `
+  + "a handle runs a chain's document over its own rows, never the chain's; build it from "
+  + 'this handle (or from([]) to write a document), or run it over its rows with toArray()';
+
 const OVER_SIX = [{ id: 'o2', total: 12 }, { id: 'o3', total: 30 }];
 
 /** @type {{ name: string, postgres: boolean }[]} */
@@ -233,11 +240,44 @@ for (const host of HOSTS) {
       const stars = from([{ pid: 9, stars: 99 }]).where((/** @type {any} */ p) => p.stars.gt(3));
       assert.throws(() => client.entities.Post.execute(stars), (/** @type {any} */ e) => e.message === inMemory('execute', 'entity', 'Post', '1 row'));
       assert.strictEqual((await rejection(() => client.entities.Post.explain(stars))).message, inMemory('explain', 'entity', 'Post', '1 row'));
-      // no rows, or rows whose count is read only by consuming them, are taken as before
-      for (const builder of [from([]), fromAsync([]), from(new Map()), from((function* () {})())]) {
+      // no rows are the document builder and are taken as before
+      for (const builder of [from([]), fromAsync([]), from(new Map()), fromAsync(new Set())]) {
         assert.deepStrictEqual(await orders.execute(over(builder)), OVER_SIX);
       }
       assert.deepStrictEqual(await rows(orders.query(over(fromAsync([])))), OVER_SIX);
+    });
+
+    it('a chain over rows it cannot count is JL0005 by their kind, and they are never read', async () => {
+      const { orders } = client.collections;
+      const over = (/** @type {any} */ chain) => chain.where((/** @type {any} */ o) => o.total.gt(6)).orderBy((/** @type {any} */ o) => o.total);
+      let pulled = 0;
+      const x = { id: 'x', total: 99 };
+      const queue = createPushQueue();
+      queue.feed(x);
+      queue.end();
+      // each was taken and answered the handle's OVER_SIX, its own rows ignored;
+      // an empty generator answered right, and from([]) is its replacement
+      const sources = {
+        'a generator': () => from((function* () { pulled += 1; yield x; })()),
+        'an empty generator': () => from((function* () { pulled += 1; yield* []; })()),
+        'an async iterable': () => fromAsync({ [Symbol.asyncIterator]() { pulled += 1; throw new Error('read'); } }),
+        'a cursor': () => fromAsync({ next() { pulled += 1; return Promise.resolve({ done: true, value: undefined }); } }),
+        'a push queue': () => fromAsync(queue),
+        'a chain over rows': () => fromAsync(from([x])),
+        "a chain over this handle's rows": () => fromAsync(from(orders).where((/** @type {any} */ o) => o.total.gt(20))),
+      };
+      for (const [name, source] of Object.entries(sources)) {
+        assert.throws(() => orders.execute(over(source())), (/** @type {any} */ e) => e.code === 'JL0005'
+          && e.message === uncounted('execute', 'collection', 'orders'), name);
+        assert.throws(() => orders.query(over(source())), (/** @type {any} */ e) => e.message === uncounted('query', 'collection', 'orders'), name);
+        assert.strictEqual((await rejection(() => orders.explain(over(source())))).message, uncounted('explain', 'collection', 'orders'), name);
+        assert.strictEqual((await rejection(() => orders.live(over(source())))).message, uncounted('live', 'collection', 'orders'), name);
+      }
+      const stars = fromAsync((async function* () { pulled += 1; yield { pid: 9, stars: 99 }; })()).where((/** @type {any} */ p) => p.stars.gt(3));
+      assert.throws(() => client.entities.Post.execute(stars), (/** @type {any} */ e) => e.message === uncounted('execute', 'entity', 'Post'));
+      assert.strictEqual((await rejection(() => client.entities.Post.live(stars))).message, uncounted('live', 'entity', 'Post'));
+      assert.strictEqual(pulled, 0);
+      assert.deepStrictEqual(await rows(queue), [x]);
     });
 
     it('a view the client never built carries its own source: another store\'s, an escaped transaction\'s', async () => {

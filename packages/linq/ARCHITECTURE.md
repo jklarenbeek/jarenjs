@@ -191,7 +191,9 @@ of the store carries its own kind, name and the database the store reads
 (`STORE_SOURCE`), and `source.js` compares them, so a handle takes only a
 chain over its own collection or entity of a store over its database, or
 over no rows (`from([])`, the document builder): `JL0005` otherwise,
-naming the other source, another store, or the count of rows. The
+naming the other source, another store, or the count of rows (rows it
+cannot count without reading them, such as a generator's, are refused
+by their kind and never read). The
 client's own `live()` compares the database alone, since it takes any
 entity of it.
 Nothing here runs a query, plans one or keeps state: the store stays

@@ -416,13 +416,22 @@ describe('the live census: each shape registers as its maintenance-table row say
     finally { await store.close(); }
   });
 
-  it('an include() chain handed to the client\'s live() is JD0033 and registers nothing', async () => {
+  it('an include() chain handed to the client\'s live(), or its handle\'s live, execute or explain, is JD0033 and registers nothing', async () => {
     const client = await open(MODEL, { driver: nodeDriver(), capture: true, validator: null });
     try {
       await seed(client.store);
       const graph = client.entities.Author.include((/** @type {any} */ a) => a.posts,
         { orderBy: (/** @type {any} */ p) => p.score, take: 2 });
       await assert.rejects(async () => client.live(graph), LOAD_SPECIFICATION);
+      await assert.rejects(async () => client.entities.Author.live(graph), LOAD_SPECIFICATION);
+      // the handle hands the store the graph's specification, never the graph object (JD0041)
+      for (const member of ['execute', 'explain']) {
+        await assert.rejects(async () => client.entities.Author[member](graph), {
+          code: 'JD0033',
+          message: 'JD0033: an entity query ranges over a declared entity array ($.<Entity>[*]); this document '
+            + 'names none, so it has no rows to answer at /entities',
+        });
+      }
       assert.equal(client.store.stats().liveQueries, 0);
     }
     finally { await client.close(); }

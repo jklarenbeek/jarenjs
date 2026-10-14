@@ -51,7 +51,8 @@ function chainStart(provider, members) {
  * externals, exactly as `live()` hands them over (`chain.js`), and a chain
  * built over another collection or entity, the same-named one of another
  * store, or rows in memory, is `JL0005` (`source.js`). A document is
- * handed to the store untouched. `explain()` with nothing is the empty
+ * handed to the store untouched, and an `include()` graph as its load
+ * specification, which the store refuses as one. `explain()` with nothing is the empty
  * chain's explanation, the chain's own. A refusal of the chain is
  * answered as the store answers a refusal of a document on that member:
  * thrown where the store's member is value-or-promise (`execute` and
@@ -68,7 +69,7 @@ function acceptChains(provider, members, thrown) {
     const onlyOwn = onlyOwnSource(provider, method);
     members[method] = (source, options) => {
       if (method === 'explain' && source === undefined) return fromAsync(provider).explain();
-      if (!isChain(source)) return read(source, options);
+      if (!isChain(source) && !(source instanceof Graph)) return read(source, options);
       let resolved;
       try { resolved = resolveSource(source, options, onlyOwn); }
       catch (error) {

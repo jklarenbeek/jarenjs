@@ -452,12 +452,12 @@ what each does is its own documentation's job
   asking in JavaScript. Wanted: a root for a join table, so a membership can be
   filtered, counted and joined in one document
   ([DB-CLIENT §6](../packages/linq/docs/DB-CLIENT.md)).
-- [ ] **The store reads a non-plain object as a document.**
-  `store.collection('orders').execute(new Date())` answers `{}`: the query
-  compiler walks a document's own members and refuses a function there
-  (`JQ0003`), so an object whose state is not its own enumerable members is
-  read as a document with no clauses. Wanted: refuse a document that is not
-  JSON (a class instance) with a coded refusal, as `JD0039` refuses a chain
+- [ ] **A non-JSON external is read as `{}`.** `execute(document, { externals:
+  { since: new Date(…) } })` compares `$since` with an empty object (`$gt`
+  against a `Date` matches no row, on SQLite and PostgreSQL, with or without
+  pushdown), where its ISO string answers right. Wanted: refuse an external
+  that is not JSON (`JD0041`, as a document holding one is refused), or bind a
+  `Date` as its `toISOString()`
   ([MODEL-FORMAT §10.1](../packages/db/docs/MODEL-FORMAT.md)).
 - [ ] **A handle refuses a chain over one database a second store names
   differently.** A handle takes a chain over another store's view when both
@@ -467,14 +467,6 @@ what each does is its own documentation's job
   addresses (a socket and TCP) give the two stores different names, so the
   chain is refused `JL0005` though it would answer right
   ([DB-CLIENT §6](../packages/linq/docs/DB-CLIENT.md)).
-- [ ] **A handle takes a chain over rows it cannot count.** A handle refuses a
-  chain over another collection or entity (from any view of the store) and
-  over rows in memory it can count (`JL0005`), but a chain over a generator,
-  an async iterable, a cursor or a push queue is taken and its rows ignored,
-  because counting them would consume them; a non-empty one answers from the
-  handle's rows. Wanted: a decision — refuse every in-memory source but a
-  countable empty one (an empty generator answered right), or count by a peek
-  the chain can replay ([DB-CLIENT §6](../packages/linq/docs/DB-CLIENT.md)).
 - [ ] **Lone surrogates and NUL in native projections.** A lone surrogate written
   as a JavaScript escape comes back from a native projection, group key or
   distinct as three U+FFFD, and `$ends-with` and `$contains` over NUL or lone

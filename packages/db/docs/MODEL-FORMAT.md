@@ -1834,6 +1834,7 @@ error.
 | `JD0038` | the native mutation document is unsupported or invalid |
 | `JD0039` | a member that takes a query document was handed a chain |
 | `JD0040` | the save spans a relation cycle |
+| `JD0041` | a query document is not JSON: a non-plain object with no own member to read, at its root or inside it |
 | `JD0050` | live queries require change capture |
 | `JD0051` | the demanded live mode is unavailable |
 | `JD0052` | the live-query bound was reached |
@@ -2971,6 +2972,26 @@ holds no function). It used to be read as a document with no clauses, so
 call that meant the chain passes its document, `chain.toDocument()` with
 `{ externals: chain.explain().bindings }`, or hands the chain to the
 `@jarenjs/linq` handle it was built from, which takes it.
+
+A query document is JSON, and the compiler reads a document by its own
+enumerable members, so the same members refuse an object they cannot
+read that way — one whose prototype is neither `Object.prototype` nor
+`null` and which has no own enumerable member — with `JD0041` naming the
+member (`collection('orders').execute takes a query document, which is
+JSON, and was handed a Date instance — …`):
+`store.collection('orders').execute(new Date())` answered `{}`, as did a
+`Map` or a `RegExp`, and an entity member refused one with `JD0033`. A
+class instance with fields is read by those fields, at the root as inside
+a document, and a null-prototype object is a plain one; both are taken
+as before. Inside a document, a value of that kind with no own enumerable member (a `Date`,
+a `Map`, a `Set`, a `RegExp`) is `JD0041` with the `docPath` naming where
+it stands, on every member and in every dialect (`a query document holds
+a Date instance, which it reads as {} — … at /$where/$gt/1`): it was read
+as `{}`, so a `$where` comparing with a `Date` matched no row and a
+`$return` holding one answered `{}`. Write the JSON value the object
+stands for — a `Date` as its `toISOString()`, the form a `date-time`
+member holds. A class instance inside a document is still read by its
+own fields.
 
 An entity set is a provider (QUERY-PEN §8): `store.entity(name)` and
 `store.sync.entity(name)` carry `execute(document, options)` and

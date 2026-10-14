@@ -17,6 +17,7 @@ import { isPlainOptions } from '@jarenjs/core/object';
 
 import { RUN_BINDINGS } from '../document.js';
 import { requireListBindings } from '../expression.js';
+import { Graph } from './include.js';
 
 /** Whether a source is a chain: a document and an explanation to give.
  * @param {any} source */
@@ -27,7 +28,8 @@ export const isChain = (source) => source !== null && typeof source === 'object'
  * The document a source stands for, the values it bound and the
  * parameters its `in()` calls read whole as lists — unchecked, because
  * what the store runs is decided only once the options are merged in.
- * @param {any} source - a chain (either surface) or a query document
+ * @param {any} source - a chain (either surface), an `include()` graph
+ *   (its load specification is the document) or a query document
  * @returns {{ document: any, bindings: Record<string, unknown>, lists: readonly string[],
  *   source?: object | null, rows?: any }} `source` is the provider the
  *   chain was built over and `rows` the rows in memory (the other one
@@ -35,6 +37,10 @@ export const isChain = (source) => source !== null && typeof source === 'object'
  *   this package did not build
  */
 function documentOf(source) {
+  // an include() graph is a load specification, and the store tells one
+  // from a query document by its spec (`JD0033`); the graph object itself
+  // is not JSON, which the store refuses as such (`JD0041`)
+  if (source instanceof Graph) return { document: source.toSpec(), bindings: {}, lists: [] };
   if (!isChain(source)) return { document: source, bindings: {}, lists: [] };
   const document = source.toDocument();
   // a chain-like this package did not build gives its own explanation

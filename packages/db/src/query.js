@@ -37,7 +37,7 @@
  * the whole document runs over them.
  */
 
-import { utf8ByteLength } from '@jarenjs/core/string';
+import { escapePointerToken, utf8ByteLength } from '@jarenjs/core/string';
 import { physicalSelection, columnCodec, textKeyPlan, textKeyDecoding, checkTextKeys, physicalOrderable } from './physical.js';
 
 import { createSemanticCache } from '@jarenjs/core/cache';
@@ -571,22 +571,77 @@ function projectedTreeItems(project, row, prefix = '') {
     return rows.flatMap((row) => build(group.tree, row));
   }
 
+/** How a refusal names a non-plain object. @param {object} value */
+const instanceOf = (value) => `a ${value.constructor?.name || 'non-plain'} instance`;
+
 /**
- * Refuse a chain where a store member takes a query document (`JD0039`).
- * A `@jarenjs/linq` chain keeps its clauses behind methods, so read as a
- * document it was one with no clauses: `execute` answered `{}` and
- * `query` `[{}]`. It is recognised by its `toDocument()` method (this
- * package does not import linq), which no document can carry: a query
- * document is JSON, and JSON holds no function.
+ * Refuse what a store member that takes a query document cannot read as
+ * one at its root. A `@jarenjs/linq` chain (`JD0039`) keeps its clauses
+ * behind methods, so read as a document it was one with no clauses:
+ * `execute` answered `{}` and `query` `[{}]`. It is recognised by its
+ * `toDocument()` method (this package does not import linq), which no
+ * document can carry: a query document is JSON, and JSON holds no
+ * function. An object the compiler cannot read is refused by the rule
+ * {@link refuseOpaqueValues} keeps inside a document (`JD0041`): its
+ * prototype is neither `Object.prototype` nor `null` and it has no own
+ * enumerable member, so `execute(new Date())` answered `{}`. A class
+ * instance read by its own fields is read as those fields, as before.
  * @param {any} document
  * @param {string} spelling - the member, as the reason names it
  */
-export function refuseChain(document, spelling) {
-  if (document !== null && typeof document === 'object' && typeof document.toDocument === 'function') {
+export function refuseNonDocument(document, spelling) {
+  if (document === null || typeof document !== 'object') return;
+  if (typeof document.toDocument === 'function') {
     throw new DbCompileError('JD0039',
       `${spelling} takes a query document and was handed a chain — pass the chain's document, `
       + 'toDocument() with { externals: chain.explain().bindings }, or hand the chain to the '
       + 'handle it was built from, which runs it');
+  }
+  if (Array.isArray(document)) return;
+  const proto = Object.getPrototypeOf(document);
+  if (proto !== Object.prototype && proto !== null && Object.keys(document).length === 0) {
+    throw new DbCompileError('JD0041',
+      `${spelling} takes a query document, which is JSON, and was handed ${instanceOf(document)} — `
+      + 'a document is read by its own members alone, and a Date or a Map has none; pass the '
+      + 'document as a plain object');
+  }
+}
+
+/**
+ * Refuse a value inside a query document that the compiler reads as `{}`
+ * though it is not one (`JD0041`): an object whose prototype is neither
+ * `Object.prototype` nor `null` and which has no own enumerable member —
+ * a `Date`, a `Map`, a `Set`, a `RegExp` — so its state never reached the
+ * query (a `$where` comparing with a `Date` compared with `{}`, and one
+ * in a `$return` answered `{}`). An object read by its own members, a
+ * class instance's fields among them, is read as those members and is
+ * taken. A document holding such a value cannot be a cache identity, so
+ * a compiled entry never stands for one: this runs where an entry is
+ * compiled (never on a hit) and where a live query is registered.
+ * @param {any} document
+ */
+export function refuseOpaqueValues(document) {
+  // iterative: a document nested thousands deep compiles, so its walk
+  // must not take a frame per level; a container met twice (a shared
+  // subtree or a cycle) is read once
+  const seen = new Set();
+  /** @type {[any, string][]} each value and where it stands, next on top */
+  const pending = [[document, '']];
+  while (pending.length > 0) {
+    const [value, at] = /** @type {[any, string]} */ (pending.pop());
+    if (value === null || typeof value !== 'object' || seen.has(value)) continue;
+    seen.add(value);
+    if (!Array.isArray(value)) {
+      const proto = Object.getPrototypeOf(value);
+      if (proto !== Object.prototype && proto !== null && Object.keys(value).length === 0) {
+        throw new DbCompileError('JD0041',
+          `a query document holds ${instanceOf(value)}, which it reads as {} — `
+          + 'write the JSON value it stands for (a Date as its toISOString())', at);
+      }
+    }
+    const keys = Object.keys(value);
+    // pushed last first, so the first member is read first
+    for (let k = keys.length - 1; k >= 0; k--) pending.push([value[keys[k]], `${at}/${escapePointerToken(keys[k])}`]);
   }
 }
 
@@ -767,6 +822,7 @@ export function createQueryEngine(context) {
       return cached;
     }
     state.counters.misses++;
+    refuseOpaqueValues(document);
 
     if (profile !== null && profile.collections !== null
       && !profile.collections.includes(collection.name)) {
@@ -1333,7 +1389,7 @@ export function createQueryEngine(context) {
   const execute = (document, options = undefined) => {
     const spelling = `collection('${collection.name}').execute`;
     readCallOptions(options, DOCUMENT_CALL_OPTIONS, spelling);
-    refuseChain(document, spelling);
+    refuseNonDocument(document, spelling);
     refuseWholeStreaming(options, spelling, 'query()');
     requireCallable(options, state.now);
     const { externals, strict, profile, pushdown } = callState(options);
@@ -1459,7 +1515,7 @@ export function createQueryEngine(context) {
   const query = (document, options = undefined, cursorFactory = createCursor) => {
     const spelling = `collection('${collection.name}').query`;
     readCallOptions(options, DOCUMENT_CALL_OPTIONS, spelling);
-    refuseChain(document, spelling);
+    refuseNonDocument(document, spelling);
     requireCallable(options, state.now);
     const { externals, strict, profile, pushdown } = callState(options);
     const entry = entryFor(document, strict, profile, pushdown);
@@ -1568,7 +1624,7 @@ export function createQueryEngine(context) {
     // the options of the call it explains, an execute's or a cursor's
     const spelling = `collection('${collection.name}').explain`;
     readCallOptions(options, DOCUMENT_CALL_OPTIONS, spelling);
-    refuseChain(document, spelling);
+    refuseNonDocument(document, spelling);
     const { externals, strict, profile, profileSource, pushdown } = callState(options);
     const entry = entryFor(document, strict, profile, pushdown);
     // the run this call would make: bound against the externals it was
@@ -1920,6 +1976,7 @@ export function createEntityQueryEngine(context) {
       return cached;
     }
     state.counters.misses++;
+    refuseOpaqueValues(document);
     let planned = planEntityQuery(document, entities, mapping, operators);
     if (planned.referenced.length === 0) {
       // `$[*]` over the entity MAP answered the rows of every entity,
@@ -2188,7 +2245,7 @@ export function createEntityQueryEngine(context) {
   const execute = (document, options = undefined) => {
     readCallOptions(options, DOCUMENT_CALL_OPTIONS, 'entity execute()');
     refuseWholeStreaming(options, 'entity execute()', 'cursor()');
-    refuseChain(document, 'entity execute()');
+    refuseNonDocument(document, 'entity execute()');
     return run(document, options);
   };
 
@@ -2366,7 +2423,7 @@ export function createEntityQueryEngine(context) {
    */
   const query = (document, options = undefined, register = undefined, cursorFactory = createCursor) => {
     readCallOptions(options, ENTITY_CURSOR_OPTIONS, 'entity cursor()');
-    refuseChain(document, 'entity cursor()');
+    refuseNonDocument(document, 'entity cursor()');
     requireCallable(options, state.now);
     const { externals, strict, pushdown, profile } = callState(options);
     const entry = entryFor(document, pushdown, profile);
@@ -2452,7 +2509,7 @@ export function createEntityQueryEngine(context) {
   const explain = (document, options = undefined) => {
     // the options of the call it explains, an execute's or a cursor's
     readCallOptions(options, ENTITY_CURSOR_OPTIONS, 'entity explain()');
-    refuseChain(document, 'entity explain()');
+    refuseNonDocument(document, 'entity explain()');
     const { pushdown, profile, profileSource } = callState(options);
     const entry = entryFor(document, pushdown, profile);
     // bound against the externals it was given: a value the database

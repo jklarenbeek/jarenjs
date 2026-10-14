@@ -20,9 +20,11 @@
  * the right rows and is taken, while a chain over the same-named source
  * of a store over another database is refused. A chain over an
  * empty array (`from([])`, the document builder) names no rows and is
- * taken; so are rows whose count cannot be read without consuming them (a
- * generator, an async iterable, a cursor) and a provider that carries no
- * source (one written by hand).
+ * taken, and so is a provider that carries no source (one written by
+ * hand). Rows whose count cannot be read without consuming them (a
+ * generator, an async iterable, a cursor, a push queue, another chain)
+ * are refused by their kind, never by reading them: they may hold rows
+ * the handle would ignore.
  */
 
 import { STORE_SOURCE } from '@jarenjs/db';
@@ -33,7 +35,8 @@ import { LinqBuildError } from '../errors.js';
  * How many rows an in-memory source holds, where that is known without
  * reading it: an array, a string, a typed array, a Set or a Map.
  * @param {any} rows
- * @returns {number | undefined} `undefined` for any other iterable
+ * @returns {number | undefined} `undefined` for any other source, which
+ *   is not read to find out
  */
 function countOf(rows) {
   if (Array.isArray(rows) || typeof rows === 'string' || ArrayBuffer.isView(rows)) {
@@ -47,7 +50,7 @@ function countOf(rows) {
  * A handle's refusal of a chain built over another source than its own
  * (`JL0005`): another collection or entity, by name, the same-named one
  * of a store over another database, by the database its store reads, or
- * rows in memory.
+ * rows in memory — any but a countable empty set of them.
  * @param {any} provider - the store view the handle fronts, carrying its
  *   own source under `STORE_SOURCE`
  * @param {string} method - the member the chain was handed to
@@ -68,13 +71,15 @@ export function onlyOwnSource(provider, method) {
     if (key !== undefined && key.store !== own.store) {
       throw new LinqBuildError('JL0005', `${handed} ${key.kind} '${key.name}' of another store — ${elsewhere}`);
     }
-    const count = rows === null ? undefined : countOf(rows);
-    if (count !== undefined && count > 0) {
-      throw new LinqBuildError('JL0005',
-        `${handed} ${count === 1 ? '1 row' : `${count} rows`} in memory — `
-        + "a handle runs a chain's document over its own rows, never the chain's; build it from "
-        + 'this handle (or from([]) to write a document), or run it over its rows with toArray()');
-    }
+    if (rows === null) return;
+    const count = countOf(rows);
+    if (count === 0) return;
+    const held = count === undefined ? 'rows in memory it cannot count without reading them'
+      : `${count === 1 ? '1 row' : `${count} rows`} in memory`;
+    throw new LinqBuildError('JL0005',
+      `${handed} ${held} — `
+      + "a handle runs a chain's document over its own rows, never the chain's; build it from "
+      + 'this handle (or from([]) to write a document), or run it over its rows with toArray()');
   };
 }
 

@@ -36,7 +36,7 @@ import { isPlainOptions, refuseUnknownMembers, refuseUnknownModelMembers, readOp
 import { canonicalKeyText, namesNoNumber, noNumberKeyReason } from './key-text.js';
 import { planCollection, planEntity, planJoinTable, refuseNameCollisions, verifyShape, compileIndexPath, canonicalOf, creationOrder } from './ddl.js';
 import { translatePatch } from './patch-sql.js';
-import { createQueryEngine, createQueryState, createEntityQueryEngine, createLoadEngine, refuseChain } from './query.js';
+import { createQueryEngine, createQueryState, createEntityQueryEngine, createLoadEngine, refuseNonDocument, refuseOpaqueValues } from './query.js';
 import { sqliteDatabasePath } from './migration-target.js';
 import { CLOSED_UNDER, admitCursor, admitSyncCursor, createCursor, createSyncCursor, shareCursor } from './cursor.js';
 import { refuseUnsupportedPragmaKeys, resolvePragmaRequests, configurePragmas, PRAGMA_NAMES } from './pragmas.js';
@@ -3316,7 +3316,8 @@ export function openStore(model, options) {
           };
           const registerCollectionLive = (core, document, liveOptions) => {
             readOptions(liveOptions, LIVE_OPTIONS, 'live');
-            refuseChain(document, `collection('${core.model.name}').live`);
+            refuseNonDocument(document, `collection('${core.model.name}').live`);
+            refuseOpaqueValues(document);
             const externals = liveOptions?.externals ?? {};
             const keyed = core.model.keySegments !== null;
             const eventTime = normalizeEventTime(liveOptions, core.model.name);
@@ -3960,7 +3961,8 @@ export function openStore(model, options) {
                 'live queries require change capture — open the store with { capture: true }');
             }
             readOptions(liveOptions, LIVE_OPTIONS, 'live');
-            refuseChain(document, 'store.live');
+            refuseNonDocument(document, 'store.live');
+            refuseOpaqueValues(document);
             if (liveOptions?.eventTime !== undefined) {
               throw new DbCompileError('JD0053',
                 'live eventTime maintains a collection view — an entity document re-runs, '
