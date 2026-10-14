@@ -12,6 +12,9 @@
 
 import { mathf64_pow } from '@jarenjs/core/math';
 
+/** A whole number written as decimal text: the exact form of a word a `Number` cannot hold. */
+export const DECIMAL_INTEGER = /^-?\d+$/;
+
 const MAX_SAFE = BigInt(Number.MAX_SAFE_INTEGER);
 const MIN_SAFE = -MAX_SAFE;
 

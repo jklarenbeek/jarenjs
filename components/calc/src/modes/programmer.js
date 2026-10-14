@@ -12,7 +12,7 @@
 
 import { toWord, toBase } from '@jarenjs/core/math';
 import { programmerEnv } from '../env.js';
-import { isFiniteValue } from '../exact.js';
+import { fit, isFiniteValue } from '../exact.js';
 
 export const BASES = ['HEX', 'DEC', 'OCT', 'BIN'];
 export const WORD_SIZES = [8, 16, 32, 64];
@@ -40,16 +40,15 @@ function wordOf(value, wordBits, signed) {
 }
 
 /**
- * The word the display shows for `value`, as a Number — what a
- * programmer-mode result commits as `ans`, so the next calculation uses
- * the value the user saw rather than the unwrapped float. A non-finite
- * value has no word and is returned as it is. A word past 2^53 is the
- * nearest Number, which is all a JSON state slice can hold of it.
+ * The word the display shows for `value`: a `Number` while it is safe, an
+ * exact `bigint` once it is beyond 2^53, so what a programmer-mode result
+ * commits as `ans` is the value the user saw rather than the unwrapped
+ * float. A non-finite value has no word and is returned as it is.
  * @param {number | bigint} value @param {number} [wordBits] @param {boolean} [signed]
- * @returns {number}
+ * @returns {number | bigint}
  */
-export function wordValue(value, wordBits = 32, signed = false) {
-  return isFiniteValue(value) ? Number(wordOf(value, wordBits, signed)) : /** @type {number} */ (value);
+export function wordExact(value, wordBits = 32, signed = false) {
+  return isFiniteValue(value) ? fit(wordOf(value, wordBits, signed)) : value;
 }
 
 /**

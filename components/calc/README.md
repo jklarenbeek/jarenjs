@@ -121,11 +121,17 @@ records the position in a side table, so the AST itself stays geometry-free);
 a programmer result beyond 2^53 is the exact word, where the value was rounded
 to a double before the display wrapped it (`0xFFFFFFFFFFFFFFFF` on a 64-bit
 word displayed `0x0` and now displays `0xFFFF FFFF FFFF FFFF`; `not(0)` and
-`0xFFFFFFFFFFFFFFFF & 0xFF00000000000001` were wrong the same way). The `ans`
-and memory a state slice holds are still JSON numbers, exact to 2^53, so `=` shows the exact
-word while clearing the entry, reusing `ans` and `M+` use the rounded one. A programmer-mode
-`evaluate` answer past 2^53 changed too: an exact power is rounded once and the word
-operations are exact (see CALC-FORMAT).
+`0xFFFFFFFFFFFFFFFF & 0xFF00000000000001` were wrong the same way). The `ans` and
+memory a state slice holds keep such a word: the state gains `ansExact` and
+`memoryExact`, the word as decimal text beside the rounded JSON number, so
+clearing the entry, reusing `ans` and `mem`, and `M+` use the exact word where they
+used the rounded one (a state saved earlier has neither member and loads as it
+was; `M+` is now the `calc-mem-add` effect, which a host that lists the
+component's effects by name must register, as `calcEditEffects` does). A
+programmer-mode `evaluate` answer past 2^53 changed too: an exact power is
+rounded once and the word operations are exact, and a scope value written as a
+decimal-integer string (`ans: '18446744073709551615'`) is the integer it spells,
+where it was rounded to a double (see CALC-FORMAT).
 
 See `docs/CALC-FORMAT.md` and `ARCHITECTURE.md` for the full contract.
 

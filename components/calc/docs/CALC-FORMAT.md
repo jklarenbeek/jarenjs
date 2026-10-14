@@ -78,12 +78,26 @@ rounded once (`10^23` is `1e+23`, it was `1.0000000000000001e+23`) and the
 word operations are exact (`~~5` on a 64-bit word is `5`, it was
 `18446744073709552000`). The limits that remain: a division
 with a remainder whose quotient is beyond 2^53 is truncated, which is all a
-double that large holds of it; the committed `ans` and the memory register
-are JSON numbers in the state slice, so a word beyond 2^53 is held there as
-its nearest `Number`, so `=` shows the exact word while clearing the entry,
-reusing `ans` and `M+` read the rounded value (an unsigned 64-bit
-`0xFFFFFFFFFFFFFFFF` rounds up to 2^64, which wraps to `0x0`); a scope value must be a `Number`, as it always
-was; and `toExpression` prints a literal beyond 2^53 as that nearest `Number`.
+double that large holds of it; a scope value must be a `Number` (or, in the
+programmer environment, a decimal-integer string, below), and a `bigint` is
+refused, as it always was; and `toExpression` prints a literal beyond 2^53 as
+that nearest `Number`.
+
+**The state slice keeps the exact word.** `ans` and `memory` stay JSON numbers
+(the nearest double). A programmer-mode word beyond ±(2^53 − 1) is also written
+as decimal text in `ansExact` / `memoryExact` (`'18446744073709551615'` for an
+unsigned 64-bit all-ones word; the empty text beside a word a `Number` holds).
+Calculation reads the text instead of the number only in the programmer mode
+and only while it is the integer the number rounds from, so a host that patches
+`ans` or `memory` alone, or a state saved before the members existed, reads as
+the number it holds. In the programmer environment a scope value that is a
+string of decimal digits (an optional leading `-`) is the integer it spells,
+exactly; any other string reads as `+value` does. `M+` adds the two words as
+integers (unwrapped, as before) when both are whole, and as floats otherwise.
+The `memory` member of the viewModel is that decimal text while an exact word is
+held and the `Number` otherwise. A decimal-integer string that reads within
+±(2^53 − 1) is the `Number` `+value` gives, as before. `calc/commit` takes an
+optional `exact` payload member (absent reads as the empty text).
 
 Every function declares how many arguments it takes — the environment's
 `arity` table, `[min, max]` per function name — and a call outside that range

@@ -81,5 +81,9 @@ State (`$.calc`) is plain JSON, immutable, copy-on-write via
 return `patch`/`effects` transitions. The display string, four-base views,
 plot vnode and forms model are derived in the `viewModel` boundary — never
 stored in state. `=` and backspace route through JS effects (`calc-eval`,
-`calc-edit`) because evaluation is JS; everything else is a pure patch.
-Works headless (omit `node`) → SSR / replay for free.
+`calc-edit`) because evaluation is JS, and `M+` routes through `calc-mem-add`
+because a word beyond 2^53 needs integer addition; everything else is a pure
+patch. `ans` and `memory` are JSON numbers; a programmer-mode word beyond 2^53
+is also held as its decimal text in `ansExact` / `memoryExact`, which the scope
+reads only while it is the integer its `Number` rounds from (see
+`docs/CALC-FORMAT.md`). Works headless (omit `node`) → SSR / replay for free.

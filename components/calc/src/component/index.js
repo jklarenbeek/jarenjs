@@ -32,9 +32,9 @@ import {
   solveTvm, convertValue, unitOptions, converterDimensions,
 } from '../index.js';
 import { evaluateExact } from '../compile.js';
-import { isFiniteValue } from '../exact.js';
+import { DECIMAL_INTEGER, fit, isFiniteValue, toNumber } from '../exact.js';
 import { standardMode } from '../modes/standard.js';
-import { BASES, WORD_SIZES, wordValue, viewsOf, formatWord } from '../modes/programmer.js';
+import { BASES, WORD_SIZES, wordExact, viewsOf, formatWord } from '../modes/programmer.js';
 import { financialMode } from '../modes/financial.js';
 import { converterMode } from '../modes/converter.js';
 import { createRatesLayer, FALLBACK_RATES } from './rates/index.js';
@@ -66,7 +66,9 @@ export function calcInitialState() {
     mode: 'standard',
     entry: '',
     ans: 0,
+    ansExact: '',
     memory: 0,
+    memoryExact: '',
     angleMode: 'rad',
     base: 'DEC',
     wordBits: 32,
@@ -79,16 +81,59 @@ export function calcInitialState() {
   };
 }
 
-/** The scope for evaluating an entry against a state slice or an effect's props. */
+/**
+ * The exact word beside a held `Number`, or `undefined`. The decimal string
+ * is trusted only while it is the integer the `Number` rounds from, so a
+ * state a host patched at `ans` or `memory` alone, or one written before
+ * the exact form existed, reads as the `Number` it holds.
+ * @param {any} held the `ans` or `memory` Number
+ * @param {any} text the `ansExact` or `memoryExact` sibling
+ * @returns {bigint | undefined}
+ */
+function exactWord(held, text) {
+  return typeof text === 'string' && DECIMAL_INTEGER.test(text) && Number(text) === held ? BigInt(text) : undefined;
+}
+
+/**
+ * The decimal text of a word a `Number` cannot hold exactly, else the empty
+ * text the state slice holds beside a safe `Number`.
+ * @param {number | bigint} word
+ * @returns {string}
+ */
+function exactText(word) {
+  return typeof word === 'bigint' ? String(word) : '';
+}
+
+/**
+ * The scope for evaluating an entry against a state slice or an effect's
+ * props. A programmer-mode `ans` and memory that have an exact form enter
+ * the scope as that decimal integer, which the exact environment reads
+ * without rounding; every other mode holds the `Number`.
+ */
 function scopeOf(calc) {
+  const programmer = calc.mode === 'programmer';
+  const held = (number, text) => {
+    const word = programmer ? exactWord(number, text) : undefined;
+    return word === undefined ? number : String(word);
+  };
+  const memory = held(calc.memory, calc.memoryExact);
   return {
     angleMode: calc.angleMode,
     wordBits: calc.wordBits,
     signed: calc.signed,
-    ans: calc.ans,
-    mem: calc.memory,
-    memory: calc.memory,
+    ans: held(calc.ans, calc.ansExact),
+    mem: memory,
+    memory,
   };
+}
+
+/**
+ * The value a scope entry stands for. In the programmer mode a decimal-integer
+ * string is the integer it spells; any other value, a string a host patched
+ * into the slice included, is what the state holds.
+ */
+function scopeValue(held, mode) {
+  return mode === 'programmer' && typeof held === 'string' && DECIMAL_INTEGER.test(held) ? fit(BigInt(held)) : held;
 }
 
 /** The evaluation env for a mode. */
@@ -140,11 +185,13 @@ export const calcActions = {
       base: '$.calc.base',
       angleMode: '$.calc.angleMode', wordBits: '$.calc.wordBits',
       signed: '$.calc.signed', ans: '$.calc.ans', memory: '$.calc.memory',
+      ansExact: '$.calc.ansExact', memoryExact: '$.calc.memoryExact',
     } }],
   },
   'calc/commit': {
     patch: [
       { op: 'replace', path: '/calc/ans', value: '$payload.value' },
+      { op: 'add', path: '/calc/ansExact', value: { $if: [{ $exists: '$payload.exact' }, '$payload.exact', ''] } },
       { op: 'replace', path: '/calc/entry', value: { $if: [{ $exists: '$payload.entry' }, '$payload.entry', '$payload.display'] } },
       { op: 'add', path: '/calc/tape/-', value: { expr: '$payload.expr', result: '$payload.display' } },
     ],
@@ -154,8 +201,25 @@ export const calcActions = {
   'calc/base': { patch: [{ op: 'replace', path: '/calc/base', value: '$payload.base' }] },
   'calc/word': { patch: [{ op: 'replace', path: '/calc/wordBits', value: { $number: '$payload.bits' } }] },
   'calc/sign': { patch: [{ op: 'replace', path: '/calc/signed', value: { $if: ['$.calc.signed', false, true] } }] },
-  'calc/mem-add': { patch: [{ op: 'replace', path: '/calc/memory', value: { $add: ['$.calc.memory', '$.calc.ans'] } }] },
-  'calc/mem-clear': { patch: [{ op: 'replace', path: '/calc/memory', value: 0 }] },
+  'calc/mem-add': {
+    effects: [{ run: 'calc-mem-add', with: {
+      mode: '$.calc.mode',
+      ans: '$.calc.ans', ansExact: '$.calc.ansExact',
+      memory: '$.calc.memory', memoryExact: '$.calc.memoryExact',
+    } }],
+  },
+  'calc/mem-set': {
+    patch: [
+      { op: 'replace', path: '/calc/memory', value: '$payload.value' },
+      { op: 'add', path: '/calc/memoryExact', value: '$payload.exact' },
+    ],
+  },
+  'calc/mem-clear': {
+    patch: [
+      { op: 'replace', path: '/calc/memory', value: 0 },
+      { op: 'add', path: '/calc/memoryExact', value: '' },
+    ],
+  },
   // plotting
   'calc/plot-expr': { patch: [{ op: 'replace', path: '/calc/plot/expr', value: '$event.value' }] },
   'calc/plot-kind': { patch: [{ op: 'replace', path: '/calc/plot/kind', value: '$payload.kind' }] },
@@ -211,7 +275,7 @@ export const calcViewRules = [...CALCULATOR_RULES, ...calcFormViewRules];
 
 export { createRatesLayer, FALLBACK_RATES, CURRENCY_CODES } from './rates/index.js';
 
-/** The `calc-edit` (backspace) and `calc-eval` (=) JS effect handlers. */
+/** The `calc-edit` (backspace), `calc-eval` (=) and `calc-mem-add` (M+) JS effect handlers. */
 export const calcEditEffects = {
   'calc-edit': (props, dispatch) => {
     const entry = String(props?.entry ?? '');
@@ -231,21 +295,33 @@ export const calcEditEffects = {
     const display = mode === 'programmer'
       ? formatWord(res.value, view)
       : desc.format ? desc.format(res.value, view) : String(res.value);
-    // `ans` is the word the display shows, as a Number: the next calculation
-    // uses the value the user saw. A state slice holds JSON numbers, so a
-    // word beyond 2^53 is held as its nearest Number there, and the display
-    // of `ans` (after clearing the entry) or of a later `ans` use is of that
-    // rounded value, where `=` showed the exact word.
-    const value = mode === 'programmer'
-      ? wordValue(res.value, props.wordBits ?? 32, props.signed ?? false)
+    // `ans` is the word the display shows, so the next calculation uses the
+    // value the user saw. A state slice holds it as a JSON number, and a word
+    // beyond 2^53 also as its decimal text beside the number, which a
+    // programmer-mode scope reads back exactly.
+    const word = mode === 'programmer'
+      ? wordExact(res.value, props.wordBits ?? 32, props.signed ?? false)
       : res.value;
+    const value = toNumber(word);
     // The displayed result becomes the next entry, except when it is not a
     // number (`∞`, `NaN`, `—` are not expressions): the typed expression
     // stays, so the entry still evaluates. Grouping belongs on the
     // tape/display; expression literals contain no spaces.
     const next = !isFiniteValue(res.value) ? entry
       : mode === 'programmer' ? display.replaceAll(' ', '') : display;
-    dispatch('calc/commit', { value, display, expr: entry, entry: next });
+    dispatch('calc/commit', { value, exact: exactText(word), display, expr: entry, entry: next });
+  },
+  'calc-mem-add': (props, dispatch) => {
+    const scope = scopeOf(props);
+    const ans = scopeValue(scope.ans, props.mode);
+    const memory = scopeValue(scope.memory, props.mode);
+    const whole = (v) => typeof v === 'bigint' || Number.isInteger(v);
+    // a programmer word is added as the integer it is, so the register keeps
+    // an exact word; every other sum is the float sum it always was
+    const sum = props.mode === 'programmer' && whole(ans) && whole(memory)
+      ? fit(BigInt(ans) + BigInt(memory))
+      : Number(memory) + Number(ans);
+    dispatch('calc/mem-set', { value: toNumber(sum), exact: exactText(sum) });
   },
 };
 
@@ -265,7 +341,8 @@ export function contributeCalcViewModel(state, options = {}) {
   const scope = scopeOf(calc);
 
   // live result of the current entry
-  const live = calc.entry === '' ? { ok: true, value: calc.ans } : evaluateExact(calc.entry, scope, { env });
+  const ans = scopeValue(scope.ans, calc.mode);
+  const live = calc.entry === '' ? { ok: true, value: ans } : evaluateExact(calc.entry, scope, { env });
   const display = {
     entry: calc.entry === '' ? '0' : calc.entry,
     result: !live.ok ? '' : calc.mode === 'programmer' ? formatWord(live.value, calc) : desc.format(live.value, calc),
@@ -273,7 +350,7 @@ export function contributeCalcViewModel(state, options = {}) {
   };
 
   // programmer four-base view
-  const pv = live.ok && isFiniteValue(live.value) ? live.value : calc.ans;
+  const pv = live.ok && isFiniteValue(live.value) ? live.value : ans;
   const bases = {
     base: calc.base, wordBits: calc.wordBits, signed: calc.signed,
     baseOptions: BASES.map((b) => ({ id: b, label: b, active: b === calc.base, on: { click: { action: 'calc/base', with: { base: b } } } })),
@@ -337,7 +414,7 @@ export function contributeCalcViewModel(state, options = {}) {
     display,
     keypad: keypadFor(calc.mode),
     tape: calc.tape.map((t, i) => ({ key: 'tape' + i, expr: t.expr, result: t.result })),
-    memory: calc.memory,
+    memory: scope.memory,
     angle: { mode: calc.angleMode, options: ['rad', 'deg', 'grad'].map((a) => ({ id: a, label: a, active: a === calc.angleMode, on: { click: { action: 'calc/angle', with: { mode: a } } } })) },
     bases,
     financial,

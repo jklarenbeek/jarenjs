@@ -21,7 +21,7 @@ import { parseExpression } from './parser/index.js';
 import { defaultEnv } from './env.js';
 import { CalcParseError, errorAt } from './errors.js';
 import { siteOf, exactOf } from './ast.js';
-import { toNumber } from './exact.js';
+import { DECIMAL_INTEGER, fit, toNumber } from './exact.js';
 
 /**
  * Compile an AST against an environment.
@@ -65,9 +65,18 @@ function build(node, env) {
     }
     case 'var': {
       const name = node.name;
+      // an exact environment reads a decimal-integer string as the integer it
+      // spells, where `+v` would round it to a double past 2^53
+      const exact = env.exact === true;
       return (scope) => {
         const v = scope ? scope[name] : undefined;
-        return v === undefined ? NaN : +v;
+        if (v === undefined) return NaN;
+        if (exact && typeof v === 'string' && DECIMAL_INTEGER.test(v)) {
+          // only a word a Number cannot hold takes the integer: a safe one reads as `+v` does
+          const word = fit(BigInt(v));
+          if (typeof word === 'bigint') return word;
+        }
+        return +v;
       };
     }
     case 'unary': {
