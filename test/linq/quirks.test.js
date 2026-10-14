@@ -767,4 +767,28 @@ describe('a Sequence member refuses the argument after the ones it reads, on bot
     assert.strictEqual(await fromAsync(ROWS).all(gt3, none), false);
     assert.deepStrictEqual(await fromAsync(ROWS).elementAt(1, none), { n: 5, k: 'a' });
   });
+
+  it('the three factories refuse the argument after their last, over rows and over a provider', () => {
+    const how = 'pass the engine registries in the one options object';
+    const provider = { execute() { throw new Error('never run'); }, root: '$[*]' };
+    for (const source of [ROWS, provider]) {
+      assert.throws(() => from(source, {}, 5), refusal('from', how));
+      assert.throws(() => from(source, undefined, 5), refusal('from', how));
+      assert.throws(() => fromAsync(source, {}, 5), refusal('fromAsync', how));
+      assert.throws(() => fromDocument(source, '$[*]', {}, 5), refusal('fromDocument', how));
+      assert.throws(() => fromDocument(source, '$[*]', undefined, 5), refusal('fromDocument', how));
+    }
+    // the refusal comes before the options and the source are read
+    assert.throws(() => from(ROWS, { bogus: 1 }, 5), refusal('from', how));
+    assert.throws(() => from(5, {}, 5), refusal('from', how));
+  });
+
+  it('the three factories take an undefined after their last, and every call without one builds as before', async () => {
+    const none = undefined;
+    assert.deepStrictEqual(from(ROWS, {}, none).where(gt3).toArray(), [{ n: 5, k: 'a' }, { n: 7, k: 'b' }]);
+    assert.deepStrictEqual(from(ROWS, none, none).first(), { n: 1, k: 'a' });
+    assert.deepStrictEqual(await fromAsync(ROWS, {}, none).where(gt3).toArray(), [{ n: 5, k: 'a' }, { n: 7, k: 'b' }]);
+    assert.deepStrictEqual(fromDocument(ROWS, '$[*]', {}, none).toArray().length, 4);
+    assert.deepStrictEqual(fromDocument(ROWS, '$[*]').toArray().length, 4);
+  });
 });

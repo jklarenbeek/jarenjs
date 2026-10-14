@@ -97,6 +97,7 @@ const UNREAD = {
   'orderBy thenBy': '@(key, { collation }); no comparer',
   'join groupJoin': 'no comparer; keys compare as the engine does',
   'toDocument explain': 'call it bare',
+  'from fromAsync fromDocument': 'pass the engine registries in the one options object',
   selectMany: '@(sel).select(resultSel)',
   groupBy: '@(key).select((g) => ({ key: g.key, items: [g.items.all().member] }))',
   aggregate: '@(seed, step).select(resultSel)',

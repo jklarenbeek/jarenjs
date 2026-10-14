@@ -499,11 +499,14 @@ The real C# semantics, because getting these wrong is how a
   `orderBy(key, options, comparer)`, `take(1, 2)`, `where(pred, x)`, and
   the same on `select`, `skip`, `concat`, `defaultIfEmpty`, `ofType`, `cast`,
   `groupJoin`, `thenBy*`, `params`, `mapAsync`, `any`, `all`, `elementAt`,
-  `toDocument` and `explain`. They used to build and answer as if it had
-  never been written: `groupBy(key, elementSel)` still held whole rows in
-  `items`, `aggregate(seed, step, resultSel)` answered the unprojected
-  fold, `take(1, 2)` took one, and `join(…, comparer)` compared as the
-  engine compares. The message names the spelling that does what the extra
+  `toDocument` and `explain`, and on the three that start a chain,
+  `from(rows, {}, 5)`, `fromAsync(rows, {}, 5)` and
+  `fromDocument(rows, document, {}, 5)`, whose message names the one
+  options object that takes the engine registries. They used to build and
+  answer as if it had never been written: `groupBy(key, elementSel)` still
+  held whole rows in `items`, `aggregate(seed, step, resultSel)` answered
+  the unprojected fold, `take(1, 2)` took one, `join(…, comparer)` compared
+  as the engine compares, and `from(rows, {}, 5)` built `from(rows, {})`. The message names the spelling that does what the extra
   argument meant; a result selector that reads the
   outer item as well as the element has no spelling, and neither has a
   custom comparer. `undefined` is no argument, here as above;
@@ -1538,6 +1541,7 @@ that preserves it, so there is no spelling that is allowed to.
 | `from(rows).orderBy(key, options, comparer)`; `orderByDescending`, `thenBy`, `thenByDescending`, `join(…, comparer)` and `groupJoin(…, comparer)` likewise | `orderBy() would ignore the argument past its last; orderBy(key, { collation }); no comparer` (`no comparer; keys compare as the engine does` for the joins) | `orderBy(key, { collation: 'name' })` with the collation registered (§8.1); a join compares as the engine does |
 | `from(rows).elementAtOrDefault(9, (r) => r.n > 3)`, or a third argument | `elementAtOrDefault() takes one default value, not a predicate — it reads no callback, so the one passed would be ignored or answered as the default; filter first: where(pred).elementAtOrDefault(index, value)` | `from(rows).where((r) => r.n.gt(3)).elementAtOrDefault(9, value)` |
 | `from(rows, { limit: { steps: 3 } })` | `from() does not take 'limit' — did you mean 'limits'?` | `{ limits: { steps: 3 } }` |
+| `from(rows, {}, 5)`; `fromAsync(rows, {}, 5)` and `fromDocument(rows, document, {}, 5)` likewise | `from() would ignore the argument past its last; pass the engine registries in the one options object` | `from(rows, { limits: { steps: 3 } })`; an `undefined` in that place is no argument |
 | `from(rows, { bogus: 1 })` | `from() does not take 'bogus'; the options are compileTypeTest, functions, collations, pathFunctions, limits, registry` | one of the six (§8.1); `fromAsync()` and `fromDocument()` refuse the same way, by their own names |
 | `from(rows, 'x')`, `from(rows, null)` | `from() takes a plain options object` | an object literal, or no second argument |
 | `orderBy((u) => u.n, { emtpy: 'greatest' })` | `orderBy() does not take 'emtpy' — did you mean 'empty'?` | `{ empty: 'greatest' }` |

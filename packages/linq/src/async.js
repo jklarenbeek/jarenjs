@@ -1009,9 +1009,11 @@ function validateParams(bindings) {
  * @param {{ compileTypeTest?: any, functions?: any, collations?: any,
  *   pathFunctions?: any, limits?: any, registry?: object }} [options] -
  *   the engine registries, as `from()` takes them — the same closed set
+ * @param {...undefined} unread - reads nothing: an argument after `options` is `JL0005`
  * @returns {AsyncSequence}
  */
-export function fromAsync(source, options) {
+export function fromAsync(source, options, ...unread) {
+  requireNoTrailingArgument(unread, 'fromAsync');
   if (isProviderSource(source)) {
     return new AsyncSequence(
       { kind: 'provider', source, root: providerRoot(source) },

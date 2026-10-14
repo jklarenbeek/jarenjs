@@ -777,9 +777,11 @@ export class Sequence {
  *   `registry` when the hooks are rebuilt per call, so compiled documents
  *   still share a cache partition. A closed set: any other member, or an
  *   argument that is not a plain object, is `JL0005`.
+ * @param {...undefined} unread - reads nothing: an argument after `options` is `JL0005`
  * @returns {Sequence}
  */
-export function from(source, options) {
+export function from(source, options, ...unread) {
+  requireNoTrailingArgument(unread, 'from');
   const kind = classifySource(source);
   const root = kind === 'provider' ? providerRoot(source) : '$[*]';
   const relations = kind === 'provider' ? providerRelations(source) : null;
@@ -802,9 +804,11 @@ export function from(source, options) {
  *   pathFunctions?: any, limits?: any, registry?: object }} [options] -
  *   as {@link from}. A SAVED document is the case `limits` exists for:
  *   bound its steps and results before running it.
+ * @param {...undefined} unread - reads nothing: an argument after `options` is `JL0005`
  * @returns {Sequence}
  */
-export function fromDocument(source, document, options) {
+export function fromDocument(source, document, options, ...unread) {
+  requireNoTrailingArgument(unread, 'fromDocument');
   const read = readOptions(options, SOURCE_OPTION_KEYS, 'fromDocument()');
   let root = document;
   if (root !== null && typeof root === 'object' && !Array.isArray(root)

@@ -458,10 +458,6 @@ what each does is its own documentation's job
   asking in JavaScript. Wanted: a root for a join table, so a membership can be
   filtered, counted and joined in one document
   ([DB-CLIENT §6](../packages/linq/docs/DB-CLIENT.md)).
-- [ ] **`from()`, `fromAsync()` and `fromDocument()` ignore an argument after
-  their last.** `from(rows, {}, 5)` builds as if the `5` were never written,
-  where every Sequence member now refuses an argument it does not read.
-  Wanted: the same `JL0005` refusal.
 - [ ] **A collection handle's `execute`, `query` and `explain` take a chain and
   answer nothing real.** `client.collections.orders.execute(orders.where(...))`
   answers `{}` and `query(chain)` yields `[{}]` (the store's members take a
