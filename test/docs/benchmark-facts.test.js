@@ -88,7 +88,7 @@ describe('a measured bundle size is quoted through a marker, never typed', () =>
 
   it('has figures distinctive enough to search for', () => {
     assert.strictEqual(measured.size, Object.keys(baseline.bundles).length + Object.keys(baseline.chain).length, `${measured.size} distinct measured figures`);
-    for (const figure of measured.keys()) assert.match(figure, /^\d{1,3},\d{3}$/);
+    for (const figure of measured.keys()) assert.match(figure, /^\d{1,3}(?:,\d{3})+$/);
   });
 
   it('no committed markdown types one outside a derived block', () => {
