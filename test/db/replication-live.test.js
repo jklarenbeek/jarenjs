@@ -54,3 +54,53 @@ for (const mode of ['session', 'journal']) it(`${mode}: replicated mutations mai
   }
   finally { await source.close(); await target.close(); }
 });
+
+for (const mode of ['session', 'journal']) it(`${mode}: a row deleted and stored again with the document it had replicates nothing and refuses nothing`, async () => {
+  const open = (replica) => openStore(structuredClone(replicationModel), { driver: nodeDriver(), capture: { mode }, replication: { replica } });
+  const source = await open('source');
+  try {
+    const notes = source.collection('notes');
+    await notes.put({ id: 'a', n: 1, group: 'west' });
+    await notes.put({ id: 'b', n: 1, group: 'west' });
+    const { next } = await source.replication.page();
+    const records = [];
+    source.observe((record) => records.push(record.patch));
+    await source.transaction(async (tx) => {
+      await tx.collection('notes').delete('a');
+      await tx.collection('notes').put({ id: 'a', n: 1, group: 'west' });
+    });
+    // the row moved in its table, which capture says; a replica holds rows without their order
+    assert.deepEqual(records, [[{ op: 'replace', path: '/notes/a', value: { id: 'a', n: 1, group: 'west' } }]]);
+    assert.deepEqual((await source.replication.page({ after: next })).items, []);
+    await source.transaction(async (tx) => {
+      await tx.collection('notes').delete('b');
+      await tx.collection('notes').put({ id: 'b', n: 1, group: 'west' });
+      await tx.collection('notes').put({ id: 'c', n: 2, group: 'east' });
+    });
+    const page = await source.replication.page({ after: next });
+    assert.deepEqual(page.items.map((item) => item.operations.map((operation) => [operation.table, operation.key])), [[['notes', 'c']]]);
+  }
+  finally { await source.close(); }
+});
+
+for (const mode of ['session', 'journal']) it(`${mode}: an unlink and link of one pair across two saves of one transaction commits and replicates nothing`, async () => {
+  const source = await openStore(structuredClone(replicationModel), { driver: nodeDriver(), capture: { mode }, replication: { replica: 'source' } });
+  try {
+    await source.entity('Tag').create({ id: 't1', label: 'one' });
+    await source.entity('Parent').create({ id: 'P1', name: 'first' });
+    source.entity('Parent').link('P1', 'tags', 't1');
+    await source.saveChanges();
+    const { next } = await source.replication.page();
+    // the membership row is the one it was: no operation, and the commit stands
+    await source.transaction(async (tx) => {
+      tx.entity('Parent').unlink('P1', 'tags', 't1');
+      await tx.saveChanges();
+      tx.entity('Parent').link('P1', 'tags', 't1');
+      await tx.saveChanges();
+    });
+    assert.deepEqual((await source.replication.page({ after: next })).items, []);
+    const parent = await source.entity('Parent').asNoTracking().load({ include: { tags: true } });
+    assert.deepEqual(parent[0].tags.map((tag) => tag.id), ['t1']);
+  }
+  finally { await source.close(); }
+});

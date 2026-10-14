@@ -3414,7 +3414,9 @@ export function openStore(model, options) {
                 : undefined;
             return resolved === undefined ? undefined : core.get(resolved);
           };
-          /** Journal-mode write wrappers for a collection core. */
+          /** Capture's write wrappers for a collection core: the journal's
+           * records, and in session mode the deletes and the writes after
+           * them that a changeset nets away (a row deleted and stored again). */
           const captureCollection = (collectionName, core) => {
             if (capture === null) return core;
             const journal = capture.mode === 'journal';
@@ -3426,7 +3428,7 @@ export function openStore(model, options) {
               insert: (doc, options) => {
                 readWriteOptions(collectionName, options, 'insert', false);
                 return guard(() => chain(core.insert(doc, options), (key) => {
-                  if (journal) capture.record(collectionName, [key], null, doc);
+                  capture.record(collectionName, [key], null, doc, [key]);
                   return key;
                 }));
               },
@@ -3435,10 +3437,13 @@ export function openStore(model, options) {
                 return guard(() => (journal
                   ? chain(readBefore(core, doc, key), (before) =>
                     chain(core.put(doc, key, options), (storedKey) => {
-                      capture.record(collectionName, [storedKey], before ?? null, doc);
+                      capture.record(collectionName, [storedKey], before ?? null, doc, [storedKey]);
                       return storedKey;
                     }))
-                  : core.put(doc, key, options)));
+                  : chain(core.put(doc, key, options), (storedKey) => {
+                    capture.record(collectionName, [storedKey], undefined, doc, [storedKey]);
+                    return storedKey;
+                  })));
               },
               patch: (key, ops, options) => {
                 readWriteOptions(collectionName, options, 'patch', true);
@@ -3457,10 +3462,13 @@ export function openStore(model, options) {
                   ? chain(core.get(key), (before) =>
                     chain(core.delete(key, options), (deleted) => {
                       if (deleted && before !== undefined)
-                        capture.record(collectionName, [key], before, null);
+                        capture.record(collectionName, [key], before, null, [key]);
                       return deleted;
                     }))
-                  : core.delete(key, options)));
+                  : chain(core.delete(key, options), (deleted) => {
+                    if (deleted) capture.record(collectionName, [key], undefined, null, [key]);
+                    return deleted;
+                  })));
               },
             };
           };
@@ -3475,10 +3483,7 @@ export function openStore(model, options) {
             return {
               ...core,
               create: (doc) => guard(() => chain(core.create(doc), (made) => {
-                if (journal) {
-                  capture.record(entityName, keysOf(made), null,
-                    stripRelations(entityName, made));
-                }
+                capture?.record(entityName, keysOf(made), null, stripRelations(entityName, made), core.plan.keyValues(keysOf(made)));
                 return made;
               })),
               update: (key, changes) => guard(() => (journal
@@ -3497,7 +3502,12 @@ export function openStore(model, options) {
               // written, even when the caller's transaction catches it.
               delete: (key) => guard(() => {
                 const judged = reaches && cascadeClosure.judges(entityName);
-                if (!journal && !judged) return core.delete(key);
+                if (!journal && !judged) {
+                  return chain(core.delete(key), (deleted) => {
+                    if (deleted) capture?.record(entityName, core.normalizeKey(key), undefined, null, core.plan.keyValues(core.normalizeKey(key)));
+                    return deleted;
+                  });
+                }
                 const remove = () => chain(readCascade(entityName, core.normalizeKey(key)), (closure) =>
                   chain(closure === null ? core.get(key) : closure.root, (before) =>
                     chain(core.delete(key), (deleted) => !deleted || before === undefined ? deleted
@@ -3507,9 +3517,10 @@ export function openStore(model, options) {
                           // recorded it — never another spelling of it ('16.0',
                           // an instant's epoch) the delete was called with
                           capture.record(entityName, keysOf(before),
-                            stripRelations(entityName, before), null);
+                            stripRelations(entityName, before), null, core.plan.keyValues(keysOf(before)));
                           if (closure !== null) recordCascade(closure.entries);
                         }
+                        else capture?.record(entityName, keysOf(before), undefined, null, core.plan.keyValues(keysOf(before)));
                         return deleted;
                       }))));
                 return judged ? attempt(() => connection.transaction(remove),
@@ -4832,7 +4843,7 @@ export function openStore(model, options) {
             // ————— named savepoints (MODEL-FORMAT §5.2) —————
             // One per-exact-scope map from the caller's LABEL to an
             // opaque driver checkpoint plus the settlement-list mark and,
-            // in journal capture mode, the capture mark. The label is a
+            // under capture, the capture mark. The label is a
             // map key and diagnostic only — the driver generates the
             // `jaren_sp_*` identifier structured nesting already uses, so
             // a label can never become SQL, and both savepoint kinds

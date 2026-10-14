@@ -671,7 +671,7 @@ describe('an event-time view keeps its own copy of a reading', function () {
 describe('a floating sum or mean answers what a fresh run answers, bit for bit', function () {
   const FLOATS = [['a', 5, 0.7], ['b', 2, 0.01], ['c', 4, 0.3], ['d', 5, 0.6]];
 
-  it('a rolling sum over readings sharing an instant is the fresh run, not the view\'s own order', async function () {
+  it('a rolling sum over readings sharing an instant is the fresh run, and the view stays maintained', async function () {
     const store = await open();
     const readings = store.collection('readings');
     const spec = { width: 3 * MINUTE, aggregate: 'sum' };
@@ -682,8 +682,8 @@ describe('a floating sum or mean answers what a fresh run answers, bit for bit',
     const fresh = rollingSeries(await allRows(store), spec);
     assert.deepStrictEqual(fresh.map((row) => row.value), [0.01, 0.31, 1.5999999999999999, 1.5999999999999999]);
     assert.deepStrictEqual(live.result.rows, fresh);
-    assert.strictEqual(live.mode.mode, 'rerun');
-    assert.match(live.mode.reason, /^'sum' — rows sharing an instant add in the order they reached the view/);
+    assert.deepStrictEqual(live.mode, { strategy: 'rolling', mode: 'incremental' });
+    assert.strictEqual(live.stats().reruns, 0);
     await store.close();
   });
 
@@ -738,6 +738,77 @@ describe('a floating sum or mean answers what a fresh run answers, bit for bit',
     });
   }
 
+  for (const [label, document, kernel, spec] of [
+    ['bucket sum', bucketDoc({ aggregate: 'sum' }), resampleSeries, { every: MINUTE, aggregate: 'sum' }],
+    ['bucket mean', bucketDoc({ aggregate: 'mean' }), resampleSeries, { every: MINUTE, aggregate: 'mean' }],
+    ['rolling sum', rollingDoc({ aggregate: 'sum' }), rollingSeries, { width: 5 * MINUTE, aggregate: 'sum' }],
+    ['rolling mean', rollingDoc({ aggregate: 'mean' }), rollingSeries, { width: 5 * MINUTE, aggregate: 'mean' }],
+  ]) {
+    it(`${label}: decimals sharing an instant, written in transactions and stored again, stay maintained and equal the kernel after every commit`, async function () {
+      const store = await open();
+      const readings = store.collection('readings');
+      const random = mulberry32(0x7ab1e);
+      // four instants for twelve keys: most readings share one
+      const instant = () => T0 + Math.floor(random() * 4) * 30_000;
+      const reading = () => Math.round(random() * 1000) / 100;
+      for (let i = 0; i < 6; i++) await readings.insert({ id: `k${i}`, series: 's', at: instant(), value: reading() });
+      const live = await readings.live(document, { eventTime: EVENT_TIME, mode: 'incremental' });
+      assert.deepStrictEqual(live.result.rows, kernel(await allRows(store), spec));
+      for (let step = 0; step < 60; step++) {
+        await store.transaction(async (tx) => {
+          const writes = tx.collection('readings');
+          const used = new Set();
+          for (let i = 1 + Math.floor(random() * 3); i > 0; i--) {
+            const id = `k${Math.floor(random() * 12)}`;
+            if (used.has(id)) continue;
+            used.add(id);
+            const held = await writes.get(id);
+            const roll = random();
+            // a row deleted and stored again with the document it had moves
+            // last in the table, as an update does not
+            if (held !== undefined && roll < 0.3) {
+              await writes.delete(id);
+              await writes.insert(held);
+            }
+            else if (held !== undefined && roll < 0.45) await writes.delete(id);
+            else await writes.put({ id, series: 's', at: instant(), value: reading() }, id);
+          }
+        });
+        assert.deepStrictEqual(live.result.rows, kernel(await allRows(store), spec), `step ${step}`);
+      }
+      assert.strictEqual(live.mode.mode, 'incremental');
+      assert.strictEqual(live.stats().reruns, 0);
+      await store.close();
+    });
+  }
+
+  for (const [label, document, kernel, spec] of [
+    ['bucket', bucketDoc({ aggregate: 'sum' }), resampleSeries, { every: MINUTE, aggregate: 'sum' }],
+    ['rolling', rollingDoc({ aggregate: 'sum' }), rollingSeries, { width: 5 * MINUTE, aggregate: 'sum' }],
+  ]) {
+    it(`${label}: a late reading stored again re-reads every row's position afresh`, async function () {
+      const store = await open();
+      const readings = store.collection('readings');
+      const live = await readings.live(document,
+        { eventTime: { ...EVENT_TIME, watermark: T0 + 100 * MINUTE, allowedLateness: 10 * MINUTE } });
+      for (const [id, value] of [['a', 0.1], ['b', 0.2], ['c', 0.3]])
+        await readings.insert({ id, series: 's', at: T0 + 95 * MINUTE, value });
+      // (0.1 + 0.2) + 0.3
+      assert.strictEqual(live.result.rows.at(-1).value, 0.6000000000000001);
+      live.advance(T0 + 200 * MINUTE);
+      await store.transaction(async (tx) => {
+        await tx.collection('readings').delete('a');
+        await tx.collection('readings').insert({ id: 'a', series: 's', at: T0 + 95 * MINUTE, value: 0.1 });
+      });
+      assert.strictEqual(live.stats().lateData, 1);
+      // a is last in the table now: (0.2 + 0.3) + 0.1
+      assert.strictEqual(live.result.rows.at(-1).value, 0.6);
+      assert.deepStrictEqual(live.result.rows, kernel(await allRows(store), spec));
+      assert.strictEqual(live.mode.mode, 'incremental');
+      await store.close();
+    });
+  }
+
   it('readings whose every partial sum is exact stay maintained: integers and binary fractions', async function () {
     const store = await open();
     const readings = store.collection('readings');
@@ -788,47 +859,52 @@ describe('a floating sum or mean answers what a fresh run answers, bit for bit',
     await store.close();
   });
 
-  it('a registration over stored decimals runs by re-reading from the first row, the reason named', async function () {
+  it('a registration over stored decimals sharing an instant is maintained from the first row', async function () {
     const store = await open();
     const readings = store.collection('readings');
     for (const [id, minute, value] of FLOATS)
       await readings.insert({ id, series: 's', at: T0 + minute * MINUTE, value });
     const spec = { width: 3 * MINUTE, aggregate: 'sum' };
-    const live = await readings.live(rollingDoc(spec), { eventTime: EVENT_TIME });
-    assert.strictEqual(live.mode.mode, 'rerun');
+    const live = await readings.live(rollingDoc(spec), { eventTime: EVENT_TIME, mode: 'incremental' });
+    assert.deepStrictEqual(live.result.rows.map((row) => row.value), [0.01, 0.31, 1.5999999999999999, 1.5999999999999999]);
     assert.deepStrictEqual(live.result.rows, rollingSeries(await allRows(store), spec));
-    // the registration stays a re-run: the decimals leaving does not hand it back
     for (const [id] of FLOATS) await readings.delete(id);
     await readings.insert({ id: 'whole', series: 's', at: T0, value: 4 });
-    assert.strictEqual(live.mode.mode, 'rerun');
+    assert.strictEqual(live.mode.mode, 'incremental');
+    assert.strictEqual(live.stats().reruns, 0);
     assert.deepStrictEqual(live.result.rows, rollingSeries(await allRows(store), spec));
     await store.close();
   });
 
-  it('a sum whose integers could pass 2^53 together is a fresh run, as the whole-query accumulator is', async function () {
+  it('a sum whose integers pass 2^53 together adds them in table order and stays maintained', async function () {
     const store = await open();
     const readings = store.collection('readings');
     const spec = { every: MINUTE, aggregate: 'sum' };
     const live = await readings.live(bucketDoc(spec), { eventTime: EVENT_TIME });
-    await readings.insert({ id: 'a', series: 's', at: T0, value: 2 ** 51 });
-    await readings.insert({ id: 'b', series: 's', at: T0, value: 2 ** 51 });
+    for (const [id, value] of [['a', 1], ['b', 1], ['c', 2 ** 53]])
+      await readings.insert({ id, series: 's', at: T0, value });
+    // the table holds a first: (1 + 1) + 2^53 is 2^53 + 2, where a view that
+    // moved the updated row last would add (1 + 2^53) + 1, which rounds to 2^53
+    await readings.put({ id: 'a', series: 'moved', at: T0, value: 1 }, 'a');
+    assert.strictEqual(live.result.rows[0].value, 2 ** 53 + 2);
     assert.strictEqual(live.mode.mode, 'incremental');
-    await readings.insert({ id: 'c', series: 's', at: T0, value: 3 });
-    assert.strictEqual(live.mode.mode, 'rerun');
     assert.deepStrictEqual(live.result.rows, resampleSeries(await allRows(store), spec));
     await store.close();
   });
 
-  it('a registration that demands incremental maintenance is refused by decimals it cannot add as a fresh run does (JD0051)', async function () {
+  it('a registration that demands incremental maintenance is maintained over decimals sharing an instant', async function () {
     const store = await open();
     const readings = store.collection('readings');
     await readings.insert({ id: 'a', series: 's', at: T0, value: 0.1 });
     await readings.insert({ id: 'b', series: 's', at: T0, value: 0.2 });
-    await assert.rejects(readings.live(rollingDoc({ aggregate: 'sum' }),
-      { eventTime: EVENT_TIME, mode: 'incremental' }), { code: 'JD0051' });
-    const live = await readings.live(bucketDoc({ aggregate: 'mean' }),
-      { eventTime: EVENT_TIME, mode: 'incremental' }).catch((error) => error);
-    assert.strictEqual(live.code, 'JD0051');
+    for (const [document, kernel, spec] of [
+      [rollingDoc({ aggregate: 'sum' }), rollingSeries, { width: 5 * MINUTE, aggregate: 'sum' }],
+      [bucketDoc({ aggregate: 'mean' }), resampleSeries, { every: MINUTE, aggregate: 'mean' }],
+    ]) {
+      const live = await readings.live(document, { eventTime: EVENT_TIME, mode: 'incremental' });
+      assert.strictEqual(live.mode.mode, 'incremental');
+      assert.deepStrictEqual(live.result.rows, kernel(await allRows(store), spec));
+    }
     const whole = await readings.live(rollingDoc({ aggregate: 'max' }),
       { eventTime: EVENT_TIME, mode: 'incremental' });
     assert.strictEqual(whole.mode.mode, 'incremental');
@@ -938,7 +1014,7 @@ describe('a floating sum or mean answers what a fresh run answers, bit for bit',
     ['bucket', bucketDoc({ aggregate: 'sum' }), { every: MINUTE, aggregate: 'sum' }, resampleSeries],
     ['rolling', rollingDoc({ aggregate: 'sum' }), { width: 5 * MINUTE, aggregate: 'sum' }, rollingSeries],
   ]) {
-    it(`${label}: a handed-over view still reports late data and counts it`, async function () {
+    it(`${label}: a view over decimals sharing an instant reports late data and counts it`, async function () {
       const store = await open();
       const readings = store.collection('readings');
       const live = await readings.live(document,
@@ -947,16 +1023,16 @@ describe('a floating sum or mean answers what a fresh run answers, bit for bit',
       live.subscribe((event) => events.push(event));
       await readings.insert({ id: 'a', series: 's', at: T0 + 95 * MINUTE, value: 21.4 });
       await readings.insert({ id: 'b', series: 's', at: T0 + 95 * MINUTE, value: 21.7 });
-      assert.strictEqual(live.mode.mode, 'rerun');
+      assert.strictEqual(live.mode.mode, 'incremental');
       assert.strictEqual(live.stats().lateData, 0);
       await readings.insert({ id: 'late', series: 's', at: T0 + MINUTE, value: 3.3 });
       assert.strictEqual(events.length, 3);
       assert.strictEqual(events[2].lateData.reason, 'late-data');
       assert.strictEqual(events[2].lateData.key, 'late');
       assert.strictEqual(live.stats().lateData, 1);
-      assert.strictEqual(live.mode.mode, 'rerun');
+      assert.strictEqual(live.mode.mode, 'incremental');
       assert.deepStrictEqual(live.result.rows, kernel(await allRows(store), spec));
-      // the next on-time write is a fresh run again, and a second late one counts again
+      // the next on-time write is maintained, and a second late one counts again
       await readings.insert({ id: 'c', series: 's', at: T0 + 96 * MINUTE, value: 0.1 });
       assert.strictEqual(events[3].lateData, undefined);
       await readings.delete('late');
@@ -1000,7 +1076,7 @@ describe('a floating sum or mean answers what a fresh run answers, bit for bit',
     });
   }
 
-  it('a view demanding incremental maintenance errors, as the accumulator does, once a decimal reaches it', async function () {
+  it('a view demanding incremental maintenance stays live when a decimal shares an instant', async function () {
     const store = await open();
     const readings = store.collection('readings');
     const live = await readings.live(rollingDoc({ aggregate: 'sum' }),
@@ -1011,22 +1087,25 @@ describe('a floating sum or mean answers what a fresh run answers, bit for bit',
     assert.strictEqual(live.state, 'live');
     assert.strictEqual(live.mode.mode, 'incremental');
     await readings.insert({ id: 'c', series: 's', at: T0, value: 0.1 });
-    assert.strictEqual(live.state, 'errored');
-    assert.strictEqual(live.error.code, 'JD0051');
+    assert.strictEqual(live.state, 'live');
+    assert.deepStrictEqual(live.result.rows,
+      rollingSeries(await allRows(store), { width: 5 * MINUTE, aggregate: 'sum' }));
     await store.close();
   });
 
-  it('the watermark keeps moving and the stats keep counting after the hand-over', async function () {
+  it('the watermark keeps moving over decimals sharing an instant, and nothing is re-read', async function () {
     const store = await open();
     const readings = store.collection('readings');
     const live = await readings.live(rollingDoc({ aggregate: 'sum' }), { eventTime: EVENT_TIME });
     await readings.insert({ id: 'a', series: 's', at: T0, value: 0.1 });
     await readings.insert({ id: 'a2', series: 's', at: T0, value: 0.2 });
-    assert.strictEqual(live.mode.mode, 'rerun');
+    assert.strictEqual(live.mode.mode, 'incremental');
     live.advance(T0 + MINUTE);
     assert.strictEqual(live.stats().watermark, T0 + MINUTE);
     await readings.insert({ id: 'b', series: 's', at: T0 + 2 * MINUTE, value: 0.2 });
-    assert.strictEqual(live.stats().reruns >= 1, true);
+    assert.strictEqual(live.stats().reruns, 0);
+    assert.deepStrictEqual(live.result.rows,
+      rollingSeries(await allRows(store), { width: 5 * MINUTE, aggregate: 'sum' }));
     await store.close();
   });
 });

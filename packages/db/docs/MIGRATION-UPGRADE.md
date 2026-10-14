@@ -2266,8 +2266,8 @@ into a new database created with the default UTF-8 encoding, and open that.
   position for each row it places (one point read per row at registration).
 - Code that relied on the key's text as the tie order must declare the key as
   the last `orderBy` term, which both orders honour. A row deleted and stored again
-  with the document it had, in one transaction, leaves no capture record, so the
-  window keeps it where it was until a record changes it.
+  with the document it had, in one transaction, left no capture record, so the
+  window kept it where it was until a record changed it (§31).
 
 ## 27. Store rules judge the rows a foreign-key action removes or nulls
 
@@ -2377,6 +2377,38 @@ into a new database created with the default UTF-8 encoding, and open that.
   does. A lone surrogate that SQLite stores still reads back from a native
   projection, group key or distinct as three U+FFFD (a named deviation:
   [NATIVE-PLANS](NATIVE-PLANS.md#reads)).
+
+## 31. A row stored again moves in a live view, and a live event-time sum stays maintained
+
+- A row deleted and stored again with the document it had, in one
+  transaction, left no capture record, so a live view kept it where it was
+  while `execute` listed it after the rows it ties with: three rows tied at
+  one sort value, `p` deleted and inserted again, answered `["p","q","r"]` live
+  and `["q","r","p"]` when run — on SQLite and on PostgreSQL, in a maintained
+  window, a group, a re-run and an asynchronous view alike. Such a commit now
+  carries a `replace` of the row's whole document at `/<table>/<key>`
+  ([LIVE-FORMAT §3](LIVE-FORMAT.md#3-the-op-mapping)) when a collection's
+  `insert`, `put` or `delete`, or an entity's `create` or `delete`, wrote it,
+  and every live view reads the row at its new place. Observers and the
+  persisted log receive that record where they received none; a replicating
+  store sends no operation for it, since a replica holds rows without their
+  order. A unit of work's save, a membership and a foreign-key action that
+  delete a row and store it again unchanged are still no record.
+- A replicating store under journal capture refused a transaction that
+  unlinked and linked one pair again across two saves (`JD0060`, "a logical
+  operation must change its row"); the membership row is the one the replica
+  holds, so the transaction now commits and sends no operation for it
+  ([REPLICATION-FORMAT](REPLICATION-FORMAT.md)).
+- An event-time `sum` or `mean` holding two rows at one instant whose readings
+  do not add exactly handed its registration to a fresh run (`live.mode`
+  `rerun`; `JD0051` at registration or as the view's error under
+  `mode: 'incremental'`). The view now adds rows sharing an instant in the
+  table's order, as a fresh run adds them, and stays maintained with the same
+  answer: `live.mode` reads `bucket` or `rolling` where it read `rerun`, and a
+  registration that demanded incremental maintenance is no longer refused for
+  it. The view reads the position of each row that shares its instant with
+  another (one point read per such row, again when a record places the row
+  anew).
 
 ## Measured costs
 

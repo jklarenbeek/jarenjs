@@ -349,9 +349,15 @@ export function createReplicationEngine(options) {
           ? null : applyJSONPatch(old.value, entry.patch);
         return chain(rows.read(entry.table, entry.key), (actual) => {
           if (!equal(actual ?? null, after)) fail('JD2104', 'capture disagrees with the durable replica before-image');
-          operations.push({ table: entry.table, key: entry.key, before: old.value, after });
+          // a row stored again with the document it had (deleted and stored
+          // again, a membership unlinked and linked again) changed nothing a
+          // replica holds: rows replicate without their order. A row neither
+          // side holds is still an operation, which the envelope refuses
+          if (old.value === null || !equal(old.value, after))
+            operations.push({ table: entry.table, key: entry.key, before: old.value, after });
         });
       })), () => {
+        if (operations.length === 0) return null;
         const seq = position(saved.frontier, config.replica) + 1;
         const envelope = normalizeReplication({ $replication: '0.1', replica: config.replica, seq,
           frontier: saved.frontier, model, operations });

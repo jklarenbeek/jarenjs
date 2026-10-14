@@ -1231,9 +1231,9 @@ measure what that costs sequential point reads beside what it gains concurrent o
   against a watermark the HOST supplies — never a clock — and a reading
   behind the declared lateness re-reads and emits a `lateData` record
   rather than being folded in as though it had arrived on time. A `sum`
-  or `mean` equals a fresh run bit for bit: a rolling view folds the
-  series again when its readings stop adding exactly, and a view holding
-  two rows at one instant then answers by a fresh run, the reason named.
+  or `mean` equals a fresh run bit for bit: rows sharing an instant add in
+  the table's order, and a rolling view folds the series again when its
+  readings stop adding exactly.
 - **Durable runs and the job queue** (JOBS-FORMAT, FLOW-FORMAT §7.6):
   a `@jarenjs/flow` DAG run checkpoints declared nodes and RESUMES
   after a crash; `store.jobs` leases work in one guarded statement (no

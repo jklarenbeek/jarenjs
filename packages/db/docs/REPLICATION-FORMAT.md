@@ -28,6 +28,10 @@ key, `'2026-03-01T00:00:00Z'` or the epoch for an instant key kept as an epoch c
 `'2026-03-01T00:00:00.000Z'` — replicates as session capture's does; such a delete used to refuse
 its replicated transaction `JD0060`. A unit-of-work removal of a row it never read has only the key
 it was given, and by another spelling still refuses `JD0060`, where session capture commits it.
+A row the transaction leaves as the replica holds it — deleted and stored again with the document it
+had, or a membership unlinked and linked again — is no operation, and a transaction of only such rows
+writes no envelope: rows replicate without their order. Under journal capture an `unlink` and `link`
+of one pair across two saves of one transaction used to refuse the transaction `JD0060`.
 
 PostgreSQL enrollment verifies engine metadata, deterministic binary text
 collation, permanent managed tables and deferrable foreign keys. New managed

@@ -442,16 +442,6 @@ what each does is its own documentation's job
   question to the engine. Wanted: either state that the window prunes before
   validation, or a probe over the rows outside it that costs less than the
   window saves.
-- [ ] **An event-time `sum` or `mean` of readings that do not add exactly hands
-  a view holding two rows at one instant to a fresh run.** A bucket or rolling
-  view adds rows sharing an instant in the order they reached it, a fresh run in
-  the table's, so once the readings are not integers or binary fractions of a
-  modest scale the view re-reads from the store for the rest of its life
-  (`live.mode` `rerun`; `JD0051` under `mode: 'incremental'`). Wanted: add
-  same-instant rows in table order (the position a live window already reads),
-  which keeps the view maintained (LIVE-FORMAT 13.3). A rolling view over such
-  readings folds the whole series on every write, which costs a few times a
-  slice repair.
 - [ ] **Join tables are not queryable roots.** A many-to-many join table has no
   root to bind: `u.labels` as a chain hop is `JL0105`, and a membership is read
   through `include` (`client.entities.User.include((u) => u.labels)` loads the
@@ -702,12 +692,20 @@ what each does is its own documentation's job
   it names and answers. Wanted: count
   natively only where the table cannot hold an invalid row (a declared check),
   or read the column.
-- [ ] **A row deleted and stored again with the same document leaves a window's
-  tie order stale.** A transaction that deletes a row and stores it again
-  unchanged writes no capture record, yet the table holds the row last, so a
-  maintained ordered window (and a nested group's order) keeps it where it was
-  and a fresh run orders it after its ties. Wanted: capture reports a row that
-  moved, or a view re-reads positions it cannot confirm (LIVE-FORMAT section 9).
+- [ ] **A row a unit of work deletes and that is stored again unchanged in the same
+  transaction leaves a view's tie order stale.** A row deleted and stored again with
+  the document it had through a collection's `insert`, `put` or `delete`, or an
+  entity's `create` or `delete`, is a `replace` record (LIVE-FORMAT §3) and every
+  live view reads it at its new place. A removal a unit of work's save makes, an
+  `unlink` and `link` of the same pair, and a row a foreign-key action removes are
+  not among the writes a move is told from: Label `p` removed by a save and created
+  again with the same document in one transaction answers live `["p","q","r"]` and
+  `["q","r","p"]` when run, in both capture modes. Journal capture also records an
+  `unlink` and `link` of one pair across two saves of one transaction as a
+  whole-row `replace` of the membership row where session capture records nothing.
+  Wanted: the unit of work's removals and inserts, membership writes and
+  foreign-key actions report a row stored again alike in both modes (session mode
+  without the before-image reads the journal makes for updates).
 - [ ] **A native grouping cannot know its group count.** A native `$distinct`
   or `$groupby` groups every row it reads: with nearly as many groups as rows
   the statement does the engine's work and a sort besides and is slower than

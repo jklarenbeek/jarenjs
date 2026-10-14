@@ -497,14 +497,78 @@ export function createCaptureEngine(options) {
     ? doc
     : JSON.parse(JSON.stringify(doc)));
 
-  /** Journal-mode emission from the write paths. */
-  const record = (table, keyParts, before, after) => {
-    if (mode !== 'journal' || st().depth === 0) return;
-    st().journal.push({ table, keyParts,
-      before: jsonReality(before), after: jsonReality(after) });
+  /**
+   * A write path's record of one row write: the whole patch in journal
+   * mode. In session mode the changeset is the patch, and the buffer keeps
+   * only what a changeset cannot show — a row deleted and stored again in
+   * one transaction, whose net change is no change when the document is
+   * the one it had, yet which the table now holds last: every delete, and
+   * a write to a key this transaction deleted. In both modes the keys it
+   * deleted ride on the buffer, so a buffer given up takes them along.
+   * `before` is unread in session mode.
+   * @param {string} table
+   * @param {any[]} keyParts
+   * @param {any} before
+   * @param {any} after - `null` for a delete
+   * @param {any[]} [moved] - for a write of the store's own row API
+   *   (`insert`, `put`, `delete`, `create`), the key as the values it names,
+   *   one value however the key is spelled: the writes a row deleted and
+   *   stored again is told from, alike in both modes — a unit of work's
+   *   save, a membership and a foreign-key action are not among them
+   */
+  const record = (table, keyParts, before, after, moved = undefined) => {
+    if (st().depth === 0) return;
+    const journal = st().journal;
+    const row = moved === undefined ? null : `${table}\u0000${keyToken(moved)}`;
+    if (row !== null && after === null) (journal.removed ??= new Set()).add(row);
+    if (mode === 'journal') {
+      journal.push({ table, keyParts, before: jsonReality(before), after: jsonReality(after), moved });
+      return;
+    }
+    if (row === null || (after !== null && !journal.removed?.has(row))) return;
+    journal.push({ table, keyParts, before: undefined, after: jsonReality(after), moved });
   };
 
-  const journalOps = () => {
+  /**
+   * The ops a transaction's rows deleted and stored again add to its
+   * patch: a row whose last write follows a delete of it, and which the
+   * patch names nowhere — the document it holds is the one it had — is a
+   * `replace` of its whole document, because the table now holds it last
+   * and a query that ties by position reads it there (LIVE-FORMAT §3). A
+   * row stored again with another document is in the patch already.
+   * @param {any[]} ops - the patch the changeset or journal answered
+   * @param {any[]} journal - the transaction's buffer
+   */
+  const withRestored = (ops, journal) => {
+    // a transaction that deleted no row through the row API stored none again
+    if (journal.removed === undefined) return ops;
+    /** @type {Map<string, { table: string, token: string, removed: boolean, restored: boolean, after: any }>} */
+    const rows = new Map();
+    for (const entry of journal) {
+      if (entry.moved === undefined) continue;
+      const key = `${entry.table}\u0000${keyToken(entry.moved)}`;
+      const row = rows.get(key) ?? { table: entry.table, token: '', removed: false, restored: false, after: null };
+      if (entry.after === null) row.removed = true;
+      else {
+        if (row.removed) row.restored = true;
+        // the pointer is the key the write stored, as every op names it
+        row.token = keyToken(entry.keyParts);
+      }
+      row.after = entry.after;
+      rows.set(key, row);
+    }
+    const restored = [...rows.values()].filter((row) => row.restored && row.after !== null);
+    if (restored.length === 0) return ops;
+    const named = new Set(ops.map((op) => op.path.split('/', 3).join('/')));
+    for (const row of restored) {
+      const path = pointerOf(row.table, row.token);
+      if (!named.has(path)) ops.push({ op: 'replace', path, value: row.after });
+    }
+    return ops;
+  };
+
+  /** @param {any[]} journal */
+  const journalOps = (journal) => {
     // ONE NET OP PER ROW (§2), the same discipline sessions get for
     // free: fold every entry for one (table, key) into first-before /
     // last-after, so insert+update coalesces, insert+delete vanishes,
@@ -515,7 +579,7 @@ export function createCaptureEngine(options) {
     const netted = new Map();
     /** @type {string[]} */
     const order = [];
-    for (const entry of st().journal) {
+    for (const entry of journal) {
       const token = keyToken(entry.keyParts);
       const key = `${entry.table}\u0000${token}`;
       const existing = netted.get(key);
@@ -554,16 +618,17 @@ export function createCaptureEngine(options) {
 
   /** Collect this commit's patch (inside the transaction). */
   const collect = () => {
+    const journal = st().journal;
+    st().journal = [];
     if (mode === 'session') {
       const changeset = st().session.changeset();
       st().session.close();
       st().session = null;
-      if (changeset.length === 0) return [];
-      return translateOperations(connection, shapes, parseChangeset(changeset));
+      if (changeset.length === 0) return withRestored([], journal);
+      return chain(translateOperations(connection, shapes, parseChangeset(changeset)),
+        (ops) => withRestored(ops, journal));
     }
-    const ops = journalOps();
-    st().journal = [];
-    return ops;
+    return withRestored(journalOps(journal), journal);
   };
 
   // Every log statement is prepared for one use and released after it,
@@ -659,7 +724,7 @@ export function createCaptureEngine(options) {
     let outcome;
     try {
       if (mode === 'session') st().session = connection.session();
-      else st().journal = [];
+      st().journal = [];
       // a captured write reads before it writes (the journal's before-image,
       // a key's spellings), so a transaction it opens takes the writer lock
       // up front: a deferred one met the read→write upgrade busy the busy
@@ -721,15 +786,14 @@ export function createCaptureEngine(options) {
   };
 
   /**
-   * A NESTED transaction scope: in journal mode, records buffered by
-   * an inner transaction that rolls back (and whose failure the
-   * caller CATCHES) must vanish exactly as a session drops rows
-   * undone by ROLLBACK TO — checkpoint the buffer and truncate on
-   * failure.
+   * A NESTED transaction scope: records buffered by an inner transaction
+   * that rolls back (and whose failure the caller CATCHES) must vanish
+   * exactly as a session drops rows undone by ROLLBACK TO — checkpoint
+   * the buffer and truncate on failure. In session mode the buffer holds
+   * only the deletes and the rows stored again after them.
    */
   const nest = (fn) => {
     if (st().depth === 0) return wrap(fn);
-    if (mode !== 'journal') return fn();
     const mark = st().journal.length;
     // a hold limit may give the engine up while this scope still runs:
     // the journal is then the NEXT owner's, and a late failure here must
@@ -758,14 +822,14 @@ export function createCaptureEngine(options) {
    * (MODEL-FORMAT §5.2). A named `SAVEPOINT` takes a mark; a
    * `ROLLBACK TO` truncates the buffer to it, so records the engine
    * undid vanish from the commit's patch exactly as a session drops
-   * rows undone by `ROLLBACK TO`. Session mode needs neither half —
-   * SQLite's own changeset already excludes the undone rows — and
-   * answers `null` so the caller stores nothing.
+   * rows undone by `ROLLBACK TO`. In session mode SQLite's own
+   * changeset already excludes the undone rows, and the buffer the pair
+   * truncates holds only the deletes and the rows stored again after them.
    */
-  const mark = () => (mode === 'journal' ? st().journal.length : null);
+  const mark = () => st().journal.length;
   /** @param {number | null} at - a value {@link mark} answered */
   const truncate = (at) => {
-    if (mode === 'journal' && at !== null && st().journal.length > at) st().journal.length = at;
+    if (at !== null && st().journal.length > at) st().journal.length = at;
   };
 
   return {

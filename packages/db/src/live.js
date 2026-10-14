@@ -1009,8 +1009,6 @@ export function createLiveRegistry(bounds) {
         if (definition.demanded === 'incremental') throw unavailable(reason);
         mode = modeOf('rerun', reason);
       },
-      // the fresh run a strategy hands its registration to
-      rerun: () => rerunStrategy(classification, context),
     };
     const STRATEGIES = {
       rows: rowsStrategy, window: windowStrategy, accumulator: accumulatorStrategy,

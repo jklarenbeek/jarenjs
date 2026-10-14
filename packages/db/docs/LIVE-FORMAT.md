@@ -57,7 +57,8 @@ instant key kept as an epoch column holds the epoch, in both modes.
 **Op order within a record is UNSPECIFIED.** A commit carries one net
 op per row (SQLite sessions coalesce insert+update, drop
 insert+delete, omit no-op updates — and the journal mirrors that
-discipline), every op targets a distinct pointer, and the record
+discipline; a row deleted and stored again with the document it had is
+one `replace`, §3), every op targets a distinct pointer, and the record
 applies correctly in any order. The two capture modes MAY order the
 same ops differently; they MUST agree as sets.
 
@@ -70,6 +71,7 @@ same ops differently; they MUST agree as sets.
 | UPDATE, document column changed | old JSONB diffed against new (`createJSONPatch`) → minimal nested ops under `/<table>/<key>` |
 | UPDATE, mapped scalar/foreign-key column changed | property-level op at `/<table>/<key>/<property>`: `replace` (both present), `add` (was `NULL`), `remove` (now `NULL` — absent per MODEL-FORMAT §9.3) |
 | join-table INSERT / DELETE | `add` / `remove` of the membership row document |
+| a row deleted and stored again in one transaction with the document it had, through `insert`, `put` or `delete` of a collection, or `create` and `delete` of an entity | `replace` at `/<table>/<key>` with the full document: nothing in the row changed, but the table now holds it last, where a query that ties by position reads it (§9). An entity's key is told by the values it names, so its delete by another spelling of it (`'16.0'` for 16) counts; on SQLite a single integer key is the row's position, and the record moves nothing. Stored again with another document, the row is the UPDATE rows above. A unit of work's save, a membership and a foreign-key action are not among those writes: a row they delete and store again unchanged is no op |
 
 Changesets (not patchsets) are used because they carry OLD values —
 that is what makes the minimal nested diff and the add/remove/replace
@@ -526,13 +528,12 @@ registration:
   another value in one transaction reaches capture as a diff of its
   members, yet it is a new row at the end of the source order, and the
   group moves it there as a delete and an insert would. Inserted again
-  with an EQUAL value, the key reaches capture as no change at all (a
-  commit that changed nothing else carries no record): a group, distinct
-  projection or nested group keeps the row in its old place until a later
-  change to that row reaches capture, while `execute` reads it at its new
-  place at once (and a re-run does at its next record). Telling that move
-  apart would mean reading every held row's position on every record,
-  which maintenance does not do;
+  with an EQUAL value, the key reaches capture as a `replace` of its
+  whole document (§3), which every strategy reads as a change to the row,
+  so the row moves as `execute` reads it. A row a unit of work's save, a
+  membership or a foreign-key action deleted and stored again unchanged
+  reaches capture as no change at all: a maintained view keeps it in its
+  old place until a later change to that row reaches capture;
 - row and window strategies depend on their WHOLE collection — the
   result carries the row documents, so any member change changes an
   emitted row.
@@ -592,11 +593,16 @@ document and apply patches to it; ops are `add`, `remove` and
   them: insertion order, an update keeping a row where it is and a row
   deleted and stored again being last. The window reads a row's
   position when it places the row, and places it again whenever a record
-  changes it. A row deleted and stored
-  again with the document it had, in one transaction, leaves no capture
-  record, so the window cannot see it move to the end and keeps it
-  where it was; a consumer that needs one tie order whatever happens to
-  the table declares the key as the last `orderBy` term. An UNORDERED query's initial order is the engine's;
+  changes it — a row deleted and stored again with the document it had,
+  in one transaction, included: its record is a `replace` of the whole
+  document (§3). *Upgrade: such a row left no capture record, so a
+  window kept it where it was while `execute` listed it after its ties
+  (three rows tied at one sort value, `p` deleted and inserted again:
+  live `["p","q","r"]`, a fresh run `["q","r","p"]`); it now moves, and
+  an observer receives the record.* A row a unit of work's save deletes
+  and stores again unchanged still leaves no record (§3); a consumer that
+  needs one tie order whatever happens to the table declares the key as
+  the last `orderBy` term. An UNORDERED query's initial order is the engine's;
   maintenance then appends newly matching rows and splices removed
   ones, which is deterministic given the write history but is NOT
   re-derived rowid order — a consumer that needs a specific order
@@ -859,9 +865,9 @@ reason named, never a maintained view that dies on its first fold.
   — two, when it moves a reading across a boundary — and exactly those
   are folded again by calling `resampleSeries` over that bucket's own
   rows. The aggregate is therefore the kernel's: a bucket's `min`, `max`
-  and `count`, and its `sum` or `mean`, are what a fresh query answers (a
-  `sum` or `mean` of readings that do not add exactly, with two rows at one
-  instant, is a fresh run, below).
+  and `count`, and its `sum` or `mean`, are what a fresh query answers,
+  bit for bit (§13.3): the bucket's rows reach the kernel in the order a
+  fresh run reads them.
 - **A rolling view keeps its rows in instant order.** A write at `t` can
   only change the windows ending in `[t, t + width)`, so exactly that
   stretch is recomputed — again by the kernel, over the slice those
@@ -895,16 +901,17 @@ work and a visible lateness contract, not a smaller heap.
 | `fill: 'locf'` / `'linear'` | they fill an empty bucket from its neighbours, so one late reading moves buckets it never belonged to |
 | `aggregate: 'first'` / `'last'` | they name a row by its position in the series, which a per-key state does not preserve — the same refusal the pushdown planner makes |
 | a `retention` under `width + allowedLateness` | a repair could read outside the horizon the view claims |
-| a `sum` or `mean` holding two rows at one instant once its readings are not integers or binary fractions whose every partial sum is exact in a double (§13.3) | floating additions do not associate and the table's order of rows at one instant is not the order they reached the view; the registration answers by a fresh run from then on |
 | a `$subsequence` window, a projecting operand, a collection with no document key | there is no row a key can be tracked through |
 | a spec whose `at` selector is not `eventTime.path` | the state would place a row by one instant and aggregate it by another |
 | an operand `$where` that reads the collection root (`$`, `$.…`, `$[…]`, or the root inside a path filter) | the state files each row alone through the filter, and one row is not the collection the kernel's own run reads |
 
 Each of those is `live.mode.reason`, and `mode: 'incremental'` still
-refuses them at registration with `JD0051`; the `sum` and `mean` row
-is found as the rows arrive, so a view that demanded incremental
-maintenance refuses at registration when it is registered over such
-rows and is `errored` with `JD0051` when a write brings them.
+refuses them at registration with `JD0051`. A `sum` or `mean` is none of
+them, whatever its readings (§13.3). *Upgrade: a `sum` or `mean` holding two
+rows at one instant whose readings do not add exactly handed its
+registration to a fresh run (`live.mode` `rerun`, and `JD0051` under
+`mode: 'incremental'`, at registration or as the view's error); it now stays
+maintained, with the same answer.*
 
 ### 13.3 Late data is visible, never lost
 
@@ -935,43 +942,33 @@ stream of inserts, in-place updates, instant moves and deletes against
 `resampleSeries` / `rollingSeries` over the whole collection after each
 one, which is the only oracle that cannot drift with the implementation.
 
-A `sum` or `mean` is held to that by two different means, because floating
-additions do not associate. The readings of a bucket are added in instant
-order by the view and by a fresh run alike, so readings at distinct instants
-need nothing more. A rolling view cannot slice: the kernel adds a window's
+A `sum` or `mean` is held to that by two means, because floating additions do
+not associate. **The view adds in the order a fresh run adds.** A fresh run
+reads the rows in the table's order and the kernel orders them by instant,
+keeping rows that share an instant in that order; the view keeps its rows by
+instant too, and rows sharing an instant by their position in the table. It
+reads a row's position when the row first shares its instant with another
+(one point read per such row) and again when a record places the row anew —
+an update keeps a row's position, a row deleted and stored again is last,
+in one transaction too (§9). Readings `0.1`, `0.2` and `0.3` at one instant,
+stored in that order, add to `0.6000000000000001`; after `0.1` is updated in
+place they still do, where adding them as they reached the view — `0.2`,
+`0.3`, then `0.1` — gives `0.6`.
+
+**A rolling view cannot slice past exactness.** The kernel adds a window's
 readings in two parts (the older ones from the newest end back, the newer
 ones as they arrived) whose split depends on every reading before the window,
 so a slice recomputed on its own can differ from a fresh run in the last bits.
-And rows sharing an instant reach a view in arrival order where a fresh run
-reads them in the table's. Readings `0.7` at minute 5, `0.01` at minute 2,
-`0.3` at minute 4 and `0.6` at minute 5 under a three-minute width: the last
-two windows hold `0.3`, `0.7` and `0.6`; a fresh run answers
-`1.5999999999999999`, and a view that added them in its own order answered
-`1.6`.
-
 So the view counts the readings it holds: every reading is a whole multiple
 of 2^-S (S the largest scale among them) below 2^E (E the largest exponent),
 and a partial sum of `n` of them is exact while `n * 2^(E + S)` stays within
-2^53. Within that bound no order shows, and the view is maintained as it is
-for `min`, `max` and `count`. Past it (`0.1` beside `0.2`, two integers near
-2^52, a long run of integers close to 2^53 in all):
-
-- a **rolling** view folds the whole series again through the kernel on every
-  write (`stats().recomputes` counts it) instead of the slice, and stays
-  `incremental`: it reads nothing from the store and its answer is the fresh
-  run's bit for bit;
-- a view holding **two rows at one instant** hands the registration to a fresh
-  run for the rest of its life: `live.mode` is `rerun` with the reason named,
-  every later write re-reads from the store (`stats().reruns` counts them), and
-  the answer is a fresh run's by construction. A view that demanded
-  incremental maintenance is `JD0051` at registration when the stored rows
-  already hold such a tie, and `errored` with `JD0051` when a write brings
-  one. The view keeps placing rows, so a reading behind the boundary is still
-  re-read, reported in `lateData` and counted in `stats().lateData`, and the
-  watermark keeps moving. One decimal reading is exact on its own, so it takes
-  a second to cause either. A view that has handed over stays handed over after
-  the rows are deleted;
-- a **bucket** view holding readings at distinct instants is unchanged.
+2^53. Within that bound no order shows and a write recomputes the stretch it
+can reach. Past it (`0.1` beside `0.2`, two integers near 2^52, a long run of
+integers close to 2^53 in all) a rolling view folds the whole series again
+through the kernel on every write (`stats().recomputes` counts it) instead of
+the slice, and stays `incremental`: it reads nothing from the store but the
+positions above, and its answer is the fresh run's bit for bit. A bucket view
+folds only the buckets a write touches, whatever its readings.
 
 ## Bounded joins, graph projections and nested groups
 
@@ -995,12 +992,15 @@ a packed `$for` source (`['$.Author[*]']`), re-run with
 `a self join has ambiguous root invalidation`. The projected
 identity is the tuple of source identities, so duplicate projected values remain
 distinct. Default entity result order follows physical row insertion order;
-point reads preserve that order even when a key is deleted and reinserted. The
-exception is a row deleted and inserted again with identical values in one
-transaction — an `unlink` and `link` of the same pair included: capture records
-no change for it, so no live registration moves it when `execute` starts
-listing it last. A re-run takes the new place at its next record, a maintained
-join or graph when a later change to that row reaches capture. A
+point reads preserve that order even when a key is deleted and reinserted. An
+entity deleted and created again with identical values in one transaction is a
+`replace` of its row (§3), so every live registration reads it at its new
+place. The exception is a row a unit of work's save deletes and stores again
+with identical values in one transaction — an `unlink` and `link` of the same
+pair included: it is not reported as moved, so no live registration moves it
+when `execute` starts listing it last. A re-run takes the new place at its next
+record, a maintained join or graph when a later change to that row reaches
+capture. A
 left join uses a canonical `$allowing-empty` binding over an equality-filtered
 inner subquery. Its absent child can be defaulted to null. Graph projections
 embed equality-filtered child queries in a single outer row's return object.
@@ -1055,9 +1055,8 @@ order than `execute`.*
 
 Source holders retain physical row positions: changing a holder preserves its
 position, a key deleted and inserted again takes a new one at the end — in
-one transaction too, unless it comes back with an equal value, which
-capture records as no change: the holder then keeps its old position until
-a later change to that row reaches capture (§8) — and deleting a group's
+one transaction too, with an equal value as well, which capture records as
+a `replace` of the row (§3) — and deleting a group's
 earliest holder may move that group's output. Unaffected group outputs retain reference identity. Only affected
 groups are reevaluated, followed by an optional final aggregate over all group
 outputs. This costs work proportional to the affected groups plus group-output

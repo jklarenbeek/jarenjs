@@ -26,6 +26,7 @@ import { createJsltRegistry, financePack } from '@jarenjs/json/jslt';
 import { openStore, createLiveRegistry } from '@jarenjs/db';
 import { nodeDriver } from '@jarenjs/db/node';
 import { mulberry32 } from '@jarenjs/core/random';
+import { liveOracle } from './oracle/replication.js';
 
 const MODEL = {
   $model: '0.1',
@@ -210,6 +211,101 @@ describe('the maintained window', () => {
     assert.deepStrictEqual(live.result.rows, ['q', 'r', 'p']);
     await store.close();
   });
+
+  /** Three rows tied at 3 points, a live window and a fresh run over them,
+   * and every capture record the store delivers. */
+  const tiedRows = async (mode) => {
+    const store = await openStore(MODEL, { driver: nodeDriver(), capture: { mode } });
+    const scores = store.collection('scores');
+    for (const id of ['p', 'q', 'r']) await scores.insert({ id, points: 3, name: id });
+    const document = [{ $for: { it: '$[*]' }, $orderby: { $key: '$it.points' }, $return: '$it.id' }];
+    const live = await scores.live(document, { mode: 'incremental' });
+    const records = [];
+    store.observe((record) => records.push(record.patch));
+    const fresh = () => scores.execute(document);
+    // the emitted patches, applied to a mirror, and a fresh run, after every write
+    return { store, scores, live, records, fresh, oracle: liveOracle(live, fresh) };
+  };
+
+  for (const mode of ['session', 'journal']) {
+    for (const [label, storeAgain] of /** @type {[string, (c: any) => Promise<any>][]} */ ([
+      ['insert', (c) => c.insert({ id: 'p', points: 3, name: 'p' })],
+      ['a keyed put', (c) => c.put({ id: 'p', points: 3, name: 'p' }, 'p')],
+      ['a put of the document alone', (c) => c.put({ id: 'p', points: 3, name: 'p' })],
+    ])) {
+      it(`${mode}: a row deleted and stored again by ${label} with the document it had, in one transaction, ties behind the rows that stayed`, async () => {
+        const { store, live, records, fresh, oracle } = await tiedRows(mode);
+        try {
+          assert.deepStrictEqual(live.result.rows, ['p', 'q', 'r']);
+          await store.transaction(async (tx) => {
+            await tx.collection('scores').delete('p');
+            await storeAgain(tx.collection('scores'));
+          });
+          assert.deepStrictEqual(await fresh(), ['q', 'r', 'p']);
+          assert.deepStrictEqual(live.result.rows, ['q', 'r', 'p']);
+          await oracle.check();
+          assert.strictEqual(live.mode.strategy, 'window');
+          // the row moved in its table, which the record says as one op
+          assert.deepStrictEqual(records,
+            [[{ op: 'replace', path: '/scores/p', value: { id: 'p', points: 3, name: 'p' } }]]);
+        }
+        finally { await store.close(); }
+      });
+    }
+
+    it(`${mode}: an update or put to the document a row holds, or a delete and store across two transactions, agrees with a fresh run`, async () => {
+      const { store, scores, live, records, oracle } = await tiedRows(mode);
+      try {
+        // the row keeps its place: an update keeps its position, and nothing changed
+        await scores.put({ id: 'p', points: 3, name: 'p' }, 'p');
+        await scores.put({ id: 'p', points: 3, name: 'p' });
+        await scores.patch('p', [{ op: 'replace', path: '/name', value: 'p' }]);
+        await store.transaction(async (tx) => tx.collection('scores').put({ id: 'p', points: 3, name: 'p' }, 'p'));
+        assert.deepStrictEqual(records, []);
+        assert.deepStrictEqual(live.result.rows, ['p', 'q', 'r']);
+        await oracle.check();
+        // a delete, then the same document stored again in the next transaction
+        await scores.delete('p');
+        await scores.insert({ id: 'p', points: 3, name: 'p' });
+        assert.deepStrictEqual(live.result.rows, ['q', 'r', 'p']);
+        await oracle.check();
+        await scores.delete('q');
+        await scores.put({ id: 'q', points: 3, name: 'q' }, 'q');
+        assert.deepStrictEqual(live.result.rows, ['r', 'p', 'q']);
+        await oracle.check();
+      }
+      finally { await store.close(); }
+    });
+
+    it(`${mode}: a delete and store again that a savepoint rolls back records nothing, and a row stored again then deleted is a delete`, async () => {
+      const { store, live, records, oracle } = await tiedRows(mode);
+      try {
+        await store.transaction(async (tx) => {
+          await tx.transaction(async (inner) => {
+            await inner.collection('scores').delete('p');
+            await inner.collection('scores').insert({ id: 'p', points: 3, name: 'p' });
+            throw new Error('undo');
+          }).catch((error) => { if (error.message !== 'undo') throw error; });
+          await tx.savepoints.create('mark');
+          await tx.collection('scores').delete('q');
+          await tx.collection('scores').insert({ id: 'q', points: 3, name: 'q' });
+          await tx.savepoints.rollbackTo('mark');
+        });
+        assert.deepStrictEqual(records, []);
+        assert.deepStrictEqual(live.result.rows, ['p', 'q', 'r']);
+        await oracle.check();
+        await store.transaction(async (tx) => {
+          await tx.collection('scores').delete('p');
+          await tx.collection('scores').insert({ id: 'p', points: 3, name: 'p' });
+          await tx.collection('scores').delete('p');
+        });
+        assert.deepStrictEqual(records, [[{ op: 'remove', path: '/scores/p' }]]);
+        assert.deepStrictEqual(live.result.rows, ['q', 'r']);
+        await oracle.check();
+      }
+      finally { await store.close(); }
+    });
+  }
 
   it('descending order and a filtered window maintain together', async () => {
     const store = await open();

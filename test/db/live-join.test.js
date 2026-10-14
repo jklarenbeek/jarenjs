@@ -231,3 +231,76 @@ it('join dependency bytes refuse oversize state at registration and close once a
   }
   finally { await store.close(); }
 });
+
+for (const mode of ['session', 'journal']) it(`${mode}: an entity deleted and created again with the document it had, in one transaction, re-runs a view whose ties it moved`, async () => {
+  const store = await openStore(MODEL, { driver: nodeDriver(), capture: { mode } });
+  try {
+    for (const id of ['p', 'q', 'r']) await store.entity('Author').create({ id, name: 'same' });
+    const ordered = [{ $for: { a: '$.Author[*]' }, $orderby: { $key: '$a.name' }, $return: '$a.id' }];
+    const live = await store.live(ordered);
+    const oracle = liveOracle(live, () => store.execute(ordered)); await oracle.check();
+    assert.deepEqual(live.result.rows, ['p', 'q', 'r']);
+    await store.transaction(async (tx) => {
+      await tx.entity('Author').delete('p');
+      await tx.entity('Author').create({ id: 'p', name: 'same' });
+    });
+    assert.deepEqual(live.result.rows, ['q', 'r', 'p']);
+    await oracle.check();
+    oracle.close();
+  }
+  finally { await store.close(); }
+});
+
+it('session: an entity whose delete a store rule judges, deleted and created again with the document it had, re-runs a view whose ties it moved', async () => {
+  const key = { type: 'string', 'x-entity': { key: true } };
+  const judged = { $model: '0.1', entities: {
+    Hub: { schema: { type: 'object', required: ['id'], properties: { id: key, name: { type: 'string' },
+      spokes: { 'x-entity': { relation: { to: 'Spoke', many: true, via: 'hub', onDelete: 'cascade' } } } } } },
+    Spoke: { schema: { type: 'object', required: ['id'], properties: { id: key, hub: { type: ['string', 'null'] } } },
+      invariants: [{ name: 'kept', on: ['delete'], enforcement: 'store', assert: { $ne: ['$.old.id', 'kept'] } }] },
+  } };
+  const store = await openStore(judged, { driver: nodeDriver(), capture: { mode: 'session' } });
+  try {
+    for (const id of ['p', 'q', 'r']) await store.entity('Hub').create({ id, name: 'same' });
+    const ordered = [{ $for: { h: '$.Hub[*]' }, $orderby: { $key: '$h.name' }, $return: '$h.id' }];
+    const live = await store.live(ordered);
+    const oracle = liveOracle(live, () => store.execute(ordered)); await oracle.check();
+    await store.transaction(async (tx) => {
+      await tx.entity('Hub').delete('p');
+      await tx.entity('Hub').create({ id: 'p', name: 'same' });
+    });
+    assert.deepEqual(live.result.rows, ['q', 'r', 'p']);
+    await oracle.check();
+    oracle.close();
+  }
+  finally { await store.close(); }
+});
+
+for (const mode of ['session', 'journal']) it(`${mode}: a maintained join and graph move a row deleted and created again with the document it had, in one transaction`, async () => {
+  const store = await openStore(MODEL, { driver: nodeDriver(), capture: { mode } });
+  try {
+    await store.entity('Author').create({ id: 'a', name: 'Ada' });
+    await store.entity('Author').create({ id: 'b', name: 'Bob' });
+    for (const id of ['p', 'q', 'r']) await store.entity('Post').create({ id, author: 'a', title: id });
+    const graph = [{ $for: { a: '$.Author[*]' }, $return: { id: '$a.id',
+      posts: [{ $for: { x: '$.Post[*]' }, $where: { $eq: ['$x.author', '$a.id'] }, $return: '$x.id' }] } }];
+    const join = await store.live(JOIN, { mode: 'incremental' });
+    const projection = await store.live(graph, { mode: 'incremental' });
+    assert.deepEqual([join.mode.strategy, projection.mode.strategy], ['join', 'graph']);
+    const oracles = [liveOracle(join, () => store.execute(JOIN)), liveOracle(projection, () => store.execute(graph))];
+    for (const oracle of oracles) await oracle.check();
+    await store.transaction(async (tx) => {
+      await tx.entity('Post').delete('p');
+      await tx.entity('Post').create({ id: 'p', author: 'a', title: 'p' });
+    });
+    assert.deepEqual(join.result.rows.map((row) => row.id), ['q', 'r', 'p']);
+    assert.deepEqual(projection.result.rows[0].posts, ['q', 'r', 'p']);
+    await store.transaction(async (tx) => {
+      await tx.entity('Author').delete('a');
+      await tx.entity('Author').create({ id: 'a', name: 'Ada' });
+    });
+    assert.deepEqual(projection.result.rows.map((row) => row.id), ['b', 'a']);
+    for (const oracle of oracles) { await oracle.check(); oracle.close(); }
+  }
+  finally { await store.close(); }
+});

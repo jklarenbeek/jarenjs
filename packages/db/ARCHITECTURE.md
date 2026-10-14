@@ -1392,7 +1392,11 @@ action changed it), again afterwards: the stored rows are then its
 images. Both net ONE op per row — insert+
 update coalesces, insert+delete vanishes, an update back to the
 original emits nothing — so the two modes agree as SETS (a differential
-test pins it). The journal's netting was added when the wasm parity
+test pins it). A row the store's own row API deletes and stores again
+with the document it had nets to nothing, yet the table holds it last:
+both modes add one `replace` of its whole document for it, the session
+mode from a buffer of the transaction's deletes and the writes after
+them that the write paths keep beside the changeset. The journal's netting was added when the wasm parity
 suite ran a same-row multi-op transaction the original differential
 script never wrote. Op order within a record is UNSPECIFIED; every op targets
 a distinct pointer. The persisted `_jaren_changes` log rides the same
@@ -1452,9 +1456,9 @@ over a FIXED width. There is no clock under either — the watermark is a
 finite epoch the host supplies and `advance()` is the only way it moves
 — and both fold through `@jarenjs/core/series` itself rather than
 carrying a second aggregate, so a maintained answer is what a fresh
-query gives (a `sum` or `mean` whose readings stop adding exactly makes a
-rolling view fold the series again, and hands a view holding two rows at one
-instant to a fresh run: LIVE-FORMAT §13.3). A write touches one bucket (two when it
+query gives (a `sum` or `mean` adds rows sharing an instant in the table's
+order, read from their positions, and one whose readings stop adding exactly
+makes a rolling view fold the series again: LIVE-FORMAT §13.3). A write touches one bucket (two when it
 crosses a boundary) or the windows ending in `[t, t + width)`, and
 exactly those are recomputed. Everything a per-key state cannot place
 exactly re-runs with its member named: a calendar ladder, a named zone,

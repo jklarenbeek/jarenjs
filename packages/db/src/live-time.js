@@ -34,17 +34,15 @@
  * never quietly folded into a bucket its reader already believed
  * closed.
  *
- * A `sum` or `mean` equals a fresh run bit for bit while every partial
- * sum of its readings is exact (integers and binary fractions within
- * 2^53), because the order the additions run in cannot show. Past that
- * bound floating additions do not associate and two things differ: a
- * rolling window's total depends on the whole series before it, so a
- * rolling view then folds the whole series again through the kernel; and
- * rows sharing an instant are added in arrival order here and in table
- * order by a fresh run, so a view holding such rows hands the registration
- * to a fresh run for the rest of its life, the reason named in
- * `live.mode`. Readings at distinct instants are added in instant order
- * by both, and are maintained as before.
+ * A `sum` or `mean` equals a fresh run bit for bit. Floating additions do
+ * not associate, so the view adds what a fresh run adds in the order it
+ * adds it: readings in instant order, and rows sharing an instant in the
+ * order the table holds them — their positions, read when such rows meet
+ * and read again when a record places a row anew. While every partial sum
+ * of the readings is exact (integers and binary fractions within 2^53) no
+ * order shows; past that bound a rolling window's total depends on the
+ * whole series before it, so a rolling view then folds the whole series
+ * again through the kernel instead of the stretch a write can reach.
  *
  * `retention` is the horizon this view claims to work over. It is
  * checked, not assumed: it must cover a whole window plus the lateness
@@ -418,16 +416,21 @@ function eventTimeBase(description, context) {
   // the view equals a fresh run only while every partial sum is exact
   const terms = aggregate === 'sum' || aggregate === 'mean'
     ? sumTerms(description.spec.value ?? 'value') : null;
-  /** The fresh run this registration answers by once rows sharing an
-   * instant add inexactly.
-   * @type {any} */
-  let delegate = null;
-  /** How many held rows sit at each instant, and at how many instants more
-   * than one does: only rows sharing an instant are added in an order the
-   * kernel does not decide by instant.
-   * @type {Map<number, number>} */
-  const instants = new Map();
-  let tied = 0;
+  /** The position in the table of each held row a tie has needed, read
+   * once and forgotten when a record places the row anew.
+   * @type {Map<string, number>} */
+  const positions = new Map();
+  /** A held row's position in the table; a row with none (gone since the
+   * record) ties after the rest, as a window ties it. */
+  const positionOf = (key) => {
+    let position = positions.get(key);
+    if (position === undefined) {
+      // a driver may hand a position back as a bigint
+      position = Number(context.rowPosition(key) ?? Infinity);
+      positions.set(key, position);
+    }
+    return position;
+  };
 
   /** The instant a row is late BEFORE. */
   const boundary = () => watermark - description.eventTime.allowedLateness;
@@ -468,56 +471,33 @@ function eventTimeBase(description, context) {
     instantOf,
     advance,
     boundary,
-    /** The registration's counters, the fresh run's folded in once it answers. */
-    statsOf: () => ({ ...stats, watermark,
-      ...(delegate === null ? {} : { reruns: stats.reruns + delegate.stats().reruns }) }),
-    /** The fresh run that answers for this registration, or `null` while it is maintained. */
-    delegate: () => delegate,
-    /** A row now held (`track`) or no longer held (`untrack`) by the maintained state. */
+    statsOf: () => ({ ...stats, watermark }),
+    /** A row now held (`track`) or no longer held (`untrack`) by the
+     * maintained state: a row that leaves takes its position with it, so a
+     * row placed anew reads its position again. */
     track(row) {
-      if (terms === null) return;
-      terms.add(row);
-      const at = instantOf(row);
-      const count = (instants.get(at) ?? 0) + 1;
-      instants.set(at, count);
-      if (count === 2) tied += 1;
+      terms?.add(row);
     },
-    untrack(row) {
-      if (terms === null) return;
-      terms.remove(row);
-      const at = instantOf(row);
-      const count = /** @type {number} */ (instants.get(at)) - 1;
-      if (count === 0) instants.delete(at);
-      else instants.set(at, count);
-      if (count === 1) tied -= 1;
+    untrack(key, row) {
+      positions.delete(key);
+      terms?.remove(row);
     },
     /** The maintained state was emptied. */
     forget() {
       terms?.clear();
-      instants.clear();
-      tied = 0;
+      positions.clear();
     },
     /** Whether every partial sum of the held readings is exact. */
     exact: () => terms === null || terms.exact(),
-    /** Whether the held readings add in an order only a fresh run reproduces:
-     * rows share an instant and the sums are not exact. */
-    diverges: () => tied > 0 && terms !== null && !terms.exact(),
     /**
-     * The fresh run that answers for the rest of the registration's life,
-     * once the held readings diverge. A registration that demanded
-     * incremental maintenance refuses. The maintained state stays, so late
-     * readings are still told apart and counted.
-     * @returns {any}
+     * Order held rows as a fresh run adds them: by instant, and rows
+     * sharing an instant by their position in the table — the order the
+     * kernel keeps them in, since it sorts by instant alone. A position is
+     * read only for a row that shares its instant.
+     * @param {{ key: string, at: number }} a
+     * @param {{ key: string, at: number }} b
      */
-    rerun() {
-      if (delegate === null) {
-        context.handOver(`'${aggregate}' — rows sharing an instant add in the order they reached `
-          + 'the view, and readings that are not integers or binary fractions within 2^53 add '
-          + 'differently in the order a fresh run reads them');
-        delegate = context.rerun();
-      }
-      return delegate;
-    },
+    compare: (a, b) => (a.at - b.at) || (positionOf(a.key) - positionOf(b.key)),
     /** The `lateData` record an emission carries when a reading landed
      * behind the boundary. */
     late: (at, key) => ({
@@ -540,9 +520,9 @@ export function bucketStrategy(description, context) {
   const { ladder, fill, aggregate, start, end, spec } = description;
   const base = eventTimeBase(description, context);
 
-  /** @type {Map<string, { at: number, bucket: number, row: any }>} */
+  /** @type {Map<string, { key: string, at: number, bucket: number, row: any }>} */
   const placed = new Map();
-  /** @type {Map<number, Map<string, any>>} bucket start → its rows */
+  /** @type {Map<number, Set<string>>} bucket start → the keys of its rows */
   const rows = new Map();
   /** @type {Map<number, { at: number, value: number|null, count: number }>} */
   const folded = new Map();
@@ -551,7 +531,8 @@ export function bucketStrategy(description, context) {
   const inWindow = (at) => (start === null || at >= start) && (end === null || at < end);
 
   /** Re-fold one bucket through the kernel — the same call, over the
-   * same rows, that a fresh query would make over this stretch. */
+   * same rows in the same order, that a fresh query would make over this
+   * stretch. */
   const refold = (bucket) => {
     base.stats.recomputes += 1;
     const held = rows.get(bucket);
@@ -560,8 +541,9 @@ export function bucketStrategy(description, context) {
       folded.delete(bucket);
       return;
     }
+    const ordered = [...held].map((key) => /** @type {any} */ (placed.get(key))).sort(base.compare);
     try {
-      folded.set(bucket, resampleSeries([...held.values()],
+      folded.set(bucket, resampleSeries(ordered.map((entry) => entry.row),
         { ...spec, start: bucket, end: bucket + ladder.width, fill: 'null' })[0]);
     }
     catch (error) {
@@ -577,7 +559,7 @@ export function bucketStrategy(description, context) {
       rows.get(previous.bucket)?.delete(key);
       touched.add(previous.bucket);
       placed.delete(key);
-      base.untrack(previous.row);
+      base.untrack(key, previous.row);
     }
     if (row === undefined) return;
     const at = base.instantOf(row);
@@ -585,11 +567,11 @@ export function bucketStrategy(description, context) {
     const bucket = ladder.startOf(ladder.indexOf(at));
     let held = rows.get(bucket);
     if (held === undefined) {
-      held = new Map();
+      held = new Set();
       rows.set(bucket, held);
     }
-    held.set(key, row);
-    placed.set(key, { at, bucket, row });
+    held.add(key);
+    placed.set(key, { key, at, bucket, row });
     touched.add(bucket);
     base.track(row);
   };
@@ -641,18 +623,17 @@ export function bucketStrategy(description, context) {
   return {
     advance: base.advance,
     stats: base.statsOf,
-    entries: (rows) => base.delegate()?.entries(rows) ?? placed.size + folded.size,
+    entries: () => placed.size + folded.size,
     init: () => chain(context.execute([description.source], { externals: context.externals }),
       (docs) => {
         base.forget();
         const touched = new Set();
         for (const doc of /** @type {any[]} */ (docs))
           place(context.keyOf(doc), base.rowOf(doc), touched);
-        if (base.diverges()) return base.rerun().init();
         for (const bucket of touched) refold(bucket);
         return emit();
       }),
-    apply(record, previousRows) {
+    apply(record) {
       const touched = context.touchedKeys(record, description.deps);
       if (touched === null) return null;
       /** @type {any} */
@@ -674,7 +655,6 @@ export function bucketStrategy(description, context) {
         place(key, row, moved);
       }
       if (late !== null) return { rebuild: true, late };
-      if (base.delegate() !== null || base.diverges()) return base.rerun().apply(record, previousRows);
       if (moved.size === 0) return null;
       for (const bucket of moved) refold(bucket);
       return { rows: emit() };
@@ -700,16 +680,14 @@ export function rollingStrategy(description, context) {
   const { spec, width } = description;
   const base = eventTimeBase(description, context);
 
-  /** @type {Map<string, { at: number, row: any }>} */
+  /** @type {Map<string, { key: string, at: number, row: any }>} */
   const placed = new Map();
-  /** Rows in instant order; ties keep arrival order, which `min`, `max`
-   * and `count` cannot tell apart and a floating `sum` or `mean` can.
-   * @type {any[]} */
+  /** The held rows in the order a fresh run adds them: by instant, and
+   * rows sharing an instant by their position in the table.
+   * @type {{ key: string, at: number, row: any }[]} */
   let ordered = [];
   /** One output per row of `ordered`. @type {any[]} */
   let out = [];
-
-  const compareAt = (a, b) => base.instantOf(a) - base.instantOf(b);
 
   const rolled = (rows) => {
     try {
@@ -726,7 +704,7 @@ export function rollingStrategy(description, context) {
     let hi = ordered.length;
     while (lo < hi) {
       const mid = (lo + hi) >> 1;
-      if (base.instantOf(ordered[mid]) < at) lo = mid + 1;
+      if (ordered[mid].at < at) lo = mid + 1;
       else hi = mid;
     }
     return lo;
@@ -737,7 +715,7 @@ export function rollingStrategy(description, context) {
     let hi = ordered.length;
     while (lo < hi) {
       const mid = (lo + hi) >> 1;
-      if (base.instantOf(ordered[mid]) <= at) lo = mid + 1;
+      if (ordered[mid].at <= at) lo = mid + 1;
       else hi = mid;
     }
     return lo;
@@ -755,7 +733,7 @@ export function rollingStrategy(description, context) {
     base.stats.recomputes += 1;
     const lo = upperBound(from - width);
     const hi = lowerBound(to + width);
-    const answers = rolled(ordered.slice(lo, hi));
+    const answers = rolled(ordered.slice(lo, hi).map((entry) => entry.row));
     for (let i = lowerBound(from); i < hi; i++) out[i] = answers[i - lo];
   };
 
@@ -764,25 +742,32 @@ export function rollingStrategy(description, context) {
     if (previous === undefined) return null;
     const at = lowerBound(previous.at);
     for (let i = at; i < ordered.length; i++) {
-      if (ordered[i] === previous.row) {
+      if (ordered[i] === previous) {
         ordered.splice(i, 1);
         out.splice(i, 1);
         break;
       }
     }
     placed.delete(key);
-    base.untrack(previous.row);
+    base.untrack(key, previous.row);
     return previous.at;
   };
 
   const insertRow = (key, row) => {
-    const at = base.instantOf(row);
-    const position = upperBound(at);
-    ordered.splice(position, 0, row);
-    out.splice(position, 0, null);
-    placed.set(key, { at, row });
+    const entry = { key, at: base.instantOf(row), row };
     base.track(row);
-    return at;
+    // after the rows that precede it among those sharing its instant
+    let lo = lowerBound(entry.at);
+    let hi = upperBound(entry.at);
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (base.compare(ordered[mid], entry) <= 0) lo = mid + 1;
+      else hi = mid;
+    }
+    ordered.splice(lo, 0, entry);
+    out.splice(lo, 0, null);
+    placed.set(key, entry);
+    return entry.at;
   };
 
   /** Fold the whole series again through the kernel. A rolling total that is
@@ -790,7 +775,7 @@ export function rollingStrategy(description, context) {
    * slice of the series can reproduce it. */
   const repairAll = () => {
     base.stats.recomputes += 1;
-    const folded = rolled(ordered);
+    const folded = rolled(ordered.map((entry) => entry.row));
     // a row the fold answers as before stays the object it was, so the
     // emission shares it by reference and diffs only what moved
     for (let i = 0; i < folded.length; i++) {
@@ -804,7 +789,7 @@ export function rollingStrategy(description, context) {
   return {
     advance: base.advance,
     stats: base.statsOf,
-    entries: (rows) => base.delegate()?.entries(rows) ?? placed.size,
+    entries: () => placed.size,
     init: () => chain(context.execute([description.source], { externals: context.externals }),
       (docs) => {
         base.forget();
@@ -812,16 +797,16 @@ export function rollingStrategy(description, context) {
         for (const doc of /** @type {any[]} */ (docs)) {
           const row = base.rowOf(doc);
           if (row === undefined) continue;
-          placed.set(context.keyOf(doc), { at: base.instantOf(row), row });
+          const entry = { key: context.keyOf(doc), at: base.instantOf(row), row };
+          placed.set(entry.key, entry);
           base.track(row);
-          ordered.push(row);
+          ordered.push(entry);
         }
-        ordered.sort(compareAt);
-        if (base.diverges()) return base.rerun().init();
-        out = rolled(ordered);
+        ordered.sort(base.compare);
+        out = rolled(ordered.map((entry) => entry.row));
         return out.slice();
       }),
-    apply(record, previousRows) {
+    apply(record) {
       const touched = context.touchedKeys(record, description.deps);
       if (touched === null) return null;
       /** @type {any} */
@@ -854,7 +839,6 @@ export function rollingStrategy(description, context) {
         removeRow(move.key);
         if (move.row !== undefined) insertRow(move.key, move.row);
       }
-      if (base.delegate() !== null || base.diverges()) return base.rerun().apply(record, previousRows);
       if (from === Infinity) return null;
       if (base.exact()) repair(from, to);
       else repairAll();

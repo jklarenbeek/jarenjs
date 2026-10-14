@@ -78,3 +78,26 @@ it('nested group order follows the first qualifying row when a filter changes', 
   }
   finally { await store.close(); }
 });
+
+for (const mode of ['session', 'journal']) it(`${mode}: a row deleted and stored again with the document it had, in one transaction, moves its groups behind the rows that stayed`, async () => {
+  const store = await openStore(model, { driver: nodeDriver(), capture: { mode } });
+  try {
+    const rows = store.collection('rows');
+    await rows.put({ id: 'a', region: 'west', team: 'x', score: 5 });
+    await rows.put({ id: 'b', region: 'east', team: 'y', score: 3 });
+    await rows.put({ id: 'c', region: 'west', team: 'z', score: 1 });
+    const live = await rows.live(document, { mode: 'incremental' });
+    assert.equal(live.mode.strategy, 'nested-group');
+    const oracle = liveOracle(live, () => rows.execute(document)); await oracle.check();
+    const order = () => live.result.rows.map((row) => [row.region, row.teams.map((team) => team.team)]);
+    assert.deepEqual(order(), [['west', ['x', 'z']], ['east', ['y']]]);
+    await store.transaction(async (tx) => {
+      await tx.collection('rows').delete('a');
+      await tx.collection('rows').put({ id: 'a', region: 'west', team: 'x', score: 5 });
+    });
+    assert.deepEqual(order(), [['east', ['y']], ['west', ['z', 'x']]]);
+    await oracle.check();
+    oracle.close();
+  }
+  finally { await store.close(); }
+});

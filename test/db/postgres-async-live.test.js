@@ -273,4 +273,43 @@ describe('PostgreSQL asynchronous live and lexical freshness', { skip: !url && '
       await assert.rejects(buffered.collection('notes').live(all), { code: 'JD0051' });
     });
   });
+
+  it('re-reads the tie order of a row deleted and stored again with the document it had, in one transaction', async () => {
+    await fixture(async ({ open }) => {
+      const store = await open();
+      const notes = store.collection('notes');
+      for (const id of ['p', 'q', 'r']) await notes.insert({ id, title: 'same' });
+      const ordered = [{ $for: { it: '$[*]' }, $orderby: { $key: '$it.title' }, $return: '$it.id' }];
+      const live = await notes.live(ordered), entity = await store.live(items);
+      await store.entity('Item').create({ id: 'a', title: 'tea' });
+      await live.refresh(); await entity.refresh();
+      assert.deepEqual(live.result.rows, ['p', 'q', 'r']);
+      const records = []; store.observe((record) => records.push(record.patch));
+      for (const storeAgain of [(c) => c.insert({ id: 'p', title: 'same' }), (c) => c.put({ id: 'q', title: 'same' })]) {
+        const id = records.length === 0 ? 'p' : 'q';
+        await store.transaction(async (tx) => { await tx.collection('notes').delete(id); await storeAgain(tx.collection('notes')); });
+        await live.refresh();
+        assert.deepEqual(live.result.rows, await notes.execute(ordered));
+      }
+      assert.deepEqual(live.result.rows, ['r', 'p', 'q']);
+      assert.deepEqual(records, [[{ op: 'replace', path: '/notes/p', value: { id: 'p', title: 'same' } }],
+        [{ op: 'replace', path: '/notes/q', value: { id: 'q', title: 'same' } }]]);
+      // an update to the document a row holds keeps its place and records nothing
+      await notes.put({ id: 'r', title: 'same' }, 'r');
+      await store.transaction(async (tx) => tx.collection('notes').put({ id: 'r', title: 'same' }, 'r'));
+      await live.refresh();
+      assert.deepEqual(live.result.rows, ['r', 'p', 'q']);
+      assert.equal(records.length, 2);
+      // a delete, then the same document stored again in the next transaction
+      await notes.delete('r');
+      await notes.insert({ id: 'r', title: 'same' });
+      await live.refresh();
+      assert.deepEqual(live.result.rows, ['p', 'q', 'r']);
+      assert.deepEqual(live.result.rows, await notes.execute(ordered));
+      await store.transaction(async (tx) => { await tx.entity('Item').delete('a'); await tx.entity('Item').create({ id: 'a', title: 'tea' }); });
+      await entity.refresh();
+      assert.deepEqual(records.at(-1), [{ op: 'replace', path: '/Item/a', value: { id: 'a', title: 'tea' } }]);
+      assert.deepEqual(entity.result.rows, await store.execute(items));
+    });
+  });
 });

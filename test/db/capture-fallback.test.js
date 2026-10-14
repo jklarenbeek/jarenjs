@@ -83,6 +83,24 @@ async function script(store) {
     await notes.patch('n1', [{ op: 'replace', path: '/meta/deep/1', value: 9 }]);
     // n1 ends exactly where it started: nothing may be emitted for it
   });
+  // rows deleted and stored again: with the document they had (moved last
+  // in their table, one whole-document replace each), and with another
+  await store.transaction(async (tx) => {
+    const notes = tx.collection('notes');
+    await notes.delete('n1');
+    await notes.put({ id: 'n1', body: 'a', meta: { deep: [1, 9] } });
+    await notes.delete('kept');
+    await notes.insert({ id: 'kept', body: 'v3' });
+    await tx.entity('Tag').delete('t1');
+    await tx.entity('Tag').create({ name: 't1' });
+  });
+  // a unit of work's removal is not among the writes a move is told from:
+  // stored again unchanged, the row is no record in either mode
+  await store.transaction(async (tx) => {
+    tx.entity('Tag').remove(await tx.entity('Tag').get('t1'));
+    await tx.saveChanges();
+    await tx.entity('Tag').create({ name: 't1' });
+  });
   const tagged = await store.entity('Tag').get('t1');
   store.entity('Tag').remove(tagged);
   await store.saveChanges();
@@ -110,8 +128,44 @@ describe('the journal fallback', () => {
       'the same commits produce the same record count');
     assert.deepStrictEqual(canonical(fromJournal), canonical(fromSession),
       'identical op sets, record by record');
+    assert.deepStrictEqual(canonical(fromSession).at(-2), [
+      { op: 'replace', path: '/Tag/t1', value: { name: 't1' } },
+      { op: 'replace', path: '/notes/kept/body', value: 'v3' },
+      { op: 'replace', path: '/notes/n1', value: { id: 'n1', body: 'a', meta: { deep: [1, 9] } } },
+    ], 'a row stored again with the document it had is one whole-document replace');
     await viaSession.close();
     await viaJournal.close();
+  });
+
+  it('an entity deleted under another spelling of its key and created again is one record, alike in both modes', async () => {
+    const SPELLED = { $model: '0.1', entities: {
+      Num: { schema: { type: 'object', properties: { id: { type: 'integer', 'x-entity': { key: true } }, n: { type: 'integer' } } } },
+      At: { schema: { type: 'object', properties: {
+        at: { type: 'string', format: 'date-time', 'x-entity': { key: true, column: 'integer' } }, n: { type: 'integer' } } } },
+    } };
+    const records = {};
+    for (const mode of ['session', 'journal']) {
+      const store = await openStore(SPELLED, { driver: nodeDriver(), capture: { mode } });
+      try {
+        await store.entity('Num').create({ id: 16, n: 1 });
+        await store.entity('At').create({ at: '2026-01-01T00:00:01Z', n: 1 });
+        const seen = [];
+        store.observe((record) => seen.push(record.patch));
+        await store.transaction(async (tx) => {
+          await tx.entity('Num').delete('16.0');
+          await tx.entity('Num').create({ id: 16, n: 1 });
+          await tx.entity('At').delete('2026-01-01T00:00:01.000Z');
+          await tx.entity('At').create({ at: '2026-01-01T00:00:01Z', n: 1 });
+        });
+        records[mode] = canonical(seen.map((patch) => ({ patch })));
+      }
+      finally { await store.close(); }
+    }
+    assert.deepStrictEqual(records.session, [[
+      { op: 'replace', path: '/At/2026-01-01T00:00:01Z', value: { at: '2026-01-01T00:00:01Z', n: 1 } },
+      { op: 'replace', path: '/Num/16', value: { id: 16, n: 1 } },
+    ]]);
+    assert.deepStrictEqual(records.journal, records.session);
   });
 
   it('the caught-inner-rollback edge holds in journal mode too', async () => {
