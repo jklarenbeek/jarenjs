@@ -39,11 +39,9 @@
  */
 
 import { textWidth, sanitizeHref, encodeUrlAttribute } from '@jarenjs/view/helpers';
-import {
-  compileDateFormat, axisTicksTime, timeTicksEvery, partsFromEpoch,
-} from '@jarenjs/core/dates';
+import { axisTicksTime, timeTicksEvery } from '@jarenjs/core/dates';
 import { coord as round } from '../utils.js';
-import { strftimeToLdml } from '../parser/gantt-grammar.js';
+import { compileAxisFormat } from '../parser/gantt-grammar.js';
 import { createExcluder, DAY_MS } from '../gantt-calendar.js';
 
 const FONT_SIZE = 13;
@@ -337,10 +335,8 @@ function planTicks(domain, rules, xOf, dateNames) {
     : timeTicksEvery(domain.start, domain.end, rules.tick.unit, rules.tick.amount,
       { weekStart: rules.weekStart });
 
-  const adapted = strftimeToLdml(rules.axisFormat);
   // the parser already refused an unsupported specifier, so this compiles
-  const label = compileDateFormat(adapted.value, dateNames);
-  const parts = at.map((ms) => label(partsFromEpoch(ms)));
+  const parts = at.map(compileAxisFormat(rules.axisFormat, dateNames));
 
   // keep every `stride`-th label, the smallest stride that fits
   let widest = 0;

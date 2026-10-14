@@ -17,9 +17,18 @@
  * moment's most reported footgun and the reason `@jarenjs/core/dates`
  * refuses that spelling in the first place.
  *
- * Every function here returns `{ value, error }` rather than throwing:
+ * Every adapter here returns `{ value, error }` rather than throwing:
  * the caller owns the source line, and a `JM` error without one is not
- * worth much.
+ * worth much. `compileAxisFormat` is the exception, because the layout
+ * calls it on a pattern the parser has already accepted.
+ *
+ * `axisFormat` is the one of the three a formatter writes rather than a
+ * parser reads, so it is adapted to pieces rather than to one pattern:
+ * each specifier is its own LDML pattern, compiled on its own, because
+ * two adjacent tokens of one letter merge into a wider token (`%m%m`
+ * joined is `MMMM`, the month name), and the four specifiers LDML has
+ * no token for — the ISO week-based year and the two epoch counts — are
+ * computed from the instant here.
  *
  * The vendored conformance table for all of this — which tokens the
  * shipped Mermaid version documents, which of them this engine
@@ -27,6 +36,8 @@
  * `test/mermaid/fixtures/gantt-grammar.json`, pinned against this file
  * by `test/mermaid/gantt.test.js`.
  */
+
+import { isoWeekOfYear, partsFromEpoch, compileDateFormat } from '@jarenjs/core/dates';
 
 /** Mermaid's own default when a diagram declares no `dateFormat`. */
 export const DEFAULT_DATE_FORMAT = 'YYYY-MM-DD';
@@ -66,7 +77,34 @@ const STRFTIME_TO_LDML = Object.freeze({
   a: 'EEE', A: 'EEEE', b: 'MMM', B: 'MMMM', p: 'a',
   Z: 'XX',
   x: "MM'/'dd'/'yyyy", X: "HH':'mm':'ss",
+  // d3 keeps time in milliseconds, so its microseconds are those and 000
+  f: "SSS'000'", q: 'Q', u: 'E', V: 'ww',
   '%': "'%'",
+});
+
+/**
+ * d3-time-format's padding: zeroes to `width`, after the sign.
+ * @param {number} value
+ * @param {number} width
+ * @returns {string}
+ */
+function d3Pad(value, width) {
+  const digits = '' + (value < 0 ? -value : value);
+  return (value < 0 ? '-' : '') + digits.padStart(width, '0');
+}
+
+/**
+ * The strftime specifiers no LDML token writes, each computed from the
+ * tick's instant and its UTC parts record exactly as d3-time-format
+ * computes it. The week-based year is derived per instant, so the parts
+ * record keeps its one calendar year.
+ * @type {Readonly<Record<string, (ms: number, parts: any) => string>>}
+ */
+const STRFTIME_COMPUTED = Object.freeze({
+  G: (ms, parts) => d3Pad(isoWeekOfYear(parts).year % 10000, 4),
+  g: (ms, parts) => d3Pad(isoWeekOfYear(parts).year % 100, 2),
+  Q: (ms) => '' + ms,
+  s: (ms) => '' + Math.floor(ms / 1000),
 });
 
 /** Documented strftime specifiers this engine will not write, and why. */
@@ -76,14 +114,6 @@ const STRFTIME_REFUSED = Object.freeze({
   U: 'd3 counts weeks from the first Sunday; the core week number is ISO, so the two disagree',
   W: 'd3 counts weeks from the first Monday; the core week number is ISO, so the two disagree',
   w: 'd3 numbers Sunday 0; the core weekday number is ISO, where 1 is Monday',
-  f: 'microseconds are below the millisecond this suite measures time in',
-  g: 'the week-based year is a second year field, and the core parts record has one',
-  G: 'the week-based year is a second year field, and the core parts record has one',
-  q: 'a quarter on a time axis is a label, not a tick this engine plans',
-  Q: 'an epoch is a whole value, not a calendar field',
-  s: 'an epoch is a whole value, not a calendar field',
-  u: 'the ISO weekday number is a tick label this engine does not plan',
-  V: 'the ISO week number is a tick label this engine does not plan',
 });
 
 /** The LDML tokens that need a `names` provider before they compile. */
@@ -160,15 +190,17 @@ export function momentToLdml(pattern) {
 }
 
 /**
- * Adapt a Mermaid `axisFormat` to an LDML pattern. This is a separate
- * grammar from `dateFormat` on purpose: `%m` is a month and `m` is a
- * minute, so one table serving both would silently mis-read half of
+ * Adapt a Mermaid `axisFormat` to the pieces that write it. This is a
+ * separate grammar from `dateFormat` on purpose: `%m` is a month and `m`
+ * is a minute, so one table serving both would silently mis-read half of
  * every axis.
  * @param {string} pattern - a d3-time-format (strftime) pattern
- * @returns {Adapted} `value` is the LDML pattern
+ * @returns {Adapted} `value` is the pieces in order: an LDML pattern
+ *   string for each specifier and each run of literal text, and a
+ *   `STRFTIME_COMPUTED` function for each specifier LDML has no token for
  */
 export function strftimeToLdml(pattern) {
-  let out = '';
+  const out = [];
   let literal = '';
   for (let i = 0; i < pattern.length;) {
     if (pattern[i] !== '%') {
@@ -181,26 +213,61 @@ export function strftimeToLdml(pattern) {
       return bad(`axisFormat '${pattern}' ends in a bare '%'`);
     if (STRFTIME_REFUSED[spec] !== undefined)
       return bad(`axisFormat specifier '%${spec}' is not supported: ${STRFTIME_REFUSED[spec]}`);
-    const ldml = STRFTIME_TO_LDML[spec];
-    if (ldml === undefined)
+    const piece = STRFTIME_TO_LDML[spec] ?? STRFTIME_COMPUTED[spec];
+    if (piece === undefined)
       return bad(`axisFormat specifier '%${spec}' is not a d3-time-format directive`);
-    out += quoted(literal);
+    if (literal !== '') out.push(quoted(literal));
     literal = '';
-    out += ldml;
+    out.push(piece);
     i += 2;
   }
-  out += quoted(literal);
+  if (literal !== '') out.push(quoted(literal));
   return ok(out);
+}
+
+/**
+ * Compile an `axisFormat` the parser accepted into the tick labeller:
+ * epoch milliseconds in, the label on the UTC clock out. Each LDML piece
+ * is compiled once, here, and never per tick.
+ * @param {string} pattern - a d3-time-format (strftime) pattern
+ * @param {import('@jarenjs/core/dates').DateNames} [names] - the locale
+ *   names a name specifier (`%b`, `%A`, `%p`) writes
+ * @returns {(ms: number) => string}
+ * @throws {TypeError} on a pattern `strftimeToLdml` refuses, or a name
+ *   specifier with no provider for it
+ */
+export function compileAxisFormat(pattern, names = undefined) {
+  const adapted = strftimeToLdml(pattern);
+  if (adapted.error !== null) throw new TypeError(adapted.error);
+  const steps = adapted.value.map((piece) => {
+    if (typeof piece !== 'string') return piece;
+    const write = compileDateFormat(piece, names);
+    return (ms, parts) => write(parts);
+  });
+  return (ms) => {
+    const parts = partsFromEpoch(ms);
+    let label = '';
+    for (const step of steps) label += step(ms, parts);
+    return label;
+  };
 }
 
 /**
  * Whether an LDML pattern uses a token that needs locale names, and
  * which token that is. Used to turn `compileDateFormat`'s TypeError into
  * a `JM` error that names the Mermaid spelling and the way out.
- * @param {string} ldml
+ * @param {string | Array<string | Function>} ldml - a pattern, or the
+ *   pieces `strftimeToLdml` adapts one to
  * @returns {string | null}
  */
 export function ldmlNeedsNames(ldml) {
+  if (typeof ldml !== 'string') {
+    for (const piece of ldml) {
+      const needed = typeof piece === 'string' ? ldmlNeedsNames(piece) : null;
+      if (needed !== null) return needed;
+    }
+    return null;
+  }
   let inQuote = false;
   for (let i = 0; i < ldml.length;) {
     if (ldml[i] === "'") {
@@ -295,4 +362,4 @@ export function parseWeekend(text) {
   return ok(ISO_WEEKDAYS[name]);
 }
 
-export { MOMENT_TO_LDML, MOMENT_REFUSED, STRFTIME_TO_LDML, STRFTIME_REFUSED };
+export { MOMENT_TO_LDML, MOMENT_REFUSED, STRFTIME_TO_LDML, STRFTIME_COMPUTED, STRFTIME_REFUSED };

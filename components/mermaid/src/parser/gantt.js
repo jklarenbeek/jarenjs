@@ -32,7 +32,7 @@
  * each one is a `JM` error carrying its source line:
  *
  * 1. **No clock.** Mermaid starts an undated first task *today*. This
- *    engine has no clock (`docs/ROADMAP.md`, "there is no now"), so a
+ *    engine has no clock (`packages/core/docs/DATES.md`, "there is no `now`"), so a
  *    schedule with no dated anchor is an error rather than a diagram
  *    that means something different tomorrow.
  * 2. **No silent literals.** An unsupported `dateFormat` or

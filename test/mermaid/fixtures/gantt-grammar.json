@@ -69,19 +69,19 @@
       { "token": "%x", "means": "the date, as %m/%d/%Y", "ldml": "MM'/'dd'/'yyyy", "supported": true },
       { "token": "%X", "means": "the time, as %H:%M:%S", "ldml": "HH':'mm':'ss", "supported": true },
       { "token": "%%", "means": "a literal percent sign", "ldml": "'%'", "supported": true },
+      { "token": "%f", "means": "microseconds", "ldml": "SSS'000'", "supported": true },
+      { "token": "%g", "means": "ISO 8601 week-based year without century", "ldml": null, "supported": true, "computed": "the year of the ISO week holding the instant, modulo 100, two digits" },
+      { "token": "%G", "means": "ISO 8601 week-based year with century", "ldml": null, "supported": true, "computed": "the year of the ISO week holding the instant, modulo 10000, four digits" },
+      { "token": "%q", "means": "quarter of the year", "ldml": "Q", "supported": true },
+      { "token": "%Q", "means": "milliseconds since the epoch", "ldml": null, "supported": true, "computed": "the instant itself, a whole number of milliseconds" },
+      { "token": "%s", "means": "seconds since the epoch", "ldml": null, "supported": true, "computed": "the instant in seconds, rounded down, so -1.5 s is -2" },
+      { "token": "%u", "means": "ISO 8601 weekday number, Monday 1", "ldml": "E", "supported": true },
+      { "token": "%V", "means": "ISO 8601 week of the year", "ldml": "ww", "supported": true },
       { "token": "%e", "means": "day of month, space padded", "ldml": null, "supported": false, "reason": "the formatter pads with zeroes or not at all; a space-padded field would be a token of its own" },
       { "token": "%c", "means": "the date and time, as %a %b %e %H:%M:%S %Y", "ldml": null, "supported": false, "reason": "it expands to %e, which is unsupported" },
       { "token": "%U", "means": "week of the year, Sunday first", "ldml": null, "supported": false, "reason": "the core week number is ISO (Monday first, week 1 holds January 4th) and is a different rule, so answering with it would be wrong rather than approximate" },
       { "token": "%W", "means": "week of the year, Monday first", "ldml": null, "supported": false, "reason": "d3 counts from the first Monday; ISO counts from the week holding January 4th, so the two disagree in January" },
-      { "token": "%w", "means": "weekday number, 0 is Sunday", "ldml": null, "supported": false, "reason": "the core weekday number is ISO (1 is Monday), so the same digit would mean a different day" },
-      { "token": "%f", "means": "microseconds", "ldml": null, "supported": false, "reason": "microseconds are below the millisecond this suite measures time in" },
-      { "token": "%g", "means": "ISO 8601 week-based year without century", "ldml": null, "supported": false, "reason": "the week-based year is a second year field, and the core parts record has one year" },
-      { "token": "%G", "means": "ISO 8601 week-based year with century", "ldml": null, "supported": false, "reason": "the week-based year is a second year field, and the core parts record has one year" },
-      { "token": "%q", "means": "quarter of the year", "ldml": null, "supported": false, "reason": "a quarter on a time axis is a label rather than a tick this engine plans" },
-      { "token": "%Q", "means": "milliseconds since the epoch", "ldml": null, "supported": false, "reason": "an epoch is a whole value, not a calendar field" },
-      { "token": "%s", "means": "seconds since the epoch", "ldml": null, "supported": false, "reason": "an epoch is a whole value, not a calendar field" },
-      { "token": "%u", "means": "ISO 8601 weekday number, Monday 1", "ldml": null, "supported": false, "reason": "the ISO weekday number is a tick label this engine does not plan" },
-      { "token": "%V", "means": "ISO 8601 week of the year", "ldml": null, "supported": false, "reason": "the ISO week number is a tick label this engine does not plan" }
+      { "token": "%w", "means": "weekday number, 0 is Sunday", "ldml": null, "supported": false, "reason": "the core weekday number is ISO (1 is Monday), so the same digit would mean a different day" }
     ]
   },
   "tickInterval": {

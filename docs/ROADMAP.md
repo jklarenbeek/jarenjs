@@ -41,7 +41,6 @@ delete it or fix it.
 
 - [ ] **JSLT matcher optimizer (single-walk)** — replace per-rule path pre-passes with a single multi-pattern walk, specialize location tracking by reachable modes, and use input-schema knowledge to prune impossible shape rules. The benchmark quantifies the gap: dense pure-path transforms pay ~9–12× over the raw path scan, and hand-written native JS stays 3–139× faster on real transformations — this is the main JSLT performance workstream.
 - [ ] **Prepass-level pruning in the JSLT matcher** — skip re-evaluating match *paths* over unchanged regions using the changed-path feed directly, rather than discovering the reuse afterwards through the memo cache. The remaining O(change) idea now that the memo layers have shipped.
-- [ ] **`$apply` mode-argument typing in the schema twins** — the draft-neutral subset forbids tuple validation, so a non-string mode in the two-item `$apply` array is compiler-rejected (JT0007) but schema-accepted. Changing this means abandoning the mechanical twin transform or changing the language encoding; documented in JSLT-FORMAT Appendix B.
 
 ## @jarenjs/json — XQuery front-end & QT3
 
@@ -149,6 +148,10 @@ establish registry publication or downstream acceptance.
   do with.
 - [ ] **More domain projections** — the geometry-free-AST-as-model idea now ships executable arrows for flat FSMs, compound statecharts and DAGs (`stateDiagram ⇄ jaren-fsm` and `flowchart ⇄ jaren-dag`, run by `@jarenjs/flow`; MERMAID-FORMAT §5.1); the remaining follow-ups on the same idea are sequence⇄orchestration/saga and ER⇄JSON-Schema+`@jarenjs/forms`.
 - [ ] **Diagram tooltips beyond flowchart and state nodes** — `mermaidPlugin({ tooltips: true })` ships node tooltips (focus and hover, Escape, aria wiring) for the diagram types whose render marks nodes (`flowchart`, `stateDiagram`, `jaren-dag`). The remaining types draw no marked target: sequence actors and messages, class and ER panels, gantt rows (which carry `data-id` but a different class), edges, and the secondary placeholders. Their render needs per-element markers first. The text is English-only and derived from the DOM; a Mermaid `click` line's own tooltip text is parse-accepted and not modeled in the AST.
+- [ ] **Gantt `dateFormat` refuses dayjs' epoch and week tokens.** `X` and `x`
+  (epoch seconds and milliseconds), `Q`, `w` and `ww` are refused: `X`/`x` could
+  read as an instant, while the week tokens need a decision on how a parsed
+  week-based year and week number become a date.
 
 ## @jarenjs/charts
 
@@ -943,63 +946,6 @@ machine — the opt-in workflow or a local one — and its result recorded here.
   cross-check of number formatting skips unless the runtime's ICU is the one it
   was measured against.
 
-## Dates & times (cross-package)
-
-One program. The motivating observation is that the suite does not lack a
-date *library* — it lacked date *capability in its engines*: charts silently
-dropped date strings, gantt stored its date directives without interpreting
-them, forms rendered two of its three date formats as plain text boxes, and
-the locale packs contained no month names at all.
-
-The kernel (`@jarenjs/core/dates/*`), the query operators, the charts time
-axis, the forms date controls, the JOSL dedup, the allocation-free
-`formatMinimum`/`formatMaximum` comparators, the locale packs' calendar
-language and the Mermaid Gantt timeline are done; what they do is documented in
-`packages/core/ARCHITECTURE.md`, QUERY-FORMAT.md §8.13 and the respective
-package READMEs — the date msgids and their compilation in
-`packages/locales/README.md`; the chart time axis takes the same
-`DateNames` record the Gantt does (`components/charts/README.md`), and a
-zone provider over the host's ICU ships opt-in as
-`@jarenjs/locales/intl-zones` beside the runtime record
-(`@jarenjs/core/runtime`) that hands it, with the clock, to every host
-subsystem at once. One entry is left.
-
-Two constraints shape every entry. **There is no date type**: dates are RFC
-3339 strings (lexical, interchange) and epoch milliseconds (arithmetic), both
-of which are already JSON items — a wrapper object, even an immutable one,
-could not be a query-engine item, a JSON Patch target, a schema-validated
-value or part of app state, which is exactly why `canonicalizeJson` turns a
-`Date` into `{}` and why JOSL's value classes are opaque outside JOSL. And
-**there is no `now`**: a compiled query is cached by document identity and
-saved as a rule, so the current instant enters as data (an external, an app
-effect) rather than as an operator (QUERY-FORMAT §8.13).
-
-Note the deadline this program does *not* have: TC39 Temporal reached Stage 4
-in March 2026 and ships in Chrome 144+, Firefox 139+ and Node 26+, but not
-Safari and not this repo's Node ≥ 24 baseline. The string/number
-representation is what `Temporal.Instant.from()` consumes, so the kernel can
-delegate to Temporal internally once the baseline moves, without changing a
-public surface. Building a general-purpose date *library* is therefore the one
-thing to avoid.
-
-- [ ] **Mermaid gantt: the d3 axis specifiers that are refused.**
-  `dateFormat`, `axisFormat`, `tickInterval`, `excludes`, `includes`,
-  `inclusiveEndDates`, `weekday`, `weekend`, `topAxis` and `displayMode:
-  compact` are interpreted (the last two as Mermaid reads them, from the
-  diagram's config, and `topAxis` also as a header line), `click` statements put
-  an allow-listed link on a task and record a `call` as inert data, the tasks
-  resolve to half-open intervals with dependencies and working-day arithmetic,
-  and gantt renders a real timeline — the grammar, the vendored conformance
-  table and the divergences are in `components/mermaid/docs/MERMAID-FORMAT.md`
-  §4.4, and the kernel's half is `compileDateParser` in
-  `packages/core/docs/DATES.md`. What is left is the eight d3 axis specifiers
-  the conformance table now names as refusals rather than passing off as unknown
-  (`%f`, `%g`, `%G`, `%q`, `%Q`, `%s`, `%u`, `%V`): a week-based year and a week
-  number are a second year field and a derived one, so admitting them is a
-  parts-record decision rather than a table entry. Note `todayMarker` is **not**
-  on this list and never will be — it needs a clock, and there is none (see the
-  constraint above); a host that wants "now" on a diagram supplies the instant
-  as data.
 ## Geospatial (cross-package)
 
 Geography is a capability every surface of the suite can spell, and the shipped

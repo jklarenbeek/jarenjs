@@ -25,7 +25,8 @@ import { layoutGantt } from '../../components/mermaid/src/layout/gantt.js';
 import {
   momentToLdml, strftimeToLdml, parseTickInterval, parseTaskDuration,
   parseWeekday, parseWeekend,
-  MOMENT_TO_LDML, MOMENT_REFUSED, STRFTIME_TO_LDML, STRFTIME_REFUSED,
+  MOMENT_TO_LDML, MOMENT_REFUSED, STRFTIME_TO_LDML, STRFTIME_COMPUTED, STRFTIME_REFUSED,
+  compileAxisFormat,
 } from '../../components/mermaid/src/parser/gantt-grammar.js';
 import {
   createExcluder, pushEndPastExclusions, pushEndDayByDay, DAY_MS,
@@ -82,7 +83,13 @@ describe('the Gantt conformance table is the code', () => {
     for (const entry of GRAMMAR.axisFormat.tokens) {
       const got = strftimeToLdml(entry.token);
       const spec = entry.token.slice(1);
-      if (entry.supported) {
+      if (entry.supported && entry.ldml === null) {
+        // no LDML token writes it, so the table says what it is computed from
+        assert.strictEqual(got.error, null, `${entry.token} should be supported`);
+        assert.strictEqual(typeof STRFTIME_COMPUTED[spec], 'function', entry.token);
+        assert.strictEqual(typeof entry.computed, 'string', entry.token);
+      }
+      else if (entry.supported) {
         assert.strictEqual(got.error, null, `${entry.token} should be supported`);
         assert.strictEqual(STRFTIME_TO_LDML[spec], entry.ldml, entry.token);
       }
@@ -92,7 +99,8 @@ describe('the Gantt conformance table is the code', () => {
       }
     }
     const listed = new Set(GRAMMAR.axisFormat.tokens.map((e) => e.token.slice(1)));
-    for (const spec of [...Object.keys(STRFTIME_TO_LDML), ...Object.keys(STRFTIME_REFUSED)])
+    for (const spec of [...Object.keys(STRFTIME_TO_LDML), ...Object.keys(STRFTIME_COMPUTED),
+      ...Object.keys(STRFTIME_REFUSED)])
       assert.ok(listed.has(spec), `%${spec} is implemented but not in the conformance table`);
   });
 
@@ -167,15 +175,15 @@ describe('dateFormat and axisFormat are separate grammars', () => {
     // moment `m` is a minute; strftime `%m` is a month. One shared
     // table would silently mis-read half of every diagram.
     assert.strictEqual(momentToLdml('m').value, 'm');
-    assert.strictEqual(strftimeToLdml('%m').value, 'MM');
+    assert.deepStrictEqual(strftimeToLdml('%m').value, ['MM']);
     assert.strictEqual(momentToLdml('M').value, 'M');
-    assert.strictEqual(strftimeToLdml('%M').value, 'mm');
+    assert.deepStrictEqual(strftimeToLdml('%M').value, ['mm']);
   });
 
   it('should quote literal runs rather than leaving them to LDML', () => {
     assert.strictEqual(momentToLdml('YYYY-MM-DD').value, "yyyy'-'MM'-'dd");
     assert.strictEqual(momentToLdml('[on] DD MMM').value, "'on 'dd' 'MMM");
-    assert.strictEqual(strftimeToLdml('%Y at %H').value, "yyyy' at 'HH");
+    assert.deepStrictEqual(strftimeToLdml('%Y at %H').value, ['yyyy', "' at '", 'HH']);
   });
 
   it('should never hand a moment token straight to the core compiler', () => {
@@ -205,6 +213,94 @@ describe('dateFormat and axisFormat are separate grammars', () => {
   it('should refuse a bare trailing percent in axisFormat', () => {
     assert.throws(() => parseMermaid('gantt\naxisFormat %Y%\nsection S\n'
       + 'T : t1, 2014-01-01, 3d'), /bare '%'/);
+  });
+});
+
+/**
+ * The label the axis writes on the tick at `at`, through the whole
+ * parse and layout: one task starting at `at`, ticks every `every`.
+ * @param {string} axisFormat
+ * @param {number} at - epoch ms, on an `every` boundary
+ * @param {string} [every] - a tickInterval
+ * @param {string} [span] - the task's duration
+ * @returns {string | null}
+ */
+function axisLabelAt(axisFormat, at, every = '1day', span = '2d') {
+  const text = new Date(at).toISOString().slice(0, 23).replace('T', ' ');
+  const src = `gantt\ndateFormat YYYY-MM-DD HH:mm:ss.SSS\naxisFormat ${axisFormat}\n`
+    + `tickInterval ${every}\nsection S\nT : t1, ${text}, ${span}`;
+  const tick = layoutGantt(parseMermaid(src).ast).ticks.find((t) => t.at === at);
+  assert.ok(tick !== undefined, `a tick lands on ${text}`);
+  return tick.label;
+}
+
+describe("axisFormat writes d3's week-year, week, weekday, quarter and epoch fields", () => {
+  // the expected strings are d3-time-format's own, run on the same instants
+  it('should write the ISO week-based year, week and weekday at year boundaries', () => {
+    const cases = [
+      ['2020-12-31', '2020-W53-4 Q4 20'],
+      ['2021-01-01', '2020-W53-5 Q1 20'],
+      ['2021-01-03', '2020-W53-7 Q1 20'],
+      ['2021-01-04', '2021-W01-1 Q1 21'],
+      ['2024-12-30', '2025-W01-1 Q4 25'],
+      ['2026-01-01', '2026-W01-4 Q1 26'],
+    ];
+    for (const [day, expected] of cases)
+      assert.strictEqual(axisLabelAt('%G-W%V-%u Q%q %g', Date.parse(day)), expected, day);
+  });
+
+  it('should write the epoch as whole milliseconds and floored seconds', () => {
+    assert.strictEqual(axisLabelAt('%Q %s %f', Date.parse('2020-12-31')),
+      '1609372800000 1609372800 000000');
+    // a negative epoch floors its seconds, as d3 does: -1.5 s is second -2
+    assert.strictEqual(axisLabelAt('%Q %s %f', -1500, '500millisecond', '1000ms'), '-1500 -2 500000');
+    assert.strictEqual(axisLabelAt('%Q %s %f', -1000, '500millisecond', '1000ms'), '-1000 -1 000000');
+    assert.strictEqual(axisLabelAt('%Q %s %f %G-W%V-%u', -500, '500millisecond', '1000ms'),
+      '-500 -1 500000 1970-W01-3');
+    assert.strictEqual(axisLabelAt('%G-W%V-%u', Date.UTC(1969, 11, 28)), '1969-W52-7');
+  });
+
+  it('should write microseconds as the millisecond followed by 000', () => {
+    assert.strictEqual(axisLabelAt('%S.%f', Date.UTC(2021, 0, 4, 0, 0, 5, 7), '1millisecond',
+      '2ms'),
+      '05.007000');
+  });
+
+  it('should keep two adjacent specifiers two fields', () => {
+    // adjacent LDML tokens of one letter merge into a wider token: `%y%Y`
+    // was `yyyyyy`, read as the year then its two digits, and `%m%m` was
+    // `MMMM`, the month NAME
+    const monday = Date.UTC(2021, 0, 4);
+    assert.strictEqual(axisLabelAt('%y%Y', monday), '212021');
+    assert.strictEqual(axisLabelAt('%m%m', monday), '0101');
+    assert.strictEqual(axisLabelAt('%u%u%u', monday), '111');
+  });
+
+  it("should sign and pad a week-based year before the common era as d3 does", () => {
+    const label = compileAxisFormat('%G %g %V');
+    assert.strictEqual(label(Date.UTC(-1, 5, 15)), '-0001 -01 24');
+    // 1 January of year -1 is a Friday, in the last week of year -2
+    assert.strictEqual(label(Date.UTC(-1, 0, 1)), '-0002 -02 53');
+    assert.throws(() => compileAxisFormat('%U'), TypeError);
+  });
+
+  it("should label a week axis with %G-W%V across the year's turn", () => {
+    const src = `gantt
+dateFormat YYYY-MM-DD
+axisFormat %G-W%V
+tickInterval 1week
+weekday monday
+section S
+Turn : t1, 2020-12-28, 21d`;
+    const scene = layoutGantt(parseMermaid(src).ast);
+    const labelled = scene.ticks.filter((t) => t.label !== null)
+      .map((t) => [new Date(t.at).toISOString().slice(0, 10), t.label]);
+    assert.deepStrictEqual(labelled, [
+      ['2020-12-28', '2020-W53'], ['2021-01-04', '2021-W01'],
+      ['2021-01-11', '2021-W02'], ['2021-01-18', '2021-W03'],
+    ]);
+    const svg = renderToString(renderMermaid(src));
+    for (const [, label] of labelled) assert.ok(svg.includes(`>${label}<`), label);
   });
 });
 
@@ -699,7 +795,7 @@ A :a, 2026-01-05, 1d`);
   });
 
   it('says a real d3 specifier is unsupported rather than unknown', () => {
-    for (const [spec, listed] of [['%V', true], ['%u', true], ['%Q', true], ['%n', false]]) {
+    for (const [spec, listed] of [['%U', true], ['%w', true], ['%e', true], ['%n', false]]) {
       const { error } = strftimeToLdml(`${spec}`);
       assert.notStrictEqual(error, null, spec);
       assert.strictEqual(/is not supported/.test(/** @type {string} */ (error)), listed,

@@ -199,6 +199,29 @@ answers 2019 for `2018-12-31`. Note also that moment's `m` is a minute
 while strftime's `%m` is a month: one shared table would mis-read half
 of every diagram.
 
+`axisFormat` is only ever written, never read, and it is written on
+the UTC clock. Each specifier is its own LDML pattern, compiled on its
+own, because adjacent tokens of one letter merge into a wider one. The
+ISO week number `%V`, the ISO weekday `%u` and the quarter `%q` are core
+tokens (`ww`, `E`, `Q`), and `%f` is the millisecond followed by `000`,
+as in d3. LDML has no token for the other four, so they are computed
+from the instant as d3 computes them: the ISO week-based year `%G` (four
+digits) and `%g` (two), taken from `isoWeekOfYear`, `%Q` as whole epoch
+milliseconds, and `%s` as epoch seconds rounded down, so -1.5 s is `-2`.
+So `%G-W%V` labels 2021-01-03 `2020-W53` and 2024-12-30 `2025-W01`. The
+week-based year is derived for each tick, so the AST and the core parts
+record keep their one calendar year. Three supported specifiers still
+write something other than d3's UTC formatter: `%Z` writes `Z` where d3
+writes `+0000`, and `%Y`/`%y` write year -5 as `0005`/`95` where d3
+writes `-0005`/`-05` (`%G`/`%g` keep d3's sign). `dateFormat` is dayjs'
+grammar, not strftime, so none of these eight can reach a task's date;
+dayjs' own `Q`, `X`, `x`, `w` and `ww` stay refused there, each for the
+reason the conformance table gives.
+*Upgrade: `%f`, `%g`, `%G`, `%q`, `%Q`, `%s`, `%u` and `%V` were refused
+by name. Two adjacent specifiers were merged into one wider token, so
+`%y%Y` wrote its two years in the wrong order and `%m%m` asked for a
+month name.*
+
 An **unsupported** token is a `JM` error naming the token and the
 reason, not a literal passed through. The vendored conformance table —
 every documented token of the Mermaid version this engine tracks, marked
@@ -339,7 +362,7 @@ height grows to hold the row.
 #### Nine deliberate divergences from Mermaid
 
 1. **No clock.** Mermaid starts an undated first task *today*. This
-   engine has no clock anywhere (`docs/ROADMAP.md`, "there is no now"),
+   engine has no clock anywhere (`packages/core/docs/DATES.md`, "there is no `now`"),
    so a schedule with no dated anchor is a `JM` error rather than a
    diagram that means something different tomorrow. In practice only the
    first task needs a date. For the same reason `todayMarker` is kept
