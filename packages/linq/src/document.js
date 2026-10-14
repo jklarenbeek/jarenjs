@@ -85,23 +85,44 @@ function anyPassed(args) {
 }
 
 /**
- * Refuse an argument after the ones an operator reads. A selector,
- * count or schema handed past the last parameter was never called or
- * applied: `groupBy(key, (r) => r.n)` grouped whole rows,
+ * The spelling that does what an argument past the last one a member
+ * reads meant, per row of members that share it (`@` stands for the
+ * member's own name). A member in no row (`where`, `select`, `concat`,
+ * `ofType`, `cast`, `params`) chains twice: `@(a).@(b)`.
+ * @type {Readonly<Record<string, string>>}
+ */
+const UNREAD = {
+  'skip take': 'skip(a).take(b)',
+  'any all': 'where(a).@(b)',
+  'orderBy thenBy': '@(key, { collation }); no comparer',
+  'join groupJoin': 'no comparer; keys compare as the engine does',
+  'toDocument explain': 'call it bare',
+  selectMany: '@(sel).select(resultSel)',
+  groupBy: '@(key).select((g) => ({ key: g.key, items: [g.items.all().member] }))',
+  aggregate: '@(seed, step).select(resultSel)',
+  mapAsync: '@(fn, { concurrency })',
+  elementAt: 'elementAtOrDefault(index, value)',
+  defaultIfEmpty: '@(value)',
+};
+
+/**
+ * Refuse an argument after the ones a member reads. A selector, count or
+ * schema handed past the last parameter was never called or applied:
+ * `groupBy(key, (r) => r.n)` grouped whole rows,
  * `aggregate(0, step, (x) => x)` answered the fold, `take(1, 2)` took
  * one, `join(…, comparer)` compared as the engine does. The one passed
- * is `JL0005` naming what the member takes and the spelling that does
- * what the extra argument was written to do. `undefined` is no argument.
+ * is `JL0005` naming the spelling that does what the extra one meant.
+ * `undefined` is no argument.
  * @param {readonly any[]} unread - what followed the last parameter read
- * @param {string} name - the member's spelling, for the refusal
- * @param {string} takes - what the member reads, as a noun phrase
- * @param {string} instead - the spelling that does what the extra argument meant
+ * @param {string} name - the member's spelling (`orderByDescending` reads as `orderBy`)
  */
-export function requireNoTrailingArgument(unread, name, takes, instead) {
-  if (anyPassed(unread)) {
-    throw new LinqBuildError('JL0005',
-      `${name}() takes ${takes}; the extra argument passed would never be read — ${instead}`);
-  }
+export function requireNoTrailingArgument(unread, name) {
+  if (!anyPassed(unread)) return;
+  const key = name.replace('Descending', '');
+  const row = Object.keys(UNREAD).find((names) => names.split(' ').includes(key));
+  const how = UNREAD[/** @type {string} */ (row)] ?? '@(a).@(b)';
+  throw new LinqBuildError('JL0005',
+    `${name}() would ignore the argument past its last; ${how.replaceAll('@', name)}`);
 }
 
 /**

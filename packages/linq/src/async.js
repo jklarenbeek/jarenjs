@@ -268,20 +268,20 @@ export class AsyncSequence {
 
   /** One predicate; a second argument is `JL0005`. @param {...undefined} unread */
   where(predicate, ...unread) {
-    requireNoTrailingArgument(unread, 'where', 'one predicate', 'where(a).where(b) keeps the rows both keep');
+    requireNoTrailingArgument(unread, 'where');
     return this.#chainCaptured('where', 'predicate', predicate);
   }
 
   /** One projection; a second argument is `JL0005`. @param {...undefined} unread */
   select(projection, ...unread) {
-    requireNoTrailingArgument(unread, 'select', 'one projection', 'select(a).select(b) projects the result again');
+    requireNoTrailingArgument(unread, 'select');
     return this.#chainCaptured('select', 'projection', projection);
   }
 
   /** One selector; C#'s result selector is `JL0005`, as on the sync
    * surface. @param {...undefined} unread */
   selectMany(selector, ...unread) {
-    requireNoTrailingArgument(unread, 'selectMany', 'one selector', 'selectMany(sel).select(resultSel) projects each element (a result selector that reads the outer item as well has no spelling here)');
+    requireNoTrailingArgument(unread, 'selectMany');
     const { expression, hops, lists } = this.#capture(selector);
     return this.#with({
       kind: 'select', name: 'selectMany',
@@ -311,8 +311,7 @@ export class AsyncSequence {
   /** @param {readonly any[]} unread - C#'s comparer, which `JL0005` refuses */
   #orderStage(kind, key, desc, options, unread) {
     const name = desc ? `${kind}Descending` : kind;
-    requireNoTrailingArgument(unread, name, 'a key selector and an options object',
-      'a comparer is the options bag — { empty, collation } names a registered collation');
+    requireNoTrailingArgument(unread, name);
     const { expression, hops, lists } = this.#capture(key);
     return this.#with({ kind, name, spec: orderSpec(expression, desc, options, `${name}()`), hops, lists });
   }
@@ -321,7 +320,7 @@ export class AsyncSequence {
    * (the group is read by `select((g) => …)` after it).
    * @param {...undefined} unread */
   groupBy(key, ...unread) {
-    requireNoTrailingArgument(unread, 'groupBy', 'one key selector', 'groupBy(key).select((g) => ({ key: g.key, items: [g.items.all().member] })) reads the elements of each group (an element or result selector goes there)');
+    requireNoTrailingArgument(unread, 'groupBy');
     const { expression, hops, lists } = this.#capture(key);
     return this.#with({ kind: 'groupBy', key: expression, hops, lists });
   }
@@ -329,7 +328,7 @@ export class AsyncSequence {
   /** A seed and a step; C#'s result selector is `JL0005`.
    * @param {...undefined} unread */
   aggregate(seed, step, ...unread) {
-    requireNoTrailingArgument(unread, 'aggregate', 'a seed and a step', 'aggregate(seed, step).select(resultSel) projects the folded value');
+    requireNoTrailingArgument(unread, 'aggregate');
     const { expression, hops, lists } = this.#capture(step, (sink) => ['acc', this.#rowRoot('it', sink)]);
     return this.#with({
       kind: 'aggregate',
@@ -373,8 +372,7 @@ export class AsyncSequence {
    * the inner rows keep their relation table under `it2`. C#'s comparer
    * overload is `JL0005`. @param {...undefined} unread */
   join(inner, outerKey, innerKey, result, ...unread) {
-    requireNoTrailingArgument(unread, 'join', 'an inner sequence, two key selectors and a result selector',
-      'there is no comparer: keys compare as the engine compares values');
+    requireNoTrailingArgument(unread, 'join');
     const params = this.#requireJoinable(inner, 'join');
     const outer = this.#capture(outerKey);
     const key = this.#capture(innerKey, (sink) => [inner.#rowRoot('it2', sink)]);
@@ -394,8 +392,7 @@ export class AsyncSequence {
   /** Group-join, pushed whole: the `$let`-bound group of the synchronous
    * surface, under the same rule as `join`. @param {...undefined} unread */
   groupJoin(inner, outerKey, innerKey, result, ...unread) {
-    requireNoTrailingArgument(unread, 'groupJoin', 'an inner sequence, two key selectors and a result selector',
-      'there is no comparer: keys compare as the engine compares values');
+    requireNoTrailingArgument(unread, 'groupJoin');
     const params = this.#requireJoinable(inner, 'groupJoin');
     const innerDoc = inner.toDocument();
     const outer = this.#capture(outerKey);
@@ -418,13 +415,13 @@ export class AsyncSequence {
 
   /** @param {number} count @param {...undefined} unread */
   skip(count, ...unread) {
-    requireNoTrailingArgument(unread, 'skip', 'one count', 'skip(a).take(b) is a window');
+    requireNoTrailingArgument(unread, 'skip');
     return this.#with({ kind: 'skip', count: requireNonNegativeInteger(count, 'skip') });
   }
 
   /** @param {number} count @param {...undefined} unread */
   take(count, ...unread) {
-    requireNoTrailingArgument(unread, 'take', 'one count', 'skip(a).take(b) is a window');
+    requireNoTrailingArgument(unread, 'take');
     return this.#with({ kind: 'take', count: requireNonNegativeInteger(count, 'take') });
   }
 
@@ -448,7 +445,7 @@ export class AsyncSequence {
    * the stream (`JL0005` otherwise; the format doc says why).
    * @param {any} other @param {...undefined} unread */
   concat(other, ...unread) {
-    requireNoTrailingArgument(unread, 'concat', 'one sequence or constant array', 'concat(a).concat(b) joins both');
+    requireNoTrailingArgument(unread, 'concat');
     if (!Array.isArray(other)) {
       throw new LinqBuildError('JL0005',
         'concat on an async sequence takes a constant array — an async source cannot be re-iterated for a second sequence');
@@ -465,20 +462,20 @@ export class AsyncSequence {
 
   /** @param {any} [fallback] @param {...undefined} unread */
   defaultIfEmpty(fallback = null, ...unread) {
-    requireNoTrailingArgument(unread, 'defaultIfEmpty', 'one fallback value', 'defaultIfEmpty(value) stands one value in for an empty sequence');
+    requireNoTrailingArgument(unread, 'defaultIfEmpty');
     const expr = toExpression(fallback);
     return this.#with({ kind: 'defaultIfEmpty', fallback: expr, value: expr?.$const ?? fallback });
   }
 
   /** @param {any} schema @param {...undefined} unread */
   ofType(schema, ...unread) {
-    requireNoTrailingArgument(unread, 'ofType', 'one schema', 'ofType(a).ofType(b) applies both');
+    requireNoTrailingArgument(unread, 'ofType');
     return this.#with({ kind: 'ofType', schema: schemaOf(schema) });
   }
 
   /** @param {any} schema @param {...undefined} unread */
   cast(schema, ...unread) {
-    requireNoTrailingArgument(unread, 'cast', 'one schema', 'cast(a).cast(b) applies both');
+    requireNoTrailingArgument(unread, 'cast');
     return this.#with({ kind: 'cast', schema: schemaOf(schema) });
   }
 
@@ -490,8 +487,7 @@ export class AsyncSequence {
   /** The bounded-concurrency boundary (QUERY-PEN.md §11).
    * @param {...undefined} unread */
   mapAsync(fn, options, ...unread) {
-    requireNoTrailingArgument(unread, 'mapAsync', 'a callback and an options object',
-      'concurrency, mode and ordered go in the options');
+    requireNoTrailingArgument(unread, 'mapAsync');
     if (typeof fn !== 'function') {
       throw new LinqBuildError('JL0005', 'mapAsync takes an async callback');
     }
@@ -500,7 +496,7 @@ export class AsyncSequence {
 
   /** @param {...undefined} unread */
   params(bindings, ...unread) {
-    requireNoTrailingArgument(unread, 'params', 'one object of bindings', 'params(a).params(b) binds both');
+    requireNoTrailingArgument(unread, 'params');
     validateParams(bindings);
     const merged = new Map(this.#params);
     for (const name of Object.keys(bindings)) {
@@ -520,7 +516,7 @@ export class AsyncSequence {
    * made the document a live window into an immutable sequence.
    * @param {...undefined} unread */
   toDocument(...unread) {
-    requireNoTrailingArgument(unread, 'toDocument', 'no argument', 'call it bare');
+    requireNoTrailingArgument(unread, 'toDocument');
     if (this.#stages.some((s) => s.kind === 'mapAsync')) {
       throw new LinqBuildError('JL0005',
         'toDocument() cannot represent mapAsync (a host callback); explain() reports the split');
@@ -535,7 +531,7 @@ export class AsyncSequence {
    * and a `thenBy` is part of the `$orderby` barrier it extends, not a
    * barrier of its own. @param {...undefined} unread */
   explain(...unread) {
-    requireNoTrailingArgument(unread, 'explain', 'no argument', 'call it bare');
+    requireNoTrailingArgument(unread, 'explain');
     const firstMap = this.#stages.findIndex((s) => s.kind === 'mapAsync');
     // over a provider nothing before the split materialises HERE — the
     // provider runs the pushed document — so only the residual can hold
@@ -850,8 +846,7 @@ export class AsyncSequence {
 
   /** @param {number} index @param {...undefined} unread */
   async elementAt(index, ...unread) {
-    requireNoTrailingArgument(unread, 'elementAt', 'one index',
-      'elementAtOrDefault(index, value) answers a value out of range');
+    requireNoTrailingArgument(unread, 'elementAt');
     requireNonNegativeInteger(index, 'elementAt');
     const w = this.#pushable()
       ? await this.#pushWindow('elementAt', [index]) : await this.skip(index).#window(1);
@@ -931,7 +926,7 @@ export class AsyncSequence {
 
   /** @param {any} [predicate] @param {...undefined} unread */
   async any(predicate, ...unread) {
-    requireNoTrailingArgument(unread, 'any', 'an optional predicate', 'where(a).any(b) asks for both');
+    requireNoTrailingArgument(unread, 'any');
     if (this.#pushable()) {
       if (predicate === undefined) return this.#pushTerminal('exists');
       const { expression, lists } = this.#capture(predicate);
@@ -947,7 +942,7 @@ export class AsyncSequence {
 
   /** @param {any} predicate @param {...undefined} unread */
   async all(predicate, ...unread) {
-    requireNoTrailingArgument(unread, 'all', 'one predicate', 'where(a).all(b) asks for both');
+    requireNoTrailingArgument(unread, 'all');
     const { expression, lists } = this.#capture(predicate);
     if (this.#pushable()) return this.#pushTerminal('every', [expression], lists);
     const values = this.#externals(lists).values;

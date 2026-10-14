@@ -645,71 +645,61 @@ describe('a Sequence member refuses the argument after the ones it reads, on bot
   const ROWS = [{ n: 1, k: 'a' }, { n: 5, k: 'a' }, { n: 7, k: 'b' }, { n: 2, k: 'b' }];
   const gt3 = (/** @type {any} */ r) => r.n.gt(3);
   const num = (/** @type {any} */ r) => r.n;
-  const refusal = (/** @type {string} */ name, /** @type {string} */ takes, /** @type {string} */ instead) => {
-    const text = `JL0005: ${name}() takes ${takes}; the extra argument passed would never be read — ${instead}`;
+  const refusal = (/** @type {string} */ name, /** @type {string} */ how) => {
+    const text = `JL0005: ${name}() would ignore the argument past its last; ${how}`;
     return coded('JL0005', new RegExp(`^${text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`));
   };
-  const WHERE = ['one predicate', 'where(a).where(b) keeps the rows both keep'];
-  const SELECT = ['one projection', 'select(a).select(b) projects the result again'];
-  const SELECT_MANY = ['one selector', 'selectMany(sel).select(resultSel) projects each element '
-    + '(a result selector that reads the outer item as well has no spelling here)'];
-  const GROUP_BY = ['one key selector', 'groupBy(key).select((g) => ({ key: g.key, items: [g.items.all().member] })) '
-    + 'reads the elements of each group (an element or result selector goes there)'];
-  const AGGREGATE = ['a seed and a step', 'aggregate(seed, step).select(resultSel) projects the folded value'];
-  const WINDOW = ['one count', 'skip(a).take(b) is a window'];
-  const ORDER = ['a key selector and an options object',
-    'a comparer is the options bag — { empty, collation } names a registered collation'];
-  const SCHEMA_ONE = (/** @type {string} */ n) => ['one schema', `${n}(a).${n}(b) applies both`];
-  const JOIN = ['an inner sequence, two key selectors and a result selector',
-    'there is no comparer: keys compare as the engine compares values'];
-  /** @type {Array<[string, (q: any) => any, string[]]>} */
+  const GROUP_BY = 'groupBy(key).select((g) => ({ key: g.key, items: [g.items.all().member] }))';
+  const WINDOW = 'skip(a).take(b)';
+  const JOIN = 'no comparer; keys compare as the engine does';
+  const ANY = 'where(a).any(b)';
+  const chained = (/** @type {string} */ n) => `${n}(a).${n}(b)`;
+  /** @type {Array<[string, (q: any) => any, string]>} */
   const BUILDERS = [
-    ['where', (q) => q.where(gt3, num), WHERE],
-    ['select', (q) => q.select(num, num), SELECT],
-    ['selectMany', (q) => q.selectMany((r) => [r.n], num), SELECT_MANY],
+    ['where', (q) => q.where(gt3, num), chained('where')],
+    ['select', (q) => q.select(num, num), chained('select')],
+    ['selectMany', (q) => q.selectMany((r) => [r.n], num), 'selectMany(sel).select(resultSel)'],
     ['groupBy', (q) => q.groupBy(num, num), GROUP_BY],
-    ['aggregate', (q) => q.aggregate(0, (a, r) => a.add(r.n), (x) => x), AGGREGATE],
+    ['aggregate', (q) => q.aggregate(0, (a, r) => a.add(r.n), (x) => x), 'aggregate(seed, step).select(resultSel)'],
     ['skip', (q) => q.skip(1, 2), WINDOW],
     ['take', (q) => q.take(1, 2), WINDOW],
-    ['concat', (q) => q.concat([1], [2]), ['one sequence or constant array', 'concat(a).concat(b) joins both']],
-    ['defaultIfEmpty', (q) => q.defaultIfEmpty(1, 2),
-      ['one fallback value', 'defaultIfEmpty(value) stands one value in for an empty sequence']],
-    ['ofType', (q) => q.ofType({ type: 'object' }, 1), SCHEMA_ONE('ofType')],
-    ['cast', (q) => q.cast({ type: 'object' }, 1), SCHEMA_ONE('cast')],
-    ['orderBy', (q) => q.orderBy(num, undefined, () => 0), ORDER],
-    ['orderByDescending', (q) => q.orderByDescending(num, undefined, () => 0), ORDER],
-    ['thenBy', (q) => q.orderBy(num).thenBy(num, undefined, () => 0), ORDER],
-    ['thenByDescending', (q) => q.orderBy(num).thenByDescending(num, undefined, () => 0), ORDER],
+    ['concat', (q) => q.concat([1], [2]), chained('concat')],
+    ['defaultIfEmpty', (q) => q.defaultIfEmpty(1, 2), 'defaultIfEmpty(value)'],
+    ['ofType', (q) => q.ofType({ type: 'object' }, 1), chained('ofType')],
+    ['cast', (q) => q.cast({ type: 'object' }, 1), chained('cast')],
+    ['orderBy', (q) => q.orderBy(num, undefined, () => 0), 'orderBy(key, { collation }); no comparer'],
+    ['orderByDescending', (q) => q.orderByDescending(num, undefined, () => 0),
+      'orderByDescending(key, { collation }); no comparer'],
+    ['thenBy', (q) => q.orderBy(num).thenBy(num, undefined, () => 0), 'thenBy(key, { collation }); no comparer'],
+    ['thenByDescending', (q) => q.orderBy(num).thenByDescending(num, undefined, () => 0),
+      'thenByDescending(key, { collation }); no comparer'],
     ['join', (q) => q.join(q, num, num, (a) => a, () => true), JOIN],
     ['groupJoin', (q) => q.groupJoin(q, num, num, (a) => a, () => true), JOIN],
-    ['params', (q) => q.params({ a: 1 }, { b: 2 }),
-      ['one object of bindings', 'params(a).params(b) binds both']],
-    ['mapAsync', (q) => q.mapAsync(async (x) => x, { concurrency: 1 }, 1),
-      ['a callback and an options object', 'concurrency, mode and ordered go in the options']],
-    ['toDocument', (q) => q.toDocument(1), ['no argument', 'call it bare']],
-    ['explain', (q) => q.explain(1), ['no argument', 'call it bare']],
+    ['params', (q) => q.params({ a: 1 }, { b: 2 }), chained('params')],
+    ['mapAsync', (q) => q.mapAsync(async (x) => x, { concurrency: 1 }, 1), 'mapAsync(fn, { concurrency })'],
+    ['toDocument', (q) => q.toDocument(1), 'call it bare'],
+    ['explain', (q) => q.explain(1), 'call it bare'],
   ];
-  /** @type {Array<[string, (q: any) => any, string[]]>} */
+  /** @type {Array<[string, (q: any) => any, string]>} */
   const TERMINALS = [
-    ['elementAt', (q) => q.elementAt(1, 'none'),
-      ['one index', 'elementAtOrDefault(index, value) answers a value out of range']],
-    ['any', (q) => q.any(gt3, gt3), ['an optional predicate', 'where(a).any(b) asks for both']],
-    ['all', (q) => q.all(gt3, gt3), ['one predicate', 'where(a).all(b) asks for both']],
+    ['elementAt', (q) => q.elementAt(1, 'none'), 'elementAtOrDefault(index, value)'],
+    ['any', (q) => q.any(gt3, gt3), ANY],
+    ['all', (q) => q.all(gt3, gt3), 'where(a).all(b)'],
   ];
   const surfaces = [['from', () => from(ROWS)], ['fromAsync', () => fromAsync(ROWS)]];
 
   it('every builder refuses at the call, with the member named and the spelling that works', () => {
     for (const [label, make] of surfaces) {
-      for (const [name, call, [takes, instead]] of BUILDERS) {
-        assert.throws(() => call(make()), refusal(name, takes, instead), `${label} ${name}`);
+      for (const [name, call, how] of BUILDERS) {
+        assert.throws(() => call(make()), refusal(name, how), `${label} ${name}`);
       }
     }
   });
 
   it('every terminal that takes an argument refuses the next one', async () => {
     for (const [, make] of surfaces) {
-      for (const [name, call, [takes, instead]] of TERMINALS) {
-        await assert.rejects(async () => call(make()), refusal(name, takes, instead), name);
+      for (const [name, call, how] of TERMINALS) {
+        await assert.rejects(async () => call(make()), refusal(name, how), name);
       }
     }
     assert.throws(() => from(ROWS).elementAt(1, 'none'), coded('JL0005', /^JL0005: elementAt\(\)/));
@@ -729,11 +719,11 @@ describe('a Sequence member refuses the argument after the ones it reads, on bot
   it('the refusal comes before any run over a provider', () => {
     let runs = 0;
     const provider = { execute() { runs++; return [[]]; }, root: '$[*]' };
-    assert.throws(() => from(provider).groupBy(num, num), refusal('groupBy', ...GROUP_BY));
-    assert.throws(() => from(provider).elementAt(0, 1), coded('JL0005', /^JL0005: elementAt\(\) takes one index/));
-    assert.throws(() => from(provider).any(gt3, gt3), refusal('any', 'an optional predicate', 'where(a).any(b) asks for both'));
-    assert.throws(() => from(provider).take(1, 2), refusal('take', ...WINDOW));
-    assert.throws(() => from(provider).join(from(provider), num, num, (a) => a, 1), refusal('join', ...JOIN));
+    assert.throws(() => from(provider).groupBy(num, num), refusal('groupBy', GROUP_BY));
+    assert.throws(() => from(provider).elementAt(0, 1), refusal('elementAt', 'elementAtOrDefault(index, value)'));
+    assert.throws(() => from(provider).any(gt3, gt3), refusal('any', ANY));
+    assert.throws(() => from(provider).take(1, 2), refusal('take', WINDOW));
+    assert.throws(() => from(provider).join(from(provider), num, num, (a) => a, 1), refusal('join', JOIN));
     assert.strictEqual(runs, 0);
   });
 
