@@ -337,10 +337,15 @@ override that is not an array is ([DB-CLIENT.md](DB-CLIENT.md) §2.1). A path th
 already fans is the list as it stands, wherever along it the fan is:
 `u.sku.in(u.tags.all())` emits `"$it.tags[*]"`, as `u.sku.in(u.tags)`
 does, and `u.sku.in(u.items.all().sku)` emits `"$it.items[*].sku"`,
-every item's `sku`. The values are
+every item's `sku`. A member of a relation target is a list by the same
+rule: `p.label.in(p.author.tags)` and `p.label.in(p.author.tags.all())`
+both compare against the hop's phrase returning `"$r1.tags[*]"`, and
+`u.name.in(u.posts.all().label)` against every related row's `label`; a
+store answers them as the in-memory engine does. The values are
 scalars — a string, a number, a boolean, `null` or a captured
 expression; an object or array item, or an argument that is neither an
-array nor a path, is `JL0005`. A store plans a list of values, a
+array nor a path — the relation's own rows (`p.author`,
+`u.posts.all()`) among them — is `JL0005`. A store plans a list of values, a
 parameter's list and a chain of `.or()` equalities on one member to one
 bound list the member's index seeks (MODEL-FORMAT §10.1); membership in
 another member's array compares two members of one row, which runs in
@@ -1657,10 +1662,12 @@ refused with `JL0108`, the message naming the method (`.length`) and its call
 (`.length(…)`). Calling it builds the expression as before, `typeof` of it is
 `'function'`, and a document member that shares the method's name is read with
 `get('length')`.
-Off a relation target (`p.author.tags.includes('a')`) the element-test
-message names the fanned comparison alone, because `in()` over the member is
-refused off a relation: `p.author.tags.all().eq('a')` holds when any element
-equals `'a'`, as it does on a member of the row itself. A chain that spelled
+Off a relation target (`p.author.tags.includes('a')`) the message names
+the spellings it names on a member of the row itself, and both run there:
+`p.author.tags.all().eq('a')` holds when any element equals `'a'`, and
+`p.label.in(p.author.tags)` when the label equals any element. A relation
+target's member as the list of `in()` was refused `JL0005` ('it cannot
+follow an operator result or a relation'); it now answers. A chain that spelled
 `.all()` on a relation target's array member before it fanned read the whole
 array as one value and matched nothing off it; it now reads the elements, and
 matches the rows whose elements match.

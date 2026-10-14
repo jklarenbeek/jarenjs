@@ -55,6 +55,7 @@ delete it or fix it.
   mapping probes every position, so it is quadratic in the text length and bounded by the sequence guards),
   `substring-before`/`-after` and `translate` (nothing finds a position in a string).
 - [ ] **1-based positional *outputs*** — `at`/`count` surface the format's 0-based D6 values, so QT3 asserts them as wrong-value; fixing them would need reference rewriting. Revisit if the scorecard noise starts to matter.
+
 ## @jarenjs/validate
 
 - [ ] **Per-scope static evaluated-set analysis for `unevaluated*`** — the shipped
@@ -628,10 +629,9 @@ what each does is its own documentation's job
   on a to-many relation (`u.posts.some(...)`, `.filter`, `.map`) is `JL0005`
   ("fan them first (.all().some)"), advice that points at a member spelling, not
   at the predicate the reader wrote.
-- [ ] **A hop member cannot be the list of `in`.** `x.in(p.author.tags.all())`
-  is refused `JL0005` ('cannot follow an operator result or a relation'), where
-  `.all().eq(v)` on the same hop member now fans; and `.all().all()` on a hop
-  member appends a second `[*]`, as a path member does.
+- [ ] **An indexed relation is not a list for `in()`.** `u.id.in(u.posts.at(0).tags)`
+  is refused `JL0005`: `at()` off a relation is an operator result, where the
+  path form `x.in(it.items.at(0).tags)` answers.
 - [ ] **A PostgreSQL table keeps the unguarded definitions of an open-container
   index path until its index is dropped and declared again; a comparison,
   ordering or grouping over such a path reads the guarded document and does not

@@ -6,8 +6,11 @@
  * every element's `sku`, and the aggregates range over those elements. The
  * emitted phrase returns the fanned path (`$r1.tags[*]`), the in-memory
  * engine and a store answer alike, and `.all()` on the relation itself (the
- * related rows) is unchanged. A store run is SQLite always, PostgreSQL where
- * JAREN_PG_URL names a server.
+ * related rows) is unchanged. The same member is the list of `in()` as a path
+ * member is: unfanned it is every element (`$r1.tags[*]`), fanned anywhere
+ * along it it is the sequence as it stands; and `.all().all()` fans twice on
+ * both. A store run is SQLite always, PostgreSQL where JAREN_PG_URL names a
+ * server.
  */
 
 import { after, before, describe, it } from 'node:test';
@@ -33,19 +36,19 @@ const TABLES = Object.freeze({
   }),
 });
 
-/** Users with array members (one without `tags`), posts with and without an author. */
+/** Users with array members (one with an empty `tags`), posts with and without an author. */
 const ROOT = {
   User: [
-    { id: 'u1', name: 'ada', tags: ['a', 'b'], items: [{ sku: 'x', qty: 1 }, { sku: 'y', qty: 2 }] },
-    { id: 'u2', name: 'lin', tags: ['c'], items: [] },
-    { id: 'u3', name: 'kid', tags: [], items: [{ sku: 'x', qty: 5 }] },
+    { id: 'u1', name: 'ada', tags: ['a', 'b'], items: [{ sku: 'x', qty: 1 }, { sku: 'y', qty: 2 }], nest: [['a'], ['b', 'c']] },
+    { id: 'u2', name: 'lin', tags: ['c'], items: [], nest: [] },
+    { id: 'u3', name: 'kid', tags: [], items: [{ sku: 'x', qty: 5 }], nest: [['x']] },
   ],
   Post: [
-    { pid: 1, authorId: 'u1', tags: ['q'] },
-    { pid: 2, authorId: 'u2', tags: ['r', 's'] },
-    { pid: 3, authorId: 'u1', tags: [] },
-    { pid: 4, tags: [] },
-    { pid: 5, authorId: 'u3', tags: [] },
+    { pid: 1, authorId: 'u1', label: 'a', tags: ['q'] },
+    { pid: 2, authorId: 'u2', label: 'c', tags: ['r', 's'] },
+    { pid: 3, authorId: 'u1', label: 'z', tags: [] },
+    { pid: 4, label: 'a', tags: [] },
+    { pid: 5, authorId: 'u3', label: 'a', tags: [] },
   ],
 };
 
@@ -94,6 +97,14 @@ const CASES = [
     { $for: { it: '$.User[*]' }, $return: { $count: authored('$r1.tags[*]') } }, [1, 2, 0]],
   ['the related row itself, fanned, is still the row', (/** @type {any} */ f) => f('Post').select((p) => p.author.all().count()),
     { $for: { it: '$.Post[*]' }, $return: { $count: author('$r1') } }, [1, 1, 1, 0, 1]],
+  ['a value in the member, fanned', (/** @type {any} */ f) => f('Post').where((p) => p.label.in(p.author.tags.all())).select((p) => p.pid),
+    { $for: { it: '$.Post[*]' }, $where: { $eq: ['$it.label', author('$r1.tags[*]')] }, $return: '$it.pid' }, [1, 2]],
+  ['a value in the member, unfanned, is every element', (/** @type {any} */ f) => f('Post').where((p) => p.label.in(p.author.tags)).select((p) => p.pid),
+    { $for: { it: '$.Post[*]' }, $where: { $eq: ['$it.label', author('$r1.tags[*]')] }, $return: '$it.pid' }, [1, 2]],
+  ['a value in a member of the related rows', (/** @type {any} */ f) => f('User').where((u) => u.tags.at(0).in(u.posts.all().label)).select((u) => u.id),
+    { $for: { it: '$.User[*]' }, $where: { $eq: ['$it.tags[0]', authored('$r1.label')] }, $return: '$it.id' }, ['u1', 'u2']],
+  ['the member fanned twice', (/** @type {any} */ f) => f('Post').select((p) => [p.author.nest.all().all()]),
+    { $for: { it: '$.Post[*]' }, $return: [author('$r1.nest[*][*]')] }, [['a', 'b', 'c'], [], ['a', 'b', 'c'], [], ['x']]],
 ];
 
 describe('.all() on a relation target\'s array member fans it as on a path member', () => {
@@ -114,6 +125,28 @@ describe('.all() on a relation target\'s array member fans it as on a path membe
     assert.deepStrictEqual(own.toArray(), ['u1']);
     assert.strictEqual(posts().where((p) => p.author.tags.all().eq('a')).toDocument().$where.$eq[0].$return, '$r1.tags[*]');
   });
+
+  it('a path member is the list of in() as the relation target\'s member is, fanned or not', () => {
+    for (const build of [(/** @type {any} */ u) => u.name.in(u.tags), (/** @type {any} */ u) => u.name.in(u.tags.all())]) {
+      assert.deepStrictEqual(users().where(build).toDocument().$where, { $eq: ['$it.name', '$it.tags[*]'] });
+    }
+    const list = users().where((u) => u.tags.at(0).in(u.tags)).select((u) => u.id);
+    assert.deepStrictEqual(list.toArray(), ['u1', 'u2']);
+  });
+
+  it('.all().all() on a path member fans twice, as on the relation target\'s member', () => {
+    const own = users().select((u) => [u.nest.all().all()]);
+    assert.deepStrictEqual(own.toDocument().$return, ['$it.nest[*][*]']);
+    assert.deepStrictEqual(own.toArray(), [['a', 'b', 'c'], [], ['x']]);
+  });
+
+  it('the relation itself, as rows, is still not the list of in()', () => {
+    for (const build of [(/** @type {any} */ p) => p.label.in(p.author), (/** @type {any} */ p) => p.label.in(p.author.all())]) {
+      assert.throws(() => posts().where(build), (/** @type {any} */ e) => e instanceof LinqBuildError && e.code === 'JL0005'
+        && /it cannot follow an operator result or a relation/.test(e.message));
+    }
+    assert.throws(() => users().where((u) => u.name.in(u.posts.all())), (/** @type {any} */ e) => e.code === 'JL0005');
+  });
 });
 
 describe('the array-method refusal on a relation target names a spelling that runs', () => {
@@ -128,9 +161,12 @@ describe('the array-method refusal on a relation target names a spelling that ru
       assert.ok(e instanceof LinqBuildError && e.code === 'JL0108', method);
       assert.strictEqual(e.message, `JL0108: .${method}() is a JavaScript array method, and a captured expression has none — it `
         + 'stands for a value the engine computes later; test the elements with a fanned comparison — x.tags.all().eq(v) holds when '
-        + 'any element equals v (on a string member, x.name.contains(v))');
+        + 'any element equals v (on a string member, x.name.contains(v)); for a scalar in a list write v.in([a, b]) or v.in(x.tags)');
     }
     assert.deepStrictEqual(posts().where((p) => p.author.tags.all().eq('a')).select((p) => p.pid).toArray(), [1, 3]);
+    assert.deepStrictEqual(posts().where((p) => p.label.in(p.author.tags)).select((p) => p.pid).toArray(), [1, 2]);
+    // a member NAMED like an array method is still the list it holds
+    assert.deepStrictEqual(posts().where((p) => p.label.in(p.author.find)).toDocument().$where.$eq[1].$return, '$r1.find[*]');
   });
 
   it('the other methods keep the spellings they name for a path member, and each runs off a relation target', () => {
@@ -151,11 +187,13 @@ const User = m.object({
   name: m.string(),
   tags: m.array(m.string()),
   items: m.array(m.object({ sku: m.string(), qty: m.integer() })),
+  nest: m.array(m.array(m.string())),
   posts: m.rel.hasMany('Post', { via: 'authorId', onDelete: 'setNull' }),
 });
 const Post = m.object({
   pid: m.integer().key(),
   authorId: m.string().optional(),
+  label: m.string(),
   tags: m.array(m.string()),
   author: m.rel.hasOne('User', { via: 'authorId', onDelete: 'setNull' }),
 });

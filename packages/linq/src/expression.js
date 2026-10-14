@@ -466,7 +466,11 @@ const associative = (op) => function (/** @type {any} */ record, /** @type {any}
  * `$it.items[*].sku`) is a sequence of those items, and is the list as
  * it stands — fanning it again would fan each item. Whether it fans is
  * the record's own `fanned` mark, never a scan of the path text: a
- * member NAMED `a[*]` is one bracketed step that fans nothing. A
+ * member NAMED `a[*]` is one bracketed step that fans nothing. A member
+ * of a relation target is a list by the same rule: `p.author.tags` is
+ * every element (the phrase returning `$r1.tags[*]`), and a hop fanned
+ * anywhere along it (`p.author.tags.all()`, `u.posts.all().label`) is
+ * its phrase as it stands; the relation itself is rows, not a list. A
  * parameter read whole as the list is recorded for the capture's runner,
  * which requires its binding to be an array ({@link requireListBindings}).
  * @param {any} record @param {any} values
@@ -475,13 +479,15 @@ function membership(record, values) {
   const list = nodeOf(values);
   if (list !== undefined) {
     assertLive(list);
-    if (list.hop !== undefined || (list.seq === undefined && !list.pathable)) {
+    if (list.hop !== undefined ? !readsMember(list.hop) : list.seq === undefined && !list.pathable) {
       throw new LinqBuildError('JL0005',
         'in() takes an array of values or a PATH to one (a parameter p.ids, a member it.tags); '
         + 'it cannot follow an operator result or a relation');
     }
     if (list.param !== undefined) listStack[listStack.length - 1]?.push(list.param);
-    const items = list.seq ?? (list.fanned ? list.doc : `${list.doc}[*]`);
+    // an unfanned path or hop member is every element; a fanned one is its sequence
+    const items = list.hop !== undefined && !list.hop.fan ? hopDocument(list.hop.chain, `${list.hop.ret}[*]`)
+      : list.seq ?? (list.fanned ? list.doc : `${list.doc}[*]`);
     return makeExpr({ $eq: [record.doc, items] }, record.epoch, false);
   }
   if (!Array.isArray(values)) {
@@ -1029,11 +1035,9 @@ function toJSON() {
 
 /** The spelling of an element TEST, shared by the methods that search; it
  * runs off a relation target's array member as off a path member. */
-const ELEMENT_TEST_FAN = 'test the elements with a fanned comparison — x.tags.all().eq(v) holds when any '
-  + 'element equals v (on a string member, x.name.contains(v))';
-
-/** The same, for a member of the row itself: a scalar in a list is `in()` over the path. */
-const ELEMENT_TEST = `${ELEMENT_TEST_FAN}; for a scalar in a list write v.in([a, b]) or v.in(x.tags)`;
+const ELEMENT_TEST = 'test the elements with a fanned comparison — x.tags.all().eq(v) holds when any '
+  + 'element equals v (on a string member, x.name.contains(v)); for a scalar in a list write '
+  + 'v.in([a, b]) or v.in(x.tags)';
 
 /** The spelling of a per-element PREDICATE, shared by the methods that take one. */
 const ELEMENT_PREDICATE = 'a capture has no per-element predicate; compare a fanned member '
@@ -1083,15 +1087,12 @@ const ARRAY_METHODS = {
  * (`JL0108`) naming the query-language spelling, where the member's host
  * value would have thrown `x.tags.includes is not a function`.
  * @param {string} name
- * @param {boolean} [hop] - the member is read off a relation target, where
- *   `in()` over the member is refused: the element test names the fan alone
  * @returns {never}
  */
-function refuseArrayMethod(name, hop = false) {
-  const spelling = hop && ARRAY_METHODS[name] === ELEMENT_TEST ? ELEMENT_TEST_FAN : ARRAY_METHODS[name];
+function refuseArrayMethod(name) {
   throw new LinqBuildError('JL0108',
     `.${name}() is a JavaScript array method, and a captured expression has none — it stands for `
-    + `a value the engine computes later; ${spelling}`);
+    + `a value the engine computes later; ${ARRAY_METHODS[name]}`);
 }
 
 /**
@@ -1159,7 +1160,7 @@ function makeExpr(doc, epoch, pathable, extra = undefined) {
   // every other capture keeps `typeof` 'object'
   const refuse = () => {
     assertLive(record);
-    return refuseArrayMethod(arrayMethod, record.hop !== undefined);
+    return refuseArrayMethod(arrayMethod);
   };
   handler.apply = refuse;
   handler.construct = refuse;
