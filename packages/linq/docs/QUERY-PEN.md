@@ -152,7 +152,11 @@ value becomes the expression:
 - `u.a.b` records the path `$it.a.b`; `u.list.at(0)` records
   `$it.list[0]` (negative integers count from the end; an integer
   beyond ±(2^53 − 1) is `JL0005` at build time — no array has an element
-  there, and the path text cannot spell it);
+  there, and the path text cannot spell it); `at()` indexes an ARRAY,
+  as a JSONPath index does: on a string member it answers nothing
+  (`u.name.at(0)` is no character), and `u.name.substring(0, 1)` is the
+  first character — the typed surface offers `at()` on no string
+  expression, so only an untyped member can reach this;
   `u.list.all()` records `$it.list[*]`; a key that is not an
   identifier — or one that collides with a method name — goes through
   `u.get('odd key')`. A member read off an operator result is that

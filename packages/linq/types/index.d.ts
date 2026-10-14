@@ -383,6 +383,9 @@ export interface UnknownExpr
   substring(start: number, length?: number): UnknownExpr;
   replace(pattern: string, replacement: string): UnknownExpr;
   all(): UnknownExpr;
+  /** The element at a 0-based index of an ARRAY member; on a string member
+   * it answers nothing, as a JSONPath index does — `substring(i, 1)` is
+   * the character. */
   at(index: number | NumberExpr): UnknownExpr;
   /** Do two half-open `{start, end}` intervals share an instant? */
   overlaps(other: Interval | ExprBase<unknown>): BoolExpr;

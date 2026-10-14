@@ -626,10 +626,6 @@ what each does is its own documentation's job
   `IN (SELECT …)` term already excludes, so it raised a false `JQ2001`, and the
   count reads every row lacking the member, turning a seek on a sparse member
   into a table scan.
-- [ ] **`at(i)` on a string member answers nothing.** `from([{ s: 'abc' }]).select((x) => x.s.at(0))`
-  answers `[]`, where JavaScript's `'abc'.at(0)` is `'a'`: `at()` lowers to an
-  array index, which a string does not have, and the capture cannot tell a string
-  member from an array one. `x.s.substring(0, 1)` is the character.
 - [ ] **A PostgreSQL table keeps the unguarded definitions of an open-container
   index path until its index is dropped and declared again; a comparison,
   ordering or grouping over such a path reads the guarded document and does not
