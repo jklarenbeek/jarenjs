@@ -641,7 +641,14 @@ are read (backslash before punctuation, character references, tabs, newlines)
 and prints a tab in text as `&#9;`; it also prints a paragraph that opens with a
 raw-HTML tag after a placeholder definition (`[-]: <>`) so it stays a paragraph,
 puts an HTML block that starts with spaces below its list marker or footnote
-label, and tries a literal `*` or `_` bare where no escaped one reads back. In frontmatter, a quote protects a `#`
+label, ends a list with that definition before an HTML block indented as far as
+the list's last item (the block used to print inside the item), and tries a
+literal `*` or `_` bare where no escaped one reads back, searching a long run a
+stretch at a time (a run of more than four emphasis or strong nodes, or of more
+than 600 printed characters, whose canonical spelling did not read back used to
+print in it; content no spelling the search tries reads back as still prints
+canonically, after a search paid from a pool in proportion to what the call
+prints, which costs more than the single read-back it used to). In frontmatter, a quote protects a `#`
 only in a scalar that begins with one (`title: It's fine # note` ends at the
 comment); `\xXX` and `\UXXXXXXXX` escapes mean their character, and an escape
 without its digits is a located error, as in YAML (`"C:\users\me"` in double

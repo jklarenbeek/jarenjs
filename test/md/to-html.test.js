@@ -1,7 +1,7 @@
 //@ts-check
 import { describe, it } from 'node:test';
 import * as assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 import { parseMarkdown, mdToVnode, toHtml, compileMarkdown } from '@jarenjs/md';
@@ -231,12 +231,8 @@ describe('toHtml — byte-identical to the vnode path where a vnode can hold the
     assert.equal(toHtml(doc, options), viaVnode(doc, options));
   });
 
-  it('agrees over the CommonMark corpus for every example free of raw HTML', function (t) {
-    const spec = fileURLToPath(new URL('../../benchmark/commonmark-spec/spec.txt', import.meta.url));
-    if (!existsSync(spec)) {
-      t.skip('commonmark-spec submodule not initialized');
-      return;
-    }
+  it('agrees over the CommonMark corpus for every example free of raw HTML', function () {
+    const spec = fileURLToPath(new URL('./fixtures/commonmark/spec.txt', import.meta.url));
     let compared = 0;
     for (const example of extractExamples(readFileSync(spec, 'utf8'))) {
       const src = example.markdown;
@@ -257,15 +253,11 @@ describe('toHtml — byte-identical to the vnode path where a vnode can hold the
     assert.equal(compared > 500, true, `compared ${compared} examples`);
   });
 
-  it('every example the vnode path misses is a raw-HTML one', function (t) {
+  it('every example the vnode path misses is a raw-HTML one', function () {
     // The package publishes two conformance numbers and one reason for
     // the gap between them. This is that reason, checked: a vnode tree
     // has no way to hold half an element, and NOTHING ELSE is missing.
-    const spec = fileURLToPath(new URL('../../benchmark/commonmark-spec/spec.txt', import.meta.url));
-    if (!existsSync(spec)) {
-      t.skip('commonmark-spec submodule not initialized');
-      return;
-    }
+    const spec = fileURLToPath(new URL('./fixtures/commonmark/spec.txt', import.meta.url));
     const parseOptions = { gfm: false, frontmatter: false };
     const unexplained = [];
     for (const example of extractExamples(readFileSync(spec, 'utf8'))) {

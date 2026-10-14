@@ -579,10 +579,19 @@ underscores (`**_x_**`), because `***x***` reads back as the nesting the
 other way round. Emphasis or strong beside or inside another (`*a*` then
 `_b_`, `__**x**y__`) is checked against the parser: when the `*` spelling
 would merge delimiters into one run, the first alternating spelling that
-reads back as the same nodes is the one printed. When none of those does, up
-to four such nodes in a short run are also tried with each text node's `*` and
-`_` left bare, which is how a source spells a delimiter run that no escaped
-character can. A destination, a title
+reads back as the same nodes is the one printed. When none of those does,
+each text node's `*` and `_` may also be left bare, which is how a source
+spells a delimiter run that no escaped character can: every combination of the
+spellings of up to four such nodes in a short run (at most 600 printed
+characters), and, for any longer or denser run, a search a stretch at a time.
+The content splits wherever the join of two neighbours has no delimiter
+character on both sides, since a delimiter run reaches across a join only
+through such characters; each stretch is read back against the parser with a
+character of the kind its neighbours print beside it, and spelled with as few
+nodes and texts the other way as will do, so the cost of the search grows with
+the longest stretch of touching delimiters and not with the run. The result
+is read back as a whole, and stretches a run turns out to reach across are
+searched together. A destination, a title
 and a fence's info string are escaped as they are read: a backslash before
 punctuation, an `&` that opens a character reference, a tab and a newline
 print as an escape or a reference, and a destination that starts with `<`
@@ -611,17 +620,17 @@ The normative round-trip guarantees:
    output.
 
 The guarantee is checked over those corpora and over randomly assembled
-documents; it has known gaps outside them, in shapes no real document
-holds. Two remain: a run of more than four emphasis or strong nodes, or one
-longer than 600 printed characters, whose canonical spelling does not read
-back is printed canonically, and the spellings that would read back (the
-other delimiter for each node, a literal `*` or `_` left bare) are not
-searched; and a top-level HTML block that begins with two or more spaces,
-placed straight after a list, prints inside the list's last item, because
-the spaces count as the item's indentation and nothing the AST holds can end
-the list first. A paragraph that is only raw inline HTML a block would start on (it can
+documents; it has a known gap outside them, in a shape no real document holds:
+a run of touching delimiters whose spelling the search does not reach (it
+tries the fewest changes first, paid from a pool of parsed characters in
+proportion to what the call prints, which content it cannot spell spends
+whole) or whose nesting needs only some of one text node's `*` or `_` left
+bare is printed canonically and reads back as other nodes. A paragraph that is only raw inline HTML a block would start on (it can
 only follow a link reference definition, which the AST does not keep) prints
-after a definition that defines nothing, `[-]: <>`; an HTML block's leading
+after a definition that defines nothing, `[-]: <>`, and so does an HTML block
+that begins with as many spaces as the last item of the list before it is
+indented by (it would belong to that item, and the definition ends the list
+and leaves no node); an HTML block's leading
 spaces as the first line of a list item or a footnote definition print
 below the marker or the label; a setext heading that opens with such a tag continues the same definition, and a line of text shaped like a rule (`-- -`) prints with its first character escaped.
 

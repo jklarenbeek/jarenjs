@@ -12,7 +12,7 @@
 
 import { describe, it } from 'node:test';
 import * as assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 import { parseMarkdown, toHtml, toMarkdown, mdToVnode, walkAst } from '@jarenjs/md';
@@ -405,7 +405,7 @@ describe('the gfm flag gates every one of these behaviours', function () {
 // The oracle
 // ------------------------------------------------------------------
 
-const GFM_SPEC = fileURLToPath(new URL('../../benchmark/gfm-spec/test/spec.txt', import.meta.url));
+const GFM_SPEC = fileURLToPath(new URL('./fixtures/gfm/spec.txt', import.meta.url));
 
 /**
  * The extension sections of the GFM specification, and what this package
@@ -428,11 +428,7 @@ const EMITTERS = [
 ];
 
 describe('the GFM specification corpus', function () {
-  it('scores every extension section, on both emitters', function (t) {
-    if (!existsSync(GFM_SPEC)) {
-      t.skip("run 'git submodule update --init benchmark/gfm-spec' to enable the GFM corpus");
-      return;
-    }
+  it('scores every extension section, on both emitters', function () {
     const examples = extractExamples(readFileSync(GFM_SPEC, 'utf8'));
     for (const [name, render] of EMITTERS) {
       for (const [heading, expected, total] of EXTENSION_SCORES) {
@@ -455,11 +451,7 @@ describe('the GFM specification corpus', function () {
     }
   });
 
-  it('the two emitters agree on every extension example a vnode can hold', function (t) {
-    if (!existsSync(GFM_SPEC)) {
-      t.skip("run 'git submodule update --init benchmark/gfm-spec' to enable the GFM corpus");
-      return;
-    }
+  it('the two emitters agree on every extension example a vnode can hold', function () {
     const sections = new Set(EXTENSION_SCORES.map(([heading]) => heading));
     const examples = extractExamples(readFileSync(GFM_SPEC, 'utf8'))
       .filter((e) => sections.has(e.section));

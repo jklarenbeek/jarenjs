@@ -2,7 +2,7 @@
 import { describe, it } from 'node:test';
 import * as assert from 'node:assert/strict';
 
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 import { parseMarkdown, toMarkdown, compileMarkdown } from '@jarenjs/md';
@@ -110,12 +110,8 @@ describe('toMarkdown: the corpus is a fixed point', function () {
   // The oracle for every dialect change: a rule that alters block
   // structure (empty items, tight/loose, container continuation) shows
   // up here as an AST that no longer survives its own canonical form.
-  it('round-trips every CommonMark spec example', function (t) {
-    const spec = fileURLToPath(new URL('../../benchmark/commonmark-spec/spec.txt', import.meta.url));
-    if (!existsSync(spec)) {
-      t.skip('commonmark-spec submodule not initialized');
-      return;
-    }
+  it('round-trips every CommonMark spec example', function () {
+    const spec = fileURLToPath(new URL('./fixtures/commonmark/spec.txt', import.meta.url));
     let checked = 0;
     for (const example of extractExamples(readFileSync(spec, 'utf8'))) {
       const src = example.markdown;
@@ -133,17 +129,13 @@ describe('toMarkdown: the corpus is a fixed point', function () {
     assert.equal(checked, 655, 'the whole corpus was checked');
   });
 
-  it('round-trips every GFM spec example, extensions on', function (t) {
+  it('round-trips every GFM spec example, extensions on', function () {
     // The same oracle over the GFM corpus, with `gfm: true` — which is
     // the only place tables, task lists, strikethrough, footnotes and
     // literal autolinks are printed at corpus scale. A printer that
     // cannot write one of them down shows up here as an AST that does
     // not survive its own canonical form.
-    const spec = fileURLToPath(new URL('../../benchmark/gfm-spec/test/spec.txt', import.meta.url));
-    if (!existsSync(spec)) {
-      t.skip("run 'git submodule update --init benchmark/gfm-spec' to enable the GFM corpus");
-      return;
-    }
+    const spec = fileURLToPath(new URL('./fixtures/gfm/spec.txt', import.meta.url));
     let checked = 0;
     for (const example of extractExamples(readFileSync(spec, 'utf8'))) {
       const src = example.markdown;

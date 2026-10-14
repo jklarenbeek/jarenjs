@@ -141,29 +141,6 @@ describe('parseMarkdown — blank lines in lists', function () {
   });
 });
 
-describe('toMarkdown — a run no spelling reads back as costs a few parses, not hundreds', function () {
-  /** @param {string} unit @returns {number} best of three, in ms, for 200 paragraphs of four units */
-  function printing(unit) {
-    const paragraph = Array.from({ length: 4 }, () => unit + ' ' + 'plain '.repeat(40)).join(' ');
-    const doc = parseMarkdown(Array.from({ length: 200 }, () => paragraph).join('\n\n'));
-    let low = Infinity;
-    for (let i = 0; i < 3; i++) {
-      const started = performance.now();
-      toMarkdown(doc);
-      low = Math.min(low, performance.now() - started);
-    }
-    return low;
-  }
-
-  it('prints eight delimiter nodes that never read back within a small multiple of the cost of ones that do', () => {
-    const stubborn = Math.max(printing('**.***1****1'), 0.5);
-    const easy = Math.max(printing('**a *b* c**'), 0.5);
-    // the read-back check parses each run once; trying every spelling of eight
-    // nodes would parse it 260 times, and that is what the ratio refuses
-    assert.ok(stubborn / easy < 30, `stubborn ${stubborn.toFixed(1)} ms, easy ${easy.toFixed(1)} ms`);
-  });
-});
-
 describe('toMarkdown — a paragraph that opens with raw HTML stays a paragraph', function () {
   it('continues a filler definition, the way the source held it', () => {
     assert.equal(canonical('[a]: /u\n<b>'), '[-]: <>\n<b>\n');

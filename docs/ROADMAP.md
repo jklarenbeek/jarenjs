@@ -138,16 +138,17 @@ establish registry publication or downstream acceptance.
 
 ## @jarenjs/md
 
-- [ ] **Canonical printing's last shapes.** parseMarkdown(toMarkdown(doc)) deep-
-  equals doc over the CommonMark and GFM corpora and random documents, except
-  two shapes no real document holds: a run of more than four emphasis/strong
-  nodes (or over 600 printed characters) whose canonical spelling does not read
-  back (the spelling search covers at most four delimiter nodes, six bits), and
-  a top-level HTML block starting with two or more spaces placed straight after
-  a list, which prints inside the last item. Wanted: a search that scales, and a
-  way to end a list before such a block (a node that records it, or a printed
-  separator the parser drops).
-
+- [ ] **Canonical printing: delimiter soups.** `toMarkdown` searches a run of
+  emphasis and strong a stretch at a time, paid from a per-call pool in
+  proportion to what it prints, so length no longer limits it, but a stretch of
+  dozens of touching delimiter nodes with no text between can exceed the pool,
+  and a nesting that needs only some of one text node's `*`/`_` left bare is
+  outside the spelling model; such a run prints canonically and reads back as
+  other nodes, and one unspellable stretch returns the whole block to the
+  canonical spelling, discarding the stretches that were solved. Content the
+  search cannot spell costs far more than the single read-back it used to.
+  Wanted: a guided search, a per-character bare spelling, or printing the solved
+  stretches and the canonical spelling only where needed.
 ## @jarenjs/mermaid
 
 - [ ] **`htmlLabels:true`** — labels still render as SVG `<text>`. The view renderer now supports HTML descendants of `foreignObject` and namespaced attributes; Mermaid still needs HTML-label rendering, sizing and parity tests. Safe mode intentionally excludes `foreignObject`.
