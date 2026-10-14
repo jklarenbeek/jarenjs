@@ -46,7 +46,8 @@ import {
 } from './provider.js';
 import {
   emitDocument, wrapTerminal, snapshot, fanProjection, isReservedBinding, RESERVED_BINDINGS_TEXT,
-  PROJECTING_STAGES, requireNonNegativeInteger, requireNoArgument, requireDefaultValue, readOptions, orderSpec,
+  PROJECTING_STAGES, requireNonNegativeInteger, requireNoArgument, requireNoTrailingArgument, requireDefaultValue,
+  readOptions, orderSpec,
   RUN_BINDINGS, mergeBindings,
 } from './document.js';
 import { adaptAsyncSource } from './sources.js';
@@ -265,9 +266,22 @@ export class AsyncSequence {
 
   //#region the operator surface (same vocabulary as Sequence)
 
-  where(predicate) { return this.#chainCaptured('where', 'predicate', predicate); }
-  select(projection) { return this.#chainCaptured('select', 'projection', projection); }
-  selectMany(selector) {
+  /** One predicate; a second argument is `JL0005`. @param {...undefined} unread */
+  where(predicate, ...unread) {
+    requireNoTrailingArgument(unread, 'where', 'one predicate', 'where(a).where(b) keeps the rows both keep');
+    return this.#chainCaptured('where', 'predicate', predicate);
+  }
+
+  /** One projection; a second argument is `JL0005`. @param {...undefined} unread */
+  select(projection, ...unread) {
+    requireNoTrailingArgument(unread, 'select', 'one projection', 'select(a).select(b) projects the result again');
+    return this.#chainCaptured('select', 'projection', projection);
+  }
+
+  /** One selector; C#'s result selector is `JL0005`, as on the sync
+   * surface. @param {...undefined} unread */
+  selectMany(selector, ...unread) {
+    requireNoTrailingArgument(unread, 'selectMany', 'one selector', 'selectMany(sel).select(resultSel) projects each element (a result selector that reads the outer item as well has no spelling here)');
     const { expression, hops, lists } = this.#capture(selector);
     return this.#with({
       kind: 'select', name: 'selectMany',
@@ -285,23 +299,37 @@ export class AsyncSequence {
     return this.#with({ kind, [slot]: expression, hops, lists });
   }
 
-  orderBy(key, options) { return this.#orderStage('orderBy', key, false, options); }
-  orderByDescending(key, options) { return this.#orderStage('orderBy', key, true, options); }
-  thenBy(key, options) { return this.#orderStage('thenBy', key, false, options); }
-  thenByDescending(key, options) { return this.#orderStage('thenBy', key, true, options); }
+  /** @param {any} key @param {any} [options] @param {...undefined} unread */
+  orderBy(key, options, ...unread) { return this.#orderStage('orderBy', key, false, options, unread); }
+  /** @param {any} key @param {any} [options] @param {...undefined} unread */
+  orderByDescending(key, options, ...unread) { return this.#orderStage('orderBy', key, true, options, unread); }
+  /** @param {any} key @param {any} [options] @param {...undefined} unread */
+  thenBy(key, options, ...unread) { return this.#orderStage('thenBy', key, false, options, unread); }
+  /** @param {any} key @param {any} [options] @param {...undefined} unread */
+  thenByDescending(key, options, ...unread) { return this.#orderStage('thenBy', key, true, options, unread); }
 
-  #orderStage(kind, key, desc, options) {
-    const { expression, hops, lists } = this.#capture(key);
+  /** @param {readonly any[]} unread - C#'s comparer, which `JL0005` refuses */
+  #orderStage(kind, key, desc, options, unread) {
     const name = desc ? `${kind}Descending` : kind;
+    requireNoTrailingArgument(unread, name, 'a key selector and an options object',
+      'a comparer is the options bag — { empty, collation } names a registered collation');
+    const { expression, hops, lists } = this.#capture(key);
     return this.#with({ kind, name, spec: orderSpec(expression, desc, options, `${name}()`), hops, lists });
   }
 
-  groupBy(key) {
+  /** One key selector; C#'s element and result selectors are `JL0005`
+   * (the group is read by `select((g) => …)` after it).
+   * @param {...undefined} unread */
+  groupBy(key, ...unread) {
+    requireNoTrailingArgument(unread, 'groupBy', 'one key selector', 'groupBy(key).select((g) => ({ key: g.key, items: [g.items.all().member] })) reads the elements of each group (an element or result selector goes there)');
     const { expression, hops, lists } = this.#capture(key);
     return this.#with({ kind: 'groupBy', key: expression, hops, lists });
   }
 
-  aggregate(seed, step) {
+  /** A seed and a step; C#'s result selector is `JL0005`.
+   * @param {...undefined} unread */
+  aggregate(seed, step, ...unread) {
+    requireNoTrailingArgument(unread, 'aggregate', 'a seed and a step', 'aggregate(seed, step).select(resultSel) projects the folded value');
     const { expression, hops, lists } = this.#capture(step, (sink) => ['acc', this.#rowRoot('it', sink)]);
     return this.#with({
       kind: 'aggregate',
@@ -342,8 +370,11 @@ export class AsyncSequence {
 
   /** Equi-join, pushed whole: the nested-`$for` shape the synchronous
    * surface emits (a store answers a two-root join in one statement);
-   * the inner rows keep their relation table under `it2`. */
-  join(inner, outerKey, innerKey, result) {
+   * the inner rows keep their relation table under `it2`. C#'s comparer
+   * overload is `JL0005`. @param {...undefined} unread */
+  join(inner, outerKey, innerKey, result, ...unread) {
+    requireNoTrailingArgument(unread, 'join', 'an inner sequence, two key selectors and a result selector',
+      'there is no comparer: keys compare as the engine compares values');
     const params = this.#requireJoinable(inner, 'join');
     const outer = this.#capture(outerKey);
     const key = this.#capture(innerKey, (sink) => [inner.#rowRoot('it2', sink)]);
@@ -361,8 +392,10 @@ export class AsyncSequence {
   }
 
   /** Group-join, pushed whole: the `$let`-bound group of the synchronous
-   * surface, under the same rule as `join`. */
-  groupJoin(inner, outerKey, innerKey, result) {
+   * surface, under the same rule as `join`. @param {...undefined} unread */
+  groupJoin(inner, outerKey, innerKey, result, ...unread) {
+    requireNoTrailingArgument(unread, 'groupJoin', 'an inner sequence, two key selectors and a result selector',
+      'there is no comparer: keys compare as the engine compares values');
     const params = this.#requireJoinable(inner, 'groupJoin');
     const innerDoc = inner.toDocument();
     const outer = this.#capture(outerKey);
@@ -383,8 +416,17 @@ export class AsyncSequence {
     }, params);
   }
 
-  skip(count) { return this.#with({ kind: 'skip', count: requireNonNegativeInteger(count, 'skip') }); }
-  take(count) { return this.#with({ kind: 'take', count: requireNonNegativeInteger(count, 'take') }); }
+  /** @param {number} count @param {...undefined} unread */
+  skip(count, ...unread) {
+    requireNoTrailingArgument(unread, 'skip', 'one count', 'skip(a).take(b) is a window');
+    return this.#with({ kind: 'skip', count: requireNonNegativeInteger(count, 'skip') });
+  }
+
+  /** @param {number} count @param {...undefined} unread */
+  take(count, ...unread) {
+    requireNoTrailingArgument(unread, 'take', 'one count', 'skip(a).take(b) is a window');
+    return this.#with({ kind: 'take', count: requireNonNegativeInteger(count, 'take') });
+  }
 
   /** Drop repeated items. Reads no argument, and no key either:
    * `select(sel).distinct()` keeps the first of each repeated projection
@@ -403,8 +445,10 @@ export class AsyncSequence {
   }
 
   /** Async sources are single-pass, so only a CONSTANT array can join
-   * the stream (`JL0005` otherwise; the format doc says why). */
-  concat(other) {
+   * the stream (`JL0005` otherwise; the format doc says why).
+   * @param {any} other @param {...undefined} unread */
+  concat(other, ...unread) {
+    requireNoTrailingArgument(unread, 'concat', 'one sequence or constant array', 'concat(a).concat(b) joins both');
     if (!Array.isArray(other)) {
       throw new LinqBuildError('JL0005',
         'concat on an async sequence takes a constant array — an async source cannot be re-iterated for a second sequence');
@@ -419,28 +463,44 @@ export class AsyncSequence {
     });
   }
 
-  defaultIfEmpty(fallback = null) {
+  /** @param {any} [fallback] @param {...undefined} unread */
+  defaultIfEmpty(fallback = null, ...unread) {
+    requireNoTrailingArgument(unread, 'defaultIfEmpty', 'one fallback value', 'defaultIfEmpty(value) stands one value in for an empty sequence');
     const expr = toExpression(fallback);
     return this.#with({ kind: 'defaultIfEmpty', fallback: expr, value: expr?.$const ?? fallback });
   }
 
-  ofType(schema) { return this.#with({ kind: 'ofType', schema: schemaOf(schema) }); }
-  cast(schema) { return this.#with({ kind: 'cast', schema: schemaOf(schema) }); }
+  /** @param {any} schema @param {...undefined} unread */
+  ofType(schema, ...unread) {
+    requireNoTrailingArgument(unread, 'ofType', 'one schema', 'ofType(a).ofType(b) applies both');
+    return this.#with({ kind: 'ofType', schema: schemaOf(schema) });
+  }
+
+  /** @param {any} schema @param {...undefined} unread */
+  cast(schema, ...unread) {
+    requireNoTrailingArgument(unread, 'cast', 'one schema', 'cast(a).cast(b) applies both');
+    return this.#with({ kind: 'cast', schema: schemaOf(schema) });
+  }
 
   zip() {
     throw new LinqBuildError('JL0006',
       'zip is unsupported: the query grammar has no positional co-iteration (see QUERY-PEN.md §4)');
   }
 
-  /** The bounded-concurrency boundary (QUERY-PEN.md §11). */
-  mapAsync(fn, options) {
+  /** The bounded-concurrency boundary (QUERY-PEN.md §11).
+   * @param {...undefined} unread */
+  mapAsync(fn, options, ...unread) {
+    requireNoTrailingArgument(unread, 'mapAsync', 'a callback and an options object',
+      'concurrency, mode and ordered go in the options');
     if (typeof fn !== 'function') {
       throw new LinqBuildError('JL0005', 'mapAsync takes an async callback');
     }
     return this.#with({ kind: 'mapAsync', fn, options: normalizeMapAsyncOptions(options) });
   }
 
-  params(bindings) {
+  /** @param {...undefined} unread */
+  params(bindings, ...unread) {
+    requireNoTrailingArgument(unread, 'params', 'one object of bindings', 'params(a).params(b) binds both');
     validateParams(bindings);
     const merged = new Map(this.#params);
     for (const name of Object.keys(bindings)) {
@@ -457,8 +517,10 @@ export class AsyncSequence {
    * in the chain, because a host callback has no document form. A deep
    * snapshot, as on the sync surface: the emitted tree embeds the
    * stages' captured expressions, and handing those out by reference
-   * made the document a live window into an immutable sequence. */
-  toDocument() {
+   * made the document a live window into an immutable sequence.
+   * @param {...undefined} unread */
+  toDocument(...unread) {
+    requireNoTrailingArgument(unread, 'toDocument', 'no argument', 'call it bare');
     if (this.#stages.some((s) => s.kind === 'mapAsync')) {
       throw new LinqBuildError('JL0005',
         'toDocument() cannot represent mapAsync (a host callback); explain() reports the split');
@@ -471,8 +533,9 @@ export class AsyncSequence {
    * `barrier`, what this surface's own execution does. Stages are named
    * by the OPERATOR the caller wrote (`selectMany`, `orderByDescending`),
    * and a `thenBy` is part of the `$orderby` barrier it extends, not a
-   * barrier of its own. */
-  explain() {
+   * barrier of its own. @param {...undefined} unread */
+  explain(...unread) {
+    requireNoTrailingArgument(unread, 'explain', 'no argument', 'call it bare');
     const firstMap = this.#stages.findIndex((s) => s.kind === 'mapAsync');
     // over a provider nothing before the split materialises HERE — the
     // provider runs the pushed document — so only the residual can hold
@@ -785,8 +848,10 @@ export class AsyncSequence {
     return all.length === 0 ? [] : [all[all.length - 1]];
   }
 
-  /** @param {number} index */
-  async elementAt(index) {
+  /** @param {number} index @param {...undefined} unread */
+  async elementAt(index, ...unread) {
+    requireNoTrailingArgument(unread, 'elementAt', 'one index',
+      'elementAtOrDefault(index, value) answers a value out of range');
     requireNonNegativeInteger(index, 'elementAt');
     const w = this.#pushable()
       ? await this.#pushWindow('elementAt', [index]) : await this.skip(index).#window(1);
@@ -794,8 +859,12 @@ export class AsyncSequence {
     return w[0];
   }
 
-  /** @param {number} index @param {any} [defaultValue] */
-  async elementAtOrDefault(index, defaultValue) {
+  /** The item at `index`, or the value when out of range; reads no
+   * predicate, so a callback there is `JL0005`.
+   * @param {number} index @param {any} [defaultValue] @param {...undefined} unread */
+  async elementAtOrDefault(index, defaultValue, ...unread) {
+    requireDefaultValue([defaultValue, ...unread], 'elementAtOrDefault',
+      'where(pred).elementAtOrDefault(index, value)');
     requireNonNegativeInteger(index, 'elementAtOrDefault');
     const w = this.#pushable()
       ? await this.#pushWindow('elementAt', [index]) : await this.skip(index).#window(1);
@@ -860,8 +929,9 @@ export class AsyncSequence {
     return v;
   }
 
-  /** @param {any} [predicate] */
-  async any(predicate) {
+  /** @param {any} [predicate] @param {...undefined} unread */
+  async any(predicate, ...unread) {
+    requireNoTrailingArgument(unread, 'any', 'an optional predicate', 'where(a).any(b) asks for both');
     if (this.#pushable()) {
       if (predicate === undefined) return this.#pushTerminal('exists');
       const { expression, lists } = this.#capture(predicate);
@@ -875,8 +945,9 @@ export class AsyncSequence {
     return false;
   }
 
-  /** @param {any} predicate */
-  async all(predicate) {
+  /** @param {any} predicate @param {...undefined} unread */
+  async all(predicate, ...unread) {
+    requireNoTrailingArgument(unread, 'all', 'one predicate', 'where(a).all(b) asks for both');
     const { expression, lists } = this.#capture(predicate);
     if (this.#pushable()) return this.#pushTerminal('every', [expression], lists);
     const values = this.#externals(lists).values;

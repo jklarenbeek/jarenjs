@@ -638,3 +638,143 @@ describe('a Sequence member that reads no predicate or selector refuses one, on 
     assert.strictEqual((await fromAsync(ROWS).toArray(maybe)).length, 4);
   });
 });
+
+describe('a Sequence member refuses the argument after the ones it reads, on both surfaces', () => {
+  // an ignored trailing argument answers the plain call; each case below is
+  // one whose plain answer differs from the answer the argument was written for
+  const ROWS = [{ n: 1, k: 'a' }, { n: 5, k: 'a' }, { n: 7, k: 'b' }, { n: 2, k: 'b' }];
+  const gt3 = (/** @type {any} */ r) => r.n.gt(3);
+  const num = (/** @type {any} */ r) => r.n;
+  const refusal = (/** @type {string} */ name, /** @type {string} */ takes, /** @type {string} */ instead) => {
+    const text = `JL0005: ${name}() takes ${takes}; the extra argument passed would never be read — ${instead}`;
+    return coded('JL0005', new RegExp(`^${text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`));
+  };
+  const WHERE = ['one predicate', 'where(a).where(b) keeps the rows both keep'];
+  const SELECT = ['one projection', 'select(a).select(b) projects the result again'];
+  const SELECT_MANY = ['one selector', 'selectMany(sel).select(resultSel) projects each element '
+    + '(a result selector that reads the outer item as well has no spelling here)'];
+  const GROUP_BY = ['one key selector', 'groupBy(key).select((g) => ({ key: g.key, items: [g.items.all().member] })) '
+    + 'reads the elements of each group (an element or result selector goes there)'];
+  const AGGREGATE = ['a seed and a step', 'aggregate(seed, step).select(resultSel) projects the folded value'];
+  const WINDOW = ['one count', 'skip(a).take(b) is a window'];
+  const ORDER = ['a key selector and an options object',
+    'a comparer is the options bag — { empty, collation } names a registered collation'];
+  const SCHEMA_ONE = (/** @type {string} */ n) => ['one schema', `${n}(a).${n}(b) applies both`];
+  const JOIN = ['an inner sequence, two key selectors and a result selector',
+    'there is no comparer: keys compare as the engine compares values'];
+  /** @type {Array<[string, (q: any) => any, string[]]>} */
+  const BUILDERS = [
+    ['where', (q) => q.where(gt3, num), WHERE],
+    ['select', (q) => q.select(num, num), SELECT],
+    ['selectMany', (q) => q.selectMany((r) => [r.n], num), SELECT_MANY],
+    ['groupBy', (q) => q.groupBy(num, num), GROUP_BY],
+    ['aggregate', (q) => q.aggregate(0, (a, r) => a.add(r.n), (x) => x), AGGREGATE],
+    ['skip', (q) => q.skip(1, 2), WINDOW],
+    ['take', (q) => q.take(1, 2), WINDOW],
+    ['concat', (q) => q.concat([1], [2]), ['one sequence or constant array', 'concat(a).concat(b) joins both']],
+    ['defaultIfEmpty', (q) => q.defaultIfEmpty(1, 2),
+      ['one fallback value', 'defaultIfEmpty(value) stands one value in for an empty sequence']],
+    ['ofType', (q) => q.ofType({ type: 'object' }, 1), SCHEMA_ONE('ofType')],
+    ['cast', (q) => q.cast({ type: 'object' }, 1), SCHEMA_ONE('cast')],
+    ['orderBy', (q) => q.orderBy(num, undefined, () => 0), ORDER],
+    ['orderByDescending', (q) => q.orderByDescending(num, undefined, () => 0), ORDER],
+    ['thenBy', (q) => q.orderBy(num).thenBy(num, undefined, () => 0), ORDER],
+    ['thenByDescending', (q) => q.orderBy(num).thenByDescending(num, undefined, () => 0), ORDER],
+    ['join', (q) => q.join(q, num, num, (a) => a, () => true), JOIN],
+    ['groupJoin', (q) => q.groupJoin(q, num, num, (a) => a, () => true), JOIN],
+    ['params', (q) => q.params({ a: 1 }, { b: 2 }),
+      ['one object of bindings', 'params(a).params(b) binds both']],
+    ['mapAsync', (q) => q.mapAsync(async (x) => x, { concurrency: 1 }, 1),
+      ['a callback and an options object', 'concurrency, mode and ordered go in the options']],
+    ['toDocument', (q) => q.toDocument(1), ['no argument', 'call it bare']],
+    ['explain', (q) => q.explain(1), ['no argument', 'call it bare']],
+  ];
+  /** @type {Array<[string, (q: any) => any, string[]]>} */
+  const TERMINALS = [
+    ['elementAt', (q) => q.elementAt(1, 'none'),
+      ['one index', 'elementAtOrDefault(index, value) answers a value out of range']],
+    ['any', (q) => q.any(gt3, gt3), ['an optional predicate', 'where(a).any(b) asks for both']],
+    ['all', (q) => q.all(gt3, gt3), ['one predicate', 'where(a).all(b) asks for both']],
+  ];
+  const surfaces = [['from', () => from(ROWS)], ['fromAsync', () => fromAsync(ROWS)]];
+
+  it('every builder refuses at the call, with the member named and the spelling that works', () => {
+    for (const [label, make] of surfaces) {
+      for (const [name, call, [takes, instead]] of BUILDERS) {
+        assert.throws(() => call(make()), refusal(name, takes, instead), `${label} ${name}`);
+      }
+    }
+  });
+
+  it('every terminal that takes an argument refuses the next one', async () => {
+    for (const [, make] of surfaces) {
+      for (const [name, call, [takes, instead]] of TERMINALS) {
+        await assert.rejects(async () => call(make()), refusal(name, takes, instead), name);
+      }
+    }
+    assert.throws(() => from(ROWS).elementAt(1, 'none'), coded('JL0005', /^JL0005: elementAt\(\)/));
+  });
+
+  it('elementAtOrDefault refuses a function or a third argument in the default slot', async () => {
+    const refused = coded('JL0005', new RegExp('^JL0005: elementAtOrDefault\\(\\) takes one default value, '
+      + 'not a predicate — it reads no callback, so the one passed would be ignored or answered as the default; '
+      + 'filter first: where\\(pred\\)\\.elementAtOrDefault\\(index, value\\)$'));
+    // out of range: the old answer was the function itself
+    assert.throws(() => from(ROWS).elementAtOrDefault(9, gt3), refused);
+    assert.throws(() => from(ROWS).elementAtOrDefault(1, 'none', 'extra'), refused);
+    await assert.rejects(async () => fromAsync(ROWS).elementAtOrDefault(9, gt3), refused);
+    await assert.rejects(async () => fromAsync(ROWS).elementAtOrDefault(1, 'none', 'extra'), refused);
+  });
+
+  it('the refusal comes before any run over a provider', () => {
+    let runs = 0;
+    const provider = { execute() { runs++; return [[]]; }, root: '$[*]' };
+    assert.throws(() => from(provider).groupBy(num, num), refusal('groupBy', ...GROUP_BY));
+    assert.throws(() => from(provider).elementAt(0, 1), coded('JL0005', /^JL0005: elementAt\(\) takes one index/));
+    assert.throws(() => from(provider).any(gt3, gt3), refusal('any', 'an optional predicate', 'where(a).any(b) asks for both'));
+    assert.throws(() => from(provider).take(1, 2), refusal('take', ...WINDOW));
+    assert.throws(() => from(provider).join(from(provider), num, num, (a) => a, 1), refusal('join', ...JOIN));
+    assert.strictEqual(runs, 0);
+  });
+
+  it('the spellings the refusals name answer what the extra argument was written for', async () => {
+    assert.deepStrictEqual(from(ROWS).aggregate(0, (a, r) => a.add(r.n)).select((x) => x.mul(10)).toArray(), [150]);
+    assert.deepStrictEqual(from([]).take(0).aggregate(0, (a, r) => a.add(r.n)).select((x) => x.mul(10)).toArray(), [0]);
+    assert.deepStrictEqual(await fromAsync(ROWS).aggregate(0, (a, r) => a.add(r.n)).select((x) => x.mul(10)).toArray(), [150]);
+    const perKey = from(ROWS).groupBy((r) => r.k).select((g) => ({ key: g.key, items: [g.items.all().n] }));
+    assert.deepStrictEqual(perKey.toArray(), [{ key: 'a', items: [1, 5] }, { key: 'b', items: [7, 2] }]);
+    assert.deepStrictEqual(await fromAsync(ROWS).groupBy((r) => r.k)
+      .select((g) => ({ key: g.key, items: [g.items.all().n] })).toArray(), perKey.toArray());
+    const nested = [{ id: 1, t: [{ v: 1 }, { v: 2 }] }, { id: 2, t: [{ v: 3 }] }];
+    assert.deepStrictEqual(from(nested).selectMany((o) => o.t).select((e) => e.v).toArray(), [1, 2, 3]);
+    assert.deepStrictEqual(from(ROWS).where(gt3).where((r) => r.k.eq('b')).toArray(), [{ n: 7, k: 'b' }]);
+    assert.deepStrictEqual(from(ROWS).skip(1).take(2).toArray(), [{ n: 5, k: 'a' }, { n: 7, k: 'b' }]);
+    assert.deepStrictEqual(from(ROWS).elementAtOrDefault(9, 'none'), 'none');
+    assert.deepStrictEqual(await fromAsync(ROWS).elementAtOrDefault(9, 'none'), 'none');
+    assert.strictEqual(from(ROWS).any(gt3), true);
+    assert.strictEqual(from(ROWS).where(gt3).any((r) => r.n.gt(6)), true);
+    assert.strictEqual(await fromAsync(ROWS).all(gt3), false);
+  });
+
+  it('an undefined after the last argument is no argument, and every call without one is unchanged', async () => {
+    const none = undefined;
+    for (const [label, make] of surfaces) {
+      const q = make();
+      assert.strictEqual(q.where(gt3, none).select(num, none).skip(1, none).take(1, none) instanceof Object, true, label);
+      q.selectMany((r) => [r.n], none); q.groupBy(num, none); q.aggregate(0, (a, r) => a.add(r.n), none);
+      q.concat([1], none); q.defaultIfEmpty(1, none); q.ofType({ type: 'object' }, none); q.cast({ type: 'object' }, none);
+      q.orderBy(num, undefined, none).thenBy(num, undefined, none); q.params({ a: 1 }, none);
+      q.mapAsync(async (x) => x, { concurrency: 1 }, none); q.explain(none);
+    }
+    from(ROWS).toDocument(none);
+    from(ROWS).join(from(ROWS), num, num, (a) => a, none);
+    from(ROWS).groupJoin(from(ROWS), num, num, (a) => a, none);
+    assert.deepStrictEqual(from(ROWS).elementAt(1, none), { n: 5, k: 'a' });
+    assert.deepStrictEqual(from(ROWS).elementAtOrDefault(1, none, none), { n: 5, k: 'a' });
+    assert.strictEqual(from(ROWS).any(gt3, none), true);
+    assert.strictEqual(from(ROWS).all(gt3, none), false);
+    assert.strictEqual(await fromAsync(ROWS).any(gt3, none), true);
+    assert.strictEqual(await fromAsync(ROWS).all(gt3, none), false);
+    assert.deepStrictEqual(await fromAsync(ROWS).elementAt(1, none), { n: 5, k: 'a' });
+  });
+});

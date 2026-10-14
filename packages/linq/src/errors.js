@@ -74,7 +74,10 @@ export const LINQ_CODES = /* @__PURE__ */ Object.freeze({
  *    argument handed to an aggregate (`count`, `sum`, `avg`, `min`,
  *    `max`, `exists`, `isEmpty`) or to a member that reads none
  *    (`first`, `last`, `single`, `toArray`, `distinct`, `reverse`, a
- *    predicate in the default slot of `firstOrDefault`), a value that
+ *    predicate in the default slot of `firstOrDefault`), an argument
+ *    after the last one an operator reads (`groupBy(key, elementSel)`,
+ *    `selectMany(sel, resultSel)`, `aggregate(seed, step, resultSel)`,
+ *    `take(1, 2)`, a comparer after `orderBy` or `join`), a value that
  *    cannot embed in a document — a sparse array among them — an option
  *    outside one of the chain's closed option bags, or a chain handed to
  *    the `live()` of a source it was not built over)

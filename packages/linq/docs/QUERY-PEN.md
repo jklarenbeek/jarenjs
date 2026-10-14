@@ -257,19 +257,19 @@ is part of THIS design.
 |---|---|---|---|
 | `Where` | FLWOR `$where` | native | `(e: Expr<T>) => Expr<boolean>` → `Seq<T>` |
 | `Select` | `$return` constructor | native | `(e: Expr<T>) => Expr<R>` → `Seq<R>` |
-| `SelectMany` | `$return` of a `$for` phrase over the projection — the projected value is iterated ONE level (an array member's elements, a constructed array's members; a scalar is itself), and the FLWOR `$return` concatenates per tuple. Emitted as `{ "$for": { "it": <projection> }, "$return": "$it" }` (the nested phrase rebinds `it` legally) | native | `(e: Expr<T>) => Expr<R[]>` → `Seq<R>` |
-| `OrderBy` / `OrderByDescending` | `$orderby` key spec (`$dir`; `$empty`/`$collation` via `options`) | native | `(e: Expr<T>) => Expr<K>` → `Seq<T>` |
+| `SelectMany` | `$return` of a `$for` phrase over the projection — the projected value is iterated ONE level (an array member's elements, a constructed array's members; a scalar is itself), and the FLWOR `$return` concatenates per tuple. Emitted as `{ "$for": { "it": <projection> }, "$return": "$it" }` (the nested phrase rebinds `it` legally) | native | `(e: Expr<T>) => Expr<R[]>` → `Seq<R>`; C#'s result selector `(item, element) => …` is `JL0005` naming `selectMany(sel).select(resultSel)`, which maps each element (a result that reads the outer item as well has no spelling here) |
+| `OrderBy` / `OrderByDescending` | `$orderby` key spec (`$dir`; `$empty`/`$collation` via `options`) | native | `(e: Expr<T>) => Expr<K>` → `Seq<T>`; C#'s comparer overload is `JL0005` — `{ collation }` names a registered collation |
 | `ThenBy` / `ThenByDescending` | appended `$orderby` spec; must directly follow `orderBy*` (`JL0005`) | native | as `OrderBy` |
-| `GroupBy` | `$groupby`; downstream items are `{ key, items }` | native | `(e: Expr<T>) => Expr<K>` → `Seq<{key: K, items: T[]}>` |
+| `GroupBy` | `$groupby`; downstream items are `{ key, items }` | native | `(e: Expr<T>) => Expr<K>` → `Seq<{key: K, items: T[]}>`; C#'s element and result selectors are `JL0005` naming `groupBy(key).select((g) => …)`, which reads each group |
 | `Join` | nested `$for` + `$where` `$eq` — the engine rewrites this shape to a HASH JOIN (compile-time, QUERY-FORMAT §6), which is why it is fast **when both keys are plain member paths** (`o => o.pid`, `i => i.id`); a key with an operator in it (`o => o.name.lower()`, `o => o.p.add(0)`) is not a probe key and the join runs as a nested loop. Both sides MUST derive from the same source, or from two providers sharing one `scope` (§8 — two entity sets of one store are two roots of ONE multi-entity input, and the store answers the equijoin in one statement); anything else is `JL0005`: a query document reads one input. On the async surface the join exists only over a provider, pushed whole (§10). The inner side's declared parameters ride along (§7) | native | `(inner: Seq<U>, ok, ik, (o: Expr<T>, i: Expr<U>) => Expr<R>)` → `Seq<R>` |
 | `GroupJoin` | the matching group bound as an ARRAY value — `$let: { g: [ <correlated inner phrase> ] }` — so the result selector can index it (`g.at(0)`), fan it (`g.all()`), place it in a member (`{ matches: g }`) and aggregate over its members (`(u, g) => ({ n: g.count() })` counts the matches, `g.exists()` is whether there are any); same-source rule and parameter merge as `Join` | emulated | `(inner: Seq<U>, ok, ik, (o: Expr<T>, g: ArrayExpr<U> & AggregatableExpr) => Expr<R>)` → `Seq<R>` |
-| `Skip` / `Take` | `$subsequence` | native | `(n: number)` → `Seq<T>` |
+| `Skip` / `Take` | `$subsequence` | native | `(n: number)` → `Seq<T>`; one count and no more (`JL0005`) |
 | `Distinct` | `$distinct` (deep structural equality — the grouping relation) | native | `()` → `Seq<T>`; reads no key, and one handed a selector is `JL0005` naming `select(sel).distinct()` (the projected values, not a by-key choice of rows) |
 | `Reverse` | `$reverse` | native | `()` → `Seq<T>`; reads no argument (`JL0005`) |
 | `Count` / `Sum` / `Average` / `Min` / `Max` | §8.8 aggregates (`Average` → `$avg`) | native | `count(): number`; `sum(): number`; `average/min/max(): number` (throw `JL2001` on empty; `min`/`max` follow the operand family); none reads an argument, and one handed an argument is `JL0005` naming `where(pred).count()` or `select(sel).sum()` |
 | `Any()` | `$exists` | native | `(): boolean` |
 | `Any(pred)` / `All(pred)` | `$some` / `$every` quantifier phrase | native | `(pred): boolean` (`all` vacuously true on empty) |
-| `Aggregate(seed, fn)` | `$fold` — the accumulator clause; the result is a sequence of exactly ONE accumulated value (`.first()` reads it) | native | `(seed: A, (acc: Expr<A>, e: Expr<T>) => Expr<A>)` → `Seq<A>` |
+| `Aggregate(seed, fn)` | `$fold` — the accumulator clause; the result is a sequence of exactly ONE accumulated value (`.first()` reads it) | native | `(seed: A, (acc: Expr<A>, e: Expr<T>) => Expr<A>)` → `Seq<A>`; C#'s result selector is `JL0005` naming `aggregate(seed, step).select(resultSel)` |
 | `Aggregate(fn)` (unseeded) | — JSON cannot spell "the implicit first element" as a lambda seed | unsupported (`JL0006`) | — |
 | `First` / `FirstOrDefault` | `[ $subsequence [expr, 0, 1] ]` window | native | `(): T` (`JL2001` on empty) / `(d?): T \| D`; neither reads a predicate, and one handed to either is `JL0005` naming `where(pred).first()` / `where(pred).firstOrDefault(d)` |
 | `Single` / `SingleOrDefault` | `[ $subsequence [expr, 0, 2] ]` window | native | `(): T` (`JL2001`/`JL2002`) / `(d?): T \| D` (`JL2002` on 2+); no predicate (`JL0005`, as `First`) |
@@ -460,7 +460,9 @@ The real C# semantics, because getting these wrong is how a
   `singleOrDefault(d)` throws on two-or-more and returns `d` on empty.
 - `last()`/`lastOrDefault(d)` mirror `first` over the reversed window.
 - `elementAt(i)` out of range throws `JL2003`;
-  `elementAtOrDefault(i, d)` returns `d`.
+  `elementAtOrDefault(i, d)` returns `d`; a function there, like a second
+  argument after `d`, is `JL0005` naming `where(pred).elementAtOrDefault(i, d)`
+  (it answered the function itself out of range).
 - `average()`, `min()` and `max()` over an empty sequence throw
   `JL2001` (C# `InvalidOperationException`); `sum()` of nothing is `0`;
   `count()` of nothing is `0`.
@@ -490,6 +492,23 @@ The real C# semantics, because getting these wrong is how a
   fallback is `firstOrDefault() ?? fallback`; `fromAsync()` refuses the same
   way, a terminal as a rejected promise and `distinct`/`reverse` at the
   call.
+- Every operator reads exactly the arguments its row in §4 names, and an
+  argument after the last one is `JL0005`: `groupBy(key, (r) => r.n)`
+  (C#'s element selector), `selectMany(sel, (o, e) => …)` and
+  `aggregate(0, step, (x) => x)` (C#'s result selectors), `join(…, comparer)`,
+  `orderBy(key, options, comparer)`, `take(1, 2)`, `where(pred, x)`, and
+  the same on `select`, `skip`, `concat`, `defaultIfEmpty`, `ofType`, `cast`,
+  `groupJoin`, `thenBy*`, `params`, `mapAsync`, `any`, `all`, `elementAt`,
+  `toDocument` and `explain`. They used to build and answer as if it had
+  never been written: `groupBy(key, elementSel)` still held whole rows in
+  `items`, `aggregate(seed, step, resultSel)` answered the unprojected
+  fold, `take(1, 2)` took one, and `join(…, comparer)` compared as the
+  engine compares. The message names what the member takes and the spelling
+  that does what the extra argument meant; a result selector that reads the
+  outer item as well as the element has no spelling, and neither has a
+  custom comparer. `undefined` is no argument, here as above;
+  `fromAsync()` refuses the same way (a terminal as a rejected promise, a
+  builder at the call).
 - `any()` is existence; `all(pred)` is vacuously true over the empty
   sequence.
 
@@ -1514,6 +1533,10 @@ that preserves it, so there is no spelling that is allowed to.
 | `from(rows).firstOrDefault((r) => r.n > 3)`; `lastOrDefault`, `singleOrDefault`, a second argument, and `fromAsync(rows)` likewise | `firstOrDefault() takes one default value, not a predicate — it reads no callback, so the one passed would be ignored or answered as the default; filter first: where(pred).firstOrDefault(value)` | `from(rows).where((r) => r.n.gt(3)).firstOrDefault(value)` |
 | `from(rows).distinct((r) => r.n)`; `toArray(sel)`, `reverse(sel)` and `fromAsync(rows)` likewise | `distinct() takes no argument — it reads none, so the one passed would be ignored; filter or project first: select(sel).distinct()` (`select(sel).toArray()`, `where(pred).reverse()` for the others) | `from(rows).select((r) => r.n).distinct()` — the distinct values; a by-key choice of rows is not in the grammar |
 | `from(rows).count((r) => r.n > 3)`; `sum`, `average`, `min`, `max` handed a selector; `fromAsync(rows)` likewise | `count() takes no argument — it reads none, so the one passed would be ignored; filter or project first: where(pred).count()` (`select(sel).sum()` for the others) | `from(rows).where((r) => r.n.gt(3)).count()`, `from(rows).select((r) => r.n).sum()` |
+| `from(rows).groupBy((r) => r.k, (r) => r.n)` (C#'s element selector); `selectMany(sel, resultSel)`, `aggregate(seed, step, resultSel)` and `fromAsync(rows)` likewise | `groupBy() takes one key selector; the extra argument passed would never be read — groupBy(key).select((g) => ({ key: g.key, items: [g.items.all().member] })) reads the elements of each group (an element or result selector goes there)` (`selectMany(sel).select(resultSel)` and `aggregate(seed, step).select(resultSel)` for the others) | `from(rows).groupBy((r) => r.k).select((g) => ({ key: g.key, items: [g.items.all().n] }))` — the elements of each group, as an array |
+| `from(rows).take(1, 2)`; `where(pred, x)`, `select`, `skip`, `concat`, `defaultIfEmpty`, `ofType`, `cast`, `any`, `all`, `elementAt`, `params`, `mapAsync`, `toDocument`, `explain` and `fromAsync(rows)` likewise | `take() takes one count; the extra argument passed would never be read — skip(a).take(b) is a window` (each member names its own arguments and spelling) | `from(rows).skip(1).take(2)` |
+| `from(rows).orderBy(key, options, comparer)`; `orderByDescending`, `thenBy`, `thenByDescending`, `join(…, comparer)` and `groupJoin(…, comparer)` likewise | `orderBy() takes a key selector and an options object; the extra argument passed would never be read — a comparer is the options bag — { empty, collation } names a registered collation` (`there is no comparer: keys compare as the engine compares values` for the joins) | `orderBy(key, { collation: 'name' })` with the collation registered (§8.1); a join compares as the engine does |
+| `from(rows).elementAtOrDefault(9, (r) => r.n > 3)`, or a third argument | `elementAtOrDefault() takes one default value, not a predicate — it reads no callback, so the one passed would be ignored or answered as the default; filter first: where(pred).elementAtOrDefault(index, value)` | `from(rows).where((r) => r.n.gt(3)).elementAtOrDefault(9, value)` |
 | `from(rows, { limit: { steps: 3 } })` | `from() does not take 'limit' — did you mean 'limits'?` | `{ limits: { steps: 3 } }` |
 | `from(rows, { bogus: 1 })` | `from() does not take 'bogus'; the options are compileTypeTest, functions, collations, pathFunctions, limits, registry` | one of the six (§8.1); `fromAsync()` and `fromDocument()` refuse the same way, by their own names |
 | `from(rows, 'x')`, `from(rows, null)` | `from() takes a plain options object` | an object literal, or no second argument |

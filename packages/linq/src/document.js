@@ -67,10 +67,40 @@ export function requireNonNegativeInteger(value, what) {
  * @param {string} instead - the chain that reads the argument
  */
 export function requireNoArgument(args, name, instead) {
-  if (args.some((arg) => arg !== undefined)) {
+  if (anyPassed(args)) {
     throw new LinqBuildError('JL0005',
       `${name}() takes no argument — it reads none, so the one passed would be ignored; `
       + `filter or project first: ${instead}`);
+  }
+}
+
+/**
+ * Whether a call handed over anything: an `undefined` is a caller
+ * forwarding an optional argument it did not receive, not an argument.
+ * @param {readonly any[]} args
+ * @returns {boolean}
+ */
+function anyPassed(args) {
+  return args.some((arg) => arg !== undefined);
+}
+
+/**
+ * Refuse an argument after the ones an operator reads. A selector,
+ * count or schema handed past the last parameter was never called or
+ * applied: `groupBy(key, (r) => r.n)` grouped whole rows,
+ * `aggregate(0, step, (x) => x)` answered the fold, `take(1, 2)` took
+ * one, `join(…, comparer)` compared as the engine does. The one passed
+ * is `JL0005` naming what the member takes and the spelling that does
+ * what the extra argument was written to do. `undefined` is no argument.
+ * @param {readonly any[]} unread - what followed the last parameter read
+ * @param {string} name - the member's spelling, for the refusal
+ * @param {string} takes - what the member reads, as a noun phrase
+ * @param {string} instead - the spelling that does what the extra argument meant
+ */
+export function requireNoTrailingArgument(unread, name, takes, instead) {
+  if (anyPassed(unread)) {
+    throw new LinqBuildError('JL0005',
+      `${name}() takes ${takes}; the extra argument passed would never be read — ${instead}`);
   }
 }
 
@@ -86,12 +116,14 @@ export function requireNoArgument(args, name, instead) {
  * `firstOrDefault() ?? fn`. `undefined` is no argument.
  * @param {readonly any[]} args - what the terminal was handed
  * @param {string} name - the terminal's spelling, for the refusal
+ * @param {string} [instead] - the chain that reads a predicate; the
+ *   `where(pred).<name>(value)` of the three terminals by default
  */
-export function requireDefaultValue(args, name) {
-  if (typeof args[0] === 'function' || args.slice(1).some((arg) => arg !== undefined)) {
+export function requireDefaultValue(args, name, instead = `where(pred).${name}(value)`) {
+  if (typeof args[0] === 'function' || anyPassed(args.slice(1))) {
     throw new LinqBuildError('JL0005',
       `${name}() takes one default value, not a predicate — it reads no callback, so the one `
-      + `passed would be ignored or answered as the default; filter first: where(pred).${name}(value)`);
+      + `passed would be ignored or answered as the default; filter first: ${instead}`);
   }
 }
 
