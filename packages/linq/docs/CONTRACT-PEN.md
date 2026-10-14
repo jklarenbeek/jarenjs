@@ -1193,10 +1193,10 @@ to write, and reaching them means one import of `@jarenjs/contract` over
 
 ## 7. Cost
 
-`@jarenjs/linq/contract` builds to **<!--fact:bundle.contract-->55,444<!--/fact--> bytes** as a minified,
+`@jarenjs/linq/contract` builds to **<!--fact:bundle.contract-->55,835<!--/fact--> bytes** as a minified,
 tree-shaken ESM bundle — the figure `scripts/check-tree-shaking.js`
 measures and `npm run test:tree-shaking` reports, published rounded
-(<!--fact:bundle.contract.kb-->55<!--/fact--> kB) beside the other subpath prices in
+(<!--fact:bundle.contract.kb-->56<!--/fact--> kB) beside the other subpath prices in
 [docs/CONSUMING.md](../../../docs/CONSUMING.md).
 
 The probe is a gate, not a report: building a one-operation contract as a
@@ -1205,7 +1205,7 @@ them:
 
 - **the schema pen is included, and that is the ceiling.** A contract's
   inputs and outputs are schemas, so the two are measured together and
-  the bundle carries <!--fact:bundle.schema-->41,872<!--/fact--> of its <!--fact:bundle.contract-->55,444<!--/fact--> bytes as the schema pen's own.
+  the bundle carries <!--fact:bundle.schema-->42,263<!--/fact--> of its <!--fact:bundle.contract-->55,835<!--/fact--> bytes as the schema pen's own.
   The contract pen's own share is the remaining ~13 kB, most of it the
   refusal messages §4 lists;
 - **no chain module** — none of `sequence.js`, `document.js`, `async.js`,
@@ -1221,6 +1221,6 @@ them:
 A consumer who writes a contract and also compiles it pays both prices
 and they add rather than overlap. That is the shape the separation is
 for: a browser bundle that only needs the TYPES a contract implies —
-`typedClient` over an HTTP binding, say — ships the pen's <!--fact:bundle.contract.kb-->55<!--/fact--> kB and none
+`typedClient` over an HTTP binding, say — ships the pen's <!--fact:bundle.contract.kb-->56<!--/fact--> kB and none
 of the compiler, while the server that serves the contract imports
 `@jarenjs/contract` and does not need the pen at all.

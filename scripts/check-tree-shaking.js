@@ -149,7 +149,8 @@ if (engineLeak.length > 0)
 // Raised to 39,700 (measured 39686): the shared capture's coded refusal of JSON.stringify on a captured value add 386.
 // Raised to 40,000 (measured 39955): the shared capture's coded refusal of an argument handed to an aggregate of a captured value add 269.
 // Raised to 42,000 (measured 41891): the shared capture's coded refusal of an array method called on a member, with the query spelling it names add 1936.
-if (schemaBytes > 42000)
+// Raised to 42,300 (measured 42263): the shared capture's refusal to coerce a method read without its call add 391.
+if (schemaBytes > 42300)
   throw new Error(`The schema pen bundle grew to ${schemaBytes} bytes.`);
 
 console.log(`Tree-shaking smoke test passed (${schemaBytes} byte schema-pen bundle; no chain module, no engine).`);
@@ -230,7 +231,8 @@ if (chainEdgeLeak.length > 0)
 // Raised to 224,600 (measured 224523): the remaining Sequence members' refusal of a predicate, selector or default they never read add 996.
 // Raised to 226,400 (measured 226328): every Sequence member's refusal of an argument it never reads, read from one table add 1805.
 // Raised to 226,500 (measured 226411): from()'s refusal of a trailing argument add 102.
-if (chainBytes > 226500)
+// Raised to 226,900 (measured 226802): the shared capture's refusal to coerce a method read without its call add 391.
+if (chainBytes > 226900)
   throw new Error(`The chain bundle grew to ${chainBytes} bytes.`);
 
 console.log(`Tree-shaking smoke test passed (${chainBytes} byte chain bundle; no schema-pen module, no client module, no store/validator/formats bytes).`);
@@ -310,7 +312,8 @@ if (modelEngineLeak.length > 0)
 // Raised to 51,500 (measured 51488): the shared capture's coded refusal of JSON.stringify on a captured value add 386.
 // Raised to 51,800 (measured 51757): the shared capture's coded refusal of an argument handed to an aggregate of a captured value add 269.
 // Raised to 53,700 (measured 53696): the shared capture's coded refusal of an array method called on a member, with the query spelling it names add 1939.
-if (modelBytes > 53700)
+// Raised to 54,100 (measured 54068): the shared capture's refusal to coerce a method read without its call add 391.
+if (modelBytes > 54100)
   throw new Error(`The model pen bundle grew to ${modelBytes} bytes.`);
 const schemaModelLeak = Object.entries(schemaInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/model/') && info.bytesInOutput > 0);
@@ -367,7 +370,8 @@ if (jsltEngineLeak.length > 0)
 // Raised to 22,300 (measured 22264): the shared capture's coded refusal of JSON.stringify on a captured value add 386.
 // Raised to 22,600 (measured 22533): the shared capture's coded refusal of an argument handed to an aggregate of a captured value add 269.
 // Raised to 24,500 (measured 24466): the shared capture's coded refusal of an array method called on a member, with the query spelling it names add 1933.
-if (jsltBytes > 24500)
+// Raised to 24,900 (measured 24836): the shared capture's refusal to coerce a method read without its call add 391.
+if (jsltBytes > 24900)
   throw new Error(`The JSLT pen bundle grew to ${jsltBytes} bytes.`);
 const chainJsltLeak = Object.entries(chainInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/jslt/') && info.bytesInOutput > 0);
@@ -435,7 +439,8 @@ if (migrationEngineLeak.length > 0)
 // Raised to 28,400 (measured 28391): the shared capture's coded refusal of JSON.stringify on a captured value add 386.
 // Raised to 28,700 (measured 28660): the shared capture's coded refusal of an argument handed to an aggregate of a captured value add 269.
 // Raised to 30,600 (measured 30598): the shared capture's coded refusal of an array method called on a member, with the query spelling it names add 1938.
-if (migrationBytes > 30600)
+// Raised to 31,000 (measured 30970): the shared capture's refusal to coerce a method read without its call add 392.
+if (migrationBytes > 31000)
   throw new Error(`The migration pen bundle grew to ${migrationBytes} bytes.`);
 const chainMigrationLeak = Object.entries(chainInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/migration/') && info.bytesInOutput > 0);
@@ -602,7 +607,8 @@ if (asyncLiveLeak.length)
 // Raised to 976,000 (measured 975939): the remaining Sequence members' refusal of a predicate, selector or default they never read add 638.
 // Raised to 977,300 (measured 977222): every Sequence member's refusal of an argument it never reads, read from one table add 1283.
 // Raised to 977,800 (measured 977778): a handle's execute, query and explain taking a chain, and from()'s refusal of a trailing argument add 575.
-if (clientBytes > 977800)
+// Raised to 978,700 (measured 978646): the shared capture's refusal to coerce a method read without its call, and the validator's relative pointer dialect option add 868.
+if (clientBytes > 978700)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 
@@ -657,7 +663,8 @@ if (contractPenLeak.length > 0)
 // Raised to 53,300 (measured 53257): the shared capture's coded refusal of JSON.stringify on a captured value add 386.
 // Raised to 53,600 (measured 53526): the shared capture's coded refusal of an argument handed to an aggregate of a captured value add 269.
 // Raised to 55,500 (measured 55463): the shared capture's coded refusal of an array method called on a member, with the query spelling it names add 1937.
-if (contractPenBytes > 55500)
+// Raised to 55,900 (measured 55835): the shared capture's refusal to coerce a method read without its call add 391.
+if (contractPenBytes > 55900)
   throw new Error(`The contract pen bundle grew to ${contractPenBytes} bytes.`);
 const chainContractLeak = Object.entries(chainInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/contract/') && info.bytesInOutput > 0);
@@ -721,7 +728,8 @@ if (flowPenLeak.length > 0)
 // Raised to 22,400 (measured 22364): the shared capture's coded refusal of JSON.stringify on a captured value add 386.
 // Raised to 22,700 (measured 22633): the shared capture's coded refusal of an argument handed to an aggregate of a captured value add 269.
 // Raised to 24,600 (measured 24566): the shared capture's coded refusal of an array method called on a member, with the query spelling it names add 1933.
-if (flowPenBytes > 24600)
+// Raised to 25,000 (measured 24934): the shared capture's refusal to coerce a method read without its call add 390.
+if (flowPenBytes > 25000)
   throw new Error(`The flow pen bundle grew to ${flowPenBytes} bytes.`);
 const chainFlowLeak = Object.entries(chainInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/flow/') && info.bytesInOutput > 0);
@@ -780,7 +788,8 @@ if (appPenLeak.length > 0)
 // Raised to 54,800 (measured 54700): the shared capture's coded refusal of JSON.stringify on a captured value add 386.
 // Raised to 55,000 (measured 54969): the shared capture's coded refusal of an argument handed to an aggregate of a captured value add 269.
 // Raised to 57,000 (measured 56908): the shared capture's coded refusal of an array method called on a member, with the query spelling it names add 1939.
-if (appPenBytes > 57000)
+// Raised to 57,300 (measured 57281): the shared capture's refusal to coerce a method read without its call add 392.
+if (appPenBytes > 57300)
   throw new Error(`The app pen bundle grew to ${appPenBytes} bytes.`);
 const chainAppLeak = Object.entries(chainInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/app/') && info.bytesInOutput > 0);
@@ -838,7 +847,8 @@ if (formsPenLeak.length > 0)
 // Raised to 44,000 (measured 43952): the shared capture's coded refusal of JSON.stringify on a captured value add 386.
 // Raised to 44,300 (measured 44221): the shared capture's coded refusal of an argument handed to an aggregate of a captured value add 269.
 // Raised to 46,200 (measured 46161): the shared capture's coded refusal of an array method called on a member, with the query spelling it names add 1940.
-if (formsPenBytes > 46200)
+// Raised to 46,600 (measured 46534): the shared capture's refusal to coerce a method read without its call add 392.
+if (formsPenBytes > 46600)
   throw new Error(`The forms pen bundle grew to ${formsPenBytes} bytes.`);
 const chainFormsLeak = Object.entries(chainInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/forms/') && info.bytesInOutput > 0);

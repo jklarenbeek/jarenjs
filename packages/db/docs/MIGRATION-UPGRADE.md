@@ -2270,8 +2270,8 @@ into a new database created with the default UTF-8 encoding, and open that.
 
 Exact identity stores complete canonical documents and model endpoints, so
 storage and comparison costs grow with their size. A short fingerprint remains
-useful for display; it does not replace this evidence. The migration pen adds <!--fact:bundle.migration-->30,578<!--/fact--> bytes to an otherwise empty
-consumer bundle; the DB-client fixture is <!--fact:bundle.db-->977,778<!--/fact--> bytes. These are complete measured
+useful for display; it does not replace this evidence. The migration pen adds <!--fact:bundle.migration-->30,970<!--/fact--> bytes to an otherwise empty
+consumer bundle; the DB-client fixture is <!--fact:bundle.db-->978,646<!--/fact--> bytes. These are complete measured
 fixture sizes, not the incremental price of identity alone.
 
 The following native SQLite workload measures current receipts and repeat
