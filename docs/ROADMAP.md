@@ -140,8 +140,6 @@ establish registry publication or downstream acceptance.
   would let a user override the auto-layout without polluting the AST —
   the honest place to add it if a consumer asks.
 
-## @jarenjs/contract
-
 ## @jarenjs/md
 
 - [ ] **Canonical printing's last shapes.** parseMarkdown(toMarkdown(doc)) deep-
@@ -170,11 +168,13 @@ establish registry publication or downstream acceptance.
 ## @jarenjs/charts
 
 - [ ] **Sessions for the remaining nine types** — `line`, `bar`, `heatmap` and `candlestick` patch in place; the other nine (`boxplot`, `gauge`, `map`, `pie`, `radar`, `sankey`, `scatter`, `streamgraph`, `treemap`) re-render wholesale, which is correct and, at their sizes, cheap.
+
 ## @jarenjs/calc
 
 - [ ] **Interactive plots** — drag-to-rotate for x·y·z and pan/zoom for x·y are a `hydrate` enhancement (out of scope for v1; the static SVG render is complete).
 - [ ] **Programmer 64-bit state** — programmer-mode evaluation, the `=` display and the committed entry are exact to 64 bits, but the state slice holds `ans` and the memory register as JSON numbers (exact to 2^53), so a word beyond that is held rounded: `=` shows the exact word while clearing the entry afterwards, reusing `ans` and `M+` use the rounded one (an unsigned `0xFFFFFFFFFFFFFFFF` rounds up to 2^64 and shows `0x0`). Also open: a division with a remainder whose quotient is beyond 2^53 truncates (a double holds no fraction there), a scope value must still be a `Number` (a `bigint` is refused), and `toExpression` prints a literal beyond 2^53 as its nearest double. An exact `ans` needs the state schema to carry a string or bigint form (a minor).
 - [ ] **More rate providers** — additional API-key-free tickers beyond CoinGecko and Binance; websocket/streaming rates are deliberately out of v1 (REST polling only).
+
 ## @jarenjs/play
 
 The engine playground behind `#/play`: pick an engine and an example, edit the
@@ -632,6 +632,11 @@ what each does is its own documentation's job
   over a member typed `string` alone. Wanted: a guarded native form that raises
   on the null row (a native count of the rows holding a null beside the seek),
   or a decision that the native answer is the contract for a nullable string.
+  A guarded form that counts the refused rows beside the seek was built and set
+  aside: SQLite evaluates a registered-function term for rows an earlier
+  `IN (SELECT …)` term already excludes, so it raised a false `JQ2001`, and the
+  count reads every row lacking the member, turning a seek on a sparse member
+  into a table scan.
 - [ ] **A capture answers most array methods with a coded refusal, but not all,
   and not on a to-many relation.** `u.tags.includes('a')` and 18 more (includes,
   indexOf, lastIndexOf, some, every, filter, find, findIndex, findLast,
@@ -768,6 +773,7 @@ what each does is its own documentation's job
   argument), so a host holding only the structural shape cannot bound a sweep, and "more remain"
   is implicit (count === limit; an exact multiple costs one extra call). Wanted: a `limit` in the
   structural shape and the kit, or a result that says whether more remain (a shape change).
+
 ## Lexical search (cross-package)
 
 The [resident lexical contract](../packages/core/docs/SEARCH.md), explicit JSON/LINQ
@@ -1042,6 +1048,7 @@ thing to avoid.
   list and never will be — it needs a clock, and there is none (see the
   constraint above); a host that wants "now" on a diagram supplies the instant
   as data.
+
 ## Geospatial (cross-package)
 
 Geography is a capability every surface of the suite can spell, and the shipped
