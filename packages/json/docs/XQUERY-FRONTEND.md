@@ -155,7 +155,8 @@ compileXQuery(text)(null, { doc: inputDocument });
 | `(: comments :)` (nestable) | whitespace, legal between any two tokens |
 | `declare variable $x external;` | validated, emits nothing (use is the declaration, §2) |
 | `declare variable $x := ...`, `... external := ...` | error `unsupported construct 'variable declaration with default value'` |
-| any other `declare ...` (function, namespace, option, default, ...) | error `unsupported construct 'declare <kind>'` |
+| any other declaration, `declare` followed by `function`, `namespace`, `default`, `option`, `base-uri`, `boundary-space`, `copy-namespaces`, `construction`, `ordering`, `context`, `decimal-format`, `revalidation` or `updating` | error `unsupported construct 'declare <kind>'` |
+| `declare` followed by any other word, or by no word | a name test like any other: `unsupported construct 'path expression'` (`declare ne gt`), or `unexpected keyword 'declare'` before an operand |
 | `import module` / `import schema`, `module namespace` (library modules), at the start of the prolog | error `unsupported construct 'import module'` / `'library module'` |
 | `import` or `module` anywhere else, or at the start without `module`/`schema`/`namespace` after it | a name test like any other: `unsupported construct 'path expression'` (`import eq 1`), or `unexpected keyword 'import'` before an operand |
 

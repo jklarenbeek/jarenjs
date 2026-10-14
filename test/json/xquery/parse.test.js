@@ -686,6 +686,27 @@ describe('XQuery front-end parser', () => {
       failsWith('group by $x', "unexpected keyword 'group'", 0);
     });
 
+    it('should read declare as a name test where no declaration kind follows', () => {
+      failsWith('declare ne gt', "unsupported construct 'path expression'", 0);
+      failsWith('declare eq 1', "unsupported construct 'path expression'", 0);
+      failsWith('declare = 1', "unsupported construct 'path expression'", 0);
+      failsWith('declare, declare', "unsupported construct 'path expression'", 0);
+      failsWith('declare-ne gt', "unsupported construct 'path expression'", 0);
+      failsWith('declare variable $x external; declare ne gt', "unsupported construct 'path expression'", 30);
+      failsWith('xquery version "3.1"; declare lt declare', "unsupported construct 'path expression'", 22);
+      // a keyword-named name followed by an operand is a misplaced keyword, as for every other keyword
+      failsWith('declare foo; 1', "unexpected keyword 'declare'", 0);
+      failsWith('declare Variable $x external; 1', "unexpected keyword 'declare'", 0);
+    });
+
+    it('should name every declaration kind XQuery defines', () => {
+      for (const kind of ['function', 'namespace', 'default', 'option', 'base-uri', 'boundary-space',
+        'copy-namespaces', 'construction', 'ordering', 'context', 'decimal-format', 'revalidation', 'updating'])
+        failsWith(`declare ${kind} x; 1`, `unsupported construct 'declare ${kind}'`, 0);
+      failsWith('declare variable $x external; declare ordering ordered; 1', "unsupported construct 'declare ordering'", 30);
+      failsWith('declare variable $x := 1; 1', "unsupported construct 'variable declaration with default value'", 0);
+    });
+
     it('should report a keyword-named name test as a path expression, not a keyword', () => {
       failsWith('let', "unsupported construct 'path expression'", 0);
       failsWith('declare', "unsupported construct 'path expression'", 0);

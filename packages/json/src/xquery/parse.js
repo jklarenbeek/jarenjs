@@ -102,6 +102,17 @@ const EXPR_KEYWORDS = new Set([
   'allowing', 'by', 'declare', 'import', 'module', 'external', 'variable',
 ]);
 
+// the words that open a prolog declaration after 'declare' (XQuery 3.1 Setter,
+// VarDecl, FunctionDecl, NamespaceDecl, DefaultNamespaceDecl, ContextItemDecl,
+// OptionDecl and DecimalFormatDecl, plus the XQuery Update `updating` and
+// XQuery 1.0 `revalidation` forms); any other word after it leaves 'declare' a
+// name test
+const DECLARATION_KINDS = new Set([
+  'variable', 'function', 'namespace', 'default', 'option', 'base-uri',
+  'boundary-space', 'copy-namespaces', 'construction', 'ordering', 'context',
+  'decimal-format', 'revalidation', 'updating',
+]);
+
 // words that follow an operand as an operator
 const OPERATOR_WORDS = new Set([
   'eq', 'ne', 'lt', 'le', 'gt', 'ge', 'and', 'or', 'div', 'idiv', 'mod', 'to',
@@ -1990,11 +2001,11 @@ export function parseXQuery(source) {
         if (cc(pos) === CC_PERCENT)
           fail("unsupported construct 'annotation'");
         // nothing declarable follows: 'declare' is a name test, not a prolog
-        if (!isNameStartCode(cc(pos))) {
+        const kind = isNameStartCode(cc(pos)) ? parseNCName() : '';
+        if (!DECLARATION_KINDS.has(kind)) {
           pos = save;
           return;
         }
-        const kind = parseNCName();
         if (kind === 'variable') {
           parseVariableDecl(at);
           continue;
