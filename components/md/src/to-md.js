@@ -3,7 +3,8 @@
  * @file Canonical Markdown printer: AST → text (MD-FORMAT.md §5).
  *
  * The printer is the round-trip half of the package: canonical output
- * re-parses to a deep-equal AST. Canonical choices: ATX headings, `-`
+ * re-parses to a deep-equal AST, short of a run of delimiters no search
+ * spells (MD-FORMAT.md §5). Canonical choices: ATX headings, `-`
  * bullets, `1.`/`2.` ordered markers renumbered from `start`, backtick
  * fences, `*`/`**` emphasis, inline links, backslash hard breaks and
  * piped tables. Dispatch is one prebuilt table per node class — no
@@ -113,12 +114,14 @@ const MASK_LENGTH = 600;
  * parsed. One call to `toMarkdown` has one pool of them: a few thousand to
  * start with, and for every run it prints this many more per printed
  * character. A run that needs no search leaves its share to the runs that
- * do; one that no spelling reads back as spends what there is and prints as
- * it always printed, so the whole call costs a small multiple of what
- * printing without the search costs.
+ * do; one that no spelling reads back as spends what there is, and then
+ * `GUIDED_CHARS_PER_CHAR` per printed character on a guided search of each
+ * stretch that still does not read back, so the whole call costs a small
+ * multiple of what printing without the search costs.
  */
 const SEARCH_CHARS_PER_CHAR = 64;
 const SEARCH_CHARS_FLOOR = 4000;
+const GUIDED_CHARS_PER_CHAR = SEARCH_CHARS_PER_CHAR / 2;
 /** What is left of the call's pool. */
 const searchPool = { left: 0 };
 
@@ -545,6 +548,21 @@ function stretchOf(nodes, start, end) {
 }
 
 /**
+ * Where each stretch of a block's content ends: wherever the join of two
+ * neighbours does not have a delimiter character on both sides.
+ * @param {MdNode[]} nodes
+ * @returns {number[]}
+ */
+function stretchEnds(nodes) {
+  const ends = [];
+  for (let i = 1; i < nodes.length; i++) {
+    if (plainEdge(nodes[i - 1], true) !== null || plainEdge(nodes[i], false) !== null) ends.push(i);
+  }
+  ends.push(nodes.length);
+  return ends;
+}
+
+/**
  * Spell a block's content a stretch at a time. The content splits wherever
  * the join of two neighbours does not have a delimiter character on both
  * sides, since a delimiter run reaches across a join only through such
@@ -559,12 +577,7 @@ function stretchOf(nodes, start, end) {
  * @returns {string | null}
  */
 function printSegments(nodes) {
-  /** @type {number[]} where each stretch ends */
-  let ends = [];
-  for (let i = 1; i < nodes.length; i++) {
-    if (plainEdge(nodes[i - 1], true) !== null || plainEdge(nodes[i], false) !== null) ends.push(i);
-  }
-  ends.push(nodes.length);
+  let ends = stretchEnds(nodes);
   /** @type {Map<number, string>} */
   const spelled = new Map();
   for (;;) {
@@ -590,13 +603,286 @@ function printSegments(nodes) {
   }
 }
 
+/** A character a printed prefix may end on: a letter, a digit or a space, none of which a delimiter run is made of. */
+const RE_CUT = /[\p{L}\p{N} ]/u;
+
+/**
+ * The opening marker an emphasis, strong or strikethrough node prints with
+ * in a spelling that decides each node (`style` 4).
+ * @param {MdNode} node
+ * @param {PrintContext} pc
+ * @returns {string}
+ */
+function openingMark(node, pc) {
+  if (node.type === 'strikethrough') return '~~';
+  const mark = underscoreFor(node, pc, 0) ? '_' : '*';
+  return node.type === 'strong' ? mark + mark : mark;
+}
+
+/**
+ * Adjacent text nodes joined into one, as the parser joins them.
+ * @param {MdNode[]} nodes
+ * @returns {MdNode[]}
+ */
+function joinTexts(nodes) {
+  /** @type {MdNode[]} */
+  const out = [];
+  for (const node of nodes) {
+    const last = out[out.length - 1];
+    if (node.type === 'text' && last !== undefined && last.type === 'text') {
+      out[out.length - 1] = { type: 'text', value: last.value + node.value };
+    }
+    else out.push(node);
+  }
+  return out;
+}
+
+/**
+ * Do two lists of inline nodes read the same? A text compares by its value
+ * and an emphasis, strong or strikethrough node by its children, which is
+ * all a prefix's nodes differ by; any other node compares whole.
+ * @param {MdNode[]} a
+ * @param {MdNode[]} b
+ * @returns {boolean}
+ */
+function sameInlines(a, b) {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i];
+    const y = b[i];
+    if (x.type !== y.type) return false;
+    if (x.type === 'text' ? x.value !== y.value
+      : isEmphasisClass(x) || x.type === 'strikethrough' ? !sameInlines(x.children, y.children)
+        : !equalsJson(x, y)) return false;
+  }
+  return true;
+}
+
+/**
+ * The text of a stretch up to a character of one of its text nodes, and
+ * what that text reads back as when the spelling is right: the nodes that
+ * close before the character as they are, and each node still open there
+ * as its opening marker in literal text, since nothing closes it yet.
+ * @param {MdNode[]} nodes
+ * @param {number[]} path the text node's index in each list on the way down to it
+ * @param {number} depth
+ * @param {number} cut the index of the last character printed
+ * @param {PrintContext} pc
+ * @returns {{ text: string, want: MdNode[] }}
+ */
+function prefixOf(nodes, path, depth, cut, pc) {
+  const node = nodes[path[depth]];
+  const want = nodes.slice(0, path[depth]);
+  let text = printInlines(want, pc, node);
+  if (depth === path.length - 1) {
+    const value = node.value.slice(0, cut + 1);
+    text += escapeText(value, printsBare(node, pc));
+    want.push({ type: 'text', value });
+  }
+  else {
+    const mark = openingMark(node, pc);
+    const inner = prefixOf(node.children, path, depth + 1, cut, pc);
+    text += mark + inner.text;
+    want.push({ type: 'text', value: mark }, ...inner.want);
+  }
+  return { text, want: joinTexts(want) };
+}
+
+/**
+ * A step of the guided search, in the order the stretch prints. A site
+ * decides one emphasis or strong node's delimiter or whether one text
+ * node's `*` and `_` print bare: `edge` says the text starts or ends with
+ * one, which it then tries bare first, and `closes` is the number of steps
+ * printed before the node's
+ * closing marker. A check reads back the text printed up to a character
+ * of a text node, its `cut`, found by its `path`.
+ * @typedef {{ node: MdNode, text: boolean, edge: boolean, closes: number }} GuidedSite
+ * @typedef {{ node: null, path: number[], cut: number }} GuidedCheck
+ */
+
+/**
+ * The sites of a stretch and the checks between them. A check follows each
+ * text node outside a link, at its last letter, digit or space: the parser
+ * matches each closing run against the runs before it, so what every run
+ * before that character reads as is settled there.
+ * @param {MdNode[]} nodes
+ * @param {(GuidedSite | GuidedCheck)[]} [steps]
+ * @param {number[]} [path]
+ * @param {boolean} [inLink]
+ * @returns {(GuidedSite | GuidedCheck)[]}
+ */
+function guidedSteps(nodes, steps = [], path = [], inLink = false) {
+  for (let i = 0; i < nodes.length; i++) {
+    const node = nodes[i];
+    path.push(i);
+    const delimited = isEmphasisClass(node);
+    const text = node.type === 'text' && RE_DELIMITER.test(node.value);
+    /** @type {GuidedSite | null} */
+    const site = delimited || text
+      ? { node, text, edge: text && (RE_DELIMITER.test(node.value.charAt(0)) || RE_DELIMITER.test(node.value.charAt(node.value.length - 1))), closes: 0 }
+      : null;
+    if (site !== null) steps.push(site);
+    if (node.type === 'text' && !inLink) {
+      let cut = node.value.length - 1;
+      while (cut >= 0 && !RE_CUT.test(node.value.charAt(cut))) cut--;
+      if (cut >= 0) steps.push({ node: null, path: path.slice(), cut });
+    }
+    if (Array.isArray(node.children)) {
+      guidedSteps(node.children, steps, path, inLink || !(delimited || node.type === 'strikethrough'));
+    }
+    if (site !== null) site.closes = steps.length;
+    path.pop();
+  }
+  return steps;
+}
+
+/**
+ * What the stretch prints as in a spelling found site by site in the order
+ * the sites print, a text node that starts or ends with a `*` or `_` trying
+ * them bare first and any other text escaped first. The text printed so
+ * far is read back at every check, and a prefix that reads back as other
+ * nodes is abandoned there: the search goes back to the last site that can
+ * have caused it (one printed since the check before, or a node open across
+ * that check) instead of trying every spelling of the sites after it. It
+ * does not try every spelling, and it is paid from the pool; null when no
+ * spelling it reaches reads back.
+ * @param {Stretch} stretch
+ * @param {boolean} underscore emphasis and strong try `_` before `*`
+ * @returns {string | null}
+ */
+function guidedSpelling(stretch, underscore) {
+  const steps = guidedSteps(stretch.nodes);
+  /** @type {Map<MdNode, boolean>} */
+  const assign = new Map();
+  /** @param {GuidedSite} site */
+  const reset = (site) => assign.set(site.node, site.text ? site.edge : underscore);
+  for (const step of steps) if (step.node !== null) reset(step);
+  const pc = { style: EMPHASIS_STYLES, depth: 0, assign };
+  /** @type {number[]} the last check before each step */
+  const checkBefore = [];
+  for (let k = 0, last = -1; k <= steps.length; k++) {
+    checkBefore.push(last);
+    if (k < steps.length && steps[k].node === null) last = k;
+  }
+  /**
+   * The sites a prefix that reads back as other nodes at step `at` is blamed on.
+   * @param {number} at
+   * @returns {Set<number>}
+   */
+  const suspects = (at) => {
+    const blamed = new Set();
+    for (let k = 0; k < at; k++) {
+      const step = steps[k];
+      if (step.node === null) continue;
+      if (k > checkBefore[at] || (!step.text && step.closes > checkBefore[at])) blamed.add(k);
+    }
+    return blamed;
+  };
+  /** @type {Set<number>[]} what each site's spellings tried so far were blamed on, besides itself */
+  const blame = steps.map(() => new Set());
+  /** @type {Uint8Array} how many spellings of each site are tried */
+  const tried = new Uint8Array(steps.length);
+  let k = 0;
+  while (searchPool.left > 0) {
+    /** @type {Set<number>} */
+    let failed;
+    const step = steps[k];
+    if (step === undefined) {
+      const body = printInlines(stretch.nodes, pc, stretch.next);
+      if (readsBody(stretch, body)) return body;
+      failed = suspects(k);
+    }
+    else if (step.node !== null) {
+      tried[k++] = 1;
+      continue;
+    }
+    else {
+      const prefix = prefixOf(stretch.nodes, step.path, 0, step.cut, pc);
+      const text = stretch.before + prefix.text;
+      searchPool.left -= text.length;
+      const want = stretch.before === '' ? prefix.want : joinTexts([{ type: 'text', value: stretch.before }, ...prefix.want]);
+      if (sameInlines(readBack(text), want)) {
+        k++;
+        continue;
+      }
+      failed = suspects(k);
+    }
+    // back to the last site blamed with a spelling left to try; the sites
+    // from `k` on are still as they started
+    for (;;) {
+      let to = -1;
+      for (const site of failed) if (site > to) to = site;
+      if (to === -1) return null;
+      for (let j = to + 1; j < k; j++) {
+        const later = steps[j];
+        if (later.node === null) continue;
+        tried[j] = 0;
+        blame[j].clear();
+        reset(later);
+      }
+      for (const site of failed) if (site !== to) blame[to].add(site);
+      const node = /** @type {MdNode} */ (steps[to].node);
+      if (tried[to] === 1) {
+        tried[to] = 2;
+        assign.set(node, !assign.get(node));
+        k = to + 1;
+        break;
+      }
+      failed = new Set(blame[to]);
+    }
+  }
+  return null;
+}
+
+/**
+ * The guided search with emphasis and strong trying `_` first, on half of
+ * what is left of the pool, then trying `*` first on the rest: a spelling
+ * far from the canonical one is found by the first, one near it by the
+ * second.
+ * @param {Stretch} stretch
+ * @returns {string | null}
+ */
+function guidedEitherWay(stretch) {
+  const half = searchPool.left / 2;
+  searchPool.left -= half;
+  const body = guidedSpelling(stretch, true);
+  searchPool.left += half;
+  return body ?? guidedSpelling(stretch, false);
+}
+
+/**
+ * Print a block's content that no spelling the search found reads back as,
+ * a stretch at a time: each stretch prints canonically where that reads
+ * back, else in the spelling the guided search finds, and canonically only
+ * where neither does — so one stretch no search spells costs the block
+ * none of the others. The guided search is paid from an allowance of its
+ * own, and the call's pool is left as the search before it left it.
+ * @param {MdNode[]} nodes
+ * @param {number} allowance
+ * @returns {string}
+ */
+function printStretches(nodes, allowance) {
+  const kept = searchPool.left;
+  searchPool.left = allowance;
+  const ends = stretchEnds(nodes);
+  let text = '';
+  for (let k = 0, start = 0; k < ends.length; start = ends[k++]) {
+    const stretch = stretchOf(nodes, start, ends[k]);
+    const part = printInlines(stretch.nodes, CANONICAL, stretch.next);
+    text += searchPool.left > 0 && !readsBody(stretch, part) ? guidedEitherWay(stretch) ?? part : part;
+  }
+  searchPool.left = kept;
+  return text;
+}
+
 /**
  * Print the inline content of one block. A run of delimiters the
  * canonical spelling would merge (emphasis in emphasis, emphasis beside
  * strong) is checked against the parser, and the first spelling that
  * reads back as the same nodes is the one printed: the alternating ones,
  * then every combination for a short run, then a search a stretch at a
- * time, which has no bound on the length of the run.
+ * time, which has no bound on the length of the run. When none of those
+ * reads back, each stretch is printed on its own (`printStretches`).
  * @param {MdNode[]} nodes
  * @returns {string}
  */
@@ -605,7 +891,8 @@ function printRun(nodes) {
   searchPool.left += SEARCH_CHARS_PER_CHAR * canonical.length;
   if (!mayMergeDelimiters(nodes) || readsAs(canonical, nodes)) return canonical;
   const whole = wholeStretch(nodes);
-  return alternatingSpelling(whole) ?? maskedSpelling(whole, canonical.length) ?? printSegments(nodes) ?? canonical;
+  return alternatingSpelling(whole) ?? maskedSpelling(whole, canonical.length) ?? printSegments(nodes)
+    ?? printStretches(nodes, GUIDED_CHARS_PER_CHAR * canonical.length);
 }
 
 /**

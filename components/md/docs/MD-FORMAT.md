@@ -591,7 +591,20 @@ character of the kind its neighbours print beside it, and spelled with as few
 nodes and texts the other way as will do, so the cost of the search grows with
 the longest stretch of touching delimiters and not with the run. The result
 is read back as a whole, and stretches a run turns out to reach across are
-searched together. A destination, a title
+searched together. When no spelling those searches find reads back, the
+content prints a stretch at a time: each stretch canonically where that reads
+back, else in the spelling a guided search finds, and canonically only where
+neither does, so a stretch no search spells changes no other stretch's
+spelling. The guided search decides the nodes in the order they print, each
+text with a `*` or `_` at its edge trying it bare first, reads the text
+printed so far back after each text node, and on a prefix that reads back as
+other nodes returns to the last node that can have caused it; it is paid from
+an allowance of its own in proportion to what the block prints. A stretch
+neither search spells, and a node no Markdown reads back as (an emphasis or
+strong node with nothing in it, which the parser never makes), print
+canonically and read back as other nodes there; `toMarkdown` does not report
+it, and a caller that needs to know parses the text again and compares. A
+destination, a title
 and a fence's info string are escaped as they are read: a backslash before
 punctuation, an `&` that opens a character reference, a tab and a newline
 print as an escape or a reference, and a destination that starts with `<`
@@ -604,7 +617,8 @@ tab in the AST, as it is inside code and HTML blocks.
 The normative round-trip guarantees:
 
 1. `parseMarkdown(toMarkdown(doc))` produces an AST deep-equal to
-   `doc.ast` for any document this package produced, and printing that
+   `doc.ast` for any document this package produced, short of the
+   delimiter runs no search above spells, and printing that
    AST again reproduces the same text (canonical form is a fixed
    point). Both halves are checked over the whole CommonMark example
    corpus, not a sample: a printer that cannot represent a construct it

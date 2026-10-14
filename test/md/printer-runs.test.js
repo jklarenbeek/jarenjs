@@ -1,14 +1,16 @@
 //@ts-check
 /**
- * The printer's output reads back as the document it came from for any run
- * of emphasis and strong, however long, and for an HTML block that starts
- * with spaces and stands straight after a list.
+ * The printer's output reads back as the document it came from for a run
+ * of emphasis and strong however long, wherever a search spells it, and for
+ * an HTML block that starts with spaces and stands straight after a list.
  *
  * A run the canonical spelling merges into one delimiter run is spelled by
  * a search against the parser. The search covers a stretch of the run at a
  * time, with the character each neighbour prints beside its edge, so it is
  * not bounded by the number of delimiter nodes or characters in the run;
- * the timing tests compare eight times the input and never a wall clock.
+ * a stretch it does not spell is left to a guided search, and one neither
+ * spells prints canonically without changing the others. The timing tests
+ * compare eight times the input and never a wall clock.
  * An HTML block that begins with as many spaces as the last list item's
  * content is indented by would print inside that item, so a definition that
  * defines nothing ends the list first.
@@ -60,6 +62,57 @@ function random(seed) {
   };
   return { int, pick: (items) => items[int(items.length)] };
 }
+
+/**
+ * A printer of each source's document, parsed once: a timing compares the printing.
+ * @returns {(source: string) => string}
+ */
+function printParsed() {
+  /** @type {Map<string, any>} */
+  const documents = new Map();
+  return (source) => {
+    let doc = documents.get(source);
+    if (doc === undefined) {
+      doc = parseMarkdown(source);
+      documents.set(source, doc);
+    }
+    return toMarkdown(doc);
+  };
+}
+
+/**
+ * How many times longer printing forty paragraphs takes than printing forty
+ * paragraphs of emphasis and strong that read back at once, each as many
+ * characters long as the source of one of the forty. Both documents print
+ * about the same number of characters; each timing is several prints in a
+ * row, so that the easy one takes milliseconds, and the fastest of several,
+ * taken in turn so that a loaded host slows them alike.
+ * @param {any[]} hard the forty paragraphs
+ * @param {number} length
+ * @returns {{ ratio: number, message: string }}
+ */
+function costAgainstReadingBack(hard, length) {
+  const easy = parseMarkdown(Array.from({ length: 40 }, () => '*a **b** c* and '.repeat(7).slice(0, length)).join('\n\n'));
+  const time = (/** @type {any} */ doc) => {
+    const started = performance.now();
+    for (let i = 0; i < 6; i++) toMarkdown(doc);
+    return performance.now() - started;
+  };
+  let hardest = Infinity;
+  let easiest = Infinity;
+  for (let i = 0; i < 5; i++) {
+    hardest = Math.min(hardest, time(hard));
+    easiest = Math.min(easiest, time(easy));
+  }
+  return { ratio: hardest / easiest, message: `${hardest.toFixed(2)} ms against ${easiest.toFixed(2)} ms` };
+}
+
+/**
+ * A run of delimiters, letters and spaces whose nesting the search a
+ * stretch at a time does not spell: most of its emphasis and strong need `_`
+ * and its literal `*` and `_` need to be bare, as its source has them.
+ */
+const UNIT = '.___a_b_1ba 1b_1**ab***__a _.1_b11****__1a **_ b***1*a1b.b b b __*__* * a a1__1*****____._. b**___********';
 
 describe('toMarkdown — a run of emphasis and strong no short search spells reads back', function () {
   // Each source below is five or more delimiter nodes whose canonical
@@ -128,17 +181,7 @@ describe('toMarkdown — the spelling a search finds is the one printed', functi
 });
 
 describe('toMarkdown — printing a long run costs time in proportion to its length', function () {
-  /** @type {Map<string, any>} */
-  const documents = new Map();
-  /** @param {string} source */
-  const print = (source) => {
-    let doc = documents.get(source);
-    if (doc === undefined) {
-      doc = parseMarkdown(source);
-      documents.set(source, doc);
-    }
-    return toMarkdown(doc);
-  };
+  const print = printParsed();
   /** @type {[string, (n: number) => string][]} */
   const SHAPES = [
     ['stubborn units a word apart', (n) => '**.***1****1 plain '.repeat(n)],
@@ -186,59 +229,92 @@ describe('toMarkdown — a bare delimiter never opens a list or a rule', functio
   });
 });
 
-describe('toMarkdown — content no searched spelling reads back as costs time in proportion to its length', function () {
-  // ninety characters of delimiters, letters and spaces that the search does not
-  // reach: the printer spends its whole allowance on it and prints it canonically.
-  // If it ever reads back, use another run the search gives up on: the point is the cost.
-  const UNIT = '.___a_b_1ba 1b_1**ab***__a _.1_b11****__1a **_ b***1*a1b.b b b __*__* * a a1__1*****____._. b**___********';
+describe('toMarkdown — content only the guided search spells reads back, at a cost in proportion to its length', function () {
   /** @param {number} n */
   const make = (n) => (UNIT + ' plain ').repeat(n);
 
-  it('prints it as it prints everything the search gives up on, and not as the nodes it came from', () => {
-    const source = make(10);
-    const doc = parseMarkdown(source);
-    const text = toMarkdown(doc);
-    assert.notDeepEqual(parseMarkdown(text).ast, doc.ast);
-    assert.equal(toMarkdown(doc), text);
+  it('prints it so that it reads back, and each copy of it in a block', () => {
+    assert.equal(canonical(UNIT),
+      '.___a\\_b\\_1ba 1b\\_1**ab***__a _.1_b11****__1a **_ b***1*a1b.b b b __*__* * a a1__1*****____._. b**___********\n');
+    canonical(make(10));
+  });
+
+  it('spells a run near the canonical spelling and one far from it', () => {
+    // the first needs `*` where it can and the bare `_` and `*` its texts start
+    // or end with, the second needs most of its emphasis and strong spelled `_`
+    assert.equal(canonical('*`c`b1__.**_1`c`***____** bb*b_a .1!"`c` _*`c`!a_[l](u) *_**"***** _'),
+      '*`c`b1\\_\\_.**_1`c`***____** bb*b\\_a .1!"`c` _*`c`!a_[l](u) *_**"***** _\n');
+    assert.equal(canonical('[l](u) b(a (__a **`c`*(!`c`**a a"***((_**._**a *(_! bb 1*"._*.b_._!***.* ba *[l](u)""~~1_"[l](u)b_~~("'),
+      '[l](u) b(a (__a __`c`_(!`c`__a a"___((\\___._**a *(_! bb 1\\*"._*.b_._!***.* ba *[l](u)""\\~\\~1_"[l](u)b_\\~\\~("\n');
   });
 
   it('costs at most a bounded multiple of printing a run that reads back at once', function () {
-    // The search is paid from a pool in proportion to what a call prints, so
-    // content it cannot spell costs a bounded number of reads of itself, not the
-    // thousands a search of every spelling would. Both documents print the same
-    // number of characters; each timing is several prints in a row, so that the
-    // easy one takes milliseconds, and the fastest of several, taken in turn so
-    // that a loaded host slows them alike. The limit sits near the geometric
-    // mean of the bounded multiple and the unbounded search.
-    const hard = parseMarkdown(Array.from({ length: 40 }, () => UNIT).join('\n\n'));
-    const easy = parseMarkdown(Array.from({ length: 40 }, () => '*a **b** c* and '.repeat(7).slice(0, UNIT.length)).join('\n\n'));
-    const time = (/** @type {any} */ doc) => {
-      const started = performance.now();
-      for (let i = 0; i < 6; i++) toMarkdown(doc);
-      return performance.now() - started;
-    };
-    let hardest = Infinity;
-    let easiest = Infinity;
-    for (let i = 0; i < 5; i++) {
-      hardest = Math.min(hardest, time(hard));
-      easiest = Math.min(easiest, time(easy));
-    }
-    assert.ok(hardest / easiest < 150, `${hardest.toFixed(2)} ms against ${easiest.toFixed(2)} ms`);
+    // Each search is paid in proportion to what a call prints, so content
+    // that needs every one of them costs a bounded number of reads of itself,
+    // not the thousands a search of every spelling would. The limit sits near
+    // the geometric mean of the bounded multiple and the unbounded search.
+    const hard = parseMarkdown(Array.from({ length: 40 }, () => UNIT).join('\n\n')).ast;
+    const { ratio, message } = costAgainstReadingBack(hard, UNIT.length);
+    assert.ok(ratio < 150, message);
   });
 
   it('eight times the content at most multiplies the time by twenty-four', function () {
-    /** @type {Map<string, any>} */
-    const documents = new Map();
-    /** @param {string} source */
-    const print = (source) => {
-      let doc = documents.get(source);
-      if (doc === undefined) {
-        doc = parseMarkdown(source);
-        documents.set(source, doc);
-      }
-      return toMarkdown(doc);
-    };
-    const ratio = growthRatio(print, make(6), make(48), { limit: 24 });
+    const ratio = growthRatio(printParsed(), make(6), make(48), { limit: 24 });
+    assert.ok(ratio < 24, `eight times the content multiplied the time by ${ratio.toFixed(2)}`);
+  });
+});
+
+describe('toMarkdown — a stretch no search spells costs the block none of the others', function () {
+  // The parser never makes an emphasis with nothing in it, so no spelling of
+  // one reads back: content that holds one makes every search spend all it is
+  // given, and prints canonically where it stands.
+  const EMPTY = { type: 'emphasis', children: [] };
+  /**
+   * `n` copies of the guided search's run a word apart, each with an empty
+   * emphasis at the end of its outer strong.
+   * @param {number} n
+   * @returns {any[]}
+   */
+  const unspellable = (n) => {
+    /** @type {any[]} */
+    const children = [];
+    for (let i = 0; i < n; i++) {
+      const [first, strong, last] = parseMarkdown(UNIT).ast[0].children;
+      const previous = children.pop();
+      children.push(previous === undefined ? first : { type: 'text', value: previous.value + ' plain ' + first.value },
+        { ...strong, children: [...strong.children, EMPTY] }, last);
+    }
+    return [{ type: 'paragraph', children }];
+  };
+
+  it('prints the stretches that read back as they read, and canonically only one no text reads back as', () => {
+    const unit = parseMarkdown(UNIT).ast[0].children;
+    const ast = [{ type: 'paragraph', children: [...unit, { type: 'text', value: ' plain ' }, EMPTY] }];
+    assert.equal(toMarkdown(ast), canonical(UNIT).slice(0, -1) + ' plain **\n');
+  });
+
+  it('leaves the blocks after it the pool the search before it left', () => {
+    // the second block is a run whose search needs what the first block's search
+    // left of the pool, and the first holds a node no text reads back as
+    const after = parseMarkdown('"_`c`**1b~~1_ ba(__* a  b[l](u)a .`c`1**b____1.~~**_1__ b*[l](u)"" "(*1!a !a _.a~~_[l](u)[l](u)a!!**__*`c`___!~~_*1*****(a ~~a__*~~*[l](u)`c`!_***').ast;
+    const ast = [{ type: 'paragraph', children: [{ type: 'strong', children: [EMPTY] }, { type: 'text', value: ' a' }] }, ...after];
+    assert.deepEqual(parseMarkdown(toMarkdown(ast)).ast.slice(1), after);
+  });
+
+  it('prints a stretch no spelling reads back as canonically, and the same every time', () => {
+    const ast = unspellable(1);
+    const text = toMarkdown(ast);
+    assert.equal(text, '.***a\\_b\\_1ba 1b\\_1**ab**\\***a _.1\\_b11\\*\\*\\*\\*_*1a \\*\\** b***1*a1b.b b b **\\***\\* \\* a a1\\_\\_1**\\*\\*\\*__**.*. b\\*\\*****\\_\\*\\*\\*\\*\\*\\*\\*\\*\n');
+    assert.equal(toMarkdown(ast), text);
+  });
+
+  it('costs at most a bounded multiple of printing a run that reads back at once', function () {
+    const { ratio, message } = costAgainstReadingBack(Array.from({ length: 40 }, () => unspellable(1)[0]), UNIT.length);
+    assert.ok(ratio < 150, message);
+  });
+
+  it('eight times the content at most multiplies the time by twenty-four', function () {
+    const ratio = growthRatio((/** @type {any[]} */ ast) => toMarkdown(ast), unspellable(6), unspellable(48), { limit: 24 });
     assert.ok(ratio < 24, `eight times the content multiplied the time by ${ratio.toFixed(2)}`);
   });
 });

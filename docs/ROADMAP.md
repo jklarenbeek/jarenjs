@@ -127,17 +127,18 @@ establish registry publication or downstream acceptance.
 
 ## @jarenjs/md
 
-- [ ] **Canonical printing: delimiter soups.** `toMarkdown` searches a run of
-  emphasis and strong a stretch at a time, paid from a per-call pool in
-  proportion to what it prints, so length no longer limits it, but a stretch of
-  dozens of touching delimiter nodes with no text between can exceed the pool,
-  and a nesting that needs only some of one text node's `*`/`_` left bare is
-  outside the spelling model; such a run prints canonically and reads back as
-  other nodes, and one unspellable stretch returns the whole block to the
-  canonical spelling, discarding the stretches that were solved. Content the
-  search cannot spell costs far more than the single read-back it used to.
-  Wanted: a guided search, a per-character bare spelling, or printing the solved
-  stretches and the canonical spelling only where needed.
+- [ ] **Canonical printing: delimiter soups.** `toMarkdown` spells a run of
+  emphasis and strong by a search a stretch at a time and, where nothing it
+  finds reads back, prints the block a stretch at a time, each stretch the
+  canonical spelling does not read back as spelled by a guided search (sites
+  in print order, the printed prefix read back after each text node), each
+  search paid in proportion to what the call prints. A stretch the guided
+  search does not reach within its allowance still prints canonically and
+  reads back as other nodes there, as does a node no Markdown reads back as
+  (an empty emphasis or strong); `toMarkdown` does not report either. Wanted:
+  a spelling derived from the delimiter algorithm instead of searched for, and
+  a way to report a stretch that does not read back (a new option: a minor).
+
 ## @jarenjs/mermaid
 
 - [ ] **`htmlLabels:true`** — labels still render as SVG `<text>`. The view renderer now supports HTML descendants of `foreignObject` and namespaced attributes; Mermaid still needs HTML-label rendering, sizing and parity tests. Safe mode intentionally excludes `foreignObject`.
