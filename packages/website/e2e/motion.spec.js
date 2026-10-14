@@ -61,7 +61,10 @@ const lastCard = (page) => page.locator('.engine-card').last();
 async function startMeasuredCount(page) {
   await page.clock.install();
   await openHome(page, 'no-preference');
-  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1000));
+  // a margin the page round trip cannot outrun on a loaded host: pausing at a
+  // time the running clock already passed is refused ('cannot fast-forward to
+  // the past'), and the count under test starts later, on scroll
+  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 5000));
   // Read the renderer's string before the below-fold card starts counting.
   const headline = page.locator('.engine-perf').last();
   const published = await headline.textContent();
