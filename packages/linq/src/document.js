@@ -54,15 +54,16 @@ export function requireNonNegativeInteger(value, what) {
 }
 
 /**
- * Refuse an argument a terminal does not read. An aggregate terminal
- * folds the sequence it ends: `count((r) => r.n > 3)` would count every
- * row and `sum((r) => r.n)` would fold the unprojected items, the
- * callback never called, so the one passed is `JL0005` naming the
- * spelling that does what it was written to do. An `undefined` is a
- * caller forwarding an optional argument it did not receive, not an
- * argument.
+ * Refuse an argument a member does not read. A terminal acts on the
+ * sequence it ends: `count((r) => r.n > 3)` would count every row,
+ * `sum((r) => r.n)` would fold the unprojected items and
+ * `first((r) => r.n > 3)` would answer the first row, the callback never
+ * called; `distinct((r) => r.n)` would drop only whole-row repeats. The
+ * one passed is `JL0005` naming the spelling that does
+ * what it was written to do. An `undefined` is a caller forwarding an
+ * optional argument it did not receive, not an argument.
  * @param {readonly any[]} args - what the terminal was handed
- * @param {string} name - the terminal's spelling, for the refusal
+ * @param {string} name - the member's spelling, for the refusal
  * @param {string} instead - the chain that reads the argument
  */
 export function requireNoArgument(args, name, instead) {
@@ -70,6 +71,27 @@ export function requireNoArgument(args, name, instead) {
     throw new LinqBuildError('JL0005',
       `${name}() takes no argument — it reads none, so the one passed would be ignored; `
       + `filter or project first: ${instead}`);
+  }
+}
+
+/**
+ * Refuse a callback in the default slot of `firstOrDefault`,
+ * `lastOrDefault` or `singleOrDefault`, and an argument after it. The
+ * slot takes the VALUE answered for an empty sequence, never a
+ * predicate: `firstOrDefault((r) => r.n > 3)` answered the first row
+ * (or, over an empty sequence, the function itself), the predicate never
+ * called. A default is a JSON-shaped item of the sequence's own kind, and
+ * a function is none, so the one passed is `JL0005` naming the spelling
+ * that reads a predicate; a caller who wants a callable fallback writes
+ * `firstOrDefault() ?? fn`. `undefined` is no argument.
+ * @param {readonly any[]} args - what the terminal was handed
+ * @param {string} name - the terminal's spelling, for the refusal
+ */
+export function requireDefaultValue(args, name) {
+  if (typeof args[0] === 'function' || args.slice(1).some((arg) => arg !== undefined)) {
+    throw new LinqBuildError('JL0005',
+      `${name}() takes one default value, not a predicate — it reads no callback, so the one `
+      + `passed would be ignored or answered as the default; filter first: where(pred).${name}(value)`);
   }
 }
 

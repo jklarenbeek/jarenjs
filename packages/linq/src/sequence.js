@@ -21,7 +21,8 @@ import {
 } from './expression.js';
 import {
   emitDocument, wrapTerminal, snapshot, fanProjection, isReservedBinding, RESERVED_BINDINGS_TEXT,
-  PROJECTING_STAGES, requireNonNegativeInteger, requireNoArgument, readOptions, orderSpec, RUN_BINDINGS, mergeBindings,
+  PROJECTING_STAGES, requireNonNegativeInteger, requireNoArgument, requireDefaultValue, readOptions, orderSpec,
+  RUN_BINDINGS, mergeBindings,
 } from './document.js';
 import {
   classifySource, compileDocument, executeInMemory, providerRoot, providerRelations, sharesScope,
@@ -323,11 +324,19 @@ export class Sequence {
     return this.#with({ kind: 'take', count: requireNonNegativeInteger(count, 'take') });
   }
 
-  distinct() {
+  /** Drop repeated items. Reads no argument, and no key either:
+   * `select(sel).distinct()` keeps the first of each repeated projection
+   * (the keys, not the rows), and a selector handed here is `JL0005`.
+   * @param {...undefined} unread */
+  distinct(...unread) {
+    requireNoArgument(unread, 'distinct', 'select(sel).distinct()');
     return this.#with({ kind: 'distinct' });
   }
 
-  reverse() {
+  /** Reverse the order. Reads no argument (`JL0005` otherwise).
+   * @param {...undefined} unread */
+  reverse(...unread) {
+    requireNoArgument(unread, 'reverse', 'where(pred).reverse()');
     return this.#with({ kind: 'reverse' });
   }
 
@@ -527,7 +536,11 @@ export class Sequence {
     return /** @type {any[]} */ (result);
   }
 
-  toArray() {
+  /** Every item. Reads no argument: `select(sel).toArray()` maps them
+   * (`JL0005` otherwise).
+   * @param {...undefined} unread */
+  toArray(...unread) {
+    requireNoArgument(unread, 'toArray', 'select(sel).toArray()');
     return this.#window('toArray');
   }
 
@@ -545,40 +558,64 @@ export class Sequence {
     yield* this.toArray();
   }
 
-  first() {
+  /** The first item. Reads no argument: `where(pred).first()` is the
+   * first match (`JL0005` otherwise).
+   * @param {...undefined} unread */
+  first(...unread) {
+    requireNoArgument(unread, 'first', 'where(pred).first()');
     const w = this.#window('first');
     if (w.length === 0) throw new LinqRuntimeError('JL2001', 'first() found no element');
     return w[0];
   }
 
-  /** @param {any} [defaultValue] */
-  firstOrDefault(defaultValue) {
+  /** The first item, or the value for an empty sequence; reads no
+   * predicate, so a callback there is `JL0005`
+   * (`where(pred).firstOrDefault(value)`).
+   * @param {any} [defaultValue] @param {...undefined} unread */
+  firstOrDefault(defaultValue, ...unread) {
+    requireDefaultValue([defaultValue, ...unread], 'firstOrDefault');
     const w = this.#window('first');
     return w.length === 0 ? defaultValue : w[0];
   }
 
-  single() {
+  /** The only item. Reads no argument: `where(pred).single()` is the one
+   * match (`JL0005` otherwise).
+   * @param {...undefined} unread */
+  single(...unread) {
+    requireNoArgument(unread, 'single', 'where(pred).single()');
     const w = this.#window('single');
     if (w.length === 0) throw new LinqRuntimeError('JL2001', 'single() found no element');
     if (w.length > 1) throw new LinqRuntimeError('JL2002', 'single() found more than one element');
     return w[0];
   }
 
-  /** @param {any} [defaultValue] */
-  singleOrDefault(defaultValue) {
+  /** The only item, or the value for an empty sequence; reads no
+   * predicate, so a callback there is `JL0005`
+   * (`where(pred).singleOrDefault(value)`).
+   * @param {any} [defaultValue] @param {...undefined} unread */
+  singleOrDefault(defaultValue, ...unread) {
+    requireDefaultValue([defaultValue, ...unread], 'singleOrDefault');
     const w = this.#window('single');
     if (w.length > 1) throw new LinqRuntimeError('JL2002', 'singleOrDefault() found more than one element');
     return w.length === 0 ? defaultValue : w[0];
   }
 
-  last() {
+  /** The last item. Reads no argument: `where(pred).last()` is the last
+   * match (`JL0005` otherwise).
+   * @param {...undefined} unread */
+  last(...unread) {
+    requireNoArgument(unread, 'last', 'where(pred).last()');
     const w = this.#window('last');
     if (w.length === 0) throw new LinqRuntimeError('JL2001', 'last() found no element');
     return w[0];
   }
 
-  /** @param {any} [defaultValue] */
-  lastOrDefault(defaultValue) {
+  /** The last item, or the value for an empty sequence; reads no
+   * predicate, so a callback there is `JL0005`
+   * (`where(pred).lastOrDefault(value)`).
+   * @param {any} [defaultValue] @param {...undefined} unread */
+  lastOrDefault(defaultValue, ...unread) {
+    requireDefaultValue([defaultValue, ...unread], 'lastOrDefault');
     const w = this.#window('last');
     return w.length === 0 ? defaultValue : w[0];
   }

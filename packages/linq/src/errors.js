@@ -72,8 +72,10 @@ export const LINQ_CODES = /* @__PURE__ */ Object.freeze({
  *    path, a member read off a to-many relation before `all()`, a
  *    negative `skip`/`take`, an `at()` index beyond a safe integer, an
  *    argument handed to an aggregate (`count`, `sum`, `avg`, `min`,
- *    `max`, `exists`, `isEmpty`), which reads none, a value that cannot
- *    embed in a document — a sparse array among them — an option
+ *    `max`, `exists`, `isEmpty`) or to a member that reads none
+ *    (`first`, `last`, `single`, `toArray`, `distinct`, `reverse`, a
+ *    predicate in the default slot of `firstOrDefault`), a value that
+ *    cannot embed in a document — a sparse array among them — an option
  *    outside one of the chain's closed option bags, or a chain handed to
  *    the `live()` of a source it was not built over)
  *  - `JL0006` — an operator the mapping table records as

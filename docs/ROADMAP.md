@@ -464,13 +464,17 @@ what each does is its own documentation's job
   asking in JavaScript. Wanted: a root for a join table, so a membership can be
   filtered, counted and joined in one document
   ([DB-CLIENT §6](../packages/linq/docs/DB-CLIENT.md)).
-- [ ] **More Sequence members drop an argument.** On `from()`: `first(pred)`,
-  `last(pred)`, `firstOrDefault`/`lastOrDefault(pred)`, `toArray(x)`,
-  `reverse(x)` and `distinct(selector)` answer as if the argument were never
-  written (`from(rows).first((r) => r.n.gt(3))` is the first row, not the first
-  match; `single(pred)` fails `JL2002`), and `fromAsync()` was not checked.
-  Wanted: the same `JL0005` refusal naming `where(pred).first()` /
-  `select(sel).distinct()`.
+- [ ] **Overloads and trailing arguments a Sequence member reads none of.**
+  `selectMany(sel, resultSel)`, `groupBy(key, elementSel)` and `aggregate(seed,
+  step, resultSel)` build and answer as if the C# result or element selector
+  were never written (`from([{n:1}]).groupBy((r) => r.n, (r) => r.n).toArray()`
+  still holds whole rows in `items`; `aggregate(0, step, (x) => x)` folds
+  without the result selector), and a trailing argument on `where`, `select`,
+  `skip`, `take`, `any`, `all`, `concat`, `defaultIfEmpty`, `elementAt`,
+  `elementAtOrDefault`'s default slot, `ofType`, `cast`, `toDocument` and
+  `explain` is dropped the same way (`from(rows).take(1, 2)` takes 1). Both
+  surfaces. Wanted: the same `JL0005` refusal (`requireNoArgument` on a rest
+  parameter), naming the `select(...)` to write after the operator.
 - [ ] **A collection handle's `execute`, `query` and `explain` take a chain and
   answer nothing real.** `client.collections.orders.execute(orders.where(...))`
   answers `{}` and `query(chain)` yields `[{}]` (the store's members take a

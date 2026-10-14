@@ -46,7 +46,8 @@ import {
 } from './provider.js';
 import {
   emitDocument, wrapTerminal, snapshot, fanProjection, isReservedBinding, RESERVED_BINDINGS_TEXT,
-  PROJECTING_STAGES, requireNonNegativeInteger, requireNoArgument, readOptions, orderSpec, RUN_BINDINGS, mergeBindings,
+  PROJECTING_STAGES, requireNonNegativeInteger, requireNoArgument, requireDefaultValue, readOptions, orderSpec,
+  RUN_BINDINGS, mergeBindings,
 } from './document.js';
 import { adaptAsyncSource } from './sources.js';
 import { applyMapAsync, normalizeMapAsyncOptions } from './concurrency.js';
@@ -384,8 +385,22 @@ export class AsyncSequence {
 
   skip(count) { return this.#with({ kind: 'skip', count: requireNonNegativeInteger(count, 'skip') }); }
   take(count) { return this.#with({ kind: 'take', count: requireNonNegativeInteger(count, 'take') }); }
-  distinct() { return this.#with({ kind: 'distinct' }); }
-  reverse() { return this.#with({ kind: 'reverse' }); }
+
+  /** Drop repeated items. Reads no argument, and no key either:
+   * `select(sel).distinct()` keeps the first of each repeated projection
+   * (the keys, not the rows), and a selector handed here is `JL0005`.
+   * @param {...undefined} unread */
+  distinct(...unread) {
+    requireNoArgument(unread, 'distinct', 'select(sel).distinct()');
+    return this.#with({ kind: 'distinct' });
+  }
+
+  /** Reverse the order. Reads no argument (`JL0005` otherwise).
+   * @param {...undefined} unread */
+  reverse(...unread) {
+    requireNoArgument(unread, 'reverse', 'where(pred).reverse()');
+    return this.#with({ kind: 'reverse' });
+  }
 
   /** Async sources are single-pass, so only a CONSTANT array can join
    * the stream (`JL0005` otherwise; the format doc says why). */
@@ -683,8 +698,11 @@ export class AsyncSequence {
   /** The whole result as one array. Over a provider with no `mapAsync`
    * this is ONE pushed window — the terminal asked for the array, so the
    * store answers it in one statement rather than one row at a time;
-   * everywhere else it drains the item stream. */
-  async toArray() {
+   * everywhere else it drains the item stream. Reads no argument:
+   * `select(sel).toArray()` maps them (`JL0005` otherwise).
+   * @param {...undefined} unread */
+  async toArray(...unread) {
+    requireNoArgument(unread, 'toArray', 'select(sel).toArray()');
     if (this.#pushable()) return this.#pushWindow('toArray');
     return collect(this[Symbol.asyncIterator]());
   }
@@ -699,40 +717,64 @@ export class AsyncSequence {
     return out;
   }
 
-  async first() {
+  /** The first item. Reads no argument: `where(pred).first()` is the
+   * first match (`JL0005` otherwise).
+   * @param {...undefined} unread */
+  async first(...unread) {
+    requireNoArgument(unread, 'first', 'where(pred).first()');
     const w = this.#pushable() ? await this.#pushWindow('first') : await this.#window(1);
     if (w.length === 0) throw new LinqRuntimeError('JL2001', 'first() found no element');
     return w[0];
   }
 
-  /** @param {any} [defaultValue] */
-  async firstOrDefault(defaultValue) {
+  /** The first item, or the value for an empty sequence; reads no
+   * predicate, so a callback there is `JL0005`
+   * (`where(pred).firstOrDefault(value)`).
+   * @param {any} [defaultValue] @param {...undefined} unread */
+  async firstOrDefault(defaultValue, ...unread) {
+    requireDefaultValue([defaultValue, ...unread], 'firstOrDefault');
     const w = this.#pushable() ? await this.#pushWindow('first') : await this.#window(1);
     return w.length === 0 ? defaultValue : w[0];
   }
 
-  async single() {
+  /** The only item. Reads no argument: `where(pred).single()` is the one
+   * match (`JL0005` otherwise).
+   * @param {...undefined} unread */
+  async single(...unread) {
+    requireNoArgument(unread, 'single', 'where(pred).single()');
     const w = this.#pushable() ? await this.#pushWindow('single') : await this.#window(2);
     if (w.length === 0) throw new LinqRuntimeError('JL2001', 'single() found no element');
     if (w.length > 1) throw new LinqRuntimeError('JL2002', 'single() found more than one element');
     return w[0];
   }
 
-  /** @param {any} [defaultValue] */
-  async singleOrDefault(defaultValue) {
+  /** The only item, or the value for an empty sequence; reads no
+   * predicate, so a callback there is `JL0005`
+   * (`where(pred).singleOrDefault(value)`).
+   * @param {any} [defaultValue] @param {...undefined} unread */
+  async singleOrDefault(defaultValue, ...unread) {
+    requireDefaultValue([defaultValue, ...unread], 'singleOrDefault');
     const w = this.#pushable() ? await this.#pushWindow('single') : await this.#window(2);
     if (w.length > 1) throw new LinqRuntimeError('JL2002', 'singleOrDefault() found more than one element');
     return w.length === 0 ? defaultValue : w[0];
   }
 
-  async last() {
+  /** The last item. Reads no argument: `where(pred).last()` is the last
+   * match (`JL0005` otherwise).
+   * @param {...undefined} unread */
+  async last(...unread) {
+    requireNoArgument(unread, 'last', 'where(pred).last()');
     const w = this.#pushable() ? await this.#pushWindow('last') : await this.#lastWindow();
     if (w.length === 0) throw new LinqRuntimeError('JL2001', 'last() found no element');
     return w[0];
   }
 
-  /** @param {any} [defaultValue] */
-  async lastOrDefault(defaultValue) {
+  /** The last item, or the value for an empty sequence; reads no
+   * predicate, so a callback there is `JL0005`
+   * (`where(pred).lastOrDefault(value)`).
+   * @param {any} [defaultValue] @param {...undefined} unread */
+  async lastOrDefault(defaultValue, ...unread) {
+    requireDefaultValue([defaultValue, ...unread], 'lastOrDefault');
     const w = this.#pushable() ? await this.#pushWindow('last') : await this.#lastWindow();
     return w.length === 0 ? defaultValue : w[0];
   }

@@ -539,3 +539,102 @@ describe('a Sequence terminal reads no argument, so it is refused when given one
     assert.strictEqual(await fromAsync([1, 5, 7]).max(maybe), 7);
   });
 });
+
+describe('a Sequence member that reads no predicate or selector refuses one, on both surfaces', () => {
+  // the first and the last row fail the predicate, so a predicate that is
+  // ignored answers { n: 1 } and { n: 2 } where a read one answers 5 and 7
+  const ROWS = [{ n: 1 }, { n: 5 }, { n: 7 }, { n: 2 }];
+  const DUPES = [{ n: 1, t: 'a' }, { n: 1, t: 'b' }, { n: 2, t: 'c' }];
+  const gt3 = (/** @type {any} */ r) => r.n.gt(3);
+  const SPELLING = {
+    first: 'where(pred).first()', last: 'where(pred).last()', single: 'where(pred).single()',
+    toArray: 'select(sel).toArray()', distinct: 'select(sel).distinct()', reverse: 'where(pred).reverse()',
+  };
+  const refused = (/** @type {keyof typeof SPELLING} */ name) => coded('JL0005', new RegExp(
+    `^JL0005: ${name}\\(\\) takes no argument — it reads none, so the one passed would be ignored; `
+    + `filter or project first: ${SPELLING[name].replace(/[().]/g, '\\$&')}$`));
+  const refusedDefault = (/** @type {string} */ name) => coded('JL0005', new RegExp(
+    `^JL0005: ${name}\\(\\) takes one default value, not a predicate — it reads no callback, so the one `
+    + `passed would be ignored or answered as the default; filter first: where\\(pred\\)\\.${name}\\(value\\)$`));
+
+  it('first, last and single handed a predicate answered the unfiltered row', () => {
+    assert.strictEqual(from(ROWS).first().n, 1);
+    assert.throws(() => from(ROWS).first(gt3), refused('first'));
+    assert.throws(() => from(ROWS).first((r) => r.n > 3), refused('first'));
+    assert.throws(() => from(ROWS).last(gt3), refused('last'));
+    // one row that does not match: the predicate-less answer was that row, not JL2001
+    assert.throws(() => from([{ n: 1 }]).single(gt3), refused('single'));
+    assert.throws(() => from(ROWS).single(gt3), refused('single'));
+    assert.throws(() => from(ROWS).first(undefined, gt3), refused('first'));
+  });
+
+  it('firstOrDefault, lastOrDefault and singleOrDefault handed a predicate answered a row, or the function itself', () => {
+    for (const name of ['firstOrDefault', 'lastOrDefault', 'singleOrDefault']) {
+      assert.throws(() => from(ROWS)[name](gt3), refusedDefault(name));
+      assert.throws(() => from([]).take(0)[name](gt3), refusedDefault(name));
+      // the C# (predicate, default) overload: the second argument was dropped
+      assert.throws(() => from(ROWS)[name](gt3, 'none'), refusedDefault(name));
+      assert.throws(() => from(ROWS)[name]('none', 'extra'), refusedDefault(name));
+    }
+  });
+
+  it('toArray, reverse and distinct handed a selector answered the unprojected rows', () => {
+    assert.throws(() => from(ROWS).toArray((r) => r.n), refused('toArray'));
+    assert.throws(() => from(ROWS).toArray(5), refused('toArray'));
+    assert.throws(() => from(ROWS).reverse((r) => r.n), refused('reverse'));
+    // two rows shared n = 1: a distinct-by would answer one of them
+    assert.throws(() => from(DUPES).distinct((r) => r.n), refused('distinct'));
+  });
+
+  it('the async surface refuses the same way', async () => {
+    const seq = () => fromAsync(ROWS);
+    await assert.rejects(seq().first(gt3), refused('first'));
+    await assert.rejects(seq().last(gt3), refused('last'));
+    await assert.rejects(fromAsync([{ n: 1 }]).single(gt3), refused('single'));
+    await assert.rejects(seq().toArray((r) => r.n), refused('toArray'));
+    for (const name of ['firstOrDefault', 'lastOrDefault', 'singleOrDefault']) {
+      await assert.rejects(seq()[name](gt3), refusedDefault(name));
+      await assert.rejects(seq()[name](gt3, 'none'), refusedDefault(name));
+    }
+    // builders: refused at the call, before any enumeration
+    assert.throws(() => fromAsync(DUPES).distinct((r) => r.n), refused('distinct'));
+    assert.throws(() => fromAsync(ROWS).reverse((r) => r.n), refused('reverse'));
+  });
+
+  it('the refusal is the same over a provider, before the document is run', () => {
+    let runs = 0;
+    const provider = { execute() { runs++; return [[]]; }, root: '$[*]' };
+    assert.throws(() => from(provider).first(gt3), refused('first'));
+    assert.throws(() => from(provider).toArray(gt3), refused('toArray'));
+    assert.throws(() => from(provider).firstOrDefault(gt3), refusedDefault('firstOrDefault'));
+    assert.strictEqual(runs, 0);
+  });
+
+  it('the spellings the refusals name answer, and so does a call with no argument or an undefined one', async () => {
+    assert.deepStrictEqual(from(ROWS).where(gt3).first(), { n: 5 });
+    assert.deepStrictEqual(from(ROWS).where(gt3).last(), { n: 7 });
+    assert.deepStrictEqual(from(ROWS).where((r) => r.n.gt(6)).single(), { n: 7 });
+    assert.strictEqual(from(ROWS).where((r) => r.n.gt(9)).firstOrDefault('none'), 'none');
+    assert.deepStrictEqual(from(ROWS).where(gt3).firstOrDefault('none'), { n: 5 });
+    assert.deepStrictEqual(from(ROWS).where(gt3).lastOrDefault('none'), { n: 7 });
+    assert.deepStrictEqual(from(ROWS).where((r) => r.n.gt(6)).singleOrDefault('none'), { n: 7 });
+    assert.deepStrictEqual(from(DUPES).select((r) => r.n).distinct().toArray(), [1, 2]);
+    assert.deepStrictEqual(from(DUPES).select((r) => r.n).toArray(), [1, 1, 2]);
+    assert.deepStrictEqual(from(ROWS).where(gt3).reverse().toArray(), [{ n: 7 }, { n: 5 }]);
+    assert.deepStrictEqual(await fromAsync(ROWS).where(gt3).first(), { n: 5 });
+    assert.deepStrictEqual(await fromAsync(ROWS).where(gt3).last(), { n: 7 });
+    assert.deepStrictEqual(await fromAsync(DUPES).select((r) => r.n).distinct().toArray(), [1, 2]);
+    // a caller that forwards an optional argument it did not receive
+    const maybe = undefined;
+    assert.strictEqual(from(ROWS).first(maybe).n, 1);
+    assert.strictEqual(from(ROWS).last(maybe).n, 2);
+    assert.strictEqual(from(ROWS).toArray(maybe).length, 4);
+    assert.strictEqual(from(ROWS).reverse(maybe).first().n, 2);
+    assert.strictEqual(from(DUPES).distinct(maybe).toArray().length, 3);
+    assert.strictEqual(from(ROWS).firstOrDefault(maybe, undefined).n, 1);
+    assert.strictEqual(from([]).take(0).firstOrDefault(maybe), undefined);
+    assert.strictEqual(from([]).take(0).lastOrDefault(null), null);
+    assert.strictEqual(await fromAsync(ROWS).first(maybe).then((r) => r.n), 1);
+    assert.strictEqual((await fromAsync(ROWS).toArray(maybe)).length, 4);
+  });
+});

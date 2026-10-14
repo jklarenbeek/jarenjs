@@ -264,15 +264,15 @@ is part of THIS design.
 | `Join` | nested `$for` + `$where` `$eq` — the engine rewrites this shape to a HASH JOIN (compile-time, QUERY-FORMAT §6), which is why it is fast **when both keys are plain member paths** (`o => o.pid`, `i => i.id`); a key with an operator in it (`o => o.name.lower()`, `o => o.p.add(0)`) is not a probe key and the join runs as a nested loop. Both sides MUST derive from the same source, or from two providers sharing one `scope` (§8 — two entity sets of one store are two roots of ONE multi-entity input, and the store answers the equijoin in one statement); anything else is `JL0005`: a query document reads one input. On the async surface the join exists only over a provider, pushed whole (§10). The inner side's declared parameters ride along (§7) | native | `(inner: Seq<U>, ok, ik, (o: Expr<T>, i: Expr<U>) => Expr<R>)` → `Seq<R>` |
 | `GroupJoin` | the matching group bound as an ARRAY value — `$let: { g: [ <correlated inner phrase> ] }` — so the result selector can index it (`g.at(0)`), fan it (`g.all()`), place it in a member (`{ matches: g }`) and aggregate over its members (`(u, g) => ({ n: g.count() })` counts the matches, `g.exists()` is whether there are any); same-source rule and parameter merge as `Join` | emulated | `(inner: Seq<U>, ok, ik, (o: Expr<T>, g: ArrayExpr<U> & AggregatableExpr) => Expr<R>)` → `Seq<R>` |
 | `Skip` / `Take` | `$subsequence` | native | `(n: number)` → `Seq<T>` |
-| `Distinct` | `$distinct` (deep structural equality — the grouping relation) | native | `()` → `Seq<T>` |
-| `Reverse` | `$reverse` | native | `()` → `Seq<T>` |
+| `Distinct` | `$distinct` (deep structural equality — the grouping relation) | native | `()` → `Seq<T>`; reads no key, and one handed a selector is `JL0005` naming `select(sel).distinct()` (the projected values, not a by-key choice of rows) |
+| `Reverse` | `$reverse` | native | `()` → `Seq<T>`; reads no argument (`JL0005`) |
 | `Count` / `Sum` / `Average` / `Min` / `Max` | §8.8 aggregates (`Average` → `$avg`) | native | `count(): number`; `sum(): number`; `average/min/max(): number` (throw `JL2001` on empty; `min`/`max` follow the operand family); none reads an argument, and one handed an argument is `JL0005` naming `where(pred).count()` or `select(sel).sum()` |
 | `Any()` | `$exists` | native | `(): boolean` |
 | `Any(pred)` / `All(pred)` | `$some` / `$every` quantifier phrase | native | `(pred): boolean` (`all` vacuously true on empty) |
 | `Aggregate(seed, fn)` | `$fold` — the accumulator clause; the result is a sequence of exactly ONE accumulated value (`.first()` reads it) | native | `(seed: A, (acc: Expr<A>, e: Expr<T>) => Expr<A>)` → `Seq<A>` |
 | `Aggregate(fn)` (unseeded) | — JSON cannot spell "the implicit first element" as a lambda seed | unsupported (`JL0006`) | — |
-| `First` / `FirstOrDefault` | `[ $subsequence [expr, 0, 1] ]` window | native | `(): T` (`JL2001` on empty) / `(d?): T \| D` |
-| `Single` / `SingleOrDefault` | `[ $subsequence [expr, 0, 2] ]` window | native | `(): T` (`JL2001`/`JL2002`) / `(d?): T \| D` (`JL2002` on 2+) |
+| `First` / `FirstOrDefault` | `[ $subsequence [expr, 0, 1] ]` window | native | `(): T` (`JL2001` on empty) / `(d?): T \| D`; neither reads a predicate, and one handed to either is `JL0005` naming `where(pred).first()` / `where(pred).firstOrDefault(d)` |
+| `Single` / `SingleOrDefault` | `[ $subsequence [expr, 0, 2] ]` window | native | `(): T` (`JL2001`/`JL2002`) / `(d?): T \| D` (`JL2002` on 2+); no predicate (`JL0005`, as `First`) |
 | `Last` / `LastOrDefault` | `[ $subsequence [$reverse expr, 0, 1] ]` | native | as `First` |
 | `ElementAt` / `ElementAtOrDefault` | `[ $subsequence [expr, i, 1] ]` | native | `(i): T` (`JL2003` out of range) / `(i, d?)` |
 | `Concat` | `$seq` (a constant array's elements join the stream) | native | `(other: Seq<T> \| T[])` → `Seq<T>` |
@@ -473,6 +473,23 @@ The real C# semantics, because getting these wrong is how a
   not an argument, so a caller that forwards an optional one it did not
   receive is unchanged; `fromAsync()` refuses the same way, as a rejected
   promise.
+- `first()`, `last()`, `single()`, `toArray()`, `distinct()` and `reverse()`
+  read no argument either: `first((r) => r.n > 3)` is `JL0005` naming
+  `where(pred).first()`, `distinct((r) => r.n)` names `select(sel).distinct()`
+  (the projected values, not one row per key) and `toArray(sel)` names
+  `select(sel).toArray()`. `firstOrDefault`, `lastOrDefault` and
+  `singleOrDefault` read one DEFAULT VALUE and no predicate: a function
+  there, or a second argument, is `JL0005` naming
+  `where(pred).firstOrDefault(value)`. All of them used to build and answer
+  as if the argument had never been written: `first(pred)` was the first
+  row, `last(pred)` the last, `single(pred)` the only row (or `JL2002`
+  whenever there were two), `firstOrDefault(pred)` the first row or, over
+  an empty sequence, the function itself, `distinct(sel)` the plain
+  distinct rows, and `toArray(sel)` and `reverse(sel)` the unprojected
+  rows. `undefined` is no argument, here as above; a function-valued
+  fallback is `firstOrDefault() ?? fallback`; `fromAsync()` refuses the same
+  way, a terminal as a rejected promise and `distinct`/`reverse` at the
+  call.
 - `any()` is existence; `all(pred)` is vacuously true over the empty
   sequence.
 
@@ -1493,6 +1510,9 @@ that preserves it, so there is no spelling that is allowed to.
 | `select((r) => r.v.all().rolling(spec))` where `spec` reads the row | `rolling() takes a plain literal spec object, not an expression or captured value` | a literal spec |
 | `select((u) => u.tags.at(2 ** 53))` | `at() takes a safe integer index, got 9007199254740992` | an index within ±(2^53 − 1), which an array can have |
 | `groupBy(…).select((g) => g.items.sum((r) => r.score))`; the same with `count`, `avg`, `min`, `max`, `exists`, `isEmpty` or a predicate | `sum() takes no argument — it reads none, so the one passed would be ignored; to aggregate a member of each row fan the rows first: .all().<member>.sum()` | `g.items.all().score.sum()` (§13.3) |
+| `from(rows).first((r) => r.n > 3)`; `last`, `single` and `fromAsync(rows)` likewise | `first() takes no argument — it reads none, so the one passed would be ignored; filter or project first: where(pred).first()` | `from(rows).where((r) => r.n.gt(3)).first()` |
+| `from(rows).firstOrDefault((r) => r.n > 3)`; `lastOrDefault`, `singleOrDefault`, a second argument, and `fromAsync(rows)` likewise | `firstOrDefault() takes one default value, not a predicate — it reads no callback, so the one passed would be ignored or answered as the default; filter first: where(pred).firstOrDefault(value)` | `from(rows).where((r) => r.n.gt(3)).firstOrDefault(value)` |
+| `from(rows).distinct((r) => r.n)`; `toArray(sel)`, `reverse(sel)` and `fromAsync(rows)` likewise | `distinct() takes no argument — it reads none, so the one passed would be ignored; filter or project first: select(sel).distinct()` (`select(sel).toArray()`, `where(pred).reverse()` for the others) | `from(rows).select((r) => r.n).distinct()` — the distinct values; a by-key choice of rows is not in the grammar |
 | `from(rows).count((r) => r.n > 3)`; `sum`, `average`, `min`, `max` handed a selector; `fromAsync(rows)` likewise | `count() takes no argument — it reads none, so the one passed would be ignored; filter or project first: where(pred).count()` (`select(sel).sum()` for the others) | `from(rows).where((r) => r.n.gt(3)).count()`, `from(rows).select((r) => r.n).sum()` |
 | `from(rows, { limit: { steps: 3 } })` | `from() does not take 'limit' — did you mean 'limits'?` | `{ limits: { steps: 3 } }` |
 | `from(rows, { bogus: 1 })` | `from() does not take 'bogus'; the options are compileTypeTest, functions, collations, pathFunctions, limits, registry` | one of the six (§8.1); `fromAsync()` and `fromDocument()` refuse the same way, by their own names |
