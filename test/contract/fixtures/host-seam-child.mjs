@@ -6,9 +6,14 @@
 // under a V8 old space far below the payload (`--max-old-space-size=64`
 // for 100 MiB, a third of it live with the loaded modules before the
 // first byte moves). Retention is measured by the live heap after a forced
-// collection at a quarter and three quarters consumed, never by the
-// process surviving: whether a collector keeps up with garbage under a
-// fixed cap is the host's scheduling, not the pipeline's memory.
+// collection at a quarter and three quarters consumed, against a baseline
+// taken after a warm-up of every measured path. Run it with
+// `--no-incremental-marking`, as the test does: an incremental full
+// collection keeps whatever it marked during its cycle and promotes the
+// young generation with it, and V8 checks the cap against the old
+// generation's committed pages, so on a two-core host that floating
+// garbage alone can exhaust the cap; an atomic collection keeps only the
+// live set, so surviving the cap is part of the bound.
 // Backpressure is measured where it matters: the rows the
 // cursor pulled while the client had consumed a quarter, and the application writable queue (independent of TCP buffers). A halfway cancellation must
 // reach every finalizer exactly once: the byte source's `return()`, the
@@ -101,8 +106,12 @@ function counters() {
     written: 0, maxChunk: 0, maxProducerAhead: 0, maxApplicationQueued: 0, highWaterMark: 0 };
 }
 
+/** Rows a warm-up body serves before its cursor ends (0: the whole collection). */
+let warmRows = 0;
+
 /**
- * The DB cursor, counted: every row pulled, every `return()`.
+ * The DB cursor, counted: every row pulled, every `return()`. During the
+ * warm-up it ends after `warmRows` rows, returning the store's cursor.
  * @param {ReturnType<typeof counters>} c
  */
 function countedCursor(c) {
@@ -112,6 +121,10 @@ function countedCursor(c) {
     [Symbol.asyncIterator]() {
       return {
         async next() {
+          if (warmRows > 0 && c.pulls >= warmRows) {
+            if (typeof inner.return === 'function') await inner.return();
+            return { done: true, value: undefined };
+          }
           const step = await inner.next();
           if (!step.done) {
             c.pulls += 1;
@@ -250,6 +263,32 @@ nodeServer.listen(0, '127.0.0.1');
 await once(nodeServer, 'listening');
 const client = typedHttpClient(openHttpClient(contract, { baseUrl: `http://127.0.0.1:${nodeServer.address().port}` }), pen);
 
+// the Fetch carrier, in-process (its runs follow the Node carrier's)
+const fetchDispatcher = server();
+const fetchHandler = toFetchHandler(fetchDispatcher);
+const fetchClient = typedHttpClient(openHttpClient(contract, { baseUrl: 'http://contract.local', fetch: (url, init) => fetchHandler(new Request(url, init)) }), pen);
+
+// ——— the warm-up: every path the measured runs take, on a short body ———
+// The baseline is the live heap after this warm-up, so the code each path
+// compiles on first use (both encodings, both carriers, an exhausted body
+// and a cancelled one) is counted in the baseline instead of as growth;
+// the warm-up's own garbage is collected by the baseline's collections.
+// Its releases are reset so the measured requests count from zero.
+warmRows = 64;
+for (const [warmClient, operation, format, cancelAt] of /** @type {const} */ ([
+  [client, 'rows.csv', 'csv', null], [client, 'rows.josl', 'josl', null], [client, 'rows.csv', 'csv', PAYLOAD * 4],
+  [fetchClient, 'rows.csv', 'csv', null], [fetchClient, 'rows.csv', 'csv', PAYLOAD * 4],
+])) {
+  const before = releases.identity;
+  const warm = await warmClient.bytes(operation, null);
+  if (!warm.ok) throw new Error(`warm-up ${operation} failed: ${JSON.stringify(warm)}`);
+  await sink(warm.value.body, () => live[format], cancelAt);
+  await settle(() => releases.identity === before + 1);
+}
+warmRows = 0;
+releases.identity = 0;
+releases.acquired = 0;
+
 const baselineHeap = await liveHeap();
 const started = Date.now();
 const csv = await client.bytes('rows.csv', null);
@@ -273,9 +312,6 @@ const cancelSummary = { consumed: cancelRead.consumed, pulls: live.csv.pulls, pu
 const nodeMs = Date.now() - started;
 
 // ——— the Fetch carrier, in-process: CSV whole and cancelled ———
-const fetchDispatcher = server();
-const fetchHandler = toFetchHandler(fetchDispatcher);
-const fetchClient = typedHttpClient(openHttpClient(contract, { baseUrl: 'http://contract.local', fetch: (url, init) => fetchHandler(new Request(url, init)) }), pen);
 const fetchStarted = Date.now();
 const fcsv = await fetchClient.bytes('rows.csv', null);
 if (!fcsv.ok) throw new Error(`fetch csv failed: ${JSON.stringify(fcsv)}`);

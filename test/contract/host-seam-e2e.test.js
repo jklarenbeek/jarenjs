@@ -6,12 +6,20 @@
  * Node HTTP adapter under the host lifecycle → `typedHttpClient(…).
  * bytes()` → an incremental hash/count sink — 100 MiB of rows in a child
  * whose V8 old space is 64 MiB, a third of it live with the loaded modules
- * before the first byte moves. Retention is asserted on the live heap after a forced
- * collection at a quarter and three quarters consumed, not by the child
- * surviving: whether the collector keeps up with garbage under a fixed cap
- * is the machine's scheduling (a 48 MiB cap left 27 MiB over them and killed the child in a few runs in twenty-five). Backpressure reaches
- * the cursor: at a
- * quarter consumed the cursor has pulled a bounded prefix of the rows,
+ * before the first byte moves. The child runs with `--no-incremental-marking`,
+ * so every full collection is atomic and keeps exactly the live set, and the
+ * child surviving is part of the bound: the live set stayed under the cap at
+ * every collection. Under the default incremental marking it is not — a full
+ * collection keeps whatever it marked during its cycle and promotes the young
+ * generation it marked, and V8 checks its limit against the old generation's
+ * committed pages, not its live bytes, so on a two-core host that floating
+ * garbage alone exhausted the cap: the collector's scheduling, not the
+ * pipeline's memory. Retention is asserted on the live heap after a forced
+ * collection at a quarter and three quarters consumed, against a baseline
+ * taken after a warm-up that runs every measured path (both encodings, both
+ * carriers, an exhausted and a cancelled body) on a short body: the code a
+ * path compiles on first use is not growth. Backpressure reaches
+ * the cursor: at a quarter consumed the cursor has pulled a bounded prefix of the rows,
  * and queued application bytes stay bounded independently of TCP buffers. A halfway
  * cancellation reaches the byte source's `return()`, the cursor's
  * `return()`, the acquired release and the identity release exactly
@@ -27,12 +35,12 @@ import { fileURLToPath } from 'node:url';
 
 const CHILD = fileURLToPath(new URL('./fixtures/host-seam-child.mjs', import.meta.url));
 const TOTAL = 100 * 1024 * 1024;
-/** The heap the pipeline may hold beyond the loaded modules, after a collection, while 100 MiB flows through. */
+/** The heap the pipeline may hold beyond the loaded modules and warmed-up paths, after a collection, while 100 MiB flows through. */
 const LIVE_GROWTH = 8 * 1024 * 1024;
 
 describe('the host seam end to end — a fixed-heap child', () => {
   it('moves 100 MiB of rows as CSV and JOSL from a store cursor to bytes() under a 64 MiB old space; the live heap stays flat; backpressure reaches the cursor; a halfway cancel releases everything once', () => {
-    const child = spawnSync(process.execPath, ['--no-warnings=ExperimentalWarning', '--max-old-space-size=64', '--expose-gc', CHILD, String(TOTAL)],
+    const child = spawnSync(process.execPath, ['--no-warnings=ExperimentalWarning', '--max-old-space-size=64', '--no-incremental-marking', '--expose-gc', CHILD, String(TOTAL)],
       { encoding: 'utf8', maxBuffer: 1024 * 1024 });
     assert.strictEqual(child.status, 0, child.stderr);
     const out = JSON.parse(child.stdout.trim().split('\n').pop() ?? '{}');
