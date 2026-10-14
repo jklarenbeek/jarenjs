@@ -234,7 +234,8 @@ if (chainEdgeLeak.length > 0)
 // Raised to 226,500 (measured 226411): from()'s refusal of a trailing argument add 102.
 // Raised to 226,900 (measured 226802): the shared capture's refusal to coerce a method read without its call add 391.
 // Raised to 229,200 (measured 229144): the shared capture's coded refusal of every array and string method on a member, and the predicate a to-many relation's array method needs, add 2342.
-if (chainBytes > 229200)
+// Raised to 229,300 (measured 229209): a handle's check of the source a chain was built over add 65.
+if (chainBytes > 229300)
   throw new Error(`The chain bundle grew to ${chainBytes} bytes.`);
 
 console.log(`Tree-shaking smoke test passed (${chainBytes} byte chain bundle; no schema-pen module, no client module, no store/validator/formats bytes).`);
@@ -614,7 +615,8 @@ if (asyncLiveLeak.length)
 // Raised to 977,800 (measured 977778): a handle's execute, query and explain taking a chain, and from()'s refusal of a trailing argument add 575.
 // Raised to 978,700 (measured 978646): the shared capture's refusal to coerce a method read without its call, and the validator's relative pointer dialect option add 868.
 // Raised to 981,000 (measured 980988): the shared capture's coded refusal of every array and string method on a member, and the predicate a to-many relation's array method needs, add 2342.
-if (clientBytes > 981000)
+// Raised to 981,100 (measured 981042): a handle's check of the source a chain was built over add 54.
+if (clientBytes > 981100)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 
