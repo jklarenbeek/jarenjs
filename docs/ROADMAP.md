@@ -990,22 +990,22 @@ delegate to Temporal internally once the baseline moves, without changing a
 public surface. Building a general-purpose date *library* is therefore the one
 thing to avoid.
 
-- [ ] **Mermaid gantt: the directives that are still only text.**
+- [ ] **Mermaid gantt: the d3 axis specifiers that are refused.**
   `dateFormat`, `axisFormat`, `tickInterval`, `excludes`, `includes`,
   `inclusiveEndDates`, `weekday`, `weekend`, `topAxis` and `displayMode:
   compact` are interpreted (the last two as Mermaid reads them, from the
-  diagram's config, and `topAxis` also as a header line), the tasks resolve
-  to half-open intervals with dependencies and working-day arithmetic, and
-  gantt renders a real timeline — the grammar, the vendored conformance table
-  and the divergences are in `components/mermaid/docs/MERMAID-FORMAT.md`
+  diagram's config, and `topAxis` also as a header line), `click` statements put
+  an allow-listed link on a task and record a `call` as inert data, the tasks
+  resolve to half-open intervals with dependencies and working-day arithmetic,
+  and gantt renders a real timeline — the grammar, the vendored conformance
+  table and the divergences are in `components/mermaid/docs/MERMAID-FORMAT.md`
   §4.4, and the kernel's half is `compileDateParser` in
-  `packages/core/docs/DATES.md`. What is left is the `click` interaction
-  statements — plus the eight d3 axis specifiers the conformance table now
-  names as refusals rather than passing off as unknown (`%f`, `%g`, `%G`,
-  `%q`, `%Q`, `%s`, `%u`, `%V`): a week-based year and a week number are a
-  second year field and a derived one, so admitting them is a parts-record
-  decision rather than a table entry. Note `todayMarker` is **not** on this
-  list and never will be — it needs a clock, and there is none (see the
+  `packages/core/docs/DATES.md`. What is left is the eight d3 axis specifiers
+  the conformance table now names as refusals rather than passing off as unknown
+  (`%f`, `%g`, `%G`, `%q`, `%Q`, `%s`, `%u`, `%V`): a week-based year and a week
+  number are a second year field and a derived one, so admitting them is a
+  parts-record decision rather than a table entry. Note `todayMarker` is **not**
+  on this list and never will be — it needs a clock, and there is none (see the
   constraint above); a host that wants "now" on a diagram supplies the instant
   as data.
 ## Geospatial (cross-package)

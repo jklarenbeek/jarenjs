@@ -375,6 +375,75 @@
         }
       }
     },
+    "ganttClick": {
+      "description": "One `click` statement. `ids` are the task ids it names (an id no task has binds nothing); `href` is the URL as written, not vetted: the layout draws a link only when the URL passes the package's link allow-list; `call` is a function name and its argument strings, recorded and never run or drawn.",
+      "type": "object",
+      "required": [
+        "ids",
+        "href",
+        "call",
+        "line"
+      ],
+      "properties": {
+        "ids": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "href": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "call": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "required": [
+            "name",
+            "args"
+          ],
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "args": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "line": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "anyOf": [
+        {
+          "properties": {
+            "href": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "properties": {
+            "call": {
+              "type": "object"
+            }
+          }
+        }
+      ]
+    },
     "ganttAst": {
       "description": "gantt — a resolved schedule. `meta` holds the header lines verbatim so the printer stays a fixed point; `rules` holds the same directives interpreted, and `domain` is the half-open span every task falls inside.",
       "type": "object",
@@ -416,6 +485,13 @@
                 }
               }
             }
+          }
+        },
+        "clicks": {
+          "description": "The `click` statements in source order. A tree written before they were read lacks the member.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ganttClick"
           }
         },
         "domain": {

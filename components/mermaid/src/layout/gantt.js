@@ -32,9 +32,13 @@
  * Both switches are Mermaid config (`gantt.displayMode`, `gantt.topAxis`),
  * so they arrive as `options.config`; only a `topAxis` header line is in
  * the AST, as a `meta` member.
+ *
+ * The one URL policy lives here too: a row's `href` is the `click` link
+ * that passed `sanitizeHref`, or `null`, so the renderer draws what the
+ * scene says and cannot bypass the filter.
  */
 
-import { textWidth } from '@jarenjs/view/helpers';
+import { textWidth, sanitizeHref, encodeUrlAttribute } from '@jarenjs/view/helpers';
 import {
   compileDateFormat, axisTicksTime, timeTicksEvery, partsFromEpoch,
 } from '@jarenjs/core/dates';
@@ -86,6 +90,9 @@ export function layoutGantt(ast, options = {}) {
   const span = domain.end - domain.start || DAY_MS;
   const xOf = (at) => round(plotX + ((at - domain.start) / span) * plotW);
 
+  // --- the link a `click` statement puts on a task
+  const hrefs = linkTargets(ast.clicks);
+
   // --- rows and sections, top to bottom
   const top = (title === null ? 0 : TITLE_H) + AXIS_H + MARGIN;
   const sections = [];
@@ -117,6 +124,7 @@ export function layoutGantt(ast, options = {}) {
         : Math.min(xOf(task.start), plotX + plotW - barW);
       const x = round(barX);
       const w = round(barW);
+      const href = hrefs.get(task.id) ?? null;
       // a milestone is a diamond centred on its instant, so its span is the diamond's
       const label = switches.compact
         ? placeLabel(task.name, milestone ? x - MILESTONE_R : x, milestone ? x + MILESTONE_R : x + w,
@@ -147,7 +155,8 @@ export function layoutGantt(ast, options = {}) {
         barY: round(rowY + (ROW_H - BAR_H) / 2),
         barH: BAR_H,
         r: MILESTONE_R,
-        classes: classesFor(task.flags),
+        href,
+        classes: classesFor(task.flags, href !== null),
       };
       rows.push(row);
       byId.set(task.id, row);
@@ -402,13 +411,35 @@ function planLinks(rows, byId) {
 }
 
 /**
+ * The link each task id carries: the last `click ... href` that names it,
+ * as Mermaid keeps one, and only when the URL passes the allow-list every
+ * Mermaid link goes through. An unsafe or relative-without-a-dot URL leaves
+ * the task without a link, and an earlier safe one does not come back. A
+ * `call` puts nothing here: it is recorded in the AST and never drawn.
+ * @param {{ ids: string[], href: string | null }[] | undefined} clicks
+ * @returns {Map<string, string | null>} an id to its attribute-ready URL, or `null`
+ */
+function linkTargets(clicks) {
+  /** @type {Map<string, string | null>} */
+  const targets = new Map();
+  for (const click of clicks ?? []) {
+    if (click.href === null) continue;
+    const safe = sanitizeHref(click.href);
+    const url = safe === null ? null : encodeUrlAttribute(safe);
+    for (const id of click.ids) targets.set(id, url);
+  }
+  return targets;
+}
+
+/**
  * @param {string[]} flags
+ * @param {boolean} linked - the task carries a link
  * @returns {string}
  */
-function classesFor(flags) {
+function classesFor(flags, linked) {
   let out = 'mm-gantt-task';
   for (const flag of flags) out += ` mm-gantt-${flag}`;
-  return out;
+  return linked ? out + ' mm-gantt-clickable' : out;
 }
 
 /**

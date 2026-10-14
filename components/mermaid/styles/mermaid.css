@@ -117,6 +117,8 @@
    node, a done bar an activation, a critical bar a note, the grid a cluster
    edge. A status class is therefore both the theme hook and the hit-test
    handle a host reads off `data-id`. */
+.mermaid.mm-gantt .mm-gantt-click { cursor: pointer; }
+.mermaid.mm-gantt .mm-gantt-click:focus-visible .mm-gantt-shape { stroke-width: 3; }
 .mermaid.mm-gantt .mm-gantt-band { fill: var(--mm-cluster-fill); }
 .mermaid.mm-gantt .mm-gantt-excluded { fill: var(--mm-activation-fill); }
 .mermaid.mm-gantt .mm-gantt-grid { stroke: var(--mm-cluster-stroke); }

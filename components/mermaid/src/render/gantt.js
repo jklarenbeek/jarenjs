@@ -13,7 +13,9 @@
  * or a generic one) and a `<desc>` naming the span and the task count,
  * so a screen reader gets the shape of the schedule rather than a
  * hundred unlabelled rectangles. Bars carry `data-id` and a status
- * class, which is also what an interactive host hit-tests on.
+ * class, which is also what an interactive host hit-tests on. A task
+ * with a `click` link wears it as an anchor around its label and shape;
+ * the URL arrives vetted from the layout, and a `call` is never drawn.
  */
 
 import { svgRoot, group, rect, path, polygon, textAt, num } from '@jarenjs/view/helpers';
@@ -102,9 +104,10 @@ export function renderGantt(scene, theme, hash) {
     }));
   }
 
-  // Rows: the name, then the bar or the milestone.
+  // Rows: the name, then the bar or the milestone. A task with a link
+  // wears it as an anchor around both, so the whole row is the target.
   for (const row of scene.rows) {
-    children.push(group({ class: row.classes, key: 'row-' + row.id, 'data-id': row.id }, [
+    const parts = [
       textAt(row.labelX, row.labelY + 4, row.name, fs, {
         class: 'mm-gantt-label', fill: t.nodeText,
         // a compact name is centred on or placed beside its bar
@@ -119,7 +122,9 @@ export function renderGantt(scene, theme, hash) {
           class: 'mm-gantt-shape', rx: 3, fill: fillFor(row.flags, t),
           stroke: strokeFor(row.flags, t), 'stroke-width': 1,
         }),
-    ]));
+    ];
+    children.push(group({ class: row.classes, key: 'row-' + row.id, 'data-id': row.id },
+      row.href === null ? parts : [['a', { href: row.href, class: 'mm-gantt-click' }, ...parts]]));
   }
 
   // The title last, so nothing paints over it.

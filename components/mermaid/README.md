@@ -222,10 +222,21 @@ Launch : a3, 2024-01-04, 2d
 A bare `topAxis` line in the diagram's body does the same here, though Mermaid
 11.16.1 fails on it.
 
+`click` statements are read too. `click a1 href "https://example.test/p"` puts
+a link on the task, but only a URL the package's `sanitizeHref` allow-list
+passes (http and https URLs, `mailto:`, a fragment, protocol-relative URLs and
+root-relative or dot-relative paths): `javascript:`, `data:`, `vbscript:` and a
+bare `page.html` leave the task without a link. `click a1 call report(a1, "two words")` is **recorded
+and never run**: the tree keeps the name and the argument strings in
+`ast.clicks`, the diagram draws nothing for it, and a host that wants the call
+decides what the name means. The reasons are that a diagram's text must not
+choose which function a page runs, and that Mermaid's default level binds
+nothing either.
+
 Each task carries `{ id, flags, start, end, duration, after, line }`
 beside its raw `info`, with `start`/`end` as epoch milliseconds and the
 interval half-open. The grammar, the vendored conformance table and the
-six deliberate divergences from Mermaid are in
+nine deliberate divergences from Mermaid are in
 [docs/MERMAID-FORMAT.md §4.4](./docs/MERMAID-FORMAT.md). The load-bearing
 one: **there is no clock here**, so a schedule with no dated anchor is a
 line-aware error rather than a diagram whose meaning changes daily.
@@ -468,7 +479,18 @@ be dropped and now draws the second row of date labels; a top-level front-matter
 `displayMode` now lands in `config.gantt.displayMode` for every diagram type
 (so `toMermaid` prints it back in the `init` header, even for a flowchart) and
 a gantt that sets it to `compact` packs its rows; and a gantt scene gained
-`compact` and `bottomAxis` members and its rows gained `lane` and `labelAnchor`.
+`compact` and `bottomAxis` members and its rows gained `lane` and `labelAnchor`;
+a gantt `click` statement used to fail the parse when its URL held a colon
+(`click a1 href "https://example.test/p"` was read as a task row) or vanish
+when it held none (`click a1 call report()`), and is now read: a gantt tree
+gained a `clicks` member (a tree without one reads as no clicks), a scene row
+gained `href`, a row with a link is wrapped in an anchor and gains the class
+`mm-gantt-clickable`, `toMermaid` prints the statements after the tasks (so a
+statement written between two tasks comes back below both, and the tasks after
+it sit a line higher on reading it back), and a line that starts with `click`,
+is not a click statement and carries no task colon is an error where it used
+to be dropped (a task row such as `Click on href : a3, 2024-01-09, 1d` is still
+a task).
 
 ## Exports
 

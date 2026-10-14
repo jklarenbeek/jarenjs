@@ -6,7 +6,7 @@
     "recorded": "2026-08-26",
     "url": "https://mermaid.js.org/syntax/gantt.html",
     "source": "node_modules/mermaid/dist/chunks/mermaid.esm.min/ganttDiagram-2QTCJSNI.mjs",
-    "note": "The dateFormat token table is dayjs' customParseFormat vocabulary (moment's spelling), the axisFormat table is d3-time-format's strftime vocabulary, and the tickInterval and duration grammars are the two regular expressions the shipped chunk executes. The `excludes`, `includes` and `inclusiveEndDates` entries are read from the chunk's gantt database (`isInvalidDate`, `checkTaskDates`, `getEndDate`, `mergeTokens`) and its lexer. The `topAxis` and `displayMode` entries are read from the chunk's renderer (`makeGrid`, `getMaxIntersections`), from the lexer rule and parser action for `topAxis`, and from the front-matter step that copies a top-level `displayMode` into the gantt config."
+    "note": "The dateFormat token table is dayjs' customParseFormat vocabulary (moment's spelling), the axisFormat table is d3-time-format's strftime vocabulary, and the tickInterval and duration grammars are the two regular expressions the shipped chunk executes. The `excludes`, `includes` and `inclusiveEndDates` entries are read from the chunk's gantt database (`isInvalidDate`, `checkTaskDates`, `getEndDate`, `mergeTokens`) and its lexer. The `topAxis` and `displayMode` entries are read from the chunk's renderer (`makeGrid`, `getMaxIntersections`), from the lexer rule and parser action for `topAxis`, and from the front-matter step that copies a top-level `displayMode` into the gantt config. The `click` entry is read from the chunk's lexer rules, its clickStatement productions and its `setLink`, `setClickEvent` and `setClickFun` actions, and each form and reject was run through the shipped gantt database at both the default and the loose security level."
   },
   "dateFormat": {
     "default": "YYYY-MM-DD",
@@ -137,6 +137,56 @@
     "headerLine": false,
     "note": "The renderer packs a section's tasks into rows when the gantt config's `displayMode` is exactly `compact`: tasks in start order, source order breaking ties, each into the first row whose last task has ended by its start (the effective end, after `excludes` has pushed it), so a task that starts the instant another ends shares its row. A top-level front-matter `displayMode` is copied into `config.gantt.displayMode` and wins over a `config` member there; an init directive wins over both. The lexer has no rule for a `displayMode` line, so one reads as a task row."
   },
+  "click": {
+    "keyword": "click",
+    "caseInsensitive": true,
+    "grammar": "click <ids> [href \"<url>\"] [call <name>(<arguments>)], with at least one of the two, each at most once and in either order, then an optional `%` comment",
+    "ids": "one word of task ids separated by commas, no spaces; an id that names no task binds nothing",
+    "forms": [
+      { "source": "click a1 href \"https://x.test/p\"", "ids": ["a1"], "href": "https://x.test/p", "call": null },
+      { "source": "click a1,a2 href \"https://x.test/p\"", "ids": ["a1", "a2"], "href": "https://x.test/p", "call": null },
+      { "source": "click a1, href \"https://x.test/p\"", "ids": ["a1"], "href": "https://x.test/p", "call": null },
+      { "source": "click   a1   href   \"https://x.test/a b\"", "ids": ["a1"], "href": "https://x.test/a b", "call": null },
+      { "source": "CLICK a1 HREF \"https://x.test/p\" %% a note", "ids": ["a1"], "href": "https://x.test/p", "call": null },
+      { "source": "click a1 call fn()", "ids": ["a1"], "href": null, "call": { "name": "fn", "args": [] } },
+      { "source": "click a1 call fn( )", "ids": ["a1"], "href": null, "call": { "name": "fn", "args": [] } },
+      { "source": "click a1 call fn(x, \"y z\", 3)", "ids": ["a1"], "href": null, "call": { "name": "fn", "args": ["x", "y z", "3"] } },
+      { "source": "click a1 call fn(\"a:b\")", "ids": ["a1"], "href": null, "call": { "name": "fn", "args": ["a:b"] } },
+      { "source": "click a1 call fn(a,)", "ids": ["a1"], "href": null, "call": { "name": "fn", "args": ["a", ""] } },
+      { "source": "click a1 call fn(\"\")", "ids": ["a1"], "href": null, "call": { "name": "fn", "args": [""] } },
+      { "source": "click a1 call fn ( 1 )", "ids": ["a1"], "href": null, "call": { "name": "fn", "args": ["1"] } },
+      { "source": "click a1 call fn(x) href \"https://x.test/q\"", "ids": ["a1"], "href": "https://x.test/q", "call": { "name": "fn", "args": ["x"] } },
+      { "source": "click a1 call fn() href \"https://x.test/q\"", "ids": ["a1"], "href": "https://x.test/q", "call": { "name": "fn", "args": [] } },
+      { "source": "click a1 href \"https://x.test/q\" call fn()", "ids": ["a1"], "href": "https://x.test/q", "call": { "name": "fn", "args": [] } },
+      { "source": "click a1 href \"https://x.test/q\"call go(\"a,b\", c)", "ids": ["a1"], "href": "https://x.test/q", "call": { "name": "go", "args": ["a,b", "c"] } }
+    ],
+    "rejects": [
+      { "source": "click a1", "reason": "neither an href nor a call" },
+      { "source": "click a1 call fn", "reason": "a call needs its parentheses" },
+      { "source": "click a1 call (x)", "reason": "a call needs a function name" },
+      { "source": "click a1 call fn(1))", "reason": "text after the closing parenthesis" },
+      { "source": "click a1 call fn(a)(b)", "reason": "text after the closing parenthesis" },
+      { "source": "click a1 call f() call g()", "reason": "a second call" },
+      { "source": "click a1 href https://x.test", "reason": "the URL must be double-quoted" },
+      { "source": "click a1 href\"https://x.test\"", "reason": "href needs whitespace before its quote" },
+      { "source": "click a1 href \"\"", "reason": "an empty URL" },
+      { "source": "click a1 href \"https://x.test\" trailing", "reason": "text after the URL" },
+      { "source": "click a1 href \"https://x.test\" href \"https://y.test\"", "reason": "a second href" },
+      { "source": "click a1 call fn href \"https://x.test/q\"", "reason": "a call needs its parentheses" },
+      { "source": "click a1 href \"https://x.test/q\" call fn", "reason": "a call needs its parentheses" }
+    ],
+    "callArguments": "split at each comma with an even number of double quotes after it, each piece trimmed, one pair of surrounding quotes removed; none written is an empty list, and Mermaid then passes the task id when it runs the call",
+    "href": {
+      "mermaid": "the URL goes through the @braintree/sanitize-url filter unless securityLevel is loose, which turns javascript: into about:blank; the task gets the class `clickable`, and a click on its bar or its label calls window.open(url, \"_self\"); with securityLevel sandbox the bar and label are wrapped in an anchor",
+      "jaren": "the URL goes through sanitizeHref, an allow-list, and is percent-encoded for the attribute; a task whose URL fails it has no link and no anchor"
+    },
+    "call": {
+      "mermaid": "nothing is bound unless securityLevel is loose, where the click runs the global function of that name with the arguments; the task is `clickable` either way",
+      "jaren": "recorded in the tree as a name and its argument strings and never looked up, bound or run, whatever the config says; the task is not drawn clickable"
+    },
+    "order": "Mermaid applies a click when the line is read, so a click written before its task, or naming an id no task has, has no effect; here a click binds by id wherever it is written, and an id no task has still binds nothing",
+    "note": "The lexer rules are `click[\\s]+`, `href[\\s]+[\"]`, `call[\\s]+`, `\\([\\s]*\\)`, `\\(` and `\\)`; the productions are clickStatement 34-40 and the actions `setLink`, `setClickEvent` and `setClickFun`, all read from the chunk `provenance.source` names. A line that starts with the word and carries a task's `:` outside quotes and parentheses, such as `Click the button : a3, 2024-01-09, 1d` or `Click on href : a3, 2024-01-09, 1d`, fails Mermaid's parse and stays a task row here. `click , href \"u\"` names no id: Mermaid accepts it and binds nothing, and it is refused here because the printer could not write it back."
+  },
   "status": {
     "flags": ["done", "active", "crit", "milestone"],
     "note": "Flags lead the task data, in any order, before the id and the dates."
@@ -179,10 +229,34 @@
       "why": "the line is the directive's evident spelling, a document carrying it already rendered here, and a refusal would break it for no gain"
     },
     {
+      "what": "an after naming an id no task has",
+      "mermaid": "the task starts today",
+      "jaren": "a JM error naming the task and the id",
+      "why": "the start would again depend on a clock this engine does not have, and a guessed dependency is a schedule nobody wrote"
+    },
+    {
       "what": "compact mode with two sections of the same name, or with section names that are integers",
       "mermaid": "the renderer groups the tasks by section name and walks the groups in JavaScript key order, so same-named sections pack together and an integer-looking name jumps to the front",
       "jaren": "every section packs on its own and the sections keep their source order",
       "why": "a section is a position in the document, and a name that sorts differently from where it was written would move rows away from their headings"
+    },
+    {
+      "what": "a click href that is unsafe or bare-relative (javascript:, data:, page.html)",
+      "mermaid": "javascript: becomes about:blank and the task is still a link; a relative URL is kept; the filter is the sanitize-url package",
+      "jaren": "only the URL forms sanitizeHref allows draw a link (http and https URLs, mailto, a fragment, a protocol-relative URL, a root-relative path and a dot-relative path); any other URL leaves the task without a link, and the tree keeps the URL as written",
+      "why": "the allow-list is the one policy every link in this package already goes through, and a link that goes nowhere is worse than none"
+    },
+    {
+      "what": "a click call",
+      "mermaid": "inert at the default security level, and a call of the page's global function at loose",
+      "jaren": "kept in the tree as a name and argument strings and never drawn or run at any config",
+      "why": "a diagram is data from an author the host may not trust, and a name in the text must never choose which function runs; a host that wants the call reads the tree and decides"
+    },
+    {
+      "what": "a click written before its task, or on a line that merely starts with the word",
+      "mermaid": "a click before its task has no effect, and a task row such as `Click the button : a3, 2024-01-09, 1d` fails the parse",
+      "jaren": "a click binds by id wherever it is written, and a line that does not read as a click statement and carries a task's colon stays a task row",
+      "why": "schedules already resolve forward references, and a task named in plain words should not be refused because its first word is a keyword"
     }
   ]
 }

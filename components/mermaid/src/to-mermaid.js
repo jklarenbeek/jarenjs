@@ -13,6 +13,7 @@
  */
 
 import { parseState } from './parser/state.js';
+import { printClick } from './parser/gantt-click.js';
 
 //#region public ----------------------------------------------------
 
@@ -392,6 +393,8 @@ function printGantt(ast) {
     if (section.name) out.push(`section ${section.name}`);
     for (const t of section.tasks) out.push(`${t.name} : ${t.info}`);
   }
+  // a tree written before `click` existed has no `clicks`
+  for (const click of ast.clicks ?? []) out.push(printClick(click));
   return out.join('\n') + '\n';
 }
 

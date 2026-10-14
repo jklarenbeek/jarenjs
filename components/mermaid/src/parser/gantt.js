@@ -23,6 +23,11 @@
  * whose action fails there; this reader keeps the line in `meta` like
  * `inclusiveEndDates` and layout reads it from there.
  *
+ * `click` statements are not header lines or task rows: `gantt-click.js` reads
+ * each into `clicks` (`{ ids, href, call, line }`), binding nothing. The URL is
+ * kept as written and vetted by the layout; a `call` is data that no module
+ * ever looks up or runs.
+ *
  * Three refusals are the whole difference from a permissive reader, and
  * each one is a `JM` error carrying its source line:
  *
@@ -47,6 +52,7 @@ import {
   ISO_WEEKDAYS,
 } from './gantt-grammar.js';
 import { createExcluder, pushEndPastExclusions, dayIndexOf, DAY_MS } from '../gantt-calendar.js';
+import { startsClick, readClick, hasTaskSeparator } from './gantt-click.js';
 
 const HEADER_KEYS = new Set([
   'title', 'dateFormat', 'axisFormat', 'excludes', 'includes', 'inclusiveEndDates',
@@ -104,10 +110,10 @@ const FLAG_SET = new Set(FLAGS);
  * @returns {object}
  */
 export function parseGantt(lines, offset = 0, _header = '', options = {}) {
-  const { meta, metaLine, listed, sections } = scan(lines, offset);
+  const { meta, metaLine, listed, sections, clicks } = scan(lines, offset);
   const rules = interpret(meta, metaLine, listed, options.dateNames);
   resolve(sections, rules);
-  return { meta, rules: rules.published, sections, domain: domainOf(sections) };
+  return { meta, rules: rules.published, sections, clicks, domain: domainOf(sections) };
 }
 
 //#region scanning ---------------------------------------------------
@@ -118,7 +124,7 @@ export function parseGantt(lines, offset = 0, _header = '', options = {}) {
  * that later fails to resolve.
  * @param {string[]} lines
  * @param {number} offset
- * @returns {{ meta: any, metaLine: any, listed: any, sections: any[] }}
+ * @returns {{ meta: any, metaLine: any, listed: any, sections: any[], clicks: any[] }}
  */
 function scan(lines, offset) {
   /** @type {Record<string, string>} */
@@ -128,6 +134,8 @@ function scan(lines, offset) {
   /** each line of a list directive, with its source line @type {Record<string, { text: string, line: number }[]>} */
   const listed = {};
   const sections = [];
+  /** the `click` statements in source order @type {{ ids: string[], href: string | null, call: any, line: number }[]} */
+  const clicks = [];
   let current = { name: null, tasks: [] };
   sections.push(current);
 
@@ -155,8 +163,19 @@ function scan(lines, offset) {
       sections.push(current);
       continue;
     }
-    // Task row: `Name : meta`
     const colon = line.indexOf(':');
+    if (startsClick(line)) {
+      const read = readClick(line);
+      if (read.value !== null) {
+        clicks.push({ ...read.value, line: at });
+        continue;
+      }
+      // a line that does not read as a click and carries a task's `:` is a
+      // task row (`Click on href : a3, 2024-01-09, 1d`); one without it is
+      // a click that cannot be read
+      if (!hasTaskSeparator(line)) fail(read.error, at);
+    }
+    // Task row: `Name : meta`
     if (colon !== -1) {
       const name = line.slice(0, colon).trim();
       const info = line.slice(colon + 1).trim();
@@ -177,7 +196,7 @@ function scan(lines, offset) {
   // Drop a leading empty default section if unused.
   const trimmed = sections[0].name === null && sections[0].tasks.length === 0
     ? sections.slice(1) : sections;
-  return { meta, metaLine, listed, sections: trimmed };
+  return { meta, metaLine, listed, sections: trimmed, clicks };
 }
 
 //#endregion

@@ -23,6 +23,7 @@ const CORPUS = [
   'mindmap\n  root\n    child',
   'gantt\ntitle Plan\ndateFormat YYYY-MM-DD\nexcludes weekends\ntickInterval 1week\nweekday monday\n'
     + 'section Build\nDesign : done, a1, 2024-01-04, 3d\nShip : milestone, m1, after a1, 0d',
+  'gantt\ndateFormat YYYY-MM-DD\nsection Build\nDesign : a1, 2024-01-04, 3d\nclick a1 href "https://x.test/p" call report(a1, "two words")\nclick a1,nope call go()',
   'gantt\ndateFormat YYYY-MM-DD\ninclusiveEndDates\nexcludes weekends\nincludes 2024-01-06\n'
     + 'section Build\nDesign : a1, 2024-01-04, 2024-01-08',
 ];
@@ -54,6 +55,25 @@ describe('the DiagramDocument AST JSON Schema', function () {
       ...doc.ast,
       rules: { ...rules, tick: { amount: 0, unit: 'fortnight' } },
     }), false, 'a tick interval is a positive count of a documented unit');
+  });
+
+  it('describes a click statement, and accepts a tree written before they were read', function () {
+    const validateGantt = new JarenValidator().compile({
+      $schema: schema.$schema,
+      $ref: '#/$defs/ganttAst',
+      $defs: schema.$defs,
+    });
+    const { ast } = parseMermaid(CORPUS[CORPUS.length - 2]);
+    assert.deepEqual(ast.clicks.map((/** @type {any} */ c) => c.ids), [['a1'], ['a1', 'nope']]);
+    assert.equal(validateGantt(ast), true);
+    const { clicks, ...older } = ast;
+    assert.equal(clicks.length, 2);
+    assert.equal(validateGantt(older), true, 'clicks is not required');
+    assert.equal(validateGantt({ ...ast, clicks: [{ ...clicks[0], ids: [] }] }), false, 'a click names a task');
+    assert.equal(validateGantt({ ...ast, clicks: [{ ...clicks[0], href: null, call: null }] }), false,
+      'a click carries a link, a call or both');
+    assert.equal(validateGantt({ ...ast, clicks: [{ ...clicks[0], call: { name: 'f' } }] }), false,
+      'a call carries its argument list');
   });
 
   it('rejects a document missing the envelope keys', function () {

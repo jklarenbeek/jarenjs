@@ -143,7 +143,7 @@ answer rather than only what the source said.
 ### 4.4 gantt — a resolved schedule
 
 ```
-{ meta, rules, sections:[{ name, tasks[] }], domain:{ start, end } }
+{ meta, rules, sections:[{ name, tasks[] }], clicks[], domain:{ start, end } }
 ```
 
 `meta` holds the header lines **verbatim** (`title`, `dateFormat`,
@@ -170,6 +170,11 @@ milestone, which is the instant `start === end`. `flags` is the subset
 of `done`, `active`, `crit`, `milestone` in that order. `domain` is the
 half-open span every task falls inside, and it is what layout scales
 against.
+
+`clicks` holds the `click` statements in source order, each
+`{ ids[], href, call, line }`: the task ids it names, the URL as written (or
+`null`) and the call (or `null`) as `{ name, args[] }`. A tree written before
+they were read lacks the member and reads as no clicks.
 
 The AST stays geometry-free and plain JSON: no compiled closure and no
 coordinate crosses this boundary. `layout/gantt.js` re-compiles the axis
@@ -249,6 +254,48 @@ extra day is added before anything that follows reads the end, so an
 `after` successor starts a day later too. The date end stays "the
 author's answer": the extra day is not pushed past `excludes` either.
 
+#### Click statements
+
+`click <ids> href "<url>"` and `click <ids> call <name>(<arguments>)` are
+read as Mermaid's lexer and grammar read them (the vendored table lists
+every form and every reject, and was run through the shipped parser). The
+ids are one word, separated by commas; `href` and `call` may both appear, in
+either order, each once, and a `%` comment may follow. The three words are
+matched in any case. A line that starts with `click` and does not read as a
+click statement is a `JM` error on its line unless it carries the `:` that
+separates a task's name from its data (a colon outside every double-quoted
+run and every parenthesis): that line is a task row, so `Click the button :
+a3, 2024-01-09, 1d`, `Click on href : a3, ...` and `Click to call (now) : a3,
+...` stay tasks, and a bare `click` or `click a1` is the error.
+
+A click binds by task id wherever it is written (before the task, after it,
+in another section), and an id no task has binds nothing. When several
+statements carry an `href` for one task the last one wins.
+
+**A link is drawn through the allow-list the package already applies to
+links.** The layout gives each row `href`, `null` or the URL that
+`sanitizeHref` passes (http and https URLs, `mailto:`, a fragment, a
+protocol-relative URL such as `//cdn.example/x`, a root-relative path and a
+dot-relative path) percent-encoded for the attribute, and the
+renderer wraps the row's label and shape in one `<a href class="mm-gantt-click">`
+inside its group; the group also gains `mm-gantt-clickable`. A URL the
+allow-list refuses (`javascript:`, `data:`, `vbscript:`, `file:`, any other
+scheme, a bare relative `page.html`) leaves the task without a link, and an earlier safe link on the
+same task does not come back. The tree keeps the URL as written, so a host
+that draws from the tree instead of the scene must filter it with the
+exported `sanitizeHref`.
+
+**A call is data.** The tree records the name and the argument strings
+(split as Mermaid splits them, so none written is `[]`, where Mermaid would
+pass the task id when it runs the call); nothing looks the name up, binds it
+or runs it, at any config, and the layout and the renderer ignore it
+completely: no class, no handler, no attribute, and a document with and
+without it renders byte for byte alike. Mermaid's default level binds
+nothing either, so a document that renders there renders here; only its
+loose level, which runs a global function chosen by the diagram's text, has
+no counterpart. A host that wants the call reads `clicks` and decides what
+the name means.
+
 #### The two switches that live in the config
 
 `topAxis` and `displayMode: compact` live in the diagram's config in
@@ -289,7 +336,7 @@ side, and with it off the engines differ in which side the single row is
 on. In the scene, `bottomAxis` is `null`, or `{ y, labelY }`, and the
 height grows to hold the row.
 
-#### Six deliberate divergences from Mermaid
+#### Nine deliberate divergences from Mermaid
 
 1. **No clock.** Mermaid starts an undated first task *today*. This
    engine has no clock anywhere (`docs/ROADMAP.md`, "there is no now"),
@@ -323,6 +370,20 @@ height grows to hold the row.
    together and an integer-looking name (`section 2024`) jumps in front of
    the others. Here a section is a place in the document: it packs on its
    own and keeps its position.
+7. **A click `href` goes through the package's allow-list.** Mermaid sends
+   the URL through the sanitize-url package, which turns `javascript:` into
+   `about:blank` and leaves the task a link, and keeps a relative `page.html`;
+   here the forms `sanitizeHref` passes draw a link and every other URL draws
+   none.
+8. **A click `call` is never run and never drawn.** It is recorded in the tree
+   (see above); Mermaid's loose level calls the page's global function of that
+   name, and its default level binds nothing but still marks the task
+   clickable.
+9. **A click binds by id wherever it stands, and a line that starts with the
+   word but carries a task's colon is a task row.** Mermaid applies a click when it reads the
+   line, so one written before its task has no effect, and `Click the button :
+   a3, 2024-01-09, 1d` fails its parse.
+
 
 ### 4.5 Secondary types, and the pie renderer
 
