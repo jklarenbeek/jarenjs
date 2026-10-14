@@ -18,7 +18,7 @@
 import { svgRoot, line as svgLine, coord } from '@jarenjs/view/helpers';
 import { clamp01 } from '@jarenjs/core/math';
 import { scaleLinear, scaleBand } from '../core/scale.js';
-import { axisTicksLinear, formatTickValue, formatTickValues } from '../core/axis.js';
+import { axisTicksLinear, formatTickValues } from '../core/axis.js';
 import { cartesianFrame, annotateChart } from '../core/cartesian.js';
 import { measurableSpan } from '../core/domain.js';
 import { CATEGORICAL, seriesColor } from '../core/palette.js';
@@ -212,8 +212,7 @@ export function renderBoxplotAST(ast, theme, hash, options = {}) {
       fill: color, 'fill-opacity': 0.35, stroke: color, 'stroke-width': 1.5,
       class: 'chart-box',
     }, tooltip,
-    `${box.label} — min ${formatTickValue(s.min)}, q1 ${formatTickValue(s.q1)}, `
-    + `median ${formatTickValue(s.med)}, q3 ${formatTickValue(s.q3)}, max ${formatTickValue(s.max)}`,
+    `${box.label} — min ${s.min}, q1 ${s.q1}, median ${s.med}, q3 ${s.q3}, max ${s.max}`,
     { type: 'boxplot', label: box.label, ...s }));
     children.push(svgLine(coord(x0), coord(y(box.medV)), coord(x1), coord(y(box.medV)),
       { stroke: color, 'stroke-width': 2, class: 'chart-box-median' }));

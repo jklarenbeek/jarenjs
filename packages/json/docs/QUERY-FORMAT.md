@@ -302,7 +302,8 @@ flows through the query as an ordinary XQuery sequence.
 A descendant segment descends at most `limits.descentDepth` levels of
 nesting (default 1000), counting the descents a filter inside it starts: a
 value nested deeper is `JQ2009`, raised before the host's call stack can
-overflow. The default is fixed so the refusal is the same on every host;
+overflow, with the `docPath` of the path that descended (*upgrade: it
+carried `''`*). The default is fixed so the refusal is the same on every host;
 raising it lets the host's call stack decide again (§8.12).
 
 A variable-rooted path evaluates its segments against each item of the
@@ -1398,7 +1399,7 @@ The other three bound the **query** and its descent rather than its output:
   descends (`JQ2009`, §5.1). Unlike the others it applies when omitted, at
   1000 levels, so a deep document is refused the same way on every host
   rather than wherever the host's call stack runs out; raising it lets the
-  stack decide again. It must be a positive safe integer, and `explain()`
+  stack decide again. It must be a positive integer, as every limit must, and `explain()`
   does not report it.
 
 An unknown limit name, or a value that is not a positive integer, is a

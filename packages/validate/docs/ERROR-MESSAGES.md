@@ -71,7 +71,7 @@ One flat namespace:
 | Producer | Keys | Params carried |
 |---|---|---|
 | validate keywords | the keyword itself: `type`, `required`, `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`, `multipleOf`, `minLength`, `maxLength`, `pattern`, `additionalProperties`, `minProperties`, `maxProperties`, `minItems`, `maxItems`, `uniqueItems`, `contains`, `items`, `allOf`, `anyOf`, `oneOf`, `not`, `format`, `if`, `then`, `else`, `false schema`, `$query` | `type`/`types`; `missingProperty`; `limit` + `comparison`; `multipleOf`; `pattern`; `additionalProperty`; `format` |
-| query runtime via `$query` | the `JQ2xxx` code (`JQ2001`, `JQ2003`, ...) | `{ code, docPath }` |
+| query runtime via `$query` | the `JQ2xxx` code of a failure that judges the instance (`JQ2001` to `JQ2005`, `JQ2008`; every other runtime refusal is thrown) | `{ code, docPath }` |
 | forms field checks | `form/` + the emitted keyword: `form/required`, `form/type`, `form/const`, `form/enum`, `form/minLength`, `form/maxLength`, `form/pattern`, `form/format`, `form/minimum`, `form/maximum`, `form/exclusiveMinimum`, `form/exclusiveMaximum`, `form/multipleOf`, `form/minItems`, `form/maxItems`, `form/uniqueItems`, `form/minProperties`, `form/maxProperties` | per branch: `limit`, `len`, `type`, `format`, `enumValues`, `constValue`, `pattern`, `multipleOf` |
 | forms rules | `x-form/assert` (the default), else the author's `$msgid` | `{ pointer, ...spec.params }` |
 | calendar language | `date/month/01`…`12` and `date/weekday/0`…`6`, each `/wide` and `/short`; `date/meridiem/am|pm`; `date/relative/<unit>/past|future` over `second`…`year`; `date/relative/{now,yesterday,today,tomorrow}`; `format/name/<format>` | names take none; a relative entry takes the ABSOLUTE `{ value }` |
@@ -282,11 +282,31 @@ failed validation, because a `false` under `not` would read as success.
 back to itself through `$ref`s alone is refused wherever it sits in the
 document. A root schema is also refused when following, from the root, the
 `$ref` (evaluated before its siblings) or the one in-place applicator a
-schema evaluates first on every instance — the first member of its only
-`allOf`, `anyOf` or `oneOf`, its only `not`, or its `if` beside a `then` or
-an `else`, with nothing else asserting beside it — comes back to a schema
-already on the way: such a validator decides nothing on any instance. The
-message names every schema location on the loop:
+schema evaluates first on every instance — its only `not`, its `if` beside a
+`then` or an `else`, the target of its only `$dynamicRef` or `$recursiveRef`,
+or the first member its only `allOf`, `anyOf` or `oneOf` reaches on every
+instance, with nothing beside it that can fail an instance — comes back to a
+schema already on the way: such a validator decides nothing on any instance.
+
+- *Can fail an instance* is read the way the compiler reads it: the
+  validation and applicator keywords do, except `format` while it compiles to
+  no validator (formats annotate under the dialect and options, or no format
+  compiler is registered under the name), `contentEncoding` and
+  `contentMediaType` while content is not validated, and `items`,
+  `additionalItems`, `additionalProperties`, `propertyNames`,
+  `unevaluatedItems` or `unevaluatedProperties` holding `true` or `{}`.
+  Annotations, identifiers, `$defs`, unknown and `x-` keywords never do.
+- *The first member reached on every instance*: `allOf` passes over leading
+  members that pass everything (`true`, `{}`, a member of annotations), since
+  it stops only at a failing one; `anyOf` passes over leading `false` members,
+  since it stops at a passing one; `oneOf` passes over leading `false` members
+  and at most one member that passes everything, since it stops at a second
+  match.
+- A `$dynamicRef` or `$recursiveRef` is followed only while the walk stays in
+  the root's own resource, where its dynamic target is its static one.
+
+*Upgrade: such a root used to compile and refused every instance `JK2001`.*
+The message names every schema location on the loop:
 
 ```text
 JK0001: $ref cycle: http://loop.test/a# -> http://loop.test/a#/allOf/0 -> http://loop.test/a# never reads the instance

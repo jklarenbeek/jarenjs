@@ -15,7 +15,8 @@
  * `config.y2` names the series that read a second value axis on the
  * right edge: its domain is scanned over those series only, it lays
  * its own ticks and label, and it draws no gridlines (the left axis
- * owns them). The x axis, `log` and a `'step'` y policy apply to both
+ * owns them). While no left series has data the left axis lays no ticks
+ * and no label, and the gridlines follow the right axis. The x axis, `log` and a `'step'` y policy apply to both
  * axes; a pinned `domain.y` is in the left axis's units and pins only
  * it. A chart none of whose series `y2` names is the one-axis chart.
  *
@@ -256,6 +257,9 @@ export function resolveLineDomains(ext, policy, time, log) {
   if (ext.r0 === undefined || ext.r1 === undefined) return domains;
   // a pin is in the left axis's units, so the right axis never reads it
   const right = resolveValueAxis(ext.r0, ext.r1, policy.step, null, log);
+  // with no left series data the left axis lays no ticks: its domain is a
+  // placeholder no series reads
+  if (!Number.isFinite(ext.y0)) domains.yTickValues = [];
   return { ...domains, y2: right.domain, y2TickValues: right.ticks };
 }
 
@@ -366,7 +370,8 @@ export function buildLineASTResolved(input, config, domains) {
     },
     y: {
       ticks: ticksOf(domains.yTickValues, yScale),
-      label: config.yLabel ?? null,
+      // a left axis with no series data (every one reads the right axis) draws no label
+      label: domains.y2 !== undefined && domains.yTickValues.length === 0 ? null : config.yLabel ?? null,
     },
     domain: { x: domains.x, y: domains.y },
     legend: series.length > 1

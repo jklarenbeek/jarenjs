@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { JarenValidator, SchemaCompileError, SchemaRuntimeError, VALIDATE_CODES } from '@jarenjs/validate';
 import { getSchemaDraftByName, getSchemaDraftByVersion } from '@jarenjs/refs';
+import { stringFormats } from '@jarenjs/formats';
 
 /** @param {number} n @returns {any} `n` arrays nested around `0` */
 const nestedArrays = (n) => { let v = /** @type {any} */ (0); for (let i = 0; i < n; i++) v = [v]; return v; };
@@ -98,6 +99,65 @@ describe('a root that comes back to itself before reading the instance', () => {
     });
   }
 
+  // Each row: a root loop beside keywords that may or may not fail an
+  // instance, per mode as above: K where compile() refuses JK0001, else the
+  // answers per instance. Every K row answered nothing before (R on every
+  // instance in every mode); every other row answers as it did.
+  const besideTheLoop = /** @type {[string, any, string, object?][]} */ ([
+    ['an unknown x- keyword', { 'x-note': 1, allOf: [{ $ref: '#' }] }, 'K K K K K K'],
+    ['format with no compiler registered', { format: 'email', allOf: [{ $ref: '#' }] }, 'K K K K K K'],
+    ['format asserting', { format: 'email', allOf: [{ $ref: '#' }] }, 'RFRRRRR RFRRRRR K RRRRRRR RRRRRRR K', { formats: true }],
+    ['format asserting by option', { format: 'email', allOf: [{ $ref: '#' }] },
+      'RFRRRRR RFRRRRR RFRRRRR RRRRRRR RRRRRRR RRRRRRR', { formats: true, formatAssertion: true }],
+    ['contentMediaType', { contentMediaType: 'application/json', allOf: [{ $ref: '#' }] }, 'RFRRRRR K K RRRRRRR K K'],
+    ['contentEncoding', { contentEncoding: 'base64', allOf: [{ $ref: '#' }] }, 'RFRRRRR K K RRRRRRR K K'],
+    ['unevaluatedProperties: true', { unevaluatedProperties: true, allOf: [{ $ref: '#' }] }, 'K K K K K K'],
+    ['additionalProperties: {}', { additionalProperties: {}, allOf: [{ $ref: '#' }] }, 'K K K K K K'],
+    ['items: true', { items: true, allOf: [{ $ref: '#' }] }, 'K K K K K K'],
+    ['propertyDependencies while it is not a keyword', { propertyDependencies: { a: { b: false } }, allOf: [{ $ref: '#' }] }, 'K K K K K K'],
+    ['a $dynamicRef to its own anchor', { $dynamicAnchor: 'n', allOf: [{ $dynamicRef: '#n' }] }, 'K K K K K K'],
+    ['a bare $dynamicRef', { $dynamicAnchor: 'n', $dynamicRef: '#n' }, 'K K K K K K'],
+    ['a $recursiveRef', { $recursiveAnchor: true, allOf: [{ $recursiveRef: '#' }] }, 'K K K K K K'],
+    ['a $dynamicRef in an embedded resource, whose dynamic target reads', {
+      $id: 'http://loop.test/a', $defs: { r: { $dynamicAnchor: 'n', type: 'string' } },
+      allOf: [{ $id: 'http://loop.test/b', $dynamicAnchor: 'n', allOf: [{ $dynamicRef: '#n' }] }],
+    }, 'FTFFFFF FTFFFFF FTFFFFF FTFFFFF FTFFFFF FTFFFFF'],
+    ['a $dynamicRef beside an assertion', { $dynamicAnchor: 'n', type: 'string', allOf: [{ $dynamicRef: '#n' }] },
+      'FRFFFFF FRFFFFF FRFFFFF RRRRRRR RRRRRRR RRRRRRR'],
+    ['allOf after {}', { allOf: [{}, { $ref: '#' }] }, 'K K K K K K'],
+    ['allOf after an annotation', { allOf: [{ title: 't' }, { $ref: '#' }] }, 'K K K K K K'],
+    ['allOf after false', { allOf: [false, { $ref: '#' }] }, 'FFFFFFF FFFFFFF FFFFFFF RRRRRRR RRRRRRR RRRRRRR'],
+    ['anyOf after false', { anyOf: [false, { $ref: '#' }] }, 'K K K K K K'],
+    ['anyOf after true', { anyOf: [true, { $ref: '#' }] }, 'TTTTTTT TTTTTTT TTTTTTT TTTTTTT TTTTTTT TTTTTTT'],
+    ['oneOf after true', { oneOf: [true, { $ref: '#' }] }, 'K K K K K K'],
+    ['oneOf after false', { oneOf: [false, { $ref: '#' }] }, 'K K K K K K'],
+    ['oneOf after two trues', { oneOf: [true, true, { $ref: '#' }] }, 'FFFFFFF FFFFFFF FFFFFFF FFFFFFF FFFFFFF FFFFFFF'],
+  ]);
+
+  for (const [label, schema, expected, options = {}] of besideTheLoop) {
+    it(`is refused only where nothing beside the loop can fail: ${label}`, () => {
+      const { formats, ...rest } = /** @type {any} */ (options);
+      const got = MODES.map(({ collectErrors, $schema }) => {
+        const validator = new JarenValidator({ collectErrors, ...rest });
+        if (formats) validator.addFormats(stringFormats);
+        let validate;
+        try { validate = validator.compile({ ...structuredClone(schema), $schema }); }
+        catch (e) { assert.equal(/** @type {any} */ (e).code, 'JK0001'); return 'K'; }
+        return INSTANCES.map((instance) => {
+          try { return answer(validate(instance)) ? 'T' : 'F'; }
+          catch (e) { assert.equal(/** @type {any} */ (e).code, 'JK2001'); return 'R'; }
+        }).join('');
+      }).join(' ');
+      assert.equal(got, expected);
+    });
+  }
+
+  it('names a $dynamicRef on the loop', () => {
+    assert.throws(() => new JarenValidator().compile({ $id: 'http://loop.test/d', $dynamicAnchor: 'n', allOf: [{ $dynamicRef: '#n' }] }), {
+      message: 'JK0001: $ref cycle: http://loop.test/d# -> http://loop.test/d#/allOf/0 -> http://loop.test/d# never reads the instance',
+    });
+  });
+
   it('throws instead of failing, so a loop under not never reads as success', () => {
     const validate = new JarenValidator().compile({ not: { anyOf: [{ type: 'string' }, { $ref: '#' }] } });
     assert.equal(validate('a'), false);
@@ -176,7 +236,10 @@ describe('the reference depth bound', () => {
     });
     assert.equal(recursive(nestedArrays(10)), true);
     assert.throws(() => recursive(nestedArrays(100000)), depthRefusal);
-    const loop = new JarenValidator().compile({ $schema: DRAFTS[2], $id: 'http://depth.test/l', $dynamicAnchor: 'n', allOf: [{ $dynamicRef: '#n' }] });
+    const loop = new JarenValidator().compile({
+      $schema: DRAFTS[2], $id: 'http://depth.test/l', $dynamicAnchor: 'n', anyOf: [{ type: 'string' }, { $dynamicRef: '#n' }],
+    });
+    assert.equal(loop('a'), true);
     assert.throws(() => loop(1), depthRefusal);
   });
 

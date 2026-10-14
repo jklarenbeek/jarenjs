@@ -45,6 +45,21 @@ export function isRecursiveQueryCompileError(error) {
   return false;
 }
 
+// The runtime codes that judge the instance (QUERY-FORMAT.md section 10.3): a
+// type error, a zero divisor, the EBV of several items, a key that is not one
+// string, incomparable sort keys, an item a schema literal rejects. Each is a
+// failed assertion. Every other runtime refusal - an execution limit (JQ2007,
+// JQ2009), a host hook that threw - decides nothing about the instance, so it
+// is thrown: folded into a failure, `not` would turn it into success.
+const INSTANCE_CODES = new Set(['JQ2001', 'JQ2002', 'JQ2003', 'JQ2004', 'JQ2005', 'JQ2008']);
+
+/** Whether a thrown value is a query runtime error that judges the instance.
+ * @param {unknown} e - The thrown value
+ * @returns {e is JsonQueryRuntimeError} Whether it reports as a failed assertion
+ */
+function judgesInstance(e) {
+  return e instanceof JsonQueryRuntimeError && INSTANCE_CODES.has(e.code);
+}
 
 /**
  * Compile the '$query' keyword of a schema into a validator.
@@ -54,11 +69,12 @@ export function isRecursiveQueryCompileError(error) {
  * schema literals inside the query (`$valid`/`$assert`/`$as`) may `$ref`
  * schemas registered on that instance with `addSchema`. Malformed query
  * documents (`JQ0xxx`) and externals other than `root`/`path` throw here,
- * at schema compile time. At validation time a `JsonQueryRuntimeError`
- * (`JQ2xxx` - a data-shaped failure such as the EBV of a multi-item result
- * or arithmetic on a non-number) reports as a validation failure whose
- * error params carry the `code` and the query `docPath`; only `JQ2009`, a
- * descendant segment past its nesting bound, is thrown.
+ * at schema compile time. At validation time a data-shaped
+ * `JsonQueryRuntimeError` (see `judgesInstance`: the EBV of a multi-item
+ * result, arithmetic on a non-number, ...) reports as a validation failure
+ * whose error params carry the `code` and the query `docPath`; every other
+ * runtime refusal - an execution limit (`JQ2007`, `JQ2009`) among them - is
+ * thrown.
  *
  * @param {object} schemaObj - The validation object
  * @param {object} jsonSchema - The JSON schema containing the '$query' keyword
@@ -110,12 +126,7 @@ export function compileQuerySchema(schemaObj, jsonSchema) {
       return query.ebv(data, ext) || addError(data, dataPath);
     }
     catch (e) {
-      // A data-shaped runtime error (JQ2003 multi-item EBV, a JQ2001-class
-      // operator error) is a failed assertion. An execution limit (JQ2009: a
-      // descendant segment past its nesting bound) decides nothing about the
-      // instance, so it is thrown: folded into a failure, `not` would turn it
-      // into success.
-      if (e instanceof JsonQueryRuntimeError && e.code !== 'JQ2009')
+      if (judgesInstance(e))
         return addError(data, dataPath, e.code, e.docPath);
       throw e;
     }

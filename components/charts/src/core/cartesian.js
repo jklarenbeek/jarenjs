@@ -10,7 +10,7 @@
 
 import { line as svgLine, textAt, textWidth, num } from '@jarenjs/view/helpers';
 import { seriesColor, sequentialColor } from './palette.js';
-import { formatTickValue } from './axis.js';
+import { formatTickValues } from './axis.js';
 
 export const FS_TICK = 11;
 export const FS_LABEL = 12;
@@ -104,7 +104,8 @@ export function legendRow(legend, right, y, theme, palette) {
 /**
  * The ramp key a shaded chart (heatmap, map) puts in the legend slot:
  * five stops sampled along `ramp` as swatches, labelled only at the ends
- * with the extent of the values. `stops` is the swatch palette the legend
+ * with the extent of the values, at the precision that tells the two
+ * apart (`formatTickValues`). `stops` is the swatch palette the legend
  * row draws from; `legend` is null when there is no domain to key.
  * @param {{min: number, max: number} | null} domain
  * @param {readonly string[]} ramp
@@ -112,9 +113,9 @@ export function legendRow(legend, right, y, theme, palette) {
  */
 export function rampLegend(domain, ramp) {
   const stops = [0, 0.25, 0.5, 0.75, 1].map((t) => sequentialColor(t, ramp));
-  const legend = domain === null ? null : stops.map((_, i) => ({
-    name: i === 0 ? formatTickValue(domain.min)
-      : i === stops.length - 1 ? formatTickValue(domain.max) : '',
+  const ends = domain === null ? null : formatTickValues([domain.min, domain.max]);
+  const legend = ends === null ? null : stops.map((_, i) => ({
+    name: i === 0 ? ends[0] : i === stops.length - 1 ? ends[1] : '',
     swatch: i,
   }));
   return { stops, legend };
@@ -132,7 +133,8 @@ export function rampLegend(domain, ramp) {
  * @param {AxisAST} [params.xAxis] ticks along the bottom edge
  * @param {AxisAST} [params.yAxis] ticks along the left edge
  * @param {AxisAST} [params.y2Axis] ticks along the right edge: a second
- *  value axis with its own label and no gridlines (the left axis owns them)
+ *  value axis with its own label and no gridlines (the left axis owns them,
+ *  unless it lays no ticks)
  * @param {'x'|'y'|'xy'|'none'} [params.grid] which tick sets draw grid lines
  * @param {number} [params.width]
  * @param {number} [params.plotHeight]
@@ -181,8 +183,12 @@ export function cartesianFrame(params) {
       { 'text-anchor': 'end', fill: t.muted, class: 'chart-tick' }));
   }
   if (y2Axis !== null) {
+    const y2Grid = yAxis.ticks.length === 0 && (grid === 'y' || grid === 'xy');
     for (const tick of y2Axis.ticks) {
-      children.push(textAt(plot.x + plot.w + 6, plot.y + (1 - tick.pos) * plot.h + 4,
+      const y = plot.y + (1 - tick.pos) * plot.h;
+      if (y2Grid)
+        children.push(svgLine(plot.x, y, plot.x + plot.w, y, { stroke: t.grid, 'stroke-width': 1, class: 'chart-grid' }));
+      children.push(textAt(plot.x + plot.w + 6, y + 4,
         fitLabel(tick.label, 230, FS_TICK), FS_TICK,
         { 'text-anchor': 'start', fill: t.muted, class: 'chart-tick' }));
     }

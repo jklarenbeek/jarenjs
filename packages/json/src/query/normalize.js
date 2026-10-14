@@ -19,7 +19,7 @@
 // collected in order of first appearance.
 
 import { parseJSONPath, JSONPathSyntaxError, RE_JSONPATH_VARIABLE_HEAD } from '../path.js';
-import { isSingularSegments, descentCeilingOption } from '../segments.js';
+import { isSingularSegments, descentCeilingOption, positiveIntegerOption } from '../segments.js';
 import { encodeJSONPointerSegment } from '../pointer.js';
 import { NESTING_CEILING } from '../errors.js';
 import { JsonQueryCompileError } from './errors.js';
@@ -1433,11 +1433,8 @@ function validateLimits(value) {
     throw new TypeError('options.limits must be a plain object');
   refuseUnknownMembers(value, LIMIT_NAMES,
     (name, hint) => new TypeError(`options.limits.${name} is not a known limit${hint}`));
-  for (const name in value) {
-    const v = value[name];
-    if (!Number.isInteger(v) || v < 1)
-      throw new TypeError(`options.limits.${name} must be a positive integer`);
-  }
+  for (const name in value)
+    positiveIntegerOption(value[name], `options.limits.${name}`);
   return Object.freeze({
     sequenceItems: value.sequenceItems ?? null,
     resultItems: value.resultItems ?? null,

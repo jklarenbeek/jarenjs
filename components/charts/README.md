@@ -157,7 +157,12 @@ apply to both value axes; a pinned `domain.y` (`{ min, max }`) is in the
 left axis's units and pins only the left one. A name in `y2.series` that
 no series carries is not an error — a live feed delivers its series one
 at a time — and a chart none of whose series `y2` names renders exactly
-as it does without `y2`. A `y2` that is not `{ series: string[], label?:
+as it does without `y2`. The opposite case, every series with data on the
+right, lays no left ticks and no `yLabel` (the plot's left edge line
+stays), and the gridlines follow the right axis's ticks until a left
+series has a point. *Upgrade:
+such a chart drew an invented `0`–`1` left axis, with its gridlines, under
+the left label.* A `y2` that is not `{ series: string[], label?:
 string | null }` is refused with a `CodedError` `CH0002` naming the
 member's JSON Pointer (`/y2`, `/y2/series/1`, `/y2/label`), by
 `compileChart`, `buildLineAST` and `createChartSession` alike; the schema
@@ -524,7 +529,11 @@ that tell them apart: ticks 81,600 to 81,680 by 20 used to read `81.6k` three ti
 and `81.7k` twice and now read `81.60k`, `81.62k`, … `81.68k`; 2,510 to 2,520 by 2
 reads `2.510k` … `2.520k`. Every axis (line, bar, scatter, candlestick, boxplot,
 streamgraph, gauge, radar) labels this way; an axis whose labels already differed
-prints exactly as before.
+prints exactly as before. The ramp legend of a heatmap or map labels its two ends
+the same way (`81.60k` and `81.62k`, where both read `81.6k`), and the hover text
+of a heatmap cell, a map shape and a boxplot box names the datum as every other
+mark's does (`a × r: 81600`, `min 81600, q1 81605, …`), where it printed the
+three-significant-digit tick label (`81.6k`).
 Axes built on `axisTicksLinear` keep the tick at either end of a raw domain when
 the quotient rounds just short of a whole number (`[0, 0.3]` gains its `0.3`,
 `[0.1, 0.7]` its `0.7`); the bar, line, scatter and gauge builders nice the

@@ -173,7 +173,49 @@ describe("Schema '$query' keyword (Jaren JSON Query assertions)", () => {
     });
   });
 
-  describe('runtime-error policy (JQ2xxx is a failed assertion, never a throw)', () => {
+  describe('runtime-error policy (a data-shaped JQ2xxx is a failed assertion; a limit is thrown)', () => {
+    it('should fail, not throw, on every data-shaped code (JQ2001-JQ2005, JQ2008)', () => {
+      const jaren = new JarenValidator({ collectErrors: true });
+      const cases = [
+        [{ $add: ['$.a', 1] }, { a: 'x' }, 'JQ2001', '/$add/0'],
+        [{ $idiv: ['$.a', 0] }, { a: 1 }, 'JQ2002', '/$idiv'],
+        ['$.xs[*]', { xs: [1, 2] }, 'JQ2003', ''],
+        [{ $exists: { $map: [['$.k', 1]] } }, { k: 1 }, 'JQ2004', '/$exists/$map/0/0'],
+        [{ $sort: '$.xs[*]' }, { xs: [1, 'a'] }, 'JQ2005', '/$sort'],
+        [{ $assert: ['$.a', { type: 'string' }] }, { a: 1 }, 'JQ2008', '/$assert'],
+      ];
+      const seen = cases.map(([query, data]) => {
+        const result = jaren.compile({ $query: query })(data);
+        return [result.valid, result.errors[0]?.params];
+      });
+      assert.deepStrictEqual(seen, cases.map(([, , code, docPath]) => [false, { code, docPath }]));
+    });
+
+    it('should throw an execution limit (JQ2007), so not never reads it as success', () => {
+      const range = { $gt: [{ $count: { $reverse: { $range: [0, '$.n'] } } }, 0] };
+      for (const collectErrors of [false, true]) {
+        const jaren = new JarenValidator({ collectErrors });
+        const holds = jaren.compile({ $query: range });
+        const negated = jaren.compile({ not: { $query: range } });
+        const valid = (r) => (typeof r === 'object' ? r.valid : r);
+        assert.deepStrictEqual([valid(holds({ n: 10 })), valid(negated({ n: 10 }))], [true, false]);
+        assert.throws(() => holds({ n: 2000000 }),
+          { name: 'JsonQueryRuntimeError', code: 'JQ2007', docPath: '/$gt/0/$count/$reverse/$range' });
+        assert.throws(() => negated({ n: 2000000 }), { name: 'JsonQueryRuntimeError', code: 'JQ2007' });
+      }
+    });
+
+    it('should compile a schema literal whose $query refuses only null', () => {
+      const onNull = { $if: [{ $eq: ['$', null] }, 2000000, 3] };
+      const literal = { $query: { $gt: [{ $count: { $range: [0, onNull] } }, 0] } };
+      for (const collectErrors of [false, true]) {
+        const validate = new JarenValidator({ collectErrors }).compile({ $query: { $valid: ['$.a', literal] } });
+        const valid = (r) => (typeof r === 'object' ? r.valid : r);
+        assert.strictEqual(valid(validate({ a: 5 })), true);
+        assert.throws(() => validate({ a: null }), { name: 'JsonQueryRuntimeError', code: 'JQ2007' });
+      }
+    });
+
     it('should fail, not throw, on arithmetic over hostile data (JQ2001)', () => {
       const validate = new JarenValidator().compile({
         $query: { $gt: [{ $add: ['$.a', 1] }, 0] },

@@ -2,7 +2,10 @@ import {
   isBoolOrObjectClass,
   hasSchemaReference,
   hasRefSiblings,
+  REF_SIBLING_KEYWORDS,
 } from './tools.js';
+
+import { getSchemaFormatCompiler } from './format.js';
 
 import {
   isBoolishType,
@@ -541,40 +544,131 @@ export function resolveRefSchemaDeep(schemas, baseUri, refschema, opts = new Tra
   throw new Error(`The json schema '${baseUri}' can not be resolved!`);
 }
 
-// Keywords that neither assert nor apply a subschema: a schema holding only
-// these beside one in-place applicator evaluates that applicator first.
-const INERT_KEYWORDS = new Set([
-  '$id', '$schema', '$anchor', '$dynamicAnchor', '$recursiveAnchor', '$defs', 'definitions',
-  '$comment', '$vocabulary', 'title', 'description', 'default', 'examples', 'deprecated',
-  'readOnly', 'writeOnly',
-]);
+/**
+ * @typedef {object} InstanceReading - what decides whether a keyword compiles
+ *   to a validator, for one compilation
+ * @property {{ formatAssertion?: boolean|null, contentValidation?: boolean|null,
+ *   propertyDependencies?: boolean|null }} options - the compilation's validation options
+ * @property {Record<string, any>} formats - the format compilers registered on the validator
+ */
+
+// Keywords applying one subschema to members or items: with a `true` or `{}`
+// subschema they pass every instance.
+const PASS_THROUGH_KEYWORDS = new Set(['items', 'additionalItems', 'additionalProperties',
+  'propertyNames', 'unevaluatedItems', 'unevaluatedProperties']);
+
+/**
+ * Whether a keyword of a schema object can fail an instance, read the way the
+ * compiler reads it: it is one of the keywords a `$ref` carries as an
+ * asserting sibling (`REF_SIBLING_KEYWORDS`, and `propertyDependencies` while
+ * that option is on), except `format` while it compiles to no validator
+ * (formats annotate, or no compiler is registered under the name), the
+ * content keywords while content is not validated, and a keyword applying a
+ * subschema that passes everything to members or items. Every other key
+ * (annotations, identifiers, `$defs`, unknown and `x-*` keywords) compiles to
+ * no validator.
+ * @param {string} key
+ * @param {any} value
+ * @param {InstanceReading} reading
+ * @returns {boolean}
+ */
+function canFail(key, value, reading) {
+  if (key === 'propertyDependencies') return reading.options.propertyDependencies === true;
+  if (!REF_SIBLING_KEYWORDS.includes(key)) return false;
+  if (key === 'format')
+    return reading.options.formatAssertion !== false && getSchemaFormatCompiler(reading.formats, value) != null;
+  if (key === 'contentEncoding' || key === 'contentMediaType') return reading.options.contentValidation === true;
+  if (PASS_THROUGH_KEYWORDS.has(key)) return !passesEverything(value, reading);
+  return true;
+}
+
+/**
+ * Whether a subschema passes every instance without reading it: `true`, or
+ * an object none of whose keywords can fail or refers anywhere.
+ * @param {any} schema
+ * @param {InstanceReading} reading
+ * @returns {boolean}
+ */
+function passesEverything(schema, reading) {
+  if (schema === true) return true;
+  if (!isObjectClass(schema) || hasSchemaReference(schema, '$ref') || hasSchemaReference(schema, '$recursiveRef'))
+    return false;
+  for (const key of Object.keys(schema)) {
+    if (canFail(key, schema[key], reading)) return false;
+  }
+  return true;
+}
+
+/**
+ * The index of the member of an in-place applicator list reached on every
+ * instance: the first one, after the leading members that cannot answer
+ * before the next one runs. `allOf` stops at a failing member, so it skips
+ * only members that pass everything; `anyOf` stops at a passing member, so
+ * it skips only `false`; `oneOf` stops at a second passing member, so it
+ * skips `false` and at most one member that passes everything.
+ * @param {string} key - `allOf`, `anyOf` or `oneOf`
+ * @param {any[]} members
+ * @param {InstanceReading} reading
+ * @returns {number}
+ */
+function firstReachedMember(key, members, reading) {
+  let passing = 0;
+  let i = 0;
+  for (; i < members.length - 1; i++) {
+    const member = members[i];
+    if (member === false && key !== 'allOf') continue;
+    if (key === 'anyOf' || !passesEverything(member, reading)) break;
+    if (key === 'oneOf' && ++passing > 1) break;
+  }
+  return i;
+}
 
 /**
  * The subschema a schema object evaluates first on every instance, without
  * descending into it and before anything else it asserts can decide the
- * answer: the first member of its only `allOf`, `anyOf` or `oneOf`, its only
- * `not`, or its `if` when a `then` or an `else` is beside it. A schema with
- * any other keyword answers before reaching it on some instance.
+ * answer: the member `firstReachedMember` picks of its only `allOf`, `anyOf`
+ * or `oneOf`, its only `not`, its `if` when a `then` or an `else` is beside
+ * it, or the target of its only `$dynamicRef` or `$recursiveRef` (marked by
+ * the key). Keywords that cannot fail (`canFail`) are passed over; a schema
+ * with any other keyword answers before reaching it on some instance.
  * @param {Record<string, any>} schema
+ * @param {InstanceReading} reading
  * @returns {[string, any] | undefined} the subschema's pointer suffix and value
  */
-function firstInPlaceSubschema(schema) {
+function firstInPlaceSubschema(schema, reading) {
   let first;
   for (const key of Object.keys(schema)) {
-    if (INERT_KEYWORDS.has(key)) continue;
+    if (key === '$recursiveRef') {
+      if (first !== undefined) return undefined;
+      first = [key, schema[key]];
+      continue;
+    }
+    if (!canFail(key, schema[key], reading)) continue;
     if ((key === 'then' || key === 'else') && Object.hasOwn(schema, 'if')) continue;
     if (first !== undefined) return undefined;
     if (key === 'allOf' || key === 'anyOf' || key === 'oneOf') {
       const members = schema[key];
       if (!Array.isArray(members) || members.length === 0) return undefined;
-      first = [`${key}/0`, members[0]];
+      const i = firstReachedMember(key, members, reading);
+      first = [`${key}/${i}`, members[i]];
     }
     else if (key === 'not') first = ['not', schema.not];
     else if (key === 'if' && (Object.hasOwn(schema, 'then') || Object.hasOwn(schema, 'else')))
       first = ['if', schema.if];
+    else if (key === '$dynamicRef') first = [key, schema[key]];
     else return undefined;
   }
   return first;
+}
+
+/**
+ * The part of a schema id before its fragment: the resource it lies in.
+ * @param {string} id
+ * @returns {string}
+ */
+function resourceOf(id) {
+  const hash = id.indexOf('#');
+  return hash === -1 ? id : id.slice(0, hash);
 }
 
 /**
@@ -582,22 +676,26 @@ function firstInPlaceSubschema(schema) {
  * schema it is still evaluating without having read the instance: following
  * the `$ref` (always evaluated first) or the one in-place applicator each
  * schema evaluates first returns to a schema already on the way. Such a
- * validator decides nothing on any instance. A loop that only some instances
- * reach is not refused here; the reference depth bound refuses it where an
- * instance reaches it.
+ * validator decides nothing on any instance. A `$dynamicRef` or
+ * `$recursiveRef` is followed like a `$ref` while the walk stays in the root
+ * resource, where its dynamic target is its static one; elsewhere the walk
+ * stops. A loop that only some instances reach is not refused here; the
+ * reference depth bound refuses it where an instance reaches it.
  * @param {Map<string, any>} schemas - The schema map
  * @param {string} rootId - The id the root schema is compiled under
  * @param {any} root - The root schema
+ * @param {InstanceReading} reading - The compilation's options and formats
  * @param {TraverseOptions} [opts]
  * @throws {RefCycleError} naming the schema locations on the loop
  */
-export function assertRootReadsInstance(schemas, rootId, root, opts = new TraverseOptions()) {
+export function assertRootReadsInstance(schemas, rootId, root, reading, opts = new TraverseOptions()) {
   /** @type {Map<object, Map<string, number>>} */
   const visited = new Map();
   const ids = [];
   let schema = root;
   let base = rootId;
   let at = rootId;
+  let rootResource;
   // Each step visits a new (schema, base) pair, of which a document has
   // finitely many; the cap only ends a walk whose bases never repeat.
   for (let steps = 0; steps <= schemas.size * 4 + 64; steps++) {
@@ -606,6 +704,7 @@ export function assertRootReadsInstance(schemas, rootId, root, opts = new Traver
       base = createJsonPointer(schema.$id, base, opts).id;
       at = base;
     }
+    rootResource ??= resourceOf(base);
     const location = at.includes('#') ? at : at + '#';
     let bases = visited.get(schema);
     const seen = bases?.get(base);
@@ -615,21 +714,33 @@ export function assertRootReadsInstance(schemas, rootId, root, opts = new Traver
     bases.set(base, ids.length);
     ids.push(location);
 
-    if (hasSchemaReference(schema, '$ref')) {
-      let target;
-      try {
-        target = resolveRefSchemaShallow(schemas, schema.$ref, base, opts);
+    let ref;
+    if (hasSchemaReference(schema, '$ref'))
+      ref = schema.$ref;
+    else {
+      const first = firstInPlaceSubschema(schema, reading);
+      if (first === undefined) return;
+      if (first[0] === '$dynamicRef' || first[0] === '$recursiveRef') {
+        const dynamic = first[1];
+        if (resourceOf(base) !== rootResource || typeof dynamic !== 'string' || !dynamic.startsWith('#')
+          || (first[0] === '$recursiveRef' && dynamic !== '#'))
+          return;
+        ref = dynamic;
       }
-      catch {
-        return; // a target not loaded is reported where it is used
+      else {
+        at = `${location}/${first[0]}`;
+        schema = first[1];
+        continue;
       }
-      schema = target.schema;
-      base = at = target.id;
-      continue;
     }
-    const first = firstInPlaceSubschema(schema);
-    if (first === undefined) return;
-    at = `${location}/${first[0]}`;
-    schema = first[1];
+    let target;
+    try {
+      target = resolveRefSchemaShallow(schemas, ref, base, opts);
+    }
+    catch {
+      return; // a target not loaded is reported where it is used
+    }
+    schema = target.schema;
+    base = at = target.id;
   }
 }

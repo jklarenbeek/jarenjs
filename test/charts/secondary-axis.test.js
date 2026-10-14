@@ -134,11 +134,24 @@ describe('line chart — right value axis', function () {
     assert.deepEqual(vSpan(log.series[1]), [0, 1]);
   });
 
-  it('a right series alone draws an empty left axis and its own right one', function () {
+  it('a right series alone draws no left ticks or label, and its gridlines follow the right axis', function () {
     const ast = buildLineAST({ series: [FEED.series[1]] }, TWO_AXES);
     assert.deepEqual(ast.domain.y, [0, 1]);
     assert.deepEqual(ast.domain.y2, [2508.3, 2521.4]);
     assert.equal(ast.legend, null);
+    assert.deepEqual(ast.y, { ticks: [], label: null });
+    assert.deepEqual(ast.y2?.ticks.map((t) => t.label), ['2.510k', '2.512k', '2.514k', '2.516k', '2.518k', '2.520k']);
+    const svg = compileChart(TWO_AXES, { series: [FEED.series[1]] }).toSvgString();
+    assert.equal(svg.includes('BTCUSDT'), false);
+    const grid = [...svg.matchAll(/<line x1="([\d.]+)" y1="([\d.]+)" x2="([\d.]+)" y2="[\d.]+"[^>]*class="chart-grid"/g)].map((m) => Number(m[2]).toFixed(6));
+    const rightTicks = [...svg.matchAll(/<text x="[\d.]+" y="([\d.]+)" font-size="[\d.]+" text-anchor="start"[^>]*class="chart-tick"/g)]
+      .map((m) => (Number(m[1]) - 4).toFixed(6));
+    assert.deepEqual(grid, rightTicks);
+    assert.equal(grid.length, 6);
+    // a left series brings the left axis, its label and its gridlines back
+    const both = buildLineAST(FEED, TWO_AXES);
+    assert.equal(both.y.label, 'BTCUSDT (USDT)');
+    assert.deepEqual(both.y.ticks.map((t) => t.label), ['81.60k', '81.62k', '81.64k', '81.66k', '81.68k']);
   });
 
   it('refuses a malformed y2 with CH0002 naming the member', function () {
@@ -211,6 +224,15 @@ describe('line session — right value axis', function () {
     // 2600 lies inside the left domain's numbers but beyond the right one's
     const moved = step({ x: 1, s: 'eth', y: 2600 });
     assert.equal(moved.mode, 'rebuilt');
+  });
+
+  it('rebuilds when the first left point arrives inside the empty left placeholder domain', function () {
+    const { step } = setup();
+    assert.equal(step({ x: 0, s: 'eth', y: 2500 }, { x: 1, s: 'eth', y: 2520 }).mode, 'rebuilt');
+    assert.equal(step({ x: 1, s: 'eth', y: 2510 }).mode, 'incremental');
+    // a left series whose only reading is unplottable leaves the left axis empty
+    assert.equal(step({ x: 1, s: 'btc', y: null }).mode, 'rebuilt');
+    assert.equal(step({ x: 0, s: 'btc', y: 0 }, { x: 1, s: 'btc', y: 1 }).mode, 'rebuilt');
   });
 
   it('a right-series eviction that retires its extreme rebuilds; one that does not patches', function () {

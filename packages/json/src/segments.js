@@ -589,64 +589,107 @@ export function compileSelectorNodeV(sel) {
 let descentDepth = 0;
 
 // The ceiling the segments compiled right now take: DATA_DEPTH_CEILING
-// unless a caller compiles under its own (withDescentCeiling). Module scope
-// like pendingResets: set and restored around one synchronous compile.
+// unless a caller compiles under its own (withDescentCeiling), and the query
+// document location they belong to, '' outside a query (withDescentDocPath),
+// which a descent refusal names. Module scope like pendingResets: set and
+// restored around one synchronous compile.
 let compileCeiling = DATA_DEPTH_CEILING;
+let compileDocPath = '';
+
+/**
+ * Run `compile` under a descent ceiling and document location.
+ * @template T
+ * @param {number} ceiling
+ * @param {string} docPath
+ * @param {() => T} compile
+ * @returns {T}
+ */
+function withDescentScope(ceiling, docPath, compile) {
+  const savedCeiling = compileCeiling;
+  const savedDocPath = compileDocPath;
+  compileCeiling = ceiling;
+  compileDocPath = docPath;
+  try {
+    return compile();
+  }
+  finally {
+    compileCeiling = savedCeiling;
+    compileDocPath = savedDocPath;
+  }
+}
 
 /**
  * Run `compile` with the descendant segments it compiles bounded at
  * `ceiling` levels of nesting instead of `DATA_DEPTH_CEILING`.
  * @template T
- * @param {number} ceiling - A positive safe integer
+ * @param {number} ceiling - A positive integer
  * @param {() => T} compile
  * @returns {T}
  */
 export function withDescentCeiling(ceiling, compile) {
-  const saved = compileCeiling;
-  compileCeiling = ceiling;
-  try {
-    return compile();
-  }
-  finally {
-    compileCeiling = saved;
-  }
+  return withDescentScope(ceiling, compileDocPath, compile);
 }
 
 /**
- * Refuse a descendant ceiling option that is not a positive safe integer.
+ * Run `compile` with the descendant segments it compiles naming `docPath`,
+ * the query document location of their path, when they refuse a value
+ * nested past their ceiling.
+ * @template T
+ * @param {string} docPath - A JSON Pointer into the query document
+ * @param {() => T} compile
+ * @returns {T}
+ */
+export function withDescentDocPath(docPath, compile) {
+  return withDescentScope(compileCeiling, docPath, compile);
+}
+
+/**
+ * Read a limit option: a whole number from 1, the one rule every JSONPath
+ * and query limit reads. A value past `Number.MAX_SAFE_INTEGER` is a whole
+ * number too, and bounds nothing a host can reach.
+ * @param {unknown} value - The option
+ * @param {string} name - The option's name, for the refusal
+ * @returns {number}
+ * @throws {TypeError} when it is not a positive integer
+ */
+export function positiveIntegerOption(value, name) {
+  if (!Number.isInteger(value) || /** @type {number} */ (value) < 1)
+    throw new TypeError(`${name} must be a positive integer`);
+  return /** @type {number} */ (value);
+}
+
+/**
+ * Read a descendant ceiling option (`positiveIntegerOption`), the default
+ * ceiling when it is not given.
  * @param {unknown} value - The option, `undefined` or `null` when not given
  * @param {string} name - The option's name, for the refusal
  * @returns {number} the ceiling to compile under
  */
 export function descentCeilingOption(value, name) {
-  if (value == null)
-    return DATA_DEPTH_CEILING;
-  if (!Number.isSafeInteger(value) || value < 1)
-    throw new TypeError(`${name} must be a positive safe integer`);
-  return value;
+  return value == null ? DATA_DEPTH_CEILING : positiveIntegerOption(value, name);
 }
 
-function descentTooDeep(ceiling) {
+function descentTooDeep(ceiling, docPath) {
   return new JsonQueryRuntimeError('JQ2009',
-    `a descendant segment reaches a value nested deeper than ${ceiling} levels`, '');
+    `a descendant segment reaches a value nested deeper than ${ceiling} levels`, docPath);
 }
 
-export function descendV(v, output, root, apply, ceiling) {
+export function descendV(v, output, root, apply, ceiling, docPath) {
   apply(v, output, root);
   if (typeof v !== 'object' || v === null)
     return;
   if (descentDepth >= ceiling)
-    throw descentTooDeep(ceiling);
+    throw descentTooDeep(ceiling, docPath);
   descentDepth++;
   try {
     if (Array.isArray(v)) {
       for (let i = 0; i < v.length; i++)
-        descendV(v[i], output, root, apply, ceiling);
+        descendV(v[i], output, root, apply, ceiling, docPath);
     }
     else {
       for (const key in v) {
         if (hasOwn(v, key))
-          descendV(v[key], output, root, apply, ceiling);
+          descendV(v[key], output, root, apply, ceiling, docPath);
       }
     }
   }
@@ -672,9 +715,10 @@ export function compileSegmentV(seg) {
   const apply = compileSelectorsV(seg);
   if (seg.descendant) {
     const ceiling = compileCeiling;
+    const docPath = compileDocPath;
     return (input, output, root) => {
       for (let i = 0; i < input.length; i++)
-        descendV(input[i], output, root, apply, ceiling);
+        descendV(input[i], output, root, apply, ceiling, docPath);
     };
   }
   return (input, output, root) => {
@@ -782,20 +826,20 @@ function compileSelectorNodeG(sel) {
   }
 }
 
-function* descendG(v, root, apply, depth, ceiling) {
+function* descendG(v, root, apply, depth, ceiling, docPath) {
   yield* apply(v, root);
   if (typeof v !== 'object' || v === null)
     return;
   if (depth >= ceiling)
-    throw descentTooDeep(ceiling);
+    throw descentTooDeep(ceiling, docPath);
   if (Array.isArray(v)) {
     for (let i = 0; i < v.length; i++)
-      yield* descendG(v[i], root, apply, depth + 1, ceiling);
+      yield* descendG(v[i], root, apply, depth + 1, ceiling, docPath);
   }
   else {
     for (const key in v) {
       if (hasOwn(v, key))
-        yield* descendG(v[key], root, apply, depth + 1, ceiling);
+        yield* descendG(v[key], root, apply, depth + 1, ceiling, docPath);
     }
   }
 }
@@ -816,7 +860,8 @@ export function compileSegmentG(seg) {
     };
   if (seg.descendant) {
     const ceiling = compileCeiling;
-    return function* segmentDescendantG(v, root) { yield* descendG(v, root, apply, 0, ceiling); };
+    const docPath = compileDocPath;
+    return function* segmentDescendantG(v, root) { yield* descendG(v, root, apply, 0, ceiling, docPath); };
   }
   return apply;
 }
@@ -974,22 +1019,22 @@ export function compileSelectorNodeP(sel) {
   }
 }
 
-export function descendP(v, p, outV, outP, root, apply, ceiling) {
+export function descendP(v, p, outV, outP, root, apply, ceiling, docPath) {
   apply(v, p, outV, outP, root);
   if (typeof v !== 'object' || v === null)
     return;
   if (descentDepth >= ceiling)
-    throw descentTooDeep(ceiling);
+    throw descentTooDeep(ceiling, docPath);
   descentDepth++;
   try {
     if (Array.isArray(v)) {
       for (let i = 0; i < v.length; i++)
-        descendP(v[i], p + '[' + i + ']', outV, outP, root, apply, ceiling);
+        descendP(v[i], p + '[' + i + ']', outV, outP, root, apply, ceiling, docPath);
     }
     else {
       for (const key in v) {
         if (hasOwn(v, key))
-          descendP(v[key], appendName(p, key), outV, outP, root, apply, ceiling);
+          descendP(v[key], appendName(p, key), outV, outP, root, apply, ceiling, docPath);
       }
     }
   }
@@ -1009,9 +1054,10 @@ export function compileSegmentP(seg) {
     };
   if (seg.descendant) {
     const ceiling = compileCeiling;
+    const docPath = compileDocPath;
     return (inV, inP, outV, outP, root) => {
       for (let i = 0; i < inV.length; i++)
-        descendP(inV[i], inP[i], outV, outP, root, apply, ceiling);
+        descendP(inV[i], inP[i], outV, outP, root, apply, ceiling, docPath);
     };
   }
   return (inV, inP, outV, outP, root) => {

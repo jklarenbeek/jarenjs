@@ -55,7 +55,10 @@ function composeDocPath(base, inner) {
 // One compiled query per distinct match-path source string: rules across
 // modes matching the same path share the object, so the per-call
 // `.paths(root)` enumeration is computed once per transform (see
-// getQueryPaths), not once per mode.
+// getQueryPaths), not once per mode. A shared query names the first rule
+// that matches its path when the enumeration refuses (see matchPathsOf).
+const matchRules = new WeakMap();
+
 function compileMatchPath(rule, pathQueryCache, pathOptions) {
   const match = rule.match;
   if (match === null || match.path === null)
@@ -67,6 +70,7 @@ function compileMatchPath(rule, pathQueryCache, pathOptions) {
     const query = compileJSONPath(match.path,
       pathOptions === undefined ? undefined : { pathFunctions: pathOptions.pathFunctions });
     pathQueryCache.set(match.path, query);
+    matchRules.set(query, rule);
     return query;
   }
   catch (error) {
@@ -619,7 +623,7 @@ function addSpinePrefixes(path, matchMap, bitMode) {
 function getQueryPaths(query, tctx) {
   let cache = tctx.queryPaths;
   if (cache === false)
-    return query.paths(tctx.root);
+    return matchPathsOf(query, tctx.root);
   if (cache === null) {
     cache = new Map();
     tctx.queryPaths = cache;
@@ -627,9 +631,26 @@ function getQueryPaths(query, tctx) {
   const cached = cache.get(query);
   if (cached !== undefined)
     return cached;
-  const paths = query.paths(tctx.root);
+  const paths = matchPathsOf(query, tctx.root);
   cache.set(query, paths);
   return paths;
+}
+
+// A match path's enumeration raises what a rule body raises: a query
+// runtime error (a descendant segment past its nesting bound) surfaces as
+// JT2004 naming the rule and its match path, the error as the cause.
+function matchPathsOf(query, root) {
+  try {
+    return query.paths(root);
+  }
+  catch (error) {
+    if (!(error instanceof JsonQueryRuntimeError))
+      throw error;
+    const rule = matchRules.get(query);
+    throw new JsltRuntimeError('JT2004',
+      `rule ${rule.docPath} failed matching its path: ${error.message}`,
+      composeDocPath(rule.match.pathDocPath, error.docPath), error);
+  }
 }
 
 function buildBitPrepass(mode, tctx) {

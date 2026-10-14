@@ -1012,7 +1012,7 @@ export function parseJSONPath(source, options = undefined) {
  * @returns {JSONPathQuery} The compiled query function
  * @throws {JSONPathSyntaxError} When the query is not valid RFC 9535
  * @throws {TypeError} When `options.pathFunctions` is not a valid registry,
- *   or `options.maxDescentDepth` is not a positive safe integer
+ *   or `options.maxDescentDepth` is not a positive integer
  * @example
  * const q = compileJSONPath('$.store.book[?@.price < 10].title');
  * q(data); // ['Sayings of the Century', 'Moby Dick']

@@ -100,3 +100,31 @@ describe('axis tick labels — neighbours never print the same text', function (
     assert.deepEqual(lineY([0, 2.5e6]), ['0', '500k', '1M', '1.5M', '2M', '2.5M']);
   });
 });
+
+describe('ramp legends and hover text — the extent apart, the datum exact', function () {
+  const titles = (/** @type {string} */ svg) => [...svg.matchAll(/<title>([^<]*)<\/title>/g)].map((m) => m[1]);
+  // the ramp's end labels: the only numeric texts of these charts (their axes are categories)
+  const legend = (/** @type {string} */ svg) => [...svg.matchAll(/<text[^>]*class="chart-tick">(\d[^<]*)<\/text>/g)].map((m) => m[1]).sort();
+  const square = (/** @type {number} */ x) => [[[x, 50], [x + 1, 50], [x + 1, 51], [x, 51], [x, 50]]];
+  const map = compileChart({
+    type: 'map', value: 'v',
+    features: { type: 'FeatureCollection', features: [
+      { type: 'Feature', properties: { name: 'a', v: 81600 }, geometry: { type: 'Polygon', coordinates: square(3) } },
+      { type: 'Feature', properties: { name: 'b', v: 81620 }, geometry: { type: 'Polygon', coordinates: square(5) } },
+    ] },
+  }).toSvgString();
+  const heatmap = compileChart({ type: 'heatmap' }, { xLabels: ['a', 'b'], yLabels: ['r'], values: [[81600, 81620]] }).toSvgString();
+
+  it('labels the ends of a heatmap and a map ramp at the precision that tells them apart', () => {
+    for (const svg of [heatmap, map]) assert.deepEqual(legend(svg), ['81.60k', '81.62k']);
+  });
+
+  it('names a heatmap cell, a map shape and a box by the datum, as a bar does', () => {
+    assert.deepEqual(titles(heatmap), ['a × r: 81600', 'b × r: 81620']);
+    assert.deepEqual(titles(map), ['a: 81600', 'b: 81620']);
+    const box = compileChart({ type: 'boxplot' }, { boxes: [{ label: 's', values: [81600, 81605, 81610, 81615, 81620] }] });
+    assert.deepEqual(titles(box.toSvgString()), ['s — min 81600, q1 81605, median 81610, q3 81615, max 81620']);
+    assert.deepEqual(titles(compileChart({ type: 'bar' }, { categories: ['a', 'b'], series: [{ name: 's', values: [81600, 81620] }] })
+      .toSvgString()), ['a: 81600', 'b: 81620']);
+  });
+});

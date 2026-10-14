@@ -579,6 +579,27 @@ describe('Jaren JSLT dispatch', () => {
       });
     });
 
+    it('wraps a descent past its bound as JT2004/JQ2009 in a match path as in a body', () => {
+      let deep = 1;
+      for (let i = 0; i < 1500; i++) deep = [deep];
+      const failure = (sheet) => {
+        try { compileJsltStylesheet(sheet)({ a: deep }); }
+        catch (error) {
+          assert.ok(error instanceof JsltRuntimeError);
+          assert.ok(error.cause instanceof JsonQueryRuntimeError);
+          return [error.code, error.cause.code, error.docPath, error.message];
+        }
+        return 'answered';
+      };
+      const reason = 'JQ2009: a descendant segment reaches a value nested deeper than 1000 levels';
+      assert.deepStrictEqual(failure([{ match: '$', body: { $count: '$..*' } }]),
+        ['JT2004', 'JQ2009', '/0/body/$count', `JT2004: rule /0 failed at location $: ${reason} at /$count at /0/body/$count`]);
+      assert.deepStrictEqual(failure([{ match: '$', body: '$' }, { match: '$..x', body: '$' }]),
+        ['JT2004', 'JQ2009', '/1/match', `JT2004: rule /1 failed matching its path: ${reason} at '' at /1/match`]);
+      assert.deepStrictEqual(failure([{ match: { path: '$..x' }, body: '$' }, { match: '$..x', mode: 'm', body: '$' }]),
+        ['JT2004', 'JQ2009', '/0/match/path', `JT2004: rule /0 failed matching its path: ${reason} at '' at /0/match/path`]);
+    });
+
     it('binds path to null on location-less dispatch', () => {
       const transform = compileWithStub([
         {

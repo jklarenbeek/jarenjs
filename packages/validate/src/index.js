@@ -2084,9 +2084,6 @@ export class JarenValidator {
    */
   compile(schema, schemas = undefined) {
     const { origin, map } = JarenValidator.#traverseSchema(schema, schemas, this.#schemas, this.#traverse);
-    // A root that loops back to itself before reading the instance decides
-    // nothing on any instance: refused here rather than when it validates.
-    assertRootReadsInstance(map, origin, schema, this.#traverse);
 
     // Detect draft version from schema and update validation options
     const draftVersion = detectSchemaDraft(schema);
@@ -2134,6 +2131,10 @@ export class JarenValidator {
       existingValidation.relativePointerDialect ?? 'handrews-01',
       existingValidation.maxReferenceDepth ?? REFERENCE_DEPTH_CEILING
     );
+    // A root that loops back to itself before reading the instance decides
+    // nothing on any instance: refused here rather than when it validates.
+    // Whether a keyword reads the instance depends on these options.
+    assertRootReadsInstance(map, origin, schema, { options: validationOptions, formats: this.#formats }, this.#traverse);
 
     // Pre-compile all refs before returning the validator
     // This ensures all ref chains are resolved at compile time

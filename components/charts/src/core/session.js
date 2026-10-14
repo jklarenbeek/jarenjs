@@ -390,7 +390,9 @@ function createLineSession(config, source, options) {
     const d = ast.domain;
     if (domains.x[0] !== d.x[0] || domains.x[1] !== d.x[1]
       || domains.y[0] !== d.y[0] || domains.y[1] !== d.y[1]
-      || domains.y2?.[0] !== d.y2?.[0] || domains.y2?.[1] !== d.y2?.[1]) {
+      || domains.y2?.[0] !== d.y2?.[0] || domains.y2?.[1] !== d.y2?.[1]
+      // the left axis appears or goes as its first series data arrives or leaves
+      || (domains.yTickValues.length === 0) !== (ast.y.ticks.length === 0)) {
       return rebuild(truth);
     }
 

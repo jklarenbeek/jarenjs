@@ -109,17 +109,43 @@ describe('the descendant bound options', () => {
     assert.throws(() => query(nestedArrays(11)), (e) => e.code === 'JQ2009');
   });
 
+  it('name the path of the query that refused, as every other limit does', () => {
+    const at = (doc) => {
+      try { compileJsonQuery(doc, { limits: { descentDepth: 5 } })([nestedArrays(10)]); }
+      catch (e) { assert.ok(e instanceof JsonQueryRuntimeError); return [e.code, e.docPath, e.message]; }
+      return 'answered';
+    };
+    assert.deepEqual(at({ $add: [1, { $count: '$..*' }] }), ['JQ2009', '/$add/1/$count',
+      'JQ2009: a descendant segment reaches a value nested deeper than 5 levels at /$add/1/$count']);
+    assert.deepEqual(at({ $exists: '$[0]..*' }), ['JQ2009', '/$exists',
+      'JQ2009: a descendant segment reaches a value nested deeper than 5 levels at /$exists']);
+    assert.deepEqual(at({ $count: '$[?count(@..*) > 0]' }), ['JQ2009', '/$count',
+      'JQ2009: a descendant segment reaches a value nested deeper than 5 levels at /$count']);
+    // a JSONPath compiled after a query names no query location
+    assert.throws(() => compileJSONPath('$..*', { maxDescentDepth: 5 })(nestedArrays(10)), { code: 'JQ2009', docPath: '' });
+    assert.deepEqual(at('$..*'), ['JQ2009', '',
+      'JQ2009: a descendant segment reaches a value nested deeper than 5 levels at \'\'']);
+  });
+
   it('keep a one-off query cached apart per bound', () => {
     assert.equal(queryJSONPath('$..*', nestedArrays(20), { maxDescentDepth: 30 }).length, 20);
     assert.throws(() => queryJSONPath('$..*', nestedArrays(20), { maxDescentDepth: 10 }), (e) => e.code === 'JQ2009');
     assert.equal(queryJSONPath('$..*', nestedArrays(20)).length, 20);
   });
 
-  it('are refused unless a positive safe integer', () => {
-    for (const bad of [0, -1, 1.5, '5', NaN, 2 ** 53]) {
+  it('are refused unless a positive integer, as every limit is', () => {
+    for (const bad of [0, -1, 1.5, '5', NaN, Infinity]) {
       assert.throws(() => compileJSONPath('$..*', { maxDescentDepth: bad }),
-        { name: 'TypeError', message: 'options.maxDescentDepth must be a positive safe integer' });
-      assert.throws(() => compileJsonQuery('$..*', { limits: { descentDepth: bad } }), TypeError);
+        { name: 'TypeError', message: 'options.maxDescentDepth must be a positive integer' });
+      assert.throws(() => compileJsonQuery('$..*', { limits: { descentDepth: bad } }),
+        { name: 'TypeError', message: 'options.limits.descentDepth must be a positive integer' });
+      assert.throws(() => compileJsonQuery('$..*', { limits: { steps: bad } }),
+        { name: 'TypeError', message: 'options.limits.steps must be a positive integer' });
+    }
+    // a whole number past the safe range bounds nothing a host reaches, as for every limit
+    for (const big of [2 ** 53, 1e300]) {
+      assert.equal(compileJSONPath('$..*', { maxDescentDepth: big })(nestedArrays(3)).length, 3);
+      assert.equal(compileJsonQuery('$..*', { limits: { descentDepth: big, steps: big } })(nestedArrays(3)).length, 3);
     }
   });
 

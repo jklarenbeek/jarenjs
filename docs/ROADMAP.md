@@ -36,11 +36,22 @@ delete it or fix it.
 (RFC 9535, passing the complete official compliance suite), JSON Patch
 (RFC 6902) and Merge Patch (RFC 7396). See
 [`packages/json/ARCHITECTURE.md`](../packages/json/ARCHITECTURE.md).
+- [ ] **A descendant segment's depth refusal does not localize.** A descendant
+  segment past its nesting bound is refused `JQ2009` with `messageId:
+  'query/reason'`: it names its path but does not localize. Add
+  `query/descent-limit` (`{limit}`, English: 'a descendant segment reaches a
+  value nested deeper than {limit} levels') to `queryMessagesEn`, the eleven
+  `@jarenjs/locales` packs and the derived linq message vocabulary, and build
+  the error with `queryRuntimeError` in `descentTooDeep`.
 
 ## @jarenjs/json — JSLT
 
 - [ ] **JSLT matcher optimizer (single-walk)** — replace per-rule path pre-passes with a single multi-pattern walk, specialize location tracking by reachable modes, and use input-schema knowledge to prune impossible shape rules. The benchmark quantifies the gap: dense pure-path transforms pay ~9–12× over the raw path scan, and hand-written native JS stays 3–139× faster on real transformations — this is the main JSLT performance workstream.
 - [ ] **Prepass-level pruning in the JSLT matcher** — skip re-evaluating match *paths* over unchanged regions using the changed-path feed directly, rather than discovering the reuse afterwards through the memo cache. The remaining O(change) idea now that the memo layers have shipped.
+- [ ] **A stylesheet cannot move the descent bound.** JSLT match paths compile
+  under the fixed 1000-level descent bound; a stylesheet has no
+  `maxDescentDepth` to move it, as `compileJSONPath` and `limits.descentDepth`
+  do.
 
 ## @jarenjs/json — XQuery front-end & QT3
 
@@ -756,6 +767,14 @@ what each does is its own documentation's job
   a flipped comparison (`5 < n` and `n > 5`), redundant parentheses and the
   server's casts and literal spellings, and it is a stated stricter refusal at
   open (a minor).
+- [ ] **The two ledgers judge `limit` with two predicates.** The two ledgers
+  read `limit` with two predicates each: `inFlight` `Number.isInteger`
+  (accepts `2**53`), `sweep` `Number.isSafeInteger` (refuses it, pinned by the
+  shared kit at test/contract/ledger-contract.js:333). Unify per D1 by
+  loosening `sweep` in packages/contract/src/ledger.js and
+  packages/linq/src/db/ledger.js together, and the kit's `2 ** 53` row, after
+  checking the db ledger binds an unsafe `LIMIT` correctly; else tighten
+  `inFlight` as a minor.
 
 ## Lexical search (cross-package)
 

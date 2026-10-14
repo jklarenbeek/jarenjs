@@ -287,6 +287,6 @@ describe('a sum of finite values past the largest double is drawn by proportion'
     assert.equal(ast.boxes[0].medV, 0.5);
     const svg = svgOf({ type: 'boxplot', boxes });
     assert.doesNotMatch(svg, /NaN|Infinity/);
-    assert.match(svg, /<title>g — min -1e\+299G, q1 -5e\+298G, median 0, q3 5e\+298G, max 1e\+299G<\/title>/);
+    assert.match(svg, /<title>g — min -1e\+308, q1 -5e\+307, median 0, q3 5e\+307, max 1e\+308<\/title>/);
   });
 });

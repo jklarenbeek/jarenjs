@@ -15,6 +15,7 @@ import {
   NOTHING,
   compileSingularGetter,
   compileSegmentV,
+  withDescentDocPath,
   runSegmentsV,
 } from '../segments.js';
 import { queryRuntimeError } from './messages.js';
@@ -87,7 +88,7 @@ function compilePath(node) {
       return v === NOTHING ? EMPTY : v;
     };
   }
-  const segs = node.segments.map(compileSegmentV);
+  const segs = withDescentDocPath(node.docPath, () => node.segments.map(compileSegmentV));
   if (node.rootCard === CARD_ONE)
     return (f) => seqOf(runSegmentsV(segs, base(f), f[0]));
   return (f) => {
@@ -139,7 +140,7 @@ export function compileExistsTest(node) {
         return getter(b, f[0]) !== NOTHING;
       };
     }
-    const segs = node.segments.map(compileSegmentV);
+    const segs = withDescentDocPath(node.docPath, () => node.segments.map(compileSegmentV));
     if (node.rootCard === CARD_ONE)
       return (f) => runSegmentsV(segs, base(f), f[0]).length !== 0;
     return (f) => {

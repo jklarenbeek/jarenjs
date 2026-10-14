@@ -31,7 +31,6 @@ import { svgRoot, coord } from '@jarenjs/view/helpers';
 import { clamp01 } from '@jarenjs/core/math';
 import { bboxOf, bboxUnion, fitMercator, simplifyLine, simplifyRing } from '@jarenjs/core/geo';
 import { scaleLinear, scaleLog } from '../core/scale.js';
-import { formatTickValue } from '../core/axis.js';
 import { FS_TITLE, annotateChart, chartTitle, legendRow, rampLegend } from '../core/cartesian.js';
 import { SEQUENTIAL, sequentialColor } from '../core/palette.js';
 import { normalizeTooltip, valueMark } from '../core/marks.js';
@@ -325,7 +324,7 @@ export function renderMapAST(ast, theme, hash, options = {}) {
     const fill = shape.t === null ? unshaded : sequentialColor(shape.t, ramp);
     const hover = shape.value === null
       ? shape.label
-      : `${shape.label}: ${formatTickValue(shape.value)}`;
+      : `${shape.label}: ${shape.value}`;
     const descriptor = { type: 'map', label: shape.label, value: shape.value };
 
     if (shape.rings.length !== 0) {

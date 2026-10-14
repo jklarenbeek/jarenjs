@@ -75,8 +75,20 @@ export function createTypeTestCompiler(validator = undefined) {
     // The default validator options are boolean mode (skipErrors on,
     // collectErrors off): the compiled function IS the predicate. An
     // error-collecting instance returns { valid, errors } objects
-    // instead - detect that shape once, per schema, and unwrap it.
-    if (typeof validate(null) === 'boolean')
+    // instead - detect that shape once, per schema, and unwrap it. A schema
+    // that refuses `null` (a `$query` past an execution limit) shows no
+    // shape, and is unwrapped per call instead of refused here.
+    let probe;
+    try {
+      probe = validate(null);
+    }
+    catch {
+      return (value) => {
+        const result = validate(value);
+        return typeof result === 'boolean' ? result : result.valid === true;
+      };
+    }
+    if (typeof probe === 'boolean')
       return validate;
     return (value) => validate(value).valid === true;
   };

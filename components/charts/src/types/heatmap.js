@@ -20,7 +20,6 @@
 import { svgRoot, coord } from '@jarenjs/view/helpers';
 import { clamp01 } from '@jarenjs/core/math';
 import { scaleLinear, scaleLog } from '../core/scale.js';
-import { formatTickValue } from '../core/axis.js';
 import { cartesianFrame, annotateChart, rampLegend } from '../core/cartesian.js';
 import { SEQUENTIAL, sequentialColor } from '../core/palette.js';
 import { normalizeTooltip, valueMark } from '../core/marks.js';
@@ -171,7 +170,7 @@ export function heatCellRender(cell, ast, plot, ramp, tooltip = null) {
     width: coord(Math.max(0.5, w)), height: coord(Math.max(0.5, h)),
     fill: sequentialColor(cell.t, ramp), class: 'chart-heat-cell',
   }, tooltip,
-  `${ast.xLabels[cell.xi]} × ${ast.yLabels[cell.yi]}: ${formatTickValue(cell.value)}`,
+  `${ast.xLabels[cell.xi]} × ${ast.yLabels[cell.yi]}: ${cell.value}`,
   {
     type: 'heatmap', x: ast.xLabels[cell.xi], y: ast.yLabels[cell.yi], value: cell.value,
   });

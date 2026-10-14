@@ -1365,14 +1365,14 @@ count, on the memory ledger and on `createDbLedger` alike. An answer
 equal to `limit` says more MAY remain and a smaller one that none do, so
 a host drains a backlog by calling again until the answer falls below
 the limit (a backlog that is an exact multiple of the limit costs one
-more call, which answers 0). A malformed second argument — not a plain
+more call, which answers 0). A second argument that is `undefined` or
+`null` is no options: an unbounded sweep. A malformed one — not a plain
 object, a member other than `limit`, or a `limit` that is not a whole
 number from 1 — is a `TypeError`, and nothing is dropped. The memory
 ledger used to ignore the second argument and drop every expired
 record; it now honours the bound, so a host that passed a `limit` sees
 at most that many dropped per call, and a malformed second argument it
-used to ignore (`null` among them) is now refused, as `createDbLedger`
-refuses it. A host ledger of its own that keeps
+used to ignore is now refused, as `createDbLedger` refuses it. A host ledger of its own that keeps
 `sweep(now)` still fits the `Ledger` type; a caller that bounds it sees
 the bound ignored as an answer above `limit`.
 

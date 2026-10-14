@@ -42,7 +42,8 @@ variant included — `bar`, `line`, `scatter`, `candlestick`) plus
 `radar`, `gauge`, `boxplot`, `heatmap`, `treemap`, `streamgraph`,
 `sankey` and `map`. Cartesian types share `cartesianFrame`, which
 draws a second value axis on the right edge when a type hands it one
-(the line's `y2`: its own ticks and label, no gridlines, and a legend
+(the line's `y2`: its own ticks and label, no gridlines unless the left
+axis lays no ticks, and a legend
 row raised clear of its top tick label; a frame without one is laid
 out as before);
 `radar`/`gauge` are polar around their own centers;

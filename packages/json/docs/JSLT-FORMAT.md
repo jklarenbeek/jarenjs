@@ -546,7 +546,7 @@ In the bare-array shorthand (§2.1) the document has no `rules` member;
 | JT2001 | dispatch depth exceeded `maxDepth` |
 | JT2002 | built-in rebuild: an object member's child dispatch produced 2+ items (message carries the location + member name) |
 | JT2003 | unmatched value under `"error"` disposition |
-| JT2004 | rule body raised a runtime error — wraps `JsonQueryRuntimeError` (cause), message names the rule (`/rules/<i>`) and the node location when known; never double-wraps |
+| JT2004 | rule body or match path raised a runtime error — wraps `JsonQueryRuntimeError` (cause), message names the rule (`/rules/<i>`) and the node location when known; never double-wraps. A match path raises when its enumeration does (a descendant segment past its nesting bound, `JQ2009`); `docPath` is the path's (`/rules/<i>/match`, or `/rules/<i>/match/path` for the object form), and a path shared by several rules names the first. *Upgrade: a match path's error escaped unwrapped as `JsonQueryRuntimeError`.* |
 
 JT0xxx are compile errors (`JsltCompileError`), JT2xxx runtime errors
 (`JsltRuntimeError`) — the same numbering convention as JQ0xxx/JQ2xxx.

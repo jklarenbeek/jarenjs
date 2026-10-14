@@ -453,15 +453,19 @@ Semantics and composition:
   asserts as a sibling of `$ref` (both apply together). Under draft-07 the
   `$ref`-overrides-siblings rule stands, so a `$query` written beside a `$ref`
   is ignored on that node.
-- Query **runtime** errors (`JQ2xxx` — e.g. arithmetic on a non-number, the
-  EBV of a multi-item result) are validation **failures**; in
+- Query **runtime** errors that judge the instance (`JQ2001` to `JQ2005` and
+  `JQ2008` — e.g. arithmetic on a non-number, the EBV of a multi-item result,
+  an item a schema literal rejects) are validation **failures**; in
   `collectErrors` mode the error params carry the `code` and the query
-  `docPath`. The one exception is `JQ2009`, a descendant segment (`$..`) over
-  a value nested deeper than 1000 levels: it decides nothing about the
-  instance, so it is thrown, never reported as a failure that `not` would
-  turn into success. *Upgrade: such an instance overflowed the call stack
-  with an uncoded `RangeError`.* Malformed query documents and free externals other than
-  `root`/`path` fail fast at `compile()`.
+  `docPath`. Every other runtime refusal is thrown, never reported as a
+  failure that `not` would turn into success: it decides nothing about the
+  instance. These are the execution limits — `JQ2009`, a descendant segment
+  (`$..`) over a value nested deeper than 1000 levels, and `JQ2007`, a
+  `$range` materializing more than 1,000,000 items. *Upgrade: the deep
+  instance overflowed the call stack with an uncoded `RangeError`; the long
+  `$range` reported a failure, so `not` answered `true`.* Malformed query
+  documents and free externals other than `root`/`path` fail fast at
+  `compile()`.
 - Schema literals inside the query (`$valid`/`$assert`/`$as`,
   QUERY-FORMAT §8.11) compile against the **same validator instance**, so
   their `$ref`s resolve to your `addSchema` registrations. The bridge
