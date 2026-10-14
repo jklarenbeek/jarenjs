@@ -206,11 +206,11 @@ and the bundle is the byte count the tree-shaking probe builds.
 | Document | Subpath | Lines | Mapping rows | Worked examples | Refusals | Bundle |
 |---|---|---:|---:|---:|---:|---:|
 | [LINQ-FORMAT.md](LINQ-FORMAT.md) | — | 955 | — | — | — | — |
-| [QUERY-PEN.md](QUERY-PEN.md) | `.` | 2,171 | 34 | 8 | 17 | 229,858 B |
+| [QUERY-PEN.md](QUERY-PEN.md) | `.` | 2,171 | 34 | 8 | 17 | 230,428 B |
 | [SCHEMA-PEN.md](SCHEMA-PEN.md) | `./schema` | 1,266 | 82 | 10 | 4 | 45,247 B |
 | [MODEL-PEN.md](MODEL-PEN.md) | `./model` | 1,242 | 31 | 7 | 3 | 57,054 B |
 | [JSLT-PEN.md](JSLT-PEN.md) | `./jslt` | 980 | 17 | 8 | 3 | 27,811 B |
-| [MIGRATION-PEN.md](MIGRATION-PEN.md) | `./migration` | 957 | 13 | 5 | 4 | 33,951 B |
+| [MIGRATION-PEN.md](MIGRATION-PEN.md) | `./migration` | 957 | 13 | 5 | 4 | 34,044 B |
 | [CONTRACT-PEN.md](CONTRACT-PEN.md) | `./contract` | 1,226 | 38 | 6 | 3 | 58,820 B |
 | [FLOW-PEN.md](FLOW-PEN.md) | `./flow` | 1,050 | 16 | 7 | 3 | 27,913 B |
 | [APP-PEN.md](APP-PEN.md) | `./app` | 1,314 | 24 | 7 | 4 | 60,267 B |
@@ -218,9 +218,9 @@ and the bundle is the byte count the tree-shaking probe builds.
 | [MESSAGES-PEN.md](MESSAGES-PEN.md) | `./messages` | 105 | 9 | 2 | 1 | 14,055 B |
 | [JTLT-PEN.md](JTLT-PEN.md) | `./jtlt` | 83 | 13 | 1 | 2 | 24,526 B |
 | [PROJECT-PEN.md](PROJECT-PEN.md) | `./project` | 84 | 9 | 1 | 1 | 4,668 B |
-| [CHARTS-PEN.md](CHARTS-PEN.md) | `./charts` | 100 | 21 | 1 | 1 | 6,503 B |
-| [DB-CLIENT.md](DB-CLIENT.md) | `./db` | 1,298 | 46 | 4 | 2 | 984,578 B |
-| [FORMULA-PEN.md](FORMULA-PEN.md) | `./formula` | 41 | 2 | — | — | 11,241 B |
+| [CHARTS-PEN.md](CHARTS-PEN.md) | `./charts` | 100 | 21 | 1 | 1 | 6,542 B |
+| [DB-CLIENT.md](DB-CLIENT.md) | `./db` | 1,298 | 46 | 4 | 2 | 992,989 B |
+| [FORMULA-PEN.md](FORMULA-PEN.md) | `./formula` | 41 | 2 | — | — | 11,330 B |
 | **16 documents** | | **13,819** | **373** | **73** | | |
 <!--/fact-->
 
@@ -265,11 +265,11 @@ it and each document publishes it. The rounded column is what
 <!--fact:pens.cost-->
 | Subpath | Document | Bundle | Rounded |
 |---|---|---:|---:|
-| `@jarenjs/linq` | [QUERY-PEN.md](QUERY-PEN.md) | 229,858 B | 230 kB |
+| `@jarenjs/linq` | [QUERY-PEN.md](QUERY-PEN.md) | 230,428 B | 230 kB |
 | `@jarenjs/linq/schema` | [SCHEMA-PEN.md](SCHEMA-PEN.md) | 45,247 B | 45 kB |
 | `@jarenjs/linq/model` | [MODEL-PEN.md](MODEL-PEN.md) | 57,054 B | 57 kB |
 | `@jarenjs/linq/jslt` | [JSLT-PEN.md](JSLT-PEN.md) | 27,811 B | 28 kB |
-| `@jarenjs/linq/migration` | [MIGRATION-PEN.md](MIGRATION-PEN.md) | 33,951 B | 34 kB |
+| `@jarenjs/linq/migration` | [MIGRATION-PEN.md](MIGRATION-PEN.md) | 34,044 B | 34 kB |
 | `@jarenjs/linq/contract` | [CONTRACT-PEN.md](CONTRACT-PEN.md) | 58,820 B | 59 kB |
 | `@jarenjs/linq/flow` | [FLOW-PEN.md](FLOW-PEN.md) | 27,913 B | 28 kB |
 | `@jarenjs/linq/app` | [APP-PEN.md](APP-PEN.md) | 60,267 B | 60 kB |
@@ -277,9 +277,9 @@ it and each document publishes it. The rounded column is what
 | `@jarenjs/linq/messages` | [MESSAGES-PEN.md](MESSAGES-PEN.md) | 14,055 B | 14 kB |
 | `@jarenjs/linq/jtlt` | [JTLT-PEN.md](JTLT-PEN.md) | 24,526 B | 25 kB |
 | `@jarenjs/linq/project` | [PROJECT-PEN.md](PROJECT-PEN.md) | 4,668 B | 5 kB |
-| `@jarenjs/linq/charts` | [CHARTS-PEN.md](CHARTS-PEN.md) | 6,503 B | 7 kB |
-| `@jarenjs/linq/db` | [DB-CLIENT.md](DB-CLIENT.md) | 984,578 B | 985 kB |
-| `@jarenjs/linq/formula` | [FORMULA-PEN.md](FORMULA-PEN.md) | 11,241 B | 11 kB |
+| `@jarenjs/linq/charts` | [CHARTS-PEN.md](CHARTS-PEN.md) | 6,542 B | 7 kB |
+| `@jarenjs/linq/db` | [DB-CLIENT.md](DB-CLIENT.md) | 992,989 B | 993 kB |
+| `@jarenjs/linq/formula` | [FORMULA-PEN.md](FORMULA-PEN.md) | 11,330 B | 11 kB |
 <!--/fact-->
 
 Read these as prices, not as scores. `./db` is the largest by an order of
@@ -861,7 +861,7 @@ it says.
 | `.log(value)`, `.catLabel(text)`, `.valLabel(text)` | members on kinds that declare them | same kind | native |
 | `.series(values)` | the kind's series shape | same kind | native |
 | `.x(value)`, `.markers(value)`, `.sampling(value)` | line members | line | native |
-| `.xLabel(text)`, `.yLabel(text)`, `.domain(spec)`, `.dateNames(names)`, `.timeFormats(formats)` | axis members on their declared kinds | same kind | native |
+| `.xLabel(text)`, `.yLabel(text)`, `.y2(axis)`, `.domain(spec)`, `.dateNames(names)`, `.timeFormats(formats)` | axis members on their declared kinds (`y2` on a line) | same kind | native |
 | `.xLog(value)`, `.yLog(value)`, `.refY(value)`, `.refLabel(text)` | scatter members | scatter | native |
 | `.points(values)`, `.candles(values)` | the kind's point/candle data | same kind | native |
 | `.axes(values)`, `.max(value)`, `.min(value)` | radar/gauge members | same kind | native |
@@ -884,8 +884,8 @@ it says.
 | `where`, `select`, `orderBy`, …, `toArray`, `first`, `count`, … | the chain: `fromAsync(handle)` ([QUERY-PEN.md](QUERY-PEN.md) §8, §10) | every `AsyncSequence` operator and terminal, delegated — nothing is duplicated, every read is the chain's document and pushes down; the handle is iterable (`for await`); two handles of one client share a `scope`, so a join's inner may be `fromAsync(otherHandle)` |
 | `include(pick, spec?)` | the store's `load(spec)` (MODEL-FORMAT §10.4, §10.5) | opens a graph that EMITS the spec (§2.4, §3), typed `Loaded<>` by what it included |
 | `link(own, member, target)`, `unlink(…)` | the store's membership API (MODEL-FORMAT §11.7) | reads the relation table first — the member must be a many-to-many relation (`JL0107`, naming the kind it is, or the members that are) — then records through the store; `saveChanges()` writes the join rows |
-| `live(chain \| document, options?)` | the store's registration — `store.live` for an entity root, `collection.live` for a collection (LIVE-FORMAT §7) | hands over the chain's document and its `params()` bindings as the externals (`options.externals` merge over them, and a parameter an `in()` reads whole must be an array in the merged set — `JL0004`, so a placeholder the options override registers and a non-array override, which used to register unchecked, does not; options the store would refuse — `null`, a string, `externals` that is not a plain object — reach it as given and it refuses them with `JD0013`, where the merge used to accept an array or a string as bindings named `0`, `1`, …); a handle's `live` registers only a chain built over its own collection or entity (by name, from any view of the store) or over no rows (`from([])`, the document builder) — a chain over another one, or over rows in memory (any but an empty array, Set or Map: a generator, an async iterable, a cursor or a push queue is not read to count it), is `JL0005`, where it used to register its document over the handle's rows; the strategy, the reason and the maintenance are the store's |
-| `execute(chain \| document, options?)`, `query(…)`, `explain(…)` | the store's own members, on a collection handle and on an entity handle (a collection has `query`; an entity set has none) | a chain is handed over as `live()` hands it (`execute` answers the document's own shape: several rows an array, one row the row, none `undefined`): its document runs with its `params()` bindings as the externals (`options.externals` merge over them and a parameter an `in()` reads whole must be an array in the merged set — `JL0004`), and a chain built over another collection or entity, or over rows in memory, is `JL0005` (`execute() on collection 'orders' was handed a chain built over collection 'users'`; `… built over 2 rows in memory`, or `… built over rows in memory it cannot count without reading them` for a generator, an async iterable, a cursor or a push queue, where those rows used to be ignored and the handle's own answered); a chain over no rows (`from([])`) is the document builder and is taken. A chain answers exactly what its `toDocument()` answers on the same member; a document, with or without options, goes to the store untouched. `explain()` with nothing is still the empty chain's explanation. A refusal of the chain is answered as the store answers a refused document on that member: `execute` and `query` throw, `explain` rejects. They used to read a chain as a document with no clauses: a collection answered `{}` for `execute(chain)` and `[{}]` for `query(chain)`, and an entity refused with `JD0033` |
+| `live(chain \| document, options?)` | the store's registration — `store.live` for an entity root, `collection.live` for a collection (LIVE-FORMAT §7) | hands over the chain's document and its `params()` bindings as the externals (`options.externals` merge over them, and a parameter an `in()` reads whole must be an array in the merged set — `JL0004`, so a placeholder the options override registers and a non-array override, which used to register unchecked, does not; a `Date` under `options.externals` that the document compares is the store's `JD0041`, where it used to register compared as `{}`; options the store would refuse — `null`, a string, `externals` that is not a plain object — reach it as given and it refuses them with `JD0013`, where the merge used to accept an array or a string as bindings named `0`, `1`, …); a handle's `live` registers only a chain built over its own collection or entity (by name, from any view of the store) or over no rows (`from([])`, the document builder) — a chain over another one, or over rows in memory (any but an empty array, Set or Map: a generator, an async iterable, a cursor or a push queue is not read to count it), is `JL0005`, where it used to register its document over the handle's rows; the strategy, the reason and the maintenance are the store's |
+| `execute(chain \| document, options?)`, `query(…)`, `explain(…)` | the store's own members, on a collection handle and on an entity handle (a collection has `query`; an entity set has none) | a chain is handed over as `live()` hands it (`execute` answers the document's own shape: several rows an array, one row the row, none `undefined`): its document runs with its `params()` bindings as the externals (`options.externals` merge over them and a parameter an `in()` reads whole must be an array in the merged set — `JL0004`; `params()` refuses a `Date` binding itself with `JL0004`, and a `Date` under `options.externals` that the document compares reaches the store, which refuses it with `JD0041` where it used to be compared as `{}` and match no row), and a chain built over another collection or entity, or over rows in memory, is `JL0005` (`execute() on collection 'orders' was handed a chain built over collection 'users'`; `… built over 2 rows in memory`, or `… built over rows in memory it cannot count without reading them` for a generator, an async iterable, a cursor or a push queue, where those rows used to be ignored and the handle's own answered); a chain over no rows (`from([])`) is the document builder and is taken. A chain answers exactly what its `toDocument()` answers on the same member; a document, with or without options, goes to the store untouched. `explain()` with nothing is still the empty chain's explanation. A refusal of the chain is answered as the store answers a refused document on that member: `execute` and `query` throw, `explain` rejects. They used to read a chain as a document with no clauses: a collection answered `{}` for `execute(chain)` and `[{}]` for `query(chain)`, and an entity refused with `JD0033` |
 | `client.collections.<name>` | the store's collection | the same chain start and `live`, typed from the pen's collection schema (§2.5) |
 | `saveChanges()`, `transaction(fn, options?)`, `close()`, `capabilities`, `store` | the store's | pass-throughs; `saveChanges` and `live` exist exactly when the model declares entities, as on the store; `store` is the escape hatch, typed `TypedStore` |
 

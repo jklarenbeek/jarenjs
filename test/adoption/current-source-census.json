@@ -71,16 +71,16 @@
       "api": "@jarenjs/json/query",
       "role": "existing compiler and limits; saved-profile conversion pending",
       "matches": [
-        "61: * Compile options for {@link compileJsonQuery}.",
-        "119: * @property {boolean} [analysis] - On `compileJsonQuery`: additionally",
-        "127: * what `analyzeQuery` returns and `compileJsonQuery`'s `analysis`",
-        "161: * The compiled query returned by {@link compileJsonQuery}: the query",
-        "218: * const q = compileJsonQuery({",
-        "225:export function compileJsonQuery(doc, options = {}) {",
-        "335: * shared by `analyzeQuery` and `compileJsonQuery`'s `analysis` option",
-        "373: *   `compileJsonQuery`",
-        "386:const compileUncached = (/** @type {any} */ doc) => compileJsonQuery(doc);",
-        "409:    query = compileJsonQuery(doc);"
+        "69: * Compile options for {@link compileJsonQuery}.",
+        "127: * @property {boolean} [analysis] - On `compileJsonQuery`: additionally",
+        "135: * what `analyzeQuery` returns and `compileJsonQuery`'s `analysis`",
+        "169: * The compiled query returned by {@link compileJsonQuery}: the query",
+        "226: * const q = compileJsonQuery({",
+        "233:export function compileJsonQuery(doc, options = {}) {",
+        "345: * shared by `analyzeQuery` and `compileJsonQuery`'s `analysis` option",
+        "383: *   `compileJsonQuery`",
+        "396:const compileUncached = (/** @type {any} */ doc) => compileJsonQuery(doc);",
+        "419:    query = compileJsonQuery(doc);"
       ],
       "disposition": "retained"
     },

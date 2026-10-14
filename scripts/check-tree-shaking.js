@@ -237,7 +237,8 @@ if (chainEdgeLeak.length > 0)
 // Raised to 229,200 (measured 229144): the shared capture's coded refusal of every array and string method on a member, and the predicate a to-many relation's array method needs, add 2342.
 // Raised to 229,300 (measured 229209): a handle's check of the source a chain was built over add 65.
 // Raised to 229,900 (measured 229858): the shared capture's reading of an index off a relation as a hop for in() and all() add 649.
-if (chainBytes > 229900)
+// Raised to 230,500 (measured 230428): the chart pen's right value axis and the shared capture's bounds add 570.
+if (chainBytes > 230500)
   throw new Error(`The chain bundle grew to ${chainBytes} bytes.`);
 
 console.log(`Tree-shaking smoke test passed (${chainBytes} byte chain bundle; no schema-pen module, no client module, no store/validator/formats bytes).`);
@@ -429,7 +430,9 @@ if (migrationPenLeak.length > 0)
   throw new Error(`The migration pen pulled the schema or model pen into the bundle: ${migrationPenLeak.map(([file]) => file).join(', ')}`);
 const migrationEngineLeak = Object.entries(migrationInputs)
   .filter(([file, info]) => (/packages\/(validate|emit|db|formats|refs)\//.test(file)
-    || (file.includes('packages/json/') && !/packages\/json\/src\/(canonical|pointer)\.js$/.test(file)))
+    // errors.js is the package's error classes and fixed bounds, no engine:
+    // canonical.js reads its data depth ceiling from there
+    || (file.includes('packages/json/') && !/packages\/json\/src\/(canonical|pointer|errors)\.js$/.test(file)))
     && info.bytesInOutput > 0);
 if (migrationEngineLeak.length > 0)
   throw new Error(`The migration pen pulled an engine or the store into the bundle: ${migrationEngineLeak.map(([file]) => file).join(', ')}`);
@@ -451,7 +454,8 @@ if (migrationEngineLeak.length > 0)
 // Raised to 31,000 (measured 30970): the shared capture's refusal to coerce a method read without its call add 392.
 // Raised to 33,400 (measured 33304): the shared capture's coded refusal of every array and string method on a member, and the predicate a to-many relation's array method needs, add 2334.
 // Raised to 34,000 (measured 33951): the shared capture's reading of an index off a relation as a hop for in() and all() add 647.
-if (migrationBytes > 34000)
+// Raised to 34,100 (measured 34044): the canonical form's data depth bound add 93.
+if (migrationBytes > 34100)
   throw new Error(`The migration pen bundle grew to ${migrationBytes} bytes.`);
 const chainMigrationLeak = Object.entries(chainInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/migration/') && info.bytesInOutput > 0);
@@ -623,7 +627,8 @@ if (asyncLiveLeak.length)
 // Raised to 981,100 (measured 981042): a handle's check of the source a chain was built over add 54.
 // Raised to 982,700 (measured 982682): the database a store reads, named in its views' source, and the store's coded refusal of a chain where it takes a document add 1640.
 // Raised to 984,600 (measured 984578): the shared capture's reading of an index off a relation as a hop, the handle's refusal of rows it cannot count and the store's refusal of a document it cannot read add 1896.
-if (clientBytes > 984600)
+// Raised to 993,000 (measured 992989): the store's refusal of a non-JSON compared external, epoch-key binding on every key path, the judging of rows a foreign-key action changes, and the double comparison and rounded-read refusal of an integer past 2^53 add 8411.
+if (clientBytes > 993000)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 
