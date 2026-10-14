@@ -37,7 +37,7 @@ is the index of those guides, and it is how a reader reaches any of them.
 | Document | Lines | What it writes, and when to open it |
 |---|---:|---|
 | [LINQ-FORMAT.md](LINQ-FORMAT.md) | 954 | this file, the binder and the family's **normative reference**: what a pen is, the rules all of them keep, the shared `JL01xx` table, and the cross-pen views derived from the guides it indexes. **Read it when** you want a rule that is true of every pen, an index of the documents, or one place to look up a method without knowing which pen owns it |
-| [QUERY-PEN.md](QUERY-PEN.md) | 2,073 | the chain, `.` — query documents (`jaren-query`) and the provider seam. **Read it when** you are querying data, or implementing a provider that answers a query document |
+| [QUERY-PEN.md](QUERY-PEN.md) | 2,093 | the chain, `.` — query documents (`jaren-query`) and the provider seam. **Read it when** you are querying data, or implementing a provider that answers a query document |
 | [SCHEMA-PEN.md](SCHEMA-PEN.md) | 1,266 | `./schema` — JSON Schema 2020-12: the structural keywords, the constraints and the annotations, each with a method of its own, plus `$query`, `$defs`/`$ref` recursion and the normalizer's per-field predicates. **Read it when** you are describing the shape of data — for validation, for a form, or as the base of an entity |
 | [MODEL-PEN.md](MODEL-PEN.md) | 1,242 | `./model` — the `x-entity` vocabulary on JSON Schema, and the `$model` 0.1 document `openStore` accepts unchanged. **Read it when** you are declaring a store's entities, their keys and their relations |
 | [JSLT-PEN.md](JSLT-PEN.md) | 980 | `./jslt` — `$jslt` 0.1 stylesheets: the envelope and its rules, whose bodies are captured over the matched value. **Read it when** you are transforming one document into another |
@@ -206,7 +206,7 @@ and the bundle is the byte count the tree-shaking probe builds.
 | Document | Subpath | Lines | Mapping rows | Worked examples | Refusals | Bundle |
 |---|---|---:|---:|---:|---:|---:|
 | [LINQ-FORMAT.md](LINQ-FORMAT.md) | — | 954 | — | — | — | — |
-| [QUERY-PEN.md](QUERY-PEN.md) | `.` | 2,073 | 34 | 8 | 17 | 223,527 B |
+| [QUERY-PEN.md](QUERY-PEN.md) | `.` | 2,093 | 34 | 8 | 17 | 224,523 B |
 | [SCHEMA-PEN.md](SCHEMA-PEN.md) | `./schema` | 1,266 | 82 | 10 | 4 | 41,891 B |
 | [MODEL-PEN.md](MODEL-PEN.md) | `./model` | 1,242 | 31 | 7 | 3 | 53,696 B |
 | [JSLT-PEN.md](JSLT-PEN.md) | `./jslt` | 980 | 17 | 8 | 3 | 24,466 B |
@@ -219,9 +219,9 @@ and the bundle is the byte count the tree-shaking probe builds.
 | [JTLT-PEN.md](JTLT-PEN.md) | `./jtlt` | 83 | 13 | 1 | 2 | 21,180 B |
 | [PROJECT-PEN.md](PROJECT-PEN.md) | `./project` | 84 | 9 | 1 | 1 | 4,668 B |
 | [CHARTS-PEN.md](CHARTS-PEN.md) | `./charts` | 100 | 21 | 1 | 1 | 6,503 B |
-| [DB-CLIENT.md](DB-CLIENT.md) | `./db` | 1,227 | 45 | 4 | 2 | 975,301 B |
+| [DB-CLIENT.md](DB-CLIENT.md) | `./db` | 1,227 | 45 | 4 | 2 | 975,939 B |
 | [FORMULA-PEN.md](FORMULA-PEN.md) | `./formula` | 41 | 2 | — | — | 11,241 B |
-| **16 documents** | | **13,649** | **372** | **73** | | |
+| **16 documents** | | **13,669** | **372** | **73** | | |
 <!--/fact-->
 
 A pen whose mapping rows are far below its worked examples is a pen
@@ -265,7 +265,7 @@ it and each document publishes it. The rounded column is what
 <!--fact:pens.cost-->
 | Subpath | Document | Bundle | Rounded |
 |---|---|---:|---:|
-| `@jarenjs/linq` | [QUERY-PEN.md](QUERY-PEN.md) | 223,527 B | 224 kB |
+| `@jarenjs/linq` | [QUERY-PEN.md](QUERY-PEN.md) | 224,523 B | 225 kB |
 | `@jarenjs/linq/schema` | [SCHEMA-PEN.md](SCHEMA-PEN.md) | 41,891 B | 42 kB |
 | `@jarenjs/linq/model` | [MODEL-PEN.md](MODEL-PEN.md) | 53,696 B | 54 kB |
 | `@jarenjs/linq/jslt` | [JSLT-PEN.md](JSLT-PEN.md) | 24,466 B | 24 kB |
@@ -278,7 +278,7 @@ it and each document publishes it. The rounded column is what
 | `@jarenjs/linq/jtlt` | [JTLT-PEN.md](JTLT-PEN.md) | 21,180 B | 21 kB |
 | `@jarenjs/linq/project` | [PROJECT-PEN.md](PROJECT-PEN.md) | 4,668 B | 5 kB |
 | `@jarenjs/linq/charts` | [CHARTS-PEN.md](CHARTS-PEN.md) | 6,503 B | 7 kB |
-| `@jarenjs/linq/db` | [DB-CLIENT.md](DB-CLIENT.md) | 975,301 B | 975 kB |
+| `@jarenjs/linq/db` | [DB-CLIENT.md](DB-CLIENT.md) | 975,939 B | 976 kB |
 | `@jarenjs/linq/formula` | [FORMULA-PEN.md](FORMULA-PEN.md) | 11,241 B | 11 kB |
 <!--/fact-->
 
@@ -340,15 +340,15 @@ it says.
 | `Join` | nested `$for` + `$where` `$eq` — the engine rewrites this shape to a HASH JOIN (compile-time, QUERY-FORMAT §6), which is why it is fast **when both keys are plain member paths** (`o => o.pid`, `i => i.id`); a key with an operator in it (`o => o.name.lower()`, `o => o.p.add(0)`) is not a probe key and the join runs as a nested loop. Both sides MUST derive from the same source, or from two providers sharing one `scope` (§8 — two entity sets of one store are two roots of ONE multi-entity input, and the store answers the equijoin in one statement); anything else is `JL0005`: a query document reads one input. On the async surface the join exists only over a provider, pushed whole (§10). The inner side's declared parameters ride along (§7) | native | `(inner: Seq<U>, ok, ik, (o: Expr<T>, i: Expr<U>) => Expr<R>)` → `Seq<R>` |
 | `GroupJoin` | the matching group bound as an ARRAY value — `$let: { g: [ <correlated inner phrase> ] }` — so the result selector can index it (`g.at(0)`), fan it (`g.all()`), place it in a member (`{ matches: g }`) and aggregate over its members (`(u, g) => ({ n: g.count() })` counts the matches, `g.exists()` is whether there are any); same-source rule and parameter merge as `Join` | emulated | `(inner: Seq<U>, ok, ik, (o: Expr<T>, g: ArrayExpr<U> & AggregatableExpr) => Expr<R>)` → `Seq<R>` |
 | `Skip` / `Take` | `$subsequence` | native | `(n: number)` → `Seq<T>` |
-| `Distinct` | `$distinct` (deep structural equality — the grouping relation) | native | `()` → `Seq<T>` |
-| `Reverse` | `$reverse` | native | `()` → `Seq<T>` |
+| `Distinct` | `$distinct` (deep structural equality — the grouping relation) | native | `()` → `Seq<T>`; reads no key, and one handed a selector is `JL0005` naming `select(sel).distinct()` (the projected values, not a by-key choice of rows) |
+| `Reverse` | `$reverse` | native | `()` → `Seq<T>`; reads no argument (`JL0005`) |
 | `Count` / `Sum` / `Average` / `Min` / `Max` | §8.8 aggregates (`Average` → `$avg`) | native | `count(): number`; `sum(): number`; `average/min/max(): number` (throw `JL2001` on empty; `min`/`max` follow the operand family); none reads an argument, and one handed an argument is `JL0005` naming `where(pred).count()` or `select(sel).sum()` |
 | `Any()` | `$exists` | native | `(): boolean` |
 | `Any(pred)` / `All(pred)` | `$some` / `$every` quantifier phrase | native | `(pred): boolean` (`all` vacuously true on empty) |
 | `Aggregate(seed, fn)` | `$fold` — the accumulator clause; the result is a sequence of exactly ONE accumulated value (`.first()` reads it) | native | `(seed: A, (acc: Expr<A>, e: Expr<T>) => Expr<A>)` → `Seq<A>` |
 | `Aggregate(fn)` (unseeded) | — JSON cannot spell "the implicit first element" as a lambda seed | unsupported (`JL0006`) | — |
-| `First` / `FirstOrDefault` | `[ $subsequence [expr, 0, 1] ]` window | native | `(): T` (`JL2001` on empty) / `(d?): T \| D` |
-| `Single` / `SingleOrDefault` | `[ $subsequence [expr, 0, 2] ]` window | native | `(): T` (`JL2001`/`JL2002`) / `(d?): T \| D` (`JL2002` on 2+) |
+| `First` / `FirstOrDefault` | `[ $subsequence [expr, 0, 1] ]` window | native | `(): T` (`JL2001` on empty) / `(d?): T \| D`; neither reads a predicate, and one handed to either is `JL0005` naming `where(pred).first()` / `where(pred).firstOrDefault(d)` |
+| `Single` / `SingleOrDefault` | `[ $subsequence [expr, 0, 2] ]` window | native | `(): T` (`JL2001`/`JL2002`) / `(d?): T \| D` (`JL2002` on 2+); no predicate (`JL0005`, as `First`) |
 | `Last` / `LastOrDefault` | `[ $subsequence [$reverse expr, 0, 1] ]` | native | as `First` |
 | `ElementAt` / `ElementAtOrDefault` | `[ $subsequence [expr, i, 1] ]` | native | `(i): T` (`JL2003` out of range) / `(i, d?)` |
 | `Concat` | `$seq` (a constant array's elements join the stream) | native | `(other: Seq<T> \| T[])` → `Seq<T>` |

@@ -227,7 +227,8 @@ if (chainEdgeLeak.length > 0)
 // Raised to 220,900 (measured 220897): the shared capture's coded refusal of an argument handed to an aggregate of a captured value and the range join's bounds check add 761.
 // Raised to 223,000 (measured 222962): the shared capture's coded refusal of an array method called on a member, with the query spelling it names, and the chain's record of the source it was built over add 2065.
 // Raised to 223,600 (measured 223527): the Sequence aggregates' refusal of an argument they never read add 565.
-if (chainBytes > 223600)
+// Raised to 224,600 (measured 224523): the remaining Sequence members' refusal of a predicate, selector or default they never read add 996.
+if (chainBytes > 224600)
   throw new Error(`The chain bundle grew to ${chainBytes} bytes.`);
 
 console.log(`Tree-shaking smoke test passed (${chainBytes} byte chain bundle; no schema-pen module, no client module, no store/validator/formats bytes).`);
@@ -596,7 +597,8 @@ if (asyncLiveLeak.length)
 // Raised to 971,400 (measured 971321): the relative pointer's bhutton-00 index manipulation and its dialect check add 1208.
 // Raised to 974,400 (measured 974332): the shared capture's coded refusal of an array method called on a member, with the query spelling it names, and live()'s check of a chain's source add 3011.
 // Raised to 975,400 (measured 975301): the table-driven catalog scanner and the Sequence aggregates' refusal of an argument they never read add 969.
-if (clientBytes > 975400)
+// Raised to 976,000 (measured 975939): the remaining Sequence members' refusal of a predicate, selector or default they never read add 638.
+if (clientBytes > 976000)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 
