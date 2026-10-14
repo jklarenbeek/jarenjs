@@ -156,7 +156,8 @@ compileXQuery(text)(null, { doc: inputDocument });
 | `declare variable $x external;` | validated, emits nothing (use is the declaration, §2) |
 | `declare variable $x := ...`, `... external := ...` | error `unsupported construct 'variable declaration with default value'` |
 | any other `declare ...` (function, namespace, option, default, ...) | error `unsupported construct 'declare <kind>'` |
-| `import module` / `import schema`, `module namespace` (library modules) | error `unsupported construct 'import module'` / `'library module'` |
+| `import module` / `import schema`, `module namespace` (library modules), at the start of the prolog | error `unsupported construct 'import module'` / `'library module'` |
+| `import` or `module` anywhere else, or at the start without `module`/`schema`/`namespace` after it | a name test like any other: `unsupported construct 'path expression'` (`import eq 1`), or `unexpected keyword 'import'` before an operand |
 
 ### 4.2 Expressions, by precedence
 

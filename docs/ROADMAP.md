@@ -64,10 +64,6 @@ delete it or fix it.
   mapping probes every position, so it is quadratic in the text length and bounded by the sequence guards),
   `substring-before`/`-after` and `translate` (nothing finds a position in a string).
 - [ ] **1-based positional *outputs*** — `at`/`count`/`fn:index-of` surface the format's 0-based D6 values, so QT3 asserts them as wrong-value; `fn:index-of` has a cheap local emission fix, `at`/`count` would need reference rewriting. Revisit if the scorecard noise starts to matter.
-- [ ] **Front-end diagnostic polish** — `import` or `module` standing alone as a
-  name test still raises `unsupported construct 'import declaration'` /
-  `'library module'` where a name test is meant.
-
 ## @jarenjs/validate
 
 - [ ] **Per-scope static evaluated-set analysis for `unevaluated*`** — the shipped

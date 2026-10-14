@@ -97,6 +97,35 @@ describe('XQuery front-end parser', () => {
       failsWith('import schema namespace s = "u"; 1', "unsupported construct 'import schema'", 0);
       failsWith('module namespace m = "u"; 1', "unsupported construct 'library module'", 0);
     });
+
+    it('should name import module, import schema and module namespace wherever the prolog allows them', () => {
+      failsWith('import module', "unsupported construct 'import module'", 0);
+      failsWith('import schema', "unsupported construct 'import schema'", 0);
+      failsWith('module namespace', "unsupported construct 'library module'", 0);
+      failsWith('(: c :) import (: d :) module namespace m = "u"; 1', "unsupported construct 'import module'", 8);
+      failsWith('xquery version "3.1"; module namespace m = "u"; 1', "unsupported construct 'library module'", 22);
+      failsWith('declare variable $x external; import schema "u"; 1', "unsupported construct 'import schema'", 30);
+      failsWith('declare variable $x external; module namespace m = "u"; 1', "unsupported construct 'library module'", 30);
+    });
+
+    it('should read import and module as name tests where no declaration follows', () => {
+      failsWith('import', "unsupported construct 'path expression'", 0);
+      failsWith('module', "unsupported construct 'path expression'", 0);
+      failsWith('import gt import', "unsupported construct 'path expression'", 0);
+      failsWith('import ne import', "unsupported construct 'path expression'", 0);
+      failsWith('module = 1', "unsupported construct 'path expression'", 0);
+      failsWith('import + 1', "unsupported construct 'path expression'", 0);
+      failsWith('import, module', "unsupported construct 'path expression'", 0);
+      failsWith('import-module', "unsupported construct 'path expression'", 0);
+      failsWith('xquery version "3.1"; import eq 1', "unsupported construct 'path expression'", 22);
+      failsWith('declare variable $x external; module eq 1', "unsupported construct 'path expression'", 30);
+      // a keyword-named name followed by an operand is a misplaced keyword, as for every other keyword
+      failsWith('import 1', "unexpected keyword 'import'", 0);
+      failsWith('module "x"', "unexpected keyword 'module'", 0);
+      failsWith('import $x', "unexpected keyword 'import'", 0);
+      failsWith('import module-x', "unexpected keyword 'import'", 0);
+      failsWith('module namespaces', "unexpected keyword 'module'", 0);
+    });
   });
 
   describe('literals', () => {

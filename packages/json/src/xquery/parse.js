@@ -2001,13 +2001,16 @@ export function parseXQuery(source) {
         }
         fail(`unsupported construct 'declare ${kind}'`, at);
       }
+      // 'import' and 'module' are declarations only before 'module' / 'schema'
+      // and 'namespace'; anywhere else they are name tests like any other
       if (w === 'import') {
-        skipWS();
-        const kind = isNameStartCode(cc(pos)) ? parseNCName() : 'declaration';
-        fail(`unsupported construct 'import ${kind}'`, at);
+        const kind = tryKeyword('module') >= 0 ? 'module' : tryKeyword('schema') >= 0 ? 'schema' : null;
+        if (kind !== null)
+          fail(`unsupported construct 'import ${kind}'`, at);
       }
-      if (w === 'module')
+      else if (w === 'module' && tryKeyword('namespace') >= 0) {
         fail("unsupported construct 'library module'", at);
+      }
       pos = save;
       return;
     }
