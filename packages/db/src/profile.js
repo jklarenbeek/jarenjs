@@ -28,12 +28,17 @@
  *     item, and answering a narrowed document nobody asked for would be
  *     the wrong answer, not a safer one.
  *
+ * The store's profile is a floor ({@link floorProfile}): a per-call profile
+ * can only narrow it, never drop its predicates or raise its bounds.
+ *
  * A point read (`get`) is not a query document but answers the row of one
- * key, so the mandatory predicate reaches it as a test of the row it read:
- * a row the predicate does not keep is answered as absent
- * ({@link pointReadFilter}); a predicate that names an external keeps every
- * row, because a read binds none. The member allow-list, the row bound and
- * the engine limits are properties of a query document and do not apply to it.
+ * key, so the mandatory predicate reaches it as a test of the row it read,
+ * with the externals the read passes: a row the predicate does not keep is
+ * answered as absent ({@link pointReadFilter}), and a read that does not
+ * bind an external the predicate names is refused. A root with a member
+ * allow-list refuses a point read, which answers the whole document. The
+ * row bound and the engine limits are properties of a query document and do
+ * not apply to it.
  *
  * The non-claims are part of the contract and live in
  * MODEL-FORMAT.md §8: no statement timeout exists on the SQLite
@@ -49,6 +54,17 @@ import { DbCompileError } from './errors.js';
 import { isJsonObject } from '@jarenjs/core/object';
 import { analyzeQuery } from '@jarenjs/json/query';
 import { compileSetResidual } from './residual.js';
+
+/**
+ * The query document a predicate over `$it` stands for: every row of a root
+ * the expression keeps, whole. The one spelling the profile's predicates,
+ * a point read's test and an include's `where` are planned and analysed by.
+ * @param {any} expression - a query expression over `$it`
+ * @returns {any}
+ */
+export function predicateQuery(expression) {
+  return { $for: { it: '$[*]' }, $where: expression, $return: '$it' };
+}
 
 /** The `'safe'` profile: the documented defaults. */
 export const SAFE_PROFILE = Object.freeze({
@@ -192,6 +208,116 @@ export function assertProfileRoots(profile, roots, docPath = '/profile') {
   }
 }
 
+/** A bound member's value for comparison: `null` (no bound) reads as the
+ * widest. @param {number | null} value */
+const widthOf = (value) => (value === null ? Infinity : value);
+
+/**
+ * The profile one call runs under. With no store profile it is the call's
+ * own, normalized over the `'safe'` defaults. With one, the store's profile
+ * is a FLOOR: a member the call leaves out is the store's, and a member it
+ * spells may only narrow the store's — a lower `maxRows`, engine limit or
+ * graph cap, a sub-list of an allow-list, `refuseFullScan: true`, and
+ * predicates that are conjoined with the store's (`$and`), never in place of
+ * them. A member that would widen what the store admits is refused `JD0011`,
+ * naming the member and the store's value, rather than clamped: the caller
+ * asked for more than the store allows, and answering a narrower document it
+ * did not ask for would hide that. A per-call `'safe'` spells every member of
+ * the `'safe'` table.
+ * @param {any} storeProfile - the store's normalized profile, or `null`
+ * @param {any} callProfile - the call's `profile` option as given, or `undefined`
+ * @param {string} docPath - where a refusal points
+ * @returns {any} a normalized, frozen profile, or `null`
+ */
+export function floorProfile(storeProfile, callProfile, docPath) {
+  if (callProfile === undefined) return storeProfile;
+  const own = normalizeProfile(callProfile);
+  if (storeProfile === null) return own;
+  const spelled = callProfile === 'safe' ? SAFE_PROFILE : callProfile;
+  /** @param {string} member @param {any} asked @param {any} allowed */
+  const widens = (member, asked, allowed) => new DbCompileError('JD0011',
+    `the call's profile asks ${member} ${JSON.stringify(asked)}, and the store's profile allows `
+    + `${JSON.stringify(allowed)}: a per-call profile can only narrow the store's — omit ${member} `
+    + "to run under the store's, or open the store with the wider profile", docPath);
+  /** @param {string} member @param {readonly string[]} asked @param {readonly string[]} allowed */
+  const subList = (member, asked, allowed) => {
+    const outside = asked.find((name) => !allowed.includes(name));
+    if (outside !== undefined) throw widens(member, outside, allowed);
+    return asked;
+  };
+  const limits = { ...storeProfile.limits };
+  for (const name of Object.keys(spelled.limits ?? {})) {
+    if (own.limits[name] > storeProfile.limits[name])
+      throw widens(`limits.${name}`, own.limits[name], storeProfile.limits[name]);
+    limits[name] = own.limits[name];
+  }
+  /** @param {'maxRows' | 'maxIncludedRows' | 'maxDepth' | 'maxBytes'} member */
+  const bound = (member) => {
+    if (spelled[member] === undefined) return storeProfile[member];
+    if (widthOf(own[member]) > widthOf(storeProfile[member]))
+      throw widens(member, own[member], storeProfile[member]);
+    return own[member];
+  };
+  const predicates = { ...storeProfile.predicates };
+  for (const [root, predicate] of Object.entries(own.predicates)) {
+    predicates[root] = storeProfile.predicates[root] === undefined ? predicate
+      : { $and: [storeProfile.predicates[root], predicate] };
+  }
+  let collections = storeProfile.collections;
+  if (spelled.collections !== undefined) {
+    if (own.collections === null && collections !== null) throw widens('collections', null, collections);
+    collections = collections === null ? own.collections
+      : Object.freeze(subList('collections', own.collections, collections));
+  }
+  if (spelled.refuseFullScan !== undefined && own.refuseFullScan === false && storeProfile.refuseFullScan)
+    throw widens('refuseFullScan', false, true);
+  return Object.freeze({
+    limits: Object.freeze(limits),
+    maxRows: bound('maxRows'),
+    externals: spelled.externals === undefined ? storeProfile.externals
+      : Object.freeze(subList('externals', own.externals, storeProfile.externals)),
+    functions: spelled.functions === undefined ? storeProfile.functions
+      : Object.freeze(subList('functions', own.functions, storeProfile.functions)),
+    collations: spelled.collations === undefined ? storeProfile.collations
+      : Object.freeze(subList('collations', own.collations, storeProfile.collations)),
+    collections,
+    predicates: Object.freeze(predicates),
+    refuseFullScan: storeProfile.refuseFullScan || own.refuseFullScan,
+    maxIncludedRows: bound('maxIncludedRows'),
+    maxDepth: bound('maxDepth'),
+    maxBytes: bound('maxBytes'),
+    members: spelled.members === undefined ? storeProfile.members
+      : floorMembers(storeProfile.members, own.members, widens),
+  });
+}
+
+/**
+ * The member allow-list a call narrows to: the store's lists, with each
+ * root the call names replaced by the call's list — every path of which
+ * must lie inside a path the store allows for that root.
+ * @param {any} store - the store's normalized member lists, or `null`
+ * @param {any} call - the call's normalized member lists, or `null`
+ * @param {(member: string, asked: any, allowed: any) => Error} widens
+ * @returns {any}
+ */
+function floorMembers(store, call, widens) {
+  if (call === null) {
+    if (store !== null) throw widens('members', null, Object.fromEntries(
+      Object.entries(store).map(([root, policy]) => [root, policy.declared])));
+    return null;
+  }
+  if (store === null) return call;
+  for (const [root, policy] of Object.entries(call)) {
+    const allowed = /** @type {any} */ (store)[root];
+    if (allowed === undefined) continue;
+    /** @type {any} */ (policy).canonical.forEach((/** @type {string} */ path, /** @type {number} */ at) => {
+      if (!allowed.canonical.some((/** @type {string} */ entry) => inside(path, entry)))
+        throw widens(`members['${root}']`, /** @type {any} */ (policy).declared[at], allowed.declared);
+    });
+  }
+  return Object.freeze({ ...store, ...call });
+}
+
 /**
  * Whether a read canonical is inside an allowed one: the member itself,
  * or anything under it. Allowing `a` allows `a.b`; allowing `a.b` does
@@ -247,8 +373,7 @@ export function memberDenial(profile, root, analysisRoot, isRootSource) {
  * @returns {import('./algebra.js').PlanPredicate}
  */
 export function translateProfilePredicate(expression, shape) {
-  const planned = planQuery(
-    { $for: { it: '$[*]' }, $where: expression, $return: '$it' }, shape);
+  const planned = planQuery(predicateQuery(expression), shape);
   if (planned.mode !== 'native' || planned.plan.filter === null) {
     throw new TypeError(
       'a profile predicate must translate natively (it binds the database-side fetch); '
@@ -289,41 +414,76 @@ export function applyRowBound(plan, maxRows) {
 }
 
 /**
- * The profile's verdict on a row a point read found, for one root: `null`
- * when the profile keeps no predicate for it (the read is answered as
- * stored), otherwise a test of the row's document by the same predicate
- * the query engines conjoin into every fetch. The test runs the predicate
- * in the engine over the one document, which agrees with the database's
- * answer by the pushdown contract, so a row the predicate keeps from a
- * query is a row it keeps from a point read.
+ * Whether a point read's external is one the database compares as the
+ * engine does: a string, a finite number, or a list (or object) of them. A
+ * `null` compares as SQL NULL in the database and as a value in the engine,
+ * and a boolean does not bind at all, so a point read judged by the engine
+ * could keep a row the query engines' statement does not.
+ * @param {any} value
+ * @returns {boolean}
+ */
+function comparable(value) {
+  if (typeof value === 'string') return true;
+  if (typeof value === 'number') return Number.isFinite(value);
+  if (value === null || typeof value !== 'object') return false;
+  return (Array.isArray(value) ? value : Object.values(value)).every(comparable);
+}
+
+/**
+ * The profile's verdict on a point read of one root: `null` when the profile
+ * bounds no point read of it (no predicate, no member list — the read is
+ * answered as stored), otherwise a judge taking the read's externals. The
+ * judge refuses `JD0011` before any row is read when the root has a member
+ * allow-list — a point read answers the whole document, as a graph load
+ * does — or when the predicate names an external the read does not bind
+ * ({@link comparable});
+ * otherwise it answers the test of the row's document by the same predicate
+ * the query engines conjoin into every fetch. The test runs the predicate in
+ * the engine over the one document, which agrees with the database's answer
+ * by the pushdown contract, so a row the predicate keeps from a query is a
+ * row it keeps from a point read; the statement stays the key seek it was.
  *
- * A point read binds no externals, so a predicate that names one cannot be
- * judged: such a root's point read is answered as stored, exactly as a store
- * with no predicate for it answers. The predicate is analysed and compiled on
- * first use, so a store that never reads a point never pays for it. The
- * engine limits are not passed to the test: they bound the JavaScript a query
- * document runs, and a point read runs no document of the caller's.
+ * The predicate is analysed and compiled on first use, so a store that
+ * never reads a point never pays for it. The engine limits are not passed to
+ * the test: they bound the JavaScript a query document runs, and a point
+ * read runs no document of the caller's.
  * @param {any} profile - a normalized profile, or `null`
  * @param {string} root - the collection or entity read
  * @param {{ functions?: any, extensions?: any } | null} operators - the
  *   store's registered operators
  * @param {any} zoneProvider - the injected clock
- * @returns {((document: any) => boolean) | null}
+ * @param {string} [docPath] - where a refusal points
+ * @returns {((externals: any) => (document: any) => boolean) | null}
  */
-export function pointReadFilter(profile, root, operators, zoneProvider) {
+export function pointReadFilter(profile, root, operators, zoneProvider, docPath) {
+  const policy = profile === null || profile.members === null ? undefined : profile.members[root];
   const expression = profile === null ? undefined : profile.predicates[root];
-  if (expression === undefined) return null;
+  if (policy === undefined && expression === undefined) return null;
   /** @type {((candidates: any[], externals: any) => any) | null} */
   let keeps = null;
-  let judged = false;
-  return (document) => {
-    if (!judged) {
-      const wrapper = { $for: { it: '$[*]' }, $where: expression, $return: '$it' };
-      // a predicate that names an external keeps no row from a read that binds none
-      if (analyzeQuery(wrapper, operators ?? undefined).externals.length === 0)
-        keeps = compileSetResidual(wrapper, undefined, operators, zoneProvider);
-      judged = true;
+  /** @type {string[]} */
+  let names = [];
+  return (externals) => {
+    if (policy !== undefined) {
+      throw new DbCompileError('JD0011',
+        `the profile allows only the members (${policy.declared.join(', ')}) of '${root}', and a `
+        + 'point read answers the whole document — query the members the policy allows instead', docPath);
     }
-    return keeps === null || keeps([document], {}) !== undefined;
+    if (keeps === null) {
+      const wrapper = predicateQuery(expression);
+      names = [...new Set(analyzeQuery(wrapper, operators ?? undefined).externals.map((ref) => ref.name))];
+      keeps = compileSetResidual(wrapper, undefined, operators, zoneProvider);
+    }
+    const bound = externals ?? {};
+    const unbound = names.filter((name) => typeof bound !== 'object'
+      || !Object.hasOwn(bound, name) || !comparable(bound[name]));
+    if (unbound.length > 0) {
+      throw new DbCompileError('JD0011',
+        `the profile's predicate for '${root}' cannot bind ${unbound.map((name) => `'$${name}'`).join(', ')} `
+        + 'for this point read — missing, or a value the database cannot compare (null, a boolean, or a list '
+        + 'holding one) — pass it as get(key, { externals })', docPath);
+    }
+    const test = /** @type {(candidates: any[], externals: any) => any} */ (keeps);
+    return (document) => test([document], bound) !== undefined;
   };
 }

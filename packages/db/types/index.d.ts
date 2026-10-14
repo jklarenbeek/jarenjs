@@ -181,9 +181,12 @@ export interface ExecuteOptions {
   strict?: boolean;
   /** `false` forces the set residual — the oracle's harness switch. */
   pushdown?: boolean;
-  /** The safety profile for THIS call, replacing the store's (normalized
-   * over the `'safe'` defaults, MODEL-FORMAT §8); applies to collection,
-   * entity, graph, include and store-root execution alike. */
+  /** The safety profile for THIS call. On a store opened with a profile it
+   * narrows the store's, which is a floor: a member left out is the store's,
+   * predicates are conjoined with the store's, and a member that would
+   * widen it is `JD0011`; on a store with none it is normalized over the
+   * `'safe'` defaults (MODEL-FORMAT §8). Applies to collection, entity,
+   * graph, include and store-root execution alike. */
   profile?: 'safe' | ProfileSpec;
   /** Cancellation: a call already aborted runs no statement (`JD2072`);
    * a cursor or page is released at its next row boundary. */
@@ -632,7 +635,11 @@ export interface Collection<T = unknown> {
   /** Insert; `options` reads nothing (a new document holds no
    * precondition), and any member is `JD0013`. */
   insert(doc: T, options?: Record<string, never>): Promise<string | number>;
-  get(key: string | number): Promise<T | undefined>;
+  /** The row of `key`, or `undefined` when none is stored or the store
+   * profile's predicate for this root does not keep it; `externals` binds
+   * the externals that predicate names, and a read that binds too few is
+   * `JD0011` (MODEL-FORMAT §8). */
+  get(key: string | number, options?: Pick<ExecuteOptions, 'externals'>): Promise<T | undefined>;
   put(doc: T, key?: string | number, options?: WriteOptions): Promise<string | number>;
   /** RFC 6902, read and written in one write transaction: a leading
    * `test` is a compare-and-set, the result is validated before it is
@@ -660,7 +667,7 @@ export interface Collection<T = unknown> {
 export interface SyncCollection<T = unknown> {
   stats(): unknown;
   insert(doc: T, options?: Record<string, never>): string | number;
-  get(key: string | number): T | undefined;
+  get(key: string | number, options?: Pick<ExecuteOptions, 'externals'>): T | undefined;
   put(doc: T, key?: string | number, options?: WriteOptions): string | number;
   patch(key: string | number, ops: readonly unknown[], options?: WriteOptions): T;
   delete(key: string | number, options?: WriteOptions): boolean;
@@ -702,7 +709,7 @@ export interface EntityScope {
 }
 
 export interface UntrackedReads<T = unknown> {
-  get(key: EntityKeyArg): Promise<T | undefined>;
+  get(key: EntityKeyArg, options?: Pick<ExecuteOptions, 'externals'>): Promise<T | undefined>;
   load(spec?: LoadSpec, options?: Pick<ExecuteOptions, 'profile' | 'signal' | 'deadline'>): Promise<T[]>;
 }
 
@@ -725,7 +732,7 @@ export interface EntitySet<T = unknown, I = unknown> {
   /** The provider phantom: a chain over this set infers its item type. */
   readonly __item?: T;
   create(doc: I): Promise<Readonly<T>>;
-  get(key: EntityKeyArg): Promise<Readonly<T> | undefined>;
+  get(key: EntityKeyArg, options?: Pick<ExecuteOptions, 'externals'>): Promise<Readonly<T> | undefined>;
   update(key: EntityKeyArg, changes: Partial<T>): Promise<Readonly<T>>;
   /** One bounded native SQLite column mutation; unsupported shapes refuse JD0038. */
   mutate(document: EntityMutation): Promise<MutationResult>;
@@ -780,7 +787,7 @@ export interface EntitySet<T = unknown, I = unknown> {
 }
 
 export interface SyncUntrackedReads<T = unknown> {
-  get(key: EntityKeyArg): T | undefined;
+  get(key: EntityKeyArg, options?: Pick<ExecuteOptions, 'externals'>): T | undefined;
   load(spec?: LoadSpec, options?: Pick<ExecuteOptions, 'profile' | 'signal' | 'deadline'>): T[];
 }
 
@@ -788,7 +795,7 @@ export interface SyncEntitySet<T = unknown, I = unknown> {
   /** The provider phantom: a chain over this set infers its item type. */
   readonly __item?: T;
   create(doc: I): Readonly<T>;
-  get(key: EntityKeyArg): Readonly<T> | undefined;
+  get(key: EntityKeyArg, options?: Pick<ExecuteOptions, 'externals'>): Readonly<T> | undefined;
   update(key: EntityKeyArg, changes: Partial<T>): Readonly<T>;
   delete(key: EntityKeyArg): boolean;
   load(spec?: LoadSpec, options?: Pick<ExecuteOptions, 'profile' | 'signal' | 'deadline'>): ReadonlyArray<Readonly<T>>;

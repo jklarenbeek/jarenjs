@@ -96,7 +96,7 @@ export type MembershipTarget<E extends MetaMap<E>, M extends EntityMeta, K exten
   E[M['relations'][K]['entity'] & keyof E]['key'] | M['relations'][K]['doc'];
 
 export interface TypedUntrackedReads<E extends MetaMap<E>, M extends EntityMeta> {
-  get(key: EntityKeyArg): Promise<M['doc'] | undefined>;
+  get(key: EntityKeyArg, options?: Pick<ExecuteOptions, 'externals'>): Promise<M['doc'] | undefined>;
   load<const S extends TypedLoadSpec<E, M>>(spec?: S,
     options?: Pick<ExecuteOptions, 'profile' | 'signal' | 'deadline'>): Promise<Array<Loaded<E, M, S>>>;
 }
@@ -107,7 +107,7 @@ export interface TypedEntitySet<E extends MetaMap<E>, M extends EntityMeta> {
    * without a cast. */
   readonly __item?: M['doc'];
   create(doc: M['input']): Promise<Readonly<M['doc']>>;
-  get(key: EntityKeyArg): Promise<Readonly<M['doc']> | undefined>;
+  get(key: EntityKeyArg, options?: Pick<ExecuteOptions, 'externals'>): Promise<Readonly<M['doc']> | undefined>;
   /** A relation member is a projection, never stored state: `update()`
    * refuses it (`JD2003`), and the type does not offer it. */
   update(key: EntityKeyArg, changes: Partial<Omit<M['doc'], keyof M['relations']>>): Promise<Readonly<M['doc']>>;

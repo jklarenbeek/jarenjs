@@ -2117,16 +2117,30 @@ cross-tenant reads. A **profile** composes five independent bounds:
 
 ```js
 const store = await openStore(model, { driver, profile: 'safe' });
-// or per call:
+// narrowed per call (a per-call profile can only narrow the store's):
+collection.query(doc, { profile: { maxRows: 200 } });
+// or, on a store opened with no profile, per call alone:
 collection.query(doc, { profile: { maxRows: 200, externals: ['min'] } });
 ```
 
 `'safe'` is the default table; a profile object overrides members over
-it. A per-call `profile` REPLACES the store's for that call — it is
-normalized over the `'safe'` defaults, not over the store's profile —
-so a store-level mandatory predicate or allow-list does not carry into
-`execute(doc, { profile: { maxRows: 50 } })`: spell the whole profile
-per call, or set it once on the store and pass none. The defaults: engine limits
+it. On a store opened with a profile, that profile is a FLOOR under a
+per-call one, so a call can narrow what the store admits and never widen
+it: a member the call leaves out is the store's;
+the call's `predicates` are conjoined with the store's (`$and`) for a root
+both name, never in place of them; `maxRows`, each engine limit and each
+graph cap may only be lowered; `externals`, `functions`, `collations`,
+`collections` and each root's `members` may only name a subset of the store's;
+and `refuseFullScan` may only be turned on. A member that would widen the
+store's — a larger bound, `null` for a bound the store sets, a name outside
+the store's list, `refuseFullScan: false` where the store refuses — is
+refused `JD0011`, naming the member, the value asked and the store's value,
+rather than clamped: the caller asked for more than the store allows. A
+per-call `'safe'` spells every member of the `'safe'` table, so it is refused
+on a store whose profile is narrower. On a store opened with no profile, a
+per-call profile is normalized over the `'safe'` defaults, as it always was.
+So `execute(doc, { profile: { maxRows: 50 } })` keeps the store's
+mandatory predicate and allow-lists and lowers its row bound to 50. The defaults: engine limits
 `{ sequenceItems: 100000, resultItems: 10000, steps: 1000000, depth: 32 }`,
 `maxRows: 1000`, no externals, no host functions, no collations, all
 of the store's collections, no mandatory predicates, no scan refusal,
@@ -2142,12 +2156,13 @@ subquery) and store-root execution (`store.execute`); a live
 registration on a store opened with a profile re-runs through `execute`
 whatever its shape (LIVE-FORMAT §7; over an asynchronous connection a
 resnapshot, with the profile's limits narrowed to its credits), so the
-profile binds every result it holds. It bounds query documents and point
-reads, not every read: a point read (`get`, collection or entity) answers a
-row only when the root's mandatory predicate, if it names no external, keeps
-it (below), while
-`store.observe`, capture and replication feeds deliver every tenant's
-records, because they are host surfaces. `collections` is
+profile binds every result it holds. It bounds every read a caller makes
+through a query document or a point read: a point read (`get`, collection or
+entity) answers a row only when the root's mandatory predicate, bound to the
+read's own `externals`, keeps it (below). It does not bound the change
+feeds — `store.observe`, change capture and replication — which deliver every
+tenant's records, nor the trusted SQL surface `store.relational`: they are
+host surfaces (below). `collections` is
 the one allow-list and names collections AND entity roots; a document
 that reads a name outside it is `JD0011` on every engine, with the
 same reason. `predicates` is keyed by collection or entity name, and
@@ -2295,26 +2310,57 @@ prove was applied is not a budget.
    host-configured predicate that cannot is a `TypeError` at first
    use, because there is no residual to hide it in.
 
-   A point read is judged by the same predicate when the predicate names no
-   external. `get` on a collection or an entity — tracked or `asNoTracking()`,
-   synchronous or asynchronous, on the store or inside a transaction — answers
-   the row of its key only when the root's predicate keeps it, and `undefined`
-   otherwise, which no caller can tell from a key that holds nothing (and a
-   tracked entity `get` of such a row registers no snapshot). The predicate runs
-   in the engine over the one document, which agrees with the database's answer
-   by the pushdown contract, so a row a query keeps is a row `get` keeps; the
-   engine `limits`, `maxRows` and the member allow-list are bounds on a query
-   document and do not apply to it. A read binds no externals and `get` takes no
-   per-call options, so a root whose predicate names an external — the
-   tenant-isolation spelling above — reads as it always did: `get` answers the
-   row of any key, and a store that isolates tenants through an external reads
-   its rows by a query that supplies it. A root the profile keeps no predicate
-   for reads as stored. The store's own writes read the stored row — a patch's
-   and a put's precondition, an entity update, a rule's old row — because a
-   profile bounds what a caller reads, not what the store writes: a tracked
-   `put` of a key whose `get` answered `undefined` still replaces the stored
-   row. `get` takes no per-call `profile`, so the store's is the only one that
-   applies to it.
+   A point read is judged by the same predicate. `get` on a collection or an
+   entity — tracked or `asNoTracking()`, synchronous or asynchronous, on the
+   store or inside a transaction — answers the row of its key only when the
+   root's predicate keeps it, and `undefined` otherwise, which no caller can
+   tell from a key that holds nothing (and a tracked entity `get` of such a row
+   registers no snapshot). A predicate that names an external — the
+   tenant-isolation spelling above — is bound from the read's own options,
+   `get(key, { externals: { tenant } })`, as a query binds it from its
+   `externals`; a read that leaves one unbound, or binds it to `null`, a boolean
+   or a list holding one (values the database compares otherwise than the
+   engine, or cannot bind), is refused `JD0011` before the row is read, so the
+   refusal does not tell a key another tenant holds from one that holds
+   nothing, and one a comparison would read as `{}` is refused `JD0041`, as on
+   `execute`. The predicate runs in the engine over the one document, which
+   agrees with the database's answer by the pushdown contract, so a row a query
+   keeps is a row `get` keeps; the statement is the key seek it is on a store
+   with no profile (the predicate costs the database nothing). The engine
+   `limits` and `maxRows` are bounds on a query document and do not apply to
+   it. A root the member allow-list names refuses `get` with `JD0011`, as it
+   refuses a graph `load`: a point read answers the whole document. A root the
+   profile keeps no predicate or member list for reads as stored. The store's
+   own writes read the stored row — a patch's and a put's precondition, an
+   entity update, a rule's old row — because a profile bounds what a caller
+   reads, not what the store writes: a tracked `put` of a key whose `get`
+   answered `undefined` still replaces the stored row. `get` takes no per-call
+   `profile`, so the store's is the only one that applies to it.
+
+   **The change feeds are host surfaces.** `store.observe`, the capture log
+   (`changesSince`, `changes`) and replication deliver every record the store
+   commits, whichever tenant's rows it touched, and take no profile. A read
+   profile does not bound them because they are not a caller's read of rows:
+   a feed reports what was WRITTEN, in commit order, to a consumer the host
+   wires up — a cache, a replica, an audit log, a search index — that must
+   see every change to stay correct, and a record it skipped would silently
+   desynchronise it. A predicate also cannot judge a record as it stands: one
+   record is a commit's RFC 6902 patch over `/<table>/<key>/…` pointers, which
+   can touch several tenants' rows at once, a `remove` carries no document,
+   and a row whose `tenant` member was rewritten would leave a tenant's view
+   without a record saying so. A host that relays a feed to a tenant bounds
+   it at the relay: it subscribes once, keeps for each connection only the
+   operations whose rows the tenant may read — judged by the key, through
+   `get(key, { externals })` with the tenant the connection authenticated (the
+   value it binds as that tenant's query `externals`), or by its own mapping
+   of keys to tenants for a removed row — and never hands the feed itself to a
+   caller. A live query (`live()`) is not a feed: it re-runs its document
+   through `execute` under the store's profile (above). The same holds for
+   the store's trusted surfaces over the physical tables — `store.relational`
+   (structural SQL, [SQLITE-RELATIONAL](SQLITE-RELATIONAL.md#through-a-store)),
+   and `backupTo`: they read every row, whatever profile
+   the store was opened with, and a host never hands them to a caller whose
+   reads the profile bounds.
 
 **Read-only stores.** `openStore(model, { readOnly: true })` opens the
 connection read-only at the DRIVER, so every write is refused by the

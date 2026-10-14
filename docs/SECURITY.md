@@ -128,7 +128,10 @@ Claimed, and each proven by a hostile-input test:
 - **Mandatory tenant predicates.** A profile predicate is conjoined
   into every plan after translation — native statements, residual
   candidate fetches and diverted scans alike — so no document shape
-  removes it.
+  removes it. No per-call profile sheds it (a call's profile only
+  narrows the store's), a point read (`get`) is judged by it, and the
+  change feeds and the trusted relational SQL surface are host surfaces
+  the host bounds itself ([MODEL-FORMAT §8](../packages/db/docs/MODEL-FORMAT.md)).
 - **Denials do not wedge.** Every refusal leaves the store usable; the
   suite runs an ordinary query after each attack.
 - **Read-only means the database refuses.** A read-only store opens

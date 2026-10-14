@@ -36,7 +36,7 @@ import { isPlainOptions, refuseUnknownMembers, refuseUnknownModelMembers, readOp
 import { canonicalKeyText, namesNoNumber, noNumberKeyReason } from './key-text.js';
 import { planCollection, planEntity, planJoinTable, refuseNameCollisions, verifyShape, compileIndexPath, canonicalOf, creationOrder } from './ddl.js';
 import { translatePatch } from './patch-sql.js';
-import { createQueryEngine, createQueryState, createEntityQueryEngine, createLoadEngine, refuseNonDocument, refuseOpaqueValues, refuseOpaqueExternals, liveComparedExternals } from './query.js';
+import { createQueryEngine, createQueryState, createEntityQueryEngine, createLoadEngine, refuseNonDocument, refuseOpaqueValues, refuseOpaqueExternals, liveComparedExternals, profileComparedExternals } from './query.js';
 import { sqliteDatabasePath } from './migration-target.js';
 import { CLOSED_UNDER, admitCursor, admitSyncCursor, createCursor, createSyncCursor, shareCursor } from './cursor.js';
 import { refuseUnsupportedPragmaKeys, resolvePragmaRequests, configurePragmas, PRAGMA_NAMES } from './pragmas.js';
@@ -3633,18 +3633,26 @@ export function openStore(model, options) {
           /**
            * A point read as the store's profile lets a caller see it: the row
            * of `name` that `read` found, or absent when the root's mandatory
-           * predicate does not keep it (a predicate naming an external keeps
-           * every row: a read binds none). Only the surfaces a caller reads
+           * predicate, bound to the read's own `externals`, does not keep it
+           * (pointReadFilter refuses a read that binds too few, and a root
+           * with a member allow-list). Only the surfaces a caller reads
            * through take it; the cores the store's own writes, captures and
            * rules read stay the stored row.
            * @param {string} name - the collection or entity read
            * @param {any} core - its core, whose `get` is the stored row
-           * @returns {(key: any) => any}
+           * @returns {(key: any, readOptions?: { externals?: any }) => any}
            */
           const profiledRead = (name, core) => {
-            const keeps = pointReadFilter(storeProfile, name, operators, zoneProvider);
-            return keeps === null ? (key) => core.get(key)
-              : (key) => chain(core.get(key), (doc) => (doc === undefined || keeps(doc) ? doc : undefined));
+            const judge = pointReadFilter(storeProfile, name, operators, zoneProvider,
+              (collections.get(name) ?? entities.get(name))?.docPath);
+            if (judge === null) return (key) => core.get(key);
+            const compared = profileComparedExternals(storeProfile, [name], operators ?? undefined);
+            const spelling = `${collections.has(name) ? 'collection' : 'entity'}('${name}').get`;
+            return (key, readOptions) => {
+              const keeps = judge(readOptions?.externals);
+              refuseOpaqueExternals(compared, readOptions?.externals, spelling);
+              return chain(core.get(key), (doc) => (doc === undefined || keeps(doc) ? doc : undefined));
+            };
           };
           const entityCoreFor = (name) => {
             let core = entityCores.get(name);
@@ -3796,7 +3804,7 @@ export function openStore(model, options) {
                   chain(core.create(doc), (made) => chain(attach(made, memberships), () => made)));
                 return chain(guard(() => (capture === null ? write() : capture.nest(write))), registerCreated);
               },
-              get: (key) => chain(read(key), (doc) =>
+              get: (key, readOptions) => chain(read(key, readOptions), (doc) =>
                 (doc === undefined ? undefined : tracker.register(name, doc))),
               update: (key, changes) => chain(core.update(key, changes), registerUpdated),
               delete: (key) => chain(core.delete(key), (done) => {
@@ -3830,7 +3838,7 @@ export function openStore(model, options) {
               link: (own, member, target) => tracker.link(name, own, member, target),
               unlink: (own, member, target) => tracker.unlink(name, own, member, target),
               noTracking: {
-                get: (key) => read(key),
+                get: (key, readOptions) => read(key, readOptions),
                 load: (spec, loadOptions) => loads.load(spec, loadOptions),
               },
             };
@@ -3849,12 +3857,12 @@ export function openStore(model, options) {
               if (handle === undefined) {
                 const ops = trackedOpsFor(name);
                 const untracked = Object.freeze({
-                  get: lift((key) => ops.noTracking.get(key)),
+                  get: lift((key, readOptions) => ops.noTracking.get(key, readOptions)),
                   load: lift((spec, loadOptions) => ops.noTracking.load(spec, loadOptions)),
                 });
                 handle = Object.freeze({
                   create: lift((doc) => ops.create(doc)),
-                  get: lift((key) => ops.get(key)),
+                  get: lift((key, readOptions) => ops.get(key, readOptions)),
                   update: lift((key, changes) => ops.update(key, changes)),
                   mutate: lift((document) => ops.mutate(document)),
                   delete: lift((key) => ops.delete(key)),
@@ -3904,12 +3912,12 @@ export function openStore(model, options) {
               if (handle === undefined) {
                 const ops = trackedOpsFor(name);
                 const untracked = Object.freeze({
-                  get: (key) => ops.noTracking.get(key),
+                  get: (key, readOptions) => ops.noTracking.get(key, readOptions),
                   load: (spec, loadOptions) => ops.noTracking.load(spec, loadOptions),
                 });
                 handle = Object.freeze({
                   create: (doc) => ops.create(doc),
-                  get: (key) => ops.get(key),
+                  get: (key, readOptions) => ops.get(key, readOptions),
                   update: (key, changes) => ops.update(key, changes),
                   delete: (key) => ops.delete(key),
                   load: (spec, loadOptions) => ops.load(spec, loadOptions),

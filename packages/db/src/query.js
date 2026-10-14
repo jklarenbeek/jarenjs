@@ -68,8 +68,8 @@ import {
 } from './udf.js';
 import { refuseCancelled } from './cancellation.js';
 import {
-  normalizeProfile, translateProfilePredicate, assertProfileRoots, memberDenial,
-  applyMandatoryPredicate, applyRowBound, SAFE_PROFILE,
+  floorProfile, translateProfilePredicate, assertProfileRoots, memberDenial,
+  applyMandatoryPredicate, applyRowBound, SAFE_PROFILE, predicateQuery,
 } from './profile.js';
 
 /**
@@ -725,13 +725,13 @@ function comparedExternals(root, predicate = null) {
  * @param {Iterable<string>} roots - the collections or entities read
  * @param {any} operators - the store's registered operators, or undefined
  */
-function profileComparedExternals(profile, roots, operators) {
+export function profileComparedExternals(profile, roots, operators) {
   if (profile === null) return [];
   const found = [];
   for (const root of roots) {
     const expression = profile.predicates[root];
     if (expression === undefined) continue;
-    const wrapper = { $for: { it: '$[*]' }, $where: expression, $return: '$it' };
+    const wrapper = predicateQuery(expression);
     found.push(...comparedExternals(analyzeQuery(wrapper, operators).root, root));
   }
   return found;
@@ -1114,6 +1114,11 @@ export function createQueryEngine(context) {
       // with it: each one binds a TYPED slot in the statement above
       seeks: (emitted.seeks ?? []).map((seek) => ({ ...seek, statement: null })),
       externalNames,
+      // the externals the profile's mandatory predicate binds in every
+      // statement of this entry, diverted or not
+      predicateExternals: mandatory === null ? [] : [...new Set(analyzeQuery(
+        predicateQuery(profile.predicates[collection.name]),
+        operators ?? undefined).externals.map((/** @type {any} */ ref) => ref.name))],
       compared,
       externalSlotKinds: externalSlotKinds(emitted.slots, plan.rank),
       // a literal probe is normalized once, here; an external one per
@@ -1354,6 +1359,17 @@ export function createQueryEngine(context) {
     }) ?? null;
   /** Must this call divert to the residual? */
   const mustDivert = (entry, externals) => divertingExternal(entry, externals) !== null;
+  /** Refuse a call that does not bind an external the profile's mandatory
+   * predicate reads, as the engine does (`JQ2006`) and the entity engine
+   * does (`JD0011`): the statement would bind it as NULL, or fail in the
+   * driver, and a diversion still runs the predicate in the database. */
+  const refuseUnboundPredicate = (entry, externals) => {
+    const missing = entry.predicateExternals.filter((name) => externals[name] === undefined);
+    if (missing.length === 0) return;
+    throw profileRefusal(`the profile's predicate for '${collection.name}' cannot bind `
+      + `${missing.map((name) => `'$${name}'`).join(', ')} for this call — it is missing, and a mandatory `
+      + 'predicate runs in the database or not at all');
+  };
 
   const rowsToDocs = (rows) => rows.map((row) => JSON.parse(row.doc));
 
@@ -1546,8 +1562,7 @@ export function createQueryEngine(context) {
    * @param {any} options
    */
   const resolveProfile = (options) => {
-    const resolved = options?.profile !== undefined
-      ? normalizeProfile(options.profile) : storeProfile;
+    const resolved = floorProfile(storeProfile, options?.profile, collection.docPath);
     assertProfileRoots(resolved, roots, collection.docPath);
     return resolved;
   };
@@ -1581,6 +1596,7 @@ export function createQueryEngine(context) {
     const { externals, strict, profile, pushdown } = callState(options);
     const entry = entryFor(document, strict, profile, pushdown);
     refuseOpaqueExternals(entry.compared, externals, spelling);
+    refuseUnboundPredicate(entry, externals);
 
     return chain(guardScan(entry), () => {
       const diverted = mustDivert(entry, externals);
@@ -1707,6 +1723,7 @@ export function createQueryEngine(context) {
     const { externals, strict, profile, pushdown } = callState(options);
     const entry = entryFor(document, strict, profile, pushdown);
     refuseOpaqueExternals(entry.compared, externals, spelling);
+    refuseUnboundPredicate(entry, externals);
     const classified = cursorClass(entry, externals);
     refuseBuffered(options, classified, collection.docPath);
     const signal = options?.signal;
@@ -2043,7 +2060,7 @@ function externalOf(pred) {
  * @returns {{ filter: any } | { refusal: { construct: string, reason: string } } | { error: Error }}
  */
 function planEntityWhere(expression, entity, entityMapping, analyzeOpts) {
-  const wrapper = { $for: { it: '$[*]' }, $where: expression, $return: '$it' };
+  const wrapper = predicateQuery(expression);
   let analysis;
   try {
     analysis = analyzeQuery(wrapper, analyzeOpts);
@@ -2141,11 +2158,10 @@ export function createEntityQueryEngine(context) {
   // producer holding one set can follow a hop into another root
   const relations = relationTables(entities);
 
-  /** The switches one call resolves: the profile per call replaces the
-   * store's, normalized over the safe defaults, as on a collection. */
+  /** The switches one call resolves: the profile per call narrows the
+   * store's ({@link floorProfile}), as on a collection. */
   const callState = (options) => {
-    const profile = options?.profile !== undefined
-      ? normalizeProfile(options.profile) : storeProfile;
+    const profile = floorProfile(storeProfile, options?.profile, '/entities');
     assertProfileRoots(profile, roots, '/entities');
     return {
       externals: options?.externals ?? {},
@@ -3642,9 +3658,9 @@ export function createLoadEngine(context, entityName) {
   };
   /** The profile one call resolves, as on the query engines. */
   const profileOf = (options) => {
-    const resolved = options?.profile !== undefined
-      ? normalizeProfile(options.profile) : storeProfile;
-    assertProfileRoots(resolved, roots, entities.get(entityName)?.docPath);
+    const docPath = entities.get(entityName)?.docPath;
+    const resolved = floorProfile(storeProfile, options?.profile, docPath ?? '/entities');
+    assertProfileRoots(resolved, roots, docPath);
     refuseMemberPolicy(resolved);
     return resolved;
   };

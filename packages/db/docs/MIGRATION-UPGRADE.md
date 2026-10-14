@@ -2067,7 +2067,8 @@ number `1` no longer do where a string-first member's `TEXT` column made them on
   snapshot, and a tracked `put` of its key still replaces the stored row. A
   predicate that names an external (`profile.externals`) cannot be judged by a
   read that binds none, and `get` takes no options: that root's `get` answers
-  as before, and its rows are read by a query that supplies the external. A root
+  as before, and its rows are read by a query that supplies the external
+  (§29 binds it from the read's own `externals`). A root
   the profile keeps no predicate for, and a store opened with none, read as
   before, and the store's own writes still read the stored row.
 
@@ -2306,6 +2307,40 @@ into a new database created with the default UTF-8 encoding, and open that.
   ([POSTGRESQL](POSTGRESQL.md)). Everything within ±(2^53 − 1), every number
   the store wrote, and every `number` member read as before; code that read
   such a row repairs the stored value.
+
+## 29. A store profile bounds every read
+
+- A per-call `profile` on a store opened with one REPLACED the store's for
+  that call, normalized over the `'safe'` defaults, so
+  `execute(doc, { profile: { maxRows: 50 } })` dropped the store's mandatory
+  predicates and allow-lists and answered every tenant's rows. The store's
+  profile is now a floor under the call's
+  ([MODEL-FORMAT §8](MODEL-FORMAT.md#8-the-safe-execution-profile)): a member
+  the call leaves out is the store's, the call's predicates are conjoined with
+  the store's, and a member that would widen the store's — a larger `maxRows`,
+  engine limit or graph cap, `null` for a bound the store sets, a name outside
+  one of its lists, `refuseFullScan: false` where it refuses, or a per-call
+  `'safe'` over a narrower store — is now refused `JD0011`, naming the member
+  and the store's value. Code that widened a bound per call opens the store
+  with the wider profile and narrows it per call; a reader that must see past
+  the store's predicate (a migration, an operator's tool) opens a store without
+  one. A store opened with no profile runs a call's profile as before.
+- `get` of a collection or an entity whose root's predicate names an external
+  took no options and answered the row of any key. It now takes
+  `{ externals }`, binds the predicate with them and answers `undefined` for a
+  row the predicate does not keep; a `get` that leaves such an external unbound,
+  or binds it to `null`, a boolean or a list holding one, is refused `JD0011`
+  whether its key holds a row or not, and one a comparison would read as `{}`
+  is `JD0041`, as on `execute`. Pass the externals the store's queries pass:
+  `get(key, { externals: { tenant } })`.
+- `get` of a root the profile's member allow-list names answered the whole
+  document, members the list does not allow included; it is now refused
+  `JD0011`, as a graph `load` of such a root is. Read the allowed members
+  through a query.
+- A collection `execute` or `query` that left unbound an external the store
+  predicate reads failed in the SQLite driver with an uncoded bind error, and
+  answered no rows on PostgreSQL, where the query engine refuses an unbound
+  external (`JQ2006`); it is now refused `JD0011`, as on an entity.
 
 ## Measured costs
 

@@ -507,18 +507,18 @@ what each does is its own documentation's job
   those reads measurably slower for text that never holds one, and an
   `$ends-with` that compares bytes to survive a U+0000 answers false under
   `$not` for the empty string; both mechanisms were tried and withdrawn.
-- [ ] **A store profile does not yet bound every read.** A point read (`get`)
-  applies the root's mandatory predicate when it names no external
-  ([MODEL-FORMAT §8](../packages/db/docs/MODEL-FORMAT.md)); a root whose
-  predicate names an external still answers the row of any key, because `get`
-  takes no per-call externals (or `profile`). `store.observe`, capture and
-  replication feeds deliver every tenant's records, a tracked `put`/`update` of
-  a key `get` hides still writes the stored row, and a per-call `profile` on
-  `execute`, `query` and `cursor` replaces the store's mandatory predicate
-  instead of narrowing it. Wanted: per-call options on `get` that supply
-  externals, the store's profile kept as a floor under a per-call one (or a
-  store option that pins it), and the feeds named as host surfaces with their
-  own bound.
+- [ ] **A diverted collection call binds NULL for the store predicate's
+  externals.** Under a profile predicate `$eq ['$it.tenant','$tenant']`, a call
+  the store diverts to a full scan binds only its literal slots: with
+  `externals: { tenant: 'a', x: true }` and `$where: { $not: { $eq: ['$it.id',
+  '$x'] } }` it answers no row (with and without pushdown) where `"a1"` is
+  right; it fails closed, but answers wrong.
+- [ ] **A boolean tenant external answers differently per engine.** A store
+  predicate's external bound to `true` raises an uncoded driver error on
+  SQLite, answers `[]` on PostgreSQL and keeps the matching rows in the
+  engine, where the entity engine refuses `JD0011` and MODEL-FORMAT §8 claims
+  `JD0011` on every engine. Wanted: one answer, decided by what string data
+  answers right ([MODEL-FORMAT §8](../packages/db/docs/MODEL-FORMAT.md)).
 - [ ] **Federation merge strategy and spilling.** Connected N-way joins and
   nested fluent joins now have an explicit fetch order and combined admission
   credits (QUERY-PEN §12.1). A merge strategy still needs a provider ordering
