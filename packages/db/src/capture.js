@@ -203,6 +203,19 @@ const pointerOf = (table, token, path = '') =>
 /** Whether a column derives from the document's instant string. @param {any} column */
 const derivedEpoch = (column) => column.role === 'epoch' || column.epoch === true;
 
+/**
+ * The pointer token a row goes by: an instant key kept as an epoch column as
+ * its document spells the instant — the string journal capture records it
+ * under, never the epoch the column holds (LIVE-FORMAT §2) — and every other
+ * key part as `parts` holds it. One instant has many spellings, so a write
+ * that stores a row again under another one renames its pointer.
+ * @param {TableShape} shape @param {any} doc @param {any[]} parts
+ */
+const documentToken = (shape, doc, parts) => keyToken(shape.keyIndexes.map((index, i) => {
+  const name = shape.columns[index].name;
+  return shape.columns[index].epoch === true && typeof doc?.[name] === 'string' ? doc[name] : parts[i];
+}));
+
 /** Decode one stored column value to its DOCUMENT-level value. */
 function documentValue(column, value) {
   if (value === null || value === undefined) return value;
@@ -255,25 +268,30 @@ export function translateOperations(connection, shapes, operations) {
     }
 
     // an instant key kept as an epoch column is rendered as its document
-    // keeps it, the string journal capture records it under — never as the
-    // epoch the column holds (LIVE-FORMAT §2)
+    // keeps it ({@link documentToken})
     const epochKeyed = shape.keyIndexes.some((index) => shape.columns[index].epoch === true);
     /** The row's key token, read from its document. @param {any} doc */
-    const tokenOf = (doc) => keyToken(shape.keyIndexes.map((index, i) => {
-      const name = shape.columns[index].name;
-      return shape.columns[index].epoch === true && typeof doc?.[name] === 'string' ? doc[name] : keyValues[i];
-    }));
-    /** The document an update leaves stored, for its key token: the
-     * changeset carries the document only where the update changed it. */
-    const storedDocument = () => {
-      const docColumn = shape.columns[shape.docIndex].name;
+    const tokenOf = (doc) => documentToken(shape, doc, keyValues);
+    /** Read the row an update leaves stored by its key: `selection` is the
+     * list the statement selects. @param {string} selection */
+    const readStored = (selection) => {
       const q = connection.dialect.quoteIdentifier;
       const where = shape.keyIndexes.map((index, i) =>
         `${q(shape.columns[index].name)} = ${connection.dialect.parameterRef(i + 1, 'v')}`).join(' AND ');
-      return chain(useStatementOnce(connection,
-        `SELECT ${connection.dialect.jsonText(q(docColumn))} AS ${q('t')} FROM ${q(operation.table)} WHERE ${where}`,
-        (statement) => statement.get(keyValues)), (row) => (row === undefined ? null : JSON.parse(row.t)));
+      return useStatementOnce(connection, `SELECT ${selection} FROM ${q(operation.table)} WHERE ${where}`,
+        (statement) => statement.get(keyValues));
     };
+    /** The document an update leaves stored, for its key token: the
+     * changeset carries the document only where the update changed it. */
+    const storedDocument = () => {
+      const q = connection.dialect.quoteIdentifier;
+      return chain(readStored(`${connection.dialect.jsonText(q(shape.columns[shape.docIndex].name))} AS ${q('t')}`),
+        (row) => (row === undefined ? null : JSON.parse(row.t)));
+    };
+    /** The whole row an update leaves stored, as its document. */
+    const storedRow = () => chain(
+      readStored(shape.columns.map((column) => connection.dialect.quoteIdentifier(column.name)).join(', ')),
+      (row) => buildDocument(shape.columns.map((column) => row[column.name])));
 
     const buildDocument = (values) => chain(
       jsonOf(values[shape.docIndex]), (doc) => {
@@ -343,6 +361,16 @@ export function translateOperations(connection, shapes, operations) {
     return chain(jsonOf(operation.oldValues[shape.docIndex]), (oldDoc) =>
       chain(jsonOf(newDocBlob), (newDoc) => {
         const rowToken = epochKeyed ? tokenOf(oldDoc) : token;
+        if (epochKeyed && tokenOf(newDoc) !== rowToken) {
+          // stored again under another spelling of its instant: the row goes
+          // by another pointer, so it is removed under the one it had and
+          // added, whole, under the new one — as journal capture records it
+          ops.push({ op: 'remove', path: pointerOf(operation.table, rowToken) });
+          return chain(storedRow(), (doc) => {
+            ops.push({ op: 'add', path: pointerOf(operation.table, tokenOf(newDoc)), value: doc });
+            return null;
+          });
+        }
         columnOps(rowToken);
         const prefix = pointerOf(operation.table, rowToken);
         for (const op of createJSONPatch(oldDoc ?? {}, newDoc ?? {})) {
@@ -585,7 +613,7 @@ export function createCaptureEngine(options) {
       const existing = netted.get(key);
       if (existing === undefined) {
         netted.set(key, {
-          table: entry.table, token,
+          table: entry.table, token, parts: entry.keyParts,
           before: entry.before, after: entry.after,
         });
         order.push(key);
@@ -607,6 +635,17 @@ export function createCaptureEngine(options) {
         ops.push({ op: 'remove', path: prefix });
       }
       else {
+        const shape = shapes.get(entry.table);
+        const parts = entry.parts;
+        const from = shape === undefined ? entry.token : documentToken(shape, entry.before, parts);
+        const to = shape === undefined ? entry.token : documentToken(shape, entry.after, parts);
+        if (from !== to) {
+          // stored again under another spelling of its instant (see the
+          // session translation): removed under one pointer, added under the other
+          ops.push({ op: 'remove', path: pointerOf(entry.table, from) },
+            { op: 'add', path: pointerOf(entry.table, to), value: entry.after });
+          continue;
+        }
         for (const op of createJSONPatch(entry.before, entry.after)) {
           ops.push({ ...op, path: `${prefix}${op.path}`,
             ...(op.from !== undefined ? { from: `${prefix}${op.from}` } : {}) });

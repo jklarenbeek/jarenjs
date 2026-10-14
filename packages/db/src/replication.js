@@ -348,6 +348,13 @@ export function createReplicationEngine(options) {
         const after = entry.patch.length === 1 && entry.patch[0].op === 'remove' && entry.patch[0].path === ''
           ? null : applyJSONPatch(old.value, entry.patch);
         return chain(rows.read(entry.table, entry.key), (actual) => {
+          // a removal that still reads its row: the transaction stored it
+          // again under another spelling of its key (an instant's), which a
+          // replica's history names as another row
+          if (after === null && actual != null) {
+            fail('JD2104', `the row '${entry.key}' of '${entry.table}' was stored again under another spelling of its `
+              + 'key, which replication cannot carry — store it under the spelling it holds');
+          }
           if (!equal(actual ?? null, after)) fail('JD2104', 'capture disagrees with the durable replica before-image');
           // a row stored again with the document it had (deleted and stored
           // again, a membership unlinked and linked again) changed nothing a

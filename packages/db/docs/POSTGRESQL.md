@@ -257,7 +257,9 @@ integer past 2^53 exactly. An `integer` member read from its column is refused
 `JD2003` (class `data`, the reason SQLite's refusal of an integer its driver
 cannot hand over carries) when the JavaScript number it reads as would round
 it: the number is neither the stored integer nor spelled by its digits, as
-`9007199254740993` written by trusted SQL is. Every integer within
+`9007199254740993` written by trusted SQL is — kept with a scale too
+(`9007199254740993.0`, which a retype from text leaves), since the digits
+before the point are the integer. Every integer within
 ±(2^53 − 1), every integer a double holds exactly and every integer a
 JavaScript number wrote (2^60 is stored as `1152921504606847000`) reads as the
 number, so the store's own data reads as before. SQLite refuses every integer

@@ -2171,10 +2171,23 @@ the native statement, each root the residual fetches, the load's root
 and every include subquery over that entity. A predicate may name an
 external, which `execute()` binds from the call's `externals` — so it
 isolates tenants only when the host, not the caller, supplies those
-externals; one the database cannot bind — a missing one, a boolean, or a
-list holding a `null` or a boolean — is refused `JD0011` rather than
-dropped from the fetch, and one the predicate would compare as `{}` (a
-`Date`, a `Map`) is refused `JD0041` (§10.1). A load binds none, so
+externals; one the database cannot bind as the engine compares it is
+refused `JD0011` rather than dropped from the fetch: a missing one; on an
+entity, a boolean or a list holding a `null` or a boolean; on a
+collection, a `null`, a boolean, an object or an array — alone, or as an
+item of a membership list — that an equality, an inequality or the
+membership compares with a member that can hold one (its schema type
+admits `null` or `boolean`, or names no scalar type), where the engine
+matches the stored value and the database does not. Against a member that
+cannot hold it the comparison matches nothing on either side, and the call
+answers — except that on SQLite a boolean, an object or an array in place
+of a single value still fails in the driver, uncoded. One the predicate
+would compare as `{}` (a
+`Date`, a `Map`) is refused `JD0041` (§10.1). `explain()` given externals
+refuses what the run it explains refuses; given none, it answers the plan
+with every external unbound. `all()` binds no externals, so under a
+predicate that names one it is refused `JD0011`: read the rows with
+`query('$[*]', { externals })`. A load binds none, so
 a load under such a profile refuses `JD0032`, as a load whose own `where`
 names one does. `maxRows` bounds every
 fetch on every engine (`JD2007`), the residual's input rows included:

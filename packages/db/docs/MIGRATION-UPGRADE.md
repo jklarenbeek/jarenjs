@@ -2446,6 +2446,62 @@ where it wrote `5.0`). The previous release opens such a store and reads those
 values as the text they hold, and it runs a migration document this release
 planned as written.
 
+## 33. A key recorded under its own spelling, and four answers the engine gives
+
+- A collection row written by another spelling of its numeric key —
+  `delete('16.0')` or `put(doc, '16.0')` of the row stored under 16, a key
+  column that is numeric — was recorded under the spelling the call named it
+  by: journal capture recorded `remove /t/16.0`, a pointer no row has, so a
+  mirror applying the feed failed (`JP2001`) and a replicated delete refused its
+  transaction `JD0060`; and in session capture such a delete followed by a
+  store of the same document in one transaction left no record. Both modes now
+  record the row under the key it is stored under (`remove /t/16`, and the
+  `replace` a row stored again carries), as they record an entity's
+  ([LIVE-FORMAT §3](LIVE-FORMAT.md#3-the-op-mapping)). `put` still answers the
+  key as the call passed it, and a text key column holds `'16.0'` as a key of
+  its own, as before.
+- An entity row whose instant key is kept as an epoch column, stored again
+  under another spelling of the instant — deleted as `2026-03-01T00:00:00.000Z`
+  and created as `2026-03-01T00:00:00Z` in one transaction, or `put` so by a
+  unit of work — was recorded as an update under the pointer it had: session
+  capture recorded `replace /E/2026-03-01T00:00:00.000Z/at` beside a `replace`
+  under the new pointer, and a unit of work's save recorded its change under the
+  new pointer alone, so a mirror applying the feed failed (`JP2001`) at that
+  record or the next. Both modes now record `remove` at the pointer the row had
+  and `add` at the new one with the whole document. A replicating store, which
+  committed such a session-mode transaction and sent an envelope its replica
+  refused (`JD2104`), or under journal capture refused it with an unnamed
+  `JD2104` or failed `JP2001`, now refuses it `JD2104` in either mode, naming
+  the row, and writes nothing
+  ([REPLICATION-FORMAT](REPLICATION-FORMAT.md)): store the row under the
+  spelling it holds.
+- A collection store profile predicate bound to a `null`, a boolean, an object
+  or an array — alone, or as an item of a membership list — compared with a
+  member that can hold one answered as if no row held it: under
+  `{ $eq: ['$it.tenant', '$tenants[*]'] }`, `tenants: ['a', null]` answered the
+  `'a'` rows without the `null` ones, and on SQLite a boolean failed in the
+  driver. `execute`, `query` and `explain` now refuse it `JD0011`
+  ([MODEL-FORMAT §8](MODEL-FORMAT.md#8-the-safe-execution-profile)). Against a
+  member that cannot hold it (`type: 'string'` and `null`) the call answers as
+  before. Bind the tenant as a string or a number.
+- `explain()` given externals that leave a store profile predicate's external
+  unbound, or bind it to a value the run refuses, reported the plan of a run
+  that never happens (`mode: 'native'` on a collection, `'set'` on an entity and
+  the store root); it now refuses `JD0011`, as `execute` does. `explain()` with
+  no externals reports the plan as before. `all()` under such a predicate is
+  still refused `JD0011`, and the reason now names `query('$[*]', { externals })`.
+- An entity `$where` comparing a member reached through a related entity — a
+  `$count`, `$exists` or `$empty` of a hop, or a comparison of the member it
+  returns — with a string literal holding a lone surrogate compared U+FFFD in
+  its place and answered other rows than the engine; the conjunct now runs in
+  the engine (`predicate.loneSurrogate`), as a comparison on the root does, so
+  `explain()` names `set` where it named `native` and `strict: true` refuses it
+  `JD0010`.
+- On PostgreSQL an entity `integer` member whose `numeric` column holds an
+  integer past ±(2^53 − 1) with a scale — `9007199254740993.0`, which a retype
+  from text leaves — read back as the rounded number; it is now refused
+  `JD2003`, as the same integer without the scale is (§28).
+
 ## Measured costs
 
 Exact identity stores complete canonical documents and model endpoints, so

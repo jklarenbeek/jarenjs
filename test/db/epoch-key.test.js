@@ -18,6 +18,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { normalizeEntities, openStore, planModelMigration, sqliteDialect } from '@jarenjs/db';
 import { nodeDriver } from '@jarenjs/db/node';
+import { applyJSONPatch } from '@jarenjs/json/patch';
 import { ENGINES, skipFor, withStore, counted } from './store-core-engines.js';
 
 /** @param {boolean} epoch */
@@ -136,6 +137,78 @@ describe('an instant key kept as an epoch column', () => {
     assert.deepEqual(seen.session, CAPTURED);
   });
 
+  it('a row stored again under another spelling of its instant is removed under the one it had and added under the new one', async () => {
+    const plain = { $model: '0.1', entities: { E: { schema: { type: 'object', properties: { at: instantKey(), n: { type: 'integer' } } } } } };
+    for (const how of ['delete and create', 'put']) {
+      for (const mode of ['session', 'journal']) {
+        const store = await openStore(plain, { driver: nodeDriver(), capture: { mode } });
+        try {
+          /** @type {any[]} */
+          const patches = [];
+          store.observe((/** @type {any} */ record) => patches.push(record.patch));
+          const rows = store.entity('E');
+          await rows.create({ at: INSTANT, n: 1 });
+          if (how === 'put') {
+            rows.put({ ...(await rows.get(INSTANT)), at: SHORT });
+            await store.saveChanges();
+          }
+          else {
+            await store.transaction(async (/** @type {any} */ tx) => {
+              await tx.entity('E').delete(INSTANT);
+              await tx.entity('E').create({ at: SHORT, n: 1 });
+            });
+          }
+          await rows.update(EPOCH, { n: 5 });
+          assert.deepEqual(patches.map((patch) => opsOf({ patch })), [
+            [`add /E/${INSTANT} {"at":"${INSTANT}","n":1}`],
+            [`add /E/${SHORT} {"at":"${SHORT}","n":1}`, `remove /E/${INSTANT}`],
+            [`replace /E/${SHORT}/n 5`],
+          ], `${how}, ${mode}`);
+          // a mirror that applies every record holds what the store holds
+          let mirror = { E: {} };
+          for (const patch of patches) mirror = applyJSONPatch(mirror, patch);
+          assert.deepEqual(mirror, { E: { [SHORT]: { at: SHORT, n: 5 } } }, `${how}, ${mode}`);
+        }
+        finally { await store.close(); }
+      }
+    }
+  });
+
+  it('a replicated store refuses a row stored again under another spelling of its instant, and keeps replicating', async () => {
+    const plain = { $model: '0.1', entities: { E: { schema: { type: 'object', properties: { at: instantKey(), n: { type: 'integer' } } } } } };
+    for (const how of ['delete and create', 'put']) {
+      for (const mode of ['session', 'journal']) {
+        const store = await openStore(plain, { driver: nodeDriver(), capture: { mode }, replication: { replica: 'a' } });
+        const replica = await openStore(plain, { driver: nodeDriver(), replication: { replica: 'b' } });
+        try {
+          const rows = store.entity('E');
+          await rows.create({ at: INSTANT, n: 1 });
+          const respell = how === 'put'
+            ? async () => {
+              rows.put({ ...(await rows.get(INSTANT)), at: SHORT });
+              await store.saveChanges();
+            }
+            : () => store.transaction(async (/** @type {any} */ tx) => {
+              await tx.entity('E').delete(INSTANT);
+              await tx.entity('E').create({ at: SHORT, n: 1 });
+            });
+          await assert.rejects(respell, { code: 'JD2104', reason: `the row '${INSTANT}' of 'E' was stored again under another `
+            + 'spelling of its key, which replication cannot carry — store it under the spelling it holds' }, `${how}, ${mode}`);
+          assert.deepEqual(await rows.asNoTracking().load({}), [{ at: INSTANT, n: 1 }], `${how}, ${mode}`);
+          await rows.create({ at: '2026-04-01T00:00:00Z', n: 2 });
+          for (const envelope of (await store.replication.page({ after: 0 })).items)
+            assert.equal((await replica.replication.apply(envelope)).status, 'applied', `${how}, ${mode}`);
+          assert.deepEqual(await replica.entity('E').asNoTracking().load({}),
+            [{ at: INSTANT, n: 1 }, { at: '2026-04-01T00:00:00Z', n: 2 }], `${how}, ${mode}`);
+        }
+        finally {
+          await replica.close();
+          await store.close();
+        }
+      }
+    }
+  });
+
   it('a numeric key deleted by another spelling of it is recorded under its own in both modes', async () => {
     const numbered = { $model: '0.1', entities: { N: { schema: { type: 'object', properties: {
       id: { type: 'integer', 'x-entity': { key: true } } } } } } };
@@ -155,6 +228,117 @@ describe('an instant key kept as an epoch column', () => {
       finally { await store.close(); }
     }
   });
+
+  it('a collection row written by another spelling of its numeric key is recorded under its own in both modes', async () => {
+    const keyed = { $model: '0.1', collections: { t: { key: '/n',
+      schema: { type: 'object', properties: { n: { type: 'integer' }, p: { type: 'integer' } } } } } };
+    const numbered = { $model: '0.1', collections: { t: { key: null, identity: 'integer',
+      schema: { type: 'object', properties: { p: { type: 'integer' } } } } } };
+    const named = { $model: '0.1', collections: { t: { key: '/n',
+      schema: { type: 'object', properties: { n: { type: 'string' }, p: { type: 'integer' } } } } } };
+    for (const mode of ['session', 'journal']) {
+      /** @param {any} definition @param {(t: any, store: any) => Promise<void>} work */
+      const recorded = async (definition, work) => {
+        const store = await openStore(definition, { driver: nodeDriver(), capture: { mode }, replication: { replica: 'a' } });
+        const replica = await openStore(definition, { driver: nodeDriver(), replication: { replica: 'b' } });
+        try {
+          const records = [];
+          store.observe((/** @type {any} */ record) => records.push(opsOf(record)));
+          await work(store.collection('t'), store);
+          for (const envelope of (await store.replication.page({ after: 0 })).items)
+            assert.equal((await replica.replication.apply(envelope)).status, 'applied', mode);
+          assert.deepEqual(await replica.collection('t').all(), await store.collection('t').all(), mode);
+          return records;
+        }
+        finally {
+          await replica.close();
+          await store.close();
+        }
+      };
+      assert.deepEqual(await recorded(keyed, async (t) => {
+        await t.insert({ n: 16, p: 1 });
+        assert.equal(await t.delete('16.0'), true);
+      }), [['add /t/16 {"n":16,"p":1}'], ['remove /t/16']], mode);
+      // deleted and stored again in one transaction: the row moved to the end, under its own key
+      assert.deepEqual(await recorded(keyed, async (t, store) => {
+        for (const n of [16, 17]) await t.insert({ n, p: 1 });
+        await store.transaction(async (/** @type {any} */ tx) => {
+          await tx.collection('t').delete('16.0');
+          await tx.collection('t').insert({ n: 16, p: 1 });
+        });
+      }), [['add /t/16 {"n":16,"p":1}'], ['add /t/17 {"n":17,"p":1}'], ['replace /t/16 {"n":16,"p":1}']], mode);
+      assert.deepEqual(await recorded(numbered, async (t) => {
+        assert.equal(await t.insert({ p: 1 }), 1);
+        await t.put({ p: 2 }, '1.0');
+        assert.equal(await t.delete(' 1'), true);
+      }), [['add /t/1 {"p":1}'], ['replace /t/1/p 2'], ['remove /t/1']], mode);
+      // a text key column holds '16.0' as a key of its own
+      assert.deepEqual(await recorded(named, async (t) => {
+        await t.insert({ n: '16.0', p: 1 });
+        assert.equal(await t.delete('16'), false);
+        assert.equal(await t.delete('16.0'), true);
+      }), [['add /t/16.0 {"n":"16.0","p":1}'], ['remove /t/16.0']], mode);
+    }
+  });
+
+  for (const engine of ENGINES) {
+    it(`on ${engine}, the journal records an instant row stored again under another spelling as removed and added, and replication refuses it`,
+      { skip: skipFor(engine) }, async () => {
+        const plain = { $model: '0.1', entities: { E: { schema: { type: 'object', properties: { at: instantKey(), n: { type: 'integer' } } } } } };
+        for (const how of ['delete and create', 'put']) {
+          for (const replicated of [false, true]) {
+            await withStore(engine, plain, async (store) => {
+              /** @type {any[]} */
+              const patches = [];
+              store.observe((/** @type {any} */ record) => patches.push(record.patch));
+              const rows = store.entity('E');
+              await rows.create({ at: INSTANT, n: 1 });
+              const respell = how === 'put'
+                ? async () => {
+                  rows.put({ ...(await rows.get(INSTANT)), at: SHORT });
+                  await store.saveChanges();
+                }
+                : () => store.transaction(async (/** @type {any} */ tx) => {
+                  await tx.entity('E').delete(INSTANT);
+                  await tx.entity('E').create({ at: SHORT, n: 1 });
+                });
+              if (replicated) {
+                await assert.rejects(respell, { code: 'JD2104', reason: `the row '${INSTANT}' of 'E' was stored again under `
+                  + 'another spelling of its key, which replication cannot carry — store it under the spelling it holds' }, how);
+                assert.deepEqual(await rows.asNoTracking().load({}), [{ at: INSTANT, n: 1 }], how);
+                return;
+              }
+              await respell();
+              await rows.update(EPOCH, { n: 5 });
+              assert.deepEqual(patches.map((patch) => opsOf({ patch })), [
+                [`add /E/${INSTANT} {"at":"${INSTANT}","n":1}`],
+                [`add /E/${SHORT} {"at":"${SHORT}","n":1}`, `remove /E/${INSTANT}`],
+                [`replace /E/${SHORT}/n 5`],
+              ], how);
+              let mirror = { E: {} };
+              for (const patch of patches) mirror = applyJSONPatch(mirror, patch);
+              assert.deepEqual(mirror, { E: { [SHORT]: { at: SHORT, n: 5 } } }, how);
+            }, { capture: { mode: 'journal' }, ...(replicated ? { replication: { replica: 'a' } } : {}) });
+          }
+        }
+      });
+  }
+
+  for (const engine of ENGINES) {
+    it(`on ${engine}, the journal records a collection row deleted by another spelling of its key under its own`,
+      { skip: skipFor(engine) }, async () => {
+        const keyed = { $model: '0.1', collections: { t: { key: '/n',
+          schema: { type: 'object', properties: { n: { type: 'integer' }, p: { type: 'integer' } } } } } };
+        await withStore(engine, keyed, async (store) => {
+          const records = [];
+          store.observe((/** @type {any} */ record) => records.push(opsOf(record)));
+          const t = store.collection('t');
+          await t.insert({ n: 16, p: 1 });
+          assert.equal(await t.delete('16.0'), true);
+          assert.deepEqual(records, [['add /t/16 {"n":16,"p":1}'], ['remove /t/16']]);
+        }, { capture: { mode: 'journal' } });
+      });
+  }
 
   for (const engine of ENGINES) {
     describe(`on ${engine}`, { skip: skipFor(engine) }, () => {

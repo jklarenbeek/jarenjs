@@ -185,7 +185,10 @@ A string literal reaches the database through the driver as UTF-8, which has no
 spelling for a lone surrogate: it arrives as U+FFFD and the database compares that
 in its place, so a comparison or a string operator over one stays in the engine
 (`predicate.loneSurrogate`; on SQLite it runs as a registered function, which reads
-the literal as written), as does a disjunction that holds one. PostgreSQL's text and
+the literal as written), as does a disjunction that holds one. An entity conjunct
+that holds one inside a hop to a related entity (a `$count`, `$exists` or `$empty` of
+the hop, or a comparison of the member it returns) stays in the engine on both
+dialects. PostgreSQL's text and
 jsonb hold no U+0000, so there a literal holding one, or a membership list item
 holding U+0000 or a lone surrogate, sends a collection's document to the engine
 (`bind.serverText`); such a list rides the statement on SQLite, whose JSON reads the

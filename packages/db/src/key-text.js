@@ -44,6 +44,21 @@ export function namesNoNumber(key) {
 }
 
 /**
+ * The value a key part names under a NUMERIC key column: decimal text is
+ * the number it spells, so `'16'`, `' 16'`, `'16.0'` and `16` are one key
+ * wherever one is filed, compared or recorded. Text that names no number,
+ * or a number no double holds exactly, stays as it is, as does every other
+ * part.
+ * @param {unknown} part
+ * @returns {unknown}
+ */
+export function numericKeyValue(part) {
+  if (typeof part !== 'string' || namesNoNumber(part)) return part;
+  const value = Number(part);
+  return !Number.isFinite(value) || (Number.isInteger(value) && !Number.isSafeInteger(value)) ? part : value;
+}
+
+/**
  * Why a write refuses a key that {@link namesNoNumber} under a numeric key
  * column (`JD2002`, before any statement, on every engine): no read could
  * find the row it wrote, and PostgreSQL would store `'0x10'` under 16 —

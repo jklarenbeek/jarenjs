@@ -22,12 +22,17 @@ values out of documents that replicate to PostgreSQL. Drivers without `changeCap
 buffered cursor mode, refuse at open. Both capture modes record the rows a delete's foreign keys
 remove or null and the membership rows of every row it removes, so models with cascading and set-null
 relations replicate in either mode, and an envelope whose side effects on the replica are absent
-from its operations rolls back (`JD2104`). A journal origin records a deleted row under the key the
-stored row holds, so a delete by another spelling of its key — `'16.0'` or `'016'` for an integer
+from its operations rolls back (`JD2104`). A journal origin records a deleted row, an entity's or a
+collection's, under the key the stored row holds, so a delete by another spelling of its key — `'16.0'` or `'016'` for an integer
 key, `'2026-03-01T00:00:00Z'` or the epoch for an instant key kept as an epoch column and created as
 `'2026-03-01T00:00:00.000Z'` — replicates as session capture's does; such a delete used to refuse
 its replicated transaction `JD0060`. A unit-of-work removal of a row it never read has only the key
 it was given, and by another spelling still refuses `JD0060`, where session capture commits it.
+A row stored again under another spelling of its instant key — deleted as
+`'2026-03-01T00:00:00.000Z'` and created as `'2026-03-01T00:00:00Z'` in one transaction, or `put` so
+by a unit of work — goes by another pointer ([LIVE-FORMAT §3](LIVE-FORMAT.md#3-the-op-mapping)),
+which a replica's history names as another row: the transaction refuses `JD2104` in either mode and
+writes nothing; store it under the spelling it holds.
 A row the transaction leaves as the replica holds it — deleted and stored again with the document it
 had, or a membership unlinked and linked again — is no operation, and a transaction of only such rows
 writes no envelope: rows replicate without their order. Under journal capture an `unlink` and `link`

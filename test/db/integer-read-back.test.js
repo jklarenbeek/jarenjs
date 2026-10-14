@@ -82,6 +82,25 @@ describe('a stored integer a JavaScript number would round', () => {
     });
   }
 
+  it('on postgres, the integer stored with a scale is refused as the one without', { skip: skipFor('postgres') }, async () => {
+    await withRawWriter('postgres', async (store, raw) => {
+      const set = store.entity('T');
+      await set.create({ id: 'r', v: 1, n: 1 });
+      for (const value of ['9007199254740993.0', '-9007199254740993.00']) {
+        await raw(`UPDATE "T" SET "v" = ${value}`);
+        await assert.rejects(async () => set.asNoTracking().get('r'), (error) => {
+          assert.deepEqual({ code: error.code, cause: error.cause?.code }, { code: 'JD2003', cause: 'ERR_OUT_OF_RANGE' });
+          assert.equal(error.reason, 'a stored integer cannot be represented exactly as a JavaScript number: '
+            + `Value is too large to be represented as a JavaScript number: ${value.replace(/\.0+$/, '')}`);
+          return true;
+        });
+      }
+      // a safe integer with a scale reads as the integer, and a number column as the nearest double
+      await raw('UPDATE "T" SET "v" = 12.0, "n" = 9007199254740993.0');
+      assert.deepEqual(await set.asNoTracking().get('r'), { id: 'r', v: 12, n: 9007199254740992 });
+    });
+  });
+
   for (const engine of ENGINES) {
     it(`on ${engine}, a number column reads it as the nearest double`, { skip: skipFor(engine) }, async () => {
       await withRawWriter(engine, async (store, raw) => {

@@ -105,3 +105,47 @@ describe('a string literal the database would read as another string', () => {
     });
   });
 });
+
+const RELATED = {
+  $model: '0.1',
+  entities: {
+    User: { schema: { type: 'object', required: ['id'], properties: { id: { type: 'string', 'x-entity': { key: true } },
+      meta: { type: 'object', properties: { n: { type: 'string' } } } } } },
+    Post: { schema: { type: 'object', required: ['pid'], properties: { pid: { type: 'integer', 'x-entity': { key: true } },
+      authorId: { type: 'string' } } } },
+  },
+};
+
+describe('a string literal the database would read as another string, inside a hop to a related entity', () => {
+  it('answers what the engine answers, and the conjunct runs in the residual', async () => {
+    await onBothEngines(RELATED, async (store, host) => {
+      // PostgreSQL holds no lone surrogate, so there only U+FFFD is stored
+      const users = host === 'sqlite' ? [['u1', 'x\uD800'], ['u2', 'x�']] : [['u2', 'x�']];
+      for (const [id, n] of users) await store.entity('User').create({ id, meta: { n } });
+      for (const [pid, authorId] of [[1, 'u1'], [2, 'u2']]) await store.entity('Post').create({ pid, authorId });
+      const posts = store.entity('Post');
+      const over = (/** @type {any} */ where) => ({ $for: { it: '$.Post[*]' }, $where: where, $return: '$it.pid' });
+      const authors = (/** @type {any} */ where) => ({ $for: { r1: '$.User[*]' },
+        $where: { $and: [{ $eq: ['$r1.id', '$it.authorId'] }, where] }, $return: '$r1' });
+      const sqlite = host === 'sqlite';
+      for (const [where, expected] of /** @type {[any, number[]][]} */ ([
+        [{ $gt: [{ $count: authors({ $eq: ['$r1.meta.n', 'x\uD800'] }) }, 0] }, sqlite ? [1] : []],
+        [{ $exists: authors({ '$starts-with': ['$r1.meta.n', 'x\uD800'] }) }, sqlite ? [1] : []],
+        [{ $exists: authors({ $eq: ['$r1.meta.n', 'x\uD800'] }) }, sqlite ? [1] : []],
+        [{ $empty: authors({ $eq: ['$r1.meta.n', 'x\uD800'] }) }, sqlite ? [2] : [1, 2]],
+        [{ $eq: [{ $for: { r1: '$.User[*]' }, $where: { $eq: ['$r1.id', '$it.authorId'] }, $return: '$r1.meta.n' }, 'x\uD800'] },
+          sqlite ? [1] : []],
+      ])) {
+        const document = over(where);
+        assert.deepEqual(sorted(await posts.execute(document, { pushdown: false })), expected, JSON.stringify(where));
+        assert.deepEqual(sorted(await posts.execute(document)), expected, JSON.stringify(where));
+        const plan = await posts.explain(document);
+        assert.equal(plan.mode, 'set', JSON.stringify(where));
+        assert.deepEqual(plan.reasons.map((/** @type {any} */ reason) => reasonId(reason.reason)), ['predicate.loneSurrogate']);
+        await assert.rejects(async () => posts.execute(document, { strict: true }), { code: 'JD0010' });
+      }
+      // the same hop with a well-formed literal keeps its native plan
+      assert.equal((await posts.explain(over({ $exists: authors({ $eq: ['$r1.meta.n', 'x�'] }) }))).mode, 'native');
+    });
+  });
+});

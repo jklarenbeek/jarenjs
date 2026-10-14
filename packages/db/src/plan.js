@@ -348,7 +348,7 @@ const FAMILY_ORDER = ['number', 'text', 'boolean', 'null'];
  * @param {import('./dialect.js').JsonPathSegment[]} segments
  * @returns {('number' | 'text' | 'boolean' | 'null')[] | null}
  */
-function scalarFamilies(schema, segments) {
+export function scalarFamilies(schema, segments) {
   const declared = schemaNodeAt(schema, segments)?.type;
   const names = typeof declared === 'string' ? [declared] : declared;
   if (!Array.isArray(names) || names.length === 0) return null;
@@ -424,6 +424,9 @@ function bindsLoneSurrogate(pred) {
     case 'and': case 'or': return pred.items.some(bindsLoneSurrogate);
     case 'not': return bindsLoneSurrogate(pred.item);
     case 'cmp': case 'strop': return typeof pred.operand.lit === 'string' && !pred.operand.lit.isWellFormed();
+    // a hop's filter is bound in the correlated subselect that tests or
+    // counts the related rows, as a root's own filter is
+    case 'hop': case 'hopCount': return pred.hop.filter != null && bindsLoneSurrogate(pred.hop.filter);
     default: return false;
   }
 }

@@ -188,7 +188,8 @@ no continuation to emit.
   database cannot bind (a boolean, a null, a missing name) is reported
   as the set residual the call becomes — mode, statement and reason —
   and counted in `stats().bind.diverted`, so a production diversion is
-  visible where nobody calls `explain()`. Every explanation carries
+  visible where nobody calls `explain()`; one a store profile's predicate
+  cannot bind is refused `JD0011`, as the call is. Every explanation carries
   `streaming` (`'row'` or `'buffered'`) and `barrier` (the construct
   that forces a buffer, or `null`), the same classification the cursor
   itself carries; `strictStreaming: true` on a cursor declines a

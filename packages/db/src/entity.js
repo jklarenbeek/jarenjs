@@ -27,7 +27,7 @@ import { createCursor, createSyncCursor, rowClassOf } from './cursor.js';
 import { checkInvariants, existsRowSql, RECORD_PATH, ruleLiteral } from './invariants.js';
 import { columnCodec, physicalRead } from './physical.js';
 import { mergeEntityRow } from './graph.js';
-import { namesNoNumber, noNumberKeyReason } from './key-text.js';
+import { namesNoNumber, noNumberKeyReason, numericKeyValue } from './key-text.js';
 import { createJSONPatch } from '@jarenjs/json/patch';
 import { canonicalizeJson } from '@jarenjs/json/canonical';
 import { createEntityMutation } from './mutation.js';
@@ -474,9 +474,10 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
   };
   const valuedKeys = !physical && (numericKey.some(Boolean) || epochKey.some(Boolean));
   /** The parts of a key as the values they name (§6): decimal text under a
-   * numeric key column is the number it spells, so `'16'`, `' 16'`, `'16.0'`
-   * and `16` are one key wherever the unit of work files or compares one,
-   * and an instant under an epoch key column is the epoch it names, so
+   * numeric key column is the number it spells ({@link numericKeyValue}), so
+   * `'16'`, `' 16'`, `'16.0'` and `16` are one key wherever the unit of work
+   * files or compares one, and an instant under an epoch key column is the
+   * epoch it names, so
    * `'2026-03-01T00:00:00Z'` and `'2026-03-01T00:00:00.000Z'` are one key.
    * Text spelling a number no double holds exactly, or no instant, stays as
    * it is. @param {any[]} parts @returns {any[]} */
@@ -486,14 +487,9 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
     for (let i = 0; i < parts.length; i++) {
       const part = parts[i];
       if (typeof part !== 'string') continue;
-      let value;
-      if (epochKey[i]) value = storedKeyPart(i, part);
-      else {
-        if (!numericKey[i] || namesNoNumber(part)) continue;
-        value = Number(part);
-        if (!Number.isFinite(value) || (Number.isInteger(value) && !Number.isSafeInteger(value))) continue;
-      }
-      if (value === null) continue;
+      if (!epochKey[i] && !numericKey[i]) continue;
+      const value = epochKey[i] ? storedKeyPart(i, part) : numericKeyValue(part);
+      if (value === null || value === part) continue;
       if (out === parts) out = [...parts];
       out[i] = value;
     }

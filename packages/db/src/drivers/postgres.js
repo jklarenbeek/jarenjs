@@ -86,20 +86,25 @@ function spelledInFull(number) {
 }
 
 /**
- * Whether a stored `numeric`'s JavaScript number rounds the integer it
- * holds: the number is neither the stored integer nor spelled by its digits
- * (an integer past the double range is neither). Every integer within
+ * The digits of the integer a stored `numeric` holds when its JavaScript
+ * number rounds it — the number is neither the stored integer nor spelled by
+ * its digits (an integer past the double range is neither) — else `null`. An
+ * integral value kept with a scale (`9007199254740993.0`, which a retype from
+ * text leaves) is the integer its digits before the point spell. Every integer within
  * ±(2^53 - 1), every fraction, every integer a double holds exactly, and
  * every integer a JavaScript number wrote (its digits ARE that number's
  * spelling: 2^60 is written `1152921504606847000`) does not.
  * @param {any} value - the wire's text
- * @returns {boolean}
+ * @returns {string | null}
  */
-function roundsInteger(value) {
-  if (typeof value !== 'string' || !/^-?\d+$/.test(value)) return false;
-  const number = Number(value);
+function roundedIntegerDigits(value) {
+  const integral = typeof value === 'string' ? /^(-?\d+)(?:\.0+)?$/.exec(value) : null;
+  if (integral === null) return null;
+  const digits = integral[1];
+  const number = Number(digits);
   return !Number.isSafeInteger(number)
-    && !(Number.isFinite(number) && (BigInt(value) === BigInt(number) || spelledInFull(number) === value));
+    && !(Number.isFinite(number) && (BigInt(digits) === BigInt(number) || spelledInFull(number) === digits))
+    ? digits : null;
 }
 
 /** `json` and `jsonb`: parsed by the client unless the host said
@@ -185,9 +190,10 @@ function normalizeRows(result) {
   for (const row of rows) {
     for (const { name, convert, stored } of converters) {
       const value = row[name];
-      if (stored && roundsInteger(value)) {
+      const rounded = stored ? roundedIntegerDigits(value) : null;
+      if (rounded !== null) {
         if (!Object.hasOwn(row, ROUNDED_INTEGERS)) Object.defineProperty(row, ROUNDED_INTEGERS, { value: {} });
-        row[ROUNDED_INTEGERS][name] = value;
+        row[ROUNDED_INTEGERS][name] = rounded;
       }
       row[name] = convert(value);
     }

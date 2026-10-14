@@ -33,7 +33,7 @@ import { DbCompileError, DbRuntimeError, wrapDriverError, isDriverError, classif
 import { chain, toPromise, isThenable, attempt, abortReason, createStatementOwner, useStatementOnce } from './driver.js';
 import { createSessionRouter } from './sessions.js';
 import { isPlainOptions, refuseUnknownMembers, refuseUnknownModelMembers, readOptions, readControls } from './options.js';
-import { canonicalKeyText, namesNoNumber, noNumberKeyReason } from './key-text.js';
+import { canonicalKeyText, namesNoNumber, noNumberKeyReason, numericKeyValue } from './key-text.js';
 import { planCollection, planEntity, planJoinTable, refuseNameCollisions, verifyShape, compileIndexPath, canonicalOf, creationOrder } from './ddl.js';
 import { translatePatch } from './patch-sql.js';
 import { createQueryEngine, createQueryState, createEntityQueryEngine, createLoadEngine, refuseNonDocument, refuseOpaqueValues, refuseOpaqueExternals, liveComparedExternals, profileComparedExternals } from './query.js';
@@ -1237,6 +1237,11 @@ function collectionCore(connection, collection, plan, validate, queryState, stor
     stats: () => ({ ...stats, ...engine.stats() }),
     model: collection,
     queryShape: engine.shape,
+    /** The key a row a write names by `key` is stored under: decimal text
+     * under a numeric key column is the number it spells, as its statement
+     * binds it; a text key column holds every other spelling as a key of
+     * its own. @param {string | number} key */
+    storedKey: (key) => (textKey ? key : numericKeyValue(key)),
     // the provider: value-or-promise, deliberately NOT lifted — a
     // synchronous driver answers a linq chain synchronously
     execute: (document, options) => engine.execute(document, options),
@@ -1367,7 +1372,10 @@ function collectionCore(connection, collection, plan, validate, queryState, stor
      */
     all(options) {
       readAllOptions(options);
-      const cursor = engine.query('$[*]', options, connection.synchronous ? createSyncCursor : createCursor);
+      // it binds no externals: a profile predicate that names one is read
+      // through the document `$[*]`, which does
+      const cursor = engine.query('$[*]', options, connection.synchronous ? createSyncCursor : createCursor,
+        ` — all() binds no externals: read the rows with query('$[*]', { externals })`);
       /** @type {any[]} */
       const documents = [];
       const pump = () => {
@@ -3432,16 +3440,20 @@ export function openStore(model, options) {
                   return key;
                 }));
               },
+              // a write is recorded under the key its row is stored under —
+              // never another spelling of it ('16.0') the call named it by
               put: (doc, key, options) => {
                 readWriteOptions(collectionName, options, 'put', true);
                 return guard(() => (journal
                   ? chain(readBefore(core, doc, key), (before) =>
                     chain(core.put(doc, key, options), (storedKey) => {
-                      capture.record(collectionName, [storedKey], before ?? null, doc, [storedKey]);
+                      const parts = [core.storedKey(storedKey)];
+                      capture.record(collectionName, parts, before ?? null, doc, parts);
                       return storedKey;
                     }))
                   : chain(core.put(doc, key, options), (storedKey) => {
-                    capture.record(collectionName, [storedKey], undefined, doc, [storedKey]);
+                    const parts = [core.storedKey(storedKey)];
+                    capture.record(collectionName, parts, undefined, doc, parts);
                     return storedKey;
                   })));
               },
@@ -3451,22 +3463,23 @@ export function openStore(model, options) {
                   ? chain(core.get(key), (before) =>
                     chain(core.patch(key, ops, options), (after) => {
                       // a patch that changed nothing wrote nothing, and records nothing
-                      if (!equalsJson(before, after)) capture.record(collectionName, [key], before ?? null, after);
+                      if (!equalsJson(before, after)) capture.record(collectionName, [core.storedKey(key)], before ?? null, after);
                       return after;
                     }))
                   : core.patch(key, ops, options)));
               },
               delete: (key, options) => {
                 readWriteOptions(collectionName, options, 'delete', true);
+                const parts = [core.storedKey(key)];
                 return guard(() => (journal
                   ? chain(core.get(key), (before) =>
                     chain(core.delete(key, options), (deleted) => {
                       if (deleted && before !== undefined)
-                        capture.record(collectionName, [key], before, null, [key]);
+                        capture.record(collectionName, parts, before, null, parts);
                       return deleted;
                     }))
                   : chain(core.delete(key, options), (deleted) => {
-                    if (deleted) capture.record(collectionName, [key], undefined, null, [key]);
+                    if (deleted) capture.record(collectionName, parts, undefined, null, parts);
                     return deleted;
                   })));
               },

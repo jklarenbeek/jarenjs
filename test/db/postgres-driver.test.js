@@ -484,10 +484,15 @@ describe('the injected PostgreSQL driver', () => {
       // `JD2003` (class `data`) on both engines; a `number` member reads the
       // nearest double, and so does a numeric a statement computes (no table
       // named), as the engine reads the member it is computed from
-      for (const text of ['9007199254740993', '-9007199254740993', '1152921504606846977', `1${'0'.repeat(400)}`]) {
+      // an integral numeric with a scale (a retype from text keeps `.0`) is the
+      // integer it spells, refused as the same digits without the scale are
+      assert.deepStrictEqual(await merged('12.0', 'integer'), { v: 12 });
+      assert.deepStrictEqual(await merged('9007199254740994.00', 'integer'), { v: 9007199254740994 });
+      for (const text of ['9007199254740993', '-9007199254740993', '1152921504606846977', `1${'0'.repeat(400)}`,
+        '9007199254740993.0', '-9007199254740993.000']) {
         await assert.rejects(merged(text, 'integer'), (error) => error instanceof RangeError
           && /** @type {any} */ (error).code === 'ERR_OUT_OF_RANGE'
-          && error.message === `Value is too large to be represented as a JavaScript number: ${text}`);
+          && error.message === `Value is too large to be represented as a JavaScript number: ${text.replace(/\.0+$/, '')}`);
         assert.deepStrictEqual(await merged(text, 'number'), { v: Number(text) }, text);
         for (const tableID of [0, undefined]) {
           assert.deepStrictEqual(await merged(text, 'integer', [{ name: 'v', dataTypeID: 1700, tableID }, fields[1]]),

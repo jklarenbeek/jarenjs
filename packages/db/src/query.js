@@ -49,7 +49,7 @@ import { readOptions, readControls, isPlainOptions, refuseUnknownMembers } from 
 import {
   planQuery, planEntityQuery, entityShape, planEntityPredicate, entityPathRef,
   isRootScanSource, isEntityRootSource, BIND_REASONS, PLANNER_REASONS, admitsMixedTypes,
-  predicateTerms, boundPredicateTerms, mapHops, hopsOf,
+  predicateTerms, boundPredicateTerms, mapHops, hopsOf, scalarFamilies,
 } from './plan.js';
 import { emitPlan, emitEntityPlan, createEntityPredicateEmitters, UnrepresentablePath, UnrepresentableIdentity,
   entityTableColumns, physicalComparable,
@@ -223,6 +223,59 @@ function aggregateNullError() {
 function bindable(value) {
   return typeof value === 'string'
     || (typeof value === 'number' && Number.isFinite(value));
+}
+
+/**
+ * The leaves of a collection profile's mandatory predicate that compare a
+ * member with an external — an equality, an inequality, or a membership in
+ * a list — each with the value families its member can hold under the
+ * collection's schema (`null`: any, the member is not typed as scalars).
+ * @param {any} pred - the translated predicate
+ * @param {any} schema - the collection's schema
+ * @param {any[]} [out]
+ * @returns {{ name: string, list: boolean, member: string, families: string[] | null }[]}
+ */
+function externalLeaves(pred, schema, out = []) {
+  switch (pred?.p) {
+    case 'and': case 'or':
+      for (const item of pred.items) externalLeaves(item, schema, out);
+      break;
+    case 'not':
+      externalLeaves(pred.item, schema, out);
+      break;
+    case 'cmp': case 'in':
+      if (!('ext' in pred.operand) || (pred.p === 'cmp' && pred.op !== 'eq' && pred.op !== 'ne')) break;
+      out.push({ name: pred.operand.ext, list: pred.p === 'in',
+        member: pred.ref.segments.map((/** @type {any} */ segment) => segment.name ?? `[${segment.index}]`).join('.'),
+        families: scalarFamilies(schema, pred.ref.segments) });
+      break;
+    default:
+  }
+  return out;
+}
+
+/** How a sentence names a value of each family the database binds otherwise than the engine compares it. */
+const STRAY_VALUES = { null: 'a null', boolean: 'a boolean', structure: 'an object or an array' };
+
+/**
+ * The family of a value a native comparison does not compare as the engine
+ * does, that the leaf's member can hold — a `null` the database binds as no
+ * value, a boolean, an object or an array it does not compare — or `null`
+ * when the leaf binds every value it reaches as the engine compares it: a
+ * string, a number, or a family its member never holds. A membership's
+ * list reaches its items (an object's member values); a scalar reaches none.
+ * @param {{ list: boolean, families: string[] | null }} leaf @param {any} value
+ * @returns {'null' | 'boolean' | 'structure' | null}
+ */
+function strayFamily(leaf, value) {
+  const items = !leaf.list ? [value]
+    : value !== null && typeof value === 'object' ? (Array.isArray(value) ? value : Object.values(value)) : [];
+  for (const item of items) {
+    const family = item === null ? 'null' : typeof item === 'boolean' ? 'boolean'
+      : typeof item === 'object' ? 'structure' : null;
+    if (family !== null && (leaf.families === null || leaf.families.includes(family))) return family;
+  }
+  return null;
 }
 
 /**
@@ -1119,6 +1172,9 @@ export function createQueryEngine(context) {
       predicateExternals: mandatory === null ? [] : [...new Set(analyzeQuery(
         predicateQuery(profile.predicates[collection.name]),
         operators ?? undefined).externals.map((/** @type {any} */ ref) => ref.name))],
+      // the predicate's comparisons and memberships of an external, with
+      // what each one's member can hold
+      predicateLeaves: mandatory === null ? [] : externalLeaves(mandatory, collection.schema),
       compared,
       externalSlotKinds: externalSlotKinds(emitted.slots, plan.rank),
       // a literal probe is normalized once, here; an external one per
@@ -1362,13 +1418,25 @@ export function createQueryEngine(context) {
   /** Refuse a call that does not bind an external the profile's mandatory
    * predicate reads, as the engine does (`JQ2006`) and the entity engine
    * does (`JD0011`): the statement would bind it as NULL, or fail in the
-   * driver, and a diversion still runs the predicate in the database. */
-  const refuseUnboundPredicate = (entry, externals) => {
+   * driver, and a diversion still runs the predicate in the database. So is
+   * a call whose external holds a value the statement would compare
+   * otherwise than the engine does, where the member can hold one
+   * ({@link strayFamily}): the predicate would keep other rows than it does.
+   * `repair` names the way out a surface that takes no externals has. */
+  const refuseUnboundPredicate = (entry, externals, repair = '') => {
     const missing = entry.predicateExternals.filter((name) => externals[name] === undefined);
-    if (missing.length === 0) return;
-    throw profileRefusal(`the profile's predicate for '${collection.name}' cannot bind `
-      + `${missing.map((name) => `'$${name}'`).join(', ')} for this call — it is missing, and a mandatory `
-      + 'predicate runs in the database or not at all');
+    if (missing.length > 0) {
+      throw profileRefusal(`the profile's predicate for '${collection.name}' cannot bind `
+        + `${missing.map((name) => `'$${name}'`).join(', ')} for this call — it is missing, and a mandatory `
+        + `predicate runs in the database or not at all${repair}`);
+    }
+    for (const leaf of entry.predicateLeaves) {
+      const family = strayFamily(leaf, externals[leaf.name]);
+      if (family === null) continue;
+      throw profileRefusal(`the profile's predicate for '${collection.name}' cannot bind '$${leaf.name}' for this call `
+        + `— it holds ${STRAY_VALUES[family]}, which the engine compares with the same value in '${leaf.member}' and the `
+        + 'database does not, so the predicate would keep other rows than it does; bind strings and numbers');
+    }
   };
 
   const rowsToDocs = (rows) => rows.map((row) => JSON.parse(row.doc));
@@ -1714,8 +1782,10 @@ export function createQueryEngine(context) {
    * @param {typeof createCursor} [cursorFactory] - the synchronous cursor
    *   for a caller that drains it on a synchronous driver (`all()` on the
    *   synchronous twin); the asynchronous one otherwise
+   * @param {string} [repair] - what a refusal of an unbound predicate
+   *   external adds for a caller that takes no externals (`all()`)
    */
-  const query = (document, options = undefined, cursorFactory = createCursor) => {
+  const query = (document, options = undefined, cursorFactory = createCursor, repair = '') => {
     const spelling = `collection('${collection.name}').query`;
     readCallOptions(options, DOCUMENT_CALL_OPTIONS, spelling);
     refuseNonDocument(document, spelling);
@@ -1723,7 +1793,7 @@ export function createQueryEngine(context) {
     const { externals, strict, profile, pushdown } = callState(options);
     const entry = entryFor(document, strict, profile, pushdown);
     refuseOpaqueExternals(entry.compared, externals, spelling);
-    refuseUnboundPredicate(entry, externals);
+    refuseUnboundPredicate(entry, externals, repair);
     const classified = cursorClass(entry, externals);
     refuseBuffered(options, classified, collection.docPath);
     const signal = options?.signal;
@@ -1838,8 +1908,10 @@ export function createQueryEngine(context) {
     // diversion statement and answers in the set residual — so that is
     // the mode, the SQL and the barrier reported, not the native plan's
     // no externals at all is the abstract plan, as it always was; given
-    // externals — even a partial set — are bound as execute would bind them
+    // externals — even a partial set — are bound as execute would bind
+    // them, and refused as execute refuses them
     const bound = options?.externals !== undefined;
+    if (bound) refuseUnboundPredicate(entry, externals);
     const classified = cursorClass(entry, bound ? externals : null);
     const diverted = bound && mustDivert(entry, externals);
     const chosen = diverted ? fullScanEmitted(entry) : entry;
@@ -2367,14 +2439,12 @@ export function createEntityQueryEngine(context) {
       }), { readOnly: true });
   };
 
-  /** Fetch every referenced entity's rows and build the in-memory
-   * root — each fetch wearing the profile's mandatory predicate for its
-   * entity and its row bound (`LIMIT maxRows + 1`, refused when crossed),
-   * so a residual's input is as bounded as a native answer. The
-   * predicate's externals bind from the call's; one the database cannot
-   * take is refused (`JD0011`), never dropped: a mandatory predicate runs
-   * in the database or not at all. */
-  const fetchRoot = (entry, externals) => {
+  /** The statements a residual fetches every referenced entity's rows
+   * by, built on first use — each wearing the profile's mandatory
+   * predicate for its entity and its row bound (`LIMIT maxRows + 1`,
+   * refused when crossed), so a residual's input is as bounded as a
+   * native answer. */
+  const fetchersOf = (entry) => {
     if (entry.fetchers === null) {
       entry.fetchers = [...(entry.planned.referenced.length === 0
         ? entities.keys() : entry.planned.referenced)].map((name) => {
@@ -2415,7 +2485,14 @@ export function createEntityQueryEngine(context) {
         };
       });
     }
-    for (const fetcher of entry.fetchers) {
+    return entry.fetchers;
+  };
+
+  /** Refuse (`JD0011`) a residual run whose fetch cannot bind an external
+   * of the profile's mandatory predicate from the call's externals — never
+   * dropped: a mandatory predicate runs in the database or not at all. */
+  const refuseUnboundFetchers = (entry, externals) => {
+    for (const fetcher of fetchersOf(entry)) {
       if (divertReason(fetcher, externals) === null) continue;
       const names = [...new Set(fetcher.slots.filter((/** @type {any} */ slot) => 'external' in slot)
         .map((/** @type {any} */ slot) => `'$${slot.external}'`))];
@@ -2423,6 +2500,12 @@ export function createEntityQueryEngine(context) {
         + 'for this call — missing, or a value the database cannot compare — and a mandatory predicate runs '
         + 'in the database or not at all', entities.get(fetcher.name)?.docPath);
     }
+  };
+
+  /** Fetch every referenced entity's rows through {@link fetchersOf} and
+   * build the in-memory root, refused first by {@link refuseUnboundFetchers}. */
+  const fetchRoot = (entry, externals) => {
+    refuseUnboundFetchers(entry, externals);
     /** @type {any} */
     const root = {};
     const next = (i) => {
@@ -2736,6 +2819,9 @@ export function createEntityQueryEngine(context) {
     // call's diversion is not carried into it
     const runtime = entry.runtimeReason?.construct === 'external' ? null : entry.runtimeReason;
     const mode = diverted || runtime ? 'set' : entry.planned.mode;
+    // a residual run fetches every root it reads, so explaining one given
+    // externals refuses what that fetch refuses
+    if (options?.externals !== undefined && mode !== 'native') refuseUnboundFetchers(entry, externals);
     const reasons = runtime ? [runtime, ...entry.planned.reasons] : diverted && classified.barrier !== null
       ? [classified.barrier, ...entry.planned.reasons] : entry.planned.reasons;
     const base = {

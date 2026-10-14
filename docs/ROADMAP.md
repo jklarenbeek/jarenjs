@@ -75,6 +75,7 @@ delete it or fix it.
   do not reach them. `canonicalizeJson`'s 1000-level bound is fixed (the
   function takes no options), where validation (`maxReferenceDepth`) and the
   descendant segment (`maxDescentDepth`, `limits.descentDepth`) can raise theirs.
+
 ## @jarenjs/view & @jarenjs/app
 
 Reusable host helpers now cover [bounded file tokens and route subscriptions](../packages/app/docs/APP-FORMAT.md),
@@ -470,13 +471,31 @@ what each does is its own documentation's job
   handed to a registered function is the caller's own and answers right, so a
   blanket refusal of every external is not the fix: follow the binding through
   the analysed tree, or refuse where the engine's comparison reads the item.
-- [ ] **A collection's profile predicate binds an external the database cannot
-  take as the raw driver error.** A store profile predicate
-  `$eq ['$it.tenant', '$tenant']` on a collection, executed with `tenant`
-  `true`, `{}` or missing, throws Node's `ERR_INVALID_ARG_TYPE` ("Provided
-  value cannot be bound to SQLite parameter 1"), and `{ x: 1 }` or `['t1']`
-  throw `ERR_INVALID_STATE` ("Unknown named parameter"), where MODEL-FORMAT §8
-  promises `JD0011`, as an entity's fetch refuses one.
+- [ ] **A collection's profile predicate binds a boolean, an object or an
+  array its member cannot hold as SQLite's raw driver error.** A store profile
+  predicate `$eq ['$it.tenant', '$tenant']` on a collection whose `tenant` is
+  typed `string` (or `['string', 'null']`), executed with `tenant` `true` or
+  `false`, throws Node's `ERR_INVALID_ARG_TYPE` ("Provided value cannot be
+  bound to SQLite parameter 1"), and `{ x: 1 }` or `['t1']` throw
+  `ERR_INVALID_STATE` ("Unknown named parameter"), where PostgreSQL answers no
+  row, the engine's answer. A missing external, and a value the member can
+  hold, are refused `JD0011` ([MODEL-FORMAT
+  §8](../packages/db/docs/MODEL-FORMAT.md)). Wanted: SQLite answers no row as
+  PostgreSQL does.
+- [ ] **A point read and an entity fetch refuse a predicate external a
+  collection call answers.** Under `{ $eq: ['$it.tenant', '$tenants[*]'] }`,
+  `get` (collection or entity) refuses `JD0011` a bare `null` and a list
+  holding a `null` or a boolean, and an entity's `execute` refuses the list,
+  even where the member cannot hold the item — `tenants: ['a', true]` against
+  a `['string', 'null']` member, or `[null]` against an entity member whose
+  stored `null` reads as absent — where the engine answers the `'a'` rows (or
+  none) and a collection `execute` now answers them. Wanted: refuse only what
+  the member can hold, as the collection does; admitting is not a refusal, so
+  a patch.
+- [ ] **`all()` takes no externals.** Under a store profile predicate that
+  names an external, `collection.all()` is always refused `JD0011` (its reason
+  names `query('$[*]', { externals })`): its options are a closed set without
+  `externals`. Wanted: `all({ externals })` (new option, a minor).
 - [ ] **A `bigint` external compares as no number.** `$gt ['$e.n', '$min']`
   with `externals: { min: 2n }` matches no row, with or without pushdown,
   where `2` answers right: the comparison does not read a `bigint` as the
@@ -523,12 +542,6 @@ what each does is its own documentation's job
   `externals: { tenant: 'a', x: true }` and `$where: { $not: { $eq: ['$it.id',
   '$x'] } }` it answers no row (with and without pushdown) where `"a1"` is
   right; it fails closed, but answers wrong.
-- [ ] **A boolean tenant external answers differently per engine.** A store
-  predicate's external bound to `true` raises an uncoded driver error on
-  SQLite, answers `[]` on PostgreSQL and keeps the matching rows in the
-  engine, where the entity engine refuses `JD0011` and MODEL-FORMAT §8 claims
-  `JD0011` on every engine. Wanted: one answer, decided by what string data
-  answers right ([MODEL-FORMAT §8](../packages/db/docs/MODEL-FORMAT.md)).
 - [ ] **Federation merge strategy and spilling.** Connected N-way joins and
   nested fluent joins now have an explicit fetch order and combined admission
   credits (QUERY-PEN §12.1). A merge strategy still needs a provider ordering
@@ -539,19 +552,25 @@ what each does is its own documentation's job
 - [ ] **Replication beyond bounded managed histories.** Portable envelopes,
   causal frontiers, durable receipts, transactional apply, explicit conflicts
   and bounded snapshot resets are implemented in
-  [REPLICATION-FORMAT](../packages/db/docs/REPLICATION-FORMAT.md) on SQLite and
-  PostgreSQL, under session and journal capture alike, including the rows
+  [REPLICATION-FORMAT](../packages/db/docs/REPLICATION-FORMAT.md) on SQLite
+  and PostgreSQL, under session and journal capture alike, including the rows
   foreign keys remove or null. Paged snapshots need snapshot identity and
-  continuation consistency; receipt/tombstone compaction needs causal stability
-  evidence beyond current reset credits. Independent field merges require a
-  declared resolver policy. Concurrent structural changes — a child added on one
-  replica under a parent another replica deletes — refuse on both sides
-  (`JD2104` where the deletion arrives, `JD2005` where the child arrives) and
-  need a reset; no structural conflict policy exists. An envelope no write order
-  can replay — values rotated between rows, or a row that must be written both
-  before a removal and after it — refuses `JD2005` or `JD2104`. A store on
-  several PostgreSQL sessions (`sessions` above 1) refuses `replication`
-  (`JD0009`): its pages, snapshots and applies are qualified on one session.
+  continuation consistency; receipt/tombstone compaction needs causal
+  stability evidence beyond current reset credits. Independent field merges
+  require a declared resolver policy. Concurrent structural changes — a child
+  added on one replica under a parent another replica deletes — refuse on both
+  sides (`JD2104` where the deletion arrives, `JD2005` where the child
+  arrives) and need a reset; no structural conflict policy exists. An envelope
+  no write order can replay — values rotated between rows, or a row that must
+  be written both before a removal and after it — refuses `JD2005` or
+  `JD2104`. A row whose instant key is kept as an epoch column, stored again
+  under another spelling of the instant — deleted and created in one
+  transaction, or `put` by a unit of work — is refused `JD2104` in either
+  capture mode and writes nothing: a replica's history names rows by the key's
+  text, so the two spellings are two rows; carrying it needs the history keyed
+  by the value the key binds. A store on several PostgreSQL sessions
+  (`sessions` above 1) refuses `replication` (`JD0009`): its pages, snapshots
+  and applies are qualified on one session.
 - [ ] **A journal removal of a row never read records the key it was given.**
   A unit-of-work `remove()` of a row no read loaded, by another spelling of
   its key (`'16.0'` for 16; another spelling of an instant, or its epoch,

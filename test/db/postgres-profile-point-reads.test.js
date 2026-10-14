@@ -103,11 +103,13 @@ describe('a point read on a profiled store, on PostgreSQL', { skip }, () => {
     }
   });
 
-  it('answers a root whose predicate names an external as stored', async () => {
+  it('binds a predicate that names an external from the read\'s own externals', async () => {
     const profile = { externals: ['tenant'], predicates: { docs: { $eq: ['$it.tenant', '$tenant'] } } };
     await withStore('postgres', MODEL, async (store) => {
       await store.collection('docs').insert({ id: 'b1', tenant: 'b' });
-      assert.strictEqual((await store.collection('docs').get('b1')).tenant, 'b');
+      assert.strictEqual((await store.collection('docs').get('b1', { externals: { tenant: 'b' } })).tenant, 'b');
+      assert.strictEqual(await store.collection('docs').get('b1', { externals: { tenant: 'a' } }), undefined);
+      await assert.rejects(async () => store.collection('docs').get('b1'), { code: 'JD0011' });
     }, { profile });
   });
 });
