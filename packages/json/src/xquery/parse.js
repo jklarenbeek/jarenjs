@@ -155,8 +155,9 @@ function fnUnary(op) {
   return { min: 1, max: 1, emit: (args) => ({ [op]: args[0] }) };
 }
 
-function fnPair(op) {
-  return { min: 2, max: 2, emit: (args) => ({ [op]: args }) };
+// a function whose arguments are the operator's operand list
+function fnArgs(op, min, max) {
+  return { min, max, emit: (args) => ({ [op]: args }) };
 }
 
 // substring/subsequence: F&O's 1-based start becomes 0-based (D6);
@@ -219,14 +220,22 @@ const negativeInfinity = () => ({ '$div': [-1, 0] });
 
 // A cast that cannot succeed fails when the query runs (XQuery raises
 // FORG0001 when the cast is evaluated, never when the query is read), as
-// the engine's cast error JQ2001; the message quotes the type and text.
+// the engine's cast error JQ2001: `$number` of a text that names the
+// failure, which no JSON number spells.
+function raisedWith(text) {
+  return { '$number': text };
+}
+
 function failedLiteralCast(name, text) {
-  return { '$number': `xs:${name}: ${text}` };
+  return raisedWith(`xs:${name}: ${text}`);
 }
 
 function failedCast(name) {
-  return { '$number': { '$concat': [`xs:${name}: `, CAST_ARG] } };
+  return raisedWith({ '$concat': [`xs:${name}: `, CAST_ARG] });
 }
+
+// what a literal operand folds to when the cast cannot succeed
+const CAST_FAILS = Symbol('cast fails');
 
 // the text of an emitted string that stands for a string literal, or null
 // when the string is a variable or path reference (Rule 2 escaping: a
@@ -239,12 +248,21 @@ function literalText(e) {
   return e.charCodeAt(1) === CC_DOLLAR ? e.slice(1) : null;
 }
 
+// the text a failed literal cast quotes: the literal as it was written
+function literalOperandText(e) {
+  const text = literalText(e);
+  return text === null ? String(e) : text;
+}
+
 const trimXsdWhiteSpace = (s) => s.replace(/^[ \t\r\n]+|[ \t\r\n]+$/g, '');
 
-// the number a numeric constructor gives a string literal: a number, the
-// non-finite document, or the failing cast when the text is outside the
-// type's lexical space (XSD white space around it is not part of it)
-function foldNumericText(name, type, text) {
+// true when the number `e` is finite: an infinity or NaN minus itself is NaN
+const isFiniteNumber = (e) => ({ '$eq': [{ '$sub': [e, e] }, 0] });
+
+// the number a numeric cast gives a string literal: a number, the
+// non-finite document, or CAST_FAILS when the text is outside the type's
+// lexical space (XSD white space around it is not part of it)
+function foldNumericText(type, text) {
   const trimmed = trimXsdWhiteSpace(text);
   if (type === 'double') {
     if (trimmed === 'NaN')
@@ -255,7 +273,7 @@ function foldNumericText(name, type, text) {
       return negativeInfinity();
   }
   if (!LEXICAL_RE[type].test(trimmed))
-    return failedLiteralCast(name, text);
+    return CAST_FAILS;
   const n = Number(trimmed);
   if (type === 'double') {
     // a spelling beyond the double range is the infinity of its sign
@@ -264,13 +282,13 @@ function foldNumericText(name, type, text) {
     return n === -Infinity ? negativeInfinity() : n;
   }
   // an integer or a decimal has no negative zero and no infinity
-  return Number.isFinite(n) ? n + 0 : failedLiteralCast(name, text);
+  return Number.isFinite(n) ? n + 0 : CAST_FAILS;
 }
 
-// What a numeric constructor gives a literal operand (a string, a number
-// or a boolean), or undefined when the operand is not a literal.
+// What a numeric cast gives a literal operand (a string, a number or a
+// boolean), CAST_FAILS, or undefined when the operand is not a literal.
 // xs:float is xs:double throughout: the engine has no single precision.
-function foldNumericOperand(name, type, e) {
+function foldNumericOperand(type, e) {
   if (typeof e === 'boolean')
     return e ? 1 : 0;
   if (typeof e === 'number') {
@@ -279,22 +297,23 @@ function foldNumericOperand(name, type, e) {
     return type === 'decimal' ? e + 0 : e;
   }
   const text = literalText(e);
-  return text === null ? undefined : foldNumericText(name, type, text);
+  return text === null ? undefined : foldNumericText(type, text);
 }
 
-// A string operand read by the type's lexical space, in the document (the
-// operand is the string at CAST_ARG): white space trimmed, the sign read
-// apart, the digits put in the JSON number grammar `$number` reads. Leading
-// zeros go behind a sentinel (an I-Regexp has no anchors; the text was
-// matched against the lexical space first, so it holds none), the digit
+// The readings below take the one item at CAST_ARG and give the value the
+// cast makes of it, or the empty sequence when the cast cannot make one;
+// they never raise, so a cast is its reading or the error, and `castable
+// as` asks whether the reading gave a value.
+
+// A string read by the type's lexical space: white space trimmed, the sign
+// read apart, the digits put in the JSON number grammar `$number` reads.
+// Leading zeros go behind a sentinel (an I-Regexp has no anchors; the text
+// was matched against the lexical space first, so it holds none), the digit
 // before a bare dot, exponent or end comes back, and a trailing dot gets its
-// zero.
-// A decimal or an integer goes through its text once more, which turns an
-// overflow into a failed cast and negative zero into zero.
-function readLexicalNumber(name, type) {
-  const signed = type === 'double'
-    ? { '$if': ['$xs_negative', { '$neg': '$xs_value' }, '$xs_value'] }
-    : { '$number': { '$string': { '$if': ['$xs_negative', { '$neg': '$xs_value' }, '$xs_value'] } } };
+// zero. A decimal or an integer beyond the double range is no value, and
+// has no negative zero.
+function readLexicalNumber(type) {
+  const signed = { '$if': ['$xs_negative', { '$neg': '$xs_value' }, '$xs_value'] };
   const digits = {
     '$let': {
       xs_digits: { '$substring': [{ '$replace': [{ '$concat': ['\uffff', '$xs_unsigned'] }, '\uffff0+', '\uffff'] }, 1] },
@@ -308,14 +327,16 @@ function readLexicalNumber(name, type) {
       },
       xs_value: { '$number': '$xs_json' },
     },
-    '$return': signed,
+    '$return': type === 'double'
+      ? signed
+      : { '$let': { xs_signed: signed }, '$return': { '$if': [isFiniteNumber('$xs_signed'), { '$add': ['$xs_signed', 0] }] } },
   };
   const unsigned = {
     '$let': {
       xs_negative: { '$starts-with': ['$xs_text', '-'] },
       xs_unsigned: { '$if': [{ '$or': ['$xs_negative', { '$starts-with': ['$xs_text', '+'] }] }, { '$substring': ['$xs_text', 1] }, '$xs_text'] },
     },
-    '$return': { '$if': [{ '$match': ['$xs_unsigned', LEXICAL[type]] }, digits, failedCast(name)] },
+    '$return': { '$if': [{ '$match': ['$xs_unsigned', LEXICAL[type]] }, digits] },
   };
   const special = type !== 'double' ? unsigned : {
     '$if': [
@@ -327,32 +348,62 @@ function readLexicalNumber(name, type) {
   return { '$let': { xs_text: { '$normalize-space': CAST_ARG } }, '$return': special };
 }
 
-// The constructor of a numeric type: a literal operand folds; any other
-// is evaluated once and read by what it is - a string by the lexical
-// space, a boolean as 1 or 0, a number by the type's value rule, and
-// everything else (the empty sequence stays empty; null, an array, an
-// object or several items are the type error JQ2001) by `$number`.
-function numericConstructor(name, type) {
+// A number read by the type's value rule: a double takes it as it is, a
+// decimal takes a finite one, an integer a finite one without its fraction;
+// neither has a negative zero.
+function readNumber(type) {
+  if (type === 'double')
+    return CAST_ARG;
+  const value = type === 'integer' ? { '$idiv': [CAST_ARG, 1] } : CAST_ARG;
+  return { '$if': [isFiniteNumber(CAST_ARG), { '$add': [value, 0] }] };
+}
+
+// A numeric type: a string by the lexical space, a number by the type's
+// value rule, a boolean as 1 or 0; nothing else (null, an array, an object,
+// two or more items) has a value.
+function numericType(type) {
   return {
-    min: 1,
-    max: 1,
-    emit: (args) => {
-      const folded = foldNumericOperand(name, type, args[0]);
-      if (folded !== undefined)
-        return folded;
-      // a double takes a number as it is; an integer or a decimal takes the
-      // text of a number back, which is a number again only when it is
-      // finite (an integer first loses its fraction)
-      const otherwise = type === 'double'
-        ? { '$number': CAST_ARG }
-        : { '$if': [
-          { '$is-boolean': CAST_ARG }, { '$number': CAST_ARG },
-          { '$number': { '$string': type === 'integer' ? { '$idiv': [CAST_ARG, 1] } : CAST_ARG } }] };
-      return {
-        '$let': { [CAST_VAR]: args[0] },
-        '$return': { '$if': [{ '$is-string': CAST_ARG }, readLexicalNumber(name, type), otherwise] },
-      };
+    fold: (e) => foldNumericOperand(type, e),
+    read: () => ({
+      '$if': [
+        { '$is-string': CAST_ARG }, readLexicalNumber(type),
+        { '$if': [
+          { '$is-number': CAST_ARG }, readNumber(type),
+          { '$if': [{ '$is-boolean': CAST_ARG }, { '$number': CAST_ARG }] }] }],
+    }),
+  };
+}
+
+// The integer `e` (a number) when it lies in [low, high), the empty
+// sequence otherwise; an absent bound does not limit. Every bound is an
+// integer the double holds exactly (2^63 and 2^64 included), so the test
+// is exact on the value the engine holds.
+function inRange(e, low, high) {
+  const tests = [];
+  if (low !== undefined)
+    tests.push({ '$ge': [e, low] });
+  if (high !== undefined)
+    tests.push({ '$lt': [e, high] });
+  return tests.length === 1 ? tests[0] : { '$and': tests };
+}
+
+// The integer types XSD derives by range: the integer reading, kept only
+// in [low, high). xs:long and xs:unsignedLong reach past 2^53, where an
+// integer is a double (D1): their texts and literals are read as the
+// double nearest them first, then the range is checked on that double.
+function integerRangeType(low, high) {
+  const integer = numericType('integer');
+  const inside = (n) => (low === undefined || n >= low) && (high === undefined || n < high);
+  return {
+    fold: (e) => {
+      const n = integer.fold(e);
+      return n === undefined || n === CAST_FAILS || inside(n) ? n : CAST_FAILS;
     },
+    read: () => ({
+      '$for': { xs_int: integer.read() },
+      '$where': inRange('$xs_int', low, high),
+      '$return': '$xs_int',
+    }),
   };
 }
 
@@ -363,56 +414,118 @@ const BOOLEAN_FALSE_TEXTS = Object.freeze(['false', '0']);
 // xs:boolean: a boolean is itself, a number is false only for 0 and NaN
 // (the `$boolean` of a number), a string is `true`/`1` or `false`/`0` once
 // trimmed; `$boolean` itself would be the EBV, for which "false" is true
-function booleanConstructor() {
-  // true when the trimmed operand text is one of `texts`
-  const isOneOf = (texts) => ({
-    '$or': texts.map((word) => ({ '$eq': [{ '$normalize-space': CAST_ARG }, word] })),
-  });
+const booleanType = Object.freeze({
+  fold: (e) => {
+    if (typeof e === 'boolean')
+      return e;
+    if (typeof e === 'number')
+      return e !== 0;
+    const literal = literalText(e);
+    if (literal === null)
+      return undefined;
+    const trimmed = trimXsdWhiteSpace(literal);
+    if (BOOLEAN_TRUE_TEXTS.includes(trimmed))
+      return true;
+    return BOOLEAN_FALSE_TEXTS.includes(trimmed) ? false : CAST_FAILS;
+  },
+  read: () => {
+    // true when the trimmed operand text is one of `texts`
+    const isOneOf = (texts) => ({
+      '$or': texts.map((word) => ({ '$eq': [{ '$normalize-space': CAST_ARG }, word] })),
+    });
+    return {
+      '$if': [
+        { '$is-boolean': CAST_ARG }, CAST_ARG,
+        { '$if': [
+          { '$is-number': CAST_ARG }, { '$boolean': CAST_ARG },
+          { '$if': [
+            { '$is-string': CAST_ARG },
+            { '$if': [isOneOf(BOOLEAN_TRUE_TEXTS), true, { '$if': [isOneOf(BOOLEAN_FALSE_TEXTS), false] }] }] }] }],
+    };
+  },
+});
+
+// xs:string is `$string`, which takes a string, a number, a boolean or
+// null (QUERY-FORMAT section 8.10); no literal folds
+const stringType = Object.freeze({
+  fold: () => undefined,
+  read: () => ({
+    '$if': [
+      { '$or': ['$is-string', '$is-number', '$is-boolean', '$is-null'].map((op) => ({ [op]: CAST_ARG })) },
+      { '$string': CAST_ARG },
+    ],
+  }),
+});
+
+// The `xs:` types the JSON model has a value for, by local name. The engine
+// has one number type (D1), so the numeric types differ in the values they
+// accept and the errors they raise, not in the value they give.
+const XS_TYPES = Object.freeze({
+  'string': stringType,
+  'boolean': booleanType,
+  'integer': numericType('integer'),
+  'decimal': numericType('decimal'),
+  'double': numericType('double'),
+  'float': numericType('double'),
+  'long': integerRangeType(-(2 ** 63), 2 ** 63),
+  'int': integerRangeType(-(2 ** 31), 2 ** 31),
+  'short': integerRangeType(-(2 ** 15), 2 ** 15),
+  'byte': integerRangeType(-(2 ** 7), 2 ** 7),
+  'unsignedLong': integerRangeType(0, 2 ** 64),
+  'unsignedInt': integerRangeType(0, 2 ** 32),
+  'unsignedShort': integerRangeType(0, 2 ** 16),
+  'unsignedByte': integerRangeType(0, 2 ** 8),
+  'nonNegativeInteger': integerRangeType(0, undefined),
+  'positiveInteger': integerRangeType(1, undefined),
+  'nonPositiveInteger': integerRangeType(undefined, 1),
+  'negativeInteger': integerRangeType(undefined, 0),
+});
+
+// `e cast as xs:<name>?` (the constructor function) and, when
+// `emptyAllowed` is false, `e cast as xs:<name>`, which raises on the empty
+// sequence. A literal operand folds; any other is bound once to CAST_VAR,
+// outside every name the reading introduces, and read when the query runs,
+// so the cast is lazy.
+function castTo(name, e, emptyAllowed) {
+  // `$string` is the cast to xs:string? itself
+  if (name === 'string' && emptyAllowed)
+    return { '$string': e };
+  const type = XS_TYPES[name];
+  const folded = type.fold(e);
+  if (folded === CAST_FAILS)
+    return failedLiteralCast(name, literalOperandText(e));
+  if (folded !== undefined)
+    return folded;
+  const cast = { '$coalesce': [type.read(), failedCast(name)] };
   return {
-    min: 1,
-    max: 1,
-    emit: (args) => {
-      const e = args[0];
-      if (typeof e === 'boolean')
-        return e;
-      if (typeof e === 'number')
-        return e !== 0;
-      const literal = literalText(e);
-      if (literal !== null) {
-        const trimmed = trimXsdWhiteSpace(literal);
-        if (BOOLEAN_TRUE_TEXTS.includes(trimmed))
-          return true;
-        return BOOLEAN_FALSE_TEXTS.includes(trimmed) ? false : failedLiteralCast('boolean', literal);
-      }
-      return {
-        '$let': { [CAST_VAR]: e },
-        '$return': {
-          '$if': [
-            { '$is-boolean': CAST_ARG }, CAST_ARG,
-            { '$if': [
-              { '$is-number': CAST_ARG }, { '$boolean': CAST_ARG },
-              { '$if': [
-                { '$is-string': CAST_ARG },
-                { '$if': [isOneOf(BOOLEAN_TRUE_TEXTS), true, { '$if': [isOneOf(BOOLEAN_FALSE_TEXTS), false, failedCast('boolean')] }] },
-                { '$number': CAST_ARG }] }] }],
-        },
-      };
+    '$let': { [CAST_VAR]: e },
+    '$return': {
+      '$if': emptyAllowed
+        ? [{ '$exists': CAST_ARG }, cast]
+        : [{ '$exists': CAST_ARG }, cast, failedLiteralCast(name, 'the empty sequence')],
     },
   };
 }
 
-// The `xs:` constructor functions the JSON model has a value for. The
-// engine has one number type (D1), so integer, decimal, double and float
-// differ in the values they accept and the errors they raise, not in the
-// value they give.
-const XS_TABLE = Object.freeze({
-  'string': fnUnary('$string'),
-  'boolean': booleanConstructor(),
-  'integer': numericConstructor('integer', 'integer'),
-  'decimal': numericConstructor('decimal', 'decimal'),
-  'double': numericConstructor('double', 'double'),
-  'float': numericConstructor('float', 'double'),
-});
+// `e castable as xs:<name>` (`?` when `emptyAllowed`): whether the cast
+// would give a value - never an error. A literal operand folds to the
+// answer.
+function castableAs(name, e, emptyAllowed) {
+  const type = XS_TYPES[name];
+  const folded = type.fold(e);
+  if (folded !== undefined)
+    return folded !== CAST_FAILS;
+  return {
+    '$let': { [CAST_VAR]: e },
+    '$return': { '$if': [{ '$exists': CAST_ARG }, { '$exists': type.read() }, emptyAllowed] },
+  };
+}
+
+// The `xs:` constructor functions: `xs:T(e)` is `e cast as xs:T?`.
+const XS_TABLE = Object.freeze(Object.fromEntries(Object.keys(XS_TYPES).map((name) => [
+  name,
+  { min: 1, max: 1, emit: (args) => castTo(name, args[0], true) },
+])));
 
 // fn:tokenize splits at the matches of a regular expression, and the
 // engine has no operator that finds matches; the plain-text pattern is
@@ -485,6 +598,89 @@ const tokenizeFunction = Object.freeze({
 
 //#endregion
 
+//#region fn:remove, fn:insert-before, fn:compare
+
+// The operands of a composed function, each evaluated once and outside
+// every name the composition introduces: one array per operand, in an
+// array bound to `name` (an array constructor keeps the items of an
+// operand together in its one member), read back by `$name[i][*]`.
+function withOperands(name, args, body) {
+  return {
+    '$let': { [name]: args.map((a) => [a]) },
+    '$return': body(args.map((_, i) => `$${name}[${i}][*]`)),
+  };
+}
+
+// An F&O position is an xs:integer: one finite integral number. Anything
+// else (the empty sequence, a fraction, NaN, an infinity) is the type
+// error: the number less its truncation is 0 only for a finite integral
+// one (an infinity less itself is NaN), and `$idiv` raises on what is not
+// one number.
+function withIntegerPosition(fn, at, body) {
+  return {
+    '$if': [
+      { '$eq': [{ '$sub': [at, { '$idiv': [at, 1] }] }, 0] },
+      body,
+      raisedWith({ '$concat': [`fn:${fn}: position `, at] }),
+    ],
+  };
+}
+
+// the items of `seq` before the 1-based position `at` (`$subsequence` is
+// 0-based, D6)
+const itemsBefore = (seq, at) => ({ '$subsequence': [seq, 0, { '$sub': [at, 1] }] });
+
+// fn:remove: the target without the item at the position (the 0-based
+// start `at` is the item after it); a position outside the target removes
+// nothing
+const removeFunction = Object.freeze({
+  min: 2,
+  max: 2,
+  emit: (args) => withOperands('rm_args', args, ([target, at]) => withIntegerPosition('remove', at, {
+    '$seq': [itemsBefore(target, at), { '$subsequence': [target, at] }],
+  })),
+});
+
+// fn:insert-before: the inserts before the item at the position; a
+// position below 1 inserts before the first item, one past the end appends
+const insertBeforeFunction = Object.freeze({
+  min: 3,
+  max: 3,
+  emit: (args) => withOperands('ib_args', args, ([target, at, inserts]) => withIntegerPosition('insert-before', at, {
+    '$seq': [itemsBefore(target, at), inserts, { '$subsequence': [target, { '$sub': [at, 1] }] }],
+  })),
+});
+
+const CODEPOINT_COLLATION = 'http://www.w3.org/2005/xpath-functions/collation/codepoint';
+
+// fn:compare under the Unicode codepoint collation, the one the engine
+// has: -1, 0 or 1 as the first string sorts before, with or after the
+// second (`$lt` orders strings by code point), the empty sequence when
+// either is empty. An operand that is neither one string nor empty is the
+// type error, raised by `$string-length`, which takes nothing else.
+const compareFunction = Object.freeze({
+  min: 2,
+  max: 3,
+  emit: (args, refuse) => {
+    if (args.length === 3 && literalText(args[2]) !== CODEPOINT_COLLATION)
+      return refuse("unsupported construct 'collation'");
+    return withOperands('cmp_args', args.slice(0, 2), ([a, b]) => {
+      const fits = (e) => ({ '$or': [{ '$empty': e }, { '$is-string': e }] });
+      return {
+        '$if': [
+          { '$and': [fits(a), fits(b)] },
+          { '$if': [
+            { '$and': [{ '$exists': a }, { '$exists': b }] },
+            { '$if': [{ '$lt': [a, b] }, -1, { '$if': [{ '$eq': [a, b] }, 0, 1] }] }] },
+          { '$seq': [{ '$string-length': a }, { '$string-length': b }] },
+        ],
+      };
+    });
+  },
+});
+
+//#endregion
+
 // The supported built-in functions (bare or `fn:`-prefixed), one entry
 // per name: `{ min, max, emit(args, refuse) }` over already-emitted
 // argument expressions; `refuse(message)` throws the positioned
@@ -512,19 +708,27 @@ const FN_TABLE = Object.freeze({
   'lower-case': fnUnary('$lower'),
   'string-length': fnUnary('$string-length'),
   'normalize-space': fnUnary('$normalize-space'),
-  'contains': fnPair('$contains'),
-  'starts-with': fnPair('$starts-with'),
-  'ends-with': fnPair('$ends-with'),
+  'contains': fnArgs('$contains', 2, 2),
+  'starts-with': fnArgs('$starts-with', 2, 2),
+  'ends-with': fnArgs('$ends-with', 2, 2),
   // fn:matches tests a *substring* match (F&O), which is `$search`;
   // `$match` is the anchored RFC 9535 match() - see XQUERY-FRONTEND.md
-  'matches': fnPair('$search'),
+  'matches': fnArgs('$search', 2, 2),
   'index-of': indexOfFunction,
-  'concat': { min: 2, max: Infinity, emit: (args) => ({ '$concat': args }) },
-  'string-join': { min: 1, max: 2, emit: (args) => ({ '$string-join': args }) },
-  'replace': { min: 3, max: 3, emit: (args) => ({ '$replace': args }) },
+  'concat': fnArgs('$concat', 2, Infinity),
+  'string-join': fnArgs('$string-join', 1, 2),
+  'replace': fnArgs('$replace', 3, 3),
   'substring': fnAdjustedStart('$substring'),
   'subsequence': fnAdjustedStart('$subsequence'),
   'tokenize': tokenizeFunction,
+  'abs': fnUnary('$abs'),
+  'floor': fnUnary('$floor'),
+  'ceiling': fnUnary('$ceiling'),
+  'round': fnArgs('$round', 1, 2),
+  'round-half-to-even': fnArgs('$round-half-to-even', 1, 2),
+  'remove': removeFunction,
+  'insert-before': insertBeforeFunction,
+  'compare': compareFunction,
   // XQuery has no boolean literals; fn:true()/fn:false() are the spelling
   'true': { min: 0, max: 0, emit: () => true },
   'false': { min: 0, max: 0, emit: () => false },
@@ -1050,12 +1254,12 @@ export function parseXQuery(source) {
     }
   }
 
-  // MultiplicativeExpr ::= UnaryExpr (("*" | "div" | "idiv" | "mod") UnaryExpr)*
-  // The grammar levels between multiplicative and unary (union, intersect,
-  // except, instance of, treat as, castable as, cast as, arrow) are all
-  // outside the subset and rejected here by name.
+  // MultiplicativeExpr ::= CastableExpr (("*" | "div" | "idiv" | "mod") CastableExpr)*
+  // The other grammar levels between multiplicative and castable (union,
+  // intersect, except, instance of, treat as) are outside the subset and
+  // rejected here by name.
   function parseMultiplicative() {
-    let expr = parseUnary();
+    let expr = parseCastable();
     for (;;) {
       const save = pos;
       skipWS();
@@ -1063,37 +1267,84 @@ export function parseXQuery(source) {
       const c = cc(pos);
       if (c === CC_STAR) {
         pos++;
-        expr = { '$mul': [expr, parseUnary()] };
+        expr = { '$mul': [expr, parseCastable()] };
         continue;
       }
       if (isNameStartCode(c)) {
         const ident = parseNCName();
         if (ident === 'div') {
-          expr = { '$div': [expr, parseUnary()] };
+          expr = { '$div': [expr, parseCastable()] };
           continue;
         }
         if (ident === 'idiv') {
-          expr = { '$idiv': [expr, parseUnary()] };
+          expr = { '$idiv': [expr, parseCastable()] };
           continue;
         }
         if (ident === 'mod') {
-          expr = { '$mod': [expr, parseUnary()] };
+          expr = { '$mod': [expr, parseCastable()] };
           continue;
         }
         if (ident === 'instance')
           fail("unsupported construct 'instance of'", at);
         if (ident === 'treat')
           fail("unsupported construct 'treat as'", at);
-        if (ident === 'castable')
-          fail("unsupported construct 'castable as'", at);
-        if (ident === 'cast')
-          fail("unsupported construct 'cast as'", at);
+        // one cast and one castable at most, in that order (XPST0003)
+        if (ident === 'castable' || ident === 'cast')
+          fail(`unexpected '${ident}' after a cast or castable expression`, at);
         if (ident === 'union' || ident === 'intersect' || ident === 'except')
           fail(`unsupported construct '${ident} expression'`, at);
       }
       pos = save;
       return expr;
     }
+  }
+
+  // CastableExpr ::= CastExpr ("castable" "as" SingleType)?
+  // CastExpr ::= UnaryExpr ("cast" "as" SingleType)?
+  // (the arrow level between cast and unary is outside the subset)
+  function parseCastable() {
+    let expr = parseUnary();
+    let at = tryKeyword('cast');
+    if (at !== -1) {
+      const type = parseSingleType('cast as');
+      expr = castTo(type.name, expr, type.emptyAllowed);
+    }
+    at = tryKeyword('castable');
+    if (at !== -1) {
+      const type = parseSingleType('castable as');
+      expr = castableAs(type.name, expr, type.emptyAllowed);
+    }
+    return expr;
+  }
+
+  // SingleType ::= SimpleTypeName "?"?, after a consumed `cast` or
+  // `castable`: an `xs:` type the JSON model has a value for (XS_TYPES);
+  // any other type is refused by name. `?` admits the empty sequence.
+  function parseSingleType(construct) {
+    expectKeyword('as');
+    skipWS();
+    const at = pos;
+    let name = parseNCName();
+    if (name === 'Q' && cc(pos) === CC_LBRACE)
+      fail("unsupported construct 'URI-qualified name'", at);
+    let written = name;
+    let prefix = null;
+    if (cc(pos) === CC_COLON && isNameStartCode(cc(pos + 1))) {
+      pos++;
+      prefix = name;
+      name = parseNCName();
+      written = prefix + ':' + name;
+    }
+    if (prefix !== 'xs' || !hasOwn(XS_TYPES, name))
+      fail(`unsupported construct '${construct} ${written}'`, at);
+    const save = pos;
+    skipWS();
+    if (cc(pos) === CC_QUESTION) {
+      pos++;
+      return { name, emptyAllowed: true };
+    }
+    pos = save;
+    return { name, emptyAllowed: false };
   }
 
   // UnaryExpr ::= ("-" | "+")* ValueExpr. Unary '+' is a no-op in this

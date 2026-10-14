@@ -1,8 +1,8 @@
 {
  "$comment": "QT3 baseline: every attributed tier-A failure (see benchmark/qt3-README.md). Deviation ids: D1-D7 QUERY-FORMAT.md section 11; E1/E2 engine rules (comparison/no-atomization, sections 8.4-8.10); E3 resource guards (section 8.9); E4 NaN ordering (section 6.6); F1-F6 front-end approximations (XQUERY-FRONTEND.md section 3). skip: fatal resource exhaustion, never run in-process.",
  "summary": {
-  "pass": 3394,
-  "unsupported-syntax": 19190
+  "pass": 6098,
+  "unsupported-syntax": 16232
  },
  "tests": {
   "ArrayTest-044": {
@@ -19,6 +19,61 @@
    "status": "deviation",
    "id": "D2",
    "note": "= compares an array item structurally; XQuery atomizes the array into its members"
+  },
+  "CastAs092": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "CastAs097": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "CastAs167": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "CastAs169": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "xs:float is an IEEE double here: no single-precision value, range or serialization"
+  },
+  "CastAs171": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "CastAs173": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "CastAs175": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "xs:float is an IEEE double here: no single-precision value, range or serialization"
+  },
+  "CastAs201": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "CastAs202": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "CastAs209": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "CastAs647": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
   },
   "FOAR0001_1": {
    "status": "deviation",
@@ -119,6 +174,16 @@
    "status": "deviation",
    "id": "E1",
    "note": "booleans/mixed types do not order; value comparisons over empty sequences are false, not empty (F1)"
+  },
+  "K-GenCompEq-30": {
+   "status": "deviation",
+   "id": "E1",
+   "note": "incomparable item pairs compare false, never XPTY0004 (QUERY-FORMAT section 8.4); value comparisons are existential (F1)"
+  },
+  "K-GenCompEq-31": {
+   "status": "deviation",
+   "id": "E1",
+   "note": "incomparable item pairs compare false, never XPTY0004 (QUERY-FORMAT section 8.4); value comparisons are existential (F1)"
   },
   "K-GenCompEq-47": {
    "status": "deviation",
@@ -295,6 +360,16 @@
    "id": "D1",
    "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
   },
+  "K-SeqRemoveFunc-25": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "no numeric tower: an integral double is an integer, so 1.0 and 1.0e0 are valid xs:integer positions"
+  },
+  "K-SeqRemoveFunc-26": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "no numeric tower: an integral double is an integer, so 1.0 and 1.0e0 are valid xs:integer positions"
+  },
   "K-SeqSubsequenceFunc-27": {
    "status": "deviation",
    "id": "E1",
@@ -404,6 +479,31 @@
    "status": "deviation",
    "id": "F4",
    "note": "the version/encoding declaration is validated for shape only; XQST0031/XQST0087 are not raised"
+  },
+  "K2-ABSFunc-47": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "K2-ABSFunc-48": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "K2-ABSFunc-49": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "K2-ABSFunc-50": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "K2-ForExprPositionalVar-1": {
+   "status": "deviation",
+   "id": "D6",
+   "note": "positional variables count from 0"
   },
   "K2-ForExprPositionalVar-4": {
    "status": "deviation",
@@ -520,6 +620,26 @@
    "id": "D1",
    "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
   },
+  "K2-NumericGT-1": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "xs:long/xs:unsignedLong check their range on the double a text or literal rounds to; past 2^53 that double can lie on the other side of the bound (XQUERY-FRONTEND section 4.6)"
+  },
+  "K2-NumericGT-2": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "xs:long/xs:unsignedLong check their range on the double a text or literal rounds to; past 2^53 that double can lie on the other side of the bound (XQUERY-FRONTEND section 4.6)"
+  },
+  "K2-NumericLT-1": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "xs:long/xs:unsignedLong check their range on the double a text or literal rounds to; past 2^53 that double can lie on the other side of the bound (XQUERY-FRONTEND section 4.6)"
+  },
+  "K2-NumericLT-2": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "xs:long/xs:unsignedLong check their range on the double a text or literal rounds to; past 2^53 that double can lie on the other side of the bound (XQUERY-FRONTEND section 4.6)"
+  },
   "K2-NumericMod-22": {
    "status": "deviation",
    "id": "D1",
@@ -585,6 +705,311 @@
    "id": "D5",
    "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
   },
+  "K2-RoundEvenFunc-13": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "K2-RoundEvenFunc-14": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "K2-RoundEvenFunc-15": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "K2-RoundEvenFunc-16": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "K2-RoundFunc-117": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "K2-RoundFunc-118": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "K2-RoundFunc-13": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "K2-RoundFunc-14": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "K2-RoundFunc-16": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "K2-RoundFunc-169": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "K2-RoundFunc-17": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "K2-RoundFunc-170": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "K2-RoundFunc-173": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "K2-RoundFunc-174": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "K2-RoundFunc-177": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "K2-RoundFunc-178": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "K2-RoundFunc-18": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "K2-RoundFunc-181": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "K2-RoundFunc-182": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "K2-RoundFunc-185": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "K2-RoundFunc-186": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "K2-RoundFunc-189": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "K2-RoundFunc-190": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "K2-RoundFunc-20": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "K2-RoundFunc-26": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "K2-RoundFunc-29": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "K2-RoundFunc-30": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "K2-RoundFunc-33": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "K2-RoundFunc-34": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "K2-RoundFunc-37": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "K2-RoundFunc-38": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "K2-RoundFunc-41": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "K2-RoundFunc-42": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "K2-RoundFunc-45": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "K2-RoundFunc-46": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "K2-RoundFunc-49": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "K2-RoundFunc-50": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "K2-RoundFunc-53": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "K2-RoundFunc-54": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "K2-RoundFunc-57": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "K2-RoundFunc-58": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "K2-RoundFunc-61": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "K2-RoundFunc-62": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "K2-RoundFunc-65": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "K2-RoundFunc-66": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "K2-RoundFunc-69": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "K2-RoundFunc-70": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "K2-RoundFunc-73": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "K2-RoundFunc-74": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "K2-RoundFunc-77": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "K2-RoundFunc-78": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "K2-RoundFunc-81": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "K2-RoundFunc-82": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "K2-RoundFunc-85": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "K2-RoundFunc-86": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "K2-RoundFunc-89": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "K2-RoundFunc-90": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "K2-RoundFunc-93": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "K2-RoundFunc-94": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "K2-SeqExprCast-214": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "K2-SeqExprCast-22": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "xs:long/xs:unsignedLong check their range on the double a text or literal rounds to; past 2^53 that double can lie on the other side of the bound (XQUERY-FRONTEND section 4.6)"
+  },
   "K2-SeqExprCast-223": {
    "status": "deviation",
    "id": "D1",
@@ -594,6 +1019,16 @@
    "status": "deviation",
    "id": "D1",
    "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "K2-SeqExprCast-5": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "xs:long/xs:unsignedLong check their range on the double a text or literal rounds to; past 2^53 that double can lie on the other side of the bound (XQUERY-FRONTEND section 4.6)"
+  },
+  "K2-SeqExprCast-78": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "xs:long/xs:unsignedLong check their range on the double a text or literal rounds to; past 2^53 that double can lie on the other side of the bound (XQUERY-FRONTEND section 4.6)"
   },
   "K2-TokenizeFunc-6": {
    "status": "deviation",
@@ -845,6 +1280,91 @@
    "id": "D3",
    "note": "EBV of a singleton array/object is true, never FORG0006"
   },
+  "casthc12": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "casthc13": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "casthc17": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "xs:float is an IEEE double here: no single-precision value, range or serialization"
+  },
+  "casthc18": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "casthc24": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "cbcl-cast-decimal-001": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers and decimals are IEEE doubles: no xs:integer/xs:decimal overflow (FOCA0001/FOCA0003/FOAR0002), a huge value stays a double"
+  },
+  "cbcl-cast-decimal-002": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers and decimals are IEEE doubles: no xs:integer/xs:decimal overflow (FOCA0001/FOCA0003/FOAR0002), a huge value stays a double"
+  },
+  "cbcl-cast-decimal-003": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers and decimals are IEEE doubles: no xs:integer/xs:decimal overflow (FOCA0001/FOCA0003/FOAR0002), a huge value stays a double"
+  },
+  "cbcl-cast-decimal-004": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers and decimals are IEEE doubles: no xs:integer/xs:decimal overflow (FOCA0001/FOCA0003/FOAR0002), a huge value stays a double"
+  },
+  "cbcl-cast-integer-001": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers and decimals are IEEE doubles: no xs:integer/xs:decimal overflow (FOCA0001/FOCA0003/FOAR0002), a huge value stays a double"
+  },
+  "cbcl-cast-integer-002": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers and decimals are IEEE doubles: no xs:integer/xs:decimal overflow (FOCA0001/FOCA0003/FOAR0002), a huge value stays a double"
+  },
+  "cbcl-cast-integer-003": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers and decimals are IEEE doubles: no xs:integer/xs:decimal overflow (FOCA0001/FOCA0003/FOAR0002), a huge value stays a double"
+  },
+  "cbcl-cast-integer-004": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers and decimals are IEEE doubles: no xs:integer/xs:decimal overflow (FOCA0001/FOCA0003/FOAR0002), a huge value stays a double"
+  },
+  "cbcl-cast-long-002": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "xs:long/xs:unsignedLong check their range on the double a text or literal rounds to; past 2^53 that double can lie on the other side of the bound (XQUERY-FRONTEND section 4.6)"
+  },
+  "cbcl-cast-long-004": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "xs:long/xs:unsignedLong check their range on the double a text or literal rounds to; past 2^53 that double can lie on the other side of the bound (XQUERY-FRONTEND section 4.6)"
+  },
+  "cbcl-castable-long-002": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "xs:long/xs:unsignedLong check their range on the double a text or literal rounds to; past 2^53 that double can lie on the other side of the bound (XQUERY-FRONTEND section 4.6)"
+  },
+  "cbcl-castable-long-004": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "xs:long/xs:unsignedLong check their range on the double a text or literal rounds to; past 2^53 that double can lie on the other side of the bound (XQUERY-FRONTEND section 4.6)"
+  },
   "cbcl-count-001": {
    "status": "deviation",
    "id": "E3",
@@ -1030,6 +1550,26 @@
    "id": "D1",
    "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
   },
+  "fn-abs-more-args-002": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "fn-abs-more-args-003": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "fn-abs-more-args-009": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "fn-abs-more-args-010": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
   "fn-avg-10": {
    "status": "deviation",
    "id": "E2",
@@ -1089,6 +1629,51 @@
    "status": "deviation",
    "id": "D1",
    "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-boolean-mixed-args-039": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "xs:long/xs:unsignedLong check their range on the double a text or literal rounds to; past 2^53 that double can lie on the other side of the bound (XQUERY-FRONTEND section 4.6)"
+  },
+  "fn-ceiling-double-10": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "fn-ceiling-double-9": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "fn-ceiling-float-10": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "fn-ceiling-float-9": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "fn-ceilingdbl1args-1": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "fn-ceilingdbl1args-3": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "fn-ceilingflt1args-1": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "fn-ceilingflt1args-3": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
   },
   "fn-concatdbl2args-1": {
    "status": "deviation",
@@ -1190,6 +1775,141 @@
    "id": "D1",
    "note": "integers beyond 2^53 lose precision as IEEE doubles"
   },
+  "fn-concatlng2args-1": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-concatlng2args-2": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-concatlng2args-3": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-concatlng2args-4": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-concatlng2args-5": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-concatnint2args-1": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-concatnint2args-2": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-concatnint2args-3": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-concatnint2args-4": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-concatnint2args-5": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-concatnni2args-2": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-concatnni2args-3": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-concatnni2args-4": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-concatnni2args-5": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-concatnpi2args-1": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-concatnpi2args-2": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-concatnpi2args-3": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-concatnpi2args-4": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-concatnpi2args-5": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-concatpint2args-2": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-concatpint2args-3": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-concatpint2args-4": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-concatpint2args-5": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-concatulng2args-2": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-concatulng2args-3": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-concatulng2args-4": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-concatulng2args-5": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
   "fn-distinct-values-mixed-args-015": {
    "status": "deviation",
    "id": "D1",
@@ -1239,6 +1959,161 @@
    "status": "deviation",
    "id": "E1",
    "note": "booleans/mixed types do not order; value comparisons over empty sequences are false, not empty (F1)"
+  },
+  "fn-floor-double-10": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "fn-floor-double-11": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "fn-floor-double-9": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "fn-floor-float-10": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "fn-floor-float-11": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "fn-floor-float-9": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "fn-floordbl1args-1": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "fn-floordbl1args-3": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "fn-floordec1args-1": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-floordec1args-2": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-floordec1args-3": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-floorflt1args-1": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "fn-floorflt1args-3": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "fn-floorintg1args-1": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-floorintg1args-2": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-floorintg1args-3": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-floorlng1args-1": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-floorlng1args-2": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-floorlng1args-3": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-floornint1args-1": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-floornint1args-2": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-floornni1args-2": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-floornni1args-3": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-floornpi1args-1": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-floornpi1args-2": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-floorpint1args-2": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-floorpint1args-3": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-floorulng1args-2": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-floorulng1args-3": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-insert-before-mix-args-009": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "equality is the engine's (equalsJson): NaN equals nothing, where fn:deep-equal treats NaN as equal to itself"
+  },
+  "fn-insert-before-mix-args-012": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "equality is the engine's (equalsJson): NaN equals nothing, where fn:deep-equal treats NaN as equal to itself"
   },
   "fn-matches-25": {
    "status": "deviation",
@@ -1395,6 +2270,21 @@
    "id": "D1",
    "note": "xs:float is an IEEE double here: no single-precision value, range or serialization"
   },
+  "fn-numberint1args-1": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "fn-numberint1args-2": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "fn-numberint1args-3": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
   "fn-numberintg1args-1": {
    "status": "deviation",
    "id": "D1",
@@ -1404,6 +2294,56 @@
    "status": "deviation",
    "id": "D1",
    "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-numberlng1args-1": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "fn-numberlng1args-3": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "fn-numbernint1args-1": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "fn-numbernni1args-3": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "fn-numbernpi1args-1": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "fn-numbernpi1args-2": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "fn-numberpint1args-3": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "fn-numberulng1args-2": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "fn-remove-mix-args-011": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "equality is the engine's (equalsJson): NaN equals nothing, where fn:deep-equal treats NaN as equal to itself"
+  },
+  "fn-remove-mix-args-015": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "equality is the engine's (equalsJson): NaN equals nothing, where fn:deep-equal treats NaN as equal to itself"
   },
   "fn-replace-10": {
    "status": "deviation",
@@ -1500,6 +2440,21 @@
    "id": "D5",
    "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
   },
+  "fn-round-half-to-even-20": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "xs:decimal is an IEEE double: rounding with a precision decides on the double nearest the decimal (35.425 is 35.42499...)"
+  },
+  "fn-round-half-to-even-24": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "xs:decimal is an IEEE double: rounding with a precision decides on the double nearest the decimal (35.425 is 35.42499...)"
+  },
+  "fn-round2args-4": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "xs:decimal is an IEEE double: rounding with a precision decides on the double nearest the decimal (35.425 is 35.42499...)"
+  },
   "fn-string-2": {
    "status": "deviation",
    "id": "E2",
@@ -1555,6 +2510,71 @@
    "id": "D1",
    "note": "integers beyond 2^53 lose precision as IEEE doubles"
   },
+  "fn-stringlng1args-1": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-stringlng1args-2": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-stringlng1args-3": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-stringnint1args-1": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-stringnint1args-2": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-stringnni1args-2": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-stringnni1args-3": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-stringnpi1args-1": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-stringnpi1args-2": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-stringpint1args-2": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-stringpint1args-3": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-stringulng1args-2": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-stringulng1args-3": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
   "fn-subsequence-mix-args-013": {
    "status": "deviation",
    "id": "D1",
@@ -1586,6 +2606,21 @@
    "note": "integers beyond 2^53 lose precision as IEEE doubles"
   },
   "fn-sumintg2args-3": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-sumlng2args-1": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-sumlng2args-3": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-sumlng3args-3": {
    "status": "deviation",
    "id": "D1",
    "note": "integers beyond 2^53 lose precision as IEEE doubles"
@@ -1664,6 +2699,16 @@
    "status": "deviation",
    "id": "E2",
    "note": "aggregates treat an array as one item (no atomization), JQ2001"
+  },
+  "functx-fn-abs-3": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "functx-fn-abs-all": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
   },
   "functx-fn-replace-10": {
    "status": "deviation",
@@ -2025,6 +3070,161 @@
    "id": "D1",
    "note": "integers beyond 2^53 lose precision as IEEE doubles"
   },
+  "op-concatlng2args-1": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "op-concatlng2args-2": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "op-concatlng2args-3": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "op-concatlng2args-4": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "op-concatlng2args-5": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "op-concatnint2args-1": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "op-concatnint2args-2": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "op-concatnint2args-3": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "op-concatnint2args-4": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "op-concatnint2args-5": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "op-concatnni2args-2": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "op-concatnni2args-3": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "op-concatnni2args-4": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "op-concatnni2args-5": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "op-concatnpi2args-1": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "op-concatnpi2args-2": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "op-concatnpi2args-3": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "op-concatnpi2args-4": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "op-concatnpi2args-5": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "op-concatpint2args-2": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "op-concatpint2args-3": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "op-concatpint2args-4": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "op-concatpint2args-5": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "op-concatulng2args-2": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "op-concatulng2args-3": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "op-concatulng2args-4": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "op-concatulng2args-5": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "op-logical-and-100": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "xs:long/xs:unsignedLong check their range on the double a text or literal rounds to; past 2^53 that double can lie on the other side of the bound (XQUERY-FRONTEND section 4.6)"
+  },
+  "op-logical-and-101": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "xs:long/xs:unsignedLong check their range on the double a text or literal rounds to; past 2^53 that double can lie on the other side of the bound (XQUERY-FRONTEND section 4.6)"
+  },
+  "op-logical-or-100": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "xs:long/xs:unsignedLong check their range on the double a text or literal rounds to; past 2^53 that double can lie on the other side of the bound (XQUERY-FRONTEND section 4.6)"
+  },
+  "op-logical-or-101": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "xs:long/xs:unsignedLong check their range on the double a text or literal rounds to; past 2^53 that double can lie on the other side of the bound (XQUERY-FRONTEND section 4.6)"
+  },
   "op-numeric-addintg2args-1": {
    "status": "deviation",
    "id": "D1",
@@ -2034,6 +3234,36 @@
    "status": "deviation",
    "id": "D1",
    "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "op-numeric-addlng2args-1": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "op-numeric-addlng2args-3": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "op-numeric-divide-big-01": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers and decimals are IEEE doubles: no xs:integer/xs:decimal overflow (FOCA0001/FOCA0003/FOAR0002), a huge value stays a double"
+  },
+  "op-numeric-dividelng2args-2": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "xs:decimal arithmetic is IEEE double arithmetic: a quotient carries double precision, not decimal"
+  },
+  "op-numeric-dividelng2args-4": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "xs:decimal arithmetic is IEEE double arithmetic: a quotient carries double precision, not decimal"
+  },
+  "op-numeric-dividenint2args-4": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "xs:decimal arithmetic is IEEE double arithmetic: a quotient carries double precision, not decimal"
   },
   "op-numeric-equal-emptyseq": {
    "status": "deviation",
@@ -2066,6 +3296,26 @@
    "note": "$idiv is IEEE: a NaN or infinite operand gives NaN/Infinity and a huge quotient is a double, never FOAR0002 (QUERY-FORMAT section 8.5)"
   },
   "op-numeric-modintg2args-1": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "op-numeric-subtract-big-01": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "op-numeric-subtractlng2args-2": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "op-numeric-subtractlng2args-4": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "op-numeric-subtractpint2args-3": {
    "status": "deviation",
    "id": "D1",
    "note": "integers beyond 2^53 lose precision as IEEE doubles"

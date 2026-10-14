@@ -44,15 +44,14 @@ delete it or fix it.
 
 ## @jarenjs/json — XQuery front-end & QT3
 
-- [ ] **More `xs:*` constructors and `fn:*` mappings** — the numeric, boolean and string constructors and
-  `fn:tokenize` with a plain-text separator are mapped. What still hides most of the scorecard's
-  `unsupported-syntax` cases falls in three groups. Mappable onto an operator the engine has: `fn:round`, `abs`,
-  `floor`, `ceiling`, `round-half-to-even`, `format-number`; the derived integer types (`xs:long`, `xs:int`, ...)
-  as range-checked integers; `cast as` / `castable as` for the types already mapped. Composable from existing
-  operators, to be checked: `fn:remove`, `fn:insert-before` (from `$subsequence`), `fn:compare`. Needing an engine
-  operator first: `fn:tokenize` with a regular-expression pattern or flags (an I-Regexp split; the plain-text
-  mapping probes every position, so it is quadratic in the text length and bounded by the sequence guards),
-  `substring-before`/`-after` and `translate` (nothing finds a position in a string).
+- [ ] **More `xs:*` constructors and `fn:*` mappings** — the numeric, boolean and string constructors, the derived integer
+  types, `cast as` / `castable as` for those types, `fn:tokenize` with a plain-text separator, `abs`, `floor`, `ceiling`,
+  `round`, `round-half-to-even`, `remove`, `insert-before` and `compare` (codepoint collation) are mapped. What remains:
+  `fn:format-number`, which maps onto `$format-number` but needs the QT3 runner first (it ignores the test environments'
+  decimal-format declarations and has no mapping for `FODF1310`, so the scorecard would count right answers as failures);
+  the date, time and duration constructors (`xs:date`, `xs:dateTime`, `xs:time`, `xs:dayTimeDuration`, ...); and, needing an engine operator first, `fn:tokenize` with a regular-expression pattern
+  or flags (an I-Regexp split; the plain-text mapping probes every position, so it is quadratic in the text length and
+  bounded by the sequence guards), `substring-before`/`-after` and `translate` (nothing finds a position in a string).
 - [ ] **1-based positional *outputs*** — `at`/`count` surface the format's 0-based D6 values, so QT3 asserts them as wrong-value; fixing them would need reference rewriting. Revisit if the scorecard noise starts to matter.
 
 ## @jarenjs/validate

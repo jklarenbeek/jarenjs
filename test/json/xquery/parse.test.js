@@ -601,8 +601,8 @@ describe('XQuery front-end parser', () => {
     it('should reject the type operators by name', () => {
       failsWith('1 instance of xs:integer', "unsupported construct 'instance of'", 2);
       failsWith('$x treat as item()', "unsupported construct 'treat as'", 3);
-      failsWith('$x castable as xs:int', "unsupported construct 'castable as'", 3);
-      failsWith('$x cast as xs:int', "unsupported construct 'cast as'", 3);
+      failsWith('$x castable as xs:date', "unsupported construct 'castable as xs:date'", 15);
+      failsWith('$x cast as xs:date', "unsupported construct 'cast as xs:date'", 11);
     });
 
     it('should reject the set operators by name', () => {

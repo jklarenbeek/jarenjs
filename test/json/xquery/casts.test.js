@@ -1,67 +1,10 @@
 import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
 
-import * as fs from 'node:fs';
-import * as path from 'node:path';
-import { fileURLToPath } from 'node:url';
-
-import { parseXQuery, compileXQuery, XQuerySyntaxError } from '@jarenjs/json/xquery';
+import { compileXQuery } from '@jarenjs/json/xquery';
 import { JsonQueryRuntimeError } from '@jarenjs/json/query';
 
-import { JarenValidator } from '@jarenjs/validate';
-import * as formats from '@jarenjs/formats';
-
-// Every emitted document must validate against both query-format schema
-// artifacts before it is compiled and run.
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const schemasDir = path.join(__dirname, '..', '..', '..', 'packages', 'json', 'schemas');
-
-function compileArtifact(name) {
-  const schema = JSON.parse(fs.readFileSync(path.join(schemasDir, name), 'utf8'));
-  const compiler = new JarenValidator({ formatAssertion: true });
-  compiler.addFormats(formats.jsonFormats);
-  return compiler.compile(schema);
-}
-
-const validators = [
-  ['draft 2020-12 (canonical)', compileArtifact('jaren-query.schema.json')],
-  ['draft-07 (twin)', compileArtifact('jaren-query.draft-07.schema.json')],
-];
-
-function validated(text) {
-  const doc = parseXQuery(text);
-  for (const [draft, validate] of validators) {
-    assert.strictEqual(validate(doc), true,
-      `emitted document must validate under ${draft}: ${JSON.stringify(doc)}`);
-  }
-  return doc;
-}
-
-// the result sequence of `text`, run with the externals; the array
-// constructor around it makes an empty result [] and a singleton [item]
-function values(text, externals = {}) {
-  validated(text);
-  return compileXQuery(`[${text}]`)(null, externals);
-}
-
-// the cast error: the engine's type error, raised when the query runs
-function failsAtRun(text, externals = {}) {
-  validated(text);
-  assert.throws(() => compileXQuery(`[${text}]`)(null, externals), (e) => {
-    assert.ok(e instanceof JsonQueryRuntimeError, `expected a runtime error, got ${e.name}: ${e.message}`);
-    assert.strictEqual(e.code, 'JQ2001', e.message);
-    return true;
-  });
-}
-
-function failsWith(src, part, position) {
-  assert.throws(() => parseXQuery(src), (e) => {
-    assert.ok(e instanceof XQuerySyntaxError, `expected XQuerySyntaxError, got ${e.name}: ${e.message}`);
-    assert.ok(e.message.includes(part), `expected message to include ${JSON.stringify(part)}, got: ${e.message}`);
-    assert.strictEqual(e.position, position);
-    return true;
-  });
-}
+import { validated, values, failsAtRun, failsWith } from './emitted.js';
 
 const NEG_ZERO = -0;
 
@@ -289,7 +232,7 @@ describe('XQuery front-end xs: constructors', () => {
     it('should refuse a type the JSON model has no value for', () => {
       failsWith('xs:date("2020-01-01")', "unsupported function 'xs:date'", 0);
       failsWith('xs:dateTime($x)', "unsupported function 'xs:dateTime'", 0);
-      failsWith('xs:long("1")', "unsupported function 'xs:long'", 0);
+      failsWith('xs:gYear("2020")', "unsupported function 'xs:gYear'", 0);
       failsWith('xs:untypedAtomic($x)', "unsupported function 'xs:untypedAtomic'", 0);
       failsWith('xs:anyURI("a")', "unsupported function 'xs:anyURI'", 0);
     });
@@ -305,8 +248,9 @@ describe('XQuery front-end xs: constructors', () => {
       failsWith('fn:double("1")', "unsupported function 'fn:double'", 0);
     });
 
-    it('should keep the cast expressions unsupported', () => {
-      failsWith('"1" cast as xs:integer', "unsupported construct 'cast as'", 4);
+    it('should refuse a cast to one of them by name', () => {
+      failsWith('"1" cast as xs:date', "unsupported construct 'cast as xs:date'", 12);
+      failsWith('"1" castable as xs:date?', "unsupported construct 'castable as xs:date'", 16);
     });
   });
 });

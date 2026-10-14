@@ -43,6 +43,7 @@ q(null, { doc: data }); // parse + compile convenience; returns the engine's com
   | `unsupported construct '<name>'` | recognized XQuery construct outside the subset |
   | `unsupported function '<name>'` / `unsupported function '<name>#<arity>'` | function (or an arity of one) outside the mapping table |
   | `unsupported construct 'tokenize pattern other than plain text'` / `'tokenize separator that overlaps itself'` | `fn:tokenize` with a pattern the document cannot split at (§4.6) |
+  | `unsupported construct 'cast as <name>'` / `'castable as <name>'` | a cast to a type outside the mapped ones (§4.6) |
   | `unsupported clause order: '<kw>' after '<kw>'` | FLWOR clause sequence that cannot be expressed by nesting (§5.1) |
   | `unsupported variable name '<name>'`, `unsupported lookup index 0 ...` | lexeme outside the JSON format's rules |
 
@@ -140,19 +141,21 @@ compileXQuery(text)(null, { doc: inputDocument });
 > `array { ... }` has identical flattening semantics in both languages.
 > Members that are singletons (the JSON-shaped case) agree everywhere.
 
-> ### ⚠ `xs:` constructors: one number type, JSON-model values
+> ### ⚠ `xs:` constructors and casts: one number type, JSON-model values
 >
-> `xs:integer`, `xs:decimal`, `xs:double`, `xs:float`, `xs:boolean` and
-> `xs:string` are constructor functions (§4.6). The engine has one number
-> type (**D1**), so the numeric constructors differ in the *text and values
+> `xs:integer`, `xs:decimal`, `xs:double`, `xs:float`, `xs:boolean`,
+> `xs:string` and the integer types XSD derives by range (`xs:long`,
+> `xs:int`, ..., `xs:negativeInteger`) are constructor functions and the
+> types `cast as` and `castable as` take (§4.6). The engine has one number
+> type (**D1**), so the numeric types differ in the *text and values
 > they accept and the errors they raise*, not in the value they give:
 > `xs:float` is a double (no single-precision rounding, range or
 > overflow to `INF`), `xs:integer(7.9)` is `7`, and an integer or decimal
-> beyond 2^53 loses precision. A cast that fails raises `JQ2001` (the
+> beyond 2^53 loses precision (`xs:long` and `xs:unsignedLong` check their
+> range on that double). A cast that fails raises `JQ2001` (the
 > analogue of `FORG0001`, `FOCA0002` and `XPTY0004` alike), when the cast is
-> evaluated, never when the query is read. `cast as`, `castable as` and the
-> other `xs:` types (dates, durations, binary, the derived integer types)
-> stay outside the subset (§6).
+> evaluated, never when the query is read. The other `xs:` types (dates,
+> durations, binary, `xs:untypedAtomic`, ...) stay outside the subset (§6).
 
 ## 4. The supported subset
 
@@ -182,6 +185,7 @@ compileXQuery(text)(null, { doc: inputDocument });
 | `A \|\| B \|\| ...` | `{"$concat": [A, B, ...]}` |
 | `A to B` | `{"$range": [A, B]}` |
 | `+ - * div idiv mod` | `$add $sub $mul $div $idiv $mod` (binary, left-associative) |
+| `E cast as T`, `E cast as T?`, `E castable as T`, `E castable as T?` | the cast's `$let` phrase, or the folded literal (§4.6) |
 | unary `-E` / `+E` | `{"$neg": E}` (folded into number literals: `-5` → `-5`) / no-op |
 | postfix lookup `?name ?N ?*` | path fold, `$let`-bound path, or `$get` (§4.3) |
 | `map { K: V, ... }` | plain map constructor / `$map` (§4.4) |
@@ -279,13 +283,19 @@ Any other prefix, any name not listed, or any arity not listed is an error
 | `reverse`, `head`, `tail` | 1 | `$reverse`, `$head`, `$tail` |
 | `subsequence` | 2–3 | `{"$subsequence": [seq, start−1, len?]}` (**start adjusted**, §3) |
 | `index-of` | 2 | a `$for` over `{"$index-of": [seq, item]}` adding 1 to each position (**results adjusted to 1-based**, §3) |
+| `abs`, `floor`, `ceiling` | 1 | `$abs`, `$floor`, `$ceiling` |
+| `round`, `round-half-to-even` | 1–2 | `{"$round": [e, precision?]}`, `$round-half-to-even` (F&O rounding over doubles, QUERY-FORMAT §8.5) |
+| `remove` | 2 | a `$let` phrase: the items before the position and after it (§4.7) |
+| `insert-before` | 3 | a `$let` phrase: the items before the position, the inserts, the rest (§4.7) |
+| `compare` | 2–3 | a `$let` phrase ordering two strings by code point; the third argument only the codepoint collation (§4.7) |
 | `true`, `false` | 0 | the literals `true` / `false` |
 | `map:get` | 2 | `{"$get": [map, key]}` (key never adjusted) |
 | `array:get` | 2 | `{"$get": [array, pos−1]}` (**position adjusted**, §3) |
 | `xs:string` | 1 | `{"$string": e}` |
 | `xs:integer`, `xs:decimal`, `xs:double`, `xs:float`, `xs:boolean` | 1 | folded literal or a `$let` phrase (§4.6) |
+| `xs:long`, `xs:int`, `xs:short`, `xs:byte`, `xs:unsignedLong`, `xs:unsignedInt`, `xs:unsignedShort`, `xs:unsignedByte`, `xs:nonNegativeInteger`, `xs:positiveInteger`, `xs:nonPositiveInteger`, `xs:negativeInteger` | 1 | folded literal or a `$let` phrase checking the range (§4.6) |
 
-### 4.6 The `xs:` constructors and `fn:tokenize`
+### 4.6 The `xs:` constructors, `cast as`, `castable as` and `fn:tokenize`
 
 **Numeric constructors** read their operand by what it is:
 
@@ -315,7 +325,7 @@ Any other operand is bound once to the variable `xs_arg` in a `$let` phrase
 whose `$return` reads it by the table above, so the cast is lazy: `if
 (false()) then xs:integer("x") else 1` is `1`. The phrase is larger than the
 `$number` it replaces and costs a pattern match or two for a string operand;
-a number or a boolean takes one `$if` branch.
+a number or a boolean costs a few type tests.
 
 `xs:boolean` is not the `$boolean` operator, which is the effective boolean
 value (for which the string `"false"` is `true`): a boolean is itself, a
@@ -324,6 +334,39 @@ or `false`/`0` and nothing else, and the empty sequence is empty.
 `xs:string(e)` is `{"$string": e}`: `xs:string(())` is the empty sequence, an
 array or object is `JQ2001`, and a number serializes the way JavaScript does
 (`Infinity`, `1e+21`; deviation **D1**), not as XDM's canonical form.
+
+**Derived integer types.** `xs:long`, `xs:int`, `xs:short`, `xs:byte`,
+`xs:unsignedLong`, `xs:unsignedInt`, `xs:unsignedShort`,
+`xs:unsignedByte`, `xs:nonNegativeInteger`, `xs:positiveInteger`,
+`xs:nonPositiveInteger` and `xs:negativeInteger` read their operand as
+`xs:integer` does and keep the integer only inside the type's range;
+outside it the cast fails with `JQ2001` (XQuery's `FORG0001`), the type and
+the operand in the message: `xs:byte("127")` emits `127`, `xs:byte(300)`
+emits `{"$number": "xs:byte: 300"}`, `xs:unsignedInt("-0")` emits `0`. For
+any other operand the phrase reads the integer and keeps it with a `$where`
+on the range (bound to `xs_int`). The ranges of `xs:long` and
+`xs:unsignedLong` reach past 2^53, where an integer is a double (**D1**): a
+text or a literal is read as the double nearest it first, and the range is
+then checked on that double, exactly. Near those bounds a value is judged by
+the double it rounds to: `xs:long("9223372036854775807")` rounds to 2^63 and
+fails, `xs:long("-9223372036854775809")` rounds to -2^63 and gives it, and
+`xs:unsignedLong("18446744073709551615")` rounds to 2^64 and fails.
+
+**`cast as` and `castable as`.** `E cast as xs:T?` is the constructor
+`xs:T(E)`; `E cast as xs:T` is the same cast, except that the empty
+sequence fails with `JQ2001` (XQuery's `XPTY0004`). `E castable as xs:T` is
+`true` when the cast gives a value and `false` when it would fail, and is
+never an error itself: both read the operand the same way, and the cast
+raises only where that reading gives no value. The empty sequence is
+castable only as `xs:T?`, two or more items as nothing. `T` is one of the
+types of this section, written with the `xs:` prefix; any other
+(`xs:date`, `xs:anyAtomicType`, an unprefixed name) is `unsupported
+construct 'cast as <name>'` or `'castable as <name>'`. A literal operand
+folds: `"12" castable as xs:byte` emits `true`. The grammar is XQuery's:
+unary minus binds tighter (`-1 cast as xs:string` is `"-1"`), arithmetic
+looser (`1 + "2" cast as xs:integer` is `3`), and an expression takes one
+`cast` and then one `castable` at most (`1 cast as xs:integer cast as
+xs:string` is a syntax error; parenthesize the operand instead).
 
 **`fn:tokenize`** splits at the matches of a regular expression, and the
 engine has no operator that finds matches, so the front-end maps the one
@@ -344,6 +387,33 @@ sequence the engine's guards bound: a text longer than 1,000,000 code points
 is `JQ2007`, one longer than a lower `limits.sequenceItems` is `JQ2009`. A
 long text wants a regular-expression operator in the engine, which does not
 exist.
+
+### 4.7 `fn:remove`, `fn:insert-before` and `fn:compare`
+
+The engine has no operator for these three; each composes from operators it
+has. Every operand is evaluated once, outside the names the composition
+binds: the operands are bound together, one array per operand (an array
+constructor keeps an operand's items together as its members) —
+`remove($xs, $p)` emits `{"$let": {"rm_args": [["$xs"], ["$p"]]}, ...}` and
+reads the operands back as `"$rm_args[0][*]"` and `"$rm_args[1][*]"`
+(`ib_args` for `insert-before`, `cmp_args` for `compare`).
+
+- `remove(target, position)` is the items before the position followed by
+  the items after it, two `$subsequence`s; `insert-before(target,
+  position, inserts)` puts the inserts between the items before the
+  position and the rest. As in F&O, a position outside the target removes
+  nothing, one below 1 inserts before the first item and one past the end
+  appends.
+- The position is an `xs:integer`: one finite integral number, else
+  `JQ2001` (XQuery's `XPTY0004`). With one number type (**D1**), `1.0` and
+  `1e0` are integers here, where XQuery refuses a decimal or a double.
+- `compare(a, b)` is `-1`, `0` or `1` as `a` sorts before, with or after `b`
+  by code point — the order `$lt` gives two strings, so U+FFFD sorts before
+  U+1F600, which UTF-16 order would reverse — and the empty sequence when
+  either is empty. An operand that is neither one string nor empty is
+  `JQ2001`. The third argument may only be the codepoint collation's URI
+  (`http://www.w3.org/2005/xpath-functions/collation/codepoint`) as a
+  literal; any other collation is `unsupported construct 'collation'`.
 
 ## 5. FLWOR
 
@@ -423,14 +493,15 @@ Each is recognized and rejected by name (`unsupported construct '...'`):
 | unary lookup `?name`, `?( E )` keys, `?0` | `unary lookup`, `parenthesized lookup key`, `unsupported lookup index 0` |
 | predicates `E[...]` | `predicate` |
 | dynamic calls `E(...)`, `name#arity`, inline `function(){}`, `?` placeholder | `dynamic function call`, `named function reference`, `inline function expression`, `argument placeholder` |
-| `instance of`, `treat as`, `castable as`, `cast as` | `instance of`, `treat as`, `castable as`, `cast as` |
+| `instance of`, `treat as` | `instance of`, `treat as` |
+| `cast as` / `castable as` a type outside §4.6 (`xs:date`, `xs:anyAtomicType`, an unprefixed name, ...) | `cast as <name>`, `castable as <name>` |
 | `union` / `\|`, `intersect`, `except` | `union expression`, ... |
 | node comparisons `is`, `<<`, `>>` | `node comparison` |
 | arrow `=>`, simple map `!` | `arrow expression`, `simple map operator` |
 | `switch`, `typeswitch`, `try { } catch { }` | `switch expression`, `typeswitch expression`, `try/catch expression` |
 | direct (`<a/>`) and computed node constructors, `ordered {}`, `unordered {}`, `validate {}` | `node constructor`, `computed node constructor`, ... |
 | type declarations `as T` (anywhere), `allowing empty`, window clauses, collations | `type declaration`, `allowing empty`, `window clause`, `collation` |
-| `xs:` constructors other than §4.6's six (`xs:date`, `xs:dayTimeDuration`, `xs:long`, `xs:int`, `xs:hexBinary`, `xs:untypedAtomic`, `xs:anyURI`, ...) | `unsupported function '<name>'` |
+| `xs:` constructors other than §4.6's (`xs:date`, `xs:dayTimeDuration`, `xs:hexBinary`, `xs:untypedAtomic`, `xs:anyURI`, ...) | `unsupported function '<name>'` |
 | string `&`-entities, non-finite number literals (`1e400`) | `character reference`, `non-finite number literal` |
 | string constructors `` `...` ``, ` ``[...]`` ` | `string constructor` |
 | annotations `declare %ann ...` | `annotation` |
