@@ -643,10 +643,10 @@ what each does is its own documentation's job
   closure's source text (the method table returns a function for every
   operator-method name). Wanted: a `Symbol.toPrimitive` on the returned method
   that answers `JL0108` naming the method and its call.
-- [ ] **`.all()` on a relation-hop member does not fan.**
-  `p.author.tags.all().eq('a')` emits `$r1.tags` (no `[*]`), so the fanned
-  comparison the array-method refusal names matches nothing off a hop target's
-  array member; the same spelling works on a path member.
+- [ ] **A hop member cannot be the list of `in`.** `x.in(p.author.tags.all())`
+  is refused `JL0005` ('cannot follow an operator result or a relation'), where
+  `.all().eq(v)` on the same hop member now fans; and `.all().all()` on a hop
+  member appends a second `[*]`, as a path member does.
 - [ ] **A PostgreSQL table keeps the unguarded definitions of an open-container
   index path until its index is dropped and declared again; a comparison,
   ordering or grouping over such a path reads the guarded document and does not

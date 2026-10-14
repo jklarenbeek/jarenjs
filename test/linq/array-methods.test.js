@@ -168,11 +168,13 @@ describe('a member of a relation hop is refused the same way', () => {
     assert.throws(() => posts().select((p) => ({ v: p.author.tags.map((t) => t) })),
       (e) => e.code === 'JL0108' && /^JL0108: \.map\(\)/.test(e.message));
     assert.deepStrictEqual(posts().select((p) => p.author.filter).toArray(), ['k']);
-    // a relation target's array member cannot be fanned in a capture: the message names the spelling that runs
+    // the message names the fanned comparison, which fans a relation target's array member as a path member
+    // (`in()` over the member is not offered: it is refused off a relation)
     assert.throws(() => posts().where((p) => p.author.tags.includes('a')),
       (e) => e.message === 'JL0108: .includes() is a JavaScript array method, and a captured expression has none — it stands '
-        + 'for a value the engine computes later; a relation target\'s array member cannot be fanned in a capture, so index '
-        + 'one element with .at(i) — p.author.tags.at(0).eq(v) — and test it');
+        + 'for a value the engine computes later; test the elements with a fanned comparison — x.tags.all().eq(v) holds when '
+        + 'any element equals v (on a string member, x.name.contains(v))');
+    assert.deepStrictEqual(posts().where((p) => p.author.tags.all().eq('a')).select((p) => p.pid).toArray(), [1]);
     assert.deepStrictEqual(posts().where((p) => p.author.tags.at(0).eq('a')).select((p) => p.pid).toArray(), [1]);
     assert.deepStrictEqual(posts().where((p) => p.author.tags.at(0).eq('zz')).select((p) => p.pid).toArray(), []);
   });

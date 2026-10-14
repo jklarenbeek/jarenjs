@@ -713,8 +713,14 @@ const METHODS = {
     return makeExpr({ $get: [record.doc, toExpression(index)] }, record.epoch, false);
   },
   all(record) {
-    // a hop's related rows, fanned: the phrase itself, a sequence
-    if (record.hop !== undefined) return makeHop({ ...record.hop, fan: true }, record.epoch, record.nav);
+    // a hop's related rows, fanned: the phrase itself, a sequence; an
+    // array MEMBER of a hop's target fans as a path member does, the
+    // phrase returning `$r1.tags[*]`
+    if (record.hop !== undefined) {
+      const { hop } = record;
+      return makeHop(readsMember(hop) ? { ...hop, ret: `${hop.ret}[*]`, fan: true } : { ...hop, fan: true },
+        record.epoch, record.nav);
+    }
     // a bound array's fan carries the array's navigation (a group-join's
     // group holds the inner rows; a hop off them binds each row first)
     if (record.seq !== undefined) return makeExpr(record.seq, record.epoch, true, { nav: record.nav, fanned: true });
@@ -843,6 +849,14 @@ function makeHop(hop, epoch, nav, arrayMethod = undefined) {
   return makeExpr(hop.many && !hop.fan ? [phrase] : phrase, epoch, false,
     { seq: phrase, nav, hop, arrayMethod });
 }
+
+/**
+ * Whether a hop returns a member of its target row (`$r1.tags`) and not the
+ * row itself (`$r1`): a member of an array is fanned with a `[*]` step on
+ * its path, a row is already one element of the phrase's sequence.
+ * @param {{ chain: any[], ret: string }} hop
+ */
+const readsMember = (hop) => hop.ret !== '$' + hop.chain[hop.chain.length - 1].binding;
 
 /**
  * Record one hop: `member` is a relation of the rows `target` stands
@@ -997,14 +1011,13 @@ function toJSON() {
     + 'document member named toJSON is read with get(\'toJSON\'))');
 }
 
-/** The spelling for an array member of a relation target, whichever method was called. */
-const HOP_MEMBER = 'a relation target\'s array member cannot be fanned in a capture, so index one '
-  + 'element with .at(i) — p.author.tags.at(0).eq(v) — and test it';
+/** The spelling of an element TEST, shared by the methods that search; it
+ * runs off a relation target's array member as off a path member. */
+const ELEMENT_TEST_FAN = 'test the elements with a fanned comparison — x.tags.all().eq(v) holds when any '
+  + 'element equals v (on a string member, x.name.contains(v))';
 
-/** The spelling of an element TEST, shared by the methods that search. */
-const ELEMENT_TEST = 'test the elements with a fanned comparison — x.tags.all().eq(v) holds when any '
-  + 'element equals v (on a string member, x.name.contains(v)); for a scalar in a list write '
-  + 'v.in([a, b]) or v.in(x.tags)';
+/** The same, for a member of the row itself: a scalar in a list is `in()` over the path. */
+const ELEMENT_TEST = `${ELEMENT_TEST_FAN}; for a scalar in a list write v.in([a, b]) or v.in(x.tags)`;
 
 /** The spelling of a per-element PREDICATE, shared by the methods that take one. */
 const ELEMENT_PREDICATE = 'a capture has no per-element predicate; compare a fanned member '
@@ -1054,14 +1067,15 @@ const ARRAY_METHODS = {
  * (`JL0108`) naming the query-language spelling, where the member's host
  * value would have thrown `x.tags.includes is not a function`.
  * @param {string} name
- * @param {boolean} [hop] - the member is read off a relation target, whose
- *   array members cannot be fanned in a capture (`.all()` lowers without a fan)
+ * @param {boolean} [hop] - the member is read off a relation target, where
+ *   `in()` over the member is refused: the element test names the fan alone
  * @returns {never}
  */
 function refuseArrayMethod(name, hop = false) {
+  const spelling = hop && ARRAY_METHODS[name] === ELEMENT_TEST ? ELEMENT_TEST_FAN : ARRAY_METHODS[name];
   throw new LinqBuildError('JL0108',
     `.${name}() is a JavaScript array method, and a captured expression has none — it stands for `
-    + `a value the engine computes later; ${hop ? HOP_MEMBER : ARRAY_METHODS[name]}`);
+    + `a value the engine computes later; ${spelling}`);
 }
 
 /**
