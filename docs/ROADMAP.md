@@ -220,9 +220,6 @@ costs a descriptor plus examples and no UI code at all.
   document implies having all of it, so this waits for a consumer that
   genuinely edits a stream.
 
-- [ ] **An empty root array and an empty table are the same JOSL text.**
-  `stringifyJosl([])` is `''`, which reads back as `{}`.
-
 ## @jarenjs/linq & @jarenjs/db — the data pair
 
 The fluent front door and the SQLite document store shipped as a pair;

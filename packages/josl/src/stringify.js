@@ -285,7 +285,8 @@ export function formatSection(obj, options = {}, headerPath = []) {
 /**
  * Serialize a value to JOSL (or strict TOML) text.
  * @param {object|Array} value - A plain object root, or (JOSL mode only)
- *  an array of plain objects for a [[]] root-array document
+ *  an array of plain objects for a [[]] root-array document (`[]` when
+ *  it has no element)
  * @param {object} [options] - Writer options
  * @param {'josl'|'toml'} [options.mode] - 'toml' emits strict TOML 1.0
  * @param {'error'|'omit'} [options.onNull] - TOML mode: what to do with
@@ -313,7 +314,7 @@ export function stringifyJosl(value, options = {}) {
       ctx.path.pop();
     }
     if (value.length === 0)
-      return '';
+      return '[]\n';
   }
   else if (isPlainOptions(value))
     emitTable(ctx, '', value);

@@ -20,6 +20,9 @@ import {
 import { closeIterator, abortedError } from './pull.js';
 import { admitOptions, JOSL_WRITE, JOSL_STREAM_WRITE, JOSL_PULL_WRITE } from './options.js';
 
+// the text of a root array with no element, the same from every writer
+const EMPTY_ROOT_ARRAY = '[]\n';
+
 class JoslStreamWriter {
   constructor(options = {}) {
     this.options = {
@@ -127,6 +130,30 @@ class JoslStreamWriter {
     return this;
   }
 
+  // what both root-array spellings need of the document so far
+  admitRootArray() {
+    this.guard();
+    if (this.options.mode === 'toml')
+      throw new JoslStringifyError('root arrays ([[]]) are a JOSL extension');
+    if (this.rootHasPairs || (!this.rootIsArray && this.sawSection))
+      throw new JoslStringifyError('cannot mix a root table and a root array');
+  }
+
+  /**
+   * Declare the document an empty root array: the one-line `[]`, for a
+   * root array that ends up with no element (JOSL mode only). An array
+   * with elements needs no declaration - `rootItem` makes the root one.
+   * @returns {this} The writer, for chaining
+   */
+  rootArray() {
+    this.admitRootArray();
+    if (this.rootIsArray)
+      throw new JoslStringifyError('the root array is already declared');
+    this.rootIsArray = true;
+    this.emit(EMPTY_ROOT_ARRAY);
+    return this;
+  }
+
   /**
    * Start a `[[]]` root-array element (JOSL mode only). With a record
    * argument the whole table body is emitted at once - the natural
@@ -135,11 +162,7 @@ class JoslStreamWriter {
    * @returns {this} The writer, for chaining
    */
   rootItem(record = undefined) {
-    this.guard();
-    if (this.options.mode === 'toml')
-      throw new JoslStringifyError('root arrays ([[]]) are a JOSL extension');
-    if (this.rootHasPairs || (!this.rootIsArray && this.sawSection))
-      throw new JoslStringifyError('cannot mix a root table and a root array');
+    this.admitRootArray();
     this.rootIsArray = true;
     this.headerScope++;
     this.sectionKeys = new Set();
@@ -219,6 +242,8 @@ export function* stringifyJoslChunks(value, options = {}) {
   if (Array.isArray(value)) {
     if (options.mode === 'toml')
       throw new JoslStringifyError('a TOML root must be a table; root arrays are a JOSL extension');
+    if (value.length === 0)
+      yield EMPTY_ROOT_ARRAY;
     for (let i = 0; i < value.length; ++i)
       yield rootItemChunk(value[i], i, options);
     return;
@@ -282,6 +307,8 @@ export async function* stringifyJoslStream(records, options = {}) {
       }
       yield rootItemChunk(step.value, index++, options);
     }
+    if (index === 0)
+      yield EMPTY_ROOT_ARRAY;
   }
   finally {
     if (!finished)

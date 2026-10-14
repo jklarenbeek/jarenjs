@@ -88,7 +88,7 @@ The unified event vocabulary:
 | `item` | jsonx | `path`, `index`, `value`, `line` | a scalar array element completes |
 | `object-start` / `array-start` | jsonx | `path`, `line` | `{` / `[` opened |
 | `object-end` / `array-end` | jsonx | `path`, `value`, `line` | `}` / `]` closed |
-| `table` / `table-array` / `root-item` | josl | `path`, `line` (+`index`) | a header line completes |
+| `table` / `table-array` / `root-array` / `root-item` | josl | `path`, `line` (+`index` on `root-item`) | a header line completes |
 | `text-partial` | jsonx | `path`, `text`, `line` | more of a string arrived (opt-in) |
 
 Paths are absolute (strings for keys, numbers for indices), so events
@@ -276,6 +276,12 @@ Each `[[]]` completes the previous record — `reader.root()` exposes the
 partial array at any time, so record *N* can be processed while the
 model is still emitting record *N+1*.
 
+A list with no records is the one-line document `[]`
+(`stringifyJosl([])` writes it, `parseJosl('[]')` reads `[]`), distinct from
+the empty document, which reads `{}`. An empty list was once written as an
+empty string, which reads `{}`; a reader that predates `[]` refuses it, so
+a list that may be empty and must reach such a reader needs a wrapper key.
+
 ## Streaming writer
 
 The write-side mirror of the reader — build a document event by event and
@@ -288,7 +294,8 @@ const w = createStreamWriter({ onChunk: (c) => response.write(c), buffer: false 
 w.pair('title', 'run 42')
   .table('server')
   .pair('host', 'localhost');
-// root-array documents: w.rootItem(record) per completed record
+// root-array documents: w.rootItem(record) per completed record,
+// or w.rootArray() for a root array with none (written `[]`)
 w.end();                                     // '' — buffer: false retains nothing; the sink has it
 
 // or stream an existing value, one chunk per [[]] record:

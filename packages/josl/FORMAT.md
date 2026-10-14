@@ -90,6 +90,19 @@ root; mixing the two is an error.
 Root array elements are tables. Root arrays of scalars are intentionally
 not supported (use a wrapper key); this keeps `[[]]` unambiguous.
 
+A root array with no element is written `[]` on a line of its own, which
+is how `stringifyJosl([])` spells it and how it reads back (`{}` is the
+empty document, so the two cannot share a spelling). `[]` declares the
+root an array and appends nothing; `[[]]` elements may follow it, and a
+`[table]`, `[[array]]` or key-value pair before the first `[[]]` is an
+error as it is in any root array. It is written once, as the first
+header: after a `[[]]` element, after a second `[]`, or in a document
+that has an object root it is an error. Strict TOML mode refuses it with
+the rest of the root-array extension (`[]` was never a valid TOML header,
+so no TOML document changes meaning). The writer uses `[]` for an empty
+root array only; every table and every non-empty root array is written
+with the headers above.
+
 ### Datetimes (inherited, clarified)
 
 TOML's four datetime flavours are kept as-is; JOSL pins the JavaScript
@@ -124,6 +137,7 @@ completes:
 | --- | --- |
 | `{type:'table', path, line}` | a `[header]` opened |
 | `{type:'table-array', path, line}` | a `[[header]]` appended an element |
+| `{type:'root-array', path, line}` | a `[]` empty root array declared (`path` is `[]`) |
 | `{type:'root-item', path, index, line}` | a `[[]]` element started |
 | `{type:'pair', path, key, value, line}` | a key-value completed |
 
@@ -136,7 +150,7 @@ visits leaves bottom-up, only after the full text has arrived, and never
 tells you where you are.
 
 The write side mirrors this: `createStreamWriter` emits text chunks
-event by event (`pair`, `table`, `tableArray`, `rootItem`; `buffer:
+event by event (`pair`, `table`, `tableArray`, `rootArray`, `rootItem`; `buffer:
 false` retains none of them), `stringifyJoslChunks` streams an existing
 value one `[[]]` record at a time, and `stringifyJoslStream` pulls
 records from an async source one per chunk — all byte-identical to

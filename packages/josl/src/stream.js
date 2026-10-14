@@ -17,6 +17,7 @@ import { admitOptions, JOSL_READ, JOSL_ITERATE } from './options.js';
  * Events, in document order:
  *   {type:'table',       path, line}          - a [header] opened
  *   {type:'table-array', path, line}          - a [[header]] appended
+ *   {type:'root-array',  path, line}          - a [] empty root array declared
  *   {type:'root-item',   path, index, line}   - a [[]] element started
  *   {type:'pair',        path, key, value, line} - a key-value completed
  *

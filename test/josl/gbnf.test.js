@@ -102,7 +102,7 @@ describe('josl: gbnf accepts the official valid corpus', () => {
 });
 
 describe('josl: gbnf covers the JOSL extensions', () => {
-  for (const doc of ['n = null\n', 'b = 123n\n', 'h = 0xffn\n', 're = /a+[/x]/gi\n', '[[]]\nid = 1\n']) {
+  for (const doc of ['n = null\n', 'b = 123n\n', 'h = 0xffn\n', 're = /a+[/x]/gi\n', '[[]]\nid = 1\n', '[]\n']) {
     it(`accepts ${JSON.stringify(doc)} in josl mode`, () => {
       ok(recognizes(joslBnf, doc));
       // and the parser agrees the text is a document

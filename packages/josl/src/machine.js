@@ -20,7 +20,8 @@
 //   regexp          key = /pattern/flags   (JS literal syntax)
 //   root array      [[]] starts/appends an element of a root-level array;
 //                   later [table] / [[array]] headers are scoped to the
-//                   current root element.
+//                   current root element; [] declares a root array with
+//                   no element.
 
 import {
   CC_TAB,
@@ -281,7 +282,7 @@ export class JoslMachine {
 
   /**
    * The (possibly still growing) root value: `{}`-rooted for documents,
-   * `[]`-rooted after a `[[]]` header. Undefined content yields `{}`.
+   * array-rooted after a `[[]]` or `[]` header. Undefined content yields `{}`.
    * Under `detachRoot` a finished document hands its last item over
    * here, so the root ends empty.
    * @returns {*} Current root value
@@ -666,6 +667,12 @@ export class JoslMachine {
 
   parseHeader(line, pos) {
     pos++; // consume '['
+    const close = this.skipWs(line, pos);
+    if (close < line.length && line.charCodeAt(close) === CC_RBRACKET) {
+      // [] — JOSL empty root array
+      this.declareRootArray(close);
+      return this.expectLineEnd(line, close + 1);
+    }
     if (pos < line.length && line.charCodeAt(pos) === CC_LBRACKET) {
       pos++; // consume second '['
       let p = this.skipWs(line, pos);
@@ -702,6 +709,8 @@ export class JoslMachine {
   // walk the intermediate keys of a header, creating implicit tables and
   // descending into the last element of arrays-of-tables
   navigate(keys, pos) {
+    if (this.rootIsArray && this.current === null)
+      this.err(pos, 'expected [[]] before sections in a root array');
     let [t, path] = this.headerBase();
     this.deeper(keys.length);
     for (let i = 0; i < keys.length - 1; ++i) {
@@ -783,7 +792,10 @@ export class JoslMachine {
     this.emit({ type: 'table-array', path: this.currentPath, line: this.startLine });
   }
 
-  openRootItem(pos) {
+  // Make the root an array (the first of `[]` and `[[]]` in the document
+  // does) or refuse: strict TOML has no root array, and a root that
+  // already holds a table cannot also be one.
+  adoptRootArray(pos) {
     if (this.mode === 'toml')
       this.err(pos, 'root arrays ([[]]) are a JOSL extension',
         'name the array, e.g. [[items]], for TOML compatibility');
@@ -791,10 +803,24 @@ export class JoslMachine {
       this.rootValue = [];
       this.rootIsArray = true;
       this.meta.set(this.rootValue, { aot: true });
+      return true;
     }
-    else if (!this.rootIsArray)
+    if (!this.rootIsArray)
       this.err(pos, 'cannot mix a root table and a root array',
         'a document that starts with key-value pairs has an object root');
+    return false;
+  }
+
+  // `[]`: a root array with no element, the only way to write one
+  declareRootArray(pos) {
+    if (!this.adoptRootArray(pos))
+      this.err(pos, 'the root array is already declared',
+        'write [] once, before the first [[]] element, and only for an array with none');
+    this.emit({ type: 'root-array', path: [], line: this.startLine });
+  }
+
+  openRootItem(pos) {
+    this.adoptRootArray(pos);
     // the previous item is complete the moment the next header opens:
     // under detachment it leaves the root here
     if (this.detachRoot !== null && this.rootValue.length !== 0)

@@ -13,7 +13,7 @@
 // text; it does not make `parseJosl` unnecessary.
 //
 // The rules follow the TOML 1.0 ABNF closely enough to be read next to it.
-// Where JOSL adds a value form (null, bigint, regexp, a `[[]]` root array)
+// Where JOSL adds a value form (null, bigint, regexp, a `[[]]` or `[]` root array)
 // the extra rule is gated on `mode`.
 
 // One deliberate narrowing: `regexp-body` treats an unescaped '/' as the
@@ -136,6 +136,7 @@ const JOSL_ONLY = [
   ['regexp-class-char', '[^\\]\\\\\\n] | "\\\\" [^\\n]'],
   ['regexp-flags', '[a-z]*'],
   ['root-item-table', '"[[" ws "]]"'],
+  ['root-array-table', '"[" ws "]"'],
 ];
 
 /**
@@ -147,7 +148,7 @@ const JOSL_ONLY = [
  * a context-free grammar cannot express (duplicate keys, table conflicts).
  * @param {object} [options] - Grammar options
  * @param {'josl'|'toml'} [options.mode] - 'toml' omits the JOSL-only value
- *  forms (null, bigint, regexp) and the `[[]]` root-array header
+ *  forms (null, bigint, regexp) and the `[[]]` and `[]` root-array headers
  * @returns {string} The GBNF grammar
  */
 export function toGbnf(options = undefined) {
@@ -155,7 +156,9 @@ export function toGbnf(options = undefined) {
   const rules = [
     ...CORE,
     ['val', toml ? VAL_CORE : VAL_JOSL],
-    ['table', toml ? 'array-table | std-table' : 'root-item-table | array-table | std-table'],
+    ['table', toml
+      ? 'array-table | std-table'
+      : 'root-item-table | root-array-table | array-table | std-table'],
     ...(toml ? [] : JOSL_ONLY),
   ];
   const order = new Map(rules.map(([name], i) => [name, i]));
