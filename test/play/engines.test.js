@@ -5,6 +5,8 @@
  * registered operators thread through `options` to query/jslt.
  */
 import { describe, it } from 'node:test';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import * as assert from 'node:assert';
 
 import { runExample, EXAMPLES, ENGINES } from '@jarenjs/play';
@@ -539,18 +541,27 @@ describe('@jarenjs/play — the emit engine (a schema compiles to a type model a
   });
 
   it('a schema the model compiles but the renderer cannot dispatch fails in the render phase with the stylesheet\'s code, at the schema pane', () => {
-    // the renderer needs more stack per level than the compiler, so some depth compiles and
-    // does not render; the depth where that happens depends on the host stack, so scan for it
+    // the renderer's dispatch guard trips past 1024 levels, deeper than a test runner's default
+    // call stack lets the model compiler reach on every host, so the case runs in a child with
+    // a larger stack (well inside the 8 MB thread limit), where 1100 levels always compile
+    const probe = `
+      import { runExample } from '@jarenjs/play';
+      const nested = (d) => '{"type":"array","items":'.repeat(d) + '{"type":"string"}' + '}'.repeat(d);
+      const out = {};
+      for (const target of ['typescript', 'markdown'])
+        out[target] = runExample('emit', { schema: nested(1100) }, {}, { config: { target } }).error ?? null;
+      process.stdout.write(JSON.stringify(out));`;
+    const child = spawnSync(process.execPath, ['--stack-size=4000', '--input-type=module', '-e', probe],
+      { cwd: fileURLToPath(new URL('../..', import.meta.url)), encoding: 'utf8' });
+    assert.strictEqual(child.status, 0, child.stderr);
+    const errors = JSON.parse(child.stdout);
     for (const target of ['typescript', 'markdown']) {
-      let found;
-      for (let depth = 1100; depth <= 1500 && found === undefined; depth += 100) {
-        const r = emit(nested(depth), { target });
-        if (r.ok === false && r.error.code === 'TL2003') found = r;
-      }
-      assert.ok(found, `${target}: some depth between 1100 and 1500 renders no further`);
-      assert.strictEqual(found.error.pane, 'schema');
-      assert.match(found.error.message, /^TL2003: JT2001: dispatch /);
-      assert.strictEqual(typeof found.error.path, 'string', 'the stylesheet states where');
+      const error = errors[target];
+      assert.ok(error, `${target}: 1100 levels render no further`);
+      assert.strictEqual(error.code, 'TL2003');
+      assert.strictEqual(error.pane, 'schema');
+      assert.match(error.message, /^TL2003: JT2001: dispatch /);
+      assert.strictEqual(typeof error.path, 'string', 'the stylesheet states where');
     }
   });
 
