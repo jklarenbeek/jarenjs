@@ -64,6 +64,12 @@ delete it or fix it.
   mapping probes every position, so it is quadratic in the text length and bounded by the sequence guards),
   `substring-before`/`-after` and `translate` (nothing finds a position in a string).
 - [ ] **1-based positional *outputs*** — `at`/`count`/`fn:index-of` surface the format's 0-based D6 values, so QT3 asserts them as wrong-value; `fn:index-of` has a cheap local emission fix, `at`/`count` would need reference rewriting. Revisit if the scorecard noise starts to matter.
+- [ ] **`declare` before a word that opens no declaration** — `declare ne gt`
+  raises `unsupported construct 'declare ne'` where `declare` is a name test;
+  only the declaration kinds XQuery defines (`variable`, `function`,
+  `namespace`, `default`, `option`, `base-uri`, `boundary-space`,
+  `copy-namespaces`, `construction`, `ordering`, `context`, `decimal-format`,
+  `revalidation`, `updating`) should open one.
 ## @jarenjs/validate
 
 - [ ] **Per-scope static evaluated-set analysis for `unevaluated*`** — the shipped
