@@ -299,7 +299,7 @@ function slotValue(slot, externals, anchors = null) {
   // a family the member cannot hold (a store predicate's, which cannot
   // divert). No driver binds one as the engine reads it — SQLite refuses
   // a boolean and reads an object as named parameters — so it binds as an
-  // empty BLOB, a kind no JSON member holds: every guarded comparison
+  // empty byte string, a kind no JSON member holds: every guarded comparison
   // reads it as the foreign value it is, as the engine does
   return value !== null && (typeof value === 'boolean' || typeof value === 'object') ? FOREIGN_VALUE : value;
 }
