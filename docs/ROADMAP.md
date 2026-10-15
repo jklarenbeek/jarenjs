@@ -38,8 +38,27 @@ delete it or fix it.
 
 ## @jarenjs/json — JSLT
 
-- [ ] **JSLT matcher optimizer (single-walk)** — replace per-rule path pre-passes with a single multi-pattern walk, specialize location tracking by reachable modes, and use input-schema knowledge to prune impossible shape rules. The benchmark quantifies the gap: dense pure-path transforms pay ~9–12× over the raw path scan, and hand-written native JS stays 3–139× faster on real transformations — this is the main JSLT performance workstream.
-- [ ] **Prepass-level pruning in the JSLT matcher** — skip re-evaluating match *paths* over unchanged regions using the changed-path feed directly, rather than discovering the reuse afterwards through the memo cache. The remaining O(change) idea now that the memo layers have shipped.
+- [ ] **JSLT matcher: schema-aware pruning and the rest of the single walk** —
+  a mode's match paths built from names, indexes and wildcards (child or
+  descendant) already run as one walk of the input; three parts remain. Prune
+  shape rules that can never match, from input-schema knowledge: nothing
+  accepts an input schema today, so this needs a new compile option (a minor).
+  Run slice and filter selectors inside the walk too (they still enumerate per
+  path). Specialize location tracking by the modes a dispatch can reach: a
+  mode with no path rule and no `$path` read still builds every location
+  because JT2002/JT2003/JT2004 messages print it (`no rule in mode "s" matched
+  $['a']`), so this first needs messages that do not depend on it, or
+  locations built only on error.
+- [ ] **Prepass-level pruning from the changed-path feed** — skip re-matching
+  paths over unchanged regions using the transition's changed paths:
+  `evaluate(data, externals)` takes no changed paths today, so this needs a
+  new argument or option (a minor) and `@jarenjs/app` passing its transition's
+  `changedPaths`. Reusing the previous pre-pass by input reference instead is
+  not safe: under `memo: true` a stylesheet whose rules are not memo-eligible
+  answers right today when the caller mutates the input in place, and
+  reference reuse would answer it from stale matches. Even with the pre-pass
+  pruned, a copy-on-write view loop stays O(n) per frame: its `$apply`
+  dispatch and memo lookups run per item.
 
 ## @jarenjs/json — XQuery front-end & QT3
 

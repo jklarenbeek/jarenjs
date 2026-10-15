@@ -7,6 +7,7 @@ import {
   JSONPathSyntaxError,
 } from '../path.js';
 import {
+  RE_NAME_NEEDS_ESCAPE,
   appendName,
   compileSegmentP,
   descentCeilingOption,
@@ -41,10 +42,6 @@ import { setObjectMember } from '@jarenjs/core/object';
 const hasOwn = Object.hasOwn;
 const NO_RULE = Symbol('Jslt.NoRule');
 const NO_EXTERNAL_VALUES = Object.freeze([]);
-// The rebuild prune set of a matched-but-unfired location in an
-// all-path-rule share mode: no child continues toward a match. Never
-// mutated; rebuild walkers only test membership.
-const NO_CHILDREN = new Set();
 
 function composeDocPath(base, inner) {
   return inner.length === 0 ? base : base + inner;
@@ -55,8 +52,8 @@ function composeDocPath(base, inner) {
 // proxy-observable reflection
 
 // One compiled query per distinct match-path source string: rules across
-// modes matching the same path share the object, so the per-call
-// `.paths(root)` enumeration is computed once per transform (see
+// modes matching the same path share the object, so a path the single
+// walk cannot run is enumerated (`.paths(root)`) once per transform (see
 // getQueryPaths), not once per mode. A shared query names the first rule
 // that matches its path when the enumeration refuses (see matchPathsOf).
 const matchRules = new WeakMap();
@@ -499,35 +496,38 @@ function compileRules(model, compileTypeTest, tableBox, targetModes, memoEnabled
     readsPath,
     memoCaches,
     // rules sharing one match path (across modes, the TOC/render idiom)
-    // enumerate it once per transform call through tctx.queryPaths
+    // enumerate it - when the single walk cannot run it - once per
+    // transform call through tctx.queryPaths
     sharedQueries: pathRuleCount > pathQueryCache.size,
   };
 }
 
 //#region match pre-pass
 
-// A mode's pre-pass is ONE Map from normalized path to a match entry.
-// A matched location holds its rule bits directly (a nonzero mask, or a
-// Set of ordinals past 32 path rules); a location on the spine of a
-// deeper match holds a SpineEntry carrying both its own match (0 or
-// undefined when none) and the set of child keys continuing toward a
-// match. One lookup per dispatched node answers "does a rule match
-// here", "can a rule match below", and "through which children" - so a
-// share rebuild copies every other child by reference without building
-// its path string. Invariant: every present key's proper ancestors are
-// present with their child links, so prefix insertion stops at the
-// first present prefix.
-
-class SpineEntry {
-  constructor(match, childKey) {
+// A mode's pre-pass is a trie over the input: one PrepassNode per
+// location a match path selects (its rule bits, or a Set of ordinals past
+// 32 path rules) or that lies on the spine of a deeper match, its
+// `children` map keyed by the decoded member name or element index - the
+// exact key forms the built-in rebuild walks with. A node answers "does a
+// rule match here", "can a rule match below" and "through which
+// children", and the rebuild hands each child its node, so a located
+// dispatch below the root needs no lookup and a share rebuild copies
+// every other child by reference without building its path string.
+// Absent nodes are null; an empty pre-pass is a null root.
+class PrepassNode {
+  constructor(match, children) {
     this.match = match; // 0 (bit mode) / undefined (Set mode) when unmatched
-    this.children = new Set([childKey]);
+    this.children = children; // Map, or null when nothing matches below
+    // resolveLocation's cache of a one-child map's member name when it
+    // needs no escape (null when there is none such), set on first use:
+    // the trie is final once built
+    this.sole = undefined;
   }
 }
 
 // Decode one normalized-path segment `['name']` (with RFC 9535 section
 // 2.7 escapes) into the raw member name, or `[123]` into the integer
-// index - the exact key forms the built-in rebuild walks with.
+// index.
 function parseSegmentKey(path, start, end) {
   if (path.charCodeAt(start + 1) === 0x27) { // single quote: a member name
     const from = start + 2;
@@ -566,59 +566,99 @@ function parseSegmentKey(path, start, end) {
   return index;
 }
 
-// Link `prefix -> childKey` into the pre-pass map. Returns true when the
-// prefix was already present (its ancestors are then already linked).
-function addSpineLink(matchMap, prefix, childKey, bitMode) {
-  const entry = matchMap.get(prefix);
-  if (entry === undefined) {
-    matchMap.set(prefix, new SpineEntry(bitMode ? 0 : undefined, childKey));
-    return false;
+// The end (exclusive) of the normalized-path segment opening at `start`
+// (a '['): past the closing `']` of a quoted name, whose backslash
+// escapes skip the escaped code unit, or past the ']' of an index.
+function segmentEnd(path, start) {
+  if (path.charCodeAt(start + 1) !== 0x27) // single quote
+    return path.indexOf(']', start) + 1;
+  let i = start + 2;
+  for (;;) {
+    const c = path.charCodeAt(i);
+    if (c === 0x5C) // backslash
+      i += 2;
+    else if (c === 0x27)
+      return i + 2;
+    else
+      i++;
   }
-  if (entry instanceof SpineEntry) {
-    entry.children.add(childKey);
-    return true;
-  }
-  // a matched-only entry becomes a spine entry keeping its match
-  matchMap.set(prefix, new SpineEntry(entry, childKey));
-  return true;
 }
 
-// Add every proper ancestor of one matched RFC 9535 normalized path,
-// with its child link. Segment starts are '[' characters outside a
-// quoted name; backslash escapes inside `['...']` skip the escaped code
-// unit. Ancestors are linked longest-first so the presence invariant
-// makes repeated spines O(1).
-function addSpinePrefixes(path, matchMap, bitMode) {
-  let positions = null;
-  let quoted = false;
-  for (let i = 1; i < path.length; i++) {
-    const c = path.charCodeAt(i);
-    if (quoted) {
-      if (c === 0x5C) // backslash
-        i++;
-      else if (c === 0x27) // single quote
-        quoted = false;
-    }
-    else if (c === 0x27) { // single quote
-      quoted = true;
-    }
-    else if (c === 0x5B) { // '['
-      if (positions === null)
-        positions = [i];
-      else
-        positions.push(i);
-    }
+// The member name of a node's only child when its normalized form is the
+// name itself, else null.
+function soleName(node) {
+  const children = node.children;
+  if (children.size === 1) {
+    const key = children.keys().next().value;
+    if (typeof key === 'string' && !RE_NAME_NEEDS_ESCAPE.test(key))
+      return key;
   }
-  if (positions === null)
-    return;
-  let end = path.length;
-  for (let j = positions.length - 1; j >= 0; j--) {
-    const start = positions[j];
-    const childKey = parseSegmentKey(path, start, end);
-    if (addSpineLink(matchMap, path.slice(0, start), childKey, bitMode))
-      return;
-    end = start;
+  return null;
+}
+
+// The pre-pass node at a normalized path, or null when no rule of the
+// mode matches there or below. A segment naming a spine's only member
+// (the `$['store']['book']` of `$['store']['book'][7]`) is compared in
+// place, without decoding it.
+function resolveLocation(root, loc) {
+  let node = root;
+  for (let i = 1; i < loc.length;) {
+    const children = node.children;
+    if (children === null)
+      return null;
+    let sole = node.sole;
+    if (sole === undefined) {
+      sole = soleName(node);
+      node.sole = sole;
+    }
+    if (sole !== null) {
+      const from = i + 2;
+      const close = from + sole.length;
+      if (loc.charCodeAt(i + 1) === 0x27 && loc.charCodeAt(close) === 0x27
+        && loc.charCodeAt(close + 1) === 0x5D && loc.startsWith(sole, from)) {
+        node = children.get(sole);
+        i = close + 2;
+        continue;
+      }
+    }
+    const end = segmentEnd(loc, i);
+    node = children.get(parseSegmentKey(loc, i, end));
+    if (node === undefined)
+      return null;
+    i = end;
   }
+  return node;
+}
+
+function addMatch(node, ordinal, bitMode) {
+  if (bitMode)
+    node.match |= 1 << ordinal;
+  else if (node.match === undefined)
+    node.match = new Set([ordinal]);
+  else
+    node.match.add(ordinal);
+}
+
+// Insert one enumerated normalized path, creating its spine.
+function insertPath(root, path, ordinal, bitMode) {
+  let node = root;
+  for (let i = 1; i < path.length;) {
+    const end = segmentEnd(path, i);
+    const key = parseSegmentKey(path, i, end);
+    let children = node.children;
+    if (children === null) {
+      children = new Map();
+      node.children = children;
+    }
+    let child = children.get(key);
+    if (child === undefined) {
+      child = new PrepassNode(bitMode ? 0 : undefined, null);
+      children.set(key, child);
+    }
+    node = child;
+    i = end;
+  }
+  addMatch(node, ordinal, bitMode);
 }
 
 // Every distinct match query enumerates the input once per transform
@@ -657,68 +697,247 @@ function matchPathsOf(query, root) {
   }
 }
 
-function buildBitPrepass(mode, tctx) {
-  const matchMap = new Map();
-  const queries = mode.pathQueries;
-  for (let ordinal = 0; ordinal < queries.length; ordinal++) {
-    const paths = getQueryPaths(queries[ordinal], tctx);
-    const bit = 1 << ordinal;
-    for (let i = 0; i < paths.length; i++) {
-      const path = paths[i];
-      const entry = matchMap.get(path);
-      if (entry === undefined)
-        matchMap.set(path, bit);
-      else if (entry instanceof SpineEntry)
-        entry.match |= bit;
-      else
-        matchMap.set(path, entry | bit);
-      addSpinePrefixes(path, matchMap, true);
+//#region single-walk matcher
+
+// The match paths whose selectors are all names, indexes and wildcards
+// (child or descendant segments) run together in ONE walk of the input
+// instead of one enumeration each: an automaton state is one (path,
+// segment) position, the walk carries the states alive at each value and
+// descends only where one is, and builds the trie directly - no
+// normalized path string is built and none is parsed back. Paths with a
+// slice or a filter selector keep their enumeration (getQueryPaths) and
+// are inserted after the walk, in ordinal order, so host functions run
+// exactly as before. The walk calls no host code; it gives up - and the
+// whole mode falls back to the per-path enumerations, which then raise
+// exactly what they always raised - on any throw (an accessor, a host
+// stack overflow) and before a descendant segment could reach a
+// container as deep as the descent bound.
+
+const WALK_ABORT = Symbol('Jslt.WalkAbort');
+
+function walkableSegments(segments) {
+  for (let i = 0; i < segments.length; i++) {
+    const selectors = segments[i].selectors;
+    for (let j = 0; j < selectors.length; j++) {
+      const kind = selectors[j].kind;
+      if (kind !== 'name' && kind !== 'index' && kind !== 'wildcard')
+        return false;
     }
   }
-  return matchMap;
+  return true;
 }
 
-function buildSetPrepass(mode, tctx) {
-  const matchMap = new Map();
-  const queries = mode.pathQueries;
-  for (let ordinal = 0; ordinal < queries.length; ordinal++) {
-    const paths = getQueryPaths(queries[ordinal], tctx);
-    for (let i = 0; i < paths.length; i++) {
-      const path = paths[i];
-      const entry = matchMap.get(path);
-      if (entry === undefined) {
-        matchMap.set(path, new Set([ordinal]));
-      }
-      else if (entry instanceof SpineEntry) {
-        if (entry.match === undefined)
-          entry.match = new Set([ordinal]);
+// One automaton step per (walkable path, segment position); the position
+// past the last segment is the path's final state (`ordinal` >= 0).
+function compileWalk(pathQueries, bitMasks, descentCeiling) {
+  const steps = [];
+  const starts = [];
+  const enumerated = [];
+  for (let ordinal = 0; ordinal < pathQueries.length; ordinal++) {
+    const segments = pathQueries[ordinal].ast.segments;
+    if (!walkableSegments(segments)) {
+      enumerated.push(ordinal);
+      continue;
+    }
+    starts.push(steps.length);
+    for (let i = 0; i < segments.length; i++) {
+      const selectors = segments[i].selectors;
+      let names = null;
+      let indexes = null;
+      let wildcard = false;
+      for (let j = 0; j < selectors.length; j++) {
+        const selector = selectors[j];
+        if (selector.kind === 'wildcard')
+          wildcard = true;
+        else if (selector.kind === 'name')
+          (names ??= []).push(selector.name);
         else
-          entry.match.add(ordinal);
+          (indexes ??= []).push(selector.index);
       }
-      else {
-        entry.add(ordinal);
+      steps.push({ ordinal: -1, descendant: segments[i].descendant, wildcard, names, indexes });
+    }
+    steps.push({ ordinal, descendant: false, wildcard: false, names: null, indexes: null });
+  }
+  if (starts.length === 0)
+    return null;
+  return {
+    steps,
+    starts,
+    enumerated,
+    bitMode: bitMasks,
+    ceiling: descentCeiling,
+  };
+}
+
+function addState(states, state) {
+  if (states === null)
+    return [state];
+  if (!states.includes(state))
+    states.push(state);
+  return states;
+}
+
+// Whether an index selector list selects element `index` of an array of
+// `length` elements (a negative index counts from the end).
+function selectsIndex(indexes, index, length) {
+  for (let j = 0; j < indexes.length; j++) {
+    const selected = indexes[j];
+    if ((selected < 0 ? length + selected : selected) === index)
+      return true;
+  }
+  return false;
+}
+
+// The states a child inherits: every state alive for all children, plus
+// the next state of each named/indexed step selecting this key (a member
+// name, or an element index of an array of `length` elements).
+function childStates(every, picks, steps, key, length) {
+  let states = every;
+  let copied = false;
+  for (let p = 0; p < picks.length; p++) {
+    const step = steps[picks[p]];
+    if (length < 0
+      ? step.names === null || !step.names.includes(key)
+      : step.indexes === null || !selectsIndex(step.indexes, key, length))
+      continue;
+    if (!copied) {
+      states = every === null ? [] : every.slice();
+      copied = true;
+    }
+    states = addState(states, picks[p] + 1);
+  }
+  return states;
+}
+
+function walkNode(value, states, depth, walk) {
+  const steps = walk.steps;
+  const bitMode = walk.bitMode;
+  let match = bitMode ? 0 : undefined;
+  let matched = false;
+  const container = typeof value === 'object' && value !== null;
+  let every = null; // states alive at every child
+  let picks = null; // steps selecting named or indexed children
+  let descends = false;
+  for (let s = 0; s < states.length; s++) {
+    const state = states[s];
+    const step = steps[state];
+    if (step.ordinal >= 0) {
+      if (bitMode)
+        match |= 1 << step.ordinal;
+      else
+        (match ??= new Set()).add(step.ordinal);
+      matched = true;
+      continue;
+    }
+    if (!container)
+      continue;
+    if (step.descendant) {
+      every = addState(every, state);
+      descends = true;
+    }
+    if (step.wildcard)
+      every = addState(every, state + 1);
+    if (step.names !== null || step.indexes !== null)
+      picks = addState(picks, state);
+  }
+  if (!container || (every === null && picks === null))
+    return matched ? new PrepassNode(match, null) : null;
+  if (descends && depth >= walk.ceiling)
+    throw WALK_ABORT;
+
+  let children = null;
+  if (Array.isArray(value)) {
+    const length = value.length;
+    if (every !== null) {
+      for (let i = 0; i < length; i++) {
+        const next = picks === null ? every : childStates(every, picks, steps, i, length);
+        const child = walkNode(value[i], next, depth + 1, walk);
+        if (child !== null)
+          (children ??= new Map()).set(i, child);
       }
-      addSpinePrefixes(path, matchMap, false);
+    }
+    else {
+      for (let p = 0; p < picks.length; p++) {
+        const indexes = steps[picks[p]].indexes;
+        if (indexes === null)
+          continue;
+        for (let j = 0; j < indexes.length; j++) {
+          const index = indexes[j] < 0 ? length + indexes[j] : indexes[j];
+          if (index < 0 || index >= length || (children !== null && children.has(index)))
+            continue;
+          const child = walkNode(value[index], childStates(null, picks, steps, index, length), depth + 1, walk);
+          if (child !== null)
+            (children ??= new Map()).set(index, child);
+        }
+      }
     }
   }
-  return matchMap;
+  else if (every !== null) {
+    for (const key in value) {
+      if (!hasOwn(value, key))
+        continue;
+      const next = picks === null ? every : childStates(every, picks, steps, key, -1);
+      const child = walkNode(value[key], next, depth + 1, walk);
+      if (child !== null)
+        (children ??= new Map()).set(key, child);
+    }
+  }
+  else {
+    for (let p = 0; p < picks.length; p++) {
+      const names = steps[picks[p]].names;
+      if (names === null)
+        continue;
+      for (let j = 0; j < names.length; j++) {
+        const name = names[j];
+        if (!hasOwn(value, name) || (children !== null && children.has(name)))
+          continue;
+        const child = walkNode(value[name], childStates(null, picks, steps, name, -1), depth + 1, walk);
+        if (child !== null)
+          (children ??= new Map()).set(name, child);
+      }
+    }
+  }
+  if (children === null && !matched)
+    return null;
+  return new PrepassNode(match, children);
+}
+
+//#endregion
+
+function enumeratePrepass(mode, tctx, root, ordinals) {
+  const queries = mode.pathQueries;
+  const bitMode = mode.bitMasks;
+  for (let k = 0; k < ordinals.length; k++) {
+    const ordinal = ordinals[k];
+    const paths = getQueryPaths(queries[ordinal], tctx);
+    for (let i = 0; i < paths.length; i++)
+      insertPath(root, paths[i], ordinal, bitMode);
+  }
+  return root;
 }
 
 function buildPrepass(mode, tctx) {
-  const prepass = mode.bitMasks
-    ? buildBitPrepass(mode, tctx)
-    : buildSetPrepass(mode, tctx);
-  tctx.prepasses[mode.id] = prepass;
-  return prepass;
+  const walk = mode.walk;
+  const bitMode = mode.bitMasks;
+  let root = WALK_ABORT;
+  let ordinals = mode.allOrdinals;
+  if (walk !== null) {
+    try {
+      root = walkNode(tctx.root, walk.starts, 0, walk);
+      ordinals = walk.enumerated;
+    }
+    catch {
+      root = WALK_ABORT;
+    }
+  }
+  if (root === WALK_ABORT || root === null)
+    root = new PrepassNode(bitMode ? 0 : undefined, null);
+  enumeratePrepass(mode, tctx, root, ordinals);
+  if (root.children === null && (bitMode ? root.match === 0 : root.match === undefined))
+    root = null;
+  tctx.prepasses[mode.id] = root;
+  return root;
 }
-
-//#region roadmap
-// A single-walk multi-pattern path matcher would replace the per-rule
-// `.paths(root)` loop here. Schema-aware pruning can join the same mode
-// metadata once predicates expose safe descendant impossibility facts.
-// Location tracking is intentionally global today; a future reachability
-// analysis can specialize it per connected set of modes.
-//#endregion
 
 //#endregion
 
@@ -759,22 +978,26 @@ function describeLocation(loc) {
   return loc === null ? 'a location-less value' : loc;
 }
 
-// `children` (a share-mode all-path-rules prune set, null otherwise)
-// lists the only keys through which a deeper rule can still match:
-// every other child is copied by reference without a dispatch and
-// without building its normalized path.
-function rebuildObject(value, loc, mode, depth, tctx, dispatchMode, fresh, children) {
+// `children` is the dispatched location's pre-pass children map (null
+// when nothing matches below it, or when the mode tracks no matches);
+// each child is dispatched with its node, so its own lookup is free.
+// With `prune` (a share mode of path rules only) the map lists the only
+// keys through which a deeper rule can still match: every other child is
+// copied by reference without a dispatch and without building its
+// normalized path.
+function rebuildObject(value, loc, mode, depth, tctx, dispatchMode, fresh, children, prune) {
   const out = {};
   let changed = fresh;
   for (const key in value) {
     if (!hasOwn(value, key))
       continue;
-    if (children !== null && !children.has(key)) {
+    const node = children === null ? null : children.get(key) ?? null;
+    if (prune && node === null) {
       setObjectMember(out, key, value[key]);
       continue;
     }
     const childLoc = loc === null ? null : appendName(loc, key);
-    const child = dispatchMode(value[key], childLoc, mode, depth + 1, tctx);
+    const child = dispatchMode(value[key], childLoc, mode, depth + 1, tctx, node);
     if (child === EMPTY) {
       changed = true;
       continue;
@@ -791,16 +1014,17 @@ function rebuildObject(value, loc, mode, depth, tctx, dispatchMode, fresh, child
   return changed ? out : value;
 }
 
-function rebuildArray(value, loc, mode, depth, tctx, dispatchMode, fresh, children) {
+function rebuildArray(value, loc, mode, depth, tctx, dispatchMode, fresh, children, prune) {
   const out = [];
   let changed = fresh;
   for (let i = 0; i < value.length; i++) {
-    if (children !== null && !children.has(i)) {
+    const node = children === null ? null : children.get(i) ?? null;
+    if (prune && node === null) {
       out.push(value[i]);
       continue;
     }
     const childLoc = loc === null ? null : loc + '[' + i + ']';
-    const child = dispatchMode(value[i], childLoc, mode, depth + 1, tctx);
+    const child = dispatchMode(value[i], childLoc, mode, depth + 1, tctx, node);
     if (child === EMPTY) {
       changed = true;
     }
@@ -817,10 +1041,10 @@ function rebuildArray(value, loc, mode, depth, tctx, dispatchMode, fresh, childr
   return changed ? out : value;
 }
 
-// The share pruning decision lives in dispatchMode (one pre-pass lookup
+// The share pruning decision lives in dispatchMode (one pre-pass node
 // yields the match and the prune set); by the time the built-in rule
 // rebuilds, descending is already known to be required or harmless.
-function builtIn(value, loc, mode, depth, tctx, dispatchMode, children) {
+function builtIn(value, loc, mode, depth, tctx, dispatchMode, children, prune) {
   if (mode.unmatched === 'error') {
     throw new JsltRuntimeError('JT2003',
       `no rule in mode ${JSON.stringify(mode.name)} matched ${describeLocation(loc)}`,
@@ -832,11 +1056,11 @@ function builtIn(value, loc, mode, depth, tctx, dispatchMode, children) {
 
   const fresh = mode.unmatched === 'fresh';
   return Array.isArray(value)
-    ? rebuildArray(value, loc, mode, depth, tctx, dispatchMode, fresh, children)
-    : rebuildObject(value, loc, mode, depth, tctx, dispatchMode, fresh, children);
+    ? rebuildArray(value, loc, mode, depth, tctx, dispatchMode, fresh, children, prune)
+    : rebuildObject(value, loc, mode, depth, tctx, dispatchMode, fresh, children, prune);
 }
 
-function compileMode(modelMode, compiledRules, id, fallbackUnmatched, fallbackPath) {
+function compileMode(modelMode, compiledRules, prepassIdOf, walkCeiling, fallbackUnmatched, fallbackPath) {
   const rankedRules = modelMode === null ? NO_EXTERNAL_VALUES : modelMode.rules;
   const name = modelMode === null ? '' : modelMode.name;
   const unmatched = modelMode === null ? fallbackUnmatched : modelMode.unmatched;
@@ -881,7 +1105,9 @@ function compileMode(modelMode, compiledRules, id, fallbackUnmatched, fallbackPa
   }
 
   return Object.freeze({
-    id,
+    // the pre-pass slot: modes with element-wise identical match-query
+    // lists (the TOC/render idiom) share one pre-pass per transform
+    id: prepassIdOf(pathQueries),
     name,
     unmatched,
     unmatchedPath,
@@ -892,6 +1118,10 @@ function compileMode(modelMode, compiledRules, id, fallbackUnmatched, fallbackPa
     shareAllPaths: unmatched === 'share' && allPathRules,
     bitMasks,
     pathQueries: Object.freeze(pathQueries),
+    // the single-walk automaton over the mode's walkable match paths
+    // (null when none is), and every path ordinal for the fallback
+    walk: walkCeiling === null ? null : compileWalk(pathQueries, bitMasks, walkCeiling),
+    allOrdinals: Object.freeze(pathQueries.map((_, ordinal) => ordinal)),
     pathBits: pathBits === null ? null : Object.freeze(pathBits),
     pathOrdinals: pathOrdinals === null ? null : Object.freeze(pathOrdinals),
     tests: Object.freeze(tests),
@@ -900,7 +1130,7 @@ function compileMode(modelMode, compiledRules, id, fallbackUnmatched, fallbackPa
   });
 }
 
-function buildModes(model, compiledRules, targetModes) {
+function buildModes(model, compiledRules, targetModes, walkCeiling) {
   const modelModes = new Map();
   const names = [];
   for (let i = 0; i < model.modes.length; i++) {
@@ -915,19 +1145,35 @@ function buildModes(model, compiledRules, targetModes) {
     }
   }
 
+  const queryLists = [];
+  const prepassIdOf = (pathQueries) => {
+    for (let id = 0; id < queryLists.length; id++) {
+      const seen = queryLists[id];
+      if (seen.length !== pathQueries.length)
+        continue;
+      let same = true;
+      for (let j = 0; j < seen.length && same; j++)
+        same = seen[j] === pathQueries[j];
+      if (same)
+        return id;
+    }
+    queryLists.push(pathQueries);
+    return queryLists.length - 1;
+  };
+
   const modes = new Map();
   for (let i = 0; i < names.length; i++) {
     const name = names[i];
     const modelMode = modelModes.get(name);
     const runtime = modelMode === null
       ? Object.freeze({
-          ...compileMode(null, compiledRules, i, model.unmatched, model.unmatchedPath),
+          ...compileMode(null, compiledRules, prepassIdOf, walkCeiling, model.unmatched, model.unmatchedPath),
           name,
         })
-      : compileMode(modelMode, compiledRules, i, model.unmatched, model.unmatchedPath);
+      : compileMode(modelMode, compiledRules, prepassIdOf, walkCeiling, model.unmatched, model.unmatchedPath);
     modes.set(name, runtime);
   }
-  return { modes, count: names.length };
+  return { modes, count: queryLists.length };
 }
 
 function resolveExternalValues(externalNames, compiledRules, ext) {
@@ -957,9 +1203,12 @@ function resolveExternalValues(externalNames, compiledRules, ext) {
  * evaluator and its user-external metadata.
  * @param {object} model - result of normalizeJsltStylesheet
  * @param {object} [options] - compile options
+ * @param {boolean} [walkPaths=true] - match the walkable paths of a mode
+ *   in one walk; false enumerates every match path on its own (the
+ *   reference the single walk must equal, for differential tests)
  * @returns {{evaluate: Function, externals: readonly string[]}}
  */
-export function compileJsltDispatch(model, options = {}) {
+export function compileJsltDispatch(model, options = {}, walkPaths = true) {
   const compileTypeTest = typeof options.compileTypeTest === 'function'
     ? options.compileTypeTest
     : null;
@@ -995,11 +1244,14 @@ export function compileJsltDispatch(model, options = {}) {
   const compiled = withDescentCeiling(descentCeiling, () =>
     compileRules(model, compileTypeTest, tableBox, targetModes, memoEnabled, bodyOptions, descentCeiling));
   tableBox.needsLoc = model.anyPathRule || compiled.readsPath;
-  const built = buildModes(model, compiled.rules, targetModes);
+  const built = buildModes(model, compiled.rules, targetModes, walkPaths ? descentCeiling : null);
   const modes = built.modes;
   const rootMode = modes.get('');
 
-  function dispatchMode(value, loc, mode, depth, tctx) {
+  // `node` is the location's pre-pass node when the caller already holds
+  // it (a rebuild hands each child its own, null when absent), or
+  // undefined when only the location string is known
+  function dispatchMode(value, loc, mode, depth, tctx, node) {
     if (depth > maxDepth) {
       throw new JsltRuntimeError('JT2001',
         `dispatch depth ${depth} exceeded maxDepth ${maxDepth}`,
@@ -1013,18 +1265,15 @@ export function compileJsltDispatch(model, options = {}) {
     let match; // rule bit mask (bit mode) or Set of ordinals, or undefined
     let children = null;
     if (loc !== null && mode.pathQueries.length !== 0) {
-      let prepass = tctx.prepasses[mode.id];
-      if (prepass === undefined)
-        prepass = buildPrepass(mode, tctx);
-      const entry = prepass.get(loc);
-      if (entry !== undefined) {
-        if (entry instanceof SpineEntry) {
-          match = entry.match;
-          children = entry.children;
-        }
-        else {
-          match = entry;
-        }
+      if (node === undefined) {
+        let root = tctx.prepasses[mode.id];
+        if (root === undefined)
+          root = buildPrepass(mode, tctx);
+        node = root === null ? null : resolveLocation(root, loc);
+      }
+      if (node !== null) {
+        match = node.match;
+        children = node.children;
       }
     }
     if (mode.shareAllPaths) {
@@ -1036,7 +1285,7 @@ export function compileJsltDispatch(model, options = {}) {
       }
       else if (match === undefined || match === 0) {
         // on the spine of a deeper match only: descend without a scan
-        return builtIn(value, loc, mode, depth, tctx, dispatchMode, children);
+        return builtIn(value, loc, mode, depth, tctx, dispatchMode, children, true);
       }
     }
     const matched = mode.bitMasks
@@ -1044,8 +1293,7 @@ export function compileJsltDispatch(model, options = {}) {
       : scanSetRules(mode, value, loc, depth, tctx, match);
     if (matched !== NO_RULE)
       return matched;
-    return builtIn(value, loc, mode, depth, tctx, dispatchMode,
-      mode.shareAllPaths ? (children === null ? NO_CHILDREN : children) : null);
+    return builtIn(value, loc, mode, depth, tctx, dispatchMode, children, mode.shareAllPaths);
   }
 
   function dispatch(value, loc, modeName, depth, tctx) {
@@ -1053,7 +1301,7 @@ export function compileJsltDispatch(model, options = {}) {
     /* c8 ignore next 2 -- every static $apply target is registered at compile time */
     if (mode === undefined)
       throw new Error(`JSLT internal error: mode ${JSON.stringify(modeName)} was not compiled`);
-    return dispatchMode(value, loc, mode, depth, tctx);
+    return dispatchMode(value, loc, mode, depth, tctx, undefined);
   }
 
   tableBox.dispatch = dispatch;
@@ -1095,7 +1343,7 @@ export function compileJsltDispatch(model, options = {}) {
         highestDepth: 0,
       };
       try {
-        return dispatchMode(data, rootLoc, rootMode, 0, tctx);
+        return dispatchMode(data, rootLoc, rootMode, 0, tctx, undefined);
       }
       catch (error) {
         // A synchronous JavaScript stack can be shallower than the
