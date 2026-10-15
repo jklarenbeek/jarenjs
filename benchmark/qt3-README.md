@@ -140,9 +140,10 @@ Divergences from XDM to keep in mind when triaging:
     XQuery 3.1).
 - `status: "bug"` — fails and should not; `issue` describes it. Real bugs are
   wins: fix the trivial ones, keep the rest listed here.
-- `skip: true` — never run in-process: the query exhausts the heap (e.g.
-  `1 to 3000000000` materializes before the 2³² `JQ2007` guard can fire, since
-  the engine's sequences are eager arrays). Counted under its `status`.
+- `skip: true` — never run in-process: the query would exhaust the heap (the
+  engine's sequences are eager arrays; a `$range` past the default resource
+  guard is refused `JQ2007` before it materializes, so none is skipped today). Counted
+  under its `status`.
 - `summary.pass` — a full run must pass at least this many cases, so a
   pass → unsupported/reclassified flip cannot slip through unnoticed.
 

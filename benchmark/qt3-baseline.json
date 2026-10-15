@@ -1,7 +1,7 @@
 {
  "$comment": "QT3 baseline: every attributed tier-A failure (see benchmark/qt3-README.md). Deviation ids: D1-D7 QUERY-FORMAT.md section 11; E1/E2 engine rules (comparison/no-atomization, sections 8.4-8.10); E3 resource guards (section 8.9); E4 NaN ordering (section 6.6); F1-F6 front-end approximations (XQUERY-FRONTEND.md section 3). skip: fatal resource exhaustion, never run in-process.",
  "summary": {
-  "pass": 6098,
+  "pass": 6103,
   "unsupported-syntax": 16232
  },
  "tests": {
@@ -1151,9 +1151,9 @@
    "note": "integers beyond 2^53: $range bounds must be safe integers (JQ2001)"
   },
   "RangeExpr-409d": {
-   "status": "bug",
-   "skip": true,
-   "issue": "eager $range materializes >10^9 items and exhausts the heap before the 2^32 JQ2007 guard can fire (lazy sequences needed)"
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
   },
   "RangeExpr-409e": {
    "status": "deviation",
@@ -1504,31 +1504,6 @@
    "status": "deviation",
    "id": "D1",
    "note": "$idiv is IEEE: a NaN or infinite operand gives NaN/Infinity and a huge quotient is a double, never FOAR0002 (QUERY-FORMAT section 8.5)"
-  },
-  "cbcl-subsequence-010": {
-   "status": "bug",
-   "skip": true,
-   "issue": "eager $range materializes >10^9 items and exhausts the heap before the 2^32 JQ2007 guard can fire (lazy sequences needed)"
-  },
-  "cbcl-subsequence-011": {
-   "status": "bug",
-   "skip": true,
-   "issue": "eager $range materializes >10^9 items and exhausts the heap before the 2^32 JQ2007 guard can fire (lazy sequences needed)"
-  },
-  "cbcl-subsequence-012": {
-   "status": "bug",
-   "skip": true,
-   "issue": "eager $range materializes >10^9 items and exhausts the heap before the 2^32 JQ2007 guard can fire (lazy sequences needed)"
-  },
-  "cbcl-subsequence-013": {
-   "status": "bug",
-   "skip": true,
-   "issue": "eager $range materializes >10^9 items and exhausts the heap before the 2^32 JQ2007 guard can fire (lazy sequences needed)"
-  },
-  "cbcl-subsequence-014": {
-   "status": "bug",
-   "skip": true,
-   "issue": "eager $range materializes >10^9 items and exhausts the heap before the 2^32 JQ2007 guard can fire (lazy sequences needed)"
   },
   "count-010": {
    "status": "deviation",
