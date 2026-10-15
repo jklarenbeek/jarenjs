@@ -2713,6 +2713,29 @@ written. A model `introspect()` reads back here opens a table the previous
 release created under it. The previous release refuses `--upgrade-columns` as
 an unknown option; plan the link there through `planColumnUpgrade`.
 
+## 40. A row a save, a membership or a foreign-key action stores again moves in a live view
+
+- A row a unit of work's save removed, a membership row an `unlink` removed, or a
+  row a foreign-key action removed, stored again with the document it had in the
+  same transaction, left no capture record (session capture) or none for a row a
+  read had loaded (journal capture), so a live view kept it where it was while
+  `execute` listed it after the rows it ties with. Such a commit now carries a
+  `replace` of the row's whole document in both modes
+  ([LIVE-FORMAT §3](LIVE-FORMAT.md#3-the-op-mapping)); observers and the persisted
+  log receive it, and a replicating store sends no operation for it.
+- Journal capture recorded a unit of work's removal of a row no read loaded under
+  the spelling of the key it was given (`/N/16.0`, `/E/1772323200000`), and a
+  replicating store refused the transaction `JD0060`. The removal now reads the row
+  first (one statement when no foreign key reaches the entity) and is recorded
+  under the key the row holds; the transaction commits.
+- A row deleted, stored again with another document and patched or updated back
+  to the document it had in one transaction was recorded with the intermediate
+  document, and a replicating store refused the transaction `JD2104`. The record
+  now carries the document the row holds, and the transaction commits.
+- Under session capture, a delete that a foreign key reaches, made after a row was
+  stored again by an insert in the same transaction, now reads the rows its
+  foreign-key actions reach before it runs, as journal capture does.
+
 ## Measured costs
 
 Exact identity stores complete canonical documents and model endpoints, so

@@ -26,15 +26,17 @@ from its operations rolls back (`JD2104`). A journal origin records a deleted ro
 collection's, under the key the stored row holds, so a delete by another spelling of its key — `'16.0'` or `'016'` for an integer
 key, `'2026-03-01T00:00:00Z'` or the epoch for an instant key kept as an epoch column and created as
 `'2026-03-01T00:00:00.000Z'` — replicates as session capture's does; such a delete used to refuse
-its replicated transaction `JD0060`. A unit-of-work removal of a row it never read has only the key
-it was given, and by another spelling still refuses `JD0060`, where session capture commits it.
+its replicated transaction `JD0060`. A unit-of-work removal of a row it never read reads the row
+before its statement, so it too is recorded under the stored key; by another spelling of the key it
+used to refuse `JD0060` under journal capture, where session capture committed it.
 A row stored again under another spelling of its instant key — deleted as
 `'2026-03-01T00:00:00.000Z'` and created as `'2026-03-01T00:00:00Z'` in one transaction, or `put` so
 by a unit of work — goes by another pointer ([LIVE-FORMAT §3](LIVE-FORMAT.md#3-the-op-mapping)),
 which a replica's history names as another row: the transaction refuses `JD2104` in either mode and
 writes nothing; store it under the spelling it holds.
 A row the transaction leaves as the replica holds it — deleted and stored again with the document it
-had, or a membership unlinked and linked again — is no operation, and a transaction of only such rows
+had, by the row API, a unit of work's save or a foreign-key action, or a membership unlinked and
+linked again — is no operation, and a transaction of only such rows
 writes no envelope: rows replicate without their order. Under journal capture an `unlink` and `link`
 of one pair across two saves of one transaction used to refuse the transaction `JD0060`.
 

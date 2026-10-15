@@ -3401,15 +3401,25 @@ export function openStore(model, options) {
           /** The closure journal capture records (replay's writer reads it too). */
           const captureCascade = cascadeClosure === null || !journalCapture ? undefined
             : (table, keyParts) => cascadeClosure.predict(table, keyParts);
-          /** The closure a store delete reads: recorded by a journal, judged
-           * by the store rules it reaches; `null` when neither asks for it. */
+          /** Whether a delete reads its closure for capture: always in a
+           * journal, and in session mode while the transaction holds a row an
+           * insert stored after a delete, whose document a foreign-key action
+           * may change (the changeset nets the row away, so the buffer must
+           * hold its last write). */
+          const capturesCascade = () => journalCapture || capture?.restoring() === true;
+          /** The closure a store delete reads: recorded by capture, judged by
+           * the store rules it reaches; `null` when neither asks for it. */
           const readCascade = cascadeClosure === null ? undefined
-            : (table, keyParts) => (journalCapture || cascadeClosure.judges(table) ? cascadeClosure.predict(table, keyParts) : null);
+            : (table, keyParts) => (capturesCascade() || cascadeClosure.judges(table) ? cascadeClosure.predict(table, keyParts) : null);
+          /** The key values a capture record names a row by: an entity's as
+           * its plan reads them, a membership row's as its columns hold them. */
+          const movedKey = (table, keyParts) => (entities.has(table) ? entityCoreFor(table).plan.keyValues(keyParts) : keyParts);
           /** Record a closure's entries, relation members stripped as every entry is. */
           const recordCascade = (entries) => {
             for (const entry of entries) {
               capture.record(entry.table, entry.keyParts,
-                stripRelations(entry.table, entry.before), stripRelations(entry.table, entry.after));
+                stripRelations(entry.table, entry.before), stripRelations(entry.table, entry.after),
+                movedKey(entry.table, entry.keyParts));
             }
           };
           /** The document a keyed `put` replaces, for the journal's
@@ -3465,10 +3475,15 @@ export function openStore(model, options) {
                   ? chain(core.get(key), (before) =>
                     chain(core.patch(key, ops, options), (after) => {
                       // a patch that changed nothing wrote nothing, and records nothing
-                      if (!equalsJson(before, after)) capture.record(collectionName, [core.storedKey(key)], before ?? null, after);
+                      const parts = [core.storedKey(key)];
+                      if (!equalsJson(before, after)) capture.record(collectionName, parts, before ?? null, after, parts);
                       return after;
                     }))
-                  : core.patch(key, ops, options)));
+                  : chain(core.patch(key, ops, options), (after) => {
+                    const parts = [core.storedKey(key)];
+                    capture.record(collectionName, parts, undefined, after, parts);
+                    return after;
+                  })));
               },
               delete: (key, options) => {
                 readWriteOptions(collectionName, options, 'delete', true);
@@ -3506,10 +3521,14 @@ export function openStore(model, options) {
                   chain(core.update(key, changes), (next) => {
                     capture.record(entityName, keysOf(next),
                       stripRelations(entityName, before ?? null),
-                      stripRelations(entityName, next));
+                      stripRelations(entityName, next), core.plan.keyValues(keysOf(next)));
                     return next;
                   }))
-                : core.update(key, changes))),
+                : capture === null ? core.update(key, changes)
+                  : chain(core.update(key, changes), (next) => {
+                    capture.record(entityName, keysOf(next), undefined, stripRelations(entityName, next), core.plan.keyValues(keysOf(next)));
+                    return next;
+                  }))),
               // the closure's locked root is the before-image when the entity
               // has inbound edges; a refused delete throws before any record.
               // A closure a store rule judges is read, removed and judged in
@@ -3517,7 +3536,7 @@ export function openStore(model, options) {
               // written, even when the caller's transaction catches it.
               delete: (key) => guard(() => {
                 const judged = reaches && cascadeClosure.judges(entityName);
-                if (!journal && !judged) {
+                if (!journal && !judged && !(reaches && capturesCascade())) {
                   return chain(core.delete(key), (deleted) => {
                     if (deleted) capture?.record(entityName, core.normalizeKey(key), undefined, null, core.plan.keyValues(core.normalizeKey(key)));
                     return deleted;
@@ -3533,9 +3552,9 @@ export function openStore(model, options) {
                           // an instant's epoch) the delete was called with
                           capture.record(entityName, keysOf(before),
                             stripRelations(entityName, before), null, core.plan.keyValues(keysOf(before)));
-                          if (closure !== null) recordCascade(closure.entries);
                         }
                         else capture?.record(entityName, keysOf(before), undefined, null, core.plan.keyValues(keysOf(before)));
+                        if (closure !== null && capture !== null) recordCascade(closure.entries);
                         return deleted;
                       }))));
                 return judged ? attempt(() => connection.transaction(remove),
@@ -3717,11 +3736,11 @@ export function openStore(model, options) {
             const tracker = entities.size > 0
               ? createTracker({
                 connection, entities, mapping, coreFor: entityCoreFor,
-                captureRecord: capture === null || capture.mode !== 'journal'
-                  ? undefined
-                  : (table, keyParts, before, after) => capture.record(table, keyParts,
+                captureRecord: capture === null ? undefined
+                  : (table, keyParts, before, after, moved) => capture.record(table, keyParts,
                     before === undefined ? undefined : stripRelations(table, before),
-                    stripRelations(table, after)),
+                    stripRelations(table, after), moved),
+                journal: journalCapture,
                 readCascade,
                 judgeCascade: cascadeClosure === null ? undefined : (entries) => cascadeClosure.judge(entries),
               })

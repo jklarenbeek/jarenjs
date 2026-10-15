@@ -1392,11 +1392,18 @@ action changed it), again afterwards: the stored rows are then its
 images. Both net ONE op per row — insert+
 update coalesces, insert+delete vanishes, an update back to the
 original emits nothing — so the two modes agree as SETS (a differential
-test pins it). A row the store's own row API deletes and stores again
-with the document it had nets to nothing, yet the table holds it last:
-both modes add one `replace` of its whole document for it, the session
-mode from a buffer of the transaction's deletes and the writes after
-them that the write paths keep beside the changeset. The journal's netting was added when the wasm parity
+test pins it). A row deleted and stored again with the document it had
+— by the row API, a unit of work's save, a membership or a foreign-key
+action — nets to nothing, yet the table holds it last: both modes add one
+`replace` of its whole document for it, the session mode from a buffer
+the write paths keep beside the changeset of the transaction's deletes,
+its inserts once it deleted a row, and every later write to a row it
+deleted or so inserted. An insert found no row, so one the patch names
+nowhere held that document when the transaction began; the rows a
+foreign-key action removed need no read to be told. While such an insert
+is buffered, a session-mode delete a foreign key reaches reads its closure
+as the journal does, so a member its actions null reaches the buffer as
+the row's last document. The journal's netting was added when the wasm parity
 suite ran a same-row multi-op transaction the original differential
 script never wrote. Op order within a record is UNSPECIFIED; every op targets
 a distinct pointer. The persisted `_jaren_changes` log rides the same

@@ -92,6 +92,43 @@ const CAPTURED = [
   ['remove /E/2026-04-01T00:00:00Z'],
 ];
 
+/** A numeric key and an instant key kept as an epoch column. */
+const SPELLED = { $model: '0.1', entities: {
+  N: { schema: { type: 'object', properties: { id: { type: 'integer', 'x-entity': { key: true } } } } },
+  E: { schema: { type: 'object', properties: { at: instantKey(), n: { type: 'integer' } } } } } };
+
+/** Rows a unit of work that never read them removes by other spellings of
+ * their keys ('16.0', the epoch, another spelling of the instant), with every
+ * record the store delivers and the envelopes a replica applied.
+ * @param {any} store @param {any} replica */
+const unreadRemovals = async (store, replica) => {
+  const records = [];
+  store.observe((/** @type {any} */ record) => records.push(opsOf(record)));
+  await store.entity('N').create({ id: 16 });
+  await store.entity('E').create({ at: SHORT, n: 1 });
+  await store.entity('E').create({ at: '2026-04-01T00:00:00Z', n: 2 });
+  await store.transaction(async (/** @type {any} */ tx) => {
+    tx.entity('N').remove('16.0');
+    tx.entity('E').remove(EPOCH);
+    tx.entity('E').remove('2026-04-01T00:00:00.000Z');
+    assert.equal((await tx.saveChanges()).deleted, 3);
+  }, { unitOfWork: 'own' });
+  const statuses = [];
+  for (const envelope of (await store.replication.page({ after: 0 })).items)
+    statuses.push((await replica.replication.apply(envelope)).status);
+  return { records, statuses, held: [await replica.entity('N').asNoTracking().load({}), await replica.entity('E').asNoTracking().load({})] };
+};
+const UNREAD_REMOVED = {
+  records: [
+    ['add /N/16 {"id":16}'],
+    [`add /E/${SHORT} {"at":"${SHORT}","n":1}`],
+    ['add /E/2026-04-01T00:00:00Z {"at":"2026-04-01T00:00:00Z","n":2}'],
+    [`remove /E/${SHORT}`, 'remove /E/2026-04-01T00:00:00Z', 'remove /N/16'],
+  ],
+  statuses: ['applied', 'applied', 'applied', 'applied'],
+  held: [[], []],
+};
+
 describe('an instant key kept as an epoch column', () => {
   it('opens, and an append-only log is loaded, ordered and range-queried by the instant', async () => {
     assert.equal(normalizeEntities(model(true)).get('E').properties.get('at').column, 'integer');
@@ -226,6 +263,21 @@ describe('an instant key kept as an epoch column', () => {
         assert.deepEqual(records, [['add /N/16 {"id":16}'], ['add /N/17 {"id":17}'], ['remove /N/16'], ['remove /N/17']], mode);
       }
       finally { await store.close(); }
+    }
+  });
+
+  it('a unit of work\'s removal of rows it never read, by other spellings of their keys, is recorded under the keys they hold in both modes, and replicates', async () => {
+    for (const mode of ['session', 'journal']) {
+      const store = await openStore(SPELLED, { driver: nodeDriver(), capture: { mode }, replication: { replica: 'a' } });
+      const replica = await openStore(SPELLED, { driver: nodeDriver(), replication: { replica: 'b' } });
+      try {
+        assert.deepEqual(await unreadRemovals(store, replica), UNREAD_REMOVED, mode);
+        assert.deepEqual(await store.entity('E').asNoTracking().load({}), [], mode);
+      }
+      finally {
+        await replica.close();
+        await store.close();
+      }
     }
   });
 
@@ -459,6 +511,12 @@ describe('an instant key kept as an epoch column', () => {
           assert.deepEqual(await replica.entity('E').asNoTracking().load({}), []);
           assert.deepEqual(await replica.entity('T').asNoTracking().load({}), [{ name: 't' }]);
         }
+        finally { await replica.close(); }
+      }, { replication: { replica: 'a' }, capture: { mode: 'journal' } }));
+
+      it('journal capture records a unit of work\'s removal of rows it never read under the keys they hold, and its envelopes apply', () => withStore(engine, SPELLED, async (store) => {
+        const replica = await openStore(SPELLED, { driver: nodeDriver(), replication: { replica: 'b' } });
+        try { assert.deepEqual(await unreadRemovals(store, replica), UNREAD_REMOVED); }
         finally { await replica.close(); }
       }, { replication: { replica: 'a' }, capture: { mode: 'journal' } }));
 

@@ -530,19 +530,22 @@ export function createCaptureEngine(options) {
    * mode. In session mode the changeset is the patch, and the buffer keeps
    * only what a changeset cannot show — a row deleted and stored again in
    * one transaction, whose net change is no change when the document is
-   * the one it had, yet which the table now holds last: every delete, and
-   * a write to a key this transaction deleted. In both modes the keys it
-   * deleted ride on the buffer, so a buffer given up takes them along.
-   * `before` is unread in session mode.
+   * the one it had, yet which the table now holds last: every delete, an
+   * insert once it deleted any row (a row a foreign-key action removed is
+   * stored again by an insert), and every write after to a key it deleted
+   * or so inserted. In both modes the keys it deleted ride on the buffer,
+   * so a buffer given up takes them along. `before` is unread in session
+   * mode but for `null`, which marks an insert.
    * @param {string} table
    * @param {any[]} keyParts
-   * @param {any} before
+   * @param {any} before - `null` for a write that found no row (an insert)
    * @param {any} after - `null` for a delete
-   * @param {any[]} [moved] - for a write of the store's own row API
-   *   (`insert`, `put`, `delete`, `create`), the key as the values it names,
-   *   one value however the key is spelled: the writes a row deleted and
-   *   stored again is told from, alike in both modes — a unit of work's
-   *   save, a membership and a foreign-key action are not among them
+   * @param {any[]} [moved] - for a row write a call or a save names (a
+   *   collection's `insert`, `put`, `patch` and `delete`, an entity's
+   *   `create`, `update` and `delete`, a unit of work's inserts, updates,
+   *   removals and membership rows, a foreign-key action's rows), the key
+   *   as the values it names, one value however the key is spelled: the
+   *   writes a row deleted and stored again is told from, alike in both modes
    */
   const record = (table, keyParts, before, after, moved = undefined) => {
     if (st().depth === 0) return;
@@ -553,22 +556,29 @@ export function createCaptureEngine(options) {
       journal.push({ table, keyParts, before: jsonReality(before), after: jsonReality(after), moved });
       return;
     }
-    if (row === null || (after !== null && !journal.removed?.has(row))) return;
-    journal.push({ table, keyParts, before: undefined, after: jsonReality(after), moved });
+    if (row === null) return;
+    const inserted = before === null && after !== null && journal.removed !== undefined;
+    if (inserted) (journal.inserted ??= new Set()).add(row);
+    if (after !== null && !inserted && !journal.removed?.has(row) && !journal.inserted?.has(row)) return;
+    journal.push({ table, keyParts, before: before === null ? null : undefined, after: jsonReality(after), moved });
   };
 
   /**
    * The ops a transaction's rows deleted and stored again add to its
-   * patch: a row whose last write follows a delete of it, and which the
-   * patch names nowhere — the document it holds is the one it had — is a
-   * `replace` of its whole document, because the table now holds it last
-   * and a query that ties by position reads it there (LIVE-FORMAT §3). A
-   * row stored again with another document is in the patch already.
+   * patch: a row whose last write follows a delete of it, or an insert of
+   * it, and which the patch names nowhere — the document it holds is the
+   * one it had — is a `replace` of its whole document, because the table
+   * now holds it last and a query that ties by position reads it there
+   * (LIVE-FORMAT §3). An insert found no row, so a row it stored that the
+   * patch names nowhere was there when the transaction began and was
+   * removed since, by whatever removed it (a foreign-key action included).
+   * A row stored again with another document is in the patch already.
    * @param {any[]} ops - the patch the changeset or journal answered
    * @param {any[]} journal - the transaction's buffer
    */
   const withRestored = (ops, journal) => {
-    // a transaction that deleted no row through the row API stored none again
+    // a transaction that deleted no row a call or a save names removed none,
+    // a foreign-key action's included, so stored none again
     if (journal.removed === undefined) return ops;
     /** @type {Map<string, { table: string, token: string, removed: boolean, restored: boolean, after: any }>} */
     const rows = new Map();
@@ -578,7 +588,7 @@ export function createCaptureEngine(options) {
       const row = rows.get(key) ?? { table: entry.table, token: '', removed: false, restored: false, after: null };
       if (entry.after === null) row.removed = true;
       else {
-        if (row.removed) row.restored = true;
+        if (row.removed || entry.before === null) row.restored = true;
         // the pointer is the key the write stored, as every op names it
         row.token = keyToken(entry.keyParts);
       }
@@ -866,6 +876,11 @@ export function createCaptureEngine(options) {
    * truncates holds only the deletes and the rows stored again after them.
    */
   const mark = () => st().journal.length;
+  /** Whether this transaction holds a row an insert stored after a delete,
+   * whose last document a foreign-key action of a later delete may change:
+   * a session-mode delete then reads the rows its actions reach, as the
+   * journal always does, so the buffer holds that write too. */
+  const restoring = () => st().depth > 0 && st().journal.inserted !== undefined;
   /** @param {number | null} at - a value {@link mark} answered */
   const truncate = (at) => {
     if (at !== null && st().journal.length > at) st().journal.length = at;
@@ -880,6 +895,7 @@ export function createCaptureEngine(options) {
     mark,
     truncate,
     record,
+    restoring,
     // Metadata belongs to this capture transaction and is cleared on every
     // settlement, including a failure while collecting or persisting changes.
     setContext(value) {

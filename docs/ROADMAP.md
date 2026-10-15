@@ -594,15 +594,6 @@ what each does is its own documentation's job
   by the value the key binds. A store on several PostgreSQL sessions
   (`sessions` above 1) refuses `replication` (`JD0009`): its pages, snapshots
   and applies are qualified on one session.
-- [ ] **A journal removal of a row never read records the key it was given.**
-  A unit-of-work `remove()` of a row no read loaded, by another spelling of
-  its key (`'16.0'` for 16; another spelling of an instant, or its epoch,
-  under a key kept as an epoch column), deletes the row, but journal capture
-  records the `remove` under that spelling (`/N/16.0`, `/E/1772323200000`)
-  where session capture records the stored key, and under replication the
-  transaction refuses `JD0060`. Wanted: the delete reads the stored key of the
-  row it removes (as it reads the rows its foreign keys change) and journal
-  capture records under it.
 - [ ] **Remaining incremental live shapes.**
   [The matrix](../packages/db/docs/LIVE-FORMAT.md) still re-runs ordered groups,
   ordered or windowed distinct projections, windowed groups and windowed
@@ -743,20 +734,6 @@ what each does is its own documentation's job
   it names and answers. Wanted: count
   natively only where the table cannot hold an invalid row (a declared check),
   or read the column.
-- [ ] **A row a unit of work deletes and that is stored again unchanged in the same
-  transaction leaves a view's tie order stale.** A row deleted and stored again with
-  the document it had through a collection's `insert`, `put` or `delete`, or an
-  entity's `create` or `delete`, is a `replace` record (LIVE-FORMAT §3) and every
-  live view reads it at its new place. A removal a unit of work's save makes, an
-  `unlink` and `link` of the same pair, and a row a foreign-key action removes are
-  not among the writes a move is told from: Label `p` removed by a save and created
-  again with the same document in one transaction answers live `["p","q","r"]` and
-  `["q","r","p"]` when run, in both capture modes. Journal capture also records an
-  `unlink` and `link` of one pair across two saves of one transaction as a
-  whole-row `replace` of the membership row where session capture records nothing.
-  Wanted: the unit of work's removals and inserts, membership writes and
-  foreign-key actions report a row stored again alike in both modes (session mode
-  without the before-image reads the journal makes for updates).
 - [ ] **A native grouping cannot know its group count.** A native `$distinct`
   or `$groupby` groups every row it reads: with nearly as many groups as rows
   the statement does the engine's work and a sort besides and is slower than

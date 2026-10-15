@@ -253,6 +253,23 @@ describe('the maintained window', () => {
       });
     }
 
+    it(`${mode}: a row deleted, stored again with another document and patched back to the one it had, in one transaction, records the document it holds`, async () => {
+      const { store, scores, live, records, oracle } = await tiedRows(mode);
+      try {
+        await store.transaction(async (tx) => {
+          await tx.collection('scores').delete('p');
+          await tx.collection('scores').insert({ id: 'p', points: 9, name: 'p' });
+          await tx.collection('scores').patch('p', [{ op: 'replace', path: '/points', value: 3 }]);
+        });
+        assert.deepStrictEqual(await scores.get('p'), { id: 'p', points: 3, name: 'p' });
+        assert.deepStrictEqual(live.result.rows, ['q', 'r', 'p']);
+        await oracle.check();
+        assert.deepStrictEqual(records,
+          [[{ op: 'replace', path: '/scores/p', value: { id: 'p', points: 3, name: 'p' } }]]);
+      }
+      finally { await store.close(); }
+    });
+
     it(`${mode}: an update or put to the document a row holds, or a delete and store across two transactions, agrees with a fresh run`, async () => {
       const { store, scores, live, records, oracle } = await tiedRows(mode);
       try {

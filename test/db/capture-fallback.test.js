@@ -11,7 +11,7 @@
 
 import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
-import { DatabaseSync } from 'node:sqlite';
+import { DatabaseSync, StatementSync } from 'node:sqlite';
 
 import { openStore } from '@jarenjs/db';
 import { nodeDriver } from '@jarenjs/db/node';
@@ -94,8 +94,8 @@ async function script(store) {
     await tx.entity('Tag').delete('t1');
     await tx.entity('Tag').create({ name: 't1' });
   });
-  // a unit of work's removal is not among the writes a move is told from:
-  // stored again unchanged, the row is no record in either mode
+  // a unit of work's removal moves a row stored again unchanged as the
+  // row API's delete does: one whole-document replace in either mode
   await store.transaction(async (tx) => {
     tx.entity('Tag').remove(await tx.entity('Tag').get('t1'));
     await tx.saveChanges();
@@ -129,6 +129,9 @@ describe('the journal fallback', () => {
     assert.deepStrictEqual(canonical(fromJournal), canonical(fromSession),
       'identical op sets, record by record');
     assert.deepStrictEqual(canonical(fromSession).at(-2), [
+      { op: 'replace', path: '/Tag/t1', value: { name: 't1' } },
+    ], 'a row a unit of work removed and stored again with the document it had is one whole-document replace');
+    assert.deepStrictEqual(canonical(fromSession).at(-3), [
       { op: 'replace', path: '/Tag/t1', value: { name: 't1' } },
       { op: 'replace', path: '/notes/kept/body', value: 'v3' },
       { op: 'replace', path: '/notes/n1', value: { id: 'n1', body: 'a', meta: { deep: [1, 9] } } },
@@ -254,6 +257,50 @@ describe('the journal fallback', () => {
     }
     finally {
       cleanup();
+    }
+  });
+
+  it('session capture reads no row a save writes, where the journal reads its images', async () => {
+    const TRACKED = { $model: '0.1', entities: { Row: { schema: { type: 'object', required: ['id'],
+      properties: { id: { type: 'string', 'x-entity': { key: true } }, name: { type: 'string' } } } } } };
+    /** @type {string[] | null} */
+    let reads = null;
+    const run = StatementSync.prototype.get;
+    const all = StatementSync.prototype.all;
+    // every row read a statement makes of the table, while the save runs
+    StatementSync.prototype.get = function (...args) {
+      if (/^SELECT/.test(this.sourceSQL) && this.sourceSQL.includes('"Row"')) reads?.push('get');
+      return run.apply(this, args);
+    };
+    StatementSync.prototype.all = function (...args) {
+      if (/^SELECT/.test(this.sourceSQL) && this.sourceSQL.includes('"Row"')) reads?.push('all');
+      return all.apply(this, args);
+    };
+    try {
+      const seen = {};
+      for (const mode of ['session', 'journal']) {
+        const store = await openStore(TRACKED, { driver: nodeDriver(), capture: { mode } });
+        try {
+          for (const id of ['p', 'q']) await store.entity('Row').create({ id, name: id });
+          await store.transaction(async (tx) => {
+            const row = await tx.entity('Row').get('p');
+            tx.entity('Row').put({ ...row, name: 'P' });
+            tx.entity('Row').remove('q');
+            reads = [];
+            await tx.saveChanges();
+            seen[mode] = reads.length;
+            reads = null;
+          }, { unitOfWork: 'own' });
+        }
+        finally { await store.close(); }
+      }
+      // the journal reads the updated row's before-image and the stored key
+      // of the row its removal never read; a changeset holds both
+      assert.deepStrictEqual(seen, { session: 0, journal: 2 });
+    }
+    finally {
+      StatementSync.prototype.get = run;
+      StatementSync.prototype.all = all;
     }
   });
 

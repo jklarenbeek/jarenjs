@@ -6,6 +6,8 @@ import { nodeDriver } from '@jarenjs/db/node';
 import { createJsltRegistry, statsPack } from '@jarenjs/json/jslt';
 import { createIntlZoneProvider } from '@jarenjs/locales/intl-zones';
 import { liveOracle } from './oracle/replication.js';
+import { skipFor, withStore } from './store-core-engines.js';
+import { asyncLive } from '@jarenjs/db/async-live';
 
 const MODEL = { $model: '0.1', entities: {
   Author: { schema: { type: 'object', required: ['id'], properties: {
@@ -304,3 +306,172 @@ for (const mode of ['session', 'journal']) it(`${mode}: a maintained join and gr
   }
   finally { await store.close(); }
 });
+
+/** Hubs whose spokes a foreign-key action removes, and tags they are members of. */
+const RESTORED = { $model: '0.1', entities: {
+  Hub: { schema: { type: 'object', required: ['id'], properties: { id: { type: 'string', 'x-entity': { key: true } }, name: { type: 'string' },
+    spokes: { 'x-entity': { relation: { to: 'Spoke', many: true, via: 'hub', onDelete: 'cascade' } } },
+    leaning: { 'x-entity': { relation: { to: 'Spoke', many: true, via: 'other', onDelete: 'setNull' } } },
+    tags: { 'x-entity': { relation: { to: 'Tag', many: true } } } } } },
+  Spoke: { schema: { type: 'object', required: ['id'], properties: { id: { type: 'string', 'x-entity': { key: true } },
+    hub: { type: ['string', 'null'] }, other: { type: ['string', 'null'] }, name: { type: 'string' } } } },
+  Tag: { schema: { type: 'object', required: ['id'], properties: { id: { type: 'string', 'x-entity': { key: true } } } } },
+} };
+
+/**
+ * A store holding hubs `g`, `h` and `k`, spokes `p` (on `h`), `q` and `r` (on `g`)
+ * tied by name, and `h` a member of tags `a`, `b` and `c`, handed to `fn`
+ * with a live view over the spokes, one over the membership rows, every
+ * record the store delivers, and a check that a replica the envelopes apply
+ * to holds what the store holds.
+ * @param {string} engine @param {'session' | 'journal'} mode
+ * @param {(world: { store: any, views: any[], oracles: any[], records: any[], replicated: () => Promise<void>,
+ *   settled: () => Promise<void> }) => Promise<void>} fn
+ */
+const restoredWorld = (engine, mode, fn) => withStore(engine, RESTORED, async (store) => {
+  const replica = await openStore(RESTORED, { driver: nodeDriver(), replication: { replica: 'b' } });
+  /** @type {any[]} */
+  const oracles = [];
+  try {
+    for (const id of ['g', 'h', 'k']) await store.entity('Hub').create({ id, name: id });
+    await store.entity('Spoke').create({ id: 'p', hub: 'h', name: 'same' });
+    for (const id of ['q', 'r']) await store.entity('Spoke').create({ id, hub: 'g', name: 'same' });
+    for (const id of ['a', 'b', 'c']) {
+      await store.entity('Tag').create({ id });
+      store.entity('Hub').link('h', 'tags', id);
+    }
+    await store.saveChanges();
+    const spokes = [{ $for: { s: '$.Spoke[*]' }, $orderby: { $key: '$s.name' }, $return: '$s.id' }];
+    const members = [{ $for: { m: '$.Hub_Tag[*]' }, $return: '$m.Tag_key' }];
+    const views = [await store.live(spokes), await store.live(members)];
+    if (engine !== 'sqlite') for (const view of views) await view.refresh();
+    oracles.push(liveOracle(views[0], () => store.execute(spokes)), liveOracle(views[1], () => store.execute(members)));
+    /** @type {any[]} */
+    const records = [];
+    store.observe((/** @type {any} */ record) => records.push(record.patch));
+    const replicated = async () => {
+      for (const envelope of (await store.replication.page({ after: 0 })).items)
+        assert.equal((await replica.replication.apply(envelope)).status, 'applied', mode);
+      // a replica holds the rows, not their order in a table
+      const held = async (/** @type {any} */ at, /** @type {string} */ name) => (await at.entity(name).asNoTracking()
+        .load(name === 'Hub' ? { include: { tags: true } } : {}))
+        .sort((/** @type {any} */ a, /** @type {any} */ b) => (a.id < b.id ? -1 : 1));
+      for (const name of ['Hub', 'Spoke', 'Tag'])
+        assert.deepEqual(await held(replica, name), await held(store, name), `${mode} ${name}`);
+    };
+    const settled = async () => { if (engine !== 'sqlite') for (const view of views) await view.refresh(); };
+    await fn({ store, views, oracles, records, replicated, settled });
+  }
+  finally {
+    for (const oracle of oracles) oracle.close();
+    await replica.close();
+  }
+}, engine === 'sqlite' ? { capture: { mode }, replication: { replica: 'a' } }
+  // a PostgreSQL view follows commits from a durable log, refreshed before each check
+  : { capture: { mode, log: { retention: 4 } }, replication: { replica: 'a' }, live: asyncLive({ pollMs: 60000 }) });
+
+// both capture modes on SQLite, the journal on PostgreSQL (which keeps no session)
+for (const [engine, mode] of /** @type {const} */ ([['sqlite', 'session'], ['sqlite', 'journal'], ['postgres', 'journal']])) {
+  const name = engine === 'sqlite' ? mode : `${engine} ${mode}`;
+  for (const [label, storeAgain] of /** @type {[string, (tx: any) => Promise<any>][]} */ ([
+    ['read, removed by a save and added by the next', async (tx) => {
+      tx.entity('Spoke').remove(await tx.entity('Spoke').get('p')); await tx.saveChanges();
+      tx.entity('Spoke').add({ id: 'p', hub: 'h', name: 'same' }); await tx.saveChanges();
+    }],
+    ['removed by a save of rows it never read and created', async (tx) => {
+      tx.entity('Spoke').remove('p'); await tx.saveChanges();
+      await tx.entity('Spoke').create({ id: 'p', hub: 'h', name: 'same' });
+    }],
+    ['deleted and added by a save', async (tx) => {
+      await tx.entity('Spoke').delete('p');
+      tx.entity('Spoke').add({ id: 'p', hub: 'h', name: 'same' }); await tx.saveChanges();
+    }],
+  ])) {
+    it(`${name}: a row ${label}, with the document it had, in one transaction, ties behind the rows that stayed`, { skip: skipFor(engine) }, () => restoredWorld(engine, mode, async ({ store, views, oracles, records, replicated, settled }) => {
+      await store.transaction(storeAgain, { unitOfWork: 'own' });
+      await settled();
+      assert.deepEqual(views[0].result.rows, ['q', 'r', 'p']);
+      for (const oracle of oracles) await oracle.check();
+      assert.deepEqual(records, [[{ op: 'replace', path: '/Spoke/p', value: { id: 'p', hub: 'h', name: 'same' } }]]);
+      await replicated();
+    }));
+  }
+
+  for (const [label, remove] of /** @type {[string, (tx: any) => Promise<any>][]} */ ([
+    ['a delete', (tx) => tx.entity('Hub').delete('h')],
+    ['a save', (tx) => { tx.entity('Hub').remove('h'); return tx.saveChanges(); }],
+  ])) {
+    it(`${name}: rows the foreign-key actions of ${label} removed, stored again with the documents they had in one transaction, move in every view`, { skip: skipFor(engine) }, () => restoredWorld(engine, mode, async ({ store, views, oracles, records, replicated, settled }) => {
+      await store.transaction(async (tx) => {
+        await remove(tx);
+        await tx.entity('Hub').create({ id: 'h', name: 'h' });
+        await tx.entity('Spoke').create({ id: 'p', hub: 'h', name: 'same' });
+        for (const id of ['a', 'b', 'c']) tx.entity('Hub').link('h', 'tags', id);
+        await tx.saveChanges();
+      }, { unitOfWork: 'own' });
+      await settled();
+      assert.deepEqual(views.map((view) => view.result.rows), [['q', 'r', 'p'], ['a', 'b', 'c']]);
+      for (const oracle of oracles) await oracle.check();
+      assert.deepEqual(records.map((patch) => patch.map((op) => `${op.op} ${op.path}`).sort()), [[
+        'replace /Hub/h', 'replace /Hub_Tag/["h","a"]', 'replace /Hub_Tag/["h","b"]', 'replace /Hub_Tag/["h","c"]', 'replace /Spoke/p',
+      ]]);
+      await replicated();
+    }));
+  }
+
+  for (const [label, storeAgain] of /** @type {[string, (tx: any) => Promise<any>][]} */ ([
+    ['deleted, created with another document and updated', async (tx) => {
+      await tx.entity('Spoke').delete('p');
+      await tx.entity('Spoke').create({ id: 'p', hub: 'h', name: 'other' });
+      await tx.entity('Spoke').update('p', { name: 'same' });
+    }],
+    ['removed by a save, added with another document by the next and put', async (tx) => {
+      tx.entity('Spoke').remove('p'); await tx.saveChanges();
+      const added = tx.entity('Spoke').add({ id: 'p', hub: 'h', name: 'other' }); await tx.saveChanges();
+      tx.entity('Spoke').put({ ...added, name: 'same' }); await tx.saveChanges();
+    }],
+  ])) {
+    it(`${name}: a row ${label} back to the document it had, in one transaction, records the document it holds`, { skip: skipFor(engine) }, () => restoredWorld(engine, mode, async ({ store, views, oracles, records, replicated, settled }) => {
+      await store.transaction(storeAgain, { unitOfWork: 'own' });
+      await settled();
+      assert.deepEqual(views[0].result.rows, ['q', 'r', 'p']);
+      for (const oracle of oracles) await oracle.check();
+      assert.deepEqual(records, [[{ op: 'replace', path: '/Spoke/p', value: { id: 'p', hub: 'h', name: 'same' } }]]);
+      await replicated();
+    }));
+  }
+
+  for (const [label, storeAgain] of /** @type {[string, (tx: any) => Promise<any>][]} */ ([
+    ['updated', (tx) => tx.entity('Spoke').update('p', { other: null })],
+    ['nulled by the foreign-key action of a later delete', (tx) => tx.entity('Hub').delete('k')],
+    ['nulled by the foreign-key action of a later save', (tx) => { tx.entity('Hub').remove('k'); return tx.saveChanges(); }],
+  ])) {
+    it(`${name}: a row a foreign-key action removed, created with another document and ${label} back to the one it had, in one transaction, records the document it holds`, { skip: skipFor(engine) }, () => restoredWorld(engine, mode, async ({ store, views, oracles, records, replicated, settled }) => {
+      await store.transaction(async (tx) => {
+        await tx.entity('Hub').delete('h');
+        await tx.entity('Hub').create({ id: 'h', name: 'h' });
+        await tx.entity('Spoke').create({ id: 'p', hub: 'h', other: 'k', name: 'same' });
+        await storeAgain(tx);
+      }, { unitOfWork: 'own' });
+      await settled();
+      assert.deepEqual(views[0].result.rows, ['q', 'r', 'p']);
+      for (const oracle of oracles) await oracle.check();
+      const spoke = records[0].filter((op) => op.path === '/Spoke/p');
+      assert.deepEqual(spoke, [{ op: 'replace', path: '/Spoke/p', value: { id: 'p', hub: 'h', name: 'same' } }]);
+      await replicated();
+    }));
+  }
+
+  it(`${name}: a membership unlinked by a save and linked again by the next, in one transaction, moves in a view over its rows`, { skip: skipFor(engine) }, () => restoredWorld(engine, mode, async ({ store, views, oracles, records, replicated, settled }) => {
+    assert.deepEqual(views[1].result.rows, ['a', 'b', 'c']);
+    await store.transaction(async (tx) => {
+      tx.entity('Hub').unlink('h', 'tags', 'a'); await tx.saveChanges();
+      tx.entity('Hub').link('h', 'tags', 'a'); await tx.saveChanges();
+    });
+    await settled();
+    assert.deepEqual(views[1].result.rows, ['b', 'c', 'a']);
+    for (const oracle of oracles) await oracle.check();
+    assert.deepEqual(records, [[{ op: 'replace', path: '/Hub_Tag/["h","a"]', value: { Hub_key: 'h', Tag_key: 'a' } }]]);
+    await replicated();
+  }));
+}

@@ -71,7 +71,7 @@ same ops differently; they MUST agree as sets.
 | UPDATE, document column changed | old JSONB diffed against new (`createJSONPatch`) → minimal nested ops under `/<table>/<key>` |
 | UPDATE, mapped scalar/foreign-key column changed | property-level op at `/<table>/<key>/<property>`: `replace` (both present), `add` (was `NULL`), `remove` (now `NULL` — absent per MODEL-FORMAT §9.3) |
 | join-table INSERT / DELETE | `add` / `remove` of the membership row document |
-| a row deleted and stored again in one transaction with the document it had, through `insert`, `put` or `delete` of a collection, or `create` and `delete` of an entity | `replace` at `/<table>/<key>` with the full document: nothing in the row changed, but the table now holds it last, where a query that ties by position reads it (§9). A key is told by the values it names, a collection's numeric key as an entity's, so a delete by another spelling of it (`'16.0'` for 16) counts, and the row is recorded under the key it is stored under; on SQLite a single integer key is the row's position, and the record moves nothing. Stored again with another document under the same pointer, the row is the UPDATE rows above. A unit of work's save, a membership and a foreign-key action are not among those writes: a row they delete and store again unchanged is no op |
+| a row deleted and stored again in one transaction with the document it had — removed by a collection's `delete`, an entity's `delete`, a unit of work's save, an `unlink` or a foreign-key action, and stored by a collection's `insert` or `put`, an entity's `create`, a save or a `link`, with any write between | `replace` at `/<table>/<key>` with the full document: nothing in the row changed, but the table now holds it last, where a query that ties by position reads it (§9). A key is told by the values it names, a collection's numeric key as an entity's, so a delete by another spelling of it (`'16.0'` for 16) counts, and the row is recorded under the key it is stored under; on SQLite a single integer key is the row's position, and the record moves nothing. Stored again with another document under the same pointer, the row is the UPDATE rows above. A membership row is the two-column document of its pair, so an `unlink` and a `link` of one pair across two saves of one transaction is a `replace` of it in both modes |
 | a row whose instant key kept as an epoch column is stored again under another spelling of the instant (`2026-03-01T00:00:00Z` where the row held `2026-03-01T00:00:00.000Z`): deleted and created in one transaction, or `put` by a unit of work | `remove` at the pointer the row had and `add` at the new one with the full document: the pointer is the string the document keeps (§2), so the row goes by another one. A replicated store refuses such a write `JD2104`: a replica's history names the two spellings as two rows |
 
 Changesets (not patchsets) are used because they carry OLD values —
@@ -94,14 +94,21 @@ them).
   build may not). Sessions are per COMMIT, never long-lived (an
   unbounded session is a memory leak); a rolled-back transaction —
   and a rolled-back savepoint inside a committed one — contributes
-  nothing (probed and pinned by test).
+  nothing (probed and pinned by test). Beside the changeset the write
+  paths keep the transaction's deletes and, once it deleted a row, its
+  inserts and every later write to a row it deleted or so inserted: a
+  row stored again is told from them (§3). While the transaction holds
+  such an insert, a store delete a foreign key reaches reads the rows
+  its actions will remove or null before it runs, as the journal does,
+  so the last document of a row they change is the one recorded.
 - **`journal`** — the write path itself emits records: the store
   already knows what it wrote. **Less complete, stated plainly**: it
   cannot see writes made through raw SQL, triggers, or another
-  connection; a journal-mode delete of a row the store never read
-  emits its `remove` without having seen the old document, under the
-  key it was given (`/N/16.0` for a row keyed 16 removed as `'16.0'`) —
-  any other delete is recorded under the key the stored row holds; a keyed
+  connection; a delete is recorded under the key the stored row holds
+  (`/N/16` for a row keyed 16 removed as `'16.0'`): a unit of work's
+  removal of a row no read loaded reads the row before its statement, as
+  a row API delete does (the closure's locked root when a foreign key
+  reaches it); a keyed
   `put` reads the stored document first, so it emits the `replace`
   session mode emits and a `put` that changes nothing emits nothing.
   It reconstructs the database's own `ON DELETE` actions: before a
@@ -531,10 +538,8 @@ registration:
   group moves it there as a delete and an insert would. Inserted again
   with an EQUAL value, the key reaches capture as a `replace` of its
   whole document (§3), which every strategy reads as a change to the row,
-  so the row moves as `execute` reads it. A row a unit of work's save, a
-  membership or a foreign-key action deleted and stored again unchanged
-  reaches capture as no change at all: a maintained view keeps it in its
-  old place until a later change to that row reaches capture;
+  so the row moves as `execute` reads it, whichever write removed it — a
+  unit of work's save, an `unlink` and a foreign-key action included;
 - row and window strategies depend on their WHOLE collection — the
   result carries the row documents, so any member change changes an
   emitted row.
@@ -600,10 +605,11 @@ document and apply patches to it; ops are `add`, `remove` and
   window kept it where it was while `execute` listed it after its ties
   (three rows tied at one sort value, `p` deleted and inserted again:
   live `["p","q","r"]`, a fresh run `["q","r","p"]`); it now moves, and
-  an observer receives the record.* A row a unit of work's save deletes
-  and stores again unchanged still leaves no record (§3); a consumer that
-  needs one tie order whatever happens to the table declares the key as
-  the last `orderBy` term. An UNORDERED query's initial order is the engine's;
+  an observer receives the record — as it does for a row a unit of
+  work's save, an `unlink` or a foreign-key action removed, which left no
+  record in either mode before.* A consumer that needs one tie order
+  whatever happens to the table declares the key as the last `orderBy`
+  term. An UNORDERED query's initial order is the engine's;
   maintenance then appends newly matching rows and splices removed
   ones, which is deterministic given the write history but is NOT
   re-derived rowid order — a consumer that needs a specific order
@@ -996,12 +1002,9 @@ distinct. Default entity result order follows physical row insertion order;
 point reads preserve that order even when a key is deleted and reinserted. An
 entity deleted and created again with identical values in one transaction is a
 `replace` of its row (§3), so every live registration reads it at its new
-place. The exception is a row a unit of work's save deletes and stores again
-with identical values in one transaction — an `unlink` and `link` of the same
-pair included: it is not reported as moved, so no live registration moves it
-when `execute` starts listing it last. A re-run takes the new place at its next
-record, a maintained join or graph when a later change to that row reaches
-capture. A
+place — a row a unit of work's save or a foreign-key action deletes and that is
+stored again with identical values included, and an `unlink` and `link` of the
+same pair. A
 left join uses a canonical `$allowing-empty` binding over an equality-filtered
 inner subquery. Its absent child can be defaulted to null. Graph projections
 embed equality-filtered child queries in a single outer row's return object.

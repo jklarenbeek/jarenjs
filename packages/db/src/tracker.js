@@ -101,12 +101,20 @@ function inOrder(count, step, from = 0) {
 /**
  * The store-level unit of work.
  * @param {{ connection: any, entities: Map<string, any>, mapping: any,
- *   coreFor: (name: string) => any }} context
+ *   coreFor: (name: string) => any, captureRecord?: (table: string, keyParts: any[], before: any, after: any, moved?: any[]) => void,
+ *   journal?: boolean, readCascade?: (table: string, keyParts: any[]) => any,
+ *   judgeCascade?: (entries: any[]) => any }} context - `captureRecord` records a
+ *   row write for capture; `journal` whether capture keeps a journal (its update
+ *   records read before-images); `readCascade` and `judgeCascade` read and judge
+ *   the rows a delete's foreign-key actions reach
  * @returns {any}
  */
 export function createTracker(context) {
   const { connection, entities, mapping, coreFor } = context;
   const captureRecord = context.captureRecord ?? null;
+  // whether capture keeps a journal: the before-images its update records
+  // read, and the stored key of a row a removal never read
+  const journal = captureRecord !== null && context.journal === true;
   // the rows a delete's foreign-key actions reach: read before each delete
   // statement runs when a journal records them or a store rule judges them,
   // judged right after the statement removed its row and recorded by
@@ -1160,12 +1168,22 @@ export function createTracker(context) {
       // of the transaction (a foreign-key action nulling a member, a direct
       // write) leaves the snapshot stale; the row is then read again after the
       // statement, and the two stored rows are the images.
-      const journalImage = statement.kind === 'update' && captureRecord !== null
+      const journalImage = statement.kind === 'update' && journal
         && coreFor(statement.entity).plan.document !== false;
       return chain(ahead(statement), () => chain(
-        statement.kind === 'delete' && readCascade !== null
-          ? chain(readCascade(statement.entity, statement.removal.parts), (closure) => {
+        statement.kind === 'delete'
+          ? chain(readCascade === null ? null : readCascade(statement.entity, statement.removal.parts), (closure) => {
             statement.cascade = closure?.entries ?? [];
+            // a journal records a removal under the key its row is stored
+            // under, so a removal no read loaded reads its row first ('16.0'
+            // names the row 16): the closure's locked root, the row a rule
+            // judges, or the row itself
+            if (!journal || statement.removal.snapshot !== null) return undefined;
+            const core = coreFor(statement.entity);
+            return chain(closure?.root ?? statement.before
+              ?? core.getLocked(keyArgument(core.plan, statement.removal.parts)), (row) => {
+              statement.removedRow = row;
+            });
           })
           : journalImage
             ? chain(storedRowOf(statement.record), (row) => { statement.journalBefore = row; })
@@ -1473,8 +1491,8 @@ export function createTracker(context) {
           (undo.inserted ??= []).push({ key, record, saved });
           records.set(/** @type {string} */ (key), saved);
           record.saved = doc;
-          captureRecord?.(statement.entity,
-            plan.keys.map((k) => doc[k]), null, doc);
+          const keyParts = plan.keys.map((/** @type {string} */ k) => doc[k]);
+          captureRecord?.(statement.entity, keyParts, null, doc, plan.keyValues(keyParts));
         });
       }
       else if (statement.kind === 'update') {
@@ -1491,8 +1509,10 @@ export function createTracker(context) {
         // a stale snapshot is no image of the row: the stored rows read
         // around the statement are (see `runStatements`)
         const stale = statement.journalAfter !== undefined;
-        captureRecord?.(statement.entity, plan.keys.map((k) => record.snapshot[k]),
-          stale ? statement.journalBefore : before, stale ? statement.journalAfter : record.snapshot);
+        const keyParts = plan.keys.map((/** @type {string} */ k) => record.snapshot[k]);
+        captureRecord?.(statement.entity, keyParts,
+          stale ? statement.journalBefore : before, stale ? statement.journalAfter : record.snapshot,
+          plan.keyValues(keyParts));
       }
       else if (statement.kind === 'delete') {
         const removal = statement.removal;
@@ -1500,14 +1520,17 @@ export function createTracker(context) {
         records.delete(removedKey);
         if (removals.get(removedKey) === removal) removals.delete(removedKey);
         if ((statement.deletedRows ?? 0) > 0) {
-          // under the key a row read holds, as its insert recorded it; a
-          // removal of a row never read has only the key it was given
-          captureRecord?.(removal.entity, removal.snapshot === null ? removal.parts
-            : coreFor(removal.entity).plan.keys.map((/** @type {string} */ key) => removal.snapshot[key]),
-          removal.snapshot ?? undefined, null);
+          // under the key the row holds, as its insert recorded it: the row
+          // a read loaded, or the one a journal read before the statement
+          const plan = coreFor(removal.entity).plan;
+          const row = removal.snapshot ?? statement.removedRow ?? null;
+          captureRecord?.(removal.entity, row === null ? removal.parts
+            : plan.keys.map((/** @type {string} */ key) => row[key]),
+          row ?? undefined, null, plan.keyValues(removal.parts));
           // the rows the database's foreign-key actions changed with it
           for (const entry of statement.cascade ?? []) {
-            captureRecord?.(entry.table, entry.keyParts, entry.before, entry.after);
+            captureRecord?.(entry.table, entry.keyParts, entry.before, entry.after,
+              entities.has(entry.table) ? coreFor(entry.table).plan.keyValues(entry.keyParts) : entry.keyParts);
           }
         }
       }
@@ -1520,10 +1543,10 @@ export function createTracker(context) {
           for (const column of statement.tableColumns) ordered[column] = value[column];
           const keyParts = statement.tableColumns.map((column) => ordered[column]);
           if (statement.kind === 'join-insert') {
-            captureRecord?.(statement.entity, keyParts, null, ordered);
+            captureRecord?.(statement.entity, keyParts, null, ordered, keyParts);
           }
           else {
-            captureRecord?.(statement.entity, keyParts, undefined, null);
+            captureRecord?.(statement.entity, keyParts, undefined, null, keyParts);
           }
         }
       }
