@@ -224,7 +224,8 @@ function compileItemValidator(schemaObj, itemSchema, key, index) {
   if (typeof itemSchema === 'object' && itemSchema !== null) {
     // Fast path: $ref-only schema - check property directly before calling Object.keys
     // This avoids the overhead of Object.keys for the most common case
-    if (itemSchema.$ref !== undefined) {
+    // Recording output units, the item's own subschema is one: no shortcut.
+    if (itemSchema.$ref !== undefined && schemaObj.root.recorder === null) {
       const keys = Object.keys(itemSchema);
       if (keys.length === 1) {
         // Use the root to resolve the ref directly to the target validator

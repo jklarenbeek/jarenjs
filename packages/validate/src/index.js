@@ -29,13 +29,14 @@ import {
   hasUnevaluatedItemsCoverage,
   EvalLog,
   assertRelativePointerDialect,
+  markStep,
 } from './tools.js';
 import { wrapUnevaluated } from './unevaluated.js';
 import { registerFormatCompiler, registerFormatCompilers } from './format.js';
 import { mergeMap } from '@jarenjs/core/object';
 import { hasRecursiveAnchor, getDynamicAnchorName, collectDynamicAnchors, collectDynamicAnchorsDeep } from './dynamic-ref.js';
 import { isRecursiveQueryCompileError } from './query-keyword.js';
-import { boundReference, assertReferenceDepth, REFERENCE_DEPTH_CEILING } from './errors.js';
+import { boundReference, assertReferenceDepth, assertOutputFormat, REFERENCE_DEPTH_CEILING } from './errors.js';
 import { TRAVERSE_SCHEMA_MAP_MAPS, detectSchemaDraft } from './schema-keywords.js';
 
 export {
@@ -252,6 +253,7 @@ export class ValidationOptions {
    * @param {boolean} [propertyDependencies=false] - Whether the `propertyDependencies` proposal keyword asserts. Off, it is an unknown keyword like any other; on, it applies in documents of draft 2020-12 (and the draft-next dialect) and in documents that declare no draft.
    * @param {'handrews-01'|'bhutton-00'} [relativePointerDialect='handrews-01'] - Which Relative JSON Pointer grammar the `data` and `$data` keywords and the `relative-json-pointer` format speak: `'handrews-01'` is draft-handrews-relative-json-pointer-01 (what the format suite asserts); `'bhutton-00'` is draft-bhutton-relative-json-pointer-00, which also accepts index manipulation (`0+1`, `1-1/name`, `0-1#`). Any other value is a TypeError when a schema compiles.
    * @param {number} [maxReferenceDepth=256] - The deepest nesting of schema references one validation enters before it throws `JK2001` (a positive safe integer, else `JK0002` when a schema compiles). Fixed by default so the answer is the same on every host; raising it lets the host's call stack decide again.
+   * @param {OutputFormat<any>} [outputFormat] - A JSON Schema standard output format from `@jarenjs/validate/output`, returned by a compiled validator instead of a boolean or `{ valid, errors }`; unset, the return shape is `collectErrors`'. Any other value is refused `JK0003` when a schema compiles.
    */
   constructor(
     skipErrors = true,
@@ -265,7 +267,8 @@ export class ValidationOptions {
     unknownFormats = 'ignore',
     propertyDependencies = false,
     relativePointerDialect = 'handrews-01',
-    maxReferenceDepth = REFERENCE_DEPTH_CEILING
+    maxReferenceDepth = REFERENCE_DEPTH_CEILING,
+    outputFormat = undefined
   ) {
     /** @type {boolean} Whether to stop at first error or continue */
     this.skipErrors = skipErrors;
@@ -291,8 +294,18 @@ export class ValidationOptions {
     this.relativePointerDialect = relativePointerDialect;
     /** @type {number} The deepest nesting of schema references one validation enters */
     this.maxReferenceDepth = maxReferenceDepth;
+    /** @type {OutputFormat<any>|undefined} The standard output format a compiled validator returns, or undefined for the `collectErrors` shapes */
+    this.outputFormat = outputFormat;
   }
 }
+
+/**
+ * A JSON Schema standard output format, imported from
+ * `@jarenjs/validate/output` (`flagOutput`, `basicOutput`,
+ * `detailedOutput`, `verboseOutput`, `listOutput`, `hierarchicalOutput`).
+ * @template R - What the compiled validator returns
+ * @typedef {import('./output.js').OutputFormat<R>} OutputFormat
+ */
 
 /**
  * ValidationRoot manages the compilation and validation context for a schema.
@@ -376,6 +389,8 @@ export class ValidationRoot {
   #owner = null;
   /** @type {Map<string, object>|null} Compiled 'errorMessage' specs by schema path; null when the schema set has none */
   #errorMessages = null;
+  /** @type {UnitRecorder|null} The recorder of an output format's units (`@jarenjs/validate/output`), or null when this compilation records none */
+  #recorder = null;
 
   /** Keywords whose value is a map of arbitrary names to schemas; those
    * names must not be mistaken for keywords (e.g. a metaschema declaring
@@ -526,6 +541,8 @@ export class ValidationRoot {
 
     assertRelativePointerDialect(opts.relativePointerDialect);
     assertReferenceDepth(opts.maxReferenceDepth);
+    assertOutputFormat(opts.outputFormat);
+    this.#recorder = opts.outputFormat?.recorder?.(schemas) ?? null;
     this.#options = opts;
     this.#traverse = traverseOptionsFor(traverse, opts.propertyDependencies);
     this.#owner = owner;
@@ -547,7 +564,9 @@ export class ValidationRoot {
       if (flags.dollarData && flags.unevaluated) break;
     }
     this.#usesDollarData = flags.dollarData;
-    this.#usesUnevaluated = flags.unevaluated;
+    // Recording runs every branch of an `anyOf` (each passing branch has
+    // annotations to report), which annotation tracking already does.
+    this.#usesUnevaluated = flags.unevaluated || this.#recorder !== null;
 
     // For the root schema, baseUri is the origin
     this.#firstSchema = ValidationRoot.#createObject(this, origin, schema, origin);
@@ -726,8 +745,12 @@ export class ValidationRoot {
    */
   addError(error /*:InternalValidationError*/) {
     this.#errors.push(error);
+    this.#recorder?.error(error);
     return false;
   }
+
+  /** @returns {UnitRecorder|null} The output units' recorder, or null (an internal collaborator of the keyword compilers) */
+  get recorder() { return this.#recorder; }
 
   /**
    * A checkpoint in the collected-error list.
@@ -912,6 +935,16 @@ export class ValidationRoot {
 }
 
 /**
+ * The recorder an output format of `@jarenjs/validate/output` hands a
+ * compilation: every subschema applied enters it, carrying the evaluation
+ * path segment an applicator marked as `pending`.
+ * @typedef {import('./output.js').UnitRecorder} UnitRecorder
+ */
+
+/** The evaluation step of a `$ref` (see `markStep`). */
+const REF_STEP = Object.freeze(['$ref']);
+
+/**
  * Whether a schema id lies in the document being compiled. A loop among
  * registrations of other documents is reported when something reaches it.
  * @param {string} id
@@ -987,6 +1020,9 @@ export class ValidationObject {
     const resolved = root.unresolvedObject(ref);
     if (resolved != null) {
       const refValidator = resolved.validate;
+      // Recording, the call through the reference is its own output unit;
+      // the dynamic scope keeps the target's own function.
+      const callRef = markStep(root.recorder, REF_STEP, refValidator);
       const resolvedSchema = resolved.schema;
       
       // Check if the target schema has a dynamic anchor ($recursiveAnchor or $dynamicAnchor)
@@ -1027,7 +1063,7 @@ export class ValidationObject {
               root.pushDynamicAnchorValidator(anchorName, refValidator);
             }
             try {
-              return combineRefAndSiblings(refValidator, siblingValidator, self.options.skipErrors,
+              return combineRefAndSiblings(callRef, siblingValidator, self.options.skipErrors,
               data, dataPath, dataRoot);
             } finally {
               // Pop in reverse order
@@ -1053,7 +1089,7 @@ export class ValidationObject {
               root.pushDynamicAnchorValidator(anchorName, refValidator);
             }
             try {
-              return refValidator(data, dataPath, dataRoot);
+              return callRef(data, dataPath, dataRoot);
             } finally {
               // Pop in reverse order
               if (hasRecAnchor || dynAnchorName) {
@@ -1072,13 +1108,13 @@ export class ValidationObject {
         // unevaluated* keywords must see annotations produced by the $ref
         // target, so the wrapper goes around the combined validator.
         return wrapUnevaluated(self, schema, function validateRefWithSiblings(data, dataPath, dataRoot) {
-          return combineRefAndSiblings(refValidator, siblingValidator, self.options.skipErrors,
+          return combineRefAndSiblings(callRef, siblingValidator, self.options.skipErrors,
               data, dataPath, dataRoot);
         });
       }
       
-      self.#validator = refValidator;
-      return refValidator;
+      self.#validator = callRef;
+      return callRef;
     }
 
     // Resolved on first use. Every loop through references passes at least
@@ -1115,14 +1151,17 @@ export class ValidationObject {
           enterAnchors.push(anchor);
         }
 
+        const targetValidator = obj.validate;
         resolvedState = {
-          refValidator: obj.validate,
+          refValidator: targetValidator,
+          // Recording, the call through the reference is its own output unit.
+          callRef: markStep(rootRef.recorder, REF_STEP, targetValidator),
           enterAnchors,
           hasRecAnchor: isObjectClass(resolvedSchema) && hasRecursiveAnchor(resolvedSchema),
           dynAnchorName: isObjectClass(resolvedSchema) ? getDynamicAnchorName(resolvedSchema) : null,
         };
       }
-      const { refValidator, enterAnchors, hasRecAnchor, dynAnchorName } = resolvedState;
+      const { refValidator, callRef, enterAnchors, hasRecAnchor, dynAnchorName } = resolvedState;
 
       for (let i = 0; i < enterAnchors.length; i++) {
         const anchor = enterAnchors[i];
@@ -1138,10 +1177,10 @@ export class ValidationObject {
           try {
             // If there are sibling validators (draft 2019-09+), combine them with the ref validator
             if (boundSiblingValidator) {
-              return combineRefAndSiblings(refValidator, boundSiblingValidator,
+              return combineRefAndSiblings(callRef, boundSiblingValidator,
                 self.options.skipErrors, data, dataPath, dataRoot);
             }
-            return refValidator(data, dataPath, dataRoot);
+            return callRef(data, dataPath, dataRoot);
           } finally {
             rootRef.popDynamicAnchorValidator(anchorName);
           }
@@ -1149,17 +1188,17 @@ export class ValidationObject {
 
         // If there are sibling validators (draft 2019-09+), combine them with the ref validator
         if (boundSiblingValidator) {
-          return combineRefAndSiblings(refValidator, boundSiblingValidator,
+          return combineRefAndSiblings(callRef, boundSiblingValidator,
                 self.options.skipErrors, data, dataPath, dataRoot);
         }
 
         // Cache the validator directly (skipping this resolver) only when
         // this ref registers no dynamic anchors - otherwise later calls
         // would lose the registrations.
-        if (enterAnchors.length === 0) {
+        if (enterAnchors.length === 0 && rootRef.recorder === null) {
           self.#validator = refValidator;
         }
-        return refValidator(data, dataPath, dataRoot);
+        return callRef(data, dataPath, dataRoot);
       } finally {
         // Pop anchors in reverse order
         for (let i = enterAnchors.length - 1; i >= 0; i--) {
@@ -1221,6 +1260,12 @@ export class ValidationObject {
     }
 
     this.#validator = ValidationObject.compileValidator(this, path, schema, baseUri);
+    // Recording output units, applying this subschema is one.
+    const recorder = root.recorder;
+    if (recorder !== null) {
+      const validate = this.#validator;
+      this.#validator = (data, dataPath, dataRoot, dataKey) => recorder.enter(this, validate, data, dataPath, dataRoot, dataKey);
+    }
 
     // An applicator may enter an embedded resource without following a ref.
     // Its anchors have the same lifetime as that evaluation. Keep this
@@ -1387,7 +1432,7 @@ export class ValidationObject {
       : root.createObject(path, schema, basePath, this.#declaredDraft);
     this.#members.push(child);
 
-    return child.validate;
+    return markStep(root.recorder, [key, index, member], child.validate);
   }
 }
 
@@ -1449,7 +1494,7 @@ export class ValidatorOptions {
       /** @type {object[]} Initial schemas to register */
       this.schemas = opts.schemas || [];
       // If collectErrors is passed directly, create ValidationOptions with it
-      if (opts.collectErrors != null || opts.skipErrors != null || opts.useGrapheme != null || opts.contentValidation != null || opts.draftVersion != null || opts.formatAssertion != null || opts.messages != null || opts.unknownFormats != null || opts.propertyDependencies != null || opts.relativePointerDialect != null || opts.maxReferenceDepth != null) {
+      if (opts.collectErrors != null || opts.skipErrors != null || opts.useGrapheme != null || opts.contentValidation != null || opts.draftVersion != null || opts.formatAssertion != null || opts.messages != null || opts.unknownFormats != null || opts.propertyDependencies != null || opts.relativePointerDialect != null || opts.maxReferenceDepth != null || opts.outputFormat !== undefined) {
         const collectErrors = opts.collectErrors ?? false;
         this.validation = new ValidationOptions(
           // collecting errors implies actually recording them
@@ -1467,7 +1512,8 @@ export class ValidatorOptions {
           opts.unknownFormats ?? 'ignore',
           opts.propertyDependencies ?? false,
           opts.relativePointerDialect ?? 'handrews-01',
-          opts.maxReferenceDepth ?? REFERENCE_DEPTH_CEILING
+          opts.maxReferenceDepth ?? REFERENCE_DEPTH_CEILING,
+          opts.outputFormat
         );
       } else {
         /** @type {ValidationOptions} Validation behavior options */
@@ -1506,6 +1552,7 @@ export class ValidatorOptions {
  * The plain-object form accepted by the JarenValidator constructor, mixing
  * validator-level settings with the ValidationOptions fields.
  * @template {boolean} [TCollect=false]
+ * @template {OutputFormat<any>|undefined} [TOutput=undefined]
  * @typedef {object} ValidatorInit
  * @property {Record<string, FormatCompiler>} [formats] - Format compilers to register
  * @property {(JSONSchema | boolean)[]} [schemas] - Schemas to register
@@ -1522,6 +1569,7 @@ export class ValidatorOptions {
  * @property {boolean} [propertyDependencies] - Assert the `propertyDependencies` proposal keyword (default false: it is an unknown keyword); applies in draft 2020-12 (and draft-next) documents and in documents that declare no draft
  * @property {'handrews-01'|'bhutton-00'} [relativePointerDialect] - The Relative JSON Pointer grammar of `data`, `$data` and the `relative-json-pointer` format: `'handrews-01'` (default) or `'bhutton-00'`, which also accepts index manipulation (`0+1`, `1-1/name`, `0-1#`)
  * @property {number} [maxReferenceDepth] - The deepest nesting of schema references one validation enters before it throws `JK2001` (default 256, the same on every host; a larger value lets the host's call stack decide again). Also bounds `validateSchema`. Not a positive safe integer: `JK0002` when a schema compiles
+ * @property {TOutput} [outputFormat] - Return a JSON Schema standard output instead of a boolean or `{ valid, errors }`: a format from `@jarenjs/validate/output`; it takes precedence over `collectErrors`. Another value (a format's name as a string included): `JK0003` when a schema compiles
  */
 
 /**
@@ -1532,6 +1580,7 @@ export class ValidatorOptions {
  * it is carried in the type parameter so the two shapes never have to be
  * distinguished at runtime.
  * @template {boolean} [TCollect=false]
+ * @template {OutputFormat<any>|undefined} [TOutput=undefined]
  * @class
  * @example
  * const validator = new JarenValidator();
@@ -1553,7 +1602,7 @@ export class JarenValidator {
 
   /**
    * Creates a new JarenValidator instance.
-   * @param {ValidatorOptions | ValidatorInit<TCollect>} [options] - Validator options including formats, schemas, validation options, and traverse options
+   * @param {ValidatorOptions | ValidatorInit<TCollect, TOutput>} [options] - Validator options including formats, schemas, validation options, and traverse options
    */
   constructor(options = new ValidatorOptions()) {
     // Accept a plain options object ({ skipErrors, collectErrors, ... })
@@ -1783,6 +1832,9 @@ export class JarenValidator {
    * @returns {(data) => boolean | {valid: boolean, errors: import("./messages.js").ValidationError[]}}
    */
   static #compileSchemaWithRoot(self, origin, schemas, root) {
+    const outputFormat = root.options.outputFormat;
+    if (outputFormat !== undefined) return outputFormat.validator(root);
+
     const collectErrors = self.#options.validation?.collectErrors || false;
 
     if (!collectErrors) {
@@ -1829,8 +1881,8 @@ export class JarenValidator {
     // SCHEMA is well-formed. The unknownFormats guard protects an author
     // from a keyword of their own that silently checks nothing, so it does
     // not apply here — otherwise merely registering draft-07 would throw.
-    const validation = JarenValidator.#withOption(this.#options.validation,
-      'unknownFormats', 'ignore');
+    const validation = JarenValidator.#withOption(JarenValidator.#withOption(this.#options.validation,
+      'unknownFormats', 'ignore'), 'outputFormat', undefined);
     if (Array.isArray(schema)) {
       const [first, ...siblings] = schema;
       const { origin, map } = JarenValidator.#traverseSchema(first, siblings, undefined, new TraverseOptions(key));
@@ -2058,7 +2110,7 @@ export class JarenValidator {
    * @template [T=unknown]
    * @param {JSONSchemaLike | boolean} schema - The schema to compile
    * @param {(JSONSchemaLike | boolean)[]} [schemas] - Additional schemas to reference during compilation
-   * @returns {TCollect extends true ? CompiledCollector : CompiledPredicate<T>} A validation function;
+   * @returns {TOutput extends OutputFormat<infer R> ? (data: unknown) => R : TCollect extends true ? CompiledCollector : CompiledPredicate<T>} A validation function;
    *   it throws `SchemaRuntimeError` `JK2001` for an instance that nests more than 256 schema
    *   references (a deep instance, or one that reaches a loop that never reads it)
    * @throws {SchemaCompileError} `JK0001` when a loop of references never reads the instance
@@ -2129,8 +2181,16 @@ export class JarenValidator {
       existingValidation.unknownFormats ?? 'ignore',
       existingValidation.propertyDependencies ?? false,
       existingValidation.relativePointerDialect ?? 'handrews-01',
-      existingValidation.maxReferenceDepth ?? REFERENCE_DEPTH_CEILING
+      existingValidation.maxReferenceDepth ?? REFERENCE_DEPTH_CEILING,
+      existingValidation.outputFormat
     );
+    // A recording output format records the errors of every keyword;
+    // `flag` is the boolean validator, which stops at the first failure.
+    const outputFormat = validationOptions.outputFormat;
+    if (outputFormat != null) {
+      validationOptions.skipErrors = outputFormat.recorder === undefined;
+      validationOptions.collectErrors = false;
+    }
     // A root that loops back to itself before reading the instance decides
     // nothing on any instance: refused here rather than when it validates.
     // Whether a keyword reads the instance depends on these options.

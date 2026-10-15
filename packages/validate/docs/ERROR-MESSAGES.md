@@ -276,6 +276,7 @@ failed validation, because a `false` under `not` would read as success.
 |---|---|---|
 | `JK0001` | `SchemaCompileError` | A loop of references and in-place applicators never reads the instance: refused by `compile()` |
 | `JK0002` | `SchemaCompileError` | The `maxReferenceDepth` option is not a positive safe integer: refused when a schema compiles |
+| `JK0003` | `SchemaCompileError` | The `outputFormat` option is not a format of `@jarenjs/validate/output`: refused when a schema compiles |
 | `JK2001` | `SchemaRuntimeError` | Validation nests schema references deeper than `maxReferenceDepth` (default 256): refused where the bound is crossed |
 
 **`JK0001` — a loop that never reads the instance.** A `$ref` that leads
@@ -334,4 +335,19 @@ back. Raising it hands the decision back to the host: past the default, a
 deep enough instance can overflow the call stack again, at a depth that
 differs from host to host. Anything but a positive safe integer is refused
 `JK0002` when a schema compiles; `null` or absent means the default.
+
+**`JK0003` — the output format.** The `outputFormat` option takes one of
+the formats `@jarenjs/validate/output` exports (`flagOutput`,
+`basicOutput`, `detailedOutput`, `verboseOutput`, `listOutput`,
+`hierarchicalOutput`; the README's *Standard output formats*). Anything
+else, a format's name as a string (`'list'`) included, is refused `JK0003`
+when a schema compiles, naming the subpath and the value given, rather
+than quietly returning the default shape:
+
+```text
+JK0003: outputFormat takes a format of '@jarenjs/validate/output', got 'list'
+```
+
+The formats live behind the subpath so that a validator given none ships
+none of their code. Absent means the `collectErrors` shapes.
 

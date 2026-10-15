@@ -37,6 +37,7 @@ Highlights:
 - `$vocabulary`-aware keyword selection and per-draft `format`/content assertion defaults
 - Instance-data references via the `data` keyword (json-everything data-ref) and Ajv-style `$data`
 - Cross-field assertions via the `$query` extension keyword (a [Jaren JSON Query](../json/docs/QUERY-FORMAT.md) inside the schema)
+- The JSON Schema standard output formats (`flag`, `basic`, `detailed`, `verbose`, `list`, `hierarchical`) from `@jarenjs/validate/output`, via the `outputFormat` option — see [Standard output formats](#standard-output-formats)
 
 Schema registrations accept boolean schemas when supplied an explicit key.
 Document URIs with or without an empty `#` fragment are aliases; replacing a
@@ -482,7 +483,7 @@ ordinary recursive `$ref` validation remains supported.
 
 ## Compatibility settings
 
-Six options decide answers that differ between validators, between JSON
+Eight options decide answers that differ between validators, between JSON
 Schema drafts, or between Jaren and the library you are migrating from. Each
 one is a deliberate default, and each one is worth setting explicitly in a
 shared factory rather than inheriting.
@@ -500,8 +501,9 @@ shared factory rather than inheriting.
 
 ### The return shape is `collectErrors`
 
-`collectErrors` is the *only* switch between the two return shapes, and it is
-off by default:
+`collectErrors` is the switch between the two default return shapes, and it is
+off by default (the `outputFormat` option replaces both with a JSON Schema
+standard output; see [Standard output formats](#standard-output-formats)):
 
 ```javascript
 new JarenValidator().compile(schema)(data);
@@ -864,6 +866,185 @@ What this recipe does **not** give you is Zod's output normalization: a
 compiled validator is a pure predicate and never modifies its input. That
 boundary does not move — but the normalization itself ships beside it, as a
 separately compiled pass. See [Normalization](#normalization) below.
+
+## Standard output formats
+
+The `outputFormat` option makes a compiled validator return one of the
+output formats JSON Schema publishes, instead of a boolean or
+`{ valid, errors }`. The formats are exported by `@jarenjs/validate/output`,
+and the option takes one of them: a validator that is given none never
+loads that module, so an application that does not use them ships none of
+their code. Apart from `flag`, each one locates every failure (and, for a
+passing instance, every annotation) twice: along the evaluation, through
+every `$ref`, and at the absolute location of the schema that holds it.
+
+| `outputFormat` | Specification | Shape |
+|---|---|---|
+| `flagOutput` | both | `{ valid }`, from the boolean validator |
+| `basicOutput` | JSON Schema 2020-12 Core §12 | the units that carry an `error` or an `annotation`, flat |
+| `detailedOutput` | JSON Schema 2020-12 Core §12 | those units nested by the schema, condensed |
+| `verboseOutput` | JSON Schema 2020-12 Core §12 | every keyword of every applied subschema, nested |
+| `listOutput` | the output specification that followed 2020-12 | the units that carry `errors` or `annotations`, flat under `details` |
+| `hierarchicalOutput` | the output specification that followed 2020-12 | every applied subschema, nested under `details` |
+
+The two specifications name their units differently, and each format uses
+its own specification's names. The 2020-12 formats have one unit per keyword:
+`keywordLocation` (the path through `$ref` hops), `absoluteKeywordLocation`
+(the keyword's absolute URI, present once the evaluation passed a reference),
+`instanceLocation`, and a singular `error` or `annotation`, with nested
+results under `errors` or `annotations`. `list` and `hierarchical` have one
+unit per subschema: `evaluationPath`, `schemaLocation` (the subschema's
+absolute URI with a JSON Pointer fragment, never an anchor name),
+`instanceLocation`, `errors` and `annotations` as objects keyed by keyword,
+and nested results under `details`. The value is checked when a schema
+compiles: anything but a format of `@jarenjs/validate/output` (a format's
+name as a string included) is refused `JK0003`, naming the subpath (a
+misspelled option name is ignored, like any unknown option).
+
+A schema, an instance:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/order",
+  "type": "object",
+  "properties": {
+    "id": { "type": "string" },
+    "lines": { "type": "array", "items": { "$ref": "#/$defs/line" } }
+  },
+  "required": ["id"],
+  "$defs": {
+    "line": {
+      "type": "object",
+      "properties": { "qty": { "type": "integer", "minimum": 1 } },
+      "required": ["sku"]
+    }
+  }
+}
+```
+
+```json
+{ "lines": [{ "sku": "a", "qty": 0 }, { "qty": 2 }] }
+```
+
+```javascript
+import { JarenValidator } from '@jarenjs/validate';
+import { listOutput } from '@jarenjs/validate/output';
+
+// orderSchema and order are the two documents above
+const validate = new JarenValidator({ outputFormat: listOutput }).compile(orderSchema);
+validate(order);
+```
+
+returns:
+
+```json
+{
+  "valid": false,
+  "details": [
+    {
+      "valid": false,
+      "evaluationPath": "",
+      "schemaLocation": "https://example.com/order#",
+      "instanceLocation": "",
+      "errors": { "required": "must have required property 'id'" },
+      "droppedAnnotations": { "properties": ["lines"] }
+    },
+    {
+      "valid": false,
+      "evaluationPath": "/properties/lines/items/$ref/properties/qty",
+      "schemaLocation": "https://example.com/order#/$defs/line/properties/qty",
+      "instanceLocation": "/lines/0/qty",
+      "errors": { "minimum": "must be >= 1" }
+    },
+    {
+      "valid": false,
+      "evaluationPath": "/properties/lines/items/$ref",
+      "schemaLocation": "https://example.com/order#/$defs/line",
+      "instanceLocation": "/lines/1",
+      "errors": { "required": "must have required property 'sku'" },
+      "droppedAnnotations": { "properties": ["qty"] }
+    }
+  ]
+}
+```
+
+and with `outputFormat: basicOutput`:
+
+```json
+{
+  "valid": false,
+  "errors": [
+    {
+      "valid": false,
+      "keywordLocation": "/properties/lines/items/$ref/properties/qty/minimum",
+      "absoluteKeywordLocation": "https://example.com/order#/$defs/line/properties/qty/minimum",
+      "instanceLocation": "/lines/0/qty",
+      "error": "must be >= 1"
+    },
+    {
+      "valid": false,
+      "keywordLocation": "/properties/lines/items/$ref/required",
+      "absoluteKeywordLocation": "https://example.com/order#/$defs/line/required",
+      "instanceLocation": "/lines/1",
+      "error": "must have required property 'sku'"
+    },
+    {
+      "valid": false,
+      "keywordLocation": "/required",
+      "instanceLocation": "",
+      "error": "must have required property 'id'"
+    }
+  ]
+}
+```
+
+What the units say:
+
+- **Annotations survive only where the specification keeps them**: on a unit
+  that passed, inside units that all passed. A failed unit carries the
+  annotations its own keywords produced as `droppedAnnotations` (`list` and
+  `hierarchical`); a passing unit inside a failed one carries none. The
+  annotations are the keywords' values (`title`, `description`, `default`,
+  `deprecated`, `readOnly`, `writeOnly`, `examples`, `format`, and the
+  `content*` keywords on a string), the member names `properties`,
+  `patternProperties`, `additionalProperties` and `unevaluatedProperties`
+  applied to, the indexes `contains` matched, and the largest index or `true`
+  of `prefixItems`, `items`, `additionalItems` and `unevaluatedItems`.
+  Unknown keywords are not reported as annotations.
+- **Every failure is explained once.** An applicator whose subschemas
+  failed (`allOf`, `properties`, `items`, `$ref`, ...) reports nothing of its
+  own; the failed subschemas do. An applicator that fails by itself reports
+  its message: `not`, `oneOf` matching twice, an `anyOf` or `contains` that
+  matched nothing (beside the failed probes), and a boolean `false`
+  subschema the validator evaluates in place, such as
+  `additionalProperties: false` (in `list` and `hierarchical` at the unit
+  holding it; a `false` schema evaluated as a subschema keys its message by
+  `""`). Two errors of one keyword in one unit (two missing `required`
+  members) are one entry in `list` and `hierarchical`, the messages joined
+  by `; `, and two units in the 2020-12 formats.
+- **The flat and condensed forms keep what decides the answer**: a passing
+  subschema inside a failing one, a failed `anyOf` branch beside one that
+  passed, and an `if` condition that failed are left out of `basic`,
+  `detailed` and `list`. `hierarchical` keeps every applied subschema, and
+  `verbose` every keyword of every applied subschema (a `true` subschema
+  has none, so it adds no unit there).
+- **Messages and `errorMessage` are the collected errors' own**: the same
+  catalog renders them, an `errorMessage` replaces them, and
+  `messages: false` leaves them `''`.
+
+`outputFormat` takes precedence over `collectErrors`. `flagOutput` runs the
+boolean validator, which stops at the first failure; the other five record a
+unit per applied subschema and evaluate every `anyOf` branch (each passing
+branch has annotations to report), so they cost about an order of magnitude
+more than the `collectErrors` output. The boolean default and
+`collectErrors` are unchanged. Against the specifications' examples, two
+answers differ: `basic` leaves out the 2020-12 example's two branch units
+("A subschema had errors."), which carry no error or annotation of their
+own, and adds the `valid` its output schema requires; and
+`droppedAnnotations` follows one rule (every failed unit reports what its
+own keywords produced), where the example shows it on some failed units
+and not others.
 
 ## Normalization
 

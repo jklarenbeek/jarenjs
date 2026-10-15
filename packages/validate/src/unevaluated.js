@@ -42,7 +42,9 @@ function compileUnevaluatedProperties(schemaObj, jsonSchema) {
 
   // true: everything left over is valid, but counts as evaluated for
   // any unevaluatedProperties in an outer schema.
-  if (uneval === true) {
+  // Recording output units, `true` applies as a subschema below, so its
+  // annotation names the members it evaluated.
+  if (uneval === true && root.recorder === null) {
     return function validateUnevaluatedPropertiesTrue(data, _dataPath, _dataRoot, _mark) {
       if (!isObjectType(data)) return true;
       const log = root.evalLog;
@@ -111,7 +113,8 @@ function compileUnevaluatedItems(schemaObj, jsonSchema) {
   const extendPaths = extendsChildLocations(schemaObj, jsonSchema, ['unevaluatedItems']);
   const addError = schemaObj.createErrorHandler(uneval, 'unevaluatedItems');
 
-  if (uneval === true) {
+  // Recording output units, `true` applies as a subschema below.
+  if (uneval === true && root.recorder === null) {
     return function validateUnevaluatedItemsTrue(data, _dataPath, _dataRoot, _mark) {
       if (!isArrayClass(data)) return true;
       root.evalLog.add(data, -1);

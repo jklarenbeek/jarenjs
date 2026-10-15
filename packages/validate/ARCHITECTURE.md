@@ -28,6 +28,7 @@ The validator embraces these architectural principles:
 | `packages/validate/src/traverse.js` | Schema traversal and ref resolution (`storeSchemaIdsInMap`, `restoreSchemaRefsInMap`) |
 | `packages/validate/src/schema.js` | Schema compilation dispatcher (`compileSchemaObject`) |
 | `packages/validate/src/messages.js` | Error conversion, message catalogs, the `errorMessage` keyword specs (`ValidationError`, `messagesEn`, `localizeErrors`) |
+| `packages/validate/src/output.js` | The JSON Schema standard output formats (`@jarenjs/validate/output`): the unit recorder and the projections |
 | `packages/validate/src/array.js` | Array validation logic |
 | `packages/validate/src/object.js` | Object validation logic |
 | `packages/validate/src/string.js` | String validation logic |
@@ -294,6 +295,7 @@ flowchart LR
         INDEX --> TRAVERSE[traverse.js]
         INDEX --> TOOLS[tools.js]
         INDEX --> DYNREF[dynamic-ref.js]
+        OUTPUT[output.js subpath] -.-> VR
     end
 
     subgraph "External Dependencies"
@@ -686,6 +688,36 @@ Conversion is structured-first, render-late (the normative spec is
   `msgid` + `params`; the `messages: false` option skips rendering
   entirely (`message: ''`).
 
+### Standard Output Formats (output.js)
+
+The formats live in `output.js`, the `@jarenjs/validate/output` subpath; the
+core never imports it, so a validator given no format ships none of it. A
+format is an object the `outputFormat` option carries: `validator(root)`
+builds the compiled function, and a recording format's `recorder(schemas)`
+makes the compilation's recorder. The core keeps only the hooks, all decided
+when a schema compiles (an unrecorded compilation builds the closures it
+always built):
+
+- **Every applied subschema enters the recorder.** Recording, each
+  `ValidationObject` wraps its validator so that applying it calls
+  `recorder.enter(object, …)`. The applicator that reached it marks the step
+  first (`markStep` in `tools.js`): `createValidator` its keyword and index,
+  the `$ref` sites `$ref`, the `$dynamicRef` and `$recursiveRef` keywords
+  their own. `addError` hands every error to the recorder, which files it
+  under the innermost open unit.
+- **Nothing that would skip a unit.** Recording turns off the items `$ref`
+  fast path (it calls the target in place of the item's subschema), the
+  runtime caching of a resolved `$ref` target, the in-place `true` of
+  `unevaluated*`, and the first-match `anyOf` (recording runs the
+  annotation-tracking path, which evaluates every branch).
+- **Projection, not bookkeeping.** `output.js` reads the finished tree:
+  locations (a dynamic anchor's object and a plain-name fragment are
+  resolved to their JSON Pointer by walking the registered resources once),
+  annotations from the schema and from the units each applicator applied,
+  the survival rule (a passing unit inside passing units), the wrapper
+  errors a failed subschema already explains, and the pruning of the flat
+  and condensed forms.
+
 ### Error Handler Creation
 
 ```mermaid
@@ -1068,6 +1100,7 @@ For broader context on how this package fits into the JarenJS ecosystem:
 |------|---------|-------------|
 | `index.js` | Public API | `JarenValidator`, `ValidationOptions`, `ValidatorOptions` |
 | `messages.js` | Error conversion & i18n | `ValidationError`, `convertInternalErrors`, `messagesEn`, `compileMessageTemplate`, `compileMessageCatalog`, `renderErrorMessage`, `localizeErrors`, `compileErrorMessageSpec` |
+| `output.js` | Standard output formats (`@jarenjs/validate/output`) | `flagOutput`, `basicOutput`, `detailedOutput`, `verboseOutput`, `listOutput`, `hierarchicalOutput` |
 | `schema.js` | Schema compilation | `compileSchemaObject` |
 | `traverse.js` | Schema traversal | `TraverseOptions`, `storeSchemaIdsInMap`, `resolveRefSchemaDeep` |
 | `tools.js` | Shared utilities | `isBoolOrObjectClass`, `hasSchemaReference`, `createIsSchemaTypeHandler` |

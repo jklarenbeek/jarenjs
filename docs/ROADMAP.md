@@ -24,8 +24,6 @@ delete it or fix it.
 
 - **1.0 stable** — no milestone-level blockers remain; 1.0 is gated on the
   per-package items below rather than on any one feature.
-- **1.1**
-  - [ ] JSON Schema standard output formats (`list`/`hierarchical` wrappers, `evaluationPath`/`schemaLocation` renames) — the remaining half of [Fixing JSON Schema output](https://json-schema.org/blog/posts/fixing-json-schema-output); the structured params + keyed messages are exactly what that format wants
 - **1.2**
   - [ ] compileAsync for asynchronous schema loading
   - [ ] JSON.parse reviver / JSON.stringify replacer integration
@@ -86,6 +84,27 @@ delete it or fix it.
   do not reach them. `canonicalizeJson`'s 1000-level bound is fixed (the
   function takes no options), where validation (`maxReferenceDepth`) and the
   descendant segment (`maxDescentDepth`, `limits.descentDepth`) can raise theirs.
+- [ ] **`basic` output omits the 2020-12 example's branch units.** JSON Schema
+  2020-12 Core §12.4.2 lists, beside the error units, the branch units of `""`
+  and `/items/$ref` with `error: "A subschema had errors."`; `basicOutput`
+  lists only the units that carry an error or an annotation, because a branch
+  unit's message would need a new message key (`subschema`), which every
+  `@jarenjs/locales` pack must then carry (the packs' key-coverage test
+  refuses a key one of them lacks). Fix: add the key to `messagesEn` and every
+  pack, then list the condensed tree's branch nodes in `basic`.
+- [ ] **`pattern: "/a/"` is read as the regex literal `a`.** `@jarenjs/core`
+  `createRegExp` reads a string written `/source/flags` as a literal, and
+  `pattern` compiles through it: `{ "type": "string", "pattern": "/a/" }`
+  accepts `"a"` (ECMA-262, which JSON Schema 2020-12 Validation §6.3.3 names,
+  reads the source `/a/` and accepts only strings containing `/a/`), `"/a/i"`
+  accepts `"A"`, and `"/\\$ref/"` accepts `"/$ref"`, so the official 2020-12
+  output schema's `keywordLocation` pattern is misread; a failure reports
+  `params.pattern: "a"`. The JSON-Schema-Test-Suite has no case with a
+  slash-delimited pattern, so it passes either way. The literal form is
+  documented as the validator's syntax (README, normalization), so the fix is
+  a decision: read `pattern` as ECMA-262 source (a minor: `"/a/"` stops
+  matching `"a"`), keeping the literal form for the normalizer's own patterns
+  if wanted.
 
 ## @jarenjs/view & @jarenjs/app
 

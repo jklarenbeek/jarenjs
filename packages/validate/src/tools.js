@@ -537,3 +537,20 @@ export function memberPath(dataPath, key) {
   }
   return dataPath + '/' + token;
 }
+
+/**
+ * Recording output units (`@jarenjs/validate/output`), mark the subschema
+ * `validate` reaches as reached through `step` (a keyword, with the index
+ * and the name inside its value): the recorder reads the mark when the
+ * subschema enters it. An unrecorded compilation keeps `validate`.
+ * @param {{ pending: any }|null} recorder
+ * @param {readonly (string|number|undefined)[]} step
+ * @param {Function|undefined} validate
+ * @returns {any}
+ */
+export function markStep(recorder, step, validate) {
+  return recorder === null || validate === undefined ? validate : function validateMarkedStep(data, dataPath, dataRoot, dataKey) {
+    recorder.pending = step;
+    return validate(data, dataPath, dataRoot, dataKey);
+  };
+}

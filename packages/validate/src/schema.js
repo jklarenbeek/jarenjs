@@ -22,6 +22,7 @@ import {
 
 import {
   combineIndependent,
+  markStep,
   createIsSchemaTypeHandler,
   hasSchemaReference,
   hasRefSiblings,
@@ -63,16 +64,17 @@ import { createJsonPointer } from './traverse.js';
 function compileDynamicRef(schemaObj, jsonSchema) {
   // Check for $recursiveRef (draft 2019-09)
   if (hasSchemaReference(jsonSchema, '$recursiveRef')) {
-    return compileRecursiveRef(schemaObj, jsonSchema);
+    return markStep(schemaObj.root.recorder, ['$recursiveRef'], compileRecursiveRef(schemaObj, jsonSchema));
   }
 
   // Check for $dynamicRef (draft 2020-12)
   if (hasSchemaReference(jsonSchema, '$dynamicRef')) {
-    return compileDynamicAnchorRef(schemaObj, jsonSchema);
+    return markStep(schemaObj.root.recorder, ['$dynamicRef'], compileDynamicAnchorRef(schemaObj, jsonSchema));
   }
 
   return undefined;
 }
+
 
 /**
  * Compile $recursiveRef which references the outermost $recursiveAnchor: true.

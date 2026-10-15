@@ -1,0 +1,154 @@
+{
+  "source": "draft-bhutton-json-schema-01 (JSON Schema 2020-12 Core) section 12.4",
+  "schema": {
+    "$id": "https://example.com/polygon",
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$defs": {
+      "point": {
+        "type": "object",
+        "properties": {
+          "x": {
+            "type": "number"
+          },
+          "y": {
+            "type": "number"
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "x",
+          "y"
+        ]
+      }
+    },
+    "type": "array",
+    "items": {
+      "$ref": "#/$defs/point"
+    },
+    "minItems": 3
+  },
+  "instance": [
+    {
+      "x": 2.5,
+      "y": 1.3
+    },
+    {
+      "x": 1,
+      "z": 6.7
+    }
+  ],
+  "flag": {
+    "valid": false
+  },
+  "basic": {
+    "valid": false,
+    "errors": [
+      {
+        "keywordLocation": "",
+        "instanceLocation": "",
+        "error": "A subschema had errors."
+      },
+      {
+        "keywordLocation": "/items/$ref",
+        "absoluteKeywordLocation": "https://example.com/polygon#/$defs/point",
+        "instanceLocation": "/1",
+        "error": "A subschema had errors."
+      },
+      {
+        "keywordLocation": "/items/$ref/required",
+        "absoluteKeywordLocation": "https://example.com/polygon#/$defs/point/required",
+        "instanceLocation": "/1",
+        "error": "Required property 'y' not found."
+      },
+      {
+        "keywordLocation": "/items/$ref/additionalProperties",
+        "absoluteKeywordLocation": "https://example.com/polygon#/$defs/point/additionalProperties",
+        "instanceLocation": "/1/z",
+        "error": "Additional property 'z' found but was invalid."
+      },
+      {
+        "keywordLocation": "/minItems",
+        "instanceLocation": "",
+        "error": "Expected at least 3 items but found 2"
+      }
+    ]
+  },
+  "detailed": {
+    "valid": false,
+    "keywordLocation": "",
+    "instanceLocation": "",
+    "errors": [
+      {
+        "valid": false,
+        "keywordLocation": "/items/$ref",
+        "absoluteKeywordLocation": "https://example.com/polygon#/$defs/point",
+        "instanceLocation": "/1",
+        "errors": [
+          {
+            "valid": false,
+            "keywordLocation": "/items/$ref/required",
+            "absoluteKeywordLocation": "https://example.com/polygon#/$defs/point/required",
+            "instanceLocation": "/1",
+            "error": "Required property 'y' not found."
+          },
+          {
+            "valid": false,
+            "keywordLocation": "/items/$ref/additionalProperties",
+            "absoluteKeywordLocation": "https://example.com/polygon#/$defs/point/additionalProperties",
+            "instanceLocation": "/1/z",
+            "error": "Additional property 'z' found but was invalid."
+          }
+        ]
+      },
+      {
+        "valid": false,
+        "keywordLocation": "/minItems",
+        "instanceLocation": "",
+        "error": "Expected at least 3 items but found 2"
+      }
+    ]
+  },
+  "verboseSchema": {
+    "$id": "https://example.com/polygon",
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "validProp": true
+    },
+    "additionalProperties": false
+  },
+  "verboseInstance": {
+    "validProp": 5,
+    "disallowedProp": "value"
+  },
+  "verbose": {
+    "valid": false,
+    "keywordLocation": "",
+    "instanceLocation": "",
+    "errors": [
+      {
+        "valid": true,
+        "keywordLocation": "/type",
+        "instanceLocation": ""
+      },
+      {
+        "valid": true,
+        "keywordLocation": "/properties",
+        "instanceLocation": ""
+      },
+      {
+        "valid": false,
+        "keywordLocation": "/additionalProperties",
+        "instanceLocation": "",
+        "errors": [
+          {
+            "valid": false,
+            "keywordLocation": "/additionalProperties",
+            "instanceLocation": "/disallowedProp",
+            "error": "Additional property 'disallowedProp' found but was invalid."
+          }
+        ]
+      }
+    ]
+  }
+}
