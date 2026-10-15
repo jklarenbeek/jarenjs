@@ -2,6 +2,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { JarenValidator, ValidationOptions, ValidationRoot } from '@jarenjs/validate';
+import { storeSchemaIdsInMap } from '../../packages/validate/src/traverse.js';
 
 // A `$data` reference or a `$query` reads the location of the instance it sits
 // on, so a compilation that holds one has to build member and item locations.
@@ -20,6 +21,8 @@ const ORIGIN = 'http://paths.test/root';
  */
 function locationTouches(schema, data) {
   const schemas = new Map([[ORIGIN, schema]]);
+  // Registered like a compiled document, so its references resolve.
+  storeSchemaIdsInMap(schemas, ORIGIN, schema);
   const root = new ValidationRoot(ORIGIN, schemas, {},
     new ValidationOptions(true, true, false, null, 2020));
   let touched = 0;
@@ -139,6 +142,51 @@ describe('which schemas build their children\'s locations', () => {
     assert.equal(touched, 6); // the reader's three items and the shared schema's three
   });
 
+  // A reference is followed: a subtree builds locations only when what it
+  // references reads one, not because it holds a reference.
+  /** @param {any} branch @param {any} defs */
+  const besideReader = (branch, defs) => ({ $defs: defs, allOf: [{ properties: { hi: READER } }, branch] });
+
+  it('a $ref branch beside a reader builds none when its target reads nothing', () => {
+    const { valid, touched } = locationTouches(
+      besideReader({ properties: { plain: { $ref: '#/$defs/plain' } } }, { plain: PLAIN }),
+      { lo: 1, hi: 2, plain: { a: [{ x: 'u' }] } });
+    assert.equal(valid, true);
+    assert.equal(touched, 1); // 'hi' only
+  });
+
+  it('an items $ref beside a reader builds none for its items', () => {
+    const { valid, touched } = locationTouches({
+      $defs: { item: { type: 'object', properties: { x: { type: 'string' } } } },
+      allOf: [{ prefixItems: [{}, READER_ITEMS] }, { items: { $ref: '#/$defs/item' } }],
+    }, [{ x: 'a' }, { x: 'b' }, { x: 'c' }]);
+    assert.equal(valid, true);
+    assert.equal(touched, 3); // the reader's branch only, which walks every item
+  });
+
+  it('a recursive $ref to a schema without a reader builds none', () => {
+    const { valid, touched } = locationTouches(
+      besideReader({ properties: { tree: { $ref: '#/$defs/node' } } },
+        { node: { properties: { kid: { $ref: '#/$defs/node' } } } }),
+      { lo: 1, hi: 2, tree: { kid: { kid: {} } } });
+    assert.equal(valid, true);
+    assert.equal(touched, 1);
+  });
+
+  it('a $ref whose target reads, a $dynamicRef and a $ref under an embedded $id still build', () => {
+    for (const [branch, defs, data] of /** @type {any[]} */ ([
+      [{ properties: { low: { $ref: '#/$defs/low' } } }, { low: READER }, { lo: 1, hi: 2, low: { lo: 1 } }],
+      [{ properties: { d: { $dynamicRef: '#/$defs/n' } } }, { n: {} }, { lo: 1, hi: 2, d: {} }],
+      [{ properties: { p: { $ref: 'http://paths.test/plain' } } },
+        { plain: { $id: 'http://paths.test/plain', properties: { x: { $ref: '#/$defs/y' } }, $defs: { y: { type: 'string' } } } },
+        { lo: 1, hi: 2, p: { x: 's' } }],
+    ])) {
+      const { valid, touched } = locationTouches(besideReader(branch, defs), data);
+      assert.equal(valid, true);
+      assert.equal(touched, 2, JSON.stringify(branch));
+    }
+  });
+
   it('a reader in the holder\'s own keywords asks nothing of its children', () => {
     const { valid, touched } = locationTouches({
       properties: { plain: PLAIN },
@@ -155,6 +203,34 @@ const DRAFTS = {
   2019: { version: 2019, uri: 'https://json-schema.org/draft/2019-09/schema' },
   2020: { version: 2020, uri: 'https://json-schema.org/draft/2020-12/schema' },
 };
+
+describe('judging references costs a compile no more than walking them once', () => {
+  /**
+   * Compile a reader beside a chain of `n` definitions, each referencing the
+   * next, none reading a location: the fastest of five fresh compiles.
+   * @param {number} n
+   */
+  function compileChain(n) {
+    /** @type {Record<string, any>} */
+    const $defs = {};
+    for (let i = 0; i < n; ++i)
+      $defs['d' + i] = { properties: { x: { type: 'number' }, next: i + 1 < n ? { $ref: '#/$defs/d' + (i + 1) } : {} } };
+    const schema = { $schema: DRAFTS[2020].uri, $defs, properties: { lo: {}, hi: READER, chain: { $ref: '#/$defs/d0' } } };
+    let fastest = Infinity;
+    for (let round = 0; round < 5; ++round) {
+      const start = process.hrtime.bigint();
+      new JarenValidator().compile(schema);
+      fastest = Math.min(fastest, Number(process.hrtime.bigint() - start));
+    }
+    return fastest;
+  }
+
+  it('a chain eight times longer compiles in about eight times the time', () => {
+    const growth = compileChain(800) / compileChain(100);
+    // Judging each holder by walking its whole chain again grows ~64x.
+    assert.ok(growth < 24, `grew ${growth.toFixed(1)}x`);
+  });
+});
 
 describe('a reader still sees its own location through every route', () => {
   /**
@@ -281,6 +357,55 @@ describe('a reader still sees its own location through every route', () => {
       assert.equal(verdict({ lo: 1, hi: 2 }), true);
       assert.equal(verdict({ lo: 3, hi: 2 }), false);
     }
+  });
+
+  it('one subschema shared by two documents follows each document\'s reference', () => {
+    // `#/$defs/limit` is a reader in one document and a plain schema in the
+    // other: the shared subschema must hand `hi` its location under the first.
+    const shared = { properties: { hi: { $ref: '#/$defs/limit' } } };
+    for (const options of [{}, { collectErrors: true, skipErrors: false }]) {
+      const validator = new JarenValidator({ draftVersion: 2020, ...options });
+      validator.addSchema({ $id: 'http://paths.test/plain', $defs: { limit: {} }, properties: { o: shared } });
+      validator.addSchema({ $id: 'http://paths.test/reads', $defs: { limit: { minimum: { $data: '1/lo' } } }, properties: { o: shared } });
+      const validate = validator.compile({ allOf: [{ $ref: 'http://paths.test/plain' }, { $ref: 'http://paths.test/reads' }] });
+      const verdict = (/** @type {any} */ data) => {
+        const result = validate(data);
+        return typeof result === 'boolean' ? result : result.valid;
+      };
+      assert.equal(verdict({ o: { lo: 1, hi: 2 } }), true);
+      assert.equal(verdict({ o: { lo: 3, hi: 2 } }), false);
+    }
+  });
+
+  it('one subschema reached through two documents in one walk is judged under each', () => {
+    const node = { properties: { hi: { $ref: '#/$defs/limit' } } };
+    for (const options of [{}, { collectErrors: true, skipErrors: false }]) {
+      const validator = new JarenValidator({ draftVersion: 2020, ...options });
+      validator.addSchema({ $id: 'http://paths.test/plain', $defs: { limit: {}, node } });
+      validator.addSchema({ $id: 'http://paths.test/reads', $defs: { limit: { minimum: { $data: '1/lo' } }, node } });
+      const validate = validator.compile({ properties: { o: { allOf: [
+        { $ref: 'http://paths.test/plain#/$defs/node' }, { $ref: 'http://paths.test/reads#/$defs/node' },
+      ] } } });
+      const verdict = (/** @type {any} */ data) => {
+        const result = validate(data);
+        return typeof result === 'boolean' ? result : result.valid;
+      };
+      assert.equal(verdict({ o: { lo: 1, hi: 2 } }), true);
+      assert.equal(verdict({ o: { lo: 3, hi: 2 } }), false);
+    }
+  });
+
+  it('a target reached again after a loop is judged by everything it reaches', () => {
+    // Walking `first`, B's own walk ends without a reader (it loops back to A,
+    // still being walked) before A's `hi` is found: B reaches a reader all the
+    // same, so C must hand B its location.
+    const defs = {
+      A: { properties: { b: { $ref: '#/$defs/B' }, hi: READER } },
+      B: { properties: { a: { $ref: '#/$defs/A' } } },
+      C: { properties: { c: { $ref: '#/$defs/B' } } },
+    };
+    reads({ $defs: defs, properties: { lo: {}, first: { $ref: '#/$defs/A' }, third: { $ref: '#/$defs/C' } } },
+      { lo: 0, third: { c: { a: { lo: 1, hi: 2 } } } }, { lo: 0, third: { c: { a: { lo: 3, hi: 2 } } } });
   });
 
   it('the collected failures are the same with and without a reader elsewhere', () => {

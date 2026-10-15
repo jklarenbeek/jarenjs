@@ -73,17 +73,44 @@ delete it or fix it.
 
 ## @jarenjs/validate
 
-- [ ] **Per-scope static evaluated-set analysis for `unevaluated*`** — the shipped
-  sibling-coverage elision compiles away the checks that are statically
-  unreachable, but the genuinely dynamic cases — nested `unevaluated*`, cousin
-  schemas, annotations flowing across `$ref`/in-place applicators — still pay the
-  runtime evaluation log and its linear scans, and sit well behind Ajv's
-  compile-time evaluated-set tracking. Computing a static evaluated set per schema
-  scope (with a small dynamic remainder only where refs make it unknowable) is the
-  main remaining validator performance workstream.
+- [ ] **Per-call cost of annotation tracking for `unevaluated*`** — a check
+  over many members or items no longer scans the evaluation log once per
+  member: a long stretch is gathered in one pass, so the check grows with the
+  instance (static and dynamic checks alike, `anyOf` included). What remains
+  of the gap to Ajv's compile-time evaluated-set tracking is per call: while
+  tracking is on, every in-place keyword records each member it evaluates and
+  `anyOf` runs every branch. A compile-time evaluated set per check, with
+  recording confined to the checks whose set the instance decides, answered
+  identically over the whole suite in every mode, but its analysis cost more
+  bundle than the validator's budget and measured no faster than the log on
+  suite-size instances; a smaller encoding of it, or gating that pays for
+  itself, is the open work.
 - [ ] **Unprefixed `query` alias / vocabulary registration** — register `$query` through a custom vocabulary and meta-schema (json-everything style) instead of only as an extension keyword.
-- [ ] **A reference keeps instance locations on** — once a `$data`, `data` or `$query` reader exists anywhere in the compilation, a subtree holding a `$ref`, `$dynamicRef` or `$recursiveRef` still extends member and item locations even when what it references reads none; resolving references during the compile-time scan would let those subtrees skip too.
-
+- [ ] **A dynamic reference keeps instance locations on** — once a `$data`,
+  `data` or `$query` reader exists anywhere in the compilation, a `$ref` is
+  resolved during the compile-time scan and only a target that reaches a
+  reader keeps member and item locations on; a subtree holding a `$dynamicRef`
+  or `$recursiveRef`, or a `$ref` inside a subtree with an embedded `$id`,
+  still extends them even when nothing it can reach reads one. Following those
+  needs every `$dynamicAnchor` the compilation can enter by that name, and the
+  embedded resource's base.
+- [ ] **With the validation vocabulary off, `items` stops at `maxItems`** — a
+  metaschema whose `$vocabulary` omits validation turns `maxItems` into an
+  annotation, but the item loops still cut at it (`resolveLength` in
+  array.js): `{ $schema: <vocab-off meta>, maxItems: 1, items: {type:
+  'string'} }` accepts `['a', 5]` while the same schema without `maxItems`
+  rejects it.
+- [ ] **`items` asserts `type`/`required` under a metaschema that turns the
+  validation vocabulary off** — `compileItemValidator`'s type-only and
+  required-only fast paths ignore `vocabValidation`, unlike `properties` and
+  the schema compiler's own fast paths: `{items: {type: 'string'}}` rejects
+  `[5]`, `{properties: {a: {type: 'string'}}}` accepts `{a: 5}`, `{type:
+  'string'}` accepts `5`.
+- [ ] **An unknown `prefixItems` turns off `items: false`** — in a document
+  declaring 2019-09, `prefixItems` is an unknown keyword, yet
+  `compileArrayItemsBoolean` still skips `items: false` when it sees one: `{
+  $schema: 2019-09, prefixItems: [{}], items: false }` accepts `[1, 2]`;
+  without `prefixItems` it rejects.
 - [ ] **Compiling a deeply nested schema still recurses per level.** A schema
   nested 20,000 levels deep (`properties`, `items` or `allOf` chains, under
   any `$schema`) throws `RangeError` while it compiles: two passes recurse

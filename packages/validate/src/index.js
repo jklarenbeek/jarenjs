@@ -378,10 +378,12 @@ export class ValidationRoot {
   #anchorObjects = new Map();
   /** @type {boolean} Whether any schema in this compilation reads the location of its instance */
   #usesDollarData = false;
-  /** @type {WeakMap<object, boolean>} Schema subtree -> whether it holds a location reader or a reference */
+  /** @type {WeakMap<object, {base: string, reads: boolean}>} Schema subtree -> whether it holds or reaches a location reader, judged against the base its references resolve against */
   #readsBelowSchema = new WeakMap();
-  /** @type {WeakMap<object, boolean>} Map of schemas (names -> schemas) -> the same; apart from the schema memo because an object read as a map has names where one read as a schema has keywords */
+  /** @type {WeakMap<object, {base: string, reads: boolean}>} Map of schemas (names -> schemas) -> the same; apart from the schema memo because an object read as a map has names where one read as a schema has keywords */
   #readsBelowMap = new WeakMap();
+  /** @type {Map<string, boolean>} Reference target id -> whether it reaches a location reader */
+  #targetReads = new Map();
   /** @type {boolean} Whether any schema in this compilation contains unevaluatedProperties/unevaluatedItems */
   #usesUnevaluated = false;
   /** @type {EvalLog} Log of evaluated properties/items for unevaluated* support */
@@ -421,12 +423,6 @@ export class ValidationRoot {
       ? !hasUnevaluatedPropertiesCoverage(node)
       : !hasUnevaluatedItemsCoverage(node);
   }
-
-  /**
-   * Keywords that lead to another schema by name. A subtree holding one may
-   * reach a location reader that sits outside it.
-   */
-  static #REFERENCE_KEYWORDS = new Set(['$ref', '$dynamicRef', '$recursiveRef']);
 
   /**
    * Walks a schema (sub)tree and offers every keyword to `visit`. Keys inside
@@ -493,14 +489,55 @@ export class ValidationRoot {
   }
 
   /**
-   * A visitor for `#walkKeywords`: true at a location reader or at a reference
-   * (which may lead to a reader the walk cannot see).
-   * @param {object} node
-   * @param {string} key
+   * Whether a subtree holds a location reader, or can reach one through a
+   * reference. A `$ref` is resolved and its target walked too; one that is no
+   * reference string or does not resolve, a `$dynamicRef` or `$recursiveRef`
+   * (whose target the instance decides), and a `$ref` in a subtree holding an
+   * embedded `$id` (which moves the base it resolves against) count as
+   * reaching one.
+   * @param {any} node - The subtree
+   * @param {boolean} isSchema - Whether its keys are keywords (not names)
+   * @param {string} base - The base its references resolve against
+   * @param {{bases: Map<string, Set<any>>, targets: string[]}} walk - Per
+   *   base, the nodes and reference targets already walked against it (an
+   *   object shared by two documents is judged under each one's base), and
+   *   the targets this walk entered
    * @returns {boolean}
    */
-  static #holdsReaderOrReference(node, key) {
-    return ValidationRoot.#readsLocation(node, key) || ValidationRoot.#REFERENCE_KEYWORDS.has(key);
+  #readsBelow(node, isSchema, base, walk) {
+    let moved = false;
+    let followed = false;
+    const seen = walk.bases.get(base) ?? new Set();
+    walk.bases.set(base, seen);
+    return ValidationRoot.#walkKeywords(node, seen, (holder, key) => {
+      if (ValidationRoot.#readsLocation(holder, key) || key === '$dynamicRef' || key === '$recursiveRef')
+        return true;
+      if (key === '$id') {
+        moved = true;
+        return followed;
+      }
+      if (key !== '$ref') return false;
+      if (moved || !hasSchemaReference(holder, '$ref')) return true;
+      followed = true;
+      let target;
+      try {
+        target = this.referencedSchema(base, holder);
+      }
+      catch {
+        return true;
+      }
+      const { id } = target;
+      const known = this.#targetReads.get(id);
+      if (known !== undefined) return known;
+      if (seen.has(id)) return false;
+      seen.add(id);
+      walk.targets.push(id);
+      // A target that reaches a reader always does; one that reaches none is
+      // known only once the whole walk has found none.
+      const reads = this.#readsBelow(target.schema, true, id, walk);
+      if (reads) this.#targetReads.set(id, true);
+      return reads;
+    }, isSchema, this.#options.propertyDependencies === true);
   }
 
   /**
@@ -605,15 +642,17 @@ export class ValidationRoot {
    * Whether a schema has to hand locations to the subschemas under the given
    * keywords. Locations are strings built per member and per item, so they are
    * built only where something below can read one: a `$data` reference, the
-   * `data` keyword or a `$query`, or a reference that may lead to one. A
-   * subtree holding none of those is given its parent's location unextended
-   * and nothing in it looks. An internal collaborator of the keyword
-   * compilers, like `usesDollarData`; not part of the package's API.
+   * `data` keyword or a `$query`, there or in a schema a reference below leads
+   * to (see `#readsBelow`). A subtree that reaches none of those is given its
+   * parent's location unextended and nothing in it looks. An internal
+   * collaborator of the keyword compilers, like `usesDollarData`; not part of
+   * the package's API.
    * @param {object} schema - The schema object holding the keywords
    * @param {readonly string[]} keywords - The keywords whose values are validated against the children
+   * @param {string} base - The base the children's references resolve against
    * @returns {boolean}
    */
-  childLocationsNeeded(schema, keywords) {
+  childLocationsNeeded(schema, keywords, base) {
     if (!this.#usesDollarData) return false;
     for (let i = 0; i < keywords.length; ++i) {
       const key = keywords[i];
@@ -621,13 +660,15 @@ export class ValidationRoot {
       if (value === null || typeof value !== 'object') continue;
       const isSchema = !ValidationRoot.#SCAN_MAP_KEYWORDS.has(key);
       const memo = isSchema ? this.#readsBelowSchema : this.#readsBelowMap;
-      let reads = memo.get(value);
-      if (reads === undefined) {
-        reads = ValidationRoot.#walkKeywords(value, new Set(), ValidationRoot.#holdsReaderOrReference, isSchema,
-          this.#options.propertyDependencies === true);
-        memo.set(value, reads);
+      let judged = memo.get(value);
+      if (judged === undefined || judged.base !== base) {
+        const walk = { bases: new Map(), targets: [] };
+        judged = { base, reads: this.#readsBelow(value, isSchema, base, walk) };
+        memo.set(value, judged);
+        // A walk that found no reader went through everything its targets reach.
+        if (!judged.reads) for (const id of walk.targets) this.#targetReads.set(id, false);
       }
-      if (reads) return true;
+      if (judged.reads) return true;
     }
     return false;
   }
@@ -720,6 +761,19 @@ export class ValidationRoot {
 
     // Create and cache the validation object
     return ValidationRoot.#createObject(this, id, root);
+  }
+
+  /**
+   * The schema a `$ref` leads to, found without building it: the id and the
+   * schema `resolveObject` builds for the same reference. An internal
+   * collaborator of the compile-time analyses; not part of the package's API.
+   * @param {string} base - The base the reference resolves against
+   * @param {object} schema - The schema containing the $ref
+   * @returns {{id: string, schema: any}}
+   * @throws {Error} When the target is not loaded or the chain loops
+   */
+  referencedSchema(base, schema) {
+    return resolveRefSchemaDeep(this.#schemas, base, schema, this.#traverse);
   }
 
   /**

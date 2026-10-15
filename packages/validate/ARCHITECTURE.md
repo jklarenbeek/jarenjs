@@ -632,10 +632,14 @@ member and per item. While the validator stops at the first failure
 the schemas once: with no reader anywhere, no location is built at all. With
 one, each object and array schema asks `childLocationsNeeded` about the
 subschemas its members and items are validated against, and extends the
-location for them only when that subtree holds a reader, or a reference
-(`$ref`, `$dynamicRef`, `$recursiveRef`) that may lead to one. A subtree
-that holds neither is handed its parent's location unextended and never looks
-at it. A validator that continues past failures (`skipErrors: false`, which
+location for them only when that subtree holds a reader or reaches one through
+a reference. A `$ref` is resolved while the schema compiles and its target is
+judged the same way, so a subtree whose references lead only to schemas
+without a reader extends nothing. A `$dynamicRef` or `$recursiveRef` (whose
+target the instance decides), a `$ref` that does not resolve, and a `$ref` in
+a subtree holding an embedded `$id` (which moves the base it resolves against)
+count as reaching one. A subtree that reaches no reader is handed its parent's
+location unextended and never looks at it. A validator that continues past failures (`skipErrors: false`, which
 collecting errors implies by default) always extends: its errors report the
 location.
 
@@ -1026,8 +1030,9 @@ Map<string, ValidationObject> {
 | `JarenValidator.#precompileRefs` | index.js | Pre-create ValidationObjects for all refs |
 | `ValidationObject.compileValidator` | index.js | Compile validator, ref combination, dynamic-anchor registration |
 | `ValidationRoot.resolveObject` | index.js | Resolve ref to ValidationObject (fallback only) |
+| `ValidationRoot.referencedSchema` | index.js | The id and schema a `$ref` leads to, without building it (the location-reader scan follows references with it) |
 | `wrapUnevaluated` | unevaluated.js | Final-stage unevaluatedProperties/unevaluatedItems check |
-| `EvalLog` | tools.js | Annotation log with mark/rollback for unevaluated* |
+| `EvalLog` | tools.js | Annotation log with mark/rollback for unevaluated*, and a one-pass index of a long stretch for a check over many members |
 | `collectDynamicAnchorsDeep` | dynamic-ref.js | Gather a resource's $dynamicAnchors for scope entry |
 
 ---
@@ -1208,6 +1213,7 @@ pair through a message catalog.
 - Instance-identity keying makes annotations flow correctly through `$ref` chains and recursion without threading context through every validator signature
 - mark/rollback gives failed applicator branches (anyOf/oneOf/not/if) exact annotation-discarding semantics
 - The compile-time feature scan keeps schemas without unevaluated* keywords completely free of tracking overhead
+- A check over many members (items) gathers the stretch of the log since its mark into a set in one pass (`EvalLog.index`), so its cost grows with the instance rather than with the instance's square; a short stretch is still scanned per member, which is cheaper there
 
 ### 6. Dynamic Scope as Per-Anchor Stacks
 

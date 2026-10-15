@@ -61,10 +61,13 @@ function compileUnevaluatedProperties(schemaObj, jsonSchema) {
       if (!isObjectType(data)) return true;
       const log = root.evalLog;
       const keys = Object.keys(data);
+      // Many members against a long log: one pass instead of a scan per member.
+      const index = log.index(data, mark, keys.length);
       let valid = true;
       for (let i = 0; i < keys.length; ++i) {
-        if (!log.hasKey(data, keys[i], mark))
-          valid = addError(keys[i], dataPath) && valid;
+        const key = keys[i];
+        if (index === null ? !log.hasKey(data, key, mark) : !index.has(key))
+          valid = addError(key, dataPath) && valid;
       }
       return valid;
     };
@@ -75,10 +78,14 @@ function compileUnevaluatedProperties(schemaObj, jsonSchema) {
     if (!isObjectType(data)) return true;
     const log = root.evalLog;
     const keys = Object.keys(data);
+    const index = log.index(data, mark, keys.length);
+    // A member that holds the instance itself can evaluate more of it while
+    // it is validated here: those entries come after `end`.
+    const end = log.mark();
     let valid = true;
     for (let i = 0; i < keys.length; ++i) {
       const key = keys[i];
-      if (log.hasKey(data, key, mark)) continue;
+      if (index === null ? log.hasKey(data, key, mark) : index.has(key) || log.hasKey(data, key, end)) continue;
       if (validator(data[key], extendPaths ? memberPath(dataPath, key) : dataPath, dataRoot, key) === true)
         log.add(data, key);
       else
@@ -126,8 +133,10 @@ function compileUnevaluatedItems(schemaObj, jsonSchema) {
     return function validateUnevaluatedItemsFalse(data, dataPath, dataRoot, mark) {
       if (!isArrayClass(data)) return true;
       const log = root.evalLog;
+      const index = log.index(data, mark, data.length);
+      if (index !== null && index.has(-1)) return true;
       for (let i = 0; i < data.length; ++i) {
-        if (!log.hasItem(data, i, mark))
+        if (index === null ? !log.hasItem(data, i, mark) : !index.has(i))
           return addError(i, dataPath);
       }
       return true;
@@ -138,9 +147,12 @@ function compileUnevaluatedItems(schemaObj, jsonSchema) {
   return function validateUnevaluatedItems(data, dataPath, dataRoot, mark) {
     if (!isArrayClass(data)) return true;
     const log = root.evalLog;
+    const index = log.index(data, mark, data.length);
+    if (index !== null && index.has(-1)) return true;
+    const end = log.mark();
     let valid = true;
     for (let i = 0; i < data.length; ++i) {
-      if (log.hasItem(data, i, mark)) continue;
+      if (index === null ? log.hasItem(data, i, mark) : index.has(i) || log.hasItem(data, i, end)) continue;
       if (validator(data[i], extendPaths ? dataPath + '/' + i : dataPath, dataRoot, i) === true)
         log.add(data, i);
       else

@@ -134,7 +134,8 @@ export const ARRAY_CHILD_KEYWORDS = Object.freeze(['items', 'prefixItems', 'addi
  * @returns {boolean}
  */
 export function extendsChildLocations(schemaObj, jsonSchema, keywords) {
-  return !schemaObj.options.skipErrors || schemaObj.root.childLocationsNeeded(jsonSchema, keywords);
+  return !schemaObj.options.skipErrors
+    || schemaObj.root.childLocationsNeeded(jsonSchema, keywords, schemaObj.baseUri || schemaObj.path);
 }
 
 /**
@@ -381,12 +382,25 @@ export class EvalLog {
   #data = [];
   #keys = [];
   #len = 0;
+  /** Entries at or past `#len` that a rollback left behind, still holding instance references */
+  #high = 0;
 
-  /** Clears the log; called at the start of each root validation. */
+  /**
+   * Clears the log; called at the start of each root validation. Entries are
+   * overwritten, never truncated: an array's length setter is a slow call on
+   * every validation, while dropping the references keeps the last instance
+   * collectable.
+   */
   reset() {
-    this.#data.length = 0;
-    this.#keys.length = 0;
+    const end = this.#len > this.#high ? this.#len : this.#high;
+    const datas = this.#data;
+    const keys = this.#keys;
+    for (let i = 0; i < end; ++i) {
+      datas[i] = undefined;
+      keys[i] = undefined;
+    }
     this.#len = 0;
+    this.#high = 0;
   }
 
   /** @returns {number} The current log position */
@@ -396,6 +410,7 @@ export class EvalLog {
 
   /** Discards all entries recorded after the given mark. */
   rollback(mark) {
+    if (this.#len > this.#high) this.#high = this.#len;
     this.#len = mark;
   }
 
@@ -415,6 +430,29 @@ export class EvalLog {
       if (datas[i] === data && keys[i] === key) return true;
     }
     return false;
+  }
+
+  /**
+   * The keys (item indexes, -1 for all items) of `data` recorded at or after
+   * `from`, gathered in one pass for a check about to look up `lookups` of
+   * them; `null` when the stretch is short enough that a scan per lookup is
+   * cheaper. Entries recorded after this call are not in the set: they are
+   * found by scanning from the `mark()` taken right after it.
+   * @param {object} data
+   * @param {number} from
+   * @param {number} lookups
+   * @returns {Set<string|number>|null}
+   */
+  index(data, from, lookups) {
+    const len = this.#len;
+    if (len - from < 16 || lookups < 4) return null;
+    const datas = this.#data;
+    const keys = this.#keys;
+    const found = new Set();
+    for (let i = from; i < len; ++i) {
+      if (datas[i] === data) found.add(keys[i]);
+    }
+    return found;
   }
 
   /** @returns {boolean} True when item `index` of `data` was evaluated at or after `from` (-1 entries cover all items) */
