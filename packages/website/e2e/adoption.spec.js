@@ -1,10 +1,17 @@
-import { test, expect } from '@playwright/test';
+import { expect } from '@playwright/test';
+import { test, reachesNetwork } from './outage.js';
 
-test('offline catalog preserves original data, reviews pages and recovers remote success after reload', async ({ page, context }, testInfo) => {
+test('offline catalog preserves original data, reviews pages and recovers remote success after reload', async ({ page, context, site }, testInfo) => {
   test.setTimeout(120000);
-  const offlineNavigation = testInfo.project.name !== 'webkit';
-  if (!offlineNavigation) testInfo.annotations.push({ type: 'qualification', description: 'WebKit offline page navigation is pending: this host reports an internal navigation error. Offline database reopen, ingestion and reconciliation are exercised.' });
-  await page.goto('/jarenjs/#/collection?mode=adoption');
+  // Offline is the site's server really gone, on every engine, plus the browser's offline
+  // emulation where that emulation still lets the service worker answer: Playwright's
+  // WebKit fails a request before the worker sees it (offline-navigation.spec.js).
+  const goOffline = async () => {
+    await site.down();
+    if (testInfo.project.name !== 'webkit') await context.setOffline(true);
+    expect(await reachesNetwork(page)).toBe(false);
+  };
+  await page.goto(`${site.origin}/jarenjs/#/collection?mode=adoption`);
   await expect(page.locator('[data-journey-qualification]')).toContainText('native OS input methods remain pending');
   const status = page.locator('[data-journey-status]');
   await expect(status).toContainText('64 matches', { timeout: 30000 });
@@ -52,22 +59,18 @@ test('offline catalog preserves original data, reviews pages and recovers remote
   await page.evaluate(async () => { await navigator.serviceWorker.ready; });
   await expect.poll(() => page.evaluate(() => !!navigator.serviceWorker.controller)).toBe(true);
   await page.reload(); await expect(status).toContainText('64 matches', { timeout: 30000 });
-  await context.setOffline(true);
+  await goOffline();
   await page.getByRole('button', { name: 'Reopen database' }).click(); await expect(status).toContainText('later writes preserved');
   await page.getByRole('button', { name: 'Ingest snapshot' }).click(); await expect(status).toContainText('0 changes');
-  if (!offlineNavigation) await context.setOffline(false);
   await page.getByRole('button', { name: 'Send and simulate interruption' }).click();
   await expect(status).toContainText('Interrupted send retained', { timeout: 30000 });
   expect(await page.evaluate(() => JSON.parse(sessionStorage.getItem('adoption-remote')).length)).toBe(2);
-  await context.setOffline(true);
   await page.getByRole('button', { name: 'Reconcile and recover' }).click();
   await expect(status).toContainText('No remote resend');
-  if (!offlineNavigation) await context.setOffline(false);
   await page.reload(); await expect(status).toContainText('Recovered run complete', { timeout: 30000 });
   expect(JSON.parse(await draft.inputValue()).revision).toBe('2');
   expect(await page.evaluate(() => JSON.parse(sessionStorage.getItem('adoption-remote')).length)).toBe(2);
-  await context.setOffline(true);
   await page.getByRole('button', { name: 'Ingest snapshot' }).click(); await expect(status).toContainText('0 changes');
   await page.screenshot({ path: testInfo.outputPath('adoption.png'), fullPage: true });
-  await page.goto('/jarenjs/#/docs'); await expect(page.locator('[data-journey-editor]')).toHaveCount(0);
+  await page.goto(`${site.origin}/jarenjs/#/docs`); await expect(page.locator('[data-journey-editor]')).toHaveCount(0);
 });

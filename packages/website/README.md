@@ -112,6 +112,18 @@ three engines on every push.
 hot-updates, private model workers, query plans and live commits.
 `e2e/project-offline.spec.js` downloads and unzips the actual export, serves
 it locally with external requests blocked, and runs both an app and SQLite.
+`e2e/offline-navigation.spec.js` takes away the server the site was loaded
+from and reloads: the service worker answers with the cached shell and the app
+boots, in all three engines. `e2e/adoption.spec.js` runs its offline reopen,
+ingestion, interrupted send and reload against the same kind of outage. The
+outage is real because `context.setOffline(true)` cannot stand in for one on
+WebKit: Playwright's WebKit offline emulation fails a request before the page's
+service worker is asked, even when the worker answers with a `Response` it
+constructs itself, from no cache and no network. The spec's second test pins
+that reduced case (the fetch rejects with `Load failed`, the reload reports
+`WebKit encountered an internal error`) and fails once the emulation lets the
+worker answer. Chromium and Firefox take the worker's answer under the
+emulation, so the journey also emulates offline there.
 `e2e/view-runtime.spec.js` tests safe DOM/SSR reflection, composition and caret
 settlement, multiple selects, adopted fragment roots and SVG namespaces.
 Composition events are automated; native OS IME and actual screen-reader

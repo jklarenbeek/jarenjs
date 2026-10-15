@@ -93,11 +93,12 @@ source imports. The browser journey at `#/collection?mode=adoption` uses the
 same host and reusable components with SQLite session storage. Chromium,
 Firefox and WebKit exercise draft editing, review across pages, receipt replay,
 ingestion, interruption after remote success, reconciliation, reopen and
-navigation disposal. Offline page reload is qualified on Chromium and Firefox.
-The Linux Playwright WebKit host reports an internal error for that navigation;
-it separately exercises offline database reopen, ingestion and reconciliation,
-with network restored for page reload. WebKit offline page-navigation acceptance
-remains pending. Session storage preserves this tab's database through
+navigation disposal. Offline page reload is qualified with the site's server
+really gone on Chromium, Firefox and the Linux Playwright WebKit build; Chromium
+and Firefox additionally emulate offline. Playwright's WebKit offline emulation
+fails a request before the page's service worker can answer it, so that build
+takes the real outage alone; the website README records the reduced case.
+Offline navigation in a shipping Safari remains pending. Session storage preserves this tab's database through
 reload; closing the tab is outside that persistence contract.
 
 ## Combined cost and source ownership

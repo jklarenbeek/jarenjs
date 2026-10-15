@@ -162,6 +162,7 @@ establish registry publication or downstream acceptance.
   do with.
 - [ ] **More domain projections** — the geometry-free-AST-as-model idea now ships executable arrows for flat FSMs, compound statecharts and DAGs (`stateDiagram ⇄ jaren-fsm` and `flowchart ⇄ jaren-dag`, run by `@jarenjs/flow`; MERMAID-FORMAT §5.1); the remaining follow-ups on the same idea are sequence⇄orchestration/saga and ER⇄JSON-Schema+`@jarenjs/forms`.
 - [ ] **Diagram tooltips beyond flowchart and state nodes** — `mermaidPlugin({ tooltips: true })` ships node tooltips (focus and hover, Escape, aria wiring) for the diagram types whose render marks nodes (`flowchart`, `stateDiagram`, `jaren-dag`). The remaining types draw no marked target: sequence actors and messages, class and ER panels, gantt rows (which carry `data-id` but a different class), edges, and the secondary placeholders. Their render needs per-element markers first. The text is English-only and derived from the DOM; a Mermaid `click` line's own tooltip text is parse-accepted and not modeled in the AST.
+
 ## @jarenjs/charts
 
 - [ ] **Sessions for the remaining nine types** — `line`, `bar`, `heatmap` and `candlestick` patch in place; the other nine (`boxplot`, `gauge`, `map`, `pie`, `radar`, `sankey`, `scatter`, `streamgraph`, `treemap`) re-render wholesale, which is correct and, at their sizes, cheap.
@@ -912,10 +913,14 @@ entry remains pending until its actual host and operator evidence exists.
   executables and automated browser composition only. Keep original sources
   and retained oracles until their qualified retirement; synthetic passes never
   authorize a downstream deletion or increase a budget.
-- [ ] **WebKit offline page navigation.** Offline database reopen, ingestion
-  and reconciliation pass on the qualified WebKit host, but offline page reload
-  reports an internal navigation error. Qualify navigation itself before claiming
-  complete offline browser recovery. Chromium and Firefox already exercise it.
+- [ ] **Safari offline page navigation.** Offline page reload is qualified
+  with the site's server really gone on Chromium, Firefox and the Linux
+  Playwright WebKit build, both on its own and inside the adoption journey
+  (reopen, ingestion, interrupted send, reconciliation and reload, all
+  offline). Playwright's WebKit offline emulation fails a request before the
+  page's service worker answers it, so that build takes the real outage alone;
+  the reduced case is pinned in the browser suite. Waits on an offline reload
+  in a shipping Safari (macOS or iOS), which this Linux host cannot run.
 - [ ] **Combined resource qualification.** Exact peak heap and host-wide remaining
   handles need a matching measurement for each combined host/workload. Sampled
   heap, process high-water RSS and focused component teardown do not fill those
