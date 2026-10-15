@@ -943,15 +943,15 @@
           "host": "node",
           "metric": "peakHeapBytes",
           "limit": 268435456,
-          "value": null,
-          "status": "pending"
+          "value": 59463744,
+          "status": "pass"
         },
         {
           "host": "bun",
           "metric": "peakHeapBytes",
           "limit": 268435456,
-          "value": null,
-          "status": "pending"
+          "value": 54056304,
+          "status": "pass"
         }
       ]
     },
@@ -1013,15 +1013,15 @@
           "host": "node",
           "metric": "remainingHandles",
           "limit": 0,
-          "value": null,
-          "status": "pending"
+          "value": 0,
+          "status": "pass"
         },
         {
           "host": "bun",
           "metric": "remainingHandles",
           "limit": 0,
-          "value": null,
-          "status": "pending"
+          "value": 0,
+          "status": "pass"
         }
       ]
     },
@@ -1923,15 +1923,15 @@
           "host": "node",
           "metric": "peakHeapBytes",
           "limit": 805306368,
-          "value": null,
-          "status": "pending"
+          "value": 276646240,
+          "status": "pass"
         },
         {
           "host": "bun",
           "metric": "peakHeapBytes",
           "limit": 805306368,
-          "value": null,
-          "status": "pending"
+          "value": 300182068,
+          "status": "pass"
         }
       ]
     },
@@ -1993,15 +1993,15 @@
           "host": "node",
           "metric": "remainingHandles",
           "limit": 0,
-          "value": null,
-          "status": "pending"
+          "value": 0,
+          "status": "pass"
         },
         {
           "host": "bun",
           "metric": "remainingHandles",
           "limit": 0,
-          "value": null,
-          "status": "pending"
+          "value": 0,
+          "status": "pass"
         }
       ]
     }
@@ -2009,6 +2009,7 @@
   "sourceHashes": {
     "benchmark/adoption-result.json": "dc51288d0e955ee9ccd029816ff984c2b1e39d3f8fda126b868252eab0d4c08b",
     "benchmark/adoption-journey-result.json": "ece2bb2bb68746545c2d9bc9f692322797d2f1d4dc9384b8fdb13649d3d79b7d",
+    "benchmark/adoption-resources-result.json": "2e8a56d2d7736132f0c605341c5230fdabf478112c16963ff97be827ef91f2a6",
     "benchmark/relational-result.json": "0da4b08f0aa8cbec3c9571f003239b30335199e1bbfa9370654dff3a890aaf92",
     "benchmark/collection-result.json": "1891b3e1c846d32184ee5e413a15cb8d265e8f90f327105a873b3d55891ce6bf",
     "benchmark/lexical-result.json": "b432d314e42e81d30a481eb3d4dd166d2b1c66b39131bb428028fe6917faa453",
@@ -2016,13 +2017,13 @@
     "benchmark/providers-result.json": "2164e5cc37d15a70bf0ba268feec0b29a4fed392ed706d81ebe649cd002fddf7",
     "benchmark/adoption-hosts-result.json": "72184f5fb0d4d4745c7a356a1174451da19a495524a2e91ed71456660f260b20",
     "benchmark/durable-result.json": "f158c3968f5696035353335c93c2f8a5d112c485f6ee7028232618ce93ebc45f",
-    "benchmark/adoption-program.js": "65641927fba330df879d6a0fcbc4e4298141d4e0de8dce33a2f9af75fb64f5cd",
-    "scripts/lib/adoption-program.js": "7ee3ff433e68674b098ef2a1937dc2ce084dcba6bd2fdd80c8aad046ff4bd930"
+    "benchmark/adoption-program.js": "5314492ff9005c584f728c2d920d04d6e5603a54b9b5fee09f390983f57d4af9",
+    "scripts/lib/adoption-program.js": "5ece5170bff2b409b2bce8e641470ba578c358b9a829b637532690dda0a88d2f"
   },
   "limitations": [
     "Focused metrics keep their original workload and host scope. Resources are compared on the combined journey, never chosen from a cheaper focused leg.",
     "Provider pages/rows/bytes measure complete synthetic ingestion; attempts per request remain unmeasured here. Recovery resends cover the terminated catalog fixture.",
-    "Pending means no matching measurement in this scope, even when a focused test or another host passes. Exact combined peak heap and host-wide remaining handles are pending.",
+    "Pending means no matching measurement in this scope, even when a focused test or another host passes. Combined peak heap is the largest live set after a forced collection at the journey phase boundaries, not an exact instantaneous peak; it and host-wide remaining handles are measured on the Linux source hosts only.",
     "Linux executables and automated browser composition do not establish other operating systems, PostgreSQL, native OS IME, assistive technology, real providers or downstream approval.",
     "Original saved sources and all retained oracles remain. Library readiness never authorizes their deletion."
   ]

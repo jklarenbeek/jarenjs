@@ -630,7 +630,8 @@ if (asyncLiveLeak.length)
 // Raised to 984,600 (measured 984578): the shared capture's reading of an index off a relation as a hop, the handle's refusal of rows it cannot count and the store's refusal of a document it cannot read add 1896.
 // Raised to 993,000 (measured 992989): the store's refusal of a non-JSON compared external, epoch-key binding on every key path, the judging of rows a foreign-key action changes, and the double comparison and rounded-read refusal of an integer past 2^53 add 8411.
 // Raised to 1,002,600 (measured 1002519): the store profile as a floor on every read, the engine's evaluation order after a raising conjunct, live replace records for a row stored again, the rebuild's String() spelling, and the stored-key capture, scaled-integer and explain refusals add 9530.
-if (clientBytes > 1002600)
+// Raised to 1,005,100 (measured 1005049): PostgreSQL's out-of-range literal and negated-list spellings, the layout-condition read-back, the worker-hosted Bun backup and the opt-in column upgrade add 2530.
+if (clientBytes > 1005100)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 

@@ -205,6 +205,16 @@ pending timer, so its count rests on the drain check alone: it can show zero or
 at least one, never which resource remains.
 
 <!--fact:adoption.resources-->
+
+| Host | Consumer | Rows | Boundaries | Peak live MiB | Peak after | Live after teardown MiB | Listed after teardown, less baseline | Loop drained | Remaining handles |
+|---|---|---:|---:|---:|---|---:|---|---|---:|
+| node v24.20.0 | catalog | 10000 | 35 | 56.71 | runner.run | 28.48 | none | yes | 0 |
+| node v24.20.0 | archive-stock | 75000 | 26 | 263.83 | query | 47.88 | none | yes | 0 |
+| bun 1.4.2 | catalog | 10000 | 35 | 51.55 | runner.run | 16.61 | none | yes | 0 |
+| bun 1.4.2 | archive-stock | 75000 | 26 | 286.28 | query | 36.33 | none | yes | 0 |
+
+node/catalog: 0 measured budget losses. node/archive-stock: 0 measured budget losses. bun/catalog: 0 measured budget losses. bun/archive-stock: 0 measured budget losses.
+
 <!--/fact-->
 
 These are the Linux source hosts. The standalone executables and other
@@ -346,9 +356,9 @@ matching combined measurements.
 | catalog | providers.unresolvedResends | 0 | pending | providers: pending | 0 (pass) | 0 (pass) |
 | catalog | resources.sampledHeapBytes | 268435456 | 154179328 (pass) | —: pending | 88377984 (pass) | 68917820 (pass) |
 | catalog | resources.peakRssBytes | 536870912 | 315109376 (pass) | —: pending | 283623424 (pass) | 248631296 (pass) |
-| catalog | resources.peakHeapBytes | 268435456 | pending | —: pending | pending | pending |
+| catalog | resources.peakHeapBytes | 268435456 | pending | —: pending | 59463744 (pass) | 54056304 (pass) |
 | catalog | resources.teardownMs | 1000 | 0.07 (pass) | —: pending | 0.21 (pass) | 0.20 (pass) |
-| catalog | resources.remainingHandles | 0 | pending | —: pending | pending | pending |
+| catalog | resources.remainingHandles | 0 | pending | —: pending | 0 (pass) | 0 (pass) |
 | archive-stock | relational.statements | 9 | 9 (pass) | relational: 9 (pass) | pending | pending |
 | archive-stock | relational.queryMs | 250 | 0.16 (pass) | relational: 0.60 (pass) | pending | pending |
 | archive-stock | relational.recoveryMs | 5000 | 49.20 (pass) | relational: 76.04 (pass) | pending | pending |
@@ -374,9 +384,9 @@ matching combined measurements.
 | archive-stock | providers.unresolvedResends | 0 | pending | providers: pending | 0 (pass) | 0 (pass) |
 | archive-stock | resources.sampledHeapBytes | 805306368 | 1020055816 (fail) | —: pending | 353561880 (pass) | 341041131 (pass) |
 | archive-stock | resources.peakRssBytes | 1073741824 | 1209151488 (fail) | —: pending | 938188800 (pass) | 984317952 (pass) |
-| archive-stock | resources.peakHeapBytes | 805306368 | pending | —: pending | pending | pending |
+| archive-stock | resources.peakHeapBytes | 805306368 | pending | —: pending | 276646240 (pass) | 300182068 (pass) |
 | archive-stock | resources.teardownMs | 2000 | 0.10 (pass) | —: pending | 0.23 (pass) | 0.33 (pass) |
-| archive-stock | resources.remainingHandles | 0 | pending | —: pending | pending | pending |
+| archive-stock | resources.remainingHandles | 0 | pending | —: pending | 0 (pass) | 0 (pass) |
 
 <!--/fact-->
 
