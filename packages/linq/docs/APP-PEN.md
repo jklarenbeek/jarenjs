@@ -1309,6 +1309,6 @@ side by side: `@jarenjs/linq/schema` <!--fact:bundle.schema-->45,293<!--/fact-->
 three carry the capture, the expression lowering and the JSON boundary,
 which each bundle counts once — so what the app pen costs a consumer who
 already imports the schema pen is the difference the numbers do state:
-**about 15 kB**, the JSLT pen's non-shared half plus this pen's own
+the JSLT pen's non-shared half plus this pen's own
 `defineApp`, action capture, seven patch operations, pointer lowering,
 `bind()`, `sub()` and their refusal messages.
