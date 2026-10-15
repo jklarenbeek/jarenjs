@@ -66,7 +66,8 @@ plan      Diff two model FILES into an exact 0.2 migration document,
           verify the from-model's physical shape against the database.
           With --upgrade-columns, plan instead the link that rebuilds the
           generated columns, index expressions and interval CHECKs the
-          --store tables hold as an earlier release created them, from
+          --store tables hold as an earlier release created them (and
+          creates a join table's index over its second key column), from
           the model the database holds to itself; the snapshot is neither
           read nor advanced, and a database that holds what this release
           creates plans nothing and writes nothing. Apply the link as the
@@ -434,7 +435,7 @@ async function commandPlanUpgrade(options) {
   else {
     console.log(rendered);
   }
-  console.error(`NOTE: the link rebuilds ${report.upgraded.join(', ')} — apply it as the next link of the chain`);
+  console.error(`NOTE: the link rebuilds or creates ${report.upgraded.join(', ')} — apply it as the next link of the chain`);
 }
 
 async function commandStatus(options, { asCheck }) {

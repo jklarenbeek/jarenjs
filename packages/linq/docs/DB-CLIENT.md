@@ -443,20 +443,28 @@ runs them):
 
 | Question | Chain |
 |---|---|
-| which labels does `u1` hold | `labels.where((j) => j.User_key.eq('u1')).select((j) => j.Label_key)` (reads the table: no index on `User_key`, below) |
+| which labels does `u1` hold | `labels.where((j) => j.User_key.eq('u1')).select((j) => j.Label_key)` (seeks the index on `User_key`, below) |
 | how many users hold each label | `client.entities.Label.groupJoin(fromAsync(labels), (l) => l.name, (j) => j.Label_key, (l, g) => ({ label: l.name, users: g.count() }))` |
 | which pairs carry a blue label | `labels.join(fromAsync(client.entities.Label), (j) => j.Label_key, (l) => l.name, (j, l) => ({ j, l })).where((x) => x.l.color.eq('blue'))` |
-| which users hold no label | the document `{ "$for": { "u": "$.User[*]" }, "$where": { "$not": { "$exists": { "$for": { "j": "$.Label_User[*]" }, "$where": { "$eq": ["$j.User_key", "$u.id"] }, "$return": "$j" } } }, "$return": "$u.id" }`, handed to `labels.execute` |
+| which users hold no label | `client.entities.User.where((u) => u.labels.all().exists().not()).select((u) => u.id)`, or the document `{ "$for": { "u": "$.User[*]" }, "$where": { "$not": { "$exists": { "$for": { "j": "$.Label_User[*]" }, "$where": { "$eq": ["$j.User_key", "$u.id"] }, "$return": "$j" } } }, "$return": "$u.id" }`, handed to `labels.execute` |
 
-(`labels` is `client.entities.User.memberships.labels`.) The last row is a
-document because its chain spellings do not lower to one statement: a
-`where` after a `groupJoin`, and the hop `u.labels.all().exists()`, both
-answer right and run on the engine's set path, which `explain()` names.
+(`labels` is `client.entities.User.memberships.labels`.) A many-to-many hop
+read only for its count or its existence (`u.labels.all().exists()`,
+`u.labels.count()`) is one statement too: a correlated `EXISTS` or count
+over the join row, with the target row it names tested inside it, so a
+join row a writer that did not enforce the foreign key left behind its
+deleted label is not counted, as the engine does not count it
+([MODEL-FORMAT §10.7](../../db/docs/MODEL-FORMAT.md)). A `where` after a
+`groupJoin` is a nested FLWOR, which answers right and runs on the
+engine's set path, as `explain()` names.
 
 The table's primary key is its two columns in sorted entity order
 (`Label_key`, then `User_key`), so a filter on the leading column seeks
-it on both dialects; a filter on the other column has no index to seek,
-because the store declares no second index on a join table.
+it on both dialects, and the store indexes the other column
+(`Label_User_User_key`), so a filter on it seeks that index. A join table
+an earlier release created has no second index until
+`planColumnUpgrade` creates it ([MIGRATION-FORMAT §3](../../db/docs/MIGRATION-FORMAT.md));
+until then a filter on its second column reads the table.
 
 ## 3. Worked examples
 
@@ -1006,8 +1014,9 @@ join table, so a question about WHEN a pair was attached, or by whom, has
 nothing to read. A membership that carries data of its own is an entity
 of its own, with a one-to-many edge to each side. `u.labels` as a chain
 hop lowers through the join table (two links: the join row, then the
-label it names), and `include((u) => u.labels)` loads the rows or, with
-`{ count: true }`, counts them.
+label it names; counted or tested for existence, one statement), and
+`include((u) => u.labels)` loads the rows or, with `{ count: true }`,
+counts them.
 
 **A chain split by a host callback has no document to register.**
 `mapAsync` runs a JavaScript function per row, so the chain after it is

@@ -2843,6 +2843,53 @@ an unknown option; plan the link there through `planColumnUpgrade`.
   so `strictStreaming: true` declines it `JD0037`. Type the member so the return cannot raise to
   keep the row stream.
 
+## 44. A join table indexed over its second key column, and a many-to-many hop counted in one statement
+
+- A many-to-many join table this release creates carries an index over its
+  second key column (`Label_User_User_key` on `Label_User`, beside the primary
+  key `(Label_key, User_key)`), so a filter on that column, the cascade from its
+  entity and a membership read from that side seek it where they read the whole
+  table (`SCAN`). Under a profile that refuses full scans (`refuseFullScan`), such
+  a read was refused `JD0011`; over a table this release creates it runs. No
+  answer changes. A join table an earlier release created opens, reads, writes
+  and migrates as it did, without the index; `planColumnUpgrade(connection,
+  model)` (`jaren-db plan --upgrade-columns`) plans the one `CREATE INDEX` that
+  gives it one (`report.upgraded` names `Label_User.Label_User_User_key`), and
+  plans nothing once it is there ([MIGRATION-FORMAT §3](MIGRATION-FORMAT.md#upgrading-the-definitions-a-table-holds)).
+- A link this release plans creates a join table with the index; one that renames
+  a join table with its endpoint drops the index where the table has one
+  (`DROP INDEX IF EXISTS`) and creates it under the name a fresh build gives it,
+  and one that rebuilds a join table indexes it after it takes its final name.
+  The default shadow builds its baseline's join tables without the index, as the
+  earliest release did. A rename link an earlier release planned applies, as
+  before, to a join table without the index; applied to one this release created,
+  it leaves the index under the table's old name: on SQLite `migrate()` refuses
+  the link `JD0023` (`the migrated shape does not equal the target model's:
+  unexpected index:Label_User_User_key`) with nothing changed, and on PostgreSQL,
+  which compares no shape after a link, the next open refuses the table `JD0002`.
+  Plan the link again with this release, or drop the old index in a `sql` step
+  before it.
+- A many-to-many hop read only for its count or its existence —
+  `u.labels.all().count()`, `u.labels.all().exists()`, its negation (the users
+  without a label), a count compared with a number — ran on the engine's set path
+  (`a navigation hop translates only as one plain correlated FLWOR`) and is now one
+  native statement on SQLite and PostgreSQL: a correlated count or `EXISTS` over
+  the join row, with the target row it names tested inside it. Any hop counted or
+  tested through a second hop that reaches at most one row lowers the same way.
+  The answer is the engine's (`pushdown: false`), a join row whose target row a
+  writer that did not enforce the foreign key deleted included (it is not
+  counted); `explain().mode` reads `native`, and a call with `strict: true` that
+  was refused `JD0010` for the hop now runs.
+
+**Downgrade.** The previous release refuses a store whose join table this
+release created, or that the upgrade link indexed: `JD0002` (`entity
+'Label_User': the existing table does not match the declared model (1 declared
+indexes exist, the model declares 0 — the database has Label_User_User_key,
+which the model does not declare)`). Go back by dropping each such index
+(`DROP INDEX "Label_User_User_key"`); the table then opens on the previous
+release as one it created. A store whose join tables an earlier release created
+and that never ran the upgrade link opens on the previous release as before.
+
 ## Measured costs
 
 Exact identity stores complete canonical documents and model endpoints, so

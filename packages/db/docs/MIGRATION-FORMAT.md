@@ -398,7 +398,12 @@ that rebuilds exactly the ones that differ:
   holds them unguarded, and so does one whose model stopped declaring the
   container (`type: 'array'` to none), which a plan between the two models
   accepts as it is. A model that declares the container gets the unguarded
-  spelling a fresh store creates for it.
+  spelling a fresh store creates for it;
+- on both engines, a many-to-many join table without the index over its
+  second key column (`Label_User_User_key` on `Label_User`), which no earlier
+  release created: a filter on that column, and the cascade from its entity,
+  read the whole table. The link creates the index and changes nothing else;
+  `report.upgraded` names it `<table>.<index>` (`Label_User.Label_User_User_key`).
 
 The steps are the ones a model change plans for the same column: drop the
 indexes over it (and the CHECK that reads it), drop the column, add it as a fresh
@@ -408,7 +413,7 @@ like any other, and a table that refuses the rebuilt definition (a stored docume
 of the other container kind that collides in a unique index over the rebuilt
 column) fails the link `JD0023` with nothing changed: migrate the documents first. `report.upgraded` names each rebuilt definition
 (`c.gx_q`, `rows.slot_interval`). A definition that is neither spelling is left
-as it is for the open path to refuse (`JD0002`). Entities, the document schema
+as it is for the open path to refuse (`JD0002`). Entity tables, the document schema
 and every other difference between models are not planned here.
 
 The upgrade is a plan of its own, never a side effect of `planMigration` or
@@ -437,7 +442,11 @@ it rebuilds what it created.
 
 When pending work exists and `shadow` is not `false`, the whole chain
 replays on a disposable shadow before real migration writes. The default
-initializer builds the baseline model into an empty database; a supplied
+initializer builds the baseline model into an empty database, each
+many-to-many join table as the earliest release created it, without the
+index over its second key column (a link an earlier release planned neither
+creates, renames nor drops that index; one this release plans creates it,
+and the shadow's acceptance takes a join table with it or without it); a supplied
 `shadowFixture(connection)` instead creates the historical schema and
 fixture rows. Physical preservation plans require that initializer or an
 explicit `shadow: false`, because a query mapping cannot recreate all
@@ -968,9 +977,9 @@ database of its own
 | change type / enum CHECK / key / epoch flavor | **rebuild** (§10); a type change meets the stored values first: one that the new type cannot hold refuses the migration when it runs (§10) |
 | add, drop or change an index (`unique`/`index`/version, an entry of the entity's `indexes`, its `where`) | plain DDL — a changed index (uniqueness, columns or condition) is a `DROP INDEX` then a `CREATE INDEX`; a rebuild (§10) recreates every index with its condition |
 | add, drop or change a database rule of a store-owned layout (MODEL-FORMAT §13.4) | its programs as plain DDL: an added program is its `CREATE` (on PostgreSQL its function, then its trigger), a removed one its `DROP` (a trigger before its function), a changed one both, an unchanged one nothing. Every `DROP` goes before the table's other steps and every `CREATE` of a table that already exists comes last in the migration, after its transform steps: a renamed or a rebuilt table's programs are dropped before the rename or the rebuild (§10) and created again at the end; a new entity's table is created with its programs |
-| add or drop a relation (foreign-key column, join table) | foreign keys **rebuild** the holder — an inferred foreign-key column the target model no longer declares is folded into the document when the target declares the property, else named in `report.lost` and the plan is destructive; join tables create/drop directly |
+| add or drop a relation (foreign-key column, join table) | foreign keys **rebuild** the holder — an inferred foreign-key column the target model no longer declares is folded into the document when the target declares the property, else named in `report.lost` and the plan is destructive; join tables create (with the index over their second key column) and drop directly |
 | entity added / dropped | create / `DROP TABLE` (destructive, named), children before parents so no foreign key dangles mid-migration |
-| entity renamed | declared with `x-rename` on the target entity — never inferred; join tables renamed mechanically with their endpoints |
+| entity renamed | declared with `x-rename` on the target entity — never inferred; join tables renamed mechanically with their endpoints, and the index over a join table's second key column dropped where the table has one (`DROP INDEX IF EXISTS`) and created under the name a fresh build gives it; a join table rebuilt in its endpoint order is indexed after it takes its final name |
 | scalar ⇄ JSONB move (`column: "json"` toggled) | the first two rows: `ADD COLUMN` plus a `sql` lift out of the document, or a `sql` fold plus `DROP COLUMN` — a rebuild only where SQLite cannot drop the column in place. A value keeps its JSON type on both engines: a fold writes the column's JSON value (on PostgreSQL `to_jsonb` of a number or a text, `true` or `false` of a boolean), a lift reads the member as the JSON type its column holds, an absent member stays absent, and on PostgreSQL a member the document holds as another JSON type than its column's refuses the lift (`JD0023`, naming the member and the type found) before any row changes, as SQLite's STRICT column refuses a text in an integer column (SQLite takes a boolean as 1 where PostgreSQL refuses it). An instant moves between a plain column, an epoch column and the document as the string it began as; an epoch column retyped to a number keeps the epoch |
 | key allocation (`default: "auto"`) added or removed | PostgreSQL, where allocation is a column property: steps of their own, right after the entity renames and ahead of every other step. Gaining: the key's table locked against every other session (a block that runs `LOCK TABLE … IN ACCESS EXCLUSIVE MODE`), a check under that lock that no stored key is a number a `bigint` would round (`JD0023`, naming the key and the value; a key stored as text, or retyped into the integer by the same edit, is read as the number it spells), every referencing column and then the key `ALTER … TYPE bigint`, a sequence the key owns as its default (an identity allocates by itself and takes none), `setval` past the highest stored key, and the rule functions of the converted tables replaced. Dropping: the key's identity, if it is one, and its default removed, the key and then every referencing column `TYPE numeric`, the sequence the key owned dropped, the rule functions replaced. A table the same edit rebuilds takes the lock and the check for a gain, and nothing for a drop: the rebuild carries the sequence, or leaves it with the old table. SQLite: no step, the rowid allocates either way |
 

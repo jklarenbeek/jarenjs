@@ -72,6 +72,15 @@ for (const engine of ENGINES) {
       const labels = client.entities.Label;
       const held = labels.select((l) => ({ name: l.name, users: l.users.count() }));
       assert.deepStrictEqual(await held.toArray(), [{ name: 'admin', users: 1 }, { name: 'secret', users: 0 }]);
+      // counted and tested through the join row in one statement, the
+      // bounded target read as the engine reads it
+      const used = labels.where((l) => l.users.all().exists()).select((l) => l.name);
+      assert.deepStrictEqual(await used.toArray(), ['admin']);
+      for (const chain of [held, used]) {
+        assert.deepStrictEqual(await client.store.execute(chain.toDocument(), { pushdown: false }),
+          chain === held ? [{ name: 'admin', users: 1 }, { name: 'secret', users: 0 }] : 'admin');
+        assert.strictEqual((await labels.explain(chain)).mode, 'native');
+      }
     }));
   });
 }

@@ -16,7 +16,7 @@
  */
 
 import { explainMapping } from './model.js';
-import { utf8ByteLength } from '@jarenjs/core/string';
+import { hashContent, utf8ByteLength } from '@jarenjs/core/string';
 import { IDENTIFIER, ENGINE_TABLES } from './engine-metadata.js';
 import { DbCompileError } from './errors.js';
 import { chain } from './driver.js';
@@ -1077,8 +1077,12 @@ function verifyDeclaredSql(connection, plan, disagree) {
       /** @type {Map<string, string>} */
       const actual = new Map();
       for (const row of rows) actual.set(String(row.name), comparableDeclaredSql(row.sql, MANAGED_SQL_OPTIONS));
+      // an index a table an earlier release created goes without (see `verifyShape`)
+      const legacyAbsent = new Set((plan.expected?.indexes ?? [])
+        .filter((/** @type {any} */ index) => index.legacyAbsent === true).map((/** @type {any} */ index) => index.name));
       for (const [name, wanted] of planned) {
         const have = actual.get(name);
+        if (have === undefined && legacyAbsent.has(name)) continue;
         if (have === undefined)
           disagree(`the model declares '${name}', which the database does not have`);
         if (have !== wanted) {
@@ -1192,7 +1196,11 @@ export function verifyShape(connection, plan, collection, docPath, kind = 'colle
               plain: row.plain === undefined || row.plain === null || Number(row.plain) === 1,
               conforming: readsConforming(row) }))
             .sort((a, b) => (a.name < b.name ? -1 : 1));
-          const wantedIndexes = plan.expected.indexes;
+          // an index a table an earlier release created goes without
+          // (`legacyAbsent`) is wanted only where the table has it
+          const createdNames = new Set(created.map((index) => index.name));
+          const wantedIndexes = plan.expected.indexes.filter((/** @type {any} */ index) =>
+            index.legacyAbsent !== true || createdNames.has(index.name));
           if (created.length !== wantedIndexes.length) {
             // the COUNT is the fact, but the NAMES are what a reader
             // needs: a file moved between two physical mappings differs
@@ -1719,8 +1727,14 @@ export function planJoinTable(tableName, join, entities, dialect) {
   };
   const columns = [endpoint(join.left), endpoint(join.right)];
   const docPath = `/entities/${join.left.entity}`;
+  // the primary key leads with the first column, so a read by the second —
+  // one row's memberships from that side, the cascade from its entity —
+  // seeks this index; a table an earlier release created has none, and
+  // opens without it (`legacyAbsent`, see `verifyShape`)
+  const index = { name: joinIndexName(dialect, tableName, join.right.column), unique: false, columns: [join.right.column] };
   const objects = [{ name: tableName, what: `the join table of '${join.left.entity}' and '${join.right.entity}'`, docPath,
-    rename: 'the join table' }, ...ownObjects(dialect, tableName, columns, docPath)];
+    rename: 'the join table' }, ...ownObjects(dialect, tableName, columns, docPath),
+  { name: index.name, what: `the index over '${join.right.column}' of the join table '${tableName}'`, docPath, rename: 'the join table' }];
   refuseNameCollisions(objects);
   return {
     table: tableName,
@@ -1728,14 +1742,48 @@ export function planJoinTable(tableName, join, entities, dialect) {
       table: tableName,
       columns,
       compositeKey: [join.left.column, join.right.column],
-    })],
+    }), dialect.ddl.createIndex({ ...index, table: tableName })],
     objects,
     expectedForeignKeys: expectedForeignKeysOf(columns),
     expected: {
       columns: expectedColumnsOf(columns, legacyTypes, dialect),
-      indexes: [],
+      indexes: [{ ...index, legacyAbsent: true }],
     },
   };
+}
+
+/**
+ * The name of a join table's index over its second key column:
+ * `<table>_<column>`, as an entity's index over a column is named, or, where
+ * that is longer than the engine keeps an identifier (PostgreSQL's 63 bytes),
+ * `<table>_<hash>`, the table clipped at a character boundary to fit — a
+ * table and a column that each fit never make a name the engine truncates.
+ * @param {any} dialect @param {string} table @param {string} column
+ * @returns {string}
+ */
+export function joinIndexName(dialect, table, column) {
+  const natural = `${table}_${column}`;
+  const limit = dialect.maxIdentifierBytes;
+  if (!Number.isFinite(limit) || utf8ByteLength(natural) <= limit) return natural;
+  const suffix = `_${hashContent(`${table}\u0000${column}`)}`;
+  return clipToBytes(table, limit - suffix.length) + suffix;
+}
+
+/**
+ * The longest prefix of `text` that is whole characters and at most `bytes`
+ * bytes of UTF-8 — how an engine that bounds an identifier in bytes clips a
+ * name it derives, so no character is split.
+ * @param {string} text @param {number} bytes
+ * @returns {string}
+ */
+export function clipToBytes(text, bytes) {
+  let kept = '', used = 0;
+  for (const character of text) {
+    used += utf8ByteLength(character);
+    if (used > bytes) break;
+    kept += character;
+  }
+  return kept;
 }
 
 /** Plan explicit database-enforced persistence rules; never applies them. A

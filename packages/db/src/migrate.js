@@ -21,7 +21,7 @@
  */
 
 import { canonicalizeJson } from '@jarenjs/json/canonical';
-import { hashContent, utf8ByteLength } from '@jarenjs/core/string';
+import { hashContent } from '@jarenjs/core/string';
 import { resolveRuntime } from '@jarenjs/core/runtime';
 import { refuseCancelled } from './cancellation.js';
 import { cloneJson, setObjectMember, isPlainOptions, isJsonObject } from '@jarenjs/core/object';
@@ -45,7 +45,7 @@ import { modelIdentity, migrationIdentity } from './migration-identity.js';
 import { migrationChecksum, historyStatements, readMigrationHistory, checkHistoryObservation, checkAppliedRows,
   historyHeader, identityRows, checkHistoryIdentity, checkHistoryChain, writeIdentityRows } from './migration-history.js';
 export { HISTORY_TABLE, ENGINE_TABLES };
-import { planCollection, verifyShape, legacyColumnTypes, planEntity, planJoinTable, plannedExpression, acceptsColumn, columnExpression, creationOrder } from './ddl.js';
+import { planCollection, verifyShape, legacyColumnTypes, planEntity, planJoinTable, joinIndexName, clipToBytes, plannedExpression, acceptsColumn, columnExpression, creationOrder } from './ddl.js';
 import { normalizeEntities, explainMapping, asHistory } from './model.js';
 import { derivedValue, memberAt, registerDeriveFunctions } from './derive.js';
 import { mergeEntityRow } from './graph.js';
@@ -1307,20 +1307,22 @@ export const planModelMigration = planMigration;
  * index expression or an interval CHECK over a path the schema leaves a
  * container open on without the guard a query reads it under — the link drops
  * that definition (and the indexes over its column) and creates it again as
- * this release creates it, through the same steps a model change plans. Every
+ * this release creates it, through the same steps a model change plans; and a
+ * many-to-many join table without the index over its second key column, which
+ * no earlier release created, gets that index. Every
  * stored document stays; the columns are computed again by the database. A
  * database already current plans no step, which is how a host learns that a
  * store is behind: the plan is the probe. The link goes from the model to
  * itself and is applied by {@link migrate} as the next link of the chain;
- * nothing else of the model is planned (entities, document schema).
+ * nothing else of the model is planned (entity tables, document schema).
  * @param {any} connection - an open connection to the database, as `migrate` opens one
  * @param {any} model - the model the database holds (its tables open under it)
  * @param {{ id?: string, expressions?: Record<string, any> }} [options] - `id` the
  *   link's name (`upgrade-<hash>` by default); `expressions` the host's declared
  *   index-expression functions
  * @returns {any} value-or-promise of `{ migration, report: { upgraded: string[] } }`:
- *   `upgraded` names each definition the link rebuilds, `<table>.<column>` or
- *   `<table>.<constraint>`
+ *   `upgraded` names each definition the link rebuilds or creates, `<table>.<column>`,
+ *   `<table>.<constraint>` or `<table>.<index>`
  */
 export function planColumnUpgrade(connection, model, options = undefined) {
   readOptions(options, ['id', 'expressions'], 'planColumnUpgrade()');
@@ -1332,20 +1334,56 @@ export function planColumnUpgrade(connection, model, options = undefined) {
   const to = hashContent(identity.to);
   const collections = [...normalizeModel(model, options?.expressions).values()]
     .map((collection) => ({ collection, plan: planCollection(collection.name, collection, dialect, mapping) }));
-  return chain(heldDefinitionsOf(connection, collections.map(({ plan }) => plan)), (held) => {
-    const steps = [];
-    /** @type {string[]} */
-    const upgraded = [];
-    for (const { collection, plan } of collections) {
-      const holding = held.get(plan.table);
-      if (holding === undefined) continue;
-      upgraded.push(...[...holding.types.keys(), ...holding.columns, ...holding.checks].map((name) => `${plan.table}.${name}`));
-      steps.push(...collectionSteps(collection.name, heldPlanOf(plan, holding), plan, collection, dialect, mapping).steps);
-    }
-    const migration = { $migration: MIGRATION_VERSION, id: options?.id ?? `upgrade-${to.slice(0, 8)}`,
-      from: to, to, identity, steps };
-    return { migration, report: { upgraded } };
-  });
+  return chain(heldDefinitionsOf(connection, collections.map(({ plan }) => plan)), (held) =>
+    chain(missingJoinIndexes(connection, joinPlansOf(model, dialect)), (missing) => {
+      const steps = [];
+      /** @type {string[]} */
+      const upgraded = [];
+      for (const { collection, plan } of collections) {
+        const holding = held.get(plan.table);
+        if (holding === undefined) continue;
+        upgraded.push(...[...holding.types.keys(), ...holding.columns, ...holding.checks].map((name) => `${plan.table}.${name}`));
+        steps.push(...collectionSteps(collection.name, heldPlanOf(plan, holding), plan, collection, dialect, mapping).steps);
+      }
+      for (const { table, index, sql } of missing) {
+        upgraded.push(`${table}.${index}`);
+        steps.push({ kind: 'ddl', sql, note: `index the join table '${table}' over its second key column, as a fresh store creates it` });
+      }
+      const migration = { $migration: MIGRATION_VERSION, id: options?.id ?? `upgrade-${to.slice(0, 8)}`,
+        from: to, to, identity, steps };
+      return { migration, report: { upgraded } };
+    }));
+}
+
+/**
+ * The join tables of the model that exist without the index over their
+ * second key column, which a table an earlier release created lacks: each
+ * with the statement a fresh store creates the index by. A join table the
+ * database does not hold has nothing to upgrade.
+ * @param {any} connection
+ * @param {any[]} plans - from `planJoinTable`, one per join table
+ * @returns {any} value-or-promise of `{ table: string, index: string, sql: string }[]`
+ */
+function missingJoinIndexes(connection, plans) {
+  const dialect = connection.dialect;
+  /** @type {{ table: string, index: string, sql: string }[]} */
+  const missing = [];
+  const next = (/** @type {number} */ i) => {
+    if (i >= plans.length) return missing;
+    const plan = plans[i];
+    return chain(connection.prepare(dialect.introspect.tableExists()), (exists) =>
+      chain(exists.get([plan.table]), (row) => (row === undefined ? next(i + 1)
+        : chain(connection.prepare(dialect.introspect.indexes(plan.table)), (statement) =>
+          chain(statement.all([]), (rows) => {
+            const held = new Set(rows.map((/** @type {any} */ candidate) => String(candidate.name)));
+            for (const index of plan.expected.indexes) {
+              if (index.legacyAbsent === true && !held.has(index.name))
+                missing.push({ table: plan.table, index: index.name, sql: dialect.ddl.createIndex({ ...index, table: plan.table }) });
+            }
+            return next(i + 1);
+          })))));
+  };
+  return next(0);
 }
 
 /**
@@ -1622,16 +1660,23 @@ function planEntityChanges(fromModel, toModel, dialect, steps, report, transform
     // a `through` name stays through the rename, so the rebuilt table is
     // built beside the old one and takes the name once the old one is gone
     const staged = finalName === oldName ? `${oldName}__rebuild` : finalName;
-    for (const sql of planJoinTable(staged, target, toMapping, dialect).createSql) {
-      steps.push({ kind: 'ddl', sql, note: `rebuild join table '${oldName}' as '${finalName}' ${why}` });
-    }
+    // the table alone: its index is created last, under the final table's name
+    steps.push({ kind: 'ddl', sql: planJoinTable(staged, target, toMapping, dialect).createSql[0],
+      note: `rebuild join table '${oldName}' as '${finalName}' ${why}` });
+    const indexes = () => {
+      for (const sql of planJoinTable(finalName, target, toMapping, dialect).createSql.slice(1))
+        steps.push({ kind: 'ddl', sql, note: `index the rebuilt join table '${finalName}'` });
+    };
     steps.push({ kind: 'sql',
       sql: `INSERT INTO ${q(staged)} (${targetOrder.map(q).join(', ')}) `
         + `SELECT ${targetOrder.map((column) => q(sourceOf(column))).join(', ')} FROM ${q(oldName)}`,
       note: `copy the memberships of '${oldName}' into '${staged}'` });
     steps.push({ kind: 'ddl', sql: dialect.ddl.dropTable(oldName),
       note: `drop '${oldName}' — its memberships now live in '${staged}'` });
-    if (staged === finalName) return;
+    if (staged === finalName) {
+      indexes();
+      return;
+    }
     steps.push({ kind: 'ddl', sql: dialect.ddl.renameTable(staged, finalName), note: `rename '${staged}' to '${finalName}'` });
     // PostgreSQL named the key after the staged table; a create gives it `<table>_pkey`
     if (dialect.name === 'postgres') {
@@ -1640,8 +1685,10 @@ function planEntityChanges(fromModel, toModel, dialect, steps, report, transform
           + `TO ${q(postgresKeyName(finalName, dialect.maxIdentifierBytes))}`,
         note: `the primary key of '${finalName}' takes the name a create gives it` });
     }
+    indexes();
   };
-  /** The join tables renamed in place, which a rebuilding link must still rebuild. @type {{ name: string, target: any }[]} */
+  /** The join tables renamed in place, which a rebuilding link must still rebuild, each with the
+   * name its index over the second column was created under. @type {{ name: string, target: any, index: string }[]} */
   const renamedInPlace = [];
   for (const [joinName, join] of Object.entries(fromMapping.joinTables)) {
     if (![join.left, join.right].some((side) => renamedEntity(side.entity) !== side.entity)) continue;
@@ -1668,7 +1715,7 @@ function planEntityChanges(fromModel, toModel, dialect, steps, report, transform
         steps.push({ kind: 'ddl', sql: dialect.ddl.renameColumn(newJoin, column.from, column.to),
           note: `rename the endpoint column '${column.from}' with its entity` });
       }
-      renamedInPlace.push({ name: newJoin, target });
+      renamedInPlace.push({ name: newJoin, target, index: joinIndexName(dialect, joinName, join.right.column) });
       continue;
     }
     rebuildJoin(joinName, newJoin, target, (toColumn) => renamedColumns.find((column) => column.to === toColumn).from,
@@ -1942,6 +1989,20 @@ function planEntityChanges(fromModel, toModel, dialect, steps, report, transform
     for (const { name, target } of renamedInPlace)
       rebuildJoin(name, name, target, (toColumn) => toColumn, 'to reference its renamed endpoint');
   }
+  else {
+    // a join table renamed in place keeps its index over the second column
+    // under the name it was created with, which names the table or the
+    // column it had: the index is created again under the name a fresh
+    // build gives it, and one an earlier release never created is created
+    for (const { name, target, index } of renamedInPlace) {
+      const plan = planJoinTable(name, target, toMapping, dialect);
+      if (plan.expected.indexes.every((/** @type {any} */ planned) => planned.name === index)) continue;
+      steps.push({ kind: 'ddl', sql: `DROP INDEX IF EXISTS ${q(index)}`,
+        note: `drop the index '${index}' of the renamed join table '${name}', where it has one` });
+      for (const sql of plan.createSql.slice(1))
+        steps.push({ kind: 'ddl', sql, note: `index the renamed join table '${name}'` });
+    }
+  }
 
   // ————— join tables —————
   const fromJoins = new Set(Object.keys(fromMapping.joinTables).filter((joinName) => continued(joinName) !== undefined).map(renamedJoinName));
@@ -1964,13 +2025,7 @@ function planEntityChanges(fromModel, toModel, dialect, steps, report, transform
  * @returns {string}
  */
 function postgresKeyName(table, limit) {
-  let kept = '', bytes = 0;
-  for (const character of table) {
-    bytes += utf8ByteLength(character);
-    if (bytes > limit - '_pkey'.length) break;
-    kept += character;
-  }
-  return `${kept}_pkey`;
+  return `${clipToBytes(table, limit - '_pkey'.length)}_pkey`;
 }
 
 /**
@@ -2651,16 +2706,19 @@ function renderRebuild(name, fromName, fm, tm, toMapping, dialect, report) {
  * @returns {any} value-or-promise
  */
 export function createModelShape(connection, model, expressions = undefined) {
-  return createShapeHolding(connection, model, expressions, new Map());
+  return createShapeHolding(connection, model, expressions, { columns: new Map(), bareJoins: new Set() });
 }
 
 /**
  * {@link createModelShape}, with some generated columns in the type a table
- * holds them in.
+ * holds them in, and some join tables without the index over their second
+ * key column, as an earlier release created them.
  * @param {any} connection
  * @param {any} model
  * @param {any} expressions
- * @param {Map<string, Map<string, string>>} legacy - by table, then by column
+ * @param {{ columns: Map<string, Map<string, string>>, bareJoins: Set<string> | 'all' }} legacy -
+ *   `columns` by table, then by column; `bareJoins` the join tables created without
+ *   that index, or `'all'` of them
  * @returns {any}
  */
 function createShapeHolding(connection, model, expressions, legacy) {
@@ -2670,7 +2728,7 @@ function createShapeHolding(connection, model, expressions, legacy) {
   for (const collection of normalizeModel(model, expressions).values()) {
     statements.push(
       ...planCollection(collection.name, collection, dialect,
-        { ...mappingFor(connection, expressions), legacyColumns: legacy.get(collection.name) }).createSql);
+        { ...mappingFor(connection, expressions), legacyColumns: legacy.columns.get(collection.name) }).createSql);
   }
   // a shape is built for a baseline too, which is history
   const entities = asHistory(() => normalizeEntities(model));
@@ -2679,8 +2737,8 @@ function createShapeHolding(connection, model, expressions, legacy) {
     const plans = Object.keys(mapping.entities).map((name) => planEntity(name, mapping.entities[name], mapping, dialect, { deferCycles: true }));
     for (const plan of plans) statements.push(...plan.createSql);
     for (const name of Object.keys(mapping.joinTables)) {
-      statements.push(
-        ...planJoinTable(name, mapping.joinTables[name], mapping, dialect).createSql);
+      const created = planJoinTable(name, mapping.joinTables[name], mapping, dialect).createSql;
+      statements.push(...(legacy.bareJoins === 'all' || legacy.bareJoins.has(name) ? created.slice(0, 1) : created));
     }
     for (const plan of plans) statements.push(...plan.deferredForeignKeys ?? []);
   }
@@ -2735,7 +2793,7 @@ export function compareShapeToModel(driver, connection, model, registerFunctions
   return withMigrationConnection({ driver, path: ':memory:' }, (reference) =>
     chain(chain(registerDeriveFunctions(reference),
       () => (registerFunctions !== undefined ? registerFunctions(reference) : null)), () => {
-      return chain(legacyColumnsOf(connection, model, expressions), (legacy) =>
+      return chain(legacyShapeOf(connection, model, expressions), (legacy) =>
         chain(createShapeHolding(reference, model, expressions, legacy), () =>
           chain(schemaShapeOf(reference, { columnOrder: 'ignore' }), (wanted) =>
             chain(schemaShapeOf(connection, { columnOrder: 'ignore' }), (actual) => {
@@ -2760,18 +2818,33 @@ export function compareShapeToModel(driver, connection, model, registerFunctions
 }
 
 /**
- * The generated columns of a database's collection tables that are declared in
- * another of their member's types than the model's plan declares, by table and column.
+ * What a database holds as an earlier release created it, for a reference
+ * shape to hold too: the generated columns of its collection tables declared
+ * in another of their member's types than the model's plan declares, by table
+ * and column, and the join tables without the index over their second key column.
  * @param {any} connection - the database
  * @param {any} model
  * @param {any} expressions
- * @returns {any} value-or-promise of `Map<string, Map<string, string>>`
+ * @returns {any} value-or-promise of `{ columns: Map<string, Map<string, string>>, bareJoins: Set<string> }`
  */
-function legacyColumnsOf(connection, model, expressions) {
+function legacyShapeOf(connection, model, expressions) {
   const plans = [...normalizeModel(model, expressions).values()]
     .map((collection) => planCollection(collection.name, collection, connection.dialect, mappingFor(connection, expressions)));
-  return chain(heldDefinitionsOf(connection, plans), (held) => new Map([...held]
-    .filter(([, holding]) => holding.types.size > 0).map(([table, holding]) => [table, holding.types])));
+  return chain(heldDefinitionsOf(connection, plans), (held) => chain(missingJoinIndexes(connection, joinPlansOf(model, connection.dialect)), (missing) => ({
+    columns: new Map([...held].filter(([, holding]) => holding.types.size > 0).map(([table, holding]) => [table, holding.types])),
+    bareJoins: new Set(missing.map((entry) => entry.table)),
+  })));
+}
+
+/**
+ * The plan of each many-to-many join table of a model (none for a model
+ * without entities); a model read as history is planned as history.
+ * @param {any} model @param {any} dialect @returns {any[]}
+ */
+function joinPlansOf(model, dialect) {
+  if (asHistory(() => normalizeEntities(model)).size === 0) return [];
+  const mapping = asHistory(() => explainMapping(model));
+  return Object.entries(mapping.joinTables).map(([name, join]) => planJoinTable(name, join, mapping, dialect));
 }
 
 /**
@@ -3425,7 +3498,11 @@ function replayOnShadow(primary, driver, shadowPath, baseline, migrations, model
   }) };
   return withMigrationConnection({ driver: independent, path: shadowPath }, (shadow) =>
     chain(verifyShadowOwnership(primary, shadow, driver, migrations.some((migration) => migration.physical?.dialect === 'postgres')), () => chain(emptyShadowHistory(shadow), () => chain(registerDeriveFunctions(shadow), () => chain(options.registerFunctions?.(shadow), () =>
-      chain(options.shadowFixture === undefined ? createModelShape(shadow, baseline, options.expressions)
+      // the baseline as the earliest release created it: a join table
+      // without the index over its second key column, which a link an
+      // earlier release planned does not create, rename or drop (a link this
+      // release plans creates it, and acceptance takes the table either way)
+      chain(options.shadowFixture === undefined ? createShapeHolding(shadow, baseline, options.expressions, { columns: new Map(), bareJoins: 'all' })
         : options.shadowFixture(shadow), () => chain(emptyShadowHistory(shadow), () => runMigration({ connection: shadow }, migrations, {
         batchSize: options.batchSize, assertionBounds: options.assertionBounds,
         onProgress: options.onProgress, onAssertionPlan: options.onAssertionPlan,

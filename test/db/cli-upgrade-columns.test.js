@@ -73,7 +73,7 @@ describe('jaren-db plan --upgrade-columns', () => {
       assert.equal(migration.id, 'upgrade');
       assert.equal(migration.from, migration.to);
       assert.deepEqual(migration.steps.map((/** @type {any} */ step) => step.kind), ['ddl', 'ddl', 'ddl', 'ddl']);
-      assert.equal(printed.stderr, 'NOTE: the link rebuilds c.gx_q — apply it as the next link of the chain\n');
+      assert.equal(printed.stderr, 'NOTE: the link rebuilds or creates c.gx_q — apply it as the next link of the chain\n');
       // the plan reads the database and changes nothing
       assert.equal(columnType(dir), 'REAL');
 

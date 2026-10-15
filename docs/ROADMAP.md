@@ -482,28 +482,30 @@ what each does is its own documentation's job
   worker hosts), and an included child's and the capture journal's integer
   columns refused as the row read whole is (graph.js, capture.js).
 - [ ] **A join table carries no column beyond its two keys.** A many-to-many
-  join table is a read-only root (`$.<JoinTable>[*]`, MODEL-FORMAT §10.7;
-  `client.entities.User.memberships.labels`, DB-CLIENT §2.8), but the model
-  declares nothing else on it, so "which pairs were attached since Friday"
-  has no column to read; such a membership is an entity with two one-to-many
-  edges today. Wanted: columns declared on a `through` (an attach instant at
-  least), with their DDL, migration and typed join row.
-- [ ] **A join table's second key column has no index.** The primary key is
-  `(<A>_key, <B>_key)` in sorted entity order and no other index is declared,
-  so a filter or correlated count on `<B>_key` (a user's labels in
-  `Label_User`, the cascade from `User`) reads the whole table
-  (`SCAN Label_User` on SQLite). Wanted: an index on the second column — a
-  DDL change, so a minor with the previous release's stores proven to open,
-  plan and introspect as before.
-- [ ] **A many-to-many hop counted or tested for existence is not one
-  statement.** `u.labels.all().exists()` and `.count()` lower to two links
-  (the join row, then the target row), which the native translator refuses
-  ("a navigation hop translates only as one plain correlated FLWOR"), and a
-  `where` after `groupJoin` is a nested FLWOR, so "users without a label"
-  answers right on the set path; the document `$not $exists` over
-  `$.Label_User[*]` is native. Wanted: a hop read only for its count or
-  existence lowers through the join row alone (the foreign key guarantees
-  the target row).
+  join table is a read-only root (`$.<JoinTable>[*]`, MODEL-FORMAT §10.7)
+  whose rows are its two keys, so "which pairs were attached since Friday" has
+  no column to read; such a membership is an entity with two one-to-many edges
+  today. Wanted: columns declared on a `through` (an attach instant at least).
+  Five decisions come first: the declaration (`through` is a table name on
+  either side of the edge; an object form must be declared once or
+  identically); who writes a value (`link()` carries none, and the unit of
+  work, the capture journal, replication documents and live join rows carry
+  only the two keys; a database default such as `'now'` is the database's
+  transaction time, which a replay or a capture apply on another database does
+  not reproduce); what re-linking an existing pair does (an idempotent no-op
+  today: keep the first value or refresh it); how `introspectModel` tells a
+  join table with a third column from an entity (it reads exactly two
+  foreign-key columns as one); and the migration strategy that adds or drops a
+  column on a join table (none exists).
+- [ ] **A rename link an earlier release planned leaves a join table's index
+  under its old name.** A link that renames an entity with a many-to-many
+  edge, planned before join tables were indexed over their second key column,
+  renames the table and its column but not the index. Applied to a join table
+  created with the index, SQLite's `migrate()` refuses it `JD0023` with
+  nothing changed, while PostgreSQL, which compares no shape after a link,
+  applies it and the next open refuses the table `JD0002` (MIGRATION-UPGRADE
+  §44). Wanted: a PostgreSQL link checks the migrated join tables' indexes as
+  SQLite's acceptance does, so it fails before it commits.
 - [ ] **A non-JSON external reached through a conditional, a computed operand
   or a nested phrase is read as `{}`.** An external the engine compares or
   equates, reached through name, index, wildcard, slice, filter and descendant

@@ -1925,12 +1925,14 @@ export interface ColumnUpgradeOptions {
 export interface ColumnUpgradePlan {
   /** A link from the model to itself; no step when the tables are current. */
   migration: ExactMigrationDocument;
-  /** Each definition the link rebuilds: `<table>.<column>` or `<table>.<constraint>`. */
+  /** Each definition the link rebuilds or creates: `<table>.<column>`, `<table>.<constraint>` or `<table>.<index>`. */
   report: { upgraded: string[] };
 }
 /** Plan the link that rebuilds the generated columns, index expressions and
  * interval CHECKs a database's collection tables hold in an earlier
- * release's definition, read from the catalog (MIGRATION-FORMAT §3).
+ * release's definition, and creates the index over the second key column a
+ * join table an earlier release created lacks, read from the catalog
+ * (MIGRATION-FORMAT §3).
  * A value on a synchronous connection, a promise on an asynchronous one. */
 export declare function planColumnUpgrade(connection: unknown, model: unknown,
   options?: ColumnUpgradeOptions): ColumnUpgradePlan | Promise<ColumnUpgradePlan>;

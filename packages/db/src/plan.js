@@ -1625,12 +1625,16 @@ function termsOf(value, negated) {
  * @returns {any}
  */
 export function mapHops(plan, fn) {
-  const predicate = (/** @type {any} */ pred) => {
+  // a hop's own filter can test a hop of its own (a join row's target row,
+  // see `planHop`), which reads its entity as the outer one does
+  const hop = (/** @type {any} */ read) => fn({ ...read, filter: predicate(read.filter) });
+  /** @param {any} pred @returns {any} */
+  const predicate = (pred) => {
     switch (pred?.p) {
       case 'and': case 'or': return { ...pred, items: pred.items.map(predicate) };
       case 'not': return { ...pred, item: predicate(pred.item) };
       case 'binding': return { ...pred, filter: predicate(pred.filter) };
-      case 'hop': case 'hopCount': return { ...pred, hop: fn(pred.hop) };
+      case 'hop': case 'hopCount': return { ...pred, hop: hop(pred.hop) };
       default: return pred;
     }
   };
@@ -1638,10 +1642,10 @@ export function mapHops(plan, fn) {
     ...plan,
     filters: plan.filters.map((/** @type {any} */ entry) => ({ ...entry, filter: predicate(entry.filter) })),
     order: plan.order === null ? null : plan.order.map((/** @type {any} */ term) =>
-      (term.hop === undefined ? term : { ...term, hop: fn(term.hop) })),
+      (term.hop === undefined ? term : { ...term, hop: hop(term.hop) })),
     project: plan.project === null ? null : { ...plan.project, leaves: plan.project.leaves.map((/** @type {any} */ leaf) =>
-      (leaf.count !== undefined ? { ...leaf, count: fn(leaf.count) }
-        : leaf.hop !== undefined ? { ...leaf, hop: fn(leaf.hop) } : leaf)) },
+      (leaf.count !== undefined ? { ...leaf, count: hop(leaf.count) }
+        : leaf.hop !== undefined ? { ...leaf, hop: hop(leaf.hop) } : leaf)) },
   };
 }
 
@@ -4178,15 +4182,27 @@ export function entityPathRef(node, slot, shape) {
  * bare or one singular member path of it. An ordering, a `$let`, a grouping,
  * a window, a second binding or a hop out of a hop is not a hop: an inner
  * ordering can raise where a statement could not.
+ *
+ * With `through`, for a site that reads only how many rows the hop yields or
+ * whether it yields one (a count, an existence test), the hop may instead
+ * return a second hop out of its binding that reaches at most one row
+ * ({@link hopKeyed}) and returns that row bare — a many-to-many hop's join
+ * row, then the target row it names. Its rows are then the hop's own rows
+ * that reach such a row, so the second hop becomes an existence test in the
+ * first one's filter, its end on the first binding left unbound (`null`, the
+ * row the filter is judged on): a join row whose target row is gone, which a
+ * database that did not enforce the foreign key can hold, is not counted,
+ * as the engine does not count it.
  * @param {any} inner - a `flwor` node
  * @param {Map<number, any>} outer - slot → the bindings the hop correlates with
  * @param {Map<string, any>} entities
  * @param {any} mapping
+ * @param {boolean} [through] - the site reads the hop's rows only to count or test them
  * @returns {{ hop: { entity: string, binding: string, edges: any[], filter: any },
  *   binding: any, member: any } | null} `member` is the returned path
  *   node, or `null` for the binding itself
  */
-function planHop(inner, outer, entities, mapping) {
+function planHop(inner, outer, entities, mapping, through = false) {
   if (inner?.kind !== 'flwor' || inner.forBindings.length !== 1 || inner.groupby !== null
     || inner.fold !== null || inner.orderby !== null || inner.letBindings.length
     || inner.asChecks !== null || inner.count !== null) return null;
@@ -4195,7 +4211,8 @@ function planHop(inner, outer, entities, mapping) {
   if (entity === null || source.window !== null || source.atSlot !== -1 || source.allowingEmpty) return null;
   const ret = inner.ret;
   const bare = ret.kind === 'var' && ret.external !== true && ret.slot === source.slot;
-  if (!bare && !(ret.kind === 'path' && ret.external !== true && ret.rootSlot === source.slot
+  const nested = through && ret.kind === 'flwor';
+  if (!bare && !nested && !(ret.kind === 'path' && ret.external !== true && ret.rootSlot === source.slot
     && ret.singular === true)) return null;
   const shape = entityShape(entities.get(entity), mapping.entities[entity]);
   const binding = { name: source.name, slot: source.slot, entity, shape };
@@ -4219,6 +4236,14 @@ function planHop(inner, outer, entities, mapping) {
     filter = conjoin(filter, planned.pred);
   }
   if (!edges.length) return null;
+  if (nested) {
+    const reached = planHop(ret, new Map([[binding.slot, binding]]), entities, mapping);
+    if (reached === null || reached.member !== null || !hopKeyed(reached.hop, mapping)) return null;
+    const unbound = (/** @type {any} */ end) => (end.binding === binding.name ? { ...end, binding: null } : end);
+    filter = conjoin(filter, { p: 'hop', hop: { ...reached.hop,
+      edges: reached.hop.edges.map((/** @type {any} */ edge) => ({ left: unbound(edge.left), right: unbound(edge.right) })) } });
+    return { hop: { entity, binding: binding.name, edges, filter }, binding, member: null };
+  }
   return { hop: { entity, binding: binding.name, edges, filter }, binding, member: bare ? null : ret };
 }
 
@@ -4273,7 +4298,7 @@ function planHopPredicate(node, outerBinding, entities, mapping) {
     || (existence && !isHop(node.args[hopAt]))) return null;
   const counted = isCount(node.args[hopAt]);
   const planned = planHop(counted ? node.args[hopAt].args[0] : node.args[hopAt],
-    new Map([[outerBinding.slot, outerBinding]]), entities, mapping);
+    new Map([[outerBinding.slot, outerBinding]]), entities, mapping, existence || counted);
   if (planned === null) return { refusal: refusal(node.name, ENTITY_REASONS.hopShape) };
   if (existence || counted) {
     const guarded = hopWithPresence(planned);
@@ -4346,7 +4371,7 @@ function entityProjectionTree(node, byName, entities, mapping, total = undefined
     if (child.kind === 'literal') return { p: 'lit', value: child.value };
     if (child.kind === 'op' && child.name === '$count' && child.args[0]?.kind === 'flwor') {
       // the rows of a related entity counted in the row's own statement
-      const planned = planHop(child.args[0], byName, entities, mapping);
+      const planned = planHop(child.args[0], byName, entities, mapping, true);
       const counted = planned === null ? null : hopWithPresence(planned);
       if (counted === null || 'refusal' in counted) {
         blocked ??= counted === null ? ENTITY_REASONS.hopShape : counted.refusal.reason;

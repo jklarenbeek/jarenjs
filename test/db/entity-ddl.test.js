@@ -96,7 +96,7 @@ describe('golden entity DDL (SQLite)', () => {
       /PRIMARY KEY \("student", "course"\)\) STRICT$/);
   });
 
-  it('the join table carries two cascading foreign keys and a composite key', () => {
+  it('the join table carries two cascading foreign keys, a composite key and an index over its second column', () => {
     const join = planJoinTable('Label_User', mapping.joinTables.Label_User,
       mapping, sqliteDialect);
     assert.deepStrictEqual(join.createSql, [
@@ -104,7 +104,11 @@ describe('golden entity DDL (SQLite)', () => {
       + '"Label_key" TEXT REFERENCES "Label" ("name") ON DELETE CASCADE, '
       + '"User_key" TEXT REFERENCES "User" ("id") ON DELETE CASCADE, '
       + 'PRIMARY KEY ("Label_key", "User_key")) STRICT',
+      'CREATE INDEX "Label_User_User_key" ON "Label_User" ("User_key")',
     ]);
+    // a table an earlier release created without the index opens as it is
+    assert.deepStrictEqual(join.expected.indexes,
+      [{ name: 'Label_User_User_key', unique: false, columns: ['User_key'], legacyAbsent: true }]);
     assert.deepStrictEqual(join.expectedForeignKeys.map((fk) => fk.references),
       ['Label', 'User']);
   });

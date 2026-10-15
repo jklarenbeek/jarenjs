@@ -3321,9 +3321,15 @@ profile predicate, once for each place the statement reads it — a value
 leaf reads it twice, for the member and for its type — and the leaves of
 the filter inside it count toward the dialect's term bound as many times as
 the statement carries them. A profile that refuses full-table scans sees the
-scan inside a subselect as it sees a join's. A hop that is none of the above
+scan inside a subselect as it sees a join's. A hop read only for its count or
+its existence may return a second hop out of its own row that reaches at most
+one row (its equalities cover that entity's key) and returns that row bare —
+a many-to-many hop's join row, then the target row it names (§10.7): the
+statement counts or tests the first hop's rows that reach such a row, so a
+join row whose target row is gone is not counted, as the engine does not
+count it. A hop that is none of the above
 stays in the engine, named by `explain()` and refused under `strict`
-(§10.6): a hop out of a hop, an inner ordering, a correlation by an
+(§10.6): a hop out of a hop (but for that count or test), an inner ordering, a correlation by an
 inequality, equalities across comparison families or over members that admit
 `null` (`entity.hopShape`), and a hop read as a value without the key proof
 (`entity.hopValue`). A hop with no correlation to the row is no hop of it: in
@@ -3847,8 +3853,9 @@ a number appears only where `capabilities.rowEstimates` is filled):
   server cannot hold (`bind.serverText`; a graph load, `JD0032`, and a native
   mutation, `JD0038`, refuse it; NATIVE-PLANS names the stored lone surrogate a
   native projection reads as U+FFFD);
-- a navigation hop out of shape (`entity.hopShape`): a hop out of a hop,
-  one with an inner `$orderby`, `$let`, grouping or window, one correlated
+- a navigation hop out of shape (`entity.hopShape`): a hop out of a hop
+  (but for a count or an existence test of one that reaches at most one row,
+  §10.1), one with an inner `$orderby`, `$let`, grouping or window, one correlated
   by an inequality, or with equalities across comparison families or over
   members that admit `null` (an uncorrelated hop in a `$where` belongs to
   no binding: `entity.conjunctBinding`); and a hop read as
@@ -4047,6 +4054,14 @@ by name.
 Because the root exists, a many-to-many **hop** lowers: a chain's
 `u.labels` becomes two links — the join row that names the membership,
 then the target row it names — instead of the `JL0105` refusal it was.
+Read only for its count or its existence (`u.labels.all().count()`,
+`u.labels.all().exists()`, and its negation, "the users without a label"),
+the hop is one native statement on SQLite and PostgreSQL: a correlated
+count or `EXISTS` over the join row, with the target row it names tested
+inside it (§10.1), so a join row a writer that did not enforce the foreign
+key left behind its deleted target is not counted, as the engine does not
+count it. Read as a value (`u.labels`, the array of related rows), it
+stays in the engine.
 A relation entry that does not name its join row's columns
 (`{ joinTable, ownColumn, ownKey, targetColumn, targetKey }` — §10.1)
 still refuses with that code, because there is then nothing to lower
@@ -4094,8 +4109,14 @@ source `{ kind: 'join table', name: 'Label_User', store }` under
 `STORE_SOURCE` (§10.1).
 
 The join table's primary key is its two columns, the sorted entity's
-first (`Label_key`, then `User_key`), and it has no other index: a filter
-on the leading column seeks, one on the other column has no index to seek.
+first (`Label_key`, then `User_key`), and the store indexes the other
+column (`Label_User_User_key`, named `<table>_<column>` as an entity's
+column index is, or the table's name clipped beside a short hash where
+PostgreSQL would truncate that name): a filter on either column seeks,
+and so do the cascade from the second entity and a hop from it. A join
+table an earlier release created has no second index; it opens, reads and
+writes as it is, and `planColumnUpgrade` plans the statement that creates
+the index (MIGRATION-FORMAT §3).
 A join table declares no column beyond its two keys, so a membership that
 carries data of its own (when it was attached, a role) is an entity of
 its own with two one-to-many edges.

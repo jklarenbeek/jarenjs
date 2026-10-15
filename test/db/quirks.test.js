@@ -279,8 +279,9 @@ describe('join tables are found by their endpoints', () => {
       { dialect: sqliteDialect, id: 'r' });
     assert.strictEqual(report.destructive, false);
     // the endpoint order flips (Item < Tag_Group, Tag_Group < Thing), so the
-    // join table is rebuilt in the fresh build's column order, rows copied
-    assert.deepStrictEqual(migration.steps.map((s) => s.kind), ['ddl', 'ddl', 'sql', 'ddl']);
+    // join table is rebuilt in the fresh build's column order, rows copied,
+    // and indexed over its second column last
+    assert.deepStrictEqual(migration.steps.map((s) => s.kind), ['ddl', 'ddl', 'sql', 'ddl', 'ddl']);
     assert.match(migration.steps[2].sql, /^INSERT INTO "Tag_Group_Thing" \("Tag_Group_key", "Thing_key"\) SELECT "Tag_Group_key", "Item_key" FROM "Item_Tag_Group"$/);
     await migrate({ driver: nodeDriver(), path }, [migration], { baseline: withUnderscore('Item'), model: withUnderscore('Thing') });
     const renamed = await openStore(withUnderscore('Thing'), { driver: nodeDriver(), path });

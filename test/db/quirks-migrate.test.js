@@ -393,6 +393,9 @@ describe('a join table takes its endpoints from the mapping, never from its name
       'ALTER TABLE "Team_Member" RENAME TO "Crew_Member"',
       'ALTER TABLE "Team_Member_Work_Item" RENAME TO "Crew_Member_Work_Item"',
       'ALTER TABLE "Crew_Member_Work_Item" RENAME COLUMN "Team_Member_key" TO "Crew_Member_key"',
+      // the index over the second column, under the name a fresh build gives it
+      'DROP INDEX IF EXISTS "Team_Member_Work_Item_Work_Item_key"',
+      'CREATE INDEX "Crew_Member_Work_Item_Work_Item_key" ON "Crew_Member_Work_Item" ("Work_Item_key")',
     ]);
     const file = fresh('join-underscore');
     const store = await openStore(FROM, { driver: nodeDriver(), path: file });
@@ -484,7 +487,7 @@ describe('a join table name given to another edge', () => {
     const { migration, report } = planModelMigration(from, to, { dialect: sqliteDialect, id: 'reuse' });
     assert.strictEqual(report.destructive, true, 'the memberships of the old edge are lost');
     assert.deepStrictEqual(migration.steps.filter((step) => step.kind === 'ddl').map((step) => step.sql.replace(/^(CREATE TABLE "Link").*$/s, '$1 …')),
-      ['DROP TABLE "Link"', 'CREATE TABLE "Link" …']);
+      ['DROP TABLE "Link"', 'CREATE TABLE "Link" …', 'CREATE INDEX "Link_C_key" ON "Link" ("C_key")']);
     const file = fresh('join-name-reused');
     const store = await openStore(from, { driver: nodeDriver(), path: file });
     await store.entity('A').create({ id: 'a1' });
@@ -529,6 +532,7 @@ describe('a join table follows its renamed endpoint in a link that also rebuilds
       'INSERT INTO "Article_Tag__rebuild" ("Article_key", "Tag_key") SELECT "Article_key", "Tag_key" FROM "Article_Tag"',
       'DROP TABLE "Article_Tag"',
       'ALTER TABLE "Article_Tag__rebuild" RENAME TO "Article_Tag"',
+      'CREATE INDEX "Article_Tag_Tag_key" ON "Article_Tag" ("Tag_key")',
     ]);
     const file = fresh('join-follows-rebuild');
     const store = await openStore(FROM, { driver: nodeDriver(), path: file });
@@ -561,6 +565,8 @@ describe('a join table follows its renamed endpoint in a link that also rebuilds
       'ALTER TABLE "Post" RENAME TO "Article"',
       'ALTER TABLE "Post_Tag" RENAME TO "Article_Tag"',
       'ALTER TABLE "Article_Tag" RENAME COLUMN "Post_key" TO "Article_key"',
+      'DROP INDEX IF EXISTS "Post_Tag_Tag_key"',
+      'CREATE INDEX "Article_Tag_Tag_key" ON "Article_Tag" ("Tag_key")',
     ]);
   });
 });

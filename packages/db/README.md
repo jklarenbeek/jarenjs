@@ -333,7 +333,9 @@ no continuation to emit.
   `JD2004` and memberships are still written through `link`/`unlink`.
   Because the root exists, a many-to-many hop on the chain lowers
   through it (two links: the membership, then the row it names) instead
-  of refusing.
+  of refusing, and one counted or tested for existence is one native
+  statement. The table's second key column carries an index of its own,
+  so a read by either key seeks.
 - **Storage is declarative.** Indexed paths become generated columns
   plus real indexes, typed from the collection's schema. Opening an
   existing database verifies the declared shape and refuses to alter

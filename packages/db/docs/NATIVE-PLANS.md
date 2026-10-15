@@ -36,8 +36,11 @@ bindings, a bare inner return or one singular member path of it, and supported
 scalar predicates. Such a hop counts, tests existence or emptiness, takes part
 in a comparison, and — where its equalities cover the inner entity's declared
 key — orders rows or fills a projected member; `$some` and `$every` over one
-entity array are one `EXISTS` (MODEL-FORMAT §10.1). Windows, grouping
-and ordering inside a correlation, a hop out of a hop, and arbitrary computed
+entity array are one `EXISTS` (MODEL-FORMAT §10.1). A hop counted or tested
+for existence may return a second hop that reaches at most one row (a
+many-to-many hop's join row, then its target row), which becomes an
+`EXISTS` inside the first. Windows, grouping
+and ordering inside a correlation, any other hop out of a hop, and arbitrary computed
 inner returns remain residual. Mandatory profile filters
 apply to correlated roots too. Scalar column projections preserve declared NULL
 policies. Codecs needing transformed representations remain decoded-row work.
