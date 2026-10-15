@@ -175,7 +175,7 @@ function compileArrayContainsBoolean(schemaObj, jsonSchema) {
   if (contains === true) {
     const addError = schemaObj.createErrorHandler(true, 'contains');
     const root = schemaObj.root;
-    const trackContains = root.usesUnevaluated && (schemaObj.options.draftVersion || 7) >= 2020;
+    const trackContains = root.usesUnevaluated && (schemaObj.declaredDraft ?? schemaObj.options.draftVersion ?? 7) >= 2020;
     return function validateArrayContainsTrue(data, dataPath) {
       const valid = validateCount != null
         ? validateCount(data.length, dataPath)
@@ -411,8 +411,9 @@ function compileArrayChildren(schemaObj, jsonSchema) {
   const root = schemaObj.root;
   const track = root.usesUnevaluated;
   const logFailed = annotatesFailedMembers(schemaObj);
-  // In draft 2020-12 contains produces item annotations; in 2019-09 it doesn't.
-  const trackContains = track && (schemaObj.options.draftVersion || 7) >= 2020;
+  // In draft 2020-12 contains produces item annotations; in 2019-09 it
+  // doesn't. The draft is the one the schema's own document declares.
+  const trackContains = track && (schemaObj.declaredDraft ?? schemaObj.options.draftVersion ?? 7) >= 2020;
   // Item paths are consumed by error reporting and by location readers
   // (`$data`, `data`, `$query`) below the items only.
   const extendPaths = extendsChildLocations(schemaObj, jsonSchema, ARRAY_CHILD_KEYWORDS);

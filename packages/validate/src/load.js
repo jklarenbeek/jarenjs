@@ -19,6 +19,7 @@ import { isBoolOrObjectClass } from './tools.js';
 import { storeSchemaIdsInMap, DEFAULT_ORIGIN } from './traverse.js';
 import { SchemaCompileError, describeCount, describeKind } from './errors.js';
 import { VALIDATOR_STATE } from './validator-state.js';
+import { detectSchemaDraft } from './schema-keywords.js';
 
 /** The default of the `maxLoads` option: the most documents one `compileAsync` call loads. */
 export const DEFAULT_MAX_LOADS = 100;
@@ -131,9 +132,11 @@ export async function compileAsync(validator, schema, options) {
     /** @type {[string, string][]} */
     const targets = [];
     try {
+      // The schema's document is read under the draft `compile` reads it
+      // under; a loaded one under the draft it declares, as `addSchema` reads it.
       storeSchemaIdsInMap(ids, base, doc, traverse, (target, location) => {
         targets.push([target.leftUri, prefix + location]);
-      });
+      }, undefined, ids === own ? detectSchemaDraft(doc) : null);
     }
     catch (e) {
       if (ids === own) throw e;

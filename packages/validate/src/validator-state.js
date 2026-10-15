@@ -2,14 +2,16 @@
 /**
  * @file What each `JarenValidator` holds, for the package's own subpath
  * modules: `@jarenjs/validate/load` reads which schema documents a
- * validator holds and the traversal options its compile walks with, without
- * widening the class's public surface.
+ * validator holds and the traversal options its compile walks with, and a
+ * compilation what the walks read at each schema's place, without widening
+ * the class's public surface.
  */
 
 /**
  * @typedef {object} ValidatorState
  * @property {Map<string, any>} schemas - The registered schemas by URI; a `null` entry is a reference target not resolved yet
  * @property {import('./traverse.js').TraverseOptions} traverse - The traversal options `compile` walks with
+ * @property {import('./traverse.js').SchemaPlaces} places - What the walks read at each registered schema's place
  */
 
 /** @type {WeakMap<object, ValidatorState>} */

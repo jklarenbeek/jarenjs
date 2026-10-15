@@ -18,6 +18,7 @@ import {
   resolveRefSchemaDeep,
   traverseOptionsFor,
   encodeJsonPointerPath,
+  decodeJsonPointerPath,
   TraverseOptions,
   createJsonPointer,
 } from './traverse.js';
@@ -309,6 +310,29 @@ export class ValidationOptions {
  */
 
 /**
+ * The draft a schema's place declares, as the walks that registered it read
+ * it: a reference target is compiled under the draft of the document that
+ * holds it. A flattened copy of a target is found by its location.
+ * @param {import('./traverse.js').SchemaPlaces|undefined} places - What the walks read
+ * @param {Map<string, any>} schemas - The compilation's schemas by URI
+ * @param {string} path - The schema's location
+ * @param {any} schema - The schema, or a copy of it
+ * @returns {number|null} The declared draft, or null when none is
+ */
+function placeDraft(places, schemas, path, schema) {
+  const drafts = places?.drafts;
+  if (drafts === undefined) return null;
+  let place = schema;
+  if (!drafts.has(place)) {
+    const pointer = path.indexOf('#/');
+    place = schemas.get(pointer === -1 ? path : path.slice(0, pointer + 1));
+    if (pointer !== -1)
+      for (const part of decodeJsonPointerPath(path.slice(pointer + 1))) place = place?.[part];
+  }
+  return drafts.get(place) ?? null;
+}
+
+/**
  * ValidationRoot manages the compilation and validation context for a schema.
  * It holds references to all schemas, formats, options, and compiled ValidationObjects.
  * @class
@@ -320,9 +344,12 @@ export class ValidationRoot {
    * @param {string} path - The URI path for this schema object
    * @param {object|boolean} schema - The JSON schema
    * @param {string} baseUri - The base URI for resolving relative refs
+   * @param {number|null} [parentDeclaredDraft] - The draft inherited from the
+   *   parent schema object; omitted for a reference target, which reads the
+   *   draft its own place declares
    * @returns {ValidationObject} The created ValidationObject
    */
-  static #createObject(self, path, schema, baseUri, parentDeclaredDraft = null) {
+  static #createObject(self, path, schema, baseUri, parentDeclaredDraft = undefined) {
     const objects = self.#objects;
     if (objects.has(path)) {
       const p = objects.get(path);
@@ -337,7 +364,8 @@ export class ValidationRoot {
     building.add(path);
     let obj;
     try {
-      obj = new ValidationObject(self, path, schema, baseUri, parentDeclaredDraft);
+      obj = new ValidationObject(self, path, schema, baseUri,
+        parentDeclaredDraft === undefined ? placeDraft(self.#places, self.#schemas, path, schema) : parentDeclaredDraft);
     }
     finally {
       building.delete(path);
@@ -390,6 +418,8 @@ export class ValidationRoot {
   #evalLog = new EvalLog();
   /** @type {object|null} The JarenValidator instance this compilation belongs to, or null when constructed standalone */
   #owner = null;
+  /** @type {import('./traverse.js').SchemaPlaces|undefined} What the owner's walks read at each schema's place */
+  #places = undefined;
   /** @type {Map<string, object>|null} Compiled 'errorMessage' specs by schema path; null when the schema set has none */
   #errorMessages = null;
   /** @type {UnitRecorder|null} The recorder of an output format's units (`@jarenjs/validate/output`), or null when this compilation records none */
@@ -584,6 +614,7 @@ export class ValidationRoot {
     this.#options = opts;
     this.#traverse = traverseOptionsFor(traverse, opts.propertyDependencies);
     this.#owner = owner;
+    this.#places = VALIDATOR_STATE.get(owner)?.places;
 
     this.#objects = new Map();
     this.#errors = [];
@@ -702,9 +733,11 @@ export class ValidationRoot {
    * @param {string} path - The URI path for this schema object
    * @param {object|boolean} schema - The JSON schema
    * @param {string} baseUri - The base URI for resolving relative refs
+   * @param {number|null} [parentDeclaredDraft] - Omitted for a reference
+   *   target, which reads the draft its own place declares
    * @returns {ValidationObject} The created ValidationObject
    */
-  createObject(path, schema, baseUri, parentDeclaredDraft = null) {
+  createObject(path, schema, baseUri, parentDeclaredDraft = undefined) {
     return ValidationRoot.#createObject(this, path, schema, baseUri, parentDeclaredDraft);
   }
 
@@ -752,7 +785,7 @@ export class ValidationRoot {
     // Resolve ref chain and check final ID cache
     const schemas = this.#schemas;
     const traverse = this.#traverse;
-    const { id, schema: root } = resolveRefSchemaDeep(schemas, path, schema, traverse);
+    const { id, schema: root } = resolveRefSchemaDeep(schemas, path, schema, traverse, undefined, this.#places);
 
     // Check if final ID is already compiled
     const finalCached = objects.get(id);
@@ -773,7 +806,7 @@ export class ValidationRoot {
    * @throws {Error} When the target is not loaded or the chain loops
    */
   referencedSchema(base, schema) {
-    return resolveRefSchemaDeep(this.#schemas, base, schema, this.#traverse);
+    return resolveRefSchemaDeep(this.#schemas, base, schema, this.#traverse, undefined, this.#places);
   }
 
   /**
@@ -785,7 +818,7 @@ export class ValidationRoot {
    */
   assertNoRefLoop(path, schema) {
     try {
-      resolveRefSchemaDeep(this.#schemas, path, schema, this.#traverse, this.#loopFree);
+      resolveRefSchemaDeep(this.#schemas, path, schema, this.#traverse, this.#loopFree, this.#places);
     }
     catch (e) {
       // A target that is not loaded is reported where it is used.
@@ -1654,6 +1687,8 @@ export class JarenValidator {
   #options = new ValidatorOptions();
   /** @type {TraverseOptions} The traversal options, carrying the `propertyDependencies` switch of the validation options */
   #traverse = new TraverseOptions();
+  /** @type {import('./traverse.js').SchemaPlaces} What the walks read at each registered schema's place */
+  #places = { drafts: new WeakMap(), refBases: new WeakMap(), keptRefs: new Set() };
 
   /**
    * Creates a new JarenValidator instance.
@@ -1670,7 +1705,7 @@ export class JarenValidator {
     this.#metaSchemas = new Map();
     this.#options = options;
     this.#traverse = traverseOptionsFor(options.traverse, options.validation?.propertyDependencies);
-    VALIDATOR_STATE.set(this, { schemas: this.#schemas, traverse: this.#traverse });
+    VALIDATOR_STATE.set(this, { schemas: this.#schemas, traverse: this.#traverse, places: this.#places });
   }
 
   /**
@@ -1708,16 +1743,22 @@ export class JarenValidator {
    * @param {boolean | object} schema
    * @param {object[] | undefined} schemas
    * @param {TraverseOptions} opts
+   * @param {import('./traverse.js').SchemaPlaces} [places] - Where the walks record what each place reads
    * @returns {{origin:string, map: Map}}
    */
-  static #traverseSchema(schema, schemas = undefined, fromMap = undefined, opts = new TraverseOptions()) {
+  static #traverseSchema(schema, schemas = undefined, fromMap = undefined, opts = new TraverseOptions(), places = undefined) {
     // initialize schema map for all ids and refs
     const schemaMap = new Map(fromMap);
+    // The schema's document is read under the draft `compile` reads it
+    // under: the one it declares, draft-07 when it declares none.
     const origin = storeSchemaIdsInMap(
       schemaMap,
       opts.origin,
       schema,
-      opts);
+      opts,
+      undefined,
+      places,
+      detectSchemaDraft(schema));
 
     // Then add the other reference schemas
     if (Array.isArray(schemas) && schemas.length > 0) {
@@ -1725,11 +1766,13 @@ export class JarenValidator {
         schemaMap,
         origin,
         ref,
-        opts));
+        opts,
+        undefined,
+        places));
     }
 
     // make sure all schemas are connected
-    restoreSchemaRefsInMap(schemaMap, opts);
+    restoreSchemaRefsInMap(schemaMap, opts, places);
 
     return { origin: origin, map: schemaMap };
   }
@@ -1800,7 +1843,7 @@ export class JarenValidator {
       if (!key.startsWith(prefix) || !isObjectClass(entry) || !hasSchemaReference(entry, '$ref'))
         continue;
       try {
-        resolveRefSchemaDeep(this.#schemas, key, entry, this.#traverse);
+        resolveRefSchemaDeep(this.#schemas, key, entry, this.#traverse, undefined, this.#places);
       }
       catch (e) {
         // A target not registered yet is reported where it is used.
@@ -1835,7 +1878,7 @@ export class JarenValidator {
     // Use a wrapper map to collect new entries, then merge them
     const newSchemas = new Map();
     try {
-      storeSchemaIdsInMap(newSchemas, baseUri, schema, scopedOpts);
+      storeSchemaIdsInMap(newSchemas, baseUri, schema, scopedOpts, undefined, this.#places);
     } catch (_e) {
       // Ignore errors for already-existing schemas at the root level
     }
@@ -2193,7 +2236,7 @@ export class JarenValidator {
    * // result = { valid: false, errors: [...] }
    */
   compile(schema, schemas = undefined) {
-    const { origin, map } = JarenValidator.#traverseSchema(schema, schemas, this.#schemas, this.#traverse);
+    const { origin, map } = JarenValidator.#traverseSchema(schema, schemas, this.#schemas, this.#traverse, this.#places);
 
     // Detect draft version from schema and update validation options
     const draftVersion = detectSchemaDraft(schema);

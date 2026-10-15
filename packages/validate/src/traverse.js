@@ -153,6 +153,19 @@ export function createJsonPointer(refUri, baseUri, opts = new JsonPointerOptions
 }
 
 /**
+ * What the walks of one validator read at each schema object's place, so the
+ * compiler reads the same.
+ * @typedef {object} SchemaPlaces
+ * @property {WeakMap<object, number|null>} drafts - The draft each place
+ *   declares (the nearest `$schema` on the way to it), `null` for none: a
+ *   reference target is compiled under it
+ * @property {WeakMap<object, string>} refBases - For a `$ref` beside an `$id`
+ *   that does not set its base (before 2019-09), the base it resolves against
+ * @property {Set<string>} keptRefs - The targets such a `$ref` names that its
+ *   `$id` would have placed elsewhere: a refusal to resolve one says why
+ */
+
+/**
  * Register a schema document's identifiers (`$id`/`id`, `$anchor`,
  * `$dynamicAnchor`) in `schemas`, and every `$ref` target it names as a
  * `null` placeholder that {@link restoreSchemaRefsInMap} resolves.
@@ -164,9 +177,15 @@ export function createJsonPointer(refUri, baseUri, opts = new JsonPointerOptions
  *   Offered the resolved target of every `$ref` and `$dynamicRef` the walk
  *   reaches, with the reference's location in the document as a URI
  *   fragment (`#/properties/a/%24ref`)
+ * @param {SchemaPlaces} [places] - Where to record what each schema
+ *   object's place reads, for the compiler to read the same
+ * @param {number|null} [defaultDraft] - The draft a place that declares none
+ *   is read under (`compile` reads its schema's document as draft-07 when it
+ *   declares none); `null` when unknown, as for a document registered before
+ *   any compile names its draft
  * @returns {string} The document's own id
  */
-export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPointerOptions(), onReference = undefined) {
+export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPointerOptions(), onReference = undefined, places = undefined, defaultDraft = null) {
   if (!isObjectClass(schema)) {
     const { id } = createJsonPointer(baseUri, undefined, opts);
     schemas.set(id, schema);
@@ -189,10 +208,12 @@ export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPoi
     const { obj, base, path, draft: inheritedDraft } = queue.shift();
     // The draft a document declares is inherited by everything below it.
     const draft = isStringType(obj.$schema) ? detectSchemaDraft(obj) : inheritedDraft;
+    places?.drafts.set(obj, draft);
 
     // Handle $id (draft 6+) or id (draft 4) for identifying subschemas
     const idKeyword = isStringType(obj.$id) ? obj.$id : isStringType(obj.id) ? obj.id : undefined;
-    if (isStringType(idKeyword) && !isStringWhiteSpace(idKeyword)) {
+    const hasId = isStringType(idKeyword) && !isStringWhiteSpace(idKeyword);
+    if (hasId) {
       const { id } = createJsonPointer(idKeyword, base, opts);
       if (!schemas.has(id))
         schemas.set(id, obj);
@@ -247,8 +268,19 @@ export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPoi
       onReference(createJsonPointer(obj.$dynamicRef, baseUri, opts), encodeJsonPointerPath(path, '$dynamicRef'));
 
     if (isStringType(obj.$ref) && !isStringWhiteSpace(obj.$ref)) {
-      const target = createJsonPointer(obj.$ref, baseUri, opts);
+      // Before 2019-09 a `$ref` replaces its schema object: an `$id` beside
+      // it names the object but does not set the base the reference
+      // resolves against.
+      const reading = draft ?? defaultDraft;
+      const keepsBase = hasId && reading !== null && reading < 2019;
+      const target = createJsonPointer(obj.$ref, keepsBase ? base : baseUri, opts);
       const ref = target.id;
+      if (keepsBase) places?.refBases.set(obj, base);
+      else places?.refBases.delete(obj);
+      // The latest walk to name a target decides whether a refusal to
+      // resolve it says why the `$id` was not its base.
+      if (keepsBase && createJsonPointer(obj.$ref, baseUri, opts).id !== ref) places?.keptRefs.add(ref);
+      else places?.keptRefs.delete(ref);
       if (!schemas.has(ref))
         schemas.set(ref, null);
       if (onReference !== undefined) onReference(target, encodeJsonPointerPath(path, '$ref'));
@@ -417,7 +449,16 @@ export function isRefCycleError(error) {
   return error instanceof RefCycleError;
 }
 
-export function restoreSchemaRefsInMap(schemas, opts = new JsonPointerOptions()) {
+/**
+ * Resolve every `null` placeholder the walks left in `schemas`.
+ * @param {Map<string, any>} schemas
+ * @param {JsonPointerOptions} [opts]
+ * @param {SchemaPlaces} [places] - What the walks read
+ * @throws {SchemaCompileError} `JK0008` for a target of a draft-07 `$ref`
+ *   whose `$id` does not set its base that nothing resolves (any other
+ *   unresolvable target throws an `Error`)
+ */
+export function restoreSchemaRefsInMap(schemas, opts = new JsonPointerOptions(), places = undefined) {
   for (const [id, item] of schemas.entries()) {
     if (item != null)
       continue;
@@ -430,7 +471,9 @@ export function restoreSchemaRefsInMap(schemas, opts = new JsonPointerOptions())
         schemas,
         id,
         { $ref: id },
-        opts
+        opts,
+        undefined,
+        places
       );
 
       if (finalSchema == null)
@@ -446,9 +489,20 @@ export function restoreSchemaRefsInMap(schemas, opts = new JsonPointerOptions())
     } catch (_e) {
       // If deep resolution fails (remote ref not loaded), fall back to shallow resolution
       // This preserves the original behavior for unresolved refs
-      const { schema } = resolveRefSchemaShallow(schemas, id, null, opts);
-      if (schema == null)
-        throw new Error(`Can not resolve schema for '${id}'`);
+      const kept = places?.keptRefs.has(id);
+      let schema = null;
+      try {
+        ({ schema } = resolveRefSchemaShallow(schemas, id, null, opts));
+      }
+      catch (e) {
+        if (!kept) throw e;
+      }
+      if (schema == null) {
+        const reason = `Can not resolve schema for '${id}'`;
+        throw kept
+          ? new SchemaCompileError('JK0008', `${reason}: a draft-07 $ref ignores the $id beside it; register that URI, or declare $schema 2019-09 or later`)
+          : new Error(reason);
+      }
 
       schemas.set(id, schema);
     }
@@ -499,10 +553,12 @@ export function traverseOptionsFor(traverse, propertyDependencies) {
  *   already walked to a schema without references (reaching one ends the walk
  *   early, and the answer is then not the flattened schema); every id of a
  *   chain that ends there is added
+ * @param {SchemaPlaces} [places] - What the walks read: the base a hop's
+ *   `$ref` resolves against when its `$id` does not set it
  * @returns {{id: string, schema: any}}
  * @throws {RefCycleError} when the chain comes back to an id it visited
  */
-export function resolveRefSchemaDeep(schemas, baseUri, refschema, opts = new TraverseOptions(), clean = undefined) {
+export function resolveRefSchemaDeep(schemas, baseUri, refschema, opts = new TraverseOptions(), clean = undefined, places = undefined) {
   if (!isObjectClass(refschema))
     return { id: baseUri, schema: refschema };
 
@@ -553,7 +609,7 @@ export function resolveRefSchemaDeep(schemas, baseUri, refschema, opts = new Tra
           return finish({ id, schema });
       }
 
-      queue.push({ item: schema, base: id });
+      queue.push({ item: schema, base: places?.refBases.get(schema) ?? id });
     } else {
       // No $ref in this item, merge as normal
       result = opts.mergeSchemas == true

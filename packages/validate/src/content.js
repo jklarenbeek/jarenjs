@@ -46,7 +46,9 @@ export function compileContentMediaType(schemaObj, jsonSchema) {
         return isValidJSON(data) || addError(data, dataPath);
       };
     }
-    else {
+    // Only an encoding the validator can decode is decoded; any other one
+    // leaves the content unread, as `contentEncoding` alone leaves it.
+    if (encoding === 'base64') {
       const decoder = new TextDecoder('utf-8', { ignoreBOM: true });
       return function validateBase64JsonContent(data, dataPath) {
         if (!isStringType(data)) return true;
@@ -58,7 +60,8 @@ export function compileContentMediaType(schemaObj, jsonSchema) {
     }
   }
 
-  // Unknown media type - treat as valid (per JSON Schema spec)
+  // An unknown media type, or JSON under an encoding the validator cannot
+  // decode, is not checked (per JSON Schema spec)
   return undefined;
 }
 

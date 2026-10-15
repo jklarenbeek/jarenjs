@@ -70,7 +70,7 @@ One flat namespace:
 
 | Producer | Keys | Params carried |
 |---|---|---|
-| validate keywords | the keyword itself: `type`, `required`, `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`, `multipleOf`, `minLength`, `maxLength`, `pattern`, `additionalProperties`, `minProperties`, `maxProperties`, `minItems`, `maxItems`, `uniqueItems`, `contains`, `minContains`, `maxContains`, `items`, `allOf`, `anyOf`, `oneOf`, `not`, `format`, `contentEncoding`, `contentMediaType`, `nullable`, `if`, `then`, `else`, `false schema`, `const`, `enum`, `dependentRequired`, `dependencies`, `unevaluatedProperties`, `unevaluatedItems`, `$query` | `type`/`types`; `missingProperty`; `limit` (+ `comparison` for the numeric bounds); `multipleOf`; `pattern`; `additionalProperty`; `format`; `encoding` (`contentEncoding`, and `contentMediaType` beside a declared `contentEncoding`, whose check decodes the string first); `mediaType`; `allowedValue` (`const`: the value it expected); `allowedValues` (`enum`: the list it allows); `property` + `missingProperty` (`dependentRequired` and the array form of `dependencies`: the present property and the first dependency the object lacks); `unevaluatedProperty` (the member name); `unevaluatedItem` (the index) |
+| validate keywords | the keyword itself: `type`, `required`, `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`, `multipleOf`, `minLength`, `maxLength`, `pattern`, `additionalProperties`, `minProperties`, `maxProperties`, `minItems`, `maxItems`, `uniqueItems`, `contains`, `minContains`, `maxContains`, `items`, `allOf`, `anyOf`, `oneOf`, `not`, `format`, `contentEncoding`, `contentMediaType`, `nullable`, `if`, `then`, `else`, `false schema`, `const`, `enum`, `dependentRequired`, `dependencies`, `unevaluatedProperties`, `unevaluatedItems`, `$query` | `type`/`types`; `missingProperty`; `limit` (+ `comparison` for the numeric bounds); `multipleOf`; `pattern`; `additionalProperty`; `format`; `encoding` (`contentEncoding`, and `contentMediaType` beside `contentEncoding: 'base64'`, whose check decodes the string first); `mediaType`; `allowedValue` (`const`: the value it expected); `allowedValues` (`enum`: the list it allows); `property` + `missingProperty` (`dependentRequired` and the array form of `dependencies`: the present property and the first dependency the object lacks); `unevaluatedProperty` (the member name); `unevaluatedItem` (the index) |
 | `basic` output | `subschema`: the error of a branch unit, "A subschema had errors." (rendered in English: an output format takes no catalog, so the packs' entry is not read yet) | none |
 | query runtime via `$query` | the `JQ2xxx` code of a failure that judges the instance (`JQ2001` to `JQ2005`, `JQ2008`; every other runtime refusal is thrown) | `{ code, docPath }` |
 | forms field checks | `form/` + the emitted keyword: `form/required`, `form/type`, `form/const`, `form/enum`, `form/minLength`, `form/maxLength`, `form/pattern`, `form/format`, `form/minimum`, `form/maximum`, `form/exclusiveMinimum`, `form/exclusiveMaximum`, `form/multipleOf`, `form/minItems`, `form/maxItems`, `form/uniqueItems`, `form/minProperties`, `form/maxProperties` | per branch: `limit`, `len`, `type`, `format`, `enumValues`, `constValue`, `pattern`, `multipleOf` |
@@ -296,6 +296,7 @@ failed validation, because a `false` under `not` would read as success.
 | `JK0005` | `SchemaCompileError` | `compileAsync`'s `loadSchema` returned something that is not a schema (an object or a boolean) |
 | `JK0006` | `SchemaCompileError` | One `compileAsync` call needs more document loads than its `maxLoads` option (default 100) |
 | `JK0007` | `SchemaCompileError` | `compileAsync` was given something that is not a `JarenValidator`, a `loadSchema` that is not a function, or a `maxLoads` that is not a positive safe integer |
+| `JK0008` | `SchemaCompileError` | A draft-07 `$ref` beside an `$id`, which does not set its base, resolves to no schema the validator holds: refused when a schema compiles |
 | `JK2001` | `SchemaRuntimeError` | Validation nests schema references deeper than `maxReferenceDepth` (default 256): refused where the bound is crossed |
 
 **`JK0001` — a loop that never reads the instance.** A `$ref` that leads
@@ -419,3 +420,18 @@ An argument `compileAsync` does not take is `JK0007` (`compileAsync takes a
 loadSchema(uri) function, got undefined`; `maxLoads must be a positive safe
 integer, got 0`), refused before anything is loaded.
 
+**`JK0008` — a draft-07 `$ref` beside an `$id`.** Before 2019-09 a `$ref`
+replaces the schema object it sits in, so an `$id` beside it names the
+object but does not set the base the reference resolves against: the
+reference resolves against the enclosing base, as `compile`, `addSchema`
+and `compileAsync` all read it (the schema being compiled reads `$ref` and
+the `$id` beside it as draft-07 does when it declares no `$schema`). When nothing the validator holds has that URI, the
+compilation is refused, naming the URI and the two repairs (register a
+schema at that URI, or declare `$schema` 2019-09 or later so the `$id` sets
+the base):
+
+```text
+JK0008: Can not resolve schema for 'https://github.com/jklarenbeek/name.json#': a draft-07 $ref ignores the $id beside it; register that URI, or declare $schema 2019-09 or later
+```
+
+From 2019-09 on the `$id` sets the base of the `$ref` beside it.

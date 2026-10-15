@@ -127,30 +127,24 @@ delete it or fix it.
   loader that serves that URI, which the README teaches and which answers
   right, so it waits on a decision to change the default (a minor with an
   upgrade sentence).
-- [ ] **A `$ref` target loses its document's declared draft.** `{ $schema:
-  2019-09, $defs: { t: { prefixItems: [{ type: 'integer' }] } }, $ref:
-  '#/$defs/t' }` accepts `[5]` and rejects `['5']`: the target is compiled
-  with no declared draft, so it reads `prefixItems` that 2019-09 ignores (the
-  same subschema compiled inline first keeps the draft: `{ $schema: 2019-09,
-  properties: { a: tuple, b: { $ref: '#/properties/a' } } }` ignores it under
-  `b`). Every declared-draft gate (`dependentRequired`, `minContains`,
-  `unevaluated*`, `propertyDependencies`) is affected; fixing it changes
-  collected errors (a minor). The normalizer already reads the target by its
-  place.
-- [ ] **A draft-07 `$id` beside `$ref` is honoured by the load walk and
-  ignored by compile.** `compileAsync(new JarenValidator(), { $defs: { a: {
-  $id: 'sub/a.json', $ref: 'name.json' } }, $ref: 'sub/a.json' }, ...)` loads
-  `https://github.com/jklarenbeek/sub/name.json`, and the returned validator
-  then throws an uncoded `Error` ("The root of reference: '$ref':
-  'https://github.com/jklarenbeek/name.json#', is not found in init-cache") on
-  its first call; a synchronous `compile` after `addSchema` of the same
-  document throws the same. Under 2020-12 both agree.
-- [ ] **`contentMediaType: 'application/json'` checks base64 whatever
-  `contentEncoding` names.** `{ contentEncoding: 'base32', contentMediaType:
-  'application/json' }` rejects a base32 JSON string (`'PMRGC5BCHI2H2==='`)
-  while `contentEncoding: 'base32'` alone is an unknown encoding that passes.
-  Accepting it changes collected errors (a minor).
-
+- [ ] **A registered document that declares no draft reads a draft-07 `$id`
+  beside `$ref` as a base.** `addSchema` (and a `compileAsync` load) walks a
+  document before any compile names its draft, so in `{ $id:
+  'https://held.test/root.json', $defs: { a: { $id: 'sub/a.json', $ref:
+  'name.json' } } }` it registers `https://held.test/sub/name.json` as the
+  target, while a draft-07 (or undeclared) schema referencing
+  `https://held.test/sub/a.json` compiles that `$ref` against the enclosing
+  base: with only `sub/name.json` registered, `compile` succeeds and the first
+  call throws an uncoded `Error` ("…/name.json#', is not found in
+  init-cache"). The schema being compiled, and any document declaring its
+  `$schema`, read alike; one reading here needs the registration walk deferred
+  to the compile that names the draft.
+- [ ] **An unresolvable reference is refused uncoded.** `compile({ $ref:
+  'nope.json' })` throws a plain `Error` ("Can not resolve schema for
+  '…/nope.json#'"); a pointer into a document nothing holds throws "The root
+  of reference … is not found in init-cache". Coding them (as `JK0008` codes
+  the draft-07 case) prefixes the message with the code, which the Play
+  validate-refs test pins.
 - [ ] **The output formats answer in English only.** A unit carries rendered
   text, so `localizeErrors` does not reach it and the packs' `subschema` entry
   is never read. A catalog on the output path (or units that keep `msgid` and

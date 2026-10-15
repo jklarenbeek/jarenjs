@@ -7,12 +7,14 @@
  * (`@jarenjs/validate/load`) loads what a schema references: a document the
  * loader fails to load (`JK0004`), one that is not a schema (`JK0005`), a
  * compilation that needs more loads than its bound (`JK0006`) and an
- * argument it does not take (`JK0007`). When a validator runs: a validation
- * that nests more schema references than `maxReferenceDepth` (default
- * {@link REFERENCE_DEPTH_CEILING}) is refused where the bound is crossed
- * (`JK2001`), before the host's call stack can overflow. Every refusal is
- * thrown, never folded into a `false` answer: under `not` a folded failure
- * would read as success.
+ * argument it does not take (`JK0007`). A draft-07 `$ref` whose sibling
+ * `$id` does not set its base, and which then resolves to no schema the
+ * validator holds, is refused when it compiles (`JK0008`). When a validator
+ * runs: a validation that nests more schema references than
+ * `maxReferenceDepth` (default {@link REFERENCE_DEPTH_CEILING}) is refused
+ * where the bound is crossed (`JK2001`), before the host's call stack can
+ * overflow. Every refusal is thrown, never folded into a `false` answer:
+ * under `not` a folded failure would read as success.
  */
 
 import { CodedError } from '@jarenjs/core/errors';
@@ -30,6 +32,7 @@ export const VALIDATE_CODES = Object.freeze({
   JK0005: 'compileAsync: a loaded document is not a schema (an object or a boolean)',
   JK0006: 'compileAsync: a compilation needs more schema loads than the maxLoads option',
   JK0007: 'compileAsync: its validator, loadSchema or maxLoads argument is not one it takes',
+  JK0008: 'a draft-07 $ref beside an $id resolves to no schema',
   JK2001: 'validation nests schema references deeper than the reference depth ceiling',
 });
 

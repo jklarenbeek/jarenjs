@@ -108,7 +108,7 @@ BigInt instance values are supported too: `maximum`/`minimum`/`exclusiveMaximum`
 ### 🔑 Keywords for content
 
 - contentEncoding | asserts in `draft7`, annotation-only from `draft2019` on (spec default), controlled by the `contentValidation` option
-- contentMediaType | same assertion defaults; `application/json` content is parse-checked
+- contentMediaType | same assertion defaults; `application/json` content is parse-checked, decoded first under `contentEncoding: 'base64'`; under an encoding the validator does not decode (`base32`, `BASE64`) it is not checked, as `contentEncoding` alone does not check it. *Upgrade: the check decoded the string as base64 whatever `contentEncoding` named, so `{ "contentEncoding": "base32", "contentMediaType": "application/json" }` rejected the base32 JSON document `'PMRGC5BCHI2H2==='`; collected errors lose those `contentMediaType` failures.*
 - ❌ contentSchema | annotation only (never asserted)
 
 Base64 JSON content validation decodes UTF-8 in both browser and Node runtimes;
@@ -325,11 +325,27 @@ See also:
 
 ### 👉 Vocabularies and cross-draft references
 
-A schema's `$schema` declaration is honored per document: referenced documents that declare a different draft are processed with that draft's keyword set (a draft-07 document ignores `dependentRequired`, `dependentSchemas`, `minContains`, `maxContains`, `unevaluatedProperties` and `unevaluatedItems`; a 2019-09 or draft-07 document ignores `prefixItems`, so its `items: false` forbids every item). A document that declares no `$schema` reads every keyword. Custom metaschemas with `$vocabulary` are respected — omitting the validation vocabulary turns validation keywords into annotations (`type` and `required` inside `items`, `minContains`/`maxContains` beside `contains`, and `maxItems`, which then no longer bounds the items `items` and `contains` look at), and declaring `format-assertion` turns format assertion on. *Upgrade: under a metaschema without the validation vocabulary, `{ "items": { "type": "string" } }` used to reject `[5]`, `minContains`/`maxContains` counted, and `{ "maxItems": 1, "items": { "properties": { "x": false } } }` accepted `[{}, { "x": 1 }]` because it stopped at the first item; a 2019-09 or draft-07 document with `prefixItems` beside `items: false` accepted any array, and a draft-07 document asserted `minContains`, `maxContains`, `unevaluatedProperties` and `unevaluatedItems`.*
+A schema's `$schema` declaration is honored per document: referenced documents that declare a different draft are processed with that draft's keyword set (a draft-07 document ignores `dependentRequired`, `dependentSchemas`, `minContains`, `maxContains`, `unevaluatedProperties` and `unevaluatedItems`; a 2019-09 or draft-07 document ignores `prefixItems`, so its `items: false` forbids every item). A document that declares no `$schema` reads every keyword. A `$ref` target is processed with the draft its own place declares — the nearest `$schema` on the way to it in the document that holds it, the referencing one or another — however it is compiled (`compile`, `addSchema` + `compile`, `compileAsync`). *Upgrade: a reference target was compiled with no declared draft, so `{ "$schema": "https://json-schema.org/draft/2019-09/schema", "$defs": { "t": { "prefixItems": [{ "type": "integer" }] } }, "$ref": "#/$defs/t" }` rejected `["5"]`, which the same `prefixItems` written inline accepts; the other declared-draft gates (`dependentRequired`, `dependentSchemas`, `minContains`, `maxContains`, `unevaluatedProperties`, `unevaluatedItems`, `propertyDependencies`) read a target the same way, so collected errors lose the failures of keywords the target's draft does not have. The keywords beside a target's own `$ref` assert by its document's draft too: a draft-07 target `{ "$ref": "#/definitions/y", "minimum": 5 }` referenced from a 2020-12 schema no longer asserts `minimum`, and a 2020-12 one referenced from a draft-07 schema now does; and a 2020-12 document referenced from a draft-07 schema, or from one that declares no draft, now counts the items its `contains` matches as evaluated for its `unevaluatedItems`.* Custom metaschemas with `$vocabulary` are respected — omitting the validation vocabulary turns validation keywords into annotations (`type` and `required` inside `items`, `minContains`/`maxContains` beside `contains`, and `maxItems`, which then no longer bounds the items `items` and `contains` look at), and declaring `format-assertion` turns format assertion on. *Upgrade: under a metaschema without the validation vocabulary, `{ "items": { "type": "string" } }` used to reject `[5]`, `minContains`/`maxContains` counted, and `{ "maxItems": 1, "items": { "properties": { "x": false } } }` accepted `[{}, { "x": 1 }]` because it stopped at the first item; a 2019-09 or draft-07 document with `prefixItems` beside `items: false` accepted any array, and a draft-07 document asserted `minContains`, `maxContains`, `unevaluatedProperties` and `unevaluatedItems`.*
 
 Modern reference chains preserve supported sibling assertions, including
 dependent schemas and dynamic references. Draft-07 retains its reference-only
-behavior, ignoring siblings beside `$ref`.
+behavior, ignoring siblings beside `$ref`: an `$id` beside a draft-07 `$ref`
+names the object but does not set the base the reference resolves against
+(the schema being compiled reads `$ref` and the `$id` beside it as draft-07
+does when it declares no `$schema`). `compile`,
+`addSchema` and `compileAsync` read it alike, and a reference that then
+resolves to nothing the validator holds is refused when it compiles
+(`JK0008`, naming the URI and the repairs). A document registered with
+`addSchema` (or loaded) that declares no `$schema` is registered before any
+compile names its draft, and its registration reads an `$id` beside `$ref`
+as setting the base, as from 2019-09 on: declare its `$schema` when such a
+document is referenced from a draft-07 schema. *Upgrade: the walk that registers a schema resolved such a
+`$ref` against the `$id`, so `compileAsync` loaded `sub/name.json` for
+`{ "$defs": { "a": { "$id": "sub/a.json", "$ref": "name.json" } }, "$ref":
+"sub/a.json" }` and the validator then threw an uncoded `Error` on its first
+call, and a pointer to that object (`#/$defs/a`) read `sub/name.json` where
+draft-07 reads `name.json` — with only `sub/name.json` held it answered, and
+it is now refused `JK0008`.*
 
 ## `propertyDependencies` — select a subschema by a member's value
 
