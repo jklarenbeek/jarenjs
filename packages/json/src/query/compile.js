@@ -19,7 +19,7 @@ import {
   runSegmentsV,
 } from '../segments.js';
 import { queryRuntimeError } from './messages.js';
-import { EMPTY, Seq, seqOf, appendItem, ebv, stableKeyString, itemRef } from './runtime.js';
+import { EMPTY, Seq, seqOf, appendItem, ebv, stableKeyString, stableKeyStringWithin, itemRef } from './runtime.js';
 import { CARD_ONE, CARD_MANY, hostFailureText, collectReadSlots } from './normalize.js';
 // The operator registry: every section-8 operator compiles through its
 // table entry (compileOp). Only referenced inside functions, so the
@@ -409,7 +409,14 @@ function compileLet(node) {
 // Equality itself stays exact: buckets key on `stableKeyString`, which
 // agrees with the `$eq` relation (`equalsJson`) on every JSON value
 // except NaN - and a NaN key is dropped on both sides, which is what
-// `$eq` already does, since NaN equals nothing.
+// `$eq` already does, since NaN equals nothing. A value with no key -
+// one nested past the key's bound or holding a cycle, which `$eq` can
+// still answer (a value equals itself) - is answered by the scan
+// instead, through the `$eq` itself over every inner item, for an outer
+// tuple whose key is missing. An inner item whose key is missing is
+// filed nowhere: `$eq` finds it equal to no value that has a key, and
+// raises nothing there, since the walk never goes deeper than the
+// keyed side.
 //
 // Every probe - this one and the screened ones below - also evaluates
 // what the scan evaluates WHEN the scan evaluates it, so it cannot
@@ -575,8 +582,8 @@ function probeBinding(node) {
 }
 
 // Decide whether `node`'s innermost $for can become a hash-join probe.
-// Returns { inner, outerKey, innerKey, residual, outerFirst, readsBoth }
-// or null.
+// Returns { inner, eq, outerKey, innerKey, residual, outerFirst,
+// readsBoth } or null.
 function planHashJoin(node) {
   const binding = probeBinding(node);
   if (binding === null)
@@ -614,7 +621,7 @@ function planHashJoin(node) {
     return null;
 
   return {
-    inner, outerKey, innerKey, residual: rest, outerFirst: uses1,
+    inner, eq, outerKey, innerKey, residual: rest, outerFirst: uses1,
     // `$eq` of two singletons reads both; otherwise it stops at an empty
     // first operand
     readsBoth: eq.args[0].card === CARD_ONE && eq.args[1].card === CARD_ONE,
@@ -792,14 +799,16 @@ function compileScreenedProbe(plan, next, where, wherePath) {
   return { drive: probeDriver(cell), probe };
 }
 
-// The key a bucket is filed under, or null when the value cannot take
-// part in an equality at all (empty, a multi-item sequence, or NaN).
+// The key a bucket is filed under; null when the value cannot take part
+// in an equality at all (empty, a multi-item sequence, or NaN); undefined
+// when it can but has no key (nested past the key's bound, or holding a
+// cycle), so only the scan's `$eq` can answer it.
 function joinKey(v) {
   if (v === EMPTY || v instanceof Seq)
     return null;
   if (typeof v === 'number' && v !== v)
     return null;
-  return stableKeyString(v);
+  return stableKeyStringWithin(v);
 }
 
 // The hash-join probe clause and its driver. The table is built at the
@@ -811,6 +820,8 @@ function compileJoinProbe(plan, next) {
   const srcGet = compileNode(plan.inner.expr);
   const innerKeyGet = compileUncounted(plan.innerKey);
   const outerKeyGet = compileUncounted(plan.outerKey);
+  const eqGet = compileNode(plan.eq);
+  const eqPath = plan.eq.docPath;
   const cell = { state: null };
 
   const build = (f) => {
@@ -822,8 +833,10 @@ function compileJoinProbe(plan, next) {
       const v = innerKeyGet(f);
       if (v !== EMPTY)
         someValue = true;
+      // an item without a key equals no outer key that has one: only an
+      // outer key without one, which the scan answers, can meet it
       const key = joinKey(v);
-      if (key === null)
+      if (key === null || key === undefined)
         continue;
       const bucket = table.get(key);
       if (bucket === undefined)
@@ -831,18 +844,30 @@ function compileJoinProbe(plan, next) {
       else
         bucket.push(items[i]);
     }
-    return { table, readsOuter: readsOuter(plan, items.length, someValue) };
+    return { items, table, readsOuter: readsOuter(plan, items.length, someValue) };
+  };
+
+  // the scan this probe stands for, for an outer tuple
+  const scan = (f, out, items) => {
+    for (let i = 0; i < items.length; i++) {
+      f[slot] = items[i];
+      if (ebv(eqGet(f), eqPath))
+        next(f, out);
+    }
   };
 
   const probe = (f, out) => {
     if (cell.state === null)
       cell.state = build(f);
-    if (!cell.state.readsOuter)
+    const state = cell.state;
+    if (!state.readsOuter)
       return; // the scan reads no outer key here: nothing matches or raises
     const key = joinKey(outerKeyGet(f));
     if (key === null)
       return;
-    const bucket = cell.state.table.get(key);
+    if (key === undefined)
+      return scan(f, out, state.items);
+    const bucket = state.table.get(key);
     if (bucket === undefined)
       return;
     for (let i = 0; i < bucket.length; i++) {

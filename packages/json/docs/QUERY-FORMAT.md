@@ -540,6 +540,21 @@ are one). A host that maintains groups outside the engine files each row
 under it, not under a JSON text such as `JSON.stringify`, which writes all
 three non-finite numbers as `null`.
 
+An item holding a cycle, or nested past 10000 levels of arrays and objects
+(the bound `$eq` compares to), has no key. A `$groupby` key, a `$distinct`
+item and `stableKeyString` refuse it with the codes `$eq` raises for the same
+values: a `CodedError` named `JsonCycleError` with code `JO2002`, whose
+`docPath` is the member that closes the cycle as a JSON Pointer into the item
+(`a circular reference cannot be keyed at /self`), or a `JsonDepthError` with
+code `JO2001` (`a value nested deeper than 10000 levels cannot be keyed`).
+The bound is fixed, so the refusal is the same on every host; a subtree shared
+without a cycle is keyed each time it is reached. An equijoin answered from a
+hash table answers an outer key without a key through `$eq` over every inner
+item, as the nested loop does, so `$eq`'s own answer stands (a value equals
+itself). *Upgrade: such an item used to escape as an uncoded `RangeError`, in
+a hash join too; one nested past the host stack but within 10000 levels now
+has a key.*
+
 ```json
 { "$for": { "b": "$.store.book[*]" },
   "$groupby": { "genre": "$b.category" },
@@ -1177,7 +1192,7 @@ clause/operator collision note.
 
 | Operator | Signature | Definition |
 |---|---|---|
-| `$distinct` | `{"$distinct": e}` | The distinct items of the operand, in first-occurrence order (`fn:distinct-values` adapted to D2 deep equality). Equality is the **grouping key relation** of §6.5: deep structural equality with `NaN` equal to itself and `-0` equal to `0` — `$distinct` and `$groupby` always agree. A `bigint` item (an integer past 2^53 read by `@jarenjs/josl`) equals only the same `bigint`, and a member held as `undefined` by a host-built row is a member, not an absent one. *Upgrade: every `bigint` shared one group with `{}`, and an `undefined` member raised a raw `TypeError`.* |
+| `$distinct` | `{"$distinct": e}` | The distinct items of the operand, in first-occurrence order (`fn:distinct-values` adapted to D2 deep equality). Equality is the **grouping key relation** of §6.5: deep structural equality with `NaN` equal to itself and `-0` equal to `0` — `$distinct` and `$groupby` always agree. A `bigint` item (an integer past 2^53 read by `@jarenjs/josl`) equals only the same `bigint`, and a member held as `undefined` by a host-built row is a member, not an absent one. An item holding a cycle or nested past 10000 levels is refused, `JO2002` at the member closing the cycle or `JO2001` (§6.5). *Upgrade: every `bigint` shared one group with `{}`, and an `undefined` member raised a raw `TypeError`; a cyclic or very deep item escaped as an uncoded `RangeError`.* |
 | `$reverse` | `{"$reverse": e}` | The operand's items in reverse order (`fn:reverse`). |
 | `$sort` | `{"$sort": e}` | The operand's items sorted ascending by value (`fn:sort`, natural order only — key-based sorting is `$orderby`'s job). Items MUST be all numbers or all strings; anything else, or a mix, is runtime error `JQ2005` (the `$orderby` key-type rules). `NaN` orders per §6.6: equal to itself, less than every other number. The sort is stable. |
 | `$head` | `{"$head": e}` | The first item, or empty (`fn:head`). |

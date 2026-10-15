@@ -31,13 +31,24 @@ delete it or fix it.
 (RFC 9535, passing the complete official compliance suite), JSON Patch
 (RFC 6902) and Merge Patch (RFC 7396). See
 [`packages/json/ARCHITECTURE.md`](../packages/json/ARCHITECTURE.md).
-- [ ] **Keyed query operators overflow on a cyclic or very deep value.**
-  `stableKeyString` (`$distinct` and the operators keyed by a value's content)
-  recurses on the host stack, so `compileJsonQuery({ $distinct: '$.self'
-  })(c)` with `c.self = c`, and `{ $distinct: '$' }` over 100000 nested
-  arrays, escape as an uncoded `RangeError` "Maximum call stack size
-  exceeded", where a descendant segment names the cycle `JQ2016` at `/self`
-  (or the depth `JQ2009`) and `stableStringify` says `JO2002` / `JO2001`.
+- [ ] **Geometry operators overflow on cyclic or very deep coordinates.**
+  `$bbox`, `$area`, `$centroid`, `$length`, `$distance`, `$within`,
+  `$bbox-intersects` and `$geohash` walk coordinates on the host stack
+  (`bboxOf`/`positionsOf` of `@jarenjs/core/geo`), so `compileJsonQuery({
+  $bbox: '$.g' })({ g })` with `g.coordinates` holding itself, or over 100000
+  nested arrays, escapes as an uncoded `RangeError`, where `$eq` refuses the
+  same values `JO2002` / `JO2001`.
+- [ ] **`semanticKey` refuses a cycle uncoded and overflows on a very deep
+  value.** `semanticKey(c)` with `c.self = c` throws an uncoded `TypeError`
+  (`a cycle at /self cannot be a cache identity`), and over 100000 nested
+  arrays an uncoded `RangeError`. The formula compile cache and the formula
+  batch's input keys call it, where `stableStringify` says `JO2002` /
+  `JO2001`.
+- [ ] **A heavily shared value exhausts the heap when keyed.**
+  `stableKeyString` writes a shared subtree each time it is reached, so
+  `$distinct` over 40 levels of `d = [d, d]` builds a key of 2^40 leaves and
+  the process aborts out of memory (the same at the previous release). `$eq`
+  answers the same reference at once.
 
 ## @jarenjs/json — JSLT
 

@@ -13,6 +13,7 @@
 // maintain the invariant; `assertSeqInvariant` checks it in tests.
 
 import { messageRef, queryRuntimeError } from './messages.js';
+import { JSON_WALK_DEPTH_CEILING, walkRefusal } from '../errors.js';
 
 /**
  * The empty sequence `()` (same singleton-sentinel pattern as
@@ -151,10 +152,63 @@ export function itemRef(v) {
  *     is a member, as it is to `$eq` (`equalsJson`) and to the async
  *     operators' `semanticKey`, and is not the same row as one without it.
  *
+ * A value is keyed on the host's call stack to 256 levels of nesting and
+ * on its own stack past them, so the bound is the same on every host:
+ * past 10000 levels, the bound `equalsJson` compares to (`$eq`), it is
+ * refused with a `JsonDepthError` `JO2001` (`a value nested deeper than
+ * 10000 levels cannot be keyed`), and a value holding a cycle with a
+ * `JsonCycleError` `JO2002` whose `docPath` is the member that closes
+ * it, a JSON Pointer into `value` (`a circular reference cannot be keyed
+ * at /self`). A subtree shared without a cycle is keyed each time it is
+ * reached.
+ *
  * @param {any} value - a JSON item (not EMPTY, not a Seq)
  * @returns {string} a deterministic serialization for grouping
+ * @throws {CodedError} `JO2001` past 10000 levels of nesting, `JO2002` on
+ *   a cycle
  */
 export function stableKeyString(value) {
+  try {
+    return stableKeyAt(value, 1);
+  }
+  catch (error) {
+    throw error === KEY_CEILING ? walkRefusal('keyed', [value]) : error;
+  }
+}
+
+/**
+ * {@link stableKeyString}, or `undefined` for a value it refuses: for a
+ * caller that answers such a value another way.
+ * @param {any} value - a JSON item (not EMPTY, not a Seq)
+ * @returns {string | undefined}
+ */
+export function stableKeyStringWithin(value) {
+  try {
+    return stableKeyAt(value, 1);
+  }
+  catch (error) {
+    if (error === KEY_CEILING)
+      return undefined;
+    throw error;
+  }
+}
+
+// What the key walk throws past the bound: the caller holds the root it
+// needs to tell a cycle from a deep value.
+const KEY_CEILING = Object.freeze({ reached: JSON_WALK_DEPTH_CEILING });
+
+// The nesting keyed on the host's call stack, the fast path every
+// ordinary value takes; a value nested deeper continues on
+// `stableKeyWalk`, which keeps its own stack.
+const RECURSIVE_KEY_DEPTH = 256;
+
+/**
+ * The key of a value that holds nothing to walk, or `undefined` for one
+ * that does (an array, an object, or anything else read as an object).
+ * @param {any} value
+ * @returns {string | undefined}
+ */
+function leafKey(value) {
   switch (typeof value) {
     case 'string':
       return JSON.stringify(value);
@@ -167,16 +221,28 @@ export function stableKeyString(value) {
     case 'undefined':
       return 'undefined'; // a row member held as `undefined`: present, not absent
     default:
-      break;
+      return value === null ? 'null' : undefined;
   }
-  if (value === null)
-    return 'null';
+}
+
+/**
+ * The key of a value `depth` containers down from the root.
+ * @param {any} value
+ * @param {number} depth
+ * @returns {string}
+ */
+function stableKeyAt(value, depth) {
+  const leaf = leafKey(value);
+  if (leaf !== undefined)
+    return leaf;
+  if (depth > RECURSIVE_KEY_DEPTH)
+    return stableKeyWalk(value, depth);
   if (Array.isArray(value)) {
     let s = '[';
     for (let i = 0; i < value.length; i++) {
       if (i > 0)
         s += ',';
-      s += stableKeyString(value[i]);
+      s += stableKeyAt(value[i], depth + 1);
     }
     return s + ']';
   }
@@ -185,9 +251,59 @@ export function stableKeyString(value) {
   for (let i = 0; i < keys.length; i++) {
     if (i > 0)
       s += ',';
-    s += JSON.stringify(keys[i]) + ':' + stableKeyString(value[keys[i]]);
+    s += JSON.stringify(keys[i]) + ':' + stableKeyAt(value[keys[i]], depth + 1);
   }
   return s + '}';
+}
+
+/**
+ * The key of a container `depth` levels down, on an explicit stack of
+ * the containers still open, so the nesting it reaches is not the host's
+ * call stack; a container past {@link JSON_WALK_DEPTH_CEILING} throws
+ * `KEY_CEILING`, which the caller turns into its answer.
+ * @param {any} value - An array or object
+ * @param {number} depth
+ * @returns {string}
+ */
+function stableKeyWalk(value, depth) {
+  /** @type {{ value: any, keys: string[] | null, at: number }[]} */
+  const frames = [];
+  let s = '';
+  let next = value;
+  for (;;) {
+    const leaf = leafKey(next);
+    if (leaf !== undefined)
+      s += leaf;
+    else {
+      if (depth + frames.length > JSON_WALK_DEPTH_CEILING)
+        throw KEY_CEILING;
+      const keys = Array.isArray(next) ? null : Object.keys(next).sort();
+      s += keys === null ? '[' : '{';
+      frames.push({ value: next, keys, at: 0 });
+    }
+    // on to the next member, closing every container it finishes
+    for (;;) {
+      const frame = frames[frames.length - 1];
+      const size = frame.keys === null ? frame.value.length : frame.keys.length;
+      if (frame.at < size) {
+        if (frame.at > 0)
+          s += ',';
+        if (frame.keys === null)
+          next = frame.value[frame.at];
+        else {
+          const key = frame.keys[frame.at];
+          s += JSON.stringify(key) + ':';
+          next = frame.value[key];
+        }
+        frame.at++;
+        break;
+      }
+      s += frame.keys === null ? ']' : '}';
+      frames.pop();
+      if (frames.length === 0)
+        return s;
+    }
+  }
 }
 
 /**

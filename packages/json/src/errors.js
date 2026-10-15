@@ -7,6 +7,7 @@
 // class name must not leak into `error.name`.
 
 import { CodedError } from '@jarenjs/core/errors';
+import { locateCycle } from '@jarenjs/core/object';
 
 /**
  * The deepest expression nesting the package compiles or parses: the
@@ -46,6 +47,28 @@ export const JSON_WALK_DEPTH_CEILING = 10000;
 export function walkTooDeep(verb) {
   return new CodedError('JsonDepthError', 'JO2001',
     `a value nested deeper than ${JSON_WALK_DEPTH_CEILING} levels cannot be ${verb}`);
+}
+
+/**
+ * The refusal of a walk that reached {@link JSON_WALK_DEPTH_CEILING}, the
+ * one `@jarenjs/core/object` raises there: a cycle in one of `roots` is
+ * named as one at the member that closes it (`locateCycle`), a
+ * `JsonCycleError` `JO2002`; a value without one is too deep (`JO2001`).
+ * The roots are searched only here, after the walk has refused, never on
+ * its way down.
+ * @param {string} verb - What could not be done, in the passive
+ * @param {any[]} roots - The values the walk started from
+ * @param {string[]} [names] - Each root's name, for a walk over several
+ * @returns {CodedError}
+ */
+export function walkRefusal(verb, roots, names = undefined) {
+  for (let i = 0; i < roots.length; i++) {
+    const at = locateCycle(roots[i]);
+    if (at !== undefined)
+      return new CodedError('JsonCycleError', 'JO2002',
+        `a circular reference${names === undefined ? '' : ` in ${names[i]}`} cannot be ${verb}`, at);
+  }
+  return walkTooDeep(verb);
 }
 
 /**

@@ -41,7 +41,6 @@ import {
   isJsonContainer,
   isJsonObject,
   isPlainOptions,
-  locateCycle,
   refuseUnknownMembers,
   setObjectMember,
   stableStringify,
@@ -55,7 +54,7 @@ import {
 import { NOTHING, scanArrayIndex } from './segments.js';
 
 import { CodedError } from '@jarenjs/core/errors';
-import { CodedDocPathError, JSON_WALK_DEPTH_CEILING, walkTooDeep } from './errors.js';
+import { CodedDocPathError, JSON_WALK_DEPTH_CEILING, walkRefusal, walkTooDeep } from './errors.js';
 
 import {
   makeState,
@@ -935,26 +934,6 @@ export function createJSONPatch(source, target, options = undefined) {
   catch (error) {
     throw diffRefusal(error, source, target);
   }
-}
-
-/**
- * The refusal of a walk that reached `JSON_WALK_DEPTH_CEILING`, the one
- * `@jarenjs/core/object` raises there: a cycle in one of `roots` is
- * named as one at the member that closes it (`locateCycle`), a
- * `JsonCycleError` `JO2002`; a value without one is too deep (`JO2001`).
- * @param {string} verb - What could not be done, in the passive
- * @param {any[]} roots - The values the walk started from
- * @param {string[]} [names] - Each root's name, for a walk over several
- * @returns {CodedError}
- */
-function walkRefusal(verb, roots, names = undefined) {
-  for (let i = 0; i < roots.length; i++) {
-    const at = locateCycle(roots[i]);
-    if (at !== undefined)
-      return new CodedError('JsonCycleError', 'JO2002',
-        `a circular reference${names === undefined ? '' : ` in ${names[i]}`} cannot be ${verb}`, at);
-  }
-  return walkTooDeep(verb);
 }
 
 const DIFFED_DOCUMENTS = ['the source', 'the target'];
