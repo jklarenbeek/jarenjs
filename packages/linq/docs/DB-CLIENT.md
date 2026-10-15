@@ -1030,9 +1030,9 @@ name and by the database its store reads, so every view of it over this
 database is the same source: the handle, `fromAsync(handle)`, the store's
 own collection or entity set, the synchronous twin under `store.sync`, the
 handle of a transaction client, and the same-named collection of another
-client opened over the same database (one SQLite file, or one PostgreSQL
-server, database and schema) — all of which answered right and register
-as before. Every view of a store carries its own name and the database it
+client opened over the same database (one SQLite file, one shared-cache
+in-memory SQLite database, or one PostgreSQL server, database and schema)
+— all of which answered right and register as before. Every view of a store carries its own name and the database it
 reads (`STORE_SOURCE`, MODEL-FORMAT §10.1), so a view the client never
 built is told the same way: a chain over another store's `users`, or over
 a `users` view a finished transaction handed out, is `JL0005` on
@@ -1045,7 +1045,18 @@ store's rows and answered from them, never from its own. An upgrade that
 did that on purpose builds the chain from this client's handle; one that
 meant the other database's rows registers it there. A private in-memory
 database has no name a second store could share, so two stores over
-in-memory databases are always two sources. The client's own `live()`,
+private in-memory databases are always two sources. Two stores over one
+shared-cache in-memory database (`file:NAME?mode=memory&cache=shared`,
+through the Node or Node worker driver) are one source: a chain from one
+used to be `JL0005` on the other, though it would have answered right,
+and answers that database's rows now. Two stores over one database that
+name it differently are still two sources, so a chain from one is
+`JL0005` on the other rather than answered from the wrong rows: one
+SQLite file through two hard links (which only a rollback journal mode
+opens twice; WAL, the default, fails the second open `JD0002`), and one
+PostgreSQL server through two addresses (a unix socket and TCP, or the
+IPv4 and the IPv6 loopback; MODEL-FORMAT §10.1 says why the server's own
+identifier does not name it). The client's own `live()`,
 and a transaction client's, refuse a chain over any entity of a store
 over another database the same way (`live() on the client was handed a
 chain built over entity 'Post' of another store`).

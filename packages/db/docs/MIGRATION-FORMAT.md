@@ -796,7 +796,7 @@ The run options include:
 
   | strategy | which assertions | what it costs |
   |---|---|---|
-  | provider | a collection `$count` that the existing query planner proves native without a typed intermediate schema | one aggregate result, with no assertion document fetch |
+  | provider | a collection `$count` that the existing query planner proves native without a typed intermediate schema, over a database whose text order is code point order (not a UTF-16 SQLite file) | one aggregate result, with no assertion document fetch |
   | per-document | an independent, unwindowed FLWOR over `$[*]`, with the default empty-sequence expectation | one keyset batch; fails at the first violation |
   | fold | `$count`, `$sum`, `$avg`, `$min`, `$max` over a partition-independent operand; sequence EBV of an independent FLWOR | one batch plus fixed accumulator state |
   | fold with bounds | `$distinct` over such an operand with an explicit positive `maxDistinct` | one batch plus unique items under cardinality and byte bounds |
@@ -815,7 +815,15 @@ The run options include:
   strategy. `onAssertionPlan(plan)` reports migration, step, collection,
   strategy, shape, reason and bounds before the assertion reads documents;
   Store dry-run query statements also expose strategy and reason. Provider
-  promotion reuses the query planner with no assumed typed columns. An
+  promotion reuses the query planner with no assumed typed columns. A
+  native count compares text by the SQLite file's BINARY order, which is
+  code point order only over UTF-8, so over a UTF-16 file (`migrate` runs
+  on one; a store refuses to open it) the `$count` takes its fold and
+  reads the documents instead. It used to take the native count there:
+  `'Ā' > 'ÿ'` counted no row on a UTF-16le file (the file orders U+0100
+  before U+00FF) and `'😀' < '\uFFFD'` one on UTF-16le and UTF-16be alike,
+  so an assertion that held refused its migration and one that did not
+  let it run. An
   aggregate other than a collection `$count` is not promoted to typed SQL,
   and that is by design: typing it needs a schema for the documents between
   transform steps, which neither the migration's baseline nor its target

@@ -548,13 +548,25 @@ export function textKeyDecoding(connection) {
  * @param {any} connection
  * @param {string} what - the sentence's subject: what compares text by code point
  * @param {(why: string) => never} fail
- * @returns {any} value-or-promise, `null` where there is nothing to check
+ * @returns {any} value-or-promise of nothing
  */
 export function requireCodePointText(connection, what, fail) {
-  if (typeof connection.dialect.introspect.pragma !== 'function') return null;
-  return chain(databaseEncoding(connection), (name) => {
-    if (String(name).toUpperCase() !== 'UTF-8') fail(`${what}, which a ${name} database does not; use a UTF-8 database`);
+  return chain(nonCodePointEncoding(connection), (name) => {
+    if (name !== null) fail(`${what}, which a ${name} database does not; use a UTF-8 database`);
   });
+}
+
+/**
+ * The SQLite database's text encoding when its BINARY order is not code
+ * point order (a UTF-16 file), `null` when it is (UTF-8) or the dialect has
+ * no pragma to read (PostgreSQL, whose collation it spells): what a native
+ * text comparison, order or page must not be trusted over.
+ * @param {any} connection
+ * @returns {any} value-or-promise of the encoding's name, or `null`
+ */
+export function nonCodePointEncoding(connection) {
+  if (typeof connection.dialect.introspect.pragma !== 'function') return null;
+  return chain(databaseEncoding(connection), (name) => (String(name).toUpperCase() === 'UTF-8' ? null : name));
 }
 
 /**

@@ -3116,10 +3116,29 @@ view, a transaction's and the synchronous twin, and on any surface spread
 from one. `store` names the database the store reads, compared by value:
 `sqlite:` and the file's canonical name as SQLite reports it (absolute,
 symbolic links resolved), or `postgres:` and the server address, port,
-database and schema the store's connection reads. Two stores over one
-database are one source and two databases are two. A private in-memory
-SQLite database has no name a second store could share: its stores carry
-a symbol of their own, so two of them are always two sources. A chain
+database and schema the store's connection reads. A shared-cache
+in-memory SQLite database (`file:NAME?mode=memory&cache=shared`, or
+`file::memory:?cache=shared`) opened by the Node or Node worker driver is
+held by this process's SQLite library, so every such store over the name
+reads it: `sqlite-memory:` and the URI's VFS parameter (`null` when it
+names none) and decoded name as JSON, `sqlite-memory:[null,"NAME"]`. Two
+stores over one database are one source and two databases are two. A
+private in-memory SQLite database has no name a second store could share:
+its stores carry a symbol of their own, so two of them are always two
+sources; so do the stores of a shared-cache URI through any other driver,
+which holds a database of its own under the name (the child process
+driver, a wasm module; `bun:sqlite` opens the URI as a file of that name,
+named by its path). Two stores over one database can still carry two
+names, and a chain from one is then refused on the other as from another
+database, never answered from the wrong rows: one SQLite file through two
+hard links (the second open fails `JD0002` in WAL mode, the default; a
+rollback journal mode opens both), and one PostgreSQL server reached
+through two addresses (over a unix socket the server reports no address,
+and over the IPv4 and the IPv6 loopback two different ones). The server's `system_identifier` does not name it
+instead: a streaming standby, a restored base backup or a copied data
+directory carry the primary's, so it would name two diverged servers one
+database. The stores of a shared-cache in-memory database used to carry
+a symbol each, as a private one's do. A chain
 built over a view reports the view, so a reader handed the chain can tell
 which rows its document names without having built the view itself:
 `@jarenjs/linq`'s handles refuse a chain over another collection or

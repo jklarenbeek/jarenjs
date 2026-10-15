@@ -1455,10 +1455,12 @@ function untrackedPageOptions(options) {
  * exactly when they read one database: PostgreSQL's server address and
  * port, database and schema (the dialect's migration identity statement);
  * SQLite's canonical filename (absolute, symbolic links resolved by the
- * engine). `null` where no second connection can name the database (a
- * private in-memory one) or the dialect gives no identity.
- * @param {any} connection @returns {any} value-or-promise of string or null */
-function databaseTarget(connection) {
+ * engine), or the name and VFS of a shared-cache in-memory database
+ * (`sharedMemoryName`). `null` where no second connection can name the
+ * database (a private in-memory one) or the dialect gives no identity.
+ * @param {any} connection @param {string} path - the path the driver opened
+ * @param {string} driverName @returns {any} value-or-promise of string or null */
+function databaseTarget(connection, path, driverName) {
   const { dialect } = connection;
   if (dialect.migration?.identity) {
     return useStatementOnce(connection, dialect.migration.identity, (statement) => chain(statement.get([]),
@@ -1466,7 +1468,52 @@ function databaseTarget(connection) {
         : `${dialect.name}:${JSON.stringify([row.address, row.port, row.database, row.schema])}`)));
   }
   if (dialect.name !== 'sqlite' || typeof dialect.introspect?.pragma !== 'function') return null;
-  return chain(sqliteDatabasePath(connection), (path) => (path === null ? null : `sqlite:${path}`));
+  return chain(sqliteDatabasePath(connection), (file) => (file !== null ? `sqlite:${file}`
+    : sharedMemoryName(path, driverName)));
+}
+
+/** The drivers whose `open()` hands a `file:` URI to the runtime's one
+ * SQLite library in this process, where every connection naming one
+ * shared-cache in-memory database reads it. Another driver's stores keep
+ * a token each: `node-process-sqlite` holds the database in a child
+ * process of its own and a wasm module is a library of its own (and
+ * `bun:sqlite` opens a URI as a file of that name, named by its path). */
+const SHARED_CACHE_DRIVERS = new Set(['node-sqlite', 'node-worker-sqlite']);
+
+/** The name every connection of this process shares a SQLite shared-cache
+ * in-memory database under: `file:NAME?mode=memory&cache=shared` (or
+ * `file::memory:?cache=shared`), the path percent-decoded, an empty or
+ * `localhost` authority dropped, the last of a repeated parameter winning,
+ * as the engine reads the URI; the VFS is part of the name. `null` for any other
+ * path, so a spelling this does not read stays a database of its own.
+ * @param {string} path @param {string} driverName @returns {string | null} */
+function sharedMemoryName(path, driverName) {
+  if (!SHARED_CACHE_DRIVERS.has(driverName) || !path.startsWith('file:')) return null;
+  let rest = path.slice(5);
+  const fragment = rest.indexOf('#');
+  if (fragment !== -1) rest = rest.slice(0, fragment);
+  // an authority (the engine opens only an empty one or `localhost`) is
+  // not part of the name
+  if (rest.startsWith('//')) {
+    const slash = rest.indexOf('/', 2);
+    if (slash === -1) return null;
+    rest = rest.slice(slash);
+  }
+  const query = rest.indexOf('?');
+  /** @type {Map<string, string>} */
+  const parameters = new Map();
+  let name;
+  try {
+    name = decodeURIComponent(query === -1 ? rest : rest.slice(0, query));
+    if (query !== -1) for (const pair of rest.slice(query + 1).split('&')) {
+      const equals = pair.indexOf('=');
+      if (equals > 0) parameters.set(decodeURIComponent(pair.slice(0, equals)), decodeURIComponent(pair.slice(equals + 1)));
+    }
+  }
+  catch { return null; }
+  const memory = parameters.get('mode') === 'memory' || name === ':memory:';
+  if (!memory || name === '' || parameters.get('cache') !== 'shared') return null;
+  return `sqlite-memory:${JSON.stringify([parameters.get('vfs') ?? null, name])}`;
 }
 
 /**
@@ -1474,10 +1521,11 @@ function databaseTarget(connection) {
  * source under: `{ kind: 'collection' | 'entity', name, store }`, the same
  * on the store's view, a transaction's, the synchronous twin and any
  * surface spread from them. `store` names the database the view reads,
- * compared by value: SQLite's canonical filename, PostgreSQL's server,
- * database and schema (as strings), so two stores over one database are
- * one source and two databases are two; a database no second store can
- * name (a private in-memory one) gets a symbol of the store's own. A
+ * compared by value: SQLite's canonical filename or a shared-cache
+ * in-memory database's name, PostgreSQL's server, database and schema (as
+ * strings), so two stores over one database are one source and two
+ * databases are two; a database no second store can name (a private
+ * in-memory one) gets a symbol of the store's own. A
  * chain built over a view reports it, so a reader handed the chain can
  * tell which rows its document names.
  */
@@ -2029,7 +2077,7 @@ export function openStore(model, options) {
   // the database every view of this store names in its STORE_SOURCE: the
   // one it reads (databaseTarget), set by the open sequence, so two stores
   // over one database are one source; a database no second store can name
-  // (in memory) keeps this token of the store's own
+  // (a private in-memory one) keeps this token of the store's own
   /** @type {string | symbol} */
   let storeIdentity = Symbol('@jarenjs/db store');
 
@@ -3075,7 +3123,7 @@ export function openStore(model, options) {
       };
       const opening = () => {
         refuseParallelReadsHere();
-        return chain(databaseTarget(connection), (target) => {
+        return chain(databaseTarget(connection, path, options.driver.name), (target) => {
           if (target !== null) storeIdentity = target;
           return openSequence();
         });

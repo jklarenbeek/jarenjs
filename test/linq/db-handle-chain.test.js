@@ -11,8 +11,8 @@
  * over rows in memory (a generator, a cursor or a queue too, never read to
  * count them), is `JL0005`, as `live()` answers it; a chain over
  * no rows (the `from([])` document builder), or over the same source from
- * any view of a store over this database (another client of one file or
- * schema included), is taken. A document is handed to the store untouched. A store run is SQLite always, PostgreSQL where
+ * any view of a store over this database (another client of one file,
+ * shared-cache in-memory database or schema included), is taken. A document is handed to the store untouched. A store run is SQLite always, PostgreSQL where
  * JAREN_PG_URL names a server.
  */
 
@@ -27,6 +27,7 @@ import { open } from '@jarenjs/linq/db';
 import * as m from '@jarenjs/linq/model';
 import { openStore } from '@jarenjs/db';
 import { nodeDriver } from '@jarenjs/db/node';
+import { nodeProcessDriver } from '@jarenjs/db/node-process';
 import { postgresDriver } from '@jarenjs/db/postgres';
 
 const url = process.env.JAREN_PG_URL;
@@ -364,6 +365,27 @@ for (const host of HOSTS) {
       finally {
         for (const opened of [first, second, elsewhere, memory]) await opened.close();
         rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('a chain over another client of one shared-cache in-memory database answers right (SQLite only)', { skip: host.postgres }, async () => {
+      const over = (/** @type {any} */ c) => c.collections.orders.where((/** @type {any} */ o) => o.total.gt(6)).orderBy((/** @type {any} */ o) => o.total);
+      const path = 'file:handle-chain-shared?mode=memory&cache=shared';
+      const first = await open(model, { driver: nodeDriver(), path, validator: null });
+      const second = await open(model, { driver: nodeDriver(), path, validator: null });
+      // a child process holds a database of its own under the same name
+      const child = await open(model, { driver: nodeProcessDriver(), path, validator: null });
+      try {
+        for (const [id, total] of [['o1', 5], ['o2', 12], ['o3', 30]]) await first.collections.orders.insert({ id, total });
+        assert.deepStrictEqual(await over(second).toArray(), OVER_SIX);
+        assert.deepStrictEqual(await first.collections.orders.execute(over(second)), OVER_SIX);
+        assert.deepStrictEqual(await rows(first.collections.orders.query(over(second))), OVER_SIX);
+        assert.deepStrictEqual(await over(child).toArray(), []);
+        assert.throws(() => first.collections.orders.execute(over(child)), (/** @type {any} */ e) => e.code === 'JL0005'
+          && e.message === anotherStore('execute', 'collection', 'orders'));
+      }
+      finally {
+        for (const opened of [first, second, child]) await opened.close();
       }
     });
 

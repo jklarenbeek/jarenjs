@@ -58,7 +58,7 @@ import { applyTableMigration } from './table-migration.js';
 import { withForeignKeySettings } from './foreign-key-scope.js';
 import { withMigrationConnection, checkMigrationTarget, physicalTargetOf, comparePhysicalTarget, verifyShadowOwnership, physicalObjectKey, migrationOwnerOf, lockMigration, migrationWriterSettings, preservationSchemaOf, verifyPreservation, checkPhysicalPreservation } from './migration-target.js';
 import { readSchema } from './introspect.js';
-import { verifyPhysical } from './physical.js';
+import { nonCodePointEncoding, verifyPhysical } from './physical.js';
 import { walkPhysicalRows, transformPhysicalRows } from './physical-transform.js';
 import {
   MIGRATION_VERSION, isPerDocumentAssertion, compileDocumentStep, checkMigrationDocument, checkReplacement,
@@ -3121,64 +3121,70 @@ function runSteps(connection, migration, options) {
         ? JSON.parse(row.doc)
         : mergeEntityRow(assertionMapping, row, 'doc'));
 
-      const provider = assertionMapping === null ? assertionProvider(current.assert, current.collection, operation.shape) : null;
-      options.onAssertionPlan?.({ ...operation.plan, ...(provider === null ? {} : {
-        strategy: 'provider', reason: 'the existing query planner proves a native count without assuming an intermediate schema',
-      }) });
-      if (provider !== null) {
-        const engine = createQueryEngine({
-          connection: { ...connection, prepare: (sql, metadata) => temporaryStatement(connection, sql, metadata) },
-          state: createQueryState(),
-          collection: { name: current.collection, schema: { type: 'object' }, docPath: '' },
-          physicalPlan: { table: current.collection, keyColumn: 'key', docColumn: 'doc', columnByCanonical: new Map() },
-        });
-        return chain(engine.execute(provider, { strict: true }), operation.accept);
-      }
+      const counted = assertionMapping === null ? assertionProvider(current.assert, current.collection, operation.shape) : null;
+      // the native count compares text by the file's BINARY order, which is
+      // code point order only over UTF-8: over a UTF-16 file the step reads
+      // its documents through the engine instead
+      return chain(counted === null ? null : nonCodePointEncoding(connection), (encoding) => {
+        const provider = encoding === null ? counted : null;
+        options.onAssertionPlan?.({ ...operation.plan, ...(provider === null ? {} : {
+          strategy: 'provider', reason: 'the existing query planner proves a native count without assuming an intermediate schema',
+        }) });
+        if (provider !== null) {
+          const engine = createQueryEngine({
+            connection: { ...connection, prepare: (sql, metadata) => temporaryStatement(connection, sql, metadata) },
+            state: createQueryState(),
+            collection: { name: current.collection, schema: { type: 'object' }, docPath: '' },
+            physicalPlan: { table: current.collection, keyColumn: 'key', docColumn: 'doc', columnByCanonical: new Map() },
+          });
+          return chain(engine.execute(provider, { strict: true }), operation.accept);
+        }
 
-      if (operation.fold !== null) {
-        // Consume operand items in row order through the query engine's
-        // shared state: regrouping floating-point batch totals is unsound.
-        let accumulated = operation.fold.start();
-        let folded = 0;
-        return chain(walkRows(connection, current.collection, options.batchSize, (rows) => {
-          accumulated = operation.fold.combine(accumulated, rows.map(readDoc));
-          folded += rows.length;
+        if (operation.fold !== null) {
+          // Consume operand items in row order through the query engine's
+          // shared state: regrouping floating-point batch totals is unsound.
+          let accumulated = operation.fold.start();
+          let folded = 0;
+          return chain(walkRows(connection, current.collection, options.batchSize, (rows) => {
+            accumulated = operation.fold.combine(accumulated, rows.map(readDoc));
+            folded += rows.length;
+            options.onProgress?.({
+              migration: migration.id,
+              collection: current.collection,
+              asserted: folded,
+            });
+          }, false, assertionMapping, options.check), () => operation.fold.finish(accumulated));
+        }
+
+        if (!operation.perDocument) {
+          // materializing: the answer needs every document at once. That is
+          // a cost, so it is bounded and the bound is crossed BEFORE the
+          // excess is held — the walk stops at the row that would break it
+          const guard = createAssertionBoundGuard(options.assertionBounds, current.collection,
+            `the assertion of migration '${migration.id}' step ${i}`);
+          const gathered = [];
+          return chain(walkRows(connection, current.collection, options.batchSize, (rows) => {
+            for (const row of rows) {
+              const doc = readDoc(row);
+              guard.admit(doc, typeof row.doc === 'string' ? row.doc : undefined);
+              gathered.push(doc);
+            }
+          }, false, assertionMapping, options.check), () => assertOver(gathered));
+        }
+        // per-document: walk in keyset batches like every other step,
+        // failing fast at the first batch that violates
+        let asserted = 0;
+        return walkRows(connection, current.collection, options.batchSize, (rows) => {
+          const docs = rows.map(readDoc);
+          assertOver(docs);
+          asserted += docs.length;
           options.onProgress?.({
             migration: migration.id,
             collection: current.collection,
-            asserted: folded,
+            asserted,
           });
-        }, false, assertionMapping, options.check), () => operation.fold.finish(accumulated));
-      }
-
-      if (!operation.perDocument) {
-        // materializing: the answer needs every document at once. That is
-        // a cost, so it is bounded and the bound is crossed BEFORE the
-        // excess is held — the walk stops at the row that would break it
-        const guard = createAssertionBoundGuard(options.assertionBounds, current.collection,
-          `the assertion of migration '${migration.id}' step ${i}`);
-        const gathered = [];
-        return chain(walkRows(connection, current.collection, options.batchSize, (rows) => {
-          for (const row of rows) {
-            const doc = readDoc(row);
-            guard.admit(doc, typeof row.doc === 'string' ? row.doc : undefined);
-            gathered.push(doc);
-          }
-        }, false, assertionMapping, options.check), () => assertOver(gathered));
-      }
-      // per-document: walk in keyset batches like every other step,
-      // failing fast at the first batch that violates
-      let asserted = 0;
-      return walkRows(connection, current.collection, options.batchSize, (rows) => {
-        const docs = rows.map(readDoc);
-        assertOver(docs);
-        asserted += docs.length;
-        options.onProgress?.({
-          migration: migration.id,
-          collection: current.collection,
-          asserted,
-        });
-      }, false, assertionMapping, options.check);
+        }, false, assertionMapping, options.check);
+      });
     }), (error) => stepFailed(migration, i, current.kind, error)), () => step(i + 1));
   };
   return step(0);
@@ -3665,6 +3671,8 @@ function runMigration(target, migrations, options, replay = undefined, shadowRep
         return chain(shadowRun, () => {
           if (options.dryRun === true) {
             const rendered = [], counts = {};
+            /** @type {string | null} */
+            let textEncoding = null;
             const collect = (i) => {
               if (i >= pending.length) return null;
               const migration = pending[i];
@@ -3696,7 +3704,8 @@ function runMigration(target, migrations, options, replay = undefined, shadowRep
                     migrationId: migration.id, compileJslt: compileJsltStylesheet, compileQuery: compileJsonQuery,
                     assertionBounds: runOptions.assertionBounds,
                   });
-                  const strategy = assertionProvider(migrationStep.assert, migrationStep.collection, operation.shape) === null ? operation.strategy : 'provider';
+                  const strategy = textEncoding !== null
+                    || assertionProvider(migrationStep.assert, migrationStep.collection, operation.shape) === null ? operation.strategy : 'provider';
                   rendered.push(`-- assert over '${migrationStep.collection}' (${strategy}; ${operation.reason})`);
                 }
               }
@@ -3719,8 +3728,13 @@ function runMigration(target, migrations, options, replay = undefined, shadowRep
               };
               return chain(count(0), () => collect(i + 1));
             };
-            return chain(collect(0), () => ({ dryRun: true, pending: pending.map((m) => m.id),
-              statements: rendered, counts, shadowValidated: options.shadow !== false }));
+            // the run counts natively only where text order is code point order
+            const asserts = pending.some((migration) => migration.steps.some((step) => step.kind === 'query'));
+            return chain(asserts ? nonCodePointEncoding(connection) : null, (encoding) => {
+              textEncoding = encoding;
+              return chain(collect(0), () => ({ dryRun: true, pending: pending.map((m) => m.id),
+                statements: rendered, counts, shadowValidated: options.shadow !== false }));
+            });
           }
           const applied = [];
           // the checks the chain's end makes: the model's real-data

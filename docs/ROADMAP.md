@@ -501,12 +501,15 @@ what each does is its own documentation's job
   follow the operators that hand an item through.
 - [ ] **A handle refuses a chain over one database a second store names
   differently.** A handle takes a chain over another store's view when both
-  read one database (one SQLite file by its canonical path, one PostgreSQL
-  address, port, database and schema), but a shared-cache in-memory SQLite
-  database, one file through two hard links, or one server through two
-  addresses (a socket and TCP) give the two stores different names, so the
-  chain is refused `JL0005` though it would answer right
-  ([DB-CLIENT §6](../packages/linq/docs/DB-CLIENT.md)).
+  read one database (one SQLite file by its canonical path, one shared-cache
+  in-memory database the Node drivers hold, one PostgreSQL address, port,
+  database and schema), but one file through two hard links (which only a
+  rollback journal mode opens twice) or one server through two addresses (a
+  socket and TCP, IPv4 and IPv6) give the two stores different names, so the
+  chain is refused `JL0005` though it would answer right. The server's
+  `system_identifier` is not a fix (a standby or a restored copy carries it);
+  a file needs an identity every driver reports alike ([DB-CLIENT
+  §6](../packages/linq/docs/DB-CLIENT.md)).
 - [ ] **A PostgreSQL statement at the term bound can still compile for
   seconds.** One statement carries at most 128 predicate terms
   ([POSTGRESQL](../packages/db/docs/POSTGRESQL.md)); a leaf is one term, an
@@ -534,11 +537,6 @@ what each does is its own documentation's job
   those leaves (a row-value membership for pairs, one external list for
   external `$ne`), or a weight for the fetch in the style of the
   external-operand weights.
-- [ ] **A migration over a UTF-16 file compares a query step's text terms by
-  BINARY.** `migrate` still runs on a UTF-16 file (physical-transform key pages
-  read it through its own decoder), and a `query` step's native text comparison
-  is code point only over UTF-8; refuse the file when a step reads text, or give
-  the comparison the dialect's code-point collation.
 - [ ] **A comparison, ordering or grouping over an open-container index path
   on PostgreSQL reads the guarded document and does not seek the index, and a
   digit name over a declared object container reads back as an index.** The
