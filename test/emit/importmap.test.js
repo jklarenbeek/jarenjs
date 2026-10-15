@@ -244,6 +244,74 @@ describe('buildImportMap — an installed tree, served unbundled', () => {
     finally { fs.rmSync(root, { recursive: true, force: true }); }
   });
 
+  it('skips an optional dependency that declares no JavaScript entry, a platform binary, and reports one anything requires', () => {
+    const root = installTree({
+      'node_modules/@x/tool/package.json': { name: '@x/tool', version: '1.0.0', exports: './index.js',
+        optionalDependencies: { '@x/tool-linux': '1.0.0', '@x/tool-js': '1.0.0', '@x/tool-exports': '1.0.0', '@x/tool-index': '1.0.0',
+          '@x/tool-absent': '1.0.0' } },
+      'node_modules/@x/tool/index.js': 'export const tool = 1;\n',
+      // no exports, no main, no index.js: a native binary for one os and cpu
+      'node_modules/@x/tool-linux/package.json': { name: '@x/tool-linux', version: '1.0.0', os: ['linux'], cpu: ['x64'], preferUnplugged: true },
+      'node_modules/@x/tool-linux/bin/tool': '\u007fELF\n',
+      'node_modules/@x/tool-js/package.json': { name: '@x/tool-js', version: '1.0.0', main: 'lib/main.js' },
+      'node_modules/@x/tool-js/lib/main.js': 'export const js = 1;\n',
+      'node_modules/@x/tool-exports/package.json': { name: '@x/tool-exports', version: '1.0.0', exports: './dist/x.js' },
+      'node_modules/@x/tool-exports/dist/x.js': 'export const x = 1;\n',
+      'node_modules/@x/tool-index/package.json': { name: '@x/tool-index', version: '1.0.0' },
+      'node_modules/@x/tool-index/index.js': 'export const index = 1;\n',
+    });
+    try {
+      const options = { packages: ['@x/tool'], root, prefix: '/v/' };
+      // the platform package maps nothing and reports nothing; the optional ones with an entry
+      // (exports, main, or index.js alone) map as before; the one not installed is passed over as before
+      const skipped = buildImportMap(options);
+      assert.deepStrictEqual(skipped.imports, { '@x/tool': '/v/@x/tool/index.js', '@x/tool-exports': '/v/@x/tool-exports/dist/x.js',
+        '@x/tool-index': '/v/@x/tool-index/index.js', '@x/tool-js': '/v/@x/tool-js/lib/main.js' });
+      assert.deepStrictEqual(skipped.files, ['/v/@x/tool-exports/dist/x.js', '/v/@x/tool-index/index.js', '/v/@x/tool-js/lib/main.js',
+        '/v/@x/tool/index.js']);
+      assert.deepStrictEqual(skipped.unresolved, []);
+      const run = runCli(root, ['--packages', '@x/tool', '--prefix', '/v/']);
+      assert.strictEqual(run.status, 0, run.stderr);
+      assert.strictEqual(run.stderr, '');
+      assert.deepStrictEqual(JSON.parse(run.stdout).imports, skipped.imports);
+      // named, or required by any dependent beside the optional one, it is reported as before
+      const named = buildImportMap({ ...options, packages: ['@x/tool', '@x/tool-linux'] });
+      assert.strictEqual(named.imports['@x/tool-linux'], '/v/@x/tool-linux/index.js');
+      assert.deepStrictEqual(named.unresolved, [{ specifier: './index.js', from: '@x/tool-linux/package.json' }]);
+      /** @param {string} file @param {string} content */
+      const write = (file, content) => {
+        fs.mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
+        fs.writeFileSync(path.join(root, file), content);
+      };
+      // a dependent met after the optional edge still requires it
+      write('node_modules/@x/needs/package.json', JSON.stringify({ name: '@x/needs', version: '1.0.0', exports: './index.js',
+        dependencies: { '@x/tool-linux': '1.0.0' } }));
+      write('node_modules/@x/needs/index.js', 'export {};\n');
+      const required = buildImportMap({ ...options, packages: ['@x/tool', '@x/needs'] });
+      assert.strictEqual(required.imports['@x/tool-linux'], '/v/@x/tool-linux/index.js');
+      assert.deepStrictEqual(required.unresolved, [{ specifier: './index.js', from: '@x/tool-linux/package.json' }]);
+      const failed = runCli(root, ['--packages', '@x/tool,@x/needs', '--prefix', '/v/']);
+      assert.strictEqual(failed.status, 1);
+      assert.match(failed.stderr, /^error: @x\/tool-linux\/package\.json imports \.\/index\.js, which the map does not resolve$/m);
+      write('node_modules/@x/needs/package.json', JSON.stringify({ name: '@x/needs', version: '1.0.0', exports: './index.js',
+        peerDependencies: { '@x/tool-linux': '1.0.0' } }));
+      assert.deepStrictEqual(buildImportMap({ ...options, packages: ['@x/tool', '@x/needs'] }).unresolved,
+        [{ specifier: './index.js', from: '@x/tool-linux/package.json' }]);
+      // an optional package that writes a main naming no file declares an entry it lacks: reported
+      write('node_modules/@x/tool/package.json', JSON.stringify({ name: '@x/tool', version: '1.0.0', exports: './index.js',
+        optionalDependencies: { '@x/tool-linux': '1.0.0', '@x/tool-broken': '1.0.0' } }));
+      write('node_modules/@x/tool-broken/package.json', JSON.stringify({ name: '@x/tool-broken', version: '1.0.0', main: 'gone.js' }));
+      assert.deepStrictEqual(buildImportMap(options).unresolved, [{ specifier: './index.js', from: '@x/tool-broken/package.json' }]);
+      // a served file that imports the skipped package is reported at the import
+      fs.rmSync(path.join(root, 'node_modules/@x/tool-broken'), { recursive: true });
+      write('node_modules/@x/tool/index.js', "import '@x/tool-linux';\nexport const tool = 1;\n");
+      const imported = buildImportMap(options);
+      assert.deepStrictEqual(imported.imports, { '@x/tool': '/v/@x/tool/index.js' });
+      assert.deepStrictEqual(imported.unresolved, [{ specifier: '@x/tool-linux', from: '@x/tool/index.js' }]);
+    }
+    finally { fs.rmSync(root, { recursive: true, force: true }); }
+  });
+
   it('passes over an export target that is a number or a boolean, mapping and exiting as before', () => {
     const root = installTree({
       'node_modules/@x/num/package.json': { name: '@x/num', version: '1.0.0', exports: { '.': './a.js', './n': 5, './b': { browser: true, default: './a.js' } } },

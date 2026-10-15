@@ -520,15 +520,41 @@ export function expandExports(manifest, options) {
  * @returns {string}
  */
 function legacyMain(main) {
-  if (typeof main !== 'string' || main === '') return './index.js';
+  if (!namesMain(main)) return './index.js';
   return main.startsWith('./') ? main : `./${main}`;
+}
+
+/** Whether a manifest's `main` names an entry Node reads: a non-empty string.
+ * @param {unknown} main @returns {main is string} */
+function namesMain(main) {
+  return typeof main === 'string' && main !== '';
+}
+
+/** Whether `path` is a file. @param {string} path */
+function isFile(path) {
+  return existsSync(path) && statSync(path).isFile();
+}
+
+/**
+ * Whether a package declares no JavaScript entry: no `exports`, no `main`,
+ * and no `index.js` for Node's fallback to find — Node answers
+ * `ERR_MODULE_NOT_FOUND` for its bare name. A platform-binary package (an
+ * `os`/`cpu` pair and a native file, reached through `optionalDependencies`)
+ * is one: it holds nothing an import map maps. A `main` naming no file is
+ * an entry declared and missing, not this.
+ * @param {string} dir @param {any} manifest
+ * @returns {boolean}
+ */
+function declaresNoEntry(dir, manifest) {
+  return manifest.exports == null && !namesMain(manifest.main) && !isFile(join(dir, 'index.js'));
 }
 
 /**
  * The `main` a package without `exports` serves from `dir`, found as Node's
  * legacy main resolution finds it: the first of `main`, `main.js` and
  * `main/index.js` that is a file, else `./index.js`, as Node falls back
- * to it (a package with no such file reports it unresolved). Node also
+ * to it (a package with no such file reports it unresolved, unless only
+ * `optionalDependencies` reach it and it declares no entry at all). Node also
  * tries `.json` and `.node` candidates; a browser map serves only
  * JavaScript, so they are not copied. A map cannot probe the file system
  * at load time as Node does, so the probe happens here, once, from the
@@ -539,9 +565,8 @@ function legacyMain(main) {
  */
 function legacyEntry(dir, main) {
   const written = legacyMain(main);
-  const isFile = (/** @type {string} */ path) => existsSync(join(dir, path)) && statSync(join(dir, path)).isFile();
   for (const candidate of [written, `${written}.js`, `${written}/index.js`]) {
-    if (isFile(candidate)) return candidate;
+    if (isFile(join(dir, candidate))) return candidate;
   }
   return './index.js';
 }
@@ -617,7 +642,9 @@ const RE_SCRIPT = /\.(?:m?js)$/;
  *
  * The closure follows each package's `dependencies`, `peerDependencies`
  * and `optionalDependencies`, a dependency that is not installed passed
- * over. Each package is found as Node finds it — `node_modules/<name>`
+ * over, and so is one only `optionalDependencies` reach that declares no
+ * JavaScript entry (no `exports`, no `main`, no `index.js`: a
+ * platform-binary package). Each package is found as Node finds it — `node_modules/<name>`
  * beside the dependent, then in each parent directory up to `root` —
  * starting from `root` for the packages named. Its `exports` resolve under
  * `conditions` with Node's precedence (`expandExports`), single-star
@@ -672,14 +699,17 @@ export function buildImportMap(options) {
   const chosen = new Map();
   /** name → every install directory met, by real path @type {Map<string, Set<string>>} */
   const met = new Map();
+  /** the names a package named, or a `dependencies` or `peerDependencies` edge, reaches @type {Set<string>} */
+  const required = new Set();
   /** @type {Array<{ name: string, dir: string }>} */
   const queue = [];
-  const visit = (/** @type {string} */ name, /** @type {string} */ from, /** @type {boolean} */ named) => {
+  const visit = (/** @type {string} */ name, /** @type {string} */ from, /** @type {boolean} */ named, /** @type {boolean} */ optional) => {
     const dir = locate(name, from, top);
     if (dir === null) {
       if (named) throw new TypeError(`buildImportMap: '${name}' is not installed under ${top}`);
       return;
     }
+    if (!optional) required.add(name);
     const real = realpathSync(dir);
     let paths = met.get(name);
     if (paths === undefined) met.set(name, paths = new Set());
@@ -690,14 +720,14 @@ export function buildImportMap(options) {
     if (current === undefined || dir.length < current.length) chosen.set(name, dir);
     queue.push({ name, dir });
   };
-  for (const given of packages) visit(given.includes('/') || given.startsWith('@') ? given : `@jarenjs/${given}`, top, true);
+  for (const given of packages) visit(given.includes('/') || given.startsWith('@') ? given : `@jarenjs/${given}`, top, true, false);
   /** name → its parsed manifest, for the chosen copies @type {Map<string, any>} */
   const manifests = new Map();
   while (queue.length > 0) {
     const { name, dir } = /** @type {{ name: string, dir: string }} */ (queue.shift());
     const manifest = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'));
     for (const field of DEPENDENCY_FIELDS) {
-      for (const dep of Object.keys(manifest[field] ?? {})) visit(dep, dir, false);
+      for (const dep of Object.keys(manifest[field] ?? {})) visit(dep, dir, false, field === 'optionalDependencies');
     }
     if (chosen.get(name) === dir) manifests.set(name, manifest);
   }
@@ -718,6 +748,8 @@ export function buildImportMap(options) {
   for (const name of names) {
     const dir = /** @type {string} */ (chosen.get(name));
     const manifest = manifests.get(name);
+    // reached only as an optional dependency, a package with no JavaScript entry maps nothing
+    if (!required.has(name) && declaresNoEntry(dir, manifest)) continue;
     const entries = expandExports(manifest.exports == null ? { ...manifest, main: legacyEntry(dir, manifest.main) } : manifest,
       { conditions, listFiles: (folder) => listDirectory(join(dir, folder)) });
     for (const entry of entries) {
@@ -857,7 +889,7 @@ function followFiles(name, dir, file, base, files, unresolved, bare) {
     const url = base + current;
     if (files.has(url)) continue;
     const path = join(dir, ...current.split('/'));
-    if (!existsSync(path) || !statSync(path).isFile()) {
+    if (!isFile(path)) {
       unresolved.push({ specifier: asked, from });
       continue;
     }

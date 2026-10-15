@@ -317,10 +317,23 @@ subpath:
   (`{ "browser": null, "default": "./node.js" }` serves a browser nothing),
   and a fallback array takes its first target Node takes;
 - a target Node refuses (outside `./`, or through `..` or `node_modules`) is reported, not mapped;
+- a target that is a number or a boolean is passed over like a condition that
+  does not match, so `{ "browser": true, "default": "./a.js" }` serves
+  `./a.js`. Node is stricter there: it raises `ERR_INVALID_PACKAGE_TARGET`
+  when that subpath is imported, while the package's other exports still load.
+  The map does not refuse it, since refusing would fail a manifest whose other
+  exports serve a working page;
 - a package without `exports` serves its `main`, read from the package root:
   the first of `main`, `main.js` and `main/index.js` that is a file, else its
   `index.js` (Node's `.json` and `.node` candidates are not copied, a browser
-  map serving only JavaScript).
+  map serving only JavaScript);
+- an optional dependency that declares no JavaScript entry — no `exports`, no
+  `main` and no `index.js`, as a platform-binary package (`os`, `cpu` and a
+  native file) declares none — maps nothing and is not reported. Named in
+  `--packages`, reached through `dependencies` or `peerDependencies` too, or
+  imported by a served file, it is reported unresolved as any other package is.
+  Upgrade note: such a package used to be reported as its missing `./index.js`,
+  and the command exited 1.
 
 `--prefix` is the URL `node_modules` is served under, so a dependency
 installed nested is served from where it sits. A package installed twice — a

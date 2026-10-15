@@ -1015,13 +1015,11 @@ still open is listed here, each with its reason.
 
 ## Benchmarks & tooling
 
-- [ ] **The import map passes over two things Node refuses or lacks.** An export
-  target that is a number or a boolean is passed over, where Node raises
-  `ERR_INVALID_PACKAGE_TARGET`; refusing it would make `jaren-emit importmap`
-  exit 1 on a manifest that builds a working map today, so it needs a deliberate
-  decision. And following `optionalDependencies` can reach a platform-binary
-  package with no JavaScript entry, whose `./index.js` is then reported
-  unresolved. Neither occurs in the suite's own closure.
+- [ ] **The import map serves a `main` that names a native binary.** A package
+  without `exports` whose `main` names a `.node` file (a napi-rs platform
+  package) is mapped to it and the file listed for the server, though a
+  browser can load only JavaScript; skipping or reporting it changes what
+  the command prints for such a tree, so it needs a decision.
 - [ ] **`vector.js`'s largest leg needs about 1.5 GB.** 50,000 × 768 holds one
   in-memory SQLite database of roughly a gigabyte beside a 153 MB resident
   matrix, and finishes in about ninety seconds; a memory-constrained runner
