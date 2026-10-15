@@ -226,3 +226,101 @@ describe('a hash join over a value it cannot key answers as the scan', () => {
       { value: [0, 1] });
   });
 });
+
+describe('a key over a heavily shared value', () => {
+  // `[d, d]` nested `levels` times around 0: 2^levels leaves, levels + 1
+  // distinct containers (built shared)
+  const shared = (levels) => {
+    /** @type {any} */
+    let d = 0;
+    for (let i = 0; i < levels; i++) d = [d, d];
+    return d;
+  };
+  // the same value with nothing shared: every container its own
+  const unshared = (levels) => {
+    /** @type {any[]} */
+    let row = new Array(2 ** levels).fill(0);
+    for (let i = 0; i < levels; i++) {
+      const up = new Array(row.length / 2);
+      for (let j = 0; j < up.length; j++) up[j] = [row[2 * j], row[2 * j + 1]];
+      row = up;
+    }
+    return row[0];
+  };
+  // the shared form of `shared(levels)`: the innermost pair in full, then
+  // each level's second member a back-reference to the one below it
+  const sharedForm = (levels) => {
+    let s = '[0,0]';
+    for (let ordinal = levels - 1; ordinal >= 1; ordinal--)
+      s = `[${s},\u0001${ordinal}]`;
+    return s;
+  };
+
+  it('writes a key past 2^20 characters in the shared form, the same for a shared and an unshared value', () => {
+    assert.equal(stableKeyString(shared(20)), sharedForm(20));
+    assert.equal(stableKeyString(unshared(20)), sharedForm(20));
+    assert.equal(sharedForm(40).length, 230);
+    assert.equal(stableKeyString(shared(40)), sharedForm(40));
+    assert.equal(stableKeyString(shared(1000)).length, 6890);
+  });
+
+  it('writes every key up to 2^20 characters out, shared or not', () => {
+    const text = JSON.stringify(unshared(18));
+    assert.equal(text.length, 1048573);
+    assert.equal(stableKeyString(shared(18)), text);
+    assert.equal(stableKeyString({ a: [1, 2], b: [1, 2] }), '{"a":[1,2],"b":[1,2]}');
+  });
+
+  it('writes a key past the bound with no container repeated as the text written out', () => {
+    const numbers = Array.from({ length: 2 ** 18 }, (_, i) => i);
+    const key = stableKeyString({ n: numbers });
+    assert.ok(key.length > 2 ** 20);
+    assert.equal(key, `{"n":[${numbers.join(',')}]}`);
+  });
+
+  it('holds the bound and the cycle refusal in the shared form', () => {
+    assert.equal(stableKeyString(shared(10000)).length, sharedForm(10000).length);
+    assert.throws(() => stableKeyString(shared(10001)), { code: 'JO2001' });
+    const loop = /** @type {any} */ ({ a: shared(20) });
+    loop.self = loop;
+    assert.throws(() => stableKeyString(loop), { code: 'JO2002', docPath: '/self' });
+    // a subtree keyed once within the bound is past it on a later, longer path
+    const deep = nest(9990, 0);
+    const later = nest(20, deep);
+    const wide = Array.from({ length: 2 ** 18 }, (_, i) => i);
+    assert.throws(() => stableKeyString([deep, later]), { code: 'JO2001' });
+    assert.throws(() => stableKeyString([wide, deep, later]), { code: 'JO2001' });
+    // within the bound it answers, the second reach a back-reference to the
+    // first (the root is container 0, `wide` 1, `deep` 2)
+    assert.equal(stableKeyString([wide, deep, nest(9, deep)]),
+      `[[${wide.join(',')}],${nestedKey(9990, '0')},${nestedKey(9, '\u00012')}]`);
+  });
+
+  it('answers $distinct over a shared value as over the same value unshared', () => {
+    const distinct = compileJsonQuery({ $distinct: '$.v[*]' });
+    const d = shared(40);
+    assert.deepEqual(distinct({ v: [d, d, shared(40), shared(39), d] }).length, 2);
+    const twenty = distinct({ v: [shared(20), unshared(20), shared(19)] });
+    assert.equal(twenty.length, 2);
+    assert.equal(stableKeyString(twenty[0]), sharedForm(20));
+    assert.equal(stableKeyString(twenty[1]), sharedForm(19));
+  });
+
+  it('groups a shared value with the same value unshared', () => {
+    const groups = compileJsonQuery({
+      $for: { r: '$.rows[*]' }, $groupby: { k: '$r.v' }, $return: { $count: '$r' },
+    });
+    const rows = (...values) => ({ rows: values.map((v) => ({ v })) });
+    assert.deepEqual(groups(rows(shared(20), shared(19), unshared(20), shared(20))), [3, 1]);
+    const d = shared(40);
+    assert.deepEqual(groups(rows(d, shared(40), d)), 3); // one group: a single item
+  });
+
+  it('joins a shared key as the scan does', () => {
+    const doc = { $for: { o: '$.a[*]', i: '$.b[*]' }, $where: { $eq: ['$o.k', '$i.k'] }, $return: ['$o.n', '$i.n'] };
+    const d = shared(40);
+    const data = { a: [{ n: 0, k: d }, { n: 1, k: 'x' }], b: [{ n: 2, k: 'x' }, { n: 3, k: d }] };
+    assert.deepEqual(compileJsonQuery(doc)(data), [[0, 3], [1, 2]]);
+    assert.deepEqual(compileJsonQuery({ ...doc, $let: { _z: 1 } })(data), [[0, 3], [1, 2]]);
+  });
+});

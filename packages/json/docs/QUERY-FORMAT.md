@@ -547,13 +547,22 @@ values: a `CodedError` named `JsonCycleError` with code `JO2002`, whose
 `docPath` is the member that closes the cycle as a JSON Pointer into the item
 (`a circular reference cannot be keyed at /self`), or a `JsonDepthError` with
 code `JO2001` (`a value nested deeper than 10000 levels cannot be keyed`).
-The bound is fixed, so the refusal is the same on every host; a subtree shared
-without a cycle is keyed each time it is reached. An equijoin answered from a
+The bound is fixed, so the refusal is the same on every host. A key longer than
+2^20 characters is written in a shared form, so an item that shares a subtree
+many times without a cycle costs its distinct subtrees, not every path to them:
+a container equal to one already written is written as `U+0001` and that one's
+ordinal among the containers written in full (the root is 0), in document
+order. Equal means the key's own equality, by content, never by reference: two
+items share a key exactly when their keys written out are equal, shared or
+not. An equijoin answered from a
 hash table answers an outer key without a key through `$eq` over every inner
 item, as the nested loop does, so `$eq`'s own answer stands (a value equals
 itself). *Upgrade: such an item used to escape as an uncoded `RangeError`, in
 a hash join too; one nested past the host stack but within 10000 levels now
-has a key.*
+has a key. An item that shares a subtree many times (40 levels of `d = [d, d]`)
+used to exhaust the heap and abort the process; it now has a key. A key past
+2^20 characters that repeats a container is a different string than before,
+and the groups it forms are the same.*
 
 ```json
 { "$for": { "b": "$.store.book[*]" },
@@ -1611,6 +1620,24 @@ piece of work this format does not yet do.
 `$intersects` that compared only bounding boxes would be a lie the first time
 two L-shaped regions shared a box and nothing else; real geometry-to-geometry
 intersection is overlay work and is deliberately absent.
+
+**An operand is walked to a bound, and refused with `$eq`'s codes.** A value
+nested past 100000 levels of arrays and objects is refused with a `CodedError`
+named `JsonDepthError`, code `JO2001` (`a value nested deeper than 100000
+levels cannot be walked as GeoJSON`) — ten times the 10000 `$eq` compares to,
+because these operators answered nests past 10000 levels before and still
+do — and one whose walk meets a cycle — coordinates,
+a `Feature` or a collection that holds itself — with a `JsonCycleError`,
+code `JO2002`, whose `docPath` is the member that closes it as a JSON Pointer
+into the operand, the pointer `$eq` names for the same value (`a circular
+reference cannot be walked as GeoJSON at /coordinates/0`; `$geo-simplify` says
+`simplified`). These are the codes `$eq` raises. A cycle in a member the walk
+does not read, such as `properties`, is never refused, and `$geo-text` answers
+empty for a `FeatureCollection` nested past the eight levels WKT can spell, one
+that holds itself among them. A spatial join screened by a box index raises or
+answers exactly as the scan it replaces. *Upgrade: such an operand used to
+escape as an uncoded `RangeError`; one nested past the host stack but within
+100000 levels now answers.*
 
 | Operator | Definition |
 |---|---|

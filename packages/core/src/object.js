@@ -6,8 +6,11 @@ import {
   isBooleanType,
   isTypedArray,
 } from './index.js';
-import { compareCodePoints, escapePointerToken, hashContent } from './string.js';
+import { compareCodePoints, hashContent } from './string.js';
 import { CodedError } from './errors.js';
+import { JSON_WALK_DEPTH_CEILING, WALK_CEILING, locateCycle, locateCycleIn, walkRefusal, walkTooDeep } from './walk.js';
+
+export { locateCycle };
 
 const hasOwn = Object.hasOwn;
 
@@ -117,97 +120,6 @@ export function equalsDeep(target, source) {
   return true;
 }
 
-// The deepest nesting `equalsJson` and `stableStringify` walk (and the
-// JSON Patch and Merge Patch diffs of `@jarenjs/json`, which hold the same
-// bound): past every nesting a default host stack could walk recursively,
-// so no value that answered before is refused, and fixed, so a refusal is
-// the same on every host.
-const JSON_WALK_DEPTH_CEILING = 10000;
-
-/**
- * The refusal of a value nested past `JSON_WALK_DEPTH_CEILING`.
- * @param {string} verb - What could not be done, in the passive
- * @returns {CodedError}
- */
-function walkTooDeep(verb) {
-  return new CodedError('JsonDepthError', 'JO2001',
-    `a value nested deeper than ${JSON_WALK_DEPTH_CEILING} levels cannot be ${verb}`);
-}
-
-/**
- * The refusal of a walk that reached `JSON_WALK_DEPTH_CEILING`. A walk
- * over a cycle reaches it too, so the roots are searched for one only
- * then, never on the way down: a cycle is named as one, located at the
- * member that closes it (`JsonCycleError` `JO2002`); a value without one
- * is as deep as the bound (`JO2001`).
- * @param {string} verb - What could not be done, in the passive
- * @param {any[]} roots - The values the walk started from
- * @param {string[]} [names] - Each root's name, for a walk over several
- * @returns {CodedError}
- */
-function walkRefusal(verb, roots, names = undefined) {
-  for (let i = 0; i < roots.length; i++) {
-    const at = locateCycle(roots[i]);
-    if (at !== undefined)
-      return new CodedError('JsonCycleError', 'JO2002',
-        `a circular reference${names === undefined ? '' : ` in ${names[i]}`} cannot be ${verb}`, at);
-  }
-  return walkTooDeep(verb);
-}
-
-/**
- * The JSON Pointer of the member that closes a cycle in `value`: the first
- * member whose value is a container already open above it, walking arrays
- * by index and object members in the sorted order `stableStringify` and
- * `canonicalizeJson` (`@jarenjs/json/canonical`) write them, so the three
- * name the same member. `undefined` for a value without a cycle, and for
- * one whose cycle lies past 10000 levels of nesting, the bound
- * `stableStringify` and `equalsJson` refuse at (`JO2001`).
- *
- * Every container is walked once: a member already searched without a
- * cycle is not searched again, so a value that shares a subtree many times
- * costs its size, not the number of its paths.
- * @param {unknown} value
- * @returns {string | undefined} The pointer, or `undefined` when there is none
- * @example
- * const doc = { items: [1] };
- * doc.items.push(doc);
- * locateCycle(doc); // '/items/1'
- * locateCycle({ a: [1, 2] }); // undefined
- */
-export function locateCycle(value) {
-  if (value === null || typeof value !== 'object')
-    return undefined;
-  /** @type {Set<object>} */
-  const open = new Set([value]);
-  /** @type {Set<object>} */
-  const searched = new Set();
-  // one frame per open container, the frames `stableStringify` opens:
-  // `keys` is null for an array, `at` the next member to search
-  const frames = [openStableFrame(value)];
-  for (;;) {
-    const frame = frames[frames.length - 1];
-    const size = frame.keys === null ? frame.value.length : frame.keys.length;
-    if (frame.at < size) {
-      const member = frame.value[frame.keys === null ? frame.at : frame.keys[frame.at]];
-      frame.at++;
-      if (member === null || typeof member !== 'object' || searched.has(member))
-        continue;
-      if (open.has(member))
-        return frames.map((f) => '/' + (f.keys === null ? String(f.at - 1) : escapePointerToken(f.keys[f.at - 1]))).join('');
-      if (frames.length >= JSON_WALK_DEPTH_CEILING)
-        return undefined;
-      open.add(member);
-      frames.push(openStableFrame(member));
-      continue;
-    }
-    open.delete(frame.value);
-    searched.add(frame.value);
-    frames.pop();
-    if (frames.length === 0)
-      return undefined;
-  }
-}
 
 /**
  * Structural equality of two JSON values per RFC 9535 section 2.3.5.2.2.
@@ -240,13 +152,11 @@ export function equalsJson(a, b) {
     return equalsJsonAt(a, b, 1);
   }
   catch (error) {
-    throw error === COMPARE_CEILING ? walkRefusal('compared', [a, b], COMPARED_VALUES) : error;
+    throw error === WALK_CEILING ? walkRefusal('compared', [a, b], COMPARED_VALUES) : error;
   }
 }
 
-// What `equalsJsonWalk` throws at the bound: the roots it needs to tell a
-// cycle from a deep value are `equalsJson`'s, which names the refusal.
-const COMPARE_CEILING = Object.freeze({ reached: JSON_WALK_DEPTH_CEILING });
+// The names `equalsJson`'s refusal gives its two roots.
 const COMPARED_VALUES = ['the first value', 'the second value'];
 
 // The nesting `equalsJson` compares on the host's call stack, the fast
@@ -301,7 +211,7 @@ function equalsJsonAt(a, b, depth) {
  * `equalsJson` for two containers `depth` levels down, on an explicit
  * stack of the pairs still to compare, so the nesting it reaches is not
  * the host's call stack; past `JSON_WALK_DEPTH_CEILING` it throws
- * `COMPARE_CEILING`, which `equalsJson` turns into its refusal.
+ * `WALK_CEILING`, which `equalsJson` turns into its refusal.
  * @param {any} a - An array or object
  * @param {any} b - An array or object
  * @param {number} depth
@@ -312,7 +222,7 @@ function equalsJsonWalk(a, b, depth) {
   const pending = [];
   for (;;) {
     if (depth > JSON_WALK_DEPTH_CEILING)
-      throw COMPARE_CEILING;
+      throw WALK_CEILING;
     const aIsArray = Array.isArray(a);
     if (aIsArray !== Array.isArray(b))
       return false;
@@ -529,7 +439,7 @@ export function stableStringify(value) {
 }
 
 /**
- * The frame `stableStringify` (and `locateCycle`) opens for one container.
+ * The frame `stableStringify` opens for one container.
  * @param {any} value - An array or object
  */
 function openStableFrame(value) {
@@ -594,20 +504,24 @@ const SEMANTIC_TOKENS = {
 };
 
 /**
- * Serialize one node of a semantic key, or throw when the value cannot
- * be keyed injectively.
+ * The refusal of a value `semanticKey` cannot key injectively.
+ * @param {string} what - The value, as the message names it
+ * @param {string} path - JSON-Pointer-ish trail, for the error message
+ * @returns {TypeError}
+ */
+function semanticRefusal(what, path) {
+  return new TypeError(
+    `semanticKey: ${what} at ${path === '' ? 'the root' : path} cannot be a cache identity`);
+}
+
+/**
+ * The token of a value that holds nothing to walk, `undefined` for an
+ * object, or a throw for a value that cannot be keyed injectively.
  * @param {*} value
  * @param {string} path - JSON-Pointer-ish trail, for the error message
- * @param {Set<object>} open - Ancestors on the current path (cycle guard)
- * @param {boolean} ordered - Object members in enumeration order rather
- *   than sorted
- * @returns {string}
+ * @returns {string | undefined}
  */
-function semanticToken(value, path, open, ordered) {
-  const refuse = (what) => {
-    throw new TypeError(
-      `semanticKey: ${what} at ${path === '' ? 'the root' : path} cannot be a cache identity`);
-  };
+function semanticLeaf(value, path) {
   if (value === null) return 'null';
   switch (typeof value) {
     case 'boolean': return value ? 'true' : 'false';
@@ -621,52 +535,156 @@ function semanticToken(value, path, open, ordered) {
       return Object.is(value, -0) ? SEMANTIC_TOKENS.negZero : String(value);
     case 'undefined': return SEMANTIC_TOKENS.undefined;
     case 'bigint': return `\u0000big${value}`;
-    case 'function': return refuse('a function');
-    case 'symbol': return refuse('a symbol');
-    default: break;
+    case 'function': throw semanticRefusal('a function', path);
+    case 'symbol': throw semanticRefusal('a symbol', path);
+    default: return undefined;
   }
-  const object = /** @type {object} */ (value);
-  if (open.has(object)) refuse('a cycle');
+}
+
+// What the walk throws on meeting a container already open above it. Its
+// trail is message text, not a pointer, so `semanticKey` builds the
+// refusal and locates the member that closes the cycle itself.
+const SEMANTIC_CYCLE = Object.freeze({ cycle: true });
+
+// The nesting keyed on the host's call stack, the fast path every
+// ordinary value takes; a value nested deeper continues on
+// `semanticWalk`, which keeps its own stack.
+const RECURSIVE_SEMANTIC_DEPTH = 256;
+
+/**
+ * Check one container the walk is about to open and mark it open: the
+ * member names in key order, or `null` for an array.
+ * @param {object} object
+ * @param {string} path - JSON-Pointer-ish trail, for the error message
+ * @param {Set<object>} open - Ancestors on the current path (cycle guard)
+ * @param {boolean} ordered - Object members in enumeration order rather
+ *   than sorted
+ * @returns {string[] | null}
+ */
+function openSemantic(object, path, open, ordered) {
+  if (open.has(object)) throw SEMANTIC_CYCLE;
   const proto = Object.getPrototypeOf(object);
   // a symbol-keyed member is data the serialization cannot show, so two
   // values differing only there would share an identity
   if (Object.getOwnPropertySymbols(object).length > 0)
-    refuse('a symbol-keyed member');
+    throw semanticRefusal('a symbol-keyed member', path);
   open.add(object);
-  let out;
   if (Array.isArray(object)) {
     // a subclass carries behavior the key cannot see
-    if (proto !== Array.prototype) refuse('an Array subclass instance');
-    const items = /** @type {any[]} */ (object);
+    if (proto !== Array.prototype) throw semanticRefusal('an Array subclass instance', path);
     // an own property beyond the elements would vanish positionally
-    for (const key of Object.keys(items)) {
+    for (const key of Object.keys(object)) {
       const index = Number(key);
-      if (!Number.isInteger(index) || index < 0 || index >= items.length || String(index) !== key)
-        refuse(`the extra array property ${JSON.stringify(key)}`);
+      if (!Number.isInteger(index) || index < 0 || index >= object.length || String(index) !== key)
+        throw semanticRefusal(`the extra array property ${JSON.stringify(key)}`, path);
     }
+    return null;
+  }
+  // Date, Map, Set, RegExp and every class instance stringify to `{}`
+  // through `Object.keys` — a whole family collapsing onto one key
+  if (proto !== Object.prototype && proto !== null)
+    throw semanticRefusal(`a ${object.constructor?.name ?? 'non-plain'} instance`, path);
+  // the member names are distinct, so their sequence alone spells the
+  // order: an ordered key stays injective with order as part of identity
+  return ordered ? Object.keys(object) : Object.keys(object).sort(compareCodePoints);
+}
+
+/**
+ * Serialize one node of a semantic key, `depth` containers down from the
+ * root, or throw when the value cannot be keyed injectively.
+ * @param {*} value
+ * @param {string} path - JSON-Pointer-ish trail, for the error message
+ * @param {Set<object>} open - Ancestors on the current path (cycle guard)
+ * @param {boolean} ordered - Object members in enumeration order rather
+ *   than sorted
+ * @param {number} depth
+ * @returns {string}
+ */
+function semanticToken(value, path, open, ordered, depth) {
+  const leaf = semanticLeaf(value, path);
+  if (leaf !== undefined)
+    return leaf;
+  if (depth > RECURSIVE_SEMANTIC_DEPTH)
+    return semanticWalk(value, path, open, ordered, depth);
+  const keys = openSemantic(value, path, open, ordered);
+  let out;
+  if (keys === null) {
     out = '[';
-    for (let i = 0; i < items.length; i++)
-      out += (i === 0 ? '' : ',') + semanticToken(items[i], `${path}/${i}`, open, ordered);
+    for (let i = 0; i < value.length; i++)
+      out += (i === 0 ? '' : ',') + semanticToken(value[i], `${path}/${i}`, open, ordered, depth + 1);
     out += ']';
   }
   else {
-    // Date, Map, Set, RegExp and every class instance stringify to `{}`
-    // through `Object.keys` — a whole family collapsing onto one key
-    if (proto !== Object.prototype && proto !== null)
-      refuse(`a ${object.constructor?.name ?? 'non-plain'} instance`);
-    // the member names are distinct, so their sequence alone spells the
-    // order: an ordered key stays injective with order as part of identity
-    const keys = ordered ? Object.keys(object) : Object.keys(object).sort(compareCodePoints);
     out = '{';
     for (let i = 0; i < keys.length; i++) {
       const key = keys[i];
       out += (i === 0 ? '' : ',') + JSON.stringify(key) + ':'
-        + semanticToken(/** @type {any} */ (object)[key], `${path}/${key}`, open, ordered);
+        + semanticToken(value[key], `${path}/${key}`, open, ordered, depth + 1);
     }
     out += '}';
   }
-  open.delete(object);
+  open.delete(value);
   return out;
+}
+
+/**
+ * {@link semanticToken} for a container `depth` levels down, on an
+ * explicit stack of the containers still open, so the nesting it reaches
+ * is not the host's call stack; a container past
+ * `JSON_WALK_DEPTH_CEILING` is refused with `JO2001`.
+ * @param {object} value - An array or object
+ * @param {string} path - JSON-Pointer-ish trail, for the error message
+ * @param {Set<object>} open - Ancestors on the current path (cycle guard)
+ * @param {boolean} ordered - Object members in enumeration order rather
+ *   than sorted
+ * @param {number} depth
+ * @returns {string}
+ */
+function semanticWalk(value, path, open, ordered, depth) {
+  /** @type {{ object: any, keys: string[] | null, at: number, path: string }[]} */
+  const frames = [];
+  let out = '';
+  /** @type {any} */
+  let next = value;
+  let nextPath = path;
+  for (;;) {
+    const leaf = semanticLeaf(next, nextPath);
+    if (leaf !== undefined)
+      out += leaf;
+    else {
+      if (depth + frames.length > JSON_WALK_DEPTH_CEILING)
+        throw walkTooDeep('a cache identity');
+      const keys = openSemantic(next, nextPath, open, ordered);
+      out += keys === null ? '[' : '{';
+      frames.push({ object: next, keys, at: 0, path: nextPath });
+    }
+    // on to the next member, closing every container it finishes
+    for (;;) {
+      const frame = frames[frames.length - 1];
+      const size = frame.keys === null ? frame.object.length : frame.keys.length;
+      if (frame.at < size) {
+        if (frame.at > 0)
+          out += ',';
+        if (frame.keys === null) {
+          next = frame.object[frame.at];
+          nextPath = `${frame.path}/${frame.at}`;
+        }
+        else {
+          const key = frame.keys[frame.at];
+          out += JSON.stringify(key) + ':';
+          next = frame.object[key];
+          nextPath = `${frame.path}/${key}`;
+        }
+        frame.at++;
+        break;
+      }
+      out += frame.keys === null ? ']' : '}';
+      open.delete(frame.object);
+      frames.pop();
+      if (frames.length === 0)
+        return out;
+    }
+  }
 }
 
 /**
@@ -704,12 +722,20 @@ function semanticToken(value, path, open, ordered) {
  * a present-but-`undefined` member from an absent one — every case
  * `stableStringify` silently folds together. Values that cannot be
  * keyed injectively are REFUSED with a `TypeError` rather than folded:
- * functions, symbols, cycles, and non-plain objects (a `Date`, `Map`,
- * `RegExp` or class instance, all of which serialize to `{}`), plus the
- * two members a serialization cannot show — a symbol key, and an own
- * array property that is not an element index. A caller that may hold such a
- * value must treat the refusal as "not cacheable" and compute afresh —
- * never as "reuse whatever shares the key".
+ * functions, symbols, and non-plain objects (a `Date`, `Map`, `RegExp`
+ * or class instance, all of which serialize to `{}`), plus the two
+ * members a serialization cannot show — a symbol key, and an own array
+ * property that is not an element index. A cycle is refused as a
+ * circular reference, a `JsonCycleError` `JO2002` located at the member
+ * that closes it, the first the key's own member order meets (`a
+ * circular reference cannot be a cache identity at /self`). Past 256
+ * levels the walk keeps its own stack, so it does not overflow the
+ * host's: a value nested deeper than 10000 levels, the bound
+ * `stableStringify` and `equalsJson` hold, is refused with a
+ * `JsonDepthError` `JO2001` (`a value nested deeper than 10000 levels
+ * cannot be a cache identity`). A caller that may hold such a value must
+ * treat the refusal as "not cacheable" and compute afresh — never as
+ * "reuse whatever shares the key".
  *
  * The identity covers OWN ENUMERABLE string-keyed properties, the same
  * surface JSON reads. Two values differing only in a non-enumerable
@@ -720,6 +746,8 @@ function semanticToken(value, path, open, ordered) {
  * @returns {string} the complete deterministic serialization
  * @throws {TypeError} When the value cannot be keyed injectively, or
  *   `options` is not a plain `{ ordered?: boolean }`
+ * @throws {CodedError} `JO2002` on a cycle, `JO2001` past 10000 levels of
+ *   nesting
  */
 export function semanticKey(value, options = undefined) {
   let ordered = false;
@@ -731,8 +759,21 @@ export function semanticKey(value, options = undefined) {
       throw new TypeError('semanticKey: options must be a plain { ordered?: boolean }');
     ordered = options.ordered === true;
   }
-  return semanticToken(value, '', new Set(), ordered);
+  try {
+    return semanticToken(value, '', new Set(), ordered, 1);
+  }
+  catch (error) {
+    if (error !== SEMANTIC_CYCLE)
+      throw error;
+    // searched in the walk's own member order, so the member named is the
+    // one the walk met
+    throw new CodedError('JsonCycleError', 'JO2002', 'a circular reference cannot be a cache identity',
+      locateCycleIn(value, ordered ? Object.keys : codePointKeys));
+  }
 }
+
+/** @param {object} object @returns {string[]} */
+const codePointKeys = (object) => Object.keys(object).sort(compareCodePoints);
 
 /**
  * True for a JSON object — a non-null object that is not an array.

@@ -126,11 +126,13 @@ describe('semanticKey', () => {
   it('refuses what it cannot key injectively instead of folding it to {}', () => {
     const cyclic = /** @type {any} */ ({ a: 1 });
     cyclic.self = cyclic;
-    for (const value of [new Date(0), new Map(), new Set(), /x/, cyclic,
+    for (const value of [new Date(0), new Map(), new Set(), /x/,
       () => {}, Symbol('s'), class {}, Object.assign([], { extra: 1 })]) {
       assert.throws(() => semanticKey(value), TypeError,
         `${String(value)} must be refused`);
     }
+    // a cycle is refused as the circular reference it is, located
+    assert.throws(() => semanticKey(cyclic), { code: 'JO2002', docPath: '/self' });
     // ...while genuinely plain data, including a null prototype, is fine
     assert.strictEqual(semanticKey(Object.assign(Object.create(null), { a: 1 })),
       semanticKey({ a: 1 }));
@@ -282,10 +284,11 @@ describe('semanticKey { ordered: true }', () => {
   it('refuses exactly what the default key refuses', () => {
     const cyclic = /** @type {any} */ ({ a: 1 });
     cyclic.self = cyclic;
-    for (const value of [new Date(0), new Map(), /x/, cyclic, () => {}, Symbol('s'),
+    for (const value of [new Date(0), new Map(), /x/, () => {}, Symbol('s'),
       Object.assign([], { extra: 1 }), { [Symbol('k')]: 1 }, { nested: [new Set()] }]) {
       assert.throws(() => semanticKey(value, ordered), TypeError, `${String(value)} must be refused`);
     }
+    assert.throws(() => semanticKey(cyclic, ordered), { code: 'JO2002', docPath: '/self' });
     assert.strictEqual(semanticKey(Object.assign(Object.create(null), { b: 1, a: 2 }), ordered), '{"b":1,"a":2}');
   });
 

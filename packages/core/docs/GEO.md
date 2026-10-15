@@ -112,6 +112,26 @@ mass), `containsPosition`, `geoDistance` (between representative
 positions), `ringsClosed`. Nothing here validates — malformed input
 yields null or 0 — because judgment lives one module over.
 
+The one refusal is the walk's bound. A value is walked to 100000
+levels of nesting, on the host's stack for the first 256 and on the
+walk's own past them, so a nest past the host stack answers. The bound
+is ten times the 10000 `equalsJson` holds: the recursive walk took a
+whole collection (two levels) or Feature per host frame and answered
+nests past 10000 levels on a default host stack, and no value it
+answered there is refused. Past 100000 levels the walk refuses with
+`JO2001` (`a value nested deeper than 100000 levels cannot be walked as
+GeoJSON`), and a
+cycle it follows — coordinates, a Feature or a collection that holds
+itself — with `JO2002` at the member `locateCycle` names, the pointer
+`equalsJson` gives for the same value (`a circular reference cannot be
+walked as GeoJSON at /coordinates/0`). `simplifyGeometry` refuses the
+same way (`... cannot be simplified`), and `geoJsonToWkt` through
+`geometryOf`. A cycle in a member no walk reads — `properties`, a
+foreign member — is never refused, and a cycle is searched for only once
+the bound is reached. *Upgrade: such a value used to escape as an
+uncoded `RangeError`; one nested past the host stack but within 100000
+levels now answers.*
+
 ## Validity — `valid.js`, `geohash.js`
 
 The one-call judgments backing the `geoFormats` group in
@@ -169,7 +189,9 @@ element gets a `Z` modifier, and anything else is written 2D with the
 third elements dropped, because one WKT geometry carries one modifier
 for all of its coordinates. The decision is made per tagged geometry, so
 a `GEOMETRYCOLLECTION` may mix 2D and 3D members — invalid WKT is never
-emitted.
+emitted. Collections nested more than eight deep have no text the
+reader accepts, so a FeatureCollection nested past them — one that holds
+itself among them — answers `null`, however deep it goes.
 
 **One direction round-trips and the other does not.**
 `wktToGeoJson(geoJsonToWkt(g))` returns `g`, and that is asserted over

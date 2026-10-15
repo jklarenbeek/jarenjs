@@ -159,8 +159,21 @@ export function itemRef(v) {
  * 10000 levels cannot be keyed`), and a value holding a cycle with a
  * `JsonCycleError` `JO2002` whose `docPath` is the member that closes
  * it, a JSON Pointer into `value` (`a circular reference cannot be keyed
- * at /self`). A subtree shared without a cycle is keyed each time it is
- * reached.
+ * at /self`).
+ *
+ * A key longer than 1048576 characters (2^20) is written in its shared
+ * form instead, so a value that shares a subtree many times, without a
+ * cycle, costs its distinct subtrees rather than every path to them:
+ * `[d, d]` nested 40 times is 2^40 leaves written out, and 41 subtrees
+ * shared. The shared form is the same text, except that a container
+ * equal to one already written is written as a back-reference, `\u0001`
+ * and the ordinal of that first one among the containers written in
+ * full (the root is 0), in document order. Equal is the key's own
+ * equality, decided by content and never by reference, so two values get
+ * the same key exactly when they did before, shared or not; only the
+ * text of a key past the bound differs. `\u0001` occurs in no key
+ * written out (`JSON.stringify` escapes it), so a back-reference cannot
+ * be read as a value.
  *
  * @param {any} value - a JSON item (not EMPTY, not a Seq)
  * @returns {string} a deterministic serialization for grouping
@@ -169,7 +182,7 @@ export function itemRef(v) {
  */
 export function stableKeyString(value) {
   try {
-    return stableKeyAt(value, 1);
+    return stableKeyOf(value);
   }
   catch (error) {
     throw error === KEY_CEILING ? walkRefusal('keyed', [value]) : error;
@@ -184,7 +197,7 @@ export function stableKeyString(value) {
  */
 export function stableKeyStringWithin(value) {
   try {
-    return stableKeyAt(value, 1);
+    return stableKeyOf(value);
   }
   catch (error) {
     if (error === KEY_CEILING)
@@ -196,6 +209,32 @@ export function stableKeyStringWithin(value) {
 // What the key walk throws past the bound: the caller holds the root it
 // needs to tell a cycle from a deep value.
 const KEY_CEILING = Object.freeze({ reached: JSON_WALK_DEPTH_CEILING });
+
+// The longest key written out; a longer one is written in the shared form.
+const KEY_TEXT_BOUND = 2 ** 20;
+
+// What the key walk throws once the key it writes out is past
+// `KEY_TEXT_BOUND`: the caller writes the shared form instead.
+const KEY_TOO_LONG = Object.freeze({ reached: KEY_TEXT_BOUND });
+
+/**
+ * The key of a value, written out or, past {@link KEY_TEXT_BOUND}, in the
+ * shared form; throws `KEY_CEILING` past the bound on nesting.
+ * @param {any} value
+ * @returns {string}
+ */
+function stableKeyOf(value) {
+  let key;
+  try {
+    key = stableKeyAt(value, 1);
+  }
+  catch (error) {
+    if (error !== KEY_TOO_LONG)
+      throw error;
+    return sharedKey(value);
+  }
+  return key.length > KEY_TEXT_BOUND ? sharedKey(value) : key;
+}
 
 // The nesting keyed on the host's call stack, the fast path every
 // ordinary value takes; a value nested deeper continues on
@@ -243,6 +282,8 @@ function stableKeyAt(value, depth) {
       if (i > 0)
         s += ',';
       s += stableKeyAt(value[i], depth + 1);
+      if (s.length > KEY_TEXT_BOUND)
+        throw KEY_TOO_LONG;
     }
     return s + ']';
   }
@@ -252,6 +293,8 @@ function stableKeyAt(value, depth) {
     if (i > 0)
       s += ',';
     s += JSON.stringify(keys[i]) + ':' + stableKeyAt(value[keys[i]], depth + 1);
+    if (s.length > KEY_TEXT_BOUND)
+      throw KEY_TOO_LONG;
   }
   return s + '}';
 }
@@ -281,6 +324,8 @@ function stableKeyWalk(value, depth) {
       s += keys === null ? '[' : '{';
       frames.push({ value: next, keys, at: 0 });
     }
+    if (s.length > KEY_TEXT_BOUND)
+      throw KEY_TOO_LONG;
     // on to the next member, closing every container it finishes
     for (;;) {
       const frame = frames[frames.length - 1];
@@ -303,6 +348,130 @@ function stableKeyWalk(value, depth) {
       if (frames.length === 0)
         return s;
     }
+  }
+}
+
+/**
+ * The shared form of a value's key (see {@link stableKeyString}), on an
+ * explicit stack, in time and space linear in the value's distinct
+ * containers; throws `KEY_CEILING` for a cycle, or a container past
+ * `JSON_WALK_DEPTH_CEILING` on any path to it.
+ *
+ * First every container gets the identity of its content: its text with
+ * each member container written as that member's identity, so two
+ * containers share one exactly when their keys written out are equal, and
+ * a container reached again by reference is not walked again. Then the
+ * key is written, each identity in full the first time and as a
+ * back-reference after.
+ * @param {any} value
+ * @returns {string}
+ */
+function sharedKey(value) {
+  const leaf = leafKey(value);
+  if (leaf !== undefined)
+    return leaf;
+  /** @type {Map<object, number>} each container walked, to its identity */
+  const identities = new Map();
+  /** @type {Map<string, number>} each content seen, to its identity */
+  const contents = new Map();
+  /** @type {number[]} each identity's height: the containers on its longest path down */
+  const heights = [];
+  /** @type {Set<object>} */
+  const open = new Set([value]);
+  /** @param {any} container */
+  const openFrame = (container) => {
+    const keys = Array.isArray(container) ? null : Object.keys(container).sort();
+    return { value: container, keys, at: 0, text: keys === null ? '[' : '{', height: 1 };
+  };
+  const frames = [openFrame(value)];
+  for (;;) {
+    const frame = frames[frames.length - 1];
+    const size = frame.keys === null ? frame.value.length : frame.keys.length;
+    if (frame.at < size) {
+      const key = frame.keys === null ? null : frame.keys[frame.at];
+      const member = key === null ? frame.value[frame.at] : frame.value[key];
+      frame.text += (frame.at > 0 ? ',' : '') + (key === null ? '' : JSON.stringify(key) + ':');
+      frame.at++;
+      const memberLeaf = leafKey(member);
+      if (memberLeaf !== undefined) {
+        frame.text += memberLeaf;
+        continue;
+      }
+      const known = identities.get(member);
+      if (known !== undefined) {
+        frame.text += '#' + known;
+        frame.height = Math.max(frame.height, heights[known] + 1);
+        continue;
+      }
+      if (open.has(member) || frames.length >= JSON_WALK_DEPTH_CEILING)
+        throw KEY_CEILING;
+      open.add(member);
+      frames.push(openFrame(member));
+      continue;
+    }
+    const content = frame.text + (frame.keys === null ? ']' : '}');
+    let identity = contents.get(content);
+    if (identity === undefined) {
+      identity = heights.length;
+      contents.set(content, identity);
+      heights.push(frame.height);
+    }
+    identities.set(frame.value, identity);
+    open.delete(frame.value);
+    frames.pop();
+    if (frames.length === 0) {
+      if (heights[identity] > JSON_WALK_DEPTH_CEILING)
+        throw KEY_CEILING;
+      return writeShared(value, identities);
+    }
+    const parent = frames[frames.length - 1];
+    parent.text += '#' + identity;
+    parent.height = Math.max(parent.height, heights[identity] + 1);
+  }
+}
+
+/**
+ * Write the shared form of a key whose containers all have identities.
+ * @param {object} value - An array or object
+ * @param {Map<object, number>} identities
+ * @returns {string}
+ */
+function writeShared(value, identities) {
+  /** @type {Map<number, number>} each identity written, to its ordinal */
+  const ordinals = new Map([[/** @type {number} */ (identities.get(value)), 0]]);
+  /** @param {any} container */
+  const openFrame = (container) => ({ value: container, keys: Array.isArray(container) ? null : Object.keys(container).sort(), at: 0 });
+  const frames = [openFrame(value)];
+  let s = frames[0].keys === null ? '[' : '{';
+  for (;;) {
+    const frame = frames[frames.length - 1];
+    const size = frame.keys === null ? frame.value.length : frame.keys.length;
+    if (frame.at < size) {
+      const key = frame.keys === null ? null : frame.keys[frame.at];
+      const member = key === null ? frame.value[frame.at] : frame.value[key];
+      s += (frame.at > 0 ? ',' : '') + (key === null ? '' : JSON.stringify(key) + ':');
+      frame.at++;
+      const memberLeaf = leafKey(member);
+      if (memberLeaf !== undefined) {
+        s += memberLeaf;
+        continue;
+      }
+      const identity = /** @type {number} */ (identities.get(member));
+      const ordinal = ordinals.get(identity);
+      if (ordinal !== undefined) {
+        s += '\u0001' + ordinal;
+        continue;
+      }
+      ordinals.set(identity, ordinals.size);
+      const inner = openFrame(member);
+      s += inner.keys === null ? '[' : '{';
+      frames.push(inner);
+      continue;
+    }
+    s += frame.keys === null ? ']' : '}';
+    frames.pop();
+    if (frames.length === 0)
+      return s;
   }
 }
 

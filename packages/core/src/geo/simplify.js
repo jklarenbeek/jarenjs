@@ -1,5 +1,7 @@
 //@ts-check
 
+import { GEOJSON_WALK_DEPTH_CEILING, walkRefusal } from '../walk.js';
+
 //#region Line simplification
 // Real geographic data is drawn at a resolution nobody is looking at. A
 // national boundary from OpenStreetMap carries tens of thousands of
@@ -159,29 +161,90 @@ function simplifyNest(value, depth, tolerance, simplify) {
  * be the planar-for-geodesic confusion the rest of this module exists to
  * prevent.
  *
+ * Collections are walked on the walk's own stack, to the GeoJSON
+ * traversal's bound of 100000 levels: a value nested deeper is refused as a
+ * `JsonDepthError` `JO2001`, and one holding itself as a `JsonCycleError`
+ * `JO2002` located at the member that closes it.
+ *
  * @param {any} value
  * @param {number} tolerance - in degrees
  * @returns {any} a new value; the input is not modified
+ * @throws {CodedError} `JO2001` past 100000 levels of nesting, `JO2002` on
+ *   a collection or Feature that holds itself
  * @example
  * simplifyGeometry({ type: 'LineString', coordinates: [[0,0],[1,0.001],[2,0]] }, 0.01);
  * // { type: 'LineString', coordinates: [[0,0],[2,0]] }
  */
 export function simplifyGeometry(value, tolerance) {
-  if (value === null || typeof value !== 'object' || Array.isArray(value))
-    return value;
-  if (value.type === 'FeatureCollection') {
-    if (!Array.isArray(value.features))
-      return value;
-    return { ...value, features: value.features.map((f) => simplifyGeometry(f, tolerance)) };
+  /** @type {{ value: any, items: any[], out: any[], at: number, depth: number }[]} */
+  const open = [];
+  /** @type {any} */
+  let next = value;
+  let depth = 1;
+  for (;;) {
+    // `next` simplified, unless it opens a collection (or a Feature) to
+    // rebuild once its members are
+    let done = next;
+    if (next !== null && typeof next === 'object' && !Array.isArray(next)) {
+      if (depth > GEOJSON_WALK_DEPTH_CEILING)
+        throw walkRefusal('simplified', [value], undefined, GEOJSON_WALK_DEPTH_CEILING);
+      const type = next.type;
+      if (type === 'Feature') {
+        open.push({ value: next, items: [next.geometry], out: [undefined], at: 0, depth: depth + 1 });
+        done = OPENED;
+      }
+      else if (type === 'FeatureCollection' || type === 'GeometryCollection') {
+        const items = type === 'FeatureCollection' ? next.features : next.geometries;
+        if (Array.isArray(items)) {
+          open.push({ value: next, items, out: new Array(items.length), at: 0, depth: depth + 2 });
+          done = OPENED;
+        }
+      }
+      else
+        done = simplifyShape(next, tolerance);
+    }
+    if (done !== OPENED) {
+      if (open.length === 0)
+        return done;
+      const inner = open[open.length - 1];
+      inner.out[inner.at - 1] = done;
+    }
+    // on to the next member, rebuilding every collection it finishes
+    for (;;) {
+      const inner = open[open.length - 1];
+      // a hole stays a hole, as `Array.prototype.map` leaves it
+      while (inner.at < inner.items.length && !(inner.at in inner.items))
+        inner.at++;
+      if (inner.at < inner.items.length) {
+        next = inner.items[inner.at++];
+        depth = inner.depth;
+        break;
+      }
+      open.pop();
+      const source = inner.value;
+      const rebuilt = source.type === 'Feature' ? { ...source, geometry: inner.out[0] }
+        : source.type === 'FeatureCollection' ? { ...source, features: inner.out }
+          : { ...source, geometries: inner.out };
+      if (open.length === 0)
+        return rebuilt;
+      const outer = open[open.length - 1];
+      outer.out[outer.at - 1] = rebuilt;
+    }
   }
-  if (value.type === 'Feature') {
-    return { ...value, geometry: simplifyGeometry(value.geometry, tolerance) };
-  }
-  if (value.type === 'GeometryCollection') {
-    if (!Array.isArray(value.geometries))
-      return value;
-    return { ...value, geometries: value.geometries.map((g) => simplifyGeometry(g, tolerance)) };
-  }
+}
+
+// What `simplifyGeometry` notes in place of an answer for a value whose
+// members are still to be simplified.
+const OPENED = Symbol('opened');
+
+/**
+ * A geometry that is not a collection with its vertices dropped, or the
+ * value itself when it has none to drop.
+ * @param {any} value - An object
+ * @param {number} tolerance
+ * @returns {any}
+ */
+function simplifyShape(value, tolerance) {
   switch (value.type) {
     case 'LineString':
       return { ...value, coordinates: simplifyNest(value.coordinates, 0, tolerance, simplifyLine) };

@@ -174,9 +174,47 @@ describe('locateCycle names the member that closes a cycle', () => {
     /** @type {any} */
     const self = { x: 1 };
     self.self = self;
-    // semanticKey keeps its own cycle refusal
-    assert.throws(() => semanticKey(self), /semanticKey: a cycle at \/self cannot be a cache identity/);
+    // semanticKey keeps its own message for a cycle
+    assert.throws(() => semanticKey(self), circular('a circular reference cannot be a cache identity', '/self'));
     assert.equal(stableStringify({ a: { k: 1 }, b: { k: 1 } }), '{"a":{"k":1},"b":{"k":1}}');
+  });
+});
+
+describe('semanticKey walks deep values without the host stack', () => {
+  it('keys 10000 levels both ways', () => {
+    assert.equal(semanticKey(nestArrays(9999, [1])), '['.repeat(10000) + '1' + ']'.repeat(10000));
+    assert.equal(semanticKey(nestObjects(10000, 1), { ordered: true }), '{"a":'.repeat(10000) + '1' + '}'.repeat(10000));
+  });
+
+  it('refuses the 10001st level with JO2001', () => {
+    assert.throws(() => semanticKey(nestArrays(10000, [1])), refused('a cache identity'));
+    assert.throws(() => semanticKey(nestObjects(10001, 1), { ordered: true }), refused('a cache identity'));
+    assert.throws(() => semanticKey(nestArrays(100000, 1)), refused('a cache identity'));
+  });
+
+  it('refuses a cycle as a circular reference at the member its own order meets first', () => {
+    /** @type {any} */
+    const self = { x: 1 };
+    self.self = self;
+    const reason = 'a circular reference cannot be a cache identity';
+    assert.throws(() => semanticKey({ b: self, 'a/~': [self] }), circular(reason, '/a~1~0/0/self'));
+    assert.throws(() => semanticKey({ b: self, 'a/~': [self] }, { ordered: true }), circular(reason, '/b/self'));
+    assert.throws(() => semanticKey(nestObjects(300, self)), circular(reason, '/a'.repeat(300) + '/self'));
+    // code point order, not code unit order: U+FF61 sorts before U+1F600
+    const named = { '\u{1F600}': [self], '\uFF61': self };
+    assert.throws(() => semanticKey(named), circular(reason, '/\uFF61/self'));
+  });
+
+  it('keeps every other refusal a TypeError past the host-stack levels', () => {
+    assert.throws(() => semanticKey(nestArrays(300, () => 1)),
+      { name: 'TypeError', message: `semanticKey: a function at ${'/0'.repeat(300)} cannot be a cache identity` });
+    assert.throws(() => semanticKey(nestObjects(300, new Map())),
+      { name: 'TypeError', message: `semanticKey: a Map instance at ${'/a'.repeat(300)} cannot be a cache identity` });
+  });
+
+  it('keys a value that shares a subtree as before', () => {
+    const shared = { k: [1, -0] };
+    assert.equal(semanticKey({ q: shared, p: shared }), '{"p":{"k":[1,-0]},"q":{"k":[1,-0]}}');
   });
 });
 
@@ -197,5 +235,31 @@ describe('the bound holds on a small host stack', () => {
       { encoding: 'utf8', cwd: new URL('../..', import.meta.url) });
     assert.equal(child.status, 0, child.stderr);
     assert.equal(child.stdout, JSON.stringify([true, 5000 * 6 + 1 + 5000 * 2, 'JO2001', 'JO2001']));
+  });
+
+  it('keys and walks GeoJSON to their bounds under --stack-size=900', () => {
+    const script = `
+      import { semanticKey } from '@jarenjs/core/object';
+      import { bboxOf, geometryArea, simplifyGeometry } from '@jarenjs/core/geo';
+      const nest = (n) => { let v = 1; for (let i = 0; i < n; i++) v = { a: [v] }; return v; };
+      const coords = (n) => { let v = [1, 2]; for (let i = 0; i < n; i++) v = [v]; return v; };
+      const collection = (n) => { let g = { type: 'Point', coordinates: [1, 2] };
+        for (let i = 0; i < n; i++) g = { type: 'GeometryCollection', geometries: [g] }; return g; };
+      const codeOf = (f) => { try { f(); return 'answered'; } catch (e) { return e.code ?? e.name; } };
+      process.stdout.write(JSON.stringify([
+        semanticKey(nest(5000)).length,
+        codeOf(() => semanticKey(nest(5001))),
+        bboxOf({ type: 'LineString', coordinates: coords(99998) }),
+        codeOf(() => bboxOf({ type: 'LineString', coordinates: coords(99999) })),
+        geometryArea(collection(49999)),
+        codeOf(() => geometryArea(collection(50000))),
+        codeOf(() => simplifyGeometry(collection(49999), 0.1)),
+        codeOf(() => simplifyGeometry(collection(50000), 0.1)),
+      ]));
+    `;
+    const child = spawnSync(process.execPath, ['--stack-size=900', '--input-type=module', '-e', script],
+      { encoding: 'utf8', cwd: new URL('../..', import.meta.url) });
+    assert.equal(child.status, 0, child.stderr);
+    assert.equal(child.stdout, JSON.stringify([5000 * 6 + 1 + 5000 * 2, 'JO2001', [1, 2, 1, 2], 'JO2001', 0, 'JO2001', 'answered', 'JO2001']));
   });
 });

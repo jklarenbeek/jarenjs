@@ -84,6 +84,31 @@ the default one — so it costs at most an extra miss. The default is unchanged 
 the option's arrival; a consumer that adopts the ordered form stops serving one
 document's entry to another that differs from it only in member order.
 
+`semanticKey` holds the same bound and names a cycle the same way: past 10000
+levels it throws `JO2001` (`a value nested deeper than 10000 levels cannot be a
+cache identity`), and a cycle `JO2002` at the member that closes it, the first
+the key's own member order meets (`a circular reference cannot be a cache
+identity at /self`). Every other value it cannot key stays a `TypeError`. *Upgrade:
+a cycle was a `TypeError` (`semanticKey: a cycle at /self cannot be a cache
+identity`), and a value nested past the host stack an uncoded `RangeError`; one
+within 10000 levels now has a key. A caller that read a `TypeError` as "not
+cacheable" reads the coded refusal the same way: the formula compile cache and
+the formula batch's input keys report it with its code.*
+
+The GeoJSON traversal of `@jarenjs/core/geo` holds a bound of its own:
+`eachPosition`, `bboxOf`, `positionsOf`, `centroidOf`, `geoDistance`, `geometryOf`,
+`geometryArea`, `geometryLength`, `containsPosition`, `ringsClosed`,
+`simplifyGeometry` and `geoJsonToWkt` walk a value nested past the host stack,
+and refuse one past 100000 levels with `JO2001` and a cycle they follow with
+`JO2002` at the member `locateCycle` names (`a circular reference cannot be walked as GeoJSON at
+/coordinates/0`; `simplifyGeometry` says `simplified`). A cycle in a member a
+walk does not read is not refused, and `geoJsonToWkt` answers `null` for a
+FeatureCollection nested past its eight levels, one that holds itself among them.
+The bound is ten times `equalsJson`'s because the recursive walk took a whole
+collection (two levels) or Feature per host frame, and answered nests past 10000
+levels on a default host stack; no value it answered there is refused. *Upgrade:
+such a value used to escape as an uncoded `RangeError`.*
+
 ## Modules
 
 | Import | Contents |

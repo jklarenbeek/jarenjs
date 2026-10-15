@@ -27,6 +27,7 @@ import { CARD_ONE, CARD_MANY, hostFailureText, collectReadSlots } from './normal
 import { OPERATORS, checkRangeBound } from './operators.js';
 import { intervalArg } from './series.js';
 import { bboxOf, createBboxIndex } from '@jarenjs/core/geo';
+import { CodedError } from '@jarenjs/core/errors';
 import { createIntervalIndex, overlapsInterval } from '@jarenjs/core/series';
 
 /**
@@ -467,7 +468,7 @@ const BOX_SCREEN = {
   index(values, always) {
     const boxes = new Array(values.length);
     for (let i = 0; i < values.length; i++) {
-      boxes[i] = bboxOf(values[i]);
+      boxes[i] = screenBox(values[i]);
       // no box means the index cannot speak for it - a malformed operand
       // must still reach the predicate and raise what a scan would raise
       if (boxes[i] === null)
@@ -476,10 +477,25 @@ const BOX_SCREEN = {
     return createBboxIndex(boxes);
   },
   candidates(index, v) {
-    const box = bboxOf(v);
+    const box = screenBox(v);
     return box === null ? null : index.search(box[0], box[1], box[2], box[3]);
   },
 };
+
+// The box a screen files a value under, or null for one it cannot: no box,
+// or a value the walk refuses (a cycle, or a nest past its bound). The
+// refusal is left for the predicate, which raises it for exactly the pairs
+// a scan reaches, after whatever the scan raises first.
+function screenBox(v) {
+  try {
+    return bboxOf(v);
+  }
+  catch (error) {
+    if (error instanceof CodedError && (error.code === 'JO2001' || error.code === 'JO2002'))
+      return null;
+    throw error;
+  }
+}
 
 // Does `$overlaps` accept `v` as an interval? Asked of the operator's own
 // rule - `intervalArg`'s record test, then the kernel's `overlapsInterval`

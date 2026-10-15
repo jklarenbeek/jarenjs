@@ -628,7 +628,7 @@ passed straight in without the `type` discriminator being involved.
 | `ring.js` | ring closure, winding, area and containment |
 | `bbox.js` | bounding boxes, the cheap half of every spatial test |
 | `geohash.js` | the base-32 cell encoding, and its validity tester |
-| `geojson.js` | the one layer that knows the `type` discriminator |
+| `geojson.js` | the one layer that knows the `type` discriminator; walks to the GeoJSON bound in `walk.js` |
 | `valid.js` | `isValidGeoJson` — the one-call structural judgment (rings must close), the boolean twin of the schema artifacts in `@jarenjs/json` |
 | `wkt.js` | the Well-Known Text round trip — `wktToGeoJson`, `geoJsonToWkt` and `isValidWkt`, one grammar walk with and without a builder |
 | `index-tree.js` | a static packed-Hilbert box index for spatial joins |
@@ -1096,6 +1096,14 @@ The JSON addressing standards (JSON validation helpers, JSON Pointer per RFC 690
 ### 9. Object Module (`object.js`)
 
 Deep equality and collection manipulation.
+
+The bounds the walks over a JSON value hold — 10000 levels of nesting for
+`equalsJson`, `stableStringify` and `semanticKey` here, 100000 for the
+GeoJSON traversal of `geo/`, whose recursive walk answered deeper nests on a
+default host stack — and their two refusals (`JO2001` past the bound,
+`JO2002` at the member that closes a cycle, located by `locateCycle`) live in
+`walk.js`, a module internal to the package with no `exports` entry, so the
+walks refuse a value alike; `object.js` re-exports `locateCycle`.
 
 ```mermaid
 flowchart TB

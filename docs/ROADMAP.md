@@ -31,24 +31,26 @@ delete it or fix it.
 (RFC 9535, passing the complete official compliance suite), JSON Patch
 (RFC 6902) and Merge Patch (RFC 7396). See
 [`packages/json/ARCHITECTURE.md`](../packages/json/ARCHITECTURE.md).
-- [ ] **Geometry operators overflow on cyclic or very deep coordinates.**
-  `$bbox`, `$area`, `$centroid`, `$length`, `$distance`, `$within`,
-  `$bbox-intersects` and `$geohash` walk coordinates on the host stack
-  (`bboxOf`/`positionsOf` of `@jarenjs/core/geo`), so `compileJsonQuery({
-  $bbox: '$.g' })({ g })` with `g.coordinates` holding itself, or over 100000
-  nested arrays, escapes as an uncoded `RangeError`, where `$eq` refuses the
-  same values `JO2002` / `JO2001`.
-- [ ] **`semanticKey` refuses a cycle uncoded and overflows on a very deep
-  value.** `semanticKey(c)` with `c.self = c` throws an uncoded `TypeError`
-  (`a cycle at /self cannot be a cache identity`), and over 100000 nested
-  arrays an uncoded `RangeError`. The formula compile cache and the formula
-  batch's input keys call it, where `stableStringify` says `JO2002` /
-  `JO2001`.
-- [ ] **A heavily shared value exhausts the heap when keyed.**
-  `stableKeyString` writes a shared subtree each time it is reached, so
-  `$distinct` over 40 levels of `d = [d, d]` builds a key of 2^40 leaves and
-  the process aborts out of memory (the same at the previous release). `$eq`
-  answers the same reference at once.
+- [ ] **Geometry measurements crash uncoded on a malformed collection
+  member.** `$area`, `$length` and `$within` over `{ type:
+  'FeatureCollection', features: {} }`, `{ type: 'GeometryCollection',
+  geometries: 5 }` or `{ type: 'MultiPolygon', coordinates: {} }` escape as an
+  uncoded `TypeError` (`object is not iterable`): `geometryArea`,
+  `geometryLength`, `containsPosition` and `ringsClosed` of
+  `@jarenjs/core/geo` iterate a member with `for...of`, where `eachPosition`
+  skips one that is not an array and the module states that malformed input
+  yields null or 0 (`$bbox` over the same FeatureCollection answers empty).
+- [ ] **`$eq` takes exponential time over two separately built shared
+  values.** `equalsJson(a, b)` compares a subtree each time it is reached, so
+  two values each built as `d = [d, d]` 22 levels deep take 65 ms and every 3
+  more levels ×8 (40 levels: hours); one reference against itself answers at
+  once, and `$distinct`/`$groupby` key such values in linear time.
+- [ ] **`semanticKey`, `stableStringify` and `contentKey` exhaust the heap on
+  a heavily shared value.** They write a shared subtree each time it is
+  reached: 22 levels of `d = [d, d]` is a 16777213-character key (semanticKey
+  1.8 s, stableStringify 0.7 s), ×8 per 3 levels, so 40 levels aborts the
+  process out of memory. The formula compile and batch keys call `semanticKey`
+  on host options (`limits`, `revision`).
 
 ## @jarenjs/json — JSLT
 

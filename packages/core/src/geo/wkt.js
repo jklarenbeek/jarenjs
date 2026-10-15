@@ -576,20 +576,30 @@ function writeGeometry(geometry, dim, level = 0) {
  * The geometry a value carries, following the traversal layer's
  * unwrapping posture: a Feature yields its geometry, a
  * FeatureCollection a GeometryCollection of its features', a bare
- * position a Point.
+ * position a Point. `UNWRITABLE` for a FeatureCollection nested `level`
+ * collections down past the writer's bound: the collection holding it
+ * holds a member, so `writeGeometry` refuses it at that bound, and the
+ * walk stops there rather than follow a cycle or a deep nest further.
+ * @param {any} value
+ * @param {number} [level] - The FeatureCollections enclosing `value`
+ * @returns {any}
  */
-function geometryToWrite(value) {
+function geometryToWrite(value, level = 0) {
   if (isPosition(value))
     return { type: 'Point', coordinates: value };
   if (value === null || typeof value !== 'object' || Array.isArray(value))
     return null;
   if (value.type === 'FeatureCollection') {
+    if (level > MAX_COLLECTION_DEPTH)
+      return UNWRITABLE;
     const features = Array.isArray(value.features) ? value.features : [];
     const geometries = [];
     for (let i = 0; i < features.length; i++) {
       // a Feature with a null geometry is a located-nowhere record;
       // WKT cannot say that, so it contributes nothing to the collection
-      const inner = geometryToWrite(features[i]);
+      const inner = geometryToWrite(features[i], level + 1);
+      if (inner === UNWRITABLE)
+        return UNWRITABLE;
       if (inner !== null)
         geometries.push(inner);
     }
@@ -597,6 +607,9 @@ function geometryToWrite(value) {
   }
   return geometryOf(value);
 }
+
+// What `geometryToWrite` answers for a value no WKT text can spell.
+const UNWRITABLE = Symbol('unwritable');
 
 /**
  * A GeoJSON value as a WKT string, or `null` for a value with no
@@ -615,11 +628,14 @@ function geometryToWrite(value) {
  * is not written approximately. So does a geometry {@link isValidWkt}
  * would refuse once written: a polygon ring of fewer than four positions
  * or whose first and last positions differ (altitude included), a line
- * of one position, or collections nested more than eight deep.
+ * of one position, or collections nested more than eight deep — a
+ * FeatureCollection that holds itself among them.
  *
  * @param {any} value
  * @param {{ dim?: number }} [options]
  * @returns {string | null}
+ * @throws {CodedError} `JO2001` for a Feature nested in Features past
+ *   100000 levels, `JO2002` for one that holds itself ({@link geometryOf})
  * @example
  * geoJsonToWkt({ type: 'Point', coordinates: [4.9041, 52.3676] });
  * // 'POINT (4.9041 52.3676)'
@@ -631,7 +647,7 @@ function geometryToWrite(value) {
  */
 export function geoJsonToWkt(value, options = {}) {
   const geometry = geometryToWrite(value);
-  if (geometry === null)
+  if (geometry === null || geometry === UNWRITABLE)
     return null;
   return writeGeometry(geometry, options.dim === 3 ? 3 : 2);
 }
