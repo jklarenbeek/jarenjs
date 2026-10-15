@@ -70,7 +70,8 @@ One flat namespace:
 
 | Producer | Keys | Params carried |
 |---|---|---|
-| validate keywords | the keyword itself: `type`, `required`, `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`, `multipleOf`, `minLength`, `maxLength`, `pattern`, `additionalProperties`, `minProperties`, `maxProperties`, `minItems`, `maxItems`, `uniqueItems`, `contains`, `items`, `allOf`, `anyOf`, `oneOf`, `not`, `format`, `if`, `then`, `else`, `false schema`, `$query` | `type`/`types`; `missingProperty`; `limit` + `comparison`; `multipleOf`; `pattern`; `additionalProperty`; `format` |
+| validate keywords | the keyword itself: `type`, `required`, `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`, `multipleOf`, `minLength`, `maxLength`, `pattern`, `additionalProperties`, `minProperties`, `maxProperties`, `minItems`, `maxItems`, `uniqueItems`, `contains`, `items`, `allOf`, `anyOf`, `oneOf`, `not`, `format`, `if`, `then`, `else`, `false schema`, `const`, `enum`, `dependentRequired`, `dependencies`, `unevaluatedProperties`, `unevaluatedItems`, `$query` | `type`/`types`; `missingProperty`; `limit` + `comparison`; `multipleOf`; `pattern`; `additionalProperty`; `format`; `allowedValue` (`const`: the value it expected, the resolved one under `$data`/`data`); `allowedValues` (`enum`: the list it allows); `property` + `missingProperty` (`dependentRequired` and the array form of `dependencies`: the present property and the first dependency the object lacks); `unevaluatedProperty` (the member name); `unevaluatedItem` (the index) |
+| `basic` output | `subschema`: the error of a branch unit, "A subschema had errors." | none |
 | query runtime via `$query` | the `JQ2xxx` code of a failure that judges the instance (`JQ2001` to `JQ2005`, `JQ2008`; every other runtime refusal is thrown) | `{ code, docPath }` |
 | forms field checks | `form/` + the emitted keyword: `form/required`, `form/type`, `form/const`, `form/enum`, `form/minLength`, `form/maxLength`, `form/pattern`, `form/format`, `form/minimum`, `form/maximum`, `form/exclusiveMinimum`, `form/exclusiveMaximum`, `form/multipleOf`, `form/minItems`, `form/maxItems`, `form/uniqueItems`, `form/minProperties`, `form/maxProperties` | per branch: `limit`, `len`, `type`, `format`, `enumValues`, `constValue`, `pattern`, `multipleOf` |
 | forms rules | `x-form/assert` (the default), else the author's `$msgid` | `{ pointer, ...spec.params }` |
@@ -86,10 +87,14 @@ before rendering `form/format`, leaving `params.format` structural so the
 same error re-renders in a second language. See the
 [`@jarenjs/locales` README](../../locales/README.md).
 
-Keywords without a built-in English entry (`const`, `enum`,
-`dependentRequired`, `dependencies`, `unevaluatedProperties`, ...) render
-the generic `validation failed for keyword '<keyword>'`; their `msgid` is
-still the keyword, so a catalog (or an application) may cover them.
+Keywords without a built-in English entry (`minContains`, `maxContains`,
+`contentEncoding`, `contentMediaType`, `nullable`, ...) render the generic
+`validation failed for keyword '<keyword>'` with empty `params`; their
+`msgid` is still the keyword, so a catalog (or an application) may cover
+them. *Upgrade: `const`, `enum`, `dependentRequired`, `dependencies`,
+`unevaluatedProperties` and `unevaluatedItems` used to render the generic
+message, and `const`, `enum`, `dependentRequired` and `dependencies`
+carried empty `params`.*
 
 ## 3. MessageSpec
 

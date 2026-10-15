@@ -20,6 +20,7 @@
 
 import {
   formatMessageValue,
+  formatSchemaValue,
   makeNumberRenderer,
   makePluralPicker,
   makeTypeNamer,
@@ -56,6 +57,16 @@ const TYPE_NAMES = {
 const typeName = makeTypeNamer(TYPE_NAMES);
 
 //#endregion
+
+/**
+ * `dependentRequired`, and the array form of draft-07 `dependencies`: the
+ * present property and the first dependency it misses.
+ * @param {any} p - The error's params
+ * @returns {string}
+ */
+const requiresDependency = (p) => p.missingProperty !== undefined
+  ? `moet de eigenschap '${p.missingProperty}' bevatten wanneer de eigenschap '${p.property}' aanwezig is`
+  : 'moet de eigenschappen bevatten waarvan de aanwezige eigenschappen afhangen';
 
 /**
  * The Dutch catalog. Covers every key of validate's `messagesEn`, every
@@ -100,6 +111,21 @@ export const nl = {
   then: 'moet aan het "then"-schema voldoen',
   else: 'moet aan het "else"-schema voldoen',
   'false schema': 'booleaans schema false is altijd ongeldig',
+  const: (p) => p.allowedValue !== undefined
+    ? `moet gelijk zijn aan de constante ${formatSchemaValue(p.allowedValue)}`
+    : 'moet gelijk zijn aan de constante',
+  enum: (p) => Array.isArray(p.allowedValues)
+    ? `moet gelijk zijn aan een van de toegestane waarden: ${listFormat.format(p.allowedValues.map(formatSchemaValue))}`
+    : 'moet gelijk zijn aan een van de toegestane waarden',
+  dependentRequired: requiresDependency,
+  dependencies: requiresDependency,
+  unevaluatedProperties: (p) => p.unevaluatedProperty !== undefined
+    ? `de niet-geëvalueerde eigenschap '${p.unevaluatedProperty}' voldoet niet aan het 'unevaluatedProperties'-schema`
+    : "de niet-geëvalueerde eigenschappen voldoen niet aan het 'unevaluatedProperties'-schema",
+  unevaluatedItems: (p) => p.unevaluatedItem !== undefined
+    ? `het niet-geëvalueerde item op index ${p.unevaluatedItem} voldoet niet aan het 'unevaluatedItems'-schema`
+    : "de niet-geëvalueerde items voldoen niet aan het 'unevaluatedItems'-schema",
+  subschema: 'Een subschema bevatte fouten.',
   $query: (p) => p.code
     ? `de '$query'-assertie gaf ${p.code} op '${p.docPath}'`
     : "moet aan de '$query'-assertie voldoen",
@@ -410,6 +436,7 @@ export const nl = {
   'query/phrase-limit': 'een frase heeft meer dan {limit} items gematerialiseerd (limits.sequenceItems)',
   'query/steps-limit': 'de query heeft limits.steps overschreden ({limit} evaluaties van expressies)',
   'query/result-limit': 'het queryresultaat bevat {count} items, meer dan limits.resultItems ({limit})',
+  'query/descent-limit': 'een afstammelingsegment bereikt een waarde die dieper dan {limit} niveaus genest is',
   'query/function-threw': "de geregistreerde functie '{name}' gooide een fout: {detail}",
   'query/operator-threw': "de geregistreerde operator '{name}' is mislukt: {detail}",
   'query/input-undefined': 'het invoerdocument is undefined, wat geen JSON-waarde is',

@@ -22,6 +22,7 @@ import { isJsonObject } from '@jarenjs/core/object';
 
 import { messageRef, renderMessageId } from '../message-ref.js';
 import { JsonQueryCompileError, JsonQueryRuntimeError } from './errors.js';
+import { DESCENT_LIMIT_ID, DESCENT_LIMIT_TEMPLATE } from './descent-message.js';
 
 /**
  * The plain English catalog: message id → template (`{param}`
@@ -227,6 +228,7 @@ export const queryMessagesEn = Object.freeze({
   'query/phrase-limit': 'a phrase materialized more than {limit} items (limits.sequenceItems)',
   'query/steps-limit': 'the query exceeded limits.steps ({limit} expression evaluations)',
   'query/result-limit': 'the query result has {count} items, more than limits.resultItems ({limit})',
+  [DESCENT_LIMIT_ID]: DESCENT_LIMIT_TEMPLATE,
   'query/function-threw': "registered function '{name}' threw: {detail}",
   'query/operator-threw': "registered operator '{name}' failed: {detail}",
   'query/input-undefined': 'the input document is undefined, which is not a JSON value',

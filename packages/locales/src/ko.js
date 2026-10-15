@@ -24,6 +24,7 @@
 
 import {
   formatMessageValue,
+  formatSchemaValue,
   makeNumberRenderer,
   makeTypeNamer,
   dateNameEntries,
@@ -55,6 +56,16 @@ const TYPE_NAMES = {
 const typeName = makeTypeNamer(TYPE_NAMES);
 
 //#endregion
+
+/**
+ * `dependentRequired`, and the array form of draft-07 `dependencies`: the
+ * present property and the first dependency it misses.
+ * @param {any} p - The error's params
+ * @returns {string}
+ */
+const requiresDependency = (p) => p.missingProperty !== undefined
+  ? `속성 '${p.property}'이(가) 있으면 속성 '${p.missingProperty}'이(가) 필요합니다`
+  : '존재하는 속성이 의존하는 속성이 필요합니다';
 
 /**
  * The Korean catalog. Covers every key of validate's `messagesEn`,
@@ -99,6 +110,21 @@ export const ko = {
   then: '"then" 스키마와 일치해야 합니다',
   else: '"else" 스키마와 일치해야 합니다',
   'false schema': '불리언 스키마 false는 항상 유효하지 않습니다',
+  const: (p) => p.allowedValue !== undefined
+    ? `상수 ${formatSchemaValue(p.allowedValue)}와(과) 같아야 합니다`
+    : '상수와 같아야 합니다',
+  enum: (p) => Array.isArray(p.allowedValues)
+    ? `허용된 값 ${listFormat.format(p.allowedValues.map(formatSchemaValue))} 중 하나와 같아야 합니다`
+    : '허용된 값 중 하나와 같아야 합니다',
+  dependentRequired: requiresDependency,
+  dependencies: requiresDependency,
+  unevaluatedProperties: (p) => p.unevaluatedProperty !== undefined
+    ? `평가되지 않은 속성 '${p.unevaluatedProperty}'이(가) 'unevaluatedProperties' 스키마를 충족하지 않습니다`
+    : "평가되지 않은 속성이 'unevaluatedProperties' 스키마를 충족하지 않습니다",
+  unevaluatedItems: (p) => p.unevaluatedItem !== undefined
+    ? `인덱스 ${p.unevaluatedItem}의 평가되지 않은 항목이 'unevaluatedItems' 스키마를 충족하지 않습니다`
+    : "평가되지 않은 항목이 'unevaluatedItems' 스키마를 충족하지 않습니다",
+  subschema: '하위 스키마에 오류가 있었습니다.',
   $query: (p) => p.code
     ? `'$query' 어설션이 '${p.docPath}'에서 ${p.code} 오류를 발생시켰습니다`
     : "'$query' 어설션을 만족해야 합니다",
@@ -409,6 +435,7 @@ export const ko = {
   'query/phrase-limit': '구문이 항목을 {limit}개 넘게 구체화했습니다 (limits.sequenceItems)',
   'query/steps-limit': '쿼리가 limits.steps(식 평가 {limit}회)를 초과했습니다',
   'query/result-limit': '쿼리 결과의 항목이 {count}개로 limits.resultItems({limit})보다 많습니다',
+  'query/descent-limit': '하위 항목 세그먼트가 {limit}단계보다 깊이 중첩된 값에 도달합니다',
   'query/function-threw': "등록된 함수 '{name}'에서 예외가 발생했습니다: {detail}",
   'query/operator-threw': "등록된 연산자 '{name}'이(가) 실패했습니다: {detail}",
   'query/input-undefined': '입력 문서가 undefined입니다 (undefined는 JSON 값이 아닙니다)',

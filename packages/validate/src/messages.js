@@ -26,6 +26,7 @@
 import {
   compileMessageTemplate,
   compileMessageCatalog,
+  formatMessageValue,
 } from '@jarenjs/core/message';
 
 export {
@@ -35,12 +36,38 @@ export {
 
 //#region English catalog
 
+/** A BigInt inside a value, which JSON cannot spell, as its digits. */
+const bigintDigits = (/** @type {string} */ _key, /** @type {unknown} */ value) =>
+  typeof value === 'bigint' ? value.toString() : value;
+
+/**
+ * A schema value quoted for a message, as `formatMessageValue` quotes it,
+ * except that a BigInt (a schema built in JavaScript may hold one) is
+ * written as its digits instead of throwing.
+ * @param {unknown} value - The value to quote
+ * @returns {string}
+ */
+function quoteValue(value) {
+  if (typeof value === 'bigint') return value.toString();
+  return typeof value === 'string' ? formatMessageValue(value) : String(JSON.stringify(value, bigintDigits));
+}
+
+/**
+ * `dependentRequired`, and the array form of draft-07 `dependencies`: the
+ * present property and the first dependency it misses.
+ * @param {any} p - The error's params
+ * @returns {string}
+ */
+const requiresDependency = (p) => p.missingProperty !== undefined
+  ? `must have property '${p.missingProperty}' when property '${p.property}' is present`
+  : 'must have the properties its present properties depend on';
+
 /**
  * The built-in English catalog: one entry per message key the validator
- * produces, rendering the exact strings of the historical `#convertErrors`
- * if/else chain. Keywords without an entry (`const`, `enum`,
- * `dependentRequired`, ...) fall back to the generic
- * `validation failed for keyword '<keyword>'` - as before.
+ * produces. Keywords without an entry (`minContains`, `maxContains`,
+ * `contentEncoding`, `contentMediaType`, `nullable`, ...) fall back to the generic
+ * `validation failed for keyword '<keyword>'`. `subschema` is no keyword:
+ * it is the message of a `basic` output's branch unit.
  * @type {Record<string, string | ((params: object, error?: object) => string)>}
  */
 export const messagesEn = {
@@ -77,6 +104,21 @@ export const messagesEn = {
   then: 'must match "then" schema',
   else: 'must match "else" schema',
   'false schema': 'boolean schema false is always invalid',
+  const: (p) => p.allowedValue !== undefined
+    ? `must be equal to constant ${quoteValue(p.allowedValue)}`
+    : 'must be equal to constant',
+  enum: (p) => Array.isArray(p.allowedValues)
+    ? `must be equal to one of the allowed values: ${p.allowedValues.map(quoteValue).join(', ')}`
+    : 'must be equal to one of the allowed values',
+  dependentRequired: requiresDependency,
+  dependencies: requiresDependency,
+  unevaluatedProperties: (p) => p.unevaluatedProperty !== undefined
+    ? `unevaluated property '${p.unevaluatedProperty}' fails the 'unevaluatedProperties' schema`
+    : "unevaluated properties fail the 'unevaluatedProperties' schema",
+  unevaluatedItems: (p) => p.unevaluatedItem !== undefined
+    ? `unevaluated item at index ${p.unevaluatedItem} fails the 'unevaluatedItems' schema`
+    : "unevaluated items fail the 'unevaluatedItems' schema",
+  subschema: 'A subschema had errors.',
   $query: (p) => p.code
     ? `'$query' assertion raised ${p.code} at '${p.docPath}'`
     : "must satisfy the '$query' assertion",
@@ -433,6 +475,21 @@ export function convertInternalErrors(internalErrors) {
       params.pattern = err.expected?.source || err.expected;
     } else if (keyword === 'additionalProperties') {
       params.additionalProperty = err.dataKey;
+    } else if (keyword === 'const') {
+      // A data reference passes the value it resolved after the data path.
+      params.allowedValue = err.rest != null && err.rest.length > 1 ? err.rest[1] : err.expected;
+    } else if (keyword === 'enum') {
+      params.allowedValues = err.rest != null && err.rest.length > 1 ? err.rest[1] : err.expected;
+    } else if (keyword === 'dependentRequired' || keyword === 'dependencies') {
+      // One error per present property: name it and the first dependency
+      // the object lacks, read back from the schema the error came from.
+      const required = keyword === 'dependencies' ? err.expected : err.object?.schema?.dependentRequired?.[err.dataKey];
+      params.property = err.dataKey;
+      if (Array.isArray(required) && err.value !== null && typeof err.value === 'object') {
+        const present = Object.keys(err.value);
+        const missing = required.find((name) => !present.includes(name));
+        if (missing !== undefined) params.missingProperty = missing;
+      }
     } else if (keyword === 'unevaluatedProperties') {
       params.unevaluatedProperty = err.value;
     } else if (keyword === 'unevaluatedItems') {

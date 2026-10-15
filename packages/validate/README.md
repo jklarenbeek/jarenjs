@@ -894,7 +894,7 @@ every `$ref`, and at the absolute location of the schema that holds it.
 | `outputFormat` | Specification | Shape |
 |---|---|---|
 | `flagOutput` | both | `{ valid }`, from the boolean validator |
-| `basicOutput` | JSON Schema 2020-12 Core §12 | the units that carry an `error` or an `annotation`, flat |
+| `basicOutput` | JSON Schema 2020-12 Core §12 | the units that carry an `error` or an `annotation`, and the branch units of a failure, flat |
 | `detailedOutput` | JSON Schema 2020-12 Core §12 | those units nested by the schema, condensed |
 | `verboseOutput` | JSON Schema 2020-12 Core §12 | every keyword of every applied subschema, nested |
 | `listOutput` | the output specification that followed 2020-12 | the units that carry `errors` or `annotations`, flat under `details` |
@@ -990,6 +990,18 @@ and with `outputFormat: basicOutput`:
   "errors": [
     {
       "valid": false,
+      "keywordLocation": "",
+      "instanceLocation": "",
+      "error": "A subschema had errors."
+    },
+    {
+      "valid": false,
+      "keywordLocation": "/properties/lines/items",
+      "instanceLocation": "/lines",
+      "error": "A subschema had errors."
+    },
+    {
+      "valid": false,
       "keywordLocation": "/properties/lines/items/$ref/properties/qty/minimum",
       "absoluteKeywordLocation": "https://example.com/order#/$defs/line/properties/qty/minimum",
       "instanceLocation": "/lines/0/qty",
@@ -1033,7 +1045,10 @@ What the units say:
   subschema the validator evaluates in place, such as
   `additionalProperties: false` (in `list` and `hierarchical` at the unit
   holding it; a `false` schema evaluated as a subschema keys its message by
-  `""`). Two errors of one keyword in one unit (two missing `required`
+  `""`). `basic` also lists, as the 2020-12 example does, each failed unit
+  of the condensed hierarchy that holds two or more failed units, with the
+  error "A subschema had errors." (the `subschema` message; `''` under
+  `messages: false`). Two errors of one keyword in one unit (two missing `required`
   members) are one entry in `list` and `hierarchical`, the messages joined
   by `; `, and two units in the 2020-12 formats.
 - **The flat and condensed forms keep what decides the answer**: a passing
@@ -1052,12 +1067,12 @@ unit per applied subschema and evaluate every `anyOf` branch (each passing
 branch has annotations to report), so they cost about an order of magnitude
 more than the `collectErrors` output. The boolean default and
 `collectErrors` are unchanged. Against the specifications' examples, two
-answers differ: `basic` leaves out the 2020-12 example's two branch units
-("A subschema had errors."), which carry no error or annotation of their
-own, and adds the `valid` its output schema requires; and
-`droppedAnnotations` follows one rule (every failed unit reports what its
-own keywords produced), where the example shows it on some failed units
-and not others.
+answers differ: `basic` adds the `valid` its output schema requires to
+every unit; and `droppedAnnotations` follows one rule (every failed unit
+reports what its own keywords produced), where the example shows it on
+some failed units and not others. `list` lists no branch units: its own
+specification's example has none (*upgrade: `basic` used to leave out the
+2020-12 example's branch units*).
 
 ## Normalization
 

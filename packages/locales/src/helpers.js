@@ -15,7 +15,27 @@
  * the date adapters import it, consumers never see it.
  */
 
-export { formatMessageValue } from '@jarenjs/core/message';
+import { formatMessageValue } from '@jarenjs/core/message';
+
+export { formatMessageValue };
+
+/** A BigInt inside a value, which JSON cannot spell, as its digits. */
+const bigintDigits = (/** @type {string} */ _key, /** @type {unknown} */ value) =>
+  typeof value === 'bigint' ? value.toString() : value;
+
+/**
+ * Quote a schema value inside a message (the value `const` expects, the
+ * values `enum` allows) as `formatMessageValue` does, except that a BigInt
+ * (a schema built in JavaScript may hold one) is written as its digits
+ * instead of throwing.
+ *
+ * @param {unknown} value - The value to quote
+ * @returns {string}
+ */
+export function formatSchemaValue(value) {
+  if (typeof value === 'bigint') return value.toString();
+  return typeof value === 'string' ? formatMessageValue(value) : String(JSON.stringify(value, bigintDigits));
+}
 
 /**
  * Build a numeric-limit renderer over a pack's number format. Values

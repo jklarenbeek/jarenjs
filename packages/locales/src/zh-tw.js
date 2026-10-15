@@ -24,6 +24,7 @@
 
 import {
   formatMessageValue,
+  formatSchemaValue,
   makeNumberRenderer,
   makeTypeNamer,
   dateNameEntries,
@@ -55,6 +56,16 @@ const TYPE_NAMES = {
 const typeName = makeTypeNamer(TYPE_NAMES);
 
 //#endregion
+
+/**
+ * `dependentRequired`, and the array form of draft-07 `dependencies`: the
+ * present property and the first dependency it misses.
+ * @param {any} p - The error's params
+ * @returns {string}
+ */
+const requiresDependency = (p) => p.missingProperty !== undefined
+  ? `屬性 '${p.property}' 存在時，必須包含屬性 '${p.missingProperty}'`
+  : '必須包含現有屬性所依賴的屬性';
 
 /**
  * The zh-TW catalog. Covers every key of validate's `messagesEn`,
@@ -99,6 +110,21 @@ export const zhTW = {
   then: '必須符合 "then" 綱要',
   else: '必須符合 "else" 綱要',
   'false schema': '布林綱要 false 永遠無效',
+  const: (p) => p.allowedValue !== undefined
+    ? `必須等於常數 ${formatSchemaValue(p.allowedValue)}`
+    : '必須等於常數',
+  enum: (p) => Array.isArray(p.allowedValues)
+    ? `必須等於允許值 ${listFormat.format(p.allowedValues.map(formatSchemaValue))} 其中之一`
+    : '必須等於允許值其中之一',
+  dependentRequired: requiresDependency,
+  dependencies: requiresDependency,
+  unevaluatedProperties: (p) => p.unevaluatedProperty !== undefined
+    ? `未評估的屬性 '${p.unevaluatedProperty}' 不符合 'unevaluatedProperties' 綱要`
+    : "未評估的屬性不符合 'unevaluatedProperties' 綱要",
+  unevaluatedItems: (p) => p.unevaluatedItem !== undefined
+    ? `索引 ${p.unevaluatedItem} 的未評估項目不符合 'unevaluatedItems' 綱要`
+    : "未評估的項目不符合 'unevaluatedItems' 綱要",
+  subschema: '子綱要有錯誤。',
   $query: (p) => p.code
     ? `'$query' 斷言在 '${p.docPath}' 產生了 ${p.code}`
     : "必須滿足 '$query' 斷言",
@@ -409,6 +435,7 @@ export const zhTW = {
   'query/phrase-limit': '片語具體化了超過 {limit} 個項目（limits.sequenceItems）',
   'query/steps-limit': '查詢超過 limits.steps（{limit} 次運算式求值）',
   'query/result-limit': '查詢結果有 {count} 個項目，超過 limits.resultItems（{limit}）',
+  'query/descent-limit': '子代區段觸及巢狀深度超過 {limit} 層的值',
   'query/function-threw': "已註冊的函式 '{name}' 擲回例外：{detail}",
   'query/operator-threw': "已註冊的運算子 '{name}' 失敗：{detail}",
   'query/input-undefined': '輸入文件為 undefined，而 undefined 不是 JSON 值',

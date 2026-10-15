@@ -12,6 +12,8 @@ import {
   queryJSONPath,
   JsonCanonicalizeError,
   JsonQueryRuntimeError,
+  queryMessagesEn,
+  renderQueryMessage,
 } from '@jarenjs/json';
 
 /** `n` arrays nested around `0` */
@@ -125,6 +127,25 @@ describe('the descendant bound options', () => {
     assert.throws(() => compileJSONPath('$..*', { maxDescentDepth: 5 })(nestedArrays(10)), { code: 'JQ2009', docPath: '' });
     assert.deepEqual(at('$..*'), ['JQ2009', '',
       'JQ2009: a descendant segment reaches a value nested deeper than 5 levels at \'\'']);
+  });
+
+  it('carry a catalog message id and its limit, so the refusal renders in any catalog', () => {
+    const refused = (run) => {
+      try { run(); }
+      catch (e) { assert.ok(e instanceof JsonQueryRuntimeError); return e; }
+      return assert.fail('answered');
+    };
+    for (const e of [
+      refused(() => compileJSONPath('$..*', { maxDescentDepth: 5 })(nestedArrays(10))),
+      refused(() => compileJsonQuery({ $count: '$..*' }, { limits: { descentDepth: 5 } })(nestedArrays(10))),
+    ]) {
+      assert.equal(e.messageId, 'query/descent-limit');
+      assert.deepEqual(e.params, { limit: 5 });
+      assert.equal(e.reason, 'a descendant segment reaches a value nested deeper than 5 levels');
+      assert.equal(renderQueryMessage(e, queryMessagesEn), e.reason);
+      assert.equal(renderQueryMessage(e, { 'query/descent-limit': 'deeper than {limit}' }), 'deeper than 5');
+    }
+    assert.equal(queryMessagesEn['query/descent-limit'], 'a descendant segment reaches a value nested deeper than {limit} levels');
   });
 
   it('keep a one-off query cached apart per bound', () => {

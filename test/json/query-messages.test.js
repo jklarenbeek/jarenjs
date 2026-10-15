@@ -136,7 +136,9 @@ describe('the catalog is the only source of a query message', () => {
   it('no raise site builds an English sentence: only the extension helper passes one through', () => {
     const raw = [];
     for (const [file, text] of Object.entries(source)) {
-      if (file === 'query/messages.js' || file === 'query/errors.js') continue;
+      // descent-message.js holds one catalog entry the catalog reads, so a
+      // JSONPath-only bundle raises it without carrying the whole catalog
+      if (file === 'query/messages.js' || file === 'query/errors.js' || file === 'query/descent-message.js') continue;
       for (const m of text.matchAll(/new JsonQuery(?:Compile|Runtime)Error\(/g)) {
         const line = text.slice(0, m.index).split('\n').length;
         raw.push(`${file}:${line}`);

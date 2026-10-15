@@ -174,22 +174,29 @@ describe('the 2020-12 output formats against the specification\'s examples', () 
     assert.deepEqual(output('flag', spec.schema, spec.instance), spec.flag);
   });
 
-  it('basic: the units of the example that carry an error, each with its valid', () => {
-    // The example also lists the two branch units ("A subschema had
-    // errors."), which carry nothing of their own; basic lists the units
-    // that carry an error or an annotation.
-    const leaves = spec.basic.errors.filter((/** @type {any} */ u) => u.error !== 'A subschema had errors.')
-      .map((/** @type {any} */ u) => ({ valid: false, ...u }));
+  it('basic: every unit of the example, its branch units included, each with its valid', () => {
     const actual = output('basic', spec.schema, spec.instance);
-    assert.deepEqual(withoutMessages(sortedUnits(actual)), withoutMessages(sortedUnits({ valid: false, errors: leaves })));
+    const expected = { valid: false, errors: spec.basic.errors.map((/** @type {any} */ u) => ({ valid: false, ...u })) };
+    assert.deepEqual(withoutMessages(sortedUnits(actual)), withoutMessages(sortedUnits(expected)));
+    // The branch units carry the example's own words.
+    const branches = (/** @type {any} */ out) => out.errors.filter((/** @type {any} */ u) => u.error === 'A subschema had errors.');
+    assert.deepEqual(branches(actual), branches(expected));
     assert.deepEqual(actual, {
       valid: false,
       errors: [
+        { valid: false, keywordLocation: '', instanceLocation: '', error: 'A subschema had errors.' },
+        { valid: false, keywordLocation: '/items/$ref', absoluteKeywordLocation: 'https://example.com/polygon#/$defs/point', instanceLocation: '/1', error: 'A subschema had errors.' },
         { valid: false, keywordLocation: '/items/$ref/additionalProperties', absoluteKeywordLocation: 'https://example.com/polygon#/$defs/point/additionalProperties', instanceLocation: '/1/z', error: "must NOT have additional property 'z'" },
         { valid: false, keywordLocation: '/items/$ref/required', absoluteKeywordLocation: 'https://example.com/polygon#/$defs/point/required', instanceLocation: '/1', error: "must have required property 'y'" },
         { valid: false, keywordLocation: '/minItems', instanceLocation: '', error: 'must NOT have fewer than 3 items' },
       ],
     });
+  });
+
+  it('basic: a branch unit\'s message follows the messages option, as every unit\'s does', () => {
+    assert.deepEqual(output('basic', spec.schema, spec.instance, { messages: false }).errors.map((/** @type {any} */ u) => [u.keywordLocation, u.error]), [
+      ['', ''], ['/items/$ref', ''], ['/items/$ref/additionalProperties', ''], ['/items/$ref/required', ''], ['/minItems', ''],
+    ]);
   });
 
   it('detailed', () => {

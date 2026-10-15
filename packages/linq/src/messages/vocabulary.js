@@ -67,6 +67,27 @@ export const CATALOGS = deepFreeze({
     "then": [],
     "else": [],
     "false schema": [],
+    "const": [
+      "allowedValue"
+    ],
+    "enum": [
+      "allowedValues"
+    ],
+    "dependentRequired": [
+      "missingProperty",
+      "property"
+    ],
+    "dependencies": [
+      "missingProperty",
+      "property"
+    ],
+    "unevaluatedProperties": [
+      "unevaluatedProperty"
+    ],
+    "unevaluatedItems": [
+      "unevaluatedItem"
+    ],
+    "subschema": [],
     "$query": [
       "code",
       "docPath"
@@ -703,6 +724,9 @@ export const CATALOGS = deepFreeze({
     ],
     "query/result-limit": [
       "count",
+      "limit"
+    ],
+    "query/descent-limit": [
       "limit"
     ],
     "query/function-threw": [

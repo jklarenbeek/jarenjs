@@ -27,6 +27,7 @@
 
 import {
   formatMessageValue,
+  formatSchemaValue,
   makeNumberRenderer,
   makePluralForms,
   makeTypeNamer,
@@ -113,6 +114,16 @@ function compareLimit(p) {
 //#endregion
 
 /**
+ * `dependentRequired`, and the array form of draft-07 `dependencies`: the
+ * present property and the first dependency it misses.
+ * @param {any} p - The error's params
+ * @returns {string}
+ */
+const requiresDependency = (p) => p.missingProperty !== undefined
+  ? `يجب أن تحتوي على الخاصية '${p.missingProperty}' عند وجود الخاصية '${p.property}'`
+  : 'يجب أن تحتوي على الخصائص التي تعتمد عليها خصائصها الموجودة';
+
+/**
  * The Arabic catalog. Covers every key of validate's `messagesEn`,
  * every `form/*` key of forms' `formsMessagesEn`, `x-form/assert`, the
  * `JQ2xxx` codes reachable through `$query`, every `contract/*`
@@ -159,6 +170,21 @@ export const ar = {
   then: 'يجب أن تطابق مخطط "then"',
   else: 'يجب أن تطابق مخطط "else"',
   'false schema': 'المخطط المنطقي false غير صالح دائمًا',
+  const: (p) => p.allowedValue !== undefined
+    ? `يجب أن تساوي القيمة الثابت ${formatSchemaValue(p.allowedValue)}`
+    : 'يجب أن تساوي القيمة الثابت',
+  enum: (p) => Array.isArray(p.allowedValues)
+    ? `يجب أن تساوي القيمة إحدى القيم المسموح بها: ${listFormat.format(p.allowedValues.map(formatSchemaValue))}`
+    : 'يجب أن تساوي القيمة إحدى القيم المسموح بها',
+  dependentRequired: requiresDependency,
+  dependencies: requiresDependency,
+  unevaluatedProperties: (p) => p.unevaluatedProperty !== undefined
+    ? `الخاصية غير المقيَّمة '${p.unevaluatedProperty}' لا تستوفي مخطط 'unevaluatedProperties'`
+    : "الخصائص غير المقيَّمة لا تستوفي مخطط 'unevaluatedProperties'",
+  unevaluatedItems: (p) => p.unevaluatedItem !== undefined
+    ? `العنصر غير المقيَّم عند الفهرس ${p.unevaluatedItem} لا يستوفي مخطط 'unevaluatedItems'`
+    : "العناصر غير المقيَّمة لا تستوفي مخطط 'unevaluatedItems'",
+  subschema: 'احتوى مخطط فرعي على أخطاء.',
   $query: (p) => p.code
     ? `أثار تأكيد '$query' الخطأ ${p.code} في '${p.docPath}'`
     : "يجب أن تحقق تأكيد '$query'",
@@ -469,6 +495,7 @@ export const ar = {
   'query/phrase-limit': 'تجاوز عدد العناصر التي جسّدتها عبارة {limit} (⁨limits.sequenceItems⁩)',
   'query/steps-limit': 'تجاوز الاستعلام ⁨limits.steps⁩ ({limit} عملية تقييم للتعابير)',
   'query/result-limit': 'يتجاوز عدد عناصر نتيجة الاستعلام ({count}) قيمة ⁨limits.resultItems⁩ ({limit})',
+  'query/descent-limit': 'يصل مقطع الأحفاد إلى قيمة يتجاوز عمق تداخلها الحد ({limit})',
   'query/function-threw': "طرحت الدالة المسجّلة ⁨'{name}'⁩ استثناءً: ⁨{detail}⁩",
   'query/operator-threw': "فشل العامل المسجّل ⁨'{name}'⁩: ⁨{detail}⁩",
   'query/input-undefined': 'قيمة مستند الإدخال undefined، وهي ليست قيمة ⁨JSON⁩',

@@ -102,6 +102,13 @@ const SAMPLE_PARAMS = {
   then: {},
   else: {},
   'false schema': {},
+  const: { allowedValue: 'EUR' },
+  enum: { allowedValues: ['a', 'b', 'c'] },
+  dependentRequired: { property: 'country', missingProperty: 'zip' },
+  dependencies: { property: 'country', missingProperty: 'zip' },
+  unevaluatedProperties: { unevaluatedProperty: 'extra' },
+  unevaluatedItems: { unevaluatedItem: 2 },
+  subschema: {},
   $query: { code: 'JQ2003', docPath: '/a' },
   JQ2001: { code: 'JQ2001', docPath: '/a' },
   JQ2003: { code: 'JQ2003', docPath: '/a' },
@@ -348,6 +355,56 @@ describe('@jarenjs/locales — the entity-tag precondition (JC2014)', () => {
       assert.ok(text.includes('{op}'), `${code}: ${text}`);
     }
   });
+});
+
+describe('@jarenjs/locales — the failures that name what the instance needed', () => {
+  const jaren = new JarenValidator({ collectErrors: true });
+  const values = jaren.compile({
+    type: 'object',
+    properties: { c: { const: 'EUR' }, e: { enum: ['a', 'b'] }, t: { prefixItems: [{}], unevaluatedItems: false } },
+    dependentRequired: { c: ['zip'] },
+  });
+  // a failure elsewhere in the object would leave its members unevaluated
+  const members = jaren.compile({ properties: { a: {} }, unevaluatedProperties: false });
+  const validate = () => [...values({ c: 'USD', e: 'x', t: [1, 2] }).errors, ...members({ a: 1, extra: 1 }).errors];
+  /** The words each failure must carry, in every language. */
+  const named = {
+    const: ['"EUR"'],
+    enum: ['"a"', '"b"'],
+    dependentRequired: ['zip', 'c'],
+    unevaluatedProperties: ['extra'],
+    unevaluatedItems: ['1'],
+  };
+  const english = Object.fromEntries(validate().map((/** @type {any} */ e) => [e.keyword, e.message]));
+  let descent;
+  try { compileJsonQuery({ $count: '$..*' }, { limits: { descentDepth: 5 } })([[[[[[[0]]]]]]]); }
+  catch (thrown) { descent = thrown; }
+
+  for (const [code, pack] of Object.entries({ nl, fr, es, pt, de, ja, ko, zhTW, ru, tr, ar })) {
+    it(`${code} renders each in its language, naming what the English names`, () => {
+      const errors = validate();
+      localizeErrors(errors, compileMessageCatalog(pack));
+      const messages = Object.fromEntries(errors.map((/** @type {any} */ e) => [e.keyword, e.message]));
+      for (const [keyword, words] of Object.entries(named)) {
+        assert.notStrictEqual(messages[keyword], english[keyword], `${code} ${keyword} renders its own words`);
+        for (const word of words) assert.ok(messages[keyword].includes(word), `${code} ${keyword}: ${messages[keyword]} names ${word}`);
+      }
+      assert.notStrictEqual(compileMessageCatalog(pack).subschema({}), messagesEn.subschema, `${code} subschema`);
+      const rendered = renderQueryMessage(descent, pack);
+      assert.strictEqual(rendered, String(pack['query/descent-limit']).replace('{limit}', '5'));
+      assert.notStrictEqual(rendered, descent.reason, `${code} renders the descent bound in its own words`);
+    });
+
+    it(`${code} names a BigInt constant, index 0 and the empty member name`, () => {
+      const compiled = compileMessageCatalog(pack);
+      assert.ok(compiled.const({ allowedValue: 10n }).includes('10'), `${code} const`);
+      assert.ok(compiled.enum({ allowedValues: [10n, [20n]] }).includes('["20"]'), `${code} enum`);
+      assert.notStrictEqual(compiled.unevaluatedItems({ unevaluatedItem: 0 }), compiled.unevaluatedItems({}), `${code} index 0`);
+      assert.notStrictEqual(compiled.unevaluatedProperties({ unevaluatedProperty: '' }), compiled.unevaluatedProperties({}), `${code} ''`);
+      assert.notStrictEqual(compiled.dependentRequired({ property: '', missingProperty: '' }), compiled.dependentRequired({}), `${code} ''`);
+      assert.strictEqual(compiled.dependencies({ property: 'a', missingProperty: 'b' }), compiled.dependentRequired({ property: 'a', missingProperty: 'b' }));
+    });
+  }
 });
 
 describe('@jarenjs/locales fr/es/pt/de/ja', () => {

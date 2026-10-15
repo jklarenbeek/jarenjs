@@ -21,7 +21,7 @@ import {
   isDigitCode,
 } from '@jarenjs/core/scan';
 import { DATA_DEPTH_CEILING } from './errors.js';
-import { JsonQueryRuntimeError } from './query/errors.js';
+import { descentLimitError } from './query/descent-message.js';
 
 /**
  * Sentinel for the absence of a value ("Nothing" in RFC 9535 terms), as
@@ -669,17 +669,12 @@ export function descentCeilingOption(value, name) {
   return value == null ? DATA_DEPTH_CEILING : positiveIntegerOption(value, name);
 }
 
-function descentTooDeep(ceiling, docPath) {
-  return new JsonQueryRuntimeError('JQ2009',
-    `a descendant segment reaches a value nested deeper than ${ceiling} levels`, docPath);
-}
-
 export function descendV(v, output, root, apply, ceiling, docPath) {
   apply(v, output, root);
   if (typeof v !== 'object' || v === null)
     return;
   if (descentDepth >= ceiling)
-    throw descentTooDeep(ceiling, docPath);
+    throw descentLimitError(ceiling, docPath);
   descentDepth++;
   try {
     if (Array.isArray(v)) {
@@ -831,7 +826,7 @@ function* descendG(v, root, apply, depth, ceiling, docPath) {
   if (typeof v !== 'object' || v === null)
     return;
   if (depth >= ceiling)
-    throw descentTooDeep(ceiling, docPath);
+    throw descentLimitError(ceiling, docPath);
   if (Array.isArray(v)) {
     for (let i = 0; i < v.length; i++)
       yield* descendG(v[i], root, apply, depth + 1, ceiling, docPath);
@@ -1024,7 +1019,7 @@ export function descendP(v, p, outV, outP, root, apply, ceiling, docPath) {
   if (typeof v !== 'object' || v === null)
     return;
   if (descentDepth >= ceiling)
-    throw descentTooDeep(ceiling, docPath);
+    throw descentLimitError(ceiling, docPath);
   descentDepth++;
   try {
     if (Array.isArray(v)) {

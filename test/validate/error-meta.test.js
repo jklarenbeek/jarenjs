@@ -255,7 +255,7 @@ describe('Error meta: instancePath matrix', () => {
     }
     const constError = result.errors.find(e => e.keyword === 'const');
     assert.strictEqual(constError.msgid, 'const');
-    // keywords without a catalog entry keep the generic message
-    assert.strictEqual(constError.message, "validation failed for keyword 'const'");
+    assert.deepStrictEqual(constError.params, { allowedValue: 42 });
+    assert.strictEqual(constError.message, 'must be equal to constant 42');
   });
 });

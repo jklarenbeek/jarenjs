@@ -21,6 +21,7 @@
 
 import {
   formatMessageValue,
+  formatSchemaValue,
   makeNumberRenderer,
   makePluralPicker,
   makeTypeNamer,
@@ -57,6 +58,16 @@ const TYPE_NAMES = {
 const typeName = makeTypeNamer(TYPE_NAMES);
 
 //#endregion
+
+/**
+ * `dependentRequired`, and the array form of draft-07 `dependencies`: the
+ * present property and the first dependency it misses.
+ * @param {any} p - The error's params
+ * @returns {string}
+ */
+const requiresDependency = (p) => p.missingProperty !== undefined
+  ? `debe tener la propiedad '${p.missingProperty}' cuando la propiedad '${p.property}' está presente`
+  : 'debe tener las propiedades de las que dependen sus propiedades presentes';
 
 /**
  * The Spanish catalog. Covers every key of validate's `messagesEn`, every
@@ -101,6 +112,21 @@ export const es = {
   then: 'debe cumplir el esquema "then"',
   else: 'debe cumplir el esquema "else"',
   'false schema': 'el esquema booleano false siempre es inválido',
+  const: (p) => p.allowedValue !== undefined
+    ? `debe ser igual a la constante ${formatSchemaValue(p.allowedValue)}`
+    : 'debe ser igual a la constante',
+  enum: (p) => Array.isArray(p.allowedValues)
+    ? `debe ser igual a uno de los valores permitidos: ${listFormat.format(p.allowedValues.map(formatSchemaValue))}`
+    : 'debe ser igual a uno de los valores permitidos',
+  dependentRequired: requiresDependency,
+  dependencies: requiresDependency,
+  unevaluatedProperties: (p) => p.unevaluatedProperty !== undefined
+    ? `la propiedad no evaluada '${p.unevaluatedProperty}' no cumple el esquema 'unevaluatedProperties'`
+    : "las propiedades no evaluadas no cumplen el esquema 'unevaluatedProperties'",
+  unevaluatedItems: (p) => p.unevaluatedItem !== undefined
+    ? `el elemento no evaluado en el índice ${p.unevaluatedItem} no cumple el esquema 'unevaluatedItems'`
+    : "los elementos no evaluados no cumplen el esquema 'unevaluatedItems'",
+  subschema: 'Un subesquema tenía errores.',
   $query: (p) => p.code
     ? `la aserción '$query' produjo ${p.code} en '${p.docPath}'`
     : "debe cumplir la aserción '$query'",
@@ -409,6 +435,7 @@ export const es = {
   'query/phrase-limit': 'una frase materializó más de {limit} elementos (limits.sequenceItems)',
   'query/steps-limit': 'la consulta superó limits.steps ({limit} evaluaciones de expresiones)',
   'query/result-limit': 'el resultado de la consulta tiene {count} elementos, más que limits.resultItems ({limit})',
+  'query/descent-limit': 'un segmento descendiente alcanza un valor anidado a más de {limit} niveles de profundidad',
   'query/function-threw': "la función registrada '{name}' lanzó una excepción: {detail}",
   'query/operator-threw': "el operador registrado '{name}' falló: {detail}",
   'query/input-undefined': 'el documento de entrada es undefined, lo cual no es un valor JSON',

@@ -23,6 +23,7 @@
 
 import {
   formatMessageValue,
+  formatSchemaValue,
   makeNumberRenderer,
   makeTypeNamer,
   dateNameEntries,
@@ -54,6 +55,16 @@ const TYPE_NAMES = {
 const typeName = makeTypeNamer(TYPE_NAMES);
 
 //#endregion
+
+/**
+ * `dependentRequired`, and the array form of draft-07 `dependencies`: the
+ * present property and the first dependency it misses.
+ * @param {any} p - The error's params
+ * @returns {string}
+ */
+const requiresDependency = (p) => p.missingProperty !== undefined
+  ? `'${p.property}' özelliği varken '${p.missingProperty}' özelliğini içermelidir`
+  : 'mevcut özelliklerinin bağlı olduğu özellikleri içermelidir';
 
 /**
  * The Turkish catalog. Covers every key of validate's `messagesEn`,
@@ -98,6 +109,21 @@ export const tr = {
   then: '"then" şemasıyla eşleşmelidir',
   else: '"else" şemasıyla eşleşmelidir',
   'false schema': 'false boole şeması her zaman geçersizdir',
+  const: (p) => p.allowedValue !== undefined
+    ? `${formatSchemaValue(p.allowedValue)} sabitine eşit olmalıdır`
+    : 'sabite eşit olmalıdır',
+  enum: (p) => Array.isArray(p.allowedValues)
+    ? `izin verilen değerlerden birine eşit olmalıdır: ${listFormat.format(p.allowedValues.map(formatSchemaValue))}`
+    : 'izin verilen değerlerden birine eşit olmalıdır',
+  dependentRequired: requiresDependency,
+  dependencies: requiresDependency,
+  unevaluatedProperties: (p) => p.unevaluatedProperty !== undefined
+    ? `değerlendirilmemiş '${p.unevaluatedProperty}' özelliği 'unevaluatedProperties' şemasını karşılamıyor`
+    : "değerlendirilmemiş özellikler 'unevaluatedProperties' şemasını karşılamıyor",
+  unevaluatedItems: (p) => p.unevaluatedItem !== undefined
+    ? `${p.unevaluatedItem} dizinindeki değerlendirilmemiş öğe 'unevaluatedItems' şemasını karşılamıyor`
+    : "değerlendirilmemiş öğeler 'unevaluatedItems' şemasını karşılamıyor",
+  subschema: 'Bir alt şemada hatalar vardı.',
   $query: (p) => p.code
     ? `'$query' doğrulaması '${p.docPath}' konumunda ${p.code} hatası verdi`
     : "'$query' doğrulamasını karşılamalıdır",
@@ -408,6 +434,7 @@ export const tr = {
   'query/phrase-limit': 'bir öbek {limit} öğeden fazlasını somutlaştırdı (limits.sequenceItems)',
   'query/steps-limit': 'sorgu limits.steps sınırını aştı ({limit} ifade değerlendirmesi)',
   'query/result-limit': 'sorgu sonucu {count} öğe içeriyor; bu, limits.resultItems ({limit}) sınırından fazla',
+  'query/descent-limit': 'bir alt öğe segmenti {limit} düzeyden daha derin iç içe geçmiş bir değere ulaşıyor',
   'query/function-threw': "kayıtlı '{name}' işlevi bir özel durum oluşturdu: {detail}",
   'query/operator-threw': "kayıtlı '{name}' işleci başarısız oldu: {detail}",
   'query/input-undefined': 'girdi belgesi undefined; bu bir JSON değeri değil',

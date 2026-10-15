@@ -20,12 +20,13 @@ const grammar = (ids, complete = false) => new JarenValidator().compile({ type: 
 const params = { type: 'integer', types: ['string', 'number'], missingProperty: 'name', additionalProperty: 'extra', comparison: '>=', limit: 2,
   multipleOf: 3, pattern: 'abc', format: 'email', code: 'JQ2001', docPath: '/a', constValue: 'x', enumValues: ['a', 'b'], len: 1,
   op: 'load', allow: 'GET', media: 'json', kind: 'in-flight', header: 'x-id', name: 'Error', status: 500, id: 'shop',
-  server: '2', client: '1', ms: 100, attempts: 3, lastCode: 'JC2051' };
+  server: '2', client: '1', ms: 100, attempts: 3, lastCode: 'JC2051', allowedValue: 'EUR', allowedValues: ['a', 2],
+  property: 'country', unevaluatedProperty: 'extra', unevaluatedItem: 0 };
 
 describe('messages pen', () => {
   it('derives every key and parameter from English and gates both generated artifacts', () => {
-    assert.deepEqual(Object.values(english).map((catalog) => Object.keys(catalog).length), [30, 22, 38]);
-    assert.equal(keys.length, 90);
+    assert.deepEqual(Object.values(english).map((catalog) => Object.keys(catalog).length), [37, 22, 38]);
+    assert.equal(keys.length, 97);
     for (const [source, catalog] of Object.entries(english)) assert.deepEqual(p.CATALOGS[source], catalogParameters(catalog));
     const out = messagePenArtifacts();
     assert.equal(readFileSync(new URL('../../packages/linq/src/messages/vocabulary.js', import.meta.url), 'utf8'), out.vocabulary);

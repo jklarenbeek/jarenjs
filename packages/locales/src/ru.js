@@ -24,6 +24,7 @@
 
 import {
   formatMessageValue,
+  formatSchemaValue,
   makeNumberRenderer,
   makePluralForms,
   makePluralPicker,
@@ -77,6 +78,16 @@ const typeName = makeTypeNamer(TYPE_NAMES);
 //#endregion
 
 /**
+ * `dependentRequired`, and the array form of draft-07 `dependencies`: the
+ * present property and the first dependency it misses.
+ * @param {any} p - The error's params
+ * @returns {string}
+ */
+const requiresDependency = (p) => p.missingProperty !== undefined
+  ? `должно содержать свойство '${p.missingProperty}', если присутствует свойство '${p.property}'`
+  : 'должно содержать свойства, от которых зависят присутствующие свойства';
+
+/**
  * The Russian catalog. Covers every key of validate's `messagesEn`,
  * every `form/*` key of forms' `formsMessagesEn`, `x-form/assert`, the
  * `JQ2xxx` codes reachable through `$query`, every `contract/*`
@@ -119,6 +130,21 @@ export const ru = {
   then: 'должно соответствовать схеме "then"',
   else: 'должно соответствовать схеме "else"',
   'false schema': 'булева схема false всегда недопустима',
+  const: (p) => p.allowedValue !== undefined
+    ? `должно быть равно константе ${formatSchemaValue(p.allowedValue)}`
+    : 'должно быть равно константе',
+  enum: (p) => Array.isArray(p.allowedValues)
+    ? `должно быть равно одному из допустимых значений: ${listFormat.format(p.allowedValues.map(formatSchemaValue))}`
+    : 'должно быть равно одному из допустимых значений',
+  dependentRequired: requiresDependency,
+  dependencies: requiresDependency,
+  unevaluatedProperties: (p) => p.unevaluatedProperty !== undefined
+    ? `неоценённое свойство '${p.unevaluatedProperty}' не соответствует схеме 'unevaluatedProperties'`
+    : "неоценённые свойства не соответствуют схеме 'unevaluatedProperties'",
+  unevaluatedItems: (p) => p.unevaluatedItem !== undefined
+    ? `неоценённый элемент с индексом ${p.unevaluatedItem} не соответствует схеме 'unevaluatedItems'`
+    : "неоценённые элементы не соответствуют схеме 'unevaluatedItems'",
+  subschema: 'В подсхеме были ошибки.',
   $query: (p) => p.code
     ? `утверждение '$query' вызвало ${p.code} в '${p.docPath}'`
     : "должно удовлетворять утверждению '$query'",
@@ -431,6 +457,7 @@ export const ru = {
   'query/phrase-limit': 'фраза материализовала более {limit} элементов (limits.sequenceItems)',
   'query/steps-limit': 'запрос превысил limits.steps ({limit} вычислений выражений)',
   'query/result-limit': 'число элементов в результате запроса ({count}) превышает limits.resultItems ({limit})',
+  'query/descent-limit': 'сегмент потомков достигает значения, глубина вложенности которого больше {limit}',
   'query/function-threw': "зарегистрированная функция '{name}' выбросила исключение: {detail}",
   'query/operator-threw': "зарегистрированный оператор '{name}' завершился с ошибкой: {detail}",
   'query/input-undefined': 'входной документ равен undefined, что не является значением JSON',

@@ -294,7 +294,11 @@ Rules of the road:
    dragging in `@jarenjs/validate` or `@jarenjs/forms`, so that either one
    can serve any pack. The platform and `@jarenjs/core` are the only things
    a pack may reach for - core is where the shared value renderer lives, so
-   a pack cannot drift from the catalog contract by re-implementing it.
+   a pack cannot drift from the catalog contract by re-implementing it. The
+   one wrapper is `formatSchemaValue` (in the packs' internal `helpers.js`),
+   which writes a BigInt in a `const` or `enum` value as its digits where
+   core's renderer would throw; the validator's English catalog quotes the
+   same way.
 3. **Use `Intl`, as module-level singletons.** `Intl.PluralRules` for
    plural categories (see `nl.js`: "1 teken" / "2 tekens"),
    `Intl.NumberFormat` for `{limit}`-style numbers, `Intl.ListFormat` for

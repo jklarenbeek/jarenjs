@@ -34,13 +34,6 @@ delete it or fix it.
 (RFC 9535, passing the complete official compliance suite), JSON Patch
 (RFC 6902) and Merge Patch (RFC 7396). See
 [`packages/json/ARCHITECTURE.md`](../packages/json/ARCHITECTURE.md).
-- [ ] **A descendant segment's depth refusal does not localize.** A descendant
-  segment past its nesting bound is refused `JQ2009` with `messageId:
-  'query/reason'`: it names its path but does not localize. Add
-  `query/descent-limit` (`{limit}`, English: 'a descendant segment reaches a
-  value nested deeper than {limit} levels') to `queryMessagesEn`, the eleven
-  `@jarenjs/locales` packs and the derived linq message vocabulary, and build
-  the error with `queryRuntimeError` in `descentTooDeep`.
 
 ## @jarenjs/json — JSLT
 
@@ -86,14 +79,35 @@ delete it or fix it.
   value; `equalsJson`, `stableStringify`, `createJSONPatch` and
   `createMergePatch` walk on their own stack and refuse past 10000 levels with
   `JO2001`.
-- [ ] **`basic` output omits the 2020-12 example's branch units.** JSON Schema
-  2020-12 Core §12.4.2 lists, beside the error units, the branch units of `""`
-  and `/items/$ref` with `error: "A subschema had errors."`; `basicOutput`
-  lists only the units that carry an error or an annotation, because a branch
-  unit's message would need a new message key (`subschema`), which every
-  `@jarenjs/locales` pack must then carry (the packs' key-coverage test
-  refuses a key one of them lacks). Fix: add the key to `messagesEn` and every
-  pack, then list the condensed tree's branch nodes in `basic`.
+- [ ] **Five keywords still render the generic message.** `minContains`,
+  `maxContains`, `contentEncoding`, `contentMediaType` and `nullable: false`
+  failures render `validation failed for keyword '<k>'` with `params: {}` (`{
+  contains: { type: 'string' }, minContains: 2 }` on `['a']`). Each needs
+  params (the limit, the encoding or media type) and a key in `messagesEn` and
+  the eleven packs.
+- [ ] **A `$data`/`data` bound names its pointer.** `{ minimum: { $data: '1/m'
+  } }` on `{ n: 1, m: 5 }` reports `params.limit: '1/m'` and "must be >= 1/m";
+  the resolved value is the error's second meta argument (as `const`/`enum`
+  now read it). Changing it changes a non-fallback message (an upgrade
+  sentence).
+- [ ] **Collected errors stop at the first `$data` keyword that fails.**
+  `allValidatorsPass` (tools.js) returns at the first failing validator even
+  in collect mode, so `{ const: { $data: '1/w' }, minimum: { $data: '1/m' } }`
+  reports only `minimum`.
+- [ ] **`unevaluatedProperties` is silent beside a failed sibling.** `{
+  properties: { a: { type: 'string' } }, unevaluatedProperties: false }` on `{
+  a: 1, x: 1 }` collects only `type` at `/a`; `x` is not reported (the answer,
+  invalid, is right).
+- [ ] **An empty member name loses its name.** `required: ['']` on `{}`
+  renders "must have required properties" and `additionalProperties: false` on
+  `{ '': 1 }` "must NOT have additional properties" (the renderers test the
+  param by truthiness; the new keys test `!== undefined`).
+- [ ] **A BigInt in a schema value throws in the shared renderers.**
+  `formatMessageValue`/`formatTemplateParam` JSON-stringify, so forms'
+  `form/const` with `constValue: 10n` and `form/enum` with `[10n]` throw
+  `TypeError`, as does any template catalog entry `{allowedValues}` over a
+  nested BigInt; spelling BigInt in core would let validate's `quoteValue` and
+  locales' `formatSchemaValue` collapse into it.
 - [ ] **A `v`-mode literal `pattern` is still read as a literal.** `pattern`,
   `patternProperties` keys and the `regex` format read a string as an ECMA-262
   source in Unicode mode, so `"/a/"` matches only text containing `/a/`; a

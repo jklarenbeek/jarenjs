@@ -21,6 +21,7 @@
 
 import {
   formatMessageValue,
+  formatSchemaValue,
   makeNumberRenderer,
   makeTypeNamer,
   dateNameEntries,
@@ -52,6 +53,16 @@ const TYPE_NAMES = {
 const typeName = makeTypeNamer(TYPE_NAMES);
 
 //#endregion
+
+/**
+ * `dependentRequired`, and the array form of draft-07 `dependencies`: the
+ * present property and the first dependency it misses.
+ * @param {any} p - The error's params
+ * @returns {string}
+ */
+const requiresDependency = (p) => p.missingProperty !== undefined
+  ? `プロパティ '${p.property}' がある場合はプロパティ '${p.missingProperty}' が必要です`
+  : '存在するプロパティが依存するプロパティが必要です';
 
 /**
  * The Japanese catalog. Covers every key of validate's `messagesEn`,
@@ -96,6 +107,21 @@ export const ja = {
   then: '"then" スキーマに一致しなければなりません',
   else: '"else" スキーマに一致しなければなりません',
   'false schema': 'ブールスキーマ false は常に無効です',
+  const: (p) => p.allowedValue !== undefined
+    ? `定数 ${formatSchemaValue(p.allowedValue)} と等しくなければなりません`
+    : '定数と等しくなければなりません',
+  enum: (p) => Array.isArray(p.allowedValues)
+    ? `許可された値 ${listFormat.format(p.allowedValues.map(formatSchemaValue))} のいずれかと等しくなければなりません`
+    : '許可された値のいずれかと等しくなければなりません',
+  dependentRequired: requiresDependency,
+  dependencies: requiresDependency,
+  unevaluatedProperties: (p) => p.unevaluatedProperty !== undefined
+    ? `未評価のプロパティ '${p.unevaluatedProperty}' は 'unevaluatedProperties' スキーマを満たしていません`
+    : "未評価のプロパティは 'unevaluatedProperties' スキーマを満たしていません",
+  unevaluatedItems: (p) => p.unevaluatedItem !== undefined
+    ? `インデックス ${p.unevaluatedItem} の未評価の項目は 'unevaluatedItems' スキーマを満たしていません`
+    : "未評価の項目は 'unevaluatedItems' スキーマを満たしていません",
+  subschema: 'サブスキーマにエラーがありました。',
   $query: (p) => p.code
     ? `'$query' アサーションが '${p.docPath}' で ${p.code} を発生させました`
     : "'$query' アサーションを満たさなければなりません",
@@ -406,6 +432,7 @@ export const ja = {
   'query/phrase-limit': 'フレーズが {limit} 個を超える項目を具体化しました（limits.sequenceItems）',
   'query/steps-limit': 'クエリが limits.steps（式の評価 {limit} 回）を超えました',
   'query/result-limit': 'クエリ結果の項目数は {count} 個で、limits.resultItems（{limit}）を超えています',
+  'query/descent-limit': '子孫セグメントが {limit} 段より深くネストした値に到達しています',
   'query/function-threw': "登録された関数 '{name}' が例外をスローしました: {detail}",
   'query/operator-threw': "登録された演算子 '{name}' が失敗しました: {detail}",
   'query/input-undefined': '入力ドキュメントが undefined です（undefined は JSON 値ではありません）',

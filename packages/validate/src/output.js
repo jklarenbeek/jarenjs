@@ -27,7 +27,7 @@
 
 import { isArrayClass, isObjectClass } from '@jarenjs/core';
 import { encodeJSONPointerSegment, decodeJSONPointerSegment } from '@jarenjs/json/pointer';
-import { convertInternalErrors } from './messages.js';
+import { convertInternalErrors, renderErrorMessage } from './messages.js';
 import { TRAVERSE_SCHEMA_OBJECTS, TRAVERSE_SCHEMA_MAPS, TRAVERSE_SCHEMA_MAP_MAPS } from './schema-keywords.js';
 import { createJsonPointer } from './traverse.js';
 
@@ -47,7 +47,8 @@ import { createJsonPointer } from './traverse.js';
 
 /**
  * The `basic` output: the units that carry an error (a failed validation)
- * or an annotation (a passing one), flat.
+ * or an annotation (a passing one), and the branch units of a failure
+ * ("A subschema had errors."), flat.
  * @typedef {{ valid: boolean, errors?: KeywordOutputUnit[], annotations?: KeywordOutputUnit[] }} BasicOutput
  */
 
@@ -644,15 +645,21 @@ function projectDetailed(root) {
 }
 
 /**
- * The `basic` output: the units of the condensed hierarchy that carry an
- * error or an annotation, flat.
+ * The `basic` output: the units of the condensed hierarchy, flat. A unit
+ * that carries an error or an annotation is listed with it; a failed unit
+ * that carries neither holds two or more failed units (the condensed
+ * hierarchy keeps no other), and is listed as a branch unit with the
+ * `subschema` message, "A subschema had errors.".
  * @param {OutputUnit} root
+ * @param {{ options?: { messages?: boolean } }} validation - The compilation's `ValidationRoot`
  * @returns {Record<string, unknown>}
  */
-function projectBasic(root) {
+function projectBasic(root, validation) {
+  const branch = validation.options?.messages === false ? '' : renderErrorMessage({ keyword: 'subschema' });
   const units = [];
   const visit = (/** @type {KeywordNode} */ node) => {
     if (carries(node)) units.push(keywordUnit(node, []));
+    else if (!node.valid) units.push(keywordUnit({ ...node, error: branch }, []));
     for (const kid of node.kids) visit(kid);
   };
   const kept = condense(keywordTree(root, root.valid, false));
@@ -747,7 +754,7 @@ function createRecorder(schemas) {
 /**
  * @template R
  * @param {string} name
- * @param {(root: OutputUnit) => R} projection
+ * @param {(root: OutputUnit, validation: any) => R} projection - Projects the recorded units; `validation` is the compilation's `ValidationRoot`
  * @returns {Readonly<OutputFormat<R>>}
  */
 function recordingFormat(name, projection) {
@@ -759,7 +766,7 @@ function recordingFormat(name, projection) {
       const recorder = root.recorder;
       return (/** @type {unknown} */ data) => {
         const recorded = recorder.run(() => root.validate(data));
-        return projection(unitOf(recorded.root, null, recorded.schemas));
+        return projection(unitOf(recorded.root, null, recorded.schemas), root);
       };
     },
   });
@@ -780,7 +787,7 @@ export const flagOutput = Object.freeze({
 
 /**
  * `basic` (JSON Schema 2020-12): the units that carry an error or an
- * annotation, flat.
+ * annotation, and the branch units of a failure, flat.
  * @type {Readonly<OutputFormat<BasicOutput>>}
  */
 export const basicOutput = recordingFormat('basic', projectBasic);
