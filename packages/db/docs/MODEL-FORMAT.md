@@ -329,9 +329,9 @@ Three things follow, and none of them is optional:
   per-mapping cell.
 
 **What it costs, both halves** (`benchmark/spatial.js`, the store's own
-rows over 50 000 points): the same `$within` measures <!--fact:spatial.rtreeStore-->0.46 ms against 2 ms — 4.3× in the R\*Tree's favour<!--/fact-->, and loading them
-costs <!--fact:spatial.rtreeLoad-->718 ms against 399 ms for 50,000 documents in one transaction — 1.8× the write cost<!--/fact-->. Isolated from the store on a raw
-connection, the same probe is <!--fact:spatial.rtree-->0.3 ms against 1.9 ms — 6.4× in the R\*Tree's favour<!--/fact-->. Read speed bought with write cost and a
+rows over 50 000 points): the same `$within` measures <!--fact:spatial.rtreeStore-->0.51 ms against 2.2 ms — 4.3× in the R\*Tree's favour<!--/fact-->, and loading them
+costs <!--fact:spatial.rtreeLoad-->841 ms against 482 ms for 50,000 documents in one transaction — 1.7× the write cost<!--/fact-->. Isolated from the store on a raw
+connection, the same probe is <!--fact:spatial.rtree-->0.33 ms against 2 ms — 5.9× in the R\*Tree's favour<!--/fact-->. Read speed bought with write cost and a
 second table: choose it deliberately, per index, which is why it is
 neither automatic nor a store-wide option.
 
@@ -2639,12 +2639,12 @@ pushes everything BUT the spatial conjunct):
 <!--fact:spatial.udfTable-->
 | shape | pushed (ms) | residual (ms) | verdict |
 |---|---|---|---|
-| solo `$within` over a full scan | 94 | 80 | ~even |
-| indexed `$eq` **and** `$within` (~5 % pass the index) | 5.7 | 52 | push **9.1×** |
-| `$within` with `LIMIT 10` | 1.9 | 77 | push **41.0×** |
+| solo `$within` over a full scan | 105 | 78 | ~even |
+| indexed `$eq` **and** `$within` (~5 % pass the index) | 6.5 | 58 | push **8.9×** |
+| `$within` with `LIMIT 10` | 102 | 73 | ~even |
 <!--/fact-->
 
-So the spatial hatch <!--fact:spatial.udfVerdict-->earns its row: 9.1× beside the selective conjunct and 41.0× under the LIMIT<!--/fact-->,
+So the spatial hatch <!--fact:spatial.udfVerdict-->earns its row: 8.9× beside the selective conjunct and 0.7× under the LIMIT<!--/fact-->,
 by the same rule as `$sqrt`: a sole `$within` over a full scan is a
 loss (the UDF re-parses every row in the callback, and the exact
 containment test is dearer than a square root), a `$within` beside

@@ -543,13 +543,13 @@ reason in `live.mode` — declared, never silent.
 **The numbers, the loss included.** `benchmark/spatial.js` stores <!--fact:spatial.corpus-->50,000 points<!--/fact-->
 over the Netherlands and probes one box at <!--fact:spatial.rows-->258 of 50,000 (0.5 %)<!--/fact--> selectivity,
 asserting every plan case of the committed spatial corpus and every timed shape against the JavaScript
-engine before a single timing is printed. The `$within` a consumer writes went from <!--fact:spatial.scan-->80 ms<!--/fact-->
-as a full scan to <!--fact:spatial.within-->2 ms<!--/fact--> over the `bbox` index (<!--fact:spatial.scanVsIndexed-->40.0<!--/fact-->×);
-`$bbox-intersects` is <!--fact:spatial.bboxIntersects-->1.9 ms<!--/fact-->, a bounded `$distance` <!--fact:spatial.distance-->1.5 ms<!--/fact-->;
-one geohash cell answers in <!--fact:spatial.cellOne-->0.0068 ms for 0 row(s)<!--/fact--> and the honest nine-cell
-probe in <!--fact:spatial.cellNine-->0.026 ms for 2 row(s)<!--/fact-->. The row the store had to win is the same
-`$within` in the in-memory engine over the parsed array, no database at all: <!--fact:spatial.engine-->32 ms<!--/fact-->.
-The indexed store is now <!--fact:spatial.engineVsIndexed-->16.1× faster than<!--/fact--> it — but the un-indexed scan
+engine before a single timing is printed. The `$within` a consumer writes went from <!--fact:spatial.scan-->78 ms<!--/fact-->
+as a full scan to <!--fact:spatial.within-->2.2 ms<!--/fact--> over the `bbox` index (<!--fact:spatial.scanVsIndexed-->35.9<!--/fact-->×);
+`$bbox-intersects` is <!--fact:spatial.bboxIntersects-->2 ms<!--/fact-->, a bounded `$distance` <!--fact:spatial.distance-->1.5 ms<!--/fact-->;
+one geohash cell answers in <!--fact:spatial.cellOne-->0.016 ms for 0 row(s)<!--/fact--> and the honest nine-cell
+probe in <!--fact:spatial.cellNine-->0.041 ms for 2 row(s)<!--/fact-->. The row the store had to win is the same
+`$within` in the in-memory engine over the parsed array, no database at all: <!--fact:spatial.engine-->31 ms<!--/fact-->.
+The indexed store is now <!--fact:spatial.engineVsIndexed-->14.4× faster than<!--/fact--> it — but the un-indexed scan
 is not, and the comparison is not an even one either way: the engine starts from parsed objects where the
 store starts from bytes on a page and pays JSON materialisation for every row it returns. Both rows stay
 published. The deterministic-UDF hatch takes a literal `$within` on a collection with no derived index, and
@@ -564,10 +564,10 @@ columns (MODEL-FORMAT §2.1). The logical model is unchanged — the
 spatial corpus runs every entry under both mappings, in all three
 executors, with no special-cased entry — and the pushed conjunct becomes
 a `rowid` subquery over the virtual table. Through the store the same
-`$within` measures <!--fact:spatial.rtreeStore-->0.46 ms against 2 ms — 4.3× in the R\*Tree's favour<!--/fact-->; loading the same rows
-costs <!--fact:spatial.rtreeLoad-->718 ms against 399 ms for 50,000 documents in one transaction — 1.8× the write cost<!--/fact-->, because the R\*Tree is a
+`$within` measures <!--fact:spatial.rtreeStore-->0.51 ms against 2.2 ms — 4.3× in the R\*Tree's favour<!--/fact-->; loading the same rows
+costs <!--fact:spatial.rtreeLoad-->841 ms against 482 ms for 50,000 documents in one transaction — 1.7× the write cost<!--/fact-->, because the R\*Tree is a
 second table written inside every write transaction. Isolated from the
-store on a raw connection the probe is <!--fact:spatial.rtree-->0.3 ms against 1.9 ms — 6.4× in the R\*Tree's favour<!--/fact-->.
+store on a raw connection the probe is <!--fact:spatial.rtree-->0.33 ms against 2 ms — 5.9× in the R\*Tree's favour<!--/fact-->.
 Both halves are published because both are the price. One honest
 difference comes with it: an R\*Tree stores 32-bit floats rounded
 outward, so its box is a superset and `$bbox-intersects` is refined

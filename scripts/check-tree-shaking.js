@@ -241,7 +241,8 @@ if (chainEdgeLeak.length > 0)
 // Raised to 230,600 (measured 230506): the descent refusal's message id and docPath add 78.
 // Raised to 231,500 (measured 231415): the join table's query root and the message vocabulary's new keyword and descent ids add 909.
 // Raised to 232,600 (measured 232511): the message vocabulary's ids for the five keyword messages, the resolved bound and the failed load, and core's located cycle refusal add 1096.
-if (chainBytes > 232600)
+// Raised to 240,600 (measured 240544): the geometry walks' coded cycle and depth refusal with their stack-free fallback past 256 levels (core walk), the keyed operators' located cycle and depth refusal and the shared-value key in linear space, and the descent segment's cycle refusal add 8033.
+if (chainBytes > 240600)
   throw new Error(`The chain bundle grew to ${chainBytes} bytes.`);
 
 console.log(`Tree-shaking smoke test passed (${chainBytes} byte chain bundle; no schema-pen module, no client module, no store/validator/formats bytes).`);
@@ -636,7 +637,8 @@ if (asyncLiveLeak.length)
 // Raised to 1,016,900 (measured 1016809): the join table's query root, bracket member paths, one external-admission rule on every surface, replace records for a row a save or a membership stores again, the bind diversion of strings the database would not receive as written, the raising cursor, the blank-tolerant retype and the number-first union read-back add 11760.
 // Raised to 1,020,400 (measured 1020349): a join table's rows bounded by each side's profile predicate, the refusal of keys and texts the database would store as another value, the engine fold over a non-UTF-8 file and the shared-cache source add 3540.
 // Raised to 1,033,400 (measured 1033301): the store's refusal of a non-JSON external through filters and operators, a wide predicate external compared by its digits, the join table's second-key index and its upgrade, the many-to-many count and existence in one statement, the validator's every-keyword collection, draft keyword gates and resolved bounds, the single-pass unevaluated log and core's located cycle refusal add 12952.
-if (clientBytes > 1033400)
+// Raised to 1,044,600 (measured 1044563): the chain's geometry, keying and descent cycle refusals (8033), the validator's reference targets under their own draft and its coded unresolvable, dynamic and malformed references (2834), and the digit-name guard and point-read key spelling add 11262.
+if (clientBytes > 1044600)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 
