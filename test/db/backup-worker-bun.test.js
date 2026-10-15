@@ -46,7 +46,7 @@ describe('a Bun backup inside a compiled executable', () => {
       const { complete, aborted, deadline } = report;
       assert.equal(complete.events, complete.pages - 1, JSON.stringify(complete));
       assert.ok(complete.ticksDuringCopy > 0, `no timer ran during the copy: ${JSON.stringify(complete)}`);
-      assert.deepEqual([complete.rows, complete.everyRow], [3000, true]);
+      assert.deepEqual([complete.rows, complete.everyRow], [12000, true]);
 
       for (const [stopped, code] of [[aborted, 'JD2079'], [deadline, 'JD2075']]) {
         assert.equal(stopped.code, code, JSON.stringify(stopped));

@@ -8,7 +8,9 @@ import { openStore } from '@jarenjs/db';
 import { bunDriver } from '@jarenjs/db/bun';
 import { existsSync, readdirSync } from 'node:fs';
 
-const ROWS = 3000;
+// large enough that a whole copy takes many times the ticks an abort takes
+// to settle, so the comparison below holds on a loaded host
+const ROWS = 12000;
 const MODEL = {
   $model: '0.1',
   collections: {
