@@ -11,9 +11,9 @@
       "role": "physical discovery and preserve/refuse",
       "matches": [
         "3: * @file Database → model: `introspectModel(connection)` reads a live",
-        "194:export function readSchema(connection, options = undefined) {",
-        "890:export function introspectModel(connection, options = undefined) {",
-        "902:  return chain(readSchema(connection, options), (schema) => {"
+        "198:export function readSchema(connection, options = undefined) {",
+        "877:export function introspectModel(connection, options = undefined) {",
+        "889:  return chain(readSchema(connection, options), (schema) => {"
       ],
       "disposition": "retained"
     },
@@ -102,7 +102,7 @@
       "api": "@jarenjs/contract/ledger",
       "role": "finite-TTL HTTP claim",
       "matches": [
-        "261:export function createMemoryLedger(options = {}) {"
+        "272:export function createMemoryLedger(options = {}) {"
       ],
       "disposition": "retained"
     },

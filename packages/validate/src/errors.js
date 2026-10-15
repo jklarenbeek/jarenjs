@@ -1,14 +1,18 @@
 //@ts-check
 /**
- * @file The validator's coded refusals: a schema whose references loop
- * without reading the instance is refused when it is compiled
- * (`JK0001`), an invalid `maxReferenceDepth` option likewise (`JK0002`),
- * an `outputFormat` option that is not an output format likewise
- * (`JK0003`), and a validation that nests more schema references than that option
- * (default {@link REFERENCE_DEPTH_CEILING}) is refused where the bound is
- * crossed (`JK2001`), before the host's call stack can overflow. Both are
- * thrown, never folded into a `false` answer: under `not` a folded
- * failure would read as success.
+ * @file The validator's coded refusals. When a schema compiles: a loop of
+ * references that never reads the instance (`JK0001`), an invalid
+ * `maxReferenceDepth` option (`JK0002`) and an `outputFormat` option that
+ * is not an output format (`JK0003`). When `compileAsync`
+ * (`@jarenjs/validate/load`) loads what a schema references: a document the
+ * loader fails to load (`JK0004`), one that is not a schema (`JK0005`), a
+ * compilation that needs more loads than its bound (`JK0006`) and an
+ * argument it does not take (`JK0007`). When a validator runs: a validation
+ * that nests more schema references than `maxReferenceDepth` (default
+ * {@link REFERENCE_DEPTH_CEILING}) is refused where the bound is crossed
+ * (`JK2001`), before the host's call stack can overflow. Every refusal is
+ * thrown, never folded into a `false` answer: under `not` a folded failure
+ * would read as success.
  */
 
 import { CodedError } from '@jarenjs/core/errors';
@@ -22,6 +26,10 @@ export const VALIDATE_CODES = Object.freeze({
   JK0001: 'a loop of references and in-place applicators never reads the instance',
   JK0002: 'the maxReferenceDepth option is not a positive safe integer',
   JK0003: 'outputFormat is not a format of @jarenjs/validate/output',
+  JK0004: 'compileAsync: the loadSchema function failed to load a referenced schema',
+  JK0005: 'compileAsync: a loaded document is not a schema, or not a valid one under its registered $schema',
+  JK0006: 'compileAsync: a compilation needs more schema loads than the maxLoads option',
+  JK0007: 'compileAsync: its validator, loadSchema or maxLoads argument is not one it takes',
   JK2001: 'validation nests schema references deeper than the reference depth ceiling',
 });
 
@@ -43,9 +51,11 @@ export class SchemaCompileError extends CodedError {
   /**
    * @param {string} code - Stable diagnosis code
    * @param {string} reason - What is wrong
+   * @param {string} [location] - Where in the schema, as `docPath`
+   * @param {{ cause?: unknown }} [options] - `cause`: the error behind the refusal
    */
-  constructor(code, reason) {
-    super('SchemaCompileError', code, reason);
+  constructor(code, reason, location = undefined, options = undefined) {
+    super('SchemaCompileError', code, reason, location, options);
   }
 }
 
@@ -71,7 +81,7 @@ export class SchemaRuntimeError extends CodedError {
 export function assertReferenceDepth(value) {
   if (value !== undefined && !(Number.isSafeInteger(value) && /** @type {number} */ (value) > 0))
     throw new SchemaCompileError('JK0002',
-      `maxReferenceDepth must be a positive safe integer, got ${typeof value === 'number' ? String(value) : JSON.stringify(value) ?? typeof value}`);
+      `maxReferenceDepth must be a positive safe integer, got ${describeCount(value)}`);
 }
 
 /**
@@ -85,7 +95,29 @@ export function assertReferenceDepth(value) {
 export function assertOutputFormat(value) {
   if (value !== undefined && typeof (/** @type {any} */ (value))?.validator !== 'function')
     throw new SchemaCompileError('JK0003',
-      `outputFormat takes a format of '@jarenjs/validate/output', got ${typeof value === 'string' ? `'${value}'` : typeof value}`);
+      `outputFormat takes a format of '@jarenjs/validate/output', got ${describeKind(value)}`);
+}
+
+/**
+ * Name the value given for a count option in its refusal: a number as
+ * written, anything else as JSON (`"3"`, `null`), or its type when JSON has
+ * no spelling for it.
+ * @param {unknown} value
+ * @returns {string}
+ */
+export function describeCount(value) {
+  return typeof value === 'number' ? String(value) : JSON.stringify(value) ?? typeof value;
+}
+
+/**
+ * Name the value given where a function or an object of one kind is taken:
+ * a string quoted (it is often the name of what was meant), anything else
+ * by its type.
+ * @param {unknown} value
+ * @returns {string}
+ */
+export function describeKind(value) {
+  return typeof value === 'string' ? `'${value}'` : typeof value;
 }
 
 let referenceDepth = 0;

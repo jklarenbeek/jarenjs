@@ -38,6 +38,7 @@ import { hasRecursiveAnchor, getDynamicAnchorName, collectDynamicAnchors, collec
 import { isRecursiveQueryCompileError } from './query-keyword.js';
 import { boundReference, assertReferenceDepth, assertOutputFormat, REFERENCE_DEPTH_CEILING } from './errors.js';
 import { TRAVERSE_SCHEMA_MAP_MAPS, detectSchemaDraft } from './schema-keywords.js';
+import { VALIDATOR_STATE } from './validator-state.js';
 
 export {
   registerFormatCompilers
@@ -1615,6 +1616,7 @@ export class JarenValidator {
     this.#metaSchemas = new Map();
     this.#options = options;
     this.#traverse = traverseOptionsFor(options.traverse, options.validation?.propertyDependencies);
+    VALIDATOR_STATE.set(this, { schemas: this.#schemas, traverse: this.#traverse });
   }
 
   /**

@@ -28,6 +28,7 @@ Key entry points:
 - `.addMetaSchema(schemas, key)` — register (custom) meta-schemas, honoring `$vocabulary`
 - `.addFormats(formats)` — register format validators (see [`@jarenjs/formats`](../formats))
 - `.compile(schema)` — compile a schema into a validation function
+- `compileAsync(validator, schema, { loadSchema })` from `@jarenjs/validate/load` — load the documents a schema's references need, then compile it — see [Loading referenced schemas](#loading-referenced-schemas)
 
 Highlights:
 
@@ -879,6 +880,75 @@ What this recipe does **not** give you is Zod's output normalization: a
 compiled validator is a pure predicate and never modifies its input. That
 boundary does not move — but the normalization itself ships beside it, as a
 separately compiled pass. See [Normalization](#normalization) below.
+
+## Loading referenced schemas
+
+`compile` resolves a `$ref` only to a document the validator already holds.
+When the documents live elsewhere — on a schema registry, in a database, in
+files a tool call names — `compileAsync` from `@jarenjs/validate/load` loads
+them first. It walks the schema for the documents its `$ref` and
+`$dynamicRef` targets live in, asks the host's `loadSchema(uri)` for each one
+the validator does not hold, registers it with `addSchema`, walks what it
+loaded the same way, and then compiles with `compile` — so the validator it
+returns is the one `compile` returns over the same documents added
+beforehand:
+
+```javascript
+import { JarenValidator } from '@jarenjs/validate';
+import { compileAsync } from '@jarenjs/validate/load';
+
+// The host's documents, by URI (an HTTP fetch or a database read works the same).
+const documents = {
+  'https://schemas.example.com/person.json': {
+    type: 'object',
+    properties: {
+      name: { $ref: 'name.json' },
+      friends: { type: 'array', items: { $ref: '#' } },
+    },
+    required: ['name'],
+  },
+  'https://schemas.example.com/name.json': { type: 'string', minLength: 1 },
+};
+
+const validator = new JarenValidator();
+const validate = await compileAsync(validator,
+  { $ref: 'https://schemas.example.com/person.json' },
+  { loadSchema: async (uri) => documents[uri] });
+
+validate({ name: 'Ada', friends: [{ name: 'Alan' }] }); // true
+validate({ name: 'Ada', friends: [{ name: '' }] });     // false: name.json needs one character
+validator.getSchema('https://schemas.example.com/name.json') === documents['https://schemas.example.com/name.json']; // true: it stays added
+```
+
+- **What it loads.** The document a reference names: `loadSchema` is called
+  with an absolute URI without its fragment (`name.json#/$defs/x` loads
+  `name.json`), resolved against the `$id` the reference sits under — in a
+  loaded document, against the URI it was loaded from. Also the meta-schema
+  a schema's `$schema` names, unless that is a json-schema.org dialect (the
+  validator implements those itself), because `compile` reads its
+  `$vocabulary`; and what a schema the validator already held references and
+  nothing holds, since `compile` resolves those too. A schema whose
+  references the validator all holds loads nothing.
+- **Once each.** A document is loaded at most once per validator: several
+  references to it, in one call or in calls running at the same time, wait
+  on the same load. A loaded document stays added, so a later compile finds
+  it held. A load that failed is not remembered; the next call asks again.
+  A cycle of references between documents ends, since a document already
+  reached is not walked again.
+- **What `loadSchema` returns.** The parsed document — an object or a
+  boolean — or a promise of it. Its JSON text is not a schema: parse it
+  first.
+- **Refusals.** A loader that throws or rejects refuses with `JK0004` (its
+  error kept as `cause`), something that is not a schema with `JK0005`, a
+  call that needs more than `maxLoads` documents (default 100) with
+  `JK0006`, and an argument `compileAsync` does not take with `JK0007`.
+  Each load refusal names the URI and, as `docPath`, the reference that
+  needed it ([ERROR-MESSAGES §9](docs/ERROR-MESSAGES.md#9-coded-refusals)).
+  A loaded document is registered as `addSchema` registers it: it is not
+  validated against a meta-schema.
+
+`compileAsync` lives behind its own subpath, so a validator that never loads
+a schema ships none of its code.
 
 ## Standard output formats
 

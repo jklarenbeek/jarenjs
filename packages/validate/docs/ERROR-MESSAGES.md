@@ -282,6 +282,10 @@ failed validation, because a `false` under `not` would read as success.
 | `JK0001` | `SchemaCompileError` | A loop of references and in-place applicators never reads the instance: refused by `compile()` |
 | `JK0002` | `SchemaCompileError` | The `maxReferenceDepth` option is not a positive safe integer: refused when a schema compiles |
 | `JK0003` | `SchemaCompileError` | The `outputFormat` option is not a format of `@jarenjs/validate/output`: refused when a schema compiles |
+| `JK0004` | `SchemaCompileError` | `compileAsync`'s `loadSchema` threw or rejected for a document a schema references |
+| `JK0005` | `SchemaCompileError` | `compileAsync`'s `loadSchema` returned something that is not a schema (an object or a boolean) |
+| `JK0006` | `SchemaCompileError` | One `compileAsync` call needs more document loads than its `maxLoads` option (default 100) |
+| `JK0007` | `SchemaCompileError` | `compileAsync` was given something that is not a `JarenValidator`, a `loadSchema` that is not a function, or a `maxLoads` that is not a positive safe integer |
 | `JK2001` | `SchemaRuntimeError` | Validation nests schema references deeper than `maxReferenceDepth` (default 256): refused where the bound is crossed |
 
 **`JK0001` — a loop that never reads the instance.** A `$ref` that leads
@@ -355,4 +359,44 @@ JK0003: outputFormat takes a format of '@jarenjs/validate/output', got 'list'
 
 The formats live behind the subpath so that a validator given none ships
 none of their code. Absent means the `collectErrors` shapes.
+
+**`JK0004`–`JK0007` — loading what a schema references.** `compileAsync`
+(`@jarenjs/validate/load`, the README's *Loading referenced schemas*) loads
+every document a schema's references need that the validator does not hold
+through the host's `loadSchema(uri)`. A load that cannot be used refuses the
+whole compilation; the message names the URI asked for, and `docPath` is the
+reference that needed it — in the schema (`#/…`) or in a document loaded
+for it (`https://…#/…`). A loader that throws or rejects is `JK0004`, its
+error kept as `cause`:
+
+```text
+JK0004: loadSchema('https://x.test/a.json') failed: 503 Service Unavailable at #/properties/a/%24ref
+```
+
+A reference inside a schema the validator held before the call has no
+location in the schema being compiled; its refusal says so instead:
+
+```text
+JK0004: loadSchema('https://x.test/name.json') failed: no document at https://x.test/name.json, referenced by a schema the validator held
+```
+
+A loader that returns anything but an object or a boolean — the document's
+JSON text included, which the host parses — is `JK0005`, rather than a
+document `addSchema` would skip and `compile` then cannot resolve:
+
+```text
+JK0005: loadSchema('https://x.test/s.json') returned the string '{"type":"string"}', not a schema (an object or a boolean) at #/items/%24ref
+```
+
+A call that needs more documents than `maxLoads` (default 100) stops at the
+first one past the bound, so a loader that keeps answering with documents
+that reference new ones cannot run without end:
+
+```text
+JK0006: compileAsync needs more than 100 schema loads (maxLoads); one more is 'https://x.test/100.json' at https://x.test/99.json#/%24ref
+```
+
+An argument `compileAsync` does not take is `JK0007` (`compileAsync takes a
+loadSchema(uri) function, got undefined`; `maxLoads must be a positive safe
+integer, got 0`), refused before anything is loaded.
 

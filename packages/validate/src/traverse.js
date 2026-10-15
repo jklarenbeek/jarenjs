@@ -152,7 +152,21 @@ export function createJsonPointer(refUri, baseUri, opts = new JsonPointerOptions
   return new JsonPointer(`${leftUri}#`, search, `${leftUri}#`, null);
 }
 
-export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPointerOptions()) {
+/**
+ * Register a schema document's identifiers (`$id`/`id`, `$anchor`,
+ * `$dynamicAnchor`) in `schemas`, and every `$ref` target it names as a
+ * `null` placeholder that {@link restoreSchemaRefsInMap} resolves.
+ * @param {Map<string, any>} schemas - The map to register into
+ * @param {string} baseUri - The URI the document was retrieved from
+ * @param {any} schema - The document
+ * @param {JsonPointerOptions} [opts]
+ * @param {(target: JsonPointer, location: string) => void} [onReference] -
+ *   Offered the resolved target of every `$ref` and `$dynamicRef` the walk
+ *   reaches, with the reference's location in the document as a URI
+ *   fragment (`#/properties/a/%24ref`)
+ * @returns {string} The document's own id
+ */
+export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPointerOptions(), onReference = undefined) {
   if (!isObjectClass(schema)) {
     const { id } = createJsonPointer(baseUri, undefined, opts);
     schemas.set(id, schema);
@@ -229,10 +243,15 @@ export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPoi
       // It's only used for $dynamicRef resolution
     }
 
+    if (onReference !== undefined && hasSchemaReference(obj, '$dynamicRef'))
+      onReference(createJsonPointer(obj.$dynamicRef, baseUri, opts), encodeJsonPointerPath(path, '$dynamicRef'));
+
     if (isStringType(obj.$ref) && !isStringWhiteSpace(obj.$ref)) {
-      const { id: ref } = createJsonPointer(obj.$ref, baseUri, opts);
+      const target = createJsonPointer(obj.$ref, baseUri, opts);
+      const ref = target.id;
       if (!schemas.has(ref))
         schemas.set(ref, null);
+      if (onReference !== undefined) onReference(target, encodeJsonPointerPath(path, '$ref'));
 
       // Don't continue here - we need to process other schemas in the same
       // parent object (like definitions) even if this one has a $ref.

@@ -25,7 +25,6 @@ delete it or fix it.
 - **1.0 stable** — no milestone-level blockers remain; 1.0 is gated on the
   per-package items below rather than on any one feature.
 - **1.2**
-  - [ ] compileAsync for asynchronous schema loading
   - [ ] JSON.parse reviver / JSON.stringify replacer integration
 
 ## @jarenjs/json — JSONPath & addressing

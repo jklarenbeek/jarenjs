@@ -29,6 +29,8 @@ The validator embraces these architectural principles:
 | `packages/validate/src/schema.js` | Schema compilation dispatcher (`compileSchemaObject`) |
 | `packages/validate/src/messages.js` | Error conversion, message catalogs, the `errorMessage` keyword specs (`ValidationError`, `messagesEn`, `localizeErrors`) |
 | `packages/validate/src/output.js` | The JSON Schema standard output formats (`@jarenjs/validate/output`): the unit recorder and the projections |
+| `packages/validate/src/load.js` | `compileAsync` (`@jarenjs/validate/load`): loads the documents a schema's references need, then compiles |
+| `packages/validate/src/validator-state.js` | What each validator holds, for the subpath modules (`load.js`) |
 | `packages/validate/src/array.js` | Array validation logic |
 | `packages/validate/src/object.js` | Object validation logic |
 | `packages/validate/src/string.js` | String validation logic |
@@ -717,6 +719,27 @@ always built):
   the survival rule (a passing unit inside passing units), the wrapper
   errors a failed subschema already explains, and the pruning of the flat
   and condensed forms.
+
+### Loading Referenced Schemas (load.js)
+
+`compileAsync` lives in `load.js`, the `@jarenjs/validate/load` subpath; the
+core never imports it. It reads what a validator holds through
+`validator-state.js` (the registered schemas and the traversal options, set
+by the constructor) and changes nothing in the compile pipeline:
+
+- **One walk.** It finds the references with the walk that registers a
+  schema, `storeSchemaIdsInMap`, whose optional `onReference` callback is
+  offered each `$ref` and `$dynamicRef` target with its location. The
+  targets are reached when the walk ends, once every identifier of the
+  document is registered, so a reference into the schema's own resources is
+  never loaded.
+- **Loaded documents are registered by `addSchema`** under the URI they were
+  loaded from, and walked with that URI as their base. A schema the
+  validator held before the call is not walked again: its unresolved
+  references are already in the registry as `null` entries, and the
+  documents they name are loaded too.
+- **Then `compile`.** Nothing is compiled until every document is held, so
+  the compiled validator is the synchronous one over the same registrations.
 
 ### Error Handler Creation
 

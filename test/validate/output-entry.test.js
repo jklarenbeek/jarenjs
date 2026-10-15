@@ -25,3 +25,13 @@ it('a validator given no output format ships none of @jarenjs/validate/output', 
     + "export const v = new JarenValidator({ outputFormat: listOutput }).compile({ type: 'string' });");
   assert.equal(formatted.filter((file) => /packages\/validate\/src\/output\.js$/.test(file)).length, 1);
 });
+
+it('a validator that never loads a schema ships none of @jarenjs/validate/load', async () => {
+  const plain = await bundled("import { JarenValidator } from '@jarenjs/validate';\n"
+    + "export const v = new JarenValidator().compile({ type: 'string' });");
+  assert.deepEqual(plain.filter((file) => /packages\/validate\/src\/load\.js$/.test(file)), []);
+  const loading = await bundled("import { JarenValidator } from '@jarenjs/validate';\n"
+    + "import { compileAsync } from '@jarenjs/validate/load';\n"
+    + "export const v = compileAsync(new JarenValidator(), { type: 'string' }, { loadSchema: async () => true });");
+  assert.equal(loading.filter((file) => /packages\/validate\/src\/load\.js$/.test(file)).length, 1);
+});

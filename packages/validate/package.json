@@ -23,6 +23,10 @@
       "types": "./dist/types/output.d.ts",
       "default": "./src/output.js"
     },
+    "./load": {
+      "types": "./dist/types/load.d.ts",
+      "default": "./src/load.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
