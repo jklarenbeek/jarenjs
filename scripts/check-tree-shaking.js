@@ -633,7 +633,8 @@ if (asyncLiveLeak.length)
 // Raised to 1,002,600 (measured 1002519): the store profile as a floor on every read, the engine's evaluation order after a raising conjunct, live replace records for a row stored again, the rebuild's String() spelling, and the stored-key capture, scaled-integer and explain refusals add 9530.
 // Raised to 1,005,100 (measured 1005049): PostgreSQL's out-of-range literal and negated-list spellings, the layout-condition read-back, the worker-hosted Bun backup and the opt-in column upgrade add 2530.
 // Raised to 1,016,900 (measured 1016809): the join table's query root, bracket member paths, one external-admission rule on every surface, replace records for a row a save or a membership stores again, the bind diversion of strings the database would not receive as written, the raising cursor, the blank-tolerant retype and the number-first union read-back add 11760.
-if (clientBytes > 1016900)
+// Raised to 1,020,400 (measured 1020349): a join table's rows bounded by each side's profile predicate, the refusal of keys and texts the database would store as another value, the engine fold over a non-UTF-8 file and the shared-cache source add 3540.
+if (clientBytes > 1020400)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 

@@ -16,7 +16,7 @@
     "benchmark/adoption-resources.js": "804d2e8aac6fa509c837da6d5d66d9204a43ede8ed7af0cd6ead2554a0b6acff",
     "benchmark/adoption-resources-entry.js": "252bc432d619a361363fa0fe90a6fde1fd4f52ea3b7d654d6547c8ce8d8da557",
     "packages/db/src/jobs.js": "865fd96e486c0444065ce838fabf4cb487655df8fdf3fe7387a52d4188bd6e70",
-    "packages/db/src/store.js": "e5c694bb867e4f0961e6445e93a22c15985724dda57d8a515fcfd7b45bf5f6f3"
+    "packages/db/src/store.js": "22b7a427ba92cf675451d0aab9a2db8b44236b367672eaf8a9b126a7173a26c5"
   },
   "method": {
     "liveHeap": "process.memoryUsage().heapUsed after two forced full collections (Node --expose-gc gc(), Bun.gc(true)) at each phase boundary",
@@ -41,148 +41,148 @@
           "phase": "all",
           "searchHash": "e1a757541681300c320a4f07aa0742b817d9363eb284bfd0d061691e76de93bf",
           "runtime": "v24.20.0",
-          "peakLiveHeapBytes": 59656256,
+          "peakLiveHeapBytes": 59706648,
           "peakPhase": "runner.run",
           "samples": [
             {
               "phase": "start",
-              "bytes": 20947928
+              "bytes": 20991520
             },
             {
               "phase": "rows",
-              "bytes": 23894096
+              "bytes": 23937688
             },
             {
               "phase": "seed",
-              "bytes": 24875488
+              "bytes": 24924760
             },
             {
               "phase": "open",
-              "bytes": 26058680
+              "bytes": 26106168
             },
             {
               "phase": "migrateSaved",
-              "bytes": 26534232
+              "bytes": 26581744
             },
             {
               "phase": "migrateSaved",
-              "bytes": 26599816
+              "bytes": 26647768
             },
             {
               "phase": "query",
-              "bytes": 57167320
+              "bytes": 57216480
             },
             {
               "phase": "saveRule",
-              "bytes": 56103240
+              "bytes": 56152304
             },
             {
               "phase": "saveRule",
-              "bytes": 56149688
+              "bytes": 56198752
             },
             {
               "phase": "rows",
-              "bytes": 56236768
+              "bytes": 56285832
             },
             {
               "phase": "preview",
-              "bytes": 56464736
+              "bytes": 56512848
             },
             {
               "phase": "rows",
-              "bytes": 56524504
+              "bytes": 56572616
             },
             {
               "phase": "command.execute",
-              "bytes": 56563160
+              "bytes": 56610216
             },
             {
               "phase": "command.execute",
-              "bytes": 56769224
+              "bytes": 56817584
             },
             {
               "phase": "rows",
-              "bytes": 56831880
+              "bytes": 56880240
             },
             {
               "phase": "preview",
-              "bytes": 56869544
+              "bytes": 56924256
             },
             {
               "phase": "command.execute",
-              "bytes": 57018640
+              "bytes": 57067056
             },
             {
               "phase": "command.execute",
-              "bytes": 57068160
+              "bytes": 57116576
             },
             {
               "phase": "command.execute",
-              "bytes": 57071568
+              "bytes": 57119984
             },
             {
               "phase": "command.execute",
-              "bytes": 57071288
+              "bytes": 57119704
             },
             {
               "phase": "ingest",
-              "bytes": 59442728
+              "bytes": 59493120
             },
             {
               "phase": "ingest",
-              "bytes": 59490544
+              "bytes": 59540936
             },
             {
               "phase": "prepare",
-              "bytes": 59517576
+              "bytes": 59567968
             },
             {
               "phase": "prepare",
-              "bytes": 59517904
+              "bytes": 59568296
             },
             {
               "phase": "runner.run",
-              "bytes": 59656256
+              "bytes": 59706648
             },
             {
               "phase": "close",
-              "bytes": 31070264
+              "bytes": 31120656
             },
             {
               "phase": "open",
-              "bytes": 31691560
+              "bytes": 31743048
             },
             {
               "phase": "ingest",
-              "bytes": 31680104
+              "bytes": 31731592
             },
             {
               "phase": "migrateSaved",
-              "bytes": 31689616
+              "bytes": 31741104
             },
             {
               "phase": "command.execute",
-              "bytes": 31734016
+              "bytes": 31785504
             },
             {
               "phase": "rows",
-              "bytes": 31798040
+              "bytes": 31849528
             },
             {
               "phase": "close",
-              "bytes": 31835504
+              "bytes": 31886992
             },
             {
               "phase": "close",
-              "bytes": 31835456
+              "bytes": 31886944
             },
             {
               "phase": "close",
-              "bytes": 31835624
+              "bytes": 31887112
             },
             {
               "phase": "teardown",
-              "bytes": 30054640
+              "bytes": 30102872
             }
           ],
           "resources": {
@@ -209,112 +209,112 @@
           "phase": "all",
           "searchHash": "51902a33caf8dad05035c9e56096dde0af6c44bb7491692213654b689fcd58ae",
           "runtime": "v24.20.0",
-          "peakLiveHeapBytes": 276823232,
+          "peakLiveHeapBytes": 276871384,
           "peakPhase": "query",
           "samples": [
             {
               "phase": "start",
-              "bytes": 20947944
+              "bytes": 20991616
             },
             {
               "phase": "rows",
-              "bytes": 43450416
+              "bytes": 43579016
             },
             {
               "phase": "seed",
-              "bytes": 45565464
+              "bytes": 45614816
             },
             {
               "phase": "open",
-              "bytes": 46769048
+              "bytes": 46820384
             },
             {
               "phase": "migrateSaved",
-              "bytes": 47244464
+              "bytes": 47292056
             },
             {
               "phase": "migrateSaved",
-              "bytes": 47310048
+              "bytes": 47358080
             },
             {
               "phase": "query",
-              "bytes": 276823232
+              "bytes": 276871384
             },
             {
               "phase": "saveRule",
-              "bytes": 267799728
+              "bytes": 267847880
             },
             {
               "phase": "saveRule",
-              "bytes": 267831784
+              "bytes": 267879936
             },
             {
               "phase": "rows",
-              "bytes": 267906976
+              "bytes": 267955128
             },
             {
               "phase": "preview",
-              "bytes": 268125600
+              "bytes": 268172944
             },
             {
               "phase": "rows",
-              "bytes": 268194888
+              "bytes": 268242984
             },
             {
               "phase": "preview",
-              "bytes": 268225480
+              "bytes": 268273632
             },
             {
               "phase": "command.execute",
-              "bytes": 268269192
+              "bytes": 268317344
             },
             {
               "phase": "rows",
-              "bytes": 268289360
+              "bytes": 268337512
             },
             {
               "phase": "prepare",
-              "bytes": 268240264
+              "bytes": 268288416
             },
             {
               "phase": "ingest",
-              "bytes": 270894328
+              "bytes": 270945896
             },
             {
               "phase": "ingest",
-              "bytes": 270925912
+              "bytes": 270977480
             },
             {
               "phase": "close",
-              "bytes": 53638384
+              "bytes": 53689952
             },
             {
               "phase": "open",
-              "bytes": 54281720
+              "bytes": 54334368
             },
             {
               "phase": "ingest",
-              "bytes": 54292864
+              "bytes": 54345512
             },
             {
               "phase": "migrateSaved",
-              "bytes": 54299784
+              "bytes": 54352432
             },
             {
               "phase": "close",
-              "bytes": 54315600
+              "bytes": 54368248
             },
             {
               "phase": "close",
-              "bytes": 54315552
+              "bytes": 54368200
             },
             {
               "phase": "close",
-              "bytes": 54315720
+              "bytes": 54368368
             },
             {
               "phase": "teardown",
-              "bytes": 50391584
+              "bytes": 50439824
             }
           ],
           "resources": {
@@ -346,148 +346,148 @@
           "phase": "all",
           "searchHash": "e1a757541681300c320a4f07aa0742b817d9363eb284bfd0d061691e76de93bf",
           "runtime": "1.4.2",
-          "peakLiveHeapBytes": 54119870,
+          "peakLiveHeapBytes": 54142706,
           "peakPhase": "runner.run",
           "samples": [
             {
               "phase": "start",
-              "bytes": 5444439
+              "bytes": 5454714
             },
             {
               "phase": "rows",
-              "bytes": 8201939
+              "bytes": 8207062
             },
             {
               "phase": "seed",
-              "bytes": 10769123
+              "bytes": 10781824
             },
             {
               "phase": "open",
-              "bytes": 12059227
+              "bytes": 12069050
             },
             {
               "phase": "migrateSaved",
-              "bytes": 12805141
+              "bytes": 12821836
             },
             {
               "phase": "migrateSaved",
-              "bytes": 12826349
+              "bytes": 12842524
             },
             {
               "phase": "query",
-              "bytes": 51608880
+              "bytes": 51622531
             },
             {
               "phase": "saveRule",
-              "bytes": 51358241
+              "bytes": 51371828
             },
             {
               "phase": "saveRule",
-              "bytes": 51377018
+              "bytes": 51391021
             },
             {
               "phase": "rows",
-              "bytes": 51423636
+              "bytes": 51437783
             },
             {
               "phase": "preview",
-              "bytes": 51811818
+              "bytes": 51825965
             },
             {
               "phase": "rows",
-              "bytes": 51819064
+              "bytes": 51831755
             },
             {
               "phase": "command.execute",
-              "bytes": 52099293
+              "bytes": 52110960
             },
             {
               "phase": "command.execute",
-              "bytes": 52252261
+              "bytes": 52264984
             },
             {
               "phase": "rows",
-              "bytes": 52261267
+              "bytes": 52273990
             },
             {
               "phase": "preview",
-              "bytes": 52259927
+              "bytes": 52272506
             },
             {
               "phase": "command.execute",
-              "bytes": 52704387
+              "bytes": 52717001
             },
             {
               "phase": "command.execute",
-              "bytes": 52715251
+              "bytes": 52726009
             },
             {
               "phase": "command.execute",
-              "bytes": 52662269
+              "bytes": 52677979
             },
             {
               "phase": "command.execute",
-              "bytes": 52614975
+              "bytes": 52627027
             },
             {
               "phase": "ingest",
-              "bytes": 53446803
+              "bytes": 53462105
             },
             {
               "phase": "ingest",
-              "bytes": 53470268
+              "bytes": 53484354
             },
             {
               "phase": "prepare",
-              "bytes": 53519123
+              "bytes": 53534135
             },
             {
               "phase": "prepare",
-              "bytes": 53531972
+              "bytes": 53546706
             },
             {
               "phase": "runner.run",
-              "bytes": 54119870
+              "bytes": 54142706
             },
             {
               "phase": "close",
-              "bytes": 17215061
+              "bytes": 17237783
             },
             {
               "phase": "open",
-              "bytes": 17912711
+              "bytes": 17933460
             },
             {
               "phase": "ingest",
-              "bytes": 18019080
+              "bytes": 18039804
             },
             {
               "phase": "migrateSaved",
-              "bytes": 18052058
+              "bytes": 18076238
             },
             {
               "phase": "command.execute",
-              "bytes": 18216399
+              "bytes": 18234507
             },
             {
               "phase": "rows",
-              "bytes": 18151121
+              "bytes": 18172613
             },
             {
               "phase": "close",
-              "bytes": 18173335
+              "bytes": 18194603
             },
             {
               "phase": "close",
-              "bytes": 18173543
+              "bytes": 18194812
             },
             {
               "phase": "close",
-              "bytes": 18173057
+              "bytes": 18194326
             },
             {
               "phase": "teardown",
-              "bytes": 17485163
+              "bytes": 17505631
             }
           ],
           "resources": {
@@ -508,112 +508,112 @@
           "phase": "all",
           "searchHash": "51902a33caf8dad05035c9e56096dde0af6c44bb7491692213654b689fcd58ae",
           "runtime": "1.4.2",
-          "peakLiveHeapBytes": 300223131,
+          "peakLiveHeapBytes": 300237728,
           "peakPhase": "query",
           "samples": [
             {
               "phase": "start",
-              "bytes": 5450542
+              "bytes": 5455678
             },
             {
               "phase": "rows",
-              "bytes": 26017591
+              "bytes": 26022432
             },
             {
               "phase": "seed",
-              "bytes": 28523130
+              "bytes": 28534000
             },
             {
               "phase": "open",
-              "bytes": 29866200
+              "bytes": 29878905
             },
             {
               "phase": "migrateSaved",
-              "bytes": 30580599
+              "bytes": 30592880
             },
             {
               "phase": "migrateSaved",
-              "bytes": 30599831
+              "bytes": 30609512
             },
             {
               "phase": "query",
-              "bytes": 300223131
+              "bytes": 300237728
             },
             {
               "phase": "saveRule",
-              "bytes": 295414765
+              "bytes": 295429298
             },
             {
               "phase": "saveRule",
-              "bytes": 295430156
+              "bytes": 295444689
             },
             {
               "phase": "rows",
-              "bytes": 295490406
+              "bytes": 295504939
             },
             {
               "phase": "preview",
-              "bytes": 295871162
+              "bytes": 295885615
             },
             {
               "phase": "rows",
-              "bytes": 295884972
+              "bytes": 295899425
             },
             {
               "phase": "preview",
-              "bytes": 295993909
+              "bytes": 296008362
             },
             {
               "phase": "command.execute",
-              "bytes": 296062332
+              "bytes": 296075806
             },
             {
               "phase": "rows",
-              "bytes": 296114778
+              "bytes": 296129368
             },
             {
               "phase": "prepare",
-              "bytes": 296120441
+              "bytes": 296135703
             },
             {
               "phase": "ingest",
-              "bytes": 296977626
+              "bytes": 296987630
             },
             {
               "phase": "ingest",
-              "bytes": 296993891
+              "bytes": 297003773
             },
             {
               "phase": "close",
-              "bytes": 37503937
+              "bytes": 37513819
             },
             {
               "phase": "open",
-              "bytes": 38448550
+              "bytes": 38466576
             },
             {
               "phase": "ingest",
-              "bytes": 38450587
+              "bytes": 38468933
             },
             {
               "phase": "migrateSaved",
-              "bytes": 38493889
+              "bytes": 38513115
             },
             {
               "phase": "close",
-              "bytes": 38494498
+              "bytes": 38512064
             },
             {
               "phase": "close",
-              "bytes": 38493750
+              "bytes": 38510784
             },
             {
               "phase": "close",
-              "bytes": 38754694
+              "bytes": 38773040
             },
             {
               "phase": "teardown",
-              "bytes": 38118182
+              "bytes": 38136320
             }
           ],
           "resources": {
@@ -639,7 +639,7 @@
         {
           "metric": "peakHeapBytes",
           "limit": 268435456,
-          "value": 59656256,
+          "value": 59706648,
           "status": "pass"
         },
         {
@@ -657,7 +657,7 @@
         {
           "metric": "peakHeapBytes",
           "limit": 805306368,
-          "value": 276823232,
+          "value": 276871384,
           "status": "pass"
         },
         {
@@ -675,7 +675,7 @@
         {
           "metric": "peakHeapBytes",
           "limit": 268435456,
-          "value": 54119870,
+          "value": 54142706,
           "status": "pass"
         },
         {
@@ -693,7 +693,7 @@
         {
           "metric": "peakHeapBytes",
           "limit": 805306368,
-          "value": 300223131,
+          "value": 300237728,
           "status": "pass"
         },
         {
