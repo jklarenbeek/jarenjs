@@ -280,8 +280,13 @@ describe('membership edges', () => {
       assert.notEqual((await store.explain(residual, { profile, externals: { allowed: ['a'] } })).mode, 'native');
       for (const query of [native, residual, overItem(true)])
         assert.deepEqual(await store.execute(query, { profile, externals: { allowed: ['a'] } }), 'i1');
-      // a value the database cannot compare is refused, never dropped from the fetch
-      for (const externals of [{ allowed: ['a', null] }, {}]) {
+      // a null the column cannot hold (its NULL reads as absent) matches nothing, as in the engine
+      for (const query of [native, residual]) {
+        assert.deepEqual(await store.execute(query, { profile, externals: { allowed: ['a', null] } }), 'i1');
+        assert.deepEqual(await store.execute(query, { profile, externals: { allowed: ['a', null], unused: 1 }, pushdown: false }), 'i1');
+      }
+      // a missing one is refused, never dropped from the fetch
+      for (const externals of [{}]) {
         for (const query of [native, residual]) {
           // a thunk: over a synchronous driver the refusal is thrown, not a rejection
           await assert.rejects(async () => store.execute(query, { profile, externals }), (/** @type {any} */ error) => error.code === 'JD0011'

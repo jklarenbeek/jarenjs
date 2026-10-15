@@ -413,20 +413,130 @@ export function applyRowBound(plan, maxRows) {
   return { ...plan, window };
 }
 
+/** How a sentence names a value of each family the database binds otherwise than the engine compares it. */
+const STRAY_VALUES = { null: 'a null', boolean: 'a boolean', structure: 'an object or an array' };
+
 /**
- * Whether a point read's external is one the database compares as the
- * engine does: a string, a finite number, or a list (or object) of them. A
- * `null` compares as SQL NULL in the database and as a value in the engine,
- * and a boolean does not bind at all, so a point read judged by the engine
- * could keep a row the query engines' statement does not.
- * @param {any} value
- * @returns {boolean}
+ * @typedef {{ name: string, op: string, list: boolean, member: string,
+ *   families: string[] | null, nullBinds: boolean }} PredicateLeaf
  */
-function comparable(value) {
-  if (typeof value === 'string') return true;
-  if (typeof value === 'number') return Number.isFinite(value);
-  if (value === null || typeof value !== 'object') return false;
-  return (Array.isArray(value) ? value : Object.values(value)).every(comparable);
+
+/**
+ * The leaves of a store profile's mandatory predicate that compare a member
+ * with an external — a comparison of any operator, or a membership in a
+ * list — each with the value families its member can hold (`familiesOf`
+ * of its reference: `null` for any, the member is not typed as scalars)
+ * and whether its statement compares a bound `null` as the engine does.
+ * @param {any} pred - the translated predicate
+ * @param {(ref: any) => string[] | null} familiesOf
+ * @param {boolean} nullBinds
+ * @param {PredicateLeaf[]} [out]
+ * @returns {PredicateLeaf[]}
+ */
+export function predicateLeaves(pred, familiesOf, nullBinds, out = []) {
+  switch (pred?.p) {
+    case 'and': case 'or':
+      for (const item of pred.items) predicateLeaves(item, familiesOf, nullBinds, out);
+      break;
+    case 'not':
+      predicateLeaves(pred.item, familiesOf, nullBinds, out);
+      break;
+    case 'cmp': case 'in':
+      if (!('ext' in pred.operand)) break;
+      out.push({ name: pred.operand.ext, op: pred.p === 'in' ? 'eq' : pred.op, list: pred.p === 'in',
+        member: pred.ref.column ?? pred.ref.segments.map((/** @type {any} */ segment) => segment.name ?? `[${segment.index}]`).join('.'),
+        families: familiesOf(pred.ref), nullBinds });
+      break;
+    default:
+  }
+  return out;
+}
+
+/**
+ * The family of a value an equality, an inequality or a membership does not
+ * compare as the engine does, that the leaf's member can hold — a `null`
+ * the database binds as no value (where its statement does not compare
+ * one), a boolean, an object or an array it does not compare — or `null`
+ * when the leaf binds every value it reaches as the engine compares it: a
+ * string, a number, or a family its member never holds, which matches
+ * nothing on either side. An ordering comparison holds for none of those
+ * families in the engine and in the database alike. A membership's list
+ * reaches its items (an object's member values); a scalar reaches none.
+ * @param {PredicateLeaf} leaf @param {any} value
+ * @returns {'null' | 'boolean' | 'structure' | null}
+ */
+function strayFamily(leaf, value) {
+  if (leaf.op !== 'eq' && leaf.op !== 'ne') return null;
+  const items = !leaf.list ? [value]
+    : value !== null && typeof value === 'object' ? (Array.isArray(value) ? value : Object.values(value)) : [];
+  for (const item of items) {
+    const family = item === null ? (leaf.nullBinds && !leaf.list ? null : 'null') : typeof item === 'boolean' ? 'boolean'
+      : typeof item === 'object' ? 'structure' : null;
+    if (family !== null && (leaf.families === null || leaf.families.includes(family))) return family;
+  }
+  return null;
+}
+
+/**
+ * The first value at or inside `value` that no JSON value is — a function
+ * or a symbol — named as a sentence names it, or `null`. No database binds
+ * one, and a membership list's JSON would hold `null` in its place.
+ * @param {any} value @returns {string | null}
+ */
+function nonJsonWithin(value) {
+  const seen = new Set();
+  const pending = [value];
+  while (pending.length > 0) {
+    const item = pending.pop();
+    if (typeof item === 'function') return 'a function';
+    if (typeof item === 'symbol') return 'a symbol';
+    if (item === null || typeof item !== 'object' || seen.has(item)) continue;
+    seen.add(item);
+    pending.push(...(Array.isArray(item) ? item : Object.values(item)));
+  }
+  return null;
+}
+
+/**
+ * Admit the externals a store profile's mandatory predicate binds, for one
+ * call or point read of `root` — the one rule every surface that binds one
+ * follows: a missing external is refused `JD0011` (a mandatory predicate
+ * runs in the database or not at all), so is one holding a function or a
+ * symbol, which no database binds, and so is a value its member can
+ * hold that the database compares otherwise than the engine
+ * ({@link strayFamily}), since the predicate would keep other rows than it
+ * does. Every other value is admitted: one its member cannot hold matches
+ * nothing on either side.
+ * @param {string} root - the collection or entity
+ * @param {readonly string[]} names - every external the predicate names
+ * @param {readonly PredicateLeaf[]} leaves - its comparisons of one
+ * @param {any} externals - the call's externals
+ * @param {{ read: 'call' | 'point read', repair?: string,
+ *   refusal: (reason: string) => Error }} how
+ */
+export function admitPredicateExternals(root, names, leaves, externals, how) {
+  const bound = externals !== null && typeof externals === 'object' ? externals : {};
+  const prefix = (/** @type {string} */ listed) => `the profile's predicate for '${root}' cannot bind ${listed} for this ${how.read}`;
+  const missing = names.filter((name) => !Object.hasOwn(bound, name) || bound[name] === undefined);
+  if (missing.length > 0) {
+    throw how.refusal(`${prefix(missing.map((name) => `'$${name}'`).join(', '))} — it is missing, and a mandatory `
+      + `predicate runs in the database or not at all${how.repair ?? ''}`);
+  }
+  for (const name of names) {
+    const foreign = nonJsonWithin(bound[name]);
+    if (foreign !== null) {
+      throw how.refusal(`${prefix(`'$${name}'`)} — it holds ${foreign}, which is no JSON value: the database `
+        + 'cannot bind it, and a mandatory predicate runs in the database or not at all; bind strings and numbers');
+    }
+  }
+  for (const leaf of leaves) {
+    const family = strayFamily(leaf, bound[leaf.name]);
+    if (family !== null) {
+      throw how.refusal(`${prefix(`'$${leaf.name}'`)} — it holds ${STRAY_VALUES[family]}, which the engine compares `
+        + `with the same value in '${leaf.member}' and the database does not, so the predicate would keep other rows `
+        + 'than it does; bind strings and numbers');
+    }
+  }
 }
 
 /**
@@ -435,8 +545,8 @@ function comparable(value) {
  * answered as stored), otherwise a judge taking the read's externals. The
  * judge refuses `JD0011` before any row is read when the root has a member
  * allow-list — a point read answers the whole document, as a graph load
- * does — or when the predicate names an external the read does not bind
- * ({@link comparable});
+ * does — or when the predicate's externals are not admitted
+ * ({@link admitPredicateExternals}, under the leaves `leavesOf` names);
  * otherwise it answers the test of the row's document by the same predicate
  * the query engines conjoin into every fetch. The test runs the predicate in
  * the engine over the one document, which agrees with the database's answer
@@ -452,10 +562,12 @@ function comparable(value) {
  * @param {{ functions?: any, extensions?: any } | null} operators - the
  *   store's registered operators
  * @param {any} zoneProvider - the injected clock
- * @param {string} [docPath] - where a refusal points
+ * @param {string | undefined} docPath - where a refusal points
+ * @param {() => readonly PredicateLeaf[]} leavesOf - the predicate's
+ *   comparisons of an external, as the query engine of `root` reads them
  * @returns {((externals: any) => (document: any) => boolean) | null}
  */
-export function pointReadFilter(profile, root, operators, zoneProvider, docPath) {
+export function pointReadFilter(profile, root, operators, zoneProvider, docPath, leavesOf) {
   const policy = profile === null || profile.members === null ? undefined : profile.members[root];
   const expression = profile === null ? undefined : profile.predicates[root];
   if (policy === undefined && expression === undefined) return null;
@@ -475,14 +587,12 @@ export function pointReadFilter(profile, root, operators, zoneProvider, docPath)
       keeps = compileSetResidual(wrapper, undefined, operators, zoneProvider);
     }
     const bound = externals ?? {};
-    const unbound = names.filter((name) => typeof bound !== 'object'
-      || !Object.hasOwn(bound, name) || !comparable(bound[name]));
-    if (unbound.length > 0) {
-      throw new DbCompileError('JD0011',
-        `the profile's predicate for '${root}' cannot bind ${unbound.map((name) => `'$${name}'`).join(', ')} `
-        + 'for this point read — missing, or a value the database cannot compare (null, a boolean, or a list '
-        + 'holding one) — pass it as get(key, { externals })', docPath);
-    }
+    // the query engines' rule, so a read they refuse is one get refuses;
+    // the test below runs in the engine, which compares every admitted
+    // value as it does, an integer past 2^53 among them
+    admitPredicateExternals(root, names, leavesOf(), bound, { read: 'point read',
+      repair: ' — pass it as get(key, { externals })',
+      refusal: (reason) => new DbCompileError('JD0011', reason, docPath) });
     const test = /** @type {(candidates: any[], externals: any) => any} */ (keeps);
     return (document) => test([document], bound) !== undefined;
   };

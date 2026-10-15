@@ -160,7 +160,7 @@ export type Continuation<S, M extends EntityMeta> = LoadContinuation & {
 
 /** A page's options over this graph (the store's `PageOptions`, the
  * continuation typed by the declared ordering). */
-export interface GraphPageOptions<S, M extends EntityMeta> extends EntityCursorOptions {
+export interface GraphPageOptions<S, M extends EntityMeta> extends Pick<EntityCursorOptions, 'signal' | 'deadline' | 'profile' | 'tracking'> {
   lookahead?: boolean;
   limit?: number;
   after?: Continuation<S, M>;

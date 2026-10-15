@@ -1214,14 +1214,15 @@ function collectionCore(connection, collection, plan, validate, queryState, stor
       (error) => wrapDriverError(error, { docPath: collection.docPath, collection: collection.name, key })), fn)),
   'immediate');
   /**
-   * `all()`'s options: the cursor's own — `signal`, `deadline`, `profile`,
+   * `all()`'s options: the cursor's own — `externals` (which the store
+   * profile's predicate binds), `signal`, `deadline`, `profile`,
    * `strictStreaming` — and nothing a fixed document cannot use
    * (`JD0013`).
    * @param {unknown} options
    */
   const readAllOptions = (options) => {
     const spelling = `collection('${collection.name}').all`;
-    readOptions(options, ['signal', 'deadline', 'profile', 'strictStreaming'], spelling);
+    readOptions(options, ['externals', 'signal', 'deadline', 'profile', 'strictStreaming'], spelling);
     readControls(options, spelling);
   };
 
@@ -1237,6 +1238,8 @@ function collectionCore(connection, collection, plan, validate, queryState, stor
     stats: () => ({ ...stats, ...engine.stats() }),
     model: collection,
     queryShape: engine.shape,
+    /** The store profile's predicate leaves, as a point read admits by them. */
+    predicateLeaves: engine.predicateLeaves,
     /** The key a row a write names by `key` is stored under: decimal text
      * under a numeric key column is the number it spells, as its statement
      * binds it; a text key column holds every other spelling as a key of
@@ -1366,16 +1369,15 @@ function collectionCore(connection, collection, plan, validate, queryState, stor
      * item cursor of `$[*]` rather than reading `execute`'s answer, which
      * is a sequence — `undefined` for none, the bare document for one, and
      * for one array-valued document exactly what two documents would give.
-     * @param {{ signal?: AbortSignal, deadline?: number, profile?: any,
-     *   strictStreaming?: boolean }} [options]
+     * Its `externals` bind the store profile's predicate, as a query's do.
+     * @param {{ externals?: Record<string, any>, signal?: AbortSignal, deadline?: number,
+     *   profile?: any, strictStreaming?: boolean }} [options]
      * @returns {any} value-or-promise of the documents
      */
     all(options) {
       readAllOptions(options);
-      // it binds no externals: a profile predicate that names one is read
-      // through the document `$[*]`, which does
       const cursor = engine.query('$[*]', options, connection.synchronous ? createSyncCursor : createCursor,
-        ` — all() binds no externals: read the rows with query('$[*]', { externals })`);
+        ' — pass it as all({ externals })');
       /** @type {any[]} */
       const documents = [];
       const pump = () => {
@@ -3668,13 +3670,16 @@ export function openStore(model, options) {
            */
           const profiledRead = (name, core) => {
             const judge = pointReadFilter(storeProfile, name, operators, zoneProvider,
-              (collections.get(name) ?? entities.get(name))?.docPath);
+              (collections.get(name) ?? entities.get(name))?.docPath,
+              () => (collections.has(name) ? core.predicateLeaves() : entityEngine.predicateLeaves(name)));
             if (judge === null) return (key) => core.get(key);
             const compared = profileComparedExternals(storeProfile, [name], operators ?? undefined);
             const spelling = `${collections.has(name) ? 'collection' : 'entity'}('${name}').get`;
             return (key, readOptions) => {
-              const keeps = judge(readOptions?.externals);
+              // a value the predicate would read otherwise than it stands
+              // for first, as the query engines refuse it
               refuseOpaqueExternals(compared, readOptions?.externals, spelling);
+              const keeps = judge(readOptions?.externals);
               return chain(core.get(key), (doc) => (doc === undefined || keeps(doc) ? doc : undefined));
             };
           };

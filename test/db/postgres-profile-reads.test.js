@@ -72,8 +72,9 @@ describe('PostgreSQL: a store profile bounds every read', { skip: !url && 'JAREN
   it('refuses a point read, and a query, that do not bind the predicate\'s external', async () => {
     await assert.rejects(async () => store.collection('docs').get('b1'),
       { code: 'JD0011', message: /predicate for 'docs' cannot bind '\$tenant' for this point read/ });
-    await assert.rejects(async () => store.collection('docs').get('b1', { externals: { tenant: null } }),
-      { code: 'JD0011' });
+    // a null the string member cannot hold keeps no row, as the query keeps none
+    assert.strictEqual(await store.collection('docs').get('b1', { externals: { tenant: null } }), undefined);
+    assert.strictEqual(await store.collection('docs').execute(IDS, { externals: { tenant: null } }), undefined);
     await assert.rejects(async () => store.collection('docs').execute(IDS),
       { code: 'JD0011', message: /predicate for 'docs' cannot bind '\$tenant' for this call/ });
   });

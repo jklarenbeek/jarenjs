@@ -115,3 +115,18 @@ for (const host of [{ name: 'sqlite', postgres: false }, ...(url ? [{ name: 'pos
     });
   });
 }
+
+describe('a handle\'s all() hands the store its externals', () => {
+  it('binds the store profile\'s predicate, which it was refused without', async () => {
+    const client = await open(model, { driver: nodeDriver(), validator: null,
+      profile: { externals: ['from'], predicates: { visits: { $ge: ['$it.seen', '$from'] } } } });
+    try {
+      for (const [id, seen] of [['a', '2026-01-01T00:00:00Z'], ['b', '2026-06-01T00:00:00Z']]) await client.collections.visits.insert({ id, seen });
+      assert.deepStrictEqual(await client.collections.visits.all({ externals: { from: '2026-03-01T00:00:00Z' } }),
+        [{ id: 'b', seen: '2026-06-01T00:00:00Z' }]);
+      await assert.rejects(async () => client.collections.visits.all(), { code: 'JD0011' });
+      await assert.rejects(async () => client.collections.visits.all({ externals: { from: SINCE } }), { code: 'JD0041' });
+    }
+    finally { await client.close(); }
+  });
+});

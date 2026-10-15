@@ -195,7 +195,10 @@ describe('PostgreSQL: membership over thousands of values', { skip: !url && 'JAR
     assert.equal((await store.explain(native, { profile, externals: { allowed: ['s1', 's3'] } })).mode, 'native');
     assert.deepEqual(await store.execute(native, { profile, externals: { allowed: ['s1', 's3', 's11'] } }), ['i1', 'i3']);
     assert.deepEqual(await store.execute(residual, { profile, externals: { allowed: ['s1', 's3'] } }), ['i1', 'i3']);
-    await assert.rejects(async () => store.execute(residual, { profile, externals: { allowed: ['s1', null] } }),
+    // a null the column cannot hold (its NULL reads as absent) matches nothing, as in the engine
+    assert.deepEqual(await store.execute(residual, { profile, externals: { allowed: ['s1', null] } }), 'i1');
+    assert.deepEqual(await store.execute(native, { profile, externals: { allowed: ['s1', 's3', null] } }), ['i1', 'i3']);
+    await assert.rejects(async () => store.execute(residual, { profile, externals: {} }),
       (/** @type {any} */ error) => error.code === 'JD0011' && /cannot bind '\$allowed' for this call/.test(error.message));
   });
 

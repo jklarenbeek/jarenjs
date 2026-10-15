@@ -9,8 +9,8 @@
  * cannot hold it, the comparison matches nothing on either side, and the call
  * answers as it did. `explain` given externals refuses what the run it
  * explains refuses, on a collection, an entity and the store root; with none
- * it is the abstract plan. `all()` binds no externals and says how to read
- * the rows.
+ * it is the abstract plan. `all()` binds them from its own `externals`, and
+ * names that option when one is missing.
  *
  * The PostgreSQL half runs where `JAREN_PG_URL` names a server.
  */
@@ -149,15 +149,16 @@ describe('explain() given externals refuses what the run it explains refuses', (
 });
 
 describe('all() under a predicate that names an external', () => {
-  it('is refused, naming the document that binds one, which answers', async () => {
+  it('is refused without the external, naming the option that binds it, and answers with it', async () => {
     const store = await openStore(TEXT, { driver: nodeDriver(),
       profile: { maxRows: 100, externals: ['tenant'], predicates: { t: EQ } } });
     try {
       const rows = store.collection('t');
       for (const [id, tenant] of ROWS.get(TEXT) ?? []) await rows.insert({ id, tenant });
       await assert.rejects(async () => rows.all(), { code: 'JD0011', message: 'JD0011: the profile\'s predicate for \'t\' cannot bind '
-        + '\'$tenant\' for this call — it is missing, and a mandatory predicate runs in the database or not at all — all() binds '
-        + 'no externals: read the rows with query(\'$[*]\', { externals }) at /collections/t' });
+        + '\'$tenant\' for this call — it is missing, and a mandatory predicate runs in the database or not at all — pass it as '
+        + 'all({ externals }) at /collections/t' });
+      assert.deepEqual(await rows.all({ externals: { tenant: 'c' } }), [{ id: 'c1', tenant: 'c' }]);
       const read = [];
       for await (const document of rows.query('$[*]', { externals: { tenant: 'c' } })) read.push(document);
       assert.deepEqual(read, [{ id: 'c1', tenant: 'c' }]);

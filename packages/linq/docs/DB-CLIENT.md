@@ -220,7 +220,7 @@ hands it to `explain()` and asserts `mode: 'native'` with no residual.
 | `toSpec()`, `toJSON()` | the spec | plain deep-frozen JSON, a snapshot: mutating it changes nothing, and two builds are one document; a cursor handed to `after()` is copied there, so writing into it afterwards moves no page |
 | `toArray()` | — | `load(spec)`: the store's one statement |
 | `cursor(options?)` | — | `loadCursor(spec, options)`: one root graph per pull from that same statement, its includes attached and bounded per root; `return()` releases it; `{ signal?, tracking? }` — untracked unless `tracking: true` |
-| `page(options?)` | — | `page(spec, options)`: one bounded page over the composite keyset — `{ items, continuation, hasMore, snapshot }`, never more than `limit` roots or `maxBytes` bytes; `{ limit?, after?, maxBytes?, consistency?, signal?, tracking? }`; a `take`/`skip` on the graph beside it is the store's `JD0032` |
+| `page(options?)` | — | `page(spec, options)`: one bounded page over the composite keyset — `{ items, continuation, hasMore, snapshot }`, never more than `limit` roots or `maxBytes` bytes; `{ limit?, after?, maxBytes?, consistency?, lookahead?, signal?, deadline?, profile?, tracking? }` (a cursor's `externals`, `strict`, `pushdown` and `strictStreaming` are the store's `JD0013`: a page binds no externals); a `take`/`skip` on the graph beside it is the store's `JD0032` |
 
 For an untrusted transport, the Node host can wrap the structural continuation
 with [`@jarenjs/contract/continuation-node`](../../contract/docs/CONTRACT-FORMAT.md#20-scoped-continuations-at-a-node-host).
@@ -276,7 +276,8 @@ A collection handle is 49 members: 11 from the store's collection
 `explain` `live`), the same 40 chain members, and two overlaps, `explain`
 (resolved by arity, as on an entity handle) and `all` (resolved by the
 argument: a predicate is the chain's quantifier and answers a boolean;
-nothing, or the collection's `all()` options, is every document, always an
+nothing, or the collection's `all()` options — its `externals` among them,
+which bind the store profile's predicate — is every document, always an
 array). `execute`, `query` and `explain` take a chain as well as a query
 document (§6). It has no `include`, no `link`/`unlink` and no unit of work,
 because a collection has no relations and no tracking — and neither does
@@ -346,10 +347,10 @@ A record past `expiresAt` is dropped on `claim` and `lookup`;
 `sweep(now?, { limit? })` drops the expired records in one transaction
 and answers the count: without a `limit` every expired record, so a ledger
 left unswept for long deletes its whole backlog under one write lock; with
-one (a whole number from 1) at most that many, the longest expired first
-(equal expiries in the order they were written), read through the
-`by_expires` index so the call touches only the rows it deletes, however
-many records the collection holds.
+one (a whole number from 1, however large: one past `Number.MAX_SAFE_INTEGER`
+binds as it) at most that many, the longest expired first (equal expiries in
+the order they were written), read through the `by_expires` index so the call
+touches only the rows it deletes, however many records the collection holds.
 A host bounds the lock by calling again while the answer equals the limit:
 a smaller answer says none remain, and a backlog that is an exact multiple
 of the limit costs one more call that answers 0. A

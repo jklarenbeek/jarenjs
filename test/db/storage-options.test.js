@@ -100,16 +100,21 @@ describe('finite read controls remain closed and typed', () => {
     assert.throws(() => planRelational(document, { signal: 'invalid' }), { code: 'JD0013' });
   });
 
-  it('a graph page retains its declared cursor options while the set owns tracking', async () => {
+  it('a graph page reads its own options while the set owns tracking, and refuses those a page cannot honour', async () => {
     const store = await openStore(model, { driver: nodeDriver() });
     try {
       await store.entity('Item').create({ id: 'a', value: 1 });
       store.entity('Item').discard('a');
-      const options = { limit: 1, tracking: true, externals: {}, strict: true, pushdown: false, strictStreaming: true };
+      const options = { limit: 1, tracking: true };
       const page = await store.entity('Item').page({}, options);
       assert.deepEqual(page.items, [{ id: 'a', value: 1 }]);
       assert.equal(store.stats().tracker.tracked, 1);
       assert.deepEqual((await store.sync.entity('Item').page({}, options)).items, page.items);
+      // a page binds no externals and has no residual: each was taken and changed nothing
+      for (const dropped of [{ externals: {} }, { strict: true }, { pushdown: false }, { strictStreaming: true }]) {
+        await assert.rejects(async () => store.entity('Item').page({}, { ...options, ...dropped }), { code: 'JD0013' });
+        assert.throws(() => store.sync.entity('Item').page({}, { ...options, ...dropped }), { code: 'JD0013' });
+      }
     }
     finally { await store.close(); }
   });

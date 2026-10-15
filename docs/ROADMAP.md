@@ -497,52 +497,20 @@ what each does is its own documentation's job
   `$.Label_User[*]` is native. Wanted: a hop read only for its count or
   existence lowers through the join row alone (the foreign key guarantees
   the target row).
-- [ ] **A non-JSON external compared through a variable is read as `{}`.** An
-  external a comparison names directly (`$since`, `$ids[*]`, `$window.from` as
-  an operand of `$eq $ne $lt $le $gt $ge`, or in the store profile's
-  predicate) that holds a `Date`, a `Map` or another object with no own member
-  is refused `JD0041` ([MODEL-FORMAT §10.1](../packages/db/docs/MODEL-FORMAT.md)).
-  One bound to a variable first (`$let`, `$for`, a quantifier) and compared
-  through it, or reached through a descendant, slice or filter path, is still
-  compared as `{}` and matches no row, and `$distinct`, `$index-of` and
-  ordering or grouping keys read such a value unchecked. A value returned or
+- [ ] **A non-JSON external reached through a filter or an operator is read as
+  `{}`.** An external the engine compares or equates — a direct operand of
+  `$eq $ne $lt $le $gt $ge`, `$distinct` or `$index-of`, a grouping key, or
+  one a `$let`, `$for`, quantifier or grouping variable is bound to and
+  compared through, through name, index, wildcard, slice and descendant
+  segments — that holds a `Date`, a `Map` or another object with no own
+  member, or a `bigint`, is refused `JD0041` ([MODEL-FORMAT
+  §10.1](../packages/db/docs/MODEL-FORMAT.md)). One reached through a filter
+  segment (`$xs[?@.k == 1]`), or one an operator computes a value from before
+  a comparison reads it (`$first`, a `$get` member, a window or `$fold`
+  variable), is still compared as `{}` and matches no row. A value returned or
   handed to a registered function is the caller's own and answers right, so a
-  blanket refusal of every external is not the fix: follow the binding through
-  the analysed tree, or refuse where the engine's comparison reads the item.
-- [ ] **A collection's profile predicate binds a boolean, an object or an
-  array its member cannot hold as SQLite's raw driver error.** A store profile
-  predicate `$eq ['$it.tenant', '$tenant']` on a collection whose `tenant` is
-  typed `string` (or `['string', 'null']`), executed with `tenant` `true` or
-  `false`, throws Node's `ERR_INVALID_ARG_TYPE` ("Provided value cannot be
-  bound to SQLite parameter 1"), and `{ x: 1 }` or `['t1']` throw
-  `ERR_INVALID_STATE` ("Unknown named parameter"), where PostgreSQL answers no
-  row, the engine's answer. A missing external, and a value the member can
-  hold, are refused `JD0011` ([MODEL-FORMAT
-  §8](../packages/db/docs/MODEL-FORMAT.md)). Wanted: SQLite answers no row as
-  PostgreSQL does.
-- [ ] **A point read and an entity fetch refuse a predicate external a
-  collection call answers.** Under `{ $eq: ['$it.tenant', '$tenants[*]'] }`,
-  `get` (collection or entity) refuses `JD0011` a bare `null` and a list
-  holding a `null` or a boolean, and an entity's `execute` refuses the list,
-  even where the member cannot hold the item — `tenants: ['a', true]` against
-  a `['string', 'null']` member, or `[null]` against an entity member whose
-  stored `null` reads as absent — where the engine answers the `'a'` rows (or
-  none) and a collection `execute` now answers them. Wanted: refuse only what
-  the member can hold, as the collection does; admitting is not a refusal, so
-  a patch.
-- [ ] **`all()` takes no externals.** Under a store profile predicate that
-  names an external, `collection.all()` is always refused `JD0011` (its reason
-  names `query('$[*]', { externals })`): its options are a closed set without
-  `externals`. Wanted: `all({ externals })` (new option, a minor).
-- [ ] **A `bigint` external compares as no number.** `$gt ['$e.n', '$min']`
-  with `externals: { min: 2n }` matches no row, with or without pushdown,
-  where `2` answers right: the comparison does not read a `bigint` as the
-  number it holds. Wanted: compare it exactly where the engine can, or refuse
-  it with a coded reason.
-- [ ] **The load engine's `page()` takes options it never reads.** Its closed
-  option set admits `externals`, `strict`, `pushdown` and `strictStreaming`,
-  and none changes what a page answers. Wanted: read each, or drop it from the
-  set so a caller who passes one is told.
+  blanket refusal is not the fix: evaluate the filter over the external, or
+  follow the operators that hand an item through.
 - [ ] **A handle refuses a chain over one database a second store names
   differently.** A handle takes a chain over another store's view when both
   read one database (one SQLite file by its canonical path, one PostgreSQL
@@ -574,12 +542,6 @@ what each does is its own documentation's job
   (the driver's UTF-8 encoding), so `get` reads back another string than was
   written, while a document member keeps the surrogate (its JSON escape). Wanted:
   refuse such a value with a code on a text column, or store it exactly.
-- [ ] **A diverted collection call binds NULL for the store predicate's
-  externals.** Under a profile predicate `$eq ['$it.tenant','$tenant']`, a call
-  the store diverts to a full scan binds only its literal slots: with
-  `externals: { tenant: 'a', x: true }` and `$where: { $not: { $eq: ['$it.id',
-  '$x'] } }` it answers no row (with and without pushdown) where `"a1"` is
-  right; it fails closed, but answers wrong.
 - [ ] **Federation merge strategy and spilling.** Connected N-way joins and
   nested fluent joins now have an explicit fetch order and combined admission
   credits (QUERY-PEN §12.1). A merge strategy still needs a provider ordering
@@ -738,14 +700,19 @@ what each does is its own documentation's job
   the derived model declares plain `jsonb_extract`); a string-first union
   reopens. Same in v0.140.0.
 - [ ] **On PostgreSQL the generated column of an indexed union member is the first type's, so a comparison of another kind reads the document and does not seek.** Wanted: a typed column per kind or an expression index.
-- [ ] **An external past 2^53 compares exactly in SQLite where the engine
-  compares doubles.** A comparison against an external holding an integer past
-  ±(2^53 − 1) (`$eq`/`$lt` of `$x` = 2**60 or -(2**62) over an unindexed
-  member, an indexed `integer` member or a string-first union) misses the row
-  the engine finds: the value is known only when it binds, and the statement
-  keeps the exact form so that a safe external still seeks (MULTI-INDEX OR).
-  Wanted: send such an external to the engine at bind time, as a value the
-  database cannot bind is, or a seekable double form.
+- [ ] **A store predicate's external past 2^53 compares exactly in SQLite
+  where the engine compares doubles.** A store profile predicate comparing a
+  member with an external integer past ±(2^53 − 1) (`$eq ['$it.u', '$x']`, `x`
+  2**60, over a row holding 2**60) binds the number as it is, and SQLite reads
+  the stored JSON integer by its digits (`1152921504606847000` is 2^60 + 24
+  there), so the row is kept or dropped otherwise than the engine. A
+  document's own such external now runs in the engine over the whole
+  collection, a point read is judged by the engine, and PostgreSQL compares
+  both as the engine does. The predicate runs in the database or not at all,
+  so it cannot be sent to the engine, and a refusal would refuse every call
+  whose stored values are far from it, which answer right. Wanted: a seekable
+  double form of the comparison — it would also keep a document's such
+  external on its index instead of the whole-collection read.
 - [ ] **A grouping ordered by a key that reads a NULL as a present `null` runs
   in the engine.** A column whose policy reads a NULL as a present `null`
   (`null: 'null'`) used as a group key under an `$orderby` makes the engine

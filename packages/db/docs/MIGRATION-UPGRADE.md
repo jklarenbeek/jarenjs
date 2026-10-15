@@ -2623,6 +2623,53 @@ declares one; go back by declaring those members' indexes as `unique` or
 `index` flags, or by renaming the members to identifiers. Tables of a model
 without one are the ones the previous release creates.
 
+## 38. One rule for the externals a store call binds
+
+An external is admitted, bound and compared by one rule on every surface that
+binds one — a collection's `execute`, `query`, `explain` and `all`, an entity
+query, a point read and the full scan a call diverts to
+([MODEL-FORMAT §8](MODEL-FORMAT.md#8-the-safe-execution-profile)). Answers that
+change:
+
+- A collection call the store diverted to a full scan (its own external a
+  value the database cannot take) bound the store profile predicate's
+  externals as `NULL` and answered no row; it now binds them and answers the
+  engine's rows.
+- A store profile predicate's boolean, object or array its member cannot hold
+  failed in the SQLite driver, uncoded (`ERR_INVALID_ARG_TYPE`,
+  `ERR_INVALID_STATE`); it now matches nothing, as on PostgreSQL and in the
+  engine.
+- An entity query refused `JD0011` a predicate list holding a `null` or a
+  boolean its column cannot hold, and a point read (collection or entity)
+  refused a `null`, a boolean, or a list holding one, even where its member
+  cannot hold it; each now answers the engine's rows (`undefined` for a point
+  read the predicate does not keep). A value the member can hold, and a missing
+  external, are refused as before, and a point read's reason for a missing one
+  now reads as the query engines' (`… it is missing, and a mandatory predicate
+  runs in the database or not at all — pass it as get(key, { externals })`).
+- On SQLite a document's external integer past 2^53 compared by its digits,
+  so `$eq ['$e.n', '$x']` with `x` 2^60 missed the row the engine finds; the
+  call now runs in the engine over the whole collection, as for any external
+  the database cannot bind (`explain()` given it reports `set` mode).
+- A store predicate's function or symbol failed in the SQLite driver on a
+  collection call and was refused `JD0011` by an entity query and a point
+  read; every surface now refuses it `JD0011` with one reason (`… it holds a
+  function, which is no JSON value …`).
+- An external bound to a variable first (`$let`, `$for`, a quantifier, a
+  grouping key) and compared through it, reached through a slice or a
+  descendant segment, or read by `$distinct`, `$index-of` or a grouping key,
+  that holds a `Date` or another object read as `{}`, was compared as `{}`; it
+  is now refused `JD0041`, as a direct operand is. A comparison of such a
+  variable with the external it is bound to answers, as one of the external
+  with itself does. Pass the JSON value it stands for.
+- A `bigint` external a comparison reads matched no row (`$ne` every row); it
+  is now refused `JD0041`. Pass `Number(value)`.
+- `all()` refused `{ externals }` (`JD0013`) and so was always refused under a
+  predicate that names one; it now binds them: `all({ externals })`.
+- An entity's `page()` took `externals`, `strict`, `pushdown` and
+  `strictStreaming` and read none of them; each is now refused `JD0013`. Drop
+  them from a page's options.
+
 ## Measured costs
 
 Exact identity stores complete canonical documents and model endpoints, so

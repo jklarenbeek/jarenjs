@@ -1174,8 +1174,9 @@ capture transaction begins.
 **`all()` reads every document.** `collection.all(options?)` answers
 every stored document as an array, one entry per document, in the order
 `execute('$[*]')` visits them — on the synchronous twin and inside a
-transaction alike; it reads the cursor's `signal`, `deadline`, `profile`
-and `strictStreaming`, nothing else (`JD0013`), and a `signal` that aborts
+transaction alike; it reads the cursor's `externals` (which bind the store
+profile's predicate, §8), `signal`, `deadline`, `profile` and
+`strictStreaming`, nothing else (`JD0013`), and a `signal` that aborts
 while the call waits in the store's queue takes it off the queue
 (`JD2064`), as it does for `execute`, `explain`, `load` and `page`. `execute('$[*]')`
 answers the engine's SEQUENCE instead: `undefined` for an empty
@@ -1850,7 +1851,7 @@ error.
 | `JD0038` | the native mutation document is unsupported or invalid |
 | `JD0039` | a member that takes a query document was handed a chain |
 | `JD0040` | the save spans a relation cycle |
-| `JD0041` | a query document, or an external a comparison reads, is not JSON: a non-plain object with no own member to read, at its root or inside it |
+| `JD0041` | a query document, or an external a comparison reads, is not JSON: a non-plain object with no own member to read, at its root or inside it, or a `bigint` external a comparison reads |
 | `JD0050` | live queries require change capture |
 | `JD0051` | the demanded live mode is unavailable |
 | `JD0052` | the live-query bound was reached |
@@ -2171,23 +2172,32 @@ the native statement, each root the residual fetches, the load's root
 and every include subquery over that entity. A predicate may name an
 external, which `execute()` binds from the call's `externals` — so it
 isolates tenants only when the host, not the caller, supplies those
-externals; one the database cannot bind as the engine compares it is
-refused `JD0011` rather than dropped from the fetch: a missing one; on an
-entity, a boolean or a list holding a `null` or a boolean; on a
-collection, a `null`, a boolean, an object or an array — alone, or as an
+externals. One rule admits them on every surface that binds one — a
+collection's `execute`, `query`, `explain` and `all`, an entity query, a
+point read, and the full scan a call whose own external the database
+cannot take diverts to — and one the database cannot bind as the engine
+compares it is refused `JD0011` rather than dropped from the fetch: a
+missing one; a `null`, a boolean, an object or an array — alone, or as an
 item of a membership list — that an equality, an inequality or the
-membership compares with a member that can hold one (its schema type
-admits `null` or `boolean`, or names no scalar type), where the engine
-matches the stored value and the database does not. Against a member that
-cannot hold it the comparison matches nothing on either side, and the call
-answers — except that on SQLite a boolean, an object or an array in place
-of a single value still fails in the driver, uncoded. One the predicate
-would compare as `{}` (a
-`Date`, a `Map`) is refused `JD0041` (§10.1). `explain()` given externals
+membership compares with a member that can hold one (on a collection, its
+schema type admits `null` or `boolean`, or names no scalar type; on an
+entity, a boolean column, or a list item `null` where the column's policy
+reads a NULL as a present `null`), where the engine matches the stored
+value and the database does not; and one holding a function or a symbol,
+which no database binds. Against a member that cannot hold it the
+comparison matches nothing on either side, and the call answers — a
+boolean, an object or an array in place of a single value too, which SQLite
+binds as a value of no JSON kind. A predicate's integer past 2^53 is bound
+as the number it is: PostgreSQL compares it as the engine does, but SQLite
+reads a stored JSON integer by its digits, so a stored integer past 2^53
+near the value can be kept or dropped otherwise than the engine does (a
+document's own such external runs in the engine instead). One the
+predicate would compare as `{}` (a `Date`, a `Map`), or a `bigint`, is
+refused `JD0041` (§10.1). `explain()` given externals
 refuses what the run it explains refuses; given none, it answers the plan
-with every external unbound. `all()` binds no externals, so under a
-predicate that names one it is refused `JD0011`: read the rows with
-`query('$[*]', { externals })`. A load binds none, so
+with every external unbound. `all()` binds them from its own `externals`,
+`all({ externals })`, and without one a predicate names it is refused
+`JD0011`. A load binds none, so
 a load under such a profile refuses `JD0032`, as a load whose own `where`
 names one does. `maxRows` bounds every
 fetch on every engine (`JD2007`), the residual's input rows included:
@@ -2212,7 +2222,11 @@ and `loadCursor` reads `signal`, `deadline`, `profile` and `tracking`.
 Each of these calls also refuses a malformed value of a control it reads
 (`JD0013`): a `signal` that is not an `AbortSignal`, a `deadline` that is
 not a finite number, a `strictStreaming` that is not a boolean, and
-`externals` that are not a plain object.
+`externals` that are not a plain object. A `page` reads `limit`, `after`,
+`maxBytes`, `consistency`, `lookahead`, `signal`, `deadline`, `profile` and
+its set's `tracking` (§10.5); it is a graph load, one native statement that
+binds no externals and has no residual, so a cursor's `externals`,
+`strict`, `pushdown` and `strictStreaming` are `JD0013` there.
 
 **The member allow-list.** `collections` says which roots a document
 may read; `members` says which MEMBERS of a root it may read. It is
@@ -2331,12 +2345,14 @@ prove was applied is not a budget.
    registers no snapshot). A predicate that names an external — the
    tenant-isolation spelling above — is bound from the read's own options,
    `get(key, { externals: { tenant } })`, as a query binds it from its
-   `externals`; a read that leaves one unbound, or binds it to `null`, a boolean
-   or a list holding one (values the database compares otherwise than the
-   engine, or cannot bind), is refused `JD0011` before the row is read, so the
-   refusal does not tell a key another tenant holds from one that holds
-   nothing, and one a comparison would read as `{}` is refused `JD0041`, as on
-   `execute`. The predicate runs in the engine over the one document, which
+   `externals`; a read whose externals the query engines refuse by the rule
+   above — one left unbound, or a value its member can hold that the database
+   compares otherwise than the engine — is refused `JD0011` before the row is
+   read, so the refusal does not tell a key another tenant holds from one that
+   holds nothing, and one a comparison would read as `{}`, or a `bigint`, is
+   refused `JD0041`, as on `execute`. A value its member cannot hold keeps no
+   row, as the query keeps none; an integer past 2^53 is judged by the engine,
+   as every point read is. The predicate runs in the engine over the one document, which
    agrees with the database's answer by the pushdown contract, so a row a query
    keeps is a row `get` keeps; the statement is the key seek it is on a store
    with no profile (the predicate costs the database nothing). The engine
@@ -3086,12 +3102,17 @@ member holds. A class instance inside a document is still read by its
 own fields.
 
 An external is a call's own value, so the same members check it per
-call, against the compiled document: an external a comparison reads —
-a direct operand of `$eq`, `$ne`, `$lt`, `$le`, `$gt` or `$ge` (`$since`,
-`$ids[*]`, `$window.from`), in the document or in the store profile's
-predicate over a root it reads — that holds such a value, at its root
-or inside it, is `JD0041` naming the member, the external and the
-comparison's `docPath`, on every member above and on every view
+call, against the compiled document: an external the engine compares or
+equates — a direct operand of `$eq`, `$ne`, `$lt`, `$le`, `$gt`, `$ge`,
+`$distinct` or `$index-of`, or a grouping key (`$since`, `$ids[*]`,
+`$window.from`), or one a variable is bound to first (`$let`, `$for`, a
+quantifier, a grouping key) and compared through it (`$s` after
+`$let: { s: '$since' }`), in the document or in the store profile's
+predicate over a root it reads, followed through the path it reaches
+(name, index, wildcard, slice and descendant segments) — that holds such
+a value, at its root or inside it, is `JD0041` naming the member, the
+external and the comparison's `docPath`, on every member above and on
+every view
 (`collection('ev').execute external '$since' holds a Date instance,
 which a comparison reads as {} — pass the JSON value it stands for, a
 Date as its toISOString() at /$where/$gt/1`). It used to be compared as
@@ -3103,9 +3124,15 @@ external the query returns, or hands to a registered function, is
 passed through by reference (the function receives the `Date` itself);
 one the document never compares is not read; a plain or null-prototype
 object, a class instance read by its fields, an array and a primitive
-compare as JSON. An external bound to a variable first (`$let`, `$for`,
-a quantifier) and compared through it, or reached through a descendant,
-slice or filter path, is not followed and is still compared as `{}`.
+compare as JSON. An external reached through a filter segment, or one an
+operator computes a value from before a comparison reads it (`$first`, a
+`$get` member, a function's result), is not followed and is still compared
+as `{}`. A `bigint` such a position reads is `JD0041` the same way
+(`… external '$min' holds a bigint, which a comparison reads as no number —
+pass the number it stands for, Number(value) at /$where/$gt/1`): the engine
+compares it with no number, so `$gt ['$e.n', '$min']` with `min: 2n` matched
+no row and `$ne` every row; returned, or handed to a function, it is passed
+through as before.
 
 An entity set is a provider (QUERY-PEN §8): `store.entity(name)` and
 `store.sync.entity(name)` carry `execute(document, options)` and

@@ -76,13 +76,15 @@ describe('collection.all()', () => {
       controller.abort(new Error('stop'));
       await assert.rejects(docs.all({ signal: controller.signal }), (/** @type {any} */ error) => error.code === 'JD2072');
       assert.throws(() => store.sync?.collection('docs').all({ signal: controller.signal }), (/** @type {any} */ error) => error.code === 'JD2072');
-      for (const options of [{ externals: {} }, { pushdown: false }, { strict: true }, 'x', null]) {
+      for (const options of [{ pushdown: false }, { strict: true }, 'x', null]) {
         await assert.rejects(docs.all(/** @type {any} */ (options)), (/** @type {any} */ error) => error.code === 'JD0013',
           JSON.stringify(options));
       }
       await assert.rejects(docs.all(/** @type {any} */ ({ signl: controller.signal })), (/** @type {any} */ error) => /'signal'/.test(error.message));
-      // the options it reads
+      // the options it reads; its externals bind a store predicate's, and here none
       assert.deepStrictEqual(await docs.all({ deadline: Date.now() + 60_000, strictStreaming: true, profile: 'safe' }), [{ a: 1 }, { a: 2 }]);
+      assert.deepStrictEqual(await docs.all({ externals: {} }), [{ a: 1 }, { a: 2 }]);
+      await assert.rejects(docs.all(/** @type {any} */ ({ externals: 'x' })), (/** @type {any} */ error) => error.code === 'JD0013');
     }
     finally { await store.close(); }
   });

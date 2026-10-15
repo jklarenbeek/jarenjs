@@ -88,6 +88,8 @@ async function main(): Promise<void> {
   // emits and takes a two-value keys tuple, plus the row's key
   const ordered = client.entities.Post.graph().orderBy((p) => p.stars).thenByDescending((p) => p.title);
   const page = await ordered.page({ limit: 10, maxBytes: 65536, consistency: 'live' });
+  // @ts-expect-error — a page binds no externals and has no residual to steer
+  await ordered.page({ limit: 10, externals: {} });
   const continuation: { readonly keys: [number, string]; readonly key: number } | null = page.continuation;
   void continuation;
   const pageRows: { pid: number; title?: string }[] = page.items;
@@ -227,8 +229,8 @@ async function main(): Promise<void> {
   await collection.delete('p1', { expect: [{ path: '/t', value: 1 }] });
   // @ts-expect-error — an expect names the path it compares
   await collection.delete('p1', { expect: { value: 1 } });
-  // @ts-expect-error — all() reads the cursor's options, not a fixed document's externals
-  await collection.all({ externals: {} });
+  // all() binds the externals a store profile's predicate names
+  await collection.all({ externals: { tenant: 'a' } });
   void [everyPlace, bounded, allPositive];
   // @ts-expect-error — a collections-only model has no unit of work
   void places.saveChanges;

@@ -70,6 +70,7 @@ import { refuseCancelled } from './cancellation.js';
 import {
   floorProfile, translateProfilePredicate, assertProfileRoots, memberDenial,
   applyMandatoryPredicate, applyRowBound, SAFE_PROFILE, predicateQuery,
+  predicateLeaves, admitPredicateExternals,
 } from './profile.js';
 
 /**
@@ -219,63 +220,17 @@ function aggregateNullError() {
   return new JsonQueryRuntimeError('JQ2001', renderQueryMessage(message), undefined, message);
 }
 
-/** @param {any} value - a bindable native parameter? */
-function bindable(value) {
+/**
+ * Does an external bind as a native parameter the database compares as the
+ * engine does? A string, and a finite number — but not, where the database
+ * reads a JSON integer by its digits (`exact`), an integer past 2^53, which
+ * the engine compares as the double it is.
+ * @param {any} value @param {boolean} [exact]
+ */
+function bindable(value, exact = false) {
   return typeof value === 'string'
-    || (typeof value === 'number' && Number.isFinite(value));
-}
-
-/**
- * The leaves of a collection profile's mandatory predicate that compare a
- * member with an external — an equality, an inequality, or a membership in
- * a list — each with the value families its member can hold under the
- * collection's schema (`null`: any, the member is not typed as scalars).
- * @param {any} pred - the translated predicate
- * @param {any} schema - the collection's schema
- * @param {any[]} [out]
- * @returns {{ name: string, list: boolean, member: string, families: string[] | null }[]}
- */
-function externalLeaves(pred, schema, out = []) {
-  switch (pred?.p) {
-    case 'and': case 'or':
-      for (const item of pred.items) externalLeaves(item, schema, out);
-      break;
-    case 'not':
-      externalLeaves(pred.item, schema, out);
-      break;
-    case 'cmp': case 'in':
-      if (!('ext' in pred.operand) || (pred.p === 'cmp' && pred.op !== 'eq' && pred.op !== 'ne')) break;
-      out.push({ name: pred.operand.ext, list: pred.p === 'in',
-        member: pred.ref.segments.map((/** @type {any} */ segment) => segment.name ?? `[${segment.index}]`).join('.'),
-        families: scalarFamilies(schema, pred.ref.segments) });
-      break;
-    default:
-  }
-  return out;
-}
-
-/** How a sentence names a value of each family the database binds otherwise than the engine compares it. */
-const STRAY_VALUES = { null: 'a null', boolean: 'a boolean', structure: 'an object or an array' };
-
-/**
- * The family of a value a native comparison does not compare as the engine
- * does, that the leaf's member can hold — a `null` the database binds as no
- * value, a boolean, an object or an array it does not compare — or `null`
- * when the leaf binds every value it reaches as the engine compares it: a
- * string, a number, or a family its member never holds. A membership's
- * list reaches its items (an object's member values); a scalar reaches none.
- * @param {{ list: boolean, families: string[] | null }} leaf @param {any} value
- * @returns {'null' | 'boolean' | 'structure' | null}
- */
-function strayFamily(leaf, value) {
-  const items = !leaf.list ? [value]
-    : value !== null && typeof value === 'object' ? (Array.isArray(value) ? value : Object.values(value)) : [];
-  for (const item of items) {
-    const family = item === null ? 'null' : typeof item === 'boolean' ? 'boolean'
-      : typeof item === 'object' ? 'structure' : null;
-    if (family !== null && (leaf.families === null || leaf.families.includes(family))) return family;
-  }
-  return null;
+    || (typeof value === 'number' && Number.isFinite(value)
+      && !(exact && Number.isInteger(value) && !Number.isSafeInteger(value)));
 }
 
 /**
@@ -288,15 +243,15 @@ function strayFamily(leaf, value) {
  * the engine; so does a missing external, which the engine refuses by
  * its own error. A scalar still crosses as one JSON value, so only a
  * JSON scalar binds: a bigint, a function or a symbol is the engine's to
- * answer.
- * @param {any} value
+ * answer. An item past 2^53 binds where {@link bindable} binds it.
+ * @param {any} value @param {boolean} [exact]
  */
-function listBindable(value) {
+function listBindable(value, exact = false) {
   if (value === undefined) return false;
   if (value === null || typeof value === 'string' || typeof value === 'boolean') return true;
   if (typeof value === 'number') return Number.isFinite(value);
   if (typeof value !== 'object') return false;
-  return (Array.isArray(value) ? value : Object.values(value)).every(bindable);
+  return (Array.isArray(value) ? value : Object.values(value)).every((item) => bindable(item, exact));
 }
 
 /**
@@ -331,8 +286,19 @@ function slotValue(slot, externals, anchors = null) {
       throw new Error(`the seek '${slot.typed.seek}' was not resolved before the bind`);
     return anchors[slot.typed.seek];
   }
-  return externals[slot.external];
+  const value = externals[slot.external];
+  // a slot that binds the value itself reaches the statement only with a
+  // value the admission let through: a boolean, an object or an array of
+  // a family the member cannot hold (a store predicate's, which cannot
+  // divert). No driver binds one as the engine reads it — SQLite refuses
+  // a boolean and reads an object as named parameters — so it binds as an
+  // empty BLOB, a kind no JSON member holds: every guarded comparison
+  // reads it as the foreign value it is, as the engine does
+  return value !== null && (typeof value === 'boolean' || typeof value === 'object') ? FOREIGN_VALUE : value;
 }
+
+/** The parameter a value of no SQL kind binds as ({@link slotValue}). */
+const FOREIGN_VALUE = new Uint8Array(0);
 
 /**
  * How one external reaches the statement. An external reached ONLY
@@ -695,12 +661,13 @@ function isOpaque(value) {
 }
 
 /**
- * The first value at or inside `root` that {@link isOpaque} names, in
- * document order, with the JSON Pointer of where it stands; `null` when
- * there is none.
- * @param {any} root @returns {{ value: object, at: string } | null}
+ * The first value at or inside `root` that {@link isOpaque} names — or,
+ * with `bigints`, that is a `bigint` — in document order, with the JSON
+ * Pointer of where it stands; `null` when there is none.
+ * @param {any} root @param {boolean} [bigints]
+ * @returns {{ value: any, at: string } | null}
  */
-function opaqueWithin(root) {
+function opaqueWithin(root, bigints = false) {
   // iterative: a document nested thousands deep compiles, so its walk
   // must not take a frame per level; a container met twice (a shared
   // subtree or a cycle) is read once
@@ -709,6 +676,7 @@ function opaqueWithin(root) {
   const pending = [[root, '']];
   while (pending.length > 0) {
     const [value, at] = /** @type {[any, string]} */ (pending.pop());
+    if (bigints && typeof value === 'bigint') return { value, at };
     if (value === null || typeof value !== 'object' || seen.has(value)) continue;
     seen.add(value);
     if (isOpaque(value)) return { value, at };
@@ -721,19 +689,37 @@ function opaqueWithin(root) {
 
 /** The comparisons (QUERY-FORMAT §8.4): each reads its operands' items as JSON. */
 const COMPARISONS = new Set(['$eq', '$ne', '$lt', '$le', '$gt', '$ge']);
+/** The operators that equate their operands' items by the engine's JSON
+ * equality as a comparison does: `$distinct` keeps one of equal items,
+ * `$index-of` names the positions of the item equal to its second. */
+const EQUATING = new Set(['$distinct', '$index-of']);
 /** Node members that hold a host value, never a node (QUERY-FORMAT C.3). */
 const HOST_MEMBERS = new Set(['fn', 'entry', 'collation']);
 
-/** @param {any} node @returns {boolean} */
-const isExternalRef = (node) => (node.kind === 'var' || node.kind === 'path') && node.external === true;
+/**
+ * The variables a node binds — a `$for` or `$let` binding, a quantifier's,
+ * a grouping key's — each `{ slot, expr }`: the slot a reference to the
+ * variable names, and the expression its value is.
+ * @param {any} node @returns {{ slot: number, expr: any }[]}
+ */
+function bindingsOf(node) {
+  if (node.kind === 'flwor') return [...node.forBindings, ...node.letBindings, ...(node.groupby?.keys ?? [])];
+  if (node.kind === 'quant') return node.bindings;
+  return [];
+}
 
 /**
- * The externals a query reads as a comparison's direct operand — `$since`,
- * `$xs[*]`, `$o.d` in `$eq $ne $lt $le $gt $ge` — found anywhere in its
- * analysed tree (QUERY-FORMAT Appendix C). A comparison of one external
- * reference with the same reference answers alike whatever it holds, and
- * is left out. A value the query returns or hands to a host function is
- * passed by reference, and an external bound to a variable first is not
+ * The externals a query reads where the engine compares or equates items
+ * — a direct operand of `$eq $ne $lt $le $gt $ge`, `$distinct` or
+ * `$index-of`, or a grouping key: `$since`, `$xs[*]`, `$o.d` — found
+ * anywhere in its analysed tree (QUERY-FORMAT Appendix C), and followed
+ * through the variables the query binds to one: `$s` after
+ * `$let: { s: '$since' }`, `$q.d` after `$for: { q: '$xs[*]' }` or a
+ * quantifier over it, each named by the external and the path it reaches.
+ * A comparison of one external reference with the same reference answers
+ * alike whatever it holds, and is left out. A value the query returns or
+ * hands to a host function is passed by reference, and one an operator
+ * computes from the external (its count, a member it gets) is not
  * followed.
  * @param {any} root - the analysed tree
  * @param {string | null} [predicate] - the profile root whose predicate the
@@ -741,8 +727,10 @@ const isExternalRef = (node) => (node.kind === 'var' || node.kind === 'path') &&
  * @returns {{ name: string, segments: readonly any[], docPath: string, predicate: string | null }[]}
  */
 function comparedExternals(root, predicate = null) {
-  /** @type {{ name: string, segments: readonly any[], docPath: string, predicate: string | null }[]} */
-  const found = [];
+  /** @type {Map<number, any>} each bound variable's expression, by slot */
+  const bound = new Map();
+  /** @type {any[][]} the operands one comparison or equating operator reads, together */
+  const operands = [];
   const pending = [root];
   while (pending.length > 0) {
     const node = pending.pop();
@@ -754,18 +742,40 @@ function comparedExternals(root, predicate = null) {
     // a literal's and a raw argument's value is JSON, a path's segments
     // are its own grammar: neither holds a node
     if (node.kind === 'literal' || node.kind === 'raw' || node.kind === 'path') continue;
-    if (node.kind === 'op' && COMPARISONS.has(node.name)) {
-      const refs = node.args.filter(isExternalRef);
-      const same = refs.length === 2 && refs[0].name === refs[1].name
-        && JSON.stringify(refs[0].segments ?? []) === JSON.stringify(refs[1].segments ?? []);
-      if (!same) {
-        for (const ref of refs) found.push({ name: ref.name, segments: ref.segments ?? [], docPath: ref.docPath, predicate });
-      }
-    }
+    for (const binding of bindingsOf(node)) bound.set(binding.slot, binding.expr);
+    if (node.kind === 'op' && (COMPARISONS.has(node.name) || EQUATING.has(node.name))) operands.push(node.args);
+    if (node.kind === 'flwor') for (const key of node.groupby?.keys ?? []) operands.push([key.expr]);
     const keys = Object.keys(node);
     for (let k = keys.length - 1; k >= 0; k--) {
       if (!HOST_MEMBERS.has(keys[k])) pending.push(node[keys[k]]);
     }
+  }
+  /**
+   * The external a reference reads and the path it reaches it by, through
+   * the variables bound to one; `null` for any other reference. A slot is
+   * bound once in a tree, and a binding refers only to slots bound before
+   * it, so the walk ends.
+   * @param {any} node @returns {{ name: string, segments: any[] } | null}
+   */
+  const resolve = (node) => {
+    /** @type {any[][]} the paths read on the way, the outermost first */
+    const paths = [];
+    let current = node;
+    while (current?.kind === 'var' || current?.kind === 'path') {
+      paths.unshift(current.segments ?? []);
+      if (current.external === true) return { name: current.name, segments: paths.flat() };
+      current = bound.get(current.kind === 'var' ? current.slot : current.rootSlot);
+    }
+    return null;
+  };
+  /** @type {{ name: string, segments: readonly any[], docPath: string, predicate: string | null }[]} */
+  const found = [];
+  for (const args of operands) {
+    const refs = args.map((arg) => ({ arg, ref: resolve(arg) })).filter((entry) => entry.ref !== null);
+    const same = refs.length === 2 && args.length === 2 && refs[0].ref.name === refs[1].ref.name
+      && JSON.stringify(refs[0].ref.segments) === JSON.stringify(refs[1].ref.segments);
+    if (same) continue;
+    for (const { arg, ref } of refs) found.push({ name: ref.name, segments: ref.segments, docPath: arg.docPath, predicate });
   }
   return found;
 }
@@ -792,18 +802,17 @@ export function profileComparedExternals(profile, roots, operators) {
 
 /**
  * The values a compared reference reads from its external: the whole
- * value for `$name`, what name, index and wildcard selectors reach for a
- * path — an object {@link isOpaque} names met on the way standing for
- * all it would reach; `null` for a path with a descendant, slice or
- * filter segment, which this does not follow.
+ * value for `$name`, what name, index, slice, wildcard and descendant
+ * selectors reach for a path — an object {@link isOpaque} names met on the
+ * way standing for all it would reach; `null` for a path with a filter
+ * segment, which this does not follow.
  * @param {any} value @param {readonly any[]} segments @returns {any[] | null}
  */
 function referencedValues(value, segments) {
   let current = [value];
   for (const segment of segments) {
-    if (segment.descendant) return null;
     const next = [];
-    for (const item of current) {
+    for (const item of segment.descendant ? descendantsOf(current) : current) {
       if (item === null || typeof item !== 'object') continue;
       // a Set, a Map or a Date on the way is read as {}, so the path
       // reaches nothing through it: it is the value the comparison reads
@@ -823,6 +832,9 @@ function referencedValues(value, segments) {
         else if (selector.kind === 'wildcard') {
           for (const member of Array.isArray(item) ? item : Object.values(item)) next.push(member);
         }
+        else if (selector.kind === 'slice') {
+          if (Array.isArray(item)) next.push(...sliced(item, selector));
+        }
         else return null;
       }
     }
@@ -832,11 +844,60 @@ function referencedValues(value, segments) {
 }
 
 /**
- * Refuse an external a comparison would read as `{}` (`JD0041`): one
- * {@link comparedExternals} names whose value holds, at its root or inside
- * it, what {@link isOpaque} names, so `$gt ['$e.at', '$since']` with
- * `since` a `Date` compared with `{}` and matched no row. Run per call,
- * after the compiled entry is found: the externals are the call's own.
+ * Each value with every value inside it, in document order — what a
+ * descendant segment selects from: a container met twice is read once, and
+ * an object {@link isOpaque} names is not entered.
+ * @param {readonly any[]} values @returns {any[]}
+ */
+function descendantsOf(values) {
+  const out = [];
+  const seen = new Set();
+  const pending = [...values].reverse();
+  while (pending.length > 0) {
+    const value = pending.pop();
+    out.push(value);
+    if (value === null || typeof value !== 'object' || seen.has(value) || isOpaque(value)) continue;
+    seen.add(value);
+    const members = Array.isArray(value) ? value : Object.values(value);
+    for (let k = members.length - 1; k >= 0; k--) pending.push(members[k]);
+  }
+  return out;
+}
+
+/**
+ * The elements an array slice selects (RFC 9535 §2.3.4): `start`, `end`
+ * and `step` as JSONPath reads them, negative bounds from the end, a zero
+ * step selecting nothing.
+ * @param {readonly any[]} array @param {{ start: number | null, end: number | null, step: number | null }} slice
+ * @returns {any[]}
+ */
+function sliced(array, slice) {
+  const step = slice.step ?? 1;
+  if (step === 0) return [];
+  const length = array.length;
+  const bound = (/** @type {number} */ index) => (index >= 0 ? index : length + index);
+  const out = [];
+  if (step > 0) {
+    const lower = Math.min(Math.max(bound(slice.start ?? 0), 0), length);
+    const upper = Math.min(Math.max(bound(slice.end ?? length), 0), length);
+    for (let i = lower; i < upper; i += step) out.push(array[i]);
+  }
+  else {
+    const upper = Math.min(Math.max(bound(slice.start ?? length - 1), -1), length - 1);
+    const lower = Math.min(Math.max(bound(slice.end ?? -length - 1), -1), length - 1);
+    for (let i = upper; lower < i; i += step) out.push(array[i]);
+  }
+  return out;
+}
+
+/**
+ * Refuse an external a comparison would read otherwise than it stands for
+ * (`JD0041`): one {@link comparedExternals} names whose value holds, at its
+ * root or inside it, what {@link isOpaque} names, so `$gt ['$e.at', '$since']`
+ * with `since` a `Date` compared with `{}` and matched no row — or a
+ * `bigint`, which the engine compares with no number, so `$gt ['$e.n', '$min']`
+ * with `min` `2n` matched none either. Run per call, after the compiled
+ * entry is found: the externals are the call's own.
  * @param {readonly { name: string, segments: readonly any[], docPath: string, predicate: string | null }[]} compared
  * @param {any} externals - the call's externals
  * @param {string} spelling - the member, as the reason names it
@@ -848,17 +909,20 @@ export function refuseOpaqueExternals(compared, externals, spelling) {
     const values = referencedValues(externals[ref.name], ref.segments);
     for (const value of values ?? []) {
       // a list of ids is mostly primitives: no walk for those
-      if (value === null || typeof value !== 'object') continue;
-      const found = opaqueWithin(value);
+      const found = typeof value === 'bigint' ? { value, at: '' }
+        : value === null || typeof value !== 'object' ? null : opaqueWithin(value, true);
       if (found === null) continue;
       // the document's comparison is named by its docPath, which the
       // error carries; a profile predicate is the store's, not the caller's
       const where = ref.predicate === null ? 'a comparison'
         : `the store profile's predicate for '${ref.predicate}'`;
+      // a bigint is no JSON number: the engine compares it with none
+      const bigint = typeof found.value === 'bigint';
       throw new DbCompileError('JD0041',
-        `${spelling} external '$${ref.name}' holds ${instanceOf(found.value)}`
-        + `${found.at === '' ? '' : ` at ${found.at}`}, which ${where} reads as {} — `
-        + 'pass the JSON value it stands for, a Date as its toISOString()',
+        `${spelling} external '$${ref.name}' holds ${bigint ? 'a bigint' : instanceOf(found.value)}`
+        + `${found.at === '' ? '' : ` at ${found.at}`}, which ${where} reads as `
+        + (bigint ? 'no number — pass the number it stands for, Number(value)'
+          : '{} — pass the JSON value it stands for, a Date as its toISOString()'),
         ref.predicate === null ? ref.docPath : undefined);
     }
   }
@@ -901,6 +965,10 @@ export function createQueryEngine(context) {
   const operators = state.operators ?? null;
   const zoneProvider = state.zoneProvider ?? null;
   const dialect = connection.dialect;
+  // SQLite reads a JSON integer by its digits, where the engine (and
+  // PostgreSQL's `numeric`, over the shortest digits the store writes)
+  // compares the double: an external past 2^53 is not compared alike
+  const exactIntegers = dialect.name === 'sqlite';
   const shape = {
     collection: collection.name,
     schema: collection.schema,
@@ -1036,6 +1104,15 @@ export function createQueryEngine(context) {
    */
   const profileRefusal = (reason) =>
     new DbCompileError('JD0011', reason, collection.docPath);
+  /** The store predicate's comparisons of an external, each with what its
+   * member can hold under the collection's schema. @param {any} mandatory */
+  const leavesOf = (mandatory) =>
+    predicateLeaves(mandatory, (ref) => scalarFamilies(collection.schema, ref.segments), false);
+  /** The store profile's leaves for this collection, as a point read
+   * admits its externals by them: translated on first use. @type {any[] | null} */
+  let storeLeaves = null;
+  const profileLeaves = () => (storeLeaves ??= storeProfile?.predicates[collection.name] === undefined ? []
+    : leavesOf(translateProfilePredicate(storeProfile.predicates[collection.name], shape)));
 
   /**
    * Build (or fetch) the cached entry for one document, under one
@@ -1174,7 +1251,7 @@ export function createQueryEngine(context) {
         operators ?? undefined).externals.map((/** @type {any} */ ref) => ref.name))],
       // the predicate's comparisons and memberships of an external, with
       // what each one's member can hold
-      predicateLeaves: mandatory === null ? [] : externalLeaves(mandatory, collection.schema),
+      predicateLeaves: mandatory === null ? [] : leavesOf(mandatory),
       compared,
       externalSlotKinds: externalSlotKinds(emitted.slots, plan.rank),
       // a literal probe is normalized once, here; an external one per
@@ -1244,8 +1321,11 @@ export function createQueryEngine(context) {
     return entry.fullScanSql;
   };
   const fullScanOf = (entry, use) => useRead(connection, fullScanEmitted(entry), use, entry);
-  const fullScanParams = (entry) =>
-    fullScanEmitted(entry).slots.map((slot) => ('literal' in slot ? slot.literal : null));
+  /** The full scan's parameters: its literals, and the externals the
+   * profile's mandatory predicate binds from the call — the only
+   * externals its statement holds, admitted before any statement runs. */
+  const fullScanParams = (entry, externals) =>
+    fullScanEmitted(entry).slots.map((slot) => slotValue(slot, externals));
   /**
    * The rows a pushed sum or average selects, as whole documents: the
    * plan's own filter — the profile's mandatory predicate already in it —
@@ -1407,36 +1487,23 @@ export function createQueryEngine(context) {
       });
       if (invalidDerived) return true;
       if (kind === 'derived') return false;
-      if (kind === 'list') return !listBindable(externals[name]);
+      if (kind === 'list') return !listBindable(externals[name], exactIntegers);
       // a probe binds when SOME declared width takes it; a width the
       // model does not declare is the diversion it always was
       if (kind === 'probe') return rankAlternativeFor(entry, externals[name]) === null;
-      return !bindable(externals[name]);
+      return !bindable(externals[name], exactIntegers);
     }) ?? null;
   /** Must this call divert to the residual? */
   const mustDivert = (entry, externals) => divertingExternal(entry, externals) !== null;
-  /** Refuse a call that does not bind an external the profile's mandatory
-   * predicate reads, as the engine does (`JQ2006`) and the entity engine
-   * does (`JD0011`): the statement would bind it as NULL, or fail in the
-   * driver, and a diversion still runs the predicate in the database. So is
-   * a call whose external holds a value the statement would compare
-   * otherwise than the engine does, where the member can hold one
-   * ({@link strayFamily}): the predicate would keep other rows than it does.
+  /** Admit the externals the profile's mandatory predicate binds in every
+   * statement of this entry, diverted or not ({@link admitPredicateExternals}):
+   * a missing one, and one the statement would compare otherwise than the
+   * engine where the member can hold it, are refused (`JD0011`), as the
+   * engine refuses a missing one (`JQ2006`) and as a point read does.
    * `repair` names the way out a surface that takes no externals has. */
   const refuseUnboundPredicate = (entry, externals, repair = '') => {
-    const missing = entry.predicateExternals.filter((name) => externals[name] === undefined);
-    if (missing.length > 0) {
-      throw profileRefusal(`the profile's predicate for '${collection.name}' cannot bind `
-        + `${missing.map((name) => `'$${name}'`).join(', ')} for this call — it is missing, and a mandatory `
-        + `predicate runs in the database or not at all${repair}`);
-    }
-    for (const leaf of entry.predicateLeaves) {
-      const family = strayFamily(leaf, externals[leaf.name]);
-      if (family === null) continue;
-      throw profileRefusal(`the profile's predicate for '${collection.name}' cannot bind '$${leaf.name}' for this call `
-        + `— it holds ${STRAY_VALUES[family]}, which the engine compares with the same value in '${leaf.member}' and the `
-        + 'database does not, so the predicate would keep other rows than it does; bind strings and numbers');
-    }
+    admitPredicateExternals(collection.name, entry.predicateExternals, entry.predicateLeaves, externals,
+      { read: 'call', repair, refusal: profileRefusal });
   };
 
   const rowsToDocs = (rows) => rows.map((row) => JSON.parse(row.doc));
@@ -1489,7 +1556,7 @@ export function createQueryEngine(context) {
   const divertBucket = (entry, document, externals) => {
     seriesStats.diverted++;
     return fullScanOf(entry, (statement) =>
-      chain(statement.all(fullScanParams(entry)), (rows) => {
+      chain(statement.all(fullScanParams(entry, externals)), (rows) => {
         const docs = rowsToDocs(checkRowBound(entry, rows));
         const answer = setResidualOf(entry, document)(docs, externals);
         countSeries(entry, 2, docs.length, itemCount(answer));
@@ -1604,7 +1671,7 @@ export function createQueryEngine(context) {
       if (entry.planned.mode === 'knn') knnStats.diverted++;
       else bindStats.diverted++;
       return fullScanOf(entry, (statement) =>
-        chain(statement.all(fullScanParams(entry)), (rows) =>
+        chain(statement.all(fullScanParams(entry, externals)), (rows) =>
           rowsToDocs(checkRowBound(entry, rows))));
     }
     if (entry.planned.mode === 'knn') return knnCandidates(entry, externals);
@@ -2067,6 +2134,7 @@ export function createQueryEngine(context) {
   };
 
   return { execute: bounded(execute, driverWrap), query, explain: bounded(explain, driverWrap), shape,
+    predicateLeaves: profileLeaves,
     stats: () => ({ knn: { ...knnStats }, series: { ...seriesStats }, bind: { ...bindStats } }) };
 }
 
@@ -2245,6 +2313,31 @@ export function createEntityQueryEngine(context) {
     };
   };
 
+  // as on a collection: SQLite reads a JSON integer by its digits
+  const exactIntegers = dialect.name === 'sqlite';
+  /** A mandatory predicate's comparisons of an external, by what each
+   * column can hold: its storage kind, and a present `null` only where its
+   * policy reads a NULL as one. A bound `null` compares as the engine does
+   * on every column, as it always has. @param {any} predicate */
+  const entityLeaves = (predicate) => predicateLeaves(predicate, (ref) => {
+    const kind = ref.storage === 'string' ? 'text' : ref.storage === 'boolean' ? 'boolean' : 'number';
+    return ref.nullPolicy === 'null' ? [kind, 'null'] : [kind];
+  }, true);
+  /** The externals a profile's predicate of entity `name` names.
+   * @param {any} profile @param {string} name @returns {string[]} */
+  const predicateNamesOf = (profile, name) => [...new Set(analyzeQuery(predicateQuery(profile.predicates[name]), analyzeOpts)
+    .externals.map((/** @type {any} */ ref) => ref.name))];
+  /** The store predicate's leaves for entity `name`, as its point read admits
+   * by them, translated on first use. @type {Map<string, any[]>} */
+  const storeLeaves = new Map();
+  const profileLeaves = (/** @type {string} */ name) => {
+    if (!storeLeaves.has(name)) {
+      const predicate = mandatoryEntityPredicate(storeProfile, entities.get(name), mapping.entities[name], analyzeOpts);
+      storeLeaves.set(name, predicate === null ? [] : entityLeaves(predicate));
+    }
+    return /** @type {any[]} */ (storeLeaves.get(name));
+  };
+
   const entryFor = (document, pushdown, profile = null) => {
     const key = ['E', document, dialect.name, pushdown, profile];
     const cached = state.cache.get(key);
@@ -2338,6 +2431,12 @@ export function createEntityQueryEngine(context) {
       packedResidual: null,
       fetchers: null,
       mandatory,
+      // each mandatory predicate's comparisons of an external, the
+      // externals it names, and those the document itself never names
+      predicateLeaves: new Map([...mandatory].map(([name, predicate]) => [name, entityLeaves(predicate)])),
+      predicateNames: new Map([...mandatory.keys()].map((name) => [name, predicateNamesOf(profile, name)])),
+      predicateOnly: new Set([...mandatory.keys()].flatMap((name) => predicateNamesOf(profile, name))
+        .filter((name) => !planned.analysis.externals.some((/** @type {any} */ ref) => ref.name === name))),
       // what each call's externals must hold as JSON, checked per call
       compared: [...comparedExternals(planned.analysis.root),
         ...profileComparedExternals(profile, planned.referenced, analyzeOpts)],
@@ -2488,29 +2587,29 @@ export function createEntityQueryEngine(context) {
     return entry.fetchers;
   };
 
-  /** Refuse (`JD0011`) a residual run whose fetch cannot bind an external
-   * of the profile's mandatory predicate from the call's externals — never
-   * dropped: a mandatory predicate runs in the database or not at all. */
-  const refuseUnboundFetchers = (entry, externals) => {
-    for (const fetcher of fetchersOf(entry)) {
-      if (divertReason(fetcher, externals) === null) continue;
-      const names = [...new Set(fetcher.slots.filter((/** @type {any} */ slot) => 'external' in slot)
-        .map((/** @type {any} */ slot) => `'$${slot.external}'`))];
-      throw profileEntityRefusal(`the profile's predicate for '${fetcher.name}' cannot bind ${names.join(', ')} `
-        + 'for this call — missing, or a value the database cannot compare — and a mandatory predicate runs '
-        + 'in the database or not at all', entities.get(fetcher.name)?.docPath);
+  /** Admit the externals the profile's mandatory predicate of every entity
+   * the call reads binds, by the rule a collection and a point read follow
+   * ({@link admitPredicateExternals}): a missing one, and one its column can
+   * hold that the statement compares otherwise than the engine, are refused
+   * (`JD0011`) — never dropped: a mandatory predicate runs in the database
+   * or not at all. Every statement of the call then binds them as they are.
+   * @param {any} entry @param {any} externals */
+  const admitPredicates = (entry, externals) => {
+    for (const [name, leaves] of entry.predicateLeaves) {
+      admitPredicateExternals(name, entry.predicateNames.get(name), leaves, externals, { read: 'call',
+        refusal: (reason) => profileEntityRefusal(reason, entities.get(name)?.docPath) });
     }
   };
 
   /** Fetch every referenced entity's rows through {@link fetchersOf} and
-   * build the in-memory root, refused first by {@link refuseUnboundFetchers}. */
+   * build the in-memory root; the call admitted its predicates' externals. */
   const fetchRoot = (entry, externals) => {
-    refuseUnboundFetchers(entry, externals);
+    const fetchers = fetchersOf(entry);
     /** @type {any} */
     const root = {};
     const next = (i) => {
-      if (i >= entry.fetchers.length) return root;
-      const fetcher = entry.fetchers[i];
+      if (i >= fetchers.length) return root;
+      const fetcher = fetchers[i];
       return useRead(connection, fetcher, (statement) =>
         chain(statement.all(fetcher.slots.map((slot) => slotValue(slot, externals))), (rows) => {
           admittedRows(entry, rows);
@@ -2547,6 +2646,7 @@ export function createEntityQueryEngine(context) {
     const { externals, strict, pushdown, profile } = callState(options);
     const entry = entryFor(document, pushdown, profile);
     refuseOpaqueExternals(entry.compared, externals, 'entity execute()');
+    admitPredicates(entry, externals);
     entry.admitted = { statements: 0, rows: 0, bytes: 0 };
     entry.runtimeReason = null;
     if (entry.planned.mode !== 'native') {
@@ -2642,15 +2742,18 @@ export function createEntityQueryEngine(context) {
   const divertReason = (entry, externals) => {
     for (const slot of entry.slots) {
       if ('external' in slot && slot.list === true) {
-        if (listBindable(externals[slot.external])) continue;
+        if (entry.predicateOnly.has(slot.external) || listBindable(externals[slot.external], exactIntegers)) continue;
         return { construct: 'external', reason: BIND_REASONS.external(slot.external, 'root') };
       }
+      // the profile predicate's own externals were admitted before any
+      // statement ({@link admitPredicates}): each binds as it is
+      if ('external' in slot && entry.predicateOnly.has(slot.external)) continue;
       // a JSON-encoded external crosses as text whatever it holds, so what
       // decides is the value the caller gave; a null compares as the
       // column's own null on either engine
       const json = 'external' in slot && slot.json === true;
       const value = json ? externals[slot.external] : slotValue(slot, externals);
-      if (bindable(value) || ((slot.nullable === true || json) && value === null)) continue;
+      if (bindable(value, exactIntegers && 'external' in slot) || ((slot.nullable === true || json) && value === null)) continue;
       const name = 'external' in slot ? slot.external
         : 'derived' in slot ? (slot.derived.kind === 'bboxAxis' ? slot.derived.external
           : [slot.derived.centre, slot.derived.radius].find((input) => 'external' in input)?.external) : null;
@@ -2720,6 +2823,7 @@ export function createEntityQueryEngine(context) {
     const { externals, strict, pushdown, profile } = callState(options);
     const entry = entryFor(document, pushdown, profile);
     refuseOpaqueExternals(entry.compared, externals, 'entity cursor()');
+    admitPredicates(entry, externals);
     if (strict && entry.planned.mode !== 'native') {
       const forcing = entry.planned.reasons[0];
       throw new DbCompileError('JD0010',
@@ -2821,7 +2925,7 @@ export function createEntityQueryEngine(context) {
     const mode = diverted || runtime ? 'set' : entry.planned.mode;
     // a residual run fetches every root it reads, so explaining one given
     // externals refuses what that fetch refuses
-    if (options?.externals !== undefined && mode !== 'native') refuseUnboundFetchers(entry, externals);
+    if (options?.externals !== undefined) admitPredicates(entry, externals);
     const reasons = runtime ? [runtime, ...entry.planned.reasons] : diverted && classified.barrier !== null
       ? [classified.barrier, ...entry.planned.reasons] : entry.planned.reasons;
     const base = {
@@ -2861,7 +2965,7 @@ export function createEntityQueryEngine(context) {
 
   return { execute: bounded(execute, driverWrap), query,
     syncQuery: (document, options, register) => query(document, options, register, createSyncCursor),
-    explain: bounded(explain, driverWrap), relations };
+    explain: bounded(explain, driverWrap), relations, predicateLeaves: profileLeaves };
 }
 
 /**
@@ -3853,8 +3957,11 @@ export function createLoadEngine(context, entityName) {
      * @param {((tree: any, doc: any) => any) | undefined} [register]
      */
     page(spec, options = undefined, register = undefined, cursorFactory = createCursor) {
-      readOptions(options, ['limit', 'after', 'maxBytes', 'consistency', 'signal', 'deadline', 'lookahead', 'profile',
-        'externals', 'strict', 'pushdown', 'strictStreaming'], 'page()');
+      // a page is a graph load: one native statement that binds no
+      // externals and has no residual, so `externals`, `strict`,
+      // `pushdown` and `strictStreaming` are not among what it reads
+      readOptions(options, ['limit', 'after', 'maxBytes', 'consistency', 'signal', 'deadline', 'lookahead', 'profile'],
+        'page()');
       readControls(options, 'page()');
       requireCallable(options, state.now);
       const limit = options?.limit ?? PAGE_LIMIT_DEFAULT;

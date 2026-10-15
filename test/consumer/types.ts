@@ -1602,6 +1602,8 @@ for (const item of syncHostCursor) { const id: number = item.id; void id; break;
 syncHostCursor[Symbol.dispose]();
 const syncHostPage: Page<Readonly<{ id: number }>> = syncHostItems.page({}, { limit: 2 });
 void syncHostPage.continuation;
+// @ts-expect-error — a page binds no externals and has no residual to steer
+syncHostItems.page({}, { limit: 2, pushdown: false });
 
 // Materialized graph loads share their profile and preflight controls across
 // tracked, untracked, generated and synchronous entity surfaces.

@@ -228,8 +228,9 @@ export interface WriteOptions {
 }
 
 /** `all()`'s options: the cursor's own, and nothing a fixed document
- * cannot use (`JD0013`). */
-export type AllOptions = Pick<CursorOptions, 'signal' | 'deadline' | 'profile' | 'strictStreaming'>;
+ * cannot use (`JD0013`). Its `externals` bind the store profile's
+ * predicate, as a query's do. */
+export type AllOptions = Pick<CursorOptions, 'externals' | 'signal' | 'deadline' | 'profile' | 'strictStreaming'>;
 
 /** An entity cursor's options. `tracking: true` registers every yielded
  * entity document with the unit of work — a snapshot per row, so the
@@ -319,8 +320,10 @@ export interface LoadContinuation {
  * bound), the continuation to resume from, and `consistency` —
  * `'snapshot'` is refused (`JD0036`) over an ordering whose keys a
  * write may change; `'live'` (the default) reports the truth in
- * `snapshot`. */
-export interface PageOptions<C = LoadContinuation> extends EntityCursorOptions {
+ * `snapshot`. A page is a graph load — one native statement that binds no
+ * externals — so a cursor's `externals`, `strict`, `pushdown` and
+ * `strictStreaming` are not among its options (`JD0013`). */
+export interface PageOptions<C = LoadContinuation> extends Pick<EntityCursorOptions, 'signal' | 'deadline' | 'profile' | 'tracking'> {
   /** False admits no lookahead row; a full page reports hasMore: null. */
   lookahead?: boolean;
   limit?: number;
