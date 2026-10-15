@@ -728,15 +728,24 @@ always built):
 
 `compileAsync` lives in `load.js`, the `@jarenjs/validate/load` subpath; the
 core never imports it. It reads what a validator holds through
-`validator-state.js` (the registered schemas and the traversal options, set
-by the constructor) and changes nothing in the compile pipeline:
+`validator-state.js` (the registered schemas, the traversal options and what
+the walks read at each place, set by the constructor) and changes nothing in
+the compile pipeline:
 
 - **One walk.** It finds the references with the walk that registers a
   schema, `storeSchemaIdsInMap`, whose optional `onReference` callback is
   offered each `$ref` and `$dynamicRef` target with its location. The
   targets are reached when the walk ends, once every identifier of the
   document is registered, so a reference into the schema's own resources is
-  never loaded.
+  never loaded. Every document is walked as `compile` reads it: a place that
+  declares no draft under the draft the schema names, so a draft-07 compile
+  loads what a draft-07 `$ref` beside an `$id` names, and the entries a
+  registered undeclared document left for its 2019-09 reading
+  (`lateTargets`) are not loaded for it. A failed load of a target only such
+  a draft-07 reading in a loaded document names is no refusal (`needed`):
+  `compile` resolves that reference on the call that reaches it and refuses
+  it there, so the loader answers what `compile` answers over the documents
+  it could load.
 - **Rounds, in a fixed order.** The documents one round reaches are loaded
   at once; only when every one of them settled are they registered, walked
   and their failures judged, each in the order it was reached. A reference
@@ -1092,7 +1101,16 @@ document that is (the message then names the step that misses)
 - Is the ref path correct in the schema?
 - After `restoreSchemaRefsInMap`, all refs should have non-null values
 - `JK0008` instead: a draft-07 `$ref` beside an `$id` resolves against the
-  enclosing base, not the `$id`
+  enclosing base, not the `$id`. In a registered document that declares no
+  `$schema` each compile reads it under its own draft: the walk records both
+  bases (`refBases`, `undecidedBases`), `resolveRefSchemaDeep` and
+  `restoreSchemaRefsInMap` take the compile's draft, and a draft-07 compile
+  drops the entries only the 2019-09 reading needs (`lateTargets`)
+- A `$dynamicRef` or `$recursiveRef` target is resolved by the `$ref`
+  resolver on the call that reaches it; nothing found is `JK0009` there
+- `JK0010`: the reference or `$id` text is no URI; `createJsonPointer` codes
+  the `URL` parse failure, and the callers that know the keyword and its
+  place name them
 
 ### Performance Degradation on First Validation
 

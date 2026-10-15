@@ -16,11 +16,13 @@ import {
   RefCycleError,
   assertRootReadsInstance,
   resolveRefSchemaDeep,
+  resolveRefSchemaShallow,
   traverseOptionsFor,
   encodeJsonPointerPath,
   decodeJsonPointerPath,
   TraverseOptions,
   createJsonPointer,
+  keywordLocation,
   unresolvedReference,
 } from './traverse.js';
 
@@ -786,7 +788,7 @@ export class ValidationRoot {
     // Resolve ref chain and check final ID cache
     const schemas = this.#schemas;
     const traverse = this.#traverse;
-    const { id, schema: root } = resolveRefSchemaDeep(schemas, path, schema, traverse, undefined, this.#places);
+    const { id, schema: root } = resolveRefSchemaDeep(schemas, path, schema, traverse, undefined, this.#places, this.#options.draftVersion);
 
     // Check if final ID is already compiled
     const finalCached = objects.get(id);
@@ -807,7 +809,20 @@ export class ValidationRoot {
    * @throws {SchemaCompileError} `JK0009` when the target is not held, `JK0001` when the chain loops
    */
   referencedSchema(base, schema) {
-    return resolveRefSchemaDeep(this.#schemas, base, schema, this.#traverse, undefined, this.#places);
+    return resolveRefSchemaDeep(this.#schemas, base, schema, this.#traverse, undefined, this.#places, this.#options.draftVersion);
+  }
+
+  /**
+   * The schema a reference names, without following that schema's own
+   * reference. An internal collaborator of the compiler; not part of the
+   * package's API.
+   * @param {string} ref - The reference
+   * @param {string} base - The base it resolves against
+   * @returns {{id: string, schema: any}}
+   * @throws {SchemaCompileError} `JK0009` when the target is not held
+   */
+  heldSchema(ref, base) {
+    return resolveRefSchemaShallow(this.#schemas, ref, base, this.#traverse);
   }
 
   /**
@@ -819,7 +834,7 @@ export class ValidationRoot {
    */
   assertNoRefLoop(path, schema) {
     try {
-      resolveRefSchemaDeep(this.#schemas, path, schema, this.#traverse, this.#loopFree, this.#places);
+      resolveRefSchemaDeep(this.#schemas, path, schema, this.#traverse, this.#loopFree, this.#places, this.#options.draftVersion);
     }
     catch (e) {
       // A target that is not loaded is reported where it is used.
@@ -1088,7 +1103,7 @@ export class ValidationObject {
     const refBase = draftVersion >= 2019
       ? (self.baseUri || baseUri || path)
       : (baseUri || path);
-    const { id: ref } = createJsonPointer(schema.$ref, refBase, root.traverse);
+    const { id: ref } = createJsonPointer(schema.$ref, refBase, root.traverse, '$ref', keywordLocation(path, '$ref'));
     // A schema that references itself decides nothing: validating it re-enters
     // the same validator on the same instance until the stack runs out.
     if (ref === path)
@@ -1351,7 +1366,7 @@ export class ValidationObject {
     if (isObjectClass(schema) && schema.$id) {
       // This schema has its own $id - resolve it against the parent's baseUri
       // to get the absolute base for children
-      const { id: resolvedId } = createJsonPointer(schema.$id, baseUri);
+      const { id: resolvedId } = createJsonPointer(schema.$id, baseUri, undefined, '$id', keywordLocation(path, '$id'));
       this.#effectiveBaseUri = resolvedId.endsWith('#') ? resolvedId.slice(0, -1) : resolvedId;
     } else {
       // No $id - inherit parent's base
@@ -1503,7 +1518,7 @@ export class ValidationObject {
     // If schema has $id, resolve it against basePath to get the new base URI
     // Otherwise, use the current path
     const id = hasId
-      ? createJsonPointer(schema.$id, basePath || this.#path).id
+      ? createJsonPointer(schema.$id, basePath || this.#path, undefined, '$id').id
       : this.#path;
 
     // If schema has $id, use the resolved ID as the path (it defines the schema's location)
@@ -1699,7 +1714,7 @@ export class JarenValidator {
   /** @type {TraverseOptions} The traversal options, carrying the `propertyDependencies` switch of the validation options */
   #traverse = new TraverseOptions();
   /** @type {import('./traverse.js').SchemaPlaces} What the walks read at each registered schema's place */
-  #places = { drafts: new WeakMap(), refBases: new WeakMap(), keptRefs: new Set() };
+  #places = { drafts: new WeakMap(), refBases: new WeakMap(), keptRefs: new Set(), undecidedBases: new WeakMap(), lateTargets: new Set() };
 
   /**
    * Creates a new JarenValidator instance.
@@ -1782,8 +1797,8 @@ export class JarenValidator {
         places));
     }
 
-    // make sure all schemas are connected
-    restoreSchemaRefsInMap(schemaMap, opts, places);
+    // make sure all schemas are connected, as this compile reads them
+    restoreSchemaRefsInMap(schemaMap, opts, places, detectSchemaDraft(schema));
 
     return { origin: origin, map: schemaMap };
   }
@@ -2081,7 +2096,7 @@ export class JarenValidator {
       if (!isObjectClass(schema) || !schema.$id) continue;
 
       // Check if this id matches the resolved $id
-      const { id: resolvedId } = createJsonPointer(schema.$id, origin);
+      const { id: resolvedId } = createJsonPointer(schema.$id, origin, undefined, '$id', keywordLocation(id, '$id'));
       if (id === resolvedId || id === resolvedId + '#') {
         // This is a canonical $id path - create with origin as base
         try {
@@ -2130,7 +2145,7 @@ export class JarenValidator {
         // apply $id resolution during traversal (that would double-resolve).
         let rootIdMatchesBaseDoc = false;
         if (rootSchema && isObjectClass(rootSchema) && rootSchema.$id) {
-          const { id: resolvedRootId } = createJsonPointer(rootSchema.$id, origin);
+          const { id: resolvedRootId } = createJsonPointer(rootSchema.$id, origin, undefined, '$id', keywordLocation(rootId, '$id'));
           const resolvedRootBase = resolvedRootId.endsWith('#') ? resolvedRootId.slice(0, -1) : resolvedRootId;
           if (baseDoc === resolvedRootBase) {
             rootIdMatchesBaseDoc = true;
@@ -2150,7 +2165,7 @@ export class JarenValidator {
             const shouldApplyId = !isRootSchema || !rootIdMatchesBaseDoc;
 
             if (shouldApplyId) {
-              const { id: resolvedId } = createJsonPointer(currentSchema.$id, currentBaseUri);
+              const { id: resolvedId } = createJsonPointer(currentSchema.$id, currentBaseUri, undefined, '$id');
               currentBaseUri = resolvedId.endsWith('#') ? resolvedId.slice(0, -1) : resolvedId;
             }
           }
@@ -2182,11 +2197,11 @@ export class JarenValidator {
           // If candidate has an $id, it could be our base
           if (isObjectClass(candidateSchema) && candidateSchema.$id) {
             // Try resolving our $id against this candidate's resolved $id
-            const { id: candidateResolvedId } = createJsonPointer(candidateSchema.$id, origin);
+            const { id: candidateResolvedId } = createJsonPointer(candidateSchema.$id, origin, undefined, '$id');
             const candidateBase = candidateResolvedId.endsWith('#') ? candidateResolvedId.slice(0, -1) : candidateResolvedId;
 
             try {
-              const { id: testResolvedId } = createJsonPointer(schema.$id, candidateBase);
+              const { id: testResolvedId } = createJsonPointer(schema.$id, candidateBase, undefined, '$id');
               const testResolvedIdWithHash = testResolvedId.endsWith('#') ? testResolvedId : testResolvedId + '#';
 
               if (id === testResolvedIdWithHash || id === testResolvedId) {

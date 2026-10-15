@@ -313,7 +313,7 @@ function unitOf(record, parent, schemas) {
   for (let hops = 0; hops < 64; hops++) {
     const written = /** @type {any} */ (nodes.get(location));
     if (written === undefined || written === object.schema || typeof written.$ref !== 'string') break;
-    const target = withFragment(createJsonPointer(written.$ref, location.slice(0, location.indexOf('#'))).id);
+    const target = withFragment(createJsonPointer(written.$ref, location.slice(0, location.indexOf('#')), undefined, '$ref').id);
     if (target === location) break;
     const hop = new OutputUnit(enclosing, segment, location, written, object, record.instanceLocation, record.data);
     hop.valid = record.valid;

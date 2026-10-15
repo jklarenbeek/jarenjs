@@ -95,7 +95,9 @@ export async function compileAsync(validator, schema, options) {
   if (!(Number.isSafeInteger(maxLoads) && maxLoads > 0))
     throw new SchemaCompileError('JK0007', `maxLoads must be a positive safe integer, got ${describeCount(maxLoads)}`);
 
-  const { schemas, traverse } = state;
+  const { schemas, traverse, places } = state;
+  /** The draft `compile` reads a place that declares none under. */
+  const reading = detectSchemaDraft(schema);
   let inFlight = IN_FLIGHT.get(validator);
   if (inFlight === undefined) IN_FLIGHT.set(validator, inFlight = new Map());
   /** The schema's own identifiers: a reference to one of them is held. */
@@ -105,6 +107,13 @@ export async function compileAsync(validator, schema, options) {
   const held = (/** @type {string} */ key) => (own.get(key) ?? schemas.get(key)) != null;
   /** @type {[string, string|undefined, LoadFailure][]} The loads that failed, in the order they were reached */
   const failed = [];
+  /**
+   * The documents a reference `compile` resolves when it compiles needs. The
+   * draft-07 target of a `$ref` beside an `$id` in a loaded document that
+   * declares no draft is resolved by the first call that reaches it: a failed
+   * load of it alone is no refusal, as `compile` refuses it on that call.
+   */
+  const needed = new Set();
   let loads = 0;
   /**
    * Refuse the first failed load, in the order reached, whose document is
@@ -112,7 +121,7 @@ export async function compileAsync(validator, schema, options) {
    */
   const refuseFailed = () => {
     for (const [key, at, failure] of failed) {
-      if (!held(key))
+      if (!held(key) && needed.has(key))
         throw new SchemaCompileError(failure.code, failure.reason + heldBy(at) + underDefaultBase(traverse.origin, key), at, failure.options);
     }
   };
@@ -126,17 +135,18 @@ export async function compileAsync(validator, schema, options) {
    * @param {string} base - The URI the document was retrieved from
    * @param {string} prefix - What names the document in a location (`''` for the schema)
    * @param {Map<string, any>} ids - Where its identifiers are registered
-   * @returns {[string, string][]} Each target's key (`uri#`) and the location of its reference
+   * @returns {[string, string, boolean][]} Each target's key (`uri#`), the location of its
+   *   reference, and whether only a call that reaches it resolves it
    */
   const walk = (doc, base, prefix, ids) => {
-    /** @type {[string, string][]} */
+    /** @type {[string, string, boolean][]} */
     const targets = [];
     try {
-      // The schema's document is read under the draft `compile` reads it
-      // under; a loaded one under the draft it declares, as `addSchema` reads it.
-      storeSchemaIdsInMap(ids, base, doc, traverse, (target, location) => {
-        targets.push([target.leftUri, prefix + location]);
-      }, undefined, ids === own ? detectSchemaDraft(doc) : null);
+      // Every document is read as `compile` reads it: a place that declares
+      // no draft under the draft the schema does.
+      storeSchemaIdsInMap(ids, base, doc, traverse, (target, location, undecided) => {
+        targets.push([target.leftUri, prefix + location, undecided && ids !== own]);
+      }, undefined, reading);
     }
     catch (e) {
       if (ids === own) throw e;
@@ -144,7 +154,7 @@ export async function compileAsync(validator, schema, options) {
     return targets;
   };
 
-  /** @type {[string, string|undefined][]} The documents to reach next, with the reference that needs each (none for a schema the validator held) */
+  /** @type {[string, string|undefined, boolean?][]} The documents to reach next, with the reference that needs each (none for a schema the validator held) and whether only a call resolves it */
   let pending = walk(schema, traverse.origin, '', own);
   // `compile` reads the `$vocabulary` of the meta-schema the schema's
   // `$schema` names, looked up by that URI with an empty fragment.
@@ -159,7 +169,8 @@ export async function compileAsync(validator, schema, options) {
   for (;;) {
     /** @type {[string, string|undefined, Promise<unknown>|undefined][]} Each document of the round, with the load another call has in flight for it */
     const round = [];
-    for (const [key, at] of pending) {
+    for (const [key, at, onCall] of pending) {
+      if (onCall !== true) needed.add(key);
       if (reached.has(key) || held(key)) continue;
       reached.add(key);
       round.push([key, at, inFlight.get(key)]);
@@ -167,7 +178,7 @@ export async function compileAsync(validator, schema, options) {
     if (round.length === 0) {
       // A schema the validator held before this call registered its
       // references as unresolved entries; `compile` resolves every one of them.
-      pending = unheld(schemas, reached, held);
+      pending = unheld(schemas, reached, held, (id) => reading < 2019 && places.lateTargets.has(id));
       if (pending.length === 0) break;
       continue;
     }
@@ -234,13 +245,16 @@ async function loadOne(loadSchema, uri) {
  * @param {Map<string, unknown>} schemas - What the validator holds
  * @param {Set<string>} reached - The documents this call reached
  * @param {(key: string) => boolean} held
+ * @param {(id: string) => boolean} unread - Whether `compile` does not read
+ *   the reference that left an entry (one only the 2019-09 reading of an
+ *   undeclared document names, in a compile that reads it before 2019-09)
  * @returns {[string, undefined][]}
  */
-function unheld(schemas, reached, held) {
+function unheld(schemas, reached, held, unread) {
   const keys = new Set();
   for (const [id, entry] of schemas) {
     const key = id.slice(0, id.indexOf('#') + 1);
-    if (entry === null && key.length > 1 && !reached.has(key) && !held(key)) keys.add(key);
+    if (entry === null && key.length > 1 && !reached.has(key) && !held(key) && !unread(id)) keys.add(key);
   }
   return [...keys].map((key) => [key, undefined]);
 }

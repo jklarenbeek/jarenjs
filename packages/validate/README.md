@@ -336,18 +336,27 @@ does when it declares no `$schema`). `compile`,
 `addSchema` and `compileAsync` read it alike, and a reference that then
 resolves to nothing the validator holds is refused when it compiles
 (`JK0008`, naming the URI and the repairs). A document registered with
-`addSchema` (or loaded) that declares no `$schema` is registered before any
-compile names its draft, and its registration reads an `$id` beside `$ref`
-as setting the base, as from 2019-09 on: declare its `$schema` when such a
-document is referenced from a draft-07 schema. Left undeclared, it is read two
-ways by a draft-07 compile: a reference to the object's `$id` resolves the
-`$ref` beside it against the enclosing base, a pointer to the object against
-the `$id`, so with both URIs held the two references answer differently; with
-only the one the `$id` names, the first call that reaches a reference to the
-object's `$id` is refused `JK0008`, naming the URI draft-07 reads (an instance
-that does not reach it answers); with only the URI draft-07 reads, the
-compilation is refused `JK0009`, naming the one the `$id` names. *Upgrade: a call that reached such a
-reference threw an uncoded `Error` ("…, is not found in init-cache").* *Upgrade: the walk that registers a schema resolved such a
+`addSchema` (or loaded) that declares no `$schema` is read by each compile
+under the draft that compile names, whichever reference reaches the object —
+its `$id` or a pointer (`#/$defs/a`): a draft-07 (or undeclared) compile
+resolves the `$ref` beside the `$id` against the enclosing base, a 2019-09 or
+2020-12 compile against the `$id`. A draft-07 compile resolves such a `$ref`
+when a call first reaches it: with nothing held at the URI draft-07 reads, that
+call is refused `JK0008` naming it (an instance that does not reach it
+answers), and the URI the `$id` names is not needed; `compileAsync` loads the
+URI the compile reads, and one its loader cannot serve is refused by that call
+too, as `compile` refuses it. *Upgrade: a call that reached such a
+reference threw an uncoded `Error` ("…, is not found in init-cache").* *Upgrade: a
+draft-07 compile read such an object two ways — a reference to its `$id`
+against the enclosing base, a pointer to it against the `$id` — so with both
+URIs held the two references answered differently; a pointer now reads what the
+`$id` reference reads (with only the URI the `$id` names held it answered, and
+it is now refused `JK0008` on the call that reaches it). With only the URI
+draft-07 reads held the compilation was refused `JK0009` naming the other, and
+it now answers; a loop only the `$id` reading makes (`sub/name.json` holding `{ "$ref":
+"…/root.json#/$defs/a" }`) refused a draft-07 compile `JK0001`, and it now answers;
+`compileAsync` asked the loader for the URI the `$id` names (`sub/name.json`), and now
+asks for the one draft-07 reads (`name.json`).* *Upgrade: the walk that registers a schema resolved such a
 `$ref` against the `$id`, so `compileAsync` loaded `sub/name.json` for
 `{ "$defs": { "a": { "$id": "sub/a.json", "$ref": "name.json" } }, "$ref":
 "sub/a.json" }` and the validator then threw an uncoded `Error` on its first
@@ -715,6 +724,27 @@ the first call that reaches it. *Upgrade: these were plain `Error`s whose messag
 `Can not resolve schema for '<uri>'`, `The root of reference: '$ref': '<uri>', is not
 found in init-cache` and `The '<pointer>' is not a valid schema in '<uri>'`; the message
 now begins with the code and ends with the repair.*
+
+A `$dynamicRef` or `$recursiveRef` whose target nothing resolves — a document
+nothing holds, a pointer that misses, an anchor no schema declares
+(`"$dynamicRef": "#nope"`) — is refused `JK0009` the same way by the first call that
+reaches it; an instance that does not reach it answers (an output format runs every
+branch, so there every instance that reaches the applicator reaches it). 2019-09
+defines `$recursiveRef` only for `"#"`: another value that names a schema the validator
+holds applies nothing. *Upgrade: such a reference answered `false` on every instance
+that reached it, so `not` around it answered `true` for everything; a `$recursiveRef`
+other than `"#"` answered `true`; and `"$dynamicRef": "#nope"` was refused `JK0001` as a
+loop that never reads the instance.*
+
+A `$ref`, `$dynamicRef`, `$recursiveRef` or `$id` (`id`) that is no valid URI reference —
+`http://[x`, a port past 65535 — is refused `JK0010`, naming the keyword, the text and
+where it sits: `compile({ "$ref": "http://[x" })` fails with `JK0010: $ref 'http://[x' is
+not a valid URI reference; correct it, percent-encoding any character a URI does not
+allow at #/%24ref`. It is refused where the text is read: when the schema compiles, by
+the first call that builds a registered document's subschema holding it, and, for a
+`$recursiveRef` other than `"#"`, by the call that reaches it. *Upgrade: these threw an
+uncoded `TypeError` (`ERR_INVALID_URL`, `Invalid URL`); a malformed `$recursiveRef`
+answered `true`.*
 
 One validation nests at most 256 schema references (a `$ref` resolved on first use, a
 `$dynamicRef` or a `$recursiveRef`); one more throws a `SchemaRuntimeError` whose `code`
