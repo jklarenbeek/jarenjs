@@ -19,13 +19,15 @@
  *
  * A backup copies pages through SQLite's online backup on a dedicated
  * read-only `node:sqlite` connection to the same file — Bun ships it on
- * the same SQLite library — so it reports progress between steps and
- * stops at an abort raised in `onProgress` or a passed deadline; Bun's
- * `backup()` runs every step before it returns, so nothing else on the
- * thread runs during a copy. A database without a file (memory,
- * temporary), a runtime without `node:sqlite`, and a `bun:sqlite` on
- * another SQLite library than `node:sqlite`'s copy with one `VACUUM INTO`
- * instead: no progress, free pages dropped.
+ * the same SQLite library — inside a worker: Bun's `backup()` runs every
+ * step before it returns, so the copy holds the worker's thread, never
+ * the caller's. It reports progress between steps, and an abort or a
+ * passed deadline stops it between pages, whatever raised it — a timer
+ * and an I/O callback run while it copies. A database without a file
+ * (memory, temporary), a runtime without `node:sqlite`, and a
+ * `bun:sqlite` on another SQLite library than `node:sqlite`'s copy with
+ * one `VACUUM INTO` instead, on the calling thread: no progress, free
+ * pages dropped.
  */
 
 import { lazyOpen, openConnection } from '../driver.js';
@@ -165,7 +167,7 @@ export function fromBunModule(mod, path, options) {
     rename: (from, to) => publishSqliteFile(from, to, mainFileOf(db)),
     remove: removeSqliteFile,
   };
-  return adaptBunDatabase(db, { ...options, ...(backup ? { backup } : {}) });
+  return adaptBunDatabase(db, { ...options, backup });
 }
 
 /**

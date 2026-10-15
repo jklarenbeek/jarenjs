@@ -375,7 +375,10 @@ neither stops a snapshot nor is stopped by one. On Node a write issued through
 the connection while the copy runs (an ungated statement) is refused —
 `attempt to write a readonly database` — rather than joining the copy's read
 transaction, where it would hold every step busy and never commit; on Bun the
-copy holds the thread, so no such write can run.
+copy reads on a connection of its own in a worker, so such a write meets the
+copy's read transaction as another connection's would: under WAL it commits
+outside the copy, under a rollback journal it fails `database is locked` once
+its busy timeout passes.
 
 A connection the Node or Bun driver opened copies inside one read transaction
 (on Node the connection's own, on Bun a dedicated read-only `node:sqlite`
@@ -392,8 +395,8 @@ backup gives every new copy the schema cookie 1 — its `PRAGMA schema_version`
 is not the source's, so a schema-change plan reviewed against one refuses
 `JD0021` on the other — and a copy of a WAL database is made a rollback-journal
 file (header bytes 18–19), so it opens read-only anywhere, read-only media
-included, without creating `-wal` or `-shm` beside it. On Bun the copy holds the
-calling thread until it ends. A connection without the backup primitive (one a
+included, without creating `-wal` or `-shm` beside it. On Bun the page copy runs
+in a worker, so the calling thread stays free until it ends. A connection without the backup primitive (one a
 caller adapted itself) — and on Bun a database without a file, a runtime
 without `node:sqlite` or a `bun:sqlite` on another SQLite library — copies with
 one [`VACUUM INTO`](https://www.sqlite.org/lang_vacuum.html) statement instead:

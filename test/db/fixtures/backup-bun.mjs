@@ -62,10 +62,9 @@ const report = {};
   report.abort = { code: codeOf(error), events, siblings: siblings(target) };
 }
 {
-  // an abort raised by a microtask queued during the copy: Bun runs every
-  // step before backup() returns, so the microtask runs after the last page
-  // and before the copy settles through file I/O, and the abort lands before
-  // publication
+  // an abort raised by a microtask queued during the copy: the copy runs
+  // in a worker, so the microtask runs right after the first event and the
+  // abort stops the copy at its next report, before any later event
   const target = file('microtask.db');
   const controller = new AbortController();
   let events = 0;
@@ -76,11 +75,9 @@ const report = {};
   report.microtask = { code: codeOf(error), events, published: existsSync(target), siblings: siblings(target) };
 }
 {
-  // an abort raised by a timer queued during the copy: whether the timer
-  // runs before the copy's file I/O settles is the event loop's to order
-  // (under load it does not always), so the backup either stops at the abort
-  // and publishes nothing or publishes the whole copy; no temporary file
-  // remains either way
+  // an abort raised by a timer queued during the copy: the copy runs in a
+  // worker, so the timer runs while it copies and the abort stops it between
+  // pages; nothing is published and no temporary file remains
   const target = file('timer.db');
   const controller = new AbortController();
   let events = 0;
@@ -98,9 +95,11 @@ const report = {};
   report.deadline = { code: codeOf(error), calls };
 }
 {
+  // a throw from onProgress stops the copy, and onProgress is not called again
   const target = file('thrown.db');
-  const error = await failure(store.backupTo(target, { rate: 100, onProgress: () => { throw new Error('refused'); } }));
-  report.thrown = { code: codeOf(error), cause: error?.cause?.message ?? null, siblings: siblings(target) };
+  let calls = 0;
+  const error = await failure(store.backupTo(target, { rate: 100, onProgress: () => { calls++; throw new Error('refused'); } }));
+  report.thrown = { code: codeOf(error), cause: error?.cause?.message ?? null, calls, siblings: siblings(target) };
 }
 {
   // a write issued from inside the copy waits for it: the copy is the

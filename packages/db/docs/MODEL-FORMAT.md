@@ -1019,9 +1019,9 @@ their busy timeout passes; under WAL they proceed, but no checkpoint
 passes the copy's snapshot until it ends. The dedicated connection opens
 the file SQLite reports for the database: a path renamed or replaced
 under an open Bun store copies what that path holds now, or fails.
-Bun's platform runs every step before it returns, so its events arrive
-synchronously during the copy and nothing else on the thread runs until
-the copy ends. Both page copies are page-identical to the source: free
+Bun's platform runs every step before it returns, so that connection and
+its copy run in a worker: the calling thread runs timers, I/O and other
+work while it copies, and each step's event reaches `onProgress` there. Both page copies are page-identical to the source: free
 pages are kept, and only page 1's change counter (bytes 24–27), schema
 cookie (bytes 40–43: SQLite's backup gives every new copy the cookie 1)
 and version-valid-for number (bytes 92–95) may differ — except that under a
@@ -1067,12 +1067,10 @@ step — `JD2080`; the migration in flight rolls back whole), `maintenance:
 'statement'` (before the one statement each operation issues —
 `JD2081`), `backup: 'page'` (between the pages the platform reports —
 `JD2079`, also while the backup still waits for the store gate; on
-Bun, whose platform runs every step before it returns, only an abort
-raised inside `onProgress` or a passed deadline stops a copy mid-way,
-an abort raised by a microtask queued during the copy lands after the
-copy and before publication — one raised by a timer or an I/O callback
-lands only if the event loop runs it before the copy settles, and may come
-after publication — and a
+Bun, whose copy runs in a worker, an abort raised anywhere — inside
+`onProgress`, by a microtask, a timer or an I/O callback — stops it at
+the worker's next step, or before publication once its last page is
+copied — and a
 one-step copy is checked before and after), and `midStatement:
 false` — a filled slot, not an absent
 one; a driver that grows an interrupt flips exactly that member. A

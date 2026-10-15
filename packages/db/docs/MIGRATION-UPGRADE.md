@@ -2520,6 +2520,27 @@ does not read back. Recreate the index under the declared condition, or
 declare the condition the index holds. Nothing is altered, and SQLite is
 unchanged.
 
+## 35. A Bun backup copies in a worker, and the calling thread runs meanwhile
+
+On Bun, `backupTo` and `snapshotDatabase` copied on the calling thread,
+because Bun's `node:sqlite` backup runs every step before it returns: no timer,
+I/O callback or other work ran until the copy ended, and an abort a timer or a
+microtask raised landed only after the last page. The page copy now runs in a
+worker on the same dedicated read-only connection
+([HOSTS](HOSTS.md#existing-file-adoption-and-backup)): an abort raised anywhere
+and a passed deadline stop it between pages, `onProgress` is called on the
+calling thread as the worker's steps report, and the copy's contract (codes,
+cleanup, atomic publication, a point-in-time copy under the store gate) is
+unchanged. Three answers change. A timer or a microtask abort now stops the copy
+mid-way instead of after its last page. A store call a timer makes during a
+copy now waits at the store gate and fails `JD0012` once `queueTimeout` passes,
+where it used to run after the copy; pass a longer
+`queueTimeout` to a store whose backups outlast it. An ungated statement on a
+snapshot's own connection can now run during the copy: under WAL it commits
+outside the copy, under a rollback journal it fails `database is locked` once
+its busy timeout passes. Bundles and compiled executables need no new
+entrypoint: the worker travels inside the driver. Node is unchanged.
+
 ## Measured costs
 
 Exact identity stores complete canonical documents and model endpoints, so

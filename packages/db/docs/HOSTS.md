@@ -377,6 +377,10 @@ retry that could never succeed.) A start that outlives `startupTimeoutMs` stays 
 retryable `JD2090`, now naming the endpoint and the deadline: that start may only
 have been slow.
 
+The Bun binding's backup worker needs no such entrypoint: its module travels
+inside the driver as a `data:` URL and imports only builtins
+([existing-file adoption and backup](#existing-file-adoption-and-backup)).
+
 ## Async SQLite jobs and committed feeds
 
 | Host entry | Jobs | `capture.mode: 'auto'` | Sessions | Live with `asyncLive()` + log |
@@ -879,16 +883,25 @@ busy timeout passes); under WAL they proceed, but no checkpoint passes the
 copy's snapshot until it ends. The copy reopens the file SQLite reports for the
 database, so a path renamed or replaced under an open Bun store copies what the
 path holds now, or fails. Bun's `node:sqlite` runs every step before it
-returns, so its progress events arrive synchronously, nothing else on the
-thread runs until the copy ends, and only an abort raised inside `onProgress`
-or a passed deadline stops a copy mid-way; an abort raised by a microtask queued
-during the copy lands after the copy and before publication, while one raised by
-a timer or an I/O callback lands only if the event loop runs it before the copy
-settles, which it does not order (the copy settles through file I/O, never a
-timer, so fake timers cannot stall it). A Bun database without a file, a Bun runtime without
+returns, so that connection and its copy live in a worker: the calling thread
+stays free while it copies (timers, I/O and other work run), each step's
+progress event reaches `onProgress` there, and an abort — raised inside
+`onProgress`, by a microtask, a timer or an I/O callback — or a passed deadline
+stops the copy at the worker's next step, or before publication once the last
+page is copied; no event is delivered after it. The worker's module travels as
+a `data:` URL inside the driver, so a bundle or a `bun build --compile`
+executable needs no second entrypoint for it; a compiled executable on Linux
+is qualified by a test that builds one. The copy waits on no timer, so fake
+timers cannot stall it. The worker begins its read transaction while the
+calling thread waits — a few statements on a free file, up to the busy timeout
+on a locked one, as when the copy began on that thread — so a commit of that
+thread's own on another connection cannot make the copy's first read busy. A store call made
+during the copy waits for it at the store gate, as for a transaction, and fails
+`JD0012` once `queueTimeout` passes.
+A Bun database without a file, a Bun runtime without
 `node:sqlite`, and a `bun:sqlite` on another SQLite library than `node:sqlite`'s
 (compared before the file is opened) copy with one `VACUUM INTO` statement
-instead (one step, no event). Neither host allocates a whole-database
+on the calling thread instead (one step, no event). Neither host allocates a whole-database
 JavaScript image; native SQLite caches and temporary storage govern working
 memory. Publication is refused while the target's `-wal` holds frames or its
 `-journal` is hot, and every failed backup removes its temporary with the

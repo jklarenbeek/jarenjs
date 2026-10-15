@@ -10,8 +10,8 @@
  * ships it on the same SQLite library as `bun:sqlite` — holding one read
  * transaction for the whole copy, so no write restarts it and the copy is
  * the database as it stood when the copy began. Bun's `backup()` runs
- * every step before it returns: progress arrives synchronously, and
- * nothing else on the thread runs until the copy ends. It copies with one
+ * every step before it returns, so the copy runs in a worker
+ * (`backup-worker.js`) and the calling thread stays free. It copies with one
  * `VACUUM INTO` statement instead — no progress, free pages dropped — for
  * a database without a file (memory, temporary), when `node:sqlite` cannot
  * be loaded, and when the two bindings report different SQLite source
@@ -26,6 +26,7 @@ import { chain, useStatementOnce } from '../driver.js';
 import { checkSqliteTargetPath } from '../backup.js';
 import { sqliteDatabasePath } from '../migration-target.js';
 import { sqliteDialect } from '../dialects/sqlite.js';
+import { copyInWorker } from './backup-worker.js';
 
 /** The files SQLite keeps beside a database: its rollback journal, its
  * write-ahead log and that log's shared-memory index. */
@@ -250,7 +251,8 @@ function vacuumInto(db, target) {
 /**
  * Copy a `bun:sqlite` database onto `target` page by page, `rate` pages per
  * step, reporting `progress` after every step that leaves pages to copy.
- * The copy runs on a dedicated `node:sqlite` connection opened read-only on
+ * The copy runs in a worker ({@link copyInWorker}) on a dedicated
+ * `node:sqlite` connection opened read-only on
  * the file the database's `main` schema names — never the path it was
  * opened with, whose meaning a relative path ties to the working
  * directory — with the Bun handle's busy timeout, inside one read
@@ -262,12 +264,12 @@ function vacuumInto(db, target) {
  * does not exist yet or is an empty file; a failed copy may leave a
  * partial one, which the caller removes with {@link removeSqliteFile}.
  *
- * Either copy holds the thread from its first page to its last. The copy
- * is then flushed and its page count read from its header — real I/O, so
- * the microtasks queued during the copy run before it settles, and an abort
- * they raise is seen before publication; a timer or an I/O callback that
- * came due may run before or after it, as the event loop orders them. No
- * timer is involved: a clock that never advances cannot stall it.
+ * The page copy holds the worker's thread, never this one: timers and I/O
+ * run here while it copies, `progress` is called here between its steps,
+ * and a throw from `progress` stops it at the worker's next step. The
+ * `VACUUM INTO` fallback holds this thread for its one statement. Either
+ * copy is then flushed and its page count read from its header. No timer
+ * is involved: a clock that never advances cannot stall it.
  * @param {any} db - a `bun:sqlite`-shaped `Database`
  * @param {string} target
  * @param {{ rate?: number, progress?: (report: { totalPages: number,
@@ -283,22 +285,8 @@ export async function copyBunDatabase(db, target, options) {
   const timeout = file === '' ? 0 : (firstRow(db, sqliteDialect.introspect.pragma('busy_timeout'))?.timeout ?? 0);
   const sqlite = file === '' ? null : await import('node:sqlite').catch(() => null);
   if (typeof sqlite?.backup === 'function' && typeof sqlite?.DatabaseSync === 'function'
-    && nodeSqliteLibrary(sqlite) === library) {
-    const dedicated = new sqlite.DatabaseSync(file, { readOnly: true, timeout });
-    try {
-      // the read transaction starts at its first read and holds the
-      // snapshot every step copies from
-      dedicated.exec('BEGIN; SELECT count(*) FROM sqlite_schema');
-      try { await sqlite.backup(dedicated, target, options); }
-      finally {
-        try { dedicated.exec('COMMIT'); }
-        catch { /* a read transaction that cannot end ends with its connection */ }
-      }
-    }
-    finally {
-      dedicated.close();
-    }
-  }
+    && nodeSqliteLibrary(sqlite) === library)
+    await copyInWorker(file, target, { timeout, rate: options?.rate, progress: options?.progress });
   else vacuumInto(db, target);
   return flushedPageCount(target);
 }
@@ -413,8 +401,10 @@ async function insideOneRead(connection, copy) {
  * differ, SQLite's backup gives the copy the schema cookie 1, and a copy of
  * a WAL database is made a rollback-journal file. On Node a write issued
  * through the connection while it copies is refused (see `insideOneRead`);
- * on Bun the copy holds the calling thread until it ends, so none can be
- * (its fallbacks are the file comment's). A
+ * on Bun the copy reads on a connection of its own in a worker, so such a
+ * write meets its read transaction as another connection's would: under
+ * WAL it commits outside the copy, under a rollback journal it fails busy
+ * once its busy timeout passes (its fallbacks are the file comment's). A
  * connection without that primitive copies with one `VACUUM INTO`
  * statement, which compacts: free pages dropped, not page for page.
  * SQLite's page caches bound working memory; no JavaScript image of the

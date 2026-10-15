@@ -399,16 +399,12 @@ what each does is its own documentation's job
   independent-database shadow replay retains exact qualified programs.
   PostgreSQL coherent dump/restore and archived-WAL recovery now have
   [separate managed-data oracles](../packages/db/docs/POSTGRESQL.md).
-  Physical-schema cutover, power-loss durability, deployment beyond the qualified
-  Linux executables and actual downstream cutover still require named evidence.
-  On Bun a backup's copy runs on the calling thread, because Bun's `node:sqlite`
-  backup performs every step before it returns: a deadline or an abort raised
-  from `onProgress` stops it between pages, but an abort from a timer or I/O
-  takes effect only after the copy, and only if the event loop runs it before
-  the copy's closing file I/O settles; nothing else on that thread runs
-  meanwhile. A Bun copy that leaves the thread free needs a worker-hosted backup
-  qualified inside compiled executables
-  ([HOSTS](../packages/db/docs/HOSTS.md#existing-file-adoption-and-backup)).
+  Still waiting on outside evidence: physical-schema cutover, power-loss
+  durability (a power-cut rig), deployment beyond the qualified Linux
+  executables — the worker-hosted Bun backup
+  ([HOSTS](../packages/db/docs/HOSTS.md#existing-file-adoption-and-backup)) on
+  macOS and Windows included — and an application owner's actual downstream
+  cutover.
 - [ ] **PostgreSQL entity changes beyond an unreferenced table.** A change
   the planner expresses as a rebuild (a key declaration, an `enum`, a type, a
   relation) rebuilds the table on PostgreSQL under a table lock, which holds for

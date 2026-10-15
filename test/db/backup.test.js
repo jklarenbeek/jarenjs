@@ -716,6 +716,43 @@ describe('the Bun binding', () => {
     finally { await store?.close(); source.cleanup(); destination.cleanup(); }
   });
 
+  it('a Bun copy that fails in its worker is coded as the platform\'s failure, its fields kept, and leaves nothing', async () => {
+    const source = tempDbPath();
+    let store;
+    try {
+      store = await openStore(MODEL, { driver: bunDouble(), path: source.dbPath });
+      await fill(store, 40, 400);
+      // the copy's own target cannot be opened: the failure is the worker's
+      const missing = path.join(`${source.dbPath}-no-such-dir`, 'backup.db');
+      const error = await store.backupTo(missing, { rate: 1, checkpoint: false }).then(() => null, (thrown) => thrown);
+      assert.deepStrictEqual([error?.code, error?.class, error?.retryable, error?.message],
+        ['JD2078', 'cantopen', false, 'JD2078: the backup failed: unable to open database file']);
+      assert.deepStrictEqual([error?.cause?.code, error?.cause?.errcode, error?.cause?.errstr],
+        ['ERR_SQLITE_ERROR', 14, 'unable to open database file']);
+      assert.strictEqual(fs.existsSync(path.dirname(missing)), false);
+    }
+    finally { await store?.close(); source.cleanup(); }
+  });
+
+  it('a Bun copy calls onProgress no more once it threw, though the worker reported more steps meanwhile', async () => {
+    const source = tempDbPath(), destination = tempDbPath();
+    let store;
+    try {
+      store = await openStore(MODEL, { driver: bunDouble(), path: source.dbPath });
+      await fill(store, 200, 4000);
+      let calls = 0;
+      const error = await store.backupTo(destination.dbPath, { rate: 1, checkpoint: false, onProgress: () => {
+        // this thread sleeps while the worker copies on and reports
+        if (++calls === 1) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+        throw new Error('refused');
+      } }).then(() => null, (thrown) => thrown);
+      assert.deepStrictEqual([error?.code, error?.cause?.message, calls], ['JD2078', 'refused', 1]);
+      assert.strictEqual(fs.existsSync(destination.dbPath), false);
+      assert.deepStrictEqual(siblings(destination.dbPath), []);
+    }
+    finally { await store?.close(); source.cleanup(); destination.cleanup(); }
+  });
+
   it('a Bun backup settles while timers never fire', async () => {
     const source = tempDbPath(), destination = tempDbPath();
     const timers = { setTimeout: globalThis.setTimeout, setInterval: globalThis.setInterval, setImmediate: globalThis.setImmediate };
@@ -754,17 +791,14 @@ describe('the Bun binding', () => {
         assert.strictEqual(report.full.events, Math.ceil(report.full.pages / 100) - 1, JSON.stringify(report.full));
         assert.strictEqual(report.full.zero, 0);
         assert.deepStrictEqual(report.abort, { code: 'JD2079', events: 3, siblings: [] });
-        // an abort raised by a microtask queued during the copy runs after
-        // the last page and still lands before publication
-        assert.deepStrictEqual(report.microtask, { code: 'JD2079', events: report.full.events, published: false, siblings: [] });
-        // a timer's turn against the copy's file I/O is not the backup's to
-        // order: the abort lands and nothing is published, or the copy is
-        // published whole; no temporary file remains either way
-        assert.ok(report.timer.code === 'JD2079' ? report.timer.published === false
-          : report.timer.code === null && report.timer.published === true, JSON.stringify(report.timer));
-        assert.deepStrictEqual([report.timer.events, report.timer.siblings], [report.full.events, []]);
+        // the copy runs in a worker: an abort raised by a microtask queued
+        // in the first event stops it at the next report, before any later
+        // event, and one raised by a timer lands while it copies
+        assert.deepStrictEqual(report.microtask, { code: 'JD2079', events: 1, published: false, siblings: [] });
+        assert.deepStrictEqual([report.timer.code, report.timer.published, report.timer.siblings], ['JD2079', false, []]);
+        assert.ok(report.timer.events <= report.full.events, JSON.stringify(report.timer));
         assert.deepStrictEqual(report.deadline, { code: 'JD2075', calls: 6 });
-        assert.deepStrictEqual(report.thrown, { code: 'JD2078', cause: 'refused', siblings: [] });
+        assert.deepStrictEqual(report.thrown, { code: 'JD2078', cause: 'refused', calls: 1, siblings: [] });
         assert.deepStrictEqual(report.closed, { code: 'JD2063', cleanupError: null, siblings: [] });
         assert.deepStrictEqual(report.pointInTime, { copyHasDuring: false, storeHasDuring: true });
         // page identity: at most page 1 differs, and only in its change

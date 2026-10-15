@@ -41,12 +41,12 @@
  * the platform makes (a throw there is what stops the pump), and again
  * before publication; an abort while the backup waits for the store gate
  * takes it out of the queue. On Bun the platform runs every step before it
- * returns, so only an abort raised inside `onProgress` or a passed
- * deadline stops a copy mid-way; an abort raised by a microtask queued
- * during the copy lands after the copy and before publication, while one
- * raised by a timer or an I/O callback lands only if the event loop runs it
- * before the copy's closing file I/O settles, which the loop does not
- * order, so it may come after publication.
+ * returns, so the binding copies in a worker: its progress callbacks reach
+ * this thread as the worker's steps report, a throw from one stops the
+ * worker at its next step, and timers and I/O run meanwhile: an abort,
+ * whatever raised it (a timer, an I/O callback), and a passed deadline
+ * stop the copy between pages, or before publication once its last page
+ * is copied.
  *
  * This module imports no runtime builtin: the copy, the rename and the
  * removal are the driver's primitives (`connection.backup`).

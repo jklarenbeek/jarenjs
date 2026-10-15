@@ -1707,8 +1707,10 @@ edits, rather than replacing it with an older backup.
 `backupTo()` publishes a sibling temporary only after a complete copy.
 Both hosts copy page by page through SQLite's online backup — Node on the
 store's own connection, Bun on a dedicated read-only `node:sqlite` connection
-under the store gate — and rename through the same publisher, which refuses a
-target whose `-wal` holds frames or whose `-journal` is hot. Neither builds a full
+in a worker under the store gate, so on both the calling thread runs while it
+copies and an abort from a timer stops it between pages — and rename through
+the same publisher, which refuses a target whose `-wal` holds frames or whose
+`-journal` is hot. Neither builds a full
 database image in JavaScript memory. Both copies include committed WAL;
 interruption before rename leaves the previous destination valid, while a
 leftover temporary (and, from a killed copy, its `-journal`) is not published.
