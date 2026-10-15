@@ -376,6 +376,62 @@ explicit `id` (`jaren-db plan --id`).
   the interval, the count and the first keys, and nothing changes.
   Identical declarations plan nothing.
 
+### Upgrading the definitions a table holds
+
+A plan compares two models, so it cannot see what a table holds. A table an
+earlier release created opens and answers as it did while it holds the
+definitions that release wrote, and a plan between identical models plans
+nothing for it. `planColumnUpgrade(connection, model, { id?, expressions? })`
+reads the catalog instead: per collection table of `model`, it compares each
+generated column, index expression and interval CHECK the table holds with what
+a fresh store of the same model creates, and plans a link from `model` to itself
+that rebuilds exactly the ones that differ:
+
+- on SQLite, the generated column of an indexed member of several types
+  (`['number', 'string']`) held in one of those types (`REAL`, `TEXT`,
+  `INTEGER`), which refuses a conforming document of another kind (`JD2005`)
+  and reads the document for a comparison of that kind; it becomes the untyped
+  column a fresh store creates (MIGRATION-UPGRADE §18);
+- on PostgreSQL, a generated column, index expression or interval CHECK over a
+  path with a digit step held in the other spelling of the guard a query reads
+  the path under (MIGRATION-UPGRADE §21): a table an earlier release created
+  holds them unguarded, and so does one whose model stopped declaring the
+  container (`type: 'array'` to none), which a plan between the two models
+  accepts as it is. A model that declares the container gets the unguarded
+  spelling a fresh store creates for it.
+
+The steps are the ones a model change plans for the same column: drop the
+indexes over it (and the CHECK that reads it), drop the column, add it as a fresh
+store creates it, create the indexes, add the CHECK. Every stored document stays
+and the database computes the column again; the link runs in one transaction
+like any other, and a table that refuses the rebuilt definition (a stored document
+of the other container kind that collides in a unique index over the rebuilt
+column) fails the link `JD0023` with nothing changed: migrate the documents first. `report.upgraded` names each rebuilt definition
+(`c.gx_q`, `rows.slot_interval`). A definition that is neither spelling is left
+as it is for the open path to refuse (`JD0002`). Entities, the document schema
+and every other difference between models are not planned here.
+
+The upgrade is a plan of its own, never a side effect of `planMigration` or
+`migrate()`: a plan between models stays a function of the models, so the plan
+from a model read back by `introspect()` is what it was. The upgrade is how a
+host learns that a store is behind: it plans no step for a database that holds
+what this release creates. Apply it as the next link of the chain:
+
+```js
+const connection = await driver.open(path, {});
+let upgrade;
+try { upgrade = (await planColumnUpgrade(connection, model)).migration; }
+finally { await connection.close(); }
+if (upgrade.steps.length > 0)
+  await migrate({ driver, path }, [...previousMigrations, upgrade], { baseline, model });
+```
+
+The link's `id` defaults to `upgrade-<hash of the model>`; planned again after it
+applies, it plans no step. A migration document a previous release planned
+carries the DDL it planned and keeps creating that release's definitions when it
+applies; planning the link again creates this release's, and the upgrade after
+it rebuilds what it created.
+
 ## 4. The shadow database
 
 When pending work exists and `shadow` is not `false`, the whole chain

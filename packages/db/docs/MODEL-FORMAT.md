@@ -184,8 +184,9 @@ the other kind is non-conforming. A table holds either spelling and is
 accepted as it is (a change of how the model declares the container plans
 nothing, a move of the path between an index step and a name rebuilds the
 bound columns and the CHECK); one an earlier release created holds the unguarded text and reads an
-object's key `0` there until the interval and its bound indexes are dropped by
-a migration and declared again.
+object's key `0` there until the link `planColumnUpgrade` plans from the catalog
+rebuilds them ([MIGRATION-FORMAT §3](MIGRATION-FORMAT.md#upgrading-the-definitions-a-table-holds)),
+or the interval and its bound indexes are dropped by a migration and declared again.
 
 An invalid model document is `JD0005` with a `docPath` pointing at the
 offending member. Model checking happens before any database work.

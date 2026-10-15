@@ -27,7 +27,7 @@ import { SCALAR_TYPES, columnKindFor } from './scalar-types.js';
 import { verifyRulePrograms } from './physical.js';
 import { rowPaths, rowPredicate, storedBoolean } from './dialects/row-predicate.js';
 import { planTable } from './dialects/sqlite-schema.js';
-import { readIntervalCheck } from './dialects/check-read.js';
+import { readIntervalCheck, readsConforming } from './dialects/check-read.js';
 import { comparableDeclaredSql } from './schema-sql.js';
 import { readsAsIndex } from './model-path.js';
 export { normalizeDeclaredSql, comparableDeclaredSql } from './schema-sql.js';
@@ -1147,7 +1147,7 @@ export function verifyShape(connection, plan, collection, docPath, kind = 'colle
           generated: Number(row.hidden) !== 0,
           computes: row.default_value === null || row.default_value === undefined ? null : String(row.default_value),
           identity: row.identity === undefined || row.identity === null ? '' : String(row.identity),
-          conforming: row.conforming === undefined || row.conforming === null || String(row.conforming) === 'on',
+          conforming: readsConforming(row),
         }))
         .sort((a, b) => (a.name < b.name ? -1 : 1));
       const expected = [...plan.expected.columns]
@@ -1207,7 +1207,7 @@ export function verifyShape(connection, plan, collection, docPath, kind = 'colle
             .map((row) => ({ name: String(row.name), unique: Number(row.uniq) !== 0,
               predicate: row.predicate === null || row.predicate === undefined ? null : String(row.predicate),
               plain: row.plain === undefined || row.plain === null || Number(row.plain) === 1,
-              conforming: row.conforming === undefined || row.conforming === null || String(row.conforming) === 'on' }))
+              conforming: readsConforming(row) }))
             .sort((a, b) => (a.name < b.name ? -1 : 1));
           const wantedIndexes = plan.expected.indexes;
           if (created.length !== wantedIndexes.length) {
@@ -1294,7 +1294,7 @@ function verifyIntervalChecks(connection, plan, disagree) {
         }
         if (Number(row.validated) !== 1)
           disagree(`CHECK '${interval.constraint}' is not validated: the rows it holds were never checked against it`);
-        const conforming = row.conforming === undefined || row.conforming === null || String(row.conforming) === 'on';
+        const conforming = readsConforming(row);
         const read = readIntervalCheck(String(row.expression ?? ''), dialect.intervalSpelling(conforming));
         const same = read !== null && read.column === plan.docColumn && canonicalOf(read.span) === interval.span.canonical
           && read.start === interval.start && read.end === interval.end && read.maxDuration === interval.maxDuration;
@@ -1329,7 +1329,7 @@ export function plannedExpression(dialect, plan, name) {
  * @param {any} dialect @param {any} column
  * @returns {string}
  */
-function columnExpression(dialect, column) {
+export function columnExpression(dialect, column) {
   return column.expression ?? dialect.columnRead(dialect.quoteIdentifier(DOC_COLUMN), column);
 }
 

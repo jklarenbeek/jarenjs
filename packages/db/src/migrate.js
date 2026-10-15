@@ -45,12 +45,12 @@ import { modelIdentity, migrationIdentity } from './migration-identity.js';
 import { migrationChecksum, historyStatements, readMigrationHistory, checkHistoryObservation, checkAppliedRows,
   historyHeader, identityRows, checkHistoryIdentity, checkHistoryChain, writeIdentityRows } from './migration-history.js';
 export { HISTORY_TABLE, ENGINE_TABLES };
-import { planCollection, verifyShape, legacyColumnTypes, planEntity, planJoinTable, plannedExpression, acceptsColumn, creationOrder } from './ddl.js';
+import { planCollection, verifyShape, legacyColumnTypes, planEntity, planJoinTable, plannedExpression, acceptsColumn, columnExpression, creationOrder } from './ddl.js';
 import { normalizeEntities, explainMapping, asHistory } from './model.js';
 import { derivedValue, memberAt, registerDeriveFunctions } from './derive.js';
 import { mergeEntityRow } from './graph.js';
 import { entityCore } from './entity.js';
-import { sqlTokens } from './dialects/check-read.js';
+import { sqlTokens, readIntervalGuards, readsConforming } from './dialects/check-read.js';
 import { isKeyword } from './sql.js';
 import { MEMBER_WHEN } from './dialect.js';
 import { comparableDeclaredSql } from './schema-sql.js';
@@ -709,7 +709,9 @@ function deriveStep(collection, plan, columnNames, note) {
 function intervalDifference(fromPlan, toPlan, disturbedColumns) {
   const from = new Map((fromPlan.intervals ?? []).map((interval) => [interval.constraint, interval]));
   const to = new Map((toPlan.intervals ?? []).map((interval) => [interval.constraint, interval]));
-  const differs = (/** @type {any} */ a, /** @type {any} */ b) => (a.sql !== b.sql && a.sql !== b.alternate)
+  // a CHECK whose table is known to hold the other spelling (`holds`) is that text
+  const differs = (/** @type {any} */ a, /** @type {any} */ b) => (a.holds !== undefined ? a.holds !== b.sql
+    : a.sql !== b.sql && a.sql !== b.alternate)
     || [a.start, a.end, b.start, b.end].some((column) => disturbedColumns.has(column));
   const dropped = [...from.values()].filter((interval) => !to.has(interval.constraint) || differs(interval, to.get(interval.constraint)));
   const added = [...to.values()].filter((interval) => !from.has(interval.constraint) || differs(from.get(interval.constraint), interval));
@@ -863,6 +865,172 @@ function dialectMapping(dialect) {
 }
 
 /**
+ * The structural steps one collection takes between two physical plans of its
+ * table: generated columns, indexes, R*Trees and declared intervals, in
+ * dependency order, or the one rebuild an engine without `ADD CONSTRAINT`
+ * takes where an interval changes. A from-plan column or interval that carries
+ * `holds` is compared by that text exactly (see {@link planColumnUpgrade}).
+ * @param {string} name @param {any} fromPlan @param {any} toPlan @param {any} toCollection
+ * @param {any} dialect @param {any} mapping - what `planCollection` takes
+ * @returns {{ steps: any[], backfilled: string[] }} `backfilled`: the stored derived
+ *   columns the steps add and fill
+ */
+function collectionSteps(name, fromPlan, toPlan, toCollection, dialect, mapping) {
+  const steps = [];
+  const fromColumns = new Map(fromPlan.generated.map((g) => [g.name, g]));
+  const toColumns = new Map(toPlan.generated.map((g) => [g.name, g]));
+  const fromIndexes = new Map(fromPlan.expected.indexes.map((i) => [i.name, i]));
+  const toIndexes = new Map(toPlan.expected.indexes.map((i) => [i.name, i]));
+
+  // a derived column's EXPRESSION is part of its identity: the same
+  // path at a different precision, or under the other physical
+  // mapping, is a different column even where name and type agree
+  // and so is a member of several types by any change of its types or their
+  // order: its column is untyped whatever they are, and what differs is how
+  // the first of them makes it read the member. The same index expression read
+  // with the guard of a path that leaves a container open and without it is one
+  // column (`alternate`): a table holds either, and neither is a change — but
+  // the guard names the kind of each digit step (`[0]` off an array, `['0']`
+  // off an object), so a column guarded for one kind is a change to the other.
+  // A column whose table is known to hold the other spelling (`holds`, its text)
+  // is that text, which is a change to any other
+  const columnChanged = (a, b) => a.type !== b.type || a.pathText !== b.pathText
+    || (a.members ?? null) !== (b.members ?? null)
+    || (a.holds !== undefined ? a.holds !== columnExpression(dialect, b)
+      : a.alternate === undefined && b.alternate === undefined
+        ? (a.expression ?? null) !== (b.expression ?? null)
+        : !acceptsColumn(dialect, a, b))
+    || (a.stored === true) !== (b.stored === true);
+
+  // columns first decide their fate; an index rebuilds when it
+  // changes OR when any column it covers or its condition reads is
+  // dropped or changed (the database refuses to drop a column under a
+  // live index, or drops the index with it) — then
+  // everything runs in dependency order: drop indexes, drop columns,
+  // add columns, create indexes
+  // the R*Tree half of the physical shape (MODEL-FORMAT §2.1,
+  // `physical`). Changing it in either direction is a physical change
+  // and needs a migration, not an open-time alteration: the virtual
+  // table and its three triggers leave BEFORE the columns they read
+  // are disturbed, and arrive AFTER them with a backfill — a
+  // generated column arrives populated, an R*Tree does not.
+  //
+  // A virtual table is compared by NAME and not by declared text,
+  // which is where a column and an index are different: the name is
+  // built from the column stem, the module and its column list are
+  // fixed, and the three triggers are built from that same stem — so
+  // under this dialect a table present on both sides cannot differ,
+  // and one whose stem moved has a different name. `verifyShape`
+  // compares the declared text at open, which is the backstop if that
+  // ever stops being true.
+  const fromVirtual = new Map(fromPlan.virtualTables.map((v) => [v.name, v]));
+  const toVirtual = new Map(toPlan.virtualTables.map((v) => [v.name, v]));
+  for (const [virtualName, from] of fromVirtual) {
+    if (toVirtual.has(virtualName)) continue;
+    for (const trigger of from.triggers) {
+      steps.push({ kind: 'ddl', sql: dialect.ddl.dropTrigger(trigger.name),
+        note: `drop sync trigger '${trigger.name}' on '${name}'` });
+    }
+    steps.push({ kind: 'ddl', sql: dialect.ddl.dropVirtualTable(virtualName),
+      note: `drop the R*Tree '${virtualName}' (and its shadow tables) on '${name}'` });
+  }
+
+  const disturbedColumns = new Set();
+  for (const [columnName, fromColumn] of fromColumns) {
+    const target = toColumns.get(columnName);
+    if (target === undefined || columnChanged(fromColumn, target))
+      disturbedColumns.add(columnName);
+  }
+  // a declared interval's CHECK: an engine that alters a table in place
+  // drops it before any index or column work and adds it after all of it
+  // (the CHECK reads the bound columns); one that cannot (SQLite) takes
+  // ONE rebuild step of the whole target shape, which makes every other
+  // column and index step of this collection the rebuild's own
+  const intervals = intervalDifference(fromPlan, toPlan, disturbedColumns);
+  const rebuilding = intervals.changed && dialect.capabilities.alterTableFull !== true;
+  /** @type {string[]} */
+  let backfilled = [];
+  if (rebuilding) {
+    const rebuilt = renderCollectionRebuild(name, fromPlan, toPlan, toCollection, dialect, mapping, columnChanged);
+    steps.push(...rebuilt.steps);
+    backfilled = rebuilt.backfilled;
+  }
+  else {
+    for (const interval of intervals.dropped) {
+      steps.push({ kind: 'ddl', sql: dialect.ddl.dropCheck({ table: name, name: interval.constraint }),
+        note: `drop the CHECK '${interval.constraint}' of interval '${interval.name}' on '${name}'` });
+    }
+    const indexNeedsRebuild = (indexName, fromIndex) => {
+      const target = toIndexes.get(indexName);
+      return target === undefined || indexChanged(fromIndex, target)
+        || [...fromIndex.columns, ...(fromIndex.reads ?? [])].some((column) => disturbedColumns.has(column));
+    };
+    for (const [indexName, fromIndex] of fromIndexes) {
+      if (indexNeedsRebuild(indexName, fromIndex)) {
+        steps.push({ kind: 'ddl', sql: dialect.ddl.dropIndex(indexName),
+          note: `drop index '${indexName}' on '${name}'` });
+      }
+    }
+    for (const columnName of disturbedColumns) {
+      steps.push({ kind: 'ddl', sql: dialect.ddl.dropColumn(name, columnName),
+        note: `drop generated column '${columnName}' on '${name}'` });
+    }
+    for (const [columnName, toColumn] of toColumns) {
+      const source = fromColumns.get(columnName);
+      if (source === undefined || columnChanged(source, toColumn)) {
+        steps.push({
+          kind: 'ddl',
+          sql: dialect.ddl.addGeneratedColumn(
+            { table: name, docColumn: toPlan.docColumn, column: toColumn }),
+          note: toColumn.stored === true
+            ? `add stored derived column '${columnName}' on '${name}'`
+            : `add generated column '${columnName}' on '${name}'`,
+        });
+        if (toColumn.stored === true) backfilled.push(columnName);
+      }
+    }
+    // a GENERATED column arrives populated; a STORED one arrives NULL,
+    // and a pushdown over a NULL column silently returns fewer rows.
+    // The backfill is an explicit step rather than an assumption that
+    // the table is empty
+    if (backfilled.length > 0) {
+      steps.push(deriveStep(name, toPlan, backfilled,
+        `backfill derived column(s) ${backfilled.join(', ')} on '${name}'`));
+    }
+    for (const [indexName, toIndex] of toIndexes) {
+      const source = fromIndexes.get(indexName);
+      const rebuilt = source !== undefined && indexNeedsRebuild(indexName, source);
+      if (source === undefined || rebuilt) {
+        steps.push({
+          kind: 'ddl',
+          sql: dialect.ddl.createIndex({ name: indexName, table: name, columns: toIndex.columns,
+            unique: toIndex.unique, where: toIndex.where }),
+          note: `create index '${indexName}' on '${name}'`,
+        });
+      }
+    }
+    for (const [virtualName, target] of toVirtual) {
+      if (fromVirtual.has(virtualName)) continue;
+      steps.push({ kind: 'ddl', sql: target.createSql,
+        note: `create the R*Tree '${virtualName}' on '${name}'` });
+      for (const trigger of target.triggers) {
+        steps.push({ kind: 'ddl', sql: trigger.sql,
+          note: `create sync trigger '${trigger.name}' on '${name}'` });
+      }
+      // the triggers fire on WRITES; the rows already stored need the
+      // backfill, and without it a probe silently returns nothing
+      steps.push({ kind: 'sql', sql: target.fillSql,
+        note: `backfill the R*Tree '${virtualName}' from the stored documents` });
+    }
+    for (const interval of intervals.added) {
+      steps.push({ kind: 'ddl', sql: dialect.ddl.addCheck({ table: name, name: interval.constraint, sql: interval.sql }),
+        note: `add the CHECK '${interval.constraint}' of interval '${interval.name}' on '${name}'` });
+    }
+  }
+  return { steps, backfilled };
+}
+
+/**
  * Plan a migration between two model documents. The planner diffs the
  * PHYSICAL plans (columns, indexes, declared intervals) and renders DDL through the
  * dialect; a changed schema gets a DRAFT identity transform that
@@ -989,153 +1157,9 @@ export function planMigration(fromModel, toModel, options = undefined) {
         + 'which this planner does not produce (a named non-goal — branch the shape instead)');
     }
 
-    const fromColumns = new Map(fromPlan.generated.map((g) => [g.name, g]));
-    const toColumns = new Map(toPlan.generated.map((g) => [g.name, g]));
-    const fromIndexes = new Map(fromPlan.expected.indexes.map((i) => [i.name, i]));
-    const toIndexes = new Map(toPlan.expected.indexes.map((i) => [i.name, i]));
-
-    // a derived column's EXPRESSION is part of its identity: the same
-    // path at a different precision, or under the other physical
-    // mapping, is a different column even where name and type agree
-    // and so is a member of several types by any change of its types or their
-    // order: its column is untyped whatever they are, and what differs is how
-    // the first of them makes it read the member. The same index expression read
-    // with the guard of a path that leaves a container open and without it is one
-    // column (`alternate`): a table holds either, and neither is a change — but
-    // the guard names the kind of each digit step (`[0]` off an array, `['0']`
-    // off an object), so a column guarded for one kind is a change to the other
-    const columnChanged = (a, b) => a.type !== b.type || a.pathText !== b.pathText
-      || (a.members ?? null) !== (b.members ?? null)
-      || (a.alternate === undefined && b.alternate === undefined
-        ? (a.expression ?? null) !== (b.expression ?? null)
-        : !acceptsColumn(dialect, a, b))
-      || (a.stored === true) !== (b.stored === true);
-
-    // columns first decide their fate; an index rebuilds when it
-    // changes OR when any column it covers or its condition reads is
-    // dropped or changed (the database refuses to drop a column under a
-    // live index, or drops the index with it) — then
-    // everything runs in dependency order: drop indexes, drop columns,
-    // add columns, create indexes
-    // the R*Tree half of the physical shape (MODEL-FORMAT §2.1,
-    // `physical`). Changing it in either direction is a physical change
-    // and needs a migration, not an open-time alteration: the virtual
-    // table and its three triggers leave BEFORE the columns they read
-    // are disturbed, and arrive AFTER them with a backfill — a
-    // generated column arrives populated, an R*Tree does not.
-    //
-    // A virtual table is compared by NAME and not by declared text,
-    // which is where a column and an index are different: the name is
-    // built from the column stem, the module and its column list are
-    // fixed, and the three triggers are built from that same stem — so
-    // under this dialect a table present on both sides cannot differ,
-    // and one whose stem moved has a different name. `verifyShape`
-    // compares the declared text at open, which is the backstop if that
-    // ever stops being true.
-    const fromVirtual = new Map(fromPlan.virtualTables.map((v) => [v.name, v]));
-    const toVirtual = new Map(toPlan.virtualTables.map((v) => [v.name, v]));
-    for (const [virtualName, from] of fromVirtual) {
-      if (toVirtual.has(virtualName)) continue;
-      for (const trigger of from.triggers) {
-        steps.push({ kind: 'ddl', sql: dialect.ddl.dropTrigger(trigger.name),
-          note: `drop sync trigger '${trigger.name}' on '${name}'` });
-      }
-      steps.push({ kind: 'ddl', sql: dialect.ddl.dropVirtualTable(virtualName),
-        note: `drop the R*Tree '${virtualName}' (and its shadow tables) on '${name}'` });
-    }
-
-    const disturbedColumns = new Set();
-    for (const [columnName, fromColumn] of fromColumns) {
-      const target = toColumns.get(columnName);
-      if (target === undefined || columnChanged(fromColumn, target))
-        disturbedColumns.add(columnName);
-    }
-    // a declared interval's CHECK: an engine that alters a table in place
-    // drops it before any index or column work and adds it after all of it
-    // (the CHECK reads the bound columns); one that cannot (SQLite) takes
-    // ONE rebuild step of the whole target shape, which makes every other
-    // column and index step of this collection the rebuild's own
-    const intervals = intervalDifference(fromPlan, toPlan, disturbedColumns);
-    const rebuilding = intervals.changed && dialect.capabilities.alterTableFull !== true;
-    /** @type {string[]} */
-    let backfilled = [];
-    if (rebuilding) {
-      const rebuilt = renderCollectionRebuild(name, fromPlan, toPlan, toCollection, dialect, mapping, columnChanged);
-      steps.push(...rebuilt.steps);
-      backfilled = rebuilt.backfilled;
-    }
-    else {
-      for (const interval of intervals.dropped) {
-        steps.push({ kind: 'ddl', sql: dialect.ddl.dropCheck({ table: name, name: interval.constraint }),
-          note: `drop the CHECK '${interval.constraint}' of interval '${interval.name}' on '${name}'` });
-      }
-      const indexNeedsRebuild = (indexName, fromIndex) => {
-        const target = toIndexes.get(indexName);
-        return target === undefined || indexChanged(fromIndex, target)
-          || [...fromIndex.columns, ...(fromIndex.reads ?? [])].some((column) => disturbedColumns.has(column));
-      };
-      for (const [indexName, fromIndex] of fromIndexes) {
-        if (indexNeedsRebuild(indexName, fromIndex)) {
-          steps.push({ kind: 'ddl', sql: dialect.ddl.dropIndex(indexName),
-            note: `drop index '${indexName}' on '${name}'` });
-        }
-      }
-      for (const columnName of disturbedColumns) {
-        steps.push({ kind: 'ddl', sql: dialect.ddl.dropColumn(name, columnName),
-          note: `drop generated column '${columnName}' on '${name}'` });
-      }
-      for (const [columnName, toColumn] of toColumns) {
-        const source = fromColumns.get(columnName);
-        if (source === undefined || columnChanged(source, toColumn)) {
-          steps.push({
-            kind: 'ddl',
-            sql: dialect.ddl.addGeneratedColumn(
-              { table: name, docColumn: toPlan.docColumn, column: toColumn }),
-            note: toColumn.stored === true
-              ? `add stored derived column '${columnName}' on '${name}'`
-              : `add generated column '${columnName}' on '${name}'`,
-          });
-          if (toColumn.stored === true) backfilled.push(columnName);
-        }
-      }
-      // a GENERATED column arrives populated; a STORED one arrives NULL,
-      // and a pushdown over a NULL column silently returns fewer rows.
-      // The backfill is an explicit step rather than an assumption that
-      // the table is empty
-      if (backfilled.length > 0) {
-        steps.push(deriveStep(name, toPlan, backfilled,
-          `backfill derived column(s) ${backfilled.join(', ')} on '${name}'`));
-      }
-      for (const [indexName, toIndex] of toIndexes) {
-        const source = fromIndexes.get(indexName);
-        const rebuilt = source !== undefined && indexNeedsRebuild(indexName, source);
-        if (source === undefined || rebuilt) {
-          steps.push({
-            kind: 'ddl',
-            sql: dialect.ddl.createIndex({ name: indexName, table: name, columns: toIndex.columns,
-              unique: toIndex.unique, where: toIndex.where }),
-            note: `create index '${indexName}' on '${name}'`,
-          });
-        }
-      }
-      for (const [virtualName, target] of toVirtual) {
-        if (fromVirtual.has(virtualName)) continue;
-        steps.push({ kind: 'ddl', sql: target.createSql,
-          note: `create the R*Tree '${virtualName}' on '${name}'` });
-        for (const trigger of target.triggers) {
-          steps.push({ kind: 'ddl', sql: trigger.sql,
-            note: `create sync trigger '${trigger.name}' on '${name}'` });
-        }
-        // the triggers fire on WRITES; the rows already stored need the
-        // backfill, and without it a probe silently returns nothing
-        steps.push({ kind: 'sql', sql: target.fillSql,
-          note: `backfill the R*Tree '${virtualName}' from the stored documents` });
-      }
-      for (const interval of intervals.added) {
-        steps.push({ kind: 'ddl', sql: dialect.ddl.addCheck({ table: name, name: interval.constraint, sql: interval.sql }),
-          note: `add the CHECK '${interval.constraint}' of interval '${interval.name}' on '${name}'` });
-      }
-    }
+    const physical = collectionSteps(name, fromPlan, toPlan, toCollection, dialect, mapping);
+    steps.push(...physical.steps);
+    const backfilled = physical.backfilled;
 
     if (canonicalizeJson(fromCollection.schema) !== canonicalizeJson(toCollection.schema)) {
       report.schemaChanged.push(name);
@@ -1150,7 +1174,7 @@ export function planMigration(fromModel, toModel, options = undefined) {
         // one the caller supplied — and a stored derived column is computed
         // FROM the document: without this it keeps the old document's value
         const stale = toPlan.derived
-          .filter((column) => toColumns.get(column.name)?.stored === true)
+          .filter((column) => toPlan.generated.some((g) => g.name === column.name && g.stored === true))
           .map((column) => column.name)
           .filter((columnName) => !backfilled.includes(columnName));
         const backfills = stale.length === 0 ? [] : [deriveStep(name, toPlan, stale,
@@ -1269,6 +1293,131 @@ function transformOf(transform) {
 /** `planMigration` handles the whole model — collections AND entities
  * — since the relational order; this name says so. */
 export const planModelMigration = planMigration;
+
+/**
+ * Plan the link that brings the tables of a database up to the definitions
+ * this release creates for the model they hold. A table an earlier release
+ * created opens and answers as it did, and a plan between two models compares
+ * the models alone, so it plans nothing for such a table; this plan reads the
+ * catalog instead and compares, per collection table, each generated column,
+ * index expression and interval CHECK the table holds with what a fresh store
+ * of the same model creates. Where the table holds the definition an earlier
+ * release created — on SQLite a generated column of an indexed member of
+ * several types in one of those types, on PostgreSQL a generated column, an
+ * index expression or an interval CHECK over a path the schema leaves a
+ * container open on without the guard a query reads it under — the link drops
+ * that definition (and the indexes over its column) and creates it again as
+ * this release creates it, through the same steps a model change plans. Every
+ * stored document stays; the columns are computed again by the database. A
+ * database already current plans no step, which is how a host learns that a
+ * store is behind: the plan is the probe. The link goes from the model to
+ * itself and is applied by {@link migrate} as the next link of the chain;
+ * nothing else of the model is planned (entities, document schema).
+ * @param {any} connection - an open connection to the database, as `migrate` opens one
+ * @param {any} model - the model the database holds (its tables open under it)
+ * @param {{ id?: string, expressions?: Record<string, any> }} [options] - `id` the
+ *   link's name (`upgrade-<hash>` by default); `expressions` the host's declared
+ *   index-expression functions
+ * @returns {any} value-or-promise of `{ migration, report: { upgraded: string[] } }`:
+ *   `upgraded` names each definition the link rebuilds, `<table>.<column>` or
+ *   `<table>.<constraint>`
+ */
+export function planColumnUpgrade(connection, model, options = undefined) {
+  readOptions(options, ['id', 'expressions'], 'planColumnUpgrade()');
+  if (options?.id !== undefined && options.id !== null && (typeof options.id !== 'string' || options.id === ''))
+    throw refuse('JD0013', `planColumnUpgrade() option 'id' is a non-empty string, the migration's name in the history, got ${JSON.stringify(options.id)}`);
+  const dialect = connection.dialect;
+  const mapping = mappingFor(connection, options?.expressions);
+  const identity = migrationIdentity(model, model);
+  const to = hashContent(identity.to);
+  const collections = [...normalizeModel(model, options?.expressions).values()]
+    .map((collection) => ({ collection, plan: planCollection(collection.name, collection, dialect, mapping) }));
+  return chain(heldDefinitionsOf(connection, collections.map(({ plan }) => plan)), (held) => {
+    const steps = [];
+    /** @type {string[]} */
+    const upgraded = [];
+    for (const { collection, plan } of collections) {
+      const holding = held.get(plan.table);
+      if (holding === undefined) continue;
+      upgraded.push(...[...holding.types.keys(), ...holding.columns, ...holding.checks].map((name) => `${plan.table}.${name}`));
+      steps.push(...collectionSteps(collection.name, heldPlanOf(plan, holding), plan, collection, dialect, mapping).steps);
+    }
+    const migration = { $migration: MIGRATION_VERSION, id: options?.id ?? `upgrade-${to.slice(0, 8)}`,
+      from: to, to, identity, steps };
+    return { migration, report: { upgraded } };
+  });
+}
+
+/**
+ * What each collection table holds where it is not what this release creates
+ * for the model: a generated column in one of its member's types (`types`, by
+ * the type word the table declares it in), and a generated column or an
+ * interval CHECK in the other spelling of a path the dialect guards
+ * (`columns`, `checks`) — read back through the dialect's exact read-back, so
+ * a definition that is neither spelling is left to the open path, which
+ * refuses it. A table that holds every definition as planned has no entry.
+ * @param {any} connection
+ * @param {any[]} plans - from `planCollection`, one per collection
+ * @returns {any} value-or-promise of `Map<string, { types: Map<string, string>, columns: Set<string>, checks: Set<string> }>`
+ */
+function heldDefinitionsOf(connection, plans) {
+  const dialect = connection.dialect;
+  const readBack = dialect.capabilities.declaredSqlText === true ? undefined : dialect.readBack;
+  /** @type {Map<string, { types: Map<string, string>, columns: Set<string>, checks: Set<string> }>} */
+  const held = new Map();
+  const next = (/** @type {number} */ i) => {
+    if (i >= plans.length) return held;
+    const plan = plans[i];
+    const spelled = readBack === undefined ? [] : plan.generated.filter((column) => column.alternate !== undefined);
+    const checked = readBack === undefined ? [] : (plan.intervals ?? []).filter((interval) => interval.alternate !== undefined);
+    if (!plan.generated.some((column) => column.legacyTypes !== undefined) && spelled.length === 0 && checked.length === 0)
+      return next(i + 1);
+    const holding = { types: new Map(), columns: new Set(), checks: new Set() };
+    const record = () => {
+      if (holding.types.size + holding.columns.size + holding.checks.size > 0) held.set(plan.table, holding);
+      return next(i + 1);
+    };
+    return chain(connection.prepare(dialect.introspect.columns(plan.table)), (statement) =>
+      chain(statement.all([]), (rows) => {
+        holding.types = legacyColumnTypes(dialect, plan, rows);
+        for (const column of spelled) {
+          const row = rows.find((candidate) => String(candidate.name) === column.name);
+          if (row === undefined || row.default_value === null || row.default_value === undefined) continue;
+          const computes = String(row.default_value);
+          if (readBack.expression(computes, columnExpression(dialect, column), readsConforming(row)) !== null
+            && readBack.expression(computes, column.alternate, readsConforming(row)) === null) holding.columns.add(column.name);
+        }
+        if (checked.length === 0) return record();
+        return chain(connection.prepare(dialect.introspect.checks(plan.table)), (checks) =>
+          chain(checks.all([]), (checkRows) => {
+            for (const interval of checked) {
+              const row = checkRows.find((candidate) => String(candidate.name) === interval.constraint);
+              if (row === undefined) continue;
+              const guards = readIntervalGuards(String(row.expression ?? ''), dialect.intervalSpelling(readsConforming(row)));
+              const guarded = interval.span.unpinned !== undefined;
+              if (guards !== null && !(guards.size === 1 && guards.has(guarded))) holding.checks.add(interval.constraint);
+            }
+            return record();
+          }));
+      }));
+  };
+  return next(0);
+}
+
+/**
+ * The plan of a collection as its table holds it: the generated columns
+ * {@link heldDefinitionsOf} read in one of their member's types keep that type,
+ * and a column or CHECK held in the other spelling carries that text (`holds`),
+ * which {@link collectionSteps} compares exactly.
+ * @param {any} plan @param {{ types: Map<string, string>, columns: Set<string>, checks: Set<string> }} holding
+ * @returns {any}
+ */
+function heldPlanOf(plan, holding) {
+  const base = holding.types.size > 0 ? plan.replan(holding.types) : plan;
+  return { ...base,
+    generated: base.generated.map((/** @type {any} */ column) => (holding.columns.has(column.name) ? { ...column, holds: column.alternate } : column)),
+    intervals: (base.intervals ?? []).map((/** @type {any} */ interval) => (holding.checks.has(interval.constraint) ? { ...interval, holds: interval.alternate } : interval)) };
+}
 
 /** Copy schema positions with the mapping vocabulary stripped: a pure
  * mapping change (an index, a column toggle) is not a DOCUMENT change
@@ -2584,22 +2733,10 @@ export function compareShapeToModel(driver, connection, model, registerFunctions
  * @returns {any} value-or-promise of `Map<string, Map<string, string>>`
  */
 function legacyColumnsOf(connection, model, expressions) {
-  const dialect = connection.dialect;
-  /** @type {Map<string, Map<string, string>>} */
-  const legacy = new Map();
-  const collections = [...normalizeModel(model, expressions).values()];
-  const next = (/** @type {number} */ i) => {
-    if (i >= collections.length) return legacy;
-    const plan = planCollection(collections[i].name, collections[i], dialect, mappingFor(connection, expressions));
-    if (!plan.generated.some((column) => column.legacyTypes !== undefined)) return next(i + 1);
-    return chain(connection.prepare(dialect.introspect.columns(plan.table)), (statement) =>
-      chain(statement.all([]), (rows) => {
-        const held = legacyColumnTypes(dialect, plan, rows);
-        if (held.size > 0) legacy.set(plan.table, held);
-        return next(i + 1);
-      }));
-  };
-  return next(0);
+  const plans = [...normalizeModel(model, expressions).values()]
+    .map((collection) => planCollection(collection.name, collection, connection.dialect, mappingFor(connection, expressions)));
+  return chain(heldDefinitionsOf(connection, plans), (held) => new Map([...held]
+    .filter(([, holding]) => holding.types.size > 0).map(([table, holding]) => [table, holding.types])));
 }
 
 /**

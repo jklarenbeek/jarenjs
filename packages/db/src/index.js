@@ -78,7 +78,7 @@ export {
 export { createTracker, BATCH_PARAM_BUDGET, BATCH_ROW_BOUND } from './tracker.js';
 export { deepFreeze } from '@jarenjs/core/object';
 export {
-  planMigration, planModelMigration, migrate, migrationStatus, migrationHistory, adoptMigrationHistory,
+  planMigration, planModelMigration, planColumnUpgrade, migrate, migrationStatus, migrationHistory, adoptMigrationHistory,
   shapeHash, isPerDocumentAssertion,
   migrationChecksum, createModelShape, schemaShapeOf, compareShapeToModel,
   MIGRATION_VERSION, HISTORY_TABLE, ASSERTION_BOUNDS_DEFAULT,

@@ -93,8 +93,10 @@ opens as it is: a model that changes how it declares the container plans no
 change to them (one that moves the path between an index step and a name
 rebuilds them, the guard naming the kind of step), and a table an earlier release created, which holds the
 unguarded definitions, keeps reading an object's key `0` at an index step (and
-answers `JD2005` from its CHECK for a bad span there) until its index and
-interval are dropped by a migration and declared again.
+answers `JD2005` from its CHECK for a bad span there) until the link
+`planColumnUpgrade` plans from the catalog rebuilds them
+([MIGRATION-FORMAT §3](MIGRATION-FORMAT.md#upgrading-the-definitions-a-table-holds)),
+or its index and interval are dropped by a migration and declared again.
 
 One statement carries at most 128 predicate terms (the dialect's
 `maxPredicateTerms`), a leaf predicate being one term but for the one weighed

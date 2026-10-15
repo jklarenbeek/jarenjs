@@ -1912,6 +1912,25 @@ export declare function planMigration(from: unknown, to: unknown, options: PlanM
 /** The whole-model diff — collections AND entities (MIGRATION-FORMAT §9);
  * the same function as `planMigration`. */
 export declare function planModelMigration(from: unknown, to: unknown, options: PlanMigrationOptions): MigrationPlan;
+/** The options of `planColumnUpgrade`. */
+export interface ColumnUpgradeOptions {
+  /** The link's name in the history; `upgrade-<hash>` by default. */
+  id?: string;
+  /** The host's declared index-expression functions. */
+  expressions?: Record<string, unknown>;
+}
+export interface ColumnUpgradePlan {
+  /** A link from the model to itself; no step when the tables are current. */
+  migration: ExactMigrationDocument;
+  /** Each definition the link rebuilds: `<table>.<column>` or `<table>.<constraint>`. */
+  report: { upgraded: string[] };
+}
+/** Plan the link that rebuilds the generated columns, index expressions and
+ * interval CHECKs a database's collection tables hold in an earlier
+ * release's definition, read from the catalog (MIGRATION-FORMAT §3).
+ * A value on a synchronous connection, a promise on an asynchronous one. */
+export declare function planColumnUpgrade(connection: unknown, model: unknown,
+  options?: ColumnUpgradeOptions): ColumnUpgradePlan | Promise<ColumnUpgradePlan>;
 export interface MigrationStatusReport {
   applied: string[];
   pending: string[];

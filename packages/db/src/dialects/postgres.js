@@ -579,7 +579,7 @@ function intervalSpelling(conforming) {
       }
       for (; depth > 0; depth--, i++) if (!symbol(i, ')')) return undefined;
       if (!symbol(i, ')')) return undefined;
-      return { column: column.value, segments, end: i + 1 };
+      return { column: column.value, segments, end: i + 1, guarded: guards !== null };
     },
   };
 }

@@ -332,6 +332,18 @@ export function sqliteChecks(rows) {
   return checks;
 }
 
+/**
+ * Whether the session a catalog row was read in kept
+ * `standard_conforming_strings` on (`conforming`: `'on'`, the default, or
+ * absent where the engine reports none), which says how the row's
+ * expression text spells a backslash.
+ * @param {{ conforming?: unknown }} row
+ * @returns {boolean}
+ */
+export function readsConforming(row) {
+  return row.conforming === undefined || row.conforming === null || String(row.conforming) === 'on';
+}
+
 /** PostgreSQL exposes each CHECK expression separately, with whether the
  * rows it holds were checked against it (`validated`; a CHECK added `NOT
  * VALID` holds nothing for them) and the session's string conformance.
@@ -339,7 +351,7 @@ export function sqliteChecks(rows) {
 export function postgresChecks(rows) {
   return rows.map((row) => ({ name: String(row.name), sql: String(row.expression ?? ''),
     ...(row.validated === undefined || row.validated === null ? {} : { validated: Number(row.validated) === 1 }),
-    conforming: row.conforming === undefined || row.conforming === null || String(row.conforming) === 'on',
+    conforming: readsConforming(row),
     ...(row.unsafe_collation ? null : enumOf(sqlTokens(String(row.expression ?? '')), postgresCast)) }));
 }
 
@@ -575,16 +587,40 @@ export const SQLITE_PREDICATE = /* @__PURE__ */ Object.freeze({
 /**
  * How one engine spells the interval CHECK it hands back, beyond what a
  * {@link PredicateSpelling} reads: `typeOf` reads the JSON-type call over
- * the document column at `at` — the column, the path it reads as segments
- * and the token after the call — or answers `undefined`; `integers` says
+ * the document column at `at` — the column, the path it reads as segments,
+ * the token after the call and, where the engine reads a path under a guard
+ * of its containers, whether this call does (`guarded`) — or answers
+ * `undefined`; `integers` says
  * how a bound is held to an integer, by the document's JSON type
  * (`'document'`: one JSON-type call per bound, `IS 'integer'`) or by the
  * column (`'column'`: present, and equal to its own `trunc`).
  * @typedef {PredicateSpelling & {
  *   typeOf: (tokens: { kind: string, value: string }[], at: number) =>
- *     ({ column: string, segments: import('../dialect.js').JsonPathSegment[], end: number } | undefined),
+ *     ({ column: string, segments: import('../dialect.js').JsonPathSegment[], end: number,
+ *       guarded?: boolean } | undefined),
  *   integers: 'document' | 'column' }} IntervalSpelling
  */
+
+/**
+ * Whether an interval CHECK reads its span under the guard of its containers:
+ * the guard flag of every JSON-type call {@link readIntervalCheck} reads in
+ * it (`true` guarded, `false` not), or `null` for text that is no interval
+ * CHECK. A CHECK whose every call agrees answers one flag; the one
+ * declaration read either way is the same declaration to that reader.
+ * @param {string} sql
+ * @param {IntervalSpelling} spelling - the engine's
+ * @returns {Set<boolean> | null}
+ */
+export function readIntervalGuards(sql, spelling) {
+  /** @type {Set<boolean>} */
+  const guards = new Set();
+  const read = readIntervalCheck(sql, { ...spelling, typeOf: (tokens, at) => {
+    const call = spelling.typeOf(tokens, at);
+    if (call !== undefined) guards.add(call.guarded === true);
+    return call;
+  } });
+  return read === null ? null : guards;
+}
 
 /** The bound every declared interval keeps a span within: the safe integers. */
 const SAFE_BOUND = Number.MAX_SAFE_INTEGER;

@@ -670,35 +670,33 @@ what each does is its own documentation's job
   `IN (SELECT …)` term already excludes, so it raised a false `JQ2001`, and the
   count reads every row lacking the member, turning a seek on a sparse member
   into a table scan.
-- [ ] **A PostgreSQL table keeps the unguarded definitions of an open-container
-  index path until its index is dropped and declared again; a comparison,
-  ordering or grouping over such a path reads the guarded document and does not
-  seek the index.** The generated column, index expression and interval CHECK of
-  a new table read an index step off an array alone (and a digit name off an
-  object alone) where the schema leaves the container open; a table an earlier
-  release created, or one whose model only changed how it declares the
-  container, keeps whatever it holds and opens as it is, so no plan upgrades it
-  (a model that moves the path between an index step and a name rebuilds the
-  column). Still open: (a) a plan, or an option, that rebuilds such a column
-  from the live catalog; (b) a migration document a previous release planned
-  keeps creating unguarded columns (re-plan the link); (c) an earlier table
-  answers `JD2005` from its CHECK where the store answered `JD2003` for an
-  object keyed `0` holding a bad span, and a table that keeps its plain column
-  after a declared container is loosened (`type: 'array'` or `'object'` to none)
-  refuses conforming documents of the other kind (`JD2005`); (d) a digit name
-  over a DECLARED object container (`type: 'object'`, `$.s['0']`) is unguarded
-  text that `introspect()` reads back as an index, an interval over it does not
-  reopen (`JD0002`, before and after), and the plan from a model that reads such
-  a name under a guard to the model derived from the unguarded table rebuilds
-  the column; (e) the seek: read the column for an open-container path when the
-  plan knows the column carries the guard (the planned column's `unpinned`; a
-  table holding the other spelling must keep the guarded document), or an
-  expression index; (f) `memberAt` reads a negative index as absent where the
-  engine counts from the end.
-- [ ] **A SQLite table the previous release created keeps one of its member's types under an indexed union until a link changes the union or the column is retyped by hand.**
-  Such a table opens, answers as it did and is accepted by `plan --store` and `migrate()`, but a comparison of a kind its column cannot hold reads the document and names no
-  index, and it still refuses the documents the column's type cannot hold. A plan that changes the union's types rebuilds the column; a plan between identical models
-  plans nothing. Wanted: a plan, or an open option, that retypes the column from the live catalog without changing the model.
+- [ ] **A comparison, ordering or grouping over an open-container index path
+  on PostgreSQL reads the guarded document and does not seek the index, and a
+  digit name over a declared object container reads back as an index.** The
+  generated column, index expression and interval CHECK of a table read an
+  index step off an array alone (and a digit name off an object alone) where
+  the schema leaves the container open; `planColumnUpgrade` rebuilds a table
+  an earlier release created, or one whose model stopped declaring the
+  container, to those definitions. Still open: (d) a digit name over a
+  DECLARED object container (`type: 'object'`, `$.s['0']`) is unguarded text
+  that `introspect()` reads back as an index (`$.s[0]`, `type: 'array'`), an
+  interval over it does not reopen (`JD0002`, before and after), and the plan
+  from a model that reads such a name under a guard to the model derived from
+  the unguarded table rebuilds the column; (e) the seek: read the column for
+  an open-container path when the plan knows the column carries the guard (the
+  planned column's `unpinned`; a table holding the other spelling keeps the
+  guarded document until `planColumnUpgrade` rebuilds it), or an expression
+  index.
+- [ ] **`jaren-db plan` has no flag for the column upgrade.**
+  `planColumnUpgrade` is an API only; wanted `jaren-db plan --store <db>
+  --upgrade-columns`, which prints or writes the link (cli.js was outside this
+  lane).
+- [ ] **On SQLite a model read back from a table with an indexed number-first
+  union member does not reopen it.** `introspect()` derives `q: {}` and
+  `openStore(derived)` is `JD0002` (the table's `gx_q` reads numbers through
+  `CASE WHEN json_type(...) IN ('integer','real') THEN CAST(... AS REAL) ...`,
+  the derived model declares plain `jsonb_extract`); a string-first union
+  reopens. Same in v0.140.0.
 - [ ] **On PostgreSQL the generated column of an indexed union member is the first type's, so a comparison of another kind reads the document and does not seek.** Wanted: a typed column per kind or an expression index.
 - [ ] **An external past 2^53 compares exactly in SQLite where the engine
   compares doubles.** A comparison against an external holding an integer past

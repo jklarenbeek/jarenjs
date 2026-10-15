@@ -2023,8 +2023,9 @@ the column to that type (`REAL` for `'number'`), and the link fails `JD0023`
 (`constraint failed`, nothing changed) when a stored document holds a kind the
 column cannot: migrate the documents first. A plan between two models that
 declare the same types in the same order plans no step, so a table of an earlier
-release that no link touches stays as it is. Retype it once, per column, on a
-copy first, in one transaction: drop the indexes over the column, drop the
+release that no link touches stays as it is until the link `planColumnUpgrade`
+plans from the catalog rebuilds it (§36). To retype it by hand instead, once per
+column, on a copy first, in one transaction: drop the indexes over the column, drop the
 column, add it back untyped with the expression a fresh table carries, and create
 the indexes again (here the member `q` of the collection `c`, indexed as
 `c_by_q`; `sqlite_master` holds the `CREATE INDEX` text of every index over
@@ -2127,9 +2128,9 @@ spelled and read as before, and so is every SQLite table.
   the plan rebuilds, as is declaring the container the other kind; the plan in
   the other direction of the flow above, from the model to the model read off
   an earlier table, rebuilds the column of a name the derived model reads as an
-  index. The definition a table holds otherwise changes only with a migration
-  that drops the index (and its interval) and a later one that declares it
-  again.
+  index. The definition a table holds otherwise changes only with the link
+  `planColumnUpgrade` plans from the catalog (§36), or with a migration that
+  drops the index (and its interval) and a later one that declares it again.
 
 **Downgrade.** A table this release creates holds the guarded definitions for a
 path whose container the schema leaves open, and the previous release refuses it
@@ -2144,7 +2145,8 @@ previous release's schema (containers typed) after that.
 
 **A table an earlier release created** opens and answers as it did, with the
 unguarded definitions; it keeps reading an object's key `0` at an index step
-until its index is dropped and declared again. Two answers differ on it from
+until the link `planColumnUpgrade` plans from the catalog rebuilds them (§36), or
+its index is dropped and declared again. Two answers differ on it from
 the previous release's: a document whose open container is an object keyed `0`
 and whose span is bad was refused `JD2003` by the store (which read it as a
 span) and is now written, and the table's own CHECK answers `JD2005` for it
@@ -2154,7 +2156,8 @@ span) and is now written, and the table's own CHECK answers `JD2005` for it
 planned: applying it creates the columns, indexes and CHECK of a path with an
 open container unguarded, as that release did, and the store accepts them. Plan
 the link again with this release to create them guarded; an applied link is
-never re-planned (see section 1).
+never re-planned (see section 1), and the tables it built are rebuilt by the link
+`planColumnUpgrade` plans (§36).
 
 ## 22. A UTF-16 file is refused when a store opens
 
@@ -2540,6 +2543,49 @@ snapshot's own connection can now run during the copy: under WAL it commits
 outside the copy, under a rollback journal it fails `database is locked` once
 its busy timeout passes. Bundles and compiled executables need no new
 entrypoint: the worker travels inside the driver. Node is unchanged.
+
+## 36. A plan that rebuilds what a table an earlier release created holds
+
+`planColumnUpgrade(connection, model)` is new
+([MIGRATION-FORMAT §3](MIGRATION-FORMAT.md#upgrading-the-definitions-a-table-holds)).
+It reads the catalog and plans a link from the model to itself that rebuilds
+each generated column, index expression and interval CHECK a collection table
+holds otherwise than a fresh store of the same model creates it: on SQLite a
+union member's column an earlier release typed (§18), on PostgreSQL an
+open-container path's column, expression or CHECK held without the guard
+(§21), or with it under a model that now declares the container. Nothing else
+changes: a store opens as before, `planMigration` and `migrate()` plan and run
+what they did (a plan between identical models still plans nothing, so the
+plan from a model read back by `introspect()` is unchanged), and a table this
+release or the previous one created for the model it holds plans no step; one
+created while the model declared a path's container otherwise (or left it open)
+is rebuilt to the spelling of the model it holds now. Applied, the link keeps
+every stored document and every query's answer, and the table it rebuilds
+behaves as a fresh one:
+
+- On SQLite, a conforming document of another kind than the column's type
+  (`{ q: 'text' }` under `['number', 'string']` over a `REAL` column) is
+  stored, where it was refused `JD2005`, and a comparison of that kind reads the
+  column and seeks its index (`explain().indexes` names it) where it read the
+  document.
+- On PostgreSQL, a conforming document whose open container is the other kind
+  (an object keyed `0` where the index step reads an array) holds nothing at
+  the step: it no longer collides in a unique index with the array holding the
+  same value (`JD2005`), and a bad span there is written, where the table's own
+  CHECK refused it `JD2005`.
+- On PostgreSQL, a model that declares the container (`type: 'array'`) over a
+  table created while it was open gets the unguarded definitions a fresh store
+  creates for it; no answer changes for the documents the model admits. A
+  document of the other kind written while the container was open (`{ u: { 0: 1 } }`
+  beside `{ u: [1] }`) collides in a unique index over the rebuilt column, and the
+  link fails `JD0023` (`constraint failed`, nothing changed): migrate the
+  documents first.
+
+**Downgrade.** The link creates the definitions this release and the previous
+one create, so the previous release opens the table it rebuilt. A release from
+before the untyped union column (§18) refuses such a SQLite table `JD0002`, and
+one from before the guard (§21) such a PostgreSQL table, as each refuses a table
+a later release created; go back by the statements those sections give.
 
 ## Measured costs
 
