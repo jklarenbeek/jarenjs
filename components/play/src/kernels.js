@@ -12,6 +12,12 @@
  * write RFC 3339 text through the parse and format kernels, as the
  * operators do; a kernel that compiles a function (a date picture, an
  * I-Regexp) is called with the value it then reads.
+ *
+ * The two doors do not answer every argument alike: a kernel answers
+ * `null` where it has no answer (an invalid I-Regexp, a value that is not
+ * a position), and answers arguments the operator refuses (`geohashEncode`
+ * defaults a missing precision to 9, where `$geohash` refuses `JQ2001`), so
+ * the card compares only arguments both doors answer.
  */
 import { geoDistance, geohashEncode } from '@jarenjs/core/geo';
 import { parseRFC3339Parts, formatRFC3339Parts, parseDuration, addDuration, compileDateFormat } from '@jarenjs/core/dates';
@@ -34,7 +40,8 @@ function parsed(parse, name, text, index) {
  * @property {string} value - the option value, the kernel's export name
  * @property {'geo' | 'dates' | 'math' | 'text'} family - its `@jarenjs/core` subpath
  * @property {string} signature - the call the Arguments pane spells
- * @property {(args: any[]) => any} call - the kernel over the arguments
+ * @property {(args: any[]) => any} call - the kernel over the arguments;
+ *   `null` (or nothing) where the kernel has no answer for them
  * @property {(args: any[]) => object} query - the operator document over the same arguments
  * @property {(args: any[]) => import('./index.js').Panel[]} [deep] - extra drill-down panels
  */
@@ -71,12 +78,14 @@ export const KERNELS = Object.freeze([
     value: 'compileIRegexp', family: 'text', signature: 'compileIRegexp(pattern, true).test(input) — an RFC 9485 I-Regexp matched whole',
     call: ([pattern, input]) => {
       if (typeof input !== 'string') throw new TypeError('argument 1: the input a pattern is tested against is a string');
-      const re = compileIRegexp(pattern, true);
+      // a value that is not a string is no I-Regexp, as a number already
+      // answered; the kernel itself reads a string's length
+      const re = typeof pattern === 'string' ? compileIRegexp(pattern, true) : null;
       return re === null ? null : re.test(input);
     },
     query: () => ({ $match: ['$[1]', '$[0]'] }),
     deep: ([pattern]) => {
-      const re = compileIRegexp(pattern, true);
+      const re = typeof pattern === 'string' ? compileIRegexp(pattern, true) : null;
       return re === null ? [] : [{ id: 'regexp', label: 'The ECMAScript RegExp it compiles to', kind: 'code', depth: 'deep', text: String(re) }];
     },
   },

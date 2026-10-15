@@ -73,7 +73,10 @@ pane takes, and names each value JSON writes differently. The kernels
 engine calls the `@jarenjs/core` geo, date, math and text functions the
 `$query` operators run, over a JSON array of arguments, and drills down
 into the operator document that runs the same kernel and whether the two
-answers agree.
+answers agree — compared only when both doors answer: where one refuses the
+arguments (its code) or answers nothing (the kernel's `null`, the
+operator's empty sequence) the card says so instead (`not compared —
+$query refuses with JQ2001`).
 
 Answers that changed (upgrade notes): a host `validate` runner now receives a
 fourth argument, the parsed referenced schemas (`[]` when the pane is empty),
@@ -84,7 +87,11 @@ failed with `engine.run is not a function`; a timing that is `NaN` or infinite
 prints a dash, where it printed `NaN ms`. The JOSL engine's streaming-events
 table writes each path as a JSON Pointer, `~` and `/` in a key escaped
 (`/a~1b` for the key `a/b`), where it printed `/a/b`, the pointer of a
-nested member.
+nested member. The kernels card's `Same answer` reads `not compared — …`
+where one door refuses or answers nothing (`geohashEncode` without a
+precision, an invalid I-Regexp), where it read `no`; an I-Regexp pattern
+`null` or an array is no I-Regexp (`null`), as a number already was, where
+it failed with a property-read `TypeError`.
 
 ## Exports
 

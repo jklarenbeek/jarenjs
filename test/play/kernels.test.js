@@ -3,7 +3,8 @@
  * @file The kernels engine calls the `@jarenjs/core` functions the `$query`
  * operators run — geo, dates, math, text — directly over a JSON array of
  * arguments, and shows the operator document that runs the same kernel over
- * the same arguments, with that document's answer beside it.
+ * the same arguments, with that document's answer beside it and a verdict
+ * on the two only where both answer.
  */
 import { describe, it } from 'node:test';
 import * as assert from 'node:assert/strict';
@@ -49,12 +50,37 @@ describe('@jarenjs/play — the kernels engine', () => {
     }
   });
 
-  it('says so when the two doors disagree: the kernel defaults a precision the operator reads as empty', () => {
-    const r = run('geohashEncode', [4.9041, 52.3676]);
-    assert.equal(panel(r, 'out').text, '"u173zt5p3"');
-    const [answers, same] = panel(r, 'agree').items.map((i) => i.value);
-    assert.match(answers, /^refused — JQ2001: /);
-    assert.equal(same, 'no');
+  it('compares only arguments both doors answer, and says which door did not', () => {
+    for (const [kernel, args, out, answers, same] of [
+      // the kernel defaults a precision the operator reads as the empty sequence
+      ['geohashEncode', [4.9041, 52.3676], '"u173zt5p3"', /^refused — JQ2001: /, 'not compared — $query refuses with JQ2001'],
+      ['geohashEncode', [4.9041, 52.3676, 13], '"u173zt5p3u1vz"', /^refused — JQ2001: /, 'not compared — $query refuses with JQ2001'],
+      ['roundExact', [1.005], '1', /^refused — JQ2001: /, 'not compared — $query refuses with JQ2001'],
+      ['roundExact', [null, 2, 'half-up'], 'null', /^refused — JQ2001: /, 'not compared — $query refuses with JQ2001 and the kernel answers null'],
+      // an invalid pattern is no regexp to the kernel and no match to $match
+      ['compileIRegexp', ['(?=a)', 'a'], 'null', /^false$/, 'not compared — the kernel answers null'],
+      ['geoDistance', [[0, 0]], 'null', /^\(no result\)$/, 'not compared — the kernel answers null and $query nothing'],
+      ['geohashEncode', [null, 52, 5], '"u10pb"', /^\(no result\)$/, 'not compared — $query answers nothing'],
+      ['roundExact', [], '(no result)', /^\(no result\)$/, 'not compared — the kernel answers nothing and $query nothing'],
+      // both answer: the verdict compares them
+      ['geohashEncode', [4.9041, 200, 5], '"upgrz"', /^"upgrz"$/, 'yes'],
+      ['compileIRegexp', ['a', 'b'], 'false', /^false$/, 'yes'],
+    ]) {
+      const r = run(/** @type {string} */ (kernel), /** @type {any[]} */ (args));
+      assert.equal(r.ok, true, `${kernel}: ${r.error?.message}`);
+      assert.equal(panel(r, 'out').text, out, `${kernel} ${JSON.stringify(args)}`);
+      const [answered, verdict] = panel(r, 'agree').items.map((i) => i.value);
+      assert.match(answered, /** @type {RegExp} */ (answers), `${kernel} ${JSON.stringify(args)}`);
+      assert.equal(verdict, same, `${kernel} ${JSON.stringify(args)}`);
+    }
+  });
+
+  it('every library example reads the same answer through both doors', () => {
+    for (const example of EXAMPLES.filter((e) => e.engine === 'kernels')) {
+      const r = /** @type {any} */ (runExample('kernels', example.source, {}, { config: example.config }));
+      assert.equal(r.ok, true, example.id);
+      assert.equal(panel(r, 'agree').items[1].value, 'yes', example.id);
+    }
   });
 
   it('shows the ECMAScript RegExp an I-Regexp compiles to', () => {
@@ -78,6 +104,16 @@ describe('@jarenjs/play — the kernels engine', () => {
     const r = run('compileIRegexp', ['[0-9]+', 42]);
     assert.equal(r.ok, false);
     assert.equal(r.error.pane, 'args');
+  });
+
+  it('a pattern that is not a string is no I-Regexp, as a number already answered', () => {
+    for (const pattern of [null, ['a'], 42, {}]) {
+      const r = run('compileIRegexp', [pattern, 'a']);
+      assert.equal(r.ok, true, `${JSON.stringify(pattern)}: ${r.error?.message}`);
+      assert.equal(panel(r, 'out').text, 'null');
+      assert.equal(panel(r, 'regexp'), undefined);
+      assert.equal(panel(r, 'agree').items[1].value, 'not compared — $query refuses with JQ2001 and the kernel answers null');
+    }
   });
 
   it('refuses arguments that are not a JSON array at the arguments pane', () => {

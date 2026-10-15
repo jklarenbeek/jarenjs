@@ -41,6 +41,7 @@ import {
   isJsonContainer,
   isJsonObject,
   isPlainOptions,
+  locateCycle,
   refuseUnknownMembers,
   setObjectMember,
   stableStringify,
@@ -928,7 +929,53 @@ export function createJSONPatch(source, target, options = undefined) {
     : options.arrayDiff;
   if (mode !== 'index' && mode !== 'minimal')
     throw new TypeError(`unknown 'arrayDiff' option '${mode}'`);
-  return diffDocuments(source, target, mode === 'minimal');
+  try {
+    return diffDocuments(source, target, mode === 'minimal');
+  }
+  catch (error) {
+    throw diffRefusal(error, source, target);
+  }
+}
+
+/**
+ * The refusal of a walk that reached `JSON_WALK_DEPTH_CEILING`, the one
+ * `@jarenjs/core/object` raises there: a cycle in one of `roots` is
+ * named as one at the member that closes it (`locateCycle`), a
+ * `JsonCycleError` `JO2002`; a value without one is too deep (`JO2001`).
+ * @param {string} verb - What could not be done, in the passive
+ * @param {any[]} roots - The values the walk started from
+ * @param {string[]} [names] - Each root's name, for a walk over several
+ * @returns {CodedError}
+ */
+function walkRefusal(verb, roots, names = undefined) {
+  for (let i = 0; i < roots.length; i++) {
+    const at = locateCycle(roots[i]);
+    if (at !== undefined)
+      return new CodedError('JsonCycleError', 'JO2002',
+        `a circular reference${names === undefined ? '' : ` in ${names[i]}`} cannot be ${verb}`, at);
+  }
+  return walkTooDeep(verb);
+}
+
+const DIFFED_DOCUMENTS = ['the source', 'the target'];
+
+/**
+ * What a diff throws for an error raised inside it. The walk bound is met
+ * by the diff's own walk or by the `equalsJson` and `stableStringify` it
+ * calls on a subtree, whose cycle pointer is the subtree's; a cycle is
+ * named from the documents' roots instead (`JO2002`), and a refusal of a
+ * value without one (`JO2001`) and every other error pass unchanged.
+ * @param {unknown} error
+ * @param {any} source
+ * @param {any} target
+ * @returns {unknown}
+ */
+function diffRefusal(error, source, target) {
+  const code = /** @type {any} */ (error)?.code;
+  if (!(error instanceof Error) || (code !== 'JO2001' && code !== 'JO2002'))
+    return error;
+  const refusal = walkRefusal('diffed', [source, target], DIFFED_DOCUMENTS);
+  return refusal.code === 'JO2002' || code === 'JO2002' ? refusal : error;
 }
 
 //#endregion
@@ -990,7 +1037,7 @@ function compileMergePlan(patch) {
     const depth = depths.pop() + 1;
     for (let i = 0; i < plan.mergePatches.length; i++) {
       if (depth > JSON_WALK_DEPTH_CEILING)
-        throw walkTooDeep('applied');
+        throw walkRefusal('applied', [patch]);
       const child = splitMergeLevel(plan.mergePatches[i]);
       plan.merges.push(child);
       open.push(child);
@@ -1192,7 +1239,12 @@ function diffMergeObjects(src, tgt) {
 export function createMergePatch(source, target) {
   if (!isJsonObject(source) || !isJsonObject(target))
     return target;
-  return diffMergeObjects(source, target);
+  try {
+    return diffMergeObjects(source, target);
+  }
+  catch (error) {
+    throw diffRefusal(error, source, target);
+  }
 }
 
 //#endregion

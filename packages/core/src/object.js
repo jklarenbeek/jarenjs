@@ -6,7 +6,7 @@ import {
   isBooleanType,
   isTypedArray,
 } from './index.js';
-import { compareCodePoints, hashContent } from './string.js';
+import { compareCodePoints, escapePointerToken, hashContent } from './string.js';
 import { CodedError } from './errors.js';
 
 const hasOwn = Object.hasOwn;
@@ -120,8 +120,8 @@ export function equalsDeep(target, source) {
 // The deepest nesting `equalsJson` and `stableStringify` walk (and the
 // JSON Patch and Merge Patch diffs of `@jarenjs/json`, which hold the same
 // bound): past every nesting a default host stack could walk recursively,
-// so no value that answered before is refused, and fixed, so a refusal -
-// a cycle included - is the same on every host.
+// so no value that answered before is refused, and fixed, so a refusal is
+// the same on every host.
 const JSON_WALK_DEPTH_CEILING = 10000;
 
 /**
@@ -132,6 +132,81 @@ const JSON_WALK_DEPTH_CEILING = 10000;
 function walkTooDeep(verb) {
   return new CodedError('JsonDepthError', 'JO2001',
     `a value nested deeper than ${JSON_WALK_DEPTH_CEILING} levels cannot be ${verb}`);
+}
+
+/**
+ * The refusal of a walk that reached `JSON_WALK_DEPTH_CEILING`. A walk
+ * over a cycle reaches it too, so the roots are searched for one only
+ * then, never on the way down: a cycle is named as one, located at the
+ * member that closes it (`JsonCycleError` `JO2002`); a value without one
+ * is as deep as the bound (`JO2001`).
+ * @param {string} verb - What could not be done, in the passive
+ * @param {any[]} roots - The values the walk started from
+ * @param {string[]} [names] - Each root's name, for a walk over several
+ * @returns {CodedError}
+ */
+function walkRefusal(verb, roots, names = undefined) {
+  for (let i = 0; i < roots.length; i++) {
+    const at = locateCycle(roots[i]);
+    if (at !== undefined)
+      return new CodedError('JsonCycleError', 'JO2002',
+        `a circular reference${names === undefined ? '' : ` in ${names[i]}`} cannot be ${verb}`, at);
+  }
+  return walkTooDeep(verb);
+}
+
+/**
+ * The JSON Pointer of the member that closes a cycle in `value`: the first
+ * member whose value is a container already open above it, walking arrays
+ * by index and object members in the sorted order `stableStringify` and
+ * `canonicalizeJson` (`@jarenjs/json/canonical`) write them, so the three
+ * name the same member. `undefined` for a value without a cycle, and for
+ * one whose cycle lies past 10000 levels of nesting, the bound
+ * `stableStringify` and `equalsJson` refuse at (`JO2001`).
+ *
+ * Every container is walked once: a member already searched without a
+ * cycle is not searched again, so a value that shares a subtree many times
+ * costs its size, not the number of its paths.
+ * @param {unknown} value
+ * @returns {string | undefined} The pointer, or `undefined` when there is none
+ * @example
+ * const doc = { items: [1] };
+ * doc.items.push(doc);
+ * locateCycle(doc); // '/items/1'
+ * locateCycle({ a: [1, 2] }); // undefined
+ */
+export function locateCycle(value) {
+  if (value === null || typeof value !== 'object')
+    return undefined;
+  /** @type {Set<object>} */
+  const open = new Set([value]);
+  /** @type {Set<object>} */
+  const searched = new Set();
+  // one frame per open container, the frames `stableStringify` opens:
+  // `keys` is null for an array, `at` the next member to search
+  const frames = [openStableFrame(value)];
+  for (;;) {
+    const frame = frames[frames.length - 1];
+    const size = frame.keys === null ? frame.value.length : frame.keys.length;
+    if (frame.at < size) {
+      const member = frame.value[frame.keys === null ? frame.at : frame.keys[frame.at]];
+      frame.at++;
+      if (member === null || typeof member !== 'object' || searched.has(member))
+        continue;
+      if (open.has(member))
+        return frames.map((f) => '/' + (f.keys === null ? String(f.at - 1) : escapePointerToken(f.keys[f.at - 1]))).join('');
+      if (frames.length >= JSON_WALK_DEPTH_CEILING)
+        return undefined;
+      open.add(member);
+      frames.push(openStableFrame(member));
+      continue;
+    }
+    open.delete(frame.value);
+    searched.add(frame.value);
+    frames.pop();
+    if (frames.length === 0)
+      return undefined;
+  }
 }
 
 /**
@@ -147,18 +222,32 @@ function walkTooDeep(verb) {
  *
  * Past 256 levels the walk keeps its own stack, so it does not overflow
  * the host's: a value nested deeper than 10000 levels, past any nesting a
- * default host stack could compare, and a pair of cycles are refused with a
- * `JsonDepthError` `JO2001` (`a value nested deeper than 10000 levels
- * cannot be compared`). One reference compared with itself answers `true`
- * at any depth, without a walk.
+ * default host stack could compare, is refused with a `JsonDepthError`
+ * `JO2001` (`a value nested deeper than 10000 levels cannot be compared`),
+ * and a pair the walk follows into a cycle with a `JsonCycleError`
+ * `JO2002` that names the value and the member closing the cycle
+ * (`a circular reference in the first value cannot be compared at /self`,
+ * the pointer {@link locateCycle} answers). One reference compared with
+ * itself answers `true` at any depth, without a walk.
  * @param {any} a
  * @param {any} b
  * @returns {boolean}
- * @throws {CodedError} `JO2001` past 10000 levels of nesting
+ * @throws {CodedError} `JO2001` past 10000 levels of nesting, `JO2002` on
+ *   a cycle
  */
 export function equalsJson(a, b) {
-  return equalsJsonAt(a, b, 1);
+  try {
+    return equalsJsonAt(a, b, 1);
+  }
+  catch (error) {
+    throw error === COMPARE_CEILING ? walkRefusal('compared', [a, b], COMPARED_VALUES) : error;
+  }
 }
+
+// What `equalsJsonWalk` throws at the bound: the roots it needs to tell a
+// cycle from a deep value are `equalsJson`'s, which names the refusal.
+const COMPARE_CEILING = Object.freeze({ reached: JSON_WALK_DEPTH_CEILING });
+const COMPARED_VALUES = ['the first value', 'the second value'];
 
 // The nesting `equalsJson` compares on the host's call stack, the fast
 // path every ordinary value takes: a recursive walk stops at the first
@@ -211,7 +300,8 @@ function equalsJsonAt(a, b, depth) {
 /**
  * `equalsJson` for two containers `depth` levels down, on an explicit
  * stack of the pairs still to compare, so the nesting it reaches is not
- * the host's call stack; past `JSON_WALK_DEPTH_CEILING` it refuses.
+ * the host's call stack; past `JSON_WALK_DEPTH_CEILING` it throws
+ * `COMPARE_CEILING`, which `equalsJson` turns into its refusal.
  * @param {any} a - An array or object
  * @param {any} b - An array or object
  * @param {number} depth
@@ -222,7 +312,7 @@ function equalsJsonWalk(a, b, depth) {
   const pending = [];
   for (;;) {
     if (depth > JSON_WALK_DEPTH_CEILING)
-      throw walkTooDeep('compared');
+      throw COMPARE_CEILING;
     const aIsArray = Array.isArray(a);
     if (aIsArray !== Array.isArray(b))
       return false;
@@ -369,12 +459,15 @@ export function isUniqueDeepArray(arr) {
  *
  * The walk keeps its own stack, so it does not overflow the host's: a
  * value nested deeper than 10000 levels, past any nesting a default host
- * stack could serialize, and a cycle are refused with a `JsonDepthError`
- * `JO2001` (`a value nested deeper than 10000 levels cannot be
- * serialized`).
+ * stack could serialize, is refused with a `JsonDepthError` `JO2001`
+ * (`a value nested deeper than 10000 levels cannot be serialized`), and a
+ * cycle with a `JsonCycleError` `JO2002` located at the member that closes
+ * it (`a circular reference cannot be serialized at /self`, the pointer
+ * {@link locateCycle} and `canonicalizeJson` name).
  * @param {*} value - The value to serialize
  * @returns {string|undefined} Deterministic JSON text
- * @throws {CodedError} `JO2001` past 10000 levels of nesting
+ * @throws {CodedError} `JO2001` past 10000 levels of nesting, `JO2002` on
+ *   a cycle
  */
 export function stableStringify(value) {
   if (value === null || typeof value !== 'object')
@@ -416,7 +509,7 @@ export function stableStringify(value) {
     if (child !== undefined) {
       frames.push(frame);
       if (frames.length >= JSON_WALK_DEPTH_CEILING)
-        throw walkTooDeep('serialized');
+        throw walkRefusal('serialized', [value]);
       frame = openStableFrame(child);
       continue;
     }
@@ -436,7 +529,7 @@ export function stableStringify(value) {
 }
 
 /**
- * The frame `stableStringify` opens for one container.
+ * The frame `stableStringify` (and `locateCycle`) opens for one container.
  * @param {any} value - An array or object
  */
 function openStableFrame(value) {
@@ -465,8 +558,8 @@ function openStableFrame(value) {
  * Two further properties a caller must know, inherited from
  * `stableStringify`: **`undefined` members are dropped** (two values
  * differing only in an `undefined` member share a key) and a cyclic value
- * is refused as a value nested past 10000 levels (`JO2001`), with no
- * location. Both are fine
+ * is refused as a circular reference (`JO2002`), located at the member
+ * that closes the cycle. Both are fine
  * for a fingerprint and wrong for a checksum — for anything hashed,
  * signed or recorded, use `canonicalizeJson`
  * (`@jarenjs/json/canonical`, RFC 8785) instead. Do not conflate the

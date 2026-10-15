@@ -31,10 +31,12 @@ delete it or fix it.
 (RFC 9535, passing the complete official compliance suite), JSON Patch
 (RFC 6902) and Merge Patch (RFC 7396). See
 [`packages/json/ARCHITECTURE.md`](../packages/json/ARCHITECTURE.md).
-- [ ] **`JO2001` names a cycle as a deep value.**
-  `stableStringify`/`contentKey`/`equalsJson` on `c.self = c` refuse "nested
-  deeper than 10000 levels" with no location, where `canonicalizeJson` says "a
-  circular reference … at /self".
+- [ ] **A descendant segment names a cycle as a deep value.** `$..x` over
+  `c.self = c` refuses `JQ2009` "a descendant segment reaches a value nested
+  deeper than 1000 levels at ''", the work-limit code, with no data location,
+  where `stableStringify` now says `JO2002` "a circular reference … at /self".
+  The message is a localized query-catalog entry, so naming the cycle needs a
+  message key in every locale pack.
 
 ## @jarenjs/json — JSLT
 
@@ -248,11 +250,6 @@ costs a descriptor plus examples and no UI code at all.
   stream parsers are pure, but they consume a stream rather than a string, so
   a descriptor for them first needs a source pane that means "feed this in
   chunks" — a question the `(source, data)` shape does not answer.
-- [ ] **The Core kernels card compares answers the two doors cannot share.**
-  `geohashEncode` without a precision answers with the kernel's default 9
-  while `$geohash` refuses `JQ2001`; the I-Regexp kernel's `null` (invalid
-  pattern) is compared with `$match`'s `false`; both cards read "Same answer:
-  no".
 
 ## @jarenjs/studio
 

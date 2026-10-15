@@ -2,15 +2,16 @@
 /**
  * @file `createJSONPatch` and `createMergePatch` diff, and
  * `compileMergePatch`/`applyMergePatch` apply, any nesting a default host
- * stack could, without that stack: past 10000 levels, and on a cycle, they
- * refuse with `JO2001`, the bound `equalsJson` and `stableStringify` hold,
- * instead of overflowing it.
+ * stack could, without that stack: past 10000 levels they refuse with
+ * `JO2001`, the bound `equalsJson` and `stableStringify` hold, instead of
+ * overflowing it, and on a cycle with `JO2002` at the member that closes
+ * it, located from the documents' roots.
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { createJSONPatch, createMergePatch, applyJSONPatch, applyMergePatch, compileMergePatch } from '@jarenjs/json';
-import { equalsJson } from '@jarenjs/core/object';
+import { createJSONPatch, createMergePatch, applyJSONPatch, applyMergePatch, compileMergePatch, canonicalizeJson } from '@jarenjs/json';
+import { equalsJson, locateCycle, stableStringify } from '@jarenjs/core/object';
 
 /** `n` nested `{ a }` objects around `leaf`. @param {number} n @param {unknown} leaf */
 const nestObjects = (n, leaf) => {
@@ -26,6 +27,27 @@ const nestArrays = (n, leaf) => {
   for (let i = 0; i < n; i++) v = [v];
   return v;
 };
+/** An object whose `self` member is itself. @param {number} x */
+const cycle = (x) => {
+  /** @type {any} */
+  const value = { x };
+  value.self = value;
+  return value;
+};
+/** An array whose one item is itself. */
+const cycleArray = () => {
+  /** @type {any[]} */
+  const value = [];
+  value.push(value);
+  return value;
+};
+/** @param {string} tail @param {string} at */
+const circular = (tail, at) => ({
+  name: 'JsonCycleError',
+  code: 'JO2002',
+  docPath: at,
+  message: `JO2002: a circular reference ${tail} at ${at}`,
+});
 const refused = {
   name: 'JsonDepthError',
   code: 'JO2001',
@@ -48,15 +70,34 @@ describe('createJSONPatch diffs deep values without the host stack', () => {
     }
   });
 
-  it('refuses the 10001st level and a pair of cycles with JO2001', () => {
+  it('refuses the 10001st level with JO2001', () => {
     assert.throws(() => createJSONPatch(nestObjects(10001, 1), nestObjects(10001, 2)), refused);
-    /** @type {any} */
-    const a = { x: 1 };
-    a.self = a;
-    /** @type {any} */
-    const b = { x: 2 };
-    b.self = b;
-    assert.throws(() => createJSONPatch(a, b), refused);
+  });
+
+  it('refuses a pair of cycles as a circular reference located in the documents', () => {
+    assert.throws(() => createJSONPatch(cycle(1), cycle(2)), circular('in the source cannot be diffed', '/self'));
+    // equalsJson and stableStringify meet these cycles on a subtree: the pointer is the document's
+    for (const arrayDiff of /** @type {const} */ (['index', 'minimal'])) {
+      assert.throws(() => createJSONPatch({ a: [cycle(1)] }, { a: [cycle(1)] }, { arrayDiff }),
+        circular('in the source cannot be diffed', '/a/0/self'), arrayDiff);
+    }
+    // the minimal diff keys each item by its stable serialization; the index diff never walks them
+    assert.throws(() => createJSONPatch({ a: [1, cycle(1)] }, { a: [cycle(1), 2] }, { arrayDiff: 'minimal' }),
+      circular('in the source cannot be diffed', '/a/1/self'));
+    const added = cycle(1);
+    assert.deepEqual(createJSONPatch({ a: [1, cycle(1)] }, { a: [added, 2] }),
+      [{ op: 'replace', path: '/a/0', value: added }, { op: 'replace', path: '/a/1', value: 2 }]);
+    // a cycle closed past the bound from the documents' roots is a value as deep as the bound,
+    // though equalsJson meets it within its own bound on the subtree it compares
+    assert.throws(() => createJSONPatch(nestObjects(9998, { k: [cycle(1)] }), nestObjects(9998, { k: [cycle(1)] })), refused);
+    // a cycle only the target holds is named in the target
+    assert.throws(() => createJSONPatch({ k: [nestArrays(10005, 1)] }, { k: [cycleArray()] }),
+      circular('in the target cannot be diffed', '/k/0/0'));
+  });
+
+  it('still answers a diff that adds a cycle the walk never enters', () => {
+    const target = cycle(1);
+    assert.deepEqual(createJSONPatch({}, target), [{ op: 'add', path: '/x', value: 1 }, { op: 'add', path: '/self', value: target }]);
   });
 
   it('answers an empty patch for one reference at any depth', () => {
@@ -99,15 +140,16 @@ describe('createMergePatch diffs deep values without the host stack', () => {
     assert.equal(equalsJson(createMergePatch(source, nestObjects(10000, null)), nestObjects(10000, null)), true);
   });
 
-  it('refuses the 10001st level and a pair of cycles with JO2001', () => {
+  it('refuses the 10001st level with JO2001', () => {
     assert.throws(() => createMergePatch(nestObjects(10001, 1), nestObjects(10001, 2)), refused);
-    /** @type {any} */
-    const a = { x: 1 };
-    a.self = a;
-    /** @type {any} */
-    const b = { x: 2 };
-    b.self = b;
-    assert.throws(() => createMergePatch(a, b), refused);
+  });
+
+  it('refuses a pair of cycles as a circular reference located in the documents', () => {
+    assert.throws(() => createMergePatch(cycle(1), cycle(2)), circular('in the source cannot be diffed', '/self'));
+    // equalsJson compares the arrays: the pointer is the document's
+    assert.throws(() => createMergePatch({ a: [cycle(1)] }, { a: [cycle(1)] }), circular('in the source cannot be diffed', '/a/0/self'));
+    const target = cycle(1);
+    assert.deepEqual(createMergePatch({}, target), target);
   });
 
   it('answers an empty patch for one reference at any depth', () => {
@@ -136,13 +178,49 @@ describe('compileMergePatch and applyMergePatch apply deep patches without the h
     assert.equal(JSON.stringify(Object.keys(changed)), '["a","b"]');
   });
 
-  it('refuses a patch of 10001 levels and a cyclic patch with JO2001', () => {
+  it('refuses a patch of 10001 levels with JO2001', () => {
     assert.throws(() => compileMergePatch(nestObjects(10001, 1)), unapplied);
     assert.throws(() => applyMergePatch({}, nestObjects(10001, null)), unapplied);
-    /** @type {any} */
-    const cycle = { x: 1 };
-    cycle.self = cycle;
-    assert.throws(() => compileMergePatch(cycle), unapplied);
+  });
+
+  it('refuses a cyclic patch as a circular reference at the member that closes it', () => {
+    assert.throws(() => compileMergePatch(cycle(1)), circular('cannot be applied', '/self'));
+    assert.throws(() => applyMergePatch({}, { a: { b: cycle(1) } }), circular('cannot be applied', '/a/b/self'));
+  });
+});
+
+describe('every walker names the member canonicalizeJson names', () => {
+  it('agrees on the pointer of each cycle', () => {
+    /** @type {any[]} */
+    const shapes = [];
+    for (const build of [
+      (/** @type {any} */ v) => { v.self = v; },
+      (/** @type {any} */ v) => { v.list = [1, { back: v }]; },
+      (/** @type {any} */ v) => { v['a/b'] = { 'm~n': v }; },
+      (/** @type {any} */ v) => { v.z = { y: null }; v.z.y = v.z; v.a = 1; },
+      (/** @type {any} */ v) => { v.deep = nestObjects(500, null); let at = v.deep; while (at.a !== null) at = at.a; at.a = v; },
+    ]) {
+      const value = {};
+      build(value);
+      shapes.push(value);
+    }
+    for (const value of shapes) {
+      /** @type {any} */
+      let oracle;
+      try { canonicalizeJson(value); }
+      catch (error) { oracle = error; }
+      assert.equal(oracle?.message.startsWith('a circular reference'), true, oracle?.message);
+      const at = oracle.dataPath;
+      assert.equal(locateCycle(value), at);
+      assert.throws(() => stableStringify(value), { code: 'JO2002', docPath: at });
+      // a merge patch sets an array whole, so only a cycle through objects is walked
+      if (Array.isArray(value.list))
+        assert.equal(typeof compileMergePatch(value), 'function');
+      else
+        assert.throws(() => compileMergePatch(value), { code: 'JO2002', docPath: at });
+      assert.throws(() => createJSONPatch(value, structuredClone(value)), { code: 'JO2002', docPath: at });
+      assert.throws(() => createMergePatch(value, structuredClone(value)), { code: 'JO2002', docPath: at });
+    }
   });
 });
 

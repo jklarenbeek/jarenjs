@@ -47,13 +47,27 @@ the draft-04 modifier is `false` (it read `false` as a bound).
 `equalsJson` and `stableStringify` (`@jarenjs/core/object`) walk a deep value on
 their own stack instead of the host's, so a value nested past the host stack
 answers; past 10000 levels, a nesting no default host stack could walk
-recursively, and on a cycle, they throw a `CodedError` named `JsonDepthError`
-with code `JO2001` (`a value nested deeper than 10000 levels cannot be compared`,
-`... serialized`). The bound is fixed, so the refusal is the same on every host;
-`contentKey`, which serializes through `stableStringify`, and the JSON Patch and
-Merge Patch diffs of `@jarenjs/json` hold the same one. Every
-other answer is unchanged byte for byte. *Upgrade: a value nested past the host
-stack, or a cycle, used to escape as an uncoded `RangeError`.*
+recursively, they throw a `CodedError` named `JsonDepthError` with code `JO2001`
+(`a value nested deeper than 10000 levels cannot be compared`, `... serialized`).
+A cycle is refused as a cycle: a `CodedError` named `JsonCycleError` with code
+`JO2002` whose `docPath` is the member that closes it (`a circular reference
+cannot be serialized at /self`; `equalsJson` names the value, `a circular
+reference in the second value cannot be compared at /self`). The bound is fixed,
+so the refusal is the same on every host; `contentKey`, which serializes through
+`stableStringify`, and the JSON Patch and Merge Patch diffs of `@jarenjs/json`
+hold the same one. Every other answer is unchanged byte for byte. *Upgrade: a
+value nested past the host stack, or a cycle, used to escape as an uncoded
+`RangeError`; a cycle was then refused as `JO2001`, a value nested deeper than
+10000 levels, with no location — code that caught `JO2001` for a cycle catches
+`JO2002`.*
+
+`locateCycle(value)` (`@jarenjs/core/object`) answers that pointer for any
+value: the first member, walking arrays by index and object members in sorted
+order (the order `stableStringify` and `canonicalizeJson` write them, so the
+three name the same member), whose value is a container already open above it,
+or `undefined` when there is none within 10000 levels. A loop longer than the
+bound is a value as deep as it (`JO2001`). The walks search for a cycle only
+once they reach the bound, so a value without one costs nothing more.
 
 `semanticKey(value, options?)` (`@jarenjs/core/object`) is the collision-free
 identity the semantic cache keys by, in two forms of one serializer with the same
@@ -76,7 +90,7 @@ document's entry to another that differs from it only in member order.
 |---|---|
 | `@jarenjs/core` | type guards and getters (`isStringType`, `isObjectClass`, `getIntegerType`, ...) |
 | `@jarenjs/core/array` | array helpers (`isUniqueArray`, `getUniqueArray`, `includesAll`, ...) |
-| `@jarenjs/core/object` | deep equality (`equalsDeep`, JSON-only `equalsJson`), the `isJsonObject` and deep `isJsonValue` predicates, `__proto__`-safe `setObjectMember`, `deepFreeze`, map/set merging, the collision-free `semanticKey` (order-insensitive, or `{ ordered: true }`) and the `contentKey` fingerprint |
+| `@jarenjs/core/object` | deep equality (`equalsDeep`, JSON-only `equalsJson`), the `isJsonObject` and deep `isJsonValue` predicates, `__proto__`-safe `setObjectMember`, `deepFreeze`, the `locateCycle` pointer, map/set merging, the collision-free `semanticKey` (order-insensitive, or `{ ordered: true }`) and the `contentKey` fingerprint |
 | `@jarenjs/core/string` | Unicode string helpers (`countCodePoints`, `compareCodePoints`, ...), regex compilation and repeatable `createRegExpTester` predicates, the suite's one content hash (`fnv1a` and the `hashContent` fingerprint over it), `kebabCase` and `escapePointerToken`, the RFC 6901 token escape every JSON Pointer writer shares |
 | `@jarenjs/core/model` | `withoutModelRenameHints` copies a model without collection/entity rename hints, preserving nested schema annotations and declaration order |
 | `@jarenjs/core/cache` | the bounded LRU with key deletion (`createBoundedCache`), the reference-keyed `createWeakCache`, and `createSemanticCache` — keyed by what a value IS; both bounded caches accept an optional capacity-eviction hook |

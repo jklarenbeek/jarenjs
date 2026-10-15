@@ -32,8 +32,8 @@ export const DATA_DEPTH_CEILING = 1000;
  * `equalsJson` and `stableStringify` of `@jarenjs/core/object` hold, which
  * the diffs call on whole subtrees, so one refusal (`JO2001`) answers past
  * it whichever walker meets the level first. Past every nesting a default
- * host stack could walk recursively, and fixed, so a refusal - a cycle
- * included - is the same on every host.
+ * host stack could walk recursively, and fixed, so a refusal is the same on
+ * every host.
  */
 export const JSON_WALK_DEPTH_CEILING = 10000;
 

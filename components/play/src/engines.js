@@ -135,6 +135,29 @@ function jsonLoss(value) {
 const KERNEL_BY_VALUE = new Map(KERNELS.map((k) => [k.value, k]));
 
 /**
+ * The kernels card's verdict on its two doors: `yes` or `no` only when
+ * both answer the arguments. A door that refuses them, or answers nothing
+ * (the kernel's `null`, the operator's empty sequence), answers another
+ * question than the door that answers, so the card says which door did
+ * what instead of comparing.
+ * @param {unknown} answer - The kernel's answer
+ * @param {unknown} queryAnswer - The operator document's answer
+ * @param {unknown} refusal - What the operator document threw, if it threw
+ * @returns {string}
+ */
+function sameAnswer(answer, queryAnswer, refusal) {
+  const kernelAnswers = answer !== null && answer !== undefined;
+  const kernelSays = `the kernel answers ${answer === undefined ? 'nothing' : fmt(answer)}`;
+  if (refusal !== undefined)
+    return `not compared — $query refuses${code(refusal) === undefined ? '' : ` with ${code(refusal)}`}${kernelAnswers ? '' : ` and ${kernelSays}`}`;
+  if (!kernelAnswers)
+    return `not compared — ${kernelSays}${queryAnswer === undefined ? ' and $query nothing' : ''}`;
+  if (queryAnswer === undefined)
+    return 'not compared — $query answers nothing';
+  return fmt(queryAnswer) === fmt(answer) ? 'yes' : 'no';
+}
+
+/**
  * A VISUAL engine (markdown/mermaid/charts): the descriptor + examples live
  * here (canonical), but the vnode rendering is delegated to a host-injected
  * `options.renderers[id]` — the hybrid seam that keeps this package free of the
@@ -645,7 +668,8 @@ export const ENGINE_LIST = [
     // the @jarenjs/core kernels the $query operators run, called directly:
     // the Arguments pane is the call's JSON array, and the deep drill-down
     // is the operator document that runs the same kernel over the same
-    // array (read as its data) — with its answer, so the two doors agree
+    // array (read as its data) — with its answer, and whether the two
+    // doors answer the same when both answer (`sameAnswer`)
     id: 'kernels', label: 'Core kernels', lead: 'The @jarenjs/core functions the $query operators run — geo, dates, math, text — called directly.',
     sourcePanes: [{ key: 'args', label: 'Arguments — a JSON array', control: 'code' }],
     dataPanes: [],
@@ -663,15 +687,15 @@ export const ENGINE_LIST = [
       catch (err) { return fail(msg(err), code(err), locate(err, 'args')); }
       const t1 = now();
       const query = kernel.query(a.value);
-      let queryAnswer;
-      try { queryAnswer = fmt(compileJsonQuery(query)(a.value)); }
-      catch (err) { queryAnswer = `refused — ${msg(err)}`; }
+      let queryAnswer, refusal;
+      try { queryAnswer = compileJsonQuery(query)(a.value); }
+      catch (err) { refusal = err; }
       return okPanels([
         { id: 'out', label: kernel.signature, kind: 'code', text: fmt(answer) },
         deepCode('query', 'The $query operator that runs it', fmt(query)),
         deepCards('agree', 'The operator over the same arguments', [
-          { title: '$query answers', value: queryAnswer },
-          { title: 'Same answer', value: queryAnswer === fmt(answer) ? 'yes' : 'no' },
+          { title: '$query answers', value: refusal === undefined ? fmt(queryAnswer) : `refused — ${msg(refusal)}` },
+          { title: 'Same answer', value: sameAnswer(answer, queryAnswer, refusal) },
         ]),
         ...deep,
       ], null, t1 - t0);
