@@ -1,7 +1,7 @@
 {
   "name": "@jarenjs/studio",
   "private": false,
-  "version": "0.144.0",
+  "version": "0.145.0",
   "type": "module",
   "main": "./src/index.js",
   "types": "./dist/types/index.d.ts",
@@ -80,17 +80,17 @@
     "prepack": "npm run build:types"
   },
   "dependencies": {
-    "@jarenjs/core": "0.144.0",
-    "@jarenjs/validate": "0.144.0",
-    "@jarenjs/json": "0.144.0",
-    "@jarenjs/app": "0.144.0",
-    "@jarenjs/flow": "0.144.0",
-    "@jarenjs/db": "0.144.0",
-    "@jarenjs/contract": "0.144.0",
-    "@jarenjs/view": "0.144.0",
-    "@jarenjs/forms": "0.144.0",
-    "@jarenjs/formats": "0.144.0",
-    "@jarenjs/charts": "0.144.0",
-    "@jarenjs/mermaid": "0.144.0"
+    "@jarenjs/core": "0.145.0",
+    "@jarenjs/validate": "0.145.0",
+    "@jarenjs/json": "0.145.0",
+    "@jarenjs/app": "0.145.0",
+    "@jarenjs/flow": "0.145.0",
+    "@jarenjs/db": "0.145.0",
+    "@jarenjs/contract": "0.145.0",
+    "@jarenjs/view": "0.145.0",
+    "@jarenjs/forms": "0.145.0",
+    "@jarenjs/formats": "0.145.0",
+    "@jarenjs/charts": "0.145.0",
+    "@jarenjs/mermaid": "0.145.0"
   }
 }
