@@ -419,6 +419,16 @@ one-off query, so an external region narrows exactly as a literal one
 does, and a region with no bounding box diverts to a full initial read
 and is still correct.
 
+**A live ordering by distance re-runs, and that is the contract.** The
+geofence maintains a `$where` per row; an `$orderby` over `$distance` (or over
+a member beside a refined predicate) and a spatial aggregate re-run on
+invalidation, with the reason in `live.mode`, and answer what a fresh
+`execute` answers. Maintaining a distance-ordered window would need an
+incremental spatial index that tracks changed distances, window membership,
+ties and its own state credits; a native bounding-box filter supplies none of
+that state. None is planned. A consumer that needs a cheap live nearest-first
+list registers the fence (`$where` alone) and orders its rows itself.
+
 Re-run is a first-class, documented outcome, not a failure. What is
 forbidden is *silently* re-running while the reader believes the query
 is incremental: `live.mode` reports `'incremental'` or `'rerun'`, the
@@ -428,6 +438,32 @@ refuses at registration (`JD0051`), the same shape as capture's
 demanded session — an application that needs the property can refuse
 to start. A `mode` other than `'auto'`, `'incremental'`, `'rerun'` and
 `'resnapshot'` is `JD0013`, so a misspelt demand is never taken for `'auto'`.
+
+**The re-run rows are the contract.** Every row of the table above whose
+strategy is a re-run answers what a fresh `execute` answers, and none is
+planned to become incremental until a consumer needs it. What keeps them out is
+the maintenance boundary, not a missing optimisation: a group is maintained by
+recomputing only the groups a change touches, which needs every output to
+depend on one group's rows, and ordering, windows or distinct across groups
+and a second grouping level break that; ordered entity tuples would need a
+maintained global order; a nested self-join binding reads the outer root; and
+a profile's predicates, member lists and limits would have to apply to every
+row maintenance admits, inserted documents included. A native SQL plan proves
+none of those. A new strategy for any of them must keep the row and byte
+credits, transactional invalidation, and the equal-answer checks against a
+fresh run that every strategy here is held to.
+
+**A maintained join needs a declared lookup on every edge.** Each side of a
+join equality must be the entity's key, a declared index or a mapped foreign
+key ([bounded joins](#bounded-joins-graph-projections-and-nested-groups));
+otherwise the view re-runs with the reason
+`join dependency '<binding>.<column>' has no declared index`; a reverse
+many-to-many edge without one re-runs too. This is a policy, kept on purpose:
+maintenance answers its reverse lookups from its own in-memory indices, so it
+could follow such an edge, but the join strategy is qualified only for edges
+the model declares, and relaxing the rule would change the strategy of
+registrations that re-run today. To maintain such a join, declare the index
+on the joined member.
 
 **A store profile re-runs every registration.** On a store opened with a
 `profile` (MODEL-FORMAT §8) — any profile, `'safe'` included, since a

@@ -32,6 +32,21 @@ bounds, which is no loss; a CHECK of another shape or name, or one added
 `NOT VALID`, is `unmapped-constraint`.
 Repeated inspection is read-only; `strict: true` refuses losses with `JD0002`.
 
+The loss rows are the contract for what the model vocabulary cannot say;
+introspection never infers intent to make one go away. A collection's partial
+index, an entity's partial index whose condition does not read back into the
+query grammar, a direct SQL expression index and a CHECK outside the complete
+scalar enum grammar stay sorted loss rows: such a predicate or expression has
+no equivalent model declaration, and emitting an unconditional index in its
+place would strengthen what the database promises. A boolean stored as an
+integer and a numeric precision that storage erased cannot be told apart
+without metadata the database does not keep, and a PostgreSQL schema's keys,
+types, constraints, opclasses, functions, row-level security and identity
+sequences are inventoried without being read as application intent. To adopt
+such a table, author the declarations it needs — on SQLite in the explicit
+structural vocabulary of [native SQLite programs](SQLITE-RELATIONAL.md) — in
+the model that opens it, rather than deriving them.
+
 A **model document** declares the collections of a store: each
 collection is a JSON Schema for its documents, a key declaration, and
 a set of declared indexes. `openStore(model, { driver, ... })` opens
@@ -3943,7 +3958,9 @@ column, a document member) keeps the native form, so a stored `null` answers
 false there where the engine raises `JQ2001`. Running the common nullable text
 shape in the engine costs its prefix search the index seek (about 30 times on
 SQLite, 15 on PostgreSQL), makes `strict` refuse it and counts every fetched
-row against a profile's `maxRows`; the deviation is open work on the ROADMAP.
+row against a profile's `maxRows`. [NATIVE-PLANS](NATIVE-PLANS.md#named-deviations)
+lists it, with its exact input and both answers, beside the store's other
+named deviations.
 
 ### 10.7 The join table as a query root
 

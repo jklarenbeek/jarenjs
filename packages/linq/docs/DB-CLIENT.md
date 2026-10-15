@@ -988,9 +988,10 @@ incremental — comes from `explain()` and never from this document.
 sets of one store join in one document, because they share a provider
 scope; a join between two STORES, or between a store and an array, would
 need one query document with two inputs and there is no such document.
-Three or more bindings the entity translator names a residual. Both are
-on [docs/ROADMAP.md](../../../docs/ROADMAP.md) under `@jarenjs/linq &
-@jarenjs/db`, "Federation merge strategy and spilling".
+Three or more bindings the entity translator names a residual. A
+federation (`federate()`, [QUERY-PEN §12.1](QUERY-PEN.md#121-the-federation-boundary-federate))
+gives several sources one scope, so a join between them is one document
+there, run in fetch order; outside it the join is `JL0005`.
 
 **A join row carries its two keys and nothing else.** The join table is a
 root (§2.8), so a question about the pairs — filtered, counted, joined to
@@ -1407,3 +1408,13 @@ inactive status, actor/reason and a transactional `canReset(tx, record)` policy.
 The default refuses; the policy must consult receipts and unresolved effects.
 Reset never deletes those tables. Incompatible workflow/schema identities refuse;
 a host must perform an explicitly reviewed migration before attachment.
+
+There is no conformance kit for host-owned run tables — a test suite a host
+would run against its own table to prove it keeps the run store's contract —
+and none is planned. The run store reads and writes those tables itself
+through the declared mapping, every write is read back and refuses `JL2009`
+when it does not round-trip, and the adapters are typed for every
+`DurableClient`, so a table that breaks the contract is refused at the write
+that breaks it; no host has needed a kit to adopt them. A host proving its own
+mapping runs its workflow against a store opened over that table, as
+`test/flow/run-adoption.test.js` does.

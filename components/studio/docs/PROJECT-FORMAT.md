@@ -196,5 +196,6 @@ modes with a drag splitter, the phone pane switcher, save/load/share, and comple
 
 The stage displays the nested app's latest boot/runtime failure and clears
 it on restart. Remaining constraints live in
-[ROADMAP.md](../../../docs/ROADMAP.md). The editor remains a plain
-`<textarea>` with no syntax highlighting or imperative editor chrome.
+[ROADMAP.md](../../../docs/ROADMAP.md). The editor is a plain
+`<textarea>` with no syntax highlighting or imperative editor chrome (the
+[README](../README.md#complete-reusable-editors) says why).

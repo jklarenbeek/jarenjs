@@ -86,10 +86,10 @@ FALLBACK or a coded refusal on the common path, never a skip:
 | `rowIdentity` (with a declared identity column) | the dialect adds that column to every table it creates, and it IS `rowIdentity()` |
 | `immediateTransactions` | `mode: 'immediate'` takes no lock before the body, and a read-then-write body takes its row locks when it writes; no shipped dialect answers `false` any more |
 
-Two subsystems are SQLite's own in 0.1 and say so on the connection
-rather than in the dialect: the durable job queue (`capabilities.jobs`)
-and the change ledger (`capabilities.changeCapture`) write their own
-statements. Opening a store that asks for either on a connection that
+Two subsystems say so on the connection rather than in the dialect,
+because they write their own statements: the durable job queue
+(`capabilities.jobs`) and the change ledger (`capabilities.changeCapture`),
+each with a SQLite and a PostgreSQL implementation. Opening a store that asks for either on a connection that
 declares it absent is a coded refusal at open — `JD0003` and `JD0051` —
 not a failure at the first statement.
 
@@ -106,6 +106,15 @@ module, keeps the ones that begin as SQL, and fails on a SQLite
 spelling outside `src/dialects/` and `src/drivers/` unless the module
 is named — with the capability that makes it honest — in a short
 approved list.
+
+There are two dialects, SQLite and PostgreSQL, and a third is not planned
+until a consumer names one. The seam makes a third dialect's SQL a contained
+job, but its cost is everything behind the seam: passing the differential
+oracle, and a job queue and a change journal with their own concurrency and
+coverage proofs, each qualified on a real server. A capability flag set
+optimistically to skip one of those would turn a coded refusal into a wrong
+answer. A host on another engine reads and writes through its own driver and
+hands the documents to the query engine, which answers over any JSON.
 
 The SQLite dialect stores documents as JSONB in a `BLOB` column of a
 `STRICT` table, projects each indexed path into a virtual generated
@@ -756,10 +765,11 @@ ERRORS on non-conforming operands where SQL would coerce or sort — a
 `null` under an ordered key, a non-string under a string operator —
 so a path whose schema admits `null`, or several kinds, is a named residual
 for ordering and aggregates, and the two engines keep answering alike over
-conforming data. A string operator is the one named deviation: a member typed
+conforming data. A string operator is a named deviation: a member typed
 `['string', 'null']` stays native, so a stored `null` answers false where the
 engine raises `JQ2001` (the common nullable text shape keeps its index seek,
-`strict` and its profile row bound; the ROADMAP lists it), while a member of
+`strict` and its profile row bound; [NATIVE-PLANS](docs/NATIVE-PLANS.md#named-deviations)
+lists it with the store's other named deviations), while a member of
 several kinds besides `null` (`['string', 'integer']`) and a column whose
 policy reads a NULL back as a present `null` (`null: 'null'`) are the
 engine's and raise. An entity column of any other policy holds no member
@@ -1081,7 +1091,9 @@ number is not a bucket at all (`value-not-numeric`, also for `count`).
 Both counts are over the rows the statement reads: a `start`/`end`
 window is applied by the statement, so a row outside it is never read and
 a refusable row there is never met (the operand's own `$where` hides
-nothing the engine meets: it filters before the kernel there too).
+nothing the engine meets: it filters before the kernel there too) — a
+[named deviation](docs/NATIVE-PLANS.md#named-deviations), since the engine
+validates every row first.
 
 **`explain().series`** is `null` unless the document asked a temporal
 question, which it does by naming a §8.16 operator or by being the

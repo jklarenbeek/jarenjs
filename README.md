@@ -8,7 +8,7 @@ Every engine in the repository follows one philosophy: **parse and decide everyt
 
 ## ✅ Conformance & Speed
 
-Jaren scores **<!--fact:validate.conformance-->1166 of 1166<!--/fact-->** on the official [JSON-Schema-Test-Suite](https://github.com/json-schema-org/JSON-Schema-Test-Suite) — including the optional format suites — across all benchmarked drafts, counted independently of what the rival could compile; the cases that fail are named in [the roadmap](docs/ROADMAP.md). Against Ajv it is faster on <!--fact:validate.perTestWins-->766 of 1090<!--/fact--> of the tests both engines pass, and <!--fact:validate.vsAjv-->1.3<!--/fact-->x as fast on the success-only totals. All numbers below were measured on <!--fact:benchmarks.measured-->2026-08-02–2026-10-06 with Node v24.20.0/v22.22.2/v24.19.0<!--/fact-->; they are reproducible from the [benchmark workspace](benchmark/README.md), which documents each tool, suite and fairness decision. Micro-timing totals vary roughly ±10% run to run; the pass/fail counts are the invariant.
+Jaren scores **<!--fact:validate.conformance-->1166 of 1166<!--/fact-->** on the official [JSON-Schema-Test-Suite](https://github.com/json-schema-org/JSON-Schema-Test-Suite) — including the optional format suites — across all benchmarked drafts, counted independently of what the rival could compile. Against Ajv it is faster on <!--fact:validate.perTestWins-->766 of 1090<!--/fact--> of the tests both engines pass, and <!--fact:validate.vsAjv-->1.3<!--/fact-->x as fast on the success-only totals. All numbers below were measured on <!--fact:benchmarks.measured-->2026-08-02–2026-10-06 with Node v24.20.0/v22.22.2/v24.19.0<!--/fact-->; they are reproducible from the [benchmark workspace](benchmark/README.md), which documents each tool, suite and fairness decision. Micro-timing totals vary roughly ±10% run to run; the pass/fail counts are the invariant.
 
 ### @jarenjs/validate — vs Ajv over the official suite
 
@@ -237,7 +237,7 @@ For detailed API documentation beyond that, visit our official documentation. Wh
 
 ## 📅 Roadmap
 
-The roadmap lives in its own document: [ROADMAP.md](docs/ROADMAP.md). It tracks the remaining release milestones (1.0 stable → beyond) together with the open work per package — from the JSLT single-walk matcher optimizer and the `JSON.parse` reviver integration to the database's open shapes and the Windows qualification.
+The roadmap lives in its own document: [ROADMAP.md](docs/ROADMAP.md). It tracks the remaining release milestones (1.0 stable → beyond) together with the open work per package — from the JSLT single-walk matcher optimizer and the static evaluated-set analysis for `unevaluated*` to the database's open shapes and the Windows qualification.
 
 It deliberately lists **only what is still open**. When something ships, its knowledge moves into the document a reader would actually reach for — the package `README`, its `ARCHITECTURE.md`, the format spec — and the entry leaves the roadmap. That is what keeps it a plan you can act on rather than a changelog you have to read past; the record of *when* something shipped is in the git history and the release tags.
 

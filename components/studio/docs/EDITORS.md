@@ -58,6 +58,15 @@ kind stays fixed while a document is open; templates open a new document.
 A DAG returns its settled output or failure. `event` sends a machine event
 through the same sandbox used by the run controls.
 
+The Flow diagram is laid out automatically and deterministically from the
+document: equal documents draw the same picture, and an edge is added by arming
+a source node and clicking its target. Nodes cannot be dragged and no position
+is saved, because geometry never enters a `jaren-fsm` or `jaren-dag` document;
+a layout stored beside the graph would make two equal machines differ by where
+someone left their boxes. No consumer has asked for hand placement. If one does,
+the place for it is a `meta.layout` side-table that overrides the automatic
+layout without entering the graph itself.
+
 Data documents contain `{ model, query }`. `read()` also returns `buffers`
 (`modelText` and `queryText`), results and the query plan. Its revision includes
 both raw buffers, so even an unfinished JSON edit prevents a stale replacement.

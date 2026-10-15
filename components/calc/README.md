@@ -31,6 +31,13 @@ toExpression(parseExpression('a-(b-c)'));    // "a - (b - c)"
 toSvgString(plot2d('sin(x)', { domain: [-6.28, 6.28] })); // standalone SVG
 ```
 
+A plot is a static SVG: the render is the whole contract, on the server and in
+the browser alike. There is no drag-to-rotate for x·y·z and no pan or zoom for
+x·y, and none is planned — it would be a hydration layer holding pointer state
+the SSR output cannot have. To show another view, render again with new
+options: `yaw` and `pitch` rotate an x·y·z plot, `domain` and `range` move and
+scale an x·y one.
+
 ```js
 import { createCalcComponent } from '@jarenjs/calc/component';
 const calc = createCalcComponent({ provider: 'coingecko' });
@@ -107,6 +114,16 @@ SSR and offline tests working with no network; failures route to an error
 action. When refreshes overlap, only the newest request may publish success
 or failure; an older completion cannot replace its rates or clear its
 in-flight status.
+
+Those two tickers are the whole provider list, read by REST polling. Both are
+free and need no API key; another public ticker would tie the component to one
+more third-party API whose shape and terms can change under it, and a
+websocket or streaming feed would hold a connection open for a converter that
+needs a rate every refresh interval. No more providers are planned. A host
+that needs another source passes its own fetcher as the provider:
+`createCalcComponent({ provider: (codes, { fetch, at }) => fetchMyRates(codes) })`
+resolves to a table shaped like `fallbackRates`, and the same polling, debounce
+and newest-request rule apply to it.
 
 Answers that changed (upgrade notes): `=` on a result that is not a finite
 number (`1/0`, `0/0`, a programmer value with no word) leaves the typed

@@ -69,6 +69,15 @@ compileFormula(defineFormula('price', { '$format-number': ['$.price', '€ #.##0
   .evaluate({ price: 1234.5 }); // {kind:'value', value:'€ 1.234,50'}
 ```
 
+`$quantity` reads its units from `@jarenjs/core/convert`'s one registry
+module, which the Query engine imports, so every formula bundle carries every
+dimension's unit table, although the unit words `$quantity` reads
+(`UNIT_ALIASES`) name only mass, volume, length and area. The registry stays
+one module, and no per-dimension registry is planned: splitting it would save
+bundle bytes only, never change an answer, and would add an import path per
+dimension through which a unit word and its table could come from different
+releases.
+
 Formula compiler options are a plain, closed object: `schemas`, `helpers`,
 `compileTypeTest`, `limits`, `cacheSize`, `packs`, `dateNames` and
 `decimalFormats`. Unknown members refuse with `TypeError`, including a

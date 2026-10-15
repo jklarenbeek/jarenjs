@@ -242,6 +242,37 @@ protocol; this implementation refuses them rather than splicing partial state.
 A reset preserves the receiver's own replica identity and clears its outgoing
 history. Future writes continue its sequence from the imported frontier.
 
+## Limits
+
+Replication is bounded managed history, and these limits are the contract,
+not a list of work in progress. Every one of them refuses with a code; none
+answers with partial or merged state, and no extension is planned until a
+consumer needs one.
+
+- **Snapshots are one document.** A history whose rows and receipts exceed
+  `maxOperations` (`JD2106`) or `maxBytes` does not reset. A paged snapshot
+  would need a snapshot identity and continuation consistency across pages.
+  Raise the two credits; a history larger than one document can hold cannot
+  be reset.
+- **Receipts and tombstones are kept.** Retention prunes only outgoing
+  envelopes; compacting receipts and row tombstones needs evidence that every
+  replica has passed them, which the reset credits do not give. Size the
+  database for them.
+- **A row is the unit of conflict.** Concurrent writes to different fields of
+  one row conflict as whole rows. Merging fields needs a declared policy, which
+  is the `replication.resolver` hook ([Conflicts](#conflicts)).
+- **Structural conflicts need a reset.** A child added on one replica under a
+  parent another replica deletes refuses on both sides (`JD2104`, `JD2005`), as
+  does an envelope no write order can replay ([Applying and exporting](#applying-and-exporting)). No
+  structural conflict policy exists; reset the replicas from a snapshot that
+  covers their whole acknowledged history.
+- **A row has one key spelling.** A row stored again under another spelling of
+  an instant key kept as an epoch column refuses its transaction (`JD2104`):
+  a history names rows by the key's text. Store it under the spelling it holds.
+- **One PostgreSQL session.** A store opened with `sessions` above 1 refuses
+  `replication` (`JD0009`): pages, snapshots and applies are qualified on one
+  session. Open the replicating store with one session.
+
 ## Authoring
 
 `@jarenjs/linq/db` exports a deterministic pen using the same validator:

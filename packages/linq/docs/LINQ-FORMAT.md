@@ -37,20 +37,20 @@ is the index of those guides, and it is how a reader reaches any of them.
 | Document | Lines | What it writes, and when to open it |
 |---|---:|---|
 | [LINQ-FORMAT.md](LINQ-FORMAT.md) | 971 | this file, the binder and the family's **normative reference**: what a pen is, the rules all of them keep, the shared `JL01xx` table, and the cross-pen views derived from the guides it indexes. **Read it when** you want a rule that is true of every pen, an index of the documents, or one place to look up a method without knowing which pen owns it |
-| [QUERY-PEN.md](QUERY-PEN.md) | 2,169 | the chain, `.` — query documents (`jaren-query`) and the provider seam. **Read it when** you are querying data, or implementing a provider that answers a query document |
+| [QUERY-PEN.md](QUERY-PEN.md) | 2,179 | the chain, `.` — query documents (`jaren-query`) and the provider seam. **Read it when** you are querying data, or implementing a provider that answers a query document |
 | [SCHEMA-PEN.md](SCHEMA-PEN.md) | 1,266 | `./schema` — JSON Schema 2020-12: the structural keywords, the constraints and the annotations, each with a method of its own, plus `$query`, `$defs`/`$ref` recursion and the normalizer's per-field predicates. **Read it when** you are describing the shape of data — for validation, for a form, or as the base of an entity |
-| [MODEL-PEN.md](MODEL-PEN.md) | 1,241 | `./model` — the `x-entity` vocabulary on JSON Schema, and the `$model` 0.1 document `openStore` accepts unchanged. **Read it when** you are declaring a store's entities, their keys and their relations |
+| [MODEL-PEN.md](MODEL-PEN.md) | 1,240 | `./model` — the `x-entity` vocabulary on JSON Schema, and the `$model` 0.1 document `openStore` accepts unchanged. **Read it when** you are declaring a store's entities, their keys and their relations |
 | [JSLT-PEN.md](JSLT-PEN.md) | 980 | `./jslt` — `$jslt` 0.1 stylesheets: the envelope and its rules, whose bodies are captured over the matched value. **Read it when** you are transforming one document into another |
 | [MIGRATION-PEN.md](MIGRATION-PEN.md) | 957 | `./migration` — `$migration` 0.2 documents: exact model endpoints and the ordered steps the runner takes. **Read it when** you are moving a store from one model to the next |
 | [CONTRACT-PEN.md](CONTRACT-PEN.md) | 1,226 | `./contract` — `$contract` 0.1 documents: the operations, their schemas, their declared behavior and their REST binding. **Read it when** you are declaring an API and want its client, its server and its tools typed from one document |
-| [FLOW-PEN.md](FLOW-PEN.md) | 1,050 | `./flow` — `jaren-fsm` 0.1 machines and `jaren-dag` 0.1 dataflows, every query-valued member captured. **Read it when** you are declaring a state machine or a dependency graph of tasks |
+| [FLOW-PEN.md](FLOW-PEN.md) | 1,046 | `./flow` — `jaren-fsm` 0.1 machines and `jaren-dag` 0.1 dataflows, every query-valued member captured. **Read it when** you are declaring a state machine or a dependency graph of tasks |
 | [APP-PEN.md](APP-PEN.md) | 1,314 | `./app` — the `jaren-app` 0.1 document `createApp` runs, and the JSON Schema of its state beside it. **Read it when** you are declaring a whole application: state, view, actions, effects |
 | [FORMS-PEN.md](FORMS-PEN.md) | 947 | `./forms` — the `x-form` vocabulary on JSON Schema, and `assertOnSubmit()`, the same rules' layer-3 `$query` twin. **Read it when** you are turning a schema into a form |
 | [MESSAGES-PEN.md](MESSAGES-PEN.md) | 105 | `./messages` — JSON message catalogs and message references. **Read it when** you want checked translation keys, placeholders and explicit completeness. |
 | [JTLT-PEN.md](JTLT-PEN.md) | 83 | `./jtlt` — text templates with JSLT dispatch and query expressions. **Read it when** you want to author Markdown, XML or source text as portable JSON. |
 | [PROJECT-PEN.md](PROJECT-PEN.md) | 84 | `./project` — Studio projects with named, typed files. **Read it when** you want a portable editor workspace containing documents written by several pens. |
 | [CHARTS-PEN.md](CHARTS-PEN.md) | 100 | `./charts` — chart-definition documents for every chart kind. **Read it when** you want typed chart data and presentation options that `compileChart` consumes. |
-| [DB-CLIENT.md](DB-CLIENT.md) | 1,409 | `./db` — the client: the store's typed front door, not a pen, and the package's one runtime edge. **Read it when** you are reading or writing rows: `load`, `include`, `link`/`unlink`, `live` |
+| [DB-CLIENT.md](DB-CLIENT.md) | 1,420 | `./db` — the client: the store's typed front door, not a pen, and the package's one runtime edge. **Read it when** you are reading or writing rows: `load`, `include`, `link`/`unlink`, `live` |
 | [FORMULA-PEN.md](FORMULA-PEN.md) | 41 | `./formula` — author versioned saved JSON Query profiles without executing them. |
 <!--/fact-->
 
@@ -206,22 +206,22 @@ and the bundle is the byte count the tree-shaking probe builds.
 | Document | Subpath | Lines | Mapping rows | Worked examples | Refusals | Bundle |
 |---|---|---:|---:|---:|---:|---:|
 | [LINQ-FORMAT.md](LINQ-FORMAT.md) | — | 971 | — | — | — | — |
-| [QUERY-PEN.md](QUERY-PEN.md) | `.` | 2,169 | 34 | 8 | 17 | 231,415 B |
+| [QUERY-PEN.md](QUERY-PEN.md) | `.` | 2,179 | 34 | 8 | 17 | 231,415 B |
 | [SCHEMA-PEN.md](SCHEMA-PEN.md) | `./schema` | 1,266 | 82 | 10 | 4 | 45,247 B |
-| [MODEL-PEN.md](MODEL-PEN.md) | `./model` | 1,241 | 31 | 7 | 3 | 57,054 B |
+| [MODEL-PEN.md](MODEL-PEN.md) | `./model` | 1,240 | 31 | 7 | 3 | 57,054 B |
 | [JSLT-PEN.md](JSLT-PEN.md) | `./jslt` | 980 | 17 | 8 | 3 | 27,811 B |
 | [MIGRATION-PEN.md](MIGRATION-PEN.md) | `./migration` | 957 | 13 | 5 | 4 | 34,044 B |
 | [CONTRACT-PEN.md](CONTRACT-PEN.md) | `./contract` | 1,226 | 38 | 6 | 3 | 58,820 B |
-| [FLOW-PEN.md](FLOW-PEN.md) | `./flow` | 1,050 | 16 | 7 | 3 | 27,913 B |
+| [FLOW-PEN.md](FLOW-PEN.md) | `./flow` | 1,046 | 16 | 7 | 3 | 27,913 B |
 | [APP-PEN.md](APP-PEN.md) | `./app` | 1,314 | 24 | 7 | 4 | 60,267 B |
 | [FORMS-PEN.md](FORMS-PEN.md) | `./forms` | 947 | 18 | 6 | 3 | 49,517 B |
 | [MESSAGES-PEN.md](MESSAGES-PEN.md) | `./messages` | 105 | 9 | 2 | 1 | 14,322 B |
 | [JTLT-PEN.md](JTLT-PEN.md) | `./jtlt` | 83 | 13 | 1 | 2 | 24,526 B |
 | [PROJECT-PEN.md](PROJECT-PEN.md) | `./project` | 84 | 9 | 1 | 1 | 4,668 B |
 | [CHARTS-PEN.md](CHARTS-PEN.md) | `./charts` | 100 | 21 | 1 | 1 | 6,542 B |
-| [DB-CLIENT.md](DB-CLIENT.md) | `./db` | 1,409 | 54 | 5 | 2 | 1,016,809 B |
+| [DB-CLIENT.md](DB-CLIENT.md) | `./db` | 1,420 | 54 | 5 | 2 | 1,016,809 B |
 | [FORMULA-PEN.md](FORMULA-PEN.md) | `./formula` | 41 | 2 | — | — | 11,334 B |
-| **16 documents** | | **13,943** | **381** | **74** | | |
+| **16 documents** | | **13,959** | **381** | **74** | | |
 <!--/fact-->
 
 A pen whose mapping rows are far below its worked examples is a pen

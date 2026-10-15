@@ -654,6 +654,14 @@ node benchmark/vector.js --sizes 10000 --dims 768
 node benchmark/vector.js --output json --filepath out.json
 ```
 
+The full grid's largest leg, 50,000 vectors of 768 dimensions, holds one
+in-memory SQLite database of the whole corpus beside the resident matrix, so
+it needs far more memory than any other leg; on a memory-constrained runner
+pass `--sizes 10000`. The leg stays in memory by design: backing it with a file
+would buy the headroom at the price of measuring a page cache instead of a
+database, which is worth trading only once a runner the suite must publish
+from cannot hold it.
+
 The rival is a devDependency of this workspace (`sqlite-vec`), loaded into
 `node:sqlite` with `allowExtension`. A host where it does not load still
 publishes every other row, with the exact loader error recorded beside the one

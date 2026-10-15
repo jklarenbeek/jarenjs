@@ -44,6 +44,18 @@ and operation contract. The [host guide](docs/EDITORS.md) describes the complete
 API, worker initialization, storage identity and lifecycle. A packed independent
 host exercises all three editors without importing website source.
 
+The text editor is a plain controlled `<textarea>`, here and in
+`@jarenjs/play`, and it has no syntax highlighting by design. The two ways to
+add highlighting — a `contenteditable` surface, or a highlighted `<pre>`
+mirrored behind a transparent textarea — both break the contract the typing
+buffer exists for: a render that lands mid-edit must not move the caret or
+eat a keystroke, and the text a user typed must be the text the editor holds.
+A `contenteditable` surface hands the caret and the text to the browser, a
+mirror must match the textarea's layout to the character after every
+keystroke, and neither may bring back `innerHTML`. A host that wants
+highlighting mounts its own code editor and writes the result through the
+revision-checked editor controllers above.
+
 ## The project document
 
 A thin envelope over typed files — the full contract is

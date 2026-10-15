@@ -403,7 +403,13 @@ isolated and ignored — observation MUST NOT change a run.
 - **Streaming.** A run is one value in, one value out; feeding a dag
   from the `@jarenjs/josl` incremental readers chunk by chunk is the
   natural 0.2 composition, and doing it well changes the node contract
-  — so it is not bolted on here.
+  — so it is not bolted on here. No streaming input is planned until a
+  consumer needs one: the bounded provider ingestion composition
+  ([WORKFLOW-FORMAT](WORKFLOW-FORMAT.md#complete-provider-ingestion))
+  consumes a provider's bounded pages one at a time and does not need it. To process a
+  stream, run the dag once per value the reader yields (a record, a
+  page, a chunk the host collects), or collect the stream into one value
+  first.
 - **Retries.** A failed run is rerun by its caller; retry policy
   belongs to the host (or the app's task convention), not the graph.
 - **Persistence / resume — amended.** A run STILL holds no durable

@@ -815,9 +815,16 @@ The run options include:
   strategy. `onAssertionPlan(plan)` reports migration, step, collection,
   strategy, shape, reason and bounds before the assertion reads documents;
   Store dry-run query statements also expose strategy and reason. Provider
-  promotion reuses the query planner with no assumed typed columns. Typed
-  SQL aggregates still need a trustworthy intermediate schema and proof
-  that their numeric/order semantics match; otherwise the ordered fold runs.
+  promotion reuses the query planner with no assumed typed columns. An
+  aggregate other than a collection `$count` is not promoted to typed SQL,
+  and that is by design: typing it needs a schema for the documents between
+  transform steps, which neither the migration's baseline nor its target
+  describes, and a schema inferred from either endpoint can be wrong about
+  the documents a step has half-transformed — a typed `SUM` over a member a
+  step turned from a number into a string would answer where the engine
+  refuses. The ordered fold answers what the engine answers in one batch
+  plus fixed state, so it runs instead. No intermediate-schema contract is
+  planned until a migration needs the SQL speed.
 
   **A materializing assertion is bounded.** `options.assertionBounds`
   defaults to `{ maxRows: 100000, maxBytes: 67108864 }` and is crossed

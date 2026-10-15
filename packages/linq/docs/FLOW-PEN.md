@@ -431,16 +431,13 @@ one-item sequence with the item. So this graph, run three times:
 ```
 
 Two survivors give an array, ONE survivor gives the row itself, none
-gives `null`. FLOW-FORMAT §6 states only the empty case, and the
-difference is invisible until a downstream `$[*]` iterates an object's
-values instead of an array's items. The pen cannot fix it — this is the
-engine's reading of a document the pen wrote faithfully — so it is
-recorded in [docs/ROADMAP.md](../../../docs/ROADMAP.md) under
-`@jarenjs/flow`, where the resolution is a format decision (a §6 sentence
-and a worked example, or a node-level "always a sequence" option). Until
-then: a `query` node feeding anything that expects a list wants a `$for`
-whose `$return` is explicitly an array constructor, or a downstream node
-that tolerates both.
+gives `null`: the query engine's singleton rule, which FLOW-FORMAT §6.1
+states for every `query` node. The difference is invisible until a
+downstream `$[*]` iterates an object's values instead of an array's items,
+and the pen cannot change it — this is the engine's reading of a document
+the pen wrote faithfully. A `query` node feeding anything that expects a
+list wants a `$for` whose `$return` is explicitly an array constructor, or
+a downstream node that tolerates both.
 
 ### 3.6 A `jslt` node
 
@@ -962,9 +959,8 @@ parallel regions and no delayed or timed transitions (§1.1). A machine's
 current state is a string and storing it is the host's business (§1.1);
 `createFsmSession` is a convenience over that, not persistence. And an
 effect is never invoked by the engine: the descriptors come back as data
-and the host's registry runs them. Both engines' remaining non-goals are
-on [docs/ROADMAP.md](../../../docs/ROADMAP.md) under `@jarenjs/flow`, and
-none of them is a pen limitation.
+and the host's registry runs them. Both engines' non-goals are the
+format's (FLOW-FORMAT §1.1, §7.5), and none of them is a pen limitation.
 
 ### 6.4 The shape a `query` node's result takes
 

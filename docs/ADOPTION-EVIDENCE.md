@@ -296,14 +296,14 @@ fixtures or public contracts, independent of any private notes or checkouts.
 | Older clause | Accountable owner | Final disposition and evidence | Preserved remainder |
 |---|---|---|---|
 | SQL pushdown, projection/distinct | `db` | Narrowed to [native shapes](../packages/db/docs/NATIVE-PLANS.md) and [projection tests](../test/db/plan-projection.test.js) | Non-reconstructible trees and broader algebra |
-| Incremental live queries | `db` | Narrowed to [qualified live strategies](../packages/db/docs/LIVE-FORMAT.md) and [range resets](../test/linq/db-range.test.js) | Entity windows, nested self joins and the boundary the [ROADMAP](ROADMAP.md) entry lists |
+| Incremental live queries | `db` | Narrowed to [qualified live strategies](../packages/db/docs/LIVE-FORMAT.md) and [range resets](../test/linq/db-range.test.js) | None open: entity windows, nested self joins and the other shapes that re-run are the [re-run contract](../packages/db/docs/LIVE-FORMAT.md#7-live-queries-the-maintenance-table) |
 | Introspection losses | `db` | Inventory repaired; [losses remain explicit](../test/db/physical-inventory.test.js) | A loss is never permission to drop a physical object |
-| Replication capture/cascades/snapshots | `db` | Adopted-trigger refusal preserved in [combined assertions](../test/consumer/journey.js); [replication contract](../packages/db/docs/REPLICATION-FORMAT.md) | PostgreSQL capture, causal compaction, child effects and independent field merges |
+| Replication capture/cascades/snapshots | `db` | Adopted-trigger refusal preserved in [combined assertions](../test/consumer/journey.js); [replication contract](../packages/db/docs/REPLICATION-FORMAT.md) | None open: causal compaction and independent field merges are [replication limits](../packages/db/docs/REPLICATION-FORMAT.md#limits) |
 | Interval declaration and overlap seeks | `db` | Cross-member enforcement supplied by [invariants](../test/db/invariants.test.js) | Dedicated interval declaration/index/seek proof |
 | Accessibility and native IME | `view` | Automated [composition behavior](../packages/website/e2e/view-runtime.spec.js) and collection interaction qualified | Actual AT/OS IME audit remains open |
-| Studio durability and syntax highlighting | `studio` | Reserved; [existing editor contract](../components/studio/README.md) unchanged | Entity projects, durable stores, highlighting |
-| Federation, third dialect, migration intermediate schema | `db` | Reserved beyond [current query contracts](../packages/db/docs/NATIVE-PLANS.md) | Spilling, dialect subsystems and intermediate type declarations |
-| Awaiting documents and streaming DAG input | `flow` | Existing [task/workflow composition](../packages/flow/docs/WORKFLOW-FORMAT.md) reused | Action format revision and streaming input |
+| Studio durability and syntax highlighting | `studio` | Reserved; [existing editor contract](../components/studio/README.md) unchanged | Entity projects and durable stores; highlighting is declined in the [editor contract](../components/studio/README.md#complete-reusable-editors) |
+| Federation, third dialect, migration intermediate schema | `db` | Declined beyond [current query contracts](../packages/db/docs/NATIVE-PLANS.md) | None open: [fetch-order federation](../packages/linq/docs/QUERY-PEN.md#121-the-federation-boundary-federate), [two dialects](../packages/db/ARCHITECTURE.md) and the [ordered assertion fold](../packages/db/docs/MIGRATION-FORMAT.md) are the contracts |
+| Awaiting documents and streaming DAG input | `flow` | Existing [task/workflow composition](../packages/flow/docs/WORKFLOW-FORMAT.md) reused | Action format revision; streaming input is declined (FLOW-FORMAT §7.5) |
 | Unrelated validation, query, diagrams, charts and AI | Respective package engines | Reserved, [open roadmap](ROADMAP.md) unchanged outside proved clauses | Existing owners retain all unrelated intent |
 
 ## Complete frozen-budget comparison

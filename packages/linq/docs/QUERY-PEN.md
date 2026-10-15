@@ -967,8 +967,18 @@ failure or cancellation. `signal` is checked at row boundaries and passed to
 providers. Cleanup failures preserve a primary execution failure and never
 strand another opened cursor.
 
-There is no spill, distributed transaction or cross-source write. A merge
-strategy remains unavailable because providers declare no ordering guarantee.
+There is no spill, distributed transaction or cross-source write, and none is
+planned. Federated joins run in fetch order (steps 2 and 3 above): each next side
+is reduced against the keys already fetched, and the query engine joins the
+retained sets. A merge join would need each
+provider to guarantee the order of what it yields, which no provider declares;
+assuming one would answer wrong the first time a provider yields out of order.
+Spilling, or a streaming intermediate engine, would be a second execution
+contract, and it still could not bound what a buffered provider allocates
+before it hands its array over. Keep each side inside its credits instead:
+narrow a side with its own filters, declare `estimatedRows` so the smallest
+side starts the fetch, or give a large side a cursor source rather than a
+buffered one.
 
 ## 13. Worked examples
 

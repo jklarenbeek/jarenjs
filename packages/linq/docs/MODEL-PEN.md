@@ -1165,12 +1165,11 @@ catch them:
   wire or produced by a tool is a value, and `openStore(model, …)` takes
   it as it stands. Nothing here has to be in the path.
 - **The database already exists and you are matching it.** Planning runs
-  one way — the model describes what the store should build — and reading
-  a model back out of a live database is open work, tracked in
-  [docs/ROADMAP.md](../../../docs/ROADMAP.md) under the data pair
-  ("Introspection of an existing database"). Until it lands, a model over
-  a database somebody else made is a transcription, and a transcription
-  is as easy to get wrong in code as in JSON.
+  one way — the model describes what the store should build. Reading a
+  model back out of a live database is `store.introspect()`, whose loss
+  rows name what the model vocabulary cannot say
+  ([MODEL-FORMAT §1](../../db/docs/MODEL-FORMAT.md#1-scope)); start from
+  its derived model, not from this pen, and author what it reports lost.
 - **Nothing carries `x-entity`.** A collection takes a builder from any
   pen — `m.collection(s.object({ id: s.string() }), { key: '/id' })` is
   accepted and emits the same document — so a store of plain document

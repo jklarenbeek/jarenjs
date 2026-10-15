@@ -109,6 +109,14 @@ compileXQuery(text)(null, { doc: inputDocument });
 > - `for $x at $i in ...` — `$i` counts from **0**, not 1;
 > - `count $c` — `$c` counts from **0**.
 >
+> These two stay 0-based by design. Making them 1-based means rewriting
+> every reference to the bound variable (`$i` → `$i + 1`) through every
+> nested scope that can see it, which turns a one-token binding into a
+> scope-tracking rewrite of the whole query, for no change to what the JSON
+> format computes. The QT3 scorecard counts the test cases that assert a
+> 1-based `at` or `count` value as wrong-value failures. Where a 1-based
+> position is wanted, write it: `for $x at $i in $xs return $i + 1`.
+>
 > *Upgrade: `fn:index-of` used to answer the engine's 0-based positions, so
 > `index-of((10, 20), 20)` answered `1`; it now answers `2`. A query that
 > compensated with `+ 1` must drop it, and the emitted document is no longer a

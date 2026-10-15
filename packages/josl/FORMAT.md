@@ -159,6 +159,16 @@ records from an async source one per chunk — all byte-identical to
 root as the next header completes it; a table root is refused, being one
 retained value rather than a record stream.
 
+The concrete syntax tree is whole-document only. `parseJoslCst` and
+`parseTomlCst` take the complete text and record each node's source span;
+there is no streaming CST, and none is planned. A CST exists to rewrite a
+document in place, and rewriting a document means holding all of it, so a
+streamed one buys nothing a consumer has asked for. The chunk cutter has the
+same slices in hand, but reports them per line without the terminator. To
+edit a large document, read it whole into `parseJoslCst`; to transform a
+stream, read events or records and write a new stream with
+`createStreamWriter`.
+
 **Limits.** A reader refuses a document by size only when asked. Every
 limit defaults to `Infinity`, counts UTF-8 bytes, and is judged while
 the text is still in cutter, token or container state; a crossing is a

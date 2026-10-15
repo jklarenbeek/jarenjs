@@ -204,12 +204,9 @@ bound by the same rule when the call runs: a string external holding a lone
 surrogate — and on PostgreSQL one holding U+0000, or a membership list holding
 either — diverts the call to the engine (`bind.external`), while on SQLite a list
 holding one still binds. SQLite's `$ends-with` compares bytes, so a
-U+0000 in the pattern or in the stored value answers as the engine does. **A named
-deviation:** a lone surrogate that SQLite stores (PostgreSQL refuses the document)
-reads back from a native projection, group key or distinct as three U+FFFD, where the
-engine and the live strategies read the surrogate itself; reading it exactly would
-test every text leaf of every such statement, which slows the reads of text that
-never holds one.
+U+0000 in the pattern or in the stored value answers as the engine does. A lone
+surrogate that SQLite stores reads back from a native statement as U+FFFD, one of the
+[named deviations](#named-deviations) below.
 
 Safe identity/object projection chains, including a projected join followed by
 filtering and ordering, flatten without crossing windows, grouping or inner
@@ -224,6 +221,74 @@ are application admission costs. SQLite does not expose visited-row counts or
 statement time enforcement; a correlated subquery can visit many rows despite
 returning a small projection. Use indexes and inspect the scan narrative. Profile
 row limits bound fetched results; byte limits bound each decoded result item.
+
+## Named deviations
+
+The `pushdown: false` engine is the oracle: a native plan answers what it
+answers, value or error code. These are the cases where it does not, each
+kept on purpose and named here; every other difference is a defect. In the
+last three the native plan answers where the engine raises a type or decoding
+error, and wherever the engine answers, the two agree; in the first the two
+read one stored string differently.
+
+- **A lone surrogate stored on SQLite reads back as U+FFFD.** A document
+  holding `"\uD800"` (SQLite stores it; PostgreSQL refuses the document)
+  reads back from a native projection, group key or distinct as three
+  U+FFFD, where the engine and the live strategies read the surrogate itself.
+  Reading it exactly would test every text leaf of every such statement,
+  which slows the reads of text that never holds one. Keep lone surrogates
+  out of stored text, or run the read with `pushdown: false`.
+- **A pushed string operator answers false for a stored `null`.** Collection
+  `e` keyed `/id`, `s` typed `['string', 'null']` with an index on `$.s`,
+  rows `{ "id": "a", "s": "abc" }` and `{ "id": "b", "s": null }`:
+  `{ "$for": { "e": "$[*]" }, "$where": { "$starts-with": ["$e.s", "a"] }, "$return": "$e.id" }`
+  answers `"a"` natively (with `strict: true` too), and the engine raises
+  `JQ2001` (`expected a string, got null`). `$ends-with` and `$contains` do
+  the same, over a plain column, an epoch column or a document member. A
+  member typed `string` alone answers false the same way for a stored `null`
+  or number, which only a store that validates nothing can hold. Running the
+  nullable shape in the engine would cost the prefix search its index seek,
+  make `strict` refuse it and count every fetched row against a profile's
+  `maxRows`. A guarded native form that counts the null rows beside the seek
+  was built and set aside: SQLite evaluates a registered-function term for
+  rows an earlier `IN (SELECT …)` term already excludes, so it raised a false
+  `JQ2001`, and the count reads every row lacking the member, turning a seek
+  on a sparse member into a table scan. A member of several kinds besides
+  `null` (`['string', 'integer']`) and an adopted column with `null: 'null'`
+  are the engine's and raise. To get one answer from both, say what a `null`
+  means: `{ "$and": [{ "$ne": ["$e.s", null] }, { "$starts-with": ["$e.s", "a"] }] }`
+  answers `"a"` natively and in the engine, and stays native.
+- **A native `$resample` window never reads the rows outside it.**
+  Collection `sample` (`series` string, `at` integer, `value` number, index
+  `["$.series", "$.at"]`), rows `{ "series": "a", "at": 1767225600000, "value": 1 }`,
+  `{ "series": "a", "at": 1767225660000, "value": 2 }` and, outside the window,
+  `{ "series": "a", "at": 1767226200000, "value": "x" }`:
+  `{ "$resample": [{ "$for": { "s": "$[*]" }, "$where": { "$eq": ["$s.series", "a"] }, "$return": "$s" }, { "every": 60000, "aggregate": "max", "start": 1767225600000, "end": 1767225720000 }] }`
+  answers natively
+  `[{ "at": 1767225600000, "value": 1, "count": 1 }, { "at": 1767225660000, "value": 2, "count": 1 }]`,
+  and the engine raises `JQ2001` (`row 2, value: neither a finite number nor null`).
+  The statement applies `start` and `end`, so a row outside them that the
+  temporal kernel refuses (no instant, no reading) is never met; the engine
+  validates every row first. Inside the window the statement counts the rows
+  that carry no reading and hands such a question to the engine
+  ([ARCHITECTURE](../ARCHITECTURE.md), "A group with no instant"). Probing the
+  rows outside the window would cost what the window saves. A store that
+  validates its writes (a `compileSchema` hook) cannot hold such a row.
+- **A native statement never reads a column it does not name.** An adopted
+  SQLite table `d (id INTEGER PRIMARY KEY, day TEXT NOT NULL, n INTEGER NOT NULL)`
+  holding `(1, '2026-01-01', 1)` and `(2, 'not a date', 2)`, mapped as entity
+  `D` with `day` under the `date` codec: `{ "$for": { "it": "$.D[*]" }, "$return": "$it.n" }`
+  answers `[1, 2]` natively, and the engine raises `JD2003` (`column 'day'
+  refuses a lossy or invalid date value`), because it decodes the whole row.
+  A `$count` of that `$for`, a selection (`$where` over `n`) and a
+  `$distinct` of it answer the same way. The engine's class is wider than this
+  example: invalid text in a `date` or `datetime` column, a PostgreSQL
+  `double precision` NaN or Infinity, an integer above 2^53. Reading every
+  column would cost every native statement the columns it does not need. A
+  `$count` of the bare binding (`{ "$count": "$.D[*]" }`) and any document
+  that reads the column (`{ "n": "$it.n", "day": "$it.day" }`) raise `JD2003`
+  natively too. To keep such rows out of the table, constrain the column in
+  the database (a CHECK that `day` holds a date).
 
 ## Mutations
 

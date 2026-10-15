@@ -1827,10 +1827,14 @@ its side-effect-free status read are in
   capture after a disposable live probe. Failed session probes select journal
   capture. OPFS, IndexedDB snapshots and memory have explicit capability and
   durability differences; see [execution hosts](docs/HOSTS.md).
-- **Remaining boundaries**: untyped and opaque grouped/projection shapes,
-  federation beyond two sources, richer incremental live queries, portable
-  capture and introspection outside the model vocabulary (MODEL-FORMAT §10.6
-  and the roadmap).
+- **Remaining boundaries**: untyped and opaque grouped/projection shapes stay
+  open (MODEL-FORMAT §10.6 and the roadmap); portable capture is
+  [LIVE-FORMAT §4](docs/LIVE-FORMAT.md#4-capture-modes-and-their-limitations)'s
+  limits. The live
+  shapes that re-run ([LIVE-FORMAT §7](docs/LIVE-FORMAT.md#7-live-queries-the-maintenance-table)),
+  introspection outside the model vocabulary
+  ([MODEL-FORMAT §1](docs/MODEL-FORMAT.md#1-scope)) and federation in fetch
+  order are the contract.
 
 The normative formats are
 [docs/MODEL-FORMAT.md](docs/MODEL-FORMAT.md) (storage §§1–7, safe

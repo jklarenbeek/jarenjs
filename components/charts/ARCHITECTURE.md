@@ -190,6 +190,16 @@ asserted after every tick in the property tests
 (`test/charts/session.test.js`), including under log axes, null
 samples, ring-buffer eviction and resets.
 
+Sessions stop at those four types by design. `boxplot`, `gauge`, `map`,
+`pie`, `radar`, `sankey`, `scatter`, `streamgraph` and `treemap` have no
+session: `createChartSession` refuses them with a `TypeError` naming the
+type. Their data is not a stream of marks that stay put (one changed slice
+moves every other angle of a pie, one flow re-routes a sankey, one value
+re-packs a treemap), so most changes would fall back to a rebuild anyway,
+and at the sizes they are drawn at a wholesale render is cheap. For those
+types, call `compileChart(config, data)` again with the new data and render
+its `toVnode()`.
+
 ## Memoization (the honest story)
 
 - `hashContent` takes a **string**. It is used only on the
