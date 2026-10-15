@@ -18,7 +18,7 @@ import { parseMermaid, toMermaid, compileMermaid, renderMermaid, layoutDiagram }
 import { renderToString } from '@jarenjs/view';
 import { sanitizeHref } from '@jarenjs/view/helpers';
 
-import { readClick, splitCallArguments, hasTaskSeparator } from '../../components/mermaid/src/parser/gantt-click.js';
+import { readClick, splitCallArguments, hasTaskSeparator } from '../../components/mermaid/src/parser/click.js';
 import { growthRatio } from '../lib/growth.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -267,8 +267,8 @@ describe('a link is drawn only through the allow-list', () => {
 
   it('should wrap the label and the shape of a linked row in one anchor inside its group', () => {
     const svg = svgOf(HEAD + 'click a2 href "https://x.test/p"');
-    assert.match(svg, /<g class="mm-gantt-task mm-gantt-clickable" data-id="a2"><a href="https:\/\/x\.test\/p" class="mm-gantt-click"><text [^>]*class="mm-gantt-label"[^>]*>B<\/text><rect [^>]*class="mm-gantt-shape"[^>]*><\/rect><\/a><\/g>/);
-    assert.match(svg, /<g class="mm-gantt-task" data-id="a1"><text /, 'an unlinked row keeps its shape');
+    assert.match(svg, /<g class="mm-node mm-gantt-task mm-gantt-clickable" data-id="a2"><a href="https:\/\/x\.test\/p" class="mm-gantt-click"><text [^>]*class="mm-gantt-label mm-label"[^>]*>B<\/text><rect [^>]*class="mm-gantt-shape"[^>]*><\/rect><\/a><\/g>/);
+    assert.match(svg, /<g class="mm-node mm-gantt-task" data-id="a1"><text /, 'an unlinked row keeps its shape');
   });
 
   it('should draw a milestone inside the anchor too', () => {

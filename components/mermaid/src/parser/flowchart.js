@@ -7,7 +7,7 @@
  * pattern regex is a module constant used with the sticky (`y`) flag so
  * there is no per-call `RegExp` allocation; the vertex/edge chain is a
  * hand-written scan. Produces the geometry-free flowchart AST from
- * `ast.js` — nodes, edges, subgraphs, classDef/class/style — preserving
+ * `ast.js` — nodes, edges, subgraphs, classDef/class/style, click — preserving
  * shape, label and declaration order so `to-mermaid.js` is a fixed
  * point.
  */
@@ -16,6 +16,7 @@ import {
   flowNode, flowEdge, flowSubgraph, flowClassDef, flowClass, flowStyle, flowchartAst,
 } from '../ast.js';
 import { fail } from '../errors.js';
+import { readNodeClick } from './click.js';
 import { countCharCode } from '@jarenjs/core/string';
 
 /**
@@ -64,6 +65,8 @@ export function parseFlowchart(lines, lineOffset, direction) {
   const classDefs = [];
   const classes = [];
   const styles = [];
+  /** @type {import('./click.js').NodeClick[]} */
+  const clicks = [];
   /** @type {{ id: string, label: string, direction: string|null, nodes: string[] }[]} */
   const subgraphStack = [];
 
@@ -133,7 +136,14 @@ export function parseFlowchart(lines, lineOffset, direction) {
       styles.push(flowStyle(rest.slice(0, sp).trim(), rest.slice(sp + 1).trim()));
       continue;
     }
-    if (line.startsWith('click ') || line.startsWith('linkStyle ')) {
+    if (line.startsWith('click ')) {
+      // a line that is none of Mermaid's click forms stays parse-accepted
+      // and out of the tree, as every click line was before they were read
+      const read = readNodeClick(line.endsWith(';') ? line.slice(0, -1).trimEnd() : line, true);
+      if (read !== null) clicks.push(read);
+      continue;
+    }
+    if (line.startsWith('linkStyle ')) {
       continue; // parse-accept, not modeled in v1
     }
 
@@ -150,7 +160,7 @@ export function parseFlowchart(lines, lineOffset, direction) {
   }
 
   const nodes = nodeOrder.map((id) => nodeMap.get(id));
-  return flowchartAst(direction, nodes, edges, subgraphs, classDefs, classes, styles);
+  return flowchartAst(direction, nodes, edges, subgraphs, classDefs, classes, styles, clicks);
 }
 
 /**

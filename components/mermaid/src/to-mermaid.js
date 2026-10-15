@@ -13,7 +13,7 @@
  */
 
 import { parseState } from './parser/state.js';
-import { printClick } from './parser/gantt-click.js';
+import { printClick, printNodeClick } from './parser/click.js';
 
 //#region public ----------------------------------------------------
 
@@ -106,6 +106,10 @@ function printFlowchart(ast) {
   for (const cd of ast.classDefs) out.push(`classDef ${cd.name} ${cd.styles}`);
   for (const c of ast.classes) out.push(`class ${c.node} ${c.name}`);
   for (const s of ast.styles) out.push(`style ${s.node} ${s.styles}`);
+
+  // 5. click statements in AST order; a tree written before they were read
+  //    has no `clicks`
+  for (const click of ast.clicks ?? []) out.push(printNodeClick(click));
 
   return out.join('\n') + '\n';
 }
@@ -268,6 +272,7 @@ function printClass(ast) {
   for (const r of ast.relations) {
     out.push(`${r.from} ${r.type} ${r.to}${r.label ? ' : ' + r.label : ''}`);
   }
+  for (const click of ast.clicks ?? []) out.push(printNodeClick(click));
   return out.join('\n') + '\n';
 }
 

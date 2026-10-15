@@ -1,6 +1,6 @@
 //@ts-check
 /**
- * @file The optional per-node tooltips.
+ * @file The optional tooltips on every diagram type's nodes and edges.
  *
  * The behaviour worth pinning is what a keyboard user and a mouse user are
  * each told, and that the wiring a screen reader needs (role, description
@@ -10,6 +10,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
+import { readFileSync } from 'node:fs';
 
 import { diagramToVnode } from '@jarenjs/mermaid';
 import { mermaidPlugin } from '@jarenjs/mermaid/plugin';
@@ -441,12 +442,157 @@ describe('tooltips — attach and teardown', () => {
       'Escape and scroll need a document to listen on');
     assert.strictEqual(noEvents.node('A').getAttribute('tabindex'), null);
 
-    // A sequence diagram draws actors, not marked nodes: nothing to point at.
-    const sequence = figure('sequenceDiagram\n  A->>B: hi');
-    const before = sequence.el.children.length;
-    assert.strictEqual(attachDiagramTooltips(sequence.el, { document: sequence.document }), undefined);
-    assert.strictEqual(sequence.el.children.length, before);
-    assert.ok(!sequence.el.classes.has('mm-has-tooltips'));
+    // A placeholder, a pie without its renderer and a parse error draw no
+    // marked node or edge: nothing to point at.
+    for (const source of ['journey\n  title J\n  section S\n    a: 5: me', 'pie\n  "a" : 1', 'flowchart LR\n  A["x']) {
+      const none = figure(source);
+      const before = none.el.children.length;
+      assert.strictEqual(attachDiagramTooltips(none.el, { document: none.document }), undefined, source);
+      assert.strictEqual(none.el.children.length, before, source);
+      assert.ok(!none.el.classes.has('mm-has-tooltips'), source);
+    }
+  });
+});
+
+/** Every element of `selector` whose `attr` is `value`. */
+const all = (f, selector, attr, value) => f.svg.querySelectorAll(selector).filter((n) => n.getAttribute(attr) === String(value));
+/** Focus `target`, read the tooltip, and move focus away again. */
+const say = (f, target) => {
+  f.fire(target, 'focusin');
+  const text = f.tip().textContent;
+  f.fire(target, 'focusout', { relatedTarget: null });
+  return text;
+};
+
+describe('tooltips — every type that draws something to point at', () => {
+  const SEQUENCE = 'sequenceDiagram\n  participant A as Alice\n  A->>B: hi\n  B-->>A: ok\n  A->>A: self';
+
+  it('names a sequence actor, on both of its boxes, by the messages that reach and leave it', () => {
+    const f = figure(SEQUENCE);
+    attachDiagramTooltips(f.el, { document: f.document });
+    const alice = all(f, '.mm-node', 'data-id', 'A');
+    assert.strictEqual(alice.length, 2, 'the head box and the foot box');
+    for (const box of alice) {
+      assert.strictEqual(box.getAttribute('tabindex'), '0');
+      assert.strictEqual(box.getAttribute('role'), 'img');
+      assert.strictEqual(box.getAttribute('aria-label'), 'Alice (A)');
+      assert.strictEqual(say(f, box), 'Alice (A)\nfrom: B (ok), Alice (self)\nto: B (hi), Alice (self)');
+    }
+    assert.strictEqual(say(f, all(f, '.mm-node', 'data-id', 'B')[1]), 'B\nfrom: Alice (hi)\nto: Alice (ok)');
+  });
+
+  it('names a sequence message by its two ends and its text', () => {
+    const f = figure(SEQUENCE);
+    attachDiagramTooltips(f.el, { document: f.document });
+    const message = (i) => all(f, '.mm-edge', 'data-edge', i)[0];
+    assert.strictEqual(say(f, message(0)), 'Alice → B (hi)');
+    assert.strictEqual(say(f, message(1)), 'B → Alice (ok)');
+    assert.strictEqual(say(f, message(2)), 'Alice → Alice (self)');
+    assert.strictEqual(message(0).getAttribute('aria-label'), 'Alice → B (hi)');
+    assert.strictEqual(message(0).getAttribute('tabindex'), '0');
+  });
+
+  it('names a class and an entity by its box, and its relations by their rows', () => {
+    const cls = figure('classDiagram\n  class Animal {\n    +name\n  }\n  Animal <|-- Dog : extends\n  Animal <|-- Cat');
+    attachDiagramTooltips(cls.el, { document: cls.document });
+    assert.strictEqual(say(cls, cls.node('Animal')), 'Animal\nto: Dog, Cat');
+    assert.strictEqual(say(cls, cls.node('Dog')), 'Dog\nfrom: Animal');
+    assert.strictEqual(say(cls, all(cls, '.mm-edge', 'data-edge', 0)[0]), 'Animal → Dog');
+    assert.strictEqual(cls.svg.querySelectorAll('.mm-node').length, 3, 'the relations box is not a class');
+
+    const er = figure('erDiagram\n  CUSTOMER ||--o{ ORDER : places\n  CUSTOMER {\n    string name PK\n  }');
+    attachDiagramTooltips(er.el, { document: er.document });
+    assert.strictEqual(say(er, er.node('CUSTOMER')), 'CUSTOMER\nto: ORDER');
+    assert.strictEqual(say(er, er.node('ORDER')), 'ORDER\nfrom: CUSTOMER');
+    assert.strictEqual(say(er, all(er, '.mm-edge', 'data-edge', 0)[0]), 'CUSTOMER → ORDER');
+  });
+
+  const GANTT = 'gantt\n  dateFormat YYYY-MM-DD\n  section S\n  A task :a1, 2024-01-01, 3d\n  B task :after a1, 2d';
+
+  it('names a gantt row by the dependencies that reach and leave it, and a connector by its ends', () => {
+    const f = figure(GANTT);
+    attachDiagramTooltips(f.el, { document: f.document });
+    assert.strictEqual(say(f, f.node('a1')), 'A task (a1)\nto: B task');
+    assert.strictEqual(say(f, f.node('task1')), 'B task (task1)\nfrom: A task');
+    const link = all(f, '.mm-edge', 'data-edge', 0)[0];
+    assert.ok(link.classes.has('mm-gantt-link'));
+    assert.strictEqual(say(f, link), 'A task → B task');
+  });
+
+  it('reaches a linked gantt row through its link, and leaves the link a link', () => {
+    const f = figure(`${GANTT}\n  click a1 href "https://x.test/a"`);
+    attachDiagramTooltips(f.el, { document: f.document });
+    const row = f.node('a1');
+    const link = row.querySelector('a');
+    for (const attr of ['tabindex', 'role', 'aria-label'])
+      assert.strictEqual(row.getAttribute(attr), null, `the row gains no ${attr}`);
+    f.fire(link, 'focusin');
+    assert.strictEqual(f.tip().textContent, 'A task (a1)\nto: B task');
+    assert.strictEqual(link.getAttribute('aria-describedby'), f.tip().id, 'the link is what the tooltip describes');
+    assert.strictEqual(row.getAttribute('aria-describedby'), null);
+    f.fire(f.document, 'keydown', { key: 'Escape' });
+    assert.ok(f.tip().attrs.has('hidden'));
+    assert.strictEqual(link.getAttribute('aria-describedby'), null);
+    // the unlinked row is reached as every other node is
+    assert.strictEqual(f.node('task1').getAttribute('tabindex'), '0');
+  });
+
+  it('names a flowchart link by its two ends and its label', () => {
+    const f = figure(FLOW);
+    attachDiagramTooltips(f.el, { document: f.document });
+    const edge = (i) => all(f, '.mm-edge', 'data-edge', i)[0];
+    assert.strictEqual(say(f, edge(0)), 'Start → Pick');
+    assert.strictEqual(say(f, edge(1)), 'Pick → Done (yes)');
+    assert.strictEqual(say(f, edge(2)), 'Pick → Start (no)');
+    assert.strictEqual(edge(1).getAttribute('role'), 'img');
+  });
+
+  it('shows, hides and dismisses the same way on every type', () => {
+    for (const [source, pick] of [
+      [SEQUENCE, (f) => all(f, '.mm-edge', 'data-edge', 0)[0]],
+      ['classDiagram\n  Animal <|-- Dog', (f) => f.node('Dog')],
+      [GANTT, (f) => f.node('a1')],
+    ]) {
+      const f = figure(source);
+      const detach = attachDiagramTooltips(f.el, { document: f.document });
+      const target = pick(f);
+      f.fire(target, 'pointerover', { pointerType: 'touch' });
+      assert.ok(f.tip().attrs.has('hidden'), `${source}: touch never hovers`);
+      f.fire(target, 'pointerover', { pointerType: 'mouse' });
+      assert.ok(!f.tip().attrs.has('hidden'), source);
+      assert.strictEqual(target.getAttribute('aria-describedby'), f.tip().id, source);
+      f.fire(f.document, 'keydown', { key: 'Escape' });
+      assert.ok(f.tip().attrs.has('hidden'), `${source}: Escape`);
+      assert.strictEqual(target.getAttribute('aria-describedby'), null, source);
+      f.fire(target, 'focusin');
+      assert.ok(!f.tip().attrs.has('hidden'), `${source}: focus`);
+      f.fire(target, 'pointerout', { pointerType: 'mouse', relatedTarget: f.svg });
+      assert.ok(f.tip().attrs.has('hidden'), `${source}: leaving`);
+      detach();
+      assert.strictEqual(target.getAttribute('tabindex'), null, `${source}: torn down`);
+      assert.strictEqual(target.getAttribute('role'), null, source);
+    }
+  });
+});
+
+describe('tooltips — the text a click statement gives a node', () => {
+  const HOSTILE = '<img src=x onerror=alert(1)> & <b>bold</b>';
+
+  it('shows the author text instead of the derived text, as text', () => {
+    const f = figure(`flowchart LR\n  A["Start"] --> B\n  click A "https://x.test" "${HOSTILE}"`);
+    attachDiagramTooltips(f.el, { document: f.document });
+    f.fire(f.node('A'), 'focusin');
+    assert.strictEqual(f.tip().textContent, HOSTILE);
+    assert.strictEqual(f.tip().children.length, 0, 'set as text: no element was built from it');
+    assert.strictEqual(f.node('A').getAttribute('aria-label'), 'Start (A)', 'the name stays the node\'s');
+    f.fire(f.node('A'), 'focusout');
+    assert.strictEqual(say(f, f.node('B')), 'B\nfrom: Start', 'a node without one keeps the derived text');
+  });
+
+  it('shows a class click tooltip on its box', () => {
+    const f = figure('classDiagram\n  class Foo\n  click Foo call show() "Shows <it>"');
+    attachDiagramTooltips(f.el, { document: f.document });
+    assert.strictEqual(say(f, f.node('Foo')), 'Shows <it>');
   });
 });
 
@@ -467,14 +613,20 @@ describe('tooltips — the plugin opts in, and only then', () => {
   });
 
   it('marks the block for hydration and keeps the SVG byte-identical', () => {
-    const plain = mermaidPlugin().render(node);
-    for (const options of [{ tooltips: true }, { interactive: true }, { interactive: true, tooltips: true }]) {
-      const live = mermaidPlugin(options);
-      const out = live.render(node);
-      assert.strictEqual(out[1]['data-md-hydrate'], 'mermaid', JSON.stringify(options));
-      assert.strictEqual(typeof live.hydrate, 'function');
-      assert.strictEqual(JSON.stringify(out[2]), JSON.stringify(plain[2]),
-        `${JSON.stringify(options)}: the SVG is the same with and without hydration`);
+    for (const value of [
+      FLOW, 'sequenceDiagram\n  A->>B: hi', 'classDiagram\n  Animal <|-- Dog', 'erDiagram\n  A ||--o{ B : has',
+      'gantt\n  dateFormat YYYY-MM-DD\n  section S\n  A :a1, 2024-01-01, 3d\n  click a1 href "https://x.test"',
+      'flowchart LR\n  A --> B\n  click A cb "tip"',
+    ]) {
+      const plain = mermaidPlugin().render({ value });
+      for (const options of [{ tooltips: true }, { interactive: true }, { interactive: true, tooltips: true }]) {
+        const live = mermaidPlugin(options);
+        const out = live.render({ value });
+        assert.strictEqual(out[1]['data-md-hydrate'], 'mermaid', JSON.stringify(options));
+        assert.strictEqual(typeof live.hydrate, 'function');
+        assert.strictEqual(JSON.stringify(out[2]), JSON.stringify(plain[2]),
+          `${JSON.stringify(options)}: the SVG is the same with and without hydration\n${value}`);
+      }
     }
   });
 
@@ -504,5 +656,17 @@ describe('tooltips — the plugin opts in, and only then', () => {
     assert.ok(f.el.classes.has('mm-has-tooltips'));
     f.fire(f.node('B'), 'focusin');
     assert.ok(!f.tip().attrs.has('hidden'));
+  });
+});
+
+describe('markers — one contract, and no type reaches another type\'s code', () => {
+  it('marks every type through the one module, which no renderer passes another renderer through', () => {
+    const read = (file) => readFileSync(new URL(`../../components/mermaid/src/${file}`, import.meta.url), 'utf8');
+    for (const file of ['flowchart', 'sequence', 'gantt', 'misc']) {
+      const siblings = [...read(`render/${file}.js`).matchAll(/from '\.\/([\w-]+)\.js'/g)].map((m) => m[1]);
+      assert.deepStrictEqual(siblings, ['marks'], `render/${file}.js imports no other renderer`);
+    }
+    assert.ok(!/^import /m.test(read('render/marks.js')), 'the marker module imports nothing');
+    assert.ok(!/^import /m.test(read('tooltips.js')), 'the tooltip module reads the DOM, never a renderer');
   });
 });

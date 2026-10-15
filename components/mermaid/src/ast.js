@@ -132,10 +132,13 @@ export function flowStyle(node, styles) {
  * @param {object[]} classDefs
  * @param {object[]} classes
  * @param {object[]} styles
+ * @param {import('./parser/click.js').NodeClick[]} [clicks] the `click`
+ *   statements in source order; a tree written before they were read lacks
+ *   the member, and reads as none
  * @returns {object}
  */
-export function flowchartAst(direction, nodes, edges, subgraphs, classDefs, classes, styles) {
-  return { direction, nodes, edges, subgraphs, classDefs, classes, styles };
+export function flowchartAst(direction, nodes, edges, subgraphs, classDefs, classes, styles, clicks = []) {
+  return { direction, nodes, edges, subgraphs, classDefs, classes, styles, clicks };
 }
 
 //#endregion

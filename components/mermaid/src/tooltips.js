@@ -1,6 +1,9 @@
 //@ts-check
 /**
- * @file Optional per-node tooltips for a rendered flowchart or state diagram.
+ * @file Optional tooltips for the nodes and edges of a rendered diagram:
+ * flowchart, state and jaren-dag nodes and links, sequence actors and
+ * messages, class and ER boxes and their relation rows, gantt rows and their
+ * dependency connectors.
  *
  * Like pan/zoom, this is an enhancement of a finished SVG: the render never
  * imports it, it runs only in a browser, and only when a consumer opts in
@@ -8,17 +11,22 @@
  * with and without it, and a page that never enables it tree-shakes the file
  * away.
  *
- * The render already names its targets: every node group carries
- * `data-id="<node id>"` and every edge group `data-from` / `data-to`. The
+ * The render already names its targets, with one marker contract for every
+ * type (`render/marks.js`): every node group carries `mm-node` and
+ * `data-id="<node id>"`, every edge `mm-edge`, `data-from` and `data-to`. The
  * tooltip is built from those and the label text in the DOM, so nothing is
- * re-parsed and nothing is re-rendered. What it tells a reader is what the
- * picture cannot while the diagram is zoomed in or large: the node's id and
- * what flows into and out of it, named by the neighbours' labels.
+ * re-parsed and nothing is re-rendered, and this file reads no diagram type's
+ * code. What it tells a reader is what the picture cannot while the diagram
+ * is zoomed in or large: a node's id and what flows into and out of it, named
+ * by the neighbours' labels, and an edge's two ends. A node a `click`
+ * statement gave tooltip text shows that text instead, as text. The words
+ * `from`, `to` and the arrow are English and not localizable.
  *
  * The rules that keep it usable:
  *
- *   - **Focus shows it, like hover.** Each node is focusable; a keyboard user
- *     gets exactly the text a mouse user does.
+ *   - **Focus shows it, like hover.** Each node and edge is focusable (a
+ *     gantt row through the link it wraps, when it has one); a keyboard user
+ *     gets exactly the text a mouse user does, in drawing order.
  *   - **It is wired, not just drawn.** The tooltip is a `role="tooltip"`
  *     element and the focused or hovered node points at it with
  *     `aria-describedby` for as long as it is shown.
@@ -44,22 +52,35 @@ const attached = new WeakMap();
 /** Monotonic suffix so two diagrams on one page never share a tooltip id. */
 let serial = 0;
 
+/** A node group, whatever the diagram type draws it as (`render/marks.js`). */
+const NODE = '.mm-node[data-id]';
+/** An edge element: a flowchart link, a sequence message, a relation row, a gantt dependency. */
+const EDGE = '.mm-edge[data-from]';
+
 /**
- * The text a node's tooltip shows, from the diagram's own DOM.
- * @param {any} svg the rendered `<svg>`
- * @returns {Map<any, string>} node group element to tooltip text
+ * @typedef {object} Target
+ * @property {string} text what its tooltip shows
+ * @property {string} name its accessible name: the tooltip's first line
+ * @property {any} describes the element the tooltip describes: the target
+ *   itself, or the link a gantt row wraps its label and bar in
  */
-function describeNodes(svg) {
+
+/**
+ * What each node's and each edge's tooltip says, from the diagram's own DOM.
+ * @param {any} svg the rendered `<svg>`
+ * @returns {Map<any, Target>} target element to what it shows
+ */
+function describeTargets(svg) {
   /** @type {Map<string, string>} how the neighbours' lines name each node */
   const names = new Map();
-  /** @type {Map<string, any>} */
-  const groups = new Map();
   /** @type {Map<string, string>} the label a node shows, '' when it shows none */
   const labels = new Map();
-  for (const node of svg.querySelectorAll('.mm-node[data-id]')) {
+  /** @type {[any, string][]} every node element and its id; a sequence draws each actor twice */
+  const nodes = [];
+  for (const node of svg.querySelectorAll(NODE)) {
     const id = node.getAttribute('data-id');
+    nodes.push([node, id]);
     const label = labelOf(node, '.mm-label');
-    groups.set(id, node);
     labels.set(id, label);
     names.set(id, label || displayId(id));
   }
@@ -72,24 +93,35 @@ function describeNodes(svg) {
     if (list === undefined) map.set(id, [text]);
     else list.push(text);
   };
-  for (const edge of svg.querySelectorAll('.mm-edge')) {
+  /** @type {[any, string][]} */
+  const edges = [];
+  for (const edge of svg.querySelectorAll(EDGE)) {
     const from = edge.getAttribute('data-from');
     const to = edge.getAttribute('data-to');
     if (!names.has(from) || !names.has(to)) continue;
     const say = labelOf(edge, '.mm-edge-label');
     push(out, from, say === '' ? names.get(to) : `${names.get(to)} (${say})`);
     push(into, to, say === '' ? names.get(from) : `${names.get(from)} (${say})`);
+    edges.push([edge, `${names.get(from)} → ${names.get(to)}${say === '' ? '' : ` (${say})`}`]);
   }
-  /** @type {Map<any, string>} */
-  const texts = new Map();
-  for (const [id, node] of groups) {
+  /** @type {Map<any, Target>} */
+  const targets = new Map();
+  for (const [node, id] of nodes) {
     const label = labels.get(id);
     const lines = [label === '' || label === id ? displayId(id) : `${label} (${id})`];
     if (into.has(id)) lines.push(`from: ${into.get(id)?.join(', ')}`);
     if (out.has(id)) lines.push(`to: ${out.get(id)?.join(', ')}`);
-    texts.set(node, lines.join('\n'));
+    // the text a `click` statement gave the node, which the render keeps in
+    // the node's `<desc>`, is what the author chose to say instead
+    const authored = String(node.querySelector('desc')?.textContent ?? '');
+    targets.set(node, {
+      text: authored === '' ? lines.join('\n') : authored,
+      name: lines[0],
+      describes: node.querySelector('a') ?? node,
+    });
   }
-  return texts;
+  for (const [edge, line] of edges) targets.set(edge, { text: line, name: line, describes: edge });
+  return targets;
 }
 
 /** A synthetic id such as `__start` reads as a word, not as plumbing. */
@@ -116,8 +148,8 @@ function labelOf(parent, selector) {
  * @param {{ document?: any, MutationObserver?: any }} [env] injection seam for tests
  * @returns {(() => void)|undefined} a teardown function (the same one when the
  *   element is already attached), or undefined when there is nothing to attach
- *   to: no `<svg>`, no document to build the tooltip with, or a diagram type
- *   whose nodes the render does not mark
+ *   to: no `<svg>`, no document to build the tooltip with, or a diagram
+ *   that draws no marked node or edge (a pie, a placeholder, an error)
  */
 export function attachDiagramTooltips(el, env = {}) {
   const again = attached.get(el);
@@ -128,8 +160,8 @@ export function attachDiagramTooltips(el, env = {}) {
   if (doc === undefined || doc === null || typeof doc.createElement !== 'function'
     || typeof doc.addEventListener !== 'function')
     return undefined;
-  const texts = describeNodes(svg);
-  if (texts.size === 0) return undefined;
+  const targets = describeTargets(svg);
+  if (targets.size === 0) return undefined;
 
   const tip = doc.createElement('div');
   tip.className = 'mm-tooltip';
@@ -142,7 +174,7 @@ export function attachDiagramTooltips(el, env = {}) {
   if (typeof tip.showPopover === 'function') tip.setAttribute('popover', 'manual');
   el.appendChild(tip);
 
-  /** @type {any} the node whose tooltip is showing */
+  /** @type {any} the node or edge whose tooltip is showing */
   let active = null;
 
   /** Place the tooltip under its node (above it when below does not fit), in viewport coordinates. */
@@ -166,28 +198,29 @@ export function attachDiagramTooltips(el, env = {}) {
     if (active === node) return;
     hide();
     active = node;
-    tip.textContent = texts.get(node) ?? '';
+    // text, never markup: the author's `click` text included
+    tip.textContent = targets.get(node)?.text ?? '';
     tip.removeAttribute('hidden');
     if (typeof tip.showPopover === 'function') {
       try { tip.showPopover(); }
       catch { /* a figure outside the document has no top layer; fixed still places it */ }
     }
-    node.setAttribute('aria-describedby', tip.id);
+    targets.get(node)?.describes.setAttribute('aria-describedby', tip.id);
     place();
   };
 
   const hide = () => {
     if (active === null) return;
-    active.removeAttribute('aria-describedby');
+    targets.get(active)?.describes.removeAttribute('aria-describedby');
     active = null;
     if (typeof tip.hidePopover === 'function') tip.hidePopover();
     tip.setAttribute('hidden', '');
   };
 
-  /** The node group an event target sits in, or null. */
+  /** The node or edge an event target sits in, or null. */
   const nodeOf = (target) => {
-    const group = target?.closest?.('.mm-node[data-id]');
-    return group !== null && group !== undefined && texts.has(group) ? group : null;
+    const found = target?.closest?.(NODE) ?? target?.closest?.(EDGE);
+    return found !== null && found !== undefined && targets.has(found) ? found : null;
   };
 
   // Hover and focus share one pair of handlers; a focus event carries no
@@ -206,10 +239,14 @@ export function attachDiagramTooltips(el, env = {}) {
     if (event.key === 'Escape') hide();
   };
 
-  for (const node of texts.keys()) {
+  // A gantt row that wraps a link is reached through the link: it already
+  // takes focus and is named by its text, and an image role on the row would
+  // hide it from a screen reader.
+  const marked = [...targets].filter(([node, target]) => target.describes === node).map(([node]) => node);
+  for (const node of marked) {
     node.setAttribute('tabindex', '0');
     node.setAttribute('role', 'img');
-    node.setAttribute('aria-label', texts.get(node)?.split('\n')[0] ?? '');
+    node.setAttribute('aria-label', targets.get(node)?.name ?? '');
   }
   el.classList.add('mm-has-tooltips');
   svg.addEventListener('pointerover', onEnter);
@@ -237,7 +274,7 @@ export function attachDiagramTooltips(el, env = {}) {
     svg.removeEventListener('focusout', onLeave);
     doc.removeEventListener('keydown', onKeyDown);
     doc.removeEventListener('scroll', place, true);
-    for (const node of texts.keys()) {
+    for (const node of marked) {
       node.removeAttribute('tabindex');
       node.removeAttribute('role');
       node.removeAttribute('aria-label');

@@ -160,8 +160,102 @@
         },
         "styles": {
           "type": "array"
+        },
+        "clicks": {
+          "description": "The `click` statements in source order. A tree written before they were read lacks the member.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/flowClick"
+          }
         }
       }
+    },
+    "flowClick": {
+      "description": "One flowchart `click` statement: the node ids it names (an id no node has binds nothing), one action (`href`, the URL as written and never drawn as a link, or `call`, a function name and its argument strings, recorded and never run), the `target` a link names, and `tooltip`, the author's text, which a hydrated diagram shows as text and never as markup.",
+      "type": "object",
+      "required": [
+        "ids",
+        "href",
+        "target",
+        "call",
+        "tooltip"
+      ],
+      "properties": {
+        "ids": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "href": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "target": {
+          "enum": [
+            "_self",
+            "_blank",
+            "_parent",
+            "_top",
+            null
+          ]
+        },
+        "call": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "required": [
+            "name",
+            "args"
+          ],
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "args": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "tooltip": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "href": {
+              "type": "string"
+            },
+            "call": {
+              "type": "null"
+            }
+          }
+        },
+        {
+          "properties": {
+            "href": {
+              "type": "null"
+            },
+            "call": {
+              "type": "object"
+            }
+          }
+        }
+      ]
     },
     "seqParticipant": {
       "type": "object",

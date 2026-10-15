@@ -2,11 +2,13 @@
 /**
  * @file Class-diagram grammar → class AST. Supports `class Foo { … }`
  * bodies, `Foo : +member` line form, and relations
- * (`<|--`, `*--`, `o--`, `-->`, `..>`, `..|>`) with optional `: label`.
+ * (`<|--`, `*--`, `o--`, `-->`, `..>`, `..|>`) with optional `: label`,
+ * and `click` statements (a link or a call, with the tooltip text).
  * Geometry-free: members and relations preserve declaration order.
  */
 
 import { collectBraceBody } from '../utils.js';
+import { readNodeClick } from './click.js';
 
 /** Relation operator between two class names, optional `: label`. */
 const RE_RELATION = /^(\S+)\s+([<>|*o.]{0,2}(?:--|\.\.)[<>|*o.]{0,2})\s+(\S+)(?:\s*:\s*(.*))?$/;
@@ -22,6 +24,8 @@ export function parseClass(lines) {
   const classMap = new Map();
   const order = [];
   const relations = [];
+  /** @type {import('./click.js').NodeClick[]} */
+  const clicks = [];
 
   const ensure = (name) => {
     let cls = classMap.get(name);
@@ -54,6 +58,14 @@ export function parseClass(lines) {
       continue;
     }
 
+    // a click names a class and declares none; a line that is not one of
+    // Mermaid's class click forms reads on as it always did
+    const click = line.startsWith('click ') ? readNodeClick(line, false) : null;
+    if (click !== null) {
+      clicks.push(click);
+      continue;
+    }
+
     const rel = RE_RELATION.exec(line);
     if (rel !== null) {
       ensure(rel[1]);
@@ -69,7 +81,7 @@ export function parseClass(lines) {
     }
   }
 
-  return { classes: order.map((n) => classMap.get(n)), relations };
+  return { classes: order.map((n) => classMap.get(n)), relations, clicks };
 }
 
 /**

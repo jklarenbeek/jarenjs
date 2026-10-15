@@ -13,8 +13,8 @@
  * no browser — a capability the old injection wrapper lacked.
  *
  * `hydrate` exists only when a consumer asks for `interactive: true` (pan,
- * zoom, touch) or `tooltips: true` (a tooltip on each flowchart and state
- * node), alone or together. The render is complete without it: hydration
+ * zoom, touch) or `tooltips: true` (a tooltip on each node and edge any
+ * diagram type draws), alone or together. The render is complete without it: hydration
  * enhances an already finished SVG, so server output is byte-identical either
  * way and a page that does not opt in never loads either module.
  */

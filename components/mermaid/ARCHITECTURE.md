@@ -62,7 +62,7 @@ so each computes at most once.
 | `src/parser/config.js` | `---` front-matter + `%%{init}%%` → `config` (built-in YAML subset; md parser injectable); a top-level front-matter `displayMode` becomes `config.gantt.displayMode` |
 | `src/parser/{flowchart,sequence,class,er,state,gantt,pie}.js` | char-code recursive descent; module-const sticky regexes; `fail(msg, line)` |
 | `src/parser/gantt-grammar.js` | the three Gantt token grammars (dayjs `dateFormat`, strftime `axisFormat`, `tickInterval`/duration) adapted onto the core LDML vocabulary — never a string replace; a `dateFormat` that is one epoch token (`X`, `x`) adapts to an instant reader instead; the axis labeller compiles each strftime specifier on its own and computes the four LDML has no token for (`%G`, `%g`, `%Q`, `%s`) from the tick's instant |
-| `src/parser/gantt-click.js` | the Gantt `click` statement (`href "url"`, `call name(args)`) as a single linear scan, and its canonical printing; a call is recorded as data and never bound, a link is vetted by the layout |
+| `src/parser/click.js` | the `click` statement as a single linear scan, and its canonical printing: the Gantt grammar (`href "url"`, `call name(args)`) and the flowchart and class one (one link or call, the author's tooltip text, a link target); a call is recorded as data and never bound, a link is vetted by the layout, a tooltip is text |
 | `src/gantt-calendar.js` | the `excludes`/`includes` working calendar over `@jarenjs/core/series` intervals, beside the day-by-day oracle it is differential-tested against |
 | `src/parser/index.js` | detect type on the first non-config line, dispatch, assemble the envelope |
 | `src/ast.js` | monomorphic node constructors + `walkSequence` |
@@ -71,6 +71,7 @@ so each computes at most once.
 | `src/layout/{flowchart,sequence,state,gantt}.js` | pure, deterministic `PositionedDiagram` scene graphs; the Gantt one takes its tick boundaries from `@jarenjs/core/dates`, so a timeline needs no dependency on the chart component, and gives a row the `click` link that passes `sanitizeHref`; it also reads the config's `gantt.topAxis` (or a `topAxis` header line) and `gantt.displayMode: compact` (the latter packs a section's rows first-fit) |
 | `@jarenjs/view/helpers` | shared tagged-array SVG vnode builders over `h()`; the `sanitizeHref`/`sanitizeUrl` URL policies (the engine imports them, no local copy) |
 | `src/render/{flowchart,sequence,gantt,misc,error}.js` | specialized `PositionedDiagram → vnode` closures + the error box |
+| `src/render/marks.js` | the one node and edge marker contract every renderer writes (`mm-node` + `data-id`, `mm-edge` + `data-edge`/`data-from`/`data-to`, a click tooltip as the node's `<desc>`); it imports nothing, so no renderer reaches another through it |
 | `src/theme.js` | `--mm-*` token tables resolved through the shared `@jarenjs/view/helpers` `resolveTheme` (concrete colors **and** CSS variables) |
 | `src/plugin.js` | the self-frozen Markdown plugin + `refreshMermaidFence` |
 | `src/component/index.js` | `createMermaidComponent` (memoized `view()`, app effects, no-op hydrate) |
@@ -111,8 +112,9 @@ synchronous and complete, so a Markdown document with a `mermaid` fence
 renders to a full SVG string through SSR with **no browser** — a
 capability real Mermaid lacks. The component's `hydrate` is therefore a
 no-op; pan, zoom and touch are the opt-in `mermaidPlugin({ interactive: true })`
-hydrate and per-node tooltips the opt-in `mermaidPlugin({ tooltips: true })`
-one, each attaching to the finished SVG from its own module.
+hydrate and node and edge tooltips the opt-in `mermaidPlugin({ tooltips: true })`
+one, each attaching to the finished SVG from its own module; the tooltip one
+reads only the markers every renderer writes, so it imports no renderer.
 
 ## Known limits (v0.1)
 

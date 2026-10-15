@@ -819,10 +819,10 @@ describe('gantt renders an accessible timeline', () => {
   });
 
   it('should carry a status class and a data-id per task', () => {
-    assert.match(svg, /class="mm-gantt-task mm-gantt-done" data-id="a1"/);
-    assert.match(svg, /class="mm-gantt-task mm-gantt-active" data-id="a2"/);
-    assert.match(svg, /class="mm-gantt-task mm-gantt-crit" data-id="a3"/);
-    assert.match(svg, /class="mm-gantt-task mm-gantt-milestone" data-id="m1"/);
+    assert.match(svg, /class="mm-node mm-gantt-task mm-gantt-done" data-id="a1"/);
+    assert.match(svg, /class="mm-node mm-gantt-task mm-gantt-active" data-id="a2"/);
+    assert.match(svg, /class="mm-node mm-gantt-task mm-gantt-crit" data-id="a3"/);
+    assert.match(svg, /class="mm-node mm-gantt-task mm-gantt-milestone" data-id="m1"/);
     assert.match(svg, /<polygon points="/, 'the milestone is a diamond');
   });
 

@@ -207,7 +207,17 @@ establish registry publication or downstream acceptance.
   runs straight from border to border and can cross a node it has nothing to
   do with.
 - [ ] **More domain projections** — the geometry-free-AST-as-model idea now ships executable arrows for flat FSMs, compound statecharts and DAGs (`stateDiagram ⇄ jaren-fsm` and `flowchart ⇄ jaren-dag`, run by `@jarenjs/flow`; MERMAID-FORMAT §5.1); the remaining follow-ups on the same idea are sequence⇄orchestration/saga and ER⇄JSON-Schema+`@jarenjs/forms`.
-- [ ] **Diagram tooltips beyond flowchart and state nodes** — `mermaidPlugin({ tooltips: true })` ships node tooltips (focus and hover, Escape, aria wiring) for the diagram types whose render marks nodes (`flowchart`, `stateDiagram`, `jaren-dag`). The remaining types draw no marked target: sequence actors and messages, class and ER panels, gantt rows (which carry `data-id` but a different class), edges, and the secondary placeholders. Their render needs per-element markers first. The text is English-only and derived from the DOM; a Mermaid `click` line's own tooltip text is parse-accepted and not modeled in the AST.
+- [ ] **Diagram tooltips on the secondary types** — `mermaidPlugin({ tooltips:
+  true })` gives every node and edge of flowchart, state, jaren-dag, sequence,
+  class, ER and gantt output a tooltip, through one marker contract
+  (`render/marks.js`), and a flowchart or class `click` line's tooltip text is
+  modelled and shown as text. The secondary types (mindmap, gitGraph, journey,
+  timeline) render a placeholder and draw nothing to point at, sequence notes
+  and blocks are not targets, a class or ER relation's label is not part of
+  its ends' tooltips (the relations box draws it inside one row), and a
+  truncated gantt name stays truncated in its tooltip. The text is
+  English-only. A class diagram's `link` and `callback` statements (which also
+  carry a tooltip) are not modelled.
 
 ## @jarenjs/play
 

@@ -23,7 +23,7 @@
  * whose action fails there; this reader keeps the line in `meta` like
  * `inclusiveEndDates` and layout reads it from there.
  *
- * `click` statements are not header lines or task rows: `gantt-click.js` reads
+ * `click` statements are not header lines or task rows: `click.js` reads
  * each into `clicks` (`{ ids, href, call, line }`), binding nothing. The URL is
  * kept as written and vetted by the layout; a `call` is data that no module
  * ever looks up or runs.
@@ -52,7 +52,7 @@ import {
   ISO_WEEKDAYS,
 } from './gantt-grammar.js';
 import { createExcluder, pushEndPastExclusions, dayIndexOf, DAY_MS } from '../gantt-calendar.js';
-import { startsClick, readClick, hasTaskSeparator } from './gantt-click.js';
+import { startsClick, readClick, hasTaskSeparator } from './click.js';
 
 const HEADER_KEYS = new Set([
   'title', 'dateFormat', 'axisFormat', 'excludes', 'includes', 'inclusiveEndDates',

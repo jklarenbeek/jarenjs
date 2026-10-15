@@ -36,11 +36,13 @@
 .md-mermaid.mermaid-block.mm-zoomed { overflow: hidden; }
 .md-mermaid.mermaid-block.mm-zoomed svg { max-width: 100%; }
 
-/* Per-node tooltips (an opt-in hydrate). The tooltip is fixed to the viewport
-   and placed by script, so the scrolling figure neither clips it nor grows
-   to hold it; the popover resets let the top-layer form size and sit the same
-   way. A node that can take focus shows the same outline the figure does. */
-.md-mermaid.mm-has-tooltips .mm-node:focus-visible {
+/* Node and edge tooltips (an opt-in hydrate). The tooltip is fixed to the
+   viewport and placed by script, so the scrolling figure neither clips it nor
+   grows to hold it; the popover resets let the top-layer form size and sit
+   the same way. A node or edge that can take focus shows the same outline the
+   figure does. */
+.md-mermaid.mm-has-tooltips .mm-node:focus-visible,
+.md-mermaid.mm-has-tooltips .mm-edge:focus-visible {
   outline: 2px solid var(--md-link, #2563eb);
   outline-offset: 2px;
 }

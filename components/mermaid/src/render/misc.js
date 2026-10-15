@@ -8,15 +8,29 @@
  * gitGraph, journey, timeline) render a labeled "not yet laid out"
  * placeholder. Pie is drawn by the renderer the host injects (charts'
  * `mermaidPieRenderer`), or by the placeholder when none was.
+ *
+ * A class's or an entity's box is a node of its name, and each row of the
+ * relations box an edge between the two it names, marked as every type marks
+ * them (`marks.js`); a placeholder draws nothing a reader can point at.
  */
 
-import { svgRoot, rect, path, textAt, num, textWidth } from '@jarenjs/view/helpers';
+import { svgRoot, group, rect, path, textAt, num, textWidth } from '@jarenjs/view/helpers';
+import { nodeMark, edgeMark, withTooltip, clickTooltips } from './marks.js';
+
+/**
+ * @typedef {object} PanelSection
+ * @property {string} heading
+ * @property {string[]} rows
+ * @property {string | null} id the class or entity a box draws, null for the relations box
+ * @property {string} [tooltip] the tooltip text a `click` gave the class
+ * @property {{ from: string, to: string }[]} [edges] the relations box's rows, as endpoints
+ */
 
 /**
  * Render a structured panel: a title and a list of sections, each a
  * bordered box with a heading and text rows.
  * @param {string} title
- * @param {{ heading: string, rows: string[] }[]} sections
+ * @param {PanelSection[]} sections
  * @param {any} theme
  * @param {string} hash
  * @returns {any}
@@ -36,12 +50,19 @@ export function renderStructured(title, sections, theme, hash) {
   children.push(textAt(16, 24, title, fs + 3, { 'font-weight': 'bold', fill: t.nodeText }));
   for (const section of sections) {
     const boxH = headH + section.rows.length * rowH + 8;
-    children.push(rect(16, y, boxW, boxH, { rx: 4, fill: t.nodeFill, stroke: t.nodeStroke, 'stroke-width': 1, class: 'mm-panel' }));
-    children.push(textAt(26, y + 17, section.heading, fs, { 'font-weight': 'bold', fill: t.nodeText }));
-    children.push(path(`M16,${num(y + headH)} h${boxW}`, { stroke: t.nodeStroke, 'stroke-width': 1 }));
+    const box = [
+      rect(16, y, boxW, boxH, { rx: 4, fill: t.nodeFill, stroke: t.nodeStroke, 'stroke-width': 1, class: 'mm-panel' }),
+      textAt(26, y + 17, section.heading, fs,
+        section.id === null ? { 'font-weight': 'bold', fill: t.nodeText } : { 'font-weight': 'bold', class: 'mm-label', fill: t.nodeText }),
+      path(`M16,${num(y + headH)} h${boxW}`, { stroke: t.nodeStroke, 'stroke-width': 1 }),
+    ];
     for (let i = 0; i < section.rows.length; i++) {
-      children.push(textAt(26, y + headH + 16 + i * rowH, section.rows[i], fs, { fill: t.nodeText }));
+      const row = textAt(26, y + headH + 16 + i * rowH, section.rows[i], fs, { fill: t.nodeText });
+      const edge = section.edges?.[i];
+      box.push(edge === undefined ? row : group(edgeMark(i, edge.from, edge.to, 'rel-' + i), [row]));
     }
+    if (section.id === null) children.push(...box);
+    else children.push(group(nodeMark(section.id, 'panel-' + section.id), withTooltip(box, section.tooltip)));
     y += boxH + gap;
   }
   return svgRoot('mermaid mm-svg', boxW + 32, y, theme, children,
@@ -72,26 +93,42 @@ export function renderPlaceholder(type, theme, hash, note = 'parsed — not yet 
  * Build the sections for the structured renderers.
  * @param {string} diagram
  * @param {any} ast
- * @returns {{ title: string, sections: { heading: string, rows: string[] }[] }}
+ * @returns {{ title: string, sections: PanelSection[] }}
  */
 export function structuredSections(diagram, ast) {
   if (diagram === 'class') {
+    const tips = clickTooltips(ast.clicks);
+    /** @type {PanelSection[]} */
     const sections = ast.classes.map((c) => ({
       heading: c.name,
       rows: c.members.map((m) => `${m.visibility ?? ''}${m.text}`),
+      id: c.name,
+      tooltip: tips.get(c.name),
     }));
     if (ast.relations.length) {
-      sections.push({ heading: 'relations', rows: ast.relations.map((r) => `${r.from} ${r.type} ${r.to}${r.label ? ' : ' + r.label : ''}`) });
+      sections.push({
+        heading: 'relations',
+        rows: ast.relations.map((r) => `${r.from} ${r.type} ${r.to}${r.label ? ' : ' + r.label : ''}`),
+        id: null,
+        edges: ast.relations,
+      });
     }
     return { title: 'Class diagram', sections };
   }
   if (diagram === 'er') {
+    /** @type {PanelSection[]} */
     const sections = ast.entities.map((e) => ({
       heading: e.name,
       rows: e.attributes.map((a) => `${a.type} ${a.name}${a.keys.length ? ' ' + a.keys.join(',') : ''}`),
+      id: e.name,
     }));
     if (ast.relationships.length) {
-      sections.push({ heading: 'relationships', rows: ast.relationships.map((r) => `${r.left} ${r.leftCard}--${r.rightCard} ${r.right} : ${r.label}`) });
+      sections.push({
+        heading: 'relationships',
+        rows: ast.relationships.map((r) => `${r.left} ${r.leftCard}--${r.rightCard} ${r.right} : ${r.label}`),
+        id: null,
+        edges: ast.relationships.map((r) => ({ from: r.left, to: r.right })),
+      });
     }
     return { title: 'Entity–relationship', sections };
   }

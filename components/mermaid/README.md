@@ -58,9 +58,10 @@ c.toText();                         // canonical Mermaid (toMermaid)
 c.toLayout();                       // the PositionedDiagram — pure geometry
                                     // (nodes x/y/w/h, routed edges); null for
                                     // types without a layout. The rendered
-                                    // SVG also marks every node/edge with
-                                    // data-id / data-edge+data-from+data-to,
-                                    // so editors hit-test without re-layout.
+                                    // SVG also marks every node/edge of every
+                                    // type with data-id /
+                                    // data-edge+data-from+data-to, so editors
+                                    // hit-test without re-layout.
 ```
 
 **Render pipeline:**
@@ -331,13 +332,24 @@ Everything runs on the SVG's `viewBox` — four numbers changing. Nothing
 re-renders, nothing re-parses, and the view is clamped so it can never be
 panned off its own canvas.
 
-**Node tooltips are a second opt-in.** `mermaidPlugin({ tooltips: true })`
-(alone, or beside `interactive: true`) hydrates each flowchart and state node
-with a tooltip: the node's label and id, what flows into it and what it leads
-to, named by the neighbours' labels and the edges' own. It is built from the
-`data-id`, `data-from` and `data-to` markers the render already writes and the
-label text in the DOM, so the render is unchanged and server output is
-byte-identical either way.
+**Tooltips are a second opt-in.** `mermaidPlugin({ tooltips: true })`
+(alone, or beside `interactive: true`) hydrates every node and edge a diagram
+draws with a tooltip: flowchart, state and jaren-dag nodes and links, sequence
+actors (both boxes) and messages, class and ER boxes and the rows of their
+relations box, gantt rows and their dependency connectors. A node's tooltip
+reads its label and id, what flows into it and what it leads to, named by the
+neighbours' labels and the edges' own; an edge's reads its two ends and its
+label (`Start → Done (yes)`). Every type writes the same markers — a node group
+with `mm-node` and `data-id`, its name in an `mm-label` text; an edge with
+`mm-edge`, `data-edge`, `data-from` and `data-to`, its label in an
+`mm-edge-label` text — and the tooltip is built from those and the text in the
+DOM, so it needs no type's code and server output is byte-identical with and
+without it. A flowchart or class `click` line's own tooltip text
+(`click A "https://example.test" "Opens the docs"`) is shown instead of the
+derived text, as text: the render keeps it in the node's `<desc>`, escaped
+like any label, and the tooltip sets it with `textContent`, so `<b>` in it is
+four characters. The words `from`, `to` and the arrow are English and not
+localizable.
 
 ```javascript
 const plugin = mermaidPlugin({ theme: 'host', tooltips: true });
@@ -354,8 +366,11 @@ block[1]['data-md-hydrate'];       // 'mermaid'
 await plugin.hydrate(blockElement);
 ```
 
-Hover and keyboard focus show the same text. Every node becomes focusable and
-named, the tooltip is a `role="tooltip"` element, and the node it describes
+Hover and keyboard focus show the same text. Every node and edge becomes
+focusable (in drawing order: a flowchart's links before its nodes) and named,
+except a gantt row that wraps a `click` link, which is reached and described
+through the link, as it already takes focus. The tooltip is a `role="tooltip"`
+element, and the node or edge it describes
 points at it with `aria-describedby` for as long as it is shown; Escape
 dismisses it, whichever of hover or focus showed it. Touch never hovers (a tap
 stays the page's), so a touch user reaches the text by focusing the node. The
@@ -363,8 +378,8 @@ tooltip is `position: fixed` (and in the top layer where the browser has
 popovers), so the scrolling figure neither clips it nor grows a scrollbar to
 hold it; it sits under its node, or above it when there is no room below. A
 pan, zoom or scroll moves the node, and a shown tooltip is placed against it
-again. Sequence, class, ER, gantt and the other diagram types draw no marked
-nodes, so they are left as they are. `@jarenjs/mermaid/tooltips` exports
+again. A pie, a placeholder and a parse error draw nothing marked, so they
+are left as they are. `@jarenjs/mermaid/tooltips` exports
 `attachDiagramTooltips(el)` for a host that wires its own hydration; the
 stylesheet's `.mm-tooltip` rules style the result.
 
@@ -492,7 +507,19 @@ statement written between two tasks comes back below both, and the tasks after
 it sit a line higher on reading it back), and a line that starts with `click`,
 is not a click statement and carries no task colon is an error where it used
 to be dropped (a task row such as `Click on href : a3, 2024-01-09, 1d` is still
-a task).
+a task); a flowchart's and a class diagram's `click` line used to be skipped
+and is now read into a `clicks` member of the tree (a tree without one reads as
+no clicks; a line that is none of Mermaid's forms is still skipped), which
+`toMermaid` prints back after the styles or the relations, and a click's
+tooltip text renders as a `<desc>` in its node's group; and the SVG of a
+sequence, class, ER and gantt diagram gained the node and edge markers every
+type now shares: an actor box's and a gantt row's group gained the class
+`mm-node` and the actor box `data-id`, their names the class `mm-label`, a
+message's group and a gantt connector the class `mm-edge` and `data-edge`,
+`data-from` and `data-to`, a message's label the class `mm-edge-label`, a
+class's or an entity's box elements are grouped under one `mm-node` group, and
+each relations row under an `mm-edge` group; a sequence scene's messages gained
+`from` and `to`.
 
 ## Exports
 

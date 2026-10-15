@@ -12,15 +12,17 @@ import {
 } from '@jarenjs/view/helpers';
 
 import { shapeAttributes, shapeStyle, textColor } from '../styles.js';
+import { nodeMark, edgeMark, withTooltip } from './marks.js';
 
 /**
  * @param {any} scene PositionedDiagram (flowchart or state, via its adapter)
  * @param {{ tokens: Record<string,string>, cssVars: Record<string,string> }} theme
  * @param {string} hash content hash for the root key
  * @param {string} [rootClass] root `class` — the state renderer adds `mm-state`
+ * @param {Map<string, string>} [tooltips] the tooltip text a `click` gave each node id
  * @returns {any}
  */
-export function renderFlowchart(scene, theme, hash, rootClass = 'mermaid mm-svg') {
+export function renderFlowchart(scene, theme, hash, rootClass = 'mermaid mm-svg', tooltips = new Map()) {
   const t = theme.tokens;
   const children = [];
 
@@ -49,7 +51,7 @@ export function renderFlowchart(scene, theme, hash, rootClass = 'mermaid mm-svg'
 
   // Nodes.
   for (const node of scene.nodes) {
-    children.push(renderNode(node, t, scene.fontSize));
+    children.push(renderNode(node, t, scene.fontSize, tooltips.get(node.id)));
   }
 
   return svgRoot(rootClass, scene.width, scene.height, theme, children,
@@ -58,9 +60,10 @@ export function renderFlowchart(scene, theme, hash, rootClass = 'mermaid mm-svg'
 
 /**
  * @param {any} node @param {Record<string,string>} t @param {number} fontSize
+ * @param {string | undefined} tooltip
  * @returns {any}
  */
-function renderNode(node, t, fontSize) {
+function renderNode(node, t, fontSize, tooltip) {
   const shapeEl = shapeVnode(node, t);
   const cx = node.x + node.w / 2;
   const cy = node.y + node.h / 2;
@@ -71,7 +74,7 @@ function renderNode(node, t, fontSize) {
       : { class: 'mm-label', fill: color, style: `fill:${color}` });
   // `data-id` is the stable identity an editor's event delegation and
   // hit-testing key on (MERMAID-FORMAT §7): the AST node id, verbatim.
-  return group({ class: 'mm-node', key: 'n-' + node.id, 'data-id': node.id }, [shapeEl, label]);
+  return group(nodeMark(node.id, 'n-' + node.id), withTooltip([shapeEl, label], tooltip));
 }
 
 /**
@@ -204,10 +207,7 @@ function renderEdge(e, t, fontSize, i) {
 
   // Edge identity for editors: endpoints plus `data-edge`, the edge's
   // AST position — which is also its docPath tail (MERMAID-FORMAT §7).
-  return group({
-    class: 'mm-edge', key: 'e-' + i,
-    'data-edge': i, 'data-from': e.from, 'data-to': e.to,
-  }, parts);
+  return group(edgeMark(i, e.from, e.to, 'e-' + i), parts);
 }
 
 /**

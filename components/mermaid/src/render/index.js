@@ -18,6 +18,7 @@ import { renderSequence } from './sequence.js';
 import { renderGantt } from './gantt.js';
 import { renderStructured, renderPlaceholder, structuredSections } from './misc.js';
 import { errorVnode } from './error.js';
+import { clickTooltips } from './marks.js';
 
 /**
  * Compute the pure `PositionedDiagram` scene for a document (no vnode).
@@ -72,7 +73,7 @@ export function diagramToVnode(docOrSource, options = {}) {
     const hash = doc.meta?.hash ?? '0';
     switch (doc.diagram) {
       case 'flowchart':
-        return renderFlowchart(layoutFlowchart(doc.ast), theme, hash);
+        return renderFlowchart(layoutFlowchart(doc.ast), theme, hash, undefined, clickTooltips(doc.ast.clicks));
       case 'state':
         // a state diagram IS a graph: the state adapter feeds the same
         // layout and renderer as flowcharts (MERMAID-FORMAT §6)

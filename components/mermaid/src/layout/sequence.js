@@ -86,11 +86,11 @@ export function layoutSequence(ast) {
         const x2 = centerOf(stmt.to);
         if (stmt.activation === 'activate') activate(stmt.to);
         if (stmt.from === stmt.to) {
-          messages.push({ x1, y: state.y, x2, label: stmt.text, line: stmt.line, head: stmt.head, self: true });
+          messages.push({ x1, y: state.y, x2, label: stmt.text, line: stmt.line, head: stmt.head, self: true, from: stmt.from, to: stmt.to });
           state.y += SELF_GAP;
         }
         else {
-          messages.push({ x1, y: state.y, x2, label: stmt.text, line: stmt.line, head: stmt.head, self: false });
+          messages.push({ x1, y: state.y, x2, label: stmt.text, line: stmt.line, head: stmt.head, self: false, from: stmt.from, to: stmt.to });
           state.y += MSG_GAP;
         }
         if (stmt.activation === 'deactivate') deactivate(stmt.from);

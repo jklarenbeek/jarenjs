@@ -12,13 +12,16 @@
  * Accessibility: the root carries a `<title>` (the diagram's own title,
  * or a generic one) and a `<desc>` naming the span and the task count,
  * so a screen reader gets the shape of the schedule rather than a
- * hundred unlabelled rectangles. Bars carry `data-id` and a status
- * class, which is also what an interactive host hit-tests on. A task
+ * hundred unlabelled rectangles. A row is a node and a dependency
+ * connector an edge, marked as every type marks them (`marks.js`), and a
+ * bar's status class sits beside the node marker: that is also what an
+ * interactive host hit-tests on. A task
  * with a `click` link wears it as an anchor around its label and shape;
  * the URL arrives vetted from the layout, and a `call` is never drawn.
  */
 
 import { svgRoot, group, rect, path, polygon, textAt, num } from '@jarenjs/view/helpers';
+import { nodeMark, edgeMark } from './marks.js';
 import { compileDateFormat, partsFromEpoch } from '@jarenjs/core/dates';
 
 // the summary line is a date range, and it is the one label on the
@@ -90,8 +93,8 @@ export function renderGantt(scene, theme, hash) {
   for (let i = 0; i < scene.links.length; i++) {
     const link = scene.links[i];
     children.push(path(polyline(link.points), {
-      class: 'mm-gantt-link', fill: 'none', stroke: t.lineColor,
-      'stroke-width': 1, 'stroke-dasharray': '3 3', key: 'link-' + i,
+      ...edgeMark(i, link.from, link.to, 'link-' + i, 'mm-gantt-link'),
+      fill: 'none', stroke: t.lineColor, 'stroke-width': 1, 'stroke-dasharray': '3 3',
     }));
   }
 
@@ -109,7 +112,7 @@ export function renderGantt(scene, theme, hash) {
   for (const row of scene.rows) {
     const parts = [
       textAt(row.labelX, row.labelY + 4, row.name, fs, {
-        class: 'mm-gantt-label', fill: t.nodeText,
+        class: 'mm-gantt-label mm-label', fill: t.nodeText,
         // a compact name is centred on or placed beside its bar
         ...(row.labelAnchor === 'start' ? {} : { 'text-anchor': row.labelAnchor }),
       }),
@@ -123,7 +126,7 @@ export function renderGantt(scene, theme, hash) {
           stroke: strokeFor(row.flags, t), 'stroke-width': 1,
         }),
     ];
-    children.push(group({ class: row.classes, key: 'row-' + row.id, 'data-id': row.id },
+    children.push(group(nodeMark(row.id, 'row-' + row.id, row.classes),
       row.href === null ? parts : [['a', { href: row.href, class: 'mm-gantt-click' }, ...parts]]));
   }
 

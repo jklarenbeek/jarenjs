@@ -3,10 +3,13 @@
  * @file Sequence renderer: `PositionedDiagram` → pure-vnode SVG.
  * Actor boxes (top and bottom), dashed lifelines, activation bars,
  * messages with solid/dotted lines and arrow/open/cross/async heads,
- * note boxes and block frames.
+ * note boxes and block frames. Both boxes of an actor are nodes of that
+ * participant's id and every message an edge between two of them, marked
+ * as every type marks them (`marks.js`).
  */
 
 import { svgRoot, group, rect, path, line, polygon, textAt, textLines, num } from '@jarenjs/view/helpers';
+import { nodeMark, edgeMark } from './marks.js';
 
 /**
  * @param {any} scene PositionedDiagram (sequence)
@@ -41,8 +44,8 @@ export function renderSequence(scene, theme, hash) {
 
   // Actor boxes, top and bottom.
   for (const a of scene.actors) {
-    children.push(actorBox(a, a.boxY, t, fs));
-    children.push(actorBox(a, a.bottomY, t, fs));
+    children.push(actorBox(a, a.boxY, t, fs, 'actor-head-' + a.id));
+    children.push(actorBox(a, a.bottomY, t, fs, 'actor-foot-' + a.id));
   }
 
   // Notes.
@@ -65,12 +68,13 @@ export function renderSequence(scene, theme, hash) {
 
 /**
  * @param {any} a actor @param {number} y box top @param {Record<string,string>} t @param {number} fs
+ * @param {string} key
  * @returns {any}
  */
-function actorBox(a, y, t, fs) {
-  return group({ class: 'mm-actor' }, [
+function actorBox(a, y, t, fs, key) {
+  return group(nodeMark(a.id, key, 'mm-actor'), [
     rect(a.boxX, y, a.w, a.h, { rx: 3, fill: t.actorFill, stroke: t.actorStroke, 'stroke-width': 1 }),
-    textLines(a.x, y + a.h / 2, [a.label], fs, { fill: t.actorText, 'font-weight': 'bold' }),
+    textLines(a.x, y + a.h / 2, [a.label], fs, { class: 'mm-label', fill: t.actorText, 'font-weight': 'bold' }),
   ]);
 }
 
@@ -91,17 +95,17 @@ function renderMessage(m, t, fs, i) {
     const y1 = m.y + 26;
     parts.push(path(`M${num(m.x1)},${num(y0)} h${loopW} v${y1 - y0} h${-loopW}`, lineProps));
     parts.push(arrowHead({ x: m.x1 + 6, y: y1 }, { x: m.x1 + loopW, y: y1 }, m.head, stroke));
-    parts.push(textAt(m.x1 + loopW + 6, (y0 + y1) / 2, m.label, fs, { class: 'mm-message-label', fill: t.edgeLabelText }));
+    parts.push(textAt(m.x1 + loopW + 6, (y0 + y1) / 2, m.label, fs, { class: 'mm-message-label mm-edge-label', fill: t.edgeLabelText }));
   }
   else {
     parts.push(line(m.x1, m.y, m.x2, m.y, lineProps));
     parts.push(arrowHead({ x: m.x2, y: m.y }, { x: m.x1, y: m.y }, m.head, stroke));
     const midX = (m.x1 + m.x2) / 2;
     parts.push(textAt(midX, m.y - 6, m.label, fs, {
-      'text-anchor': 'middle', class: 'mm-message-label', fill: t.edgeLabelText,
+      'text-anchor': 'middle', class: 'mm-message-label mm-edge-label', fill: t.edgeLabelText,
     }));
   }
-  return group({ class: 'mm-message', key: 'msg-' + i }, parts);
+  return group(edgeMark(i, m.from, m.to, 'msg-' + i, 'mm-message'), parts);
 }
 
 /**

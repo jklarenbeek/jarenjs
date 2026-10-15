@@ -81,7 +81,7 @@ member order (monomorphic; the structural hash is deterministic).
 ### 4.1 flowchart
 
 ```
-{ direction, nodes[], edges[], subgraphs[], classDefs[], classes[], styles[] }
+{ direction, nodes[], edges[], subgraphs[], classDefs[], classes[], styles[], clicks[] }
 ```
 
 | Shape | Members |
@@ -90,6 +90,18 @@ member order (monomorphic; the structural hash is deterministic).
 | edge | `{ from, to, stroke, head, tail, length, label }` — stroke ∈ solid/thick/dotted; head/tail ∈ none/arrow/circle/cross; `length` preserved so the printer is a fixed point |
 | subgraph | `{ id, label, direction, nodes[] }` |
 | classDef / class / style | `{ name, styles }` / `{ node, name }` / `{ node, styles }` |
+| click | `{ ids[], href, target, call, tooltip }` — one action: `href` (a link, never drawn) or `call` (`{ name, args[] }`, recorded and never run); `target` ∈ `_self`/`_blank`/`_parent`/`_top` after a link, else null; `tooltip` the author's text, else null |
+
+`clicks` holds the `click` statements in source order, in the forms Mermaid's
+flowchart grammar reads: `click A "url"` or `click A href "url"`, each with an
+optional tooltip string and then an optional target, and `click A callback` or
+`click A call callback(args)`, each with an optional tooltip string. A bare
+callback reads as a `call` with no arguments, which is how Mermaid runs it,
+and `toMermaid` prints a link with `href` and a callback with `call`. A line
+that starts with `click ` and is none of these forms stays parse-accepted and
+out of the tree, as every click line was before they were read; a tree written
+before then lacks the member and reads as no clicks. A click's tooltip is what
+a hydrated diagram shows for its node (§7), as text.
 
 A flowchart declares at most 10,000 edges, counting the pairs a `&` group
 expands to; a source that names more is a `MermaidParseError` on the line that
@@ -117,7 +129,11 @@ loop/opt/alt/par/critical/break.
 
 ### 4.3 class / er / state / pie
 
-Class: `{ classes:[{ name, label, members[] }], relations[] }`. ER:
+Class: `{ classes:[{ name, label, members[] }], relations[], clicks[] }`, a
+click shaped as a flowchart's (§4.1) in the forms Mermaid's class grammar reads
+— `click Name href "url"` with an optional tooltip and target, `click Name call
+callback(args)` with an optional tooltip; the flowchart's bare forms are not
+read, and a tree without `clicks` reads as none. ER:
 `{ entities:[{ name, attributes[] }], relationships[] }`, an attribute being
 `{ type, name, keys[] }` plus the `comment` that ended its line in quotes when
 there was one (keys are `PK`, `FK`, `UK`, comma- or space-separated; `toMermaid`
@@ -472,7 +488,7 @@ type) and the reverse of `parseMermaid`. The normative contract:
 > fully-modeled types (flowchart, sequence).
 
 The flowchart printer emits in a fixed order — node declarations (AST
-order) → subgraph membership → edges → classDef/class/style — and it is
+order) → subgraph membership → edges → classDef/class/style → click — and it is
 that ordering which makes node order and edge order a fixed point on the
 round trip. Subgraphs, however, round-trip **structurally, not as a
 deep-equal fixed point**: they emit their members by bare id and a
@@ -598,3 +614,19 @@ so a click maps to a document member without translation. These are
 plain data props on the vnodes: SSR emits them, event delegation reads
 them, and the state renderer's root additionally carries the
 `mm-state` class for theming.
+
+Every other type that draws something a reader can point at writes the same
+markers (`src/render/marks.js`): a node is a group with the class `mm-node`
+and `data-id`, its name in an `mm-label` text, and an edge an element with the
+class `mm-edge`, `data-edge`, `data-from` and `data-to`, its label in an
+`mm-edge-label` text. A sequence actor's head and foot boxes are both nodes of
+the participant id and a message an edge (`data-edge` its position among the
+messages); a class's or an entity's box is a node of its name and each row of
+the relations box an edge (its position among the relations); a gantt row is a
+node of its task id and a dependency connector an edge from the prerequisite
+to the dependent task (its position among the connectors). A pie, a
+placeholder and an error draw none. A node a `click` gave tooltip text carries
+it as the text of its first child `<desc>`, which draws nothing and is escaped
+like any label, so the author's text never becomes markup and the standalone
+SVG stays well-formed whatever it holds. The opt-in tooltips
+(`mermaidPlugin({ tooltips: true })`) read exactly these markers.
