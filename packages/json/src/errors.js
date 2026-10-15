@@ -27,6 +27,27 @@ export const NESTING_CEILING = 256;
 export const DATA_DEPTH_CEILING = 1000;
 
 /**
+ * The deepest nesting the JSON Patch and Merge Patch diffs walk: the bound
+ * `equalsJson` and `stableStringify` of `@jarenjs/core/object` hold, which
+ * the diffs call on whole subtrees, so one refusal (`JO2001`) answers past
+ * it whichever walker meets the level first. Past every nesting a default
+ * host stack could walk recursively, and fixed, so a refusal - a cycle
+ * included - is the same on every host.
+ */
+export const JSON_WALK_DEPTH_CEILING = 10000;
+
+/**
+ * The refusal of a value nested past {@link JSON_WALK_DEPTH_CEILING}, the
+ * one `@jarenjs/core/object` raises for the same bound.
+ * @param {string} verb - What could not be done, in the passive
+ * @returns {CodedError}
+ */
+export function walkTooDeep(verb) {
+  return new CodedError('JsonDepthError', 'JO2001',
+    `a value nested deeper than ${JSON_WALK_DEPTH_CEILING} levels cannot be ${verb}`);
+}
+
+/**
  * Base for errors that carry a stable `code` and a `docPath`, an RFC
  * 6901 JSON Pointer into the offending document. A wrapped error is
  * exposed through the native `cause` option when one is given. This is

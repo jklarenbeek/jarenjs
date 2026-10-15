@@ -351,6 +351,14 @@ exceeding it is runtime error JT2001 — the self-application loop
 
 MUST die with JT2001, not a stack overflow.
 
+A descendant segment (`..`) in a rule's match path or in a path inside a rule
+body descends at most 1000 levels of nesting; a document nested deeper is
+refused with JT2004 wrapping `JQ2009`. The compile option `maxDescentDepth` (a
+positive integer, as `compileJSONPath` takes it; anything else is a
+`TypeError`) moves that bound for the whole stylesheet. Fixed by default so the
+answer is the same on every host; a larger value lets the host's call stack
+decide again.
+
 ---
 
 ## 6. `$apply` — the apply-templates operator
@@ -600,7 +608,7 @@ transformJson(stylesheet, data, externals?, options?) // one-shot, WeakMap-cache
 Module: `@jarenjs/json/jslt`. `transform` returns plain JSON with the query
 API's sequence mapping: `undefined` for the empty sequence, the item itself
 for a singleton, an array of items for a longer sequence. `options` carries
-`compileTypeTest` (§9) and `maxDepth` (§5.4), both for
+`compileTypeTest` (§9), `maxDepth` and `maxDescentDepth` (§5.4), all for
 `compileJsltStylesheet` and as the optional fourth argument of
 `transformJson`. The one-shot function is the counterpart of `queryJson`,
 caching compiled stylesheets by document identity and compile-option

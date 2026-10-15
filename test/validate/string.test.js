@@ -65,16 +65,15 @@ describe('Schema String Type', function () {
       assert.isFalse(validate('(800)FLOWERS'), 'is not valid phonenumber by letters');
     });
 
-    it('should validate type: \'string\', pattern: \'/^.*$/i\'', function () {
+    it('should read type: \'string\', pattern: \'/^.*$/\' as a pattern source, not a literal', function () {
       const validate = compiler.compile({
         type: 'string',
         pattern: '/^(\\([0-9]{3}\\))?[0-9]{3}-[0-9]{4}$/',
       });
 
-      assert.isTrue(validate('555-1212'), '555-1212 is a local phonenumber');
-      assert.isTrue(validate('(888)555-1212'), 'is valid phonenumber with area code');
-      assert.isFalse(validate('(888)555-1212 ext. 532'), 'is not valid phonenumber with extension');
-      assert.isFalse(validate('(800)FLOWERS'), 'is not valid phonenumber by letters');
+      // `^` and `$` sit between the slashes, so no text can match
+      assert.isFalse(validate('555-1212'), 'the slashes are part of the pattern');
+      assert.isFalse(validate('/555-1212/'), 'the anchors cannot match inside the slashes');
     });
 
     it('should validate type: \'string\', pattern: /^.*$/i', function () {

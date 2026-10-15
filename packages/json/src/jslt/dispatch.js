@@ -9,7 +9,9 @@ import {
 import {
   appendName,
   compileSegmentP,
+  descentCeilingOption,
   runSegmentsP,
+  withDescentCeiling,
 } from '../segments.js';
 import {
   CARD_MANY,
@@ -59,7 +61,7 @@ function composeDocPath(base, inner) {
 // that matches its path when the enumeration refuses (see matchPathsOf).
 const matchRules = new WeakMap();
 
-function compileMatchPath(rule, pathQueryCache, pathOptions) {
+function compileMatchPath(rule, pathQueryCache, pathOptions, descentCeiling) {
   const match = rule.match;
   if (match === null || match.path === null)
     return null;
@@ -67,8 +69,10 @@ function compileMatchPath(rule, pathQueryCache, pathOptions) {
   if (cached !== undefined)
     return cached;
   try {
-    const query = compileJSONPath(match.path,
-      pathOptions === undefined ? undefined : { pathFunctions: pathOptions.pathFunctions });
+    const query = compileJSONPath(match.path, {
+      pathFunctions: pathOptions === undefined ? undefined : pathOptions.pathFunctions,
+      maxDescentDepth: descentCeiling,
+    });
     pathQueryCache.set(match.path, query);
     matchRules.set(query, rule);
     return query;
@@ -429,7 +433,7 @@ function makeBodyEvaluator(rule, body, userSlots) {
   };
 }
 
-function compileRules(model, compileTypeTest, tableBox, targetModes, memoEnabled, pathOptions) {
+function compileRules(model, compileTypeTest, tableBox, targetModes, memoEnabled, pathOptions, descentCeiling) {
   const rules = model.rules;
   const temporary = new Array(rules.length);
   const externalNames = [];
@@ -440,7 +444,7 @@ function compileRules(model, compileTypeTest, tableBox, targetModes, memoEnabled
   let pathRuleCount = 0;
   for (let i = 0; i < rules.length; i++) {
     const rule = rules[i];
-    const pathQuery = compileMatchPath(rule, pathQueryCache, pathOptions);
+    const pathQuery = compileMatchPath(rule, pathQueryCache, pathOptions, descentCeiling);
     if (pathQuery !== null)
       pathRuleCount++;
     const test = compileMatchSchema(rule, compileTypeTest);
@@ -962,6 +966,9 @@ export function compileJsltDispatch(model, options = {}) {
   const maxDepth = options.maxDepth === undefined ? 1024 : options.maxDepth;
   if (!Number.isInteger(maxDepth) || maxDepth < 0)
     throw new TypeError('options.maxDepth must be a non-negative integer');
+  // the descent bound of every descendant segment the stylesheet holds:
+  // its match paths, and the paths inside its rule bodies
+  const descentCeiling = descentCeilingOption(options.maxDescentDepth, 'options.maxDescentDepth');
   const memoEnabled = options.memo === true;
   // JSONPath function extensions reach both places a stylesheet embeds
   // a path: the rules' match paths, and the path strings inside rule
@@ -985,7 +992,8 @@ export function compileJsltDispatch(model, options = {}) {
     needsLoc: false,
   };
   const targetModes = new Set();
-  const compiled = compileRules(model, compileTypeTest, tableBox, targetModes, memoEnabled, bodyOptions);
+  const compiled = withDescentCeiling(descentCeiling, () =>
+    compileRules(model, compileTypeTest, tableBox, targetModes, memoEnabled, bodyOptions, descentCeiling));
   tableBox.needsLoc = model.anyPathRule || compiled.readsPath;
   const built = buildModes(model, compiled.rules, targetModes);
   const modes = built.modes;

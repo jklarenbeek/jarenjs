@@ -9,7 +9,6 @@ import {
 } from '@jarenjs/core/number';
 
 import {
-  createRegExp,
   createRegExpTester,
   getStringLength,
 } from '@jarenjs/core/string';
@@ -17,6 +16,44 @@ import {
 import {
   trueThat,
 } from '@jarenjs/core/function';
+
+/**
+ * Compile a JSON Schema regular expression (`pattern`, a
+ * `patternProperties` key) into a repeatable predicate. A string is an
+ * ECMA-262 pattern source, as JSON Schema 2020-12 Validation §6.3.3 reads
+ * it, compiled in Unicode mode: `'/a/'` matches only text containing
+ * `/a/`, never the `/source/flags` literal `createRegExp` would read. A
+ * RegExp that JavaScript code placed in a schema keeps its own flags.
+ *
+ * A string that is no valid Unicode-mode source but compiles as a
+ * `/source/flags` literal - a `v`-mode literal such as
+ * `'/[\\p{L}--[a-z]]/v'` - is still read as that literal, as it always
+ * was: refusing it would refuse a schema that compiles today.
+ * @param {unknown} pattern - The keyword's value
+ * @returns {((value: string) => boolean) | undefined} The tester, or
+ *   `undefined` when no pattern is given
+ * @throws {SyntaxError} When the string compiles neither way
+ * @throws {Error} When the value is neither a string nor a RegExp
+ */
+export function createSchemaPatternTester(pattern) {
+  if (typeof pattern !== 'string')
+    return createRegExpTester(/** @type {RegExp | null | undefined} */ (pattern));
+  let regexp;
+  try {
+    regexp = new RegExp(pattern, 'u');
+  }
+  catch (error) {
+    let literal;
+    try {
+      literal = createRegExpTester(pattern);
+    }
+    catch (_literalError) {
+      throw error;
+    }
+    return literal;
+  }
+  return (value) => regexp.test(value);
+}
 
 function compileMinLength(schemaObj, jsonSchema) {
   const min = getIntishType(jsonSchema.minLength) || 0;
@@ -46,11 +83,11 @@ function compilePattern(schemaObj, jsonSchema) {
   // Skip if pattern is a $data reference object (has $data property)
   if (jsonSchema.pattern && typeof jsonSchema.pattern === 'object' && jsonSchema.pattern.$data) return undefined;
 
-  const pattern = createRegExp(jsonSchema.pattern);
-  if (pattern == null) return undefined;
+  const pattern = jsonSchema.pattern;
+  const matches = createSchemaPatternTester(pattern);
+  if (matches === undefined) return undefined;
 
   const addError = schemaObj.createErrorHandler(pattern, 'pattern');
-  const matches = createRegExpTester(pattern);
 
   return function validateIsMatch(str = '', dataPath) {
     return matches(str)
@@ -148,10 +185,10 @@ export function compileStringBasic(schemaObj, jsonSchema) {
   // Fast path for pattern-only schemas (common in ecmascript-regex tests)
   // This eliminates the intermediate function call overhead
   if (hasPattern && max < 0 && min < 1) {
-    const pattern = createRegExp(jsonSchema.pattern);
-    if (pattern != null) {
+    const pattern = jsonSchema.pattern;
+    const matches = createSchemaPatternTester(pattern);
+    if (matches !== undefined) {
       const addError = schemaObj.createErrorHandler(pattern, 'pattern');
-      const matches = createRegExpTester(pattern);
       return function validateStringPatternOnly(data, dataPath) {
         if (!isStringType(data)) return true;
         return matches(data) || addError(data, dataPath);

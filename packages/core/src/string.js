@@ -47,16 +47,34 @@ export function isRegExpType(data) {
 
 
 /**
+ * Whether `data` is a regular expression: a RegExp, or a string that
+ * compiles as an ECMA-262 pattern source in Unicode mode, the reading
+ * JSON Schema gives `pattern` and the `regex` format. A string written
+ * `/source/flags` is a source like any other (`'/a/gg'` is valid: it
+ * matches the text `/a/gg`); only a string that is no valid source falls
+ * back to the literal {@link createRegExp} reads (a `v`-mode literal), as
+ * the validator's `pattern` does.
  * @param {string | RegExp | null | undefined } data
  * @returns {boolean}
  */
 export function isStringRegExp(data) {
+  if (isRegExpType(data))
+    return true;
+  if (!isStringType(data))
+    return false;
   try {
-    return createRegExp(data) != null;
+    new RegExp(data, 'u');
+    return true;
   }
   // eslint-disable-next-line no-unused-vars
   catch (e) {
-    return false;
+    try {
+      return createRegExp(data) != null;
+    }
+    // eslint-disable-next-line no-unused-vars
+    catch (literalError) {
+      return false;
+    }
   }
 }
 

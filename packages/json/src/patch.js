@@ -54,7 +54,7 @@ import {
 import { NOTHING, scanArrayIndex } from './segments.js';
 
 import { CodedError } from '@jarenjs/core/errors';
-import { CodedDocPathError } from './errors.js';
+import { CodedDocPathError, JSON_WALK_DEPTH_CEILING, walkTooDeep } from './errors.js';
 
 import {
   makeState,
@@ -634,14 +634,48 @@ function appendPointer(path, key) {
   return path + '/' + encodeJSONPointerSegment(key);
 }
 
-function diffObject(src, tgt, path, out, lcs) {
+// The diff keeps its own stack instead of recursing per level, so the
+// nesting it can reach is not the host's call stack: a member pair of two
+// containers of one kind is not diffed where it is met, it is emitted into
+// the op list as a DiffPair, and `createJSONPatch` diffs it in its place,
+// so the ops come out in the order a recursive walk emits them.
+class DiffPair {
+  /**
+   * @param {any} src
+   * @param {any} tgt
+   * @param {string} path
+   * @param {number} depth - Containers from the root down to this pair
+   */
+  constructor(src, tgt, path, depth) {
+    this.src = src;
+    this.tgt = tgt;
+    this.path = path;
+    this.depth = depth;
+  }
+}
+
+// Emit what one pair of values needs: nothing for one reference, a
+// DiffPair for two arrays or two objects, else a replace unless the two
+// are deep-equal.
+function diffChild(src, tgt, path, out, depth) {
+  if (src === tgt)
+    return;
+  const sArr = Array.isArray(src);
+  const tArr = Array.isArray(tgt);
+  if (sArr ? tArr : !tArr && isJsonContainer(src) && isJsonContainer(tgt))
+    out.push(new DiffPair(src, tgt, path, depth));
+  else if (!equalsJson(src, tgt))
+    out.push({ op: 'replace', path, value: tgt });
+}
+
+function diffObject(src, tgt, path, out, depth) {
   for (const key in src) {
     if (!hasOwn(src, key))
       continue;
     if (!hasOwn(tgt, key))
       out.push({ op: 'remove', path: appendPointer(path, key) });
     else
-      diffValue(src[key], tgt[key], appendPointer(path, key), out, lcs);
+      diffChild(src[key], tgt[key], appendPointer(path, key), out, depth + 1);
   }
   for (const key in tgt) {
     if (hasOwn(tgt, key) && !hasOwn(src, key))
@@ -659,10 +693,10 @@ function diffObject(src, tgt, path, out, lcs) {
 // have left it: an `add` shifts everything after it right (so the next
 // insert goes one further along), while repeated `remove`s all land on
 // the same index (each one shifts the rest left onto it).
-function diffArrayGap(src, si, sRun, tgt, ti, tRun, cur, path, out, lcs) {
+function diffArrayGap(src, si, sRun, tgt, ti, tRun, cur, path, out, depth) {
   const both = sRun < tRun ? sRun : tRun;
   for (let k = 0; k < both; k++)
-    diffValue(src[si + k], tgt[ti + k], path + '/' + (cur + k), out, lcs);
+    diffChild(src[si + k], tgt[ti + k], path + '/' + (cur + k), out, depth + 1);
   if (tRun > both) {
     for (let k = both; k < tRun; k++)
       out.push({ op: 'add', path: path + '/' + (cur + k), value: tgt[ti + k] });
@@ -710,7 +744,7 @@ function internElement(ids, value) {
 // `cur` tracks where the current source element sits in the document as
 // the ops emitted so far have left it: an insert shifts the rest right,
 // a delete shifts it left onto the same index.
-function diffArrayAligned(src, s0, s1, tgt, t0, t1, path, out, lcs) {
+function diffArrayAligned(src, s0, s1, tgt, t0, t1, path, out, depth) {
   const m = s1 - s0;
   const n = t1 - t0;
   const ids = new Map();
@@ -756,7 +790,7 @@ function diffArrayAligned(src, s0, s1, tgt, t0, t1, path, out, lcs) {
     const best = dp[row + j];
     if (best === dp[next + j + 1] + (same ? 0 : 1)) {
       if (!same)
-        diffValue(src[s0 + i], tgt[t0 + j], path + '/' + cur, out, lcs);
+        diffChild(src[s0 + i], tgt[t0 + j], path + '/' + cur, out, depth + 1);
       i++;
       j++;
       cur++;
@@ -787,7 +821,7 @@ function diffArrayAligned(src, s0, s1, tgt, t0, t1, path, out, lcs) {
 // middle instead, so an insertion or deletion is emitted as one op and
 // only genuinely changed positions are rewritten - at O(m*n) time and
 // space in the size of that middle.
-function diffArray(src, tgt, path, out, lcs) {
+function diffArray(src, tgt, path, out, lcs, depth) {
   const slen = src.length;
   const tlen = tgt.length;
   const minLen = slen < tlen ? slen : tlen;
@@ -808,27 +842,39 @@ function diffArray(src, tgt, path, out, lcs) {
   // one run of pure inserts or pure deletes needs no alignment, and the
   // budget keeps a large middle from turning quadratic
   if (!lcs || sMid === 0 || tMid === 0 || (sMid + 1) * (tMid + 1) > ALIGN_MAX_CELLS) {
-    diffArrayGap(src, start, sMid, tgt, start, tMid, start, path, out, lcs);
+    diffArrayGap(src, start, sMid, tgt, start, tMid, start, path, out, depth);
     return;
   }
-  diffArrayAligned(src, start, sEnd, tgt, start, tEnd, path, out, lcs);
+  diffArrayAligned(src, start, sEnd, tgt, start, tEnd, path, out, depth);
 }
 
-function diffValue(src, tgt, path, out, lcs) {
-  if (src === tgt)
-    return;
-  const sArr = Array.isArray(src);
-  const tArr = Array.isArray(tgt);
-  if (sArr && tArr) {
-    diffArray(src, tgt, path, out, lcs);
-    return;
+// Diff `source` into `target`, expanding each DiffPair where it stands.
+function diffDocuments(source, target, lcs) {
+  const out = [];
+  /** @type {any[]} */
+  const stack = [];
+  diffChild(source, target, '', stack, 1);
+  while (stack.length > 0) {
+    const item = stack.pop();
+    if (!(item instanceof DiffPair)) {
+      out.push(item);
+      continue;
+    }
+    if (item.depth > JSON_WALK_DEPTH_CEILING)
+      throw walkTooDeep('diffed');
+    const items = [];
+    if (Array.isArray(item.src))
+      diffArray(item.src, item.tgt, item.path, items, lcs, item.depth);
+    else
+      diffObject(item.src, item.tgt, item.path, items, item.depth);
+    // the ops before the first pair need no stacking
+    let first = 0;
+    while (first < items.length && !(items[first] instanceof DiffPair))
+      out.push(items[first++]);
+    for (let i = items.length - 1; i >= first; i--)
+      stack.push(items[i]);
   }
-  if (!sArr && !tArr && isJsonContainer(src) && isJsonContainer(tgt)) {
-    diffObject(src, tgt, path, out, lcs);
-    return;
-  }
-  if (!equalsJson(src, tgt))
-    out.push({ op: 'replace', path, value: tgt });
+  return out;
 }
 
 /**
@@ -882,9 +928,7 @@ export function createJSONPatch(source, target, options = undefined) {
     : options.arrayDiff;
   if (mode !== 'index' && mode !== 'minimal')
     throw new TypeError(`unknown 'arrayDiff' option '${mode}'`);
-  const out = [];
-  diffValue(source, target, '', out, mode === 'minimal');
-  return out;
+  return diffDocuments(source, target, mode === 'minimal');
 }
 
 //#endregion
@@ -1028,36 +1072,59 @@ function isEmptyObjectShallow(obj) {
   return true;
 }
 
-function diffMergeObjects(src, tgt) {
+// One object pair `diffMergeObjects` has open: the removals are written
+// when it opens, then `at` walks the target's members; `key` names the
+// member whose pair is open above this one.
+function openMergeFrame(src, tgt) {
   const patch = {};
   for (const key in src) {
     if (hasOwn(src, key) && !hasOwn(tgt, key))
       setObjectMember(patch, key, null);
   }
-  for (const key in tgt) {
-    if (!hasOwn(tgt, key))
-      continue;
-    const tv = tgt[key];
-    if (!hasOwn(src, key)) {
-      // an added member with value null is unrepresentable (null means
-      // remove); either way the key ends up absent after applying
-      if (tv !== null)
-        setObjectMember(patch, key, tv);
+  return { src, tgt, keys: Object.keys(tgt), at: 0, key: '', patch };
+}
+
+// The merge diff keeps its own stack of open object pairs instead of
+// recursing per level, so the nesting it can reach is not the host's
+// call stack; a nested patch joins its parent when its pair closes, in
+// the member order a recursive walk writes.
+function diffMergeObjects(src, tgt) {
+  const frames = [];
+  let frame = openMergeFrame(src, tgt);
+  for (;;) {
+    const keys = frame.keys;
+    if (frame.at < keys.length) {
+      const key = keys[frame.at++];
+      const tv = frame.tgt[key];
+      if (!hasOwn(frame.src, key)) {
+        // an added member with value null is unrepresentable (null means
+        // remove); either way the key ends up absent after applying
+        if (tv !== null)
+          setObjectMember(frame.patch, key, tv);
+        continue;
+      }
+      const sv = frame.src[key];
+      if (sv === tv)
+        continue;
+      if (isJsonObject(sv) && isJsonObject(tv)) {
+        frame.key = key;
+        frames.push(frame);
+        if (frames.length >= JSON_WALK_DEPTH_CEILING)
+          throw walkTooDeep('diffed');
+        frame = openMergeFrame(sv, tv);
+      }
+      else if (!equalsJson(sv, tv)) {
+        setObjectMember(frame.patch, key, tv);
+      }
       continue;
     }
-    const sv = src[key];
-    if (sv === tv)
-      continue;
-    if (isJsonObject(sv) && isJsonObject(tv)) {
-      const sub = diffMergeObjects(sv, tv);
-      if (!isEmptyObjectShallow(sub))
-        setObjectMember(patch, key, sub);
-    }
-    else if (!equalsJson(sv, tv)) {
-      setObjectMember(patch, key, tv);
-    }
+    const parent = frames.pop();
+    if (parent === undefined)
+      return frame.patch;
+    if (!isEmptyObjectShallow(frame.patch))
+      setObjectMember(parent.patch, parent.key, frame.patch);
+    frame = parent;
   }
-  return patch;
 }
 
 /**

@@ -7,6 +7,7 @@ import {
   isTypedArray,
 } from './index.js';
 import { compareCodePoints, hashContent } from './string.js';
+import { CodedError } from './errors.js';
 
 const hasOwn = Object.hasOwn;
 
@@ -116,6 +117,23 @@ export function equalsDeep(target, source) {
   return true;
 }
 
+// The deepest nesting `equalsJson` and `stableStringify` walk (and the
+// JSON Patch and Merge Patch diffs of `@jarenjs/json`, which hold the same
+// bound): past every nesting a default host stack could walk recursively,
+// so no value that answered before is refused, and fixed, so a refusal -
+// a cycle included - is the same on every host.
+const JSON_WALK_DEPTH_CEILING = 10000;
+
+/**
+ * The refusal of a value nested past `JSON_WALK_DEPTH_CEILING`.
+ * @param {string} verb - What could not be done, in the passive
+ * @returns {CodedError}
+ */
+function walkTooDeep(verb) {
+  return new CodedError('JsonDepthError', 'JO2001',
+    `a value nested deeper than ${JSON_WALK_DEPTH_CEILING} levels cannot be ${verb}`);
+}
+
 /**
  * Structural equality of two JSON values per RFC 9535 section 2.3.5.2.2.
  *
@@ -126,15 +144,42 @@ export function equalsDeep(target, source) {
  * Deliberately not the same as
  * `equalsDeep`, the generic JavaScript variant: this is the hot-path
  * comparator of the JSONPath engine — do not merge the two.
+ *
+ * Past 256 levels the walk keeps its own stack, so it does not overflow
+ * the host's: a value nested deeper than 10000 levels, past any nesting a
+ * default host stack could compare, and a pair of cycles are refused with a
+ * `JsonDepthError` `JO2001` (`a value nested deeper than 10000 levels
+ * cannot be compared`). One reference compared with itself answers `true`
+ * at any depth, without a walk.
  * @param {any} a
  * @param {any} b
  * @returns {boolean}
+ * @throws {CodedError} `JO2001` past 10000 levels of nesting
  */
 export function equalsJson(a, b) {
+  return equalsJsonAt(a, b, 1);
+}
+
+// The nesting `equalsJson` compares on the host's call stack, the fast
+// path every ordinary value takes: a recursive walk stops at the first
+// difference in member order. A pair nested deeper continues on
+// `equalsJsonWalk`, which keeps its own stack.
+const RECURSIVE_COMPARE_DEPTH = 256;
+
+/**
+ * `equalsJson` for a pair `depth` containers down from the root.
+ * @param {any} a
+ * @param {any} b
+ * @param {number} depth
+ * @returns {boolean}
+ */
+function equalsJsonAt(a, b, depth) {
   if (a === b)
     return true;
   if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null)
     return false;
+  if (depth > RECURSIVE_COMPARE_DEPTH)
+    return equalsJsonWalk(a, b, depth);
   const aIsArray = Array.isArray(a);
   if (aIsArray !== Array.isArray(b))
     return false;
@@ -143,7 +188,7 @@ export function equalsJson(a, b) {
     if (alen !== b.length)
       return false;
     for (let i = 0; i < alen; i++) {
-      if (!equalsJson(a[i], b[i]))
+      if (!equalsJsonAt(a[i], b[i], depth + 1))
         return false;
     }
     return true;
@@ -152,7 +197,7 @@ export function equalsJson(a, b) {
   for (const key in a) {
     if (!hasOwn(a, key))
       continue;
-    if (!hasOwn(b, key) || !equalsJson(a[key], b[key]))
+    if (!hasOwn(b, key) || !equalsJsonAt(a[key], b[key], depth + 1))
       return false;
     count++;
   }
@@ -161,6 +206,69 @@ export function equalsJson(a, b) {
       count--;
   }
   return count === 0;
+}
+
+/**
+ * `equalsJson` for two containers `depth` levels down, on an explicit
+ * stack of the pairs still to compare, so the nesting it reaches is not
+ * the host's call stack; past `JSON_WALK_DEPTH_CEILING` it refuses.
+ * @param {any} a - An array or object
+ * @param {any} b - An array or object
+ * @param {number} depth
+ * @returns {boolean}
+ */
+function equalsJsonWalk(a, b, depth) {
+  /** @type {any[]} */
+  const pending = [];
+  for (;;) {
+    if (depth > JSON_WALK_DEPTH_CEILING)
+      throw walkTooDeep('compared');
+    const aIsArray = Array.isArray(a);
+    if (aIsArray !== Array.isArray(b))
+      return false;
+    if (aIsArray) {
+      const alen = a.length;
+      if (alen !== b.length)
+        return false;
+      for (let i = 0; i < alen; i++) {
+        const x = a[i];
+        const y = b[i];
+        if (x === y)
+          continue;
+        if (typeof x !== 'object' || typeof y !== 'object' || x === null || y === null)
+          return false;
+        pending.push(x, y, depth + 1);
+      }
+    }
+    else {
+      let count = 0;
+      for (const key in a) {
+        if (!hasOwn(a, key))
+          continue;
+        if (!hasOwn(b, key))
+          return false;
+        count++;
+        const x = a[key];
+        const y = b[key];
+        if (x === y)
+          continue;
+        if (typeof x !== 'object' || typeof y !== 'object' || x === null || y === null)
+          return false;
+        pending.push(x, y, depth + 1);
+      }
+      for (const key in b) {
+        if (hasOwn(b, key))
+          count--;
+      }
+      if (count !== 0)
+        return false;
+    }
+    if (pending.length === 0)
+      return true;
+    depth = pending.pop();
+    b = pending.pop();
+    a = pending.pop();
+  }
 }
 
 /**
@@ -258,29 +366,83 @@ export function isUniqueDeepArray(arr) {
  * format: dropping a member changes the document. For output that is
  * hashed or signed, use `canonicalizeJson` (`@jarenjs/json/canonical`,
  * RFC 8785), which rejects every non-JSON input instead of coercing it.
+ *
+ * The walk keeps its own stack, so it does not overflow the host's: a
+ * value nested deeper than 10000 levels, past any nesting a default host
+ * stack could serialize, and a cycle are refused with a `JsonDepthError`
+ * `JO2001` (`a value nested deeper than 10000 levels cannot be
+ * serialized`).
  * @param {*} value - The value to serialize
  * @returns {string|undefined} Deterministic JSON text
+ * @throws {CodedError} `JO2001` past 10000 levels of nesting
  */
 export function stableStringify(value) {
   if (value === null || typeof value !== 'object')
     return JSON.stringify(value);
-  if (Array.isArray(value)) {
-    let out = '[';
-    for (let i = 0; i < value.length; ++i)
-      out += (i === 0 ? '' : ',') + (stableStringify(value[i]) ?? 'null');
-    return out + ']';
-  }
-  const keys = Object.keys(value).sort();
-  let out = '{';
-  let first = true;
-  for (const key of keys) {
-    const sv = stableStringify(value[key]);
-    if (sv === undefined)
+  // One frame per open container, so the nesting is not the host's call
+  // stack: `keys` is null for an array, `at` the next member to write and
+  // `key` the member whose container is open above this frame.
+  /** @type {{ value: any, keys: string[] | null, at: number, key: string, out: string, first: boolean }[]} */
+  const frames = [];
+  let frame = openStableFrame(value);
+  for (;;) {
+    const container = frame.value;
+    const keys = frame.keys;
+    let child;
+    if (keys === null) {
+      if (frame.at < container.length) {
+        const item = container[frame.at++];
+        if (item === null || typeof item !== 'object') {
+          frame.out += (frame.at === 1 ? '' : ',') + (JSON.stringify(item) ?? 'null');
+          continue;
+        }
+        child = item;
+      }
+    }
+    else if (frame.at < keys.length) {
+      const key = keys[frame.at++];
+      const member = container[key];
+      if (member === null || typeof member !== 'object') {
+        const sv = JSON.stringify(member);
+        if (sv !== undefined) {
+          frame.out += (frame.first ? '' : ',') + JSON.stringify(key) + ':' + sv;
+          frame.first = false;
+        }
+        continue;
+      }
+      frame.key = key;
+      child = member;
+    }
+    if (child !== undefined) {
+      frames.push(frame);
+      if (frames.length >= JSON_WALK_DEPTH_CEILING)
+        throw walkTooDeep('serialized');
+      frame = openStableFrame(child);
       continue;
-    out += (first ? '' : ',') + JSON.stringify(key) + ':' + sv;
-    first = false;
+    }
+    // the container is complete: close it into the frame below
+    const text = frame.out + (keys === null ? ']' : '}');
+    const parent = frames.pop();
+    if (parent === undefined)
+      return text;
+    if (parent.keys === null)
+      parent.out += (parent.at === 1 ? '' : ',') + text;
+    else {
+      parent.out += (parent.first ? '' : ',') + JSON.stringify(parent.key) + ':' + text;
+      parent.first = false;
+    }
+    frame = parent;
   }
-  return out + '}';
+}
+
+/**
+ * The frame `stableStringify` opens for one container.
+ * @param {any} value - An array or object
+ */
+function openStableFrame(value) {
+  return Array.isArray(value)
+    ? { value, keys: null, at: 0, key: '', out: '[', first: true }
+    : { value, keys: Object.keys(value).sort(), at: 0, key: '', out: '{', first: true };
 }
 
 /**

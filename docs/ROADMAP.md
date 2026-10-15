@@ -46,10 +46,6 @@ delete it or fix it.
 
 - [ ] **JSLT matcher optimizer (single-walk)** — replace per-rule path pre-passes with a single multi-pattern walk, specialize location tracking by reachable modes, and use input-schema knowledge to prune impossible shape rules. The benchmark quantifies the gap: dense pure-path transforms pay ~9–12× over the raw path scan, and hand-written native JS stays 3–139× faster on real transformations — this is the main JSLT performance workstream.
 - [ ] **Prepass-level pruning in the JSLT matcher** — skip re-evaluating match *paths* over unchanged regions using the changed-path feed directly, rather than discovering the reuse afterwards through the memo cache. The remaining O(change) idea now that the memo layers have shipped.
-- [ ] **A stylesheet cannot move the descent bound.** JSLT match paths compile
-  under the fixed 1000-level descent bound; a stylesheet has no
-  `maxDescentDepth` to move it, as `compileJSONPath` and `limits.descentDepth`
-  do.
 
 ## @jarenjs/json — XQuery front-end & QT3
 
@@ -76,14 +72,20 @@ delete it or fix it.
 - [ ] **Unprefixed `query` alias / vocabulary registration** — register `$query` through a custom vocabulary and meta-schema (json-everything style) instead of only as an extension keyword.
 - [ ] **A reference keeps instance locations on** — once a `$data`, `data` or `$query` reader exists anywhere in the compilation, a subtree holding a `$ref`, `$dynamicRef` or `$recursiveRef` still extends member and item locations even when what it references reads none; resolving references during the compile-time scan would let those subtrees skip too.
 
-- [ ] **Other recursive walkers still recurse per level of data or schema.**
-  `equalsJson`, `stableStringify`, `createJSONPatch` and `createMergePatch` over a
-  100,000-deep value, and compiling a schema nested 20,000 levels deep, throw
-  `RangeError` instead of a coded refusal; the depth bounds that now guard
-  `canonicalizeJson`, the JSONPath descendant segment and validation (`JK2001`)
-  do not reach them. `canonicalizeJson`'s 1000-level bound is fixed (the
-  function takes no options), where validation (`maxReferenceDepth`) and the
-  descendant segment (`maxDescentDepth`, `limits.descentDepth`) can raise theirs.
+- [ ] **Compiling a deeply nested schema still recurses per level.** A schema
+  nested 20,000 levels deep (`properties`, `items` or `allOf` chains, under
+  any `$schema`) throws `RangeError` while it compiles: two passes recurse
+  once per level (`#walkKeywords`, then `createValidator` →
+  `compileSchemaObject` → `buildPropertyValidators`). A fixed bound that fires
+  before a small host stack also refuses schemas a default host compiles
+  today, so the fix is that bound plus an option to raise it (a minor), as
+  `maxReferenceDepth` is, or an iterative compile. The same per-level
+  recursion remains in `compileMergePatch`/`applyMergePatch` over a
+  100,000-deep patch, and in `equalsDeep` (and `uniqueItems` through
+  `isUniqueDeepArray`), `deepFreeze` and `semanticKey` over a 100,000-deep
+  value; `equalsJson`, `stableStringify`, `createJSONPatch` and
+  `createMergePatch` walk on their own stack and refuse past 10000 levels with
+  `JO2001`.
 - [ ] **`basic` output omits the 2020-12 example's branch units.** JSON Schema
   2020-12 Core §12.4.2 lists, beside the error units, the branch units of `""`
   and `/items/$ref` with `error: "A subschema had errors."`; `basicOutput`
@@ -92,19 +94,14 @@ delete it or fix it.
   `@jarenjs/locales` pack must then carry (the packs' key-coverage test
   refuses a key one of them lacks). Fix: add the key to `messagesEn` and every
   pack, then list the condensed tree's branch nodes in `basic`.
-- [ ] **`pattern: "/a/"` is read as the regex literal `a`.** `@jarenjs/core`
-  `createRegExp` reads a string written `/source/flags` as a literal, and
-  `pattern` compiles through it: `{ "type": "string", "pattern": "/a/" }`
-  accepts `"a"` (ECMA-262, which JSON Schema 2020-12 Validation §6.3.3 names,
-  reads the source `/a/` and accepts only strings containing `/a/`), `"/a/i"`
-  accepts `"A"`, and `"/\\$ref/"` accepts `"/$ref"`, so the official 2020-12
-  output schema's `keywordLocation` pattern is misread; a failure reports
-  `params.pattern: "a"`. The JSON-Schema-Test-Suite has no case with a
-  slash-delimited pattern, so it passes either way. The literal form is
-  documented as the validator's syntax (README, normalization), so the fix is
-  a decision: read `pattern` as ECMA-262 source (a minor: `"/a/"` stops
-  matching `"a"`), keeping the literal form for the normalizer's own patterns
-  if wanted.
+- [ ] **A `v`-mode literal `pattern` is still read as a literal.** `pattern`,
+  `patternProperties` keys and the `regex` format read a string as an ECMA-262
+  source in Unicode mode, so `"/a/"` matches only text containing `/a/`; a
+  string that is no valid Unicode-mode source but compiles as a
+  `/source/flags` literal (`"/[\\p{L}--[a-z]]/v"`) still falls back to that
+  literal, because it compiled before. Closing it refuses such a schema when
+  it compiles (a minor), with an upgrade sentence that names the `v`-mode
+  spelling.
 
 ## @jarenjs/view & @jarenjs/app
 
@@ -140,6 +137,15 @@ establish registry publication or downstream acceptance.
   include synthetic composition events and Firefox's automation input sequence;
   the collection also covers synthetic composition during scroll and focused-row removal. Native OS input methods still need manual coverage before claiming full
   language/input-method fidelity. VIEW-FORMAT §8 records that limit.
+
+## @jarenjs/forms
+
+- [ ] **Field `pattern` still reads `/source/flags` as a literal.**
+  `@jarenjs/forms` compiles a field's `pattern` through `@jarenjs/core`
+  `createRegExp`, so `{ "type": "string", "pattern": "/a/" }` accepts `"a"`
+  per keystroke while `@jarenjs/validate` reads the ECMA-262 source and
+  refuses it; the README promises both layers accept the same strings. Fix:
+  compile string patterns as Unicode-mode sources, as the validator does.
 
 ## @jarenjs/flow
 

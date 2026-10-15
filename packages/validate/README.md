@@ -61,6 +61,19 @@ Jaren supports the full set of JSON Schema validation keywords. Here's a quick o
 - Meta: `$schema`, `$id`, `$ref`, `$anchor`, `$dynamicRef`/`$dynamicAnchor`, `$recursiveRef`/`$recursiveAnchor`, `$vocabulary`
 - **Non-standard**: `data` (json-everything's [data-ref](https://docs.json-everything.net/schema/examples/data-ref/) proposal), Ajv-style `$data` references, and the [`$query` keyword](#query--cross-field-assertions) below
 
+A `pattern`, a `patternProperties` key and a string checked by the `regex`
+format are ECMA-262 pattern sources, as JSON Schema 2020-12 Validation §6.3.3
+reads them, compiled in Unicode mode: `"/a/"` matches only text that contains
+`/a/`, and `"/a/i"` only text that contains `/a/i`. A failure's
+`params.pattern` is the string the schema wrote. A RegExp that JavaScript code
+places in a schema keeps its own flags. A string that is no valid Unicode-mode
+source but compiles as a `v`-mode literal (`"/[\\p{L}--[a-z]]/v"`) is still
+read as that literal. *Upgrade: a string written
+`/source/flags` used to be read as a regular-expression literal, so `"/a/"`
+accepted `"a"` and `"/a/i"` accepted `"A"`; drop the slashes and spell a
+flag inside the source (`"[Aa]"` for case-insensitivity). `params.pattern`
+used to carry the compiled source, with every `/` escaped as `\/`.*
+
 <details>
 <summary>🔥 For a complete list of supported keywords and their implementation status, click here</summary>
 
@@ -1136,8 +1149,8 @@ Tuple tail normalization starts after the declared prefix, including prefix
 positions that need no changes. Same-document anchors are collected from schema
 positions; anchor-looking keys in defaults, constants and examples are data.
 
-Pattern strings use the validator's syntax, including `/pattern/flags`.
-Global and sticky flags cannot retain a cursor between members or calls.
+A `patternProperties` key is a pattern source here as in the validator, so
+both cover the same members.
 
 Member schemas **compose the way JSON Schema says they do**: a member covered
 by `properties` *and* by one or more matching `patternProperties` is

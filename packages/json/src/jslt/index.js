@@ -5,7 +5,7 @@
 
 import { deepFreezeCopy } from '../query/normalize.js';
 import { EMPTY, Seq } from '../query/runtime.js';
-import { createOptionVariantCache, identityOf } from '../option-variants.js';
+import { createOptionVariantCache, jsltOptionsKey } from '../option-variants.js';
 import { normalizeJsltStylesheet } from './stylesheet.js';
 import { compileJsltDispatch } from './dispatch.js';
 
@@ -34,6 +34,12 @@ export { mathPack, financePack, statsPack, allPacks } from './packs/index.js';
  *   [options.compileTypeTest] - validator-agnostic hook compiling schema
  *   match conditions and schema literals inside query bodies
  * @param {number} [options.maxDepth=1024] - maximum dispatch nesting depth
+ * @param {number} [options.maxDescentDepth=1000] - the deepest data
+ *   nesting a descendant segment (`..`) descends, in the rules' match
+ *   paths and in the paths inside rule bodies, before the transform is
+ *   refused (`JT2004` wrapping `JQ2009`); a positive integer, as
+ *   `compileJSONPath` takes it. Fixed by default so the answer is the
+ *   same on every host; a larger value lets the host's call stack decide
  * @param {boolean} [options.memo=false] - memoize rule outputs by
  *   (location, value reference): across repeated transforms of
  *   copy-on-write-updated documents, unchanged subtrees return the
@@ -76,24 +82,7 @@ export function compileJsltStylesheet(doc, options = {}) {
 const STYLESHEET_CACHE = createOptionVariantCache();
 
 function cachedTransform(stylesheet, options) {
-  // Every option that changes what compiles is part of the derived key,
-  // or a second call with different options silently reuses the first
-  // compilation. Hooks and registries compare by identity, so they are
-  // interned to per-process ids.
-  const compileTypeTest = typeof options?.compileTypeTest === 'function'
-    ? options.compileTypeTest
-    : null;
-  const maxDepth = options?.maxDepth === undefined ? 1024 : options.maxDepth;
-  const memo = options?.memo === true;
-  const pathFunctions = options?.pathFunctions == null ? null : options.pathFunctions;
-  // registered operators/functions (the JSLT operator registry) change
-  // what compiles, so they join the key by identity — a registry hands a
-  // STABLE extensions/functions object per instance (registry.js), so
-  // two transforms with the same registry still hit the cache.
-  const extensions = options?.extensions == null ? null : options.extensions;
-  const functions = options?.functions == null ? null : options.functions;
-  const key = `${identityOf(compileTypeTest)}|${maxDepth}|${memo ? 1 : 0}`
-    + `|${identityOf(pathFunctions)}|${identityOf(extensions)}|${identityOf(functions)}`;
+  const key = jsltOptionsKey(options);
   return STYLESHEET_CACHE.getOrCompile(stylesheet, key,
     () => compileJsltStylesheet(stylesheet, options));
 }
@@ -109,6 +98,8 @@ function cachedTransform(stylesheet, options) {
  * @param {(schemaJson: any, docPath: string) => ((value: any) => boolean)}
  *   [options.compileTypeTest] - schema type-test compiler
  * @param {number} [options.maxDepth=1024] - maximum dispatch nesting depth
+ * @param {number} [options.maxDescentDepth=1000] - the descent bound of
+ *   the stylesheet's descendant segments, as for `compileJsltStylesheet`
  * @param {boolean} [options.memo=false] - memoize rule outputs
  * @param {Record<string, import('../path.js').JSONPathFunction>}
  *   [options.pathFunctions] - custom JSONPath function extensions

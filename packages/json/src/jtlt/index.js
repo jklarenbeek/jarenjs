@@ -8,7 +8,7 @@
 // reimplemented.
 
 import { deepFreezeCopy } from '../query/normalize.js';
-import { createOptionVariantCache, identityOf } from '../option-variants.js';
+import { createOptionVariantCache, jsltOptionsKey } from '../option-variants.js';
 import {
   compileJsltStylesheet,
   JsltCompileError,
@@ -41,6 +41,8 @@ export { JtltCompileError, JtltRuntimeError } from './errors.js';
  *   [options.compileTypeTest] - validator-agnostic hook for schema
  *   matches and schema operators inside segment expressions
  * @param {number} [options.maxDepth=1024] - maximum dispatch nesting depth
+ * @param {number} [options.maxDescentDepth=1000] - the descent bound of
+ *   the template's descendant segments, as for `compileJsltStylesheet`
  * @returns {function} reusable `render(data, externals?)` function
  * @throws {JtltCompileError} when compilation fails
  * @example
@@ -108,18 +110,9 @@ export function validateJtltTemplate(doc, options) {
 const TEMPLATE_CACHE = createOptionVariantCache();
 
 function cachedRender(template, options) {
-  // The FULL option tuple keys the cache. `compileJtltStylesheet`
-  // forwards its options to the JSLT compiler, which also honours
-  // `memo` and `pathFunctions` — the old two-field comparison dropped
-  // both, so a one-call render with `pathFunctions` compiled without
-  // them (a live cache-poisoning bug, fixed by keying on everything).
-  const compileTypeTest = typeof options?.compileTypeTest === 'function'
-    ? options.compileTypeTest
-    : null;
-  const maxDepth = options?.maxDepth === undefined ? 1024 : options.maxDepth;
-  const memo = options?.memo === true;
-  const pathFunctions = options?.pathFunctions == null ? null : options.pathFunctions;
-  const key = `${identityOf(compileTypeTest)}|${maxDepth}|${memo ? 1 : 0}|${identityOf(pathFunctions)}`;
+  // compileJtltStylesheet forwards its options to the JSLT compiler, so
+  // they key the cache as they key the JSLT one
+  const key = jsltOptionsKey(options);
   return TEMPLATE_CACHE.getOrCompile(template, key,
     () => compileJtltStylesheet(template, options));
 }
@@ -135,6 +128,8 @@ function cachedRender(template, options) {
  * @param {(schemaJson: any, docPath: string) => ((value: any) => boolean)}
  *   [options.compileTypeTest] - schema type-test compiler
  * @param {number} [options.maxDepth=1024] - maximum dispatch nesting depth
+ * @param {number} [options.maxDescentDepth=1000] - the descent bound of
+ *   the template's descendant segments, as for `compileJsltStylesheet`
  * @returns {string} the rendered output text
  * @throws {JtltCompileError} when compilation fails
  * @throws {JtltRuntimeError} when rendering fails

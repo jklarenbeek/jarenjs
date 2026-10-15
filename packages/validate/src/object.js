@@ -11,9 +11,7 @@ import {
   getIntishType,
 } from '@jarenjs/core/number';
 
-import {
-  createRegExpTester,
-} from '@jarenjs/core/string';
+import { createSchemaPatternTester } from './string.js';
 
 import {
   trueThat,
@@ -151,7 +149,7 @@ function buildPatternValidators(schemaObj, jsonSchema) {
   const list = [];
   for (let i = 0; i < entryKeys.length; ++i) {
     const key = entryKeys[i];
-    const matches = createRegExpTester(key);
+    const matches = createSchemaPatternTester(key);
     if (matches == null) continue;
 
     const validator = schemaObj.createValidator(entries[key], 'patternProperties', key);

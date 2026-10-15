@@ -5,14 +5,14 @@
  * different options, so the cache key is the FULL option tuple — every
  * option that changes what compiles must be part of the derived key, or
  * a second call with different options silently reuses the first
- * compilation (the cache-poisoning bug the JTLT cache had before the
- * health pass). Identity-compared option values (hook functions,
+ * compilation. Identity-compared option values (hook functions,
  * function-extension registries) are interned to stable per-process ids
  * so the key is a flat string and lookup is O(1) instead of a linear
  * scan over an unbounded variants array.
  */
 
 import { createBoundedCache, createWeakCache } from '@jarenjs/core/cache';
+import { descentCeilingOption } from './segments.js';
 
 /** @type {WeakMap<object, number>} */
 const IDENTITY_IDS = new WeakMap();
@@ -51,4 +51,26 @@ export function createOptionVariantCache(limitPerDocument = 16) {
       return variants.getOrCreate(key, compile);
     },
   };
+}
+
+/**
+ * The variant key of the JSLT compile options, which JTLT forwards
+ * unchanged: every option that changes what compiles - the type-test
+ * hook, the dispatch and descent bounds, memoization, and the path
+ * functions, operators and functions a registry hands in (compared by
+ * identity; a registry hands a stable object per instance, so two calls
+ * with the same registry share a compilation).
+ * @param {any} options - The compile options, or `undefined`
+ * @returns {string}
+ * @throws {TypeError} When `maxDescentDepth` is not a positive integer
+ */
+export function jsltOptionsKey(options) {
+  const compileTypeTest = typeof options?.compileTypeTest === 'function'
+    ? options.compileTypeTest
+    : null;
+  const maxDepth = options?.maxDepth === undefined ? 1024 : options.maxDepth;
+  const maxDescentDepth = descentCeilingOption(options?.maxDescentDepth, 'options.maxDescentDepth');
+  const memo = options?.memo === true;
+  return `${identityOf(compileTypeTest)}|${maxDepth}|${maxDescentDepth}|${memo ? 1 : 0}`
+    + `|${identityOf(options?.pathFunctions)}|${identityOf(options?.extensions)}|${identityOf(options?.functions)}`;
 }

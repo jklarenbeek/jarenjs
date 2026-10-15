@@ -33,7 +33,6 @@ import {
 } from '@jarenjs/core/object';
 
 import { parseJSONPointer } from '@jarenjs/json';
-import { createRegExpTester } from '@jarenjs/core/string';
 import { isJsonNumberString } from '@jarenjs/core/number';
 import {
   TRAVERSE_SCHEMA_OBJECTS,
@@ -42,6 +41,7 @@ import {
   detectSchemaDraft,
   admitsPropertyDependencies,
 } from './schema-keywords.js';
+import { createSchemaPatternTester } from './string.js';
 
 const hasOwn = Object.hasOwn;
 
@@ -280,7 +280,7 @@ function buildObjectStep(node, ctx) {
   if (patternProperties !== null) {
     const sources = Object.getOwnPropertyNames(patternProperties);
     for (let i = 0; i < sources.length; i++) {
-      const matches = createRegExpTester(sources[i]);
+      const matches = createSchemaPatternTester(sources[i]);
       const step = compileNode(patternProperties[sources[i]], ctx);
       patternSteps.push(matches, step);
       if (step !== null) hasStep = true;

@@ -44,6 +44,17 @@ either end of the domain when the quotient rounds just short of a whole number
 (`(t, 10, 20)` is `[10, 20]`; it answered `[undefined, 20]`) and keeps the inclusive one when
 the draft-04 modifier is `false` (it read `false` as a bound).
 
+`equalsJson` and `stableStringify` (`@jarenjs/core/object`) walk a deep value on
+their own stack instead of the host's, so a value nested past the host stack
+answers; past 10000 levels, a nesting no default host stack could walk
+recursively, and on a cycle, they throw a `CodedError` named `JsonDepthError`
+with code `JO2001` (`a value nested deeper than 10000 levels cannot be compared`,
+`... serialized`). The bound is fixed, so the refusal is the same on every host;
+`contentKey`, which serializes through `stableStringify`, and the JSON Patch and
+Merge Patch diffs of `@jarenjs/json` hold the same one. Every
+other answer is unchanged byte for byte. *Upgrade: a value nested past the host
+stack, or a cycle, used to escape as an uncoded `RangeError`.*
+
 `semanticKey(value, options?)` (`@jarenjs/core/object`) is the collision-free
 identity the semantic cache keys by, in two forms of one serializer with the same
 strictness and refusals. By default it is order-insensitive, as JSON data is:
@@ -111,7 +122,7 @@ const matches = createRegExpTester('/^x/gi');
 matches('X'); matches('X');          // true both times; global/sticky state is isolated
 ```
 
-`createRegExp` reads `/source/flags` as a literal only when a closing slash is followed by flag letters, so `'/users/[0-9]+'` is a pattern that starts with a slash (it used to throw), and a `v`-mode literal keeps `v` instead of gaining `u`. `getStringLength(str, true)` counts a CR LF pair as one grapheme in ASCII text too.
+`createRegExp` reads `/source/flags` as a literal only when a closing slash is followed by flag letters, so `'/users/[0-9]+'` is a pattern that starts with a slash (it used to throw), and a `v`-mode literal keeps `v` instead of gaining `u`. `isStringRegExp` reads a string as a Unicode-mode pattern source first, the reading JSON Schema gives `pattern` and the `regex` format, so `'/a/gg'` is a regular expression (the text `/a/gg`); only a string that is no valid source falls back to the literal (`'/[\\p{L}--[a-z]]/v'`), as the validator's `pattern` does. *Upgrade: it read the literal first, so `'/a/gg'` (flags the engine refuses) was not a regular expression.* `getStringLength(str, true)` counts a CR LF pair as one grapheme in ASCII text too.
 
 ## Text validation
 

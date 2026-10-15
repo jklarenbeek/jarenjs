@@ -45,3 +45,28 @@ describe('createRegExp — slash-led patterns', () => {
     assert.throws(() => createRegExp('/a/gg'), SyntaxError);
   });
 });
+
+describe('isStringRegExp — a string is a pattern source', () => {
+  it('answers what a Unicode-mode pattern source compiles to, not the literal', () => {
+    // valid sources whose literal reading carries flags the engine refuses
+    assert.strictEqual(isStringRegExp('/a/gg'), true);
+    assert.strictEqual(isStringRegExp('/a/uv'), true);
+    // no valid Unicode-mode source, but a v-mode literal: still the literal
+    assert.strictEqual(isStringRegExp('/[\\p{L}--[a-z]]/v'), true);
+    // valid neither way
+    assert.strictEqual(isStringRegExp('/[\\p{L}--[a-z]]/'), false);
+    assert.strictEqual(isStringRegExp('\\a'), false);
+  });
+
+  it('a RegExp is a regular expression; other values are not', () => {
+    assert.strictEqual(isStringRegExp(/a/v), true);
+    assert.strictEqual(isStringRegExp(null), false);
+    assert.strictEqual(isStringRegExp(undefined), false);
+    assert.strictEqual(isStringRegExp(/** @type {any} */ (5)), false);
+  });
+
+  it('leaves createRegExp reading /source/flags as a literal', () => {
+    assert.strictEqual(createRegExp('/a/i')?.test('A'), true);
+    assert.throws(() => createRegExp('/a/gg'), SyntaxError);
+  });
+});
