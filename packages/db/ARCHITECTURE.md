@@ -1742,7 +1742,14 @@ text (`dialect.readBack`): the condition through that reader, and a generated
 column's expression through `expressionForm`, which reads the planned text and
 the server's deparse into one form — undoing literal types, `ELSE NULL`,
 parentheses, name quoting and the path array's quoting, nothing else — and
-compares them whole. The planner asks it first whether a planned condition or
+compares them whole. A layout index's condition, a declared `$sql` term the
+open renders through the relational emitter rather than plans, is read by
+`conditionForm`: `expressionForm` with a condition's forms (`CAST`, `IN`,
+`LIKE`, `IS DISTINCT FROM`), then one form for every spelling the server keeps
+of one condition — operands ordered, lists gathered, comparisons oriented,
+`NOT` taken in, the server's column casts and literal readings undone by the
+column's catalog type — and `readBack.layoutConditionDiffers` compares it only
+where both sides read (`physical.js`'s index check calls it). The planner asks it first whether a planned condition or
 expression reads back, and refuses one that does not (`JD0004`). SQLite
 verifies by its CREATE text, so neither reader enters a bundle that carries
 only SQLite. Every planner lists the schema objects it names, the engine's own

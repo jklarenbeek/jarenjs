@@ -2502,6 +2502,24 @@ planned as written.
   from text leaves — read back as the rounded number; it is now refused
   `JD2003`, as the same integer without the scale is (§28).
 
+## 34. A PostgreSQL layout index under another condition is refused at open
+
+A layout index (`physical.indexes`) whose condition the database holds in
+another form than the model declares — recreated as `WHERE status IN
+('active')` under a declaration of `IN ('active', 'pending')` — opened on
+PostgreSQL as if nothing had drifted, because the open compared the index's
+shape alone: a declared partial unique index then let two `pending` rows of one
+key in. The open now reads the condition back from the catalog and refuses one
+that reads as another condition `JD0002` (`index '<name>' is declared as`, the
+server's text and the declared rendering), as SQLite does
+([MODEL-FORMAT §12](MODEL-FORMAT.md#12-existing-column-layouts)). Every
+spelling the server reads as the declared condition still opens — operands in
+another order, a list as `IN`, `= ANY` or an `OR` chain, a comparison flipped,
+the server's casts and literal spellings — and so does a condition either side
+does not read back. Recreate the index under the declared condition, or
+declare the condition the index holds. Nothing is altered, and SQLite is
+unchanged.
+
 ## Measured costs
 
 Exact identity stores complete canonical documents and model endpoints, so

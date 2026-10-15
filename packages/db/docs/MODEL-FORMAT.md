@@ -2743,10 +2743,11 @@ inside the writing transaction lets a concurrent writer slip past it.
 - A layout an application owns (§12) declares its indexes in
   `physical.indexes`; `indexes` beside `physical` is `JD0004`. The mapping
   reports them as `entities[E].declaredIndexes` (`{ name, unique, partial,
-  columns, members, sql }`): each term's column by its physical name and by
+  columns, members, sql, where? }`): each term's column by its physical name and by
   the member it maps (an expression term, or a column the layout does not
-  map, `null` in both), whether the index declares a condition, and the
-  statement whose text SQLite compares (§12).
+  map, `null` in both), whether the index declares a condition, the
+  statement whose text SQLite compares, and the declared condition itself,
+  the `$sql` term PostgreSQL renders to compare (§12).
 
 **An unknown member of `x-entity` is `JD0030` with a `docPath`.** A
 silently ignored mapping directive is a data-loss bug waiting to
@@ -4276,8 +4277,28 @@ do not count, so an index the application created in its own spelling
 verifies, while another operator, literal, column or list is `JD0002`
 (the message shows both texts); the statement the store plans,
 `explainMapping(model).entities.<E>.declaredIndexes[i].sql` (§9.2), is
-one spelling that always verifies. PostgreSQL, which deparses, verifies
-the shape alone and reads a changed condition's text as no drift. An
+one spelling that always verifies. PostgreSQL, which keeps no CREATE
+text, reads the condition back out of its catalog (`pg_get_expr`) and
+compares it with the declared one as its own relational rendering writes
+it, both read into one form, so a spelling the server reads as the same
+condition verifies: `AND` and `OR` operands in any order, a list as `IN`,
+`= ANY (ARRAY[…])` or an `OR` of equalities (and `NOT IN`, `<> ALL` or an
+`AND` of inequalities), a comparison either way round (`5 < n` and
+`n > 5`), `NOT` over a comparison, a list or a NULL test, `IS [NOT]
+DISTINCT FROM NULL` beside `IS [NOT] NULL`, a boolean beside `= true`,
+redundant parentheses, the server's casts — `'a'::text`, and a column
+cast to a wider type of its kind, `(v)::text` over a `varchar`,
+`(n)::numeric` over an `integer`, which an explicit cast of that kind
+reads as too — and its literal spellings (`1.50` and `1.5`, `'5'` beside
+an integer, `'t'` beside a boolean). Another operator, literal, column,
+list or conjunct is `JD0002`, the message showing the server's text and
+the rendering. A condition either side does not read is not compared and
+verifies by the index's shape alone, as an expression term does on
+PostgreSQL: a literal the server rewrites by its type (a date, a uuid), a
+function outside the relational vocabulary or one the server respells
+(`TRIM`), a quantified comparison other than `= ANY` and `<> ALL`, an
+`IS [NOT] TRUE` test, a table-qualified column (which the server never
+writes), and a declaration PostgreSQL has no rendering of (`GLOB`). An
 index the layout does not declare
 is a physical fact. A unique index over plain column terms without a
 condition keys an existence probe (§13.2). A `kind: "view"` layout declares

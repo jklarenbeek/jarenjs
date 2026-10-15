@@ -370,9 +370,10 @@ function postgresCast(value, type, take) {
 /** The comparison each operator spells. */
 const COMPARISONS = /* @__PURE__ */ Object.freeze(/** @type {Record<string, string>} */ ({ '=': '$eq', '<>': '$ne', '!=': '$ne', '<': '$lt', '<=': '$le', '>': '$gt', '>=': '$ge' }));
 
-/** How deep a condition the reader follows: a deeper one is refused where it
- * is planned, and a stored one this deep reads as a condition that differs. */
-const READ_DEPTH = 256;
+/** How deep a condition or an expression a reader follows: a deeper one is
+ * refused where it is planned, and a stored one this deep reads as one that
+ * differs. */
+export const READ_DEPTH = 256;
 
 /**
  * Read an index condition back into the query grammar, from the text the

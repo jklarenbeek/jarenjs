@@ -662,7 +662,8 @@ export function postgresDialect(options = undefined) {
     rowPredicateFlavor: POSTGRES,
     // the server keeps no CREATE text, so the open reads each index condition
     // and generated column's expression back from its deparse and compares it
-    // with the planned one exactly
+    // with the planned one; a layout index's condition as one condition
+    // across the spellings the server keeps for it
     readBack: postgresReadBack,
     capabilities: {
       jsonb: true,

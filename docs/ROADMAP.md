@@ -756,16 +756,12 @@ what each does is its own documentation's job
   (`JD0004`/`JD0005` at the member). Wanted: a bracket spelling
   (`$['日本']`) through the one path resolver of the row-predicate module and
   the entity index walk, with the same oracle rows.
-- [ ] **PostgreSQL verifies a physical index's condition by shape.** A
-  recreated physical index with another condition reopens on PostgreSQL, where
-  SQLite compares the condition's text (MODEL-FORMAT §12). Wanted: read
-  `pg_get_expr(indpred)` through the relational grammar and compare it as
-  SQLite does.
-  A comparison through the grammar must treat as equal a commuted `AND` or
-  `OR` operand order, `IN (a, b)` beside `x = a OR x = b` (and `= ANY (ARRAY[...])`),
-  a flipped comparison (`5 < n` and `n > 5`), redundant parentheses and the
-  server's casts and literal spellings, and it is a stated stricter refusal at
-  open (a minor).
+- [ ] **PostgreSQL verifies a layout index's expression term by shape.** A
+  layout index term that is an expression (`lower(code)`) is verified on
+  PostgreSQL by its position alone, where SQLite compares the CREATE text
+  (MODEL-FORMAT §12), as is a condition the read-back does not read (a date or
+  uuid literal, `TRIM`, a quantified comparison other than `= ANY`). Wanted:
+  read `pg_get_indexdef`'s terms through the same condition form.
 - [ ] **The two ledgers judge `limit` with two predicates.** The two ledgers
   read `limit` with two predicates each: `inFlight` `Number.isInteger`
   (accepts `2**53`), `sweep` `Number.isSafeInteger` (refuses it, pinned by the

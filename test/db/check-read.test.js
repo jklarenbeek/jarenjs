@@ -16,7 +16,7 @@ import assert from 'node:assert/strict';
 import { sqliteDialect } from '@jarenjs/db';
 import { postgresDialect } from '@jarenjs/db/postgres';
 import { POSTGRES_PREDICATE, POSTGRES_PREDICATE_ESCAPED, SQLITE_PREDICATE, decimalText, readIntervalCheck, readPredicate } from '../../packages/db/src/dialects/check-read.js';
-import { expressionForm, postgresReadBack } from '../../packages/db/src/dialects/postgres-read-back.js';
+import { conditionForm, expressionForm, postgresReadBack } from '../../packages/db/src/dialects/postgres-read-back.js';
 import { rowPaths, rowPredicate } from '../../packages/db/src/dialects/row-predicate.js';
 import { SQLITE } from '../../packages/db/src/dialects/invariant-sql.js';
 import { POSTGRES } from '../../packages/db/src/dialects/postgres-invariants.js';
@@ -192,6 +192,86 @@ describe("reading a generated column's expression back", () => {
       "lower((doc #>> '{a}'::text[]))", '', 'CASE',
     ]) assert.notEqual(postgresReadBack.expression(stored, text, true), null, stored);
     assert.notEqual(postgresReadBack.expression("\"left\"((doc #>> '{a}'::text[]), 4)", 'left(("doc" #>> \'{"a"}\'), 3)', true), null);
+  });
+});
+
+describe("comparing a layout index's condition read back", () => {
+  /** @type {Record<string, string>} */
+  const TYPES = { s: 'text', v: 'character varying(10)', n: 'integer', sm: 'smallint', bi: 'bigint', m: 'numeric', d: 'double precision', b: 'boolean', dt: 'date' };
+  /** @param {string} column */
+  const typeOf = (column) => TYPES[column];
+  /** @param {string} stored @param {string} planned @param {boolean} [conforming] */
+  const differs = (stored, planned, conforming = true) => postgresReadBack.layoutConditionDiffers(stored, planned, typeOf, conforming);
+  // the deparse PostgreSQL 16, 17 and 18 hand back for each condition, beside the PostgreSQL rendering of a declared one
+  const SAME = [
+    ["(s = ANY (ARRAY['a'::text, 'b'::text]))", "(\"s\" IN ('b', 'a'))"],
+    ["((s = 'a'::text) OR (s = 'b'::text))", "(\"s\" IN ('a', 'b'))"],
+    ["(s <> ALL (ARRAY['a'::text, 'b'::text]))", "((\"s\" <> 'b') AND (\"s\" <> 'a'))"],
+    ["(NOT (s = ANY (ARRAY['a'::text, 'b'::text])))", "(\"s\" NOT IN ('a', 'b'))"],
+    ["((s = 'a'::text) AND (n > 5))", "((\"n\" > 5) AND (\"s\" = 'a'))"],
+    ['(5 < n)', '("n" > 5)'],
+    ['(n <= 5)', '(NOT ("n" > 5))'],
+    ["((v)::text = ANY ((ARRAY['a'::character varying, 'b'::character varying])::text[]))", "(\"v\" IN ('a', 'b'))"],
+    ['((n)::numeric > 5.5)', '("n" > 5.5)'],
+    ['(m > (5)::numeric)', '("m" > 5)'],
+    ['(m > 1.50)', '("m" > 1.5)'],
+    ["(m > '100'::numeric)", '("m" > 100)'],
+    ['(d > (0.1)::double precision)', '("d" > 0.1)'],
+    ["(n > '-5'::integer)", '("n" > -5)'],
+    ["(bi > '9007199254740991'::bigint)", '("bi" > 9007199254740991)'],
+    ['(n > 5)', "(\"n\" > '5')"],
+    ['(n = ANY (ARRAY[1, 2]))', "(\"n\" IN ('2', '1'))"],
+    ['(b = true)', "(\"b\" = 't')"],
+    ['b', "(\"b\" = 'yes')"],
+    ['(NOT b)', "(\"b\" = 'off')"],
+    ['(s IS NULL)', '("s" IS NOT DISTINCT FROM NULL)'],
+    ['(s IS NOT NULL)', '(NOT ("s" IS NOT DISTINCT FROM NULL))'],
+    ["(NOT (s IS DISTINCT FROM 'a'::text))", "(\"s\" IS NOT DISTINCT FROM 'a')"],
+    ["(s !~~ 'a%'::text)", "(NOT (\"s\" LIKE 'a%'))"],
+    ["(lower((v)::text) = 'a'::text)", "(pg_catalog.lower(\"v\") = 'a')"],
+    ['((n)::bigint > 5)', '("n" > 5)'],
+    ["(NULLIF(s, ''::text) IS NOT NULL)", "(NULLIF(\"s\", '') IS DISTINCT FROM NULL)"],
+    ['(\nCASE\n    WHEN (n > 5) THEN \'big\'::text\n    ELSE NULL::text\nEND IS NOT NULL)', "((CASE WHEN (\"n\" > 5) THEN 'big' ELSE NULL END) IS DISTINCT FROM NULL)"],
+    ['((n > 1) AND (n < 9) AND (b OR (s IS NOT NULL)))', '(((("n" > 1) AND ("n" < 9)) AND ("b" OR ("s" IS DISTINCT FROM NULL))))'],
+    ['(n > 5)', '(("n" > 5) AND ("n" > 5))'],
+  ];
+  it('reads every spelling of one condition into one form', () => {
+    for (const [stored, planned] of SAME) {
+      assert.notEqual(conditionForm(stored, true, typeOf), null, stored);
+      assert.deepEqual(conditionForm(stored, true, typeOf), conditionForm(planned, true, typeOf), `${stored} beside ${planned}`);
+      assert.equal(differs(stored, planned), false, stored);
+    }
+    // a session whose standard_conforming_strings is off doubles the backslash
+    assert.equal(differs("(s = 'a\\\\b'::text)", "(\"s\" = 'a\\b')", false), false);
+    assert.equal(differs("(s = 'a\\\\b'::text)", "(\"s\" = 'a\\b')", true), true);
+  });
+
+  it('reads a changed literal, operator, conjunct, column or cast as another condition', () => {
+    for (const [stored, planned] of [
+      ['(n > 6)', '("n" > 5)'], ['(n >= 5)', '("n" > 5)'], ["(s = ANY (ARRAY['a'::text, 'c'::text]))", "(\"s\" IN ('a', 'b'))"],
+      ["((n > 5) AND (s = 'a'::text))", '("n" > 5)'], ['(n > 5)', "((\"n\" > 5) AND (\"s\" = 'a'))"],
+      ["((n > 5) OR (s = 'a'::text))", "((\"n\" > 5) AND (\"s\" = 'a'))"], ['(sm > 5)', '("n" > 5)'], ["(s = 'A'::text)", "(\"s\" = 'a')"],
+      ['(s IS NOT NULL)', '("s" IS NOT DISTINCT FROM NULL)'], ['(NOT b)', '"b"'], ['((m)::integer > 5)', '("m" > 5)'],
+      ["(s ~~ 'a%'::text)", "(\"s\" NOT LIKE 'a%')"], ['(5 > n)', '("n" > 5)'],
+    ]) assert.equal(differs(stored, planned), true, `${stored} beside ${planned}`);
+  });
+
+  it('compares nothing it cannot read: a rewritten literal, an unknown type or function, another quantifier', () => {
+    for (const [stored, planned] of [
+      ["(TRIM(BOTH FROM s) = 'a'::text)", "(TRIM(\"s\") = 'b')"],
+      ["(dt > '2025-01-01'::date)", "(\"dt\" > '2024-01-01')"],
+      ["(u = 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a12'::uuid)", "(\"u\" = 'A0EEBC99-9C0B-4EF8-BB6D-6BB9BD380A11')"],
+      ['(b IS NOT TRUE)', '"b"'],
+      ['(n > ANY (ARRAY[6, 7]))', '("n" > 5)'],
+      ["(jsonb_typeof(j) = 'object'::text)", "(pg_catalog.jsonb_typeof(\"j\") = 'array')"],
+      ["(n > 'x'::integer)", "(\"n\" > 'y')"],
+      ['(abs(q) > 2)', "(pg_catalog.abs(\"q\") > '3')"],
+      ['(n > 5)', '("t"."n" > 5)'],
+      ['', '("n" > 5)'],
+    ]) {
+      assert.ok(conditionForm(stored, true, typeOf) === null || conditionForm(planned, true, typeOf) === null, `${stored} beside ${planned}`);
+      assert.equal(differs(stored, planned), false, stored);
+    }
   });
 });
 

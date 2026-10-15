@@ -246,7 +246,8 @@ describe('a physical layout verifies its declared indexes at open', () => {
       ['a unique constraint', 'ALTER TABLE orders ADD CONSTRAINT orders_code UNIQUE (code)', PLAIN_ORDERS, null],
       ['a hash index under a plain non-unique declaration', 'CREATE INDEX orders_code ON orders USING hash (code)', { ...PLAIN_ORDERS, unique: false }, null],
       ['a quoted name in another case, which PostgreSQL keeps apart', 'CREATE UNIQUE INDEX "Orders_Code" ON orders(code)', PLAIN_ORDERS, /is missing/],
-      ['a condition with another text, which the shape does not see', "CREATE UNIQUE INDEX orders_code ON orders(code) WHERE status = 'open'", { ...PLAIN_ORDERS, where: OPEN }, null],
+      ['a one-item list written as an equality, which the server reads as one condition', "CREATE UNIQUE INDEX orders_code ON orders(code) WHERE status = 'open'", { ...PLAIN_ORDERS, where: OPEN }, null],
+      ['a condition over another list', "CREATE UNIQUE INDEX orders_code ON orders(code) WHERE status IN ('open', 'held')", { ...PLAIN_ORDERS, where: OPEN }, /is declared as/],
       ['an expression under a plain declaration', 'CREATE UNIQUE INDEX orders_code ON orders(lower(code))', PLAIN_ORDERS, /covers \(<expression>\)/],
       ['INCLUDE columns under a composite declaration', 'CREATE UNIQUE INDEX orders_code ON orders(code, status) INCLUDE (id)',
         { ...PLAIN_ORDERS, terms: [{ by: col('code') }, { by: col('status') }] }, null],
@@ -289,10 +290,8 @@ describe('a physical layout verifies its declared indexes at open', () => {
         await fixture.exec('DROP INDEX shift_day; CREATE INDEX shift_day ON shift(day)');
         assert.equal(await openRefusal(model, options), null);
         await fixture.exec("DROP INDEX shift_one_active; CREATE UNIQUE INDEX shift_one_active ON shift(employee_id, day) WHERE status IN ('active')");
-        const changed = await openRefusal(model, options);
-        // the condition's text is what SQLite keeps; PostgreSQL verifies the index's shape, which a changed condition leaves
-        if (name === 'sqlite') assert.match(changed.message, /index 'shift_one_active' is declared as/);
-        else assert.equal(changed, null);
+        // SQLite compares the condition's text, PostgreSQL the condition it reads back from its catalog
+        assert.match((await openRefusal(model, options)).message, /index 'shift_one_active' is declared as/);
         await fixture.exec('DROP INDEX shift_one_active; CREATE UNIQUE INDEX shift_one_active ON shift(employee_id, day)');
         assert.match((await openRefusal(model, options)).message, /index 'shift_one_active' has no condition/);
       }

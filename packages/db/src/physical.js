@@ -13,6 +13,7 @@ import { comparableDeclaredSql } from './schema-sql.js';
 import { foldIdentifier } from './invariants.js';
 import { sqlTokens } from './dialects/check-read.js';
 import { isKeyword } from './sql.js';
+import { relationalEmitter } from './relational.js';
 
 const compiledCodecs = new WeakMap();
 const STORAGE = { text: 'string', integer: 'integer', number: 'number', boolean: 'boolean',
@@ -126,14 +127,31 @@ export function normalizePhysical(physical, properties, keys, path, types = new 
  * A declared index as the open verifies it and a probe reads it: each term's
  * column by physical name and by the member it maps — an expression term, or
  * a column the layout does not map, `null` in both — whether the index is
- * unique and whether it declares a condition, and the statement that creates
- * it, whose text SQLite keeps.
+ * unique and whether it declares a condition, the statement that creates it,
+ * whose text SQLite keeps, and the condition itself (`where`, the declared
+ * `$sql` term), which an engine that deparses renders to compare.
  * @param {any} index @param {any[]} columns - the layout's columns @param {string} sql
  */
 function declaredIndex(index, columns, sql) {
   const names = index.terms.map((term) => (term?.by?.$sql === 'column' && typeof term.by.name === 'string' ? term.by.name : null));
   return { name: index.name, unique: index.unique === true, partial: index.where !== undefined, columns: names,
-    members: names.map((name) => (name === null ? null : columns.find((column) => column.physical === name)?.name ?? null)), sql };
+    members: names.map((name) => (name === null ? null : columns.find((column) => column.physical === name)?.name ?? null)), sql,
+    ...(index.where === undefined ? {} : { where: index.where }) };
+}
+
+/**
+ * A declared condition as the dialect's relational rendering writes it, or
+ * `undefined` where the dialect cannot render it (a function or a literal
+ * its vocabulary does not have): what a deparsing engine's stored condition
+ * is compared with.
+ * @param {any} dialect @param {any} where - the declared `$sql` term @returns {string | undefined}
+ */
+function renderedCondition(dialect, where) {
+  try { return relationalEmitter({ inline: true, dialect }).expr(where); }
+  catch (error) {
+    if (error instanceof DbCompileError) return undefined;
+    throw error;
+  }
 }
 
 /**
@@ -145,17 +163,24 @@ function declaredIndex(index, columns, sql) {
  * is a fact, as an undeclared index is). What that shape cannot see — a
  * condition's text, an expression term — is compared as SQLite keeps it, the
  * CREATE text, token by token (`sameIndexText`), so an index the application
- * created in its own spelling verifies and another condition is drift; an
- * engine that deparses keeps no text to compare.
+ * created in its own spelling verifies and another condition is drift. An
+ * engine that deparses keeps no text: its stored condition is read back
+ * (`readBack.layoutConditionDiffers`) and compared with the declared one as
+ * its relational rendering writes it, so a spelling the server reads as the
+ * same condition verifies and another condition is drift; a condition either
+ * side does not read is not compared, nor is an expression term.
  * @param {any} connection
  * @param {any[]} declared - the layout's `declaredIndexes`
  * @param {any[]} existing - the table's indexes as `readSchema` reports them
+ * @param {any[]} columns - the table's columns as `readSchema` reports them, each with its catalog `type`
  * @param {(why: string) => never} fail
  * @returns {any} value-or-promise
  */
-function verifyDeclaredIndexes(connection, declared, existing, fail) {
+function verifyDeclaredIndexes(connection, declared, existing, columns, fail) {
   const dialect = connection.dialect;
   const text = dialect.capabilities.declaredSqlText === true;
+  const readBack = text ? undefined : dialect.readBack;
+  const typeOf = (/** @type {string} */ name) => columns.find((column) => column.name === name)?.type;
   const fold = dialect.name === 'sqlite' ? foldIdentifier : (/** @type {string} */ name) => name;
   const list = (/** @type {(string | null)[]} */ columns) => columns.map((column) => column ?? '<expression>').join(', ');
   const step = (/** @type {number} */ i) => {
@@ -176,6 +201,10 @@ function verifyDeclaredIndexes(connection, declared, existing, fail) {
         const wanted = comparableDeclaredSql(index.sql), actual = comparableDeclaredSql(String(have.sql));
         if (!sameIndexText(wanted, actual)) fail(`index '${index.name}' is declared as\n  ${actual}\nand the model declares\n  ${wanted}`);
       }
+      const planned = readBack !== undefined && index.where !== undefined && typeof have.predicate === 'string'
+        ? renderedCondition(dialect, index.where) : undefined;
+      if (planned !== undefined && readBack.layoutConditionDiffers(have.predicate, planned, typeOf, have.conforming !== false))
+        fail(`index '${index.name}' is declared as\n  WHERE ${have.predicate}\nand the model declares\n  WHERE ${planned}`);
       return step(i + 1);
     });
   };
@@ -445,7 +474,7 @@ export function verifyPhysical(connection, mapping, schema) {
       const catalogColumn = schema.catalog?.find((o) => o.type === 'column' && o.owner === mapping.table && o.name === column.physical)?.metadata ?? null;
       connection.dialect.qualifyPhysicalColumn?.(column, actual, mapping.kind, database, catalogColumn);
     }
-    return mapping.kind === 'view' ? null : verifyDeclaredIndexes(connection, mapping.declaredIndexes ?? [], table.indexes ?? [], fail);
+    return mapping.kind === 'view' ? null : verifyDeclaredIndexes(connection, mapping.declaredIndexes ?? [], table.indexes ?? [], table.columns, fail);
   }));
 }
 

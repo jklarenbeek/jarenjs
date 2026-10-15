@@ -177,6 +177,7 @@ export const MEMBER_WHEN = Symbol('dialect.memberWhen');
  *   rowPredicateFlavor?: any,
  *   readBack?: { conditionReads: (planned: string, columns: any[]) => boolean,
  *     condition: (stored: string | null, planned: string | undefined, columns: any[], conforming: boolean) => string | null,
+ *     layoutConditionDiffers: (stored: string, planned: string, typeOf: (column: string) => string | undefined, conforming: boolean) => boolean,
  *     expressionReads: (planned: string) => boolean,
  *     expression: (stored: string, planned: string, conforming: boolean) => string | null },
  *   isCreateRace?: (error: any) => boolean,
