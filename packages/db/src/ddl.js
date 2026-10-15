@@ -6,16 +6,16 @@
  * of SQL rendered by the dialect.
  *
  * Index paths are JSONPath expressions analyzed through the engine's
- * PUBLISHED AST (`analyzeQuery`): a path is indexable exactly when the
- * analysis says it is singular and every segment is a plain member or
- * index selection. That reuses the one grammar authority instead of
+ * PUBLISHED AST (`analyzeQuery`, read once for every model path by
+ * `readModelPath`): a path is indexable exactly when the analysis says
+ * it is singular and every segment is a plain member or index
+ * selection. That reuses the one grammar authority instead of
  * re-parsing, and it fails loudly (`JD0004`) on everything else —
  * wildcards, slices, filters, descendants, functions — rather than
  * silently indexing the wrong thing.
  */
 
 import { explainMapping } from './model.js';
-import { analyzeQuery } from '@jarenjs/json/query';
 import { utf8ByteLength } from '@jarenjs/core/string';
 import { IDENTIFIER, ENGINE_TABLES } from './engine-metadata.js';
 import { DbCompileError } from './errors.js';
@@ -29,7 +29,7 @@ import { rowPaths, rowPredicate, storedBoolean } from './dialects/row-predicate.
 import { planTable } from './dialects/sqlite-schema.js';
 import { readIntervalCheck, readsConforming } from './dialects/check-read.js';
 import { comparableDeclaredSql } from './schema-sql.js';
-import { readsAsIndex } from './model-path.js';
+import { modelPath, readModelPath, readsAsIndex } from './model-path.js';
 export { normalizeDeclaredSql, comparableDeclaredSql } from './schema-sql.js';
 
 const MANAGED_SQL_OPTIONS = Object.freeze({ columnOrder: /** @type {const} */ ('ignore') });
@@ -176,46 +176,16 @@ export function indexCondition(where, columns, dialect, docPath, unreadable, rea
  *   canonical: string }}
  */
 export function compileIndexPath(expression, docPath) {
-  let analysis;
-  try {
-    analysis = analyzeQuery(expression);
-  }
-  catch (cause) {
-    throw new DbCompileError('JD0004',
-      `the index path '${expression}' is not a valid query expression`,
-      docPath, /** @type {Error} */ (cause));
-  }
-  const root = analysis.root;
-  if (root.kind !== 'path' || root.name !== '$' || root.external === true) {
-    throw new DbCompileError('JD0004',
-      `the index path '${expression}' must address the stored document through '$'`,
-      docPath);
-  }
-  if (root.singular !== true) {
-    throw new DbCompileError('JD0004',
-      `the index path '${expression}' is not singular — wildcards, slices, filters and descendants are not indexable`,
-      docPath);
-  }
-  /** @type {import('./dialect.js').JsonPathSegment[]} */
-  const segments = [];
-  for (const segment of root.segments) {
-    const selector = segment.selectors[0];
-    if (segment.descendant === true || segment.selectors.length !== 1
-      || (selector.kind !== 'name' && selector.kind !== 'index')) {
-      throw new DbCompileError('JD0004',
-        `the index path '${expression}' uses a selector that does not pick one member`,
-        docPath);
-    }
-    segments.push(selector.kind === 'name'
-      ? { name: selector.name }
-      : { index: selector.index });
-  }
-  if (segments.length === 0) {
-    throw new DbCompileError('JD0004',
-      `the index path '${expression}' selects the whole document — index a member`,
-      docPath);
-  }
-  return { segments, canonical: canonicalOf(segments) };
+  const read = readModelPath(expression);
+  if ('segments' in read) return { segments: read.segments, canonical: canonicalOf(read.segments) };
+  const reasons = {
+    invalid: 'is not a valid query expression',
+    root: "must address the stored document through '$'",
+    singular: 'is not singular — wildcards, slices, filters and descendants are not indexable',
+    selector: 'uses a selector that does not pick one member',
+    whole: 'selects the whole document — index a member',
+  };
+  throw new DbCompileError('JD0004', `the index path '${expression}' ${reasons[read.refused]}`, docPath, read.cause);
 }
 
 /**
@@ -237,8 +207,21 @@ export function canonicalOf(segments) {
     .join('');
 }
 
-/** A member name that spells itself: anything else is JSON-quoted in
- * the canonical, so `.a.b` (nested) and `."a.b"` (one member) differ. */
+/**
+ * The one top-level member a canonical spelling names ({@link canonicalOf}),
+ * or `undefined` for a nested path or an element.
+ * @param {string} canonical
+ * @returns {string | undefined}
+ */
+function topMemberOf(canonical) {
+  const name = /^\.([A-Za-z_][A-Za-z0-9_]*)$/.exec(canonical)?.[1];
+  if (name !== undefined || !canonical.startsWith('."')) return name;
+  try {
+    const quoted = JSON.parse(canonical.slice(1));
+    return typeof quoted === 'string' && canonicalOf([{ name: quoted }]) === canonical ? quoted : undefined;
+  }
+  catch { return undefined; }
+}
 
 /**
  * The subschema of one array element. A negative index counts from the end,
@@ -779,14 +762,14 @@ export function planCollection(name, collection, dialect, options = undefined) {
   const collectionPath = collection.docPath ?? `/collections/${name}`;
   const conditionColumns = [];
   for (const column of generated) {
-    const member = /^\.([A-Za-z_][A-Za-z0-9_]*)$/.exec(column.pathText === null ? '' : column.canonical)?.[1];
+    const member = column.pathText === null ? undefined : topMemberOf(column.canonical);
     const codec = member === undefined || column.derive !== undefined ? undefined : conditionCodec(schemaNodeAt(collection.schema, [{ name: member }]));
     if (codec !== undefined) conditionColumns.push({ name: /** @type {string} */ (member), physical: column.name, codec });
   }
   /** @param {string} member */
   const unreadable = (member) => (columnByCanonical.has(canonicalOf([{ name: member }]))
     ? `'${member}' may hold null or has no one scalar type, and its generated column holds SQL NULL for a null and for a missing member alike, which the query engine tells apart`
-    : `'${member}' has no generated column: an index condition reads a member the collection indexes by its path — index '$.${member}' first`);
+    : `'${member}' has no generated column: an index condition reads a member the collection indexes by its path — index '${modelPath([{ name: member }])}' first`);
   for (const index of indexes) {
     if (index.declared.where === undefined) continue;
     /** @type {Set<string>} */

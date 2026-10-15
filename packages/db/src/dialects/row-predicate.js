@@ -27,7 +27,8 @@
  * truth value, a text literal and an integer operand spelled) and the
  * resolver of the paths it reads, and wraps every refusal reason in its own
  * error. */
-import { RULE_CODECS, RECORD_PATH, SAFE_INTEGER, isArithmetic, ruleLiteral } from '../invariants.js';
+import { RULE_CODECS, SAFE_INTEGER, isArithmetic, recordPath, ruleLiteral } from '../invariants.js';
+import { memberNames } from '../model-path.js';
 
 /** The safe-integer range as a SQL condition over a reference, the one
  * spelling a column's domain and an arithmetic result's share on both engines.
@@ -52,46 +53,52 @@ export const storedBoolean = (value) => (value ? '1' : '0');
  * @typedef {(path: string) => PathRead} PathResolver
  */
 
+/** Whether a path's member names are the one name `op`. @param {string[] | null} names */
+const isOp = (names) => names?.length === 1 && names[0] === 'op';
+
 /**
  * A rule's paths for one operation: `$.old.<member>` and `$.new.<member>` read
- * a column of the old or the new row, and `$.op` is the operation's name.
+ * a column of the old or the new row (a member of any name also written
+ * `$.new['<member>']`), and `$.op` is the operation's name.
  * @param {any[]} columns the layout's mapped columns @param {string} op
  * @param {(name: string) => string} q the dialect's identifier quoting
  * @returns {PathResolver}
  */
 export function rulePaths(columns, op, q) {
   return (path) => {
-    if (path === '$.op') return { text: op };
-    const match = RECORD_PATH.exec(path);
+    if (isOp(memberNames(path))) return { text: op };
+    const read = recordPath(path);
     // an audit value is typed before it is read: a path no rule reads types
     // as the column named after its second dot, so the refusal names the type
     // or the path as a rule's plan always has
-    if (match === null) return { refused: `unsupported record path '${path}'; a text that starts with $ is written $$`,
+    if (read === null) return { refused: `unsupported record path '${path}'; a text that starts with $ is written $$`,
       column: columns.find((c) => c.name === path.slice(path.indexOf('.', 2) + 1)) };
-    const [, record, name] = match;
+    const { record, name } = read;
     const column = columns.find((c) => c.name === name);
     return { name, column, ref: column === undefined ? undefined : `${record.toUpperCase()}.${q(column.physical)}`,
       unavailable: (op === 'insert' && record === 'old') || (op === 'delete' && record === 'new') };
   };
 }
 
-/** A member of the row itself, as an index condition names it. */
-const MEMBER_PATH = /^\$\.([A-Za-z_][A-Za-z0-9_]*)$/;
-
 /**
- * An index condition's paths: `$.<member>` reads a column of the row itself;
- * a rule's operation and its old and new records do not exist there.
+ * An index condition's paths: `$.<member>` reads a column of the row itself
+ * (a member of any name also written `$['<member>']`); a rule's operation and
+ * its old and new records do not exist there, though a member named `op`,
+ * `old` or `new` does.
  * @param {any[]} columns the mapped columns @param {(name: string) => string} q the dialect's identifier quoting
  * @returns {PathResolver}
  */
 export function rowPaths(columns, q) {
   return (path) => {
-    if (path === '$.op') return { refused: "'$.op' is a rule's operation; an index condition reads $.<member>" };
-    if (/^\$\.(old|new)\./.test(path)) return { refused: `'${path}' reads a rule's record; an index condition reads $.<member>` };
-    const match = MEMBER_PATH.exec(path);
-    if (match === null) return { refused: `unsupported path '${path}'; an index condition reads $.<member>, and a text that starts with $ is written $$` };
-    const column = columns.find((c) => c.name === match[1]);
-    return { name: match[1], column, ref: column === undefined ? undefined : q(column.physical) };
+    const names = memberNames(path);
+    const column = names?.length === 1 ? columns.find((c) => c.name === names[0]) : undefined;
+    if (isOp(names) && column === undefined)
+      return { refused: `'${path}' is a rule's operation; an index condition reads $.<member> or $['<member>']` };
+    if (/^\$\.(old|new)\./.test(path) || (names !== null && names.length > 1 && (names[0] === 'old' || names[0] === 'new')))
+      return { refused: `'${path}' reads a rule's record; an index condition reads $.<member> or $['<member>']` };
+    if (names?.length !== 1)
+      return { refused: `unsupported path '${path}'; an index condition reads $.<member> or $['<member>'], and a text that starts with $ is written $$` };
+    return { name: names[0], column, ref: column === undefined ? undefined : q(column.physical) };
   };
 }
 

@@ -782,14 +782,6 @@ what each does is its own documentation's job
   the statement does the engine's work and a sort besides and is slower than
   the engine, on PostgreSQL more than on SQLite. Wanted: a cost signal (a
   distinct-count estimate or a bounded-group run-time fallback).
-- [ ] **Member paths outside ASCII identifiers in entity indexes, index
-  conditions and database rules.** Entity index paths, index conditions and
-  rule operands name members as `$.<member>` over ASCII identifiers. A member
-  named otherwise (`é`, `日本`, `123`, `a b`) takes per-property
-  `index`/`unique` flags but no entity index, condition or rule operand
-  (`JD0004`/`JD0005` at the member). Wanted: a bracket spelling
-  (`$['日本']`) through the one path resolver of the row-predicate module and
-  the entity index walk, with the same oracle rows.
 - [ ] **PostgreSQL verifies a layout index's expression term by shape.** A
   layout index term that is an expression (`lower(code)`) is verified on
   PostgreSQL by its position alone, where SQLite compares the CREATE text

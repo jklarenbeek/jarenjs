@@ -17,6 +17,28 @@ import { compileJsonQuery } from '@jarenjs/json/query';
 /** @param {string} name @param {string} [codec] @param {string} [nul] */
 export const column = (name, codec = 'integer', nul = 'reject') => ({ name, codec, null: nul });
 
+/** A member path in the bracket spelling, its name a single-quoted RFC 9535
+ * name (a quote and a backslash escaped): `$.new['日本']`. @param {string} prefix @param {string} name */
+export const bracketed = (prefix, name) => `${prefix}['${name.replaceAll('\\', '\\\\').replaceAll("'", "\\'")}']`;
+
+/**
+ * A value with each member path `$.<m>`, `$.old.<m>` or `$.new.<m>` whose
+ * member `names` renames written in the bracket spelling of its new name.
+ * @param {any} node @param {Record<string, string>} names @returns {any}
+ */
+export function renamePaths(node, names) {
+  if (typeof node === 'string') {
+    const match = /^(\$(?:\.(?:old|new))?)\.([A-Za-z_][A-Za-z0-9_]*)$/.exec(node);
+    return match !== null && Object.hasOwn(names, match[2]) ? bracketed(match[1], names[match[2]]) : node;
+  }
+  if (Array.isArray(node)) return node.map((item) => renamePaths(item, names));
+  if (node !== null && typeof node === 'object') return Object.fromEntries(Object.entries(node).map(([key, value]) => [key, renamePaths(value, names)]));
+  return node;
+}
+
+/** A record with the members `names` renames under their new names. @param {Record<string, any>} record @param {Record<string, string>} names */
+export const renameKeys = (record, names) => Object.fromEntries(Object.entries(record).map(([key, value]) => [Object.hasOwn(names, key) ? names[key] : key, value]));
+
 /** Two rules over one table, the first auditing into another. */
 export const ruleModel = { $model: '0.1', entities: {
   Entry: { schema: { type: 'object', properties: {
@@ -249,17 +271,23 @@ function plannedRefusal(node, policy) {
  * what the query engine accepts over the record as stored — a member omitted
  * where its column reads SQL NULL as absent — and refuses a row its codec
  * cannot read; a plan refuses a `null` literal against an absent member.
+ * `names` renames the members `a` and `b` (their columns keep their names),
+ * each path to one then written in the bracket spelling.
  * @param {RuleEngine} engine @param {{ a: string, b: string }} [policy] the columns' `null` policies
+ * @param {Record<string, string>} [names]
  * @returns {Promise<string>} per predicate, its verdicts or `refused`
  */
-export async function ruleTruthTable(engine, policy = TRUTH_POLICIES.null) {
+export async function ruleTruthTable(engine, policy = TRUTH_POLICIES.null, names = {}) {
   const verdicts = [];
   const absent = Object.keys(policy).filter((name) => policy[/** @type {'a' | 'b'} */ (name)] === 'absent');
   for (const expression of TRUTH_PREDICATES) {
     const spec = /** @type {any} */ (structuredClone(truthModel));
     for (const name of ['a', 'b']) spec.entities.Row.physical.columns[name].null = policy[/** @type {'a' | 'b'} */ (name)];
-    spec.entities.Row.invariants = [{ name: 'truth', on: ['insert'], assert: expression, enforcement: 'database' }];
-    const evaluate = compileJsonQuery(expression);
+    spec.entities.Row.schema.properties = renameKeys(spec.entities.Row.schema.properties, names);
+    spec.entities.Row.physical.columns = renameKeys(spec.entities.Row.physical.columns, names);
+    const assertion = renamePaths(expression, names);
+    spec.entities.Row.invariants = [{ name: 'truth', on: ['insert'], assert: assertion, enforcement: 'database' }];
+    const evaluate = compileJsonQuery(assertion);
     const fixture = await engine.fixture(TRUTH_TABLES);
     try {
       const refusal = plannedRefusal(expression, policy);
@@ -272,7 +300,7 @@ export async function ruleTruthTable(engine, policy = TRUTH_POLICIES.null) {
       const row = [];
       for (const a of [null, -1, 2]) for (const b of [null, -1, 2]) {
         const insert = () => fixture.exec(`INSERT INTO rows VALUES(1, ${a}, ${b})`);
-        const stored = Object.fromEntries(Object.entries({ a, b }).filter(([name, value]) => value !== null || !absent.includes(name)));
+        const stored = renameKeys(Object.fromEntries(Object.entries({ a, b }).filter(([name, value]) => value !== null || !absent.includes(name))), names);
         const accepted = evaluate({ old: null, new: { id: 1, ...stored }, op: 'insert' }) === true;
         if (accepted) { await insert(); await fixture.exec('DELETE FROM rows'); }
         else await assert.rejects(insert(), /jaren invariant:truth/, `${JSON.stringify(expression)} over ${JSON.stringify(stored)}`);
@@ -834,9 +862,16 @@ export const UNIQUE_WHERES = [
 const UNIQUE_SCHEMA = { type: 'object', required: ['id', 'employeeId', 'day'], properties: {
   id: { type: 'string', 'x-entity': { key: true } }, employeeId: { type: 'string' }, day: { type: 'string' },
   status: { type: ['string', 'null'] }, flag: { type: ['boolean', 'null'] }, n: { type: 'number' } } };
-/** One entity per condition, each with a unique index over the employee-day where the condition holds. */
-export const uniquenessModel = { $model: '0.1', entities: Object.fromEntries(UNIQUE_WHERES.map((where, i) => [`U${i}`,
-  { schema: UNIQUE_SCHEMA, indexes: [{ name: 'one', path: ['$.employeeId', '$.day'], unique: true, where }] }])) };
+/**
+ * One entity per condition, each with a unique index over the employee-day
+ * where the condition holds; `names` renames members, each path to one then
+ * written in the bracket spelling. @param {Record<string, string>} [names]
+ */
+export const uniquenessModelOf = (names = {}) => ({ $model: '0.1', entities: Object.fromEntries(UNIQUE_WHERES.map((where, i) => [`U${i}`,
+  { schema: { ...UNIQUE_SCHEMA, required: UNIQUE_SCHEMA.required.map((name) => (Object.hasOwn(names, name) ? names[name] : name)),
+    properties: renameKeys(UNIQUE_SCHEMA.properties, names) },
+  indexes: [{ name: 'one', path: renamePaths(['$.employeeId', '$.day'], names), unique: true, where: renamePaths(where, names) }] }])) });
+export const uniquenessModel = uniquenessModelOf();
 // a written null reads back as a missing member: the engine judges the record as stored
 const UNIQUE_VARIANTS = [{ status: 'active' }, { status: 'pending' }, { status: 'cancelled' }, { status: 'Active' }, {},
   { status: 'active', flag: true }, { flag: false }, { flag: true, n: 2 }, { n: -1 }, { n: 1.5 }, { n: 3, status: 'B' }, { status: 'b', n: 0 },
@@ -854,25 +889,28 @@ const asStored = (row) => Object.fromEntries(Object.entries(row).filter(([, valu
  * refused exactly when an earlier stored row of its employee-day also
  * satisfies the condition — beside the verdicts the store met, and every
  * accepted row read back beside the record the engine judged.
- * @param {any} store - a store opened over `uniquenessModel`
+ * @param {any} store - a store opened over `uniquenessModelOf(names)`
+ * @param {Record<string, string>} [names] - the members the model renames
  * @returns {Promise<{ where: any, expected: string[], actual: string[], judged: any[], stored: any[] }[]>}
  */
-export async function uniquenessAgreement(store) {
+export async function uniquenessAgreement(store, names = {}) {
   const out = [];
-  for (const [i, where] of UNIQUE_WHERES.entries()) {
+  const rows = UNIQUE_ROWS.map((row) => renameKeys(row, names));
+  for (const [i, declared] of UNIQUE_WHERES.entries()) {
+    const where = renamePaths(declared, names);
     const holds = compileJsonQuery(where);
     /** @type {Set<string>} */
     const taken = new Set();
-    const expected = UNIQUE_ROWS.map((row) => {
-      if (holds(asStored(row)) !== true) return 'ok';
+    const expected = UNIQUE_ROWS.map((row, at) => {
+      if (holds(asStored(rows[at])) !== true) return 'ok';
       const tuple = `${row.employeeId}\u0000${row.day}`;
       if (taken.has(tuple)) return 'JD2005/constraint';
       taken.add(tuple);
       return 'ok';
     });
     const entity = store.entity(`U${i}`);
-    const actual = await createVerdicts(entity, UNIQUE_ROWS);
-    const accepted = UNIQUE_ROWS.filter((_, at) => actual[at] === 'ok');
+    const actual = await createVerdicts(entity, rows);
+    const accepted = rows.filter((_, at) => actual[at] === 'ok');
     out.push({ where, expected, actual, judged: accepted.map(asStored),
       stored: await Promise.all(accepted.map((row) => entity.get(row.id))) });
   }
@@ -915,15 +953,22 @@ const HYBRID_WRONG_INTEGERS = { sqlite: ['9007199254740993'], postgres: ['900719
  * write is accepted exactly when the query engine accepts the record as the
  * store reads it back, an accepted row reads back as that record, an integer
  * no member reads back is refused, and a `null` literal against a member
- * that is never null refuses the open.
- * @param {RuleEngine} engine @returns {Promise<string>} per predicate, its verdicts or `refused`
+ * that is never null refuses the open. `names` renames the members `a` and
+ * `b`, and with them their columns, each path to one then written in the
+ * bracket spelling.
+ * @param {RuleEngine} engine @param {Record<string, string>} [names]
+ * @returns {Promise<string>} per predicate, its verdicts or `refused`
  */
-export async function hybridTruthTable(engine) {
+export async function hybridTruthTable(engine, names = {}) {
   const verdicts = [];
+  // a raw writer names a renamed column as a quoted identifier
+  const columnsSql = ['a', 'b'].map((name) => (Object.hasOwn(names, name) ? `"${names[name].replaceAll('"', '""')}"` : name)).join(', ');
   for (const expression of TRUTH_PREDICATES) {
     const model = /** @type {any} */ (structuredClone(hybridTruthModel));
-    model.entities.Row.invariants = [{ name: 'truth', on: ['insert'], assert: expression, enforcement: 'database' }];
-    const evaluate = compileJsonQuery(expression);
+    model.entities.Row.schema.properties = renameKeys(model.entities.Row.schema.properties, names);
+    const assertion = renamePaths(expression, names);
+    model.entities.Row.invariants = [{ name: 'truth', on: ['insert'], assert: assertion, enforcement: 'database' }];
+    const evaluate = compileJsonQuery(assertion);
     const fixture = await engine.fixture(STORE_OWNED_TABLES);
     try {
       if (nullOfAbsent(expression, ['a', 'b'])) {
@@ -936,10 +981,10 @@ export async function hybridTruthTable(engine) {
         const rows = store.entity('Row');
         const row = [];
         for (const a of [null, -1, 2]) for (const b of [null, -1, 2]) {
-          const stored = presentOf({ a, b });
+          const stored = renameKeys(presentOf({ a, b }), names);
           const expected = evaluate({ old: null, new: { id: 1, ...stored }, op: 'insert' }) === true;
           const by = { store: await accepted(() => rows.create({ id: 1, ...stored })),
-            raw: await accepted(() => fixture.exec(`INSERT INTO "Row" (id, a, b, doc) VALUES (2, ${rawValue(a)}, ${rawValue(b)}, ${rawDoc(engine)})`)) };
+            raw: await accepted(() => fixture.exec(`INSERT INTO "Row" (id, ${columnsSql}, doc) VALUES (2, ${rawValue(a)}, ${rawValue(b)}, ${rawDoc(engine)})`)) };
           assert.deepEqual(by, { store: expected, raw: expected }, `${JSON.stringify(expression)} over ${JSON.stringify(stored)}`);
           for (const [id, kept] of [[1, by.store], [2, by.raw]]) if (kept) assert.deepEqual(await rows.get(id), { id, ...stored });
           await fixture.exec('DELETE FROM "Row"');
@@ -947,7 +992,7 @@ export async function hybridTruthTable(engine) {
         }
         verdicts.push(row);
         for (const value of HYBRID_WRONG_INTEGERS[/** @type {'sqlite' | 'postgres'} */ (engine.name)])
-          await assert.rejects(fixture.exec(`INSERT INTO "Row" (id, a, b, doc) VALUES (3, ${value}, 2, ${rawDoc(engine)})`), /jaren invariant:truth/, value);
+          await assert.rejects(fixture.exec(`INSERT INTO "Row" (id, ${columnsSql}, doc) VALUES (3, ${value}, 2, ${rawDoc(engine)})`), /jaren invariant:truth/, value);
       }
       finally { await store.close(); }
     }
@@ -1403,3 +1448,111 @@ export async function hybridAgreement(engine, enforcement = 'database') {
   }
   finally { await fixture.dispose(); }
 }
+
+/** The members the member-path scenario reads, by their ASCII names. */
+export const PATH_MEMBERS = Object.freeze({ status: 'status', doc: 'doc', note: 'note' });
+const PATH_TABLES = {
+  sqlite: 'CREATE TABLE docs(id INTEGER PRIMARY KEY, status TEXT); CREATE TABLE lines(id INTEGER PRIMARY KEY, doc_id INTEGER, note TEXT)',
+  postgres: 'CREATE TABLE docs(id integer PRIMARY KEY, status text); CREATE TABLE lines(id integer PRIMARY KEY, doc_id integer, note text)',
+};
+
+/**
+ * A probe of a parent row, a delete rule over the old record and a sum over
+ * the new one, on explicit layouts whose columns keep their names while
+ * `names` renames the members they map; a renamed member's path is written in
+ * the bracket spelling.
+ * @param {'database' | 'store'} enforcement @param {Record<string, string>} names
+ */
+export const pathModel = (enforcement, names) => {
+  /** @param {string} record @param {string} member */
+  const spell = (record, member) => (names[member] === member ? `$.${record}.${member}` : bracketed(`$.${record}`, names[member]));
+  return { $model: '0.1', entities: {
+    Doc: { schema: { type: 'object', properties: { id: { type: 'integer', 'x-entity': { key: true } }, [names.status]: { type: 'string' } } },
+      physical: { table: 'docs', columns: { id: column('id'), [names.status]: column('status', 'text') } } },
+    Line: { schema: { type: 'object', properties: { id: { type: 'integer', 'x-entity': { key: true } }, [names.doc]: { type: 'integer' },
+      [names.note]: { type: 'string' } } },
+    physical: { table: 'lines', columns: { id: column('id'), [names.doc]: column('doc_id'), [names.note]: column('note', 'text') } },
+    invariants: [
+      { name: 'open_parent', on: ['insert'], enforcement,
+        assert: { '$exists-row': { entity: 'Doc', match: { id: spell('new', 'doc'), [names.status]: 'draft' } } } },
+      { name: 'kept', on: ['delete'], enforcement, assert: { $ne: [spell('old', 'note'), 'held'] } },
+      { name: 'bounded', on: ['update'], enforcement, assert: { $le: [{ $add: [spell('new', 'doc'), 1] }, 10] } },
+    ] },
+  } };
+};
+
+/**
+ * The member-path scenario: the store's writes and, where the database
+ * enforces, a raw writer's, each `ok` or the rule that refused it, and the
+ * lines left behind read back under their ASCII member names — the same
+ * string for every `names` that renames the members.
+ * @param {RuleEngine} engine @param {'database' | 'store'} enforcement @param {Record<string, string>} [names]
+ * @returns {Promise<string>}
+ */
+export async function memberPathScenario(engine, enforcement, names = PATH_MEMBERS) {
+  const model = pathModel(enforcement, names);
+  const back = Object.fromEntries(Object.entries(names).map(([ascii, name]) => [name, ascii]));
+  const fixture = await engine.fixture(PATH_TABLES);
+  try {
+    if (enforcement === 'database') for (const statement of planInvariants(model, { dialect: fixture.dialect })) await fixture.exec(statement.sql);
+    const store = await openStore(model, { driver: fixture.driver });
+    try {
+      const docs = store.entity('Doc'), lines = store.entity('Line');
+      await docs.create({ id: 1, [names.status]: 'draft' });
+      await docs.create({ id: 2, [names.status]: 'final' });
+      const writes = [];
+      for (const write of [
+        () => lines.create({ id: 1, [names.doc]: 1, [names.note]: 'held' }), () => lines.create({ id: 2, [names.doc]: 2, [names.note]: 'a' }),
+        () => lines.create({ id: 3, [names.doc]: 3, [names.note]: 'a' }), () => lines.update(1, { [names.doc]: 9 }),
+        () => lines.update(1, { [names.doc]: 10 }), () => lines.delete(1), () => lines.update(1, { [names.note]: 'free' }), () => lines.delete(1),
+      ]) writes.push(await outcome(write));
+      if (enforcement === 'database') for (const sql of ["INSERT INTO lines(id, doc_id, note) VALUES (5, 2, 'a')",
+        "INSERT INTO lines(id, doc_id, note) VALUES (6, 1, 'held')", 'DELETE FROM lines WHERE id = 6', 'UPDATE lines SET doc_id = 10 WHERE id = 6'])
+        writes.push(await outcome(() => fixture.exec(sql)));
+      const rows = await Promise.all([1, 2, 3, 5, 6].map((key) => lines.get(key)));
+      return JSON.stringify({ writes, lines: rows.map((row) => (row === undefined ? null : renameKeys(row, back))) });
+    }
+    finally { await store.close(); }
+  }
+  finally { await fixture.dispose(); }
+}
+
+/** Names no `$.<member>` spells: unicode (an astral one included), a leading digit, a blank, and each of `'`, `"`, `]`, `\` and SQL. */
+export const ODD_NAMES = ['日本', 'é', '𝒳', '123', 'a b', "it's", 'say "hi"', 'x]y', 'back\\slash', 'x"); DROP TABLE "U0"; --'];
+/** The uniqueness oracle's members under such names. */
+export const UNIQUE_NAMES = { employeeId: '日本', day: 'x"); DROP TABLE "U0"; --', status: 'it\'s "a]b" \\ c', flag: 'é', n: '123' };
+/** The truth members `a` and `b`, renamed. */
+export const TRUTH_NAMES = { a: 'a b', b: 'b"; DROP TABLE "Row"; --' };
+/** The member-path scenario's members, renamed. */
+export const SCENARIO_NAMES = { status: '状態', doc: 'x"); DROP TABLE lines; --', note: 'it\'s "a]b" \\ c' };
+/** The motivating index's members, renamed. */
+export const SHIFT_NAMES = { employeeId: '従業員', day: 'a b', status: 'x"]\\\'' };
+
+/** The motivating model with its members renamed and its paths in the bracket spelling. @param {Record<string, string>} names */
+export const shiftModelOf = (names) => shiftModel([renamePaths(ONE_ACTIVE, names)],
+  { ...SHIFT_SCHEMA, required: SHIFT_SCHEMA.required.map((name) => names[name] ?? name), properties: renameKeys(SHIFT_SCHEMA.properties, names) });
+
+/** One entity whose members take every name of `ODD_NAMES`: a unique index over each member where it is not
+ * `free` (a row lacking the member is outside it), and one database rule that refuses `bad` in any of them. */
+export const oddNamesModel = () => ({ $model: '0.1', entities: { E: {
+  schema: { type: 'object', properties: { id: { type: 'string', 'x-entity': { key: true } },
+    ...Object.fromEntries(ODD_NAMES.map((name) => [name, { type: 'string' }])) } },
+  indexes: ODD_NAMES.map((name, at) => ({ name: `i${at}`, path: bracketed('$', name), unique: true, where: { $ne: [bracketed('$', name), 'free'] } })),
+  invariants: [{ name: 'no_bad', on: ['insert', 'update'], enforcement: 'database',
+    assert: { $and: ODD_NAMES.map((name) => ({ $not: { $eq: [bracketed('$.new', name), 'bad'] } })) } }],
+} } });
+
+/**
+ * Per name of `ODD_NAMES`, the verdicts of five creates into a store opened
+ * over `oddNamesModel()`: a value, the same value again, `free` twice, `bad`.
+ * @param {any} store @returns {Promise<string[][]>}
+ */
+export async function oddNameVerdicts(store) {
+  const entity = store.entity('E');
+  const out = [];
+  for (const [at, name] of ODD_NAMES.entries())
+    out.push(await createVerdicts(entity, ['v', 'v', 'free', 'free', 'bad'].map((value, i) => ({ id: `${at}-${i}`, [name]: value }))));
+  return out;
+}
+/** What `oddNameVerdicts` answers for every name. */
+export const ODD_NAME_VERDICTS = ['ok', 'JD2005/constraint', 'ok', 'ok', 'JD2096/constraint'];

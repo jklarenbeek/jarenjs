@@ -88,7 +88,8 @@ The store runs over SQLite — on Node (`@jarenjs/db/node`), on Bun
 - `indexes[].where` makes the index **partial**: it holds only the
   documents a bounded condition is true for, so a unique index refuses a
   second document only where both satisfy it. The condition is a query
-  expression over top-level members (`$.<member>`) the collection
+  expression over top-level members (`$.<member>`, or `$['<member>']` for
+  any name, §9.2) the collection
   already indexes by their path, each of one scalar schema type that
   excludes `null` — a generated column holds SQL NULL for a JSON null
   and for a missing member alike, which the query engine tells apart —
@@ -2700,9 +2701,22 @@ inside the writing transaction lets a concurrent writer slip past it.
   scalar, a foreign key's `via` column, an epoch (`column: "integer"`)
   member. A member the document keeps, a nested path and a relation are
   `JD0004` naming the member: map it as a column.
+- A member of any name — `日本`, `é`, `123`, `a b`, one holding a quote, a
+  bracket or a backslash — is written in the bracket spelling,
+  `$['<member>']` or `$["<member>"]`, a quote or a backslash in the name
+  escaped as a JSONPath (RFC 9535) quoted name escapes it (`$['it\'s']`,
+  `$['a\\b']`). The model reads every index path, condition operand and rule
+  operand through the query language's own path grammar, so any spelling of
+  one member it reads (`$.日本` included) names that member, and two spellings
+  of one member are one path. The generated SQL quotes the member's column as
+  an identifier on both engines, and a model whose members are all identifiers
+  plans the SQL it planned before.
 - `where` is the condition of §2's partial index, over the same
   members minus the epoch ones (the column holds milliseconds, the
-  condition would compare the member's text). Every operand is read as
+  condition would compare the member's text), each written `$.<member>` or
+  `$['<member>']`; a member named `op` is read there as any other (in a rule
+  `$.op` is the operation), and `$.old.<member>` and `$.new.<member>` are a
+  rule's records, which an index condition refuses. Every operand is read as
   stored: a member a row lacks is SQL NULL, never equal, unequal or
   ordered; a boolean compares the stored `1` or `0`, on both engines.
 - The mapping keeps one-column entries apart: `explainMapping()`'s
@@ -2730,8 +2744,10 @@ inside the writing transaction lets a concurrent writer slip past it.
   property's `unique` or `index`, and any other one an `indexes` entry,
   its condition read back only where it renders to exactly what the
   database holds, in the reader's canonical form (a boolean as the stored
-  `1` or `0`, a one-item list as `$eq`, nested `$and`/`$or` flattened —
-  equal in meaning and rendered SQL). An index no model declares — an
+  `1` or `0`, a one-item list as `$eq`, nested `$and`/`$or` flattened, a
+  member that is no identifier as `$["<member>"]` — equal in meaning and
+  rendered SQL). A `unique` or `index` flag on such a member reads back as
+  the flag. An index no model declares — an
   `INCLUDE` column, an operator class, collation or key order of its own,
   a name another planned object takes with case folded — stays an
   `unmapped-index` row. The derived model types a member as its column
@@ -4588,7 +4604,8 @@ judged as §13.3 says of a document, with no change test of its own.
 
 `{ "$exists-row": { "entity": "<Entity>", "match": { "<member>": <value>, … } } }`
 is true when the target entity holds a row whose members equal the values. A
-value is `$.old.member`, `$.new.member` or a scalar literal; a text literal
+value is `$.old.member`, `$.new.member` (a member of any name written
+`$.new['<member>']`, §9.2) or a scalar literal; a text literal
 that starts with `$` is written `$$`, as in any query (`"$$draft"` is the text
 `$draft`). `match` covers the target's whole primary key, or every column of
 one unique index of the target that its open verifies — a `physical.indexes`
@@ -4741,12 +4758,13 @@ Database enforcement also requires a bounded query expression, which one
 row-predicate compiler lowers to SQL that gives the query engine's answer over
 the row as stored, with the one exception below. Its operands are scalar
 literals, `$.op`, and `$.old.member` / `$.new.member` references to `text`,
-`integer`, `number`, `boolean`, `date` and `datetime` columns. A literal is read
+`integer`, `number`, `boolean`, `date` and `datetime` columns, a member of any
+name written `$.new['<member>']` (§9.2). A literal is read
 as the query language reads it: a text that starts with `$` is written `$$`,
 and `$const` quotes one level as written, so a quoted object or list (a nested
 `$const` included) is no scalar and refuses, as does a text holding U+0000,
-which SQL text cannot carry; any other `$` expression (a variable, a bracketed
-path) refuses. A column's `null` policy (§12) says what its SQL NULL is, and so
+which SQL text cannot carry; any other `$` expression (a variable, a path with
+an index or a wildcard, a nested member) refuses. A column's `null` policy (§12) says what its SQL NULL is, and so
 what a rule reads there: on a `null` column a JSON null, so equality is
 null-safe (a `null` literal matches it, and `$ne` of `2` and a null holds); on
 an `absent` column a missing member, which every comparison finds false — `$ne`

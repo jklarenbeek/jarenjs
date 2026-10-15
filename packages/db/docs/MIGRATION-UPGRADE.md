@@ -2587,6 +2587,42 @@ before the untyped union column (§18) refuses such a SQLite table `JD0002`, and
 one from before the guard (§21) such a PostgreSQL table, as each refuses a table
 a later release created; go back by the statements those sections give.
 
+## 37. A member of any name in an entity index, an index condition and a rule
+
+An entity index path, an index condition's operand (on an entity or a
+collection) and a database rule's operand named a member as `$.<member>` over
+ASCII identifiers, so a member named `日本`, `é`, `123` or `a b` took its own
+`index` or `unique` flag but was refused in any of them (`JD0004` at the index
+path or condition, `JD0005` at the rule). Each now takes the bracket spelling,
+`$['日本']` or `$.new['a b']`, read through the query language's path grammar
+([MODEL-FORMAT §9.2](MODEL-FORMAT.md#92-the-x-entity-vocabulary-a-closed-set)),
+and answers as the same index, condition or rule over an identifier-named
+member does, the store's enforcement and the database's alike. A model whose
+members are all identifiers plans exactly the SQL it planned before, so a store
+the previous release created opens, plans and introspects as before, with three
+answers changed:
+
+- `introspect()` reads a `unique` or `index` flag on a member that is no
+  identifier back as the flag, where it reported the index `unmapped-index`
+  and a plan from the derived model created it again.
+- An index condition reads a member named `op` (`$.op`) as its column, where
+  it refused it as a rule's operation; without such a member `$.op` is still
+  refused.
+- `introspect()` types a member an expression index reads whose name holds
+  `]`, where the derived schema left it out.
+
+A rule's paths are one path in every spelling: an update rule reading an
+incremented member, a store-owned layout's rule reading an epoch member, and a
+PostgreSQL audit that would round a number are refused in the bracket spelling
+as in the dotted one.
+
+**Downgrade.** The previous release refuses a model that writes a bracket
+path in an entity index, a condition or a rule (`JD0004` at the index path or
+condition, `JD0005` at the rule), so it does not open a store whose model
+declares one; go back by declaring those members' indexes as `unique` or
+`index` flags, or by renaming the members to identifiers. Tables of a model
+without one are the ones the previous release creates.
+
 ## Measured costs
 
 Exact identity stores complete canonical documents and model endpoints, so

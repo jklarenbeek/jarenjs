@@ -37,7 +37,7 @@ import { isKeyword } from './sql.js';
 import { foldIdentifier } from './invariants.js';
 import { MODEL_VERSION, ENGINE_TABLES, IDENTIFIER } from './engine-metadata.js';
 import { registeredName, expressionMembers } from './expression.js';
-import { modelPath, readsAsIndex } from './model-path.js';
+import { modelPath, readModelPath, readsAsIndex } from './model-path.js';
 import { isJsonObject, setObjectMember } from '@jarenjs/core/object';
 
 /**
@@ -471,41 +471,14 @@ function placeType(node, segments, type, open = false) {
 
 /**
  * A `$.a.b[0]` path back into typed segments — the shape `placeType`
- * walks. `null` for a spelling this module did not produce.
+ * walks. `null` for a path that is not one of names and non-negative
+ * indexes.
  * @param {string} path
  * @returns {import('./dialect.js').JsonPathSegment[] | null}
  */
 function memberSegments(path) {
-  if (!path.startsWith('$')) return null;
-  const segments = [];
-  let i = 1;
-  while (i < path.length) {
-    if (path[i] === '.') {
-      const match = /^\.([A-Za-z_][A-Za-z0-9_]*)/.exec(path.slice(i));
-      if (match === null) return null;
-      segments.push({ name: match[1] });
-      i += match[0].length;
-      continue;
-    }
-    if (path[i] === '[') {
-      const end = path.indexOf(']', i + 1);
-      if (end < 0) return null;
-      const body = path.slice(i + 1, end);
-      if (/^(?:0|[1-9][0-9]*)$/.test(body)) segments.push({ index: Number(body) });
-      else {
-        try {
-          const name = JSON.parse(body);
-          if (typeof name !== 'string') return null;
-          segments.push({ name });
-        }
-        catch { return null; }
-      }
-      i = end + 1;
-      continue;
-    }
-    return null;
-  }
-  return segments.length === 0 ? null : segments;
+  const read = readModelPath(path);
+  return 'segments' in read && read.segments.every((segment) => !('index' in segment) || segment.index >= 0) ? read.segments : null;
 }
 
 /**
@@ -742,12 +715,11 @@ function declareEdges(dialect, entities, tables, edges, report) {
   }
 }
 
-/** An identifier a `$.<member>` path and an index name can spell. */
-
 /**
  * The columns of an entity table an index or its condition may read: a
  * scalar column the entity maps (a key and a foreign key included), each
- * with the codec its type reads back as.
+ * with the codec its type reads back as. A member of any name has a path:
+ * `$.<member>`, or `$["<member>"]` for one that is no identifier.
  * @param {any} dialect @param {any} table
  * @returns {{ name: string, physical: string, codec: string }[]}
  */
@@ -756,8 +728,7 @@ function readableColumns(dialect, table) {
   return table.columns.flatMap((/** @type {any} */ column) => {
     const codec = SCALAR_CODECS.get(dialect.schemaTypeOf(column.type));
     return column.generated || column.name === DOC_COLUMN || column.name === identity
-      || codec === undefined || !IDENTIFIER.test(column.name)
-      ? [] : [{ name: column.name, physical: column.name, codec }];
+      || codec === undefined ? [] : [{ name: column.name, physical: column.name, codec }];
   });
 }
 
@@ -795,7 +766,9 @@ function entityIndexOf(dialect, table, index, readable) {
     return `the index covers (${index.columns.map((/** @type {string | null} */ column) => column ?? '<expression>').join(', ')}), `
       + 'which are not all scalar columns the entity maps';
   /** @type {any} */
-  const declared = { name, path: index.columns.length === 1 ? `$.${index.columns[0]}` : index.columns.map((/** @type {string} */ column) => `$.${column}`),
+  /** @param {string} member */
+  const pathOf = (member) => modelPath([{ name: member }]);
+  const declared = { name, path: index.columns.length === 1 ? pathOf(index.columns[0]) : index.columns.map(pathOf),
     ...(index.unique ? { unique: true } : {}) };
   const keepsText = dialect.capabilities?.declaredSqlText === true;
   /** @type {string | undefined} */
@@ -804,7 +777,7 @@ function entityIndexOf(dialect, table, index, readable) {
     const text = keepsText ? conditionText(index.sql) : index.predicate;
     const member = (/** @type {string} */ identifier) => {
       const column = readable.find((c) => c.physical === identifier);
-      return column === undefined ? null : { path: `$.${column.name}`, codec: column.codec };
+      return column === undefined ? null : { path: pathOf(column.name), codec: column.codec };
     };
     const where = text === null ? null : keepsText ? readPredicate(text, SQLITE_PREDICATE, member)
       : dialect.readBack?.read(text, readable, index.conforming) ?? null;

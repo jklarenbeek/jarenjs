@@ -16,6 +16,7 @@
  * (`conditionForm`), and a condition either side does not read is not
  * compared. Only the PostgreSQL dialect imports this module.
  */
+import { modelPath } from '../model-path.js';
 import { POSTGRES_PREDICATE, POSTGRES_PREDICATE_ESCAPED, READ_DEPTH, decimalText, postgresStrings, readPredicate, sqlTokens } from './check-read.js';
 
 /** The string types a literal of text keeps its value under. */
@@ -500,7 +501,7 @@ export function conditionForm(sql, conforming, typeOf) {
  * @param {{ name: string, physical: string, codec: string }[]} columns */
 const memberOf = (columns) => (/** @type {string} */ identifier) => {
   const column = columns.find((c) => c.physical === identifier);
-  return column === undefined ? null : { path: `$.${column.name}`, codec: column.codec };
+  return column === undefined ? null : { path: modelPath([{ name: column.name }]), codec: column.codec };
 };
 
 /**

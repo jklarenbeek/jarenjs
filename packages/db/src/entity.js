@@ -24,7 +24,7 @@ import { setObjectMember, isJsonObject } from '@jarenjs/core/object';
 import { DbRuntimeError, wrapDriverError, wrapHeldKey, keyUndecided } from './errors.js';
 import { chain, isThenable, attempt, useStatementOnce, releaseStatements as releasePrepared } from './driver.js';
 import { createCursor, createSyncCursor, rowClassOf } from './cursor.js';
-import { checkInvariants, existsRowSql, RECORD_PATH, ruleLiteral } from './invariants.js';
+import { checkInvariants, existsRowSql, recordPath, ruleLiteral } from './invariants.js';
 import { columnCodec, physicalRead } from './physical.js';
 import { mergeEntityRow } from './graph.js';
 import { namesNoNumber, noNumberKeyReason, numericKeyValue } from './key-text.js';
@@ -575,8 +575,8 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
     const params = [];
     let none = false;
     const sql = existsRowSql(spec, dialect, (expression, column) => {
-      const path = typeof expression === 'string' ? RECORD_PATH.exec(expression) : null;
-      const value = path === null ? ruleLiteral(expression) : record[path[1]]?.[path[2]] ?? null;
+      const path = recordPath(expression);
+      const value = path === null ? ruleLiteral(expression) : record[path.record]?.[path.name] ?? null;
       let encoded = null;
       try { encoded = value === null ? null : columnCodec(column).encode(value); }
       catch { none = true; }

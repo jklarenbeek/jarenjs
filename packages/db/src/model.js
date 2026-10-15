@@ -26,6 +26,7 @@ import { refuseUnknownModelMembers } from './options.js';
 import { columnCodec, normalizePhysical } from './physical.js';
 import { normalizeInvariants, resolveInvariants } from './invariants.js';
 import { schemaPosition } from './schema-positions.js';
+import { memberNames, modelPath } from './model-path.js';
 
 /** The closed `x-entity` vocabulary; anything else is `JD0030`. */
 const ENTITY_MEMBERS = new Set(['key', 'unique', 'index', 'default', 'column', 'relation', 'version']);
@@ -39,8 +40,13 @@ const ENTITY_INDEX_MEMBERS = ['name', 'path', 'expression', 'unique', 'where'];
 /** The collection index members that need a generated column, which an entity
  * table never has: recognized, and refused by name before any other member. */
 const GENERATED_INDEX_MEMBERS = ['derive', 'precision', 'dims', 'physical'];
-/** An entity index path: one top-level member. */
-const MEMBER_PATH = /^\$\.([A-Za-z_][A-Za-z0-9_]*)$/;
+/** The member an entity index path names: one top-level member, written
+ * `$.<member>` or, for any name, `$['<member>']`; `undefined` for any other
+ * path. @param {string} path @returns {string | undefined} */
+const indexMember = (path) => {
+  const names = memberNames(path);
+  return names?.length === 1 ? names[0] : undefined;
+};
 /** Why an entity index reads only what a column holds. */
 const COLUMN_MAPPED = 'an entity index reads column-mapped top-level members as their columns hold them, '
   + 'and an entity table has no generated column — map it as a column (a top-level scalar property)';
@@ -237,10 +243,10 @@ function normalizeEntityIndexes(spec, docPath) {
     if (paths.length === 0 || paths.some((path) => typeof path !== 'string' || path === ''))
       throw modelError('an index path is a $.<member> string (a composite index takes a non-empty array of them)', `${indexPath}/path`);
     for (const path of paths) {
-      if (!MEMBER_PATH.test(path))
-        throw modelError(`the index path '${path}' is not one member written $.<member>: ${COLUMN_MAPPED}`, `${indexPath}/path`, 'JD0004');
+      if (indexMember(path) === undefined)
+        throw modelError(`the index path '${path}' is not one member written $.<member> or $['<member>']: ${COLUMN_MAPPED}`, `${indexPath}/path`, 'JD0004');
     }
-    return { name: index.name, paths: paths.map((path) => path.slice(2)), unique: index.unique === true,
+    return { name: index.name, paths: paths.map(indexMember), unique: index.unique === true,
       where: index.where, docPath: indexPath };
   });
 }
@@ -758,11 +764,12 @@ function entityIndexesOf(entity, columns, foreignKeys) {
     for (const member of index.paths) {
       if (mapped.has(member)) continue;
       const property = entity.properties.get(member);
+      const path = modelPath([{ name: member }]);
       throw modelError(property === undefined
-        ? `the index path '$.${member}' names no property of entity '${entity.name}'`
+        ? `the index path '${path}' names no property of entity '${entity.name}'`
         : property.relation !== undefined
-          ? `the index path '$.${member}' names a relation, which has no column of its own — index the foreign key it declares`
-          : `the index path '$.${member}' reads '${member}', which the entity's document holds: ${COLUMN_MAPPED}`,
+          ? `the index path '${path}' names a relation, which has no column of its own — index the foreign key it declares`
+          : `the index path '${path}' reads '${member}', which the entity's document holds: ${COLUMN_MAPPED}`,
       `${index.docPath}/path`, 'JD0004');
     }
     return { name: index.name, columns: [...index.paths], unique: index.unique,

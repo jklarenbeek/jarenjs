@@ -86,7 +86,7 @@ export const POSTGRES = {
     if (column.codec !== 'integer') return;
     let literal = expression;
     while (literal && typeof literal === 'object' && Object.hasOwn(literal, '$const')) literal = literal.$const;
-    const source = typeof expression === 'string' && expression.startsWith('$.') ? columnOf(expression) : undefined;
+    const source = typeof expression === 'string' && expression.startsWith('$') && !expression.startsWith('$$') ? columnOf(expression) : undefined;
     if (source?.codec === 'number' || (typeof literal === 'number' && !Number.isInteger(literal)))
       fail(`audit member '${column.name}' is an integer column, which would round a number`);
   },

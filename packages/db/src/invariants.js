@@ -9,12 +9,22 @@ import { chain } from './driver.js';
 import { DbCompileError, DbRuntimeError } from './errors.js';
 import { refuseUnknownModelMembers } from './options.js';
 import { IDENTIFIER } from './engine-metadata.js';
+import { memberNames } from './model-path.js';
 
 const MEMBERS = ['name', 'on', 'assert', 'enforcement', 'audit', 'when', 'columns', 'effects'];
 /** The codecs a rule compares, as SQL and as JSON alike. */
 export const RULE_CODECS = ['text', 'integer', 'number', 'boolean', 'date', 'datetime'];
-/** A rule value that reads the record: `$.old.<member>` or `$.new.<member>`. */
-export const RECORD_PATH = /^\$\.(old|new)\.([A-Za-z_][A-Za-z0-9_]*)$/;
+/**
+ * The record and member a rule value reads: `$.old.<member>` or
+ * `$.new.<member>`, a member of any name also written `$.new['<member>']`;
+ * `null` for any other value.
+ * @param {unknown} value
+ * @returns {{ record: 'old' | 'new', name: string } | null}
+ */
+export function recordPath(value) {
+  const names = memberNames(value);
+  return names?.length === 2 && (names[0] === 'old' || names[0] === 'new') ? { record: names[0], name: names[1] } : null;
+}
 /** The bound of the safe-integer range an integer a rule reads, and every sum,
  * difference or negation it computes, must hold to: ±(2^53 − 1), the range
  * the engine's doubles count exactly, held by the trigger and the store alike. */
@@ -105,7 +115,7 @@ function withProbes(node, probes, fail) {
 /** Whether every leaf of an arithmetic node is a record path or an integer
  * literal, through nested arithmetic. @param {any[]} operands @returns {boolean} */
 function plainArithmetic(operands) {
-  return operands.every((operand) => (typeof operand === 'string' ? RECORD_PATH.test(operand)
+  return operands.every((operand) => (typeof operand === 'string' ? recordPath(operand) !== null
     : typeof operand === 'number' ? Number.isInteger(operand)
       : isArithmetic(operand) ? plainArithmetic([Object.values(operand)[0]].flat())
         : isJsonObject(operand) && Object.keys(operand).length === 1
@@ -127,7 +137,7 @@ function arithmeticOf(node, out = []) {
       const [key, args] = Object.entries(node)[0];
       const operands = key === '$neg' ? [args] : args;
       out.push({ evaluate: compileJsonQuery(node), operands: operands.map((operand) => compileJsonQuery(operand)),
-        reads: pathsOf(node).map((path) => RECORD_PATH.exec(path)?.[2]), plain: plainArithmetic(operands) });
+        reads: pathsOf(node).map((path) => recordPath(path)?.name), plain: plainArithmetic(operands) });
     }
     for (const value of Object.values(node)) arithmeticOf(value, out);
   }
@@ -211,7 +221,7 @@ export function normalizeInvariants(rules, path) {
 /** The record paths a value reads, outside `$const`.
  * @param {any} node @param {string[]} [out] @returns {string[]} */
 function pathsOf(node, out = []) {
-  if (typeof node === 'string' && node.startsWith('$.')) out.push(node);
+  if (typeof node === 'string' && (node.startsWith('$.') || node.startsWith('$['))) out.push(node);
   else if (Array.isArray(node)) for (const item of node) pathsOf(item, out);
   else if (node && typeof node === 'object' && !Object.hasOwn(node, '$const'))
     for (const value of Object.values(node)) pathsOf(value, out);
@@ -235,7 +245,7 @@ function refuseStoreOwnedRule(entity, rule, storageOf, fail) {
   if (rule.probes.length > 0)
     fail('database invariant: a database rule on a store-owned layout reads no other row: $exists-row lowers from an explicit column layout', 'assert');
   for (const path of pathsOf(rule.assert)) {
-    const name = RECORD_PATH.exec(path)?.[2];
+    const name = recordPath(path)?.name;
     const property = name === undefined ? undefined : entity.properties.get(name);
     const storage = property === undefined ? 'column' : storageOf(property);
     if (storage === 'epoch') fail(`database invariant: '${name}' holds an epoch (milliseconds) in its column, while a rule compares the member's text — `
@@ -389,10 +399,10 @@ export function resolveInvariants(entities, codecOf, storageOf) {
           if (keys.includes(member) && ruleLiteral(value) === null)
             refuse(`$exists-row member '${member}' is one the probe is keyed by, which matches a value, never null: a key holds no null and a unique index admits any number of them`);
           const escaped = typeof value === 'string' && value.startsWith('$') && !value.startsWith('$$');
-          const path = escaped ? RECORD_PATH.exec(value) : null;
-          if (escaped && path === null) refuse(`$exists-row value '${value}' must read $.old.<member> or $.new.<member>; a text that starts with $ is written $$`);
+          const path = escaped ? recordPath(value) : null;
+          if (escaped && path === null) refuse(`$exists-row value '${value}' must read $.old.<member> or $.new.<member> (any name also $.new['<member>']); a text that starts with $ is written $$`);
           if (path !== null) {
-            const name = path[2];
+            const name = path.name;
             if (layout === null) {
               if (entity.properties.get(name)?.relation !== undefined || !entity.properties.has(name))
                 refuse(`$exists-row value '${value}': '${entity.name}' has no stored property '${name}'`);
@@ -421,8 +431,9 @@ export function resolveInvariants(entities, codecOf, storageOf) {
       if (!rule.on.includes('update')) continue;
       const at = `${entity.docPath}/invariants/${index}`;
       for (const member of increments) {
-        const readIn = pathsOf(rule.assert).includes(`$.new.${member}`) ? 'assert'
-          : pathsOf(rule.audit?.values ?? {}).includes(`$.new.${member}`) ? 'audit' : null;
+        /** @param {any} node */
+        const readsNew = (node) => pathsOf(node).some((path) => recordPath(path)?.record === 'new' && recordPath(path)?.name === member);
+        const readIn = readsNew(rule.assert) ? 'assert' : readsNew(rule.audit?.values ?? {}) ? 'audit' : null;
         if (readIn !== null)
           throw new DbCompileError('JD0005', `'${member}' is incremented by the database: an update rule cannot read $.new.${member}`, `${at}/${readIn}`);
         if (rule.columns?.includes(member))
