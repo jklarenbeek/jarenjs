@@ -2890,6 +2890,52 @@ which the model does not declare)`). Go back by dropping each such index
 release as one it created. A store whose join tables an earlier release created
 and that never ran the upgrade link opens on the previous release as before.
 
+## 45. A digit name read back as a name, a key past its column's width, and a join table checked before a PostgreSQL link commits
+
+- On PostgreSQL a generated column, an index expression or an interval CHECK
+  over a member name the path text spells as an index (`$.s['0']` with `s`
+  declared `type: 'object'`, or the document's own `$['0']`) was written without
+  the guard, in the text an index step off an array takes, so `introspect()`
+  read it back as that index (`$.s[0]`, `s` an array), an interval over it did
+  not reopen (`JD0002`), and a plan from a model that reads the name under the
+  guard to the model derived from the table rebuilt the column. A table this
+  release creates reads such a name under the object guard whatever the schema
+  declares; it reopens, introspects to the names it was declared with, and the
+  round trip plans nothing. A comparison over the path still reads the column,
+  and a document's answers do not change. A table an earlier release created
+  opens as it did (one with such an interval still refuses `JD0002`), and
+  `planColumnUpgrade(connection, model)` plans the link that rebuilds its
+  columns and CHECK to the guarded text (`report.upgraded` names each); after
+  it the table opens and introspects to the names. SQLite spells a name and
+  an index apart and is unchanged.
+- On PostgreSQL a point read, a tracked update or delete and a key-addressed
+  `mutate({ key })` over an adopted `smallint` or `integer` key column refused a
+  key past the column's width (`get(3000000000)`) `JD2005` (`value
+  "3000000000" is out of range for type integer`); the key's parameter is now
+  spelled `($n)::bigint`, so such a key names no row, as the engine answers
+  (`get` answers `undefined`, `mutate` affects nothing, a tracked update is
+  `JD2006` as for any key no row holds), and the primary key's index serves
+  every key.
+- On PostgreSQL `migrate()` with a target `model` now verifies the many-to-many
+  join tables a link leaves as the next open verifies them. A rename link an
+  earlier release planned, applied to a join table this or the previous release
+  indexed over its second key column, left the index under the table's old
+  name and the next open refused the table `JD0002`; the link now fails
+  `JD0023` (`the migrated shape does not equal the target model's: entity
+  'Label_Person': … the database has Label_User_User_key, which the model does
+  not declare; the next open would refuse the table (JD0002), so nothing was
+  changed: …`) before it commits, as it does on SQLite. Plan the link again
+  with this release, or drop the old index in a `sql` step before it. A link
+  that leaves every join table as the open accepts it applies as before.
+
+**Downgrade.** The previous release opens, reads, queries and introspects a
+store this release creates exactly as this release does: it reads the guarded
+text of a digit name as the other spelling of the path. Its
+`planColumnUpgrade` plans a link that rebuilds such definitions to the
+unguarded text; do not apply it, or a name `'0'` reads back as an index again.
+A rename link the previous release planned is refused by this release where
+it would leave a join table the open refuses; plan it again.
+
 ## Measured costs
 
 Exact identity stores complete canonical documents and model endpoints, so

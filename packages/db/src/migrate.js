@@ -3353,10 +3353,41 @@ function acceptMigrationModel(connection, model, options, driver, physical, targ
     const entities = normalizeEntities(model);
     if (entities.size === 0 || physical || target !== undefined || [...entities.values()].some((entity) => entity.physical)) return null;
     if (typeof driver?.open !== 'function') throw refuse('JD0021', 'borrowed model comparison requires shadowDriver or a complete physicalTarget');
+    if (connection.dialect.capabilities.declaredSqlText !== true) return acceptJoinTables(connection, model);
     return chain(compareShapeToModel(driver, connection, model, options.registerFunctions, options.expressions), (difference) => {
       if (difference !== null) throw refuse('JD0023', `the migrated shape does not equal the target model's: ${difference}`);
     });
   });
+}
+
+/**
+ * On an engine that keeps no CREATE text to compare (PostgreSQL), the
+ * model's join tables as a migration leaves them, verified as the next
+ * open verifies them ({@link verifyShape}): a link that leaves one the
+ * open would refuse (`JD0002`) — a rename an earlier release planned,
+ * which leaves the index over the second key column under the table's
+ * old name — is refused `JD0023` before it commits, as SQLite's shape
+ * comparison refuses it. A join table the database does not hold is
+ * created by the open.
+ * @param {any} connection @param {any} model
+ * @returns {any} value-or-promise
+ */
+function acceptJoinTables(connection, model) {
+  const dialect = connection.dialect;
+  const plans = joinPlansOf(model, dialect);
+  const refusal = (/** @type {string} */ difference) => {
+    throw refuse('JD0023', `the migrated shape does not equal the target model's: ${difference}; the next open `
+      + 'would refuse the table (JD0002), so nothing was changed: plan the link again with this release, which '
+      + 'renames a join table\'s index with it, or bring the table to the model in a sql step before the link ends');
+  };
+  const next = (/** @type {number} */ i) => {
+    if (i >= plans.length) return null;
+    const plan = plans[i];
+    return chain(connection.prepare(dialect.introspect.tableExists()), (exists) =>
+      chain(exists.get([plan.table]), (row) => (row === undefined ? next(i + 1)
+        : chain(verifyShape(connection, plan, plan.table, '', 'entity', refusal), () => next(i + 1)))));
+  };
+  return next(0);
 }
 
 /** Read every normal receipt field and raw side payload without changing either.

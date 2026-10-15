@@ -8,7 +8,9 @@
  * statement; SQLite always compared by value. An integer past the column's
  * own width there (`3000000000` against an `integer`, `40000` against a
  * `smallint`) binds as a `bigint` and compares as written, through the
- * column's index. The oracle is the engine (`pushdown: false`). The
+ * column's index. A key of that width names no row: a point read, a
+ * tracked update or delete and a key-addressed `mutate` answer what a key no
+ * row holds answers. The oracle is the engine (`pushdown: false`). The
  * PostgreSQL half needs `JAREN_PG_URL`.
  */
 import { describe, it } from 'node:test';
@@ -168,4 +170,64 @@ describe('an integer literal outside a PostgreSQL column\'s own width answers as
     }
     finally { await handle.close(); }
   });
+});
+
+describe('a key past a PostgreSQL key column\'s own width names no row', () => {
+  /** An adopted table keyed by a column of `type`, one row under key 1. @param {string} type */
+  const keyed = (type) => ({ ddl: `CREATE TABLE keyed (id ${type} PRIMARY KEY, qty integer NOT NULL);
+    INSERT INTO keyed SELECT g, 5 FROM generate_series(1, 2000) g; ANALYZE keyed;`,
+  entities: { Keyed: { schema: { type: 'object', properties: { id: { type: 'integer', 'x-entity': { key: true } }, qty: { type: 'integer' } } },
+    physical: { table: 'keyed', columns: { id: { name: 'id', codec: 'integer', null: 'reject' }, qty: { name: 'qty', codec: 'integer', null: 'reject' } } } } } });
+  /** What a call answered, or the code it was refused with. @param {() => any} call */
+  const outcome = async (call) => {
+    try { return { value: await call() }; }
+    catch (error) { return { code: /** @type {any} */ (error).code }; }
+  };
+  /** What `saveChanges()` reports, but the time it took. @param {any} store */
+  const saved = async (store) => ({ ...(await store.saveChanges()), elapsedMs: 0 });
+  /** Every key-addressed call over `key`. @param {any} store @param {number} key */
+  const byKey = async (store, key) => {
+    const rows = store.entity('Keyed');
+    return {
+      get: await outcome(() => rows.get(key)),
+      update: await outcome(() => rows.mutate({ op: 'update', key, set: { qty: 6 }, reporting: 'matched' })),
+      delete: await outcome(() => rows.mutate({ op: 'delete', key })),
+      tracked: await outcome(async () => { await rows.update(key, { qty: 7 }); return saved(store); }),
+      removed: await outcome(async () => { await rows.delete(key); return saved(store); }),
+    };
+  };
+  for (const [type, wide] of /** @type {const} */ ([['integer', 3000000000], ['smallint', 40000]])) {
+    it(`${type}: ${wide} and ${-wide} answer as a key no row holds, and the key's index still serves`, { skip: !url && 'JAREN_PG_URL is not set' }, async () => {
+      /** @type {string[]} */
+      const statements = [];
+      const { ddl, entities } = keyed(type);
+      const handle = await adoptedPostgres(ddl, entities, { label: `wkey${type}`, statements });
+      try {
+        const absentKey = await byKey(handle.store, 2001);
+        assert.deepEqual(absentKey.get, { value: undefined });
+        assert.equal(absentKey.update.value.affected, 0);
+        for (const key of [wide, -wide]) assert.deepEqual(await byKey(handle.store, key), absentKey, `key ${key}`);
+        assert.deepEqual(await handle.store.entity('Keyed').get(1), { id: 1, qty: 5 });
+        assert.equal((await handle.store.entity('Keyed').mutate({ op: 'update', key: 2, set: { qty: 6 }, reporting: 'matched' })).affected, 1);
+        // the point read's statement compares the bare column with a bigint, which its primary key's index serves
+        const read = statements.map((sql) => /(?:^| FOR )(SELECT .* FROM .*"keyed" WHERE "id" = \(\$1\)::bigint)$/.exec(sql)?.[1])
+          .find((sql) => sql !== undefined);
+        assert.ok(read !== undefined, 'the point read compares the key as a bigint');
+        const client = await handle.pool.connect();
+        try {
+          await client.query('BEGIN');
+          await client.query('SET LOCAL enable_seqscan = off');
+          for (const key of [1, wide]) {
+            const plan = (await client.query({ text: `EXPLAIN ${read}`, values: [key] })).rows.map((/** @type {any} */ row) => row['QUERY PLAN']).join('\n');
+            assert.match(plan, /Index (Only )?Scan using keyed_pkey/, `${key}: ${plan}`);
+          }
+        }
+        finally {
+          await client.query('ROLLBACK');
+          client.release();
+        }
+      }
+      finally { await handle.close(); }
+    });
+  }
 });

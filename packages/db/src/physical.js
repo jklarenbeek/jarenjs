@@ -333,6 +333,22 @@ export function physicalRead(column, dialect, prefix = '') {
 }
 
 /**
+ * A parameter compared with an `integer`-codec column, spelled `bigint` on
+ * PostgreSQL. The server types an untyped parameter from the column it
+ * meets, so an integer past that column's own width (`3000000000` against
+ * an `integer`, `40000` against a `smallint`) is refused while the
+ * parameter is read, before a row is compared; as a `bigint` it compares
+ * through the btree integer family's cross-width operators, so the bare
+ * column keeps its index and such a value names no row. Every other column
+ * and engine binds the parameter as itself.
+ * @param {any} dialect @param {string | undefined} codec @param {string} paramSql
+ * @returns {string}
+ */
+export function integerParameter(dialect, codec, paramSql) {
+  return dialect.name === 'postgres' && codec === 'integer' ? `(${paramSql})::bigint` : paramSql;
+}
+
+/**
  * Whether a mapped column may carry an order, per codec and engine: the
  * one table an explicit `orderBy` of a load and a keyset term consult.
  * `explicit` — a load may order by the column, because SQL orders it as

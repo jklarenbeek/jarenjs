@@ -377,18 +377,13 @@ what each does is its own documentation's job
   read in index order (it spells `NULLS FIRST`, so the rows past the row value
   are sorted: about 14 ms for the second page of 200,000 rows against 0.016 ms
   read in index order), pushdown beyond the qualified native census and
-  additional PostgreSQL types remain open. An integer key outside an adopted
-  PostgreSQL `smallint` or `integer` key column's own range is refused
-  `JD2005` by a point read (`get(3000000000)`) and a key-addressed `mutate`,
-  where the engine answers no row: the key's parameter is typed from the
-  column (queries, `load` and `mutate({ where })` spell such a literal
-  `bigint`). A partition attached to an adopted partitioned table while a
-  store is open reports a duplicate key as `JD2005` naming its own constraint
-  until the next open; the catalog read cannot follow it without a read on the
-  failure path, which an aborted PostgreSQL transaction forbids. Capture and
-  replication of adopted physical tables — whose application triggers and
-  cascades the store does not write — remain refused until their complete
-  writer population has an executable oracle.
+  additional PostgreSQL types remain open. A partition attached to an adopted
+  partitioned table while a store is open reports a duplicate key as `JD2005`
+  naming its own constraint until the next open; the catalog read cannot
+  follow it without a read on the failure path, which an aborted PostgreSQL
+  transaction forbids. Capture and replication of adopted physical tables —
+  whose application triggers and cascades the store does not write — remain
+  refused until their complete writer population has an executable oracle.
 - [ ] **Broader database invariant lowering.** Rules lower to verified triggers
   on SQLite and PostgreSQL alike ([MODEL-FORMAT §13](../packages/db/docs/MODEL-FORMAT.md#13-persistence-invariants)),
   over comparisons, membership, existence probes keyed by a verified unique
@@ -494,15 +489,6 @@ what each does is its own documentation's job
   join table with a third column from an entity (it reads exactly two
   foreign-key columns as one); and the migration strategy that adds or drops a
   column on a join table (none exists).
-- [ ] **A rename link an earlier release planned leaves a join table's index
-  under its old name.** A link that renames an entity with a many-to-many
-  edge, planned before join tables were indexed over their second key column,
-  renames the table and its column but not the index. Applied to a join table
-  created with the index, SQLite's `migrate()` refuses it `JD0023` with
-  nothing changed, while PostgreSQL, which compares no shape after a link,
-  applies it and the next open refuses the table `JD0002` (MIGRATION-UPGRADE
-  §44). Wanted: a PostgreSQL link checks the migrated join tables' indexes as
-  SQLite's acceptance does, so it fails before it commits.
 - [ ] **A non-JSON external reached through a conditional, a computed operand
   or a nested phrase is read as `{}`.** An external the engine compares or
   equates, reached through name, index, wildcard, slice, filter and descendant
@@ -560,22 +546,17 @@ what each does is its own documentation's job
   external `$ne`), or a weight for the fetch in the style of the
   external-operand weights.
 - [ ] **A comparison, ordering or grouping over an open-container index path
-  on PostgreSQL reads the guarded document and does not seek the index, and a
-  digit name over a declared object container reads back as an index.** The
+  on PostgreSQL reads the guarded document and does not seek the index.** The
   generated column, index expression and interval CHECK of a table read an
-  index step off an array alone (and a digit name off an object alone) where
-  the schema leaves the container open; `planColumnUpgrade` rebuilds a table
-  an earlier release created, or one whose model stopped declaring the
-  container, to those definitions. Still open: (d) a digit name over a
-  DECLARED object container (`type: 'object'`, `$.s['0']`) is unguarded text
-  that `introspect()` reads back as an index (`$.s[0]`, `type: 'array'`), an
-  interval over it does not reopen (`JD0002`, before and after), and the plan
-  from a model that reads such a name under a guard to the model derived from
-  the unguarded table rebuilds the column; (e) the seek: read the column for
-  an open-container path when the plan knows the column carries the guard (the
-  planned column's `unpinned`; a table holding the other spelling keeps the
-  guarded document until `planColumnUpgrade` rebuilds it), or an expression
-  index.
+  index step off an array alone, and a digit name off an object alone, where
+  the schema leaves the container open. A digit name is read under the object
+  guard even where the schema declares the object, so it reads back as the
+  name. `planColumnUpgrade` rebuilds a table an earlier release created, or
+  one whose model stopped declaring the container, to those definitions. Still
+  open: the seek: read the column for an open-container path when the plan
+  knows the column carries the guard (the planned column's `unpinned`; a table
+  holding the other spelling keeps the guarded document until
+  `planColumnUpgrade` rebuilds it), or an expression index.
 - [ ] **On PostgreSQL the generated column of an indexed union member is the first type's, so a comparison of another kind reads the document and does not seek.** Wanted: a typed column per kind or an expression index.
 - [ ] **A store predicate's external past 2^53 compares exactly with digits
   another writer spelled, in SQLite.** A store profile predicate's external

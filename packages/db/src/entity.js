@@ -25,7 +25,7 @@ import { DbRuntimeError, wrapDriverError, wrapHeldKey, keyUndecided } from './er
 import { chain, isThenable, attempt, useStatementOnce, releaseStatements as releasePrepared } from './driver.js';
 import { createCursor, createSyncCursor, rowClassOf } from './cursor.js';
 import { checkInvariants, existsRowSql, recordPath, ruleLiteral } from './invariants.js';
-import { columnCodec, physicalRead } from './physical.js';
+import { columnCodec, physicalRead, integerParameter } from './physical.js';
 import { mergeEntityRow } from './graph.js';
 import { namesNoNumber, noNumberKeyReason, numericKeyValue } from './key-text.js';
 import { createJSONPatch } from '@jarenjs/json/patch';
@@ -384,8 +384,10 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
     return chain(prepared(name, sql), use);
   };
   const parameterAt = (i) => dialect.parameterRef(i, 'v');
+  // a key past an adopted column's width names no row (see `integerParameter`)
+  const keyCodecs = keys.map((key) => (physical ? entityMapping.columns.find((c) => c.name === key)?.codec : undefined));
   const keyWhere = (offset) => keys
-    .map((key, i) => `${q(physicalName(key))} = ${parameterAt(offset + i + 1)}`).join(' AND ');
+    .map((key, i) => `${q(physicalName(key))} = ${integerParameter(dialect, keyCodecs[i], parameterAt(offset + i + 1))}`).join(' AND ');
   const selectColumns = [
     ...scalarColumns.filter((column) => !column.epoch).map((column) => physical
       ? `${physicalRead(column, dialect)} AS ${q(physicalName(column.name))}` : q(column.name)),

@@ -8,7 +8,9 @@
  * `planColumnUpgrade` plans the one statement that creates it, and plans
  * nothing once it is there. A migration that renames a join table creates
  * the index under the name a fresh store gives it, whether the table had
- * the index or not.
+ * the index or not. A rename an earlier release planned, which leaves the
+ * index under the table's old name where the table has one, is refused
+ * before it commits on both engines, as the next open would refuse it.
  */
 import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
@@ -384,5 +386,84 @@ for (const engine of ENGINES.filter((name) => name === 'postgres')) {
         values: [schema, through] })).rows.map((/** @type {any} */ row) => row.indexname);
       assert.deepStrictEqual(names, [joinIndexName(postgresDialect(), through, 'User_key'), `${through}_pkey`].sort());
     }));
+
+    // the link as a release that created no such index planned it: the renames alone
+    const RENAMED = renames[0].to;
+    const earlierLink = () => {
+      const planned = planModelMigration(MODEL, RENAMED, { dialect: postgresDialect(), id: 'rename' }).migration;
+      return { ...planned, steps: planned.steps.filter((/** @type {any} */ step) => !/INDEX/.test(step.sql ?? '')) };
+    };
+    /** The schema's tables and their indexes, from the catalog. @param {any} pool @param {string} schema */
+    const catalog = async (pool, schema) => (await pool.query({ text: 'SELECT tablename, indexname FROM pg_indexes WHERE schemaname = $1 ORDER BY 1, 2',
+      values: [schema] })).rows.map((/** @type {any} */ row) => `${row.tablename}.${row.indexname}`);
+
+    it('a rename link planned without the index is refused before it commits over a join table that has it, and applies over one that never had it', () => withPostgres(async ({ pool, schema, driver }) => {
+      const link = earlierLink();
+      assert.deepStrictEqual(link.steps.map((/** @type {any} */ step) => step.sql), ['ALTER TABLE "User" RENAME TO "Person"',
+        'ALTER TABLE "Label_User" RENAME TO "Label_Person"', 'ALTER TABLE "Label_Person" RENAME COLUMN "User_key" TO "Person_key"']);
+      const store = await openStore(MODEL, { driver: driver() });
+      try { await seed(store); }
+      finally { await store.close(); }
+      const before = await catalog(pool, schema);
+      assert.deepStrictEqual(before, ['Label.Label_pkey', 'Label_User.Label_User_User_key', 'Label_User.Label_User_pkey', 'User.User_pkey']);
+      await assert.rejects(async () => migrate({ driver: driver() }, [link], { baseline: MODEL, model: RENAMED, shadow: false }), {
+        code: 'JD0023',
+        message: /the migrated shape does not equal the target model's: entity 'Label_Person': 1 declared indexes exist, the model declares 0 — the database has Label_User_User_key, which the model does not declare; the next open would refuse the table \(JD0002\), so nothing was changed: plan the link again with this release/,
+      });
+      // nothing changed: no table renamed, no history written
+      assert.deepStrictEqual(await catalog(pool, schema), before);
+      const reopened = await openStore(MODEL, { driver: driver() });
+      try { assert.deepStrictEqual(await answers(reopened), EXPECTED); }
+      finally { await reopened.close(); }
+      // the same link over a join table without the index applies, and the store opens under the renamed model
+      await pool.query(`DROP INDEX "${schema}"."Label_User_User_key"`);
+      assert.deepStrictEqual((await migrate({ driver: driver() }, [link], { baseline: MODEL, model: RENAMED, shadow: false })).applied, ['rename']);
+      const renamed = await openStore(RENAMED, { driver: driver() });
+      try { assert.deepStrictEqual([await renamed.execute(renames[0].read)].flat().sort(), ['admin', 'dev']); }
+      finally { await renamed.close(); }
+    }));
+
+    // links that leave every join table as the open accepts it keep applying, over a join table with the index and one without
+    const links = [
+      { label: 'indexes another table', to: (() => { const next = structuredClone(MODEL); next.entities.Label.schema.properties.color = { type: 'string', 'x-entity': { index: true } }; return next; })(),
+        tables: ['Label', 'Label_User', 'User'] },
+      { label: 'adds a many-to-many edge', to: { $model: '0.1', entities: { User: entity('id', { labels: many('Label'), tags: many('Tag') }), Label: entity('name', { color: { type: 'string' } }), Tag: entity('id') } },
+        tables: ['Label', 'Label_User', 'Tag', 'Tag_User', 'User'] },
+      { label: 'drops a many-to-many edge', to: { $model: '0.1', entities: { User: entity('id'), Label: entity('name', { color: { type: 'string' } }) } },
+        tables: ['Label', 'User'] },
+    ];
+    it('a link that leaves a join table the model declares to the open, which creates it, applies', () => withPostgres(async ({ pool, schema, driver }) => {
+      const store = await openStore(MODEL, { driver: driver() });
+      try { await seed(store); }
+      finally { await store.close(); }
+      const { to } = links[1];
+      const planned = planModelMigration(MODEL, to, { dialect: postgresDialect(), id: 'next' }).migration;
+      const migration = { ...planned, steps: planned.steps.filter((/** @type {any} */ step) => step.draft !== true && !/Tag_User/.test(step.sql ?? '')) };
+      assert.deepStrictEqual((await migrate({ driver: driver() }, [migration], { baseline: MODEL, model: to, shadow: false })).applied, ['next']);
+      assert.ok(!(await catalog(pool, schema)).some((name) => name.startsWith('Tag_User.')));
+      const reopened = await openStore(to, { driver: driver() });
+      try { assert.deepStrictEqual(await answers(reopened), EXPECTED); }
+      finally { await reopened.close(); }
+      assert.ok((await catalog(pool, schema)).includes('Tag_User.Tag_User_User_key'));
+    }));
+
+    for (const { label, to, tables } of links) {
+      for (const earlier of [false, true]) {
+        it(`a link that ${label} applies over a join table ${earlier ? 'without' : 'with'} the index`, () => withPostgres(async ({ pool, schema, driver }) => {
+          const store = await openStore(MODEL, { driver: driver() });
+          try { await seed(store); }
+          finally { await store.close(); }
+          if (earlier) await pool.query(`DROP INDEX "${schema}"."Label_User_User_key"`);
+          const planned = planModelMigration(MODEL, to, { dialect: postgresDialect(), id: 'next' }).migration;
+          // an edge member added or dropped changes no stored document: its draft transform is a pure widening
+          const migration = { ...planned, steps: planned.steps.filter((/** @type {any} */ step) => step.draft !== true) };
+          assert.deepStrictEqual((await migrate({ driver: driver() }, [migration], { baseline: MODEL, model: to, shadow: false })).applied, ['next']);
+          const held = new Set((await catalog(pool, schema)).map((name) => name.split('.')[0]).filter((name) => !name.startsWith('_jaren')));
+          assert.deepStrictEqual([...held].sort(), tables);
+          const reopened = await openStore(to, { driver: driver() });
+          await reopened.close();
+        }));
+      }
+    }
   });
 }

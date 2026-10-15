@@ -10,8 +10,9 @@
  * and by the store. The definition now reads such a path off the document
  * under the dialect's guard (an index step only off an array, a name that
  * reads as an index only off an object); a path whose containers the schema
- * declares keeps every byte, and a table an earlier release created, which
- * holds the unguarded definitions, opens as it did. The store's own read of
+ * declares keeps every byte unless it names a member the path text spells as
+ * an index (postgres-digit-names.test.js), and a table an earlier release
+ * created, which holds the unguarded definitions, opens as it did. The store's own read of
  * a span (`memberAt`) selects the same members on every engine.
  */
 import { describe, it } from 'node:test';
@@ -54,15 +55,16 @@ describe('a generated column over a path that leaves a container open', () => {
       [[{ name: 'u' }, { index: 0 }], [{ name: 'u' }, { name: '0' }]]);
   });
 
-  it('keeps every byte where the schema declares the container, or the dialect guards no step', () => {
+  it('keeps every byte of an index off a declared array, or where the dialect guards no step', () => {
     const declared = planOf(withU({ type: 'array', items: INT }, [U_INDEXES[0]]));
     assert.equal(declared.createSql[0],
       'CREATE TABLE "rows" ("key" text COLLATE "C" PRIMARY KEY, "doc" jsonb NOT NULL, "rid" bigserial, '
       + '"gx_u_0" numeric GENERATED ALWAYS AS ((CASE WHEN jsonb_typeof(("doc" #> \'{"u","0"}\')) = \'number\' '
       + 'THEN (("doc" #> \'{"u","0"}\'))::numeric END)) STORED)');
     assert.equal(declared.generated[0].unpinned, undefined);
+    // a name the path text spells as an index is read off a declared object under the guard too, or it would read back as the index
     const named = planOf(withU({ type: 'object', properties: { 0: INT } }, [U_INDEXES[1]]));
-    assert.equal(named.generated[0].unpinned, undefined);
+    assert.deepEqual(named.generated[0].unpinned, [{ name: 'u' }, { name: '0' }]);
     // SQLite's path text tells a name from an index: its plan carries no guard at all
     const sqlite = planOf(withU(OPEN_U, U_INDEXES), undefined, sqliteDialect);
     assert.ok(sqlite.generated.every((/** @type {any} */ column) => column.unpinned === undefined));

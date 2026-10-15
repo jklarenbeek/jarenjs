@@ -8,9 +8,11 @@
  * document guarded so each step meets the container it means; a path with
  * no such step is read as before, and so are the generated columns,
  * migrations and drift read-back of every path whose containers the schema
- * declares, which keep every byte of theirs (a path whose container the
- * schema leaves open is guarded in them too: see
- * postgres-open-container-columns.test.js).
+ * declares and that names no member `0`, which keep every byte of theirs (a
+ * path whose container the schema leaves open is guarded in them too: see
+ * postgres-open-container-columns.test.js; and so is a member name the path
+ * text spells as an index, which the catalog would otherwise read back as
+ * one: see postgres-digit-names.test.js).
  */
 
 import { describe, it, before, after } from 'node:test';
@@ -85,14 +87,14 @@ describe('the dialect text a digit in a path writes', () => {
   indexes: [{ name: 'by_start', path: '$.spans[0].start' }, { name: 'by_zero', path: "$['0']" },
     { name: 'by_tag', path: '$.tags[1]' }] } } };
 
-  it('the generated columns, whose definitions the store compares to the catalog, keep every byte', () => {
+  it('the generated columns, whose definitions the store compares to the catalog, keep every byte but the document\'s own member 0, read under the object guard', () => {
     const plan = planCollection('spans', normalizeModel(MODEL).get('spans'), dialect);
     assert.deepEqual(plan.createSql, [
       'CREATE TABLE "spans" ("key" text COLLATE "C" PRIMARY KEY, "doc" jsonb NOT NULL, "rid" bigserial, '
       + '"gx_spans_0_start" numeric GENERATED ALWAYS AS ((CASE WHEN jsonb_typeof(("doc" #> \'{"spans","0","start"}\')) = \'number\' '
       + 'THEN (("doc" #> \'{"spans","0","start"}\'))::numeric END)) STORED, '
-      + '"gx_0" text COLLATE "C" GENERATED ALWAYS AS (((CASE WHEN jsonb_typeof(("doc" #> \'{"0"}\')) = \'string\' '
-      + 'THEN "doc" #>> \'{"0"}\' END) COLLATE "C")) STORED, '
+      + '"gx_0" text COLLATE "C" GENERATED ALWAYS AS (((CASE WHEN jsonb_typeof(((CASE WHEN jsonb_typeof("doc") = \'object\' THEN "doc" END) #> \'{"0"}\')) = \'string\' '
+      + 'THEN (CASE WHEN jsonb_typeof("doc") = \'object\' THEN "doc" END) #>> \'{"0"}\' END) COLLATE "C")) STORED, '
       + '"gx_tags_1" text COLLATE "C" GENERATED ALWAYS AS (((CASE WHEN jsonb_typeof(("doc" #> \'{"tags","1"}\')) = \'string\' '
       + 'THEN "doc" #>> \'{"tags","1"}\' END) COLLATE "C")) STORED)',
       'CREATE INDEX "spans_by_start" ON "spans" ("gx_spans_0_start")',

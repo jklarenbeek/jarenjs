@@ -279,18 +279,39 @@ export function unpinnedStep(schema, segments) {
 
 /**
  * The segments of a path whose definition must read its member under the
- * dialect's guard — the schema leaves a container of one of its steps open
- * ({@link unpinnedStep}) and the dialect guards such a step — or
- * `undefined`. A column over a path whose containers the schema declares
- * reads it unguarded, which is every byte an earlier release wrote.
+ * dialect's guard, where the dialect guards one of its steps, or
+ * `undefined`: the schema leaves a container of such a step open
+ * ({@link unpinnedStep}), or the catalog would read a member name of it
+ * back as an index ({@link nameReadsBackAsIndex}); under the guard the name
+ * reads back as the name it was declared as, whatever container the schema
+ * declares. A path whose containers the schema declares and that has no
+ * such name reads unguarded, which is every byte an earlier release wrote
+ * for it.
  * @param {any} schema
  * @param {any} dialect
  * @param {import('./dialect.js').JsonPathSegment[]} segments
  * @returns {import('./dialect.js').JsonPathSegment[] | undefined}
  */
 function guardedPath(schema, dialect, segments) {
-  return unpinnedStep(schema, segments)
+  return (unpinnedStep(schema, segments) || nameReadsBackAsIndex(dialect, segments))
     && dialect.queryGuard(dialect.quoteIdentifier(DOC_COLUMN), segments) !== null ? segments : undefined;
+}
+
+/**
+ * Whether the dialect's catalog reads a path's unguarded definition back
+ * with one of its member names as an array index: PostgreSQL's path text
+ * spells the name `'0'` as it spells the index `0` (`#> '{s,0}'`), and its
+ * read-back takes such an element for the index ({@link memberPathOf} of
+ * the dialect); SQLite spells the two apart.
+ * @param {any} dialect
+ * @param {import('./dialect.js').JsonPathSegment[]} segments
+ * @returns {boolean}
+ */
+function nameReadsBackAsIndex(dialect, segments) {
+  const text = dialect.jsonPathText(segments);
+  const read = text === null ? null : dialect.memberPathOf?.(dialect.jsonExtract(dialect.quoteIdentifier(DOC_COLUMN), text)) ?? null;
+  return read !== null && read.length === segments.length
+    && segments.some((segment, at) => 'name' in segment && 'index' in read[at]);
 }
 
 /**
@@ -1101,18 +1122,22 @@ function verifyDeclaredSql(connection, plan, disagree) {
 
 /**
  * Verify an existing table against the planned shape; any difference
- * is `JD0002` and nothing is altered. Shared by the store's open path
- * and the migration engine's shadow validation.
+ * is `JD0002` and nothing is altered. Shared by the store's open path,
+ * the migration engine's shadow validation and its acceptance of the
+ * tables a migration leaves, which refuses in its own words (`refuse`).
  * @param {any} connection
  * @param {any} plan
  * @param {string} collection - the table's collection or entity
  * @param {string} docPath
  * @param {'collection' | 'entity'} [kind] - what `collection` names, for the refusal
+ * @param {(difference: string) => never} [refuse] - raises the refusal of a
+ *   difference, which names the table first; `JD0002` where none is given
  * @returns {any} value-or-promise
  */
-export function verifyShape(connection, plan, collection, docPath, kind = 'collection') {
+export function verifyShape(connection, plan, collection, docPath, kind = 'collection', refuse = undefined) {
   const dialect = connection.dialect;
-  const disagree = (difference) => {
+  const disagree = (/** @type {string} */ difference) => {
+    if (refuse !== undefined) return refuse(`${kind} '${collection}': ${difference}`);
     throw new DbCompileError('JD0002',
       `${kind} '${collection}': the existing table does not match the declared model (${difference}); reshaping a live database is the migration story, and nothing was altered`,
       docPath);

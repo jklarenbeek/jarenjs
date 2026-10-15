@@ -398,7 +398,12 @@ that rebuilds exactly the ones that differ:
   holds them unguarded, and so does one whose model stopped declaring the
   container (`type: 'array'` to none), which a plan between the two models
   accepts as it is. A model that declares the container gets the unguarded
-  spelling a fresh store creates for it;
+  spelling a fresh store creates for it, but for a member name the path text
+  spells as an index (`'0'`), which a fresh store reads under the object guard
+  however the container is declared: a table an earlier release created for
+  such a name over a declared object, or for the document's own `$['0']`,
+  holds it unguarded, and `introspect()` reads it back as the index until the
+  link rebuilds it;
 - on both engines, a many-to-many join table without the index over its
   second key column (`Label_User_User_key` on `Label_User`), which no earlier
   release created: a filter on that column, and the cascade from its entity,
@@ -1278,6 +1283,12 @@ including indexes, foreign keys and constraints. Physical mappings verify
 their declared columns and invariants; complete application schema acceptance
 requires a reviewed `physicalTarget`, including retained programs. The
 shadow and primary use the same selected acceptance rule before publication.
+PostgreSQL keeps no CREATE text to compare, so there the acceptance verifies
+each many-to-many join table the database holds as the next open verifies it:
+a link that would leave one the open refuses (`JD0002`) — a rename an earlier
+release planned, which leaves the index over the second key column under the
+table's old name — fails `JD0023` before it commits, as SQLite's comparison
+fails it, and names the repair (plan the link again with this release).
 
 **UDF-expression indexes.** An index over a registered deterministic
 function is invisible to any connection that has not registered the

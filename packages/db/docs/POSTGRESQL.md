@@ -84,16 +84,23 @@ SQLite read it; a comparison, an ordering or a grouping reads the guarded
 document instead of the indexed column, and does not seek that index, and the
 declared interval's exact seek holds the document to the span's container
 beside its bound columns. Where the container is declared (`type: 'array'` for
-an index step, `type: 'object'` for a digit name) the column, its index and the
-CHECK are spelled and read as before, and a document of the other kind, which
-the schema forbids, is still read through them. The store's own interval check
+an index step, `type: 'object'` for a digit name) a comparison over the path
+reads the column, and a document of the other kind, which the schema forbids,
+is still read through the column, its index and the CHECK. An index step off a
+declared array is spelled as before. A member name the path text spells as an
+index (`'0'`, the document's own `$['0']` included) is read under the object
+guard whatever the schema declares: unguarded it is the index's text, which the
+catalog reads back as that index, so `introspect()` derived an array where an
+object was declared and an interval over it did not reopen. The store's own interval check
 reads an index step off an array and a name off an object, on every engine. A
 table holds either spelling of such a column, index expression and CHECK and
 opens as it is: a model that changes how it declares the container plans no
 change to them (one that moves the path between an index step and a name
 rebuilds them, the guard naming the kind of step), and a table an earlier release created, which holds the
 unguarded definitions, keeps reading an object's key `0` at an index step (and
-answers `JD2005` from its CHECK for a bad span there) until the link
+answers `JD2005` from its CHECK for a bad span there), and keeps a name `'0'`
+that `introspect()` reads back as an index (its interval CHECK refused `JD0002`
+at the next open), until the link
 `planColumnUpgrade` plans from the catalog rebuilds them
 ([MIGRATION-FORMAT §3](MIGRATION-FORMAT.md#upgrading-the-definitions-a-table-holds)),
 or its index and interval are dropped by a migration and declared again.
@@ -241,6 +248,11 @@ compares `int2` and `int4` with `int8`, so the bare column's index still serves
 the condition, and the comparison answers as the engine does on every operator,
 through `execute`, `load` and `mutate` (`qty < 3000000000` is every present
 row, `qty = 3000000000` none). A literal within `smallint` binds as itself. A
+statement that addresses a row by its key — a point read (`get`), the row a
+store rule reads locked, a tracked update or delete, `mutate({ key })` — spells
+the key's parameter `($n)::bigint` against such a key column whatever the key,
+so a key past the column's width (`get(3000000000)` on an `integer` key) names
+no row, as the engine answers, and the primary key's index serves every key. A
 fraction, an infinity and a magnitude past 64 bits are folded at plan time
 ([MODEL-FORMAT §10.1](MODEL-FORMAT.md#101-entity-query-documents)), and a membership list compares as
 `numeric` whatever the column's width.

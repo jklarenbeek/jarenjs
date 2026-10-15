@@ -19,7 +19,7 @@
 
 import { codePointPrefixSuccessor } from '@jarenjs/core/string';
 import { plainFamily, bindsText } from './algebra.js';
-import { physicalSelection } from './physical.js';
+import { physicalSelection, integerParameter } from './physical.js';
 import { columnKindFor } from './scalar-types.js';
 import { isNumericType } from './types.js';
 
@@ -167,21 +167,18 @@ const physicalValueType = (ref, sql, dialect) => ref.codec !== undefined
 const SMALLINT_MAX = 32767;
 
 /**
- * A literal's parameter against an `integer`-codec column. PostgreSQL types
- * an untyped parameter from the column it meets, so an integer past that
- * column's own width (`3000000000` against an `integer`, `40000` against a
- * `smallint`) is refused while the parameter is read, before a row is
- * compared. Spelled `bigint`, the literal compares through the btree integer
- * family's cross-width operators, so the bare column keeps its index; a
- * literal within `smallint`, which every such column takes, binds as itself.
- * The planner has folded a fraction, an infinity and a magnitude past 64 bits
- * already, so what reaches here is an integer `bigint` holds.
+ * A literal's parameter against an `integer`-codec column: one outside
+ * `smallint`, the narrowest column the codec maps, is spelled as
+ * {@link integerParameter} spells it, so PostgreSQL does not refuse it for
+ * the column's width; a literal within `smallint`, which every such column
+ * takes, binds as itself. The planner has folded a fraction, an infinity and
+ * a magnitude past 64 bits already, so what reaches here is an integer
+ * `bigint` holds.
  * @param {any} dialect @param {{ codec?: string }} ref @param {unknown} lit @param {string} paramSql
  * @returns {string}
  */
-const integerColumnLiteral = (dialect, ref, lit, paramSql) => (dialect.name === 'postgres'
-  && ref.codec === 'integer' && typeof lit === 'number' && (lit > SMALLINT_MAX || lit < -SMALLINT_MAX - 1)
-  ? `(${paramSql})::bigint` : paramSql);
+const integerColumnLiteral = (dialect, ref, lit, paramSql) => (typeof lit === 'number'
+  && (lit > SMALLINT_MAX || lit < -SMALLINT_MAX - 1) ? integerParameter(dialect, ref.codec, paramSql) : paramSql);
 
 /**
  * A promoted path the dialect's JSON path grammar cannot spell (a

@@ -8,7 +8,7 @@ import { DbCompileError, DbRuntimeError, wrapDriverError } from './errors.js';
 import { entityShape, planEntityPredicate, predicateTerms, bindsLoneSurrogate, LONE_SURROGATE_REFUSAL,
   PLANNER_REASONS } from './plan.js';
 import { createEntityPredicateEmitters, bindsUnheldText, UNHELD_TEXT_REFUSAL } from './emit.js';
-import { physicalSelection } from './physical.js';
+import { physicalSelection, integerParameter } from './physical.js';
 import { relationalEmitter } from './relational.js';
 import { isJsonObject } from '@jarenjs/core/object';
 
@@ -130,7 +130,7 @@ export function createEntityMutation(connection, entity, mapping, core) {
       const where = [];
       if (Object.hasOwn(document, 'key')) {
         const parts = core.normalizeKey(document.key);
-        where.push(...core.plan.keys.map((key, i) => `${q(column(key).physical)} = ${param(core.plan.encodeColumn(key, parts[i]))}`));
+        where.push(...core.plan.keys.map((key, i) => `${q(column(key).physical)} = ${integerParameter(dialect, column(key).codec, param(core.plan.encodeColumn(key, parts[i])))}`));
       }
       if (Object.hasOwn(document, 'where')) where.push(predicate(document.where));
       if (!where.length) fail('update/delete require a key or an explicit predicate');
