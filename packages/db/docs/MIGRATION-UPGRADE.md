@@ -2815,6 +2815,34 @@ an unknown option; plan the link there through `planColumnUpgrade`.
   released and the backup failed `JD2078`. The calling thread now runs while
   the worker waits the lock out, and the copy completes once it is released.
 
+## 43. Externals, wide integers and cursors that answer as the engine
+
+- An external reached through a filter segment (`$xs[?@.k == 1].at`), handed to a comparison by
+  `$head`, `$tail`, `$reverse`, `$subsequence` with literal bounds, `$get` with a literal key, an
+  operand of `$seq` or a member of an array or object constructor compared whole, or bound as a
+  `$fold` accumulator's initial value, that holds a `Date` or another object read as `{}`, or a
+  `bigint`, was compared as `{}` (as no number) and matched no row; it is now refused `JD0041`, as
+  a direct operand is. So is one a filter compares or hands to a path function on the way
+  (`$xs[?@.at > "2026"]`), which the filter read as `{}`. A value the filter or the operator leaves
+  behind is not read, and the call answers as before. Pass the JSON value it stands for.
+- On SQLite a store profile predicate comparing a member with an external integer past
+  ±(2^53 − 1) (`$eq ['$it.u', '$x']`, `x` 2**60) bound the number as it is, and SQLite compared it
+  exactly with the stored JSON integer's digits (`1152921504606847000`, 2^60 + 24), so the row was
+  dropped or kept otherwise than the engine. It now binds as the integer its own shortest digits
+  spell and keeps the rows the engine keeps, in the same statement; a `number` member's column
+  takes the number as before. A stored integer another writer spelled with other digits than a
+  JavaScript number's shortest is compared by those digits.
+- On PostgreSQL a native statement that projects an `integer` member (`$return: '$it.v'`, or an
+  object or array constructor of it) answered the nearest double for a stored integer the number
+  rounds (`9007199254740993`, written by trusted SQL); it is now refused `JD2003`, as the row read
+  whole and the engine refuse it. Store such a value as a string, or keep it within ±(2^53 − 1).
+- A `query()` cursor whose return runs in the engine per row (`explain().mode` `row`) and can
+  raise on a row — `{ $upper: '$it.u' }` over a member the schema does not type exactly `string` —
+  yielded the items before the row it raised on; it now reads the statement whole first and raises
+  before its first item, as the engine does (`streaming: 'buffered'`, `bind.raisingProjection`),
+  so `strictStreaming: true` declines it `JD0037`. Type the member so the return cannot raise to
+  keep the row stream.
+
 ## Measured costs
 
 Exact identity stores complete canonical documents and model endpoints, so

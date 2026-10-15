@@ -89,9 +89,11 @@ describe('golden SQL (the truth-table forms)', () => {
     assert.match(sql, /typeof\(\?\) = 'text'/);
     assert.match(sql, /typeof\(\?\) IN \('integer', 'real'\)/);
     assert.match(sql, /LIMIT 5 OFFSET 2$/);
+    // the number branch's value binds a number past 2^53 by the digits
+    // the document spells it with, as SQLite reads the member
     assert.deepStrictEqual(slots, [
       { external: 'min' }, { external: 'min' },
-      { external: 'min' }, { external: 'min' },
+      { external: 'min' }, { external: 'min', digits: true },
     ]);
   });
 

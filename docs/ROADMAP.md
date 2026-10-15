@@ -501,13 +501,16 @@ what each does is its own documentation's job
   lost, the index is rebuilt. Wanted: compare the read, not the member list.
 - [ ] **An integer past 2^53 in an `integer` column answers differently on the
   two engines.** A stored integer a JavaScript number would round is refused
-  `JD2003` on both where a row is read whole; but one the store wrote
-  (2**53+2, 2**60) reads back exactly on PostgreSQL (`numeric`) and is refused
-  on SQLite (`INTEGER`), whose create accepts it, and on PostgreSQL a native
-  statement that projects the member alone (`$return: '$it.v'`), an included
-  child, and change capture still read a rounding one as the nearest double.
-  Wanted: one answer for an integer past ±(2^53 − 1), at the write or at every
-  read.
+  `JD2003` on both where a row is read whole and, on PostgreSQL, where a
+  native statement projects the member; but one the store wrote (2**53+2,
+  2**60) reads back exactly on PostgreSQL (`numeric`) and is refused on SQLite
+  (`INTEGER`), whose create accepts it, and on PostgreSQL an included child
+  (`load({ include })`) and change capture still read a rounding one as the
+  nearest double. Wanted: one answer for an integer past ±(2^53 − 1): on
+  SQLite an integer a double holds exactly read as that number (each SQLite
+  driver decodes the column itself — drivers/node.js, bun.js, wasm.js and the
+  worker hosts), and an included child's and the capture journal's integer
+  columns refused as the row read whole is (graph.js, capture.js).
 - [ ] **A join table carries no column beyond its two keys.** A many-to-many
   join table is a read-only root (`$.<JoinTable>[*]`, MODEL-FORMAT §10.7;
   `client.entities.User.memberships.labels`, DB-CLIENT §2.8), but the model
@@ -531,20 +534,24 @@ what each does is its own documentation's job
   `$.Label_User[*]` is native. Wanted: a hop read only for its count or
   existence lowers through the join row alone (the foreign key guarantees
   the target row).
-- [ ] **A non-JSON external reached through a filter or an operator is read as
-  `{}`.** An external the engine compares or equates — a direct operand of
-  `$eq $ne $lt $le $gt $ge`, `$distinct` or `$index-of`, a grouping key, or
-  one a `$let`, `$for`, quantifier or grouping variable is bound to and
-  compared through, through name, index, wildcard, slice and descendant
-  segments — that holds a `Date`, a `Map` or another object with no own
-  member, or a `bigint`, is refused `JD0041` ([MODEL-FORMAT
-  §10.1](../packages/db/docs/MODEL-FORMAT.md)). One reached through a filter
-  segment (`$xs[?@.k == 1]`), or one an operator computes a value from before
-  a comparison reads it (`$first`, a `$get` member, a window or `$fold`
-  variable), is still compared as `{}` and matches no row. A value returned or
-  handed to a registered function is the caller's own and answers right, so a
-  blanket refusal is not the fix: evaluate the filter over the external, or
-  follow the operators that hand an item through.
+- [ ] **A non-JSON external reached through a conditional, a computed operand
+  or a nested phrase is read as `{}`.** An external the engine compares or
+  equates, reached through name, index, wildcard, slice, filter and descendant
+  segments, through `$let`, `$for` (its window too), quantifier, grouping and
+  `$fold` variables, or handed through by `$head`, `$tail`, `$reverse`,
+  `$subsequence` with literal bounds, `$get` with a literal key, `$seq` or an
+  array or object constructor compared whole, that holds a `Date`, a `Map` or
+  another object with no own member, or a `bigint`, is refused `JD0041`
+  ([MODEL-FORMAT §10.1](../packages/db/docs/MODEL-FORMAT.md)), and so is one a
+  filter compares or hands to a path function on the way. One reached through
+  `$if`, `$coalesce` or `$default`, through `$subsequence` or `$get` with a
+  computed bound or key, through `$entries`, a nested phrase's return or a
+  path into a constructor, or through a filter that reads the input document
+  (`$xs[?@.k == $[0].k]`), is still compared as `{}` and matches no row. Which
+  operand those hand through depends on a row or on the collection, so a
+  refusal by what the external holds would refuse calls that answer right.
+  Wanted: follow them where the operand they pick is decided by the externals
+  alone.
 - [ ] **A handle refuses a chain over one database a second store names
   differently.** A handle takes a chain over another store's view when both
   read one database (one SQLite file by its canonical path, one shared-cache
@@ -601,19 +608,19 @@ what each does is its own documentation's job
   guarded document until `planColumnUpgrade` rebuilds it), or an expression
   index.
 - [ ] **On PostgreSQL the generated column of an indexed union member is the first type's, so a comparison of another kind reads the document and does not seek.** Wanted: a typed column per kind or an expression index.
-- [ ] **A store predicate's external past 2^53 compares exactly in SQLite
-  where the engine compares doubles.** A store profile predicate comparing a
-  member with an external integer past ±(2^53 − 1) (`$eq ['$it.u', '$x']`, `x`
-  2**60, over a row holding 2**60) binds the number as it is, and SQLite reads
-  the stored JSON integer by its digits (`1152921504606847000` is 2^60 + 24
-  there), so the row is kept or dropped otherwise than the engine. A
-  document's own such external now runs in the engine over the whole
-  collection, a point read is judged by the engine, and PostgreSQL compares
-  both as the engine does. The predicate runs in the database or not at all,
-  so it cannot be sent to the engine, and a refusal would refuse every call
-  whose stored values are far from it, which answer right. Wanted: a seekable
-  double form of the comparison — it would also keep a document's such
-  external on its index instead of the whole-collection read.
+- [ ] **A store predicate's external past 2^53 compares exactly with digits
+  another writer spelled, in SQLite.** A store profile predicate's external
+  integer past ±(2^53 − 1) binds on SQLite as the integer its own shortest
+  digits spell (2^60 as `1152921504606847000`), the digits a document the
+  store wrote holds for the same number, so the predicate keeps the rows the
+  engine keeps over the store's own documents, in the statement a safe integer
+  binds. A document another writer stored with other digits for such a number
+  (`1152921504606846976`, which the engine reads as 2^60) is compared by those
+  digits and kept or dropped otherwise than the engine. A document's own such
+  external still runs in the engine over the whole collection. Wanted: a
+  seekable double form of the comparison (the integer interval that rounds to
+  the double, bound as two integers), which would also keep a document's such
+  external on its index.
 - [ ] **A grouping ordered by a key that reads a NULL as a present `null` runs
   in the engine.** A column whose policy reads a NULL as a present `null`
   (`null: 'null'`) used as a group key under an `$orderby` makes the engine
@@ -634,20 +641,6 @@ what each does is its own documentation's job
   (MODEL-FORMAT §12), as is a condition the read-back does not read (a date or
   uuid literal, `TRIM`, a quantified comparison other than `= ANY`). Wanted:
   read `pg_get_indexdef`'s terms through the same condition form.
-- [ ] **A row cursor yields items before a row its residual projection raises
-  on.** Over `$return: { $upper: '$it.u' }` ordered by an indexed `o`, rows
-  a(u:'x'), b(u:5), a SQLite `query()` cursor (`streaming: 'row'`) yields
-  `'X'` and raises `JQ2001` at b, where the engine's cursor raises before its
-  first item. Wanted: a row cursor whose residual projection can raise reads
-  its statement whole first, or the streaming deviation is named (buffering
-  every such cursor costs the row stream of each projection the planner cannot
-  prove total).
-- [ ] **A native window or count over a constructor never evaluates the rows
-  outside it.** On a store that validates nothing, a row the schema forbids
-  that lies outside `$subsequence`'s window, or any row of a `$count` of a
-  projection, raises `JQ2001` in the engine and is never read natively, so the
-  native plan answers. Wanted: a ruling that the window prunes before
-  evaluation, or a guard that costs less than the window saves.
 
 ## Lexical search (cross-package)
 

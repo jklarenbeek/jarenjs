@@ -704,8 +704,14 @@ already holds the double (a `number` member's `REAL` column, or the cast read
 of a union whose first type is `number`) is compared bare and seeks too, and
 every other indexed member reads the cast and does not seek. PostgreSQL reads
 both spellings of the digits as one `numeric` and changes nothing. An
-external operand is not covered: its value is known only when it binds, and
-its comparison keeps the exact form (the ROADMAP lists it).
+external operand's value is known only when it binds: a document's own such
+external sends the call to the engine, and a store profile predicate's, which
+runs in the database or not at all, binds on SQLite as the integer its own
+shortest digits spell (the slot's `digits`, where the member is read by its
+digits rather than from a column of doubles). Those are the digits a document
+holds for the same number, and the shortest digits of the doubles order as the
+doubles do, so the exact comparison keeps the rows the engine keeps over the
+documents the store wrote, in the statement a safe integer binds.
 
 **A path against a path is decided by the family of the two values.**
 Only members the schema types as scalars qualify — `string`, `number`,

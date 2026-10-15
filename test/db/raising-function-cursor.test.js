@@ -6,7 +6,10 @@
  * such a statement whole first (`streaming: 'buffered'`, the barrier
  * `bind.raisingFunction`) and raises where the engine does. A cursor whose
  * functions cannot raise — none, a lone-surrogate comparison, an operator
- * over a member typed exactly string — still pulls one row per item.
+ * over a member typed exactly string — still pulls one row per item. So
+ * does a cursor whose return runs in the engine per row (a row residual):
+ * one that can raise on a row reads the statement whole first (the barrier
+ * `bind.raisingProjection`), one that cannot still streams.
  */
 
 import { describe, it } from 'node:test';
@@ -123,6 +126,74 @@ describe('a cursor beside a registered function that can raise', () => {
           Object.assign(counters, { iterate: 0, next: 0, return: 0, all: 0 });
           assert.equal((await first(rows.query(over(where, { $orderby: ['$it.o'] })))).items.length, 1);
           pulled.push({ size, raises: where === RAISES, ...counters });
+        }
+      }
+      assert.deepEqual(pulled, [
+        { size: 1000, raises: false, iterate: 1, next: 1, return: 1, all: 0 },
+        { size: 1000, raises: true, iterate: 0, next: 0, return: 0, all: 1 },
+        { size: 8000, raises: false, iterate: 1, next: 1, return: 1, all: 0 },
+        { size: 8000, raises: true, iterate: 0, next: 0, return: 0, all: 1 },
+      ]);
+    }
+    finally {
+      await store.close();
+    }
+  });
+});
+
+describe('a cursor whose return runs in the engine per row', () => {
+  /** A document projecting `ret` per row. @param {any} ret @param {any} [more] */
+  const projecting = (ret, more = {}) => ({ $for: { it: '$[*]' }, ...more, $return: ret });
+  const RAISING = [{ $upper: '$it.u' }, { k: { $upper: '$it.u' } }];
+  const TOTAL = [{ $upper: '$it.s' }, { k: { $upper: '$it.s' } }];
+
+  it('raises before its first item where the return can raise on a row, as the engine does', async () => {
+    await onBothEngines(MODEL, async (store, host) => {
+      const rows = store.collection('c');
+      await rows.insert({ id: 'a', o: 1, u: 'x', s: 'p' });
+      await rows.insert({ id: 'b', o: 2, u: 5, s: 'q' });
+      for (const ret of RAISING) {
+        for (const document of [projecting(ret, { $orderby: ['$it.o'] }), projecting(ret)]) {
+          const label = `${host}: ${JSON.stringify(document)}`;
+          assert.deepEqual(await first(rows.query(document, { pushdown: false })), { code: 'JQ2001', items: [] }, label);
+          assert.deepEqual(await first(rows.query(document)), { code: 'JQ2001', items: [] }, label);
+          const plan = await rows.explain(document);
+          assert.deepEqual([plan.mode, plan.streaming, plan.barrier.construct, reasonId(plan.barrier.reason)],
+            ['row', 'buffered', '$return', 'bind.raisingProjection'], label);
+          await assert.rejects(async () => {
+            for await (const item of rows.query(document, { strictStreaming: true })) assert.fail(item);
+          }, { code: 'JD0037' }, label);
+        }
+      }
+      // a return over a member typed exactly string streams, and answers as the engine
+      for (const ret of TOTAL) {
+        const document = projecting(ret, { $orderby: ['$it.o'] });
+        const plan = await rows.explain(document);
+        assert.deepEqual([plan.mode, plan.streaming, plan.barrier], ['row', 'row', null], `${host}: ${JSON.stringify(ret)}`);
+        const expected = ret === TOTAL[0] ? ['P', 'Q'] : [{ k: 'P' }, { k: 'Q' }];
+        assert.deepEqual(await rows.execute(document, { pushdown: false }), expected);
+        const items = [];
+        for await (const item of rows.query(document)) items.push(item);
+        assert.deepEqual(items, expected, host);
+      }
+    });
+  });
+
+  it('a return that cannot raise pulls one row per item, one that can reads the statement once whole', async () => {
+    const counters = { iterate: 0, next: 0, return: 0, all: 0 };
+    const store = await openStore(MODEL, { driver: statementCountingDriver(counters) });
+    try {
+      const pulled = [];
+      let stored = 0;
+      for (const size of [1000, 8000]) {
+        await store.transaction(async (/** @type {any} */ tx) => {
+          for (; stored < size; stored++) await tx.collection('c').insert({ id: `r${stored}`, o: stored, u: 'x', s: 'p' });
+        });
+        for (const ret of [TOTAL[0], RAISING[0]]) {
+          Object.assign(counters, { iterate: 0, next: 0, return: 0, all: 0 });
+          const firstItem = (await first(store.collection('c').query(projecting(ret, { $orderby: ['$it.o'] })))).items;
+          assert.deepEqual(firstItem, [ret === TOTAL[0] ? 'P' : 'X']);
+          pulled.push({ size, raises: ret === RAISING[0], ...counters });
         }
       }
       assert.deepEqual(pulled, [

@@ -16,7 +16,8 @@
  *
  * - `native` — everything translated; the plan alone answers.
  * - `row`    — predicates, ordering and window pushed; only the
- *   projection runs in the engine, per fetched row (streams).
+ *   projection runs in the engine, per fetched row (streams, unless
+ *   the projection can raise on a row: `rowRaises`).
  *   `rowReturn` is the COMPLETE one-row document to run, binding
  *   included — the collection binding is named by the document, so a
  *   wrapper built anywhere else would have to guess it.
@@ -193,6 +194,10 @@ export const BIND_REASONS = Object.freeze({
   // engine evaluates the filter on every row before its first item
   raisingFunction: 'a conjunct that runs as a registered function can raise on a row, and the engine '
     + 'evaluates the filter on every row before it yields an item: the statement is read whole first',
+  // a projection evaluated per row that can raise on one: the engine
+  // evaluates the return of every row before its first item
+  raisingProjection: 'the return runs in the engine and can raise on a row, and the engine evaluates it '
+    + 'on every row before it yields an item: the statement is read whole first',
   /**
    * A value the database cannot bind: the call reads its whole source
    * and the engine answers. `over` names what that source is — a
@@ -3273,7 +3278,8 @@ function rawConjunctsOf(rawWhere, mount) {
  * @returns {{ plan: import('./algebra.js').Plan,
  *   reasons: { construct: string, reason: string }[],
  *   whereFullyPushed: boolean, orderPushed: boolean,
- *   projectionNative: boolean, totalReturn: boolean, itSlot: number, itName: string | null,
+ *   projectionNative: boolean, totalReturn: boolean, returnCannotRaise: boolean,
+ *   itSlot: number, itName: string | null,
  *   udfs: string[], prefilters: any[],
  *   knn: { column: string, dims: number, probe: any } | null }}
  *   `knn` is the recognized k-nearest ordering, pending the window
@@ -3283,7 +3289,9 @@ function rawConjunctsOf(rawWhere, mount) {
  *   rows are then its items, and a count or a window may leave rows
  *   unevaluated unless a conjunct runs as a registered function (`udfs`),
  *   which the database stops evaluating once the window is full, where the
- *   engine evaluates it on every row and raises where it does. No conjunct
+ *   engine evaluates it on every row and raises where it does.
+ *   `returnCannotRaise` is set when such a return raises on no row (a
+ *   `totalReturn`, or one operator that cannot raise). No conjunct
  *   after one that can raise narrows the rows (`afterRaising`), so a count
  *   evaluates it on every row the engine does
  */
@@ -3301,7 +3309,7 @@ function planFlwor(node, shape, rawFlwor, udfHook) {
   if (!sourceIsCollection) {
     reasons.push(refusal('$for', FLWOR_REASONS.binding));
     return { plan, reasons, whereFullyPushed: false, orderPushed: false,
-      projectionNative: false, totalReturn: false, projectedTree: null,
+      projectionNative: false, totalReturn: false, returnCannotRaise: false, projectedTree: null,
       itSlot: -1, itName: null, udfs: [], prefilters: [],
       knn: null, bucket: null, group: null, bucketRefusal: null };
   }
@@ -3491,6 +3499,10 @@ function planFlwor(node, shape, rawFlwor, udfHook) {
   // member a residual conjunct still needs would be a wrong answer
   let projectionNative = false;
   let totalReturn = false;
+  // a projection the statement cannot fetch, evaluated by the engine per
+  // row, that raises on no row: a constructor that is `totalReturn`, or
+  // one operator {@link cannotRaise} accepts
+  let returnCannotRaise = false;
   /** @type {import('./algebra.js').PlanRef | null} */
   let projectedPath = null;
   /** @type {{ tree: any, leaves: any[] } | null} */
@@ -3513,13 +3525,15 @@ function planFlwor(node, shape, rawFlwor, udfHook) {
     }
     else {
       reasons.push(refusal('$return', FLWOR_REASONS.projection));
+      const resolve = (/** @type {any} */ arg) => {
+        const found = pathRef(arg, itSlot, shape);
+        return found === null ? null : { ref: found, schema: shape.schema };
+      };
       // an object or array constructor is one item per row; where every
       // operator in it cannot raise, no row needs evaluating to count or to window the rows
       totalReturn = (node.ret.kind === 'object' || node.ret.kind === 'array')
-        && projectionTree(node.ret, itSlot, shape, (op) => cannotRaise(op, (arg) => {
-          const found = pathRef(arg, itSlot, shape);
-          return found === null ? null : { ref: found, schema: shape.schema };
-        })) !== null;
+        && projectionTree(node.ret, itSlot, shape, (op) => cannotRaise(op, resolve)) !== null;
+      returnCannotRaise = totalReturn || (node.ret.kind === 'op' && cannotRaise(node.ret, resolve));
     }
   }
 
@@ -3530,6 +3544,7 @@ function planFlwor(node, shape, rawFlwor, udfHook) {
     orderPushed: orderPushed && structureClean,
     projectionNative,
     totalReturn,
+    returnCannotRaise,
     projectedPath,
     projectedTree,
     itSlot,
@@ -3584,9 +3599,13 @@ function composeWindows(windows) {
  *   prefilters: { construct: string, via: 'columns' | 'rtree',
  *     columns: string[], exact: boolean }[],
  *   series: any,
+ *   rowRaises: boolean,
  * }}
  *   `series` is the temporal record (`series.js`) when the document
- *   asked a §8.16 question, and `null` when it did not.
+ *   asked a §8.16 question, and `null` when it did not. `rowRaises` is
+ *   set for a row residual whose return can raise on a row: the engine
+ *   evaluates it on every row before its first item, so a cursor over
+ *   it reads the statement whole first.
  */
 /**
  * The whole-collection scan a bare root wildcard means: the degenerate
@@ -3602,10 +3621,11 @@ const ROOT_SCAN = Object.freeze({ $for: Object.freeze({ it: '$[*]' }), $return: 
  * @param {any} analysis @param {any} [plan]
  * @param {'native' | 'row' | 'set' | 'knn'} [mode]
  * @param {any[]} [reasons] @param {any} [rowReturn] @param {string[]} [udfs]
- * @param {any[]} [prefilters] @param {any} [series] */
+ * @param {any[]} [prefilters] @param {any} [series]
+ * @param {boolean} [rowRaises] - a row residual's return can raise on a row */
 function collectionResult(analysis, plan = null, mode = 'set', reasons = [],
-  rowReturn = null, udfs = [], prefilters = [], series = null) {
-  return { analysis, plan, mode, reasons, rowReturn, udfs, prefilters, series };
+  rowReturn = null, udfs = [], prefilters = [], series = null, rowRaises = false) {
+  return { analysis, plan, mode, reasons, rowReturn, udfs, prefilters, series, rowRaises };
 }
 
 function planCollectionCore(document, shape, options = undefined) {
@@ -3999,7 +4019,8 @@ function planCollectionPhrase(document, analysis, shape, options) {
       }, flwor.udfs, flwor.prefilters,
       flwor.bucketRefusal == null
         ? classifySelection(plan, shape, flwor.orderPushed)
-        : refinedGrouping(plan, shape, flwor.bucketRefusal, '$groupby'));
+        : refinedGrouping(plan, shape, flwor.bucketRefusal, '$groupby'),
+      !flwor.returnCannotRaise);
   }
 
   // the set residual: pushed conjuncts narrow, the engine answers — so
@@ -4044,6 +4065,7 @@ function underSetMode(series) {
  *   prefilters: { construct: string, via: 'columns' | 'rtree',
  *     columns: string[], exact: boolean }[],
  *   series: any,
+ *   rowRaises: boolean,
  * }}
  */
 export function planQuery(document, shape, options = undefined) {

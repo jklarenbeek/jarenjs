@@ -488,6 +488,8 @@ export const sqliteDialect = createDialect({
   // hand back (JD2003) and compares exactly, where the engine holds and
   // compares the double nearest to it
   numberRead: (sql) => `CAST(${sql} AS REAL)`,
+  // and so a stored JSON integer is read by its digits, and compared exactly
+  integerDigits: true,
   rowIdentity,
   // membership of the row identity in a bound list — the fetch of a
   // k-nearest plan's candidates. `IN` over the rowid is a primary-key

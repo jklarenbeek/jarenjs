@@ -209,6 +209,7 @@ export const MEMBER_WHEN = Symbol('dialect.memberWhen');
  *   jsonObject: (pairsSql: string) => string,
  *   jsonEmbed: (columnSql: string) => string,
  *   externalEncoding?: 'value' | 'json',
+ *   integerDigits?: boolean,
  *   externalCompare?: (valueSql: string, kind: string) => string,
  *   externalRef?: (paramSql: string, kind: string) => string,
  *   valueTypeOf: (paramSql: string) => string,
@@ -905,6 +906,16 @@ export function createDialect(spec) {
      * a guard the row would fail does not stop the coercion.
      */
     externalEncoding: spec.externalEncoding ?? 'value',
+    /**
+     * Whether the engine reads a stored JSON integer as the exact integer
+     * its digits spell, and compares it exactly with a bound number. A
+     * document spells a number past 2^53 by its shortest digits, so such
+     * an engine compares a member it reads that way with an external past
+     * 2^53 as the engine does when the external binds as the integer ITS
+     * shortest digits spell: those digits are the ones the document holds
+     * for the same number, and they order as the doubles do.
+     */
+    integerDigits: spec.integerDigits === true,
     /** The MEMBER side of an external comparison, at the branch's kind. */
     externalCompare: spec.externalCompare ?? ((valueSql) => valueSql),
     /** The PARAMETER side of an external comparison, at the same kind. */

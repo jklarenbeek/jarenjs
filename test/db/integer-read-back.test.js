@@ -112,6 +112,30 @@ describe('a stored integer a JavaScript number would round', () => {
     });
   }
 
+  for (const engine of ENGINES) {
+    it(`on ${engine}, a native statement that projects the member refuses it as the row read whole does`, { skip: skipFor(engine) }, async () => {
+      await withRawWriter(engine, async (store, raw) => {
+        const set = store.entity('T');
+        await set.create({ id: 'a', v: 1, n: 1 });
+        await set.create({ id: 'b', v: 2, n: 2 });
+        await raw('UPDATE "T" SET "v" = 9007199254740993 WHERE "id" = \'b\'');
+        for (const ret of ['$it.v', { v: '$it.v' }, { id: '$it.id', v: '$it.v' }]) {
+          const document = { $for: { it: '$.T[*]' }, $orderby: ['$it.id'], $return: ret };
+          assert.equal((await store.explain(document)).mode, 'native', JSON.stringify(ret));
+          for (const pushdown of [true, false]) {
+            await assert.rejects(async () => store.execute(document, { pushdown }), (error) => {
+              assert.deepEqual({ code: error.code, class: error.class, cause: error.cause?.code },
+                { code: 'JD2003', class: 'data', cause: 'ERR_OUT_OF_RANGE' }, `${JSON.stringify(ret)} ${pushdown}`);
+              return true;
+            });
+          }
+        }
+        // a member the statement does not project is not read (a named deviation)
+        assert.deepEqual(await store.execute({ $for: { it: '$.T[*]' }, $orderby: ['$it.id'], $return: '$it.n' }), [1, 2]);
+      });
+    });
+  }
+
   it('on postgres, an integer past 2^53 the store wrote reads back as written', { skip: skipFor('postgres') }, async () => {
     await withStore('postgres', model, async (store) => {
       const set = store.entity('T');

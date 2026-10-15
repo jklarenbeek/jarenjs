@@ -293,8 +293,9 @@ cast of a document member), as the engine reads the member it comes from. The
 driver tells a stored value from a computed one by the table the server names
 for a result column; a client that names none reads every `numeric` as the
 nearest double. The refusal is made where a row is read whole (`get`, `load`,
-`page`, a query that returns the entity); a native statement that projects the
-`integer` member alone still answers the nearest double.
+`page`, a query that returns the entity) and where a native statement projects
+the `integer` member (`$return: '$it.v'`, or a constructor of it); an included
+child and change capture still read such a value as the nearest double.
 
 ## The writer lock and the lock family
 

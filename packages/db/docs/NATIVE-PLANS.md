@@ -184,7 +184,13 @@ engine also evaluates the filter on every row before a cursor yields its first i
 so a `query()` cursor over a statement whose registered function can raise reads the
 statement whole first (`streaming: 'buffered'`, the barrier `bind.raisingFunction`;
 `strictStreaming` declines it, `JD0037`) and raises before any item where the engine
-does; a cursor whose functions cannot raise still pulls one row per item.
+does; a cursor whose functions cannot raise still pulls one row per item. The engine
+evaluates the return of every row before that first item too, so a cursor whose return
+runs in the engine per row (`mode: 'row'`) and can raise on one reads the statement
+whole first as well (the barrier `bind.raisingProjection`, construct `$return`); a
+return that cannot raise — an operator a pushed count accepts, over the operand it
+accepts, or a constructor of such operators, member paths and literals — still pulls
+one row per item.
 
 A string literal reaches the database through the driver as UTF-8, which has no
 spelling for a lone surrogate: it arrives as U+FFFD and the database compares that
@@ -227,7 +233,7 @@ row limits bound fetched results; byte limits bound each decoded result item.
 The `pushdown: false` engine is the oracle: a native plan answers what it
 answers, value or error code. These are the cases where it does not, each
 kept on purpose and named here; every other difference is a defect. In the
-last three the native plan answers where the engine raises a type or decoding
+last four the native plan answers where the engine raises a type or decoding
 error, and wherever the engine answers, the two agree; in the first the two
 read one stored string differently.
 
@@ -289,6 +295,23 @@ read one stored string differently.
   that reads the column (`{ "n": "$it.n", "day": "$it.day" }`) raise `JD2003`
   natively too. To keep such rows out of the table, constrain the column in
   the database (a CHECK that `day` holds a date).
+- **A native count or window over a constructor never evaluates the rows it
+  skips.** Collection `c` (`o` number with an index on `$.o`, `u` typed
+  `string`) on a store with no validation hook, rows `{ "id": "a", "o": 1, "u": "x" }`,
+  `{ "id": "b", "o": 2, "u": 5 }` and `{ "id": "c", "o": 3, "u": "y" }`:
+  `{ "$count": { "$for": { "it": "$[*]" }, "$return": { "k": { "$upper": "$it.u" } } } }`
+  answers `3` natively, and
+  `{ "$subsequence": [{ "$for": { "it": "$[*]" }, "$orderby": ["$it.o"], "$return": { "k": { "$upper": "$it.u" } } }, 0, 1] }`
+  answers `{ "k": "X" }`; the engine raises `JQ2001` (`expected a string, got
+  a number`) on row `b` for both. The schema types `u` exactly `string`, so
+  the planner proves the constructor cannot raise and counts the rows (one
+  `COUNT(*)` that reads none) or stops the statement once the window is full;
+  a row the schema forbids is never evaluated. For the same reason a `query()`
+  cursor over that return streams and yields the items before the row it
+  raises on. Evaluating every row would cost the count and the window what
+  they save. A store that validates its writes (a `compileSchema` hook)
+  cannot hold such a row; on one that does not, `pushdown: false` answers as
+  the engine.
 
 ## Mutations
 

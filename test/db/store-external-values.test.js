@@ -237,6 +237,72 @@ for (const engine of ENGINES) {
       });
     });
 
+    it('one a filter selects or reads, an operator hands through or a fold starts from', async () => {
+      await seeded(engine, async (store) => {
+        const ev = store.collection('ev');
+        const member = "collection('ev').execute";
+        /** @type {[any, any, any, string][]} each document, externals of which one reads a Date, their JSON form, and where */
+        const cases = [
+          [evs({ $gt: ['$e.at', '$xs[?@.k == 1].at'] }), { xs: [{ k: 1, at: SINCE }] }, { xs: [{ k: 1, at: ISO }] }, '/$where/$gt/1'],
+          [evs({ $gt: ['$e.at', '$xs[?@.at > "2026"].v'] }), { xs: [{ v: ISO, at: SINCE }] }, { xs: [{ v: ISO, at: ISO }] }, '/$where/$gt/1'],
+          [evs({ $gt: ['$e.at', '$xs[?length(@.at) > 3].v'] }), { xs: [{ v: ISO, at: SINCE }] }, { xs: [{ v: ISO, at: ISO }] }, '/$where/$gt/1'],
+          [evs({ $gt: ['$e.at', '$xs..[?@.k == 1].at'] }), { xs: { o: [{ k: 1, at: SINCE }] } }, { xs: { o: [{ k: 1, at: ISO }] } }, '/$where/$gt/1'],
+          [evs({ $gt: ['$e.at', '$xs[0:1][?(@.k == 1 || @.k == 2) && !@.z && match(@.s, "a.*")]["at"]'] }),
+            { xs: [[{}, { k: 2, s: 'ab', at: SINCE }]] }, { xs: [[{}, { k: 2, s: 'ab', at: ISO }]] }, '/$where/$gt/1'],
+          [evs({ $gt: ['$e.at', { $head: '$xs[*]' }] }), { xs: [SINCE, ISO] }, { xs: [ISO, ISO] }, '/$where/$gt/1'],
+          [evs({ $gt: ['$e.at', { $tail: '$xs[*]' }] }), { xs: [ISO, SINCE] }, { xs: [ISO, ISO] }, '/$where/$gt/1'],
+          [evs({ $gt: ['$e.at', { $reverse: '$xs[*]' }] }), { xs: [SINCE] }, { xs: [ISO] }, '/$where/$gt/1'],
+          [evs({ $gt: ['$e.at', { $subsequence: ['$xs[*]', 1, 1] }] }), { xs: [ISO, SINCE, ISO] }, { xs: [ISO, ISO, ISO] }, '/$where/$gt/1'],
+          [evs({ $gt: ['$e.at', { $get: ['$o', 'at'] }] }), { o: { at: SINCE } }, { o: { at: ISO } }, '/$where/$gt/1'],
+          [evs({ $gt: ['$e.at', { $get: ['$xs', -1] }] }), { xs: [ISO, SINCE] }, { xs: [ISO, ISO] }, '/$where/$gt/1'],
+          [evs({ $gt: ['$e.at', { $seq: ['$a', '$b'] }] }), { a: ISO, b: SINCE }, { a: ISO, b: ISO }, '/$where/$gt/1'],
+          [evs({ $ne: [['$e.at'], ['$a']] }), { a: SINCE }, { a: ISO }, '/$where/$ne/1'],
+          [evs({ $ne: [{ at: '$e.at' }, { at: '$a' }] }), { a: SINCE }, { a: ISO }, '/$where/$ne/1'],
+          [{ $fold: { acc: '$s' }, $for: { e: '$[*]' }, $where: { $gt: ['$e.at', '$acc'] }, $orderby: ['$e.id'], $return: '$e.id' },
+            { s: SINCE }, { s: ISO }, '/$where/$gt/1'],
+          [{ $for: { e: '$[*]', w: { $in: '$xs[*]', $window: 'tumbling', $size: 1 } }, $where: { $gt: ['$e.at', '$w'] }, $return: '$e.id' },
+            { xs: [SINCE] }, { xs: [ISO] }, '/$where/$gt/1'],
+        ];
+        for (const [document, dated, iso, docPath] of cases) {
+          // the one external holding a Date
+          const name = Object.keys(dated).find((key) => dated[key] !== iso[key]);
+          const label = JSON.stringify(document);
+          for (const pushdown of [true, false]) {
+            const expected = await ev.execute(document, { externals: iso, pushdown: false });
+            assert.notStrictEqual(expected, undefined, label);
+            assert.deepStrictEqual(await ev.execute(document, { externals: iso, pushdown }), expected, label);
+            const { error } = await refusal(() => ev.execute(document, { externals: dated, pushdown }));
+            assert.strictEqual(error.message, compared(member, name, docPath), label);
+          }
+        }
+        // what the filter or operator leaves behind is never read: the call answers
+        const ok = (/** @type {any} */ document, /** @type {any} */ externals) => ev.execute(document, { externals });
+        assert.strictEqual(await ok(evs({ $gt: ['$e.at', '$xs[?@.k == 1].at'] }), { xs: [{ k: 1, at: ISO }, { k: 2, at: SINCE }] }), 'b');
+        assert.strictEqual(await ok(evs({ $gt: ['$e.at', '$xs[?@.at].v'] }), { xs: [{ v: ISO, at: SINCE }] }), 'b');
+        assert.strictEqual(await ok(evs({ $gt: ['$e.at', '$xs[?count(@.*) == 2].v'] }), { xs: [{ v: ISO, at: SINCE }] }), 'b');
+        assert.strictEqual(await ok(evs({ $gt: ['$e.at', { $head: '$xs[*]' }] }), { xs: [ISO, SINCE] }), 'b');
+        assert.strictEqual(await ok(evs({ $gt: ['$e.at', { $tail: '$xs[*]' }] }), { xs: [SINCE, ISO] }), 'b');
+        assert.strictEqual(await ok(evs({ $gt: ['$e.at', { $subsequence: ['$xs[*]', 0, 1] }] }), { xs: [ISO, SINCE] }), 'b');
+        assert.strictEqual(await ok(evs({ $gt: ['$e.at', { $get: ['$o', 'at'] }] }), { o: { at: ISO, other: SINCE } }), 'b');
+        assert.strictEqual(await ok(evs({ $gt: ['$e.at', { $get: ['$xs[*]', 'at'] }] }), { xs: [{ at: SINCE }, { at: SINCE }] }), undefined);
+        // the entity engine reads the same way
+        const rows = store.entity('Event');
+        const after = rowsOf({ $gt: ['$e.at', '$xs[?@.k == 1].at'] });
+        assert.strictEqual(await rows.execute(after, { externals: { xs: [{ k: 1, at: ISO }]} }), 2);
+        assert.strictEqual((await refusal(() => rows.execute(after, { externals: { xs: [{ k: 1, at: SINCE }]} }))).error.message,
+          compared('entity execute()', 'xs', '/$where/$gt/1'));
+      });
+    });
+
+    it('a filter that reads the input document is not followed, and answers as the engine', async () => {
+      await seeded(engine, async (store) => {
+        const document = evs({ $gt: ['$e.at', '$xs[?@.k == $[0].k].at'] });
+        for (const pushdown of [true, false]) {
+          assert.strictEqual(await store.collection('ev').execute(document, { externals: { xs: [{ k: 1, at: SINCE }] }, pushdown }), undefined);
+        }
+      });
+    });
+
     it('a host function is handed the Date itself', async () => {
       /** @type {any[]} */
       const seen = [];

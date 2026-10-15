@@ -2215,11 +2215,16 @@ as written, on PostgreSQL only), and on PostgreSQL one holding U+0000; and
 one holding a function or a symbol, which no database binds. Against a member that cannot hold it the
 comparison matches nothing on either side, and the call answers — a
 boolean, an object or an array in place of a single value too, which SQLite
-binds as a value of no JSON kind. A predicate's integer past 2^53 is bound
-as the number it is: PostgreSQL compares it as the engine does, but SQLite
-reads a stored JSON integer by its digits, so a stored integer past 2^53
-near the value can be kept or dropped otherwise than the engine does (a
-document's own such external runs in the engine instead). One the
+binds as a value of no JSON kind. A predicate's integer past 2^53 keeps
+the rows the engine keeps: PostgreSQL compares it as the engine does, and
+SQLite, which reads a stored JSON integer as the exact integer its digits
+spell, binds it as the integer its own shortest digits spell (2^60 as
+`1152921504606847000`), the digits a document holds for the same number,
+which order as the doubles do; a column that holds the double (a `number`
+member's) takes the number as it is. The statement is the one a safe
+integer binds, so it seeks as that one does. A stored integer another
+writer spelled with other digits than the shortest is compared by those
+digits (a document's own such external runs in the engine instead). One the
 predicate would compare as `{}` (a `Date`, a `Map`), or a `bigint`, is
 refused `JD0041` (§10.1). `explain()` given externals
 refuses what the run it explains refuses; given none, it answers the plan
@@ -3181,11 +3186,17 @@ An external is a call's own value, so the same members check it per
 call, against the compiled document: an external the engine compares or
 equates — a direct operand of `$eq`, `$ne`, `$lt`, `$le`, `$gt`, `$ge`,
 `$distinct` or `$index-of`, or a grouping key (`$since`, `$ids[*]`,
-`$window.from`), or one a variable is bound to first (`$let`, `$for`, a
-quantifier, a grouping key) and compared through it (`$s` after
-`$let: { s: '$since' }`), in the document or in the store profile's
+`$window.from`), or one a variable is bound to first (`$let`, `$for` and
+its window, a quantifier, a grouping key, a `$fold` accumulator's initial
+value) and compared through it (`$s` after `$let: { s: '$since' }`), or
+one an operator hands through to the comparison as it is (`$head`,
+`$tail`, `$reverse`, `$subsequence` with literal bounds, `$get` with a
+literal key, each operand of `$seq`, each member of an array or object
+constructor compared whole), in the document or in the store profile's
 predicate over a root it reads, followed through the path it reaches
-(name, index, wildcard, slice and descendant segments) — that holds such
+(name, index, wildcard, slice, filter and descendant segments; a filter
+selects as the engine does, and a value it compares or hands to a path
+function on the way, `length(@.at)`, is read too) — that holds such
 a value, at its root or inside it, is `JD0041` naming the member, the
 external and the comparison's `docPath`, on every member above and on
 every view
@@ -3200,10 +3211,14 @@ external the query returns, or hands to a registered function, is
 passed through by reference (the function receives the `Date` itself);
 one the document never compares is not read; a plain or null-prototype
 object, a class instance read by its fields, an array and a primitive
-compare as JSON. An external reached through a filter segment, or one an
-operator computes a value from before a comparison reads it (`$first`, a
-`$get` member, a function's result), is not followed and is still compared
-as `{}`. A `bigint` such a position reads is `JD0041` the same way
+compare as JSON; a value a filter or an operator leaves behind (`$tail`
+dropping it, `$get` of another member) and one a filter only tests the
+existence of, or counts, is not read. One reached through a filter that
+reads the input document (`$xs[?@.k == $[0].k]`), through `$if`,
+`$coalesce` or `$default`, through `$subsequence` or `$get` with a computed
+bound or key, through `$entries`, a nested phrase's return or a path into
+a constructor, or one an operator computes a value from (a function's
+result), is not followed and is still compared as `{}`. A `bigint` such a position reads is `JD0041` the same way
 (`… external '$min' holds a bigint, which a comparison reads as no number —
 pass the number it stands for, Number(value) at /$where/$gt/1`): the engine
 compares it with no number, so `$gt ['$e.n', '$min']` with `min: 2n` matched

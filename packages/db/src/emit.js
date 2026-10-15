@@ -480,7 +480,7 @@ function typedDiffers(presentSql, valueSql, paramSql) {
 }
 
 /**
- * @typedef {{ external: string, nullable?: boolean, json?: boolean, list?: boolean } | { literal: unknown } |
+ * @typedef {{ external: string, nullable?: boolean, json?: boolean, list?: boolean, digits?: boolean } | { literal: unknown } |
  *   { derived: { kind: 'bboxAxis', external: string,
  *     axis: 'w' | 's' | 'e' | 'n' } } |
  *   { derived: { kind: 'circleAxis', centre: { external: string } | { literal: unknown },
@@ -493,7 +493,9 @@ function typedDiffers(presentSql, valueSql, paramSql) {
  *   shape the prefix successor uses — compute in JavaScript what SQL
  *   cannot, bind an ordinary parameter — and it stays closed on
  *   purpose: a general expression slot would be a second query language
- *   living in the emitter.
+ *   living in the emitter. An external slot marked `digits` binds a
+ *   number past 2^53 as the integer its shortest digits spell, for a
+ *   member the database reads by its digits (`dialect.integerDigits`).
  *
  *   A TYPED slot is the other direction: a scalar whose JSON type is
  *   PROVEN before the statement binds — the database's own answer to
@@ -639,9 +641,12 @@ export function emitPlan(plan, dialect, physical) {
    */
   const comparedValue = (ref, kind, wide) => {
     const value = valueOf(ref, kind);
-    return comparedAs(dialect, value, wide
-      && !(value === q(ref.column) && physical.doubleColumns?.has(ref.column) === true));
+    return comparedAs(dialect, value, wide && !readsDouble(ref, value));
   };
+  /** Whether a ref's read is a generated column that holds a number as the
+   * double already (`physical.doubleColumns`).
+   * @param {any} ref @param {string} value - the read {@link valueOf} spells */
+  const readsDouble = (ref, value) => value === q(ref.column) && physical.doubleColumns?.has(ref.column) === true;
   const pathText = (ref) => pathTextOf(dialect, ref);
   /** The document a query reads a ref's member from: guarded where the
    * engine's path text would read the member off the wrong container. */
@@ -803,7 +808,13 @@ export function emitPlan(plan, dialect, physical) {
     const name = pred.operand.ext;
     const external = () => externalSlot(name);
     const compare = (kind) => dialect.externalCompare(valueOf(pred.ref, kind), kind);
-    const against = (kind) => dialect.externalRef(external(), kind);
+    // a member read by its digits compares with an external past 2^53 as
+    // the engine does when the external binds as the integer its own
+    // shortest digits spell (`digits`, `dialect.integerDigits`); a column
+    // that holds the double compares with the number as it is
+    const digits = dialect.integerDigits && !readsDouble(pred.ref, valueOf(pred.ref, 'number'));
+    const against = (kind) => dialect.externalRef(kind === 'number' && digits
+      ? param({ external: name, digits: true }) : external(), kind);
     const textBranch = `(${jt} IS NOT NULL AND ${jt} = ${sl('text')} AND `
       + `${dialect.valueTypeOf(external())} = ${sl('text')} AND `
       + `${compare('text')} ${pred.op === 'ne' ? '=' : symbol} ${against('text')})`;
