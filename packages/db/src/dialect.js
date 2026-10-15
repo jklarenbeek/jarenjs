@@ -250,6 +250,7 @@ export const MEMBER_WHEN = Symbol('dialect.memberWhen');
  *   intervalSpelling: (conforming: boolean) => import('./dialects/check-read.js').IntervalSpelling,
  *   memberPathOf?: (expression: string) => (JsonPathSegment[] | null),
  *   memberGuarded?: (expression: string) => boolean,
+ *   memberReadsNumbersFirst?: (expression: string) => boolean,
  *   expressionOf?: (expression: string, byName: Record<string, string>) => (any | null),
  *   readGenerated?: (rows: any[]) => { name: string, expression: string }[],
  *   physicalRead?: (codec: string, sql: string) => string,
@@ -958,6 +959,14 @@ export function createDialect(spec) {
      * definition the catalog holds.
      */
     memberGuarded: spec.memberGuarded,
+    /**
+     * Whether a generated column's expression reads its numbers as doubles
+     * and every other kind as it is stored — the untyped column of a member
+     * whose union lists `number` first — which the introspector answers by
+     * declaring such a member a union of every kind, `number` first, so the
+     * derived model plans the definition the catalog holds.
+     */
+    memberReadsNumbersFirst: spec.memberReadsNumbersFirst,
     /**
      * How this dialect's interval CHECK reads back through the one
      * interval reader, for a session whose string spelling is as given.

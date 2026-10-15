@@ -152,12 +152,25 @@ function schemaTypeOf(declaredType) {
  */
 function memberPathOf(expression) {
   const text = String(expression);
-  const match = /^\s*\(*\s*jsonb_extract\s*\(\s*"[^"]*"\s*,\s*'((?:[^']|'')*)'\s*\)\s*\)*\s*$/.exec(text)
-    ?? /^\s*\(*\s*CASE\s+WHEN\s+json_type\s*\(\s*"[^"]*"\s*,\s*'((?:[^']|'')*)'\s*\)\s+IN\s*\(\s*'integer'\s*,\s*'real'\s*\)\s+THEN\s+CAST\s*\(\s*jsonb_extract\s*\(\s*"[^"]*"\s*,\s*'\1'\s*\)\s+AS\s+REAL\s*\)\s+ELSE\s+jsonb_extract\s*\(\s*"[^"]*"\s*,\s*'\1'\s*\)\s+END\s*\)*\s*$/i
-      .exec(text);
+  const match = PLAIN_READ.exec(text) ?? KEY_READ.exec(text);
   if (match === null) return null;
   return parsePathText(match[1].replace(/''/g, "'"));
 }
+
+/** A member read as it is stored: {@link jsonExtract}'s default read. */
+const PLAIN_READ = /^\s*\(*\s*jsonb_extract\s*\(\s*"[^"]*"\s*,\s*'((?:[^']|'')*)'\s*\)\s*\)*\s*$/;
+/** A member read with its numbers as doubles: {@link jsonExtract}'s `key` read. */
+const KEY_READ = /^\s*\(*\s*CASE\s+WHEN\s+json_type\s*\(\s*"[^"]*"\s*,\s*'((?:[^']|'')*)'\s*\)\s+IN\s*\(\s*'integer'\s*,\s*'real'\s*\)\s+THEN\s+CAST\s*\(\s*jsonb_extract\s*\(\s*"[^"]*"\s*,\s*'\1'\s*\)\s+AS\s+REAL\s*\)\s+ELSE\s+jsonb_extract\s*\(\s*"[^"]*"\s*,\s*'\1'\s*\)\s+END\s*\)*\s*$/i;
+
+/**
+ * Whether a generated column's expression is the `key` read
+ * {@link memberPathOf} recovers a path from: the read of an untyped column
+ * over a member whose union lists `number` first, which reads each number as
+ * the double the engine compares and any other kind as it is stored.
+ * @param {string} expression
+ * @returns {boolean}
+ */
+const memberReadsNumbersFirst = (expression) => KEY_READ.test(String(expression));
 
 /**
  * `$."a"."b"[0]` back into typed segments — the inverse of
@@ -485,6 +498,7 @@ export const sqliteDialect = createDialect({
   rtreeDdl: rtreeDdl({ quoteIdentifier, rowIdentity, rtree: RTREE }),
   schemaTypeOf,
   memberPathOf,
+  memberReadsNumbersFirst,
   expressionOf,
   readGenerated,
   explainQuery: (sql) => `EXPLAIN QUERY PLAN ${sql}`,

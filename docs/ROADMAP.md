@@ -456,20 +456,29 @@ what each does is its own documentation's job
   foreign keys re-pointed through the rebuild, or in-place `ALTER`s where
   PostgreSQL has them.
 - [ ] **A rebuild that spells a number as text can end in another last digit
-  on SQLite, and keeps the cast for a referenced key.** A number or a boolean
-  retyped into text is copied as `String()` spells it on both engines (an
-  integer keeps its digits), but on SQLite a number whose shortest spelling
-  takes 16 or 17 significant digits can end in another last digit (SQLite's
-  formatter rounds it; the text reads back as the same number), and a key
+  on SQLite, and keeps the cast for a referenced key.** A number retyped into
+  text is copied as `String()` spells it on both engines, except that on
+  SQLite a number whose shortest spelling takes 16 or 17 significant digits
+  can end in the neighbour of `String()`'s last digit (the text reads back as
+  the same number): the copy chooses among the candidates that read back the
+  one SQLite's own formatter rounds to, and that formatter rounds from an
+  inexact decimal of its own. An exact choice needs the double's exact decimal
+  in SQL (multi-precision per value) or a registered function, which a
+  migration document cannot rely on (`bun:sqlite` registers none). A key
   another table's foreign key references, with the column that references it,
   keeps the engine's cast (`5.0` on SQLite) so the reference matches while one
-  table is rebuilt and the other not yet. Wanted: exact last digits on SQLite,
-  and a referenced number key spelled as `String()` (the referencing table
-  rebuilt ahead of the key's check, or the check taken after both).
-- [ ] **A retype check refuses a blank text that `Number()` reads.** The empty
-  or blank text, which `Number()` reads as `0` (and SQLite's cast as `0.0`),
-  and a number led or trailed by a no-break space, which `Number()` trims, are
-  refused on both engines. Wanted: decide whether a blank text is a number.
+  table is rebuilt and the other not yet; for the same reason a text led or
+  trailed by a blank only `Number()` trims (a no-break space) is refused there
+  when retyped into a number. Wanted: exact last digits on SQLite, and a
+  referenced key spelled and read as `String()` and `Number()` do (the
+  referencing table rebuilt ahead of the key's check, or the check taken after
+  both). ADD (optional, observed): "- [ ] **A plan between two number-first
+  unions that differ only past the first type recreates an identical column on
+  SQLite.** `['number','string']` -> `['number','boolean']` (and a model read
+  back by `introspect()` -> the authored one) drops and adds `gx_q` with the
+  same `CASE` read, because the plan compares the union's `members`; nothing
+  is lost, the index is rebuilt. Wanted: compare the read, not the member
+  list."
 - [ ] **An integer past 2^53 in an `integer` column answers differently on the
   two engines.** A stored integer a JavaScript number would round is refused
   `JD2003` on both where a row is read whole; but one the store wrote
@@ -703,16 +712,6 @@ what each does is its own documentation's job
   planned column's `unpinned`; a table holding the other spelling keeps the
   guarded document until `planColumnUpgrade` rebuilds it), or an expression
   index.
-- [ ] **`jaren-db plan` has no flag for the column upgrade.**
-  `planColumnUpgrade` is an API only; wanted `jaren-db plan --store <db>
-  --upgrade-columns`, which prints or writes the link (cli.js was outside this
-  lane).
-- [ ] **On SQLite a model read back from a table with an indexed number-first
-  union member does not reopen it.** `introspect()` derives `q: {}` and
-  `openStore(derived)` is `JD0002` (the table's `gx_q` reads numbers through
-  `CASE WHEN json_type(...) IN ('integer','real') THEN CAST(... AS REAL) ...`,
-  the derived model declares plain `jsonb_extract`); a string-first union
-  reopens. Same in v0.140.0.
 - [ ] **On PostgreSQL the generated column of an indexed union member is the first type's, so a comparison of another kind reads the document and does not seek.** Wanted: a typed column per kind or an expression index.
 - [ ] **A store predicate's external past 2^53 compares exactly in SQLite
   where the engine compares doubles.** A store profile predicate comparing a

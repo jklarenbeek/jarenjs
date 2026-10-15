@@ -2299,13 +2299,40 @@ function numberTextSql(dialect, ref) {
     + `ELSE CASE WHEN ${ref} < 0 THEN '-' ELSE '' END || (${spelled}) END`;
 }
 
+/** The characters JavaScript's `Number()` trims around the number a text
+ * spells, by code point: the ASCII blanks both engines' casts skip too, and the
+ * others (a no-break space, U+FEFF, U+3000, ...), which neither cast skips. */
+const NUMBER_BLANKS = Object.freeze([0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x20, 0xa0, 0x1680,
+  0x2000, 0x2001, 0x2002, 0x2003, 0x2004, 0x2005, 0x2006, 0x2007, 0x2008, 0x2009, 0x200a,
+  0x2028, 0x2029, 0x202f, 0x205f, 0x3000, 0xfeff]);
+
+/** The storages a text is read into as the number it spells. */
+const NUMBER_STORAGES = new Set(['number', 'integer', 'boolean']);
+
+/**
+ * A text column read as the text `Number()` reads a number from: without the
+ * blanks it trims at either end ({@link NUMBER_BLANKS}). A text that is blank
+ * once they are gone is the empty text, which the retype check refuses though
+ * `Number()` reads it as `0` (and SQLite's cast as `0.0`): no writer meant a
+ * number by it.
+ * @param {any} dialect @param {string} ref - the quoted column
+ * @returns {string}
+ */
+function numberTextOf(dialect, ref) {
+  return dialect.name === 'postgres'
+    ? `pg_catalog.btrim(${ref}, ${NUMBER_BLANKS.map((code) => `pg_catalog.chr(${code})`).join(' || ')})`
+    : `trim(${ref}, char(${NUMBER_BLANKS.join(', ')}))`;
+}
+
 /**
  * The copy of a column whose type a rebuild changes: its cast, except into
  * text, where a value is spelled as the engine's `String()` spells what the
  * store reads — a number as {@link numberTextSql} does, a boolean as `true` or
  * `false`. An integer keeps its digits (SQLite's 64-bit integer, PostgreSQL's
  * numeric below 1e21, which also drops a scale a retype from text left, `12.0`),
- * so one past 2^53 that no double holds is not rounded by the retype.
+ * so one past 2^53 that no double holds is not rounded by the retype. A text
+ * cast to a number, an integer or a boolean is cast without the blanks
+ * `Number()` trims ({@link numberTextOf}).
  * @param {any} dialect @param {string} ref - the quoted column
  * @param {string} from - the column's storage now
  * @param {string} to - the storage it is retyped to
@@ -2313,7 +2340,7 @@ function numberTextSql(dialect, ref) {
  * @returns {string}
  */
 function retypedSql(dialect, ref, from, to, type) {
-  if (to !== 'string') return `CAST(${ref} AS ${type})`;
+  if (to !== 'string') return `CAST(${from === 'string' && NUMBER_STORAGES.has(to) ? numberTextOf(dialect, ref) : ref} AS ${type})`;
   if (from === 'boolean') return `CASE ${ref} WHEN 1 THEN 'true' WHEN 0 THEN 'false' ELSE CAST(${ref} AS ${type}) END`;
   if (from === 'number') return numberTextSql(dialect, ref);
   if (from === 'integer' && dialect.name === 'postgres')
@@ -2329,7 +2356,11 @@ function retypedSql(dialect, ref, from, to, type) {
  * on SQLite, `12.5` becomes the integer `12`, a number outside 64 bits
  * saturates, an integer past 2^53 rounds into a double, and `0.5` or `81` is no
  * boolean. A spelling the cast reads right (`007`, `+5`, ` 12`, `12.0`, `.5`)
- * is no change. The statement fails, naming the member and the first value in
+ * is no change. A text is judged as the copy casts it, without the blanks
+ * `Number()` trims around a number (a no-break space, U+FEFF), except in a
+ * column a foreign key joins, which the copy casts as it is; a text blank once
+ * they are gone names no number and is refused, though `Number()` reads it as
+ * `0`. The statement fails, naming the member and the first value in
  * order that would change, as `wholeKeySql` does; no such value, no failure,
  * and a missing member (SQL NULL) is no value. Both engines refuse a value
  * whose number the cast would not keep, with three exceptions of the engines'
@@ -2343,12 +2374,15 @@ function retypedSql(dialect, ref, from, to, type) {
  * @param {string} from - the column's storage now
  * @param {string} to - the storage it is retyped to
  * @param {boolean} instant - the column is an epoch column, which stays within a double's exact range
+ * @param {boolean} joined - a foreign key joins the column, which the copy casts as it is
  * @returns {string | null}
  */
-function retypeCheckSql(dialect, table, column, from, to, instant) {
+function retypeCheckSql(dialect, table, column, from, to, instant, joined) {
   const q = dialect.quoteIdentifier, literal = dialect.stringLiteral, ref = q(column);
   const postgres = dialect.name === 'postgres';
   const text = from === 'string';
+  // a text is judged as the copy casts it: without the blanks Number() trims, but where a foreign key joins it
+  const read = text && !joined ? numberTextOf(dialect, ref) : ref;
   const int64 = '-9223372036854775808 AND 9223372036854775807';
   // the spellings PostgreSQL's numeric cast reads as JavaScript's Number() does: blanks around a sign,
   // digits with an optional point and an exponent (bounded, so that no digit string reaches an overflow
@@ -2361,8 +2395,8 @@ function retypeCheckSql(dialect, table, column, from, to, instant) {
   let lost, held;
   if (to === 'boolean' && text) {
     lost = postgres
-      ? `NOT CASE WHEN ${ref} ~ ${literal(digitsText)} THEN CAST(${ref} AS numeric) IN (0, 1) ELSE false END`
-      : `NOT (${ref} NOT GLOB '*[.eE]*' AND CAST(${ref} AS INTEGER) = ${ref} AND CAST(${ref} AS INTEGER) IN (0, 1))`;
+      ? `NOT CASE WHEN ${read} ~ ${literal(digitsText)} THEN CAST(${read} AS numeric) IN (0, 1) ELSE false END`
+      : `NOT (${read} NOT GLOB '*[.eE]*' AND CAST(${read} AS INTEGER) = ${read} AND CAST(${read} AS INTEGER) IN (0, 1))`;
     held = 'the 0 or 1 a boolean is stored as';
   }
   else if (to === 'boolean') {
@@ -2374,10 +2408,10 @@ function retypeCheckSql(dialect, table, column, from, to, instant) {
     // -2^63, which the saturated cast equals, so that one boundary is held to its own spelling; a nonzero
     // fraction is refused outright, for a double past 2^53 would hide it
     lost = postgres
-      ? `NOT CASE WHEN ${ref} ~ ${literal(decimalText)} THEN CAST(${ref} AS numeric) = pg_catalog.trunc(CAST(${ref} AS numeric)) `
-        + `AND CAST(${ref} AS numeric) BETWEEN ${int64} ELSE false END`
-      : `NOT (CAST(${ref} AS INTEGER) = ${ref} AND ${ref} NOT GLOB '*.*[1-9]*' `
-        + `AND (CAST(${ref} AS INTEGER) <> -9223372036854775808 OR ${ref} = '-9223372036854775808'))`;
+      ? `NOT CASE WHEN ${read} ~ ${literal(decimalText)} THEN CAST(${read} AS numeric) = pg_catalog.trunc(CAST(${read} AS numeric)) `
+        + `AND CAST(${read} AS numeric) BETWEEN ${int64} ELSE false END`
+      : `NOT (CAST(${read} AS INTEGER) = ${read} AND ${read} NOT GLOB '*.*[1-9]*' `
+        + `AND (CAST(${read} AS INTEGER) <> -9223372036854775808 OR ${read} = '-9223372036854775808'))`;
     held = 'a whole number a 64-bit integer holds';
   }
   else if (to === 'integer' && from === 'number') {
@@ -2390,8 +2424,8 @@ function retypeCheckSql(dialect, table, column, from, to, instant) {
   }
   else if (to === 'number' && text) {
     lost = postgres
-      ? `NOT CASE WHEN ${ref} ~ ${literal(decimalText)} THEN pg_catalog.abs(CAST(${ref} AS numeric)) <= 1.7976931348623157E+308 ELSE false END`
-      : `NOT (CAST(${ref} AS REAL) = ${ref} AND CAST(${ref} AS REAL) NOT IN (9e999, -9e999))`;
+      ? `NOT CASE WHEN ${read} ~ ${literal(decimalText)} THEN pg_catalog.abs(CAST(${read} AS numeric)) <= 1.7976931348623157E+308 ELSE false END`
+      : `NOT (CAST(${read} AS REAL) = ${read} AND CAST(${read} AS REAL) NOT IN (9e999, -9e999))`;
     held = 'a finite number';
   }
   else if (to === 'number' && from === 'integer' && !instant && !postgres) {
@@ -2506,13 +2540,14 @@ function renderRebuild(name, fromName, fm, tm, toMapping, dialect, report) {
       else {
         // the type's name alone: a collation belongs to the column, and
         // `CAST(x AS text COLLATE "C")` is not a cast. A column a foreign key
-        // joins keeps the engine's cast into text, so the reference matches
-        // the key it names while one side is rebuilt and the other not yet
+        // joins keeps the engine's cast, into text and out of it, so the
+        // reference matches the key it names while one side is rebuilt and the
+        // other not yet
         const type = dialect.comparableColumnType(storageType(column.storage));
         sources.push(joined(columnName) ? `CAST(${q(columnName)} AS ${type})`
           : retypedSql(dialect, q(columnName), fromColumn.storage, column.storage, type));
         const check = retypeCheckSql(dialect, name, columnName, fromColumn.storage, column.storage,
-          fromColumn.source === 'epoch(document)');
+          fromColumn.source === 'epoch(document)', joined(columnName));
         if (check !== null) retypeChecks.push(check);
       }
       continue;
@@ -3009,13 +3044,17 @@ function runSteps(connection, migration, options) {
               return null;
             });
           }
+          // a statement that throws is named the step's failure here, once: the
+          // statements after it run outside this catch, so a failure of theirs
+          // is not named again
+          let ran;
           try {
-            return chain(attempt(() => connection.exec(statements[j]), (cause) => (j === dropAt ? referenced(cause) : cause)),
-              () => runNext(j + 1));
+            ran = attempt(() => connection.exec(statements[j]), (cause) => (j === dropAt ? referenced(cause) : cause));
           }
           catch (cause) {
             return fail(/** @type {Error} */ (cause).message, /** @type {Error} */ (cause));
           }
+          return chain(ran, () => runNext(j + 1));
         };
         return chain(foreignKeyViolations(connection), (rows) => { before = rows; return runNext(0); });
       }

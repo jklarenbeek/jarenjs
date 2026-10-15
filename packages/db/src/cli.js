@@ -17,7 +17,7 @@ import { pathToFileURL } from 'url';
 import { loadDocument as loadDocumentFile, isDocumentFile } from '@jarenjs/json/node';
 
 import {
-  planModelMigration, migrate, migrationStatus, migrationHistory, adoptMigrationHistory,
+  planModelMigration, planColumnUpgrade, migrate, migrationStatus, migrationHistory, adoptMigrationHistory,
   shapeHash, compareShapeToModel,
   sqliteDialect, normalizeModel, normalizeEntities, explainMapping,
   planCollection, planEntity, planJoinTable, HISTORY_TABLE, entityEmitModel,
@@ -37,6 +37,7 @@ const USAGE = `jaren-db — model-driven SQLite migrations
 Usage:
   jaren-db plan     --from <model> --to <model> [--store <db>] [--id <name>] [--out <file>]
   jaren-db plan     --model <model> [--snapshot <file>] [--store <db>] [--id <name>] --out <file>
+  jaren-db plan     --model <model> --store <db> --upgrade-columns [--id <name>] [--out <file>]
   jaren-db snapshot --model <model> [--snapshot <file>] [--types <file>]
   jaren-db status   --model <model> --store <db> [--migrations <dir>] [--snapshot <file>]
   jaren-db apply    --store <db> --baseline <model> --migrations <dir> [--model <m>] [--dry-run] [--yes]
@@ -63,6 +64,13 @@ plan      Diff two model FILES into an exact 0.2 migration document,
           --out the migration is written and the snapshot advanced; a
           model matching its snapshot plans nothing. With --store, first
           verify the from-model's physical shape against the database.
+          With --upgrade-columns, plan instead the link that rebuilds the
+          generated columns, index expressions and interval CHECKs the
+          --store tables hold as an earlier release created them, from
+          the model the database holds to itself; the snapshot is neither
+          read nor advanced, and a database that holds what this release
+          creates plans nothing and writes nothing. Apply the link as the
+          next of --migrations.
 snapshot  Write the model's snapshot; with --types, emit's TypeScript
           declaration for it (needs @jarenjs/emit beside @jarenjs/db).
 status    Applied, pending, drift (a hand-modified database) and — with
@@ -96,8 +104,8 @@ documents Run a migration's DOCUMENT steps (jslt, query) over a file of
           while writing nothing. Exit: 0 applicable and valid, 1 a
           migration or source failure, 2 a misuse of this command line.
 
-status, check, history, apply --dry-run, plan --store and adopt-history
-never create a --store database named by a plain path: one that does not
+status, check, history, apply --dry-run, plan --store (with or without
+--upgrade-columns) and adopt-history never create a --store database named by a plain path: one that does not
 exist is refused (exit 1). An apply that is only printed, or that finds
 nothing pending without --yes, creates nothing either. :memory: is an
 empty database. A file: URI reaches SQLite as written, so its own mode
@@ -133,7 +141,7 @@ const VALUE_FLAGS = new Set([
  * snapshot beside the model instead, and `apply --check` applied.
  */
 const COMMAND_FLAGS = Object.freeze({
-  plan: ['--from', '--to', '--model', '--store', '--id', '--out', '--snapshot'],
+  plan: ['--from', '--to', '--model', '--store', '--id', '--out', '--snapshot', '--upgrade-columns'],
   snapshot: ['--model', '--snapshot', '--types'],
   status: ['--model', '--store', '--migrations', '--snapshot', '--baseline'],
   check: ['--model', '--store', '--migrations', '--snapshot', '--baseline'],
@@ -154,7 +162,7 @@ function parseArgs(argv) {
     snapshot: null, types: null, observed: null, physicalTarget: null,
     inputs: [], maxRows: undefined, maxBytes: undefined, maxDistinct: undefined,
     in: null, format: null, outFormat: null, collection: null,
-    batchSize: null, inPlace: false, check: false,
+    batchSize: null, inPlace: false, check: false, upgradeColumns: false,
     dryRun: false, yes: false, help: false,
   };
   const historyCommand = options.command === 'history' || options.command === 'adopt-history';
@@ -201,6 +209,7 @@ function parseArgs(argv) {
       case '--batch-size': options.batchSize = argv[++i]; break;
       case '--in-place': options.inPlace = true; break;
       case '--check': options.check = true; break;
+      case '--upgrade-columns': options.upgradeColumns = true; break;
       case '--dry-run': options.dryRun = true; break;
       case '--yes': options.yes = true; break;
       case '--help': case '-h': options.help = true; break;
@@ -313,6 +322,7 @@ const renderSteps = (migration) => {
 };
 
 async function commandPlan(options) {
+  if (options.upgradeColumns) return commandPlanUpgrade(options);
   let fromModel;
   let toModel;
   let snapshotFile = null;
@@ -379,6 +389,52 @@ async function commandPlan(options) {
       console.log(`advanced ${snapshotFile} (shape ${shapeHash(toModel)})`);
     }
   }
+}
+
+/**
+ * `plan --upgrade-columns`: the link `planColumnUpgrade` plans from the catalog
+ * of --store for the model the database holds, printed or written as `plan`
+ * writes a migration. The store is first verified against the model, as `plan
+ * --store` verifies the from-model; a database that holds what this release
+ * creates plans no step, and nothing is written.
+ */
+async function commandPlanUpgrade(options) {
+  if (options.from !== null || options.to !== null)
+    fail('plan --upgrade-columns takes --model, the model the database holds, not --from and --to');
+  if (options.snapshot !== null)
+    fail('plan --upgrade-columns plans from the database, not from a --snapshot');
+  if (options.model === null || options.store === null)
+    fail('plan --upgrade-columns needs --model and --store');
+  const model = await loadDocument(options.model, 'model', 'model');
+  requireStore(options.store);
+  const driver = nodeDriver();
+  const connection = await driver.open(existingStore(options.store), {}).catch((error) => fail(error.message));
+  let planned;
+  try {
+    const drift = await Promise.resolve(compareShapeToModel(driver, connection, model, undefined));
+    if (drift !== null) fail(`the store does not match the model (${drift}) — is this the model the database holds?`);
+    planned = await Promise.resolve(planColumnUpgrade(connection, model, options.id === null ? undefined : { id: options.id }));
+  }
+  catch (error) {
+    fail(error.message);
+  }
+  finally {
+    await connection.close();
+  }
+  const { migration, report } = planned;
+  if (migration.steps.length === 0) {
+    console.log(`no upgrade — the tables of ${options.store} hold what this release creates for the model; nothing to plan`);
+    return;
+  }
+  const rendered = JSON.stringify(migration, null, 2);
+  if (options.out !== null) {
+    fs.writeFileSync(options.out, rendered + '\n');
+    console.log(`wrote ${options.out} (${migration.steps.length} step(s))`);
+  }
+  else {
+    console.log(rendered);
+  }
+  console.error(`NOTE: the link rebuilds ${report.upgraded.join(', ')} — apply it as the next link of the chain`);
 }
 
 async function commandStatus(options, { asCheck }) {

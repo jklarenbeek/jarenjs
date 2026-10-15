@@ -389,7 +389,10 @@ no continuation to emit.
   row, `jaren-db` loads model and migration MODULES beside JSON, plans
   from the committed `model.snapshot.json`, refuses a module that is
   not pure, and `jaren-db check` fails CI on a model that moved without
-  a plan (MIGRATION-FORMAT §11).
+  a plan (MIGRATION-FORMAT §11). `jaren-db plan --model <model> --store <db>
+  --upgrade-columns` prints, or with `--out` writes, the link
+  `planColumnUpgrade` plans from the database's catalog for the definitions a
+  table an earlier release created still holds (MIGRATION-FORMAT §3).
 - **A document migration does not need the database.** Its `jslt` and
   `query` steps act on documents, so `migrateDocuments` runs them over
   arrays and `streamDocuments` over a source it may walk only once,
@@ -1394,7 +1397,12 @@ it (`key-source` — `options.keys` supplies the pointer), a view cannot
 be declared (`unmapped-view`), a foreign key cannot say which side
 declared the edge (`ambiguous-relation`), a table whose name is no identifier
 (`My Table`, `123x`) is no collection or entity a model can declare
-(`unmapped-table`). A many-to-many edge is declared on the first of its two
+(`unmapped-table`). On SQLite the untyped column of an indexed member of
+several types records only how it reads: a member whose union lists `number`
+first comes back as a union of every kind behind `number` (`['number',
+'string', 'boolean', 'object', 'array', 'null']`, which plans the same read),
+any other untyped (`{}`), and either way the union's own types are an
+`unmapped-type` row. A many-to-many edge is declared on the first of its two
 entities as the other's name pluralised, qualified by the join table's name
 where a column or another edge already has that member. A foreign key comes
 back as the typed property it is, with the edge declared beside it: a

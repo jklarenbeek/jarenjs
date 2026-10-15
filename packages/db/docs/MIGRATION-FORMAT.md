@@ -427,7 +427,8 @@ if (upgrade.steps.length > 0)
 ```
 
 The link's `id` defaults to `upgrade-<hash of the model>`; planned again after it
-applies, it plans no step. A migration document a previous release planned
+applies, it plans no step. At the command line, `jaren-db plan --model <model>
+--store <db> --upgrade-columns` prints or writes the same link (§11). A migration document a previous release planned
 carries the DDL it planned and keeps creating that release's definitions when it
 applies; planning the link again creates this release's, and the upgrade after
 it rebuilds what it created.
@@ -1098,9 +1099,22 @@ a spelling the cast reads right retypes as it always did:
 
 | into | a value is refused when |
 |---|---|
-| integer | it is not a whole number within 64 bits: a fraction (`12.5`, `.5`), a text that names no number (`abc`, `true`, `NaN`, the empty text), a number beyond the 64 bits (`9223372036854775808`, `-9223372036854775809`; a double is judged as the double it is, so `-2^63` is held and `2^63` is not). `007`, `+5`, ` 12`, `12.0` and `5.` are held |
-| number | it is a text that names no finite number (`abc`, `Infinity`, `NaN`, `1e999`, `1_000`, `-0x10`); `.5`, `5.`, `+5`, `007` and ` 12` are held, and so is a text below the double range (`1e-400`), which lands as `0` on both engines, as `Number()` reads it: SQLite stores `0.0`, PostgreSQL's numeric column keeps the decimal and the store reads it as `0`. On SQLite also a whole number a double does not hold exactly (past 2^53, for most), a text of one included |
-| boolean | it is not `0` or `1`; a text only as digits (`01` and `+1` are held, `1.0` and `true` are not) |
+| integer | it is not a whole number within 64 bits: a fraction (`12.5`, `.5`), a text that names no number (`abc`, `true`, `NaN`, the empty or a blank text), a number beyond the 64 bits (`9223372036854775808`, `-9223372036854775809`; a double is judged as the double it is, so `-2^63` is held and `2^63` is not). `007`, `+5`, ` 12`, `12.0` and `5.` are held |
+| number | it is a text that names no finite number (`abc`, `Infinity`, `NaN`, `1e999`, `1_000`, `-0x10`, the empty or a blank text); `.5`, `5.`, `+5`, `007` and ` 12` are held, and so is a text below the double range (`1e-400`), which lands as `0` on both engines, as `Number()` reads it: SQLite stores `0.0`, PostgreSQL's numeric column keeps the decimal and the store reads it as `0`. On SQLite also a whole number a double does not hold exactly (past 2^53, for most), a text of one included |
+| boolean | it is not `0` or `1`; a text only as digits (`01` and `+1` are held, `1.0`, `true` and the empty or a blank text are not) |
+
+A text is read as `Number()` reads the number it spells: without the blanks
+`Number()` trims at either end, the ASCII ones both casts skip and the others
+neither cast skips (a no-break space, U+FEFF, U+3000, every space separator,
+U+2028 and U+2029), so `'\u00a05'` retypes as `5` on both engines. A text that
+is blank once they are gone (the empty text, `'   '`, a no-break space alone)
+is refused into each type, though `Number()` reads it as `0` and SQLite's cast
+as `0.0`: it names no number a writer meant, and a retype that turned it into
+`0` would hide every missing value among the zeros. Give such a row the number
+it stands for, or remove the member, before the retype. A key another table's
+foreign key references, and the column that references it, keep the engine's
+cast (below), so there a text led or trailed by a blank only `Number()` trims
+is refused.
 
 Where the engines' own casts differ, so do the verdicts: SQLite reads only the
 digits before a fraction or an exponent of a text (`1e3` is `1` there, and is
@@ -1255,6 +1269,7 @@ drop the index) on a schema the store accepts.
 ```
 jaren-db plan     --from <model> --to <model> [--store <db>] [--id x] [--out file]
 jaren-db plan     --model <model> [--snapshot <file>] [--store <db>] [--id x] --out file
+jaren-db plan     --model <model> --store <db> --upgrade-columns [--id x] [--out file]
 jaren-db snapshot --model <model> [--snapshot <file>] [--types <file>]
 jaren-db status   --model <model> --store <db> [--migrations <dir>] [--snapshot <file>]
 jaren-db apply    --store <db> --baseline <model> --migrations <dir> [--model <m>] [--dry-run] [--yes]
@@ -1306,6 +1321,18 @@ jaren-db documents --migrations <dir> --in <file|-> (--out <file|-> | --in-place
   the from-model's physical shape with the database itself — never
   with the history, which would refuse every database that has applied
   a migration.
+- `plan --upgrade-columns` plans the link `planColumnUpgrade` plans from the
+  catalog (§3, "Upgrading the definitions a table holds"): `--model` is the
+  model the database holds, which `--store` is first compared with as
+  `plan --store` compares the from-model, and the link goes from that model
+  to itself. It is printed, or written with `--out` (`--id` names it,
+  `upgrade-<hash>` by default), and stderr names each definition it rebuilds;
+  apply it as the next file of `--migrations`. The snapshot is neither read
+  nor advanced (`--from`, `--to` and `--snapshot` are refused beside the
+  flag), and a database that holds what this release creates plans no step:
+  the CLI says so and writes nothing. The command line passes no functions,
+  so a model that declares an index expression is refused `JD0004`, as by
+  `plan --store`; plan its upgrade through the API with `{ expressions }`.
 - `snapshot` writes the model's snapshot (`--snapshot`, the same
   default) — from the model the store was created with, before the
   first `plan --model`; with `--types <file>` it also writes emit's
@@ -1348,8 +1375,8 @@ jaren-db documents --migrations <dir> --in <file|-> (--out <file|-> | --in-place
   database without a history table it creates nothing (§6). Normal status,
   check and apply (including `--dry-run`) refuse unverifiable legacy history
   and pending 0.1 with `JD0028`; a printout is not a legacy bypass.
-- `status`, `check`, `history`, `apply --dry-run`, `plan --store` and
-  `adopt-history` never create a `--store` database named by a plain path: a
+- `status`, `check`, `history`, `apply --dry-run`, `plan --store` (with or
+  without `--upgrade-columns`) and `adopt-history` never create a `--store` database named by a plain path: a
   `--store` naming a file that does not exist is refused (`the database file
   does not exist: <path>`, exit 1) and no file is left behind, because opening
   it would create an empty file and report it as an empty history. They open

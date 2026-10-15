@@ -515,13 +515,16 @@ describe('a store this release created, under a plan that changes the union', ()
 });
 
 describe('introspection of an indexed member of several types', () => {
+  /** What a member read back through a number-first read is declared as: every kind, `number` first. */
+  const EVERY_KIND = ['number', 'string', 'boolean', 'object', 'array', 'null'];
+
   it('reads the index back over an untyped member and reports the column it cannot type', async () => {
-    for (const type of /** @type {any[]} */ ([['number', 'string'], ['string', 'number']])) {
+    for (const [type, derived] of /** @type {[any, any][]} */ ([[['number', 'string'], { type: EVERY_KIND }], [['string', 'number'], {}]])) {
       const store = await openStore(modelOf(type), { driver: nodeDriver() });
       try {
         const { model, report } = await store.introspect();
         assert.deepStrictEqual(model.collections.c.indexes, [{ name: 'by_q', path: '$.q' }]);
-        assert.deepStrictEqual(model.collections.c.schema.properties, { q: {} });
+        assert.deepStrictEqual(model.collections.c.schema.properties, { q: derived });
         assert.deepStrictEqual(report.filter((loss) => loss.code === 'unmapped-type').map((loss) => loss.object), ['c.gx_q']);
       }
       finally {
@@ -529,4 +532,40 @@ describe('introspection of an indexed member of several types', () => {
       }
     }
   });
+
+  // a number-first union reads its numbers as doubles (`CASE WHEN json_type(...) IN ('integer', 'real') ...`),
+  // whatever its other types: the model read back declares every kind behind `number`, so it plans that read
+  for (const type of /** @type {any[]} */ ([['number', 'string'], ['number', 'boolean'], ['null', 'number', 'string'],
+    ['number', 'integer'], ['string', 'number'], ['integer', 'string']])) {
+    const numberFirst = type.find((/** @type {string} */ t) => t !== 'null') === 'number';
+    it(`a model read back from ${JSON.stringify(type)} reopens the table and reads and writes every kind`, async () => {
+      const { dbPath, cleanup } = tempDbPath();
+      try {
+        const store = await openStore(modelOf(type), { driver: nodeDriver(), path: dbPath });
+        /** @type {any} */
+        let derived;
+        try {
+          await store.collection('c').put({ id: 'n', q: 2 });
+          derived = (await store.introspect({ keys: { c: '/id' } })).model;
+        }
+        finally { await store.close(); }
+        assert.deepStrictEqual(derived.collections.c.schema.properties.q, numberFirst ? { type: EVERY_KIND } : {});
+        const again = await openStore(derived, { driver: nodeDriver(), path: dbPath });
+        try {
+          const kinds = [2.5, 'b', '2', true, null, { a: 1 }, [1]];
+          for (const [at, q] of kinds.entries()) await again.collection('c').put({ id: `k${at}`, q });
+          for (const [at, q] of kinds.entries()) assert.deepStrictEqual((await again.collection('c').get(`k${at}`))?.q, q);
+          const twos = where({ $eq: ['$it.q', 2] });
+          assert.deepStrictEqual(await again.collection('c').execute(twos), 'n');
+          assert.deepStrictEqual((await again.collection('c').explain(twos)).indexes, ['c_by_q']);
+          // read back again, the model is the one it was read back as
+          assert.deepStrictEqual((await again.introspect({ keys: { c: '/id' } })).model, derived);
+        }
+        finally { await again.close(); }
+      }
+      finally {
+        cleanup();
+      }
+    });
+  }
 });

@@ -154,6 +154,10 @@ function readTable(connection, table, objects) {
         }))));
 }
 
+/** The type a member read back through a number-first read is declared in:
+ * `number` first, then every other JSON kind, so it admits every value. */
+const NUMBER_FIRST = Object.freeze(['number', 'string', 'boolean', 'object', 'array', 'null']);
+
 /** The on-delete words a model declares. */
 const MODEL_ACTIONS = Object.freeze(['cascade', 'restrict', 'setNull']);
 
@@ -273,7 +277,7 @@ function deriveCollection(dialect, table, report, keys, functionNames) {
   const byName = new Map(table.columns.map((column) => [column.name, column]));
   const expressions = new Map(table.generated.map((entry) => [entry.name, entry.expression]));
 
-  /** @type {Map<string, { path: string, type: string | undefined,
+  /** @type {Map<string, { path: string, type: string | string[] | undefined,
    *   segments: import('./dialect.js').JsonPathSegment[], open: boolean }>} */
   const paths = new Map();
   /** @type {Map<string, any>} column -> the declared index expression */
@@ -304,8 +308,18 @@ function deriveCollection(dialect, table, report, keys, functionNames) {
         + 'index expression this dialect wrote'));
       continue;
     }
-    const type = dialect.schemaTypeOf(column.type);
-    if (type === undefined) {
+    let type = dialect.schemaTypeOf(column.type);
+    if (type === undefined && dialect.memberReadsNumbersFirst?.(expression) === true) {
+      // the read of a member whose union lists `number` first: the union's
+      // other types leave no trace, and a union of every kind admits what
+      // any of them did and plans the same read
+      type = [...NUMBER_FIRST];
+      report(loss('unmapped-type', `${table.name}.${column.name}`,
+        `the column type '${column.type}' maps back to no schema type, and its read of the `
+        + 'member\'s numbers as doubles is that of a union that lists `number` first, whose other '
+        + `types are not recorded, so the member is typed ${JSON.stringify(NUMBER_FIRST)}`));
+    }
+    else if (type === undefined) {
       report(loss('unmapped-type', `${table.name}.${column.name}`,
         `the column type '${column.type}' maps back to no schema type, so the member `
         + 'is left untyped'));
@@ -433,7 +447,7 @@ function deriveCollection(dialect, table, report, keys, functionNames) {
  * the derived model plans the same guard.
  * @param {any} node - the schema node to place into
  * @param {import('./dialect.js').JsonPathSegment[]} segments
- * @param {string | undefined} type
+ * @param {string | string[] | undefined} type
  * @param {boolean} [open]
  */
 function placeType(node, segments, type, open = false) {

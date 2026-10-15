@@ -2670,6 +2670,49 @@ change:
   `strictStreaming` and read none of them; each is now refused `JD0013`. Drop
   them from a page's options.
 
+## 39. A text retyped into a number as `Number()` reads it, a number-first union read back, and the column upgrade at the command line
+
+- A rebuild that retyped a text member into a number, an integer or a boolean
+  refused `JD0023` a number led or trailed by a blank `Number()` trims and
+  neither engine's cast skips (a no-break space, U+FEFF, U+3000, another space
+  separator, U+2028, U+2029: `'\u00a05'`); it now retypes it as `Number()`
+  reads it (`5`), on both engines
+  ([MIGRATION-FORMAT §10](MIGRATION-FORMAT.md#10-the-rebuild-procedure)). A
+  blank text (the empty text, `'   '`, a no-break space alone) is refused as
+  before, now as a documented limit: it names no number a writer meant. A key
+  another table's foreign key references, and the column that references it,
+  keep the engine's cast and refuse such a text as before.
+- On SQLite `introspect()` of a table holding the untyped column of an indexed
+  member whose union lists `number` first (`['number', 'string']`,
+  `['number', 'boolean']`, `['null', 'number', 'string']`) read the member back
+  as `{}`, a model whose plain read is not the table's, so `openStore` of the
+  model read back refused the table `JD0002`. It now reads the member back as
+  `{ type: ['number', 'string', 'boolean', 'object', 'array', 'null'] }`, a
+  union of every kind behind `number`, whose read is the table's: the model
+  read back opens the table, and the `unmapped-type` row says the union's own
+  types are not recorded. A member whose union lists another type first comes
+  back untyped, as before. A plan from the model read back to the authored one
+  recreates the column, as it did, and destroys nothing.
+- `jaren-db plan --model <model> --store <db> --upgrade-columns [--id <name>]
+  [--out <file>]` is new: it prints or writes the link `planColumnUpgrade`
+  plans from the catalog (MIGRATION-FORMAT §11), and plans nothing for a
+  database already current.
+- A rebuild whose statement failed on a driver that throws (node:sqlite, a
+  wasm or Bun build) named its step once for every statement before the one
+  that failed (`migration 'm' step 0 (rebuild) failed: JD0023: migration 'm'
+  step 0 (rebuild) failed: …`); it now names it once, as on PostgreSQL. The
+  code is `JD0023`, as before.
+- A migration document an earlier release planned carries its own copy and runs
+  as it did.
+
+**Downgrade.** The tables, the generated columns and the history this release
+writes are the ones the previous release writes. A migration document this
+release plans for a retype out of text reads the text through `trim()`
+(`pg_catalog.btrim()` on PostgreSQL), which the previous release runs as
+written. A model `introspect()` reads back here opens a table the previous
+release created under it. The previous release refuses `--upgrade-columns` as
+an unknown option; plan the link there through `planColumnUpgrade`.
+
 ## Measured costs
 
 Exact identity stores complete canonical documents and model endpoints, so

@@ -18,6 +18,7 @@ import { nodeDriver } from '@jarenjs/db/node';
 import { postgresDialect } from '@jarenjs/db/postgres';
 import { PG_URL, withPostgres } from './store-core-engines.js';
 import { tempDbPath } from './helpers.js';
+import { chain } from '../../packages/db/src/driver.js';
 
 /** @param {string} type */
 const model = (type) => ({ $model: '0.1', entities: { T: { schema: { type: 'object', required: ['id'], properties: {
@@ -113,6 +114,16 @@ const CASES = [
   ['string', 'boolean', '1', 1], ['string', 'boolean', '0', 0], ['string', 'boolean', '01', 1], ['string', 'boolean', '+1', 1],
   ['string', 'boolean', 'true', null], ['string', 'boolean', '2', null], ['string', 'boolean', '12', null],
   ['string', 'boolean', '-1', null], ['string', 'boolean', 'abc', null], ['string', 'boolean', '1.0', null],
+  // the blanks Number() trims around a number besides the ASCII ones both casts skip (a no-break space, U+FEFF,
+  // U+3000), interleaved with those too; a blank text is refused, for it names no number a writer meant, and so
+  // is a zero-width space, which Number() reads as NaN
+  ['string', 'number', '\u00a05', 5], ['string', 'number', '5\u00a0', 5], ['string', 'number', '\ufeff12.5\u3000', 12.5],
+  ['string', 'number', ' \u00a0 -2e3\u2028 ', -2000], ['string', 'number', '\u00a0', null], ['string', 'number', '   ', null],
+  ['string', 'number', '\u200b5', null], ['string', 'number', '\u00a0abc', null],
+  ['string', 'integer', '\u00a012', 12], ['string', 'integer', '\u202f-7\u205f', -7], ['string', 'integer', '\u00a0', null],
+  ['string', 'integer', ' \u2003 ', null], ['string', 'integer', '\u200b5', null], ['string', 'integer', '\u00a012.5', null],
+  ['string', 'boolean', '\u00a01', 1], ['string', 'boolean', '0\ufeff', 0], ['string', 'boolean', '\u00a0', null],
+  ['string', 'boolean', '', null], ['string', 'boolean', '\u00a02', null],
   ['integer', 'number', 81, 81], ['integer', 'number', 9007199254740992, 9007199254740992],
   ['integer', 'number', { raw: '9007199254740993' }, { sqlite: null, postgres: 9007199254740992 }],
   ['integer', 'number', { raw: '-9007199254740993' }, { sqlite: null, postgres: -9007199254740992 }],
@@ -147,7 +158,8 @@ for (const engine of ENGINES) {
           const text = typeof seed === 'object' ? seed.raw : typeof seed === 'number' && Math.abs(seed) >= 2 ** 62 ? '' : String(seed);
           const mark = engine === 'postgres' ? "'" : '"';
           assert.ok(held.refusal.message.includes(`the member ${mark}v${mark} of ${mark}T${mark} holds ${text}`), held.refusal.message);
-          assert.ok(held.refusal.message.includes(`step 0 (rebuild)`), held.refusal.message);
+          // the step is named once, whether the driver throws or rejects
+          assert.equal(held.refusal.message.split('step 0 (rebuild) failed: ').length, 2, held.refusal.message);
           // the migration rolled back whole: the row is as it was, in its first type
           assert.equal(held.kept, 'kept');
           if (typeof seed === 'object') assert.equal(held.value, seed.raw);
@@ -240,5 +252,81 @@ describe('the check is planned where a cast can lose, and nowhere else', () => {
       assert.equal(plan.create.filter((/** @type {string} */ sql) => CHECK.test(sql)).length, 1);
       assert.match(plan.create.find((/** @type {string} */ sql) => CHECK.test(sql)), /FROM "T" WHERE "id" IS NOT NULL/);
     }
+  });
+});
+
+for (const engine of ENGINES) {
+  describe(`${engine}: a text retyped into a number reads as Number() reads it, the blanks it trims trimmed`, () => {
+    it('every character Number() trims around a number, on either side', async () => {
+      const blanks = [];
+      for (let code = 0; code <= 0xffff; code++) {
+        const char = String.fromCharCode(code);
+        if (code < 0xd800 || code > 0xdfff) if (Number(`${char}5${char}`) === 5) blanks.push(char);
+      }
+      await onEngine(engine, async (h) => {
+        const store = await h.open(model('string'));
+        for (const [at, char] of blanks.entries()) await store.entity('T').create({ id: `r${String(at).padStart(2, '0')}`, v: `${char}${at}${char}` });
+        await store.close();
+        const { migration } = planModelMigration(model('string'), model('number'), { dialect: h.dialect, id: 'retype' });
+        migration.steps = migration.steps.filter((/** @type {any} */ step) => step.draft !== true);
+        // applied twice, the chain changes nothing the second time
+        for (let run = 0; run < 2; run++) await migrate(h.target, [migration], { baseline: model('string'), model: model('number'), shadow: false });
+        const after = await h.open(model('number'));
+        try {
+          const read = [];
+          for (const at of blanks.keys()) read.push((await after.entity('T').asNoTracking().get(`r${String(at).padStart(2, '0')}`))?.v);
+          assert.deepEqual(read, blanks.map((_, at) => at));
+        }
+        finally { await after.close(); }
+      });
+    });
+  });
+}
+
+// PostgreSQL rebuilds no entity another table references, so the case is SQLite's
+describe('sqlite: a text retyped into a number where a foreign key joins it', () => {
+  it('a key a foreign key references keeps the engine\'s cast, so a blank Number() trims is refused there', async () => {
+    const keyed = (/** @type {string} */ type) => ({ $model: '0.1', entities: {
+      P: { schema: { type: 'object', required: ['id'], properties: { id: { type, 'x-entity': { key: true } },
+        kids: { 'x-entity': { relation: { to: 'C', many: true, via: 'pid', onDelete: 'cascade' } } } } } },
+      C: { schema: { type: 'object', required: ['id'], properties: { id: { type: 'string', 'x-entity': { key: true } }, pid: { type } } } } } });
+    await onEngine('sqlite', async (h) => {
+      const store = await h.open(keyed('string'));
+      await store.entity('P').create({ id: '\u00a05' });
+      await store.entity('C').create({ id: 'c', pid: '\u00a05' });
+      await store.close();
+      const { migration } = planModelMigration(keyed('string'), keyed('number'), { dialect: h.dialect, id: 'retype' });
+      migration.steps = migration.steps.filter((/** @type {any} */ step) => step.draft !== true);
+      await assert.rejects(() => migrate(h.target, [migration], { baseline: keyed('string'), model: keyed('number'), shadow: false }),
+        (/** @type {any} */ error) => error.code === 'JD0023' && error.message.includes('the member "id" of "P" holds \u00a05, which is not a finite number'));
+      assert.deepEqual(await h.text('SELECT "id" FROM "P"'), [{ id: '\u00a05' }]);
+      assert.deepEqual(await h.text('SELECT "pid" FROM "C"'), [{ pid: '\u00a05' }]);
+    });
+  });
+});
+
+describe('sqlite: a rebuild statement a driver refuses with its own code', () => {
+  it('fails the step JD0023, naming the step once', async () => {
+    /** A connection whose copy statement throws a coded error, as a driver's own refusal does. @param {any} target @returns {any} */
+    const refusing = (target) => Object.freeze({ ...target,
+      exec: (/** @type {string} */ sql) => {
+        if (String(sql).startsWith('INSERT INTO "T__rebuild"')) throw Object.assign(new Error('the driver refused the copy'), { code: 'JD2005' });
+        return target.exec(sql);
+      },
+      transaction: (/** @type {any} */ fn, /** @type {any[]} */ ...rest) => target.transaction((/** @type {any} */ scope) => fn(refusing(scope)), ...rest) });
+    const inner = nodeDriver();
+    const driver = { name: inner.name, dialect: inner.dialect,
+      open: (/** @type {string} */ dbPath, /** @type {any} */ options) => chain(inner.open(dbPath, options), refusing) };
+    await onEngine('sqlite', async (h) => {
+      const store = await h.open(model('string'));
+      await store.entity('T').create({ id: 'r', v: '7', w: 'kept' });
+      await store.close();
+      const { migration } = planModelMigration(model('string'), model('integer'), { dialect: h.dialect, id: 'retype' });
+      migration.steps = migration.steps.filter((/** @type {any} */ step) => step.draft !== true);
+      await assert.rejects(() => migrate({ driver, path: h.target.path }, [migration], { baseline: model('string'), model: model('integer'), shadow: false }),
+        (/** @type {any} */ error) => error.code === 'JD0023'
+          && error.message === "JD0023: migration 'retype' step 0 (rebuild) failed: the driver refused the copy");
+      assert.deepEqual(await h.text('SELECT "v", "w" FROM "T"'), [{ v: '7', w: 'kept' }]);
+    });
   });
 });
