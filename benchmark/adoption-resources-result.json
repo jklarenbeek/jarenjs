@@ -1,0 +1,715 @@
+{
+  "format": "jaren-adoption-resources/1",
+  "freezeHash": "fba6d22f7d055476f7f4ef3d5fa5c7a51e372b3b0266a269e8713c9ec4b3d2b2",
+  "runtime": {
+    "node": "v24.20.0",
+    "platform": "linux",
+    "arch": "x64",
+    "cpu": "AMD Ryzen 9 5900HX with Radeon Graphics"
+  },
+  "sourceHashes": {
+    "packages/website/src/examples/adoption.js": "8d1bcc31da58fe9eeee3aee4863f19bed7f1b667a425463a34379944eabbe0c9",
+    "packages/website/src/examples/adoption-model.js": "7e990a688127108a8e7b158c5030f777baef9a2b5bfcabaf156115ff76551577",
+    "packages/website/src/examples/adoption-fixture.js": "16479fa5b6fab527767b763780d9cf2dd24143bdca25f7990ac74cc8779ec567",
+    "test/consumer/journey.js": "38010d72aabaeb2c840f091ec1f7f8781f2d357eb4ce9f393b05770259132d3a",
+    "scripts/lib/adoption-journey.js": "ac4f3c24a0d7edddaf08bbd012d38dbf0c4b0effa4443f17333b543948e7efc6",
+    "benchmark/adoption-resources.js": "804d2e8aac6fa509c837da6d5d66d9204a43ede8ed7af0cd6ead2554a0b6acff",
+    "benchmark/adoption-resources-entry.js": "252bc432d619a361363fa0fe90a6fde1fd4f52ea3b7d654d6547c8ce8d8da557",
+    "packages/db/src/jobs.js": "865fd96e486c0444065ce838fabf4cb487655df8fdf3fe7387a52d4188bd6e70",
+    "packages/db/src/store.js": "0f9196f558089b359348b05c19376cd2871c0cbf6ea22848865f3a1bc2922738"
+  },
+  "method": {
+    "liveHeap": "process.memoryUsage().heapUsed after two forced full collections (Node --expose-gc gc(), Bun.gc(true)) at each phase boundary",
+    "boundaries": [
+      "start: modules loaded",
+      "rows: frozen workload generated",
+      "seed: pre-existing file written",
+      "open: each application open",
+      "after each awaited application call the journey makes: migrateSaved, query, saveRule, rows, preview, command.execute, ingest, prepare, runner.run, close",
+      "teardown: the journey returned after its final close"
+    ],
+    "remaining": "process.getActiveResourcesInfo() after teardown and one setImmediate turn, minus the list taken before the workload once the standard streams are open (multiset)",
+    "drain": "the loop drained (beforeExit) before an unreferenced 1 ms timer fired; a live loop counts at least one remaining handle"
+  },
+  "hosts": [
+    {
+      "label": "node",
+      "results": [
+        {
+          "consumer": "catalog",
+          "rows": 10000,
+          "phase": "all",
+          "searchHash": "e1a757541681300c320a4f07aa0742b817d9363eb284bfd0d061691e76de93bf",
+          "runtime": "v24.20.0",
+          "peakLiveHeapBytes": 59463744,
+          "peakPhase": "runner.run",
+          "samples": [
+            {
+              "phase": "start",
+              "bytes": 20786288
+            },
+            {
+              "phase": "rows",
+              "bytes": 23732472
+            },
+            {
+              "phase": "seed",
+              "bytes": 24708088
+            },
+            {
+              "phase": "open",
+              "bytes": 25881776
+            },
+            {
+              "phase": "migrateSaved",
+              "bytes": 26357360
+            },
+            {
+              "phase": "migrateSaved",
+              "bytes": 26422944
+            },
+            {
+              "phase": "query",
+              "bytes": 56991192
+            },
+            {
+              "phase": "saveRule",
+              "bytes": 55926408
+            },
+            {
+              "phase": "saveRule",
+              "bytes": 55973192
+            },
+            {
+              "phase": "rows",
+              "bytes": 56060272
+            },
+            {
+              "phase": "preview",
+              "bytes": 56285568
+            },
+            {
+              "phase": "rows",
+              "bytes": 56345336
+            },
+            {
+              "phase": "command.execute",
+              "bytes": 56384648
+            },
+            {
+              "phase": "command.execute",
+              "bytes": 56586152
+            },
+            {
+              "phase": "rows",
+              "bytes": 56648808
+            },
+            {
+              "phase": "preview",
+              "bytes": 56685296
+            },
+            {
+              "phase": "command.execute",
+              "bytes": 56829672
+            },
+            {
+              "phase": "command.execute",
+              "bytes": 56876184
+            },
+            {
+              "phase": "command.execute",
+              "bytes": 56878992
+            },
+            {
+              "phase": "command.execute",
+              "bytes": 56878712
+            },
+            {
+              "phase": "ingest",
+              "bytes": 59250168
+            },
+            {
+              "phase": "ingest",
+              "bytes": 59297984
+            },
+            {
+              "phase": "prepare",
+              "bytes": 59325000
+            },
+            {
+              "phase": "prepare",
+              "bytes": 59325312
+            },
+            {
+              "phase": "runner.run",
+              "bytes": 59463744
+            },
+            {
+              "phase": "close",
+              "bytes": 30877752
+            },
+            {
+              "phase": "open",
+              "bytes": 31493424
+            },
+            {
+              "phase": "ingest",
+              "bytes": 31481968
+            },
+            {
+              "phase": "migrateSaved",
+              "bytes": 31490296
+            },
+            {
+              "phase": "command.execute",
+              "bytes": 31534696
+            },
+            {
+              "phase": "rows",
+              "bytes": 31598720
+            },
+            {
+              "phase": "close",
+              "bytes": 31635128
+            },
+            {
+              "phase": "close",
+              "bytes": 31635080
+            },
+            {
+              "phase": "close",
+              "bytes": 31635248
+            },
+            {
+              "phase": "teardown",
+              "bytes": 29862032
+            }
+          ],
+          "resources": {
+            "standardStreams": [
+              "Socket",
+              "Socket"
+            ],
+            "baseline": [
+              "PipeWrap",
+              "PipeWrap"
+            ],
+            "afterTeardown": [
+              "PipeWrap",
+              "PipeWrap"
+            ],
+            "remaining": [],
+            "drained": true
+          },
+          "remainingHandles": 0
+        },
+        {
+          "consumer": "archive-stock",
+          "rows": 75000,
+          "phase": "all",
+          "searchHash": "51902a33caf8dad05035c9e56096dde0af6c44bb7491692213654b689fcd58ae",
+          "runtime": "v24.20.0",
+          "peakLiveHeapBytes": 276646240,
+          "peakPhase": "query",
+          "samples": [
+            {
+              "phase": "start",
+              "bytes": 20786304
+            },
+            {
+              "phase": "rows",
+              "bytes": 43384088
+            },
+            {
+              "phase": "seed",
+              "bytes": 45398016
+            },
+            {
+              "phase": "open",
+              "bytes": 46592048
+            },
+            {
+              "phase": "migrateSaved",
+              "bytes": 47067496
+            },
+            {
+              "phase": "migrateSaved",
+              "bytes": 47133080
+            },
+            {
+              "phase": "query",
+              "bytes": 276646240
+            },
+            {
+              "phase": "saveRule",
+              "bytes": 267622672
+            },
+            {
+              "phase": "saveRule",
+              "bytes": 267654728
+            },
+            {
+              "phase": "rows",
+              "bytes": 267729920
+            },
+            {
+              "phase": "preview",
+              "bytes": 267947496
+            },
+            {
+              "phase": "rows",
+              "bytes": 268016752
+            },
+            {
+              "phase": "preview",
+              "bytes": 268047400
+            },
+            {
+              "phase": "command.execute",
+              "bytes": 268091176
+            },
+            {
+              "phase": "rows",
+              "bytes": 268111328
+            },
+            {
+              "phase": "prepare",
+              "bytes": 268062232
+            },
+            {
+              "phase": "ingest",
+              "bytes": 270711112
+            },
+            {
+              "phase": "ingest",
+              "bytes": 270742872
+            },
+            {
+              "phase": "close",
+              "bytes": 53455344
+            },
+            {
+              "phase": "open",
+              "bytes": 54092552
+            },
+            {
+              "phase": "ingest",
+              "bytes": 54103616
+            },
+            {
+              "phase": "migrateSaved",
+              "bytes": 54110616
+            },
+            {
+              "phase": "close",
+              "bytes": 54126432
+            },
+            {
+              "phase": "close",
+              "bytes": 54126384
+            },
+            {
+              "phase": "close",
+              "bytes": 54126552
+            },
+            {
+              "phase": "teardown",
+              "bytes": 50210232
+            }
+          ],
+          "resources": {
+            "standardStreams": [
+              "Socket",
+              "Socket"
+            ],
+            "baseline": [
+              "PipeWrap",
+              "PipeWrap"
+            ],
+            "afterTeardown": [
+              "PipeWrap",
+              "PipeWrap"
+            ],
+            "remaining": [],
+            "drained": true
+          },
+          "remainingHandles": 0
+        }
+      ]
+    },
+    {
+      "label": "bun",
+      "results": [
+        {
+          "consumer": "catalog",
+          "rows": 10000,
+          "phase": "all",
+          "searchHash": "e1a757541681300c320a4f07aa0742b817d9363eb284bfd0d061691e76de93bf",
+          "runtime": "1.4.2",
+          "peakLiveHeapBytes": 54056304,
+          "peakPhase": "runner.run",
+          "samples": [
+            {
+              "phase": "start",
+              "bytes": 5423326
+            },
+            {
+              "phase": "rows",
+              "bytes": 8182593
+            },
+            {
+              "phase": "seed",
+              "bytes": 10735313
+            },
+            {
+              "phase": "open",
+              "bytes": 12014557
+            },
+            {
+              "phase": "migrateSaved",
+              "bytes": 12767475
+            },
+            {
+              "phase": "migrateSaved",
+              "bytes": 12784779
+            },
+            {
+              "phase": "query",
+              "bytes": 51566456
+            },
+            {
+              "phase": "saveRule",
+              "bytes": 51316919
+            },
+            {
+              "phase": "saveRule",
+              "bytes": 51336113
+            },
+            {
+              "phase": "rows",
+              "bytes": 51384187
+            },
+            {
+              "phase": "preview",
+              "bytes": 51768752
+            },
+            {
+              "phase": "rows",
+              "bytes": 51775998
+            },
+            {
+              "phase": "command.execute",
+              "bytes": 52055155
+            },
+            {
+              "phase": "command.execute",
+              "bytes": 52207947
+            },
+            {
+              "phase": "rows",
+              "bytes": 52216953
+            },
+            {
+              "phase": "preview",
+              "bytes": 52215581
+            },
+            {
+              "phase": "command.execute",
+              "bytes": 52647550
+            },
+            {
+              "phase": "command.execute",
+              "bytes": 52656894
+            },
+            {
+              "phase": "command.execute",
+              "bytes": 52605206
+            },
+            {
+              "phase": "command.execute",
+              "bytes": 52557912
+            },
+            {
+              "phase": "ingest",
+              "bytes": 53395841
+            },
+            {
+              "phase": "ingest",
+              "bytes": 53416858
+            },
+            {
+              "phase": "prepare",
+              "bytes": 53465705
+            },
+            {
+              "phase": "prepare",
+              "bytes": 53478748
+            },
+            {
+              "phase": "runner.run",
+              "bytes": 54056304
+            },
+            {
+              "phase": "close",
+              "bytes": 17151385
+            },
+            {
+              "phase": "open",
+              "bytes": 17840021
+            },
+            {
+              "phase": "ingest",
+              "bytes": 17946268
+            },
+            {
+              "phase": "migrateSaved",
+              "bytes": 17979918
+            },
+            {
+              "phase": "command.execute",
+              "bytes": 18140651
+            },
+            {
+              "phase": "rows",
+              "bytes": 18078981
+            },
+            {
+              "phase": "close",
+              "bytes": 18101963
+            },
+            {
+              "phase": "close",
+              "bytes": 18101499
+            },
+            {
+              "phase": "close",
+              "bytes": 18101013
+            },
+            {
+              "phase": "teardown",
+              "bytes": 17417678
+            }
+          ],
+          "resources": {
+            "standardStreams": [
+              "WriteStream",
+              "WriteStream"
+            ],
+            "baseline": [],
+            "afterTeardown": [],
+            "remaining": [],
+            "drained": true
+          },
+          "remainingHandles": 0
+        },
+        {
+          "consumer": "archive-stock",
+          "rows": 75000,
+          "phase": "all",
+          "searchHash": "51902a33caf8dad05035c9e56096dde0af6c44bb7491692213654b689fcd58ae",
+          "runtime": "1.4.2",
+          "peakLiveHeapBytes": 300182068,
+          "peakPhase": "query",
+          "samples": [
+            {
+              "phase": "start",
+              "bytes": 5422778
+            },
+            {
+              "phase": "rows",
+              "bytes": 25996771
+            },
+            {
+              "phase": "seed",
+              "bytes": 28486646
+            },
+            {
+              "phase": "open",
+              "bytes": 29822802
+            },
+            {
+              "phase": "migrateSaved",
+              "bytes": 30540262
+            },
+            {
+              "phase": "migrateSaved",
+              "bytes": 30553662
+            },
+            {
+              "phase": "query",
+              "bytes": 300182068
+            },
+            {
+              "phase": "saveRule",
+              "bytes": 295373662
+            },
+            {
+              "phase": "saveRule",
+              "bytes": 295389053
+            },
+            {
+              "phase": "rows",
+              "bytes": 295449303
+            },
+            {
+              "phase": "preview",
+              "bytes": 295826330
+            },
+            {
+              "phase": "rows",
+              "bytes": 295840140
+            },
+            {
+              "phase": "preview",
+              "bytes": 295949077
+            },
+            {
+              "phase": "command.execute",
+              "bytes": 296016873
+            },
+            {
+              "phase": "rows",
+              "bytes": 296068979
+            },
+            {
+              "phase": "prepare",
+              "bytes": 296074642
+            },
+            {
+              "phase": "ingest",
+              "bytes": 296929794
+            },
+            {
+              "phase": "ingest",
+              "bytes": 296945821
+            },
+            {
+              "phase": "close",
+              "bytes": 37456377
+            },
+            {
+              "phase": "open",
+              "bytes": 38390246
+            },
+            {
+              "phase": "ingest",
+              "bytes": 38391371
+            },
+            {
+              "phase": "migrateSaved",
+              "bytes": 38435585
+            },
+            {
+              "phase": "close",
+              "bytes": 38461386
+            },
+            {
+              "phase": "close",
+              "bytes": 38460634
+            },
+            {
+              "phase": "close",
+              "bytes": 38722362
+            },
+            {
+              "phase": "teardown",
+              "bytes": 38090670
+            }
+          ],
+          "resources": {
+            "standardStreams": [
+              "WriteStream",
+              "WriteStream"
+            ],
+            "baseline": [],
+            "afterTeardown": [],
+            "remaining": [],
+            "drained": true
+          },
+          "remainingHandles": 0
+        }
+      ]
+    }
+  ],
+  "checks": [
+    {
+      "host": "node",
+      "consumer": "catalog",
+      "checks": [
+        {
+          "metric": "peakHeapBytes",
+          "limit": 268435456,
+          "value": 59463744,
+          "status": "pass"
+        },
+        {
+          "metric": "remainingHandles",
+          "limit": 0,
+          "value": 0,
+          "status": "pass"
+        }
+      ]
+    },
+    {
+      "host": "node",
+      "consumer": "archive-stock",
+      "checks": [
+        {
+          "metric": "peakHeapBytes",
+          "limit": 805306368,
+          "value": 276646240,
+          "status": "pass"
+        },
+        {
+          "metric": "remainingHandles",
+          "limit": 0,
+          "value": 0,
+          "status": "pass"
+        }
+      ]
+    },
+    {
+      "host": "bun",
+      "consumer": "catalog",
+      "checks": [
+        {
+          "metric": "peakHeapBytes",
+          "limit": 268435456,
+          "value": 54056304,
+          "status": "pass"
+        },
+        {
+          "metric": "remainingHandles",
+          "limit": 0,
+          "value": 0,
+          "status": "pass"
+        }
+      ]
+    },
+    {
+      "host": "bun",
+      "consumer": "archive-stock",
+      "checks": [
+        {
+          "metric": "peakHeapBytes",
+          "limit": 805306368,
+          "value": 300182068,
+          "status": "pass"
+        },
+        {
+          "metric": "remainingHandles",
+          "limit": 0,
+          "value": 0,
+          "status": "pass"
+        }
+      ]
+    }
+  ],
+  "limitations": [
+    "The peak is the largest live set at the named boundaries; a live set inside one application call can be larger and is not observed.",
+    "The live set includes the journey assertions that run in the same process, as the timed run does.",
+    "process.getActiveResourcesInfo() omits unreferenced timers and handles, so one of those is neither listed nor counted; it does list the standard stream pipes, which is why the baseline is taken once they are open.",
+    "Bun returns an empty resource list even with a listening server and a pending timer, so its remaining count rests on the drain check alone: it can show zero or at least one, never which resource remains.",
+    "Linux source hosts only; standalone executables and other operating systems are not measured here."
+  ]
+}

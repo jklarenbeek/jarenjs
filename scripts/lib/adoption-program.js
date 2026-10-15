@@ -13,7 +13,7 @@ export function summarizeAdoption(manifest, reports) {
     if (!row) throw new Error(`${name}: missing consumer ${id}`);
     return row;
   };
-  const combined = reports['adoption-journey'];
+  const combined = reports['adoption-journey'], resources = reports['adoption-resources'];
   const budgets = manifest.consumers.flatMap((definition) => {
     const id = definition.id, reference = consumer('adoption', id);
     const focused = {
@@ -27,10 +27,14 @@ export function summarizeAdoption(manifest, reports) {
       const host = combined.hosts.find((host) => host.label === label);
       const row = host?.results.find((row) => row.consumer === id && row.phase === 'all');
       if (!row || row.rows !== definition.rows) throw new Error(`${label}: missing consumer workload ${id}`);
+      // the live set and remaining handles come from their own instrumented run of the same journey
+      const live = resources?.hosts.find((host) => host.label === label)?.results.find((row) => row.consumer === id && row.phase === 'all');
+      if (!live || live.rows !== definition.rows) throw new Error(`${label}: missing resource workload ${id}`);
       return { host: label, values: {
         search: { startupMs: row.searchMs },
         providers: { unresolvedResends: host.recoverySends },
-        resources: { sampledHeapBytes: row.heapBytes, peakRssBytes: row.peakRssBytes, teardownMs: row.teardownMs },
+        resources: { sampledHeapBytes: row.heapBytes, peakRssBytes: row.peakRssBytes, teardownMs: row.teardownMs,
+          peakHeapBytes: live.peakLiveHeapBytes, remainingHandles: live.remainingHandles },
       } };
     });
     return Object.entries(definition.budgets).flatMap(([stage, limits]) => Object.entries(limits).map(([metric, limit]) => ({

@@ -39,6 +39,19 @@ export const adoptionFacts = {
         + `\n\nRetained reference adapters: ${report.ownership.retainedOracleLines} lines; adopted application policy: ${report.ownership.adoptedPolicyLines} lines. Third-party search/virtualization mechanisms in the application: ${report.ownership.retainedThirdPartyMechanisms.length} → ${report.ownership.adoptedThirdPartyMechanisms.length}.\n\n`
         + report.checks.map((row) => `${row.host}/${row.consumer}: ${row.checks.filter((check) => check.status === 'fail').length} measured budget losses.`).join(' ') + '\n\n';
     },
+    'adoption.resources': () => {
+      const report = JSON.parse(readFileSync(new URL('../benchmark/adoption-resources-result.json', import.meta.url), 'utf8'));
+      const manifest = JSON.parse(readFileSync(new URL('../test/adoption/manifest.json', import.meta.url), 'utf8'));
+      if (report.freezeHash !== manifest.freezeHash) throw new Error('combined resource fixture drift');
+      assertMeasurementSources(report.sourceHashes, file =>
+        `combined resource evidence drift: ${file}; run node benchmark/adoption-resources.js --write`);
+      const mib = (bytes) => (bytes / 1048576).toFixed(2);
+      return '\n\n| Host | Consumer | Rows | Boundaries | Peak live MiB | Peak after | Live after teardown MiB | Listed after teardown, less baseline | Loop drained | Remaining handles |\n'
+        + '|---|---|---:|---:|---:|---|---:|---|---|---:|\n'
+        + report.hosts.flatMap((host) => host.results.map((row) =>
+          `| ${host.label} ${row.runtime} | ${row.consumer} | ${row.rows} | ${row.samples.length} | ${mib(row.peakLiveHeapBytes)} | ${row.peakPhase} | ${mib(row.samples.at(-1).bytes)} | ${row.resources.remaining.length === 0 ? 'none' : row.resources.remaining.join(', ')} | ${row.resources.drained ? 'yes' : 'no'} | ${row.remainingHandles} |`)).join('\n')
+        + '\n\n' + report.checks.map((row) => `${row.host}/${row.consumer}: ${row.checks.filter((check) => check.status === 'fail').length} measured budget losses.`).join(' ') + '\n\n';
+    },
     'adoption.reference': () => {
       const report = JSON.parse(readFileSync(new URL('../benchmark/adoption-result.json', import.meta.url), 'utf8'));
       const manifest = JSON.parse(readFileSync(new URL('../test/adoption/manifest.json', import.meta.url), 'utf8'));

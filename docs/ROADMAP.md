@@ -913,10 +913,20 @@ entry remains pending until its actual host and operator evidence exists.
   page's service worker answers it, so that build takes the real outage alone;
   the reduced case is pinned in the browser suite. Waits on an offline reload
   in a shipping Safari (macOS or iOS), which this Linux host cannot run.
-- [ ] **Combined resource qualification.** Exact peak heap and host-wide remaining
-  handles need a matching measurement for each combined host/workload. Sampled
-  heap, process high-water RSS and focused component teardown do not fill those
-  cells in the [complete budget comparison](ADOPTION-EVIDENCE.md#complete-frozen-budget-comparison).
+- [ ] **Combined resource qualification on Windows and macOS.** The Linux Node
+  and Bun source hosts publish the largest live heap after forced collections
+  at the journey's phase boundaries and the host resources remaining after
+  teardown in the [complete budget comparison](ADOPTION-EVIDENCE.md#complete-frozen-budget-comparison).
+  Windows and macOS need the same run (`node benchmark/adoption-resources.js`)
+  on a machine of that system: their allocators, file and socket handles and
+  process teardown differ in ways a Linux run cannot show.
+- [ ] **Combined resources on the standalone executables, and the peak inside a
+  call.** The live set and remaining handles are measured on the Node and Bun
+  source hosts only; the relocated standalone executables
+  (`scripts/check-adoption-journeys.js --native`) have neither. The published
+  peak is the largest live set at phase boundaries, a lower bound: a live set
+  inside one application call is not observed (the smallest heap limit the
+  journey completes under would bound it from above).
 
 ## Windows qualification (cross-package)
 

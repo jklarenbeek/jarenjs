@@ -6,7 +6,7 @@ import { readAdoption, verifyFreeze, adoptionHash } from '../test/adoption/evide
 
 if (process.argv.slice(2).some((arg) => !['--final', '--write'].includes(arg))) throw new Error('Usage: node benchmark/adoption.js --final [--write]');
 const manifest = readAdoption('manifest.json'); verifyFreeze(manifest);
-const names = ['adoption', 'adoption-journey', 'relational', 'collection', 'lexical', 'formula', 'providers'];
+const names = ['adoption', 'adoption-journey', 'adoption-resources', 'relational', 'collection', 'lexical', 'formula', 'providers'];
 const reports = Object.fromEntries(names.map((name) => [name, JSON.parse(readFileSync(new URL(`${name}-result.json`, import.meta.url), 'utf8'))]));
 const files = [...names.map((name) => `benchmark/${name}-result.json`), 'benchmark/adoption-hosts-result.json',
   'benchmark/durable-result.json', 'benchmark/adoption-program.js', 'scripts/lib/adoption-program.js'];
@@ -15,7 +15,7 @@ const report = { ...summarizeAdoption(manifest, reports),
   limitations: [
     'Focused metrics keep their original workload and host scope. Resources are compared on the combined journey, never chosen from a cheaper focused leg.',
     'Provider pages/rows/bytes measure complete synthetic ingestion; attempts per request remain unmeasured here. Recovery resends cover the terminated catalog fixture.',
-    'Pending means no matching measurement in this scope, even when a focused test or another host passes. Exact combined peak heap and host-wide remaining handles are pending.',
+    'Pending means no matching measurement in this scope, even when a focused test or another host passes. Combined peak heap is the largest live set after a forced collection at the journey phase boundaries, not an exact instantaneous peak; it and host-wide remaining handles are measured on the Linux source hosts only.',
     'Linux executables and automated browser composition do not establish other operating systems, PostgreSQL, native OS IME, assistive technology, real providers or downstream approval.',
     'Original saved sources and all retained oracles remain. Library readiness never authorizes their deletion.',
   ] };

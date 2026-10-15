@@ -141,7 +141,9 @@ reports retain their measured wins, losses and qualification boundaries.
 Combined search startup includes the database read, content hash and index;
 the historical reference index timing alone is a different workload. Heap is a
 sample and RSS is a process high-water mark including assertion instrumentation.
-Exact peak heap remains unmeasured. No benchmark raises a frozen ceiling.
+The exact instantaneous peak heap remains unmeasured; the largest live set at the
+journey's phase boundaries is reported [separately](#combined-live-set-and-remaining-handles).
+No benchmark raises a frozen ceiling.
 
 The [memory observation history](../benchmark/adoption-memory-history.json)
 retains an earlier Bun archive-stock peak-RSS loss of 1,413,287,936 bytes against
@@ -162,6 +164,51 @@ resource checks. The separate native-host run measured its Bun executable at
 including the earlier executable peak of 1,078,005,760 bytes, which exceeded
 the same 1,073,741,824-byte ceiling. These observations do not establish a
 causal memory improvement from changing startup retries.
+
+### Combined live set and remaining handles
+
+```sh
+node benchmark/adoption-resources.js --write
+npm run docs:derive
+```
+
+The Node and Bun source hosts run each full workload once more, in a fresh
+process whose only instrument is the
+[resource entry](../benchmark/adoption-resources-entry.js), so no forced
+collection lands inside a timed region: the timings, sampled heap and RSS above
+come from the uninstrumented run, and the instrumented journey must return the
+same search hash. The live set is `process.memoryUsage().heapUsed`
+after two forced full collections (`gc()` under Node's `--expose-gc`,
+`Bun.gc(true)` under Bun); without a collector the run refuses rather than read
+a raw heap. It is taken at the journey's own phase boundaries: once the modules
+load, after the frozen rows are generated, after the existing file is seeded,
+after each application open, after every awaited application call the journey
+makes (`migrateSaved`, `query`, `saveRule`, `rows`, `preview`,
+`command.execute`, `ingest`, `prepare`, `runner.run`, `close`) and after
+teardown. The peak is the largest of those samples. It is a lower bound on the
+instantaneous peak, because a live set inside one application call is not
+observed, and it includes the journey's own assertions, as the timed run does.
+The sampled heap in the comparison counts garbage not yet collected and so can
+exceed the live-set peak; neither value stands in for the other.
+
+Remaining handles are read with `process.getActiveResourcesInfo()` after
+teardown and one `setImmediate` turn, less the list taken before the workload
+once the standard streams are open (the report is written to one, and loading
+`node:assert` opens the other), counted as a multiset. That list omits
+unreferenced timers and handles, so one of those is neither listed nor counted;
+it does list the pipes of the standard streams, which do not hold the loop
+open, so the baseline is taken after they are opened. A second check asks
+whether the loop then drains (`beforeExit`) before an unreferenced 1 ms timer
+fires; a loop that stays alive counts at least one remaining handle even when
+the list is empty. Bun returns an empty list even with a listening server and a
+pending timer, so its count rests on the drain check alone: it can show zero or
+at least one, never which resource remains.
+
+<!--fact:adoption.resources-->
+<!--/fact-->
+
+These are the Linux source hosts. The standalone executables and other
+operating systems have no live-set or remaining-handle measurement.
 
 ## Retained reference costs
 
@@ -252,6 +299,7 @@ fixtures or public contracts, independent of any private notes or checkouts.
 ## Complete frozen-budget comparison
 
 ```sh
+node benchmark/adoption-resources.js --write
 node benchmark/adoption.js --final --write
 npm run docs:derive
 ```
@@ -261,9 +309,13 @@ frozen metric. Values retain their metric units (milliseconds, bytes or counts).
 Focused reports measure their own declared work; combined reports measure the
 application journey. A pending combined cell is not a failure of its focused
 implementation and is not permission to claim a measured application result.
-Resource samples are never substituted for exact peaks, and a shorter focused
-workload never supplies the combined memory value. Provider attempts per request
-and host-wide remaining handles lack matching combined measurements.
+Resource samples are never substituted for the live-set peak, and a shorter
+focused workload never supplies the combined memory value. Combined peak heap and
+remaining handles come from the [instrumented run](#combined-live-set-and-remaining-handles)
+of the same journey on the Linux source hosts; the peak is the largest live set
+at phase boundaries, a lower bound on the instantaneous peak, so its pass does
+not show the true peak under the ceiling. Provider attempts per request lack
+matching combined measurements.
 
 <!--fact:adoption.budgets-->
 

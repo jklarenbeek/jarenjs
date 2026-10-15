@@ -899,6 +899,10 @@ retained-adapter versus application-policy ownership, work/resource budgets,
 provider wire behavior and interruption/recovery. The reference command below
 remains independently executable. Use `node scripts/check-adoption-journeys.js
 --native --write` to qualify Node/Bun hosts and relocated standalone executables.
+`node benchmark/adoption-resources.js --write` runs the same combined journey on
+the Node and Bun source hosts in a separate instrumented process per workload,
+recording the live set after forced collections at its phase boundaries and the
+host resources left after teardown; no timing comes from that process.
 
 `node benchmark/adoption.js` measures the checksum-pinned synthetic consumers
 against retained development-only oracles. It reports costs, losses and pending
