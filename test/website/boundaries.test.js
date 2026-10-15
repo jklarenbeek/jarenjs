@@ -111,6 +111,15 @@ describe('website boundaries — benchmark suite derivations', function () {
     assert.match(text, /optional\/format suite/, 'the conformance card renders');
     assert.match(text, /Formats only Jaren implements/, 'the jaren-only table is published, not hidden');
     assert.match(text, /idn-hostname/, 'the internationalized formats are listed');
+    for (const name of state.bench.formats.conformance.unregistered) {
+      assert.ok(text.includes(name), `the card names the suite file it does not score: ${name}`);
+    }
+  });
+
+  it('names no unscored suite file when every file has a tester', function () {
+    const data = loadBench('formats');
+    const state = { benchStatus: { formats: 'loaded' }, bench: { formats: { ...data, conformance: { ...data.conformance, unregistered: [] } } }, benchUi: {} };
+    assert.doesNotMatch(JSON.stringify(deriveSuite(state, 'formats')), /not scored here/);
   });
 
   it('derives the TOML suite from the generated data', function () {

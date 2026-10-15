@@ -665,7 +665,10 @@ function formatsSuite(data) {
     out.push(cards([{
       title: 'Conformance',
       value: `${data.conformance.pass} / ${data.conformance.total}`,
-      note: `official optional/format suite, ${data.conformance.formats} formats`,
+      note: `official optional/format suite, ${data.conformance.formats} formats`
+        + (data.conformance.unregistered?.length > 0
+          ? `; not scored here (no format tester, run by the validator suite): ${data.conformance.unregistered.join(', ')}`
+          : ''),
     }]));
   }
   out.push(...genericTables(data,
