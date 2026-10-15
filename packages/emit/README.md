@@ -325,8 +325,17 @@ subpath:
   exports serve a working page;
 - a package without `exports` serves its `main`, read from the package root:
   the first of `main`, `main.js` and `main/index.js` that is a file, else its
-  `index.js` (Node's `.json` and `.node` candidates are not copied, a browser
+  `index.js` (Node's `.json` and `.node` candidates are not tried, a browser
   map serving only JavaScript);
+- a `main` that is a native addon (`.node`, as a napi-rs platform package
+  names its binary) is not mapped and its file is not listed, since a browser
+  import of it would fail at load: reached only through
+  `optionalDependencies`, the package is passed over without a report, as a
+  platform package that declares no entry is (below); named in `--packages`,
+  or reached through `dependencies` or `peerDependencies`, it is reported
+  unresolved against its `package.json`, and the command exits 1. Upgrade
+  note: such a package used to be mapped to its `.node` file, the file listed
+  in `--files`, and the command exited 0;
 - an optional dependency that declares no JavaScript entry — no `exports`, no
   `main` and no `index.js`, as a platform-binary package (`os`, `cpu` and a
   native file) declares none — maps nothing and is not reported. Named in

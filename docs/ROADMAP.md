@@ -788,14 +788,6 @@ what each does is its own documentation's job
   (MODEL-FORMAT §12), as is a condition the read-back does not read (a date or
   uuid literal, `TRIM`, a quantified comparison other than `= ANY`). Wanted:
   read `pg_get_indexdef`'s terms through the same condition form.
-- [ ] **The two ledgers judge `limit` with two predicates.** The two ledgers
-  read `limit` with two predicates each: `inFlight` `Number.isInteger`
-  (accepts `2**53`), `sweep` `Number.isSafeInteger` (refuses it, pinned by the
-  shared kit at test/contract/ledger-contract.js:333). Unify per D1 by
-  loosening `sweep` in packages/contract/src/ledger.js and
-  packages/linq/src/db/ledger.js together, and the kit's `2 ** 53` row, after
-  checking the db ledger binds an unsafe `LIMIT` correctly; else tighten
-  `inFlight` as a minor.
 
 ## Lexical search (cross-package)
 
@@ -1055,11 +1047,14 @@ still open is listed here, each with its reason.
 
 ## Benchmarks & tooling
 
-- [ ] **The import map serves a `main` that names a native binary.** A package
-  without `exports` whose `main` names a `.node` file (a napi-rs platform
-  package) is mapped to it and the file listed for the server, though a
-  browser can load only JavaScript; skipping or reporting it changes what
-  the command prints for such a tree, so it needs a decision.
+- [ ] **The import map maps an `exports` target that is a native addon, and
+  misses an extensionless `main` Node resolves to one.** `exports: { ".":
+  "./x.node" }` is mapped to the binary and the file listed, reached
+  optionally or not; `main: "binding"` beside `binding.node` (Node loads it)
+  is mapped to a missing `./index.js` and reported, so an optional-only
+  platform package of that shape fails the command. Skipping an `exports`
+  native target changes what the command prints for a manifest whose other
+  exports serve a page, so it needs a decision.
 - [ ] **`vector.js`'s largest leg needs about 1.5 GB.** 50,000 × 768 holds one
   in-memory SQLite database of roughly a gigabyte beside a 153 MB resident
   matrix, and finishes in about ninety seconds; a memory-constrained runner

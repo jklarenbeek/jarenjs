@@ -132,6 +132,19 @@ const DEFAULT_TTL_MS = 86_400_000;
 const IN_FLIGHT_LIMIT = 1_000;
 
 /**
+ * Read a `limit` — the one predicate `inFlight` and `sweep` judge it by: a
+ * whole number from 1, however large (a bound past every record answers
+ * them all), else a `TypeError`.
+ * @param {unknown} limit
+ * @param {string} spelling
+ * @returns {number}
+ */
+function readLimit(limit, spelling) {
+  if (!Number.isInteger(limit) || /** @type {number} */ (limit) < 1) throw new TypeError(`${spelling}: limit is a whole number from 1`);
+  return /** @type {number} */ (limit);
+}
+
+/**
  * Read `inFlight`'s query (a closed set, refused by name before anything
  * is read).
  * @param {unknown} query
@@ -151,8 +164,7 @@ function readInFlightQuery(query, spelling) {
   for (const [name, value] of [['olderThan', olderThan], ['now', now]]) {
     if (value !== undefined && !Number.isFinite(value)) throw new TypeError(`${spelling}: ${name} is an instant in epoch milliseconds`);
   }
-  if (!Number.isInteger(limit) || limit < 1) throw new TypeError(`${spelling}: limit is a whole number from 1`);
-  return { op, scope, olderThan, limit, now };
+  return { op, scope, olderThan, limit: readLimit(limit, spelling), now };
 }
 
 /**
@@ -170,8 +182,7 @@ function readSweepOptions(options, spelling) {
   refuseUnknownMembers(options, ['limit'], (key, hint) =>
     new TypeError(`${spelling}: '${key}' is not a member it reads${hint}`));
   const { limit } = /** @type {any} */ (options);
-  if (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 1)) throw new TypeError(`${spelling}: limit is a whole number from 1`);
-  return { limit };
+  return { limit: limit === undefined ? undefined : readLimit(limit, spelling) };
 }
 
 /**

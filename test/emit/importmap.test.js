@@ -312,6 +312,57 @@ describe('buildImportMap — an installed tree, served unbundled', () => {
     finally { fs.rmSync(root, { recursive: true, force: true }); }
   });
 
+  it('maps no main that is a native addon: skipped where only an optional edge reaches it, reported where the closure requires it', () => {
+    const root = installTree({
+      'node_modules/@x/canvas/package.json': { name: '@x/canvas', version: '1.0.0', exports: './index.js',
+        optionalDependencies: { '@x/canvas-linux-x64-gnu': '1.0.0', '@x/canvas-fallback': '1.0.0' } },
+      'node_modules/@x/canvas/index.js': 'export const canvas = 1;\n',
+      // a napi-rs platform package: no exports, a main that names the binary
+      'node_modules/@x/canvas-linux-x64-gnu/package.json': { name: '@x/canvas-linux-x64-gnu', version: '1.0.0', os: ['linux'], cpu: ['x64'],
+        main: 'canvas.linux-x64-gnu.node' },
+      'node_modules/@x/canvas-linux-x64-gnu/canvas.linux-x64-gnu.node': '\u007fELF\n',
+      // a native main that is not installed falls back to index.js, as in Node: JavaScript, mapped as before
+      'node_modules/@x/canvas-fallback/package.json': { name: '@x/canvas-fallback', version: '1.0.0', main: './gone.node' },
+      'node_modules/@x/canvas-fallback/index.js': 'export const fallback = 1;\n',
+    });
+    try {
+      const options = { packages: ['@x/canvas'], root, prefix: '/v/' };
+      const skipped = buildImportMap(options);
+      assert.deepStrictEqual(skipped.imports, { '@x/canvas': '/v/@x/canvas/index.js', '@x/canvas-fallback': '/v/@x/canvas-fallback/index.js' });
+      assert.deepStrictEqual(skipped.files, ['/v/@x/canvas-fallback/index.js', '/v/@x/canvas/index.js']);
+      assert.deepStrictEqual(skipped.unresolved, []);
+      const run = runCli(root, ['--packages', '@x/canvas', '--prefix', '/v/']);
+      assert.strictEqual(run.status, 0, run.stderr);
+      assert.strictEqual(run.stderr, '');
+      assert.deepStrictEqual(JSON.parse(run.stdout).imports, skipped.imports);
+      // named, the package is reported against its manifest, and neither mapped nor listed
+      const named = buildImportMap({ ...options, packages: ['@x/canvas-linux-x64-gnu'] });
+      assert.deepStrictEqual(named, { imports: {}, files: [], duplicates: [], optional: [],
+        unresolved: [{ specifier: '@x/canvas-linux-x64-gnu', from: '@x/canvas-linux-x64-gnu/package.json' }] });
+      /** @param {string} file @param {string} content */
+      const write = (file, content) => {
+        fs.mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
+        fs.writeFileSync(path.join(root, file), content);
+      };
+      // required through dependencies, it is reported the same way, and the command exits 1 naming it
+      write('node_modules/@x/needs/package.json', JSON.stringify({ name: '@x/needs', version: '1.0.0', exports: './index.js',
+        dependencies: { '@x/canvas-linux-x64-gnu': '1.0.0' } }));
+      write('node_modules/@x/needs/index.js', 'export {};\n');
+      const required = buildImportMap({ ...options, packages: ['@x/needs'] });
+      assert.deepStrictEqual(required.imports, { '@x/needs': '/v/@x/needs/index.js' });
+      assert.deepStrictEqual(required.files, ['/v/@x/needs/index.js']);
+      assert.deepStrictEqual(required.unresolved, [{ specifier: '@x/canvas-linux-x64-gnu', from: '@x/canvas-linux-x64-gnu/package.json' }]);
+      const failed = runCli(root, ['--packages', '@x/needs', '--prefix', '/v/']);
+      assert.strictEqual(failed.status, 1);
+      assert.strictEqual(failed.stderr,
+        'error: @x/canvas-linux-x64-gnu/package.json imports @x/canvas-linux-x64-gnu, which the map does not resolve\n');
+      // a served file that imports the skipped package is reported at the import
+      write('node_modules/@x/canvas/index.js', "import '@x/canvas-linux-x64-gnu';\nexport const canvas = 1;\n");
+      assert.deepStrictEqual(buildImportMap(options).unresolved, [{ specifier: '@x/canvas-linux-x64-gnu', from: '@x/canvas/index.js' }]);
+    }
+    finally { fs.rmSync(root, { recursive: true, force: true }); }
+  });
+
   it('passes over an export target that is a number or a boolean, mapping and exiting as before', () => {
     const root = installTree({
       'node_modules/@x/num/package.json': { name: '@x/num', version: '1.0.0', exports: { '.': './a.js', './n': 5, './b': { browser: true, default: './a.js' } } },

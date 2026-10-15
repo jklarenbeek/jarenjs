@@ -86,6 +86,22 @@ function stale(ref, reason) {
 }
 
 /**
+ * Read a `limit` — the one predicate `inFlight` and `sweep` judge it by,
+ * the memory ledger's: a whole number from 1, however large, else a
+ * `TypeError`. The answer is the bound `take` binds: one past
+ * `Number.MAX_SAFE_INTEGER` bounds nothing a store holds and binds as that
+ * integer, since the planner pushes only a safe integer into `LIMIT` —
+ * past it the read would run in the engine over the whole table.
+ * @param {unknown} limit
+ * @param {string} spelling
+ * @returns {number}
+ */
+function readLimit(limit, spelling) {
+  if (!Number.isInteger(limit) || /** @type {number} */ (limit) < 1) throw new TypeError(`${spelling}: limit is a whole number from 1`);
+  return Math.min(/** @type {number} */ (limit), Number.MAX_SAFE_INTEGER);
+}
+
+/**
  * The same closed set the memory ledger reads for `inFlight` — a
  * `TypeError` names an unknown member or a malformed value.
  * @param {unknown} query
@@ -105,8 +121,7 @@ function readInFlightQuery(query) {
   for (const [name, value] of [['olderThan', olderThan], ['now', now]]) {
     if (value !== undefined && !Number.isFinite(value)) throw new TypeError(`${spelling}: ${name} is an instant in epoch milliseconds`);
   }
-  if (!Number.isInteger(limit) || limit < 1) throw new TypeError(`${spelling}: limit is a whole number from 1`);
-  return { op, scope, olderThan, limit, now };
+  return { op, scope, olderThan, limit: readLimit(limit, spelling), now };
 }
 
 /**
@@ -123,8 +138,7 @@ function readSweepOptions(options) {
   refuseUnknown(options, ['limit'], (key, list) =>
     `${spelling}: '${key}' is not a member it reads; it reads ${list}`);
   const { limit } = /** @type {any} */ (options);
-  if (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 1)) throw new TypeError(`${spelling}: limit is a whole number from 1`);
-  return { limit };
+  return { limit: limit === undefined ? undefined : readLimit(limit, spelling) };
 }
 
 /**

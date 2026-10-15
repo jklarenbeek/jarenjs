@@ -1368,7 +1368,12 @@ the limit (a backlog that is an exact multiple of the limit costs one
 more call, which answers 0). A second argument that is `undefined` or
 `null` is no options: an unbounded sweep. A malformed one — not a plain
 object, a member other than `limit`, or a `limit` that is not a whole
-number from 1 — is a `TypeError`, and nothing is dropped. The memory
+number from 1 — is a `TypeError`, and nothing is dropped. `sweep` and
+`inFlight` judge `limit` by one predicate: any whole number from 1,
+however large, so a limit past every record answers them all. Upgrade
+note: `sweep` used to refuse a whole number past `Number.MAX_SAFE_INTEGER`
+(`2 ** 53`, say) that `inFlight` took; it now takes it, on both suite
+ledgers, and drops every expired record. The memory
 ledger used to ignore the second argument and drop every expired
 record; it now honours the bound, so a host that passed a `limit` sees
 at most that many dropped per call, and a malformed second argument it

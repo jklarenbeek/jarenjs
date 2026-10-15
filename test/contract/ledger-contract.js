@@ -25,6 +25,12 @@ import { ledgerId } from '@jarenjs/contract/ledger';
 export const CLAIM = { op: 'product.save', scope: '', key: 'k1', hash: 'a'.repeat(64) };
 export const RESPONSE = { status: 200, headers: { 'content-type': 'application/json; charset=utf-8' }, body: '{"id":1}' };
 
+/** The `limit`s both `inFlight` and `sweep` refuse: not a whole number from 1. */
+const REFUSED_LIMITS = [0, -3, 1.5, '2', Infinity, NaN, null];
+
+/** Whole numbers past every record, the unsafe ones among them: both members take each as a bound that answers them all. */
+const PAST_EVERY_RECORD = [Number.MAX_SAFE_INTEGER, 2 ** 53, 2 ** 64, Number.MAX_VALUE];
+
 /**
  * @typedef {Object} LedgerUnderTest
  * @property {any} ledger - the ledger (claim/commit/fail/lookup/sweep)
@@ -330,7 +336,7 @@ export const cases = {
     await using(under, async () => {
       const { ledger } = under;
       await ledger.claim({ ...CLAIM, now: 10 });
-      for (const limit of [0, -3, 1.5, '2', Infinity, NaN, null, 2 ** 53]) {
+      for (const limit of REFUSED_LIMITS) {
         await assert.rejects(async () => ledger.sweep(1000, { limit }),
           (/** @type {any} */ err) => err instanceof TypeError && /ledger\.sweep: limit is a whole number from 1/.test(err.message), String(limit));
       }
@@ -361,6 +367,34 @@ export const cases = {
       assert.strictEqual(await ledger.sweep(), 1);
       assert.strictEqual(await ledger.sweep(2_000_000), unbounded.length, 'one live claim per round, swept once they expire');
     });
+  },
+
+  /** `inFlight` and `sweep` judge `limit` by one predicate: a whole number
+   * from 1, however large — one past every record answers them all, a safe
+   * integer or not — and each refuses the same malformed ones. */
+  async oneLimitPredicate(factory) {
+    const under = await factory({ ttlMs: 1000, startedTtlMs: 100, now: () => 1000 });
+    await using(under, async () => {
+      const { ledger } = under;
+      await ledger.claim({ ...CLAIM, now: 1000 });
+      for (const limit of REFUSED_LIMITS) {
+        await assert.rejects(async () => ledger.inFlight({ limit, now: 1000 }),
+          (/** @type {any} */ err) => err instanceof TypeError && /ledger\.inFlight: limit is a whole number from 1/.test(err.message), String(limit));
+        await assert.rejects(async () => ledger.sweep(5000, { limit }),
+          (/** @type {any} */ err) => err instanceof TypeError && /ledger\.sweep: limit is a whole number from 1/.test(err.message), String(limit));
+      }
+      assert.notStrictEqual(await ledger.lookup({ ...CLAIM, now: 1000 }), null, 'a refused limit dropped nothing');
+    });
+    for (const limit of PAST_EVERY_RECORD) {
+      const fresh = await factory({ ttlMs: 1000, startedTtlMs: 100, now: () => 5000 });
+      await using(fresh, async () => {
+        const { ledger } = fresh;
+        for (const [key, at] of [['b', 1010], ['a', 1000], ['c', 1020], ['live', 4950]]) await ledger.claim({ ...CLAIM, key: String(key), now: Number(at) });
+        assert.deepStrictEqual((await ledger.inFlight({ limit, now: 1030 })).map((c) => c.key), ['a', 'b', 'c', 'live'], `inFlight, limit ${limit}`);
+        assert.strictEqual(await ledger.sweep(5000, { limit }), 3, `sweep, limit ${limit}: every expired record`);
+        assert.deepStrictEqual((await ledger.inFlight({ limit, now: 4960 })).map((c) => c.key), ['live'], `limit ${limit}: nothing live is swept`);
+      });
+    }
   },
 
   /** A lease is whole milliseconds on every ledger. */
@@ -461,5 +495,6 @@ export function ledgerLifecycleContract(name, factory) {
     it('sweep(now, { limit }) drops at most limit records, the longest expired first, until an answer below the limit', () => cases.boundedSweep(factory));
     it('a bounded sweep takes tied expiries each once across calls; a limit past the backlog takes it all', () => cases.boundedSweepDrain(factory));
     it('a malformed sweep limit is refused and drops nothing; an absent one sweeps every expired record', () => cases.sweepLimitRefused(factory));
+    it('inFlight and sweep judge limit by one predicate: the same malformed ones refused, any whole number past every record answering them all', () => cases.oneLimitPredicate(factory));
   });
 }

@@ -245,6 +245,41 @@ function settledRecord(id, expiresAt) {
   };
 }
 
+/**
+ * node:sqlite behind the driver contract, counting the rows every SELECT
+ * hands back and keeping the query plan of each one over the ledger table.
+ */
+function countingDriver() {
+  const counting = {
+    read: 0,
+    /** @type {string[]} */
+    plans: [],
+    reset() { counting.read = 0; counting.plans = []; },
+    driver: /** @type {any} */ (null),
+  };
+  class Counting extends sqlite.DatabaseSync {
+    /** @param {string} sql */
+    prepare(sql) {
+      const statement = super.prepare(sql);
+      const select = /^\s*SELECT/i.test(sql);
+      const planner = select && sql.includes('FROM "ledger"') ? super.prepare(`EXPLAIN QUERY PLAN ${sql}`) : null;
+      return {
+        run: (/** @type {any[]} */ ...args) => statement.run(...args),
+        get: (/** @type {any[]} */ ...args) => statement.get(...args),
+        all: (/** @type {any[]} */ ...args) => {
+          const found = statement.all(...args);
+          if (select) counting.read += found.length;
+          if (planner !== null) counting.plans.push(planner.all(...args).map((/** @type {any} */ step) => step.detail).join('; '));
+          return found;
+        },
+        iterate: function* (/** @type {any[]} */ ...args) { for (const row of statement.iterate(...args)) { if (select) counting.read++; yield row; } },
+      };
+    }
+  }
+  counting.driver = { ...nodeDriver(), open: (/** @type {string} */ path, /** @type {any} */ opts) => Promise.resolve(fromNodeModule({ DatabaseSync: Counting }, path, opts)) };
+  return counting;
+}
+
 describe('createDbLedger — sweep(now, { limit })', () => {
   /** @param {any} client @returns {Promise<string[]>} */
   const remaining = async (client) => (await client.collections.ledger.toArray()).map((/** @type {any} */ r) => r.id).sort();
@@ -298,44 +333,49 @@ describe('createDbLedger — sweep(now, { limit })', () => {
   });
 
   it('a bounded call reads only the rows it deletes, in index order: 50 rows read whether the table holds 1,000 or 8,000, and whether 100 or all of them are expired', async () => {
-    let read = 0;
-    /** @type {string[]} */
-    let plans = [];
-    // node:sqlite behind the driver contract, counting the rows every SELECT hands back
-    // and keeping the query plan of each one over the ledger table
-    class Counting extends sqlite.DatabaseSync {
-      /** @param {string} sql */
-      prepare(sql) {
-        const statement = super.prepare(sql);
-        const select = /^\s*SELECT/i.test(sql);
-        const planner = select && sql.includes('FROM "ledger"') ? super.prepare(`EXPLAIN QUERY PLAN ${sql}`) : null;
-        return {
-          run: (/** @type {any[]} */ ...args) => statement.run(...args),
-          get: (/** @type {any[]} */ ...args) => statement.get(...args),
-          all: (/** @type {any[]} */ ...args) => {
-            const found = statement.all(...args);
-            if (select) read += found.length;
-            if (planner !== null) plans.push(planner.all(...args).map((/** @type {any} */ step) => step.detail).join('; '));
-            return found;
-          },
-          iterate: function* (/** @type {any[]} */ ...args) { for (const row of statement.iterate(...args)) { if (select) read++; yield row; } },
-        };
-      }
-    }
-    const driver = { ...nodeDriver(), open: (/** @type {string} */ path, /** @type {any} */ opts) => Promise.resolve(fromNodeModule({ DatabaseSync: Counting }, path, opts)) };
+    const counting = countingDriver();
     for (const [table, expired] of [[1000, 100], [8000, 100], [8000, 8000]]) {
-      const client = await memoryClient({ driver });
+      const client = await memoryClient({ driver: counting.driver });
       await client.transaction(async (tx) => {
         for (let i = 0; i < table; i++) await tx.collections.ledger.insert(settledRecord(`r${i}`, i < expired ? 10 + i : 1e12 + i));
       });
       const ledger = createDbLedger(client, { now: () => 1e9 });
-      read = 0;
-      plans = [];
+      counting.reset();
       assert.strictEqual(await ledger.sweep(1e9, { limit: 50 }), 50);
-      assert.strictEqual(read, 50, `${table} records, ${expired} expired`);
-      assert.deepStrictEqual(plans, ['SEARCH ledger USING INDEX ledger_by_expires (gx_expiresAt<?)'],
+      assert.strictEqual(counting.read, 50, `${table} records, ${expired} expired`);
+      assert.deepStrictEqual(counting.plans, ['SEARCH ledger USING INDEX ledger_by_expires (gx_expiresAt<?)'],
         'one statement: the expiry index range in index order, no table scan and no sort');
       assert.strictEqual((await client.collections.ledger.toArray()).length, table - 50);
+    }
+  });
+
+  it('a limit past the largest safe integer is a bound past every record, read through the same statement as a small one, by sweep and inFlight', async () => {
+    const counting = countingDriver();
+    /** @param {number} limit */
+    const run = async (limit) => {
+      const client = await memoryClient({ driver: counting.driver });
+      await client.transaction(async (tx) => {
+        for (let i = 0; i < 1000; i++) await tx.collections.ledger.insert(settledRecord(`r${i}`, i < 3 ? 10 + i : 1e12 + i));
+      });
+      const ledger = createDbLedger(client, { ttlMs: 1e6, startedTtlMs: 100, now: () => 1e9 });
+      for (const [key, at] of [['b', 1010], ['a', 1000]]) await ledger.claim({ op: 'o', scope: '', key, hash: 'h', now: at });
+      counting.reset();
+      const inFlight = (await ledger.inFlight({ limit, now: 1020 })).map((c) => c.key);
+      const inFlightRead = { read: counting.read, plans: [...counting.plans] };
+      counting.reset();
+      const swept = await ledger.sweep(1e9, { limit });
+      const sweepRead = { read: counting.read, plans: [...counting.plans] };
+      return { inFlight, inFlightRead, swept, sweepRead, left: (await client.collections.ledger.toArray()).length };
+    };
+    const safe = await run(50);
+    assert.deepStrictEqual(safe.inFlight, ['a', 'b']);
+    // the three settled records past expiry and the two claims past their own expiry
+    assert.strictEqual(safe.swept, 5);
+    assert.strictEqual(safe.sweepRead.read, 5);
+    assert.deepStrictEqual(safe.sweepRead.plans, ['SEARCH ledger USING INDEX ledger_by_expires (gx_expiresAt<?)']);
+    assert.strictEqual(safe.left, 997);
+    for (const limit of [2 ** 53, Number.MAX_VALUE]) {
+      assert.deepStrictEqual(await run(limit), safe, String(limit));
     }
   });
 
