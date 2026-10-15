@@ -240,7 +240,8 @@ if (chainEdgeLeak.length > 0)
 // Raised to 230,500 (measured 230428): the chart pen's right value axis and the shared capture's bounds add 570.
 // Raised to 230,600 (measured 230506): the descent refusal's message id and docPath add 78.
 // Raised to 231,500 (measured 231415): the join table's query root and the message vocabulary's new keyword and descent ids add 909.
-if (chainBytes > 231500)
+// Raised to 232,600 (measured 232511): the message vocabulary's ids for the five keyword messages, the resolved bound and the failed load, and core's located cycle refusal add 1096.
+if (chainBytes > 232600)
   throw new Error(`The chain bundle grew to ${chainBytes} bytes.`);
 
 console.log(`Tree-shaking smoke test passed (${chainBytes} byte chain bundle; no schema-pen module, no client module, no store/validator/formats bytes).`);
@@ -634,7 +635,8 @@ if (asyncLiveLeak.length)
 // Raised to 1,005,100 (measured 1005049): PostgreSQL's out-of-range literal and negated-list spellings, the layout-condition read-back, the worker-hosted Bun backup and the opt-in column upgrade add 2530.
 // Raised to 1,016,900 (measured 1016809): the join table's query root, bracket member paths, one external-admission rule on every surface, replace records for a row a save or a membership stores again, the bind diversion of strings the database would not receive as written, the raising cursor, the blank-tolerant retype and the number-first union read-back add 11760.
 // Raised to 1,020,400 (measured 1020349): a join table's rows bounded by each side's profile predicate, the refusal of keys and texts the database would store as another value, the engine fold over a non-UTF-8 file and the shared-cache source add 3540.
-if (clientBytes > 1020400)
+// Raised to 1,033,400 (measured 1033301): the store's refusal of a non-JSON external through filters and operators, a wide predicate external compared by its digits, the join table's second-key index and its upgrade, the many-to-many count and existence in one statement, the validator's every-keyword collection, draft keyword gates and resolved bounds, the single-pass unevaluated log and core's located cycle refusal add 12952.
+if (clientBytes > 1033400)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 
@@ -821,7 +823,8 @@ if (appPenLeak.length > 0)
 // Raised to 57,300 (measured 57281): the shared capture's refusal to coerce a method read without its call add 392.
 // Raised to 59,700 (measured 59619): the shared capture's coded refusal of every array and string method on a member, and the predicate a to-many relation's array method needs, add 2338.
 // Raised to 60,300 (measured 60267): the shared capture's reading of an index off a relation as a hop for in() and all() add 648.
-if (appPenBytes > 60300)
+// Raised to 60,400 (measured 60313): core's located cycle refusal add 46.
+if (appPenBytes > 60400)
   throw new Error(`The app pen bundle grew to ${appPenBytes} bytes.`);
 const chainAppLeak = Object.entries(chainInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/app/') && info.bytesInOutput > 0);

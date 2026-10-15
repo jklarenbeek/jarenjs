@@ -50,7 +50,7 @@ is the index of those guides, and it is how a reader reaches any of them.
 | [JTLT-PEN.md](JTLT-PEN.md) | 83 | `./jtlt` — text templates with JSLT dispatch and query expressions. **Read it when** you want to author Markdown, XML or source text as portable JSON. |
 | [PROJECT-PEN.md](PROJECT-PEN.md) | 84 | `./project` — Studio projects with named, typed files. **Read it when** you want a portable editor workspace containing documents written by several pens. |
 | [CHARTS-PEN.md](CHARTS-PEN.md) | 100 | `./charts` — chart-definition documents for every chart kind. **Read it when** you want typed chart data and presentation options that `compileChart` consumes. |
-| [DB-CLIENT.md](DB-CLIENT.md) | 1,437 | `./db` — the client: the store's typed front door, not a pen, and the package's one runtime edge. **Read it when** you are reading or writing rows: `load`, `include`, `link`/`unlink`, `live` |
+| [DB-CLIENT.md](DB-CLIENT.md) | 1,446 | `./db` — the client: the store's typed front door, not a pen, and the package's one runtime edge. **Read it when** you are reading or writing rows: `load`, `include`, `link`/`unlink`, `live` |
 | [FORMULA-PEN.md](FORMULA-PEN.md) | 41 | `./formula` — author versioned saved JSON Query profiles without executing them. |
 <!--/fact-->
 
@@ -206,22 +206,22 @@ and the bundle is the byte count the tree-shaking probe builds.
 | Document | Subpath | Lines | Mapping rows | Worked examples | Refusals | Bundle |
 |---|---|---:|---:|---:|---:|---:|
 | [LINQ-FORMAT.md](LINQ-FORMAT.md) | — | 971 | — | — | — | — |
-| [QUERY-PEN.md](QUERY-PEN.md) | `.` | 2,179 | 34 | 8 | 17 | 231,415 B |
-| [SCHEMA-PEN.md](SCHEMA-PEN.md) | `./schema` | 1,266 | 82 | 10 | 4 | 45,247 B |
-| [MODEL-PEN.md](MODEL-PEN.md) | `./model` | 1,240 | 31 | 7 | 3 | 57,054 B |
-| [JSLT-PEN.md](JSLT-PEN.md) | `./jslt` | 980 | 17 | 8 | 3 | 27,811 B |
-| [MIGRATION-PEN.md](MIGRATION-PEN.md) | `./migration` | 957 | 13 | 5 | 4 | 34,044 B |
-| [CONTRACT-PEN.md](CONTRACT-PEN.md) | `./contract` | 1,226 | 38 | 6 | 3 | 58,820 B |
-| [FLOW-PEN.md](FLOW-PEN.md) | `./flow` | 1,046 | 16 | 7 | 3 | 27,913 B |
-| [APP-PEN.md](APP-PEN.md) | `./app` | 1,314 | 24 | 7 | 4 | 60,267 B |
-| [FORMS-PEN.md](FORMS-PEN.md) | `./forms` | 947 | 18 | 6 | 3 | 49,517 B |
-| [MESSAGES-PEN.md](MESSAGES-PEN.md) | `./messages` | 105 | 9 | 2 | 1 | 14,322 B |
-| [JTLT-PEN.md](JTLT-PEN.md) | `./jtlt` | 83 | 13 | 1 | 2 | 24,526 B |
-| [PROJECT-PEN.md](PROJECT-PEN.md) | `./project` | 84 | 9 | 1 | 1 | 4,668 B |
-| [CHARTS-PEN.md](CHARTS-PEN.md) | `./charts` | 100 | 21 | 1 | 1 | 6,542 B |
-| [DB-CLIENT.md](DB-CLIENT.md) | `./db` | 1,437 | 54 | 5 | 2 | 1,020,349 B |
-| [FORMULA-PEN.md](FORMULA-PEN.md) | `./formula` | 41 | 2 | — | — | 11,334 B |
-| **16 documents** | | **13,976** | **381** | **74** | | |
+| [QUERY-PEN.md](QUERY-PEN.md) | `.` | 2,179 | 34 | 8 | 17 | 232,511 B |
+| [SCHEMA-PEN.md](SCHEMA-PEN.md) | `./schema` | 1,266 | 82 | 10 | 4 | 45,293 B |
+| [MODEL-PEN.md](MODEL-PEN.md) | `./model` | 1,240 | 31 | 7 | 3 | 57,100 B |
+| [JSLT-PEN.md](JSLT-PEN.md) | `./jslt` | 980 | 17 | 8 | 3 | 27,857 B |
+| [MIGRATION-PEN.md](MIGRATION-PEN.md) | `./migration` | 957 | 13 | 5 | 4 | 34,090 B |
+| [CONTRACT-PEN.md](CONTRACT-PEN.md) | `./contract` | 1,226 | 38 | 6 | 3 | 58,866 B |
+| [FLOW-PEN.md](FLOW-PEN.md) | `./flow` | 1,046 | 16 | 7 | 3 | 27,959 B |
+| [APP-PEN.md](APP-PEN.md) | `./app` | 1,314 | 24 | 7 | 4 | 60,313 B |
+| [FORMS-PEN.md](FORMS-PEN.md) | `./forms` | 947 | 18 | 6 | 3 | 49,563 B |
+| [MESSAGES-PEN.md](MESSAGES-PEN.md) | `./messages` | 105 | 9 | 2 | 1 | 14,551 B |
+| [JTLT-PEN.md](JTLT-PEN.md) | `./jtlt` | 83 | 13 | 1 | 2 | 24,572 B |
+| [PROJECT-PEN.md](PROJECT-PEN.md) | `./project` | 84 | 9 | 1 | 1 | 4,711 B |
+| [CHARTS-PEN.md](CHARTS-PEN.md) | `./charts` | 100 | 21 | 1 | 1 | 6,587 B |
+| [DB-CLIENT.md](DB-CLIENT.md) | `./db` | 1,446 | 54 | 5 | 2 | 1,033,301 B |
+| [FORMULA-PEN.md](FORMULA-PEN.md) | `./formula` | 41 | 2 | — | — | 11,441 B |
+| **16 documents** | | **13,985** | **381** | **74** | | |
 <!--/fact-->
 
 A pen whose mapping rows are far below its worked examples is a pen
@@ -265,21 +265,21 @@ it and each document publishes it. The rounded column is what
 <!--fact:pens.cost-->
 | Subpath | Document | Bundle | Rounded |
 |---|---|---:|---:|
-| `@jarenjs/linq` | [QUERY-PEN.md](QUERY-PEN.md) | 231,415 B | 231 kB |
-| `@jarenjs/linq/schema` | [SCHEMA-PEN.md](SCHEMA-PEN.md) | 45,247 B | 45 kB |
-| `@jarenjs/linq/model` | [MODEL-PEN.md](MODEL-PEN.md) | 57,054 B | 57 kB |
-| `@jarenjs/linq/jslt` | [JSLT-PEN.md](JSLT-PEN.md) | 27,811 B | 28 kB |
-| `@jarenjs/linq/migration` | [MIGRATION-PEN.md](MIGRATION-PEN.md) | 34,044 B | 34 kB |
-| `@jarenjs/linq/contract` | [CONTRACT-PEN.md](CONTRACT-PEN.md) | 58,820 B | 59 kB |
-| `@jarenjs/linq/flow` | [FLOW-PEN.md](FLOW-PEN.md) | 27,913 B | 28 kB |
-| `@jarenjs/linq/app` | [APP-PEN.md](APP-PEN.md) | 60,267 B | 60 kB |
-| `@jarenjs/linq/forms` | [FORMS-PEN.md](FORMS-PEN.md) | 49,517 B | 50 kB |
-| `@jarenjs/linq/messages` | [MESSAGES-PEN.md](MESSAGES-PEN.md) | 14,322 B | 14 kB |
-| `@jarenjs/linq/jtlt` | [JTLT-PEN.md](JTLT-PEN.md) | 24,526 B | 25 kB |
-| `@jarenjs/linq/project` | [PROJECT-PEN.md](PROJECT-PEN.md) | 4,668 B | 5 kB |
-| `@jarenjs/linq/charts` | [CHARTS-PEN.md](CHARTS-PEN.md) | 6,542 B | 7 kB |
-| `@jarenjs/linq/db` | [DB-CLIENT.md](DB-CLIENT.md) | 1,020,349 B | 1020 kB |
-| `@jarenjs/linq/formula` | [FORMULA-PEN.md](FORMULA-PEN.md) | 11,334 B | 11 kB |
+| `@jarenjs/linq` | [QUERY-PEN.md](QUERY-PEN.md) | 232,511 B | 233 kB |
+| `@jarenjs/linq/schema` | [SCHEMA-PEN.md](SCHEMA-PEN.md) | 45,293 B | 45 kB |
+| `@jarenjs/linq/model` | [MODEL-PEN.md](MODEL-PEN.md) | 57,100 B | 57 kB |
+| `@jarenjs/linq/jslt` | [JSLT-PEN.md](JSLT-PEN.md) | 27,857 B | 28 kB |
+| `@jarenjs/linq/migration` | [MIGRATION-PEN.md](MIGRATION-PEN.md) | 34,090 B | 34 kB |
+| `@jarenjs/linq/contract` | [CONTRACT-PEN.md](CONTRACT-PEN.md) | 58,866 B | 59 kB |
+| `@jarenjs/linq/flow` | [FLOW-PEN.md](FLOW-PEN.md) | 27,959 B | 28 kB |
+| `@jarenjs/linq/app` | [APP-PEN.md](APP-PEN.md) | 60,313 B | 60 kB |
+| `@jarenjs/linq/forms` | [FORMS-PEN.md](FORMS-PEN.md) | 49,563 B | 50 kB |
+| `@jarenjs/linq/messages` | [MESSAGES-PEN.md](MESSAGES-PEN.md) | 14,551 B | 15 kB |
+| `@jarenjs/linq/jtlt` | [JTLT-PEN.md](JTLT-PEN.md) | 24,572 B | 25 kB |
+| `@jarenjs/linq/project` | [PROJECT-PEN.md](PROJECT-PEN.md) | 4,711 B | 5 kB |
+| `@jarenjs/linq/charts` | [CHARTS-PEN.md](CHARTS-PEN.md) | 6,587 B | 7 kB |
+| `@jarenjs/linq/db` | [DB-CLIENT.md](DB-CLIENT.md) | 1,033,301 B | 1033 kB |
+| `@jarenjs/linq/formula` | [FORMULA-PEN.md](FORMULA-PEN.md) | 11,441 B | 11 kB |
 <!--/fact-->
 
 Read these as prices, not as scores. `./db` is the largest by an order of
@@ -957,10 +957,10 @@ it says.
 
 | Question | Chain |
 |---|---|
-| which labels does `u1` hold | `labels.where((j) => j.User_key.eq('u1')).select((j) => j.Label_key)` (reads the table: no index on `User_key`, below) |
+| which labels does `u1` hold | `labels.where((j) => j.User_key.eq('u1')).select((j) => j.Label_key)` (seeks the index on `User_key`, below) |
 | how many users hold each label | `client.entities.Label.groupJoin(fromAsync(labels), (l) => l.name, (j) => j.Label_key, (l, g) => ({ label: l.name, users: g.count() }))` |
 | which pairs carry a blue label | `labels.join(fromAsync(client.entities.Label), (j) => j.Label_key, (l) => l.name, (j, l) => ({ j, l })).where((x) => x.l.color.eq('blue'))` |
-| which users hold no label | the document `{ "$for": { "u": "$.User[*]" }, "$where": { "$not": { "$exists": { "$for": { "j": "$.Label_User[*]" }, "$where": { "$eq": ["$j.User_key", "$u.id"] }, "$return": "$j" } } }, "$return": "$u.id" }`, handed to `labels.execute` |
+| which users hold no label | `client.entities.User.where((u) => u.labels.all().exists().not()).select((u) => u.id)`, or the document `{ "$for": { "u": "$.User[*]" }, "$where": { "$not": { "$exists": { "$for": { "j": "$.Label_User[*]" }, "$where": { "$eq": ["$j.User_key", "$u.id"] }, "$return": "$j" } } }, "$return": "$u.id" }`, handed to `labels.execute` |
 
 ### Formula document authoring — [FORMULA-PEN.md §2](FORMULA-PEN.md)
 
