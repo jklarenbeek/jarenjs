@@ -8,9 +8,9 @@
  * primitives, and the `x-form` rules (rules.js) add cross-field behavior -
  * visibility, enablement, computed values, preemptive assertions - as
  * compiled Jaren JSON Queries, before the complete compiled schema
- * validation runs (app-wired; forms never RUNS the validator — its one
- * import from that package is the pure same-document ref resolution in
- * `@jarenjs/validate/normalize`). The
+ * validation runs (app-wired; forms never RUNS the validator — its imports
+ * from that package are the pure same-document ref resolution and the
+ * `pattern` reading in `@jarenjs/validate/normalize`). The
  * data helpers keep form values in plain JSON semantics, addressed by
  * JSON pointer through the @jarenjs/json compiled pointer engine.
  */

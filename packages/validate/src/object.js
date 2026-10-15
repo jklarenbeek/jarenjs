@@ -18,6 +18,7 @@ import {
 } from '@jarenjs/core/function';
 
 import {
+  annotatesFailedMembers,
   isBoolOrObjectClass,
   getBoolOrObjectClass,
   getArrayClassMinItems,
@@ -124,6 +125,7 @@ function compileProperties(schemaObj, jsonSchema) {
 
   const root = schemaObj.root;
   const track = root.usesUnevaluated;
+  const logFailed = annotatesFailedMembers(schemaObj);
 
   return function validatePropertyItem(data, dataPath, dataRoot, dataKey) {
     const result = new ValidationResult();
@@ -132,7 +134,7 @@ function compileProperties(schemaObj, jsonSchema) {
       return result;
     else {
       const valid = validator(data[dataKey], dataPath, dataRoot, dataKey);
-      if (track && valid === true) root.evalLog.add(data, dataKey);
+      if (track && (valid === true || logFailed)) root.evalLog.add(data, dataKey);
       return result.addMatch(valid);
     }
   };
@@ -168,6 +170,7 @@ function compilePatternProperties(schemaObj, jsonSchema) {
 
   const root = schemaObj.root;
   const track = root.usesUnevaluated;
+  const logFailed = annotatesFailedMembers(schemaObj);
 
   return function validatePatternPropertiesItem(data, dataPath, dataRoot, dataKey) {
     const result = new ValidationResult();
@@ -175,7 +178,7 @@ function compilePatternProperties(schemaObj, jsonSchema) {
       const { matches, validator } = list[i];
       if (matches(dataKey)) {
         const valid = validator(data[dataKey], dataPath, dataRoot, dataKey);
-        if (track && valid === true) root.evalLog.add(data, dataKey);
+        if (track && (valid === true || logFailed)) root.evalLog.add(data, dataKey);
         result.addMatch(valid);
       }
     }
@@ -187,21 +190,24 @@ function compileAdditionalProperties(schemaObj, jsonSchema) {
   const additional = getBoolOrObjectClass(jsonSchema.additionalProperties);
   if (additional == null) return undefined;
 
+  const root = schemaObj.root;
+  const track = root.usesUnevaluated;
+  const logFailed = annotatesFailedMembers(schemaObj);
+
   if (additional === false) {
     const addError = schemaObj.createErrorHandler(false, ['additionalProperties']);
 
     return function validateNoAdditionalProperties(data, dataPath, dataRoot, dataKey) {
+      if (track && logFailed) root.evalLog.add(data, dataKey);
       return addError(dataKey, data, dataPath);
     };
   }
 
-  const root = schemaObj.root;
-  const track = root.usesUnevaluated;
   const validator = schemaObj.createValidator(additional, 'additionalProperties');
 
   return function validateAdditionalPropertyItem(data, dataPath, dataRoot, dataKey) {
     const valid = validator(data[dataKey], dataPath, dataRoot, dataKey);
-    if (track && valid === true) root.evalLog.add(data, dataKey);
+    if (track && (valid === true || logFailed)) root.evalLog.add(data, dataKey);
     return valid;
   };
 }

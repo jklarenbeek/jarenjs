@@ -24,6 +24,7 @@ import {
   getArrayClassMinItems,
   isOfSchemaType,
   extendsChildLocations,
+  annotatesFailedMembers,
   ARRAY_CHILD_KEYWORDS,
 } from './tools.js';
 
@@ -124,8 +125,12 @@ function compileContainsMinMax(schemaObj, jsonSchema) {
   const contains = getBoolOrObjectClass(jsonSchema.contains);
   if (contains == null) return undefined;
 
-  const minContains = getIntishType(jsonSchema.minContains);
-  const maxContains = getIntishType(jsonSchema.maxContains);
+  // minContains/maxContains belong to the validation vocabulary and exist
+  // since draft 2019-09: without either, `contains` needs one match.
+  const counted = schemaObj.options.vocabValidation !== false
+    && !(schemaObj.declaredDraft != null && schemaObj.declaredDraft < 2019);
+  const minContains = counted ? getIntishType(jsonSchema.minContains) : undefined;
+  const maxContains = counted ? getIntishType(jsonSchema.maxContains) : undefined;
 
   const addNonError = schemaObj.createErrorHandler(0, 'contains');
   const addMinError = schemaObj.createErrorHandler(minContains, 'minContains');
@@ -190,6 +195,20 @@ function compileArrayContainsBoolean(schemaObj, jsonSchema) {
 //#endregion
 
 //#region Items
+/**
+ * The `prefixItems` array a schema applies, or `undefined`. A document that
+ * declares a draft before 2020-12 via `$schema` treats `prefixItems` as an
+ * unknown keyword; a document that declares none reads it.
+ * @param {import('./index.js').ValidationObject} schemaObj
+ * @param {object} jsonSchema
+ * @returns {unknown[] | undefined}
+ */
+function readPrefixItems(schemaObj, jsonSchema) {
+  return (schemaObj.declaredDraft != null && schemaObj.declaredDraft < 2020)
+    ? undefined
+    : getArrayClassMinItems(jsonSchema.prefixItems, 1);
+}
+
 function compileArrayItemsBoolean(schemaObj, jsonSchema) {
   const items = getBoolishType(jsonSchema.items);
   if (items === true) return trueThat;
@@ -197,13 +216,16 @@ function compileArrayItemsBoolean(schemaObj, jsonSchema) {
 
   // With prefixItems (draft 2020-12), items:false only forbids items beyond
   // the prefix; that is enforced by the tuple validator, not here.
-  if (getArrayClassMinItems(jsonSchema.prefixItems, 1) != null)
+  if (readPrefixItems(schemaObj, jsonSchema) != null)
     return undefined;
 
   const addError = schemaObj.createErrorHandler(false, 'items');
+  const root = schemaObj.root;
+  const logFailed = root.usesUnevaluated && annotatesFailedMembers(schemaObj);
   return function validateArrayItemsFalse(data, dataPath) {
-    return data.length === 0
-      || addError(data, dataPath);
+    if (data.length === 0) return true;
+    if (logFailed) root.evalLog.add(data, -1);
+    return addError(data, dataPath);
   };
 }
 
@@ -248,17 +270,20 @@ function compileItemValidator(schemaObj, itemSchema, key, index) {
     // so a failing item reports nothing of its own and the caller can only
     // aggregate one error at the array path. When errors are recorded, fall
     // through to full compilation so each failing item yields its own error
-    // at its own instancePath, matching the multi-keyword path.
-    const stopAtFirst = schemaObj.root.options.skipErrors;
+    // at its own instancePath, matching the multi-keyword path. Both assert
+    // validation-vocabulary keywords, so they apply only while the
+    // meta-schema keeps that vocabulary on.
+    const bare = schemaObj.root.options.skipErrors
+      && schemaObj.options.vocabValidation !== false;
 
     // Fast path: type-only schema (most common case) - check property directly first
-    if (stopAtFirst && itemSchema.type !== undefined && Object.keys(itemSchema).length === 1) {
+    if (bare && itemSchema.type !== undefined && Object.keys(itemSchema).length === 1) {
       const typeOnly = compileTypeOnlyValidator(itemSchema.type);
       if (typeOnly !== undefined) return typeOnly;
     }
 
     // Fast path: required-only schema - check property directly first
-    if (stopAtFirst && Array.isArray(itemSchema.required) && Object.keys(itemSchema).length === 1) {
+    if (bare && Array.isArray(itemSchema.required) && Object.keys(itemSchema).length === 1) {
       const required = itemSchema.required;
       // `in` also answers for the names every object inherits (`toString`);
       // a list naming one of those takes the own-member probe, any other list
@@ -391,16 +416,13 @@ export function compileArrayPrimitives(schemaObj, jsonSchema) {
 
 function compileArrayChildren(schemaObj, jsonSchema) {
   // Check for prefixItems (draft 2020-12+) first, then items.
-  // A document that declares an older draft via $schema treats
-  // prefixItems as an unknown keyword.
-  const prefixItems = (schemaObj.declaredDraft != null && schemaObj.declaredDraft < 2020)
-    ? undefined
-    : getArrayClassMinItems(jsonSchema.prefixItems, 1);
+  const prefixItems = readPrefixItems(schemaObj, jsonSchema);
   const items = jsonSchema.items;
   const isTuple = getArrayClassMinItems(items, 1) != null;
 
   const root = schemaObj.root;
   const track = root.usesUnevaluated;
+  const logFailed = annotatesFailedMembers(schemaObj);
   // In draft 2020-12 contains produces item annotations; in 2019-09 it doesn't.
   const trackContains = track && (schemaObj.options.draftVersion || 7) >= 2020;
   // Item paths are consumed by error reporting and by location readers
@@ -453,12 +475,6 @@ function compileArrayChildren(schemaObj, jsonSchema) {
 
   const validateMinMax = compileContainsMinMax(schemaObj, jsonSchema) || trueThat;
 
-  const maxItems = getIntishType(jsonSchema.maxItems) || 0;
-
-  const resolveLength = len => (maxItems > 0
-    ? Math.min(maxItems, len)
-    : len);
-
   // Fast path: items only, no contains
   if (validateContains == null && validateItem != null) {
     // if validateItem is trueThat, just check length
@@ -478,19 +494,16 @@ function compileArrayChildren(schemaObj, jsonSchema) {
     const validator = validateItem;
 
     return function validateArrayItemsOnly(data, dataPath, dataRoot) {
-      const len = resolveLength(data.length);
+      const len = data.length;
       const arr = data;
 
       let invalid = 0;
       for (let i = 0; i < len; ++i) {
         const itemPath = extendPaths ? dataPath + '/' + i : dataPath;
         // Direct validator call, no intermediate wrappers
-        if (validator(arr[i], itemPath, dataRoot, i) !== true) {
-          invalid++;
-        }
-        else if (track && i < evalLimit) {
-          root.evalLog.add(data, i);
-        }
+        const ok = validator(arr[i], itemPath, dataRoot, i) === true;
+        if (!ok) invalid++;
+        if (track && i < evalLimit && (ok || logFailed)) root.evalLog.add(data, i);
       }
       return invalid === 0
         || addError(invalid, dataPath);
@@ -502,7 +515,7 @@ function compileArrayChildren(schemaObj, jsonSchema) {
     const validator = validateContains;
 
     return function validateArrayContainsOnly(data, dataPath, dataRoot) {
-      const len = resolveLength(data.length);
+      const len = data.length;
       const arr = data;
       // Each element is a CANDIDATE probe: the array only has to contain a
       // match, so an element that is not one has done nothing wrong.
@@ -526,7 +539,7 @@ function compileArrayChildren(schemaObj, jsonSchema) {
 
   const stopAtFirstContains = schemaObj.options.skipErrors;
   return function validateArrayChildren(data, dataPath, dataRoot) {
-    const len = resolveLength(data.length);
+    const len = data.length;
     const arr = data;
 
     let invalid = 0;
@@ -535,12 +548,9 @@ function compileArrayChildren(schemaObj, jsonSchema) {
       const obj = arr[i];
       const itemPath = extendPaths ? dataPath + '/' + i : dataPath;
       // Direct validator calls without intermediate wrappers
-      if (itemValidator(obj, itemPath, dataRoot, i) !== true) {
-        invalid++;
-      }
-      else if (track && i < evalLimit) {
-        root.evalLog.add(data, i);
-      }
+      const ok = itemValidator(obj, itemPath, dataRoot, i) === true;
+      if (!ok) invalid++;
+      if (track && i < evalLimit && (ok || logFailed)) root.evalLog.add(data, i);
       // A contains candidate is a probe: not matching is not a fault.
       const containsMark = root.errorMark();
       if (containsValidator(obj, itemPath, dataRoot) === true) {

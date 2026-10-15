@@ -4,9 +4,10 @@
  * Preemptive per-field validation.
  *
  * These checks run synchronously on every keystroke, powered directly by
- * @jarenjs/core primitives (grapheme-aware string length, unicode regexes,
- * format testers, deep equality). They give the user immediate feedback
- * per field BEFORE the complete compiled schema validation runs - which
+ * @jarenjs/core primitives (grapheme-aware string length, deep equality),
+ * the format testers and the validator's own `pattern` reading
+ * (`createSchemaPatternTester`). They give the user immediate feedback per
+ * field BEFORE the complete compiled schema validation runs - which
  * remains authoritative for cross-field rules (required combinations,
  * dependencies, unevaluatedProperties, ...). Cross-field feedback per
  * keystroke is rules.js territory (the `x-form` annotation).
@@ -19,8 +20,8 @@
 
 import {
   getStringLength,
-  createRegExp,
 } from '@jarenjs/core/string';
+import { createSchemaPatternTester } from '@jarenjs/validate/normalize';
 
 import {
   equalsDeep,
@@ -49,14 +50,15 @@ import {
  * @property {string} message - Human readable message (rendered through a catalog)
  */
 
-// Bounded LRU (`@jarenjs/core/cache`); `null` is the cached "invalid
-// pattern" verdict (the cache's miss sentinel is `undefined`, so a negative
-// result is a real entry).
-const regexCache = createBoundedCache(500);
-function getPattern(source) {
-  return regexCache.getOrCreate(source, (src) => {
+// Bounded LRU (`@jarenjs/core/cache`) of pattern testers, compiled as the
+// validator compiles `pattern` (an ECMA-262 source in Unicode mode); `null`
+// is the cached "invalid pattern" verdict (the cache's miss sentinel is
+// `undefined`, so a negative result is a real entry).
+const patternCache = createBoundedCache(500);
+function getPatternTester(source) {
+  return patternCache.getOrCreate(source, (src) => {
     try {
-      return createRegExp(src);
+      return createSchemaPatternTester(src) ?? null;
     }
     catch (_e) {
       return null;
@@ -143,8 +145,8 @@ export function validateField(field, value, catalog = undefined) {
         pushError(errors, catalog, 'maxLength', { limit: c.maxLength, len });
       }
       if (c.pattern !== undefined) {
-        const regex = getPattern(c.pattern);
-        if (regex != null && !regex.test(value)) {
+        const matches = getPatternTester(c.pattern);
+        if (matches != null && !matches(value)) {
           pushError(errors, catalog, 'pattern', { pattern: c.pattern });
         }
       }

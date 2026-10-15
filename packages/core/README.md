@@ -258,6 +258,13 @@ const t = compileMessageTemplate('must be {comparison} {limit}');
 t({ comparison: '>=', limit: 18 });   // 'must be >= 18'
 ```
 
+A parameter renders as `String(value)`, an object or array as its JSON, and
+`formatMessageValue` quotes a value a message names (a string keeps its
+quotes, so `""` stays visible). A BigInt, which JSON cannot spell, renders as
+its digits at any depth (`10n` as `10`, `[10n]` as `["10"]`). *Upgrade: a
+BigInt inside an object or array parameter, and any BigInt passed to
+`formatMessageValue`, used to throw `TypeError`.*
+
 ## Units, currency and finance
 
 - `convert` — pure, deterministic quantity conversion over a registry of affine dimensional units (`convert(1, 'nmi', 'km')` → `1.852`; dimensions include length, area, volume, mass, temperature, time, speed, pressure, energy, angle and more, with `unitsOf`/`dimensionOf` for discovery). Currency is rate-table based: rates come in as data, never from a network call inside this package. Reference in [docs/CONVERT.md](./docs/CONVERT.md).

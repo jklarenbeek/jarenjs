@@ -15,6 +15,9 @@
  *    document for an index past the end.
  * 5. A tuple slot the data does not hold yet has no node in the view model,
  *    yet its assert failed on `null` in the rule results and on submit.
+ * 6. A BigInt `const` or `enum` value threw while its message rendered.
+ * 7. A field `pattern` written `/source/flags` was read as a literal, so
+ *    `"/a/"` accepted `"a"` per keystroke where the validator refuses it.
  */
 
 import { describe, it } from 'node:test';
@@ -395,5 +398,41 @@ describe('forms - a tuple slot the data does not hold yet', () => {
     const grown = { pair: ['a', 'no'] };
     assert.strictEqual(evaluateFormRules(rules, grown, undefined, memo)['/pair/1'].errors.length, 1);
     assert.deepStrictEqual(evaluateFormRules(rules, short, undefined, memo), { '/pair/1': {} });
+  });
+});
+
+describe('a BigInt in a field constraint', () => {
+  it('renders as its digits in the const and enum messages', () => {
+    assert.strictEqual(renderFormsMessage(undefined, 'form/const', { constValue: 10n }), 'Must be 10');
+    assert.strictEqual(renderFormsMessage(undefined, 'form/enum', { enumValues: [10n, 'a'] }), 'Must be one of: 10, "a"');
+  });
+});
+
+describe('a field pattern', () => {
+  /**
+   * The field's per-keystroke verdict and the validator's, for one string.
+   * @param {string} pattern
+   * @param {string} value
+   */
+  const verdicts = (pattern, value) => {
+    const schema = { type: 'string', pattern };
+    const field = buildFormModel({ type: 'object', properties: { f: schema } }).children[0];
+    return [validateField(field, value).map((e) => e.msgid), new JarenValidator().compile(schema)(value)];
+  };
+
+  it('reads a string as an ECMA-262 source, as the validator does', () => {
+    assert.deepStrictEqual(verdicts('/a/', 'a'), [['form/pattern'], false]);
+    assert.deepStrictEqual(verdicts('/a/', 'x/a/y'), [[], true]);
+    assert.deepStrictEqual(verdicts('/a/gg', '/a/gg'), [[], true]);
+    assert.deepStrictEqual(verdicts('^\\p{Lu}', 'Ab'), [[], true]);
+    assert.deepStrictEqual(verdicts('^\\p{Lu}', 'ab'), [['form/pattern'], false]);
+    // a v-mode literal, no Unicode-mode source, still reads as the literal
+    assert.deepStrictEqual(verdicts('/[\\p{L}--[a-z]]/v', 'a'), [['form/pattern'], false]);
+    assert.deepStrictEqual(verdicts('/[\\p{L}--[a-z]]/v', 'A'), [[], true]);
+  });
+
+  it('asserts nothing per keystroke for a pattern that compiles neither way', () => {
+    const field = buildFormModel({ type: 'object', properties: { f: { type: 'string', pattern: '(' } } }).children[0];
+    assert.deepStrictEqual(validateField(field, 'a'), []);
   });
 });

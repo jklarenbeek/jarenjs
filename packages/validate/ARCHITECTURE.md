@@ -1214,6 +1214,7 @@ pair through a message catalog.
 - mark/rollback gives failed applicator branches (anyOf/oneOf/not/if) exact annotation-discarding semantics
 - The compile-time feature scan keeps schemas without unevaluated* keywords completely free of tracking overhead
 - A check over many members (items) gathers the stretch of the log since its mark into a set in one pass (`EvalLog.index`), so its cost grows with the instance rather than with the instance's square; a short stretch is still scanned per member, which is cheaper there
+- When errors are collected, the checks also run beside a failed sibling, and `properties`, `patternProperties`, `additionalProperties`, `items` and `prefixItems` log every member they matched, pass or fail (`annotatesFailedMembers`), so a member a sibling already reported is not reported again as unevaluated; such an entry only ever sits inside a schema that fails, or a branch an applicator rolls back
 
 ### 6. Dynamic Scope as Per-Anchor Stacks
 

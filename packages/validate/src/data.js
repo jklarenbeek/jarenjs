@@ -72,5 +72,5 @@ export function compileDataSchema(schemaObj, jsonSchema) {
     }
   }
 
-  return allValidatorsPass(validators);
+  return allValidatorsPass(validators, schemaObj.options.skipErrors);
 }

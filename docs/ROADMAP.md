@@ -94,23 +94,6 @@ delete it or fix it.
   still extends them even when nothing it can reach reads one. Following those
   needs every `$dynamicAnchor` the compilation can enter by that name, and the
   embedded resource's base.
-- [ ] **With the validation vocabulary off, `items` stops at `maxItems`** — a
-  metaschema whose `$vocabulary` omits validation turns `maxItems` into an
-  annotation, but the item loops still cut at it (`resolveLength` in
-  array.js): `{ $schema: <vocab-off meta>, maxItems: 1, items: {type:
-  'string'} }` accepts `['a', 5]` while the same schema without `maxItems`
-  rejects it.
-- [ ] **`items` asserts `type`/`required` under a metaschema that turns the
-  validation vocabulary off** — `compileItemValidator`'s type-only and
-  required-only fast paths ignore `vocabValidation`, unlike `properties` and
-  the schema compiler's own fast paths: `{items: {type: 'string'}}` rejects
-  `[5]`, `{properties: {a: {type: 'string'}}}` accepts `{a: 5}`, `{type:
-  'string'}` accepts `5`.
-- [ ] **An unknown `prefixItems` turns off `items: false`** — in a document
-  declaring 2019-09, `prefixItems` is an unknown keyword, yet
-  `compileArrayItemsBoolean` still skips `items: false` when it sees one: `{
-  $schema: 2019-09, prefixItems: [{}], items: false }` accepts `[1, 2]`;
-  without `prefixItems` it rejects.
 - [ ] **Compiling a deeply nested schema still recurses per level.** A schema
   nested 20,000 levels deep (`properties`, `items` or `allOf` chains, under
   any `$schema`) throws `RangeError` while it compiles: two passes recurse
@@ -136,32 +119,28 @@ delete it or fix it.
   the resolved value is the error's second meta argument (as `const`/`enum`
   now read it). Changing it changes a non-fallback message (an upgrade
   sentence).
-- [ ] **Collected errors stop at the first `$data` keyword that fails.**
-  `allValidatorsPass` (tools.js) returns at the first failing validator even
-  in collect mode, so `{ const: { $data: '1/w' }, minimum: { $data: '1/m' } }`
-  reports only `minimum`.
-- [ ] **`unevaluatedProperties` is silent beside a failed sibling.** `{
-  properties: { a: { type: 'string' } }, unevaluatedProperties: false }` on `{
-  a: 1, x: 1 }` collects only `type` at `/a`; `x` is not reported (the answer,
-  invalid, is right).
-- [ ] **An empty member name loses its name.** `required: ['']` on `{}`
-  renders "must have required properties" and `additionalProperties: false` on
-  `{ '': 1 }` "must NOT have additional properties" (the renderers test the
-  param by truthiness; the new keys test `!== undefined`).
-- [ ] **A BigInt in a schema value throws in the shared renderers.**
-  `formatMessageValue`/`formatTemplateParam` JSON-stringify, so forms'
-  `form/const` with `constValue: 10n` and `form/enum` with `[10n]` throw
-  `TypeError`, as does any template catalog entry `{allowedValues}` over a
-  nested BigInt; spelling BigInt in core would let validate's `quoteValue` and
-  locales' `formatSchemaValue` collapse into it.
+- [ ] **An empty member name loses its name in the locale packs.** The
+  eleven `@jarenjs/locales` packs test `missingProperty` and
+  `additionalProperty` by truthiness, so `required: ['']` on `{}` renders
+  the plural fallback ("muss die Pflichteigenschaften enthalten", ...)
+  where `messagesEn` now names `''`; the test is `!== undefined`, as their
+  `requiresDependency` already reads. The packs' `formatSchemaValue` is now
+  identical to `@jarenjs/core/message` `formatMessageValue` (BigInt as its
+  digits) and can collapse into it.
 - [ ] **A `v`-mode literal `pattern` is still read as a literal.** `pattern`,
-  `patternProperties` keys and the `regex` format read a string as an ECMA-262
-  source in Unicode mode, so `"/a/"` matches only text containing `/a/`; a
-  string that is no valid Unicode-mode source but compiles as a
-  `/source/flags` literal (`"/[\\p{L}--[a-z]]/v"`) still falls back to that
-  literal, because it compiled before. Closing it refuses such a schema when
-  it compiles (a minor), with an upgrade sentence that names the `v`-mode
-  spelling.
+  `patternProperties` keys, the `regex` format and `@jarenjs/forms`' field
+  `pattern` read a string as an ECMA-262 source in Unicode mode, so `"/a/"`
+  matches only text containing `/a/`; a string that is no valid Unicode-mode
+  source but compiles as a `/source/flags` literal (`"/[\\p{L}--[a-z]]/v"`)
+  still falls back to that literal, because it compiled before. Closing it
+  refuses such a schema when it compiles (a minor), with an upgrade sentence
+  that names the `v`-mode spelling.
+- [ ] **The normalizer reads `prefixItems` in a document that declares
+  2019-09.** `compileNormalizer` applies keywords without the declared
+  draft, so `{ $schema: 2019-09, prefixItems: [{ type: 'integer' }] }` with
+  `coerceTypes: true` turns `['5']` into `[5]`, while the validator ignores
+  `prefixItems` there and accepts `['5']` as is. The node compiler needs the
+  draft the anchor walk already tracks.
 - [ ] **`compileAsync` resolves a relative reference in a schema without `$id`
   against the default base.** `{ $ref: 'name.json' }` asks the loader for
   `https://github.com/jklarenbeek/name.json`, a URI the host never named.
@@ -218,15 +197,6 @@ establish registry publication or downstream acceptance.
   corpus in Chromium, Firefox and WebKit, with synthetic composition events,
   Firefox's automation input sequence, and synthetic composition during
   collection scroll and focused-row removal.
-
-## @jarenjs/forms
-
-- [ ] **Field `pattern` still reads `/source/flags` as a literal.**
-  `@jarenjs/forms` compiles a field's `pattern` through `@jarenjs/core`
-  `createRegExp`, so `{ "type": "string", "pattern": "/a/" }` accepts `"a"`
-  per keystroke while `@jarenjs/validate` reads the ECMA-262 source and
-  refuses it; the README promises both layers accept the same strings. Fix:
-  compile string patterns as Unicode-mode sources, as the validator does.
 
 ## @jarenjs/md
 

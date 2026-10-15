@@ -36,22 +36,6 @@ export {
 
 //#region English catalog
 
-/** A BigInt inside a value, which JSON cannot spell, as its digits. */
-const bigintDigits = (/** @type {string} */ _key, /** @type {unknown} */ value) =>
-  typeof value === 'bigint' ? value.toString() : value;
-
-/**
- * A schema value quoted for a message, as `formatMessageValue` quotes it,
- * except that a BigInt (a schema built in JavaScript may hold one) is
- * written as its digits instead of throwing.
- * @param {unknown} value - The value to quote
- * @returns {string}
- */
-function quoteValue(value) {
-  if (typeof value === 'bigint') return value.toString();
-  return typeof value === 'string' ? formatMessageValue(value) : String(JSON.stringify(value, bigintDigits));
-}
-
 /**
  * `dependentRequired`, and the array form of draft-07 `dependencies`: the
  * present property and the first dependency it misses.
@@ -74,7 +58,7 @@ export const messagesEn = {
   type: (p) => p.types
     ? `must be one of the following types: ${p.types.join(', ')}`
     : `must be ${p.type === 'integer' ? 'an' : 'a'} ${p.type}`,
-  required: (p) => p.missingProperty
+  required: (p) => p.missingProperty !== undefined
     ? `must have required property '${p.missingProperty}'`
     : 'must have required properties',
   minimum: 'must be {comparison} {limit}',
@@ -85,7 +69,7 @@ export const messagesEn = {
   minLength: 'must NOT have fewer than {limit} characters',
   maxLength: 'must NOT have more than {limit} characters',
   pattern: 'must match pattern "{pattern}"',
-  additionalProperties: (p) => p.additionalProperty
+  additionalProperties: (p) => p.additionalProperty !== undefined
     ? `must NOT have additional property '${p.additionalProperty}'`
     : 'must NOT have additional properties',
   minProperties: 'must NOT have fewer than {limit} properties',
@@ -105,10 +89,10 @@ export const messagesEn = {
   else: 'must match "else" schema',
   'false schema': 'boolean schema false is always invalid',
   const: (p) => p.allowedValue !== undefined
-    ? `must be equal to constant ${quoteValue(p.allowedValue)}`
+    ? `must be equal to constant ${formatMessageValue(p.allowedValue)}`
     : 'must be equal to constant',
   enum: (p) => Array.isArray(p.allowedValues)
-    ? `must be equal to one of the allowed values: ${p.allowedValues.map(quoteValue).join(', ')}`
+    ? `must be equal to one of the allowed values: ${p.allowedValues.map(formatMessageValue).join(', ')}`
     : 'must be equal to one of the allowed values',
   dependentRequired: requiresDependency,
   dependencies: requiresDependency,

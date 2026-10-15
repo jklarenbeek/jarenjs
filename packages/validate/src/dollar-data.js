@@ -177,7 +177,7 @@ export function compileDollarDataSchema(schemaObj, jsonSchema) {
     if (validator) validators.push(validator);
   }
 
-  return allValidatorsPass(validators);
+  return allValidatorsPass(validators, schemaObj.options.skipErrors);
 }
 
 export function isDollarDataReference(jsonSchema) {

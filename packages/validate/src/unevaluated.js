@@ -177,6 +177,10 @@ export function wrapUnevaluated(schemaObj, jsonSchema, validator) {
   const root = schemaObj.root;
   if (!root.usesUnevaluated) return validator;
   if (jsonSchema == null || typeof jsonSchema !== 'object') return validator;
+  // unevaluatedProperties/unevaluatedItems only exist since draft 2019-09; a
+  // document that declares an older draft via $schema treats them as
+  // unknown keywords.
+  if (schemaObj.declaredDraft != null && schemaObj.declaredDraft < 2019) return validator;
 
   const unevalProps = compileUnevaluatedProperties(schemaObj, jsonSchema);
   const unevalItems = compileUnevaluatedItems(schemaObj, jsonSchema);
@@ -186,11 +190,15 @@ export function wrapUnevaluated(schemaObj, jsonSchema, validator) {
   return function validateUnevaluatedSchema(data, dataPath, dataRoot, dataKey) {
     const log = root.evalLog;
     const mark = log.mark();
-    // The sibling result IS a precondition: unevaluated* reads annotations
-    // that a failed sibling may never have produced. But unevaluatedProperties
-    // and unevaluatedItems are independent of each other.
-    if (validator(data, dataPath, dataRoot, dataKey) === false) return false;
-    let valid = unevalProps == null || unevalProps(data, dataPath, dataRoot, mark) !== false;
+    // A failed sibling decides the answer. When errors are collected the
+    // checks still run, so a member nothing evaluated is reported beside the
+    // sibling's own fault: the siblings log every member they matched, pass
+    // or fail, so a member they already reported is not named twice.
+    // unevaluatedProperties and unevaluatedItems are independent of each
+    // other.
+    let valid = validator(data, dataPath, dataRoot, dataKey) !== false;
+    if (stopAtFirst && !valid) return false;
+    if (unevalProps != null && unevalProps(data, dataPath, dataRoot, mark) === false) valid = false;
     if (stopAtFirst && !valid) return false;
     if (unevalItems != null && unevalItems(data, dataPath, dataRoot, mark) === false) valid = false;
     return valid;

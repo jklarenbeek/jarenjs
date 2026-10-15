@@ -43,6 +43,10 @@ import {
 } from './schema-keywords.js';
 import { createSchemaPatternTester } from './string.js';
 
+// The validator's reading of a `pattern` string, for a consumer that checks
+// one without compiling a schema (a form field, per keystroke).
+export { createSchemaPatternTester };
+
 const hasOwn = Object.hasOwn;
 
 /**

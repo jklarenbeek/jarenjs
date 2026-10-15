@@ -34,6 +34,23 @@ describe('formatMessageValue', function () {
     assert.equal(formatMessageValue([1, 2]), '[1,2]');
     assert.equal(formatMessageValue({ a: 1 }), '{"a":1}');
   });
+
+  it('writes a BigInt, which JSON cannot spell, as its digits (a JSON string inside a container)', function () {
+    assert.equal(formatMessageValue(10n), '10');
+    assert.equal(formatMessageValue([10n, 'a']), '["10","a"]');
+    assert.equal(formatMessageValue({ a: { b: -2n } }), '{"a":{"b":"-2"}}');
+    assert.equal(formatMessageValue(undefined), 'undefined');
+  });
+});
+
+describe('a BigInt in a rendered parameter', function () {
+  it('renders as its digits at any depth', function () {
+    assert.equal(formatTemplateParam(10n), '10');
+    assert.equal(formatTemplateParam([10n]), '["10"]');
+    assert.equal(formatTemplateParam({ a: [1n, 2] }), '{"a":["1",2]}');
+    const render = compileMessageTemplate('must be one of {allowedValues}');
+    assert.equal(render({ allowedValues: [[10n], 'x'] }), 'must be one of [["10"],"x"]');
+  });
 });
 
 describe('compileMessageTemplate', function () {

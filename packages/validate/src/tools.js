@@ -471,6 +471,21 @@ export class EvalLog {
 }
 
 /**
+ * Whether an applicator logs a member it matched even when the member's
+ * subschema fails. When errors are collected, `unevaluatedProperties` and
+ * `unevaluatedItems` still run beside a failed sibling, and the member the
+ * sibling matched (and already reported) must not be reported again as
+ * unevaluated. The entry is harmless to the answer: a failing subschema
+ * fails the schema that logged it, and every applicator that discards a
+ * failed branch (`anyOf`, `oneOf`, `not`, a failed `if`) rolls the log back.
+ * @param {{ options: { skipErrors: boolean } }} schemaObj
+ * @returns {boolean}
+ */
+export function annotatesFailedMembers(schemaObj) {
+  return !schemaObj.options.skipErrors;
+}
+
+/**
  * Combine INDEPENDENT keyword validators without short-circuiting.
  *
  * `a(...) && b(...)` is the right composition in boolean mode: the answer is
@@ -498,19 +513,24 @@ export function combineIndependent(validators) {
 }
 
 /**
- * Compose validators that must all pass, stopping at the first that does
- * not: `undefined` when there are none, the one validator itself when
- * there is one, so the common single-keyword case adds no wrapper.
+ * Compose independent keyword validators that must all pass: `undefined`
+ * when there are none, the one validator itself when there is one, so the
+ * common single-keyword case adds no wrapper. In boolean mode the
+ * composition stops at the first failure; when errors are collected it
+ * runs every validator ({@link combineIndependent}), so each failing
+ * keyword reports its own error.
  * @param {Function[]} validators - The validators, in evaluation order
+ * @param {boolean} stopAtFirst - Whether to stop at the first failure (the `skipErrors` option)
  * @returns {Function|undefined} The composed validator, or undefined
  */
-export function allValidatorsPass(validators) {
+export function allValidatorsPass(validators, stopAtFirst) {
   if (validators.length === 0) {
     return undefined;
   }
   if (validators.length === 1) {
     return validators[0];
   }
+  if (!stopAtFirst) return combineIndependent(validators);
   return function validateAll(data, dataPath, dataRoot) {
     for (let i = 0; i < validators.length; i++) {
       if (!validators[i](data, dataPath, dataRoot)) {

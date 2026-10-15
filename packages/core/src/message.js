@@ -19,28 +19,42 @@ import { setObjectMember } from './object.js';
  */
 
 /**
+ * `JSON.stringify` replacer for a value a message quotes: a BigInt (a
+ * schema or a field built in JavaScript may hold one), which JSON cannot
+ * spell, is written as its digits.
+ * @param {string} _key
+ * @param {unknown} value
+ * @returns {unknown}
+ */
+function bigintDigits(_key, value) {
+  return typeof value === 'bigint' ? value.toString() : value;
+}
+
+/**
  * Render one interpolated parameter: `String(v)` for primitives,
- * `JSON.stringify(v)` for objects and arrays.
+ * `JSON.stringify(v)` for objects and arrays, a BigInt at any depth as its
+ * digits.
  *
  * @param {unknown} value - The parameter value
  * @returns {string} The rendered value
  */
 export function formatTemplateParam(value) {
   return (value !== null && typeof value === 'object')
-    ? JSON.stringify(value)
+    ? JSON.stringify(value, bigintDigits)
     : String(value);
 }
 
 /**
  * Render a JSON value for quotation inside a message: strings keep their
  * quotes so an empty or space-padded value is visible, everything else is
- * JSON.
+ * JSON, a BigInt at any depth as its digits (`10n` renders `10`).
  *
  * @param {unknown} value - The value to render
  * @returns {string}
  */
 export function formatMessageValue(value) {
-  return typeof value === 'string' ? `"${value}"` : JSON.stringify(value);
+  if (typeof value === 'string') return `"${value}"`;
+  return typeof value === 'bigint' ? value.toString() : String(JSON.stringify(value, bigintDigits));
 }
 
 /**

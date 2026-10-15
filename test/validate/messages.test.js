@@ -160,6 +160,9 @@ describe('messagesEn', () => {
     assert.strictEqual(en.required({}), 'must have required properties');
     assert.strictEqual(en.additionalProperties({ additionalProperty: 'x' }), "must NOT have additional property 'x'");
     assert.strictEqual(en.additionalProperties({}), 'must NOT have additional properties');
+    // an empty member name is a name
+    assert.strictEqual(en.required({ missingProperty: '' }), "must have required property ''");
+    assert.strictEqual(en.additionalProperties({ additionalProperty: '' }), "must NOT have additional property ''");
     assert.strictEqual(en.$query({}), "must satisfy the '$query' assertion");
     assert.strictEqual(en.$query({ code: 'JQ2003', docPath: '/a' }), "'$query' assertion raised JQ2003 at '/a'");
     assert.strictEqual(en.JQ2003({ code: 'JQ2003', docPath: '/a' }), "'$query' assertion raised JQ2003 at '/a'");
@@ -185,5 +188,24 @@ describe('ValidationError', () => {
   it('defaults msgid to the keyword', () => {
     const error = new ValidationError({ keyword: 'pattern', instancePath: '', schemaPath: '', params: {} });
     assert.strictEqual(error.msgid, 'pattern');
+  });
+});
+
+describe('an empty member name in a collected error', () => {
+  it('is named in the message', () => {
+    const collecting = new JarenValidator({ collectErrors: true });
+    assert.deepStrictEqual(collecting.compile({ required: [''] })({}).errors.map((e) => e.message),
+      ["must have required property ''"]);
+    assert.deepStrictEqual(collecting.compile({ additionalProperties: false })({ '': 1 }).errors.map((e) => e.message),
+      ["must NOT have additional property ''"]);
+  });
+});
+
+describe('a BigInt in a schema value', () => {
+  it('renders as its digits in const and enum messages', () => {
+    const en = compileMessageCatalog(messagesEn);
+    assert.strictEqual(en.const({ allowedValue: 10n }), 'must be equal to constant 10');
+    assert.strictEqual(en.const({ allowedValue: { n: 10n } }), 'must be equal to constant {"n":"10"}');
+    assert.strictEqual(en.enum({ allowedValues: [10n, 'a', [1n]] }), 'must be equal to one of the allowed values: 10, "a", ["1"]');
   });
 });

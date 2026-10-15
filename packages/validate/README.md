@@ -75,6 +75,13 @@ accepted `"a"` and `"/a/i"` accepted `"A"`; drop the slashes and spell a
 flag inside the source (`"[Aa]"` for case-insensitivity). `params.pattern`
 used to carry the compiled source, with every `/` escaped as `\/`.*
 
+The same reading is exported as `createSchemaPatternTester(pattern)` from
+`@jarenjs/validate/normalize`: it
+returns a repeatable `(text) => boolean` predicate (`undefined` for no
+pattern) and throws a `SyntaxError` for a string that compiles neither way.
+`@jarenjs/forms` compiles a field's `pattern` through it, so a form field and
+the validator accept the same strings.
+
 <details>
 <summary>🔥 For a complete list of supported keywords and their implementation status, click here</summary>
 
@@ -318,7 +325,7 @@ See also:
 
 ### 👉 Vocabularies and cross-draft references
 
-A schema's `$schema` declaration is honored per document: referenced documents that declare a different draft are processed with that draft's keyword set (a draft-07 document ignores `dependentRequired`; a 2019-09 document ignores `prefixItems`). Custom metaschemas with `$vocabulary` are respected — omitting the validation vocabulary turns validation keywords into annotations, and declaring `format-assertion` turns format assertion on.
+A schema's `$schema` declaration is honored per document: referenced documents that declare a different draft are processed with that draft's keyword set (a draft-07 document ignores `dependentRequired`, `dependentSchemas`, `minContains`, `maxContains`, `unevaluatedProperties` and `unevaluatedItems`; a 2019-09 or draft-07 document ignores `prefixItems`, so its `items: false` forbids every item). A document that declares no `$schema` reads every keyword. Custom metaschemas with `$vocabulary` are respected — omitting the validation vocabulary turns validation keywords into annotations (`type` and `required` inside `items`, `minContains`/`maxContains` beside `contains`, and `maxItems`, which then no longer bounds the items `items` and `contains` look at), and declaring `format-assertion` turns format assertion on. *Upgrade: under a metaschema without the validation vocabulary, `{ "items": { "type": "string" } }` used to reject `[5]`, `minContains`/`maxContains` counted, and `{ "maxItems": 1, "items": { "properties": { "x": false } } }` accepted `[{}, { "x": 1 }]` because it stopped at the first item; a 2019-09 or draft-07 document with `prefixItems` beside `items: false` accepted any array, and a draft-07 document asserted `minContains`, `maxContains`, `unevaluatedProperties` and `unevaluatedItems`.*
 
 Modern reference chains preserve supported sibling assertions, including
 dependent schemas and dynamic references. Draft-07 retains its reference-only
@@ -613,6 +620,24 @@ what its subschema finds wrong in a member sits at the member (`type` at `/q`) b
 the keyword's own failure at the holder (`unevaluatedProperties` at `""`). A consumer that
 wants the member's location joins the holder's `instancePath` and the member from
 `params` (as one pointer token: `/` and `~` escaped). *Upgrade: `params` used to be empty, so two failing members read alike.*
+
+Collected errors carry what every keyword found. Beside a failed sibling,
+`unevaluatedProperties` and `unevaluatedItems` still report the members and
+items nothing evaluated (`{ "properties": { "a": { "type": "string" } },
+"unevaluatedProperties": false }` on `{ "a": 1, "x": 1 }` reports `type` at
+`/a` and `unevaluatedProperties` naming `x`); a member a sibling matched counts
+as evaluated even when its subschema failed, so it is reported once, by that
+sibling. Every failing `$data` and `data` keyword reports its own error, and
+the item walk reports failing items past `maxItems`. The recording output
+formats (`basic`, `detailed`, `verbose`, `list`, `hierarchical`) record the
+same units. The answer is the boolean mode answer in every case, and `flag`
+output is unchanged. *Upgrade: a failed sibling silenced
+`unevaluatedProperties`/`unevaluatedItems`, collection stopped at the first
+failing `$data`/`data` keyword, and the item walk stopped at `maxItems` (where
+a `contains` that only an item past it matched also reported a `contains`
+failure), so the collected error lists and the output formats' error units,
+and their counts, grow; `verbose` used to list such an `unevaluatedProperties`,
+`unevaluatedItems` or `$data` keyword unit as passing.*
 
 A reference from `items`, `prefixItems` or a tuple form back to a schema that is
 still being compiled (`{ "type": "array", "items": { "$ref": "#" } }`, or a cycle through
