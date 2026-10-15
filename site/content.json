@@ -1,6 +1,6 @@
 {
-  "generated": "2026-10-15T01:21:50+02:00",
-  "commit": "e9288e6de70cd3cdd1560290f61261729b67951b",
+  "generated": "2026-10-15T05:44:16+02:00",
+  "commit": "48b37d4fdb96a00bb60b232fbd4157ba579aef20",
   "packages": [
     {
       "name": "@jarenjs/core",
@@ -5876,7 +5876,7 @@
       "name": "@jarenjs/play",
       "card": {
         "title": "Play",
-        "blurb": "The engine playground: pick a JSON engine — JSON Schema, JSONPath, JSON Pointer, JSON Patch, query, JSLT, JTLT, JOSL, CSV, Markdown, Mermaid, Contract, Emit — feed it an input and one or more datasets from a curated example library, and watch it run. Understand an engine standalone before composing it in the Studio. The engine is headless; the component is the playground UI.",
+        "blurb": "The engine playground: pick a JSON engine — JSON Schema, JSONPath, JSON Pointer, JSON Patch, query, XQuery, LINQ, JSLT, JTLT, JOSL, JSONX, CSV, Markdown, MDX, Mermaid, Charts, Contract, Emit, the core kernels — feed it an input and one or more datasets from a curated example library, and watch it run. Understand an engine standalone before composing it in the Studio. The engine is headless; the component is the playground UI.",
         "perf": null
       },
       "engines": [],
@@ -5886,7 +5886,7 @@
           "package": "@jarenjs/play",
           "card": {
             "title": "Play",
-            "blurb": "The engine playground: pick a JSON engine — JSON Schema, JSONPath, JSON Pointer, JSON Patch, query, JSLT, JTLT, JOSL, CSV, Markdown, Mermaid, Contract, Emit — feed it an input and one or more datasets from a curated example library, and watch it run. Understand an engine standalone before composing it in the Studio. The engine is headless; the component is the playground UI."
+            "blurb": "The engine playground: pick a JSON engine — JSON Schema, JSONPath, JSON Pointer, JSON Patch, query, XQuery, LINQ, JSLT, JTLT, JOSL, JSONX, CSV, Markdown, MDX, Mermaid, Charts, Contract, Emit, the core kernels — feed it an input and one or more datasets from a curated example library, and watch it run. Understand an engine standalone before composing it in the Studio. The engine is headless; the component is the playground UI."
           }
         },
         "ast": [
@@ -6185,7 +6185,7 @@
         ],
         "meta": {
           "sourceUrl": "components/play/site.md",
-          "hash": "1ypltpg",
+          "hash": "i4dm10",
           "frontmatterLang": "yaml"
         }
       },
