@@ -227,8 +227,9 @@ played by the provider seam below.
   NAVIGATE: `p.author.email` and `u.posts.all().count()` are hops,
   lowered at capture to the correlated phrases the engine and the store
   both run, so the document never carries a relation name and
-  `explain().hops` lists what was navigated; a many-to-many hop is
-  `JL0105` until the join table is a queryable root. An asynchronous provider is
+  `explain().hops` lists what was navigated; a many-to-many hop lowers
+  through the join table's root, and `client.entities.User.memberships.labels`
+  queries that root (DB-CLIENT §2.8). An asynchronous provider is
   `fromAsync`'s: the document arrives whole and `execute` may answer a
   promise. `mapAsync` splits a provider chain into a pushed prefix and a
   local residual, and `explain()` shows the split.

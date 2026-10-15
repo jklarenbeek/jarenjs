@@ -13,8 +13,13 @@
  * collection with the same chain start and `live`, and `execute`,
  * `query` and `explain` taking a chain as well as a document.
  * `explain()` without a document explains the empty chain; with one it is
- * the store's explanation of that document.
+ * the store's explanation of that document. A join handle is a many-to-many
+ * join table's read-only query root, reached through the relation member
+ * that names it (`memberships`), with the same chain start and document
+ * members and `live`.
  */
+
+import { STORE_SOURCE } from '@jarenjs/db';
 
 import { fromAsync, AsyncSequence } from '../async.js';
 import { Graph } from './include.js';
@@ -82,17 +87,66 @@ function acceptChains(provider, members, thrown) {
 }
 
 /**
+ * A handle's `live`: a chain over the handle's own source (the whole source
+ * when none is given) or a document, registered through the store's live
+ * registration as it stands at the call; a chain over another source is
+ * `JL0005` (`source.js`).
+ * @param {any} provider - the store's handle the chain is built over
+ * @param {() => any} registration - the store member that registers it
+ */
+const liveOver = (provider, registration) => (source = fromAsync(provider), options = undefined) =>
+  registerLive(registration(), source, options, onlyOwnSource(provider, 'live'));
+
+/**
+ * The read-only handle over one many-to-many join table, the query root
+ * `$.<JoinTable>[*]` (MODEL-FORMAT §10.7): the chain start over its rows,
+ * `execute` and `explain` taking a chain as well as a document, the item
+ * `cursor` over a document, and `live`. A join row is its two key columns
+ * (`<Entity>_key`), so the handle has no point read, no unit of work and
+ * no relation table — a membership is still written through
+ * `link`/`unlink`. Its provider is
+ * the store's entity document surface under the join table's own root and
+ * source, and it carries the entity sets' `scope`, so a chain over it and
+ * a chain over an entity join in one document.
+ * @param {any} store - the opened store (or a transaction's view of it)
+ * @param {string} name - the join table
+ * @param {string} entity - an entity the join table relates: its set lends
+ *   the document members, which take any document over the store's roots
+ * @returns {any}
+ */
+export function createJoinHandle(store, name, entity) {
+  const set = store.entity(entity);
+  const provider = Object.freeze({
+    execute: set.execute,
+    cursor: set.cursor,
+    explain: set.explain,
+    root: `$.${name}[*]`,
+    [STORE_SOURCE]: Object.freeze({ kind: 'join table', name, store: set[STORE_SOURCE].store }),
+    scope: set.scope,
+  });
+  /** @type {Record<string | symbol, any>} */
+  const members = { ...provider };
+  chainStart(provider, members);
+  acceptChains(provider, members, ['execute']);
+  members.live = liveOver(provider, () => store.live);
+  return Object.freeze(members);
+}
+
+/**
  * The handle over one entity set.
  * @param {any} store - the opened store
  * @param {string} name - the entity
+ * @param {Readonly<Record<string, any>>} memberships - the join handle of
+ *   each many-to-many member, by member name
  * @returns {any}
  */
-export function createEntityHandle(store, name) {
+export function createEntityHandle(store, name, memberships) {
   const set = store.entity(name);
   /** @type {Record<string | symbol, any>} */
   const members = { ...set };
   chainStart(set, members);
   acceptChains(set, members, ['execute']);
+  members.memberships = memberships;
   members.include = (pick, spec) => new Graph(set, name).include(pick, spec);
   // the graph with nothing included: the root clauses, the keyset and
   // the page over the rows alone
@@ -106,8 +160,7 @@ export function createEntityHandle(store, name) {
     requireMembership(set.relations, name, member, 'unlink');
     set.unlink(own, member, target);
   };
-  members.live = (source = fromAsync(set), options = undefined) =>
-    registerLive(store.live, source, options, onlyOwnSource(set, 'live'));
+  members.live = liveOver(set, () => store.live);
   return Object.freeze(members);
 }
 
@@ -130,7 +183,6 @@ export function createCollectionHandle(store, name) {
   const quantifier = members.all;
   members.all = (/** @type {any} */ arg, /** @type {any[]} */ ...rest) =>
     (typeof arg === 'function' ? quantifier(arg, ...rest) : collection.all(arg));
-  members.live = (source = fromAsync(collection), options = undefined) =>
-    registerLive(collection.live, source, options, onlyOwnSource(collection, 'live'));
+  members.live = liveOver(collection, () => collection.live);
   return Object.freeze(members);
 }

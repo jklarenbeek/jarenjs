@@ -84,8 +84,8 @@ name a caller writes is named — under the title that describes what it
 holds.
 
 The exports include the store door and its helpers. The door hands back a client of frozen handles, each of
-which is the store's own set plus the chain plus three additions. §2.1
-divides the responsibilities; §2.2 to §2.7 enumerate the surface.
+which is the store's own set plus the chain plus the client's own members. §2.1
+divides the responsibilities; §2.2 to §2.8 enumerate the surface.
 
 ### 2.1 What is the store's and what is the client's
 
@@ -164,7 +164,8 @@ reconstruct the configuration by reading this paragraph.
 ### 2.3 The entity handle
 
 A handle has no Proxy. It combines the store's entity set, the asynchronous
-chain, and the client's graph, live and range adapters. `explain` is shared
+chain, the client's graph, live and range adapters, and the join handles of
+its many-to-many members (§2.8). `explain` is shared
 and resolved below.
 
 | Group | Members |
@@ -174,7 +175,7 @@ and resolved below.
 | the provider seam | `root` `scope` `relations` |
 | membership | `link` `unlink` — the store's, behind §4.2's check |
 | the chain | every `AsyncSequence` operator and terminal: `where` `select` `selectMany` `orderBy` `orderByDescending` `thenBy` `thenByDescending` `groupBy` `aggregate` `join` `groupJoin` `skip` `take` `distinct` `reverse` `concat` `defaultIfEmpty` `ofType` `cast` `zip` `mapAsync` `params` `toDocument` `toArray` `first` `firstOrDefault` `single` `singleOrDefault` `last` `lastOrDefault` `elementAt` `elementAtOrDefault` `count` `sum` `average` `min` `max` `any` `all`, and `Symbol.asyncIterator` |
-| the client's own | `include` (§2.4), `graph()` (a graph with nothing included, §2.4), `live`, and `range(spec, options)` |
+| the client's own | `include` (§2.4), `graph()` (a graph with nothing included, §2.4), `live`, `range(spec, options)`, and `memberships` (the join handle of each many-to-many member, §2.8) |
 | in both | `explain` |
 
 **`explain` is the one name the store's set and the chain both carry, and
@@ -402,6 +403,54 @@ Source resets invalidate requests; `refresh()` rebuilds the bounded range under
 the new source revision. Disposal drains the range and unsubscribes; set
 `disposeSource` when the range also owns its source.
 
+### 2.8 The join handle
+
+A many-to-many join table is a read-only query root of the store
+([MODEL-FORMAT §10.7](../../db/docs/MODEL-FORMAT.md)), and the client
+reaches it through the member that names it:
+`client.entities.User.memberships.labels` is the handle over the join
+table `labels` writes through. Both members of one edge hold the same
+handle — `client.entities.Label.memberships.users` is that object too —
+so a join table has one root and one source, whichever side reaches it.
+`memberships` holds exactly the many-to-many members (an entity with none
+has an empty record), and a transaction client's handles carry their own.
+
+| Group | Members |
+|---|---|
+| the provider seam | `root` (`'$.Label_User[*]'`), `scope` — the entity sets' own, so a chain over the join table and a chain over an entity join in one document |
+| the store's reads | `execute` and `explain`, each taking a chain built over this handle or a document; `cursor` over a document |
+| the chain | every `AsyncSequence` operator and terminal, as on an entity handle (§2.3) |
+| the client's own | `live`: a chain over the join table (all its rows when none is given), maintained like an entity root's |
+
+A join row is the table's two key columns and nothing else —
+`{ Label_key, User_key }`, each named `<Entity>_key` and typed as the key
+it references — so the handle has no point read, no unit of work and no
+relation table: a membership is still written through `link`/`unlink`
+and `saveChanges()`. A chain built over another source handed to it is
+`JL0005` (`execute() on join table 'Label_User' was handed a chain built
+over entity 'User'`), as on every handle.
+
+The questions it answers, each one document and each one native
+statement on SQLite and PostgreSQL ([§3.5](#35-the-join-table-as-a-root)
+runs them):
+
+| Question | Chain |
+|---|---|
+| which labels does `u1` hold | `labels.where((j) => j.User_key.eq('u1')).select((j) => j.Label_key)` (reads the table: no index on `User_key`, below) |
+| how many users hold each label | `client.entities.Label.groupJoin(fromAsync(labels), (l) => l.name, (j) => j.Label_key, (l, g) => ({ label: l.name, users: g.count() }))` |
+| which pairs carry a blue label | `labels.join(fromAsync(client.entities.Label), (j) => j.Label_key, (l) => l.name, (j, l) => ({ j, l })).where((x) => x.l.color.eq('blue'))` |
+| which users hold no label | the document `{ "$for": { "u": "$.User[*]" }, "$where": { "$not": { "$exists": { "$for": { "j": "$.Label_User[*]" }, "$where": { "$eq": ["$j.User_key", "$u.id"] }, "$return": "$j" } } }, "$return": "$u.id" }`, handed to `labels.execute` |
+
+(`labels` is `client.entities.User.memberships.labels`.) The last row is a
+document because its chain spellings do not lower to one statement: a
+`where` after a `groupJoin`, and the hop `u.labels.all().exists()`, both
+answer right and run on the engine's set path, which `explain()` names.
+
+The table's primary key is its two columns in sorted entity order
+(`Label_key`, then `User_key`), so a filter on the leading column seeks
+it on both dialects; a filter on the other column has no index to seek,
+because the store declares no second index on a join table.
+
 ## 3. Worked examples
 
 The client's examples are not builder-to-document pairs, and this is
@@ -413,11 +462,10 @@ store, not one it authored. Every pair is executed by
 fences were run through `explain()` and `toArray()` against a real
 `node:sqlite` store before they were written down.
 
-A chain over a handle cannot be a pair, because the chain's document is
-not read by `schemaOf`; §2.3 shows one as prose with its assertion cited
-from `test/linq/client.test.js`, and §2.4 does the same for an
-`explain()`. Four pairs is what the graph surface supports honestly, and
-four is what §3 carries.
+The first four pairs are graphs; the fifth exports a chain, and its `json`
+fence is the chain's query document (`toDocument()`). §2.3 shows a chain
+over an entity handle as prose with its assertion cited from
+`test/linq/client.test.js`, and §2.4 does the same for an `explain()`.
 
 Each fence opens its own store over the smallest model that carries the
 relations it needs, so a reader can run any one of them alone — but they
@@ -426,7 +474,10 @@ declares: users, their posts, the labels a post carries and the comments
 under it. Read in order, the four are one reading session against it: an
 include with a spec and a counted membership, then the root clauses and a
 cursor, then every way to spell an ordering, then a bracketed pick with a
-two-level include.
+two-level include. The fifth asks about the labels themselves — which
+user–label pairs there are, through the join table as a root — over the
+same users and labels, with a `color` on each label and the inverse
+`users` member declared.
 
 ### 3.1 An include with a spec, and a counted membership
 
@@ -637,6 +688,61 @@ it selects `set.asNoTracking().load(spec)` over `set.load(spec)`, which
 is a choice about the unit of work rather than about the query. Two
 graphs that differ only in it are one document.
 
+### 3.5 The join table as a root
+
+```js
+import { open } from '@jarenjs/linq/db';
+import { fromAsync } from '@jarenjs/linq';
+import * as m from '@jarenjs/linq/model';
+import { nodeDriver } from '@jarenjs/db/node';
+
+const User = m.object({ id: m.string().key(), labels: m.rel.belongsToMany('Label') });
+const Label = m.object({ name: m.string().key(), color: m.string(), users: m.rel.belongsToMany('User') });
+const client = await open(m.defineModel({ entities: { User, Label } }), { driver: nodeDriver() });
+await client.transaction(async (tx) => {
+  for (const id of ['u1', 'u2', 'u3']) await tx.entities.User.create({ id });
+  for (const [name, color] of [['admin', 'red'], ['dev', 'blue'], ['ops', 'green']]) {
+    await tx.entities.Label.create({ name, color });
+  }
+});
+client.entities.User.link('u1', 'labels', 'admin');
+client.entities.User.link('u1', 'labels', 'dev');
+client.entities.User.link('u2', 'labels', 'dev');
+await client.saveChanges();
+
+// the join table Label_User is the chain's root: the pairs whose label is blue,
+// joined to Label in one native statement. toArray() answers
+// [{ user: 'u1', label: 'dev' }, { user: 'u2', label: 'dev' }]
+export const blue = client.entities.User.memberships.labels
+  .join(fromAsync(client.entities.Label), (j) => j.Label_key, (l) => l.name, (j, l) => ({ j, l }))
+  .where((x) => x.l.color.eq('blue'))
+  .select((x) => ({ user: x.j.User_key, label: x.l.name }));
+```
+```json
+{
+  "$for": {
+    "it": [
+      {
+        "$for": { "it": "$.Label_User[*]", "it2": "$.Label[*]" },
+        "$where": { "$eq": ["$it.Label_key", "$it2.name"] },
+        "$return": { "j": "$it", "l": "$it2" }
+      }
+    ]
+  },
+  "$where": { "$eq": ["$it.l.color", "blue"] },
+  "$return": { "user": "$it.j.User_key", "label": "$it.l.name" }
+}
+```
+
+The same store answers the other membership questions of §2.8 from the
+same root: `client.entities.Label.groupJoin(fromAsync(client.entities.Label.memberships.users),
+(l) => l.name, (j) => j.Label_key, (l, g) => ({ label: l.name, users: g.count() }))`
+answers `[{ label: 'admin', users: 1 }, { label: 'dev', users: 2 },
+{ label: 'ops', users: 0 }]` — a label no one holds counts zero — and
+`client.entities.User.memberships.labels.where((j) => j.User_key.eq('u1'))
+.select((j) => j.Label_key)` answers `['admin', 'dev']`, each one
+statement.
+
 ## 4. Refusals
 
 The client raises these two `LinqBuildError` codes and no others —
@@ -770,6 +876,9 @@ const users = await client.entities.User
   .toArray();                                          // (User & { posts: Post[]; labels: number })[]
 client.entities.User.link('u1', 'labels', 'admin');    // member: the many-to-many members only
 client.entities.User.link('u1', 'posts', 1);           // does not compile — posts is oneToMany
+client.entities.User.memberships.labels                // JoinHandle<{ User_key: string; Label_key: string }>
+  .where((j) => j.User_key.eq('u1'));                  // j: the join row, its two key columns
+client.entities.User.memberships.posts;                // does not compile — posts has no join table
 client.entities.User.include((u) => u.email);          // does not compile — not a relation member
 const live: TypedLiveQuery<Post> = await client.live(client.entities.Post.where((p) => p.stars.ge(3)));
 open<EntityMetaMap>(json, { driver });                 // a JSON model with a named map
@@ -882,15 +991,15 @@ Three or more bindings the entity translator names a residual. Both are
 on [docs/ROADMAP.md](../../../docs/ROADMAP.md) under `@jarenjs/linq &
 @jarenjs/db`, "Federation merge strategy and spilling".
 
-**A many-to-many join table is not a queryable root in this version.**
-`u.labels` as a chain HOP is `JL0105` — the join table has no root to
-bind, so there is no phrase to lower to — and the way to read a
-membership is `include`: `client.entities.User.include((u) => u.labels)`
-loads the rows and `{ count: true }` counts them. A question ABOUT the
-membership ("which pairs were attached since Friday") is reachable only
-by loading and then asking in JavaScript. The change that closes all of
-it is one change, on [docs/ROADMAP.md](../../../docs/ROADMAP.md) under
-`@jarenjs/linq & @jarenjs/db`, "Join tables are not queryable roots".
+**A join row carries its two keys and nothing else.** The join table is a
+root (§2.8), so a question about the pairs — filtered, counted, joined to
+either entity — is one document; but the model declares no column on a
+join table, so a question about WHEN a pair was attached, or by whom, has
+nothing to read. A membership that carries data of its own is an entity
+of its own, with a one-to-many edge to each side. `u.labels` as a chain
+hop lowers through the join table (two links: the join row, then the
+label it names), and `include((u) => u.labels)` loads the rows or, with
+`{ count: true }`, counts them.
 
 **A chain split by a host callback has no document to register.**
 `mapAsync` runs a JavaScript function per row, so the chain after it is
@@ -1038,10 +1147,11 @@ never builds one; the migration between two of them is
   raw statements; a reporting query with three joins and a window
   function is a statement, not a chain, and pretending otherwise costs a
   residual nobody sees until it is slow.
-- **The relation is a membership you want to interrogate.** §6 says it
-  above: a join table is not a queryable root, so a question about the
-  pairs themselves is a load and then JavaScript. That is a real cost and
-  it is worth knowing before the model is shaped around it.
+- **The relation is a membership that carries data.** §6 says it above:
+  a join row is its two keys, so an attach time, a role or an ordering on
+  the pair is not a column of it. Model such a pair as an entity with two
+  one-to-many edges before the model is shaped around a many-to-many
+  member.
 
 ## 7. Cost
 

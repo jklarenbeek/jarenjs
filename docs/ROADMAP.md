@@ -468,14 +468,29 @@ what each does is its own documentation's job
   question to the engine. Wanted: either state that the window prunes before
   validation, or a probe over the rows outside it that costs less than the
   window saves.
-- [ ] **Join tables are not queryable roots.** A many-to-many join table has no
-  root to bind: `u.labels` as a chain hop is `JL0105`, and a membership is read
-  through `include` (`client.entities.User.include((u) => u.labels)` loads the
-  rows, `{ count: true }` counts them). A question about the membership itself
-  ("which pairs were attached since Friday") is reachable only by loading and
-  asking in JavaScript. Wanted: a root for a join table, so a membership can be
-  filtered, counted and joined in one document
-  ([DB-CLIENT §6](../packages/linq/docs/DB-CLIENT.md)).
+- [ ] **A join table carries no column beyond its two keys.** A many-to-many
+  join table is a read-only root (`$.<JoinTable>[*]`, MODEL-FORMAT §10.7;
+  `client.entities.User.memberships.labels`, DB-CLIENT §2.8), but the model
+  declares nothing else on it, so "which pairs were attached since Friday"
+  has no column to read; such a membership is an entity with two one-to-many
+  edges today. Wanted: columns declared on a `through` (an attach instant at
+  least), with their DDL, migration and typed join row.
+- [ ] **A join table's second key column has no index.** The primary key is
+  `(<A>_key, <B>_key)` in sorted entity order and no other index is declared,
+  so a filter or correlated count on `<B>_key` (a user's labels in
+  `Label_User`, the cascade from `User`) reads the whole table
+  (`SCAN Label_User` on SQLite). Wanted: an index on the second column — a
+  DDL change, so a minor with the previous release's stores proven to open,
+  plan and introspect as before.
+- [ ] **A many-to-many hop counted or tested for existence is not one
+  statement.** `u.labels.all().exists()` and `.count()` lower to two links
+  (the join row, then the target row), which the native translator refuses
+  ("a navigation hop translates only as one plain correlated FLWOR"), and a
+  `where` after `groupJoin` is a nested FLWOR, so "users without a label"
+  answers right on the set path; the document `$not $exists` over
+  `$.Label_User[*]` is native. Wanted: a hop read only for its count or
+  existence lowers through the join row alone (the foreign key guarantees
+  the target row).
 - [ ] **A non-JSON external compared through a variable is read as `{}`.** An
   external a comparison names directly (`$since`, `$ids[*]`, `$window.from` as
   an operand of `$eq $ne $lt $le $gt $ge`, or in the store profile's

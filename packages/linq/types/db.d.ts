@@ -16,12 +16,13 @@
 import type { AsyncSequence, AsyncExplanation, Expr, ExprBase, BoolExpr, OrderOptions } from './index.js';
 import type { ModelDocument, CollectionSpec, InferMeta } from './model.js';
 import type {
-  EntityMeta, MetaMap, TypedEntitySet, TypedStore, TypedLoadSpec, Loaded,
+  EntityMeta, MetaMap, TypedEntitySet, TypedStore, TypedLoadSpec, Loaded, MembershipMember,
 } from '@jarenjs/db/typed';
 import type {
   Collection, ExecuteOptions, LiveOptions, LiveQuery, LoadExplanation, OpenStoreOptions,
   SavepointController, SaveReport, StoreCapabilities, TransactionStore,
   EntityCursorOptions, QueryCursor, LoadContinuation, Page, IsolationLevel, AllOptions,
+  EntityScope, SequenceResult, ValueOrPromise,
 } from '@jarenjs/db';
 import type { JarenValidator } from '@jarenjs/validate';
 import type { Runtime } from '@jarenjs/core/runtime';
@@ -217,11 +218,53 @@ export interface Graph<E extends MetaMap<E>, M extends EntityMeta, S> {
   explain(): LoadExplanation | Promise<LoadExplanation>;
 }
 
+/** One row of a many-to-many join table (MODEL-FORMAT §10.7): exactly its
+ * two key columns, `<Entity>_key` for the entity `N` that declares member
+ * `K` and for the entity `K` relates it to, each typed as the key it
+ * references. A join row has no document of its own. */
+export type JoinRow<E extends MetaMap<E>, M extends EntityMeta, N extends string, K extends keyof M['relations']> = {
+  [P in `${N}_key` | `${M['relations'][K]['entity'] & string}_key`]: P extends `${N}_key`
+    ? M['key'] : E[M['relations'][K]['entity'] & keyof E]['key'];
+};
+
+/** The name an entity's metadata `M` stands under in the map `E`. */
+export type EntityNameOf<E extends MetaMap<E>, M extends EntityMeta> =
+  { [K in keyof E & string]: Equals<E[K], M> extends true ? K : never }[keyof E & string];
+type Equals<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true : false;
+
+/** The read-only handle over one many-to-many join table, its query root
+ * `$.<JoinTable>[*]` (MODEL-FORMAT §10.7): the chain start over its rows,
+ * `execute` and `explain` taking a chain (its document, its params as the
+ * externals; a chain over another source is `JL0005`) or a document, the
+ * item `cursor` over a document, and `live`. It shares the entity sets' `scope`, so a chain over
+ * it joins an entity chain in one document. There is no point read and no
+ * unit of work: a membership is written through `link`/`unlink`. */
+export type JoinHandle<T> = ChainStart<T> & {
+  /** The root expression the join rows are bound through (`$.<JoinTable>[*]`). */
+  readonly root: string;
+  /** The identity every entity set of the store shares. */
+  readonly scope: EntityScope;
+  execute<R = unknown>(source: AsyncSequence<any, any> | object, options?: ExecuteOptions): ValueOrPromise<SequenceResult<R>>;
+  /** A document as an item cursor: one row per pull, the statement released on `return()`. */
+  cursor<R = T>(document: unknown, options?: EntityCursorOptions): QueryCursor<R>;
+  explain(source: AsyncSequence<any, any> | object, options?: ExecuteOptions): Promise<unknown>;
+  /** A live query over a chain of this join table (all of its rows when
+   * none is given), through the store's entity-root registration. */
+  live<R = T>(source?: AsyncSequence<R, any> | object, options?: LiveOptions): Promise<TypedLiveQuery<R>>;
+};
+
 /** An entity handle: the typed entity set, the chain start, and the
  * client's own members. `link`/`unlink` are the typed set's — over
- * exactly the many-to-many members. */
-export type EntityHandle<E extends MetaMap<E>, M extends EntityMeta> =
+ * exactly the many-to-many members — and `memberships` holds the join
+ * handle of each of them. `N` is the entity's name, which names its key
+ * column in a join row: the client passes it, and left out it is the name
+ * whose metadata `M` is. */
+export type EntityHandle<E extends MetaMap<E>, M extends EntityMeta, N extends string = EntityNameOf<E, M>> =
   TypedEntitySet<E, M> & ChainStart<M['doc']> & {
+    /** The join table each many-to-many member writes through, as a
+     * read-only query root: both inverse members of one edge hold the
+     * same handle. */
+    readonly memberships: { readonly [K in MembershipMember<M>]: JoinHandle<JoinRow<E, M, N, K>> };
     range(spec: import('@jarenjs/db').LoadSpec, options: DbRangeOptions): Promise<DbRangeProvider<M['doc']>>;
     /** Open a graph: include one relation member with an optional spec. */
     include<K extends keyof M['relations'] & string, const I extends IncludeSpec<E, TargetMeta<E, M, K>> = true>(
@@ -446,7 +489,7 @@ export type TransactionClientOf<E extends MetaMap<E>, C = Record<string, unknown
   readonly attempt: number;
   /** The isolation level the transaction runs at. */
   readonly isolation: IsolationLevel;
-  readonly entities: { readonly [K in keyof E & string]: EntityHandle<E, E[K]> };
+  readonly entities: { readonly [K in keyof E & string]: EntityHandle<E, E[K], K> };
   readonly collections: { readonly [K in keyof C & string]: CollectionHandle<C[K]> };
   /** Nest through this transaction's savepoint. The options are the
    * root's less `unitOfWork` (`JD0014` at runtime), and `mode:
@@ -467,7 +510,7 @@ export type Client<E extends MetaMap<E>, C = Record<string, unknown>> = {
   /** The store itself — the escape hatch, typed. */
   readonly store: TypedStore<E>;
   readonly capabilities: StoreCapabilities;
-  readonly entities: { readonly [K in keyof E & string]: EntityHandle<E, E[K]> };
+  readonly entities: { readonly [K in keyof E & string]: EntityHandle<E, E[K], K> };
   readonly collections: { readonly [K in keyof C & string]: CollectionHandle<C[K]> };
   /** A transaction, with a typed client of its own. */
   transaction<R>(fn: (tx: TransactionClientOf<E, C>) => R | Promise<R>,

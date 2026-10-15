@@ -18,7 +18,7 @@ import { JarenValidator } from '@jarenjs/validate';
 import { stringFormats, dateTimeFormats } from '@jarenjs/formats';
 import { isPlainOptions, setObjectMember } from '@jarenjs/core/object';
 
-import { createEntityHandle, createCollectionHandle } from './handle.js';
+import { createEntityHandle, createCollectionHandle, createJoinHandle } from './handle.js';
 import { registerLive } from './live.js';
 import { onlyThisStore } from './source.js';
 
@@ -85,9 +85,28 @@ export async function open(model, options) {
    * @param {any} over
    */
   const handlesOf = (over) => {
+    // one join handle per join table: both inverse members of an edge
+    // name the same root
+    /** @type {Map<string, any>} */
+    const joins = new Map();
+    /** The join handle of each many-to-many member of `name`. @param {string} name */
+    const membershipsOf = (name) => {
+      /** @type {Record<string, any>} */
+      const record = {};
+      for (const [member, relation] of Object.entries(over.relations?.[name] ?? {})) {
+        if (relation.kind !== 'manyToMany') continue;
+        let join = joins.get(relation.joinTable);
+        if (join === undefined) {
+          join = createJoinHandle(over, relation.joinTable, name);
+          joins.set(relation.joinTable, join);
+        }
+        setObjectMember(record, member, join);
+      }
+      return Object.freeze(record);
+    };
     const entities = {};
     for (const name of over.roots ?? []) {
-      setObjectMember(entities, name, createEntityHandle(over, name));
+      setObjectMember(entities, name, createEntityHandle(over, name, membershipsOf(name)));
     }
     const collections = {};
     for (const name of Object.keys(model.collections ?? {})) {

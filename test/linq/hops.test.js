@@ -6,8 +6,9 @@
  * `u.posts.all().exists()` are captured as HOPS and lowered to the
  * correlated phrases the engine and the store both run — byte-equal to
  * the hand-written documents here — so the emitted document carries no
- * relation name; `explain().hops` lists the hops; a many-to-many hop is
- * `JL0105` at build time naming the join table; the hop bindings `r<n>`
+ * relation name; `explain().hops` lists the hops; a many-to-many hop
+ * lowers through its join table's root, and one whose relation entry does
+ * not name the join row's columns is `JL0105` at build time; the hop bindings `r<n>`
  * are reserved. The store's side of the seam — the rows, the residual
  * reasons, the strict refusal — is `test/db/provider.test.js` and the
  * generated oracle group.

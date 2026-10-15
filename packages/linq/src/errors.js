@@ -115,9 +115,8 @@ export const LINQ_CODES = /* @__PURE__ */ Object.freeze({
  *    rule's externals argument — a form rule's context, a migration
  *    assertion's argument — embedded whole, as a value, or spread
  *  - `JL0105` — a relation hop on the chain (the query pen) cannot
- *    lower: the member is a many-to-many relation, whose join table is
- *    not a queryable root in this version (`load({ include })` reads the
- *    memberships); or the relation's key column or the key it references
+ *    lower: the member is a many-to-many relation whose entry does not
+ *    name its join row's columns; or the relation's key column or the key it references
  *    is composite or undeclared; or the provider's relation table holds
  *    something that is not a relation record
  *  - `JL0106` — a migration step names an entity or collection the

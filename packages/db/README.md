@@ -127,9 +127,8 @@ from(store.sync.entity('User')).where((u) => u.posts.all().count().ge(2));
 //                                $return: '$r1' } }, 2] } …
 ```
 
-A many-to-many member (`u.labels`) is refused at build time (`JL0105`)
-naming the join table: it is not a queryable root in this version, so
-`load({ include: { labels: true } })` is how the memberships are read.
+A many-to-many member (`u.labels`) lowers through its join table's root
+(MODEL-FORMAT §10.7): the join row, then the target row it names.
 
 `execute` answers in the ENGINE's result shape (QUERY-FORMAT §1,
 "singleton ≡ item"): `undefined` for no rows, the document itself for

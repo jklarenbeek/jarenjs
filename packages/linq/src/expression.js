@@ -785,9 +785,8 @@ function navigates(record, name) {
 
 /**
  * The relation entry a hop may lower from, or the coded refusal: a
- * many-to-many member has no queryable join-table root in this version
- * (the phrase would need one — `load({ include })` reads the
- * memberships), and a foreign-key relation needs its key column and the
+ * many-to-many member lowers through its join table's root and needs the
+ * entry to name the join row's columns, and a foreign-key relation needs its key column and the
  * single key it references (a composite key would need a tuple equality
  * the vocabulary does not spell).
  * @param {any} relation

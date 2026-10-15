@@ -296,7 +296,7 @@ is part of THIS design.
 | relation navigation — to-one hop (`p.author`, `p.author.email`) | over a provider with a relation table (§3, §8): `{ "$for": { "r1": "$.User[*]" }, "$where": { "$eq": ["$r1.<targetKey>", "$it.<via>"] }, "$return": "$r1.email" }` — the target's key against the row's foreign key (`kind: "oneToOne"`, the key on the declaring entity). Zero or one item: an object member's one value (absent when there is none), an operand elsewhere (empty compares false; `exists()`/`isEmpty()` say which), and under `$orderby` a key that may be empty (`$empty` applies). The binding is `r1`, `r2`, … per capture. An array member of the target fans as a path member does: `p.author.tags.all()` returns `"$r1.tags[*]"`, so `p.author.tags.all().eq('a')` holds when any element equals `'a'`, `p.author.items.all().sku` is every element's `sku` and `p.author.items.all().qty.sum()` totals them | native by desugaring — the document is the phrase; a store plans it as a correlated subselect where its correlation is proven (MODEL-FORMAT §10.1) and runs it as a named residual otherwise (`explain()`, §10.6) | `Expr<Post>['author']` is `ObjectExpr<User>` — emit's optional relation member, nothing new |
 | relation navigation — to-many hop (`u.posts`, `u.posts.all()`) | `{ "$for": { "r1": "$.Post[*]" }, "$where": { "$eq": ["$r1.<via>", "$it.<targetKey>"] }, "$return": "$r1" }` — the target's foreign key against the row's key (`kind: "oneToMany"`, the key on the target). As a VALUE the phrase is packed, `[ <phrase> ]`, the array of related rows a member holds (`{ posts: u.posts }`; `u.posts.at(0)` indexes it); fanned, `u.posts.all()` is the bare phrase, a sequence: `.all().count()` → `{ "$count": <phrase> }`, `.all().exists()` → `{ "$exists": <phrase> }`, `.all().title` returns `"$r1.title"` per row (`[u.posts.all().title]` packs the titles; `.all().tags.all()` returns `"$r1.tags[*]"`, every related row's elements). `count()`/`exists()` on the value range over the rows too, as a group-join's group's do | native by desugaring, as above | `ArrayExpr<Post>`; `all()` is `FannedExpr<Post>` |
 | relation navigation — chained, and from every row binding | hops nest: `p.author.posts.all().count()` is `{ "$count": { "$for": { "r1": "$.User[*]" }, "$where": …, "$return": { "$for": { "r2": "$.Post[*]" }, "$where": { "$eq": ["$r2.authorId", "$r1.id"] }, "$return": "$r2" } } }` — the inner phrase correlates with the outer binding; a hop off a fanned to-many (`u.posts.all().author`) is a sequence, one target per row; a join's `it2` hops from the inner row; a group-join's fanned group (`g.all().author`) binds each row first (`{ "$for": { "r1": "$g[*]" }, "$return": <hop over $r1> }`); the group itself is an array, not a row | native by desugaring, as above | as the target's `Expr<…>` |
-| relation navigation — many-to-many (`u.labels`) | — the join table is not a queryable root in this version, so no phrase exists to lower to; `load({ include: { labels: true } })` reads the memberships | unsupported (`JL0105`, naming the join table) | — |
+| relation navigation — many-to-many (`u.labels`) | two links through the join table's root: the join row, then the target row it names (MODEL-FORMAT §10.7) | emulated | — |
 
 Two spatial names are deliberately not the obvious ones, and the reason
 is the same one that made §8.14's `$length` and §8.7's `$string-length`
@@ -714,7 +714,7 @@ the normative home, this table mirrors it):
 | `JL0102` | a pen was asked for a construct the format cannot carry |
 | `JL0103` | a `$defs` name collision, a dangling ref, or an unnamed recursion |
 | `JL0104` | a pen-owned keyword through `meta()`, or an external a captured rule did not declare |
-| `JL0105` | a relation hop on the chain cannot lower: a many-to-many member (its join table is not a queryable root), a composite or undeclared key, or a malformed relation entry (§3, §4 "relation navigation") |
+| `JL0105` | a relation hop on the chain cannot lower: a many-to-many entry that does not name its join row's columns, a composite or undeclared key, or a malformed relation entry (§3, §4 "relation navigation") |
 | `JL0106` | a migration step names a table the target model does not declare, or a draft it cannot match |
 | `JL0107` | the client (`@jarenjs/linq/db`, [DB-CLIENT.md](DB-CLIENT.md)) named a member that is not the relation kind the operation needs: `include()` over a member that is not a declared relation, `link()`/`unlink()` over a relation that is not many-to-many |
 | `JL0108` | a captured expression — in any pen's callback, or the chain's — was converted to a JavaScript primitive (`==`, `+`, a template literal or `<` met the capture proxy, or met a method read without its call, `u.name.length > 0`), met `JSON.stringify`, or had an array or a string method called on a member (`u.tags.includes('a')`) (§14.9) |
@@ -1627,18 +1627,17 @@ is missing.
 
 | The spelling that trips it | The message | The spelling that works |
 |---|---|---|
-| `u.labels` where `labels` is many-to-many | `'labels' is a many-to-many relation: the join table 'UserLabel' is not a queryable root in this version, so the hop has no phrase to lower to — read the memberships with load({ include: { labels: true } })` | `load({ include: { labels: true } })` through the client ([DB-CLIENT.md](DB-CLIENT.md) §2) |
+| `u.labels` where the many-to-many entry does not name its join row | `'labels' is a many-to-many relation whose entry does not name its join row's columns ({ joinTable, ownColumn, ownKey, targetColumn, targetKey } — MODEL-FORMAT §10.1), so the hop has no phrase to lower to` | a provider whose `relations` is the store's own table, which names them |
 | a relation entry that is not a relation record | `the relation table names 'labels' but its entry is not a relation record ({ to, kind, via, fkEntity, fkTargets, targetKey } — MODEL-FORMAT §10.1)` | a provider whose `relations` is the store's own table |
 | a relation whose `kind` is neither of the two | `'labels' has relation kind 'oneToNone', which is not one this surface lowers (oneToOne, oneToMany)` | `oneToOne` or `oneToMany` |
 | a relation over a composite or undeclared key | `'labels' cannot lower: its foreign key or the key it references is composite or undeclared, and the hop's equality would need a tuple the vocabulary does not spell` | a single-column key, or `load({ include })` |
 
-The first is the one a reader meets: a many-to-many member is exactly
-the relation that has no direction to correlate in. The hop would need
-to bind the JOIN TABLE as a root and correlate twice, and a join table
-is not a queryable root in this version — so there is no phrase, and an
-honest refusal that names the join table beats a document that quietly
-reads the wrong rows. `load({ include })` reads the memberships through
-the client instead, which is the operation the store already has.
+The first is the one a reader meets with a hand-built provider: a
+many-to-many hop binds the JOIN TABLE as a root and correlates twice —
+the join row, then the target row it names (MODEL-FORMAT §10.7) — so it
+needs the entry to name the join row's columns, which the store's own
+relation table does. Without them there is no phrase, and an honest
+refusal beats a document that quietly reads the wrong rows.
 
 ### 14.9 `JL0108` — a capture converted to a primitive
 
@@ -1975,7 +1974,6 @@ rather than discover it.
 |---|---|---|
 | `aggregate(fn)`, unseeded | C#'s unseeded overload means "the first element is the seed". A query document is data: there is no clause that says "start from whichever item comes first", and inventing one would make the document mean something the grammar does not define | `JL0006`, naming the seeded form |
 | `zip()` | positional co-iteration — pair the *n*th of one input with the *n*th of another — has no operator in the grammar, and a FLWOR phrase reads ONE input. Emulating it would mean materialising both sides in the host, which is exactly the "runs somewhere other than the document says" the chain exists to avoid | `JL0006` |
-| a many-to-many hop (`u.labels`) | the phrase would have to bind the JOIN TABLE as a root and correlate twice, and a join table is not a queryable root in this version | `JL0105`, naming the join table and pointing at `load({ include })` |
 
 All three are checked in both directions: `test/linq/pen-docs.test.js`
 holds §14's code list equal to what the chain's modules throw, and the

@@ -5,7 +5,8 @@
  * handles chain (`client.entities.Post.where(…)` is `fromAsync(handle)
  * .where(…)`, so every read is the chain's document and pushes down),
  * load graphs from an EMITTED `load` spec (`include`), track and save
- * changes, link and unlink many-to-many members and maintain live
+ * changes, link and unlink many-to-many members, query each one's join
+ * table as a read-only root (`memberships`) and maintain live
  * results — over exactly one runtime edge: this subpath imports
  * `@jarenjs/db`, `@jarenjs/validate` and `@jarenjs/formats`, declared as
  * optional peers; no other subpath of the package does, and the store

@@ -336,9 +336,8 @@ correlated phrase the engine and the store both run, so the query
 document carries no relation name ([QUERY-PEN.md](QUERY-PEN.md) §3, §4
 "relation navigation"). The table the chain reads is the one the store
 derives from these members (`store.entity(name).relations`,
-MODEL-FORMAT §10.1); a `rel.belongsToMany` member is the one kind it
-refuses (`JL0105`), because its join table is not a queryable root in
-this version.
+MODEL-FORMAT §10.1); a `rel.belongsToMany` member lowers through its
+join table's root (MODEL-FORMAT §10.7).
 
 ## 3. Worked examples
 

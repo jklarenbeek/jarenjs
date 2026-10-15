@@ -3897,6 +3897,54 @@ A relation entry that does not name its join row's columns
 still refuses with that code, because there is then nothing to lower
 through.
 
+A membership question is one document over the root, and it runs as one
+native statement on SQLite and PostgreSQL that answers what the engine
+answers (`pushdown: false`):
+
+```js
+import { openStore } from '@jarenjs/db';
+import { nodeDriver } from '@jarenjs/db/node';
+
+const store = await openStore({ $model: '0.1', entities: {
+  User: { schema: { type: 'object', required: ['id'], properties: {
+    id: { type: 'string', 'x-entity': { key: true } },
+    labels: { 'x-entity': { relation: { to: 'Label', many: true } } } } } },
+  Label: { schema: { type: 'object', required: ['name'], properties: {
+    name: { type: 'string', 'x-entity': { key: true } }, color: { type: 'string' } } } } } },
+{ driver: nodeDriver() });
+for (const id of ['u1', 'u2', 'u3']) await store.entity('User').create({ id });
+for (const [name, color] of [['admin', 'red'], ['dev', 'blue']]) await store.entity('Label').create({ name, color });
+store.entity('User').link('u1', 'labels', 'admin');
+store.entity('User').link('u1', 'labels', 'dev');
+store.entity('User').link('u2', 'labels', 'dev');
+await store.saveChanges();
+
+// the pairs whose label is blue: the join root joined to Label
+await store.execute({ $for: { j: '$.Label_User[*]', l: '$.Label[*]' },
+  $where: { $and: [{ $eq: ['$j.Label_key', '$l.name'] }, { $eq: ['$l.color', 'blue'] }] },
+  $return: { user: '$j.User_key', label: '$l.name' } });
+// → [{ user: 'u1', label: 'dev' }, { user: 'u2', label: 'dev' }]
+
+// how many users hold each label: a correlated count over the root
+await store.execute({ $for: { l: '$.Label[*]' }, $return: { label: '$l.name',
+  users: { $count: { $for: { j: '$.Label_User[*]' }, $where: { $eq: ['$j.Label_key', '$l.name'] }, $return: '$j' } } } });
+// → [{ label: 'admin', users: 1 }, { label: 'dev', users: 2 }]
+```
+
+`@jarenjs/linq`'s client reaches the same root through the member that
+names it — `client.entities.User.memberships.labels`, a chain source over
+`$.Label_User[*]` whose rows are typed by the two keys
+([DB-CLIENT §2.8](../../linq/docs/DB-CLIENT.md)). Its handle carries the
+source `{ kind: 'join table', name: 'Label_User', store }` under
+`STORE_SOURCE` (§10.1).
+
+The join table's primary key is its two columns, the sorted entity's
+first (`Label_key`, then `User_key`), and it has no other index: a filter
+on the leading column seeks, one on the other column has no index to seek.
+A join table declares no column beyond its two keys, so a membership that
+carries data of its own (when it was attached, a role) is an entity of
+its own with two one-to-many edges.
+
 
 ## 11. The unit of work
 

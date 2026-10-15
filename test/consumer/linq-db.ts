@@ -6,7 +6,7 @@
 // many-to-many members at compile time, and every negative is pinned.
 import { open } from '@jarenjs/linq/db';
 import type {
-  Client, EntityHandle, CollectionHandle, TypedLiveQuery, TransactionClientOf,
+  Client, EntityHandle, CollectionHandle, TypedLiveQuery, TransactionClientOf, JoinHandle, JoinRow,
 } from '@jarenjs/linq/db';
 import type { InferMeta } from '@jarenjs/linq/model';
 import type { EntityMeta } from '@jarenjs/db/typed';
@@ -117,6 +117,21 @@ async function main(): Promise<void> {
   client.entities.User.link('u1', 'labels', 42);
   const report: SaveReport = await client.saveChanges();
   void report.joinInserted;
+
+  // the join table as a root: reached through the many-to-many member, its
+  // rows are the two key columns, each typed as the key it references
+  const memberships: JoinHandle<{ User_key: string; Label_key: string }> = client.entities.User.memberships.labels;
+  const joinRow: Equals<JoinRow<Meta, Meta['User'], 'User', 'labels'>, { User_key: string; Label_key: string }> = true;
+  const pairs: { User_key: string; Label_key: string }[] = await memberships.toArray();
+  const labelsOfU1: string[] = await memberships.where((j) => j.User_key.eq('u1')).select((j) => j.Label_key).toArray();
+  const pairCount: number = await memberships.count();
+  void [joinRow, pairs, labelsOfU1, pairCount];
+  // @ts-expect-error — a join row carries only its two key columns
+  void memberships.where((j) => j.User_id.eq('u1'));
+  // @ts-expect-error — a key column is typed as the key it references
+  void memberships.where((j) => j.User_key.eq(1));
+  // @ts-expect-error — a to-many relation that is not many-to-many has no join table
+  void client.entities.User.memberships.posts;
 
   // live: the rows are typed by the chain's item
   const live: TypedLiveQuery<Post> = await client.live(client.entities.Post.where((p) => p.stars.ge(3)));
