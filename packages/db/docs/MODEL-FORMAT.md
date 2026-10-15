@@ -2184,7 +2184,16 @@ that reads a name outside it is `JD0011` on every engine, with the
 same reason. `predicates` is keyed by collection or entity name, and
 an entity's predicate is conjoined into every fetch of that entity —
 the native statement, each root the residual fetches, the load's root
-and every include subquery over that entity. A predicate may name an
+and every include subquery over that entity. A join table's rows belong
+to the entities it relates (§10.7): under a profile that holds a
+predicate for either, a join row is readable only where the row it names
+on that side is, so every fetch of the join-table root wears the
+existence of that row under the side's predicate —
+`EXISTS (SELECT 1 FROM "User" WHERE "User"."id" = "Label_User"."User_key"
+AND <User's predicate>)` — beside any predicate the profile keys by the
+join table itself; it binds the side's externals as a read of the side
+does, and a live query over the root re-runs on a write to the side. A
+predicate may name an
 external, which `execute()` binds from the call's `externals` — so it
 isolates tenants only when the host, not the caller, supplies those
 externals. One rule admits them on every surface that binds one — a
@@ -2357,7 +2366,14 @@ prove was applied is not a budget.
    use, because there is no residual to hide it in — on a collection and
    an entity alike, one comparing a string literal that holds a lone
    surrogate, which the database would read as U+FFFD and so keep the
-   rows holding U+FFFD in its place.
+   rows holding U+FFFD in its place. A read of a join-table root
+   translates the predicate of each side that bounds it, so an
+   untranslatable one is the same `TypeError` there. On PostgreSQL, whose text and
+   jsonb hold no U+0000, a predicate comparing a string literal holding
+   one, or a list item holding U+0000 or a lone surrogate, has no
+   statement: every query surface that would fetch with it (`execute`,
+   `query`, `explain`, `all`, a cursor, a load) refuses `JD0011`, and a
+   point read, which the engine judges, answers as on any store.
 
    A point read is judged by the same predicate. `get` on a collection or an
    entity — tracked or `asNoTracking()`, synchronous or asynchronous, on the
@@ -2883,7 +2899,11 @@ transform's output or a native mutation's assignment, value or key — is
 therefore refused `JD2003` naming the member, and nothing is written (a
 save holding one such record writes none of its records); a key no write
 can store names no row, so a read by it answers absent, and `remove` or
-`link` refuses it (`JD2003`) where it stages it. A member the document holds keeps
+`link` refuses it (`JD2003`) where it stages it. A collection's key column
+is such a column too: `insert` and `put` of a key holding a lone surrogate
+are refused `JD2003`, and `get`, `patch` and `delete` by one answer
+`undefined`, `JD2006` and `false`, as for a key that holds nothing — never
+the document of the key spelled with U+FFFD. A member the document holds keeps
 the surrogate (its JSON escape is well-formed text), and SQLite stores
 U+0000 in a column as written (PostgreSQL refuses it, `JD2005`).
 
@@ -3788,9 +3808,11 @@ a number appears only where `capabilities.rowEstimates` is filled):
   surrogate, which a driver binds as U+FFFD (`predicate.loneSurrogate`; a graph
   load, `JD0032`, and a native mutation, `JD0038`, have no engine path and refuse
   it), and on PostgreSQL a collection's or an entity query's literal holding
-  U+0000, or a membership list item holding U+0000 or a lone surrogate, which the
-  server cannot hold (`bind.serverText`; NATIVE-PLANS names the stored lone
-  surrogate a native projection reads as U+FFFD);
+  U+0000, or a membership list item holding U+0000 or a lone surrogate — over a
+  collection's document, an entity's document or an entity's column — which the
+  server cannot hold (`bind.serverText`; a graph load, `JD0032`, and a native
+  mutation, `JD0038`, refuse it; NATIVE-PLANS names the stored lone surrogate a
+  native projection reads as U+FFFD);
 - a navigation hop out of shape (`entity.hopShape`): a hop out of a hop,
   one with an inner `$orderby`, `$let`, grouping or window, one correlated
   by an inequality, or with equalities across comparison families or over
@@ -3976,6 +3998,17 @@ It is a ROOT and not an entity: `store.entity('<JoinTable>')` is
 unit of work, and nothing about the table's lifecycle changes. The two
 namespaces are one, so a join table whose name is also a declared
 entity's is refused at open (`JD0005`) — `$.X[*]` may mean one thing.
+
+A join row belongs to the two rows it names, so a store profile that bounds
+either entity bounds the root (§8): under `predicates: { User: { $eq:
+['$it.tenant', '$tenant'] } }` a read of `$.Label_User[*]` answers only the
+memberships of the users the call's tenant admits — on every surface that
+reads it (`execute`, a count, a correlated count or existence test from
+`Label`, a join, `explain`, a cursor, a live query, the client's join
+handle), natively and in the engine alike — and a read that leaves
+`$tenant` unbound is refused `JD0011`, as a read of `User` is. An
+allow-list (`collections`) that leaves the join table out refuses the root
+by name.
 
 Because the root exists, a many-to-many **hop** lowers: a chain's
 `u.labels` becomes two links — the join row that names the membership,

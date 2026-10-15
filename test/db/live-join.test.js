@@ -401,12 +401,13 @@ for (const [engine, mode] of /** @type {const} */ ([['sqlite', 'session'], ['sql
     ['a delete', (tx) => tx.entity('Hub').delete('h')],
     ['a save', (tx) => { tx.entity('Hub').remove('h'); return tx.saveChanges(); }],
   ])) {
-    it(`${name}: rows the foreign-key actions of ${label} removed, stored again with the documents they had in one transaction, move in every view`, { skip: skipFor(engine) }, () => restoredWorld(engine, mode, async ({ store, views, oracles, records, replicated, settled }) => {
+    // the memberships stored again by links, or by the create that carries them
+    for (const carried of [false, true]) it(`${name}: rows the foreign-key actions of ${label} removed, stored again with the documents they had in one transaction${carried ? ', the memberships by the create that carries them,' : ''} move in every view`, { skip: skipFor(engine) }, () => restoredWorld(engine, mode, async ({ store, views, oracles, records, replicated, settled }) => {
       await store.transaction(async (tx) => {
         await remove(tx);
-        await tx.entity('Hub').create({ id: 'h', name: 'h' });
+        await tx.entity('Hub').create({ id: 'h', name: 'h', ...(carried ? { tags: ['a', 'b', 'c'] } : {}) });
         await tx.entity('Spoke').create({ id: 'p', hub: 'h', name: 'same' });
-        for (const id of ['a', 'b', 'c']) tx.entity('Hub').link('h', 'tags', id);
+        if (!carried) for (const id of ['a', 'b', 'c']) tx.entity('Hub').link('h', 'tags', id);
         await tx.saveChanges();
       }, { unitOfWork: 'own' });
       await settled();

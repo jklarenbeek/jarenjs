@@ -51,10 +51,10 @@ import { readOptions, readControls, isPlainOptions, refuseUnknownMembers } from 
 import {
   planQuery, planEntityQuery, entityShape, planEntityPredicate, entityPathRef, bindsLoneSurrogate, LONE_SURROGATE_REFUSAL,
   isRootScanSource, isEntityRootSource, BIND_REASONS, PLANNER_REASONS, admitsMixedTypes,
-  predicateTerms, boundPredicateTerms, mapHops, hopsOf, scalarFamilies,
+  predicateTerms, boundPredicateTerms, mapHops, hopsOf, scalarFamilies, entityRoot,
 } from './plan.js';
 import { emitPlan, emitEntityPlan, createEntityPredicateEmitters, UnrepresentablePath, UnrepresentableIdentity,
-  entityTableColumns, physicalComparable, bindsAsWritten,
+  entityTableColumns, physicalComparable, bindsAsWritten, bindsUnheldText, UNHELD_TEXT_REFUSAL,
   documentMemberOf, bucketGuards, bucketAbsentGuard } from './emit.js';
 import { modelPath } from './model-path.js';
 import { selectPlan, conjoin, effectiveOrder, planOrder, ordersByColumn } from './algebra.js';
@@ -72,7 +72,7 @@ import { refuseCancelled } from './cancellation.js';
 import {
   floorProfile, translateProfilePredicate, assertProfileRoots, memberDenial,
   applyMandatoryPredicate, applyRowBound, SAFE_PROFILE, predicateQuery,
-  predicateLeaves, admitPredicateExternals,
+  predicateLeaves, admitPredicateExternals, boundedJoinSides, rootEntry,
 } from './profile.js';
 
 /**
@@ -815,7 +815,7 @@ export function profileComparedExternals(profile, roots, operators) {
   if (profile === null) return [];
   const found = [];
   for (const root of roots) {
-    const expression = profile.predicates[root];
+    const expression = rootEntry(profile.predicates, root);
     if (expression === undefined) continue;
     const wrapper = predicateQuery(expression);
     found.push(...comparedExternals(analyzeQuery(wrapper, operators).root, root));
@@ -1134,8 +1134,9 @@ export function createQueryEngine(context) {
   /** The store profile's leaves for this collection, as a point read
    * admits its externals by them: translated on first use. @type {any[] | null} */
   let storeLeaves = null;
-  const profileLeaves = () => (storeLeaves ??= storeProfile?.predicates[collection.name] === undefined ? []
-    : leavesOf(translateProfilePredicate(storeProfile.predicates[collection.name], shape)));
+  const profileLeaves = () => (storeLeaves ??= storeProfile === null
+    || rootEntry(storeProfile.predicates, collection.name) === undefined ? []
+    : leavesOf(translateProfilePredicate(rootEntry(storeProfile.predicates, collection.name), shape)));
 
   /**
    * Build (or fetch) the cached entry for one document, under one
@@ -1190,8 +1191,8 @@ export function createQueryEngine(context) {
     // it the whole document is the set residual's, named, before the
     // profile and strict mode read the mode
     const mandatory = profile !== null
-      && profile.predicates[collection.name] !== undefined
-      ? translateProfilePredicate(profile.predicates[collection.name], shape)
+      && rootEntry(profile.predicates, collection.name) !== undefined
+      ? translateProfilePredicate(rootEntry(profile.predicates, collection.name), shape)
       : null;
     planned = boundPredicateTerms(planned, dialect.maxPredicateTerms, predicateTerms(mandatory));
     if (profile !== null) {
@@ -1249,7 +1250,13 @@ export function createQueryEngine(context) {
         series: null, reasons: [{ construct: 'path', reason: error.message }, ...planned.reasons],
       };
       plan = shapePlan(selectPlan(collection.name));
-      emitted = emitPlan(plan, dialect, physical);
+      // the set residual's fetch is the mandatory predicate alone: what it
+      // cannot spell has nowhere else to run
+      try { emitted = emitPlan(plan, dialect, physical); }
+      catch (cause) {
+        if (!(cause instanceof UnrepresentablePath)) throw cause;
+        throw profileRefusal(uncarriedPredicate(collection.name));
+      }
     }
     const externalNames = planned.analysis.externals.map((e) => e.name);
     // what each call's externals must hold as JSON: checked per call, as
@@ -1270,7 +1277,7 @@ export function createQueryEngine(context) {
       // the externals the profile's mandatory predicate binds in every
       // statement of this entry, diverted or not
       predicateExternals: mandatory === null ? [] : [...new Set(analyzeQuery(
-        predicateQuery(profile.predicates[collection.name]),
+        predicateQuery(rootEntry(profile.predicates, collection.name)),
         operators ?? undefined).externals.map((/** @type {any} */ ref) => ref.name))],
       // the predicate's comparisons and memberships of an external, with
       // what each one's member can hold
@@ -2267,7 +2274,7 @@ function planEntityWhere(expression, entity, entityMapping, analyzeOpts) {
  * @returns {any} a plan predicate, or null
  */
 function mandatoryEntityPredicate(profile, entity, entityMapping, analyzeOpts) {
-  const expression = profile?.predicates?.[entity.name];
+  const expression = profile === null ? undefined : rootEntry(profile.predicates, entity.name);
   if (expression === undefined) return null;
   const planned = planEntityWhere(expression, entity, entityMapping, analyzeOpts);
   // a literal the database would read as another string keeps other rows
@@ -2285,6 +2292,17 @@ function mandatoryEntityPredicate(profile, entity, entityMapping, analyzeOpts) {
  * @param {string | undefined} docPath
  */
 const profileEntityRefusal = (reason, docPath) => new DbCompileError('JD0011', reason, docPath);
+
+/**
+ * Why a profile's mandatory predicate has no statement on a database: it
+ * compares a string literal the server cannot hold, or reads a member name
+ * the dialect's JSON path grammar cannot carry, and such a predicate has no
+ * residual to run in.
+ * @param {string} root
+ */
+const uncarriedPredicate = (root) => `the profile's predicate for '${root}' compares a string this server `
+  + 'cannot hold (U+0000, or a list item holding U+0000 or a lone surrogate) or reads a member name its JSON '
+  + 'path grammar cannot carry, and a mandatory predicate runs in the database or not at all';
 
 /**
  * The store-level entity query engine: documents over the
@@ -2361,7 +2379,7 @@ export function createEntityQueryEngine(context) {
   }, true, dialect);
   /** The externals a profile's predicate of entity `name` names.
    * @param {any} profile @param {string} name @returns {string[]} */
-  const predicateNamesOf = (profile, name) => [...new Set(analyzeQuery(predicateQuery(profile.predicates[name]), analyzeOpts)
+  const predicateNamesOf = (profile, name) => [...new Set(analyzeQuery(predicateQuery(rootEntry(profile.predicates, name)), analyzeOpts)
     .externals.map((/** @type {any} */ ref) => ref.name))];
   /** The store predicate's leaves for entity `name`, as its point read admits
    * by them, translated on first use. @type {Map<string, any[]>} */
@@ -2373,6 +2391,62 @@ export function createEntityQueryEngine(context) {
     }
     return /** @type {any[]} */ (storeLeaves.get(name));
   };
+
+  /** The correlation of a join-table root's rows with one side's rows —
+   * `<side>.<key> = <join>.<side>_key`, planned as the hop of an existence
+   * test is, with the join row's end of each edge left unbound (`null`): it
+   * is the row the bound is judged on, under whatever binding reads it.
+   * `null` when the planner keeps the correlation out of SQL.
+   * @type {Map<string, any>} */
+  const correlations = new Map();
+  const correlationOf = (/** @type {string} */ name, /** @type {any} */ side) => {
+    const key = `${name}\u0000${side.column}`;
+    if (!correlations.has(key)) {
+      const planned = planEntityQuery({ $for: { j: entityRoot(name) },
+        $where: { $exists: { $for: { s: entityRoot(side.entity) },
+          $where: { $eq: [`$s[${JSON.stringify(side.referencesKey)}]`, `$j[${JSON.stringify(side.column)}]`] },
+          $return: '$s' } },
+        $return: '$j' }, entities, mapping, operators);
+      const test = planned.mode === 'native' ? planned.plan.filters[0].filter : null;
+      const unbound = (/** @type {any} */ end) => (end.binding === 'j' ? { ...end, binding: null } : end);
+      correlations.set(key, test?.p !== 'hop' ? null : { ...test.hop,
+        edges: test.hop.edges.map((/** @type {any} */ edge) => ({ left: unbound(edge.left), right: unbound(edge.right) })) });
+    }
+    return correlations.get(key);
+  };
+  /** The profile's mandatory predicate for root `name`, translated. A join
+   * row names one row on each side, so under a profile that bounds a side
+   * it is readable only where the row it names is: its bound is the
+   * existence of that row under the side's own predicate, beside any
+   * predicate the profile keys by the join table itself — natively, or
+   * refused (`JD0011`), never answered unbounded.
+   * @param {any} profile @param {string} name @returns {any} */
+  const rootPredicate = (profile, name) => {
+    let predicate = mandatoryEntityPredicate(profile, entities.get(name), mapping.entities[name], analyzeOpts);
+    for (const side of boundedSides(profile, name)) {
+      const hop = correlationOf(name, side);
+      if (hop === null) {
+        throw profileEntityRefusal(`the profile bounds the rows of '${side.entity}', and the rows of the join `
+          + `table '${name}' that name them are readable only where those rows are; the correlation of its `
+          + `'${side.column}' column with '${side.entity}' cannot be carried natively, so its rows are not read`,
+        entities.get(name)?.docPath);
+      }
+      predicate = conjoin(predicate, { p: 'hop', hop: { ...hop,
+        filter: mandatoryEntityPredicate(profile, entities.get(side.entity), mapping.entities[side.entity], analyzeOpts) } });
+    }
+    return predicate;
+  };
+  /** The sides of join-table root `name` the profile bounds; none for an
+   * entity, and none for a root its allow-list refuses, which is refused
+   * by that name. @param {any} profile @param {string} name */
+  const boundedSides = (profile, name) => (profile.collections !== null && !profile.collections.includes(name) ? []
+    : boundedJoinSides(profile, mapping.joinTables, name));
+  /** The roots whose profile predicates a read of `names` binds: each
+   * root, and the bounded sides of a join-table root.
+   * @param {any} profile @param {readonly string[]} names @returns {string[]} */
+  const predicatedRoots = (profile, names) => [...new Set(names.flatMap((name) => [
+    ...(rootEntry(profile.predicates, name) === undefined ? [] : [name]),
+    ...boundedSides(profile, name).map((side) => side.entity)]))];
 
   const entryFor = (document, pushdown, profile = null) => {
     const key = ['E', document, dialect.name, pushdown, profile];
@@ -2414,9 +2488,18 @@ export function createEntityQueryEngine(context) {
     const mandatory = new Map();
     if (profile !== null) {
       for (const name of planned.referenced) {
-        const predicate = mandatoryEntityPredicate(profile, entities.get(name), mapping.entities[name], analyzeOpts);
+        const predicate = rootPredicate(profile, name);
         if (predicate !== null) mandatory.set(name, predicate);
       }
+    }
+    // the roots whose own predicates those carry: a join-table root's
+    // bounded sides bind their predicates' externals as the sides do
+    const predicated = profile === null ? [] : predicatedRoots(profile, planned.referenced);
+    // a literal the server cannot hold has no statement to ride, and a
+    // mandatory predicate no residual to run in: refused before any plan
+    for (const name of predicated) {
+      if (bindsUnheldText(dialect, mandatoryEntityPredicate(profile, entities.get(name), mapping.entities[name], analyzeOpts)))
+        throw profileEntityRefusal(uncarriedPredicate(name), entities.get(name)?.docPath);
     }
     const mandatoryTerms = planned.plan === null || mandatory.size === 0 ? 0
       : planned.plan.bindings.reduce((sum, binding) => sum + predicateTerms(mandatory.get(binding.entity) ?? null), 0)
@@ -2469,13 +2552,14 @@ export function createEntityQueryEngine(context) {
       mandatory,
       // each mandatory predicate's comparisons of an external, the
       // externals it names, and those the document itself never names
-      predicateLeaves: new Map([...mandatory].map(([name, predicate]) => [name, entityLeaves(predicate)])),
-      predicateNames: new Map([...mandatory.keys()].map((name) => [name, predicateNamesOf(profile, name)])),
-      predicateOnly: new Set([...mandatory.keys()].flatMap((name) => predicateNamesOf(profile, name))
+      predicateLeaves: new Map(predicated.map((name) => [name, entityLeaves(
+        mandatoryEntityPredicate(profile, entities.get(name), mapping.entities[name], analyzeOpts))])),
+      predicateNames: new Map(predicated.map((name) => [name, predicateNamesOf(profile, name)])),
+      predicateOnly: new Set(predicated.flatMap((name) => predicateNamesOf(profile, name))
         .filter((name) => !planned.analysis.externals.some((/** @type {any} */ ref) => ref.name === name))),
       // what each call's externals must hold as JSON, checked per call
       compared: [...comparedExternals(planned.analysis.root),
-        ...profileComparedExternals(profile, planned.referenced, analyzeOpts)],
+        ...profileComparedExternals(profile, predicated, analyzeOpts)],
       rowBound: profile === null ? null : profile.maxRows,
       byteBound: profile === null ? null : profile.maxBytes,
       residualLimits: profile === null ? undefined : profile.limits,
@@ -2487,13 +2571,15 @@ export function createEntityQueryEngine(context) {
     if (planned.mode === 'native') {
       let plan = planned.plan;
       if (mandatory.size > 0) {
+        // the document's own hops first: a join-table root's bound is a
+        // hop of its own, which already wears its side's predicate
+        plan = mapHops(plan, (hop) => (mandatory.has(hop.entity)
+          ? { ...hop, filter: conjoin(hop.filter, mandatory.get(hop.entity)) } : hop));
         plan = { ...plan, filters: plan.filters.map((entry) => {
           const binding = plan.bindings.find((candidate) => candidate.name === entry.binding);
           const predicate = mandatory.get(binding.entity);
           return predicate === undefined ? entry : { ...entry, filter: conjoin(entry.filter, predicate) };
         }) };
-        plan = mapHops(plan, (hop) => (mandatory.has(hop.entity)
-          ? { ...hop, filter: conjoin(hop.filter, mandatory.get(hop.entity)) } : hop));
       }
       if (entry.rowBound !== null && plan.aggregate === null) {
         const cap = entry.rowBound + 1;
@@ -2585,10 +2671,11 @@ export function createEntityQueryEngine(context) {
         ? entities.keys() : entry.planned.referenced)].map((name) => {
         /** @type {any[]} */
         const slots = [];
+        // a join-table root's bound reads the rows of its sides
         const emitters = createEntityPredicateEmitters(dialect, (slot) => {
           slots.push(slot);
           return dialect.parameterRef(slots.length, 'v');
-        });
+        }, { tableOf: (entity) => dialect.tableName(mapping.entities[entity].table, mapping.entities[entity].schema) });
         const predicate = entry.mandatory.get(name);
         let where = '';
         if (predicate !== undefined) {
@@ -2597,9 +2684,7 @@ export function createEntityQueryEngine(context) {
           }
           catch (error) {
             if (!(error instanceof UnrepresentablePath)) throw error;
-            throw profileEntityRefusal(`the profile's predicate for '${name}' reads a member name the `
-              + 'dialect\'s JSON path grammar cannot carry, and a mandatory predicate runs in the database '
-              + 'or not at all', entities.get(name)?.docPath);
+            throw profileEntityRefusal(uncarriedPredicate(name), entities.get(name)?.docPath);
           }
         }
         const limit = entry.rowBound === null ? '' : ` ${dialect.limitClause(entry.rowBound + 1, undefined)}`;
@@ -3087,6 +3172,8 @@ export function createLoadEngine(context, entityName) {
     // read as another string
     if (bindsLoneSurrogate(planned.filter))
       throw refuse(`the where expression is not translatable: ${LONE_SURROGATE_REFUSAL}`, path);
+    if (bindsUnheldText(dialect, planned.filter))
+      throw refuse(`the where expression is not translatable: ${UNHELD_TEXT_REFUSAL}`, path);
     // a load binds no externals: a where that names one would reach the
     // driver as an unbound parameter
     const external = externalOf(planned.filter);
@@ -3108,6 +3195,8 @@ export function createLoadEngine(context, entityName) {
     }
     const predicate = mandatoryEntityPredicate(profile, entities.get(name), mapping.entities[name], analyzeOpts);
     if (predicate === null) return node;
+    if (bindsUnheldText(dialect, predicate))
+      throw profileEntityRefusal(uncarriedPredicate(name), entities.get(name)?.docPath);
     // the profile's predicate binds as the load's own where does: an
     // external it names has no value here, and would reach the driver as
     // an unbound parameter
@@ -3861,8 +3950,7 @@ export function createLoadEngine(context, entityName) {
    * @param {any} profile
    */
   const refuseMemberPolicy = (profile) => {
-    const policy = profile === null || profile.members === null
-      ? undefined : profile.members[entityName];
+    const policy = profile === null ? undefined : rootEntry(profile.members, entityName);
     if (policy === undefined) return;
     throw new DbCompileError('JD0011',
       `the profile allows only the members (${policy.declared.join(', ')}) of `

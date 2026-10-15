@@ -2766,6 +2766,55 @@ an unknown option; plan the link there through `planColumnUpgrade`.
   declines it `JD0037`. Put a selective conjunct the planner translates first, or type the member
   so the function cannot raise, to keep the row stream.
 
+## 42. A join table bounded by its entities' profile predicates, keys and literals the database cannot hold, and a Bun backup under a lock
+
+- On a store (or a call) whose profile holds a predicate for an entity a
+  many-to-many join table relates, a read of the join-table root
+  (`$.<JoinTable>[*]`, the client's `memberships` handle) answered every
+  tenant's memberships. It now answers only the join rows whose row on each
+  bounded side the predicate admits — every surface, natively and in the
+  engine — binds that side's externals (a read that leaves one unbound is
+  refused `JD0011`, as a read of the side is), and a live query over it
+  re-runs on a write to the side. A side predicate the planner cannot
+  translate, which a read of the root never translated before, is now the
+  `TypeError` at first use a read of the side gives. A profile that should
+  expose every membership names its predicate per call instead, or keys none
+  by the related entities.
+- A collection key holding a lone surrogate was bound as U+FFFD, so on SQLite
+  `insert` collided with the key spelled with U+FFFD (`JD2001`), `put`
+  replaced that key's document, and `get`, `patch` and `delete` addressed it;
+  on PostgreSQL `insert` and `put` failed `JD2005` and `get` and `delete`
+  addressed it. `insert` and `put` are now refused `JD2003`, and `get`,
+  `patch` and `delete` by such a key answer `undefined`, `JD2006` and `false`,
+  as an entity key's read does. Repair: write `key.toWellFormed()`.
+- `create()` of an entity with a many-to-many array left no capture record of
+  a membership row a delete in the same transaction had removed (session
+  capture), and a journal record a live view could not tell from a new row, so
+  a live query over the join table kept the row where it was. Such a row is now
+  recorded as a `link` records it: a `replace` of the membership row in both
+  modes ([LIVE-FORMAT §3](LIVE-FORMAT.md#3-the-op-mapping)).
+- On PostgreSQL a profile predicate comparing a string literal holding U+0000,
+  or a list item holding U+0000 or a lone surrogate, failed every query with an
+  internal error (collection) or `JD2005` (entity); every query surface now
+  refuses it `JD0011`, and a point read answers as before. A graph load's or a
+  native mutation's `where` comparing one failed `JD2005` and is now refused
+  `JD0032` or `JD0038` before the statement. An entity query comparing a
+  column or a member with such a list item failed `JD2005` and now runs in the
+  residual (`bind.serverText`), answering what `pushdown: false` answers.
+- On PostgreSQL a layout index whose stored condition compares a column cast
+  to a type that rounds it — an integer to `real`, a bigint to `real` or
+  `double precision`, a numeric to either — opened as the declared uncast
+  condition, though the two hold different rows. It is now refused `JD0002`
+  naming both; declare the condition the index holds, or recreate the index
+  under the declared one. A cast that holds every value (an integer to
+  `double precision`, a smallint to `real`) opens as before.
+- A Bun backup started while another connection held the file's lock (a
+  rollback journal) held the calling thread for the whole busy timeout — first
+  reading the database's file, then waiting for the worker to begin — so a
+  lock a timer or an I/O callback of that thread would release was never
+  released and the backup failed `JD2078`. The calling thread now runs while
+  the worker waits the lock out, and the copy completes once it is released.
+
 ## Measured costs
 
 Exact identity stores complete canonical documents and model endpoints, so

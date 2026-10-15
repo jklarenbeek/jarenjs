@@ -431,6 +431,12 @@ and `saveChanges()`. A chain built over another source handed to it is
 `JL0005` (`execute() on join table 'Label_User' was handed a chain built
 over entity 'User'`), as on every handle.
 
+A join row belongs to the users and labels it names, so a store profile
+that bounds either entity bounds the handle: under `profile: { predicates:
+{ User: { $eq: ['$it.tenant', 't1'] } } }` its chains, its count, its
+cursor and its live query answer the memberships of tenant `t1`'s users
+alone ([MODEL-FORMAT §8](../../db/docs/MODEL-FORMAT.md#8-the-safe-execution-profile)).
+
 The questions it answers, each one document and each one native
 statement on SQLite and PostgreSQL ([§3.5](#35-the-join-table-as-a-root)
 runs them):

@@ -304,12 +304,15 @@ const CATEGORIES = new Map([...[...STRING_TYPES].map((type) => [type, 'string'])
  * The casts the server writes around a column it compares under a wider type
  * of its own family, by the column's type: the condition the server keeps
  * for `n > 5.5` over an integer `n` is `(n)::numeric > 5.5`, the same one.
+ * Only a cast that holds every value of the column exactly is one: an
+ * integer past 2^24 has no `real`, a bigint past 2^53 no `double precision`,
+ * and a numeric neither, so a condition comparing such a cast keeps other
+ * rows than the column compared as it stands, and reads as another condition.
  */
 const WIDER = new Map([
   ['smallint', ['integer', 'bigint', 'numeric', 'real', 'double precision']],
-  ['integer', ['bigint', 'numeric', 'real', 'double precision']],
-  ['bigint', ['numeric', 'real', 'double precision']],
-  ['numeric', ['real', 'double precision']],
+  ['integer', ['bigint', 'numeric', 'double precision']],
+  ['bigint', ['numeric']],
   ['real', ['double precision']],
   ['character varying', ['text']], ['character', ['text']], ['name', ['text']],
 ]);

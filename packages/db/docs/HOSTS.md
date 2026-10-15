@@ -893,9 +893,13 @@ a `data:` URL inside the driver, so a bundle or a `bun build --compile`
 executable needs no second entrypoint for it; a compiled executable on Linux
 is qualified by a test that builds one. The copy waits on no timer, so fake
 timers cannot stall it. The worker begins its read transaction while the
-calling thread waits — a few statements on a free file, up to the busy timeout
-on a locked one, as when the copy began on that thread — so a commit of that
-thread's own on another connection cannot make the copy's first read busy. A store call made
+calling thread waits — a few statements on a free file, so a commit of that
+thread's own on another connection cannot make the copy's first read busy,
+as none could while the copy began on that thread. An attempt that meets a
+lock another connection holds fails at once, and the worker pauses on its own
+thread before the next one, while the calling thread runs — so a lock a timer
+or an I/O callback of that thread releases is released — until the busy
+timeout has passed, when the backup fails busy. A store call made
 during the copy waits for it at the store gate, as for a transaction, and fails
 `JD0012` once `queueTimeout` passes.
 A Bun database without a file, a Bun runtime without

@@ -470,3 +470,25 @@ export function assertNoSqlText(plan) {
       throw new Error(`plan carries SQL text: found '${token}'`);
   }
 }
+
+/**
+ * Whether a planned predicate binds a string literal `refused` names: the
+ * operand of a comparison or a string operator (bound as text), or an item
+ * of a membership list (bound inside its JSON text, `listed`).
+ * @param {any} pred
+ * @param {(text: string, listed: boolean) => boolean} refused
+ * @returns {boolean}
+ */
+export function bindsText(pred, refused) {
+  switch (pred.p) {
+    case 'and': case 'or': return pred.items.some((/** @type {any} */ item) => bindsText(item, refused));
+    case 'not': return bindsText(pred.item, refused);
+    case 'cmp': case 'strop': return typeof pred.operand.lit === 'string' && refused(pred.operand.lit, false);
+    case 'in': return Array.isArray(pred.operand.list)
+      && pred.operand.list.some((/** @type {any} */ item) => typeof item === 'string' && refused(item, true));
+    // a hop's filter is bound in the correlated subselect that tests or
+    // counts the related rows, as a root's own filter is
+    case 'hop': case 'hopCount': return pred.hop.filter != null && bindsText(pred.hop.filter, refused);
+    default: return false;
+  }
+}

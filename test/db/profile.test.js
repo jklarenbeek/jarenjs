@@ -451,3 +451,29 @@ describe('the member allow-list: what a caller may read, per root', () => {
       TypeError);
   });
 });
+
+describe('a profile predicate the statement cannot spell is refused JD0011 on a collection as on an entity', () => {
+  // a member name holding a double quote has no SQLite JSON path; the
+  // collection's residual fetch let the emitter's internal error escape
+  const predicate = { $eq: ['$it["a\\"b"]', 'x'] };
+  it('every query refuses it by name; a point read, which the engine judges, answers', async () => {
+    const store = await openStore({ $model: '0.1', collections: { ev: { key: '/id', schema: { type: 'object' } } },
+      entities: { E: { schema: { type: 'object', required: ['id'], properties: { id: { type: 'string', 'x-entity': { key: true } } } } } } },
+    { driver: nodeDriver(), profile: { predicates: { ev: predicate, E: predicate } } });
+    try {
+      for (const id of ['1', '2']) {
+        await store.collection('ev').insert({ id, 'a"b': id === '1' ? 'x' : 'y' });
+        await store.entity('E').create({ id, 'a"b': id === '1' ? 'x' : 'y' });
+      }
+      const refused = (/** @type {string} */ root) => (/** @type {any} */ error) => error.code === 'JD0011'
+        && error.message.startsWith(`JD0011: the profile's predicate for '${root}' compares a string this server cannot hold`);
+      await assert.rejects(async () => store.collection('ev').execute({ $for: { it: '$[*]' }, $return: '$it.id' }), refused('ev'));
+      await assert.rejects(async () => store.collection('ev').all(), refused('ev'));
+      await assert.rejects(async () => store.execute({ $for: { e: '$.E[*]' }, $return: '$e.id' }), refused('E'));
+      assert.deepStrictEqual(await store.collection('ev').get('1'), { id: '1', 'a"b': 'x' });
+      assert.strictEqual(await store.collection('ev').get('2'), undefined);
+      assert.strictEqual(await store.entity('E').get('2'), undefined);
+    }
+    finally { await store.close(); }
+  });
+});

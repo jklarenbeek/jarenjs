@@ -629,3 +629,49 @@ describe('a member whose column the table already has is refused when the model 
     });
   }
 });
+
+describe('a collection key holding a lone surrogate, as an entity key holding one', () => {
+  // the driver binds a lone surrogate as U+FFFD, so such a key addressed the
+  // document of the key spelled with U+FFFD: a put replaced it, a delete
+  // removed it, and on PostgreSQL a get read it
+  const MODEL = { $model: '0.1',
+    collections: { c: { key: '/id', schema: { type: 'object', properties: { id: { type: 'string' }, v: { type: 'integer' } } } },
+      free: { schema: { type: 'object' }, identity: 'uuid' }, n: { key: '/id', schema: { type: 'object', properties: { id: { type: 'integer' } } } } },
+    entities: { T: { schema: { type: 'object', required: ['id'], properties: {
+      id: { type: 'string', 'x-entity': { key: true } }, v: { type: 'integer' } } } } } };
+  /** @param {() => any} fn */
+  const outcome = async (fn) => {
+    try { return { value: await fn() }; }
+    catch (/** @type {any} */ error) { return { code: error.code }; }
+  };
+  for (const engine of ENGINES) {
+    it(`a write is refused JD2003, a read answers absent, and the U+FFFD key's document is untouched (${engine})`,
+      { skip: skipFor(engine) }, () => withStore(engine, MODEL, async (store) => {
+        const c = store.collection('c');
+        const t = store.entity('T');
+        await c.insert({ id: '�', v: 0 });
+        await t.create({ id: '�', v: 0 });
+        assert.deepStrictEqual([
+          await outcome(() => c.insert({ id: '\uD800', v: 1 })),
+          await outcome(() => c.put({ id: '\uDC00', v: 2 })),
+          await outcome(() => store.collection('free').put({ v: 3 }, 'k\uD800')),
+          await outcome(() => c.get('\uD800')),
+          await outcome(() => c.patch('\uD800', [{ op: 'replace', path: '/v', value: 9 }])),
+          await outcome(() => c.delete('\uDC00')),
+        ], [{ code: 'JD2003' }, { code: 'JD2003' }, { code: 'JD2003' }, { value: undefined }, { code: 'JD2006' }, { value: false }]);
+        // the entity twin answers alike
+        assert.deepStrictEqual([
+          await outcome(() => t.create({ id: '\uD800', v: 1 })),
+          await outcome(() => t.get('\uD800')),
+          await outcome(() => t.update('\uD800', { v: 9 })),
+          await outcome(() => t.delete('\uDC00')),
+        ], [{ code: 'JD2003' }, { value: undefined }, { code: 'JD2006' }, { value: false }]);
+        assert.deepStrictEqual(await c.all(), [{ id: '�', v: 0 }]);
+        assert.deepStrictEqual(await c.get('�'), { id: '�', v: 0 });
+        // a well-formed pair is a key of its own, and a numeric key column refuses such a string as any other
+        assert.strictEqual(await c.insert({ id: '😀', v: 4 }), '😀');
+        assert.deepStrictEqual(await c.get('😀'), { id: '😀', v: 4 });
+        assert.deepStrictEqual(await outcome(() => store.collection('n').put({ v: 5 }, '\uD800')), { code: 'JD2002' });
+      }));
+  }
+});

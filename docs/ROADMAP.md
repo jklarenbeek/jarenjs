@@ -436,13 +436,13 @@ what each does is its own documentation's job
   when retyped into a number. Wanted: exact last digits on SQLite, and a
   referenced key spelled and read as `String()` and `Number()` do (the
   referencing table rebuilt ahead of the key's check, or the check taken after
-  both). ADD (optional, observed): "- [ ] **A plan between two number-first
-  unions that differ only past the first type recreates an identical column on
-  SQLite.** `['number','string']` -> `['number','boolean']` (and a model read
-  back by `introspect()` -> the authored one) drops and adds `gx_q` with the
-  same `CASE` read, because the plan compares the union's `members`; nothing
-  is lost, the index is rebuilt. Wanted: compare the read, not the member
-  list."
+  both).
+- [ ] **A plan between two number-first unions that differ only past the
+  first type recreates an identical column on SQLite.**
+  `['number','string']` -> `['number','boolean']` (and a model read back by
+  `introspect()` -> the authored one) drops and adds `gx_q` with the same
+  `CASE` read, because the plan compares the union's `members`; nothing is
+  lost, the index is rebuilt. Wanted: compare the read, not the member list.
 - [ ] **An integer past 2^53 in an `integer` column answers differently on the
   two engines.** A stored integer a JavaScript number would round is refused
   `JD2003` on both where a row is read whole; but one the store wrote

@@ -5,7 +5,9 @@
  * plain object assigned by name: an entity called `__proto__` rewrote the
  * map's prototype instead of becoming a member, so it had no table (the open
  * created none, and the first write met the driver's raw "no such table"), no
- * join tables and no plan. It is an own member like any other name.
+ * join tables and no plan. It is an own member like any other name. So is
+ * a root named like one in a profile's per-root maps: a store profile that
+ * keeps no predicate for `constructor` reads none for it.
  */
 import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
@@ -96,4 +98,35 @@ describe('an entity named __proto__', () => {
     }
     finally { cleanup(); }
   });
+});
+
+describe('a root named like a prototype member on a store with a profile', () => {
+  // the profile's per-root maps were read by name, so a root called
+  // `constructor` or `toString` read the prototype's function as its
+  // predicate: every write and read of it failed JQ0003
+  const MODEL = { $model: '0.1', collections: { constructor: { key: '/id', schema: { type: 'object' } },
+    other: { key: '/id', schema: { type: 'object' } } },
+  entities: { toString: { schema: { type: 'object', required: ['id'], properties: {
+    id: { type: 'string', 'x-entity': { key: true } }, k: { type: 'string' } } } } } };
+  for (const [label, profile, kept] of /** @type {[string, any, string[]][]} */ ([
+    ["the 'safe' profile, which keeps no predicate for it", 'safe', ['a', 'b']],
+    ['a member list of another root', { members: { other: ['$.id'] } }, ['a', 'b']],
+    ['a predicate the host keys by its name', { predicates: { constructor: { $eq: ['$it.k', 'x'] }, toString: { $eq: ['$it.k', 'x'] } } }, ['a']],
+  ])) {
+    it(`is written, read and queried under ${label}`, async () => {
+      const store = await openStore(MODEL, { driver: nodeDriver(), profile });
+      try {
+        for (const [id, k] of [['a', 'x'], ['b', 'y']]) {
+          await store.collection('constructor').insert({ id, k });
+          await store.entity('toString').create({ id, k });
+        }
+        const answer = kept.length === 1 ? kept[0] : kept;
+        assert.deepStrictEqual(await store.collection('constructor').execute({ $for: { it: '$[*]' }, $return: '$it.id' }), answer);
+        assert.deepStrictEqual(await store.execute({ $for: { e: '$.toString[*]' }, $return: '$e.id' }), answer);
+        assert.deepStrictEqual(await store.collection('constructor').get('b'), kept.includes('b') ? { id: 'b', k: 'y' } : undefined);
+        assert.deepStrictEqual(await store.entity('toString').get('b'), kept.includes('b') ? { id: 'b', k: 'y' } : undefined);
+      }
+      finally { await store.close(); }
+    });
+  }
 });

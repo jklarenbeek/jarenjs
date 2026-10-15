@@ -42,7 +42,7 @@ import { CLOSED_UNDER, admitCursor, admitSyncCursor, createCursor, createSyncCur
 import { refuseUnsupportedPragmaKeys, resolvePragmaRequests, configurePragmas, PRAGMA_NAMES } from './pragmas.js';
 import { createMaintenance } from './maintenance.js';
 import { createBackup } from './backup.js';
-import { normalizeProfile, assertProfileRoots, pointReadFilter } from './profile.js';
+import { normalizeProfile, assertProfileRoots, pointReadFilter, boundedJoinSides } from './profile.js';
 import { compileEntityModel, joinTableRoots } from './model.js';
 import { entityCore, insertAttempt } from './entity.js';
 import { requireCodePointText, verifyPhysical } from './physical.js';
@@ -1090,12 +1090,20 @@ function collectionCore(connection, collection, plan, validate, queryState, stor
     return null; // integer: the database allocates
   };
   /** A write's key, refused (`JD2002`) when it is a string that names no
-   * number under a numeric key column — see `noNumberKeyReason`.
+   * number under a numeric key column — see `noNumberKeyReason` — and
+   * (`JD2003`) when it is a string holding a lone surrogate, which no key
+   * column stores as written ({@link unstorableKey}), as an entity key is.
    * @param {string | number} key */
   const numberedKey = (key) => {
     if (!textKey && namesNoNumber(key)) {
       throw new DbRuntimeError('JD2002', noNumberKeyReason(key),
         { docPath: collection.docPath, collection: collection.name, key });
+    }
+    if (unstorableKey(key)) {
+      throw new DbRuntimeError('JD2003', `the key ${JSON.stringify(key)} holds a lone surrogate, which the key `
+        + 'column cannot store: the driver writes U+FFFD in its place, so the write would address the document '
+        + 'of another key; write a well-formed string (toWellFormed())',
+      { docPath: collection.docPath, collection: collection.name, key });
     }
     return key;
   };
@@ -1107,11 +1115,18 @@ function collectionCore(connection, collection, plan, validate, queryState, stor
   // read finds either spelling and a write first moves a legacy row onto
   // the canonical text, so the file converges as it is written.
   const textKey = plan.keyType === dialect.typeFor('string', 'key');
+  /** Whether a key is a string no key column stores as written: UTF-8 has
+   * no spelling for a lone surrogate. @param {unknown} key */
+  const unstorableKey = (key) => typeof key === 'string' && !key.isWellFormed();
   const bindKey = (/** @type {string | number} */ key) => (textKey ? canonicalKeyText(key) : key);
   // a lookup of a string that is no number on a numeric key column names no
   // row on either engine (see `namesNoNumber`); a WRITE under such a key is
   // refused before it binds anything (`numberedKey`)
-  const whereKey = (/** @type {string | number} */ key) => (!textKey && namesNoNumber(key) ? null : bindKey(key));
+  // and a string holding a lone surrogate, which the driver binds as U+FFFD,
+  // names the row of no write either: it answers absent, as an entity key's
+  // read does, rather than the row of the key spelled with U+FFFD
+  const whereKey = (/** @type {string | number} */ key) =>
+    ((!textKey && namesNoNumber(key)) || unstorableKey(key) ? null : bindKey(key));
   // A collection without a key member has no document that could confirm
   // a legacy spelling, so a number names its canonical row only and a
   // string key spelled `'7.0'` stays a key of its own.
@@ -3809,12 +3824,17 @@ export function openStore(model, options) {
                       (error) => wrapDriverError(error,
                         { docPath: entities.get(name).docPath, collection: name, key: ownKey }));
                     return chain(ran, () => {
-                      if (capture !== null && capture.mode === 'journal') {
+                      // recorded as every membership writer records its
+                      // row, in both modes and with the key it names: a
+                      // membership a delete in the same transaction removed
+                      // is a row stored again (capture `moved`)
+                      if (capture !== null) {
                         const value = { [own.column]: ownKey, [target.column]: keys[j] };
                         const ordered = {};
                         for (const column of [join.left.column, join.right.column])
                           ordered[column] = value[column];
-                        capture.record(table, Object.values(ordered), null, ordered);
+                        const parts = Object.values(ordered);
+                        capture.record(table, parts, null, ordered, parts);
                       }
                       return row(j + 1);
                     });
@@ -4065,13 +4085,18 @@ export function openStore(model, options) {
                 + "a load specification is not a query document, and a collection's live query is "
                 + 'store.collection(name).live', '/entities');
             }
-            refuseOpaqueExternals(liveComparedExternals(document, operators, storeProfile, roots),
+            // a join-table root the profile bounds reads its sides' rows
+            // too: a write to one re-runs the query, and their predicates'
+            // externals bind as the document's do
+            const read = storeProfile === null ? roots : new Set([...roots, ...[...roots].flatMap((name) =>
+              boundedJoinSides(storeProfile, mapping.joinTables, name).map((side) => side.entity))]);
+            refuseOpaqueExternals(liveComparedExternals(document, operators, storeProfile, read),
               liveOptions?.externals, 'store.live');
             const logicalRows = createLogicalRows({ connection, shapes: captureShapes, capture,
               collectionCore: coreFor, entityCore: entityCoreFor });
             return closeOnRollback(liveRegistry.register({
               name: [...roots].join('+'),
-              tables: roots,
+              tables: read,
               document,
               externals: liveOptions?.externals ?? {},
               demanded: liveOptions?.mode,

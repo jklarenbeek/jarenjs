@@ -44,7 +44,7 @@ import {
 import { compareJsonScalarLt } from '@jarenjs/core/object';
 import { compileBuckets, resampleSeries, toEpoch } from '@jarenjs/core/series';
 
-import { selectPlan, conjoin, plainFamily, PLAN_VERSION } from './algebra.js';
+import { selectPlan, conjoin, plainFamily, PLAN_VERSION, bindsText } from './algebra.js';
 import { typeOfPath, isNumericType } from './types.js';
 import { schemaNodeAt, canonicalOf, unpinnedStep } from './ddl.js';
 import { columnKindFor } from './scalar-types.js';
@@ -431,15 +431,7 @@ export const LONE_SURROGATE_REFUSAL = 'a string literal holding a lone surrogate
  * @returns {boolean}
  */
 export function bindsLoneSurrogate(pred) {
-  switch (pred.p) {
-    case 'and': case 'or': return pred.items.some(bindsLoneSurrogate);
-    case 'not': return bindsLoneSurrogate(pred.item);
-    case 'cmp': case 'strop': return typeof pred.operand.lit === 'string' && !pred.operand.lit.isWellFormed();
-    // a hop's filter is bound in the correlated subselect that tests or
-    // counts the related rows, as a root's own filter is
-    case 'hop': case 'hopCount': return pred.hop.filter != null && bindsLoneSurrogate(pred.hop.filter);
-    default: return false;
-  }
+  return bindsText(pred, (text, listed) => !listed && !text.isWellFormed());
 }
 
 /** Whether a reference holds a boolean: by its schema type, or by what its

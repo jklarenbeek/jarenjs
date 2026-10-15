@@ -171,8 +171,10 @@ for (const engine of ENGINES) {
         await admin.query('SET LOCAL enable_seqscan = off');
         const rows = (await admin.query({ text: `EXPLAIN ${sql}`, values: ['dev'] })).rows;
         const text = rows.map((/** @type {any} */ row) => row['QUERY PLAN']).join('\n');
-        assert.match(text, /Index (Only )?Scan (using|on) "Label_User_pkey"/);
-        assert.match(text, /Index Cond: \("Label_key" = /);
+        // PostgreSQL 16 reaches the key through a bitmap over the same index,
+        // its condition beside the column's IS NOT NULL
+        assert.match(text, /(Index (Only )?Scan (using|on)|Bitmap Index Scan on) "Label_User_pkey"/);
+        assert.match(text, /Index Cond: \((\("Label_key" IS NOT NULL\) AND \()?"Label_key" = /);
       }
       finally {
         await admin.query('ROLLBACK');

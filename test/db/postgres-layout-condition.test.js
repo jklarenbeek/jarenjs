@@ -69,6 +69,8 @@ const SAME = [
   ["the server's casts on a varchar list", list(col('v'), ['a', 'b']), "v IN ('a', 'b')"],
   ['a smallint column cast up to integer', bin('>', cast(col('sm'), 'INTEGER'), val(5)), 'sm > 5'],
   ['an integer column cast up beside a fraction', bin('>', col('n'), val(5.5)), '(n)::numeric > 5.5'],
+  ['an integer column cast to double precision, which holds every integer', bin('>', col('n'), val(5)), '(n)::double precision > 5'],
+  ['a smallint column cast to real, which holds every smallint', bin('>', col('sm'), val(5)), '(sm)::real > 5'],
   ['an integer literal cast to numeric', bin('>', col('m'), val(5)), 'm > 5::numeric'],
   ['a numeric literal spelled with trailing zeros', bin('>', col('m'), val(1.5)), 'm > 1.50'],
   ['a numeric literal spelled with an exponent', bin('>', col('m'), val(1.5)), 'm > 15e-1'],
@@ -132,6 +134,12 @@ const DRIFT = [
   ['IS NULL for IS NOT NULL', bin('IS', col('s'), val(null)), 's IS NOT NULL'],
   ['a boolean negated', col('b'), 'NOT b'],
   ['a narrowing cast the declaration does not make', bin('>', col('m'), val(5)), '(m)::integer > 5'],
+  // a cast that rounds the column keeps other rows: 16777217 is no real, and
+  // 0.1000000000000000000001 is 0.1 as a double
+  ['an integer column cast to real', bin('=', col('n'), val(16777217)), '(n)::real = 16777217'],
+  ['a bigint column cast to double precision', bin('=', col('bi'), val(5)), '(bi)::double precision = 5'],
+  ['a numeric column cast to double precision', bin('=', col('m'), val(0.1)), '(m)::double precision = 0.1'],
+  ['a numeric column cast to real', bin('>', col('m'), val(5)), '(m)::real > 5'],
 ];
 /** A declared condition the reader cannot read back on one side: not compared, so it opens as it did. */
 const UNREAD = [

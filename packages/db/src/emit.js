@@ -18,7 +18,7 @@
  */
 
 import { codePointPrefixSuccessor } from '@jarenjs/core/string';
-import { plainFamily } from './algebra.js';
+import { plainFamily, bindsText } from './algebra.js';
 import { physicalSelection } from './physical.js';
 import { columnKindFor } from './scalar-types.js';
 import { isNumericType } from './types.js';
@@ -229,10 +229,39 @@ export function bindsAsWritten(dialect, text, asJson) {
   return (asJson || text.isWellFormed()) && serverHolds(dialect, text, asJson);
 }
 
+/**
+ * Whether a planned predicate binds a string literal the server behind a
+ * dialect cannot hold ({@link serverHolds}): a statement with no engine
+ * path — a profile's mandatory predicate, a graph load, a native mutation —
+ * refuses it by its own code, where a query document runs in the residual.
+ * @param {any} dialect @param {any} pred @returns {boolean}
+ */
+export function bindsUnheldText(dialect, pred) {
+  return bindsText(pred, (text, listed) => !serverHolds(dialect, text, listed));
+}
+
+/** What a literal the server cannot hold is. */
+const UNHELD_TEXT = 'a string literal holding U+0000, or a list item holding U+0000 or a lone surrogate, '
+  + 'is not a value this server holds';
+
+/** The reason a statement with no engine path refuses such a literal. */
+export const UNHELD_TEXT_REFUSAL = `${UNHELD_TEXT}, and this statement has no engine path to compare it; `
+  + 'select the rows through execute(), which answers it in the engine';
+
 /** The reason a literal the server cannot hold sends a collection's or an
  * entity's document to the set residual. */
-const SERVER_TEXT = 'a string literal holding U+0000, or a list item holding U+0000 or a lone surrogate, '
-  + 'is not a value this server holds; the call runs in the residual over every row it reads';
+const SERVER_TEXT = `${UNHELD_TEXT}; the call runs in the residual over every row it reads`;
+
+/**
+ * A membership list's string items as the JSON text one slot binds, refused
+ * when the server holds one of them in no JSON value ({@link serverHolds}),
+ * which the query engines catch to run the document in the set residual.
+ * @param {any} dialect @param {string[]} texts @returns {string}
+ */
+function textList(dialect, texts) {
+  if (texts.some((text) => !serverHolds(dialect, text, true))) throw new UnrepresentablePath(SERVER_TEXT);
+  return JSON.stringify(texts);
+}
 
 /**
  * Refuse a slot whose string literal the server cannot hold
@@ -814,9 +843,8 @@ export function emitPlan(plan, dialect, physical) {
     }
     const texts = pred.operand.list.filter((value) => typeof value === 'string');
     const numbers = pred.operand.list.filter((value) => typeof value === 'number');
-    if (texts.some((text) => !serverHolds(dialect, text, true))) throw new UnrepresentablePath(SERVER_TEXT);
     const branches = [];
-    if (texts.length > 0) branches.push(branch('text', param({ literal: JSON.stringify(texts) })));
+    if (texts.length > 0) branches.push(branch('text', param({ literal: textList(dialect, texts) })));
     if (numbers.length > 0)
       branches.push(branch('number', param({ literal: numberList(numbers) }), numbers.some(beyondSafeInteger)));
     return branches.length === 1 ? branches[0] : `(${branches.join(' OR ')})`;
@@ -1218,12 +1246,14 @@ export function emitPlan(plan, dialect, physical) {
  * and the graph-load builder: given an alias and its document column,
  * emit one predicate with the flavor-correct forms. A plan that reads a
  * related entity through a hop also names where the hop finds it:
- * `related` spells an entity's table and a binding's alias.
+ * `related` spells an entity's table and a binding's alias (a statement
+ * over one root, whose hops correlate only with the row judged, needs no
+ * aliases).
  * @param {any} dialect
  * @param {(slot: ParamSlot) => string} param
- * @param {{ tableOf: (entity: string) => string, aliasOf: (binding: string) => string }} [related]
+ * @param {{ tableOf: (entity: string) => string, aliasOf?: (binding: string) => string }} [related]
  * @returns {{ emitPred: (aliasSql: string, docSql: string, pred: any) => string,
- *   hopFrom: (hop: any) => { alias: string, sql: string } }}
+ *   hopFrom: (hop: any, outer?: string) => { alias: string, sql: string } }}
  */
 export function createEntityPredicateEmitters(dialect, param, related = undefined) {
   const q = dialect.quoteIdentifier;
@@ -1260,7 +1290,7 @@ export function createEntityPredicateEmitters(dialect, param, related = undefine
       const texts = pred.operand.list.filter((/** @type {any} */ value) => typeof value === 'string');
       const numbers = pred.operand.list.filter((/** @type {any} */ value) => typeof value === 'number');
       const branches = [];
-      if (texts.length > 0) branches.push(branch('text', param({ literal: JSON.stringify(texts) })));
+      if (texts.length > 0) branches.push(branch('text', param({ literal: textList(dialect, texts) })));
       if (numbers.length > 0)
         branches.push(branch('number', param({ literal: numberList(numbers) }), numbers.some(beyondSafeInteger)));
       return branches.length === 1 ? branches[0] : `(${branches.join(' OR ')})`;
@@ -1333,7 +1363,7 @@ export function createEntityPredicateEmitters(dialect, param, related = undefine
       const values = pred.operand.list.filter((/** @type {any} */ value) =>
         (kind === 'text' ? typeof value === 'string' : typeof value === 'number'));
       if (values.length === 0) return dialect.booleanLiteral(false);
-      const list = kind === 'text' ? JSON.stringify(values) : numberList(values);
+      const list = kind === 'text' ? textList(dialect, values) : numberList(values);
       return `(${column} IS NOT NULL AND ${inListSql(dialect, column, param({ literal: list }), kind)})`;
     }
     const symbol = { eq: '=', ne: '<>', lt: '<', le: '<=', gt: '>', ge: '>=' }[pred.op];
@@ -1411,20 +1441,25 @@ export function createEntityPredicateEmitters(dialect, param, related = undefine
    * alias of its own, the correlation compared as a join compares it (a
    * text column in code-point order), then the hop's own filter. Called
    * once for every place the SQL reads the hop, so each reading carries
-   * its own parameters, in the order of the text.
+   * its own parameters, in the order of the text. An edge end whose
+   * binding is `null` reads the row the predicate holding the hop is
+   * judged on (`outer`) — a bound that belongs to a root, not to a binding
+   * of one document.
    * @param {{ entity: string, binding: string, edges: any[], filter: any }} hop
+   * @param {string} [outer] - the alias of the row the predicate is judged on
    */
-  const hopFrom = (hop) => {
+  const hopFrom = (hop, outer) => {
     const alias = q(`h${hops++}`);
-    const side = (/** @type {{ binding: string, ref: any }} */ end) => physicalComparable(end.ref,
-      `${end.binding === hop.binding ? alias : related.aliasOf(end.binding)}.${q(end.ref.column)}`, dialect);
+    const side = (/** @type {{ binding: string | null, ref: any }} */ end) => physicalComparable(end.ref,
+      `${end.binding === hop.binding ? alias : end.binding === null ? outer
+        : related.aliasOf(end.binding)}.${q(end.ref.column)}`, dialect);
     const conditions = hop.edges.map((/** @type {any} */ edge) => `${side(edge.left)} = ${side(edge.right)}`);
     if (hop.filter !== null) conditions.push(emitPred(alias, `${alias}.${q('doc')}`, hop.filter));
     return { alias, sql: `FROM ${related.tableOf(hop.entity)} AS ${alias} WHERE ${conditions.join(' AND ')}` };
   };
 
   const emitPred = (aliasSql, docSql, pred) => {
-    if (pred.p === 'hop') return `EXISTS (SELECT 1 ${hopFrom(pred.hop).sql})`;
+    if (pred.p === 'hop') return `EXISTS (SELECT 1 ${hopFrom(pred.hop, aliasSql).sql})`;
     if (pred.p === 'hopCount') {
       const { sql } = hopFrom(pred.hop);
       const symbol = { eq: '=', ne: '<>', lt: '<', le: '<=', gt: '>', ge: '>=' }[pred.op];

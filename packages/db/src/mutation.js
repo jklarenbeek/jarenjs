@@ -7,7 +7,7 @@ import { chain, attempt, createStatementOwner } from './driver.js';
 import { DbCompileError, DbRuntimeError, wrapDriverError } from './errors.js';
 import { entityShape, planEntityPredicate, predicateTerms, bindsLoneSurrogate, LONE_SURROGATE_REFUSAL,
   PLANNER_REASONS } from './plan.js';
-import { createEntityPredicateEmitters } from './emit.js';
+import { createEntityPredicateEmitters, bindsUnheldText, UNHELD_TEXT_REFUSAL } from './emit.js';
 import { physicalSelection } from './physical.js';
 import { relationalEmitter } from './relational.js';
 import { isJsonObject } from '@jarenjs/core/object';
@@ -90,6 +90,7 @@ export function createEntityMutation(connection, entity, mapping, core) {
     const bounded = (planned) => {
       if ('refusal' in planned) fail(planned.refusal.reason);
       if (bindsLoneSurrogate(planned.pred)) fail(LONE_SURROGATE_REFUSAL);
+      if (bindsUnheldText(dialect, planned.pred)) fail(UNHELD_TEXT_REFUSAL);
       if (dialect.maxPredicateTerms !== null && predicateTerms(planned.pred) > dialect.maxPredicateTerms)
         fail(PLANNER_REASONS['predicate.termBound'].text);
       return planned;

@@ -24,21 +24,28 @@
  * target after the caller removes it. The copy waits on no timer.
  *
  * The worker begins its read transaction while the calling thread waits for
- * it on the same shared memory (a few statements, bounded by the busy
- * timeout): no statement of the calling thread is then mid-commit on the
- * file, so a commit of its own on another connection cannot make the copy's
- * first read busy — as none could while the copy ran on that thread.
+ * it on the same shared memory: no statement of the calling thread is then
+ * mid-commit on the file, so a commit of its own on another connection
+ * cannot make the copy's first read busy — as none could while the copy ran
+ * on that thread. Each attempt is a few statements, because the worker's
+ * connection waits on no lock: one that meets a lock another connection
+ * holds fails at once, and the worker pauses on its own thread before it
+ * asks for the next attempt, while the calling thread runs — so a lock a
+ * connection of that thread holds, and a timer or an I/O callback of it
+ * releases, is released — until the busy timeout has passed, when the copy
+ * fails busy as a read would.
  */
 
 import { cloneDriverError } from '../errors.js';
 
 /** The worker: open the database read-only, begin one read transaction
- * (the snapshot every step copies from) while the calling thread waits for
- * it, back the database up onto the target and post `{ pages }` or
+ * (the snapshot every step copies from) in attempts the calling thread
+ * waits for, back the database up onto the target and post `{ pages }` or
  * `{ error }` before it exits (the error of a copy the flag stopped is the
  * calling thread's to replace). Shared slots: 0 the stop flag, 1 the phase
- * of the snapshot handshake (1 ready, 2 begin, 3 begun or failed). Built
- * on first use, never at load: a bundle that never copies on Bun drops it. */
+ * of an attempt (1 ready, 2 begin, 3 attempted), 2 the slot a pause waits
+ * on. Built on first use, never at load: a bundle that never copies on Bun
+ * drops it. */
 const workerSource = () => `import { parentPort, workerData } from 'node:worker_threads';
 import { backup, DatabaseSync } from 'node:sqlite';
 const cloneDriverError = ${cloneDriverError};
@@ -51,15 +58,27 @@ if (reports) options.progress = ({ totalPages, remainingPages }) => {
 };
 let outcome;
 try {
-  const db = new DatabaseSync(file, { readOnly: true, timeout });
+  const db = new DatabaseSync(file, { readOnly: true, timeout: 0 });
   try {
-    Atomics.store(slots, 1, 1);
-    parentPort.postMessage({ ready: true });
-    Atomics.wait(slots, 1, 1);
-    try { db.exec('BEGIN; SELECT count(*) FROM sqlite_schema'); }
-    finally {
-      Atomics.store(slots, 1, 3);
-      Atomics.notify(slots, 1);
+    const started = Date.now();
+    for (let pause = 1; ; pause = Math.min(pause * 2, 100)) {
+      Atomics.store(slots, 1, 1);
+      parentPort.postMessage({ ready: true });
+      Atomics.wait(slots, 1, 1);
+      let busy = false;
+      try { db.exec('BEGIN; SELECT count(*) FROM sqlite_schema'); }
+      catch (error) {
+        try { db.exec('ROLLBACK'); }
+        catch { /* the BEGIN itself failed: no transaction is open */ }
+        if ((error?.errcode & 0xff) !== 5 || Date.now() - started >= timeout) throw error;
+        busy = true;
+      }
+      finally {
+        Atomics.store(slots, 1, 3);
+        Atomics.notify(slots, 1);
+      }
+      if (!busy) break;
+      Atomics.wait(slots, 2, 0, Math.max(1, Math.min(pause, timeout - (Date.now() - started))));
     }
     try { outcome = { pages: await backup(db, target, options) }; }
     finally {
@@ -73,10 +92,10 @@ catch (error) { outcome = { error: cloneDriverError(error) }; }
 parentPort.postMessage(outcome);
 `;
 
-/** How long, past the copy's busy timeout, the calling thread waits for
- * the worker to begin its read transaction before it stops waiting: only a
- * worker that died mid-handshake outlasts the busy timeout. */
-const HANDSHAKE_MARGIN_MS = 1000;
+/** How long the calling thread waits for one attempt of the worker to
+ * begin its read transaction before it stops waiting: an attempt waits on
+ * no lock, so only a worker that died mid-attempt outlasts it. */
+const ATTEMPT_MARGIN_MS = 1000;
 
 /** @type {URL | undefined} */
 let workerUrl;
@@ -84,7 +103,7 @@ let workerUrl;
 /**
  * Copy the SQLite database at `file` onto `target` page by page in a
  * worker, `rate` pages per step, inside one read transaction of a
- * dedicated read-only connection with busy timeout `timeout`; `progress`
+ * dedicated read-only connection, begun within busy timeout `timeout`; `progress`
  * receives `{ totalPages, remainingPages }` on the calling thread after
  * every step that leaves pages to copy, and a throw from it stops the copy
  * at the worker's next step. Resolves the page count SQLite reports;
@@ -99,7 +118,7 @@ let workerUrl;
  */
 export async function copyInWorker(file, target, { timeout, rate, progress }) {
   const { Worker } = await import('node:worker_threads');
-  const shared = new SharedArrayBuffer(8);
+  const shared = new SharedArrayBuffer(12);
   const slots = new Int32Array(shared);
   workerUrl ??= new URL(`data:text/javascript,${encodeURIComponent(workerSource())}`);
   const worker = new Worker(workerUrl,
@@ -111,12 +130,12 @@ export async function copyInWorker(file, target, { timeout, rate, progress }) {
     let outcome = null;
     worker.on('message', (message) => {
       if (message.ready === true) {
-        // the read transaction begins while this thread waits: no
-        // statement of this thread is mid-commit on the file then, so
-        // none of its own commits can make that first read busy
+        // an attempt to begin the read transaction runs while this thread
+        // waits: no statement of this thread is mid-commit on the file
+        // then, so none of its own commits can make that first read busy
         Atomics.store(slots, 1, 2);
         Atomics.notify(slots, 1);
-        Atomics.wait(slots, 1, 2, timeout + HANDSHAKE_MARGIN_MS);
+        Atomics.wait(slots, 1, 2, ATTEMPT_MARGIN_MS);
         return;
       }
       if (message.totalPages === undefined) { outcome = message; return; }

@@ -209,6 +209,35 @@ export function assertProfileRoots(profile, roots, docPath = '/profile') {
   }
 }
 
+/**
+ * A profile's own entry for one root in a per-root map (`predicates`,
+ * `members`): `undefined` where the host spelled none, a root named like a
+ * prototype member (`constructor`, `toString`) included.
+ * @param {Record<string, any> | null} map
+ * @param {string} root
+ * @returns {any}
+ */
+export function rootEntry(map, root) {
+  return map !== null && Object.hasOwn(map, root) ? map[root] : undefined;
+}
+
+/**
+ * The entities a profile bounds the rows of a join table through: a join
+ * row names one row of each entity it relates, so under a profile that
+ * holds a predicate for either it is readable only where the row it names
+ * is (MODEL-FORMAT §8, §10.7) — a read of the join table binds those
+ * predicates, and depends on those entities' rows.
+ * @param {any} profile - a normalized profile
+ * @param {Record<string, any> | undefined} joinTables - the mapping's join tables
+ * @param {string} root - a root name; one that is no join table has none
+ * @returns {any[]} the bounded sides, `{ entity, column, referencesKey }`
+ */
+export function boundedJoinSides(profile, joinTables, root) {
+  const join = rootEntry(joinTables ?? null, root);
+  return join === undefined ? []
+    : [join.left, join.right].filter((side) => rootEntry(profile.predicates, side.entity) !== undefined);
+}
+
 /** A bound member's value for comparison: `null` (no bound) reads as the
  * widest. @param {number | null} value */
 const widthOf = (value) => (value === null ? Infinity : value);
@@ -261,8 +290,8 @@ export function floorProfile(storeProfile, callProfile, docPath) {
   };
   const predicates = { ...storeProfile.predicates };
   for (const [root, predicate] of Object.entries(own.predicates)) {
-    predicates[root] = storeProfile.predicates[root] === undefined ? predicate
-      : { $and: [storeProfile.predicates[root], predicate] };
+    const floor = rootEntry(storeProfile.predicates, root);
+    predicates[root] = floor === undefined ? predicate : { $and: [floor, predicate] };
   }
   let collections = storeProfile.collections;
   if (spelled.collections !== undefined) {
@@ -343,8 +372,7 @@ function inside(read, allowed) {
  * @returns {string | null}
  */
 export function memberDenial(profile, root, analysisRoot, isRootSource) {
-  const policy = profile === null || profile.members === null
-    ? undefined : profile.members[root];
+  const policy = profile === null ? undefined : rootEntry(profile.members, root);
   if (policy === undefined) return null;
   const reads = collectMemberReads(analysisRoot, isRootSource);
   const allowed = policy.declared.join(', ');
@@ -596,8 +624,8 @@ export function admitPredicateExternals(root, names, leaves, externals, how) {
  * @returns {((externals: any) => (document: any) => boolean) | null}
  */
 export function pointReadFilter(profile, root, operators, zoneProvider, docPath, leavesOf) {
-  const policy = profile === null || profile.members === null ? undefined : profile.members[root];
-  const expression = profile === null ? undefined : profile.predicates[root];
+  const policy = profile === null ? undefined : rootEntry(profile.members, root);
+  const expression = profile === null ? undefined : rootEntry(profile.predicates, root);
   if (policy === undefined && expression === undefined) return null;
   /** @type {((candidates: any[], externals: any) => any) | null} */
   let keeps = null;

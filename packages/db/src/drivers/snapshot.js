@@ -34,8 +34,6 @@ const SIDE_FILES = Object.freeze(['-journal', '-wal', '-shm']);
 
 const SOURCE_ID = 'SELECT sqlite_source_id() AS id';
 
-const MAIN_FILE = "SELECT file FROM pragma_database_list WHERE name = 'main'";
-
 /**
  * Remove a SQLite file and every side file SQLite may have left beside
  * it — a copy that failed part-way leaves its `-journal` too. A path that
@@ -103,10 +101,17 @@ async function refuseOwnDatabase(databaseFile, target, what) {
 }
 
 /** The main database's file a raw `node:sqlite` or `bun:sqlite` handle
- * reports (`''` for a memory or temporary database).
+ * reports (`''` for a memory or temporary database). A handle with no
+ * `location()` is asked by `PRAGMA database_list`, which reads the
+ * connection alone: its table-valued form is a query, which on a rollback
+ * journal waits out the busy timeout on a lock another connection holds,
+ * the calling thread held all the while.
  * @param {any} db @returns {string} */
 export function mainFileOf(db) {
-  return typeof db.location === 'function' ? (db.location() ?? '') : (firstRow(db, MAIN_FILE)?.file ?? '');
+  if (typeof db.location === 'function') return db.location() ?? '';
+  const statement = db.prepare(sqliteDialect.introspect.pragma('database_list'));
+  try { return statement.all().find((/** @type {any} */ row) => row.name === 'main')?.file ?? ''; }
+  finally { statement.finalize?.(); }
 }
 
 /** The first bytes of a hot rollback journal: SQLite rolls back a journal
@@ -255,8 +260,8 @@ function vacuumInto(db, target) {
  * `node:sqlite` connection opened read-only on
  * the file the database's `main` schema names — never the path it was
  * opened with, whose meaning a relative path ties to the working
- * directory — with the Bun handle's busy timeout, inside one read
- * transaction that is ended, and the connection closed, however the copy
+ * directory — inside one read transaction, begun within the Bun handle's
+ * busy timeout, that is ended, and the connection closed, however the copy
  * ends. The libraries are compared before that file is opened, and the
  * connection prepares no statement: under Bun, `close()` leaves a
  * connection with an unfinalized statement open, holding the file and its
