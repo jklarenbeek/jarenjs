@@ -111,6 +111,11 @@ const VALUE_ANNOTATIONS = new Set([
   'examples', 'format',
 ]);
 
+/** The draft that introduced a keyword whose annotation is its own value, where it is not draft 6: an older draft reads it as an unknown keyword. */
+const ANNOTATION_SINCE = Object.freeze({
+  readOnly: 7, writeOnly: 7, contentEncoding: 7, contentMediaType: 7, deprecated: 2019, contentSchema: 2019,
+});
+
 /** Keywords whose annotation is their own value, for a string instance only. */
 const STRING_ANNOTATIONS = new Set(['contentEncoding', 'contentMediaType', 'contentSchema']);
 
@@ -187,8 +192,10 @@ function schemaPointers(schemas) {
   const name = (/** @type {string} */ token) => encodeURIComponent(encodeJSONPointerSegment(token));
   const visit = (/** @type {any} */ node, /** @type {string} */ location, /** @type {boolean} */ isRoot) => {
     if (!isObjectClass(node) || pointers.has(node)) return;
-    // An embedded resource is registered, and located, under its own id.
-    if (!isRoot && typeof node.$id === 'string') return;
+    // An embedded resource is registered, and located, under its own id; a
+    // plain-name `$id` (`#node`, drafts 6 and 7) names a subschema of the
+    // enclosing resource and is located there.
+    if (!isRoot && typeof node.$id === 'string' && !node.$id.startsWith('#')) return;
     pointers.set(node, location);
     if (!nodes.has(location)) nodes.set(location, node);
     for (const key of Object.keys(node)) {
@@ -319,6 +326,7 @@ function lastToken(pointer) {
  */
 function annotationOf(unit, keyword, children) {
   const schema = unit.schema;
+  if (/** @type {Record<string, number>} */ (ANNOTATION_SINCE)[keyword] > unit.draft) return undefined;
   if (VALUE_ANNOTATIONS.has(keyword)) return schema[keyword];
   if (STRING_ANNOTATIONS.has(keyword)) return typeof unit.data === 'string' ? schema[keyword] : undefined;
   if (MEMBER_ANNOTATIONS.has(keyword)) {
@@ -374,7 +382,8 @@ function keywordResults(unit, verbose) {
   for (const child of unit.children) resultOf(child.keyword).children.push(child);
 
   const schema = unit.schema;
-  const keys = isObjectClass(schema) ? Object.keys(schema) : [];
+  // Before draft 2019-09 a `$ref` makes its siblings inert: only it is evaluated.
+  const keys = !isObjectClass(schema) ? [] : unit.draft < 2019 && typeof schema.$ref === 'string' ? ['$ref'] : Object.keys(schema);
   /** @type {KeywordResult[]} */
   const ordered = [];
   for (const key of keys) {

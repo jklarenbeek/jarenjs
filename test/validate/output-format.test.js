@@ -348,6 +348,47 @@ describe('output units', () => {
     });
   });
 
+  it('name a subschema a draft-06/07 plain-name $id identifies by its JSON Pointer location, as a pointer $ref to it is', () => {
+    for (const dialect of ['http://json-schema.org/draft-06/schema#', 'http://json-schema.org/draft-07/schema#']) {
+      const byName = { $schema: dialect, $id: 'http://ex.test/a.json', allOf: [{ $ref: '#node' }], definitions: { x: { $id: '#node', type: 'string' } } };
+      const byPointer = { ...byName, allOf: [{ $ref: '#/definitions/x' }] };
+      for (const schema of [byName, byPointer]) {
+        assert.deepEqual(output('list', schema, 1), {
+          valid: false,
+          details: [{ valid: false, evaluationPath: '/allOf/0/$ref', schemaLocation: 'http://ex.test/a.json#/definitions/x', instanceLocation: '', errors: { type: 'must be a string' } }],
+        }, dialect);
+        assert.deepEqual(output('basic', schema, 1), {
+          valid: false,
+          errors: [{ valid: false, keywordLocation: '/allOf/0/$ref/type', absoluteKeywordLocation: 'http://ex.test/a.json#/definitions/x/type', instanceLocation: '', error: 'must be a string' }],
+        }, dialect);
+        assert.deepEqual(output('hierarchical', schema, 'a').details[0].details[0].schemaLocation, 'http://ex.test/a.json#/definitions/x');
+      }
+    }
+  });
+
+  it('report only what a draft-06/07 schema evaluated: no sibling of a $ref, no keyword of a later draft', () => {
+    const D6 = 'http://json-schema.org/draft-06/schema#';
+    const D7 = 'http://json-schema.org/draft-07/schema#';
+    const D19 = 'https://json-schema.org/draft/2019-09/schema';
+    const inert = { $schema: D7, $ref: '#/definitions/a', title: 'ignored', type: 'number', definitions: { a: {} } };
+    assert.equal(new JarenValidator().compile(inert)('x'), true);
+    assert.deepEqual(output('list', inert, 'x'), { valid: true, details: [] });
+    assert.deepEqual(output('verbose', inert, 'x'), {
+      valid: true, keywordLocation: '', instanceLocation: '',
+      annotations: [{ valid: true, keywordLocation: '/$ref', instanceLocation: '', annotations: [
+        { valid: true, keywordLocation: '/$ref', absoluteKeywordLocation: 'https://github.com/jklarenbeek/jarenjs#/definitions/a', instanceLocation: '' },
+      ] }],
+    });
+    // 2019-09 applies the siblings beside the reference
+    assert.deepEqual(output('list', { ...inert, $schema: D19 }, 2).details[0].annotations, { title: 'ignored' });
+    const annotations = (/** @type {string} */ dialect) => output('list', { $schema: dialect, readOnly: true, deprecated: true, examples: [1] }, 1).details[0].annotations;
+    assert.deepEqual([annotations(D6), annotations(D7), annotations(D19)], [
+      { examples: [1] },
+      { readOnly: true, examples: [1] },
+      { readOnly: true, deprecated: true, examples: [1] },
+    ]);
+  });
+
   it('escape member names in every location', () => {
     assert.deepEqual(output('list', { $schema: S, $id: 'https://ex.test/app', properties: { '~a/b': { type: 'number' } } }, { '~a/b': 'x' }).details, [
       { valid: false, evaluationPath: '/properties/~0a~1b', schemaLocation: 'https://ex.test/app#/properties/~0a~1b', instanceLocation: '/~0a~1b', errors: { type: 'must be a number' } },

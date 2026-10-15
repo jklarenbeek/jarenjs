@@ -713,8 +713,8 @@ always built):
   `unevaluated*`, and the first-match `anyOf` (recording runs the
   annotation-tracking path, which evaluates every branch).
 - **Projection, not bookkeeping.** `output.js` reads the finished tree:
-  locations (a dynamic anchor's object and a plain-name fragment are
-  resolved to their JSON Pointer by walking the registered resources once),
+  locations (a dynamic anchor's object, a plain-name fragment and a
+  draft-06/07 plain-name `$id` are resolved to their JSON Pointer by walking the registered resources once),
   annotations from the schema and from the units each applicator applied,
   the survival rule (a passing unit inside passing units), the wrapper
   errors a failed subschema already explains, and the pruning of the flat
@@ -733,6 +733,13 @@ by the constructor) and changes nothing in the compile pipeline:
   targets are reached when the walk ends, once every identifier of the
   document is registered, so a reference into the schema's own resources is
   never loaded.
+- **Rounds, in a fixed order.** The documents one round reaches are loaded
+  at once; only when every one of them settled are they registered, walked
+  and their failures judged, each in the order it was reached. A reference
+  into a resource embedded in a document loaded beside it is so held, never
+  loaded, and a failed load of a document that a document loaded beside it
+  or after it embeds is no refusal: which load settles first changes
+  nothing.
 - **Loaded documents are registered by `addSchema`** under the URI they were
   loaded from, and walked with that URI as their base. A schema the
   validator held before the call is not walked again: its unresolved

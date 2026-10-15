@@ -99,23 +99,35 @@ export async function compileAsync(validator, schema, options) {
   if (inFlight === undefined) IN_FLIGHT.set(validator, inFlight = new Map());
   /** The schema's own identifiers: a reference to one of them is held. */
   const own = new Map();
-  /** The documents this call reached, walked or being walked. */
+  /** The documents this call reached. */
   const reached = new Set();
+  const held = (/** @type {string} */ key) => (own.get(key) ?? schemas.get(key)) != null;
+  /** @type {[string, string|undefined, LoadFailure][]} The loads that failed, in the order they were reached */
+  const failed = [];
   let loads = 0;
+  /**
+   * Refuse the first failed load, in the order reached, whose document is
+   * still not held: one loaded beside it or after it may embed it.
+   */
+  const refuseFailed = () => {
+    for (const [key, at, failure] of failed) {
+      if (!held(key))
+        throw new SchemaCompileError(failure.code, failure.reason + heldBy(at), at, failure.options);
+    }
+  };
 
   /**
-   * Walk a document for the documents its references live in, and reach each.
-   * A loaded document whose walk fails is reached as far as its walk got, as
-   * far as `addSchema` registered it; the schema's own walk failing is the
-   * error `compile` throws.
+   * The documents a document's references live in, in the order the walk
+   * that registers it meets them. A loaded document whose walk fails is
+   * reached as far as its walk got, as far as `addSchema` registered it; the
+   * schema's own walk failing is the error `compile` throws.
    * @param {any} doc
    * @param {string} base - The URI the document was retrieved from
    * @param {string} prefix - What names the document in a location (`''` for the schema)
    * @param {Map<string, any>} ids - Where its identifiers are registered
-   * @returns {Promise<unknown>}
+   * @returns {[string, string][]} Each target's key (`uri#`) and the location of its reference
    */
   const walk = (doc, base, prefix, ids) => {
-    // Reached once the walk ends, when every identifier is registered.
     /** @type {[string, string][]} */
     const targets = [];
     try {
@@ -126,81 +138,81 @@ export async function compileAsync(validator, schema, options) {
     catch (e) {
       if (ids === own) throw e;
     }
-    return Promise.all(targets.map(([key, at]) => reach(key, at)));
+    return targets;
   };
 
-  /**
-   * Make the document `key` names held: when nothing holds it, load it and
-   * walk what was loaded.
-   * @param {string} key - The document's key, `uri#`
-   * @param {string} [at] - The location of the reference that needs it, when
-   *   the reference is in the schema or a document this call loaded
-   * @returns {Promise<void>}
-   */
-  const reach = async (key, at) => {
-    if (reached.has(key)) return;
-    reached.add(key);
-    const uri = key.slice(0, -1);
-    if ((own.get(key) ?? schemas.get(key)) != null) return;
-    const by = at === undefined ? ', referenced by a schema the validator held' : '';
-    if (++loads > maxLoads)
-      throw new SchemaCompileError('JK0006', `compileAsync needs more than ${maxLoads} schema loads (maxLoads); one more is '${uri}'${by}`, at);
-    let load = inFlight.get(key);
-    if (load === undefined) {
-      const settled = () => inFlight.delete(key);
-      load = loadOne(validator, loadSchema, uri);
-      inFlight.set(key, load);
-      load.then(settled, settled);
-    }
-    let doc;
-    try {
-      doc = await load;
-    }
-    catch (e) {
-      if (!(e instanceof LoadFailure)) throw e;
-      throw new SchemaCompileError(e.code, e.reason + by, at, e.options);
-    }
-    await walk(doc, key, uri, new Map());
-  };
-
-  /**
-   * The documents of the unresolved references the validator holds that
-   * nothing holds and this call has not reached.
-   * @returns {string[]}
-   */
-  const unheld = () => {
-    const keys = new Set();
-    for (const [id, entry] of schemas) {
-      const key = id.slice(0, id.indexOf('#') + 1);
-      if (entry === null && key.length > 1 && !reached.has(key) && (own.get(key) ?? schemas.get(key)) == null)
-        keys.add(key);
-    }
-    return [...keys];
-  };
-
-  const reaching = [walk(schema, traverse.origin, '', own)];
+  /** @type {[string, string|undefined][]} The documents to reach next, with the reference that needs each (none for a schema the validator held) */
+  let pending = walk(schema, traverse.origin, '', own);
   // `compile` reads the `$vocabulary` of the meta-schema the schema's
   // `$schema` names, looked up by that URI with an empty fragment.
   const dialect = isObjectClass(schema) && isStringType(schema.$schema) ? schema.$schema : '';
   const fragment = dialect.indexOf('#');
   if (dialect !== '' && !OWN_DIALECT.test(dialect) && (fragment === -1 || fragment === dialect.length - 1))
-    reaching.push(reach(fragment === -1 ? `${dialect}#` : dialect, '#/%24schema'));
-  await Promise.all(reaching);
-  // A schema the validator held before this call registered its references
-  // as unresolved entries; `compile` resolves every one of them.
-  for (let missing = unheld(); missing.length > 0; missing = unheld())
-    await Promise.all(missing.map((key) => reach(key)));
+    pending.push([fragment === -1 ? `${dialect}#` : dialect, '#/%24schema']);
+  // The documents are loaded in rounds: every document a round reaches is
+  // loaded at once, and only when all of them settled are they registered,
+  // walked and their failures judged, each in the order it was reached. What
+  // the call loads and answers so never depends on which load settles first.
+  for (;;) {
+    /** @type {[string, string|undefined, Promise<unknown>|undefined][]} Each document of the round, with the load another call has in flight for it */
+    const round = [];
+    for (const [key, at] of pending) {
+      if (reached.has(key) || held(key)) continue;
+      reached.add(key);
+      round.push([key, at, inFlight.get(key)]);
+    }
+    if (round.length === 0) {
+      // A schema the validator held before this call registered its
+      // references as unresolved entries; `compile` resolves every one of them.
+      pending = unheld(schemas, reached, held);
+      if (pending.length === 0) break;
+      continue;
+    }
+    // A document another call is loading counts toward that call's bound.
+    // Past the bound, a failed load nothing has made up for is the refusal.
+    for (const [key, at, joined] of round) {
+      if (joined === undefined && ++loads > maxLoads) {
+        refuseFailed();
+        throw new SchemaCompileError('JK0006', `compileAsync needs more than ${maxLoads} schema loads (maxLoads); one more is '${key.slice(0, -1)}'${heldBy(at)}`, at);
+      }
+    }
+    /** @type {string[]} */
+    const issued = [];
+    const settled = await Promise.allSettled(round.map(([key, , joined]) => {
+      if (joined !== undefined) return joined;
+      const load = loadOne(loadSchema, key.slice(0, -1));
+      inFlight.set(key, load);
+      issued.push(key);
+      return load;
+    }));
+    pending = [];
+    try {
+      settled.forEach((result, i) => {
+        if (result.status === 'fulfilled' && schemas.get(round[i][0]) !== result.value)
+          validator.addSchema(result.value, round[i][0]);
+      });
+    }
+    finally {
+      // Held from here on: a call that reaches one finds it registered.
+      for (const key of issued) inFlight.delete(key);
+    }
+    settled.forEach((result, i) => {
+      const [key, at] = round[i];
+      if (result.status === 'fulfilled') pending.push(...walk(result.value, key, key.slice(0, -1), new Map()));
+      else failed.push([key, at, result.reason]);
+    });
+  }
+  refuseFailed();
   return validator.compile(schema);
 }
 
 /**
- * Load one document and add it to the validator.
- * @param {any} validator
+ * Load one document.
  * @param {(uri: string) => unknown} loadSchema
  * @param {string} uri - The document's URI, without a fragment
- * @returns {Promise<unknown>} The document
+ * @returns {Promise<unknown>} The document; a {@link LoadFailure} when it cannot be used
  */
-async function loadOne(validator, loadSchema, uri) {
+async function loadOne(loadSchema, uri) {
   let doc;
   try {
     doc = await loadSchema(uri);
@@ -210,8 +222,34 @@ async function loadOne(validator, loadSchema, uri) {
   }
   if (!isBoolOrObjectClass(doc))
     throw new LoadFailure('JK0005', `loadSchema('${uri}') returned ${describeDocument(doc)}, not a schema (an object or a boolean)`);
-  validator.addSchema(doc, `${uri}#`);
   return doc;
+}
+
+/**
+ * The documents of the unresolved references the validator holds that
+ * nothing holds and this call has not reached.
+ * @param {Map<string, unknown>} schemas - What the validator holds
+ * @param {Set<string>} reached - The documents this call reached
+ * @param {(key: string) => boolean} held
+ * @returns {[string, undefined][]}
+ */
+function unheld(schemas, reached, held) {
+  const keys = new Set();
+  for (const [id, entry] of schemas) {
+    const key = id.slice(0, id.indexOf('#') + 1);
+    if (entry === null && key.length > 1 && !reached.has(key) && !held(key)) keys.add(key);
+  }
+  return [...keys].map((key) => [key, undefined]);
+}
+
+/**
+ * What a load refusal adds when the reference that needed the document is
+ * in a schema the validator held before the call.
+ * @param {string|undefined} at - The location of the reference, when it is in the schema or a loaded document
+ * @returns {string}
+ */
+function heldBy(at) {
+  return at === undefined ? ', referenced by a schema the validator held' : '';
 }
 
 /**

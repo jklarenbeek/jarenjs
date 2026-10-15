@@ -464,8 +464,9 @@ function openStableFrame(value) {
  *
  * Two further properties a caller must know, inherited from
  * `stableStringify`: **`undefined` members are dropped** (two values
- * differing only in an `undefined` member share a key) and there is
- * **no cycle guard** (a cyclic value overflows the stack). Both are fine
+ * differing only in an `undefined` member share a key) and a cyclic value
+ * is refused as a value nested past 10000 levels (`JO2001`), with no
+ * location. Both are fine
  * for a fingerprint and wrong for a checksum — for anything hashed,
  * signed or recorded, use `canonicalizeJson`
  * (`@jarenjs/json/canonical`, RFC 8785) instead. Do not conflate the

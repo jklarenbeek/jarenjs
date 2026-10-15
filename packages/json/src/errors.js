@@ -27,7 +27,8 @@ export const NESTING_CEILING = 256;
 export const DATA_DEPTH_CEILING = 1000;
 
 /**
- * The deepest nesting the JSON Patch and Merge Patch diffs walk: the bound
+ * The deepest nesting the JSON Patch and Merge Patch diffs walk, and the
+ * deepest merge patch `compileMergePatch` applies: the bound
  * `equalsJson` and `stableStringify` of `@jarenjs/core/object` hold, which
  * the diffs call on whole subtrees, so one refusal (`JO2001`) answers past
  * it whichever walker meets the level first. Past every nesting a default

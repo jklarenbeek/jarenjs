@@ -214,6 +214,134 @@ describe('compileAsync loads each document once', () => {
   });
 });
 
+/** One turn of the event loop. */
+const tick = () => new Promise((resolve) => setImmediate(resolve));
+
+/**
+ * A loader whose loads of `docs` settle only when `release` lets them, in
+ * the order it is given; a URI outside `docs` rejects at once.
+ * @param {Record<string, unknown>} docs
+ */
+function gated(docs) {
+  /** @type {string[]} */
+  const calls = [];
+  /** @type {Map<string, () => void>} */
+  const waiting = new Map();
+  return {
+    calls,
+    /** @param {string} uri */
+    loadSchema: (uri) => {
+      calls.push(uri);
+      if (!Object.hasOwn(docs, uri)) return Promise.reject(new Error(`no document at ${uri}`));
+      return new Promise((resolve) => waiting.set(uri, () => resolve(structuredClone(docs[uri]))));
+    },
+    /** @param {string[]} order - The URIs to settle, one per turn; one never asked for is passed over */
+    async release(order) {
+      for (const uri of order) {
+        for (let turns = 0; turns < 20 && !waiting.has(uri); turns++) await tick();
+        waiting.get(uri)?.();
+        waiting.delete(uri);
+        for (let turns = 0; turns < 3; turns++) await tick();
+      }
+    },
+  };
+}
+
+/**
+ * Every order of `items`.
+ * @param {string[]} items
+ * @returns {string[][]}
+ */
+function orders(items) {
+  if (items.length <= 1) return [items];
+  return items.flatMap((item, i) => orders([...items.slice(0, i), ...items.slice(i + 1)]).map((rest) => [item, ...rest]));
+}
+
+/**
+ * What `compileAsync` answers for each order its loads settle in: the URIs
+ * it asked for, and the validator's answers on `instances` (or the refusal).
+ * @param {object} schema
+ * @param {Record<string, unknown>} docs
+ * @param {string[]} settle - The documents whose loads are released, in every order
+ * @param {unknown[]} instances
+ */
+async function everyOrder(schema, docs, settle, instances) {
+  const answers = [];
+  for (const order of orders(settle)) {
+    const loader = gated(docs);
+    const [result] = await Promise.allSettled([compileAsync(new JarenValidator(), schema, loader), loader.release(order)]);
+    answers.push({
+      order: order.join(' '),
+      calls: loader.calls,
+      answer: result.status === 'fulfilled' ? instances.map((instance) => result.value(instance)) : result.reason.message,
+    });
+  }
+  return answers;
+}
+
+describe('compileAsync answers the same whichever load settles first', () => {
+  const S = 'https://json-schema.org/draft/2020-12/schema';
+  const embeds = { $schema: S, $defs: { e: { $id: 'https://x.test/e.json', type: 'string' } } };
+
+  it('a reference into a resource embedded in a document loaded beside it is held, and never loaded', async () => {
+    const docs = { 'https://x.test/d1.json': embeds, 'https://x.test/d2.json': { $schema: S, $ref: 'https://x.test/e.json' } };
+    const schema = { $schema: S, properties: { a: { $ref: 'https://x.test/d1.json' }, b: { $ref: 'https://x.test/d2.json' } } };
+    const answers = await everyOrder(schema, docs, ['https://x.test/d1.json', 'https://x.test/d2.json'], [{ b: 'x' }, { b: 1 }]);
+    const calls = ['https://x.test/d1.json', 'https://x.test/d2.json'];
+    assert.deepEqual(answers, [
+      { order: 'https://x.test/d1.json https://x.test/d2.json', calls, answer: [true, false] },
+      { order: 'https://x.test/d2.json https://x.test/d1.json', calls, answer: [true, false] },
+    ]);
+    const sync = new JarenValidator();
+    for (const [uri, doc] of Object.entries(docs)) sync.addSchema(doc, `${uri}#`);
+    assert.deepEqual([sync.compile(schema)({ b: 'x' }), sync.compile(schema)({ b: 1 })], [true, false]);
+  });
+
+  it('a failed load of a document embedded in one loaded beside it is no refusal', async () => {
+    const docs = { 'https://x.test/d1.json': embeds };
+    const schema = { $schema: S, properties: { a: { $ref: 'https://x.test/d1.json' }, b: { $ref: 'https://x.test/e.json' } } };
+    const answers = await everyOrder(schema, docs, ['https://x.test/d1.json'], [{ b: 'x' }, { b: 1 }]);
+    assert.deepEqual(answers, [
+      { order: 'https://x.test/d1.json', calls: ['https://x.test/d1.json', 'https://x.test/e.json'], answer: [true, false] },
+    ]);
+  });
+
+  it('three documents loaded together, in all six orders', async () => {
+    const docs = {
+      'https://x.test/d1.json': embeds,
+      'https://x.test/d2.json': { $schema: S, properties: { e: { $ref: 'https://x.test/e.json' }, g: { $ref: 'https://x.test/g.json' } } },
+      'https://x.test/d3.json': { $schema: S, $defs: { g: { $id: 'https://x.test/g.json', type: 'integer' } } },
+    };
+    const schema = { $schema: S, allOf: [{ $ref: 'https://x.test/d1.json' }, { $ref: 'https://x.test/d2.json' }, { $ref: 'https://x.test/d3.json' }] };
+    const answers = await everyOrder(schema, docs, Object.keys(docs), [{ e: 'x', g: 1 }, { e: 1 }, { g: 1.5 }]);
+    assert.equal(answers.length, 6);
+    for (const { order, calls, answer } of answers)
+      assert.deepEqual({ order, calls, answer }, { order, calls: Object.keys(docs), answer: [true, false, false] });
+  });
+
+  it('a failed load is the refusal, before maxLoads stops the loads after it', async () => {
+    const loader = served({ 'https://x.test/b.json': { $ref: 'c.json' }, 'https://x.test/c.json': { type: 'string' } });
+    const error = await refusal(compileAsync(new JarenValidator(),
+      { properties: { a: { $ref: 'https://x.test/a.json' }, b: { $ref: 'https://x.test/b.json' } } }, { ...loader, maxLoads: 2 }));
+    assert.equal(error.message, "JK0004: loadSchema('https://x.test/a.json') failed: no document at https://x.test/a.json at #/properties/a/%24ref");
+    assert.deepEqual(loader.calls, ['https://x.test/a.json', 'https://x.test/b.json']);
+  });
+
+  it('a document another call is loading counts toward that call\'s maxLoads, not this one\'s', async () => {
+    const docs = Object.fromEntries(Array.from({ length: 5 }, (_, i) =>
+      [`https://x.test/${i}.json`, i < 4 ? { $ref: `https://x.test/${i + 1}.json` } : { type: 'number' }]));
+    const first = served(docs);
+    const second = served(docs);
+    const validator = new JarenValidator();
+    const [a, b] = await Promise.all([
+      compileAsync(validator, { $ref: 'https://x.test/0.json' }, { ...first, maxLoads: 5 }),
+      compileAsync(validator, { items: { $ref: 'https://x.test/0.json' } }, { ...second, maxLoads: 2 }),
+    ]);
+    assert.deepEqual([a(1), a('1'), b([1]), b(['1'])], [true, false, true, false]);
+    assert.deepEqual([first.calls.length, second.calls.length], [5, 0]);
+  });
+});
+
 describe('compileAsync refusals', () => {
   it('JK0004: the loader throws or rejects, naming the URI, the reference and the cause', async () => {
     const offline = new Error('503 Service Unavailable');
@@ -290,6 +418,8 @@ describe('compileAsync refusals', () => {
 
   it('every new code has its row', () => {
     assert.deepEqual(['JK0004', 'JK0005', 'JK0006', 'JK0007'].map((code) => typeof VALIDATE_CODES[code]), ['string', 'string', 'string', 'string']);
+    // what loadSchema's answer is checked for: its kind, not a meta-schema
+    assert.equal(VALIDATE_CODES.JK0005, 'compileAsync: a loaded document is not a schema (an object or a boolean)');
   });
 });
 

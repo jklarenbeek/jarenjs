@@ -1716,7 +1716,8 @@ export class JarenValidator {
 
         // Also traverse the schema to find and store all internal $id anchors
         // This is important for remote schemas that may have location-independent identifiers
-        // We use a wrapper that skips already-existing keys instead of throwing
+        // We use a wrapper that skips already-existing keys instead of throwing,
+        // and fills a key an earlier schema's reference left unresolved
         this.#traverseAndStoreIds(schemaKey, schema);
 
         // A ring of references registered here would make every later compile
@@ -1785,9 +1786,10 @@ export class JarenValidator {
       // Ignore errors for already-existing schemas at the root level
     }
 
-    // Merge new entries into the main schemas map, skipping existing keys
+    // Merge new entries into the main schemas map, skipping existing keys;
+    // an unresolved entry (a reference an earlier schema made) is filled.
     for (const [id, value] of newSchemas.entries()) {
-      if (!this.#schemas.has(id)) {
+      if (this.#schemas.get(id) == null) {
         this.#schemas.set(id, value);
       }
     }

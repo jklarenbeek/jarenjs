@@ -941,16 +941,15 @@ export function createJSONPatch(source, target, options = undefined) {
  * @typedef {(doc: any) => any} JsonMergePatchApplier
  */
 
-// Compile one merge-patch object level into a plan closure. The patch
-// splits once into removes (null members), scalar/array sets and
-// nested-object merges; applying is identity-preserving - a level that
-// changes nothing returns the target reference unchanged.
-function compileMergeObjectNode(patch) {
+// One merge-patch object level, split once into removes (null members),
+// scalar/array sets and nested-object merges; `merges` holds the plan of
+// each nested level, filled by `compileMergePlan`.
+function splitMergeLevel(patch) {
   const removes = [];
   const setKeys = [];
   const setVals = [];
   const mergeKeys = [];
-  const mergeFns = [];
+  const mergePatches = [];
   for (const key in patch) {
     if (!hasOwn(patch, key))
       continue;
@@ -960,55 +959,71 @@ function compileMergeObjectNode(patch) {
     }
     else if (isJsonObject(v)) {
       mergeKeys.push(key);
-      mergeFns.push(compileMergeObjectNode(v));
+      mergePatches.push(v);
     }
     else {
       setKeys.push(key);
       setVals.push(v);
     }
   }
-  const removeSet = removes.length > 0 ? new Set(removes) : null;
-  const rlen = removes.length;
-  const slen = setKeys.length;
-  const mlen = mergeKeys.length;
-  return function mergeNode(target) {
-    if (!isJsonObject(target)) {
-      // RFC 7396: a non-object target is replaced by merging into {}
-      const out = {};
-      for (let i = 0; i < slen; i++)
-        setObjectMember(out, setKeys[i], setVals[i]);
-      for (let i = 0; i < mlen; i++)
-        setObjectMember(out, mergeKeys[i], mergeFns[i](undefined));
-      return out;
+  return {
+    removes,
+    removeSet: removes.length > 0 ? new Set(removes) : null,
+    setKeys,
+    setVals,
+    mergeKeys,
+    mergePatches,
+    merges: [],
+  };
+}
+
+// The plans of a merge patch's object levels, split on their own stack
+// instead of recursing per level, so the nesting a patch can reach is not
+// the host's call stack; past JSON_WALK_DEPTH_CEILING levels it is
+// refused, as the diff that writes such patches refuses.
+function compileMergePlan(patch) {
+  const root = splitMergeLevel(patch);
+  const open = [root];
+  const depths = [1];
+  while (open.length > 0) {
+    const plan = open.pop();
+    const depth = depths.pop() + 1;
+    for (let i = 0; i < plan.mergePatches.length; i++) {
+      if (depth > JSON_WALK_DEPTH_CEILING)
+        throw walkTooDeep('applied');
+      const child = splitMergeLevel(plan.mergePatches[i]);
+      plan.merges.push(child);
+      open.push(child);
+      depths.push(depth);
     }
+  }
+  return root;
+}
+
+// The value one level merges `target` into, given the merged value of
+// each of its nested levels. RFC 7396: a non-object target is replaced by
+// merging into {}. An object target the level does not change comes back
+// by reference; otherwise its members are copied, the removed ones left out.
+function mergeLevel(plan, target, merged) {
+  const removes = plan.removes;
+  const setKeys = plan.setKeys;
+  const setVals = plan.setVals;
+  const mergeKeys = plan.mergeKeys;
+  const isObject = isJsonObject(target);
+  if (isObject) {
     let changed = false;
-    for (let i = 0; i < rlen; i++) {
-      if (hasOwn(target, removes[i])) {
-        changed = true;
-        break;
-      }
-    }
-    if (!changed) {
-      for (let i = 0; i < slen; i++) {
-        const key = setKeys[i];
-        if (!hasOwn(target, key) || target[key] !== setVals[i]) {
-          changed = true;
-          break;
-        }
-      }
-    }
-    const mres = mlen > 0 ? new Array(mlen) : null;
-    for (let i = 0; i < mlen; i++) {
-      const key = mergeKeys[i];
-      const prev = hasOwn(target, key) ? target[key] : undefined;
-      const sub = mergeFns[i](prev);
-      mres[i] = sub;
-      if (sub !== prev)
-        changed = true;
-    }
+    for (let i = 0; i < removes.length && !changed; i++)
+      changed = hasOwn(target, removes[i]);
+    for (let i = 0; i < setKeys.length && !changed; i++)
+      changed = !hasOwn(target, setKeys[i]) || target[setKeys[i]] !== setVals[i];
+    for (let i = 0; i < mergeKeys.length && !changed; i++)
+      changed = merged[i] !== (hasOwn(target, mergeKeys[i]) ? target[mergeKeys[i]] : undefined);
     if (!changed)
       return target;
-    const out = {};
+  }
+  const out = {};
+  if (isObject) {
+    const removeSet = plan.removeSet;
     for (const key in target) {
       if (!hasOwn(target, key))
         continue;
@@ -1016,12 +1031,43 @@ function compileMergeObjectNode(patch) {
         continue;
       setObjectMember(out, key, target[key]);
     }
-    for (let i = 0; i < slen; i++)
-      setObjectMember(out, setKeys[i], setVals[i]);
-    for (let i = 0; i < mlen; i++)
-      setObjectMember(out, mergeKeys[i], mres[i]);
-    return out;
-  };
+  }
+  for (let i = 0; i < setKeys.length; i++)
+    setObjectMember(out, setKeys[i], setVals[i]);
+  for (let i = 0; i < mergeKeys.length; i++)
+    setObjectMember(out, mergeKeys[i], merged[i]);
+  return out;
+}
+
+// Apply a merge plan on its own stack of open levels: a nested level's
+// value joins its parent when it closes, in the patch's member order; a
+// level without nested levels closes where it is reached.
+function applyMergePlan(root, doc) {
+  if (root.mergeKeys.length === 0)
+    return mergeLevel(root, doc, null);
+  const frames = [];
+  let frame = { plan: root, target: doc, merged: new Array(root.mergeKeys.length), at: 0 };
+  for (;;) {
+    const { plan, target } = frame;
+    if (frame.at < plan.mergeKeys.length) {
+      const key = plan.mergeKeys[frame.at];
+      const child = plan.merges[frame.at];
+      const prev = isJsonObject(target) && hasOwn(target, key) ? target[key] : undefined;
+      if (child.mergeKeys.length === 0) {
+        frame.merged[frame.at++] = mergeLevel(child, prev, null);
+        continue;
+      }
+      frames.push(frame);
+      frame = { plan: child, target: prev, merged: new Array(child.mergeKeys.length), at: 0 };
+      continue;
+    }
+    const value = mergeLevel(plan, target, frame.merged);
+    const parent = frames.pop();
+    if (parent === undefined)
+      return value;
+    parent.merged[parent.at++] = value;
+    frame = parent;
+  }
 }
 
 /**
@@ -1046,9 +1092,9 @@ export function compileMergePatch(patch) {
       return patch;
     };
   }
-  const node = compileMergeObjectNode(patch);
+  const plan = compileMergePlan(patch);
   return function applyMerge(doc) {
-    return node(doc);
+    return applyMergePlan(plan, doc);
   };
 }
 

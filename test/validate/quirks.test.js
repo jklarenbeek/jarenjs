@@ -137,6 +137,26 @@ describe('schema registration', () => {
   });
 });
 
+describe('schema registration in any order', () => {
+  it('a resource embedded in a document added after one that references it is found', () => {
+    const S = 'https://json-schema.org/draft/2020-12/schema';
+    const docs = {
+      'https://x.test/d1.json': { $schema: S, $defs: { e: { $id: 'https://x.test/e.json', type: 'string' } } },
+      'https://x.test/d2.json': { $schema: S, properties: { e: { $ref: 'https://x.test/e.json' }, g: { $ref: 'https://x.test/g.json' } } },
+      'https://x.test/d3.json': { $schema: S, $defs: { g: { $id: 'https://x.test/g.json', type: 'integer' } } },
+    };
+    const keys = Object.keys(docs);
+    const schema = { $schema: S, allOf: keys.map((key) => ({ $ref: key })) };
+    for (const order of [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]]) {
+      const validator = new JarenValidator();
+      for (const i of order) validator.addSchema(docs[keys[i]], `${keys[i]}#`);
+      const validate = validator.compile(schema);
+      assert.deepEqual([validate({ e: 'x', g: 1 }), validate({ e: 1 }), validate({ g: 1.5 })], [true, false, false], order.join(' '));
+      assert.equal(validator.getSchema('https://x.test/g.json'), docs['https://x.test/d3.json'].$defs.g);
+    }
+  });
+});
+
 describe('dynamic anchor scope', () => {
   it('keeps distinct anchor schemas with the same long annotation prefix separate', () => {
     const validate = new JarenValidator().compile({

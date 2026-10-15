@@ -1,14 +1,15 @@
 //@ts-check
 /**
- * @file `createJSONPatch` and `createMergePatch` diff any nesting a default
- * host stack could, without that stack: past 10000 levels, and on a cycle,
- * they refuse with `JO2001`, the bound `equalsJson` and `stableStringify`
- * hold, instead of overflowing it.
+ * @file `createJSONPatch` and `createMergePatch` diff, and
+ * `compileMergePatch`/`applyMergePatch` apply, any nesting a default host
+ * stack could, without that stack: past 10000 levels, and on a cycle, they
+ * refuse with `JO2001`, the bound `equalsJson` and `stableStringify` hold,
+ * instead of overflowing it.
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { createJSONPatch, createMergePatch, applyJSONPatch } from '@jarenjs/json';
+import { createJSONPatch, createMergePatch, applyJSONPatch, applyMergePatch, compileMergePatch } from '@jarenjs/json';
 import { equalsJson } from '@jarenjs/core/object';
 
 /** `n` nested `{ a }` objects around `leaf`. @param {number} n @param {unknown} leaf */
@@ -115,6 +116,36 @@ describe('createMergePatch diffs deep values without the host stack', () => {
   });
 });
 
+describe('compileMergePatch and applyMergePatch apply deep patches without the host stack', () => {
+  const unapplied = { ...refused, message: 'JO2001: a value nested deeper than 10000 levels cannot be applied' };
+
+  it('applies the 10000-level patch createMergePatch writes', () => {
+    const source = nestObjects(10000, 1);
+    const target = nestObjects(10000, 2);
+    assert.equal(equalsJson(applyMergePatch(source, createMergePatch(source, target)), target), true);
+    // onto a non-object, the patch builds the objects it merges into
+    assert.equal(equalsJson(applyMergePatch(1, nestObjects(10000, 2)), target), true);
+  });
+
+  it('returns a document 10000 levels deep that the patch does not change by reference', () => {
+    const doc = nestObjects(10000, 1);
+    assert.equal(compileMergePatch(nestObjects(10000, 1))(doc), doc);
+    const changed = compileMergePatch({ b: 1, a: nestObjects(9999, 1) })(doc);
+    assert.notEqual(changed, doc);
+    assert.equal(changed.a, doc.a);
+    assert.equal(JSON.stringify(Object.keys(changed)), '["a","b"]');
+  });
+
+  it('refuses a patch of 10001 levels and a cyclic patch with JO2001', () => {
+    assert.throws(() => compileMergePatch(nestObjects(10001, 1)), unapplied);
+    assert.throws(() => applyMergePatch({}, nestObjects(10001, null)), unapplied);
+    /** @type {any} */
+    const cycle = { x: 1 };
+    cycle.self = cycle;
+    assert.throws(() => compileMergePatch(cycle), unapplied);
+  });
+});
+
 describe('the bound holds on a small host stack', () => {
   it('passes 10000 levels and refuses 10001 under --stack-size=900', () => {
     const script = `
@@ -132,5 +163,21 @@ describe('the bound holds on a small host stack', () => {
       { encoding: 'utf8', cwd: new URL('../..', import.meta.url) });
     assert.equal(child.status, 0, child.stderr);
     assert.equal(child.stdout, JSON.stringify([1, 'answered', 'JO2001', 'JO2001']));
+  });
+
+  it('applies a 10000-level merge patch and refuses 10001 under --stack-size=900', () => {
+    const script = `
+      import { applyMergePatch, compileMergePatch } from '@jarenjs/json';
+      const nest = (n, leaf) => { let v = leaf; for (let i = 0; i < n; i++) v = { a: v }; return v; };
+      const codeOf = (f) => { try { f(); return 'answered'; } catch (e) { return e.code ?? e.name; } };
+      process.stdout.write(JSON.stringify([
+        codeOf(() => applyMergePatch(nest(10000, 1), nest(10000, 2))),
+        codeOf(() => compileMergePatch(nest(10001, 2))),
+      ]));
+    `;
+    const child = spawnSync(process.execPath, ['--stack-size=900', '--input-type=module', '-e', script],
+      { encoding: 'utf8', cwd: new URL('../..', import.meta.url) });
+    assert.equal(child.status, 0, child.stderr);
+    assert.equal(child.stdout, JSON.stringify(['answered', 'JO2001']));
   });
 });

@@ -31,6 +31,10 @@ delete it or fix it.
 (RFC 9535, passing the complete official compliance suite), JSON Patch
 (RFC 6902) and Merge Patch (RFC 7396). See
 [`packages/json/ARCHITECTURE.md`](../packages/json/ARCHITECTURE.md).
+- [ ] **`JO2001` names a cycle as a deep value.**
+  `stableStringify`/`contentKey`/`equalsJson` on `c.self = c` refuse "nested
+  deeper than 10000 levels" with no location, where `canonicalizeJson` says "a
+  circular reference … at /self".
 
 ## @jarenjs/json — JSLT
 
@@ -112,6 +116,24 @@ delete it or fix it.
   literal, because it compiled before. Closing it refuses such a schema when
   it compiles (a minor), with an upgrade sentence that names the `v`-mode
   spelling.
+- [ ] **`compileAsync` resolves a relative reference in a schema without `$id`
+  against the default base.** `{ $ref: 'name.json' }` asks the loader for
+  `https://github.com/jklarenbeek/name.json`, a URI the host never named.
+  Refusing such a reference, or a base option, is a minor.
+- [ ] **The output formats answer in English only.** A unit carries rendered
+  text, so `localizeErrors` does not reach it and the packs' `subschema` entry
+  is never read. A catalog on the output path (or units that keep `msgid` and
+  `params`) is a new API (a minor).
+- [ ] **`verbose` lists keywords nothing evaluated.** An unknown keyword
+  (`x-ui`) and a keyword of a later draft (draft-07 `deprecated`) appear as
+  passing keyword units without an annotation; leaving them out needs a
+  per-draft keyword registry.
+- [ ] **A disallowed member is located two ways.** `additionalProperties:
+  false` places each failure at the member (`/x`), `unevaluatedProperties:
+  false` at the object (`""`, the member in the message), and
+  `dependentRequired` at the present member (`/a`) in collected errors and
+  `basic`, at the object in `list`. One rule changes collected `instancePath`
+  (an upgrade note).
 
 ## @jarenjs/view & @jarenjs/app
 
@@ -200,6 +222,11 @@ costs a descriptor plus examples and no UI code at all.
   stream parsers are pure, but they consume a stream rather than a string, so
   a descriptor for them first needs a source pane that means "feed this in
   chunks" — a question the `(source, data)` shape does not answer.
+- [ ] **The Core kernels card compares answers the two doors cannot share.**
+  `geohashEncode` without a precision answers with the kernel's default 9
+  while `$geohash` refuses `JQ2001`; the I-Regexp kernel's `null` (invalid
+  pattern) is compared with `$match`'s `false`; both cards read "Same answer:
+  no".
 
 ## @jarenjs/studio
 

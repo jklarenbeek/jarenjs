@@ -41,6 +41,8 @@ import {
   ARRAY_CONSTRAINTS, OBJECT_CONSTRAINTS,
 } from '@jarenjs/core/schema';
 
+import { createSchemaPatternTester } from './string.js';
+
 //#region Object
 export function isBoolOrObjectClass(obj) {
   return isBooleanType(obj)
@@ -345,7 +347,7 @@ export function createDataRefCompilers() {
     maxLength: constraint('maxLength', isJsonString, isNumberType,
       (data, max, useGrapheme) => getStringLength(data, useGrapheme) <= max),
     pattern: constraint('pattern', isJsonString, isStringType,
-      (data, pattern) => new RegExp(pattern, 'u').test(data)),
+      (data, pattern) => createSchemaPatternTester(pattern)(data)),
     minItems: constraint('minItems', Array.isArray, isNumberType,
       (data, min) => data.length >= min),
     maxItems: constraint('maxItems', Array.isArray, isNumberType,

@@ -27,7 +27,7 @@ export const VALIDATE_CODES = Object.freeze({
   JK0002: 'the maxReferenceDepth option is not a positive safe integer',
   JK0003: 'outputFormat is not a format of @jarenjs/validate/output',
   JK0004: 'compileAsync: the loadSchema function failed to load a referenced schema',
-  JK0005: 'compileAsync: a loaded document is not a schema, or not a valid one under its registered $schema',
+  JK0005: 'compileAsync: a loaded document is not a schema (an object or a boolean)',
   JK0006: 'compileAsync: a compilation needs more schema loads than the maxLoads option',
   JK0007: 'compileAsync: its validator, loadSchema or maxLoads argument is not one it takes',
   JK2001: 'validation nests schema references deeper than the reference depth ceiling',

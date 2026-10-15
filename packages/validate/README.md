@@ -647,6 +647,12 @@ some instances reach still compiles and answers every instance that does not rea
 passes through `properties`, `items` or another applicator that descends into the
 instance before it comes back is recursion and is unchanged.
 
+Documents can be added in any order: a resource embedded in one
+(`$defs: { e: { $id: 'https://x.test/e.json' } }`) is found by a reference
+that a document added before it makes. *Upgrade: such a reference used to stay
+unresolved, and compiling failed `Can not resolve schema for
+'https://x.test/e.json#'`.*
+
 One validation nests at most 256 schema references (a `$ref` resolved on first use, a
 `$dynamicRef` or a `$recursiveRef`); one more throws a `SchemaRuntimeError` whose `code`
 is `JK2001`, naming the reference, before the host's call stack can overflow. The
@@ -923,7 +929,11 @@ validator.getSchema('https://schemas.example.com/name.json') === documents['http
 - **What it loads.** The document a reference names: `loadSchema` is called
   with an absolute URI without its fragment (`name.json#/$defs/x` loads
   `name.json`), resolved against the `$id` the reference sits under — in a
-  loaded document, against the URI it was loaded from. Also the meta-schema
+  loaded document, against the URI it was loaded from. A schema without an
+  `$id` sits under the validator's default base,
+  `https://github.com/jklarenbeek/jarenjs`, so its `{ "$ref": "name.json" }`
+  asks for `https://github.com/jklarenbeek/name.json`: give the schema an
+  `$id` to name the base its relative references resolve against. Also the meta-schema
   a schema's `$schema` names, unless that is a json-schema.org dialect (the
   validator implements those itself), because `compile` reads its
   `$vocabulary`; and what a schema the validator already held references and
@@ -935,6 +945,15 @@ validator.getSchema('https://schemas.example.com/name.json') === documents['http
   it held. A load that failed is not remembered; the next call asks again.
   A cycle of references between documents ends, since a document already
   reached is not walked again.
+- **Whichever load settles first.** The documents found together are loaded
+  together, and registered and walked in the order they were found once
+  all of them settled, so what a call loads and answers never depends on
+  the loader's timing: a reference into a resource another loaded document
+  embeds is held, and a load that failed is no refusal when a document
+  loaded beside it or after it embeds what it was asked for. `maxLoads`
+  counts the loads the call itself asks its loader for, not one it waits
+  on for another call. *Upgrade: such a call used to refuse `JK0004` or
+  `JK0006`, or compile, depending on which load settled first.*
 - **What `loadSchema` returns.** The parsed document — an object or a
   boolean — or a promise of it. Its JSON text is not a schema: parse it
   first.
@@ -1106,7 +1125,12 @@ What the units say:
   `patternProperties`, `additionalProperties` and `unevaluatedProperties`
   applied to, the indexes `contains` matched, and the largest index or `true`
   of `prefixItems`, `items`, `additionalItems` and `unevaluatedItems`.
-  Unknown keywords are not reported as annotations.
+  Unknown keywords are not reported as annotations, nor a keyword of a later
+  draft (`readOnly`, `writeOnly`, `contentEncoding` and `contentMediaType`
+  before draft-07, `deprecated` and `contentSchema` before 2019-09). Before
+  2019-09 a `$ref` makes its siblings inert, so no format reports them.
+  *Upgrade: such siblings were reported as annotations and, in `verbose`,
+  as passing keywords.*
 - **Every failure is explained once.** An applicator whose subschemas
   failed (`allOf`, `properties`, `items`, `$ref`, ...) reports nothing of its
   own; the failed subschemas do. An applicator that fails by itself reports
@@ -1127,9 +1151,12 @@ What the units say:
   `detailed` and `list`. `hierarchical` keeps every applied subschema, and
   `verbose` every keyword of every applied subschema (a `true` subschema
   has none, so it adds no unit there).
-- **Messages and `errorMessage` are the collected errors' own**: the same
-  catalog renders them, an `errorMessage` replaces them, and
-  `messages: false` leaves them `''`.
+- **Messages and `errorMessage` are the collected errors' own**: the
+  English messages render them, an `errorMessage` replaces them, and
+  `messages: false` leaves them `''`. A unit carries the rendered text
+  only, so `localizeErrors`, which re-renders collected errors from their
+  `msgid` and `params`, does not reach an output: the formats answer in
+  English.
 
 `outputFormat` takes precedence over `collectErrors`. `flagOutput` runs the
 boolean validator, which stops at the first failure; the other five record a

@@ -7,7 +7,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { equalsJson, stableStringify } from '@jarenjs/core/object';
+import { contentKey, equalsJson, stableStringify } from '@jarenjs/core/object';
 
 /** `n` nested arrays around `leaf`. @param {number} n @param {unknown} leaf */
 const nestArrays = (n, leaf) => {
@@ -73,6 +73,8 @@ describe('stableStringify walks deep values without the host stack', () => {
     const cycle = [1];
     cycle.push(cycle);
     assert.throws(() => stableStringify(cycle), refused('serialized'));
+    // contentKey serializes through stableStringify: a cycle is the same refusal, not an overflow
+    assert.throws(() => contentKey(cycle), refused('serialized'));
   });
 
   it('keeps every other answer byte for byte', () => {

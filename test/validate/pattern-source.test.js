@@ -115,6 +115,19 @@ describe('the instance-data pattern readers read a source too', () => {
       assert.equal(validate({ value: 'a', p: '/a/' }), false);
     }
   });
+
+  it('read a v-mode literal as the static pattern does', () => {
+    const literal = '/[\\p{L}--[a-z]]/v';
+    const fixed = compile({ type: 'string', pattern: literal });
+    assert.deepEqual([fixed('A'), fixed('a')], [true, false]);
+    for (const reader of [{ $data: '1/p' }, undefined]) {
+      const value = reader === undefined
+        ? { type: 'string', data: { pattern: '/p' } }
+        : { type: 'string', pattern: reader };
+      const validate = compile({ properties: { value, p: { type: 'string' } } });
+      assert.deepEqual([validate({ value: 'A', p: literal }), validate({ value: 'a', p: literal })], [true, false]);
+    }
+  });
 });
 
 describe("format 'regex' accepts what pattern compiles", () => {
