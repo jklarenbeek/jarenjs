@@ -25,7 +25,7 @@ import { layoutGantt } from '../../components/mermaid/src/layout/gantt.js';
 import {
   momentToLdml, strftimeToLdml, parseTickInterval, parseTaskDuration,
   parseWeekday, parseWeekend,
-  MOMENT_TO_LDML, MOMENT_REFUSED, STRFTIME_TO_LDML, STRFTIME_COMPUTED, STRFTIME_REFUSED,
+  MOMENT_TO_LDML, MOMENT_REFUSED, MOMENT_EPOCH, STRFTIME_TO_LDML, STRFTIME_COMPUTED, STRFTIME_REFUSED,
   compileAxisFormat,
 } from '../../components/mermaid/src/parser/gantt-grammar.js';
 import {
@@ -63,7 +63,14 @@ describe('the Gantt conformance table is the code', () => {
   it('should agree with the dateFormat adapter, token for token', () => {
     for (const entry of GRAMMAR.dateFormat.tokens) {
       const got = momentToLdml(entry.token);
-      if (entry.supported) {
+      if (entry.supported && entry.ldml === null) {
+        // an epoch token reads the whole date, so it adapts to its reader
+        assert.strictEqual(got.error, null, `${entry.token} should be supported`);
+        assert.strictEqual(typeof MOMENT_EPOCH[entry.token], 'function', entry.token);
+        assert.strictEqual(got.value, MOMENT_EPOCH[entry.token], entry.token);
+        assert.strictEqual(typeof entry.instant, 'string', entry.token);
+      }
+      else if (entry.supported) {
         assert.strictEqual(got.error, null, `${entry.token} should be supported`);
         assert.strictEqual(MOMENT_TO_LDML[entry.token], entry.ldml, entry.token);
       }
@@ -75,7 +82,8 @@ describe('the Gantt conformance table is the code', () => {
     }
     // and nothing the code knows is missing from the table
     const listed = new Set(GRAMMAR.dateFormat.tokens.map((e) => e.token));
-    for (const token of [...Object.keys(MOMENT_TO_LDML), ...Object.keys(MOMENT_REFUSED)])
+    for (const token of [...Object.keys(MOMENT_TO_LDML), ...Object.keys(MOMENT_REFUSED),
+      ...Object.keys(MOMENT_EPOCH)])
       assert.ok(listed.has(token), `${token} is implemented but not in the conformance table`);
   });
 
@@ -214,6 +222,129 @@ describe('dateFormat and axisFormat are separate grammars', () => {
     assert.throws(() => parseMermaid('gantt\naxisFormat %Y%\nsection S\n'
       + 'T : t1, 2014-01-01, 3d'), /bare '%'/);
   });
+});
+
+/**
+ * The first task's half-open interval under a one-token `dateFormat`.
+ * @param {string} dateFormat
+ * @param {string} info - the task's metadata
+ * @param {string} [header] - more header lines, each ending in a newline
+ * @returns {[number, number]}
+ */
+function spanUnder(dateFormat, info, header = '') {
+  const task = parseMermaid(`gantt\ndateFormat ${dateFormat}\n${header}section S\nT : ${info}`)
+    .ast.sections[0].tasks[0];
+  return [task.start, task.end];
+}
+
+describe("dateFormat X and x read the whole date as dayjs' strict instant", () => {
+  it('should read X as epoch seconds and x as epoch milliseconds', () => {
+    assert.deepStrictEqual(spanUnder('X', 't1, 1704067200, 1d'),
+      [UTC(2024, 1, 1), UTC(2024, 1, 2)]);
+    assert.deepStrictEqual(spanUnder('x', 't1, 1704067200000, 1d'),
+      [UTC(2024, 1, 1), UTC(2024, 1, 2)]);
+    // an end written as a count is an instant too, here one hour on
+    assert.deepStrictEqual(spanUnder('X', 't1, 1704067200, 1704070800'),
+      [UTC(2024, 1, 1), UTC(2024, 1, 1, 1)]);
+    assert.deepStrictEqual(spanUnder('x', 't1, 0, 1'), [0, 1]);
+  });
+
+  it('should read a negative epoch back to the first instant of year 0', () => {
+    assert.deepStrictEqual(spanUnder('X', 't1, -86400, 1d'), [-86400000, 0]);
+    assert.deepStrictEqual(spanUnder('x', 't1, -5, 1ms'), [-5, -4]);
+    assert.deepStrictEqual(spanUnder('X', 't1, -62167219200, 1d'),
+      [-62167219200000, -62167132800000]);
+    // one second earlier is year -1, which no dateFormat reads here
+    assert.throws(() => spanUnder('X', 't1, -62167219201, 1d'),
+      (err) => err.line === 4 && /starts at '-62167219201', which is neither a date in 'X'/.test(err.message));
+  });
+
+  it('should refuse every spelling strict dayjs refuses', () => {
+    // strict dayjs writes the instant back and compares the text, so a
+    // fraction (X writes whole seconds), a sign, a leading zero, `-0`
+    // and an exponent all fail there, and fall to a JM here
+    for (const [format, text] of [['X', '1.5'], ['X', '1704067200.579'], ['X', '-1.5'],
+      ['X', '01'], ['X', '+5'], ['X', '-0'], ['X', '1e3'], ['X', '0x10'],
+      ['x', '1.5'], ['x', '-0'], ['x', '01'], ['x', '1e3'],
+      ['X', '8640000000001'], ['x', '8640000000000001']]) {
+      assert.throws(() => spanUnder(format, `t1, ${text}, 1d`),
+        (err) => err.line === 4 && err.message.includes(`starts at '${text}', which is neither a date in '${format}'`),
+        `${format} ${text}`);
+    }
+  });
+
+  it('should read the last instant a date holds, and refuse an end past it', () => {
+    assert.deepStrictEqual(spanUnder('x', 't1, 8639999999999999, 1ms'),
+      [8639999999999999, 8.64e15]);
+    assert.deepStrictEqual(spanUnder('X', 't1, 8639999999999, 8640000000000'),
+      [8639999999999000, 8.64e15]);
+    for (const [format, info] of [['x', 't1, 8640000000000000, 1d'], ['X', 't1, 8640000000000, 1ms']]) {
+      assert.throws(() => spanUnder(format, info),
+        (err) => err.line === 4 && /^task 't1' ends past the last instant a date can hold$/.test(err.message),
+        info);
+    }
+  });
+
+  it("should end a duration that crosses the last instant with that reason, not 'excludes'", () => {
+    // the same end written in calendar fields, which X merely makes easy to reach
+    assert.throws(() => spanUnder('Y-MM-DD', 't1, 275760-09-13, 1d'),
+      (err) => err.line === 4 && /ends past the last instant a date can hold/.test(err.message));
+    assert.deepStrictEqual(spanUnder('Y-MM-DD', 't1, 275760-09-12, 1d'),
+      [8639999913600000, 8.64e15]);
+  });
+
+  it('should still read an ISO day as a date, as every dateFormat does', () => {
+    assert.deepStrictEqual(spanUnder('X', 't1, 2024-01-05, 1d'),
+      [UTC(2024, 1, 5), UTC(2024, 1, 6)]);
+  });
+
+  it('should exclude and include the UTC day that holds a listed instant', () => {
+    // Friday 2024-01-05 for three working days; Monday the 8th excluded
+    // as the instant 2024-01-08T00:00Z pushes the end one more day
+    assert.deepStrictEqual(spanUnder('X', 't1, 1704412800, 3d', 'excludes weekends 1704672000\n'),
+      [UTC(2024, 1, 5), UTC(2024, 1, 11)]);
+    // noon on Sunday the 7th names that whole day, given back
+    assert.deepStrictEqual(spanUnder('X', 't1, 1704412800, 3d',
+      'excludes weekends\nincludes 1704628800\n'), [UTC(2024, 1, 5), UTC(2024, 1, 9)]);
+  });
+
+  it('should refuse X or x beside any other token or literal, as dayjs reads nothing there', () => {
+    for (const format of ['X-HH', 'YYYY-MM-DD X', '[at ]X', 'XX', 'Xx', 'YYYYxMM', 'x[ms]']) {
+      assert.throws(() => spanUnder(format, 't1, 1, 1d'), (err) => err.line === 2
+        && /^dateFormat token '[Xx]' must be the whole dateFormat: dayjs reads an epoch only as the entire date/.test(err.message),
+      format);
+    }
+  });
+
+  it('should keep a bracketed x a literal', () => {
+    assert.deepStrictEqual(spanUnder('YYYY[x]MM', 't1, 2024x03, 1d'),
+      [UTC(2024, 3, 1), UTC(2024, 3, 2)]);
+  });
+
+  it('should keep the epoch dateFormat verbatim in meta and rules', () => {
+    const doc = parseMermaid('gantt\ndateFormat X\nsection S\nT : t1, 1704067200, 1d');
+    assert.strictEqual(doc.ast.meta.dateFormat, 'X');
+    assert.strictEqual(doc.ast.rules.dateFormat, 'X');
+    const twice = parseMermaid(toMermaid(doc));
+    assert.deepStrictEqual(twice.ast, doc.ast);
+  });
+});
+
+describe('dateFormat declines the quarter and week tokens, naming why', () => {
+  for (const [format, token, reason] of [
+    ['YYYY Q', 'Q', /a quarter names three months, not one, and the core parser keeps no quarter field$/],
+    ['YYYY-w', 'w', /a week number names a date only under a week-year rule .*; the core kernel derives the ISO week from a date and reads none back$/],
+    ['YYYY ww', 'ww', /a week number names a date only under a week-year rule .*; the core kernel derives the ISO week from a date and reads none back$/],
+  ]) {
+    it(`should refuse ${token} on the dateFormat line`, () => {
+      assert.throws(() => spanUnder(format, 't1, 2024 3, 1d'), (err) => {
+        assert.strictEqual(err.line, 2);
+        assert.ok(err.message.startsWith(`dateFormat token '${token}' is not supported: `), err.message);
+        assert.match(err.message, reason);
+        return true;
+      });
+    });
+  }
 });
 
 /**

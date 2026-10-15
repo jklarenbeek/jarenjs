@@ -162,11 +162,6 @@ establish registry publication or downstream acceptance.
   do with.
 - [ ] **More domain projections** — the geometry-free-AST-as-model idea now ships executable arrows for flat FSMs, compound statecharts and DAGs (`stateDiagram ⇄ jaren-fsm` and `flowchart ⇄ jaren-dag`, run by `@jarenjs/flow`; MERMAID-FORMAT §5.1); the remaining follow-ups on the same idea are sequence⇄orchestration/saga and ER⇄JSON-Schema+`@jarenjs/forms`.
 - [ ] **Diagram tooltips beyond flowchart and state nodes** — `mermaidPlugin({ tooltips: true })` ships node tooltips (focus and hover, Escape, aria wiring) for the diagram types whose render marks nodes (`flowchart`, `stateDiagram`, `jaren-dag`). The remaining types draw no marked target: sequence actors and messages, class and ER panels, gantt rows (which carry `data-id` but a different class), edges, and the secondary placeholders. Their render needs per-element markers first. The text is English-only and derived from the DOM; a Mermaid `click` line's own tooltip text is parse-accepted and not modeled in the AST.
-- [ ] **Gantt `dateFormat` refuses dayjs' epoch and week tokens.** `X` and `x`
-  (epoch seconds and milliseconds), `Q`, `w` and `ww` are refused: `X`/`x` could
-  read as an instant, while the week tokens need a decision on how a parsed
-  week-based year and week number become a date.
-
 ## @jarenjs/charts
 
 - [ ] **Sessions for the remaining nine types** — `line`, `bar`, `heatmap` and `candlestick` patch in place; the other nine (`boxplot`, `gauge`, `map`, `pie`, `radar`, `sankey`, `scatter`, `streamgraph`, `treemap`) re-render wholesale, which is correct and, at their sizes, cheap.

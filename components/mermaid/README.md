@@ -236,15 +236,17 @@ nothing either.
 Each task carries `{ id, flags, start, end, duration, after, line }`
 beside its raw `info`, with `start`/`end` as epoch milliseconds and the
 interval half-open. The grammar, the vendored conformance table and the
-nine deliberate divergences from Mermaid are in
+ten deliberate divergences from Mermaid are in
 [docs/MERMAID-FORMAT.md §4.4](./docs/MERMAID-FORMAT.md). The load-bearing
 one: **there is no clock here**, so a schedule with no dated anchor is a
 line-aware error rather than a diagram whose meaning changes daily.
 
 Mermaid's `dateFormat` is moment's grammar and its `axisFormat` is
 strftime; neither is LDML, so each has its own tokenizer and each token
-is mapped individually onto the core date kernel. An unsupported token
-is refused by name rather than passed through as text.
+is mapped individually onto the core date kernel. A `dateFormat` of
+exactly `X` or `x` reads each date as an instant, in epoch seconds or
+milliseconds. An unsupported token is refused by name rather than passed
+through as text.
 
 **Localized labels take an injected provider.** This engine ships no
 month or weekday names, so `axisFormat %b %Y` (or a `dateFormat` with

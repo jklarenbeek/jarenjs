@@ -5,7 +5,8 @@
  * languages** and none of them is Unicode LDML:
  *
  * - `dateFormat` is dayjs' `customParseFormat` vocabulary (moment's
- *   spelling): `YYYY-MM-DD`, where `YYYY` is the calendar year;
+ *   spelling): `YYYY-MM-DD`, where `YYYY` is the calendar year, or one
+ *   epoch token (`X`, `x`) that reads the whole date as an instant;
  * - `axisFormat` is d3-time-format's strftime vocabulary: `%Y-%m-%d`;
  * - `tickInterval` and a task's duration are two small regular
  *   grammars of their own (`1week`, `3d`).
@@ -57,18 +58,48 @@ const MOMENT_TO_LDML = Object.freeze({
   ZZ: 'XX', Z: 'XXX',
 });
 
+const WEEK_NUMBER_REFUSED = 'a week number names a date only under a week-year rule'
+  + ' (which week is the first, which day starts it); the core kernel derives the ISO week'
+  + ' from a date and reads none back';
+
 /** Documented dayjs tokens this engine will not read, and why. */
 const MOMENT_REFUSED = Object.freeze({
   SS: 'the fraction tokens are tenths (S) and milliseconds (SSS); there is no hundredths field',
-  Q: 'a quarter is derived from a month, not a field of a date',
+  Q: 'a quarter names three months, not one, and the core parser keeps no quarter field',
   Do: 'the ordinal suffix is locale text and this engine ships no ordinal data',
   DDDD: 'the day of the year is derived from a date, not a field of one',
   DDD: 'the day of the year is derived from a date, not a field of one',
-  X: 'an epoch second is a whole value, not a calendar field',
-  x: 'an epoch millisecond is a whole value, not a calendar field',
-  ww: 'the ISO week number is derived from a date, not a field of one',
-  w: 'the ISO week number is derived from a date, not a field of one',
+  ww: WEEK_NUMBER_REFUSED,
+  w: WEEK_NUMBER_REFUSED,
 });
+
+/**
+ * An epoch count as dayjs' strict parse accepts it: strict dayjs writes
+ * the instant back and compares, so only the spelling it writes reads —
+ * an integer, no `+`, no leading zero, no `-0`, no fraction, no exponent.
+ */
+const EPOCH_TEXT = /^(?:0|-?[1-9]\d*)$/;
+
+/**
+ * A reader of one epoch count, in units of `unitMs` milliseconds. An
+ * instant outside the core range (before year 0, or past the last one a
+ * JavaScript `Date` holds) still reads here and is refused where its
+ * parts become an epoch, as a date in any other `dateFormat` is.
+ * @param {number} unitMs
+ * @returns {(text: string) => object | null} the instant's UTC parts
+ *   record, or null when the text is not a count dayjs reads
+ */
+function epochReader(unitMs) {
+  return (text) => (EPOCH_TEXT.test(text) ? partsFromEpoch(Number(text) * unitMs) : null);
+}
+
+/**
+ * The dayjs epoch tokens, each the reader of its count: `X` is epoch
+ * seconds and `x` epoch milliseconds. dayjs reads one only when it is
+ * the whole pattern — its token table has neither, so beside any other
+ * token or literal it reads nothing — and the date is then that instant.
+ */
+const MOMENT_EPOCH = Object.freeze({ X: epochReader(1000), x: epochReader(1) });
 
 /** strftime specifier → the LDML fragment that writes the same field. */
 const STRFTIME_TO_LDML = Object.freeze({
@@ -148,7 +179,9 @@ function quoted(text) {
 /**
  * Adapt a Mermaid `dateFormat` to an LDML pattern.
  * @param {string} pattern - a dayjs `customParseFormat` pattern
- * @returns {Adapted} `value` is the LDML pattern
+ * @returns {Adapted} `value` is the LDML pattern, or, for a pattern that
+ *   is one epoch token, the reader of that instant, because no LDML
+ *   token reads an epoch
  */
 export function momentToLdml(pattern) {
   let out = '';
@@ -167,7 +200,8 @@ export function momentToLdml(pattern) {
     for (let len = MAX_MOMENT_TOKEN; len >= 1; len--) {
       const candidate = pattern.slice(i, i + len);
       if (candidate.length !== len) continue;
-      if (MOMENT_TO_LDML[candidate] !== undefined || MOMENT_REFUSED[candidate] !== undefined) {
+      if (MOMENT_TO_LDML[candidate] !== undefined || MOMENT_REFUSED[candidate] !== undefined
+        || MOMENT_EPOCH[candidate] !== undefined) {
         matched = candidate;
         break;
       }
@@ -179,6 +213,13 @@ export function momentToLdml(pattern) {
     }
     if (MOMENT_REFUSED[matched] !== undefined) {
       return bad(`dateFormat token '${matched}' is not supported: ${MOMENT_REFUSED[matched]}`);
+    }
+    if (MOMENT_EPOCH[matched] !== undefined) {
+      if (matched !== pattern) {
+        return bad(`dateFormat token '${matched}' must be the whole dateFormat: dayjs reads`
+          + ' an epoch only as the entire date, and beside other text it reads nothing');
+      }
+      return ok(MOMENT_EPOCH[matched]);
     }
     out += quoted(literal);
     literal = '';
@@ -362,4 +403,4 @@ export function parseWeekend(text) {
   return ok(ISO_WEEKDAYS[name]);
 }
 
-export { MOMENT_TO_LDML, MOMENT_REFUSED, STRFTIME_TO_LDML, STRFTIME_COMPUTED, STRFTIME_REFUSED };
+export { MOMENT_TO_LDML, MOMENT_REFUSED, MOMENT_EPOCH, STRFTIME_TO_LDML, STRFTIME_COMPUTED, STRFTIME_REFUSED };

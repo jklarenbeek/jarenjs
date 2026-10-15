@@ -61,7 +61,7 @@ so each computes at most once.
 |------|------|
 | `src/parser/config.js` | `---` front-matter + `%%{init}%%` → `config` (built-in YAML subset; md parser injectable); a top-level front-matter `displayMode` becomes `config.gantt.displayMode` |
 | `src/parser/{flowchart,sequence,class,er,state,gantt,pie}.js` | char-code recursive descent; module-const sticky regexes; `fail(msg, line)` |
-| `src/parser/gantt-grammar.js` | the three Gantt token grammars (dayjs `dateFormat`, strftime `axisFormat`, `tickInterval`/duration) adapted onto the core LDML vocabulary — never a string replace; the axis labeller compiles each strftime specifier on its own and computes the four LDML has no token for (`%G`, `%g`, `%Q`, `%s`) from the tick's instant |
+| `src/parser/gantt-grammar.js` | the three Gantt token grammars (dayjs `dateFormat`, strftime `axisFormat`, `tickInterval`/duration) adapted onto the core LDML vocabulary — never a string replace; a `dateFormat` that is one epoch token (`X`, `x`) adapts to an instant reader instead; the axis labeller compiles each strftime specifier on its own and computes the four LDML has no token for (`%G`, `%g`, `%Q`, `%s`) from the tick's instant |
 | `src/parser/gantt-click.js` | the Gantt `click` statement (`href "url"`, `call name(args)`) as a single linear scan, and its canonical printing; a call is recorded as data and never bound, a link is vetted by the layout |
 | `src/gantt-calendar.js` | the `excludes`/`includes` working calendar over `@jarenjs/core/series` intervals, beside the day-by-day oracle it is differential-tested against |
 | `src/parser/index.js` | detect type on the first non-config line, dispatch, assemble the envelope |

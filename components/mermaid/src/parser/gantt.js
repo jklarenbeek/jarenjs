@@ -268,7 +268,9 @@ function interpret(meta, metaLine, listed, dateNames) {
 
 /**
  * Adapt a Mermaid pattern to LDML and compile it, turning both the
- * adapter's refusal and the core compiler's into a line-aware `JM`.
+ * adapter's refusal and the core compiler's into a line-aware `JM`. An
+ * epoch `dateFormat` (`X`, `x`) adapts to its reader, which is returned
+ * as it is.
  * @param {string} pattern
  * @param {number} line
  * @param {(p: string) => { value: any, error: string | null }} adapt
@@ -280,6 +282,8 @@ function interpret(meta, metaLine, listed, dateNames) {
 function compilePattern(pattern, line, adapt, directive, names, asParser) {
   const adapted = adapt(pattern);
   if (adapted.error !== null) fail(adapted.error, line);
+  // an epoch dateFormat adapts straight to its reader: no LDML pattern
+  if (typeof adapted.value === 'function') return adapted.value;
   const needed = ldmlNeedsNames(adapted.value);
   if (needed !== null && (names === undefined || names === null)) {
     fail(`${directive} '${pattern}' asks for a locale name, so it needs a`
@@ -596,20 +600,24 @@ function resolveTask(task, byId, specs, state, rules) {
  * Add a Mermaid duration to an instant through the core calendar. A
  * fixed-width unit is integer milliseconds; `M` and `y` are calendar
  * additions, and the core refuses a fractional one rather than
- * approximating a month, which becomes a `JM` error here.
+ * approximating a month, which becomes a `JM` error here, as does an
+ * end past the last instant a JavaScript date holds.
  * @param {number} start
  * @param {{ amount: number, unit: string }} duration
  * @param {any} task
  * @returns {number}
  */
 function addDurationTo(start, duration, task) {
+  let end;
   try {
-    const parts = addToParts(partsFromEpoch(start), duration.amount, duration.unit);
-    return epochOfRFC3339Parts(parts);
+    end = epochOfRFC3339Parts(addToParts(partsFromEpoch(start), duration.amount, duration.unit));
   }
   catch (err) {
     return fail(`task '${task.id}' has an unusable duration: ${err.message}`, task.line);
   }
+  if (Number.isNaN(end))
+    fail(`task '${task.id}' ends past the last instant a date can hold`, task.line);
+  return end;
 }
 
 /**

@@ -215,12 +215,47 @@ write something other than d3's UTC formatter: `%Z` writes `Z` where d3
 writes `+0000`, and `%Y`/`%y` write year -5 as `0005`/`95` where d3
 writes `-0005`/`-05` (`%G`/`%g` keep d3's sign). `dateFormat` is dayjs'
 grammar, not strftime, so none of these eight can reach a task's date;
-dayjs' own `Q`, `X`, `x`, `w` and `ww` stay refused there, each for the
-reason the conformance table gives.
+dayjs' own epoch tokens `X` and `x` are read there as instants and its
+`Q`, `w` and `ww` are declined, both as the next paragraphs say.
 *Upgrade: `%f`, `%g`, `%G`, `%q`, `%Q`, `%s`, `%u` and `%V` were refused
 by name. Two adjacent specifiers were merged into one wider token, so
 `%y%Y` wrote its two years in the wrong order and `%m%m` asked for a
 month name.*
+
+A `dateFormat` of exactly `X` or `x` reads each date as an **instant**:
+`X` counts seconds and `x` milliseconds from 1970-01-01T00:00:00Z, and
+the task date is that instant, on the UTC clock like every other date
+here. This is dayjs' `customParseFormat` as Mermaid calls it, strictly:
+dayjs writes the instant back and compares the text, so the one spelling
+read is the one it writes, an integer with no sign but a minus, no
+leading zero and no `-0`. `dateFormat X` reads `1704067200` as
+2024-01-01T00:00Z and `-86400` as 1969-12-31T00:00Z, and refuses `1.5`,
+`01`, `+5` and `1e3` as not a date in `X` (non-strict dayjs reads the
+fraction; Mermaid's strict call does not). The instants run from
+0000-01-01T00:00Z, the first a date in any `dateFormat` reads here, to
+the last a JavaScript date holds. dayjs reads neither token anywhere
+else — its token table has no `X` or `x`, so `YYYY-MM-DD X` or `[at ]X`
+reads nothing for the count — and this engine refuses either beside any
+other token or literal on the `dateFormat` line; a bracketed `[x]` stays
+a literal. An `excludes` or `includes` term in `X` names the UTC day
+that holds its instant, as a term with a time does in any other
+`dateFormat` (Mermaid compares a term with the probed instants
+themselves). Mermaid's own start reading differs, see divergence 10.
+*Upgrade: `dateFormat X` and `dateFormat x` were refused by name; they
+now read every task date as an instant, so a diagram that used them
+parses where it was an error.*
+
+The quarter `Q` and the week numbers `w` and `ww` are **declined**, each
+a `JM` error naming its reason. A week number names a date only under a
+week-year rule (which week of a year is the first, which weekday starts
+it). dayjs' rule is the locale week of its `weekOfYear` plugin; the core
+date kernel keeps RFC 3339 strings and epoch milliseconds, not a date
+type with a calendar attached (`packages/core/docs/DATES.md`), derives
+only the ISO week from a date, and its parser reads no week back.
+Mermaid itself loads no dayjs week plugin, so its own strict read of a
+week token never yields a date. A quarter names three months rather than one: dayjs reads it as
+the quarter's first month (`YYYY Q` reads `2024 3` as 2024-07-01), a
+field the core parser does not keep. A diagram writes the date instead.
 
 An **unsupported** token is a `JM` error naming the token and the
 reason, not a literal passed through. The vendored conformance table —
@@ -235,10 +270,8 @@ the shipped chunk it was read from: dayjs' parse table is inlined there,
 and every token Mermaid really accepts must appear. A token in neither
 list is not refused — it becomes literal text, and then the diagram's
 own dates are what look wrong. `w`, `ww` and `Y` reached the tree that
-way; the week numbers are now refused by name (a week number is derived
-from a date rather than a field of one, which is why `compileDateParser`
-will not read one either) and `Y` is the signed variable-width year
-core's `y` already spells.
+way; the week numbers are now declined by name (above) and `Y` is the
+signed variable-width year core's `y` already spells.
 
 #### Task forms and working days
 
@@ -359,7 +392,7 @@ side, and with it off the engines differ in which side the single row is
 on. In the scene, `bottomAxis` is `null`, or `{ y, labelY }`, and the
 height grows to hold the row.
 
-#### Nine deliberate divergences from Mermaid
+#### Ten deliberate divergences from Mermaid
 
 1. **No clock.** Mermaid starts an undated first task *today*. This
    engine has no clock anywhere (`packages/core/docs/DATES.md`, "there is no `now`"),
@@ -406,6 +439,12 @@ height grows to hold the row.
    word but carries a task's colon is a task row.** Mermaid applies a click when it reads the
    line, so one written before its task has no effect, and `Click the button :
    a3, 2024-01-09, 1d` fails its parse.
+10. **`dateFormat X` reads every date as seconds.** Mermaid reads a start
+   date that is only digits as milliseconds under both `x` and `X`, before
+   dayjs sees it, so `dateFormat X` with `a, 1704067200, 1d` starts on
+   1970-01-20 there; a negative start and every end go through dayjs and
+   count seconds. Here a start and an end are both read as dayjs reads
+   them, so that task starts on 2024-01-01.
 
 
 ### 4.5 Secondary types, and the pie renderer
