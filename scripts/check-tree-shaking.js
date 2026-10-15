@@ -239,7 +239,8 @@ if (chainEdgeLeak.length > 0)
 // Raised to 229,900 (measured 229858): the shared capture's reading of an index off a relation as a hop for in() and all() add 649.
 // Raised to 230,500 (measured 230428): the chart pen's right value axis and the shared capture's bounds add 570.
 // Raised to 230,600 (measured 230506): the descent refusal's message id and docPath add 78.
-if (chainBytes > 230600)
+// Raised to 231,500 (measured 231415): the join table's query root and the message vocabulary's new keyword and descent ids add 909.
+if (chainBytes > 231500)
   throw new Error(`The chain bundle grew to ${chainBytes} bytes.`);
 
 console.log(`Tree-shaking smoke test passed (${chainBytes} byte chain bundle; no schema-pen module, no client module, no store/validator/formats bytes).`);
@@ -631,7 +632,8 @@ if (asyncLiveLeak.length)
 // Raised to 993,000 (measured 992989): the store's refusal of a non-JSON compared external, epoch-key binding on every key path, the judging of rows a foreign-key action changes, and the double comparison and rounded-read refusal of an integer past 2^53 add 8411.
 // Raised to 1,002,600 (measured 1002519): the store profile as a floor on every read, the engine's evaluation order after a raising conjunct, live replace records for a row stored again, the rebuild's String() spelling, and the stored-key capture, scaled-integer and explain refusals add 9530.
 // Raised to 1,005,100 (measured 1005049): PostgreSQL's out-of-range literal and negated-list spellings, the layout-condition read-back, the worker-hosted Bun backup and the opt-in column upgrade add 2530.
-if (clientBytes > 1005100)
+// Raised to 1,016,900 (measured 1016809): the join table's query root, bracket member paths, one external-admission rule on every surface, replace records for a row a save or a membership stores again, the bind diversion of strings the database would not receive as written, the raising cursor, the blank-tolerant retype and the number-first union read-back add 11760.
+if (clientBytes > 1016900)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 
