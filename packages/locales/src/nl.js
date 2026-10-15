@@ -443,6 +443,7 @@ export const nl = {
   'query/steps-limit': 'de query heeft limits.steps overschreden ({limit} evaluaties van expressies)',
   'query/result-limit': 'het queryresultaat bevat {count} items, meer dan limits.resultItems ({limit})',
   'query/descent-limit': 'een afstammelingsegment bereikt een waarde die dieper dan {limit} niveaus genest is',
+  'query/descent-cycle': 'een afstammelingsegment bereikt een kringverwijzing die door het gegevenslid {member} wordt gesloten',
   'query/function-threw': "de geregistreerde functie '{name}' gooide een fout: {detail}",
   'query/operator-threw': "de geregistreerde operator '{name}' is mislukt: {detail}",
   'query/input-undefined': 'het invoerdocument is undefined, wat geen JSON-waarde is',

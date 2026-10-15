@@ -31,12 +31,13 @@ delete it or fix it.
 (RFC 9535, passing the complete official compliance suite), JSON Patch
 (RFC 6902) and Merge Patch (RFC 7396). See
 [`packages/json/ARCHITECTURE.md`](../packages/json/ARCHITECTURE.md).
-- [ ] **A descendant segment names a cycle as a deep value.** `$..x` over
-  `c.self = c` refuses `JQ2009` "a descendant segment reaches a value nested
-  deeper than 1000 levels at ''", the work-limit code, with no data location,
-  where `stableStringify` now says `JO2002` "a circular reference … at /self".
-  The message is a localized query-catalog entry, so naming the cycle needs a
-  message key in every locale pack.
+- [ ] **Keyed query operators overflow on a cyclic or very deep value.**
+  `stableKeyString` (`$distinct` and the operators keyed by a value's content)
+  recurses on the host stack, so `compileJsonQuery({ $distinct: '$.self'
+  })(c)` with `c.self = c`, and `{ $distinct: '$' }` over 100000 nested
+  arrays, escape as an uncoded `RangeError` "Maximum call stack size
+  exceeded", where a descendant segment names the cycle `JQ2016` at `/self`
+  (or the depth `JQ2009`) and `stableStringify` says `JO2002` / `JO2001`.
 
 ## @jarenjs/json — JSLT
 

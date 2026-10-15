@@ -502,6 +502,7 @@ export const ar = {
   'query/steps-limit': 'تجاوز الاستعلام ⁨limits.steps⁩ ({limit} عملية تقييم للتعابير)',
   'query/result-limit': 'يتجاوز عدد عناصر نتيجة الاستعلام ({count}) قيمة ⁨limits.resultItems⁩ ({limit})',
   'query/descent-limit': 'يصل مقطع الأحفاد إلى قيمة يتجاوز عمق تداخلها الحد ({limit})',
+  'query/descent-cycle': 'يصل مقطع الأحفاد إلى مرجع دائري يغلقه عضو البيانات ⁨{member}⁩',
   'query/function-threw': "طرحت الدالة المسجّلة ⁨'{name}'⁩ استثناءً: ⁨{detail}⁩",
   'query/operator-threw': "فشل العامل المسجّل ⁨'{name}'⁩: ⁨{detail}⁩",
   'query/input-undefined': 'قيمة مستند الإدخال undefined، وهي ليست قيمة ⁨JSON⁩',

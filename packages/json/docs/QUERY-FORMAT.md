@@ -304,7 +304,11 @@ nesting (default 1000), counting the descents a filter inside it starts: a
 value nested deeper is `JQ2009`, raised before the host's call stack can
 overflow, with the `docPath` of the path that descended (*upgrade: it
 carried `''`*). The default is fixed so the refusal is the same on every host;
-raising it lets the host's call stack decide again (§8.12).
+raising it lets the host's call stack decide again (§8.12). A walk over a
+value that holds a cycle reaches the bound too, and is `JQ2016` instead,
+whose `params.member` is the JSON Pointer of the data member that closes the
+cycle: in the input when the input holds the walked value, else in the value
+the path starts from (an external parameter) (*upgrade: it was `JQ2009`*).
 
 A variable-rooted path evaluates its segments against each item of the
 variable's bound sequence, in order, concatenating results. For the common
@@ -2102,6 +2106,7 @@ a query error raised inside a formula keeps its own message, a reference in
 | `JQ2013` | Formula input or result is not valid JSON/schema data | — |
 | `JQ2014` | Invalid formula outcome | — |
 | `JQ2015` | Invalid reviewed rule plan | — |
+| `JQ2016` | A descendant segment over a circular reference: the value it walks holds a cycle, named by the data member that closes it (§5.1) | — |
 
 ---
 

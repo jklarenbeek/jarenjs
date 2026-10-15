@@ -1,10 +1,11 @@
 //@ts-check
 /**
- * The refusal of a descendant segment past its nesting bound, kept apart
- * from the query catalog (`./messages.js`) so a JSONPath-only bundle, which
- * raises it, does not carry every query message: the catalog reads its
- * entry from here, and the error carries the same `messageId`, `params` and
- * `docPath` a `queryRuntimeError` would.
+ * The refusals of a descendant segment, past its nesting bound or over a
+ * cycle, kept apart from the query catalog (`./messages.js`) so a
+ * JSONPath-only bundle, which raises them, does not carry every query
+ * message: the catalog reads their entries from here, and each error
+ * carries the same `messageId`, `params` and `docPath` a
+ * `queryRuntimeError` would.
  */
 
 import { JsonQueryRuntimeError } from './errors.js';
@@ -27,4 +28,23 @@ export function descentLimitError(limit, docPath) {
   // writes with String() too: the reason is the catalog's English rendering.
   return new JsonQueryRuntimeError('JQ2009', DESCENT_LIMIT_TEMPLATE.replace('{limit}', String(limit)), docPath,
     { messageId: DESCENT_LIMIT_ID, params: { limit } });
+}
+
+/** The message id of the cycle refusal. */
+export const DESCENT_CYCLE_ID = 'query/descent-cycle';
+
+/** Its English template, the query catalog's entry for {@link DESCENT_CYCLE_ID}. */
+export const DESCENT_CYCLE_TEMPLATE = 'a descendant segment reaches a circular reference closed by data member {member}';
+
+/**
+ * The `JQ2016` a descendant segment raises when the value it walks holds
+ * a cycle, which no bound on its nesting could answer.
+ * @param {string} member - The JSON Pointer of the data member that closes the cycle
+ * @param {string} docPath - The query location that refused
+ * @returns {JsonQueryRuntimeError}
+ */
+export function descentCycleError(member, docPath) {
+  // a replacer function, so a `$` in a member name is written as it is
+  return new JsonQueryRuntimeError('JQ2016', DESCENT_CYCLE_TEMPLATE.replace('{member}', () => member), docPath,
+    { messageId: DESCENT_CYCLE_ID, params: { member } });
 }

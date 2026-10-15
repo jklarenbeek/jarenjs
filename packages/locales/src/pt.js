@@ -442,6 +442,7 @@ export const pt = {
   'query/steps-limit': 'a consulta excedeu limits.steps ({limit} avaliações de expressões)',
   'query/result-limit': 'o resultado da consulta tem {count} itens, mais que limits.resultItems ({limit})',
   'query/descent-limit': 'um segmento descendente alcança um valor aninhado a mais de {limit} níveis de profundidade',
+  'query/descent-cycle': 'um segmento descendente alcança uma referência circular fechada pelo membro de dados {member}',
   'query/function-threw': "a função registrada '{name}' lançou uma exceção: {detail}",
   'query/operator-threw': "o operador registrado '{name}' falhou: {detail}",
   'query/input-undefined': 'o documento de entrada é undefined, o que não é um valor JSON',

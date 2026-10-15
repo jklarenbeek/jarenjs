@@ -441,6 +441,7 @@ export const tr = {
   'query/steps-limit': 'sorgu limits.steps sınırını aştı ({limit} ifade değerlendirmesi)',
   'query/result-limit': 'sorgu sonucu {count} öğe içeriyor; bu, limits.resultItems ({limit}) sınırından fazla',
   'query/descent-limit': 'bir alt öğe segmenti {limit} düzeyden daha derin iç içe geçmiş bir değere ulaşıyor',
+  'query/descent-cycle': 'bir alt öğe segmenti, {member} veri üyesinin kapattığı döngüsel bir başvuruya ulaşıyor',
   'query/function-threw': "kayıtlı '{name}' işlevi bir özel durum oluşturdu: {detail}",
   'query/operator-threw': "kayıtlı '{name}' işleci başarısız oldu: {detail}",
   'query/input-undefined': 'girdi belgesi undefined; bu bir JSON değeri değil',

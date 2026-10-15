@@ -98,6 +98,107 @@ describe('the JSONPath descendant segment\'s depth bound', () => {
   });
 });
 
+describe('a descendant segment over a cycle', () => {
+  /** `{ x: 1, self: <itself> }` */
+  const cyclic = () => { const c = { x: 1 }; c.self = c; return c; };
+  /**
+   * The refusal naming a cycle closed at `member` of the data, raised at `docPath` of the query.
+   * @param {string} member
+   * @param {string} [docPath]
+   */
+  const cycleAt = (member, docPath = '') => (e) => {
+    assert.ok(e instanceof JsonQueryRuntimeError);
+    assert.equal(e.code, 'JQ2016');
+    assert.equal(e.docPath, docPath);
+    assert.equal(e.messageId, 'query/descent-cycle');
+    assert.deepEqual(e.params, { member });
+    assert.equal(e.message, `JQ2016: a descendant segment reaches a circular reference closed by data member ${member} at ${docPath === '' ? '\'\'' : docPath}`);
+    return true;
+  };
+  const deepRefusal = (e) => e instanceof JsonQueryRuntimeError && e.code === 'JQ2009'
+    && e.message === 'JQ2009: a descendant segment reaches a value nested deeper than 1000 levels at \'\'';
+  /** Every JSONPath mode that walks the whole descent, over `data`. */
+  const everyMode = (path, data) => {
+    const compiled = compileJSONPath(path);
+    return [() => compiled(data), () => compiled.paths(data), () => compiled.nodes(data),
+      () => [...compiled.iterate(data)], () => queryJSONPath(path, data),
+      () => compileJSONPathSetter(path)(data, 2)];
+  };
+
+  it('names a cycle at the root as one, at the member that closes it, in every mode', () => {
+    for (const run of everyMode('$..x', cyclic()))
+      assert.throws(run, cycleAt('/self'));
+  });
+
+  it('names a deeper cycle at its document location, wherever the descent starts', () => {
+    for (const path of ['$..x', '$.a..x', '$.a.b..x', '$..b..x'])
+      for (const run of everyMode(path, { a: { b: cyclic() } }))
+        assert.throws(run, cycleAt('/a/b/self'), path);
+    // the cyclic value is the second the segment descends from
+    for (const run of everyMode('$.*..x', { p: { x: 0 }, q: { b: cyclic() } }))
+      assert.throws(run, cycleAt('/q/b/self'));
+    const items = [0, 1];
+    items.push({ list: items });
+    for (const run of everyMode('$[\'a/b\'][2]..x', { 'a/b': items }))
+      assert.throws(run, cycleAt('/a~1b/2/list/2'));
+  });
+
+  it('names the cycle a filter\'s own descent reaches', () => {
+    assert.throws(() => compileJSONPath('$..[?@..x]')(cyclic()), cycleAt('/self'));
+    assert.throws(() => compileJSONPath('$.a[?$..x]')({ a: [1], b: cyclic() }), cycleAt('/b/self'));
+  });
+
+  it('names it under every bound', () => {
+    assert.throws(() => compileJSONPath('$..x', { maxDescentDepth: 5 })(cyclic()), cycleAt('/self'));
+    assert.throws(() => compileJsonQuery({ $count: '$..x' }, { limits: { descentDepth: 5 } })({ a: [cyclic()] }),
+      cycleAt('/a/0/self', '/$count'));
+  });
+
+  it('names it in a query, at the input member, or in an external value the input does not hold', () => {
+    const c = cyclic();
+    assert.throws(() => compileJsonQuery({ $count: '$..x' })(c), cycleAt('/self', '/$count'));
+    assert.throws(() => compileJsonQuery({ $count: '$.k..x' })({ k: c }), cycleAt('/k/self', '/$count'));
+    assert.throws(() => compileJsonQuery({ $count: '$c..x' }, { externals: ['c'] })({}, { c }), cycleAt('/self', '/$count'));
+    assert.throws(() => compileJsonQuery({ $count: '$c..x' }, { externals: ['c'] })({ k: c }, { c }), cycleAt('/k/self', '/$count'));
+    // a cyclic input that does not hold the external is searched once
+    assert.throws(() => compileJsonQuery({ $count: '$c..x' }, { externals: ['c'] })(cyclic(), { c }), cycleAt('/self', '/$count'));
+  });
+
+  it('passes every other error a walk over a cycle raises unchanged', () => {
+    const thrown = new JsonQueryRuntimeError('JQ2001', 'not a number', '');
+    const pathFunctions = { fail: { params: ['value'], returns: 'logical', evaluate: () => { throw thrown; } } };
+    const compiled = compileJSONPath('$..[?fail(@)]', { pathFunctions });
+    const c = cyclic();
+    for (const run of [() => compiled(c), () => compiled.paths(c), () => [...compiled.iterate(c)]])
+      assert.throws(run, (e) => e === thrown);
+  });
+
+  it('keeps answering where the walk stops before the cycle', () => {
+    const all = compileJSONPath('$..x');
+    assert.equal(all.first(cyclic()), 1);
+    assert.equal(all.exists(cyclic()), true);
+    assert.deepEqual(compileJSONPath('$.self.x')(cyclic()), [1]);
+  });
+
+  it('keeps JQ2009 for a deep value without a cycle, beside one or not', () => {
+    for (const run of everyMode('$..x', nestedObjects(1100)))
+      assert.throws(run, deepRefusal);
+    for (const run of everyMode('$.a..x', { a: nestedObjects(1100), b: cyclic() }))
+      assert.throws(run, deepRefusal);
+  });
+
+  it('reads a value reachable twice as no cycle: it answers, or is deep', () => {
+    const shared = { x: 1 };
+    assert.deepEqual(compileJSONPath('$..x')({ p: shared, q: [shared, shared] }), [1, 1, 1]);
+    assert.deepEqual(compileJSONPath('$..x').paths({ p: shared, q: [shared] }), ['$[\'p\'][\'x\']', '$[\'q\'][0][\'x\']']);
+    // each level holds the next twice: 2^1100 paths, one walk down the first
+    let dag = { x: 1 };
+    for (let i = 0; i < 1100; i++) dag = { l: dag, r: dag };
+    for (const run of everyMode('$..x', dag))
+      assert.throws(run, deepRefusal);
+  });
+});
+
 describe('the descendant bound options', () => {
   it('move the bound both ways in JSONPath and JSON Query', () => {
     const shallow = compileJSONPath('$..*', { maxDescentDepth: 10 });
@@ -146,6 +247,19 @@ describe('the descendant bound options', () => {
       assert.equal(renderQueryMessage(e, { 'query/descent-limit': 'deeper than {limit}' }), 'deeper than 5');
     }
     assert.equal(queryMessagesEn['query/descent-limit'], 'a descendant segment reaches a value nested deeper than {limit} levels');
+    const c = { x: 1 };
+    c.self = c;
+    const cycle = refused(() => compileJSONPath('$..x')(c));
+    assert.equal(cycle.reason, 'a descendant segment reaches a circular reference closed by data member /self');
+    assert.equal(renderQueryMessage(cycle, queryMessagesEn), cycle.reason);
+    assert.equal(renderQueryMessage(cycle, { 'query/descent-cycle': 'cycle at {member}' }), 'cycle at /self');
+    // a member name holding a replacement pattern is written as it is
+    const odd = { x: 1 };
+    odd['$&'] = odd;
+    const named = refused(() => compileJSONPath('$..x')(odd));
+    assert.equal(named.reason, 'a descendant segment reaches a circular reference closed by data member /$&');
+    assert.equal(renderQueryMessage(named, queryMessagesEn), named.reason);
+    assert.equal(queryMessagesEn['query/descent-cycle'], 'a descendant segment reaches a circular reference closed by data member {member}');
   });
 
   it('keep a one-off query cached apart per bound', () => {

@@ -1,14 +1,13 @@
 //#region JSONPath segment engine (package-internal)
-// Runtime segment machinery shared by the JSONPath compiler (path.js) and
-// the query engine (query/). Extracted verbatim from path.js, in two
-// installments: values mode first, then the nodes-mode (normalized paths,
-// RFC 9535 section 2.7) compilers - so consumers beyond path.js (the JSLT
-// dispatcher's positional matching) can run selectors producing
+// Runtime segment machinery shared by the JSONPath compiler (path.js), the
+// query engine (query/) and the JSLT dispatcher's positional matching: the
+// values-mode, lazy values-mode and nodes-mode (normalized paths, RFC 9535
+// section 2.7) compilers, the last running selectors that produce
 // (value, normalized-path) pairs. This module is package-internal and is
 // deliberately not listed in the package exports.
 
-import { equalsJson, compareJsonScalarLt } from '@jarenjs/core/object';
-import { countCodePoints } from '@jarenjs/core/string';
+import { equalsJson, compareJsonScalarLt, locateCycle } from '@jarenjs/core/object';
+import { countCodePoints, escapePointerToken } from '@jarenjs/core/string';
 import { compileIRegexp } from '@jarenjs/core/text/iregexp';
 import {
   CC_TAB,
@@ -21,7 +20,8 @@ import {
   isDigitCode,
 } from '@jarenjs/core/scan';
 import { DATA_DEPTH_CEILING } from './errors.js';
-import { descentLimitError } from './query/descent-message.js';
+import { DESCENT_LIMIT_ID, descentCycleError, descentLimitError } from './query/descent-message.js';
+import { JsonQueryRuntimeError } from './query/errors.js';
 
 /**
  * Sentinel for the absence of a value ("Nothing" in RFC 9535 terms), as
@@ -669,6 +669,64 @@ export function descentCeilingOption(value, name) {
   return value == null ? DATA_DEPTH_CEILING : positiveIntegerOption(value, name);
 }
 
+/**
+ * The JSON Pointer of `target` in `root`: '' for `root` itself, else the
+ * first member path that reaches it, arrays by index and object members in
+ * their own order; `undefined` when `root` does not hold it. Each container
+ * is searched once, so a cyclic or shared `root` costs its size.
+ * @param {unknown} root
+ * @param {object} target
+ * @returns {string | undefined}
+ */
+function locateValue(root, target) {
+  if (root === target)
+    return '';
+  if (root === null || typeof root !== 'object')
+    return undefined;
+  const searched = new Set([root]);
+  /** @type {{ value: any, keys: string[] | null, at: number }[]} */
+  const frames = [{ value: root, keys: Array.isArray(root) ? null : Object.keys(root), at: 0 }];
+  while (frames.length !== 0) {
+    const frame = frames[frames.length - 1];
+    if (frame.at === (frame.keys === null ? frame.value.length : frame.keys.length)) {
+      frames.pop();
+      continue;
+    }
+    const member = frame.value[frame.keys === null ? frame.at : frame.keys[frame.at]];
+    frame.at++;
+    if (member === target)
+      return frames.map((f) => '/' + (f.keys === null ? String(f.at - 1) : escapePointerToken(f.keys[f.at - 1]))).join('');
+    if (member !== null && typeof member === 'object' && !searched.has(member)) {
+      searched.add(member);
+      frames.push({ value: member, keys: Array.isArray(member) ? null : Object.keys(member), at: 0 });
+    }
+  }
+  return undefined;
+}
+
+/**
+ * What a descendant walk from `start` raises, read again at the segment
+ * that started it. A walk over a cycle reaches the nesting bound too, so
+ * the value is searched for one only then, never on the way down: a cycle
+ * is named as one (`JQ2016`) at the data member that closes it
+ * (`locateCycle`), a JSON Pointer into `root` when `root` holds `start` and
+ * into `start` when it does not (a query path over an external value). The
+ * bound on a value without a cycle (`JQ2009`), and every other error, pass
+ * unchanged.
+ * @param {unknown} error - What the walk threw
+ * @param {any} start - The value the walk started from
+ * @param {any} root - The query root (`$`)
+ * @returns {unknown}
+ */
+function descentRefusal(error, start, root) {
+  if (!(error instanceof JsonQueryRuntimeError) || error.messageId !== DESCENT_LIMIT_ID)
+    return error;
+  const member = locateCycle(start);
+  if (member === undefined)
+    return error;
+  return descentCycleError((locateValue(root, start) ?? '') + member, error.docPath);
+}
+
 export function descendV(v, output, root, apply, ceiling, docPath) {
   apply(v, output, root);
   if (typeof v !== 'object' || v === null)
@@ -712,8 +770,14 @@ export function compileSegmentV(seg) {
     const ceiling = compileCeiling;
     const docPath = compileDocPath;
     return (input, output, root) => {
-      for (let i = 0; i < input.length; i++)
-        descendV(input[i], output, root, apply, ceiling, docPath);
+      let i = 0;
+      try {
+        for (; i < input.length; i++)
+          descendV(input[i], output, root, apply, ceiling, docPath);
+      }
+      catch (error) {
+        throw descentRefusal(error, input[i], root);
+      }
     };
   }
   return (input, output, root) => {
@@ -856,7 +920,14 @@ export function compileSegmentG(seg) {
   if (seg.descendant) {
     const ceiling = compileCeiling;
     const docPath = compileDocPath;
-    return function* segmentDescendantG(v, root) { yield* descendG(v, root, apply, 0, ceiling, docPath); };
+    return function* segmentDescendantG(v, root) {
+      try {
+        yield* descendG(v, root, apply, 0, ceiling, docPath);
+      }
+      catch (error) {
+        throw descentRefusal(error, v, root);
+      }
+    };
   }
   return apply;
 }
@@ -1051,8 +1122,14 @@ export function compileSegmentP(seg) {
     const ceiling = compileCeiling;
     const docPath = compileDocPath;
     return (inV, inP, outV, outP, root) => {
-      for (let i = 0; i < inV.length; i++)
-        descendP(inV[i], inP[i], outV, outP, root, apply, ceiling, docPath);
+      let i = 0;
+      try {
+        for (; i < inV.length; i++)
+          descendP(inV[i], inP[i], outV, outP, root, apply, ceiling, docPath);
+      }
+      catch (error) {
+        throw descentRefusal(error, inV[i], root);
+      }
     };
   }
   return (inV, inP, outV, outP, root) => {

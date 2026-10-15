@@ -442,6 +442,7 @@ export const ko = {
   'query/steps-limit': '쿼리가 limits.steps(식 평가 {limit}회)를 초과했습니다',
   'query/result-limit': '쿼리 결과의 항목이 {count}개로 limits.resultItems({limit})보다 많습니다',
   'query/descent-limit': '하위 항목 세그먼트가 {limit}단계보다 깊이 중첩된 값에 도달합니다',
+  'query/descent-cycle': '하위 항목 세그먼트가 데이터 멤버 {member}이(가) 닫는 순환 참조에 도달합니다',
   'query/function-threw': "등록된 함수 '{name}'에서 예외가 발생했습니다: {detail}",
   'query/operator-threw': "등록된 연산자 '{name}'이(가) 실패했습니다: {detail}",
   'query/input-undefined': '입력 문서가 undefined입니다 (undefined는 JSON 값이 아닙니다)',

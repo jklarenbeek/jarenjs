@@ -43,6 +43,7 @@ export const QUERY_CODES = Object.freeze({
   JQ2013: 'formula input or result is not valid JSON/schema data',
   JQ2014: 'invalid formula outcome',
   JQ2015: 'invalid reviewed rule plan',
+  JQ2016: 'a descendant segment over a circular reference',
 });
 
 /**

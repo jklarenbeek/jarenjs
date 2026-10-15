@@ -439,6 +439,7 @@ export const ja = {
   'query/steps-limit': 'クエリが limits.steps（式の評価 {limit} 回）を超えました',
   'query/result-limit': 'クエリ結果の項目数は {count} 個で、limits.resultItems（{limit}）を超えています',
   'query/descent-limit': '子孫セグメントが {limit} 段より深くネストした値に到達しています',
+  'query/descent-cycle': '子孫セグメントが、データメンバー {member} が閉じる循環参照に到達しています',
   'query/function-threw': "登録された関数 '{name}' が例外をスローしました: {detail}",
   'query/operator-threw': "登録された演算子 '{name}' が失敗しました: {detail}",
   'query/input-undefined': '入力ドキュメントが undefined です（undefined は JSON 値ではありません）',

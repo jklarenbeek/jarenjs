@@ -464,6 +464,7 @@ export const ru = {
   'query/steps-limit': 'запрос превысил limits.steps ({limit} вычислений выражений)',
   'query/result-limit': 'число элементов в результате запроса ({count}) превышает limits.resultItems ({limit})',
   'query/descent-limit': 'сегмент потомков достигает значения, глубина вложенности которого больше {limit}',
+  'query/descent-cycle': 'сегмент потомков достигает циклической ссылки, которую замыкает элемент данных {member}',
   'query/function-threw': "зарегистрированная функция '{name}' выбросила исключение: {detail}",
   'query/operator-threw': "зарегистрированный оператор '{name}' завершился с ошибкой: {detail}",
   'query/input-undefined': 'входной документ равен undefined, что не является значением JSON',

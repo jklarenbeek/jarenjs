@@ -743,6 +743,9 @@ export const CATALOGS = deepFreeze({
     "query/descent-limit": [
       "limit"
     ],
+    "query/descent-cycle": [
+      "member"
+    ],
     "query/function-threw": [
       "detail",
       "name"

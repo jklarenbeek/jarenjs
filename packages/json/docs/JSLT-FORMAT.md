@@ -353,7 +353,9 @@ MUST die with JT2001, not a stack overflow.
 
 A descendant segment (`..`) in a rule's match path or in a path inside a rule
 body descends at most 1000 levels of nesting; a document nested deeper is
-refused with JT2004 wrapping `JQ2009`. The compile option `maxDescentDepth` (a
+refused with JT2004 wrapping `JQ2009`, and a document that holds a cycle with
+JT2004 wrapping `JQ2016`, which names the data member that closes the cycle
+(*upgrade: it wrapped `JQ2009`*). The compile option `maxDescentDepth` (a
 positive integer, as `compileJSONPath` takes it; anything else is a
 `TypeError`) moves that bound for the whole stylesheet. Fixed by default so the
 answer is the same on every host; a larger value lets the host's call stack
@@ -554,7 +556,7 @@ In the bare-array shorthand (§2.1) the document has no `rules` member;
 | JT2001 | dispatch depth exceeded `maxDepth` |
 | JT2002 | built-in rebuild: an object member's child dispatch produced 2+ items (message carries the location + member name) |
 | JT2003 | unmatched value under `"error"` disposition |
-| JT2004 | rule body or match path raised a runtime error — wraps `JsonQueryRuntimeError` (cause), message names the rule (`/rules/<i>`) and the node location when known; never double-wraps. A match path raises when its enumeration does (a descendant segment past its nesting bound, `JQ2009`); `docPath` is the path's (`/rules/<i>/match`, or `/rules/<i>/match/path` for the object form), and a path shared by several rules names the first. *Upgrade: a match path's error escaped unwrapped as `JsonQueryRuntimeError`.* |
+| JT2004 | rule body or match path raised a runtime error — wraps `JsonQueryRuntimeError` (cause), message names the rule (`/rules/<i>`) and the node location when known; never double-wraps. A match path raises when its enumeration does (a descendant segment past its nesting bound, `JQ2009`, or over a cycle, `JQ2016`); `docPath` is the path's (`/rules/<i>/match`, or `/rules/<i>/match/path` for the object form), and a path shared by several rules names the first. *Upgrade: a match path's error escaped unwrapped as `JsonQueryRuntimeError`.* |
 
 JT0xxx are compile errors (`JsltCompileError`), JT2xxx runtime errors
 (`JsltRuntimeError`) — the same numbering convention as JQ0xxx/JQ2xxx.

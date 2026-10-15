@@ -444,6 +444,7 @@ export const fr = {
   'query/steps-limit': "la requête a dépassé limits.steps ({limit} évaluations d'expressions)",
   'query/result-limit': 'le résultat de la requête compte {count} éléments, plus que limits.resultItems ({limit})',
   'query/descent-limit': 'un segment descendant atteint une valeur imbriquée sur plus de {limit} niveaux',
+  'query/descent-cycle': 'un segment descendant atteint une référence circulaire fermée par le membre de données {member}',
   'query/function-threw': "la fonction enregistrée '{name}' a levé une exception : {detail}",
   'query/operator-threw': "l'opérateur enregistré '{name}' a échoué : {detail}",
   'query/input-undefined': "le document d'entrée est undefined, ce qui n'est pas une valeur JSON",

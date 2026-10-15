@@ -1005,7 +1005,8 @@ export function parseJSONPath(source, options = undefined) {
  * of nesting (default 1000); the returned functions refuse a value nested
  * deeper with a `JsonQueryRuntimeError` `JQ2009` (the walks a filter
  * starts inside a descent count toward the same bound in values and
- * nodes mode).
+ * nodes mode), and a value that holds a cycle with `JQ2016`, naming the
+ * data member that closes it.
  *
  * @param {string} source - The JSONPath expression
  * @param {JSONPathOptions} [options] - Compile options
@@ -1105,7 +1106,8 @@ const boundedCacheFor = () => createBoundedCache(512);
  * @returns {any[]} Array of matched values
  * @throws {JSONPathSyntaxError} When the query is not valid RFC 9535
  * @throws {JsonQueryRuntimeError} `JQ2009` when a descendant segment
- *   reaches a value nested deeper than `options.maxDescentDepth` (1000)
+ *   reaches a value nested deeper than `options.maxDescentDepth` (1000),
+ *   `JQ2016` when the value it walks holds a cycle
  */
 export function queryJSONPath(source, data, options = undefined) {
   const functions = options == null ? null : options.pathFunctions;

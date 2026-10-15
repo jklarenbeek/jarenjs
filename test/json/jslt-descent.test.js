@@ -129,3 +129,29 @@ describe('a JTLT template takes the same bound', () => {
     assert.throws(() => renderText(called, 1, undefined), { code: 'TL0005' });
   });
 });
+
+describe('a stylesheet names a cycle its descendant segments reach', () => {
+  /** `{ x: 1, self: <itself> }` under `a` */
+  const cyclic = () => {
+    /** @type {any} */
+    const c = { x: 1 };
+    c.self = c;
+    return { a: c };
+  };
+
+  for (const [name, stylesheet, where] of /** @type {const} */ ([
+    ['a match path', MATCH, 'matching its path'],
+    ['a path inside a rule body', BODY, 'at location \\$'],
+  ])) {
+    it(`${name} refuses it as a cycle at the member that closes it`, () => {
+      assert.throws(() => compileJsltStylesheet(stylesheet)(cyclic()), (/** @type {any} */ error) => {
+        assert.ok(error instanceof JsltRuntimeError);
+        assert.equal(error.code, 'JT2004');
+        assert.equal(error.cause?.code, 'JQ2016');
+        assert.deepEqual(error.cause?.params, { member: '/a/self' });
+        assert.match(error.message, new RegExp(`^JT2004: rule /0 failed ${where}: JQ2016: a descendant segment reaches a circular reference closed by data member /a/self`));
+        return true;
+      });
+    });
+  }
+});

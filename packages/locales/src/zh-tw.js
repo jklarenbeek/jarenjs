@@ -442,6 +442,7 @@ export const zhTW = {
   'query/steps-limit': '查詢超過 limits.steps（{limit} 次運算式求值）',
   'query/result-limit': '查詢結果有 {count} 個項目，超過 limits.resultItems（{limit}）',
   'query/descent-limit': '子代區段觸及巢狀深度超過 {limit} 層的值',
+  'query/descent-cycle': '子代區段觸及由資料成員 {member} 封閉的循環參照',
   'query/function-threw': "已註冊的函式 '{name}' 擲回例外：{detail}",
   'query/operator-threw': "已註冊的運算子 '{name}' 失敗：{detail}",
   'query/input-undefined': '輸入文件為 undefined，而 undefined 不是 JSON 值',
