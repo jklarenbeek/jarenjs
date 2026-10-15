@@ -20,7 +20,6 @@
 
 import {
   formatMessageValue,
-  formatSchemaValue,
   makeNumberRenderer,
   makePluralPicker,
   makeTypeNamer,
@@ -81,7 +80,7 @@ export const nl = {
   type: (p) => p.types
     ? `moet een van de volgende typen zijn: ${p.types.join(', ')}`
     : `moet een ${typeName(p.type)} zijn`,
-  required: (p) => p.missingProperty
+  required: (p) => p.missingProperty !== undefined
     ? `moet de verplichte eigenschap '${p.missingProperty}' bevatten`
     : 'moet de verplichte eigenschappen bevatten',
   minimum: (p) => `moet ${p.comparison} ${num(p.limit)} zijn`,
@@ -92,7 +91,7 @@ export const nl = {
   minLength: (p) => `mag niet minder dan ${num(p.limit)} ${plural(p.limit, 'teken', 'tekens')} bevatten`,
   maxLength: (p) => `mag niet meer dan ${num(p.limit)} ${plural(p.limit, 'teken', 'tekens')} bevatten`,
   pattern: 'moet overeenkomen met patroon "{pattern}"',
-  additionalProperties: (p) => p.additionalProperty
+  additionalProperties: (p) => p.additionalProperty !== undefined
     ? `mag de extra eigenschap '${p.additionalProperty}' niet bevatten`
     : 'mag geen extra eigenschappen bevatten',
   minProperties: (p) => `mag niet minder dan ${num(p.limit)} ${plural(p.limit, 'eigenschap', 'eigenschappen')} bevatten`,
@@ -101,21 +100,28 @@ export const nl = {
   maxItems: (p) => `mag niet meer dan ${num(p.limit)} ${plural(p.limit, 'item', 'items')} bevatten`,
   uniqueItems: 'mag geen dubbele items bevatten',
   contains: 'moet ten minste één geldig item bevatten',
+  minContains: (p) => `moet ten minste ${num(p.limit)} ${plural(p.limit, 'geldig item', 'geldige items')} bevatten`,
+  maxContains: (p) => `mag niet meer dan ${num(p.limit)} ${plural(p.limit, 'geldig item', 'geldige items')} bevatten`,
   items: 'de items van de lijst zijn ongeldig',
   allOf: "moet aan alle subschema's voldoen",
   anyOf: 'moet aan een subschema in anyOf voldoen',
   oneOf: 'moet aan precies één subschema in oneOf voldoen',
   not: 'mag NIET aan het subschema voldoen',
   format: 'moet overeenkomen met formaat "{format}"',
+  contentEncoding: 'moet gecodeerd zijn als "{encoding}"',
+  contentMediaType: (p) => p.encoding !== undefined
+    ? `moet "${p.mediaType}"-inhoud zijn, gecodeerd als "${p.encoding}"`
+    : `moet "${p.mediaType}"-inhoud zijn`,
+  nullable: 'mag niet null zijn',
   if: 'moet aan het "if"-schema voldoen',
   then: 'moet aan het "then"-schema voldoen',
   else: 'moet aan het "else"-schema voldoen',
   'false schema': 'booleaans schema false is altijd ongeldig',
   const: (p) => p.allowedValue !== undefined
-    ? `moet gelijk zijn aan de constante ${formatSchemaValue(p.allowedValue)}`
+    ? `moet gelijk zijn aan de constante ${formatMessageValue(p.allowedValue)}`
     : 'moet gelijk zijn aan de constante',
   enum: (p) => Array.isArray(p.allowedValues)
-    ? `moet gelijk zijn aan een van de toegestane waarden: ${listFormat.format(p.allowedValues.map(formatSchemaValue))}`
+    ? `moet gelijk zijn aan een van de toegestane waarden: ${listFormat.format(p.allowedValues.map(formatMessageValue))}`
     : 'moet gelijk zijn aan een van de toegestane waarden',
   dependentRequired: requiresDependency,
   dependencies: requiresDependency,

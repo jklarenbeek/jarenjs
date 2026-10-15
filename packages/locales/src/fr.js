@@ -21,7 +21,6 @@
 
 import {
   formatMessageValue,
-  formatSchemaValue,
   makeNumberRenderer,
   makePluralPicker,
   makeTypeNamer,
@@ -82,7 +81,7 @@ export const fr = {
   type: (p) => p.types
     ? `doit être l'un des types suivants : ${p.types.join(', ')}`
     : `doit être ${typeName(p.type)}`,
-  required: (p) => p.missingProperty
+  required: (p) => p.missingProperty !== undefined
     ? `doit contenir la propriété obligatoire '${p.missingProperty}'`
     : 'doit contenir les propriétés obligatoires',
   minimum: (p) => `doit être ${p.comparison} ${num(p.limit)}`,
@@ -93,7 +92,7 @@ export const fr = {
   minLength: (p) => `ne doit pas contenir moins de ${num(p.limit)} ${plural(p.limit, 'caractère', 'caractères')}`,
   maxLength: (p) => `ne doit pas contenir plus de ${num(p.limit)} ${plural(p.limit, 'caractère', 'caractères')}`,
   pattern: 'doit correspondre au motif "{pattern}"',
-  additionalProperties: (p) => p.additionalProperty
+  additionalProperties: (p) => p.additionalProperty !== undefined
     ? `ne doit pas contenir la propriété supplémentaire '${p.additionalProperty}'`
     : 'ne doit pas contenir de propriétés supplémentaires',
   minProperties: (p) => `ne doit pas contenir moins de ${num(p.limit)} ${plural(p.limit, 'propriété', 'propriétés')}`,
@@ -102,21 +101,28 @@ export const fr = {
   maxItems: (p) => `ne doit pas contenir plus de ${num(p.limit)} ${plural(p.limit, 'élément', 'éléments')}`,
   uniqueItems: "ne doit pas contenir d'éléments en double",
   contains: 'doit contenir au moins un élément valide',
+  minContains: (p) => `doit contenir au moins ${num(p.limit)} ${plural(p.limit, 'élément valide', 'éléments valides')}`,
+  maxContains: (p) => `doit contenir au plus ${num(p.limit)} ${plural(p.limit, 'élément valide', 'éléments valides')}`,
   items: 'les éléments de la liste sont invalides',
   allOf: 'doit satisfaire tous les sous-schémas',
   anyOf: 'doit satisfaire un sous-schéma de anyOf',
   oneOf: 'doit satisfaire exactement un sous-schéma de oneOf',
   not: 'ne doit PAS satisfaire le sous-schéma',
   format: 'doit correspondre au format "{format}"',
+  contentEncoding: 'doit être encodé en "{encoding}"',
+  contentMediaType: (p) => p.encoding !== undefined
+    ? `doit être un contenu "${p.mediaType}" encodé en "${p.encoding}"`
+    : `doit être un contenu "${p.mediaType}"`,
+  nullable: 'ne doit pas être null',
   if: 'doit satisfaire le schéma "if"',
   then: 'doit satisfaire le schéma "then"',
   else: 'doit satisfaire le schéma "else"',
   'false schema': 'le schéma booléen false est toujours invalide',
   const: (p) => p.allowedValue !== undefined
-    ? `doit être égal à la constante ${formatSchemaValue(p.allowedValue)}`
+    ? `doit être égal à la constante ${formatMessageValue(p.allowedValue)}`
     : 'doit être égal à la constante',
   enum: (p) => Array.isArray(p.allowedValues)
-    ? `doit être égal à l'une des valeurs autorisées : ${listFormat.format(p.allowedValues.map(formatSchemaValue))}`
+    ? `doit être égal à l'une des valeurs autorisées : ${listFormat.format(p.allowedValues.map(formatMessageValue))}`
     : "doit être égal à l'une des valeurs autorisées",
   dependentRequired: requiresDependency,
   dependencies: requiresDependency,

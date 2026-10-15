@@ -23,7 +23,6 @@
 
 import {
   formatMessageValue,
-  formatSchemaValue,
   makeNumberRenderer,
   makeTypeNamer,
   dateNameEntries,
@@ -79,7 +78,7 @@ export const tr = {
   type: (p) => p.types
     ? `şu türlerden biri olmalıdır: ${p.types.join(', ')}`
     : `${typeName(p.type)} olmalıdır`,
-  required: (p) => p.missingProperty
+  required: (p) => p.missingProperty !== undefined
     ? `zorunlu '${p.missingProperty}' özelliğini içermelidir`
     : 'zorunlu özellikleri içermelidir',
   minimum: (p) => `${p.comparison} ${num(p.limit)} olmalıdır`,
@@ -90,7 +89,7 @@ export const tr = {
   minLength: (p) => `en az ${num(p.limit)} karakter içermelidir`,
   maxLength: (p) => `en fazla ${num(p.limit)} karakter içermelidir`,
   pattern: '"{pattern}" desenine uymalıdır',
-  additionalProperties: (p) => p.additionalProperty
+  additionalProperties: (p) => p.additionalProperty !== undefined
     ? `ek '${p.additionalProperty}' özelliğini içermemelidir`
     : 'ek özellikler içermemelidir',
   minProperties: (p) => `en az ${num(p.limit)} özellik içermelidir`,
@@ -99,21 +98,28 @@ export const tr = {
   maxItems: (p) => `en fazla ${num(p.limit)} öğe içermelidir`,
   uniqueItems: 'yinelenen öğeler içermemelidir',
   contains: 'en az bir geçerli öğe içermelidir',
+  minContains: (p) => `en az ${num(p.limit)} geçerli öğe içermelidir`,
+  maxContains: (p) => `en fazla ${num(p.limit)} geçerli öğe içermelidir`,
   items: 'listedeki öğeler geçersiz',
   allOf: 'tüm alt şemalarla eşleşmelidir',
   anyOf: "anyOf içindeki bir alt şemayla eşleşmelidir",
   oneOf: "oneOf içindeki tam olarak bir alt şemayla eşleşmelidir",
   not: 'alt şemayla eşleşmemelidir',
   format: '"{format}" biçimine uymalıdır',
+  contentEncoding: '"{encoding}" olarak kodlanmış olmalıdır',
+  contentMediaType: (p) => p.encoding !== undefined
+    ? `"${p.encoding}" olarak kodlanmış "${p.mediaType}" içeriği olmalıdır`
+    : `"${p.mediaType}" içeriği olmalıdır`,
+  nullable: 'null olmamalıdır',
   if: '"if" şemasıyla eşleşmelidir',
   then: '"then" şemasıyla eşleşmelidir',
   else: '"else" şemasıyla eşleşmelidir',
   'false schema': 'false boole şeması her zaman geçersizdir',
   const: (p) => p.allowedValue !== undefined
-    ? `${formatSchemaValue(p.allowedValue)} sabitine eşit olmalıdır`
+    ? `${formatMessageValue(p.allowedValue)} sabitine eşit olmalıdır`
     : 'sabite eşit olmalıdır',
   enum: (p) => Array.isArray(p.allowedValues)
-    ? `izin verilen değerlerden birine eşit olmalıdır: ${listFormat.format(p.allowedValues.map(formatSchemaValue))}`
+    ? `izin verilen değerlerden birine eşit olmalıdır: ${listFormat.format(p.allowedValues.map(formatMessageValue))}`
     : 'izin verilen değerlerden birine eşit olmalıdır',
   dependentRequired: requiresDependency,
   dependencies: requiresDependency,

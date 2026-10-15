@@ -27,7 +27,6 @@
 
 import {
   formatMessageValue,
-  formatSchemaValue,
   makeNumberRenderer,
   makePluralForms,
   makeTypeNamer,
@@ -140,7 +139,7 @@ export const ar = {
   type: (p) => p.types
     ? `يجب أن تكون القيمة من أحد الأنواع التالية: ${p.types.join(', ')}`
     : `يجب أن تكون القيمة من نوع ${typeName(p.type)}`,
-  required: (p) => p.missingProperty
+  required: (p) => p.missingProperty !== undefined
     ? `يجب أن تحتوي على الخاصية الإلزامية '${p.missingProperty}'`
     : 'يجب أن تحتوي على الخصائص الإلزامية',
   minimum: compareLimit,
@@ -151,7 +150,7 @@ export const ar = {
   minLength: (p) => `يجب ألا يقل عدد الأحرف عن ${num(p.limit)}`,
   maxLength: (p) => `يجب ألا يزيد عدد الأحرف عن ${num(p.limit)}`,
   pattern: 'يجب أن تطابق النمط "{pattern}"',
-  additionalProperties: (p) => p.additionalProperty
+  additionalProperties: (p) => p.additionalProperty !== undefined
     ? `يجب ألا تحتوي على الخاصية الإضافية '${p.additionalProperty}'`
     : 'يجب ألا تحتوي على خصائص إضافية',
   minProperties: (p) => `يجب ألا يقل عدد الخصائص عن ${num(p.limit)}`,
@@ -160,21 +159,28 @@ export const ar = {
   maxItems: (p) => `يجب ألا يزيد عدد العناصر عن ${num(p.limit)}`,
   uniqueItems: 'يجب ألا تحتوي على عناصر مكررة',
   contains: 'يجب أن تحتوي على عنصر صالح واحد على الأقل',
+  minContains: (p) => `يجب ألا يقل عدد العناصر الصالحة عن ${num(p.limit)}`,
+  maxContains: (p) => `يجب ألا يزيد عدد العناصر الصالحة عن ${num(p.limit)}`,
   items: 'عناصر المصفوفة غير صالحة',
   allOf: 'يجب أن تطابق جميع المخططات الفرعية',
   anyOf: 'يجب أن تطابق أحد المخططات الفرعية في anyOf',
   oneOf: 'يجب أن تطابق مخططًا فرعيًا واحدًا بالضبط في oneOf',
   not: 'يجب ألا تطابق المخطط الفرعي',
   format: 'يجب أن تطابق التنسيق "{format}"',
+  contentEncoding: 'يجب أن يكون المحتوى مرمّزًا بترميز ⁨{encoding}⁩',
+  contentMediaType: (p) => p.encoding !== undefined
+    ? `يجب أن يكون المحتوى من نوع ⁨${p.mediaType}⁩ مرمّزًا بترميز ⁨${p.encoding}⁩`
+    : `يجب أن يكون المحتوى من نوع ⁨${p.mediaType}⁩`,
+  nullable: 'يجب ألا تكون القيمة null',
   if: 'يجب أن تطابق مخطط "if"',
   then: 'يجب أن تطابق مخطط "then"',
   else: 'يجب أن تطابق مخطط "else"',
   'false schema': 'المخطط المنطقي false غير صالح دائمًا',
   const: (p) => p.allowedValue !== undefined
-    ? `يجب أن تساوي القيمة الثابت ${formatSchemaValue(p.allowedValue)}`
+    ? `يجب أن تساوي القيمة الثابت ${formatMessageValue(p.allowedValue)}`
     : 'يجب أن تساوي القيمة الثابت',
   enum: (p) => Array.isArray(p.allowedValues)
-    ? `يجب أن تساوي القيمة إحدى القيم المسموح بها: ${listFormat.format(p.allowedValues.map(formatSchemaValue))}`
+    ? `يجب أن تساوي القيمة إحدى القيم المسموح بها: ${listFormat.format(p.allowedValues.map(formatMessageValue))}`
     : 'يجب أن تساوي القيمة إحدى القيم المسموح بها',
   dependentRequired: requiresDependency,
   dependencies: requiresDependency,

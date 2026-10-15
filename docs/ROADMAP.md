@@ -108,25 +108,6 @@ delete it or fix it.
   value; `equalsJson`, `stableStringify`, `createJSONPatch` and
   `createMergePatch` walk on their own stack and refuse past 10000 levels with
   `JO2001`.
-- [ ] **Five keywords still render the generic message.** `minContains`,
-  `maxContains`, `contentEncoding`, `contentMediaType` and `nullable: false`
-  failures render `validation failed for keyword '<k>'` with `params: {}` (`{
-  contains: { type: 'string' }, minContains: 2 }` on `['a']`). Each needs
-  params (the limit, the encoding or media type) and a key in `messagesEn` and
-  the eleven packs.
-- [ ] **A `$data`/`data` bound names its pointer.** `{ minimum: { $data: '1/m'
-  } }` on `{ n: 1, m: 5 }` reports `params.limit: '1/m'` and "must be >= 1/m";
-  the resolved value is the error's second meta argument (as `const`/`enum`
-  now read it). Changing it changes a non-fallback message (an upgrade
-  sentence).
-- [ ] **An empty member name loses its name in the locale packs.** The
-  eleven `@jarenjs/locales` packs test `missingProperty` and
-  `additionalProperty` by truthiness, so `required: ['']` on `{}` renders
-  the plural fallback ("muss die Pflichteigenschaften enthalten", ...)
-  where `messagesEn` now names `''`; the test is `!== undefined`, as their
-  `requiresDependency` already reads. The packs' `formatSchemaValue` is now
-  identical to `@jarenjs/core/message` `formatMessageValue` (BigInt as its
-  digits) and can collapse into it.
 - [ ] **A `v`-mode literal `pattern` is still read as a literal.** `pattern`,
   `patternProperties` keys, the `regex` format and `@jarenjs/forms`' field
   `pattern` read a string as an ECMA-262 source in Unicode mode, so `"/a/"`
@@ -135,24 +116,43 @@ delete it or fix it.
   still falls back to that literal, because it compiled before. Closing it
   refuses such a schema when it compiles (a minor), with an upgrade sentence
   that names the `v`-mode spelling.
-- [ ] **The normalizer reads `prefixItems` in a document that declares
-  2019-09.** `compileNormalizer` applies keywords without the declared
-  draft, so `{ $schema: 2019-09, prefixItems: [{ type: 'integer' }] }` with
-  `coerceTypes: true` turns `['5']` into `[5]`, while the validator ignores
-  `prefixItems` there and accepts `['5']` as is. The node compiler needs the
-  draft the anchor walk already tracks.
-- [ ] **`compileAsync` resolves a relative reference in a schema without `$id`
-  against the default base.** `{ $ref: 'name.json' }` asks the loader for
-  `https://github.com/jklarenbeek/name.json`, a URI the host never named.
-  Refusing such a reference, or a base option, is a minor.
+- [ ] **`compileAsync` still asks the loader for a URI under the default
+  base.** `{ $ref: 'name.json' }` in a schema without `$id`, on a validator
+  whose `traverse` names no origin, asks for
+  `https://github.com/jklarenbeek/name.json`; a failed load now names the base
+  and both repairs (an `$id`, or `traverse: new TraverseOptions(base)`), but
+  the request itself still goes out. Refusing before the load would refuse a
+  loader that serves that URI, which the README teaches and which answers
+  right, so it waits on a decision to change the default (a minor with an
+  upgrade sentence).
+- [ ] **A `$ref` target loses its document's declared draft.** `{ $schema:
+  2019-09, $defs: { t: { prefixItems: [{ type: 'integer' }] } }, $ref:
+  '#/$defs/t' }` accepts `[5]` and rejects `['5']`: the target is compiled
+  with no declared draft, so it reads `prefixItems` that 2019-09 ignores (the
+  same subschema compiled inline first keeps the draft: `{ $schema: 2019-09,
+  properties: { a: tuple, b: { $ref: '#/properties/a' } } }` ignores it under
+  `b`). Every declared-draft gate (`dependentRequired`, `minContains`,
+  `unevaluated*`, `propertyDependencies`) is affected; fixing it changes
+  collected errors (a minor). The normalizer already reads the target by its
+  place.
+- [ ] **A draft-07 `$id` beside `$ref` is honoured by the load walk and
+  ignored by compile.** `compileAsync(new JarenValidator(), { $defs: { a: {
+  $id: 'sub/a.json', $ref: 'name.json' } }, $ref: 'sub/a.json' }, ...)` loads
+  `https://github.com/jklarenbeek/sub/name.json`, and the returned validator
+  then throws an uncoded `Error` ("The root of reference: '$ref':
+  'https://github.com/jklarenbeek/name.json#', is not found in init-cache") on
+  its first call; a synchronous `compile` after `addSchema` of the same
+  document throws the same. Under 2020-12 both agree.
+- [ ] **`contentMediaType: 'application/json'` checks base64 whatever
+  `contentEncoding` names.** `{ contentEncoding: 'base32', contentMediaType:
+  'application/json' }` rejects a base32 JSON string (`'PMRGC5BCHI2H2==='`)
+  while `contentEncoding: 'base32'` alone is an unknown encoding that passes.
+  Accepting it changes collected errors (a minor).
+
 - [ ] **The output formats answer in English only.** A unit carries rendered
   text, so `localizeErrors` does not reach it and the packs' `subschema` entry
   is never read. A catalog on the output path (or units that keep `msgid` and
   `params`) is a new API (a minor).
-- [ ] **`verbose` lists keywords nothing evaluated.** An unknown keyword
-  (`x-ui`) and a keyword of a later draft (draft-07 `deprecated`) appear as
-  passing keyword units without an annotation; leaving them out needs a
-  per-draft keyword registry.
 - [ ] **A disallowed member is located two ways.** `additionalProperties:
   false` places each failure at the member (`/x`), `unevaluatedProperties:
   false` at the object (`""`, the member in the message), and

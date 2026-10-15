@@ -24,7 +24,6 @@
 
 import {
   formatMessageValue,
-  formatSchemaValue,
   makeNumberRenderer,
   makeTypeNamer,
   dateNameEntries,
@@ -80,7 +79,7 @@ export const zhTW = {
   type: (p) => p.types
     ? `必須是下列型別之一: ${p.types.join(', ')}`
     : `必須是${typeName(p.type)}`,
-  required: (p) => p.missingProperty
+  required: (p) => p.missingProperty !== undefined
     ? `必須包含必要屬性 '${p.missingProperty}'`
     : '必須包含必要屬性',
   minimum: (p) => `必須 ${p.comparison} ${num(p.limit)}`,
@@ -91,7 +90,7 @@ export const zhTW = {
   minLength: (p) => `不得少於 ${num(p.limit)} 個字元`,
   maxLength: (p) => `不得多於 ${num(p.limit)} 個字元`,
   pattern: '必須符合模式 "{pattern}"',
-  additionalProperties: (p) => p.additionalProperty
+  additionalProperties: (p) => p.additionalProperty !== undefined
     ? `不得包含額外屬性 '${p.additionalProperty}'`
     : '不得包含額外屬性',
   minProperties: (p) => `屬性不得少於 ${num(p.limit)} 個`,
@@ -100,21 +99,28 @@ export const zhTW = {
   maxItems: (p) => `項目不得多於 ${num(p.limit)} 個`,
   uniqueItems: '不得包含重複的項目',
   contains: '必須至少包含一個有效項目',
+  minContains: (p) => `必須至少包含 ${num(p.limit)} 個有效項目`,
+  maxContains: (p) => `最多只能包含 ${num(p.limit)} 個有效項目`,
   items: '陣列的項目無效',
   allOf: '必須符合所有子綱要',
   anyOf: '必須符合 anyOf 中的一個子綱要',
   oneOf: '必須恰好符合 oneOf 中的一個子綱要',
   not: '不得符合子綱要',
   format: '必須符合格式 "{format}"',
+  contentEncoding: '必須以 "{encoding}" 編碼',
+  contentMediaType: (p) => p.encoding !== undefined
+    ? `必須是以 "${p.encoding}" 編碼的 "${p.mediaType}" 內容`
+    : `必須是 "${p.mediaType}" 內容`,
+  nullable: '不得為 null',
   if: '必須符合 "if" 綱要',
   then: '必須符合 "then" 綱要',
   else: '必須符合 "else" 綱要',
   'false schema': '布林綱要 false 永遠無效',
   const: (p) => p.allowedValue !== undefined
-    ? `必須等於常數 ${formatSchemaValue(p.allowedValue)}`
+    ? `必須等於常數 ${formatMessageValue(p.allowedValue)}`
     : '必須等於常數',
   enum: (p) => Array.isArray(p.allowedValues)
-    ? `必須等於允許值 ${listFormat.format(p.allowedValues.map(formatSchemaValue))} 其中之一`
+    ? `必須等於允許值 ${listFormat.format(p.allowedValues.map(formatMessageValue))} 其中之一`
     : '必須等於允許值其中之一',
   dependentRequired: requiresDependency,
   dependencies: requiresDependency,

@@ -21,7 +21,6 @@
 
 import {
   formatMessageValue,
-  formatSchemaValue,
   makeNumberRenderer,
   makePluralPicker,
   makeTypeNamer,
@@ -82,7 +81,7 @@ export const pt = {
   type: (p) => p.types
     ? `deve ser um dos seguintes tipos: ${p.types.join(', ')}`
     : `deve ser ${typeName(p.type)}`,
-  required: (p) => p.missingProperty
+  required: (p) => p.missingProperty !== undefined
     ? `deve ter a propriedade obrigatória '${p.missingProperty}'`
     : 'deve ter as propriedades obrigatórias',
   minimum: (p) => `deve ser ${p.comparison} ${num(p.limit)}`,
@@ -93,7 +92,7 @@ export const pt = {
   minLength: (p) => `não deve ter menos de ${num(p.limit)} ${plural(p.limit, 'caractere', 'caracteres')}`,
   maxLength: (p) => `não deve ter mais de ${num(p.limit)} ${plural(p.limit, 'caractere', 'caracteres')}`,
   pattern: 'deve corresponder ao padrão "{pattern}"',
-  additionalProperties: (p) => p.additionalProperty
+  additionalProperties: (p) => p.additionalProperty !== undefined
     ? `não deve ter a propriedade adicional '${p.additionalProperty}'`
     : 'não deve ter propriedades adicionais',
   minProperties: (p) => `não deve ter menos de ${num(p.limit)} ${plural(p.limit, 'propriedade', 'propriedades')}`,
@@ -102,21 +101,28 @@ export const pt = {
   maxItems: (p) => `não deve ter mais de ${num(p.limit)} ${plural(p.limit, 'item', 'itens')}`,
   uniqueItems: 'não deve ter itens duplicados',
   contains: 'deve conter pelo menos um item válido',
+  minContains: (p) => `deve conter pelo menos ${num(p.limit)} ${plural(p.limit, 'item válido', 'itens válidos')}`,
+  maxContains: (p) => `deve conter no máximo ${num(p.limit)} ${plural(p.limit, 'item válido', 'itens válidos')}`,
   items: 'os itens da lista são inválidos',
   allOf: 'deve corresponder a todos os subesquemas',
   anyOf: 'deve corresponder a um subesquema de anyOf',
   oneOf: 'deve corresponder a exatamente um subesquema de oneOf',
   not: 'NÃO deve corresponder ao subesquema',
   format: 'deve corresponder ao formato "{format}"',
+  contentEncoding: 'deve estar codificado como "{encoding}"',
+  contentMediaType: (p) => p.encoding !== undefined
+    ? `deve ser conteúdo "${p.mediaType}" codificado como "${p.encoding}"`
+    : `deve ser conteúdo "${p.mediaType}"`,
+  nullable: 'não deve ser null',
   if: 'deve corresponder ao esquema "if"',
   then: 'deve corresponder ao esquema "then"',
   else: 'deve corresponder ao esquema "else"',
   'false schema': 'o esquema booleano false é sempre inválido',
   const: (p) => p.allowedValue !== undefined
-    ? `deve ser igual à constante ${formatSchemaValue(p.allowedValue)}`
+    ? `deve ser igual à constante ${formatMessageValue(p.allowedValue)}`
     : 'deve ser igual à constante',
   enum: (p) => Array.isArray(p.allowedValues)
-    ? `deve ser igual a um dos valores permitidos: ${listFormat.format(p.allowedValues.map(formatSchemaValue))}`
+    ? `deve ser igual a um dos valores permitidos: ${listFormat.format(p.allowedValues.map(formatMessageValue))}`
     : 'deve ser igual a um dos valores permitidos',
   dependentRequired: requiresDependency,
   dependencies: requiresDependency,

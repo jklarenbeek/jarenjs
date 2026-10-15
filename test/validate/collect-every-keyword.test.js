@@ -96,19 +96,19 @@ describe('$data and data keywords', () => {
   it('each report their own failure', () => {
     const data = { n: 1, w: 2, m: 5 };
     assert.deepEqual(collected({ properties: { n: { const: { $data: '1/w' }, minimum: { $data: '1/m' } } } }, data), [
-      ['minimum', '/n', { limit: '1/m', comparison: '>=' }],
+      ['minimum', '/n', { limit: 5, comparison: '>=' }],
       ['const', '/n', { allowedValue: 2 }],
     ]);
     assert.deepEqual(collected({ properties: { n: { data: { const: '1/w', minimum: '1/m' } } } }, data), [
       ['const', '/n', { allowedValue: 2 }],
-      ['minimum', '/n', { limit: '1/m', comparison: '>=' }],
+      ['minimum', '/n', { limit: 5, comparison: '>=' }],
     ]);
   });
 
   it('still judge only the instance types they apply to', () => {
     const schema = { properties: { n: { minimum: { $data: '1/m' }, minLength: { $data: '1/l' } } } };
     assert.deepEqual(collected(schema, { n: 'abc', m: 5, l: 2 }), []);
-    assert.deepEqual(collected(schema, { n: 'a', m: 5, l: 2 }), [['minLength', '/n', { limit: '1/l' }]]);
+    assert.deepEqual(collected(schema, { n: 'a', m: 5, l: 2 }), [['minLength', '/n', { limit: 2 }]]);
   });
 });
 

@@ -21,7 +21,6 @@
 
 import {
   formatMessageValue,
-  formatSchemaValue,
   makeNumberRenderer,
   makeTypeNamer,
   dateNameEntries,
@@ -77,7 +76,7 @@ export const ja = {
   type: (p) => p.types
     ? `次のいずれかの型でなければなりません: ${p.types.join(', ')}`
     : `${typeName(p.type)}でなければなりません`,
-  required: (p) => p.missingProperty
+  required: (p) => p.missingProperty !== undefined
     ? `必須プロパティ '${p.missingProperty}' が必要です`
     : '必須プロパティが必要です',
   minimum: (p) => `${p.comparison} ${num(p.limit)} でなければなりません`,
@@ -88,7 +87,7 @@ export const ja = {
   minLength: (p) => `${num(p.limit)} 文字以上でなければなりません`,
   maxLength: (p) => `${num(p.limit)} 文字以下でなければなりません`,
   pattern: 'パターン "{pattern}" に一致しなければなりません',
-  additionalProperties: (p) => p.additionalProperty
+  additionalProperties: (p) => p.additionalProperty !== undefined
     ? `追加のプロパティ '${p.additionalProperty}' は使用できません`
     : '追加のプロパティは使用できません',
   minProperties: (p) => `プロパティは ${num(p.limit)} 個以上でなければなりません`,
@@ -97,21 +96,28 @@ export const ja = {
   maxItems: (p) => `項目は ${num(p.limit)} 個以下でなければなりません`,
   uniqueItems: '重複する項目は使用できません',
   contains: '有効な項目を少なくとも 1 つ含まなければなりません',
+  minContains: (p) => `有効な項目を少なくとも ${num(p.limit)} 個含まなければなりません`,
+  maxContains: (p) => `有効な項目は ${num(p.limit)} 個以下でなければなりません`,
   items: '配列の項目が無効です',
   allOf: 'すべてのサブスキーマに一致しなければなりません',
   anyOf: 'anyOf のいずれかのサブスキーマに一致しなければなりません',
   oneOf: 'oneOf のちょうど 1 つのサブスキーマに一致しなければなりません',
   not: 'サブスキーマに一致してはいけません',
   format: '形式 "{format}" に一致しなければなりません',
+  contentEncoding: '"{encoding}" でエンコードされていなければなりません',
+  contentMediaType: (p) => p.encoding !== undefined
+    ? `"${p.encoding}" でエンコードされた "${p.mediaType}" コンテンツでなければなりません`
+    : `"${p.mediaType}" コンテンツでなければなりません`,
+  nullable: 'null であってはなりません',
   if: '"if" スキーマに一致しなければなりません',
   then: '"then" スキーマに一致しなければなりません',
   else: '"else" スキーマに一致しなければなりません',
   'false schema': 'ブールスキーマ false は常に無効です',
   const: (p) => p.allowedValue !== undefined
-    ? `定数 ${formatSchemaValue(p.allowedValue)} と等しくなければなりません`
+    ? `定数 ${formatMessageValue(p.allowedValue)} と等しくなければなりません`
     : '定数と等しくなければなりません',
   enum: (p) => Array.isArray(p.allowedValues)
-    ? `許可された値 ${listFormat.format(p.allowedValues.map(formatSchemaValue))} のいずれかと等しくなければなりません`
+    ? `許可された値 ${listFormat.format(p.allowedValues.map(formatMessageValue))} のいずれかと等しくなければなりません`
     : '許可された値のいずれかと等しくなければなりません',
   dependentRequired: requiresDependency,
   dependencies: requiresDependency,

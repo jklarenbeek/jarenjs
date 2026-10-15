@@ -48,8 +48,7 @@ const requiresDependency = (p) => p.missingProperty !== undefined
 
 /**
  * The built-in English catalog: one entry per message key the validator
- * produces. Keywords without an entry (`minContains`, `maxContains`,
- * `contentEncoding`, `contentMediaType`, `nullable`, ...) fall back to the generic
+ * produces. A key without an entry falls back to the generic
  * `validation failed for keyword '<keyword>'`. `subschema` is no keyword:
  * it is the message of a `basic` output's branch unit.
  * @type {Record<string, string | ((params: object, error?: object) => string)>}
@@ -78,12 +77,19 @@ export const messagesEn = {
   maxItems: 'must NOT have more than {limit} items',
   uniqueItems: 'must NOT have duplicate items',
   contains: 'must contain at least one valid item',
+  minContains: 'must contain at least {limit} valid items',
+  maxContains: 'must contain at most {limit} valid items',
   items: 'array items are invalid',
   allOf: 'must match all of the subschemas',
   anyOf: 'must match a subschema in anyOf',
   oneOf: 'must match exactly one subschema in oneOf',
   not: 'must NOT match the subschema',
   format: 'must match format "{format}"',
+  contentEncoding: 'must be encoded as "{encoding}"',
+  contentMediaType: (p) => p.encoding !== undefined
+    ? `must be "${p.mediaType}" content encoded as "${p.encoding}"`
+    : `must be "${p.mediaType}" content`,
+  nullable: 'must NOT be null',
   if: 'must match "if" schema',
   then: 'must match "then" schema',
   else: 'must match "else" schema',
@@ -438,6 +444,9 @@ export function convertInternalErrors(internalErrors) {
 
     // Build params based on error type
     const params = {};
+    // A data-referenced bound passes the value it resolved after the data
+    // path; a static one has only its schema value.
+    const bound = err.rest != null && err.rest.length > 1 ? err.rest[1] : err.expected;
     if (keyword === 'required') {
       params.missingProperty = err.dataKey;
     } else if (keyword === 'type') {
@@ -446,24 +455,23 @@ export function convertInternalErrors(internalErrors) {
       } else {
         params.type = err.expected;
       }
-    } else if (['minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum', 'minLength', 'maxLength', 'minProperties', 'maxProperties', 'minItems', 'maxItems'].includes(keyword)) {
-      params.limit = err.expected;
+    } else if (['minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum', 'minLength', 'maxLength', 'minProperties', 'maxProperties', 'minItems', 'maxItems', 'minContains', 'maxContains'].includes(keyword)) {
+      params.limit = bound;
       if (keyword === 'minimum' || keyword === 'maximum') {
         params.comparison = keyword === 'minimum' ? '>=' : '<=';
       } else if (keyword === 'exclusiveMinimum' || keyword === 'exclusiveMaximum') {
         params.comparison = keyword === 'exclusiveMinimum' ? '>' : '<';
       }
     } else if (keyword === 'multipleOf') {
-      params.multipleOf = err.expected;
+      params.multipleOf = bound;
     } else if (keyword === 'pattern') {
-      params.pattern = err.expected?.source || err.expected;
+      params.pattern = bound?.source || bound;
     } else if (keyword === 'additionalProperties') {
       params.additionalProperty = err.dataKey;
     } else if (keyword === 'const') {
-      // A data reference passes the value it resolved after the data path.
-      params.allowedValue = err.rest != null && err.rest.length > 1 ? err.rest[1] : err.expected;
+      params.allowedValue = bound;
     } else if (keyword === 'enum') {
-      params.allowedValues = err.rest != null && err.rest.length > 1 ? err.rest[1] : err.expected;
+      params.allowedValues = bound;
     } else if (keyword === 'dependentRequired' || keyword === 'dependencies') {
       // One error per present property: name it and the first dependency
       // the object lacks, read back from the schema the error came from.
@@ -479,7 +487,14 @@ export function convertInternalErrors(internalErrors) {
     } else if (keyword === 'unevaluatedItems') {
       params.unevaluatedItem = err.value;
     } else if (keyword === 'format') {
-      params.format = err.expected || err.value;
+      params.format = bound || err.value;
+    } else if (keyword === 'contentEncoding') {
+      params.encoding = err.expected;
+    } else if (keyword === 'contentMediaType') {
+      // The media type check also decodes: name the encoding it read.
+      params.mediaType = err.expected;
+      const encoding = err.object?.schema?.contentEncoding;
+      if (typeof encoding === 'string') params.encoding = encoding;
     } else if (keyword === '$query') {
       // A '$query' runtime failure passes the JQ2xxx code and the query
       // document pointer as extra meta arguments after the data path;

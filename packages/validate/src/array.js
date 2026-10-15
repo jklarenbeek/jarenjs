@@ -28,6 +28,8 @@ import {
   ARRAY_CHILD_KEYWORDS,
 } from './tools.js';
 
+import { readPrefixItems } from './schema-keywords.js';
+
 //#region Primitives
 function compileMinItems(schemaObj, jsonSchema) {
   const min = getIntishType(jsonSchema.minItems) || 0;
@@ -195,20 +197,6 @@ function compileArrayContainsBoolean(schemaObj, jsonSchema) {
 //#endregion
 
 //#region Items
-/**
- * The `prefixItems` array a schema applies, or `undefined`. A document that
- * declares a draft before 2020-12 via `$schema` treats `prefixItems` as an
- * unknown keyword; a document that declares none reads it.
- * @param {import('./index.js').ValidationObject} schemaObj
- * @param {object} jsonSchema
- * @returns {unknown[] | undefined}
- */
-function readPrefixItems(schemaObj, jsonSchema) {
-  return (schemaObj.declaredDraft != null && schemaObj.declaredDraft < 2020)
-    ? undefined
-    : getArrayClassMinItems(jsonSchema.prefixItems, 1);
-}
-
 function compileArrayItemsBoolean(schemaObj, jsonSchema) {
   const items = getBoolishType(jsonSchema.items);
   if (items === true) return trueThat;

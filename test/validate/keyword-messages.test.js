@@ -8,6 +8,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { JarenValidator, messagesEn, compileMessageCatalog, localizeErrors } from '@jarenjs/validate';
+import { stringFormats } from '@jarenjs/formats';
 
 /**
  * The collected errors of one keyword.
@@ -118,5 +119,72 @@ describe('the catalog entries', () => {
     const result = new JarenValidator({ collectErrors: true }).compile({ const: 3, enum: [1, 2] })(4);
     localizeErrors(result.errors, compileMessageCatalog({ const: (/** @type {any} */ p) => `= ${p.allowedValue}`, enum: (/** @type {any} */ p) => `in ${p.allowedValues.join('|')}` }));
     assert.deepEqual(result.errors.map((/** @type {any} */ e) => e.message).sort(), ['= 3', 'in 1|2']);
+  });
+});
+
+describe('the contains bounds, the content keywords and nullable name what they need', () => {
+  it('minContains and maxContains name the limit', () => {
+    assert.deepEqual(failures({ contains: { type: 'string' }, minContains: 2 }, ['a'], 'minContains'),
+      [{ instancePath: '', msgid: 'minContains', params: { limit: 2 }, message: 'must contain at least 2 valid items' }]);
+    assert.deepEqual(failures({ contains: { type: 'string' }, maxContains: 1 }, ['a', 'b'], 'maxContains'),
+      [{ instancePath: '', msgid: 'maxContains', params: { limit: 1 }, message: 'must contain at most 1 valid items' }]);
+  });
+
+  it('contentEncoding names the encoding, contentMediaType the media type and the encoding beside it', () => {
+    const content = (/** @type {any} */ schema, /** @type {unknown} */ data, /** @type {string} */ keyword) => {
+      const result = new JarenValidator({ collectErrors: true, contentValidation: true }).compile(schema)(data);
+      return result.errors.filter((/** @type {any} */ e) => e.keyword === keyword).map((/** @type {any} */ e) => ({ params: e.params, message: e.message }));
+    };
+    assert.deepEqual(content({ contentEncoding: 'base64' }, '%%%', 'contentEncoding'),
+      [{ params: { encoding: 'base64' }, message: 'must be encoded as "base64"' }]);
+    assert.deepEqual(content({ contentMediaType: 'application/json' }, '{x', 'contentMediaType'),
+      [{ params: { mediaType: 'application/json' }, message: 'must be "application/json" content' }]);
+    // the media type check also refuses a string that is not base64
+    assert.deepEqual(content({ contentEncoding: 'base64', contentMediaType: 'application/json' }, '%%%', 'contentMediaType'),
+      [{ params: { mediaType: 'application/json', encoding: 'base64' }, message: 'must be "application/json" content encoded as "base64"' }]);
+  });
+
+  it('nullable: false says the value must not be null', () => {
+    assert.deepEqual(failures({ nullable: false }, null, 'nullable'),
+      [{ instancePath: '', msgid: 'nullable', params: {}, message: 'must NOT be null' }]);
+  });
+
+  it('none of the five renders the generic message', () => {
+    const catalog = compileMessageCatalog(messagesEn);
+    for (const key of ['minContains', 'maxContains', 'contentEncoding', 'contentMediaType', 'nullable'])
+      assert.ok(Object.hasOwn(messagesEn, key) && !catalog[key]({}).startsWith('validation failed'), key);
+  });
+});
+
+describe('a data-referenced bound names the value it resolved, not its pointer', () => {
+  it('the numeric limits, multipleOf and the string limits', () => {
+    assert.deepEqual(failures({ properties: { n: { minimum: { $data: '1/m' } } } }, { n: 1, m: 5 }, 'minimum'),
+      [{ instancePath: '/n', msgid: 'minimum', params: { limit: 5, comparison: '>=' }, message: 'must be >= 5' }]);
+    assert.deepEqual(failures({ properties: { n: { exclusiveMaximum: { $data: '1/m' } } } }, { n: 9, m: 5 }, 'exclusiveMaximum')[0].message, 'must be < 5');
+    assert.deepEqual(failures({ properties: { n: { multipleOf: { $data: '1/k' } } } }, { n: 3, k: 2 }, 'multipleOf')[0].params, { multipleOf: 2 });
+    assert.deepEqual(failures({ properties: { s: { maxLength: { $data: '1/m' } } } }, { s: 'xyz', m: 1 }, 'maxLength')[0].message, 'must NOT have more than 1 characters');
+    assert.deepEqual(failures({ properties: { a: { minItems: { $data: '1/m' } } } }, { a: [], m: 2 }, 'minItems')[0].params, { limit: 2 });
+    assert.deepEqual(failures({ properties: { o: { maxProperties: { $data: '1/m' } } } }, { o: { x: 1 }, m: 0 }, 'maxProperties')[0].params, { limit: 0 });
+  });
+
+  it('the data keyword says the same', () => {
+    assert.deepEqual(failures({ properties: { s: { data: { maxLength: '1/m' } } } }, { s: 'xyz', m: 1 }, 'maxLength'),
+      [{ instancePath: '/s', msgid: 'maxLength', params: { limit: 1 }, message: 'must NOT have more than 1 characters' }]);
+  });
+
+  it('pattern and format name the pattern and the format they resolved', () => {
+    assert.deepEqual(failures({ properties: { s: { pattern: { $data: '1/p' } } } }, { s: 'x', p: '^a' }, 'pattern'),
+      [{ instancePath: '/s', msgid: 'pattern', params: { pattern: '^a' }, message: 'must match pattern "^a"' }]);
+    const result = new JarenValidator({ collectErrors: true, draftVersion: 2020 }).addFormats(stringFormats)
+      .compile({ properties: { s: { format: { $data: '1/f' } } } })({ s: 'xyz', f: 'email' });
+    assert.deepEqual(result.errors.map((/** @type {any} */ e) => ({ params: e.params, message: e.message })),
+      [{ params: { format: 'email' }, message: 'must match format "email"' }]);
+  });
+
+  it('an errorMessage template reads the resolved limit', () => {
+    const result = new JarenValidator({ collectErrors: true }).compile({
+      properties: { n: { minimum: { $data: '1/m' }, errorMessage: { minimum: 'at least {limit}' } } },
+    })({ n: 1, m: 5 });
+    assert.deepEqual(result.errors.map((/** @type {any} */ e) => e.message), ['at least 5']);
   });
 });

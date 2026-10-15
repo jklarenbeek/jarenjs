@@ -16,7 +16,7 @@
 
 import { isObjectClass, isStringType } from '@jarenjs/core';
 import { isBoolOrObjectClass } from './tools.js';
-import { storeSchemaIdsInMap } from './traverse.js';
+import { storeSchemaIdsInMap, DEFAULT_ORIGIN } from './traverse.js';
 import { SchemaCompileError, describeCount, describeKind } from './errors.js';
 import { VALIDATOR_STATE } from './validator-state.js';
 
@@ -112,7 +112,7 @@ export async function compileAsync(validator, schema, options) {
   const refuseFailed = () => {
     for (const [key, at, failure] of failed) {
       if (!held(key))
-        throw new SchemaCompileError(failure.code, failure.reason + heldBy(at), at, failure.options);
+        throw new SchemaCompileError(failure.code, failure.reason + heldBy(at) + underDefaultBase(traverse.origin, key), at, failure.options);
     }
   };
 
@@ -250,6 +250,24 @@ function unheld(schemas, reached, held) {
  */
 function heldBy(at) {
   return at === undefined ? ', referenced by a schema the validator held' : '';
+}
+
+/** The directory of the default base: what a relative reference resolves into when nothing names a base. */
+const DEFAULT_DIRECTORY = DEFAULT_ORIGIN.slice(0, DEFAULT_ORIGIN.lastIndexOf('/') + 1);
+
+/**
+ * What a load refusal adds when the URI it asked for sits under the
+ * validator's default base: the host named no base, so a relative reference
+ * resolved against one it never chose. The refusal then names the repair.
+ * @param {string} origin - The validator's base
+ * @param {string} key - The document's key (`uri#`)
+ * @returns {string}
+ */
+function underDefaultBase(origin, key) {
+  return origin === DEFAULT_ORIGIN && key.startsWith(DEFAULT_DIRECTORY)
+    ? `; the URI is under the validator's default base '${DEFAULT_ORIGIN}', which no $id and no traverse origin names: `
+      + 'give the schema an $id, or the validator a base (traverse: new TraverseOptions(base))'
+    : '';
 }
 
 /**

@@ -92,12 +92,17 @@ const SAMPLE_PARAMS = {
   maxItems: { limit: 2 },
   uniqueItems: {},
   contains: {},
+  minContains: { limit: 2 },
+  maxContains: { limit: 3 },
   items: {},
   allOf: {},
   anyOf: {},
   oneOf: {},
   not: {},
   format: { format: 'email' },
+  contentEncoding: { encoding: 'base64' },
+  contentMediaType: { mediaType: 'application/json', encoding: 'base64' },
+  nullable: {},
   if: {},
   then: {},
   else: {},
@@ -403,6 +408,33 @@ describe('@jarenjs/locales — the failures that name what the instance needed',
       assert.notStrictEqual(compiled.unevaluatedProperties({ unevaluatedProperty: '' }), compiled.unevaluatedProperties({}), `${code} ''`);
       assert.notStrictEqual(compiled.dependentRequired({ property: '', missingProperty: '' }), compiled.dependentRequired({}), `${code} ''`);
       assert.strictEqual(compiled.dependencies({ property: 'a', missingProperty: 'b' }), compiled.dependentRequired({ property: 'a', missingProperty: 'b' }));
+      assert.ok(compiled.required({ missingProperty: '' }).includes("''"), `${code} required ''`);
+      assert.notStrictEqual(compiled.required({ missingProperty: '' }), compiled.required({}), `${code} required ''`);
+      assert.ok(compiled.additionalProperties({ additionalProperty: '' }).includes("''"), `${code} additionalProperties ''`);
+      assert.notStrictEqual(compiled.additionalProperties({ additionalProperty: '' }), compiled.additionalProperties({}), `${code} additionalProperties ''`);
+      // a structured value quotes as the English catalog does, a nested BigInt as its digits
+      assert.ok(compiled.const({ allowedValue: { a: 10n } }).includes('{"a":"10"}'), `${code} const object`);
+      assert.ok(compiled.enum({ allowedValues: ['EUR', [1, 20n]] }).includes('"EUR"'), `${code} enum string`);
+      assert.ok(compiled.enum({ allowedValues: ['EUR', [1, 20n]] }).includes('[1,"20"]'), `${code} enum array`);
+    });
+
+    it(`${code} names the contains bound, the encoding, the media type and a forbidden null in its language`, () => {
+      const compiled = compileMessageCatalog(pack);
+      const english = compileMessageCatalog(messagesEn);
+      const cases = [
+        ['minContains', { limit: 7 }, ['7']],
+        ['maxContains', { limit: 7 }, ['7']],
+        ['contentEncoding', { encoding: 'base64' }, ['base64']],
+        ['contentMediaType', { mediaType: 'application/json' }, ['application/json']],
+        ['contentMediaType', { mediaType: 'application/json', encoding: 'base64' }, ['application/json', 'base64']],
+        ['nullable', {}, []],
+      ];
+      for (const [key, params, words] of cases) {
+        const text = compiled[/** @type {string} */ (key)](params);
+        assert.notStrictEqual(text, english[/** @type {string} */ (key)](params), `${code} ${key} renders its own words`);
+        for (const word of /** @type {string[]} */ (words)) assert.ok(text.includes(word), `${code} ${key}: ${text} names ${word}`);
+      }
+      assert.notStrictEqual(compiled.contentMediaType({ mediaType: 'application/json', encoding: 'base64' }), compiled.contentMediaType({ mediaType: 'application/json' }), `${code} names the encoding`);
     });
   }
 });

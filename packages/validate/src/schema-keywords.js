@@ -1,5 +1,6 @@
 //@ts-check
 
+import { isArrayClass } from '@jarenjs/core';
 import { SCHEMA_VALUE_KEYWORDS, SCHEMA_MAP_KEYWORDS, SCHEMA_LIST_KEYWORDS } from '@jarenjs/core/schema';
 
 /** Reference walks accept legacy additionalItems, but do not register contentSchema. */
@@ -46,4 +47,20 @@ export function detectSchemaDraft(schema) {
  */
 export function admitsPropertyDependencies(enabled, declaredDraft) {
   return enabled === true && (declaredDraft == null || declaredDraft >= 2020);
+}
+
+/**
+ * The `prefixItems` array a schema applies, or `undefined`. A document that
+ * declares a draft before 2020-12 via `$schema` treats `prefixItems` as an
+ * unknown keyword; a document that declares none reads it. The validator's
+ * item keywords and the normalizer read it through this one predicate.
+ * @param {{ declaredDraft: number|null }} schemaObj - The compiled object, or anything carrying its declared draft
+ * @param {any} jsonSchema
+ * @returns {unknown[] | undefined}
+ */
+export function readPrefixItems(schemaObj, jsonSchema) {
+  const prefixItems = jsonSchema.prefixItems;
+  return (schemaObj.declaredDraft != null && schemaObj.declaredDraft < 2020) || !(isArrayClass(prefixItems) && prefixItems.length >= 1)
+    ? undefined
+    : prefixItems;
 }

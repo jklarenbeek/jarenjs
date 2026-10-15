@@ -586,3 +586,57 @@ describe('compileNormalizer — member schemas compose', () => {
     deepStrictEqual(normalize({}), { cfg: { port: 80 } });
   });
 });
+
+describe('compileNormalizer — reads prefixItems where the validator does', () => {
+  const D19 = 'https://json-schema.org/draft/2019-09/schema';
+  const D7 = 'http://json-schema.org/draft-07/schema#';
+  const D20 = 'https://json-schema.org/draft/2020-12/schema';
+  /**
+   * The normalized document and the validator's answer on it and on the input.
+   * @param {object} schema
+   * @param {unknown} data
+   */
+  const both = (schema, data) => {
+    const validate = new JarenValidator().compile(schema);
+    const normalized = compileNormalizer(schema, { coerceTypes: true, useDefaults: true })(data);
+    return { normalized, before: validate(data), after: validate(normalized) };
+  };
+
+  it('a document that declares a draft before 2020-12 leaves prefixItems unread', () => {
+    const tuple = { prefixItems: [{ type: 'integer' }], items: { type: 'string' } };
+    deepStrictEqual(both({ $schema: D19, ...tuple }, ['5']), { normalized: ['5'], before: true, after: true });
+    deepStrictEqual(both({ $schema: D7, ...tuple }, ['5']), { normalized: ['5'], before: true, after: true });
+    deepStrictEqual(both({ $schema: D19, prefixItems: [{ properties: { a: { default: 1 } } }] }, [{}]), { normalized: [{}], before: true, after: true });
+    // nested below the declaring document
+    deepStrictEqual(both({ $schema: D19, properties: { t: tuple } }, { t: ['5'] }), { normalized: { t: ['5'] }, before: true, after: true });
+  });
+
+  it('2020-12, and a document that declares no draft, read it', () => {
+    const tuple = { prefixItems: [{ type: 'integer' }], items: { type: 'string' } };
+    deepStrictEqual(both({ $schema: D20, ...tuple }, ['5', 6]), { normalized: [5, '6'], before: false, after: true });
+    deepStrictEqual(both(tuple, ['5']), { normalized: [5], before: false, after: true });
+    // an embedded resource declaring 2020-12 inside a 2019-09 document reads it
+    deepStrictEqual(both({ $schema: D19, properties: { t: { $schema: D20, ...tuple } } }, { t: ['5'] }), { normalized: { t: [5] }, before: false, after: true });
+  });
+
+  it('a reference target is read in the draft its place in the document declares', () => {
+    const tuple = { prefixItems: [{ type: 'integer' }] };
+    const normalize = (/** @type {object} */ schema, /** @type {unknown} */ data) => compileNormalizer(schema, { coerceTypes: true })(data);
+    deepStrictEqual(normalize({ $schema: D19, $defs: { t: tuple }, $ref: '#/$defs/t' }, ['5']), ['5']);
+    deepStrictEqual(normalize({ $schema: D19, $defs: { t: { $schema: D20, ...tuple } }, $ref: '#/$defs/t' }, ['5']), [5]);
+    deepStrictEqual(normalize({ $schema: D20, $defs: { t: tuple }, allOf: [{ $ref: '#/$defs/t' }] }, ['5']), [5]);
+    deepStrictEqual(normalize({ $defs: { t: tuple }, $ref: '#/$defs/t' }, ['5']), [5]);
+    deepStrictEqual(normalize({ $schema: D19, $defs: { t: { $anchor: 'tuple', ...tuple } }, $ref: '#tuple' }, ['5']), ['5']);
+    deepStrictEqual(normalize({ $schema: D20, $defs: { t: { $anchor: 'tuple', ...tuple } }, $ref: '#tuple' }, ['5']), [5]);
+    // an anchor is read in the root's draft: a subschema reached inline under
+    // another declared draft is compiled once per draft
+    const anchored = { $schema: D19, properties: { e: { $schema: D20, items: { $anchor: 'tup', ...tuple } }, r: { items: { $ref: '#tup' } } } };
+    deepStrictEqual(normalize(anchored, { e: [['5']], r: [['5']] }), { e: [[5]], r: [['5']] });
+    deepStrictEqual(normalize({ $schema: D19, properties: { r: { items: { $ref: '#tup' } }, e: anchored.properties.e } }, { e: [['5']], r: [['5']] }), { e: [[5]], r: [['5']] });
+    // one subschema reached inline and through a reference reads the same
+    deepStrictEqual(both({ $schema: D19, properties: { a: tuple, b: { $ref: '#/properties/a' } } }, { a: ['5'], b: ['5'] }),
+      { normalized: { a: ['5'], b: ['5'] }, before: true, after: true });
+    deepStrictEqual(both({ properties: { a: tuple, b: { $schema: D19, items: { $ref: '#/properties/a' } } } }, { a: ['5'], b: [['5']] }),
+      { normalized: { a: [5], b: [[5]] }, before: false, after: true });
+  });
+});

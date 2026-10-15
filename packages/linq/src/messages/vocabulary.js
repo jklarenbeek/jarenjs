@@ -55,6 +55,12 @@ export const CATALOGS = deepFreeze({
     ],
     "uniqueItems": [],
     "contains": [],
+    "minContains": [
+      "limit"
+    ],
+    "maxContains": [
+      "limit"
+    ],
     "items": [],
     "allOf": [],
     "anyOf": [],
@@ -63,6 +69,14 @@ export const CATALOGS = deepFreeze({
     "format": [
       "format"
     ],
+    "contentEncoding": [
+      "encoding"
+    ],
+    "contentMediaType": [
+      "encoding",
+      "mediaType"
+    ],
+    "nullable": [],
     "if": [],
     "then": [],
     "else": [],

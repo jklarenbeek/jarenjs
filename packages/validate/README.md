@@ -955,10 +955,13 @@ validator.getSchema('https://schemas.example.com/name.json') === documents['http
   with an absolute URI without its fragment (`name.json#/$defs/x` loads
   `name.json`), resolved against the `$id` the reference sits under — in a
   loaded document, against the URI it was loaded from. A schema without an
-  `$id` sits under the validator's default base,
-  `https://github.com/jklarenbeek/jarenjs`, so its `{ "$ref": "name.json" }`
-  asks for `https://github.com/jklarenbeek/name.json`: give the schema an
-  `$id` to name the base its relative references resolve against. Also the meta-schema
+  `$id` sits under the validator's base, `https://github.com/jklarenbeek/jarenjs`
+  unless the host names another, so its `{ "$ref": "name.json" }` asks for
+  `https://github.com/jklarenbeek/name.json`: give the schema an `$id`, or
+  the validator a base, to name what its relative references resolve
+  against (`new JarenValidator({ traverse: new TraverseOptions('https://schemas.example.com/root.json') })`
+  asks for `https://schemas.example.com/name.json`). A load refusal for a
+  URI under the default base says so and names both repairs. Also the meta-schema
   a schema's `$schema` names, unless that is a json-schema.org dialect (the
   validator implements those itself), because `compile` reads its
   `$vocabulary`; and what a schema the validator already held references and
@@ -1010,7 +1013,7 @@ every `$ref`, and at the absolute location of the schema that holds it.
 | `flagOutput` | both | `{ valid }`, from the boolean validator |
 | `basicOutput` | JSON Schema 2020-12 Core §12 | the units that carry an `error` or an `annotation`, and the branch units of a failure, flat |
 | `detailedOutput` | JSON Schema 2020-12 Core §12 | those units nested by the schema, condensed |
-| `verboseOutput` | JSON Schema 2020-12 Core §12 | every keyword of every applied subschema, nested |
+| `verboseOutput` | JSON Schema 2020-12 Core §12 | every keyword the validator evaluates in every applied subschema, nested |
 | `listOutput` | the output specification that followed 2020-12 | the units that carry `errors` or `annotations`, flat under `details` |
 | `hierarchicalOutput` | the output specification that followed 2020-12 | every applied subschema, nested under `details` |
 
@@ -1174,8 +1177,15 @@ What the units say:
   subschema inside a failing one, a failed `anyOf` branch beside one that
   passed, and an `if` condition that failed are left out of `basic`,
   `detailed` and `list`. `hierarchical` keeps every applied subschema, and
-  `verbose` every keyword of every applied subschema (a `true` subschema
-  has none, so it adds no unit there).
+  `verbose` every keyword the validator evaluates in every applied
+  subschema (a `true` subschema has none, so it adds no unit there). An
+  unknown keyword (`x-ui`) is not evaluated, nor a keyword of a later draft
+  than the one the document declares (`prefixItems` before 2020-12;
+  `dependentRequired`, `dependentSchemas`, `minContains`, `maxContains` and
+  `unevaluated*` before 2019-09; the later annotations above), nor
+  `propertyDependencies` while its option is off; a document that declares
+  no draft has every keyword the validator asserts. *Upgrade: `verbose`
+  used to list such keywords as passing units.*
 - **Messages and `errorMessage` are the collected errors' own**: the
   English messages render them, an `errorMessage` replaces them, and
   `messages: false` leaves them `''`. A unit carries the rendered text
@@ -1283,7 +1293,15 @@ only on directly annotated, absent properties: an own property set to
 create an absent property. A supplied value still follows that reference.
 
 Tuple tail normalization starts after the declared prefix, including prefix
-positions that need no changes. Same-document anchors are collected from schema
+positions that need no changes. `prefixItems` is read where the validator
+reads it: a document that declares a draft before 2020-12 treats it as an
+unknown keyword (its `items` then applies to every item), and a same-document
+reference target is read in the draft its place in the document declares (the
+nearest `$schema` on the way to it; the root's for an anchor). *Upgrade: the
+normalizer used to coerce and default `prefixItems` positions under every
+draft, so `{ $schema: 2019-09, prefixItems: [{ type: 'integer' }], items: {
+type: 'string' } }` turned `['5']`, which the validator accepts, into `[5]`,
+which it rejects.* Same-document anchors are collected from schema
 positions; anchor-looking keys in defaults, constants and examples are data.
 
 A `patternProperties` key is a pattern source here as in the validator, so

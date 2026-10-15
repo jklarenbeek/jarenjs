@@ -70,7 +70,7 @@ One flat namespace:
 
 | Producer | Keys | Params carried |
 |---|---|---|
-| validate keywords | the keyword itself: `type`, `required`, `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`, `multipleOf`, `minLength`, `maxLength`, `pattern`, `additionalProperties`, `minProperties`, `maxProperties`, `minItems`, `maxItems`, `uniqueItems`, `contains`, `items`, `allOf`, `anyOf`, `oneOf`, `not`, `format`, `if`, `then`, `else`, `false schema`, `const`, `enum`, `dependentRequired`, `dependencies`, `unevaluatedProperties`, `unevaluatedItems`, `$query` | `type`/`types`; `missingProperty`; `limit` + `comparison`; `multipleOf`; `pattern`; `additionalProperty`; `format`; `allowedValue` (`const`: the value it expected, the resolved one under `$data`/`data`); `allowedValues` (`enum`: the list it allows); `property` + `missingProperty` (`dependentRequired` and the array form of `dependencies`: the present property and the first dependency the object lacks); `unevaluatedProperty` (the member name); `unevaluatedItem` (the index) |
+| validate keywords | the keyword itself: `type`, `required`, `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`, `multipleOf`, `minLength`, `maxLength`, `pattern`, `additionalProperties`, `minProperties`, `maxProperties`, `minItems`, `maxItems`, `uniqueItems`, `contains`, `minContains`, `maxContains`, `items`, `allOf`, `anyOf`, `oneOf`, `not`, `format`, `contentEncoding`, `contentMediaType`, `nullable`, `if`, `then`, `else`, `false schema`, `const`, `enum`, `dependentRequired`, `dependencies`, `unevaluatedProperties`, `unevaluatedItems`, `$query` | `type`/`types`; `missingProperty`; `limit` (+ `comparison` for the numeric bounds); `multipleOf`; `pattern`; `additionalProperty`; `format`; `encoding` (`contentEncoding`, and `contentMediaType` beside a declared `contentEncoding`, whose check decodes the string first); `mediaType`; `allowedValue` (`const`: the value it expected); `allowedValues` (`enum`: the list it allows); `property` + `missingProperty` (`dependentRequired` and the array form of `dependencies`: the present property and the first dependency the object lacks); `unevaluatedProperty` (the member name); `unevaluatedItem` (the index) |
 | `basic` output | `subschema`: the error of a branch unit, "A subschema had errors." (rendered in English: an output format takes no catalog, so the packs' entry is not read yet) | none |
 | query runtime via `$query` | the `JQ2xxx` code of a failure that judges the instance (`JQ2001` to `JQ2005`, `JQ2008`; every other runtime refusal is thrown) | `{ code, docPath }` |
 | forms field checks | `form/` + the emitted keyword: `form/required`, `form/type`, `form/const`, `form/enum`, `form/minLength`, `form/maxLength`, `form/pattern`, `form/format`, `form/minimum`, `form/maximum`, `form/exclusiveMinimum`, `form/exclusiveMaximum`, `form/multipleOf`, `form/minItems`, `form/maxItems`, `form/uniqueItems`, `form/minProperties`, `form/maxProperties` | per branch: `limit`, `len`, `type`, `format`, `enumValues`, `constValue`, `pattern`, `multipleOf` |
@@ -87,14 +87,24 @@ before rendering `form/format`, leaving `params.format` structural so the
 same error re-renders in a second language. See the
 [`@jarenjs/locales` README](../../locales/README.md).
 
-Keywords without a built-in English entry (`minContains`, `maxContains`,
-`contentEncoding`, `contentMediaType`, `nullable`, ...) render the generic
-`validation failed for keyword '<keyword>'` with empty `params`; their
+A bound read from the instance through `$data` or `data` (`{ minimum: {
+$data: '1/m' } }`) carries the value it resolved in its params, as a static
+bound carries the schema's: `limit`, `multipleOf`, `pattern`, `format`,
+`allowedValue` and `allowedValues` name what the instance was held to, never
+the pointer that found it.
+
+A message key without a built-in English entry renders the generic
+`validation failed for keyword '<keyword>'` with empty `params`; its
 `msgid` is still the keyword, so a catalog (or an application) may cover
-them. *Upgrade: `const`, `enum`, `dependentRequired`, `dependencies`,
+it. *Upgrade: `const`, `enum`, `dependentRequired`, `dependencies`,
 `unevaluatedProperties` and `unevaluatedItems` used to render the generic
 message, and `const`, `enum`, `dependentRequired` and `dependencies`
-carried empty `params`.*
+carried empty `params`. `minContains`, `maxContains`, `contentEncoding`,
+`contentMediaType` and `nullable` rendered the generic message with empty
+`params` too; they now carry `limit`, `encoding` and `mediaType` and render
+their own entry. A data-referenced bound used to carry its pointer (`limit:
+'1/m'`, "must be >= 1/m"); it now carries the resolved value ("must be >=
+5"), also inside an `errorMessage` template that reads `{limit}`.*
 
 ## 3. MessageSpec
 
@@ -386,6 +396,15 @@ document `addSchema` would skip and `compile` then cannot resolve:
 
 ```text
 JK0005: loadSchema('https://x.test/s.json') returned the string '{"type":"string"}', not a schema (an object or a boolean) at #/items/%24ref
+```
+
+A `JK0004` or `JK0005` for a URI under the validator's default base — a
+relative reference in a schema without `$id`, on a validator whose
+`traverse` names no origin — names the base it resolved against and the two
+repairs:
+
+```text
+JK0004: loadSchema('https://github.com/jklarenbeek/name.json') failed: no document at https://github.com/jklarenbeek/name.json; the URI is under the validator's default base 'https://github.com/jklarenbeek/jarenjs', which no $id and no traverse origin names: give the schema an $id, or the validator a base (traverse: new TraverseOptions(base)) at #/%24ref
 ```
 
 A call that needs more documents than `maxLoads` (default 100) stops at the

@@ -24,7 +24,6 @@
 
 import {
   formatMessageValue,
-  formatSchemaValue,
   makeNumberRenderer,
   makeTypeNamer,
   dateNameEntries,
@@ -80,7 +79,7 @@ export const ko = {
   type: (p) => p.types
     ? `다음 유형 중 하나여야 합니다: ${p.types.join(', ')}`
     : `${typeName(p.type)} 유형이어야 합니다`,
-  required: (p) => p.missingProperty
+  required: (p) => p.missingProperty !== undefined
     ? `필수 속성 '${p.missingProperty}'이(가) 필요합니다`
     : '필수 속성이 필요합니다',
   minimum: (p) => `${p.comparison} ${num(p.limit)} 이어야 합니다`,
@@ -91,7 +90,7 @@ export const ko = {
   minLength: (p) => `${num(p.limit)}자 이상이어야 합니다`,
   maxLength: (p) => `${num(p.limit)}자 이하여야 합니다`,
   pattern: '"{pattern}" 패턴과 일치해야 합니다',
-  additionalProperties: (p) => p.additionalProperty
+  additionalProperties: (p) => p.additionalProperty !== undefined
     ? `추가 속성 '${p.additionalProperty}'은(는) 허용되지 않습니다`
     : '추가 속성은 허용되지 않습니다',
   minProperties: (p) => `속성이 ${num(p.limit)}개 이상이어야 합니다`,
@@ -100,21 +99,28 @@ export const ko = {
   maxItems: (p) => `항목이 ${num(p.limit)}개 이하여야 합니다`,
   uniqueItems: '중복된 항목이 없어야 합니다',
   contains: '유효한 항목을 하나 이상 포함해야 합니다',
+  minContains: (p) => `유효한 항목을 ${num(p.limit)}개 이상 포함해야 합니다`,
+  maxContains: (p) => `유효한 항목을 ${num(p.limit)}개 이하로 포함해야 합니다`,
   items: '배열의 항목이 유효하지 않습니다',
   allOf: '모든 하위 스키마와 일치해야 합니다',
   anyOf: 'anyOf의 하위 스키마 중 하나와 일치해야 합니다',
   oneOf: 'oneOf의 하위 스키마 중 정확히 하나와 일치해야 합니다',
   not: '하위 스키마와 일치하지 않아야 합니다',
   format: '"{format}" 형식과 일치해야 합니다',
+  contentEncoding: '"{encoding}"(으)로 인코딩되어야 합니다',
+  contentMediaType: (p) => p.encoding !== undefined
+    ? `"${p.encoding}"(으)로 인코딩된 "${p.mediaType}" 콘텐츠여야 합니다`
+    : `"${p.mediaType}" 콘텐츠여야 합니다`,
+  nullable: 'null이 아니어야 합니다',
   if: '"if" 스키마와 일치해야 합니다',
   then: '"then" 스키마와 일치해야 합니다',
   else: '"else" 스키마와 일치해야 합니다',
   'false schema': '불리언 스키마 false는 항상 유효하지 않습니다',
   const: (p) => p.allowedValue !== undefined
-    ? `상수 ${formatSchemaValue(p.allowedValue)}와(과) 같아야 합니다`
+    ? `상수 ${formatMessageValue(p.allowedValue)}와(과) 같아야 합니다`
     : '상수와 같아야 합니다',
   enum: (p) => Array.isArray(p.allowedValues)
-    ? `허용된 값 ${listFormat.format(p.allowedValues.map(formatSchemaValue))} 중 하나와 같아야 합니다`
+    ? `허용된 값 ${listFormat.format(p.allowedValues.map(formatMessageValue))} 중 하나와 같아야 합니다`
     : '허용된 값 중 하나와 같아야 합니다',
   dependentRequired: requiresDependency,
   dependencies: requiresDependency,

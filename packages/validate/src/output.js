@@ -28,7 +28,8 @@
 import { isArrayClass, isObjectClass } from '@jarenjs/core';
 import { encodeJSONPointerSegment, decodeJSONPointerSegment } from '@jarenjs/json/pointer';
 import { convertInternalErrors, renderErrorMessage } from './messages.js';
-import { TRAVERSE_SCHEMA_OBJECTS, TRAVERSE_SCHEMA_MAPS, TRAVERSE_SCHEMA_MAP_MAPS } from './schema-keywords.js';
+import { TRAVERSE_SCHEMA_OBJECTS, TRAVERSE_SCHEMA_MAPS, TRAVERSE_SCHEMA_MAP_MAPS, admitsPropertyDependencies } from './schema-keywords.js';
+import { REF_SIBLING_KEYWORDS } from './tools.js';
 import { createJsonPointer } from './traverse.js';
 
 /**
@@ -77,7 +78,7 @@ import { createJsonPointer } from './traverse.js';
  * applied.
  * @typedef {object} UnitRecord
  * @property {string} segment - The evaluation path segment from the applying record ('' for the root)
- * @property {{ path: string, schema: any, declaredDraft: number|null, options: { draftVersion: number } }} object - The subschema's compiled object
+ * @property {{ path: string, schema: any, declaredDraft: number|null, options: { draftVersion: number, propertyDependencies?: boolean|null } }} object - The subschema's compiled object
  * @property {string} instanceLocation
  * @property {unknown} data
  * @property {boolean} valid
@@ -130,6 +131,35 @@ const ITEM_ANNOTATIONS = new Set(['additionalItems', 'unevaluatedItems', 'contai
 /** Every keyword that can produce an annotation. */
 const ANNOTATING = new Set([...VALUE_ANNOTATIONS, ...STRING_ANNOTATIONS, ...MEMBER_ANNOTATIONS, ...ITEM_ANNOTATIONS]);
 
+/** The keywords that can fail an instance or reach another schema. */
+const ASSERTING = new Set([...REF_SIBLING_KEYWORDS, ...REFERENCE_KEYWORDS]);
+
+/**
+ * The draft that introduced a keyword the validator compiles only from that
+ * draft on: a document that declares an older draft reads it as an unknown
+ * keyword, one that declares none reads it.
+ */
+const ASSERTION_SINCE = Object.freeze({
+  prefixItems: 2020, dependentRequired: 2019, dependentSchemas: 2019, minContains: 2019, maxContains: 2019,
+  unevaluatedProperties: 2019, unevaluatedItems: 2019,
+});
+
+/**
+ * Whether the validator evaluates `keyword` in a unit's subschema: a keyword
+ * of the draft the subschema is read in, by the gates the validator compiles
+ * with. An unknown keyword, and one of a later draft, is not evaluated.
+ * @param {OutputUnit} unit
+ * @param {string} keyword
+ * @returns {boolean}
+ */
+function evaluates(unit, keyword) {
+  const since = /** @type {Record<string, number>} */ (ASSERTION_SINCE)[keyword];
+  if (since !== undefined) return unit.declaredDraft == null || unit.declaredDraft >= since;
+  if (keyword === 'propertyDependencies') return admitsPropertyDependencies(unit.propertyDependencies, unit.declaredDraft);
+  if (ASSERTING.has(keyword)) return true;
+  return ANNOTATING.has(keyword) && !(/** @type {Record<string, number>} */ (ANNOTATION_SINCE)[keyword] > unit.draft);
+}
+
 /**
  * The record of one subschema applied to one instance location.
  */
@@ -139,11 +169,11 @@ class OutputUnit {
    * @param {string} segment - The evaluation path segment from the parent (`/properties/a`, `/$ref`), '' for the root
    * @param {string} schemaLocation - The absolute URI of the subschema, with a JSON Pointer fragment
    * @param {any} schema - The subschema
-   * @param {number} draft - The draft the subschema is read in
+   * @param {UnitRecord['object']} object - The subschema's compiled object
    * @param {string} instanceLocation - The JSON Pointer of the instance
    * @param {unknown} data - The instance
    */
-  constructor(parent, segment, schemaLocation, schema, draft, instanceLocation, data) {
+  constructor(parent, segment, schemaLocation, schema, object, instanceLocation, data) {
     const slash = segment.indexOf('/', 1);
     const enclosing = /** @type {{ evaluationPath: string, hop: boolean }|null} */ (parent);
     /** @type {string} The keyword of the parent that applied this unit ('' for the root) */
@@ -155,7 +185,12 @@ class OutputUnit {
     /** @type {string} */
     this.schemaLocation = schemaLocation;
     this.schema = schema;
-    this.draft = draft;
+    /** @type {number} The draft the subschema is read in */
+    this.draft = object.declaredDraft ?? object.options.draftVersion;
+    /** @type {number|null} The draft its document declares, or null when none does */
+    this.declaredDraft = object.declaredDraft;
+    /** @type {boolean|null|undefined} The `propertyDependencies` option it was compiled under */
+    this.propertyDependencies = object.options.propertyDependencies;
     /** @type {string} */
     this.instanceLocation = instanceLocation;
     this.data = data;
@@ -267,7 +302,6 @@ function locationOf(object, schemas) {
  */
 function unitOf(record, parent, schemas) {
   const object = record.object;
-  const draft = object.declaredDraft ?? object.options.draftVersion;
   let location = locationOf(object, schemas);
   let segment = record.segment;
   let enclosing = parent;
@@ -281,7 +315,7 @@ function unitOf(record, parent, schemas) {
     if (written === undefined || written === object.schema || typeof written.$ref !== 'string') break;
     const target = withFragment(createJsonPointer(written.$ref, location.slice(0, location.indexOf('#'))).id);
     if (target === location) break;
-    const hop = new OutputUnit(enclosing, segment, location, written, draft, record.instanceLocation, record.data);
+    const hop = new OutputUnit(enclosing, segment, location, written, object, record.instanceLocation, record.data);
     hop.valid = record.valid;
     if (enclosing !== parent) enclosing.children.push(hop);
     top ??= hop;
@@ -289,7 +323,7 @@ function unitOf(record, parent, schemas) {
     segment = '/$ref';
     location = target;
   }
-  const unit = new OutputUnit(enclosing, segment, location, object.schema, draft, record.instanceLocation, record.data);
+  const unit = new OutputUnit(enclosing, segment, location, object.schema, object, record.instanceLocation, record.data);
   unit.valid = record.valid;
   unit.errors = record.errors;
   unit.children = record.children.map((child) => unitOf(child, unit, schemas));
@@ -394,8 +428,9 @@ function keywordResults(unit, verbose) {
       ordered.push(result);
       continue;
     }
-    // `then`/`else` that did not apply (no subschema ran) were not evaluated.
-    if ((verbose && key !== 'then' && key !== 'else')
+    // `then`/`else` that did not apply (no subschema ran) were not evaluated,
+    // nor was a keyword the subschema's draft does not have.
+    if ((verbose && key !== 'then' && key !== 'else' && evaluates(unit, key))
       || (ANNOTATING.has(key) && annotationOf(unit, key, []) !== undefined)) {
       const quiet = resultOf(key);
       quiet.placed = true;

@@ -24,7 +24,6 @@
 
 import {
   formatMessageValue,
-  formatSchemaValue,
   makeNumberRenderer,
   makePluralForms,
   makePluralPicker,
@@ -100,7 +99,7 @@ export const ru = {
   type: (p) => p.types
     ? `должно быть одним из следующих типов: ${p.types.join(', ')}`
     : `должно быть ${typeName(p.type)}`,
-  required: (p) => p.missingProperty
+  required: (p) => p.missingProperty !== undefined
     ? `должно содержать обязательное свойство '${p.missingProperty}'`
     : 'должно содержать обязательные свойства',
   minimum: (p) => `должно быть ${p.comparison} ${num(p.limit)}`,
@@ -111,7 +110,7 @@ export const ru = {
   minLength: (p) => `не должно содержать менее ${num(p.limit)} ${plural(p.limit, 'символа', 'символов')}`,
   maxLength: (p) => `не должно содержать более ${num(p.limit)} ${plural(p.limit, 'символа', 'символов')}`,
   pattern: 'должно соответствовать шаблону "{pattern}"',
-  additionalProperties: (p) => p.additionalProperty
+  additionalProperties: (p) => p.additionalProperty !== undefined
     ? `не должно содержать дополнительное свойство '${p.additionalProperty}'`
     : 'не должно содержать дополнительных свойств',
   minProperties: (p) => `не должно содержать менее ${num(p.limit)} ${plural(p.limit, 'свойства', 'свойств')}`,
@@ -120,21 +119,28 @@ export const ru = {
   maxItems: (p) => `не должно содержать более ${num(p.limit)} ${plural(p.limit, 'элемента', 'элементов')}`,
   uniqueItems: 'не должно содержать повторяющихся элементов',
   contains: 'должно содержать хотя бы один допустимый элемент',
+  minContains: (p) => `должно содержать не менее ${num(p.limit)} ${plural(p.limit, 'допустимого элемента', 'допустимых элементов')}`,
+  maxContains: (p) => `должно содержать не более ${num(p.limit)} ${plural(p.limit, 'допустимого элемента', 'допустимых элементов')}`,
   items: 'элементы списка недопустимы',
   allOf: 'должно соответствовать всем подсхемам',
   anyOf: 'должно соответствовать одной из подсхем в anyOf',
   oneOf: 'должно соответствовать ровно одной подсхеме в oneOf',
   not: 'НЕ должно соответствовать подсхеме',
   format: 'должно соответствовать формату "{format}"',
+  contentEncoding: 'должно быть закодировано в "{encoding}"',
+  contentMediaType: (p) => p.encoding !== undefined
+    ? `должно быть содержимым "${p.mediaType}", закодированным в "${p.encoding}"`
+    : `должно быть содержимым "${p.mediaType}"`,
+  nullable: 'не должно быть null',
   if: 'должно соответствовать схеме "if"',
   then: 'должно соответствовать схеме "then"',
   else: 'должно соответствовать схеме "else"',
   'false schema': 'булева схема false всегда недопустима',
   const: (p) => p.allowedValue !== undefined
-    ? `должно быть равно константе ${formatSchemaValue(p.allowedValue)}`
+    ? `должно быть равно константе ${formatMessageValue(p.allowedValue)}`
     : 'должно быть равно константе',
   enum: (p) => Array.isArray(p.allowedValues)
-    ? `должно быть равно одному из допустимых значений: ${listFormat.format(p.allowedValues.map(formatSchemaValue))}`
+    ? `должно быть равно одному из допустимых значений: ${listFormat.format(p.allowedValues.map(formatMessageValue))}`
     : 'должно быть равно одному из допустимых значений',
   dependentRequired: requiresDependency,
   dependencies: requiresDependency,

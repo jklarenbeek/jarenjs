@@ -40,6 +40,7 @@ import {
   TRAVERSE_SCHEMA_MAP_MAPS,
   detectSchemaDraft,
   admitsPropertyDependencies,
+  readPrefixItems,
 } from './schema-keywords.js';
 import { createSchemaPatternTester } from './string.js';
 
@@ -186,6 +187,19 @@ export function collectSameDocumentAnchors(root, options = {}) {
  * @returns {object|boolean|undefined} The addressed schema, or undefined
  */
 export function resolveSameDocumentRef(ref, root, anchors) {
+  return followSameDocumentRef(ref, root, anchors, undefined);
+}
+
+/**
+ * {@link resolveSameDocumentRef}, collecting into `trail` every container a
+ * JSON Pointer passes on the way to its target, the root first.
+ * @param {string} ref
+ * @param {object|boolean} root
+ * @param {Map<string, object>|undefined} anchors
+ * @param {unknown[]|undefined} trail
+ * @returns {object|boolean|undefined}
+ */
+function followSameDocumentRef(ref, root, anchors, trail) {
   if (ref === '#') return root;
   if (!ref.startsWith('#')) return undefined;
   let node = root;
@@ -201,6 +215,7 @@ export function resolveSameDocumentRef(ref, root, anchors) {
   }
   for (let i = 0; i < tokens.length; i++) {
     if (!isJsonContainer(node)) return undefined;
+    trail?.push(node);
     node = node[tokens[i]];
   }
   return node;
@@ -369,15 +384,15 @@ function buildObjectStep(node, ctx) {
 
 /**
  * Build the array step. Both tuple spellings are handled: draft 2020-12's
- * `prefixItems` + `items`, and draft-07's array-valued `items` +
- * `additionalItems`.
+ * `prefixItems` + `items` (read only where the declared draft has
+ * `prefixItems`), and draft-07's array-valued `items` + `additionalItems`.
  * @param {object} node - The schema node
  * @param {object} ctx - The compile context
  * @returns {Function|null} The step, or null when this node needs none
  */
 function buildArrayStep(node, ctx) {
   const itemsIsTuple = Array.isArray(node.items);
-  const prefixSource = itemsIsTuple ? node.items : node.prefixItems;
+  const prefixSource = itemsIsTuple ? node.items : readPrefixItems(ctx, node);
   const restSource = itemsIsTuple ? node.additionalItems : node.items;
 
   let prefixSteps = null;
@@ -466,8 +481,18 @@ function buildScalarStep(node, ctx) {
  */
 function compileNode(node, ctx) {
   if (!isJsonObject(node)) return null;
+  // A schema that declares `$schema` is read per that draft, and the
+  // subschemas below it inherit it, as the validator reads them.
+  if (typeof node.$schema === 'string') {
+    const declaredDraft = detectSchemaDraft(node);
+    if (declaredDraft !== ctx.declaredDraft) ctx = { ...ctx, declaredDraft };
+  }
 
-  const memo = ctx.allowStrip ? ctx.memoStrip : ctx.memoNoStrip;
+  // One node reached under two drafts (inline and as a reference target)
+  // normalizes per draft.
+  const memoKey = `${ctx.allowStrip}${ctx.declaredDraft}`;
+  let memo = ctx.memos.get(memoKey);
+  if (memo === undefined) ctx.memos.set(memoKey, memo = new Map());
   const cached = memo.get(node);
   if (cached !== undefined) return cached;
 
@@ -480,11 +505,18 @@ function compileNode(node, ctx) {
   const steps = [];
 
   if (typeof node.$ref === 'string') {
-    const target = resolveSameDocumentRef(node.$ref, ctx.root, ctx.anchors);
+    const trail = [];
+    const target = followSameDocumentRef(node.$ref, ctx.root, ctx.anchors, trail);
     // A ref this module cannot follow is left alone rather than guessed at;
     // validation still resolves it through the full ref machinery.
     if (target !== undefined && target !== node) {
-      const step = compileNode(target, ctx);
+      // The target is read in the draft its place in the document declares:
+      // the nearest `$schema` on the way to it (the root's, for an anchor).
+      let declaredDraft = null;
+      for (const passed of trail.length === 0 ? [ctx.root] : trail) {
+        if (isJsonObject(passed) && typeof passed.$schema === 'string') declaredDraft = detectSchemaDraft(passed);
+      }
+      const step = compileNode(target, declaredDraft === ctx.declaredDraft ? ctx : { ...ctx, declaredDraft });
       if (step !== null) steps.push(step);
     }
   }
@@ -612,8 +644,10 @@ export function compileNormalizer(schema, options = {}) {
     options: resolved,
     root: schema,
     anchors: collectSameDocumentAnchors(schema),
-    memoStrip: new Map(),
-    memoNoStrip: new Map(),
+    /** @type {number|null} The draft the schema being compiled declares, or null when none does */
+    declaredDraft: null,
+    /** @type {Map<string, Map<object, Function|null>>} The compiled steps per stripping mode and draft */
+    memos: new Map(),
     allowStrip: true,
   };
 

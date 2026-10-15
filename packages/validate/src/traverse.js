@@ -455,9 +455,12 @@ export function restoreSchemaRefsInMap(schemas, opts = new JsonPointerOptions())
   }
 }
 
+/** The base a schema without `$id` sits under when the host names no `origin`. */
+export const DEFAULT_ORIGIN = 'https://github.com/jklarenbeek/jarenjs';
+
 export class TraverseOptions extends JsonPointerOptions {
   constructor(
-    origin = 'https://github.com/jklarenbeek/jarenjs',
+    origin = DEFAULT_ORIGIN,
     mergeSchemas = true,
     anchorsGlobal = false,
     anchorsAllowed = true,

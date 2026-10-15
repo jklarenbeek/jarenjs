@@ -21,7 +21,6 @@
 
 import {
   formatMessageValue,
-  formatSchemaValue,
   makeNumberRenderer,
   makePluralPicker,
   makeTypeNamer,
@@ -82,7 +81,7 @@ export const de = {
   type: (p) => p.types
     ? `muss einer der folgenden Typen sein: ${p.types.join(', ')}`
     : `muss ${typeName(p.type)} sein`,
-  required: (p) => p.missingProperty
+  required: (p) => p.missingProperty !== undefined
     ? `muss die Pflichteigenschaft '${p.missingProperty}' enthalten`
     : 'muss die Pflichteigenschaften enthalten',
   minimum: (p) => `muss ${p.comparison} ${num(p.limit)} sein`,
@@ -93,7 +92,7 @@ export const de = {
   minLength: (p) => `darf nicht weniger als ${num(p.limit)} Zeichen enthalten`,
   maxLength: (p) => `darf nicht mehr als ${num(p.limit)} Zeichen enthalten`,
   pattern: 'muss dem Muster "{pattern}" entsprechen',
-  additionalProperties: (p) => p.additionalProperty
+  additionalProperties: (p) => p.additionalProperty !== undefined
     ? `darf die zusätzliche Eigenschaft '${p.additionalProperty}' nicht enthalten`
     : 'darf keine zusätzlichen Eigenschaften enthalten',
   minProperties: (p) => `darf nicht weniger als ${num(p.limit)} ${plural(p.limit, 'Eigenschaft', 'Eigenschaften')} enthalten`,
@@ -102,21 +101,28 @@ export const de = {
   maxItems: (p) => `darf nicht mehr als ${num(p.limit)} ${plural(p.limit, 'Element', 'Elemente')} enthalten`,
   uniqueItems: 'darf keine doppelten Elemente enthalten',
   contains: 'muss mindestens ein gültiges Element enthalten',
+  minContains: (p) => `muss mindestens ${num(p.limit)} ${plural(p.limit, 'gültiges Element', 'gültige Elemente')} enthalten`,
+  maxContains: (p) => `darf höchstens ${num(p.limit)} ${plural(p.limit, 'gültiges Element', 'gültige Elemente')} enthalten`,
   items: 'die Elemente der Liste sind ungültig',
   allOf: 'muss allen Teilschemata entsprechen',
   anyOf: 'muss einem Teilschema in anyOf entsprechen',
   oneOf: 'muss genau einem Teilschema in oneOf entsprechen',
   not: 'darf dem Teilschema NICHT entsprechen',
   format: 'muss dem Format "{format}" entsprechen',
+  contentEncoding: 'muss als "{encoding}" kodiert sein',
+  contentMediaType: (p) => p.encoding !== undefined
+    ? `muss Inhalt vom Typ "${p.mediaType}" sein, kodiert als "${p.encoding}"`
+    : `muss Inhalt vom Typ "${p.mediaType}" sein`,
+  nullable: 'darf nicht null sein',
   if: 'muss dem "if"-Schema entsprechen',
   then: 'muss dem "then"-Schema entsprechen',
   else: 'muss dem "else"-Schema entsprechen',
   'false schema': 'das boolesche Schema false ist immer ungültig',
   const: (p) => p.allowedValue !== undefined
-    ? `muss gleich der Konstante ${formatSchemaValue(p.allowedValue)} sein`
+    ? `muss gleich der Konstante ${formatMessageValue(p.allowedValue)} sein`
     : 'muss gleich der Konstante sein',
   enum: (p) => Array.isArray(p.allowedValues)
-    ? `muss einem der erlaubten Werte entsprechen: ${listFormat.format(p.allowedValues.map(formatSchemaValue))}`
+    ? `muss einem der erlaubten Werte entsprechen: ${listFormat.format(p.allowedValues.map(formatMessageValue))}`
     : 'muss einem der erlaubten Werte entsprechen',
   dependentRequired: requiresDependency,
   dependencies: requiresDependency,

@@ -565,3 +565,58 @@ describe('output units', () => {
     }
   });
 });
+
+describe('verbose lists only the keywords the validator evaluates', () => {
+  const D7 = 'http://json-schema.org/draft-07/schema#';
+  const D19 = 'https://json-schema.org/draft/2019-09/schema';
+  const locations = (/** @type {any} */ unit) => (unit.annotations ?? unit.errors ?? []).map((/** @type {any} */ kid) => kid.keywordLocation);
+
+  it('leaves out an unknown keyword and a keyword of a later draft than the declared one', () => {
+    const later = { 'x-ui': 1, deprecated: true, type: 'string', dependentRequired: { a: ['b'] }, prefixItems: [true], minContains: 1, unevaluatedItems: false };
+    assert.deepEqual(locations(output('verbose', { $schema: D7, ...later }, 'a')), ['/type']);
+    assert.deepEqual(locations(output('verbose', { $schema: D19, ...later }, 'a')), ['/deprecated', '/type', '/dependentRequired', '/minContains', '/unevaluatedItems']);
+    assert.deepEqual(locations(output('verbose', { $schema: S, ...later, foo: 2 }, 'a')), ['/deprecated', '/type', '/dependentRequired', '/prefixItems', '/minContains', '/unevaluatedItems']);
+    // a failed unit lists the same keywords beside its error
+    assert.deepEqual(output('verbose', { $schema: D7, type: 'number', 'x-ui': 1, deprecated: true }, 'a'), {
+      valid: false, keywordLocation: '', instanceLocation: '',
+      errors: [{ valid: false, keywordLocation: '/type', instanceLocation: '', error: 'must be a number' }],
+    });
+  });
+
+  it('keeps every assertion a document without $schema reads, and propertyDependencies only while it is on', () => {
+    const undeclared = { prefixItems: [true], dependentRequired: { a: ['b'] }, 'x-ui': 1, propertyDependencies: { a: { b: true } } };
+    assert.deepEqual(locations(output('verbose', undeclared, {})), ['/prefixItems', '/dependentRequired']);
+    assert.deepEqual(locations(output('verbose', undeclared, {}, { propertyDependencies: true })), ['/prefixItems', '/dependentRequired', '/propertyDependencies']);
+    // draft-06 asserts the content keywords, and 'if' before draft-07 still evaluates
+    assert.deepEqual(locations(output('verbose', { $schema: 'http://json-schema.org/draft-06/schema#', contentMediaType: 'application/json', if: true, readOnly: true }, '{}')),
+      ['/contentMediaType', '/if']);
+  });
+
+  it('leaves a keyword out exactly where the validator ignores it', () => {
+    const D = { 7: D7, 2019: D19, 2020: S };
+    /** Each gated keyword: the draft it starts in, a schema it fails on, the instance */
+    const gated = [
+      ['prefixItems', 2020, { prefixItems: [false] }, [1]],
+      ['dependentRequired', 2019, { dependentRequired: { a: ['b'] } }, { a: 1 }],
+      ['dependentSchemas', 2019, { dependentSchemas: { a: false } }, { a: 1 }],
+      ['minContains', 2019, { contains: true, minContains: 2 }, [1]],
+      ['maxContains', 2019, { contains: true, maxContains: 0 }, [1]],
+      ['unevaluatedProperties', 2019, { unevaluatedProperties: false }, { a: 1 }],
+      ['unevaluatedItems', 2019, { unevaluatedItems: false }, [1]],
+    ];
+    for (const [keyword, since, schema, data] of gated) {
+      const before = { $schema: since === 2020 ? D19 : D7, ...schema };
+      assert.equal(new JarenValidator().compile(before)(data), true, `${keyword} is ignored before ${since}`);
+      assert.ok(!JSON.stringify(output('verbose', before, data)).includes(`"/${keyword}"`), `verbose leaves ${keyword} out before ${since}`);
+      const at = { $schema: D[/** @type {7|2019|2020} */ (since)], ...schema };
+      assert.equal(new JarenValidator().compile(at)(data), false, `${keyword} asserts from ${since}`);
+      assert.ok(JSON.stringify(output('verbose', at, data)).includes(`"/${keyword}"`), `verbose lists ${keyword} from ${since}`);
+    }
+  });
+
+  it('flag and the collected errors are unchanged', () => {
+    const schema = { $schema: D7, type: 'number', 'x-ui': 1, deprecated: true, prefixItems: [false] };
+    assert.deepEqual(output('flag', schema, 'a'), { valid: false });
+    assert.deepEqual(new JarenValidator({ collectErrors: true }).compile(schema)('a').errors.map((/** @type {any} */ e) => [e.keyword, e.instancePath]), [['type', '']]);
+  });
+});

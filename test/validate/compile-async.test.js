@@ -4,7 +4,7 @@
 // code that names the URI and the reference that needed it.
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { JarenValidator, SchemaCompileError, VALIDATE_CODES } from '@jarenjs/validate';
+import { JarenValidator, SchemaCompileError, TraverseOptions, VALIDATE_CODES } from '@jarenjs/validate';
 import { compileAsync, DEFAULT_MAX_LOADS } from '@jarenjs/validate/load';
 
 /**
@@ -423,3 +423,42 @@ describe('compileAsync refusals', () => {
   });
 });
 
+
+describe('compileAsync and a relative reference in a schema without $id', () => {
+  const BASE = 'https://github.com/jklarenbeek/jarenjs';
+  const hint = `; the URI is under the validator's default base '${BASE}', which no $id and no traverse origin names: `
+    + 'give the schema an $id, or the validator a base (traverse: new TraverseOptions(base))';
+
+  it('a failed load of a URI under the default base names the base and the repair', async () => {
+    const thrown = await refusal(compileAsync(new JarenValidator(), { properties: { n: { $ref: 'name.json' } } }, served({})));
+    assert.equal(thrown.code, 'JK0004');
+    assert.equal(thrown.docPath, '#/properties/n/%24ref');
+    assert.equal(thrown.message, `JK0004: loadSchema('https://github.com/jklarenbeek/name.json') failed: no document at https://github.com/jklarenbeek/name.json${hint} at #/properties/n/%24ref`);
+    const returned = await refusal(compileAsync(new JarenValidator(), { $ref: 'name.json' }, { loadSchema: () => '{"type":"string"}' }));
+    assert.equal(returned.message, `JK0005: loadSchema('https://github.com/jklarenbeek/name.json') returned the string '{"type":"string"}', not a schema (an object or a boolean)${hint} at #/%24ref`);
+  });
+
+  it('answers as before wherever the base was named or the document is held', async () => {
+    const name = { type: 'string' };
+    // a loader that serves the default-base URI
+    const atDefault = served({ 'https://github.com/jklarenbeek/name.json': name });
+    const v1 = await compileAsync(new JarenValidator(), { $ref: 'name.json' }, atDefault);
+    assert.deepEqual([atDefault.calls, v1('x'), v1(1)], [['https://github.com/jklarenbeek/name.json'], true, false]);
+    // the validator names the base
+    const atOrigin = served({ 'file:///schemas/name.json': name });
+    const v2 = await compileAsync(new JarenValidator({ traverse: new TraverseOptions('file:///schemas/root.json') }), { $ref: 'name.json' }, atOrigin);
+    assert.deepEqual([atOrigin.calls, v2('x'), v2(1)], [['file:///schemas/name.json'], true, false]);
+    // the schema names the base
+    const atId = served({ 'https://ex.test/name.json': name });
+    const v3 = await compileAsync(new JarenValidator(), { $id: 'https://ex.test/root.json', $ref: 'name.json' }, atId);
+    assert.deepEqual([atId.calls, v3('x'), v3(1)], [['https://ex.test/name.json'], true, false]);
+    // a document added under the URI the reference resolves to is held
+    const held = new JarenValidator().addSchema(name, 'https://github.com/jklarenbeek/name.json');
+    const none = served({});
+    const v4 = await compileAsync(held, { $ref: 'name.json' }, none);
+    assert.deepEqual([none.calls, v4('x'), v4(1)], [[], true, false]);
+    // a refusal under a base the host named carries no hint
+    const named = await refusal(compileAsync(new JarenValidator({ traverse: new TraverseOptions('file:///schemas/root.json') }), { $ref: 'name.json' }, served({})));
+    assert.equal(named.message, "JK0004: loadSchema('file:///schemas/name.json') failed: no document at file:///schemas/name.json at #/%24ref");
+  });
+});
