@@ -4,7 +4,7 @@
 
 Pick an engine (JSONPath, JSON Pointer, JSON Patch, `$query`, JSLT,
 markdown, mermaid, a `$contract` document, a JSON Schema emitted as
-TypeScript, …), feed it a source input and
+TypeScript, a fluent `@jarenjs/linq` chain, …), feed it a source input and
 one or more datasets from a curated example library, and watch it run. Where `@jarenjs/studio` is for
 building an application out of many files, `@jarenjs/play` is for
 learning one engine standalone — a reference bench you experiment on first.
@@ -61,13 +61,30 @@ Markdown reference (the model rides behind the depth toggle), with option
 selects for the target, open or closed objects, and the normalizer that makes
 the accepted and normalized types differ.
 
+Three engines show what the other packages are made of. The LINQ engine
+reads a fluent `@jarenjs/linq` chain — `from(data).where((u) =>
+u.age.gt(21)).orderBy((u) => u.name)` — as text, without `eval`, replays
+it against the real chain and shows the query document it compiles to
+beside that document's answer: the document is the thing a model learns to
+author, and a JavaScript operator the chain cannot capture (`u.age > 21`)
+is refused at its position, naming `.gt()`. The JSONX engine reads JSONX
+(bigint, regexp, datetimes, `inf`/`nan`) as the JSON another engine's data
+pane takes, and names each value JSON writes differently. The kernels
+engine calls the `@jarenjs/core` geo, date, math and text functions the
+`$query` operators run, over a JSON array of arguments, and drills down
+into the operator document that runs the same kernel and whether the two
+answers agree.
+
 Answers that changed (upgrade notes): a host `validate` runner now receives a
 fourth argument, the parsed referenced schemas (`[]` when the pane is empty),
 and must register them before compiling; a runner that ignores it still
 answers as before. `runExample` answers `unknown engine` for
 an id every object inherits (`constructor`, `__proto__`, `toString`), where it
 failed with `engine.run is not a function`; a timing that is `NaN` or infinite
-prints a dash, where it printed `NaN ms`.
+prints a dash, where it printed `NaN ms`. The JOSL engine's streaming-events
+table writes each path as a JSON Pointer, `~` and `/` in a key escaped
+(`/a~1b` for the key `a/b`), where it printed `/a/b`, the pointer of a
+nested member.
 
 ## Exports
 

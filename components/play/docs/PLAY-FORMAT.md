@@ -33,6 +33,35 @@ EnginePane = { key: string, label: string, control?: 'code' | 'text' }
   The Emit engine's single `schema` pane takes a JSON Schema (an object or a
   boolean); malformed JSON or any other value is attributed to that pane,
   because the emitter itself answers such a value with an empty file.
+  The LINQ engine's `chain` pane holds a fluent `@jarenjs/linq` chain as
+  text — `from(data).where((u) => u.age.gt(21)).select(…)` — read without
+  `eval` or `new Function` and replayed against the real chain surface, so
+  the document it shows is the one the same chain written in JavaScript
+  emits. The text is a closed subset of JavaScript: one chain starting at
+  `from(data)` (the Data pane, a JSON array), the chain operators (no
+  terminal: the engine answers `toArray()` itself), arrow callbacks whose
+  bodies read their own parameters and call the expression methods, and
+  JSON-like literals with either quote, comments and trailing commas. It is
+  stricter than JavaScript where JavaScript would capture a wrong value: an
+  operator (`>`, `&&`, `!`, `+`, `===`) is refused naming the method that
+  spells it, a block body `(u) => { … }` is refused (JavaScript reads it as
+  a statement), and a method name read without its call is refused naming
+  `.get('…')`, the spelling that reads a member of that name. Registered
+  operators do not reach it: the chain's vocabulary is closed. The answer
+  (`toArray()`) and the query document (`toDocument()`) are both calm
+  screens.
+  The JSONX engine's `text` pane takes JSONX (or, with the dialect option,
+  strict JSON) and answers the JSON a data pane reads, plus a note naming,
+  at its JSON Pointer, each value JSON writes differently: a regexp is
+  `{}`, `nan`/`inf` are `null`, a datetime is its string, and a bigint has
+  no spelling at all — `JSON.stringify` refuses the document, so the JSON
+  screen is omitted and the canonical JSONX round-trip (deep) keeps it.
+  The kernels engine's `args` pane is a JSON array of one kernel's
+  arguments; the `kernel` option picks it (a value the choices do not offer
+  is the default kernel). The answer is the kernel's; the deep panels are
+  the `$query` operator document that runs the same kernel, reading the same
+  array as its data (`$[0]`, `$[1]`, …), with that document's answer and
+  whether the two agree.
 - `dataPanes` are the JSON the engine runs against: usually one `data`; a
   patch's is its `target`; markdown / mermaid / charts have **none** — the
   source is everything.
@@ -98,16 +127,20 @@ error copies whichever its compiler stated: the **coded family** (patch,
 JSON Pointer into the document being compiled or run (`/rules/0/match`,
 `/$idiv`, `/0/path`), and a patch *runtime* error adds `dataPath`, the
 target location its operation failed at — two facts, both kept; the
-**syntax family** (JSONPath, JSON Pointer, XQuery) states `position`, a
-0-based offset into the source text; the **line/column family** (JOSL,
-CSV) states 1-based `line` and `column`. `pane` names the editor the
+**syntax family** (JSONPath, JSON Pointer, XQuery, the LINQ chain) states
+`position`, a 0-based offset into the source text; the **line/column
+family** (JOSL, JSONX, CSV) states 1-based `line` and `column`. The LINQ
+chain reader's own refusals carry the code `PLAY_CHAIN`; a refusal of the
+`@jarenjs/linq` package keeps its `JL` code and message and is positioned
+at the call that raised it. `pane` names the editor the
 location points into, and it is the whole location for a pane whose JSON
 does not parse: the host's `JSON.parse` states its offset only inside
 engine-specific message text, never as a field, so the pane is claimed and
 nothing finer. Two honest gaps: a missing host seam (`PLAY_NO_RENDERER`,
-`PLAY_NO_VALIDATOR`) is nobody's pane, and XQuery compiles a *generated*
-query document, so a location after its parse phase is a pointer into a
-document the learner never typed — stated, with no pane. `message` stays
+`PLAY_NO_VALIDATOR`) is nobody's pane, and XQuery and the LINQ chain
+compile a *generated* query document, so a location after the text is read
+is a pointer into a document the learner never typed — stated, with no
+pane. `message` stays
 verbatim (a coded error composes `code: reason at path` itself), so a
 host with no structured reader still gets everything.
 
@@ -168,10 +201,11 @@ The library covers what an engine ships, not a sample of it: `charts` holds one
 example per chart type, `mermaid` one per laid-out diagram kind (flowchart,
 sequence, state, gantt, class, ER, pie), and `validate` one example per offered
 message locale, derived from the engine's own `locale` choices, and `emit` one
-example per choice of each of its option panes (target, objects, normalizer).
-A test pins the chart types to the chart schema's list and the locales and emit
-choices to the engine's choices, so a type, locale or choice added without an
-example fails it.
+example per choice of each of its option panes (target, objects, normalizer),
+`kernels` one example per kernel and `jsonx` one per dialect.
+A test pins the chart types to the chart schema's list and the locales, emit,
+kernel and dialect choices to the engines' choices, so a type, locale or choice
+added without an example fails it.
 
 ## §5 Host-injected seams (the dependency-light contract)
 

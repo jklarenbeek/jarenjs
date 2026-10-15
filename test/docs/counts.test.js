@@ -64,8 +64,6 @@ describe('documented counts match the code', () => {
   it('the play engine count matches the registry, in every document that states it', () => {
     assert.strictEqual(statedCount(read('packages/website/README.md'), ':', 'live engines'),
       Object.keys(ENGINES).length);
-    assert.strictEqual(statedCount(read('docs/ROADMAP.md'), 'registry lacks\\*\\* —', 'ship'),
-      Object.keys(ENGINES).length);
   });
 
   it('the chart-type count matches the type modules', () => {

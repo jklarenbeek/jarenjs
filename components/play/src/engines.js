@@ -15,7 +15,7 @@ import {
 import { compileJsltStylesheet } from '@jarenjs/json/jslt';
 import { compileJtltStylesheet } from '@jarenjs/json/jtlt';
 import { parseXQuery } from '@jarenjs/json/xquery';
-import { parseJosl, stringifyJosl, stringifyJsonx } from '@jarenjs/josl';
+import { parseJosl, stringifyJosl, parseJsonx, stringifyJsonx, LocalDate, LocalTime, LocalDateTime } from '@jarenjs/josl';
 import { parseCsvDocument, stringifyCsv, sniffCsvDialect } from '@jarenjs/josl/csv';
 import { createTypeTestCompiler } from '@jarenjs/validate/query';
 import { compileContract } from '@jarenjs/contract';
@@ -25,6 +25,9 @@ import { compileEmitModel } from '@jarenjs/emit';
 import { renderTypeScript } from '@jarenjs/emit/typescript';
 import { renderMarkdown } from '@jarenjs/emit/markdown';
 import { formatMs } from './format.js';
+import { readChain } from './chain.js';
+import { KERNELS } from './kernels.js';
+import { escapePointerToken } from '@jarenjs/core/string';
 
 const compileTypeTest = createTypeTestCompiler();
 
@@ -109,6 +112,27 @@ const cell = (v) => {
   if (typeof v === 'object') { try { return JSON.stringify(v); } catch { return String(v); } }
   return String(v);
 };
+
+/** A parser event's path (an array of keys and indexes) as the JSON Pointer it
+ * names (RFC 6901 — `~` and `/` escaped), the root shown as `(root)`. */
+const pointerCell = (path) => (path ?? []).map((t) => `/${escapePointerToken(String(t))}`).join('') || '(root)';
+
+/** How many document-order events a drill-down table keeps. */
+const EVENT_CAP = 200;
+
+/** A parsed JSONX scalar JSON writes differently, as the note's phrase — or
+ * `null` for one JSON keeps. */
+function jsonLoss(value) {
+  if (typeof value === 'bigint') return 'a bigint — JSON has no spelling for it, so JSON.stringify refuses the document';
+  if (value instanceof RegExp) return 'a regexp — JSON writes {}';
+  if (typeof value === 'number' && !Number.isFinite(value)) return `${stringifyJsonx(value)} — JSON writes null`;
+  const what = value instanceof Date ? 'an instant' : value instanceof LocalDateTime ? 'a local date-time'
+    : value instanceof LocalDate ? 'a local date' : value instanceof LocalTime ? 'a local time' : null;
+  return what === null ? null : `${what} — JSON writes the string ${JSON.stringify(value)}`;
+}
+
+/** The kernel table by option value (a Map, so an inherited name finds nothing). */
+const KERNEL_BY_VALUE = new Map(KERNELS.map((k) => [k.value, k]));
 
 /**
  * A VISUAL engine (markdown/mermaid/charts): the descriptor + examples live
@@ -430,6 +454,40 @@ export const ENGINE_LIST = [
     },
   },
   {
+    // a fluent chain is the pen, the query document is the deliverable: the
+    // chain is read as text (no eval — chain.js), replayed against the real
+    // @jarenjs/linq surface, and both halves are shown — the document a model
+    // learns to author, and what it answers over the data
+    id: 'linq', label: 'LINQ', lead: 'A fluent @jarenjs/linq chain compiles to the query document a model learns to author — shown beside its answer.',
+    sourcePanes: [{ key: 'chain', label: 'Chain', control: 'code' }],
+    dataPanes: [{ key: 'data', label: 'Data' }],
+    run(source, data) {
+      const d = parseJson(data.data, 'data'); if (d.error) return failParse(d);
+      let seq, document; const t0 = now();
+      // the compile phase: the text is read and replayed, and the chain emits
+      // its document — a refusal (the reader's, or linq's own JL code) is
+      // positioned at the call in the Chain pane
+      try { seq = readChain(source.chain ?? '', d.value, { compileTypeTest }); document = seq.toDocument(); }
+      catch (err) { return fail(msg(err), code(err), locate(err, 'chain')); }
+      const t1 = now();
+      let items;
+      // the run phase executes the GENERATED document: a location in it has
+      // no pane the learner typed, as with XQuery
+      try { items = seq.toArray(); }
+      catch (err) { return fail(msg(err), code(err), locate(err)); }
+      const t2 = now();
+      return okPanels([
+        { id: 'out', label: 'Answer — toArray()', kind: 'code', text: fmt(items) },
+        { id: 'document', label: 'Query document — toDocument()', kind: 'code', text: fmt(document) },
+        deepCards('how', 'How it ran', [
+          { title: 'Items', value: String(items.length) },
+          { title: 'Compile', value: formatMs(t1 - t0) },
+          { title: 'Run', value: formatMs(t2 - t1) },
+        ]),
+      ], t1 - t0, t2 - t1);
+    },
+  },
+  {
     id: 'josl', label: 'JOSL', lead: 'The streaming TOML superset — JavaScript-obvious values, round-trips.',
     sourcePanes: [{ key: 'text', label: 'Document', control: 'code' }],
     dataPanes: [],
@@ -445,19 +503,76 @@ export const ENGINE_LIST = [
       // parse (compile) and serialize (run) are the two visible phases; the
       // parser streams document-order events as it reads — capture (capped)
       // for the "how it streamed" drill-down
-      try { parsed = parseJosl(source.text ?? '', { mode, onEvent: (e) => { if (events.length < 200) events.push(e); } }); }
+      try { parsed = parseJosl(source.text ?? '', { mode, onEvent: (e) => { if (events.length < EVENT_CAP) events.push(e); } }); }
       catch (err) { return fail(msg(err), code(err), locate(err, 'text')); }
       const t1 = now();
       const out = stringifyJsonx(parsed, { indent: 2 });
       const t2 = now();
       return ok(out, t1 - t0, t2 - t1, [
         {
-          id: 'events', label: `How it streamed (${events.length}${events.length === 200 ? ', capped' : ''})`,
+          id: 'events', label: `How it streamed (${events.length}${events.length === EVENT_CAP ? ', capped' : ''})`,
           kind: 'table', depth: 'deep', columns: ['Type', 'Path', 'Value'],
-          rows: events.map((e) => [e.type, `/${(e.path ?? []).join('/')}`, e.type === 'pair' ? stringifyJsonx(e.value) : '']),
+          rows: events.map((e) => [e.type, pointerCell(e.path), e.type === 'pair' ? stringifyJsonx(e.value) : '']),
         },
         deepCode('roundtrip', 'The canonical round-trip', stringifyJosl(parsed, { mode })),
       ]);
+    },
+  },
+  {
+    // JSONX as an INPUT dialect: read it as the data every other engine's
+    // data pane takes, and name each value JSON writes differently — a
+    // regexp is `{}` and a bigint refuses the whole document under
+    // JSON.stringify, so the parsed value never goes through `fmt`
+    id: 'jsonx', label: 'JSONX', lead: 'JSON plus bigint, regexp, datetimes and inf/nan — read as the data the other engines take.',
+    sourcePanes: [{ key: 'text', label: 'JSONX', control: 'code' }],
+    dataPanes: [],
+    optionPanes: [{
+      key: 'mode', label: 'Dialect', default: 'jsonx',
+      choices: [{ value: 'jsonx', label: 'JSONX' }, { value: 'json', label: 'JSON (strict)' }],
+    }],
+    run(source, data, options) {
+      const mode = options?.config?.mode === 'json' ? 'json' : 'jsonx';
+      /** @type {any[]} */
+      const events = [];
+      /** @type {string[]} */
+      const losses = [];
+      let bigint = false;
+      let value; const t0 = now();
+      try {
+        value = parseJsonx(source.text ?? '', {
+          mode,
+          onEvent: (e) => {
+            if (events.length < EVENT_CAP) events.push(e);
+            if (e.type === 'value' && typeof e.value === 'bigint') bigint = true;
+            const loss = e.type === 'value' ? jsonLoss(e.value) : null;
+            if (loss !== null) losses.push(`${pointerCell(e.path)}: ${loss}`);
+          },
+        });
+      }
+      catch (err) { return fail(msg(err), code(err), locate(err, 'text')); }
+      const t1 = now();
+      let json = null, roundtrip;
+      // a document nested past the call stack parses and then cannot be
+      // written: a phase failure at the source pane, never a throw
+      try {
+        if (!bigint) json = JSON.stringify(value, null, 2);
+        roundtrip = stringifyJsonx(value, { indent: 2 });
+      }
+      catch (err) { return fail(msg(err), code(err), { pane: 'text' }); }
+      const t2 = now();
+      const kept = losses.length === 0
+        ? 'every value has a JSON spelling — this is the data any engine\'s data pane reads'
+        : [`${losses.length} value${losses.length === 1 ? '' : 's'} JSON writes differently:`, ...losses].join('\n');
+      return okPanels([
+        ...(json === null ? [] : [{ id: 'out', label: 'As JSON', kind: /** @type {'code'} */ ('code'), text: json }]),
+        { id: 'kept', label: 'What JSON keeps', kind: 'note', tone: losses.length === 0 ? 'ok' : 'warn', text: kept },
+        {
+          id: 'events', label: `How it was read (${events.length}${events.length === EVENT_CAP ? ', capped' : ''})`,
+          kind: 'table', depth: 'deep', columns: ['Type', 'Path', 'Value'],
+          rows: events.map((e) => [e.type, pointerCell(e.path), e.type === 'value' ? stringifyJsonx(e.value) : (e.kind ?? '')]),
+        },
+        deepCode('roundtrip', 'The canonical JSONX round-trip', roundtrip),
+      ], t1 - t0, t2 - t1);
     },
   },
   {
@@ -524,6 +639,42 @@ export const ENGINE_LIST = [
         }] : []),
         { id: 'roundtrip', label: 'CSV round-trip', kind: 'code', depth: 'deep', text: roundtrip },
       ], t1 - t0, t2 - t1);
+    },
+  },
+  {
+    // the @jarenjs/core kernels the $query operators run, called directly:
+    // the Arguments pane is the call's JSON array, and the deep drill-down
+    // is the operator document that runs the same kernel over the same
+    // array (read as its data) — with its answer, so the two doors agree
+    id: 'kernels', label: 'Core kernels', lead: 'The @jarenjs/core functions the $query operators run — geo, dates, math, text — called directly.',
+    sourcePanes: [{ key: 'args', label: 'Arguments — a JSON array', control: 'code' }],
+    dataPanes: [],
+    optionPanes: [{
+      key: 'kernel', label: 'Kernel', default: KERNELS[0].value,
+      choices: KERNELS.map((k) => ({ value: k.value, label: `${k.family} · ${k.value}` })),
+    }],
+    run(source, data, options) {
+      // a value the choice list does not offer is the default kernel
+      const kernel = KERNEL_BY_VALUE.get(options?.config?.kernel ?? '') ?? KERNELS[0];
+      const a = parseJson(source.args, 'args'); if (a.error) return failParse(a);
+      if (!Array.isArray(a.value)) return fail('args: expected a JSON array of the kernel\'s arguments', undefined, { pane: 'args' });
+      let answer, deep; const t0 = now();
+      try { answer = kernel.call(a.value); deep = kernel.deep?.(a.value) ?? []; }
+      catch (err) { return fail(msg(err), code(err), locate(err, 'args')); }
+      const t1 = now();
+      const query = kernel.query(a.value);
+      let queryAnswer;
+      try { queryAnswer = fmt(compileJsonQuery(query)(a.value)); }
+      catch (err) { queryAnswer = `refused — ${msg(err)}`; }
+      return okPanels([
+        { id: 'out', label: kernel.signature, kind: 'code', text: fmt(answer) },
+        deepCode('query', 'The $query operator that runs it', fmt(query)),
+        deepCards('agree', 'The operator over the same arguments', [
+          { title: '$query answers', value: queryAnswer },
+          { title: 'Same answer', value: queryAnswer === fmt(answer) ? 'yes' : 'no' },
+        ]),
+        ...deep,
+      ], null, t1 - t0);
     },
   },
   {

@@ -11,6 +11,8 @@ with its reducer and run loop in the website's `src/app/` directory.
 | Module | Responsibility |
 |---|---|
 | `src/engines.js` | Descriptors, editable panes, compiler invocation and located result/error records |
+| `src/chain.js` | The LINQ engine's chain reader: the chain text read without `eval` and replayed against `@jarenjs/linq` over closed operator and method lists |
+| `src/kernels.js` | The kernels engine's table: each `@jarenjs/core` kernel with the `$query` operator document that runs it |
 | `src/examples.js` | Source presets and named datasets |
 | `src/index.js` | Registry and `runExample`; synchronous results and rejected promises share the result contract |
 | `src/component/index.js` | `createPlayComponent`, including default operator, renderer and validator seams |

@@ -4,9 +4,10 @@ card:
   title: Play
   blurb: >-
     The engine playground: pick a JSON engine — JSON Schema, JSONPath, JSON
-    Pointer, JSON Patch, query, JSLT, JTLT, JOSL, CSV, Markdown, Mermaid,
-    Contract, Emit — feed it an input and one or more datasets from a curated example
-    library, and watch it run. Understand an engine standalone before composing
+    Pointer, JSON Patch, query, XQuery, LINQ, JSLT, JTLT, JOSL, JSONX, CSV,
+    Markdown, MDX, Mermaid, Charts, Contract, Emit, the core kernels — feed it
+    an input and one or more datasets from a curated example library, and
+    watch it run. Understand an engine standalone before composing
     it in the Studio. The engine is headless; the component is the playground UI.
 ---
 

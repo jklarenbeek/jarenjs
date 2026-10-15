@@ -29,6 +29,15 @@ const BOOKSTORE = {
 };
 const bookstore = { label: 'bookstore', data: { data: j(BOOKSTORE) } };
 
+/** The people the linq examples chain over: two teams, a manager link. */
+const PEOPLE = [
+  { id: 1, name: 'Cleo', age: 34, team: 'core', managerId: null },
+  { id: 2, name: 'Ada', age: 19, team: 'core', managerId: 1 },
+  { id: 3, name: 'Bo', age: 41, team: 'web', managerId: 1 },
+  { id: 4, name: 'Dee', age: 27, team: 'web', managerId: 3 },
+];
+const people = { label: 'people', data: { data: j(PEOPLE) } };
+
 /** The user schema the emit examples share: a named definition, an enum, a
  * required member and a constraint a type cannot express. */
 const EMIT_USER = {
@@ -282,6 +291,39 @@ export const EXAMPLE_LIST = [
     source: { text: 'some $r in $doc?ratings?* satisfies $r?stars >= 5' },
     datasets: [bookstore] },
 
+  // ——— LINQ (a fluent chain → the query document, shown beside its answer) ———
+  { id: 'linq-chain', label: 'Filter, order, project', engine: 'linq',
+    source: { chain: `// one chain, read as text and replayed against @jarenjs/linq
+from(data)
+  .where((u) => u.age.gt(21))
+  .orderBy((u) => u.name)
+  .select((u) => ({ id: u.id, name: u.name }))` },
+    datasets: [people, { label: 'books', data: { data: j(BOOKSTORE.store.book.map((b, i) => ({ id: i + 1, name: b.title, age: Math.round(b.price) }))) } }] },
+  { id: 'linq-group', label: 'Group and count', engine: 'linq',
+    source: { chain: `from(data)
+  .groupBy((u) => u.team)
+  .select((g) => ({ team: g.key, people: g.items.count(), oldest: g.items.all().age.max() }))` },
+    datasets: [people] },
+  { id: 'linq-params', label: 'A parameter is a seam, not a value', engine: 'linq',
+    source: { chain: `// the document names $min; the value binds when it runs
+from(data)
+  .params({ min: 30 })
+  .where((u, p) => u.age.ge(p.min))
+  .select((u) => u.name)` },
+    datasets: [people] },
+  { id: 'linq-join', label: 'A join is a nested $for', engine: 'linq',
+    source: { chain: `from(data).join(
+  from(data),
+  (m) => m.id,
+  (r) => r.managerId,
+  (m, r) => ({ manager: m.name, report: r.name }))` },
+    datasets: [people] },
+  { id: 'linq-operator', label: 'An operator is refused, with its spelling', engine: 'linq',
+    source: { chain: `// JavaScript's > would capture a constant: the reader refuses it.
+// Spell it .gt(21) and the chain runs.
+from(data).where((u) => u.age > 21)` },
+    datasets: [people] },
+
   // ——— JOSL (source-only: no data pane; the mode select is the toggle) ———
   { id: 'josl-citizens', label: 'First-class citizens', engine: 'josl', config: { mode: 'josl' }, datasets: [],
     source: { text: `# JOSL: TOML 1.0 + JavaScript's obvious types
@@ -325,6 +367,22 @@ name = "Hammer"
 sku = 738594937
 ` } },
 
+  // ——— JSONX (source-only: JSONX read as the JSON a data pane takes) ———
+  { id: 'jsonx-citizens', label: 'Every first-class citizen', engine: 'jsonx', config: { mode: 'jsonx' }, datasets: [],
+    source: { text: `{
+  "title": "kitchen sink",
+  "count": 1_000_000,
+  "match": /^ok$/i,
+  "at": 2026-07-18T12:00:00Z,
+  "day": 2026-07-18,
+  "ratio": nan,
+  "tags": ["a", "b"]
+}` } },
+  { id: 'jsonx-bigint', label: 'A bigint has no JSON spelling', engine: 'jsonx', config: { mode: 'jsonx' }, datasets: [],
+    source: { text: '{ "id": 9007199254740993n, "name": "past 2^53" }' } },
+  { id: 'jsonx-strict', label: 'Strict JSON', engine: 'jsonx', config: { mode: 'json' }, datasets: [],
+    source: { text: '{ "name": "Ada", "langs": ["en", "nl"], "active": true }' } },
+
   // ——— CSV (source-only: strict vs repair is the lesson, live) ———
   { id: 'csv-rfc', label: 'RFC 4180', engine: 'csv', config: { repair: 'strict', headers: 'true', delimiter: 'auto', typed: 'off' }, datasets: [],
     source: { text: `id,name,note
@@ -352,6 +410,20 @@ Den Haag;548320;1248-01-01
 A-1,19.95,01234,123456789012345678901234567890,true,2026-07-27
 A-2,4.5,00042,7,false,2026-07-27T08:30:00Z
 ` } },
+
+  // ——— Core kernels (the functions the $query operators run, called directly) ———
+  { id: 'kernel-distance', label: 'Amsterdam to Paris, in metres', engine: 'kernels', config: { kernel: 'geoDistance' }, datasets: [],
+    source: { args: j([[4.9041, 52.3676], [2.3522, 48.8566]]) } },
+  { id: 'kernel-geohash', label: 'A geohash cell', engine: 'kernels', config: { kernel: 'geohashEncode' }, datasets: [],
+    source: { args: j([4.9041, 52.3676, 7]) } },
+  { id: 'kernel-add-duration', label: 'A month after January 31st', engine: 'kernels', config: { kernel: 'addDuration' }, datasets: [],
+    source: { args: j(['2026-01-31T10:00:00Z', 'P1M']) } },
+  { id: 'kernel-date-format', label: 'An LDML date picture', engine: 'kernels', config: { kernel: 'compileDateFormat' }, datasets: [],
+    source: { args: j(["yyyy-MM-dd 'at' HH:mm", '2026-07-27T14:30:05+02:00']) } },
+  { id: 'kernel-round', label: '1.005 is stored below itself', engine: 'kernels', config: { kernel: 'roundExact' }, datasets: [],
+    source: { args: j([1.005, 2, 'half-up']) } },
+  { id: 'kernel-iregexp', label: 'An I-Regexp matches whole', engine: 'kernels', config: { kernel: 'compileIRegexp' }, datasets: [],
+    source: { args: j(['[a-z]+-[0-9]{2}', 'abc-12']) } },
 
   // ——— MDX (markdown × data: interpolation + sections over the data pane) ———
   { id: 'mdx-invoice', label: 'An invoice from data', engine: 'mdx',

@@ -61,6 +61,7 @@
     "@jarenjs/emit": "0.140.0",
     "@jarenjs/josl": "0.140.0",
     "@jarenjs/json": "0.140.0",
+    "@jarenjs/linq": "0.140.0",
     "@jarenjs/validate": "0.140.0"
   }
 }

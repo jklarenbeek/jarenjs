@@ -39,9 +39,10 @@ describe('@jarenjs/play — the example library', () => {
 
   it('every example runs GREEN over each of its datasets (operators + its option config)', async () => {
     for (const ex of EXAMPLES) {
-      // the broken-on-purpose contract example refuses to compile — that
-      // IS its lesson (a JC00xx with a docPath), asserted in its own test
-      if (ex.id === 'contract-broken') continue;
+      // the broken-on-purpose examples refuse — that IS their lesson (a
+      // contract's JC00xx with a docPath, a chain's JavaScript operator at its
+      // position), asserted in their own tests
+      if (ex.id === 'contract-broken' || ex.id === 'linq-operator') continue;
       // a source-only example runs once against no data
       const runs = ex.datasets.length > 0 ? ex.datasets : [{ label: '—', data: {} }];
       for (const ds of runs) {
