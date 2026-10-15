@@ -656,7 +656,7 @@ Unit tests live in `test/` at the repository root, organized per package (`npm t
 - `jsonpath.js`, `jsonpointer.js`, `jsonquery.js`, `jslt.js` — compliance and performance for the `@jarenjs/json` engines;
 - `qt3-runner.js` — the tiered W3C QT3 scorecard (see [benchmark/qt3-README.md](../benchmark/qt3-README.md)).
 
-Validator-specific troubleshooting recipes — "Can not resolve schema for 'X'", first-validation slowness, test interference, ref-resolution logging — are collected in the [validate ARCHITECTURE debugging guide](../packages/validate/ARCHITECTURE.md#debugging-guide).
+Validator-specific troubleshooting recipes — "JK0009: Can not resolve schema for 'X'", first-validation slowness, test interference, ref-resolution logging — are collected in the [validate ARCHITECTURE debugging guide](../packages/validate/ARCHITECTURE.md#debugging-guide).
 
 ---
 

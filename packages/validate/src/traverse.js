@@ -371,10 +371,38 @@ export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPoi
   return rootUri;
 }
 
+const UNHELD = 'no schema the validator holds has that URI; register it with addSchema, load it with compileAsync, or fix the reference';
+
+/**
+ * The refusal of a reference that resolves to no schema: `JK0009`, or
+ * `JK0008` for a draft-07 `$ref` whose sibling `$id` did not set its base.
+ * @param {string} id - The reference, resolved
+ * @param {boolean} [ignoredId] - Whether a draft-07 `$ref` ignored the `$id` beside it
+ * @param {string} [why] - What does not resolve and the repair
+ * @returns {SchemaCompileError}
+ */
+export function unresolvedReference(id, ignoredId = false, why = UNHELD) {
+  return ignoredId
+    ? new SchemaCompileError('JK0008', `Can not resolve schema for '${id}': a draft-07 $ref ignores the $id beside it; register that URI, or declare $schema 2019-09 or later`)
+    : new SchemaCompileError('JK0009', `Can not resolve schema for '${id}': ${why}`);
+}
+
+/**
+ * Resolve one reference to the schema it names, without following the
+ * target's own reference.
+ * @param {Map<string, any>} schemas
+ * @param {string} refUri - The reference
+ * @param {string|null} baseUri - The base it resolves against
+ * @param {JsonPointerOptions} [opts]
+ * @returns {{id: string, schema: any}}
+ * @throws {SchemaCompileError} `JK0009` when no schema the map holds has
+ *   that URI, or its pointer misses
+ */
 export function resolveRefSchemaShallow(schemas, refUri, baseUri, opts = new JsonPointerOptions()) {
   let { id: base, leftUri, fragment } = createJsonPointer(refUri, baseUri, opts);
+  const id = base;
   if (!schemas.has(leftUri))
-    throw new Error(`The root of reference: '$ref': '${base}', is not found in init-cache`);
+    throw unresolvedReference(id);
 
   // get the document from cache
   let schema = schemas.get(leftUri);
@@ -414,7 +442,7 @@ export function resolveRefSchemaShallow(schemas, refUri, baseUri, opts = new Jso
   for (const part of fragments) {
     current = current + '/' + part;
     if (!isBoolOrObjectClass(schema[part]) && !Array.isArray(schema[part]))
-      throw new Error(`The '${current}' is not a valid schema in '${leftUri}'`);
+      throw unresolvedReference(id, false, `'${current}' is not a schema in '${leftUri}'; fix the pointer`);
 
     schema = schema[part];
     if (isObjectClass(schema) && isStringType(schema.$id) && !isStringWhiteSpace(schema.$id)) {
@@ -455,8 +483,8 @@ export function isRefCycleError(error) {
  * @param {JsonPointerOptions} [opts]
  * @param {SchemaPlaces} [places] - What the walks read
  * @throws {SchemaCompileError} `JK0008` for a target of a draft-07 `$ref`
- *   whose `$id` does not set its base that nothing resolves (any other
- *   unresolvable target throws an `Error`)
+ *   whose `$id` does not set its base that nothing resolves, `JK0009` for
+ *   any other target nothing resolves
  */
 export function restoreSchemaRefsInMap(schemas, opts = new JsonPointerOptions(), places = undefined) {
   for (const [id, item] of schemas.entries()) {
@@ -477,7 +505,7 @@ export function restoreSchemaRefsInMap(schemas, opts = new JsonPointerOptions(),
       );
 
       if (finalSchema == null)
-        throw new Error(`Can not resolve schema for '${id}'`);
+        throw unresolvedReference(id);
 
       // Store the final resolved schema (flattened ref chain)
       schemas.set(id, finalSchema);
@@ -497,12 +525,8 @@ export function restoreSchemaRefsInMap(schemas, opts = new JsonPointerOptions(),
       catch (e) {
         if (!kept) throw e;
       }
-      if (schema == null) {
-        const reason = `Can not resolve schema for '${id}'`;
-        throw kept
-          ? new SchemaCompileError('JK0008', `${reason}: a draft-07 $ref ignores the $id beside it; register that URI, or declare $schema 2019-09 or later`)
-          : new Error(reason);
-      }
+      if (schema == null)
+        throw unresolvedReference(id, kept);
 
       schemas.set(id, schema);
     }

@@ -296,7 +296,8 @@ failed validation, because a `false` under `not` would read as success.
 | `JK0005` | `SchemaCompileError` | `compileAsync`'s `loadSchema` returned something that is not a schema (an object or a boolean) |
 | `JK0006` | `SchemaCompileError` | One `compileAsync` call needs more document loads than its `maxLoads` option (default 100) |
 | `JK0007` | `SchemaCompileError` | `compileAsync` was given something that is not a `JarenValidator`, a `loadSchema` that is not a function, or a `maxLoads` that is not a positive safe integer |
-| `JK0008` | `SchemaCompileError` | A draft-07 `$ref` beside an `$id`, which does not set its base, resolves to no schema the validator holds: refused when a schema compiles |
+| `JK0008` | `SchemaCompileError` | A draft-07 `$ref` beside an `$id`, which does not set its base, resolves to no schema the validator holds: refused when a schema compiles, or by the first call that reaches a reference resolved on first use |
+| `JK0009` | `SchemaCompileError` | A reference resolves to no schema the validator holds (a document nothing holds, or a pointer that misses): refused when a schema compiles, or by the first call that reaches a reference resolved on first use |
 | `JK2001` | `SchemaRuntimeError` | Validation nests schema references deeper than `maxReferenceDepth` (default 256): refused where the bound is crossed |
 
 **`JK0001` — a loop that never reads the instance.** A `$ref` that leads
@@ -434,4 +435,21 @@ the base):
 JK0008: Can not resolve schema for 'https://github.com/jklarenbeek/name.json#': a draft-07 $ref ignores the $id beside it; register that URI, or declare $schema 2019-09 or later
 ```
 
-From 2019-09 on the `$id` sets the base of the `$ref` beside it.
+From 2019-09 on the `$id` sets the base of the `$ref` beside it. A document
+registered with `addSchema` that declares no `$schema` is walked before any
+compile names its draft, so a draft-07 compile can reach such a `$ref` only
+when it first runs: the first call that reaches it is refused `JK0008`
+there (the `SchemaCompileError` is thrown by the call), and an instance that
+does not reach it answers.
+
+**`JK0009` — a reference nothing resolves.** A reference whose document
+nothing registered or loaded, or whose pointer misses in a document the
+validator holds, is refused naming the reference and the repair. A
+reference the compilation resolves is refused when the schema compiles,
+under whichever applicator it sits; one resolved on first use is refused by
+the first call that reaches it:
+
+```text
+JK0009: Can not resolve schema for 'https://github.com/jklarenbeek/nope.json#': no schema the validator holds has that URI; register it with addSchema, load it with compileAsync, or fix the reference
+JK0009: Can not resolve schema for 'https://github.com/jklarenbeek/jarenjs#/$defs/missing': '/$defs' is not a schema in 'https://github.com/jklarenbeek/jarenjs#'; fix the pointer
+```

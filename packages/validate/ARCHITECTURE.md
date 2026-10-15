@@ -1082,14 +1082,17 @@ When schemas have `$id` that changes the base URI:
 
 ## Debugging Guide
 
-### "Can not resolve schema for 'X'"
+### "JK0009: Can not resolve schema for 'X'"
 
-**Cause**: The ref `X` is not in schemasMap
+**Cause**: The ref `X` is not in schemasMap, or its pointer misses in the
+document that is (the message then names the step that misses)
 
 **Check**:
 - Was the schema containing `X` added via `addSchema()`?
 - Is the ref path correct in the schema?
 - After `restoreSchemaRefsInMap`, all refs should have non-null values
+- `JK0008` instead: a draft-07 `$ref` beside an `$id` resolves against the
+  enclosing base, not the `$id`
 
 ### Performance Degradation on First Validation
 

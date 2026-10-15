@@ -339,7 +339,15 @@ resolves to nothing the validator holds is refused when it compiles
 `addSchema` (or loaded) that declares no `$schema` is registered before any
 compile names its draft, and its registration reads an `$id` beside `$ref`
 as setting the base, as from 2019-09 on: declare its `$schema` when such a
-document is referenced from a draft-07 schema. *Upgrade: the walk that registers a schema resolved such a
+document is referenced from a draft-07 schema. Left undeclared, it is read two
+ways by a draft-07 compile: a reference to the object's `$id` resolves the
+`$ref` beside it against the enclosing base, a pointer to the object against
+the `$id`, so with both URIs held the two references answer differently; with
+only the one the `$id` names, the first call that reaches a reference to the
+object's `$id` is refused `JK0008`, naming the URI draft-07 reads (an instance
+that does not reach it answers); with only the URI draft-07 reads, the
+compilation is refused `JK0009`, naming the one the `$id` names. *Upgrade: a call that reached such a
+reference threw an uncoded `Error` ("…, is not found in init-cache").* *Upgrade: the walk that registers a schema resolved such a
 `$ref` against the `$id`, so `compileAsync` loaded `sub/name.json` for
 `{ "$defs": { "a": { "$id": "sub/a.json", "$ref": "name.json" } }, "$ref":
 "sub/a.json" }` and the validator then threw an uncoded `Error` on its first
@@ -693,6 +701,20 @@ Documents can be added in any order: a resource embedded in one
 that a document added before it makes. *Upgrade: such a reference used to stay
 unresolved, and compiling failed `Can not resolve schema for
 'https://x.test/e.json#'`.*
+
+A reference that resolves to no schema the validator holds — a document nothing
+registered or loaded, or a pointer that misses in a held one — is refused with a
+`SchemaCompileError` whose `code` is `JK0009`, naming the reference and the repair:
+`compile({ "$ref": "nope.json" })` fails with `JK0009: Can not resolve schema for
+'https://github.com/jklarenbeek/nope.json#': no schema the validator holds has that URI;
+register it with addSchema, load it with compileAsync, or fix the reference`, and
+`{ "$ref": "#/$defs/missing" }` with `…: '/$defs' is not a schema in
+'https://github.com/jklarenbeek/jarenjs#'; fix the pointer`. It is refused where it was
+refused before: when the schema compiles, or, for a reference resolved on first use, by
+the first call that reaches it. *Upgrade: these were plain `Error`s whose messages read
+`Can not resolve schema for '<uri>'`, `The root of reference: '$ref': '<uri>', is not
+found in init-cache` and `The '<pointer>' is not a valid schema in '<uri>'`; the message
+now begins with the code and ends with the repair.*
 
 One validation nests at most 256 schema references (a `$ref` resolved on first use, a
 `$dynamicRef` or a `$recursiveRef`); one more throws a `SchemaRuntimeError` whose `code`

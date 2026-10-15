@@ -9,7 +9,10 @@
  * compilation that needs more loads than its bound (`JK0006`) and an
  * argument it does not take (`JK0007`). A draft-07 `$ref` whose sibling
  * `$id` does not set its base, and which then resolves to no schema the
- * validator holds, is refused when it compiles (`JK0008`). When a validator
+ * validator holds, is refused when it compiles (`JK0008`); any other
+ * reference that resolves to no schema the validator holds is refused
+ * `JK0009`. A reference resolved on first use is refused (`JK0008` or
+ * `JK0009`) by the first call that reaches it. When a validator
  * runs: a validation that nests more schema references than
  * `maxReferenceDepth` (default {@link REFERENCE_DEPTH_CEILING}) is refused
  * where the bound is crossed (`JK2001`), before the host's call stack can
@@ -33,6 +36,7 @@ export const VALIDATE_CODES = Object.freeze({
   JK0006: 'compileAsync: a compilation needs more schema loads than the maxLoads option',
   JK0007: 'compileAsync: its validator, loadSchema or maxLoads argument is not one it takes',
   JK0008: 'a draft-07 $ref beside an $id resolves to no schema',
+  JK0009: 'a reference resolves to no schema the validator holds',
   JK2001: 'validation nests schema references deeper than the reference depth ceiling',
 });
 

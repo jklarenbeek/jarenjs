@@ -90,7 +90,7 @@ describe('play validate: referenced schemas on the site', () => {
     const dangling = { $id: 'https://example.com/b.json', properties: { x: { $ref: 'https://example.com/missing.json' } } };
     const lazy = runValidation('{"$ref":"https://example.com/b.json"}', { x: 1 }, [dangling]);
     assert.strictEqual(lazy.valid, null);
-    assert.match(lazy.schemaError, /^schemas\[0\] \(https:\/\/example\.com\/b\.json\): Can not resolve schema/);
+    assert.match(lazy.schemaError, /^schemas\[0\] \(https:\/\/example\.com\/b\.json\): JK0009: Can not resolve schema for 'https:\/\/example\.com\/missing\.json#': /);
 
     // through the engine: SCHEMA, located at the schemas pane
     const slice = { engine: 'validate', source: { schema: main, schemas: JSON.stringify([bad]) }, data: { data: '{}' }, config: {} };

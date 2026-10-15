@@ -75,11 +75,11 @@ describe('a draft-07 $id beside $ref does not set the base of that $ref', () => 
 });
 
 describe('the refusal says why only for the compile whose walk kept the base', () => {
-  it('a later compile of a plain reference to the same URI is refused as before', () => {
+  it('a later compile of a plain reference to the same URI is refused JK0009', () => {
     const validator = new JarenValidator();
     assert.throws(() => validator.compile(doc(undefined)), (error) => error.code === 'JK0008');
     assert.throws(() => validator.compile({ $schema: D20, $ref: 'name.json' }), (error) =>
-      !(error instanceof SchemaCompileError) && error.message === `Can not resolve schema for '${BASE}name.json#'`);
+      error instanceof SchemaCompileError && error.code === 'JK0009' && error.message.startsWith(`JK0009: Can not resolve schema for '${BASE}name.json#': `));
   });
 });
 
@@ -94,7 +94,7 @@ describe('from 2019-09 on an $id beside $ref sets its base, as before', () => {
         const compiled = registered('name.json', 'sub/name.json').compile(doc($schema, ref));
         assert.deepEqual([compiled('x'), compiled(5)], [false, true], ref);
         assert.throws(() => registered('name.json').compile(doc($schema, ref)), (error) =>
-          !(error instanceof SchemaCompileError) && /^Can not resolve schema for 'https:\/\/github\.com\/jklarenbeek\/sub\/name\.json#'$/.test(error.message));
+          error instanceof SchemaCompileError && error.code === 'JK0009' && error.message.startsWith(`JK0009: Can not resolve schema for '${BASE}sub/name.json#': `));
       }
     });
   }

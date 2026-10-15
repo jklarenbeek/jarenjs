@@ -21,7 +21,7 @@ describe('schemas with a member named constructor', function () {
     for (const name of ['a', 'constructor', 'toString']) {
       assert.throws(
         () => new JarenValidator().compile({ properties: { [name]: true, b: { $ref: '#/$defs/d' } } }),
-        /is not a valid schema/,
+        /^SchemaCompileError: JK0009: Can not resolve schema for '[^']*#\/\$defs\/d': '\/\$defs' is not a schema in /,
         name);
     }
   });

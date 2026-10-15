@@ -21,6 +21,7 @@ import {
   decodeJsonPointerPath,
   TraverseOptions,
   createJsonPointer,
+  unresolvedReference,
 } from './traverse.js';
 
 import {
@@ -803,7 +804,7 @@ export class ValidationRoot {
    * @param {string} base - The base the reference resolves against
    * @param {object} schema - The schema containing the $ref
    * @returns {{id: string, schema: any}}
-   * @throws {Error} When the target is not loaded or the chain loops
+   * @throws {SchemaCompileError} `JK0009` when the target is not held, `JK0001` when the chain loops
    */
   referencedSchema(base, schema) {
     return resolveRefSchemaDeep(this.#schemas, base, schema, this.#traverse, undefined, this.#places);
@@ -1225,7 +1226,17 @@ export class ValidationObject {
     // descends into it alike.
     return wrapUnevaluated(self, schema, boundReference(path, root.options.maxReferenceDepth, function resolveSchemaCompiler(data, dataPath, dataRoot) {
       if (resolvedState === null) {
-        const obj = rootRef.resolveObject(boundRef, boundRefBase, boundSchema);
+        let obj;
+        try {
+          obj = rootRef.resolveObject(boundRef, boundRefBase, boundSchema);
+        }
+        catch (e) {
+          // A draft-07 `$ref` that resolves to nothing, whose `$id` would
+          // have named another target, says why.
+          throw e?.code === 'JK0009' && createJsonPointer(boundSchema.$ref, self.baseUri || boundRefBase, rootRef.traverse).id !== boundRef
+            ? unresolvedReference(boundRef, true)
+            : e;
+        }
         const resolvedSchema = obj.schema;
 
         // Entering the target resource brings ALL of its $dynamicAnchors into
@@ -2213,8 +2224,12 @@ export class JarenValidator {
    * @param {(JSONSchemaLike | boolean)[]} [schemas] - Additional schemas to reference during compilation
    * @returns {TOutput extends OutputFormat<infer R> ? (data: unknown) => R : TCollect extends true ? CompiledCollector : CompiledPredicate<T>} A validation function;
    *   it throws `SchemaRuntimeError` `JK2001` for an instance that nests more than 256 schema
-   *   references (a deep instance, or one that reaches a loop that never reads it)
-   * @throws {SchemaCompileError} `JK0001` when a loop of references never reads the instance
+   *   references (a deep instance, or one that reaches a loop that never reads it), and
+   *   `SchemaCompileError` `JK0008`/`JK0009` when it first reaches a reference resolved on
+   *   first use that resolves to no schema
+   * @throws {SchemaCompileError} `JK0001` when a loop of references never reads the instance;
+   *   `JK0009` (`JK0008` for a draft-07 `$ref` beside an `$id`) when a reference resolves to
+   *   no schema the validator holds
    * @example
    * const validate = validator.compile({
    *   type: 'object',

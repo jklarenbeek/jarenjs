@@ -129,23 +129,32 @@ delete it or fix it.
   right, so it waits on a decision to change the default (a minor with an
   upgrade sentence).
 - [ ] **A registered document that declares no draft reads a draft-07 `$id`
-  beside `$ref` as a base.** `addSchema` (and a `compileAsync` load) walks a
-  document before any compile names its draft, so in `{ $id:
+  beside `$ref` two ways.** `addSchema` walks `{ $id:
   'https://held.test/root.json', $defs: { a: { $id: 'sub/a.json', $ref:
-  'name.json' } } }` it registers `https://held.test/sub/name.json` as the
-  target, while a draft-07 (or undeclared) schema referencing
-  `https://held.test/sub/a.json` compiles that `$ref` against the enclosing
-  base: with only `sub/name.json` registered, `compile` succeeds and the first
-  call throws an uncoded `Error` ("…/name.json#', is not found in
-  init-cache"). The schema being compiled, and any document declaring its
-  `$schema`, read alike; one reading here needs the registration walk deferred
-  to the compile that names the draft.
-- [ ] **An unresolvable reference is refused uncoded.** `compile({ $ref:
-  'nope.json' })` throws a plain `Error` ("Can not resolve schema for
-  '…/nope.json#'"); a pointer into a document nothing holds throws "The root
-  of reference … is not found in init-cache". Coding them (as `JK0008` codes
-  the draft-07 case) prefixes the message with the code, which the Play
-  validate-refs test pins.
+  'name.json' } } }` before any compile names its draft, so it registers
+  `https://held.test/sub/name.json` as the target, while a draft-07 (or
+  undeclared) compile resolves the reference through
+  `https://held.test/sub/a.json` against the enclosing base (`…/name.json`)
+  and one through `…/root.json#/$defs/a` against the `$id`: with both URIs
+  registered (`name.json` strings, `sub/name.json` numbers) one compile of `{
+  properties: { p: { $ref: '…/sub/a.json' }, q: { $ref: '…/root.json#/$defs/a'
+  } } }` answers `{p:'x'}` `true`, `{p:5}` `false`, `{q:'x'}` `false`, `{q:5}`
+  `true`; with only `name.json`, compile is refused `JK0009` naming
+  `sub/name.json`; with only `sub/name.json`, the first reference is refused
+  `JK0008` on the call that reaches it and the second answers. One reading
+  needs the registration walk deferred to the compile that names the draft
+  (the pointer path's answer then becomes a refusal: a minor).
+- [ ] **An unresolvable `$dynamicRef` answers.** `{ $schema: 2020-12,
+  $dynamicRef: 'https://o.test/d.json#/x' }` (and `#foo`, and
+  `'#/$defs/nope'`) answers `false` for every instance (`true` under `not`);
+  `$dynamicRef: '#nope'` with no such anchor is refused `JK0001` "refers to
+  itself"; `{ $schema: 2019-09, $recursiveRef: 'https://o.test/d.json' }`
+  answers `true`. Refusing them `JK0009` on the call that reaches them refuses
+  inputs that answer (a minor).
+- [ ] **A malformed reference or `$id` throws an uncoded `TypeError`.**
+  `compile({ $ref: 'http://[x' })` throws `ERR_INVALID_URL` "Invalid URL" from
+  the pointer parser that also reads every `$id`, where an unresolvable
+  reference is refused `JK0009` with its repair.
 - [ ] **The output formats answer in English only.** A unit carries rendered
   text, so `localizeErrors` does not reach it and the packs' `subschema` entry
   is never read. A catalog on the output path (or units that keep `msgid` and
