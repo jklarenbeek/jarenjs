@@ -179,7 +179,12 @@ literals, member paths and the operators a pushed count accepts, an `$exists` or
 `$empty`, and an `$and`, `$or` or `$not` of those. The conjuncts before it keep
 narrowing, a seek staying a seek, so the selective conjunct goes first. A window
 beside a registered function stays in the engine too (`plan.registeredFunction`): the
-statement stops once the window is full, and the engine evaluates every row.
+statement stops once the window is full, and the engine evaluates every row. The
+engine also evaluates the filter on every row before a cursor yields its first item,
+so a `query()` cursor over a statement whose registered function can raise reads the
+statement whole first (`streaming: 'buffered'`, the barrier `bind.raisingFunction`;
+`strictStreaming` declines it, `JD0037`) and raises before any item where the engine
+does; a cursor whose functions cannot raise still pulls one row per item.
 
 A string literal reaches the database through the driver as UTF-8, which has no
 spelling for a lone surrogate: it arrives as U+FFFD and the database compares that
@@ -188,11 +193,17 @@ in its place, so a comparison or a string operator over one stays in the engine
 the literal as written), as does a disjunction that holds one. An entity conjunct
 that holds one inside a hop to a related entity (a `$count`, `$exists` or `$empty` of
 the hop, or a comparison of the member it returns) stays in the engine on both
-dialects. PostgreSQL's text and
+dialects. A graph load and a native mutation have no engine path, so a predicate
+comparing one refuses (`JD0032`, `JD0038`) and the statement never runs. PostgreSQL's
+text and
 jsonb hold no U+0000, so there a literal holding one, or a membership list item
-holding U+0000 or a lone surrogate, sends a collection's document to the engine
-(`bind.serverText`); such a list rides the statement on SQLite, whose JSON reads the
-escape as it read the stored document. SQLite's `$ends-with` compares bytes, so a
+holding U+0000 or a lone surrogate, sends a collection's or an entity query's
+document to the engine (`bind.serverText`); such a list rides the statement on
+SQLite, whose JSON reads the escape as it read the stored document. An external is
+bound by the same rule when the call runs: a string external holding a lone
+surrogate — and on PostgreSQL one holding U+0000, or a membership list holding
+either — diverts the call to the engine (`bind.external`), while on SQLite a list
+holding one still binds. SQLite's `$ends-with` compares bytes, so a
 U+0000 in the pattern or in the stored value answers as the engine does. **A named
 deviation:** a lone surrogate that SQLite stores (PostgreSQL refuses the document)
 reads back from a native projection, group key or distinct as three U+FFFD, where the
@@ -223,7 +234,11 @@ remain local to each call; earlier payload-bearing documents are not retained.
 Execution uses the same guarded transaction as the entity writer. It supports adopted writable
 SQLite and PostgreSQL column layouts. Hybrid entities, arbitrary SQL,
 store-enforced before/after invariants and unsupported expression shapes refuse
-with `JD0038`. Database constraints and invariant triggers retain enforcement.
+with `JD0038`, as does a `where` comparing a string that holds a lone surrogate,
+which the database would read as U+FFFD; an assignment, a value or a key holding
+one is refused `JD2003`, as the entity writer refuses it
+([MODEL-FORMAT §9.3](MODEL-FORMAT.md#93-the-hybrid-mapping)). Database constraints
+and invariant triggers retain enforcement.
 PostgreSQL verifies its explicit schema and exact scalar codecs before adoption;
 see [native column adoption](MODEL-FORMAT.md#postgresql-column-adoption).
 Its mutation result is limited on the server to `maxRows + 1` rows, so an

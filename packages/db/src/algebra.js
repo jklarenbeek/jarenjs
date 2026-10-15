@@ -71,7 +71,7 @@ export const PLAN_VERSION = 2;
  *   { p: 'const', value: boolean } |
  *   { p: 'hop', hop: PlanHop } |
  *   { p: 'hopCount', hop: PlanHop, op: 'eq' | 'ne' | 'lt' | 'le' | 'gt' | 'ge', lit: number } |
- *   { p: 'udf', name: string, key: string } |
+ *   { p: 'udf', name: string, key: string, raises?: true } |
  *   { p: 'bboxOverlap', columns: { w: string, s: string, e: string,
  *     n: string }, probe: { box: number[] } | { ext: string } |
  *     { circle: { centre: { external: string } | { literal: unknown },

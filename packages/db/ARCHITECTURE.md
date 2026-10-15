@@ -776,11 +776,9 @@ over documents that happen to conform.
 
 **Bind-time diversion.** SQLite cannot bind a boolean, and a
 `null`-valued external needs Jaren's null semantics, not SQL's. At
-execute time, if any referenced external is missing or not a string or
-finite number, the call runs the always-compiled set residual instead
+execute time, if any referenced external is missing or not a string or finite number, or is a string the database would not receive as written (a lone surrogate bound as text arrives as U+FFFD; PostgreSQL holds no U+0000 and refuses a lone surrogate's JSON escape),, the call runs the always-compiled set residual instead
 of the native statement — same answer, one branch, no wrong-typed SQL.
-A membership list is bound whole, and binds when every item `$x[*]`
-reaches is a string or a finite number: a `null` or boolean item (which
+A membership list is bound whole, and binds when every item `$x[*]` reaches is a string or a finite number, a string item on PostgreSQL holding neither U+0000 nor a lone surrogate: a `null` or boolean item (which
 `$eq` matches against a present `null` or boolean) and an object or
 array item (which it compares structurally) divert the call the same
 way. `cellIn`'s neighbourhood list and every membership share the one

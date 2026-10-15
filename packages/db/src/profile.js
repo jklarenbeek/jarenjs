@@ -54,6 +54,7 @@ import { DbCompileError } from './errors.js';
 import { isJsonObject } from '@jarenjs/core/object';
 import { analyzeQuery } from '@jarenjs/json/query';
 import { compileSetResidual } from './residual.js';
+import { bindsAsWritten } from './emit.js';
 
 /**
  * The query document a predicate over `$it` stands for: every row of a root
@@ -418,7 +419,7 @@ const STRAY_VALUES = { null: 'a null', boolean: 'a boolean', structure: 'an obje
 
 /**
  * @typedef {{ name: string, op: string, list: boolean, member: string,
- *   families: string[] | null, nullBinds: boolean }} PredicateLeaf
+ *   families: string[] | null, nullBinds: boolean, dialect: any }} PredicateLeaf
  */
 
 /**
@@ -430,22 +431,23 @@ const STRAY_VALUES = { null: 'a null', boolean: 'a boolean', structure: 'an obje
  * @param {any} pred - the translated predicate
  * @param {(ref: any) => string[] | null} familiesOf
  * @param {boolean} nullBinds
+ * @param {any} dialect - the dialect the statement binds the externals on
  * @param {PredicateLeaf[]} [out]
  * @returns {PredicateLeaf[]}
  */
-export function predicateLeaves(pred, familiesOf, nullBinds, out = []) {
+export function predicateLeaves(pred, familiesOf, nullBinds, dialect, out = []) {
   switch (pred?.p) {
     case 'and': case 'or':
-      for (const item of pred.items) predicateLeaves(item, familiesOf, nullBinds, out);
+      for (const item of pred.items) predicateLeaves(item, familiesOf, nullBinds, dialect, out);
       break;
     case 'not':
-      predicateLeaves(pred.item, familiesOf, nullBinds, out);
+      predicateLeaves(pred.item, familiesOf, nullBinds, dialect, out);
       break;
     case 'cmp': case 'in':
       if (!('ext' in pred.operand)) break;
       out.push({ name: pred.operand.ext, op: pred.p === 'in' ? 'eq' : pred.op, list: pred.p === 'in',
         member: pred.ref.column ?? pred.ref.segments.map((/** @type {any} */ segment) => segment.name ?? `[${segment.index}]`).join('.'),
-        families: familiesOf(pred.ref), nullBinds });
+        families: familiesOf(pred.ref), nullBinds, dialect });
       break;
     default:
   }
@@ -498,15 +500,36 @@ function nonJsonWithin(value) {
 }
 
 /**
+ * What a string the leaf binds holds that the database would not receive
+ * as written ({@link bindsAsWritten}) — a lone surrogate, which a driver
+ * binds as U+FFFD, or U+0000 on a server that holds none — named as a
+ * sentence names it, or `null`. A membership's list crosses as JSON, whose
+ * escape SQLite reads as written; its items are judged so.
+ * @param {PredicateLeaf} leaf @param {any} value
+ * @returns {string | null}
+ */
+function unwrittenText(leaf, value) {
+  const items = !leaf.list ? [value]
+    : value !== null && typeof value === 'object' ? (Array.isArray(value) ? value : Object.values(value)) : [value];
+  for (const item of items) {
+    if (typeof item !== 'string' || bindsAsWritten(leaf.dialect, item, leaf.list)) continue;
+    return item.isWellFormed() ? 'U+0000, which this database holds in no value'
+      : 'a lone surrogate, which the database would receive as U+FFFD and compare in its place';
+  }
+  return null;
+}
+
+/**
  * Admit the externals a store profile's mandatory predicate binds, for one
  * call or point read of `root` — the one rule every surface that binds one
  * follows: a missing external is refused `JD0011` (a mandatory predicate
  * runs in the database or not at all), so is one holding a function or a
  * symbol, which no database binds, and so is a value its member can
  * hold that the database compares otherwise than the engine
- * ({@link strayFamily}), since the predicate would keep other rows than it
- * does. Every other value is admitted: one its member cannot hold matches
- * nothing on either side.
+ * ({@link strayFamily}), and a string the database would not receive as
+ * written ({@link unwrittenText}), since the predicate would keep other rows
+ * than it does. Every other value is admitted: one its member cannot hold
+ * matches nothing on either side.
  * @param {string} root - the collection or entity
  * @param {readonly string[]} names - every external the predicate names
  * @param {readonly PredicateLeaf[]} leaves - its comparisons of one
@@ -535,6 +558,11 @@ export function admitPredicateExternals(root, names, leaves, externals, how) {
       throw how.refusal(`${prefix(`'$${leaf.name}'`)} — it holds ${STRAY_VALUES[family]}, which the engine compares `
         + `with the same value in '${leaf.member}' and the database does not, so the predicate would keep other rows `
         + 'than it does; bind strings and numbers');
+    }
+    const text = unwrittenText(leaf, bound[leaf.name]);
+    if (text !== null) {
+      throw how.refusal(`${prefix(`'$${leaf.name}'`)} — it holds ${text}, so the predicate would keep other rows `
+        + `than it does in '${leaf.member}'; bind a well-formed string without U+0000 there`);
     }
   }
 }

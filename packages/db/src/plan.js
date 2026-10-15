@@ -189,6 +189,10 @@ export const BIND_REASONS = Object.freeze({
   entityGrouping: 'entity grouping runtime guards are qualified for SQLite',
   // an entity grouping is validated and rebuilt over all its rows at once
   entityGroupWhole: 'group results are validated and reconstructed together',
+  // a registered function in the filter that can raise on a row: the
+  // engine evaluates the filter on every row before its first item
+  raisingFunction: 'a conjunct that runs as a registered function can raise on a row, and the engine '
+    + 'evaluates the filter on every row before it yields an item: the statement is read whole first',
   /**
    * A value the database cannot bind: the call reads its whole source
    * and the engine answers. `over` names what that source is — a
@@ -408,6 +412,13 @@ function stringSubjectRaises(ref, shape) {
   return shape.entityFlavors?.get(canonicalOf(ref.segments))?.nullPolicy === 'null';
 }
 
+/** Why a statement with no engine path — a graph load, a native mutation —
+ * refuses a predicate comparing a string that holds a lone surrogate. */
+export const LONE_SURROGATE_REFUSAL = 'a string literal holding a lone surrogate reaches the database as '
+  + 'U+FFFD, so the predicate would match the rows holding U+FFFD in its place, and this statement has '
+  + 'no engine path to compare it as written; compare a well-formed string, or select the rows through '
+  + 'execute(), which answers it in the engine';
+
 /**
  * Whether a planned predicate binds a string literal that holds a lone
  * surrogate as the operand of a comparison or a string operator. A driver
@@ -419,7 +430,7 @@ function stringSubjectRaises(ref, shape) {
  * @param {any} pred
  * @returns {boolean}
  */
-function bindsLoneSurrogate(pred) {
+export function bindsLoneSurrogate(pred) {
   switch (pred.p) {
     case 'and': case 'or': return pred.items.some(bindsLoneSurrogate);
     case 'not': return bindsLoneSurrogate(pred.item);
@@ -3363,13 +3374,16 @@ function planFlwor(node, shape, rawFlwor, udfHook) {
     // the conjunct's own place in the caller's document rides the call
     // as a literal, so the shared function can report an engine error
     // where the caller wrote the fragment
-    const hatched = (/** @type {number} */ i) => {
+    // `raises` marks a function that can raise on a row: a cursor then
+    // reads the statement whole before its first item, as the engine
+    // evaluates the filter on every row before it yields one
+    const hatched = (/** @type {number} */ i, /** @type {boolean} */ raises) => {
       const promoted = udfHook !== undefined && rawConjuncts[i]?.fragment !== undefined
         ? udfHook(rawConjuncts[i].fragment, itName)
         : null;
       if (promoted === null) return false;
-      plan.filter = conjoin(plan.filter,
-        { p: 'udf', name: promoted.name, key: promoted.key, mount: rawConjuncts[i].mount });
+      plan.filter = conjoin(plan.filter, { p: 'udf', name: promoted.name, key: promoted.key,
+        mount: rawConjuncts[i].mount, ...(raises ? { raises: true } : {}) });
       udfs.push(promoted.name);
       return true;
     };
@@ -3391,8 +3405,9 @@ function planFlwor(node, shape, rawFlwor, udfHook) {
       if (translated && bindsLoneSurrogate(outcome.pred))
         outcome = { refusal: refusal(construct, PREDICATE_REASONS.loneSurrogate) };
       if ('refusal' in outcome) {
-        if (!translated && !conjunctCannotRaise(conjuncts[i], itSlot, shape)) raising = true;
-        if (!hatched(i)) {
+        const raises = !translated && !conjunctCannotRaise(conjuncts[i], itSlot, shape);
+        if (raises) raising = true;
+        if (!hatched(i, raises)) {
           reasons.push(outcome.refusal);
           whereFullyPushed = false;
         }
@@ -3410,7 +3425,7 @@ function planFlwor(node, shape, rawFlwor, udfHook) {
       // interval promotion asks for it today; the spatial ones have
       // not been proven under the hatch and keep their residual
       raising = true;
-      if (outcome.composable === true && hatched(i)) continue;
+      if (outcome.composable === true && hatched(i, true)) continue;
       for (const refinement of outcome.refinements) {
         reasons.push(refinement);
         whereFullyPushed = false;

@@ -2736,6 +2736,36 @@ an unknown option; plan the link there through `planColumnUpgrade`.
   stored again by an insert in the same transaction, now reads the rows its
   foreign-key actions reach before it runs, as journal capture does.
 
+## 41. Strings the database would read as another string
+- A string external holding a lone surrogate was bound as U+FFFD (SQLite answered the rows holding
+  U+FFFD; PostgreSQL failed `JD2005`), and on PostgreSQL one holding U+0000, or a membership list
+  holding either, failed `JD2005`; such a call now diverts to the engine (`bind.external`) and
+  answers what `pushdown: false` answers. On PostgreSQL an entity query's literal holding U+0000
+  failed `JD2005` and now runs in the residual (`bind.serverText`).
+- A graph load whose `where` compares a string literal holding a lone surrogate answered the rows
+  holding U+FFFD, and a native mutation's `where` changed or deleted them; both now refuse
+  (`JD0032`, `JD0038`) and change nothing. Select such rows through `execute()`.
+- A write that put a lone surrogate into an entity column (a mapped member, a key, a foreign key, a
+  `physical` layout's column) stored U+FFFD, so `get` answered another string than was written and
+  two such keys collided; it is now refused `JD2003` naming the member, by `create`, `update`,
+  `saveChanges()` (which then writes none of its records), a physical transform's output and a
+  native mutation alike. A read by such a key answered the row stored under U+FFFD and now answers
+  absent; a staged `remove` or `link` by it, which removed or linked that row, is refused `JD2003`. Repair: write `value.toWellFormed()`, or keep the member in the
+  document, which stores it as written.
+- An entity profile predicate comparing such a literal admitted the rows holding U+FFFD; it is now
+  the `TypeError` at first use a collection's already was.
+- A profile predicate's external holding a lone surrogate — and on PostgreSQL one holding U+0000 —
+  was bound as the database receives it, so a tenant predicate kept the rows of the tenant stored
+  under U+FFFD (on PostgreSQL U+0000 failed `JD2005`); every surface that binds it (`execute`,
+  `query`, `explain`, `live`, a cursor, `get(key, { externals })`) now refuses it `JD0011`, naming
+  the external. A membership list's item holding a lone surrogate is still bound on SQLite, whose
+  JSON reads it as written. Bind well-formed strings (`toWellFormed()`).
+- A `query()` cursor whose filter holds a registered function that can raise yielded the rows before
+  the one it raised on; it now reads the statement whole first and raises before its first item, as
+  the engine does (`streaming: 'buffered'`, `bind.raisingFunction`), so `strictStreaming: true`
+  declines it `JD0037`. Put a selective conjunct the planner translates first, or type the member
+  so the function cannot raise, to keep the row stream.
+
 ## Measured costs
 
 Exact identity stores complete canonical documents and model endpoints, so

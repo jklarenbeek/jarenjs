@@ -5,7 +5,8 @@ import { createBoundedCache } from '@jarenjs/core/cache';
 import { utf8ByteLength } from '@jarenjs/core/string';
 import { chain, attempt, createStatementOwner } from './driver.js';
 import { DbCompileError, DbRuntimeError, wrapDriverError } from './errors.js';
-import { entityShape, planEntityPredicate, predicateTerms, PLANNER_REASONS } from './plan.js';
+import { entityShape, planEntityPredicate, predicateTerms, bindsLoneSurrogate, LONE_SURROGATE_REFUSAL,
+  PLANNER_REASONS } from './plan.js';
 import { createEntityPredicateEmitters } from './emit.js';
 import { physicalSelection } from './physical.js';
 import { relationalEmitter } from './relational.js';
@@ -88,6 +89,7 @@ export function createEntityMutation(connection, entity, mapping, core) {
     // mutation has no engine path past either
     const bounded = (planned) => {
       if ('refusal' in planned) fail(planned.refusal.reason);
+      if (bindsLoneSurrogate(planned.pred)) fail(LONE_SURROGATE_REFUSAL);
       if (dialect.maxPredicateTerms !== null && predicateTerms(planned.pred) > dialect.maxPredicateTerms)
         fail(PLANNER_REASONS['predicate.termBound'].text);
       return planned;

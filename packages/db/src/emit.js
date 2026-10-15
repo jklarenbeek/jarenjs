@@ -187,8 +187,9 @@ const integerColumnLiteral = (dialect, ref, lit, paramSql) => (dialect.name === 
  * A promoted path the dialect's JSON path grammar cannot spell (a
  * member name holding a double quote or a control character) — or, in
  * a collection's statement, a fold over a member the schema does not
- * type on an engine with no untyped column, or a string literal the
- * server cannot hold ({@link serverHolds}). The planner promotes by
+ * type on an engine with no untyped column, or, in a collection's or an
+ * entity query's statement, a string literal the server cannot hold
+ * ({@link serverHolds}). The planner promotes by
  * SCHEMA, not by grammar, so the query engines catch this and run the
  * document in the set residual instead; a statement that has no
  * residual (a graph load) refuses it with its own code.
@@ -212,10 +213,37 @@ function serverHolds(dialect, text, asJson) {
   return !text.includes('\u0000') && (!asJson || text.isWellFormed());
 }
 
-/** The reason a literal the server cannot hold sends a collection's
- * document to the set residual. */
+/**
+ * Whether the database receives a string bound as a value as it was
+ * written: as text, a lone surrogate reaches either server as U+FFFD (a
+ * driver encodes UTF-8), which the database would compare in its place;
+ * inside a JSON value it crosses as its escape, which SQLite reads back
+ * as written and PostgreSQL refuses ({@link serverHolds}). The bind-time
+ * rule for an external, whose value the planner never sees.
+ * @param {any} dialect
+ * @param {string} text
+ * @param {boolean} asJson - bound inside a JSON value
+ * @returns {boolean}
+ */
+export function bindsAsWritten(dialect, text, asJson) {
+  return (asJson || text.isWellFormed()) && serverHolds(dialect, text, asJson);
+}
+
+/** The reason a literal the server cannot hold sends a collection's or an
+ * entity's document to the set residual. */
 const SERVER_TEXT = 'a string literal holding U+0000, or a list item holding U+0000 or a lone surrogate, '
-  + 'is not a value this server holds; the call runs in the residual over the whole collection';
+  + 'is not a value this server holds; the call runs in the residual over every row it reads';
+
+/**
+ * Refuse a slot whose string literal the server cannot hold
+ * ({@link serverHolds}), which the query engines catch to run the
+ * document in the set residual.
+ * @param {any} dialect @param {ParamSlot} slot
+ */
+function refuseUnheldLiteral(dialect, slot) {
+  if ('literal' in slot && typeof slot.literal === 'string' && !serverHolds(dialect, slot.literal, false))
+    throw new UnrepresentablePath(SERVER_TEXT);
+}
 
 /**
  * A table that takes every spelling of the dialect's row identity as a
@@ -544,8 +572,7 @@ export function emitPlan(plan, dialect, physical) {
   // beside the main statement numbers from one again
   let sink = slots;
   const param = (slot) => {
-    if (typeof slot.literal === 'string' && !serverHolds(dialect, slot.literal, false))
-      throw new UnrepresentablePath(SERVER_TEXT);
+    refuseUnheldLiteral(dialect, slot);
     sink.push(slot);
     return dialect.parameterRef(sink.length, slotName(slot));
   };
@@ -1459,7 +1486,10 @@ export function emitEntityPlan(plan, dialect, physicalOf) {
   const sl = dialect.stringLiteral;
   /** @type {ParamSlot[]} */
   const slots = [];
+  // a literal the server cannot hold sends the document to the set
+  // residual, as a collection's does
   const param = (slot) => {
+    refuseUnheldLiteral(dialect, slot);
     slots.push(slot);
     return dialect.parameterRef(slots.length, slotName(slot));
   };

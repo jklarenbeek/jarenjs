@@ -189,6 +189,25 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
    * (`__proto__`) is a member only where the document defines it. */
   const memberOf = (doc, name) => (Object.hasOwn(doc, name) ? doc[name] : undefined);
 
+  /**
+   * A column's value as written, refused when the column would store
+   * another string: a driver encodes text as UTF-8, which has no spelling
+   * for a lone surrogate, and stores U+FFFD in its place, so a read would
+   * answer another string than was written (a document member keeps it:
+   * its JSON escape is well-formed). A key part no write can store this
+   * way is one no read finds ({@link storedKeyPart}).
+   * @param {string} name @param {any} value - what the column binds
+   */
+  const storable = (name, value) => {
+    if (typeof value === 'string' && !value.isWellFormed()) {
+      throw new DbRuntimeError('JD2003', `the member '${name}' holds a lone surrogate, which its column cannot store: `
+        + 'the driver writes U+FFFD in its place, so a read would answer another string than was written; write a '
+        + 'well-formed string (toWellFormed()), or keep the member in the document, which stores it as written',
+      { docPath, collection: entity.name });
+    }
+    return value;
+  };
+
   /** Split a completed document into bound column values + the rest.
    * Relation members are PROJECTIONS (§10.1) — never stored. */
   const split = (doc, { updating = false } = {}) => {
@@ -202,27 +221,14 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
       const value = memberOf(doc, column.name);
       if (column.name === autoKey && value === undefined) continue;
       if (physical && (column.generated || (!updating && column.databaseDefault && value === undefined))) continue;
-      if (physical) {
-        values.push({ name: column.name, value: column.codecPlan.encode(value) });
-        continue;
-      }
-      if (column.epoch) {
-        // derived: the string stays in the document, the epoch rides
-        // the column
-        setObjectMember(rest, column.name, value);
-        values.push({ name: column.name, value: epochOf(column.property, value) });
-        continue;
-      }
-      values.push({
-        name: column.name,
-        value: value === undefined || value === null
-          ? null
-          : typeof value === 'boolean' ? (value ? 1 : 0) : value,
-      });
+      // derived: an epoch column's string stays in the document, the
+      // epoch rides the column
+      if (!physical && column.epoch) setObjectMember(rest, column.name, value);
+      values.push({ name: column.name, value: encodeColumn(column.name, value) });
     }
     for (const fk of fkColumns) {
       const value = memberOf(doc, fk);
-      values.push({ name: fk, value: value === undefined || value === null ? null : value });
+      values.push({ name: fk, value: value === undefined || value === null ? null : storable(fk, value) });
     }
     if (physical && Object.keys(rest).length > 0) throw new DbRuntimeError('JD2003',
       `column-only entity '${entity.name}' cannot store undeclared members: ${Object.keys(rest).join(', ')}`);
@@ -621,8 +627,11 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
   const versionOnly = (before, after) => createJSONPatch(before, after).every((op) => memberOfPatch(op) === entity.version);
 
   const columnByName = new Map(scalarColumns.map((column) => [column.name, column]));
-  /** Encode ONE column assignment the way {@link split} would. */
-  const encodeColumn = (name, value) => {
+  /** ONE column's value as its column holds it — a physical column's codec,
+   * the epoch of an instant kept as an epoch column, a boolean as 1 or 0 —
+   * refusing nothing the column would store as another string: what a read
+   * compares the stored column with. */
+  const columnValue = (name, value) => {
     const column = columnByName.get(name);
     if (physical && column) return column.codecPlan.encode(value);
     if (column !== undefined && column.epoch)
@@ -630,6 +639,9 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
     if (value === undefined || value === null) return null;
     return typeof value === 'boolean' ? (value ? 1 : 0) : value;
   };
+  /** Encode ONE column's value for a write ({@link split} encodes each
+   * column of a row this way). */
+  const encodeColumn = (name, value) => storable(name, columnValue(name, value));
 
   const core = {
     // Temporary migration cores retire only their own completed work. Store
@@ -664,6 +676,7 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
       split,
       merge,
       encodeColumn,
+      columnValue,
       refuseUnnumbered,
       keyValues,
       storedKey,

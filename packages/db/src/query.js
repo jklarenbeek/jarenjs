@@ -20,7 +20,9 @@
  * assumed.
  *
  * Bind-time diversion: if any referenced external is missing or not a
- * string or finite number, the call runs the always-compilable set
+ * string or finite number, or is a string the database would not receive
+ * as written (a lone surrogate bound as text arrives as U+FFFD, and
+ * PostgreSQL holds no U+0000), the call runs the always-compilable set
  * residual over the full collection instead of the native statement —
  * SQLite cannot bind a boolean, a `null` needs Jaren's semantics, and
  * a missing external must raise the ENGINE's error, not a driver's.
@@ -47,12 +49,12 @@ import { DbCompileError, DbRuntimeError, wrapDriverError } from './errors.js';
 import { chain, attempt, createStatementOwner, useStatementOnce } from './driver.js';
 import { readOptions, readControls, isPlainOptions, refuseUnknownMembers } from './options.js';
 import {
-  planQuery, planEntityQuery, entityShape, planEntityPredicate, entityPathRef,
+  planQuery, planEntityQuery, entityShape, planEntityPredicate, entityPathRef, bindsLoneSurrogate, LONE_SURROGATE_REFUSAL,
   isRootScanSource, isEntityRootSource, BIND_REASONS, PLANNER_REASONS, admitsMixedTypes,
   predicateTerms, boundPredicateTerms, mapHops, hopsOf, scalarFamilies,
 } from './plan.js';
 import { emitPlan, emitEntityPlan, createEntityPredicateEmitters, UnrepresentablePath, UnrepresentableIdentity,
-  entityTableColumns, physicalComparable,
+  entityTableColumns, physicalComparable, bindsAsWritten,
   documentMemberOf, bucketGuards, bucketAbsentGuard } from './emit.js';
 import { modelPath } from './model-path.js';
 import { selectPlan, conjoin, effectiveOrder, planOrder, ordersByColumn } from './algebra.js';
@@ -222,13 +224,16 @@ function aggregateNullError() {
 
 /**
  * Does an external bind as a native parameter the database compares as the
- * engine does? A string, and a finite number — but not, where the database
- * reads a JSON integer by its digits (`exact`), an integer past 2^53, which
- * the engine compares as the double it is.
- * @param {any} value @param {boolean} [exact]
+ * engine does? A string the database receives as written (on `dialect`,
+ * bound as text or, `asJson`, inside a JSON value: {@link bindsAsWritten}),
+ * and a finite number — but not, where the database reads a JSON integer
+ * by its digits (`exact`), an integer past 2^53, which the engine compares
+ * as the double it is. Without a dialect a string is taken as it is (the
+ * statement `explain()` describes).
+ * @param {any} value @param {boolean} [exact] @param {any} [dialect] @param {boolean} [asJson]
  */
-function bindable(value, exact = false) {
-  return typeof value === 'string'
+function bindable(value, exact = false, dialect = null, asJson = false) {
+  return (typeof value === 'string' && (dialect === null || bindsAsWritten(dialect, value, asJson)))
     || (typeof value === 'number' && Number.isFinite(value)
       && !(exact && Number.isInteger(value) && !Number.isSafeInteger(value)));
 }
@@ -243,15 +248,17 @@ function bindable(value, exact = false) {
  * the engine; so does a missing external, which the engine refuses by
  * its own error. A scalar still crosses as one JSON value, so only a
  * JSON scalar binds: a bigint, a function or a symbol is the engine's to
- * answer. An item past 2^53 binds where {@link bindable} binds it.
- * @param {any} value @param {boolean} [exact]
+ * answer. An item past 2^53 binds where {@link bindable} binds it, and a
+ * string where the database reads it inside the list's JSON as written.
+ * @param {any} value @param {boolean} exact @param {any} dialect
  */
-function listBindable(value, exact = false) {
+function listBindable(value, exact, dialect) {
   if (value === undefined) return false;
-  if (value === null || typeof value === 'string' || typeof value === 'boolean') return true;
+  if (value === null || typeof value === 'boolean') return true;
+  if (typeof value === 'string') return bindsAsWritten(dialect, value, true);
   if (typeof value === 'number') return Number.isFinite(value);
   if (typeof value !== 'object') return false;
-  return (Array.isArray(value) ? value : Object.values(value)).every((item) => bindable(item, exact));
+  return (Array.isArray(value) ? value : Object.values(value)).every((item) => bindable(item, exact, dialect, true));
 }
 
 /**
@@ -295,6 +302,22 @@ function slotValue(slot, externals, anchors = null) {
   // empty BLOB, a kind no JSON member holds: every guarded comparison
   // reads it as the foreign value it is, as the engine does
   return value !== null && (typeof value === 'boolean' || typeof value === 'object') ? FOREIGN_VALUE : value;
+}
+
+/**
+ * Whether a statement's filter holds a registered function that can raise
+ * on a row (`raises`): the engine evaluates the filter on every row before
+ * it yields an item, so a cursor over such a statement reads it whole first.
+ * @param {any} pred
+ * @returns {boolean}
+ */
+function holdsRaisingFunction(pred) {
+  switch (pred?.p) {
+    case 'and': case 'or': return pred.items.some(holdsRaisingFunction);
+    case 'not': return holdsRaisingFunction(pred.item);
+    case 'udf': return pred.raises === true;
+    default: return false;
+  }
 }
 
 /** The parameter a value of no SQL kind binds as ({@link slotValue}). */
@@ -1107,7 +1130,7 @@ export function createQueryEngine(context) {
   /** The store predicate's comparisons of an external, each with what its
    * member can hold under the collection's schema. @param {any} mandatory */
   const leavesOf = (mandatory) =>
-    predicateLeaves(mandatory, (ref) => scalarFamilies(collection.schema, ref.segments), false);
+    predicateLeaves(mandatory, (ref) => scalarFamilies(collection.schema, ref.segments), false, dialect);
   /** The store profile's leaves for this collection, as a point read
    * admits its externals by them: translated on first use. @type {any[] | null} */
   let storeLeaves = null;
@@ -1487,11 +1510,11 @@ export function createQueryEngine(context) {
       });
       if (invalidDerived) return true;
       if (kind === 'derived') return false;
-      if (kind === 'list') return !listBindable(externals[name], exactIntegers);
+      if (kind === 'list') return !listBindable(externals[name], exactIntegers, dialect);
       // a probe binds when SOME declared width takes it; a width the
       // model does not declare is the diversion it always was
       if (kind === 'probe') return rankAlternativeFor(entry, externals[name]) === null;
-      return !bindable(externals[name], exactIntegers);
+      return !bindable(externals[name], exactIntegers, dialect);
     }) ?? null;
   /** Must this call divert to the residual? */
   const mustDivert = (entry, externals) => divertingExternal(entry, externals) !== null;
@@ -1832,6 +1855,7 @@ export function createQueryEngine(context) {
     if (entry.plan.aggregate !== null && ['sum', 'avg'].includes(entry.plan.aggregate.fn)) {
       return buffered(`$${entry.plan.aggregate.fn}`, BIND_REASONS.accumulationWhole);
     }
+    if (holdsRaisingFunction(entry.plan.filter)) return buffered('$where', BIND_REASONS.raisingFunction);
     return rowClassOf(connection);
   };
 
@@ -1922,32 +1946,41 @@ export function createQueryEngine(context) {
     }
     let pulledRows = 0;
     const tally = seriesTally(entry);
+    /** One database row's items. @param {any} row */
+    const items = (row) => {
+      pulledRows++;
+      if (entry.rowBound !== null && pulledRows > entry.rowBound) {
+        throw new DbRuntimeError('JD2007',
+          `the fetch crossed the profile's maxRows bound of ${entry.rowBound}`,
+          { docPath: collection.docPath, collection: collection.name });
+      }
+      checkByteBound(entry, row);
+      const items = entry.plan.project === 'document'
+        ? (entry.rowResidual === null ? [JSON.parse(row.doc)]
+          : entry.rowResidual(JSON.parse(row.doc), externals))
+        : 'path' in entry.plan.project
+          ? projectedItems(row)
+          : projectedTreeItems(entry.plan.project, row);
+      tally?.row(items.length);
+      return items;
+    };
+    const onSettle = tally === null ? undefined : tally.settle;
+    if (holdsRaisingFunction(entry.plan.filter)) {
+      // a function that can raise on a row raises before the first item,
+      // as the engine's does: the statement is read whole first
+      return cursorFactory({ ...classified, signal, deadline, now: state.now, wrap: driverWrap, onSettle,
+        materialize: () => chain(guardScan(entry), () => statementOf(entry, (statement) =>
+          chain(runAll(entry, externals, statement), (rows) => rows.flatMap(items)))) });
+    }
     // a cursor iterates a statement of its OWN: two cursors over one
     // cached statement invalidate each other's iterator at the driver
-    return cursorFactory({ ...classified, signal, deadline, now: state.now, wrap: driverWrap,
+    return cursorFactory({ ...classified, signal, deadline, now: state.now, wrap: driverWrap, onSettle,
       // the bind may have to READ first (a seek's anchor), so it settles
       // before the statement it binds is prepared
       open: () => chain(guardScan(entry), () => chain(bindParams(entry, externals),
         (params) => chain(connection.prepare(entry.sql, { readOnly: true, ephemeral: true }),
           (statement) => statement.iterate(params)))),
-      items: (row) => {
-        pulledRows++;
-        if (entry.rowBound !== null && pulledRows > entry.rowBound) {
-          throw new DbRuntimeError('JD2007',
-            `the fetch crossed the profile's maxRows bound of ${entry.rowBound}`,
-            { docPath: collection.docPath, collection: collection.name });
-        }
-        checkByteBound(entry, row);
-        const items = entry.plan.project === 'document'
-          ? (entry.rowResidual === null ? [JSON.parse(row.doc)]
-            : entry.rowResidual(JSON.parse(row.doc), externals))
-          : 'path' in entry.plan.project
-            ? projectedItems(row)
-            : projectedTreeItems(entry.plan.project, row);
-        tally?.row(items.length);
-        return items;
-      },
-      onSettle: tally === null ? undefined : tally.settle });
+      items });
   };
 
   /**
@@ -2237,10 +2270,13 @@ function mandatoryEntityPredicate(profile, entity, entityMapping, analyzeOpts) {
   const expression = profile?.predicates?.[entity.name];
   if (expression === undefined) return null;
   const planned = planEntityWhere(expression, entity, entityMapping, analyzeOpts);
-  if ('filter' in planned && planned.filter !== null) return planned.filter;
+  // a literal the database would read as another string keeps other rows
+  // than the predicate names, and a mandatory predicate has no engine path
+  const lone = 'filter' in planned && planned.filter !== null && bindsLoneSurrogate(planned.filter);
+  if ('filter' in planned && planned.filter !== null && !lone) return planned.filter;
   throw new TypeError(`a profile predicate must translate natively (it binds the database-side fetch of '${
     entity.name}'); this one refused: ${'refusal' in planned ? planned.refusal.reason
-    : 'error' in planned ? planned.error.message : 'it selects nothing'}`);
+    : 'error' in planned ? planned.error.message : lone ? LONE_SURROGATE_REFUSAL : 'it selects nothing'}`);
 }
 
 /**
@@ -2322,7 +2358,7 @@ export function createEntityQueryEngine(context) {
   const entityLeaves = (predicate) => predicateLeaves(predicate, (ref) => {
     const kind = ref.storage === 'string' ? 'text' : ref.storage === 'boolean' ? 'boolean' : 'number';
     return ref.nullPolicy === 'null' ? [kind, 'null'] : [kind];
-  }, true);
+  }, true, dialect);
   /** The externals a profile's predicate of entity `name` names.
    * @param {any} profile @param {string} name @returns {string[]} */
   const predicateNamesOf = (profile, name) => [...new Set(analyzeQuery(predicateQuery(profile.predicates[name]), analyzeOpts)
@@ -2742,7 +2778,7 @@ export function createEntityQueryEngine(context) {
   const divertReason = (entry, externals) => {
     for (const slot of entry.slots) {
       if ('external' in slot && slot.list === true) {
-        if (entry.predicateOnly.has(slot.external) || listBindable(externals[slot.external], exactIntegers)) continue;
+        if (entry.predicateOnly.has(slot.external) || listBindable(externals[slot.external], exactIntegers, dialect)) continue;
         return { construct: 'external', reason: BIND_REASONS.external(slot.external, 'root') };
       }
       // the profile predicate's own externals were admitted before any
@@ -2753,7 +2789,8 @@ export function createEntityQueryEngine(context) {
       // column's own null on either engine
       const json = 'external' in slot && slot.json === true;
       const value = json ? externals[slot.external] : slotValue(slot, externals);
-      if (bindable(value, exactIntegers && 'external' in slot) || ((slot.nullable === true || json) && value === null)) continue;
+      if (bindable(value, exactIntegers && 'external' in slot, dialect, json)
+        || ((slot.nullable === true || json) && value === null)) continue;
       const name = 'external' in slot ? slot.external
         : 'derived' in slot ? (slot.derived.kind === 'bboxAxis' ? slot.derived.external
           : [slot.derived.centre, slot.derived.radius].find((input) => 'external' in input)?.external) : null;
@@ -2995,7 +3032,7 @@ export function createLoadEngine(context, entityName) {
   // bind as when the keyset compares them with the stored columns
   const encodeColumn = context.coreFor === undefined
     ? (/** @type {string} */ column, /** @type {any} */ value) => value
-    : (column, value) => context.coreFor(entityName).plan.encodeColumn(column, value);
+    : (column, value) => context.coreFor(entityName).plan.columnValue(column, value);
   // a registered operator (Ring 2) is recognised as vocabulary so a
   // where/orderBy that uses one refuses cleanly (JD0032 — the load path
   // is all-SQL, with no residual), never as an unknown operator
@@ -3046,6 +3083,10 @@ export function createLoadEngine(context, entityName) {
     if ('refusal' in planned) {
       throw refuse(`the where expression is not translatable: ${planned.refusal.reason}`, path);
     }
+    // a load has no engine path to answer a literal the database would
+    // read as another string
+    if (bindsLoneSurrogate(planned.filter))
+      throw refuse(`the where expression is not translatable: ${LONE_SURROGATE_REFUSAL}`, path);
     // a load binds no externals: a where that names one would reach the
     // driver as an unbound parameter
     const external = externalOf(planned.filter);

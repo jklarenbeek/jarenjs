@@ -542,29 +542,6 @@ what each does is its own documentation's job
   addresses (a socket and TCP) give the two stores different names, so the
   chain is refused `JL0005` though it would answer right
   ([DB-CLIENT §6](../packages/linq/docs/DB-CLIENT.md)).
-- [ ] **Lone surrogates outside a collection query's literals.** A lone surrogate
-  SQLite stores comes back from a native projection, group key or distinct as three
-  U+FFFD while the engine and the live strategies keep it (a deviation NATIVE-PLANS
-  names: an exact read would test every SQLite text leaf of those statements, and
-  was measured slower and withdrawn). An external string holding one is bound as
-  U+FFFD (the bind check admits any string), and a graph `load({ where })` or a
-  native mutation whose predicate compares one runs natively, where neither has a
-  residual to send it to. On PostgreSQL an entity query's literal holding U+0000
-  still fails `JD2005` where the engine answers. Wanted: externals divert at bind
-  like any value the database cannot bind; the residual-less surfaces refuse with a
-  code (a minor); the entity emitter demotes as the collection one does.
-- [ ] **A native `query()` cursor yields rows before the row a registered function
-  raises on.** Over `$where: { $eq: [{ $upper: '$it.u' }, 'X'] }` ordered by an
-  indexed `o`, rows a(u:'x'), b(u:5), the native cursor yields `'a'` and raises
-  `JQ2001` at b, where the engine's cursor raises before its first item; a
-  consumer that stops after one item reads an answer the engine never gives.
-  Wanted: a cursor beside a registered function reads its statement whole before
-  the first item, or names the streaming deviation.
-- [ ] **An entity's text column stores a lone surrogate as U+FFFD.** Creating an
-  entity whose mapped `string` column member holds `'x\uD800'` stores `'x�'`
-  (the driver's UTF-8 encoding), so `get` reads back another string than was
-  written, while a document member keeps the surrogate (its JSON escape). Wanted:
-  refuse such a value with a code on a text column, or store it exactly.
 - [ ] **Federation merge strategy and spilling.** Connected N-way joins and
   nested fluent joins now have an explicit fetch order and combined admission
   credits (QUERY-PEN §12.1). A merge strategy still needs a provider ordering
@@ -745,6 +722,14 @@ what each does is its own documentation's job
   (MODEL-FORMAT §12), as is a condition the read-back does not read (a date or
   uuid literal, `TRIM`, a quantified comparison other than `= ANY`). Wanted:
   read `pg_get_indexdef`'s terms through the same condition form.
+- [ ] **A row cursor yields items before a row its residual projection raises
+  on.** Over `$return: { $upper: '$it.u' }` ordered by an indexed `o`, rows
+  a(u:'x'), b(u:5), a SQLite `query()` cursor (`streaming: 'row'`) yields
+  `'X'` and raises `JQ2001` at b, where the engine's cursor raises before its
+  first item. Wanted: a row cursor whose residual projection can raise reads
+  its statement whole first, or the streaming deviation is named (buffering
+  every such cursor costs the row stream of each projection the planner cannot
+  prove total).
 
 ## Lexical search (cross-package)
 

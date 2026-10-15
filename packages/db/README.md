@@ -963,7 +963,7 @@ oracle run on both. What differs is declared rather than discovered:
 | a spatial `physical: 'rtree'` | an R\*Tree virtual table | the B-tree over the four edge columns, and `explain().prefilters[].via` says so |
 | a transaction a statement failed in | continues | is aborted until it ends (`JD2088`, its COMMIT included, so nothing in it commits); catch-and-continue needs a nested `transaction()` |
 | `ALTER TABLE` | additive only | additive changes alter the table in place; a change the planner expresses as a rebuild (a key, an enum, a type, a relation) rebuilds the table, writers waiting until it commits, which PostgreSQL supports only for an entity nothing else depends on: no foreign key references it, its own included, and no view reads it ([§10](docs/MIGRATION-FORMAT.md#10-the-rebuild-procedure)) |
-| a string holding U+0000, or an unpaired surrogate | stored and read back as written | refused by `jsonb` (`JD2005`) — in a document, and in a key a point read looks up — so a replicated SQLite document carrying one cannot be applied ([replication](docs/REPLICATION-FORMAT.md)) |
+| a string holding U+0000, or an unpaired surrogate | stored and read back as written in a document (an entity column refuses an unpaired surrogate, `JD2003`) | refused by `jsonb` (`JD2005`) — in a document, and in a key a point read looks up — so a replicated SQLite document carrying one cannot be applied ([replication](docs/REPLICATION-FORMAT.md)) |
 
 PostgreSQL has bounded native cursors, finite admission, a read-back server
 **statement timeout** and a labelled **row estimate** (the planner's, in

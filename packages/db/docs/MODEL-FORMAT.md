@@ -2183,8 +2183,12 @@ membership compares with a member that can hold one (on a collection, its
 schema type admits `null` or `boolean`, or names no scalar type; on an
 entity, a boolean column, or a list item `null` where the column's policy
 reads a NULL as a present `null`), where the engine matches the stored
-value and the database does not; and one holding a function or a symbol,
-which no database binds. Against a member that cannot hold it the
+value and the database does not; a string the database would not
+receive as written, which the predicate compares in its place and so keeps
+another tenant's rows: one holding a lone surrogate, which a driver binds
+as U+FFFD (as an item of a membership list, whose JSON escape SQLite reads
+as written, on PostgreSQL only), and on PostgreSQL one holding U+0000; and
+one holding a function or a symbol, which no database binds. Against a member that cannot hold it the
 comparison matches nothing on either side, and the call answers — a
 boolean, an object or an array in place of a single value too, which SQLite
 binds as a value of no JSON kind. A predicate's integer past 2^53 is bound
@@ -2335,7 +2339,10 @@ prove was applied is not a budget.
    negation, a quantifier, a residual, a window, an aggregate) can
    produce a fetch without it. A predicate MUST translate natively; a
    host-configured predicate that cannot is a `TypeError` at first
-   use, because there is no residual to hide it in.
+   use, because there is no residual to hide it in — on a collection and
+   an entity alike, one comparing a string literal that holds a lone
+   surrogate, which the database would read as U+FFFD and so keep the
+   rows holding U+FFFD in its place.
 
    A point read is judged by the same predicate. `get` on a collection or an
    entity — tracked or `asNoTracking()`, synchronous or asynchronous, on the
@@ -2346,8 +2353,9 @@ prove was applied is not a budget.
    tenant-isolation spelling above — is bound from the read's own options,
    `get(key, { externals: { tenant } })`, as a query binds it from its
    `externals`; a read whose externals the query engines refuse by the rule
-   above — one left unbound, or a value its member can hold that the database
-   compares otherwise than the engine — is refused `JD0011` before the row is
+   above — one left unbound, a value its member can hold that the database
+   compares otherwise than the engine, or a string the database would not
+   receive as written — is refused `JD0011` before the row is
    read, so the refusal does not tell a key another tenant holds from one that
    holds nothing, and one a comparison would read as `{}`, or a `bigint`, is
    refused `JD0041`, as on `execute`. A value its member cannot hold keeps no
@@ -2850,6 +2858,20 @@ absent from what comes back — a returned object never names a member
 no read will show. An epoch column (§9.3's `column: "integer"` row)
 keeps its string in the document, present-`null` included.
 
+**A column stores well-formed text.** A driver binds a string to a column
+as UTF-8, which has no spelling for a lone surrogate (one half of a UTF-16
+pair without the other): the column would hold U+FFFD in its place, and a
+read would answer another string than was written. A write that would put
+one in a column — a mapped scalar, a key, a foreign key, a `physical`
+layout's column, through `create`, `update`, `saveChanges()`, a physical
+transform's output or a native mutation's assignment, value or key — is
+therefore refused `JD2003` naming the member, and nothing is written (a
+save holding one such record writes none of its records); a key no write
+can store names no row, so a read by it answers absent, and `remove` or
+`link` refuses it (`JD2003`) where it stages it. A member the document holds keeps
+the surrogate (its JSON escape is well-formed text), and SQLite stores
+U+0000 in a column as written (PostgreSQL refuses it, `JD2005`).
+
 **What an epoch column is for, exactly.** It is an index-friendly
 PRE-FILTER, not a second source of truth. The stored RFC 3339 string in
 the document is the value; the column is the instant derived from it.
@@ -3268,7 +3290,8 @@ column its strings, a numeric column its numbers); a `null` in a literal
 list is the present-null test and a `true`/`false` the boolean one, so
 the answer is `$eq`'s. A bound list binds when every item it reaches is
 a string or a finite number — a `null`, boolean, object or array item
-diverts the call at bind time — and against a boolean column or a
+diverts the call at bind time, and so, on PostgreSQL, does a string item
+holding U+0000 or a lone surrogate — and against a boolean column or a
 document path a bound list stays residual.
 
 An `$or` regroups by member once each of its items is translated,
@@ -3747,11 +3770,12 @@ a number appears only where `capabilities.rowEstimates` is filled):
   paths and the operators a pushed count accepts, an `$exists` or `$empty`,
   and an `$and`, `$or` or `$not` of those);
 - a comparison or a string operator against a string literal holding a lone
-  surrogate, which a driver binds as U+FFFD (`predicate.loneSurrogate`), and on
-  PostgreSQL a collection's literal holding U+0000, or a membership list item
-  holding U+0000 or a lone surrogate, which the server cannot hold
-  (`bind.serverText`; NATIVE-PLANS names the stored lone surrogate a native
-  projection reads as U+FFFD);
+  surrogate, which a driver binds as U+FFFD (`predicate.loneSurrogate`; a graph
+  load, `JD0032`, and a native mutation, `JD0038`, have no engine path and refuse
+  it), and on PostgreSQL a collection's or an entity query's literal holding
+  U+0000, or a membership list item holding U+0000 or a lone surrogate, which the
+  server cannot hold (`bind.serverText`; NATIVE-PLANS names the stored lone
+  surrogate a native projection reads as U+FFFD);
 - a navigation hop out of shape (`entity.hopShape`): a hop out of a hop,
   one with an inner `$orderby`, `$let`, grouping or window, one correlated
   by an inequality, or with equalities across comparison families or over
@@ -3794,7 +3818,11 @@ a number appears only where `capabilities.rowEstimates` is filled):
   or string family (`predicate.joinTerritory`);
 - externals against document paths; booleans and `null` at bind time;
   a bound membership list against a boolean column, and one holding a
-  `null`, a boolean, an object or an array at bind time;
+  `null`, a boolean, an object or an array at bind time; a string external
+  holding a lone surrogate, which a driver binds as U+FFFD, and on PostgreSQL
+  one holding U+0000, or a membership list holding either, which the server
+  cannot hold, at bind time (`bind.external`; on SQLite a list holding a lone
+  surrogate binds, its JSON escape read as written);
 - on a dialect with a term bound (PostgreSQL: 128 terms per statement, a
   leaf predicate being one and an inequality or a negated comparison
   between a document member and an external operand four, a member's

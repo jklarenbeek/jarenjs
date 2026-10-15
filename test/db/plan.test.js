@@ -723,6 +723,7 @@ describe('the planner\'s reason vocabulary', () => {
     'bind.entityGrouping': 'an entity grouping on a dialect whose guards are not qualified, decided by the '
       + 'entity engine (group-order-aggregates.test.js, over a store-owned PostgreSQL table)',
     'bind.entityGroupWhole': "an entity grouping's cursor barrier, classified by the entity engine",
+    'bind.raisingFunction': "a registered function's cursor barrier, classified by a cursor (the raising-function cursor suite)",
     'bind.path': 'a member name the dialect cannot spell (the hostile suite)',
     'bind.serverText': 'a string literal PostgreSQL cannot hold, decided by the emitter (the server-text suite)',
     'bind.identity': 'a table that takes every spelling of the row identity, decided by the entity emitter '
