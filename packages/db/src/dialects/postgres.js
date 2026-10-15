@@ -815,7 +815,8 @@ export function postgresDialect(options = undefined) {
     // values, of one kind — text byte-ordered like every text comparison,
     // a number as the `numeric` a number member reads as and a number
     // column is declared as, so the comparison casts neither side and the
-    // column's index seeks
+    // column's index seeks. An adopted integer column compares cast to
+    // `numeric`, which its own index does not serve
     inList: (valueSql, listSql, kind) => {
       const list = `((${listSql})::jsonb)`;
       const items = `(SELECT jsonb_array_elements(${list}) WHERE jsonb_typeof(${list}) = 'array' UNION ALL `

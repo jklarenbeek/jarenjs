@@ -129,7 +129,14 @@ snapshot is the engine's answer. The price: a top-level `$and` of more than 128
 `$ne` over a PostgreSQL collection (more than 32 against externals) runs in the
 engine, and a `load({ where })`
 or native `mutate()` above the bound that ran before is refused. SQLite has no
-JIT and sets no bound.
+JIT and sets no bound. Within the bound, a conjunction's `$ne` literals over
+one member are spelled as the member's presence and one negated membership
+list bound as one value, so the server compiles one leaf however many there
+are; they still count one term each, so what runs natively is unchanged. A
+profile's mandatory predicate past the bound reaches the residual's fetch in
+that spelling too. A `number` column keeps one comparison per literal (its
+list would compare a `numeric`, not the double the column holds), and so do
+an external operand and a literal the server cannot hold in a list.
 
 `explain().budget.estimatedRows` is the planner's own row estimate for a native
 plan: `{ rows, source: 'postgresql-planner' }`, where `rows` is the `Plan Rows`
@@ -222,6 +229,19 @@ order. A text keyset requires the `UTF8` database encoding, read at open — no
 per-row byte proof runs here — and refuses `JD0032` naming any other. An
 explicit `orderBy` over a text or uuid column with the `null` NULL policy stays
 refused, as every such column is for the typed path.
+
+The server types a bound literal from the column it is compared with, so an
+integer past an adopted `smallint` or `integer` column's own width
+(`qty < 3000000000` on an `integer` column) would be refused while the parameter
+is read. A literal outside `smallint`'s range is therefore spelled
+`($n)::bigint` against an `integer`-codec column: the btree integer family
+compares `int2` and `int4` with `int8`, so the bare column's index still serves
+the condition, and the comparison answers as the engine does on every operator,
+through `execute`, `load` and `mutate` (`qty < 3000000000` is every present
+row, `qty = 3000000000` none). A literal within `smallint` binds as itself. A
+fraction, an infinity and a magnitude past 64 bits are folded at plan time
+([MODEL-FORMAT §10.1](MODEL-FORMAT.md#101-entity-query-documents)), and a membership list compares as
+`numeric` whatever the column's width.
 
 A duplicate key is the violation of the table's primary-key constraint under
 the name the catalog gives it, read when the store opens: by the table probe for

@@ -342,30 +342,30 @@ what each does is its own documentation's job
   keys, exact types, constraints, opclasses, functions, RLS and identity sequences;
   adoption does not infer
   application intent from their DDL.
-- [ ] **Broader relational mapping and query qualification.** Explicit SQLite and PostgreSQL
-  column layouts, codecs, read-only views and composite-key join-table entities
-  are supported ([MODEL-FORMAT §12](../packages/db/docs/MODEL-FORMAT.md#12-existing-column-layouts)).
+- [ ] **Broader relational mapping and query qualification.** Explicit SQLite
+  and PostgreSQL column layouts, codecs, read-only views and composite-key
+  join-table entities are supported ([MODEL-FORMAT
+  §12](../packages/db/docs/MODEL-FORMAT.md#12-existing-column-layouts)).
   Physical tables page by integer, bigint, text and uuid identities on both
-  engines (a SQLite uuid by the text its table stores), an identity of NOT NULL
-  terms in one direction as one row value that the key's index serves
+  engines (a SQLite uuid by the text its table stores), an identity of NOT
+  NULL terms in one direction as one row value that the key's index serves
   ([MODEL-FORMAT §10.5](../packages/db/docs/MODEL-FORMAT.md#105-pagination)).
-  Relation navigation across physical layouts, a PostgreSQL page's `ORDER BY` read in
-  index order (it spells `NULLS FIRST`, so the rows past the row value are sorted:
-  about 14 ms for the second page of 200,000 rows against 0.016 ms read in index
-  order), pushdown beyond the qualified native census and additional PostgreSQL
-  types remain open. An integral literal outside a PostgreSQL `smallint` or
-  `integer` physical column's own range (`qty < 3000000000` on an `integer`
-  column) is refused `JD2005` through `execute`, `load` and `mutate`, because
-  the server types the parameter from the column; wanted: record the native
-  width at qualification (`verifyPhysical`) and fold the comparison as the
-  integers the column admits, as a fraction already is, or spell the parameter
-  `($n)::bigint`, which the btree integer family compares with `int4` and so
-  still seeks. A partition attached to an adopted partitioned table while a
+  Relation navigation across physical layouts, a PostgreSQL page's `ORDER BY`
+  read in index order (it spells `NULLS FIRST`, so the rows past the row value
+  are sorted: about 14 ms for the second page of 200,000 rows against 0.016 ms
+  read in index order), pushdown beyond the qualified native census and
+  additional PostgreSQL types remain open. An integer key outside an adopted
+  PostgreSQL `smallint` or `integer` key column's own range is refused
+  `JD2005` by a point read (`get(3000000000)`) and a key-addressed `mutate`,
+  where the engine answers no row: the key's parameter is typed from the
+  column (queries, `load` and `mutate({ where })` spell such a literal
+  `bigint`). A partition attached to an adopted partitioned table while a
   store is open reports a duplicate key as `JD2005` naming its own constraint
   until the next open; the catalog read cannot follow it without a read on the
-  failure path, which an aborted PostgreSQL transaction forbids. Capture and replication of adopted physical tables — whose application triggers and
-  cascades the store does not write — remain refused until their complete writer population has
-  an executable oracle.
+  failure path, which an aborted PostgreSQL transaction forbids. Capture and
+  replication of adopted physical tables — whose application triggers and
+  cascades the store does not write — remain refused until their complete
+  writer population has an executable oracle.
 - [ ] **Broader database invariant lowering.** Rules lower to verified triggers
   on SQLite and PostgreSQL alike ([MODEL-FORMAT §13](../packages/db/docs/MODEL-FORMAT.md#13-persistence-invariants)),
   over comparisons, membership, existence probes keyed by a verified unique
@@ -626,25 +626,33 @@ what each does is its own documentation's job
   describe documents between transform steps. Typed SQL promotion needs an
   intermediate-schema contract and equivalent numeric/order/error semantics;
   inferring that schema from either endpoint can return a wrong answer.
-- [ ] **A PostgreSQL statement at the term bound can still compile for seconds.** One statement carries at most
-  128 predicate terms ([POSTGRESQL](../packages/db/docs/POSTGRESQL.md)); a leaf is one term, an inequality or a
-  negated comparison against an external operand on a document member counts four, and a member's membership in an
-  external list counts sixteen (four in its own column, eight there under a `$not`), so the external chains that
-  compiled for many seconds are the engine's. A statement the server's cost model sends through JIT is still
-  compiled by LLVM, which no signal interrupts, so what remains is the weights of the other leaf kinds (none is
-  known to compile slower leaf for leaf than a literal `$ne`), and a top-level `$and` of `$ne` literals over one
-  member, which is presence plus one negated list and could regroup as an `$or` of equalities does, making it one leaf.
+- [ ] **A PostgreSQL statement at the term bound can still compile for
+  seconds.** One statement carries at most 128 predicate terms
+  ([POSTGRESQL](../packages/db/docs/POSTGRESQL.md)); a leaf is one term, an
+  inequality or a negated comparison against an external operand on a document
+  member counts four, and a member's membership in an external list counts
+  sixteen (four in its own column, eight there under a `$not`), so the
+  external chains that compiled for many seconds are the engine's. A statement
+  the server's cost model sends through JIT is still compiled by LLVM, which
+  no signal interrupts. A conjunction's `$ne` literals over one member are
+  spelled as one negated list, whose compile does not grow with its length,
+  but still count one term each; what remains is the weights of the other leaf
+  kinds — an `$or` of `$and` pairs and an external `$ne` compile per leaf and
+  grow with the count — and whether the regrouped chain should count one term.
 - [ ] **A mandatory predicate past the term bound still reaches PostgreSQL
   whole.** A profile's mandatory predicate with more leaves than the dialect's
   term bound demotes the document, and the residual's root fetch carries the
-  whole predicate (a 200-leaf statement is sent; it answers right and `maxRows`,
-  `strict` and `refuseFullScan` still bound it), and the bound's mechanism, an
-  uninterruptible JIT compile, holds for that statement too: measured under a
-  forced JIT, 128 terms (admitted) take 1.9 s and 800 take 22 s, a continuous
-  cost. A refusal (`JD0011`) was tried and rejected: profiles of 33 external
-  `$ne` terms or 65 tenant/level pairs answered right and would stop opening.
-  Wanted: a cheaper spelling of the fetch's predicate (regrouping its own
-  memberships), or a weight for it in the style of the external-operand weights.
+  whole predicate (a 200-leaf statement is sent; it answers right and
+  `maxRows`, `strict` and `refuseFullScan` still bound it). Its `$ne` literals
+  over one member reach the server as one negated list, so a chain of them
+  compiles in a time that does not grow with its length; other leaf kinds
+  still compile per leaf under JIT and grow with the count — an `$or` of
+  tenant/level pairs, and `$ne` against externals. A refusal (`JD0011`) was
+  tried and rejected: profiles of 33 external `$ne` terms or 65 tenant/level
+  pairs answered right and would stop opening. Wanted: a cheaper spelling of
+  those leaves (a row-value membership for pairs, one external list for
+  external `$ne`), or a weight for the fetch in the style of the
+  external-operand weights.
 - [ ] **A migration over a UTF-16 file compares a query step's text terms by
   BINARY.** `migrate` still runs on a UTF-16 file (physical-transform key pages
   read it through its own decoder), and a `query` step's native text comparison

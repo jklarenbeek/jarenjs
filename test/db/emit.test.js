@@ -607,3 +607,42 @@ describe('PostgreSQL: an external against an entity column', () => {
     assert.deepStrictEqual(differs.slots, [json]);
   });
 });
+
+describe('PostgreSQL: a statement spelled for the server that types and compiles it', () => {
+  const pg = postgresDialect();
+  /** @param {any} dialect @param {any} pred */
+  const emit = (dialect, pred) => {
+    /** @type {any[]} */
+    const slots = [];
+    const emitters = createEntityPredicateEmitters(dialect, (slot) => { slots.push(slot); return dialect.parameterRef(slots.length, 'v'); });
+    return { sql: emitters.emitPred('"t"', '"t"."doc"', pred), slots };
+  };
+  /** @param {string} name @param {string} storage @param {string} [codec] */
+  const column = (name, storage, codec) => ({ segments: [{ name }], flavor: 'entity-column', column: name, storage, codec, nullPolicy: 'reject' });
+  const n = column('n', 'integer');
+  const s = column('s', 'string');
+  /** @param {any} ref @param {unknown} lit */
+  const ne = (ref, lit) => ({ p: 'cmp', op: 'ne', ref, operand: { lit } });
+
+  it('two $ne literals on one member are its presence and one negated list, in the first one\'s place; SQLite keeps each', () => {
+    const chain = { p: 'and', items: [ne(n, 1), ne(s, 'a'), ne(n, 2)] };
+    assert.deepStrictEqual(emit(pg, chain), {
+      sql: `(("t"."n" IS NOT NULL AND NOT ("t"."n" IS NOT NULL AND ${pg.inList('"t"."n"', '$1', 'number')})) AND ("t"."s" IS NOT NULL AND "t"."s" <> $2))`,
+      slots: [{ literal: '[1,2]' }, { literal: 'a' }],
+    });
+    assert.deepStrictEqual(emit(sqliteDialect, chain), {
+      sql: '(("t"."n" IS NOT NULL AND "t"."n" <> ?) AND ("t"."s" IS NOT NULL AND "t"."s" <> ?) AND ("t"."n" IS NOT NULL AND "t"."n" <> ?))',
+      slots: [{ literal: 1 }, { literal: 'a' }, { literal: 2 }],
+    });
+  });
+
+  it('an integer-codec column takes a literal past smallint as a bigint parameter, and one within it as itself', () => {
+    const q = column('q', 'integer', 'integer');
+    const lt = (/** @type {any} */ dialect, /** @type {number} */ lit) => emit(dialect, { p: 'cmp', op: 'lt', ref: q, operand: { lit } }).sql;
+    for (const lit of [3000000000, 32768, -32769]) assert.strictEqual(lt(pg, lit), '("t"."q" IS NOT NULL AND "t"."q" < ($1)::bigint)', String(lit));
+    for (const lit of [30000, 32767, -32768]) assert.strictEqual(lt(pg, lit), '("t"."q" IS NOT NULL AND "t"."q" < $1)', String(lit));
+    assert.strictEqual(lt(sqliteDialect, 3000000000), '("t"."q" IS NOT NULL AND "t"."q" < ?)');
+    // a column the store made is a bigint already
+    assert.strictEqual(emit(pg, { p: 'cmp', op: 'lt', ref: n, operand: { lit: 3000000000 } }).sql, '("t"."n" IS NOT NULL AND "t"."n" < $1)');
+  });
+});

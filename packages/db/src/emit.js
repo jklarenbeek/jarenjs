@@ -38,6 +38,69 @@ function balancedJoin(parts, op) {
 }
 
 /**
+ * The member a `$ne` literal leaf of a conjunction tests, as a key equal for
+ * two leaves over one member, or `null` for a leaf {@link regroupInequalities}
+ * leaves as it is: an external operand, a literal a list cannot carry — a
+ * string the server holds in no JSON value ({@link serverHolds}), which keeps
+ * the route and the refusal a lone `$ne` has, or a number JSON cannot spell
+ * (an infinity) — or a column whose membership list is not the same
+ * comparison as its `<>` (a `number` column compares a double there, and the
+ * list a `numeric`). An epoch member's `$ne` and list both read its document.
+ * @param {any} dialect @param {any} pred @returns {string | null}
+ */
+function inequalityKey(dialect, pred) {
+  if (pred.p !== 'cmp' || pred.op !== 'ne' || !('lit' in pred.operand)) return null;
+  const lit = pred.operand.lit;
+  if (typeof lit === 'string' ? !serverHolds(dialect, lit, true) : !Number.isFinite(lit)) return null;
+  const { flavor, storage, codec } = pred.ref;
+  if (flavor === 'entity-column' && !((storage === 'integer' && (codec === undefined || codec === 'integer'))
+    || (storage === 'string' && (codec === undefined || codec === 'text')))) return null;
+  return JSON.stringify(pred.ref);
+}
+
+/**
+ * A conjunction's items with every two or more `$ne` literals over one
+ * member regrouped as the member's presence and ONE negated membership in
+ * their list — the engine's answer exactly: a `$ne` is true for a present
+ * member that equals none of the literals, of another type included, and
+ * false for an absent one; the list's forms are total, so the `NOT` never
+ * meets a NULL. It is for a dialect that bounds a statement's terms, where
+ * every leaf is compiled (PostgreSQL's JIT) and a chain of hundreds of
+ * `<>` compiles for seconds; the list is one leaf however long. The plan
+ * keeps its leaves, so the term count and the mode are unchanged. The
+ * regrouped leaf takes the place of the member's first `$ne`, so the
+ * parameters stay in statement-text order.
+ * @param {any} dialect @param {any[]} items @returns {any[]}
+ */
+function regroupInequalities(dialect, items) {
+  if (dialect.maxPredicateTerms === null) return items;
+  const keys = items.map((item) => inequalityKey(dialect, item));
+  /** @type {Map<string, any[]>} */
+  const lists = new Map();
+  keys.forEach((key, i) => {
+    if (key === null) return;
+    const list = lists.get(key);
+    if (list === undefined) lists.set(key, [items[i].operand.lit]);
+    else list.push(items[i].operand.lit);
+  });
+  if (![...lists.values()].some((list) => list.length > 1)) return items;
+  /** @type {any[]} */
+  const out = [];
+  const placed = new Set();
+  keys.forEach((key, i) => {
+    const list = key === null ? undefined : lists.get(key);
+    if (list === undefined || list.length < 2) out.push(items[i]);
+    else if (!placed.has(key)) {
+      placed.add(key);
+      const { ref } = items[i];
+      out.push({ p: 'and', items: [{ p: 'typeIs', ref, types: [], positive: true },
+        { p: 'not', item: { p: 'in', ref, operand: { list } } }] });
+    }
+  });
+  return out;
+}
+
+/**
  * The ONE membership emission: a value in a list bound as one JSON
  * parameter, one kind at a time (the dialect spells the list, `inList`).
  * Every membership test and the `cellIn` neighbourhood go through it.
@@ -99,6 +162,26 @@ export const physicalComparable = (ref, sql, dialect, column = undefined) => ref
     ?? (['text', 'date', 'datetime', 'uuid'].includes(ref.codec) ? dialect.codepoint(sql) : sql) : sql;
 const physicalValueType = (ref, sql, dialect) => ref.codec !== undefined
   ? dialect.physicalValueType?.(ref.codec, sql) ?? dialect.valueTypeOf(sql) : dialect.valueTypeOf(sql);
+
+/** The narrowest column a PostgreSQL `integer` codec maps is a `smallint`. */
+const SMALLINT_MAX = 32767;
+
+/**
+ * A literal's parameter against an `integer`-codec column. PostgreSQL types
+ * an untyped parameter from the column it meets, so an integer past that
+ * column's own width (`3000000000` against an `integer`, `40000` against a
+ * `smallint`) is refused while the parameter is read, before a row is
+ * compared. Spelled `bigint`, the literal compares through the btree integer
+ * family's cross-width operators, so the bare column keeps its index; a
+ * literal within `smallint`, which every such column takes, binds as itself.
+ * The planner has folded a fraction, an infinity and a magnitude past 64 bits
+ * already, so what reaches here is an integer `bigint` holds.
+ * @param {any} dialect @param {{ codec?: string }} ref @param {unknown} lit @param {string} paramSql
+ * @returns {string}
+ */
+const integerColumnLiteral = (dialect, ref, lit, paramSql) => (dialect.name === 'postgres'
+  && ref.codec === 'integer' && typeof lit === 'number' && (lit > SMALLINT_MAX || lit < -SMALLINT_MAX - 1)
+  ? `(${paramSql})::bigint` : paramSql);
 
 /**
  * A promoted path the dialect's JSON path grammar cannot spell (a
@@ -775,7 +858,7 @@ export function emitPlan(plan, dialect, physical) {
       case 'refCmp':
         return emitRefCmp(pred);
       case 'and':
-        return balancedJoin(pred.items.map(emitPred), 'AND');
+        return balancedJoin(regroupInequalities(dialect, pred.items).map(emitPred), 'AND');
       case 'or':
         return balancedJoin(pred.items.map(emitPred), 'OR');
       case 'not':
@@ -1270,8 +1353,9 @@ export function createEntityPredicateEmitters(dialect, param, related = undefine
       : pred.ref.storage === 'boolean' ? 'boolean' : 'number';
     if (storageKind === 'boolean' || litKind === 'other' || storageKind !== litKind)
       return pred.op === 'ne' ? present : dialect.booleanLiteral(false);
-    if (presentNull && pred.op === 'ne') return dialect.distinct(column, param({ literal: lit }));
-    return `(${column} IS NOT NULL AND ${column} ${symbol} ${param({ literal: lit })})`;
+    const value = integerColumnLiteral(dialect, pred.ref, lit, param({ literal: lit }));
+    if (presentNull && pred.op === 'ne') return dialect.distinct(column, value);
+    return `(${column} IS NOT NULL AND ${column} ${symbol} ${value})`;
   };
 
   // an epoch comparison: the derived integer column narrows through
@@ -1329,7 +1413,7 @@ export function createEntityPredicateEmitters(dialect, param, related = undefine
         present: `${dialect.jsonTypeOf(documentOf(docSql, ref), pathText(ref))} IS NOT NULL` };
     });
     if (pred.p === 'and')
-      return balancedJoin(pred.items.map((item) => emitPred(aliasSql, docSql, item)), 'AND');
+      return balancedJoin(regroupInequalities(dialect, pred.items).map((item) => emitPred(aliasSql, docSql, item)), 'AND');
     if (pred.p === 'or')
       return balancedJoin(pred.items.map((item) => emitPred(aliasSql, docSql, item)), 'OR');
     if (pred.p === 'not') return `NOT ${emitPred(aliasSql, docSql, pred.item)}`;
@@ -1395,7 +1479,8 @@ export function emitEntityPlan(plan, dialect, physicalOf) {
   const emitPred = (bindingName, pred) => {
     if (pred.p === 'binding') return emitPred(pred.binding, pred.filter);
     if (pred.p === 'and' || pred.p === 'or')
-      return balancedJoin(pred.items.map((item) => emitPred(bindingName, item)), pred.p === 'and' ? 'AND' : 'OR');
+      return balancedJoin((pred.p === 'and' ? regroupInequalities(dialect, pred.items) : pred.items)
+        .map((item) => emitPred(bindingName, item)), pred.p === 'and' ? 'AND' : 'OR');
     if (pred.p === 'not') return `NOT (${emitPred(bindingName, pred.item)})`;
     return emitters.emitPred(aliasOf(bindingName), docOf(bindingName), pred);
   };

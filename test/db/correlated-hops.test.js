@@ -768,7 +768,10 @@ if (url) {
       assert.equal(above.mode, 'set');
       assert.equal(reasonOf(above), 'predicate.termBound');
       assert.deepEqual(await store.execute(leaf(BOUND / 2 + 1)), await store.execute(leaf(BOUND / 2 + 1), { pushdown: false }));
-      assert.equal((within.sql.match(/<>/g) ?? []).length, BOUND, 'the statement carries every leaf the bound counted');
+      // the filter's `$ne` literals are one negated list, which the statement reads for the value and for the type
+      assert.equal((within.sql.match(/<>/g) ?? []).length, 0);
+      assert.equal((within.sql.match(/NOT \("h\d"\."age" IS NOT NULL AND "h\d"\."age" IN \(SELECT/g) ?? []).length, 2,
+        'the statement carries the filter the bound counted twice');
     }));
     it('an order key counts its filter once', () => using(HOSTS[1], MODEL, DOCUMENTS, async (store) => {
       /** @param {number} count */
