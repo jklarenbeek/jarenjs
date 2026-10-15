@@ -224,6 +224,14 @@ describe('the table', () => {
         const file = path.join(dir, entry.name);
         if (entry.isDirectory()) { walk(file); continue; }
         if (!entry.name.endsWith('.js') || entry.name === 'errors.js') continue;
+        // the Bun backup worker travels as a `data:` URL that imports only
+        // builtins, so it cannot reach errors.js: it reads one result code
+        // (SQLITE_BUSY, to retry its first read) itself, and nothing else
+        if (path.relative(root, file) === path.join('drivers', 'backup-worker.js')) {
+          const own = fs.readFileSync(file, 'utf8').split('\n').filter((line) => /\berrcode\b/.test(line));
+          assert.ok(own.every((line) => /& 0xff\) !== 5/.test(line)), `the worker reads a result code beyond SQLITE_BUSY: ${own.join(' | ')}`);
+          continue;
+        }
         const code = fs.readFileSync(file, 'utf8').split('\n')
           .filter((line) => !/^\s*(\/\/|\*|\/\*)/.test(line));
         if (code.some((line) => /\berrcode\b|\berrno\b|\bresultCode\b|integer overflow|UNIQUE constraint/.test(line)))
