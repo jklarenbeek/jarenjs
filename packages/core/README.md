@@ -125,8 +125,8 @@ and refuse one past 100000 levels with `JO2001` and a cycle they follow with
 /coordinates/0`; `simplifyGeometry` says `simplified`). A cycle in a member a
 walk does not read is not refused, and `geoJsonToWkt` answers `null` for a
 FeatureCollection nested past its eight levels, one that holds itself among them.
-The bound is ten times `equalsJson`'s because the recursive walk took a whole
-collection (two levels) or Feature per host frame, and answered nests past 10000
+The bound is ten times `equalsJson`'s because a walk on the host's stack took a
+whole collection (two levels) or Feature per frame, and answered nests past 10000
 levels on a default host stack; no value it answered there is refused. *Upgrade:
 such a value used to escape as an uncoded `RangeError`.*
 

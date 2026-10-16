@@ -1,8 +1,8 @@
 //@ts-check
 /**
  * @file The GeoJSON traversal walks a deep value without the host stack,
- * to 100000 levels — past every nest its recursive walk answered on a
- * default host stack: past them it refuses with `JO2001`, and on a cycle
+ * to 100000 levels — past every nest a walk on a default host stack
+ * answered: past them it refuses with `JO2001`, and on a cycle
  * it follows with `JO2002` at the member that closes it, the pointer
  * `locateCycle` answers. A value it answered before answers the same.
  */
@@ -191,6 +191,51 @@ describe('the GeoJSON walk holds its bound of 100000 levels', () => {
     assert.throws(() => simplifyGeometry(nestFeatures(100000, point), 0.1), tooDeep('simplified'));
   });
 
+  it('counts a list\'s later items at the list\'s own level after a nested list, and reads no coordinates of a Feature', () => {
+    // the first item nests lists, the second sits on the same level: its position at level n + 3
+    const later = (n) => {
+      let v = [2, 2];
+      for (let i = 0; i < n; i++) v = [v];
+      return { type: 'MultiPoint', coordinates: [[[[1, 1]]], v] };
+    };
+    assert.deepEqual(bboxOf(later(99997)), [1, 1, 2, 2]);
+    assert.throws(() => bboxOf(later(99998)), tooDeep(walked));
+    // a Feature's position is its geometry's, never a `coordinates` member beside it
+    assert.deepEqual(bboxOf({ type: 'Feature', coordinates: [9, 9], geometry: { type: 'Point', coordinates: [1, 1] } }), [1, 1, 1, 1]);
+    assert.equal(bboxOf({ type: 'Feature', coordinates: [9, 9], geometry: null }), null);
+    assert.deepEqual(positionsOf({ type: 'FeatureCollection', coordinates: [9, 9], features: [] }), []);
+  });
+
+  it('counts every level of a collection member at the bound, a Feature and its geometry alike', () => {
+    const area = geometryArea(square(0, 0, 1));
+    // a Feature at the root, n collections, then a Feature member: its
+    // geometry sits at level 2n + 3
+    const member = (n) => nestFeatures(1, nestCollections(n, nestFeatures(1, square(0, 0, 1))));
+    assert.deepEqual([geometryArea(member(49998)), containsPosition(member(49998), 0.5, 0.5), ringsClosed(member(49998))], [area, true, true]);
+    for (const walk of [geometryArea, ringsClosed, (v) => containsPosition(v, 0.5, 0.5)])
+      assert.throws(() => walk(member(49999)), tooDeep(walked));
+    // a collection member that is a Feature in Features: each Feature a level
+    const chain = (k) => nestCollections(1, nestFeatures(k, square(0, 0, 1)));
+    assert.deepEqual([geometryArea(chain(99997)), containsPosition(chain(99997), 0.5, 0.5)], [area, true]);
+    for (const walk of [geometryArea, geometryLength, (v) => containsPosition(v, 0.5, 0.5)])
+      assert.throws(() => walk(chain(99998)), tooDeep(walked));
+  });
+
+  it('counts the containers each walk reads: an array past 100000 Features is read by the walks, not by geometryOf', () => {
+    // 100000 Features put the array at level 100001
+    for (const inner of [[], [1, 2]]) {
+      const value = nestFeatures(100000, inner);
+      assert.equal(geometryOf(value), null);
+      assert.equal(geoJsonToWkt(value), null);
+      for (const walk of [geometryArea, geometryLength, ringsClosed, (v) => containsPosition(v, 0, 0), bboxOf])
+        assert.throws(() => walk(value), tooDeep(walked));
+      // one Feature less and every walk answers
+      const shallower = nestFeatures(99999, inner);
+      assert.deepEqual([geometryArea(shallower), geometryLength(shallower), ringsClosed(shallower),
+        containsPosition(shallower, 0, 0), bboxOf(shallower)], [0, 0, true, false, inner.length === 0 ? null : [1, 2, 1, 2]]);
+    }
+  });
+
   it('writes no text for FeatureCollections nested past the writer bound, however deep', () => {
     assert.equal(geoJsonToWkt(cycles.features()), null);
     let fc = { type: 'FeatureCollection', features: [{ type: 'Feature', properties: null, geometry: { type: 'Point', coordinates: [1, 2] } }] };
@@ -200,8 +245,7 @@ describe('the GeoJSON walk holds its bound of 100000 levels', () => {
 });
 
 describe('a collection measures as its nested loops added', () => {
-  // each case twice: as written, measured on the host's stack, and inside
-  // 300 collections, measured on the walk's own
+  // each case twice: as written, and inside 300 collections
   const bothDepths = (value) => [value, nestCollections(300, value)];
 
   it('measures a Feature whose geometry is a FeatureCollection as no geometry, and walks its positions', () => {

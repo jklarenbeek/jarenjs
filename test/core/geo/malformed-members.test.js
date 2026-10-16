@@ -5,8 +5,8 @@
  * coordinates or a polygon's rings that cannot be iterated hold no
  * members, and a ring or line that is not a list holds no positions, so
  * area and length are 0, containment false, and a value with no rings has
- * every ring closed. The well-formed members beside one still count, on
- * the host's stack and past it (inside 300 collections) alike, a ring or
+ * every ring closed. The well-formed members beside one still count, at
+ * the root and inside 300 collections alike, a ring or
  * line missing a position holds no positions, and every input that
  * answered before answers the same.
  */
@@ -19,7 +19,7 @@ const SQUARE = { type: 'Polygon', coordinates: [RING] };
 const SQUARE_AREA = 49447340364.086266;
 const SQUARE_LENGTH = 889425.154046261;
 
-/** `g` inside 300 GeometryCollections, past the measurements' recursion. @param {any} g */
+/** `g` inside 300 GeometryCollections, which the measurements walk. @param {any} g */
 const deep = (g) => {
   for (let i = 0; i < 300; i++) g = { type: 'GeometryCollection', geometries: [g] };
   return g;
@@ -38,7 +38,7 @@ const measures = (g) => {
     closed: ringsClosed(v),
   });
   const shallow = at(g);
-  assert.deepStrictEqual(at(deep(g)), shallow, 'the fold past the host stack must answer as the recursion');
+  assert.deepStrictEqual(at(deep(g)), shallow, 'a geometry inside collections must measure as at the root');
   return shallow;
 };
 
@@ -279,4 +279,27 @@ describe('a position that does not read as finite numbers holds no positions', (
       assert.equal(containsPosition(read, 0.5, 1), containsPosition(pair, 0.5, 1), JSON.stringify(position));
     }
   });
+});
+
+describe('a Feature at the root measures as its geometry and as inside a collection', () => {
+  const SIDE4 = [[0, 0], [4, 0], [4, 4], [0, 4], [0, 0]];
+  const AREA4 = 197668873521.43472;
+  const LENGTH4 = 1778037.382567902;
+  // area, length, containsPosition(2, 2), ringsClosed
+  const cases = [
+    ['a well-formed polygon', { type: 'Polygon', coordinates: [SIDE4] }, [AREA4, LENGTH4, true, true]],
+    ['an unclosed ring ending at an infinite longitude', { type: 'Polygon', coordinates: [[[0, 0], [4, 0], [4, 4], [0, 4], [Infinity, 1]]] }, [0, 0, false, false]],
+    ['a hole holding a position that is not a pair', { type: 'Polygon', coordinates: [SIDE4, [[1, 1], 5, [2, 2], [1, 1]]] }, [AREA4, LENGTH4, false, true]],
+    ['a line that is missing', { type: 'MultiLineString', coordinates: [null, [[0, 0], [1, 1]]] }, [0, 157249.59847404022, false, true]],
+  ];
+  const four = (/** @type {any} */ v) => [geometryArea(v), geometryLength(v), containsPosition(v, 2, 2), ringsClosed(v)];
+  for (const [label, geometry, expected] of cases) {
+    it(label, () => {
+      assert.deepStrictEqual(four(geometry), expected);
+      assert.deepStrictEqual(four({ type: 'Feature', properties: null, geometry }), expected);
+      assert.deepStrictEqual(four({ type: 'FeatureCollection', features: [{ type: 'Feature', properties: null, geometry }] }), expected);
+      // an array is no Feature, whatever members it carries
+      assert.deepStrictEqual(four(Object.assign([], { type: 'Feature', geometry })), [0, 0, false, true]);
+    });
+  }
 });

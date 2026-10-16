@@ -25,11 +25,12 @@
 // containment such a ring, a hole too, makes its polygon contain nothing.
 //
 // The one refusal is the walk's bound: a value is walked to 100000
-// levels of nesting, on the host's stack for the first 256 and on the
-// walk's own past them. That is ten times the 10000 `equalsJson` holds,
-// because the recursive walk took a collection (two levels) or a Feature
-// per host frame and answered nests past 10000 levels on a default host
-// stack; no value it answered there is refused. A value nested deeper is
+// levels of nesting, on the walk's own stack (containment takes its first
+// 256 collections or Features on the host's, then the same walk). That is
+// ten times the 10000 `equalsJson` holds, because a walk on the host's
+// stack took a collection (two levels) or a Feature per frame and
+// answered nests past 10000 levels on a default host stack; no value it
+// answered there is refused. A value nested deeper is
 // refused as a `JsonDepthError` `JO2001`, and one the walk follows into a
 // cycle as a `JsonCycleError` `JO2002` located at the member that closes
 // it — the pointer `locateCycle` answers, and the one `equalsJson` names
@@ -52,10 +53,6 @@ const GEO_VERB = 'walked as GeoJSON';
 function geoRefusal(value) {
   return walkRefusal(GEO_VERB, [value], undefined, GEOJSON_WALK_DEPTH_CEILING);
 }
-
-// The nesting walked on the host's call stack, the fast path every
-// ordinary value takes.
-const RECURSIVE_GEO_DEPTH = 256;
 
 /**
  * Whether a value looks like a bare position: an array of at least two
@@ -108,8 +105,17 @@ export function geometryOf(value) {
  *   on a cycle the walk follows
  */
 export function eachPosition(value, visit) {
+  // a position, or a geometry that holds one (a Point), needs no walk
+  const position = value !== null && typeof value === 'object' && !Array.isArray(value)
+    && value.type !== 'FeatureCollection' && value.type !== 'GeometryCollection' && value.type !== 'Feature'
+    ? value.coordinates
+    : value;
+  if (isPosition(position)) {
+    visit(position);
+    return;
+  }
   try {
-    eachPositionAt(value, visit, 1);
+    walkPositions(value, visit);
   }
   catch (error) {
     throw error === WALK_CEILING ? geoRefusal(value) : error;
@@ -117,88 +123,54 @@ export function eachPosition(value, visit) {
 }
 
 /**
- * {@link eachPosition} for a value `depth` containers down from the root.
+ * {@link eachPosition} on an explicit stack of the lists still being
+ * walked, so the nesting it reaches is not the host's call stack. Each
+ * container counts its levels: an array or a geometry's `coordinates`
+ * one, a Feature's `geometry` one, a collection and its list two; a
+ * container (a position too) past `GEOJSON_WALK_DEPTH_CEILING` throws
+ * `WALK_CEILING`.
  * @param {any} value
  * @param {(position: number[]) => void} visit
- * @param {number} depth
  */
-function eachPositionAt(value, visit, depth) {
-  if (isPosition(value)) {
-    visit(/** @type {number[]} */(value));
-    return;
-  }
-  if (value === null || typeof value !== 'object')
-    return;
-  if (depth > RECURSIVE_GEO_DEPTH) {
-    eachPositionWalk(value, visit, depth);
-    return;
-  }
-  if (Array.isArray(value)) { // a nest of coordinates
-    // a ring or line is an array OF positions, which is the overwhelming
-    // majority of what this walks; classifying each member here saves a
-    // call frame and a re-entry per vertex
-    for (let i = 0; i < value.length; i++) {
-      const item = value[i];
-      if (isPosition(item))
-        visit(item);
-      else
-        eachPositionAt(item, visit, depth + 1);
-    }
-    return;
-  }
-  if (value.type === 'FeatureCollection') {
-    const features = value.features;
-    if (Array.isArray(features)) {
-      for (let i = 0; i < features.length; i++)
-        eachPositionAt(features[i], visit, depth + 2);
-    }
-    return;
-  }
-  if (value.type === 'Feature') {
-    eachPositionAt(value.geometry, visit, depth + 1);
-    return;
-  }
-  if (value.type === 'GeometryCollection') {
-    const geometries = value.geometries;
-    if (Array.isArray(geometries)) {
-      for (let i = 0; i < geometries.length; i++)
-        eachPositionAt(geometries[i], visit, depth + 2);
-    }
-    return;
-  }
-  eachPositionAt(value.coordinates, visit, depth + 1);
-}
-
-/**
- * {@link eachPosition} for a container `depth` levels down, on an
- * explicit stack of the lists still being walked, so the nesting it
- * reaches is not the host's call stack; a container past
- * `GEOJSON_WALK_DEPTH_CEILING` throws `WALK_CEILING`.
- * @param {object} value - An array or object, not a position
- * @param {(position: number[]) => void} visit
- * @param {number} depth
- */
-function eachPositionWalk(value, visit, depth) {
-  /** @type {{ items: any[], at: number, depth: number }[]} */
-  const lists = [];
+function walkPositions(value, visit) {
+  // the innermost list still being walked, the next index in it and the
+  // depth of its items; the lists around it wait on `open`, made only for
+  // a nest (a Point's or a Polygon's walk needs none)
+  /** @type {any[] | null} */
+  let list = null;
+  let at = 0;
+  let depth = 0;
+  /** @type {{ list: any[], at: number, depth: number }[] | null} */
+  let open = null;
   /** @type {any} */
   let next = value;
-  let level = depth;
+  let level = 1;
   for (;;) {
     if (next !== null && typeof next === 'object') {
       if (level > GEOJSON_WALK_DEPTH_CEILING)
         throw WALK_CEILING;
+      /** @type {any} */
+      let items = null;
+      let from = 0;
       if (isPosition(next))
         visit(next);
-      else if (Array.isArray(next))
-        lists.push({ items: next, at: 0, depth: level + 1 });
-      else if (next.type === 'FeatureCollection') {
-        if (Array.isArray(next.features))
-          lists.push({ items: next.features, at: 0, depth: level + 2 });
+      else if (Array.isArray(next)) {
+        // a ring or line is a list of positions, the overwhelming majority
+        // of what this walks: its positions are visited here, without a
+        // trip round the walk per vertex
+        if (level < GEOJSON_WALK_DEPTH_CEILING) {
+          while (from < next.length && isPosition(next[from]))
+            visit(next[from++]);
+        }
+        if (from < next.length)
+          items = next;
+        level++;
       }
-      else if (next.type === 'GeometryCollection') {
-        if (Array.isArray(next.geometries))
-          lists.push({ items: next.geometries, at: 0, depth: level + 2 });
+      else if (next.type === 'FeatureCollection' || next.type === 'GeometryCollection') {
+        items = next.type === 'FeatureCollection' ? next.features : next.geometries;
+        if (!Array.isArray(items))
+          items = null;
+        level += 2;
       }
       else {
         // a Feature's geometry, or a geometry's coordinates: one member
@@ -206,18 +178,27 @@ function eachPositionWalk(value, visit, depth) {
         level++;
         continue;
       }
+      if (items !== null) {
+        if (list !== null)
+          (open ??= []).push({ list, at, depth });
+        list = items;
+        at = from;
+        depth = level;
+      }
     }
     // on to the next item of the innermost list not yet finished
     for (;;) {
-      if (lists.length === 0)
+      if (list === null)
         return;
-      const list = lists[lists.length - 1];
-      if (list.at < list.items.length) {
-        next = list.items[list.at++];
-        level = list.depth;
+      if (at < list.length) {
+        next = list[at++];
+        level = depth;
         break;
       }
-      lists.pop();
+      const outer = open === null ? undefined : open.pop();
+      if (outer === undefined)
+        return;
+      ({ list, at, depth } = outer);
     }
   }
 }
@@ -273,9 +254,11 @@ export function positionsOf(value) {
   return out;
 }
 
-// What a measurement's recursion throws past `RECURSIVE_GEO_DEPTH`
-// collections or Features: the measurement starts again on
-// `foldGeometries`, which walks the value on its own stack, to the bound.
+// The nesting containment walks on the host's call stack, its fast path:
+// past `RECURSIVE_GEO_DEPTH` collections or Features the recursion throws
+// `RECURSION_TOO_DEEP` and containment is taken again on `foldGeometries`,
+// which walks the value on its own stack, to the bound.
+const RECURSIVE_GEO_DEPTH = 256;
 const RECURSION_TOO_DEEP = Object.freeze({ reached: RECURSIVE_GEO_DEPTH });
 
 /**
@@ -295,62 +278,62 @@ function nearGeometryOf(value) {
   return geometryOf(geometry);
 }
 
-// The folds of the measurements, each in its own function: a closure over
-// a measurement's arguments would allocate a context on every call of the
-// function that creates it.
-
-/** @param {any} value @param {number} radius @returns {number} */
-function foldArea(value, radius) {
-  return foldGeometries(value, (inner) => measuredArea(inner, radius), add, 0);
+/**
+ * Whether a value is a geometry a measurement takes as it stands, as
+ * {@link foldGeometries} would: one that is neither a Feature nor a
+ * collection.
+ * @param {any} value
+ * @returns {boolean}
+ */
+function isLeafGeometry(value) {
+  if (value === null || typeof value !== 'object' || Array.isArray(value))
+    return false;
+  const type = value.type;
+  return typeof type === 'string' && type !== 'Feature' && type !== 'FeatureCollection'
+    && type !== 'GeometryCollection';
 }
 
-/** @param {any} value @param {number} radius @returns {number} */
-function foldLength(value, radius) {
-  return foldGeometries(value, (inner) => measuredLength(inner, radius), add, 0);
+/**
+ * The geometry a measurement takes without a walk: the value, or a
+ * Feature's geometry, when it is neither a Feature nor a collection, as
+ * {@link foldGeometries} would find it; null when the value is walked.
+ * @param {any} value
+ * @returns {any}
+ */
+function leafOf(value) {
+  const geometry = value !== null && typeof value === 'object' && !Array.isArray(value) && value.type === 'Feature'
+    ? value.geometry
+    : value;
+  return isLeafGeometry(geometry) ? geometry : null;
 }
-
-/** @param {any} value @param {number} lon @param {number} lat @returns {boolean} */
-function foldContains(value, lon, lat) {
-  return foldGeometries(value, (inner) => measuredContains(inner, lon, lat), either, false, isTrue);
-}
-
-/** @param {any} value @returns {boolean} */
-function foldRingsClosed(value) {
-  return foldGeometries(value, (inner) => measuredRingsClosed(inner), both, true, isFalse);
-}
-
-/** @param {number} sum @param {number} part */
-const add = (sum, part) => sum + part;
-/** @param {boolean} any @param {boolean} part */
-const either = (any, part) => any || part;
-/** @param {boolean} all @param {boolean} part */
-const both = (all, part) => all && part;
-/** @param {boolean} answer */
-const isTrue = (answer) => answer;
-/** @param {boolean} answer */
-const isFalse = (answer) => !answer;
 
 // A measurement reads a malformed member as nothing, without a check on
-// its hot path: the recursion reads members as the well-formed value
-// needs, and when a read throws a `TypeError` (a list that cannot be
-// iterated, a ring or position that is missing) the measurement is taken
-// again on the fold, whose collection lists are read by `membersOf` and
-// whose geometries are measured as before, or, when that throws, with
-// each ring or line that cannot be read as one holding no positions. A
-// value that holds no malformed member is measured exactly as before; a
-// malformed one adds 0 to an area or length, contains nothing, and a ring
-// with no positions is not closed. On a finite radius a length that is
-// not finite, or an infinite area, is taken again on the fold too, where
-// `lineMeasure` and `measurableArea` (below) read such a line or ring as
-// holding no positions. Containment is stricter: a polygon with any ring
-// that cannot be read, or that holds a position not reading as finite
-// numbers (`pointInPolygon`), contains nothing, its holes included,
-// because a hole that cannot be read cannot say which points it removes.
+// its hot path: a geometry is measured as the well-formed value needs, and
+// when a read throws a `TypeError` (a ring or position that is missing, a
+// list that cannot be iterated) it is measured again with each ring or
+// line that cannot be read as one holding no positions; a collection's
+// lists are read by `membersOf`. A value that holds no malformed member is
+// measured exactly as before; a malformed one adds 0 to an area or length,
+// contains nothing, and a ring with no positions is not closed. On a
+// finite radius a length that is not finite, or an infinite area, is
+// measured again too, where `lineMeasure` and `measurableArea` (below)
+// read such a line or ring as holding no positions. Containment is
+// stricter: a polygon with any ring that cannot be read, or that holds a
+// position not reading as finite numbers (`pointInPolygon`), contains
+// nothing, its holes included, because a hole that cannot be read cannot
+// say which points it removes.
 
 /** @param {any} geometry @param {number} radius @returns {number} */
 function measuredArea(geometry, radius) {
+  const { type, coordinates } = geometry;
   try {
-    const area = areaAt(geometry, radius, 1);
+    let area = 0;
+    if (type === 'Polygon')
+      area = polygonArea(coordinates, radius);
+    else if (type === 'MultiPolygon') {
+      for (const rings of coordinates ?? [])
+        area += polygonArea(rings, radius);
+    }
     if (area !== Infinity)
       return area;
   }
@@ -358,7 +341,6 @@ function measuredArea(geometry, radius) {
     if (!(error instanceof TypeError))
       throw error;
   }
-  const { type, coordinates } = geometry;
   if (type === 'Polygon')
     return measurableArea(readableRings(coordinates), radius);
   let sum = 0;
@@ -371,8 +353,21 @@ function measuredArea(geometry, radius) {
 
 /** @param {any} geometry @param {number} radius @returns {number} */
 function measuredLength(geometry, radius) {
+  const { type, coordinates } = geometry;
   try {
-    const length = lengthAt(geometry, radius, 1);
+    let length = 0;
+    if (type === 'LineString')
+      length = lineLength(coordinates ?? [], radius);
+    else if (type === 'MultiLineString' || type === 'Polygon') {
+      for (const line of coordinates ?? [])
+        length += lineLength(line, radius);
+    }
+    else if (type === 'MultiPolygon') {
+      for (const rings of coordinates ?? []) {
+        for (const ring of rings ?? [])
+          length += lineLength(ring, radius);
+      }
+    }
     if (length - length === 0)
       return length;
   }
@@ -380,7 +375,6 @@ function measuredLength(geometry, radius) {
     if (!(error instanceof TypeError))
       throw error;
   }
-  const { type, coordinates } = geometry;
   if (type === 'LineString')
     return lineMeasure(readablePositions(coordinates), radius);
   let sum = 0;
@@ -435,14 +429,18 @@ function readableContains(rings, lon, lat) {
 
 /** @param {any} geometry @returns {boolean} */
 function measuredRingsClosed(geometry) {
+  const { type, coordinates } = geometry;
   try {
-    return ringsClosedAt(geometry, 1);
+    if (type === 'Polygon')
+      return (coordinates ?? []).every(isRingClosed);
+    if (type === 'MultiPolygon')
+      return (coordinates ?? []).every((rings) => (rings ?? []).every(isRingClosed));
+    return true;
   }
   catch (error) {
     if (!(error instanceof TypeError))
       throw error;
   }
-  const { type, coordinates } = geometry;
   if (type === 'Polygon')
     return everyMember(coordinates, readableRingClosed);
   if (type === 'MultiPolygon')
@@ -530,40 +528,53 @@ function readableRings(rings) {
 }
 
 /**
- * The measurement of every geometry a value holds, joined in document
- * order: a FeatureCollection's features, a Feature's geometry and a
- * GeometryCollection's geometries are walked, each collection's parts
- * joined from `none` before its total joins the one around it, so a
- * sum adds exactly as nested loops would. Anything that is not a
- * geometry adds `none`; a Feature's geometry that is a FeatureCollection
- * is not a geometry ({@link geometryOf}). A collection's members are
- * iterated as `for...of` iterates them, and a list that cannot be
- * iterated holds none ({@link membersOf}).
+ * The measurement of every geometry a value holds, in document order: a
+ * FeatureCollection's features, a Feature's geometry and a
+ * GeometryCollection's geometries are walked. A sum totals each
+ * collection's parts from `none` before its total joins the one around
+ * it, so it adds exactly as nested loops would; a yes-or-no measurement
+ * answers `stopAt` as soon as one geometry does, and `none` when none
+ * does. Anything that is not a geometry measures `none`; a Feature's
+ * geometry that is a FeatureCollection is not a geometry
+ * ({@link geometryOf}). A collection's members are iterated as
+ * `for...of` iterates them, and a list that cannot be iterated holds none
+ * ({@link membersOf}).
  *
  * The walk keeps its own stack, to the bound the module states.
  * @template T
  * @param {any} value
- * @param {(geometry: any) => T} measure - for a geometry that is not a
- *   collection
- * @param {(total: T, part: T) => T} join
+ * @param {(geometry: any, a: any, b: any) => T} measure - for a geometry
+ *   that is not a collection, called with `a` and `b`
  * @param {T} none - the measurement of nothing
- * @param {(total: T) => boolean} [settled] - whether a total already
- *   decides the answer, which then stops the walk
+ * @param {T | undefined} stopAt - the answer that decides a yes-or-no
+ *   measurement; `undefined` for a sum
+ * @param {any} [a] - the measurement's first argument
+ * @param {any} [b] - its second
  * @returns {T}
  */
-function foldGeometries(value, measure, join, none, settled = undefined) {
-  /** @type {{ list: any, at: number, items: Iterator<any> | null, total: T, depth: number }[]} */
+function foldGeometries(value, measure, none, stopAt, a, b) {
+  // the innermost open collection: its members (an array is read by
+  // index, anything else as `for...of` reads it), the next index, its
+  // total and its members' depth; the ones around it wait on `open`
+  /** @type {any} */
+  let list = null;
+  /** @type {Iterator<any> | null} */
+  let iterated = null;
+  let at = 0;
+  let total = none;
+  let depth = 1;
+  /** @type {{ list: any, iterated: Iterator<any> | null, at: number, total: T, depth: number }[]} */
   const open = [];
   /** @type {any} */
   let next = value;
-  let depth = 1;
+  let level = 1;
   for (;;) {
     // `next` is measured, or opens the collection it is
     /** @type {any} */
     let items = null;
     let part = none;
     if (next !== null && typeof next === 'object') {
-      if (depth > GEOJSON_WALK_DEPTH_CEILING)
+      if (level > GEOJSON_WALK_DEPTH_CEILING)
         throw geoRefusal(value);
       if (next.type === 'FeatureCollection')
         items = membersOf(next.features);
@@ -573,56 +584,74 @@ function foldGeometries(value, measure, join, none, settled = undefined) {
         while (geometry !== null && typeof geometry === 'object' && !Array.isArray(geometry)
           && geometry.type === 'Feature') {
           geometry = geometry.geometry;
-          depth++;
-          if (depth > GEOJSON_WALK_DEPTH_CEILING && geometry !== null && typeof geometry === 'object')
+          level++;
+          if (level > GEOJSON_WALK_DEPTH_CEILING && geometry !== null && typeof geometry === 'object')
             throw geoRefusal(value);
         }
-        geometry = geometryOf(geometry);
-        if (geometry !== null) {
-          if (geometry.type === 'GeometryCollection')
-            items = membersOf(geometry.geometries);
-          else
-            part = measure(geometry);
-        }
+        if (isLeafGeometry(geometry))
+          part = measure(geometry, a, b);
+        else if (geometry !== null && typeof geometry === 'object' && !Array.isArray(geometry)
+          && geometry.type === 'GeometryCollection')
+          items = membersOf(geometry.geometries);
       }
     }
     if (items !== null) {
-      // an array is read by index; anything else as `for...of` reads it
-      const iterated = Array.isArray(items) ? null : items[Symbol.iterator]();
-      open.push({ list: items, at: 0, items: iterated, total: none, depth: depth + 2 });
+      if (list !== null)
+        open.push({ list, iterated, at, total, depth });
+      list = items;
+      iterated = Array.isArray(items) ? null : items[Symbol.iterator]();
+      at = 0;
+      total = none;
+      depth = level + 2;
     }
-    else if (open.length === 0)
+    else if (list === null || part === stopAt)
       return part;
-    else {
-      const inner = open[open.length - 1];
-      inner.total = join(inner.total, part);
-    }
+    else if (stopAt === undefined)
+      total += part;
     // on to the next member, closing every collection it finishes
     for (;;) {
-      const inner = open[open.length - 1];
-      if (settled !== undefined && settled(inner.total))
-        return inner.total;
-      if (inner.items === null) {
-        if (inner.at < inner.list.length) {
-          next = inner.list[inner.at++];
-          depth = inner.depth;
+      if (iterated === null) {
+        // a collection of geometries, or of Features holding one, is the
+        // overwhelming majority of what this walks: such members are
+        // measured here, without a trip round the walk per member, while
+        // neither they nor a Feature's geometry can pass the bound
+        if (depth < GEOJSON_WALK_DEPTH_CEILING) {
+          while (at < list.length) {
+            let geometry = list[at];
+            if (geometry !== null && typeof geometry === 'object' && !Array.isArray(geometry)
+              && geometry.type === 'Feature')
+              geometry = geometry.geometry;
+            if (!isLeafGeometry(geometry))
+              break;
+            at++;
+            const part = measure(geometry, a, b);
+            if (part === stopAt)
+              return part;
+            if (stopAt === undefined)
+              total += part;
+          }
+        }
+        if (at < list.length) {
+          next = list[at++];
           break;
         }
       }
       else {
-        const step = inner.items.next();
+        const step = iterated.next();
         if (!step.done) {
           next = step.value;
-          depth = inner.depth;
           break;
         }
       }
-      open.pop();
-      if (open.length === 0)
-        return inner.total;
-      const outer = open[open.length - 1];
-      outer.total = join(outer.total, inner.total);
+      const outer = open.pop();
+      if (outer === undefined)
+        return total;
+      const closed = total;
+      ({ list, iterated, at, total, depth } = outer);
+      if (stopAt === undefined)
+        total += closed;
     }
+    level = depth;
   }
 }
 
@@ -635,55 +664,9 @@ function foldGeometries(value, measure, join, none, settled = undefined) {
  * @returns {number}
  */
 export function geometryArea(value, radius = EARTH_RADIUS) {
-  try {
-    const area = areaAt(value, radius, 1);
-    if (area !== Infinity)
-      return area;
-  }
-  catch (error) {
-    if (error !== RECURSION_TOO_DEEP && !(error instanceof TypeError))
-      throw error;
-  }
-  return foldArea(value, radius);
-}
-
-/**
- * {@link geometryArea} for a value `depth` collections down, on the host's
- * stack, to `RECURSIVE_GEO_DEPTH`.
- * @param {any} value
- * @param {number} radius
- * @param {number} depth
- * @returns {number}
- */
-function areaAt(value, radius, depth) {
-  if (value === null || typeof value !== 'object')
-    return 0;
-  if (depth > RECURSIVE_GEO_DEPTH)
-    throw RECURSION_TOO_DEEP;
-  if (value.type === 'FeatureCollection') {
-    let sum = 0;
-    for (const feature of value.features ?? [])
-      sum += areaAt(feature, radius, depth + 1);
-    return sum;
-  }
-  const geometry = nearGeometryOf(value);
-  if (geometry === null)
-    return 0;
-  if (geometry.type === 'GeometryCollection') {
-    let sum = 0;
-    for (const inner of geometry.geometries ?? [])
-      sum += areaAt(inner, radius, depth + 1);
-    return sum;
-  }
-  if (geometry.type === 'Polygon')
-    return polygonArea(geometry.coordinates, radius);
-  if (geometry.type === 'MultiPolygon') {
-    let sum = 0;
-    for (const rings of geometry.coordinates ?? [])
-      sum += polygonArea(rings, radius);
-    return sum;
-  }
-  return 0;
+  const geometry = leafOf(value);
+  return geometry !== null ? measuredArea(geometry, radius)
+    : foldGeometries(value, measuredArea, 0, undefined, radius);
 }
 
 // exterior ring less holes
@@ -705,8 +688,8 @@ function polygonArea(rings, radius) {
 // value of finite positions is measured as before; on a radius that is not
 // finite every measure is taken as it stands. A polygon's total that is not
 // finite is NaN or below zero, and is taken again here; one that is
-// infinite above zero reaches the measurement's own total, which then
-// takes the value again on its fold.
+// infinite above zero reaches the measurement's own check, which then
+// takes the geometry again with `measurableArea`.
 
 /**
  * {@link polygonArea} for a total that is not above zero: 0 when it is
@@ -763,64 +746,9 @@ function lineMeasure(line, radius) {
  * @returns {number}
  */
 export function geometryLength(value, radius = EARTH_RADIUS) {
-  try {
-    const length = lengthAt(value, radius, 1);
-    if (length - length === 0)
-      return length;
-  }
-  catch (error) {
-    if (error !== RECURSION_TOO_DEEP && !(error instanceof TypeError))
-      throw error;
-  }
-  return foldLength(value, radius);
-}
-
-/**
- * {@link geometryLength} for a value `depth` collections down, on the
- * host's stack, to `RECURSIVE_GEO_DEPTH`.
- * @param {any} value
- * @param {number} radius
- * @param {number} depth
- * @returns {number}
- */
-function lengthAt(value, radius, depth) {
-  if (value === null || typeof value !== 'object')
-    return 0;
-  if (depth > RECURSIVE_GEO_DEPTH)
-    throw RECURSION_TOO_DEEP;
-  if (value.type === 'FeatureCollection') {
-    let sum = 0;
-    for (const feature of value.features ?? [])
-      sum += lengthAt(feature, radius, depth + 1);
-    return sum;
-  }
-  const geometry = nearGeometryOf(value);
-  if (geometry === null)
-    return 0;
-  const { type, coordinates } = geometry;
-  if (type === 'GeometryCollection') {
-    let sum = 0;
-    for (const inner of geometry.geometries ?? [])
-      sum += lengthAt(inner, radius, depth + 1);
-    return sum;
-  }
-  if (type === 'LineString')
-    return lineLength(coordinates ?? [], radius);
-  if (type === 'MultiLineString' || type === 'Polygon') {
-    let sum = 0;
-    for (const line of coordinates ?? [])
-      sum += lineLength(line, radius);
-    return sum;
-  }
-  if (type === 'MultiPolygon') {
-    let sum = 0;
-    for (const rings of coordinates ?? []) {
-      for (const ring of rings ?? [])
-        sum += lineLength(ring, radius);
-    }
-    return sum;
-  }
-  return 0;
+  const geometry = leafOf(value);
+  return geometry !== null ? measuredLength(geometry, radius)
+    : foldGeometries(value, measuredLength, 0, undefined, radius);
 }
 
 /**
@@ -863,7 +791,7 @@ export function containsPosition(value, lon, lat) {
   catch (error) {
     if (error !== RECURSION_TOO_DEEP && !(error instanceof TypeError))
       throw error;
-    return foldContains(value, lon, lat);
+    return foldGeometries(value, measuredContains, false, true, lon, lat);
   }
 }
 
@@ -941,48 +869,9 @@ export function geoDistance(a, b, radius = EARTH_RADIUS) {
  * @returns {boolean}
  */
 export function ringsClosed(value) {
-  try {
-    return ringsClosedAt(value, 1);
-  }
-  catch (error) {
-    if (error !== RECURSION_TOO_DEEP && !(error instanceof TypeError))
-      throw error;
-    return foldRingsClosed(value);
-  }
-}
-
-/**
- * {@link ringsClosed} for a value `depth` collections down, on the host's
- * stack, to `RECURSIVE_GEO_DEPTH`.
- * @param {any} value
- * @param {number} depth
- * @returns {boolean}
- */
-function ringsClosedAt(value, depth) {
-  if (depth > RECURSIVE_GEO_DEPTH)
-    throw RECURSION_TOO_DEEP;
-  const geometry = nearGeometryOf(value);
-  if (value !== null && typeof value === 'object' && value.type === 'FeatureCollection') {
-    for (const feature of value.features ?? []) {
-      if (!ringsClosedAt(feature, depth + 1))
-        return false;
-    }
-    return true;
-  }
-  if (geometry === null)
-    return true;
-  if (geometry.type === 'GeometryCollection') {
-    for (const inner of geometry.geometries ?? []) {
-      if (!ringsClosedAt(inner, depth + 1))
-        return false;
-    }
-    return true;
-  }
-  if (geometry.type === 'Polygon')
-    return (geometry.coordinates ?? []).every(isRingClosed);
-  if (geometry.type === 'MultiPolygon')
-    return (geometry.coordinates ?? []).every((rings) => (rings ?? []).every(isRingClosed));
-  return true;
+  const geometry = leafOf(value);
+  return geometry !== null ? measuredRingsClosed(geometry)
+    : foldGeometries(value, measuredRingsClosed, true, false);
 }
 
 //#endregion

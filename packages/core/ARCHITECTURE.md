@@ -635,18 +635,26 @@ passed straight in without the `type` discriminator being involved.
 | `mercator.js` | Web Mercator, the projection *out* for anything that draws |
 | `simplify.js` | Douglas-Peucker — dropping the vertices a drawing cannot show |
 
-The GeoJSON measurements (`geometryArea`, `geometryLength`, `containsPosition`,
-`ringsClosed`) read a malformed member without a check on their hot path: the
-recursion reads members as a well-formed value needs, and a `TypeError` from a
-read sends the whole value to the fold, which reads collection lists that cannot
-be iterated as empty and measures a geometry whose leaf code throws again with
-each ring or line that is not an array, or misses a position, holding none. A
+The GeoJSON traversal walks on its own stack: `eachPosition` keeps the lists it
+is inside (visiting a list's positions in one loop; a position or a Point needs
+no walk), and the measurements share one fold over the geometries a value holds,
+which sums each collection before the one around it and stops at the first
+answer that decides a yes-or-no measurement. `geometryArea`, `geometryLength` and
+`ringsClosed` measure a geometry, or a Feature holding one, at the root without
+the fold and take everything else on it. `containsPosition` recurses on the
+host's stack for 256 collections or Features — the containment rows measured
+slower when the fold carried them — and only past that, or on a `TypeError`,
+takes the value again on the fold. The measurements read a malformed member without a check on their
+hot path: a geometry's leaf code reads members as a well-formed value needs, and
+a `TypeError` from a read measures that geometry again with each ring or line
+that is not an array, or misses a position, holding none; the fold reads
+collection lists that cannot be iterated as empty. A
 position whose longitude or latitude does not read as a finite number throws
 nothing, so it is caught where its arithmetic shows it: on a finite radius a
 line of finite positions has a finite length and a ring a finite area, so a
 total that is not finite (a length, or an area that is infinite; a polygon's
-`NaN` or negative total is taken again where it is clamped) sends the value to
-the fold, which reads each such line or ring as holding none. Containment has
+`NaN` or negative total is taken again where it is clamped) measures the
+geometry again, reading each such line or ring as holding none. Containment has
 no total to read, so the even-odd walk in `ring.js` tests each position once:
 it reads every position once and carries it to the next edge instead of
 reading both ends of every edge, which pays for that test. It answers a ring
@@ -1119,8 +1127,8 @@ Deep equality and collection manipulation.
 
 The bounds the walks over a JSON value hold — 10000 levels of nesting for
 `equalsJson`, `stableStringify` and `semanticKey` here, 100000 for the
-GeoJSON traversal of `geo/`, whose recursive walk answered deeper nests on a
-default host stack — and their two refusals (`JO2001` past the bound,
+GeoJSON traversal of `geo/`, past the deeper nests a walk on the host's stack
+answered there by default — and their two refusals (`JO2001` past the bound,
 `JO2002` at the member that closes a cycle, located by `locateCycle`) live in
 `walk.js`, a module internal to the package with no `exports` entry, so the
 walks refuse a value alike; `object.js` re-exports `locateCycle`.

@@ -157,12 +157,12 @@ outside the ring (`[[0,0], [4,0], 5, [4,4], [0,4], [0,0]]` contained
 contained the points of its exterior, the hole's own included.*
 
 The one refusal is the walk's bound. A value is walked to 100000
-levels of nesting, on the host's stack for the first 256 and on the
-walk's own past them, so a nest past the host stack answers. The bound
-is ten times the 10000 `equalsJson` holds: the recursive walk took a
-whole collection (two levels) or Feature per host frame and answered
-nests past 10000 levels on a default host stack, and no value it
-answered there is refused. Past 100000 levels the walk refuses with
+levels of nesting, on the walk's own stack (containment recurses on the
+host's for its first 256 collections or Features, then takes the same
+walk), so a nest past the host stack answers. The bound is ten times the 10000
+`equalsJson` holds: a walk on the host's stack took a whole collection
+(two levels) or Feature per frame and answered nests past 10000 levels
+on a default host stack, and no value it answered there is refused. Past 100000 levels the walk refuses with
 `JO2001` (`a value nested deeper than 100000 levels cannot be walked as
 GeoJSON`), and a
 cycle it follows — coordinates, a Feature or a collection that holds

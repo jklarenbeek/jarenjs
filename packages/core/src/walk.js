@@ -19,11 +19,11 @@ import { CodedError } from './errors.js';
 // the same on every host.
 export const JSON_WALK_DEPTH_CEILING = 10000;
 
-// The deepest nesting the GeoJSON traversal walks. Its recursive walk
-// took a whole collection, two levels (the collection and its list), or a
-// whole Feature per host frame, so on a default host stack it answered
-// nests well past `JSON_WALK_DEPTH_CEILING` levels; the bound sits past
-// them, so no value that answered on such a host is refused.
+// The deepest nesting the GeoJSON traversal walks. A walk of it on the
+// host's stack took a whole collection, two levels (the collection and its
+// list), or a whole Feature per frame, so on a default host stack it
+// answered nests well past `JSON_WALK_DEPTH_CEILING` levels; the bound sits
+// past them, so no value that answered on such a host is refused.
 export const GEOJSON_WALK_DEPTH_CEILING = 100000;
 
 // What a walk on its own stack throws on reaching the bound: the caller
