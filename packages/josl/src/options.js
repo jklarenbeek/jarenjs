@@ -138,12 +138,22 @@ export const JOSL_PULL_WRITE = table({ ...JOSL_WRITE, signal: SIGNAL });
 /** `toGbnf`: the grammar's dialect. */
 export const GBNF = table({ mode: oneOf('josl', 'toml') });
 
-/** `parseJsonx`: the dialect and the event sink (the limits are the stream reader's). */
-export const JSONX_READ = table({ mode: oneOf('jsonx', 'json'), onEvent: CALLBACK });
+/** The JSONX dialect and event sink, which both readers take. */
+const JSONX_GRAMMAR = table({ mode: oneOf('jsonx', 'json'), onEvent: CALLBACK });
+
+/**
+ * `parseJsonx`: the grammar and the two readings of a model's reply (the
+ * limits are the stream reader's).
+ */
+export const JSONX_READ = table({
+  ...JSONX_GRAMMAR,
+  fences: oneOf('error', 'strip'),
+  duplicateKeys: oneOf('last', 'error'),
+});
 
 /** The JSONX stream reader: `createJsonxStreamReader`, `parseJsonxStream`. */
 export const JSONX_STREAM_READ = table({
-  ...JSONX_READ,
+  ...JSONX_GRAMMAR,
   partialText: BOOLEAN,
   detach: READ_DOWNSTREAM,
   ...limits(['maxTotalBytes', 'maxTokenBytes', 'maxDepth', 'maxRetainedValues']),

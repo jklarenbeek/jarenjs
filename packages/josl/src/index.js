@@ -39,7 +39,7 @@ export {
   createCsvStreamWriter,
   CsvStreamWriter,
 } from './csv-stream.js';
-export { JoslSyntaxError, JoslStringifyError, JsonxSyntaxError, CsvSyntaxError } from './errors.js';
+export { JoslSyntaxError, JoslStringifyError, JsonxSyntaxError, CsvSyntaxError, JSONX_CODES } from './errors.js';
 export { JoslLimitError, CSV_LIMIT_CODES, JOSL_LIMIT_CODES, JSONX_LIMIT_CODES } from './limits.js';
 export {
   LocalDate,

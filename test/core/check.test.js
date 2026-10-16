@@ -24,8 +24,9 @@ describe('core — composeChecks', function () {
     const check = composeChecks(positive, even);
     assert.deepStrictEqual(check(4), { valid: true, errors: [] });
     assert.deepStrictEqual(check(3), { valid: false, errors: [{ message: 'odd' }] });
-    assert.deepStrictEqual(check(-2), { valid: false, errors: [] },
-      'the bare-boolean check reports invalid with no errors, and short-circuits before "even"');
+    assert.deepStrictEqual(check(-2), { valid: false, errors: [{ code: 'JG2001', docPath: '',
+      message: 'the value was rejected by a check that named no error' }] },
+      'the bare-boolean check reports invalid with its one coded error, and short-circuits before "even"');
   });
 
   it('order matters: the earlier failing check is the one reported', function () {
@@ -74,4 +75,50 @@ it('accepts strict true only and preserves first-failure error identity', () => 
   const errors = [{ message: 'original' }]; let later = 0;
   assert.equal(composeChecks(() => ({valid:false, errors}), () => { later++; return true; })(0).errors, errors);
   assert.equal(later, 0);
+});
+
+describe('core — an invalid outcome always names an error', function () {
+  const unnamed = { code: 'JG2001', docPath: '', message: 'the value was rejected by a check that named no error' };
+
+  it('false, {valid:false}, empty errors and non-boolean answers carry one coded error', function () {
+    for (const answer of [false, { valid: false }, { valid: false, errors: [] }, { valid: false, errors: null },
+      {}, { valid: 1 }, 1, 'true', null, undefined])
+      assert.deepStrictEqual(checkOutcome(answer), { valid: false, errors: [unnamed] }, JSON.stringify(answer));
+  });
+
+  it('each synthesized error is a fresh plain object a model reads through JSON', function () {
+    const a = checkOutcome(false).errors[0], b = checkOutcome(false).errors[0];
+    assert.notStrictEqual(a, b);
+    assert.strictEqual(Object.getPrototypeOf(a), Object.prototype);
+    assert.deepStrictEqual(JSON.parse(JSON.stringify(a)), unnamed);
+  });
+
+  it('an outcome that carries errors, and every valid one, answers as before', function () {
+    const errors = [{ message: 'x' }];
+    assert.strictEqual(checkOutcome({ valid: false, errors }).errors, errors);
+    assert.deepStrictEqual(checkOutcome(true), { valid: true, errors: [] });
+    assert.deepStrictEqual(checkOutcome({ valid: true }), { valid: true, errors: [] });
+    assert.deepStrictEqual(checkOutcome({ valid: true, errors: [{ message: 'w' }] }), { valid: true, errors: [{ message: 'w' }] });
+    assert.deepStrictEqual(checkOutcome({ valid: false, errors: 'text' }), { valid: false, errors: 'text' });
+  });
+
+  it('composeChecks reports the bare-false check with the coded error and short-circuits', function () {
+    let later = 0;
+    const check = composeChecks((n) => n > 0, () => { later++; return true; });
+    assert.deepStrictEqual(check(-2), { valid: false, errors: [unnamed] });
+    assert.strictEqual(later, 0);
+    assert.deepStrictEqual(check(2), { valid: true, errors: [] });
+  });
+
+  it('a thenable answer is refused JG0001 naming the repair, never read as invalid', async function () {
+    let rejectedLater = false;
+    const rejecting = Promise.reject(new Error('late')).finally(() => { rejectedLater = true; });
+    for (const answer of [Promise.resolve(true), Promise.resolve({ valid: false }), { then() {} }, rejecting])
+      assert.throws(() => checkOutcome(answer), (e) => e instanceof Error && e.name === 'CheckOutcomeError'
+        && e.code === 'JG0001'
+        && e.message === 'JG0001: a check answered a promise, which has not settled — await the check and pass its settled answer');
+    assert.throws(() => composeChecks(async () => true)(1), { code: 'JG0001' });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.strictEqual(rejectedLater, true, 'the refused promise settled without an unhandled rejection');
+  });
 });

@@ -31,6 +31,13 @@ delete it or fix it.
 (RFC 9535, passing the complete official compliance suite), JSON Patch
 (RFC 6902) and Merge Patch (RFC 7396). See
 [`packages/json/ARCHITECTURE.md`](../packages/json/ARCHITECTURE.md).
+- [ ] **`JsonCanonicalizeError` carries no code.** `canonicalizeJson({ a: NaN
+  })`, `{ a: undefined }`, a cycle or a `Date` member throws a `TypeError`
+  subclass with a `dataPath` (`/a`, `/self`, `/d`) and no `.code`, so a host
+  that reports a model's value as not canonical catches everything and loses
+  the place. Coding it per refusal kind moves the formula engine's documented
+  `JQ2013` (it reads `cause.code ?? 'JQ2013'`), which needs the formula
+  compile and batch to keep `JQ2013` with the located detail.
 - [ ] **Geometry measurements crash uncoded on a malformed collection
   member.** `$area`, `$length` and `$within` over `{ type:
   'FeatureCollection', features: {} }`, `{ type: 'GeometryCollection',

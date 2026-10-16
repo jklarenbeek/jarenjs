@@ -445,9 +445,26 @@ and explicit strict/AI/contract compatibility policies.
 
 ## Checks and guarded editing
 
-`@jarenjs/core/check` exports `checkOutcome` and `composeChecks`. Only `true`
-or `{ valid: true }` passes. Composition stops at the first failure and
-preserves its errors. `@jarenjs/core/guarded` exports `createGuardedRefiner`: it
+`@jarenjs/core/check` exports `checkOutcome`, `composeChecks` and
+`CHECK_CODES`. Only `true` or `{ valid: true }` passes. An invalid outcome
+always names at least one error, since its errors are what a repair loop sends
+back to the model that wrote the value: an answer that carries errors keeps
+them (the same array), and one that carries none — `false`, `{ valid: false }`,
+an empty `errors`, any other value — answers the single error `{ code: 'JG2001',
+docPath: '', message: 'the value was rejected by a check that named no error' }`.
+A check that answers a promise is refused: `checkOutcome` throws a `CodedError`
+named `CheckOutcomeError` with code `JG0001`, because an unsettled answer is
+neither valid nor invalid; await the check and pass its settled answer.
+Composition stops at the first failure and preserves its errors.
+*Upgrade: such an answer used to be `{ valid: false, errors: [] }` — a promise
+included, whatever it settled to — so a repair prompt listed no error to fix.*
+
+| code | condition |
+| --- | --- |
+| `JG0001` | a check answered a promise, which `checkOutcome` cannot read |
+| `JG2001` | a check answered invalid without naming an error |
+
+`@jarenjs/core/guarded` exports `createGuardedRefiner`: it
 copies JSON before validating/applying/planning, serializes its own commits,
 and pairs optional snapshot/restore hooks. A failed commit attempts restoration
 once and retains both original and restoration failures. External writers must

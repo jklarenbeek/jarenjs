@@ -2,7 +2,8 @@
 // Pure, position-based scalar decoders shared by the full-text parser
 // (jsonx.js) and the incremental reader (jsonx-stream.js). Every function
 // takes the source text plus an offset and reports errors through an
-// `err(pos, message, hint)` callback that must throw; none of them keep
+// `err(pos, code, message, hint)` callback that must throw (`code` is one
+// of `JSONX_CODES`); none of them keep
 // state, so both parsers decode every scalar through a single code path.
 //
 // The `checkEnd(pos)` callback lets the caller assert that the character
@@ -44,6 +45,7 @@ const RE_NUM_JSONX = /[+-]?(?:0|[1-9](?:_?\d)*)(?:\.\d(?:_?\d)*)?(?:[eE][+-]?\d(
 /**
  * @callback JsonxErrCallback
  * @param {number} pos - Offset of the error in the source text
+ * @param {string} code - Its `JSONX1xxx` code
  * @param {string} message - What is wrong
  * @param {string} [hint] - Repair suggestion
  * @returns {never} Must throw
@@ -75,7 +77,7 @@ export function isValueEndCode(c) {
  */
 export function decodeEscape(text, pos, err) {
   if (pos + 1 >= text.length)
-    err(pos, 'unterminated escape sequence');
+    err(pos, 'JSONX1010', 'unterminated escape sequence');
   const c = text.charCodeAt(pos + 1);
   switch (c) {
     case CC_DQUOTE: return ['"', pos + 2];
@@ -89,11 +91,11 @@ export function decodeEscape(text, pos, err) {
     case 0x75: {
       const hex = text.slice(pos + 2, pos + 6);
       if (hex.length !== 4 || !/^[0-9a-fA-F]{4}$/.test(hex))
-        err(pos, "expected 4 hex digits after '\\u'");
+        err(pos, 'JSONX1010', "expected 4 hex digits after '\\u'");
       return [String.fromCharCode(parseInt(hex, 16)), pos + 6];
     }
     default:
-      err(pos, `invalid escape '\\${text[pos + 1]}'`);
+      err(pos, 'JSONX1010', `invalid escape '\\${text[pos + 1]}'`);
   }
 }
 
@@ -108,7 +110,7 @@ export function decodeString(text, pos, err) {
   const [out, p] = decodeStringSpan(text, pos + 1, text.length, err, false);
   if (p < text.length) // stopped on the closing quote
     return [out, p + 1];
-  err(p, 'unterminated string', "close the string with '\"'");
+  err(p, 'JSONX1009', 'unterminated string', "close the string with '\"'");
 }
 
 /**
@@ -144,7 +146,7 @@ export function decodeStringSpan(text, from, stop, err, partial) {
       continue;
     }
     if (c < 0x20)
-      err(p, 'control characters must be escaped in strings');
+      err(p, 'JSONX1011', 'control characters must be escaped in strings');
     p++;
   }
   return [out + text.slice(chunk, p), p];
@@ -167,7 +169,7 @@ export function matchDateTime(text, pos, err, checkEnd) {
     const month = Number(m[2]);
     const day = Number(m[3]);
     if (!isValidDateParts(year, month, day))
-      err(pos, `invalid date '${m[0]}'`);
+      err(pos, 'JSONX1014', `invalid date '${m[0]}'`);
     const date = new LocalDate(year, month, day);
     const end = pos + m[0].length;
     checkEnd(end);
@@ -177,14 +179,14 @@ export function matchDateTime(text, pos, err, checkEnd) {
     const minute = Number(m[5]);
     const second = Number(m[6]);
     if (!isValidTimeParts(hour, minute, second))
-      err(end, `invalid time '${m[0]}'`);
+      err(end, 'JSONX1014', `invalid time '${m[0]}'`);
     const time = new LocalTime(hour, minute, second, m[7] ?? '');
     if (m[8] === undefined)
       return [new LocalDateTime(date, time), end];
     const offset = m[8] === 'z' || m[8] === 'Z' ? 'Z' : m[8];
     const instant = new Date(`${date.toString()}T${time.toString()}${offset}`);
     if (Number.isNaN(instant.getTime()))
-      err(end, `invalid date-time '${m[0]}'`);
+      err(end, 'JSONX1014', `invalid date-time '${m[0]}'`);
     return [instant, end];
   }
   m = stickyExec(RE_TIMEONLY, text, pos);
@@ -193,7 +195,7 @@ export function matchDateTime(text, pos, err, checkEnd) {
     const minute = Number(m[2]);
     const second = Number(m[3]);
     if (!isValidTimeParts(hour, minute, second))
-      err(pos, `invalid time '${m[0]}'`);
+      err(pos, 'JSONX1014', `invalid time '${m[0]}'`);
     const end = pos + m[0].length;
     checkEnd(end);
     return [new LocalTime(hour, minute, second, m[4] ?? ''), end];
@@ -215,7 +217,7 @@ export function matchDateTime(text, pos, err, checkEnd) {
 export function matchNumber(text, pos, mode, err, checkEnd) {
   const m = stickyExec(mode === 'json' ? RE_NUM_JSON : RE_NUM_JSONX, text, pos);
   if (m === null || m[0].length === 0)
-    err(pos, 'invalid number');
+    err(pos, 'JSONX1012', 'invalid number');
   const end = pos + m[0].length;
   checkEnd(end);
   if (mode === 'json')
@@ -225,7 +227,7 @@ export function matchNumber(text, pos, mode, err, checkEnd) {
   const isFloat = /[.eE]/.test(token);
   if (isFloat) {
     if (big)
-      err(pos, 'bigint literals cannot have a fraction or exponent');
+      err(pos, 'JSONX1013', 'bigint literals cannot have a fraction or exponent');
     return [Number(token.replace(/_/g, '')), end];
   }
   const stripped = token.replace(/[_+]/g, '');
@@ -272,15 +274,15 @@ export function matchWord(text, pos, mode, err) {
     case 'inf':
     case 'Infinity':
       if (mode === 'json')
-        err(pos, `'${word}' is a JSONX extension`, 'JSON cannot represent non-finite numbers');
+        err(pos, 'JSONX1017', `'${word}' is a JSONX extension`, 'JSON cannot represent non-finite numbers');
       return [neg ? -Infinity : Infinity, p];
     case 'nan':
     case 'NaN':
       if (mode === 'json')
-        err(pos, `'${word}' is a JSONX extension`, 'JSON cannot represent non-finite numbers');
+        err(pos, 'JSONX1017', `'${word}' is a JSONX extension`, 'JSON cannot represent non-finite numbers');
       return [NaN, p];
   }
-  err(pos, `invalid value '${text.slice(pos, p)}'`);
+  err(pos, 'JSONX1007', `invalid value '${text.slice(pos, p)}'`);
 }
 
 /**
@@ -295,7 +297,7 @@ export function matchRegExp(text, pos, err) {
   let inClass = false;
   for (;;) {
     if (p >= text.length || text.charCodeAt(p) === CC_LF)
-      err(pos, 'unterminated regexp literal', "close the regexp with '/'");
+      err(pos, 'JSONX1015', 'unterminated regexp literal', "close the regexp with '/'");
     const c = text.charCodeAt(p);
     if (c === CC_BACKSLASH) {
       p += 2;
@@ -319,7 +321,7 @@ export function matchRegExp(text, pos, err) {
     return [new RegExp(body, flags), p];
   }
   catch (e) {
-    err(pos, `invalid regexp literal: ${e.message}`);
+    err(pos, 'JSONX1016', `invalid regexp literal: ${e.message}`);
   }
 }
 

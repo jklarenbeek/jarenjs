@@ -209,7 +209,7 @@ describe('josl: every entry point admits exactly its own table', () => {
     deepStrictEqual(await parseJsonxStream(['{"b": 2}'], all), { b: 2 });
     strictEqual(stringifyJsonx({ a: 1 }, { mode: 'json', indent: 2 }), '{\n  "a": 1\n}');
     strictEqual(stringifyJsonx({ a: 1n }, { mode: 'jsonx', indent: '' }), '{"a":1n}');
-    refuses(() => parseJsonx('[1]', { partialText: true }), "parseJsonx: unknown option 'partialText'; the options are mode, onEvent");
+    refuses(() => parseJsonx('[1]', { partialText: true }), "parseJsonx: unknown option 'partialText'; the options are mode, onEvent, fences, duplicateKeys");
     refuses(() => createJsonxStreamReader({ detatch: ['a'] }), "createJsonxStreamReader: unknown option 'detatch' — did you mean 'detach'?");
     await rejects(parseJsonxStream(['[1]'], { mod: 'json' }), { message: "parseJsonxStream: unknown option 'mod' — did you mean 'mode'?" });
     refuses(() => stringifyJsonx({}, { indnt: 2 }), "stringifyJsonx: unknown option 'indnt' — did you mean 'indent'?");

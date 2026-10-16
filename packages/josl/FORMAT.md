@@ -204,6 +204,55 @@ when brace syntax is the better fit:
 reports the same document-order `open` / `value` / `close` events with
 absolute paths.
 
+**Syntax refusals.** Each condition below throws a `JsonxSyntaxError` with
+a stable `JSONX1xxx` `code`, a `line` and `column`, and an `offset` — the
+0-based position in the text in UTF-16 code units. `parseJsonx` and the
+stream reader report the same code at the same place, however the stream
+is chunked; the `message` names the condition in words without the code.
+The codes are exported as `JSONX_CODES`. *Upgrade: the error used to carry
+no `code` and no `offset`; its message is unchanged.*
+
+| code | condition |
+| --- | --- |
+| `JSONX1001` | the text ends before its value is complete |
+| `JSONX1002` | text follows the complete value |
+| `JSONX1003` | an object member does not start with a string key |
+| `JSONX1004` | a key is not followed by `:` |
+| `JSONX1005` | a member is not followed by `,` or the container's closing bracket |
+| `JSONX1006` | an object or array is never closed |
+| `JSONX1007` | no value starts here |
+| `JSONX1008` | a value is followed by a character that cannot end it |
+| `JSONX1009` | a string is never closed |
+| `JSONX1010` | an invalid escape sequence in a string |
+| `JSONX1011` | an unescaped control character in a string |
+| `JSONX1012` | an invalid number |
+| `JSONX1013` | a bigint literal with a fraction or an exponent |
+| `JSONX1014` | a date or time that does not exist (`2026-02-30`, `25:00:00`) |
+| `JSONX1015` | a regexp literal is never closed |
+| `JSONX1016` | a regexp literal the platform cannot compile |
+| `JSONX1017` | a regexp literal, a leading `+` or a non-finite word (`inf`, `nan`, `Infinity`, `NaN`) in strict JSON mode; the other JSONX spellings (`1n`, `1_000`, a bare date) stop as `JSONX1008` |
+| `JSONX1018` | an object names the same member twice (only under `duplicateKeys: 'error'`) |
+
+**Reading a model's reply.** Two `parseJsonx` options, both off by default,
+read the text a language model returns when asked for JSON:
+
+- `fences: 'strip'` reads a text that is one Markdown code fence — an
+  opening run of three or more backticks or tildes with an optional info
+  string such as `json` on its own line, the body, and a closing run of the
+  same character at least as long on a line of its own, with nothing but
+  whitespace around them — as the fence's body. Every line, column and
+  offset is still counted in the text as given. A text that is not fenced
+  that way (prose around the fence, a fence never closed, a closing run
+  that does not start its line) is read as it is. The default,
+  `fences: 'error'`, reads the fence as text, and no value starts with it
+  (`JSONX1007`).
+- `duplicateKeys: 'error'` refuses a member whose name an earlier member
+  of the same object has, decoded (`"a"` and `"\u0061"` are one name), with
+  `JSONX1018` at the second member's key. The default, `duplicateKeys:
+  'last'`, keeps the last member, as `JSON.parse` does.
+
+The stream reader takes neither option and refuses both, naming `parseJsonx`.
+
 ## CSV
 
 CSV is not a JOSL dialect and has no shared grammar with it — it lives in

@@ -36,6 +36,7 @@ import {
   CC_RBRACKET,
   CC_LBRACE,
   CC_RBRACE,
+  CC_TILDE,
   isDigitCode,
   isAsciiLetterCode,
 } from '@jarenjs/core/scan';
@@ -52,31 +53,91 @@ import {
   matchRegExp,
 } from './jsonx-scalar.js';
 
+const CC_BACKTICK = 0x60;
+
+/** @param {number} c @returns {boolean} */
+const isWsCode = (c) => c === CC_SPACE || c === CC_TAB || c === CC_LF || c === CC_CR;
+
+/**
+ * The body of a text that is one Markdown code fence and nothing else
+ * around it but whitespace: an opening run of three or more backticks or
+ * tildes with an optional info string (`json`) ending its line, and a
+ * closing run of the same character, at least as long, on a line of its
+ * own. A model asked for JSON often wraps its reply this way.
+ * @param {string} text
+ * @returns {[number, number] | null} The body's start and end offsets,
+ *   the start being a line's first character; `null` when the text is not
+ *   fenced that way
+ */
+function fencedBody(text) {
+  let open = 0;
+  while (open < text.length && isWsCode(text.charCodeAt(open)))
+    open++;
+  const fence = text.charCodeAt(open);
+  if (fence !== CC_BACKTICK && fence !== CC_TILDE)
+    return null;
+  let p = open;
+  while (p < text.length && text.charCodeAt(p) === fence)
+    p++;
+  const run = p - open;
+  const eol = text.indexOf('\n', p);
+  // a backtick fence's info string holds no backtick (CommonMark)
+  if (run < 3 || eol < 0 || (fence === CC_BACKTICK && text.slice(p, eol).includes('`')))
+    return null;
+  const start = eol + 1;
+  let end = text.length;
+  while (end > start && isWsCode(text.charCodeAt(end - 1)))
+    end--;
+  let close = end;
+  while (close > start && text.charCodeAt(close - 1) === fence)
+    close--;
+  if (end - close < run)
+    return null;
+  while (close > start && (text.charCodeAt(close - 1) === CC_SPACE || text.charCodeAt(close - 1) === CC_TAB))
+    close--;
+  return close === start || text.charCodeAt(close - 1) === CC_LF ? [start, close] : null;
+}
+
 class JsonxParser {
   constructor(text, options = {}) {
     this.text = text;
+    // where `text` starts in the caller's text, which a stripped fence moves
+    this.offsetBase = 0;
+    this.lineBase = 0;
+    if (options.fences === 'strip') {
+      const body = fencedBody(text);
+      if (body !== null) {
+        this.text = text.slice(body[0], body[1]);
+        this.offsetBase = body[0];
+        this.lineBase = countCharCode(text, CC_LF, 0, body[0]);
+      }
+    }
     this.pos = 0;
     this.mode = options.mode === 'json' ? 'json' : 'jsonx';
     this.onEvent = options.onEvent ?? null;
+    this.uniqueKeys = options.duplicateKeys === 'error';
     this.path = [];
-    this.errCb = (pos, message, hint) => this.err(message, hint, pos);
+    this.errCb = (pos, code, message, hint) => this.err(code, message, hint, pos);
     this.endCb = (end) => {
       this.pos = end;
       this.checkValueEnd();
     };
   }
 
-  err(message, hint, pos = this.pos) {
+  err(code, message, hint, pos = this.pos) {
+    // the body of a stripped fence starts a line, so only the line moves
     throw new JsonxSyntaxError(
       message,
-      countCharCode(this.text, 0x0A, 0, pos) + 1,
+      countCharCode(this.text, CC_LF, 0, pos) + 1 + this.lineBase,
       columnOf(this.text, pos),
-      hint);
+      hint,
+      code,
+      pos + this.offsetBase);
   }
 
   extension(what, hint) {
     if (this.mode === 'json')
-      this.err(`${what} is a JSONX extension`, hint);
+      this.err('JSONX1017', `${what} is a JSONX extension`, hint);
   }
 
   emit(type, value) {
@@ -101,7 +162,7 @@ class JsonxParser {
     const value = this.parseValue();
     this.skipWs();
     if (this.pos < this.text.length)
-      this.err('unexpected trailing characters');
+      this.err('JSONX1002', 'unexpected trailing characters');
     return value;
   }
 
@@ -121,7 +182,7 @@ class JsonxParser {
     let isArray = false;
     for (;;) {
       if (this.pos >= text.length)
-        this.err('unexpected end of input');
+        this.err('JSONX1001', 'unexpected end of input');
       const c = text.charCodeAt(this.pos);
       let value;
       if (c === CC_LBRACE || c === CC_LBRACKET) {
@@ -156,8 +217,8 @@ class JsonxParser {
         this.skipWs();
         if (this.pos >= text.length) {
           if (isArray)
-            this.err('unterminated array', "close the array with ']'");
-          this.err('unterminated object', "close the object with '}'");
+            this.err('JSONX1006', 'unterminated array', "close the array with ']'");
+          this.err('JSONX1006', 'unterminated object', "close the object with '}'");
         }
         const d = text.charCodeAt(this.pos);
         if (d === CC_COMMA) {
@@ -166,7 +227,7 @@ class JsonxParser {
           break; // parse the value of the next member
         }
         if (d !== (isArray ? CC_RBRACKET : CC_RBRACE))
-          this.err(isArray ? "expected ',' or ']' in array" : "expected ',' or '}' in object");
+          this.err('JSONX1005', isArray ? "expected ',' or ']' in array" : "expected ',' or '}' in object");
         this.pos++;
         this.emit('close', container);
         value = container;
@@ -190,11 +251,15 @@ class JsonxParser {
       return;
     }
     if (this.pos >= this.text.length || this.text.charCodeAt(this.pos) !== CC_DQUOTE)
-      this.err('expected a string key');
+      this.err('JSONX1003', 'expected a string key');
+    const at = this.pos;
     const key = this.parseString();
+    // every earlier member of `container` is already set
+    if (this.uniqueKeys && Object.hasOwn(container, key))
+      this.err('JSONX1018', `duplicate key ${JSON.stringify(key)}`, 'name each member once', at);
     this.skipWs();
     if (this.pos >= this.text.length || this.text.charCodeAt(this.pos) !== CC_COLON)
-      this.err("expected ':' after key");
+      this.err('JSONX1004', "expected ':' after key");
     this.pos++;
     this.skipWs();
     this.path.push(key);
@@ -233,7 +298,7 @@ class JsonxParser {
     }
     if (isAsciiLetterCode(c))
       return this.scalar(this.parseWord());
-    this.err('invalid value');
+    this.err('JSONX1007', 'invalid value');
   }
 
   scalar(value) {
@@ -245,7 +310,7 @@ class JsonxParser {
     if (this.pos >= this.text.length)
       return;
     if (!isValueEndCode(this.text.charCodeAt(this.pos)))
-      this.err('unexpected character after value');
+      this.err('JSONX1008', 'unexpected character after value');
   }
 
   parseString() {
@@ -274,9 +339,17 @@ class JsonxParser {
  * @param {(event: object) => void} [options.onEvent] - Document-order
  *  event sink: {type:'open', path, kind}, {type:'value', path, value},
  *  {type:'close', path, value} — paths are absolute (JSON-Pointer-able)
+ * @param {'error'|'strip'} [options.fences] - 'strip' reads a text that is
+ *  one Markdown code fence (```json ... ```) as the fence's body, every
+ *  position still counted in `text`; the default 'error' reads the fence as
+ *  text, which no value starts with
+ * @param {'last'|'error'} [options.duplicateKeys] - 'error' refuses a
+ *  member whose name an earlier member of the same object has
+ *  (`JSONX1018`, at its key); the default 'last' keeps the last, as
+ *  JSON.parse does
  * @returns {*} The parsed value
- * @throws {JsonxSyntaxError} On invalid input
- * @throws {TypeError} On an option other than `mode` and `onEvent` - a
+ * @throws {JsonxSyntaxError} On invalid input, with its `JSONX1xxx` code
+ * @throws {TypeError} On an option other than these four - a
  *  `JSONX2xxx` limit is refused by naming the stream reader that enforces
  *  it - or a value of the wrong type
  */
@@ -377,7 +450,7 @@ export function stringifyJsonx(value, options = {}) {
   return stringifyValue(value, new Set(), gap, 0);
 }
 
-export { JsonxSyntaxError } from './errors.js';
+export { JsonxSyntaxError, JSONX_CODES } from './errors.js';
 export { LocalDate, LocalTime, LocalDateTime } from './values.js';
 
 //#endregion

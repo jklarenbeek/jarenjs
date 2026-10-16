@@ -179,13 +179,14 @@ export class JsonxMachine {
     // them in the whitespace skipper alone is exact
     this.curLine = 1;
     this.lineStart = 0; // buf offset of the current line start (may go negative after compaction)
+    this.released = 0; // text offset of buf[0]: what compaction has dropped
     // resumable token-scan state
     this.scanPos = -1; // where the pending token's scan left off
     this.partialBoundary = true;
     this.scanInFlags = false; // regexp scan: past the closing '/'
     this.scanInClass = false; // regexp scan: inside [...]
     this.scanDtSpace = false; // scalar scan: crossed a date-time space separator
-    this.errCb = (pos, message, hint) => this.errAt(pos, message, hint);
+    this.errCb = (pos, code, message, hint) => this.errAt(pos, code, message, hint);
     this.endCb = (pos) => this.checkValueEnd(this.buf, pos);
   }
 
@@ -266,8 +267,8 @@ export class JsonxMachine {
 
   //#region errors & events
 
-  errAt(pos, message, hint) {
-    throw new JsonxSyntaxError(message, this.curLine, pos - this.lineStart + 1, hint);
+  errAt(pos, code, message, hint) {
+    throw new JsonxSyntaxError(message, this.curLine, pos - this.lineStart + 1, hint, code, this.released + pos);
   }
 
   endError() {
@@ -275,20 +276,20 @@ export class JsonxMachine {
     switch (this.state) {
       case ST_VALUE:
       case ST_ELEM_FIRST:
-        this.errAt(pos, 'unexpected end of input');
+        this.errAt(pos, 'JSONX1001', 'unexpected end of input');
         break;
       case ST_KEY_FIRST:
       case ST_KEY:
-        this.errAt(pos, 'expected a string key');
+        this.errAt(pos, 'JSONX1003', 'expected a string key');
         break;
       case ST_COLON:
-        this.errAt(pos, "expected ':' after key");
+        this.errAt(pos, 'JSONX1004', "expected ':' after key");
         break;
       case ST_OBJ_NEXT:
-        this.errAt(pos, 'unterminated object', "close the object with '}'");
+        this.errAt(pos, 'JSONX1006', 'unterminated object', "close the object with '}'");
         break;
       case ST_ARR_NEXT:
-        this.errAt(pos, 'unterminated array', "close the array with ']'");
+        this.errAt(pos, 'JSONX1006', 'unterminated array', "close the array with ']'");
         break;
     }
   }
@@ -327,7 +328,7 @@ export class JsonxMachine {
       const c = buf.charCodeAt(pos);
       switch (this.state) {
         case ST_DONE:
-          this.errAt(pos, 'unexpected trailing characters');
+          this.errAt(pos, 'JSONX1002', 'unexpected trailing characters');
           break;
         case ST_KEY_FIRST:
         case ST_KEY: {
@@ -337,7 +338,7 @@ export class JsonxMachine {
             continue;
           }
           if (c !== CC_DQUOTE)
-            this.errAt(pos, 'expected a string key');
+            this.errAt(pos, 'JSONX1003', 'expected a string key');
           const end = this.scanString(buf, pos);
           if (end < 0)
             break pumping;
@@ -349,7 +350,7 @@ export class JsonxMachine {
         }
         case ST_COLON:
           if (c !== CC_COLON)
-            this.errAt(pos, "expected ':' after key");
+            this.errAt(pos, 'JSONX1004', "expected ':' after key");
           this.state = ST_VALUE;
           pos++;
           continue;
@@ -364,7 +365,7 @@ export class JsonxMachine {
             pos++;
             continue;
           }
-          this.errAt(pos, "expected ',' or '}' in object");
+          this.errAt(pos, 'JSONX1005', "expected ',' or '}' in object");
           break;
         case ST_ARR_NEXT:
           if (c === CC_RBRACKET) {
@@ -377,7 +378,7 @@ export class JsonxMachine {
             pos++;
             continue;
           }
-          this.errAt(pos, "expected ',' or ']' in array");
+          this.errAt(pos, 'JSONX1005', "expected ',' or ']' in array");
           break;
         case ST_ELEM_FIRST:
         case ST_VALUE: {
@@ -406,6 +407,7 @@ export class JsonxMachine {
       return;
     this.buf = pos === this.buf.length ? '' : this.buf.slice(pos);
     this.pos = 0;
+    this.released += pos;
     this.lineStart -= pos;
     if (this.scanPos >= 0)
       this.scanPos -= pos;
@@ -450,7 +452,7 @@ export class JsonxMachine {
     }
     if (c === CC_SLASH) {
       if (this.mode === 'json')
-        this.errAt(pos, 'a regexp literal is a JSONX extension', 'quote the pattern as a string');
+        this.errAt(pos, 'JSONX1017', 'a regexp literal is a JSONX extension', 'quote the pattern as a string');
       const scanned = this.scanRegExp(buf, pos);
       if (scanned < 0)
         return -1;
@@ -461,7 +463,7 @@ export class JsonxMachine {
       return end;
     }
     if (this.mode === 'json' && c === CC_PLUS)
-      this.errAt(pos, "a leading '+' sign is a JSONX extension", 'remove the + sign');
+      this.errAt(pos, 'JSONX1017', "a leading '+' sign is a JSONX extension", 'remove the + sign');
     const end = this.scanScalar(buf, pos);
     if (end < 0)
       return -1;
@@ -493,7 +495,7 @@ export class JsonxMachine {
       this.checkValueEnd(buf, m[1]);
     }
     else
-      this.errAt(pos, 'invalid value');
+      this.errAt(pos, 'JSONX1007', 'invalid value');
     this.completeScalar(m[0]);
     return m[1];
   }
@@ -502,7 +504,7 @@ export class JsonxMachine {
     if (pos >= buf.length)
       return;
     if (!isValueEndCode(buf.charCodeAt(pos)))
-      this.errAt(pos, 'unexpected character after value');
+      this.errAt(pos, 'JSONX1008', 'unexpected character after value');
   }
 
   // Emit the string text that arrived since the last delta. `stop` is the
@@ -840,10 +842,11 @@ export class JsonxMachine {
  *  `feed` accepts chunks that may split any token, `end` flushes,
  *  validates completeness and returns the root, `root` peeks at the
  *  partial result.
- * @throws {TypeError} On a malformed `detach` pattern
+ * @throws {TypeError} On a malformed `detach` pattern, or on `fences` or
+ *  `duplicateKeys`, which only `parseJsonx` applies
  */
 export function createJsonxStreamReader(options = undefined) {
-  const machine = new JsonxMachine(admitOptions(options, JSONX_STREAM_READ, 'createJsonxStreamReader'));
+  const machine = new JsonxMachine(admitStreamOptions(options, 'createJsonxStreamReader'));
   return {
     feed(chunk) {
       machine.feed(chunk);
@@ -857,6 +860,20 @@ export function createJsonxStreamReader(options = undefined) {
   };
 }
 
+/** The reply options `parseJsonx` applies to a whole text and the stream reader does not. */
+const WHOLE_TEXT_OPTIONS = Object.freeze(['fences', 'duplicateKeys']);
+
+/**
+ * Admit a stream reader's options: a whole-text option is refused by naming
+ * the reader that applies it rather than the nearest member.
+ * @param {unknown} options @param {string} owner @returns {Record<string, any>}
+ */
+function admitStreamOptions(options, owner) {
+  return admitOptions(options, JSONX_STREAM_READ, owner, (key, hint) => WHOLE_TEXT_OPTIONS.includes(key)
+    ? new TypeError(`${owner}: '${key}' is a parseJsonx option — read the whole text with parseJsonx to apply it`)
+    : new TypeError(`${owner}: unknown option '${key}'${hint}`));
+}
+
 /**
  * Parse an async iterable of string chunks (e.g. an LLM output stream).
  * @param {AsyncIterable<string>|Iterable<string>} chunks - Source chunks
@@ -864,13 +881,13 @@ export function createJsonxStreamReader(options = undefined) {
  * @returns {Promise<*>} The completed root value
  */
 export async function parseJsonxStream(chunks, options = undefined) {
-  const machine = new JsonxMachine(admitOptions(options, JSONX_STREAM_READ, 'parseJsonxStream'));
+  const machine = new JsonxMachine(admitStreamOptions(options, 'parseJsonxStream'));
   for await (const chunk of chunks)
     machine.feed(chunk);
   return machine.end();
 }
 
-export { JsonxSyntaxError } from './errors.js';
+export { JsonxSyntaxError, JSONX_CODES } from './errors.js';
 export { JoslLimitError, JSONX_LIMIT_CODES } from './limits.js';
 
 //#endregion

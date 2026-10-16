@@ -237,5 +237,5 @@ export function getInclusiveExclusiveBounds(getType, inclusive, exclusive) {
   return [includes, getType(exclusive)];
 }
 
-export { checkOutcome, composeChecks } from './check.js';
+export { checkOutcome, composeChecks, CHECK_CODES } from './check.js';
 export { createGuardedRefiner } from './guarded.js';

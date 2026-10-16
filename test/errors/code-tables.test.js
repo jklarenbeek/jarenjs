@@ -7,11 +7,12 @@
  * without a doc row, or a doc row without a runtime entry, was
  * invisible. Now either direction fails here, naming the codes.
  *
- * Exempt, with reasons: josl already HAS the runtime table this shape
- * is named after (`CSV_CODES`, synced to its own docs by its own
- * tests); the JT/TL/JP/JW families and `AiError` have no normative
- * doc table to sync against (their code lists live in JSDoc), so a
- * sync test would have nothing to hold them to.
+ * Exempt, with reasons: josl's `CSV_CODES` (the table this shape is
+ * named after) is a mutable object no gate holds to its FORMAT.md rows,
+ * and its `*_LIMIT_CODES` tables are documented by option, not by a
+ * code-first row; the JT/TL/JP/JW families and `AiError` have no
+ * normative doc table to sync against (their code lists live in JSDoc),
+ * so a sync test would have nothing to hold them to.
  */
 
 import { describe, it } from 'node:test';
@@ -25,6 +26,8 @@ import { LINQ_CODES } from '@jarenjs/linq';
 import { DB_CODES } from '@jarenjs/db';
 import { CONTRACT_CODES } from '@jarenjs/contract';
 import { VALIDATE_CODES } from '@jarenjs/validate';
+import { JSONX_CODES } from '@jarenjs/josl';
+import { CHECK_CODES } from '@jarenjs/core/check';
 
 /**
  * Extract every code with the given prefix from one or more format
@@ -54,6 +57,8 @@ const TABLES = /** @type {[string, Record<string, string>, string, string][]} */
     ['packages/db/docs/MODEL-FORMAT.md', 'packages/db/docs/MIGRATION-FORMAT.md'], 'JD'],
   ['CONTRACT_CODES', CONTRACT_CODES, 'packages/contract/docs/CONTRACT-FORMAT.md', 'JC'],
   ['VALIDATE_CODES', VALIDATE_CODES, 'packages/validate/docs/ERROR-MESSAGES.md', 'JK'],
+  ['JSONX_CODES', JSONX_CODES, 'packages/josl/FORMAT.md', 'JSONX'],
+  ['CHECK_CODES', CHECK_CODES, 'packages/core/README.md', 'JG'],
 ]);
 
 describe('runtime code tables match the format docs', () => {

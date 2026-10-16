@@ -358,7 +358,14 @@ parseJsonx(text, { onEvent: (e) => console.log(e.type, e.path, e.value) });
 
 parseJsonx(text, { mode: 'json' });      // bit-compatible JSON.parse
 stringifyJsonx(v, { mode: 'json' });     // delegates to JSON.stringify
+
+// a model's reply: one surrounding Markdown code fence stripped, a key named twice refused
+parseJsonx(reply, { mode: 'json', fences: 'strip', duplicateKeys: 'error' });
 ```
+
+A syntax error is a `JsonxSyntaxError` with a stable `JSONX1xxx` `code`, its
+`line`, `column` and `offset`; the codes, and what the two reply options
+accept, are in [FORMAT.md](./FORMAT.md#jsonx).
 
 ## Exports
 
