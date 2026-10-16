@@ -42,8 +42,10 @@ const result = spawnSync(process.execPath, ['--no-warnings=ExperimentalWarning',
   '--test-isolation=none', '--test-timeout=120000', '--test-reporter=tap', ...files],
 { cwd: root, env: process.env, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024,
   // A test timeout cannot terminate a leaked client that keeps the child alive
-  // after its cases finish. Bound the complete native gate as well.
-  timeout: 300000 });
+  // after its cases finish. Bound the complete native gate as well — at twice
+  // what the whole suite takes on a hosted runner (270 s measured on
+  // 2026-10-16, when a 300 s bound began to cut a healthy run short).
+  timeout: 600000 });
 process.stdout.write(result.stdout ?? '');
 process.stderr.write(result.stderr ?? '');
 // Setting the exit code lets asynchronous output pipes drain the complete
