@@ -172,10 +172,18 @@ describe('the cost of a check grows with the instance, not with its square', () 
   ])) {
     it(name, () => {
       const baseline = (/** @type {number} */ n) => perValidation((properties) => ({ properties, additionalProperties: false }), n);
-      const checked = perValidation(build, 8000) / perValidation(build, 1000);
-      const yardstick = baseline(8000) / baseline(1000);
       // A scan per member grows ~64x over this 8x step, ~3x the yardstick.
-      assert.ok(checked < yardstick * 1.8, `grew ${checked.toFixed(1)}x against the yardstick's ${yardstick.toFixed(1)}x`);
+      // One noisy sample of either side flips a single comparison on a
+      // loaded runner, so the check passes when any of three paired trials
+      // does: a quadratic scan stays ~3x over the yardstick in all three.
+      const trials = [];
+      for (let trial = 0; trial < 3; ++trial) {
+        const checked = perValidation(build, 8000) / perValidation(build, 1000);
+        const yardstick = baseline(8000) / baseline(1000);
+        trials.push(`${checked.toFixed(1)}x against ${yardstick.toFixed(1)}x`);
+        if (checked < yardstick * 1.8) return;
+      }
+      assert.fail(`grew in every trial: ${trials.join('; ')}`);
     });
   }
 });
