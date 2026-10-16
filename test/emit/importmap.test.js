@@ -337,7 +337,7 @@ describe('buildImportMap — an installed tree, served unbundled', () => {
       assert.deepStrictEqual(JSON.parse(run.stdout).imports, skipped.imports);
       // named, the package is reported against its manifest, and neither mapped nor listed
       const named = buildImportMap({ ...options, packages: ['@x/canvas-linux-x64-gnu'] });
-      assert.deepStrictEqual(named, { imports: {}, files: [], duplicates: [], optional: [],
+      assert.deepStrictEqual(named, { imports: {}, files: [], duplicates: [], optional: [], skipped: [],
         unresolved: [{ specifier: '@x/canvas-linux-x64-gnu', from: '@x/canvas-linux-x64-gnu/package.json' }] });
       /** @param {string} file @param {string} content */
       const write = (file, content) => {
@@ -359,6 +359,94 @@ describe('buildImportMap — an installed tree, served unbundled', () => {
       // a served file that imports the skipped package is reported at the import
       write('node_modules/@x/canvas/index.js', "import '@x/canvas-linux-x64-gnu';\nexport const canvas = 1;\n");
       assert.deepStrictEqual(buildImportMap(options).unresolved, [{ specifier: '@x/canvas-linux-x64-gnu', from: '@x/canvas/index.js' }]);
+    }
+    finally { fs.rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it('finds an extensionless main Node resolves to a native addon, and maps no package for it', () => {
+    const root = installTree({
+      'node_modules/@x/ext/package.json': { name: '@x/ext', version: '1.0.0', exports: './index.js',
+        optionalDependencies: { '@x/ext-linux': '1.0.0', '@x/ext-dir': '1.0.0' } },
+      'node_modules/@x/ext/index.js': 'export const ext = 1;\n',
+      // Node's legacy main resolution loads binding.node for main "binding"
+      'node_modules/@x/ext-linux/package.json': { name: '@x/ext-linux', version: '1.0.0', main: 'binding' },
+      'node_modules/@x/ext-linux/binding.node': '\u007fELF\n',
+      // ... and lib/index.node for main "lib"
+      'node_modules/@x/ext-dir/package.json': { name: '@x/ext-dir', version: '1.0.0', main: 'lib' },
+      'node_modules/@x/ext-dir/lib/index.node': '\u007fELF\n',
+    });
+    try {
+      const options = { packages: ['@x/ext'], root, prefix: '/v/' };
+      const result = buildImportMap(options);
+      assert.deepStrictEqual(result.imports, { '@x/ext': '/v/@x/ext/index.js' });
+      assert.deepStrictEqual(result.files, ['/v/@x/ext/index.js']);
+      assert.deepStrictEqual(result.unresolved, []);
+      assert.deepStrictEqual(result.skipped, []);
+      const run = runCli(root, ['--packages', '@x/ext', '--prefix', '/v/']);
+      assert.strictEqual(run.status, 0, run.stderr);
+      assert.strictEqual(run.stderr, '');
+      // named, it is reported against its manifest as a native main is
+      assert.deepStrictEqual(buildImportMap({ ...options, packages: ['@x/ext-linux'] }).unresolved,
+        [{ specifier: '@x/ext-linux', from: '@x/ext-linux/package.json' }]);
+    }
+    finally { fs.rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it('maps no export that is a native addon: a native-only package as a native main, one beside JavaScript skipped with a warning', () => {
+    const root = installTree({
+      'node_modules/@x/app2/package.json': { name: '@x/app2', version: '1.0.0', exports: './index.js',
+        optionalDependencies: { '@x/bin-linux': '1.0.0' } },
+      'node_modules/@x/app2/index.js': 'export const app = 1;\n',
+      // a platform package whose exports name only the binary
+      'node_modules/@x/bin-linux/package.json': { name: '@x/bin-linux', version: '1.0.0', exports: { '.': './x.node' } },
+      'node_modules/@x/bin-linux/x.node': '\u007fELF\n',
+      // JavaScript exports beside a native one, and a wildcard that reaches a binary
+      'node_modules/@x/mixed/package.json': { name: '@x/mixed', version: '1.0.0',
+        exports: { '.': './index.js', './native': './x.node', './lib/*': './lib/*' } },
+      'node_modules/@x/mixed/index.js': 'export const mixed = 1;\n',
+      'node_modules/@x/mixed/x.node': '\u007fELF\n',
+      'node_modules/@x/mixed/lib/a.js': 'export const a = 1;\n',
+      'node_modules/@x/mixed/lib/b.node': '\u007fELF\n',
+      // a condition that serves the browser JavaScript and Node the binary
+      'node_modules/@x/cond/package.json': { name: '@x/cond', version: '1.0.0', exports: { '.': { node: './x.node', default: './index.js' } } },
+      'node_modules/@x/cond/index.js': 'export const cond = 1;\n',
+      'node_modules/@x/cond/x.node': '\u007fELF\n',
+    });
+    try {
+      // reached only optionally, the native-only package maps nothing and is not reported
+      const optional = buildImportMap({ packages: ['@x/app2'], root, prefix: '/v/' });
+      assert.deepStrictEqual(optional.imports, { '@x/app2': '/v/@x/app2/index.js' });
+      assert.deepStrictEqual(optional.files, ['/v/@x/app2/index.js']);
+      assert.deepStrictEqual(optional.unresolved, []);
+      assert.deepStrictEqual(optional.skipped, []);
+      // required (named), it is reported against its manifest
+      const named = buildImportMap({ packages: ['@x/bin-linux'], root, prefix: '/v/' });
+      assert.deepStrictEqual(named, { imports: {}, files: [], duplicates: [], optional: [], skipped: [],
+        unresolved: [{ specifier: '@x/bin-linux', from: '@x/bin-linux/package.json' }] });
+      // beside JavaScript, each native export is left out and said so; the rest maps as before, exit 0
+      const mixed = buildImportMap({ packages: ['@x/mixed'], root, prefix: '/v/' });
+      assert.deepStrictEqual(mixed.imports, { '@x/mixed': '/v/@x/mixed/index.js', '@x/mixed/lib/a.js': '/v/@x/mixed/lib/a.js' });
+      assert.deepStrictEqual(mixed.files, ['/v/@x/mixed/index.js', '/v/@x/mixed/lib/a.js']);
+      assert.deepStrictEqual(mixed.unresolved, []);
+      const reason = 'a native addon (.node), which a browser cannot load';
+      assert.deepStrictEqual(mixed.skipped, [
+        { specifier: '@x/mixed/lib/b.node', from: '@x/mixed/package.json', reason },
+        { specifier: '@x/mixed/native', from: '@x/mixed/package.json', reason },
+      ]);
+      const run = runCli(root, ['--packages', '@x/mixed', '--prefix', '/v/']);
+      assert.strictEqual(run.status, 0, run.stderr);
+      assert.strictEqual(run.stderr,
+        'warning: @x/mixed/package.json exports @x/mixed/lib/b.node as a native addon (.node), which a browser cannot load: the map leaves it out\n'
+        + 'warning: @x/mixed/package.json exports @x/mixed/native as a native addon (.node), which a browser cannot load: the map leaves it out\n');
+      assert.deepStrictEqual(JSON.parse(run.stdout).imports, mixed.imports);
+      // the browser condition already picks the JavaScript: nothing skipped
+      const cond = buildImportMap({ packages: ['@x/cond'], root, prefix: '/v/' });
+      assert.deepStrictEqual(cond.imports, { '@x/cond': '/v/@x/cond/index.js' });
+      assert.deepStrictEqual(cond.skipped, []);
+      // a served file that imports a skipped export is reported at the import
+      fs.writeFileSync(path.join(root, 'node_modules/@x/mixed/index.js'), "import '@x/mixed/native';\nexport const mixed = 1;\n");
+      assert.deepStrictEqual(buildImportMap({ packages: ['@x/mixed'], root, prefix: '/v/' }).unresolved,
+        [{ specifier: '@x/mixed/native', from: '@x/mixed/index.js' }]);
     }
     finally { fs.rmSync(root, { recursive: true, force: true }); }
   });

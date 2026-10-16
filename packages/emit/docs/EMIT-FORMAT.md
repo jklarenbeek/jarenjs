@@ -73,7 +73,8 @@ generated artifact that churns between runs cannot be reviewed in a diff.
 
 `name` is the property name **verbatim** — it is data, not an identifier, and
 an emitter quotes it if its target language requires that. `default` is
-present only when the source schema declares one. Members appear in the order
+present only when the source schema declares one the validator reads (not
+beside a `$ref` its draft reads alone, see §9). Members appear in the order
 the schema declared them. Names present only in `required` are appended in that
 array's order with type `unknown`; the `properties` map is not required to
 establish member presence.
@@ -200,11 +201,14 @@ that across reference cycles — a type differs if anything it contains differs 
 with one defaulted field does not double every declaration in the document.
 Everything unaffected is referenced by its single shared name from both sides.
 
-**Two normalizations produce a difference, and only two.** `useDefaults` moves
+**Three normalizations produce a difference, and only three.** `useDefaults` moves
 a member from optional to required across the boundary. `coerceTypes` widens
-the accepted side to the types the normalizer will convert *from*. `trimStrings`
-is string-to-string and `removeAdditional` removes members no type declared, so
-neither justifies a second declaration.
+the accepted side to the types the normalizer will convert *from*.
+`coerceJsonText` widens the accepted side of an object or array node by
+`string`, exactly where the normalizer decodes JSON text: the node's own `type`
+names `object` or `array` and not `string`, and the node is not read as its
+`$ref` alone. `trimStrings` is string-to-string and `removeAdditional` removes
+members no type declared, so neither justifies a second declaration.
 
 A producer MUST derive the accepted side from the **same** switch resolution
 the normalizer uses, including predicate options. A variant that disagrees
@@ -274,13 +278,15 @@ Concretely, a producer:
   Following a ref into another document would mean owning a resolution scope,
   which is `@jarenjs/validate`'s job, not this format's. Within the document,
   the resolved forms are exactly the ones `compileNormalizer` resolves — `#`,
-  `#/pointer` and plain `#anchor` (outside embedded `$id` resources) — and a
-  `$ref`'s siblings compose with its target as an intersection, per 2019-09+.
-  That composition is unconditional, like the normalizer's: a draft-07
-  document in which a validator lets `$ref` shadow its siblings should not
-  put constraining siblings there — they are dead keywords to that validator,
-  and this producer takes them at their word.
+  `#/pointer` and plain `#anchor` (outside embedded `$id` resources). A
+  `$ref`'s siblings are read as the validator and `compileNormalizer` read
+  them, by the draft the node is read under (its own `$schema`, else the
+  nearest one above it, else draft-07): from 2019-09 on they compose with the
+  target as an intersection; before it, and in a document that declares no
+  draft, the node is its target alone — the siblings add no type, no
+  constraint, no default and no variant, and only a `description` beside the
+  `$ref` still documents it.
 - **`removeAdditional` and `trimStrings` as type differences.** Neither
   changes a *declared* type: trimming is string-to-string, and stripping
-  removes members the type never declared. Only `useDefaults` and
-  `coerceTypes` earn a variant (§7).
+  removes members the type never declared. Only `useDefaults`,
+  `coerceTypes` and `coerceJsonText` earn a variant (§7).

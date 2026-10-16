@@ -43,10 +43,13 @@ describe('emitted schema agreement', () => {
     });
   });
 
-  it('retains the documented draft-neutral ref sibling intersection', () => {
-    assert.deepEqual(rootType({ $defs: { S: { type: 'string' } }, $ref: '#/$defs/S', type: 'number' }), {
+  it('reads $ref siblings as the declared draft does: intersected from 2019-09, inert before and undeclared', () => {
+    const schema = { $defs: { S: { type: 'string' } }, $ref: '#/$defs/S', type: 'number' };
+    assert.deepEqual(rootType({ $schema: 'https://json-schema.org/draft/2020-12/schema', ...schema }), {
       kind: 'intersection', parts: [{ kind: 'ref', ref: 'S' }, { kind: 'primitive', primitive: 'number' }],
     });
+    assert.equal(new JarenValidator().compile(schema)('a'), true);
+    assert.deepEqual(rootType(schema), { kind: 'ref', ref: 'S' });
   });
 
   it('carries anonymous constraints into both generated artifacts', () => {

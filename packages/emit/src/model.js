@@ -36,6 +36,8 @@ import {
 import { parseJSONPointer } from '@jarenjs/json';
 import {
   collectSameDocumentAnchors,
+  detectSchemaDraft,
+  readsRefAlone,
   resolveNormalizeSwitch,
   resolveSameDocumentRef,
 } from '@jarenjs/validate/normalize';
@@ -322,11 +324,70 @@ function unionOf(types) {
 }
 
 /**
+ * The draft each container of one document is read under: the nearest
+ * `$schema` at or above it, or null where none is declared. It is the reading
+ * `compileNormalizer` carries down its walk and along a reference's pointer,
+ * so a node reads one way here whichever way it is reached.
+ * @param {any} root - The root schema
+ * @returns {Map<object, number|null>}
+ */
+function collectDeclaredDrafts(root) {
+  /** @type {Map<object, number|null>} */
+  const drafts = new Map();
+  /** @param {any} node @param {number|null} inherited */
+  const walk = (node, inherited) => {
+    if (node === null || typeof node !== 'object' || drafts.has(node)) return;
+    const draft = !Array.isArray(node) && typeof node.$schema === 'string' ? detectSchemaDraft(node) : inherited;
+    drafts.set(node, draft);
+    for (const key of Object.keys(node)) walk(node[key], draft);
+  };
+  walk(root, null);
+  return drafts;
+}
+
+/**
+ * The keywords a schema node is read by. Before draft 2019-09, and where no
+ * draft is declared, the validator and `compileNormalizer` read a node holding
+ * a `$ref` as its target alone (`readsRefAlone`): nothing beside the `$ref`
+ * asserts, coerces, decodes or defaults, so the type, its constraints and its
+ * variants read only the `$ref` there — and a `description`, which asserts
+ * nothing and still documents the node. Everywhere else, the node itself.
+ * @param {any} node - The schema node
+ * @param {object} ctx - The compile context
+ * @returns {any} The node, or the keywords it is read by
+ */
+function readingOf(node, ctx) {
+  if (!isJsonObject(node) || typeof node.$ref !== 'string'
+    || !readsRefAlone(node, ctx.drafts.get(node) ?? null)) return node;
+  return typeof node.description === 'string'
+    ? { $ref: node.$ref, description: node.description }
+    : { $ref: node.$ref };
+}
+
+/**
+ * Whether `compileNormalizer` decodes JSON text at this node under
+ * `coerceJsonText`: the node's own `type` names `object` or `array` and not
+ * `string`, and the switch resolves on. This mirrors the gate of the
+ * normalizer's JSON-text step; a node read as its `$ref` alone carries no
+ * `type` in its reading (`readingOf`), so it decodes nothing, as there.
+ * @param {any} node - The schema node, as `readingOf` reads it
+ * @param {NormalizeOptions} options - The normalize options
+ * @returns {boolean}
+ */
+function decodesJsonText(node, options) {
+  const types = typeof node.type === 'string' ? [node.type] : node.type;
+  if (!Array.isArray(types) || types.includes('string')
+    || (!types.includes('object') && !types.includes('array'))) return false;
+  return resolveNormalizeSwitch(options.coerceJsonText, node);
+}
+
+/**
  * Whether normalization changes the TYPE of this subtree.
  *
- * Only two of the four normalizations do. `useDefaults` makes a defaulted
+ * Three of the five normalizations do. `useDefaults` makes a defaulted
  * member optional on input and present on output; `coerceTypes` widens what a
- * scalar accepts. `trimStrings` is string-to-string, and `removeAdditional`
+ * scalar accepts; `coerceJsonText` widens an object or array node by the JSON
+ * text it decodes. `trimStrings` is string-to-string, and `removeAdditional`
  * removes members the type never declared — neither changes a declared type,
  * so neither justifies a second declaration.
  *
@@ -354,6 +415,7 @@ function normalizationChangesType(node, ctx) {
   if (cached !== undefined) return cached;
   if (ctx.analyzing.has(node)) return false;
   ctx.analyzing.add(node);
+  const read = readingOf(node, ctx);
 
   let differs = false;
 
@@ -363,19 +425,22 @@ function normalizationChangesType(node, ctx) {
       differs = normalizationChangesType(target, ctx);
   }
 
-  if (!differs && typeof node.type === 'string'
-    && COERCIBLE_FROM[node.type] !== undefined
-    && resolveNormalizeSwitch(options.coerceTypes, node)) {
+  if (!differs && decodesJsonText(read, options)) differs = true;
+
+  if (!differs && typeof read.type === 'string'
+    && COERCIBLE_FROM[read.type] !== undefined
+    && resolveNormalizeSwitch(options.coerceTypes, read)) {
     differs = true;
   }
 
-  const properties = isJsonObject(node.properties) ? node.properties : null;
+  const properties = isJsonObject(read.properties) ? read.properties : null;
   if (!differs && properties !== null) {
     const keys = Object.getOwnPropertyNames(properties);
     for (let i = 0; i < keys.length && !differs; i++) {
       const sub = properties[keys[i]];
-      if (isJsonObject(sub) && sub.default !== undefined
-        && resolveNormalizeSwitch(options.useDefaults, sub)) {
+      const subRead = readingOf(sub, ctx);
+      if (isJsonObject(subRead) && subRead.default !== undefined
+        && resolveNormalizeSwitch(options.useDefaults, subRead)) {
         differs = true;
         break;
       }
@@ -386,9 +451,9 @@ function normalizationChangesType(node, ctx) {
   // The array walk mirrors buildArrayStep: the tuple spelling decides which
   // keywords the normalizer reads, so it decides which ones this reads.
   if (!differs) {
-    const itemsIsTuple = Array.isArray(node.items);
-    const prefixSource = itemsIsTuple ? node.items : node.prefixItems;
-    const restSource = itemsIsTuple ? node.additionalItems : node.items;
+    const itemsIsTuple = Array.isArray(read.items);
+    const prefixSource = itemsIsTuple ? read.items : read.prefixItems;
+    const restSource = itemsIsTuple ? read.additionalItems : read.items;
     if (Array.isArray(prefixSource)) {
       for (let i = 0; i < prefixSource.length && !differs; i++)
         differs = normalizationChangesType(prefixSource[i], ctx);
@@ -398,17 +463,17 @@ function normalizationChangesType(node, ctx) {
   }
 
   if (!differs)
-    differs = normalizationChangesType(node.additionalProperties, ctx);
+    differs = normalizationChangesType(read.additionalProperties, ctx);
 
-  if (!differs && Array.isArray(node.allOf)) {
-    for (let i = 0; i < node.allOf.length && !differs; i++)
-      differs = normalizationChangesType(node.allOf[i], ctx);
+  if (!differs && Array.isArray(read.allOf)) {
+    for (let i = 0; i < read.allOf.length && !differs; i++)
+      differs = normalizationChangesType(read.allOf[i], ctx);
   }
 
-  if (!differs && isJsonObject(node.patternProperties)) {
-    const keys = Object.getOwnPropertyNames(node.patternProperties);
+  if (!differs && isJsonObject(read.patternProperties)) {
+    const keys = Object.getOwnPropertyNames(read.patternProperties);
     for (let i = 0; i < keys.length && !differs; i++)
-      differs = normalizationChangesType(node.patternProperties[keys[i]], ctx);
+      differs = normalizationChangesType(read.patternProperties[keys[i]], ctx);
   }
 
   ctx.analyzing.delete(node);
@@ -432,6 +497,8 @@ function createContext(root, options, shared) {
     suffix: options.variantSuffix ?? 'Input',
     /** @type {Map<string, object>} the document's $anchor declarations */
     anchors: shared.anchors,
+    /** @type {Map<object, number|null>} the draft each node is read under */
+    drafts: shared.drafts,
     /** @type {Map<object, boolean>} node -> normalization changes its type */
     differs: shared.differs,
     /** @type {Set<object>} nodes being analyzed, for cycle detection */
@@ -479,6 +546,7 @@ function createPlainContext(ctx) {
     variant: null,
     suffix: ctx.suffix,
     anchors: ctx.anchors,
+    drafts: ctx.drafts,
     differs: ctx.differs,
     analyzing: ctx.analyzing,
     // Same array: plain declarations are emitted in discovery order among
@@ -544,11 +612,12 @@ function typeOf(node, ctx, hint, documented = false) {
   // Anonymous constraints need a declaration's documentation slot. Object
   // member documentation also needs the declaration printer: an inline
   // object type has no member comment surface in either bundled emitter.
-  const documentedMembers = isJsonObject(node.properties)
-    && Object.values(node.properties).some((member) => isJsonObject(member)
-      && (droppedConstraints(member).length > 0
+  const read = readingOf(node, ctx);
+  const documentedMembers = isJsonObject(read.properties)
+    && Object.values(read.properties).some((member) => isJsonObject(member)
+      && (droppedConstraints(readingOf(member, ctx)).length > 0
         || (typeof member.description === 'string' && member.description.length > 0)));
-  if ((!documented && droppedConstraints(node).length > 0) || documentedMembers)
+  if ((!documented && droppedConstraints(read).length > 0) || documentedMembers)
     return declare(node, ctx, hint);
   return shapeOf(node, ctx, hint);
 }
@@ -613,8 +682,9 @@ function declare(node, ctx, hint, forceOwn = false) {
     ctx.variant === 'accepted' ? `${hint}${ctx.suffix}` : hint);
   ctx.named.set(node, name);
   ctx.building.add(node);
-  const constraints = droppedConstraints(node);
-  const doc = docLinesFor(node, constraints);
+  const read = readingOf(node, ctx);
+  const constraints = droppedConstraints(read);
+  const doc = docLinesFor(read, constraints);
   if (ctx.variant === 'accepted') {
     doc.push(`Accepted input for ${ctx.shared.get(node) ?? hint}: the shape before `
       + 'normalization, where defaulted members may be absent and coercible '
@@ -711,20 +781,23 @@ function literalMatchesType(value, node) {
 }
 
 /** The structural shape of a schema node. */
-function shapeOf(node, ctx, hint) {
+function shapeOf(schema, ctx, hint) {
   const parts = [];
+  const node = readingOf(schema, ctx);
 
   // `$ref` composes with its siblings: since 2019-09 the other keywords
   // apply ALONGSIDE the reference, so the target is one intersection part
   // rather than a substitute for the node — ignoring the siblings emitted a
-  // type wider than the schema in one place and narrower in another. A bare
-  // `$ref` with nothing else collapses to a plain alias below, and an
-  // unresolvable one contributes nothing, leaving the node honestly wider.
+  // type wider than the schema in one place and narrower in another. Before
+  // 2019-09, and where no draft is declared, the node is read as its `$ref`
+  // alone (`readingOf`), so nothing beside it takes part. A bare `$ref` with
+  // nothing else collapses to a plain alias below, and an unresolvable one
+  // contributes nothing, leaving the node honestly wider.
   if (typeof node.$ref === 'string') {
     const target = resolveRef(node.$ref, ctx);
     // A ref that resolves to the node itself asserts nothing — and spelled
     // out it would be a circular alias, which is not a type.
-    if (target !== null && target.node !== node)
+    if (target !== null && target.node !== schema)
       parts.push(declare(target.node, ctx, target.name ?? hint));
   }
 
@@ -739,6 +812,9 @@ function shapeOf(node, ctx, hint) {
     containerLiteral = values.some((value) => isJsonObject(value) || Array.isArray(value));
     for (const source of coercionSources(node, values, ctx))
       literals.push(T.primitive(PRIMITIVES[source]));
+    // a container literal's JSON text decodes into it before validation
+    if (containerLiteral && decodesJsonTextHere(node, ctx))
+      literals.push(T.primitive('string'));
     parts.push(unionOf(literals));
   }
 
@@ -823,8 +899,18 @@ function ownShape(node, ctx, hint) {
     }
     else alternatives.push(T.unknown());
   }
+  // ... and the JSON text of an object or array the normalizer decodes
+  // before any other step of the node runs.
+  if (decodesJsonTextHere(node, ctx)) alternatives.push(T.primitive('string'));
   if (node.nullable === true) alternatives.push(T.primitive('null'));
   return unionOf(alternatives);
+}
+
+/** Whether this pass is the accepted variant and the normalizer decodes
+ * JSON text at `node` (see {@link decodesJsonText}). */
+function decodesJsonTextHere(node, ctx) {
+  return ctx.variant === 'accepted' && ctx.normalize !== null
+    && decodesJsonText(node, ctx.normalize);
 }
 
 /** An object type: declared members plus an optional index signature. */
@@ -838,7 +924,8 @@ function objectShape(node, ctx, hint) {
     for (let i = 0; i < keys.length; i++) {
       const key = keys[i];
       const sub = properties[key];
-      const subNode = isJsonObject(sub) ? sub : {};
+      const own = isJsonObject(sub) ? sub : {};
+      const subNode = readingOf(own, ctx);
       const constraints = droppedConstraints(subNode);
       const defaulted = subNode.default !== undefined && ctx.normalize !== null
         && resolveNormalizeSwitch(ctx.normalize.useDefaults, subNode);
@@ -864,9 +951,9 @@ function objectShape(node, ctx, hint) {
       if (Array.isArray(declaredExtensions)) {
         let carried = null;
         for (const keyword of declaredExtensions) {
-          if (subNode[keyword] === undefined) continue;
+          if (own[keyword] === undefined) continue;
           if (carried === null) carried = {};
-          setObjectMember(carried, keyword, subNode[keyword]);
+          setObjectMember(carried, keyword, own[keyword]);
         }
         if (carried !== null) member.extensions = carried;
       }
@@ -982,6 +1069,7 @@ export function compileEmitModel(schema, options = {}) {
   // variant-less by construction, so one set serves both sides.
   const shared = {
     anchors: collectSameDocumentAnchors(schema),
+    drafts: collectDeclaredDrafts(schema),
     differs: new Map(),
     analyzing: new Set(),
     plainNamed: new Map(),

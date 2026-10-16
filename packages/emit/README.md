@@ -153,16 +153,22 @@ handler signature takes `ConfigInput`, the rest of the program handles
 that out across the reference graph, including cycles, so a schema with one defaulted field does not double every
 declaration; everything unaffected keeps a single shared name on both sides.
 
-**Only two normalizations produce a difference.** `useDefaults` moves a member
-across the optional boundary and `coerceTypes` widens what the input accepts.
-`trimStrings` is string-to-string, and `removeAdditional` removes members no
-type ever declared — neither earns a second declaration.
+**Only three normalizations produce a difference.** `useDefaults` moves a member
+across the optional boundary, `coerceTypes` widens what the input accepts, and
+`coerceJsonText` widens an object or array node by `string` exactly where the
+normalizer decodes JSON text into it (the node's own `type` names `object` or
+`array` and not `string`; never inside `anyOf`/`oneOf`, never beside a `$ref`
+the draft reads alone). `trimStrings` is string-to-string, and
+`removeAdditional` removes members no type ever declared — neither earns a
+second declaration. Upgrade note: a model compiled with `coerceJsonText` used
+to emit no accepted twin for it, so the input type refused the JSON text the
+normalizer takes; it now emits one.
 
 **Choosing per field from the command line.** `--defaults` and `--coerce` turn a
 normalization on for every node. The per-node route the programmatic API offers
 as a predicate has a command-line spelling: `--config <file>` names a JSON
 object of `compileNormalizer` options (`useDefaults`, `coerceTypes`,
-`trimStrings`, `removeAdditional`), where a switch is `true`, `false`, or the
+`trimStrings`, `coerceJsonText`, `removeAdditional`), where a switch is `true`, `false`, or the
 name of a schema annotation that turns it on for the nodes carrying
 `<annotation>: true`:
 
@@ -200,8 +206,8 @@ exits 2 and writes nothing; the string `"true"` or `"false"` in place of the
 boolean is named as such, since a quoted boolean is a typo and not an annotation.
 `--defaults`/`--coerce` beside a config that sets
 the same option is refused too (exit 2), so an option has one place it is
-decided. A config whose `useDefaults` and `coerceTypes` are both off emits one
-declaration per type, as no flag at all does.
+decided. A config whose `useDefaults`, `coerceTypes` and `coerceJsonText` are
+all off emits one declaration per type, as no flag at all does.
 
 The switch resolution, including per-field predicates, is **imported from the
 normalizer rather than reimplemented**. Two copies of that rule would drift,
@@ -324,9 +330,13 @@ subpath:
   The map does not refuse it, since refusing would fail a manifest whose other
   exports serve a working page;
 - a package without `exports` serves its `main`, read from the package root:
-  the first of `main`, `main.js` and `main/index.js` that is a file, else its
-  `index.js` (Node's `.json` and `.node` candidates are not tried, a browser
-  map serving only JavaScript);
+  the first of `main`, `main.js`, `main.node`, `main/index.js` and
+  `main/index.node` that is a file, else its `index.js` (Node's `.json`
+  candidates are not tried, a browser map serving only JavaScript). Upgrade
+  note: a `main: "binding"` beside `binding.node`, which Node loads, used to
+  be read as a missing `./index.js` and reported, so an optional-only platform
+  package of that shape failed the command; it is now the native addon it is
+  (next item);
 - a `main` that is a native addon (`.node`, as a napi-rs platform package
   names its binary) is not mapped and its file is not listed, since a browser
   import of it would fail at load: reached only through
@@ -342,7 +352,18 @@ subpath:
   `--packages`, reached through `dependencies` or `peerDependencies` too, or
   imported by a served file, it is reported unresolved as any other package is.
   Upgrade note: such a package used to be reported as its missing `./index.js`,
-  and the command exited 1.
+  and the command exited 1;
+- an `exports` target that is a native addon is never mapped or listed either.
+  A package whose every export target is one declares no JavaScript entry and
+  is treated as a native `main` is: passed over when only
+  `optionalDependencies` reach it, reported unresolved when the closure
+  requires it. Beside JavaScript exports, each native one is left out and
+  reported in the result's `skipped` (`{ specifier, from, reason }`), which
+  the command prints as a warning on stderr without failing: a page that
+  never imports it works, and a served file that does import it is reported
+  unresolved at that import. Upgrade note: such a target used to be mapped to
+  its `.node` file and the file listed in `--files`; a package the closure
+  requires whose only export is one now fails the command.
 
 `--prefix` is the URL `node_modules` is served under, so a dependency
 installed nested is served from where it sits. A package installed twice — a
@@ -385,7 +406,7 @@ of your own.
 | `additionalProperties: false` | a closed interface unless `patternProperties` supplies an index signature; with no members or patterns, `Record<string, never>` (an empty interface would let a primitive through) |
 | `items` | `Array<T>` |
 | `prefixItems`, array-form `items` | a tuple: the first `minItems` positions required, the rest optional, and an **open** rest (`...Array<unknown>`) unless `items: false`/`additionalItems: false` closes it — JSON Schema accepts shorter and longer arrays, so the type does too |
-| `$ref` (same document, including cycles) | a reference to the named declaration — `#/pointer` and plain `#anchor` forms, resolving exactly as `compileNormalizer` resolves them; a root `$ref` aliases its target, and 2019-09+ siblings intersect with it |
+| `$ref` (same document, including cycles) | a reference to the named declaration — `#/pointer` and plain `#anchor` forms, resolving exactly as `compileNormalizer` resolves them; a root `$ref` aliases its target, and siblings intersect with it where the node's draft applies them (2019-09 on) — before it, and where no draft is declared, the node is its target alone, as the validator reads it: siblings add no type, constraint, default or variant |
 | `allOf` | an intersection |
 | `anyOf`, `oneOf` | a union |
 | `properties`/`items` with **no `type`** | the container shape as one union arm, plus the other JSON kinds — applicators do not imply a container, and the validator accepts a primitive without reading them |

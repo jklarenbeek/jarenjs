@@ -44,10 +44,12 @@ normalizing gains a second declaration: Config is what you have afterwards,
 ConfigInput is what a caller may hand in.
 
 --config names a JSON object holding compileNormalizer options: useDefaults,
-coerceTypes, trimStrings (each true, false, or the name of a schema annotation
-that switches it on per node, so "coerceTypes": "x-coerce" coerces exactly the
-nodes carrying "x-coerce": true) and removeAdditional (true, false or "all").
-It is the route for the per-node choice the two flags cannot make. A
+coerceTypes, trimStrings, coerceJsonText (each true, false, or the name of a
+schema annotation that switches it on per node, so "coerceTypes": "x-coerce"
+coerces exactly the nodes carrying "x-coerce": true) and removeAdditional
+(true, false or "all"). With coerceJsonText on, the accepted variant of an
+object or array node the normalizer decodes JSON text into also takes a
+string. It is the route for the per-node choice the two flags cannot make. A
 --defaults/--coerce flag and the config's setting for the same option refuse
 each other: give it in one place. A config that cannot be read, is not JSON, or
 names an unknown or mistyped option exits 2 and writes nothing (a quoted
@@ -70,7 +72,8 @@ importmap options — serve installed packages unbundled:
 The import map is printed to stdout. A package installed twice, or an import
 the map cannot resolve, is reported on stderr with exit code 1. An import of an
 optional peer dependency that is not installed is a warning on stderr: only a
-page that loads the file importing it needs it.
+page that loads the file importing it needs it. So is an export that is a
+native addon (.node) beside JavaScript exports: the map leaves it out.
 
 Examples:
   jaren-emit --schema ./schemas --out ./src/types
@@ -117,6 +120,9 @@ function importmapCommand(argv) {
   for (const { specifier, from, reason } of result.optional) {
     console.error(`warning: ${from} imports ${specifier}, ${reason}: only a page that loads ${from} needs it`);
   }
+  for (const { specifier, from, reason } of result.skipped) {
+    console.error(`warning: ${from} exports ${specifier} as ${reason}: the map leaves it out`);
+  }
   for (const { specifier, from } of result.unresolved) {
     console.error(`error: ${from} imports ${specifier}, which the map does not resolve`);
     failed = true;
@@ -132,8 +138,11 @@ function importmapCommand(argv) {
   return 0;
 }
 
+/** The `--config` members that are switches: true, false or a schema annotation's name. */
+const CONFIG_SWITCHES = Object.freeze(['useDefaults', 'coerceTypes', 'trimStrings', 'coerceJsonText']);
+
 /** The members of `--config`: the `compileNormalizer` options, by name. */
-const CONFIG_OPTIONS = Object.freeze(['useDefaults', 'removeAdditional', 'coerceTypes', 'trimStrings']);
+const CONFIG_OPTIONS = Object.freeze(['useDefaults', 'removeAdditional', 'coerceTypes', 'trimStrings', 'coerceJsonText']);
 
 /**
  * Read the `--config` file into `compileNormalizer` options. A string naming
@@ -155,7 +164,7 @@ function readConfig(file) {
   refuseUnknownMembers(config, CONFIG_OPTIONS, (key, hint) => refuse(`unknown option '${key}'${hint}`));
   const options = {};
   const routes = [];
-  for (const name of ['useDefaults', 'coerceTypes', 'trimStrings']) {
+  for (const name of CONFIG_SWITCHES) {
     const value = config[name];
     if (value === undefined) continue;
     if (value === 'true' || value === 'false') {
@@ -199,8 +208,8 @@ function findAnnotations(value, wanted, found) {
  * The options the model derives variants from: the config file's, with the
  * two flags as `true` for the option each names. A flag and the config both
  * setting the same option is a contradiction nobody can resolve for the
- * caller, so it is refused. `null` when neither `useDefaults` nor
- * `coerceTypes` is on: the model then emits one declaration per type.
+ * caller, so it is refused. `null` when none of `useDefaults`, `coerceTypes`
+ * and `coerceJsonText` is on: the model then emits one declaration per type.
  * @param {{ defaults: boolean, coerce: boolean, config: string | null }} options
  * @returns {{ normalize: Record<string, any> | null, routes: string[] }}
  */
@@ -213,7 +222,7 @@ function normalizeOptionsOf(options) {
     settings[name] = true;
   }
   const on = (value) => value !== undefined && value !== false;
-  return { normalize: on(settings.useDefaults) || on(settings.coerceTypes) ? settings : null, routes };
+  return { normalize: on(settings.useDefaults) || on(settings.coerceTypes) || on(settings.coerceJsonText) ? settings : null, routes };
 }
 
 function parseArgs(argv) {

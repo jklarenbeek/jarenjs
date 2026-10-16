@@ -214,8 +214,9 @@ describe('compileEmitModel — refs', () => {
     assert.deepStrictEqual(decl(model, 'Id').type, { kind: 'ref', ref: 'Uuid' });
   });
 
-  it('intersects $ref siblings with their target', () => {
+  it('intersects $ref siblings with their target where the declared draft applies them', () => {
     const model = compileEmitModel({
+      $schema: 'https://json-schema.org/draft/2020-12/schema',
       $defs: { Base: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] } },
       $ref: '#/$defs/Base',
       type: 'object',

@@ -161,6 +161,33 @@ describe('jaren-emit --config — the per-node route', () => {
     finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
 
+  it('coerceJsonText widens by string exactly the object and array nodes it decodes, everywhere or by annotation', () => {
+    const document = {
+      type: 'object',
+      properties: {
+        filter: { type: 'object', properties: { tags: { type: 'array', items: { type: 'string' } } }, 'x-json': true },
+        list: { type: 'array', items: { type: 'number' } },
+        either: { type: ['object', 'string'] },
+      },
+    };
+    const everywhere = run({ coerceJsonText: true }, [], document);
+    assert.strictEqual(everywhere.status, 0, everywhere.stderr);
+    assert.match(everywhere.text ?? '', /^export type SchemaInput = \{ filter\?: \{ tags\?: Array<string> \| string; \[key: string\]: unknown; \} \| string; list\?: Array<number> \| string; either\?: \{ \[key: string\]: unknown; \} \| string; \[key: string\]: unknown; \} \| string;$/m);
+    const routed = run({ coerceJsonText: 'x-json' }, [], document);
+    assert.strictEqual(routed.status, 0, routed.stderr);
+    assert.strictEqual(routed.stderr, '');
+    assert.deepStrictEqual(members(routed.text ?? '', 'SchemaInput'), [
+      'filter?: { tags?: Array<string>; [key: string]: unknown; } | string;',
+      'list?: Array<number>;',
+      'either?: { [key: string]: unknown; } | string;',
+      '[key: string]: unknown;',
+    ]);
+    // off, the output is the single declaration it always was
+    const off = run({ coerceJsonText: false }, [], document);
+    assert.strictEqual(off.status, 0, off.stderr);
+    assert.doesNotMatch(off.text ?? '', /SchemaInput/);
+  });
+
   it('is described in the help text', () => {
     const result = spawnSync(process.execPath, [CLI, '--help'], { encoding: 'utf8' });
     assert.strictEqual(result.status, 0);
@@ -177,7 +204,7 @@ describe('jaren-emit --config — refusals', () => {
     ['a scalar', '"x-coerce"', /must be a JSON object of normalization options/],
     ['null', 'null', /must be a JSON object of normalization options/],
     ['a misspelt option', { coerceType: true }, /unknown option 'coerceType' — did you mean 'coerceTypes'\?/],
-    ['a far unknown option', { zzzzzzzzzz: true }, /unknown option 'zzzzzzzzzz'; the options are useDefaults, removeAdditional, coerceTypes, trimStrings/],
+    ['a far unknown option', { zzzzzzzzzz: true }, /unknown option 'zzzzzzzzzz'; the options are useDefaults, removeAdditional, coerceTypes, trimStrings, coerceJsonText\n/],
     ['a number switch', { coerceTypes: 1 }, /'coerceTypes' must be true, false or the name of a schema annotation/],
     ['an empty annotation', { useDefaults: '' }, /'useDefaults' must be true, false or the name of a schema annotation/],
     ['a null switch', { trimStrings: null }, /'trimStrings' must be true, false or the name of a schema annotation/],
@@ -195,7 +222,7 @@ describe('jaren-emit --config — refusals', () => {
     });
   }
 
-  for (const option of ['useDefaults', 'coerceTypes', 'trimStrings']) {
+  for (const option of ['useDefaults', 'coerceTypes', 'trimStrings', 'coerceJsonText']) {
     for (const text of ['true', 'false']) {
       it(`refuses the string "${text}" for ${option}, naming the key and the expected type`, () => {
         const result = run({ [option]: text });

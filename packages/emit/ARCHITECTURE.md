@@ -33,9 +33,12 @@ The decisions that live here, and nowhere else:
   an acyclic list; the frame already building it finishes the declaration.
 - **Composition.** `allOf` → intersection, `anyOf`/`oneOf` → union, `const`/
   `enum` → literals. Degenerate unions collapse, `never` drops out, and a
-  union containing `unknown` becomes `unknown`. A `$ref`'s 2019-09+ siblings
-  intersect with the target; the reference itself resolves through the
-  helpers `@jarenjs/validate/normalize` exports (`#`, `#/pointer`, plain
+  union containing `unknown` becomes `unknown`. A `$ref`'s siblings
+  intersect with the target where the node's draft applies them (2019-09
+  on); before it, and where no draft is declared, the node is its target
+  alone (`readsRefAlone` from `@jarenjs/validate/normalize`, the rule the
+  validator and the normalizer read). The reference itself resolves through
+  the helpers `@jarenjs/validate/normalize` exports (`#`, `#/pointer`, plain
   `#anchor`, embedded-`$id` scope boundary), so a ref means here exactly what
   it means to the runtime normalizer.
 - **Honest widening.** Every keyword in `DROPPED_CONSTRAINTS` is recorded on

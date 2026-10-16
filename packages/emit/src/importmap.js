@@ -563,13 +563,14 @@ function declaresNoEntry(dir, manifest, entry) {
 
 /**
  * The `main` a package without `exports` serves from `dir`, found as Node's
- * legacy main resolution finds it: the first of `main`, `main.js` and
- * `main/index.js` that is a file, else `./index.js`, as Node falls back
- * to it (a package with no such file reports it unresolved, unless only
- * `optionalDependencies` reach it and it declares no entry at all). Node also
- * tries `.json` and `.node` candidates; a browser map serves only
- * JavaScript, so they are not tried. A `main` that names a native addon
- * (`.node`) is found here as written, and `buildImportMap` maps none.
+ * legacy main resolution finds it: the first of `main`, `main.js`,
+ * `main.node`, `main/index.js` and `main/index.node` that is a file, else
+ * `./index.js`, as Node falls back to it (a package with no such file
+ * reports it unresolved, unless only `optionalDependencies` reach it and it
+ * declares no entry at all). The `.node` candidates are tried because Node
+ * loads them: a `main` found to be a native addon is one `buildImportMap`
+ * maps nothing for, never a missing `index.js`. Node's `.json` candidates
+ * are not tried; a browser map serves only JavaScript.
  * A map cannot probe the file system
  * at load time as Node does, so the probe happens here, once, from the
  * installed tree.
@@ -579,7 +580,7 @@ function declaresNoEntry(dir, manifest, entry) {
  */
 function legacyEntry(dir, main) {
   const written = legacyMain(main);
-  for (const candidate of [written, `${written}.js`, `${written}/index.js`]) {
+  for (const candidate of [written, `${written}.js`, `${written}.node`, `${written}/index.js`, `${written}/index.node`]) {
     if (isFile(join(dir, candidate))) return candidate;
   }
   return './index.js';
@@ -650,7 +651,24 @@ const RE_SCRIPT = /\.(?:m?js)$/;
  *   its package (`peerDependencies`, marked `optional` in
  *   `peerDependenciesMeta`) which is not installed: not a failure, since
  *   only a page that loads that file needs it; `reason` says so
+ * @property {Array<{ specifier: string, from: string, reason: string }>} skipped -
+ *   an export whose target is a native addon (`.node`) in a package that
+ *   also exports JavaScript, credited to its `package.json`: neither mapped
+ *   nor listed, since a browser cannot load it, and not a failure, since a
+ *   served file that imports it is reported in `unresolved`; `reason` says so
  */
+
+/** Why a native addon export is left out of the map. */
+const NATIVE_ADDON = 'a native addon (.node), which a browser cannot load';
+
+/**
+ * Whether an export maps a native addon: a target Node accepts that names a
+ * `.node` file.
+ * @param {ExportedPath} entry @returns {boolean}
+ */
+function exportsNativeAddon(entry) {
+  return !entry.unexpanded && !entry.invalid && entry.target !== null && isNativeAddon(entry.target);
+}
 
 /**
  * Build the import map, and the file list, that serve `packages` and their
@@ -660,7 +678,8 @@ const RE_SCRIPT = /\.(?:m?js)$/;
  * and `optionalDependencies`, a dependency that is not installed passed
  * over, and so is one only `optionalDependencies` reach that declares no
  * JavaScript entry (no `exports`, and no `main` and no `index.js`, or a
- * `main` that is a native addon: a platform-binary package). Each package is found as Node finds it — `node_modules/<name>`
+ * `main` that is a native addon; or `exports` whose every target is a
+ * native addon: a platform-binary package). Each package is found as Node finds it — `node_modules/<name>`
  * beside the dependent, then in each parent directory up to `root` —
  * starting from `root` for the packages named. Its `exports` resolve under
  * `conditions` with Node's precedence (`expandExports`), single-star
@@ -669,10 +688,12 @@ const RE_SCRIPT = /\.(?:m?js)$/;
  * root/node_modules> + '/' + path` — a dependency installed nested is
  * served from its nested place, never from a root copy no dependent
  * reaches. A target Node refuses is reported in `unresolved`, a `null` target maps nothing, and a package
- * without `exports` serves the first of `main`, `main.js` and
- * `main/index.js` that is a file, else `./index.js` — unless that is a
- * native addon (`.node`), which a browser cannot load: it is reported in
- * `unresolved` and neither mapped nor listed. A package installed more than once is reported in
+ * without `exports` serves the first of `main`, `main.js`, `main.node`,
+ * `main/index.js` and `main/index.node` that is a file, else `./index.js`.
+ * A native addon (`.node`) is never mapped or listed, since a browser cannot
+ * load one: a package the closure requires whose `main`, or every export
+ * target, is one is reported in `unresolved`; a native export beside
+ * JavaScript exports is reported in `skipped`. A package installed more than once is reported in
  * `duplicates`. An import of an optional peer that is not installed is
  * reported in `optional`, not in `unresolved`: a page that never loads the
  * importing file never fetches it. Node built-ins (`node:fs`, `fs`) are
@@ -761,25 +782,37 @@ export function buildImportMap(options) {
   const unresolved = [];
   /** @type {Array<{ specifier: string, from: string, reason: string }>} */
   const optional = [];
+  /** @type {Array<{ specifier: string, from: string, reason: string }>} */
+  const skipped = [];
   /** @type {Array<{ name: string, file: string }>} */
   const entryFiles = [];
   for (const name of names) {
     const dir = /** @type {string} */ (chosen.get(name));
     const manifest = manifests.get(name);
     const legacy = manifest.exports == null ? legacyEntry(dir, manifest.main) : null;
-    // reached only as an optional dependency, a package with no JavaScript entry maps nothing
-    if (!required.has(name) && declaresNoEntry(dir, manifest, legacy)) continue;
     const entries = expandExports(legacy === null ? manifest : { ...manifest, main: legacy },
       { conditions, listFiles: (folder) => listDirectory(join(dir, folder)) });
+    // every export a native addon: a package with no JavaScript entry, as one
+    // whose main is a native addon
+    const nativeOnly = legacy === null && entries.some(exportsNativeAddon)
+      && entries.every((entry) => entry.target === null || exportsNativeAddon(entry));
+    // reached only as an optional dependency, a package with no JavaScript entry maps nothing
+    if (!required.has(name) && (nativeOnly || declaresNoEntry(dir, manifest, legacy))) continue;
     for (const entry of entries) {
       const specifier = entry.key === '.' ? name : name + entry.key.slice(1);
       // a wildcard the files could not make finite, a target Node refuses, or a
-      // main that is a native addon: nothing a browser could load
-      if (entry.unexpanded || entry.invalid || (legacy !== null && isNativeAddon(legacy))) {
+      // package whose only entries are native addons: nothing a browser could load
+      if (entry.unexpanded || entry.invalid || (legacy !== null && isNativeAddon(legacy))
+        || (nativeOnly && entry.target !== null)) {
         unresolved.push({ specifier, from: `${name}/package.json` });
         continue;
       }
       if (entry.target === null) continue;
+      // a native addon beside JavaScript exports: left out, and said so
+      if (exportsNativeAddon(entry)) {
+        skipped.push({ specifier, from: `${name}/package.json`, reason: NATIVE_ADDON });
+        continue;
+      }
       const file = posix.normalize(entry.target);
       imports[specifier] = served(dir) + file;
       entryFiles.push({ name, file });
@@ -808,6 +841,7 @@ export function buildImportMap(options) {
     duplicates,
     unresolved: once(unresolved),
     optional: once(optional),
+    skipped: once(skipped),
   };
 }
 

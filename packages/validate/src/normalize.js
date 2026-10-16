@@ -48,8 +48,11 @@ import { createSchemaPatternTester } from './string.js';
 import { appliesRefSiblings } from './dynamic-ref.js';
 
 // The validator's reading of a `pattern` string, for a consumer that checks
-// one without compiling a schema (a form field, per keystroke).
-export { createSchemaPatternTester };
+// one without compiling a schema (a form field, per keystroke); and of the
+// draft a `$schema` declares, which `@jarenjs/emit` reads beside
+// {@link readsRefAlone} so a generated type reads a `$ref`'s siblings as this
+// module does.
+export { createSchemaPatternTester, detectSchemaDraft };
 
 const hasOwn = Object.hasOwn;
 
@@ -542,11 +545,13 @@ function buildScalarStep(node, ctx, refAlone) {
  * reads it) ignores the keywords beside one ({@link appliesRefSiblings}).
  * Nothing beside that `$ref` normalizes: not a sibling `type`, `properties`,
  * `items`, `allOf` or `additionalProperties`, and not its `default`.
+ * Exported for `@jarenjs/emit`, whose generated types read the same node
+ * the same way.
  * @param {Record<string, any>} node - A schema object
  * @param {number|null} declaredDraft - The draft its parent is read under, or null when none is declared
  * @returns {boolean}
  */
-function readsRefAlone(node, declaredDraft) {
+export function readsRefAlone(node, declaredDraft) {
   if (typeof node.$ref !== 'string') return false;
   const draft = typeof node.$schema === 'string' ? detectSchemaDraft(node) : declaredDraft;
   return !appliesRefSiblings(draft ?? 7);
