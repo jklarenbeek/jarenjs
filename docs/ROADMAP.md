@@ -670,20 +670,24 @@ what each does is its own documentation's job
   seekable double form of the comparison (the integer interval that rounds to
   the double, bound as two integers), which would also keep a document's such
   external on its index.
-- [ ] **A grouping ordered by a key that reads a NULL as a present `null` runs
-  in the engine.** A column whose policy reads a NULL as a present `null`
-  (`null: 'null'`) used as a group key under an `$orderby` makes the engine
-  raise `JQ2005` where SQL would order the NULL, so the planner keeps the
-  grouping in the engine. Wanted: a native guard that raises `JQ2005` when the
-  ordered key holds a NULL, so it stays in SQL. On PostgreSQL no column of that
-  policy is read natively (`nativeQuery` is false for it), so the grouped sum,
-  mean and extreme there also stay in the engine; qualifying such a column would
-  close both.
-- [ ] **A native grouping cannot know its group count.** A native `$distinct`
-  or `$groupby` groups every row it reads: with nearly as many groups as rows
-  the statement does the engine's work and a sort besides and is slower than
-  the engine, on PostgreSQL more than on SQLite. Wanted: a cost signal (a
-  distinct-count estimate or a bounded-group run-time fallback).
+- [ ] **On PostgreSQL a column that reads a NULL as a present `null` is read
+  in the engine.** No column whose policy is `null: 'null'` is read natively
+  on PostgreSQL (`nativeQuery` is false for it), so a grouping ordered by such
+  a key, and a grouped sum, mean or extreme over one, run in the engine there,
+  where SQLite runs them in SQL beside a guard that raises the engine's
+  `JQ2005` or `JQ2001`. Wanted: qualify such a column on PostgreSQL, with the
+  same guards.
+- [ ] **A native grouping in the engine's order of first appearance cannot
+  know its group count.** A native `$distinct` or `$groupby` whose order does
+  not name every key groups every row it reads and then sorts the groups by
+  their first row: with nearly as many groups as rows it does the engine's
+  work and that sort besides and is slower than the engine, more so on
+  PostgreSQL, whose client also reads one row per group through the cursor,
+  than on SQLite. A grouping ordered by every key needs no such sort
+  (NATIVE-PLANS). Wanted: a cost signal that costs the answering path no
+  second round trip — a distinct-count estimate the planner holds without a
+  catalog read, or a bounded-group run-time fallback that does not run both
+  plans.
 - [ ] **PostgreSQL verifies a layout index condition or expression key it
   cannot read back by shape.** A layout index's condition, or the key under an
   expression term, that the PostgreSQL read-back does not read — a date or

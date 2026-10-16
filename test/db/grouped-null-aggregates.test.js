@@ -151,3 +151,101 @@ describe('a grouped aggregate over a column that reads a NULL as a present null'
     }
   }));
 });
+
+describe('a grouping ordered by a key whose column reads a NULL as a present null', () => {
+  /** The whole outcome of one run: the value, or the refusal's code, sentence and location.
+   * @param {any} engine @param {any} document @param {any} [options] */
+  const outcome = (engine, document, options) => {
+    try { return { value: engine.execute(document, options) }; }
+    catch (error) { return { code: error.code, message: error.message, docPath: error.docPath }; }
+  };
+  /** @param {any} groupby @param {any[]} orderby @param {any} ret @param {any} [where] */
+  const ordered = (groupby, orderby, ret, where = undefined) => ({ $for: { it: '$.Row[*]' },
+    ...(where === undefined ? {} : { $where: where }), $groupby: groupby, $orderby: orderby, $return: ret });
+  // s and n read a NULL as a present null (rows 4 and 6 hold them); g holds none
+  const QUERIES = /** @type {[string, any][]} */ ([
+    ['the text key', ordered({ s: '$it.s' }, ['$s'], { s: '$s', c: { $count: '$it' } })],
+    ['the text key, descending', ordered({ s: '$it.s' }, [{ $key: '$s', $dir: 'desc' }], { s: '$s' })],
+    ['the text key, empty greatest', ordered({ s: '$it.s' }, [{ $key: '$s', $empty: 'greatest' }], { s: '$s' })],
+    ['the integer key', ordered({ n: '$it.n' }, ['$n'], { n: '$n', ids: { $sum: '$it.id' } })],
+    ['a second key that holds no null', ordered({ g: '$it.g', s: '$it.s' }, ['$g', '$s'], { g: '$g', s: '$s' })],
+    ['a first key that reads the null', ordered({ g: '$it.g', s: '$it.s' }, [{ $key: '$s', $dir: 'desc' }, '$g'], { g: '$g', s: '$s' })],
+    ['the key, then the count', ordered({ s: '$it.s' }, ['$s', { $key: { $count: '$it' }, $dir: 'desc' }], { s: '$s' })],
+    ['the key beside an aggregate that refuses its own null', ordered({ s: '$it.s' }, ['$s'], { s: '$s', v: { $max: '$it.n' } })],
+    ['the count, then the key', ordered({ n: '$it.n' }, [{ $key: { $count: '$it' }, $dir: 'desc' }, '$n'], { n: '$n' })],
+  ]);
+  /** every contiguous run of row ids, so each NULL is in some selections and out of others */
+  const SELECTIONS = /** @type {any[]} */ ([]);
+  for (let low = 1; low <= 6; low++)
+    for (let high = low; high <= 6; high++) SELECTIONS.push({ $and: [{ $ge: ['$it.id', low] }, { $le: ['$it.id', high] }] });
+
+  it('orders in SQL, as the engine does, where no group\'s key is the null', async () => fixture((engine) => {
+    const expected = {
+      'the text key': [{ s: 'p', c: 1 }, { s: 'q', c: 1 }, { s: 'r', c: 1 }, { s: 's', c: 1 }, { s: 't', c: 1 }],
+      'the text key, descending': [{ s: 't' }, { s: 's' }, { s: 'r' }, { s: 'q' }, { s: 'p' }],
+      'the text key, empty greatest': [{ s: 'p' }, { s: 'q' }, { s: 'r' }, { s: 's' }, { s: 't' }],
+      'the integer key': [{ n: 1, ids: 1 }, { n: 2, ids: 2 }, { n: 7, ids: 5 }, { n: 10, ids: 3 }],
+      'a second key that holds no null': [{ g: 'a', s: 'p' }, { g: 'a', s: 'q' }, { g: 'b', s: 'r' }, { g: 'c', s: 's' }, { g: 'c', s: 't' }],
+      'a first key that reads the null': [{ g: 'c', s: 't' }, { g: 'c', s: 's' }, { g: 'b', s: 'r' }, { g: 'a', s: 'q' }, { g: 'a', s: 'p' }],
+      'the key, then the count': [{ s: 'p' }, { s: 'q' }, { s: 'r' }, { s: 's' }, { s: 't' }],
+    };
+    for (const [name, query] of QUERIES) {
+      if (!(name in expected)) continue;
+      // row 4 holds a NULL in both s and n, row 6 in n alone
+      const clean = { ...query, $where: name === 'the integer key'
+        ? { $and: [{ $ne: ['$it.id', 4] }, { $ne: ['$it.id', 6] }] } : { $ne: ['$it.id', 4] } };
+      assert.equal(engine.explain(clean).mode, 'native', name);
+      assert.deepEqual(outcome(engine, clean, { pushdown: false }), { value: expected[name] }, `${name} (engine)`);
+      assert.deepEqual(outcome(engine, clean, { strict: true }), { value: expected[name] }, name);
+    }
+  }));
+
+  it('refuses with the engine\'s own error where a group\'s key is the null, however few groups there are', async () => fixture((engine) => {
+    const refusal = { code: 'JQ2005', message: 'JQ2005: an $orderby key must be the empty sequence, a number, or a string, got null at /$orderby/0',
+      docPath: '/$orderby/0' };
+    for (const [name, query] of QUERIES.slice(0, 4)) {
+      for (const where of [undefined, { $eq: ['$it.id', 4] }]) {
+        const document = where === undefined ? query : { ...query, $where: where };
+        assert.deepEqual(outcome(engine, document, { pushdown: false }), refusal, `${name} (engine)`);
+        assert.deepEqual(outcome(engine, document, { strict: true }), refusal, name);
+      }
+    }
+    // the key that reads the null is the second ordering
+    assert.deepEqual(outcome(engine, QUERIES[4][1], { strict: true }), { ...refusal,
+      message: refusal.message.replace('/$orderby/0', '/$orderby/1'), docPath: '/$orderby/1' });
+    // the engine orders the groups before it builds their items, so the null key is refused before the null of the aggregate
+    const beside = QUERIES[7][1];
+    assert.equal(engine.explain(beside).mode, 'native');
+    assert.deepEqual(outcome(engine, beside, { pushdown: false }), refusal);
+    assert.deepEqual(outcome(engine, beside, { strict: true }), refusal);
+  }));
+
+  it('answers as the engine over every selection of the rows', async () => fixture((engine) => {
+    // a pushed aggregate's refusal of its null is the catalog's sentence with no location, so it compares by code
+    const compared = (/** @type {any} */ result) => result.code === 'JQ2001' ? { code: result.code } : result;
+    let cases = 0;
+    for (const [name, query] of QUERIES) {
+      for (const where of SELECTIONS) {
+        const document = { ...query, $where: where };
+        const label = `${name} over ${JSON.stringify(where.$and.map((term) => Object.values(term)[0][1]))}`;
+        const oracle = compared(outcome(engine, document, { pushdown: false }));
+        assert.deepEqual(compared(outcome(engine, document)), oracle, label);
+        if (engine.explain(document).mode === 'native') assert.deepEqual(compared(outcome(engine, document, { strict: true })), oracle, label);
+        cases += 1;
+      }
+    }
+    assert.equal(cases, QUERIES.length * SELECTIONS.length);
+  }));
+
+  it('keeps in the engine an order whose refusals the statement cannot place', async () => fixture((engine) => {
+    // two ordered keys that may read the null: which one the engine refuses depends on the first group it meets
+    const twoKeys = ordered({ s: '$it.s', n: '$it.n' }, ['$s', '$n'], { s: '$s', n: '$n' });
+    // an ordering aggregate that refuses its own null, met per group in the order the engine meets the groups
+    const aggregateFirst = ordered({ s: '$it.s' }, [{ $key: { $max: '$it.n' }, $dir: 'desc' }, '$s'], { s: '$s' });
+    for (const query of [twoKeys, aggregateFirst]) {
+      assert.equal(engine.explain(query).mode, 'set', JSON.stringify(query.$orderby));
+      assert.throws(() => engine.execute(query, { strict: true }), { code: 'JD0010' });
+      assert.deepEqual(outcome(engine, query), outcome(engine, query, { pushdown: false }));
+    }
+  }));
+});

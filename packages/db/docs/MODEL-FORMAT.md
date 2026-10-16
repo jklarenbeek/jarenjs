@@ -3832,7 +3832,9 @@ a number appears only where `capabilities.rowEstimates` is filled):
   anything except an orderable key or a count, minimum, maximum, integer sum
   or integer average expression; entity grouping over a floating sum or
   average or a date-codec key or aggregate, over an aggregate or an ordered
-  key that reads a NULL as a present `null` or that stores a boolean, over a
+  key that stores a boolean, over two ordered keys that read a NULL as a
+  present `null`, or one beside an ordering aggregate of such a column (on
+  PostgreSQL, over any column of that policy), over a
   join that is ordered, windowed, returns the nullable form of a sum or reads
   a whole binding, or over one binding's compound physical key whose order
   leaves two groups tied (`entity.groupOrder`), and, on PostgreSQL, over a

@@ -224,6 +224,18 @@ function aggregateNullError() {
 }
 
 /**
+ * The refusal of a grouping whose ordered key, a column that reads a NULL
+ * as a present `null`, held that null in a group: the engine's own refusal
+ * to order a null, at the ordering that names the key.
+ * @param {string} docPath - the ordering's location in the document
+ * @returns {JsonQueryRuntimeError}
+ */
+function orderedNullError(docPath) {
+  const message = { messageId: 'query/orderby-key', params: { got: { messageId: 'query/item/null', params: {} } } };
+  return new JsonQueryRuntimeError('JQ2005', renderQueryMessage(message), docPath, message);
+}
+
+/**
  * Does an external bind as a native parameter the database compares as the
  * engine does? A string the database receives as written (on `dialect`,
  * bound as text or, `asJson`, inside a JSON value: {@link bindsAsWritten}),
@@ -3086,6 +3098,10 @@ export function createEntityQueryEngine(context) {
           const group = entry.planned.plan.group;
           if (rows.some((row) => row._valid === 0))
             throw new DbRuntimeError('JD2003', 'a grouped physical column refuses a lossy or invalid value');
+          // the engine orders the groups before it builds an item, so an ordered key's null is met first
+          const guarded = group.order === 'first-seen' ? undefined : group.order.find((term) => term.refusesNull !== undefined);
+          if (guarded !== undefined && rows.some((row) => row[`tk${guarded.index}`] === 'null'))
+            throw orderedNullError(guarded.refusesNull);
           if (rows.some((row) => group.aggregates.some((aggregate, i) => aggregate.countsNulls && row[`_nulls${i}`] > 0)))
             throw aggregateNullError();
           if (rows.some((row) => group.aggregates.some((aggregate, i) =>

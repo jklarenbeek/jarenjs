@@ -143,8 +143,13 @@ it('physical explanation names declared key ties and the grouping order actually
       [['column', 'value'], ['column', 'id']]);
     const query = grouping({ $count: '$i' });
     query[0].$orderby = '$v';
+    // the order names the one key, which ranks every two groups apart: the statement breaks no tie
     assert.deepEqual((await store.explain(query)).order.map((term) => [term.source, term.column]),
-      [['group', 'v'], ['group', 'id']]);
+      [['group', 'v']]);
+    // an order by the count alone leaves groups tied, which come out by their first row
+    query[0].$orderby = { $count: '$i' };
+    assert.deepEqual((await store.explain(query)).order.map((term) => [term.source, term.column, term.tieBreaker]),
+      [['group', 'a0', false], ['group', 'id', true]]);
   });
 });
 

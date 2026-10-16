@@ -370,14 +370,22 @@ describe('a column that reads a NULL back as a present null', () => {
     });
   });
 
-  it('keeps the groups ordered by such a key in the engine, which refuses to order the null', async () => {
+  it('orders the groups by such a key in SQL and refuses the null, as the engine refuses to order it', async () => {
     await onNullPolicy(async (store, host) => {
       const query = { $for: { t: '$.T[*]' }, $groupby: { z: '$t.a' }, $orderby: ['$z'], $return: { z: '$z', n: { $count: '$t' } } };
+      // PostgreSQL qualifies no column of this policy for native reads, so the engine keeps it there
       const explained = await store.explain(query);
-      assert.equal(explained.mode, 'set', host);
-      assert.equal(reasonOf(explained), 'entity.projection', host);
+      assert.equal(explained.mode, host === 'sqlite' ? 'native' : 'set', host);
+      if (host !== 'sqlite') assert.equal(reasonOf(explained), 'entity.projection', host);
       assert.equal(await answerOf(store, query, { pushdown: false }), 'throws JQ2005', host);
       assert.equal(await answerOf(store, query), 'throws JQ2005', host);
+      if (host === 'sqlite') assert.equal(await answerOf(store, query, { strict: true }), 'throws JQ2005', host);
+      // the groups whose key is no null are ordered, in SQL
+      const clean = { ...query, $where: { $ne: ['$t.a', null] } };
+      const ordered = JSON.stringify([{ z: 'x', n: 1 }, { z: 'y', n: 1 }]);
+      assert.equal(await answerOf(store, clean, { pushdown: false }), ordered, `${host} (engine)`);
+      assert.equal(await answerOf(store, clean), ordered, host);
+      if (host === 'sqlite') assert.equal(await answerOf(store, clean, { strict: true }), ordered, host);
       // the null is a key of its own, and a count of the rows beside it needs no order
       const unordered = { $for: { t: '$.T[*]' }, $groupby: { z: '$t.a' }, $return: { z: '$z', n: { $count: '$t' } } };
       const expected = JSON.stringify([{ z: null, n: 2 }, { z: 'x', n: 1 }, { z: 'y', n: 1 }]);

@@ -57,8 +57,9 @@ async function onHosts(fn) {
 const ordersByAggregate = (/** @type {any} */ query) =>
   /"\$(?:sum|avg|count|min|max)"/.test(JSON.stringify((query.$subsequence ? query.$subsequence[0] : query).$orderby ?? null));
 
-/** What an aggregate-ordered group statement looks like: the groups by the aggregate's alias, ties by the first row. */
-const ORDERED_BY_AGGREGATE = /GROUP BY "vk0", "tk0" ORDER BY .*"a\d" (?:ASC|DESC) NULLS (?:FIRST|LAST).*, MIN\(/;
+/** What an aggregate-ordered group statement looks like: the groups by the aggregate's alias, ties by the
+ * first row, or by the key and its type where the order also names the key, which ranks every two groups apart. */
+const ORDERED_BY_AGGREGATE = /GROUP BY "vk0", "tk0" ORDER BY (?=.*"a\d" (?:ASC|DESC) NULLS (?:FIRST|LAST))(?:.*, MIN\(|.*"tk0" (?:ASC|DESC))/;
 
 /** The cases of the collection groups the planner keeps in the engine, and the reason each names. */
 const COLLECTION_KEPT = new Map([
@@ -500,7 +501,8 @@ describe('the key of a group is ordered as the kind it is', () => {
 
   it('is read as a number, or as code points, by a statement whose projected key is text', () => {
     const pg = postgresDialect();
-    const tail = String.raw` ASC NULLS FIRST, MIN\("rid"\)$`;
+    // the order names the one key, which ranks the groups apart: no first row breaks a tie
+    const tail = String.raw` ASC NULLS FIRST, "tk0" ASC$`;
     assert.match(sqlOf(pg, 'k'), new RegExp(String.raw`GROUP BY "vk0", "tk0" ORDER BY MIN\(\(CASE WHEN jsonb_typeof\(\("doc" #> '\{"k"\}'\)\) = 'number' THEN \(\("doc" #> '\{"k"\}'\)\)::numeric END\)\)${tail}`));
     assert.match(sqlOf(pg, 's'), new RegExp(String.raw`GROUP BY "vk0", "tk0" ORDER BY MIN\(\(\(CASE WHEN jsonb_typeof\(\("doc" #> '\{"s"\}'\)\) = 'string' THEN "doc" #>> '\{"s"\}' END\) COLLATE "C"\)\)${tail}`));
     // an indexed member reads its generated column, which is typed (and collated "C") already
@@ -510,7 +512,7 @@ describe('the key of a group is ordered as the kind it is', () => {
 
   it('is the key itself where the projected key is typed already', () => {
     for (const key of ['k', 's'])
-      assert.match(sqlOf(sqliteDialect, key), /GROUP BY "vk0", "tk0" ORDER BY "vk0" ASC NULLS FIRST, MIN\("rowid"\)$/);
+      assert.match(sqlOf(sqliteDialect, key), /GROUP BY "vk0", "tk0" ORDER BY "vk0" ASC NULLS FIRST, "tk0" ASC$/);
   });
 });
 

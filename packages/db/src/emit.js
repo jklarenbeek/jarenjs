@@ -18,7 +18,7 @@
  */
 
 import { codePointPrefixSuccessor } from '@jarenjs/core/string';
-import { plainFamily, bindsText } from './algebra.js';
+import { plainFamily, bindsText, ranksGroupsApart } from './algebra.js';
 import { physicalSelection, integerParameter } from './physical.js';
 import { columnKindFor } from './scalar-types.js';
 import { isNumericType } from './types.js';
@@ -301,6 +301,40 @@ function numberedRows(q, { columns, from, where, order }) {
 
 /** The term that puts the groups of {@link numberedRows} in the order of their first rows. */
 const firstRowNumber = (/** @type {(name: string) => string} */ q) => `MIN(${q('_rn')})`;
+
+/**
+ * The `GROUP BY` and `ORDER BY` terms of a grouping whose keys the selection
+ * named `vk<i>`/`tk<i>` and whose aggregates `a<i>`. Tied groups come out by
+ * their first row (`firstRow`). An order that ranks every two groups apart
+ * ({@link ranksGroupsApart}) leaves no tie to break, and its keys alone order
+ * the groups: they are grouped in the order's sequence and each is ordered
+ * with its type beside it, so the order is the grouping's own sequence and a
+ * database that groups by sorting reads the groups off that sort rather than
+ * sorting them again. `ranks` is false where the rows are numbered, whose
+ * first row is the order.
+ * @param {(name: string) => string} q - the dialect's identifier quoting
+ * @param {any} dialect
+ * @param {{ keys: any[], order: 'first-seen' | { index?: number, aggregate?: number, desc: boolean, nullsFirst: boolean }[] }} group
+ * @param {(index: number) => string} keyOrder - what orders the key of an index
+ * @param {() => string[]} firstRow - the terms that order groups by their first row
+ * @param {boolean} ranks - whether an order that ranks the groups apart may stand alone
+ * @returns {{ groupBy: string, orderBy: string }}
+ */
+function groupingClauses(q, dialect, group, keyOrder, firstRow, ranks) {
+  const ranked = ranks && ranksGroupsApart(group);
+  const sequence = ranked
+    ? [...new Set(/** @type {any[]} */ (group.order).flatMap((term) => term.aggregate === undefined ? [term.index] : []))]
+    : group.keys.map((_, i) => i);
+  const order = group.order === 'first-seen' ? [] : group.order.flatMap((term) => {
+    const direction = term.desc ? 'DESC' : 'ASC';
+    return term.aggregate === undefined
+      ? [`${keyOrder(/** @type {number} */ (term.index))} ${direction}${dialect.orderNulls(term.nullsFirst)}`,
+        ...(ranked ? [`${q(`tk${term.index}`)} ${direction}`] : [])]
+      : [`${q(`a${term.aggregate}`)} ${direction}${dialect.orderNulls(term.nullsFirst)}`];
+  });
+  if (!ranked) order.push(...firstRow());
+  return { groupBy: sequence.map((i) => `${q(`vk${i}`)}, ${q(`tk${i}`)}`).join(', '), orderBy: order.join(', ') };
+}
 
 /**
  * The names of the columns an entity's table has: its mapped members, its
@@ -1163,9 +1197,8 @@ export function emitPlan(plan, dialect, physical) {
     // different keys and render the same text), and an engine that
     // checks its grouping refuses a selected expression the GROUP BY
     // does not cover — which every key's type discriminator would be.
-    sql += ` GROUP BY ${plan.group.keys
-      .map((key, i) => `${q(`vk${i}`)}, ${q(`tk${i}`)}`).join(', ')}`;
-    // the groups' order: the engine's own order of first appearance —
+    //
+    // The groups' order: the engine's own order of first appearance —
     // over a collection, each group's earliest row identity — or the
     // key ordering an `$orderby` declared. An engine whose scalar read is
     // TEXT (`typedExtract`) projects a key as text that orders a number by
@@ -1178,11 +1211,9 @@ export function emitPlan(plan, dialect, physical) {
         ? dialect.groupAggregate('min', valueOf(ref, kindOf(ref)))
         : q(`vk${index}`);
     };
-    const order = plan.group.order === 'first-seen' ? []
-      : plan.group.order.map((term) => `${term.aggregate === undefined ? keyOrder(term.index) : q(`a${term.aggregate}`)} `
-        + `${term.desc ? 'DESC' : 'ASC'}${dialect.orderNulls(term.nullsFirst)}`);
-    order.push(numbered ? firstRowNumber(q) : dialect.groupAggregate('min', dialect.rowIdentity()));
-    sql += ` ORDER BY ${order.join(', ')}`;
+    const { groupBy, orderBy } = groupingClauses(q, dialect, plan.group, keyOrder,
+      () => [numbered ? firstRowNumber(q) : dialect.groupAggregate('min', dialect.rowIdentity())], !numbered);
+    sql += ` GROUP BY ${groupBy} ORDER BY ${orderBy}`;
   }
   if (plan.bucket !== null) {
     // `first-seen` is the engine's own group order (§6.5, first
@@ -1743,12 +1774,9 @@ export function emitEntityPlan(plan, dialect, physicalOf) {
   else sql = `SELECT ${selection} FROM ${fromSql}${whereSql}`;
 
   if (group) {
-    sql += ` GROUP BY ${group.keys.map((key, i) => `${q(`vk${i}`)}, ${q(`tk${i}`)}`).join(', ')}`;
-    const terms = group.order === 'first-seen' ? [] : group.order.map((term) =>
-      `${q(term.aggregate === undefined ? `vk${term.index}` : `a${term.aggregate}`)} ${term.desc ? 'DESC' : 'ASC'}${dialect.orderNulls(term.nullsFirst)}`);
-    // groups an order leaves tied come out by their first row
-    terms.push(...(joined ? [firstRowNumber(q)] : identityTerms(plan.bindings[0]).map((term) => `MIN(${term})`)));
-    sql += ` ORDER BY ${terms.join(', ')}`;
+    const { groupBy, orderBy } = groupingClauses(q, dialect, group, (index) => q(`vk${index}`),
+      () => (joined ? [firstRowNumber(q)] : identityTerms(plan.bindings[0]).map((term) => `MIN(${term})`)), !joined);
+    sql += ` GROUP BY ${groupBy} ORDER BY ${orderBy}`;
     if (plan.window !== null) sql += ` ${dialect.limitClause(plan.window.limit, plan.window.offset)}`;
   }
   else if (plan.aggregate === null) {

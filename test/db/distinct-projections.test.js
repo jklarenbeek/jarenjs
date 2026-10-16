@@ -291,6 +291,10 @@ describe('a number written as 2.0 beside the same number written as 2 is one key
     ['a constructor of a number and a string', distinct({ n: '$it.n', s: '$it.s' })],
     ['a constructor of the number alone', distinct({ n: '$it.n' })],
     ['a grouping keyed by the number', { $for: { it: '$[*]' }, $groupby: { g: '$it.n' }, $return: { g: '$g', c: { $count: '$it' } } }],
+    // the order names the one key, so the groups are ordered by it alone: the two spellings are one group, never a tie
+    ['a grouping ordered by the number', { $for: { it: '$[*]' }, $groupby: { g: '$it.n' }, $orderby: ['$g'], $return: { g: '$g', c: { $count: '$it' } } }],
+    ['a grouping ordered by the number, descending',
+      { $for: { it: '$[*]' }, $groupby: { g: '$it.n' }, $orderby: [{ $key: '$g', $dir: 'desc' }], $return: { g: '$g', c: { $count: '$it' } } }],
   ]);
 
   it('groups the two spellings together, native and in the engine alike', async () => {

@@ -405,6 +405,9 @@ export function planOrder(plan) {
         column: term.aggregate === undefined ? group.keys[term.index].as : `a${term.aggregate}`,
         path: null, desc: term.desc, nullsFirst: term.nullsFirst, tieBreaker: false,
       }));
+      // an order that ranks every two groups apart leaves no tie to break,
+      // and the statement orders by it alone
+      if (ranksGroupsApart(group)) return terms;
       return [...terms, ...ties.map((term) => ({ ...term, source: 'group',
         column: term.column, tieBreaker: group.order !== 'first-seen' }))];
     }
@@ -491,4 +494,18 @@ export function bindsText(pred, refused) {
     case 'hop': case 'hopCount': return pred.hop.filter != null && bindsText(pred.hop.filter, refused);
     default: return false;
   }
+}
+
+/**
+ * Whether a grouping's order ranks any two groups apart: it names every
+ * group key, and two groups differ in one of them. An order that does not
+ * (an aggregate, a key left out, none at all) leaves ties, and tied groups
+ * come out by first appearance.
+ * @param {{ keys: any[], order: 'first-seen' | { index?: number, aggregate?: number }[] }} group
+ * @returns {boolean}
+ */
+export function ranksGroupsApart(group) {
+  const order = group.order;
+  return order !== 'first-seen' && group.keys.every((_, index) =>
+    order.some((term) => term.aggregate === undefined && term.index === index));
 }

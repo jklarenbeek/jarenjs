@@ -75,14 +75,23 @@ and aggregates read either root, and a count of any root is the count of the
 group's rows. Only the groups in that order lower there: an ordered grouping, a
 window over groups, the nullable form of a sum and a return that reads a whole
 root stay in the engine. A sum, mean or extreme over a column that stores a
-boolean, and a grouping ordered by a key that stores one or whose NULL reads
-back as a present `null`, stay in the engine, which refuses the boolean or the
-`null` where SQL folds or orders it. A sum, mean or extreme over a column whose
-NULL reads back as a present `null` lowers: the statement counts that
-aggregate's NULLs beside it, and the runtime raises the engine's `JQ2001` when
-a group holds one, where SQL alone would skip it. On PostgreSQL such a column
-is not qualified for native reads at all, so there the aggregate stays in the
-engine under `entity.projection`. A nullable
+boolean, and a grouping ordered by a key that stores one, stay in the engine,
+which refuses the boolean where SQL folds or orders it. A sum, mean or extreme
+over a column whose NULL reads back as a present `null` lowers: the statement
+counts that aggregate's NULLs beside it, and the runtime raises the engine's
+`JQ2001` when a group holds one, where SQL alone would skip it. A grouping
+ordered by a key of such a column lowers too: the key comes back with its type
+beside it, and the runtime raises the engine's `JQ2005`, at the ordering that
+names the key, when any group's key is that `null` — however few groups there
+are, since the engine refuses every key it orders before it builds an item, and
+before the `JQ2001` of a returned aggregate. So such a grouping is native in
+`explain()` and answers under `strict: true`, where it was the engine's and
+`strict` refused it with `JD0010`. Two such ordered keys, or one beside an
+ordering aggregate that refuses its own `null`, stay in the engine
+(`entity.projection`): which refusal the engine meets first depends on the first
+group it meets, which the statement does not return. On PostgreSQL such a column
+is not qualified for native reads at all, so there the aggregate and the ordered
+grouping stay in the engine under `entity.projection`. A nullable
 SQL sum needs an explicit query expression: test existence of non-null values,
 then sum those values, otherwise return literal null. An ordinary JSON sum over
 an empty sequence remains zero, beside the nullable form of the same sum in one
@@ -90,7 +99,13 @@ grouping: each is an aggregate of its own. Groups an order leaves tied come out 
 appearance, and over a compound physical identity that is the smallest key
 tuple, which independent SQL minima do not give: such a grouping (no order, an
 aggregate, a key left out) remains residual, while an order naming every group
-key ranks the groups apart and lowers. Unsupported shapes give a reason in
+key ranks the groups apart and lowers. Such an order, over an entity or a
+collection, is the statement's whole order: no first row breaks a tie, the
+groups are grouped in the order's sequence of keys and each key is ordered with
+its type beside it, so SQLite reads the groups off the sort it grouped them by
+rather than sorting them again — unless a key places an absent value where
+SQLite's default does not, is ordered twice, or is an entity's text column,
+whose collation the statement spells out on the key. Unsupported shapes give a reason in
 `explain`; strict mode refuses them with `JD0010`.
 Physical integer sums/averages also prove the group's magnitude/count bound
 inside SQL. When intermediate exactness cannot be guaranteed, ordinary execution
@@ -144,8 +159,10 @@ on SQLite, the numeric itself on PostgreSQL), so `2` and `2.0` are one key and a
 beyond 2^53, which a client that writes doubles leaves as an integer text, is a key like any
 other: the driver is never asked for it as an integer. The statement groups every row it
 reads, and the planner cannot know how many groups there are: with nearly as many groups
-as rows the statement does the engine's own work and a sort besides, and can be slower than
-the engine. SQLite groups an object or an array by its text, which keeps the order its
+as rows a statement that puts the groups in the engine's order of first appearance does the
+engine's own work and a sort of the groups besides, and can be slower than the engine. A
+grouping ordered by every key ranks the groups apart and is ordered by its keys alone, as
+the entity grouping above is. SQLite groups an object or an array by its text, which keeps the order its
 members were written in, and PostgreSQL's jsonb text keeps the spelling of a number (`1.0`),
 where the engine compares them member by member and numbers by value. So a leaf that may
 hold either (an object, an array, a member with no type, a union that lists either, a path

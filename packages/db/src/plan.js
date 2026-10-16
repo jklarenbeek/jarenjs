@@ -45,7 +45,7 @@ import {
 import { compareJsonScalarLt } from '@jarenjs/core/object';
 import { compileBuckets, resampleSeries, toEpoch } from '@jarenjs/core/series';
 
-import { selectPlan, conjoin, plainFamily, PLAN_VERSION, bindsText } from './algebra.js';
+import { selectPlan, conjoin, plainFamily, PLAN_VERSION, bindsText, ranksGroupsApart } from './algebra.js';
 import { typeOfPath, isNumericType } from './types.js';
 import { schemaNodeAt, canonicalOf, unpinnedStep } from './ddl.js';
 import { columnKindFor } from './scalar-types.js';
@@ -2894,9 +2894,23 @@ function planGeneralGrouping(node, itSlot, shape, resolve = pathRef, owners = nu
   const order = groupOrder(node.orderby, keySlot, build);
   if (order === null) return null;
   // Group equality accepts null and boolean keys; ordering them raises
-  // JQ2005. SQL ordering must not hide that engine error.
-  if (order !== 'first-seen' && order.some((term) =>
-    term.aggregate === undefined && !orderable(keys[term.index].ref, shape.schema))) return null;
+  // JQ2005. SQL ordering must not hide that engine error. A key whose
+  // column reads a NULL as a present `null` orders in SQL beside a guard:
+  // the runtime refuses the answer when a group's key is that null, at the
+  // ordering that names it (`refusesNull`), as the engine refuses every
+  // group key it orders before it builds an item. Which refusal the engine
+  // meets first depends on the first group it meets, which the statement
+  // does not return, so only one such key may be ordered, and no ordering
+  // aggregate may refuse its own null beside it.
+  if (order !== 'first-seen') {
+    if (order.some((term) => term.aggregate === undefined
+      && !orderable(keys[term.index].ref, shape.schema, true))) return null;
+    const guarded = order.flatMap((term, i) =>
+      term.aggregate === undefined && keys[term.index].ref.nullPolicy === 'null' ? [i] : []);
+    if (guarded.length > 1 || (guarded.length === 1 && order.some((term) =>
+      term.aggregate !== undefined && aggregates[term.aggregate].countsNulls))) return null;
+    for (const i of guarded) order[i] = { ...order[i], refusesNull: node.orderby.specs[i].docPath };
+  }
   return { keys, aggregates, tree, order };
 }
 
@@ -3043,20 +3057,6 @@ function distinctTree(node) {
     members.push({ name: member.name, node: built });
   }
   return { p: 'object', members };
-}
-
-/**
- * Whether a grouping's order ranks any two groups apart: it names every
- * group key, and two groups differ in one of them. An order that does not
- * (an aggregate, a key left out, none at all) leaves ties, and tied groups
- * come out by first appearance.
- * @param {{ keys: any[], order: 'first-seen' | { index?: number, aggregate?: number }[] }} group
- * @returns {boolean}
- */
-function ranksGroupsApart(group) {
-  const order = group.order;
-  return order !== 'first-seen' && group.keys.every((_, index) =>
-    order.some((term) => term.aggregate === undefined && term.index === index));
 }
 
 /**

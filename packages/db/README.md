@@ -286,8 +286,9 @@ no continuation to emit.
   the rows are numbered in that order and a group stands where its first row
   does. Literal windows apply to the distinct items. The statement groups
   every row it reads and the planner cannot know how many groups there are,
-  so with nearly as many groups as rows it does the engine's own work and a
-  sort besides and can be slower than the engine. An entity `$distinct` of
+  so with nearly as many groups as rows it does the engine's own work and,
+  in the engine's order of first appearance, a sort of the groups besides,
+  and can be slower than the engine. An entity `$distinct` of
   mapped columns lowers the same way (on PostgreSQL over one adopted table
   with no document column). A leaf that may hold an object or an array stays
   with the engine, which compares those member by member.
@@ -315,7 +316,14 @@ no continuation to emit.
   rows or groups come out in; a collection's also lists the group's keys and
   aggregates.
   Nullable scalar keys also group; ordering null or boolean keys remains
-  residual to preserve the engine's error. Windows over singleton group
+  residual to preserve the engine's error, except an entity column whose
+  NULL reads back as a present `null`: on SQLite its groups order in SQL and
+  the runtime raises the engine's `JQ2005` when a group's key is that `null`
+  (such a grouping was the engine's, and `strict: true` refused it). An
+  order that names every key ranks the groups apart and is the statement's
+  whole order, which SQLite reads off the sort it grouped them by unless a
+  key places an absent value where SQLite's default does not, is ordered
+  twice, or is an entity's text column. Windows over singleton group
   constructors lower, and counts over constructors containing only keys,
   literals and row counts count the grouped subquery. Ties under a partial
   group ordering retain first appearance.
