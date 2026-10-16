@@ -193,10 +193,14 @@ dialect papering over:
   kind conforms) the generated column, an index expression and a declared
   interval's CHECK read the member through the same `queryDocument`
   (`columnRead`, planned on the column as `unpinned`), so a conforming
-  document of the other kind holds nothing at the step; a comparison, an
-  ordering or a grouping that would read such a column reads the guarded
-  document instead, and the declared interval's exact seek holds the document
-  to the container beside its bound columns. A path whose container the schema
+  document of the other kind holds nothing at the step, and a comparison or an
+  ordering reads such a column as it reads any other (the plan's
+  `guardedColumns`). The open keeps a column there only where it reads back
+  the planned guarded definition: one a table holds unguarded (an earlier
+  release's, or one created while the model declared the container) is read
+  through the guarded document instead (`PlanRef.unpinned`). The declared
+  interval's exact seek holds the document to the container beside its bound
+  columns. A path whose container the schema
   declares (`type: 'array'` for an index step, `type: 'object'` for a digit
   name) is spelled as it always was, which is why such a database never
   reads as drifted. A table holds either spelling of a guardable path (a model
@@ -745,11 +749,17 @@ alone (PostgreSQL, which reads a value of another JSON type as `NULL`, and a
 SQLite table an earlier release created in one of the member's types, which
 still opens and is read for that type's kind alone, the document for every
 other) a comparison reads that column for its own kind and the document for
-every other, so a number comparison of a string-first member does not seek. A
+every other at that kind. On PostgreSQL the plan creates an index beside a
+declared index over such a member for each other kind, over exactly that read
+(`kindIndexes`, `<index>$<kind>`), so the server seeks it with no change to the
+statement; the open accepts a table without them, `planColumnUpgrade` adds
+them, and `introspect()` reads them back as the union's kinds. On such a SQLite
+table a number comparison of a string-first member does not seek. A
 member whose first type besides `null` is `number` stores its numbers as the doubles the query
 engine compares, as its `REAL` column did. `explain().indexes`
 names an index when the statement spells one of its columns, so a comparison
-that reads the document names none. An untyped column may hold a text or a
+that reads the document names none, and an index beside a declared one, which
+keys no column, is not named where the server seeks it. An untyped column may hold a text or a
 fraction where the first type is `integer`, so such a member is no whole epoch
 for a native bucket ladder and asks for no as-of anchor.
 

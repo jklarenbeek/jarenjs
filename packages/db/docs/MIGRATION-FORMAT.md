@@ -408,7 +408,14 @@ that rebuilds exactly the ones that differ:
   second key column (`Label_User_User_key` on `Label_User`), which no earlier
   release created: a filter on that column, and the cascade from its entity,
   read the whole table. The link creates the index and changes nothing else;
-  `report.upgraded` names it `<table>.<index>` (`Label_User.Label_User_User_key`).
+  `report.upgraded` names it `<table>.<index>` (`Label_User.Label_User_User_key`);
+- on PostgreSQL, a collection table without an index a fresh store creates
+  beside a declared index over a member of several scalar kinds, one per kind
+  besides the column's (`c_by_q$text` beside `c_by_q` over `['number',
+  'string']`, POSTGRESQL.md): no earlier release created them, and a link that
+  gives a member another kind beside an index it keeps plans none. A comparison
+  of that kind reads every row until the link creates the index; the link
+  changes nothing else, and `report.upgraded` names it `c.c_by_q$text`.
 
 The steps are the ones a model change plans for the same column: drop the
 indexes over it (and the CHECK that reads it), drop the column, add it as a fresh
@@ -451,7 +458,9 @@ initializer builds the baseline model into an empty database, each
 many-to-many join table as the earliest release created it, without the
 index over its second key column (a link an earlier release planned neither
 creates, renames nor drops that index; one this release plans creates it,
-and the shadow's acceptance takes a join table with it or without it); a supplied
+and the shadow's acceptance takes a join table with it or without it), and
+each collection without the indexes beside its declared ones over a member of
+several kinds (PostgreSQL; the upgrade link creates them); a supplied
 `shadowFixture(connection)` instead creates the historical schema and
 fixture rows. Physical preservation plans require that initializer or an
 explicit `shadow: false`, because a query mapping cannot recreate all

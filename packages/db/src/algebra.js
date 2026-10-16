@@ -35,7 +35,9 @@ export const PLAN_VERSION = 2;
  *   a path with a step a path engine may read off the other kind of
  *   container (an index, or a name that reads as one) whose container the
  *   schema leaves open, so a column spelled by the engine's path text may
- *   read the wrong member of a conforming document; `families` is carried
+ *   read the wrong member of a conforming document — it is not set where
+ *   the table holds the column read under the dialect's guard, which reads
+ *   the member the document does; `families` is carried
  *   by the two sides of a path comparison: every JSON family the schema
  *   lets the member hold.
  *

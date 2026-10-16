@@ -355,13 +355,14 @@ describe('a declared interval over an index step', () => {
         const { store, collection } = await storeForGroup(under(), postgresDriver(pool, { schema }), side);
         try {
           for (const entry of under().cases) assert.equal(await runCase(collection, under().documents, entry, 'native'), null, entry.name);
-          // an indexed path under a container the schema declares keeps its column; one under a container it leaves open reads the document
+          // an indexed path keeps its column, under a container the schema declares and under one it
+          // leaves open alike: a table this release creates reads the latter under the guard
           const sql = async (/** @type {string} */ name) => (await collection.explain(under().cases.find((/** @type {any} */ entry) => entry.name === name).query)).sql;
           const reads = side === 'indexed';
           assert.equal((await sql('a name 0 under a declared object')).includes('"gx_w_0"'), reads);
           assert.equal((await sql('an index 0 under a declared array')).includes('"gx_a_0"'), reads);
-          assert.equal((await sql('a name 0 against a number')).includes('"gx_n_0"'), false);
-          assert.equal((await sql('an index 0 against a number')).includes('"gx_v_0"'), false);
+          assert.equal((await sql('a name 0 against a number')).includes('"gx_n_0"'), reads);
+          assert.equal((await sql('an index 0 against a number')).includes('"gx_v_0"'), reads);
         }
         finally {
           await store.close();

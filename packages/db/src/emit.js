@@ -652,8 +652,9 @@ export function emitPlan(plan, dialect, physical) {
    * value of another kind does not survive intact (a TEXT column holds the
    * number 2 as '2') and which therefore answers its own kind alone. A
    * column spelled by a path text that reads a step off the wrong kind of
-   * container (`unpinned`: the schema leaves the container open) gives
-   * way to the guarded document where the dialect guards one.
+   * container (`unpinned`: the schema leaves the container open, and the
+   * table holds the column unguarded) gives way to the guarded document
+   * where the dialect guards one.
    * @param {any} ref
    * @param {'any' | 'text' | 'number' | 'boolean'} [kind]
    */

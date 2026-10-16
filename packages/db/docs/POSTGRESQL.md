@@ -64,6 +64,27 @@ that every row evaluated beside the typed extraction's own `CASE` and that the
 planner's selectivity estimate could not price; where the member is indexed the
 typed form is the column itself, which the planner estimates from its statistics.
 
+A member the schema lets hold several scalar kinds (`['number', 'string']`)
+has its generated column in its first type, so a comparison of another kind
+reads the member's typed extraction at that kind — the `CASE` a column of that
+kind would hold. Beside each declared index over one such member the store
+creates one index per other kind over exactly that extraction, named
+`<collection>_<index name>$<kind>` (`c_by_q$text`; a name past PostgreSQL's
+63 bytes is clipped beside a short hash of it), and the server seeks it for
+that comparison, a range and a bound membership list alike; `explain().indexes`,
+which names the indexes whose columns a statement spells, does not name it. It is never unique,
+so a unique index over the member still keys its first type alone, as it
+always has. The statement is the same with or without it: a table an earlier
+release created has none and answers as before by reading every row, and
+`planColumnUpgrade` adds them (MIGRATION-FORMAT §3). A link creates them with
+the declared index they sit beside, drops them with it or where the member
+stops holding the kind, and plans none beside an index it keeps — a table
+given the kind so is `planColumnUpgrade`'s to complete. `introspect()` reads
+each back as its kind of the member's union, after the column's type. A
+composite or conditional index, and a path whose steps the dialect guards (an
+index step or a digit name, below), have none. A bulk load writes the extra
+index; a single write's cost is the round trip it already pays.
+
 A path step `#>` could read off the wrong kind of container is guarded. `#>`
 takes the element `0` of an array and the key `0` of an object for the one path
 step, and the array branch reads any text `strtol` accepts as an index (`00`,
@@ -80,10 +101,14 @@ declared interval's CHECK over the path read the member from the same guarded
 document, so a conforming document whose open container is an object keyed `0`
 holds nothing at an index step (it neither collides in a unique index with the
 array that holds the same element nor reads as a span), as the engine and
-SQLite read it; a comparison, an ordering or a grouping reads the guarded
-document instead of the indexed column, and does not seek that index, and the
-declared interval's exact seek holds the document to the span's container
-beside its bound columns. Where the container is declared (`type: 'array'` for
+SQLite read it. A comparison or an ordering over such a path reads the indexed
+column, which reads the member as the guarded document does, so a comparison
+seeks its index as it does where the container is declared; a table that holds
+the column read without the guard (one an earlier release created, or one
+created while the model declared the container) is known at open, and a query
+over it reads the guarded document instead until `planColumnUpgrade` rebuilds
+the column. The declared interval's exact seek holds the document to the
+span's container beside its bound columns. Where the container is declared (`type: 'array'` for
 an index step, `type: 'object'` for a digit name) a comparison over the path
 reads the column, and a document of the other kind, which the schema forbids,
 is still read through the column, its index and the CHECK. An index step off a

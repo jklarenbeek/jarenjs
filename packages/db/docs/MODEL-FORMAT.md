@@ -193,8 +193,9 @@ parent to be the container it means: the bound columns, the CHECK and the
 native plan's exact `$overlaps` hold a document whose `spans` is an object
 keyed so to be no span, as SQLite and the query engine do, and the store's own
 check reads an index step off an array alone on every engine. A comparison or
-an ordering over such a path reads the guarded document rather than the
-column. Where the schema declares the container's type (`type: 'array'`) the
+an ordering over such a path reads the bound column, which reads the member as
+the guarded document does, where the table holds it so; one a table holds
+without the guard is read through the guarded document. Where the schema declares the container's type (`type: 'array'`) the
 bound columns and the CHECK are spelled without the guard, and a document of
 the other kind is non-conforming. A table holds either spelling and is
 accepted as it is (a change of how the model declares the container plans
@@ -504,7 +505,12 @@ every segment is a plain member or index selection. The collection's
 schema is the type source — the mapping needs no engine-side type
 inference.
 
-Two indexes over the same path share one generated column. A member
+Two indexes over the same path share one generated column. On
+PostgreSQL, whose generated columns carry a real type, a declared index
+over one member of several scalar kinds also gets one index per kind
+besides its column's, over the member read at that kind and named
+`<collection>_<index name>$<kind>`, which no declared name can take
+([POSTGRESQL.md](POSTGRESQL.md)). A member
 name the dialect's JSON path grammar cannot carry (an embedded `"` or
 a control character, on SQLite) is `JD0004`. A backslash in a name is
 written escaped, so the path names the member literally — never the

@@ -548,7 +548,8 @@ the query engine, now refuse by code or answer what the engine answers:
   database reads as drifted. Where the schema leaves the step's container
   open (no declared `type`, so an array and an object both conform) a
   comparison, an ordering or a grouping reads the guarded document instead of
-  the indexed column and no longer seeks that index, and a declared interval's
+  the indexed column and no longer seeks that index (a column held under the
+  guard is read and seeks again, §47), and a declared interval's
   exact `$overlaps` holds the document to the span's container beside its
   bound columns; where the schema declares the container (`type: 'array'` for
   an index step, `type: 'object'` for a digit name) the column and its index
@@ -1972,7 +1973,8 @@ finds its row by its double. A number comparison of such a member reads the
 column again and seeks its index (an equality, or a range with both ends:
 `SEARCH ... USING INDEX`), where it had read the document since a `TEXT` column
 holds the number `2` as the text `'2'`. A member of one type besides `null` keeps
-the column it had, and PostgreSQL keeps the first type's.
+the column it had, and PostgreSQL keeps the first type's (with an index beside
+it for each other kind, §47).
 
 Three answers change with it.
 
@@ -2977,6 +2979,44 @@ are the ones the previous release creates, and it reads the catalog without
 writing it. A store migrated through a link that took no step under this
 release opens under the previous release, which reads that column alike. An
 adopted PostgreSQL layout this release opens, the previous release opens.
+
+## 47. Seeks over a path that leaves a container open, and over another kind of a union member, on PostgreSQL
+
+- On PostgreSQL a comparison or an ordering over an index path whose container
+  the schema leaves open (`$.u[0]`, `$.u['0']` with no declared `type`) read the
+  guarded document instead of the generated column, so a comparison read every
+  row (§21). It now reads the column wherever the table holds it read under the
+  same guard — every table the previous release or this one creates — and a
+  comparison seeks its index (`explain().indexes` names it); an ordering over a
+  name that reads as an index that ran in the set residual runs native. The
+  answers are the same. A table that holds the column unguarded (one created
+  before the guard, or while the model declared the container) is recognized at
+  open and still read through the guarded document until `planColumnUpgrade`
+  rebuilds it (MIGRATION-FORMAT §3). An ordering is still sorted rather than read
+  in index order (`ASC NULLS FIRST`), and a grouping key reads the document, as
+  for every path.
+- On PostgreSQL a declared index over one member of several scalar kinds now has
+  an index beside it for each kind besides its column's (`c_by_q$text` beside
+  `c_by_q` over `['number', 'string']`, POSTGRESQL.md), so a comparison of that
+  kind, which reads the member out of the document, seeks; the statement and the
+  answers are unchanged, and the index is never unique. A store this release
+  creates has them; a table the previous release created opens and answers as
+  before, reading every row for such a comparison, until `planColumnUpgrade` adds
+  them (`report.upgraded` names `c.c_by_q$text`). A link creates them with the
+  declared index they sit beside and drops them (`DROP INDEX IF EXISTS`) with it
+  or where the member stops holding the kind; a link that gives the member of an
+  index it keeps another kind plans none, and the upgrade adds them. The model
+  `introspect()` reads back from a table that has them declares the member's
+  union (`q: { type: ['number', 'string'] }` where it declared `number`), so it
+  reopens the table and plans no index. A bulk load writes the extra index.
+
+**Downgrade.** The previous release opens, reads, queries, plans and introspects a
+store this release creates exactly as this release does, but for a collection
+table with an index beside a declared index over a member of several kinds, which
+it refuses `JD0002` naming the index (`the database has c_by_q$text, … which the
+model does not declare`): drop those indexes (`DROP INDEX "c_by_q$text"`) and it
+opens the table and answers alike. A table `planColumnUpgrade` gave them is the
+same. A table the previous release created and this release opened is unchanged.
 
 ## Measured costs
 

@@ -604,9 +604,11 @@ describe('a plan between two unions whose columns read alike', () => {
     // one read, but an INTEGER column of an earlier release does not open under ['string', 'number']
     assert.deepStrictEqual(ddlOf(['integer', 'string'], ['string', 'number']), rebuild(PLAIN_READ));
     assert.deepStrictEqual(ddlOf(['string', 'number'], undefined), rebuild(PLAIN_READ));
-    // PostgreSQL keeps the first type's column: one first type is no step, another is
-    assert.deepStrictEqual(ddlOf(['number', 'string'], ['number', 'boolean'], postgresDialect), []);
-    assert.deepStrictEqual(ddlOf(['number', 'string'], ['string', 'number'], postgresDialect).length, 4);
+    // PostgreSQL keeps the first type's column: one first type rebuilds no column, another does,
+    // and the index beside it for a kind the member stops holding leaves (one for a kind it gains
+    // beside an index the link keeps is the column upgrade's)
+    assert.deepStrictEqual(ddlOf(['number', 'string'], ['number', 'boolean'], postgresDialect), ['DROP INDEX IF EXISTS "c_by_q$text"']);
+    assert.deepStrictEqual(ddlOf(['number', 'string'], ['string', 'number'], postgresDialect).length, 6);
   });
 });
 

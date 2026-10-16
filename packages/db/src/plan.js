@@ -630,10 +630,11 @@ function wholeColumnOf(shape, canonical) {
 function pathRef(node, itSlot, shape) {
   const path = memberPath(node, itSlot);
   if (path === null) return null;
+  const column = shape.columnByCanonical.get(path.canonical) ?? null;
   return {
     segments: path.segments,
     type: typeOfPath(shape.schema, path.segments),
-    column: shape.columnByCanonical.get(path.canonical) ?? null,
+    column,
     // a member of several kinds: its column holds the first type's, and
     // answers a value of that kind alone, unless it is an untyped column
     // that holds the member as the document does (`wholeColumn`)
@@ -641,8 +642,10 @@ function pathRef(node, itSlot, shape) {
     ...wholeColumnOf(shape, path.canonical),
     // a step a path engine may read off the other kind of container, in a
     // container the schema leaves open: a column spelled that way reads
-    // the wrong member of a conforming document
-    ...(unpinnedStep(shape.schema, path.segments) ? { unpinned: true } : {}),
+    // the wrong member of a conforming document, and one the table holds
+    // read under the dialect's guard reads the member the document does
+    ...(unpinnedStep(shape.schema, path.segments) && !(column !== null && shape.guardedColumns?.has(column) === true)
+      ? { unpinned: true } : {}),
   };
 }
 

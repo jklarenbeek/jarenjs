@@ -853,6 +853,7 @@ export function planCollection(name, collection, dialect, options = undefined) {
     generated,
     checks: intervals.map((interval) => ({ name: interval.constraint, sql: interval.sql })),
   };
+  const kindIndexes = kindIndexesOf(collection.schema, dialect, indexes);
   const createSql = [
     dialect.ddl.createTable(tableShape),
     ...indexes.map((index) => dialect.ddl.createIndex({
@@ -862,6 +863,7 @@ export function planCollection(name, collection, dialect, options = undefined) {
       unique: index.unique,
       ...(index.where === undefined ? {} : { where: index.where }),
     })),
+    ...kindIndexes.map((index) => kindIndexSql(dialect, name, index)),
     ...virtualTables.flatMap((virtual) =>
       [virtual.createSql, ...virtual.triggers.map((trigger) => trigger.sql)]),
   ];
@@ -871,6 +873,8 @@ export function planCollection(name, collection, dialect, options = undefined) {
     { name, what: `the table for collection '${name}'`, docPath: collectionPath, rename: 'the collection' },
     ...ownObjects(dialect, name, [{ name: KEY_COLUMN, type: keyType }, { name: DOC_COLUMN, type: dialect.docColumnType }, ...generated], collectionPath),
     ...indexes.map((index) => ({ name: index.name, what: `index '${index.declared.name}'`, docPath: `${index.declared.docPath}/name`, rename: 'the index' })),
+    ...kindIndexes.map((index) => ({ name: index.name, what: `the ${index.kind} index beside '${index.declared.name}'`,
+      docPath: `${index.declared.docPath}/name`, rename: 'the index' })),
     ...virtualTables.flatMap((virtual) => [virtual, ...virtual.triggers].map((object) => ({ name: object.name,
       what: `the schema object '${object.name}' of a derived index`, docPath: collectionPath }))),
   ];
@@ -903,6 +907,19 @@ export function planCollection(name, collection, dialect, options = undefined) {
      * A comparison with an integer past 2^53 compares such a column bare. */
     doubleColumns: new Set(generated.filter((g) => g.kind === 'key'
       || g.type === dialect.typeFor('number', 'generated')).map((g) => g.name)),
+    /** The indexes beside a declared index over a member of several kinds
+     * that seek its other kinds ({@link kindIndexesOf}): each one's name, its
+     * declared index's (`of`), the kind and the expression it keys. Kept apart
+     * from `expected.indexes`, since no column is keyed; a table an earlier
+     * release created goes without them and opens as it is. */
+    kindIndexes,
+    /** The generated columns that read their member off the document under
+     * the dialect's guard (a path that leaves a container open), as the
+     * table holds them: a table this plan creates holds every one, and the
+     * open of an existing table keeps only those whose definition it reads
+     * back as planned ({@link verifyShape}). A query reads such a column
+     * where it would otherwise read the guarded document. */
+    guardedColumns: new Set(generated.filter((g) => g.unpinned !== undefined).map((g) => g.name)),
     virtualTables,
     createSql,
     objects,
@@ -941,6 +958,77 @@ export function planCollection(name, collection, dialect, options = undefined) {
       planCollection(name, collection, dialect, { ...options, legacyColumns }),
   });
   return plan;
+}
+
+/**
+ * The indexes that let a comparison of another kind seek a member of several
+ * scalar kinds, on an engine whose generated columns carry a real SQL type:
+ * the column a declared index keys holds the member's first type, so a
+ * comparison of another kind reads the member out of the document at that
+ * kind (the dialect's `jsonExtract`, as a native statement spells it), and
+ * an index over exactly that read is the one the server seeks for it. One per other
+ * kind (`integer` and `number` are one), beside each declared index over a
+ * single member path with no condition; never unique, so it refuses nothing
+ * the declared index admits. A path whose read the dialect guards (a step
+ * off a container the path text cannot tell apart) has none: its read
+ * changes with how the model declares the container.
+ * @param {any} schema
+ * @param {any} dialect
+ * @param {any[]} indexes - the planned declared indexes
+ * @returns {{ name: string, of: string, kind: string, expression: string, declared: any }[]}
+ */
+function kindIndexesOf(schema, dialect, indexes) {
+  if (dialect.capabilities.untypedColumns === true) return [];
+  const doc = dialect.quoteIdentifier(DOC_COLUMN);
+  return indexes.flatMap((index) => {
+    const declared = index.declared;
+    if (declared.expression !== undefined || declared.derive || declared.where !== undefined
+      || declared.paths?.length !== 1) return [];
+    const { segments } = compileIndexPath(declared.paths[0], `${declared.docPath}/path`);
+    const types = schemaNodeAt(schema, segments)?.type;
+    const pathText = dialect.jsonPathText(segments);
+    if (!Array.isArray(types) || pathText === null || dialect.queryGuard(doc, segments) !== null) return [];
+    const first = columnKindFor(schemaTypeAt(schema, segments));
+    const kinds = [...new Set(types.map((/** @type {any} */ type) => columnKindFor(type)))]
+      .filter((kind) => kind !== undefined && kind !== first);
+    return kinds.map((kind) => ({ name: kindIndexName(dialect, index.name, /** @type {string} */ (kind)), of: index.name,
+      kind: /** @type {string} */ (kind), expression: dialect.jsonExtract(doc, pathText, kind), declared }));
+  });
+}
+
+/**
+ * The name of the index beside the declared index `of` that seeks its
+ * member's `kind`: `<of>$<kind>`, which no declared index or collection can
+ * take (their names are identifiers), or, where that is longer than the
+ * engine keeps an identifier, `of` clipped to fit beside a short hash of it.
+ * @param {any} dialect @param {string} of @param {string} kind
+ * @returns {string}
+ */
+export function kindIndexName(dialect, of, kind) {
+  const natural = `${of}$${kind}`;
+  const limit = dialect.maxIdentifierBytes;
+  if (!Number.isFinite(limit) || utf8ByteLength(natural) <= limit) return natural;
+  const suffix = `$${kind}_${hashContent(of)}`;
+  return clipToBytes(of, limit - suffix.length) + suffix;
+}
+
+/**
+ * The statement that creates an index {@link kindIndexesOf} plans.
+ * @param {any} dialect @param {string} table @param {{ name: string, expression: string }} index
+ * @returns {string}
+ */
+export function kindIndexSql(dialect, table, index) {
+  return `CREATE INDEX ${dialect.quoteIdentifier(index.name)} ON ${dialect.quoteIdentifier(table)} (${index.expression})`;
+}
+
+/**
+ * The statement that drops an index {@link kindIndexesOf} plans, where the
+ * table holds it: one an earlier release created does not.
+ * @param {any} dialect @param {string} name
+ * @returns {string}
+ */
+export function kindIndexDropSql(dialect, name) {
+  return `DROP INDEX IF EXISTS ${dialect.quoteIdentifier(name)}`;
 }
 
 /**
@@ -1192,6 +1280,9 @@ export function verifyShape(connection, plan, collection, docPath, kind = 'colle
           ? plannedExpression(dialect, plan, have.name) : undefined;
         let difference = planned === undefined ? null
           : readBack.expression(/** @type {string} */ (have.computes), planned, have.conforming);
+        // a column read under the guard is one a query may read only where the table holds that
+        // spelling; one it holds the other way, or whose spelling the catalog does not say, is not
+        if (planned === undefined || difference !== null) plan.guardedColumns?.delete(have.name);
         if (difference !== null) {
           // the same path spelled with the guard or without it: a table whose container the model
           // declared the other way, or one an earlier release created, opens as it did
@@ -1214,8 +1305,11 @@ export function verifyShape(connection, plan, collection, docPath, kind = 'colle
       }
       return chain(connection.prepare(dialect.introspect.indexes(plan.table)), (indexesStatement) =>
         chain(indexesStatement.all([]), (indexRows) => {
+          // an index beside a declared one that seeks another kind of its member is
+          // compared on its own, and a table an earlier release created goes without it
+          const kindIndexes = new Map((plan.kindIndexes ?? []).map((/** @type {any} */ index) => [index.name, index]));
           const created = indexRows
-            .filter((row) => String(row.origin) === 'c')
+            .filter((row) => String(row.origin) === 'c' && !kindIndexes.has(String(row.name)))
             .map((row) => ({ name: String(row.name), unique: Number(row.uniq) !== 0,
               predicate: row.predicate === null || row.predicate === undefined ? null : String(row.predicate),
               plain: row.plain === undefined || row.plain === null || Number(row.plain) === 1,
@@ -1273,13 +1367,45 @@ export function verifyShape(connection, plan, collection, docPath, kind = 'colle
           // the table's rule programs: from the catalog where the engine keeps
           // no CREATE text, every other trigger or rewrite rule on the table
           // undeclared drift; a CREATE text comparison covers them below
-          return chain(collectColumns(0), () =>
+          const heldKindIndexes = indexRows.filter((row) => String(row.origin) === 'c' && kindIndexes.has(String(row.name)));
+          return chain(collectColumns(0), () => chain(verifyKindIndexes(connection, kindIndexes, heldKindIndexes, disagree), () =>
             chain(verifyIntervalChecks(connection, plan, disagree), () =>
               chain(verifyRulePrograms(connection, plan.table, plan.programs ?? [], disagree,
                 { installed: dialect.capabilities.declaredSqlText !== true, undeclared: true }), () =>
-                verifyDeclaredSql(connection, plan, disagree))));
+                verifyDeclaredSql(connection, plan, disagree)))));
         }));
     })));
+}
+
+/**
+ * The indexes beside a declared index that a table holds
+ * ({@link kindIndexesOf}): each the plain B-tree, neither unique nor partial,
+ * over the one key the plan creates it over, read back from the catalog.
+ * @param {any} connection
+ * @param {Map<string, any>} planned - by name
+ * @param {any[]} rows - the table's catalog rows of those names
+ * @param {(difference: string) => any} disagree
+ * @returns {any} value-or-promise
+ */
+function verifyKindIndexes(connection, planned, rows, disagree) {
+  const dialect = connection.dialect;
+  const step = (/** @type {number} */ i) => {
+    if (i >= rows.length) return null;
+    const row = rows[i];
+    const name = String(row.name);
+    if (Number(row.uniq) !== 0 || Number(row.partial ?? 0) !== 0 || (row.plain !== undefined && row.plain !== null && Number(row.plain) !== 1))
+      disagree(`index '${name}' is not the plain B-tree without a condition the model creates beside '${planned.get(name).of}'`);
+    return chain(connection.prepare(dialect.introspect.indexKeyColumns(name)), (statement) =>
+      chain(statement.all([]), (keys) => {
+        const term = keys.length === 1 && (keys[0].name === null || keys[0].name === undefined) && typeof keys[0].term === 'string'
+          ? keys[0].term : null;
+        const difference = term === null ? `keys (${keys.map((key) => key.term ?? key.name).join(', ')})`
+          : dialect.readBack.indexKey(term, planned.get(name).expression, readsConforming(row));
+        if (difference !== null) disagree(`index '${name}' ${difference}`);
+        return step(i + 1);
+      }));
+  };
+  return step(0);
 }
 
 /**

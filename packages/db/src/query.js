@@ -1276,6 +1276,7 @@ export function createQueryEngine(context) {
     schema: collection.schema,
     columnByCanonical: physicalPlan.columnByCanonical,
     anyKindColumns: physicalPlan.anyKindColumns,
+    guardedColumns: physicalPlan.guardedColumns,
     // the DECLARED indexes, in their declared column order: a temporal
     // plan is recognized by the index a model already has, so the
     // planner needs to see the list rather than guess a column's role

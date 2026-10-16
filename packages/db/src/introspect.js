@@ -30,7 +30,8 @@
 import { chain, useStatementOnce } from './driver.js';
 import { DbCompileError } from './errors.js';
 import { readOptionsOrNull } from './options.js';
-import { KEY_COLUMN, DOC_COLUMN, SCALAR_CODECS, indexCondition, canonicalOf } from './ddl.js';
+import { KEY_COLUMN, DOC_COLUMN, SCALAR_CODECS, indexCondition, canonicalOf, kindIndexName } from './ddl.js';
+import { columnKindFor } from './scalar-types.js';
 import { readPredicate, readIntervalCheck, sqlTokens, SQLITE_PREDICATE } from './dialects/check-read.js';
 import { comparableDeclaredSql } from './schema-sql.js';
 import { isKeyword } from './sql.js';
@@ -95,21 +96,28 @@ function readTable(connection, table, objects) {
           const declared = indexRows.filter((row) => String(row.origin) === 'c')
             .sort((a, b) => (String(a.name) < String(b.name) ? -1 : 1));
           const keyIndex = indexRows.find((row) => String(row.origin) === 'pk');
+          // the key an expression term holds, as the server deparses it, where the
+          // catalog reads one: what an index beside a declared one is read back by
+          const termsOf = (/** @type {string} */ name, /** @type {any[]} */ rows) =>
+            (!rows.some((row) => row.name == null) || dialect.introspect.indexKeyColumns === undefined ? null
+              : chain(all(dialect.introspect.indexKeyColumns(name)), (keys) =>
+                keys.map((key) => (typeof key.term === 'string' ? key.term : null))));
           const withColumns = (i, out) => {
             if (i >= declared.length) return out;
             return chain(all(dialect.introspect.indexColumns(String(declared[i].name))),
-              (rows) => withColumns(i + 1, [...out, {
+              (rows) => chain(termsOf(String(declared[i].name), rows), (terms) => withColumns(i + 1, [...out, {
                 name: String(declared[i].name),
                 unique: Number(declared[i].uniq) !== 0,
                 partial: Number(declared[i].partial ?? 0) !== 0,
                 columns: rows.map((row) => row.name == null ? null : String(row.name)),
+                ...(terms === null ? {} : { terms }),
                 sql: objects.find((o) => o.type === 'index' && o.name === String(declared[i].name))?.sql ?? null,
                 // an engine that keeps no CREATE text reports the condition and
                 // the index's shape from its catalog, as the open reads them
                 predicate: declared[i].predicate == null ? null : String(declared[i].predicate),
                 plain: declared[i].plain == null || Number(declared[i].plain) === 1,
                 conforming: declared[i].conforming == null || String(declared[i].conforming) === 'on',
-              }]));
+              }])));
           };
           return chain(withColumns(0, []), (indexes) =>
             chain(keyIndex === undefined
@@ -262,6 +270,45 @@ function looksLikeCollection(dialect, table) {
 }
 
 /**
+ * The indexes a table holds beside its plain path indexes that seek another
+ * kind of a member of several types (`ddl.js` `kindIndexesOf`): each under
+ * the name the plan gives it, neither unique nor partial, keying exactly the
+ * read of the member at its kind. The member's type gains that kind after
+ * its column's, so the model read back plans the same index beside it.
+ * @param {any} dialect
+ * @param {any} table
+ * @param {Map<string, { type: string | string[] | undefined, segments: import('./dialect.js').JsonPathSegment[] }>} paths
+ *   - the members by their generated columns; a folded type is written back
+ * @returns {Set<string>} the names of the indexes read so
+ */
+function kindIndexesOf(dialect, table, paths) {
+  /** @type {Set<string>} */
+  const read = new Set();
+  if (dialect.readBack?.indexKey === undefined) return read;
+  const byName = new Map(table.indexes.map((/** @type {any} */ index) => [index.name, index]));
+  for (const index of table.indexes) {
+    const entry = index.columns.length === 1 && !index.partial ? paths.get(index.columns[0]) : undefined;
+    const pathText = entry === undefined ? null : dialect.jsonPathText(entry.segments);
+    if (entry === undefined || entry.type === undefined || pathText === null) continue;
+    for (const [kind, type] of KIND_TYPES) {
+      const name = kindIndexName(dialect, index.name, kind);
+      const beside = byName.get(name);
+      const term = beside?.terms?.[0];
+      if (beside === undefined || beside.unique || beside.partial || beside.columns.length !== 1 || typeof term !== 'string'
+        || dialect.readBack.indexKey(term, dialect.jsonExtract(dialect.quoteIdentifier(DOC_COLUMN), pathText, kind), beside.conforming) !== null)
+        continue;
+      read.add(name);
+      const types = typeof entry.type === 'string' ? [entry.type] : entry.type;
+      if (!types.includes(type) && columnKindFor(types[0]) !== kind) entry.type = [...types, type];
+    }
+  }
+  return read;
+}
+
+/** The schema type each kind an index beside a declared one seeks reads back as. */
+const KIND_TYPES = /** @type {const} */ ([['text', 'string'], ['number', 'number'], ['boolean', 'boolean']]);
+
+/**
  * Derive one collection. The schema it answers holds exactly the
  * members the physical shape carries — the indexed paths, and the key
  * where one is known — because the rest of the document is not there to
@@ -328,10 +375,13 @@ function deriveCollection(dialect, table, report, keys, functionNames) {
     paths.set(column.name, { path: modelPath(segments), type, segments, open });
   }
 
+  const besides = kindIndexesOf(dialect, table, paths);
+
   /** The columns a plain path index covers — what a declaration requires of an interval's bounds. @type {Set<string>} */
   const indexedColumns = new Set();
   const indexes = [];
   for (const index of table.indexes) {
+    if (besides.has(index.name)) continue;
     if (index.partial || index.columns.some((column) => column === null)) {
       report(loss('unmapped-index', `${table.name}.${index.name}`,
         'a partial predicate or expression term cannot be represented by an unconditional member index'));

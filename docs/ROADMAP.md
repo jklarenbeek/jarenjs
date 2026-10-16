@@ -648,19 +648,29 @@ what each does is its own documentation's job
   those leaves (a row-value membership for pairs, one external list for
   external `$ne`), or a weight for the fetch in the style of the
   external-operand weights.
-- [ ] **A comparison, ordering or grouping over an open-container index path
-  on PostgreSQL reads the guarded document and does not seek the index.** The
-  generated column, index expression and interval CHECK of a table read an
-  index step off an array alone, and a digit name off an object alone, where
-  the schema leaves the container open. A digit name is read under the object
-  guard even where the schema declares the object, so it reads back as the
-  name. `planColumnUpgrade` rebuilds a table an earlier release created, or
-  one whose model stopped declaring the container, to those definitions. Still
-  open: the seek: read the column for an open-container path when the plan
-  knows the column carries the guard (the planned column's `unpinned`; a table
-  holding the other spelling keeps the guarded document until
-  `planColumnUpgrade` rebuilds it), or an expression index.
-- [ ] **On PostgreSQL the generated column of an indexed union member is the first type's, so a comparison of another kind reads the document and does not seek.** Wanted: a typed column per kind or an expression index.
+- [ ] **On PostgreSQL a comparison of another kind of a union member seeks no
+  composite or conditional index, and no index over a path with a guarded
+  step.** A declared single-path index over a member of several scalar kinds
+  has an index beside it per other kind (`c_by_q$text`) over the document read
+  that comparison spells, so it seeks; a composite (`['$.q', '$.k']`) or
+  conditional index over such a member, and any index over a path whose step
+  the dialect guards (`$.u[0]` under an open container with `items: { type:
+  ['number', 'string'] }`), has none, and that comparison reads every row.
+  Wanted: the same index beside those (for a guarded path, under each spelling
+  of the guard the table may hold).
+- [ ] **On PostgreSQL a unique index over a member of several types keys its
+  first type alone.** Under a unique `$.q` over `['number', 'string']` two
+  documents with `q: 'b'` are both stored, where SQLite refuses the second
+  (`JD2005`): the generated column holds the first type and reads a string as
+  `NULL`. Wanted: a unique index per kind — a new refusal (minor), and
+  `planColumnUpgrade` must fail `JD0023` on a table already holding
+  duplicates.
+- [ ] **On PostgreSQL an ordering over an indexed collection member is sorted,
+  never read in index order.** The statement orders `ASC NULLS FIRST` beside
+  `"rid"`, which an ascending B-tree index does not provide (`Sort` over `Seq
+  Scan`), so an `$orderby` sorts every matching row however few a page or a
+  narrow `$where` returns. Wanted: an index whose null placement the order
+  reads, or an order whose null placement the index provides.
 - [ ] **A store predicate's external past 2^53 compares exactly with digits
   another writer spelled, in SQLite.** A store profile predicate's external
   integer past ±(2^53 − 1) binds on SQLite as the integer its own shortest

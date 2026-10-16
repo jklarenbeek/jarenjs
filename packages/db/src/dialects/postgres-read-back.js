@@ -574,4 +574,20 @@ export const postgresReadBack = Object.freeze({
     return have !== null && want !== null && JSON.stringify(have) === JSON.stringify(want)
       ? null : `computes ${stored}, and the model declares ${planned}`;
   },
+  /**
+   * How the key an index holds under an expression differs from the planned
+   * expression, or `null`. The server deparses a key without its collation
+   * (`pg_get_indexdef` of one key), so the planned expression's own outer
+   * `COLLATE` is set aside, as a layout index's term is compared.
+   * @param {string} stored - the key's deparse @param {string} planned - the planned key expression
+   * @param {boolean} conforming - the reading session's `standard_conforming_strings`
+   * @returns {string | null}
+   */
+  indexKey(stored, planned, conforming) {
+    const have = expressionForm(stored, conforming);
+    const form = expressionForm(planned, true);
+    const want = form !== null && form.collate !== undefined ? form.of : form;
+    return have !== null && want !== null && JSON.stringify(have) === JSON.stringify(want)
+      ? null : `keys ${stored}, and the model declares ${planned}`;
+  },
 });

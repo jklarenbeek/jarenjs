@@ -45,7 +45,7 @@ import { modelIdentity, migrationIdentity } from './migration-identity.js';
 import { migrationChecksum, historyStatements, readMigrationHistory, checkHistoryObservation, checkAppliedRows,
   historyHeader, identityRows, checkHistoryIdentity, checkHistoryChain, writeIdentityRows } from './migration-history.js';
 export { HISTORY_TABLE, ENGINE_TABLES };
-import { planCollection, verifyShape, legacyColumnTypes, planEntity, planJoinTable, joinIndexName, clipToBytes, plannedExpression, acceptsColumn, columnExpression, creationOrder } from './ddl.js';
+import { planCollection, verifyShape, legacyColumnTypes, planEntity, planJoinTable, joinIndexName, clipToBytes, plannedExpression, acceptsColumn, columnExpression, creationOrder, kindIndexSql, kindIndexDropSql } from './ddl.js';
 import { normalizeEntities, explainMapping, asHistory } from './model.js';
 import { derivedValue, memberAt, registerDeriveFunctions } from './derive.js';
 import { mergeEntityRow } from './graph.js';
@@ -971,6 +971,16 @@ function collectionSteps(name, fromPlan, toPlan, toCollection, dialect, mapping)
           note: `drop index '${indexName}' on '${name}'` });
       }
     }
+    // an index beside a declared one that seeks another kind of its member leaves with
+    // it, and when the member no longer holds that kind; a table may not hold it (one an
+    // earlier release created, or one a link gave the kind without rebuilding the index)
+    const toKindIndexes = new Set((toPlan.kindIndexes ?? []).map((/** @type {any} */ index) => index.name));
+    for (const index of fromPlan.kindIndexes ?? []) {
+      if (!toKindIndexes.has(index.name) || indexNeedsRebuild(index.of, fromIndexes.get(index.of))) {
+        steps.push({ kind: 'ddl', sql: kindIndexDropSql(dialect, index.name),
+          note: `drop the ${index.kind} index '${index.name}' beside '${index.of}' on '${name}'` });
+      }
+    }
     for (const columnName of disturbedColumns) {
       steps.push({ kind: 'ddl', sql: dialect.ddl.dropColumn(name, columnName),
         note: `drop generated column '${columnName}' on '${name}'` });
@@ -997,16 +1007,27 @@ function collectionSteps(name, fromPlan, toPlan, toCollection, dialect, mapping)
       steps.push(deriveStep(name, toPlan, backfilled,
         `backfill derived column(s) ${backfilled.join(', ')} on '${name}'`));
     }
+    /** The declared indexes this link creates. @type {Set<string>} */
+    const createdIndexes = new Set();
     for (const [indexName, toIndex] of toIndexes) {
       const source = fromIndexes.get(indexName);
       const rebuilt = source !== undefined && indexNeedsRebuild(indexName, source);
       if (source === undefined || rebuilt) {
+        createdIndexes.add(indexName);
         steps.push({
           kind: 'ddl',
           sql: dialect.ddl.createIndex({ name: indexName, table: name, columns: toIndex.columns,
             unique: toIndex.unique, where: toIndex.where }),
           note: `create index '${indexName}' on '${name}'`,
         });
+      }
+    }
+    // an index beside a declared one arrives with it; one a table lacks beside an index
+    // it keeps is `planColumnUpgrade`'s to add
+    for (const index of toPlan.kindIndexes ?? []) {
+      if (createdIndexes.has(index.of)) {
+        steps.push({ kind: 'ddl', sql: kindIndexSql(dialect, name, index),
+          note: `create the ${index.kind} index '${index.name}' beside '${index.of}' on '${name}'` });
       }
     }
     for (const [virtualName, target] of toVirtual) {
@@ -1335,7 +1356,8 @@ export function planColumnUpgrade(connection, model, options = undefined) {
   const collections = [...normalizeModel(model, options?.expressions).values()]
     .map((collection) => ({ collection, plan: planCollection(collection.name, collection, dialect, mapping) }));
   return chain(heldDefinitionsOf(connection, collections.map(({ plan }) => plan)), (held) =>
-    chain(missingJoinIndexes(connection, joinPlansOf(model, dialect)), (missing) => {
+    chain(missingJoinIndexes(connection, joinPlansOf(model, dialect)), (missing) =>
+    chain(missingKindIndexes(connection, collections.map(({ plan }) => plan)), (besides) => {
       const steps = [];
       /** @type {string[]} */
       const upgraded = [];
@@ -1349,10 +1371,16 @@ export function planColumnUpgrade(connection, model, options = undefined) {
         upgraded.push(`${table}.${index}`);
         steps.push({ kind: 'ddl', sql, note: `index the join table '${table}' over its second key column, as a fresh store creates it` });
       }
+      const planned = new Set(steps.map((step) => step.sql));
+      for (const { table, index, sql, kind, of } of besides) {
+        if (planned.has(sql)) continue;
+        upgraded.push(`${table}.${index}`);
+        steps.push({ kind: 'ddl', sql, note: `create the ${kind} index '${index}' beside '${of}' on '${table}', as a fresh store creates it` });
+      }
       const migration = { $migration: MIGRATION_VERSION, id: options?.id ?? `upgrade-${to.slice(0, 8)}`,
         from: to, to, identity, steps };
       return { migration, report: { upgraded } };
-    }));
+    })));
 }
 
 /**
@@ -1366,20 +1394,51 @@ export function planColumnUpgrade(connection, model, options = undefined) {
  */
 function missingJoinIndexes(connection, plans) {
   const dialect = connection.dialect;
-  /** @type {{ table: string, index: string, sql: string }[]} */
+  return missingIndexes(connection, plans, (plan) => plan.expected.indexes
+    .filter((/** @type {any} */ index) => index.legacyAbsent === true)
+    .map((/** @type {any} */ index) => ({ table: plan.table, index: index.name, sql: dialect.ddl.createIndex({ ...index, table: plan.table }) })));
+}
+
+/**
+ * The indexes a fresh store creates beside a declared index over a member of
+ * several kinds (`kindIndexes`) that a collection table lacks — one an
+ * earlier release created, or one a link gave the kind without rebuilding
+ * the index — each with the statement that creates it. A collection the
+ * database does not hold has nothing to upgrade.
+ * @param {any} connection
+ * @param {any[]} plans - from `planCollection`, one per collection
+ * @returns {any} value-or-promise of `{ table: string, index: string, sql: string, kind: string, of: string }[]`
+ */
+function missingKindIndexes(connection, plans) {
+  const dialect = connection.dialect;
+  return missingIndexes(connection, plans, (plan) => (plan.kindIndexes ?? []).map((/** @type {any} */ index) =>
+    ({ table: plan.table, index: index.name, sql: kindIndexSql(dialect, plan.table, index), kind: index.kind, of: index.of })));
+}
+
+/**
+ * Of the indexes `wanted` names for each table, those a table the database
+ * holds does not: one catalog read per table that wants any.
+ * @template {{ index: string }} T
+ * @param {any} connection
+ * @param {any[]} plans - each with its `table`
+ * @param {(plan: any) => T[]} wanted
+ * @returns {any} value-or-promise of `T[]`
+ */
+function missingIndexes(connection, plans, wanted) {
+  const dialect = connection.dialect;
+  /** @type {T[]} */
   const missing = [];
   const next = (/** @type {number} */ i) => {
     if (i >= plans.length) return missing;
     const plan = plans[i];
+    const indexes = wanted(plan);
+    if (indexes.length === 0) return next(i + 1);
     return chain(connection.prepare(dialect.introspect.tableExists()), (exists) =>
       chain(exists.get([plan.table]), (row) => (row === undefined ? next(i + 1)
         : chain(connection.prepare(dialect.introspect.indexes(plan.table)), (statement) =>
           chain(statement.all([]), (rows) => {
             const held = new Set(rows.map((/** @type {any} */ candidate) => String(candidate.name)));
-            for (const index of plan.expected.indexes) {
-              if (index.legacyAbsent === true && !held.has(index.name))
-                missing.push({ table: plan.table, index: index.name, sql: dialect.ddl.createIndex({ ...index, table: plan.table }) });
-            }
+            missing.push(...indexes.filter((index) => !held.has(index.index)));
             return next(i + 1);
           })))));
   };
@@ -2711,12 +2770,14 @@ export function createModelShape(connection, model, expressions = undefined) {
 
 /**
  * {@link createModelShape}, with some generated columns in the type a table
- * holds them in, and some join tables without the index over their second
- * key column, as an earlier release created them.
+ * holds them in, some join tables without the index over their second
+ * key column, and (`bareKinds`) every collection without the indexes beside
+ * its declared ones over a member of several kinds, as an earlier release
+ * created them.
  * @param {any} connection
  * @param {any} model
  * @param {any} expressions
- * @param {{ columns: Map<string, Map<string, string>>, bareJoins: Set<string> | 'all' }} legacy -
+ * @param {{ columns: Map<string, Map<string, string>>, bareJoins: Set<string> | 'all', bareKinds?: boolean }} legacy -
  *   `columns` by table, then by column; `bareJoins` the join tables created without
  *   that index, or `'all'` of them
  * @returns {any}
@@ -2726,9 +2787,10 @@ function createShapeHolding(connection, model, expressions, legacy) {
   /** @type {string[]} */
   const statements = [];
   for (const collection of normalizeModel(model, expressions).values()) {
-    statements.push(
-      ...planCollection(collection.name, collection, dialect,
-        { ...mappingFor(connection, expressions), legacyColumns: legacy.columns.get(collection.name) }).createSql);
+    const plan = planCollection(collection.name, collection, dialect,
+      { ...mappingFor(connection, expressions), legacyColumns: legacy.columns.get(collection.name) });
+    const beside = new Set(legacy.bareKinds === true ? plan.kindIndexes.map((/** @type {any} */ index) => kindIndexSql(dialect, plan.table, index)) : []);
+    statements.push(...plan.createSql.filter((/** @type {string} */ sql) => !beside.has(sql)));
   }
   // a shape is built for a baseline too, which is history
   const entities = asHistory(() => normalizeEntities(model));
@@ -3530,10 +3592,12 @@ function replayOnShadow(primary, driver, shadowPath, baseline, migrations, model
   return withMigrationConnection({ driver: independent, path: shadowPath }, (shadow) =>
     chain(verifyShadowOwnership(primary, shadow, driver, migrations.some((migration) => migration.physical?.dialect === 'postgres')), () => chain(emptyShadowHistory(shadow), () => chain(registerDeriveFunctions(shadow), () => chain(options.registerFunctions?.(shadow), () =>
       // the baseline as the earliest release created it: a join table
-      // without the index over its second key column, which a link an
-      // earlier release planned does not create, rename or drop (a link this
-      // release plans creates it, and acceptance takes the table either way)
-      chain(options.shadowFixture === undefined ? createShapeHolding(shadow, baseline, options.expressions, { columns: new Map(), bareJoins: 'all' })
+      // without the index over its second key column, and a collection without
+      // the indexes beside its declared ones over a member of several kinds,
+      // which a link an earlier release planned does not create, rename or drop
+      // (a link this release plans creates them, and acceptance takes the table
+      // either way)
+      chain(options.shadowFixture === undefined ? createShapeHolding(shadow, baseline, options.expressions, { columns: new Map(), bareJoins: 'all', bareKinds: true })
         : options.shadowFixture(shadow), () => chain(emptyShadowHistory(shadow), () => runMigration({ connection: shadow }, migrations, {
         batchSize: options.batchSize, assertionBounds: options.assertionBounds,
         onProgress: options.onProgress, onAssertionPlan: options.onAssertionPlan,
