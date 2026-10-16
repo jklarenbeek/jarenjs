@@ -227,6 +227,15 @@ is an opt-in formatter policy with unchanged default bytes. SQLite
 have source and isolated-package fixtures. These source capabilities do not
 establish registry publication or downstream acceptance.
 
+- [ ] **Settling on awaits in flight.** `app.settled()` answers when the queue
+  drains; an awaiting action's effect in flight is not queued, so a server
+  render or a test that dispatches one has no handle on its continuation
+  (APP-FORMAT §3.3). Open: a settled form that also waits, bounded, for the
+  awaits in flight.
+- [ ] **The app pen writes no awaiting action.** `@jarenjs/linq/app` builds
+  query actions only; an `{ "$await": … }` action (APP-FORMAT §3.3) is written
+  by hand beside the pen's document. Open: a builder capturing
+  `start`/`with`/`then`/`catch` over `$result` and `$error`.
 - [ ] **Segmented logical scrolling past the CSS extent ceiling.** The [reusable collection](../components/collection/docs/COLLECTION.md) and [injected provider coordinator](../packages/app/docs/COLLECTION-PROVIDER.md) cover fixed/measured axes, keyed interaction and bounded page caches up to the conservative CSS extent ceiling; a source longer than that needs segmented logical scrolling. Complete sequential database snapshots and index seeks behind the provider also need an independently qualified source contract.
 
 - [ ] **Collection qualification on real devices, assistive technology and downstream.** Waits on a physical touch device, a screen reader and native OS input methods driving the collection, and on a downstream consumer's acceptance; the retained virtualizer oracle stays until that acceptance permits its retirement. Qualified on this host: the collection matrix in Chromium, Firefox and WebKit with synthetic input, and installed synthetic consumers, which alone do not authorize an external cutover.
