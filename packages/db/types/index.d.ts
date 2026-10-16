@@ -18,16 +18,17 @@
 
 import type { Runtime } from '@jarenjs/core/runtime';
 import type { RelationalEngine, AsyncRelationalEngine } from './relational.js';
+import { CodedError } from '@jarenjs/core/errors';
 
 // ————— errors —————
 
 export declare const DB_CODES: Readonly<Record<string, string>>;
 
-export declare class DbCompileError extends Error {
+export declare class DbCompileError extends CodedError {
   constructor(code: string, reason: string, docPath?: string, cause?: Error);
   readonly code: string;
   readonly reason: string;
-  readonly docPath?: string;
+  readonly docPath: string | undefined;
   /** Present on a `JD0002` raised by a driver failure at open: the
    * classifier's class and verdict (MODEL-FORMAT §7). */
   readonly class?: DriverErrorClass;
@@ -63,7 +64,7 @@ export declare function wrapDriverError(error: unknown, details?: {
  * node:sqlite's error shape). */
 export declare function isDriverError(error: unknown): boolean;
 
-export declare class DbRuntimeError extends Error {
+export declare class DbRuntimeError extends CodedError {
   constructor(code: string, reason: string, options?: {
     docPath?: string;
     collection?: string;
@@ -73,7 +74,7 @@ export declare class DbRuntimeError extends Error {
   });
   readonly code: string;
   readonly reason: string;
-  readonly docPath?: string;
+  readonly docPath: string | undefined;
   readonly collection?: string;
   readonly key?: unknown;
   readonly errors?: unknown[];

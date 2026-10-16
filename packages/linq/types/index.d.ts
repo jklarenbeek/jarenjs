@@ -22,6 +22,7 @@
 export type DateTime = string & { __jarenTag: 'date-time' };
 
 import type { SchemaBuilder } from './schema.js';
+import { CodedError } from '@jarenjs/core/errors';
 
 /** The phantom carrier every expression type extends: `__value` never
  * exists at runtime; it lets projections infer their unwrapped shape. */
@@ -656,13 +657,23 @@ export function fromDocument<T = unknown>(
 /** The runtime code table, synced to QUERY-PEN.md §9 by a test. */
 export const LINQ_CODES: Readonly<Record<string, string>>;
 
-export class LinqBuildError extends Error {
+/** A chain that cannot be built or emitted; QUERY-PEN.md §9 lists its codes. */
+export class LinqBuildError extends CodedError {
+  /** `reason` is the bare text; `message` is composed per the coded
+   * contract. `docPath` points into the emitted query document, where one
+   * exists. */
+  constructor(code: string, reason: string, docPath?: string, cause?: Error);
   readonly code: string;
   readonly reason: string;
   readonly docPath: string | undefined;
 }
 
-export class LinqRuntimeError extends Error {
+/** A failure while a terminal operation ran; QUERY-PEN.md §9 lists its codes. */
+export class LinqRuntimeError extends CodedError {
+  /** `reason` is the bare text; `message` is composed per the coded
+   * contract. `docPath` points into the emitted query document, where one
+   * exists. */
+  constructor(code: string, reason: string, docPath?: string, cause?: Error);
   readonly code: string;
   readonly reason: string;
   readonly docPath: string | undefined;

@@ -736,6 +736,14 @@ you don't want this package.
 
 Not a type for a rule about a whole graph: the flow pen refuses a checkpoint on a task that has no version, but "any checkpoint means every task is versioned" spans nodes, so a graph with a checkpoint on its input node and an unversioned task elsewhere type-checks, and `compileDag` refuses it with `JF0011`.
 
+Every refusal is a `LinqBuildError` (building a chain) or a
+`LinqRuntimeError` (running a terminal), and both extend `CodedError` from
+`@jarenjs/core/errors` in their declarations as at runtime: each is
+constructed `new LinqBuildError(code, reason, docPath?, cause?)`, and a
+`CodedError` binding or an `instanceof CodedError` test takes both.
+*Upgrade: the declarations used to extend `Error` with its constructor, so
+constructing one, or reading one as a `CodedError`, took a cast.*
+
 The normative mapping — every operator, its emitted phrase, and the
 deliberate deviations — is [docs/QUERY-PEN.md](docs/QUERY-PEN.md);
 internals are in [ARCHITECTURE.md](ARCHITECTURE.md).

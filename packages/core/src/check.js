@@ -17,6 +17,44 @@ import { CodedError } from './errors.js';
 import { isThenable } from './function.js';
 
 /**
+ * The members a repair loop reads from one error a check names. Every
+ * member is optional because a check names its own errors and
+ * {@link checkOutcome} passes them on as they are: a `JarenValidator`
+ * error carries `instancePath`, `keyword` and `params`; a compile gate's
+ * carries `code` and `docPath`.
+ * @typedef {object} CheckError
+ * @property {string} [code] - the error's stable code
+ * @property {string} [docPath] - JSON Pointer into the checked document
+ * @property {string} [instancePath] - JSON Pointer into the checked instance
+ * @property {string} [message] - the error's text
+ * @property {unknown} [params] - the code's or keyword's own detail
+ */
+
+/**
+ * The one error an invalid answer that names none is reported as.
+ * @typedef {{ code: 'JG2001', docPath: '', message: string }} UnnamedCheckError
+ */
+
+/**
+ * What {@link checkOutcome} answers, discriminated by `valid`. `E` is the
+ * error type the check's own answer carries; an invalid answer that
+ * carries none reports the one {@link UnnamedCheckError} instead.
+ * @template [E=CheckError]
+ * @typedef {{ valid: true, errors: E[] } | { valid: false, errors: (E | UnnamedCheckError)[] }} CheckOutcome
+ */
+
+/**
+ * The error type a check's answer `O` carries in its `errors` member:
+ * `never` for a bare boolean, the element type of an `errors` array, and
+ * `unknown` for an answer whose type does not say (`any` stays `any`).
+ * @template O
+ * @typedef {0 extends (1 & O) ? any : unknown extends O ? unknown
+ *   : O extends object ? (O extends { readonly errors?: infer A }
+ *     ? (A extends readonly (infer E)[] ? E : A extends null | undefined ? never : unknown) : never)
+ *   : never} CheckErrorsOf
+ */
+
+/**
  * The codes {@link checkOutcome} raises or reports.
  * @type {Readonly<Record<'JG0001' | 'JG2001', string>>}
  */
@@ -31,8 +69,12 @@ export const CHECK_CODES = Object.freeze({
  * carries; one that carries none (`false`, `{ valid: false }`, an empty
  * `errors`, any other value) answers the single error `{ code: 'JG2001',
  * docPath: '', message }`, a fresh plain object each time.
- * @param {any} outcome - a compiled check's return value
- * @returns {{ valid: boolean, errors: any[] }}
+ * @template [O=unknown]
+ * @param {O} outcome - a compiled check's return value
+ * @returns {0 extends (1 & O) ? CheckOutcome<any> : [O] extends [PromiseLike<unknown>] ? never
+ *   : CheckOutcome<CheckErrorsOf<O>>} the
+ *   errors keep the type the answer's own `errors` carry (`never` when the
+ *   answer's type is a promise, which is refused)
  * @throws {CodedError} `JG0001` (named `CheckOutcomeError`) when the
  *   answer is a promise or another thenable: an asynchronous check must
  *   be awaited and its settled answer passed instead
@@ -75,9 +117,10 @@ export function checkOutcome(outcome) {
  * — `reason` is the bare text of a coded error; falling back to
  * `message` keeps the adapter total over non-coded throws.
  *
- * @param {...(value: any) => any} checks - each returns a boolean or a
- *   `{ valid, errors }` outcome (mixed freely)
- * @returns {(value: any) => { valid: boolean, errors: any[] }}
+ * @template {((value: any) => unknown)[]} C
+ * @param {C} checks - each returns a boolean or a `{ valid, errors }`
+ *   outcome (mixed freely)
+ * @returns {(value: any) => CheckOutcome<CheckErrorsOf<ReturnType<C[number]>>>}
  */
 export function composeChecks(...checks) {
   return (value) => {

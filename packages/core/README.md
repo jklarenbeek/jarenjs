@@ -480,6 +480,16 @@ included, whatever it settled to — so a repair prompt listed no error to fix.*
 | `JG0001` | a check answered a promise, which `checkOutcome` cannot read |
 | `JG2001` | a check answered invalid without naming an error |
 
+For a TypeScript consumer both answer `CheckOutcome<E>`, discriminated by
+`valid`. `E` is the error type the check's own answer carries: `ValidationError`
+for a collect-mode `JarenValidator`, `never` for a bare boolean, and `unknown`
+for an answer whose type does not say. An invalid outcome's errors also admit
+`UnnamedCheckError`, the `JG2001` error above, and an answer typed as a promise
+types the outcome as `never`. `CheckError` names the members a repair loop reads
+(`code`, `docPath`, `instancePath`, `message`, `params`), each optional.
+*Upgrade: the errors used to be typed `any[]`; code that reads a member only
+some errors carry (`instancePath`) now narrows first (`'instancePath' in error`).*
+
 `@jarenjs/core/guarded` exports `createGuardedRefiner`: it
 copies JSON before validating/applying/planning, serializes its own commits,
 and pairs optional snapshot/restore hooks. A failed commit attempts restoration
@@ -487,7 +497,19 @@ once and retains both original and restoration failures. External writers must
 share the host's serialization policy.
 
 `prepareAsync` and `commit` await candidate validation and commit planning;
-synchronous `prepare` refuses asynchronous hooks. See [host primitives](docs/HOST-PRIMITIVES.md)
+synchronous `prepare` refuses asynchronous hooks.
+
+The hooks type each other: `read` fixes the document, `validateProposal`'s
+parameter the proposal `prepare` and `commit` accept, `apply` the next document,
+`planCommit` the plan `commit` receives (its `plan` member when that is set) and
+`commit` the value. A preparation answers `{ valid: true, errors: [], next, plan }`
+or `{ valid: false, errors }`. A commit answers `{ ok: true, value, snapshot }` or
+`{ ok: false, stage, errors }` with `stage` one of `'validation'`, `'snapshot'`
+and `'commit'`: only the last two carry the thrown `cause`, and only `'commit'`
+the snapshot token and an optional `restoreError`. A throw is reported as a
+`GuardedFailure` `{ code, docPath, message, stage }`. *Upgrade: the refiner used
+to be typed `any` throughout; a result read without narrowing `ok` or `stage`,
+or a hand-built preparation passed to `commitPrepared`, now needs the narrowing.* See [host primitives](docs/HOST-PRIMITIVES.md)
 for paired bootstrap/permutation inference, pure anchored file proposals with
 atomic groups, and the explicit Node-only named process executor. Financial chart
 formulas and their conventions are documented in [FINANCE](docs/FINANCE.md).

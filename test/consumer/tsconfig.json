@@ -37,7 +37,8 @@
     "host-primitives-contract.ts",
     "host-primitives-charts.ts",
     "db-migration-identity.ts",
-    "schema-vocabulary.ts"
+    "schema-vocabulary.ts",
+    "typed-outcomes.ts"
   ],
   "include": [
     "linq-*.ts"

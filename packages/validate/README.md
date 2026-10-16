@@ -576,6 +576,12 @@ new JarenValidator({ collectErrors: true }).compile(schema)(data);
 // => { valid: false, errors: [ /* ValidationError */ ] }
 ```
 
+In TypeScript the collect-mode result is discriminated by `valid`:
+`{ valid: true, errors: [] }` or `{ valid: false, errors: ValidationError[] }`.
+It carries no copy of the data, so it cannot narrow the data's type; the boolean
+mode's `compile<T>(schema)` is the `data is T` type guard. *Upgrade: the result
+used to type `valid` as `boolean`, with `ValidationError[]` on either branch.*
+
 Setting `collectErrors: true` implies `skipErrors: false` (collecting errors
 means recording them), so you do not need to set both. Set `skipErrors`
 yourself only to keep first-failure short-circuiting while still collecting.

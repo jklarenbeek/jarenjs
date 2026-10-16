@@ -1,22 +1,114 @@
 //@ts-check
 import { checkOutcome } from './check.js';
 import { isThenable } from './function.js';
+/** @import { CheckErrorsOf, UnnamedCheckError } from './check.js' */
 
 const copy = (value) => value === undefined ? undefined : JSON.parse(JSON.stringify(value));
 const failure = (error, stage) => ({ code: error?.code ?? 'GUARDED',
   docPath: error?.docPath ?? '', message: error?.message ?? String(error), stage });
 
 /**
+ * The stage a failure record names: the hook that threw, or the snapshot,
+ * commit or restore step that failed.
+ * @typedef {'shape' | 'apply' | 'candidate' | 'plan' | 'snapshot' | 'commit' | 'restore'} GuardedStage
+ */
+
+/**
+ * The record a thrown value is reported as. Its `code`, `docPath` and
+ * `message` are the thrown value's own (strings for an `Error` or a
+ * `CodedError`): `code` is `'GUARDED'` and `docPath` is `''` when it has
+ * none, and `message` is the value as a string when it has no message.
+ * @typedef {{ code: string, docPath: string, message: string, stage: GuardedStage }} GuardedFailure
+ */
+
+/**
+ * What `commit` receives from `planCommit`'s answer `R`: its `plan`
+ * member when that is set, the answer itself otherwise. An answer
+ * `{ valid: false }` is a refusal and is never committed.
+ * @template R
+ * @typedef {R extends { readonly valid: false } ? never
+ *   : R extends { readonly plan: infer X } ? Exclude<X, null | undefined> | (X extends null | undefined ? R : never)
+ *   : R} GuardedPlanOf
+ */
+
+/**
+ * A preparation `planCommit` refused by answering `{ valid: false }`: its
+ * `errors` member passes on as it is (`undefined` when it has none).
+ * @template R
+ * @typedef {R extends { readonly valid: false }
+ *   ? { valid: false, errors: 'errors' extends keyof R ? R['errors' & keyof R] : undefined }
+ *   : never} GuardedPlanRefusal
+ */
+
+/**
+ * The answer of `prepare` and `prepareAsync`. Every value in it is a JSON
+ * clone. `E` is an error the shape or candidate check named, the one
+ * `JG2001` error a check that named none is reported as, a
+ * {@link GuardedFailure} for a throw, or `applyFailure`'s answer for a
+ * throw from `apply`.
+ * @template N, R, E
+ * @typedef {{ valid: true, errors: [], next: N, plan: GuardedPlanOf<R> }
+ *   | { valid: false, errors: E[] } | GuardedPlanRefusal<R>} GuardedPrepared
+ */
+
+/**
+ * The answer of `commit` and `commitPrepared`, discriminated by `ok`; a
+ * failure names its `stage`. `I` is the `errors` member of the refused
+ * preparation.
+ * @template V, S, I
+ * @typedef {{ ok: true, value: V, snapshot: S | null }
+ *   | { ok: false, stage: 'validation', errors: I }
+ *   | { ok: false, stage: 'snapshot', cause: unknown, errors: [GuardedFailure] }
+ *   | { ok: false, stage: 'commit', cause: unknown, snapshot: S | null, restoreError?: unknown,
+ *     errors: GuardedFailure[] }} GuardedCommit
+ */
+
+/**
+ * The hooks a guarded refiner runs. `D` is the document `read` answers,
+ * `P` the proposal `validateProposal` accepts, `N` the next document
+ * `apply` answers, `R` `planCommit`'s answer, `V` `commit`'s answer and
+ * `S` `snapshot`'s token. Each hook may answer a promise, which
+ * `prepareAsync` and `commit` await and `prepare` refuses.
+ * @template D, P, N, R, V, S, VP, VC, A
+ * Each type is read from the one hook that produces it (`D` from `read`,
+ * `P` from `validateProposal`'s parameter, `N` from `apply`, `R` from
+ * `planCommit`, `V` from `commit`, `S` from `snapshot`); the hooks that
+ * receive it are typed by it.
+ * @typedef {{ read(): D | PromiseLike<D>,
+ *   validateProposal(proposal: P): VP,
+ *   apply(document: NoInfer<D>, proposal: NoInfer<P>): N | PromiseLike<N>,
+ *   validateCandidate(next: NoInfer<N>, previous: NoInfer<D>): VC,
+ *   planCommit(next: NoInfer<N>, previous: NoInfer<D>): R | PromiseLike<R>,
+ *   commit(plan: NoInfer<GuardedPlanOf<R>>,
+ *     context: { previous: NoInfer<D>, next: NoInfer<N>, snapshot: NoInfer<S> | null }): V | PromiseLike<V>,
+ *   snapshot?(): S | PromiseLike<S>, restore?(token: NoInfer<S>): unknown,
+ *   applyFailure?(error: unknown): A }} GuardedRefinerOptions
+ */
+
+/**
+ * The errors a preparation refused with, from the hooks' own answers.
+ * @template VP, VC, A
+ * @typedef {CheckErrorsOf<Awaited<VP>> | CheckErrorsOf<Awaited<VC>> | UnnamedCheckError | GuardedFailure | A} GuardedError
+ */
+
+/**
+ * A guarded refiner: the four entry points over one set of hooks.
+ * @template D, P, N, R, V, S, VP, VC, A
+ * @typedef {{ prepare(document: D, proposal: P): GuardedPrepared<N, R, GuardedError<VP, VC, A>>,
+ *   prepareAsync(document: D, proposal: P): Promise<GuardedPrepared<N, R, GuardedError<VP, VC, A>>>,
+ *   commitPrepared(previous: D, prepared: GuardedPrepared<N, R, GuardedError<VP, VC, A>>):
+ *     Promise<GuardedCommit<V, S, Extract<GuardedPrepared<N, R, GuardedError<VP, VC, A>>, { valid: false }>['errors']>>,
+ *   commit(proposal: P):
+ *     Promise<GuardedCommit<V, S, Extract<GuardedPrepared<N, R, GuardedError<VP, VC, A>>, { valid: false }>['errors']>> }} GuardedRefiner
+ */
+
+/**
  * Guard JSON edits with cloned inputs and serialized commits. prepare is
  * synchronous; prepareAsync and commit await validation and planning hooks.
  * Commit owns atomic persistence (or snapshot/restore on a single writer).
- * @param {{ read: () => Promise<any>, validateProposal: (proposal: any) => any,
- *   apply: (document: any, proposal: any) => any,
- *   validateCandidate: (next: any, previous: any) => any,
- *   planCommit: (next: any, previous: any) => any,
- *   commit: (plan: any, context: { previous: any, next: any, snapshot: any }) => Promise<any>,
- *   snapshot?: () => Promise<any>, restore?: (token: any) => Promise<any>,
- *   applyFailure?: (error: any) => any }} options
+ * @template D, N, R, V, [P=unknown], [S=never], [VP=unknown], [VC=unknown], [A=never]
+ * @param {GuardedRefinerOptions<D, P, N, R, V, S, VP, VC, A>} options
+ * @returns {GuardedRefiner<D, P, N, R, V, S, VP, VC, A>}
  */
 export function createGuardedRefiner(options) {
   for (const name of ['read', 'validateProposal', 'apply', 'validateCandidate', 'planCommit', 'commit'])

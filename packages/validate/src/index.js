@@ -1653,8 +1653,11 @@ export class ValidatorOptions {
 }
 
 /**
- * The object a compiled validator returns when `collectErrors` is enabled.
- * @typedef {{ valid: boolean, errors: import("./messages.js").ValidationError[] }} ValidationResultObject
+ * The object a compiled validator returns when `collectErrors` is enabled,
+ * discriminated by `valid`: a valid instance answers no errors. It carries
+ * no copy of the instance, so it cannot narrow the instance's type; a
+ * caller that wants `data is T` compiles the boolean mode's type guard.
+ * @typedef {{ valid: true, errors: [] } | { valid: false, errors: import("./messages.js").ValidationError[] }} ValidationResultObject
  */
 
 /**

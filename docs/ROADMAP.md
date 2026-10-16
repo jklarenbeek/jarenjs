@@ -25,6 +25,20 @@ delete it or fix it.
 - **1.0 stable** — no milestone-level blockers remain; 1.0 is gated on the
   per-package items below rather than on any one feature.
 
+## @jarenjs/core
+
+- [ ] **A refused plan names no error.** `createGuardedRefiner({ …,
+  planCommit: () => ({ valid: false }) })` prepares `{"valid":false}` (no
+  `errors`) and commits `{"ok":false,"stage":"validation"}`, where the shape
+  and candidate stages report the coded `JG2001` error through `checkOutcome`;
+  a repair loop gets nothing to fix. Wanted: the plan refusal read through
+  `checkOutcome` like its two siblings (a wrong answer made right: patch).
+- [ ] **`checkOutcome` passes a non-array `errors` through.** `checkOutcome({
+  valid: false, errors: 'bad' })` answers `{"valid":false,"errors":"bad"}`, so
+  a consumer's `errors.slice()` throws on the documented `{ valid, errors }`
+  shape. Wanted: a non-array `errors` reported as the coded `JG2001` error (or
+  wrapped as one element).
+
 ## @jarenjs/json — JSONPath & addressing
 
 *The current focus.* JSON Pointer (RFC 6901), the JSONPath engine
@@ -88,6 +102,15 @@ delete it or fix it.
 
 ## @jarenjs/validate
 
+- [ ] **A collect-mode validator cannot narrow its instance.**
+  `compile<T>(schema)` on a `collectErrors: true` validator answers `{ valid,
+  errors }`, which carries no copy of the instance, so its valid branch cannot
+  narrow the data to `T` — TypeScript narrows an argument only through a type
+  predicate — and a consumer keeps a hand-written `data is T` wrapper beside
+  each collecting validator (one tangleai consumer has 11). Wanted: a
+  collect-mode answer that narrows, e.g. `{ valid: true, value: T, errors: []
+  }` or a guard and the errors from one compile. A runtime addition and new
+  API (minor).
 - [ ] **Per-call cost of annotation tracking for `unevaluated*`** — a check
   over many members or items no longer scans the evaluation log once per
   member: a long stretch is gathered in one pass, so the check grows with the

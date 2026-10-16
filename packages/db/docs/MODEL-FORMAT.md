@@ -1836,7 +1836,11 @@ composed `message`, a `docPath` into the model document where one
 exists — and, on runtime errors, the `collection` and (where known)
 the `key` as own properties. Database errors are wrapped, never leaked
 raw: the reason keeps the original text, `cause` keeps the original
-error.
+error. Both classes extend `CodedError` from `@jarenjs/core/errors`, in
+their declarations as at runtime, so a `CodedError` binding or an
+`instanceof CodedError` test takes them. *Upgrade: the declarations used
+to extend `Error`, and their optional `docPath` is now `string |
+undefined`, as on every coded error.*
 
 | code | raised when |
 |---|---|
