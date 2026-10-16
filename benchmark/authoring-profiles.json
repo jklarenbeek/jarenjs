@@ -52,20 +52,20 @@
     },
     {
       "grammar": "app",
-      "sourceHash": "7b95677e0f0b3576cd3c570d5a9cccc82c953c4b4321c5baa80ad7a5dee1598e",
+      "sourceHash": "9555d1935d47eb17105341d8c74efcc48b36e9d1cb5f2af2cb87389d55c3e5a0",
       "seamHash": "3212745ee17fb35df53b9b8046cce2995d4d92d22d2eef34a68676462f3d4e4d",
-      "profileHash": "a1ef08043bd897fda00cf7501a437115dcb798d7609dcd6535421cbe9e10b8b6",
+      "profileHash": "1da308d6860c7f050ba43d79b82c3e076c5f15dcc23a66196e06b900fa121a15",
       "open": [
         "queryDocument",
         "stylesheetDocument"
       ],
       "full": {
-        "bytes": 48325,
-        "branches": 108
+        "bytes": 50085,
+        "branches": 110
       },
       "profile": {
-        "bytes": 2799,
-        "branches": 0
+        "bytes": 4559,
+        "branches": 2
       }
     },
     {

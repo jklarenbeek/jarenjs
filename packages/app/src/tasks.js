@@ -45,7 +45,7 @@ function safeName(err) {
  * @param {unknown} err
  * @returns {string}
  */
-function rejectionText(err) {
+export function rejectionText(err) {
   if (isErrorSafely(err)) return safeErrorMessage(err);
   if (err === null
     || (typeof err !== 'object' && typeof err !== 'function' && typeof err !== 'symbol')) {

@@ -6,14 +6,24 @@ stale-response rejection, cancellation — plus the one shipped helper,
 [`createTaskEffect`](../src/tasks.js), that removes the host-side
 boilerplate.
 
-It is deliberately **pattern-first**: there is no format change and no
-new document member. The correctness mechanism is expressible in
-today's vocabulary, and that is a *feature* of actions-as-queries — a
-task's identity is ordinary state, its guard is an ordinary query, so
-snapshots, replay and the meta-schema all keep working with nothing
-added. First-class async action documents (a disposition that awaits an
-effect before transitioning) remain the roadmap item they already are
-([APP-FORMAT §11](APP-FORMAT.md)).
+It is deliberately **pattern-first**: the convention needs no format
+change and no new document member. The correctness mechanism is
+expressible in the action vocabulary, and that is a *feature* of
+actions-as-queries — a task's identity is ordinary state, its guard is
+an ordinary query, so snapshots, replay and the meta-schema all keep
+working with nothing added.
+
+The format also states awaiting itself: an **awaiting action**
+([APP-FORMAT §3.3](APP-FORMAT.md)) commits its start, awaits a
+registered effect and continues with `then` or `catch` in one action
+document, and the runtime holds what this convention keeps in state —
+the slot identity (a newer await supersedes and aborts the one in
+flight) and stale-response rejection (a superseded await never applies
+its result). Reach for this convention instead when the identity must be
+visible in state (a view that shows the slot's `id`), when a slot needs
+a concurrency mode other than switch (`exhaust`, `concat`,
+`parallel`), or when a failure needs `projectError`'s structured
+projection rather than `$error`'s `{ code, message }`.
 
 > **The worked example below is executable.** The single `json` code
 > block in this document is a complete app document; the test suite
@@ -331,7 +341,8 @@ const app = createApp(doc, {
 
 ## What the meta-schema needs
 
-Nothing — and that is the point. The convention is ordinary `state`,
+Nothing — and that is the point. (The awaiting action, which is a format
+extension, has its own `awaitingAction` definition there.) The convention is ordinary `state`,
 ordinary `actions`, ordinary `effects` invocations; the worked example
 above validates against the shipped
 [`jaren-app.schema.json`](../schemas/jaren-app.schema.json) unchanged.

@@ -18,9 +18,17 @@
  *    `state`, when both are present)
  *  - `effects` — `[{ "run": name, "with"?: props }]` handed to the
  *    registered effect handlers
+ *
+ * An **awaiting action** is the single-member object `{ "$await": { start?,
+ * run, with?, slot?, then?, catch? } }` (APP-FORMAT §3.3). `$await` is no
+ * query operator, so the form cannot be an action that compiled before;
+ * its members are compiled here, once, each where the runtime evaluates
+ * it: `start` as an ordinary action document, `with` over `$event` and
+ * `$payload`, `then` with `$result` and `catch` with `$error` beside them.
  */
 
 import { isJsonObject } from '@jarenjs/core/object';
+import { escapePointerToken } from '@jarenjs/core/string';
 import { compileJsonQuery } from '@jarenjs/json/query';
 import { AppCompileError, toError, safeErrorMessage } from './errors.js';
 
@@ -33,11 +41,94 @@ import { AppCompileError, toError, safeErrorMessage } from './errors.js';
  *   `@jarenjs/validate/query`.
  */
 
+/** The members an `$await` object takes, in the order a refusal names them. */
+const AWAIT_MEMBERS = ['start', 'run', 'with', 'slot', 'then', 'catch'];
+
+/**
+ * A compiled awaiting action (APP-FORMAT §3.3): every member a query
+ * compiled once, or `null` where the document leaves it out.
+ */
+export class AwaitingAction {
+  /**
+   * @param {any} start - The start transition's query.
+   * @param {string} run - The registered effect awaited.
+   * @param {any} withQuery - The effect props' query.
+   * @param {string | null} slot - The await identity; `null` = the action name.
+   * @param {any} then - The success continuation's query.
+   * @param {any} catchQuery - The failure continuation's query.
+   */
+  constructor(start, run, withQuery, slot, then, catchQuery) {
+    this.start = start;
+    this.run = run;
+    this.with = withQuery;
+    this.slot = slot;
+    this.then = then;
+    this.catch = catchQuery;
+  }
+}
+
+/**
+ * Compile one `{ "$await": … }` action, refusing what the runtime could
+ * not run as `JA0004` at the member's own location.
+ * @param {string} name
+ * @param {Record<string, any>} doc
+ * @param {string} docPath - The action's pointer.
+ * @param {ActionCompileOptions} options
+ * @returns {AwaitingAction}
+ */
+function compileAwaitingAction(name, doc, docPath, options) {
+  const refuse = (/** @type {string} */ reason, /** @type {string} */ at, /** @type {Error | undefined} */ cause) =>
+    new AppCompileError('JA0004', `action '${name}': ${reason}`, at, cause);
+  const sibling = Object.keys(doc).find((key) => key !== '$await');
+  if (sibling !== undefined) {
+    throw refuse(`an awaiting action is the single member {"$await": ...}; found '${sibling}' beside it`,
+      `${docPath}/${escapePointerToken(sibling)}`, undefined);
+  }
+  const at = `${docPath}/$await`;
+  const spec = doc.$await;
+  if (!isJsonObject(spec)) throw refuse('"$await" must be an object naming at least the effect it runs', at, undefined);
+  for (const key of Object.keys(spec)) {
+    if (!AWAIT_MEMBERS.includes(key)) {
+      throw refuse(`unknown member '${key}' — "$await" takes ${AWAIT_MEMBERS.slice(0, -1).join(', ')} and catch`,
+        `${at}/${escapePointerToken(key)}`, undefined);
+    }
+  }
+  if (typeof spec.run !== 'string' || spec.run === '') {
+    throw refuse('"run" must name a registered effect (a non-empty string)', `${at}/run`, undefined);
+  }
+  if (spec.slot !== undefined && (typeof spec.slot !== 'string' || spec.slot === '')) {
+    throw refuse('"slot" must be a non-empty string', `${at}/slot`, undefined);
+  }
+  /**
+   * @param {string} member
+   * @param {readonly string[] | undefined} externals - The variables it may
+   *   leave free; `undefined` for the start, an ordinary action document.
+   */
+  const member = (member, externals) => {
+    if (spec[member] === undefined) return null;
+    try {
+      return compileJsonQuery(spec[member], externals === undefined ? options : { ...options, externals });
+    }
+    catch (err) {
+      const cause = toError(err);
+      throw refuse(`its "${member}" failed to compile: ${safeErrorMessage(cause)}`, `${at}/${member}`, cause);
+    }
+  };
+  return new AwaitingAction(
+    member('start', undefined),
+    spec.run,
+    member('with', ['event', 'payload']),
+    spec.slot ?? null,
+    member('then', ['event', 'payload', 'result']),
+    member('catch', ['event', 'payload', 'error']));
+}
+
 /**
  * Compile the `actions` member of an app document.
  * @param {any} actions
  * @param {ActionCompileOptions} options
- * @returns {Map<string, any>} action name → compiled query
+ * @returns {Map<string, any>} action name → compiled query, or an
+ *   {@link AwaitingAction} for an `{ "$await": … }` entry
  */
 export function compileActions(actions, options) {
   if (actions === undefined) return new Map();
@@ -48,14 +139,20 @@ export function compileActions(actions, options) {
   }
   const map = new Map();
   for (const name in actions) {
+    const doc = actions[name];
+    const docPath = `/actions/${escapePointerToken(name)}`;
+    if (isJsonObject(doc) && Object.hasOwn(doc, '$await')) {
+      map.set(name, compileAwaitingAction(name, doc, docPath, options));
+      continue;
+    }
     try {
-      map.set(name, compileJsonQuery(actions[name], options));
+      map.set(name, compileJsonQuery(doc, options));
     }
     catch (err) {
       const cause = toError(err);
       throw new AppCompileError('JA0004',
         `action '${name}' failed to compile: ${safeErrorMessage(cause)}`,
-        `/actions/${name}`, cause);
+        docPath, cause);
     }
   }
   return map;

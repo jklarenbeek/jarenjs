@@ -1228,15 +1228,14 @@ state no `default()` describes, and a view binding an action `actions`
 does not declare. Those are limits of the FORMAT reached through the
 pen, and each has a way through.
 
-One limit is the format's own and has no way through today: **an action
-document cannot express AWAITING.** A transition is a pure function of
-the pre-transition state to a next state plus a list of effects; an
-effect runs after the transition settles and reaches back only by
-dispatching another action. That is deliberate — it is what makes a
-transition replayable and a document serializable — but it means a
-sequence like "call this, then patch with the answer, then call that" is
-written as a chain of actions and effect callbacks rather than as one
-document.
+One limit is the pen's, not the format's: **the pen writes no awaiting
+action.** A transition is a pure function of the pre-transition state to
+a next state plus a list of effects, and the format states awaiting in
+one action: an awaiting action (APP-FORMAT §3.3) commits its start,
+awaits a registered effect and continues with `then` or `catch`, each its
+own transaction. This pen does not write that form yet; an `$await`
+action is written by hand beside the pen's actions
+(`{ ...app.document, actions: { ...app.document.actions, search: { $await: … } } }`).
 
 The convention for it exists and is the host's, not the format's:
 `createTaskEffect` and the async-task pattern of
@@ -1248,10 +1247,9 @@ awaits, and then acts must carry the identity it captured — the task id,
 or a revision — in what it dispatches, so the completion's guard refuses
 a stale result; one that must act on the state directly re-reads
 `app.getState()` after its last await and compares that identity first.
-What is open is expressing the awaiting IN the action document, which is
-an entry in `docs/ROADMAP.md` under `@jarenjs/app`; this pen writes
-whatever that grammar grows, because it has no opinion of its own about
-it.
+The awaiting action is that sequence in the document itself, with the
+same identity rule applied by its slot: a newer await on the slot aborts
+the older one, and a stale result never applies.
 
 Two smaller things the pen deliberately does not do, so a reader does
 not look for them:
@@ -1277,7 +1275,7 @@ not look for them:
   `@jarenjs/view` where it can take children and callbacks; an app
   document has no slot for either.
 - **The logic is mostly awaiting.** §6 above says it plainly: a
-  transition is pure and an effect reaches back only by dispatching. An
+  transition is pure and the pen writes no awaiting action. An
   application whose interesting part is a sequence of awaited calls is
   mostly host code with an app document attached, and the reading order
   should follow — write the tasks, then the document that dispatches

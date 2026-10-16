@@ -8,7 +8,7 @@ Applications as JSON documents. This package rebuilds [hyperapp](https://github.
 |---|---|---|
 | `state` | a JSON document | — |
 | `view` | a [JSLT stylesheet](../json/docs/JSLT-FORMAT.md) producing [vnodes](../view/docs/VIEW-FORMAT.md) | `@jarenjs/json/jslt` |
-| `actions` | named [query documents](../json/docs/QUERY-FORMAT.md) producing transitions | `@jarenjs/json/query` |
+| `actions` | named [query documents](../json/docs/QUERY-FORMAT.md) producing transitions, or `$await` actions continuing with an effect's result | `@jarenjs/json/query` |
 | transitions | next state, or an RFC 6902 **JSON Patch** | `@jarenjs/json/patch` |
 | `subs` | entries with an EBV `when` query deciding liveness | `@jarenjs/json/query` |
 
@@ -138,6 +138,48 @@ effects: {
 ```
 
 The helper aborts a slot's in-flight predecessor (`mode: "switch"`, the default — `"exhaust"`, `"concat"` and `"parallel"` pick the other per-slot concurrency semantics), dispatches `done` with `{ id, result }` on resolve and `fail ?? done` with `{ id, error }` on failure — `error` a string by default, or the JSON an optional `projectError(err, props)` returns (the door for a structured HTTP failure: status, code, safe details; anything non-JSON falls back to the string) — and dispatches nothing for an abort. The abort is only an optimization — an aborted request may already have resolved — so the state-side id guard is the guarantee: out-of-order and polling responses are rejected by construction. The handler exposes `cancel(slot)`/`cancelAll()`/`dispose()`; `app.destroy()` disposes it automatically. The full convention, with a runnable worked example the test suite executes verbatim, is [docs/TASKS.md](docs/TASKS.md).
+
+## Awaiting an effect in the document
+
+An action can also await an effect and continue with its result, so the whole flow — start, request, success, failure — is one action a model writes and the meta-schema holds a constrained decoder to. `{ "$await": … }` commits its `start` transition, runs the registered effect with the props `with` reads from the state the start produced, and continues with `then` (`$result` bound) or `catch` (`$error`, a `{ code, message }`) in a transaction of its own. A newer await on the same slot — the action's name unless `slot` names one — aborts the one in flight, and that one never applies its result, whichever order the responses arrive in; `stop()` and `destroy()` abort every await in flight ([APP-FORMAT §3.3](docs/APP-FORMAT.md)):
+
+```javascript
+import { createApp } from '@jarenjs/app';
+
+const app = createApp({
+  "state": { "status": "idle", "query": "", "users": [], "error": null },
+  "view": [{ "match": "$", "body": ["p", {}, "$.status"] }],
+  "actions": {
+    "search": { "$await": {
+      "start": { "patch": [
+        { "op": "replace", "path": "/status", "value": "loading" },
+        { "op": "replace", "path": "/query", "value": "$payload" }] },
+      "run": "fetchJson",
+      "with": { "url": { "$concat": ["/api/users?q=", "$.query"] } },
+      "then": { "patch": [
+        { "op": "replace", "path": "/status", "value": "done" },
+        { "op": "replace", "path": "/users", "value": "$result" }] },
+      "catch": { "patch": [
+        { "op": "replace", "path": "/status", "value": "error" },
+        { "op": "replace", "path": "/error", "value": "$error" }] }
+    } }
+  }
+}, {
+  effects: {
+    // an awaited effect returns its result; the signal aborts a superseded request
+    fetchJson: (props, dispatch, { signal }) =>
+      fetch(props.url, { signal }).then((response) => response.json()),
+  },
+});
+
+app.subscribe((state) => console.log(state.status, state.users));
+app.dispatch('search', 'ada');   // loading []
+app.dispatch('search', 'adam');  // loading []  (the request for "ada" is aborted)
+// the "adam" response arrives:     done [ { name: 'Adam' } ]
+// a late "ada" response changes nothing
+```
+
+A failed request continues through `catch` with `$error` `{ "code": "JA2028", "message": "…" }`; without a `catch`, the failure reaches `onError` as `JA2028`. The test suite runs this example as written, with `fetch` answering in the order the comments describe.
 
 ## One FIFO queue, observable transactions
 

@@ -241,7 +241,6 @@ establish registry publication or downstream acceptance.
   (`reduce` yields final states on first paint, DESIGN §6/§10), and the
   collection matrix's pending active descendants, keyed focus and selection,
   anchored scroll, RTL and editable controls.
-- [ ] **First-class awaiting action documents** — the async-task convention and `createTaskEffect` cover the pattern without a format change (`packages/app/docs/TASKS.md`); making *awaiting* expressible in the action document itself is the open half (APP-FORMAT §11).
 - [ ] **Native IME verification.** Waits on manual sessions with native OS
   input methods (CJK IMEs among them) on real devices before full language and
   input-method fidelity is claimed; VIEW-FORMAT §8 records that limit.

@@ -72,7 +72,7 @@ document written by hand is the same document.
   against the current state; its output MUST be a single text or
   element vnode.
 - **`actions`** (OPTIONAL) — an object mapping action names to action
-  documents (§3).
+  documents (§3) or awaiting actions (§3.3).
 - **`subs`** (OPTIONAL) — an array of subscription entries (§5.2).
 
 Unknown top-level members MUST be ignored (forward compatibility).
@@ -169,6 +169,110 @@ transitions, meaning "treat everything as changed". Dirty-path-pruned
 re-rendering builds on this feed (roadmap); today the runtime itself
 still re-runs the full view stylesheet per frame.
 
+### 3.3 Awaiting actions
+
+An action whose document is the single-member object `{ "$await": … }`
+is an **awaiting action**: it commits a start transition, awaits a
+registered effect, and continues with the effect's result in a
+transaction of its own. The request, its success and its failure are
+one action, where the task convention ([TASKS.md](TASKS.md)) writes a
+start action and a completion action the host dispatches.
+
+```json
+{ "$await": {
+  "start": { "patch": [{ "op": "replace", "path": "/status", "value": "loading" }] },
+  "run":   "fetchJson",
+  "with":  { "url": { "$concat": ["/api/items/", "$payload"] } },
+  "slot":  "detail",
+  "then":  { "patch": [{ "op": "replace", "path": "/detail", "value": "$result" }] },
+  "catch": { "patch": [{ "op": "replace", "path": "/error", "value": "$error" }] }
+} }
+```
+
+`run` is REQUIRED; every other member is OPTIONAL. A member not listed
+here, a member beside `$await`, or a member of the wrong kind is
+`JA0004`, with `docPath` at that member.
+
+- **`start`** — an action document (§3.1), evaluated and committed
+  exactly as one (§3.2, §6). Absent, the start changes nothing. A start
+  that produces nothing (the empty sequence, `null`) is a no-op and
+  **awaits nothing**, so a start guarded by `$if` decides whether to
+  await at all; a start that fails or is rejected (`JA2002`–`JA2005`,
+  `JA2015`) awaits nothing either.
+- **`run`** — the name of the registered effect awaited, a non-empty
+  string. §5.1's registry rules and §8.2.1's grants apply.
+- **`with`** — the effect's props: a query evaluated against the state
+  the start **produced**, with `$event` and `$payload` bound; absent, the
+  props are `null`. It is evaluated before the start commits, so an
+  error in it (`JA2002`) fails the start whole. Unlike an effect
+  invocation's `with` (TASKS.md's pre-transition-`$` note), it reads
+  what the start wrote.
+- **`slot`** — the await's identity, a non-empty string; absent, the
+  action's name.
+- **`then`** — the continuation on success: a query evaluated in its own
+  transaction against the state current when it runs, with `$result`
+  (the effect's result), and `$event` and `$payload` bound to the
+  dispatch's own. Absent, the result is dropped.
+- **`catch`** — the continuation on failure, likewise, with `$error`
+  instead of `$result`. Absent, the failure is reported through
+  `onError`.
+
+`with`, `then` and `catch` are closed over the variables listed for
+them: any other `$name` in one is `JA0004` when the app compiles, not a
+`JQ2006` at run time. `$await` is no query operator, so no action that
+compiled before this form existed has this shape, and every other
+action keeps §3.1 and §3.2 unchanged.
+
+**The effect.** The handler is called `handler(props, dispatch, {
+signal })` in the start's transaction, after the start's own `effects`
+(§8.1 step 2), through one promise boundary: its return value, or the
+value of the promise it returns, is the result, and a synchronous throw
+settles like a rejection. A result of `undefined` continues as `null`.
+
+**Identity and staleness.** A slot holds at most one await in flight.
+An await that starts on a slot whose await is in flight **supersedes**
+it: the superseded effect's `signal` aborts, and its settlement — a
+result, a failure, an `AbortError` — is dropped: no continuation runs,
+nothing is reported, no transaction is queued. Only the await its slot
+still holds continues, so the newest await wins whatever order the
+responses arrive in, with no id in the state and no guard in the
+document. A start that awaits nothing supersedes nothing. Slots belong
+to one app; two actions naming one `slot` supersede each other.
+
+**The continuation is a transaction.** A settlement queues one
+transaction (§8.1) — observed with `source: "await"` and `action` the
+awaiting action's name (§8.3) — that evaluates `then` or `catch` and
+commits through §3.2, §6 and every step of §8.1. `validateState`
+receives `{ previous, action, payload, changes }` with the awaiting
+action's name and its dispatch's payload. The start committed in its
+own, earlier transaction; whatever ran in between — another dispatch, a
+`setState` (§8.5) — is the state the continuation reads. A continuation
+that fails is reported as any action is (`JA2002`–`JA2005`, `JA2015`).
+
+**Failures.** Every failure of the awaited effect continues through
+`catch` with `$error` set to `{ "code", "message" }`:
+
+| `code` | When | `message` |
+|---|---|---|
+| `JA2006` | `run` names no registered (or no granted) effect | the runtime's reason |
+| `JA2007` | reading the effect registry for `run` threw | the runtime's reason |
+| `JA2028` | the effect threw or rejected — an `AbortError` the runtime did not cause included — or resolved a value that is not JSON | the rejection's message (a thrown primitive's text), or the runtime's reason for a value that is not JSON |
+
+Without a `catch`, the same failure is reported through `onError` as an
+`AppRuntimeError` with that code, `docPath` `/actions/<name>/$await`
+and, for a rejection, the host's value as `cause`; the continuation's
+observer record is `failed` with that code. A value the sink throws is
+raised again on its own microtask — never as the rejection of a promise
+the host does not hold.
+
+**Cancellation.** `stop()` and `destroy()` (§8.2) — and a boot that
+rolls back — abort every await in flight and drop its settlement. The
+`signal` aborts on supersede and on stop, and on nothing else: a host
+that aborts the request by other means sees it continue through `catch`
+(`JA2028`), so the document always learns how its await ended.
+`app.settled()` (§8.1) answers when the queue settles; an await in
+flight is not queued, so it does not wait for it.
+
 ## 4. Event bindings
 
 A vnode `on` binding (opaque to the view layer) is interpreted by this
@@ -238,7 +342,8 @@ An effect invocation is `{ "run": name, "with"?: props }`. The runtime
 resolves `name` in the registered effect handlers
 (`options.effects[name]`) and calls `handler(props ?? null, dispatch)`.
 Effects are fire-and-forget from the loop's perspective; asynchronous
-completion re-enters through `dispatch`. An unregistered name is
+completion re-enters through `dispatch` — except for the effect an
+awaiting action runs (§3.3), whose settlement the loop continues with. An unregistered name is
 `JA2006`; a throwing handler is `JA2007`; neither aborts the loop or
 the remaining effects. A registered name is an OWN member of the
 registry — in every registry, effects, subscriptions (§5.3), event
@@ -483,7 +588,8 @@ compositions, not features: state snapshots, action logs, time-travel
 subscription handlers stubbed or replaced, since replaying a log
 re-runs its transitions but must not re-fire real side effects;
 replaying recorded effect *outcomes* is an open follow-up, not a
-shipped capability), server rendering
+shipped capability; an awaiting action's continuation is no dispatch
+in the log — the stubbed effect's settlement runs it again), server rendering
 (`renderToString(app.getVnode())`), and remote mutation (ship a
 transition's `patch` over the wire). Runtimes SHOULD keep it that way:
 any extension that puts a function in the document breaks the format's
@@ -503,7 +609,7 @@ that changes state runs outside it. Within a transaction the order is
 fixed:
 
 1. action evaluation and state commit;
-2. effect invocation;
+2. effect invocation (an awaiting action's effect last, §3.3);
 3. listener notification (registration order — every listener observes
    every transaction in the same order, with the state produced by
    exactly that transaction and its changed paths);
@@ -621,7 +727,8 @@ condition changes coalesce per transaction.
 **`stop()` halts; `destroy()` ends.** `stop()` is one-way and
 nonterminal — there is no resume: it clears the queue, disposes live
 subscriptions and listeners, and permanently ignores further
-dispatches; the renderer and effect handlers stay untouched.
+dispatches; the renderer and effect handlers stay untouched (awaits in
+flight are aborted, §3.3).
 `destroy()` is terminal and idempotent: `stop()` plus observer
 removal, effect-handler `dispose()` (each handler identity exactly
 once), and renderer destruction — widgets unmount exactly once, the
@@ -670,7 +777,8 @@ trust policy.
 `app.observe(fn)` delivers one bounded JSON record per settled
 transaction: `{ seq, action, source, status, changedPaths,
 scheduledEffects, durationMs, errorCode }` — `source` is
-`'dispatch'`/`'binding'`/`'effect'`/`'subscription'`, `status` is
+`'dispatch'`/`'binding'`/`'effect'`/`'subscription'`, `'await'` (an
+awaiting action's continuation, §3.3) or `'setState'` (§8.5), `status` is
 `'applied'`/`'noop'`/`'rejected'`/`'failed'`. Payload/event values are
 included **only** when the app was created with `capturePayloads:
 true` — diagnostics must not leak data by default. A throwing observer
@@ -1095,7 +1203,7 @@ Pointer into the app document):
 | `JA0001` | the app document is not an object |
 | `JA0002` | `view` missing or failed to compile |
 | `JA0003` | `actions` is not an object |
-| `JA0004` | an action document failed to compile |
+| `JA0004` | an action document failed to compile, or an awaiting action is malformed (§3.3) |
 | `JA0005` | `subs` is not an array |
 | `JA0006` | a subscription entry is malformed / its `when` failed to compile |
 | `JA0007` | boot failed after compilation (renderer construction, initial-state check, initial subscriptions, first frame or queued boot work); everything acquired was rolled back (§8.2) |
@@ -1111,7 +1219,7 @@ defaults to rethrowing):
 | `JA2003` | a transition is not an object / `effects` not an array |
 | `JA2004` | a `patch` failed to apply (transition aborted) |
 | `JA2005` | `validateState` rejected the next state (transition blocked) |
-| `JA2006` | unregistered effect name |
+| `JA2006` | unregistered effect name (for an awaiting action: its `$error` code, §3.3) |
 | `JA2007` | an effect handler threw |
 | `JA2008` | unregistered subscription name |
 | `JA2009` | a binding requested an unknown event field (the member is bound `null`; the dispatch is NOT dropped) |
@@ -1133,6 +1241,7 @@ defaults to rethrowing):
 | `JA2025` | a route URL, query-entry or delivery bound would be exceeded (§8.8) |
 | `JA2026` | route owner is disposed, inactive or already has an active subscription (§8.8) |
 | `JA2027` | a route table is malformed — not an object of templates, a template the parser refuses — or two of its templates have one shape (§8.8) |
+| `JA2028` | an awaited effect threw, rejected or resolved a value that is not JSON, and the awaiting action has no `catch` (with one, it is the `$error` code instead, §3.3) |
 
 Wrapped causes are preserved on `error.cause`; compile errors from
 embedded documents keep their own codes (`JQ...`, `JT...`) there —
@@ -1163,10 +1272,9 @@ feedback shape a repair loop needs.
 - ~~Unifying the write path~~ — **shipped**: `@jarenjs/json/write`
   `parents: 'create'` + undefined-deletes is now exactly forms'
   `setValueAtPointer`, on the shared copy-on-write kernel.
-- **Async action documents** — the effect→dispatch convention for
-  asynchronous work is now documented and helper-backed
-  ([TASKS.md](TASKS.md): task-slot identity, stale-response rejection,
-  `createTaskEffect`); what remains open is a first-class *awaiting
-  disposition* — an action that suspends on an effect's settlement and
-  transitions with its result, instead of completing through a second
-  dispatched action.
+- ~~Async action documents~~ — **shipped**: the awaiting action (§3.3)
+  suspends on an effect's settlement and continues with its result or
+  its coded failure, its slot identity and stale-result rejection held by
+  the runtime; the effect→dispatch convention of [TASKS.md](TASKS.md)
+  and `createTaskEffect` remain for identity kept in state and the other
+  concurrency modes.

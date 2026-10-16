@@ -78,6 +78,38 @@ describe('the jaren-app meta-schema', function () {
       false, 'a numeric match — rejected by the JSLT grammar');
   });
 
+  it('accepts an awaiting action and rejects the malformed ones, under both drafts', function () {
+    const validate07 = new JarenValidator()
+      .addFormats(jsonFormats)
+      .addSchema(querySchema07)
+      .addSchema(jsltSchema07)
+      .compile(appSchema07);
+    const awaiting = { $await: {
+      start: { patch: [{ op: 'replace', path: '/status', value: 'loading' }] },
+      run: 'fetchJson',
+      with: { url: { $concat: ['/api/users?q=', '$payload'] } },
+      slot: 'users',
+      then: { patch: [{ op: 'replace', path: '/users', value: '$result' }] },
+      catch: { patch: [{ op: 'replace', path: '/error', value: '$error' }] },
+    } };
+    const cases = [
+      ['the full form', awaiting, true],
+      ['run alone', { $await: { run: 'fetchJson' } }, true],
+      ['no run', { $await: { then: {} } }, false],
+      ['an empty run', { $await: { run: '' } }, false],
+      ['an empty slot', { $await: { run: 'f', slot: '' } }, false],
+      ['an unknown member', { $await: { run: 'f', thne: {} } }, false],
+      ['a sibling member', { $await: { run: 'f' }, patch: [] }, false],
+      ['a continuation the query grammar refuses', { $await: { run: 'f', then: { $bogus: 1 } } }, false],
+      ['a value that is not an object', { $await: 'f' }, false],
+    ];
+    for (const validate of [compileApp(), validate07]) {
+      assert.deepStrictEqual(
+        cases.map(([label, action]) => [label, validate({ view: [], actions: { a: action } })]),
+        cases.map(([label, , expected]) => [label, expected]));
+    }
+  });
+
   it('stays in the draft-neutral subset and its draft-07 twin is in sync', function () {
     assert.deepStrictEqual(draftNeutralSubsetViolations(appSchema), []);
     const twin = downlevelDraft07(appSchema);

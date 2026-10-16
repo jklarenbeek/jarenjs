@@ -303,7 +303,7 @@ fixtures or public contracts, independent of any private notes or checkouts.
 | Accessibility and native IME | `view` | Automated [composition behavior](../packages/website/e2e/view-runtime.spec.js) and collection interaction qualified | Actual AT/OS IME audit remains open |
 | Studio durability and syntax highlighting | `studio` | Reserved; [existing editor contract](../components/studio/README.md) unchanged | Entity projects and durable stores; highlighting is declined in the [editor contract](../components/studio/README.md#complete-reusable-editors) |
 | Federation, third dialect, migration intermediate schema | `db` | Declined beyond [current query contracts](../packages/db/docs/NATIVE-PLANS.md) | None open: [fetch-order federation](../packages/linq/docs/QUERY-PEN.md#121-the-federation-boundary-federate), [two dialects](../packages/db/ARCHITECTURE.md) and the [ordered assertion fold](../packages/db/docs/MIGRATION-FORMAT.md) are the contracts |
-| Awaiting documents and streaming DAG input | `flow` | Existing [task/workflow composition](../packages/flow/docs/WORKFLOW-FORMAT.md) reused | Action format revision; streaming input is declined (FLOW-FORMAT §7.5) |
+| Awaiting documents and streaming DAG input | `flow` | Existing [task/workflow composition](../packages/flow/docs/WORKFLOW-FORMAT.md) reused | Streaming input is declined (FLOW-FORMAT §7.5); awaiting is the app format's awaiting action (APP-FORMAT §3.3) |
 | Unrelated validation, query, diagrams, charts and AI | Respective package engines | Reserved, [open roadmap](ROADMAP.md) unchanged outside proved clauses | Existing owners retain all unrelated intent |
 
 ## Complete frozen-budget comparison

@@ -28,7 +28,7 @@ export const APP_CODES = Object.freeze({
   JA2003: 'an action produced a transition that is not an object',
   JA2004: 'a transition patch failed to apply',
   JA2005: 'the next state violated the app invariants',
-  JA2006: 'a transition named an effect with no registered handler',
+  JA2006: 'a transition or an awaiting action named an effect with no registered handler',
   JA2007: 'an effect handler threw',
   JA2008: 'a subscription entry names no registered handler',
   JA2009: 'a binding requested an unknown event field',
@@ -50,6 +50,7 @@ export const APP_CODES = Object.freeze({
   JA2025: 'a route URL, query or delivery bound would be exceeded',
   JA2026: 'route owner is disposed, inactive or already subscribed',
   JA2027: 'a route table is malformed or two of its templates collide',
+  JA2028: 'an awaited effect threw, rejected or resolved a value that is not JSON',
 });
 
 /**
@@ -99,7 +100,8 @@ export class AppCompileError extends CodedError {
  *  - `JA2004` — a transition's `patch` failed to apply (see `cause`)
  *  - `JA2005` — the next state violated the app's invariants
  *    (`validateState` rejected it); the transition was NOT applied
- *  - `JA2006` — a transition named an effect with no registered handler
+ *  - `JA2006` — a transition or an awaiting action named an effect with
+ *    no registered handler
  *  - `JA2007` — an effect handler threw (see `cause`)
  *  - `JA2008` — a subscription entry names no registered handler
  *  - `JA2009` — a binding requested an unknown event field (the member
@@ -124,6 +126,12 @@ export class AppCompileError extends CodedError {
  *    the member)
  *  - `JA2017` — a subscription fan-out resolved more instances than
  *    `maxSubInstances`; the previous instance set was kept
+ *  - `JA2028` — an awaited effect threw, rejected or resolved a value
+ *    that is not JSON, and the awaiting action has no `catch` (see
+ *    `cause`; with one, the failure is its `$error` instead)
+ *
+ * The file-token, dialog and route codes (`JA2018`–`JA2027`) are listed
+ * with their meanings in {@link APP_CODES}.
  */
 export class AppRuntimeError extends CodedError {
   /**
@@ -284,3 +292,4 @@ export function safeErrorMessage(error) {
 export function toError(value) {
   return isErrorSafely(value) ? /** @type {Error} */ (value) : new HostValueError(value);
 }
+

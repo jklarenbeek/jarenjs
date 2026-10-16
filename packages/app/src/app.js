@@ -25,20 +25,23 @@
  * notification; all of it completes before the next transaction begins.
  * Every listener therefore observes every transaction in the same
  * order, and each notification carries the state produced by exactly
- * that transaction. Native event data is reduced to JSON synchronously
+ * that transaction. An awaiting action's continuation is a transaction
+ * of its own, queued when its effect settles (APP-FORMAT §3.3). Native event data is reduced to JSON synchronously
  * at dispatch time, before queuing. A listener, observer or cleanup
  * error is isolated: it is reported through `onError`, and whatever the
  * sink throws is re-thrown only after the drain has fully completed —
  * the queue always drains, cleanups are never skipped.
  */
 
-import { isJsonObject, isPlainOptions, nearestName, refuseUnknownMembers, stableStringify } from '@jarenjs/core/object';
+import { isJsonObject, isJsonValue, isPlainOptions, nearestName, refuseUnknownMembers, stableStringify } from '@jarenjs/core/object';
+import { escapePointerToken } from '@jarenjs/core/string';
 import { compileJsltStylesheet } from '@jarenjs/json/jslt';
 import { applyJSONPatch } from '@jarenjs/json/patch';
 import { createDomRenderer } from '@jarenjs/view';
 
-import { compileActions, compileSubs } from './actions.js';
+import { AwaitingAction, compileActions, compileSubs } from './actions.js';
 import { AppCompileError, AppRuntimeError, toError, safeErrorMessage, describeValue, describeOption } from './errors.js';
+import { rejectionText } from './tasks.js';
 
 /**
  * @typedef {Object} AppOptions
@@ -57,10 +60,14 @@ import { AppCompileError, AppRuntimeError, toError, safeErrorMessage, describeVa
  * @property {{ effects?: string[], subs?: string[], widgets?: string[], eventFields?: string[] }} [capabilities]
  *   Restrict the host registry names the document may access. Omitted
  *   lists grant nothing when this option or `safe` is enabled.
- * @property {Record<string, (props: any, dispatch: Dispatch) => void>} [effects]
+ * @property {Record<string, (props: any, dispatch: Dispatch, context?: { signal: AbortSignal }) => any>} [effects]
  *   Effect handlers by name. A handler function may carry an optional
  *   `dispose()` member, called exactly once by `app.destroy()` (a
- *   handler registered under several names is disposed once).
+ *   handler registered under several names is disposed once). A handler
+ *   an awaiting action runs (APP-FORMAT §3.3) also receives `{ signal }`
+ *   — aborted when a newer await on the slot supersedes it, or when the
+ *   app stops — and its return value, or the value of the promise it
+ *   returns, is the result the action continues with.
  * @property {Record<string, (props: any, dispatch: Dispatch) => (() => void) | void>} [subs]
  *   Subscription handlers by name; may return a cleanup function.
  * @property {Record<string, (nativeEvent: any) => any>} [eventFields]
@@ -147,8 +154,10 @@ import { AppCompileError, AppRuntimeError, toError, safeErrorMessage, describeVa
  * @property {number} seq - Monotonic transaction sequence number.
  * @property {string} action - The dispatched action name.
  * @property {string} source - What queued it: `'dispatch'` (external),
- *   `'binding'` (DOM/widget), `'effect'`, `'subscription'`, or
- *   `'setState'` (a whole-state replacement from outside the loop).
+ *   `'binding'` (DOM/widget), `'effect'`, `'subscription'`, `'await'`
+ *   (an awaiting action's continuation; `action` names the awaiting
+ *   action), or `'setState'` (a whole-state replacement from outside the
+ *   loop).
  * @property {'applied' | 'noop' | 'rejected' | 'failed'} status
  * @property {string[] | null} changedPaths - Changed JSON Pointers, or
  *   `null` when the whole state was replaced (unknown = everything).
@@ -333,6 +342,21 @@ function registered(registry, name) {
 }
 
 /**
+ * `isJsonValue` that cannot throw: a resolved proxy whose traps throw is
+ * a value JSON cannot carry, never a failure of the settlement itself.
+ * @param {unknown} value
+ * @returns {boolean}
+ */
+function isJsonSafely(value) {
+  try {
+    return isJsonValue(value);
+  }
+  catch {
+    return false;
+  }
+}
+
+/**
  * The hint a refused grant carries: ` — did you mean 'x'?` for the
  * registry name nearest the one granted, or nothing. A registry whose
  * names cannot be listed (a proxy may refuse) gets no hint.
@@ -350,6 +374,38 @@ function grantHint(name, registry) {
   }
   return near === undefined ? '' : ` — did you mean '${near}'?`;
 }
+
+/**
+ * An await in flight: the action that started it, the dispatch it
+ * answers, and the controller whose signal the effect received.
+ * @typedef {Object} PendingAwait
+ * @property {string} slot
+ * @property {string} name - The awaiting action's name.
+ * @property {any} payload - The dispatch payload, bound again as `$payload`.
+ * @property {any} event - The dispatch's `$event`, bound again.
+ * @property {AwaitingAction} action
+ * @property {AbortController} controller
+ */
+
+/**
+ * One queued transaction: a dispatch, a whole-state replacement
+ * (`replace`), or an awaiting action's settlement (`continue`, with the
+ * JSON `result` or the coded `failure` and the `message` its `$error`
+ * carries).
+ * @typedef {Object} QueueEntry
+ * @property {'replace' | 'continue'} [kind]
+ * @property {any} [state]
+ * @property {PendingAwait} [pending]
+ * @property {any} [result]
+ * @property {AppRuntimeError | null} [failure]
+ * @property {string} [message]
+ * @property {string} source
+ * @property {string} name
+ * @property {any} payload
+ * @property {any} event
+ * @property {string[] | null} unknownFields
+ * @property {Array<{ field: string, value: unknown }> | null} extractorFailures
+ */
 
 /**
  * Compile an app document and start the loop.
@@ -464,10 +520,19 @@ export function createApp(appDoc, options = {}) {
    * already-JSON-reduced event — native events never wait in the queue.
    * A `replace` entry carries a whole next state instead of an action
    * name: `setState` is a transaction like any other, so it serializes
-   * with dispatches rather than cutting in front of them.
-   * @type {Array<{ kind?: 'replace', state?: any, source: string, name: string, payload: any, event: any, unknownFields: string[] | null, extractorFailures: Array<{ field: string, value: unknown }> | null }>}
+   * with dispatches rather than cutting in front of them. A `continue`
+   * entry carries an awaiting action's settlement: the await it settles,
+   * and its JSON result or its coded failure.
+   * @type {Array<QueueEntry>}
    */
   const actionQueue = [];
+  /**
+   * The awaits in flight, by slot (APP-FORMAT §3.3). The record a slot
+   * holds is the only one whose settlement may continue: a newer await on
+   * the slot replaces it (and aborts it), and `stop()` clears them all.
+   * @type {Map<string, PendingAwait>}
+   */
+  const awaitSlots = new Map();
   let draining = false;
   let txSeq = 0;
   /**
@@ -707,7 +772,7 @@ export function createApp(appDoc, options = {}) {
    * Run one queued transaction to completion: evaluate the action,
    * commit the state, invoke effects, notify listeners, reconcile
    * subscriptions, schedule the render, then notify observers.
-   * @param {{ source: string, name: string, payload: any, event: any, unknownFields: string[] | null, extractorFailures: Array<{ field: string, value: unknown }> | null }} entry
+   * @param {QueueEntry} entry
    */
   function runTransaction(entry) {
     const started = now();
@@ -805,21 +870,56 @@ export function createApp(appDoc, options = {}) {
       return;
     }
 
-    const action = actions.get(entry.name);
-    if (action === undefined) {
-      safeError(new AppRuntimeError('JA2001', `unknown action '${entry.name}'`));
-      finish('failed', 'JA2001');
-      return;
+    // the document evaluated now, its variables, and — for an awaiting
+    // action's start — the await to begin once the start commits
+    /** @type {any} */
+    let query;
+    /** @type {Record<string, any>} */
+    let externals;
+    /** @type {AwaitingAction | null} */
+    let awaiting = null;
+    let subject = `action '${entry.name}'`;
+    if (entry.kind === 'continue') {
+      // ————— an awaiting action's continuation, its own transaction —————
+      const pending = /** @type {PendingAwait} */ (entry.pending);
+      const failure = entry.failure ?? null;
+      query = failure === null ? pending.action.then : pending.action.catch;
+      if (query === null) {
+        // no continuation for this outcome: a result is dropped, a failure
+        // nobody catches is reported with its code
+        if (failure !== null) safeError(failure);
+        finish(failure === null ? 'noop' : 'failed', failure === null ? null : failure.code);
+        return;
+      }
+      subject = `action '${entry.name}' (its "${failure === null ? 'then' : 'catch'}")`;
+      externals = failure === null
+        ? { event: entry.event, payload: entry.payload, result: entry.result }
+        : { event: entry.event, payload: entry.payload, error: { code: failure.code, message: entry.message } };
+    }
+    else {
+      const action = actions.get(entry.name);
+      if (action === undefined) {
+        safeError(new AppRuntimeError('JA2001', `unknown action '${entry.name}'`));
+        finish('failed', 'JA2001');
+        return;
+      }
+      if (action instanceof AwaitingAction) {
+        awaiting = action;
+        query = action.start;
+      }
+      else query = action;
+      externals = { event: entry.event, payload: entry.payload };
     }
 
     let transition;
     try {
-      transition = action.first(state, { event: entry.event, payload: entry.payload });
+      // an awaiting action without a start changes nothing before it awaits
+      transition = query === null ? {} : query.first(state, externals);
     }
     catch (err) {
       const cause = toError(err);
       safeError(new AppRuntimeError('JA2002',
-        `action '${entry.name}' failed: ${safeErrorMessage(cause)}`, { cause }));
+        `${subject} failed: ${safeErrorMessage(cause)}`, { cause }));
       finish('failed', 'JA2002');
       return;
     }
@@ -830,7 +930,7 @@ export function createApp(appDoc, options = {}) {
     }
     if (typeof transition !== 'object' || Array.isArray(transition)) {
       safeError(new AppRuntimeError('JA2003',
-        `action '${entry.name}' produced a transition that is not an object`));
+        `${subject} produced a transition that is not an object`));
       finish('failed', 'JA2003');
       return;
     }
@@ -849,9 +949,24 @@ export function createApp(appDoc, options = {}) {
       catch (err) {
         const cause = toError(err);
         safeError(new AppRuntimeError('JA2004',
-          `action '${entry.name}' produced a patch that failed to apply: ${safeErrorMessage(cause)}`,
+          `${subject} produced a patch that failed to apply: ${safeErrorMessage(cause)}`,
           { cause }));
         finish('failed', 'JA2004');
+        return;
+      }
+    }
+    // the awaited effect's props read the state the start produced, so the
+    // start and its props fail or commit together
+    let awaitProps = null;
+    if (awaiting !== null && awaiting.with !== null) {
+      try {
+        awaitProps = awaiting.with.first(next, externals) ?? null;
+      }
+      catch (err) {
+        const cause = toError(err);
+        safeError(new AppRuntimeError('JA2002',
+          `${subject} failed evaluating its "with": ${safeErrorMessage(cause)}`, { cause }));
+        finish('failed', 'JA2002');
         return;
       }
     }
@@ -871,7 +986,7 @@ export function createApp(appDoc, options = {}) {
         // the queue keeps draining
         const cause = toError(err);
         safeError(new AppRuntimeError('JA2015',
-          `the validateState hook threw for action '${entry.name}': ${safeErrorMessage(cause)}`,
+          `the validateState hook threw for ${subject}: ${safeErrorMessage(cause)}`,
           { cause }));
         finish('failed', 'JA2015');
         return;
@@ -879,7 +994,7 @@ export function createApp(appDoc, options = {}) {
       if (verdict === false
         || (verdict !== null && typeof verdict === 'object' && verdict.valid === false)) {
         const err = new AppRuntimeError('JA2005',
-          `action '${entry.name}' violated the app's state invariants; transition rejected`);
+          `${subject} violated the app's state invariants; transition rejected`);
         err.detail = typeof verdict === 'object' ? verdict.errors : undefined;
         safeError(err);
         finish('rejected', 'JA2005');
@@ -892,6 +1007,7 @@ export function createApp(appDoc, options = {}) {
     if (transition.effects !== undefined) {
       runEffects(entry.name, transition.effects, scheduledEffects);
     }
+    if (awaiting !== null) beginAwait(awaiting, entry, awaitProps, scheduledEffects);
     if (changed) {
       for (const listener of stateListeners) {
         try {
@@ -960,6 +1076,122 @@ export function createApp(appDoc, options = {}) {
   }
 
   /**
+   * Acquire the effect handler a document names. Registry member
+   * acquisition is host-observable (the registry may be a proxy or carry
+   * accessors), so the lookup shares the invocation's failure policy: a
+   * read that throws is `JA2007`, a name nothing is registered under is
+   * `JA2006`.
+   * @param {string} name - The action that names the effect.
+   * @param {unknown} run - The effect name the document chose.
+   * @param {string} verb - How the action uses it, for the message.
+   * @param {string | undefined} docPath - Where the name is written, when known.
+   * @returns {{ handler: any, error: AppRuntimeError | null }}
+   */
+  function acquireEffect(name, run, verb, docPath) {
+    let handler;
+    try {
+      handler = typeof run === 'string' ? registered(effectHandlers, run) : undefined;
+    }
+    catch (err) {
+      const cause = toError(err);
+      return { handler: undefined, error: new AppRuntimeError('JA2007',
+        `effect '${String(run)}' threw during lookup: ${safeErrorMessage(cause)}`, { docPath, cause }) };
+    }
+    if (handler === undefined) {
+      return { handler, error: new AppRuntimeError('JA2006',
+        `action '${name}' ${verb} unregistered effect '${String(run)}'`, { docPath }) };
+    }
+    return { handler, error: null };
+  }
+
+  /**
+   * Begin an awaiting action's await once its start committed (APP-FORMAT
+   * §3.3): the slot's await in flight, if any, is superseded — aborted, and
+   * its settlement dropped — and the effect runs through one promise
+   * boundary, so a synchronous throw settles like a rejection and a plain
+   * return like a resolution.
+   * @param {AwaitingAction} action
+   * @param {QueueEntry} entry - The dispatch whose start committed.
+   * @param {any} props - The effect props `with` produced.
+   * @param {string[]} scheduled - Records the invoked effect name.
+   */
+  function beginAwait(action, entry, props, scheduled) {
+    const slot = action.slot ?? entry.name;
+    /** @type {PendingAwait} */
+    const pending = {
+      slot, name: entry.name, payload: entry.payload, event: entry.event,
+      action, controller: new AbortController(),
+    };
+    const superseded = awaitSlots.get(slot);
+    awaitSlots.set(slot, pending);
+    superseded?.controller.abort();
+    const docPath = `/actions/${escapePointerToken(entry.name)}/$await`;
+    const { handler, error } = acquireEffect(entry.name, action.run, 'awaited', docPath);
+    if (error !== null) {
+      // the lookup failure settles like any failure: on its own microtask,
+      // through catch when the action has one
+      Promise.resolve().then(() => settleAwait(pending, 'refused', error, docPath));
+      return;
+    }
+    scheduled.push(action.run);
+    new Promise((resolve) => {
+      resolve(handler(props, effectDispatch, { signal: pending.controller.signal }));
+    }).then(
+      (value) => settleAwait(pending, 'resolved', value, docPath),
+      (reason) => settleAwait(pending, 'rejected', reason, docPath));
+  }
+
+  /**
+   * Settle one await. Only the await its slot still holds continues: a
+   * superseded one, or any after `stop()`, is dropped here, whatever it
+   * settled with. A settlement runs on its own microtask, never inside a
+   * drain, so the continuation queued here is the next transaction that
+   * runs. A failure the drain's sink throws is raised again on its own
+   * microtask, never as a rejection of a promise nobody holds.
+   * @param {PendingAwait} pending
+   * @param {'resolved' | 'rejected' | 'refused'} outcome - How the effect
+   *   settled; `refused` when no handler could be acquired.
+   * @param {unknown} value - The result, what the effect rejected with,
+   *   or the lookup's own coded error.
+   * @param {string} docPath - The awaiting action's `$await` member.
+   */
+  function settleAwait(pending, outcome, value, docPath) {
+    if (awaitSlots.get(pending.slot) !== pending) return;
+    awaitSlots.delete(pending.slot);
+    const effect = `action '${pending.name}' awaited effect '${pending.action.run}'`;
+    let result = null;
+    /** @type {AppRuntimeError | null} */
+    let failure = null;
+    let message = '';
+    if (outcome === 'refused') {
+      failure = /** @type {AppRuntimeError} */ (value);
+      message = failure.reason;
+    }
+    else if (outcome === 'rejected') {
+      message = rejectionText(value);
+      failure = new AppRuntimeError('JA2028', `${effect}, which failed: ${message}`,
+        { docPath, cause: toError(value) });
+    }
+    else if (value !== undefined && !isJsonSafely(value)) {
+      failure = new AppRuntimeError('JA2028',
+        `${effect}, which resolved a value JSON cannot carry (${describeOption(value)})`, { docPath });
+      message = failure.reason;
+    }
+    else result = value ?? null;
+    actionQueue.push({
+      kind: 'continue', pending, result, failure, message,
+      source: 'await', name: pending.name, payload: pending.payload, event: pending.event,
+      unknownFields: null, extractorFailures: null,
+    });
+    try {
+      drainQueue();
+    }
+    catch (thrown) {
+      queueMicrotask(() => { throw thrown; });
+    }
+  }
+
+  /**
    * @param {string} name
    * @param {any} effects
    * @param {string[]} scheduled - Records invoked effect names.
@@ -972,22 +1204,9 @@ export function createApp(appDoc, options = {}) {
     }
     for (const effect of effects) {
       const run = effect?.run;
-      // registry member acquisition is host-observable (the registry
-      // may be a proxy or carry accessors): lookup and invocation
-      // share one boundary and one failure policy (JA2007)
-      let handler;
-      try {
-        handler = typeof run === 'string' ? registered(effectHandlers, run) : undefined;
-      }
-      catch (err) {
-        const cause = toError(err);
-        safeError(new AppRuntimeError('JA2007',
-          `effect '${String(run)}' threw during lookup: ${safeErrorMessage(cause)}`, { cause }));
-        continue;
-      }
-      if (handler === undefined) {
-        safeError(new AppRuntimeError('JA2006',
-          `action '${name}' invoked unregistered effect '${String(run)}'`));
+      const { handler, error } = acquireEffect(name, run, 'invoked', undefined);
+      if (error !== null) {
+        safeError(error);
         continue;
       }
       scheduled.push(run);
@@ -1377,6 +1596,11 @@ export function createApp(appDoc, options = {}) {
   function teardownLoop() {
     running = false;
     actionQueue.length = 0;
+    // no continuation can run any more: every await in flight is aborted
+    // and its settlement dropped
+    const inFlight = [...awaitSlots.values()];
+    awaitSlots.clear();
+    for (const pending of inFlight) pending.controller.abort();
     refreshSubs();
     stateListeners.clear();
     // a stopped loop renders no more frames: nobody waits for one

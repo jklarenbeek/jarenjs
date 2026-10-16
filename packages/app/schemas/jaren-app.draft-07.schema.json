@@ -21,10 +21,17 @@
       ]
     },
     "actions": {
-      "description": "Named action documents: Jaren JSON Query documents evaluated with $ bound to the state and the externals $event and $payload.",
+      "description": "Named actions. An action is a Jaren JSON Query document evaluated with $ bound to the state and the externals $event and $payload, or an awaiting action: a single-member object {\"$await\": ...} that commits its start transition, awaits a registered effect and continues with its result in a transaction of its own.",
       "type": "object",
       "additionalProperties": {
-        "$ref": "#/definitions/queryDocument"
+        "anyOf": [
+          {
+            "$ref": "#/definitions/awaitingAction"
+          },
+          {
+            "$ref": "#/definitions/queryDocument"
+          }
+        ]
       }
     },
     "subs": {
@@ -84,6 +91,67 @@
     "view"
   ],
   "definitions": {
+    "awaitingAction": {
+      "description": "An action that awaits an effect (APP-FORMAT section 3.3). Its continuations are compiled once, with the action.",
+      "type": "object",
+      "properties": {
+        "$await": {
+          "type": "object",
+          "properties": {
+            "start": {
+              "description": "The transition committed before the await begins: an ordinary action document over $, $event and $payload. Absent: no change; the empty sequence: no await.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/queryDocument"
+                }
+              ]
+            },
+            "run": {
+              "description": "The registered effect awaited; it is called (props, dispatch, { signal }) and its result settles the await.",
+              "type": "string",
+              "minLength": 1
+            },
+            "with": {
+              "description": "The effect props: evaluated against the state the start transition produces, with $event and $payload; absent means null.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/queryDocument"
+                }
+              ]
+            },
+            "slot": {
+              "description": "The await identity: a new await on the slot supersedes the one in flight, which is aborted and never continues. Absent: the action name.",
+              "type": "string",
+              "minLength": 1
+            },
+            "then": {
+              "description": "The continuation on success, its own transaction: evaluated against the state current at settlement, with $result, $event and $payload.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/queryDocument"
+                }
+              ]
+            },
+            "catch": {
+              "description": "The continuation on failure, its own transaction: evaluated with $error ({ code, message }), $event and $payload. Absent: the failure is reported through onError.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/queryDocument"
+                }
+              ]
+            }
+          },
+          "required": [
+            "run"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "$await"
+      ],
+      "additionalProperties": false
+    },
     "stylesheetDocument": {
       "$ref": "https://jarenjs.dev/schemas/jaren-jslt/0.1/draft-07"
     },
