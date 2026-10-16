@@ -1,7 +1,7 @@
 {
   "name": "@jarenjs/md",
   "private": false,
-  "version": "0.145.0",
+  "version": "0.146.0",
   "type": "module",
   "main": "./src/index.js",
   "types": "./dist/types/index.d.ts",
@@ -73,7 +73,7 @@
     "prepack": "npm run build:types"
   },
   "dependencies": {
-    "@jarenjs/core": "0.145.0",
-    "@jarenjs/view": "0.145.0"
+    "@jarenjs/core": "0.146.0",
+    "@jarenjs/view": "0.146.0"
   }
 }
