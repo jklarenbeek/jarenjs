@@ -16,6 +16,9 @@
  * annotations (`title`, `description`, `examples`, `$comment`,
  * `deprecated`) never move a wire byte and are ignored; every other
  * keyword that differs between the two sides lands in `unknown` (R15).
+ * "Differs" is read through every same-document `$ref`: a construct the
+ * walk does not model is equal only when what its references resolve to
+ * is, so a change behind an unchanged spelling is reported, never lost.
  *
  * A nullable node has two spellings — `type: [T, 'null']` and a
  * two-branch `anyOf`/`oneOf` with a null-only branch — and the walk reads
@@ -34,7 +37,9 @@
 
 import { encodeJSONPointerSegment } from '@jarenjs/json/pointer';
 import { canonicalizeJson } from '@jarenjs/json/canonical';
-import { canonicalNullable, splitNullable } from '@jarenjs/core/schema';
+import {
+  canonicalNullable, splitNullable, SCHEMA_VALUE_KEYWORDS, SCHEMA_MAP_KEYWORDS, SCHEMA_LIST_KEYWORDS,
+} from '@jarenjs/core/schema';
 import { collectSameDocumentAnchors, resolveSameDocumentRef } from '@jarenjs/validate/normalize';
 
 import { compileContract } from './compile.js';
@@ -121,6 +126,128 @@ function resolveHops(node, side) {
   }
   return { node };
 }
+
+/** Keywords whose value is one schema (a tuple `items` included). */
+const SCHEMA_VALUES = new Set([...SCHEMA_VALUE_KEYWORDS, 'additionalItems']);
+/** Keywords whose value maps names to schemas (`dependencies` may also map a name to a list of names). */
+const SCHEMA_MAPS = new Set([...SCHEMA_MAP_KEYWORDS, 'dependencies']);
+/** Keywords whose value lists schemas. */
+const SCHEMA_LISTS = new Set(SCHEMA_LIST_KEYWORDS);
+/** Data keywords whose value is a set: a reorder accepts the same values. */
+const VALUE_SETS = new Set(['type', 'enum', 'required']);
+
+/**
+ * Where two schema values first accept different values once every
+ * same-document `$ref` on each side is followed into its own document:
+ * the pointer (over the resolved structure, from `path`) and the two
+ * values there, or `null` when they validate alike. Two spellings that
+ * are equal as text can still differ here, because a `$ref` names a
+ * location, not a schema — the walk below compares by text wherever it
+ * does not model a construct, and this is what keeps such a construct
+ * from reading as unchanged. Annotations and resolution artifacts are
+ * skipped, as the walk skips them; `enum`, `required` and `type` compare
+ * as sets; every other keyword that is not a schema position compares
+ * as data, so a `$ref` inside a `const` is never followed.
+ * @param {string} key - the keyword holding `x` and `y`
+ * @param {unknown} x
+ * @param {unknown} y
+ * @param {string} path - pointer to the keyword's value
+ * @param {Side} a
+ * @param {Side} b
+ * @param {Map<object, Set<object>>} pairs - schema pairs under comparison (a recursive schema terminates)
+ * @returns {{ path: string, from: unknown, to: unknown } | null}
+ */
+function divergence(key, x, y, path, a, b, pairs) {
+  const at = { path, from: x, to: y };
+  if (SCHEMA_VALUES.has(key)) {
+    if (Array.isArray(x) && Array.isArray(y)) return divergenceInList(x, y, path, a, b, pairs);
+    return schemaDivergence(x, y, path, a, b, pairs);
+  }
+  if (SCHEMA_LISTS.has(key) && Array.isArray(x) && Array.isArray(y)) return divergenceInList(x, y, path, a, b, pairs);
+  if (SCHEMA_MAPS.has(key) && isObject(x) && isObject(y)) {
+    for (const name of new Set([...Object.keys(x), ...Object.keys(y)])) {
+      const inner = path + '/' + encodeJSONPointerSegment(name);
+      if (!Object.hasOwn(x, name) || !Object.hasOwn(y, name)) return { path: inner, from: x[name], to: y[name] };
+      const found = Array.isArray(x[name]) || Array.isArray(y[name])
+        ? (canon(x[name]) === canon(y[name]) ? null : { path: inner, from: x[name], to: y[name] })
+        : schemaDivergence(x[name], y[name], inner, a, b, pairs);
+      if (found !== null) return found;
+    }
+    return null;
+  }
+  if (VALUE_SETS.has(key)) {
+    const texts = (/** @type {unknown} */ v) => [...new Set((Array.isArray(v) ? v : [v]).map(canon))].sort().join(',');
+    return texts(x) === texts(y) ? null : at;
+  }
+  return canon(x) === canon(y) ? null : at;
+}
+
+/**
+ * {@link divergence} over two lists of schemas, index by index.
+ * @param {unknown[]} x @param {unknown[]} y @param {string} path
+ * @param {Side} a @param {Side} b @param {Map<object, Set<object>>} pairs
+ * @returns {{ path: string, from: unknown, to: unknown } | null}
+ */
+function divergenceInList(x, y, path, a, b, pairs) {
+  if (x.length !== y.length) return { path, from: x, to: y };
+  for (let i = 0; i < x.length; i++) {
+    const found = schemaDivergence(x[i], y[i], `${path}/${i}`, a, b, pairs);
+    if (found !== null) return found;
+  }
+  return null;
+}
+
+/**
+ * {@link divergence} for two schemas: a same-document `$ref` on either
+ * side is followed (an external one compares by its text).
+ * @param {unknown} x @param {unknown} y @param {string} path
+ * @param {Side} a @param {Side} b @param {Map<object, Set<object>>} pairs
+ * @returns {{ path: string, from: unknown, to: unknown } | null}
+ */
+function schemaDivergence(x, y, path, a, b, pairs) {
+  if (!isObject(x) || !isObject(y)) return canon(x) === canon(y) ? null : { path, from: x, to: y };
+  let seen = pairs.get(x);
+  if (seen !== undefined && seen.has(y)) return null; // in progress: the cycle closes on itself
+  if (seen === undefined) pairs.set(x, (seen = new Set()));
+  seen.add(y);
+  for (const key of new Set([...Object.keys(x), ...Object.keys(y)])) {
+    if (ANNOTATIONS.has(key) || (RESOLUTION.has(key) && key !== '$ref')) continue;
+    if (!Object.hasOwn(x, key) || !Object.hasOwn(y, key)) {
+      return { path: path + '/' + encodeJSONPointerSegment(key), from: x[key], to: y[key] };
+    }
+    if (key === '$ref') {
+      const ta = sameDocumentTarget(x.$ref, a);
+      const tb = sameDocumentTarget(y.$ref, b);
+      // the target is read at this node's own pointer: the resolved structure
+      const found = ta === undefined || tb === undefined
+        ? (x.$ref === y.$ref ? null : { path: path + '/$ref', from: x.$ref, to: y.$ref })
+        : schemaDivergence(ta, tb, path, a, b, pairs);
+      if (found !== null) return found;
+      continue;
+    }
+    const found = divergence(key, x[key], y[key], path + '/' + encodeJSONPointerSegment(key), a, b, pairs);
+    if (found !== null) return found;
+  }
+  return null;
+}
+
+/**
+ * The schema a same-document `$ref` names on one side, or `undefined`
+ * for an external or unresolvable one.
+ * @param {unknown} ref
+ * @param {Side} side
+ */
+function sameDocumentTarget(ref, side) {
+  if (typeof ref !== 'string' || !ref.startsWith('#')) return undefined;
+  return resolveSameDocumentRef(ref, side.doc, side.anchors);
+}
+
+/**
+ * Whether two schemas validate differently: their text differs, or it is
+ * equal and a `$ref` inside resolves to schemas that differ.
+ * @param {unknown} x @param {unknown} y @param {Side} a @param {Side} b
+ */
+const schemasDiffer = (x, y, a, b) => canon(x) !== canon(y) || schemaDivergence(x, y, '', a, b, new Map()) !== null;
 
 /**
  * The event sink of one schema comparison.
@@ -212,6 +339,7 @@ function compareSchema(aNode, bNode, path, a, b, sink, visited) {
   }
   if ('opaque' in ra || 'opaque' in rb) {
     if (canon(aNode) !== canon(bNode)) sink.unknown('$ref', path, aNode, bNode);
+    else reportDivergence(schemaDivergence(aNode, bNode, path, a, b, new Map()), '$ref', sink);
     return;
   }
   let A = ra.node;
@@ -227,6 +355,7 @@ function compareSchema(aNode, bNode, path, a, b, sink, visited) {
   if (B === true) B = {};
   if (!isObject(A) || !isObject(B)) {
     if (canon(A) !== canon(B)) sink.unknown('schema', path, A, B);
+    else if (Array.isArray(A) && Array.isArray(B)) reportDivergence(divergenceInList(A, B, path, a, b, new Map()), 'schema', sink);
     return;
   }
   if (A === B) return;
@@ -248,7 +377,9 @@ function compareSchema(aNode, bNode, path, a, b, sink, visited) {
     // a reorder inside one spelling (a type array's items, a union's
     // branches) is no respelling: silent, as any other reorder is
     if (spellingA !== spellingB) sink.respelled(path, A, B);
-    if (canon(canonA) === canon(canonB)) return;
+    // equal text with a `$ref` below that resolves apart is a change the
+    // walk reads through the type-array spelling, as any other
+    if (!schemasDiffer(canonA, canonB, a, b)) return;
     if (spellingA !== 'type' && spellingB !== 'type') {
       // two unions: compare the non-null branches where they sit, so a
       // change's pointer resolves in the documents
@@ -261,17 +392,7 @@ function compareSchema(aNode, bNode, path, a, b, sink, visited) {
     B = canonB;
   }
 
-  const keys = new Set([...Object.keys(A), ...Object.keys(B)]);
-  let structure = false;
-  for (const key of keys) {
-    if (ANNOTATIONS.has(key) || RESOLUTION.has(key)) continue;
-    if (CONSTRAINT_SET.has(key)) continue; // the constraint pass below
-    if (STRUCTURE.has(key)) {
-      structure = true;
-      continue;
-    }
-    if (canon(A[key]) !== canon(B[key])) sink.unknown(key, path + '/' + key, A[key], B[key]);
-  }
+  const structure = compareUnmodeled(A, B, path, a, b, sink);
   compareConstraints(A, B, path, sink);
   if (structure) {
     compareObject(A, B, path, a, b, sink, visited);
@@ -281,6 +402,48 @@ function compareSchema(aNode, bNode, path, a, b, sink, visited) {
       else compareSchema(A.items, B.items, path + '/items', a, b, sink, visited);
     }
   }
+}
+
+/**
+ * Every keyword of a schema pair that is neither an annotation, a
+ * resolution artifact, an R6 constraint nor object structure: one that
+ * differs is R15. Equal text is not equal validation when a `$ref` inside
+ * resolves apart on the two sides, so such a keyword reports where the
+ * resolved schemas first differ. Answers whether either side carries
+ * object structure (`properties`, `required`, `additionalProperties`,
+ * `items`), which the caller's structure pass then reads.
+ * @param {Record<string, any>} A
+ * @param {Record<string, any>} B
+ * @param {string} path
+ * @param {Side} a
+ * @param {Side} b
+ * @param {Sink} sink
+ * @returns {boolean}
+ */
+function compareUnmodeled(A, B, path, a, b, sink) {
+  let structure = false;
+  for (const key of new Set([...Object.keys(A), ...Object.keys(B)])) {
+    if (ANNOTATIONS.has(key) || RESOLUTION.has(key)) continue;
+    if (CONSTRAINT_SET.has(key)) continue; // the constraint pass
+    if (STRUCTURE.has(key)) {
+      structure = true;
+      continue;
+    }
+    if (canon(A[key]) !== canon(B[key])) sink.unknown(key, path + '/' + key, A[key], B[key]);
+    else reportDivergence(divergence(key, A[key], B[key], path + '/' + key, a, b, new Map()), key, sink);
+  }
+  return structure;
+}
+
+/**
+ * Report a resolved divergence (if any) as R15 under the keyword whose
+ * construct the walk does not model.
+ * @param {{ path: string, from: unknown, to: unknown } | null} found
+ * @param {string} keyword
+ * @param {Sink} sink
+ */
+function reportDivergence(found, keyword, sink) {
+  if (found !== null) sink.unknown(keyword, found.path, found.from, found.to);
 }
 
 /**
@@ -422,7 +585,7 @@ function compareObject(A, B, path, a, b, sink, visited) {
 
   const aAp = A.additionalProperties === undefined ? true : A.additionalProperties;
   const bAp = B.additionalProperties === undefined ? true : B.additionalProperties;
-  if (canon(aAp) !== canon(bAp)) {
+  if (schemasDiffer(aAp, bAp, a, b)) {
     compareSchema(aAp, bAp, path + '/additionalProperties', a, b, sink, visited);
   }
 }
@@ -516,8 +679,10 @@ function schemaSink(diff, op, root, what) {
 }
 
 /**
- * The top-level input members of both sides, by the R4/R5/R7 rows, then
- * the member schemas recursively.
+ * The top-level input members of both sides, by the R4/R5/R7 rows (a
+ * member moved beside a constraining catch-all is R15), then the member
+ * schemas recursively, the input's own other keywords and the siblings
+ * of the `$ref` it is spelled as.
  * @param {ContractDiff} diff
  * @param {CompiledOperation} aOp
  * @param {CompiledOperation} bOp
@@ -535,7 +700,13 @@ function compareInput(diff, aOp, bOp, a, b) {
   const bProps = bEff !== null && isObject(bEff.properties) ? bEff.properties : {};
   const aReq = new Set(aEff !== null && Array.isArray(aEff.required) ? aEff.required : []);
   const bReq = new Set(bEff !== null && Array.isArray(bEff.required) ? bEff.required : []);
-  const bClosed = bEff === null || bEff.additionalProperties === false;
+  const bClosed = bEff === null || closedObject(bEff);
+  // a catch-all that constrains the members the input does not name judges
+  // a member moved out of (or into) `properties`: undecidable, R15
+  const aCatchAll = aEff === null || closedObject(aEff) ? null : constrainingCatchAll(aEff);
+  const bCatchAll = bClosed ? null : constrainingCatchAll(bEff);
+  const judged = (/** @type {string} */ at, /** @type {string} */ m, /** @type {string} */ catchAll) =>
+    push(diff.unknown, { kind: 'schema-unknown', op, docPath: at, from: m, to: m, rule: 'R15', note: catchAll });
 
   if (aEff !== null && bEff === null) {
     push(diff.breaking, {
@@ -555,6 +726,7 @@ function compareInput(diff, aOp, bOp, a, b) {
       if (bClosed) {
         push(diff.breaking, { kind: 'input-member-removed', op, docPath: at, from: m, rule: 'R5' });
       }
+      else if (bCatchAll !== null) judged(at, m, bCatchAll);
       else {
         push(diff.neutral, {
           kind: 'input-member-removed', op, docPath: at, from: m, rule: 'R5',
@@ -565,6 +737,7 @@ function compareInput(diff, aOp, bOp, a, b) {
     }
     if (!inA && inB) {
       if (bReq.has(m)) push(diff.breaking, { kind: 'input-required-added', op, docPath: at, to: m, rule: 'R4' });
+      else if (aCatchAll !== null) judged(at, m, aCatchAll);
       else push(diff.additive, { kind: 'input-member-added', op, docPath: at, to: m, rule: 'R7' });
       continue;
     }
@@ -580,7 +753,28 @@ function compareInput(diff, aOp, bOp, a, b) {
   }
   const aAp = aEff === null || aEff.additionalProperties === undefined ? true : aEff.additionalProperties;
   const bAp = bEff.additionalProperties === undefined ? true : bEff.additionalProperties;
-  if (canon(aAp) !== canon(bAp)) compareSchema(aAp, bAp, '/additionalProperties', a, b, sink, visited);
+  if (schemasDiffer(aAp, bAp, a, b)) compareSchema(aAp, bAp, '/additionalProperties', a, b, sink, visited);
+  if (aEff === null) return;
+  // the rest of the input's own keywords (an applicator, a bound on its
+  // members, a catch-all) validate the request as much as its members do,
+  // and so do the siblings of a `$ref` the input is spelled as (the
+  // members are read from what the `$ref` resolves to)
+  compareUnmodeled(aEff, bEff, '', a, b, sink);
+  compareConstraints(aEff, bEff, '', sink);
+  const aBeside = refSiblings(aOp.input?.schema);
+  const bBeside = refSiblings(bOp.input?.schema);
+  if (canon(aBeside) !== canon(bBeside)) sink.unknown('$ref', '', aOp.input?.schema, bOp.input?.schema);
+  else reportDivergence(schemaDivergence(aBeside, bBeside, '', a, b, new Map()), '$ref', sink);
+}
+
+/**
+ * The keywords beside a schema's `$ref` (annotations aside), or `{}`.
+ * @param {unknown} schema
+ * @returns {Record<string, unknown>}
+ */
+function refSiblings(schema) {
+  if (!isObject(schema) || typeof schema.$ref !== 'string') return {};
+  return Object.fromEntries(Object.entries(schema).filter(([key]) => key !== '$ref' && !ANNOTATIONS.has(key)));
 }
 
 /**
@@ -632,8 +826,10 @@ function compareBinding(diff, aOp, bOp) {
  * @param {ContractDiff} diff
  * @param {CompiledOperation} aOp
  * @param {CompiledOperation} bOp
+ * @param {Side} a
+ * @param {Side} b
  */
-function compareErrors(diff, aOp, bOp) {
+function compareErrors(diff, aOp, bOp, a, b) {
   const op = aOp.id;
   for (const code of new Set([...Object.keys(aOp.errors), ...Object.keys(bOp.errors)])) {
     const at = opPath(op) + '/errors/' + encodeJSONPointerSegment(code);
@@ -651,9 +847,14 @@ function compareErrors(diff, aOp, bOp) {
     if (from.status !== to.status) {
       push(diff.breaking, { kind: 'error-status-changed', op, docPath: at + '/status', from: from.status, to: to.status, rule: 'R10' });
     }
-    if (canon(from.schema) !== canon(to.schema)) {
+    // equal text can still validate apart, through a `$ref` that resolves
+    // to a changed schema: that reports where the two first differ
+    const moved = canon(from.schema) !== canon(to.schema)
+      ? { path: '', from: from.schema, to: to.schema }
+      : schemaDivergence(from.schema, to.schema, '', a, b, new Map());
+    if (moved !== null) {
       push(diff.unknown, {
-        kind: 'error-schema-changed', op, docPath: at + '/schema', from: from.schema, to: to.schema,
+        kind: 'error-schema-changed', op, docPath: at + '/schema' + moved.path, from: moved.from, to: moved.to,
         rule: 'R15', note: 'the rule table does not model error-schema evolution',
       });
     }
@@ -865,6 +1066,6 @@ function compareInside(diff, id, aOp, bOp, sideA, sideB) {
   compareInput(diff, aOp, bOp, sideA, sideB);
   const outSink = schemaSink(diff, id, opPath(id) + '/output', 'output');
   compareSchema(aOp.output.schema, bOp.output.schema, '', sideA, sideB, outSink, new Map());
-  compareErrors(diff, aOp, bOp);
+  compareErrors(diff, aOp, bOp, sideA, sideB);
   comparePolicy(diff, aOp, bOp);
 }

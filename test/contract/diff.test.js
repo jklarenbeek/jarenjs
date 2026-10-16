@@ -592,3 +592,242 @@ describe('diffContracts — the internal gate and the stream policy', () => {
     assert.deepStrictEqual([both.breaking.map((x) => x.kind), both.neutral.map((x) => x.kind)], [['heartbeat-slowed'], ['policy-changed']]);
   });
 });
+
+describe('diffContracts — validation behind a same-document $ref is compared as it resolves', () => {
+  /** A projection whose `required` list and `b`'s enum the cases move. @param {string[]} required @param {string[]} [en] */
+  const proj = (required, en = ['x', 'y']) => ({
+    type: 'object', properties: { a: { type: 'string' }, b: { type: 'string', enum: en } }, required,
+  });
+  const ref = { $ref: '#/$defs/proj' };
+  /**
+   * Each shape wraps the reference; `at` is where the reference sits
+   * inside it and `note` the keyword the walk does not model there.
+   * @type {Record<string, { wrap: any, at: string, note: string }>}
+   */
+  const shapes = {
+    'a discriminated oneOf variant': {
+      wrap: { oneOf: [
+        { type: 'object', properties: { ok: { const: true }, value: ref }, required: ['ok', 'value'] },
+        { type: 'object', properties: { ok: { const: false } }, required: ['ok'] },
+      ] },
+      at: '/oneOf/0/properties/value', note: 'oneOf',
+    },
+    'an anyOf branch': { wrap: { anyOf: [ref, { type: 'string' }] }, at: '/anyOf/0', note: 'anyOf' },
+    'an allOf conjunct': { wrap: { allOf: [ref] }, at: '/allOf/0', note: 'allOf' },
+    'a not': { wrap: { type: 'object', not: ref }, at: '/not', note: 'not' },
+    'an if': { wrap: { if: ref, then: { type: 'object' } }, at: '/if', note: 'if' },
+    'a then': { wrap: { if: { type: 'object' }, then: ref }, at: '/then', note: 'then' },
+    'an else': { wrap: { if: { type: 'string' }, else: ref }, at: '/else', note: 'else' },
+    'a dependentSchemas member': { wrap: { type: 'object', dependentSchemas: { a: ref } }, at: '/dependentSchemas/a', note: 'dependentSchemas' },
+    'a prefixItems entry': { wrap: { type: 'array', prefixItems: [ref] }, at: '/prefixItems/0', note: 'prefixItems' },
+    'a contains': { wrap: { type: 'array', contains: ref }, at: '/contains', note: 'contains' },
+    'a patternProperties member': { wrap: { type: 'object', patternProperties: { '^p': ref } }, at: '/patternProperties/^p', note: 'patternProperties' },
+    'a $ref beside a sibling': { wrap: { ...ref, description: 'the projection' }, at: '', note: '$ref' },
+    'a nullable union whose branch is the $ref': { wrap: { anyOf: [ref, { type: 'null' }] }, at: '/anyOf/0', note: 'anyOf' },
+    'a $ref into a nested definitions': {
+      wrap: { allOf: [{ $ref: '#/$defs/holder/definitions/proj' }] }, at: '/allOf/0', note: 'allOf',
+    },
+    'a $ref reached through another $ref': { wrap: { allOf: [{ $ref: '#/$defs/mid' }] }, at: '/allOf/0', note: 'allOf' },
+  };
+  /**
+   * The four positions validation is reached from: what an operation
+   * returns, a member of what it takes, its input's own applicator, and
+   * a declared error's schema.
+   * @type {Record<string, { op: (w: any) => any, at: string, note?: string, kind: string }>}
+   */
+  const positions = {
+    output: { op: (w) => ({ output: w }), at: '/output', kind: 'schema-unknown' },
+    'input member': { op: (w) => ({ input: { type: 'object', properties: { m: w } } }), at: '/input/properties/m', kind: 'schema-unknown' },
+    'input root': { op: (w) => ({ input: { type: 'object', properties: { m: {} }, allOf: [w] } }), at: '/input/allOf/0', note: 'allOf', kind: 'schema-unknown' },
+    'error schema': {
+      op: (w) => ({ errors: { conflict: { status: 409, schema: w } } }), at: '/errors/conflict/schema',
+      note: 'the rule table does not model error-schema evolution', kind: 'error-schema-changed',
+    },
+  };
+  /**
+   * A document whose operation reaches `$defs.w` from `position`;
+   * `holder` keeps a second copy of the projection under `definitions`
+   * and `mid` is a `$ref` to it.
+   * @param {any} p @param {any} wrap @param {(w: any) => any} position @param {any} [policy]
+   */
+  const doc = (p, wrap, position, policy) => ({
+    $contract: '0.1',
+    $defs: { proj: p, holder: { definitions: { proj: p } }, mid: ref, w: wrap },
+    operations: { 'a.do': {
+      kind: 'command', output: true, http: { method: 'POST', path: '/a' }, ...position({ $ref: '#/$defs/w' }),
+      ...(policy === undefined ? {} : { policy }),
+    } },
+  });
+
+  for (const [shape, { wrap, at, note }] of Object.entries(shapes)) {
+    it(`${shape}: a required member removed or added behind the $ref reports R15 where the resolved schemas differ, in every position`, () => {
+      for (const [position, p] of Object.entries(positions)) {
+        for (const [from, to] of [[['a', 'b'], ['a']], [['a'], ['a', 'b']]]) {
+          const d = diffContracts(doc(proj(from), wrap, p.op), doc(proj(to), wrap, p.op));
+          onlyClasses(d, ['unknown']);
+          assert.deepStrictEqual(only(d.unknown), {
+            kind: p.kind, op: 'a.do', docPath: `/operations/a.do${p.at}${at}/required`, from, to, rule: 'R15', note: p.note ?? note,
+          }, `${position}: ${from} -> ${to}`);
+        }
+      }
+    });
+  }
+
+  it('an enum narrowed behind the $ref in a union reports R15 at the enum', () => {
+    const { wrap } = shapes['a discriminated oneOf variant'];
+    const d = diffContracts(doc(proj(['a']), wrap, positions.output.op), doc(proj(['a'], ['x']), wrap, positions.output.op));
+    onlyClasses(d, ['unknown']);
+    assert.deepStrictEqual(only(d.unknown), {
+      kind: 'schema-unknown', op: 'a.do', docPath: '/operations/a.do/output/oneOf/0/properties/value/properties/b/enum',
+      from: ['x', 'y'], to: ['x'], rule: 'R15', note: 'oneOf',
+    });
+  });
+
+  it('where the walk models the position the $ref sits in, the change classifies as through a direct $ref', () => {
+    /** @type {[string, any, string][]} */
+    const modeled = [
+      ['additionalProperties', { type: 'object', additionalProperties: ref }, '/additionalProperties/properties/b'],
+      ['a nullable type array', { type: ['object', 'null'], properties: { v: ref } }, '/properties/v/properties/b'],
+      ['a nullable union', { anyOf: [{ type: 'object', properties: { v: ref } }, { type: 'null' }] }, '/anyOf/0/properties/v/properties/b'],
+    ];
+    for (const [name, wrap, at] of modeled) {
+      const out = (/** @type {string[]} */ r) => doc(proj(r), wrap, positions.output.op);
+      const inp = (/** @type {string[]} */ r) => doc(proj(r), wrap, positions['input member'].op);
+      const pick = (/** @type {any} */ c) => [c.rule, c.kind, c.docPath, c.note];
+      const looser = diffContracts(out(['a', 'b']), out(['a']));
+      onlyClasses(looser, ['breaking']);
+      assert.deepStrictEqual(pick(only(looser.breaking)), ['R8', 'output-member-optional', `/operations/a.do/output${at}`, undefined], name);
+      const tighter = diffContracts(out(['a']), out(['a', 'b']));
+      onlyClasses(tighter, ['additive']);
+      assert.deepStrictEqual(pick(only(tighter.additive)), ['R9', 'output-member-guaranteed', `/operations/a.do/output${at}`, undefined], name);
+      const required = diffContracts(inp(['a']), inp(['a', 'b']));
+      onlyClasses(required, ['breaking']);
+      assert.deepStrictEqual(pick(only(required.breaking)), ['R6', 'input-narrowed', `/operations/a.do/input/properties/m${at}`, 'made-required'], name);
+      const optional = diffContracts(inp(['a', 'b']), inp(['a']));
+      onlyClasses(optional, ['additive']);
+      assert.deepStrictEqual(pick(only(optional.additive)), ['R7', 'input-widened', `/operations/a.do/input/properties/m${at}`, 'made-optional'], name);
+    }
+  });
+
+  it('stays empty where the resolved schemas validate alike: the same document, an annotation, a reorder, a $ref inside a const', () => {
+    for (const { wrap } of Object.values(shapes)) {
+      for (const p of Object.values(positions)) {
+        onlyClasses(diffContracts(doc(proj(['a', 'b']), wrap, p.op), doc(proj(['a', 'b']), wrap, p.op)), []);
+        onlyClasses(diffContracts(doc(proj(['a', 'b']), wrap, p.op), doc({ ...proj(['b', 'a'], ['y', 'x']), description: 'moved' }, wrap, p.op)), []);
+      }
+    }
+    // a `const` holds data: a `$ref` member inside it names nothing
+    const quoted = { oneOf: [{ const: { $ref: '#/$defs/proj' } }, { type: 'string' }] };
+    onlyClasses(diffContracts(doc(proj(['a', 'b']), quoted, positions.output.op), doc(proj(['a']), quoted, positions.output.op)), []);
+  });
+
+  it('a recursive definition behind a union terminates: alike is empty, a change deep inside reports once', () => {
+    /** @param {string} leaf */
+    const tree = (leaf) => ({
+      $contract: '0.1',
+      $defs: { node: { type: 'object', properties: { name: { type: leaf }, kids: { type: 'array', items: { $ref: '#/$defs/node' } } } } },
+      operations: { 'a.do': { kind: 'read', output: { anyOf: [{ $ref: '#/$defs/node' }, { type: 'string' }] }, http: { method: 'GET', path: '/a' } } },
+    });
+    onlyClasses(diffContracts(tree('string'), tree('string')), []);
+    const d = diffContracts(tree('string'), tree('integer'));
+    onlyClasses(d, ['unknown']);
+    assert.deepStrictEqual(only(d.unknown), {
+      kind: 'schema-unknown', op: 'a.do', docPath: '/operations/a.do/output/anyOf/0/properties/name/type',
+      from: 'string', to: 'integer', rule: 'R15', note: 'anyOf',
+    });
+  });
+
+  it('a 40-level diamond of $refs compares each pair once (linear, not 2^40)', () => {
+    const depth = 40;
+    /** @param {string} leaf */
+    const diamond = (leaf) => {
+      /** @type {Record<string, any>} */
+      const defs = { [`d${depth}`]: { type: leaf } };
+      for (let i = depth - 1; i >= 0; i--) defs[`d${i}`] = { allOf: [{ $ref: `#/$defs/d${i + 1}` }, { $ref: `#/$defs/d${i + 1}` }] };
+      return { $contract: '0.1', $defs: defs, operations: { 'a.do': { kind: 'read', output: { $ref: '#/$defs/d0' }, http: { method: 'GET', path: '/a' } } } };
+    };
+    onlyClasses(diffContracts(diamond('string'), diamond('string')), []);
+    const d = diffContracts(diamond('string'), diamond('number'));
+    onlyClasses(d, ['unknown']);
+    assert.strictEqual(only(d.unknown).docPath, `/operations/a.do/output${'/allOf/0'.repeat(depth)}/type`);
+  });
+
+  it("under audience: 'all' a server operation's change behind a $ref is reported and marked; the public default skips it", () => {
+    const { wrap } = shapes['a discriminated oneOf variant'];
+    const a = doc(proj(['a', 'b']), wrap, positions.output.op, { audience: 'server' });
+    const b = doc(proj(['a']), wrap, positions.output.op, { audience: 'server' });
+    onlyClasses(diffContracts(a, b), []);
+    const all = diffContracts(a, b, { audience: 'all' });
+    onlyClasses(all, ['unknown']);
+    const c = only(all.unknown);
+    assert.deepStrictEqual([c.rule, c.docPath, c.audience], ['R15', '/operations/a.do/output/oneOf/0/properties/value/required', 'server']);
+  });
+
+  it("the input's own keywords beside its members are compared: an applicator, a bound, the siblings of the $ref it is spelled as", () => {
+    /** @param {any} input @param {any} [defs] */
+    const take = (input, defs = {}) => one({ kind: 'command', input, output: true, http: { method: 'POST', path: '/a' } }, { $defs: defs });
+    const base = { type: 'object', properties: { m: { type: 'string' } } };
+    const bound = diffContracts(take(base), take({ ...base, minProperties: 1 }));
+    onlyClasses(bound, ['unknown']);
+    assert.deepStrictEqual(only(bound.unknown), {
+      kind: 'schema-unknown', op: 'a.b', docPath: '/operations/a.b/input/minProperties', from: undefined, to: 1, rule: 'R15', note: 'minProperties',
+    });
+    const applicator = diffContracts(take({ ...base, allOf: [{ required: ['m'] }] }), take({ ...base, allOf: [] }));
+    onlyClasses(applicator, ['unknown']);
+    assert.deepStrictEqual([only(applicator.unknown).docPath, only(applicator.unknown).note], ['/operations/a.b/input/allOf', 'allOf']);
+    // a sibling of the input's $ref validates the request, though its members are read from the target
+    const In = { In: { type: 'object', properties: { m: { type: 'string' }, n: { type: 'string' } } } };
+    const sibling = diffContracts(take({ $ref: '#/$defs/In', required: ['m'] }, In), take({ $ref: '#/$defs/In', required: ['m', 'n'] }, In));
+    onlyClasses(sibling, ['unknown']);
+    assert.deepStrictEqual([only(sibling.unknown).docPath, only(sibling.unknown).note], ['/operations/a.b/input', '$ref']);
+    onlyClasses(diffContracts(take({ $ref: '#/$defs/In', required: ['m'] }, In), take({ $ref: '#/$defs/In', required: ['m'] }, In)), []);
+    // ... and so does a sibling whose own $ref resolves to a changed schema
+    const extra = (/** @type {string[]} */ required) => ({ ...In, Extra: { required } });
+    const spelled = { $ref: '#/$defs/In', allOf: [{ $ref: '#/$defs/Extra' }] };
+    const behind = diffContracts(take(spelled, extra(['m'])), take(spelled, extra(['m', 'n'])));
+    onlyClasses(behind, ['unknown']);
+    assert.deepStrictEqual(only(behind.unknown), {
+      kind: 'schema-unknown', op: 'a.b', docPath: '/operations/a.b/input/allOf/0/required', from: ['m'], to: ['m', 'n'], rule: 'R15', note: '$ref',
+    });
+    // an R6 keyword on the input itself classifies as on a member
+    const narrowed = diffContracts(take({ ...base, enum: [{ m: 'a' }, { m: 'b' }] }), take({ ...base, enum: [{ m: 'a' }] }));
+    onlyClasses(narrowed, ['breaking']);
+    assert.deepStrictEqual([only(narrowed.breaking).rule, only(narrowed.breaking).kind, only(narrowed.breaking).docPath], ['R6', 'input-narrowed', '/operations/a.b/input/enum']);
+  });
+});
+
+describe("diffContracts — the input's own members read closedness and catch-alls as a nested object's do", () => {
+  /** @param {any} input */
+  const take = (input) => one({ kind: 'command', input, output: true, http: { method: 'POST', path: '/a' } });
+  const m = { type: 'string' };
+  const n = { type: 'number' };
+
+  it('a member removed under unevaluatedProperties: false is refused from an older client: R5 breaking', () => {
+    const d = diffContracts(take({ type: 'object', properties: { m, n }, unevaluatedProperties: false }),
+      take({ type: 'object', properties: { m }, unevaluatedProperties: false }));
+    onlyClasses(d, ['breaking']);
+    assert.deepStrictEqual(only(d.breaking), { kind: 'input-member-removed', op: 'a.b', docPath: '/operations/a.b/input/properties/n', from: 'n', rule: 'R5' });
+  });
+
+  it('a member removed or added beside a catch-all that constrains it is judged by the catch-all: R15, never "ignored, not validated"', () => {
+    for (const [keyword, catchAll] of /** @type {[string, any][]} */ ([
+      ['additionalProperties', { additionalProperties: { type: 'string' } }],
+      ['patternProperties', { patternProperties: { '^n': { type: 'string' } } }],
+      ['propertyNames', { propertyNames: { maxLength: 4 } }],
+    ])) {
+      const removed = diffContracts(take({ type: 'object', properties: { m, n }, ...catchAll }), take({ type: 'object', properties: { m }, ...catchAll }));
+      onlyClasses(removed, ['unknown']);
+      assert.deepStrictEqual(only(removed.unknown), {
+        kind: 'schema-unknown', op: 'a.b', docPath: '/operations/a.b/input/properties/n', from: 'n', to: 'n', rule: 'R15', note: keyword,
+      });
+      const added = diffContracts(take({ type: 'object', properties: { m }, ...catchAll }), take({ type: 'object', properties: { m, n }, ...catchAll }));
+      onlyClasses(added, ['unknown']);
+      assert.deepStrictEqual([only(added.unknown).docPath, only(added.unknown).note], ['/operations/a.b/input/properties/n', keyword]);
+    }
+    // a required member added is refused from an older client whatever the catch-all says
+    const required = diffContracts(take({ type: 'object', properties: { m }, additionalProperties: { type: 'string' } }),
+      take({ type: 'object', properties: { m, n }, required: ['n'], additionalProperties: { type: 'string' } }));
+    onlyClasses(required, ['breaking']);
+    assert.deepStrictEqual([only(required.breaking).rule, only(required.breaking).kind], ['R4', 'input-required-added']);
+  });
+});

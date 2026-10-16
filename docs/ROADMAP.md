@@ -285,6 +285,16 @@ costs a descriptor plus examples and no UI code at all.
   the current documented lifetime is in-memory, reset on committed model or
   seed changes. Reusing the data page's shared database would break isolation.
 
+## @jarenjs/contract
+
+- [ ] **`diffContracts` reports any change inside an applicator as R15
+  `unknown`, inline or behind a `$ref`,** so a `--fail-on breaking` gate alone
+  passes a required member dropped from a `oneOf` variant. A variance rule for
+  the monotone positions (`allOf`, `anyOf`, `then`/`else`, `dependentSchemas`,
+  `prefixItems`, and a `oneOf` whose branches are provably disjoint, e.g. by a
+  required `const` discriminator) would class such a change breaking/additive;
+  `not`, `if` and an undiscriminated `oneOf` stay R15.
+
 ## @jarenjs/linq & @jarenjs/db — the data pair
 
 The fluent front door and the SQLite document store shipped as a pair;

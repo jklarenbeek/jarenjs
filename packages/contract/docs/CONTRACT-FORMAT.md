@@ -2504,7 +2504,14 @@ a stable slug, `rule` names the row, and `docPath` points into the
 document that carries the change — into `a` for a removal, into `b`
 otherwise — composed over the *resolved* structure, so a constraint
 reached through a bare `{ "$ref": "#/$defs/X" }` hop reports the path a
-validator error would name.
+validator error would name. Equal text is not equal validation: a `$ref`
+names a location, not a schema. So wherever the walk would otherwise
+compare two spellings by their text — an applicator, any keyword it does
+not model, a `$ref` beside siblings, an error's schema — it compares what
+every same-document `$ref` inside resolves to on each side (through
+`$defs`, `definitions` and chains of `$ref`s; a recursive definition
+terminates), and two spellings whose resolved schemas differ report the
+change at the first pointer where they do.
 
 | # | Change | Class |
 |---|---|---|
@@ -2512,7 +2519,7 @@ validator error would name.
 | R2 | operation added | additive |
 | R3 | `kind`, `http.method`, `http.path` (shape — variable *names* are not shape), `http.status`, `http.media` (opaqueness included), a member's `http.in` location, or `http.body` changed | breaking; an `http.media` respelled to the same type/subtype — its case or its parameters — is neutral (`media-respelled`), because the binding matches media by type/subtype alone (§7.2 step 5) |
 | R4 | input: a member added to `required` (or a new required member) | breaking |
-| R5 | input: a member removed while the new input schema is `additionalProperties: false` (or the input removed entirely) | breaking; otherwise `neutral` with a note (the member is now ignored, not validated) |
+| R5 | input: a member removed while the new input schema is closed — `additionalProperties: false` or `unevaluatedProperties: false` — (or the input removed entirely) | breaking; beside a catch-all that constrains it, R15; otherwise `neutral` with a note (the member is now ignored, not validated) |
 | R6 | input: a member's schema narrowed (type set shrinks, `enum`/`const` shrinks, `maximum` lowers, `minimum` rises, `maxLength` lowers, `minLength` rises, `pattern` added) | breaking |
 | R7 | input: a member's schema widened (the inverse of R6), an optional member added, or a member dropped from `required` | additive |
 | R8 | output: a member removed, made optional (dropped from `required`), or widened (type set grows, `enum`/`const` grows, a bound relaxes, a `pattern` dropped), or a member added to an object that was closed (`additionalProperties: false` or `unevaluatedProperties: false`) | breaking |
@@ -2522,7 +2529,7 @@ validator error would name.
 | R12 | `policy.idempotency` `none/optional → required` (a client must now send a key), or `required/optional → none` (a key an old client still sends, and retries under, is no longer read) | breaking (`idempotency-required`, `idempotency-dropped`); `required → optional` and `none → optional` additive (`idempotency-relaxed`) |
 | R13 | `policy.task`, `policy.retry`, `policy.cache`, `policy.revision`, `policy.stream` (a resume policy, heartbeat or patch bound) or `doc` changed | neutral; a `policy.stream.heartbeatMs` that rises is breaking (`heartbeat-slowed`) — an older client arms its watchdog from its own contract and reports the stream lost (`JC2094`) after twice the interval it expects |
 | R14 | `policy.audience` `public → server` | breaking; the reverse additive |
-| R15 | a schema construct the checker does not model differs between the two (`anyOf`/`oneOf`/`allOf`/`if`/`not`/`$dynamicRef`, a `format`, a *changed* `pattern`, an external or sibling-carrying `$ref`, a changed error `details` schema, …); a constraint, member or requirement present on one side only while the other carries such an applicator (it may have moved inside); a member added or removed beside a catch-all that constrains it (`additionalProperties` or `unevaluatedProperties` as a schema, `patternProperties`, `propertyNames`) | **unknown** — reported, never silently classed |
+| R15 | a schema construct the checker does not model differs between the two (`anyOf`/`oneOf`/`allOf`/`if`/`not`/`$dynamicRef`, a `format`, a *changed* `pattern`, an external or sibling-carrying `$ref`, a changed error `details` schema, …), including one whose text is unchanged while a same-document `$ref` inside it resolves to a schema that changed — reported at the first resolved pointer where the two differ; a constraint, member or requirement present on one side only while the other carries such an applicator (it may have moved inside); a member added or removed beside a catch-all that constrains it (`additionalProperties` or `unevaluatedProperties` as a schema, `patternProperties`, `propertyNames`) | **unknown** — reported, never silently classed |
 | R16 | a nullable node respelled between `type: [T, 'null']` and a two-branch `anyOf`/`oneOf` with a null-only branch, where both spellings accept exactly the same values | neutral (`schema-respelled`) — the bytes and the revision move, the accepted values do not; a reorder inside one spelling (a type array's items, a union's branches) is no respelling and is silent |
 
 Riders the rows carry:
@@ -2578,7 +2585,23 @@ Riders the rows carry:
   constrained optional member to an open nested object narrows it;
   removing one from an open object widens it); the *top-level* input
   members classify by R4/R5/R7, and output members by R8/R9 at every
-  depth.
+  depth. The input's other keywords — an applicator, a bound such as
+  `minProperties`, an R6 keyword on the input itself, the siblings of the
+  `$ref` the input is spelled as — take the same walk as any schema node.
+  **Upgrading:** a pair of contracts that differed only behind a
+  same-document `$ref` (inside an applicator or a keyword the walk does
+  not model, in an error schema, under `additionalProperties`, below a
+  nullable node), or only in the input's own keywords, used to diff empty.
+  It now reports the change: R15 `unknown` where the position is not
+  modeled, so a `--fail-on unknown` gate that passed such a pair now
+  fails; classified where it is, so a `--fail-on breaking` gate fails on
+  a breaking one. A `--fail-on breaking` gate alone still passes a change
+  inside an applicator — it is `unknown`, never a guessed direction.
+  The input's own members now read closedness and catch-alls as a nested
+  object's do: a member removed under `unevaluatedProperties: false`,
+  once a neutral R5, is breaking R5 (the server refuses it), and a member
+  removed, or added as optional, beside a catch-all that constrains it,
+  once a neutral R5 or an additive R7, is R15.
 - **Audience is the compatibility surface.** Operations whose
   `policy.audience` is `server` on **both** sides are skipped entirely;
   an audience flip is R14 and, for public consumers, subsumes the

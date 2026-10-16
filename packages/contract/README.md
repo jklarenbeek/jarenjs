@@ -673,7 +673,9 @@ const { breaking, additive, neutral, unknown } = diffContracts(v1, v2);
 //   unknown  — what the checker does not model (anyOf/if/not, a CHANGED
 //              pattern, an external $ref, an error details schema, a
 //              constraint moved into an applicator, a member beside a
-//              catch-all): REPORTED, never silently classed
+//              catch-all — or any of these unchanged as text while a $ref
+//              inside resolves to a changed schema): REPORTED, never
+//              silently classed
 // each Change = { kind, op, docPath, from?, to?, rule } — the docPath a
 // validator error would name, $refs resolved
 
