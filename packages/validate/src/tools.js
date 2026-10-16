@@ -80,16 +80,30 @@ export function isOfSchemaType(schema, type) {
 }
 
 /**
- * True when the schema is an object whose reference keyword is a string
- * with something in it.
+ * True when the schema is an object whose reference keyword is a string:
+ * a blank one is the empty URI reference (see {@link schemaReference}).
  * @param {any} schema
  * @param {'$ref'|'$recursiveRef'|'$dynamicRef'} keyword
  * @returns {boolean}
  */
 export function hasSchemaReference(schema, keyword) {
   return isObjectClass(schema)
-    && isStringType(schema[keyword])
-    && !isStringWhiteSpace(schema[keyword]);
+    && isStringType(schema[keyword]);
+}
+
+/**
+ * The reference a schema object's `$ref` or `$dynamicRef` resolves as. A
+ * blank one is the empty URI reference, which names the current resource,
+ * as `#` does (the white space around a reference is not part of it);
+ * resolving it as `#` keeps the fragment of a base that holds a pointer
+ * out of the target.
+ * @param {Record<string, any>} schema - A schema object for which {@link hasSchemaReference} holds
+ * @param {'$ref'|'$dynamicRef'} keyword
+ * @returns {string}
+ */
+export function schemaReference(schema, keyword) {
+  const ref = schema[keyword];
+  return isStringWhiteSpace(ref) ? '#' : ref;
 }
 
 /**

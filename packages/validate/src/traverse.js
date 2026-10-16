@@ -1,6 +1,7 @@
 import {
   isBoolOrObjectClass,
   hasSchemaReference,
+  schemaReference,
   hasRefSiblings,
   REF_SIBLING_KEYWORDS,
 } from './tools.js';
@@ -32,6 +33,7 @@ import {
   detectSchemaDraft,
   admitsPropertyDependencies,
 } from './schema-keywords.js';
+import { admitsDynamicReference, namesKnownDraft } from './dynamic-ref.js';
 
 import { SchemaCompileError } from './errors.js';
 
@@ -181,9 +183,13 @@ function parseJsonPointer(refUri, baseUri, opts) {
   const [leftUri, search] = uri.split('?');
 
   if (!isStringWhiteSpace(fragment)) {
-    // a json pointer
-    if (fragment.startsWith('/'))
-      return new JsonPointer(`${leftUri}#${fragment}`, search, `${leftUri}#`, fragment);
+    // a json pointer, which a URI fragment percent-encodes: a fragment that
+    // decodes to `/…` is one (`#%2F$defs%2Fx` is `#/$defs/x`), and its
+    // `%2F`s separate tokens as its `/`s do; every other escape is decoded
+    // once, with the token that holds it.
+    const pointer = fragment.replace(/%2f/gi, '/');
+    if (pointer.startsWith('/'))
+      return new JsonPointer(`${leftUri}#${pointer}`, search, `${leftUri}#`, pointer);
     // or a plain name (an `$anchor`, a `$dynamicAnchor`, a draft-07 `$id:
     // '#name'`), keyed as the URI spells it: an anchor and a reference to
     // it are spelled alike, whatever characters the name holds.
@@ -224,6 +230,9 @@ function atFragment(uri) {
  * @property {Set<string>} lateTargets - The targets such a `$ref` names only
  *   when read from 2019-09 on: a compile that reads it before 2019-09 does
  *   not need them
+ * @property {WeakSet<object>} foreign - The places whose nearest `$schema`
+ *   names no draft this package knows: their dynamic references are read as
+ *   where no draft is declared
  */
 
 /**
@@ -249,8 +258,9 @@ function keptRefBase(places, schema, reading) {
  * @param {any} schema - The document
  * @param {JsonPointerOptions} [opts]
  * @param {(target: JsonPointer, location: string, undecided: boolean) => void} [onReference] -
- *   Offered the resolved target of every `$ref` and `$dynamicRef` the walk
- *   reaches, with the reference's location in the document as a URI
+ *   Offered the resolved target of every `$ref` the walk reaches, and of
+ *   every `$dynamicRef` whose place declares a draft that defines it (or
+ *   none), with the reference's location in the document as a URI
  *   fragment (`#/properties/a/%24ref`), and whether it is the target a
  *   `$ref` beside an `$id` names in a place that declares no draft, read
  *   under `defaultDraft` before 2019-09
@@ -277,8 +287,11 @@ export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPoi
 
   const { id: rootUri } = createJsonPointer(schema.$id, baseUri, opts, '$id', '#/%24id');
   if (!isStringType(schema.$id) || isStringWhiteSpace(schema.$id)) {
-    if (schemas.has(rootUri) && schemas.get(rootUri) !== schema)
-      throw new Error(`Schema '${rootUri}' already exists`);
+    // A URI only a reference names (a `null` placeholder) holds no schema.
+    const held = schemas.get(rootUri);
+    if (held != null && held !== schema)
+      throw new SchemaCompileError('JK0012',
+        `the document has no $id, and the URI it is read under, '${rootUri}', names another schema the validator holds; give it an $id of its own`);
 
     schemas.set(rootUri, schema);
   }
@@ -293,32 +306,42 @@ export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPoi
     if (onFault === undefined) throw error;
     onFault(error);
   };
+  /** Where this walk registered each identifier: the keyword declaring it. */
+  const declared = new Map();
   /**
    * Register one identifier of the document: a second place declaring it
-   * is refused.
+   * is refused (`JK0012`), naming both.
    * @param {string} id
    * @param {object} obj - The place declaring it
    * @param {string} path
-   * @param {string} base
+   * @param {string} keyword - The keyword declaring it there
    * @returns {boolean} Whether it was registered
    */
-  const declare = (id, obj, path, base) => {
+  const declare = (id, obj, path, keyword) => {
     const held = schemas.get(id);
+    const place = encodeJsonPointerPath(path, keyword);
     if (held != null && held !== obj) {
-      fault(new Error(`Schema '${id}' for path '${path}' in '${base}' already exists`));
+      const first = declared.get(id);
+      fault(new SchemaCompileError('JK0012', first === undefined
+        ? `${keyword} declares '${id}', which names another schema the validator holds; give one of them another name`
+        : `'${id}' is declared twice (first at '${first}'); give one of them another name`, place));
       return false;
     }
     schemas.set(id, obj);
+    if (!declared.has(id)) declared.set(id, place);
     return true;
   };
 
-  const queue = [{ obj: schema, base: rootUri, path: '#', draft: null }];
+  const queue = [{ obj: schema, base: rootUri, path: '#', draft: null, foreign: false }];
   while (queue.length > 0) {
     // @ts-ignore
-    const { obj, base, path, draft: inheritedDraft } = queue.shift();
+    const { obj, base, path, draft: inheritedDraft, foreign: inheritedForeign } = queue.shift();
     // The draft a document declares is inherited by everything below it.
     const draft = isStringType(obj.$schema) ? detectSchemaDraft(obj) : inheritedDraft;
     places?.drafts.set(obj, draft);
+    const foreign = isStringType(obj.$schema) ? !namesKnownDraft(obj) : inheritedForeign;
+    if (foreign) places?.foreign.add(obj);
+    else places?.foreign.delete(obj);
 
     // Handle $id (draft 6+) or id (draft 4) for identifying subschemas
     const idKeyword = isStringType(obj.$id) ? obj.$id : isStringType(obj.id) ? obj.id : undefined;
@@ -333,7 +356,7 @@ export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPoi
         fault(e);
         continue;
       }
-      if (!declare(id, obj, path, base))
+      if (!declare(id, obj, path, idName))
         continue;
 
       // CHECK: Also store under alternate ID (with/without # suffix) for absolute URIs only
@@ -350,9 +373,11 @@ export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPoi
     else
       baseUri = base;
 
-    if (isStringType(obj.$anchor) && !isStringWhiteSpace(obj.$anchor)) {
+    // Where anchors are not allowed, a plain-name fragment names the
+    // document: an anchor declares nothing.
+    if (opts.anchorsAllowed == true && isStringType(obj.$anchor) && !isStringWhiteSpace(obj.$anchor)) {
       const { id } = createJsonPointer(`#${obj.$anchor}`, baseUri, opts);
-      if (!declare(id, obj, path, base))
+      if (!declare(id, obj, path, '$anchor'))
         continue;
 
       // we reset the baseUri when the $anchor property is set.
@@ -361,17 +386,17 @@ export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPoi
     }
 
     // Handle $dynamicAnchor (draft 2020-12) - similar to $anchor but for $dynamicRef
-    if (isStringType(obj.$dynamicAnchor) && !isStringWhiteSpace(obj.$dynamicAnchor)) {
+    if (opts.anchorsAllowed == true && isStringType(obj.$dynamicAnchor) && !isStringWhiteSpace(obj.$dynamicAnchor)) {
       const { id } = createJsonPointer(`#${obj.$dynamicAnchor}`, baseUri, opts);
-      if (!declare(id, obj, path, base))
+      if (!declare(id, obj, path, '$dynamicAnchor'))
         continue;
 
       // Note: $dynamicAnchor does NOT change the baseUri like $anchor does
       // It's only used for $dynamicRef resolution
     }
 
-    if (onReference !== undefined && hasSchemaReference(obj, '$dynamicRef'))
-      onReference(createJsonPointer(obj.$dynamicRef, baseUri, opts, '$dynamicRef', encodeJsonPointerPath(path, '$dynamicRef')), encodeJsonPointerPath(path, '$dynamicRef'), false);
+    if (onReference !== undefined && hasSchemaReference(obj, '$dynamicRef') && admitsDynamicReference('$dynamicRef', foreign ? null : draft))
+      onReference(createJsonPointer(schemaReference(obj, '$dynamicRef'), baseUri, opts, '$dynamicRef', encodeJsonPointerPath(path, '$dynamicRef')), encodeJsonPointerPath(path, '$dynamicRef'), false);
 
     // Before 2019-09 a `$ref` replaces its schema object: an `$id` beside it
     // names the object but does not set the base the reference resolves
@@ -379,9 +404,10 @@ export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPoi
     const reading = draft ?? defaultDraft;
     const keepsBase = hasId && reading !== null && reading < 2019;
     let target;
-    if (isStringType(obj.$ref) && !isStringWhiteSpace(obj.$ref)) {
+    const reference = hasSchemaReference(obj, '$ref') ? schemaReference(obj, '$ref') : undefined;
+    if (reference !== undefined) {
       try {
-        target = createJsonPointer(obj.$ref, keepsBase ? base : baseUri, opts, '$ref', encodeJsonPointerPath(path, '$ref'));
+        target = createJsonPointer(reference, keepsBase ? base : baseUri, opts, '$ref', encodeJsonPointerPath(path, '$ref'));
       }
       catch (e) {
         fault(e);
@@ -396,11 +422,11 @@ export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPoi
       const undecided = hasId && reading === null;
       if (undecided) places?.undecidedBases.set(obj, base);
       else places?.undecidedBases.delete(obj);
-      if (undecided && createJsonPointer(obj.$ref, base, opts).id !== ref) places?.lateTargets.add(ref);
+      if (undecided && createJsonPointer(reference, base, opts).id !== ref) places?.lateTargets.add(ref);
       else places?.lateTargets.delete(ref);
       // The latest walk to name a target decides whether a refusal to
       // resolve it says why the `$id` was not its base.
-      if (keepsBase && createJsonPointer(obj.$ref, baseUri, opts, '$ref', encodeJsonPointerPath(path, '$ref')).id !== ref) places?.keptRefs.add(ref);
+      if (keepsBase && createJsonPointer(reference, baseUri, opts, '$ref', encodeJsonPointerPath(path, '$ref')).id !== ref) places?.keptRefs.add(ref);
       else places?.keptRefs.delete(ref);
       if (!schemas.has(ref))
         schemas.set(ref, null);
@@ -434,13 +460,13 @@ export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPoi
                 throw new Error(`${nextpath} is not a schema`);
             }
 
-            queue.push({ obj: item, base: baseUri, path: nextpath, draft });
+            queue.push({ obj: item, base: baseUri, path: nextpath, draft, foreign });
           }
         }
         else {
           const nextpath = encodeJsonPointerPath(path, key);
 
-          queue.push({ obj: value, base: baseUri, path: nextpath, draft });
+          queue.push({ obj: value, base: baseUri, path: nextpath, draft, foreign });
         }
       }
       // or is the property a map of key and schema objects?
@@ -459,7 +485,7 @@ export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPoi
               throw new Error(`${nextpath} is not a schema`);
           }
 
-          queue.push({ obj: item, base: baseUri, path: nextpath, draft });
+          queue.push({ obj: item, base: baseUri, path: nextpath, draft, foreign });
         }
       }
       // or a map of maps (member name -> member value -> schema objects)?
@@ -482,7 +508,7 @@ export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPoi
                 throw new Error(`${nextpath} is not a schema`);
             }
 
-            queue.push({ obj: item, base: baseUri, path: nextpath, draft });
+            queue.push({ obj: item, base: baseUri, path: nextpath, draft, foreign });
           }
         }
       }
@@ -752,7 +778,7 @@ export function resolveRefSchemaDeep(schemas, baseUri, refschema, opts = new Tra
     if (hasSchemaReference(item, '$ref')) {
       if (item !== refschema && hasRefSiblings(item, opts.propertyDependencies === true))
         return { id: base, schema: item };
-      const ref = item.$ref;
+      const ref = schemaReference(item, '$ref');
       const { id, schema } = resolveRefSchemaShallow(schemas, ref, base, opts);
 
       // A hop back to an id already visited is a loop of pure references: no
@@ -788,7 +814,26 @@ export function resolveRefSchemaDeep(schemas, baseUri, refschema, opts = new Tra
  * @property {{ formatAssertion?: boolean|null, contentValidation?: boolean|null,
  *   propertyDependencies?: boolean|null }} options - the compilation's validation options
  * @property {Record<string, any>} formats - the format compilers registered on the validator
+ * @property {WeakMap<object, number|null>} [drafts] - the draft each walked
+ *   schema object's place declares ({@link SchemaPlaces}); a place it does
+ *   not hold reads every keyword
+ * @property {WeakSet<object>} [foreign] - the places whose `$schema` names no
+ *   draft this package knows ({@link SchemaPlaces})
  */
+
+/**
+ * Whether a schema object applies its dynamic reference, read the way the
+ * compiler reads it: one is written, and the draft its place declares
+ * defines the keyword (or it declares none).
+ * @param {Record<string, any>} schema
+ * @param {'$recursiveRef'|'$dynamicRef'} keyword
+ * @param {InstanceReading} reading
+ * @returns {boolean}
+ */
+function appliesDynamicReference(schema, keyword, reading) {
+  return hasSchemaReference(schema, keyword)
+    && admitsDynamicReference(keyword, reading.foreign?.has(schema) ? null : reading.drafts?.get(schema) ?? null);
+}
 
 // Keywords applying one subschema to members or items: with a `true` or `{}`
 // subschema they pass every instance.
@@ -829,7 +874,7 @@ function canFail(key, value, reading) {
  */
 function passesEverything(schema, reading) {
   if (schema === true) return true;
-  if (!isObjectClass(schema) || hasSchemaReference(schema, '$ref') || hasSchemaReference(schema, '$recursiveRef'))
+  if (!isObjectClass(schema) || hasSchemaReference(schema, '$ref') || appliesDynamicReference(schema, '$recursiveRef', reading))
     return false;
   for (const key of Object.keys(schema)) {
     if (canFail(key, schema[key], reading)) return false;
@@ -876,7 +921,8 @@ function firstReachedMember(key, members, reading) {
 function firstInPlaceSubschema(schema, reading) {
   let first;
   for (const key of Object.keys(schema)) {
-    if (key === '$recursiveRef') {
+    if (key === '$recursiveRef' || key === '$dynamicRef') {
+      if (!appliesDynamicReference(schema, key, reading)) continue;
       if (first !== undefined) return undefined;
       first = [key, schema[key]];
       continue;
@@ -893,7 +939,6 @@ function firstInPlaceSubschema(schema, reading) {
     else if (key === 'not') first = ['not', schema.not];
     else if (key === 'if' && (Object.hasOwn(schema, 'then') || Object.hasOwn(schema, 'else')))
       first = ['if', schema.if];
-    else if (key === '$dynamicRef') first = [key, schema[key]];
     else return undefined;
   }
   return first;
@@ -954,12 +999,12 @@ export function assertRootReadsInstance(schemas, rootId, root, reading, opts = n
 
     let ref;
     if (hasSchemaReference(schema, '$ref'))
-      ref = schema.$ref;
+      ref = schemaReference(schema, '$ref');
     else {
       const first = firstInPlaceSubschema(schema, reading);
       if (first === undefined) return;
       if (first[0] === '$dynamicRef' || first[0] === '$recursiveRef') {
-        const dynamic = first[1];
+        const dynamic = first[0] === '$dynamicRef' ? schemaReference(schema, '$dynamicRef') : first[1];
         if (resourceOf(base) !== rootResource || typeof dynamic !== 'string' || !dynamic.startsWith('#')
           || (first[0] === '$recursiveRef' && dynamic !== '#'))
           return;

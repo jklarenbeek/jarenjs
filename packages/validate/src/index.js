@@ -29,6 +29,7 @@ import {
 import {
   isBoolOrObjectClass,
   hasSchemaReference,
+  schemaReference,
   hasUnevaluatedPropertiesCoverage,
   hasUnevaluatedItemsCoverage,
   EvalLog,
@@ -38,6 +39,7 @@ import {
 import { wrapUnevaluated } from './unevaluated.js';
 import { registerFormatCompiler, registerFormatCompilers } from './format.js';
 import { mergeMap } from '@jarenjs/core/object';
+import { isStringWhiteSpace } from '@jarenjs/core/string';
 import { hasRecursiveAnchor, getDynamicAnchorName, collectDynamicAnchors, collectDynamicAnchorsDeep } from './dynamic-ref.js';
 import { isRecursiveQueryCompileError } from './query-keyword.js';
 import { boundReference, assertReferenceDepth, assertOutputFormat, REFERENCE_DEPTH_CEILING } from './errors.js';
@@ -325,6 +327,19 @@ export class ValidationOptions {
 function placeDraft(places, schemas, path, schema) {
   const drafts = places?.drafts;
   if (drafts === undefined) return null;
+  return drafts.get(placeOf(drafts, schemas, path, schema)) ?? null;
+}
+
+/**
+ * The schema object the walks recorded for a schema: itself, or, for a
+ * flattened copy, the object at its location.
+ * @param {WeakMap<object, unknown>} drafts - What the walks recorded per place
+ * @param {Map<string, any>} schemas
+ * @param {string} path
+ * @param {any} schema
+ * @returns {any}
+ */
+function placeOf(drafts, schemas, path, schema) {
   let place = schema;
   if (!drafts.has(place)) {
     const pointer = path.indexOf('#/');
@@ -332,7 +347,7 @@ function placeDraft(places, schemas, path, schema) {
     if (pointer !== -1)
       for (const part of decodeJsonPointerPath(path.slice(pointer + 1))) place = place?.[part];
   }
-  return drafts.get(place) ?? null;
+  return place;
 }
 
 /**
@@ -745,6 +760,19 @@ export class ValidationRoot {
   }
 
   /**
+   * Whether a schema's place lies under a `$schema` that names no draft this
+   * package knows: its dynamic references are read there as where no draft
+   * is declared. An internal collaborator of the compiler.
+   * @param {string} path - The schema's location
+   * @param {any} schema - The schema, or a copy of it
+   * @returns {boolean}
+   */
+  inForeignDialect(path, schema) {
+    const places = this.#places;
+    return places !== undefined && places.foreign.has(placeOf(places.drafts, this.#schemas, path, schema));
+  }
+
+  /**
    * Checks if an object exists at the given path without creating it.
    * @param {string} path - The URI path to check
    * @returns {ValidationObject|null|undefined} The existing object, null if marked unresolved, or undefined if not known
@@ -1055,6 +1083,25 @@ const REF_STEP = Object.freeze(['$ref']);
  */
 const LOOP_READINGS = Object.freeze([null, 7]);
 
+/**
+ * Whether a document holds a blank `$ref` anywhere in it (a value that
+ * merely looks like a schema object counts too).
+ * @param {unknown} document
+ * @returns {boolean}
+ */
+function holdsBlankReference(document) {
+  const stack = [document];
+  const seen = new Set();
+  while (stack.length > 0) {
+    const node = stack.pop();
+    if (node === null || typeof node !== 'object' || seen.has(node)) continue;
+    seen.add(node);
+    if (!Array.isArray(node) && hasSchemaReference(node, '$ref') && isStringWhiteSpace(node.$ref)) return true;
+    for (const value of Object.values(node)) stack.push(value);
+  }
+  return false;
+}
+
 
 /**
  * Whether a schema id lies in the document being compiled. A loop among
@@ -1111,7 +1158,7 @@ export class ValidationObject {
     const refBase = draftVersion >= 2019
       ? (self.baseUri || baseUri || path)
       : (baseUri || path);
-    const { id: ref } = createJsonPointer(schema.$ref, refBase, root.traverse, '$ref', keywordLocation(path, '$ref'));
+    const { id: ref } = createJsonPointer(schemaReference(schema, '$ref'), refBase, root.traverse, '$ref', keywordLocation(path, '$ref'));
     // A schema that references itself decides nothing: validating it re-enters
     // the same validator on the same instance until the stack runs out.
     if (ref === path)
@@ -1256,7 +1303,7 @@ export class ValidationObject {
         catch (e) {
           // A draft-07 `$ref` that resolves to nothing, whose `$id` would
           // have named another target, says why.
-          throw e?.code === 'JK0009' && createJsonPointer(boundSchema.$ref, self.baseUri || boundRefBase, rootRef.traverse).id !== boundRef
+          throw e?.code === 'JK0009' && createJsonPointer(schemaReference(boundSchema, '$ref'), self.baseUri || boundRefBase, rootRef.traverse).id !== boundRef
             ? unresolvedReference(boundRef, true)
             : e;
         }
@@ -1458,6 +1505,15 @@ export class ValidationObject {
     return this.#declaredDraft;
   }
 
+  /**
+   * @returns {number|null} The draft its dynamic references (`$recursiveRef`,
+   *   `$dynamicRef`) are read in: the declared draft, or null under a
+   *   `$schema` that names no draft this package knows
+   */
+  get dynamicReferenceDraft() {
+    return this.#declaredDraft !== null && this.#root.inForeignDialect(this.#path, this.#schema) ? null : this.#declaredDraft;
+  }
+
 /**
    * Creates an error handler function for validation failures.
    * @param {any} expected - The expected value that failed validation
@@ -1655,9 +1711,17 @@ export class ValidatorOptions {
 /**
  * The object a compiled validator returns when `collectErrors` is enabled,
  * discriminated by `valid`: a valid instance answers no errors. It carries
- * no copy of the instance, so it cannot narrow the instance's type; a
- * caller that wants `data is T` compiles the boolean mode's type guard.
+ * no copy of the instance, so it cannot narrow the instance's type: the
+ * collector's `narrow` answers {@link NarrowedResult}, which does.
  * @typedef {{ valid: true, errors: [] } | { valid: false, errors: import("./messages.js").ValidationError[] }} ValidationResultObject
+ */
+
+/**
+ * What a collect-mode validator's `narrow(data)` returns: its
+ * {@link ValidationResultObject}, whose valid branch also carries the
+ * instance as `value`, typed `T` (the instance itself, not a copy).
+ * @template [T=unknown]
+ * @typedef {{ valid: true, value: T, errors: [] } | { valid: false, errors: import("./messages.js").ValidationError[] }} NarrowedResult
  */
 
 /**
@@ -1669,8 +1733,12 @@ export class ValidatorOptions {
  */
 
 /**
- * A compiled validator in collect-errors mode.
- * @typedef {(data: unknown) => ValidationResultObject} CompiledCollector
+ * A compiled validator in collect-errors mode. Called, it answers
+ * `{ valid, errors }`; its `narrow` answers the same validation with the
+ * instance on the valid branch, typed `T`, so `if (r.valid) r.value`
+ * reads the instance as `T` with no type guard of the caller's own.
+ * @template [T=unknown]
+ * @typedef {((data: unknown) => ValidationResultObject) & { readonly narrow: (data: unknown) => NarrowedResult<T> }} CompiledCollector
  */
 
 /**
@@ -1725,7 +1793,7 @@ export class JarenValidator {
   /** @type {TraverseOptions} The traversal options, carrying the `propertyDependencies` switch of the validation options */
   #traverse = new TraverseOptions();
   /** @type {import('./traverse.js').SchemaPlaces} What the walks read at each registered schema's place */
-  #places = { drafts: new WeakMap(), refBases: new WeakMap(), keptRefs: new Set(), undecidedBases: new WeakMap(), lateTargets: new Set() };
+  #places = { drafts: new WeakMap(), refBases: new WeakMap(), keptRefs: new Set(), undecidedBases: new WeakMap(), lateTargets: new Set(), foreign: new WeakSet() };
 
   /**
    * Creates a new JarenValidator instance.
@@ -1877,12 +1945,16 @@ export class JarenValidator {
    * document that every compile would read. A `$ref` beside an `$id` in a
    * document that declares no draft is read two ways (the `$id` sets its
    * base from 2019-09 on, not before): a loop only one reading makes is
-   * refused by the compile that reads it so (`JK0001`), not here.
+   * refused by the compile that reads it so (`JK0001`), not here. In a
+   * document holding a blank `$ref` a loop is refused by the compile that
+   * reaches it too: such a document registered when a blank `$ref` was read
+   * as none, and what else it holds answers.
    * @param {string} documentKey - The key the document was registered under
    */
   #assertNoRefLoops(documentKey) {
     const hash = documentKey.indexOf('#');
     const prefix = hash === -1 ? documentKey : documentKey.slice(0, hash);
+    if (holdsBlankReference(this.#schemas.get(documentKey))) return;
     for (const [key, entry] of this.#schemas) {
       if (!key.startsWith(prefix) || !isObjectClass(entry) || !hasSchemaReference(entry, '$ref'))
         continue;
@@ -2020,6 +2092,13 @@ export class JarenValidator {
 
     Object.defineProperty(jarenValidateSchema, "errors", {
       get: function () { return root.errors }
+    })
+    // The same answer, carrying the instance on its valid branch.
+    Object.defineProperty(jarenValidateSchema, "narrow", {
+      value: function narrow(data) {
+        const result = jarenValidateSchema(data);
+        return result.valid ? { valid: true, value: data, errors: result.errors } : result;
+      }
     })
 
     return jarenValidateSchema;
@@ -2268,14 +2347,15 @@ export class JarenValidator {
    * compiles the schema structure, and returns a function that validates data.
    * The return type follows the instance's `collectErrors` setting: a type
    * guard over `unknown` by default, or a function producing
-   * `{ valid, errors }` when errors are collected. Jaren does not infer `T`
+   * `{ valid, errors }` when errors are collected, whose `narrow` answers
+   * the same with the instance, typed `T`, on the valid branch. Jaren does not infer `T`
    * from the schema — the caller asserts what the schema describes, which is
    * what a checked contract wrapper wants; pair it with a schema-to-type
    * generator if you need the shape derived mechanically.
    * @template [T=unknown]
    * @param {JSONSchemaLike | boolean} schema - The schema to compile
    * @param {(JSONSchemaLike | boolean)[]} [schemas] - Additional schemas to reference during compilation
-   * @returns {TOutput extends OutputFormat<infer R> ? (data: unknown) => R : TCollect extends true ? CompiledCollector : CompiledPredicate<T>} A validation function;
+   * @returns {TOutput extends OutputFormat<infer R> ? (data: unknown) => R : TCollect extends true ? CompiledCollector<T> : CompiledPredicate<T>} A validation function;
    *   it throws `SchemaRuntimeError` `JK2001` for an instance that nests more than 256 schema
    *   references (a deep instance, or one that reaches a loop that never reads it), and
    *   `SchemaCompileError` `JK0008`/`JK0009` when it first reaches a reference resolved on
@@ -2302,6 +2382,10 @@ export class JarenValidator {
    * const collecting = new JarenValidator({ collectErrors: true });
    * const result = collecting.compile(schema)({ name: 123 });
    * // result = { valid: false, errors: [...] }
+   *
+   * // Narrowing in collect mode
+   * const checked = collecting.compile<{ name: string }>(userSchema).narrow(input);
+   * if (checked.valid) checked.value.name; // checked.value is { name: string } here
    */
   compile(schema, schemas = undefined) {
     const { origin, map } = JarenValidator.#traverseSchema(schema, schemas, this.#schemas, this.#traverse, this.#places);
@@ -2363,7 +2447,7 @@ export class JarenValidator {
     // A root that loops back to itself before reading the instance decides
     // nothing on any instance: refused here rather than when it validates.
     // Whether a keyword reads the instance depends on these options.
-    assertRootReadsInstance(map, origin, schema, { options: validationOptions, formats: this.#formats }, this.#traverse);
+    assertRootReadsInstance(map, origin, schema, { options: validationOptions, formats: this.#formats, drafts: this.#places.drafts, foreign: this.#places.foreign }, this.#traverse);
 
     // Pre-compile all refs before returning the validator
     // This ensures all ref chains are resolved at compile time

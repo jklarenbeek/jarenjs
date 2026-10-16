@@ -127,14 +127,23 @@ A place the walk refuses does not end the registration: `addSchema` passes
 on (a `$ref` that is no URI registers no target; an `$id` that is no URI, or
 an identifier an earlier place declares, registers nothing at or below its
 place). The compile and loader walks pass none, so the refusal is thrown
-there. A plain-name fragment (`#a b`, `#_a`) is keyed as the URI spells it,
-so an anchor and a reference to it meet whatever characters the name holds.
+there, coded: an identifier declared twice is `JK0012`, naming the first
+place (the walk keeps where it registered each one). Where anchors are not
+allowed an `$anchor` or `$dynamicAnchor` registers nothing. A plain-name
+fragment (`#a b`, `#_a`) is keyed as the URI spells it,
+so an anchor and a reference to it meet whatever characters the name holds; a
+fragment that decodes to `/…` is a pointer, its `%2F`s read as `/`s
+(`parseJsonPointer`), so every later per-token decode stays the only one. A
+blank `$ref` or `$dynamicRef` counts as a reference (`hasSchemaReference`)
+and resolves as `#` (`schemaReference`), the current resource, never against
+a base that carries a pointer fragment.
 `#assertNoRefLoops` then refuses a loop of pure references only when both
 readings of a document that declares no draft make it (`resolveRefSchemaDeep`
 with no draft and with draft-07): a loop one reading makes is refused by the
 compile that reads it so. It does not run for a document whose walk refused a
-place: such a document does not compile as a whole, so a loop in it is left to
-the compile that reaches it, and what else it holds answers.
+place, or that holds a blank `$ref` (read as none before it was the empty
+reference): such a document does not compile as a whole, so a loop in it is
+left to the compile that reaches it, and what else it holds answers.
 
 ### Phase 2: Schema Traversal
 
@@ -161,7 +170,7 @@ compile(schema, schemas)
 - After `restoreSchemaRefsInMap`, all ref values are resolved schemas (not null)
 - **Ref chains are flattened**: `A → B → C` becomes `A → C`
 - **A chain that comes back to an id it visited is a loop** that never reads the instance; `resolveRefSchemaDeep` throws a `RefCycleError` (`SchemaCompileError`, `JK0001`, `src/errors.js`) naming it (`A -> B -> A`, or `A refers to itself`), and the compile paths that tolerate a not-yet-resolvable target rethrow it
-- **A root that comes back to itself before reading the instance** is the same refusal: `assertRootReadsInstance` follows, from the compiled root, each `$ref` and the one in-place applicator a schema evaluates first on every instance (`firstInPlaceSubschema`), and throws when the walk returns to a schema already on it. It runs once the compilation's options are known: whether a keyword beside the applicator can fail an instance (`canFail`) is read from `REF_SIBLING_KEYWORDS`, the list a `$ref` reads its asserting siblings from, narrowed by what compiles to no validator under those options (`format` without an asserting compiler, the content keywords without content validation, a subschema keyword holding `true` or `{}`). A `$dynamicRef` or `$recursiveRef` is followed while the walk stays in the root resource. A loop only some instances reach is left to the reference depth bound below
+- **A root that comes back to itself before reading the instance** is the same refusal: `assertRootReadsInstance` follows, from the compiled root, each `$ref` and the one in-place applicator a schema evaluates first on every instance (`firstInPlaceSubschema`), and throws when the walk returns to a schema already on it. It runs once the compilation's options are known: whether a keyword beside the applicator can fail an instance (`canFail`) is read from `REF_SIBLING_KEYWORDS`, the list a `$ref` reads its asserting siblings from, narrowed by what compiles to no validator under those options (`format` without an asserting compiler, the content keywords without content validation, a subschema keyword holding `true` or `{}`). A `$dynamicRef` or `$recursiveRef` its place's draft defines (`admitsDynamicReference`, reading the `drafts` the walks record) is followed while the walk stays in the root resource; elsewhere it is an unknown keyword the walk passes over. A loop only some instances reach is left to the reference depth bound below
 - **Validation nests at most `maxReferenceDepth` (default `REFERENCE_DEPTH_CEILING`, 256) references.** Each wrapped reference compares the one shared count with its own compilation's option (`JK0002` refuses an option that is not a positive safe integer). Every loop through compiled closures contains a reference resolved when first used (a target still under construction cannot be captured eagerly) or a dynamic reference, so `boundReference` wraps exactly those — the lazy `$ref` resolver, `$dynamicRef` and `$recursiveRef` — with one module-level count, restored in a `finally`. Past the bound it throws `SchemaRuntimeError` `JK2001`: thrown, never folded into `false`, because `not` would invert a folded failure. A reference to a target already built calls the target directly and costs nothing
 
 **The Critical Optimization**: `restoreSchemaRefsInMap` now uses `resolveRefSchemaDeep` instead of `resolveRefSchemaShallow`. This follows the entire ref chain at load time and stores the final schema directly.
@@ -685,6 +694,10 @@ flowchart LR
     style L fill:#9f9
 ```
 
+A collect-mode validator also carries `narrow`, defined once per compile: it
+calls the validator and returns its `{valid, errors}`, with the instance as
+`value` on the valid branch, so the plain call's answer and cost are unchanged.
+
 ### Report-Time Messages (messages.js)
 
 Conversion is structured-first, render-late (the normative spec is
@@ -748,7 +761,8 @@ the compile pipeline:
 
 - **One walk.** It finds the references with the walk that registers a
   schema, `storeSchemaIdsInMap`, whose optional `onReference` callback is
-  offered each `$ref` and `$dynamicRef` target with its location. The
+  offered each `$ref` target, and each `$dynamicRef` target its place's
+  draft defines, with its location. The
   targets are reached when the walk ends, once every identifier of the
   document is registered, so a reference into the schema's own resources is
   never loaded. Every document is walked as `compile` reads it: a place that
@@ -1121,10 +1135,19 @@ document that is (the message then names the step that misses)
   `restoreSchemaRefsInMap` take the compile's draft, and a draft-07 compile
   drops the entries only the 2019-09 reading needs (`lateTargets`)
 - A `$dynamicRef` or `$recursiveRef` target is resolved by the `$ref`
-  resolver on the call that reaches it; nothing found is `JK0009` there
+  resolver on the call that reaches it; nothing found is `JK0009` there.
+  Neither is compiled where its document declares a draft that does not
+  define it (`admitsDynamicReference`: `$recursiveRef` 2019-09,
+  `$dynamicRef` 2020-12, both where none is declared or the `$schema` names
+  no draft this package knows: the walks record such places in
+  `places.foreign`, read through `dynamicReferenceDraft`)
 - `JK0011`: a `$recursiveRef` other than `"#"` read as 2019-09
   (`compileRecursiveRef` reads the place's declared draft, else the
-  compile's); another draft applies nothing for it
+  compile's); a document that declares no draft, compiled as another,
+  applies nothing for it
+- `JK0012`: an identifier names two schemas; `storeSchemaIdsInMap`'s
+  `declare` refuses the second place (offered to `onFault` under
+  `addSchema`, which keeps the first)
 - `JK0010`: the reference or `$id` text is no URI; `createJsonPointer` codes
   the `URL` parse failure, and the callers that know the keyword and its
   place name them

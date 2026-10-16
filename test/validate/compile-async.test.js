@@ -81,9 +81,9 @@ describe('compileAsync loads what a schema references', () => {
     const error = await refusal(compileAsync(new JarenValidator(), loop, served({})));
     assert.equal(error.message, (() => { try { new JarenValidator().compile(loop); } catch (e) { return e.message; } })());
     const twice = { $defs: { a: { $id: 'https://x.test/same.json' }, b: { $id: 'https://x.test/same.json' } } };
-    await assert.rejects(compileAsync(new JarenValidator(), twice, served({})),
-      { message: "Schema 'https://x.test/same.json#' for path '#/%24defs/b' in 'https://github.com/jklarenbeek/jarenjs#' already exists" });
-    assert.throws(() => new JarenValidator().compile(twice), { message: "Schema 'https://x.test/same.json#' for path '#/%24defs/b' in 'https://github.com/jklarenbeek/jarenjs#' already exists" });
+    const declaredTwice = "JK0012: 'https://x.test/same.json#' is declared twice (first at '#/%24defs/a/%24id'); give one of them another name at #/%24defs/b/%24id";
+    await assert.rejects(compileAsync(new JarenValidator(), twice, served({})), { code: 'JK0012', message: declaredTwice });
+    assert.throws(() => new JarenValidator().compile(twice), { code: 'JK0012', message: declaredTwice });
   });
 
   it('loads nothing a validator holds, and nothing for a schema without references', async () => {

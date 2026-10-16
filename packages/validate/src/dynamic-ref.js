@@ -24,6 +24,32 @@ import {
 } from './schema-keywords.js';
 
 /**
+ * Whether a dynamic reference is a keyword at a schema location:
+ * `$recursiveRef` is one in draft 2019-09 only, `$dynamicRef` from 2020-12
+ * on. A document that declares another draft reads it as an unknown
+ * keyword, which applies nothing; one that declares none reads both.
+ * @param {'$recursiveRef'|'$dynamicRef'} keyword
+ * @param {number|null|undefined} declaredDraft - The draft the location's document declares, or null when it declares none
+ * @returns {boolean}
+ */
+export function admitsDynamicReference(keyword, declaredDraft) {
+  if (declaredDraft == null) return true;
+  return keyword === '$recursiveRef' ? declaredDraft === 2019 : declaredDraft >= 2020;
+}
+
+/**
+ * Whether a schema object's `$schema` names a draft this package reads by
+ * name. Another dialect (a vocabulary metaschema, OpenAPI 3.1's) is read as
+ * draft-07 by the declared-draft gates, but its dynamic references are read
+ * as in a document that declares no draft.
+ * @param {{ $schema: string }} schema
+ * @returns {boolean}
+ */
+export function namesKnownDraft(schema) {
+  return detectSchemaDraft(schema) !== 7 || /draft[-/]07/.test(schema.$schema);
+}
+
+/**
  * Check if a schema has $recursiveAnchor: true.
  * @param {object} schema - The schema object
  * @returns {boolean}

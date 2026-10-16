@@ -16,7 +16,10 @@
  * reaches it. A `$ref`, `$dynamicRef`, `$recursiveRef` or `$id` that is no
  * valid URI reference is refused `JK0010` where it is read, and a
  * `$recursiveRef` other than `"#"` read as draft 2019-09 `JK0011` by the
- * first call that reaches it. When a validator
+ * first call that reaches it. An identifier (`$id`, `$anchor`,
+ * `$dynamicAnchor`) that names two schemas — declared twice in a document,
+ * or already naming another schema the validator holds — is refused where
+ * the second is read (`JK0012`). When a validator
  * runs: a validation that nests more schema references than
  * `maxReferenceDepth` (default {@link REFERENCE_DEPTH_CEILING}) is refused
  * where the bound is crossed (`JK2001`), before the host's call stack can
@@ -43,6 +46,7 @@ export const VALIDATE_CODES = Object.freeze({
   JK0009: 'a reference resolves to no schema the validator holds',
   JK0010: 'a reference or an identifier is not a valid URI reference',
   JK0011: 'a $recursiveRef read as draft 2019-09 is not "#"',
+  JK0012: 'an identifier names two schemas',
   JK2001: 'validation nests schema references deeper than the reference depth ceiling',
 });
 

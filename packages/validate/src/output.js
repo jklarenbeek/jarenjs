@@ -29,6 +29,7 @@ import { isArrayClass, isObjectClass } from '@jarenjs/core';
 import { encodeJSONPointerSegment, decodeJSONPointerSegment } from '@jarenjs/json/pointer';
 import { convertInternalErrors, renderErrorMessage } from './messages.js';
 import { TRAVERSE_SCHEMA_OBJECTS, TRAVERSE_SCHEMA_MAPS, TRAVERSE_SCHEMA_MAP_MAPS, admitsPropertyDependencies } from './schema-keywords.js';
+import { admitsDynamicReference } from './dynamic-ref.js';
 import { REF_SIBLING_KEYWORDS } from './tools.js';
 import { createJsonPointer } from './traverse.js';
 
@@ -78,7 +79,7 @@ import { createJsonPointer } from './traverse.js';
  * applied.
  * @typedef {object} UnitRecord
  * @property {string} segment - The evaluation path segment from the applying record ('' for the root)
- * @property {{ path: string, schema: any, declaredDraft: number|null, options: { draftVersion: number, propertyDependencies?: boolean|null } }} object - The subschema's compiled object
+ * @property {{ path: string, schema: any, declaredDraft: number|null, dynamicReferenceDraft: number|null, options: { draftVersion: number, propertyDependencies?: boolean|null } }} object - The subschema's compiled object
  * @property {string} instanceLocation
  * @property {unknown} data
  * @property {boolean} valid
@@ -156,6 +157,7 @@ function evaluates(unit, keyword) {
   const since = /** @type {Record<string, number>} */ (ASSERTION_SINCE)[keyword];
   if (since !== undefined) return unit.declaredDraft == null || unit.declaredDraft >= since;
   if (keyword === 'propertyDependencies') return admitsPropertyDependencies(unit.propertyDependencies, unit.declaredDraft);
+  if (keyword === '$recursiveRef' || keyword === '$dynamicRef') return admitsDynamicReference(keyword, unit.dynamicReferenceDraft);
   if (ASSERTING.has(keyword)) return true;
   return ANNOTATING.has(keyword) && !(/** @type {Record<string, number>} */ (ANNOTATION_SINCE)[keyword] > unit.draft);
 }
@@ -189,6 +191,8 @@ class OutputUnit {
     this.draft = object.declaredDraft ?? object.options.draftVersion;
     /** @type {number|null} The draft its document declares, or null when none does */
     this.declaredDraft = object.declaredDraft;
+    /** @type {number|null} The draft its dynamic references are read in */
+    this.dynamicReferenceDraft = object.dynamicReferenceDraft;
     /** @type {boolean|null|undefined} The `propertyDependencies` option it was compiled under */
     this.propertyDependencies = object.options.propertyDependencies;
     /** @type {string} */

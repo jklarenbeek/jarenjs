@@ -297,9 +297,10 @@ failed validation, because a `false` under `not` would read as success.
 | `JK0006` | `SchemaCompileError` | One `compileAsync` call needs more document loads than its `maxLoads` option (default 100) |
 | `JK0007` | `SchemaCompileError` | `compileAsync` was given something that is not a `JarenValidator`, a `loadSchema` that is not a function, or a `maxLoads` that is not a positive safe integer |
 | `JK0008` | `SchemaCompileError` | A draft-07 `$ref` beside an `$id`, which does not set its base, resolves to no schema the validator holds: refused when a schema compiles, or by the first call that reaches a reference resolved on first use |
-| `JK0009` | `SchemaCompileError` | A reference resolves to no schema the validator holds (a document nothing holds, a pointer that misses, or an anchor nothing declares): refused when a schema compiles, or by the first call that reaches a reference resolved on first use, a `$dynamicRef` or a `$recursiveRef` in a draft that does not define it |
+| `JK0009` | `SchemaCompileError` | A reference resolves to no schema the validator holds (a document nothing holds, a pointer that misses, or an anchor nothing declares): refused when a schema compiles, or by the first call that reaches a reference resolved on first use, a `$dynamicRef`, or a `$recursiveRef` in a document that declares no draft and is not read as 2019-09 |
 | `JK0010` | `SchemaCompileError` | A `$ref`, `$dynamicRef`, `$recursiveRef` or `$id` (`id`) is not a valid URI reference: refused where the text is read, naming the keyword, the text and where it sits |
 | `JK0011` | `SchemaCompileError` | A `$recursiveRef` read as draft 2019-09 is not `"#"`: refused by the first call that reaches it, naming the `$ref` that applies the schema it names |
+| `JK0012` | `SchemaCompileError` | An identifier (`$id`, `$anchor`, `$dynamicAnchor`) names two schemas — a document declares it twice, or it already names another schema the validator holds: refused where the second is read, naming both places |
 | `JK2001` | `SchemaRuntimeError` | Validation nests schema references deeper than `maxReferenceDepth` (default 256): refused where the bound is crossed |
 
 **`JK0001` — a loop that never reads the instance.** A `$ref` that leads
@@ -307,8 +308,8 @@ back to itself through `$ref`s alone is refused wherever it sits in the
 document. A root schema is also refused when following, from the root, the
 `$ref` (evaluated before its siblings) or the one in-place applicator a
 schema evaluates first on every instance — its only `not`, its `if` beside a
-`then` or an `else`, the target of its only `$dynamicRef` or `$recursiveRef`,
-or the first member its only `allOf`, `anyOf` or `oneOf` reaches on every
+`then` or an `else`, the target of its only `$dynamicRef` or `$recursiveRef`
+its document's draft defines, or the first member its only `allOf`, `anyOf` or `oneOf` reaches on every
 instance, with nothing beside it that can fail an instance — comes back to a
 schema already on the way: such a validator decides nothing on any instance.
 
@@ -460,10 +461,18 @@ JK0009: Can not resolve schema for 'https://github.com/jklarenbeek/jarenjs#/$def
 A `$dynamicRef` or `$recursiveRef` whose target nothing resolves is refused
 the same way by the first call that reaches it, never answered (answered, it
 would read `false` on every instance and `true` under `not`); read as 2019-09,
-a `$recursiveRef` other than `"#"` is `JK0011` instead. A plain-name fragment
+a `$recursiveRef` other than `"#"` is `JK0011` instead. Each is a keyword only
+where its document declares a draft that defines it (`$recursiveRef`
+2019-09, `$dynamicRef` 2020-12), declares none, or declares a `$schema` that
+names no draft this package knows: elsewhere it is an unknown keyword, applies
+nothing and is never refused. A plain-name fragment
 no `$anchor` or `$dynamicAnchor` declares (`#nope`) names nothing; a name is
 matched as the URI spells it, whatever characters it holds (`#a b` is
-`#a%20b`).
+`#a%20b`). A fragment that decodes to one starting with `/` is a JSON Pointer
+(`#%2F$defs%2Fx` is `#/$defs/x`): its `%2F`s separate tokens as its `/`s do,
+so `#/$defs/a%2Fb` names `b` in `a` (`#/$defs/a~1b` names `a/b`). A blank
+`$ref` or `$dynamicRef` is the empty URI reference and names the current
+resource, as `#` does.
 
 **`JK0010` — a reference or an identifier that is no URI.** A `$ref`,
 `$dynamicRef`, `$recursiveRef` or `$id` (`id`) whose text, resolved against
@@ -472,9 +481,10 @@ past 65535) is refused naming the keyword, the text and where it sits: a `$ref`
 or `$id` of the schema being compiled as a pointer into it (read when the schema
 is registered for the compile), a `$dynamicRef`, a `$recursiveRef` or a keyword
 of a registered document as the URI of the schema object that holds it with the
-keyword appended. A `$recursiveRef` other than `"#"` in a draft that does not
-define it is refused by the call that reaches it (read as 2019-09 it is
-`JK0011`). A registered document's place that is no URI reference does not end
+keyword appended. A `$recursiveRef` other than `"#"` in a document that
+declares no draft is refused by the call that reaches it (read as 2019-09 it
+is `JK0011`); a document that declares a draft other than 2019-09 does not
+read it. A registered document's place that is no URI reference does not end
 its registration: the rest of the document is registered, and the compile that
 reads the place refuses it:
 
@@ -488,9 +498,27 @@ JK0010: $dynamicRef 'http://[x' is not a valid URI reference; correct it, percen
 2019-09 (the place's `$schema`, or the compile's when the place declares
 none), another value is refused by the first call that reaches it, naming the
 `$ref` that applies the schema it names; an instance that does not reach it
-answers. A draft that does not define the keyword (draft-07, 2020-12) applies
-nothing for it:
+answers. A document that declares a draft that does not define the keyword
+(draft-07, 2020-12) reads it as an unknown keyword, which applies nothing,
+whatever its value:
 
 ```text
 JK0011: $recursiveRef '#/$defs/x' is defined only as "#"; to apply the schema it names, write $ref '#/$defs/x' at https://github.com/jklarenbeek/jarenjs#/properties/a/%24recursiveRef
+```
+
+**`JK0012` — an identifier that names two schemas.** An `$id`, `$anchor` or
+`$dynamicAnchor` names one schema. A schema being compiled (or the schemas
+given to that compile, or the schema `compileAsync` compiles) that declares
+one twice is refused when it compiles, naming both places; one that declares
+an identifier already naming another schema the validator holds is refused
+naming the keyword and its place; and a further document a compile is given
+with no `$id` of its own, read under a URI that already names one, is
+refused with the repair of giving it one. A document registered with
+`addSchema` (or loaded by `compileAsync`) is not refused: an identifier it
+declares twice keeps its first place. Where anchors are not allowed
+(`TraverseOptions`), an `$anchor` or `$dynamicAnchor` declares nothing:
+
+```text
+JK0012: 'https://github.com/jklarenbeek/x.json#' is declared twice (first at '#/%24defs/a/%24id'); give one of them another name at #/%24defs/b/%24id
+JK0012: $id declares 'https://a.test/x.json#', which names another schema the validator holds; give one of them another name at #/%24defs/a/%24id
 ```

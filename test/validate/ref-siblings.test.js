@@ -15,7 +15,9 @@ it('retains supported assertions beside direct and chained modern references', (
         const schema = { $schema, $defs: { yes: true, no: false, hop },
           ...(chained ? { $ref: '#/$defs/hop' } : hop) };
         const validate = new JarenValidator().compile(schema);
-        assert.equal(validate(invalid), false, JSON.stringify({ $schema, sibling, chained }));
+        // 2019-09 does not define $dynamicRef: an unknown keyword, it applies nothing
+        const applies = !('$dynamicRef' in sibling) || $schema.includes('2020-12');
+        assert.equal(validate(invalid), !applies, JSON.stringify({ $schema, sibling, chained }));
         if (valid !== undefined) assert.equal(validate(valid), true);
         const legacy = new JarenValidator().compile({ ...schema, $schema: 'http://json-schema.org/draft-07/schema#' });
         assert.equal(legacy(invalid), true, 'draft-07 keeps reference-only semantics');

@@ -147,8 +147,8 @@ describe('propertyDependencies is an unknown keyword wherever it is not enabled'
   it('is walked, and its dangling and duplicate registrations refused, only when enabled', function () {
     const on = { propertyDependencies: true };
     assert.throws(() => new JarenValidator(on).compile(dangling), /Can not resolve schema/);
-    assert.throws(() => new JarenValidator(on).compile(duplicate), /already exists/);
-    assert.throws(() => new JarenValidator(on).compile({ $schema: NEXT, ...duplicate }), /already exists/);
+    assert.throws(() => new JarenValidator(on).compile(duplicate), { code: 'JK0012' });
+    assert.throws(() => new JarenValidator(on).compile({ $schema: NEXT, ...duplicate }), { code: 'JK0012' });
   });
 
   it('collectSameDocumentAnchors walks it only when asked to', function () {
@@ -376,7 +376,7 @@ describe('propertyDependencies subschemas are addressable', function () {
       $schema: DRAFT_2020,
       $id: 'https://example.test/dup',
       propertyDependencies: { k: { a: { $anchor: 'x' }, 'b/c': { $anchor: 'x' } } },
-    }), (error) => error.message === "Schema 'https://example.test/dup#x' for path '#/propertyDependencies/k/b~1c' in 'https://example.test/dup#' already exists");
+    }), (error) => error.message === "JK0012: 'https://example.test/dup#x' is declared twice (first at '#/propertyDependencies/k/a/%24anchor'); give one of them another name at #/propertyDependencies/k/b~1c/%24anchor");
   });
 
   for (const [label, options] of MODES) {

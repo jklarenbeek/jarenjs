@@ -108,15 +108,6 @@ delete it or fix it.
 
 ## @jarenjs/validate
 
-- [ ] **A collect-mode validator cannot narrow its instance.**
-  `compile<T>(schema)` on a `collectErrors: true` validator answers `{ valid,
-  errors }`, which carries no copy of the instance, so its valid branch cannot
-  narrow the data to `T` — TypeScript narrows an argument only through a type
-  predicate — and a consumer keeps a hand-written `data is T` wrapper beside
-  each collecting validator (one tangleai consumer has 11). Wanted: a
-  collect-mode answer that narrows, e.g. `{ valid: true, value: T, errors: []
-  }` or a guard and the errors from one compile. A runtime addition and new
-  API (minor).
 - [ ] **Per-call cost of annotation tracking for `unevaluated*`** — a check
   over many members or items no longer scans the evaluation log once per
   member: a long stretch is gathered in one pass, so the check grows with the
@@ -169,31 +160,15 @@ delete it or fix it.
   loader that serves that URI, which the README teaches and which answers
   right, so it waits on a decision to change the default (a minor with an
   upgrade sentence).
-- [ ] **A document that declares one identifier twice throws an uncoded
-  `Error`.** `compile({ $defs: { a: { $id: 'x.json' }, b: { $id: 'x.json' } }
-  })` throws "Schema '…/x.json#' for path '#/%24defs/b' in '…' already exists"
-  (likewise two `$anchor`s or `$dynamicAnchor`s of one name, and every
-  `$anchor` under `traverse` with `anchorsAllowed: false`); `addSchema` keeps
-  the first place and answers by it. Coding the throw is a patch; refusing a
-  compile that reads the contested identifier of a registered document is a
-  minor.
-- [ ] **`$recursiveRef` is read in drafts that do not define it.** `{ $schema:
-  2020-12, type: 'object', properties: { p: { $recursiveRef: '#' } } }`
-  answers `{p:1}` `false` (it applies the root; 2020-12 ignores the unknown
-  keyword, `true`), and a value other than `"#"` nothing resolves is refused
-  `JK0009`/`JK0010` under draft-07 and 2020-12. Ignoring it there changes
-  answers (a minor).
-- [ ] **A blank `$ref` is read as no reference.** `{ $schema: 2020-12, type:
-  'object', properties: { p: { $ref: '' } } }` answers `{p:1}` `true`; `''` is
-  a URI reference to the current document (`false`). Blank
-  `$dynamicRef`/`$recursiveRef` share the rule. Reading it changes answers (a
-  minor).
-- [ ] **A percent-encoded pointer fragment is read as a plain name.** `{
-  $defs: { x: { type: 'string' } }, properties: { p: { $ref: '#%2F$defs%2Fx' }
-  } }` is refused `JK0009` (it answered as the whole document before the
-  plain-name change); JSON Pointer's URI form decodes the fragment first, so
-  it names `$defs/x`, as `resolveSameDocumentRef` in
-  `@jarenjs/validate/normalize` reads it. Resolving it is a patch.
+- [ ] **A registered document that declares one identifier twice answers by
+  its first place.** After `addSchema({ $id: 'https://d.test/r.json', $defs: {
+  a: { $id: 'x.json', type: 'string' }, b: { $id: 'x.json', type: 'number' } }
+  })`, `compile({ $ref: 'https://d.test/x.json' })` answers `'s'` `true` and
+  `1` `false` by `a`, where compiling the same document is refused `JK0012`
+  naming both places; two registered documents that declare one nested `$id`
+  answer by the first registered, and `compileAsync` keeps a loaded document's
+  first place too. Refusing a compile that reads the contested identifier (and
+  only that compile) is a minor.
 - [ ] **The output formats answer in English only.** A unit carries rendered
   text, so `localizeErrors` does not reach it and the packs' `subschema` entry
   is never read. A catalog on the output path (or units that keep `msgid` and

@@ -83,7 +83,7 @@ describe('schema registration', () => {
       assert.equal(validate('yes'), true);
       assert.equal(validate(1), false);
     }
-    assert.throws(() => validator.compile({ ...schema, type: 'number' }), /already exists/);
+    assert.throws(() => validator.compile({ ...schema, type: 'number' }), { code: 'JK0012' });
   });
 
   for (const version of [6, 7, 2019, 2020]) {

@@ -34,6 +34,7 @@ import {
 
 import { parseJSONPointer } from '@jarenjs/json';
 import { isJsonNumberString } from '@jarenjs/core/number';
+import { isStringWhiteSpace } from '@jarenjs/core/string';
 import {
   TRAVERSE_SCHEMA_OBJECTS,
   TRAVERSE_SCHEMA_MAPS,
@@ -173,7 +174,8 @@ export function collectSameDocumentAnchors(root, options = {}) {
 }
 
 /**
- * Resolve a same-document `$ref` — `#`, `#/` followed by a JSON Pointer, or
+ * Resolve a same-document `$ref` — `#` (or a blank reference, which names the
+ * document as `#` does), `#/` followed by a JSON Pointer, or
  * `#name` for a plain `$anchor` — to the schema it addresses. URI fragment
  * escapes are decoded once, before JSON Pointer token escapes. Refs into other
  * documents are not followed: a normalizer compiles one schema, and reaching
@@ -200,7 +202,7 @@ export function resolveSameDocumentRef(ref, root, anchors) {
  * @returns {object|boolean|undefined}
  */
 function followSameDocumentRef(ref, root, anchors, trail) {
-  if (ref === '#') return root;
+  if (ref === '#' || isStringWhiteSpace(ref)) return root;
   if (!ref.startsWith('#')) return undefined;
   let node = root;
   let tokens;

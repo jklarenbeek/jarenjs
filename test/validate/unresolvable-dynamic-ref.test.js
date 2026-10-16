@@ -82,8 +82,9 @@ describe('a dynamic reference nothing resolves is refused JK0009 by the call tha
     assert.doesNotThrow(() => compiled({ $schema: D20, $dynamicRef: '#nope' }));
   });
 
-  it('a $recursiveRef pointer that misses, in a 2020-12 schema', () => {
-    const validate = compiled({ $schema: D20, properties: { a: { $recursiveRef: '#/$defs/nope' } } });
+  // a draft that declares 2020-12 or draft-07 reads $recursiveRef as an unknown keyword (recursive-ref-draft.test.js)
+  it('a $recursiveRef pointer that misses, in a schema that declares no draft', () => {
+    const validate = compiled({ properties: { a: { $recursiveRef: '#/$defs/nope' } } });
     assert.deepEqual(answers(validate, [{}, { a: 1 }]), [true, 'JK0009']);
     assert.equal(thrown(() => validate({ a: 1 })),
       `JK0009: Can not resolve schema for '${ORIGIN}#/$defs/nope': '/$defs' is not a schema in '${ORIGIN}#'; fix the pointer`);

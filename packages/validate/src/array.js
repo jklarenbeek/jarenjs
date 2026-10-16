@@ -25,6 +25,8 @@ import {
   isOfSchemaType,
   extendsChildLocations,
   annotatesFailedMembers,
+  hasSchemaReference,
+  schemaReference,
   ARRAY_CHILD_KEYWORDS,
 } from './tools.js';
 
@@ -235,7 +237,7 @@ function compileItemValidator(schemaObj, itemSchema, key, index) {
     // Fast path: $ref-only schema - check property directly before calling Object.keys
     // This avoids the overhead of Object.keys for the most common case
     // Recording output units, the item's own subschema is one: no shortcut.
-    if (itemSchema.$ref !== undefined && schemaObj.root.recorder === null) {
+    if (hasSchemaReference(itemSchema, '$ref') && schemaObj.root.recorder === null) {
       const keys = Object.keys(itemSchema);
       if (keys.length === 1) {
         // Use the root to resolve the ref directly to the target validator
@@ -243,7 +245,7 @@ function compileItemValidator(schemaObj, itemSchema, key, index) {
         const root = schemaObj.root;
         if (root && root.resolveObject) {
           try {
-            const targetObj = root.resolveObject(itemSchema.$ref, schemaObj.path, itemSchema, true);
+            const targetObj = root.resolveObject(schemaReference(itemSchema, '$ref'), schemaObj.path, itemSchema, true);
             if (targetObj && targetObj.validate) {
               return targetObj.validate;
             }

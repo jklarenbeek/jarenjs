@@ -25,6 +25,7 @@ import {
   markStep,
   createIsSchemaTypeHandler,
   hasSchemaReference,
+  schemaReference,
   hasRefSiblings,
 } from './tools.js';
 
@@ -49,7 +50,7 @@ import { compilePropertyDependencies } from './property-dependencies.js';
 import { compileDollarDataSchema } from './dollar-data.js';
 import { wrapUnevaluated } from './unevaluated.js';
 import { createJsonPointer, keywordLocation } from './traverse.js';
-import { getDynamicAnchorName } from './dynamic-ref.js';
+import { getDynamicAnchorName, admitsDynamicReference } from './dynamic-ref.js';
 
 /**
  * Compile $recursiveRef (draft 2019-09) and $dynamicRef (draft 2020-12).
@@ -64,18 +65,29 @@ import { getDynamicAnchorName } from './dynamic-ref.js';
  */
 function compileDynamicRef(schemaObj, jsonSchema) {
   // Check for $recursiveRef (draft 2019-09)
-  if (hasSchemaReference(jsonSchema, '$recursiveRef')) {
+  if (readsDynamicReference(schemaObj, jsonSchema, '$recursiveRef')) {
     return markStep(schemaObj.root.recorder, ['$recursiveRef'], compileRecursiveRef(schemaObj, jsonSchema));
   }
 
   // Check for $dynamicRef (draft 2020-12)
-  if (hasSchemaReference(jsonSchema, '$dynamicRef')) {
+  if (readsDynamicReference(schemaObj, jsonSchema, '$dynamicRef')) {
     return markStep(schemaObj.root.recorder, ['$dynamicRef'], compileDynamicAnchorRef(schemaObj, jsonSchema));
   }
 
   return undefined;
 }
 
+/**
+ * Whether a schema object applies its dynamic reference: one is written,
+ * and its document declares a draft that defines the keyword (or none).
+ * @param {ValidationObject} schemaObj
+ * @param {object} jsonSchema
+ * @param {'$recursiveRef'|'$dynamicRef'} keyword
+ * @returns {boolean}
+ */
+function readsDynamicReference(schemaObj, jsonSchema, keyword) {
+  return hasSchemaReference(jsonSchema, keyword) && admitsDynamicReference(keyword, schemaObj.dynamicReferenceDraft);
+}
 
 /**
  * Compile $recursiveRef which references the outermost $recursiveAnchor: true.
@@ -187,7 +199,7 @@ function compileRecursiveRef(schemaObj, jsonSchema) {
  */
 function compileDynamicAnchorRef(schemaObj, jsonSchema) {
   const root = schemaObj.root;
-  const ref = jsonSchema.$dynamicRef;
+  const ref = schemaReference(jsonSchema, '$dynamicRef');
 
   // a schema reached through a pointer `$ref` resolved on first use has no
   // base URI of its own: it resolves against its own location, as
@@ -434,7 +446,7 @@ export function compileSchemaObject(schemaObj, jsonSchema) {
   // combined (ref + siblings) validator instead of here, so that the
   // $ref target's annotations are visible to the unevaluated* check.
   let refWithSiblings = false;
-  if (hasSchemaReference(jsonSchema, '$ref') && !hasSchemaReference(jsonSchema, '$recursiveRef')) {
+  if (hasSchemaReference(jsonSchema, '$ref') && !readsDynamicReference(schemaObj, jsonSchema, '$recursiveRef')) {
     // Check if there are any validation-related sibling keywords
     // (REF_SIBLING_KEYWORDS — the one list the reference resolver reads
     // too). In draft 2019-09+, if there are validation siblings, we
