@@ -4,7 +4,9 @@
  * specialized closure over the scene graph; arrowheads are inline
  * polygons (no `<marker>` id collisions across diagrams on one page),
  * every shape carries a `mm-*` class for CSS re-theming and concrete
- * theme colors for standalone SSR.
+ * theme colors for standalone SSR. A scene laid out for HTML labels
+ * (`scene.htmlLabels`) draws each label as HTML inside a `foreignObject`
+ * instead of SVG `<text>`, one block per line the layout measured.
  */
 
 import {
@@ -26,6 +28,8 @@ export function renderFlowchart(scene, theme, hash, rootClass = 'mermaid mm-svg'
   const t = theme.tokens;
   const children = [];
 
+  const html = scene.htmlLabels === true;
+
   // Subgraph frames first (behind nodes).
   for (const sg of scene.subgraphs) {
     if (sg.w === 0) continue;
@@ -34,11 +38,13 @@ export function renderFlowchart(scene, theme, hash, rootClass = 'mermaid mm-svg'
         rx: 6, class: 'mm-cluster-rect',
         fill: t.clusterFill, stroke: t.clusterStroke, 'stroke-width': 1,
       }),
-      sg.label
-        ? textAt(sg.x + sg.w / 2, sg.y + 15, sg.label, scene.fontSize, {
-          'text-anchor': 'middle', class: 'mm-cluster-label', fill: t.nodeText,
-        })
-        : null,
+      !sg.label ? null
+        : html
+          ? htmlLabel(sg.x, sg.y, sg.w, CLUSTER_LABEL_BAND, [sg.label], scene.fontSize,
+            'mm-cluster-label', NODE_TEXT)
+          : textAt(sg.x + sg.w / 2, sg.y + 15, sg.label, scene.fontSize, {
+            'text-anchor': 'middle', class: 'mm-cluster-label', fill: t.nodeText,
+          }),
     ]));
   }
 
@@ -46,28 +52,73 @@ export function renderFlowchart(scene, theme, hash, rootClass = 'mermaid mm-svg'
   for (let i = 0; i < scene.edges.length; i++) {
     const e = scene.edges[i];
     if (e.points.length < 2) continue;
-    children.push(renderEdge(e, t, scene.fontSize, i));
+    children.push(renderEdge(e, t, scene.fontSize, i, html));
   }
 
   // Nodes.
   for (const node of scene.nodes) {
-    children.push(renderNode(node, t, scene.fontSize, tooltips.get(node.id)));
+    children.push(renderNode(node, t, scene.fontSize, tooltips.get(node.id), html));
   }
 
   return svgRoot(rootClass, scene.width, scene.height, theme, children,
     'mmfc-' + hash, { fit: false });
 }
 
+/** The XHTML namespace an HTML label's root declares, so a standalone SVG
+ * file reads it as HTML too. */
+const XHTML_NS = 'http://www.w3.org/1999/xhtml';
+
+/** The theme's label colors as the custom properties every root declares:
+ * what the stylesheet's `fill` rules give SVG text, given to HTML as `color`. */
+const NODE_TEXT = 'var(--mm-node-text)';
+const EDGE_LABEL_TEXT = 'var(--mm-edge-label-text)';
+
+/** The band at the top of a subgraph frame its HTML title is centered in:
+ * its middle is where the SVG title's glyphs sit (baseline 15). */
+const CLUSTER_LABEL_BAND = 20;
+
+/**
+ * An HTML label: a `foreignObject` over the box the layout sized, holding
+ * one block per measured line, centered, never wrapped again by the browser
+ * (the layout already wrapped it) and free to overflow rather than clip
+ * when the host's font runs wider than the advance table.
+ * @param {number} x @param {number} y @param {number} w @param {number} h
+ * @param {string[]} lines @param {number} fontSize
+ * @param {string} className the label's marker class (`mm-label`, …)
+ * @param {string} color a CSS color
+ * @returns {any}
+ */
+function htmlLabel(x, y, w, h, lines, fontSize, className, color) {
+  return ['foreignObject', { x: num(x), y: num(y), width: num(w), height: num(h), overflow: 'visible' },
+    ['div', {
+      xmlns: XHTML_NS, class: className,
+      style: {
+        display: 'flex', 'flex-direction': 'column', 'justify-content': 'center',
+        'align-items': 'center', width: '100%', height: '100%',
+        'font-size': fontSize + 'px', 'line-height': '1.2', 'white-space': 'nowrap',
+        'text-align': 'center', color,
+      },
+    }, ...lines.map((line) => ['div', {}, line])]];
+}
+
 /**
  * @param {any} node @param {Record<string,string>} t @param {number} fontSize
  * @param {string | undefined} tooltip
+ * @param {boolean} html the label is HTML, in the lines the layout measured
  * @returns {any}
  */
-function renderNode(node, t, fontSize, tooltip) {
+function renderNode(node, t, fontSize, tooltip, html) {
   const shapeEl = shapeVnode(node, t);
+  const color = textColor(node.styles, t);
+  if (html) {
+    // a pseudo-state draws no label at all
+    const label = node.lines.length === 0 || node.label === '' ? null
+      : htmlLabel(node.x, node.y, node.w, node.h, node.lines, fontSize, 'mm-label', color ?? NODE_TEXT);
+    return group(nodeMark(node.id, 'n-' + node.id),
+      withTooltip(label === null ? [shapeEl] : [shapeEl, label], tooltip));
+  }
   const cx = node.x + node.w / 2;
   const cy = node.y + node.h / 2;
-  const color = textColor(node.styles, t);
   const label = textLines(cx, cy, node.label.split('\n'), fontSize,
     color === null
       ? { class: 'mm-label', fill: t.nodeText }
@@ -173,9 +224,10 @@ function shapeVnode(node, t) {
 
 /**
  * @param {any} e @param {Record<string,string>} t @param {number} fontSize @param {number} i
+ * @param {boolean} html the label is HTML, in the lines the layout measured
  * @returns {any}
  */
-function renderEdge(e, t, fontSize, i) {
+function renderEdge(e, t, fontSize, i, html) {
   const p1 = e.points[0];
   const p2 = e.points[e.points.length - 1];
   const stroke = t.lineColor;
@@ -199,10 +251,13 @@ function renderEdge(e, t, fontSize, i) {
     parts.push(rect(e.labelPos.x - lw / 2, e.labelPos.y - lh / 2, lw, lh, {
       class: 'mm-edge-label-bg', fill: t.edgeLabelBg, stroke: 'none',
     }));
-    parts.push(textAt(e.labelPos.x, e.labelPos.y, e.label, fontSize, {
-      'text-anchor': 'middle', 'dominant-baseline': 'central',
-      class: 'mm-edge-label', fill: t.edgeLabelText,
-    }));
+    parts.push(html
+      ? htmlLabel(e.labelPos.x - lw / 2, e.labelPos.y - lh / 2, lw, lh, e.lines, fontSize,
+        'mm-edge-label', EDGE_LABEL_TEXT)
+      : textAt(e.labelPos.x, e.labelPos.y, e.label, fontSize, {
+        'text-anchor': 'middle', 'dominant-baseline': 'central',
+        class: 'mm-edge-label', fill: t.edgeLabelText,
+      }));
   }
 
   // Edge identity for editors: endpoints plus `data-edge`, the edge's

@@ -39,11 +39,15 @@ export {
 /**
  * Convenience: parse → layout → render, error-safe, in one call.
  * @param {string} source
- * @param {{ theme?: any, dateNames?: import('@jarenjs/core/dates').DateNames,
+ * @param {{ theme?: any, htmlLabels?: boolean, safe?: boolean, dateNames?: import('@jarenjs/core/dates').DateNames,
  *   parseFrontmatter?: (text: string) => any }} [options] - `dateNames`
  *   is the locale-name record a Gantt's `dateFormat`/`axisFormat` needs
  *   for a month or weekday token (`compileDateLocale(pack).names`);
- *   this engine ships none of its own
+ *   this engine ships none of its own. `htmlLabels: true` draws flowchart
+ *   and state labels as HTML in `foreignObject` unless the diagram's config
+ *   turns them off (the diagram alone cannot turn them on); `safe: true`
+ *   keeps them SVG text whatever either says, for output a host renders
+ *   through the `@jarenjs/view` safe policy (which drops `foreignObject`)
  * @returns {any} an SVG vnode
  */
 export function renderMermaid(source, options = {}) {
@@ -70,7 +74,7 @@ export function renderMermaid(source, options = {}) {
  * document patches in O(1) through the view reconciler.
  *
  * @param {string} source
- * @param {{ theme?: any, [k: string]: any }} [options]
+ * @param {{ theme?: any, htmlLabels?: boolean, safe?: boolean, [k: string]: any }} [options] as {@link renderMermaid}
  * @returns {CompiledMermaid}
  */
 export function compileMermaid(source, options = {}) {
@@ -107,9 +111,9 @@ export function compileMermaid(source, options = {}) {
       // The editor's hit-testing substrate: the pure PositionedDiagram
       // (nodes with x/y/w/h, edges with routed points), cached like the
       // other projections — same compiled document, reference-equal
-      // scene. Null for types without a geometric layout, and for
-      // documents that failed to parse.
-      if (layout === undefined) layout = doc !== null ? layoutDiagram(doc) : null;
+      // scene, laid out with the options it is drawn with. Null for types
+      // without a geometric layout, and for documents that failed to parse.
+      if (layout === undefined) layout = doc !== null ? layoutDiagram(doc, options) : null;
       return layout;
     },
     walk(visitor) {
@@ -125,7 +129,9 @@ export function compileMermaid(source, options = {}) {
  * touches no DOM until it is handed a container, so importing it keeps
  * the engine host-agnostic.
  *
- * @param {{ container: any, document?: any, theme?: any, [k: string]: any }} config
+ * @param {{ container: any, document?: any, theme?: any, htmlLabels?: boolean, safe?: boolean,
+ *   [k: string]: any }} config
+ *   the container and document, then the render options of {@link renderMermaid}
  * @returns {(docOrSource: any) => void}
  */
 export function createMermaidRenderer(config) {

@@ -308,6 +308,38 @@ label vanishes into it. The ink is derived from the fill's measured contrast
 instead, and is guaranteed to clear WCAG AA for any colour. Name a `color`
 yourself and that always wins.
 
+**HTML labels when the host asks for them.** Pass `htmlLabels: true`
+(Mermaid's own spelling) in the render options and flowchart and state
+diagrams draw their labels as HTML inside a `foreignObject`; a diagram's own
+`htmlLabels: false` still turns them off, but its `htmlLabels: true` alone
+does not turn them on. A line wider than
+`flowchart.wrappingWidth` (200px by default) wraps. The wrapping and the box
+sizes come from the same advance table that sizes SVG text, so the server
+render and the browser render agree and nothing is read from a DOM; a label
+that does not wrap lays out exactly as it does as SVG text. Unset, labels
+stay SVG text, where Mermaid's own default is HTML. Only a renderer that
+draws `foreignObject` (a browser) shows HTML labels: an SVG file meant for a
+rasterizer leaves them off.
+
+```js
+import { compileMermaid } from '@jarenjs/mermaid';
+
+const source = `flowchart TD
+  A[The quick brown fox jumps over the lazy dog twice] --> B[Done]`;
+
+compileMermaid(source, { htmlLabels: true }).toLayout().nodes[0].lines;
+// ['The quick brown fox jumps over', 'the lazy dog twice']
+compileMermaid(source, { htmlLabels: true }).toSvgString();
+// '<svg …><foreignObject …><div xmlns="http://www.w3.org/1999/xhtml" class="mm-label" …><div>The quick brown fox jumps over</div>…'
+compileMermaid(source).toSvgString().includes('foreignObject'); // false
+```
+
+The `@jarenjs/view` safe policy drops `foreignObject`, and the labels in it —
+which is why a diagram cannot enable HTML labels by itself: a host that
+renders through that policy and passes nothing keeps SVG text. `safe: true`
+(to `renderMermaid`, `mermaidPlugin`, `createMermaidComponent`, …) keeps
+SVG text even beside `htmlLabels: true`.
+
 **Pan, zoom and touch are opt-in.** `mermaidPlugin({ interactive: true })`
 adds a `hydrate` that attaches to the finished SVG; the render is unchanged
 and server output is byte-identical either way, so a page that does not ask

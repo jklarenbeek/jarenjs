@@ -131,12 +131,13 @@ function displayId(id) {
 
 /**
  * The visible text of the first element matching `selector` under `parent`,
- * one space between its lines.
+ * one space between its lines: an SVG label's `tspan`s, or an HTML label's
+ * line blocks (`htmlLabels`).
  */
 function labelOf(parent, selector) {
   const label = parent.querySelector(selector);
   if (label === null || label === undefined) return '';
-  const lines = [...label.querySelectorAll('tspan')]
+  const lines = [...label.querySelectorAll('tspan'), ...label.querySelectorAll('div')]
     .map((line) => String(line.textContent ?? '').trim())
     .filter((line) => line !== '');
   return lines.length > 0 ? lines.join(' ') : String(label.textContent ?? '').trim();

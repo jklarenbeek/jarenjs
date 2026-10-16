@@ -26,6 +26,10 @@ import { compileMermaid, diagramToVnode } from '../index.js';
 /**
  * @typedef {object} MermaidComponentOptions
  * @property {any} [theme] theme name or override object
+ * @property {boolean} [htmlLabels] draw flowchart and state labels as HTML in `foreignObject` unless
+ *   a diagram's config turns them off; a diagram's own `htmlLabels` cannot turn them on
+ * @property {boolean} [safe] keep every label SVG text whatever `htmlLabels` says, for output a host
+ *   renders through the `@jarenjs/view` safe policy (which drops `foreignObject`)
  * @property {{ pie?: import('../render/index.js').DiagramRenderer }} [renderers] renderers for the
  *   types this engine does not draw itself — a pie, from `@jarenjs/charts/transforms/mermaid-adapter`
  * @property {import('@jarenjs/core/dates').DateNames} [dateNames] the locale-name record a Gantt's
@@ -59,7 +63,8 @@ import { compileMermaid, diagramToVnode } from '../index.js';
  */
 export function createMermaidComponent(options = {}) {
   const compileOptions = { theme: options.theme, renderers: options.renderers,
-    dateNames: options.dateNames, parseFrontmatter: options.parseFrontmatter };
+    dateNames: options.dateNames, parseFrontmatter: options.parseFrontmatter,
+    htmlLabels: options.htmlLabels, safe: options.safe };
 
   const { compile, view } = createProjectionMemo({
     memoLimit: options.memoLimit ?? 32,

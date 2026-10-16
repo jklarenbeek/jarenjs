@@ -24,9 +24,12 @@ import { toMermaid } from './to-mermaid.js';
 import { hashContent } from './utils.js';
 
 /**
- * @param {{ theme?: any, interactive?: boolean, tooltips?: boolean, renderers?: { pie?: import('./render/index.js').DiagramRenderer },
+ * @param {{ theme?: any, interactive?: boolean, tooltips?: boolean, htmlLabels?: boolean, safe?: boolean,
+ *   renderers?: { pie?: import('./render/index.js').DiagramRenderer },
  *   [k: string]: any }} [options] - `renderers.pie` draws a pie fence (charts'
- *   `mermaidPieRenderer`); without it a pie renders the placeholder
+ *   `mermaidPieRenderer`); without it a pie renders the placeholder.
+ *   `htmlLabels` lets flowchart and state labels be HTML (a fence's own
+ *   config cannot); `safe` keeps them SVG text whatever it says
  * @returns {Readonly<{ name: string, fences: string[], node: string, render: (node: any, h: any, ctx: any) => any }>}
  */
 export function mermaidPlugin(options = {}) {

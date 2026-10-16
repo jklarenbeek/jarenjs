@@ -23,9 +23,10 @@ const END_ID = '__end';
 /**
  * Lay out a state AST through the flowchart engine.
  * @param {any} ast state AST ({ states, transitions })
+ * @param {import('./flowchart.js').FlowchartLayoutOptions} [options] how the labels are drawn
  * @returns {any} PositionedDiagram
  */
-export function layoutState(ast) {
+export function layoutState(ast, options = {}) {
   const nodes = [];
   const edges = [];
   let hasStart = false;
@@ -61,5 +62,5 @@ export function layoutState(ast) {
     classDefs: [],
     classes: [],
     styles: [],
-  });
+  }, options);
 }

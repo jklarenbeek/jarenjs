@@ -23,10 +23,11 @@ a fixed point of the canonical printer `toMermaid`.
 ### 1.2 Non-goals (v0.1)
 
 Pixel-identity with browser-Mermaid is an explicit **non-goal**. Labels
-are SVG `<text>` (Mermaid `htmlLabels: false` semantics), because
-`@jarenjs/view` 0.1 has no `foreignObject`. Layout is a deterministic
-approximation over a headless text-metrics table (no `getBBox`). See
-§6.
+are SVG `<text>` (Mermaid `htmlLabels: false` semantics) unless the host
+enables HTML labels for flowchart and state diagrams (§3, §7) — the
+reverse of Mermaid's default, which is HTML. Layout is a deterministic
+approximation over a headless text-metrics table (no `getBBox`), for HTML
+labels too. See §6.
 
 ## 2. The DiagramDocument envelope
 
@@ -72,6 +73,32 @@ round-trips byte-for-byte while a node is untransformed (§5).
 The engine may not statically import `@jarenjs/md`; a host with the md
 frontmatter parser can inject it via `parseMermaidConfig(source, {
 parseFrontmatter })`, otherwise the built-in YAML subset is used.
+
+**HTML labels are the host's to enable.** A flowchart or state diagram
+draws its labels as HTML (§7) only when the host passes `htmlLabels: true`
+in the render options (`renderMermaid`, `diagramToVnode`, `compileMermaid`,
+`layoutDiagram`, `createMermaidRenderer`, `mermaidPlugin`,
+`createMermaidComponent`). A diagram's own `htmlLabels` cannot turn them
+on, so no author's directive can blank the labels on a host that renders
+through the `@jarenjs/view` safe policy (§7); it can turn them off, as
+Mermaid's directive overrides its site config: `htmlLabels` (or the older
+`flowchart.htmlLabels`; the root one wins when both are written) reading
+`false`, `"false"`, `"null"` or `"0"` keeps SVG text. `safe: true` keeps
+SVG text whatever either says. `flowchart.wrappingWidth`, a positive number
+of px (default 200, Mermaid's), is where an HTML label line wraps (§6).
+Every other diagram type ignores all three. Like every config member, the
+diagram's stay in `config` and `toMermaid` prints them back.
+
+**Only theme tokens reach the theme.** With no `theme` render option, a
+config `theme` that is a name picks that theme; otherwise the config
+members named like a theme token (`nodeFill`, `nodeText`, …, the keys of
+`THEMES.default`) override it, and no other member does — Mermaid's
+`themeVariables` names (`primaryColor`, …) are not this engine's tokens and
+are ignored. Every override value, a host's included, becomes one
+`--mm-*` custom-property value on the root's inline style, so a value that
+could end that declaration or open another (`;`, `{`, `}`, `<`, a
+backslash, a line break, `/*`, an unclosed quote) or is neither a string
+nor a finite number is dropped and the theme keeps its own value.
 
 ## 4. The AST vocabulary
 
@@ -591,17 +618,31 @@ transition `label`s become edge labels verbatim, and the `[*]`
 pseudo-states become synthetic `__start`/`__end` nodes (a fixed-size
 filled `statedot` and an empty-labeled `doublecircle` ring — shapes
 only the adapter produces; flowchart source cannot spell them).
+
+**HTML labels are measured, not asked for.** With HTML labels (§3), every
+node and edge label line wider than `flowchart.wrappingWidth` wraps at its
+spaces, greedily, as a browser wraps Mermaid's HTML label at its maximum
+width; a word wider than the width keeps its line, as a browser lets it
+overflow. The lines are measured with the same advance table as SVG text
+and each box is sized for them, so a label that does not wrap lays out
+exactly as it does as SVG text, and a wrapped one makes a narrower,
+taller box in the same rank and order. No layout is read from a DOM — not
+in SSR, not in a browser — so the geometry is the same wherever it is
+computed. The scene then carries `htmlLabels: true` and the wrapped
+`lines` of every node and edge label; the SVG-text scene has neither.
 Composite states stay flattened in v1, their recorded `parent` not yet
 drawn as a cluster. `compileMermaid(source).toLayout()` exposes the
 scene as a cached projection — reference-equal on repeated calls, null
-for types without a geometric layout — so an editor hit-tests against
-pure geometry without re-running layout.
+for types without a geometric layout, laid out with the options the
+document is drawn with (`layoutDiagram(doc, options)`) — so an editor
+hit-tests against the boxes it sees without re-running layout.
 
 ## 7. Rendering
 
 `diagramToVnode` turns a `PositionedDiagram` into a tagged-array SVG
 vnode rooted at `['svg', …]`, which the `@jarenjs/view` patcher creates
-in the SVG namespace. It is synchronous, complete and **error-safe**: a
+in the SVG namespace (an HTML label's `foreignObject` content in the HTML
+one). It is synchronous, complete and **error-safe**: a
 parse/layout failure returns an error vnode, never throws. `toSvgString`
 is `renderToString` of that vnode — a valid standalone SVG with no
 browser.
@@ -630,3 +671,32 @@ it as the text of its first child `<desc>`, which draws nothing and is escaped
 like any label, so the author's text never becomes markup and the standalone
 SVG stays well-formed whatever it holds. The opt-in tooltips
 (`mermaidPlugin({ tooltips: true })`) read exactly these markers.
+
+**HTML labels.** A flowchart or state diagram the host renders with
+`htmlLabels: true` (§3) draws each node label, edge label and subgraph title as a
+`foreignObject` holding an XHTML `div` that carries the label's marker
+class (`mm-label`, `mm-edge-label`, `mm-cluster-label`) and one block `div`
+per line the layout measured (§6). The `foreignObject` covers the node box
+(the edge label's background, a 20px band at the top of a subgraph frame);
+the text is centered in it at 14px with line height 1.2 — the advance
+table's, where Mermaid's HTML uses 1.5 — never wrapped again by the browser
+and free to overflow rather than clip when the host's font runs wider than
+the table. Its color is the theme's `--mm-node-text` (`--mm-edge-label-text`
+for an edge), a custom property every root declares, or the `color` an
+author's style names. The text is escaped like SVG text and nothing in it
+is read as markup: a `<br>` breaks the line as it does in SVG text, and
+Mermaid's entity codes (`#quot;`) and markdown strings print as literally
+as they do there. No void element is written, so the standalone SVG stays
+well-formed XML — but only a renderer that draws `foreignObject` (a
+browser) shows its labels; a rasterizer or an SVG viewer that does not
+shows none, so a host producing output for one leaves `htmlLabels` unset.
+The node and edge markers are unchanged, and the tooltips read an HTML
+label's lines as they read SVG text's.
+
+The `@jarenjs/view` safe policy drops `foreignObject` and everything in it,
+so an HTML-label diagram rendered through it loses its labels. That is why
+the host, not the diagram, enables them (§3): a host that renders through
+the safe policy and passes nothing keeps SVG text whatever a diagram's
+config says. `safe: true` in the same render options keeps every label SVG
+text even when `htmlLabels: true` is passed — the output is then the
+SVG-text output, byte for byte.

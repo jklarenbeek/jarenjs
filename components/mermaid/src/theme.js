@@ -170,11 +170,54 @@ export const HOST_VARS = {
 /**
  * Resolve a theme. The name `'host'` resolves the default tokens linked
  * to the host token vocabulary via {@link HOST_VARS}.
+ *
+ * Every override value becomes one custom-property value on the root's
+ * inline style, so a value that could end that declaration or open another
+ * (`;`, `{`, `}`, `<`, a backslash, a line break, `/*`, an unclosed quote), and
+ * a value that is neither a string nor a finite number (which used to print
+ * as `[object Object]`), is dropped: the theme keeps its own value for it.
  * @param {string | Record<string, any>} [nameOrOverrides]
  * @returns {{ name: string, tokens: Record<string, string>, cssVars: Record<string, string> }}
  */
 export function createTheme(nameOrOverrides = 'default') {
-  return resolveTheme(THEMES, 'mm', nameOrOverrides, HOST_VARS);
+  return resolveTheme(THEMES, 'mm', usableOverrides(nameOrOverrides), HOST_VARS);
+}
+
+/** What ends a declaration in an inline style, or opens a block or a comment. */
+const RE_UNUSABLE = /[;{}<\\\n\r\f]|\/\*/;
+
+/**
+ * Whether a value can stand as one custom-property value and nothing more.
+ * @param {unknown} value
+ * @returns {boolean}
+ */
+function usableValue(value) {
+  if (typeof value === 'number') return Number.isFinite(value);
+  if (typeof value !== 'string' || RE_UNUSABLE.test(value)) return false;
+  return (value.split('"').length - 1) % 2 === 0 && (value.split("'").length - 1) % 2 === 0;
+}
+
+/**
+ * An override object with every unusable value dropped (its `vars` links
+ * too); a theme name passes through.
+ * @param {string | Record<string, any>} arg
+ * @returns {string | Record<string, any>}
+ */
+function usableOverrides(arg) {
+  if (arg === null || typeof arg !== 'object') return arg;
+  /** @type {Record<string, any>} */
+  const out = {};
+  for (const key of Object.keys(arg)) {
+    const value = arg[key];
+    if (key === 'vars' && value !== null && typeof value === 'object') {
+      /** @type {Record<string, any>} */
+      const vars = {};
+      for (const name of Object.keys(value)) if (usableValue(value[name])) vars[name] = value[name];
+      out.vars = vars;
+    }
+    else if (usableValue(value)) out[key] = value;
+  }
+  return out;
 }
 
 export { THEMES };

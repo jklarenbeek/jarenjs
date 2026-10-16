@@ -146,6 +146,20 @@ describe('createMermaidRenderer: host-DOM factory', function () {
     assert.equal(seqMarkup.includes('Start'), false);
   });
 
+  it('mounts HTML labels when the host asks, and SVG text under safe', function () {
+    const source = 'flowchart TD\n  A[Start] --> B[End]';
+    const html = createStubHost();
+    createMermaidRenderer({ container: html.container, document: html.document, htmlLabels: true })(source);
+    const htmlMarkup = serialize(html.container);
+    assert.equal(htmlMarkup.split('<foreignObject').length - 1, 2);
+    assert.match(htmlMarkup, /<div[^>]*xmlns="http:\/\/www.w3.org\/1999\/xhtml"[^>]*><div>Start<\/div><\/div>/);
+    const safe = createStubHost();
+    createMermaidRenderer({ container: safe.container, document: safe.document, htmlLabels: true, safe: true })(source);
+    const safeMarkup = serialize(safe.container);
+    assert.equal(safeMarkup.includes('foreignObject'), false);
+    assert.match(safeMarkup, />Start</);
+  });
+
   it('renders an error vnode for bad source without throwing', function () {
     const { document, container } = createStubHost();
     const render = createMermaidRenderer({ container, document });

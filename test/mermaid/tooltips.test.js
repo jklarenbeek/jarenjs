@@ -105,9 +105,9 @@ function build(vnode) {
 }
 
 /** A figure element around the rendered diagram, as the md component has it. */
-function figure(source) {
+function figure(source, options = {}) {
   const el = new Node('div');
-  el.appendChild(build(diagramToVnode(source, {})));
+  el.appendChild(build(diagramToVnode(source, options)));
   const document = new Node('#document');
   document.createElement = (tag) => new Node(tag);
   document.documentElement = { clientWidth: 800, clientHeight: 600 };
@@ -153,6 +153,22 @@ describe('tooltips — what a node says', () => {
     f.fire(f.node('A'), 'focusout');
     f.fire(f.node('B'), 'focusin');
     assert.strictEqual(f.tip().textContent, 'one two (B)\nfrom: A');
+  });
+
+  it('reads HTML labels as it reads SVG text, one space between their lines', () => {
+    for (const [source, id, text] of [
+      [FLOW, 'B', 'Pick (B)\nfrom: Start\nto: Done (yes), Start (no)'],
+      ['flowchart LR\n  A --> B["one<br/>two"]', 'B', 'one two (B)\nfrom: A'],
+      ['flowchart LR\n  A --> B["one<br/>two"]', 'A', 'A\nto: one two'],
+    ]) {
+      for (const htmlLabels of [false, true]) {
+        const f = figure(source, { htmlLabels });
+        assert.equal(f.svg.querySelectorAll('div').length > 0, htmlLabels);
+        attachDiagramTooltips(f.el, { document: f.document });
+        f.fire(f.node(id), 'focusin');
+        assert.strictEqual(f.tip().textContent, text, source);
+      }
+    }
   });
 
   it('reads a state diagram, naming the unlabelled start state as a word', () => {

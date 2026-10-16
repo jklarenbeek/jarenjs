@@ -7,7 +7,7 @@
  * tests catch any drift. Output is a host-free `PositionedDiagram`.
  */
 
-import { measureText } from '@jarenjs/view/helpers';
+import { measureText, textWidth } from '@jarenjs/view/helpers';
 import { coord as round } from '../utils.js';
 
 import { resolveNodeStyles } from '../styles.js';
@@ -22,21 +22,41 @@ const NODE_SEP = 40;
 const MARGIN = 12;
 const SUBGRAPH_PAD = 18;
 const SUBGRAPH_LABEL_H = 22;
+/** Mermaid's default `flowchart.wrappingWidth`: the widest an HTML label
+ * line grows before it wraps. */
+const WRAPPING_WIDTH = 200;
+
+/**
+ * How the labels are drawn, which decides how they are measured.
+ * @typedef {object} FlowchartLayoutOptions
+ * @property {boolean} [htmlLabels] the labels are HTML (`foreignObject`):
+ *   each line wraps at `wrappingWidth`, the scene carries the wrapped
+ *   `lines` of every node and edge label, and the boxes are sized for them
+ * @property {number} [wrappingWidth] the widest an HTML label line grows
+ *   before it wraps, in px (default 200, Mermaid's)
+ */
 
 /**
  * @param {any} ast flowchart AST
+ * @param {FlowchartLayoutOptions} [options]
  * @returns {any} PositionedDiagram
  */
-export function layoutFlowchart(ast) {
+export function layoutFlowchart(ast, options = {}) {
   const nodeStyles = resolveNodeStyles(ast);
   const dir = ast.direction || 'TB';
   const horizontal = dir === 'LR' || dir === 'RL';
+  // The label text as it is drawn: SVG text breaks only where the author
+  // did; an HTML label also wraps at the wrapping width, measured with the
+  // same advance table, so a box fits its label with no DOM to ask.
+  const html = options.htmlLabels === true;
+  const wrapAt = options.wrappingWidth ?? WRAPPING_WIDTH;
+  const textOf = html ? (/** @type {string} */ label) => wrapLabel(label, wrapAt) : (/** @type {string} */ label) => label;
 
   // 1. Node boxes from label metrics.
   /** @type {Map<string, any>} */
   const boxes = new Map();
   for (const node of ast.nodes) {
-    boxes.set(node.id, sizeNode(node));
+    boxes.set(node.id, sizeNode(node, textOf(node.label)));
   }
 
   // 2. Rank assignment (longest path over predecessors).
@@ -140,6 +160,7 @@ export function layoutFlowchart(ast) {
     // Carried on the positioned node so the scene stays self-describing: a
     // renderer never has to reach back into the AST to know how to paint.
     if (styles !== undefined) box.styles = styles;
+    if (html) box.lines = b.lines;
     return box;
   });
 
@@ -161,9 +182,10 @@ export function layoutFlowchart(ast) {
     if (e.label != null) {
       // Measured, not estimated from the character count: the renderer used to
       // guess the background width and a wide label overflowed its own box.
-      const m = measureText(e.label, FONT_SIZE);
+      const m = measureText(textOf(e.label), FONT_SIZE);
       edge.labelW = m.width + LABEL_PAD;
       edge.labelH = m.height + LABEL_PAD / 2;
+      if (html) edge.lines = m.lines;
       edge.labelPos = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
     }
     return edge;
@@ -197,7 +219,7 @@ export function layoutFlowchart(ast) {
     height = Math.max(height, s.y + s.h + MARGIN);
   }
 
-  return {
+  const scene = {
     type: 'flowchart',
     direction: dir,
     width: round(width),
@@ -207,13 +229,46 @@ export function layoutFlowchart(ast) {
     subgraphs: subgraphs.map(roundBox),
     fontSize: FONT_SIZE,
   };
+  // Only an HTML-label scene says so: the SVG-text scene stays as it was.
+  if (html) scene.htmlLabels = true;
+  return scene;
+}
+
+/**
+ * A label's text with every line longer than `width` wrapped at its spaces,
+ * greedily, as a browser wraps an HTML label at its maximum width. A word
+ * wider than `width` keeps its line, as a browser lets it overflow.
+ * @param {string} label
+ * @param {number} width
+ * @returns {string}
+ */
+function wrapLabel(label, width) {
+  const out = [];
+  for (const line of label.split('\n')) {
+    if (textWidth(line, FONT_SIZE) <= width) {
+      out.push(line);
+      continue;
+    }
+    let current = '';
+    for (const word of line.split(' ')) {
+      const candidate = current === '' ? word : current + ' ' + word;
+      if (current !== '' && textWidth(candidate, FONT_SIZE) > width) {
+        out.push(current);
+        current = word;
+      }
+      else current = candidate;
+    }
+    out.push(current);
+  }
+  return out.join('\n');
 }
 
 /**
  * @param {any} node
+ * @param {string} text the label as it is drawn
  * @returns {any}
  */
-function sizeNode(node) {
+function sizeNode(node, text) {
   const shape = node.shape;
   // The state-diagram pseudo-states are fixed-size markers, never
   // label-sized boxes. An empty-labeled doublecircle cannot come from
@@ -225,7 +280,7 @@ function sizeNode(node) {
   if (shape === 'doublecircle' && node.label === '') {
     return { x: 0, y: 0, w: 22, h: 22, lines: [] };
   }
-  const m = measureText(node.label, FONT_SIZE);
+  const m = measureText(text, FONT_SIZE);
   let w = m.width + 2 * PAD_X;
   let h = m.height + 2 * PAD_Y;
   if (shape === 'circle' || shape === 'doublecircle') {

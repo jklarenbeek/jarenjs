@@ -695,6 +695,18 @@ describe('gantt layout is deterministic geometry', () => {
     assert.strictEqual(layoutDiagram(doc).kind, 'gantt');
   });
 
+  it('should lay out with the render options, as it is drawn', () => {
+    // toLayout() used to drop the options: a month-name axis drew with the
+    // names it was handed and threw from the layout an editor asked for
+    const source = 'gantt\n  dateFormat YYYY-MM-DD\n  axisFormat %b %d\n  section A\n  t1 :a1, 2024-01-01, 60d';
+    const options = { dateNames: compileDateLocale(nl).names };
+    const compiled = compileMermaid(source, options);
+    const scene = compiled.toLayout();
+    assert.deepStrictEqual(scene, layoutGantt(parseMermaid(source, options).ast, options));
+    assert.deepStrictEqual(scene.ticks.slice(0, 3).map((/** @type {any} */ t) => t.label), ['jan 01', 'jan 15', 'jan 29']);
+    assert.ok(compiled.toSvgString().includes('>jan 01<'));
+  });
+
   it('should be byte-identical across two runs of the same document', () => {
     const again = layoutGantt(parseMermaid(PLAN).ast);
     assert.deepStrictEqual(again, scene);
