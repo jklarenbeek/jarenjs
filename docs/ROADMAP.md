@@ -872,6 +872,3 @@ machine — the opt-in workflow or a local one — and its result recorded here.
   end-to-end test uses real keyboard input, where OS-level IME and focus
   behaviour shows. The ICU cross-check of number formatting skips unless the
   runtime's ICU is the one it was measured against.
-
-## Benchmarks & tooling
-
