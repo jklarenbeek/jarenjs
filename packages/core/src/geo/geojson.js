@@ -394,7 +394,38 @@ function measuredLength(geometry, radius) {
 
 /** @param {any} geometry @param {number} lon @param {number} lat @returns {boolean} */
 function measuredContains(geometry, lon, lat) {
-  return containsAt(geometry, lon, lat, 1);
+  try {
+    return containsAt(geometry, lon, lat, 1);
+  }
+  catch (error) {
+    if (!(error instanceof TypeError))
+      throw error;
+  }
+  const { type, coordinates } = geometry;
+  if (type === 'Polygon')
+    return readableContains(coordinates, lon, lat);
+  if (type === 'MultiPolygon') {
+    for (const rings of membersOf(coordinates)) {
+      if (readableContains(rings, lon, lat))
+        return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Whether a polygon's rings, read as {@link readableRings} reads them,
+ * contain a position: never when a ring cannot be read (one that is not
+ * an array, or misses a position), as `pointInPolygon` answers for one
+ * holding a member that is not a position of finite numbers.
+ * @param {any} rings
+ * @param {number} lon
+ * @param {number} lat
+ * @returns {boolean}
+ */
+function readableContains(rings, lon, lat) {
+  const read = readableRings(rings);
+  return !(Array.isArray(read) && read.includes(NO_MEMBERS)) && pointInPolygon(lon, lat, read);
 }
 
 /** @param {any} geometry @returns {boolean} */
