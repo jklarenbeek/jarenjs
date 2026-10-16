@@ -31,21 +31,16 @@ delete it or fix it.
 (RFC 9535, passing the complete official compliance suite), JSON Patch
 (RFC 6902) and Merge Patch (RFC 7396). See
 [`packages/json/ARCHITECTURE.md`](../packages/json/ARCHITECTURE.md).
-- [ ] **Geometry measurements crash uncoded on a malformed collection
-  member.**" (lines 34-42). - RETIRE whole: "**`$eq` takes exponential time
-  over two separately built shared values.**" (lines 43-47). - NARROW
-  "**`semanticKey`, `stableStringify` and `contentKey` exhaust the heap on a
-  heavily shared value.**" (lines 48-53) to: "**`semanticKey`,
-  `stableStringify` and `contentKey` escape uncoded on a text longer than the
-  host's longest string.** A heavily shared value (`d = [d, d]`) is written in
-  space linear in its distinct containers, with the same text, until the text
-  passes the host's longest string; then the host's own `RangeError` (`Invalid
-  string length`) escapes. A coded resource refusal needs a new code in the
-  JSON value table (`CANONICAL_CODES` of `@jarenjs/json/canonical` and the
-  `JO` table of the json README), and a reader that flattens such a text (a
-  `Map` lookup on the key, `contentKey`'s hash) still holds it whole. The
-  formula compile and batch keys call `semanticKey` on host options (`limits`,
-  `revision`).
+- [ ] **`semanticKey`, `stableStringify` and `contentKey` escape uncoded on a
+  text longer than the host's longest string.** A heavily shared value (`d =
+  [d, d]`) is written in space linear in its distinct containers, with the
+  same text, until the text passes the host's longest string; then the host's
+  own `RangeError` (`Invalid string length`) escapes. A coded resource refusal
+  needs a new code in the JSON value table (`CANONICAL_CODES` of
+  `@jarenjs/json/canonical` and the `JO` table of the json README), and a
+  reader that flattens such a text (a `Map` lookup on the key, `contentKey`'s
+  hash) still holds it whole. The formula compile and batch keys call
+  `semanticKey` on host options (`limits`, `revision`).
 - [ ] **A position that is not a pair is measured as coordinates of `NaN`.**
   `geometryLength`, `geometryArea` and `containsPosition` of
   `@jarenjs/core/geo` (and `$length`, `$area`, `$within`) read a present
