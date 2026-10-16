@@ -4,7 +4,10 @@
  * one place the suite formats a number for display: notation control
  * (auto/fixed/sci/eng), thousands grouping and radix output, plus a
  * radix-aware `parseNumber`. Radix I/O delegates to `math/word.js` so
- * base conversion is never re-implemented.
+ * base conversion is never re-implemented. Both read a language's
+ * characters from a decimal format record (`decimalFormat`), the record
+ * `@jarenjs/locales` compiles from a pack and `$format-number` of
+ * `@jarenjs/json` formats pictures with, so core needs no locale data.
  */
 
 import { toBase, fromBase } from './word.js';
@@ -15,8 +18,161 @@ import { toBase, fromBase } from './word.js';
  * @property {number} [precision] significant/decimal digits (notation-dependent)
  * @property {boolean|string} [group] thousands separator: true → ',', or a custom string
  * @property {number} [radix] 2..36; when not 10, `value` is formatted as an integer word
- * @property {string} [decimal] decimal mark, default '.'
+ * @property {string} [decimal] decimal mark, default '.' (the record's under `decimalFormat`)
+ * @property {DecimalFormatLike} [decimalFormat] write a base-10 number in a
+ *   language's characters: its decimal separator, its grouping separator for
+ *   `group: true`, its minus sign, digits, exponent separator and the words
+ *   for infinity and NaN
  */
+
+/**
+ * The characters a language writes a number with: the members of the
+ * decimal format record `compileNumberLocale(pack).decimalFormat` of
+ * `@jarenjs/locales` produces (and `$format-number` of `@jarenjs/json`
+ * reads). Members it leaves out are English.
+ * @typedef {object} DecimalFormatLike
+ * @property {string} decimalSeparator
+ * @property {string} groupingSeparator
+ * @property {string} [minusSign] default '-'
+ * @property {string} [zeroDigit] the zero of the digit family, default '0'
+ * @property {string} [exponentSeparator] default 'e'
+ * @property {string} [infinity] default '∞'
+ * @property {string} [NaN] default 'NaN'
+ */
+
+/**
+ * @typedef {object} NumberCharacters
+ * @property {string} decimal
+ * @property {string} group
+ * @property {string} minus
+ * @property {number} zero - the zero's code point
+ * @property {string} exponent
+ * @property {string} infinity
+ * @property {string} nan
+ * @property {RegExp} [grammar] - built on the first read
+ */
+
+/** @type {WeakMap<object, NumberCharacters>} */
+const readRecords = new WeakMap();
+
+/** Whether a code point is a Unicode decimal digit (Nd). @param {number} cp */
+const isNd = (cp) => cp >= 0 && cp <= 0x10FFFF && /^\p{Nd}$/u.test(String.fromCodePoint(cp));
+
+/**
+ * Whether a code point is the zero of a decimal digit family. Unicode lays
+ * every family out as a run of ten consecutive Nd code points, zero first,
+ * and runs can follow one another (the mathematical digits): a zero is an
+ * Nd code point at a multiple of ten into its run.
+ * @param {number} cp
+ * @returns {boolean}
+ */
+export function isDigitZero(cp) {
+  if (!isNd(cp) || !isNd(cp + 9)) return false;
+  let before = 0;
+  while (before < 50 && isNd(cp - before - 1)) before++;
+  return before % 10 === 0;
+}
+
+/**
+ * Check a decimal format record once (a frozen one is remembered): the two
+ * separators non-empty, different and free of digits, so a number text
+ * reads one way only, and the zero digit the first of ten digits.
+ * @param {DecimalFormatLike} record
+ * @returns {NumberCharacters}
+ */
+function readNumberCharacters(record) {
+  const known = readRecords.get(record);
+  if (known !== undefined) return known;
+  if (record === null || typeof record !== 'object')
+    throw new TypeError('decimalFormat must be a decimal format record, such as compileNumberLocale(pack).decimalFormat');
+  const text = (/** @type {string} */ name, /** @type {string} */ fallback) => {
+    const value = /** @type {any} */ (record)[name] ?? fallback;
+    if (typeof value !== 'string' || value === '')
+      throw new TypeError(`decimalFormat.${name} must be a non-empty string`);
+    return value;
+  };
+  const decimal = text('decimalSeparator', '');
+  const group = text('groupingSeparator', '');
+  if (decimal === group || /\p{Nd}/u.test(decimal + group))
+    throw new TypeError(`decimalFormat's decimal separator '${decimal}' and grouping separator '${group}' must differ and hold no digit, or a number text reads two ways`);
+  const zeroText = text('zeroDigit', '0');
+  const zero = /** @type {number} */ (zeroText.codePointAt(0));
+  if ([...zeroText].length !== 1 || !isDigitZero(zero))
+    throw new TypeError(`decimalFormat.zeroDigit '${zeroText}' must be the zero of a family of ten digits`);
+  /** @type {NumberCharacters} */
+  const read = {
+    decimal, group, minus: text('minusSign', '-'), zero,
+    exponent: text('exponentSeparator', 'e'), infinity: text('infinity', '∞'), nan: text('NaN', 'NaN'),
+  };
+  if (Object.isFrozen(record)) readRecords.set(record, read);
+  return read;
+}
+
+/** ASCII digits in a digit family. @param {string} ascii @param {number} zero */
+function toFamily(ascii, zero) {
+  if (zero === 0x30) return ascii;
+  let out = '';
+  for (const c of ascii) {
+    const d = c.charCodeAt(0) - 0x30;
+    out += d >= 0 && d <= 9 ? String.fromCodePoint(zero + d) : c;
+  }
+  return out;
+}
+
+/** Digits of a family, and ASCII digits, as ASCII. @param {string} text @param {number} zero */
+function fromFamily(text, zero) {
+  if (zero === 0x30) return text;
+  let out = '';
+  for (const c of text) {
+    const cp = /** @type {number} */ (c.codePointAt(0));
+    out += cp >= zero && cp <= zero + 9 ? String.fromCharCode(0x30 + cp - zero) : c;
+  }
+  return out;
+}
+
+// written so it holds inside a character class and outside one under `u`
+const escapeRegExp = (/** @type {string} */ text) => text.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&').replace(/-/g, '\\x2d');
+
+/**
+ * The one grammar of a number written in a record's characters: an
+ * optional sign, an integer part either ungrouped or grouped in threes
+ * after a leading group of one to three digits, an optional fraction after
+ * the decimal separator, an optional exponent.
+ * @param {NumberCharacters} chars
+ * @returns {RegExp}
+ */
+function numberGrammar(chars) {
+  if (chars.grammar !== undefined) return chars.grammar;
+  const digit = chars.zero === 0x30 ? '[0-9]'
+    : `[0-9${escapeRegExp(String.fromCodePoint(chars.zero))}-${escapeRegExp(String.fromCodePoint(chars.zero + 9))}]`;
+  const minus = `${escapeRegExp(chars.minus)}|\\x2d|\\u2212`;
+  const group = escapeRegExp(chars.group);
+  chars.grammar = new RegExp(`^(?:(\\+)|(${minus}))?(${digit}{1,3}(?:${group}${digit}{3})+|${digit}+)`
+    + `(?:${escapeRegExp(chars.decimal)}(${digit}+))?`
+    + `(?:(?:${escapeRegExp(chars.exponent)}|[eE])(\\+|${minus})?(${digit}+))?$`, 'u');
+  return chars.grammar;
+}
+
+/**
+ * Read a base-10 number written in a record's characters, or NaN.
+ * @param {string} s - trimmed
+ * @param {NumberCharacters} chars
+ * @returns {number}
+ */
+function parseWritten(s, chars) {
+  for (const sign of ['', '+', '-', '\u2212', chars.minus]) {
+    if (!s.startsWith(sign)) continue;
+    const rest = s.slice(sign.length);
+    if (rest === chars.infinity || rest === '∞' || rest.toLowerCase() === 'infinity')
+      return sign === '' || sign === '+' ? Infinity : -Infinity;
+  }
+  const m = numberGrammar(chars).exec(s);
+  if (m === null) return NaN;
+  const whole = fromFamily(m[3].split(chars.group).join(''), chars.zero);
+  const fraction = m[4] === undefined ? '' : `.${fromFamily(m[4], chars.zero)}`;
+  const exponent = m[6] === undefined ? '' : `e${m[5] === undefined || m[5] === '+' ? '' : '-'}${fromFamily(m[6], chars.zero)}`;
+  return Number(`${m[2] === undefined ? '' : '-'}${whole}${fraction}${exponent}`);
+}
 
 /**
  * Insert a grouping separator every three digits of an integer string
@@ -74,19 +230,29 @@ function toEngineering(value, precision) {
  * - `"0.0509 ms"` - wants the value never to become `5.09e-5`, and must
  * either pass `notation: 'fixed'` or keep its own rounder. See
  * packages/core/docs/MATH.md.
+ *
+ * Under `decimalFormat` the text is the one `parseNumber` reads back
+ * under the same record: `formatNumber(1234.5, { decimalFormat: nlFormat,
+ * group: true })` is `'1.234,5'`. Grouping falls every three digits
+ * (a language's minimum grouping digits are not applied: Spanish 1234
+ * groups as `'1.234'`, which still reads back as 1234). A price with a
+ * currency sign in a fixed place is a picture, `'€ #.##0,00'`, for
+ * `$format-number` of `@jarenjs/json`, under the same record.
  * @param {number} value
  * @param {FormatOptions} [opts]
  * @returns {string}
+ * @throws {TypeError} when `decimalFormat` is not a record that reads one way
  */
 export function formatNumber(value, opts = {}) {
+  const chars = opts.decimalFormat === undefined ? undefined : readNumberCharacters(opts.decimalFormat);
   value = +value;
-  if (Number.isNaN(value)) return 'NaN';
-  if (value === Infinity) return '∞';
-  if (value === -Infinity) return '-∞';
+  if (Number.isNaN(value)) return chars ? chars.nan : 'NaN';
+  if (value === Infinity) return chars ? chars.infinity : '∞';
+  if (value === -Infinity) return chars ? chars.minus + chars.infinity : '-∞';
 
   const notation = opts.notation ?? 'auto';
-  const sep = opts.group === true ? ',' : (typeof opts.group === 'string' ? opts.group : '');
-  const decimal = opts.decimal ?? '.';
+  const sep = opts.group === true ? (chars ? chars.group : ',') : (typeof opts.group === 'string' ? opts.group : '');
+  const decimal = opts.decimal ?? (chars ? chars.decimal : '.');
 
   // Radix output: integer word in the requested base.
   if (opts.radix !== undefined && opts.radix !== 10) {
@@ -119,16 +285,21 @@ export function formatNumber(value, opts = {}) {
     }
   }
 
-  if (sep || decimal !== '.') {
+  if (sep || decimal !== '.' || chars) {
     const eIdx = out.search(/[eE]/);
-    const exp = eIdx >= 0 ? out.slice(eIdx) : '';
+    let exp = eIdx >= 0 ? out.slice(eIdx) : '';
     const mant = eIdx >= 0 ? out.slice(0, eIdx) : out;
     const dot = mant.indexOf('.');
-    const intPart = dot >= 0 ? mant.slice(0, dot) : mant;
-    const frac = dot >= 0 ? mant.slice(dot + 1) : '';
-    out = (sep ? groupInteger(intPart, sep) : intPart)
-      + (frac ? decimal + frac : '')
-      + exp;
+    let intPart = dot >= 0 ? mant.slice(0, dot) : mant;
+    let frac = dot >= 0 ? mant.slice(dot + 1) : '';
+    if (sep) intPart = groupInteger(intPart, sep);
+    if (chars) {
+      intPart = toFamily(intPart.startsWith('-') ? chars.minus + intPart.slice(1) : intPart, chars.zero);
+      frac = toFamily(frac, chars.zero);
+      if (exp) exp = chars.exponent + (exp[1] === '-' ? chars.minus : exp[1] === '+' ? '+' : '')
+        + toFamily(exp.replace(/^[eE][+-]?/, ''), chars.zero);
+    }
+    out = intPart + (frac ? decimal + frac : '') + exp;
   }
   return out;
 }
@@ -139,11 +310,34 @@ export function formatNumber(value, opts = {}) {
  * space) and base-10 scientific notation. Returns `NaN` on failure
  * rather than throwing.
  *
+ * Without `decimalFormat` the text is read as English: `.` is the decimal
+ * point and every `,`, `_` and space is dropped as grouping wherever it
+ * stands, so decimal-comma text misreads — `'3,45'` is 345, `'1.234,5'`
+ * is 1.2345, `'1,23'` is 123. Pass the language's decimal format to read
+ * its text instead.
+ *
+ * With `decimalFormat` (a record such as
+ * `compileNumberLocale(pack).decimalFormat`) a base-10 text has one
+ * reading: an optional `+` or minus sign (the record's, `-` or `−`), an
+ * integer part written either without grouping or with the record's
+ * grouping separator before every three digits after a leading group of
+ * one to three, an optional fraction after the record's decimal separator,
+ * and an optional exponent (the record's separator, `e` or `E`); digits
+ * are ASCII or the record's family. Anything else is `NaN`, never a guess:
+ * under Dutch `'1.234,5'` is 1234.5 and `'3,45'` is 3.45, while `'1,2,3'`,
+ * `'1.23'` and `'3.45'` are `NaN`. The infinity words (the record's, `∞`,
+ * `Infinity`) read as infinities; prefixed and `radix` input is read as
+ * without the record.
+ *
  * @param {string} str
- * @param {{ radix?: number }} [opts]
+ * @param {{ radix?: number, decimalFormat?: DecimalFormatLike }} [opts]
  * @returns {number}
+ * @throws {TypeError} when `decimalFormat` is not a record that reads one
+ *   way: separators empty, equal or holding a digit, a zero digit that is
+ *   no digit family's zero
  */
 export function parseNumber(str, opts = {}) {
+  const chars = opts.decimalFormat === undefined ? undefined : readNumberCharacters(opts.decimalFormat);
   if (typeof str !== 'number') str = String(str);
   else return +str;
   let s = str.trim();
@@ -162,6 +356,7 @@ export function parseNumber(str, opts = {}) {
       return NaN;
     }
   }
+  if (chars) return parseWritten(s, chars);
   // Base 10: strip grouping, keep the numeric grammar.
   const cleaned = s.replace(/[,_ ]/g, '');
   if (!/^[+-]?(\d+\.?\d*|\.\d+)(e[+-]?\d+)?$/i.test(cleaned)) return NaN;

@@ -20,7 +20,7 @@
  * rounds (`10.0e-1` under `0.0e0`).
  */
 
-import { roundDecimal, shiftDecimal, shortestDecimal } from '@jarenjs/core/math';
+import { isDigitZero, roundDecimal, shiftDecimal, shortestDecimal } from '@jarenjs/core/math';
 
 /**
  * A decimal format (F&O §4.7.1), every member one character but the two
@@ -61,23 +61,6 @@ export class FormatRefusal extends Error {
     this.messageId = messageId;
     this.params = params;
   }
-}
-
-/** Whether a code point is a Unicode decimal digit (Nd). @param {number} cp */
-const isNd = (cp) => cp >= 0 && cp <= 0x10FFFF && /^\p{Nd}$/u.test(String.fromCodePoint(cp));
-
-/**
- * Whether a code point is the zero of a decimal digit family. Unicode lays
- * every family out as a run of ten consecutive Nd code points, zero first,
- * and runs can follow one another (the mathematical digits): a zero is an
- * Nd code point at a multiple of ten into its run.
- * @param {number} cp
- */
-function isDigitZero(cp) {
-  if (!isNd(cp) || !isNd(cp + 9)) return false;
-  let before = 0;
-  while (before < 50 && isNd(cp - before - 1)) before++;
-  return before % 10 === 0;
 }
 
 /**

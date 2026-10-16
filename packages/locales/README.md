@@ -218,6 +218,35 @@ The picture is written in the format's own characters: under `nl` the
 decimal separator is `,`, so `'#,##0.00'` reads as a fraction and is
 refused, and the Dutch picture is `'#.##0,00'`.
 
+Host code reads and writes a plain number with the same record, through
+`formatNumber` and `parseNumber` of `@jarenjs/core/math`; a price with its
+currency sign in a fixed place stays a `$format-number` picture, as above:
+
+```js
+import { formatNumber, parseNumber } from '@jarenjs/core/math';
+import { compileJsonQuery } from '@jarenjs/json';
+import { compileNumberLocale, nl } from '@jarenjs/locales';
+
+const decimalFormat = compileNumberLocale(nl).decimalFormat;
+parseNumber('1.234,5', { decimalFormat });                          // 1234.5
+parseNumber('3,45', { decimalFormat });                             // 3.45
+parseNumber('1,2,3', { decimalFormat });                            // NaN: no Dutch reading
+formatNumber(-1234.5, { decimalFormat, group: true });              // '-1.234,5'
+formatNumber(3, { decimalFormat, notation: 'fixed', precision: 2 }); // '3,00'
+parseNumber('3,45');                                                // 345: without a record, English
+
+// a price: the picture compiled once, the number as the whole document
+const euro = compileJsonQuery({ '$format-number': ['$', '€ #.##0,00', 'nl'] }, { decimalFormats: { nl: decimalFormat } });
+euro(1234.5);                                                       // '€ 1.234,50'
+euro(-0.5);                                                         // '-€ 0,50'
+```
+
+Under a record a text has one reading — the record's grouping separator
+before every three digits or none at all, its decimal separator, its minus
+sign, digits ASCII or its family — and anything else is `NaN`, never a
+guess; what `formatNumber` writes under a pack `parseNumber` reads back
+under it. [`MATH.md`](../core/docs/MATH.md) of `@jarenjs/core` states the grammar.
+
 | Key | English | Record member |
 |---|---|---|
 | `number/decimal-separator` | `.` | `decimalSeparator` |

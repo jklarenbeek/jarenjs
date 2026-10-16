@@ -49,7 +49,9 @@ export const numberMessagesEn = {
 
 /**
  * A decimal format: the record `$format-number` and `$quantity` of
- * `@jarenjs/json` read (`options.decimalFormats`, or the operand itself).
+ * `@jarenjs/json` read (`options.decimalFormats`, or the operand itself),
+ * and `formatNumber`/`parseNumber` of `@jarenjs/core/math` take as
+ * `decimalFormat`.
  * @typedef {Object} DecimalFormat
  * @property {string} decimalSeparator
  * @property {string} groupingSeparator

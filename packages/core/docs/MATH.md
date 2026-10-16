@@ -68,9 +68,42 @@ first consumer; Mermaid draws no 3D and does not use it).
 ## Number formatting — `format.js`
 
 `formatNumber(value, { notation:'auto'|'fixed'|'sci'|'eng', precision,
-group, radix, decimal })` and radix-aware `parseNumber(str, { radix })`
-(recognizes `0x`/`0o`/`0b` prefixes, grouping separators and scientific
-notation; returns `NaN` on failure). Radix I/O delegates to `word.js`.
+group, radix, decimal, decimalFormat })` and radix-aware
+`parseNumber(str, { radix, decimalFormat })` (recognizes `0x`/`0o`/`0b`
+prefixes, grouping separators and scientific notation; returns `NaN` on
+failure). Radix I/O delegates to `word.js`.
+
+**A language's numbers.** Without `decimalFormat`, `parseNumber` reads
+English: `.` is the decimal point and every `,`, `_` and space is dropped as
+grouping wherever it stands, so decimal-comma text misreads (`'3,45'` is
+345, `'1.234,5'` is 1.2345, `'1,23'` is 123). `decimalFormat` takes the
+record `compileNumberLocale(pack).decimalFormat` of `@jarenjs/locales`
+compiles (any object with `decimalSeparator` and `groupingSeparator`, and
+optionally `minusSign`, `zeroDigit`, `exponentSeparator`, `infinity` and
+`NaN`), so core carries no locale data. Under it a text has one reading:
+an optional `+` or minus sign (the record's, `-` or `−`), an integer part
+written without grouping or with the record's grouping separator before
+every three digits after a leading group of one to three, an optional
+fraction after the record's decimal separator, an optional exponent (the
+record's separator, `e` or `E`), digits ASCII or the record's family.
+Anything else is `NaN`, never a guess: under Dutch `'1.234,5'` is 1234.5,
+`'3,45'` is 3.45 and `'10.000'` is 10000, while `'1,2,3'`, `'1.23'` and
+`'3.45'` are `NaN`; under English `'1,234.5'` is 1234.5 and `'3,45'` is
+`NaN`. Only the record's own grouping character is read: French groups
+with U+202F, and `'1 234,5'` written with an ASCII space is `NaN`.
+`formatNumber` writes the text the same record reads back (the round trip
+is tested under every shipped pack): its separators (`group: true` takes
+the record's), minus sign, digits, exponent separator and the words for
+infinity and NaN; grouping falls every three digits, so Spanish 1234
+groups as `'1.234'` although Spanish writes `1234` (CLDR's minimum
+grouping digits are not applied; the text still reads back as 1234). A
+record that cannot read one way — separators empty, equal or holding a
+digit, a zero digit that is no digit family's zero — is a `TypeError`. A
+price with its currency sign in a fixed place is a picture for
+`$format-number` of `@jarenjs/json` under the same record (`'€ #.##0,00'`
+writes `'€ 1.234,50'`). `isDigitZero(codePoint)` answers whether a code
+point is the zero of a decimal digit family, the check both the record
+here and `$format-number`'s decimal formats make.
 `Int32` and `Vec2i32` wrap every product to int32 exactly (`Math.imul`), so
 `Int32.dot(2147483647, 0, 2147483645, 0)` is `3`, the low 32 bits of the true
 product; a double product lost them past 2^53. The in-place `iadd`, `iadds`,
