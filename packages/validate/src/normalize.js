@@ -590,7 +590,10 @@ export function readsRefAlone(node, declaredDraft) {
 function compileNode(node, ctx) {
   if (!isJsonObject(node)) return null;
   // A schema that declares `$schema` is read per that draft, and the
-  // subschemas below it inherit it, as the validator reads them.
+  // subschemas below it inherit it, as the validator reads them. The
+  // normalizer holds no meta-schemas: a dialect it does not know by name is
+  // read as draft-07, where the validator reads one it holds by its
+  // meta-schema.
   if (typeof node.$schema === 'string') {
     const declaredDraft = detectSchemaDraft(node);
     if (declaredDraft !== ctx.declaredDraft) ctx = { ...ctx, declaredDraft };

@@ -71,7 +71,7 @@ describe("'$query' vocabulary and the Jaren 2020-12 dialect", () => {
         assert.deepStrictEqual(result.errors, [], JSON.stringify(query));
         // Each one compiles as a query: the keyword refuses only a free external.
         try { parse.compile({ $query: query }); }
-        catch (e) { assert.match(e.message, /cannot bind external 'minPrice'/); }
+        catch (e) { assert.match(e.message, /^JQ0005: invalid '\$query' document: '\$minPrice' is neither bound/); }
       }
     });
 
@@ -88,7 +88,7 @@ describe("'$query' vocabulary and the Jaren 2020-12 dialect", () => {
       const jaren = new JarenValidator().addMetaSchema([...draft2020], STANDARD);
       const schema = { $schema: STANDARD, $query: { $nope: 1 } };
       assert.strictEqual(jaren.validateSchema(schema), true);
-      assert.throws(() => jaren.compile(schema), /invalid '\$query' document .*JQ0002/);
+      assert.throws(() => jaren.compile(schema), { name: 'SchemaCompileError', code: 'JQ0002' });
     });
   });
 
@@ -150,7 +150,7 @@ describe("'$query' vocabulary and the Jaren 2020-12 dialect", () => {
     });
 
     it('still refuses a malformed $query at compile', () => {
-      assert.throws(() => withDialect().compile({ $schema: dialect, $query: { $nope: 1 } }), /invalid '\$query' document .*JQ0002/);
+      assert.throws(() => withDialect().compile({ $schema: dialect, $query: { $nope: 1 } }), { name: 'SchemaCompileError', code: 'JQ0002' });
     });
   });
 

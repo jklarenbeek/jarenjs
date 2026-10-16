@@ -20,7 +20,10 @@
  * `$dynamicAnchor`) that names two schemas — declared twice in a document,
  * or already naming another schema the validator holds — is refused where
  * the second is read (`JK0012`); one that two places of the registered
- * documents declare is refused by the compile that reads it. A schema `deriveStrictProfile`
+ * documents declare is refused by the compile that reads it. A `$query`
+ * document that does not compile is refused with the query compiler's own
+ * code (`JQ0xxx`, `@jarenjs/json/query`), located under the `$query`
+ * keyword, its error as the `cause`. A schema `deriveStrictProfile`
  * (`@jarenjs/validate/strict-profile`) cannot make strict is refused where
  * the derivation reads the place (`JK0101`–`JK0108`). When a validator
  * runs: a validation that nests more schema references than
@@ -74,8 +77,9 @@ export const VALIDATE_CODES = Object.freeze({
 export const REFERENCE_DEPTH_CEILING = 256;
 
 /**
- * Error thrown when a schema is refused while it is compiled
- * (`JK0xxx` codes).
+ * Error thrown when a schema is refused while it is compiled (`JK0xxx`
+ * codes, and the query compiler's `JQ0xxx` code for a `$query` document
+ * that does not compile).
  */
 export class SchemaCompileError extends CodedError {
   /**

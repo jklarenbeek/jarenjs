@@ -56,18 +56,6 @@ export function appliesRefSiblings(draft) {
 }
 
 /**
- * Whether a schema object's `$schema` names a draft this package reads by
- * name. Another dialect (a vocabulary metaschema, OpenAPI 3.1's) is read as
- * draft-07 by the declared-draft gates, but its dynamic references are read
- * as in a document that declares no draft.
- * @param {{ $schema: string }} schema
- * @returns {boolean}
- */
-export function namesKnownDraft(schema) {
-  return detectSchemaDraft(schema) !== 7 || /draft[-/]07/.test(schema.$schema);
-}
-
-/**
  * Check if a schema has $recursiveAnchor: true.
  * @param {object} schema - The schema object
  * @returns {boolean}
@@ -102,9 +90,12 @@ const FRAGMENT_BASE = 'urn:x:';
  * it sits ($defs, allOf branches, properties, ...), not just at the root.
  *
  * @param {object} schema - The resource root schema object
+ * @param {boolean} [propertyDependencies] - Whether the `propertyDependencies` keyword is on
+ * @param {number|null} [declaredDraft] - The draft the resource's place is read under, null for none
+ * @param {{ get(key: string): unknown }} [held] - The schemas a validator holds, by URI: a `$schema` naming one is read by its own
  * @returns {Array<{name: string, schema: object, validator: (function|null)}>}
  */
-export function collectDynamicAnchorsDeep(schema, propertyDependencies = false, declaredDraft = null) {
+export function collectDynamicAnchorsDeep(schema, propertyDependencies = false, declaredDraft = null, held = undefined) {
   const anchors = [];
   if (!isObjectClass(schema)) return anchors;
 
@@ -116,7 +107,7 @@ export function collectDynamicAnchorsDeep(schema, propertyDependencies = false, 
     if (seen.has(node)) continue;
     seen.add(node);
     // The draft a document declares is inherited by everything below it.
-    const draft = isStringType(node.$schema) ? detectSchemaDraft(node) : inheritedDraft;
+    const draft = isStringType(node.$schema) ? detectSchemaDraft(node, held) : inheritedDraft;
 
     if (Array.isArray(node)) {
       for (let i = 0; i < node.length; ++i) {

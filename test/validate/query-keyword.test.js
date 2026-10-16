@@ -250,38 +250,62 @@ describe("Schema '$query' keyword (Jaren JSON Query assertions)", () => {
   });
 
   describe('compile errors (schema compile time, not validation time)', () => {
-    it('should surface a malformed query document as a schema compile error', () => {
-      assert.throws(
-        () => new JarenValidator().compile({ $query: { $bogus: [1] } }),
-        (e) => {
-          assert.match(e.message, /invalid '\$query' document/);
-          // the engine error rides along as the cause, code and docPath intact
-          assert.strictEqual(e.cause.name, 'JsonQueryCompileError');
-          assert.strictEqual(e.cause.code, 'JQ0002');
-          return true;
-        });
-      // arity violation of a known operator
-      assert.throws(
-        () => new JarenValidator().compile({ $query: { $eq: [1] } }),
-        (e) => e.cause?.code === 'JQ0003');
+    /** The refusal a compile throws, as the plain fields a host or a model reads. */
+    const refusal = (schema) => {
+      try {
+        new JarenValidator().compile(schema);
+      }
+      catch (e) {
+        return { name: e.name, code: e.code, docPath: e.docPath, message: e.message,
+          cause: { name: e.cause?.name, code: e.cause?.code, docPath: e.cause?.docPath } };
+      }
+      return null;
+    };
+    const ROOT = 'https://github.com/jklarenbeek/jarenjs#';
+
+    it('refuses a malformed query document with the query compiler\'s code, located under $query', () => {
+      assert.deepStrictEqual(refusal({ $query: { $bogus: [1] } }), {
+        name: 'SchemaCompileError', code: 'JQ0002', docPath: `${ROOT}/%24query`,
+        message: `JQ0002: invalid '$query' document: unknown operator '$bogus' at ${ROOT}/%24query`,
+        cause: { name: 'JsonQueryCompileError', code: 'JQ0002', docPath: '' },
+      });
+      // arity violation of a known operator, located at the operator
+      assert.deepStrictEqual(refusal({ $query: { $eq: [1] } }), {
+        name: 'SchemaCompileError', code: 'JQ0003', docPath: `${ROOT}/%24query/%24eq`,
+        message: `JQ0003: invalid '$query' document: '$eq' takes exactly 2 operand(s), got 1 at ${ROOT}/%24query/%24eq`,
+        cause: { name: 'JsonQueryCompileError', code: 'JQ0003', docPath: '/$eq' },
+      });
       // mixed $-and-plain keys
-      assert.throws(
-        () => new JarenValidator().compile({ $query: { $eq: [1, 1], plain: 1 } }),
-        (e) => e.cause?.code === 'JQ0001');
+      assert.deepStrictEqual(refusal({ $query: { $eq: [1, 1], plain: 1 } }).code, 'JQ0001');
     });
 
-    it('should reject externals other than root and path by name', () => {
-      assert.throws(
-        () => new JarenValidator().compile({ $query: { $ge: ['$.price', '$minPrice'] } }),
-        (e) => {
-          assert.match(e.message, /'\$query' cannot bind external 'minPrice'/);
-          return true;
-        });
+    it('refuses an external other than root and path where the query names it (JQ0005)', () => {
+      assert.deepStrictEqual(refusal({ $query: { $ge: ['$.price', '$minPrice'] } }), {
+        name: 'SchemaCompileError', code: 'JQ0005', docPath: `${ROOT}/%24query/%24ge/1`,
+        message: `JQ0005: invalid '$query' document: '$minPrice' is neither bound by an enclosing phrase nor a declared external (declared externals: 'root', 'path') at ${ROOT}/%24query/%24ge/1`,
+        cause: { name: 'JsonQueryCompileError', code: 'JQ0005', docPath: '/$ge/1' },
+      });
+      // a nested $query: the schema location is spelled as a URI fragment
+      assert.deepStrictEqual(refusal({ $id: 'https://x.test/order', properties: { 'unit price': {
+        $query: { $and: [{ $exists: '$root' }, { $gt: ['$', '$floor'] }] } } } }).docPath,
+      'https://x.test/order#/properties/unit%20price/%24query/%24and/1/%24gt/1');
       // root and path themselves are of course fine
       assert.doesNotThrow(
         () => new JarenValidator().compile({ $query: { $and: [
           { $exists: '$root' }, { $exists: '$path' },
         ] } }));
+    });
+
+    it('keeps the recursive-literal refusal reachable through the cause chain', () => {
+      const jaren = new JarenValidator();
+      jaren.addSchema({ $id: 'https://x.test/r', $query: { $valid: ['$', { $ref: 'https://x.test/r' }] } });
+      assert.throws(() => jaren.compile({ $ref: 'https://x.test/r' })(1), (e) => {
+        assert.strictEqual(e.name, 'SchemaCompileError');
+        assert.strictEqual(e.code, 'JQ0009');
+        assert.strictEqual(e.cause.code, 'JQ0009');
+        assert.match(e.message, /recursive schema compilation through a query literal is not supported/);
+        return true;
+      });
     });
   });
 

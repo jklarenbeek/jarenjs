@@ -147,42 +147,22 @@ delete it or fix it.
   bundle than the validator's budget and measured no faster than the log on
   suite-size instances; a smaller encoding of it, or gating that pays for
   itself, is the open work.
-- [ ] **A dialect is read by its URI's spelling** — the draft a schema is
-  processed as comes from a substring of its `$schema` (`2020-12`, `2019-09`,
-  `draft-07`, …), never from the meta-schema that URI names, so a registered
-  dialect that extends 2020-12 under a URI without `2020-12` is processed as
-  draft-07: `{ $schema: 'https://example.com/my-dialect', prefixItems: [{
-  type: 'string' }] }` accepts `[1]` (plain 2020-12 refuses it). Following the
-  registered meta-schema's own `$schema` to a known draft is the open work. -
-  [ ] **A vocabulary is matched by substring** — `compile` turns the
-  validation vocabulary on when any `$vocabulary` key contains
-  `/vocab/validation` (and format assertion on for `/vocab/format-assertion`),
-  so a meta-schema declaring only core, applicator and
-  `https://example.com/vocab/validation-extras` still asserts `type` (`{ type:
-  'string' }` refuses `12`); a vocabulary declared `false` counts too. A
-  meta-schema that requires a vocabulary the validator does not implement is
-  processed rather than refused. - [ ] **`$query` compile refusals carry no
-  code** — a malformed query document throws a plain `Error` (`invalid
-  '$query' document at …: JQ0002 …`, the query code only on `.cause`) and a
-  free external throws `'$query' cannot bind external 'x'` with no code at
-  all; both deserve the validator's coded compile errors.
-- [ ] **A vocabulary is matched by substring** — `compile` turns the
-  validation vocabulary on when any `$vocabulary` key contains
-  `/vocab/validation` (and format assertion on for `/vocab/format-assertion`),
-  so a meta-schema declaring only core, applicator and
-  `https://example.com/vocab/validation-extras` still asserts `type` (`{ type:
-  'string' }` refuses `12`); a vocabulary declared `false` counts too. A
-  meta-schema that requires a vocabulary the validator does not implement is
-  processed rather than refused. - [ ] **`$query` compile refusals carry no
-  code** — a malformed query document throws a plain `Error` (`invalid
-  '$query' document at …: JQ0002 …`, the query code only on `.cause`) and a
-  free external throws `'$query' cannot bind external 'x'` with no code at
-  all; both deserve the validator's coded compile errors.
-- [ ] **`$query` compile refusals carry no code** — a malformed query document
-  throws a plain `Error` (`invalid '$query' document at …: JQ0002 …`, the
-  query code only on `.cause`) and a free external throws `'$query' cannot
-  bind external 'x'` with no code at all; both deserve the validator's coded
-  compile errors.
+- [ ] **The normalizer reads a dialect by name only** — `compileNormalizer`,
+  `deriveStrictProfile` and `@jarenjs/emit` hold no meta-schemas, so a
+  `$schema` naming a custom dialect is read as draft-07 there while `compile`
+  reads it through the meta-schema the validator holds: under a held dialect
+  `https://example.com/my-dialect` that extends 2020-12, `{ $schema:
+  'https://example.com/my-dialect', $defs: { s: { type: 'object' } }, $ref:
+  '#/$defs/s', properties: { a: { default: 1 } } }` applies the `$ref`'s
+  siblings when it validates, and the normalizer's `useDefaults` fills nothing
+  (`{}`, not `{ a: 1 }`). Handing the standalone readers the validator's
+  meta-schemas is the open work.
+- [ ] **A required vocabulary the validator does not implement is processed**
+  — a meta-schema whose `$vocabulary` declares an unknown vocabulary `true` is
+  processed with that vocabulary's keywords read as annotations, where 2020-12
+  asks a validator to refuse it. Refusing it is a stricter refusal, and must
+  keep admitting the Jaren dialect's query vocabulary, which this package
+  implements.
 - [ ] **A dynamic reference keeps instance locations on** — once a `$data`,
   `data` or `$query` reader exists anywhere in the compilation, a `$ref` is
   resolved during the compile-time scan and only a target that reaches a

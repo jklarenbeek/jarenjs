@@ -23,6 +23,8 @@ import {
   TraverseOptions,
   createJsonPointer,
   keywordLocation,
+  placeDraftOf,
+  readsForeign,
   unresolvedReference,
   refuseContestedReference,
   isContestedRefusal,
@@ -45,7 +47,7 @@ import { isStringWhiteSpace } from '@jarenjs/core/string';
 import { hasRecursiveAnchor, getDynamicAnchorName, collectDynamicAnchors, collectDynamicAnchorsDeep, appliesRefSiblings } from './dynamic-ref.js';
 import { isRecursiveQueryCompileError } from './query-keyword.js';
 import { boundReference, assertReferenceDepth, assertOutputFormat, REFERENCE_DEPTH_CEILING } from './errors.js';
-import { TRAVERSE_SCHEMA_OBJECTS, TRAVERSE_SCHEMA_MAPS, TRAVERSE_SCHEMA_MAP_MAPS, detectSchemaDraft } from './schema-keywords.js';
+import { TRAVERSE_SCHEMA_OBJECTS, TRAVERSE_SCHEMA_MAPS, TRAVERSE_SCHEMA_MAP_MAPS, detectSchemaDraft, declaredVocabularies } from './schema-keywords.js';
 import { VALIDATOR_STATE } from './validator-state.js';
 
 export {
@@ -329,7 +331,7 @@ export class ValidationOptions {
 function placeDraft(places, schemas, path, schema) {
   const drafts = places?.drafts;
   if (drafts === undefined) return null;
-  return drafts.get(placeOf(drafts, schemas, path, schema)) ?? null;
+  return placeDraftOf(places, placeOf(drafts, schemas, path, schema), schemas) ?? null;
 }
 
 /**
@@ -712,7 +714,7 @@ export class ValidationRoot {
 
     // Entering the root resource brings ALL of its $dynamicAnchors into the
     // dynamic scope (the root's own anchor is handled via #rootAnchorName).
-    this.#rootDynamicAnchors = collectDynamicAnchorsDeep(rootSchema, opts.propertyDependencies === true)
+    this.#rootDynamicAnchors = collectDynamicAnchorsDeep(rootSchema, opts.propertyDependencies === true, null, schemas)
       .filter(anchor => anchor.schema !== rootSchema);
   }
 
@@ -813,7 +815,7 @@ export class ValidationRoot {
    */
   inForeignDialect(path, schema) {
     const places = this.#places;
-    return places !== undefined && places.foreign.has(placeOf(places.drafts, this.#schemas, path, schema));
+    return places !== undefined && readsForeign(places, placeOf(places.drafts, this.#schemas, path, schema), this.#schemas);
   }
 
   /**
@@ -949,6 +951,14 @@ export class ValidationRoot {
   referencedSchema(base, schema) {
     return resolveRefSchemaDeep(this.#schemas, base, schema, this.#traverse, undefined, this.#places, this.#options.draftVersion);
   }
+
+  /**
+   * The compilation's schemas by URI: a `$schema` naming one is read by that
+   * meta-schema's own `$schema` ({@link detectSchemaDraft}). An internal
+   * collaborator of the compiler; not part of the package's API.
+   * @returns {Map<string, any>}
+   */
+  get held() { return this.#schemas; }
 
   /**
    * The schema a reference names, without following that schema's own
@@ -1306,7 +1316,7 @@ export class ValidationObject {
       // as refValidator below). Source $defs anchors are kept for schemas
       // whose resource entry point is the $ref itself.
       const enterAnchors = sourceDynamicAnchors.slice();
-      const targetDeepAnchors = collectDynamicAnchorsDeep(resolvedSchema, root.options.propertyDependencies === true);
+      const targetDeepAnchors = collectDynamicAnchorsDeep(resolvedSchema, root.options.propertyDependencies === true, null, root.held);
       for (let i = 0; i < targetDeepAnchors.length; i++) {
         const anchor = targetDeepAnchors[i];
         if (anchor.schema === resolvedSchema) continue;
@@ -1424,7 +1434,7 @@ export class ValidationObject {
         // Entering the target resource brings ALL of its $dynamicAnchors into
         // the dynamic scope, exactly like the pre-compiled path above.
         const enterAnchors = boundSourceAnchors.slice();
-        const targetDeepAnchors = collectDynamicAnchorsDeep(resolvedSchema, root.options.propertyDependencies === true);
+        const targetDeepAnchors = collectDynamicAnchorsDeep(resolvedSchema, root.options.propertyDependencies === true, null, root.held);
         for (let i = 0; i < targetDeepAnchors.length; i++) {
           const anchor = targetDeepAnchors[i];
           if (anchor.schema === resolvedSchema) continue;
@@ -1524,7 +1534,7 @@ export class ValidationObject {
     // A document that declares its own $schema is processed per that draft
     // (cross-draft references); subschemas inherit the document's draft.
     this.#declaredDraft = (isObjectClass(schema) && isStringType(schema.$schema))
-      ? detectSchemaDraft(schema)
+      ? detectSchemaDraft(schema, root.held)
       : parentDeclaredDraft;
 
     // Calculate the effective base URI for this schema.
@@ -1554,7 +1564,7 @@ export class ValidationObject {
     const draft = this.#declaredDraft ?? root.options.draftVersion;
     if (draft >= 2020 && isObjectClass(schema) && isStringType(schema.$id)
       && path !== baseUri) {
-      const anchors = collectDynamicAnchorsDeep(schema, root.options.propertyDependencies === true, this.#declaredDraft);
+      const anchors = collectDynamicAnchorsDeep(schema, root.options.propertyDependencies === true, this.#declaredDraft, root.held);
       if (anchors.length > 0) {
         const resourceBase = this.#effectiveBaseUri;
         const inner = (data, dataPath, dataRoot, dataKey) => this.#validator(data, dataPath, dataRoot, dataKey);
@@ -1905,7 +1915,7 @@ export class JarenValidator {
   /** @type {TraverseOptions} The traversal options, carrying the `propertyDependencies` switch of the validation options */
   #traverse = new TraverseOptions();
   /** @type {import('./traverse.js').SchemaPlaces} What the walks read at each registered schema's place */
-  #places = { drafts: new WeakMap(), refBases: new WeakMap(), keptRefs: new Set(), undecidedBases: new WeakMap(), lateTargets: new Set(), foreign: new WeakSet(), contested: new Map() };
+  #places = { drafts: new WeakMap(), refBases: new WeakMap(), keptRefs: new Set(), undecidedBases: new WeakMap(), lateTargets: new Set(), foreign: new WeakSet(), dialects: new WeakMap(), contested: new Map() };
   /** @type {Map<string, string>} The key of the document each registered identifier came from */
   #registeredIn = new Map();
   /** @type {WeakSet<object>} The documents `addSchema` registered under a key of their own */
@@ -1979,7 +1989,7 @@ export class JarenValidator {
       opts,
       undefined,
       places,
-      detectSchemaDraft(schema));
+      detectSchemaDraft(schema, schemaMap));
 
     // Then add the other reference schemas
     if (Array.isArray(schemas) && schemas.length > 0) {
@@ -1993,7 +2003,7 @@ export class JarenValidator {
     }
 
     // make sure all schemas are connected, as this compile reads them
-    restoreSchemaRefsInMap(schemaMap, opts, places, detectSchemaDraft(schema));
+    restoreSchemaRefsInMap(schemaMap, opts, places, detectSchemaDraft(schema, schemaMap));
 
     return { origin: origin, map: schemaMap };
   }
@@ -2139,7 +2149,7 @@ export class JarenValidator {
         if (twice === undefined || this.#samePlace(twice.id, twice.first, twice.second)) return;
         const names = `in '${documentName(baseUri)}', at '${twice.firstAt ?? '#'}' and at '${twice.secondAt}'`;
         contested.set(twice.id, names);
-      });
+      }, this.#schemas);
     } catch (_e) {
       // the document's own `$id` (see above)
     }
@@ -2177,9 +2187,10 @@ export class JarenValidator {
     if (first === second) return true;
     const hash = id.indexOf('#');
     if (this.#documents.has(first) && (hash === -1 || hash === id.length - 1)) return true;
-    const drafts = this.#places.drafts;
-    const foreign = this.#places.foreign;
-    if (drafts.get(first) !== drafts.get(second) || foreign.has(first) !== foreign.has(second)) return false;
+    const places = this.#places;
+    const held = this.#schemas;
+    if (placeDraftOf(places, first, held) !== placeDraftOf(places, second, held)
+      || readsForeign(places, first, held) !== readsForeign(places, second, held)) return false;
     try {
       return equalsJson(withoutAnnotations(first), withoutAnnotations(second));
     }
@@ -2551,7 +2562,7 @@ export class JarenValidator {
     const { origin, map } = JarenValidator.#traverseSchema(schema, schemas, this.#schemas, this.#traverse, this.#places);
 
     // Detect draft version from schema and update validation options
-    const draftVersion = detectSchemaDraft(schema);
+    const draftVersion = detectSchemaDraft(schema, map);
     const existingValidation = this.#options.validation || new ValidationOptions();
     // For draft7, contentValidation defaults to true; for 2019-09+, defaults to false
     const contentValidationDefault = draftVersion < 2019;
@@ -2570,10 +2581,9 @@ export class JarenValidator {
       const metaSchema = map.get(metaKey)
         || map.get(metaKey.endsWith('#') ? metaKey.slice(0, -1) : metaKey + '#');
       if (isObjectClass(metaSchema) && isObjectClass(metaSchema.$vocabulary)) {
-        vocabValidation = Object.keys(metaSchema.$vocabulary)
-          .some(uri => uri.includes('/vocab/validation'));
-        if (formatAssertion == null
-          && Object.keys(metaSchema.$vocabulary).some(uri => uri.includes('/vocab/format-assertion'))) {
+        const declared = declaredVocabularies(metaSchema.$vocabulary);
+        vocabValidation = declared.validation;
+        if (formatAssertion == null && declared.formatAssertion) {
           formatAssertion = true;
         }
       }
@@ -2607,7 +2617,7 @@ export class JarenValidator {
     // A root that loops back to itself before reading the instance decides
     // nothing on any instance: refused here rather than when it validates.
     // Whether a keyword reads the instance depends on these options.
-    assertRootReadsInstance(map, origin, schema, { options: validationOptions, formats: this.#formats, drafts: this.#places.drafts, foreign: this.#places.foreign }, this.#traverse);
+    assertRootReadsInstance(map, origin, schema, { options: validationOptions, formats: this.#formats, drafts: this.#places.drafts, foreign: this.#places.foreign, dialects: this.#places.dialects, held: map }, this.#traverse);
 
     // Pre-compile all refs before returning the validator
     // This ensures all ref chains are resolved at compile time

@@ -285,7 +285,14 @@ A schema the validator cannot decide is not answered `true` or `false`: it
 is refused with a thrown error carrying a stable `code` (the suite's coded
 error contract, `@jarenjs/core/errors`). A refusal is never folded into a
 failed validation, because a `false` under `not` would read as success.
-`VALIDATE_CODES` is the runtime table of the codes below.
+`VALIDATE_CODES` is the runtime table of the codes below. One refusal
+carries another package's code: a `$query` document that does not compile
+is refused by a `SchemaCompileError` with the query compiler's own `JQ0xxx`
+code (`@jarenjs/json`'s QUERY-FORMAT §10.2: `JQ0002` an unknown operator,
+`JQ0005` an external other than `root` and `path`, …), whose `docPath` is the
+refused place under the `$query` keyword and whose `cause` is the query
+compiler's `JsonQueryCompileError`. The query code names the defect in the
+query's own grammar; a `JK` code over it would send every reader to `cause`.
 
 | Code | Class | Meaning |
 |---|---|---|

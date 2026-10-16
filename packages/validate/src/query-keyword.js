@@ -14,7 +14,8 @@
 // Two externals are bound per call: 'root' (the instance root, so
 // "$root.currency" reaches across the document) and 'path' (the current
 // instance location as a JSON pointer string, comparable via "$path").
-// Any other free name in the query is a schema compile error - there is
+// The query compiles closed-world over those two, so any other free name
+// is the query compiler's own JQ0005 where the query names it - there is
 // nothing it could be bound to at validation time.
 
 import {
@@ -22,8 +23,30 @@ import {
   JsonQueryCompileError,
   JsonQueryRuntimeError,
 } from '@jarenjs/json/query';
+import { decodeJSONPointerSegment } from '@jarenjs/json/pointer';
 
+import { SchemaCompileError } from './errors.js';
 import { createTypeTestCompiler } from './query.js';
+import { encodeJsonPointerPath, keywordLocation } from './traverse.js';
+
+/** The externals a `$query` is bound to per call. */
+const BOUND_EXTERNALS = Object.freeze(['root', 'path']);
+
+/**
+ * Where a query compile refusal sits in the schema: the `$query` keyword of
+ * the schema object, then the query document's own pointer to the refused
+ * place, spelled as every other schema location is (a URI fragment).
+ * @param {string} schemaPath - The schema object's location
+ * @param {string} docPath - The refused place in the query document (a JSON pointer)
+ * @returns {string}
+ */
+function queryLocation(schemaPath, docPath) {
+  let location = keywordLocation(schemaPath, '$query');
+  if (docPath === '') return location;
+  for (const token of docPath.split('/').slice(1))
+    location = encodeJsonPointerPath(location, decodeJSONPointerSegment(token));
+  return location;
+}
 
 // Registered schema resources retain their query document identity across
 // compilation roots. A recursive query literal therefore re-enters this set
@@ -67,9 +90,12 @@ function judgesInstance(e) {
  * The query document compiles with a `compileTypeTest` hook backed by the
  * owning `JarenValidator` instance (threaded through `ValidationRoot`), so
  * schema literals inside the query (`$valid`/`$assert`/`$as`) may `$ref`
- * schemas registered on that instance with `addSchema`. Malformed query
- * documents (`JQ0xxx`) and externals other than `root`/`path` throw here,
- * at schema compile time. At validation time a data-shaped
+ * schemas registered on that instance with `addSchema`. A query document
+ * that does not compile - malformed, or naming an external other than
+ * `root`/`path` (`JQ0005`) - is refused here, at schema compile time, by a
+ * `SchemaCompileError` that carries the query compiler's own `JQ0xxx` code,
+ * located at the refused place under the `$query` keyword, with the query
+ * compiler's error as its `cause`. At validation time a data-shaped
  * `JsonQueryRuntimeError` (see `judgesInstance`: the EBV of a multi-item
  * result, arithmetic on a non-number, ...) reports as a validation failure
  * whose error params carry the `code` and the query `docPath`; every other
@@ -92,22 +118,16 @@ export function compileQuerySchema(schemaObj, jsonSchema) {
   compilingQueries.add(queryDoc);
   let query;
   try {
-    query = compileJsonQuery(queryDoc, { compileTypeTest });
+    query = compileJsonQuery(queryDoc, { compileTypeTest, externals: BOUND_EXTERNALS });
   }
   catch (e) {
     if (e instanceof JsonQueryCompileError)
-      throw new Error(`invalid '$query' document at '${schemaObj.path}': ${e.message}`, { cause: e });
+      throw new SchemaCompileError(e.code, `invalid '$query' document: ${e.reason}`,
+        queryLocation(schemaObj.path, e.docPath), { cause: e });
     throw e;
   }
   finally {
     compilingQueries.delete(queryDoc);
-  }
-
-  const externals = query.externals;
-  for (let i = 0; i < externals.length; ++i) {
-    const name = externals[i];
-    if (name !== 'root' && name !== 'path')
-      throw new Error(`'$query' cannot bind external '${name}' at '${schemaObj.path}' (only 'root' and 'path' are bound)`);
   }
 
   const addError = schemaObj.createErrorHandler(queryDoc, '$query');

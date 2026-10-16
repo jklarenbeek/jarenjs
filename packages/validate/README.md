@@ -352,7 +352,43 @@ See also:
 
 ### 👉 Vocabularies and cross-draft references
 
-A schema's `$schema` declaration is honored per document: referenced documents that declare a different draft are processed with that draft's keyword set (a draft-07 document ignores `dependentRequired`, `dependentSchemas`, `minContains`, `maxContains`, `unevaluatedProperties` and `unevaluatedItems`; a 2019-09 or draft-07 document ignores `prefixItems`, so its `items: false` forbids every item; a draft-07 or 2020-12 document ignores `$recursiveRef`, a draft-07 or 2019-09 one `$dynamicRef`, while one whose `$schema` names no known draft reads both). A document that declares no `$schema` reads every keyword. A `$ref` target is processed with the draft its own place declares — the nearest `$schema` on the way to it in the document that holds it, the referencing one or another — however it is compiled (`compile`, `addSchema` + `compile`, `compileAsync`). *Upgrade: a reference target was compiled with no declared draft, so `{ "$schema": "https://json-schema.org/draft/2019-09/schema", "$defs": { "t": { "prefixItems": [{ "type": "integer" }] } }, "$ref": "#/$defs/t" }` rejected `["5"]`, which the same `prefixItems` written inline accepts; the other declared-draft gates (`dependentRequired`, `dependentSchemas`, `minContains`, `maxContains`, `unevaluatedProperties`, `unevaluatedItems`, `propertyDependencies`) read a target the same way, so collected errors lose the failures of keywords the target's draft does not have. The keywords beside a target's own `$ref` assert by its document's draft too: a draft-07 target `{ "$ref": "#/definitions/y", "minimum": 5 }` referenced from a 2020-12 schema no longer asserts `minimum`, and a 2020-12 one referenced from a draft-07 schema now does; and a 2020-12 document referenced from a draft-07 schema, or from one that declares no draft, now counts the items its `contains` matches as evaluated for its `unevaluatedItems`.* Custom metaschemas with `$vocabulary` are respected — omitting the validation vocabulary turns validation keywords into annotations (`type` and `required` inside `items`, `minContains`/`maxContains` beside `contains`, and `maxItems`, which then no longer bounds the items `items` and `contains` look at), and declaring `format-assertion` turns format assertion on. *Upgrade: under a metaschema without the validation vocabulary, `{ "items": { "type": "string" } }` used to reject `[5]`, `minContains`/`maxContains` counted, and `{ "maxItems": 1, "items": { "properties": { "x": false } } }` accepted `[{}, { "x": 1 }]` because it stopped at the first item; a 2019-09 or draft-07 document with `prefixItems` beside `items: false` accepted any array, and a draft-07 document asserted `minContains`, `maxContains`, `unevaluatedProperties` and `unevaluatedItems`.*
+A schema's `$schema` declaration is honored per document: referenced documents that declare a different draft are processed with that draft's keyword set (a draft-07 document ignores `dependentRequired`, `dependentSchemas`, `minContains`, `maxContains`, `unevaluatedProperties` and `unevaluatedItems`; a 2019-09 or draft-07 document ignores `prefixItems`, so its `items: false` forbids every item; a draft-07 or 2020-12 document ignores `$recursiveRef`, a draft-07 or 2019-09 one `$dynamicRef`, while one whose `$schema` names no known draft reads both). A document that declares no `$schema` reads every keyword. A `$ref` target is processed with the draft its own place declares — the nearest `$schema` on the way to it in the document that holds it, the referencing one or another — however it is compiled (`compile`, `addSchema` + `compile`, `compileAsync`). *Upgrade: a reference target was compiled with no declared draft, so `{ "$schema": "https://json-schema.org/draft/2019-09/schema", "$defs": { "t": { "prefixItems": [{ "type": "integer" }] } }, "$ref": "#/$defs/t" }` rejected `["5"]`, which the same `prefixItems` written inline accepts; the other declared-draft gates (`dependentRequired`, `dependentSchemas`, `minContains`, `maxContains`, `unevaluatedProperties`, `unevaluatedItems`, `propertyDependencies`) read a target the same way, so collected errors lose the failures of keywords the target's draft does not have. The keywords beside a target's own `$ref` assert by its document's draft too: a draft-07 target `{ "$ref": "#/definitions/y", "minimum": 5 }` referenced from a 2020-12 schema no longer asserts `minimum`, and a 2020-12 one referenced from a draft-07 schema now does; and a 2020-12 document referenced from a draft-07 schema, or from one that declares no draft, now counts the items its `contains` matches as evaluated for its `unevaluatedItems`.* Custom metaschemas with `$vocabulary` are respected — omitting the validation vocabulary turns validation keywords into annotations (`type` and `required` inside `items`, `minContains`/`maxContains` beside `contains`, and `maxItems`, which then no longer bounds the items `items` and `contains` look at), and declaring the format-assertion vocabulary turns format assertion on. *Upgrade: under a metaschema without the validation vocabulary, `{ "items": { "type": "string" } }` used to reject `[5]`, `minContains`/`maxContains` counted, and `{ "maxItems": 1, "items": { "properties": { "x": false } } }` accepted `[{}, { "x": 1 }]` because it stopped at the first item; a 2019-09 or draft-07 document with `prefixItems` beside `items: false` accepted any array, and a draft-07 document asserted `minContains`, `maxContains`, `unevaluatedProperties` and `unevaluatedItems`.*
+
+**How a `$schema` is read.** A `$schema` names a draft by its exact URI: the
+published dialect and vocabulary meta-schemas of draft-06, draft-07, 2019-09,
+2020-12 and draft-next (read as 2020-12), and the Jaren 2020-12 dialect, with
+`http:` and `https:`, and a trailing empty fragment (`#`), read alike. Any
+other URI names the draft of the meta-schema it identifies when the validator
+holds one (`addMetaSchema`, `addSchema`, a schema passed beside it to
+`compile`, or one `compileAsync` loads): that meta-schema's own `$schema` is
+read the same way, so a dialect that extends 2020-12 under a URI of its own is
+read as 2020-12, whether it was registered before or after the schemas that
+declare it. One reading is made when a schema is walked: in a schema
+registered before the validator holds the meta-schema its `$schema` names, or
+compiled with that meta-schema passed beside it, a `$ref` beside an `$id`
+resolves as draft-07 resolves it, against the enclosing base, and a compile
+that then finds nothing there is refused `JK0008` naming that URI — register
+the dialect first. A `$schema` that names
+no draft either way — an unregistered
+dialect, or meta-schemas that lead to none or back to themselves — is read as
+draft-07. The normalizer, `deriveStrictProfile` and `detectSchemaDraft`
+without its `held` argument hold no meta-schemas, so they read a `$schema` by
+its URI only, and a custom dialect as draft-07. A `$vocabulary` turns the
+validation and format-assertion vocabularies on by their exact URIs only,
+declared `true` or `false` alike (`false` only lets a validator that does not
+implement a vocabulary go on without it). *Upgrade: the draft came from a
+substring of the `$schema` URI, so an unregistered
+`https://example.com/2020-12/my-dialect` was read as 2020-12 (now draft-07),
+`https://json-schema.org/draft/06/schema` as draft-06 (now draft-07), a URI
+spelling `draft-07` or `draft/07` (`https://json-schema.org/draft/07/schema`)
+as a known draft-07 whose `$recursiveRef` and `$dynamicRef` apply nothing
+(now an unknown dialect, which reads both), and a registered dialect `https://example.com/my-dialect` that extends 2020-12 as
+draft-07: `{ "$schema": "https://example.com/my-dialect", "prefixItems": [{
+"type": "string" }] }` accepted `[1]`, and now refuses it. A meta-schema whose
+`$vocabulary` declares `https://example.com/vocab/validation-extras` (or
+`https://example.com/vocab/format-assertion-lite`) but not the validation (or
+format-assertion) vocabulary asserted `type` (`format`); both are now
+annotations there.*
 
 Modern reference chains preserve supported sibling assertions, including
 dependent schemas and dynamic references. Draft-07 retains its reference-only
@@ -548,9 +584,16 @@ Semantics and composition:
   (`$..`) over a value nested deeper than 1000 levels, and `JQ2007`, a
   `$range` materializing more than 1,000,000 items. *Upgrade: the deep
   instance overflowed the call stack with an uncoded `RangeError`; the long
-  `$range` reported a failure, so `not` answered `true`.* Malformed query
-  documents and free externals other than `root`/`path` fail fast at
-  `compile()`.
+  `$range` reported a failure, so `not` answered `true`.* A query document
+  that does not compile fails fast at `compile()` with a `SchemaCompileError`
+  carrying the query compiler's own code — `JQ0002` for an unknown operator,
+  `JQ0005` for a free external other than `root`/`path`, every code of
+  [QUERY-FORMAT §10](../json/docs/QUERY-FORMAT.md) — and a `docPath` that
+  locates the refused place under the `$query` keyword
+  (`https://x.test/order#/properties/total/%24query/%24ge/1`); the query
+  compiler's own error is its `cause`. *Upgrade: both threw a plain `Error`
+  with no `code` (`invalid '$query' document at …: JQ0002: …`, the code only
+  on `cause`, and `'$query' cannot bind external 'x'` with none at all).*
 - Schema literals inside the query (`$valid`/`$assert`/`$as`,
   QUERY-FORMAT §8.11) compile against the **same validator instance**, so
   their `$ref`s resolve to your `addSchema` registrations. The bridge
@@ -1228,7 +1271,12 @@ validator.getSchema('https://schemas.example.com/name.json') === documents['http
   URI under the default base says so and names both repairs. Also the meta-schema
   a schema's `$schema` names, unless that is a json-schema.org dialect (the
   validator implements those itself), because `compile` reads its
-  `$vocabulary`; and what a schema the validator already held references and
+  `$vocabulary` — one whose URI names no draft is loaded before the schema's
+  own references, since the schema is read by that meta-schema's draft
+  (*Upgrade: it was asked for after them, and the references were read as
+  draft-07 reads them, so a `$ref` beside an `$id` made the loader ask for
+  the target draft-07 names*); and
+  what a schema the validator already held references and
   nothing holds, since `compile` resolves those too. A schema whose
   references the validator all holds loads nothing.
 - **Once each.** A document is loaded at most once per validator: several

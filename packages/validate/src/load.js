@@ -19,7 +19,7 @@ import { isBoolOrObjectClass } from './tools.js';
 import { storeSchemaIdsInMap, DEFAULT_ORIGIN } from './traverse.js';
 import { SchemaCompileError, describeCount, describeKind } from './errors.js';
 import { VALIDATOR_STATE } from './validator-state.js';
-import { detectSchemaDraft } from './schema-keywords.js';
+import { detectSchemaDraft, dialectDraft } from './schema-keywords.js';
 
 /** The default of the `maxLoads` option: the most documents one `compileAsync` call loads. */
 export const DEFAULT_MAX_LOADS = 100;
@@ -97,7 +97,7 @@ export async function compileAsync(validator, schema, options) {
 
   const { schemas, traverse, places } = state;
   /** The draft `compile` reads a place that declares none under. */
-  const reading = detectSchemaDraft(schema);
+  let reading = detectSchemaDraft(schema, schemas);
   let inFlight = IN_FLIGHT.get(validator);
   if (inFlight === undefined) IN_FLIGHT.set(validator, inFlight = new Map());
   /** The schema's own identifiers: a reference to one of them is held. */
@@ -146,7 +146,7 @@ export async function compileAsync(validator, schema, options) {
       // no draft under the draft the schema does.
       storeSchemaIdsInMap(ids, base, doc, traverse, (target, location, undecided) => {
         targets.push([target.leftUri, prefix + location, undecided && ids !== own]);
-      }, undefined, reading);
+      }, undefined, reading, undefined, schemas);
     }
     catch (e) {
       if (ids === own) throw e;
@@ -154,14 +154,18 @@ export async function compileAsync(validator, schema, options) {
     return targets;
   };
 
-  /** @type {[string, string|undefined, boolean?][]} The documents to reach next, with the reference that needs each (none for a schema the validator held) and whether only a call resolves it */
-  let pending = walk(schema, traverse.origin, '', own);
   // `compile` reads the `$vocabulary` of the meta-schema the schema's
-  // `$schema` names, looked up by that URI with an empty fragment.
+  // `$schema` names, looked up by that URI with an empty fragment, and the
+  // schema by that meta-schema's draft when the URI names none itself: such
+  // a meta-schema is loaded first, and the schema walked once it is held.
   const dialect = isObjectClass(schema) && isStringType(schema.$schema) ? schema.$schema : '';
   const fragment = dialect.indexOf('#');
-  if (dialect !== '' && !OWN_DIALECT.test(dialect) && (fragment === -1 || fragment === dialect.length - 1))
-    pending.push([fragment === -1 ? `${dialect}#` : dialect, '#/%24schema']);
+  const dialectKey = fragment === -1 ? `${dialect}#` : dialect;
+  const loadsDialect = dialect !== '' && !OWN_DIALECT.test(dialect) && (fragment === -1 || fragment === dialect.length - 1);
+  let walkLater = loadsDialect && !held(dialectKey) && dialectDraft(dialect) === null;
+  /** @type {[string, string|undefined, boolean?][]} The documents to reach next, with the reference that needs each (none for a schema the validator held) and whether only a call resolves it */
+  let pending = walkLater ? [] : walk(schema, traverse.origin, '', own);
+  if (loadsDialect) pending.push([dialectKey, '#/%24schema']);
   // The documents are loaded in rounds: every document a round reaches is
   // loaded at once, and only when all of them settled are they registered,
   // walked and their failures judged, each in the order it was reached. What
@@ -215,6 +219,11 @@ export async function compileAsync(validator, schema, options) {
       if (result.status === 'fulfilled') pending.push(...walk(result.value, key, key.slice(0, -1), new Map()));
       else failed.push([key, at, result.reason]);
     });
+    if (walkLater) {
+      walkLater = false;
+      reading = detectSchemaDraft(schema, schemas);
+      pending.push(...walk(schema, traverse.origin, '', own));
+    }
   }
   refuseFailed();
   return validator.compile(schema);

@@ -30,10 +30,10 @@ import {
   TRAVERSE_SCHEMA_OBJECTS,
   TRAVERSE_SCHEMA_MAPS,
   TRAVERSE_SCHEMA_MAP_MAPS,
-  detectSchemaDraft,
+  dialectDraft,
   admitsPropertyDependencies,
 } from './schema-keywords.js';
-import { admitsDynamicReference, namesKnownDraft } from './dynamic-ref.js';
+import { admitsDynamicReference } from './dynamic-ref.js';
 
 import { SchemaCompileError } from './errors.js';
 
@@ -233,11 +233,44 @@ function atFragment(uri) {
  * @property {WeakSet<object>} foreign - The places whose nearest `$schema`
  *   names no draft this package knows: their dynamic references are read as
  *   where no draft is declared
+ * @property {WeakMap<object, string>} dialects - For a place whose nearest
+ *   `$schema` names a dialect the walk could not resolve (its meta-schema not
+ *   held yet), that URI: a compile that holds the meta-schema reads the place
+ *   by it ({@link placeDraftOf}, {@link readsForeign})
  * @property {Map<string, string>} contested - The identifiers two different
  *   registered places declare, each with what names both: a compile that
  *   reads one is refused (`JK0012`), as it would answer by whichever place
  *   was registered first
  */
+
+/**
+ * The draft a recorded place is read under by one compilation: the draft its
+ * walk recorded, unless its `$schema` named a dialect the walk could not
+ * resolve and `held` now holds that dialect's meta-schema.
+ * @param {{ drafts?: WeakMap<object, number|null>, dialects?: WeakMap<object, string> }|undefined} places - What the walks read
+ * @param {object} place - A walked schema object
+ * @param {{ get(key: string): unknown }} [held] - The compilation's schemas by URI
+ * @returns {number|null|undefined} The draft, null when its place declares
+ *   none, undefined for a place no walk recorded
+ */
+export function placeDraftOf(places, place, held) {
+  const dialect = places?.dialects?.get(place);
+  return (dialect === undefined ? null : dialectDraft(dialect, held)) ?? places?.drafts?.get(place);
+}
+
+/**
+ * Whether a recorded place lies under a `$schema` that names no draft this
+ * package knows, as one compilation reads it ({@link placeDraftOf}).
+ * @param {{ foreign?: WeakSet<object>, dialects?: WeakMap<object, string> }|undefined} places - What the walks read
+ * @param {object} place - A walked schema object
+ * @param {{ get(key: string): unknown }} [held] - The compilation's schemas by URI
+ * @returns {boolean}
+ */
+export function readsForeign(places, place, held) {
+  if (places?.foreign?.has(place) !== true) return false;
+  const dialect = places.dialects?.get(place);
+  return dialect === undefined || dialectDraft(dialect, held) === null;
+}
 
 /**
  * The base the `$ref` of a schema object resolves against when the `$id`
@@ -282,9 +315,12 @@ function keptRefBase(places, schema, reading) {
  *   past it: a refused `$ref` registers no target, and a refused identifier
  *   nothing at or below its place (an identifier declared twice keeps its
  *   first place)
+ * @param {Map<string, any>} [held] - The schemas the validator already
+ *   holds: a `$schema` naming one of them, or one `schemas` holds, is read
+ *   by that meta-schema's own `$schema`
  * @returns {string} The document's own id
  */
-export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPointerOptions(), onReference = undefined, places = undefined, defaultDraft = null, onFault = undefined) {
+export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPointerOptions(), onReference = undefined, places = undefined, defaultDraft = null, onFault = undefined, held = undefined) {
   if (!isObjectClass(schema)) {
     const { id } = createJsonPointer(baseUri, undefined, opts);
     schemas.set(id, schema);
@@ -341,16 +377,26 @@ export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPoi
     return true;
   };
 
-  const queue = [{ obj: schema, base: rootUri, path: '#', draft: null, foreign: false }];
+  // A `$schema` is read through the meta-schemas this walk registers and the
+  // ones the validator already holds.
+  const dialects = { get: (/** @type {string} */ key) => schemas.get(key) ?? held?.get(key) };
+  /** @type {{ obj: any, base: string, path: string, draft: number|null, foreign: boolean, dialect: string|undefined }[]} */
+  const queue = [{ obj: schema, base: rootUri, path: '#', draft: null, foreign: false, dialect: undefined }];
   while (queue.length > 0) {
     // @ts-ignore
-    const { obj, base, path, draft: inheritedDraft, foreign: inheritedForeign } = queue.shift();
-    // The draft a document declares is inherited by everything below it.
-    const draft = isStringType(obj.$schema) ? detectSchemaDraft(obj) : inheritedDraft;
+    const { obj, base, path, draft: inheritedDraft, foreign: inheritedForeign, dialect: inheritedDialect } = queue.shift();
+    // The draft a document declares is inherited by everything below it. A
+    // `$schema` that names no draft yet is read as draft-07 and foreign here,
+    // and is kept, so a compile that holds its meta-schema reads it by that.
+    const named = isStringType(obj.$schema) ? dialectDraft(obj.$schema, dialects) : undefined;
+    const draft = named === undefined ? inheritedDraft : named ?? 7;
     places?.drafts.set(obj, draft);
-    const foreign = isStringType(obj.$schema) ? !namesKnownDraft(obj) : inheritedForeign;
+    const foreign = named === undefined ? inheritedForeign : named === null;
     if (foreign) places?.foreign.add(obj);
     else places?.foreign.delete(obj);
+    const dialect = named === undefined ? inheritedDialect : named === null ? obj.$schema : undefined;
+    if (dialect !== undefined) places?.dialects.set(obj, dialect);
+    else places?.dialects.delete(obj);
 
     // Handle $id (draft 6+) or id (draft 4) for identifying subschemas
     const idKeyword = isStringType(obj.$id) ? obj.$id : isStringType(obj.id) ? obj.id : undefined;
@@ -469,13 +515,13 @@ export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPoi
                 throw new Error(`${nextpath} is not a schema`);
             }
 
-            queue.push({ obj: item, base: baseUri, path: nextpath, draft, foreign });
+            queue.push({ obj: item, base: baseUri, path: nextpath, draft, foreign, dialect });
           }
         }
         else {
           const nextpath = encodeJsonPointerPath(path, key);
 
-          queue.push({ obj: value, base: baseUri, path: nextpath, draft, foreign });
+          queue.push({ obj: value, base: baseUri, path: nextpath, draft, foreign, dialect });
         }
       }
       // or is the property a map of key and schema objects?
@@ -494,7 +540,7 @@ export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPoi
               throw new Error(`${nextpath} is not a schema`);
           }
 
-          queue.push({ obj: item, base: baseUri, path: nextpath, draft, foreign });
+          queue.push({ obj: item, base: baseUri, path: nextpath, draft, foreign, dialect });
         }
       }
       // or a map of maps (member name -> member value -> schema objects)?
@@ -517,7 +563,7 @@ export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPoi
                 throw new Error(`${nextpath} is not a schema`);
             }
 
-            queue.push({ obj: item, base: baseUri, path: nextpath, draft, foreign });
+            queue.push({ obj: item, base: baseUri, path: nextpath, draft, foreign, dialect });
           }
         }
       }
@@ -877,6 +923,10 @@ export function resolveRefSchemaDeep(schemas, baseUri, refschema, opts = new Tra
  *   not hold reads every keyword
  * @property {WeakSet<object>} [foreign] - the places whose `$schema` names no
  *   draft this package knows ({@link SchemaPlaces})
+ * @property {WeakMap<object, string>} [dialects] - the `$schema` a place's
+ *   walk could not resolve ({@link SchemaPlaces})
+ * @property {{ get(key: string): unknown }} [held] - the compilation's
+ *   schemas by URI, which may resolve it
  */
 
 /**
@@ -890,7 +940,7 @@ export function resolveRefSchemaDeep(schemas, baseUri, refschema, opts = new Tra
  */
 function appliesDynamicReference(schema, keyword, reading) {
   return hasSchemaReference(schema, keyword)
-    && admitsDynamicReference(keyword, reading.foreign?.has(schema) ? null : reading.drafts?.get(schema) ?? null);
+    && admitsDynamicReference(keyword, readsForeign(reading, schema, reading.held) ? null : placeDraftOf(reading, schema, reading.held) ?? null);
 }
 
 // Keywords applying one subschema to members or items: with a `true` or `{}`
