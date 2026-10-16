@@ -256,7 +256,7 @@ describe('coerceJsonText — the README example', () => {
     const section = readme.slice(readme.indexOf('### Structure sent as JSON text'));
     const start = section.indexOf('```js\n') + 6;
     const fence = section.slice(start, section.indexOf('\n```', start));
-    const out = execFileSync(process.execPath, ['--input-type=module', '-e', fence], { cwd: ROOT, encoding: 'utf8' });
+    const out = execFileSync(process.execPath, ['--input-type=module', '-e', fence], { cwd: ROOT, encoding: 'utf8', env: { ...process.env, FORCE_COLOR: '0' } });
     strictEqual(out, 'false\n{"query":"jaren","filter":{"tags":["json","schema"],"limit":10}} true\n');
   });
 });

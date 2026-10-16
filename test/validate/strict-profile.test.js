@@ -597,7 +597,7 @@ describe('the README example', () => {
     const readme = fs.readFileSync(new URL('../../packages/validate/README.md', import.meta.url), 'utf8');
     const section = readme.slice(readme.indexOf('## Strict structured-output profiles'));
     const fence = section.slice(section.indexOf('```js\n') + 6, section.indexOf('\n```', section.indexOf('```js\n')));
-    const out = execFileSync(process.execPath, ['--input-type=module', '-e', fence], { cwd: ROOT, encoding: 'utf8' });
+    const out = execFileSync(process.execPath, ['--input-type=module', '-e', fence], { cwd: ROOT, encoding: 'utf8', env: { ...process.env, FORCE_COLOR: '0' } });
     assert.equal(out, '{"ops":[{"op":"remove","path":"/draft"},{"op":"add","path":"/title","value":"Q3"}]} true\n');
   });
 });
