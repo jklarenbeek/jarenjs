@@ -56,5 +56,6 @@ Every subpath a consumer can import, derived from the manifest by
 | `@jarenjs/refs/draft-07` | schema | — |
 | `@jarenjs/refs/draft-2019-09` | JavaScript | declared |
 | `@jarenjs/refs/draft-2020-12` | JavaScript | declared |
+| `@jarenjs/refs/jaren-2020-12` | JavaScript | declared |
 | `@jarenjs/refs/package.json` | metadata | — |
 <!--/fact-->

@@ -44,7 +44,7 @@ is the index of those guides, and it is how a reader reaches any of them.
 | [MIGRATION-PEN.md](MIGRATION-PEN.md) | 957 | `./migration` — `$migration` 0.2 documents: exact model endpoints and the ordered steps the runner takes. **Read it when** you are moving a store from one model to the next |
 | [CONTRACT-PEN.md](CONTRACT-PEN.md) | 1,226 | `./contract` — `$contract` 0.1 documents: the operations, their schemas, their declared behavior and their REST binding. **Read it when** you are declaring an API and want its client, its server and its tools typed from one document |
 | [FLOW-PEN.md](FLOW-PEN.md) | 1,046 | `./flow` — `jaren-fsm` 0.1 machines and `jaren-dag` 0.1 dataflows, every query-valued member captured. **Read it when** you are declaring a state machine or a dependency graph of tasks |
-| [APP-PEN.md](APP-PEN.md) | 1,314 | `./app` — the `jaren-app` 0.1 document `createApp` runs, and the JSON Schema of its state beside it. **Read it when** you are declaring a whole application: state, view, actions, effects |
+| [APP-PEN.md](APP-PEN.md) | 1,312 | `./app` — the `jaren-app` 0.1 document `createApp` runs, and the JSON Schema of its state beside it. **Read it when** you are declaring a whole application: state, view, actions, effects |
 | [FORMS-PEN.md](FORMS-PEN.md) | 947 | `./forms` — the `x-form` vocabulary on JSON Schema, and `assertOnSubmit()`, the same rules' layer-3 `$query` twin. **Read it when** you are turning a schema into a form |
 | [MESSAGES-PEN.md](MESSAGES-PEN.md) | 105 | `./messages` — JSON message catalogs and message references. **Read it when** you want checked translation keys, placeholders and explicit completeness. |
 | [JTLT-PEN.md](JTLT-PEN.md) | 83 | `./jtlt` — text templates with JSLT dispatch and query expressions. **Read it when** you want to author Markdown, XML or source text as portable JSON. |
@@ -213,7 +213,7 @@ and the bundle is the byte count the tree-shaking probe builds.
 | [MIGRATION-PEN.md](MIGRATION-PEN.md) | `./migration` | 957 | 13 | 5 | 4 | 34,682 B |
 | [CONTRACT-PEN.md](CONTRACT-PEN.md) | `./contract` | 1,226 | 38 | 6 | 3 | 58,879 B |
 | [FLOW-PEN.md](FLOW-PEN.md) | `./flow` | 1,046 | 16 | 7 | 3 | 27,972 B |
-| [APP-PEN.md](APP-PEN.md) | `./app` | 1,314 | 24 | 7 | 4 | 60,326 B |
+| [APP-PEN.md](APP-PEN.md) | `./app` | 1,312 | 24 | 7 | 4 | 60,326 B |
 | [FORMS-PEN.md](FORMS-PEN.md) | `./forms` | 947 | 18 | 6 | 3 | 49,576 B |
 | [MESSAGES-PEN.md](MESSAGES-PEN.md) | `./messages` | 105 | 9 | 2 | 1 | 14,597 B |
 | [JTLT-PEN.md](JTLT-PEN.md) | `./jtlt` | 83 | 13 | 1 | 2 | 24,585 B |
@@ -221,7 +221,7 @@ and the bundle is the byte count the tree-shaking probe builds.
 | [CHARTS-PEN.md](CHARTS-PEN.md) | `./charts` | 100 | 21 | 1 | 1 | 6,600 B |
 | [DB-CLIENT.md](DB-CLIENT.md) | `./db` | 1,446 | 54 | 5 | 2 | 1,058,619 B |
 | [FORMULA-PEN.md](FORMULA-PEN.md) | `./formula` | 41 | 2 | — | — | 12,033 B |
-| **16 documents** | | **13,985** | **381** | **74** | | |
+| **16 documents** | | **13,983** | **381** | **74** | | |
 <!--/fact-->
 
 A pen whose mapping rows are far below its worked examples is a pen
