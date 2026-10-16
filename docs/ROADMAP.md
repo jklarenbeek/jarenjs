@@ -665,13 +665,16 @@ what each does is its own documentation's job
   with `items: { type: ['number', 'string'] }`), has none, and that comparison
   reads every row. Wanted: the same index beside those (for a guarded path,
   under each spelling of the guard the table may hold).
-- [ ] **On SQLite a unique index over a member that may hold a boolean and a
-  number refuses `true` beside `1`.** The member's untyped generated column
-  holds `true` as `1` and `false` as `0`, so under a unique `$.q` over
-  `['number', 'boolean']` a document with `q: true` is refused `JD2005` beside
-  one with `q: 1`, where the query engine compares them unequal and PostgreSQL
-  stores both. Wanted: a key that keeps a boolean apart from a number (a table
-  change, so the upgrade rebuilds the column).
+- [ ] **On SQLite a unique index over a member of one scalar type refuses a
+  document of another kind beside an equal-looking one.** The store does not
+  validate a member against its declared type by default, and a `REAL` or
+  `INTEGER` column holds a JSON boolean as `1` or `0`: under a unique `$.q`
+  over `type: 'number'` (or `'integer'`) a document with `q: true` is refused
+  `JD2005` beside one with `q: 1`, and under `type: 'boolean'` a `q: 1` beside
+  a `q: true`, where the query engine compares them unequal and PostgreSQL
+  (whose typed column reads the other kind as `NULL`) stores both. Queries
+  answer right (`$eq` native equals the engine). Wanted: a key that keeps the
+  other kind apart for these too (a DDL change, minor).
 - [ ] **On PostgreSQL an ordering over an indexed collection member is sorted,
   never read in index order.** The statement orders `ASC NULLS FIRST` beside
   `"rid"`, which an ascending B-tree index does not provide (`Sort` over `Seq

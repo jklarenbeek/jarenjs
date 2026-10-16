@@ -174,6 +174,7 @@ export const MEMBER_WHEN = Symbol('dialect.memberWhen');
  *   jsonPathText: (segments: JsonPathSegment[]) => string | null,
  *   jsonExtract: (columnSql: string, pathText: string, kind?: string) => string,
  *   queryGuard?: (documentSql: string, segments: JsonPathSegment[]) => string | null,
+ *   booleanKeyTerm?: (documentSql: string, pathText: string) => string,
  *   rowPredicateFlavor?: any,
  *   readBack?: { conditionReads: (planned: string, columns: any[]) => boolean,
  *     condition: (stored: string | null, planned: string | undefined, columns: any[], conforming: boolean) => string | null,
@@ -447,14 +448,15 @@ export function createDialect(spec) {
      * An index over columns, partial when it carries `where`: the condition
      * as SQL over the table's own columns, which the row-predicate
      * lowering renders with every literal inlined (an engine keeps no
-     * parameter in a schema object).
+     * parameter in a schema object). `terms` are expressions keyed after
+     * the columns ({@link booleanKeyTerm}).
      * @param {{ name: string, table: string, columns: string[],
-     *   unique: boolean, where?: string }} shape
+     *   unique: boolean, where?: string, terms?: string[] }} shape
      * @returns {string}
      */
-    createIndex({ name, table, columns, unique, where }) {
+    createIndex({ name, table, columns, unique, where, terms }) {
       return `CREATE ${unique ? 'UNIQUE ' : ''}INDEX ${q(name)} `
-        + `ON ${q(table)} (${columns.map(q).join(', ')})${where === undefined ? '' : ` WHERE ${where}`}`;
+        + `ON ${q(table)} (${[...columns.map(q), ...(terms ?? [])].join(', ')})${where === undefined ? '' : ` WHERE ${where}`}`;
     },
     /**
      * Add one virtual generated column to an existing table (a new
@@ -769,6 +771,16 @@ export function createDialect(spec) {
      * {@link jsonExtract} alone.
      */
     queryGuard,
+    /**
+     * The key a unique index adds after its columns for each member the
+     * engine's untyped column holds (`capabilities.untypedColumns`): whether
+     * the member at `pathText` of the document is a JSON boolean. Such a
+     * column holds `true` as the integer `1` and `false` as `0`, so the
+     * column alone would key a boolean and a number as one value, which the
+     * query engine compares unequal. Undefined where a column of a real SQL
+     * type keys a boolean among booleans.
+     */
+    booleanKeyTerm: spec.booleanKeyTerm,
     /**
      * The document expression a QUERY reads the member at `segments`
      * from: the document itself, or, where {@link queryGuard} holds a

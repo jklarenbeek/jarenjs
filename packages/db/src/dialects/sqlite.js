@@ -381,6 +381,9 @@ export const sqliteDialect = createDialect({
       default: return `jsonb_extract(${columnSql}, ${member})`;
     }
   },
+  // a unique index's second key for a member the untyped column holds: the
+  // column holds a JSON boolean as the integer 0 or 1, and this tells it apart
+  booleanKeyTerm: (documentSql, pathText) => `(json_type(${documentSql}, ${stringLiteral(pathText)}) IN ('true', 'false'))`,
   // the engine-specific piece of a declared interval's CHECK beside
   // `jsonTypeOf`: each bound held to an integer by ITS JSON type — `IS`,
   // not `=`, because a half span's absent bound reads NULL and a CHECK

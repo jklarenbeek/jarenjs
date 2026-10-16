@@ -768,10 +768,12 @@ export function planCollection(name, collection, dialect, options = undefined) {
     // box's one definition (the triggers read them). A vector column
     // has none either: it is fetched whole and ranked, never sought
     if (noBtree) continue;
+    const terms = index.derive ? [] : booleanKeyTerms(dialect, index.unique, columns, generated);
     indexes.push({
       name: `${name}_${index.name}`,
       unique: index.unique,
       columns,
+      ...(terms.length === 0 ? {} : { terms }),
       declared: index,
     });
   }
@@ -862,6 +864,7 @@ export function planCollection(name, collection, dialect, options = undefined) {
       columns: index.columns,
       unique: index.unique,
       ...(index.where === undefined ? {} : { where: index.where }),
+      ...(index.terms === undefined ? {} : { terms: index.terms }),
     })),
     ...kindIndexes.map((index) => kindIndexSql(dialect, name, index)),
     ...virtualTables.flatMap((virtual) =>
@@ -947,6 +950,9 @@ export function planCollection(name, collection, dialect, options = undefined) {
           name: index.name,
           unique: index.unique,
           columns: [...index.columns],
+          // the boolean keys after the columns ({@link booleanKeyTerms}); a table
+          // an earlier release created holds the index without them
+          ...(index.terms === undefined ? {} : { terms: [...index.terms] }),
           // the columns a condition reads, for a migration that changes one of them
           ...(index.where === undefined ? {} : { where: index.where, reads: index.reads }),
         }))
@@ -960,6 +966,31 @@ export function planCollection(name, collection, dialect, options = undefined) {
       planCollection(name, collection, dialect, { ...options, legacyColumns }),
   });
   return plan;
+}
+
+/**
+ * The keys a unique index adds after its columns on an engine whose
+ * generated column over a member of several types (or of none) is untyped:
+ * for each such column, whether the member is a JSON boolean
+ * (`dialect.booleanKeyTerm`). The column holds `true` as `1` and `false` as
+ * `0`, so without it the index would refuse `true` beside `1`, two values the
+ * query engine compares unequal; every value it keyed apart stays apart, and
+ * two equal values stay one key. A non-unique index refuses nothing and keys
+ * the column alone.
+ * @param {any} dialect
+ * @param {boolean | undefined} unique
+ * @param {string[]} columns - the index's columns, in key order
+ * @param {any[]} generated - the planned generated columns
+ * @returns {string[]}
+ */
+function booleanKeyTerms(dialect, unique, columns, generated) {
+  if (unique !== true || dialect.booleanKeyTerm === undefined) return [];
+  const untyped = dialect.typeFor(undefined, 'generated');
+  return columns.flatMap((name) => {
+    const column = generated.find((candidate) => candidate.name === name);
+    return column === undefined || column.pathText === null || column.type !== untyped ? []
+      : [dialect.booleanKeyTerm(dialect.quoteIdentifier(DOC_COLUMN), column.pathText)];
+  });
 }
 
 /**
@@ -1235,12 +1266,14 @@ function verifyDeclaredSql(connection, plan, disagree) {
       // an index a table an earlier release created goes without (see `verifyShape`)
       const legacyAbsent = new Set((plan.expected?.indexes ?? [])
         .filter((/** @type {any} */ index) => index.legacyAbsent === true).map((/** @type {any} */ index) => index.name));
+      // and a unique index it created without the boolean keys after its columns
+      const termless = termlessIndexSql(dialect, plan);
       for (const [name, wanted] of planned) {
         const have = actual.get(name);
         if (have === undefined && legacyAbsent.has(name)) continue;
         if (have === undefined)
           disagree(`the model declares '${name}', which the database does not have`);
-        if (have !== wanted) {
+        if (have !== wanted && have !== termless.get(name)) {
           disagree(`'${name}' is declared as\n  ${have}\nand the model declares\n  ${wanted}`);
         }
       }
@@ -1252,6 +1285,38 @@ function verifyDeclaredSql(connection, plan, disagree) {
       }
       return verifyVirtual(0);
     }));
+}
+
+/**
+ * The CREATE text, as {@link comparableDeclaredSql} compares it, of each
+ * planned index that keys booleans after its columns
+ * ({@link booleanKeyTerms}), spelled without them: the index as a table an
+ * earlier release created holds it. Such a table opens and answers as it
+ * did (refusing `true` beside `1`); `planColumnUpgrade` creates the index
+ * again with the keys.
+ * @param {any} dialect
+ * @param {any} plan
+ * @returns {Map<string, string>} by index name
+ */
+function termlessIndexSql(dialect, plan) {
+  return new Map((plan.expected?.indexes ?? []).filter((/** @type {any} */ index) => index.terms !== undefined)
+    .map((/** @type {any} */ index) => [index.name, comparableDeclaredSql(dialect.ddl.createIndex(
+      { name: index.name, table: plan.table, columns: index.columns, unique: index.unique, where: index.where }), MANAGED_SQL_OPTIONS)]));
+}
+
+/**
+ * The planned indexes a table holds without the boolean keys after their
+ * columns ({@link termlessIndexSql}), by name, from the table's schema
+ * objects as `dialect.introspect.declaredSql` reads them.
+ * @param {any} dialect
+ * @param {any} plan
+ * @param {{ type: unknown, name: unknown, sql: unknown }[]} rows
+ * @returns {Set<string>}
+ */
+export function termlessIndexesHeld(dialect, plan, rows) {
+  const termless = termlessIndexSql(dialect, plan);
+  return new Set(rows.filter((row) => String(row.type) === 'index'
+    && termless.get(String(row.name)) === comparableDeclaredSql(String(row.sql), MANAGED_SQL_OPTIONS)).map((row) => String(row.name)));
 }
 
 /**
@@ -1395,9 +1460,14 @@ export function verifyShape(connection, plan, collection, docPath, kind = 'colle
                 // NOT sorted: `(a,b)` and `(b,a)` are different indexes —
                 // one serves an `a`-prefix lookup and the other does not,
                 // and sorting made them compare equal
-                const haveColumns = rows.map((row) => String(row.name));
-                if (haveColumns.join(',') !== want.columns.join(','))
-                  disagree(`index '${have.name}' covers (${haveColumns.join(', ')}) in that order, the model declares (${want.columns.join(', ')})`);
+                // an expression key reads back without a name: the boolean keys a
+                // unique index adds after its columns, which a table an earlier
+                // release created goes without (the CREATE text is compared below)
+                const haveColumns = rows.map((row) => (row.name === null || row.name === undefined ? null : String(row.name)));
+                const keyed = (/** @type {number} */ terms) => haveColumns.length === want.columns.length + terms
+                  && haveColumns.every((column, at) => column === (at < want.columns.length ? want.columns[at] : null));
+                if (!keyed(0) && !(want.terms !== undefined && keyed(want.terms.length)))
+                  disagree(`index '${have.name}' covers (${haveColumns.map((column) => column ?? '<expression>').join(', ')}) in that order, the model declares (${want.columns.join(', ')})`);
                 // the catalog's shape flag: no NULLS NOT DISTINCT, no key order,
                 // collation or operator class of its own, no INCLUDE column (it reads
                 // as a key column here and keys nothing), not deferred — each changes

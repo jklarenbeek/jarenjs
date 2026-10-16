@@ -3032,9 +3032,9 @@ same. A table the previous release created and this release opened is unchanged.
   read under its column's guard. A duplicate of any kind is refused `JD2005`
   (`class: 'constraint'`, the index named in the message) on a store this release
   creates; `1` and `'1'` remain two keys, as on SQLite, and a boolean meets
-  booleans alone (SQLite's untyped column holds `true` as `1` and refuses that
-  pair; the query engine does not compare them equal). A write that relied on
-  storing such a duplicate now fails; nothing else answers differently.
+  booleans alone, as the query engine compares it (on SQLite since §49). A
+  write that relied on storing such a duplicate now fails; nothing else answers
+  differently.
 - A table the previous release created keeps refusing a duplicate of the first
   kind alone until `planColumnUpgrade` adds the indexes. Where it already holds
   duplicates of another kind, the plan refuses `JD0023` (`class: 'constraint'`)
@@ -3060,6 +3060,45 @@ declared one `JD0002`, as §47 says, unique or not; dropping those indexes
 (`DROP INDEX "c_by_q$text"`, every `<index>$…` the table holds) is the one step
 for both changes, after which it opens the table and answers alike, and its
 unique index again refuses a duplicate of the member's first kind alone.
+
+## 49. A unique index over a member SQLite's untyped column holds keeps `true` apart from `1`
+
+- On SQLite the generated column over a member of several types (`q: { type:
+  ['number', 'boolean'] }`), or of none (`q: {}`), is the engine's untyped one,
+  which holds a JSON boolean as the integer `0` or `1`. A unique index over it
+  keyed the column alone, so a document with `q: true` was refused `JD2005`
+  beside one with `q: 1` (and `false` beside `0`), though the query engine
+  compares them unequal and PostgreSQL stores both. The unique index now keys,
+  after its columns, whether each such member is a boolean
+  (`CREATE UNIQUE INDEX "c_by_q" ON "c" ("gx_q", (json_type("doc", '$."q"') IN
+  ('true', 'false')))`), in every shape: a composite index after all its
+  columns, a conditional one under its condition. `true` and `1` are two keys
+  on a store this release creates; every other answer stays (equal values of
+  one kind are one key, `1` and `'1'` two, a null or missing member meets
+  nothing), a seek over the columns reads the index as before, and a
+  non-unique index and a column of one type are unchanged. A duplicate a unique
+  index refuses names the index (`UNIQUE constraint failed: index 'c_by_q'`)
+  where the message named the column (`c.gx_q`); its code and fields are as
+  before.
+- A table the previous release created opens and answers as it did, refusing
+  `true` beside `1`, until `planColumnUpgrade` drops the index and creates it
+  with the key (`report.upgraded` names `c.c_by_q`); the column stays as it is.
+  No such table holds both `true` and `1` under the index, since the earlier
+  index refused the pair, and the new key splits only what the earlier one
+  joined, so the link refuses no table. `introspect()` reads either index back
+  as the declared one, and a plan from the model it reads back plans the steps
+  it did. Every plan that creates such an index creates it with the key: a link
+  that makes it unique or gives its member the untyped column, and the plan
+  from a model read back without a conditional index (`unmapped-index`, as
+  before) to the model declaring it.
+
+**Downgrade.** The previous release refuses a table with such an index `JD0002`
+(`index 'c_by_q' covers (gx_q, null)`); create the index again without the key
+(`DROP INDEX "c_by_q"`, then `CREATE UNIQUE INDEX "c_by_q" ON "c" ("gx_q")`) and
+it opens the table and answers alike, provided the table holds no `true` beside
+a `1` (or `false` beside `0`) under the index: the statement refuses such a
+table, so change or remove one of each first. A table the previous release
+created and this release opened is unchanged.
 
 ## Measured costs
 

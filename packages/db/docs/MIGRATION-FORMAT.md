@@ -423,7 +423,16 @@ that rebuilds exactly the ones that differ:
   `duplicates` (`[['a', 'b']]`) beside `collection` and `index`; change or
   remove all but one of each and plan again. A duplicate written between the
   plan and the apply fails the link `JD0023` (`class: 'constraint'`), as any
-  unique index created over violating rows does.
+  unique index created over violating rows does;
+- on SQLite, a unique index over a member the untyped column holds (a member of
+  several types, or of none) without the key a fresh store adds after its
+  columns, whether the member is a boolean (`(json_type("doc", '$."q"') IN
+  ('true', 'false'))`): the column holds `true` as `1`, so it refuses `true`
+  beside `1`, two values the query engine compares unequal, until the link drops
+  the index and creates it with that key (MIGRATION-UPGRADE §49). The column
+  stays as it is. The new index refuses only pairs the earlier one refused, so
+  the link refuses no table and plans no duplicate check; `report.upgraded`
+  names it `c.c_by_q`.
 
 The steps are the ones a model change plans for the same column: drop the
 indexes over it (and the CHECK that reads it), drop the column, add it as a fresh

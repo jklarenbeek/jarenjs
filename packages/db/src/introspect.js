@@ -329,6 +329,33 @@ function kindIndexesOf(dialect, table, paths) {
   return read;
 }
 
+/**
+ * The columns of a unique index that keys, after them, whether each member
+ * the engine's untyped column holds is a boolean (`ddl.js`
+ * `booleanKeyTerms`): the index whose CREATE text is the one a store creates
+ * over those columns. `null` for every other index.
+ * @param {any} dialect
+ * @param {any} table
+ * @param {{ name: string, unique: boolean, columns: (string | null)[], sql: string | null }} index
+ * @param {Map<string, { segments: import('./dialect.js').JsonPathSegment[] }>} paths - by column
+ * @returns {string[] | null}
+ */
+function booleanKeyedColumns(dialect, table, index, paths) {
+  const at = index.columns.indexOf(null);
+  if (!index.unique || at <= 0 || dialect.booleanKeyTerm === undefined || index.sql === null) return null;
+  const columns = /** @type {string[]} */ (index.columns.slice(0, at));
+  const untyped = dialect.comparableColumnType(dialect.typeFor(undefined, 'generated'));
+  const terms = columns.flatMap((name) => {
+    const entry = paths.get(name);
+    const column = table.columns.find((/** @type {any} */ candidate) => candidate.name === name);
+    const pathText = entry === undefined ? null : dialect.jsonPathText(entry.segments);
+    return pathText === null || column === undefined || dialect.comparableColumnType(column.type) !== untyped ? []
+      : [dialect.booleanKeyTerm(dialect.quoteIdentifier(DOC_COLUMN), pathText)];
+  });
+  const planned = dialect.ddl.createIndex({ name: index.name, table: table.name, columns, unique: true, terms });
+  return terms.length > 0 && comparableDeclaredSql(index.sql) === comparableDeclaredSql(planned) ? columns : null;
+}
+
 /** The schema type each kind an index beside a declared one seeks reads back as. */
 const KIND_TYPES = /** @type {const} */ ([['text', 'string'], ['number', 'number'], ['boolean', 'boolean']]);
 
@@ -406,29 +433,30 @@ function deriveCollection(dialect, table, report, keys, functionNames) {
   const indexes = [];
   for (const index of table.indexes) {
     if (besides.has(index.name)) continue;
-    if (index.partial || index.columns.some((column) => column === null)) {
+    const columns = booleanKeyedColumns(dialect, table, index, paths) ?? index.columns;
+    if (index.partial || columns.some((/** @type {string | null} */ column) => column === null)) {
       report(loss('unmapped-index', `${table.name}.${index.name}`,
         'a partial predicate or expression term cannot be represented by an unconditional member index'));
       continue;
     }
-    if (index.columns.length === 1 && computed.has(index.columns[0])) {
+    if (columns.length === 1 && computed.has(columns[0])) {
       const declared = { name: indexName(table.name, index.name),
-        expression: computed.get(index.columns[0]) };
+        expression: computed.get(columns[0]) };
       if (index.unique) declared.unique = true;
       indexes.push(declared);
       continue;
     }
-    const covered = index.columns.map((column) => paths.get(column));
-    if (covered.some((entry) => entry === undefined)) {
+    const covered = columns.map((/** @type {string} */ column) => paths.get(column));
+    if (covered.some((/** @type {any} */ entry) => entry === undefined)) {
       report(loss('unmapped-index', `${table.name}.${index.name}`,
-        `the index covers (${index.columns.join(', ')}), which is not a member path set`));
+        `the index covers (${columns.join(', ')}), which is not a member path set`));
       continue;
     }
     const declared = { name: indexName(table.name, index.name), path: covered.length === 1
-      ? covered[0].path : covered.map((entry) => entry.path) };
+      ? covered[0].path : covered.map((/** @type {any} */ entry) => entry.path) };
     if (index.unique) declared.unique = true;
     indexes.push(declared);
-    for (const column of index.columns) indexedColumns.add(column);
+    for (const column of columns) indexedColumns.add(column);
   }
 
   // a declared interval: the one CHECK, under the name the store gives it,

@@ -45,7 +45,7 @@ import { modelIdentity, migrationIdentity } from './migration-identity.js';
 import { migrationChecksum, historyStatements, readMigrationHistory, checkHistoryObservation, checkAppliedRows,
   historyHeader, identityRows, checkHistoryIdentity, checkHistoryChain, writeIdentityRows } from './migration-history.js';
 export { HISTORY_TABLE, ENGINE_TABLES };
-import { planCollection, verifyShape, legacyColumnTypes, planEntity, planJoinTable, joinIndexName, clipToBytes, plannedExpression, acceptsColumn, columnExpression, creationOrder, kindIndexSql, kindIndexTerms, kindIndexDropSql } from './ddl.js';
+import { planCollection, verifyShape, legacyColumnTypes, termlessIndexesHeld, planEntity, planJoinTable, joinIndexName, clipToBytes, plannedExpression, acceptsColumn, columnExpression, creationOrder, kindIndexSql, kindIndexTerms, kindIndexDropSql } from './ddl.js';
 import { normalizeEntities, explainMapping, asHistory } from './model.js';
 import { derivedValue, memberAt, registerDeriveFunctions } from './derive.js';
 import { mergeEntityRow } from './graph.js';
@@ -123,20 +123,21 @@ function isWidening(from, to) {
 
 /**
  * Whether an index planned under one model must be rebuilt for its
- * declaration under the other: its uniqueness, its column list or its
- * condition changed. The collection and entity diffs share this one
+ * declaration under the other: its uniqueness, its column list (with the
+ * boolean keys a unique index adds after it) or its condition changed. The collection and entity diffs share this one
  * comparison. Columns compare element by element, so a column name containing
  * a comma never equals a split of it (`['a,b']` is not `['a', 'b']`); a
  * condition compares as the plan renders it, the text every open verifies,
  * and neither engine alters one in place. An expression index's expression is
  * its generated column's, compared with the column.
- * @param {{ unique: boolean, columns: readonly string[], where?: string }} from
- * @param {{ unique: boolean, columns: readonly string[], where?: string }} to
+ * @param {{ unique: boolean, columns: readonly string[], terms?: readonly string[], where?: string }} from
+ * @param {{ unique: boolean, columns: readonly string[], terms?: readonly string[], where?: string }} to
  * @returns {boolean}
  */
 export function indexChanged(from, to) {
-  return from.unique !== to.unique || from.columns.length !== to.columns.length
-    || from.columns.some((column, at) => column !== to.columns[at])
+  const differ = (/** @type {readonly string[]} */ a, /** @type {readonly string[]} */ b) =>
+    a.length !== b.length || a.some((key, at) => key !== b[at]);
+  return from.unique !== to.unique || differ(from.columns, to.columns) || differ(from.terms ?? [], to.terms ?? [])
     || (from.where ?? null) !== (to.where ?? null);
 }
 
@@ -1017,7 +1018,7 @@ function collectionSteps(name, fromPlan, toPlan, toCollection, dialect, mapping)
         steps.push({
           kind: 'ddl',
           sql: dialect.ddl.createIndex({ name: indexName, table: name, columns: toIndex.columns,
-            unique: toIndex.unique, where: toIndex.where }),
+            unique: toIndex.unique, where: toIndex.where, terms: toIndex.terms }),
           note: `create index '${indexName}' on '${name}'`,
         });
       }
@@ -1371,7 +1372,7 @@ export function planColumnUpgrade(connection, model, options = undefined) {
       for (const { collection, plan } of collections) {
         const holding = held.get(plan.table);
         if (holding === undefined) continue;
-        upgraded.push(...[...holding.types.keys(), ...holding.columns, ...holding.checks].map((name) => `${plan.table}.${name}`));
+        upgraded.push(...[...holding.types.keys(), ...holding.columns, ...holding.checks, ...holding.indexes].map((name) => `${plan.table}.${name}`));
         steps.push(...collectionSteps(collection.name, heldPlanOf(plan, holding), plan, collection, dialect, mapping).steps);
       }
       for (const { table, index, sql } of missing) {
@@ -1508,26 +1509,36 @@ function missingIndexes(connection, plans, wanted) {
  * interval CHECK in the other spelling of a path the dialect guards
  * (`columns`, `checks`) — read back through the dialect's exact read-back, so
  * a definition that is neither spelling is left to the open path, which
- * refuses it. A table that holds every definition as planned has no entry.
+ * refuses it — and a unique index without the boolean keys a fresh store
+ * creates after its columns (`indexes`, read from its CREATE text). A table
+ * that holds every definition as planned has no entry.
  * @param {any} connection
  * @param {any[]} plans - from `planCollection`, one per collection
- * @returns {any} value-or-promise of `Map<string, { types: Map<string, string>, columns: Set<string>, checks: Set<string> }>`
+ * @returns {any} value-or-promise of `Map<string, { types: Map<string, string>, columns: Set<string>, checks: Set<string>, indexes: Set<string> }>`
  */
 function heldDefinitionsOf(connection, plans) {
   const dialect = connection.dialect;
   const readBack = dialect.capabilities.declaredSqlText === true ? undefined : dialect.readBack;
-  /** @type {Map<string, { types: Map<string, string>, columns: Set<string>, checks: Set<string> }>} */
+  /** @type {Map<string, { types: Map<string, string>, columns: Set<string>, checks: Set<string>, indexes: Set<string> }>} */
   const held = new Map();
   const next = (/** @type {number} */ i) => {
     if (i >= plans.length) return held;
     const plan = plans[i];
     const spelled = readBack === undefined ? [] : plan.generated.filter((column) => column.alternate !== undefined);
     const checked = readBack === undefined ? [] : (plan.intervals ?? []).filter((interval) => interval.alternate !== undefined);
-    if (!plan.generated.some((column) => column.legacyTypes !== undefined) && spelled.length === 0 && checked.length === 0)
+    const keyed = plan.expected.indexes.some((/** @type {any} */ index) => index.terms !== undefined);
+    if (!plan.generated.some((column) => column.legacyTypes !== undefined) && spelled.length === 0 && checked.length === 0 && !keyed)
       return next(i + 1);
-    const holding = { types: new Map(), columns: new Set(), checks: new Set() };
-    const record = () => {
-      if (holding.types.size + holding.columns.size + holding.checks.size > 0) held.set(plan.table, holding);
+    const holding = { types: new Map(), columns: new Set(), checks: new Set(), indexes: new Set() };
+    const record = () => (!keyed ? recorded()
+      : chain(connection.prepare(dialect.introspect.declaredSql(plan.table)), (statement) => chain(statement.all([]), (objects) => {
+        // as the plan of the table's own column types keys them (a column held in a type
+        // keys no boolean, and is rebuilt with its indexes)
+        holding.indexes = termlessIndexesHeld(dialect, holding.types.size > 0 ? plan.replan(holding.types) : plan, objects);
+        return recorded();
+      })));
+    const recorded = () => {
+      if (holding.types.size + holding.columns.size + holding.checks.size + holding.indexes.size > 0) held.set(plan.table, holding);
       return next(i + 1);
     };
     return chain(connection.prepare(dialect.introspect.columns(plan.table)), (statement) =>
@@ -1560,14 +1571,20 @@ function heldDefinitionsOf(connection, plans) {
 /**
  * The plan of a collection as its table holds it: the generated columns
  * {@link heldDefinitionsOf} read in one of their member's types keep that type,
- * and a column or CHECK held in the other spelling carries that text (`holds`),
- * which {@link collectionSteps} compares exactly.
- * @param {any} plan @param {{ types: Map<string, string>, columns: Set<string>, checks: Set<string> }} holding
+ * a column or CHECK held in the other spelling carries that text (`holds`),
+ * which {@link collectionSteps} compares exactly, and an index held without
+ * its boolean keys has none, which {@link indexChanged} reads as a change.
+ * @param {any} plan @param {{ types: Map<string, string>, columns: Set<string>, checks: Set<string>, indexes: Set<string> }} holding
  * @returns {any}
  */
 function heldPlanOf(plan, holding) {
   const base = holding.types.size > 0 ? plan.replan(holding.types) : plan;
   return { ...base,
+    expected: { ...base.expected, indexes: base.expected.indexes.map((/** @type {any} */ index) => {
+      if (!holding.indexes.has(index.name)) return index;
+      const { terms: _keys, ...termless } = index;
+      return termless;
+    }) },
     generated: base.generated.map((/** @type {any} */ column) => (holding.columns.has(column.name) ? { ...column, holds: column.alternate } : column)),
     intervals: (base.intervals ?? []).map((/** @type {any} */ interval) => (holding.checks.has(interval.constraint) ? { ...interval, holds: interval.alternate } : interval)) };
 }
@@ -2827,15 +2844,17 @@ export function createModelShape(connection, model, expressions = undefined) {
 /**
  * {@link createModelShape}, with some generated columns in the type a table
  * holds them in, some join tables without the index over their second
- * key column, and (`bareKinds`) every collection without the indexes beside
- * its declared ones over a member of several kinds, as an earlier release
- * created them.
+ * key column, (`bareKinds`) every collection without the indexes beside
+ * its declared ones over a member of several kinds, and (`termless`) some
+ * unique indexes without the boolean keys after their columns, as an earlier
+ * release created them.
  * @param {any} connection
  * @param {any} model
  * @param {any} expressions
- * @param {{ columns: Map<string, Map<string, string>>, bareJoins: Set<string> | 'all', bareKinds?: boolean }} legacy -
+ * @param {{ columns: Map<string, Map<string, string>>, bareJoins: Set<string> | 'all', bareKinds?: boolean,
+ *   termless?: Map<string, Set<string>> }} legacy -
  *   `columns` by table, then by column; `bareJoins` the join tables created without
- *   that index, or `'all'` of them
+ *   that index, or `'all'` of them; `termless` by table, the indexes' names
  * @returns {any}
  */
 function createShapeHolding(connection, model, expressions, legacy) {
@@ -2846,7 +2865,12 @@ function createShapeHolding(connection, model, expressions, legacy) {
     const plan = planCollection(collection.name, collection, dialect,
       { ...mappingFor(connection, expressions), legacyColumns: legacy.columns.get(collection.name) });
     const beside = new Set(legacy.bareKinds === true ? plan.kindIndexes.map((/** @type {any} */ index) => kindIndexSql(dialect, plan.table, index)) : []);
-    statements.push(...plan.createSql.filter((/** @type {string} */ sql) => !beside.has(sql)));
+    const termless = legacy.termless?.get(plan.table);
+    /** @type {Map<string, string>} */
+    const spelled = new Map(plan.expected.indexes.filter((/** @type {any} */ index) => termless?.has(index.name))
+      .map((/** @type {any} */ index) => [dialect.ddl.createIndex({ ...index, table: plan.table }),
+        dialect.ddl.createIndex({ ...index, table: plan.table, terms: undefined })]));
+    statements.push(...plan.createSql.filter((/** @type {string} */ sql) => !beside.has(sql)).map((/** @type {string} */ sql) => spelled.get(sql) ?? sql));
   }
   // a shape is built for a baseline too, which is history
   const entities = asHistory(() => normalizeEntities(model));
@@ -2939,11 +2963,12 @@ export function compareShapeToModel(driver, connection, model, registerFunctions
  * What a database holds as an earlier release created it, for a reference
  * shape to hold too: the generated columns of its collection tables declared
  * in another of their member's types than the model's plan declares, by table
- * and column, and the join tables without the index over their second key column.
+ * and column, the join tables without the index over their second key column,
+ * and the unique indexes without the boolean keys after their columns, by table.
  * @param {any} connection - the database
  * @param {any} model
  * @param {any} expressions
- * @returns {any} value-or-promise of `{ columns: Map<string, Map<string, string>>, bareJoins: Set<string> }`
+ * @returns {any} value-or-promise of `{ columns: Map<string, Map<string, string>>, bareJoins: Set<string>, termless: Map<string, Set<string>> }`
  */
 function legacyShapeOf(connection, model, expressions) {
   const plans = [...normalizeModel(model, expressions).values()]
@@ -2951,6 +2976,7 @@ function legacyShapeOf(connection, model, expressions) {
   return chain(heldDefinitionsOf(connection, plans), (held) => chain(missingJoinIndexes(connection, joinPlansOf(model, connection.dialect)), (missing) => ({
     columns: new Map([...held].filter(([, holding]) => holding.types.size > 0).map(([table, holding]) => [table, holding.types])),
     bareJoins: new Set(missing.map((entry) => entry.table)),
+    termless: new Map([...held].filter(([, holding]) => holding.indexes.size > 0).map(([table, holding]) => [table, holding.indexes])),
   })));
 }
 

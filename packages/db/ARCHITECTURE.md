@@ -759,7 +759,11 @@ under the guard of a guarded path), so the declared index and they together
 refuse a duplicate of every kind; the open verifies each one's uniqueness,
 condition and keys, accepts a table without them, `planColumnUpgrade` adds them
 (refusing `JD0023` first where the table holds duplicates one would refuse), and
-`introspect()` reads them back as the union's kinds. On such a SQLite
+`introspect()` reads them back as the union's kinds. On SQLite a unique
+index keys, after its columns, whether each member the untyped column holds is
+a boolean (`dialect.booleanKeyTerm`, the planned index's `terms`), since that
+column holds `true` as `1`; the open accepts the index without them, as an
+earlier release created it, and `planColumnUpgrade` creates it again with them. On such a SQLite
 table a number comparison of a string-first member does not seek. A
 member whose first type besides `null` is `number` stores its numbers as the doubles the query
 engine compares, as its `REAL` column did. `explain().indexes`

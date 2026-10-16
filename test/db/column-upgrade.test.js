@@ -104,7 +104,9 @@ describe('planColumnUpgrade on SQLite', () => {
         + 'THEN CAST(jsonb_extract("doc", \'$."q"\') AS REAL) ELSE jsonb_extract("doc", \'$."q"\') END)) VIRTUAL',
         'ALTER TABLE "c" ADD COLUMN "gx_r" ANY GENERATED ALWAYS AS (jsonb_extract("doc", \'$."r"\')) VIRTUAL',
         'ALTER TABLE "c" ADD COLUMN "gx_n" ANY GENERATED ALWAYS AS (jsonb_extract("doc", \'$."n"\')) VIRTUAL',
-        'CREATE UNIQUE INDEX "c_by_nk" ON "c" ("gx_n", "gx_k")', 'CREATE INDEX "c_by_q" ON "c" ("gx_q")', 'CREATE INDEX "c_by_r" ON "c" ("gx_r")',
+        // the unique index keys whether its untyped member is a boolean after its columns
+        'CREATE UNIQUE INDEX "c_by_nk" ON "c" ("gx_n", "gx_k", (json_type("doc", \'$."n"\') IN (\'true\', \'false\')))',
+        'CREATE INDEX "c_by_q" ON "c" ("gx_q")', 'CREATE INDEX "c_by_r" ON "c" ("gx_r")',
       ]);
       assert.deepStrictEqual((await migrate({ driver: nodeDriver(), path: dbPath }, [migration], { baseline: MODEL, model: MODEL })).applied, [migration.id]);
       assert.deepStrictEqual(columnTypes(dbPath), { gx_k: 'TEXT', gx_n: 'ANY', gx_q: 'ANY', gx_r: 'ANY' });

@@ -84,8 +84,8 @@ guarded path step (below) is read under the guard its column is. Together with
 the declared index they key every scalar kind, so a duplicate of any kind is
 refused `JD2005` (`class: 'constraint'`) as SQLite refuses it, and a value of
 one kind never meets a value of another: `1` and `'1'` are two keys on both
-engines. A boolean meets booleans alone, as the query engine compares it, where
-SQLite's untyped column holds `true` as `1` and refuses the pair. A member whose
+engines. A boolean meets booleans alone, as the query engine compares it and as
+SQLite's unique index keys it. A member whose
 union lists a container first has a `jsonb` column that holds every kind; beside
 another member it is keyed by that column. A non-unique composite or
 conditional index, and a non-unique one over a path whose steps the dialect

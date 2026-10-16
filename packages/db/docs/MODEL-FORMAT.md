@@ -513,7 +513,12 @@ besides its column's, over the member read at that kind and named
 a unique index they are unique, and a unique composite, conditional or
 guarded index gets them too (one per combination of its members' kinds,
 `$<kind>$<kind>`), so it refuses a duplicate of every kind as SQLite does
-([POSTGRESQL.md](POSTGRESQL.md)). A member
+([POSTGRESQL.md](POSTGRESQL.md)). On SQLite the generated column over a member
+of several types, or of none, is the engine's untyped one, which holds a JSON
+boolean as the integer `0` or `1`; a unique index keys, after its columns,
+whether each such member is a boolean (`(json_type("doc", '$."q"') IN ('true',
+'false'))`), so `true` and `1` are two keys, as the query engine compares them
+and as PostgreSQL keys them, and a seek over its columns reads it as before. A member
 name the dialect's JSON path grammar cannot carry (an embedded `"` or
 a control character, on SQLite) is `JD0004`. A backslash in a name is
 written escaped, so the path names the member literally — never the
