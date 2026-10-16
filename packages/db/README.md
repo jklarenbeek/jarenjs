@@ -1264,6 +1264,11 @@ measure what that costs sequential point reads beside what it gains concurrent o
   node values refuse `JD2069`; empty matching runs upgrade under the fence.
   Finish a populated legacy run with its original runner, or deliberately
   use a new job id or the reset operation (JOBS-FORMAT §7).
+  Every DAG task receives the attempt as its third argument — `jobId`,
+  `assertLease(tx)` and `signal`, merged over the runner's `resources`
+  option — so the transaction that publishes its result checks
+  `assertLease(tx)` and an attempt that lost its job publishes nothing
+  (JOBS-FORMAT §7).
   `jobs.reset(id, { expectedGeneration })` explicitly
   discards an inactive run's checkpoints and restarts it under a new fence;
   live leases and stale observations refuse (JOBS-FORMAT §10).

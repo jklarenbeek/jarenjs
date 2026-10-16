@@ -2579,6 +2579,14 @@ export declare function createDagJobRunner(store: Store, options: {
   compileDag: Function;
   documents: Record<string, unknown>;
   tasks?: Record<string, Function | { run: Function; version?: string; taskVersions?: Record<string, string> }>;
+  /** The host's own task resources (a plain object). Every task receives
+   * them as its third argument, frozen and merged with the attempt's
+   * `jobId`, `assertLease(tx)` and `signal` — `assertLease` checks the
+   * attempt's current lease inside the transaction that writes (`JD2066`
+   * superseded, `JD2067` expired, `JD0014` for a value with no `jobs`); a
+   * member with one of those three names is `JD0013`. Never input, never
+   * checkpoint identity. */
+  resources?: Record<string | symbol, unknown>;
   concurrency?: number;
   pollInterval?: number;
   leaseMs?: number;

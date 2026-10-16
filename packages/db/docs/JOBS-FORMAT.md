@@ -421,8 +421,8 @@ await store.jobs.enqueue('sync-report', { input: { day: '2026-08-05' } });
 - The engine arrives as a capability (the validation hook's shape, applied to flow);
   `@jarenjs/db`'s manifest and import graph name `@jarenjs/flow`
   nowhere, asserted by test.
-- The options are a closed set: `compileDag`, `documents`, `tasks`, and the
-  worker's own (`concurrency`, `pollInterval`, `leaseMs`, `owner`, `renew`,
+- The options are a closed set: `compileDag`, `documents`, `tasks`,
+  `resources`, and the worker's own (`concurrency`, `pollInterval`, `leaseMs`, `owner`, `renew`,
   `onOutcome`, `backoffBase`, `backoffCap`, `stopGraceMs`, `effectSafety`). A
   member outside it is `JD0013` naming the nearest (`concurency` ran one loop);
   `maxAttempts` belongs to the job (`enqueue`).
@@ -443,6 +443,43 @@ await store.jobs.enqueue('sync-report', { input: { day: '2026-08-05' } });
   handler's: a worker winding down inside its `graceMs`, or an attempt
   whose lease has been lost, reaches every task rather than only the
   outermost await.
+- **A task fences its own writes with the attempt.** Every task receives,
+  as its third argument, the flow engine's host-private `resources`
+  (FLOW-FORMAT, never input, never checkpoint identity): a frozen object of
+  the host's own `resources` option merged with three members the runner
+  sets per attempt — `jobId` (the idempotency key to thread into what the
+  task touches), `assertLease(tx)` (`tx.jobs.assertLease` with the
+  attempt's current lease, which follows renewals) and `signal` (the
+  attempt's own, which a sibling node's failure does not abort, unlike the
+  task's second argument). A task that publishes a result — a provider's
+  response arriving after a long call — checks the lease in the
+  transaction that writes it, so an attempt whose job another worker
+  reclaimed, or whose lease expired, publishes nothing:
+
+  ```js
+  createDagJobRunner(store, { compileDag, documents: { answer: answerDag },
+    resources: { provider },
+    tasks: { publish: async ({ input }, signal, { provider, assertLease, jobId }) => {
+      const response = await provider.call(input, { signal, idempotencyKey: jobId });
+      return store.transaction(async (tx) => {
+        await assertLease(tx); // JD2066 superseded, JD2067 expired
+        await tx.collection('responses').put({ id: jobId, response });
+        return { id: jobId };
+      });
+    } } });
+  ```
+
+  `assertLease` takes the transaction the write runs in, where the check
+  and the write share one lock; a value with no `jobs` surface is `JD0014`.
+  Given the root store it checks only the instant it ran. The lease itself
+  is never handed out — it settles the job and writes checkpoint rows, so a
+  task holding it could finish the run with a result of its own — and
+  neither are the handler context's `checkpoints` (the run's own rows) and
+  `pause` (settles the queue attempt). The host's members come first and
+  the runner's last; a host member named `jobId`, `assertLease` or
+  `signal`, or a `resources` that is not a plain object, is `JD0013` when
+  the runner is built. **Upgrading:** a task's third argument
+  was `undefined` under this runner; it is now this object.
 - The runner forwards the worker options it declares — `concurrency`,
   `pollInterval`, `leaseMs`, `owner`, `renew`, `onOutcome`, the backoff
   pair and `stopGraceMs`. A `runner.stop()` with no override observes
@@ -604,7 +641,8 @@ root call.
 renewal. It uses the same token/expiry guard and `JD2065`/`JD2066`/`JD2067` refusals
 as settlement; malformed authority is `JD2068`. Inside `tx.jobs`, this read and
 subsequent mapped writes share the transaction lock. Workers receive
-`context.lease()` to read their current token after automatic renewal.
+`context.lease()` to read their current token after automatic renewal, and
+every task of a DAG job checks the same lease with `resources.assertLease(tx)` (§7).
 
 `createWorker({ effectSafety(job, context), ... })` optionally gates each handler
 admission. Only `true` admits; any other resolved value pauses the queue attempt

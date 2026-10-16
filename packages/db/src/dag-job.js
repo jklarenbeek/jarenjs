@@ -21,14 +21,20 @@
  * and a resume that disagrees with either is refused by name — reusing
  * checkpoints written by a different workflow is not a resume, it is a
  * silently wrong answer.
+ *
+ * A task's OWN writes need the same fence, and only the attempt can give
+ * it: every task receives the attempt through the engine's host-private
+ * `resources` (never input, never checkpoint identity), so the
+ * transaction that publishes a late provider response can check the
+ * lease it runs under and an attempt that lost its job publishes nothing.
  */
 
 import { canonicalizeJson } from '@jarenjs/json/canonical';
 import { hashContent } from '@jarenjs/core/string';
 import { setObjectMember, isJsonObject } from '@jarenjs/core/object';
 
-import { DbRuntimeError } from './errors.js';
-import { readOptionsOrNull } from './options.js';
+import { DbCompileError, DbRuntimeError } from './errors.js';
+import { readOptionsOrNull, isPlainOptions } from './options.js';
 
 /** The checkpoint row a run's identity lives in. The leading unit
  * separator keeps it out of any node-id namespace a document could
@@ -40,9 +46,30 @@ export const RUN_IDENTITY_NODE = '\u001Fidentity';
  * sees. A unit separator, so no job id can carry one by accident. */
 const RUN_KEY_SEPARATOR = '\u001F';
 
-/** Every member `createDagJobRunner` reads: the worker's own, which it hands on, and the three that make it a runner. */
-const RUNNER_OPTIONS = Object.freeze(['compileDag', 'documents', 'tasks', 'concurrency', 'pollInterval', 'leaseMs',
-  'owner', 'renew', 'onOutcome', 'backoffBase', 'backoffCap', 'stopGraceMs', 'effectSafety']);
+/** Every member `createDagJobRunner` reads: the worker's own, which it hands on, and the four that make it a runner. */
+const RUNNER_OPTIONS = Object.freeze(['compileDag', 'documents', 'tasks', 'resources', 'concurrency', 'pollInterval',
+  'leaseMs', 'owner', 'renew', 'onOutcome', 'backoffBase', 'backoffCap', 'stopGraceMs', 'effectSafety']);
+
+/**
+ * The members the runner adds to every task's resources, so no host
+ * resource may carry one of these names. Each is a reader of the attempt,
+ * none a writer of the run:
+ *  - `jobId` — the idempotency key a task threads into what it touches
+ *    (§7); the run key the engine sees carries the fence token too.
+ *  - `assertLease(tx)` — `tx.jobs.assertLease` with the attempt's CURRENT
+ *    lease, inside the transaction that writes. It checks the lease and
+ *    never hands it out: the lease settles the job and writes checkpoint
+ *    rows (`jobs.complete`, `jobs.checkpointsFor`), so a task holding it
+ *    could finish the run with a result of its own. Current, because a
+ *    renewal replaces the lease: the claim's own would fence the live
+ *    attempt out after its first renewal.
+ *  - `signal` — the attempt's signal (shutdown or a lost lease). A task's
+ *    second argument also aborts when a sibling node fails, so it cannot
+ *    say whether the attempt itself still runs.
+ * The handler context's `checkpoints` and `pause` stay out: the first
+ * writes the run's own rows, the second settles the queue attempt.
+ */
+const ATTEMPT_RESOURCES = Object.freeze(['jobId', 'assertLease', 'signal']);
 
 /**
  * Build a worker whose handlers run checkpointed DAG documents.
@@ -50,6 +77,7 @@ const RUNNER_OPTIONS = Object.freeze(['compileDag', 'documents', 'tasks', 'concu
  * @param {{ compileDag: Function,
  *   documents: Record<string, any>,
  *   tasks?: Record<string, Function | { run: Function, version?: string, taskVersions?: Record<string, string> }>,
+ *   resources?: Record<string | symbol, unknown>,
  *   concurrency?: number, pollInterval?: number, leaseMs?: number,
  *   owner?: string, renew?: boolean, onOutcome?: (event: any) => void,
  *   backoffBase?: number, backoffCap?: number,
@@ -72,6 +100,18 @@ export function createDagJobRunner(store, options) {
     || Object.keys(documents).length === 0) {
     throw new TypeError(
       'createDagJobRunner: "documents" must map job kinds to dag documents');
+  }
+  const hostResources = options.resources ?? {};
+  if (!isPlainOptions(hostResources)) {
+    throw new DbCompileError('JD0013',
+      "createDagJobRunner option 'resources' must be a plain object of the host's own task resources");
+  }
+  for (const name of ATTEMPT_RESOURCES) {
+    if (Object.hasOwn(hostResources, name)) {
+      throw new DbCompileError('JD0013',
+        `createDagJobRunner option 'resources' carries '${name}', which the runner sets to the attempt's own `
+        + `(${ATTEMPT_RESOURCES.join(', ')}) — rename the host's member`);
+    }
   }
 
   /**
@@ -198,6 +238,21 @@ export function createDagJobRunner(store, options) {
       { docPath: '/jobs', collection: jobId });
   };
 
+  /**
+   * The fence a task checks in the transaction that writes its result.
+   * A check made anywhere else holds only for the instant it ran.
+   * @param {any} tx - the transaction view the task writes through
+   * @param {any} context - the attempt's handler context
+   */
+  const assertAttemptLease = (tx, context) => {
+    if (typeof tx?.jobs?.assertLease !== 'function') {
+      throw new DbCompileError('JD0014',
+        "a DAG task's assertLease(tx) takes the transaction its write runs in (store.transaction's tx), "
+        + 'whose jobs surface checks the lease under the same lock; this value has none');
+    }
+    return tx.jobs.assertLease(context.lease());
+  };
+
   /** @type {Record<string, Function>} */
   const handlers = {};
   for (const kind of Object.keys(documents)) {
@@ -215,8 +270,12 @@ export function createDagJobRunner(store, options) {
         await requireSameRun(context, context.job.id, workflow, canonicalizeJson(input),
           compiled.taskVersions);
         // the handler's signal reaches every task: a worker winding down
-        // inside its grace period, or a lease this attempt has lost
-        return await compiled.run(input, { runId: runKey, signal: context.signal, drainOnAbort: true });
+        // inside its grace period, or a lease this attempt has lost. The
+        // host's resources first, the attempt's last: a member the host
+        // adds after the runner was built cannot shadow the fence.
+        const resources = Object.freeze({ ...hostResources,
+          jobId: context.job.id, assertLease: (tx) => assertAttemptLease(tx, context), signal: context.signal });
+        return await compiled.run(input, { runId: runKey, signal: context.signal, drainOnAbort: true, resources });
       }
       finally {
         active.delete(runKey);
