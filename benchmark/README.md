@@ -120,6 +120,17 @@ The conformance table in the repository [README](../README.md) is produced by
 drafts). `npm run benchmark` runs the simpler suite pass in `index.js`; its
 results are written to `benchmark/results/results.html`.
 
+**How a row is timed.** Both engines compile the group's schema and run its
+tests 2,000 times untimed, then run `--iterations` passes over them in three
+interleaved rounds (alternating which engine runs first), and each engine's row
+is its fastest round. Ajv compiles a schema into generated code that V8 optimizes
+only after many calls; the earlier method (100 warmup passes, one timed block
+per engine) timed it before that and flattered Jaren, and a single garbage
+collection inside the one block inflated a random row by up to ~65×. Rows of a
+few nanoseconds are mostly adaptor overhead for both engines, so the suite
+total and the geometric mean are the robust comparisons, not the count of
+rows each engine wins.
+
 **How the pass/fail columns are counted.** Each engine is scored over the
 tests *it* ran: a test where the other engine could not compile the schema
 is still a test this one passed or failed, and it is counted here — so

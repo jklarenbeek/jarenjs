@@ -25,7 +25,9 @@ import { fileURLToPath } from 'node:url';
 
 const DEFAULT_TEST_DRAFT = 'draft7';
 const DEFAULT_ITERATIONS = 1000;
-const WARMUP_ITERATIONS = 100;
+/** Interleaved timing rounds per engine; the fastest round is reported. */
+const ROUNDS = 3;
+const WARMUP_ITERATIONS = 2000;
 const TEST_SUITE_DIR = './benchmark/suite/tests';
 
 // Map draft aliases to schema draft names (for Jaren)
@@ -254,27 +256,32 @@ function profileTest(test, iterations, draft, remotes, successOnly = false, suit
     }
   }
 
-  // Profile Jaren
-  const jarenStart = performance.now();
-  for (let i = 0; i < iterations; i++) {
-    for (const item of test.tests) {
-      jaren.run(jarenValidator, item.data);
+  // Profile both engines in interleaved rounds, alternating which runs
+  // first, and keep each engine's fastest round: one garbage collection or
+  // deoptimization landing in a single timed block once inflated a published
+  // row by ~65x, a different row on every run. The totals stay "per
+  // iteration x iterations".
+  /** @param {any} engine @param {any} validator */
+  const timeRound = (engine, validator) => {
+    const start = performance.now();
+    for (let i = 0; i < iterations; i++) {
+      for (const item of test.tests) {
+        engine.run(validator, item.data);
+      }
     }
+    return (performance.now() - start) / iterations;
+  };
+  let jarenPerIteration = Infinity;
+  let ajvPerIteration = Infinity;
+  for (let round = 0; round < ROUNDS; round++) {
+    if (round % 2 === 1)
+      ajvPerIteration = Math.min(ajvPerIteration, timeRound(ajv, ajvValidator));
+    jarenPerIteration = Math.min(jarenPerIteration, timeRound(jaren, jarenValidator));
+    if (round % 2 === 0)
+      ajvPerIteration = Math.min(ajvPerIteration, timeRound(ajv, ajvValidator));
   }
-  const jarenEnd = performance.now();
-  const jarenTotalTime = jarenEnd - jarenStart;
-  const jarenPerIteration = jarenTotalTime / iterations;
-
-  // Profile AJV
-  const ajvStart = performance.now();
-  for (let i = 0; i < iterations; i++) {
-    for (const item of test.tests) {
-      ajv.run(ajvValidator, item.data);
-    }
-  }
-  const ajvEnd = performance.now();
-  const ajvTotalTime = ajvEnd - ajvStart;
-  const ajvPerIteration = ajvTotalTime / iterations;
+  const jarenTotalTime = jarenPerIteration * iterations;
+  const ajvTotalTime = ajvPerIteration * iterations;
 
   // Calculate statistics
   const ratio = ajvPerIteration > 0 ? jarenPerIteration / ajvPerIteration : 0;
