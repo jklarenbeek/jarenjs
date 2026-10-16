@@ -54,7 +54,12 @@ function segmentDistanceSq(px, py, ax, ay, bx, by) {
  * The first and last positions always survive, so a **ring stays closed**
  * — simplification can never turn a valid polygon into an invalid one.
  * Positions are returned by reference, not copied, so any third element
- * (altitude) rides along untouched.
+ * (altitude) rides along untouched. A line holding a member that is not a
+ * position of finite numbers (a list whose first two members are finite
+ * numbers; not `null`, a hole, `5`, `'12'`, `[null, null]` or `[NaN, 0]`)
+ * is returned unsimplified: no distance to such a member can be measured,
+ * and a vertex dropped by a distance that is not a number would be dropped
+ * without a reason.
  *
  * @param {Array<number[]>} line - positions
  * @param {number} tolerance - in the input's own coordinate units
@@ -67,6 +72,11 @@ export function simplifyLine(line, tolerance) {
   const n = line.length;
   if (n < 3 || !(tolerance > 0))
     return line.slice();
+  for (let i = 0; i < n; i++) {
+    const position = line[i];
+    if (!Number.isFinite(position?.[0]) || !Number.isFinite(position[1]) || !(position.length >= 2))
+      return line.slice();
+  }
 
   const toleranceSq = tolerance * tolerance;
   const keep = new Uint8Array(n);

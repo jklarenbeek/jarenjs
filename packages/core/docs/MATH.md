@@ -83,13 +83,18 @@ optionally `minusSign`, `zeroDigit`, `exponentSeparator`, `infinity` and
 `NaN`), so core carries no locale data. Under it a text has one reading:
 an optional `+` or minus sign (the record's, `-` or `−`), an integer part
 written without grouping or with the record's grouping separator before
-every three digits after a leading group of one to three, an optional
+every three digits after a leading group of one to three that does not
+start with zero, an optional
 fraction after the record's decimal separator, an optional exponent (the
 record's separator, `e` or `E`), digits ASCII or the record's family.
 Anything else is `NaN`, never a guess: under Dutch `'1.234,5'` is 1234.5,
 `'3,45'` is 3.45 and `'10.000'` is 10000, while `'1,2,3'`, `'1.23'` and
-`'3.45'` are `NaN`; under English `'1,234.5'` is 1234.5 and `'3,45'` is
-`NaN`. Only the record's own grouping character is read: French groups
+`'3.45'` are `NaN`, and so are `'0.125'` and `'01.000'`, which no writer
+groups: read as 125 and 1000 they would be a decimal written the other way
+taken a thousand times too large; under English `'1,234.5'` is 1234.5 and
+`'3,45'` and `'0,125'` are `NaN`. *Upgrade: a grouped integer part leading
+with zero used to be read as grouping (Dutch `'0.125'` as 125, English
+`'0,000,001'` as 1).* Only the record's own grouping character is read: French groups
 with U+202F, and `'1 234,5'` written with an ASCII space is `NaN`.
 `formatNumber` writes the text the same record reads back (the round trip
 is tested under every shipped pack): its separators (`group: true` takes

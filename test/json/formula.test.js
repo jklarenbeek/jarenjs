@@ -154,3 +154,20 @@ it('data that is not JSON is the formula\'s JQ2013, the canonicalizer\'s code an
   }
 });
 
+
+it('reads a thrown value\'s code only when it is text, and reports a schema test\'s throw at its schema', () => {
+  for (const [thrown, code] of [[null, 'JQ2013'], [undefined, 'JQ2013'], ['text', 'JQ2013'], [{ code: 42 }, 'JQ2013'], [{ code: '' }, 'JQ2013'],
+    [Object.assign(new Error('x'), { code: 'ENOENT' }), 'ENOENT']]) {
+    const compiler = createFormulaCompiler({
+      helpers: { boom: { version: '1', run: () => { throw thrown; }, trust: 'pure', cost: 1 } },
+      schemas: { row: { version: '1', schema: {} } },
+      compileTypeTest: () => () => { throw thrown; },
+    });
+    const input = compiler.compile(doc('$.a', { inputSchema: { id: 'row', version: '1' } }));
+    assert.throws(() => input.evaluate({ a: 1 }), { name: 'FormulaError', code, docPath: '/inputSchema' }, String(thrown));
+    const result = compiler.compile(doc('$.a', { resultSchema: { id: 'row', version: '1' } }));
+    assert.throws(() => result.evaluate({ a: 1 }), { name: 'FormulaError', code, docPath: '/resultSchema' }, String(thrown));
+    const helper = compiler.compile(doc({ $call: ['boom', 1] }, { helpers: [{ name: 'boom', version: '1' }] }));
+    assert.throws(() => helper.evaluate({ a: 1 }), { name: 'FormulaError', code: 'JQ2010', docPath: '/expression' }, String(thrown));
+  }
+});

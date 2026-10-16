@@ -15,6 +15,58 @@ describe('the identity behind $distinct, $groupby and the hash join', () => {
     assert.deepEqual(groups({ v: [big, {}, big, big + 1n] }), [{ k: big, n: 2 }, { k: {}, n: 1 }, { k: big + 1n, n: 1 }]);
   });
 
+  it('keeps JOSL and JSONX datetimes and regular expressions apart by their instant and their source and flags', () => {
+    const d1 = new Date('2024-01-01T00:00:00Z');
+    const d2 = new Date('2025-06-01T12:00:00Z');
+    const same = new Date('2024-01-01T00:00:00Z');
+    const eq = compileJsonQuery({ $eq: ['$.a', '$.b'] });
+    assert.equal(eq({ a: d1, b: d2 }), false);
+    assert.equal(eq({ a: d1, b: same }), true);
+    assert.equal(eq({ a: /a/, b: /b/i }), false);
+    assert.equal(eq({ a: /a/, b: /a/i }), false);
+    assert.equal(eq({ a: /a/i, b: /a/i }), true);
+    assert.equal(eq({ a: d1, b: {} }), false);
+    assert.equal(eq({ a: /a/, b: {} }), false);
+    assert.equal(eq({ a: d1, b: /a/ }), false);
+    assert.equal(eq({ a: [d1], b: [same] }), true);
+    assert.equal(eq({ a: new Date(NaN), b: new Date(NaN) }), false, 'an invalid instant equals none, as NaN does');
+    const count = compileJsonQuery({ $count: { $distinct: '$.v[*]' } });
+    assert.equal(count({ v: [d1, d2, same, {}] }), 3);
+    assert.equal(count({ v: [/a/, /b/i, /a/, /a/i, {}] }), 4);
+    const groups = compileJsonQuery({
+      $for: { x: '$.v[*]' }, $groupby: { k: '$x' }, $return: { $count: '$x' },
+    });
+    assert.deepEqual(groups({ v: [d1, d2, same] }), [2, 1]);
+    assert.deepEqual(groups({ v: [/a/, /b/i, /a/] }), [2, 1]);
+    assert.notEqual(stableKeyString(d1), stableKeyString({}));
+    assert.equal(stableKeyString([d1]), stableKeyString([same]));
+    // on the walk past the host-stack depth and in the shared form of a long key alike
+    const nest = (/** @type {any} */ leaf) => { let v = leaf; for (let i = 0; i < 300; i++) v = [v]; return v; };
+    const long = (/** @type {any} */ leaf) => [...Array.from({ length: 60000 }, () => 'a twenty char text..'), { at: leaf }];
+    // a datetime as the very first value the walk takes, and one met inside it
+    const nest256 = (/** @type {any} */ leaf) => { let v = leaf; for (let i = 0; i < 256; i++) v = [v]; return v; };
+    for (const wrap of [nest, nest256, long]) {
+      assert.equal(stableKeyString(wrap(d1)), stableKeyString(wrap(same)));
+      assert.notEqual(stableKeyString(wrap(d1)), stableKeyString(wrap(d2)));
+      assert.notEqual(stableKeyString(wrap(d1)), stableKeyString(wrap({})));
+      assert.notEqual(stableKeyString(wrap(/a/)), stableKeyString(wrap(/a/i)));
+      // one with members of its own keys by them, as $eq compares it, on every path
+      assert.equal(stableKeyString(wrap(Object.assign(new Date(0), { x: 1 }))), stableKeyString(wrap({ x: 1 })));
+    }
+    const join = compileJsonQuery({
+      $for: { o: '$.outer[*]', i: '$.inner[*]' }, $where: { $eq: ['$o.k', '$i.k'] }, $return: ['$o.id', '$i.id'],
+    });
+    const scan = compileJsonQuery({
+      $for: { o: '$.outer[*]', i: '$.inner[*]' }, $where: { $eq: [{ $seq: ['$o.k'] }, '$i.k'] }, $return: ['$o.id', '$i.id'],
+    });
+    const data = {
+      outer: [{ id: 0, k: d1 }, { id: 1, k: /a/ }, { id: 2, k: {} }],
+      inner: [{ id: 0, k: d2 }, { id: 1, k: same }, { id: 2, k: /a/ }, { id: 3, k: /a/g }, { id: 4, k: {} }],
+    };
+    assert.deepEqual(scan(data), [[0, 1], [1, 2], [2, 4]]);
+    assert.deepEqual(join(data), [[0, 1], [1, 2], [2, 4]]);
+  });
+
   it('joins a bigint key on its own value, as the scan does', () => {
     const join = compileJsonQuery({
       $for: { o: '$.outer[*]', i: '$.inner[*]' }, $where: { $eq: ['$o.k', '$i.k'] }, $return: ['$o.id', '$i.id'],

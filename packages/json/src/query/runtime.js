@@ -265,6 +265,22 @@ function leafKey(value) {
 }
 
 /**
+ * The key of an object with no own member that is a `Date` or a `RegExp`,
+ * which JOSL and JSONX read text into, or `undefined` for any other: they
+ * key by their instant and by their source and flags, as `equalsJson`
+ * compares them, in text no JSON value's key writes. Asked only of an
+ * object whose keys were read and found none, so every other object pays
+ * nothing for it.
+ * @param {any} value
+ * @returns {string | undefined}
+ */
+function opaqueKey(value) {
+  return value instanceof Date ? `Date(${value.getTime()})`
+    : value instanceof RegExp ? `RegExp(${JSON.stringify(String(value))})` : undefined;
+}
+
+
+/**
  * The key of a value `depth` containers down from the root.
  * @param {any} value
  * @param {number} depth
@@ -287,7 +303,10 @@ function stableKeyAt(value, depth) {
     }
     return s + ']';
   }
-  const keys = Object.keys(value).sort();
+  const keys = Object.keys(value);
+  if (keys.length === 0)
+    return opaqueKey(value) ?? '{}';
+  keys.sort();
   let s = '{';
   for (let i = 0; i < keys.length; i++) {
     if (i > 0)
@@ -321,8 +340,16 @@ function stableKeyWalk(value, depth) {
       if (depth + frames.length > JSON_WALK_DEPTH_CEILING)
         throw KEY_CEILING;
       const keys = Array.isArray(next) ? null : Object.keys(next).sort();
-      s += keys === null ? '[' : '{';
-      frames.push({ value: next, keys, at: 0 });
+      const opaque = keys !== null && keys.length === 0 ? opaqueKey(next) : undefined;
+      if (opaque !== undefined) {
+        s += opaque;
+        if (frames.length === 0)
+          return s;
+      }
+      else {
+        s += keys === null ? '[' : '{';
+        frames.push({ value: next, keys, at: 0 });
+      }
     }
     if (s.length > KEY_TEXT_BOUND)
       throw KEY_TOO_LONG;
@@ -405,8 +432,14 @@ function sharedKey(value) {
       }
       if (open.has(member) || frames.length >= JSON_WALK_DEPTH_CEILING)
         throw KEY_CEILING;
+      const opened = openFrame(member);
+      const opaque = opened.keys !== null && opened.keys.length === 0 ? opaqueKey(member) : undefined;
+      if (opaque !== undefined) {
+        frame.text += opaque; // a leaf: it gets no identity
+        continue;
+      }
       open.add(member);
-      frames.push(openFrame(member));
+      frames.push(opened);
       continue;
     }
     const content = frame.text + (frame.keys === null ? ']' : '}');
@@ -456,7 +489,11 @@ function writeShared(value, identities) {
         s += memberLeaf;
         continue;
       }
-      const identity = /** @type {number} */ (identities.get(member));
+      const identity = identities.get(member);
+      if (identity === undefined) { // a member the identities pass read as a leaf
+        s += opaqueKey(member);
+        continue;
+      }
       const ordinal = ordinals.get(identity);
       if (ordinal !== undefined) {
         s += '\u0001' + ordinal;

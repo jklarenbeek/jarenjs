@@ -49,6 +49,11 @@ either end of the domain when the quotient rounds just short of a whole number
 (`(t, 10, 20)` is `[10, 20]`; it answered `[undefined, 20]`) and keeps the inclusive one when
 the draft-04 modifier is `false` (it read `false` as a bound).
 
+`equalsJson` (`@jarenjs/core/object`) compares the two objects JOSL and JSONX
+read text into by what they hold: a `Date` equals a `Date` of the same instant
+and a `RegExp` a `RegExp` of the same source and flags, and neither equals
+another object. *Upgrade: both used to compare as `{}`, so any two were equal.*
+
 `equalsJson` and `stableStringify` (`@jarenjs/core/object`) walk a deep value on
 their own stack instead of the host's, so a value nested past the host stack
 answers; past 10000 levels, a nesting no default host stack could walk
@@ -477,9 +482,12 @@ and explicit strict/AI/contract compatibility policies.
 and `CHECK_CODES`. Only `true` or `{ valid: true }` passes. An invalid outcome
 always names at least one error, since its errors are what a repair loop sends
 back to the model that wrote the value: an answer that carries errors keeps
-them (the same array), and one that carries none — `false`, `{ valid: false }`,
-an empty `errors`, an `errors` that is text or a number, any other value —
-answers the single error `{ code: 'JG2001', docPath: '', message: 'the value was
+them (the same array when every item is an object; a repair loop reads each
+error's members, so a non-empty text item is answered as `{ code: 'JG2001',
+docPath: '', message: <the text> }` in its place, and `null`, `''` or a number
+is left out), and one that carries none — `false`, `{ valid: false }`,
+an empty `errors`, an `errors` that is text or a number, a list with neither an
+object nor text in it, any other value — answers the single error `{ code: 'JG2001', docPath: '', message: 'the value was
 rejected by a check that named no error' }`. `errors` is always an array: one
 error object an answer holds outside an array is answered as the array of it,
 and a valid answer with no array answers `[]`.
@@ -490,11 +498,15 @@ Composition stops at the first failure and preserves its errors.
 *Upgrade: such an answer used to be `{ valid: false, errors: [] }` — a promise
 included, whatever it settled to — so a repair prompt listed no error to fix;
 an `errors` that is not an array used to pass through as it was (`'bad'`), so
-reading it as a list threw.*
+reading it as a list threw; a list's items that are no object were kept, so
+`{ valid: false, errors: [null] }` answered `[null]`, where it now answers the
+`JG2001` error, and `errors: ['denied']` answered `['denied']`, where it now
+answers `[{ code: 'JG2001', docPath: '', message: 'denied' }]`, in
+`checkOutcome`, `composeChecks` and a guarded refiner's outcomes alike.*
 
 | code | condition |
 | --- | --- |
-| `JG0001` | a check answered a promise, which `checkOutcome` cannot read |
+| `JG0001` | a check or a compile answered a promise, which `checkOutcome` and `checkCompile` cannot read |
 | `JG0002` | a guarded hook answered a promise, which the synchronous `prepare` cannot await |
 | `JG2001` | a check answered invalid without naming an error |
 | `JG2002` | a guarded hook, snapshot, commit or restore threw a value whose code is not text |
@@ -528,7 +540,13 @@ check(5);
 ```
 
 A compile that returns answers `{ valid: true, errors: [] }`; its return value
-is not read, so it must refuse synchronously. A throw answers one error: the
+is not read, so it must refuse synchronously. One that returns a promise or
+another thenable has not decided, so the check throws the `CheckOutcomeError`
+`JG0001` instead of answering, and settles the promise so its rejection is not
+raised unhandled; await such a compile and check its settled answer.
+*Upgrade: such a check used to answer `{ valid: true, errors: [] }` for every
+value, the ones the compile rejected included, and the rejection escaped as an
+unhandled one.* A throw answers one error: the
 thrown value's own `code` when that is non-empty text, else `fallbackCode`, so
 no error reaches a repair loop without a code; its own `docPath` when that is
 text, else `''`; and its `reason` (a coded error's bare text, without the code

@@ -38,7 +38,8 @@ it('never commits rejected async checks/plans and recovers the serialized queue'
       apply: doc => doc, validateCandidate: () => true, planCommit: doc => doc,
       [hook]: async () => ({ valid: false, errors: ['denied'] }),
       commit: async () => assert.fail('invalid candidate committed') });
-    assert.deepEqual((await engine.commit({})).errors, ['denied']);
+    // the text the check gave survives, as an error object a repair loop reads
+    assert.deepEqual((await engine.commit({})).errors, [{ code: 'JG2001', docPath: '', message: 'denied' }]);
   }
 });
 

@@ -1004,6 +1004,26 @@ describe('hash-joined equijoins are invisible', () => {
       [1, 2]);
   });
 
+  it('should match a key holding a NaN at any depth only where the scan\'s $eq does', () => {
+    const nan = {
+      $for: { a: '$.xs[*]', b: '$.ys[*]' },
+      $where: { $eq: ['$a.k', '$b.k'] },
+      $return: ['$a.n', '$b.n'],
+    };
+    const data = {
+      xs: [{ n: 0, k: [NaN] }, { n: 1, k: { x: NaN } }, { n: 2, k: [[1, { y: NaN }]] }],
+      ys: [{ n: 3, k: [NaN] }, { n: 4, k: { x: NaN } }, { n: 5, k: [[1, { y: NaN }]] }],
+    };
+    assert.deepStrictEqual(bothWays(nan, data), undefined);
+    // a value equals itself, NaN inside it included: the same key on both sides joins
+    const shared = [NaN];
+    const self = { xs: [{ n: 0, k: shared }, { n: 1, k: [1] }], ys: [{ n: 2, k: shared }, { n: 3, k: [1] }] };
+    assert.deepStrictEqual(bothWays(nan, self), [[0, 2], [1, 3]]);
+    // a key whose text spells NaN still joins
+    const text = { xs: [{ n: 0, k: ['NaN'] }, { n: 1, k: { NaN: 1 } }], ys: [{ n: 2, k: ['NaN'] }, { n: 3, k: { NaN: 1 } }] };
+    assert.deepStrictEqual(bothWays(nan, text), [[0, 2], [1, 3]]);
+  });
+
   it('should join on object and array keys by deep equality', () => {
     const doc = {
       $for: { a: '$.xs[*]', b: '$.ys[*]' },

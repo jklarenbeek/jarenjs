@@ -238,6 +238,44 @@ describe('equalsJson', () => {
   assert.isTrue(equalsJson(new Map([[1, 'a']]), new Map([[2, 'b']])),
     'equalsJson should not look at Map entries (JSON-only semantics)');
 
+  it('compares a Date by its instant and a RegExp by its source and flags, on every walk', () => {
+    const d1 = new Date('2024-01-01T00:00:00Z');
+    const d2 = new Date('2025-06-01T12:00:00Z');
+    const same = new Date(d1.getTime());
+    assert.isFalse(equalsJson(d1, d2));
+    assert.isTrue(equalsJson(d1, same));
+    assert.isFalse(equalsJson(/a/, /b/i));
+    assert.isFalse(equalsJson(/a/, /a/i));
+    assert.isTrue(equalsJson(/a/g, /a/g));
+    for (const other of [{}, [], /a/])
+      assert.isFalse(equalsJson(d1, other), String(other));
+    assert.isFalse(equalsJson({}, d1));
+    assert.isFalse(equalsJson(/a/, {}));
+    assert.isFalse(equalsJson(new Date(NaN), new Date(NaN)));
+    assert.isTrue(equalsJson({ x: [d1] }, { x: [same] }));
+    assert.isFalse(equalsJson({ x: [d1] }, { x: [d2] }));
+    assert.isTrue(equalsJson({}, {}), 'two plain empty objects are one value, as before');
+    // past the host-stack walk's depth
+    const nest = (/** @type {any} */ leaf) => { let v = leaf; for (let i = 0; i < 400; i++) v = [v]; return v; };
+    assert.isFalse(equalsJson(nest(d1), nest(d2)));
+    assert.isTrue(equalsJson(nest(d1), nest(same)));
+    assert.isFalse(equalsJson(nest(/a/), nest(/b/)));
+    // past the plain compare budget, on the remembering compare
+    const shared = (/** @type {any} */ leaf) => { let v = [leaf]; for (let i = 0; i < 22; i++) v = [v, v]; return v; };
+    assert.isFalse(equalsJson(shared(d1), shared(d2)));
+    assert.isTrue(equalsJson(shared(d1), shared(same)));
+    assert.isFalse(equalsJson(nest(shared(d1)), nest(shared(d2))));
+    // a difference met only after the budget is spent on equal shared subtrees
+    const late = (/** @type {any} */ leaf) => [shared(1), [leaf]];
+    assert.isFalse(equalsJson(late(d1), late(d2)));
+    assert.isTrue(equalsJson(late(d1), late(same)));
+    assert.isFalse(equalsJson(late(/a/), late(/a/i)));
+    // the deep walk takes the last member first
+    const lateDeep = (/** @type {any} */ leaf) => nest([[leaf], shared(1)]);
+    assert.isFalse(equalsJson(lateDeep(d1), lateDeep(d2)));
+    assert.isTrue(equalsJson(lateDeep(d1), lateDeep(same)));
+  });
+
 });
 
 describe('mergeMap', () => {

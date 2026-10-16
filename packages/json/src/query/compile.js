@@ -409,12 +409,13 @@ function compileLet(node) {
 //
 // Equality itself stays exact: buckets key on `stableKeyString`, which
 // agrees with the `$eq` relation (`equalsJson`) on every JSON value
-// except NaN - and a NaN key is dropped on both sides, which is what
-// `$eq` already does, since NaN equals nothing. A value with no key -
-// one nested past the key's bound or holding a cycle, which `$eq` can
-// still answer (a value equals itself) - is answered by the scan
-// instead, through the `$eq` itself over every inner item, for an outer
-// tuple whose key is missing. An inner item whose key is missing is
+// except NaN, which the key groups with NaN and `$eq` finds equal to
+// nothing. A NaN key is dropped on both sides, which is what `$eq`
+// already does. A value with no key - one nested past the key's bound,
+// holding a cycle, or holding a NaN at any depth, which `$eq` can still
+// answer (a value equals itself, NaN inside it included) - is answered by
+// the scan instead, through the `$eq` itself over every inner item, for
+// an outer tuple whose key is missing. An inner item whose key is missing is
 // filed nowhere: `$eq` finds it equal to no value that has a key, and
 // raises nothing there, since the walk never goes deeper than the
 // keyed side.
@@ -817,14 +818,18 @@ function compileScreenedProbe(plan, next, where, wherePath) {
 
 // The key a bucket is filed under; null when the value cannot take part
 // in an equality at all (empty, a multi-item sequence, or NaN); undefined
-// when it can but has no key (nested past the key's bound, or holding a
-// cycle), so only the scan's `$eq` can answer it.
+// when it can but has no key (nested past the key's bound, holding a
+// cycle, or a container holding a NaN), so only the scan's `$eq` can
+// answer it. A NaN leaf writes `NaN` unquoted into its container's key,
+// so a key without that text holds none; one with it (text that spells
+// `NaN` too) is left to the scan, which answers either the same.
 function joinKey(v) {
   if (v === EMPTY || v instanceof Seq)
     return null;
-  if (typeof v === 'number' && v !== v)
-    return null;
-  return stableKeyStringWithin(v);
+  if (typeof v !== 'object' || v === null)
+    return v !== v ? null : stableKeyStringWithin(v);
+  const key = stableKeyStringWithin(v);
+  return key !== undefined && key.includes('NaN') ? undefined : key;
 }
 
 // The hash-join probe clause and its driver. The table is built at the

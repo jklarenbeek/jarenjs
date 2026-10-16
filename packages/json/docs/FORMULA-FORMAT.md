@@ -102,7 +102,14 @@ bindings/context or explicitly registered pure helpers, and locale data in the
 compile options above. No implicit clock, locale, network or database access is
 supplied. Formula errors carry `formulaId`, `code`
 and an RFC 6901 `docPath`; wrapped Query errors retain their code and point below
-`/expression`. Codes are allocated in the [Query registry](QUERY-FORMAT.md#10-errors).
+`/expression`. Another value thrown inside the formula keeps its `code` only
+when that is non-empty text, and is `JQ2013` otherwise (a thrown `null`, a
+number code), as `checkCompile` of `@jarenjs/core/check` reads one; a schema
+test that throws, rather than answering, fails at `/inputSchema` or
+`/resultSchema`. *Upgrade: a thrown `null` or `undefined` used to escape as an
+uncoded `TypeError`, a number code was kept as the formula error's code, and a
+schema test's throw was reported at `/expression`.* Codes are allocated in the
+[Query registry](QUERY-FORMAT.md#10-errors).
 A formula error names its sentence as a query error does: `messageId` is a
 message of `formulaMessagesEn` (exported by `@jarenjs/json/formula`, keys
 `query/formula/*`, each `{formulaId}: …`) and `params` holds its values, the

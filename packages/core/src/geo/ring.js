@@ -39,9 +39,9 @@ export function isRingClosed(ring) {
     return false;
   const first = ring[0];
   const last = ring[n - 1];
-  const x = first[0];
-  const y = first[1];
-  return x === last[0] && y === last[1] && typeof x === 'number' && typeof y === 'number'
+  const x = first?.[0];
+  const y = first?.[1];
+  return x === last?.[0] && y === last?.[1] && typeof x === 'number' && typeof y === 'number'
     && first.length >= 2 && last.length >= 2;
 }
 
@@ -112,25 +112,34 @@ export function sphericalRingArea(ring, radius = EARTH_RADIUS) {
   // consecutive edges share a vertex, so its longitude and sine are
   // carried forward rather than read and recomputed: one transcendental
   // and one test that it is a position per vertex, not two
-  let position = ring[0];
-  let ax = position[0];
-  const ay = position[1];
-  if (typeof ax !== 'number' || typeof ay !== 'number' || !(position.length >= 2))
-    return NaN;
-  let total = 0;
-  let sinA = Math.sin(ay * DEG);
-  for (let i = 1; i < n; i++) {
-    position = ring[i];
-    const bx = position[0];
-    const by = position[1];
-    if (typeof bx !== 'number' || typeof by !== 'number' || !(position.length >= 2))
+  // a missing position throws on its read, which costs nothing until it
+  // happens, where a test per position would cost every ring
+  try {
+    let position = ring[0];
+    let ax = position[0];
+    const ay = position[1];
+    if (typeof ax !== 'number' || typeof ay !== 'number' || !(position.length >= 2))
       return NaN;
-    const sinB = Math.sin(by * DEG);
-    total += (bx - ax) * DEG * (2 + sinA + sinB);
-    sinA = sinB;
-    ax = bx;
+    let total = 0;
+    let sinA = Math.sin(ay * DEG);
+    for (let i = 1; i < n; i++) {
+      position = ring[i];
+      const bx = position[0];
+      const by = position[1];
+      if (typeof bx !== 'number' || typeof by !== 'number' || !(position.length >= 2))
+        return NaN;
+      const sinB = Math.sin(by * DEG);
+      total += (bx - ax) * DEG * (2 + sinA + sinB);
+      sinA = sinB;
+      ax = bx;
+    }
+    return Math.abs(total * radius * radius * 0.5);
   }
-  return Math.abs(total * radius * radius * 0.5);
+  catch (error) {
+    if (error instanceof TypeError)
+      return NaN;
+    throw error;
+  }
 }
 
 /**
@@ -140,16 +149,17 @@ export function sphericalRingArea(ring, radius = EARTH_RADIUS) {
  * members are finite numbers; not `5`, `'12'`, `{ 0: 1, 1: 2 }`, `[null,
  * null]` or `[NaN, 0]`), or missing one: its edges are not edges, an
  * even-odd count over them reports containment that is not there, and
- * nothing lies inside it.
+ * nothing lies inside it. A ring that is not a list (`null`, `5`) is read
+ * the same way.
  * @param {number} x
  * @param {number} y
  * @param {Array<number[]>} ring
  * @returns {number}
  */
 function locateInRing(x, y, ring) {
-  const n = ring.length;
-  if (n < 3)
-    return readsFinite(ring, 0) ? 0 : -1;
+  const n = ring?.length;
+  if (!(n >= 3)) // a ring that is not a list has no length: it cannot be read
+    return n >= 0 && readsFinite(ring, 0) ? 0 : -1;
   let inside = false;
   // each position is read once, as the end of one edge and carried as
   // the start of the next, which pays for the finiteness test it gets
@@ -214,8 +224,9 @@ function readsFinite(ring, from) {
  * cross the antimeridian — which RFC 7946 tells producers to cut.
  *
  * A ring holding a member that is not a position of finite numbers (a
- * number, text, an object, a one-element array, `[null, null]`, `NaN`)
- * contains nothing.
+ * number, text, an object, a one-element array, `[null, null]`, `NaN`),
+ * or missing one (`null`, a hole in the list), contains nothing, and so
+ * does a ring that is not a list.
  *
  * @param {number} x - longitude
  * @param {number} y - latitude
@@ -223,7 +234,25 @@ function readsFinite(ring, from) {
  * @returns {boolean}
  */
 export function pointInRing(x, y, ring) {
-  return locateInRing(x, y, ring) > 0;
+  try {
+    return locateInRing(x, y, ring) > 0;
+  }
+  catch (error) {
+    return missingPosition(error);
+  }
+}
+
+/**
+ * The answer for a ring a read of a missing position threw on: it
+ * contains nothing. A test per position would cost every ring a check
+ * the throw costs nothing until it happens.
+ * @param {unknown} error
+ * @returns {false}
+ */
+function missingPosition(error) {
+  if (error instanceof TypeError)
+    return false;
+  throw error;
 }
 
 /**
@@ -232,8 +261,8 @@ export function pointInRing(x, y, ring) {
  * polygon as for a ring, so a position on a hole's edge or vertex is on
  * the polygon's own boundary and is inside; a polygon that fills the
  * hole claims it too, and the two tile without a gap. A polygon any of
- * whose rings holds a member that is not a position of finite numbers, or
- * misses one, contains nothing: a hole that cannot be read cannot say
+ * whose rings holds a member that is not a position of finite numbers,
+ * misses one, or is not a list, contains nothing: a hole that cannot be read cannot say
  * which points it removes, and a fence that answers inside for them is
  * the costly mistake.
  * @param {number} x - longitude
@@ -242,14 +271,19 @@ export function pointInRing(x, y, ring) {
  * @returns {boolean}
  */
 export function pointInPolygon(x, y, rings) {
-  if (rings.length === 0 || locateInRing(x, y, rings[0]) <= 0)
-    return false;
-  for (let i = 1; i < rings.length; i++) {
-    const at = locateInRing(x, y, rings[i]);
-    if (at === 2 || at < 0)
-      return false; // strictly inside a hole, or a hole that cannot be read
+  try {
+    if (rings.length === 0 || locateInRing(x, y, rings[0]) <= 0)
+      return false;
+    for (let i = 1; i < rings.length; i++) {
+      const at = locateInRing(x, y, rings[i]);
+      if (at === 2 || at < 0)
+        return false; // strictly inside a hole, or a hole that cannot be read
+    }
+    return true;
   }
-  return true;
+  catch (error) {
+    return missingPosition(error);
+  }
 }
 
 //#endregion

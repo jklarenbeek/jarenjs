@@ -142,3 +142,19 @@ describe('a screened spatial join over a value the walk refuses answers as the s
     assert.equal(bothWays(within, { points: [{ at: cycles.coordinates() }], regions }).code, 'JO2002');
   });
 });
+
+describe('$geo-simplify reads a line or ring holding a member that is not a position as it stands', () => {
+  it('answers the geometry unsimplified, never an uncoded TypeError', () => {
+    const cases = [
+      { type: 'Polygon', coordinates: [[[0, 0], [4, 0], null, [0, 4], [0, 0]]] },
+      { type: 'LineString', coordinates: [[0, 0], [4, 0], [4, 4], null] },
+      { type: 'LineString', coordinates: [[0, 0], [null, null], [4, 4], [5, 5]] },
+      { type: 'MultiLineString', coordinates: [[[0, 0], [1, 0.001], [2, 0], null, [3, 3]]] },
+    ];
+    for (const g of cases)
+      assert.deepEqual(outcome({ '$geo-simplify': ['$.g', 0.5] }, { g }), { value: g }, JSON.stringify(g));
+    // a line of positions is simplified as before
+    assert.deepEqual(outcome({ '$geo-simplify': ['$.g', 0.5] }, { g: { type: 'LineString', coordinates: [[0, 0], [1, 0.001], [2, 0]] } }),
+      { value: { type: 'LineString', coordinates: [[0, 0], [2, 0]] } });
+  });
+});

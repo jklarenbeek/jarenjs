@@ -130,7 +130,11 @@ export function equalsDeep(target, source) {
  * JSON-only equality: objects compare by own enumerable keys, arrays by
  * index, primitives by `===` (so `1 === 1.0`, and `NaN` is never equal).
  * Other objects also compare by own enumerable keys: constructors and
- * non-enumerable Map/Set entries are ignored. Functions compare by identity.
+ * non-enumerable Map/Set entries are ignored, except the two that JOSL and
+ * JSONX read text into, which have none: a `Date` equals a `Date` of the
+ * same instant (an invalid one equals none, as `NaN` does) and a `RegExp`
+ * a `RegExp` of the same source and flags, and neither equals another
+ * object. Functions compare by identity.
  * Deliberately not the same as
  * `equalsDeep`, the generic JavaScript variant: this is the hot-path
  * comparator of the JSONPath engine — do not merge the two.
@@ -191,6 +195,28 @@ let comparedEqual = null;
 const RECURSIVE_COMPARE_DEPTH = 256;
 
 /**
+ * Whether two objects with no own members of their own differ as the
+ * values JOSL and JSONX read into JavaScript objects of that shape: a
+ * `Date` equals a `Date` of the same instant and a `RegExp` a `RegExp` of
+ * the same source and flags, and neither equals any other object, `{}`
+ * included. Read by their members, every two would be one value.
+ * @param {object} a - holds no own enumerable member
+ * @param {object} b
+ * @returns {boolean}
+ */
+function opaqueDiffers(a, b) {
+  const aDate = a instanceof Date;
+  const bDate = b instanceof Date;
+  if (aDate || bDate)
+    return !(aDate && bDate && a.getTime() === b.getTime());
+  const aPattern = a instanceof RegExp;
+  const bPattern = b instanceof RegExp;
+  if (aPattern || bPattern)
+    return !(aPattern && bPattern && a.source === b.source && a.flags === b.flags);
+  return false;
+}
+
+/**
  * `equalsJson` for a pair `depth` containers down from the root.
  * @param {any} a
  * @param {any} b
@@ -227,6 +253,8 @@ function equalsJsonAt(a, b, depth) {
       return false;
     count++;
   }
+  if (count === 0 && opaqueDiffers(a, b))
+    return false;
   for (const key in b) {
     if (hasOwn(b, key))
       count--;
@@ -286,6 +314,8 @@ function equalsJsonWalk(a, b, depth) {
           return false;
         pending.push(x, y, depth + 1);
       }
+      if (count === 0 && opaqueDiffers(a, b))
+        return false;
       for (const key in b) {
         if (hasOwn(b, key))
           count--;
@@ -390,6 +420,8 @@ function equalsSharedAt(a, b, depth, equal) {
       }
       count++;
     }
+    if (count === 0 && opaqueDiffers(a, b))
+      return 0;
     for (const key in b) {
       if (hasOwn(b, key))
         count--;
@@ -462,6 +494,8 @@ function equalsSharedWalk(a, b, depth, equal) {
             return 0;
           pairs.push(x, y);
         }
+        if (count === 0 && opaqueDiffers(a, b))
+          return 0;
         for (const key in b) {
           if (hasOwn(b, key))
             count--;

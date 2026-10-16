@@ -108,6 +108,24 @@ describe('core — an invalid outcome always names an error', function () {
     assert.deepStrictEqual(composeChecks(() => ({ valid: false, errors: one }))(1).errors.slice(), [one]);
   });
 
+  it('a list keeps only its error objects: an invalid answer whose list names no object names the coded error', function () {
+    const one = { code: 'X1', docPath: '/a', message: 'x' };
+    for (const errors of [[null], [undefined], [''], [0, false], [null, undefined, '', 5]])
+      assert.deepStrictEqual(checkOutcome({ valid: false, errors }), { valid: false, errors: [unnamed] }, JSON.stringify(errors));
+    // a text item is an error the check named: its text is kept as the message, in order
+    const named = (/** @type {string} */ message) => ({ code: 'JG2001', docPath: '', message });
+    assert.deepStrictEqual(checkOutcome({ valid: false, errors: ['denied'] }), { valid: false, errors: [named('denied')] });
+    assert.deepStrictEqual(checkOutcome({ valid: false, errors: [null, one, 'text', '', {}, 'more'] }),
+      { valid: false, errors: [one, named('text'), {}, named('more')] });
+    // a text errors member (not a list) still names no error
+    assert.deepStrictEqual(checkOutcome({ valid: false, errors: 'denied' }), { valid: false, errors: [unnamed] });
+    const list = [one, {}];
+    assert.strictEqual(checkOutcome({ valid: false, errors: list }).errors, list, 'a list of objects is the same array');
+    assert.deepStrictEqual(checkOutcome({ valid: true, errors: [null, one] }), { valid: true, errors: [one] });
+    assert.deepStrictEqual(composeChecks(() => ({ valid: false, errors: [null] }))(1), { valid: false, errors: [unnamed] });
+    assert.deepStrictEqual(composeChecks(() => ({ valid: false, errors: ['denied'] }))(1), { valid: false, errors: [named('denied')] });
+  });
+
   it('composeChecks reports the bare-false check with the coded error and short-circuits', function () {
     let later = 0;
     const check = composeChecks((n) => n > 0, () => { later++; return true; });
@@ -181,6 +199,29 @@ describe('core — checkCompile turns a throwing compile into a check', function
     assert.deepStrictEqual(check({ a: { $bogus: 1 } }), { valid: false, errors: [
       { code: 'JQ0002', docPath: '/a', message: "unknown operator '$bogus'" }] });
     assert.deepStrictEqual(check({ $for: { b: '$.x[*]' }, $return: '$b' }), { valid: true, errors: [] });
+  });
+
+  it('refuses a compile that answers a promise JG0001, never valid, and settles its rejection', async function () {
+    let unhandled = 0;
+    const count = () => { unhandled++; };
+    process.on('unhandledRejection', count);
+    try {
+      const check = compileGate(async (doc) => { if (doc.bad) throw new Error('bad doc'); });
+      for (const value of [{ bad: true }, { bad: false }])
+        assert.throws(() => check(value), (e) => e instanceof Error && e.name === 'CheckOutcomeError' && e.code === 'JG0001'
+          && e.message === 'JG0001: the compile answered a promise, which has not settled — check with a compile that refuses synchronously, or await it and check its settled answer');
+      assert.throws(() => compileGate(() => ({ then() {} }))(1), { code: 'JG0001' });
+      assert.throws(() => composeChecks(() => true, compileGate(() => Promise.reject(new Error('late'))))(1), { code: 'JG0001' });
+      await new Promise((resolve) => setImmediate(resolve));
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.strictEqual(unhandled, 0, 'no refused promise raised an unhandled rejection');
+    }
+    finally {
+      process.off('unhandledRejection', count);
+    }
+    // a compile that returns any other value still answers valid
+    for (const returned of [undefined, null, 0, 'text', { then: 1 }, () => {}])
+      assert.deepStrictEqual(compileGate(() => returned)(1), { valid: true, errors: [] });
   });
 
   it('refuses a missing compile or fallback code when it is made', function () {

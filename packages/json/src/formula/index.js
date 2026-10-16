@@ -5,7 +5,7 @@ import { semanticKey } from '@jarenjs/core/object';
 import { compileJsonQuery } from '../query/index.js';
 import { validateDateNames, validateDecimalFormats } from '../query/normalize.js';
 import { canonicalizeJson } from '../canonical.js';
-import { FormulaError, causeCode, causeMessage, formulaMessage, snapshot, credit, FORMULA_OPTIONS, checkFormulaOptions } from './shared.js';
+import { FormulaError, causeCode, causePath, causeMessage, formulaMessage, snapshot, credit, FORMULA_OPTIONS, checkFormulaOptions } from './shared.js';
 
 export { FormulaError };
 export { formulaMessagesEn } from './messages.js';
@@ -177,25 +177,38 @@ export function createFormulaCompiler(options = {}) {
         externals: [...Object.keys(doc.bindings ?? {}), 'computed', 'context'], analysis: true,
         limits: options.limits ?? { steps: 10000, depth: 64, resultItems: 10000, sequenceItems: 10000 } });
     }
-    catch (cause) { throw new FormulaError(cause.code ?? 'JQ0013', causeMessage(cause), doc.id, `/expression${cause.docPath ?? ''}`, cause); }
+    catch (cause) {
+      const code = causeCode(cause, 'JQ0013');
+      throw new FormulaError(code, causeMessage(cause), doc.id, `/expression${causePath(cause)}`, cause);
+    }
     const dependencies = fields(query.analysis.root, doc.id);
+    // a schema test that throws fails at its schema, not at the expression
+    const passes = (test, value, at) => {
+      try {
+        return test(value);
+      }
+      catch (cause) {
+        const code = causeCode(cause, 'JQ2013');
+        throw new FormulaError(code, causeMessage(cause), doc.id, at, cause);
+      }
+    };
     const compiled = Object.freeze({ doc, key, dependencies, queryDependencies: query.dependencies,
       evaluate(input, context = {}, computed = {}) {
         try {
           const data = snapshot(input);
-          if (tests.inputSchema && !tests.inputSchema(data)) throw new FormulaError('JQ2013', formulaMessage('query/formula/input-schema'), doc.id, '/inputSchema');
+          if (tests.inputSchema && !passes(tests.inputSchema, data, '/inputSchema')) throw new FormulaError('JQ2013', formulaMessage('query/formula/input-schema'), doc.id, '/inputSchema');
           const items = query.items(data, snapshot({ ...doc.bindings, context, computed }));
           if (items.length === 0) return snapshot({ kind: 'empty', values: [] });
           const result = items.length === 1 ? items[0] : items;
           const answer = doc.resultMode === 'outcome' ? outcome(result, doc) : snapshot({ kind: 'value', value: result });
-          if (tests.resultSchema && Object.hasOwn(answer, 'value') && !tests.resultSchema(answer.value))
+          if (tests.resultSchema && Object.hasOwn(answer, 'value') && !passes(tests.resultSchema, answer.value, '/resultSchema'))
             throw new FormulaError('JQ2013', formulaMessage('query/formula/result-schema'), doc.id, '/resultSchema');
           return answer;
         }
         catch (cause) {
           if (cause instanceof FormulaError) throw cause;
           const code = causeCode(cause, 'JQ2013');
-          throw new FormulaError(code, causeMessage(cause), doc.id, `/expression${cause.docPath ?? ''}`, cause);
+          throw new FormulaError(code, causeMessage(cause), doc.id, `/expression${causePath(cause)}`, cause);
         }
       },
     });

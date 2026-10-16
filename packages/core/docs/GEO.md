@@ -143,9 +143,14 @@ cannot be read cannot say which points it removes: answering `true` would
 claim points the fence may exclude, so the polygon claims none.
 `ringsClosed`
 compares a ring's ends, and a ring whose first or last member is not a
-position (`5`, `'12'`, `[null, null]`) is not closed; `isRingClosed`,
-`sphericalRingArea` and `lineLength` read such a member alike, the last two
-answering `NaN`. A position here is a list whose first two members are
+position (`5`, `'12'`, `[null, null]`) or is missing (`null`, an array hole)
+is not closed; `isRingClosed`, `sphericalRingArea` and `lineLength` read such
+a member alike, the last two answering `NaN`, and `pointInRing` and
+`pointInPolygon` answer `false` for a ring that is not a list as well.
+*Upgrade: these five exported helpers used to throw an uncoded `TypeError`
+(`Cannot read properties of null`) for a missing position, and the two
+containment helpers for a ring that is not a list, where `containsPosition`
+and the measurements already answered.* A position here is a list whose first two members are
 numbers: the measurements test each position's type and length, not that it
 is an array, which would cost their loops a call per position, so a typed array
 or an object with a numeric `length` holding two numbers is measured as a
@@ -276,7 +281,14 @@ spare room becomes margin — stretching is how maps look wrong).
 `simplifyLine` / `simplifyRing` are iterative Douglas-Peucker;
 endpoints always survive so a ring stays closed, and a ring that would
 drop below four positions is returned unsimplified rather than
-degenerate.
+degenerate. A line or ring holding a member that is not a position of
+finite numbers (`null`, an array hole, `5`, `'12'`, `[null, null]`,
+`[NaN, 0]`) is returned unsimplified too: no distance to such a member can
+be measured, so no vertex is dropped by one. *Upgrade: a missing position
+used to throw an uncoded `TypeError` from `simplifyLine`, `simplifyRing`,
+`simplifyGeometry` and the query operator `$geo-simplify`, and a member
+arithmetic reads as numbers was measured as them (`[null, null]` as
+`(0, 0)`, and dropped).*
 
 ## Not here
 

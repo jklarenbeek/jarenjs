@@ -179,7 +179,8 @@ const escapeRegExp = (/** @type {string} */ text) => text.replace(/[.*+?^${}()|[
  * `parseNumber` reads a whole text by under `decimalFormat` and `$quantity`
  * of `@jarenjs/json` finds a number in free text by: an optional sign (`+`,
  * or a minus: the given one, `-` or `−`), an integer part either ungrouped
- * or grouped in threes after a leading group of one to three digits, an
+ * or grouped in threes after a leading group of one to three digits that
+ * does not start with zero (`0.125` is no grouped number), an
  * optional fraction after the decimal separator, and an optional exponent
  * (the given separator, `e` or `E`, an optional sign, digits); digits are
  * ASCII or the family of `zero`. `plus: false` reads no `+` and
@@ -197,6 +198,11 @@ export function numberSyntax(chars, options = {}) {
   const digits = zero === 0x30 ? '0-9'
     : `0-9${escapeRegExp(String.fromCodePoint(zero))}-${escapeRegExp(String.fromCodePoint(zero + 9))}`;
   const digit = `[${digits}]`;
+  // a grouped integer part leads with a digit that is not zero: no writer
+  // groups `0.125`, and reading it as 125 would be a guess a thousand
+  // times too large at the decimal separator the writer meant
+  const lead = zero === 0x30 ? '[1-9]'
+    : `[1-9${escapeRegExp(String.fromCodePoint(zero + 1))}-${escapeRegExp(String.fromCodePoint(zero + 9))}]`;
   const minus = escapeRegExp(chars.minus);
   const group = escapeRegExp(groupText);
   const decimal = escapeRegExp(chars.decimal);
@@ -204,7 +210,7 @@ export function numberSyntax(chars, options = {}) {
   const plus = options.plus !== false;
   const exponent = options.exponent !== false;
   // groups by position (a named group would cost every match an object)
-  let source = `(?:${plus ? '(\\+)|' : ''}(${anyMinus}))?(${digit}{1,3}(?:${group}${digit}{3})+|${digit}+)(?:${decimal}(${digit}+))?`;
+  let source = `(?:${plus ? '(\\+)|' : ''}(${anyMinus}))?(${lead}${digit}{0,2}(?:${group}${digit}{3})+|${digit}+)(?:${decimal}(${digit}+))?`;
   if (exponent)
     source += `(?:(?:${escapeRegExp(chars.exponent ?? 'e')}|[eE])(\\+|${anyMinus})?(${digit}+))?`;
   const at = plus ? 2 : 1; // the minus sign's group
@@ -390,11 +396,12 @@ export function formatNumber(value, opts = {}) {
  * reading: an optional `+` or minus sign (the record's, `-` or `−`), an
  * integer part written either without grouping or with the record's
  * grouping separator before every three digits after a leading group of
- * one to three, an optional fraction after the record's decimal separator,
+ * one to three that does not start with zero, an optional fraction after
+ * the record's decimal separator,
  * and an optional exponent (the record's separator, `e` or `E`); digits
  * are ASCII or the record's family. Anything else is `NaN`, never a guess:
  * under Dutch `'1.234,5'` is 1234.5 and `'3,45'` is 3.45, while `'1,2,3'`,
- * `'1.23'` and `'3.45'` are `NaN`. The infinity words (the record's, `∞`,
+ * `'1.23'`, `'3.45'` and `'0.125'` are `NaN`. The infinity words (the record's, `∞`,
  * `Infinity`) read as infinities; prefixed and `radix` input is read as
  * without the record.
  *

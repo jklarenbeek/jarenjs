@@ -13,7 +13,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { containsPosition, geometryArea, geometryLength, ringsClosed, pointInRing, pointInPolygon, isRingClosed,
-  sphericalRingArea, lineLength } from '@jarenjs/core/geo';
+  sphericalRingArea, lineLength, simplifyLine, simplifyRing, simplifyGeometry } from '@jarenjs/core/geo';
 
 const RING = [[0, 0], [2, 0], [2, 2], [0, 2], [0, 0]];
 const SQUARE = { type: 'Polygon', coordinates: [RING] };
@@ -302,6 +302,62 @@ describe('a position that is not a pair of finite numbers holds no positions', (
     }
     // a pair closes the ring whatever its altitudes, as before
     assert.equal(isRingClosed([[0, 0, 1], [1, 1], [2, 0], [0, 0, 2]]), true);
+  });
+
+  it('the exported ring and line helpers read a missing position as not a position, never a TypeError', () => {
+    const SQ = [[0, 0], [4, 0], [4, 4], [0, 4], [0, 0]];
+    for (const missing of [null, undefined]) {
+      for (const ring of [[[0, 0], [4, 0], missing, [0, 4], [0, 0]], [[0, 0], [4, 0], [4, 4], [0, 4], missing],
+        [missing, [4, 0], [4, 4], [0, 4], [0, 0]]]) {
+        assert.equal(pointInRing(2, 2, ring), false, label(ring));
+        assert.equal(pointInRing(4, 2, ring), false, label(ring));
+        assert.equal(pointInPolygon(2, 2, [ring]), false, label(ring));
+        assert.equal(pointInPolygon(2, 2, [SQ, ring]), false, label(ring));
+        assert.deepStrictEqual(sphericalRingArea(ring), NaN, label(ring));
+        assert.deepStrictEqual(lineLength(ring), NaN, label(ring));
+      }
+      assert.equal(isRingClosed([missing, [4, 0], [4, 4], missing]), false);
+      assert.equal(isRingClosed([[0, 0], [4, 0], [4, 4], missing]), false);
+      assert.equal(isRingClosed([missing, [4, 0], [4, 4], [0, 0]]), false);
+    }
+    // eslint-disable-next-line no-sparse-arrays
+    const hole = [[0, 0], [4, 0], , [0, 4], [0, 0]];
+    assert.equal(pointInRing(2, 2, hole), false);
+    assert.deepStrictEqual(sphericalRingArea(hole), NaN);
+    // a ring that is not a list contains nothing, and a polygon with such a hole neither
+    for (const ring of [null, undefined, 5, {}, true]) {
+      assert.equal(pointInRing(2, 2, /** @type {any} */ (ring)), false, String(ring));
+      assert.equal(pointInPolygon(2, 2, /** @type {any} */ ([SQ, ring])), false, String(ring));
+    }
+    // another error a read raises is the reader's own, and escapes as it is
+    const hostile = { get 0() { throw new RangeError('read refused'); }, 1: 0, length: 2 };
+    const hostileRing = [[0, 0], [4, 0], hostile, [0, 4], [0, 0]];
+    for (const read of [() => pointInRing(2, 2, hostileRing), () => pointInPolygon(2, 2, [hostileRing]),
+      () => sphericalRingArea(hostileRing), () => lineLength(hostileRing)])
+      assert.throws(read, { name: 'RangeError', message: 'read refused' });
+    // the well-formed ring answers as before
+    assert.equal(pointInRing(2, 2, SQ), true);
+    assert.equal(pointInPolygon(2, 2, [SQ]), true);
+    assert.equal(isRingClosed(SQ), true);
+  });
+
+  it('a line or ring holding a member that is not a position of finite numbers is not simplified', () => {
+    for (const bad of [null, undefined, 5, '12', [null, null], [NaN, 0], [1], { 0: 1, 1: 2 }]) {
+      const line = [[0, 0], [1, 0.001], bad, [2, 0.001], [3, 0], [4, 4], [5, 5]];
+      const simplified = simplifyLine(line, 0.5);
+      assert.deepStrictEqual(simplified, line, label(bad));
+      assert.notStrictEqual(simplified, line, 'a copy, as every unsimplified answer is');
+      const ring = [[0, 0], [1, 0.001], [2, 0], [2, 2], bad, [0, 2], [0, 0]];
+      assert.deepStrictEqual(simplifyRing(ring, 0.5), ring, label(bad));
+      assert.deepStrictEqual(simplifyGeometry({ type: 'Polygon', coordinates: [ring] }, 0.5),
+        { type: 'Polygon', coordinates: [ring] }, label(bad));
+    }
+    // eslint-disable-next-line no-sparse-arrays
+    const hole = [[0, 0], [1, 0.001], , [3, 0]];
+    assert.deepStrictEqual(simplifyLine(hole, 0.5), hole);
+    // a line of positions is simplified as before
+    assert.deepStrictEqual(simplifyLine([[0, 0], [1, 0.001], [2, 0]], 0.01), [[0, 0], [2, 0]]);
+    assert.deepStrictEqual(simplifyLine([[0, 0, 7], [1, 0.001], [2, 0, 9]], 0.01), [[0, 0, 7], [2, 0, 9]]);
   });
 
   it('the ring helpers read such a position as not finite', () => {

@@ -4,7 +4,7 @@ import { createBoundedCache } from '@jarenjs/core/cache';
 import { setObjectMember, semanticKey } from '@jarenjs/core/object';
 import { canonicalizeJson } from '../canonical.js';
 import { createFormulaCompiler } from './index.js';
-import { FormulaError, causeCode, formulaMessage, snapshot, credit, FORMULA_OPTIONS, checkFormulaOptions } from './shared.js';
+import { FormulaError, causeCode, causePath, formulaMessage, snapshot, credit, FORMULA_OPTIONS, checkFormulaOptions } from './shared.js';
 
 /** Copy a bounded diagnostic; arbitrary host rejection values never escape into JSON. */
 function diagnostic(error, targetId, maxChars) {
@@ -13,9 +13,8 @@ function diagnostic(error, targetId, maxChars) {
   let docPath = '';
   try {
     if (typeof error?.message === 'string') message = error.message;
-    const own = causeCode(error ?? {}, code);
-    if (typeof own === 'string') code = own;
-    if (typeof error?.docPath === 'string') docPath = error.docPath;
+    code = causeCode(error, code);
+    docPath = causePath(error);
   }
   catch { /* Host exceptions may have hostile accessors. */ }
   return { targetId, code: code.slice(0, 16), message: message.slice(0, maxChars), docPath: docPath.slice(0, maxChars) };

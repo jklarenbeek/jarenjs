@@ -202,23 +202,32 @@ export function lineLength(positions, radius = EARTH_RADIUS) {
     return 0;
   // each position is read once and carried as the start of the next
   // edge, which pays for the test that it is one
-  let position = positions[0];
-  let ax = position[0];
-  let ay = position[1];
-  if (typeof ax !== 'number' || typeof ay !== 'number' || !(position.length >= 2))
-    return NaN;
-  let total = 0;
-  for (let i = 1; i < n; i++) {
-    position = positions[i];
-    const bx = position[0];
-    const by = position[1];
-    if (typeof bx !== 'number' || typeof by !== 'number' || !(position.length >= 2))
+  // a missing position throws on its read, which costs nothing until it
+  // happens, where a test per position would cost every line
+  try {
+    let position = positions[0];
+    let ax = position[0];
+    let ay = position[1];
+    if (typeof ax !== 'number' || typeof ay !== 'number' || !(position.length >= 2))
       return NaN;
-    total += haversineDistance(ax, ay, bx, by, radius);
-    ax = bx;
-    ay = by;
+    let total = 0;
+    for (let i = 1; i < n; i++) {
+      position = positions[i];
+      const bx = position[0];
+      const by = position[1];
+      if (typeof bx !== 'number' || typeof by !== 'number' || !(position.length >= 2))
+        return NaN;
+      total += haversineDistance(ax, ay, bx, by, radius);
+      ax = bx;
+      ay = by;
+    }
+    return total;
   }
-  return total;
+  catch (error) {
+    if (error instanceof TypeError)
+      return NaN;
+    throw error;
+  }
 }
 
 //#endregion

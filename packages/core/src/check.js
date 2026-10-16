@@ -10,9 +10,12 @@
  * An invalid outcome always names at least one error, because its errors
  * are what a repair loop hands back to the model that wrote the value: a
  * check that answers `false`, `{ valid: false }`, an empty `errors` list
- * or an `errors` that is no error (text, a number) is reported as the one
- * coded error `JG2001` at the root. `errors` is always a list: one error
- * object a check did not put in a list is answered as the list of it.
+ * or an `errors` that is no error (text, a number, a list of neither
+ * object nor text) is reported as the one coded error `JG2001` at the
+ * root. `errors` is always a list of objects: one error object a check did
+ * not put in a list is answered as the list of it, a text item in a list
+ * as a `JG2001` error carrying that text as its `message`, and a list's
+ * other items that are no object are left out.
  *
  * {@link checkCompile} makes a check of a compile that refuses by
  * throwing, and {@link CHECK_CODES} also holds the codes of a guarded
@@ -67,7 +70,7 @@ import { isThenable } from './function.js';
  * @type {Readonly<Record<'JG0001' | 'JG0002' | 'JG2001' | 'JG2002', string>>}
  */
 export const CHECK_CODES = Object.freeze({
-  JG0001: 'a check answered a promise, which checkOutcome cannot read',
+  JG0001: 'a check or a compile answered a promise, which checkOutcome and checkCompile cannot read',
   JG0002: 'a guarded hook answered a promise, which the synchronous prepare cannot await',
   JG2001: 'a check answered invalid without naming an error',
   JG2002: 'a guarded hook, snapshot, commit or restore threw a value whose code is not text',
@@ -77,9 +80,13 @@ export const CHECK_CODES = Object.freeze({
  * Read a compiled check's answer as `{ valid, errors }`. Only `true` and
  * `{ valid: true }` are valid. An answer keeps the errors it carries, and
  * one error object its `errors` holds outside a list answers as the list
- * of it; a valid answer with no list answers `[]`. An invalid answer that
- * carries none (`false`, `{ valid: false }`, an empty `errors`, an
- * `errors` that is text or a number, any other value) answers the single
+ * of it; a valid answer with no list answers `[]`. A list's items are read
+ * as error objects, since a repair loop reads each error's members: an
+ * object as it stands, a non-empty text as `{ code: 'JG2001', docPath: '',
+ * message: <the text> }`, and `null`, `''` or a number left out. An invalid
+ * answer that carries none (`false`, `{ valid: false }`, an empty
+ * `errors`, an `errors` that is text or a number, a list with no object or
+ * text in it, any other value) answers the single
  * error `{ code: 'JG2001', docPath: '', message }`, a fresh plain object
  * each time.
  * @template [O=unknown]
@@ -113,17 +120,33 @@ export function checkOutcome(outcome) {
 }
 
 /**
- * An answer's `errors` member as a list: an array as it stands, one error
- * object a check did not put in a list as the list of it, and anything
- * else (missing, text, a number) as no list.
+ * An answer's `errors` member as a list of error objects: an array as it
+ * stands when every item is an object; otherwise each object kept, each
+ * non-empty text item as the error `{ code: 'JG2001', docPath: '',
+ * message: <the text> }`, in order, and every other item (`null`, `''`, a
+ * number) left out; one error object a check did not put in a list as the
+ * list of it, and anything else (missing, text, a number) as no list.
  * @param {unknown} errors
  * @returns {unknown[] | null}
  */
 function listedErrors(errors) {
-  if (Array.isArray(errors))
-    return errors;
-  return typeof errors === 'object' && errors !== null ? [errors] : null;
+  if (Array.isArray(errors)) {
+    if (errors.every(isErrorObject))
+      return errors;
+    const listed = [];
+    for (const item of errors) {
+      if (isErrorObject(item))
+        listed.push(item);
+      else if (typeof item === 'string' && item !== '')
+        listed.push({ code: 'JG2001', docPath: '', message: item });
+    }
+    return listed;
+  }
+  return isErrorObject(errors) ? [errors] : null;
 }
+
+/** @param {unknown} item @returns {boolean} */
+const isErrorObject = (item) => typeof item === 'object' && item !== null;
 
 /**
  * Compose several checks into one, run in order: the FIRST invalid
@@ -171,7 +194,9 @@ export function composeChecks(...checks) {
  * otherwise; `docPath` is its own when it is text and `''` (the root)
  * otherwise; `message` is its `reason` (a coded error's bare text), else
  * its `message`, else the value as text. The compile must refuse
- * synchronously: a promise it returns is not awaited.
+ * synchronously: one that returns a promise or another thenable has not
+ * decided, so the check throws `JG0001` rather than answer valid, and
+ * settles the promise so its rejection is not raised unhandled.
  *
  * The check composes with {@link composeChecks}, after a schema check:
  * `composeChecks(schemaCheck, checkCompile(compileJsonQuery, {
@@ -182,15 +207,17 @@ export function composeChecks(...checks) {
  * @returns {(value: any) => CheckOutcome<CompileCheckError>}
  * @throws {TypeError} when `compile` is not a function or `fallbackCode`
  *   is not non-empty text
+ * @throws {CodedError} `JG0001` (named `CheckOutcomeError`), from the
+ *   check, when the compile returns a promise or another thenable
  */
 export function checkCompile(compile, options) {
   const fallbackCode = options?.fallbackCode;
   if (typeof compile !== 'function' || typeof fallbackCode !== 'string' || fallbackCode === '')
     throw new TypeError('checkCompile needs a compile function and a non-empty fallbackCode');
   return (value) => {
+    let result;
     try {
-      compile(value);
-      return { valid: true, errors: [] };
+      result = compile(value);
     }
     catch (error) {
       const { code, docPath, reason, message } = /** @type {any} */ (error) ?? {};
@@ -200,5 +227,14 @@ export function checkCompile(compile, options) {
         message: typeof reason === 'string' ? reason : typeof message === 'string' ? message : String(error),
       }] };
     }
+    if (isThenable(result)) {
+      // a compile that has not decided cannot have accepted the value: its
+      // promise is refused, never read, and settled here so a rejection it
+      // carries is not also raised as an unhandled one
+      Promise.resolve(result).catch(() => {});
+      throw new CodedError('CheckOutcomeError', 'JG0001',
+        'the compile answered a promise, which has not settled — check with a compile that refuses synchronously, or await it and check its settled answer');
+    }
+    return { valid: true, errors: [] };
   };
 }

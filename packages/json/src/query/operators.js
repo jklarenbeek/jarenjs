@@ -442,10 +442,10 @@ function pictureOf(picture, format, docPath, compileTime) {
 // unit's dimension, read with the format's separators and digits (its own
 // digit family, and ASCII) and a minus sign written right before it. The
 // number is core's one number grammar (numberSyntax of @jarenjs/core/math)
-// without its plus sign and its exponent: digits grouped in threes or not
-// grouped at all, an optional fraction; the pattern, that number and the
-// word, is built once per format. A number that is the tail of something
-// else is never read, because reading it would be a silent
+// without its plus sign and its exponent: digits grouped in threes (the
+// first group not led by zero) or not grouped, an optional fraction; the
+// pattern, that number and the word, is built once per format. A number
+// that is the tail of something else is never read, because reading it would be a silent
 // misreading: the second group of "1 500 g" (the space may be a grouping
 // separator, and 500 would misread 1500), the denominator of "1/2 kg", the
 // end of the range "2-3 kg", the exponent of "1e3 g", digits glued to a

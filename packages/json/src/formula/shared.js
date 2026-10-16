@@ -67,14 +67,29 @@ export function causeMessage(cause) {
 }
 
 /**
- * The code a formula reports for an error it met: the error's own, or
- * `fallback` when it has none. Data that is not JSON is the formula's own
- * refusal (`JQ2013` at run time) whatever the canonicalizer's code for it:
- * that code and its `dataPath` stay on the refusal, the error's `cause`.
+ * The code a formula reports for an error it met: the error's own when it
+ * is non-empty text, or `fallback` when it has none (a thrown `null`, a
+ * number, a value with no `code`). Data that is not JSON is the formula's
+ * own refusal (`JQ2013` at run time) whatever the canonicalizer's code for
+ * it: that code and its `dataPath` stay on the refusal, the error's `cause`.
  * @param {any} cause @param {string} fallback
+ * @returns {string}
  */
 export function causeCode(cause, fallback) {
-  return cause instanceof JsonCanonicalizeError ? fallback : cause.code ?? fallback;
+  if (cause instanceof JsonCanonicalizeError) return fallback;
+  const code = cause?.code;
+  return typeof code === 'string' && code !== '' ? code : fallback;
+}
+
+/**
+ * The location within the formula an error it met names: its own
+ * `docPath` when that is text, else `''`.
+ * @param {any} cause
+ * @returns {string}
+ */
+export function causePath(cause) {
+  const docPath = cause?.docPath;
+  return typeof docPath === 'string' ? docPath : '';
 }
 
 /** Validate before copying: no dropped undefined, host objects or non-finite numbers. */

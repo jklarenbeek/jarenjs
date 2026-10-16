@@ -93,6 +93,16 @@ describe('$quantity', () => {
       assert.strictEqual(qty(text, 'g'), undefined, text);
   });
 
+  it('reads no grouped number whose leading group is zero, never a decimal a thousand times too large', () => {
+    for (const [text, format] of [['0.500 kg', 'nl'], ['0.250 kg', 'nl'], ['-0.500 kg', 'nl'], ['01.000 kg', 'nl'],
+      ['0,500 kg', undefined], ['0,250 kg', undefined], ['0,000,001 kg', undefined], ['٠٬٥٠٠ kg', 'ar']])
+      assert.strictEqual(qty(text, 'g', format), undefined, JSON.stringify(text));
+    assert.strictEqual(qty('0,500 kg', 'g', 'nl'), 500);
+    assert.strictEqual(qty('0.500 kg', 'g'), 500);
+    assert.strictEqual(qty('1.500 kg', 'g', 'nl'), 1500000);
+    assert.strictEqual(qty('0 kg', 'g', 'nl'), 0);
+  });
+
   it('reads no number after another number and any run of white space', () => {
     for (const text of ['1  500 g', '1 \t 500 g', '1  500 g', '12   500 g'])
       assert.strictEqual(qty(text, 'g'), undefined, JSON.stringify(text));

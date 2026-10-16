@@ -87,6 +87,23 @@ describe('#number format/parse under a decimal format record', function () {
       assert.ok(Number.isNaN(parseNumber(text, nl)), JSON.stringify(text));
   });
 
+  it('reads no grouped number that leads with a zero group: a decimal written the other way is not a thousand times it', () => {
+    const en = { decimalFormat: EN };
+    const arab = { decimalFormat: ARAB };
+    for (const [text, record] of [['0.125', nl], ['00.125', nl], ['-0.500', nl], ['000.000', nl], ['0.000.001', nl], ['01.000', nl],
+      ['0,125', en], ['0,000,001', en], ['05,000', en], ['0 500', { decimalFormat: FR }], ['٠٬٥٠٠', arab], ['٠١٬٠٠٠', arab]])
+      assert.ok(Number.isNaN(parseNumber(text, record)), JSON.stringify(text));
+    assert.equal(parseNumber('0,125', nl), 0.125, 'the decimal separator still reads after a zero');
+    assert.equal(parseNumber('0', nl), 0);
+    assert.equal(parseNumber('-0,5', nl), -0.5);
+    assert.equal(parseNumber('0.125', en), 0.125);
+    assert.equal(parseNumber('100.000', nl), 100000);
+    assert.equal(parseNumber('1.000.000', nl), 1000000);
+    assert.equal(parseNumber('١٠٬٠٠٠', arab), 10000);
+    assert.equal(parseNumber('٠٫٥', arab), 0.5);
+    assert.equal(parseNumber(formatNumber(0.125, { decimalFormat: NL, group: true }), nl), 0.125);
+  });
+
   it('reads English text under the English record, and refuses what the default reads as grouping', () => {
     const en = { decimalFormat: EN };
     assert.equal(parseNumber('1,234.5', en), 1234.5);

@@ -27,6 +27,18 @@ delete it or fix it.
 
 ## @jarenjs/core
 
+- [ ] **`ringSignedArea` and `ringWinding` throw an uncoded `TypeError` on a
+  missing position.** `ringSignedArea([[0,0],[4,0],null,[0,4],[0,0]])` throws
+  `Cannot read properties of null (reading '0')` and
+  `ringWinding([null,[4,0],[4,4],[0,0]])` throws `object null is not
+  iterable`, where the ring's other exported helpers answer (`pointInRing`
+  false, `sphericalRingArea` `NaN`, `isRingClosed` false); a member that is
+  not a position of finite numbers (`'12'`, `[null, null]`) is read as the
+  numbers arithmetic makes of it, so the sign can be wrong. Their JSDoc names
+  no reading of a malformed ring. Wanted: a documented malformed answer (`NaN`
+  and `0`) at no cost to a well-formed ring, as the containment helpers have
+  (a patch).
+
 - [ ] **A restore that throws `undefined` is reported as a restore that
   succeeded.** `createGuardedRefiner`'s `commit` keeps the thrown value as
   `restoreError` and tests it against `undefined`, so a `restore` hook that

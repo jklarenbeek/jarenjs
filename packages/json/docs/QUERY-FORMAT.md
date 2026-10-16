@@ -84,7 +84,14 @@ Two conformance roles exist:
    flow through as an opaque item. It MUST, however, reject a *missing*
    document (JavaScript `undefined`) with `JQ2011`: a host API that spends
    the absent value on the empty sequence would otherwise answer "empty" for
-   a query whose existence test says otherwise.
+   a query whose existence test says otherwise. The values `@jarenjs/josl`
+   reads JOSL and JSONX text into compare as what they are: a `bigint`
+   equals only the same `bigint`, a `Date` (an offset date-time) a `Date`
+   of the same instant, and a `RegExp` (a regexp literal) a `RegExp` of the
+   same source and flags, under `$eq`, `$distinct`, `$groupby` and a hash
+   join alike, and none of them equals another object. *Upgrade: a `Date`
+   or a `RegExp` used to compare as `{}`, so two different instants or
+   patterns were one value.*
 
 ### 2.2 Effective boolean value (EBV)
 
@@ -1157,10 +1164,14 @@ factor, rounded once into a double, so `"0.7 l"` in millilitres is `700` and
 `"3 lbs"` in kilograms `1.36077711`; to any other unit it divides as the
 registry does.
 - The number is written in the format's characters: digits grouped in threes
-  or not at all, then an optional fraction after the decimal separator
+  after a leading group that does not start with zero, or not grouped at all,
+  then an optional fraction after the decimal separator
   (default `.`). Under the Dutch format, `"1,5 kg"` in grams is `1500` and
   `"1.500 gram"` in kilograms is `1.5`; under the default, `"1,5 kg"` holds no
-  quantity at all. A minus sign written right before the number reads it
+  quantity at all, and neither does `"0,500 kg"` (Dutch `"0.500 kg"`): no
+  writer groups a leading zero, and read as grouping it would be a decimal
+  written the other way taken a thousand times too large. *Upgrade:
+  `"0,500 kg"` in grams used to be `500000` under the default.* A minus sign written right before the number reads it
   negative (`"-2 kg"`). A number after any other dash, or after a dash and
   white space (`"–2 kg"`, `"- 2 kg"`), is not read at all: read without the
   dash, it would lose a sign the writer may have meant.
@@ -1201,7 +1212,7 @@ clause/operator collision note.
 
 | Operator | Signature | Definition |
 |---|---|---|
-| `$distinct` | `{"$distinct": e}` | The distinct items of the operand, in first-occurrence order (`fn:distinct-values` adapted to D2 deep equality). Equality is the **grouping key relation** of §6.5: deep structural equality with `NaN` equal to itself and `-0` equal to `0` — `$distinct` and `$groupby` always agree. A `bigint` item (an integer past 2^53 read by `@jarenjs/josl`) equals only the same `bigint`, and a member held as `undefined` by a host-built row is a member, not an absent one. An item holding a cycle or nested past 10000 levels is refused, `JO2002` at the member closing the cycle or `JO2001` (§6.5). *Upgrade: every `bigint` shared one group with `{}`, and an `undefined` member raised a raw `TypeError`; a cyclic or very deep item escaped as an uncoded `RangeError`.* |
+| `$distinct` | `{"$distinct": e}` | The distinct items of the operand, in first-occurrence order (`fn:distinct-values` adapted to D2 deep equality). Equality is the **grouping key relation** of §6.5: deep structural equality with `NaN` equal to itself and `-0` equal to `0` — `$distinct` and `$groupby` always agree. A `bigint` item (an integer past 2^53 read by `@jarenjs/josl`) equals only the same `bigint`, a `Date` a `Date` of the same instant and a `RegExp` one of the same source and flags (§2.1), and a member held as `undefined` by a host-built row is a member, not an absent one. An item holding a cycle or nested past 10000 levels is refused, `JO2002` at the member closing the cycle or `JO2001` (§6.5). *Upgrade: every `bigint` shared one group with `{}`, and an `undefined` member raised a raw `TypeError`; a cyclic or very deep item escaped as an uncoded `RangeError`.* |
 | `$reverse` | `{"$reverse": e}` | The operand's items in reverse order (`fn:reverse`). |
 | `$sort` | `{"$sort": e}` | The operand's items sorted ascending by value (`fn:sort`, natural order only — key-based sorting is `$orderby`'s job). Items MUST be all numbers or all strings; anything else, or a mix, is runtime error `JQ2005` (the `$orderby` key-type rules). `NaN` orders per §6.6: equal to itself, less than every other number. The sort is stable. |
 | `$head` | `{"$head": e}` | The first item, or empty (`fn:head`). |
@@ -1675,7 +1686,7 @@ as those numbers (`"12"` as `(1, 2)`).*
 | `$geo-text` | any value → its Well-Known Text string; a value with no WKT spelling → empty |
 | `$geohash-bounds` | a cell string → the `Polygon` covering that cell; a string outside the base-32 alphabet → empty |
 | `$geohash-neighbours` | a cell string → the cell and its neighbours as a sequence of up to nine strings, in reading order (north-west first, the cell itself in the middle); cells past a pole do not exist and are absent |
-| `$geo-simplify` | `[value, tolerance]` → the same value with vertices dropped. The tolerance is in **degrees**, not metres |
+| `$geo-simplify` | `[value, tolerance]` → the same value with vertices dropped. The tolerance is in **degrees**, not metres. A line or ring holding a member that is not a position of finite numbers (`null`, `[null, null]`) is kept as it stands |
 
 **Conversion is how geography gets in and out.** Well-Known Text is what
 PostGIS, SpatiaLite, GEOS, JTS and every `ST_AsText` emit, so `$geo-parse` and
