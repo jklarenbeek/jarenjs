@@ -109,6 +109,22 @@ delete it or fix it.
 
 ## @jarenjs/validate
 
+- [ ] **Emitted accepted types for `coerceJsonText`.** `@jarenjs/emit`'s
+  accepted variant widens a scalar by what `coerceTypes` converts from, but
+  not an object or array node by `string` where `coerceJsonText` decodes JSON
+  text, so the accepted type refuses an input the normalizer takes;
+  `jaren-emit --config` refuses `coerceJsonText` as an unknown option. Mirror
+  the decode rule (the node's own `type` names `object`/`array` and not
+  `string`; a `$ref`'s sibling `type` only where the declared draft asserts
+  `$ref` siblings).
+- [ ] **The normalizer applies a `$ref`'s sibling keywords where the validator
+  ignores them.** In a document declaring draft-07 or no draft, the validator
+  ignores keywords beside `$ref` by default, but `compileNormalizer` still
+  runs them: `{ $defs: { S: { type: 'string' } }, $ref: '#/$defs/S', type:
+  'integer' }` with `coerceTypes` turns `'12'`, which validates, into `12`,
+  which does not (the same holds for sibling `properties`, `items`, `allOf`,
+  defaults and stripping). `@jarenjs/emit` mirrors the walk, so both move
+  together; `coerceJsonText` already decodes nothing in those siblings.
 - [ ] **Strict profiles of the JTLT grammar and of two schemas for one
   member.** `deriveStrictProfile` (`@jarenjs/validate/strict-profile`) carries
   a value of any shape as JSON text, a map as `{ key, value }` entries, and an

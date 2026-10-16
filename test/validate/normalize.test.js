@@ -420,7 +420,7 @@ describe('compileNormalizer — a closed option set', () => {
     refuses({ coerceType: true }, "compileNormalizer: unknown option 'coerceType' — did you mean 'coerceTypes'?");
     refuses({ useDefault: true }, "compileNormalizer: unknown option 'useDefault' — did you mean 'useDefaults'?");
     refuses({ strip: true },
-      "compileNormalizer: unknown option 'strip'; the options are useDefaults, removeAdditional, coerceTypes, trimStrings");
+      "compileNormalizer: unknown option 'strip'; the options are useDefaults, removeAdditional, coerceTypes, trimStrings, coerceJsonText");
   });
 
   it('refuses a mistyped option value', () => {

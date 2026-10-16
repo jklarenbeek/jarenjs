@@ -35,6 +35,7 @@ import {
 import { parseJSONPointer } from '@jarenjs/json';
 import { isJsonNumberString } from '@jarenjs/core/number';
 import { isStringWhiteSpace } from '@jarenjs/core/string';
+import { CC_LBRACE, CC_LBRACKET, isWhitespaceCode } from '@jarenjs/core/scan';
 import {
   TRAVERSE_SCHEMA_OBJECTS,
   TRAVERSE_SCHEMA_MAPS,
@@ -65,7 +66,7 @@ const hasOwn = Object.hasOwn;
  * default: each one changes the meaning of the caller's data, so each is a
  * decision the caller makes rather than inherits. With no options the
  * compiled normalizer is the identity.
- * Three of the four also accept a **predicate** `(schemaNode) => boolean`
+ * Four of the five also accept a **predicate** `(schemaNode) => boolean`
  * instead of a boolean, evaluated once per node at compile time. That is how
  * a consumer turns a whole-schema switch into a per-field decision — "trim
  * these string fields, leave those alone" — without the option becoming a
@@ -75,6 +76,7 @@ const hasOwn = Object.hasOwn;
  * @property {boolean|'all'} [removeAdditional=false] - Strip unknown properties: `true` only where `additionalProperties: false`, `'all'` wherever an object shape is declared
  * @property {boolean|((schemaNode: Record<string, unknown>) => boolean)} [coerceTypes=false] - Convert a value to the node's declared scalar `type` when it is convertible
  * @property {boolean|((schemaNode: Record<string, unknown>) => boolean)} [trimStrings=false] - Trim leading/trailing whitespace from strings, before coercion
+ * @property {boolean|((schemaNode: Record<string, unknown>) => boolean)} [coerceJsonText=false] - Decode a string holding the JSON text of an object or array where the node's `type` wants that container and admits no string, then normalize the decoded value
  */
 
 /**
@@ -435,6 +437,66 @@ function buildArrayStep(node, ctx) {
 }
 
 /**
+ * Whether `value` opens with the char code `open` once JSON whitespace
+ * (space, tab, line feed, carriage return) is skipped.
+ * @param {string} value
+ * @param {number} open - The char code `{` or `[`
+ * @returns {boolean}
+ */
+function opensWith(value, open) {
+  for (let i = 0; i < value.length; i++) {
+    const c = value.charCodeAt(i);
+    if (!isWhitespaceCode(c)) return c === open;
+  }
+  return false;
+}
+
+/**
+ * Build the JSON-text step: a string holding the JSON text of an object or
+ * an array is replaced by the value it encodes, so the node's other steps
+ * normalize the decoded container. A model's tool call delivers nested
+ * structure this way, one quoted string where the schema wants an object.
+ *
+ * The step exists only where the string cannot be what was meant: the node's
+ * own `type` names `object` or `array` and not `string`. A node without a
+ * `type`, or one that admits a string, accepts the string as sent, and
+ * decoding it would change a valid value. Nothing decodes beside a `$ref`
+ * whose siblings the validator ignores (see `compileNode`): there the
+ * reference alone decides.
+ *
+ * Text that is not JSON, or encodes a scalar or the other container kind, is
+ * returned unchanged so validation reports the string. The text is decoded
+ * only when its first non-whitespace character opens a wanted container, so a
+ * successful parse is that container and nothing else is attempted. Where
+ * `trimStrings` applies, the trimmed text is read, as coercion reads it, so
+ * padding the trim removes cannot leave text a second pass would decode.
+ * @param {object} node - The schema node
+ * @param {object} ctx - The compile context
+ * @returns {Function|null} The step, or null when this node needs none
+ */
+function buildJsonTextStep(node, ctx) {
+  if (ctx.jsonTextOff || !resolveNormalizeSwitch(ctx.options.coerceJsonText, node)) return null;
+  const trim = resolveNormalizeSwitch(ctx.options.trimStrings, node);
+  const types = typeof node.type === 'string' ? [node.type] : node.type;
+  if (!Array.isArray(types) || types.includes('string')) return null;
+  const wantsObject = types.includes('object');
+  const wantsArray = types.includes('array');
+  if (!wantsObject && !wantsArray) return null;
+
+  return function normalizeJsonText(value) {
+    if (typeof value !== 'string') return value;
+    const source = trim ? value.trim() : value;
+    if (!(wantsObject && opensWith(source, CC_LBRACE)) && !(wantsArray && opensWith(source, CC_LBRACKET))) return value;
+    try {
+      return JSON.parse(source);
+    }
+    catch (_e) {
+      return value;
+    }
+  };
+}
+
+/**
  * Build the scalar step: trim, then coerce. Trimming runs first so that a
  * padded transport value (`' 42 '` for a numeric field) reaches coercion in
  * the shape the grammar accepts.
@@ -492,7 +554,7 @@ function compileNode(node, ctx) {
 
   // One node reached under two drafts (inline and as a reference target)
   // normalizes per draft.
-  const memoKey = `${ctx.allowStrip}${ctx.declaredDraft}`;
+  const memoKey = `${ctx.allowStrip}${ctx.declaredDraft}${ctx.jsonTextOff ? 'j' : ''}`;
   let memo = ctx.memos.get(memoKey);
   if (memo === undefined) ctx.memos.set(memoKey, memo = new Map());
   const cached = memo.get(node);
@@ -505,6 +567,21 @@ function compileNode(node, ctx) {
   memo.set(node, deferred);
 
   const steps = [];
+
+  // Before draft 2019-09, and in a document declaring no draft, the
+  // validator ignores the keywords beside a `$ref` by default. Decoding JSON
+  // text there could turn a string the reference accepts into a container it
+  // refuses, so no JSON text decodes in the siblings' subtree; the reference
+  // target, compiled with the incoming context, still decodes by its own type.
+  const siblingCtx = ctx.options.coerceJsonText && !ctx.jsonTextOff && typeof node.$ref === 'string'
+    && !(ctx.declaredDraft !== null && ctx.declaredDraft >= 2019)
+    ? { ...ctx, jsonTextOff: true }
+    : ctx;
+
+  // Decoding comes first: every other step of this node, the reference and
+  // the `allOf` branches included, reads the decoded container.
+  const jsonTextStep = buildJsonTextStep(node, siblingCtx);
+  if (jsonTextStep !== null) steps.push(jsonTextStep);
 
   if (typeof node.$ref === 'string') {
     const trail = [];
@@ -530,17 +607,17 @@ function compileNode(node, ctx) {
   // sibling branch declares. Composition-shaped schemas therefore keep their
   // members; only defaults, coercion and trimming flow through.
   if (Array.isArray(node.allOf)) {
-    const branchCtx = ctx.allowStrip ? { ...ctx, allowStrip: false } : ctx;
+    const branchCtx = siblingCtx.allowStrip ? { ...siblingCtx, allowStrip: false } : siblingCtx;
     for (let i = 0; i < node.allOf.length; i++) {
       const step = compileNode(node.allOf[i], branchCtx);
       if (step !== null) steps.push(step);
     }
   }
 
-  const objectStep = buildObjectStep(node, ctx);
+  const objectStep = buildObjectStep(node, siblingCtx);
   if (objectStep !== null) steps.push(objectStep);
 
-  const arrayStep = buildArrayStep(node, ctx);
+  const arrayStep = buildArrayStep(node, siblingCtx);
   if (arrayStep !== null) steps.push(arrayStep);
 
   const scalarStep = buildScalarStep(node, ctx);
@@ -554,7 +631,7 @@ function compileNode(node, ctx) {
 }
 
 /** The members of `NormalizeOptions`; any other is refused. */
-const NORMALIZE_OPTIONS = Object.freeze(['useDefaults', 'removeAdditional', 'coerceTypes', 'trimStrings']);
+const NORMALIZE_OPTIONS = Object.freeze(['useDefaults', 'removeAdditional', 'coerceTypes', 'trimStrings', 'coerceJsonText']);
 
 /**
  * Refuse a malformed options object before anything compiles: every
@@ -567,7 +644,7 @@ function admitNormalizeOptions(options) {
   if (!isPlainOptions(options)) throw new TypeError('compileNormalizer: options must be a plain object');
   refuseUnknownMembers(options, NORMALIZE_OPTIONS,
     (key, hint) => new TypeError(`compileNormalizer: unknown option '${key}'${hint}`));
-  for (const name of ['useDefaults', 'coerceTypes', 'trimStrings']) {
+  for (const name of ['useDefaults', 'coerceTypes', 'trimStrings', 'coerceJsonText']) {
     const value = options[name];
     if (value !== undefined && typeof value !== 'boolean' && typeof value !== 'function')
       throw new TypeError(`compileNormalizer: '${name}' must be true, false or a function of the schema node`);
@@ -594,7 +671,10 @@ function admitNormalizeOptions(options) {
  * **What is normalized.** `properties`, `patternProperties`,
  * `additionalProperties`, `items`/`prefixItems`/`additionalItems`, same-document
  * `$ref` (`#`, `#/pointer` and plain `#anchor` forms), and `allOf` (composed,
- * with stripping disabled inside it). `allOf` branches run once, in
+ * with stripping disabled inside it). With `coerceJsonText`, a string holding
+ * an object's or array's JSON text is decoded wherever such a node's `type`
+ * wants that container and admits no string, at any depth, before the node's
+ * other steps run on the decoded value. `allOf` branches run once, in
  * declaration order, each on the previous step's output, so a default
  * supplied by a later branch is not coerced by an earlier one until the next
  * application; keep `type` and `default` on one property schema, or list the
@@ -640,6 +720,7 @@ export function compileNormalizer(schema, options = {}) {
       : options.removeAdditional === true,
     coerceTypes: options.coerceTypes,
     trimStrings: options.trimStrings,
+    coerceJsonText: options.coerceJsonText,
   };
 
   const ctx = {
@@ -648,9 +729,11 @@ export function compileNormalizer(schema, options = {}) {
     anchors: collectSameDocumentAnchors(schema),
     /** @type {number|null} The draft the schema being compiled declares, or null when none does */
     declaredDraft: null,
-    /** @type {Map<string, Map<object, Function|null>>} The compiled steps per stripping mode and draft */
+    /** @type {Map<string, Map<object, Function|null>>} The compiled steps per stripping mode, draft and decoding */
     memos: new Map(),
     allowStrip: true,
+    /** True below the inert siblings of a `$ref`, where no JSON text decodes */
+    jsonTextOff: false,
   };
 
   const step = compileNode(schema, ctx);

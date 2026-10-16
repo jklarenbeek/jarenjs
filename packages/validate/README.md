@@ -1375,6 +1375,7 @@ const normalize = compileNormalizer(schema, {
   removeAdditional: true,  // drop members the schema forbids
   coerceTypes: true,       // '9000' -> 9000 where the schema says integer
   trimStrings: true,       // '  jaren  ' -> 'jaren'
+  coerceJsonText: true,    // '{"a":1}' -> { a: 1 } where the schema says object
 });
 
 const shaped = normalize(input);   // a NEW value; `input` is untouched
@@ -1385,8 +1386,8 @@ Every option is **off by default** — each one changes what your data means,
 so each is a decision you make rather than one you inherit.
 `compileNormalizer(schema)` with no options is the identity. The option set
 is closed, and each refusal is a `TypeError` that says what is wrong: a
-member other than `useDefaults`, `removeAdditional`, `coerceTypes` and
-`trimStrings` names the nearest one (`coerceType` — did you mean
+member other than `useDefaults`, `removeAdditional`, `coerceTypes`,
+`trimStrings` and `coerceJsonText` names the nearest one (`coerceType` — did you mean
 `coerceTypes`?), a value of the wrong type names the member and what it takes
 (`coerceTypes: 'yes'`, a member set to `null`, a `removeAdditional` other
 than `true`, `false` or `'all'`), and options that are not a plain object —
@@ -1396,7 +1397,7 @@ used to throw a raw `TypeError` (`Cannot read properties of null`).
 
 ### Per-field control, not just a global switch
 
-`useDefaults`, `coerceTypes` and `trimStrings` each accept a **predicate**
+`useDefaults`, `coerceTypes`, `trimStrings` and `coerceJsonText` each accept a **predicate**
 `(schemaNode) => boolean` in place of a boolean. It runs once per node during
 compilation, so it decides per field and costs nothing at runtime:
 
@@ -1519,6 +1520,79 @@ normalizer hiding it.
 A union `type` (`['string', 'number']`) gives no single target, so coercion is
 skipped rather than guessed. Trimming runs before coercion, so `'  42  '`
 decodes for an integer field.
+
+### Structure sent as JSON text
+
+A model calling a tool often sends a nested object or array as its JSON
+*text*: one quoted string where the schema wants the structure. Validation
+refuses it as a string, and the repair costs the model another round trip.
+`coerceJsonText` decodes that string where the schema says what it must be,
+at any depth, and then normalizes inside the decoded value, so `coerceTypes`,
+`useDefaults` and `removeAdditional` apply to its members as they would to
+a member sent as structure:
+
+```js
+import { compileNormalizer } from '@jarenjs/validate/normalize';
+import { JarenValidator } from '@jarenjs/validate';
+
+const searchArgs = {
+  type: 'object',
+  properties: {
+    query: { type: 'string' },
+    filter: {
+      type: 'object',
+      properties: {
+        tags: { type: 'array', items: { type: 'string' } },
+        limit: { type: 'integer', default: 10 },
+      },
+      additionalProperties: false,
+    },
+  },
+  required: ['query', 'filter'],
+};
+const normalize = compileNormalizer(searchArgs, {
+  coerceJsonText: true, coerceTypes: true, useDefaults: true,
+});
+const validate = new JarenValidator().compile(searchArgs);
+
+// The arguments as the model sent them: `filter` is JSON text, and `tags`
+// inside it is JSON text again.
+const call = { query: 'jaren', filter: '{"tags":"[\\"json\\",\\"schema\\"]"}' };
+console.log(validate(call));                  // false
+const args = normalize(call);
+console.log(JSON.stringify(args), validate(args));
+// {"query":"jaren","filter":{"tags":["json","schema"],"limit":10}} true
+```
+
+A string is decoded only where it cannot be what was meant:
+
+- **The node's own `type` names `object` or `array` and not `string`.** A
+  node without a `type`, or with `type: ['string', 'object']`, accepts the
+  string as sent, so it stays a string. The strict-profile
+  spelling `type: ['object', 'null']` decodes; the text `'null'` stays text.
+- **Unions are not chosen by trying a parse.** `anyOf` and `oneOf` are not
+  walked (above), so a member typed only through their branches stays a
+  string. `allOf` branches and `$ref` targets are walked and decode by their
+  own `type`. The keywords beside a `$ref` decode only where the declared
+  draft asserts them (2019-09 and later); in a draft-07 document, or one
+  declaring no draft, the validator ignores them by default, so nothing in
+  them decodes (their `type`, `allOf`, `properties`, `items`) and the
+  reference's target decides.
+- **Text that does not decode to the wanted container stays as sent.**
+  Malformed JSON, the JSON text of a scalar (`'42'`, `'"{}"'`), or an array's
+  text where an object is wanted is returned unchanged, and validation
+  reports it as the wrong type.
+- **What decodes is still validated.** A decoded object that misses a
+  required member is reported at its own instance path (`/filter`), not
+  hidden by the normalizer.
+
+A second pass changes nothing: a decoded container is no longer a string,
+and text that did not decode does not decode the next time either. With
+`trimStrings` on the same node, the decode reads the trimmed text, as
+coercion does, so `'\u00a0{"a":1}'` decodes in the first pass rather than
+trimming into text the second pass would decode. Decoding
+uses `JSON.parse`, so an integer beyond ±(2⁵³−1) inside the text becomes the
+nearest double, as it would in the call's outer JSON.
 
 ## Strict structured-output profiles
 
