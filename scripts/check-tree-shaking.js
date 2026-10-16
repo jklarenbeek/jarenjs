@@ -152,7 +152,8 @@ if (engineLeak.length > 0)
 // Raised to 42,300 (measured 42263): the shared capture's refusal to coerce a method read without its call add 391.
 // Raised to 44,600 (measured 44599): the shared capture's coded refusal of every array and string method on a member, and the predicate a to-many relation's array method needs, add 2336.
 // Raised to 45,300 (measured 45247): the shared capture's reading of an index off a relation as a hop for in() and all() add 648.
-if (schemaBytes > 45300)
+// Raised to 45,400 (measured 45306): core's shared-value equality and key helpers the schema pen carries add 26.
+if (schemaBytes > 45400)
   throw new Error(`The schema pen bundle grew to ${schemaBytes} bytes.`);
 
 console.log(`Tree-shaking smoke test passed (${schemaBytes} byte schema-pen bundle; no chain module, no engine).`);
@@ -242,7 +243,8 @@ if (chainEdgeLeak.length > 0)
 // Raised to 231,500 (measured 231415): the join table's query root and the message vocabulary's new keyword and descent ids add 909.
 // Raised to 232,600 (measured 232511): the message vocabulary's ids for the five keyword messages, the resolved bound and the failed load, and core's located cycle refusal add 1096.
 // Raised to 240,600 (measured 240544): the geometry walks' coded cycle and depth refusal with their stack-free fallback past 256 levels (core walk), the keyed operators' located cycle and depth refusal and the shared-value key in linear space, and the descent segment's cycle refusal add 8033.
-if (chainBytes > 240600)
+// Raised to 244,400 (measured 244372): core's linear-time equality and linear-space keys over shared values (2833) and the documented answers for malformed geometry positions add 3828, net of the shared geometry walker's 798 saved.
+if (chainBytes > 244400)
   throw new Error(`The chain bundle grew to ${chainBytes} bytes.`);
 
 console.log(`Tree-shaking smoke test passed (${chainBytes} byte chain bundle; no schema-pen module, no client module, no store/validator/formats bytes).`);
@@ -325,7 +327,8 @@ if (modelEngineLeak.length > 0)
 // Raised to 54,100 (measured 54068): the shared capture's refusal to coerce a method read without its call add 391.
 // Raised to 56,500 (measured 56406): the shared capture's coded refusal of every array and string method on a member, and the predicate a to-many relation's array method needs, add 2338.
 // Raised to 57,100 (measured 57054): the shared capture's reading of an index off a relation as a hop for in() and all() add 648.
-if (modelBytes > 57100)
+// Raised to 57,200 (measured 57113): core's shared-value equality and key helpers the model pen carries add 26.
+if (modelBytes > 57200)
   throw new Error(`The model pen bundle grew to ${modelBytes} bytes.`);
 const schemaModelLeak = Object.entries(schemaInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/model/') && info.bytesInOutput > 0);
@@ -459,7 +462,8 @@ if (migrationEngineLeak.length > 0)
 // Raised to 33,400 (measured 33304): the shared capture's coded refusal of every array and string method on a member, and the predicate a to-many relation's array method needs, add 2334.
 // Raised to 34,000 (measured 33951): the shared capture's reading of an index off a relation as a hop for in() and all() add 647.
 // Raised to 34,100 (measured 34044): the canonical form's data depth bound add 93.
-if (migrationBytes > 34100)
+// Raised to 34,700 (measured 34613): the coded canonicalization refusals (510) and core's shared-value helpers add 536.
+if (migrationBytes > 34700)
   throw new Error(`The migration pen bundle grew to ${migrationBytes} bytes.`);
 const chainMigrationLeak = Object.entries(chainInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/migration/') && info.bytesInOutput > 0);
@@ -638,7 +642,8 @@ if (asyncLiveLeak.length)
 // Raised to 1,020,400 (measured 1020349): a join table's rows bounded by each side's profile predicate, the refusal of keys and texts the database would store as another value, the engine fold over a non-UTF-8 file and the shared-cache source add 3540.
 // Raised to 1,033,400 (measured 1033301): the store's refusal of a non-JSON external through filters and operators, a wide predicate external compared by its digits, the join table's second-key index and its upgrade, the many-to-many count and existence in one statement, the validator's every-keyword collection, draft keyword gates and resolved bounds, the single-pass unevaluated log and core's located cycle refusal add 12952.
 // Raised to 1,044,600 (measured 1044563): the chain's geometry, keying and descent cycle refusals (8033), the validator's reference targets under their own draft and its coded unresolvable, dynamic and malformed references (2834), and the digit-name guard and point-read key spelling add 11262.
-if (clientBytes > 1044600)
+// Raised to 1,051,400 (measured 1051361): the chain's shared-value equality, keys and malformed-geometry answers (3828), the validator's narrowing answer, draft-scoped recursive references, exact anchors and pointer fragments and its coded identifier and reference refusals (2037), and the coded canonicalization refusals (510) add 6798.
+if (clientBytes > 1051400)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 

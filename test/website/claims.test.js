@@ -273,8 +273,8 @@ describe('the root README bakes its load-bearing claims', function () {
     ['the validator conformance score',
       `Jaren scores \\*\\*${marker('validate.conformance')}\\*\\* on the official`],
     ['the per-test win count and the success-only multiple',
-      `faster on ${marker('validate.perTestWins')} of the tests both engines pass, `
-      + `and ${marker('validate.vsAjv')}x as fast on the success-only totals`],
+      `the faster engine on ${marker('validate.perTestWins')} of them and runs the success-only totals at `
+      + `${marker('validate.vsAjv')}× Ajv's speed`],
     ['when the quoted suites were measured',
       `measured on ${marker('benchmarks.measured')}`],
     ['the JSONPath compliance score, and the rival\'s',

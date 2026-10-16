@@ -100,6 +100,6 @@ gate compares generated files and all locale parameter sets with their sources.
 
 ## 7. Cost
 
-The isolated messages pen costs **<!--fact:bundle.messages-->14,573<!--/fact--> bytes**.
+The isolated messages pen costs **<!--fact:bundle.messages-->14,597<!--/fact--> bytes**.
 It carries the shared template compiler and generated vocabulary, with no locale,
 validator, forms or contract engine and no query chain.

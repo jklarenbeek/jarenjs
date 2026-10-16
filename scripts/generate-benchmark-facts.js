@@ -93,6 +93,11 @@ function workspace(name) {
 const ratio = (x) => x.toFixed(1);
 /** Milliseconds at two significant figures below 10, whole above. */
 const ms = (x) => (x >= 10 ? String(Math.round(x)) : Number(x.toPrecision(2)).toString());
+/** Jaren's and Ajv's totals with the faster one in bold (a tie bolds neither). */
+const faster = (jaren, ajv) => {
+  const [j, a] = [Number(ms(jaren)), Number(ms(ajv))];
+  return `${j < a ? `**${ms(jaren)} ms**` : `${ms(jaren)} ms`} vs ${a < j ? `**${ms(ajv)} ms**` : `${ms(ajv)} ms`}`;
+};
 /** Milliseconds at a fixed decimal — the CSV table's column style, where
  * a uniform width is what makes six engines comparable down the column. */
 const ms1 = (x) => x.toFixed(1);
@@ -473,7 +478,7 @@ const FACTS = {
       const ajvPassed = b.totalTests - b.ajvFailures - b.ajvErrors;
       return `| ${label} | **${jarenPassed} passed, ${b.jarenFailures} failed, ${b.jarenErrors} errors** `
         + `| ${ajvPassed} passed, ${b.ajvFailures} failed, ${b.ajvErrors} error${b.ajvErrors === 1 ? '' : 's'} `
-        + `| **${ms(b.jarenSuccessTime)} ms** vs ${ms(b.ajvSuccessTime)} ms `
+        + `| ${faster(b.jarenSuccessTime, b.ajvSuccessTime)} `
         + `| ${b.successOnly.jarenWins} of ${b.successTests} tests |`;
     });
     return ['', '| Draft | Jaren | Ajv | Success-only totals | Jaren faster on |',
