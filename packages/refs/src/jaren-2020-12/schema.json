@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jarenjs.dev/schemas/2020-12/schema",
+  "$vocabulary": {
+    "https://json-schema.org/draft/2020-12/vocab/core": true,
+    "https://json-schema.org/draft/2020-12/vocab/applicator": true,
+    "https://json-schema.org/draft/2020-12/vocab/unevaluated": true,
+    "https://json-schema.org/draft/2020-12/vocab/validation": true,
+    "https://json-schema.org/draft/2020-12/vocab/meta-data": true,
+    "https://json-schema.org/draft/2020-12/vocab/format-annotation": true,
+    "https://json-schema.org/draft/2020-12/vocab/content": true,
+    "https://jarenjs.dev/schemas/2020-12/vocab/query": true
+  },
+  "$dynamicAnchor": "meta",
+
+  "title": "Jaren 2020-12 dialect meta-schema",
+  "description": "The JSON Schema 2020-12 dialect plus the Jaren query vocabulary: a '$query' member, anywhere a subschema may stand, must be a Jaren JSON Query document. The query vocabulary is required, so a validator that does not implement '$query' refuses a schema that declares this dialect instead of ignoring the assertion.",
+  "allOf": [
+    {"$ref": "https://json-schema.org/draft/2020-12/schema"},
+    {"$ref": "meta/query"}
+  ]
+}

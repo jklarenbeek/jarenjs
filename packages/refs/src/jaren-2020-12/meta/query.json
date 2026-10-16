@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jarenjs.dev/schemas/2020-12/meta/query",
+  "$vocabulary": {
+    "https://jarenjs.dev/schemas/2020-12/vocab/query": true
+  },
+  "$dynamicAnchor": "meta",
+
+  "title": "Jaren query vocabulary meta-schema",
+  "description": "'$query' asserts that a Jaren JSON Query document, evaluated at the instance location, has a true effective boolean value. Its value is checked structurally by the published query grammar; the query compiler remains authoritative for the semantic rules the grammar cannot express (for instance, '$query' binds only the externals 'root' and 'path').",
+  "type": ["object", "boolean"],
+  "properties": {
+    "$query": {"$ref": "https://jarenjs.dev/schemas/jaren-query/0.1"}
+  }
+}

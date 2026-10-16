@@ -37,7 +37,7 @@ Highlights:
 - Per-document draft handling for cross-draft references
 - `$vocabulary`-aware keyword selection and per-draft `format`/content assertion defaults
 - Instance-data references via the `data` keyword (json-everything data-ref) and Ajv-style `$data`
-- Cross-field assertions via the `$query` extension keyword (a [Jaren JSON Query](../json/docs/QUERY-FORMAT.md) inside the schema)
+- Cross-field assertions via the `$query` extension keyword (a [Jaren JSON Query](../json/docs/QUERY-FORMAT.md) inside the schema), and a [2020-12 dialect](#checking-query-itself--the-jaren-2020-12-dialect) whose meta-schema checks it
 - The JSON Schema standard output formats (`flag`, `basic`, `detailed`, `verbose`, `list`, `hierarchical`) from `@jarenjs/validate/output`, via the `outputFormat` option — see [Standard output formats](#standard-output-formats)
 
 Schema registrations accept boolean schemas when supplied an explicit key.
@@ -466,7 +466,10 @@ is true. This gives JSON Schema the class of constraint it is notoriously bad
 at — cross-field arithmetic, ordering, aggregate consistency, quantification —
 through the query engine that already sits underneath the stack. Other
 validators treat `$query` as an unknown-keyword annotation, so schemas using
-it stay portable; the constraint simply only asserts here.
+it under a standard `$schema` stay portable; the constraint simply only
+asserts here. A schema that declares the
+[Jaren dialect](#checking-query-itself--the-jaren-2020-12-dialect) instead
+asks other validators to refuse it rather than skip the constraint.
 
 An invoice whose `total` must equal the sum of its line amounts:
 
@@ -561,6 +564,84 @@ not reach the enclosing schema's `$defs`. Register shared schema documents with
 `addSchema` and reference their IDs. Recursive compilation through such a query
 literal is refused at compile time instead of repeatedly opening another root;
 ordinary recursive `$ref` validation remains supported.
+
+### Checking `$query` itself — the Jaren 2020-12 dialect
+
+A schema a model authored is input like any other, and a malformed `$query`
+in it should be caught by validating the schema, not first by `compile()`.
+Under the standard dialects a meta-schema cannot do that: `$query` is an
+unknown keyword there, so any value passes. `@jarenjs/refs/jaren-2020-12`
+ships a dialect that can. Its meta-schema
+(`https://jarenjs.dev/schemas/2020-12/schema`) is the 2020-12 meta-schema plus
+one vocabulary, `https://jarenjs.dev/schemas/2020-12/vocab/query`, whose
+meta-schema checks every `$query` value — at the root and in every subschema —
+against the query grammar `@jarenjs/json` publishes
+(`@jarenjs/json/schemas/jaren-query.schema.json`, bundled as is). Author the
+schema with that `$schema`, check it, then compile it:
+
+```js
+import { JarenValidator } from '@jarenjs/validate';
+import jaren2020, { dialect } from '@jarenjs/refs/jaren-2020-12';
+
+const jaren = new JarenValidator({ collectErrors: true })
+  .addMetaSchema([...jaren2020], dialect);
+const checkSchema = jaren.compile({ $ref: dialect });
+
+// A schema as a model might author it
+const authored = {
+  $schema: dialect,
+  type: 'object',
+  properties: { start: { type: 'string' }, end: { type: 'string' } },
+  $query: { $le: ['$.start', '$.end'] }
+};
+console.log(checkSchema(authored).valid);
+
+// The same schema with a misspelled operator in a subschema
+const broken = { ...authored, properties: { period: { $query: { $lte: ['$.start', '$.end'] } } } };
+const { valid, errors } = checkSchema(broken);
+console.log(valid, [...new Set(errors.map(e => e.instancePath))].filter(p => p.endsWith('/$query')));
+
+const validate = jaren.compile(authored);
+console.log(
+  validate({ start: '2026-01-01', end: '2026-12-31' }).valid,
+  validate({ start: '2026-12-31', end: '2026-01-01' }).valid
+);
+```
+
+```text
+true
+false [ '/properties/period/$query' ]
+true false
+```
+
+- **Compiling is unchanged.** `$query` asserts under every dialect — this one,
+  plain 2020-12, any other draft, no `$schema` at all, and a custom
+  meta-schema whose `$vocabulary` leaves it out — so a schema answers the same
+  whichever of them it declares. The dialect inherits 2020-12's keywords and
+  its annotation-only `format`.
+- **The grammar is structural.** It accepts every query in the query
+  format's valid corpus and every `$query` this package's tests compile; the
+  compiler stays authoritative for what a grammar cannot say, and
+  `compile()` still refuses those: a free external other than `root` and
+  `path`, variable scoping, the JSONPath segments after a variable. Schema
+  literals inside a query (`$valid`/`$assert`/`$as`) are not meta-validated.
+- **The vocabulary is required** (`true` in `$vocabulary`), so a validator
+  that honours `$vocabulary` and does not implement `$query` refuses a schema
+  declaring this dialect instead of silently skipping its constraints. Keep a
+  standard `$schema` where a schema must run elsewhere too.
+- **One spelling: `$query`.** The dialect does not add an unprefixed `query`
+  alias. A bare `query` is an annotation today under every dialect, so an
+  alias could only be scoped to this one, and then the same keyword would
+  assert or not depending on a `$schema` line that embedding (a `$defs`
+  entry, a contract's operation schema) routinely drops — a constraint that
+  silently stops asserting. `$query` asserts everywhere.
+- **`data` and `$data` are not in the vocabulary.** `data` is
+  json-everything's keyword and has its own published vocabulary
+  (`https://docs.json-everything.net/schema/vocabs/data-2023`). An Ajv-style
+  `$data` stands in another keyword's value (`"maximum": { "$data": "1/max" }`),
+  which only a rewrite of that keyword's own meta-schema could describe, so
+  a schema using it fails meta-validation under this dialect exactly as under
+  plain 2020-12.
 
 ## Compatibility settings
 
