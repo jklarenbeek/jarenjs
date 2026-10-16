@@ -722,10 +722,11 @@ is `JC2008`.
    `partial` server) is `JC2013`.
    Then **identify** (§7.7): the host lifecycle's first hook runs with
    the operation, the trace, the signal and the raw transport facts —
-   before any byte of the body is read — and answers the identity
-   lease (its `host` is what `scope` sees) or a declared failure; a
-   hook fault is `JC2008`. Every later refusal in this list releases the
-   identity before it is exposed.
+   before any byte of the body is read, unless `identifyBody` asked for
+   the exact bytes (step 3 then runs first and the body is read whole) —
+   and answers the identity lease (its `host` is what `scope` sees) or a
+   declared failure; a hook fault is `JC2008`. Every later refusal in
+   this list releases the identity before it is exposed.
 3. **The body limit.** A `content-length` above `policy.limits.maxBodyBytes`
    is `JC2003` **before** any read (the adapters honor this too, §9); a
    text or byte body whose length exceeds the limit is `JC2003` after; a
@@ -952,7 +953,7 @@ below; `HTTP_ERRORS` (`@jarenjs/contract/http`) is the same table as data,
 | `JC2015` | 400 | `contract/invalid-header` | no | a declared scalar header member arrived repeated, or a header value is not a string |
 | `JC2016` | 400 | `contract/malformed-body` | no | an opaque handler read its body as text with `readBody` (§4.5) and the bytes are not valid UTF-8 |
 
-`JC2016–JC2049` are reserved for later http-side codes; a new one is
+`JC2017–JC2049` are reserved for later http-side codes; a new one is
 added to `CONTRACT_CODES`, this table and the English catalog in one
 change.
 
@@ -976,6 +977,7 @@ wire response:
 | `JC1013` | a durable command settlement capability is malformed |
 | `JC1014` | continuation host options, key material or JSON input are malformed (§20) |
 | `JC1015` | a ledger `fail(ref, false)` carried no response: a failure that is not retryable replays its stored response, so it must carry one — refused, and the claim stays `started` (§8) |
+| `JC1016` | `verifyHs256Token` or `hmacSha256Matches`: the options, the key material (a `Uint8Array` of 32–1024 bytes), the clock, the leeway, the audience or issuer, the message or the signature argument is malformed (§21) |
 | `JC2110` | a durable command was refused or failed validation |
 | `JC1012` | a provider executor, descriptor host or run capability is malformed (PROVIDER-FORMAT.md) |
 
@@ -1088,7 +1090,7 @@ is a closed set: an unknown option (`precondition` for `preconditions`,
 which used to serve a stale `If-Match` with 200) is `JC1001`, naming the
 nearest one. `trace` (default the runtime record's `uuid`,
 `crypto.randomUUID` with no record) generates the server trace; `scope(ctx, input)` derives the idempotency scope (§8);
-`partial` allows missing handlers; `head` and `partial` must be booleans when given. HTTP options are plain or null-prototype records. `validateOutput` is `"always" |
+`partial` allows missing handlers; `identifyBody` hands `identify` the exact request bytes (§7.7); `head`, `partial` and `identifyBody` must be booleans when given. HTTP options are plain or null-prototype records. `validateOutput` is `"always" |
 "never"`; `preconditions` maps operation ids to pre-handler tag
 resolvers (§7.5); `errorBody(wire, ctx)` and `onError(err, ctx)` are the
 two host hooks (`ctx` is `null` before an operation is matched);
@@ -1122,11 +1124,13 @@ default identify → { host: null }
 default acquire  → enter({ host: identity.host })
 ```
 
-`meta` is `{ op, trace, signal, carrier, method, path, headers, request,
-fail }` — the matched operation, the trace, the request signal, the
-carrier name, the request line and the raw request headers on HTTP
-(`null` on port and local), the host's own per-request value, and the
-declared-failure factory. `request` is the dispatch request's `request`
+`meta` is `{ op, trace, signal, carrier, method, path, url, headers,
+body, request, fail }` — the matched operation, the trace, the request
+signal, the carrier name, the request line (`path` without the query,
+`url` the request target as the binding received it, query included)
+and the raw request headers on HTTP (`null` on port and local), the
+request bytes when the host asked for them, the host's own per-request
+value, and the declared-failure factory. `request` is the dispatch request's `request`
 member, never read by the binding: `toNodeHandler`'s `request` seed puts
 it there, and so does a framework route that dispatches itself (§18.1).
 A principal the framework decorated (`req.user`) thus reaches `identify`
@@ -1140,7 +1144,45 @@ acquired lease may add `settlement`. A host that names only `identify`
 sees its host in `scope` and in the handler; one that names `acquire`
 owns the handler's host.
 
-**Order.** (1) the request shape, the route and the trace; (2)
+**The request bytes.** A request signature between servers covers the
+body as it was sent, and a parsed input no longer has those bytes.
+`serveHttp(…, { identifyBody: true })` reads the body **before**
+`identify` and hands it the exact bytes as `meta.body`, a `Uint8Array`
+(empty when the request has none; a text body handed to `dispatch` as
+its UTF-8 encoding; a coded body as the coded bytes — nothing is
+decoded). The read is the pipeline's own read moved forward: a
+`content-length` over `policy.limits.maxBodyBytes` is `JC2003` before
+anything is pulled, a source is drained once and never past the limit
+(`JC2003`), and one that fails or is aborted before its end is
+`JC2005` — each answered before `identify` runs, so an oversized
+request is refused as 413 whatever its credentials. The pipeline then
+parses those same bytes (media, parse and validation keep their order
+after `identify`), so what `identify` verified is what the handler
+receives. An opaque operation's upload is then **buffered** under its
+limit and its raw handler reads `ctx.body` as those bytes (or `null`
+when there are none) instead of a pull source: a signature over a
+stream cannot be judged before the stream ends. Responses — an opaque
+body, an SSE stream — are untouched. Without the option (the default)
+nothing is read before `identify`, `meta.body` is `null`, and uploads
+stream as before; a server whose operations do not all need the bytes
+serves the signed ones from a dispatcher of their own. The bytes are
+the pipeline's own buffer: `identify` reads them and does not write
+into them. Behind the `fetch` adapter `url` is the WHATWG-parsed
+`pathname + search` (the platform folds dot segments and
+percent-encodes what it must), so a signer signs the target its own URL
+serializes to; behind the `node` adapter it is the request line's
+target as sent.
+
+A signature mismatch is the operation's own answer: declare it
+(`"errors": { "unauthorized": { "status": 401 } }`) and answer
+`meta.fail('unauthorized')` from `identify`. A refusal **thrown** from
+`identify` — a `ContractRuntimeError` of §21 included — is the host's
+fault (`JC2008`), as is a code the operation does not declare.
+`hmacSha256Matches` (§21) compares a presented signature in constant
+time.
+
+**Order.** (1) the request shape, the route and the trace — and, under
+`identifyBody`, the body limit and the read; (2)
 `identify`; (3) media, parse, assembly and validation; (4) the
 idempotency key, scope, hash and claim of an HTTP JSON command; (5) a
 replay, mismatch or in-progress answer returns here, `acquire` never
@@ -3471,3 +3513,67 @@ cannot prove an application's cursor type. Use the consumer's structural
 validator (the Store validates `after`) at that boundary. The helper leaves
 `LoadContinuation` and unsigned internal paging unchanged. The same envelope
 can carry the structural continuation emitted by the LINQ graph client.
+
+## §21 Bearer tokens and request signatures at a Node host
+
+`@jarenjs/contract/auth-node` exports `verifyHs256Token(token, options)`
+and `hmacSha256Matches(key, message, signature)`, the two checks an
+`identify` hook (§7.7) makes most often. Like §20 the subpath is
+Node-only — synchronous, on `node:crypto` (Bun and Deno load it through
+their `node:crypto`) — and the browser root imports neither: a browser
+holds no shared secret to verify with. Keys, clock and policy are the
+host's; nothing is retained between calls.
+
+**`verifyHs256Token`** verifies a compact JWS whose payload is JWT
+claims (RFC 7515, RFC 7519) and answers the claims. Options, a closed
+set: `key` (a `Uint8Array` of 32–1024 bytes — RFC 7518 §3.2 refuses an
+HS256 key shorter than the MAC; encode a text secret first), `now`
+(epoch milliseconds or a synchronous clock; there is no implicit
+clock), `leewayMs` (default 0), `audience`, `issuer`.
+
+- The algorithm is fixed, never the header's choice: a header whose
+  `alg` is not exactly `"HS256"` — `none`, `HS384`, `RS256`, `hs256`,
+  absent — or that names `crit` extensions is `JC2141`, whatever its
+  signature. `typ` and `kid` are not read.
+- The token is at most 16,384 characters (`JC2146`, checked before
+  decoding), three segments of canonical unpadded base64url whose
+  header and payload are UTF-8 JSON objects (`JC2140` otherwise).
+- The signature is HMAC-SHA256 over the ASCII signing input
+  `header.payload`, compared in constant time; a signature of another
+  length, or an empty one, is a mismatch (`JC2142`), never a throw. The
+  payload is parsed only after the signature verified.
+- `exp` is required and a number (`JC2140`): the token is expired once
+  `now >= exp·1000 + leewayMs` (`JC2143`). When `nbf` is present (a
+  number, `JC2140` otherwise) the token is not yet valid while
+  `now < nbf·1000 − leewayMs` (`JC2144`). When the host names
+  `audience`, `aud` — a string, or an array of strings — must name it;
+  when it names `issuer`, `iss` must equal it (`JC2145`). `iat` is not
+  read.
+
+**`hmacSha256Matches`** answers whether `signature` (bytes — decode a
+hex or base64 header first) is the HMAC-SHA256 of `message` under
+`key`, in constant time. `message` is a string, a `Uint8Array`, or an
+array of them MACed in order (a string as its UTF-8 bytes), so a scheme
+that signs `method`, `url`, a timestamp and the body or its digest is
+assembled without copying the body. A signature of another length is
+`false`. The key is 32–1024 bytes as above.
+
+| code | when |
+|---|---|
+| `JC2140` | malformed: not a string of three canonical base64url segments, a header or payload that is not a UTF-8 JSON object, an `exp` or `nbf` that is not a number |
+| `JC2141` | the header's `alg` is not `HS256`, or it names `crit` |
+| `JC2142` | the signature is not the HMAC-SHA256 of the signing input under the key |
+| `JC2143` | now is at or after `exp` plus the leeway |
+| `JC2144` | now is before `nbf` minus the leeway |
+| `JC2145` | `aud` does not name the expected audience, or `iss` is not the expected issuer |
+| `JC2146` | the token is longer than 16,384 characters |
+
+These are `ContractRuntimeError` refusals with `status: 401` and
+`retryable: false`, reusing `contract/invalid-input` with `op: "token"`
+as §20's do. `JC1016` is a `ContractHostError` for malformed options,
+key material or arguments. Inside `identify` answer a refusal as the
+operation's declared failure (`meta.fail('unauthorized')`): a hook that
+throws is the host's fault (`JC2008`), not a 401. A token that carries
+its own claims cannot be revoked before `exp`; a host that must revoke
+keeps an opaque session token and compares its digest instead
+(`hmacSha256Matches` with a server key, or a stored hash).

@@ -174,6 +174,7 @@ import {
  *   streams' stoppers; the dispatcher's `close()` ends them all
  * @property {import('../stream/server.js').StreamLimits} streamLimits - the bounds of every SSE stream
  * @property {import('../host.js').Lifecycle} lifecycle - the host lifecycle hooks (§7.7)
+ * @property {boolean} identifyBody - the body is read before `identify` and handed to it as `meta.body`
  */
 
 /**
@@ -187,6 +188,8 @@ import {
 
 /** The strict decoder of a JSON body given as bytes. */
 const utf8 = new TextDecoder('utf-8', { fatal: true });
+/** The encoder of a text body handed to `identify` as bytes. */
+const utf8Encoder = new TextEncoder();
 
 /** The frozen empty header table of a request without declared headers. */
 const NO_HEADERS = Object.freeze({});
@@ -521,12 +524,69 @@ function run(server, request) {
   const op = route.op;
   if (route.handler === null) return refuse(server, 'JC2013', trace, { op: op.id }, undefined, null, null);
 
-  // ——— 3. identify: the host's first look at the request, before any
-  // byte of the body is read — the operation, the trace, the signal and
-  // the transport facts; never a parsed input (§7.7) ———
+  // ——— 3. identify: the host's first look at the request — the
+  // operation, the trace, the signal and the transport facts, never a
+  // parsed input (§7.7); before any byte of the body is read unless the
+  // host asked for the exact bytes (identifyBody) ———
+  if (server.identifyBody) {
+    return bodyBeforeIdentity(server, route, trace, headers, body, signalOf(request)).then((read) => (read instanceof Uint8Array
+      ? identifyThen(server, request, route, trace, hit, isHead, method, path, query, headers, read.byteLength === 0 ? null : read, read)
+      : read));
+  }
+  return identifyThen(server, request, route, trace, hit, isHead, method, path, query, headers, body, null);
+}
+
+/**
+ * Read the whole request body for `identify` under the operation's
+ * limit, exactly as the pipeline would bound it: the declared length
+ * first, then the bytes — a string as its UTF-8 encoding, a source
+ * drained once and never past the limit. Answers the bytes (empty for
+ * none) or the refusal: `JC2003` over the limit, `JC2005` for a body
+ * that never arrived whole.
+ * @param {Server} server
+ * @param {Route} route
+ * @param {string} trace
+ * @param {Readonly<Record<string, string | readonly string[]>>} headers
+ * @param {import('./body.js').Body} body
+ * @param {AbortSignal | null} signal
+ * @returns {Promise<Uint8Array | HttpResponse>}
+ */
+function bodyBeforeIdentity(server, route, trace, headers, body, signal) {
+  const op = route.op;
+  const tooLarge = () => refuse(server, 'JC2003', trace, { op: op.id, limit: route.maxBody }, undefined, null, null);
+  if (contentLength(headers) > route.maxBody) return Promise.resolve(tooLarge());
+  if (body === null) return Promise.resolve(new Uint8Array(0));
+  if (!isAsyncByteSource(body)) {
+    const bytes = typeof body === 'string' ? utf8Encoder.encode(body) : /** @type {Uint8Array} */ (body);
+    return Promise.resolve(bytes.byteLength > route.maxBody ? tooLarge() : bytes);
+  }
+  return collectBytes(/** @type {AsyncIterable<Uint8Array>} */ (body), route.maxBody, signal).then((collected) => {
+    if (collected.ok) return collected.bytes;
+    return collected.kind === 'limit' ? tooLarge() : refuse(server, 'JC2005', trace, { op: op.id }, undefined, null, null);
+  });
+}
+
+/**
+ * Run `identify` and, on a lease, the pipeline after it.
+ * @param {Server} server
+ * @param {HttpRequest} request
+ * @param {Route} route
+ * @param {string} trace
+ * @param {{ params: Record<string, string> }} hit
+ * @param {boolean} isHead
+ * @param {string} method
+ * @param {string} path
+ * @param {string} query
+ * @param {Readonly<Record<string, string | readonly string[]>>} headers
+ * @param {import('./body.js').Body} body - what the pipeline reads: the request's body, or the bytes read for identify
+ * @param {Uint8Array | null} exact - the bytes `identify` sees as `meta.body`; `null` when the host did not ask
+ * @returns {HttpResponse | Promise<HttpResponse>}
+ */
+function identifyThen(server, request, route, trace, hit, isHead, method, path, query, headers, body, exact) {
+  const op = route.op;
   const seed = /** @type {any} */ (request).request;
-  const meta = Object.freeze({ op, trace, signal: signalOf(request), carrier: /** @type {const} */ ('http'), method, path, headers,
-    request: seed === undefined ? null : seed, fail: ContractFailure });
+  const meta = Object.freeze({ op, trace, signal: signalOf(request), carrier: /** @type {const} */ ('http'), method, path,
+    url: request.url, headers, body: exact, request: seed === undefined ? null : seed, fail: ContractFailure });
   const identified = identifyHost(server.lifecycle, meta);
   /** @param {ReturnType<typeof identifyHost> extends Promise<infer A> ? A : never} answer */
   const identifiedAs = (answer) => {

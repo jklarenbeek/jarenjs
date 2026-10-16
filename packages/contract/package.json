@@ -30,6 +30,10 @@
       "types": "./dist/types/continuation-node.d.ts",
       "default": "./src/continuation-node.js"
     },
+    "./auth-node": {
+      "types": "./dist/types/auth-node.d.ts",
+      "default": "./src/auth-node.js"
+    },
     "./ledger": {
       "types": "./dist/types/ledger.d.ts",
       "default": "./src/ledger.js"

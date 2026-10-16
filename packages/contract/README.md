@@ -242,7 +242,7 @@ the transport cannot carry or would alter, before sending (`JC2050`). The normat
 **The host lifecycle.** Every server binding takes the same two hooks
 ([§7.7](docs/CONTRACT-FORMAT.md#77-the-host-lifecycle-identify-acquire-release-settle)):
 `identify(meta)` runs after the route resolved and before a byte of the
-body is read, and answers `{ host, release? }` — the host `scope(ctx)`
+body is read (unless `identifyBody` asks for the bytes, below), and answers `{ host, release? }` — the host `scope(ctx)`
 sees; `acquire(input, identity, enter)` runs after the input validated
 and after a new idempotency claim, and calls `enter({ host, release?,
 settlement? })` once — the host the handler sees as `ctx.host`, frozen
@@ -267,6 +267,105 @@ const server = serveHttp(contract, handlers, {
     (tx) => enter({ host: { db: tx }, settlement: { ledger: createDbLedger(tx), required: true } }),
     { mode: 'immediate' }),
 });
+```
+
+**Signed requests and bearer tokens.** A server-to-server signature
+covers the body as it was sent, so `identifyBody: true` reads the body
+before `identify` — once, under the operation's `maxBodyBytes` (413
+otherwise) — and hands it the exact bytes as `meta.body`, with
+`meta.url` the request target the signature covers; the pipeline then
+parses those same bytes. An opaque upload is buffered instead of
+streamed on such a server; without the option nothing is read before
+`identify` and `meta.body` is `null`. `@jarenjs/contract/auth-node`
+(Node only) compares a presented signature in constant time
+(`hmacSha256Matches`; it MACs the parts concatenated as given, so separate fields with a delimiter that cannot occur inside them, as the example's newlines and hex body digest do) and verifies an HS256 bearer token
+(`verifyHs256Token`: HS256 only — `alg: none` and every other
+algorithm are refused whatever the header says — `exp`/`nbf` against
+the host's clock and leeway, optional `aud`/`iss`). A mismatch is the
+operation's own declared 401; a refusal thrown from `identify` would be
+the host's fault (500), so the recipe returns `meta.fail`
+([§7.7](docs/CONTRACT-FORMAT.md#77-the-host-lifecycle-identify-acquire-release-settle),
+[§21](docs/CONTRACT-FORMAT.md#21-bearer-tokens-and-request-signatures-at-a-node-host)).
+
+```js
+import { createHash, createHmac } from 'node:crypto';
+import { compileContract, ContractRuntimeError } from '@jarenjs/contract';
+import { serveHttp } from '@jarenjs/contract/http';
+import { verifyHs256Token, hmacSha256Matches } from '@jarenjs/contract/auth-node';
+
+const contract = compileContract({
+  $contract: '0.1', id: 'billing', version: '1',
+  operations: {
+    'invoice.paid': {
+      kind: 'command',
+      input: { type: 'object', required: ['invoice'], properties: { invoice: { type: 'string' } } },
+      output: { type: 'object', required: ['by'], properties: { by: { type: 'string' } } },
+      errors: { unauthorized: { status: 401 } },
+      http: { method: 'POST', path: '/hooks/invoice-paid' },
+    },
+    'me.read': {
+      kind: 'read',
+      input: { type: 'object' },
+      output: { type: 'object', required: ['user'], properties: { user: { type: 'string' } } },
+      errors: { unauthorized: { status: 401 } },
+      http: { method: 'GET', path: '/me' },
+    },
+  },
+});
+
+const callerKeys = { shop: Buffer.from('a shared secret of 32 bytes or more') };   // from the host's secret store
+const tokenKey = Buffer.from('the identity provider secret, 32+ bytes');
+// the scheme both servers agree on: method, target, timestamp and the SHA-256 of the raw body
+const signed = (method, url, stamp, body) =>
+  [method, '\n', url, '\n', stamp, '\n', createHash('sha256').update(body).digest('hex')];
+
+const server = serveHttp(contract, {
+  'invoice.paid': (input, ctx) => ({ by: ctx.host.caller }),
+  'me.read': (input, ctx) => ({ user: ctx.host.user }),
+}, {
+  identifyBody: true,
+  identify: (meta) => {
+    const bearer = meta.headers.authorization;
+    if (typeof bearer === 'string' && bearer.startsWith('Bearer ')) {
+      try {
+        const claims = verifyHs256Token(bearer.slice(7), { key: tokenKey, now: Date.now(), leewayMs: 30_000, audience: 'authenticated' });
+        return { host: { user: claims.sub } };
+      }
+      catch (err) {
+        if (err instanceof ContractRuntimeError) return meta.fail('unauthorized');   // JC2140–JC2146
+        throw err;   // JC1016: the host's own key or options are wrong
+      }
+    }
+    const caller = meta.headers['x-caller'], stamp = meta.headers['x-timestamp'], signature = meta.headers['x-signature'];
+    const key = typeof caller === 'string' && Object.hasOwn(callerKeys, caller) ? callerKeys[caller] : undefined;
+    if (key === undefined || typeof stamp !== 'string' || typeof signature !== 'string'
+      || Math.abs(Date.now() - Number(stamp)) > 300_000
+      || !hmacSha256Matches(key, signed(meta.method, meta.url, stamp, meta.body), Buffer.from(signature, 'hex'))) {
+      return meta.fail('unauthorized');
+    }
+    return { host: { caller } };
+  },
+});
+
+// a signed call from the other server
+const body = '{"invoice":"inv_42"}';
+const stamp = String(Date.now());
+const signature = createHmac('sha256', callerKeys.shop).update(signed('POST', '/hooks/invoice-paid', stamp, body).join('')).digest('hex');
+const headers = { 'content-type': 'application/json', 'x-caller': 'shop', 'x-timestamp': stamp, 'x-signature': signature };
+const paid = await server.dispatch({ method: 'POST', url: '/hooks/invoice-paid', headers, body });
+// paid.status === 200, paid.body === '{"by":"shop"}'
+const forged = await server.dispatch({ method: 'POST', url: '/hooks/invoice-paid', headers, body: '{"invoice":"inv_43"}' });
+// forged.status === 401, JSON.parse(forged.body).code === 'unauthorized'
+
+// a token the identity provider issued
+const part = (value) => Buffer.from(JSON.stringify(value)).toString('base64url');
+const input = `${part({ alg: 'HS256', typ: 'JWT' })}.${part({ sub: 'u-7', aud: 'authenticated', exp: Math.floor(Date.now() / 1000) + 300 })}`;
+const token = `${input}.${createHmac('sha256', tokenKey).update(input).digest('base64url')}`;
+const me = await server.dispatch({ method: 'GET', url: '/me', headers: { authorization: `Bearer ${token}` }, body: null });
+// me.status === 200, me.body === '{"user":"u-7"}'
+const none = `${part({ alg: 'none' })}.${input.split('.')[1]}.`;
+const refused = await server.dispatch({ method: 'GET', url: '/me', headers: { authorization: `Bearer ${none}` }, body: null });
+// refused.status === 401
 ```
 
 Without a declared resolver, `If-Match`/`If-None-Match` are applied
@@ -804,8 +903,9 @@ deliberate decision, not a gap:
 ## What is here
 
 Here: the document and its grammar, `compileContract`, `contract.match`,
-`describe()`, the `JC0001–JC0017` compile errors; the HTTP server binding
+`describe()`, the `JC0001–JC0022` compile errors; the HTTP server binding
 (`serveHttp`, the `JC2001–JC2016` wire taxonomy with its English catalog,
+the exact request bytes for `identify` under `identifyBody`,
 `fetch` and `node` adapters, the ledger interface with `createMemoryLedger`
 and the `idempotencyLedgerModel`/`commandLifecycleFsm` documents); the HTTP
 client (`openHttpClient`, the outcomes with the `JC2050–JC2058` client
@@ -824,7 +924,9 @@ request ids); the `subscribe` kind with the `stream` binding
 (`client.subscribe` over SSE and port push frames carrying LIVE-FORMAT
 patches, `JC2090–JC2098`, the generated app subscription with
 `createContractSubscription`, and the one SSE codec of the suite in
-`@jarenjs/core/text/sse`); and the `contract/*` locale packs in all
+`@jarenjs/core/text/sse`); the Node-only credential checks of
+`@jarenjs/contract/auth-node` (`verifyHs256Token`, `hmacSha256Matches`,
+`JC2140–JC2146`); and the `contract/*` locale packs in all
 eleven `@jarenjs/locales` languages, key parity enforced by test.
 
 ## Exports
@@ -840,6 +942,7 @@ Every subpath a consumer can import, derived from the manifest by
 | `@jarenjs/contract/fetch` | JavaScript | declared |
 | `@jarenjs/contract/node` | JavaScript | declared |
 | `@jarenjs/contract/continuation-node` | JavaScript | declared |
+| `@jarenjs/contract/auth-node` | JavaScript | declared |
 | `@jarenjs/contract/ledger` | JavaScript | declared |
 | `@jarenjs/contract/diff` | JavaScript | declared |
 | `@jarenjs/contract/client` | JavaScript | declared |

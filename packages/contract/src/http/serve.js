@@ -91,9 +91,17 @@ export { HTTP_ERRORS, WELL_KNOWN_PATH, BodyLimitError, BodyEncodingError, readBo
  * @property {(meta: import('../host.js').IdentifyMeta) => unknown} [identify]
  *   - the host lifecycle's first hook (docs/CONTRACT-FORMAT.md §7.7):
  *   runs after the route resolved and before any byte of the body is
- *   read; answers a lease `{ host, release? }` — `host` is what `scope`
+ *   read (unless `identifyBody`); answers a lease `{ host, release? }` — `host` is what `scope`
  *   and, without `acquire`, the handler see as `ctx.host` — or a
  *   declared failure (`meta.fail`); default `{ host: null }`
+ * @property {boolean} [identifyBody] - read the request body BEFORE
+ *   `identify` and hand it the exact bytes as `meta.body` (a request
+ *   signature over the raw body is verified where the caller is
+ *   identified): read once, under the operation's `maxBodyBytes` (`JC2003`
+ *   before `identify` otherwise; a body that never arrives whole is
+ *   `JC2005`), and the pipeline parses those same bytes. An opaque
+ *   operation's upload is then buffered, not streamed. Default `false`:
+ *   nothing is read before `identify` and `meta.body` is `null`
  * @property {(input: unknown, identity: RequestContext, enter: (lease: unknown) => Promise<unknown>) => unknown} [acquire]
  *   - the second hook: runs after the input validated and, on a claimed
  *   command, after the claim answered `new`; calls `enter({ host,
@@ -133,7 +141,7 @@ export { HTTP_ERRORS, WELL_KNOWN_PATH, BodyLimitError, BodyEncodingError, readBo
 
 /** Every option `serveHttp` reads — a CLOSED set (`JC1001`, nearest name). */
 const HTTP_OPTIONS = Object.freeze(['partial', 'ledger', 'preconditions', 'validateOutput', 'head', 'wellKnown',
-  'trace', 'scope', 'errorBody', 'onError', 'now', 'catalog', 'runtime', 'streamLimits', 'identify', 'acquire']);
+  'trace', 'scope', 'errorBody', 'onError', 'now', 'catalog', 'runtime', 'streamLimits', 'identify', 'acquire', 'identifyBody']);
 
 /**
  * @param {string} code
@@ -248,7 +256,7 @@ export function serveHttp(contract, handlers, options = {}) {
   // a CLOSED set: a typo'd option used to vanish — `precondition` served
   // a stale If-Match with 200
   refuseUnknownMembers(options, HTTP_OPTIONS, (key, hint) => host('JC1001', `option '${key}' is not one serveHttp reads${hint}`));
-  for (const name of ['partial', 'head']) {
+  for (const name of ['partial', 'head', 'identifyBody']) {
     if (options[name] !== undefined && typeof options[name] !== 'boolean') {
       throw host('JC1001', `options.${name} must be a boolean`);
     }
@@ -322,6 +330,7 @@ export function serveHttp(contract, handlers, options = {}) {
     streams: new Set(),
     streamLimits,
     lifecycle,
+    identifyBody: options.identifyBody === true,
   };
 
   /** @type {HttpCapabilities} */

@@ -20,6 +20,7 @@
  *  - `JC2090–JC2109` stream binding
  *  - `JC2110–JC2119` durable commands
  *  - `JC2120–JC2139` continuations
+ *  - `JC2140–JC2159` bearer tokens
  *
  * Every range is populated; a later code lands in its own range rather
  * than at the next free number.
@@ -74,6 +75,7 @@ export const CONTRACT_CODES = Object.freeze({
   JC1013: 'a durable command settlement capability is malformed',
   JC1014: 'continuation host options, key material or JSON input are malformed',
   JC1015: 'a ledger fail(ref, false) carried no response: a non-retryable failure replays its stored response, so it must carry one — the settlement is refused and the claim stays started',
+  JC1016: 'verifyHs256Token or hmacSha256Matches: the options, the key material (a Uint8Array of 32–1024 bytes), the clock, the leeway, the audience or issuer, the message or the signature argument is malformed',
   // ——— http request-time (ContractRuntimeError, mapped onto the wire) ———
   JC2001: 'no operation matches the request method and path (404)',
   JC2002: 'the path shape is served under other methods (405, Allow lists them) — HEAD among them only beside a read: a HEAD on a GET-bound command is this code, never an execution',
@@ -123,6 +125,13 @@ export const CONTRACT_CODES = Object.freeze({
   JC2122: 'continuation authentication failed or its key id is unknown',
   JC2123: 'a continuation is outside its issued-to-expiry interval',
   JC2124: 'a continuation does not match the expected scope, query or ordering',
+  JC2140: 'a bearer token is malformed: not a string of three canonical base64url segments, a header or payload that is not a UTF-8 JSON object, or an exp or nbf that is not a NumericDate',
+  JC2141: 'a bearer token header names an algorithm other than HS256 (none among them), or crit extensions',
+  JC2142: 'a bearer token signature does not match the HS256 MAC of its signing input under the host key',
+  JC2143: 'a bearer token has expired: now is at or after exp plus the leeway',
+  JC2144: 'a bearer token is not yet valid: now is before nbf minus the leeway',
+  JC2145: 'a bearer token is not for the expected audience, or not from the expected issuer',
+  JC2146: 'a bearer token is longer than 16384 characters',
 });
 
 /**

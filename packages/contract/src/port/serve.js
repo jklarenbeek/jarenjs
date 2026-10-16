@@ -233,7 +233,7 @@ export function servePort(contract, handlers, options) {
    * @returns {Promise<{ entered: boolean, value: unknown, release: () => Promise<boolean> }>}
    */
   async function lifecycleAround(route, trace, signal, value, observed, refuse, failed, enter) {
-    const meta = Object.freeze({ op: route.op, trace, signal, carrier: /** @type {const} */ ('port'), method: null, path: null, headers: null, request: null, fail: ContractFailure });
+    const meta = Object.freeze({ op: route.op, trace, signal, carrier: /** @type {const} */ ('port'), method: null, path: null, url: null, headers: null, body: null, request: null, fail: ContractFailure });
     const identified = await identifyHost(lifecycle, meta);
     const none = () => Promise.resolve(true);
     if (identified.kind === 'fault') {

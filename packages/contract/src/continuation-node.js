@@ -1,8 +1,8 @@
 //@ts-check
 /** Bounded, authenticated continuations. Keys, clock and authority belong to the host. */
-import { createHmac, timingSafeEqual } from 'node:crypto';
 import { canonicalizeJson } from '@jarenjs/json/canonical';
 import { ContractHostError, ContractRuntimeError } from './errors.js';
+import { bytesMatch, decodeBase64url, hmacSha256, isKeyBytes } from './node-hmac.js';
 
 /** @typedef {import('./index.js').Continuation} Continuation */
 /**
@@ -89,7 +89,7 @@ function boundedJson(value, maxBytes, malformed = 'JC1014') {
 const timestamp = value => Number.isSafeInteger(value) && value >= 0;
 const keyId = value => typeof value === 'string' && value.length > 0 && value.length <= 64 && !INVALID_KEY_ID.test(value);
 function checkKey(value) {
-  if (!(value instanceof Uint8Array) || value.byteLength < 32 || value.byteLength > 1024) refuse('JC1014');
+  if (!isKeyBytes(value)) refuse('JC1014');
   return value;
 }
 
@@ -105,7 +105,7 @@ function context(options) {
 }
 
 function signature(payload, key) {
-  return createHmac('sha256', key).update(DOMAIN).update(`jc1.${payload}`, 'ascii').digest();
+  return hmacSha256(key, [DOMAIN, `jc1.${payload}`]);
 }
 
 /**
@@ -129,10 +129,7 @@ export function sealContinuation(cursor, options) {
 
 /** Decode only the canonical, unpadded base64url spelling. */
 function decode(text) {
-  if (!text.length || /[^A-Za-z0-9_-]/.test(text)) refuse('JC2120');
-  const bytes = Buffer.from(text, 'base64url');
-  if (bytes.toString('base64url') !== text) refuse('JC2120');
-  return bytes;
+  return decodeBase64url(text) ?? refuse('JC2120');
 }
 
 /**
@@ -160,7 +157,7 @@ export function openContinuation(token, options) {
       || body.v !== 1 || body.alg !== 'HS256' || !keyId(body.kid)) refuse('JC2120');
     const key = options.getKey(body.kid);
     if (key === null || key === undefined) refuse('JC2122');
-    if (!timingSafeEqual(signature(parts[1], checkKey(key)), tag)) refuse('JC2122');
+    if (!bytesMatch(signature(parts[1], checkKey(key)), tag)) refuse('JC2122');
     if (boundedJson(body, maxBytes, 'JC2120') !== json || !record(body.cursor) || !Array.isArray(body.order)
       || typeof body.query !== 'string' || !body.query.length || body.query.length > 256
       || !timestamp(body.iat) || !timestamp(body.exp) || body.exp <= body.iat) refuse('JC2120');
