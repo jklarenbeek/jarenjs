@@ -12,7 +12,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { containsPosition, geometryArea, geometryLength, ringsClosed } from '@jarenjs/core/geo';
+import { containsPosition, geometryArea, geometryLength, ringsClosed, pointInRing, pointInPolygon } from '@jarenjs/core/geo';
 
 const RING = [[0, 0], [2, 0], [2, 2], [0, 2], [0, 0]];
 const SQUARE = { type: 'Polygon', coordinates: [RING] };
@@ -84,9 +84,9 @@ describe('a ring or line that is not a list holds no positions', () => {
       assert.deepStrictEqual(measures({ type: 'Polygon', coordinates: [ring] }), { area: 0, length: 0, inside: false, closed: false });
       assert.deepStrictEqual(measures({ type: 'MultiPolygon', coordinates: [[ring]] }), { area: 0, length: 0, inside: false, closed: false });
       assert.deepStrictEqual(measures({ type: 'MultiLineString', coordinates: [ring] }), NOTHING);
-      // a malformed hole removes nothing from its polygon
+      // a malformed hole removes nothing from its polygon's measures, and its polygon contains nothing
       assert.deepStrictEqual(measures({ type: 'Polygon', coordinates: [RING, ring] }),
-        { area: SQUARE_AREA, length: SQUARE_LENGTH, inside: true, closed: false });
+        { area: SQUARE_AREA, length: SQUARE_LENGTH, inside: false, closed: false });
     });
   }
 
@@ -104,9 +104,9 @@ describe('a ring or line that is not a list holds no positions', () => {
         [[[0, 0], [2, 0], [2, 2], missing], false],
       ])) {
         assert.deepStrictEqual(measures({ type: 'Polygon', coordinates: [ring] }), { ...NO_RING, closed });
-        // as a hole it removes nothing
+        // as a hole it removes nothing from the measures, and its polygon contains nothing
         assert.deepStrictEqual(measures({ type: 'Polygon', coordinates: [RING, ring] }),
-          { area: SQUARE_AREA, length: SQUARE_LENGTH, inside: true, closed });
+          { area: SQUARE_AREA, length: SQUARE_LENGTH, inside: false, closed });
         assert.deepStrictEqual(measures({ type: 'MultiPolygon', coordinates: [[ring], [RING]] }),
           { area: SQUARE_AREA, length: SQUARE_LENGTH, inside: true, closed });
       }
@@ -141,16 +141,9 @@ describe('the inputs that answered before answer the same', () => {
     assert.deepStrictEqual(measures({ type: 'FeatureCollection', features: 'abc' }), NOTHING);
   });
 
-  it('a position that is not a pair is a NaN coordinate, and a ring of text is not closed', () => {
-    for (const position of [5, {}, 'ab', true]) {
-      const line = measures({ type: 'LineString', coordinates: [[0, 0], position] });
-      assert.ok(Number.isNaN(line.length), String(position));
-      assert.deepStrictEqual({ ...line, length: 0 }, NOTHING);
-      assert.deepStrictEqual({ ...measures({ type: 'Polygon', coordinates: [[[0, 0], [2, 0], position, [0, 0]]] }), length: 0 },
-        { area: 0, length: 0, inside: false, closed: true });
-    }
-    // a ring of text has the characters for positions
-    assert.deepStrictEqual(measures({ type: 'Polygon', coordinates: ['abcd'] }), { area: 0, length: NaN, inside: false, closed: false });
+  it('a ring of text is not closed', () => {
+    // a ring of text has the characters for positions, which do not read as numbers
+    assert.deepStrictEqual(measures({ type: 'Polygon', coordinates: ['abcd'] }), { area: 0, length: 0, inside: false, closed: false });
   });
 
   it('a sparse polygon list skips its holes as every skips them', () => {
@@ -158,5 +151,132 @@ describe('the inputs that answered before answer the same', () => {
     assert.equal(ringsClosed({ type: 'Polygon', coordinates: [RING, , RING] }), true);
     // eslint-disable-next-line no-sparse-arrays
     assert.equal(ringsClosed({ type: 'MultiPolygon', coordinates: [[RING], , [RING]] }), true);
+  });
+});
+
+describe('a position that does not read as finite numbers holds no positions', () => {
+  const NOT_FINITE = [5, {}, 'ab', true, [1], [], [NaN, 0], [0, Infinity], [0, 'a'], [undefined, undefined]];
+  const SQUARE4 = [[0, 0], [4, 0], [4, 4], [0, 4], [0, 0]];
+  const OUTER = [[-8, -8], [8, -8], [8, 8], [-8, 8], [-8, -8]];
+  const OUTER_AREA = geometryArea({ type: 'Polygon', coordinates: [OUTER] });
+  const OUTER_LENGTH = geometryLength({ type: 'Polygon', coordinates: [OUTER] });
+  /** `bad` placed after the `at`th position of the 4x4 square. @param {any} bad @param {number} at */
+  const square = (bad, at) => [...SQUARE4.slice(0, at), bad, ...SQUARE4.slice(at)];
+
+  it('the entry\'s fence contains nothing and measures 0', () => {
+    const fence = { type: 'Polygon', coordinates: [[[0, 0], 5, [2, 2], [0, 0]]] };
+    assert.equal(containsPosition(fence, 1, 1), false);
+    assert.equal(geometryLength(fence), 0);
+    assert.equal(geometryArea(fence), 0);
+    // closure compares the ends as they read, as for a missing inner position
+    assert.equal(ringsClosed(fence), true);
+  });
+
+  it('a point outside such a ring is not inside it', () => {
+    // the even-odd count over the ring's edges reported (6, 2) inside
+    const ring = square(5, 2);
+    assert.equal(containsPosition({ type: 'Polygon', coordinates: [ring] }, 6, 2), false);
+    assert.equal(pointInRing(6, 2, ring), false);
+    assert.equal(pointInPolygon(6, 2, [ring]), false);
+  });
+
+  /** @param {any} v @returns {string} */
+  const label = (v) => (Array.isArray(v) ? `[${v.map(label).join(', ')}]` : typeof v === 'string' ? `'${v}'` : v !== null && typeof v === 'object' ? '{}' : String(v));
+  for (const bad of NOT_FINITE) {
+    it(`a ring or line holding ${label(bad)} is read as one with no positions`, () => {
+      for (const at of [1, 2, 3]) {
+        const ring = square(bad, at);
+        for (const [x, y] of [[2, 2], [1, 1], [4, 2], [0, 0], [6, 2], [-5, 2]]) {
+          assert.equal(containsPosition({ type: 'Polygon', coordinates: [ring] }, x, y), false, `${at} (${x}, ${y})`);
+          assert.equal(pointInRing(x, y, ring), false, `${at} (${x}, ${y})`);
+        }
+        assert.deepStrictEqual(measures({ type: 'Polygon', coordinates: [ring] }), { area: 0, length: 0, inside: false, closed: true });
+        assert.deepStrictEqual(measures({ type: 'LineString', coordinates: ring }), NOTHING);
+        // as a hole it removes nothing from the measures, as a hole missing a position
+        // does, and its polygon contains no point, inside the hole or out of it
+        assert.deepStrictEqual(measures({ type: 'Polygon', coordinates: [OUTER, ring] }),
+          { area: OUTER_AREA, length: OUTER_LENGTH, inside: false, closed: true });
+        for (const [x, y] of [[2, 2], [-5, 2], [6, 6]]) {
+          assert.equal(containsPosition({ type: 'Polygon', coordinates: [OUTER, ring] }, x, y), false, `(${x}, ${y})`);
+          assert.equal(pointInPolygon(x, y, [OUTER, ring]), false, `(${x}, ${y})`);
+        }
+        // the holes after it are read too
+        assert.equal(pointInPolygon(-5, 2, [OUTER, SQUARE4, ring]), false);
+        // the well-formed members beside it count
+        assert.deepStrictEqual(measures({ type: 'MultiPolygon', coordinates: [[ring], [RING]] }),
+          { area: SQUARE_AREA, length: SQUARE_LENGTH, inside: true, closed: true });
+        assert.deepStrictEqual(measures({ type: 'MultiLineString', coordinates: [ring, RING] }),
+          { area: 0, length: SQUARE_LENGTH, inside: false, closed: true });
+        assert.deepStrictEqual(measures({ type: 'GeometryCollection', geometries: [{ type: 'LineString', coordinates: ring }, SQUARE] }),
+          { area: SQUARE_AREA, length: SQUARE_LENGTH, inside: true, closed: true });
+      }
+    });
+  }
+
+  it('a polygon with any hole that cannot be read contains nothing', () => {
+    // a hole that is no array, misses a position, is a hole in the ring list, or is too short to bound
+    // eslint-disable-next-line no-sparse-arrays
+    const SPARSE = [OUTER, , SQUARE4];
+    for (const rings of [[OUTER, null], [OUTER, 5], [OUTER, [[0, 0], null, [1, 1], [0, 0]]], SPARSE, [OUTER, [5]], [OUTER, [[0, 0], 'ab']]]) {
+      assert.equal(containsPosition({ type: 'Polygon', coordinates: rings }, -5, 2), false);
+      assert.equal(containsPosition(deep({ type: 'Polygon', coordinates: rings }), -5, 2), false);
+      assert.equal(containsPosition({ type: 'MultiPolygon', coordinates: [rings] }, -5, 2), false);
+      // the polygon beside it still contains
+      assert.equal(containsPosition({ type: 'MultiPolygon', coordinates: [rings, [SQUARE4]] }, 2, 2), true);
+    }
+    // a well-formed ring too short to bound anything removes nothing, as before
+    assert.equal(containsPosition({ type: 'Polygon', coordinates: [OUTER, [[0, 0], [1, 1]]] }, -5, 2), true);
+    assert.equal(containsPosition({ type: 'Polygon', coordinates: [OUTER, []] }, -5, 2), true);
+  });
+
+  it('a point on an edge before such a position is not inside', () => {
+    // the walk meets the edge (0,0)-(4,0) first; the position after it still counts
+    for (const bad of [5, [NaN, 0], null]) {
+      const ring = [[0, 0], [4, 0], [4, 4], bad, [0, 4], [0, 0]];
+      assert.equal(pointInRing(2, 0, ring), false, String(bad));
+      assert.equal(containsPosition({ type: 'Polygon', coordinates: [ring] }, 2, 0), false, String(bad));
+    }
+  });
+
+  it('an unclosed ring starting at an infinite longitude bounds no area', () => {
+    const ring = [[Infinity, 0], [1, 0], [1, 1], [0, 1]];
+    assert.equal(geometryArea({ type: 'Polygon', coordinates: [ring] }), 0);
+    assert.deepStrictEqual(measures({ type: 'Polygon', coordinates: [OUTER, ring] }).area, OUTER_AREA);
+    assert.equal(geometryArea({ type: 'GeometryCollection', geometries: [{ type: 'Polygon', coordinates: [ring] }, SQUARE] }), SQUARE_AREA);
+  });
+
+  it('a radius that is not finite measures every ring and line as it stands', () => {
+    const malformed = { type: 'Polygon', coordinates: [OUTER, square(5, 2)] };
+    for (const radius of [NaN, Infinity]) {
+      assert.deepStrictEqual(geometryLength(SQUARE, radius), radius === Infinity ? Infinity : NaN);
+      assert.deepStrictEqual(geometryLength(malformed, radius), NaN);
+      assert.equal(geometryArea(malformed, radius), 0);
+    }
+    assert.equal(geometryArea(SQUARE, Infinity), Infinity);
+    assert.equal(geometryArea(SQUARE, NaN), 0);
+    // past a missing position too, where the lines are read again one by one
+    const missing = { type: 'MultiLineString', coordinates: [[[0, 0], null], [[0, 0], [1, 1]]] };
+    const both = { type: 'MultiLineString', coordinates: [...missing.coordinates, [[0, 0], 5]] };
+    assert.deepStrictEqual(geometryLength(missing, Infinity), Infinity);
+    for (const radius of [NaN, Infinity])
+      assert.deepStrictEqual(geometryLength(both, radius), NaN);
+    assert.deepStrictEqual(geometryLength(missing, NaN), NaN);
+    assert.equal(geometryLength(both), geometryLength({ type: 'LineString', coordinates: [[0, 0], [1, 1]] }));
+    const holed = { type: 'MultiPolygon', coordinates: [[null], [OUTER, square(5, 2)]] };
+    assert.equal(geometryArea(holed), OUTER_AREA);
+    // on an infinite radius the exterior less the unread hole is NaN, read as 0 as it always was
+    assert.equal(geometryArea(holed, Infinity), 0);
+    assert.equal(geometryArea(holed, NaN), 0);
+    assert.equal(geometryArea({ type: 'MultiPolygon', coordinates: [[null], [OUTER]] }, Infinity), Infinity);
+  });
+
+  it('a position that is not a pair but reads as numbers is measured as those numbers', () => {
+    for (const [position, as] of /** @type {[any, number[]][]} */ ([['12', [1, 2]], [{ 0: 1, 1: 2 }, [1, 2]],
+      [[null, null], [0, 0]], [[true, 0], [1, 0]], [['1', '2'], [1, 2]]])) {
+      const read = { type: 'Polygon', coordinates: [[[0, 0], [4, 0], position, [0, 4], [0, 0]]] };
+      const pair = { type: 'Polygon', coordinates: [[[0, 0], [4, 0], as, [0, 4], [0, 0]]] };
+      assert.deepStrictEqual(measures(read), measures(pair), JSON.stringify(position));
+      assert.equal(containsPosition(read, 0.5, 1), containsPosition(pair, 0.5, 1), JSON.stringify(position));
+    }
   });
 });

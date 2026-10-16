@@ -32,11 +32,12 @@ const failure = (error, stage) => ({ code: error?.code ?? 'GUARDED',
  */
 
 /**
- * A preparation `planCommit` refused by answering `{ valid: false }`: its
- * `errors` member passes on as it is (`undefined` when it has none).
+ * A preparation `planCommit` refused by answering `{ valid: false }`, read
+ * as {@link checkOutcome} reads a check's answer: its errors, or the one
+ * `JG2001` error when it names none.
  * @template R
  * @typedef {R extends { readonly valid: false }
- *   ? { valid: false, errors: 'errors' extends keyof R ? R['errors' & keyof R] : undefined }
+ *   ? { valid: false, errors: (CheckErrorsOf<R> | UnnamedCheckError)[] }
  *   : never} GuardedPlanRefusal
  */
 
@@ -127,7 +128,7 @@ export function createGuardedRefiner(options) {
     const candidate = checkOutcome(yield { stage: 'candidate', run: () => options.validateCandidate(copy(next), copy(previous)) });
     if (!candidate.valid) return candidate;
     const planned = yield { stage: 'plan', run: () => options.planCommit(copy(next), copy(previous)) };
-    if (planned?.valid === false) return { valid: false, errors: planned.errors };
+    if (planned?.valid === false) return checkOutcome(planned);
     return { valid: true, errors: [], next: copy(next), plan: copy(planned?.plan ?? planned) };
   }
 

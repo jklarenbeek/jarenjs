@@ -123,12 +123,38 @@ not a closed ring, as an empty ring is not; the well-formed members
 beside it count as before. `ringsClosed` reads only a ring's ends, so a
 ring missing an inner position is closed when its ends match. A list
 that can be iterated (a `Set`, text) is read as `for...of` reads it. A
-position that is present but not a pair (a number, an object) is still
-read, as coordinates of `NaN`: a length over it is `NaN`, an area 0, and
-containment over its edges is not to be relied on. A value with no
-malformed member is measured on the same code as before, at the same
-cost. *Upgrade: such a member used to escape as an uncoded `TypeError`
-(`object is not iterable`), from `$area`, `$length` and `$within` too.*
+ring or line holding a position whose longitude or latitude does not read
+as a finite number — a number, an object, `true`, text such as `'ab'`, a
+one-element or empty array, `NaN`, `Infinity` — holds no positions in
+`geometryArea` and `geometryLength` too: it adds 0 to an area or a
+length, so a hole that cannot be read removes nothing from its polygon's
+area, as for a missing position. Containment is stricter: a polygon any of
+whose rings cannot be read — one that is not an array, misses a position,
+or holds a position that does not read as finite numbers — contains no
+point, its holes included, in `containsPosition`, `pointInRing` and
+`pointInPolygon` alike; a MultiPolygon's other polygons and a collection's
+other geometries still contain. The two readings differ on purpose. A
+measurement of a malformed value has no right answer and the module's
+promise is a plain number, so the readable rings are measured. A
+containment answer is a decision — a geofence's "inside" — and a hole that
+cannot be read cannot say which points it removes: answering `true` would
+claim points the fence may exclude, so the polygon claims none.
+`ringsClosed` still
+compares a ring's ends as they read. A position that is not a pair but
+reads as numbers is measured as those numbers, as the arithmetic reads it:
+text `'12'` as `(1, 2)`, `{ 0: 1, 1: 2 }` as `(1, 2)`, `[null, null]` as
+`(0, 0)`, `[true, 0]` as `(1, 0)`, `['1', '2']` as `(1, 2)`, where
+`eachPosition` and `bboxOf` skip it. A value with no malformed member is
+measured on the same code as before, at the same cost, and a radius that
+is not finite measures every ring and line as it stands. *Upgrade: such a
+member used to escape as an uncoded `TypeError` (`object is not
+iterable`), from `$area`, `$length` and `$within` too; a position that
+does not read as finite numbers used to be read as `NaN` coordinates, so a
+length over it was `NaN`, a hole holding it removed the whole polygon's
+area, and containment over its edges could answer `true` for a point
+outside the ring (`[[0,0], [4,0], 5, [4,4], [0,4], [0,0]]` contained
+`(6, 2)`); a polygon with a hole that is not an array or misses a position
+contained the points of its exterior, the hole's own included.*
 
 The one refusal is the walk's bound. A value is walked to 100000
 levels of nesting, on the host's stack for the first 256 and on the

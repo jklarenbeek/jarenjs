@@ -19,7 +19,10 @@
 // same defect twice in two vocabularies. The four measurements
 // (`geometryArea`, `geometryLength`, `containsPosition`, `ringsClosed`)
 // read a malformed member (a list that cannot be iterated, a ring or line
-// that is not an array or misses a position) as nothing.
+// that is not an array or misses a position) as nothing, and the first
+// three read a ring or line holding a position whose longitude or
+// latitude does not read as a finite number as holding no positions. For
+// containment such a ring, a hole too, makes its polygon contain nothing.
 //
 // The one refusal is the walk's bound: a value is walked to 100000
 // levels of nesting, on the host's stack for the first 256 and on the
@@ -336,12 +339,20 @@ const isFalse = (answer) => !answer;
 // each ring or line that cannot be read as one holding no positions. A
 // value that holds no malformed member is measured exactly as before; a
 // malformed one adds 0 to an area or length, contains nothing, and a ring
-// with no positions is not closed.
+// with no positions is not closed. On a finite radius a length that is
+// not finite, or an infinite area, is taken again on the fold too, where
+// `lineMeasure` and `measurableArea` (below) read such a line or ring as
+// holding no positions. Containment is stricter: a polygon with any ring
+// that cannot be read, or that holds a position not reading as finite
+// numbers (`pointInPolygon`), contains nothing, its holes included,
+// because a hole that cannot be read cannot say which points it removes.
 
 /** @param {any} geometry @param {number} radius @returns {number} */
 function measuredArea(geometry, radius) {
   try {
-    return areaAt(geometry, radius, 1);
+    const area = areaAt(geometry, radius, 1);
+    if (area !== Infinity)
+      return area;
   }
   catch (error) {
     if (!(error instanceof TypeError))
@@ -349,11 +360,11 @@ function measuredArea(geometry, radius) {
   }
   const { type, coordinates } = geometry;
   if (type === 'Polygon')
-    return polygonArea(readableRings(coordinates), radius);
+    return measurableArea(readableRings(coordinates), radius);
   let sum = 0;
   if (type === 'MultiPolygon') {
     for (const rings of membersOf(coordinates))
-      sum += polygonArea(readableRings(rings), radius);
+      sum += measurableArea(readableRings(rings), radius);
   }
   return sum;
 }
@@ -361,7 +372,9 @@ function measuredArea(geometry, radius) {
 /** @param {any} geometry @param {number} radius @returns {number} */
 function measuredLength(geometry, radius) {
   try {
-    return lengthAt(geometry, radius, 1);
+    const length = lengthAt(geometry, radius, 1);
+    if (length - length === 0)
+      return length;
   }
   catch (error) {
     if (!(error instanceof TypeError))
@@ -369,16 +382,16 @@ function measuredLength(geometry, radius) {
   }
   const { type, coordinates } = geometry;
   if (type === 'LineString')
-    return lineLength(readablePositions(coordinates), radius);
+    return lineMeasure(readablePositions(coordinates), radius);
   let sum = 0;
   if (type === 'MultiLineString' || type === 'Polygon') {
     for (const line of membersOf(coordinates))
-      sum += lineLength(readablePositions(line), radius);
+      sum += lineMeasure(readablePositions(line), radius);
   }
   else if (type === 'MultiPolygon') {
     for (const rings of membersOf(coordinates)) {
       for (const ring of membersOf(rings))
-        sum += lineLength(readablePositions(ring), radius);
+        sum += lineMeasure(readablePositions(ring), radius);
     }
   }
   return sum;
@@ -395,14 +408,29 @@ function measuredContains(geometry, lon, lat) {
   }
   const { type, coordinates } = geometry;
   if (type === 'Polygon')
-    return pointInPolygon(lon, lat, readableRings(coordinates));
+    return readableContains(coordinates, lon, lat);
   if (type === 'MultiPolygon') {
     for (const rings of membersOf(coordinates)) {
-      if (pointInPolygon(lon, lat, readableRings(rings)))
+      if (readableContains(rings, lon, lat))
         return true;
     }
   }
   return false;
+}
+
+/**
+ * Whether a polygon's rings, read as {@link readableRings} reads them,
+ * contain a position: never when a ring cannot be read (one that is not
+ * an array, or misses a position), as `pointInPolygon` answers for one
+ * whose position does not read as finite numbers.
+ * @param {any} rings
+ * @param {number} lon
+ * @param {number} lat
+ * @returns {boolean}
+ */
+function readableContains(rings, lon, lat) {
+  const read = readableRings(rings);
+  return !(Array.isArray(read) && read.includes(NO_MEMBERS)) && pointInPolygon(lon, lat, read);
 }
 
 /** @param {any} geometry @returns {boolean} */
@@ -608,13 +636,15 @@ function foldGeometries(value, measure, join, none, settled = undefined) {
  */
 export function geometryArea(value, radius = EARTH_RADIUS) {
   try {
-    return areaAt(value, radius, 1);
+    const area = areaAt(value, radius, 1);
+    if (area !== Infinity)
+      return area;
   }
   catch (error) {
     if (error !== RECURSION_TOO_DEEP && !(error instanceof TypeError))
       throw error;
-    return foldArea(value, radius);
   }
+  return foldArea(value, radius);
 }
 
 /**
@@ -663,7 +693,66 @@ function polygonArea(rings, radius) {
   let area = sphericalRingArea(rings[0], radius);
   for (let i = 1; i < rings.length; i++)
     area -= sphericalRingArea(rings[i], radius);
+  return area > 0 ? area : unboundedArea(area, rings, radius);
+}
+
+// On a finite radius the area of a ring of finite positions and the length
+// of a line of them are finite, so a measure that is not names a position
+// whose longitude or latitude does not read as a finite number (a number,
+// an object, text, a one-element array, `NaN`): that ring or line holds no
+// positions and measures 0, as one missing a position does. Only a total
+// that is not finite is taken again ring by ring or line by line, so a
+// value of finite positions is measured as before; on a radius that is not
+// finite every measure is taken as it stands. A polygon's total that is not
+// finite is NaN or below zero, and is taken again here; one that is
+// infinite above zero reaches the measurement's own total, which then
+// takes the value again on its fold.
+
+/**
+ * {@link polygonArea} for a total that is not above zero: 0 when it is
+ * finite or the radius is not, else the polygon as {@link measurableArea}
+ * reads it.
+ * @param {number} area
+ * @param {any[]} rings
+ * @param {number} radius
+ * @returns {number}
+ */
+function unboundedArea(area, rings, radius) {
+  return area - area === 0 || radius - radius !== 0 ? 0 : measurableArea(rings, radius);
+}
+
+/**
+ * A polygon's area with each ring whose area is not finite on a finite
+ * radius read as holding no positions: such an exterior bounds nothing,
+ * such a hole removes nothing. On a radius that is not finite, the area
+ * {@link polygonArea} answers.
+ * @param {any} rings
+ * @param {number} radius
+ * @returns {number}
+ */
+function measurableArea(rings, radius) {
+  if (!Array.isArray(rings) || rings.length === 0 || radius - radius !== 0)
+    return polygonArea(rings, radius);
+  let area = sphericalRingArea(rings[0], radius);
+  if (area - area !== 0)
+    return 0;
+  for (let i = 1; i < rings.length; i++) {
+    const hole = sphericalRingArea(rings[i], radius);
+    if (hole - hole === 0)
+      area -= hole;
+  }
   return area > 0 ? area : 0;
+}
+
+/**
+ * A line's length, 0 for one whose length is not finite on a finite radius.
+ * @param {any} line
+ * @param {number} radius
+ * @returns {number}
+ */
+function lineMeasure(line, radius) {
+  const length = lineLength(line, radius);
+  return length - length === 0 || radius - radius !== 0 ? length : 0;
 }
 
 /**
@@ -675,13 +764,15 @@ function polygonArea(rings, radius) {
  */
 export function geometryLength(value, radius = EARTH_RADIUS) {
   try {
-    return lengthAt(value, radius, 1);
+    const length = lengthAt(value, radius, 1);
+    if (length - length === 0)
+      return length;
   }
   catch (error) {
     if (error !== RECURSION_TOO_DEEP && !(error instanceof TypeError))
       throw error;
-    return foldLength(value, radius);
   }
+  return foldLength(value, radius);
 }
 
 /**

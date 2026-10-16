@@ -9,8 +9,10 @@
  *
  * An invalid outcome always names at least one error, because its errors
  * are what a repair loop hands back to the model that wrote the value: a
- * check that answers `false`, `{ valid: false }` or an empty `errors`
- * list is reported as the one coded error `JG2001` at the root.
+ * check that answers `false`, `{ valid: false }`, an empty `errors` list
+ * or an `errors` that is no error (text, a number) is reported as the one
+ * coded error `JG2001` at the root. `errors` is always a list: one error
+ * object a check did not put in a list is answered as the list of it.
  */
 
 import { CodedError } from './errors.js';
@@ -65,10 +67,13 @@ export const CHECK_CODES = Object.freeze({
 
 /**
  * Read a compiled check's answer as `{ valid, errors }`. Only `true` and
- * `{ valid: true }` are valid. An invalid answer keeps the errors it
- * carries; one that carries none (`false`, `{ valid: false }`, an empty
- * `errors`, any other value) answers the single error `{ code: 'JG2001',
- * docPath: '', message }`, a fresh plain object each time.
+ * `{ valid: true }` are valid. An answer keeps the errors it carries, and
+ * one error object its `errors` holds outside a list answers as the list
+ * of it; a valid answer with no list answers `[]`. An invalid answer that
+ * carries none (`false`, `{ valid: false }`, an empty `errors`, an
+ * `errors` that is text or a number, any other value) answers the single
+ * error `{ code: 'JG2001', docPath: '', message }`, a fresh plain object
+ * each time.
  * @template [O=unknown]
  * @param {O} outcome - a compiled check's return value
  * @returns {0 extends (1 & O) ? CheckOutcome<any> : [O] extends [PromiseLike<unknown>] ? never
@@ -84,7 +89,7 @@ export function checkOutcome(outcome) {
     return { valid: true, errors: [] };
   if (typeof outcome === 'object' && outcome !== null) {
     if (outcome.valid === true)
-      return { valid: true, errors: outcome.errors ?? [] };
+      return { valid: true, errors: listedErrors(outcome.errors) ?? [] };
     if (isThenable(outcome)) {
       // the promise is refused, never read: settle its rejection here so
       // refusing it cannot also raise an unhandled rejection
@@ -92,11 +97,24 @@ export function checkOutcome(outcome) {
       throw new CodedError('CheckOutcomeError', 'JG0001',
         'a check answered a promise, which has not settled — await the check and pass its settled answer');
     }
-    const errors = outcome.errors;
-    if (errors !== undefined && errors !== null && !(Array.isArray(errors) && errors.length === 0))
+    const errors = listedErrors(outcome.errors);
+    if (errors !== null && errors.length > 0)
       return { valid: false, errors };
   }
   return { valid: false, errors: [{ code: 'JG2001', docPath: '', message: 'the value was rejected by a check that named no error' }] };
+}
+
+/**
+ * An answer's `errors` member as a list: an array as it stands, one error
+ * object a check did not put in a list as the list of it, and anything
+ * else (missing, text, a number) as no list.
+ * @param {unknown} errors
+ * @returns {unknown[] | null}
+ */
+function listedErrors(errors) {
+  if (Array.isArray(errors))
+    return errors;
+  return typeof errors === 'object' && errors !== null ? [errors] : null;
 }
 
 /**

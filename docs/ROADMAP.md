@@ -27,17 +27,17 @@ delete it or fix it.
 
 ## @jarenjs/core
 
-- [ ] **A refused plan names no error.** `createGuardedRefiner({ …,
-  planCommit: () => ({ valid: false }) })` prepares `{"valid":false}` (no
-  `errors`) and commits `{"ok":false,"stage":"validation"}`, where the shape
-  and candidate stages report the coded `JG2001` error through `checkOutcome`;
-  a repair loop gets nothing to fix. Wanted: the plan refusal read through
-  `checkOutcome` like its two siblings (a wrong answer made right: patch).
-- [ ] **`checkOutcome` passes a non-array `errors` through.** `checkOutcome({
-  valid: false, errors: 'bad' })` answers `{"valid":false,"errors":"bad"}`, so
-  a consumer's `errors.slice()` throws on the documented `{ valid, errors }`
-  shape. Wanted: a non-array `errors` reported as the coded `JG2001` error (or
-  wrapped as one element).
+- [ ] **A synchronous preparation refuses an asynchronous hook without a
+  code.** `createGuardedRefiner(…).prepare` over a hook that answers a promise
+  reports `{ valid: false, errors: [{ code: 'GUARDED', docPath: '', message:
+  'asynchronous hook requires prepareAsync or commit', stage }] }`: the
+  refusal is a `TypeError` whose fallback code `GUARDED` is in no code table,
+  where `checkOutcome` refuses the same mistake by throwing the registered
+  `JG0001` (`CheckOutcomeError`). A repair loop reading `code` cannot tell a
+  host's missing `await` from a model's error. Wanted: a registered code for
+  the refusal (in `CHECK_CODES` or a guarded table), and a decision whether it
+  is returned in the outcome or thrown as `checkOutcome` throws (the thrown
+  form refuses an input that answers today: a minor).
 
 ## @jarenjs/json — JSONPath & addressing
 
@@ -55,15 +55,21 @@ delete it or fix it.
   reader that flattens such a text (a `Map` lookup on the key, `contentKey`'s
   hash) still holds it whole. The formula compile and batch keys call
   `semanticKey` on host options (`limits`, `revision`).
-- [ ] **A position that is not a pair is measured as coordinates of `NaN`.**
-  `geometryLength`, `geometryArea` and `containsPosition` of
+- [ ] **A position that is not a pair but reads as numbers is measured as
+  those numbers.** `geometryLength`, `geometryArea` and `containsPosition` of
   `@jarenjs/core/geo` (and `$length`, `$area`, `$within`) read a present
-  position that is a number, an object or text (`{ type: 'Polygon',
-  coordinates: [[[0,0], 5, [2,2], [0,0]]] }`) as NaN coordinates: the length
-  is `NaN` and `containsPosition(…, 1, 1)` answers `true`, where the module
-  states malformed input yields null or 0 and a missing position (`null`) now
-  makes the ring hold no positions. Reading it as a missing position changes
-  answers that do not crash today.
+  position that is not an array of two numbers, but whose members arithmetic
+  reads as numbers, as those numbers: text `'12'` as `(1, 2)`, `{ 0: 1, 1: 2
+  }` as `(1, 2)`, `[null, null]` as `(0, 0)`, `[true, 0]` as `(1, 0)`, `['1',
+  '2']` as `(1, 2)`. `eachPosition` and `bboxOf` skip it, so a fence holding
+  one measures and contains as the fence those numbers spell, not as one
+  missing a position. A position that does not read as finite numbers (`5`,
+  `{}`, `'ab'`, `[1]`, `NaN`) already makes its ring or line hold no
+  positions; reading these the same way needs a type test per position in the
+  even-odd walk, the ring area and the line length, which they do not pay
+  today. `ringsClosed` compares a ring's ends as they read, so a ring whose
+  ends are both `5` is closed while the three measurements read it as holding
+  no positions.
 
 ## @jarenjs/json — JSLT
 

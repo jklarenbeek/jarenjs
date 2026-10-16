@@ -1643,9 +1643,22 @@ escape as an uncoded `RangeError`; one nested past the host stack but within
 `$within`, a `features`, `geometries` or `coordinates` list that is not a list
 (`{"type": "FeatureCollection", "features": {}}`), or a ring or line that is
 not an array or misses a position (`null`), adds 0 to an area or length and
-contains nothing; the well-formed members beside it count. `$bbox` and
-`$centroid` already skipped such members. *Upgrade: such an operand used to
-escape as an uncoded `TypeError` from `$area`, `$length` and `$within`.*
+contains nothing; the well-formed members beside it count. So does a ring or
+line holding a position that is not an array of numbers and does not read as
+one — a number, an object, `true`, text such as `"ab"`, a one-element or empty
+array. `$within` is stricter: a polygon with any ring that cannot be read, its
+holes included, contains no point, because a hole that cannot be read cannot
+say which points it removes; `$area` and `$length` measure its readable rings.
+`$bbox-intersects` compares the boxes of the positions that can be read, as
+`$bbox` draws them. `$bbox` and `$centroid` already
+skipped such members. A position that is not a pair but reads as numbers
+(`"12"`, `[null, null]`, `["1", "2"]`) is measured as those numbers. *Upgrade:
+such an operand used to escape as an uncoded `TypeError` from `$area`,
+`$length` and `$within`; a ring or line holding a position that does not read
+as numbers answered `$length` as `NaN`, `$area` 0 for a polygon whose hole held
+it, and `$within` could be `true` for a point outside the ring; a polygon with a
+hole that is not an array or misses a position answered `$within` as its
+exterior does.*
 
 | Operator | Definition |
 |---|---|

@@ -99,7 +99,23 @@ describe('core — an invalid outcome always names an error', function () {
     assert.deepStrictEqual(checkOutcome(true), { valid: true, errors: [] });
     assert.deepStrictEqual(checkOutcome({ valid: true }), { valid: true, errors: [] });
     assert.deepStrictEqual(checkOutcome({ valid: true, errors: [{ message: 'w' }] }), { valid: true, errors: [{ message: 'w' }] });
-    assert.deepStrictEqual(checkOutcome({ valid: false, errors: 'text' }), { valid: false, errors: 'text' });
+  });
+
+  it('errors is always a list: one error outside a list is the list of it, and text names no error', function () {
+    const one = { code: 'X1', docPath: '/a', message: 'x' };
+    assert.deepStrictEqual(checkOutcome({ valid: false, errors: one }), { valid: false, errors: [one] });
+    assert.strictEqual(checkOutcome({ valid: false, errors: one }).errors[0], one);
+    // an empty error object is one error, as it is inside a list
+    assert.deepStrictEqual(checkOutcome({ valid: false, errors: {} }), { valid: false, errors: [{}] });
+    for (const errors of ['text', '', 0, 5, true, false, () => 'x'])
+      assert.deepStrictEqual(checkOutcome({ valid: false, errors }), { valid: false, errors: [unnamed] }, String(errors));
+    // a valid answer keeps the same reading, with no list as none
+    assert.deepStrictEqual(checkOutcome({ valid: true, errors: one }), { valid: true, errors: [one] });
+    for (const errors of ['text', 0, true, null])
+      assert.deepStrictEqual(checkOutcome({ valid: true, errors }), { valid: true, errors: [] }, String(errors));
+    // composeChecks answers the same list
+    assert.deepStrictEqual(composeChecks(() => ({ valid: false, errors: 'bad' }))(1), { valid: false, errors: [unnamed] });
+    assert.deepStrictEqual(composeChecks(() => ({ valid: false, errors: one }))(1).errors.slice(), [one]);
   });
 
   it('composeChecks reports the bare-false check with the coded error and short-circuits', function () {

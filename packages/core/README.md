@@ -31,7 +31,12 @@ interval over 1000 resamples took rank 26 for its lower bound instead of 25). `l
 `pointInRing` counts the right and top edges and every corner of a ring as inside, like the
 left and bottom ones (they answered `false`). `pointInPolygon` counts a position on a hole's edge or vertex as inside the polygon (the
 boundary rule), where the hole's right and top edges and corners used to be inside and its left and
-bottom edges outside; only a position strictly inside the hole is outside. `isValidMACAddr` refuses an address that
+bottom edges outside; only a position strictly inside the hole is outside. `pointInRing` answers
+`false` for a ring holding a position whose longitude or latitude does not read as a finite number
+(`5`, `{}`, `[1]`, `NaN`) or missing one, and `pointInPolygon` and `containsPosition` answer `false` for a
+polygon with any such ring, a hole included, where the even-odd count over its edges could answer `true`
+for a point outside the ring; `geometryArea` and `geometryLength` read the ring as holding no positions
+([GEO](docs/GEO.md)). `isValidMACAddr` refuses an address that
 changes its separator or grouping (`aa:bb:cc-dd:ee:ff`, `Bf27.c107d3b1`). `geoJsonToWkt`
 answers `null` for a ring the reader would refuse (fewer than four positions, ends that
 differ), a one-position line and collections nested past eight, where it wrote text
@@ -466,14 +471,19 @@ and explicit strict/AI/contract compatibility policies.
 always names at least one error, since its errors are what a repair loop sends
 back to the model that wrote the value: an answer that carries errors keeps
 them (the same array), and one that carries none — `false`, `{ valid: false }`,
-an empty `errors`, any other value — answers the single error `{ code: 'JG2001',
-docPath: '', message: 'the value was rejected by a check that named no error' }`.
+an empty `errors`, an `errors` that is text or a number, any other value —
+answers the single error `{ code: 'JG2001', docPath: '', message: 'the value was
+rejected by a check that named no error' }`. `errors` is always an array: one
+error object an answer holds outside an array is answered as the array of it,
+and a valid answer with no array answers `[]`.
 A check that answers a promise is refused: `checkOutcome` throws a `CodedError`
 named `CheckOutcomeError` with code `JG0001`, because an unsettled answer is
 neither valid nor invalid; await the check and pass its settled answer.
 Composition stops at the first failure and preserves its errors.
 *Upgrade: such an answer used to be `{ valid: false, errors: [] }` — a promise
-included, whatever it settled to — so a repair prompt listed no error to fix.*
+included, whatever it settled to — so a repair prompt listed no error to fix;
+an `errors` that is not an array used to pass through as it was (`'bad'`), so
+reading it as a list threw.*
 
 | code | condition |
 | --- | --- |
@@ -503,7 +513,12 @@ The hooks type each other: `read` fixes the document, `validateProposal`'s
 parameter the proposal `prepare` and `commit` accept, `apply` the next document,
 `planCommit` the plan `commit` receives (its `plan` member when that is set) and
 `commit` the value. A preparation answers `{ valid: true, errors: [], next, plan }`
-or `{ valid: false, errors }`. A commit answers `{ ok: true, value, snapshot }` or
+or `{ valid: false, errors }`. A plan that answers `{ valid: false }` is a refusal
+and is read as `checkOutcome` reads a check: its errors, or the one `JG2001`
+error when it names none, as the shape and candidate checks are; any other plan
+is committed as it is. *Upgrade: a refused plan used to pass its `errors` on as
+they were, so `{ valid: false }` prepared with no `errors` and committed
+`{ ok: false, stage: 'validation' }` with none.* A commit answers `{ ok: true, value, snapshot }` or
 `{ ok: false, stage, errors }` with `stage` one of `'validation'`, `'snapshot'`
 and `'commit'`: only the last two carry the thrown `cause`, and only `'commit'`
 the snapshot token and an optional `restoreError`. A throw is reported as a

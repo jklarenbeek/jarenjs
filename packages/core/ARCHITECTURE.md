@@ -640,7 +640,20 @@ The GeoJSON measurements (`geometryArea`, `geometryLength`, `containsPosition`,
 recursion reads members as a well-formed value needs, and a `TypeError` from a
 read sends the whole value to the fold, which reads collection lists that cannot
 be iterated as empty and measures a geometry whose leaf code throws again with
-each ring or line that is not an array, or misses a position, holding none.
+each ring or line that is not an array, or misses a position, holding none. A
+position whose longitude or latitude does not read as a finite number throws
+nothing, so it is caught where its arithmetic shows it: on a finite radius a
+line of finite positions has a finite length and a ring a finite area, so a
+total that is not finite (a length, or an area that is infinite; a polygon's
+`NaN` or negative total is taken again where it is clamped) sends the value to
+the fold, which reads each such line or ring as holding none. Containment has
+no total to read, so the even-odd walk in `ring.js` tests each position once:
+it reads every position once and carries it to the next edge instead of
+reading both ends of every edge, which pays for that test. It answers a ring
+it cannot read apart from one it is outside of, and `pointInPolygon` answers
+`false` for a polygon with any such ring, a hole included, where the area and
+length still measure the readable rings: an "inside" over a hole that cannot
+be read would claim points the polygon may exclude.
 
 The three validity testers back the `geoFormats` group in
 [`@jarenjs/formats`](../formats) (`geohash`, `wkt`, `geojson`).

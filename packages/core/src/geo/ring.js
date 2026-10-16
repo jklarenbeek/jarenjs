@@ -117,7 +117,10 @@ export function sphericalRingArea(ring, radius = EARTH_RADIUS) {
 
 /**
  * Where a position lies against a ring: 0 outside, 1 on an edge or
- * vertex, 2 strictly inside (even-odd rule).
+ * vertex, 2 strictly inside (even-odd rule), and -1 for a ring holding a
+ * position whose longitude or latitude does not read as a finite number,
+ * or a missing one: its edges are not edges, an even-odd count over them
+ * reports containment that is not there, and nothing lies inside it.
  * @param {number} x
  * @param {number} y
  * @param {Array<number[]>} ring
@@ -126,13 +129,19 @@ export function sphericalRingArea(ring, radius = EARTH_RADIUS) {
 function locateInRing(x, y, ring) {
   const n = ring.length;
   if (n < 3)
-    return 0;
+    return readsFinite(ring, 0) ? 0 : -1;
   let inside = false;
-  for (let i = 0, j = n - 1; i < n; j = i++) {
-    const xi = ring[i][0];
-    const yi = ring[i][1];
-    const xj = ring[j][0];
-    const yj = ring[j][1];
+  // each position is read once, as the end of one edge and carried as
+  // the start of the next, which pays for the finiteness test it gets
+  let position = ring[n - 1];
+  let xj = position[0];
+  let yj = position[1];
+  for (let i = 0; i < n; i++) {
+    position = ring[i];
+    const xi = position[0];
+    const yi = position[1];
+    if (xi - xi !== 0 || yi - yi !== 0)
+      return -1;
     // Two cheap tests decide whether the exact predicate is needed at
     // all. An edge that neither straddles the ray nor holds the point
     // inside its closed bounding box can affect neither answer, and on
@@ -141,17 +150,36 @@ function locateInRing(x, y, ring) {
     const straddles = (yi > y) !== (yj > y);
     const spans = (xi < xj ? xi <= x && x <= xj : xj <= x && x <= xi)
       && (yi < yj ? yi <= y && y <= yj : yj <= y && y <= yi);
-    if (!straddles && !spans)
-      continue;
-    const side = orient2d(xi, yi, xj, yj, x, y);
-    // exactly on this edge, and within its extent rather than its line
-    if (side === 0 && spans)
-      return 1;
-    // the crossing test itself: is the edge to the right of the point
-    if (straddles && side !== 0 && (side > 0) === (yj > yi))
-      inside = !inside;
+    if (straddles || spans) {
+      const side = orient2d(xi, yi, xj, yj, x, y);
+      // exactly on this edge, and within its extent rather than its
+      // line; the positions after it still have to be read
+      if (side === 0 && spans)
+        return readsFinite(ring, i + 1) ? 1 : -1;
+      // the crossing test itself: is the edge to the right of the point
+      if (straddles && side !== 0 && (side > 0) === (yj > yi))
+        inside = !inside;
+    }
+    xj = xi;
+    yj = yi;
   }
   return inside ? 2 : 0;
+}
+
+/**
+ * Whether every position of a ring from `from` on has a longitude and a
+ * latitude that read as finite numbers; a missing position does not.
+ * @param {Array<number[]>} ring
+ * @param {number} from
+ * @returns {boolean}
+ */
+function readsFinite(ring, from) {
+  for (let i = from; i < ring.length; i++) {
+    const position = ring[i];
+    if (position == null || position[0] - position[0] !== 0 || position[1] - position[1] !== 0)
+      return false;
+  }
+  return true;
 }
 
 /**
@@ -165,13 +193,17 @@ function locateInRing(x, y, ring) {
  * mean by containment, and it is correct for any ring that does not
  * cross the antimeridian — which RFC 7946 tells producers to cut.
  *
+ * A ring holding a position whose longitude or latitude does not read as
+ * a finite number (a number, an object, a one-element array, `NaN`)
+ * contains nothing.
+ *
  * @param {number} x - longitude
  * @param {number} y - latitude
  * @param {Array<number[]>} ring - positions
  * @returns {boolean}
  */
 export function pointInRing(x, y, ring) {
-  return locateInRing(x, y, ring) !== 0;
+  return locateInRing(x, y, ring) > 0;
 }
 
 /**
@@ -179,18 +211,23 @@ export function pointInRing(x, y, ring) {
  * not strictly inside any hole. The boundary counts as inside for the
  * polygon as for a ring, so a position on a hole's edge or vertex is on
  * the polygon's own boundary and is inside; a polygon that fills the
- * hole claims it too, and the two tile without a gap.
+ * hole claims it too, and the two tile without a gap. A polygon any of
+ * whose rings holds a position that does not read as finite numbers, or
+ * misses one, contains nothing: a hole that cannot be read cannot say
+ * which points it removes, and a fence that answers inside for them is
+ * the costly mistake.
  * @param {number} x - longitude
  * @param {number} y - latitude
  * @param {Array<Array<number[]>>} rings - a GeoJSON Polygon's coordinates
  * @returns {boolean}
  */
 export function pointInPolygon(x, y, rings) {
-  if (rings.length === 0 || locateInRing(x, y, rings[0]) === 0)
+  if (rings.length === 0 || locateInRing(x, y, rings[0]) <= 0)
     return false;
   for (let i = 1; i < rings.length; i++) {
-    if (locateInRing(x, y, rings[i]) === 2)
-      return false; // strictly inside a hole
+    const at = locateInRing(x, y, rings[i]);
+    if (at === 2 || at < 0)
+      return false; // strictly inside a hole, or a hole that cannot be read
   }
   return true;
 }

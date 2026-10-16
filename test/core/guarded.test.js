@@ -86,3 +86,39 @@ it('serializes accepted writes and captures the caller proposal before queuing',
   assert.deepEqual((await second).value, { count: 3 });
   assert.deepEqual(writes, [1, 3]);
 });
+
+it('a refused plan names its errors as the shape and candidate stages do', async () => {
+  const unnamed = { code: 'JG2001', docPath: '', message: 'the value was rejected by a check that named no error' };
+  /** @param {Record<string, (...args: any[]) => any>} hooks */
+  const engine = (hooks) => {
+    const writes = [];
+    const refiner = createGuardedRefiner({ read: () => ({ n: 1 }), validateProposal: () => true, apply: (doc) => doc,
+      validateCandidate: () => true, planCommit: (doc) => doc, commit: (plan) => { writes.push(plan); return plan; },
+      ...hooks });
+    return { refiner, writes };
+  };
+  for (const refusal of [{ valid: false }, { valid: false, errors: [] }, { valid: false, errors: null }, { valid: false, errors: 'no' }]) {
+    const label = JSON.stringify(refusal);
+    const { refiner, writes } = engine({ planCommit: () => refusal });
+    assert.deepEqual(refiner.prepare({ n: 1 }, {}), { valid: false, errors: [unnamed] }, label);
+    assert.deepEqual(await refiner.prepareAsync({ n: 1 }, {}), { valid: false, errors: [unnamed] }, label);
+    assert.deepEqual(await refiner.commit({}), { ok: false, stage: 'validation', errors: [unnamed] }, label);
+    assert.deepEqual(writes, [], label);
+    // the same answer from the shape and candidate checks reads alike
+    for (const hook of ['validateProposal', 'validateCandidate'])
+      assert.deepEqual(engine({ [hook]: () => refusal }).refiner.prepare({ n: 1 }, {}), { valid: false, errors: [unnamed] }, `${hook} ${label}`);
+  }
+  // a plan's own errors pass on as they are, as one list when it names one error outside a list
+  const errors = [{ code: 'PLAN', docPath: '/n', message: 'no room' }];
+  assert.equal(engine({ planCommit: () => ({ valid: false, errors }) }).refiner.prepare({ n: 1 }, {}).errors, errors);
+  assert.deepEqual(await engine({ planCommit: async () => ({ valid: false, errors: errors[0] }) }).refiner.prepareAsync({ n: 1 }, {}),
+    { valid: false, errors });
+  // a plan that is not a refusal still commits, whatever it is
+  for (const plan of [false, {}, 0, null, { valid: true }, { valid: 'no' }]) {
+    const { refiner, writes } = engine({ planCommit: () => plan });
+    const prepared = refiner.prepare({ n: 1 }, {});
+    assert.equal(prepared.valid, true, JSON.stringify(plan));
+    assert.equal((await refiner.commit({})).ok, true, JSON.stringify(plan));
+    assert.deepEqual(writes, [plan], JSON.stringify(plan));
+  }
+});
