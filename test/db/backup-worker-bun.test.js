@@ -56,9 +56,12 @@ describe('a Bun backup inside a compiled executable', () => {
         assert.equal(stopped.published, false);
       }
       // the abort stopped the worker, not only the events: the copy settled
-      // in a small part of the ticks a whole copy takes (copying on, it
-      // takes more than the whole copy's)
-      assert.ok(aborted.ticksAfterAbort * 2 < complete.ticksDuringCopy, JSON.stringify([aborted, complete]));
+      // in a small part of the time a whole copy takes (copying on, it
+      // takes more than the whole copy's). Wall time, not 1 ms timer ticks:
+      // a loaded host coalesces interval ticks differently over a long copy
+      // and a short settle, while both elapsed times slow together
+      assert.ok(aborted.msAfterAbort !== null && aborted.msAfterAbort * 2 < complete.copyMs,
+        JSON.stringify([aborted, complete]));
       assert.deepEqual(report.leftovers, []);
       assert.deepEqual(readdirSync(run).filter((name) => !/^(source|complete)\.db(-wal|-shm)?$/.test(name)), []);
     }

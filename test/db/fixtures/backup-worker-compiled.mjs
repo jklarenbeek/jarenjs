@@ -34,7 +34,9 @@ const report = { runtime: typeof Bun === 'undefined' ? 'node' : 'bun', compiled:
   let events = 0;
   const seen = [];
   const ticker = setInterval(() => { seen.push(events); }, 1);
+  const started = performance.now();
   const done = await store.backupTo('complete.db', { rate: 1, onProgress: () => { events++; } });
+  const copyMs = performance.now() - started;
   clearInterval(ticker);
   const ticksDuringCopy = seen.filter((count) => count > 0 && count < events).length;
   const copy = await openStore(MODEL, { driver: bunDriver(), path: 'complete.db', readOnly: true });
@@ -42,28 +44,30 @@ const report = { runtime: typeof Bun === 'undefined' ? 'node' : 'bun', compiled:
   for await (const id of copy.collection('notes').query({ $for: { it: '$[*]' }, $return: '$it.id' })) ids.push(id);
   await copy.close();
   const expected = Array.from({ length: ROWS }, (_, i) => `n${i}`).sort();
-  report.complete = { pages: done.pages, events, ticksDuringCopy, rows: ids.length,
+  report.complete = { pages: done.pages, events, ticksDuringCopy, copyMs, rows: ids.length,
     everyRow: JSON.stringify(ids.sort()) === JSON.stringify(expected) };
 }
 {
   // a timer armed by the first progress event aborts the copy; the ticks
   // from the abort to the settlement measure the copy the abort spared
   const controller = new AbortController();
-  let events = 0, eventsWhenFired = null, ticks = 0, ticksWhenFired = null;
+  let events = 0, eventsWhenFired = null, ticks = 0, ticksWhenFired = null, firedAt = null;
   const ticker = setInterval(() => { ticks++; }, 1);
   const error = await failure(store.backupTo('aborted.db', {
     rate: 1, signal: controller.signal,
     onProgress: () => {
       if (++events !== 1) return;
       setTimeout(() => {
-        [eventsWhenFired, ticksWhenFired] = [events, ticks];
+        [eventsWhenFired, ticksWhenFired, firedAt] = [events, ticks, performance.now()];
         controller.abort(new Error('timer'));
       }, 0);
     },
   }));
+  const settledAt = performance.now();
   clearInterval(ticker);
   report.aborted = { code: error?.code ?? null, events, eventsWhenFired, published: existsSync('aborted.db'),
-    ticksAfterAbort: ticksWhenFired === null ? null : ticks - ticksWhenFired };
+    ticksAfterAbort: ticksWhenFired === null ? null : ticks - ticksWhenFired,
+    msAfterAbort: firedAt === null ? null : settledAt - firedAt };
 }
 {
   // a timer armed by the first progress event passes the deadline
