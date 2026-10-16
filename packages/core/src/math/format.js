@@ -8,6 +8,9 @@
  * characters from a decimal format record (`decimalFormat`), the record
  * `@jarenjs/locales` compiles from a pack and `$format-number` of
  * `@jarenjs/json` formats pictures with, so core needs no locale data.
+ * `numberSyntax` is the one grammar of a number written in a language's
+ * characters: `parseNumber` reads a whole text by it and `$quantity` of
+ * `@jarenjs/json` finds a number in free text by it.
  */
 
 import { toBase, fromBase } from './word.js';
@@ -49,7 +52,8 @@ import { toBase, fromBase } from './word.js';
  * @property {string} exponent
  * @property {string} infinity
  * @property {string} nan
- * @property {RegExp} [grammar] - built on the first read
+ * @property {NumberSyntax} [syntax] - built on the first read
+ * @property {RegExp} [grammar] - the syntax, anchored
  */
 
 /** @type {WeakMap<object, NumberCharacters>} */
@@ -134,23 +138,86 @@ function fromFamily(text, zero) {
 const escapeRegExp = (/** @type {string} */ text) => text.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&').replace(/-/g, '\\x2d');
 
 /**
- * The one grammar of a number written in a record's characters: an
- * optional sign, an integer part either ungrouped or grouped in threes
- * after a leading group of one to three digits, an optional fraction after
- * the decimal separator, an optional exponent.
- * @param {NumberCharacters} chars
- * @returns {RegExp}
+ * The characters a number is written in, as `numberSyntax` takes them.
+ * @typedef {object} NumberSyntaxCharacters
+ * @property {string} decimal - the decimal separator
+ * @property {string} group - the grouping separator
+ * @property {string} minus - the minus sign; `-` and `−` read as one too
+ * @property {number} zero - the code point of the digit family's zero
+ * @property {string} [exponent] - the exponent separator, default 'e';
+ *   `e` and `E` read as one too
  */
-function numberGrammar(chars) {
-  if (chars.grammar !== undefined) return chars.grammar;
-  const digit = chars.zero === 0x30 ? '[0-9]'
-    : `[0-9${escapeRegExp(String.fromCodePoint(chars.zero))}-${escapeRegExp(String.fromCodePoint(chars.zero + 9))}]`;
-  const minus = `${escapeRegExp(chars.minus)}|\\x2d|\\u2212`;
-  const group = escapeRegExp(chars.group);
-  chars.grammar = new RegExp(`^(?:(\\+)|(${minus}))?(${digit}{1,3}(?:${group}${digit}{3})+|${digit}+)`
-    + `(?:${escapeRegExp(chars.decimal)}(${digit}+))?`
-    + `(?:(?:${escapeRegExp(chars.exponent)}|[eE])(\\+|${minus})?(${digit}+))?$`, 'u');
-  return chars.grammar;
+
+/**
+ * A number's digits as written, in ASCII.
+ * @typedef {object} WrittenNumber
+ * @property {boolean} negative - a minus sign was written
+ * @property {string} whole - the integer part, without its grouping separators
+ * @property {string} fraction - the digits after the decimal separator, or ''
+ * @property {string} exponent - the exponent with its sign ('-3', '12'), or ''
+ */
+
+/**
+ * The grammar of a written number, as regular expression source.
+ * @typedef {object} NumberSyntax
+ * @property {string} source - unanchored source under the `u` flag; its
+ *   capturing groups, in order: the plus sign (unless `plus: false`), the
+ *   minus sign, the integer part, the fraction, then (unless
+ *   `exponent: false`) the exponent's sign and digits
+ * @property {number} groups - how many capturing groups `source` holds
+ * @property {string} digits - the digits read (ASCII and the family) as the
+ *   body of a character class
+ * @property {string} group - the grouping separator, escaped
+ * @property {string} decimal - the decimal separator, escaped
+ * @property {string} minus - the minus sign, escaped
+ * @property {(match: RegExpExecArray) => WrittenNumber} read - the digits
+ *   of a match whose first capturing groups are the source's
+ */
+
+/**
+ * The one grammar of a number written in a language's characters, which
+ * `parseNumber` reads a whole text by under `decimalFormat` and `$quantity`
+ * of `@jarenjs/json` finds a number in free text by: an optional sign (`+`,
+ * or a minus: the given one, `-` or `−`), an integer part either ungrouped
+ * or grouped in threes after a leading group of one to three digits, an
+ * optional fraction after the decimal separator, and an optional exponent
+ * (the given separator, `e` or `E`, an optional sign, digits); digits are
+ * ASCII or the family of `zero`. `plus: false` reads no `+` and
+ * `exponent: false` no exponent. The source is unanchored, for the caller
+ * to anchor or to embed in its own context after no capturing group of its
+ * own, so that `read` finds its groups first; the escaped separators and the
+ * digit class hold inside a character class and outside one. The
+ * characters are taken as given: the caller checks that they read one way.
+ * @param {NumberSyntaxCharacters} chars
+ * @param {{ plus?: boolean, exponent?: boolean }} [options] both default true
+ * @returns {NumberSyntax}
+ */
+export function numberSyntax(chars, options = {}) {
+  const { zero, group: groupText } = chars;
+  const digits = zero === 0x30 ? '0-9'
+    : `0-9${escapeRegExp(String.fromCodePoint(zero))}-${escapeRegExp(String.fromCodePoint(zero + 9))}`;
+  const digit = `[${digits}]`;
+  const minus = escapeRegExp(chars.minus);
+  const group = escapeRegExp(groupText);
+  const decimal = escapeRegExp(chars.decimal);
+  const anyMinus = `${minus}|\\x2d|\\u2212`;
+  const plus = options.plus !== false;
+  const exponent = options.exponent !== false;
+  // groups by position (a named group would cost every match an object)
+  let source = `(?:${plus ? '(\\+)|' : ''}(${anyMinus}))?(${digit}{1,3}(?:${group}${digit}{3})+|${digit}+)(?:${decimal}(${digit}+))?`;
+  if (exponent)
+    source += `(?:(?:${escapeRegExp(chars.exponent ?? 'e')}|[eE])(\\+|${anyMinus})?(${digit}+))?`;
+  const at = plus ? 2 : 1; // the minus sign's group
+  return {
+    source, groups: at + (exponent ? 4 : 2), digits, group, decimal, minus,
+    read: (m) => ({
+      negative: m[at] !== undefined,
+      whole: fromFamily(m[at + 1].split(groupText).join(''), zero),
+      fraction: m[at + 2] === undefined ? '' : fromFamily(m[at + 2], zero),
+      exponent: !exponent || m[at + 4] === undefined ? ''
+        : `${m[at + 3] === undefined || m[at + 3] === '+' ? '' : '-'}${fromFamily(m[at + 4], zero)}`,
+    }),
+  };
 }
 
 /**
@@ -166,12 +233,14 @@ function parseWritten(s, chars) {
     if (rest === chars.infinity || rest === '∞' || rest.toLowerCase() === 'infinity')
       return sign === '' || sign === '+' ? Infinity : -Infinity;
   }
-  const m = numberGrammar(chars).exec(s);
+  if (chars.syntax === undefined) {
+    chars.syntax = numberSyntax(chars);
+    chars.grammar = new RegExp(`^${chars.syntax.source}$`, 'u');
+  }
+  const m = /** @type {RegExp} */ (chars.grammar).exec(s);
   if (m === null) return NaN;
-  const whole = fromFamily(m[3].split(chars.group).join(''), chars.zero);
-  const fraction = m[4] === undefined ? '' : `.${fromFamily(m[4], chars.zero)}`;
-  const exponent = m[6] === undefined ? '' : `e${m[5] === undefined || m[5] === '+' ? '' : '-'}${fromFamily(m[6], chars.zero)}`;
-  return Number(`${m[2] === undefined ? '' : '-'}${whole}${fraction}${exponent}`);
+  const { negative, whole, fraction, exponent } = chars.syntax.read(m);
+  return Number(`${negative ? '-' : ''}${whole}${fraction === '' ? '' : `.${fraction}`}${exponent === '' ? '' : `e${exponent}`}`);
 }
 
 /**

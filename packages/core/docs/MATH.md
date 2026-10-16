@@ -104,6 +104,16 @@ price with its currency sign in a fixed place is a picture for
 writes `'€ 1.234,50'`). `isDigitZero(codePoint)` answers whether a code
 point is the zero of a decimal digit family, the check both the record
 here and `$format-number`'s decimal formats make.
+`numberSyntax({ decimal, group, minus, zero, exponent }, { plus, exponent })`
+is that one reading as regular-expression source, unanchored, with its
+capturing groups counted (`groups`) and a `read(match)` that answers the
+written digits in ASCII (`negative`, `whole`, `fraction`, `exponent`).
+`parseNumber` reads a whole text by it; `$quantity` of `@jarenjs/json`
+finds a number in free text by it with `plus: false` and
+`exponent: false`, so under Dutch `'1,5E3'` is 1500 here while `'1,5E3 g'`
+holds no quantity, and keeps the written digits for its exact unit
+conversion. It takes the characters as given: each caller checks its own
+record first.
 `Int32` and `Vec2i32` wrap every product to int32 exactly (`Math.imul`), so
 `Int32.dot(2147483647, 0, 2147483645, 0)` is `3`, the low 32 bits of the true
 product; a double product lost them past 2^53. The in-place `iadd`, `iadds`,

@@ -8,7 +8,10 @@
 import { describe, it } from 'node:test';
 import * as assert from 'node:assert/strict';
 
+import { readFileSync } from 'node:fs';
+
 import { compileJsonQuery } from '@jarenjs/json';
+import { parseNumber } from '@jarenjs/core/math';
 import { UNIT_ALIASES, dimensionOf, unitOfAlias } from '@jarenjs/core/convert';
 import { ar, compileNumberLocale, nl } from '@jarenjs/locales';
 
@@ -138,6 +141,32 @@ describe('$quantity', () => {
     assert.strictEqual(q('1-500 g', { groupingSeparator: '-' }), 1500);
     assert.strictEqual(q('1-5 g', { decimalSeparator: '-' }), 1.5);
     assert.strictEqual(compileJsonQuery({ $quantity: ['$.t', 'g', '$.missing'] })({ t: '5 g' }), 5, 'an empty format is the default');
+  });
+
+  it('reads its number by the one number grammar of @jarenjs/core/math, without the plus sign and the exponent', () => {
+    const source = readFileSync(new URL('../../packages/json/src/query/operators.js', import.meta.url), 'utf8');
+    assert.ok(/import \{[^}]*\bnumberSyntax\b[^}]*\} from '@jarenjs\/core\/math'/.test(source), 'numberSyntax comes from core');
+    assert.deepStrictEqual(source.match(/\bescapeRegExp\b|\basciiDigits\b|\{1,3\}/g), null, 'no number pattern, regexp escape or digit mapping of its own');
+    const nl = NL.decimalFormats.nl;
+    assert.strictEqual(parseNumber('1,5E3', { decimalFormat: nl }), 1500);
+    assert.strictEqual(qty('1,5E3 g', 'g', 'nl'), undefined, 'an exponent is never read as a tail');
+    assert.strictEqual(parseNumber('+2', { decimalFormat: nl }), 2);
+    assert.strictEqual(qty('+2 kg', 'g', 'nl'), 2000, 'a plus sign before the number reads alike');
+    assert.strictEqual(parseNumber('∞', { decimalFormat: nl }), Infinity);
+    assert.strictEqual(qty('∞ g', 'g', 'nl'), undefined, 'no infinity is a quantity');
+    assert.strictEqual(qty('1234,567 g', 'g'), undefined, 'a leading group holds one to three digits');
+    assert.strictEqual(qty('1234.567 g', 'g', 'nl'), undefined);
+    const q = (/** @type {string} */ t, /** @type {any} */ f) => compileJsonQuery({ $quantity: ['$.t', 'g', '$.f'] })({ t, f });
+    assert.strictEqual(q('~2,5 kg', { minusSign: '~', decimalSeparator: ',', groupingSeparator: '.' }), -2500, 'the format\'s own minus sign');
+  });
+
+  it('reads a decimal format that parseNumber refuses, and the digits a text writes beyond a double', () => {
+    const otherFamily = { groupingSeparator: '٠', decimalSeparator: '.' };
+    assert.throws(() => parseNumber('1', { decimalFormat: otherFamily }), TypeError);
+    const q = (/** @type {string} */ t, /** @type {any} */ f) => compileJsonQuery({ $quantity: ['$.t', 'g', '$.f'] })({ t, f });
+    assert.strictEqual(q('1٠234.5 g', otherFamily), 1234.5);
+    assert.strictEqual(qty('1.0000000000000001 kg', 'g'), 1000.0000000000001, 'the written digits convert exactly');
+    assert.strictEqual(parseNumber('1.0000000000000001') * 1000, 1000, 'a double read first would lose them');
   });
 
   it('every alias names a registry unit', () => {

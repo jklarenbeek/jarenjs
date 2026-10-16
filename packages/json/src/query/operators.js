@@ -35,6 +35,7 @@ import { equalsJson, compareJsonScalarLt, setObjectMember } from '@jarenjs/core/
 import { isJsonNumberString } from '@jarenjs/core/number';
 import {
   mathf64_abs, mathf64_ceil, mathf64_floor, mathf64_round, roundExact, shortestDecimal, shiftDecimal, decimalToNumber,
+  numberSyntax,
 } from '@jarenjs/core/math';
 import { UNIT_INDEX, convert, dimensionOf, unitOfAlias } from '@jarenjs/core/convert';
 import {
@@ -440,9 +441,11 @@ function pictureOf(picture, format, docPath, compileTime) {
 // $quantity: a number in the text, followed by a unit word of the asked
 // unit's dimension, read with the format's separators and digits (its own
 // digit family, and ASCII) and a minus sign written right before it. The
-// pattern is built once per format: digits grouped in threes or not grouped
-// at all, an optional fraction, the word. A number that is the tail of
-// something else is never read, because reading it would be a silent
+// number is core's one number grammar (numberSyntax of @jarenjs/core/math)
+// without its plus sign and its exponent: digits grouped in threes or not
+// grouped at all, an optional fraction; the pattern, that number and the
+// word, is built once per format. A number that is the tail of something
+// else is never read, because reading it would be a silent
 // misreading: the second group of "1 500 g" (the space may be a grouping
 // separator, and 500 would misread 1500), the denominator of "1/2 kg", the
 // end of the range "2-3 kg", the exponent of "1e3 g", digits glued to a
@@ -452,38 +455,18 @@ function pictureOf(picture, format, docPath, compileTime) {
 // area and "30 km/h" a speed, never a length; nor one a hyphen joins to a
 // word: "2 t-shirts" is no mass.
 const quantityPatterns = new WeakMap();
-// written so it holds inside a character class and outside one under `u`
-const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&').replace(/-/g, '\\x2d');
 function quantityPattern(format) {
   let pattern = quantityPatterns.get(format);
   if (pattern === undefined) {
-    const zero = format.zeroDigit.codePointAt(0);
-    const family = zero === 0x30 ? '0-9'
-      : `0-9${escapeRegExp(format.zeroDigit)}-${escapeRegExp(String.fromCodePoint(zero + 9))}`;
-    const g = escapeRegExp(format.groupingSeparator);
-    const d = escapeRegExp(format.decimalSeparator);
-    const minus = `[\\x2d\\u2212${escapeRegExp(format.minusSign)}]`;
-    const number = new RegExp(`(?<![${family}${g}${d}\\p{L}])(${minus})?`
-      + `([${family}]{1,3}(?:${g}[${family}]{3})+|[${family}]+)`
-      + `(?:${d}([${family}]+))?\\s*(\\p{L}[\\p{L}\\p{N}]*)(?![\\p{L}\\p{N}/]|[\\x2d\\u2010\\u2011]\\p{L})`, 'gu');
-    pattern = { number, digit: new RegExp(`[${family}]$`, 'u'),
-      dash: new RegExp(`[\\p{Pd}\\u2212${escapeRegExp(format.minusSign)}]$`, 'u') };
+    const syntax = numberSyntax({ decimal: format.decimalSeparator, group: format.groupingSeparator,
+      minus: format.minusSign, zero: format.zeroDigit.codePointAt(0) }, { plus: false, exponent: false });
+    const number = new RegExp(`(?<![${syntax.digits}${syntax.group}${syntax.decimal}\\p{L}])${syntax.source}`
+      + `\\s*(\\p{L}[\\p{L}\\p{N}]*)(?![\\p{L}\\p{N}/]|[\\x2d\\u2010\\u2011]\\p{L})`, 'gu');
+    pattern = { number, read: syntax.read, unit: syntax.groups + 1, digit: new RegExp(`[${syntax.digits}]$`, 'u'),
+      dash: new RegExp(`[\\p{Pd}\\u2212${syntax.minus}]$`, 'u') };
     quantityPatterns.set(format, pattern);
   }
   return pattern;
-}
-
-/** The ASCII spelling of digits from the format's family or ASCII. */
-function asciiDigits(text, format) {
-  const zero = format.zeroDigit.codePointAt(0);
-  if (zero === 0x30)
-    return text;
-  let out = '';
-  for (const c of text) {
-    const cp = c.codePointAt(0);
-    out += cp >= zero && cp <= zero + 9 ? String.fromCharCode(0x30 + cp - zero) : c;
-  }
-  return out;
 }
 
 /** A unit operand: a registry id or an alias, as the registry id. */
@@ -511,12 +494,11 @@ function readQuantity(text, unit, format) {
     while (before >= 0 && /[\s'’_·#%+*]/u.test(text[before])) before--;
     if (before >= 0 && pattern.digit.test(text.slice(Math.max(0, before - 1), before + 1))) continue;
     if (before >= 1 && /[eE]/.test(text[before]) && pattern.digit.test(text.slice(Math.max(0, before - 2), before))) continue;
-    const from = unitOfAlias(m[4]);
+    const from = unitOfAlias(m[pattern.unit]);
     if (from === undefined || dimensionOf(from) !== dimension)
       continue;
-    const whole = asciiDigits(m[2].split(format.groupingSeparator).join(''), format);
-    const fraction = m[3] === undefined ? '' : asciiDigits(m[3], format);
-    return convertWritten(whole, fraction, m[1] !== undefined, from, unit);
+    const { whole, fraction, negative } = pattern.read(m);
+    return convertWritten(whole, fraction, negative, from, unit);
   }
   return EMPTY;
 }

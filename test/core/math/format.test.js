@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { formatNumber, parseNumber } from '@jarenjs/core/math';
+import { formatNumber, numberSyntax, parseNumber } from '@jarenjs/core/math';
 
 describe('#number format/parse', function () {
   it('auto notation', () => {
@@ -152,5 +152,39 @@ describe('#number format/parse under a decimal format record', function () {
     assert.equal(parseNumber('1,23'), 123);
     assert.equal(parseNumber('1.234,5'), 1.2345);
     assert.equal(parseNumber('1,2,3'), 123);
+  });
+});
+
+describe('#numberSyntax: the one grammar of a written number', function () {
+  const nl = { decimal: ',', group: '.', minus: '-', zero: 0x30, exponent: 'E' };
+  /** @param {import('@jarenjs/core/math').NumberSyntax} syntax @param {string} text */
+  const read = (syntax, text) => {
+    const m = new RegExp(`^${syntax.source}$`, 'u').exec(text);
+    return m === null ? null : syntax.read(m);
+  };
+
+  it('reads a sign, an integer part grouped in threes or not at all, a fraction and an exponent, as ASCII digits', () => {
+    const s = numberSyntax(nl);
+    assert.deepEqual(read(s, '1.234,5E-3'), { negative: false, whole: '1234', fraction: '5', exponent: '-3' });
+    assert.deepEqual(read(s, '+12'), { negative: false, whole: '12', fraction: '', exponent: '' });
+    assert.deepEqual(read(s, '−1234e+2'), { negative: true, whole: '1234', fraction: '', exponent: '2' });
+    assert.deepEqual(['1.23', '1.2345', '12.34.567', ',5', '1,', '1.234,5E'].map((t) => read(s, t)), [null, null, null, null, null, null]);
+  });
+
+  it('leaves the plus sign and the exponent out when asked', () => {
+    const s = numberSyntax(nl, { plus: false, exponent: false });
+    assert.equal(read(s, '+2'), null);
+    assert.equal(read(s, '1,5E3'), null);
+    assert.deepEqual(read(s, '-1.234,5'), { negative: true, whole: '1234', fraction: '5', exponent: '' });
+  });
+
+  it('reads a digit family, and escapes the characters to hold inside a class and outside one', () => {
+    const s = numberSyntax({ decimal: '٫', group: '٬', minus: '-', zero: 0x660 });
+    assert.equal(s.digits, '0-9٠-٩');
+    assert.deepEqual(read(s, '١٬٢٣٤٫٥e١'), { negative: false, whole: '1234', fraction: '5', exponent: '1' });
+    const e = numberSyntax({ decimal: '$', group: '-', minus: ']', zero: 0x30 });
+    assert.deepEqual([e.decimal, e.group, e.minus, e.digits], ['\\$', '\\x2d', '\\]', '0-9']);
+    assert.deepEqual(read(e, ']1-500$25'), { negative: true, whole: '1500', fraction: '25', exponent: '' });
+    assert.ok(new RegExp(`^[${e.group}${e.minus}]+$`, 'u').test('-]-'));
   });
 });
