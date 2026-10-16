@@ -5,7 +5,7 @@ import { semanticKey } from '@jarenjs/core/object';
 import { compileJsonQuery } from '../query/index.js';
 import { validateDateNames, validateDecimalFormats } from '../query/normalize.js';
 import { canonicalizeJson } from '../canonical.js';
-import { FormulaError, causeMessage, formulaMessage, snapshot, credit, FORMULA_OPTIONS, checkFormulaOptions } from './shared.js';
+import { FormulaError, causeCode, causeMessage, formulaMessage, snapshot, credit, FORMULA_OPTIONS, checkFormulaOptions } from './shared.js';
 
 export { FormulaError };
 export { formulaMessagesEn } from './messages.js';
@@ -194,7 +194,8 @@ export function createFormulaCompiler(options = {}) {
         }
         catch (cause) {
           if (cause instanceof FormulaError) throw cause;
-          throw new FormulaError(cause.code ?? 'JQ2013', causeMessage(cause), doc.id, `/expression${cause.docPath ?? ''}`, cause);
+          const code = causeCode(cause, 'JQ2013');
+          throw new FormulaError(code, causeMessage(cause), doc.id, `/expression${cause.docPath ?? ''}`, cause);
         }
       },
     });

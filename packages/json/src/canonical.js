@@ -32,25 +32,51 @@ const hasOwn = Object.hasOwn;
 const RE_LONE_SURROGATE = /\p{Surrogate}/u;
 
 /**
+ * The codes {@link canonicalizeJson} refuses with, one per kind of value
+ * that is not JSON data. A cycle and a nesting past the bound are refused
+ * with the codes `@jarenjs/core/object`'s equality and walks raise for the
+ * same conditions (`JO2002`, `JO2001`), so one catch serves both.
+ * @type {Readonly<Record<'JO2001' | 'JO2002' | 'JO2003' | 'JO2004' | 'JO2005' | 'JO2006' | 'JO2007' | 'JO2008', string>>}
+ */
+export const CANONICAL_CODES = Object.freeze({
+  JO2001: 'a value nested deeper than the bound',
+  JO2002: 'a circular reference',
+  JO2003: 'a number that is not finite (NaN, Infinity, -Infinity)',
+  JO2004: 'undefined, as a member, an element or an array hole',
+  JO2005: 'a BigInt',
+  JO2006: 'a function or a symbol',
+  JO2007: 'a string or member name with an unpaired surrogate',
+  JO2008: 'an object that is not a plain object or array (a Date, a Map, a class instance)',
+});
+
+/**
  * Error thrown when a value cannot be canonicalized because it is not
- * JSON data (RFC 8785 section 3.2.1). `dataPath` is an RFC 6901 JSON
- * Pointer to the offending value, so a rejected document says which
- * member was at fault rather than only that one was.
+ * JSON data (RFC 8785 section 3.2.1). `code` names the kind of value
+ * ({@link CANONICAL_CODES}) and `dataPath` is an RFC 6901 JSON Pointer to
+ * the offending value, so a rejected document says which member was at
+ * fault rather than only that one was.
  *
  * Extends `TypeError`: passing a non-JSON value to a canonicalizer is a
  * programming error, the same class `JSON.stringify` raises for a
- * BigInt or a cycle.
+ * BigInt or a cycle. That is why it is not a `CodedError` (an `Error`),
+ * though it carries a `code` as one does.
  */
 export class JsonCanonicalizeError extends TypeError {
-  constructor(message, dataPath) {
+  /**
+   * @param {string} message - What is wrong with the value
+   * @param {string} dataPath - JSON Pointer to the offending value
+   * @param {string} [code] - The refusal's code, one of {@link CANONICAL_CODES}
+   */
+  constructor(message, dataPath, code) {
     super(`${message} at ${dataPath === '' ? 'the document root' : dataPath}`);
     this.name = 'JsonCanonicalizeError';
+    this.code = code;
     this.dataPath = dataPath;
   }
 }
 
-function fail(message, dataPath) {
-  throw new JsonCanonicalizeError(message, dataPath);
+function fail(code, message, dataPath) {
+  throw new JsonCanonicalizeError(message, dataPath, code);
 }
 
 // RFC 6901 escaping for the diagnostic pointer only.
@@ -60,7 +86,7 @@ function appendPath(path, token) {
 
 function serializeString(value, path) {
   if (RE_LONE_SURROGATE.test(value))
-    fail('a string with an unpaired surrogate is not valid Unicode', path);
+    fail('JO2007', 'a string with an unpaired surrogate is not valid Unicode', path);
   // Section 3.2.2.2 is the JSON string escape discipline with the
   // shortest possible escapes and no escaping of non-ASCII - which is
   // precisely what ECMAScript's JSON.stringify emits for a string.
@@ -69,7 +95,7 @@ function serializeString(value, path) {
 
 function serializeNumber(value, path) {
   if (!Number.isFinite(value))
-    fail(`${value === value ? String(value) : 'NaN'} is not a JSON number`, path);
+    fail('JO2003', `${value === value ? String(value) : 'NaN'} is not a JSON number`, path);
   // Section 3.2.2.3 mandates ECMAScript's Number::toString, which is
   // what String() is - including `-0` serializing as `0`.
   return String(value);
@@ -89,18 +115,18 @@ function serializeValue(value, path, stack) {
     case 'object':
       break;
     case 'undefined':
-      return fail('undefined is not a JSON value', path);
+      return fail('JO2004', 'undefined is not a JSON value', path);
     case 'bigint':
-      return fail('a BigInt is not a JSON number', path);
+      return fail('JO2005', 'a BigInt is not a JSON number', path);
     default: // 'function', 'symbol'
-      return fail(`a ${typeof value} is not a JSON value`, path);
+      return fail('JO2006', `a ${typeof value} is not a JSON value`, path);
   }
 
   if (stack.has(value))
-    fail('a circular reference cannot be canonicalized', path);
+    fail('JO2002', 'a circular reference cannot be canonicalized', path);
   // `stack` holds the containers open around this one: its size is the depth
   if (stack.size >= DATA_DEPTH_CEILING)
-    fail(`a value nested deeper than ${DATA_DEPTH_CEILING} levels cannot be canonicalized`, path);
+    fail('JO2001', `a value nested deeper than ${DATA_DEPTH_CEILING} levels cannot be canonicalized`, path);
   stack.add(value);
 
   let out;
@@ -123,7 +149,7 @@ function serializeValue(value, path, stack) {
     // gets signed is the value that was passed in.
     const proto = Object.getPrototypeOf(value);
     if (proto !== null && proto !== Object.prototype)
-      fail(`a ${value.constructor?.name ?? 'non-plain'} instance is not a JSON object`, path);
+      fail('JO2008', `a ${value.constructor?.name ?? 'non-plain'} instance is not a JSON object`, path);
     // Section 3.2.3: members sorted by the UTF-16 code units of their
     // names, which is what the default string sort compares.
     const keys = Object.keys(value).sort();

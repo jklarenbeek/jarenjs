@@ -118,7 +118,10 @@ the formula's messages renders.
 JSON Query semantics apply unchanged: missing paths yield an empty sequence;
 explicit null is a value. Numeric operators do not convert strings to numbers.
 Native floating-point overflow/non-finite values and non-JSON host results are
-refused at the formula boundary. Rounding is explicit: `$round`,
+refused at the formula boundary as `JQ2013`, a batch cell's code too; for a
+value that is not JSON data the thrown error's `cause` is the
+`JsonCanonicalizeError` naming the value's own code (`CANONICAL_CODES`) and its
+`dataPath`. Rounding is explicit: `$round`,
 `$round-half-to-even`, `$floor`, `$ceiling` and `$abs` are Query operators
 ([QUERY-FORMAT §8.5](QUERY-FORMAT.md#85-arithmetic--add-sub-mul-div-idiv-mod-neg-rounding)),
 and `$round` with a precision rounds the exact binary value, as XPath F&O

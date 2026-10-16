@@ -28,6 +28,7 @@ import { CONTRACT_CODES } from '@jarenjs/contract';
 import { VALIDATE_CODES } from '@jarenjs/validate';
 import { JSONX_CODES } from '@jarenjs/josl';
 import { CHECK_CODES } from '@jarenjs/core/check';
+import { CANONICAL_CODES } from '@jarenjs/json/canonical';
 
 /**
  * Extract every code with the given prefix from one or more format
@@ -59,6 +60,7 @@ const TABLES = /** @type {[string, Record<string, string>, string, string][]} */
   ['VALIDATE_CODES', VALIDATE_CODES, 'packages/validate/docs/ERROR-MESSAGES.md', 'JK'],
   ['JSONX_CODES', JSONX_CODES, 'packages/josl/FORMAT.md', 'JSONX'],
   ['CHECK_CODES', CHECK_CODES, 'packages/core/README.md', 'JG'],
+  ['CANONICAL_CODES', CANONICAL_CODES, 'packages/json/README.md', 'JO'],
 ]);
 
 describe('runtime code tables match the format docs', () => {

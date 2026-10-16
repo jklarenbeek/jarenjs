@@ -36,7 +36,7 @@ None of it depends on JSON Schema: every module can be used standalone in any Ja
 | Write operations | `compileJSONPointerSetter`/`Inserter`/`Remover`, `compileJSONPathSetter`/`Inserter`/`Remover`, one-shot `setAtJSONPointer`, `removeAtJSONPath`, ..., `JsonWriteError` |
 | Addressing bridge | `jsonPointerFromJSONPath`, `jsonPathFromJSONPointer` |
 | JSONPath ([RFC 9535](https://www.rfc-editor.org/rfc/rfc9535.html)) | `compileJSONPath`, `queryJSONPath`, `parseJSONPath`, `isValidJSONPathStrict`, `isValidJSONPathSegments` |
-| Canonical JSON ([RFC 8785](https://www.rfc-editor.org/rfc/rfc8785.html)) | `canonicalizeJson`, `cloneJson`, `canonicalSha256`, `JsonCanonicalizeError` |
+| Canonical JSON ([RFC 8785](https://www.rfc-editor.org/rfc/rfc8785.html)) | `canonicalizeJson`, `cloneJson`, `canonicalSha256`, `JsonCanonicalizeError`, `CANONICAL_CODES` |
 | Jaren JSON Query | `compileJsonQuery`, `queryJson`, `JsonQueryCompileError`, `JsonQueryRuntimeError` |
 | Jaren JSLT | `compileJsltStylesheet`, `transformJson`, `JsltCompileError`, `JsltRuntimeError` |
 | Jaren JTLT | `compileJtltStylesheet`, `renderText`, `validateJtltTemplate`, `JtltCompileError`, `JtltRuntimeError` |
@@ -216,6 +216,21 @@ removeAtJSONPath(doc, '$.store.book[?@.price > 20]');
 Set replaces (creating a missing final member; `/arr/-` appends), insert has RFC 6902 `add` semantics (array elements shift right), remove deletes with shift. The query-selected writers deduplicate matched locations and apply them in **reverse document order**, independent of selector order (including reversed unions and negative-step slices), so multiple removals or inserts in one array — and nested matches — compose without index bookkeeping, and matching nothing is a no-op that returns the input. Everything is copy-on-write with an in-place `{ mutate: true }` escape hatch; failures (`JsonWriteError`, `JW0001`/`JW2xxx` with the target as `dataPath`) leave the input untouched. A query-selected writer whose descendant segment reaches a value nested deeper than 1000 levels throws the selecting query's `JsonQueryRuntimeError` `JQ2009` (`JQ2016` when the value holds a cycle; see the JSONPath section), also before anything is written.
 
 The addressing bridge rounds this out: `jsonPointerFromJSONPath(singularQuery)` and `jsonPathFromJSONPointer(pointer)` convert between the two location languages (digit tokens become index selectors — RFC 6901's one-token-two-forms ambiguity, resolved by convention), so pointers, normalized paths and query results compose freely.
+
+### Canonical JSON
+
+`canonicalizeJson(value)` writes the RFC 8785 canonical text of a JSON value — members sorted by UTF-16 code units, numbers in `Number::toString` form — for hashing and signing; `cloneJson` copies through it and `canonicalSha256` hashes it. Nothing is dropped or coerced: a value that is not JSON data throws a `JsonCanonicalizeError` (a `TypeError`) whose `code` names the kind of value and whose `dataPath` is a JSON Pointer to it (`NaN is not a JSON number at /a`). The codes are exported as `CANONICAL_CODES`; a cycle and a nesting past 1000 levels carry the codes `@jarenjs/core/object`'s equality and walks raise for the same conditions. *Upgrade: the error used to carry no `code`; its message is unchanged.*
+
+| code | refused value |
+| --- | --- |
+| `JO2001` | a value nested deeper than 1000 levels |
+| `JO2002` | a circular reference, located at the member that closes it |
+| `JO2003` | a number that is not finite (`NaN`, `Infinity`, `-Infinity`) |
+| `JO2004` | `undefined`, as a member, an element or an array hole |
+| `JO2005` | a BigInt |
+| `JO2006` | a function or a symbol |
+| `JO2007` | a string or member name with an unpaired surrogate |
+| `JO2008` | an object that is not a plain object or array (a `Date`, a `Map`, a class instance) |
 
 ## The JSONPath compiler
 

@@ -30,7 +30,7 @@ import { schemaPosition } from './schema-positions.js';
 import { compileJsonQuery } from '@jarenjs/json/query';
 import { compileJsltStylesheet } from '@jarenjs/json/jslt';
 
-import { DbCompileError, wrapDriverError } from './errors.js';
+import { DbCompileError, isJarenCoded, wrapDriverError } from './errors.js';
 import { readOptions, readControls } from './options.js';
 import { storedKeyMatches } from './key-text.js';
 import { chain, attempt, useStatementOnce } from './driver.js';
@@ -301,9 +301,6 @@ function receiptStamp(runtime, owner, undone) {
   return stamp;
 }
 
-/** A Jaren coded error: it already names its failure. @param {any} error */
-const isCoded = (error) => typeof error?.code === 'string' && /^J[A-Z]\d{4}$/.test(error.code);
-
 /**
  * The class and retry verdict a failure carries: a classified error's own,
  * a driver error's classification (a busy database, a constraint), and
@@ -327,7 +324,7 @@ function verdictOf(cause) {
  * @param {any} migration @param {number} index @param {string} kind @param {any} error
  */
 function stepFailed(migration, index, kind, error) {
-  if (isCoded(error)) {
+  if (isJarenCoded(error)) {
     if (error.code === 'JD0023' && typeof error.class !== 'string') Object.assign(error, { class: 'error', retryable: false });
     return error;
   }
@@ -344,7 +341,7 @@ function stepFailed(migration, index, kind, error) {
  * @param {any} error @param {string} reason
  */
 function runFailure(error, reason) {
-  if (isCoded(error)) {
+  if (isJarenCoded(error)) {
     if (error.code === 'JD0023' && typeof error.class !== 'string') Object.assign(error, { class: 'error', retryable: false });
     return error;
   }

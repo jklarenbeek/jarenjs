@@ -101,3 +101,16 @@ it('a memo hit needs the same input in the same member order', () => {
   assert.equal(again.counts.cached, 0);
   assert.equal(batch.evaluate(reordered).counts.cached, 2, 'the same order still hits');
 });
+
+it('a row that is not JSON is a JQ2013 cell, whatever the canonicalizer\'s code for it', () => {
+  const batch = compileFormulaBatch([target('x', '$.x')]);
+  const result = batch.evaluate([{ id: 1, x: NaN }, { id: 2, x: [1, undefined] }, { id: 3, x: new Map() }, { id: 4, x: 5 }]);
+  assert.deepEqual(result.errors, [
+    { targetId: 'x', code: 'JQ2013', message: 'NaN is not a JSON number at /x', docPath: '', rowId: 1 },
+    { targetId: 'x', code: 'JQ2013', message: 'undefined is not a JSON value at /x/1', docPath: '', rowId: 2 },
+    { targetId: 'x', code: 'JQ2013', message: 'a Map instance is not a JSON object at /x', docPath: '', rowId: 3 },
+  ]);
+  assert.deepEqual(result.results.map((row) => row.outcomes.x),
+    [0, 1, 2].map((diagnostic) => ({ kind: 'error', code: 'JQ2013', diagnostic })).concat([{ kind: 'value', value: 5 }]));
+});
+

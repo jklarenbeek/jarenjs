@@ -518,6 +518,21 @@ export function isConnectionLoss(error) {
 }
 
 /**
+ * Whether an error is a Jaren coded error, one that already names its
+ * failure and passes the store's wrappers with its code. A canonicalization
+ * refusal (`JsonCanonicalizeError`, a `TypeError` with a `JO` code) is not
+ * one here: it names data a host handed over that is not JSON, and the
+ * lifecycle that meets it keeps its own promised code (`JD0023`, `JD2078`),
+ * the refusal with its code and `dataPath` as the `cause`. It is matched by
+ * name, so a second copy of `@jarenjs/json` in a host's tree is matched too.
+ * @param {any} error
+ * @returns {boolean}
+ */
+export function isJarenCoded(error) {
+  return typeof error?.code === 'string' && /^J[A-Z]\d{4}$/.test(error.code) && error.name !== 'JsonCanonicalizeError';
+}
+
+/**
  * A lost connection as the coded failure the store reports, with
  * `retryable` decided the way the process and worker hosts decide it:
  * `true` only when no transaction outcome is at stake (the loss came
@@ -529,7 +544,7 @@ export function isConnectionLoss(error) {
  * @returns {DbRuntimeError}
  */
 export function connectionLost(cause, context) {
-  if (typeof cause?.code === 'string' && /^J[A-Z]\d{4}$/.test(cause.code) && cause.code !== 'JD2087') return cause;
+  if (isJarenCoded(cause) && cause.code !== 'JD2087') return cause;
   const reason = typeof cause?.message === 'string' ? cause.message : String(cause);
   const error = cause?.code === 'JD2087' ? cause
     : new DbRuntimeError('JD2087', `${CONNECTION.reason}: ${reason}`, { cause });
@@ -797,7 +812,8 @@ function classifySqlState(state, error, unique) {
  * for, with `class` and `retryable` as own members and the original as
  * `cause`. Anything that is not a driver's own error — a coded refusal
  * of this package or of the query engine (a `JQ` error thrown inside a
- * pushed user function), an API-misuse `TypeError` — is the error, and
+ * pushed user function), an API-misuse `TypeError` (a canonicalization
+ * refusal is one, its `JO` code notwithstanding) — is the error, and
  * passes through untouched.
  * @param {any} error
  * @param {WrapDetails} details - `duplicateReason` is the `JD2001`
@@ -821,7 +837,7 @@ export function wrapDriverError(error, details = {}) {
       first = first.errors[0];
     }
     const primary = wrapDriverError(first, details);
-    if (typeof primary?.code === 'string' && /^J[A-Z]\d{4}$/.test(primary.code)) {
+    if (isJarenCoded(primary)) {
       // Keep the original and the cleanup failure together, while callers
       // continue to branch on the original classified failure and its cause.
       for (const member of ['code', 'reason', 'class', 'retryable', 'docPath', 'collection', 'key', 'cause']) {
@@ -830,7 +846,7 @@ export function wrapDriverError(error, details = {}) {
     }
     return error;
   }
-  if (typeof error?.code === 'string' && /^J[A-Z]\d{4}$/.test(error.code)) return error;
+  if (isJarenCoded(error)) return error;
   if (!isDriverError(error)) {
     if (details.always !== true) return error;
     const generic = new DbRuntimeError(details.code ?? 'JD2005',

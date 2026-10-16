@@ -1,7 +1,7 @@
 //@ts-check
 /** JSON snapshots and diagnostics shared by formula, migration and review compilers. */
 import { cloneJson, deepFreeze, isJsonObject, isPlainOptions, refuseUnknownMembers } from '@jarenjs/core/object';
-import { canonicalizeJson } from '../canonical.js';
+import { canonicalizeJson, JsonCanonicalizeError } from '../canonical.js';
 import { CodedDocPathError } from '../errors.js';
 import { messageRef, renderMessageId } from '../message-ref.js';
 import { formulaMessagesEn } from './messages.js';
@@ -64,6 +64,17 @@ export function causeMessage(cause) {
   return typeof cause?.messageId === 'string' && isJsonObject(cause.params)
     ? formulaMessage('query/formula/query', { message: messageRef(cause.messageId, cause.params) })
     : formulaMessage('query/formula/detail', { detail: String(cause?.reason ?? cause?.message ?? cause) });
+}
+
+/**
+ * The code a formula reports for an error it met: the error's own, or
+ * `fallback` when it has none. Data that is not JSON is the formula's own
+ * refusal (`JQ2013` at run time) whatever the canonicalizer's code for it:
+ * that code and its `dataPath` stay on the refusal, the error's `cause`.
+ * @param {any} cause @param {string} fallback
+ */
+export function causeCode(cause, fallback) {
+  return cause instanceof JsonCanonicalizeError ? fallback : cause.code ?? fallback;
 }
 
 /** Validate before copying: no dropped undefined, host objects or non-finite numbers. */

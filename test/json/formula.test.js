@@ -5,6 +5,7 @@ import { checkFormulaParity, compileFormula, createFormulaCompiler, formulaDocum
 import { defineFormula } from '@jarenjs/linq/formula';
 import { createTypeTestCompiler } from '@jarenjs/validate/query';
 import { QUERY_CODES } from '@jarenjs/json/query';
+import { JsonCanonicalizeError } from '@jarenjs/json/canonical';
 
 const doc = (expression, options = {}) => defineFormula('amount', expression, options);
 it('saved structured formulas retain JSON types, optional absence and explicit inputs', () => {
@@ -134,3 +135,22 @@ it('one compiler answers each member order of a profile as a fresh compiler does
   const one = createFormulaCompiler();
   assert.equal(one.compile(doc(pairs[1][0])), one.compile(doc(pairs[1][0])), 'the same order still hits');
 });
+
+it('data that is not JSON is the formula\'s JQ2013, the canonicalizer\'s code and place kept on the cause', () => {
+  const cases = /** @type {[any, any, string, string, string][]} */ ([
+    ['$.x', { x: NaN }, 'JO2003', '/x', 'JQ2013: amount: NaN is not a JSON number at /x at /expression'],
+    ['$.x', { x: [1, undefined] }, 'JO2004', '/x/1', 'JQ2013: amount: undefined is not a JSON value at /x/1 at /expression'],
+    ['$.x', { x: new Date(0) }, 'JO2008', '/x', 'JQ2013: amount: a Date instance is not a JSON object at /x at /expression'],
+    // the result a formula answers is checked as its input is
+    [{ $mul: [1e308, 1e308] }, {}, 'JO2003', '/value', 'JQ2013: amount: Infinity is not a JSON number at /value at /expression'],
+  ]);
+  for (const [expression, input, code, dataPath, message] of cases) {
+    assert.throws(() => compileFormula(doc(expression)).evaluate(input), (e) => {
+      assert.deepEqual([e.name, e.code, e.docPath, e.message], ['FormulaError', 'JQ2013', '/expression', message]);
+      assert.ok(e.cause instanceof JsonCanonicalizeError && e.cause instanceof TypeError);
+      assert.deepEqual([e.cause.code, e.cause.dataPath], [code, dataPath]);
+      return true;
+    });
+  }
+});
+
