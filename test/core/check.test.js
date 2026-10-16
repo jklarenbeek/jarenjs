@@ -1,21 +1,11 @@
 //@ts-check
 import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
-import { checkOutcome, composeChecks } from '@jarenjs/core/check';
+import { checkOutcome, composeChecks, checkCompile, CHECK_CODES } from '@jarenjs/core/check';
+import { CodedError } from '@jarenjs/core/errors';
 import { compileJsonQuery, JsonQueryCompileError } from '@jarenjs/json/query';
 
-function compileGate(compile) {
-  return (doc) => {
-    try {
-      compile(doc);
-      return true;
-    }
-    catch (err) {
-      const e = /** @type {any} */ (err);
-      return { valid: false, errors: [{ code: e.code, docPath: e.docPath, message: e.message }] };
-    }
-  };
-}
+const compileGate = (compile) => checkCompile(compile, { fallbackCode: 'HOST0001' });
 
 describe('core — composeChecks', function () {
   it('passes a value through every check; the first invalid wins', function () {
@@ -136,5 +126,73 @@ describe('core — an invalid outcome always names an error', function () {
     assert.throws(() => composeChecks(async () => true)(1), { code: 'JG0001' });
     await new Promise((resolve) => setImmediate(resolve));
     assert.strictEqual(rejectedLater, true, 'the refused promise settled without an unhandled rejection');
+  });
+});
+
+describe('core — checkCompile turns a throwing compile into a check', function () {
+  const gate = checkCompile(compileJsonQuery, { fallbackCode: 'HOST0001' });
+
+  it('a compile that returns answers valid, a fresh outcome each time', function () {
+    const first = gate({ $for: { b: '$.x[*]' }, $return: '$b' });
+    assert.deepStrictEqual(first, { valid: true, errors: [] });
+    assert.notStrictEqual(gate({ $for: { b: '$.x[*]' }, $return: '$b' }), first);
+  });
+
+  it('a coded throw answers its own code, docPath and bare reason', function () {
+    assert.deepStrictEqual(gate({ a: { $bogus: 1 } }), { valid: false, errors: [
+      { code: 'JQ0002', docPath: '/a', message: "unknown operator '$bogus'" }] });
+    assert.deepStrictEqual(gate({ $bogus: [1] }), { valid: false, errors: [
+      { code: 'JQ0002', docPath: '', message: "unknown operator '$bogus'" }] });
+  });
+
+  it('a coded throw without a location answers the root docPath', function () {
+    const check = checkCompile(() => { throw new CodedError('XError', 'JX0001', 'no location'); }, { fallbackCode: 'HOST0001' });
+    assert.deepStrictEqual(check(1), { valid: false, errors: [{ code: 'JX0001', docPath: '', message: 'no location' }] });
+  });
+
+  it('a throw without a code answers the host fallback code, never an empty one', function () {
+    const thrower = (value) => checkCompile(() => { throw value; }, { fallbackCode: 'HOST0001' })(null);
+    assert.deepStrictEqual(thrower(new TypeError('not a document')),
+      { valid: false, errors: [{ code: 'HOST0001', docPath: '', message: 'not a document' }] });
+    assert.deepStrictEqual(thrower(Object.assign(new Error('numeric code'), { code: 42, docPath: 7 })),
+      { valid: false, errors: [{ code: 'HOST0001', docPath: '', message: 'numeric code' }] });
+    assert.deepStrictEqual(thrower(Object.assign(new Error('empty code'), { code: '' })),
+      { valid: false, errors: [{ code: 'HOST0001', docPath: '', message: 'empty code' }] });
+    assert.deepStrictEqual(thrower('a bare text'),
+      { valid: false, errors: [{ code: 'HOST0001', docPath: '', message: 'a bare text' }] });
+    assert.deepStrictEqual(thrower(undefined),
+      { valid: false, errors: [{ code: 'HOST0001', docPath: '', message: 'undefined' }] });
+    assert.deepStrictEqual(thrower(null),
+      { valid: false, errors: [{ code: 'HOST0001', docPath: '', message: 'null' }] });
+  });
+
+  it('hands the compile the checked value itself', function () {
+    const seen = [], value = { n: 1 };
+    assert.deepStrictEqual(checkCompile((v) => { seen.push(v); }, { fallbackCode: 'HOST0001' })(value), { valid: true, errors: [] });
+    assert.strictEqual(seen.length, 1);
+    assert.strictEqual(seen[0], value);
+  });
+
+  it('composes after a schema check: the first failure wins', function () {
+    const shape = (doc) => typeof doc === 'object' && doc !== null
+      ? true : { valid: false, errors: [{ code: 'SHAPE', docPath: '', message: 'not an object' }] };
+    const check = composeChecks(shape, gate);
+    assert.deepStrictEqual(check(5), { valid: false, errors: [{ code: 'SHAPE', docPath: '', message: 'not an object' }] });
+    assert.deepStrictEqual(check({ a: { $bogus: 1 } }), { valid: false, errors: [
+      { code: 'JQ0002', docPath: '/a', message: "unknown operator '$bogus'" }] });
+    assert.deepStrictEqual(check({ $for: { b: '$.x[*]' }, $return: '$b' }), { valid: true, errors: [] });
+  });
+
+  it('refuses a missing compile or fallback code when it is made', function () {
+    const message = /checkCompile needs/;
+    assert.throws(() => checkCompile(/** @type {any} */ (undefined), { fallbackCode: 'HOST0001' }), { name: 'TypeError', message });
+    for (const options of [undefined, {}, { fallbackCode: '' }, { fallbackCode: 1 }, { fallbackCode: null }])
+      assert.throws(() => checkCompile(compileJsonQuery, /** @type {any} */ (options)), { name: 'TypeError', message }, JSON.stringify(options));
+  });
+});
+
+describe('core — CHECK_CODES', function () {
+  it('names the guarded refusal of an asynchronous hook', function () {
+    assert.deepStrictEqual(Object.keys(CHECK_CODES), ['JG0001', 'JG0002', 'JG2001']);
   });
 });

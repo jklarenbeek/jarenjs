@@ -13,6 +13,11 @@
  * or an `errors` that is no error (text, a number) is reported as the one
  * coded error `JG2001` at the root. `errors` is always a list: one error
  * object a check did not put in a list is answered as the list of it.
+ *
+ * {@link checkCompile} makes a check of a compile that refuses by
+ * throwing, and {@link CHECK_CODES} also holds the code a guarded
+ * refiner throws when its synchronous `prepare` meets an asynchronous
+ * hook (`@jarenjs/core/guarded`).
  */
 
 import { CodedError } from './errors.js';
@@ -57,11 +62,13 @@ import { isThenable } from './function.js';
  */
 
 /**
- * The codes {@link checkOutcome} raises or reports.
- * @type {Readonly<Record<'JG0001' | 'JG2001', string>>}
+ * The codes {@link checkOutcome} and a guarded refiner's `prepare`
+ * raise or report.
+ * @type {Readonly<Record<'JG0001' | 'JG0002' | 'JG2001', string>>}
  */
 export const CHECK_CODES = Object.freeze({
   JG0001: 'a check answered a promise, which checkOutcome cannot read',
+  JG0002: 'a guarded hook answered a promise, which the synchronous prepare cannot await',
   JG2001: 'a check answered invalid without naming an error',
 });
 
@@ -129,11 +136,7 @@ function listedErrors(errors) {
  * shape through {@link checkOutcome} and each error carries a `code`
  * and a `docPath` the repair loop can act on.
  *
- * A compile gate is the two-line adapter `(doc) => { try { compile(doc);
- * return true; } catch (e) { return { valid: false, errors: [{ code:
- * e.code, docPath: e.docPath, message: e.reason ?? e.message }] }; } }`
- * — `reason` is the bare text of a coded error; falling back to
- * `message` keeps the adapter total over non-coded throws.
+ * A compile gate is {@link checkCompile} over the engine's compile.
  *
  * @template {((value: any) => unknown)[]} C
  * @param {C} checks - each returns a boolean or a `{ valid, errors }`
@@ -147,5 +150,54 @@ export function composeChecks(...checks) {
       if (!outcome.valid) return outcome;
     }
     return { valid: true, errors: [] };
+  };
+}
+
+/**
+ * The one error {@link checkCompile} answers for a throw: the thrown
+ * value's own `code` and `docPath`, and its bare `reason` as `message`.
+ * @typedef {{ code: string, docPath: string, message: string }} CompileCheckError
+ */
+
+/**
+ * Make a check of a compile that refuses by throwing: any jarenjs
+ * `compile*` (a `CodedError` carrying `code`, `docPath` and `reason`)
+ * or a host's own. The check hands the compile the checked value; a
+ * compile that returns answers `{ valid: true, errors: [] }` (its return
+ * value is not read), and a throw answers `{ valid: false, errors:
+ * [{ code, docPath, message }] }`, a fresh object each time. `code` is
+ * the thrown value's own when it is non-empty text and `fallbackCode`
+ * otherwise; `docPath` is its own when it is text and `''` (the root)
+ * otherwise; `message` is its `reason` (a coded error's bare text), else
+ * its `message`, else the value as text. The compile must refuse
+ * synchronously: a promise it returns is not awaited.
+ *
+ * The check composes with {@link composeChecks}, after a schema check:
+ * `composeChecks(schemaCheck, checkCompile(compileJsonQuery, {
+ * fallbackCode }))`.
+ * @param {(value: any) => unknown} compile - throws to refuse a value
+ * @param {{ fallbackCode: string }} options - `fallbackCode` is the code
+ *   a throw that carries none answers, chosen by the host
+ * @returns {(value: any) => CheckOutcome<CompileCheckError>}
+ * @throws {TypeError} when `compile` is not a function or `fallbackCode`
+ *   is not non-empty text
+ */
+export function checkCompile(compile, options) {
+  const fallbackCode = options?.fallbackCode;
+  if (typeof compile !== 'function' || typeof fallbackCode !== 'string' || fallbackCode === '')
+    throw new TypeError('checkCompile needs a compile function and a non-empty fallbackCode');
+  return (value) => {
+    try {
+      compile(value);
+      return { valid: true, errors: [] };
+    }
+    catch (error) {
+      const { code, docPath, reason, message } = /** @type {any} */ (error) ?? {};
+      return { valid: false, errors: [{
+        code: typeof code === 'string' && code !== '' ? code : fallbackCode,
+        docPath: typeof docPath === 'string' ? docPath : '',
+        message: typeof reason === 'string' ? reason : typeof message === 'string' ? message : String(error),
+      }] };
+    }
   };
 }

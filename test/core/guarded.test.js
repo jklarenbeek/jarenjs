@@ -10,10 +10,7 @@ it('awaits async verdicts and plans without changing synchronous prepare', async
     validateCandidate: async (next, previous) => { next.value = 99; previous.value = 99; return true; },
     planCommit: async next => ({ plan: next }), commit: async plan => { writes.push(plan); return plan; },
   });
-  const sync = engine.prepare(original, proposal);
-  assert.equal(sync.valid, false);
-  assert.match(sync.errors[0].message, /prepareAsync/);
-  assert.equal(sync.then, undefined);
+  assert.throws(() => engine.prepare(original, proposal), { name: 'GuardedRefinerError', code: 'JG0002' });
   assert.deepEqual((await engine.prepareAsync(original, proposal)).plan, { value: 2 });
   assert.equal((await engine.commit(proposal)).ok, true);
   assert.deepEqual(writes, [{ value: 2 }]);
@@ -121,4 +118,69 @@ it('a refused plan names its errors as the shape and candidate stages do', async
     assert.equal((await refiner.commit({})).ok, true, JSON.stringify(plan));
     assert.deepEqual(writes, [plan], JSON.stringify(plan));
   }
+});
+
+it('a synchronous preparation over an asynchronous hook throws the registered JG0002', async () => {
+  const unhandled = [], onUnhandled = reason => unhandled.push(reason);
+  process.on('unhandledRejection', onUnhandled);
+  try {
+    const hooks = { validateProposal: 'shape', apply: 'apply', validateCandidate: 'candidate', planCommit: 'plan' };
+    for (const [hook, stage] of Object.entries(hooks)) {
+      const ran = [], applied = [];
+      const sync = {
+        validateProposal: () => { ran.push('validateProposal'); return true; },
+        apply: (document, proposal) => { ran.push('apply'); return { ...document, ...proposal }; },
+        validateCandidate: () => { ran.push('validateCandidate'); return true; },
+        planCommit: next => { ran.push('planCommit'); return { plan: next }; },
+      };
+      const engine = createGuardedRefiner({ read: () => ({ n: 1 }), ...sync,
+        [hook]: () => { ran.push(hook); return Promise.reject(new Error('settled later')); },
+        applyFailure: error => { applied.push(error); return { code: 'APPLY', docPath: '', message: 'apply failed' }; },
+        commit: () => assert.fail('a refused preparation committed') });
+      assert.throws(() => engine.prepare({ n: 1 }, { m: 2 }), error => {
+        assert.equal(error.name, 'GuardedRefinerError');
+        assert.equal(error.code, 'JG0002');
+        assert.equal(error.reason, `the ${hook} hook answered a promise, which the synchronous prepare cannot await \u2014 `
+          + 'call prepareAsync or commit, or answer synchronously');
+        assert.equal(error.docPath, undefined);
+        return true;
+      }, stage);
+      assert.deepEqual(ran, Object.keys(hooks).slice(0, Object.keys(hooks).indexOf(hook) + 1), `${stage}: later hooks never run`);
+      assert.deepEqual(applied, [], `${stage}: applyFailure never reads the refusal`);
+    }
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(unhandled, [], 'the refused promise is settled, never left unhandled');
+  }
+  finally { process.off('unhandledRejection', onUnhandled); }
+});
+
+it('a hook that throws a JG0002 of its own is reported, not rethrown', () => {
+  const own = Object.assign(new Error('JG0002: own'), { code: 'JG0002' });
+  const engine = createGuardedRefiner({ read: () => ({}), validateProposal: () => true, apply: d => d,
+    validateCandidate: () => { throw own; }, planCommit: n => n, commit: () => null });
+  assert.deepEqual(engine.prepare({}, {}), { valid: false, errors: [
+    { code: 'JG0002', docPath: '', message: 'JG0002: own', stage: 'candidate' }] });
+});
+
+it('a hook that throws undefined is reported as before', () => {
+  const engine = createGuardedRefiner({ read: () => ({}), validateProposal: () => true, apply: d => d,
+    validateCandidate: () => { throw undefined; }, planCommit: n => n, commit: () => null });
+  assert.deepEqual(engine.prepare({}, {}), { valid: false, errors: [
+    { code: 'GUARDED', docPath: '', message: 'undefined', stage: 'candidate' }] });
+});
+
+it('a synchronous preparation over synchronous hooks answers as before', () => {
+  const make = over => createGuardedRefiner({ read: () => ({ n: 1 }), validateProposal: () => true,
+    apply: (document, proposal) => ({ ...document, ...proposal }), validateCandidate: () => true,
+    planCommit: next => ({ plan: next }), commit: () => null, ...over });
+  assert.deepEqual(make({}).prepare({ n: 1 }, { m: 2 }),
+    { valid: true, errors: [], next: { n: 1, m: 2 }, plan: { n: 1, m: 2 } });
+  assert.deepEqual(make({ validateProposal: () => false }).prepare({ n: 1 }, { m: 2 }),
+    { valid: false, errors: [{ code: 'JG2001', docPath: '', message: 'the value was rejected by a check that named no error' }] });
+  assert.deepEqual(make({ apply: () => { throw new TypeError('bad edit'); } }).prepare({ n: 1 }, { m: 2 }),
+    { valid: false, errors: [{ code: 'GUARDED', docPath: '', message: 'bad edit', stage: 'apply' }] });
+  assert.deepEqual(make({ apply: () => { throw new TypeError('bad edit'); }, applyFailure: error => ({ code: 'APPLY', message: error.message }) })
+    .prepare({ n: 1 }, { m: 2 }), { valid: false, errors: [{ code: 'APPLY', message: 'bad edit' }] });
+  assert.deepEqual(make({ planCommit: () => ({ valid: false, errors: [{ code: 'P1', docPath: '/n', message: 'no' }] }) })
+    .prepare({ n: 1 }, { m: 2 }), { valid: false, errors: [{ code: 'P1', docPath: '/n', message: 'no' }] });
 });

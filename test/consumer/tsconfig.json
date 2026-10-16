@@ -39,6 +39,7 @@
     "db-migration-identity.ts",
     "schema-vocabulary.ts",
     "typed-outcomes.ts",
+    "check-compile.ts",
     "validate-narrow.ts"
   ],
   "include": [

@@ -95,8 +95,9 @@ it returns a reviewable preview without writing target files.
 
 `createGuardedRefiner` keeps synchronous `prepare(document, proposal)`.
 `prepareAsync` and serialized `commit(proposal)` await shape, apply, candidate and
-planning hooks. Synchronous preparation refuses thenables with a validation error
-instead of interpreting a Promise as a plan. Async rejection is a failed verdict;
+planning hooks. Synchronous preparation refuses a hook's promise by throwing the
+coded `JG0002` (`GuardedRefinerError`) instead of interpreting a Promise as a plan
+or reporting it as a refused proposal. Async rejection is a failed verdict;
 no commit occurs. Every hook works on copied JSON; candidate/planning mutation
 cannot change the reader's document. Prepared values are captured before an
 asynchronous snapshot suspends. `commitPrepared` still requires the host's external

@@ -1,9 +1,11 @@
 //@ts-check
 import { checkOutcome } from './check.js';
+import { CodedError } from './errors.js';
 import { isThenable } from './function.js';
 /** @import { CheckErrorsOf, UnnamedCheckError } from './check.js' */
 
 const copy = (value) => value === undefined ? undefined : JSON.parse(JSON.stringify(value));
+const HOOKS = { shape: 'validateProposal', apply: 'apply', candidate: 'validateCandidate', plan: 'planCommit' };
 const failure = (error, stage) => ({ code: error?.code ?? 'GUARDED',
   docPath: error?.docPath ?? '', message: error?.message ?? String(error), stage });
 
@@ -69,7 +71,8 @@ const failure = (error, stage) => ({ code: error?.code ?? 'GUARDED',
  * `P` the proposal `validateProposal` accepts, `N` the next document
  * `apply` answers, `R` `planCommit`'s answer, `V` `commit`'s answer and
  * `S` `snapshot`'s token. Each hook may answer a promise, which
- * `prepareAsync` and `commit` await and `prepare` refuses.
+ * `prepareAsync` and `commit` await and `prepare` refuses by throwing
+ * `JG0002`.
  * @template D, P, N, R, V, S, VP, VC, A
  * Each type is read from the one hook that produces it (`D` from `read`,
  * `P` from `validateProposal`'s parameter, `N` from `apply`, `R` from
@@ -133,7 +136,7 @@ export function createGuardedRefiner(options) {
   }
 
   function prepareWith(document, proposal, asynchronous) {
-    let stage = 'shape';
+    let stage = 'shape', refused;
     const iterator = stages(document, proposal);
     const failed = error => ({ valid: false, errors: [stage === 'apply' && options.applyFailure
       ? options.applyFailure(error) : failure(error, stage)] });
@@ -145,19 +148,30 @@ export function createGuardedRefiner(options) {
         const answer = item.value.run();
         if (isThenable(answer)) {
           if (!asynchronous) {
+            // the promise is refused, never read: settle its rejection here
             Promise.resolve(answer).catch(() => {});
-            throw new TypeError('asynchronous hook requires prepareAsync or commit');
+            throw refused = new CodedError('GuardedRefinerError', 'JG0002', `the ${HOOKS[stage]} hook answered a promise, `
+              + 'which the synchronous prepare cannot await — call prepareAsync or commit, or answer synchronously');
           }
           return Promise.resolve(answer).then(step, failed);
         }
         return step(answer);
       }
-      catch (error) { return failed(error); }
+      catch (error) {
+        // a host's missing await is not a refusal of the proposal: the
+        // refusal leaves every nested step instead of reaching the model
+        if (refused !== undefined && error === refused) throw error;
+        return failed(error);
+      }
     }
     return step(undefined);
   }
 
-  /** Validate and plan synchronously; thenables are refused, never committed. */
+  /**
+   * Validate and plan synchronously.
+   * @throws {CodedError} `JG0002` (named `GuardedRefinerError`) when a hook
+   *   answers a promise, which is refused and never read
+   */
   function prepare(document, proposal) { return prepareWith(document, proposal, false); }
 
   /** Validate and plan while awaiting asynchronous hooks on cloned inputs. */

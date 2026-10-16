@@ -27,17 +27,18 @@ delete it or fix it.
 
 ## @jarenjs/core
 
-- [ ] **A synchronous preparation refuses an asynchronous hook without a
-  code.** `createGuardedRefiner(…).prepare` over a hook that answers a promise
-  reports `{ valid: false, errors: [{ code: 'GUARDED', docPath: '', message:
-  'asynchronous hook requires prepareAsync or commit', stage }] }`: the
-  refusal is a `TypeError` whose fallback code `GUARDED` is in no code table,
-  where `checkOutcome` refuses the same mistake by throwing the registered
-  `JG0001` (`CheckOutcomeError`). A repair loop reading `code` cannot tell a
-  host's missing `await` from a model's error. Wanted: a registered code for
-  the refusal (in `CHECK_CODES` or a guarded table), and a decision whether it
-  is returned in the outcome or thrown as `checkOutcome` throws (the thrown
-  form refuses an input that answers today: a minor).
+- [ ] **A guarded hook's uncoded throw is reported under a code no table
+  holds.** `createGuardedRefiner`'s failure record for a throw from a hook,
+  snapshot, commit or restore takes the thrown value's `code` as it is and
+  `GUARDED` when it has none, so a plain `TypeError('bad edit')` from `apply`
+  reports `{ code: 'GUARDED', docPath: '', message: 'bad edit', stage: 'apply'
+  }`, a numeric `code: 42` with `docPath: 7` passes through as numbers, and a
+  coded error's `message` is its composed text (`"JQ0002: unknown operator
+  '$bogus' at /a"`) where `checkCompile` answers the bare `reason`. A repair
+  loop reading `code` meets an unregistered code. Wanted: a registered
+  fallback (or a host-chosen one, as `checkCompile` takes) and the same
+  reading of `code`, `docPath` and `reason`. Changing the reported code or
+  message is a change to answers hosts read today (a minor).
 
 ## @jarenjs/json — JSONPath & addressing
 

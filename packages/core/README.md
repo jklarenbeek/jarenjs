@@ -466,8 +466,8 @@ and explicit strict/AI/contract compatibility policies.
 
 ## Checks and guarded editing
 
-`@jarenjs/core/check` exports `checkOutcome`, `composeChecks` and
-`CHECK_CODES`. Only `true` or `{ valid: true }` passes. An invalid outcome
+`@jarenjs/core/check` exports `checkOutcome`, `composeChecks`, `checkCompile`
+and `CHECK_CODES`. Only `true` or `{ valid: true }` passes. An invalid outcome
 always names at least one error, since its errors are what a repair loop sends
 back to the model that wrote the value: an answer that carries errors keeps
 them (the same array), and one that carries none — `false`, `{ valid: false }`,
@@ -488,6 +488,7 @@ reading it as a list threw.*
 | code | condition |
 | --- | --- |
 | `JG0001` | a check answered a promise, which `checkOutcome` cannot read |
+| `JG0002` | a guarded hook answered a promise, which the synchronous `prepare` cannot await |
 | `JG2001` | a check answered invalid without naming an error |
 
 For a TypeScript consumer both answer `CheckOutcome<E>`, discriminated by
@@ -500,6 +501,34 @@ types the outcome as `never`. `CheckError` names the members a repair loop reads
 *Upgrade: the errors used to be typed `any[]`; code that reads a member only
 some errors carry (`instancePath`) now narrows first (`'instancePath' in error`).*
 
+`checkCompile(compile, { fallbackCode })` makes that check of a compile that
+refuses by throwing — any `compile*` of the suite, whose `CodedError` carries
+`code`, `docPath` and `reason`, or a host's own:
+
+```js
+import { checkCompile, composeChecks } from '@jarenjs/core/check';
+import { compileJsonQuery } from '@jarenjs/json/query';
+
+const isObject = (doc) => typeof doc === 'object' && doc !== null;
+const check = composeChecks(isObject, checkCompile(compileJsonQuery, { fallbackCode: 'HOST0001' }));
+check({ a: { $bogus: 1 } });
+// { valid: false, errors: [{ code: 'JQ0002', docPath: '/a', message: "unknown operator '$bogus'" }] }
+check({ a: '$.x' });
+// { valid: true, errors: [] }
+check(5);
+// { valid: false, errors: [{ code: 'JG2001', docPath: '', message: 'the value was rejected by a check that named no error' }] }
+```
+
+A compile that returns answers `{ valid: true, errors: [] }`; its return value
+is not read, so it must refuse synchronously. A throw answers one error: the
+thrown value's own `code` when that is non-empty text, else `fallbackCode`, so
+no error reaches a repair loop without a code; its own `docPath` when that is
+text, else `''`; and its `reason` (a coded error's bare text, without the code
+and location the composed `message` repeats), else its `message`, else the
+value as text. `fallbackCode` is required and chosen by the host; a missing or
+empty one, or a `compile` that is not a function, throws a `TypeError` when the
+check is made. In TypeScript the check answers `CheckOutcome<CompileCheckError>`.
+
 `@jarenjs/core/guarded` exports `createGuardedRefiner`: it
 copies JSON before validating/applying/planning, serializes its own commits,
 and pairs optional snapshot/restore hooks. A failed commit attempts restoration
@@ -507,7 +536,14 @@ once and retains both original and restoration failures. External writers must
 share the host's serialization policy.
 
 `prepareAsync` and `commit` await candidate validation and commit planning;
-synchronous `prepare` refuses asynchronous hooks.
+synchronous `prepare` throws a `CodedError` named `GuardedRefinerError` with
+code `JG0002` when a hook answers a promise, naming the hook: a host's missing
+`await` is not a refusal of the proposal, so it never reaches the outcome a
+repair loop sends back to a model. *Upgrade: `prepare` used to answer such a
+hook `{ valid: false, errors: [{ code: 'GUARDED', docPath: '', message:
+'asynchronous hook requires prepareAsync or commit', stage }] }`, and an
+asynchronous `apply` handed that error to `applyFailure`; call `prepareAsync`,
+or catch the throw where a host may pass an asynchronous hook.*
 
 The hooks type each other: `read` fixes the document, `validateProposal`'s
 parameter the proposal `prepare` and `commit` accept, `apply` the next document,
