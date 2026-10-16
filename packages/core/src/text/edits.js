@@ -313,6 +313,21 @@ function unified(path, before, after) {
     + rendered(oldLines, '-') + rendered(nextLines, '+');
 }
 
+const LINE_BREAK = /\r?\n/;
+
+/** Edits are line-granular, so a piece of text without a final line break (a replacement,
+ * or the file's unterminated last line) that the next piece would run into gets the file's
+ * line ending: its first break, else the edited text's, else LF. A piece with nothing
+ * after it keeps its missing final newline. */
+function terminateJoins(pieces, before) {
+  let ending, last = -1;
+  for (let i = 0; i < pieces.length; i++) if (pieces[i]) {
+    if (last >= 0 && !pieces[last].endsWith('\n'))
+      pieces[last] += ending ??= (LINE_BREAK.exec(before ?? '') ?? LINE_BREAK.exec(pieces.join('')))?.[0] ?? '\n';
+    last = i;
+  }
+}
+
 /** Apply complete groups to copies; recheck bases and intervals even for supplied hunks.
  * Pass the configuration the hunks were compiled under: its `hash`, and its
  * `overlap` policy, which decides whether hunks that touch may apply together
@@ -359,6 +374,7 @@ export function applyTextEdits(files, hunks, configuration = {}) {
     // hunks share a start: the default refuses them as overlaps.
     for (const hunk of hunks.filter(hunk => hunk.path === path).sort((a, b) => canonical(b, a)))
       lines.splice(hunk.start, hunk.end - hunk.start, hunk.replacement);
+    terminateJoins(lines, before);
     const text = lines.join('');
     map.set(path, { path, text, hash: options.hash(text) });
     if (before !== text) diff += unified(path, before, text);

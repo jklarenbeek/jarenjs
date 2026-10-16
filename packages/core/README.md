@@ -643,7 +643,8 @@ compares the replacements once the lines tie, so the outcome does not depend on
 the order the proposals arrive in. `proposal.valid` is false because an edit was
 withheld; the hunks that remain are complete groups and apply. Pass the same
 options to both calls.
-A replacement is used verbatim, so it carries its own final newline. A throw
+A replacement without a final newline that would run into the next line
+is ended with the file's line ending rather than joined to it. A throw
 from either call is a `CodedError` named `TextEditError` with a `JE` code from
 `TEXT_EDIT_CODES` and a `docPath` naming the option, file, edit or hunk at fault.
 *Upgrade: these throws were plain `RangeError`/`TypeError` instances without a

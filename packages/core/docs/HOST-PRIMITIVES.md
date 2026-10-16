@@ -65,8 +65,13 @@ lines; the final newline may be omitted. CRLF is preserved. Section operations
 optionally accept an inclusive ending anchor `to`; without it they affect only
 the anchor's lines unless a `sectionEnd` hook extends them (below). Links are
 never interpreted. Replacement bytes are used verbatim, including their newline
-convention: an insertion or a section that should end its line carries its own
-final newline.
+convention, with one exception: edits are line-granular, so where a replacement
+without a final line break, or a last line without one, would run into the text
+after it, the file's line ending is added (its first line break, so a CRLF file
+stays CRLF; else the edited text's first; else LF). Text with nothing after it
+keeps its missing final newline. *Upgrade: such a piece was joined to the next
+line (`'a\nb'` with `X\n` inserted after `b` answered `'a\nbX\n'`; it now
+answers `'a\nb\nX\n'`), and the added line ending counts toward `maxBytes`.*
 
 Hunks record zero-based half-open line intervals `[start, end)`, original edit
 index `source`, path, base hash/text and replacement. By default overlaps are
