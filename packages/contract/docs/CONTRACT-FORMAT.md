@@ -2529,7 +2529,7 @@ change at the first pointer where they do.
 | R12 | `policy.idempotency` `none/optional → required` (a client must now send a key), or `required/optional → none` (a key an old client still sends, and retries under, is no longer read) | breaking (`idempotency-required`, `idempotency-dropped`); `required → optional` and `none → optional` additive (`idempotency-relaxed`) |
 | R13 | `policy.task`, `policy.retry`, `policy.cache`, `policy.revision`, `policy.stream` (a resume policy, heartbeat or patch bound) or `doc` changed | neutral; a `policy.stream.heartbeatMs` that rises is breaking (`heartbeat-slowed`) — an older client arms its watchdog from its own contract and reports the stream lost (`JC2094`) after twice the interval it expects |
 | R14 | `policy.audience` `public → server` | breaking; the reverse additive |
-| R15 | a schema construct the checker does not model differs between the two (`if`, `not`, `contains`, an `anyOf`/`oneOf` no discriminator tells apart, an applicator the walk does not read by direction — see the riders —, `$dynamicRef`, a `format`, a *changed* `pattern`, an external or sibling-carrying `$ref`, a changed error `details` schema, …), including one whose text is unchanged while a same-document `$ref` inside it resolves to a schema that changed — reported at the first resolved pointer where the two differ; a constraint, member or requirement present on one side only while the other carries such an applicator (it may have moved inside); a member added or removed beside a catch-all that constrains it (`additionalProperties` or `unevaluatedProperties` as a schema, `patternProperties`, `propertyNames`) | **unknown** — reported, never silently classed |
+| R15 | a schema construct the checker does not model differs between the two (`if`, `not`, `contains`, an `anyOf`/`oneOf` whose variants neither a type nor a discriminator tells apart, an applicator the walk does not read by direction — see the riders —, `$dynamicRef`, a `format`, a *changed* `pattern`, an external or sibling-carrying `$ref`, a changed error `details` schema, …), including one whose text is unchanged while a same-document `$ref` inside it resolves to a schema that changed — reported at the first resolved pointer where the two differ; a constraint, member or requirement present on one side only while the other carries such an applicator (it may have moved inside); a member added or removed beside a catch-all that constrains it (`additionalProperties` or `unevaluatedProperties` as a schema, `patternProperties`, `propertyNames`) | **unknown** — reported, never silently classed |
 | R16 | a nullable node respelled between `type: [T, 'null']` and a two-branch `anyOf`/`oneOf` with a null-only branch, where both spellings accept exactly the same values | neutral (`schema-respelled`) — the bytes and the revision move, the accepted values do not; a reorder inside one spelling (a type array's items, a union's branches) is no respelling and is silent |
 
 Riders the rows carry:
@@ -2615,29 +2615,46 @@ Riders the rows carry:
   `else` present on both sides beside an `if` that validates alike; a
   `dependentSchemas` member, the keys being the same; a `prefixItems`
   entry, the list keeping its length; and an `anyOf` or `oneOf` whose
-  variants are provably disjoint — every variant is an object schema
-  (`type: "object"`) that requires one member held to a `const` or an
-  `enum`, no value is shared between variants, and each position holds
-  the same value set on both sides — so an instance meets only the
-  variant its discriminator names, and the union accepts exactly what
-  that variant does. None of these is read by direction on a node that
+  variants are provably disjoint, so an instance meets only the variant
+  its key names and the union accepts exactly what that variant does.
+  The key is the set of JSON types a variant may accept — its `type`,
+  read through a `$ref` it is spelled as, or, without one, every type a
+  variant of its own `anyOf`/`oneOf` may accept — where no two variants'
+  sets share a type (`integer` lies inside `number`); or else the value
+  set of a member every variant requires of an object (`type: "object"`)
+  and holds to a `const` or an `enum`, where no two share a value. So
+  `anyOf: [{ "$ref": "#/$defs/proj" }, { "type": "null" }]`, the nullable
+  spelling of a projection, reads `proj` by direction. Variants pair by
+  key, not by position, so a reorder alone moves nothing. A variant
+  whose key shares nothing with any key on the other side was added or
+  removed: an added one widens the union by exactly its own values and a
+  removed one narrows it (R6/R7 under an input, R8/R9 under an output,
+  `note: "schema"`, the pointer at the variant), unless the node beside
+  the union may constrain them (R15). A key that changed but still
+  overlaps one on the other side leaves the union R15. A change that
+  names what only `a` holds — a member removed, a constraint dropped —
+  points into `a`, at the position the variant held there. None of these is read by direction on a node that
   carries `unevaluatedProperties` or `unevaluatedItems` (a member dropped
   from a branch is then refused, not freed), on the target of an input
   `$ref` beside one, or where a constraint, a member or a requirement sits
   on one side only (it may have moved into a branch). `not`, `if`,
-  `contains`, a union told apart by type alone or not at all, a changed
-  `if`, and a branch list that grew, shrank or was reordered stay R15.
+  `contains`, a union whose variants overlap, a changed `if`, and an
+  `allOf` or `prefixItems` that grew, shrank or was reordered stay R15.
   Nor is a change at a location something else the node applies there
   may also constrain — its own keywords, another `allOf` conjunct,
   another `dependentSchemas` entry, an applicator or a `contains` beside
   it: a constraint a conjunct drops while another still holds it moves
-  nothing, so it is R15 under the applicator (variants of a discriminated
-  union never apply together, and mask nothing). Within one branch the
+  nothing, so it is R15 under the applicator (the variants of a union
+  read by direction never apply together, and mask nothing). Within one branch the
   keywords are read one by one, as on a bare schema. **Upgrading:** these changes answered
   R15 `unknown`; they now answer breaking or additive, so a `--fail-on
   breaking` gate fails on a required member dropped from a discriminated
   variant of an output, and a gate on `--fail-on unknown` alone no longer
-  fails on them.
+  fails on them. Likewise for a union whose variants a type tells apart
+  (the nullable `anyOf` of a `$ref` among them), a discriminated union
+  that was reordered, and a variant added or removed under a key no other
+  variant shares: these answered R15 and now answer breaking or additive
+  — or, for a reorder alone, nothing.
 - **Audience is the compatibility surface.** Operations whose
   `policy.audience` is `server` on **both** sides are skipped entirely;
   an audience flip is R14 and, for public consumers, subsumes the
@@ -2670,7 +2687,10 @@ by a person, a revision (§14) moves by itself.
   real change reports both. The change is read on the type-array
   spelling, so its `docPath` names that spelling's keyword; when both
   sides are unions, it is read on the non-null branches where they sit
-  (`…/anyOf/0/minLength`), a pointer that resolves in both documents.
+  (`…/anyOf/0/minLength`): a change points at the branch where `b` holds
+  it, a removal at the branch where `a` held it. **Upgrading:** a
+  removal used to name `b`'s position, which in `a` could be the null
+  branch or the other keyword (`oneOf` for `anyOf`).
 
 The CLI's compatibility gate: `jaren-contract diff --from a.json --to
 b.json [--fail-on breaking[,unknown,…]]` prints the classified diff as

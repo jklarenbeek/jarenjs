@@ -380,10 +380,11 @@ describe('diffContracts — the rule table, row by row', () => {
     onlyClasses(invisible, []);
   });
 
-  it('R15: an anyOf change lands in unknown — NEVER in neutral — as do format, a changed pattern and an external $ref', () => {
+  it('R15: a change to an anyOf whose branches overlap lands in unknown — NEVER in neutral — as do format, a changed pattern and an external $ref', () => {
+    // every integer is a number: the new branch is not disjoint from the old one
     const anyOf = diffContracts(
-      commandWith({ anyOf: [{ type: 'string' }] }),
-      commandWith({ anyOf: [{ type: 'string' }, { type: 'integer' }] }));
+      commandWith({ anyOf: [{ type: 'number' }] }),
+      commandWith({ anyOf: [{ type: 'number' }, { type: 'integer' }] }));
     const c = only(anyOf.unknown);
     assert.deepStrictEqual([c.rule, c.kind, c.note, c.docPath],
       ['R15', 'schema-unknown', 'anyOf', '/operations/a.b/input/properties/x/anyOf']);
@@ -454,6 +455,24 @@ describe('diffContracts — the rule table, row by row', () => {
       assert.deepStrictEqual([narrowed.rule, narrowed.note, narrowed.docPath],
         ['R6', 'minLength', '/operations/a.b/input/properties/x/minLength']);
       onlyClasses(d, ['neutral', 'breaking']);
+    });
+
+    it('two unions whose non-null branches sit apart: a removal points at the branch where a holds it, the rest where b does', () => {
+      /** @param {any} schema */
+      const reads = (schema) => one(readOp({ output: schema }));
+      const z = { type: 'object', properties: { z: { type: 'string' } } };
+      const tight = { type: 'object', maxProperties: 2 };
+      /** @type {[any, any, string, string, string[]][]} */
+      const cases = [
+        [{ anyOf: [{ type: 'null' }, z] }, { anyOf: [tight, { type: 'null' }] }, '/anyOf/1/properties/z', '/anyOf/0/maxProperties', ['unknown', 'breaking']],
+        [{ oneOf: [z, { type: 'null' }] }, { anyOf: [tight, { type: 'null' }] }, '/oneOf/0/properties/z', '/anyOf/0/maxProperties', ['neutral', 'unknown', 'breaking']],
+      ];
+      for (const [from, to, removed, added, classes] of cases) {
+        const d = diffContracts(reads(from), reads(to));
+        onlyClasses(d, classes);
+        assert.deepStrictEqual(d.breaking.map((c) => [c.rule, c.kind, c.docPath]), [['R8', 'output-member-removed', '/operations/a.b/output' + removed]]);
+        assert.deepStrictEqual(d.unknown.map((c) => [c.rule, c.note, c.docPath]), [['R15', 'maxProperties', '/operations/a.b/output' + added]]);
+      }
     });
 
     it('a recursive nullable definition, respelled and changed, terminates and reports each once', () => {
@@ -614,7 +633,8 @@ describe('diffContracts — validation behind a same-document $ref is compared a
       ] },
       at: '/oneOf/0/properties/value', note: 'oneOf', decided: true,
     },
-    'an anyOf branch': { wrap: { anyOf: [ref, { type: 'string' }] }, at: '/anyOf/0', note: 'anyOf' },
+    'an anyOf branch another branch overlaps': { wrap: { anyOf: [ref, { type: 'object' }] }, at: '/anyOf/0', note: 'anyOf' },
+    'an anyOf branch a type tells apart': { wrap: { anyOf: [ref, { type: 'string' }] }, at: '/anyOf/0', note: 'anyOf', decided: true },
     'an allOf conjunct': { wrap: { allOf: [ref] }, at: '/allOf/0', note: 'allOf', decided: true },
     'a not': { wrap: { type: 'object', not: ref }, at: '/not', note: 'not' },
     'an if': { wrap: { if: ref, then: { type: 'object' } }, at: '/if', note: 'if' },
@@ -625,7 +645,7 @@ describe('diffContracts — validation behind a same-document $ref is compared a
     'a contains': { wrap: { type: 'array', contains: ref }, at: '/contains', note: 'contains' },
     'a patternProperties member': { wrap: { type: 'object', patternProperties: { '^p': ref } }, at: '/patternProperties/^p', note: 'patternProperties' },
     'a $ref beside a sibling': { wrap: { ...ref, description: 'the projection' }, at: '', note: '$ref' },
-    'a nullable union whose branch is the $ref': { wrap: { anyOf: [ref, { type: 'null' }] }, at: '/anyOf/0', note: 'anyOf' },
+    'a nullable union whose branch is the $ref': { wrap: { anyOf: [ref, { type: 'null' }] }, at: '/anyOf/0', note: 'anyOf', decided: true },
     'a $ref into a nested definitions': {
       wrap: { allOf: [{ $ref: '#/$defs/holder/definitions/proj' }] }, at: '/allOf/0', note: 'allOf', decided: true,
     },
@@ -701,7 +721,7 @@ describe('diffContracts — validation behind a same-document $ref is compared a
     });
   }
 
-  it('an enum narrowed behind the $ref in a discriminated union classifies at the enum, and in an undiscriminated one reports R15 there', () => {
+  it('an enum narrowed behind the $ref in a discriminated union classifies at the enum, and in one whose branches overlap reports R15 there', () => {
     const { wrap } = shapes['a discriminated oneOf variant'];
     const d = diffContracts(doc(proj(['a']), wrap, positions.output.op), doc(proj(['a'], ['x']), wrap, positions.output.op));
     onlyClasses(d, ['additive']);
@@ -709,7 +729,7 @@ describe('diffContracts — validation behind a same-document $ref is compared a
       kind: 'output-narrowed', op: 'a.do', docPath: '/operations/a.do/output/oneOf/0/properties/value/properties/b/enum',
       from: ['x', 'y'], to: ['x'], rule: 'R9', note: 'enum',
     });
-    const either = shapes['an anyOf branch'].wrap;
+    const either = shapes['an anyOf branch another branch overlaps'].wrap;
     const u = diffContracts(doc(proj(['a']), either, positions.output.op), doc(proj(['a'], ['x']), either, positions.output.op));
     onlyClasses(u, ['unknown']);
     assert.deepStrictEqual(only(u.unknown), {
@@ -761,7 +781,7 @@ describe('diffContracts — validation behind a same-document $ref is compared a
     const tree = (leaf) => ({
       $contract: '0.1',
       $defs: { node: { type: 'object', properties: { name: { type: leaf }, kids: { type: 'array', items: { $ref: '#/$defs/node' } } } } },
-      operations: { 'a.do': { kind: 'read', output: { anyOf: [{ $ref: '#/$defs/node' }, { type: 'string' }] }, http: { method: 'GET', path: '/a' } } },
+      operations: { 'a.do': { kind: 'read', output: { anyOf: [{ $ref: '#/$defs/node' }, { type: 'object' }] }, http: { method: 'GET', path: '/a' } } },
     });
     onlyClasses(diffContracts(tree('string'), tree('string')), []);
     const d = diffContracts(tree('string'), tree('integer'));
@@ -836,11 +856,12 @@ describe('diffContracts — a change inside an applicator whose direction is dec
   const at = { input: '/operations/a.b/input/properties/x', output: '/operations/a.b/output' };
   /**
    * An operation that takes `schema` as its body member `x`, or returns it.
-   * @param {'input' | 'output'} where @param {any} schema @param {any} [defs]
+   * @param {'input' | 'output'} where @param {any} schema @param {any} [defs] @param {any} [policy]
    */
-  const take = (where, schema, defs = {}) => (where === 'input'
-    ? commandWith(schema, {}, defs)
-    : one(readOp({ output: schema }), { $defs: defs }));
+  const take = (where, schema, defs = {}, policy = undefined) => {
+    const extra = policy === undefined ? {} : { policy };
+    return where === 'input' ? commandWith(schema, extra, defs) : one(readOp({ output: schema, ...extra }), { $defs: defs });
+  };
   /** @param {string} k @param {any} v */
   const variant = (k, v) => ({ type: 'object', properties: { k: { const: k }, v }, required: ['k'] });
   /**
@@ -936,7 +957,6 @@ describe('diffContracts — a change inside an applicator whose direction is dec
       ['members that traded places with a conjunct', ['allOf /allOf', 'properties /properties/a', 'properties /properties/b'],
         { type: 'object', properties: { a: {} }, allOf: [{ properties: { b: {} } }] }, { type: 'object', properties: { b: {} }, allOf: [{ properties: { a: {} } }] }],
       ['a requirement moved into a conjunct', ['allOf /allOf', 'required /required'], { type: 'object', required: ['a'], allOf: [{}] }, { type: 'object', allOf: [{ required: ['a'] }] }],
-      ['reordered variants', ['oneOf /oneOf'], { oneOf: [variant('a', y), variant('b', {})] }, { oneOf: [variant('b', {}), variant('a', y)] }],
       ['variants that share a discriminator value', ['oneOf /oneOf'], { oneOf: [variant('a', { maxLength: 5 }), variant('a', {})] }, { oneOf: [variant('a', { maxLength: 3 }), variant('a', {})] }],
       ['a variant that is not an object schema', ['oneOf /oneOf'], { oneOf: [variant('a', { maxLength: 5 }), { properties: { k: { const: 'b' } }, required: ['k'] }] },
         { oneOf: [variant('a', { maxLength: 3 }), { properties: { k: { const: 'b' } }, required: ['k'] }] }],
@@ -944,8 +964,23 @@ describe('diffContracts — a change inside an applicator whose direction is dec
         { anyOf: [variant('a', { maxLength: 3 }), { type: 'object', properties: { k: { const: 'b' } } }] }],
       ['a variant that stopped requiring the discriminator', ['anyOf /anyOf'], { anyOf: [variant('a', { maxLength: 5 }), variant('b', {})] },
         { anyOf: [variant('a', { maxLength: 3 }), { type: 'object', properties: { k: { const: 'b' } } }] }],
-      ['a discriminator value that moved', ['anyOf /anyOf'], { anyOf: [variant('a', { maxLength: 5 }), variant('b', {})] }, { anyOf: [variant('a', { maxLength: 3 }), variant('c', {})] }],
-      ['branches told apart by type alone', ['anyOf /anyOf'], { anyOf: [{ type: 'string', maxLength: 5 }, { type: 'integer' }] }, { anyOf: [{ type: 'string', maxLength: 3 }, { type: 'integer' }] }],
+      ['a discriminator value set that grew into another variant\'s', ['anyOf /anyOf'],
+        { anyOf: [{ ...variant('a', { maxLength: 5 }), properties: { k: { enum: ['a'] }, v: { maxLength: 5 } } }, variant('b', {})] },
+        { anyOf: [{ ...variant('a', { maxLength: 3 }), properties: { k: { enum: ['a', 'b'] }, v: { maxLength: 3 } } }, variant('c', {})] }],
+      ['a discriminator value set that shrank', ['anyOf /anyOf'],
+        { anyOf: [{ ...variant('a', {}), properties: { k: { enum: ['a', 'c'] }, v: { maxLength: 5 } } }, variant('b', {})] },
+        { anyOf: [{ ...variant('a', {}), properties: { k: { enum: ['a'] }, v: { maxLength: 3 } } }, variant('b', {})] }],
+      ['branches whose types overlap (an integer is a number)', ['anyOf /anyOf'], { anyOf: [{ type: 'number', maximum: 5 }, { type: 'integer' }] }, { anyOf: [{ type: 'number', maximum: 3 }, { type: 'integer' }] }],
+      ['a branch whose type set grew', ['anyOf /anyOf'], { anyOf: [{ type: 'string', maxLength: 5 }, { type: 'integer' }] }, { anyOf: [{ type: ['string', 'boolean'], maxLength: 3 }, { type: 'integer' }] }],
+      ['a branch without a type beside a typed one', ['anyOf /anyOf'], { anyOf: [{ maxLength: 5 }, { type: 'integer' }] }, { anyOf: [{ maxLength: 3 }, { type: 'integer' }] }],
+      ['a branch whose own union has an untyped variant', ['anyOf /anyOf'],
+        { anyOf: [{ anyOf: [{ type: 'string', maxLength: 5 }, { minimum: 1 }] }, { type: 'null' }] }, { anyOf: [{ anyOf: [{ type: 'string', maxLength: 3 }, { minimum: 1 }] }, { type: 'null' }] }],
+      ['a variant whose discriminator admits no value', ['anyOf /anyOf'],
+        { anyOf: [{ ...variant('a', { maxLength: 5 }), properties: { k: { enum: [] }, v: { maxLength: 5 } } }, variant('b', {})] },
+        { anyOf: [{ ...variant('a', { maxLength: 3 }), properties: { k: { enum: [] }, v: { maxLength: 3 } } }, variant('b', {})] }],
+      ['an empty union', ['anyOf /anyOf'], { anyOf: [] }, { anyOf: [{ type: 'string' }] }],
+      ['a variant added beside a node that constrains it', ['oneOf /oneOf/2'],
+        { type: 'object', oneOf: [variant('a', {}), variant('b', {})] }, { type: 'object', oneOf: [variant('a', {}), variant('b', {}), variant('c', {})] }],
       ['a then beside a changed if', ['if /if', 'then /then'], { if: { type: 'string' }, then: { maxLength: 5 } }, { if: { type: 'number' }, then: { maxLength: 3 } }],
       ['a then behind an if whose $ref resolves apart', ['if /if/type', 'then /then'], { if: { $ref: '#/$defs/c' }, then: { maxLength: 5 } }, { if: { $ref: '#/$defs/c' }, then: { maxLength: 3 } }, [{ c: { type: 'string' } }, { c: { type: 'number' } }]],
       ['a then without an if', ['then /then'], { then: { maxLength: 5 } }, { then: { maxLength: 3 } }],
@@ -982,6 +1017,119 @@ describe('diffContracts — a change inside an applicator whose direction is dec
         }
       }
     }
+  });
+
+  describe('a union whose variants are provably disjoint pairs them by type or discriminator value, not by position', () => {
+    /** @param {string} k @param {any} [v] */
+    const sum = (k, v = {}) => variant(k, v);
+    /**
+     * Each: the wider spelling, the narrower one, and what the change from
+     * the wider to the narrower (`narrowed`) and back (`widened`) reports:
+     * `[pointer, from, to, note]`, the pointer under the position.
+     * @type {[string, any, any, any[], any[]][]}
+     */
+    const cases = [
+      ['branches a type tells apart', { anyOf: [{ type: 'string', maxLength: 5 }, { type: 'integer' }] }, { anyOf: [{ type: 'string', maxLength: 3 }, { type: 'integer' }] },
+        ['/anyOf/0/maxLength', 5, 3, 'maxLength'], ['/anyOf/0/maxLength', 3, 5, 'maxLength']],
+      ['a branch typed by its own union, beside a null', { anyOf: [{ anyOf: [sum('a', { type: 'string', maxLength: 5 }), sum('b')] }, { type: 'null' }] },
+        { anyOf: [{ anyOf: [sum('a', { type: 'string', maxLength: 3 }), sum('b')] }, { type: 'null' }] },
+        ['/anyOf/0/anyOf/0/properties/v/maxLength', 5, 3, 'maxLength'], ['/anyOf/0/anyOf/0/properties/v/maxLength', 3, 5, 'maxLength']],
+      ['reordered variants a const discriminates', { oneOf: [sum('a', { type: 'string', maxLength: 5 }), sum('b')] }, { oneOf: [sum('b'), sum('a', { type: 'string', maxLength: 3 })] },
+        ['/oneOf/1/properties/v/maxLength', 5, 3, 'maxLength'], ['/oneOf/0/properties/v/maxLength', 3, 5, 'maxLength']],
+      ['reordered branches a type tells apart', { anyOf: [{ type: 'integer' }, { type: 'string', maxLength: 5 }] }, { anyOf: [{ type: 'string', maxLength: 3 }, { type: 'integer' }] },
+        ['/anyOf/0/maxLength', 5, 3, 'maxLength'], ['/anyOf/1/maxLength', 3, 5, 'maxLength']],
+      ['a variant under a new discriminator value', { oneOf: [sum('a'), sum('b'), sum('c')] }, { oneOf: [sum('a'), sum('b')] },
+        ['/oneOf/2', sum('c'), undefined, 'schema'], ['/oneOf/2', undefined, sum('c'), 'schema']],
+      ['a variant under a new discriminator value, the others reordered', { oneOf: [sum('c'), sum('a'), sum('b')] }, { oneOf: [sum('b'), sum('a')] },
+        ['/oneOf/0', sum('c'), undefined, 'schema'], ['/oneOf/0', undefined, sum('c'), 'schema']],
+      ['a variant of a new type', { anyOf: [{ type: 'string' }, { type: 'array' }, { type: 'boolean' }] }, { anyOf: [{ type: 'string' }, { type: 'boolean' }] },
+        ['/anyOf/1', { type: 'array' }, undefined, 'schema'], ['/anyOf/1', undefined, { type: 'array' }, 'schema']],
+      ['a null variant', { anyOf: [{ type: 'object', properties: { a: { $ref: '#/$defs/n' } } }, { type: 'null' }] }, { anyOf: [{ type: 'object', properties: { a: { $ref: '#/$defs/n' } } }] },
+        ['/anyOf/1', { type: 'null' }, undefined, 'schema'], ['/anyOf/1', undefined, { type: 'null' }, 'schema']],
+      ['a variant typed by a union it reaches twice', { anyOf: [{ anyOf: [{ $ref: '#/$defs/s' }, { $ref: '#/$defs/s' }] }, { type: 'boolean' }, { type: 'null' }] },
+        { anyOf: [{ anyOf: [{ $ref: '#/$defs/s' }, { $ref: '#/$defs/s' }] }, { type: 'null' }] },
+        ['/anyOf/1', { type: 'boolean' }, undefined, 'schema'], ['/anyOf/1', undefined, { type: 'boolean' }, 'schema']],
+    ];
+    /** @type {['input' | 'output', 'narrowed' | 'widened', 'breaking' | 'additive', string, string][]} */
+    const ways = [
+      ['input', 'narrowed', 'breaking', 'R6', 'input-narrowed'],
+      ['input', 'widened', 'additive', 'R7', 'input-widened'],
+      ['output', 'narrowed', 'additive', 'R9', 'output-narrowed'],
+      ['output', 'widened', 'breaking', 'R8', 'output-widened'],
+    ];
+    const n = { n: { type: 'string' }, s: { anyOf: [{ type: 'string' }, { type: 'integer' }] } };
+    const server = { audience: 'server' };
+    for (const [name, wide, narrow, narrowed, widened] of cases) {
+      it(`${name}: narrowed or widened, inline and behind a $ref, input and output, for both audiences`, () => {
+        for (const [where, direction, cls, rule, kind] of ways) {
+          const [p, q, [pointer, from, to, note]] = direction === 'narrowed' ? [wide, narrow, narrowed] : [narrow, wide, widened];
+          const expected = [rule, kind, at[where] + pointer, from, to, note];
+          const inline = diffContracts(take(where, p, n), take(where, q, n));
+          onlyClasses(inline, [cls]);
+          assert.deepStrictEqual(pick(only(inline[cls])), expected, `${where} inline ${direction}`);
+          const ref = { $ref: '#/$defs/w' };
+          const behind = diffContracts(take(where, ref, { ...n, w: p }), take(where, ref, { ...n, w: q }));
+          onlyClasses(behind, [cls]);
+          assert.deepStrictEqual(pick(only(behind[cls])), expected, `${where} behind a $ref ${direction}`);
+          // a server operation: skipped by the public default, classed alike and marked under audience 'all'
+          onlyClasses(diffContracts(take(where, p, n, server), take(where, q, n, server)), []);
+          const all = diffContracts(take(where, p, n, server), take(where, q, n, server), { audience: 'all' });
+          onlyClasses(all, [cls]);
+          assert.deepStrictEqual([...pick(only(all[cls])), only(all[cls]).audience], [...expected, 'server'], `${where} audience all ${direction}`);
+        }
+      });
+    }
+
+    it('a union whose variant is the union itself, untyped, ends unbounded: R15, no endless descent', () => {
+      // the bound beside the union reads the instance, so the loop compiles
+      /** @param {number} n */
+      const defs = (n) => ({ u: { minLength: 1, anyOf: [{ $ref: '#/$defs/u' }, { type: 'string', maxLength: n }] } });
+      for (const where of /** @type {const} */ (['input', 'output'])) {
+        const d = diffContracts(take(where, { $ref: '#/$defs/u' }, defs(5)), take(where, { $ref: '#/$defs/u' }, defs(3)));
+        onlyClasses(d, ['unknown']);
+        assert.deepStrictEqual(pick(only(d.unknown)), ['R15', 'schema-unknown', at[where] + '/anyOf', defs(5).u.anyOf, defs(3).u.anyOf, 'anyOf']);
+      }
+    });
+
+    it('a reorder alone, by discriminator value or by type, is no change', () => {
+      for (const where of /** @type {const} */ (['input', 'output'])) {
+        onlyClasses(diffContracts(take(where, { oneOf: [sum('a'), sum('b'), sum('c')] }), take(where, { oneOf: [sum('c'), sum('a'), sum('b')] })), []);
+        onlyClasses(diffContracts(take(where, { anyOf: [{ type: 'null' }, { $ref: '#/$defs/n' }] }, { n: { type: 'object' } }),
+          take(where, { anyOf: [{ $ref: '#/$defs/n' }, { type: 'null' }] }, { n: { type: ['object'] } })), []);
+      }
+    });
+
+    it('a change that names what only a holds points into a, where the reordered variant sat there; the rest into b', () => {
+      const before = { oneOf: [sum('a', { type: 'object', maxProperties: 5, properties: { z: { type: 'string' }, y: { type: 'string', maxLength: 4 } } }), sum('b')] };
+      const after = { oneOf: [sum('b'), sum('a', { type: 'object', properties: { y: { type: 'string' }, w: { type: 'string' } } })] };
+      const d = diffContracts(take('output', before), take('output', after));
+      const v = (/** @type {number} */ i) => `${at.output}/oneOf/${i}/properties/v`;
+      assert.deepStrictEqual(d.unknown.map(pick), [['R15', 'schema-unknown', v(0) + '/maxProperties', 5, undefined, 'maxProperties']]);
+      assert.deepStrictEqual(d.breaking.map(pick), [
+        ['R8', 'output-member-removed', v(0) + '/properties/z', 'z', 'z', undefined],
+        ['R8', 'output-widened', v(0) + '/properties/y/maxLength', 4, undefined, 'maxLength'],
+      ]);
+      assert.deepStrictEqual(d.additive.map(pick), [['R9', 'output-member-added', v(1) + '/properties/w', 'w', 'w', undefined]]);
+      onlyClasses(d, ['unknown', 'breaking', 'additive']);
+    });
+
+    it('a discriminator value that moved: the variant it named is removed, the one it names now is added, the one kept is read in place', () => {
+      const before = { anyOf: [sum('a', { type: 'string', maxLength: 5 }), sum('b')] };
+      const after = { anyOf: [sum('a', { type: 'string', maxLength: 3 }), sum('c')] };
+      /** @type {['input' | 'output', any[][]][]} */
+      const expected = [
+        ['input', [['R6', 'input-narrowed', '/anyOf/0/properties/v/maxLength', 5, 3, 'maxLength'], ['R7', 'input-widened', '/anyOf/1', undefined, sum('c'), 'schema'],
+          ['R6', 'input-narrowed', '/anyOf/1', sum('b'), undefined, 'schema']]],
+        ['output', [['R9', 'output-narrowed', '/anyOf/0/properties/v/maxLength', 5, 3, 'maxLength'], ['R8', 'output-widened', '/anyOf/1', undefined, sum('c'), 'schema'],
+          ['R9', 'output-narrowed', '/anyOf/1', sum('b'), undefined, 'schema']]],
+      ];
+      for (const [where, changes] of expected) {
+        const d = diffContracts(take(where, before), take(where, after));
+        onlyClasses(d, ['breaking', 'additive']);
+        const all = [...d.breaking, ...d.additive].map(pick);
+        assert.deepStrictEqual(all.sort(), changes.map((c) => [c[0], c[1], at[where] + c[2], ...c.slice(3)]).sort(), where);
+      }
+    });
   });
 
   it("an input spelled as a $ref beside unevaluatedProperties reads its target's conjuncts by text", () => {

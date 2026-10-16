@@ -659,9 +659,10 @@ const { breaking, additive, neutral, unknown } = diffContracts(v1, v2);
 // every change classified by the CONTRACT-FORMAT §13 rule table (R1–R16),
 // read as variance — an input is the server's to accept, an output the client's —
 // and read the same inside an allOf, a then/else under the same if, a
-// dependentSchemas member, a prefixItems entry and an anyOf/oneOf variant a
-// required const/enum member discriminates, where nothing else the node
-// applies constrains the same place:
+// dependentSchemas member, a prefixItems entry and an anyOf/oneOf variant
+// its type or a required const/enum member tells apart (variants pair by
+// that key, so a reorder moves nothing and a new variant widens), where
+// nothing else the node applies constrains the same place:
 //   breaking — an operation or error removed, a binding member moved, a new
 //              required input member, a narrowed input, a removed/optional-
 //              ized/WIDENED output (a closed output gaining a member too —
@@ -674,8 +675,8 @@ const { breaking, additive, neutral, unknown } = diffContracts(v1, v2);
 //   neutral  — task mode, retry, cache, policy.revision, policy.stream, doc,
 //              a nullable respelling that accepts the same values (R16), a
 //              media respelling (case, parameters) the wire matches alike
-//   unknown  — what the checker does not model (if/not, a union no
-//              discriminator tells apart, a reordered or regrown one, a CHANGED
+//   unknown  — what the checker does not model (if/not, a union whose
+//              variants overlap, a CHANGED
 //              pattern, an external $ref, an error details schema, a
 //              constraint moved into an applicator, a member beside a
 //              catch-all — or any of these unchanged as text while a $ref

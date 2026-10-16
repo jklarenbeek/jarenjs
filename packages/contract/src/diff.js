@@ -4,8 +4,8 @@
  * `b`, classified by the published rule table (docs/CONTRACT-FORMAT.md
  * §13, rows R1–R16) into `breaking`, `additive`, `neutral` and `unknown`
  * — where `unknown` is the honest fourth class: a schema construct the
- * checker does not model (`if`, `not`, a union no discriminator tells
- * apart, a changed `pattern`, an external `$ref` that moved) is REPORTED,
+ * checker does not model (`if`, `not`, a union whose variants overlap,
+ * a changed `pattern`, an external `$ref` that moved) is REPORTED,
  * never silently classed.
  *
  * The schema comparison walks the two sides in parallel over the resolved
@@ -16,8 +16,9 @@
  * (`properties`, `required`, `additionalProperties`) and `items`, and
  * walks the branches of the applicators whose direction is decidable —
  * an `allOf`, a `then`/`else` under the same `if`, a `dependentSchemas`
- * member, a `prefixItems` entry, a discriminated `anyOf`/`oneOf` — branch
- * against branch with the same rules. Pure annotations (`title`,
+ * member, a `prefixItems` entry, an `anyOf`/`oneOf` whose variants a type
+ * or a discriminator tells apart (paired by that key, wherever they sit) —
+ * branch against branch with the same rules. Pure annotations (`title`,
  * `description`, `examples`, `$comment`, `deprecated`) never move a wire
  * byte and are ignored; every other keyword that differs between the two
  * sides lands in `unknown` (R15).
@@ -348,6 +349,54 @@ function oneSided(A, B) {
   return differ(names(A), names(B)) || differ(required(A), required(B));
 }
 
+const INTEGER = canon('integer');
+const NUMBER = canon('number');
+
+/**
+ * Whether a type set (canonical texts) admits every value of the type
+ * `t` (a canonical text): a type set counts `integer` inside `number`,
+ * since every integer is a number.
+ * @param {string} t
+ * @param {Set<string>} set
+ */
+const typeCovered = (t, set) => set.has(t) || (t === INTEGER && set.has(NUMBER));
+
+/**
+ * The JSON types (canonical texts, sorted) a union branch may accept: its
+ * own `type` (read through bare `$ref` hops), or, without one, every type
+ * a branch of its own `anyOf`/`oneOf` may accept; `null` when that is not
+ * bounded by a `type` everywhere.
+ * @param {unknown} branch
+ * @param {Side} side
+ * @param {Set<object>} [within] - the nodes being read (a recursive union ends unbounded)
+ * @returns {string[] | null}
+ */
+function acceptedTypes(branch, side, within = new Set()) {
+  const resolved = resolveHops(branch, side);
+  if (!('node' in resolved) || !isObject(resolved.node) || within.has(resolved.node)) return null;
+  const node = resolved.node;
+  if (typeof node.type === 'string') return [canon(node.type)];
+  if (Array.isArray(node.type)) return [...new Set(node.type.map(canon))].sort();
+  const key = Array.isArray(node.anyOf) ? 'anyOf' : Array.isArray(node.oneOf) ? 'oneOf' : null;
+  if (key === null) return null;
+  within.add(node);
+  const sets = node[key].map((/** @type {unknown} */ inner) => acceptedTypes(inner, side, within));
+  within.delete(node);
+  return sets.includes(null) ? null : [...new Set(sets.flat())].sort();
+}
+
+/**
+ * Whether two type sets (canonical texts) share a value.
+ * @param {string[]} x @param {string[]} y
+ */
+const typesMeet = (x, y) => x.some((t) => typeCovered(t, new Set(y))) || y.some((t) => typeCovered(t, new Set(x)));
+
+/**
+ * Whether two discriminator value sets (canonical texts) share a value.
+ * @param {string[]} x @param {string[]} y
+ */
+const valuesMeet = (x, y) => x.some((v) => y.includes(v));
+
 /**
  * The value set (canonical texts, sorted) a union branch admits for the
  * member `name`, when the branch is an object schema that requires the
@@ -371,33 +420,72 @@ function discriminatorValues(branch, name, side) {
 }
 
 /**
- * Whether two unions of the same length are provably disjoint on both
- * sides by one discriminator: a member every branch requires of an
- * object (`type: 'object'`) and holds to a `const` or `enum`, with no
- * value shared between branches, and the same value set at every
- * position on both sides. Every instance then matches at most the one
- * branch its discriminator names, on both sides, so the union accepts
- * exactly what that branch does — `oneOf` and `anyOf` alike — and a
- * change inside a branch moves the union exactly as it moves the branch.
- * A reordered or re-keyed union is not paired here.
+ * How the variants of two unions pair, or `null` when they are not
+ * provably disjoint: one key per variant — the JSON types it may accept
+ * ({@link acceptedTypes}), or, failing that, the value set of a member
+ * every variant requires of an object ({@link discriminatorValues}) —
+ * no two keys on one side sharing a value, and every key either equal to
+ * one on the other side (the two variants pair) or sharing a value with
+ * none there (the variant was added or removed). Every instance then
+ * meets at most the one variant its key names, on each side, so the
+ * union accepts exactly what that variant does — `oneOf` and `anyOf`
+ * alike — a change inside a paired variant moves the union exactly as
+ * it moves the variant, an added one only widens it and a removed one
+ * only narrows it. Pairs are `[index in a, index in b]`.
  * @param {unknown[]} xs
  * @param {unknown[]} ys
  * @param {Side} a
  * @param {Side} b
+ * @returns {{ pairs: [number, number][], removed: number[], added: number[] } | null}
  */
-function discriminated(xs, ys, a, b) {
+function pairVariants(xs, ys, a, b) {
+  if (xs.length === 0 || ys.length === 0) return null;
+  const byType = keyedPairs(xs.map((x) => acceptedTypes(x, a)), ys.map((y) => acceptedTypes(y, b)), typesMeet);
+  if (byType !== null) return byType;
   const first = resolveHops(xs[0], a);
-  if (!('node' in first) || !isObject(first.node) || !Array.isArray(first.node.required)) return false;
+  if (!('node' in first) || !isObject(first.node) || !Array.isArray(first.node.required)) return null;
   for (const name of first.node.required) {
-    const before = xs.map((branch) => discriminatorValues(branch, name, a));
-    if (before.includes(null)) continue;
-    const sets = /** @type {string[][]} */ (before);
-    // the same set at every position on b: so b's are values too, and disjoint
-    if (sets.some((set, i) => canon(set) !== canon(discriminatorValues(ys[i], name, b)))) continue;
-    const all = sets.flat();
-    if (new Set(all).size === all.length) return true;
+    const byValue = keyedPairs(xs.map((x) => discriminatorValues(x, name, a)), ys.map((y) => discriminatorValues(y, name, b)), valuesMeet);
+    if (byValue !== null) return byValue;
   }
-  return false;
+  return null;
+}
+
+/**
+ * Pair two lists of variant keys (sorted canonical texts) by equality,
+ * as {@link pairVariants} says, or `null`.
+ * @param {(string[] | null)[]} xk
+ * @param {(string[] | null)[]} yk
+ * @param {(x: string[], y: string[]) => boolean} meet - whether two keys share a value
+ * @returns {{ pairs: [number, number][], removed: number[], added: number[] } | null}
+ */
+function keyedPairs(xk, yk, meet) {
+  // an empty key (an `enum: []`, a `type: []`, an empty union inside)
+  // names no instance a pair could share
+  if ([...xk, ...yk].some((k) => k === null || k.length === 0)) return null;
+  const xs = /** @type {string[][]} */ (xk);
+  const ys = /** @type {string[][]} */ (yk);
+  const apart = (/** @type {string[][]} */ keys) => keys.every((k, i) => keys.every((l, j) => j <= i || !meet(k, l)));
+  if (!apart(xs) || !apart(ys)) return null;
+  /** @type {[number, number][]} */
+  const pairs = [];
+  const added = [];
+  for (let j = 0; j < ys.length; j++) {
+    const i = xs.findIndex((k) => canon(k) === canon(ys[j]));
+    if (i >= 0) pairs.push(/** @type {[number, number]} */ ([i, j]));
+    else added.push(j);
+  }
+  const removed = [];
+  for (let i = 0; i < xs.length; i++) {
+    if (pairs.some(([p]) => p === i)) continue;
+    // a key of `a` left unpaired must share no value with a key of `b`;
+    // this also sees an unpaired key of `b` sharing one with a key of `a`,
+    // since that key cannot be paired: its equal on `b` would share the
+    // value too, and the keys on `b` are apart
+    if (ys.some((l) => meet(xs[i], l))) return null;
+    removed.push(i);
+  }
+  return { pairs, removed, added };
 }
 
 /**
@@ -405,7 +493,7 @@ function discriminated(xs, ys, a, b) {
  * by direction, branch against branch — positions where a branch that
  * narrows (or widens) narrows (or widens) what the node accepts, and
  * nothing else changed that could have moved into or out of them:
- * `allOf` of the same length with at most one conjunct respelled; `anyOf`/`oneOf` provably disjoint ({@link discriminated});
+ * `allOf` of the same length with at most one conjunct respelled; `anyOf`/`oneOf` whose variants are provably disjoint ({@link pairVariants});
  * `then`/`else` beside an `if` that validates alike; `dependentSchemas`
  * over the same keys; `prefixItems` of the same length. None where the
  * node reads its branches' annotations (`unevaluated*`) or a constraint,
@@ -432,7 +520,9 @@ function decidedApplicators(A, B, a, b) {
     const xs = A.allOf.map(canon);
     if (B.allOf.filter((/** @type {unknown} */ y, /** @type {number} */ i) => canon(y) !== xs[i]).length <= 1) decided.add('allOf');
   }
-  for (const key of ['anyOf', 'oneOf']) if (lists(key) && discriminated(A[key], B[key], a, b)) decided.add(key);
+  for (const key of ['anyOf', 'oneOf']) {
+    if (Array.isArray(A[key]) && Array.isArray(B[key]) && pairVariants(A[key], B[key], a, b) !== null) decided.add(key);
+  }
   if (A.if !== undefined && B.if !== undefined && !schemasDiffer(A.if, B.if, a, b)) {
     for (const key of ['then', 'else']) if (A[key] !== undefined && B[key] !== undefined) decided.add(key);
   }
@@ -516,7 +606,7 @@ const tokensBelow = (path, prefix) => (path.length === prefix.length ? []
  * (the node's own keywords, another `allOf` conjunct, another
  * `dependentSchemas` entry) is R15 under the applicator — the branch
  * dropped or added it, but what the node accepts need not have moved.
- * Variants of a discriminated union never apply together and mask nothing.
+ * Variants of a union read by direction never apply together and mask nothing.
  * @param {Sink} sink
  * @param {string} key - the applicator
  * @param {string} branchPath - pointer to the branch walked
@@ -550,10 +640,34 @@ function besideSink(sink, key, branchPath, beside) {
 }
 
 /**
+ * The sink of a variant walked against the one it pairs with at another
+ * position in `a`: a change that names what only `a` holds — a removed
+ * member, a dropped constraint — points into `a`, so its pointer takes
+ * the variant's position there.
+ * @param {Sink} sink
+ * @param {string} inB - pointer to the variant in `b`
+ * @param {string} inA - pointer to the variant in `a`
+ * @returns {Sink}
+ */
+function movedSink(sink, inB, inA) {
+  // every event of the variant's walk lies under its pointer in `b`
+  const intoA = (/** @type {string} */ path) => inA + path.slice(inB.length);
+  return {
+    constraint: (direction, keyword, path, from, to) => sink.constraint(direction, keyword, to === undefined ? intoA(path) : path, from, to),
+    member: (event, direction, path, member, closedBefore, catchAll) =>
+      sink.member(event, direction, event === 'removed' ? intoA(path) : path, member, closedBefore, catchAll),
+    unknown: (keyword, path, from, to) => sink.unknown(keyword, to === undefined ? intoA(path) : path, from, to),
+    respelled: sink.respelled,
+  };
+}
+
+/**
  * Walk the branches of a decided applicator ({@link decidedApplicators})
  * pairwise, so a branch change classifies by the rules a bare schema in
  * that position takes, through {@link besideSink}: where what else the
- * node applies may constrain the same location, the change is R15.
+ * node applies may constrain the same location, the change is R15. Union
+ * variants pair by key ({@link pairVariants}); one added or removed is the
+ * union widened or narrowed by its own values (`note: 'schema'`).
  * @param {string} key
  * @param {Record<string, any>} A - the node on side `a`
  * @param {Record<string, any>} B - the node on side `b`
@@ -567,9 +681,23 @@ function compareBranches(key, A, B, path, a, b, sink, visited) {
   const own = (/** @type {Record<string, any>} */ node) => Object.fromEntries(Object.entries(node).filter(([k]) =>
     k !== key && !ANNOTATIONS.has(k) && !RESOLUTION.has(k) && !((key === 'then' || key === 'else') && (k === 'if' || k === 'then' || k === 'else'))));
   const node = [{ schema: own(A), side: a, prefix: /** @type {string[]} */ ([]) }, { schema: own(B), side: b, prefix: /** @type {string[]} */ ([]) }];
-  /** @param {unknown} x @param {unknown} y @param {string} at @param {{ schema: unknown, side: Side, prefix: string[] }[]} beside */
-  const walk = (x, y, at, beside) => compareSchema(x, y, at, a, b, besideSink(sink, key, at, beside), visited);
+  /**
+   * @param {unknown} x @param {unknown} y @param {string} at
+   * @param {{ schema: unknown, side: Side, prefix: string[] }[]} beside @param {Sink} [into]
+   */
+  const walk = (x, y, at, beside, into = sink) => compareSchema(x, y, at, a, b, besideSink(into, key, at, beside), visited);
   if (key === 'then' || key === 'else') walk(A[key], B[key], path, node);
+  else if (key === 'anyOf' || key === 'oneOf') {
+    const { pairs, removed, added } = /** @type {NonNullable<ReturnType<typeof pairVariants>>} */ (pairVariants(A[key], B[key], a, b));
+    for (const [i, j] of pairs) {
+      const at = `${path}/${j}`;
+      walk(A[key][i], B[key][j], at, node, i === j ? sink : movedSink(sink, at, `${path}/${i}`));
+    }
+    // a variant added or removed widens or narrows the union by exactly
+    // its own values — unless the node beside it may refuse them anyway
+    for (const j of added) besideSink(sink, key, `${path}/${j}`, node).constraint('widened', 'schema', `${path}/${j}`, undefined, B[key][j]);
+    for (const i of removed) besideSink(sink, key, `${path}/${i}`, node).constraint('narrowed', 'schema', `${path}/${i}`, A[key][i], undefined);
+  }
   else if (key === 'dependentSchemas') {
     for (const name of Object.keys(B[key])) {
       const others = Object.keys(B[key]).filter((other) => other !== name).flatMap((other) => [
@@ -581,12 +709,12 @@ function compareBranches(key, A, B, path, a, b, sink, visited) {
     for (let i = 0; i < B[key].length; i++) {
       const at = `${path}/${i}`;
       if (key === 'prefixItems') walk(A[key][i], B[key][i], at, node.map((n) => ({ ...n, prefix: ['prefixItems', String(i)] })));
-      else if (key === 'allOf') {
+      else {
+        // allOf: every other conjunct applies beside this one
         const others = B[key].flatMap((/** @type {unknown} */ _, /** @type {number} */ j) => (j === i ? []
           : [{ schema: A[key][j], side: a, prefix: [] }, { schema: B[key][j], side: b, prefix: [] }]));
         walk(A[key][i], B[key][i], at, [...node, ...others]);
       }
-      else walk(A[key][i], B[key][i], at, node);
     }
   }
 }
@@ -655,10 +783,12 @@ function compareSchema(aNode, bNode, path, a, b, sink, visited) {
     if (!schemasDiffer(canonA, canonB, a, b)) return;
     if (spellingA !== 'type' && spellingB !== 'type') {
       // two unions: compare the non-null branches where they sit, so a
-      // change's pointer resolves in the documents
+      // change's pointer resolves in the documents (a removal's in `a`)
       const ia = nonNullBranch(A[spellingA]);
       const ib = nonNullBranch(B[spellingB]);
-      compareSchema(A[spellingA][ia], B[spellingB][ib], `${path}/${spellingB}/${ib}`, a, b, sink, visited);
+      const at = `${path}/${spellingB}/${ib}`;
+      const into = spellingA === spellingB && ia === ib ? sink : movedSink(sink, at, `${path}/${spellingA}/${ia}`);
+      compareSchema(A[spellingA][ia], B[spellingB][ib], at, a, b, into, visited);
       return;
     }
     A = canonA;
@@ -765,9 +895,7 @@ function compareConstraints(A, B, path, sink) {
     else {
       const beforeTexts = new Set(before.map(canon));
       const afterTexts = new Set(after.map(canon));
-      // a type set counts `integer` as inside `number`: every integer is a number
-      const covered = (/** @type {string} */ t, /** @type {Set<string>} */ set) => set.has(t)
-        || (key === 'type' && t === canon('integer') && set.has(canon('number')));
+      const covered = (/** @type {string} */ t, /** @type {Set<string>} */ set) => (key === 'type' ? typeCovered(t, set) : set.has(t));
       if ([...beforeTexts].some((t) => !covered(t, afterTexts))) emit('narrowed', key);
       if ([...afterTexts].some((t) => !covered(t, beforeTexts))) emit('widened', key);
     }

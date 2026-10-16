@@ -201,7 +201,7 @@ describe('jaren-contract diff — the compatibility gate', () => {
     assert.match(refused.stderr, /JC0004/);
   });
 
-  it('a required member dropped behind a $ref in a discriminated union fails a breaking gate; one in an undiscriminated union fails an unknown gate', () => {
+  it('a required member dropped behind a $ref in a discriminated or a nullable union fails a breaking gate; one in a union whose branches overlap fails an unknown gate', () => {
     /** @param {string[]} required @param {any} output */
     const doc = (required, output) => ({
       $contract: '0.1',
@@ -211,7 +211,8 @@ describe('jaren-contract diff — the compatibility gate', () => {
           { type: 'object', properties: { ok: { const: true }, value: { $ref: '#/$defs/proj' } }, required: ['ok', 'value'] },
           { type: 'object', properties: { ok: { const: false } }, required: ['ok'] },
         ] },
-        either: { anyOf: [{ $ref: '#/$defs/proj' }, { type: 'string' }] },
+        either: { anyOf: [{ $ref: '#/$defs/proj' }, { type: 'object' }] },
+        nullable: { anyOf: [{ $ref: '#/$defs/proj' }, { type: 'null' }] },
         map: { type: 'object', additionalProperties: { $ref: '#/$defs/proj' } },
       },
       operations: { 'a.read': { kind: 'read', output, http: { method: 'GET', path: '/a' } } },
@@ -233,8 +234,15 @@ describe('jaren-contract diff — the compatibility gate', () => {
     assert.strictEqual(guaranteed.status, 0, 'a member the variant now guarantees is additive');
     assert.deepStrictEqual(pick(JSON.parse(guaranteed.stdout).additive),
       [['R9', 'output-member-guaranteed', '/operations/a.read/output/oneOf/0/properties/value/properties/b']]);
+    const nullable = { $ref: '#/$defs/nullable' };
+    const dropped = gate(nullable, 'breaking');
+    assert.strictEqual(dropped.status, 1, 'an object never meets null: the projection no longer guarantees b');
+    assert.deepStrictEqual(pick(JSON.parse(dropped.stdout).breaking),
+      [['R8', 'output-member-optional', '/operations/a.read/output/anyOf/0/properties/b']]);
+    assert.strictEqual(gate(nullable, 'unknown').status, 0);
+    assert.strictEqual(gate(nullable, 'breaking', ['a'], ['a', 'b']).status, 0, 'a member the projection now guarantees is additive');
     const either = { $ref: '#/$defs/either' };
-    assert.strictEqual(gate(either, 'breaking').status, 0, 'no discriminator: the direction is not decided');
+    assert.strictEqual(gate(either, 'breaking').status, 0, 'two object branches, no discriminator: the direction is not decided');
     const unknown = gate(either, 'unknown');
     assert.strictEqual(unknown.status, 1);
     assert.match(unknown.stderr, /1 unknown change/);
