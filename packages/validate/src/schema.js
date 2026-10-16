@@ -50,7 +50,7 @@ import { compilePropertyDependencies } from './property-dependencies.js';
 import { compileDollarDataSchema } from './dollar-data.js';
 import { wrapUnevaluated } from './unevaluated.js';
 import { createJsonPointer, keywordLocation } from './traverse.js';
-import { getDynamicAnchorName, admitsDynamicReference } from './dynamic-ref.js';
+import { getDynamicAnchorName, admitsDynamicReference, appliesRefSiblings } from './dynamic-ref.js';
 
 /**
  * Compile $recursiveRef (draft 2019-09) and $dynamicRef (draft 2020-12).
@@ -147,6 +147,7 @@ function compileRecursiveRef(schemaObj, jsonSchema) {
   // Resolve the reference to find the initial target URI
   // For "#", this resolves against the baseUri
   const { id: initialTargetUri } = createJsonPointer(ref, baseUri);
+  root.refuseContested(initialTargetUri, schemaObj.path, jsonSchema);
   
   // Look up the initial target schema by its URI
   // We do a direct lookup in the schemas map to avoid triggering compilation
@@ -206,6 +207,9 @@ function compileDynamicAnchorRef(schemaObj, jsonSchema) {
   // `compileValidator` does
   const baseUri = schemaObj.baseUri || schemaObj.path;
   const { id: initialTargetUri, fragment: anchorName } = createJsonPointer(ref, baseUri, undefined, '$dynamicRef', keywordLocation(schemaObj.path, '$dynamicRef'));
+  // What the reference resolves through when it reads its initial target.
+  const holder = { $ref: initialTargetUri };
+  root.refuseContested(initialTargetUri, schemaObj.path, holder);
 
   // Pointer fragments resolve statically, regardless of whether the reference
   // also names a resource. Plain-name fragments use the same dynamic lookup
@@ -214,7 +218,7 @@ function compileDynamicAnchorRef(schemaObj, jsonSchema) {
   // answered: under `not` a `false` would read as success.
   if (anchorName?.startsWith('/')) {
     return boundReference(schemaObj.path, schemaObj.options.maxReferenceDepth, function validateDynamicRefPointer(data, dataPath, dataRoot) {
-      return root.resolveObject(initialTargetUri, baseUri, { $ref: initialTargetUri }).validate(data, dataPath, dataRoot);
+      return root.resolveObject(initialTargetUri, baseUri, holder).validate(data, dataPath, dataRoot);
     });
   }
 
@@ -278,7 +282,7 @@ function compileDynamicAnchorRef(schemaObj, jsonSchema) {
     // What the map holds under no such key (a `false` target, an anchor the
     // `$ref` resolver finds under another spelling) is resolved as a `$ref`
     // is; what nothing resolves is refused.
-    return root.resolveObject(initialTargetUri, baseUri, { $ref: initialTargetUri }).validate(data, dataPath, dataRoot);
+    return root.resolveObject(initialTargetUri, baseUri, holder).validate(data, dataPath, dataRoot);
   });
 }
 
@@ -454,7 +458,7 @@ export function compileSchemaObject(schemaObj, jsonSchema) {
     const hasValidationSiblings = hasRefSiblings(jsonSchema, schemaObj.options.propertyDependencies === true);
     // In draft 7 and earlier, $ref always overrides siblings regardless
     // In draft 2019-09+, $ref can have validation siblings
-    if (!hasValidationSiblings || draftVersion < 2019) {
+    if (!hasValidationSiblings || !appliesRefSiblings(draftVersion)) {
       return undefined;
     }
     // Otherwise, continue to process siblings alongside $ref (2019-09+ only)

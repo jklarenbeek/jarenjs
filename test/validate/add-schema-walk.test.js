@@ -84,10 +84,14 @@ describe('addSchema registers the rest of a document past a place its walk refus
   it('an identifier declared twice: an identifier after it answers (was JK0009 naming it)', () => {
     assert.deepEqual(answers(holding(twice()).compile({ $ref: 'https://a.test/b.json' }), ['s', 1]), [true, false]);
   });
-  it('an identifier declared twice keeps its first place', () => {
-    assert.deepEqual(answers(holding(twice()).compile({ $ref: 'https://a.test/x.json' }), ['s', 1]), [true, false]);
-    assert.deepEqual(answers(holding(twice()).compile({ $ref: 'https://a.test/a.json#n' }), ['s', 1]), [true, false]);
-    assert.deepEqual(answers(holding(twice()).compile({ $ref: 'https://a.test/a.json#q' }), ['s', 1]), [true, false]);
+  it('an identifier declared twice: the compile that reads it is refused, naming both places (was the first place\'s answer)', () => {
+    const both = (id, first, second) => ['JK0012', `JK0012: '${id}' names two schemas (in 'https://a.test/a.json', at '${first}' and at '${second}'), and this compile reads it, which would answer by the one registered first; give one of them another name`];
+    assert.deepEqual(refusal(() => holding(twice()).compile({ $ref: 'https://a.test/x.json' })),
+      both('https://a.test/x.json#', '#/%24defs/x/%24id', '#/%24defs/y/%24id'));
+    assert.deepEqual(refusal(() => holding(twice()).compile({ $ref: 'https://a.test/a.json#n' })),
+      both('https://a.test/a.json#n', '#/%24defs/n/%24anchor', '#/%24defs/m/%24anchor'));
+    assert.deepEqual(refusal(() => holding(twice()).compile({ $ref: 'https://a.test/a.json#q' })),
+      both('https://a.test/a.json#q', '#/%24defs/d1/%24dynamicAnchor', '#/%24defs/d2/%24dynamicAnchor'));
   });
   it('an identifier declared twice: nothing below its second place is registered, as before', () => {
     for (const uri of ['https://a.test/z.json#', 'https://a.test/w.json#', 'https://a.test/v.json#'])

@@ -19,7 +19,8 @@
  * first call that reaches it. An identifier (`$id`, `$anchor`,
  * `$dynamicAnchor`) that names two schemas — declared twice in a document,
  * or already naming another schema the validator holds — is refused where
- * the second is read (`JK0012`). A schema `deriveStrictProfile`
+ * the second is read (`JK0012`); one that two places of the registered
+ * documents declare is refused by the compile that reads it. A schema `deriveStrictProfile`
  * (`@jarenjs/validate/strict-profile`) cannot make strict is refused where
  * the derivation reads the place (`JK0101`–`JK0108`). When a validator
  * runs: a validation that nests more schema references than

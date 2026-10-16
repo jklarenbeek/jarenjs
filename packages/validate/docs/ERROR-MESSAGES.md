@@ -300,7 +300,7 @@ failed validation, because a `false` under `not` would read as success.
 | `JK0009` | `SchemaCompileError` | A reference resolves to no schema the validator holds (a document nothing holds, a pointer that misses, or an anchor nothing declares): refused when a schema compiles, or by the first call that reaches a reference resolved on first use, a `$dynamicRef`, or a `$recursiveRef` in a document that declares no draft and is not read as 2019-09 |
 | `JK0010` | `SchemaCompileError` | A `$ref`, `$dynamicRef`, `$recursiveRef` or `$id` (`id`) is not a valid URI reference: refused where the text is read, naming the keyword, the text and where it sits |
 | `JK0011` | `SchemaCompileError` | A `$recursiveRef` read as draft 2019-09 is not `"#"`: refused by the first call that reaches it, naming the `$ref` that applies the schema it names |
-| `JK0012` | `SchemaCompileError` | An identifier (`$id`, `$anchor`, `$dynamicAnchor`) names two schemas — a document declares it twice, or it already names another schema the validator holds: refused where the second is read, naming both places |
+| `JK0012` | `SchemaCompileError` | An identifier (`$id`, `$anchor`, `$dynamicAnchor`) names two schemas — a document declares it twice, or it already names another schema the validator holds: refused where the second is read, naming both places; in a registered document, refused by the compile that reads it |
 | `JK0101` | `SchemaCompileError` | Retired, no longer raised: `deriveStrictProfile` (`@jarenjs/validate/strict-profile`) carries a schema that accepts any value — `true`, `{}`, a node with no type, a free-form object, a tuple — as JSON text |
 | `JK0102` | `SchemaCompileError` | `deriveStrictProfile`: an object whose member names are open and that no entries array carries — a map beside declared `properties`, a map that may also be an array, a schema-valued `unevaluatedProperties` |
 | `JK0103` | `SchemaCompileError` | `deriveStrictProfile`: a keyword that applies members, items or branches beside its node and that no distribution makes exact — `if`/`then`/`else`, `dependentSchemas` or a draft-07 `dependencies` schema beside an object type, a branch beside an object type that is more than members (a `$ref`, a nested union, an `enum`), a branch giving a member a second schema that is not an `enum` or `const`, an untyped `allOf` of more than one branch, a `$ref` or `anyOf` beside structural siblings |
@@ -525,12 +525,18 @@ naming the keyword and its place; and a further document a compile is given
 with no `$id` of its own, read under a URI that already names one, is
 refused with the repair of giving it one. A document registered with
 `addSchema` (or loaded by `compileAsync`) is not refused: an identifier it
-declares twice keeps its first place. Where anchors are not allowed
+declares at two places that differ, or a nested one two registered documents
+declare differently, is refused only by the compile that reads it (when it
+compiles, or, for a reference resolved on first use, by the first call that
+reaches it), naming both places or both documents, since it would answer by
+the place registered first. Where anchors are not allowed
 (`TraverseOptions`), an `$anchor` or `$dynamicAnchor` declares nothing:
 
 ```text
 JK0012: 'https://github.com/jklarenbeek/x.json#' is declared twice (first at '#/%24defs/a/%24id'); give one of them another name at #/%24defs/b/%24id
 JK0012: $id declares 'https://a.test/x.json#', which names another schema the validator holds; give one of them another name at #/%24defs/a/%24id
+JK0012: 'https://d.test/x.json#' names two schemas (in 'https://d.test/r.json', at '#/%24defs/a/%24id' and at '#/%24defs/b/%24id'), and this compile reads it, which would answer by the one registered first; give one of them another name
+JK0012: 'https://d.test/x.json#' names two schemas (one registered under 'https://d.test/one.json', one under 'https://d.test/two.json'), and this compile reads it, which would answer by the one registered first; give one of them another name
 ```
 
 **`JK0102`–`JK0108` — a schema with no strict form.** `deriveStrictProfile`

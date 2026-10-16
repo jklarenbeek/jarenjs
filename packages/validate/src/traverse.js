@@ -233,6 +233,10 @@ function atFragment(uri) {
  * @property {WeakSet<object>} foreign - The places whose nearest `$schema`
  *   names no draft this package knows: their dynamic references are read as
  *   where no draft is declared
+ * @property {Map<string, string>} contested - The identifiers two different
+ *   registered places declare, each with what names both: a compile that
+ *   reads one is refused (`JK0012`), as it would answer by whichever place
+ *   was registered first
  */
 
 /**
@@ -270,12 +274,14 @@ function keptRefBase(places, schema, reading) {
  *   is read under (`compile` reads its schema's document as draft-07 when it
  *   declares none); `null` when unknown, as for a document registered before
  *   any compile names its draft
- * @param {(error: Error) => void} [onFault] - Offered each refusal of a
- *   place below the document's root (an `$id` or a `$ref` that is no URI
- *   reference, an identifier an earlier place of the document declares)
- *   instead of throwing it; the walk then goes on past it: a refused `$ref`
- *   registers no target, and a refused identifier nothing at or below its
- *   place (an identifier declared twice keeps its first place)
+ * @param {(error: Error, twice?: { id: string, first: any, second: any, firstAt: string|undefined, secondAt: string }) => void} [onFault] -
+ *   Offered each refusal of a place below the document's root (an `$id` or
+ *   a `$ref` that is no URI reference, an identifier an earlier place of the
+ *   document declares) instead of throwing it, with, for an identifier
+ *   declared twice, the identifier and both places; the walk then goes on
+ *   past it: a refused `$ref` registers no target, and a refused identifier
+ *   nothing at or below its place (an identifier declared twice keeps its
+ *   first place)
  * @returns {string} The document's own id
  */
 export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPointerOptions(), onReference = undefined, places = undefined, defaultDraft = null, onFault = undefined) {
@@ -301,10 +307,12 @@ export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPoi
   /**
    * Refuse a place, or offer the refusal to `onFault` and go on.
    * @param {Error} error
+   * @param {{ id: string, first: any, second: any, firstAt: string|undefined, secondAt: string }} [twice] -
+   *   For an identifier declared twice: it, both places and their locations
    */
-  const fault = (error) => {
+  const fault = (error, twice = undefined) => {
     if (onFault === undefined) throw error;
-    onFault(error);
+    onFault(error, twice);
   };
   /** Where this walk registered each identifier: the keyword declaring it. */
   const declared = new Map();
@@ -324,7 +332,8 @@ export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPoi
       const first = declared.get(id);
       fault(new SchemaCompileError('JK0012', first === undefined
         ? `${keyword} declares '${id}', which names another schema the validator holds; give one of them another name`
-        : `'${id}' is declared twice (first at '${first}'); give one of them another name`, place));
+        : `'${id}' is declared twice (first at '${first}'); give one of them another name`, place),
+      { id, first: held, second: obj, firstAt: first, secondAt: place });
       return false;
     }
     schemas.set(id, obj);
@@ -521,6 +530,44 @@ export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPoi
 const UNHELD = 'no schema the validator holds has that URI; register it with addSchema, load it with compileAsync, or fix the reference';
 
 /**
+ * Refuse reading an identifier two registered places declare (`JK0012`):
+ * the answer would be the first registered place's, whichever was meant.
+ * @param {SchemaPlaces|undefined} places - What the walks read
+ * @param {string} id - The identifier a reference is resolved through
+ * @throws {SchemaCompileError} `JK0012` when the identifier is contested
+ */
+function refuseContested(places, id) {
+  const names = places?.contested.get(id);
+  if (names !== undefined)
+    throw new SchemaCompileError('JK0012',
+      `'${id}' names two schemas (${names}), and this compile reads it, which would answer by the one registered first; give one of them another name`);
+}
+
+/**
+ * Refuse a reference whose document, or plain-name anchor, two registered
+ * places declare (`JK0012`). A JSON Pointer fragment is read through the
+ * document's identifier.
+ * @param {SchemaPlaces|undefined} places - What the walks read
+ * @param {string} ref - The reference, resolved
+ * @throws {SchemaCompileError} `JK0012` when it is read through a contested identifier
+ */
+export function refuseContestedReference(places, ref) {
+  if (places === undefined || places.contested.size === 0) return;
+  const hash = ref.indexOf('#');
+  refuseContested(places, hash === -1 ? `${ref}#` : ref.slice(0, hash + 1));
+  if (hash !== -1 && hash < ref.length - 1 && ref[hash + 1] !== '/') refuseContested(places, ref);
+}
+
+/**
+ * Whether an error is the refusal of a contested identifier.
+ * @param {unknown} error
+ * @returns {boolean}
+ */
+export function isContestedRefusal(error) {
+  return error instanceof SchemaCompileError && error.code === 'JK0012';
+}
+
+/**
  * The refusal of a reference that resolves to no schema: `JK0009`, or
  * `JK0008` for a draft-07 `$ref` whose sibling `$id` did not set its base.
  * @param {string} id - The reference, resolved
@@ -541,15 +588,19 @@ export function unresolvedReference(id, ignoredId = false, why = UNHELD) {
  * @param {string} refUri - The reference
  * @param {string|null} baseUri - The base it resolves against
  * @param {JsonPointerOptions} [opts]
+ * @param {SchemaPlaces} [places] - What the walks read: an identifier two
+ *   registered places declare is refused
  * @returns {{id: string, schema: any}}
  * @throws {SchemaCompileError} `JK0009` when no schema the map holds has
- *   that URI, or its pointer misses
+ *   that URI, or its pointer misses; `JK0012` when the identifier it is read
+ *   through names two registered places
  */
-export function resolveRefSchemaShallow(schemas, refUri, baseUri, opts = new JsonPointerOptions()) {
+export function resolveRefSchemaShallow(schemas, refUri, baseUri, opts = new JsonPointerOptions(), places = undefined) {
   let { id: base, leftUri, fragment } = createJsonPointer(refUri, baseUri, opts);
   const id = base;
   if (!schemas.has(leftUri))
     throw unresolvedReference(id);
+  refuseContested(places, leftUri);
 
   // get the document from cache
   let schema = schemas.get(leftUri);
@@ -565,6 +616,7 @@ export function resolveRefSchemaShallow(schemas, refUri, baseUri, opts = new Jso
     // The anchor could be stored as just the fragment (e.g., "#foo") or as a full URI
     // Try the full id first (which includes the base URI)
     if (schemas.has(base)) {
+      refuseContested(places, base);
       return { id: base, schema: schemas.get(base) };
     }
     // Try the scoped anchor format: baseUri + fragment (e.g., "https://example.com/schema#foo")
@@ -673,10 +725,16 @@ export function restoreSchemaRefsInMap(schemas, opts = new JsonPointerOptions(),
       let schema = null;
       let failure;
       try {
-        ({ schema } = resolveRefSchemaShallow(schemas, id, null, opts));
+        ({ schema } = resolveRefSchemaShallow(schemas, id, null, opts, places));
       }
       catch (e) {
         failure = e;
+      }
+      // A target read through a contested identifier is refused by the
+      // compile that reads it, not by every compile on the validator.
+      if (isContestedRefusal(failure)) {
+        schemas.delete(id);
+        continue;
       }
       if (schema == null) {
         // What only the 2019-09 reading of an undeclared document names, a
@@ -779,7 +837,7 @@ export function resolveRefSchemaDeep(schemas, baseUri, refschema, opts = new Tra
       if (item !== refschema && hasRefSiblings(item, opts.propertyDependencies === true))
         return { id: base, schema: item };
       const ref = schemaReference(item, '$ref');
-      const { id, schema } = resolveRefSchemaShallow(schemas, ref, base, opts);
+      const { id, schema } = resolveRefSchemaShallow(schemas, ref, base, opts, places);
 
       // A hop back to an id already visited is a loop of pure references: no
       // schema on it reads the instance, so no answer is reachable.

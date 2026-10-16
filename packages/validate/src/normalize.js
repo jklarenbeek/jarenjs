@@ -45,6 +45,7 @@ import {
   readPrefixItems,
 } from './schema-keywords.js';
 import { createSchemaPatternTester } from './string.js';
+import { appliesRefSiblings } from './dynamic-ref.js';
 
 // The validator's reading of a `pattern` string, for a consumer that checks
 // one without compiling a schema (a form field, per keystroke).
@@ -291,7 +292,7 @@ function buildObjectStep(node, ctx) {
       if (step !== null) hasStep = true;
       // Keep the property's step with its default. Matching pattern steps
       // are composed below so absent and supplied members normalize alike.
-      if (isJsonObject(sub) && sub.default !== undefined
+      if (isJsonObject(sub) && sub.default !== undefined && !readsRefAlone(sub, ctx.declaredDraft)
         && resolveNormalizeSwitch(options.useDefaults, sub))
         defaults.push(key, sub.default, step);
     }
@@ -460,9 +461,8 @@ function opensWith(value, open) {
  * The step exists only where the string cannot be what was meant: the node's
  * own `type` names `object` or `array` and not `string`. A node without a
  * `type`, or one that admits a string, accepts the string as sent, and
- * decoding it would change a valid value. Nothing decodes beside a `$ref`
- * whose siblings the validator ignores (see `compileNode`): there the
- * reference alone decides.
+ * decoding it would change a valid value. A node read as its `$ref` alone
+ * (see {@link readsRefAlone}) builds no step of its own: its target decodes.
  *
  * Text that is not JSON, or encodes a scalar or the other container kind, is
  * returned unchanged so validation reports the string. The text is decoded
@@ -475,7 +475,7 @@ function opensWith(value, open) {
  * @returns {Function|null} The step, or null when this node needs none
  */
 function buildJsonTextStep(node, ctx) {
-  if (ctx.jsonTextOff || !resolveNormalizeSwitch(ctx.options.coerceJsonText, node)) return null;
+  if (!resolveNormalizeSwitch(ctx.options.coerceJsonText, node)) return null;
   const trim = resolveNormalizeSwitch(ctx.options.trimStrings, node);
   const types = typeof node.type === 'string' ? [node.type] : node.type;
   if (!Array.isArray(types) || types.includes('string')) return null;
@@ -503,17 +503,19 @@ function buildJsonTextStep(node, ctx) {
  *
  * Trimming applies to every string the walk reaches, not only to nodes typed
  * `string`, because the value that needs trimming is frequently the one
- * declared as a number.
+ * declared as a number; it is a switch, not a keyword, so it applies at a
+ * node read as its `$ref` alone too, where the sibling `type` coerces nothing.
  * @param {object} node - The schema node
  * @param {object} ctx - The compile context
+ * @param {boolean} refAlone - Whether the node is read as its `$ref` alone
  * @returns {Function|null} The step, or null when this node needs none
  */
-function buildScalarStep(node, ctx) {
+function buildScalarStep(node, ctx, refAlone) {
   const options = ctx.options;
   const trim = resolveNormalizeSwitch(options.trimStrings, node);
   // A union `type` gives no single conversion target, so coercion is skipped
   // rather than guessed.
-  const coerceTo = resolveNormalizeSwitch(options.coerceTypes, node) && typeof node.type === 'string'
+  const coerceTo = !refAlone && resolveNormalizeSwitch(options.coerceTypes, node) && typeof node.type === 'string'
     ? node.type
     : null;
   if (!trim && coerceTo === null) return null;
@@ -531,6 +533,23 @@ function buildScalarStep(node, ctx) {
   return function normalizeTrimCoerce(value) {
     return coerceToType(typeof value === 'string' ? value.trim() : value, coerceTo);
   };
+}
+
+/**
+ * Whether the validator reads `node` as its `$ref` alone: the node holds a
+ * `$ref`, and the draft it is read under (its own `$schema`, else the
+ * inherited one; draft-07 where the document declares none, as `compile`
+ * reads it) ignores the keywords beside one ({@link appliesRefSiblings}).
+ * Nothing beside that `$ref` normalizes: not a sibling `type`, `properties`,
+ * `items`, `allOf` or `additionalProperties`, and not its `default`.
+ * @param {Record<string, any>} node - A schema object
+ * @param {number|null} declaredDraft - The draft its parent is read under, or null when none is declared
+ * @returns {boolean}
+ */
+function readsRefAlone(node, declaredDraft) {
+  if (typeof node.$ref !== 'string') return false;
+  const draft = typeof node.$schema === 'string' ? detectSchemaDraft(node) : declaredDraft;
+  return !appliesRefSiblings(draft ?? 7);
 }
 
 /**
@@ -554,7 +573,7 @@ function compileNode(node, ctx) {
 
   // One node reached under two drafts (inline and as a reference target)
   // normalizes per draft.
-  const memoKey = `${ctx.allowStrip}${ctx.declaredDraft}${ctx.jsonTextOff ? 'j' : ''}`;
+  const memoKey = `${ctx.allowStrip}${ctx.declaredDraft}`;
   let memo = ctx.memos.get(memoKey);
   if (memo === undefined) ctx.memos.set(memoKey, memo = new Map());
   const cached = memo.get(node);
@@ -569,18 +588,15 @@ function compileNode(node, ctx) {
   const steps = [];
 
   // Before draft 2019-09, and in a document declaring no draft, the
-  // validator ignores the keywords beside a `$ref` by default. Decoding JSON
-  // text there could turn a string the reference accepts into a container it
-  // refuses, so no JSON text decodes in the siblings' subtree; the reference
-  // target, compiled with the incoming context, still decodes by its own type.
-  const siblingCtx = ctx.options.coerceJsonText && !ctx.jsonTextOff && typeof node.$ref === 'string'
-    && !(ctx.declaredDraft !== null && ctx.declaredDraft >= 2019)
-    ? { ...ctx, jsonTextOff: true }
-    : ctx;
+  // validator reads a `$ref` alone: the keywords beside it apply nothing.
+  // Such a node normalizes as its target and nothing else, so a sibling the
+  // validator never reads cannot coerce, decode, strip or default a value
+  // the reference accepts into one it refuses.
+  const refAlone = readsRefAlone(node, ctx.declaredDraft);
 
   // Decoding comes first: every other step of this node, the reference and
   // the `allOf` branches included, reads the decoded container.
-  const jsonTextStep = buildJsonTextStep(node, siblingCtx);
+  const jsonTextStep = refAlone ? null : buildJsonTextStep(node, ctx);
   if (jsonTextStep !== null) steps.push(jsonTextStep);
 
   if (typeof node.$ref === 'string') {
@@ -606,21 +622,23 @@ function compileNode(node, ctx) {
   // the object, so what looks "additional" to it may be exactly what a
   // sibling branch declares. Composition-shaped schemas therefore keep their
   // members; only defaults, coercion and trimming flow through.
-  if (Array.isArray(node.allOf)) {
-    const branchCtx = siblingCtx.allowStrip ? { ...siblingCtx, allowStrip: false } : siblingCtx;
-    for (let i = 0; i < node.allOf.length; i++) {
-      const step = compileNode(node.allOf[i], branchCtx);
-      if (step !== null) steps.push(step);
+  if (!refAlone) {
+    if (Array.isArray(node.allOf)) {
+      const branchCtx = ctx.allowStrip ? { ...ctx, allowStrip: false } : ctx;
+      for (let i = 0; i < node.allOf.length; i++) {
+        const step = compileNode(node.allOf[i], branchCtx);
+        if (step !== null) steps.push(step);
+      }
     }
+
+    const objectStep = buildObjectStep(node, ctx);
+    if (objectStep !== null) steps.push(objectStep);
+
+    const arrayStep = buildArrayStep(node, ctx);
+    if (arrayStep !== null) steps.push(arrayStep);
   }
 
-  const objectStep = buildObjectStep(node, siblingCtx);
-  if (objectStep !== null) steps.push(objectStep);
-
-  const arrayStep = buildArrayStep(node, siblingCtx);
-  if (arrayStep !== null) steps.push(arrayStep);
-
-  const scalarStep = buildScalarStep(node, ctx);
+  const scalarStep = buildScalarStep(node, ctx, refAlone);
   if (scalarStep !== null) steps.push(scalarStep);
 
   built = composeSteps(steps);
@@ -671,7 +689,9 @@ function admitNormalizeOptions(options) {
  * **What is normalized.** `properties`, `patternProperties`,
  * `additionalProperties`, `items`/`prefixItems`/`additionalItems`, same-document
  * `$ref` (`#`, `#/pointer` and plain `#anchor` forms), and `allOf` (composed,
- * with stripping disabled inside it). With `coerceJsonText`, a string holding
+ * with stripping disabled inside it). Before draft 2019-09, and where no draft
+ * is declared, a node holding a `$ref` normalizes as its target alone, as the
+ * validator reads it: nothing beside the `$ref`, its `default` included. With `coerceJsonText`, a string holding
  * an object's or array's JSON text is decoded wherever such a node's `type`
  * wants that container and admits no string, at any depth, before the node's
  * other steps run on the decoded value. `allOf` branches run once, in
@@ -729,18 +749,16 @@ export function compileNormalizer(schema, options = {}) {
     anchors: collectSameDocumentAnchors(schema),
     /** @type {number|null} The draft the schema being compiled declares, or null when none does */
     declaredDraft: null,
-    /** @type {Map<string, Map<object, Function|null>>} The compiled steps per stripping mode, draft and decoding */
+    /** @type {Map<string, Map<object, Function|null>>} The compiled steps per stripping mode and draft */
     memos: new Map(),
     allowStrip: true,
-    /** True below the inert siblings of a `$ref`, where no JSON text decodes */
-    jsonTextOff: false,
   };
 
   const step = compileNode(schema, ctx);
 
   // A root `default` answers the "the whole document was absent" case, which
   // no member walk can reach.
-  const rootDefault = isJsonObject(schema) && schema.default !== undefined
+  const rootDefault = isJsonObject(schema) && schema.default !== undefined && !readsRefAlone(schema, null)
     && resolveNormalizeSwitch(resolved.useDefaults, schema)
     ? schema.default
     : undefined;

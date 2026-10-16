@@ -24,6 +24,8 @@ import {
   createJsonPointer,
   keywordLocation,
   unresolvedReference,
+  refuseContestedReference,
+  isContestedRefusal,
 } from './traverse.js';
 
 import {
@@ -38,12 +40,12 @@ import {
 } from './tools.js';
 import { wrapUnevaluated } from './unevaluated.js';
 import { registerFormatCompiler, registerFormatCompilers } from './format.js';
-import { mergeMap } from '@jarenjs/core/object';
+import { equalsJson, mergeMap } from '@jarenjs/core/object';
 import { isStringWhiteSpace } from '@jarenjs/core/string';
-import { hasRecursiveAnchor, getDynamicAnchorName, collectDynamicAnchors, collectDynamicAnchorsDeep } from './dynamic-ref.js';
+import { hasRecursiveAnchor, getDynamicAnchorName, collectDynamicAnchors, collectDynamicAnchorsDeep, appliesRefSiblings } from './dynamic-ref.js';
 import { isRecursiveQueryCompileError } from './query-keyword.js';
 import { boundReference, assertReferenceDepth, assertOutputFormat, REFERENCE_DEPTH_CEILING } from './errors.js';
-import { TRAVERSE_SCHEMA_MAP_MAPS, detectSchemaDraft } from './schema-keywords.js';
+import { TRAVERSE_SCHEMA_OBJECTS, TRAVERSE_SCHEMA_MAPS, TRAVERSE_SCHEMA_MAP_MAPS, detectSchemaDraft } from './schema-keywords.js';
 import { VALIDATOR_STATE } from './validator-state.js';
 
 export {
@@ -351,6 +353,46 @@ function placeOf(drafts, schemas, path, schema) {
 }
 
 /**
+ * The keywords that assert nothing under any option: two places that differ
+ * only in them validate alike. `default` stays (the normalizer reads it), as
+ * do `format` and `content*` (options make them assertions).
+ */
+const PURE_ANNOTATIONS = Object.freeze(['title', 'description', '$comment', 'examples', 'deprecated', 'readOnly', 'writeOnly']);
+
+/**
+ * A schema without its pure annotations, at every schema position (a member
+ * named `title` in `properties` is kept).
+ * @param {any} schema
+ * @returns {any}
+ */
+function withoutAnnotations(schema) {
+  if (!isObjectClass(schema)) return schema;
+  /** @type {Record<string, any>} */
+  const out = {};
+  for (const [key, value] of Object.entries(schema)) {
+    if (PURE_ANNOTATIONS.includes(key)) continue;
+    if (TRAVERSE_SCHEMA_OBJECTS.includes(key))
+      out[key] = Array.isArray(value) ? value.map(withoutAnnotations) : withoutAnnotations(value);
+    else if (TRAVERSE_SCHEMA_MAPS.includes(key) && isObjectClass(value))
+      out[key] = Object.fromEntries(Object.entries(value).map(([name, sub]) => [name, withoutAnnotations(sub)]));
+    else if (TRAVERSE_SCHEMA_MAP_MAPS.includes(key) && isObjectClass(value))
+      out[key] = Object.fromEntries(Object.entries(value).map(([name, inner]) => [name, withoutAnnotations({ properties: inner }).properties]));
+    else out[key] = value;
+  }
+  return out;
+}
+
+/**
+ * A registration key as a message names the document: without an empty
+ * fragment.
+ * @param {string} key
+ * @returns {string}
+ */
+function documentName(key) {
+  return key.endsWith('#') ? key.slice(0, -1) : key;
+}
+
+/**
  * ValidationRoot manages the compilation and validation context for a schema.
  * It holds references to all schemas, formats, options, and compiled ValidationObjects.
  * @class
@@ -408,6 +450,8 @@ export class ValidationRoot {
   #objects = null;
   /** @type {Set<string>} Paths whose ValidationObject is being constructed */
   #building = new Set();
+  /** @type {WeakMap<object, string>} The schema objects whose `$ref` a place declaring a contested identifier reads against itself, with that identifier */
+  #ownReads = new WeakMap();
   /** @type {Array} Array of validation errors */
   #errors = null;
   /** @type {ValidationObject|null} The root schema's ValidationObject */
@@ -808,6 +852,7 @@ export class ValidationRoot {
    * @returns {ValidationObject|null} The resolved ValidationObject
    */
   resolveObject(ref, path, schema, unlessBuilding = false) {
+    if (!this.#ownReads.has(schema)) this.refuseContested(ref);
     // Fast path - check if already compiled first
     const objects = this.#objects;
     const cached = objects.get(ref);
@@ -816,7 +861,16 @@ export class ValidationRoot {
     // Resolve ref chain and check final ID cache
     const schemas = this.#schemas;
     const traverse = this.#traverse;
-    const { id, schema: root } = resolveRefSchemaDeep(schemas, path, schema, traverse, undefined, this.#places, this.#options.draftVersion);
+    const places = this.#placesFor(schema);
+    const { id, schema: root } = resolveRefSchemaDeep(schemas, path, schema, traverse, undefined, places, this.#options.draftVersion);
+
+    // A target reached by a pointer whose place declares an identifier two
+    // registered places declare is built under the reference: the object
+    // built under that identifier may be the other place's.
+    if (places?.contested.has(id)) {
+      if (unlessBuilding && this.#building.has(ref)) return null;
+      return ValidationRoot.#createObject(this, ref, root, id);
+    }
 
     // Check if final ID is already compiled
     const finalCached = objects.get(id);
@@ -825,6 +879,62 @@ export class ValidationRoot {
 
     // Create and cache the validation object
     return ValidationRoot.#createObject(this, id, root);
+  }
+
+  /**
+   * Refuses a reference read through an identifier two registered places
+   * declare (`JK0012`): it would answer by the place registered first. A
+   * reference the held place makes against its own identifier answers by
+   * it, and is admitted for `holder`. An internal collaborator of the
+   * compiler; not part of the package's API.
+   * @param {string} ref - The reference, resolved
+   * @param {string} [location] - Where the schema object holding it sits
+   * @param {object} [holder] - The schema object holding it
+   */
+  refuseContested(ref, location = undefined, holder = undefined) {
+    const key = ref.slice(0, ref.indexOf('#') + 1) || `${ref}#`;
+    if (holder !== undefined && location !== undefined && this.#readsOwnPlace(key, location)) {
+      this.#ownReads.set(holder, key);
+      return;
+    }
+    refuseContestedReference(this.#places, ref);
+  }
+
+  /**
+   * Whether a reference read through a contested document identifier is read
+   * from inside the place the validator holds under it: a reference such a
+   * place makes against its own identifier names that place, and answers by it.
+   * @param {string} key - The document identifier the reference is read through
+   * @param {string} location - Where the schema object holding it sits
+   * @returns {boolean}
+   */
+  #readsOwnPlace(key, location) {
+    if (!this.#places?.contested.has(key)) return false;
+    const held = this.#schemas.get(key);
+    const hash = location.indexOf('#');
+    let place = this.#schemas.get(hash === -1 ? `${location}#` : location.slice(0, hash + 1));
+    if (place === held) return true;
+    if (hash === -1 || hash === location.length - 1) return false;
+    for (const part of decodeJsonPointerPath(location.slice(hash + 1))) {
+      place = place?.[part];
+      if (place === held) return true;
+    }
+    return false;
+  }
+
+  /**
+   * What the walks read, as a reference resolves: for a reference a place
+   * reads against its own contested identifier, without that identifier.
+   * @param {object} holder - The schema object holding the reference
+   * @returns {import('./traverse.js').SchemaPlaces|undefined}
+   */
+  #placesFor(holder) {
+    const places = this.#places;
+    const own = this.#ownReads.get(holder);
+    if (places === undefined || own === undefined) return places;
+    const contested = new Map(places.contested);
+    contested.delete(own);
+    return { ...places, contested };
   }
 
   /**
@@ -850,7 +960,7 @@ export class ValidationRoot {
    * @throws {SchemaCompileError} `JK0009` when the target is not held
    */
   heldSchema(ref, base) {
-    return resolveRefSchemaShallow(this.#schemas, ref, base, this.#traverse);
+    return resolveRefSchemaShallow(this.#schemas, ref, base, this.#traverse, this.#places);
   }
 
   /**
@@ -862,11 +972,12 @@ export class ValidationRoot {
    */
   assertNoRefLoop(path, schema) {
     try {
-      resolveRefSchemaDeep(this.#schemas, path, schema, this.#traverse, this.#loopFree, this.#places, this.#options.draftVersion);
+      resolveRefSchemaDeep(this.#schemas, path, schema, this.#traverse, this.#loopFree, this.#placesFor(schema), this.#options.draftVersion);
     }
     catch (e) {
-      // A target that is not loaded is reported where it is used.
-      if (isRefCycleError(e)) throw e;
+      // A target that is not loaded is reported where it is used; one read
+      // through a contested identifier is refused here, at compile time.
+      if (isRefCycleError(e) || isContestedRefusal(e)) throw e;
     }
   }
 
@@ -1155,7 +1266,7 @@ export class ValidationObject {
     //   $id does not change the base URI - resolve against the parent's base.
     // - Draft 2019-09+: $id establishes the base URI for the schema object it
     //   appears in, INCLUDING a sibling $ref (self.baseUri accounts for $id).
-    const refBase = draftVersion >= 2019
+    const refBase = appliesRefSiblings(draftVersion)
       ? (self.baseUri || baseUri || path)
       : (baseUri || path);
     const { id: ref } = createJsonPointer(schemaReference(schema, '$ref'), refBase, root.traverse, '$ref', keywordLocation(path, '$ref'));
@@ -1163,8 +1274,9 @@ export class ValidationObject {
     // the same validator on the same instance until the stack runs out.
     if (ref === path)
       throw new RefCycleError([path, path]);
+    root.refuseContested(ref, path, schema);
     // Only check for sibling validators in draft 2019-09+
-    const siblingValidator = draftVersion >= 2019 ? compileSchemaObject(self, schema) : null;
+    const siblingValidator = appliesRefSiblings(draftVersion) ? compileSchemaObject(self, schema) : null;
 
     // Collect dynamic anchors from the current schema's $defs/definitions.
     // When following a $ref, dynamic anchors defined in the source schema's $defs
@@ -1793,7 +1905,11 @@ export class JarenValidator {
   /** @type {TraverseOptions} The traversal options, carrying the `propertyDependencies` switch of the validation options */
   #traverse = new TraverseOptions();
   /** @type {import('./traverse.js').SchemaPlaces} What the walks read at each registered schema's place */
-  #places = { drafts: new WeakMap(), refBases: new WeakMap(), keptRefs: new Set(), undecidedBases: new WeakMap(), lateTargets: new Set(), foreign: new WeakSet() };
+  #places = { drafts: new WeakMap(), refBases: new WeakMap(), keptRefs: new Set(), undecidedBases: new WeakMap(), lateTargets: new Set(), foreign: new WeakSet(), contested: new Map() };
+  /** @type {Map<string, string>} The key of the document each registered identifier came from */
+  #registeredIn = new Map();
+  /** @type {WeakSet<object>} The documents `addSchema` registered under a key of their own */
+  #documents = new WeakSet();
 
   /**
    * Creates a new JarenValidator instance.
@@ -1907,7 +2023,9 @@ export class JarenValidator {
       const schemaKey = key || (isObjectClass(schema) ? schema.$id : undefined);
       if (schemaKey) {
         const before = new Map(this.#schemas);
+        const contestedBefore = new Map(this.#places.contested);
         this.#schemas.set(schemaKey, schema);
+        if (isObjectClass(schema)) this.#documents.add(schema);
         // Only an empty fragment aliases the document URI. Replace both
         // aliases together; a named anchor remains a distinct registration.
         const fragment = schemaKey.indexOf('#');
@@ -1933,6 +2051,9 @@ export class JarenValidator {
         catch (e) {
           this.#schemas.clear();
           for (const [k, v] of before) this.#schemas.set(k, v);
+          const contested = this.#places.contested;
+          contested.clear();
+          for (const [k, v] of contestedBefore) contested.set(k, v);
           throw e;
         }
       }
@@ -2004,28 +2125,67 @@ export class JarenValidator {
     // Use a wrapper map to collect new entries, then merge them. A place the
     // walk refuses registers nothing and the walk goes on, so the rest of
     // the document stays registered: an `$id` or a `$ref` that is no URI
-    // reference is refused (`JK0010`) by the compile that reads it, and an
-    // identifier declared twice keeps its first place. A document whose own
-    // `$id` is no URI reference registers nothing more; every compile
-    // refuses it.
+    // reference is refused (`JK0010`) by the compile that reads it. An
+    // identifier declared twice keeps its first place, and is contested
+    // when the two places differ: a compile that reads it is refused
+    // (`JK0012`), every other compile answers. A document whose own `$id`
+    // is no URI reference registers nothing more; every compile refuses it.
+    const contested = this.#places.contested;
     const newSchemas = new Map();
     let faulted = false;
     try {
-      storeSchemaIdsInMap(newSchemas, baseUri, schema, scopedOpts, undefined, this.#places, null, () => {
+      storeSchemaIdsInMap(newSchemas, baseUri, schema, scopedOpts, undefined, this.#places, null, (_error, twice) => {
         faulted = true;
+        if (twice === undefined || this.#samePlace(twice.id, twice.first, twice.second)) return;
+        const names = `in '${documentName(baseUri)}', at '${twice.firstAt ?? '#'}' and at '${twice.secondAt}'`;
+        contested.set(twice.id, names);
       });
     } catch (_e) {
       // the document's own `$id` (see above)
     }
 
-    // Merge new entries into the main schemas map, skipping existing keys;
-    // an unresolved entry (a reference an earlier schema made) is filled.
+    // Merge new entries into the main schemas map; an unresolved entry (a
+    // reference an earlier schema made) is filled. An identifier an earlier
+    // document declares keeps that place, and is contested when the two
+    // places differ.
+    const registeredIn = this.#registeredIn;
     for (const [id, value] of newSchemas.entries()) {
-      if (this.#schemas.get(id) == null) {
+      const held = this.#schemas.get(id);
+      if (held == null) {
         this.#schemas.set(id, value);
+        if (value != null) registeredIn.set(id, baseUri);
       }
+      else if (value != null && !this.#samePlace(id, held, value))
+        contested.set(id, `one registered under '${documentName(registeredIn.get(id) ?? id)}', one under '${documentName(baseUri)}'`);
     }
     return faulted;
+  }
+
+  /**
+   * Whether an identifier two registered places declare answers one way:
+   * both are one object, or equal JSON read under one draft once the pure
+   * annotations are set aside, or the
+   * identifier names a document (no anchor) and the first place is a
+   * document registered under a key of its own (the latest registration
+   * under a key names it, whatever a nested place declares).
+   * @param {string} id
+   * @param {any} first
+   * @param {any} second
+   * @returns {boolean}
+   */
+  #samePlace(id, first, second) {
+    if (first === second) return true;
+    const hash = id.indexOf('#');
+    if (this.#documents.has(first) && (hash === -1 || hash === id.length - 1)) return true;
+    const drafts = this.#places.drafts;
+    const foreign = this.#places.foreign;
+    if (drafts.get(first) !== drafts.get(second) || foreign.has(first) !== foreign.has(second)) return false;
+    try {
+      return equalsJson(withoutAnnotations(first), withoutAnnotations(second));
+    }
+    catch {
+      return false; // a cycle or a nesting too deep to compare
+    }
   }
 
   /**

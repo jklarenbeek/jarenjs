@@ -1187,7 +1187,15 @@ document that is (the message then names the step that misses)
   applies nothing for it
 - `JK0012`: an identifier names two schemas; `storeSchemaIdsInMap`'s
   `declare` refuses the second place (offered to `onFault` under
-  `addSchema`, which keeps the first)
+  `addSchema`, which keeps the first, and records the identifier in
+  `places.contested` when the two places differ, as its merge does for a
+  nested identifier two registered documents declare);
+  `resolveRefSchemaShallow` and the compile-time reads (`compileValidator`,
+  `resolveObject`, the dynamic references' initial target) refuse a
+  reference read through a contested identifier, except one the place held
+  under it makes against it (admitted per holder, `#ownReads`), and
+  `resolveObject` builds a target whose place declares one under the
+  reference, not the identifier
 - `JK0010`: the reference or `$id` text is no URI; `createJsonPointer` codes
   the `URL` parse failure, and the callers that know the keyword and its
   place name them

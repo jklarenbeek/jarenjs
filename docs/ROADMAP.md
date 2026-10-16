@@ -117,14 +117,17 @@ delete it or fix it.
   the decode rule (the node's own `type` names `object`/`array` and not
   `string`; a `$ref`'s sibling `type` only where the declared draft asserts
   `$ref` siblings).
-- [ ] **The normalizer applies a `$ref`'s sibling keywords where the validator
+- [ ] **`@jarenjs/emit` reads a `$ref`'s sibling keywords where the validator
   ignores them.** In a document declaring draft-07 or no draft, the validator
-  ignores keywords beside `$ref` by default, but `compileNormalizer` still
-  runs them: `{ $defs: { S: { type: 'string' } }, $ref: '#/$defs/S', type:
-  'integer' }` with `coerceTypes` turns `'12'`, which validates, into `12`,
-  which does not (the same holds for sibling `properties`, `items`, `allOf`,
-  defaults and stripping). `@jarenjs/emit` mirrors the walk, so both move
-  together; `coerceJsonText` already decodes nothing in those siblings.
+  and `compileNormalizer` read a schema object holding a `$ref` as its target
+  alone, siblings and a `default` beside it included, but `@jarenjs/emit`
+  intersects the siblings: `{ $defs: { S: { type: 'string' } }, $ref:
+  '#/$defs/S', type: 'integer' }` emits `S & number`, which no value the
+  validator accepts (`'12'`) satisfies; and its normalized variant types
+  `properties: { p: { $ref: '#/$defs/S', default: 5 } }` as `p: S`, present,
+  where the normalizer leaves an absent `p` absent. Mirror the rule
+  (`appliesRefSiblings` in `@jarenjs/validate`) in `shapeOf` and
+  `normalizationChangesType`.
 - [ ] **Strict profiles of the JTLT grammar and of two schemas for one
   member.** `deriveStrictProfile` (`@jarenjs/validate/strict-profile`) carries
   a value of any shape as JSON text, a map as `{ key, value }` entries, and an
@@ -188,15 +191,6 @@ delete it or fix it.
   loader that serves that URI, which the README teaches and which answers
   right, so it waits on a decision to change the default (a minor with an
   upgrade sentence).
-- [ ] **A registered document that declares one identifier twice answers by
-  its first place.** After `addSchema({ $id: 'https://d.test/r.json', $defs: {
-  a: { $id: 'x.json', type: 'string' }, b: { $id: 'x.json', type: 'number' } }
-  })`, `compile({ $ref: 'https://d.test/x.json' })` answers `'s'` `true` and
-  `1` `false` by `a`, where compiling the same document is refused `JK0012`
-  naming both places; two registered documents that declare one nested `$id`
-  answer by the first registered, and `compileAsync` keeps a loaded document's
-  first place too. Refusing a compile that reads the contested identifier (and
-  only that compile) is a minor.
 - [ ] **The output formats answer in English only.** A unit carries rendered
   text, so `localizeErrors` does not reach it and the packs' `subschema` entry
   is never read. A catalog on the output path (or units that keep `msgid` and

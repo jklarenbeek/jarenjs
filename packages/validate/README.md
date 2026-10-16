@@ -757,8 +757,8 @@ unresolved, and compiling failed `Can not resolve schema for
 `$ref` that is no URI reference, an identifier the document declares twice — does
 not end the registration: the rest of the document is registered, the compile that
 reads the place refuses it (`JK0010`), what lies below a refused identifier is not
-registered, and an identifier declared twice keeps its first place (a schema being
-compiled that declares one twice is refused `JK0012`, below); a ring of
+registered, and an identifier declared twice is refused `JK0012` by the compile that
+reads it (below); a ring of
 references in such a document is refused by the compile that reaches it (`JK0001`),
 not by `addSchema`, so what else it holds answers. *Upgrade: the registration ended at
 such a place, so a compile naming an identifier declared after it was refused `JK0009`
@@ -826,11 +826,32 @@ compiled that declares one twice, or declares one that already names another sch
 the validator holds, is refused `JK0012` when it compiles, naming both places:
 `compile({ "$defs": { "a": { "$id": "x.json" }, "b": { "$id": "x.json" } } })` fails with
 `JK0012: 'https://github.com/jklarenbeek/x.json#' is declared twice (first at
-'#/%24defs/a/%24id'); give one of them another name at #/%24defs/b/%24id`. A document
-registered with `addSchema` keeps the first place, as above. Where `TraverseOptions`
+'#/%24defs/a/%24id'); give one of them another name at #/%24defs/b/%24id`. Where `TraverseOptions`
 does not allow anchors, an `$anchor` or `$dynamicAnchor` declares nothing. *Upgrade:
 these threw an uncoded `Error` ("Schema '…' for path '…' in '…' already exists"), as did
 every `$anchor` below the root where anchors are not allowed.*
+
+`addSchema` (and `compileAsync`, for a document it loads) registers a document that
+declares one identifier at two places, or one that declares a nested identifier another
+registered document declares; only the compile that reads such an identifier — a `$ref`
+to it, a pointer or a chain of references through it, the other place's own reference
+resolved against it — is refused `JK0012`, naming both places, when it compiles, or, for a
+reference resolved on first use, by the first call that reaches it. Every other compile
+answers: each place read by a pointer into its document, a reference the place the
+validator holds under it makes against it, the whole document, any schema that reads
+neither. Two places that are one object, or equal JSON read under one draft once `title`,
+`description`, `$comment`, `examples`, `deprecated`, `readOnly` and `writeOnly` are set
+aside, answer alike and are not refused (a `default`, `format` or `content*` difference
+is one), and a nested `$id` that names a document registered under that key
+reads the document. After
+`addSchema({ $id: 'https://d.test/r.json', $defs: { a: { $id: 'x.json', type: 'string' }, b: { $id: 'x.json', type: 'number' } } })`,
+`compile({ $ref: 'https://d.test/x.json' })` fails with `JK0012: 'https://d.test/x.json#'
+names two schemas (in 'https://d.test/r.json', at '#/%24defs/a/%24id' and at
+'#/%24defs/b/%24id'), and this compile reads it, which would answer by the one registered
+first; give one of them another name`. *Upgrade: such a compile answered by the place
+registered first (`'s'` `true`, `1` `false` here, whichever place was meant); give one of
+the places another name, or reach it by a pointer
+(`https://d.test/r.json#/$defs/b`).*
 
 One validation nests at most 256 schema references (a `$ref` resolved on first use, a
 `$dynamicRef` or a `$recursiveRef`); one more throws a `SchemaRuntimeError` whose `code`
@@ -1460,6 +1481,21 @@ draft, so `{ $schema: 2019-09, prefixItems: [{ type: 'integer' }], items: {
 type: 'string' } }` turned `['5']`, which the validator accepts, into `[5]`,
 which it rejects.* Same-document anchors are collected from schema
 positions; anchor-looking keys in defaults, constants and examples are data.
+
+A `$ref`'s siblings are read where the validator reads them. Before draft
+2019-09, and in a document that declares no draft (read as draft-07, as
+`compile` reads it), a schema object holding a `$ref` is its target alone:
+nothing beside the `$ref` normalizes — no sibling `type` coerces or decodes
+JSON text, no sibling `properties`, `items`, `allOf` or `additionalProperties`
+runs, and a `default` beside it is not materialized, at a property or at the
+root. From 2019-09 on, or where a place declares such a draft itself, the
+siblings apply with the target as before. `trimStrings` is a switch, not a
+keyword, so it still trims at the `$ref`'s node. *Upgrade: the normalizer read
+those siblings in every draft, so `{ $defs: { S: { type: 'string' } }, $ref:
+'#/$defs/S', type: 'integer' }` with `coerceTypes` turned `'12'`, which the
+validator accepts, into `12`, which it rejects; a draft-07 default beside a
+`$ref` is written `{ allOf: [{ $ref: '…' }], default: … }`, or the document
+declares 2019-09 or later.*
 
 A `patternProperties` key is a pattern source here as in the validator, so
 both cover the same members.

@@ -12,6 +12,10 @@
  * 
  * Unlike regular $ref, these require runtime resolution because the target depends
  * on the dynamic context where the schema is used.
+ *
+ * It also holds what a draft reads around a reference: which dynamic
+ * reference keyword it defines, and whether the keywords beside a `$ref`
+ * apply (the one rule the compiler and the normalizer read).
  */
 
 import { isObjectClass, isStringType } from '@jarenjs/core';
@@ -35,6 +39,20 @@ import {
 export function admitsDynamicReference(keyword, declaredDraft) {
   if (declaredDraft == null) return true;
   return keyword === '$recursiveRef' ? declaredDraft === 2019 : declaredDraft >= 2020;
+}
+
+/**
+ * Whether the keywords beside a `$ref` apply, in a place read under `draft`:
+ * from 2019-09 on they apply alongside the reference; before it the
+ * reference replaces the schema object, siblings `$id` and `default`
+ * included. The compiler and the normalizer read this one rule.
+ * @param {number} draft - The draft the place is read under: the one it
+ *   declares, else the one its document is compiled under (draft-07 for a
+ *   document that declares none)
+ * @returns {boolean}
+ */
+export function appliesRefSiblings(draft) {
+  return draft >= 2019;
 }
 
 /**
