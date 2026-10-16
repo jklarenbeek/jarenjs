@@ -207,6 +207,28 @@ const PATCH_SCENARIOS = [
   },
 ];
 
+/**
+ * In-place application consumes its input, so each timed call needs a fresh
+ * clone. Timing clone + apply and subtracting a separately timed clone left
+ * the difference of two ~90 µs figures — noise larger than the ~1 µs apply
+ * (one run published 51 ns, the next 1080 ns for unchanged code). Clone a
+ * batch untimed, time only the applies over it, keep the fastest of three.
+ * @param {(doc: any) => any} apply
+ * @param {any} doc
+ * @param {number} count
+ */
+function measureInPlace(apply, doc, count) {
+  const batch = Math.max(1, Math.min(Math.round(count), 256));
+  let best = Infinity;
+  for (let round = 0; round < 3; round++) {
+    const docs = Array.from({ length: batch }, () => structuredClone(doc));
+    const start = process.hrtime.bigint();
+    for (const each of docs) apply(each);
+    best = Math.min(best, Number(process.hrtime.bigint() - start) / batch);
+  }
+  return best;
+}
+
 const MERGE_SCENARIOS = [
   {
     name: 'RFC 7396 example shape (small doc)',
@@ -272,16 +294,13 @@ function collectTables(iterations) {
     rows: PATCH_SCENARIOS.map(({ name, doc, patch }) => {
       const compiled = compileJSONPatch(patch);
       const mutating = compileJSONPatch(patch, { mutate: true });
-      // in-place application consumes its input: patch a fresh clone each
-      // iteration and subtract the clone cost measured separately
-      const cloneNs = measureNsPerOp(() => structuredClone(doc), iterations / 10);
-      const mutateNs = measureNsPerOp(() => mutating(structuredClone(doc)), iterations / 10) - cloneNs;
+      const mutateNs = measureInPlace(mutating, doc, iterations / 10);
       return {
         name,
         ops: patch.length,
         results: [
           measureNsPerOp(() => compiled(doc), iterations),
-          Math.max(0, mutateNs),
+          mutateNs,
           measureNsPerOp(() => applyJSONPatch(doc, patch), iterations),
           measureNsPerOp(() => naiveApplyPatch(doc, patch), iterations / 10),
         ],
