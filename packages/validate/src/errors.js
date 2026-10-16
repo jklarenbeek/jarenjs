@@ -14,7 +14,9 @@
  * `JK0009`. A reference resolved on first use, and a `$dynamicRef` or
  * `$recursiveRef`, is refused (`JK0008` or `JK0009`) by the first call that
  * reaches it. A `$ref`, `$dynamicRef`, `$recursiveRef` or `$id` that is no
- * valid URI reference is refused `JK0010` where it is read. When a validator
+ * valid URI reference is refused `JK0010` where it is read, and a
+ * `$recursiveRef` other than `"#"` read as draft 2019-09 `JK0011` by the
+ * first call that reaches it. When a validator
  * runs: a validation that nests more schema references than
  * `maxReferenceDepth` (default {@link REFERENCE_DEPTH_CEILING}) is refused
  * where the bound is crossed (`JK2001`), before the host's call stack can
@@ -40,6 +42,7 @@ export const VALIDATE_CODES = Object.freeze({
   JK0008: 'a draft-07 $ref beside an $id resolves to no schema',
   JK0009: 'a reference resolves to no schema the validator holds',
   JK0010: 'a reference or an identifier is not a valid URI reference',
+  JK0011: 'a $recursiveRef read as draft 2019-09 is not "#"',
   JK2001: 'validation nests schema references deeper than the reference depth ceiling',
 });
 

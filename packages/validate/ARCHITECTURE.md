@@ -122,6 +122,20 @@ flowchart TD
 
 **Important**: At this phase, refs are stored as `null` placeholders. The actual resolution happens later.
 
+A place the walk refuses does not end the registration: `addSchema` passes
+`storeSchemaIdsInMap` an `onFault` that takes the refusal, and the walk goes
+on (a `$ref` that is no URI registers no target; an `$id` that is no URI, or
+an identifier an earlier place declares, registers nothing at or below its
+place). The compile and loader walks pass none, so the refusal is thrown
+there. A plain-name fragment (`#a b`, `#_a`) is keyed as the URI spells it,
+so an anchor and a reference to it meet whatever characters the name holds.
+`#assertNoRefLoops` then refuses a loop of pure references only when both
+readings of a document that declares no draft make it (`resolveRefSchemaDeep`
+with no draft and with draft-07): a loop one reading makes is refused by the
+compile that reads it so. It does not run for a document whose walk refused a
+place: such a document does not compile as a whole, so a loop in it is left to
+the compile that reaches it, and what else it holds answers.
+
 ### Phase 2: Schema Traversal
 
 **Purpose**: Create a schemas map for a specific compilation, merging instance schemas with passed schemas.
@@ -1108,6 +1122,9 @@ document that is (the message then names the step that misses)
   drops the entries only the 2019-09 reading needs (`lateTargets`)
 - A `$dynamicRef` or `$recursiveRef` target is resolved by the `$ref`
   resolver on the call that reaches it; nothing found is `JK0009` there
+- `JK0011`: a `$recursiveRef` other than `"#"` read as 2019-09
+  (`compileRecursiveRef` reads the place's declared draft, else the
+  compile's); another draft applies nothing for it
 - `JK0010`: the reference or `$id` text is no URI; `createJsonPointer` codes
   the `URL` parse failure, and the callers that know the keyword and its
   place name them

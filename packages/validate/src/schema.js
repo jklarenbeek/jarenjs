@@ -1,6 +1,6 @@
 //@ts-check
 
-import { boundReference } from './errors.js';
+import { boundReference, SchemaCompileError } from './errors.js';
 import {
   isObjectType,
   getStringType,
@@ -49,6 +49,7 @@ import { compilePropertyDependencies } from './property-dependencies.js';
 import { compileDollarDataSchema } from './dollar-data.js';
 import { wrapUnevaluated } from './unevaluated.js';
 import { createJsonPointer, keywordLocation } from './traverse.js';
+import { getDynamicAnchorName } from './dynamic-ref.js';
 
 /**
  * Compile $recursiveRef (draft 2019-09) and $dynamicRef (draft 2020-12).
@@ -95,22 +96,33 @@ function compileRecursiveRef(schemaObj, jsonSchema) {
   const ref = jsonSchema.$recursiveRef;
   const addError = schemaObj.createErrorHandler(ref, '$recursiveRef');
 
-  // 2019-09 defines $recursiveRef only for "#" (the current document root):
-  // another value applies nothing. One that names no schema the validator
-  // holds is refused (`JK0009`) by the call that reaches it, as an
-  // unresolvable $dynamicRef is, instead of passing every instance.
+  // 2019-09 defines $recursiveRef only for "#" (the current document root)
+  // and lets another value be an error: read as 2019-09 it is refused
+  // (`JK0011`, naming the `$ref` that applies the schema it names) by the
+  // call that reaches it, instead of applying nothing. A draft that does not
+  // define the keyword applies nothing for it, but one that names no schema
+  // the validator holds is refused (`JK0009`), as an unresolvable
+  // $dynamicRef is, instead of passing every instance.
   if (ref !== '#') {
-    try {
-      const base = schemaObj.baseUri || schemaObj.path;
-      createJsonPointer(ref, base, undefined, '$recursiveRef', keywordLocation(schemaObj.path, '$recursiveRef'));
-      root.heldSchema(ref, base);
+    const place = keywordLocation(schemaObj.path, '$recursiveRef');
+    let refusal;
+    if ((schemaObj.declaredDraft ?? schemaObj.options.draftVersion) === 2019) {
+      refusal = new SchemaCompileError('JK0011',
+        `$recursiveRef '${ref}' is defined only as "#"; to apply the schema it names, write $ref '${ref}'`, place);
     }
-    catch (e) {
-      return function refuseRecursiveRef() {
-        throw e;
-      };
+    else {
+      try {
+        const base = schemaObj.baseUri || schemaObj.path;
+        createJsonPointer(ref, base, undefined, '$recursiveRef', place);
+        root.heldSchema(ref, base);
+      }
+      catch (e) {
+        refusal = e;
+      }
     }
-    return undefined;
+    return refusal === undefined ? undefined : function refuseRecursiveRef() {
+      throw refusal;
+    };
   }
 
   // Get the base URI for resolving the reference
@@ -202,7 +214,8 @@ function compileDynamicAnchorRef(schemaObj, jsonSchema) {
   
   // Check if the initial target has matching $dynamicAnchor
   // If it does, we need to use the dynamic scope; otherwise, treat like normal $ref
-  const hasDynamicAnchor = isObjectClass(initialTargetSchema) && initialTargetSchema.$dynamicAnchor === anchorName;
+  // (both spelled as the URI spells the fragment: `#a b` is `#a%20b`)
+  const hasDynamicAnchor = isObjectClass(initialTargetSchema) && getDynamicAnchorName(initialTargetSchema) === anchorName;
 
   return boundReference(schemaObj.path, schemaObj.options.maxReferenceDepth, function validateDynamicRef(data, dataPath, dataRoot) {
     if (hasDynamicAnchor) {

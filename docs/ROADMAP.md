@@ -141,40 +141,31 @@ delete it or fix it.
   loader that serves that URI, which the README teaches and which answers
   right, so it waits on a decision to change the default (a minor with an
   upgrade sentence).
-- [ ] **A `$recursiveRef` other than `"#"` that resolves applies nothing.**
-  2019-09 defines `$recursiveRef` only for `"#"` ("implementations MAY choose
-  to consider other values to be errors"); `{ $schema: 2019-09, $defs: { x: {
-  type: 'string' } }, properties: { a: { $recursiveRef: '#/$defs/x' } } }`
-  answers `true` for `{a:1}`, and the JK0009 repair for an unresolvable one
-  ("register it") leads to that. Refusing every other value, or reading it as
-  `$ref`, changes answers (a minor either way).
-- [ ] **`addSchema` swallows the walk's refusals.** `#traverseAndStoreIds`
-  ignores every error of the walk ("already-existing schemas at the root
-  level"), so a malformed nested `$ref`/`$id` or a duplicate id stops the
-  registration there: `{ $id: 'https://a.test/a.json', properties: { a: {
-  $ref: 'http://[x' } }, $defs: { b: { $id: 'b.json', type: 'string' } } }`
-  registers, and `compile({ $ref: 'https://a.test/b.json' })` is refused
-  JK0009 naming `b.json` instead of JK0010 naming the `$ref`. Refusing at
-  `addSchema` refuses calls that succeed (a minor).
-- [ ] **`addSchema` refuses a loop only the 2019-09 reading of an undeclared
-  document makes.** Its loop check reads a document that declares no draft as
-  2019-09 does: with `{ $id: 'https://held.test/root.json', $defs: { a: { $id:
-  'sub/a.json', $ref: 'name.json' } } }`, `{ $id:
-  'https://held.test/sub/name.json', $ref:
-  'https://held.test/root.json#/$defs/a' }` and `{ $id:
-  'https://held.test/name.json', type: 'string' }`, registering
-  `sub/name.json` after `root.json` is refused `JK0001` at that `addSchema`,
-  while registering it first lets a draft-07 compile of `{ properties: { p: {
-  $ref: '…/root.json#/$defs/a' } } }` answer `{p:'x'}` `true`, `{p:5}`
-  `false`, `{}` `true` (a 2019-09 compile refuses the loop). Loosening the
-  check changes what registration accepts; keeping it needs the limit written
-  in the package document (a minor either way).
-- [ ] **An `$anchor` that is no plain name is read as the document.** `{
-  $defs: { x: { $anchor: 'a b', type: 'string' } }, $ref: '#a b' }` throws an
-  uncoded `Error` "Schema '…jarenjs#' for path '#/%24defs/x' … already
-  exists": the fragment `a%20b` is neither an HTML identifier nor a pointer,
-  so `createJsonPointer` drops it and the anchor registers as the document
-  URI.
+- [ ] **A document that declares one identifier twice throws an uncoded
+  `Error`.** `compile({ $defs: { a: { $id: 'x.json' }, b: { $id: 'x.json' } }
+  })` throws "Schema '…/x.json#' for path '#/%24defs/b' in '…' already exists"
+  (likewise two `$anchor`s or `$dynamicAnchor`s of one name, and every
+  `$anchor` under `traverse` with `anchorsAllowed: false`); `addSchema` keeps
+  the first place and answers by it. Coding the throw is a patch; refusing a
+  compile that reads the contested identifier of a registered document is a
+  minor.
+- [ ] **`$recursiveRef` is read in drafts that do not define it.** `{ $schema:
+  2020-12, type: 'object', properties: { p: { $recursiveRef: '#' } } }`
+  answers `{p:1}` `false` (it applies the root; 2020-12 ignores the unknown
+  keyword, `true`), and a value other than `"#"` nothing resolves is refused
+  `JK0009`/`JK0010` under draft-07 and 2020-12. Ignoring it there changes
+  answers (a minor).
+- [ ] **A blank `$ref` is read as no reference.** `{ $schema: 2020-12, type:
+  'object', properties: { p: { $ref: '' } } }` answers `{p:1}` `true`; `''` is
+  a URI reference to the current document (`false`). Blank
+  `$dynamicRef`/`$recursiveRef` share the rule. Reading it changes answers (a
+  minor).
+- [ ] **A percent-encoded pointer fragment is read as a plain name.** `{
+  $defs: { x: { type: 'string' } }, properties: { p: { $ref: '#%2F$defs%2Fx' }
+  } }` is refused `JK0009` (it answered as the whole document before the
+  plain-name change); JSON Pointer's URI form decodes the fragment first, so
+  it names `$defs/x`, as `resolveSameDocumentRef` in
+  `@jarenjs/validate/normalize` reads it. Resolving it is a patch.
 - [ ] **The output formats answer in English only.** A unit carries rendered
   text, so `localizeErrors` does not reach it and the packs' `subschema` entry
   is never read. A catalog on the output path (or units that keep `msgid` and

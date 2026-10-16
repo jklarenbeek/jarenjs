@@ -43,6 +43,15 @@ Highlights:
 Schema registrations accept boolean schemas when supplied an explicit key.
 Document URIs with or without an empty `#` fragment are aliases; replacing a
 registration replaces both aliases. Named anchor fragments remain distinct.
+A plain-name fragment is matched as the URI spells it, whatever characters the
+name holds: `$anchor: 'a b'` is named by `#a b` (or `#a%20b`), `_a` and names
+longer than 31 characters resolve as `$anchor`, `$dynamicAnchor` and a draft-07
+`$id: '#name'`, and a name no anchor declares is refused `JK0009`. *Upgrade: an
+anchor that was no HTML identifier of at most 31 characters (`a b`, `_a`, `1a`, a
+longer name) threw an uncoded `Error` ("… already exists") where it was
+declared, and in a registered document ended its registration there; a
+reference to such a name named the whole document, so with no anchor of that
+name `{ "$ref": "#_a" }` answered as the document.*
 `addMetaSchema` accepts the bundles from `@jarenjs/refs` without mutating them,
 and `validateSchema` always returns a boolean. A schema with no `$schema`
 uses draft-07 for both compilation and meta-schema validation.
@@ -692,7 +701,12 @@ a ring of definitions fails naming every hop, `JK0001: $ref cycle: <a> -> <b> ->
 reads the instance`, whether or not anything refers to the ring. A ring of top-level
 registrations is refused by `addSchema`, where the second member is added; a ring inside
 a registered document is refused when something compiled reaches it, and does not affect
-other compiles. *Upgrade: a reference to itself used to overflow the call stack when it validated, and a
+other compiles. In a document that declares no draft, a ring only one reading makes (an
+`$id` beside a `$ref` sets its base from 2019-09 on, not before) is refused by the
+compile that reads it so, not by `addSchema`. *Upgrade: `addSchema` refused a ring only
+the 2019-09 reading made, so a document registered after another closed it was refused
+although a draft-07 compile over them answered (registered in the other order, it
+already did).* *Upgrade: a reference to itself used to overflow the call stack when it validated, and a
 loop through other references compiled to the empty schema and answered `true`; the
 refusal was a plain `Error` whose message began `$ref cycle:`.*
 A root schema is refused the same way when the loop runs through the in-place applicator
@@ -709,7 +723,15 @@ Documents can be added in any order: a resource embedded in one
 (`$defs: { e: { $id: 'https://x.test/e.json' } }`) is found by a reference
 that a document added before it makes. *Upgrade: such a reference used to stay
 unresolved, and compiling failed `Can not resolve schema for
-'https://x.test/e.json#'`.*
+'https://x.test/e.json#'`.* A place `addSchema` cannot register — an `$id` or a
+`$ref` that is no URI reference, an identifier the document declares twice — does
+not end the registration: the rest of the document is registered, the compile that
+reads the place refuses it (`JK0010`), what lies below a refused identifier is not
+registered, and an identifier declared twice keeps its first place; a ring of
+references in such a document is refused by the compile that reaches it (`JK0001`),
+not by `addSchema`, so what else it holds answers. *Upgrade: the registration ended at
+such a place, so a compile naming an identifier declared after it was refused `JK0009`
+naming that identifier.*
 
 A reference that resolves to no schema the validator holds — a document nothing
 registered or loaded, or a pointer that misses in a held one — is refused with a
@@ -729,12 +751,21 @@ A `$dynamicRef` or `$recursiveRef` whose target nothing resolves — a document
 nothing holds, a pointer that misses, an anchor no schema declares
 (`"$dynamicRef": "#nope"`) — is refused `JK0009` the same way by the first call that
 reaches it; an instance that does not reach it answers (an output format runs every
-branch, so there every instance that reaches the applicator reaches it). 2019-09
-defines `$recursiveRef` only for `"#"`: another value that names a schema the validator
-holds applies nothing. *Upgrade: such a reference answered `false` on every instance
-that reached it, so `not` around it answered `true` for everything; a `$recursiveRef`
-other than `"#"` answered `true`; and `"$dynamicRef": "#nope"` was refused `JK0001` as a
-loop that never reads the instance.*
+branch, so there every instance that reaches the applicator reaches it). *Upgrade: such
+a reference answered `false` on every instance that reached it, so `not` around it
+answered `true` for everything; a `$recursiveRef` other than `"#"` answered `true`; and
+`"$dynamicRef": "#nope"` was refused `JK0001` as a loop that never reads the instance.*
+
+2019-09 defines `$recursiveRef` only as `"#"` and lets another value be an error: read
+as 2019-09 (the place's `$schema`, or the compile's), another value is refused
+`JK0011` by the call that reaches it, naming the `$ref` that applies the schema it
+names: `{ "$recursiveRef": "#/$defs/x" }` under `properties.a` fails with `JK0011:
+$recursiveRef '#/$defs/x' is defined only as "#"; to apply the schema it names, write
+$ref '#/$defs/x' at <uri>#/properties/a/%24recursiveRef`. A draft that does not define
+the keyword applies nothing for a value that names a held schema, and refuses one
+nothing resolves `JK0009`. *Upgrade: read as 2019-09 such a value applied nothing (with
+`$defs: { x: { type: 'string' } }`, `{ a: 1 }` answered `true`), or was refused `JK0009`
+or `JK0010` with a repair that led there.*
 
 A `$ref`, `$dynamicRef`, `$recursiveRef` or `$id` (`id`) that is no valid URI reference —
 `http://[x`, a port past 65535 — is refused `JK0010`, naming the keyword, the text and
@@ -742,7 +773,8 @@ where it sits: `compile({ "$ref": "http://[x" })` fails with `JK0010: $ref 'http
 not a valid URI reference; correct it, percent-encoding any character a URI does not
 allow at #/%24ref`. It is refused where the text is read: when the schema compiles, by
 the first call that builds a registered document's subschema holding it, and, for a
-`$recursiveRef` other than `"#"`, by the call that reaches it. *Upgrade: these threw an
+`$recursiveRef` other than `"#"` in a draft that does not define it, by the call that
+reaches it (read as 2019-09 it is `JK0011`). *Upgrade: these threw an
 uncoded `TypeError` (`ERR_INVALID_URL`, `Invalid URL`); a malformed `$recursiveRef`
 answered `true`.*
 

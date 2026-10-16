@@ -33,14 +33,20 @@ export function hasRecursiveAnchor(schema) {
 }
 
 /**
- * Get the $dynamicAnchor name from a schema.
+ * Get the $dynamicAnchor name from a schema, spelled as a URI fragment
+ * spells it (`a b` is `a%20b`): the dynamic scope is keyed, and a
+ * `$dynamicRef`'s fragment compared, in the spelling the schema map keys
+ * an anchor by.
  * @param {object} schema - The schema object
  * @returns {string|null}
  */
 export function getDynamicAnchorName(schema) {
   if (!isObjectClass(schema)) return null;
-  return isStringType(schema.$dynamicAnchor) ? schema.$dynamicAnchor : null;
+  return isStringType(schema.$dynamicAnchor) ? new URL(`#${schema.$dynamicAnchor}`, FRAGMENT_BASE).hash.slice(1) : null;
 }
+
+/** Any base: a fragment's spelling does not depend on it. */
+const FRAGMENT_BASE = 'urn:x:';
 
 /**
  * Collect ALL dynamic anchors of a schema RESOURCE: every $dynamicAnchor

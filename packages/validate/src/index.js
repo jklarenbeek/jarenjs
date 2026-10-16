@@ -1049,6 +1049,14 @@ export class ValidationRoot {
 const REF_STEP = Object.freeze(['$ref']);
 
 /**
+ * The two readings of a document that declares no draft, as a compile reads
+ * it: from 2019-09 on (`null`: an `$id` beside a `$ref` sets its base), and
+ * before (draft-07).
+ */
+const LOOP_READINGS = Object.freeze([null, 7]);
+
+
+/**
  * Whether a schema id lies in the document being compiled. A loop among
  * registrations of other documents is reported when something reaches it.
  * @param {string} id
@@ -1841,12 +1849,15 @@ export class JarenValidator {
         // This is important for remote schemas that may have location-independent identifiers
         // We use a wrapper that skips already-existing keys instead of throwing,
         // and fills a key an earlier schema's reference left unresolved
-        this.#traverseAndStoreIds(schemaKey, schema);
+        const faulted = this.#traverseAndStoreIds(schemaKey, schema);
 
         // A ring of references registered here would make every later compile
-        // on this validator throw, so it is refused where it is added.
+        // on this validator throw, so it is refused where it is added. A
+        // document holding a place the walk refused does not compile as a
+        // whole, and what else it holds answers: a ring in it is refused by
+        // the compile that reaches it (`JK0001`), not here.
         try {
-          this.#assertNoRefLoops(schemaKey);
+          if (!faulted) this.#assertNoRefLoops(schemaKey);
         }
         catch (e) {
           this.#schemas.clear();
@@ -1859,7 +1870,11 @@ export class JarenValidator {
   }
 
   /**
-   * Refuses a loop of pure references among the registrations of one document.
+   * Refuses a loop of pure references among the registrations of one
+   * document that every compile would read. A `$ref` beside an `$id` in a
+   * document that declares no draft is read two ways (the `$id` sets its
+   * base from 2019-09 on, not before): a loop only one reading makes is
+   * refused by the compile that reads it so (`JK0001`), not here.
    * @param {string} documentKey - The key the document was registered under
    */
   #assertNoRefLoops(documentKey) {
@@ -1868,13 +1883,22 @@ export class JarenValidator {
     for (const [key, entry] of this.#schemas) {
       if (!key.startsWith(prefix) || !isObjectClass(entry) || !hasSchemaReference(entry, '$ref'))
         continue;
-      try {
-        resolveRefSchemaDeep(this.#schemas, key, entry, this.#traverse, undefined, this.#places);
+      let loop;
+      for (const reading of LOOP_READINGS) {
+        try {
+          resolveRefSchemaDeep(this.#schemas, key, entry, this.#traverse, undefined, this.#places, reading);
+        }
+        catch (e) {
+          // A target not registered yet is reported where it is used.
+          if (isRefCycleError(e)) {
+            loop ??= e;
+            continue;
+          }
+        }
+        loop = undefined;
+        break;
       }
-      catch (e) {
-        // A target not registered yet is reported where it is used.
-        if (isRefCycleError(e)) throw e;
-      }
+      if (loop !== undefined) throw loop;
     }
   }
 
@@ -1885,6 +1909,7 @@ export class JarenValidator {
    * conflicts between different schemas that may use the same anchor names.
    * @param {string} baseUri - The base URI for the schema
    * @param {object} schema - The schema to traverse
+   * @returns {boolean} Whether the walk refused a place below the document's root
    */
   #traverseAndStoreIds(baseUri, schema) {
     const traverseOpts = this.#traverse;
@@ -1901,12 +1926,21 @@ export class JarenValidator {
       traverseOpts.propertyDependencies
     );
 
-    // Use a wrapper map to collect new entries, then merge them
+    // Use a wrapper map to collect new entries, then merge them. A place the
+    // walk refuses registers nothing and the walk goes on, so the rest of
+    // the document stays registered: an `$id` or a `$ref` that is no URI
+    // reference is refused (`JK0010`) by the compile that reads it, and an
+    // identifier declared twice keeps its first place. A document whose own
+    // `$id` is no URI reference registers nothing more; every compile
+    // refuses it.
     const newSchemas = new Map();
+    let faulted = false;
     try {
-      storeSchemaIdsInMap(newSchemas, baseUri, schema, scopedOpts, undefined, this.#places);
+      storeSchemaIdsInMap(newSchemas, baseUri, schema, scopedOpts, undefined, this.#places, null, () => {
+        faulted = true;
+      });
     } catch (_e) {
-      // Ignore errors for already-existing schemas at the root level
+      // the document's own `$id` (see above)
     }
 
     // Merge new entries into the main schemas map, skipping existing keys;
@@ -1916,6 +1950,7 @@ export class JarenValidator {
         this.#schemas.set(id, value);
       }
     }
+    return faulted;
   }
 
   /**

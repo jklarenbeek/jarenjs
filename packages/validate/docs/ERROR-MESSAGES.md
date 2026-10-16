@@ -297,8 +297,9 @@ failed validation, because a `false` under `not` would read as success.
 | `JK0006` | `SchemaCompileError` | One `compileAsync` call needs more document loads than its `maxLoads` option (default 100) |
 | `JK0007` | `SchemaCompileError` | `compileAsync` was given something that is not a `JarenValidator`, a `loadSchema` that is not a function, or a `maxLoads` that is not a positive safe integer |
 | `JK0008` | `SchemaCompileError` | A draft-07 `$ref` beside an `$id`, which does not set its base, resolves to no schema the validator holds: refused when a schema compiles, or by the first call that reaches a reference resolved on first use |
-| `JK0009` | `SchemaCompileError` | A reference resolves to no schema the validator holds (a document nothing holds, a pointer that misses, or an anchor nothing declares): refused when a schema compiles, or by the first call that reaches a reference resolved on first use, a `$dynamicRef` or a `$recursiveRef` |
+| `JK0009` | `SchemaCompileError` | A reference resolves to no schema the validator holds (a document nothing holds, a pointer that misses, or an anchor nothing declares): refused when a schema compiles, or by the first call that reaches a reference resolved on first use, a `$dynamicRef` or a `$recursiveRef` in a draft that does not define it |
 | `JK0010` | `SchemaCompileError` | A `$ref`, `$dynamicRef`, `$recursiveRef` or `$id` (`id`) is not a valid URI reference: refused where the text is read, naming the keyword, the text and where it sits |
+| `JK0011` | `SchemaCompileError` | A `$recursiveRef` read as draft 2019-09 is not `"#"`: refused by the first call that reaches it, naming the `$ref` that applies the schema it names |
 | `JK2001` | `SchemaRuntimeError` | Validation nests schema references deeper than `maxReferenceDepth` (default 256): refused where the bound is crossed |
 
 **`JK0001` — a loop that never reads the instance.** A `$ref` that leads
@@ -458,8 +459,11 @@ JK0009: Can not resolve schema for 'https://github.com/jklarenbeek/jarenjs#/$def
 
 A `$dynamicRef` or `$recursiveRef` whose target nothing resolves is refused
 the same way by the first call that reaches it, never answered (answered, it
-would read `false` on every instance and `true` under `not`). A plain-name
-fragment no `$anchor` or `$dynamicAnchor` declares (`#nope`) names nothing.
+would read `false` on every instance and `true` under `not`); read as 2019-09,
+a `$recursiveRef` other than `"#"` is `JK0011` instead. A plain-name fragment
+no `$anchor` or `$dynamicAnchor` declares (`#nope`) names nothing; a name is
+matched as the URI spells it, whatever characters it holds (`#a b` is
+`#a%20b`).
 
 **`JK0010` — a reference or an identifier that is no URI.** A `$ref`,
 `$dynamicRef`, `$recursiveRef` or `$id` (`id`) whose text, resolved against
@@ -468,10 +472,25 @@ past 65535) is refused naming the keyword, the text and where it sits: a `$ref`
 or `$id` of the schema being compiled as a pointer into it (read when the schema
 is registered for the compile), a `$dynamicRef`, a `$recursiveRef` or a keyword
 of a registered document as the URI of the schema object that holds it with the
-keyword appended. A `$recursiveRef` other than `"#"` is refused by the call that
-reaches it:
+keyword appended. A `$recursiveRef` other than `"#"` in a draft that does not
+define it is refused by the call that reaches it (read as 2019-09 it is
+`JK0011`). A registered document's place that is no URI reference does not end
+its registration: the rest of the document is registered, and the compile that
+reads the place refuses it:
 
 ```text
 JK0010: $ref 'http://[x' is not a valid URI reference; correct it, percent-encoding any character a URI does not allow at #/%24ref
 JK0010: $dynamicRef 'http://[x' is not a valid URI reference; correct it, percent-encoding any character a URI does not allow at https://github.com/jklarenbeek/jarenjs#/properties/a/%24dynamicRef
+```
+
+**`JK0011` — a `$recursiveRef` other than `"#"`.** Draft 2019-09 defines
+`$recursiveRef` only as `"#"` and lets another value be an error. Read as
+2019-09 (the place's `$schema`, or the compile's when the place declares
+none), another value is refused by the first call that reaches it, naming the
+`$ref` that applies the schema it names; an instance that does not reach it
+answers. A draft that does not define the keyword (draft-07, 2020-12) applies
+nothing for it:
+
+```text
+JK0011: $recursiveRef '#/$defs/x' is defined only as "#"; to apply the schema it names, write $ref '#/$defs/x' at https://github.com/jklarenbeek/jarenjs#/properties/a/%24recursiveRef
 ```

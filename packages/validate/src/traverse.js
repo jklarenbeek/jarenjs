@@ -21,10 +21,6 @@ import {
 } from '@jarenjs/core/string';
 
 import {
-  isValidHtmlIdentifier,
-} from '@jarenjs/core/text';
-
-import {
   encodeJSONPointerSegment,
   decodeJSONPointerSegment,
 } from '@jarenjs/json/pointer';
@@ -149,7 +145,7 @@ function parseJsonPointer(refUri, baseUri, opts) {
         url = new URL(refUri, 'http://example.com/' + effectiveBase);
         // Restore the original baseUri in the result
         const href = url.href.replace('http://example.com/', '');
-        const [, fragment] = href.split('#');
+        const [, fragment] = atFragment(href);
         return new JsonPointer(
           effectiveBase + refUri,
           undefined,
@@ -158,7 +154,7 @@ function parseJsonPointer(refUri, baseUri, opts) {
         );
       } else if (refUri.includes('#')) {
         // refUri has a fragment: manual resolution
-        const [refBase, refFragment] = refUri.split('#');
+        const [refBase, refFragment] = atFragment(refUri);
         const resolvedId = baseUri.endsWith('/') 
           ? baseUri + refBase + '#' + refFragment
           : baseUri + '/' + refBase + '#' + refFragment;
@@ -181,22 +177,33 @@ function parseJsonPointer(refUri, baseUri, opts) {
     }
   }
 
-  const [uri, fragment] = url.href.split('#');
+  const [uri, fragment] = atFragment(url.href);
   const [leftUri, search] = uri.split('?');
 
   if (!isStringWhiteSpace(fragment)) {
-    // this is a sort of $anchor and we are karen about it and thus not use isStringAnchor().
-    if (opts.anchorsAllowed == true && isValidHtmlIdentifier(fragment)) {
+    // a json pointer
+    if (fragment.startsWith('/'))
+      return new JsonPointer(`${leftUri}#${fragment}`, search, `${leftUri}#`, fragment);
+    // or a plain name (an `$anchor`, a `$dynamicAnchor`, a draft-07 `$id:
+    // '#name'`), keyed as the URI spells it: an anchor and a reference to
+    // it are spelled alike, whatever characters the name holds.
+    if (opts.anchorsAllowed == true) {
       return opts.anchorsGlobal == true
         ? new JsonPointer(`#${fragment}`, search, `${leftUri}#`, fragment)
         : new JsonPointer(`${leftUri}#${fragment}`, search, `${leftUri}#`, fragment);
     }
-    // or a json pointer
-    else if (fragment.startsWith('/')) {
-      return new JsonPointer(`${leftUri}#${fragment}`, search, `${leftUri}#`, fragment);
-    }
   }
   return new JsonPointer(`${leftUri}#`, search, `${leftUri}#`, null);
+}
+
+/**
+ * Split a URI at its first `#`: a fragment may hold another.
+ * @param {string} uri
+ * @returns {[string, string|undefined]} The URI before it, and the fragment (`undefined` for none)
+ */
+function atFragment(uri) {
+  const hash = uri.indexOf('#');
+  return hash === -1 ? [uri, undefined] : [uri.slice(0, hash), uri.slice(hash + 1)];
 }
 
 /**
@@ -253,9 +260,15 @@ function keptRefBase(places, schema, reading) {
  *   is read under (`compile` reads its schema's document as draft-07 when it
  *   declares none); `null` when unknown, as for a document registered before
  *   any compile names its draft
+ * @param {(error: Error) => void} [onFault] - Offered each refusal of a
+ *   place below the document's root (an `$id` or a `$ref` that is no URI
+ *   reference, an identifier an earlier place of the document declares)
+ *   instead of throwing it; the walk then goes on past it: a refused `$ref`
+ *   registers no target, and a refused identifier nothing at or below its
+ *   place (an identifier declared twice keeps its first place)
  * @returns {string} The document's own id
  */
-export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPointerOptions(), onReference = undefined, places = undefined, defaultDraft = null) {
+export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPointerOptions(), onReference = undefined, places = undefined, defaultDraft = null, onFault = undefined) {
   if (!isObjectClass(schema)) {
     const { id } = createJsonPointer(baseUri, undefined, opts);
     schemas.set(id, schema);
@@ -272,6 +285,33 @@ export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPoi
 
   baseUri = rootUri;
 
+  /**
+   * Refuse a place, or offer the refusal to `onFault` and go on.
+   * @param {Error} error
+   */
+  const fault = (error) => {
+    if (onFault === undefined) throw error;
+    onFault(error);
+  };
+  /**
+   * Register one identifier of the document: a second place declaring it
+   * is refused.
+   * @param {string} id
+   * @param {object} obj - The place declaring it
+   * @param {string} path
+   * @param {string} base
+   * @returns {boolean} Whether it was registered
+   */
+  const declare = (id, obj, path, base) => {
+    const held = schemas.get(id);
+    if (held != null && held !== obj) {
+      fault(new Error(`Schema '${id}' for path '${path}' in '${base}' already exists`));
+      return false;
+    }
+    schemas.set(id, obj);
+    return true;
+  };
+
   const queue = [{ obj: schema, base: rootUri, path: '#', draft: null }];
   while (queue.length > 0) {
     // @ts-ignore
@@ -285,13 +325,16 @@ export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPoi
     const hasId = isStringType(idKeyword) && !isStringWhiteSpace(idKeyword);
     if (hasId) {
       const idName = isStringType(obj.$id) ? '$id' : 'id';
-      const { id } = createJsonPointer(idKeyword, base, opts, idName, encodeJsonPointerPath(path, idName));
-      if (!schemas.has(id))
-        schemas.set(id, obj);
-      else if (schemas.get(id) == null || schemas.get(id) === obj)
-        schemas.set(id, obj);
-      else
-        throw new Error(`Schema '${id}' for path '${path}' in '${base}' already exists`);
+      let id;
+      try {
+        ({ id } = createJsonPointer(idKeyword, base, opts, idName, encodeJsonPointerPath(path, idName)));
+      }
+      catch (e) {
+        fault(e);
+        continue;
+      }
+      if (!declare(id, obj, path, base))
+        continue;
 
       // CHECK: Also store under alternate ID (with/without # suffix) for absolute URIs only
       if (!id.startsWith('#')) {
@@ -309,12 +352,8 @@ export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPoi
 
     if (isStringType(obj.$anchor) && !isStringWhiteSpace(obj.$anchor)) {
       const { id } = createJsonPointer(`#${obj.$anchor}`, baseUri, opts);
-      if (!schemas.has(id))
-        schemas.set(id, obj);
-      else if (schemas.get(id) == null || schemas.get(id) === obj)
-        schemas.set(id, obj);
-      else
-        throw new Error(`Schema '${id}' for path '${path}' in '${base}' already exists`);
+      if (!declare(id, obj, path, base))
+        continue;
 
       // we reset the baseUri when the $anchor property is set.
       if (!id.startsWith('#')) // except when anchors are global
@@ -324,12 +363,8 @@ export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPoi
     // Handle $dynamicAnchor (draft 2020-12) - similar to $anchor but for $dynamicRef
     if (isStringType(obj.$dynamicAnchor) && !isStringWhiteSpace(obj.$dynamicAnchor)) {
       const { id } = createJsonPointer(`#${obj.$dynamicAnchor}`, baseUri, opts);
-      if (!schemas.has(id))
-        schemas.set(id, obj);
-      else if (schemas.get(id) == null || schemas.get(id) === obj)
-        schemas.set(id, obj);
-      else
-        throw new Error(`Schema '${id}' for path '${path}' in '${base}' already exists`);
+      if (!declare(id, obj, path, base))
+        continue;
 
       // Note: $dynamicAnchor does NOT change the baseUri like $anchor does
       // It's only used for $dynamicRef resolution
@@ -338,13 +373,21 @@ export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPoi
     if (onReference !== undefined && hasSchemaReference(obj, '$dynamicRef'))
       onReference(createJsonPointer(obj.$dynamicRef, baseUri, opts, '$dynamicRef', encodeJsonPointerPath(path, '$dynamicRef')), encodeJsonPointerPath(path, '$dynamicRef'), false);
 
+    // Before 2019-09 a `$ref` replaces its schema object: an `$id` beside it
+    // names the object but does not set the base the reference resolves
+    // against.
+    const reading = draft ?? defaultDraft;
+    const keepsBase = hasId && reading !== null && reading < 2019;
+    let target;
     if (isStringType(obj.$ref) && !isStringWhiteSpace(obj.$ref)) {
-      // Before 2019-09 a `$ref` replaces its schema object: an `$id` beside
-      // it names the object but does not set the base the reference
-      // resolves against.
-      const reading = draft ?? defaultDraft;
-      const keepsBase = hasId && reading !== null && reading < 2019;
-      const target = createJsonPointer(obj.$ref, keepsBase ? base : baseUri, opts, '$ref', encodeJsonPointerPath(path, '$ref'));
+      try {
+        target = createJsonPointer(obj.$ref, keepsBase ? base : baseUri, opts, '$ref', encodeJsonPointerPath(path, '$ref'));
+      }
+      catch (e) {
+        fault(e);
+      }
+    }
+    if (target !== undefined) {
       const ref = target.id;
       if (keepsBase) places?.refBases.set(obj, base);
       else places?.refBases.delete(obj);

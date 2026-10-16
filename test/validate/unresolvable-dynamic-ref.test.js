@@ -50,7 +50,8 @@ describe('a dynamic reference nothing resolves is refused JK0009 by the call tha
     ['a $dynamicRef to a document nothing holds', { $schema: D20, $dynamicRef: 'https://o.test/d.json' }, 'https://o.test/d.json#'],
     ['a $dynamicRef anchor no schema declares', { $schema: D20, $dynamicRef: '#nope' }, `${ORIGIN}#nope`],
     ['a $dynamicRef in a schema that declares no draft', { $dynamicRef: 'https://o.test/d.json' }, 'https://o.test/d.json#'],
-    ['a $recursiveRef to a document nothing holds', { $schema: D19, $recursiveRef: 'https://o.test/d.json' }, 'https://o.test/d.json#'],
+    // read as 2019-09 a $recursiveRef other than "#" is refused JK0011 (recursive-ref-value.test.js)
+    ['a $recursiveRef in a schema that declares no draft', { $recursiveRef: 'https://o.test/d.json' }, 'https://o.test/d.json#'],
   ]) {
     it(label, () => {
       const validate = compiled(schema);
@@ -81,8 +82,8 @@ describe('a dynamic reference nothing resolves is refused JK0009 by the call tha
     assert.doesNotThrow(() => compiled({ $schema: D20, $dynamicRef: '#nope' }));
   });
 
-  it('a $recursiveRef pointer that misses', () => {
-    const validate = compiled({ $schema: D19, properties: { a: { $recursiveRef: '#/$defs/nope' } } });
+  it('a $recursiveRef pointer that misses, in a 2020-12 schema', () => {
+    const validate = compiled({ $schema: D20, properties: { a: { $recursiveRef: '#/$defs/nope' } } });
     assert.deepEqual(answers(validate, [{}, { a: 1 }]), [true, 'JK0009']);
     assert.equal(thrown(() => validate({ a: 1 })),
       `JK0009: Can not resolve schema for '${ORIGIN}#/$defs/nope': '/$defs' is not a schema in '${ORIGIN}#'; fix the pointer`);
@@ -103,8 +104,8 @@ describe('an instance that does not reach the reference answers', () => {
   it('an output format runs every branch, so every instance reaches it', () => {
     assert.deepEqual(answers(compiled({ $schema: D20, anyOf: [{ type: 'string' }, unheld] }, [], { outputFormat: basicOutput }), ['a', 1]), ['JK0009', 'JK0009']);
   });
-  it('a $recursiveRef under properties', () => {
-    assert.deepEqual(answers(compiled({ $schema: D19, properties: { a: { $recursiveRef: 'https://o.test/d.json' } } }), [{}, { a: 1 }]), [true, 'JK0009']);
+  it('a $recursiveRef under properties, in a schema that declares no draft', () => {
+    assert.deepEqual(answers(compiled({ properties: { a: { $recursiveRef: 'https://o.test/d.json' } } }), [{}, { a: 1 }]), [true, 'JK0009']);
   });
 });
 
@@ -123,8 +124,9 @@ describe('every dynamic reference that resolves answers as before', () => {
     ['an $id with an empty fragment', { $schema: D20, $id: 'https://t.test/f.json#', $defs: { x: { type: 'string' } }, properties: { p: { $dynamicRef: '#/$defs/x' } } }, [], [{ p: 1 }, { p: 's' }], [false, true]],
     ['a held false document', { $schema: D20, $dynamicRef: 'https://h.test/f.json' }, [[false, 'https://h.test/f.json']], [1], [false]],
     ['a false subschema', { $schema: D20, $defs: { f: false }, properties: { p: { $dynamicRef: '#/$defs/f' } } }, [], [{}, { p: 1 }], [true, false]],
-    // 2019-09 defines $recursiveRef only for "#": another value that names a held schema applies nothing
-    ['a $recursiveRef other than "#" that resolves', { $schema: D19, $defs: { x: { type: 'string' } }, properties: { a: { $recursiveRef: '#/$defs/x' } } }, [], [{ a: 1 }, { a: 's' }], [true, true]],
+    // a draft that does not define $recursiveRef applies nothing for another value that names a held schema
+    ['a $recursiveRef other than "#" that resolves, draft-07', { $defs: { x: { type: 'string' } }, properties: { a: { $recursiveRef: '#/$defs/x' } } }, [], [{ a: 1 }, { a: 's' }], [true, true]],
+    ['a $recursiveRef other than "#" that resolves, 2020-12', { $schema: D20, $defs: { x: { type: 'string' } }, properties: { a: { $recursiveRef: '#/$defs/x' } } }, [], [{ a: 1 }, { a: 's' }], [true, true]],
   ]) {
     it(label, () => {
       assert.deepEqual(answers(compiled(schema, held), instances), expected);
