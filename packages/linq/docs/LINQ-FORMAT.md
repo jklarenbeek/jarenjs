@@ -206,11 +206,11 @@ and the bundle is the byte count the tree-shaking probe builds.
 | Document | Subpath | Lines | Mapping rows | Worked examples | Refusals | Bundle |
 |---|---|---:|---:|---:|---:|---:|
 | [LINQ-FORMAT.md](LINQ-FORMAT.md) | — | 971 | — | — | — | — |
-| [QUERY-PEN.md](QUERY-PEN.md) | `.` | 2,179 | 34 | 8 | 17 | 244,372 B |
+| [QUERY-PEN.md](QUERY-PEN.md) | `.` | 2,179 | 34 | 8 | 17 | 245,689 B |
 | [SCHEMA-PEN.md](SCHEMA-PEN.md) | `./schema` | 1,266 | 82 | 10 | 4 | 45,306 B |
 | [MODEL-PEN.md](MODEL-PEN.md) | `./model` | 1,240 | 31 | 7 | 3 | 57,113 B |
 | [JSLT-PEN.md](JSLT-PEN.md) | `./jslt` | 980 | 17 | 8 | 3 | 27,870 B |
-| [MIGRATION-PEN.md](MIGRATION-PEN.md) | `./migration` | 957 | 13 | 5 | 4 | 34,613 B |
+| [MIGRATION-PEN.md](MIGRATION-PEN.md) | `./migration` | 957 | 13 | 5 | 4 | 34,682 B |
 | [CONTRACT-PEN.md](CONTRACT-PEN.md) | `./contract` | 1,226 | 38 | 6 | 3 | 58,879 B |
 | [FLOW-PEN.md](FLOW-PEN.md) | `./flow` | 1,046 | 16 | 7 | 3 | 27,972 B |
 | [APP-PEN.md](APP-PEN.md) | `./app` | 1,314 | 24 | 7 | 4 | 60,326 B |
@@ -219,8 +219,8 @@ and the bundle is the byte count the tree-shaking probe builds.
 | [JTLT-PEN.md](JTLT-PEN.md) | `./jtlt` | 83 | 13 | 1 | 2 | 24,585 B |
 | [PROJECT-PEN.md](PROJECT-PEN.md) | `./project` | 84 | 9 | 1 | 1 | 4,724 B |
 | [CHARTS-PEN.md](CHARTS-PEN.md) | `./charts` | 100 | 21 | 1 | 1 | 6,600 B |
-| [DB-CLIENT.md](DB-CLIENT.md) | `./db` | 1,446 | 54 | 5 | 2 | 1,051,361 B |
-| [FORMULA-PEN.md](FORMULA-PEN.md) | `./formula` | 41 | 2 | — | — | 11,964 B |
+| [DB-CLIENT.md](DB-CLIENT.md) | `./db` | 1,446 | 54 | 5 | 2 | 1,056,236 B |
+| [FORMULA-PEN.md](FORMULA-PEN.md) | `./formula` | 41 | 2 | — | — | 12,033 B |
 | **16 documents** | | **13,985** | **381** | **74** | | |
 <!--/fact-->
 
@@ -265,11 +265,11 @@ it and each document publishes it. The rounded column is what
 <!--fact:pens.cost-->
 | Subpath | Document | Bundle | Rounded |
 |---|---|---:|---:|
-| `@jarenjs/linq` | [QUERY-PEN.md](QUERY-PEN.md) | 244,372 B | 244 kB |
+| `@jarenjs/linq` | [QUERY-PEN.md](QUERY-PEN.md) | 245,689 B | 246 kB |
 | `@jarenjs/linq/schema` | [SCHEMA-PEN.md](SCHEMA-PEN.md) | 45,306 B | 45 kB |
 | `@jarenjs/linq/model` | [MODEL-PEN.md](MODEL-PEN.md) | 57,113 B | 57 kB |
 | `@jarenjs/linq/jslt` | [JSLT-PEN.md](JSLT-PEN.md) | 27,870 B | 28 kB |
-| `@jarenjs/linq/migration` | [MIGRATION-PEN.md](MIGRATION-PEN.md) | 34,613 B | 35 kB |
+| `@jarenjs/linq/migration` | [MIGRATION-PEN.md](MIGRATION-PEN.md) | 34,682 B | 35 kB |
 | `@jarenjs/linq/contract` | [CONTRACT-PEN.md](CONTRACT-PEN.md) | 58,879 B | 59 kB |
 | `@jarenjs/linq/flow` | [FLOW-PEN.md](FLOW-PEN.md) | 27,972 B | 28 kB |
 | `@jarenjs/linq/app` | [APP-PEN.md](APP-PEN.md) | 60,326 B | 60 kB |
@@ -278,8 +278,8 @@ it and each document publishes it. The rounded column is what
 | `@jarenjs/linq/jtlt` | [JTLT-PEN.md](JTLT-PEN.md) | 24,585 B | 25 kB |
 | `@jarenjs/linq/project` | [PROJECT-PEN.md](PROJECT-PEN.md) | 4,724 B | 5 kB |
 | `@jarenjs/linq/charts` | [CHARTS-PEN.md](CHARTS-PEN.md) | 6,600 B | 7 kB |
-| `@jarenjs/linq/db` | [DB-CLIENT.md](DB-CLIENT.md) | 1,051,361 B | 1051 kB |
-| `@jarenjs/linq/formula` | [FORMULA-PEN.md](FORMULA-PEN.md) | 11,964 B | 12 kB |
+| `@jarenjs/linq/db` | [DB-CLIENT.md](DB-CLIENT.md) | 1,056,236 B | 1056 kB |
+| `@jarenjs/linq/formula` | [FORMULA-PEN.md](FORMULA-PEN.md) | 12,033 B | 12 kB |
 <!--/fact-->
 
 Read these as prices, not as scores. `./db` is the largest by an order of

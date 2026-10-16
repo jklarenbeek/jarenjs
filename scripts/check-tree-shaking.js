@@ -244,7 +244,8 @@ if (chainEdgeLeak.length > 0)
 // Raised to 232,600 (measured 232511): the message vocabulary's ids for the five keyword messages, the resolved bound and the failed load, and core's located cycle refusal add 1096.
 // Raised to 240,600 (measured 240544): the geometry walks' coded cycle and depth refusal with their stack-free fallback past 256 levels (core walk), the keyed operators' located cycle and depth refusal and the shared-value key in linear space, and the descent segment's cycle refusal add 8033.
 // Raised to 244,400 (measured 244372): core's linear-time equality and linear-space keys over shared values (2833) and the documented answers for malformed geometry positions add 3828, net of the shared geometry walker's 798 saved.
-if (chainBytes > 244400)
+// Raised to 245,700 (measured 245689): the locale number syntax core's parseNumber and $quantity now share (net 528), the coded over-long key and the host-string bound (364), and the geometry reading of a position that is no number pair (425) add 1317.
+if (chainBytes > 245700)
   throw new Error(`The chain bundle grew to ${chainBytes} bytes.`);
 
 console.log(`Tree-shaking smoke test passed (${chainBytes} byte chain bundle; no schema-pen module, no client module, no store/validator/formats bytes).`);
@@ -643,7 +644,8 @@ if (asyncLiveLeak.length)
 // Raised to 1,033,400 (measured 1033301): the store's refusal of a non-JSON external through filters and operators, a wide predicate external compared by its digits, the join table's second-key index and its upgrade, the many-to-many count and existence in one statement, the validator's every-keyword collection, draft keyword gates and resolved bounds, the single-pass unevaluated log and core's located cycle refusal add 12952.
 // Raised to 1,044,600 (measured 1044563): the chain's geometry, keying and descent cycle refusals (8033), the validator's reference targets under their own draft and its coded unresolvable, dynamic and malformed references (2834), and the digit-name guard and point-read key spelling add 11262.
 // Raised to 1,051,400 (measured 1051361): the chain's shared-value equality, keys and malformed-geometry answers (3828), the validator's narrowing answer, draft-scoped recursive references, exact anchors and pointer fragments and its coded identifier and reference refusals (2037), and the coded canonicalization refusals (510) add 6798.
-if (clientBytes > 1051400)
+// Raised to 1,056,300 (measured 1056236): the chain's shared number syntax, key bound and geometry reading (1317), and the validator's per-draft reference siblings in the normalizer, the JSON-text coercion, the identifier conflict check and its coded refusals (3262) add 4875.
+if (clientBytes > 1056300)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 
