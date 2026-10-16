@@ -109,25 +109,17 @@ delete it or fix it.
 
 ## @jarenjs/validate
 
-- [ ] **Emitted accepted types for `coerceJsonText`.** `@jarenjs/emit`'s
-  accepted variant widens a scalar by what `coerceTypes` converts from, but
-  not an object or array node by `string` where `coerceJsonText` decodes JSON
-  text, so the accepted type refuses an input the normalizer takes;
-  `jaren-emit --config` refuses `coerceJsonText` as an unknown option. Mirror
-  the decode rule (the node's own `type` names `object`/`array` and not
-  `string`; a `$ref`'s sibling `type` only where the declared draft asserts
-  `$ref` siblings).
-- [ ] **`@jarenjs/emit` reads a `$ref`'s sibling keywords where the validator
-  ignores them.** In a document declaring draft-07 or no draft, the validator
-  and `compileNormalizer` read a schema object holding a `$ref` as its target
-  alone, siblings and a `default` beside it included, but `@jarenjs/emit`
-  intersects the siblings: `{ $defs: { S: { type: 'string' } }, $ref:
-  '#/$defs/S', type: 'integer' }` emits `S & number`, which no value the
-  validator accepts (`'12'`) satisfies; and its normalized variant types
-  `properties: { p: { $ref: '#/$defs/S', default: 5 } }` as `p: S`, present,
-  where the normalizer leaves an absent `p` absent. Mirror the rule
-  (`appliesRefSiblings` in `@jarenjs/validate`) in `shapeOf` and
-  `normalizationChangesType`.
+- [ ] **The normalizer reads a plain-anchor target under the root's draft.**
+  `compileNormalizer` reads the target of a `#name` reference under the
+  document's root `$schema`, where the validator reads it under the nearest
+  `$schema` above its place: with an undeclared root, `$defs: { S: {}, B: {
+  $schema: <2020-12>, $defs: { C: { $anchor: 'c', $ref: '#/$defs/S', type:
+  'integer' } } } }` and `properties: { q: { $ref: '#c' } }`, the validator
+  reads `C`'s sibling `type` (`{ q: '12' }` false, `{ q: 12 }` true), but
+  `coerceTypes` leaves `'12'` as sent, so the normalized value still fails;
+  `@jarenjs/emit`, which reads by place as the validator does, types the input
+  `q?: S & (number | string)`. Read an anchor target by the nearest `$schema`
+  above it, as a pointer target is read.
 - [ ] **Strict profiles of the JTLT grammar and of two schemas for one
   member.** `deriveStrictProfile` (`@jarenjs/validate/strict-profile`) carries
   a value of any shape as JSON text, a map as `{ key, value }` entries, and an
@@ -883,11 +875,3 @@ machine — the opt-in workflow or a local one — and its result recorded here.
 
 ## Benchmarks & tooling
 
-- [ ] **The import map maps an `exports` target that is a native addon, and
-  misses an extensionless `main` Node resolves to one.** `exports: { ".":
-  "./x.node" }` is mapped to the binary and the file listed, reached
-  optionally or not; `main: "binding"` beside `binding.node` (Node loads it)
-  is mapped to a missing `./index.js` and reported, so an optional-only
-  platform package of that shape fails the command. Skipping an `exports`
-  native target changes what the command prints for a manifest whose other
-  exports serve a page, so it needs a decision.
