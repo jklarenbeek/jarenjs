@@ -2506,8 +2506,8 @@ otherwise — composed over the *resolved* structure, so a constraint
 reached through a bare `{ "$ref": "#/$defs/X" }` hop reports the path a
 validator error would name. Equal text is not equal validation: a `$ref`
 names a location, not a schema. So wherever the walk would otherwise
-compare two spellings by their text — an applicator, any keyword it does
-not model, a `$ref` beside siblings, an error's schema — it compares what
+compare two spellings by their text — an applicator it does not read by
+direction, any keyword it does not model, a `$ref` beside siblings, an error's schema — it compares what
 every same-document `$ref` inside resolves to on each side (through
 `$defs`, `definitions` and chains of `$ref`s; a recursive definition
 terminates), and two spellings whose resolved schemas differ report the
@@ -2529,7 +2529,7 @@ change at the first pointer where they do.
 | R12 | `policy.idempotency` `none/optional → required` (a client must now send a key), or `required/optional → none` (a key an old client still sends, and retries under, is no longer read) | breaking (`idempotency-required`, `idempotency-dropped`); `required → optional` and `none → optional` additive (`idempotency-relaxed`) |
 | R13 | `policy.task`, `policy.retry`, `policy.cache`, `policy.revision`, `policy.stream` (a resume policy, heartbeat or patch bound) or `doc` changed | neutral; a `policy.stream.heartbeatMs` that rises is breaking (`heartbeat-slowed`) — an older client arms its watchdog from its own contract and reports the stream lost (`JC2094`) after twice the interval it expects |
 | R14 | `policy.audience` `public → server` | breaking; the reverse additive |
-| R15 | a schema construct the checker does not model differs between the two (`anyOf`/`oneOf`/`allOf`/`if`/`not`/`$dynamicRef`, a `format`, a *changed* `pattern`, an external or sibling-carrying `$ref`, a changed error `details` schema, …), including one whose text is unchanged while a same-document `$ref` inside it resolves to a schema that changed — reported at the first resolved pointer where the two differ; a constraint, member or requirement present on one side only while the other carries such an applicator (it may have moved inside); a member added or removed beside a catch-all that constrains it (`additionalProperties` or `unevaluatedProperties` as a schema, `patternProperties`, `propertyNames`) | **unknown** — reported, never silently classed |
+| R15 | a schema construct the checker does not model differs between the two (`if`, `not`, `contains`, an `anyOf`/`oneOf` no discriminator tells apart, an applicator the walk does not read by direction — see the riders —, `$dynamicRef`, a `format`, a *changed* `pattern`, an external or sibling-carrying `$ref`, a changed error `details` schema, …), including one whose text is unchanged while a same-document `$ref` inside it resolves to a schema that changed — reported at the first resolved pointer where the two differ; a constraint, member or requirement present on one side only while the other carries such an applicator (it may have moved inside); a member added or removed beside a catch-all that constrains it (`additionalProperties` or `unevaluatedProperties` as a schema, `patternProperties`, `propertyNames`) | **unknown** — reported, never silently classed |
 | R16 | a nullable node respelled between `type: [T, 'null']` and a two-branch `anyOf`/`oneOf` with a null-only branch, where both spellings accept exactly the same values | neutral (`schema-respelled`) — the bytes and the revision move, the accepted values do not; a reorder inside one spelling (a type array's items, a union's branches) is no respelling and is silent |
 
 Riders the rows carry:
@@ -2581,7 +2581,8 @@ Riders the rows carry:
   recurse; the R6 keyword set compares as constraints; pure annotations
   (`title`, `description`, `examples`, `$comment`, `deprecated`) never
   move a wire byte and are ignored; **everything else that differs is
-  R15**. Nested member changes classify by narrowing/widening (adding a
+  R15**, but for the applicator positions the next rider reads by
+  direction. Nested member changes classify by narrowing/widening (adding a
   constrained optional member to an open nested object narrows it;
   removing one from an open object widens it); the *top-level* input
   members classify by R4/R5/R7, and output members by R8/R9 at every
@@ -2595,13 +2596,48 @@ Riders the rows carry:
   It now reports the change: R15 `unknown` where the position is not
   modeled, so a `--fail-on unknown` gate that passed such a pair now
   fails; classified where it is, so a `--fail-on breaking` gate fails on
-  a breaking one. A `--fail-on breaking` gate alone still passes a change
-  inside an applicator — it is `unknown`, never a guessed direction.
+  a breaking one. A change inside an applicator answers as the next
+  rider says.
   The input's own members now read closedness and catch-alls as a nested
   object's do: a member removed under `unevaluatedProperties: false`,
   once a neutral R5, is breaking R5 (the server refuses it), and a member
   removed, or added as optional, beside a catch-all that constrains it,
   once a neutral R5 or an additive R7, is R15.
+- **Applicators read by direction.** Where a branch that narrows (or
+  widens) can only narrow (or widen) what its node accepts, and the two
+  sides pair branch for branch, a change inside the branch classifies by
+  the rows a schema in that position takes — R6/R7 under an input, R8/R9
+  under an output, a nested object's member events included — with a
+  `docPath` through the branch. The positions: an `allOf` of the same
+  length in which at most one conjunct is respelled (conjuncts pair by
+  position, and this keeps two that traded places apart; one spelled
+  alike whose `$ref` resolves apart is read where it is); a `then` or an
+  `else` present on both sides beside an `if` that validates alike; a
+  `dependentSchemas` member, the keys being the same; a `prefixItems`
+  entry, the list keeping its length; and an `anyOf` or `oneOf` whose
+  variants are provably disjoint — every variant is an object schema
+  (`type: "object"`) that requires one member held to a `const` or an
+  `enum`, no value is shared between variants, and each position holds
+  the same value set on both sides — so an instance meets only the
+  variant its discriminator names, and the union accepts exactly what
+  that variant does. None of these is read by direction on a node that
+  carries `unevaluatedProperties` or `unevaluatedItems` (a member dropped
+  from a branch is then refused, not freed), on the target of an input
+  `$ref` beside one, or where a constraint, a member or a requirement sits
+  on one side only (it may have moved into a branch). `not`, `if`,
+  `contains`, a union told apart by type alone or not at all, a changed
+  `if`, and a branch list that grew, shrank or was reordered stay R15.
+  Nor is a change at a location something else the node applies there
+  may also constrain — its own keywords, another `allOf` conjunct,
+  another `dependentSchemas` entry, an applicator or a `contains` beside
+  it: a constraint a conjunct drops while another still holds it moves
+  nothing, so it is R15 under the applicator (variants of a discriminated
+  union never apply together, and mask nothing). Within one branch the
+  keywords are read one by one, as on a bare schema. **Upgrading:** these changes answered
+  R15 `unknown`; they now answer breaking or additive, so a `--fail-on
+  breaking` gate fails on a required member dropped from a discriminated
+  variant of an output, and a gate on `--fail-on unknown` alone no longer
+  fails on them.
 - **Audience is the compatibility surface.** Operations whose
   `policy.audience` is `server` on **both** sides are skipped entirely;
   an audience flip is R14 and, for public consumers, subsumes the

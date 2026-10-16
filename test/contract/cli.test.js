@@ -201,7 +201,7 @@ describe('jaren-contract diff — the compatibility gate', () => {
     assert.match(refused.stderr, /JC0004/);
   });
 
-  it('a change behind a $ref inside a union fails an unknown gate, and one behind a modeled $ref position fails a breaking gate', () => {
+  it('a required member dropped behind a $ref in a discriminated union fails a breaking gate; one in an undiscriminated union fails an unknown gate', () => {
     /** @param {string[]} required @param {any} output */
     const doc = (required, output) => ({
       $contract: '0.1',
@@ -211,27 +211,39 @@ describe('jaren-contract diff — the compatibility gate', () => {
           { type: 'object', properties: { ok: { const: true }, value: { $ref: '#/$defs/proj' } }, required: ['ok', 'value'] },
           { type: 'object', properties: { ok: { const: false } }, required: ['ok'] },
         ] },
+        either: { anyOf: [{ $ref: '#/$defs/proj' }, { type: 'string' }] },
         map: { type: 'object', additionalProperties: { $ref: '#/$defs/proj' } },
       },
       operations: { 'a.read': { kind: 'read', output, http: { method: 'GET', path: '/a' } } },
     });
-    /** @param {any} output @param {string} failOn */
-    const gate = (output, failOn) => run(['diff', '--from', 'v1.json', '--to', 'v2.json', '--fail-on', failOn], (dir) => {
-      fs.writeFileSync(path.join(dir, 'v1.json'), JSON.stringify(doc(['a', 'b'], output)));
-      fs.writeFileSync(path.join(dir, 'v2.json'), JSON.stringify(doc(['a'], output)));
+    /** @param {any} output @param {string} failOn @param {string[]} [from] @param {string[]} [to] */
+    const gate = (output, failOn, from = ['a', 'b'], to = ['a']) => run(['diff', '--from', 'v1.json', '--to', 'v2.json', '--fail-on', failOn], (dir) => {
+      fs.writeFileSync(path.join(dir, 'v1.json'), JSON.stringify(doc(from, output)));
+      fs.writeFileSync(path.join(dir, 'v2.json'), JSON.stringify(doc(to, output)));
     });
+    const pick = (/** @type {any[]} */ changes) => changes.map((c) => [c.rule, c.kind, c.docPath]);
     const union = { $ref: '#/$defs/result' };
-    const passes = gate(union, 'breaking');
-    assert.strictEqual(passes.status, 0, 'the union holds no modeled position: nothing is classed breaking');
-    assert.deepStrictEqual(JSON.parse(passes.stdout).unknown.map((/** @type {any} */ c) => [c.rule, c.docPath]),
-      [['R15', '/operations/a.read/output/oneOf/0/properties/value/required']]);
-    const unknown = gate(union, 'unknown');
+    const fails = gate(union, 'breaking');
+    assert.strictEqual(fails.status, 1, 'the variant the discriminator names no longer guarantees b');
+    assert.match(fails.stderr, /1 breaking change/);
+    assert.deepStrictEqual(pick(JSON.parse(fails.stdout).breaking),
+      [['R8', 'output-member-optional', '/operations/a.read/output/oneOf/0/properties/value/properties/b']]);
+    assert.strictEqual(gate(union, 'unknown').status, 0);
+    const guaranteed = gate(union, 'breaking', ['a'], ['a', 'b']);
+    assert.strictEqual(guaranteed.status, 0, 'a member the variant now guarantees is additive');
+    assert.deepStrictEqual(pick(JSON.parse(guaranteed.stdout).additive),
+      [['R9', 'output-member-guaranteed', '/operations/a.read/output/oneOf/0/properties/value/properties/b']]);
+    const either = { $ref: '#/$defs/either' };
+    assert.strictEqual(gate(either, 'breaking').status, 0, 'no discriminator: the direction is not decided');
+    const unknown = gate(either, 'unknown');
     assert.strictEqual(unknown.status, 1);
     assert.match(unknown.stderr, /1 unknown change/);
+    assert.deepStrictEqual(JSON.parse(unknown.stdout).unknown.map((/** @type {any} */ c) => [c.rule, c.docPath]),
+      [['R15', '/operations/a.read/output/anyOf/0/required']]);
     const breaking = gate({ $ref: '#/$defs/map' }, 'breaking');
     assert.strictEqual(breaking.status, 1);
     assert.match(breaking.stderr, /1 breaking change/);
-    assert.deepStrictEqual(JSON.parse(breaking.stdout).breaking.map((/** @type {any} */ c) => [c.rule, c.kind, c.docPath]),
+    assert.deepStrictEqual(pick(JSON.parse(breaking.stdout).breaking),
       [['R8', 'output-member-optional', '/operations/a.read/output/additionalProperties/properties/b']]);
   });
 

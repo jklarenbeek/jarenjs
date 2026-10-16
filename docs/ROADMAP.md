@@ -287,13 +287,17 @@ costs a descriptor plus examples and no UI code at all.
 
 ## @jarenjs/contract
 
-- [ ] **`diffContracts` reports any change inside an applicator as R15
-  `unknown`, inline or behind a `$ref`,** so a `--fail-on breaking` gate alone
-  passes a required member dropped from a `oneOf` variant. A variance rule for
-  the monotone positions (`allOf`, `anyOf`, `then`/`else`, `dependentSchemas`,
-  `prefixItems`, and a `oneOf` whose branches are provably disjoint, e.g. by a
-  required `const` discriminator) would class such a change breaking/additive;
-  `not`, `if` and an undiscriminated `oneOf` stay R15.
+- [ ] **`diffContracts` reports a change inside `not`, `if`, `contains`, or a
+  union no required `const`/`enum` member discriminates as R15 `unknown`,** so
+  a `--fail-on breaking` gate alone passes a required member dropped behind
+  `anyOf: [{ $ref }, { type: 'null' }]` (the nullable spelling of a
+  projection) or inside variants told apart only by `type`. Branches whose
+  `type` sets are disjoint are as provably disjoint as a discriminator; a
+  reordered discriminated union could pair by discriminator value instead of
+  position; a variant added under a new discriminator value is a widening; two
+  `allOf` conjuncts respelled together, and a branch change at a location
+  another conjunct or the node itself also constrains (it would need the two
+  intersected), stay R15.
 
 ## @jarenjs/linq & @jarenjs/db — the data pair
 

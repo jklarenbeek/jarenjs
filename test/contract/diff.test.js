@@ -36,14 +36,15 @@ const readOp = (extra = {}) => ({ kind: 'read', output: true, http: { method: 'G
  * A command with one body member `x` of `schema`.
  * @param {any} schema
  * @param {any} [extra]
+ * @param {any} [$defs]
  */
-const commandWith = (schema, extra = {}) => one({
+const commandWith = (schema, extra = {}, $defs = {}) => one({
   kind: 'command',
   input: { type: 'object', required: ['x'], properties: { x: schema } },
   output: true,
   http: { method: 'POST', path: '/a' },
   ...extra,
-});
+}, { $defs });
 
 /** The single change of a class, asserted to be alone there. @param {any[]} list */
 function only(list) {
@@ -601,8 +602,9 @@ describe('diffContracts — validation behind a same-document $ref is compared a
   const ref = { $ref: '#/$defs/proj' };
   /**
    * Each shape wraps the reference; `at` is where the reference sits
-   * inside it and `note` the keyword the walk does not model there.
-   * @type {Record<string, { wrap: any, at: string, note: string }>}
+   * inside it and `note` the keyword the walk does not model there;
+   * `decided` marks a position whose direction the walk reads.
+   * @type {Record<string, { wrap: any, at: string, note: string, decided?: true }>}
    */
   const shapes = {
     'a discriminated oneOf variant': {
@@ -610,35 +612,35 @@ describe('diffContracts — validation behind a same-document $ref is compared a
         { type: 'object', properties: { ok: { const: true }, value: ref }, required: ['ok', 'value'] },
         { type: 'object', properties: { ok: { const: false } }, required: ['ok'] },
       ] },
-      at: '/oneOf/0/properties/value', note: 'oneOf',
+      at: '/oneOf/0/properties/value', note: 'oneOf', decided: true,
     },
     'an anyOf branch': { wrap: { anyOf: [ref, { type: 'string' }] }, at: '/anyOf/0', note: 'anyOf' },
-    'an allOf conjunct': { wrap: { allOf: [ref] }, at: '/allOf/0', note: 'allOf' },
+    'an allOf conjunct': { wrap: { allOf: [ref] }, at: '/allOf/0', note: 'allOf', decided: true },
     'a not': { wrap: { type: 'object', not: ref }, at: '/not', note: 'not' },
     'an if': { wrap: { if: ref, then: { type: 'object' } }, at: '/if', note: 'if' },
-    'a then': { wrap: { if: { type: 'object' }, then: ref }, at: '/then', note: 'then' },
-    'an else': { wrap: { if: { type: 'string' }, else: ref }, at: '/else', note: 'else' },
-    'a dependentSchemas member': { wrap: { type: 'object', dependentSchemas: { a: ref } }, at: '/dependentSchemas/a', note: 'dependentSchemas' },
-    'a prefixItems entry': { wrap: { type: 'array', prefixItems: [ref] }, at: '/prefixItems/0', note: 'prefixItems' },
+    'a then': { wrap: { if: { type: 'object' }, then: ref }, at: '/then', note: 'then', decided: true },
+    'an else': { wrap: { if: { type: 'string' }, else: ref }, at: '/else', note: 'else', decided: true },
+    'a dependentSchemas member': { wrap: { type: 'object', dependentSchemas: { a: ref } }, at: '/dependentSchemas/a', note: 'dependentSchemas', decided: true },
+    'a prefixItems entry': { wrap: { type: 'array', prefixItems: [ref] }, at: '/prefixItems/0', note: 'prefixItems', decided: true },
     'a contains': { wrap: { type: 'array', contains: ref }, at: '/contains', note: 'contains' },
     'a patternProperties member': { wrap: { type: 'object', patternProperties: { '^p': ref } }, at: '/patternProperties/^p', note: 'patternProperties' },
     'a $ref beside a sibling': { wrap: { ...ref, description: 'the projection' }, at: '', note: '$ref' },
     'a nullable union whose branch is the $ref': { wrap: { anyOf: [ref, { type: 'null' }] }, at: '/anyOf/0', note: 'anyOf' },
     'a $ref into a nested definitions': {
-      wrap: { allOf: [{ $ref: '#/$defs/holder/definitions/proj' }] }, at: '/allOf/0', note: 'allOf',
+      wrap: { allOf: [{ $ref: '#/$defs/holder/definitions/proj' }] }, at: '/allOf/0', note: 'allOf', decided: true,
     },
-    'a $ref reached through another $ref': { wrap: { allOf: [{ $ref: '#/$defs/mid' }] }, at: '/allOf/0', note: 'allOf' },
+    'a $ref reached through another $ref': { wrap: { allOf: [{ $ref: '#/$defs/mid' }] }, at: '/allOf/0', note: 'allOf', decided: true },
   };
   /**
    * The four positions validation is reached from: what an operation
-   * returns, a member of what it takes, its input's own applicator, and
-   * a declared error's schema.
+   * returns, a member of what it takes, its input's own `allOf` (whose
+   * one conjunct is read by direction), and a declared error's schema.
    * @type {Record<string, { op: (w: any) => any, at: string, note?: string, kind: string }>}
    */
   const positions = {
     output: { op: (w) => ({ output: w }), at: '/output', kind: 'schema-unknown' },
     'input member': { op: (w) => ({ input: { type: 'object', properties: { m: w } } }), at: '/input/properties/m', kind: 'schema-unknown' },
-    'input root': { op: (w) => ({ input: { type: 'object', properties: { m: {} }, allOf: [w] } }), at: '/input/allOf/0', note: 'allOf', kind: 'schema-unknown' },
+    'input root': { op: (w) => ({ input: { type: 'object', properties: { m: {} }, allOf: [w] } }), at: '/input/allOf/0', kind: 'schema-unknown' },
     'error schema': {
       op: (w) => ({ errors: { conflict: { status: 409, schema: w } } }), at: '/errors/conflict/schema',
       note: 'the rule table does not model error-schema evolution', kind: 'error-schema-changed',
@@ -659,7 +661,7 @@ describe('diffContracts — validation behind a same-document $ref is compared a
     } },
   });
 
-  for (const [shape, { wrap, at, note }] of Object.entries(shapes)) {
+  for (const [shape, { wrap, at, note }] of Object.entries(shapes).filter(([, s]) => !s.decided)) {
     it(`${shape}: a required member removed or added behind the $ref reports R15 where the resolved schemas differ, in every position`, () => {
       for (const [position, p] of Object.entries(positions)) {
         for (const [from, to] of [[['a', 'b'], ['a']], [['a'], ['a', 'b']]]) {
@@ -673,13 +675,46 @@ describe('diffContracts — validation behind a same-document $ref is compared a
     });
   }
 
-  it('an enum narrowed behind the $ref in a union reports R15 at the enum', () => {
+  for (const [shape, { wrap, at }] of Object.entries(shapes).filter(([, s]) => s.decided)) {
+    it(`${shape}: a required member removed or added behind the $ref classifies as on a bare object, in every position but an error's`, () => {
+      const pick = (/** @type {any} */ c) => [c.rule, c.kind, c.docPath, c.from, c.to, c.note];
+      /** @type {[string, string[], string[], 'breaking' | 'additive', any[]][]} */
+      const cases = [
+        ['output', ['a', 'b'], ['a'], 'breaking', ['R8', 'output-member-optional', `/operations/a.do/output${at}/properties/b`, 'b', 'b', undefined]],
+        ['output', ['a'], ['a', 'b'], 'additive', ['R9', 'output-member-guaranteed', `/operations/a.do/output${at}/properties/b`, 'b', 'b', undefined]],
+        ['input member', ['a', 'b'], ['a'], 'additive', ['R7', 'input-widened', `/operations/a.do/input/properties/m${at}/properties/b`, 'b', 'b', 'made-optional']],
+        ['input member', ['a'], ['a', 'b'], 'breaking', ['R6', 'input-narrowed', `/operations/a.do/input/properties/m${at}/properties/b`, 'b', 'b', 'made-required']],
+        ['input root', ['a', 'b'], ['a'], 'additive', ['R7', 'input-widened', `/operations/a.do/input/allOf/0${at}/properties/b`, 'b', 'b', 'made-optional']],
+        ['input root', ['a'], ['a', 'b'], 'breaking', ['R6', 'input-narrowed', `/operations/a.do/input/allOf/0${at}/properties/b`, 'b', 'b', 'made-required']],
+      ];
+      for (const [position, from, to, cls, expected] of cases) {
+        const d = diffContracts(doc(proj(from), wrap, positions[position].op), doc(proj(to), wrap, positions[position].op));
+        onlyClasses(d, [cls]);
+        assert.deepStrictEqual(pick(only(d[cls])), expected, `${position}: ${from} -> ${to}`);
+      }
+      const error = positions['error schema'];
+      const d = diffContracts(doc(proj(['a', 'b']), wrap, error.op), doc(proj(['a']), wrap, error.op));
+      onlyClasses(d, ['unknown']);
+      assert.deepStrictEqual(only(d.unknown), {
+        kind: error.kind, op: 'a.do', docPath: `/operations/a.do${error.at}${at}/required`, from: ['a', 'b'], to: ['a'], rule: 'R15', note: error.note,
+      });
+    });
+  }
+
+  it('an enum narrowed behind the $ref in a discriminated union classifies at the enum, and in an undiscriminated one reports R15 there', () => {
     const { wrap } = shapes['a discriminated oneOf variant'];
     const d = diffContracts(doc(proj(['a']), wrap, positions.output.op), doc(proj(['a'], ['x']), wrap, positions.output.op));
-    onlyClasses(d, ['unknown']);
-    assert.deepStrictEqual(only(d.unknown), {
-      kind: 'schema-unknown', op: 'a.do', docPath: '/operations/a.do/output/oneOf/0/properties/value/properties/b/enum',
-      from: ['x', 'y'], to: ['x'], rule: 'R15', note: 'oneOf',
+    onlyClasses(d, ['additive']);
+    assert.deepStrictEqual(only(d.additive), {
+      kind: 'output-narrowed', op: 'a.do', docPath: '/operations/a.do/output/oneOf/0/properties/value/properties/b/enum',
+      from: ['x', 'y'], to: ['x'], rule: 'R9', note: 'enum',
+    });
+    const either = shapes['an anyOf branch'].wrap;
+    const u = diffContracts(doc(proj(['a']), either, positions.output.op), doc(proj(['a'], ['x']), either, positions.output.op));
+    onlyClasses(u, ['unknown']);
+    assert.deepStrictEqual(only(u.unknown), {
+      kind: 'schema-unknown', op: 'a.do', docPath: '/operations/a.do/output/anyOf/0/properties/b/enum',
+      from: ['x', 'y'], to: ['x'], rule: 'R15', note: 'anyOf',
     });
   });
 
@@ -748,8 +783,9 @@ describe('diffContracts — validation behind a same-document $ref is compared a
     };
     onlyClasses(diffContracts(diamond('string'), diamond('string')), []);
     const d = diffContracts(diamond('string'), diamond('number'));
+    // each level's two conjuncts constrain the same location: R15, not a direction
     onlyClasses(d, ['unknown']);
-    assert.strictEqual(only(d.unknown).docPath, `/operations/a.do/output${'/allOf/0'.repeat(depth)}/type`);
+    assert.deepStrictEqual([only(d.unknown).rule, only(d.unknown).note, only(d.unknown).docPath], ['R15', 'allOf', `/operations/a.do/output${'/allOf/0'.repeat(depth)}/type`]);
   });
 
   it("under audience: 'all' a server operation's change behind a $ref is reported and marked; the public default skips it", () => {
@@ -758,9 +794,9 @@ describe('diffContracts — validation behind a same-document $ref is compared a
     const b = doc(proj(['a']), wrap, positions.output.op, { audience: 'server' });
     onlyClasses(diffContracts(a, b), []);
     const all = diffContracts(a, b, { audience: 'all' });
-    onlyClasses(all, ['unknown']);
-    const c = only(all.unknown);
-    assert.deepStrictEqual([c.rule, c.docPath, c.audience], ['R15', '/operations/a.do/output/oneOf/0/properties/value/required', 'server']);
+    onlyClasses(all, ['breaking']);
+    const c = only(all.breaking);
+    assert.deepStrictEqual([c.rule, c.docPath, c.audience], ['R8', '/operations/a.do/output/oneOf/0/properties/value/properties/b', 'server']);
   });
 
   it("the input's own keywords beside its members are compared: an applicator, a bound, the siblings of the $ref it is spelled as", () => {
@@ -793,6 +829,180 @@ describe('diffContracts — validation behind a same-document $ref is compared a
     const narrowed = diffContracts(take({ ...base, enum: [{ m: 'a' }, { m: 'b' }] }), take({ ...base, enum: [{ m: 'a' }] }));
     onlyClasses(narrowed, ['breaking']);
     assert.deepStrictEqual([only(narrowed.breaking).rule, only(narrowed.breaking).kind, only(narrowed.breaking).docPath], ['R6', 'input-narrowed', '/operations/a.b/input/enum']);
+  });
+});
+
+describe('diffContracts — a change inside an applicator whose direction is decidable classifies as on a bare schema', () => {
+  const at = { input: '/operations/a.b/input/properties/x', output: '/operations/a.b/output' };
+  /**
+   * An operation that takes `schema` as its body member `x`, or returns it.
+   * @param {'input' | 'output'} where @param {any} schema @param {any} [defs]
+   */
+  const take = (where, schema, defs = {}) => (where === 'input'
+    ? commandWith(schema, {}, defs)
+    : one(readOp({ output: schema }), { $defs: defs }));
+  /** @param {string} k @param {any} v */
+  const variant = (k, v) => ({ type: 'object', properties: { k: { const: k }, v }, required: ['k'] });
+  /**
+   * Each position, spelled with a bound `n` it moves: `n = 5` is the
+   * wider schema, `n = 3` the narrower; `keyword` sits at `pointer`.
+   * @type {[string, (n: number) => any, string, string][]}
+   */
+  const decided = [
+    ['an allOf conjunct', (n) => ({ allOf: [{ type: 'string' }, { maxLength: n }] }), '/allOf/1/maxLength', 'maxLength'],
+    ['a oneOf variant a const discriminates', (n) => ({ oneOf: [variant('a', { type: 'string', maxLength: n }), variant('b', { type: 'string' })] }), '/oneOf/0/properties/v/maxLength', 'maxLength'],
+    ['an anyOf branch an enum discriminates', (n) => ({ anyOf: [
+      { type: 'object', properties: { k: { enum: ['a', 'b'] }, v: { type: 'string', maxLength: n } }, required: ['k'] },
+      { type: ['object'], properties: { k: { enum: ['c'] } }, required: ['k'] },
+    ] }), '/anyOf/0/properties/v/maxLength', 'maxLength'],
+    ['a then under the same if', (n) => ({ if: { type: 'string' }, then: { maxLength: n } }), '/then/maxLength', 'maxLength'],
+    ['an else under the same if', (n) => ({ if: { type: 'string' }, else: { maximum: n } }), '/else/maximum', 'maximum'],
+    ['a dependentSchemas member under the same key', (n) => ({ type: 'object', dependentSchemas: { a: { properties: { b: { type: 'string', maxLength: n } } } } }), '/dependentSchemas/a/properties/b/maxLength', 'maxLength'],
+    ['a prefixItems entry', (n) => ({ type: 'array', prefixItems: [{ type: 'string' }, { type: 'string', maxLength: n }] }), '/prefixItems/1/maxLength', 'maxLength'],
+  ];
+  const pick = (/** @type {any} */ c) => [c.rule, c.kind, c.docPath, c.from, c.to, c.note];
+
+  for (const [name, spell, pointer, keyword] of decided) {
+    it(`${name}: narrowed or widened, inline and behind a $ref, input and output`, () => {
+      /** @type {['input' | 'output', number, number, 'breaking' | 'additive', string, string][]} */
+      const cases = [
+        ['input', 5, 3, 'breaking', 'R6', 'input-narrowed'],
+        ['input', 3, 5, 'additive', 'R7', 'input-widened'],
+        ['output', 5, 3, 'additive', 'R9', 'output-narrowed'],
+        ['output', 3, 5, 'breaking', 'R8', 'output-widened'],
+      ];
+      for (const [where, from, to, cls, rule, kind] of cases) {
+        const expected = [rule, kind, at[where] + pointer, from, to, keyword];
+        const inline = diffContracts(take(where, spell(from)), take(where, spell(to)));
+        onlyClasses(inline, [cls]);
+        assert.deepStrictEqual(pick(only(inline[cls])), expected, `${where} inline ${from} -> ${to}`);
+        const ref = { $ref: '#/$defs/w' };
+        const behind = diffContracts(take(where, ref, { w: spell(from) }), take(where, ref, { w: spell(to) }));
+        onlyClasses(behind, [cls]);
+        assert.deepStrictEqual(pick(only(behind[cls])), expected, `${where} behind a $ref ${from} -> ${to}`);
+      }
+    });
+  }
+
+  it("the reported result envelope: a member dropped from the projection a discriminated anyOf variant returns, as the object helper spells it", () => {
+    /** @param {Record<string, any>} properties */
+    const object = (properties) => ({ type: 'object', properties, required: Object.keys(properties), additionalProperties: false });
+    /** @param {any} shape */
+    const result = (shape) => ({ anyOf: [
+      object({ ok: { const: true }, value: shape }),
+      object({ ok: { const: false }, issues: { type: 'array', items: { type: 'string' } } }),
+    ] });
+    const both = object({ a: { type: 'string' }, b: { type: 'string' } });
+    const defs = (/** @type {any} */ proj) => ({ proj, result: result({ $ref: '#/$defs/proj' }) });
+    const ref = { $ref: '#/$defs/result' };
+    const member = '/anyOf/0/properties/value/properties/b';
+    /** @type {[string, any, any, 'input' | 'output', 'breaking' | 'additive', any[]][]} */
+    const cases = [
+      ['dropped', both, object({ a: { type: 'string' } }), 'output', 'breaking', ['R8', 'output-member-removed', at.output + member, 'b', 'b', undefined]],
+      ['dropped', both, object({ a: { type: 'string' } }), 'input', 'breaking', ['R6', 'input-narrowed', at.input + member, 'b', 'b', 'removed']],
+      ['added', object({ a: { type: 'string' } }), both, 'output', 'breaking', ['R8', 'output-member-added', at.output + member, 'b', 'b', undefined]],
+      ['added', object({ a: { type: 'string' } }), both, 'input', 'breaking', ['R6', 'input-narrowed', at.input + member, 'b', 'b', 'added-required']],
+      ['made optional', both, { ...both, required: ['a'] }, 'output', 'breaking', ['R8', 'output-member-optional', at.output + member, 'b', 'b', undefined]],
+      ['made optional', both, { ...both, required: ['a'] }, 'input', 'additive', ['R7', 'input-widened', at.input + member, 'b', 'b', 'made-optional']],
+      ['made required', { ...both, required: ['a'] }, both, 'output', 'additive', ['R9', 'output-member-guaranteed', at.output + member, 'b', 'b', undefined]],
+      ['made required', { ...both, required: ['a'] }, both, 'input', 'breaking', ['R6', 'input-narrowed', at.input + member, 'b', 'b', 'made-required']],
+    ];
+    for (const [change, from, to, where, cls, expected] of cases) {
+      const d = diffContracts(take(where, ref, defs(from)), take(where, ref, defs(to)));
+      onlyClasses(d, [cls]);
+      assert.deepStrictEqual(pick(only(d[cls])), expected, `${where}: ${change}`);
+    }
+  });
+
+  it('stays R15 wherever the direction is not proven, both ways, input and output', () => {
+    const x = { minLength: 1 };
+    const y = { maxLength: 5 };
+    const z = { pattern: '^a' };
+    /**
+     * Each: what changed, the R15 entries it reports (`note pointer`, the
+     * pointer under the position), the two spellings, and the `$defs`.
+     * @type {[string, string[], any, any, [Record<string, any>, Record<string, any>]?][]}
+     */
+    const unproven = [
+      ['an allOf beside unevaluatedProperties', ['allOf /allOf'], { allOf: [{ properties: { c: { type: 'string' } } }], unevaluatedProperties: false }, { allOf: [{ properties: {} }], unevaluatedProperties: false }],
+      ['a prefixItems beside unevaluatedItems', ['prefixItems /prefixItems'], { type: 'array', prefixItems: [{ maxLength: 5 }], unevaluatedItems: false }, { type: 'array', prefixItems: [{ maxLength: 3 }], unevaluatedItems: false }],
+      ['allOf conjuncts that traded places', ['allOf /allOf'], { allOf: [x, y] }, { allOf: [y, x] }],
+      ['an allOf conjunct moved to the end', ['allOf /allOf'], { allOf: [x, y] }, { allOf: [z, x] }],
+      ['an allOf conjunct moved to the front', ['allOf /allOf'], { allOf: [x, y] }, { allOf: [y, z] }],
+      ['two conjuncts respelled', ['allOf /allOf'], { allOf: [{ minLength: 1 }, { maxLength: 5 }] }, { allOf: [{ maxLength: 4 }, { minLength: 2 }] }],
+      ['an allOf that grew', ['allOf /allOf'], { allOf: [x] }, { allOf: [x, y] }],
+      ['a constraint moved into a conjunct', ['allOf /allOf', 'minLength /minLength'], { minLength: 1, allOf: [{}] }, { allOf: [{ minLength: 1 }] }],
+      ['a member moved into a conjunct', ['allOf /allOf', 'properties /properties/a'], { type: 'object', properties: { a: {} }, allOf: [{}] }, { type: 'object', allOf: [{ properties: { a: {} } }] }],
+      ['members that traded places with a conjunct', ['allOf /allOf', 'properties /properties/a', 'properties /properties/b'],
+        { type: 'object', properties: { a: {} }, allOf: [{ properties: { b: {} } }] }, { type: 'object', properties: { b: {} }, allOf: [{ properties: { a: {} } }] }],
+      ['a requirement moved into a conjunct', ['allOf /allOf', 'required /required'], { type: 'object', required: ['a'], allOf: [{}] }, { type: 'object', allOf: [{ required: ['a'] }] }],
+      ['reordered variants', ['oneOf /oneOf'], { oneOf: [variant('a', y), variant('b', {})] }, { oneOf: [variant('b', {}), variant('a', y)] }],
+      ['variants that share a discriminator value', ['oneOf /oneOf'], { oneOf: [variant('a', { maxLength: 5 }), variant('a', {})] }, { oneOf: [variant('a', { maxLength: 3 }), variant('a', {})] }],
+      ['a variant that is not an object schema', ['oneOf /oneOf'], { oneOf: [variant('a', { maxLength: 5 }), { properties: { k: { const: 'b' } }, required: ['k'] }] },
+        { oneOf: [variant('a', { maxLength: 3 }), { properties: { k: { const: 'b' } }, required: ['k'] }] }],
+      ['a variant that does not require the discriminator', ['anyOf /anyOf'], { anyOf: [variant('a', { maxLength: 5 }), { type: 'object', properties: { k: { const: 'b' } } }] },
+        { anyOf: [variant('a', { maxLength: 3 }), { type: 'object', properties: { k: { const: 'b' } } }] }],
+      ['a variant that stopped requiring the discriminator', ['anyOf /anyOf'], { anyOf: [variant('a', { maxLength: 5 }), variant('b', {})] },
+        { anyOf: [variant('a', { maxLength: 3 }), { type: 'object', properties: { k: { const: 'b' } } }] }],
+      ['a discriminator value that moved', ['anyOf /anyOf'], { anyOf: [variant('a', { maxLength: 5 }), variant('b', {})] }, { anyOf: [variant('a', { maxLength: 3 }), variant('c', {})] }],
+      ['branches told apart by type alone', ['anyOf /anyOf'], { anyOf: [{ type: 'string', maxLength: 5 }, { type: 'integer' }] }, { anyOf: [{ type: 'string', maxLength: 3 }, { type: 'integer' }] }],
+      ['a then beside a changed if', ['if /if', 'then /then'], { if: { type: 'string' }, then: { maxLength: 5 } }, { if: { type: 'number' }, then: { maxLength: 3 } }],
+      ['a then behind an if whose $ref resolves apart', ['if /if/type', 'then /then'], { if: { $ref: '#/$defs/c' }, then: { maxLength: 5 } }, { if: { $ref: '#/$defs/c' }, then: { maxLength: 3 } }, [{ c: { type: 'string' } }, { c: { type: 'number' } }]],
+      ['a then without an if', ['then /then'], { then: { maxLength: 5 } }, { then: { maxLength: 3 } }],
+      ['a then that appeared', ['then /then'], { if: { type: 'string' } }, { if: { type: 'string' }, then: { maxLength: 3 } }],
+      ['a dependentSchemas key added', ['dependentSchemas /dependentSchemas'], { dependentSchemas: { a: { maxProperties: 5 } } }, { dependentSchemas: { a: { maxProperties: 5 }, b: {} } }],
+      ['a prefixItems that grew', ['prefixItems /prefixItems'], { type: 'array', prefixItems: [{ maxLength: 5 }] }, { type: 'array', prefixItems: [{ maxLength: 3 }, {}] }],
+      ['a constraint another conjunct still holds', ['allOf /allOf/1/minLength'],
+        { allOf: [{ minLength: 1 }, { minLength: 1, maxLength: 5 }] }, { allOf: [{ minLength: 1 }, { maxLength: 5 }] }],
+      ['a constraint the node still holds beside a then', ['then /then/minLength'],
+        { minLength: 1, if: { type: 'string' }, then: { minLength: 1 } }, { minLength: 1, if: { type: 'string' }, then: {} }],
+      ['a member the node constrains beside a variant', ['oneOf /oneOf/0/properties/v/maxLength'],
+        { type: 'object', properties: { v: { maxLength: 9 } }, oneOf: [variant('a', { maxLength: 5 }), variant('b', {})] },
+        { type: 'object', properties: { v: { maxLength: 9 } }, oneOf: [variant('a', { maxLength: 3 }), variant('b', {})] }],
+      ['a requirement another dependentSchemas entry holds', ['dependentSchemas /dependentSchemas/a/required'],
+        { dependentSchemas: { a: { required: ['c'] }, b: { required: ['c'] } } }, { dependentSchemas: { a: {}, b: { required: ['c'] } } }],
+      ['an entry a contains beside prefixItems may constrain', ['prefixItems /prefixItems/0/maxLength'],
+        { type: 'array', prefixItems: [{ maxLength: 5 }], contains: { minLength: 1 } }, { type: 'array', prefixItems: [{ maxLength: 3 }], contains: { minLength: 1 } }],
+      ['identical conjuncts behind one changed $ref', ['allOf /allOf/0/maxLength'],
+        { allOf: [{ $ref: '#/$defs/c' }, { $ref: '#/$defs/c' }] }, { allOf: [{ $ref: '#/$defs/c' }, { $ref: '#/$defs/c' }] }, [{ c: { maxLength: 5 } }, { c: { maxLength: 3 } }]],
+      ['a conjunct beside one that holds an applicator', ['allOf /allOf/1/maxLength'],
+        { allOf: [{ anyOf: [{ maxLength: 5 }, { type: 'integer' }] }, { maxLength: 5 }] }, { allOf: [{ anyOf: [{ maxLength: 5 }, { type: 'integer' }] }, { maxLength: 3 }] }],
+      ['a not', ['not /not'], { not: { maxLength: 5 } }, { not: { maxLength: 3 } }],
+      ['a contains', ['contains /contains'], { type: 'array', contains: { maxLength: 5 } }, { type: 'array', contains: { maxLength: 3 } }],
+    ];
+    for (const [name, expected, from, to, extraDefs] of unproven) {
+      for (const where of /** @type {const} */ (['input', 'output'])) {
+        for (const [p, q] of [[from, to], [to, from]]) {
+          // the $ref cases: the text is equal, the target is not
+          const [defsP, defsQ] = extraDefs ?? [{}, {}];
+          const d = diffContracts(take(where, p, defsP), take(where, q, defsQ));
+          onlyClasses(d, ['unknown']);
+          assert.ok(d.unknown.every((/** @type {any} */ c) => c.rule === 'R15'), name);
+          assert.deepStrictEqual(d.unknown.map((/** @type {any} */ c) => `${c.note} ${c.docPath.slice(at[where].length)}`).sort(), expected, `${name} (${where})`);
+        }
+      }
+    }
+  });
+
+  it("an input spelled as a $ref beside unevaluatedProperties reads its target's conjuncts by text", () => {
+    /** @param {Record<string, any>} c */
+    const defs = (c) => ({
+      In: { type: 'object', properties: { m: { type: 'string' } }, allOf: [{ $ref: '#/$defs/Extra' }] },
+      Extra: { properties: c },
+    });
+    /** @param {any} input @param {any} $defs */
+    const takes = (input, $defs) => one({ kind: 'command', input, output: true, http: { method: 'POST', path: '/a' } }, { $defs });
+    const closed = { $ref: '#/$defs/In', unevaluatedProperties: false };
+    const d = diffContracts(takes(closed, defs({ c: { type: 'string' } })), takes(closed, defs({})));
+    onlyClasses(d, ['unknown']);
+    assert.deepStrictEqual(only(d.unknown), {
+      kind: 'schema-unknown', op: 'a.b', docPath: '/operations/a.b/input/allOf/0/properties/c', from: { type: 'string' }, to: undefined, rule: 'R15', note: 'allOf',
+    });
+    // without the sibling, the conjunct is read by direction: c is no longer constrained
+    const open = { $ref: '#/$defs/In' };
+    const widened = diffContracts(takes(open, defs({ c: { type: 'string' } })), takes(open, defs({})));
+    onlyClasses(widened, ['additive']);
+    assert.deepStrictEqual(pick(only(widened.additive)), ['R7', 'input-widened', '/operations/a.b/input/allOf/0/properties/c', 'c', 'c', 'removed']);
   });
 });
 
