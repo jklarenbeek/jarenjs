@@ -648,7 +648,8 @@ if (asyncLiveLeak.length)
 // Raised to 1,056,300 (measured 1056236): the chain's shared number syntax, key bound and geometry reading (1317), and the validator's per-draft reference siblings in the normalizer, the JSON-text coercion, the identifier conflict check and its coded refusals (3262) add 4875.
 // Raised to 1,058,400 (measured 1058342): the chain's value equality and ordering, join keys and geometry answers (1417), the store's date refusal by its true reason (398), the normalizer's single reading of reference whitespace (168) and the live rows' engine comparison (115) add 2106.
 // Raised to 1,058,700 (measured 1058619): the PostgreSQL layout index's expression key read back through the relational grammar add 486.
-if (clientBytes > 1058700)
+// Raised to 1,067,600 (measured 1067514): the per-kind union and unique indexes with the boolean key that keeps true apart from 1 (ddl 3983) and their read-back (introspect 2076), the validator's exact dialect and vocabulary matching (1942), and the native grouping and seek plans (790) add 8895.
+if (clientBytes > 1067600)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 
