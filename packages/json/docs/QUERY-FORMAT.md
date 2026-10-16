@@ -89,9 +89,10 @@ Two conformance roles exist:
    equals only the same `bigint`, a `Date` (an offset date-time) a `Date`
    of the same instant, and a `RegExp` (a regexp literal) a `RegExp` of the
    same source and flags, under `$eq`, `$distinct`, `$groupby` and a hash
-   join alike, and none of them equals another object. *Upgrade: a `Date`
-   or a `RegExp` used to compare as `{}`, so two different instants or
-   patterns were one value.*
+   join alike, and none of them equals another object; `$lt $le $gt $ge`
+   order two `bigint`s and two `Date`s as they compare equal (§8.4).
+   *Upgrade: a `Date` or a `RegExp` used to compare as `{}`, so two
+   different instants or patterns were one value.*
 
 ### 2.2 Effective boolean value (EBV)
 
@@ -935,10 +936,17 @@ item comparison; otherwise `false`. Consequences:
   arrays memberwise in order; objects by key set and per-key values,
   key order irrelevant.
 - `$lt $le $gt $ge` compare numbers with numbers (mathematically) and strings
-  with strings (Unicode scalar value order). For **any other item pair**
-  (number vs string, booleans, `null`, arrays, objects) the item comparison
-  is simply **false** for that pair — not an error — and contributes no
-  witness.
+  with strings (Unicode scalar value order). The values `@jarenjs/josl`
+  reads whose equality is a value's (§2.1) order the same way: a `Date`
+  with a `Date` by instant (an invalid one orders against none, as `NaN`)
+  and a `bigint` with a `bigint` by value. For **any other item pair**
+  (number vs string, a `Date` vs its own text, a `bigint` vs a number,
+  booleans, `null`, arrays, objects — a `RegExp`, and a JOSL `LocalDate`,
+  `LocalTime` or `LocalDateTime`, which is read by its members, among
+  them) the item comparison is
+  simply **false** for that pair — not an error — and contributes no
+  witness. *Upgrade: two `Date`s or two `bigint`s used to be such a pair,
+  so `$gt` and `$lt` were both false for two different instants.*
 
 ```json
 { "$and": [

@@ -67,6 +67,31 @@ describe('the identity behind $distinct, $groupby and the hash join', () => {
     assert.deepEqual(join(data), [[0, 1], [1, 2], [2, 4]]);
   });
 
+  it('orders the datetimes and bigints it keeps apart by their instant and value, and nothing else beside them', () => {
+    const d0 = new Date(0);
+    const d1 = new Date(1);
+    const ext = { xs: [d0, d1], d0, d1, same: new Date(0), iso: d1.toISOString(), big, bigger: big + 1n, re: /a/, re2: /a/ };
+    const holds = (/** @type {string} */ op, /** @type {string} */ a, /** @type {string} */ b) => compileJsonQuery({ [op]: [a, b] })(null, ext);
+    assert.equal(holds('$gt', '$d1', '$d0'), true);
+    assert.equal(holds('$lt', '$d1', '$d0'), false);
+    assert.equal(holds('$lt', '$d0', '$d1'), true);
+    assert.equal(holds('$le', '$d0', '$same'), true);
+    assert.equal(holds('$ge', '$d0', '$same'), true);
+    assert.equal(holds('$lt', '$d0', '$same'), false);
+    assert.equal(holds('$gt', '$xs[*]', '$d0'), true);
+    assert.equal(holds('$gt', '$bigger', '$big'), true);
+    assert.equal(holds('$le', '$bigger', '$big'), false);
+    // a datetime and its own text, a bigint and a number, two regular expressions: no order, as for a boolean
+    for (const [a, b] of [['$d1', '$iso'], ['$big', 1], ['$re', '$re2']]) {
+      for (const op of ['$lt', '$le', '$gt', '$ge'])
+        assert.equal(holds(op, /** @type {string} */ (a), /** @type {string} */ (b)), false, `${op} ${a} ${b}`);
+    }
+    assert.equal(holds('$eq', '$re', '$re2'), true);
+    // the ordering readers that take numbers and strings alone still refuse a datetime, coded
+    assert.throws(() => compileJsonQuery({ $max: '$xs[*]' })(null, ext), { code: 'JQ2001' });
+    assert.throws(() => compileJsonQuery({ $for: { x: '$xs[*]' }, $orderby: '$x', $return: '$x' })(null, ext), { code: 'JQ2005' });
+  });
+
   it('joins a bigint key on its own value, as the scan does', () => {
     const join = compileJsonQuery({
       $for: { o: '$.outer[*]', i: '$.inner[*]' }, $where: { $eq: ['$o.k', '$i.k'] }, $return: ['$o.id', '$i.id'],

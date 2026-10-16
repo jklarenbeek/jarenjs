@@ -289,7 +289,8 @@ for (const engine of ENGINES) {
         [evs({ $gt: ['$e.at', '$o..d'] }), '/$where/$gt/1'],
         [evs({ $gt: ['$e.at', '$xs[0:1]'] }), '/$where/$gt/1'],
       ])) {
-        // the engine compares {} and keeps no row; the ISO string keeps b1
+        // the engine compares the Date's instant with the stored text, which it never orders against, and
+        // keeps no row; the ISO string keeps b1
         assert.strictEqual(queryJson(document, DOCS, externals), undefined);
         assert.strictEqual(queryJson(document, DOCS, iso), 'b1');
         await seeded(engine, async (store) => {
@@ -297,17 +298,37 @@ for (const engine of ENGINES) {
             assert.strictEqual(await store.collection('ev').execute(document, { externals: iso, pushdown }), 'b1');
             await assert.rejects(async () => store.collection('ev').execute(document, { externals, pushdown }),
               (/** @type {any} */ error) => error.code === 'JD0041' && error.docPath === docPath
-                && / holds a Date instance, which a comparison reads as \{\}/.test(error.message), JSON.stringify(document));
+                && / holds a Date instance, which a comparison reads as its instant: it equals and orders against a Date alone, never JSON text such as a stored date-time — /.test(error.message), JSON.stringify(document));
           }
         });
       }
     });
 
+    it('a RegExp a comparison reads is refused JD0041, as the engine reads it by its source and flags alone', async () => {
+      // the engine: a pattern equals the same pattern alone, never the stored text it would match
+      assert.strictEqual(queryJson(evs({ $eq: ['$e.kind', '$re'] }), DOCS, { re: /x/ }), undefined);
+      assert.strictEqual(queryJson(evs({ $eq: ['$e.kind', '$re'] }), DOCS, { re: 'x' }), 'a1');
+      await seeded(engine, async (store) => {
+        for (const pushdown of [true, false]) {
+          await assert.rejects(async () => store.collection('ev').execute(evs({ $eq: ['$e.kind', '$re'] }), { externals: { re: /x/ }, pushdown }), {
+            code: 'JD0041',
+            message: "JD0041: collection('ev').execute external '$re' holds a RegExp instance, which a comparison reads as its source and flags: "
+              + 'it equals the same pattern alone and orders against nothing — pass the JSON value it stands for, a pattern as its source text '
+              + 'at /$where/$eq/1' });
+        }
+      });
+    });
+
     it('a Date a distinct, an index-of or a grouping key reads is refused JD0041', async () => {
       const dates = [new Date(0), new Date(1)];
-      // the engine reads both as {}: one distinct item, two positions, one group
-      assert.strictEqual(queryJson({ $count: { $distinct: '$xs[*]' } }, DOCS, { xs: dates }), 1);
-      assert.deepStrictEqual(queryJson({ '$index-of': ['$xs[*]', '$y'] }, DOCS, { xs: dates, y: dates[1] }), [0, 1]);
+      // the engine reads each by its instant: two distinct items, one position, two groups — and a Date
+      // beside its own text as two values, which the refusal stops
+      assert.strictEqual(queryJson({ $count: { $distinct: '$xs[*]' } }, DOCS, { xs: dates }), 2);
+      assert.strictEqual(queryJson({ '$index-of': ['$xs[*]', '$y'] }, DOCS, { xs: dates, y: new Date(1) }), 1);
+      assert.deepStrictEqual(queryJson({ $for: { d: '$xs[*]' }, $groupby: { g: '$d' }, $return: { $count: '$d' } }, DOCS,
+        { xs: [...dates, new Date(1)] }), [1, 2]);
+      assert.strictEqual(queryJson({ $count: { $distinct: '$xs[*]' } }, DOCS, { xs: [dates[1], dates[1].toISOString()] }), 2);
+      assert.strictEqual(queryJson({ '$index-of': ['$xs[*]', '$y'] }, DOCS, { xs: [dates[1].toISOString()], y: dates[1] }), undefined);
       await seeded(engine, async (store) => {
         const ev = store.collection('ev');
         for (const [document, externals] of /** @type {[any, any][]} */ ([
@@ -315,9 +336,15 @@ for (const engine of ENGINES) {
           [{ $for: { e: '$[*]' }, $let: { s: '$xs' }, $return: { $count: { $distinct: '$s[*]' } } }, { xs: dates }],
           [{ $for: { e: '$[*]' }, $return: { '$index-of': ['$xs[*]', '$y'] } }, { xs: ['a', 'b'], y: dates[1] }],
           [{ $for: { e: '$[*]' }, $groupby: { g: '$d' }, $return: { $count: '$e' } }, { d: dates[0] }],
+          [{ $for: { e: '$[*]' }, $return: { $count: { $distinct: '$xs[*]' } } }, { xs: [dates[1], dates[1].toISOString()] }],
         ])) {
           assert.strictEqual(await outcome(() => ev.execute(document, { externals })), 'JD0041', JSON.stringify(document));
         }
+        await assert.rejects(async () => ev.execute({ $for: { e: '$[*]' }, $return: { $count: { $distinct: '$xs[*]' } } }, { externals: { xs: dates } }), {
+          code: 'JD0041',
+          message: "JD0041: collection('ev').execute external '$xs' holds a Date instance, which a comparison reads as its instant: "
+            + 'it equals and orders against a Date alone, never JSON text such as a stored date-time — pass the JSON value it stands for, '
+            + 'a Date as its toISOString() at /$return/$count/$distinct' });
         // their strings answer
         assert.deepStrictEqual(await ev.execute({ $for: { e: '$[*]' }, $where: { $eq: ['$e.id', 'a1'] }, $return: { $count: { $distinct: '$xs[*]' } } },
           { externals: { xs: dates.map((date) => date.toISOString()) } }), 2);

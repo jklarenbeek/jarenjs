@@ -228,8 +228,10 @@ export const DB_CODES = Object.freeze({
  *    (a `Date` in a `$where`), which the compiler read as `{}` — the
  *    `docPath` names where; or an external a comparison reads (a direct
  *    operand of `$eq $ne $lt $le $gt $ge`, in the document or the store
- *    profile's predicate) holds one, which it compared as `{}` — the
- *    reason names the external, the `docPath` the comparison
+ *    profile's predicate) holds one, which it reads otherwise than the
+ *    JSON value it stands for (a `Date` by its instant, never equal to a
+ *    stored date-time's text; a `Map` as `{}`) — the reason names the
+ *    external and how it is read, the `docPath` the comparison
  *  - `JD0050` — a live query was registered on a store opened without
  *    `capture`; the patch stream is the invalidation source
  *  - `JD0051` — `mode: 'incremental'` was demanded but the document

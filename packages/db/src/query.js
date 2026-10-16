@@ -698,11 +698,14 @@ export function refuseOpaqueValues(document) {
 }
 
 /**
- * Whether the engine reads a value as `{}` though it is not one: an object
- * whose prototype is neither `Object.prototype` nor `null` and which has no
- * own enumerable member — a `Date`, a `Map`, a `Set`, a `RegExp`. An array,
- * a plain or null-prototype object and a class instance with fields are
- * read by their own members.
+ * Whether a value is no JSON value the engine reads by its own members: an
+ * object whose prototype is neither `Object.prototype` nor `null` and which
+ * has no own enumerable member — a `Date`, a `Map`, a `Set`, a `RegExp`. A
+ * query document's compiler reads each as `{}`; a comparison reads an
+ * external `Date` by its instant and a `RegExp` by its source and flags
+ * ({@link opaqueReading}), a `Map` or a `Set` as `{}`. An array, a plain or
+ * null-prototype object and a class instance with fields are read by their
+ * own members.
  * @param {any} value @returns {boolean}
  */
 function isOpaque(value) {
@@ -923,8 +926,8 @@ function referencedValues(value, segments, read) {
     const next = [];
     for (const item of segment.descendant ? descendantsOf(current) : current) {
       if (item === null || typeof item !== 'object') continue;
-      // a Set, a Map or a Date on the way is read as {}, so the path
-      // reaches nothing through it: it is the value the comparison reads
+      // a Set, a Map or a Date on the way has no member a path reads, so
+      // the path reaches nothing through it: it is the value the comparison reads
       if (isOpaque(item)) {
         next.push(item);
         continue;
@@ -1157,9 +1160,10 @@ function sliced(array, slice) {
  * Refuse an external a comparison would read otherwise than it stands for
  * (`JD0041`): one {@link comparedExternals} names whose value holds, at its
  * root or inside it, what {@link isOpaque} names, so `$gt ['$e.at', '$since']`
- * with `since` a `Date` compared with `{}` and matched no row — or a
+ * with `since` a `Date` compares an instant with the stored text, which no
+ * `Date` equals or orders against, and matches no row — or a
  * `bigint`, which the engine compares with no number, so `$gt ['$e.n', '$min']`
- * with `min` `2n` matched none either; so is one a filter on the way
+ * with `min` `2n` matches none either; so is one a filter on the way
  * compares or hands to a function. Run per call, after the compiled entry
  * is found: the externals are the call's own.
  * @param {readonly { name: string, segments: readonly any[], docPath: string, predicate: string | null }[]} compared
@@ -1188,11 +1192,30 @@ export function refuseOpaqueExternals(compared, externals, spelling) {
       throw new DbCompileError('JD0041',
         `${spelling} external '$${ref.name}' holds ${bigint ? 'a bigint' : instanceOf(found.value)}`
         + `${found.at === '' ? '' : ` at ${found.at}`}, which ${where} reads as `
-        + (bigint ? 'no number — pass the number it stands for, Number(value)'
-          : '{} — pass the JSON value it stands for, a Date as its toISOString()'),
+        + (bigint ? 'no number — pass the number it stands for, Number(value)' : opaqueReading(found.value)),
         ref.predicate === null ? ref.docPath : undefined);
     }
   }
+}
+
+/**
+ * How a comparison reads an {@link isOpaque} external, and the JSON value
+ * to pass instead: a `Date` by its instant, which equals and orders against
+ * a `Date` alone and never a stored date-time's text; a `RegExp` by its
+ * source and flags, which equals the same pattern alone and orders against
+ * nothing; any other as `{}`.
+ * @param {object} value @returns {string}
+ */
+function opaqueReading(value) {
+  if (value instanceof Date) {
+    return 'its instant: it equals and orders against a Date alone, never JSON text such as a stored '
+      + 'date-time — pass the JSON value it stands for, a Date as its toISOString()';
+  }
+  if (value instanceof RegExp) {
+    return 'its source and flags: it equals the same pattern alone and orders against nothing — pass the JSON '
+      + 'value it stands for, a pattern as its source text';
+  }
+  return '{} — pass the JSON value it stands for, a Date as its toISOString()';
 }
 
 /**

@@ -265,7 +265,7 @@ describe('a point read on a profiled store keeps the rows the mandatory predicat
       }, { code: 'JD0011', message: /the profile's predicate for 'docs' cannot bind '\$tenant'/ });
       await assert.rejects(async () => store.execute({ $for: { u: '$.User[*]' }, $return: '$u.id' }),
         { code: 'JD0011', message: /the profile's predicate for 'User' cannot bind '\$tenant'/ });
-      // an external a comparison reads as {} is refused as the query engines refuse it
+      // an external a comparison reads otherwise than it stands for is refused as the query engines refuse it
       await assert.rejects(async () => store.collection('docs').get('a1', { externals: { tenant: new Date(0) } }),
         { code: 'JD0041', message: /collection\('docs'\)\.get external '\$tenant' holds a Date instance/ });
       await assert.rejects(async () => store.collection('docs').execute({ $for: { it: '$[*]' }, $return: '$it.id' },

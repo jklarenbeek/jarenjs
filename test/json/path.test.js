@@ -318,6 +318,26 @@ describe('comparison semantics (RFC 9535 2.3.5.2.2)', () => {
     assert.isTrue(truth('-0 == 0'));
     assert.isTrue(truth('0.5 == 5e-1'));
   });
+
+  it('orders the datetimes and big integers JOSL reads by their instant and value, as they compare equal', () => {
+    const d0 = new Date(0);
+    const read = { a: d0, b: new Date(1), same: new Date(0), s: '1970-01-01T00:00:00.001Z', big: 2n ** 60n, bigger: 2n ** 60n + 1n, re: /a/, re2: /a/ };
+    const holds = (/** @type {string} */ expr) => compileJSONPath(`$.probe[?${expr}]`)({ ...read, probe: [0] }).length === 1;
+    assert.isTrue(holds('$.a < $.b'));
+    assert.isFalse(holds('$.a > $.b'));
+    assert.isTrue(holds('$.b >= $.a'));
+    assert.isTrue(holds('$.a <= $.same'));
+    assert.isFalse(holds('$.a < $.same'));
+    assert.isTrue(holds('$.big < $.bigger'));
+    assert.isFalse(holds('$.bigger <= $.big'));
+    // a datetime and its text, and a big integer and a number, are no ordered pair
+    assert.isFalse(holds('$.a < $.s'));
+    assert.isFalse(holds('$.s < $.a'));
+    assert.isFalse(holds('$.big > 1'));
+    // a regular expression equals its own source and flags and orders against nothing, as a boolean does
+    assert.isTrue(holds('$.re <= $.re2'));
+    assert.isFalse(holds('$.re < $.re2'));
+  });
 });
 
 describe('function extensions (RFC 9535 2.4)', () => {

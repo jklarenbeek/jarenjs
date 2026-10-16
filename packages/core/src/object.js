@@ -553,10 +553,14 @@ function rememberEqual(equal, a, b, height) {
  * ordering half of the comparison family whose equality half is
  * `equalsJson`.
  *
- * Only two numbers or two strings order at all: numbers by value,
- * strings by Unicode scalar values (`compareCodePoints`, not the native
- * `<`). Every other pair — mismatched types, objects, arrays, booleans,
- * null — is simply `false` in both directions, never an error.
+ * Two numbers or two strings order: numbers by value, strings by Unicode
+ * scalar values (`compareCodePoints`, not the native `<`). So do the two
+ * values JOSL and JSONX read whose equality is a value's: two `Date`s by
+ * their instant (an invalid one orders as `NaN`, against none) and two
+ * `bigint`s by their value. Every other pair — mismatched types, a `Date`
+ * beside its own text, objects (a `Date` with members of its own, which
+ * `equalsJson` reads by them, and a `RegExp` among them), arrays,
+ * booleans, null — is simply `false` in both directions, never an error.
  *
  * @param {any} a
  * @param {any} b
@@ -570,6 +574,10 @@ export function compareJsonScalarLt(a, b, orEqual = false) {
     return typeof b === 'string' && (orEqual
       ? compareCodePoints(a, b) <= 0
       : compareCodePoints(a, b) < 0);
+  if (typeof a === 'bigint')
+    return typeof b === 'bigint' && (orEqual ? a <= b : a < b);
+  if (a instanceof Date && b instanceof Date && Object.keys(a).length === 0 && Object.keys(b).length === 0)
+    return orEqual ? a.getTime() <= b.getTime() : a.getTime() < b.getTime();
   return false;
 }
 

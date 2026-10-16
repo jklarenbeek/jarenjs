@@ -78,7 +78,8 @@ async function rows(cursor) {
 }
 
 /** The refusal `JD0041` gives `$since` on a member. @param {string} member */
-const refused = (member) => `JD0041: ${member} external '$since' holds a Date instance, which a comparison reads as {} — `
+const refused = (member) => `JD0041: ${member} external '$since' holds a Date instance, which a comparison reads as its instant: `
+  + 'it equals and orders against a Date alone, never JSON text such as a stored date-time — '
   + 'pass the JSON value it stands for, a Date as its toISOString() at /$where/$gt/1';
 
 for (const host of [{ name: 'sqlite', postgres: false }, ...(url ? [{ name: 'postgres', postgres: true }] : [])]) {

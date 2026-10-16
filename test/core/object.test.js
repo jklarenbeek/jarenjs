@@ -4,6 +4,7 @@ import * as assert from '../assert.node.js';
 import {
   equalsDeep, equalsJson, mergeMap, mergeSet, stableStringify,
   isJsonObject, isJsonValue, setObjectMember, deepFreeze, nearestName,
+  compareJsonScalarLt,
 } from '@jarenjs/core/object';
 
 describe('equalsDeep', () => {
@@ -276,6 +277,42 @@ describe('equalsJson', () => {
     assert.isTrue(equalsJson(lateDeep(d1), lateDeep(same)));
   });
 
+});
+
+describe('compareJsonScalarLt', () => {
+  it('orders a Date by its instant and a bigint by its value, as they compare equal', () => {
+    const d0 = new Date(0);
+    const d1 = new Date(1);
+    assert.isTrue(compareJsonScalarLt(d0, d1));
+    assert.isFalse(compareJsonScalarLt(d1, d0));
+    assert.isFalse(compareJsonScalarLt(d0, new Date(0)));
+    assert.isTrue(compareJsonScalarLt(d0, new Date(0), true));
+    assert.isFalse(compareJsonScalarLt(d1, d0, true));
+    assert.isTrue(compareJsonScalarLt(1n, 2n));
+    assert.isFalse(compareJsonScalarLt(2n, 1n));
+    assert.isFalse(compareJsonScalarLt(2n, 2n));
+    assert.isTrue(compareJsonScalarLt(2n, 2n, true));
+    assert.isTrue(compareJsonScalarLt(2n ** 60n, 2n ** 60n + 1n));
+  });
+
+  it('leaves every other pair unordered, a Date or a bigint beside anything else among them', () => {
+    const d0 = new Date(0);
+    const invalid = new Date(Number.NaN);
+    const fielded = Object.assign(new Date(1), { at: 1 });
+    for (const [a, b] of /** @type {[any, any][]} */ ([
+      [invalid, d0], [d0, invalid], [invalid, invalid],
+      [d0, 1], [d0, '1970-01-01T00:00:00.000Z'], [d0, {}], [d0, 1n],
+      [1n, 2], [1, 2n], ['1', 2n],
+      // a Date with members of its own compares by them, as equalsJson reads it
+      [d0, fielded], [fielded, Object.assign(new Date(2), { at: 1 })],
+      [/a/, /b/], [/a/, /a/], [/a/, 'b'],
+      [true, true], [false, true], [null, null], [{}, {}], [[], []],
+    ])) {
+      assert.isFalse(compareJsonScalarLt(a, b), `${String(a)} < ${String(b)}`);
+      assert.isFalse(compareJsonScalarLt(a, b, true), `${String(a)} <= ${String(b)}`);
+      assert.isFalse(compareJsonScalarLt(b, a), `${String(b)} < ${String(a)}`);
+    }
+  });
 });
 
 describe('mergeMap', () => {

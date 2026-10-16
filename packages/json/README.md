@@ -312,7 +312,7 @@ The parser is strict about everything the RFC is strict about: leading zeros, `-
 
 - **`Nothing` is not `null`.** A missing member and a member whose value is `null` are different things: `$[?@.a == null]` only matches nodes where `a` exists *and* is `null`. Two missing values compare equal (`$[?@.absent1 == @.absent2]` is `true`). The sentinel is exported as `JSONPATH_NOTHING` for advanced integrations.
 - **`==` is deep structural equality**; numbers compare mathematically (`1 == 1.0`).
-- **`<` orders numbers and strings only**, and strings are ordered by Unicode scalar value (code points), not by UTF-16 code units.
+- **`<` orders numbers and strings only** among JSON values, and strings are ordered by Unicode scalar value (code points), not by UTF-16 code units. Of the values `@jarenjs/josl` reads into a document, two `Date`s order by instant and two `bigint`s by value, as `==` compares them; a `Date` beside its own text, or a `RegExp`, orders against nothing. *Upgrade: two `Date`s or two `bigint`s used to order against nothing.*
 - **`match()`/`search()` take I-Regexp** ([RFC 9485](https://www.rfc-editor.org/rfc/rfc9485.html)) patterns, validated against the complete I-Regexp grammar — lookarounds, backreferences, lazy quantifiers and multi-character escapes like `\d` make the function yield `false`, as the spec requires. Literal patterns are compiled to a `RegExp` once at query-compile time; dynamic patterns get a per-callsite cache. Unescaped `^`/`$` behave as anchors, matching the RFC's own ECMAScript translation and the official compliance test suite.
 
 ### Conformance and performance

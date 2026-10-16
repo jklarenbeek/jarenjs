@@ -245,9 +245,9 @@ function compileSeqOp(gets, args) {
   };
 }
 
-// item comparison rules (section 8.4): $eq/$ne deep structural JSON
-// equality (D2); ordering only between two numbers or two strings, any
-// other pair is simply false (no witness, no error)
+// item comparison rules (section 8.4): $eq/$ne deep structural JSON equality
+// (D2); ordering between two numbers, two strings, two Dates (by instant) or
+// two bigints, any other pair is simply false (no witness, no error)
 function itemEq(a, b) {
   return equalsJson(a, b);
 }

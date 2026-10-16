@@ -50,14 +50,22 @@ const evs = (where) => ({ $for: { e: '$[*]' }, $where: where, $return: '$e.id' }
 const rowsOf = (where) => ({ $for: { e: '$.Event[*]' }, $where: where, $return: '$e.id' });
 const AFTER = { $gt: ['$e.at', '$since'] };
 
-/** The refusal `JD0041` gives an external a comparison reads as `{}`.
- * @param {string} member @param {string} name @param {string} where @param {string} [at] @param {string} [docPath] */
-const opaque = (member, name, where, at = '', docPath = '') => `JD0041: ${member} external '$${name}' holds a Date instance`
-  + `${at === '' ? '' : ` at ${at}`}, which ${where} reads as {} — pass the JSON value it stands for, a Date as its toISOString()`
+/** How a comparison reads a Date (by its instant) and a Map or a Set (as `{}`), and what to pass instead. */
+const READS = /** @type {Record<string, string>} */ ({
+  Date: 'its instant: it equals and orders against a Date alone, never JSON text such as a stored date-time — '
+    + 'pass the JSON value it stands for, a Date as its toISOString()',
+  Map: '{} — pass the JSON value it stands for, a Date as its toISOString()',
+  Set: '{} — pass the JSON value it stands for, a Date as its toISOString()',
+});
+/** The refusal `JD0041` gives an external a comparison reads otherwise than it stands for.
+ * @param {string} member @param {string} name @param {string} where @param {string} [at] @param {string} [docPath]
+ * @param {string} [kind] */
+const opaque = (member, name, where, at = '', docPath = '', kind = 'Date') => `JD0041: ${member} external '$${name}' holds a ${kind} instance`
+  + `${at === '' ? '' : ` at ${at}`}, which ${where} reads as ${READS[kind]}`
   + `${docPath === '' ? '' : ` at ${docPath}`}`;
 /** The refusal of an external the document's comparison at `docPath` reads.
- * @param {string} member @param {string} name @param {string} docPath @param {string} [at] */
-const compared = (member, name, docPath, at = '') => opaque(member, name, 'a comparison', at, docPath);
+ * @param {string} member @param {string} name @param {string} docPath @param {string} [at] @param {string} [kind] */
+const compared = (member, name, docPath, at = '', kind = 'Date') => opaque(member, name, 'a comparison', at, docPath, kind);
 
 /** What a call refuses with, and how: thrown at the call or a rejected promise.
  * @param {() => any} call @returns {Promise<{ form: string, error: any }>} */
@@ -88,7 +96,7 @@ async function seeded(engine, body, options = {}) {
 }
 
 for (const engine of ENGINES) {
-  describe(`an external a comparison reads as {} is refused, ${engine}`, { skip: skipFor(engine) }, () => {
+  describe(`an external a comparison reads otherwise than it stands for is refused, ${engine}`, { skip: skipFor(engine) }, () => {
     it('on a collection\'s execute, query, explain and live, with and without pushdown', async () => {
       await seeded(engine, async (store) => {
         const ev = store.collection('ev');
@@ -144,12 +152,12 @@ for (const engine of ENGINES) {
         assert.strictEqual((await refusal(() => ev.execute(evs({ $eq: ['$e.meta', '$o'] }), { externals: { o: { d: [SINCE] } } }))).error.message,
           compared("collection('ev').execute", 'o', '/$where/$eq/1', '/d/0'));
         assert.strictEqual((await refusal(() => ev.execute(evs({ $ne: ['$m', '$e.at'] }), { externals: { m: new Map() } }))).error.message,
-          compared("collection('ev').execute", 'm', '/$where/$ne/0').replace('a Date instance', 'a Map instance'));
+          compared("collection('ev').execute", 'm', '/$where/$ne/0', '', 'Map'));
         // a Set where a list belongs, a Map where an object does: the path reached nothing through them
         assert.strictEqual((await refusal(() => ev.execute(member, { externals: { xs: new Set([ROWS[0][1]]) } }))).error.message,
-          compared("collection('ev').execute", 'xs', '/$where/$eq/1').replace('a Date instance', 'a Set instance'));
+          compared("collection('ev').execute", 'xs', '/$where/$eq/1', '', 'Set'));
         assert.strictEqual((await refusal(() => ev.execute(evs({ $gt: ['$e.at', '$o.d'] }), { externals: { o: new Map([['d', ISO]]) } }))).error.message,
-          compared("collection('ev').execute", 'o', '/$where/$gt/1').replace('a Date instance', 'a Map instance'));
+          compared("collection('ev').execute", 'o', '/$where/$gt/1', '', 'Map'));
         // inside $let and $return: the comparison is found wherever it stands
         const nested = { $for: { e: '$[*]' }, $return: { id: '$e.id', late: { $ge: ['$e.at', '$since'] } } };
         assert.strictEqual((await refusal(() => ev.execute(nested, { externals: { since: SINCE } }))).error.message,
@@ -191,10 +199,10 @@ for (const engine of ENGINES) {
         assert.strictEqual(await ev.execute(evs({ $exists: '$e.id' }), { externals: { tenant: 't2' } }), 'b');
         const tenant = new Map();
         const { error } = await refusal(() => ev.execute(evs({ $exists: '$e.id' }), { externals: { tenant } }));
-        assert.strictEqual(error.message, opaque("collection('ev').execute", 'tenant', "the store profile's predicate for 'ev'").replace('a Date instance', 'a Map instance'));
+        assert.strictEqual(error.message, opaque("collection('ev').execute", 'tenant', "the store profile's predicate for 'ev'", '', '', 'Map'));
         assert.strictEqual(error.docPath, undefined);
         assert.strictEqual((await refusal(() => store.entity('Event').execute(rowsOf({ $exists: '$e.id' }), { externals: { tenant } }))).error.message,
-          opaque('entity execute()', 'tenant', "the store profile's predicate for 'Event'").replace('a Date instance', 'a Map instance'));
+          opaque('entity execute()', 'tenant', "the store profile's predicate for 'Event'", '', '', 'Map'));
       }, { profile });
     });
 

@@ -2229,8 +2229,8 @@ member's) takes the number as it is. The statement is the one a safe
 integer binds, so it seeks as that one does. A stored integer another
 writer spelled with other digits than the shortest is compared by those
 digits (a document's own such external runs in the engine instead). One the
-predicate would compare as `{}` (a `Date`, a `Map`), or a `bigint`, is
-refused `JD0041` (§10.1). `explain()` given externals
+predicate would read otherwise than the JSON value it stands for (a `Date`
+by its instant, a `Map` as `{}`), or a `bigint`, is refused `JD0041` (§10.1). `explain()` given externals
 refuses what the run it explains refuses; given none, it answers the plan
 with every external unbound. `all()` binds them from its own `externals`,
 `all({ externals })`, and without one a predicate names it is refused
@@ -2397,7 +2397,8 @@ prove was applied is not a budget.
    compares otherwise than the engine, or a string the database would not
    receive as written — is refused `JD0011` before the row is
    read, so the refusal does not tell a key another tenant holds from one that
-   holds nothing, and one a comparison would read as `{}`, or a `bigint`, is
+   holds nothing, and one a comparison would read otherwise than the JSON
+   value it stands for (a `Date`, a `Map`), or a `bigint`, is
    refused `JD0041`, as on `execute`. A value its member cannot hold keeps no
    row, as the query keeps none; an integer past 2^53 is judged by the engine,
    as every point read is. The predicate runs in the engine over the one document, which
@@ -3205,12 +3206,25 @@ a value, at its root or inside it, is `JD0041` naming the member, the
 external and the comparison's `docPath`, on every member above and on
 every view
 (`collection('ev').execute external '$since' holds a Date instance,
-which a comparison reads as {} — pass the JSON value it stands for, a
-Date as its toISOString() at /$where/$gt/1`). It used to be compared as
-`{}`, so `execute(document, { externals: { since: new Date(…) } })` with
-`$gt ['$e.at', '$since']` matched no row, with or without pushdown, on
-SQLite and PostgreSQL; pass `since.toISOString()`, the value a
-`date-time` member holds. Every other use answers as before: an
+which a comparison reads as its instant: it equals and orders against a
+Date alone, never JSON text such as a stored date-time — pass the JSON
+value it stands for, a Date as its toISOString() at /$where/$gt/1`). The
+engine reads a `Date` by its instant and a `RegExp` by its source and
+flags ([QUERY-FORMAT §2.1, §8.4](../../json/docs/QUERY-FORMAT.md)), and a
+`Map` or a `Set` as `{}`, so
+`execute(document, { externals: { since: new Date(…) } })` with
+`$gt ['$e.at', '$since']` keeps no row, with or without pushdown, on
+SQLite and PostgreSQL: the stored member is text, which no `Date` equals
+or orders against. Pass `since.toISOString()`, the value a `date-time`
+member holds. A `Date` that meets only `Date`s (a `$distinct` over
+`Date`s, two `Date` externals compared) answers right in the engine and
+is refused all the same, as the check does not read what the other
+operand holds; their ISO strings answer alike. A `RegExp` is refused the
+same way (`… holds a RegExp instance, which a comparison reads as its
+source and flags: it equals the same pattern alone and orders against
+nothing — …`). *Upgrade: the reason used to say a comparison reads a
+`Date` or a `RegExp` as `{}`; the code and every refused call are as
+before.* Every other use answers as before: an
 external the query returns, or hands to a registered function, is
 passed through by reference (the function receives the `Date` itself);
 one the document never compares is not read; a plain or null-prototype
@@ -3222,7 +3236,8 @@ reads the input document (`$xs[?@.k == $[0].k]`), through `$if`,
 `$coalesce` or `$default`, through `$subsequence` or `$get` with a computed
 bound or key, through `$entries`, a nested phrase's return or a path into
 a constructor, or one an operator computes a value from (a function's
-result), is not followed and is still compared as `{}`. A `bigint` such a position reads is `JD0041` the same way
+result), is not followed and is compared as the engine reads it (a `Date`
+by its instant, so equal to no stored text; a `Map` as `{}`). A `bigint` such a position reads is `JD0041` the same way
 (`… external '$min' holds a bigint, which a comparison reads as no number —
 pass the number it stands for, Number(value) at /$where/$gt/1`): the engine
 compares it with no number, so `$gt ['$e.n', '$min']` with `min: 2n` matched
