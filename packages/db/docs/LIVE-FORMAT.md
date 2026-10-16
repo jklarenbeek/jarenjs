@@ -628,7 +628,13 @@ document and apply patches to it; ops are `add`, `remove` and
   mutated). Applying the emitted patch with `applyJSONPatch`'s
   copy-on-write preserves the same sharing on the consumer's side —
   which is what keeps the O(k) renderer's fast paths alive end to
-  end.
+  end. A row that is a number, a string, a boolean or `null` is its
+  value, compared as `Object.is` compares: a computed `-0` replacing a
+  `0` is a change, and a `NaN` that stays a `NaN` is not. *Upgrade: a row
+  computed to `0` that turned into `-0`, or back (`{ "$mul": ["$it.age",
+  "$it.pay"] }` over an age of `0` while the pay changes sign), emitted
+  nothing, so the view held `[0]` where a fresh run answers `[-0]`; and
+  a write that left a `NaN` row as it was emitted a patch.*
 - **Order.** An ordered (window) query's row order — offset windows
   included — is the engine's over the declared terms, with ties broken
   by the row's position in the table, which is how `execute` breaks

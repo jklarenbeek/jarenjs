@@ -17,7 +17,7 @@ import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
 
 import { applyJSONPatch } from '@jarenjs/json/patch';
-import { openStore } from '@jarenjs/db';
+import { openStore, diffRows } from '@jarenjs/db';
 import { nodeDriver } from '@jarenjs/db/node';
 import { mulberry32 } from '@jarenjs/core/random';
 
@@ -796,6 +796,57 @@ describe("a stored document's member order is not part of its value", () => {
       assert.deepEqual(nested.result.rows, await users.execute(part));
       whole.close();
       nested.close();
+    }
+    finally { await store.close(); }
+  });
+});
+
+describe('primitive rows are compared by value, -0 and NaN included', () => {
+  it('diffRows tells -0 from 0 and keeps an unchanged NaN', () => {
+    assert.deepStrictEqual(diffRows([0], [-0]), [{ op: 'replace', path: '/rows/0', value: -0 }]);
+    assert.deepStrictEqual(diffRows([1, -0, 2], [1, 0, 2]), [{ op: 'replace', path: '/rows/1', value: 0 }]);
+    assert.deepStrictEqual(diffRows([NaN, 1], [NaN, 1]), []);
+  });
+
+  // a computed zero takes the sign of its operands: age 0 times pay -1 is -0
+  const product = { $mul: ['$it.age', '$it.pay'] };
+  for (const [name, document, strategy] of [
+    ['a row projection', [{ $for: { it: '$[*]' }, $return: product }], 'rows'],
+    ['an aggregate that re-runs', [{ $max: { $for: { it: '$[*]' }, $return: product } }], 'rerun'],
+    ['a group returning its key', [{ $for: { it: '$[*]' }, $groupby: { k: product }, $return: '$k' }], 'group'],
+  ]) it(`${name} follows a zero's sign as a fresh run answers it`, async () => {
+    const store = await open();
+    try {
+      const users = store.collection('users');
+      await users.insert({ id: 'a', age: 0, pay: 1 });
+      const live = await users.live(document);
+      assert.strictEqual(live.mode.strategy, strategy);
+      let mirror = live.result;
+      const events = [];
+      live.subscribe((event) => { events.push(event); mirror = applyJSONPatch(mirror, event.patch); });
+      for (const [pay, rows] of [[-1, [-0]], [1, [0]], [-1, [-0]]]) {
+        await users.put({ id: 'a', age: 0, pay }, 'a');
+        assert.deepStrictEqual(users.execute(document, { pushdown: false }), rows);
+        assert.deepStrictEqual(live.result.rows, rows);
+        assert.deepStrictEqual(mirror.rows, rows);
+      }
+      assert.strictEqual(events.length, 3);
+    }
+    finally { await store.close(); }
+  });
+
+  it('a write that leaves a NaN row as it was emits nothing', async () => {
+    const store = await open();
+    try {
+      const users = store.collection('users');
+      await users.insert({ id: 'a', name: 'ada', age: 0, pay: 0 });
+      const live = await users.live([{ $for: { it: '$[*]' }, $return: { $div: ['$it.pay', '$it.age'] } }]);
+      assert.strictEqual(live.mode.strategy, 'rows');
+      const events = [];
+      live.subscribe((event) => events.push(event));
+      await users.put({ id: 'a', name: 'ADA', age: 0, pay: 0 }, 'a');
+      assert.deepStrictEqual(live.result.rows, [NaN]);
+      assert.strictEqual(events.length, 0);
     }
     finally { await store.close(); }
   });

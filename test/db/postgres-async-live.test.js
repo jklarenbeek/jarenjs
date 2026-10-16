@@ -312,4 +312,22 @@ describe('PostgreSQL asynchronous live and lexical freshness', { skip: !url && '
       assert.deepEqual(entity.result.rows, await store.execute(items));
     });
   });
+
+  it('a resnapshot follows a computed zero\'s sign as a fresh run answers it', async () => {
+    await fixture(async ({ open }) => {
+      const store = await open();
+      const notes = store.collection('notes');
+      const product = [{ $for: { it: '$[*]' }, $return: { $mul: ['$it.age', '$it.pay'] } }];
+      await notes.put({ id: 'a', age: 0, pay: 1 });
+      const live = await notes.live(product);
+      let events = 0; live.subscribe(() => { events++; });
+      for (const [pay, rows] of [[-1, [-0]], [1, [0]], [-1, [-0]]]) {
+        await notes.put({ id: 'a', age: 0, pay });
+        await live.refresh();
+        assert.deepStrictEqual(await notes.execute(product, { pushdown: false }), rows);
+        assert.deepStrictEqual(live.result.rows, rows);
+      }
+      assert.strictEqual(events, 3);
+    });
+  });
 });

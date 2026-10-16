@@ -509,7 +509,9 @@ export function classifyLiveQuery(document, queryShape, keyed, eventTime = null)
 /**
  * Diff two row arrays into sequential add/remove/replace ops under
  * `/rows`, relying on REFERENCE identity for unchanged rows (the §9
- * sharing contract makes identity the equality that matters). A
+ * sharing contract makes identity the equality that matters) and, for a
+ * primitive row, on `Object.is`: a `-0` replacing a `0` is a change, as
+ * the result's value has one, and a `NaN` kept is not. A
  * working copy is replayed op by op, so the emitted patch transforms
  * the old array into the new one BY CONSTRUCTION; a remove re-filled
  * at the same index merges into a replace.
@@ -520,15 +522,18 @@ export function classifyLiveQuery(document, queryShape, keyed, eventTime = null)
 export function diffRows(oldRows, newRows) {
   const ops = [];
   const work = oldRows.slice();
+  // a Set holds -0 and 0 as one value: the zeros are asked by sign
   const wanted = new Set(newRows);
+  const zeros = [newRows.some((row) => Object.is(row, 0)), newRows.some((row) => Object.is(row, -0))];
+  const isWanted = (row) => (row === 0 ? zeros[Object.is(row, -0) ? 1 : 0] : wanted.has(row));
   for (let i = work.length - 1; i >= 0; i--) {
-    if (!wanted.has(work[i])) {
+    if (!isWanted(work[i])) {
       ops.push({ op: 'remove', path: `/rows/${i}` });
       work.splice(i, 1);
     }
   }
   for (let i = 0; i < newRows.length; i++) {
-    if (work[i] === newRows[i]) continue;
+    if (Object.is(work[i], newRows[i])) continue;
     const found = work.indexOf(newRows[i], i + 1);
     if (found !== -1) {
       ops.push({ op: 'remove', path: `/rows/${found}` });
@@ -682,7 +687,7 @@ function rowsStrategy(description, context) {
         }
         const next = fresh.map((item, index) => sharedRow(previous[index], item));
         if (next.length !== previous.length
-          || next.some((item, index) => item !== previous[index])) {
+          || next.some((item, index) => !Object.is(item, previous[index]))) {
           itemsByKey.set(token, next);
           changed = true;
         }
