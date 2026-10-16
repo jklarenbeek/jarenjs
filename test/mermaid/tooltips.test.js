@@ -160,6 +160,9 @@ describe('tooltips — what a node says', () => {
       [FLOW, 'B', 'Pick (B)\nfrom: Start\nto: Done (yes), Start (no)'],
       ['flowchart LR\n  A --> B["one<br/>two"]', 'B', 'one two (B)\nfrom: A'],
       ['flowchart LR\n  A --> B["one<br/>two"]', 'A', 'A\nto: one two'],
+      // a markdown line's styled runs are read once, inside their line
+      ['flowchart LR\n  A -->|"`x *go*`"| B["`x **bold**<br/>two`"]', 'B', 'x bold two (B)\nfrom: A (x go)'],
+      ['flowchart LR\n  A -->|"`x *go*`"| B["`x **bold**`"]', 'A', 'A\nto: x bold (x go)'],
     ]) {
       for (const htmlLabels of [false, true]) {
         const f = figure(source, { htmlLabels });

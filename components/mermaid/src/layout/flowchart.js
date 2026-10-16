@@ -9,6 +9,7 @@
 
 import { measureText, textWidth } from '@jarenjs/view/helpers';
 import { coord as round } from '../utils.js';
+import { readLabel, lineText, appendRun } from '../label-text.js';
 
 import { resolveNodeStyles } from '../styles.js';
 
@@ -45,18 +46,21 @@ export function layoutFlowchart(ast, options = {}) {
   const nodeStyles = resolveNodeStyles(ast);
   const dir = ast.direction || 'TB';
   const horizontal = dir === 'LR' || dir === 'RL';
-  // The label text as it is drawn: SVG text breaks only where the author
-  // did; an HTML label also wraps at the wrapping width, measured with the
-  // same advance table, so a box fits its label with no DOM to ask.
+  // The label's lines as they are drawn (label-text.js, the renderers'
+  // reading too): SVG text breaks only where the author did; an HTML label
+  // also wraps at the wrapping width, measured with the same advance table,
+  // so a box fits its label with no DOM to ask.
   const html = options.htmlLabels === true;
   const wrapAt = options.wrappingWidth ?? WRAPPING_WIDTH;
-  const textOf = html ? (/** @type {string} */ label) => wrapLabel(label, wrapAt) : (/** @type {string} */ label) => label;
+  const linesOf = html
+    ? (/** @type {string} */ label) => readLabel(label).flatMap((line) => wrapLine(line, wrapAt))
+    : readLabel;
 
   // 1. Node boxes from label metrics.
   /** @type {Map<string, any>} */
   const boxes = new Map();
   for (const node of ast.nodes) {
-    boxes.set(node.id, sizeNode(node, textOf(node.label)));
+    boxes.set(node.id, sizeNode(node, linesOf(node.label)));
   }
 
   // 2. Rank assignment (longest path over predecessors).
@@ -182,10 +186,11 @@ export function layoutFlowchart(ast, options = {}) {
     if (e.label != null) {
       // Measured, not estimated from the character count: the renderer used to
       // guess the background width and a wide label overflowed its own box.
-      const m = measureText(textOf(e.label), FONT_SIZE);
+      const lines = linesOf(e.label);
+      const m = measureLines(lines);
       edge.labelW = m.width + LABEL_PAD;
       edge.labelH = m.height + LABEL_PAD / 2;
-      if (html) edge.lines = m.lines;
+      if (html) edge.lines = lines;
       edge.labelPos = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
     }
     return edge;
@@ -213,6 +218,31 @@ export function layoutFlowchart(ast, options = {}) {
     };
   });
 
+  // A frame reaches SUBGRAPH_PAD past its members and its title band above
+  // them, so a subgraph holding a node of the first rank (or of the first
+  // column) starts above (left of) the canvas: move everything until every
+  // drawn frame keeps the canvas margin, as the right and bottom edges do.
+  let frameX = Infinity;
+  let frameY = Infinity;
+  for (const s of subgraphs) {
+    if (s.w === 0) continue;
+    frameX = Math.min(frameX, s.x);
+    frameY = Math.min(frameY, s.y);
+  }
+  const shiftX = frameX < MARGIN ? MARGIN - frameX : 0;
+  const shiftY = frameY < MARGIN ? MARGIN - frameY : 0;
+  if (shiftX !== 0 || shiftY !== 0) {
+    const move = (/** @type {{x:number,y:number}} */ p) => { p.x += shiftX; p.y += shiftY; };
+    for (const n of nodes) move(n);
+    for (const e of edges) {
+      for (const p of e.points) move(p);
+      if (e.labelPos !== null) move(e.labelPos);
+    }
+    for (const s of subgraphs) if (s.w !== 0) move(s);
+    width += shiftX;
+    height += shiftY;
+  }
+
   // Expand canvas for subgraph frames that spill past the content box.
   for (const s of subgraphs) {
     width = Math.max(width, s.x + s.w + MARGIN);
@@ -235,20 +265,42 @@ export function layoutFlowchart(ast, options = {}) {
 }
 
 /**
- * A label's text with every line longer than `width` wrapped at its spaces,
- * greedily, as a browser wraps an HTML label at its maximum width. A word
- * wider than `width` keeps its line, as a browser lets it overflow.
- * @param {string} label
- * @param {number} width
- * @returns {string}
+ * The advance width of one drawn line: a markdown line's bold runs measure
+ * bold.
+ * @param {import('../label-text.js').LabelLine} line
+ * @returns {number}
  */
-function wrapLabel(label, width) {
-  const out = [];
-  for (const line of label.split('\n')) {
-    if (textWidth(line, FONT_SIZE) <= width) {
-      out.push(line);
-      continue;
-    }
+function lineWidth(line) {
+  if (typeof line === 'string') return textWidth(line, FONT_SIZE);
+  let w = 0;
+  for (const run of line) w += textWidth(run.text, FONT_SIZE, run.type === 'strong' ? 700 : 400);
+  return w;
+}
+
+/**
+ * The size of a label's drawn lines: the widest line, and a line height each.
+ * @param {import('../label-text.js').LabelLine[]} lines
+ * @returns {{ width: number, height: number }}
+ */
+function measureLines(lines) {
+  const m = measureText(lines.map(lineText).join('\n'), FONT_SIZE);
+  if (lines.every((line) => typeof line === 'string')) return m;
+  return { width: Math.max(...lines.map(lineWidth)), height: m.height };
+}
+
+/**
+ * One line wrapped at its spaces wherever it is wider than `width`,
+ * greedily, as a browser wraps an HTML label at its maximum width. A word
+ * wider than `width` keeps its line, as a browser lets it overflow; a
+ * markdown line keeps each word's style.
+ * @param {import('../label-text.js').LabelLine} line
+ * @param {number} width
+ * @returns {import('../label-text.js').LabelLine[]}
+ */
+function wrapLine(line, width) {
+  if (lineWidth(line) <= width) return [line];
+  if (typeof line === 'string') {
+    const out = [];
     let current = '';
     for (const word of line.split(' ')) {
       const candidate = current === '' ? word : current + ' ' + word;
@@ -259,16 +311,49 @@ function wrapLabel(label, width) {
       else current = candidate;
     }
     out.push(current);
+    return out;
   }
-  return out.join('\n');
+  // a markdown line: the same greedy walk over its words, each measured in
+  // its own weight, and a break drops the spaces it falls on
+  /** @type {import('../label-text.js').LabelRun[][]} */
+  const out = [];
+  /** @type {import('../label-text.js').LabelRun[]} */
+  let current = [];
+  let currentW = 0;
+  /** @type {import('../label-text.js').LabelRun[]} */
+  let gap = [];
+  for (const run of line) {
+    const words = run.text.split(' ');
+    for (let i = 0; i < words.length; i++) {
+      if (i > 0) gap.push({ text: ' ', type: run.type });
+      if (words[i] === '') continue;
+      const word = { text: words[i], type: run.type };
+      const gapW = current.length === 0 ? 0 : lineWidth(gap);
+      const wordW = lineWidth([word]);
+      if (current.length !== 0 && currentW + gapW + wordW > width) {
+        out.push(current);
+        current = [];
+        currentW = 0;
+      }
+      else if (current.length !== 0) {
+        for (const g of gap) appendRun(current, g);
+        currentW += gapW;
+      }
+      appendRun(current, word);
+      currentW += wordW;
+      gap = [];
+    }
+  }
+  if (current.length !== 0) out.push(current);
+  return out;
 }
 
 /**
  * @param {any} node
- * @param {string} text the label as it is drawn
+ * @param {import('../label-text.js').LabelLine[]} lines the label as it is drawn
  * @returns {any}
  */
-function sizeNode(node, text) {
+function sizeNode(node, lines) {
   const shape = node.shape;
   // The state-diagram pseudo-states are fixed-size markers, never
   // label-sized boxes. An empty-labeled doublecircle cannot come from
@@ -280,7 +365,7 @@ function sizeNode(node, text) {
   if (shape === 'doublecircle' && node.label === '') {
     return { x: 0, y: 0, w: 22, h: 22, lines: [] };
   }
-  const m = measureText(text, FONT_SIZE);
+  const m = measureLines(lines);
   let w = m.width + 2 * PAD_X;
   let h = m.height + 2 * PAD_Y;
   if (shape === 'circle' || shape === 'doublecircle') {
@@ -301,7 +386,7 @@ function sizeNode(node, text) {
     x: 0, y: 0,
     w: Math.max(w, MIN_W),
     h: Math.max(h, MIN_H),
-    lines: m.lines,
+    lines,
   };
 }
 

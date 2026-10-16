@@ -124,6 +124,9 @@ function describeTargets(svg) {
   return targets;
 }
 
+/** A label's line element: an SVG `tspan` or an HTML label's `div`. */
+const RE_LINE_TAG = /^(?:tspan|div)$/i;
+
 /** A synthetic id such as `__start` reads as a word, not as plumbing. */
 function displayId(id) {
   return id.startsWith('__') ? id.slice(2) : id;
@@ -131,13 +134,15 @@ function displayId(id) {
 
 /**
  * The visible text of the first element matching `selector` under `parent`,
- * one space between its lines: an SVG label's `tspan`s, or an HTML label's
- * line blocks (`htmlLabels`).
+ * one space between its lines: an SVG label's line `tspan`s, or an HTML
+ * label's line blocks (`htmlLabels`). Only the label's own children are
+ * lines; a markdown line's styled runs sit inside its line.
  */
 function labelOf(parent, selector) {
   const label = parent.querySelector(selector);
   if (label === null || label === undefined) return '';
-  const lines = [...label.querySelectorAll('tspan'), ...label.querySelectorAll('div')]
+  const lines = [...(label.children ?? [])]
+    .filter((line) => RE_LINE_TAG.test(String(line.tagName)))
     .map((line) => String(line.textContent ?? '').trim())
     .filter((line) => line !== '');
   return lines.length > 0 ? lines.join(' ') : String(label.textContent ?? '').trim();

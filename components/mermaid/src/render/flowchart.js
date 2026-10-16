@@ -6,7 +6,10 @@
  * every shape carries a `mm-*` class for CSS re-theming and concrete
  * theme colors for standalone SSR. A scene laid out for HTML labels
  * (`scene.htmlLabels`) draws each label as HTML inside a `foreignObject`
- * instead of SVG `<text>`, one block per line the layout measured.
+ * instead of SVG `<text>`, one block per line the layout measured. Every
+ * label is read once, by `label-text.js` (line breaks, markdown strings,
+ * entity codes), exactly as the layout measured it; a plain single-line
+ * label draws as it always has.
  */
 
 import {
@@ -14,6 +17,7 @@ import {
 } from '@jarenjs/view/helpers';
 
 import { shapeAttributes, shapeStyle, textColor } from '../styles.js';
+import { readLabel, appendRun } from '../label-text.js';
 import { nodeMark, edgeMark, withTooltip } from './marks.js';
 
 /**
@@ -30,21 +34,24 @@ export function renderFlowchart(scene, theme, hash, rootClass = 'mermaid mm-svg'
 
   const html = scene.htmlLabels === true;
 
-  // Subgraph frames first (behind nodes).
+  // Subgraph frames first (behind nodes). The title band holds one line: a
+  // title's line breaks draw as the spaces SVG text and an unwrapped HTML
+  // label make of them.
   for (const sg of scene.subgraphs) {
     if (sg.w === 0) continue;
+    const title = sg.label ? titleLine(readLabel(sg.label)) : null;
     children.push(group({ class: 'mm-cluster', key: 'sg-' + sg.id }, [
       rect(sg.x, sg.y, sg.w, sg.h, {
         rx: 6, class: 'mm-cluster-rect',
         fill: t.clusterFill, stroke: t.clusterStroke, 'stroke-width': 1,
       }),
-      !sg.label ? null
+      title === null ? null
         : html
-          ? htmlLabel(sg.x, sg.y, sg.w, CLUSTER_LABEL_BAND, [sg.label], scene.fontSize,
+          ? htmlLabel(sg.x, sg.y, sg.w, CLUSTER_LABEL_BAND, [title], scene.fontSize,
             'mm-cluster-label', NODE_TEXT)
-          : textAt(sg.x + sg.w / 2, sg.y + 15, sg.label, scene.fontSize, {
+          : withRuns(textAt(sg.x + sg.w / 2, sg.y + 15, typeof title === 'string' ? title : '', scene.fontSize, {
             'text-anchor': 'middle', class: 'mm-cluster-label', fill: t.nodeText,
-          }),
+          }), title),
     ]));
   }
 
@@ -78,12 +85,79 @@ const EDGE_LABEL_TEXT = 'var(--mm-edge-label-text)';
 const CLUSTER_LABEL_BAND = 20;
 
 /**
+ * A subgraph title's lines as the one line its band holds: plain lines
+ * joined by the newline they were written with, markdown runs by a space.
+ * @param {import('../label-text.js').LabelLine[]} lines
+ * @returns {import('../label-text.js').LabelLine}
+ */
+function titleLine(lines) {
+  if (lines.every((line) => typeof line === 'string')) return lines.join('\n');
+  /** @type {import('../label-text.js').LabelRun[]} */
+  const runs = [];
+  lines.forEach((line, i) => {
+    if (i > 0) appendRun(runs, { text: ' ', type: 'normal' });
+    for (const run of /** @type {import('../label-text.js').LabelRun[]} */ (line)) appendRun(runs, run);
+  });
+  return runs;
+}
+
+/** The SVG presentation of a markdown run's style. */
+const RUN_STYLE = {
+  normal: {},
+  strong: { 'font-weight': 'bold' },
+  em: { 'font-style': 'italic' },
+};
+
+/**
+ * A markdown line's runs as SVG: one `tspan` per run, styled bold or italic.
+ * @param {import('../label-text.js').LabelRun[]} runs
+ * @returns {any[]}
+ */
+function svgRuns(runs) {
+  return runs.map((run) => ['tspan', RUN_STYLE[run.type], run.text]);
+}
+
+/**
+ * Put a markdown line's runs into a text element built for plain text: in
+ * one line `tspan` of their own when `line` is the element's only line, or
+ * into its `index`-th line `tspan`. A plain line leaves the element as it was
+ * built. Either way a label's `text` holds only line `tspan`s, which is how
+ * the tooltips read its lines.
+ * @param {any} el a `text` vnode
+ * @param {import('../label-text.js').LabelLine} line
+ * @param {number} [index] the line `tspan`'s position, when the element has them
+ * @returns {any}
+ */
+function withRuns(el, line, index) {
+  if (typeof line === 'string') return el;
+  if (index === undefined) return [el[0], el[1], ['tspan', {}, ...svgRuns(line)]];
+  const tspan = el[2 + index];
+  el[2 + index] = [tspan[0], tspan[1], ...svgRuns(line)];
+  return el;
+}
+
+/**
+ * SVG text for a label's lines: one `tspan` line each, centered on (`cx`,
+ * `cy`) as `textLines` centers them, a markdown line's runs inside its line.
+ * @param {number} cx @param {number} cy
+ * @param {import('../label-text.js').LabelLine[]} lines
+ * @param {number} fontSize
+ * @param {Record<string, any>} props
+ * @returns {any}
+ */
+function svgLabel(cx, cy, lines, fontSize, props) {
+  const el = textLines(cx, cy, lines.map((line) => (typeof line === 'string' ? line : '')), fontSize, props);
+  lines.forEach((line, i) => withRuns(el, line, i));
+  return el;
+}
+
+/**
  * An HTML label: a `foreignObject` over the box the layout sized, holding
  * one block per measured line, centered, never wrapped again by the browser
  * (the layout already wrapped it) and free to overflow rather than clip
  * when the host's font runs wider than the advance table.
  * @param {number} x @param {number} y @param {number} w @param {number} h
- * @param {string[]} lines @param {number} fontSize
+ * @param {import('../label-text.js').LabelLine[]} lines @param {number} fontSize
  * @param {string} className the label's marker class (`mm-label`, …)
  * @param {string} color a CSS color
  * @returns {any}
@@ -98,7 +172,21 @@ function htmlLabel(x, y, w, h, lines, fontSize, className, color) {
         'font-size': fontSize + 'px', 'line-height': '1.2', 'white-space': 'nowrap',
         'text-align': 'center', color,
       },
-    }, ...lines.map((line) => ['div', {}, line])]];
+    }, ...lines.map((line) => ['div', {}, ...htmlRuns(line)])]];
+}
+
+/** The HTML element a markdown run's style is drawn with. */
+const RUN_TAG = { strong: 'strong', em: 'em' };
+
+/**
+ * A line's content as HTML: its text, or a markdown line's runs, the styled
+ * ones in `strong`/`em` as Mermaid draws them.
+ * @param {import('../label-text.js').LabelLine} line
+ * @returns {any[]}
+ */
+function htmlRuns(line) {
+  if (typeof line === 'string') return [line];
+  return line.map((run) => (run.type === 'normal' ? run.text : [RUN_TAG[run.type], {}, run.text]));
 }
 
 /**
@@ -119,7 +207,7 @@ function renderNode(node, t, fontSize, tooltip, html) {
   }
   const cx = node.x + node.w / 2;
   const cy = node.y + node.h / 2;
-  const label = textLines(cx, cy, node.label.split('\n'), fontSize,
+  const label = svgLabel(cx, cy, readLabel(node.label), fontSize,
     color === null
       ? { class: 'mm-label', fill: t.nodeText }
       : { class: 'mm-label', fill: color, style: `fill:${color}` });
@@ -251,13 +339,22 @@ function renderEdge(e, t, fontSize, i, html) {
     parts.push(rect(e.labelPos.x - lw / 2, e.labelPos.y - lh / 2, lw, lh, {
       class: 'mm-edge-label-bg', fill: t.edgeLabelBg, stroke: 'none',
     }));
-    parts.push(html
-      ? htmlLabel(e.labelPos.x - lw / 2, e.labelPos.y - lh / 2, lw, lh, e.lines, fontSize,
-        'mm-edge-label', EDGE_LABEL_TEXT)
-      : textAt(e.labelPos.x, e.labelPos.y, e.label, fontSize, {
-        'text-anchor': 'middle', 'dominant-baseline': 'central',
-        class: 'mm-edge-label', fill: t.edgeLabelText,
-      }));
+    if (html) {
+      parts.push(htmlLabel(e.labelPos.x - lw / 2, e.labelPos.y - lh / 2, lw, lh, e.lines, fontSize,
+        'mm-edge-label', EDGE_LABEL_TEXT));
+    }
+    else {
+      // the lines the layout measured the background for, centered on it
+      const lines = readLabel(e.label);
+      parts.push(lines.length === 1 && typeof lines[0] === 'string'
+        ? textAt(e.labelPos.x, e.labelPos.y, lines[0], fontSize, {
+          'text-anchor': 'middle', 'dominant-baseline': 'central',
+          class: 'mm-edge-label', fill: t.edgeLabelText,
+        })
+        : svgLabel(e.labelPos.x, e.labelPos.y, lines, fontSize, {
+          class: 'mm-edge-label', fill: t.edgeLabelText,
+        }));
+    }
   }
 
   // Edge identity for editors: endpoints plus `data-edge`, the edge's

@@ -377,7 +377,9 @@ function readEdge(s, pos) {
   let m = RE_EDGE_LABELED.exec(s);
   let label = null;
   if (m !== null && m.index === pos) {
-    label = m[3].trim();
+    // the inline form's text reads as the pipe form's: quotes stripped and
+    // `<br>` a line break, as Mermaid reads both
+    label = stripQuotes(m[3].trim());
     const info = classifyLink(m[1], m[4], m[5]);
     return { ...info, label, pos: RE_EDGE_LABELED.lastIndex };
   }

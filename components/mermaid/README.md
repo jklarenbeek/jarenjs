@@ -551,7 +551,18 @@ message's group and a gantt connector the class `mm-edge` and `data-edge`,
 `data-from` and `data-to`, a message's label the class `mm-edge-label`, a
 class's or an entity's box elements are grouped under one `mm-node` group, and
 each relations row under an `mm-edge` group; a sequence scene's messages gained
-`from` and `to`.
+`from` and `to`. Flowchart and state labels are read as Mermaid reads them:
+an edge label with a `<br>` draws the lines it was measured for (its text was
+drawn on one line, over a background sized for two), the inline form
+`A -- "x" --> B` reads as the pipe form (its quotes and `<br/>` were kept as
+text, so its AST `label` and its printed form change), a state transition or
+description breaks at `<br>` (the tag was printed), a decimal entity code
+(`#9829;`) is decoded (named codes such as `#quot;` still print as written),
+and a markdown string (`` "`**bold**`" ``) draws its bold and italic runs
+(its backticks and stars were printed), which `toMermaid` now writes quoted;
+and a subgraph holding a first-rank or first-column node no longer draws its
+frame and title above or left of the canvas: the diagram moves to hold every
+frame, so its nodes, edges and size change.
 
 ## Exports
 

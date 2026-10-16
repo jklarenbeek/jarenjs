@@ -81,12 +81,16 @@ describe('htmlLabels — the labels are HTML inside a foreignObject', () => {
     assert.ok(svg.includes('<div>x &lt; y &amp; z</div>'));
   });
 
-  it('prints entity codes and markdown strings as literally as SVG text does', () => {
-    const body = 'flowchart LR\n  A["#quot;q#quot;"] --> B["`**md**`"] --> C["<b>x</b>"]';
-    for (const text of ['#quot;q#quot;', '`**md**`', '&lt;b&gt;x&lt;/b&gt;']) {
-      assert.equal(count(svgOf(body, HOST), `<div>${text}</div>`), 1, text);
-      assert.equal(count(svgOf(body), `>${text}</tspan>`), 1, text);
-    }
+  it('reads entity codes and markdown strings as SVG text reads them', () => {
+    const body = 'flowchart LR\n  A["#quot;q#quot; #9829;"] --> B["`**md** x`"] --> C["<b>x</b>"]';
+    const html = svgOf(body, HOST);
+    const svg = svgOf(body);
+    assert.equal(count(html, '<div>#quot;q#quot; \u2665</div>'), 1);
+    assert.equal(count(svg, '>#quot;q#quot; \u2665</tspan>'), 1);
+    assert.equal(count(html, '<div><strong>md</strong> x</div>'), 1);
+    assert.equal(count(svg, '><tspan font-weight="bold">md</tspan><tspan> x</tspan></tspan>'), 1);
+    assert.equal(count(html, '<div>&lt;b&gt;x&lt;/b&gt;</div>'), 1);
+    assert.equal(count(svg, '>&lt;b&gt;x&lt;/b&gt;</tspan>'), 1);
   });
 
   it('gives an authored text color to the HTML label', () => {
@@ -96,7 +100,7 @@ describe('htmlLabels — the labels are HTML inside a foreignObject', () => {
 
   it('draws a subgraph title as HTML in the band at the top of its frame', () => {
     const svg = svgOf('flowchart TD\n  subgraph S [Stage one]\n    A --> B\n  end', HOST);
-    assert.match(svg, /<g class="mm-cluster"><rect [^>]*><\/rect><foreignObject x="-6" y="-28" width="84" height="20" overflow="visible"><div xmlns="http:\/\/www.w3.org\/1999\/xhtml" class="mm-cluster-label" [^>]*><div>Stage one<\/div><\/div><\/foreignObject><\/g>/);
+    assert.match(svg, /<g class="mm-cluster"><rect [^>]*><\/rect><foreignObject x="12" y="12" width="84" height="20" overflow="visible"><div xmlns="http:\/\/www.w3.org\/1999\/xhtml" class="mm-cluster-label" [^>]*><div>Stage one<\/div><\/div><\/foreignObject><\/g>/);
   });
 
   it('draws a state diagram\'s labels as HTML, and no label on a pseudo-state', () => {

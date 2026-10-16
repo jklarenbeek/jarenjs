@@ -67,6 +67,7 @@ so each computes at most once.
 | `src/parser/index.js` | detect type on the first non-config line, dispatch, assemble the envelope |
 | `src/ast.js` | monomorphic node constructors + `walkSequence` |
 | `src/to-mermaid.js` | canonical AST → text printer (round-trip fixed point) |
+| `src/label-text.js` | the one reading of a flowchart or state label's text — line breaks (`\n`, `<br>`), markdown strings (`` `…` ``: bold and italic runs), Mermaid's decimal entity codes, decoded last so a code is always text — that the layout measures and both label renderers draw |
 | `src/layout/{flowchart,sequence,state,gantt}.js` | pure, deterministic `PositionedDiagram` scene graphs; the Gantt one takes its tick boundaries from `@jarenjs/core/dates`, so a timeline needs no dependency on the chart component, and gives a row the `click` link that passes `sanitizeHref`; it also reads the config's `gantt.topAxis` (or a `topAxis` header line) and `gantt.displayMode: compact` (the latter packs a section's rows first-fit) |
 | `@jarenjs/view/helpers` | shared tagged-array SVG vnode builders over `h()`; `measureText`/`textWidth` from a precomputed advance-width table (no `getBBox`); the `sanitizeHref`/`sanitizeUrl` URL policies (the engine imports them, no local copy) |
 | `src/render/{flowchart,sequence,gantt,misc,error}.js` | specialized `PositionedDiagram → vnode` closures + the error box |
@@ -124,8 +125,11 @@ reads only the markers every renderer writes, so it imports no renderer.
   diagram's config can turn HTML labels off, never on); HTML labels are
   sized and wrapped by the advance table, not by the host's font, and
   `safe: true` keeps them SVG text for the view safe policy, which drops
-  `foreignObject` (MERMAID-FORMAT §3, §6–7). Mermaid's
-  entity codes and markdown strings print literally in both. See ROADMAP.
+  `foreignObject` (MERMAID-FORMAT §3, §6–7).
+- Of Mermaid's entity codes only the decimal ones (`#9829;`) are decoded; a
+  named code (`#quot;`) prints as written, since this component carries no
+  table of named references. Markdown strings draw bold and italic only
+  (MERMAID-FORMAT §4.1). See ROADMAP.
 - Pixel parity with browser-Mermaid is a non-goal; layout is a
   deterministic approximation.
 - Class and ER render as structured panels (not full domain-specific

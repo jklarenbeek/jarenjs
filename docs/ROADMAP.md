@@ -273,25 +273,22 @@ establish registry publication or downstream acceptance.
   advance table; `safe: true` keeps SVG text; MERMAID-FORMAT §3, §6–7). Not
   yet checked in a browser engine: label centering, overflow past the box, and
   color under a host-linked theme in light and dark, with pan and zoom.
-- [ ] **Entity codes and markdown strings in labels** — Mermaid decodes
-  `#quot;`/`#9829;` entity codes and renders `` "`**bold**`" `` markdown
-  strings in labels (as HTML with `htmlLabels`, as styled `tspan`s without);
-  this engine prints both literally in SVG text and HTML labels alike. Wanted:
-  decoding in the parser or one shared label-text step, so the two label paths
-  stay twins (it changes default output for labels that use them: a minor).
-- [ ] **Subgraph frames above the canvas** — a subgraph holding a first-rank
-  node gets a frame at negative coordinates (`flowchart TD\n subgraph S [Stage
-  one]\n A --> B\n end` → frame `y=-28`, title baseline `y=-13` in a
-  `viewBox="0 0 90 165.6"`), so the title and the frame top are cut off.
-  Wanted: the canvas origin moved (or the ranks offset) to hold every frame.
-- [ ] **Edge-label line breaks** — `A -->|one<br/>two| B` measures two lines
-  (background 38.6 high) but SVG text draws one (`<text>one\ntwo</text>`, the
-  newline collapses); the inline form `A -- "one<br/>two" --> B` keeps the
-  quotes and the tag (`"one&lt;br/&gt;two"`), where the pipe form strips both;
-  a state transition `A --> B : one<br/>two` prints the tag. HTML labels
-  already draw the pipe form as two lines. Wanted: one label-text
-  normalization for every label form, and SVG edge labels drawn as `tspan`
-  lines.
+- [ ] **Named entity codes in labels** — flowchart and state labels decode
+  Mermaid's decimal entity codes (`#9829;`) and draw markdown strings
+  (MERMAID-FORMAT §4.1), but a named code (`#quot;`, `#amp;`, `#lt;`) still
+  prints as written: Mermaid's table is the browser's, the WHATWG named
+  references, and the only copy in this repository is the Markdown
+  component's, which no other component may import. Wanted: that table hoisted
+  into `@jarenjs/core`, imported by both components, and looked up for a
+  non-decimal code in the label reading — a new core export, so a minor; it
+  grows the mermaid bundle by the table's size.
+- [ ] **Entity codes and line breaks in the other diagram types** — sequence
+  messages, notes and actors, class and ER panels and gantt rows print
+  Mermaid's entity codes as written (`A->>B: I #9829; you #59; ok` draws
+  `#9829;` and `#59;`, Mermaid's documented way to write `;` in a message) and
+  a message's `<br/>` as text. Wanted: the flowchart label reading (decimal
+  codes decoded last, `<br>` a line break) at each type's measured and drawn
+  text, so a message is measured and drawn in the lines it breaks into.
 - [ ] **Full layout for the secondary types** — class and ER render as structured panels, not domain-specific layouts; mindmap/gitGraph/journey/timeline parse-accept with a placeholder. Real layouts are the next coverage push (tracked honestly in the benchmark scorecard).
 - [ ] **Layout/perf workstream** — dagre-lite handles ranks and straight
   edges; orthogonal edge routing, subgraph clustering and crossing reduction

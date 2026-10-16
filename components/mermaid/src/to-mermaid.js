@@ -14,6 +14,7 @@
 
 import { parseState } from './parser/state.js';
 import { printClick, printNodeClick } from './parser/click.js';
+import { isMarkdownString } from './label-text.js';
 
 //#region public ----------------------------------------------------
 
@@ -73,6 +74,16 @@ export function toMermaid(docOrAst) {
 const RE_NEEDS_QUOTE = /[[\](){}<>|"';]|^[\s/\\]|[\s/\\]$/;
 
 /**
+ * A markdown string in the quotes Mermaid needs to read it as one: unquoted,
+ * its backticks are plain text there. Any other label prints as it is.
+ * @param {string} text
+ * @returns {string}
+ */
+function markdownQuoted(text) {
+  return isMarkdownString(text) ? `"${text}"` : text;
+}
+
+/**
  * @param {any} ast
  * @returns {string}
  */
@@ -88,7 +99,7 @@ function printFlowchart(ast) {
   // 2. Subgraphs: reference members by bare id (membership only).
   for (const sg of ast.subgraphs) {
     out.push(sg.label && sg.label !== ''
-      ? `subgraph ${sg.id} [${sg.label.replace(/\n/g, '<br/>')}]`
+      ? `subgraph ${sg.id} [${markdownQuoted(sg.label.replace(/\n/g, '<br/>'))}]`
       : `subgraph ${sg.id}`);
     if (sg.direction) out.push('  direction ' + sg.direction);
     for (const id of sg.nodes) out.push('  ' + id);
@@ -98,7 +109,7 @@ function printFlowchart(ast) {
   // 3. Edges in AST order.
   for (const e of ast.edges) {
     const op = edgeOp(e);
-    const label = e.label != null ? `|${e.label.replace(/\n/g, '<br/>')}|` : '';
+    const label = e.label != null ? `|${markdownQuoted(e.label.replace(/\n/g, '<br/>'))}|` : '';
     out.push(`${e.from} ${op}${label} ${e.to}`);
   }
 
@@ -134,7 +145,7 @@ function wrapShape(shape, label) {
   // diagram round-trip to source that still parses.
   const text = label.replace(/\n/g, '<br/>');
   const quote = text.includes('"') && !text.includes("'") ? "'" : '"';
-  const l = RE_NEEDS_QUOTE.test(text) ? quote + text + quote : text;
+  const l = RE_NEEDS_QUOTE.test(text) || isMarkdownString(text) ? quote + text + quote : text;
   switch (shape) {
     case 'round': return `(${l})`;
     case 'stadium': return `([${l}])`;

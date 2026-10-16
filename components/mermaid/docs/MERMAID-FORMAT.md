@@ -140,6 +140,37 @@ operator — `A-->B` parses as an edge, not as a node with id `A-`. This
 is a deliberate parser-correctness deviation from upstream Mermaid,
 whose grammar permits those characters in ids.
 
+**Label text.** A node, edge or subgraph label holds its text without the
+quotes around it, with `<br>` (`<br/>`, `<br />`) read as a newline — the
+pipe form `A -->|"x"| B` and the inline form `A -- "x" --> B` alike, as
+Mermaid reads both. The tree keeps everything else as written; one reading
+of it (`src/label-text.js`), shared by the layout and both label renderers,
+decides how it is drawn, and a state diagram's labels are read the same way
+(a transition or description keeps its `<br/>` in the tree and breaks there):
+
+- **Lines** break at a newline and at `<br>`.
+- **Markdown strings.** A label wrapped in backticks — Mermaid's
+  `` A["`**bold** and *italic*`"] `` — draws `**…**`/`__…__` bold and
+  `*…*`/`_…_` italic, nesting as CommonMark pairs the delimiters (the
+  innermost style wins, as Mermaid draws it), its lines trimmed and blank
+  ones dropped. Other markdown (code spans, strikethrough, links) stays
+  literal text, where Mermaid drops what it does not support. Mermaid reads
+  only the quoted form as markdown; this tree keeps no quotes, so an
+  unquoted `` A[`…`] `` reads as markdown here, and `toMermaid` prints every
+  markdown string quoted. Mermaid also reads every state-diagram label as
+  markdown; here only the backtick form is.
+- **Entity codes.** Mermaid's decimal codes (`#35;` is `#`, `#9829;` is ♥)
+  decode as an HTML parser reads the reference Mermaid makes of each: zero,
+  a surrogate or a value past U+10FFFF is U+FFFD, and U+0080–U+009F is
+  windows-1252. A code for a character XML cannot carry (a control other
+  than tab, newline and return; U+FFFE; U+FFFF) is U+FFFD, and tab, newline
+  and return draw as a space (Mermaid breaks the line at `#10;`). A named
+  code (`#quot;`) prints as written: this component carries no table of
+  named references. A code is decoded last, inside the text the line breaks
+  and the emphasis left, so what it decodes to is always text — `#60;br#62;`
+  never breaks a line, `#42;#42;` is never bold, and `#60;script#62;` is
+  escaped like any label text (Mermaid decodes first and reads the result).
+
 ### 4.2 sequence
 
 ```
@@ -528,7 +559,9 @@ plain spelling would introduce the states in another order, it declares every
 state first. The class printer writes a member that holds a `}` or starts with
 `%%` as a `Name : member` line, because a body ends at its first `}` and drops
 comment-looking lines; the pie printer writes a label's line break as `<br/>`
-and a value as a plain decimal.
+and a value as a plain decimal. The flowchart printer writes a markdown string
+in quotes (`` ["`**a**`"] ``, `` |"`b`"| ``), which Mermaid needs to read it as
+one, and an edge label in the pipe form.
 
 The printer is canonical, not verbatim: it does not preserve source
 whitespace or comments. Two round-trip modes coexist:
@@ -629,7 +662,17 @@ exactly as it does as SVG text, and a wrapped one makes a narrower,
 taller box in the same rank and order. No layout is read from a DOM — not
 in SSR, not in a browser — so the geometry is the same wherever it is
 computed. The scene then carries `htmlLabels: true` and the wrapped
-`lines` of every node and edge label; the SVG-text scene has neither.
+`lines` of every node and edge label — a line is its text, or a markdown
+line's runs (`{ text, type }`, type `normal`/`strong`/`em`), wrapped word by
+word with each word keeping its style; the SVG-text scene has neither. Every
+label is measured as it is read (§4.1): decoded, one line per break, and a
+bold run in the table's bold advance.
+
+**Subgraph frames lie inside the canvas.** A frame reaches past its members
+by its padding, and above them by its title band, so a subgraph holding a
+node of the first rank or the first column would start above or left of the
+canvas; the layout then moves the whole diagram until every drawn frame keeps
+the canvas margin, as the right and bottom edges always did.
 Composite states stay flattened in v1, their recorded `parent` not yet
 drawn as a cluster. `compileMermaid(source).toLayout()` exposes the
 scene as a cached projection — reference-equal on repeated calls, null
@@ -684,9 +727,10 @@ and free to overflow rather than clip when the host's font runs wider than
 the table. Its color is the theme's `--mm-node-text` (`--mm-edge-label-text`
 for an edge), a custom property every root declares, or the `color` an
 author's style names. The text is escaped like SVG text and nothing in it
-is read as markup: a `<br>` breaks the line as it does in SVG text, and
-Mermaid's entity codes (`#quot;`) and markdown strings print as literally
-as they do there. No void element is written, so the standalone SVG stays
+is read as markup: it is read as SVG text reads it (§4.1), a `<br>` breaking
+the line, a markdown string's runs drawn in `strong`/`em` (in SVG text, a
+`tspan` with `font-weight="bold"`/`font-style="italic"` inside its line), and
+an entity code decoded to text. No void element is written, so the standalone SVG stays
 well-formed XML — but only a renderer that draws `foreignObject` (a
 browser) shows its labels; a rasterizer or an SVG viewer that does not
 shows none, so a host producing output for one leaves `htmlLabels` unset.
