@@ -777,6 +777,15 @@ pipeline twice, as a client:
   `JarenValidator` holding the schema and its references, and run on `null`;
   only a member it refuses is widened and recorded as a placeholder (a
   `WeakMap` from the profile's object node to the member names).
+- **Carriers are marked by node identity.** A JSON-text carrier, a boxed
+  carrier and an entries map are recorded in `WeakSet`s over the profile's
+  nodes; `fromProfile`/`toProfile` parse, box or rebuild where they meet one.
+  A distributed object is a synthetic node whose members remember every
+  original place they stand for, so the `null` question (and the `enum`
+  narrowing of a discriminating branch) is asked of each place.
+- **The original's validator also judges the whole answer.** `fromProfile`
+  keeps a `null` for an optional member whose schema admits it, unless the
+  original refuses the answer with those nulls and accepts it without them.
 - **The profile's validator picks a union branch.** `fromProfile` and
   `toProfile` walk an instance beside the profile; at an `anyOf` they compile
   each branch's place in the profile (registered under a private identifier,

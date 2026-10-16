@@ -109,19 +109,17 @@ delete it or fix it.
 
 ## @jarenjs/validate
 
-- [ ] **Strict profiles for open members, maps and the grammars.**
-  `deriveStrictProfile` (`@jarenjs/validate/strict-profile`) refuses, coded
-  and naming the place, every shape a closed profile object would read wrong:
-  a member that accepts any JSON value or a free-form `{ "type": "object" }`
-  (`JK0101`/`JK0102`), a map (`patternProperties`, a schema-valued
-  `additionalProperties`: `JK0102`), and an object beside `anyOf`/`allOf`
-  (`JK0103`). That refuses the query, JSLT, JTLT, GeoJSON grammars and every
-  committed authoring profile (open seams, `nodes`/`states` maps, the match
-  specification), and a structured-output schema with one free-form metadata
-  member. The open work is closed carriers with a map back: a member of any
-  value carried as JSON text and parsed by `fromProfile`, a map as an array of
-  `{ key, value }` entries, the members of an object-plus-union moved into
-  each branch.
+- [ ] **Strict profiles of the JTLT grammar and of two schemas for one
+  member.** `deriveStrictProfile` (`@jarenjs/validate/strict-profile`) carries
+  a value of any shape as JSON text, a map as `{ key, value }` entries, and an
+  object beside `allOf`/`anyOf`/`oneOf` distributed into its branches; every
+  suite grammar and authoring profile derives except JTLT, whose segment puts
+  an untyped `allOf` of several branches beside no type (`JK0103`). Still
+  refused, coded: two schemas for one member where neither is an
+  `enum`/`const` nor only narrows (no conjunction in the strict subset), a map
+  beside declared properties, a branch that is a `$ref` or a nested union
+  beside an object type, and `if`/`then`/`else`. Profile size against provider
+  caps (nesting depth, total name length) is not checked.
 - [ ] **Per-call cost of annotation tracking for `unevaluated*`** — a check
   over many members or items no longer scans the evaluation log once per
   member: a long stretch is gathered in one pass, so the check grows with the

@@ -49,7 +49,7 @@ export const VALIDATE_CODES = Object.freeze({
   JK0010: 'a reference or an identifier is not a valid URI reference',
   JK0011: 'a $recursiveRef read as draft 2019-09 is not "#"',
   JK0012: 'an identifier names two schemas',
-  JK0101: 'a strict profile cannot carry a schema that accepts any value',
+  JK0101: 'retired: a schema that accepts any value is carried as JSON text',
   JK0102: 'a strict profile cannot carry an object whose member names are open',
   JK0103: 'a strict profile cannot carry a keyword that applies members, items or branches beside its node',
   JK0104: 'a strict profile cannot bundle a reference',
@@ -58,6 +58,8 @@ export const VALIDATE_CODES = Object.freeze({
   JK0107: 'a profile derivation was given an argument it does not take',
   JK0108: 'a strict profile cannot carry a schema that accepts no value',
   JK2001: 'validation nests schema references deeper than the reference depth ceiling',
+  JK2002: 'fromProfile: a member carried as JSON text is not JSON text',
+  JK2003: 'fromProfile: a map carried as entries names one key twice',
 });
 
 /**
@@ -94,9 +96,10 @@ export class SchemaRuntimeError extends CodedError {
   /**
    * @param {string} code - Stable diagnosis code
    * @param {string} reason - What is wrong
+   * @param {{ dataPath?: string }} [location] - Where in the instance
    */
-  constructor(code, reason) {
-    super('SchemaRuntimeError', code, reason);
+  constructor(code, reason, location = undefined) {
+    super('SchemaRuntimeError', code, reason, location);
   }
 }
 

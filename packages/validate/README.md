@@ -1588,16 +1588,37 @@ What the derivation does, node by node:
   keyword outside the strict subset are restated in the node's description,
   where the model still reads them; `oneOf` becomes `anyOf`, and an `allOf`
   of one branch becomes that branch. `relaxSchema` is that rule on its own.
-- **A root that is not an object is wrapped** as the one member `value`
-  (strict modes take an object at the root); `fromProfile` unwraps it.
+- **A value of any shape is carried as JSON text.** A member that accepts
+  any value (`{}`, `true`, a node with no type), a free-form
+  `{ "type": "object" }`, the items of an array with no `items` schema and a
+  tuple (`prefixItems`) become a `string` whose description says to write
+  the value as JSON; `fromProfile` parses it, and the original judges what
+  it decodes to. Beside a union branch that also takes a string, the text is
+  boxed as `{ "json": "…" }` so the two cannot be read for each other.
+- **A map is carried as entries.** An object whose members come from
+  `patternProperties` or a schema-valued `additionalProperties` becomes an
+  array of closed `{ key, value }` objects (the name patterns restated on
+  `key`); `fromProfile` builds the object back.
+- **An object beside `allOf`, `anyOf` or `oneOf` is distributed** when its
+  branches only add, require or narrow members: each `allOf` branch is
+  folded into the object, and the object is copied into each `anyOf` branch
+  as a closed object of its own. A branch that names a member the object
+  also declares narrows it exactly when one side is an `enum` or `const`
+  (the values the other side accepts are kept) or only adds value keywords;
+  a branch closed with `additionalProperties: false` keeps its own members.
+- **A root that is not one closed object is wrapped** as the one member
+  `value` (strict modes take an object at the root); `fromProfile` unwraps it.
 
 **How a placeholder `null` is told from a real one.** When the profile is
 derived, the original's own validator is asked whether each optional
 member's schema accepts `null`. Only a member it refuses `null` for is
 widened, and only that member's `null` is removed by `fromProfile`. A member
 typed `['string', 'null']`, a `$ref` to a nullable definition, an `anyOf`
-with a `null` branch or an `enum` that lists `null` keeps its `null`; so
-does an answer read through two union branches that disagree about it.
+with a `null` branch or an `enum` that lists `null` keeps its `null` —
+unless the original refuses the answer with it and accepts the member
+absent (a constraint on presence, such as `not: { required: [...] }`), in
+which case those nulls are removed. An answer read through two union
+branches that disagree about it is returned as written.
 `toProfile` is the forward map (absent members filled with `null`, members
 the profile closed out dropped), for few-shot examples and tests.
 
@@ -1605,16 +1626,19 @@ the profile closed out dropped), for few-shot examples and tests.
 relaxation, so validate what `fromProfile` returns with the original
 schema: for every instance the original accepts, `toProfile` gives one the
 profile accepts, and for every answer the profile accepts, `fromProfile`
-gives one the original accepts or refuses with its own errors. Closing is
-the one narrowing: a member an open object never declared cannot be
-written by a model. A schema a closed profile would read wrong — an object
-whose member names are open (`patternProperties`, a map-valued
-`additionalProperties`, no declared `properties`), members contributed or
-required by `allOf`, `if`/`then` or a dependency, a node that accepts any
-value, a `$dynamicRef` — is
-refused with a coded `SchemaCompileError` (`JK0101`–`JK0108`, in
+gives one the original accepts, refuses with its own errors, or — for JSON
+text that is not JSON (`JK2002`) and entries that repeat a key (`JK2003`) —
+refuses itself with a coded `SchemaRuntimeError` naming the place in the
+answer. Closing is the one narrowing: a member an open object never
+declared cannot be written by a model. A schema a closed profile would read
+wrong — a map beside declared members, members contributed or required by
+`if`/`then`, a dependency or a branch that is more than members, two
+schemas for one member that no `enum` narrows, a `$dynamicRef` — is refused
+with a coded `SchemaCompileError` (`JK0102`–`JK0108`, in
 [ERROR-MESSAGES](./docs/ERROR-MESSAGES.md#9-coded-refusals)) naming the
 place and the repair, never answered with a profile that is silently wrong.
+The derivation also compiles the original, so a reference it cannot resolve
+is refused then (`JK0009`), not by the first answer.
 
 **Which strict modes it targets.** The subset is the one OpenAI's
 Structured Outputs and strict function calling accept (every member

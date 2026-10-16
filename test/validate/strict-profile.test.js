@@ -11,7 +11,7 @@ import * as assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { JarenValidator, SchemaCompileError, VALIDATE_CODES } from '@jarenjs/validate';
+import { JarenValidator, SchemaCompileError, SchemaRuntimeError, VALIDATE_CODES } from '@jarenjs/validate';
 import { deriveStrictProfile, relaxSchema } from '@jarenjs/validate/strict-profile';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
@@ -249,25 +249,179 @@ describe('deriveStrictProfile: references are bundled into one document', () => 
   });
 
   it('names a place inside a reference by its $id', () => {
-    const open = { $id: 'https://x.test/open.json', type: 'object', properties: { bag: { type: 'object' } } };
+    const open = { $id: 'https://x.test/open.json', type: 'object', properties: { bag: { type: 'object', properties: { id: { type: 'string' } }, additionalProperties: { type: 'string' } } } };
     assert.deepEqual(refusal(() => deriveStrictProfile({ $ref: 'https://x.test/open.json' }, { references: [open] })),
       ['JK0102', 'https://x.test/open.json#/properties/bag']);
   });
 });
 
+const textNote = (/** @type {string} */ what) => `(strict profile: write this ${what} as JSON text, a string such as "{\\"a\\": 1}"; the original schema enforces it)`;
+const entriesNote = '(strict profile: this object is written as an array of { key, value } entries, one per member, each key once; the original schema enforces it)';
+
+describe('deriveStrictProfile: a value of any shape is carried as JSON text', () => {
+  const schema = { type: 'object', required: ['id'], properties: {
+    id: { type: 'string' },
+    metadata: { type: 'object', description: 'free-form' },
+    anything: {},
+    list: { type: 'array' },
+    pair: { type: 'array', prefixItems: [{ type: 'string' }, { type: 'number' }] },
+  } };
+  const strict = deriveStrictProfile(schema);
+
+  it('writes a free-form object, an untyped member, the items of an untyped array and a tuple as strings', () => {
+    assert.deepEqual(strict.schema.properties, {
+      id: { type: 'string' },
+      metadata: { type: ['string', 'null'], description: `free-form ${textNote('object')}` },
+      anything: { type: ['string', 'null'], description: textNote('value') },
+      list: { type: ['array', 'null'], items: { type: 'string', description: textNote('value') } },
+      pair: { type: ['string', 'null'], description: `${textNote('array')} (strict profile: the prefixItems keyword is relaxed here; the original schema enforces it)` },
+    });
+  });
+
+  it('round-trips through the text', () => {
+    const instance = { id: 'a', metadata: { k: [1] }, anything: 5, list: [1, 'x'], pair: ['a', 1] };
+    const filled = strict.toProfile(instance);
+    assert.deepEqual(filled, { id: 'a', metadata: '{"k":[1]}', anything: '5', list: ['1', '"x"'], pair: '["a",1]' });
+    assert.equal(profiled(strict.schema)(filled), true);
+    assert.deepEqual(strict.fromProfile(filled), instance);
+  });
+
+  it('refuses text that is not JSON with a code and the place, and leaves a decoded value to the original', () => {
+    const answer = { id: 'a', metadata: '{oops', anything: null, list: null, pair: null };
+    assert.equal(profiled(strict.schema)(answer), true, 'a string is what the profile asks for');
+    assert.throws(() => strict.fromProfile(answer), (error) => error instanceof SchemaRuntimeError && error.code === 'JK2002' && error.dataPath === '/metadata');
+    const decoded = strict.fromProfile({ ...answer, metadata: '[1]' });
+    assert.deepEqual(decoded, { id: 'a', metadata: [1], anything: null });
+    assert.equal(original(schema)(decoded), false, 'the original refuses an array where it declared an object');
+  });
+
+  it('boxes a carrier as { json } beside a union branch that also takes a string', () => {
+    const union = { type: 'object', required: ['q'], properties: { q: { anyOf: [{ type: 'string' }, { type: 'object' }] } } };
+    const strict = deriveStrictProfile(union);
+    assert.deepEqual(strict.schema.properties.q, { anyOf: [{ type: 'string' },
+      { type: 'object', properties: { json: { type: 'string', description: textNote('object') } }, required: ['json'], additionalProperties: false }] });
+    assert.deepEqual(strict.toProfile({ q: { $sum: '$.b' } }), { q: { json: '{"$sum":"$.b"}' } });
+    assert.deepEqual(strict.fromProfile({ q: { json: '{"$sum":"$.b"}' } }), { q: { $sum: '$.b' } });
+    assert.deepEqual(strict.fromProfile({ q: '{"$sum":"$.b"}' }), { q: '{"$sum":"$.b"}' }, 'a string is the string branch');
+  });
+
+  it('still compiles the original, so a reference only a carrier holds is refused when the profile is derived', () => {
+    assert.deepEqual(refusal(() => deriveStrictProfile({ type: 'object', required: ['a'], properties: { a: { items: { $ref: 'https://nowhere.test/x.json' } } } })),
+      ['JK0009', undefined]);
+  });
+
+  it('carries the schema true as the wrapped value', () => {
+    const strict = deriveStrictProfile(true);
+    assert.deepEqual(strict.schema, { type: 'object', properties: { value: { type: 'string', description: textNote('value') } }, required: ['value'], additionalProperties: false });
+    assert.deepEqual(strict.fromProfile(strict.toProfile({ a: 1 })), { a: 1 });
+  });
+
+  it('widens a carrier whose original admits null, keeping the null', () => {
+    const schema = { type: 'object', required: ['n'], properties: { n: { type: 'integer' }, extra: { anyOf: [{ $ref: '#/$defs/any' }, { type: 'number' }] } }, $defs: { any: {} } };
+    const strict = deriveStrictProfile(schema);
+    assert.equal(profiled(strict.schema)(strict.toProfile({ n: 1 })), true);
+    assert.deepEqual(strict.fromProfile(strict.toProfile({ n: 1 })), { n: 1, extra: null });
+  });
+});
+
+describe('deriveStrictProfile: a map is carried as { key, value } entries', () => {
+  const schema = { type: 'object', required: ['tags'], properties: {
+    tags: { type: 'object', patternProperties: { '^x-': { type: 'string' } }, additionalProperties: false },
+    counts: { type: 'object', additionalProperties: { type: 'integer' } },
+  } };
+  const strict = deriveStrictProfile(schema);
+
+  it('derives an entries array whose value is the map\'s value schema', () => {
+    const entry = (/** @type {string} */ keyNote, /** @type {object} */ value) => ({ type: 'object', properties: { key: { type: 'string', description: keyNote }, value },
+      required: ['key', 'value'], additionalProperties: false });
+    assert.deepEqual(strict.schema.properties, {
+      tags: { type: 'array', items: entry('(strict profile: a member name; a name matching "^x-" takes that pattern\'s value schema, and every name matches one; the original schema enforces it)', { type: 'string' }), description: entriesNote },
+      counts: { type: ['array', 'null'], items: entry('(strict profile: a member name)', { type: 'integer' }), description: entriesNote },
+    });
+  });
+
+  it('round-trips an object through its entries', () => {
+    const instance = { tags: { 'x-a': 'A' }, counts: { a: 1, b: 2 } };
+    const filled = strict.toProfile(instance);
+    assert.deepEqual(filled, { tags: [{ key: 'x-a', value: 'A' }], counts: [{ key: 'a', value: 1 }, { key: 'b', value: 2 }] });
+    assert.equal(profiled(strict.schema)(filled), true);
+    assert.deepEqual(strict.fromProfile(filled), instance);
+  });
+
+  it('refuses entries that name one key twice, with a code and the place', () => {
+    assert.throws(() => strict.fromProfile({ tags: [{ key: 'x-a', value: 'A' }, { key: 'x-a', value: 'B' }], counts: null }),
+      (error) => error instanceof SchemaRuntimeError && error.code === 'JK2003' && error.dataPath === '/tags/1');
+  });
+
+  it('leaves a name the pattern refuses to the original', () => {
+    const decoded = strict.fromProfile({ tags: [{ key: 'other', value: 'A' }], counts: null });
+    assert.deepEqual(decoded, { tags: { other: 'A' } });
+    assert.equal(original(schema)(decoded), false);
+  });
+});
+
+describe('deriveStrictProfile: an object beside allOf or anyOf is distributed into its branches', () => {
+  it('folds allOf branches that only narrow into the object', () => {
+    const schema = { type: 'object', required: ['from'], properties: { from: { type: 'string' }, event: { type: ['string', 'null'] }, after: { type: 'number' } },
+      additionalProperties: false, allOf: [{ not: { required: ['event', 'after'] } }] };
+    const strict = deriveStrictProfile(schema);
+    assert.deepEqual(strict.schema, { type: 'object', additionalProperties: false, description: '(strict profile: the not keyword is relaxed here; the original schema enforces it)',
+      properties: { from: { type: 'string' }, event: { type: ['string', 'null'] }, after: { type: ['number', 'null'] } }, required: ['from', 'event', 'after'] });
+    // event admits null, so its null is kept, unless the original then
+    // refuses the answer and accepts the member absent
+    assert.deepEqual(strict.fromProfile({ from: 'a', event: null, after: 1 }), { from: 'a', after: 1 });
+    assert.deepEqual(strict.fromProfile({ from: 'a', event: null, after: null }), { from: 'a', event: null });
+  });
+
+  it('distributes the object into each anyOf branch of required alternatives', () => {
+    const schema = { type: 'object', properties: { path: { type: 'string' }, schema: { type: 'object', properties: { t: { type: 'string' } } } },
+      anyOf: [{ required: ['path'] }, { required: ['schema'] }], additionalProperties: false };
+    const strict = deriveStrictProfile(schema);
+    const branches = strict.schema.properties.value.anyOf;
+    assert.deepEqual(branches.map((/** @type {any} */ branch) => [branch.required, branch.properties.path.type, branch.properties.schema.type]),
+      [[['path', 'schema'], 'string', ['object', 'null']], [['path', 'schema'], ['string', 'null'], 'object']]);
+    assert.deepEqual(strict.fromProfile({ value: { path: '$', schema: null } }), { path: '$' });
+    assert.deepEqual(strict.fromProfile({ value: { path: null, schema: { t: 'x' } } }), { schema: { t: 'x' } });
+  });
+
+  it('narrows a member an enum or const branch discriminates to the values the object\'s schema accepts', () => {
+    const schema = { type: 'object', required: ['kind'], properties: { kind: { type: 'string' } },
+      oneOf: [{ properties: { kind: { const: 'circle' }, r: { type: 'number' } }, required: ['r'] }, { properties: { kind: { enum: ['square', 2] }, side: { type: 'number' } }, required: ['side'] }] };
+    assert.deepEqual(deriveStrictProfile(schema).schema.properties.value.anyOf, [
+      { type: 'object', properties: { kind: { enum: ['circle'] }, r: { type: 'number' } }, required: ['kind', 'r'], additionalProperties: false },
+      { type: 'object', properties: { kind: { enum: ['square'] }, side: { type: 'number' } }, required: ['kind', 'side'], additionalProperties: false },
+    ]);
+  });
+
+  it('leaves out of a closed branch the object\'s members it does not declare, and drops a branch that would need one', () => {
+    const schema = { type: 'object', properties: { a: { type: 'string' }, b: { type: 'string' } },
+      anyOf: [{ properties: { a: { type: 'string' } }, additionalProperties: false }, { required: ['b'] }, { required: ['b'], properties: { a: true }, additionalProperties: false }] };
+    assert.deepEqual(deriveStrictProfile(schema).schema.properties.value.anyOf, [
+      { type: 'object', properties: { a: { type: ['string', 'null'] } }, required: ['a'], additionalProperties: false },
+      { type: 'object', properties: { a: { type: ['string', 'null'] }, b: { type: 'string' } }, required: ['a', 'b'], additionalProperties: false },
+    ]);
+  });
+
+  it('keeps a closed branch to its own members', () => {
+    const schema = { type: 'object', anyOf: [{ required: ['member'], properties: { member: { type: 'string' } }, additionalProperties: false },
+      { required: ['value'], properties: { value: { type: 'number' } }, additionalProperties: false }] };
+    assert.deepEqual(deriveStrictProfile(schema).schema.properties.value.anyOf, [
+      { type: 'object', properties: { member: { type: 'string' } }, required: ['member'], additionalProperties: false },
+      { type: 'object', properties: { value: { type: 'number' } }, required: ['value'], additionalProperties: false },
+    ]);
+  });
+});
+
 describe('deriveStrictProfile: a schema a closed profile would read wrong is refused with a code', () => {
   for (const [label, schema, expected] of [
-    ['a member that accepts any value', { type: 'object', properties: { a: {} } }, ['JK0101', '#/properties/a']],
-    ['a member true', { type: 'object', properties: { a: true } }, ['JK0101', '#/properties/a']],
-    ['the schema true', true, ['JK0101', '#']],
-    ['an array with no items schema', { type: 'object', properties: { a: { type: 'array' } } }, ['JK0101', '#/properties/a']],
-    ['patternProperties', { type: 'object', properties: { a: { type: 'string' } }, patternProperties: { '^x': { type: 'string' } } }, ['JK0102', '#/patternProperties']],
-    ['a map-valued additionalProperties', { type: 'object', properties: { m: { type: 'object', additionalProperties: { type: 'string' } } } }, ['JK0102', '#/properties/m/additionalProperties']],
-    ['an object with no declared members', { type: 'object', properties: { m: { type: 'object' } } }, ['JK0102', '#/properties/m']],
-    ['an allOf beside an object type', { type: 'object', properties: { a: { type: 'string' } }, allOf: [{ properties: { b: { type: 'string' } } }] }, ['JK0103', '#/allOf']],
+    ['patternProperties beside declared properties', { type: 'object', properties: { a: { type: 'string' } }, patternProperties: { '^x': { type: 'string' } } }, ['JK0102', '#']],
+    ['a map that may also be an array', { type: 'object', properties: { m: { type: ['object', 'array'], additionalProperties: { type: 'string' }, items: { type: 'string' } } } }, ['JK0102', '#/properties/m']],
+    ['a schema-valued unevaluatedProperties', { type: 'object', properties: { a: { type: 'string' } }, unevaluatedProperties: { type: 'string' } }, ['JK0102', '#/unevaluatedProperties']],
+    ['an allOf branch that gives a member a schema of its own', { type: 'object', properties: { a: { type: 'string' } }, allOf: [{ properties: { a: { type: 'integer' } } }] }, ['JK0103', '#/allOf/0/properties/a']],
+    ['a branch beside an object type that is not members', { type: 'object', properties: { a: { type: 'string' } }, anyOf: [{ $ref: '#/$defs/x' }], $defs: { x: { type: 'object', properties: {} } } }, ['JK0103', '#/anyOf/0/%24ref']],
+    ['an if beside an object type', { type: 'object', properties: { a: { type: 'string' } }, if: { required: ['a'] } }, ['JK0103', '#/if']],
     ['an untyped allOf of two branches', { allOf: [{ type: 'string' }, { minLength: 1 }] }, ['JK0103', '#/allOf']],
     ['a $ref beside properties', { type: 'object', properties: { a: { $ref: '#/$defs/n', properties: {} } }, $defs: { n: { type: 'number' } } }, ['JK0103', '#/properties/a/properties']],
-    ['prefixItems', { type: 'object', properties: { t: { type: 'array', prefixItems: [{ type: 'string' }], items: { type: 'number' } } } }, ['JK0103', '#/properties/t/prefixItems']],
     ['a $dynamicRef', { type: 'object', properties: { a: { $dynamicRef: '#node' } } }, ['JK0104', '#/properties/a/%24dynamicRef']],
     ['a pointer that misses', { type: 'object', properties: { a: { $ref: '#/$defs/none' } } }, ['JK0104', '#/properties/a']],
     ['oneOf beside anyOf', { type: 'object', properties: { a: { oneOf: [{ type: 'string' }], anyOf: [{ type: 'integer' }] } } }, ['JK0105', '#/properties/a']],
@@ -291,7 +445,7 @@ describe('deriveStrictProfile: a schema a closed profile would read wrong is ref
   });
 
   it('every code is in the code table', () => {
-    for (const code of ['JK0101', 'JK0102', 'JK0103', 'JK0104', 'JK0105', 'JK0106', 'JK0107', 'JK0108'])
+    for (const code of ['JK0101', 'JK0102', 'JK0103', 'JK0104', 'JK0105', 'JK0106', 'JK0107', 'JK0108', 'JK2002', 'JK2003'])
       assert.equal(typeof VALIDATE_CODES[code], 'string', code);
   });
 
@@ -367,7 +521,7 @@ describe('the correctness contract over the JSON-Schema-Test-Suite (draft 2020-1
         }
       }
     }
-    assert.deepEqual(counts, { groups: 64, forward: 87, accepted: 103, restoredValid: 97, restoredRefused: 6, roundTrip: 86 });
+    assert.deepEqual(counts, { groups: 222, forward: 538, accepted: 749, restoredValid: 556, restoredRefused: 193, roundTrip: 535 });
   });
 
   const suite = new URL('../../benchmark/suite/tests/draft2020-12/', import.meta.url);
@@ -389,35 +543,53 @@ describe('the correctness contract over the JSON-Schema-Test-Suite (draft 2020-1
       }
     }
     assert.deepEqual(accepted, groups.map((group) => `${group.file} / ${group.description}`));
-    assert.deepEqual(codes, { JK0101: 151, JK0102: 6, JK0103: 109, JK0104: 31, JK0108: 3 });
+    assert.deepEqual(codes, { JK0009: 2, JK0102: 1, JK0103: 102, JK0104: 31, JK0108: 6 });
   });
 });
 
-describe('the json package grammars', () => {
-  const dir = new URL('../../packages/json/schemas/', import.meta.url);
-  const grammars = fs.readdirSync(dir).filter((name) => name.endsWith('.schema.json')).sort()
-    .map((name) => [name, JSON.parse(fs.readFileSync(new URL(name, dir), 'utf8'))]);
-  const references = grammars.map(([, schema]) => schema);
+const D20_ROOT = new URL('../../', import.meta.url);
+/** Every committed grammar and authoring profile of the suite, by file. */
+const grammarFiles = Object.entries({ json: ['jaren-query', 'jaren-jslt', 'jaren-jtlt', 'geojson'], db: ['jaren-model'], app: ['jaren-app'],
+  flow: ['jaren-fsm', 'jaren-dag', 'jaren-statechart', 'jaren-workflow'] })
+  .flatMap(([pkg, names]) => names.flatMap((name) => ['', '.authoring'].map((suffix) => `packages/${pkg}/schemas/${name}${suffix}.schema.json`)))
+  .filter((file) => fs.existsSync(new URL(file, D20_ROOT)));
+const grammars = new Map(grammarFiles.map((file) => [file, JSON.parse(fs.readFileSync(new URL(file, D20_ROOT), 'utf8'))]));
+const othersOf = (/** @type {any} */ schema) => [...grammars.values()].filter((other) => other.$id !== schema.$id);
 
-  it('are each refused where an open map or a composed object makes them unclosable', () => {
-    const answers = Object.fromEntries(grammars.map(([name, schema]) =>
-      [name, refusal(() => deriveStrictProfile(schema, { references: references.filter((other) => other !== schema) }))]));
-    assert.deepEqual(answers, {
-      'geojson.draft-07.schema.json': ['JK0102', 'https://jarenjs.dev/schemas/geojson/draft-07#/definitions/feature/properties/properties'],
-      'geojson.jaren.schema.json': ['JK0102', 'https://jarenjs.dev/schemas/geojson-jaren#/%24defs/feature/properties/properties'],
-      'geojson.schema.json': ['JK0102', 'https://jarenjs.dev/schemas/geojson#/%24defs/feature/properties/properties'],
-      'jaren-jslt.authoring.schema.json': ['JK0103', 'https://jarenjs.dev/schemas/jaren-jslt/0.1/authoring#/%24defs/matchSpec/anyOf/1/anyOf'],
-      'jaren-jslt.draft-07.schema.json': ['JK0103', 'https://jarenjs.dev/schemas/jaren-jslt/0.1/draft-07#/definitions/matchSpec/oneOf/1/anyOf'],
-      'jaren-jslt.llm-profile.schema.json': ['JK0103', 'https://jarenjs.dev/schemas/jaren-jslt/0.1/llm-profile#/%24defs/matchSpec/anyOf/1/anyOf'],
-      'jaren-jslt.schema.json': ['JK0103', 'https://jarenjs.dev/schemas/jaren-jslt/0.1#/%24defs/matchSpec/oneOf/1/anyOf'],
-      'jaren-jtlt.draft-07.schema.json': ['JK0103', 'https://jarenjs.dev/schemas/jaren-jtlt/0.1/draft-07#/definitions/matchSpec/oneOf/1/anyOf'],
-      'jaren-jtlt.schema.json': ['JK0103', 'https://jarenjs.dev/schemas/jaren-jtlt/0.1#/%24defs/matchSpec/oneOf/1/anyOf'],
-      'jaren-query.authoring.schema.json': ['JK0102', 'https://jarenjs.dev/schemas/jaren-query/0.1/authoring#/%24defs/objectExpression'],
-      'jaren-query.draft-07.schema.json': ['JK0102', 'https://jarenjs.dev/schemas/jaren-query/0.1/draft-07#/definitions/mapConstructor/patternProperties'],
-      'jaren-query.llm-profile.schema.json': ['JK0102', 'https://jarenjs.dev/schemas/jaren-query/0.1/llm-profile#/%24defs/mapConstructor/additionalProperties'],
-      'jaren-query.schema.json': ['JK0102', 'https://jarenjs.dev/schemas/jaren-query/0.1#/%24defs/mapConstructor/patternProperties'],
-    });
+describe('the suite\'s grammars and authoring profiles', () => {
+  it('derive, except the JTLT grammar, whose segment puts a multi-branch allOf beside no type', () => {
+    const answers = Object.fromEntries([...grammars].map(([file, schema]) => [file, refusal(() => deriveStrictProfile(schema, { references: othersOf(schema) }))[0]]));
+    assert.deepEqual(answers, Object.fromEntries(grammarFiles.map((file) => [file, file.includes('jaren-jtlt.schema') ? 'JK0103' : 'no throw'])));
   });
+
+  // documents each original accepts, read through its profile both ways
+  for (const [file, documents] of Object.entries({
+    'packages/json/schemas/jaren-query.schema.json': [{ $sum: '$.prices[*]' }, { $for: { b: '$.books[*]' }, $where: { $gt: ['$b.price', 10] }, $return: '$b.title' }, '$.a', { $concat: ['a', '$.b', 'c'] }],
+    'packages/json/schemas/jaren-query.authoring.schema.json': [{ $sum: '$.prices[*]' }, { $for: { r: '$.records[*]' }, $return: '$r.id' }, '$.a', 3],
+    'packages/json/schemas/jaren-jslt.schema.json': [[{ match: '$..title', body: { $upper: '$' } }]],
+    'packages/json/schemas/jaren-jslt.authoring.schema.json': [[{ match: '$', body: { total: { $sum: '$.prices[*]' } } }],
+      { $jslt: '0.1', rules: [{ match: { schema: { type: 'object' } }, body: '$', mode: 'ids' }] }],
+    'packages/json/schemas/geojson.schema.json': [{ type: 'Feature', geometry: { type: 'Point', coordinates: [1, 2] }, properties: { name: 'a', n: [1] } }],
+    'packages/app/schemas/jaren-app.authoring.schema.json': [{ state: { count: 0 }, view: [{ match: '$', body: { tag: 'div', children: ['hello'] } }], actions: { inc: { state: { count: { $add: ['$.count', 1] } } } } }],
+    'packages/flow/schemas/jaren-fsm.authoring.schema.json': [{ initial: 'idle', states: ['idle', 'done'], transitions: [{ from: 'idle', to: 'done', event: 'GO' }] }],
+    'packages/flow/schemas/jaren-dag.authoring.schema.json': [{ $dag: '0.1', nodes: { input: { kind: 'input' }, output: { kind: 'output' } }, edges: [{ from: 'input', to: 'output' }] }],
+    'packages/flow/schemas/jaren-statechart.authoring.schema.json': [{ $fsm: '0.2', initial: 'idle', states: ['idle', { id: 'done', final: true }], transitions: [{ from: 'idle', to: 'done', after: 10 }] }],
+    'packages/flow/schemas/jaren-workflow.authoring.schema.json': [{ $workflow: '0.2', revision: '1', initial: 'done', states: { done: { final: true } } }],
+    'packages/db/schemas/jaren-model.authoring.schema.json': [{ $model: '0.1', collections: { notes: { schema: { type: 'object' }, key: '/id' } } }],
+  })) {
+    it(`${file.split('/').at(-1)}: the profile accepts toProfile(a document), and fromProfile gives one the original accepts`, () => {
+      const schema = grammars.get(file);
+      const strict = deriveStrictProfile(schema, { references: othersOf(schema) });
+      const check = original(schema, othersOf(schema));
+      const profile = profiled(strict.schema);
+      for (const document of documents) {
+        assert.equal(check(document), true, 'the original accepts the document');
+        const filled = strict.toProfile(document);
+        assert.equal(profile(filled), true, `the profile accepts ${JSON.stringify(filled).slice(0, 80)}`);
+        assert.equal(check(strict.fromProfile(filled)), true, `the original accepts ${JSON.stringify(strict.fromProfile(filled)).slice(0, 80)}`);
+      }
+    });
+  }
 });
 
 describe('the README example', () => {
