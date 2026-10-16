@@ -27,6 +27,16 @@ delete it or fix it.
 
 ## @jarenjs/core
 
+- [ ] **A text edit joins lines its replacement or anchor left unterminated.**
+  `@jarenjs/core/text/edits` uses replacement bytes verbatim, so an
+  `insert_after` of `- rule` (no final newline) after a line is glued to the
+  next line's text, and an insertion after a last line without a final newline
+  (`'a\nb'`, anchor `b`, replacement `X\n`) answers `'a\nbX\n'`. A model
+  rarely ends a replacement with a newline. Decide between an opt-in that ends
+  a non-empty replacement with the file's line terminator and terminates an
+  unterminated line before an insertion, and documenting the host's duty to
+  append it (the current text says only that replacements are verbatim).
+
 - [ ] **`ringSignedArea` and `ringWinding` throw an uncoded `TypeError` on a
   missing position.** `ringSignedArea([[0,0],[4,0],null,[0,4],[0,0]])` throws
   `Cannot read properties of null (reading '0')` and

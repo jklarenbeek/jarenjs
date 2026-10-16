@@ -600,3 +600,51 @@ or a hand-built preparation passed to `commitPrepared`, now needs the narrowing.
 for paired bootstrap/permutation inference, pure anchored file proposals with
 atomic groups, and the explicit Node-only named process executor. Financial chart
 formulas and their conventions are documented in [FINANCE](docs/FINANCE.md).
+
+## Text edits for model-authored patches
+
+`@jarenjs/core/text/edits` compiles anchored edits against frozen files and
+applies them to copies (see [host primitives](docs/HOST-PRIMITIVES.md) for the
+whole contract). A model anchors where it reads, mid-line, and two proposals
+often rewrite one section; three opt-in options admit such a patch without
+guessing: `anchor: 'widen'` widens a unique anchor to the lines it touches,
+`sectionEnd: markdownSectionEnd` extends a heading section without a `to` to the
+next heading of its level or higher (fenced code is not read as headings), and
+`overlap: 'first-wins'` keeps the first of two overlapping hunks in canonical
+order and withholds the later one naming the kept edit as `conflict`:
+
+```js
+import { hashContent } from '@jarenjs/core/string';
+import { compileTextEdits, applyTextEdits, markdownSectionEnd } from '@jarenjs/core/text/edits';
+
+const text = '# Guide\n\n## Format\n\n- A count is a bare integer.\n\n## Sources\n\n- inputs/ only.\n';
+const files = [{ path: 'guide.md', text, hash: hashContent(text) }];
+const options = { anchor: 'widen', sectionEnd: markdownSectionEnd, overlap: 'first-wins' };
+const base = { path: 'guide.md', baseHash: files[0].hash };
+// Two proposals rewrite the Format section; a third appends a rule after a phrase.
+const patch = [
+  { ...base, op: 'replace_section', anchor: 'Format', replacement: '## Format\n\n- Report pounds to one decimal.\n\n' },
+  { ...base, op: 'insert_after', anchor: 'inputs/', replacement: '- Never read outside inputs/.\n' },
+  { ...base, op: 'replace_section', anchor: '## Format',
+    replacement: '## Format\n\n- A count is a bare integer.\n- A decimal uses a period.\n\n' },
+];
+const proposal = compileTextEdits(files, patch, options);
+proposal.withheld; // [{ edit: 0, reason: 'overlap', conflict: 2 }]
+const preview = applyTextEdits(files, proposal.hunks, options);
+preview.files[0].text;
+// '# Guide\n\n## Format\n\n- A count is a bare integer.\n- A decimal uses a period.\n\n'
+// + '## Sources\n\n- inputs/ only.\n- Never read outside inputs/.\n'
+```
+
+Without the options `Format` and `inputs/` are withheld as
+`anchor-not-line-boundary`, and edit 2 replaces only the heading line, leaving
+the section's old bullet below the new ones. Edit 2 survives because canonical order
+compares the replacements once the lines tie, so the outcome does not depend on
+the order the proposals arrive in. `proposal.valid` is false because an edit was
+withheld; the hunks that remain are complete groups and apply. Pass the same
+options to both calls.
+A replacement is used verbatim, so it carries its own final newline. A throw
+from either call is a `CodedError` named `TextEditError` with a `JE` code from
+`TEXT_EDIT_CODES` and a `docPath` naming the option, file, edit or hunk at fault.
+*Upgrade: these throws were plain `RangeError`/`TypeError` instances without a
+code.*
