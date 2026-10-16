@@ -421,7 +421,7 @@ describe('deriveStrictProfile: a schema a closed profile would read wrong is ref
     ['a branch beside an object type that is not members', { type: 'object', properties: { a: { type: 'string' } }, anyOf: [{ $ref: '#/$defs/x' }], $defs: { x: { type: 'object', properties: {} } } }, ['JK0103', '#/anyOf/0/%24ref']],
     ['an if beside an object type', { type: 'object', properties: { a: { type: 'string' } }, if: { required: ['a'] } }, ['JK0103', '#/if']],
     ['an untyped allOf of two branches', { allOf: [{ type: 'string' }, { minLength: 1 }] }, ['JK0103', '#/allOf']],
-    ['a $ref beside properties', { type: 'object', properties: { a: { $ref: '#/$defs/n', properties: {} } }, $defs: { n: { type: 'number' } } }, ['JK0103', '#/properties/a/properties']],
+    ['a $ref beside properties', { $schema: D20, type: 'object', properties: { a: { $ref: '#/$defs/n', properties: {} } }, $defs: { n: { type: 'number' } } }, ['JK0103', '#/properties/a/properties']],
     ['a $dynamicRef', { type: 'object', properties: { a: { $dynamicRef: '#node' } } }, ['JK0104', '#/properties/a/%24dynamicRef']],
     ['a pointer that misses', { type: 'object', properties: { a: { $ref: '#/$defs/none' } } }, ['JK0104', '#/properties/a']],
     ['oneOf beside anyOf', { type: 'object', properties: { a: { oneOf: [{ type: 'string' }], anyOf: [{ type: 'integer' }] } } }, ['JK0105', '#/properties/a']],
@@ -521,7 +521,7 @@ describe('the correctness contract over the JSON-Schema-Test-Suite (draft 2020-1
         }
       }
     }
-    assert.deepEqual(counts, { groups: 222, forward: 538, accepted: 749, restoredValid: 556, restoredRefused: 193, roundTrip: 535 });
+    assert.deepEqual(counts, { groups: 223, forward: 539, accepted: 750, restoredValid: 557, restoredRefused: 193, roundTrip: 536 });
   });
 
   const suite = new URL('../../benchmark/suite/tests/draft2020-12/', import.meta.url);
@@ -543,7 +543,7 @@ describe('the correctness contract over the JSON-Schema-Test-Suite (draft 2020-1
       }
     }
     assert.deepEqual(accepted, groups.map((group) => `${group.file} / ${group.description}`));
-    assert.deepEqual(codes, { JK0009: 2, JK0102: 1, JK0103: 102, JK0104: 31, JK0108: 6 });
+    assert.deepEqual(codes, { JK0009: 2, JK0102: 1, JK0103: 102, JK0104: 29, JK0108: 7 });
   });
 });
 

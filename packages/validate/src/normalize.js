@@ -182,7 +182,9 @@ export function collectSameDocumentAnchors(root, options = {}) {
 /**
  * Resolve a same-document `$ref` — `#` (or a blank reference, which names the
  * document as `#` does), `#/` followed by a JSON Pointer, or
- * `#name` for a plain `$anchor` — to the schema it addresses. URI fragment
+ * `#name` for a plain `$anchor` — to the schema it addresses. The reference
+ * is read as the validator's URL parse reads it: the C0 controls and spaces
+ * around it are dropped, and every tab and line break inside it. URI fragment
  * escapes are decoded once, before JSON Pointer token escapes. Refs into other
  * documents are not followed: a normalizer compiles one schema, and reaching
  * a registered sibling would mean owning the whole resolution scope that
@@ -199,6 +201,22 @@ export function resolveSameDocumentRef(ref, root, anchors) {
 }
 
 /**
+ * The text of a reference as the validator's URL parse reads it, before it
+ * resolves: the C0 controls and spaces around it are dropped, and every tab
+ * and line break inside it (the URL standard's reading). Exported for
+ * `@jarenjs/emit`, which names a referenced type from this text.
+ * @param {string} ref - The reference as written
+ * @returns {string}
+ */
+export function referenceText(ref) {
+  let start = 0;
+  let end = ref.length;
+  while (start < end && ref.charCodeAt(start) <= 0x20) start++;
+  while (end > start && ref.charCodeAt(end - 1) <= 0x20) end--;
+  return ref.slice(start, end).replace(/[\t\n\r]/g, '');
+}
+
+/**
  * {@link resolveSameDocumentRef}, collecting into `trail` every container a
  * JSON Pointer passes on the way to its target, the root first.
  * @param {string} ref
@@ -208,7 +226,9 @@ export function resolveSameDocumentRef(ref, root, anchors) {
  * @returns {object|boolean|undefined}
  */
 function followSameDocumentRef(ref, root, anchors, trail) {
-  if (ref === '#' || isStringWhiteSpace(ref)) return root;
+  if (isStringWhiteSpace(ref)) return root;
+  ref = referenceText(ref);
+  if (ref === '' || ref === '#') return root;
   if (!ref.startsWith('#')) return undefined;
   let node = root;
   let tokens;

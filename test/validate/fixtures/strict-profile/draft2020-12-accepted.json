@@ -6446,6 +6446,24 @@
   },
   {
     "file": "ref.json",
+    "description": "$ref to boolean schema true",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$ref": "#/$defs/bool",
+      "$defs": {
+        "bool": true
+      }
+    },
+    "tests": [
+      {
+        "description": "any value is valid",
+        "data": "foo",
+        "valid": true
+      }
+    ]
+  },
+  {
+    "file": "ref.json",
     "description": "Recursive references between schemas",
     "schema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",

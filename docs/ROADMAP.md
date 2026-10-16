@@ -92,6 +92,15 @@ delete it or fix it.
 
 ## @jarenjs/validate
 
+- [ ] **A draft-07 plain-name `$id` as a reference target outside the
+  validator.** In a draft-07 document, `definitions: { a: { $id: '#foo', type:
+  'integer' } }` and `properties: { y: { $ref: '#foo' } }`: the validator
+  applies it (`{ y: 1 }` true, `{ y: '1' }` false), but `compileNormalizer`
+  with `coerceTypes` leaves `'1'` as sent, `@jarenjs/emit` types `y: unknown`,
+  and `deriveStrictProfile` refuses `JK0104` ("resolves to no schema"):
+  `collectSameDocumentAnchors` collects `$anchor` only. Collect a
+  fragment-only `$id` as a plain name where the place is read under a draft
+  before 2019-09.
 - [ ] **The normalizer reads a plain-anchor target under the root's draft.**
   `compileNormalizer` reads the target of a `#name` reference under the
   document's root `$schema`, where the validator reads it under the nearest

@@ -768,8 +768,11 @@ pipeline twice, as a client:
   profiles of `@jarenjs/json` (`scripts/lib/schema-profiles.js`) and every
   strict-profile node run through it.
 - **Bundling by node identity.** An index walk records every schema node's
-  `uri#pointer` and every resource (an `$id`) with its anchors
-  (`collectSameDocumentAnchors`); a `$ref` resolves with
+  `uri#pointer`, the draft it is read under, and every resource (an `$id`)
+  with its anchors (`collectSameDocumentAnchors`); a node the original reads
+  as its `$ref` alone (`readsRefAlone`, the rule `compileNormalizer` and
+  `@jarenjs/emit` read) is profiled as that `$ref`, and an `$id` beside it
+  sets no base. A `$ref` resolves with
   `resolveSameDocumentRef` inside the resource its URI names, and the target
   node gets one `$defs` name in the profile however many references reach it.
 - **The original's validator decides `null`.** Once every reference is

@@ -38,6 +38,7 @@ import {
   collectSameDocumentAnchors,
   detectSchemaDraft,
   readsRefAlone,
+  referenceText,
   resolveNormalizeSwitch,
   resolveSameDocumentRef,
 } from '@jarenjs/validate/normalize';
@@ -280,13 +281,15 @@ function droppedConstraints(node) {
 function resolveRef(ref, ctx) {
   const node = resolveSameDocumentRef(ref, ctx.root, ctx.anchors);
   if (node === undefined) return null;
+  // named from the text the resolver read, white space dropped as it drops it
+  const text = referenceText(ref);
   let name = null;
-  if (ref === '#') name = 'Root';
-  else if (ref.startsWith('#/')) {
-    const tokens = parseJSONPointer(ref.slice(1));
+  if (text === '#') name = 'Root';
+  else if (text.startsWith('#/')) {
+    const tokens = parseJSONPointer(text.slice(1));
     name = tokens.length > 0 ? tokens[tokens.length - 1] : 'Root';
   }
-  else name = ref.slice(1);
+  else name = text.slice(1);
   return { node, name };
 }
 

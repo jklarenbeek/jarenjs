@@ -308,7 +308,7 @@ failed validation, because a `false` under `not` would read as success.
 | `JK0105` | `SchemaCompileError` | `deriveStrictProfile` or `relaxSchema`: a node carries both `oneOf` and `anyOf`, and the profile turns `oneOf` into `anyOf` |
 | `JK0106` | `SchemaCompileError` | `deriveStrictProfile`: a member that `required`, or a `dependentRequired` (draft-07 `dependencies` list) firing on a declared member, requires is not declared under `properties` (or is declared `false`), so a closed object could never hold it |
 | `JK0107` | `SchemaCompileError` | `deriveStrictProfile` or `relaxSchema` was given an argument it does not take |
-| `JK0108` | `SchemaCompileError` | `deriveStrictProfile`: a schema that accepts no value (`false`, an `anyOf` branch `false`, `items: false`) has no strict form |
+| `JK0108` | `SchemaCompileError` | `deriveStrictProfile`: a schema that accepts no value (`false` or a `$ref` to it, an `anyOf` branch `false`, `items: false`, an object whose own `additionalProperties: false` refuses a member a branch requires) has no strict form |
 | `JK2001` | `SchemaRuntimeError` | Validation nests schema references deeper than `maxReferenceDepth` (default 256): refused where the bound is crossed |
 | `JK2002` | `SchemaRuntimeError` | A strict profile's `fromProfile`: a member carried as JSON text is a string that is not JSON text: refused naming its `dataPath` in the answer |
 | `JK2003` | `SchemaRuntimeError` | A strict profile's `fromProfile`: a map carried as `{ key, value }` entries names one key twice: refused naming the second entry's `dataPath` |
@@ -496,7 +496,8 @@ declares no draft is refused by the call that reaches it (read as 2019-09 it
 is `JK0011`); a document that declares a draft other than 2019-09 does not
 read it. A registered document's place that is no URI reference does not end
 its registration: the rest of the document is registered, and the compile that
-reads the place refuses it:
+reads the place refuses it. `deriveStrictProfile` refuses such an `$id` with the
+same message at the same place:
 
 ```text
 JK0010: $ref 'http://[x' is not a valid URI reference; correct it, percent-encoding any character a URI does not allow at #/%24ref

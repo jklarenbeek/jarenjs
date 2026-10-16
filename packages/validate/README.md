@@ -62,6 +62,14 @@ names the current resource, as `#` does: `{ "properties": { "p": { "$ref": "" }
 }, "type": "object" }` rejects `{ "p": 1 }`. *Upgrade: a blank reference was read as
 none, so that schema accepted `{ "p": 1 }`, and `{ "$ref": "" }` (a schema referring to
 itself) accepted everything where it is now refused `JK0001`, as its `#` spelling is.*
+A reference is read as the URL standard reads one: the C0 controls and spaces
+around it are dropped, and every tab and line break inside it, so
+`"#/$defs/n "` and `"#/$defs/\nn"` name `$defs/n` in the validator,
+`compileNormalizer` and `@jarenjs/emit` alike. *Upgrade: the normalizer (and
+the types emit derives through it) left such a reference unresolved, so
+`coerceTypes` did not coerce through it and its member was typed `unknown`;
+emit also named a type from the text as written, so `" #/properties/a"` named
+it `PropertiesA` where `"#/properties/a"` names it `A`.*
 `addMetaSchema` accepts the bundles from `@jarenjs/refs` without mutating them,
 and `validateSchema` always returns a boolean. A schema with no `$schema`
 uses draft-07 for both compilation and meta-schema validation.
@@ -1688,8 +1696,13 @@ What the derivation does, node by node:
 
 - **References are bundled.** Every `$ref` the schema uses — into itself, or
   into a document passed as `references` (each with an absolute `$id`) — is
-  rewritten to `#/$defs/<name>` of the one profile document. A recursive
-  reference stays recursive.
+  rewritten to `#/$defs/<name>` of the one profile document (names made
+  provider-safe stay distinct: `a b` and `a_b` become `a_b` and `a_b_2`). A
+  recursive reference stays recursive. A `$ref` the original reads alone —
+  before draft 2019-09, or where no draft is declared — is carried alone, its
+  siblings (an `$id` among them) dropped as the original ignores them; a
+  reference to `true` is carried as JSON text, and one to `false` is a member
+  the closed object leaves out, as a member declared `false` is.
 - **Objects are closed and every member is required.** An optional member's
   type is widened to also admit `null`. A member whose original schema
   already admits `null` is left as it is.
@@ -1698,10 +1711,15 @@ What the derivation does, node by node:
   keyword outside the strict subset are restated in the node's description,
   where the model still reads them; `oneOf` becomes `anyOf`, and an `allOf`
   of one branch becomes that branch. `relaxSchema` is that rule on its own.
+  An annotation the original never enforces (`default`, `examples`,
+  `deprecated`, `readOnly`, `writeOnly`), `errorMessage` and an `x-` keyword are dropped
+  with no note, since a note tells the model the original enforces it.
 - **A value of any shape is carried as JSON text.** A member that accepts
   any value (`{}`, `true`, a node with no type), a free-form
-  `{ "type": "object" }`, the items of an array with no `items` schema and a
-  tuple (`prefixItems`) become a `string` whose description says to write
+  `{ "type": "object" }`, the items of an array with no `items` schema, a
+  tuple (`prefixItems`) and an object or array whose `enum` or `const` lists
+  an object or an array (its values restated) become a `string` whose
+  description says to write
   the value as JSON; `fromProfile` parses it, and the original judges what
   it decodes to. Beside a union branch that also takes a string, the text is
   boxed as `{ "json": "…" }` so the two cannot be read for each other.
@@ -1715,7 +1733,9 @@ What the derivation does, node by node:
   as a closed object of its own. A branch that names a member the object
   also declares narrows it exactly when one side is an `enum` or `const`
   (the values the other side accepts are kept) or only adds value keywords;
-  a branch closed with `additionalProperties: false` keeps its own members.
+  a branch closed with `additionalProperties: false` keeps its own members,
+  and so does an object closed so beside its branches: a member only a
+  branch declares leaves it, and a branch that requires one accepts nothing.
 - **A root that is not one closed object is wrapped** as the one member
   `value` (strict modes take an object at the root); `fromProfile` unwraps it.
 
@@ -1748,7 +1768,18 @@ with a coded `SchemaCompileError` (`JK0102`–`JK0108`, in
 [ERROR-MESSAGES](./docs/ERROR-MESSAGES.md#9-coded-refusals)) naming the
 place and the repair, never answered with a profile that is silently wrong.
 The derivation also compiles the original, so a reference it cannot resolve
-is refused then (`JK0009`), not by the first answer.
+is refused then (`JK0009`), not by the first answer, and an `$id` that is no
+URI reference is refused `JK0010` at its place, as the validator refuses it.
+*Upgrade: a draft-07 or undeclared `$ref` with a sibling `type` was profiled
+as that type, which the original never reads; an `enum` or `const` of
+objects or arrays was closed into a profile no value satisfies (and
+`toProfile` emptied the value); an object closed with
+`additionalProperties: false` offered the members its branches declare,
+which the original always refuses; an object whose own
+`additionalProperties: false` refuses a member a branch requires is now
+refused `JK0108`, where a profile no answer satisfies was derived; a
+reference to a boolean schema was refused `JK0104`; a malformed `$id` threw
+an uncoded `TypeError`; and annotations were restated as enforced.*
 
 **Which strict modes it targets.** The subset is the one OpenAI's
 Structured Outputs and strict function calling accept (every member

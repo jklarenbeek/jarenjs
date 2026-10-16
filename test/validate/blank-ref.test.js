@@ -114,3 +114,39 @@ describe('a blank $recursiveRef', () => {
     assert.deepEqual(outcome({ $schema: D20, type: 'object', properties: { p: { $recursiveRef: '' } } }, [{ p: 1 }]), [true]);
   });
 });
+
+// A `$ref` is read as the URL standard reads a reference, as the validator's
+// own parse reads it: the C0 controls and spaces around it are dropped, and
+// every tab and line break inside it. The normalizer and `@jarenjs/emit`
+// resolve it to the same node the validator applies.
+describe('a $ref with white space around it, or a tab or line break inside it', () => {
+  const schema = (/** @type {string} */ ref) => ({ $schema: D20, type: 'object', properties: { kid: { $ref: ref } }, $defs: { n: { type: 'integer' } } });
+  const target = schema('#/$defs/n').$defs.n;
+
+  for (const ref of ['#/$defs/n ', ' #/$defs/n', '#/$defs/\nn', '\t#/$de\tfs/n\r\n', '\u0001#/$defs/n\u001f']) {
+    it(`${JSON.stringify(ref)}: the validator, the normalizer and the resolver read #/$defs/n`, () => {
+      const s = schema(ref);
+      assert.deepEqual(outcome(s, [{ kid: 1 }, { kid: 'x' }]), [true, false]);
+      assert.deepEqual(compileNormalizer(s, { coerceTypes: true })({ kid: '1' }), { kid: 1 });
+      assert.equal(resolveSameDocumentRef(ref, s), s.$defs.n);
+      assert.notEqual(resolveSameDocumentRef(ref, s), target, 'each schema its own node');
+    });
+  }
+
+  it('a tab or line break around "#" names the document, as "#" does', () => {
+    const s = { $schema: D20, type: 'object' };
+    for (const ref of ['#\t', '\n#', '#  ', '\u0000']) assert.equal(resolveSameDocumentRef(ref, s), s, JSON.stringify(ref));
+  });
+
+  it('a space inside a pointer token is part of the name, as before', () => {
+    const s = { $schema: D20, type: 'object', properties: { kid: { $ref: '#/$defs/a b' } }, $defs: { 'a b': { type: 'integer' } } };
+    assert.deepEqual(outcome(s, [{ kid: 1 }, { kid: 'x' }]), [true, false]);
+    assert.deepEqual(compileNormalizer(s, { coerceTypes: true })({ kid: '1' }), { kid: 1 });
+  });
+
+  it('a non-breaking space before "#" is no URL white space: the reference names another document, which nothing holds', () => {
+    const s = schema(' #/$defs/n');
+    assert.equal(resolveSameDocumentRef(' #/$defs/n', s), undefined);
+    assert.equal(typeof outcome(s, [{ kid: 1 }]), 'string', 'the validator refuses it');
+  });
+});
