@@ -3005,8 +3005,8 @@ with the code that produced them.
 
 | Native runtime / SQLite | Apply all links ms | Status loop ms | No-op apply loop ms | Observation loop ms | Measured at |
 |---|---:|---:|---:|---:|---|
-| node 24.20.0 / 3.53.4 | 10.212 | 235.660 | 238.488 | 62.644 | 2026-10-16T10:28:10.873Z |
-| bun 1.4.2 / 3.53.2 | 11.044 | 226.883 | 238.029 | 63.998 | 2026-10-16T10:28:07.824Z |
+| node 24.20.0 / 3.53.4 | 10.138 | 222.108 | 233.806 | 64.427 | 2026-10-16T15:44:26.801Z |
+| bun 1.4.2 / 3.53.2 | 10.976 | 219.246 | 236.174 | 61.160 | 2026-10-16T15:44:23.862Z |
 
 | Native runtime | Current document JSON bytes | Legacy-shaped JSON projection bytes | Side rows / key+value UTF-8 bytes | SQLite page growth bytes |
 |---|---:|---:|---:|---:|
