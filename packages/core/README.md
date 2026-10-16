@@ -32,8 +32,8 @@ interval over 1000 resamples took rank 26 for its lower bound instead of 25). `l
 left and bottom ones (they answered `false`). `pointInPolygon` counts a position on a hole's edge or vertex as inside the polygon (the
 boundary rule), where the hole's right and top edges and corners used to be inside and its left and
 bottom edges outside; only a position strictly inside the hole is outside. `pointInRing` answers
-`false` for a ring holding a position whose longitude or latitude does not read as a finite number
-(`5`, `{}`, `[1]`, `NaN`) or missing one, and `pointInPolygon` and `containsPosition` answer `false` for a
+`false` for a ring holding a member that is not a position of finite numbers
+(`5`, `{}`, `[1]`, `NaN`, and `'12'` or `[null, null]`, which arithmetic would read as numbers) or missing one, and `pointInPolygon` and `containsPosition` answer `false` for a
 polygon with any such ring, a hole included, where the even-odd count over its edges could answer `true`
 for a point outside the ring; `geometryArea` and `geometryLength` read the ring as holding no positions
 ([GEO](docs/GEO.md)). `isValidMACAddr` refuses an address that
@@ -111,10 +111,17 @@ the same text character for character (a key or fingerprint a host stored
 stays valid), the same difference, and the same cycle, depth or member refusal,
 a container met again deeper refused where the walk down it would pass 10000
 levels. A value past the budget pays a map lookup per container it reaches,
-shared or not. A text longer than the host's longest string escapes as the host's own
-`RangeError` (`Invalid string length`). *Upgrade: two separately built shared
-values took time exponential in their levels to compare, and keying or
-serializing a heavily shared value exhausted the heap and aborted the process.*
+shared or not. A text longer than the host's longest string (536870888
+characters on Node) is refused with a `CodedError` named `JsonLengthError`, code
+`JO2009` (`a value whose text is longer than the host's longest string cannot be
+serialized`, `… cannot be a cache identity` from `semanticKey`), the code the JSON
+value table of `@jarenjs/json/canonical` registers. The bound is the host's own,
+so every text the host can hold is written as before, and an ordinary value pays
+nothing for it. *Upgrade: two separately built shared values took time
+exponential in their levels to compare, and keying or serializing a heavily
+shared value exhausted the heap and aborted the process; a text past the host's
+longest string (27 levels of `d = [d, d]` on Node) escaped as the host's uncoded
+`RangeError` (`Invalid string length`).*
 
 The GeoJSON traversal of `@jarenjs/core/geo` holds a bound of its own:
 `eachPosition`, `bboxOf`, `positionsOf`, `centroidOf`, `geoDistance`, `geometryOf`,
@@ -490,6 +497,7 @@ reading it as a list threw.*
 | `JG0001` | a check answered a promise, which `checkOutcome` cannot read |
 | `JG0002` | a guarded hook answered a promise, which the synchronous `prepare` cannot await |
 | `JG2001` | a check answered invalid without naming an error |
+| `JG2002` | a guarded hook, snapshot, commit or restore threw a value whose code is not text |
 
 For a TypeScript consumer both answer `CheckOutcome<E>`, discriminated by
 `valid`. `E` is the error type the check's own answer carries: `ValidationError`
@@ -557,8 +565,18 @@ they were, so `{ valid: false }` prepared with no `errors` and committed
 `{ ok: false, stage: 'validation' }` with none.* A commit answers `{ ok: true, value, snapshot }` or
 `{ ok: false, stage, errors }` with `stage` one of `'validation'`, `'snapshot'`
 and `'commit'`: only the last two carry the thrown `cause`, and only `'commit'`
-the snapshot token and an optional `restoreError`. A throw is reported as a
-`GuardedFailure` `{ code, docPath, message, stage }`. *Upgrade: the refiner used
+the snapshot token and an optional `restoreError`. A throw from a hook,
+`snapshot`, `commit` or `restore` is reported as a `GuardedFailure`
+`{ code, docPath, message, stage }`, read as `checkCompile` reads a throw:
+`code` is the thrown value's own when it is non-empty text and the registered
+`JG2002` otherwise, `docPath` its own when it is text and `''` otherwise, and
+`message` its bare `reason`, else its `message`, else the value as text; an
+`applyFailure` hook still reports a throw from `apply` its own way. *Upgrade: a
+throw that carried no code was reported under `GUARDED`, which no table holds; a
+code or `docPath` that was not text (`42`, `7`) was passed on as it was; and a
+coded error's `message` was its composed text
+(`"JQ0002: unknown operator '$bogus' at /a"`) where it is now the bare reason
+(`"unknown operator '$bogus'"`) — read `code` and `docPath` for the rest.* *Upgrade: the refiner used
 to be typed `any` throughout; a result read without narrowing `ok` or `stage`,
 or a hand-built preparation passed to `commitPrepared`, now needs the narrowing.* See [host primitives](docs/HOST-PRIMITIVES.md)
 for paired bootstrap/permutation inference, pure anchored file proposals with

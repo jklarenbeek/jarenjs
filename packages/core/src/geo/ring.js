@@ -23,7 +23,9 @@ import { DEG } from './angle.js';
  *
  * Compares longitude and latitude only. A position may legally carry a
  * third element (altitude), and RFC 7946 does not require it to match
- * for the ring to close.
+ * for the ring to close. A ring whose first or last member is not a
+ * position, a list whose first two members are numbers (`5`, `'12'`,
+ * `[null, null]`), is not closed.
  *
  * @param {Array<number[]>} ring - positions
  * @returns {boolean}
@@ -37,7 +39,10 @@ export function isRingClosed(ring) {
     return false;
   const first = ring[0];
   const last = ring[n - 1];
-  return first[0] === last[0] && first[1] === last[1];
+  const x = first[0];
+  const y = first[1];
+  return x === last[0] && y === last[1] && typeof x === 'number' && typeof y === 'number'
+    && first.length >= 2 && last.length >= 2;
 }
 
 /**
@@ -91,7 +96,10 @@ export function ringWinding(ring) {
  * Uses the spherical excess of the polygon (the standard formula for a
  * ring of great-circle edges), so unlike `ringSignedArea` this is a real
  * measurement. Accurate to the sphere approximation — under half a
- * percent, the same bound as `haversineDistance`.
+ * percent, the same bound as `haversineDistance`. A ring of four or more
+ * holding a member that is not a position, a list whose first two
+ * members are numbers, has area NaN, as one holding a coordinate that is
+ * not finite does.
  *
  * @param {Array<number[]>} ring - positions
  * @param {number} [radius]
@@ -101,16 +109,26 @@ export function sphericalRingArea(ring, radius = EARTH_RADIUS) {
   const n = ring.length;
   if (n < 4)
     return 0; // fewer than 3 distinct positions bounds no area
+  // consecutive edges share a vertex, so its longitude and sine are
+  // carried forward rather than read and recomputed: one transcendental
+  // and one test that it is a position per vertex, not two
+  let position = ring[0];
+  let ax = position[0];
+  const ay = position[1];
+  if (typeof ax !== 'number' || typeof ay !== 'number' || !(position.length >= 2))
+    return NaN;
   let total = 0;
-  // consecutive edges share a vertex, so its sine is carried forward
-  // rather than recomputed: one transcendental per vertex, not two
-  let sinA = Math.sin(ring[0][1] * DEG);
-  for (let i = 0; i < n - 1; i++) {
-    const a = ring[i];
-    const b = ring[i + 1];
-    const sinB = Math.sin(b[1] * DEG);
-    total += (b[0] - a[0]) * DEG * (2 + sinA + sinB);
+  let sinA = Math.sin(ay * DEG);
+  for (let i = 1; i < n; i++) {
+    position = ring[i];
+    const bx = position[0];
+    const by = position[1];
+    if (typeof bx !== 'number' || typeof by !== 'number' || !(position.length >= 2))
+      return NaN;
+    const sinB = Math.sin(by * DEG);
+    total += (bx - ax) * DEG * (2 + sinA + sinB);
     sinA = sinB;
+    ax = bx;
   }
   return Math.abs(total * radius * radius * 0.5);
 }
@@ -118,9 +136,11 @@ export function sphericalRingArea(ring, radius = EARTH_RADIUS) {
 /**
  * Where a position lies against a ring: 0 outside, 1 on an edge or
  * vertex, 2 strictly inside (even-odd rule), and -1 for a ring holding a
- * position whose longitude or latitude does not read as a finite number,
- * or a missing one: its edges are not edges, an even-odd count over them
- * reports containment that is not there, and nothing lies inside it.
+ * member that is not a position of finite numbers (a list whose first two
+ * members are finite numbers; not `5`, `'12'`, `{ 0: 1, 1: 2 }`, `[null,
+ * null]` or `[NaN, 0]`), or missing one: its edges are not edges, an
+ * even-odd count over them reports containment that is not there, and
+ * nothing lies inside it.
  * @param {number} x
  * @param {number} y
  * @param {Array<number[]>} ring
@@ -140,7 +160,7 @@ function locateInRing(x, y, ring) {
     position = ring[i];
     const xi = position[0];
     const yi = position[1];
-    if (xi - xi !== 0 || yi - yi !== 0)
+    if (!Number.isFinite(xi) || !Number.isFinite(yi) || !(position.length >= 2))
       return -1;
     // Two cheap tests decide whether the exact predicate is needed at
     // all. An edge that neither straddles the ray nor holds the point
@@ -167,8 +187,8 @@ function locateInRing(x, y, ring) {
 }
 
 /**
- * Whether every position of a ring from `from` on has a longitude and a
- * latitude that read as finite numbers; a missing position does not.
+ * Whether every member of a ring from `from` on is a position of finite
+ * numbers, as {@link locateInRing} reads one; a missing position is not.
  * @param {Array<number[]>} ring
  * @param {number} from
  * @returns {boolean}
@@ -176,7 +196,7 @@ function locateInRing(x, y, ring) {
 function readsFinite(ring, from) {
   for (let i = from; i < ring.length; i++) {
     const position = ring[i];
-    if (position == null || position[0] - position[0] !== 0 || position[1] - position[1] !== 0)
+    if (position == null || !Number.isFinite(position[0]) || !Number.isFinite(position[1]) || !(position.length >= 2))
       return false;
   }
   return true;
@@ -193,8 +213,8 @@ function readsFinite(ring, from) {
  * mean by containment, and it is correct for any ring that does not
  * cross the antimeridian — which RFC 7946 tells producers to cut.
  *
- * A ring holding a position whose longitude or latitude does not read as
- * a finite number (a number, an object, a one-element array, `NaN`)
+ * A ring holding a member that is not a position of finite numbers (a
+ * number, text, an object, a one-element array, `[null, null]`, `NaN`)
  * contains nothing.
  *
  * @param {number} x - longitude
@@ -212,7 +232,7 @@ export function pointInRing(x, y, ring) {
  * polygon as for a ring, so a position on a hole's edge or vertex is on
  * the polygon's own boundary and is inside; a polygon that fills the
  * hole claims it too, and the two tile without a gap. A polygon any of
- * whose rings holds a position that does not read as finite numbers, or
+ * whose rings holds a member that is not a position of finite numbers, or
  * misses one, contains nothing: a hole that cannot be read cannot say
  * which points it removes, and a fence that answers inside for them is
  * the costly mistake.

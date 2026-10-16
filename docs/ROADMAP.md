@@ -27,18 +27,16 @@ delete it or fix it.
 
 ## @jarenjs/core
 
-- [ ] **A guarded hook's uncoded throw is reported under a code no table
-  holds.** `createGuardedRefiner`'s failure record for a throw from a hook,
-  snapshot, commit or restore takes the thrown value's `code` as it is and
-  `GUARDED` when it has none, so a plain `TypeError('bad edit')` from `apply`
-  reports `{ code: 'GUARDED', docPath: '', message: 'bad edit', stage: 'apply'
-  }`, a numeric `code: 42` with `docPath: 7` passes through as numbers, and a
-  coded error's `message` is its composed text (`"JQ0002: unknown operator
-  '$bogus' at /a"`) where `checkCompile` answers the bare `reason`. A repair
-  loop reading `code` meets an unregistered code. Wanted: a registered
-  fallback (or a host-chosen one, as `checkCompile` takes) and the same
-  reading of `code`, `docPath` and `reason`. Changing the reported code or
-  message is a change to answers hosts read today (a minor).
+- [ ] **A restore that throws `undefined` is reported as a restore that
+  succeeded.** `createGuardedRefiner`'s `commit` keeps the thrown value as
+  `restoreError` and tests it against `undefined`, so a `restore` hook that
+  throws `undefined` after a failed commit answers `{ ok: false, stage:
+  'commit', errors: [<commit failure>] }` with no `restoreError` and no
+  `'restore'` failure record, the answer of a restore that worked. A snapshot,
+  commit or hook that throws `undefined` is reported (as `JG2002`, message
+  `'undefined'`). Wanted: the restore's throw kept apart from its absence; a
+  new failure record in an answer hosts read (a patch, a wrong answer made
+  right).
 
 ## @jarenjs/json — JSONPath & addressing
 
@@ -46,31 +44,16 @@ delete it or fix it.
 (RFC 9535, passing the complete official compliance suite), JSON Patch
 (RFC 6902) and Merge Patch (RFC 7396). See
 [`packages/json/ARCHITECTURE.md`](../packages/json/ARCHITECTURE.md).
-- [ ] **`semanticKey`, `stableStringify` and `contentKey` escape uncoded on a
-  text longer than the host's longest string.** A heavily shared value (`d =
-  [d, d]`) is written in space linear in its distinct containers, with the
-  same text, until the text passes the host's longest string; then the host's
-  own `RangeError` (`Invalid string length`) escapes. A coded resource refusal
-  needs a new code in the JSON value table (`CANONICAL_CODES` of
-  `@jarenjs/json/canonical` and the `JO` table of the json README), and a
-  reader that flattens such a text (a `Map` lookup on the key, `contentKey`'s
-  hash) still holds it whole. The formula compile and batch keys call
-  `semanticKey` on host options (`limits`, `revision`).
-- [ ] **A position that is not a pair but reads as numbers is measured as
-  those numbers.** `geometryLength`, `geometryArea` and `containsPosition` of
-  `@jarenjs/core/geo` (and `$length`, `$area`, `$within`) read a present
-  position that is not an array of two numbers, but whose members arithmetic
-  reads as numbers, as those numbers: text `'12'` as `(1, 2)`, `{ 0: 1, 1: 2
-  }` as `(1, 2)`, `[null, null]` as `(0, 0)`, `[true, 0]` as `(1, 0)`, `['1',
-  '2']` as `(1, 2)`. `eachPosition` and `bboxOf` skip it, so a fence holding
-  one measures and contains as the fence those numbers spell, not as one
-  missing a position. A position that does not read as finite numbers (`5`,
-  `{}`, `'ab'`, `[1]`, `NaN`) already makes its ring or line hold no
-  positions; reading these the same way needs a type test per position in the
-  even-odd walk, the ring area and the line length, which they do not pay
-  today. `ringsClosed` compares a ring's ends as they read, so a ring whose
-  ends are both `5` is closed while the three measurements read it as holding
-  no positions.
+- [ ] **`canonicalizeJson` and `stableKeyString` escape uncoded on a text
+  longer than the host's longest string.** `canonicalizeJson([s, s])` of
+  `@jarenjs/json/canonical` and `stableKeyString([s, s])` of
+  `@jarenjs/json/query`, `s` a string of 2^28 characters, throw the host's own
+  `RangeError` (`Invalid string length`), where `stableStringify`,
+  `semanticKey` and `contentKey` of `@jarenjs/core/object` refuse the same
+  value with `JO2009` (`JsonLengthError`). The refusal belongs in each writer
+  (`canonicalizeJson` as a `JsonCanonicalizeError` with that code); the host's
+  refusal is told from a call stack exhausted by `isPastLongestString`, which
+  is internal to `@jarenjs/core`.
 
 ## @jarenjs/json — JSLT
 

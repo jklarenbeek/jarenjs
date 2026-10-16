@@ -204,10 +204,34 @@ describe('stableStringify, semanticKey and contentKey over shared values', () =>
     }
   });
 
-  it('a text longer than the host\'s longest string escapes as the host\'s RangeError, not a heap exhaustion', () => {
-    for (const key of [stableStringify, semanticKey, contentKey]) {
-      assert.throws(() => key(dag(40)), RangeError);
-      assert.throws(() => key(nest(300, dag(40))), RangeError);
+  /** @param {string} verb */
+  const tooLong = (verb) => ({ name: 'JsonLengthError', code: 'JO2009', docPath: undefined,
+    message: `JO2009: a value whose text is longer than the host's longest string cannot be ${verb}` });
+
+  it('a text longer than the host\'s longest string is refused JO2009, not the host\'s RangeError', () => {
+    // 40 levels write 4 * 2^40 - 3 characters, past the longest string of every host
+    assert.equal(dagText(4).length, 4 * 2 ** 4 - 3);
+    for (const [key, verb] of /** @type {const} */ ([[stableStringify, 'serialized'], [semanticKey, 'a cache identity'],
+      [contentKey, 'serialized']])) {
+      for (const value of [dag(40), nest(300, dag(40)), { a: dag(40) }, [1, dag(40)]])
+        assert.deepStrictEqual(outcome(() => key(value)), tooLong(verb), key.name);
     }
+  });
+
+  it('a key of 26 levels, 268435453 characters, is written whole', () => {
+    assert.equal(stableStringify(dag(26))?.length, 4 * 2 ** 26 - 3);
+    assert.equal(semanticKey(dag(26)).length, 4 * 2 ** 26 - 3);
+    assert.equal(semanticKey(dag(26), { ordered: true }).length, 4 * 2 ** 26 - 3);
+  });
+
+  it('a call stack exhausted inside the writer is not read as a text too long', () => {
+    // a RangeError that is not the host's refusal of a long string passes as it was
+    /** @param {number} n @returns {unknown} */
+    const exhaust = (n) => (n === 0 ? null : exhaust(n - 1));
+    const overflow = outcome(() => exhaust(1e7));
+    assert.equal(overflow.name, 'RangeError');
+    const value = { get a() { return exhaust(1e7); } };
+    for (const key of [stableStringify, semanticKey, contentKey])
+      assert.deepStrictEqual(outcome(() => key(value)), overflow, key.name);
   });
 });

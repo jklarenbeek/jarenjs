@@ -55,7 +55,8 @@ describe('a spatial operator over a ring holding a position that does not read a
   const area = (/** @type {any} */ g) => outcome({ $area: '$.g' }, { g }).value;
   const length = (/** @type {any} */ g) => outcome({ $length: '$.g' }, { g }).value;
 
-  for (const bad of [5, {}, 'ab', true, [1]]) {
+  // the last five read as numbers to arithmetic, and are no pair either
+  for (const bad of [5, {}, 'ab', true, [1], '12', { 0: 1, 1: 2 }, [null, null], [true, 0], ['1', '2']]) {
     it(`reads ${JSON.stringify(bad)} as a ring with no positions`, () => {
       const fence = { type: 'Polygon', coordinates: [[[0, 0], [4, 0], bad, [4, 4], [0, 4], [0, 0]]] };
       for (const at of [[2, 2], [6, 2], [1, 1]])

@@ -15,9 +15,10 @@
  * object a check did not put in a list is answered as the list of it.
  *
  * {@link checkCompile} makes a check of a compile that refuses by
- * throwing, and {@link CHECK_CODES} also holds the code a guarded
- * refiner throws when its synchronous `prepare` meets an asynchronous
- * hook (`@jarenjs/core/guarded`).
+ * throwing, and {@link CHECK_CODES} also holds the codes of a guarded
+ * refiner (`@jarenjs/core/guarded`): the one its synchronous `prepare`
+ * throws when it meets an asynchronous hook, and the one it reports for
+ * a throw that carries no text code.
  */
 
 import { CodedError } from './errors.js';
@@ -62,14 +63,14 @@ import { isThenable } from './function.js';
  */
 
 /**
- * The codes {@link checkOutcome} and a guarded refiner's `prepare`
- * raise or report.
- * @type {Readonly<Record<'JG0001' | 'JG0002' | 'JG2001', string>>}
+ * The codes {@link checkOutcome} and a guarded refiner raise or report.
+ * @type {Readonly<Record<'JG0001' | 'JG0002' | 'JG2001' | 'JG2002', string>>}
  */
 export const CHECK_CODES = Object.freeze({
   JG0001: 'a check answered a promise, which checkOutcome cannot read',
   JG0002: 'a guarded hook answered a promise, which the synchronous prepare cannot await',
   JG2001: 'a check answered invalid without naming an error',
+  JG2002: 'a guarded hook, snapshot, commit or restore threw a value whose code is not text',
 });
 
 /**

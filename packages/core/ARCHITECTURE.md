@@ -644,8 +644,8 @@ answer that decides a yes-or-no measurement. `geometryArea`, `geometryLength` an
 the fold and take everything else on it. `containsPosition` recurses on the
 host's stack for 256 collections or Features — the containment rows measured
 slower when the fold carried them — and only past that, or on a `TypeError`,
-takes the value again on the fold. The measurements read a malformed member without a check on their
-hot path: a geometry's leaf code reads members as a well-formed value needs, and
+takes the value again on the fold. The measurements read a malformed member with no check on their
+hot path beyond the per-position type test below: a geometry's leaf code reads members as a well-formed value needs, and
 a `TypeError` from a read measures that geometry again with each ring or line
 that is not an array, or misses a position, holding none; the fold reads
 collection lists that cannot be iterated as empty. A
@@ -654,7 +654,16 @@ nothing, so it is caught where its arithmetic shows it: on a finite radius a
 line of finite positions has a finite length and a ring a finite area, so a
 total that is not finite (a length, or an area that is infinite; a polygon's
 `NaN` or negative total is taken again where it is clamped) measures the
-geometry again, reading each such line or ring as holding none. Containment has
+geometry again, reading each such line or ring as holding none. A member that
+is not a position but reads as numbers to arithmetic (`'12'`, `[null, null]`)
+would total a finite number, so the ring-area and line-length loops test each
+position's type: they read each position once and carry its longitude to the
+next edge, which pays for a test that its first two members are numbers and
+that it has a length, and answer `NaN` for one that is not, which the total
+then shows. The test asks for a length, not an array: `Array.isArray` per
+position was a call the loops measured slower with, so a typed array or an
+object with a numeric `length` holding two numbers is measured as a position,
+where `eachPosition` and `bboxOf` skip it. Containment has
 no total to read, so the even-odd walk in `ring.js` tests each position once:
 it reads every position once and carries it to the next edge instead of
 reading both ends of every edge, which pays for that test. It answers a ring
@@ -1131,7 +1140,14 @@ GeoJSON traversal of `geo/`, past the deeper nests a walk on the host's stack
 answered there by default — and their two refusals (`JO2001` past the bound,
 `JO2002` at the member that closes a cycle, located by `locateCycle`) live in
 `walk.js`, a module internal to the package with no `exports` entry, so the
-walks refuse a value alike; `object.js` re-exports `locateCycle`.
+walks refuse a value alike; `object.js` re-exports `locateCycle`. So does the
+writers' text refusal: `stableStringify` and `semanticKey` refuse a text longer
+than the host's longest string (`JO2009`). The bound is the host's own, met by
+the host's refusal of a join, so the writers pay nothing and no text the host
+can hold is refused: one `try` around the walk turns the host's `RangeError`
+into the coded refusal, and `isPastLongestString` tells it from another
+`RangeError` (a call stack exhausted) by the message the host gives a string
+past its longest, read once from the host.
 
 Each of those walks has two forms with one answer. The plain form reaches a
 shared subtree each time it is referenced; it counts the containers it opens

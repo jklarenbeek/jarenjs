@@ -10,6 +10,7 @@ import {
   CANONICAL_CODES,
 } from '@jarenjs/json/canonical';
 import * as root from '@jarenjs/json';
+import { stableStringify } from '@jarenjs/core/object';
 
 const cyclic = {}; cyclic.self = cyclic;
 const deep = (() => { let v = 0; for (let i = 0; i < 1001; i++) v = [v]; return v; })();
@@ -50,9 +51,16 @@ describe('canonicalizeJson refuses each kind of non-JSON data with its own code'
 
   it('the cycle and depth codes are the ones equality and the walks raise', () => {
     assert.deepStrictEqual(Object.keys(CANONICAL_CODES),
-      ['JO2001', 'JO2002', 'JO2003', 'JO2004', 'JO2005', 'JO2006', 'JO2007', 'JO2008']);
+      ['JO2001', 'JO2002', 'JO2003', 'JO2004', 'JO2005', 'JO2006', 'JO2007', 'JO2008', 'JO2009']);
     assert.ok(Object.isFrozen(CANONICAL_CODES));
     assert.strictEqual(root.CANONICAL_CODES, CANONICAL_CODES);
+  });
+
+  it('the text bound code is the one the keys of the core raise', () => {
+    /** @type {any} */
+    let d = 0;
+    for (let i = 0; i < 40; i++) d = [d, d];
+    assert.throws(() => stableStringify(d), { name: 'JsonLengthError', code: 'JO2009' });
   });
 
   it('the constructor keeps its two-argument form', () => {

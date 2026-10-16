@@ -8,7 +8,10 @@ import {
 } from './index.js';
 import { compareCodePoints, hashContent } from './string.js';
 import { CodedError } from './errors.js';
-import { JSON_WALK_DEPTH_CEILING, WALK_CEILING, locateCycle, locateCycleIn, walkRefusal, walkTooDeep } from './walk.js';
+import {
+  JSON_WALK_DEPTH_CEILING, WALK_CEILING, isPastLongestString, locateCycle, locateCycleIn, textTooLong, walkRefusal,
+  walkTooDeep,
+} from './walk.js';
 
 export { locateCycle };
 
@@ -619,18 +622,21 @@ export function isUniqueDeepArray(arr) {
  * containers: past 2^18 containers written plainly, the text of each
  * container is remembered and joined wherever it is reached again, the
  * same text held as joined pieces. A text longer than the host's longest
- * string escapes as the host's `RangeError` (`Invalid string length`).
+ * string (536870888 characters on Node) is refused with a
+ * `JsonLengthError` `JO2009` (`a value whose text is longer than the
+ * host's longest string cannot be serialized`).
  * @param {*} value - The value to serialize
  * @returns {string|undefined} Deterministic JSON text
  * @throws {CodedError} `JO2001` past 10000 levels of nesting, `JO2002` on
- *   a cycle
- * @throws {RangeError} When the text is longer than the host's longest
- *   string
+ *   a cycle, `JO2009` for a text longer than the host's longest string
  */
 export function stableStringify(value) {
-  if (value === null || typeof value !== 'object')
-    return JSON.stringify(value);
-  return writeStable(value);
+  try {
+    return value === null || typeof value !== 'object' ? JSON.stringify(value) : writeStable(value);
+  }
+  catch (error) {
+    throw isPastLongestString(error) ? textTooLong('serialized') : error;
+  }
 }
 
 // The containers `stableStringify` and `semanticKey` write plainly, a
@@ -647,7 +653,8 @@ const PLAIN_WRITE_BUDGET = 1 << 18;
  * it where it is reached again. A container remembered held no cycle,
  * and one reached again deeper is refused when its height passes the
  * bound, where the plain walk down it would be. Text longer than the
- * host's longest string escapes as the host's `RangeError`.
+ * host's longest string throws the host's `RangeError`, which
+ * `stableStringify` refuses as `JO2009`.
  * @param {object} value - An array or object
  * @returns {string}
  */
@@ -784,9 +791,8 @@ function closeStableMember(frame, text, height) {
  * @param {*} value - The value to derive a fingerprint for
  * @returns {string} base-36 content hash of the stable serialization
  * @throws {CodedError} `JO2001` past 10000 levels of nesting, `JO2002` on
- *   a cycle
- * @throws {RangeError} When the serialization is longer than the host's
- *   longest string
+ *   a cycle, `JO2009` for a serialization longer than the host's longest
+ *   string
  */
 export function contentKey(value) {
   return hashContent(stableStringify(value) ?? '');
@@ -1021,8 +1027,8 @@ function semanticWalk(value, path, open, ordered, depth) {
  * checked in it, with the same `open` ancestors; a container remembered
  * held no cycle and no refusal, and one reached again deeper is refused
  * `JO2001` when its height passes the bound, where the plain walk down it
- * would be. Text longer than the host's longest string escapes as the
- * host's `RangeError`.
+ * would be. Text longer than the host's longest string throws the host's
+ * `RangeError`, which `semanticKey` refuses as `JO2009`.
  * @param {*} value
  * @param {string} path - JSON-Pointer-ish trail, for the error message
  * @param {Set<object>} open - Ancestors on the current path (cycle guard)
@@ -1146,8 +1152,8 @@ function semanticShared(value, path, open, ordered, depth, written) {
  * treat the refusal as "not cacheable" and compute afresh — never as
  * "reuse whatever shares the key". A value that shares subtrees costs its
  * distinct containers, as in {@link stableStringify}, with the same key;
- * a key longer than the host's longest string escapes as the host's
- * `RangeError`.
+ * a key longer than the host's longest string is refused with a
+ * `JsonLengthError` `JO2009` (`… cannot be a cache identity`).
  *
  * The identity covers OWN ENUMERABLE string-keyed properties, the same
  * surface JSON reads. Two values differing only in a non-enumerable
@@ -1159,9 +1165,7 @@ function semanticShared(value, path, open, ordered, depth, written) {
  * @throws {TypeError} When the value cannot be keyed injectively, or
  *   `options` is not a plain `{ ordered?: boolean }`
  * @throws {CodedError} `JO2002` on a cycle, `JO2001` past 10000 levels of
- *   nesting
- * @throws {RangeError} When the key is longer than the host's longest
- *   string
+ *   nesting, `JO2009` for a key longer than the host's longest string
  */
 export function semanticKey(value, options = undefined) {
   let ordered = false;
@@ -1184,6 +1188,8 @@ export function semanticKey(value, options = undefined) {
     error = thrown;
     semanticWritten = null;
   }
+  if (isPastLongestString(error))
+    throw textTooLong('a cache identity');
   if (error !== SEMANTIC_CYCLE)
     throw error;
   // searched in the walk's own member order, so the member named is the

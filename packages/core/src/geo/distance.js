@@ -186,17 +186,37 @@ export function circleBounds(lon, lat, distance, radius = EARTH_RADIUS) {
 
 /**
  * Total great-circle length of a line of positions, in metres. An empty
- * or single-position line has length 0.
+ * or single-position line has length 0. A line of two or more holding a
+ * member that is not a position, a list whose first two members are
+ * numbers (`5`, `'12'`, `{ 0: 1, 1: 2 }`, `[null, null]`, `['1', '2']`),
+ * has length NaN, as one holding a coordinate that is not finite does:
+ * the numbers arithmetic would read such a member as are not its
+ * coordinates.
  * @param {Array<number[]>} positions - GeoJSON positions
  * @param {number} [radius]
  * @returns {number}
  */
 export function lineLength(positions, radius = EARTH_RADIUS) {
+  const n = positions.length;
+  if (!(n >= 2))
+    return 0;
+  // each position is read once and carried as the start of the next
+  // edge, which pays for the test that it is one
+  let position = positions[0];
+  let ax = position[0];
+  let ay = position[1];
+  if (typeof ax !== 'number' || typeof ay !== 'number' || !(position.length >= 2))
+    return NaN;
   let total = 0;
-  for (let i = 1; i < positions.length; i++) {
-    const a = positions[i - 1];
-    const b = positions[i];
-    total += haversineDistance(a[0], a[1], b[0], b[1], radius);
+  for (let i = 1; i < n; i++) {
+    position = positions[i];
+    const bx = position[0];
+    const by = position[1];
+    if (typeof bx !== 'number' || typeof by !== 'number' || !(position.length >= 2))
+      return NaN;
+    total += haversineDistance(ax, ay, bx, by, radius);
+    ax = bx;
+    ay = by;
   }
   return total;
 }

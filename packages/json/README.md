@@ -219,7 +219,7 @@ The addressing bridge rounds this out: `jsonPointerFromJSONPath(singularQuery)` 
 
 ### Canonical JSON
 
-`canonicalizeJson(value)` writes the RFC 8785 canonical text of a JSON value — members sorted by UTF-16 code units, numbers in `Number::toString` form — for hashing and signing; `cloneJson` copies through it and `canonicalSha256` hashes it. Nothing is dropped or coerced: a value that is not JSON data throws a `JsonCanonicalizeError` (a `TypeError`) whose `code` names the kind of value and whose `dataPath` is a JSON Pointer to it (`NaN is not a JSON number at /a`). The codes are exported as `CANONICAL_CODES`; a cycle and a nesting past 1000 levels carry the codes `@jarenjs/core/object`'s equality and walks raise for the same conditions. *Upgrade: the error used to carry no `code`; its message is unchanged.*
+`canonicalizeJson(value)` writes the RFC 8785 canonical text of a JSON value — members sorted by UTF-16 code units, numbers in `Number::toString` form — for hashing and signing; `cloneJson` copies through it and `canonicalSha256` hashes it. Nothing is dropped or coerced: a value that is not JSON data throws a `JsonCanonicalizeError` (a `TypeError`) whose `code` names the kind of value and whose `dataPath` is a JSON Pointer to it (`NaN is not a JSON number at /a`). The codes are exported as `CANONICAL_CODES`; a cycle and a nesting past 1000 levels carry the codes `@jarenjs/core/object`'s equality and walks raise for the same conditions, and the same table holds `JO2009`, which `@jarenjs/core/object`'s keys raise for a text longer than the host's longest string. *Upgrade: the error used to carry no `code`; its message is unchanged.*
 
 | code | refused value |
 | --- | --- |
@@ -231,6 +231,7 @@ The addressing bridge rounds this out: `jsonPointerFromJSONPath(singularQuery)` 
 | `JO2006` | a function or a symbol |
 | `JO2007` | a string or member name with an unpaired surrogate |
 | `JO2008` | an object that is not a plain object or array (a `Date`, a `Map`, a class instance) |
+| `JO2009` | a value whose text is longer than the host's longest string (536870888 characters on Node), refused by `stableStringify`, `semanticKey` and `contentKey` of `@jarenjs/core/object` |
 
 ## The JSONPath compiler
 

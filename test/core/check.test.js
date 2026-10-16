@@ -192,7 +192,7 @@ describe('core — checkCompile turns a throwing compile into a check', function
 });
 
 describe('core — CHECK_CODES', function () {
-  it('names the guarded refusal of an asynchronous hook', function () {
-    assert.deepStrictEqual(Object.keys(CHECK_CODES), ['JG0001', 'JG0002', 'JG2001']);
+  it('names the guarded refusal of an asynchronous hook and the code of an uncoded throw', function () {
+    assert.deepStrictEqual(Object.keys(CHECK_CODES), ['JG0001', 'JG0002', 'JG2001', 'JG2002']);
   });
 });

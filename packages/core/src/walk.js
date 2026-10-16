@@ -5,7 +5,8 @@
  * most `JSON_WALK_DEPTH_CEILING` levels of nesting, the GeoJSON traversal
  * (`./geo/`) at most `GEOJSON_WALK_DEPTH_CEILING`, and a walk that reaches
  * its bound tells a cycle from a deep value here, so each refuses both
- * alike.
+ * alike. `stableStringify` and `semanticKey` refuse a text longer than the
+ * host's longest string here too.
  * Internal to the package: not an entry of its `exports`.
  */
 
@@ -25,6 +26,50 @@ export const JSON_WALK_DEPTH_CEILING = 10000;
 // answered nests well past `JSON_WALK_DEPTH_CEILING` levels; the bound sits
 // past them, so no value that answered on such a host is refused.
 export const GEOJSON_WALK_DEPTH_CEILING = 100000;
+
+/**
+ * The refusal of a value whose text `stableStringify` or `semanticKey`
+ * would write is longer than the host's longest string (536870888
+ * characters on Node). The bound is the host's: a text the host can hold
+ * is written, so no key that answered is refused.
+ * @param {string} verb - What could not be done, in the passive
+ * @returns {CodedError}
+ */
+export function textTooLong(verb) {
+  return new CodedError('JsonLengthError', 'JO2009',
+    `a value whose text is longer than the host's longest string cannot be ${verb}`);
+}
+
+// The message this host's `RangeError` for a string past its longest
+// carries, read from the host on first need; null when it raises none.
+/** @type {string | null | undefined} */
+let longestStringMessage;
+
+/**
+ * Whether a thrown value is the host's refusal of a string past its
+ * longest, never another `RangeError` (a call stack exhausted). The
+ * message is the host's own, read once by joining a text to itself until
+ * the host refuses it, which holds the joined pieces rather than copies.
+ * @param {unknown} error
+ * @returns {boolean}
+ */
+export function isPastLongestString(error) {
+  if (!(error instanceof RangeError))
+    return false;
+  if (longestStringMessage === undefined) {
+    longestStringMessage = null;
+    let text = 'x';
+    try {
+      for (let i = 0; i < 40; i++)
+        text += text;
+    }
+    catch (thrown) {
+      if (thrown instanceof RangeError)
+        longestStringMessage = thrown.message;
+    }
+  }
+  return error.message === longestStringMessage;
+}
 
 // What a walk on its own stack throws on reaching the bound: the caller
 // holds the root it needs to tell a cycle from a deep value, and turns it

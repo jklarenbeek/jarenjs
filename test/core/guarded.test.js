@@ -2,6 +2,8 @@
 import { it } from 'node:test';
 import assert from 'node:assert/strict';
 import { createGuardedRefiner } from '@jarenjs/core/guarded';
+import { checkCompile, CHECK_CODES } from '@jarenjs/core/check';
+import { CodedError } from '@jarenjs/core/errors';
 
 it('awaits async verdicts and plans without changing synchronous prepare', async () => {
   const original = { value: 1 }, proposal = { value: 2 }, writes = [];
@@ -162,11 +164,11 @@ it('a hook that throws a JG0002 of its own is reported, not rethrown', () => {
     { code: 'JG0002', docPath: '', message: 'JG0002: own', stage: 'candidate' }] });
 });
 
-it('a hook that throws undefined is reported as before', () => {
+it('a hook that throws undefined is reported under JG2002', () => {
   const engine = createGuardedRefiner({ read: () => ({}), validateProposal: () => true, apply: d => d,
     validateCandidate: () => { throw undefined; }, planCommit: n => n, commit: () => null });
   assert.deepEqual(engine.prepare({}, {}), { valid: false, errors: [
-    { code: 'GUARDED', docPath: '', message: 'undefined', stage: 'candidate' }] });
+    { code: 'JG2002', docPath: '', message: 'undefined', stage: 'candidate' }] });
 });
 
 it('a synchronous preparation over synchronous hooks answers as before', () => {
@@ -178,9 +180,59 @@ it('a synchronous preparation over synchronous hooks answers as before', () => {
   assert.deepEqual(make({ validateProposal: () => false }).prepare({ n: 1 }, { m: 2 }),
     { valid: false, errors: [{ code: 'JG2001', docPath: '', message: 'the value was rejected by a check that named no error' }] });
   assert.deepEqual(make({ apply: () => { throw new TypeError('bad edit'); } }).prepare({ n: 1 }, { m: 2 }),
-    { valid: false, errors: [{ code: 'GUARDED', docPath: '', message: 'bad edit', stage: 'apply' }] });
+    { valid: false, errors: [{ code: 'JG2002', docPath: '', message: 'bad edit', stage: 'apply' }] });
   assert.deepEqual(make({ apply: () => { throw new TypeError('bad edit'); }, applyFailure: error => ({ code: 'APPLY', message: error.message }) })
     .prepare({ n: 1 }, { m: 2 }), { valid: false, errors: [{ code: 'APPLY', message: 'bad edit' }] });
   assert.deepEqual(make({ planCommit: () => ({ valid: false, errors: [{ code: 'P1', docPath: '/n', message: 'no' }] }) })
     .prepare({ n: 1 }, { m: 2 }), { valid: false, errors: [{ code: 'P1', docPath: '/n', message: 'no' }] });
+});
+
+// The values a hook, snapshot, commit or restore may throw, and the record
+// each is reported as: the reading `checkCompile` gives a throw, under the
+// registered `JG2002` when the value carries no code that is text.
+const THROWN = [
+  ['a TypeError', () => new TypeError('bad edit'), { code: 'JG2002', docPath: '', message: 'bad edit' }],
+  ['a numeric code and docPath', () => Object.assign(new Error('n'), { code: 42, docPath: 7 }),
+    { code: 'JG2002', docPath: '', message: 'n' }],
+  ['an empty code', () => Object.assign(new Error('e'), { code: '', docPath: '/x' }), { code: 'JG2002', docPath: '/x', message: 'e' }],
+  ['a CodedError', () => new CodedError('JsonQueryError', 'JQ0002', "unknown operator '$bogus'", '/a'),
+    { code: 'JQ0002', docPath: '/a', message: "unknown operator '$bogus'" }],
+  ['a CodedError with no location', () => new CodedError('JsonQueryError', 'JQ0003', 'no location'),
+    { code: 'JQ0003', docPath: '', message: 'no location' }],
+  ['a text', () => 'plain', { code: 'JG2002', docPath: '', message: 'plain' }],
+  ['null', () => null, { code: 'JG2002', docPath: '', message: 'null' }],
+  ['undefined', () => undefined, { code: 'JG2002', docPath: '', message: 'undefined' }],
+];
+
+it('a throw from a hook is read as checkCompile reads it, under the registered JG2002', () => {
+  assert.ok('JG2002' in CHECK_CODES);
+  const read = checkCompile((thrown) => { throw thrown; }, { fallbackCode: 'JG2002' });
+  for (const [name, make, expected] of THROWN) {
+    assert.deepEqual(read(make()).errors[0], expected, name);
+    for (const [stage, hook] of [['shape', 'validateProposal'], ['apply', 'apply'], ['candidate', 'validateCandidate'], ['plan', 'planCommit']]) {
+      const engine = createGuardedRefiner({ read: () => ({}), validateProposal: () => true, apply: d => d,
+        validateCandidate: () => true, planCommit: n => n, commit: () => null, [hook]: () => { throw make(); } });
+      assert.deepEqual(engine.prepare({}, {}), { valid: false, errors: [{ ...expected, stage }] }, `${name} from ${hook}`);
+    }
+  }
+});
+
+it('a throw from snapshot, commit or restore is read the same way', async () => {
+  const base = { read: () => ({ n: 1 }), validateProposal: () => true, apply: d => d, validateCandidate: () => true,
+    planCommit: n => n };
+  for (const [name, make, expected] of THROWN) {
+    const snapshot = await createGuardedRefiner({ ...base, commit: () => null, snapshot: () => { throw make(); }, restore: () => null })
+      .commit({});
+    assert.deepEqual(snapshot.errors, [{ ...expected, stage: 'snapshot' }], `${name} from snapshot`);
+    const committed = await createGuardedRefiner({ ...base, commit: () => { throw make(); } }).commit({});
+    assert.deepEqual(committed.errors, [{ ...expected, stage: 'commit' }], `${name} from commit`);
+    // a restore that throws undefined is indistinguishable from one that
+    // succeeded (`restoreError` is the thrown value), so it is not read here
+    if (name === 'undefined')
+      continue;
+    const restored = await createGuardedRefiner({ ...base, commit: () => { throw new TypeError('disk'); },
+      snapshot: () => 't', restore: () => { throw make(); } }).commit({});
+    assert.deepEqual(restored.errors, [{ code: 'JG2002', docPath: '', message: 'disk', stage: 'commit' },
+      { ...expected, stage: 'restore' }], `${name} from restore`);
+  }
 });

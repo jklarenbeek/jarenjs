@@ -1,13 +1,15 @@
 //@ts-check
-import { checkOutcome } from './check.js';
+import { checkCompile, checkOutcome } from './check.js';
 import { CodedError } from './errors.js';
 import { isThenable } from './function.js';
 /** @import { CheckErrorsOf, UnnamedCheckError } from './check.js' */
 
 const copy = (value) => value === undefined ? undefined : JSON.parse(JSON.stringify(value));
 const HOOKS = { shape: 'validateProposal', apply: 'apply', candidate: 'validateCandidate', plan: 'planCommit' };
-const failure = (error, stage) => ({ code: error?.code ?? 'GUARDED',
-  docPath: error?.docPath ?? '', message: error?.message ?? String(error), stage });
+// a throw is read as `checkCompile` reads one, so a repair loop meets one
+// reading of `code`, `docPath` and `reason`, and a registered code
+const readThrow = checkCompile((thrown) => { throw thrown; }, { fallbackCode: 'JG2002' });
+const failure = (error, stage) => ({ ...readThrow(error).errors[0], stage });
 
 /**
  * The stage a failure record names: the hook that threw, or the snapshot,
@@ -16,10 +18,11 @@ const failure = (error, stage) => ({ code: error?.code ?? 'GUARDED',
  */
 
 /**
- * The record a thrown value is reported as. Its `code`, `docPath` and
- * `message` are the thrown value's own (strings for an `Error` or a
- * `CodedError`): `code` is `'GUARDED'` and `docPath` is `''` when it has
- * none, and `message` is the value as a string when it has no message.
+ * The record a thrown value is reported as, read as `checkCompile` of
+ * `@jarenjs/core/check` reads a throw: `code` is the value's own when it
+ * is non-empty text and the registered `JG2002` otherwise, `docPath` its
+ * own when it is text and `''` otherwise, and `message` its `reason` (a
+ * `CodedError`'s bare text), else its `message`, else the value as text.
  * @typedef {{ code: string, docPath: string, message: string, stage: GuardedStage }} GuardedFailure
  */
 

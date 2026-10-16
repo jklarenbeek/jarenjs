@@ -20,8 +20,9 @@
 // (`geometryArea`, `geometryLength`, `containsPosition`, `ringsClosed`)
 // read a malformed member (a list that cannot be iterated, a ring or line
 // that is not an array or misses a position) as nothing, and the first
-// three read a ring or line holding a position whose longitude or
-// latitude does not read as a finite number as holding no positions. For
+// three read a ring or line holding a member that is not a position of
+// finite numbers (`5`, `'ab'`, `NaN`, and `'12'` or `[null, null]`, which
+// arithmetic would read as numbers) as holding no positions. For
 // containment such a ring, a hole too, makes its polygon contain nothing.
 //
 // The one refusal is the walk's bound: a value is walked to 100000
@@ -319,7 +320,7 @@ function leafOf(value) {
 // measured again too, where `lineMeasure` and `measurableArea` (below)
 // read such a line or ring as holding no positions. Containment is
 // stricter: a polygon with any ring that cannot be read, or that holds a
-// position not reading as finite numbers (`pointInPolygon`), contains
+// member that is not a position of finite numbers (`pointInPolygon`), contains
 // nothing, its holes included, because a hole that cannot be read cannot
 // say which points it removes.
 
@@ -416,7 +417,7 @@ function measuredContains(geometry, lon, lat) {
  * Whether a polygon's rings, read as {@link readableRings} reads them,
  * contain a position: never when a ring cannot be read (one that is not
  * an array, or misses a position), as `pointInPolygon` answers for one
- * whose position does not read as finite numbers.
+ * holding a member that is not a position of finite numbers.
  * @param {any} rings
  * @param {number} lon
  * @param {number} lat
@@ -680,10 +681,12 @@ function polygonArea(rings, radius) {
 }
 
 // On a finite radius the area of a ring of finite positions and the length
-// of a line of them are finite, so a measure that is not names a position
-// whose longitude or latitude does not read as a finite number (a number,
-// an object, text, a one-element array, `NaN`): that ring or line holds no
-// positions and measures 0, as one missing a position does. Only a total
+// of a line of them are finite, so a measure that is not names a member
+// that is not a position of finite numbers (a number, an object, text, a
+// one-element array, `[null, null]`, `NaN`; `sphericalRingArea` and
+// `lineLength` answer NaN for one whose members are not numbers): that
+// ring or line holds no positions and measures 0, as one missing a
+// position does. Only a total
 // that is not finite is taken again ring by ring or line by line, so a
 // value of finite positions is measured as before; on a radius that is not
 // finite every measure is taken as it stands. A polygon's total that is not

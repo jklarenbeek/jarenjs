@@ -32,11 +32,15 @@ const hasOwn = Object.hasOwn;
 const RE_LONE_SURROGATE = /\p{Surrogate}/u;
 
 /**
- * The codes {@link canonicalizeJson} refuses with, one per kind of value
- * that is not JSON data. A cycle and a nesting past the bound are refused
- * with the codes `@jarenjs/core/object`'s equality and walks raise for the
- * same conditions (`JO2002`, `JO2001`), so one catch serves both.
- * @type {Readonly<Record<'JO2001' | 'JO2002' | 'JO2003' | 'JO2004' | 'JO2005' | 'JO2006' | 'JO2007' | 'JO2008', string>>}
+ * The codes of the JSON value family: {@link canonicalizeJson} refuses
+ * with `JO2001` to `JO2008`, one per kind of value that is not JSON data.
+ * A cycle and a nesting past the bound are refused with the codes
+ * `@jarenjs/core/object`'s equality and walks raise for the same
+ * conditions (`JO2002`, `JO2001`), so one catch serves both, and `JO2009`
+ * is the refusal of `stableStringify`, `semanticKey` and `contentKey` of
+ * `@jarenjs/core/object` for a value whose text is longer than the host's
+ * longest string.
+ * @type {Readonly<Record<'JO2001' | 'JO2002' | 'JO2003' | 'JO2004' | 'JO2005' | 'JO2006' | 'JO2007' | 'JO2008' | 'JO2009', string>>}
  */
 export const CANONICAL_CODES = Object.freeze({
   JO2001: 'a value nested deeper than the bound',
@@ -47,6 +51,7 @@ export const CANONICAL_CODES = Object.freeze({
   JO2006: 'a function or a symbol',
   JO2007: 'a string or member name with an unpaired surrogate',
   JO2008: 'an object that is not a plain object or array (a Date, a Map, a class instance)',
+  JO2009: 'a value whose text is longer than the host\'s longest string',
 });
 
 /**

@@ -1651,14 +1651,15 @@ holes included, contains no point, because a hole that cannot be read cannot
 say which points it removes; `$area` and `$length` measure its readable rings.
 `$bbox-intersects` compares the boxes of the positions that can be read, as
 `$bbox` draws them. `$bbox` and `$centroid` already
-skipped such members. A position that is not a pair but reads as numbers
-(`"12"`, `[null, null]`, `["1", "2"]`) is measured as those numbers. *Upgrade:
+skipped such members. So is a position that is not a pair but reads as numbers
+(`"12"`, `{"0": 1, "1": 2}`, `[null, null]`, `["1", "2"]`). *Upgrade:
 such an operand used to escape as an uncoded `TypeError` from `$area`,
 `$length` and `$within`; a ring or line holding a position that does not read
 as numbers answered `$length` as `NaN`, `$area` 0 for a polygon whose hole held
 it, and `$within` could be `true` for a point outside the ring; a polygon with a
 hole that is not an array or misses a position answered `$within` as its
-exterior does.*
+exterior does; a position that is not a pair but reads as numbers was measured
+as those numbers (`"12"` as `(1, 2)`).*
 
 | Operator | Definition |
 |---|---|

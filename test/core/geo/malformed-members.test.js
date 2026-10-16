@@ -12,7 +12,8 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { containsPosition, geometryArea, geometryLength, ringsClosed, pointInRing, pointInPolygon } from '@jarenjs/core/geo';
+import { containsPosition, geometryArea, geometryLength, ringsClosed, pointInRing, pointInPolygon, isRingClosed,
+  sphericalRingArea, lineLength } from '@jarenjs/core/geo';
 
 const RING = [[0, 0], [2, 0], [2, 2], [0, 2], [0, 0]];
 const SQUARE = { type: 'Polygon', coordinates: [RING] };
@@ -154,8 +155,10 @@ describe('the inputs that answered before answer the same', () => {
   });
 });
 
-describe('a position that does not read as finite numbers holds no positions', () => {
-  const NOT_FINITE = [5, {}, 'ab', true, [1], [], [NaN, 0], [0, Infinity], [0, 'a'], [undefined, undefined]];
+describe('a position that is not a pair of finite numbers holds no positions', () => {
+  // the last five read as numbers to arithmetic: as (1, 2), (1, 2), (0, 0), (1, 0) and (1, 2)
+  const NOT_FINITE = [5, {}, 'ab', true, [1], [], [NaN, 0], [0, Infinity], [0, 'a'], [undefined, undefined],
+    '12', { 0: 1, 1: 2 }, [null, null], [true, 0], ['1', '2']];
   const SQUARE4 = [[0, 0], [4, 0], [4, 4], [0, 4], [0, 0]];
   const OUTER = [[-8, -8], [8, -8], [8, 8], [-8, 8], [-8, -8]];
   const OUTER_AREA = geometryArea({ type: 'Polygon', coordinates: [OUTER] });
@@ -181,7 +184,7 @@ describe('a position that does not read as finite numbers holds no positions', (
   });
 
   /** @param {any} v @returns {string} */
-  const label = (v) => (Array.isArray(v) ? `[${v.map(label).join(', ')}]` : typeof v === 'string' ? `'${v}'` : v !== null && typeof v === 'object' ? '{}' : String(v));
+  const label = (v) => (Array.isArray(v) ? `[${v.map(label).join(', ')}]` : typeof v === 'string' ? `'${v}'` : v !== null && typeof v === 'object' ? JSON.stringify(v) : String(v));
   for (const bad of NOT_FINITE) {
     it(`a ring or line holding ${label(bad)} is read as one with no positions`, () => {
       for (const at of [1, 2, 3]) {
@@ -270,14 +273,50 @@ describe('a position that does not read as finite numbers holds no positions', (
     assert.equal(geometryArea({ type: 'MultiPolygon', coordinates: [[null], [OUTER]] }, Infinity), Infinity);
   });
 
-  it('a position that is not a pair but reads as numbers is measured as those numbers', () => {
+  it('a position that is not a pair but reads as numbers is not measured as those numbers', () => {
     for (const [position, as] of /** @type {[any, number[]][]} */ ([['12', [1, 2]], [{ 0: 1, 1: 2 }, [1, 2]],
       [[null, null], [0, 0]], [[true, 0], [1, 0]], [['1', '2'], [1, 2]]])) {
       const read = { type: 'Polygon', coordinates: [[[0, 0], [4, 0], position, [0, 4], [0, 0]]] };
       const pair = { type: 'Polygon', coordinates: [[[0, 0], [4, 0], as, [0, 4], [0, 0]]] };
-      assert.deepStrictEqual(measures(read), measures(pair), JSON.stringify(position));
-      assert.equal(containsPosition(read, 0.5, 1), containsPosition(pair, 0.5, 1), JSON.stringify(position));
+      assert.deepStrictEqual(measures(read), NOTHING, JSON.stringify(position));
+      assert.notDeepStrictEqual(measures(pair), NOTHING, JSON.stringify(position));
+      assert.equal(containsPosition(read, 0.5, 1), false, JSON.stringify(position));
     }
+  });
+
+  it('a position with an altitude is measured as its pair', () => {
+    const pair = { type: 'Polygon', coordinates: [SQUARE4] };
+    const high = { type: 'Polygon', coordinates: [SQUARE4.map(([x, y], i) => [x, y, i])] };
+    assert.deepStrictEqual(measures(high), measures(pair));
+    assert.deepStrictEqual(measures({ type: 'LineString', coordinates: high.coordinates[0] }),
+      measures({ type: 'LineString', coordinates: SQUARE4 }));
+    assert.equal(pointInRing(2, 2, high.coordinates[0]), true);
+  });
+
+  it('a ring whose ends are not pairs is not closed', () => {
+    for (const end of [5, '12', { 0: 1, 1: 2 }, [null, null], [true, 0], ['1', '2'], [1], 'ab']) {
+      const ring = [end, [1, 1], [2, 0], end];
+      assert.equal(ringsClosed({ type: 'Polygon', coordinates: [ring] }), false, label(end));
+      assert.equal(ringsClosed(deep({ type: 'Polygon', coordinates: [ring] })), false, label(end));
+      assert.equal(isRingClosed(ring), false, label(end));
+    }
+    // a pair closes the ring whatever its altitudes, as before
+    assert.equal(isRingClosed([[0, 0, 1], [1, 1], [2, 0], [0, 0, 2]]), true);
+  });
+
+  it('the ring helpers read such a position as not finite', () => {
+    for (const bad of ['12', { 0: 1, 1: 2 }, [null, null], [true, 0], ['1', '2']]) {
+      assert.deepStrictEqual(sphericalRingArea(square(bad, 2)), NaN, label(bad));
+      assert.deepStrictEqual(sphericalRingArea([bad, ...SQUARE4.slice(1, 4), bad]), NaN, label(bad));
+      // an unclosed ring is read from its first position too
+      assert.deepStrictEqual(sphericalRingArea([bad, ...SQUARE4.slice(1, 4)]), NaN, label(bad));
+      assert.equal(geometryArea({ type: 'Polygon', coordinates: [[bad, ...SQUARE4.slice(1, 4)]] }), 0, label(bad));
+      assert.deepStrictEqual(lineLength([[0, 0], bad]), NaN, label(bad));
+      assert.deepStrictEqual(lineLength([bad, [0, 0]]), NaN, label(bad));
+    }
+    // a line that is not a list has no length to measure, as before
+    for (const line of [5, {}, [], [[0, 0]]])
+      assert.equal(lineLength(/** @type {any} */ (line)), 0, label(line));
   });
 });
 
