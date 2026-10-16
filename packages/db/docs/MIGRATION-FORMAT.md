@@ -412,10 +412,18 @@ that rebuilds exactly the ones that differ:
 - on PostgreSQL, a collection table without an index a fresh store creates
   beside a declared index over a member of several scalar kinds, one per kind
   besides the column's (`c_by_q$text` beside `c_by_q` over `['number',
-  'string']`, POSTGRESQL.md): no earlier release created them, and a link that
-  gives a member another kind beside an index it keeps plans none. A comparison
-  of that kind reads every row until the link creates the index; the link
-  changes nothing else, and `report.upgraded` names it `c.c_by_q$text`.
+  'string']`, POSTGRESQL.md), unique beside a unique index: no earlier release
+  created them, and a link that gives a member another kind beside a non-unique
+  index it keeps plans none. A comparison of that kind reads every row, and a
+  unique index refuses a duplicate of the column's kind alone, until the link
+  creates the index; the link changes nothing else, and `report.upgraded`
+  names it `c.c_by_q$text`. Where the table already holds documents a unique
+  one would refuse — two `q: 'b'` that the earlier table stored — the plan
+  refuses `JD0023` (`class: 'constraint'`) before any step, naming them in
+  `duplicates` (`[['a', 'b']]`) beside `collection` and `index`; change or
+  remove all but one of each and plan again. A duplicate written between the
+  plan and the apply fails the link `JD0023` (`class: 'constraint'`), as any
+  unique index created over violating rows does.
 
 The steps are the ones a model change plans for the same column: drop the
 indexes over it (and the CHECK that reads it), drop the column, add it as a fresh

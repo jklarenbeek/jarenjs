@@ -65,25 +65,44 @@ planner's selectivity estimate could not price; where the member is indexed the
 typed form is the column itself, which the planner estimates from its statistics.
 
 A member the schema lets hold several scalar kinds (`['number', 'string']`)
-has its generated column in its first type, so a comparison of another kind
-reads the member's typed extraction at that kind — the `CASE` a column of that
-kind would hold. Beside each declared index over one such member the store
-creates one index per other kind over exactly that extraction, named
-`<collection>_<index name>$<kind>` (`c_by_q$text`; a name past PostgreSQL's
-63 bytes is clipped beside a short hash of it), and the server seeks it for
-that comparison, a range and a bound membership list alike; `explain().indexes`,
-which names the indexes whose columns a statement spells, does not name it. It is never unique,
-so a unique index over the member still keys its first type alone, as it
-always has. The statement is the same with or without it: a table an earlier
-release created has none and answers as before by reading every row, and
-`planColumnUpgrade` adds them (MIGRATION-FORMAT §3). A link creates them with
-the declared index they sit beside, drops them with it or where the member
-stops holding the kind, and plans none beside an index it keeps — a table
-given the kind so is `planColumnUpgrade`'s to complete. `introspect()` reads
-each back as its kind of the member's union, after the column's type. A
-composite or conditional index, and a path whose steps the dialect guards (an
-index step or a digit name, below), have none. A bulk load writes the extra
-index; a single write's cost is the round trip it already pays.
+has its generated column in its first type, which reads every other kind as
+`NULL`, so a comparison of another kind reads the member's typed extraction at
+that kind — the `CASE` a column of that kind would hold. Beside each declared
+index over one such member the store creates one index per other kind over
+exactly that extraction, named `<collection>_<index name>$<kind>`
+(`c_by_q$text`; a name past PostgreSQL's 63 bytes is clipped beside a short
+hash of it), and the server seeks it for that comparison, a range and a bound
+membership list alike; `explain().indexes`, which names the indexes whose
+columns a statement spells, does not name it.
+
+Beside a unique index those indexes are unique too, and they stand beside every
+shape of it: a composite index has one per combination of the kinds its members
+hold other than all their first kinds together (`c_by_qr$text$boolean`), keying
+each such member by its extraction at that kind and every other member by its
+column; a conditional one carries the declared condition; and a member under a
+guarded path step (below) is read under the guard its column is. Together with
+the declared index they key every scalar kind, so a duplicate of any kind is
+refused `JD2005` (`class: 'constraint'`) as SQLite refuses it, and a value of
+one kind never meets a value of another: `1` and `'1'` are two keys on both
+engines. A boolean meets booleans alone, as the query engine compares it, where
+SQLite's untyped column holds `true` as `1` and refuses the pair. A member whose
+union lists a container first has a `jsonb` column that holds every kind; beside
+another member it is keyed by that column. A non-unique composite or
+conditional index, and a non-unique one over a path whose steps the dialect
+guards, has none.
+
+The statement is the same with or without them: a table an earlier release
+created has none, answers as before by reading every row, and refuses a
+duplicate of the first kind alone; `planColumnUpgrade` adds them
+(MIGRATION-FORMAT §3), and refuses the plan `JD0023` before any step where the
+table already holds documents a unique one would refuse, naming them. A link
+creates them with the declared index they sit beside, drops them with it or
+where the member stops holding the kind, and creates a unique one also beside
+a unique index it keeps when it gives the member the kind; beside a non-unique
+index it keeps it plans none — a table given the kind so is
+`planColumnUpgrade`'s to complete. `introspect()` reads each back as its kind of
+the member's union, after the column's type. A bulk load writes the extra
+indexes; a single write's cost is the round trip it already pays.
 
 A path step `#>` could read off the wrong kind of container is guarded. `#>`
 takes the element `0` of an array and the key `0` of an object for the one path

@@ -45,7 +45,7 @@ import { modelIdentity, migrationIdentity } from './migration-identity.js';
 import { migrationChecksum, historyStatements, readMigrationHistory, checkHistoryObservation, checkAppliedRows,
   historyHeader, identityRows, checkHistoryIdentity, checkHistoryChain, writeIdentityRows } from './migration-history.js';
 export { HISTORY_TABLE, ENGINE_TABLES };
-import { planCollection, verifyShape, legacyColumnTypes, planEntity, planJoinTable, joinIndexName, clipToBytes, plannedExpression, acceptsColumn, columnExpression, creationOrder, kindIndexSql, kindIndexDropSql } from './ddl.js';
+import { planCollection, verifyShape, legacyColumnTypes, planEntity, planJoinTable, joinIndexName, clipToBytes, plannedExpression, acceptsColumn, columnExpression, creationOrder, kindIndexSql, kindIndexTerms, kindIndexDropSql } from './ddl.js';
 import { normalizeEntities, explainMapping, asHistory } from './model.js';
 import { derivedValue, memberAt, registerDeriveFunctions } from './derive.js';
 import { mergeEntityRow } from './graph.js';
@@ -1022,10 +1022,12 @@ function collectionSteps(name, fromPlan, toPlan, toCollection, dialect, mapping)
         });
       }
     }
-    // an index beside a declared one arrives with it; one a table lacks beside an index
-    // it keeps is `planColumnUpgrade`'s to add
+    // an index beside a declared one arrives with it, and a unique one also where the
+    // link gives a kept index's member the kind (it refuses that kind's duplicates); one
+    // a table lacks beside an index it keeps is otherwise `planColumnUpgrade`'s to add
+    const fromKindIndexes = new Set((fromPlan.kindIndexes ?? []).map((/** @type {any} */ index) => index.name));
     for (const index of toPlan.kindIndexes ?? []) {
-      if (createdIndexes.has(index.of)) {
+      if (createdIndexes.has(index.of) || (index.unique && !fromKindIndexes.has(index.name))) {
         steps.push({ kind: 'ddl', sql: kindIndexSql(dialect, name, index),
           note: `create the ${index.kind} index '${index.name}' beside '${index.of}' on '${name}'` });
       }
@@ -1330,7 +1332,12 @@ export const planModelMigration = planMigration;
  * that definition (and the indexes over its column) and creates it again as
  * this release creates it, through the same steps a model change plans; and a
  * many-to-many join table without the index over its second key column, which
- * no earlier release created, gets that index. Every
+ * no earlier release created, gets that index; and so does a collection
+ * table without an index a fresh store creates beside a declared index over a
+ * member of several kinds. Where such an index is unique and the table holds
+ * documents that duplicate one another at its kind (an earlier release's
+ * unique index keyed the member's first kind alone), the plan refuses
+ * `JD0023` (`class: 'constraint'`) naming them, before any step. Every
  * stored document stays; the columns are computed again by the database. A
  * database already current plans no step, which is how a host learns that a
  * store is behind: the plan is the probe. The link goes from the model to
@@ -1379,9 +1386,58 @@ export function planColumnUpgrade(connection, model, options = undefined) {
       }
       const migration = { $migration: MIGRATION_VERSION, id: options?.id ?? `upgrade-${to.slice(0, 8)}`,
         from: to, to, identity, steps };
-      return { migration, report: { upgraded } };
+      const created = new Set(steps.map((step) => step.sql));
+      const unique = collections.flatMap(({ plan }) => (plan.kindIndexes ?? [])
+        .filter((/** @type {any} */ index) => index.unique && created.has(kindIndexSql(dialect, plan.table, index)))
+        .map((/** @type {any} */ index) => ({ plan, index })));
+      return chain(refuseDuplicates(connection, unique), () => ({ migration, report: { upgraded } }));
     })));
 }
+
+/**
+ * Refuse, before any step runs, a link that creates a unique index beside a
+ * declared one (`ddl.js` `kindIndexesOf`) over a table that already holds two
+ * documents with one value of a kind the declared index's column did not
+ * key: an earlier release's table, whose unique index refused the first
+ * kind's duplicates alone, stored them. `JD0023` (`class: 'constraint'`)
+ * names each set of such documents, so the host can change them first.
+ * @param {any} connection
+ * @param {{ plan: any, index: any }[]} indexes
+ * @returns {any} value-or-promise
+ */
+function refuseDuplicates(connection, indexes) {
+  const dialect = connection.dialect;
+  const q = dialect.quoteIdentifier;
+  const next = (/** @type {number} */ i) => {
+    if (i >= indexes.length) return null;
+    const { plan, index } = indexes[i];
+    const keys = kindIndexTerms(dialect, index);
+    const holds = [...keys.map((key) => `${key} IS NOT NULL`), ...(index.where === undefined ? [] : [`(${index.where})`])].join(' AND ');
+    const sql = `SELECT ${q('k')}, ${q('g')} FROM (SELECT ${q(plan.keyColumn)} AS ${q('k')}, `
+      + `count(*) OVER (PARTITION BY ${keys.join(', ')}) AS ${q('n')}, dense_rank() OVER (ORDER BY ${keys.join(', ')}) AS ${q('g')} `
+      + `FROM ${q(plan.table)} WHERE ${holds}) AS ${q('d')} WHERE ${q('n')} > 1 ORDER BY ${q('g')}, ${q('k')} LIMIT ${DUPLICATES_NAMED + 1}`;
+    return chain(connection.prepare(sql), (statement) => chain(statement.all([]), (rows) => {
+      if (rows.length === 0) return next(i + 1);
+      /** @type {Map<string, string[]>} */
+      const groups = new Map();
+      for (const row of rows.slice(0, DUPLICATES_NAMED)) {
+        const group = String(row.g);
+        groups.set(group, [...(groups.get(group) ?? []), String(row.k)]);
+      }
+      const duplicates = [...groups.values()];
+      const declared = index.declared.name;
+      throw Object.assign(refuse('JD0023', `the unique index '${declared}' of collection '${plan.table}' refuses a duplicate `
+        + `of any kind its members hold, but the table holds documents that duplicate one another at a kind the index's `
+        + `column did not key, which an earlier release stored: ${duplicates.map((keys) => keys.map((key) => JSON.stringify(key)).join(' and ')).join('; ')}`
+        + `${rows.length > DUPLICATES_NAMED ? ', and more' : ''} — change or remove all but one of each, then plan the upgrade again`),
+      { class: 'constraint', retryable: false, collection: plan.table, index: declared, duplicates });
+    }));
+  };
+  return next(0);
+}
+
+/** How many duplicate documents a refused upgrade names. */
+const DUPLICATES_NAMED = 20;
 
 /**
  * The join tables of the model that exist without the index over their

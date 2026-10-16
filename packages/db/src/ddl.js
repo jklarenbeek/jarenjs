@@ -853,7 +853,7 @@ export function planCollection(name, collection, dialect, options = undefined) {
     generated,
     checks: intervals.map((interval) => ({ name: interval.constraint, sql: interval.sql })),
   };
-  const kindIndexes = kindIndexesOf(collection.schema, dialect, indexes);
+  const kindIndexes = kindIndexesOf(collection.schema, dialect, indexes, generated);
   const createSql = [
     dialect.ddl.createTable(tableShape),
     ...indexes.map((index) => dialect.ddl.createIndex({
@@ -908,10 +908,12 @@ export function planCollection(name, collection, dialect, options = undefined) {
     doubleColumns: new Set(generated.filter((g) => g.kind === 'key'
       || g.type === dialect.typeFor('number', 'generated')).map((g) => g.name)),
     /** The indexes beside a declared index over a member of several kinds
-     * that seek its other kinds ({@link kindIndexesOf}): each one's name, its
-     * declared index's (`of`), the kind and the expression it keys. Kept apart
-     * from `expected.indexes`, since no column is keyed; a table an earlier
-     * release created goes without them and opens as it is. */
+     * that key its other kinds ({@link kindIndexesOf}): each one's name, its
+     * declared index's (`of`), the kinds (`kind`, `text` or `text$boolean`),
+     * whether it is unique, its keys (a column or the member read at a kind)
+     * and its condition. Kept apart from `expected.indexes`, since a key is
+     * read back as an expression; a table an earlier release created goes
+     * without them and opens as it is. */
     kindIndexes,
     /** The generated columns that read their member off the document under
      * the dialect's guard (a path that leaves a container open), as the
@@ -961,38 +963,68 @@ export function planCollection(name, collection, dialect, options = undefined) {
 }
 
 /**
- * The indexes that let a comparison of another kind seek a member of several
- * scalar kinds, on an engine whose generated columns carry a real SQL type:
- * the column a declared index keys holds the member's first type, so a
- * comparison of another kind reads the member out of the document at that
- * kind (the dialect's `jsonExtract`, as a native statement spells it), and
- * an index over exactly that read is the one the server seeks for it. One per other
- * kind (`integer` and `number` are one), beside each declared index over a
- * single member path with no condition; never unique, so it refuses nothing
- * the declared index admits. A path whose read the dialect guards (a step
- * off a container the path text cannot tell apart) has none: its read
- * changes with how the model declares the container.
+ * The indexes beside a declared index over a member of several scalar kinds,
+ * on an engine whose generated columns carry a real SQL type. The column a
+ * declared index keys holds the member's first type and reads every other
+ * kind as NULL, so a comparison of another kind reads the member out of the
+ * document at that kind (the dialect's `columnRead`, as a native statement
+ * spells it), and a unique index refuses a duplicate of the first kind
+ * alone. Beside the declared index stands one index per combination of the
+ * kinds its members hold other than the first of each (`integer` and
+ * `number` are one kind), keying each such member by its read at that kind
+ * and every other member by its column, under the declared condition, and
+ * unique when the declared index is: together they key every scalar kind,
+ * so a duplicate of any kind is refused, and a value of one kind never
+ * meets one of another (`1` and `'1'` are two keys, as are `true` and `1`).
+ * A non-unique index has them only over a single member path with no
+ * condition and no guarded step (one a comparison seeks); a unique one
+ * has them over every shape.
  * @param {any} schema
  * @param {any} dialect
  * @param {any[]} indexes - the planned declared indexes
- * @returns {{ name: string, of: string, kind: string, expression: string, declared: any }[]}
+ * @param {any[]} generated - the planned generated columns
+ * @returns {{ name: string, of: string, kind: string, unique: boolean,
+ *   keys: ({ column: string } | { expression: string })[], where?: string, declared: any }[]}
  */
-function kindIndexesOf(schema, dialect, indexes) {
+function kindIndexesOf(schema, dialect, indexes, generated) {
   if (dialect.capabilities.untypedColumns === true) return [];
   const doc = dialect.quoteIdentifier(DOC_COLUMN);
+  const byName = new Map(generated.map((column) => [column.name, column]));
   return indexes.flatMap((index) => {
     const declared = index.declared;
-    if (declared.expression !== undefined || declared.derive || declared.where !== undefined
-      || declared.paths?.length !== 1) return [];
-    const { segments } = compileIndexPath(declared.paths[0], `${declared.docPath}/path`);
-    const types = schemaNodeAt(schema, segments)?.type;
-    const pathText = dialect.jsonPathText(segments);
-    if (!Array.isArray(types) || pathText === null || dialect.queryGuard(doc, segments) !== null) return [];
-    const first = columnKindFor(schemaTypeAt(schema, segments));
-    const kinds = [...new Set(types.map((/** @type {any} */ type) => columnKindFor(type)))]
-      .filter((kind) => kind !== undefined && kind !== first);
-    return kinds.map((kind) => ({ name: kindIndexName(dialect, index.name, /** @type {string} */ (kind)), of: index.name,
-      kind: /** @type {string} */ (kind), expression: dialect.jsonExtract(doc, pathText, kind), declared }));
+    if (declared.expression !== undefined || declared.derive || !Array.isArray(declared.paths)
+      || declared.paths.length !== index.columns.length) return [];
+    const positions = declared.paths.map((/** @type {string} */ path, /** @type {number} */ at) => {
+      const { segments } = compileIndexPath(path, `${declared.docPath}/path`);
+      const column = byName.get(index.columns[at]);
+      const types = schemaNodeAt(schema, segments)?.type;
+      const first = columnKindFor(schemaTypeAt(schema, segments));
+      const kinds = !Array.isArray(types) || column === undefined || column.pathText === null ? []
+        : [...new Set(types.map((/** @type {any} */ type) => columnKindFor(type)))]
+          .filter((kind) => kind !== undefined && kind !== first);
+      const guarded = dialect.queryGuard(doc, segments) !== null;
+      return { column: index.columns[at], kinds: /** @type {string[]} */ (kinds), first: /** @type {string} */ (first), read: column, guarded };
+    });
+    // a member whose union lists a container first has a `jsonb` column that keeps every
+    // kind: beside another member it is keyed by that column alone
+    const varied = positions.filter((position) => position.kinds.length > 0 && (position.first !== undefined || positions.length === 1));
+    if (varied.length === 0) return [];
+    if (declared.unique !== true && (positions.length !== 1 || declared.where !== undefined || positions[0].guarded)) return [];
+    // every combination of the varied members' kinds but the one of their first kinds
+    /** @type {string[][]} */
+    let combinations = [[]];
+    for (const position of varied)
+      combinations = combinations.flatMap((combination) => [position.first, ...position.kinds].map((kind) => [...combination, kind]));
+    return combinations.filter((combination) => combination.some((kind, at) => kind !== varied[at].first)).map((combination) => {
+      const kind = combination.join('$');
+      const keys = positions.map((position) => {
+        const at = varied.indexOf(position);
+        return at === -1 || combination[at] === position.first ? { column: position.column }
+          : { expression: dialect.columnRead(doc, { pathText: position.read.pathText, kind: combination[at], unpinned: position.read.unpinned }) };
+      });
+      return { name: kindIndexName(dialect, index.name, kind), of: index.name, kind, unique: declared.unique === true, keys,
+        ...(index.where === undefined ? {} : { where: index.where }), declared };
+    });
   });
 }
 
@@ -1014,11 +1046,25 @@ export function kindIndexName(dialect, of, kind) {
 
 /**
  * The statement that creates an index {@link kindIndexesOf} plans.
- * @param {any} dialect @param {string} table @param {{ name: string, expression: string }} index
+ * @param {any} dialect @param {string} table
+ * @param {{ name: string, unique: boolean, keys: ({ column: string } | { expression: string })[], where?: string }} index
  * @returns {string}
  */
 export function kindIndexSql(dialect, table, index) {
-  return `CREATE INDEX ${dialect.quoteIdentifier(index.name)} ON ${dialect.quoteIdentifier(table)} (${index.expression})`;
+  const keys = kindIndexTerms(dialect, index);
+  return `CREATE ${index.unique ? 'UNIQUE ' : ''}INDEX ${dialect.quoteIdentifier(index.name)} ON ${dialect.quoteIdentifier(table)} `
+    + `(${keys.join(', ')})${index.where === undefined ? '' : ` WHERE ${index.where}`}`;
+}
+
+/**
+ * The key terms of an index {@link kindIndexesOf} plans, in order: a
+ * column by its name, a member read at a kind by its expression.
+ * @param {any} dialect
+ * @param {{ keys: ({ column: string } | { expression: string })[] }} index
+ * @returns {string[]}
+ */
+export function kindIndexTerms(dialect, index) {
+  return index.keys.map((key) => ('column' in key ? dialect.quoteIdentifier(key.column) : key.expression));
 }
 
 /**
@@ -1368,7 +1414,7 @@ export function verifyShape(connection, plan, collection, docPath, kind = 'colle
           // no CREATE text, every other trigger or rewrite rule on the table
           // undeclared drift; a CREATE text comparison covers them below
           const heldKindIndexes = indexRows.filter((row) => String(row.origin) === 'c' && kindIndexes.has(String(row.name)));
-          return chain(collectColumns(0), () => chain(verifyKindIndexes(connection, kindIndexes, heldKindIndexes, disagree), () =>
+          return chain(collectColumns(0), () => chain(verifyKindIndexes(connection, kindIndexes, heldKindIndexes, plan.conditionColumns ?? [], disagree), () =>
             chain(verifyIntervalChecks(connection, plan, disagree), () =>
               chain(verifyRulePrograms(connection, plan.table, plan.programs ?? [], disagree,
                 { installed: dialect.capabilities.declaredSqlText !== true, undeclared: true }), () =>
@@ -1379,28 +1425,38 @@ export function verifyShape(connection, plan, collection, docPath, kind = 'colle
 
 /**
  * The indexes beside a declared index that a table holds
- * ({@link kindIndexesOf}): each the plain B-tree, neither unique nor partial,
- * over the one key the plan creates it over, read back from the catalog.
+ * ({@link kindIndexesOf}): each the plain B-tree, unique where the plan's
+ * is, under the plan's condition, over exactly the keys the plan creates
+ * it over, read back from the catalog.
  * @param {any} connection
  * @param {Map<string, any>} planned - by name
  * @param {any[]} rows - the table's catalog rows of those names
+ * @param {any[]} conditionColumns - the members a condition may read
  * @param {(difference: string) => any} disagree
  * @returns {any} value-or-promise
  */
-function verifyKindIndexes(connection, planned, rows, disagree) {
+function verifyKindIndexes(connection, planned, rows, conditionColumns, disagree) {
   const dialect = connection.dialect;
   const step = (/** @type {number} */ i) => {
     if (i >= rows.length) return null;
     const row = rows[i];
     const name = String(row.name);
-    if (Number(row.uniq) !== 0 || Number(row.partial ?? 0) !== 0 || (row.plain !== undefined && row.plain !== null && Number(row.plain) !== 1))
-      disagree(`index '${name}' is not the plain B-tree without a condition the model creates beside '${planned.get(name).of}'`);
+    const want = planned.get(name);
+    if ((Number(row.uniq) !== 0) !== want.unique || (row.plain !== undefined && row.plain !== null && Number(row.plain) !== 1))
+      disagree(`index '${name}' is not the plain${want.unique ? ' unique' : ''} B-tree the model creates beside '${want.of}'`);
+    const predicate = row.predicate === null || row.predicate === undefined ? null : String(row.predicate);
+    const condition = dialect.readBack.condition(predicate, want.where, conditionColumns, readsConforming(row));
+    if (condition !== null) disagree(`index '${name}' ${condition}`);
     return chain(connection.prepare(dialect.introspect.indexKeyColumns(name)), (statement) =>
       chain(statement.all([]), (keys) => {
-        const term = keys.length === 1 && (keys[0].name === null || keys[0].name === undefined) && typeof keys[0].term === 'string'
-          ? keys[0].term : null;
-        const difference = term === null ? `keys (${keys.map((key) => key.term ?? key.name).join(', ')})`
-          : dialect.readBack.indexKey(term, planned.get(name).expression, readsConforming(row));
+        const difference = keys.length !== want.keys.length ? `keys (${keys.map((key) => key.term ?? key.name).join(', ')})`
+          : keys.map((key, at) => {
+            const planKey = want.keys[at];
+            if ('column' in planKey) return key.name === planKey.column ? null : `keys ${key.term ?? key.name} where the model keys ${planKey.column}`;
+            return key.name !== null && key.name !== undefined ? `keys ${key.name} where the model keys ${planKey.expression}`
+              : typeof key.term !== 'string' ? 'keys an expression it does not report'
+                : dialect.readBack.indexKey(key.term, planKey.expression, readsConforming(row));
+          }).find((found) => found !== null) ?? null;
         if (difference !== null) disagree(`index '${name}' ${difference}`);
         return step(i + 1);
       }));

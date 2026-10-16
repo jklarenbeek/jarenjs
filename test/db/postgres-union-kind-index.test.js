@@ -26,14 +26,16 @@ const MODEL = modelOf({ q: { type: ['number', 'string'] }, r: { type: ['string',
   [{ name: 'by_q', path: '$.q', unique: true }, { name: 'by_r', path: '$.r' }]);
 /** @param {any} model @param {any} [engine] */
 const planOf = (model, engine = dialect) => planCollection('c', normalizeModel(model).get('c'), engine);
-const TEXT_Q = `CREATE INDEX "c_by_q$text" ON "c" (((CASE WHEN jsonb_typeof(("doc" #> '{"q"}')) = 'string' THEN "doc" #>> '{"q"}' END) COLLATE "C"))`;
+const TEXT_Q = `CREATE UNIQUE INDEX "c_by_q$text" ON "c" (((CASE WHEN jsonb_typeof(("doc" #> '{"q"}')) = 'string' THEN "doc" #>> '{"q"}' END) COLLATE "C"))`;
+/** The same index beside a declared index that is not unique. */
+const TEXT_Q_PLAIN = TEXT_Q.replace('CREATE UNIQUE INDEX', 'CREATE INDEX');
 const NUMBER_R = `CREATE INDEX "c_by_r$number" ON "c" ((CASE WHEN jsonb_typeof(("doc" #> '{"r"}')) = 'number' THEN (("doc" #> '{"r"}'))::numeric END))`;
 const BOOLEAN_R = `CREATE INDEX "c_by_r$boolean" ON "c" ((CASE WHEN jsonb_typeof(("doc" #> '{"r"}')) = 'boolean' THEN (CASE WHEN (("doc" #> '{"r"}'))::boolean THEN 1 ELSE 0 END) END))`;
 /** The statements a table an earlier release created for a model: none of the indexes beside. @param {any} model */
-const earlierSql = (model) => planOf(model).createSql.filter((/** @type {string} */ sql) => !/^CREATE INDEX "[^"]*\$/.test(sql));
+const earlierSql = (model) => planOf(model).createSql.filter((/** @type {string} */ sql) => !/^CREATE (UNIQUE )?INDEX "[^"]*\$/.test(sql));
 
 describe('the index beside a declared index over a member of several kinds', () => {
-  it('is planned once per other kind, over the read a comparison of that kind spells, and never unique', () => {
+  it('is planned once per other kind, over the read a comparison of that kind spells, and unique where the declared index is', () => {
     const plan = planOf(MODEL);
     assert.deepEqual(plan.createSql.slice(-3), [TEXT_Q, NUMBER_R, BOOLEAN_R]);
     assert.deepEqual(plan.kindIndexes.map((/** @type {any} */ index) => [index.name, index.of, index.kind]),
@@ -52,7 +54,7 @@ describe('the index beside a declared index over a member of several kinds', () 
     ];
     for (const model of none) assert.deepEqual(planOf(model).kindIndexes, [], JSON.stringify(model.collections.c.indexes));
     const sqlite = planOf(MODEL, sqliteDialect);
-    assert.deepEqual([sqlite.kindIndexes, sqlite.createSql.filter((/** @type {string} */ sql) => /^CREATE INDEX "[^"]*\$/.test(sql))], [[], []]);
+    assert.deepEqual([sqlite.kindIndexes, sqlite.createSql.filter((/** @type {string} */ sql) => /^CREATE (UNIQUE )?INDEX "[^"]*\$/.test(sql))], [[], []]);
   });
 
   it('takes a name no declared index or collection can, kept within the 63 bytes of an identifier', () => {
@@ -86,7 +88,7 @@ describe('a link between two models', () => {
 
   it('creates the index beside one it creates, and drops it with one it drops or where the member no longer holds the kind', () => {
     assert.deepEqual(ddl(BARE, UNION), [`ALTER TABLE "c" ADD COLUMN "gx_q" numeric GENERATED ALWAYS AS ((CASE WHEN jsonb_typeof(("doc" #> '{"q"}')) = 'number' THEN (("doc" #> '{"q"}'))::numeric END)) STORED`,
-      'CREATE INDEX "c_by_q" ON "c" ("gx_q")', TEXT_Q]);
+      'CREATE INDEX "c_by_q" ON "c" ("gx_q")', TEXT_Q_PLAIN]);
     assert.deepEqual(ddl(UNION, BARE), ['DROP INDEX "c_by_q"', 'DROP INDEX IF EXISTS "c_by_q$text"', 'ALTER TABLE "c" DROP COLUMN "gx_q"']);
     assert.deepEqual(ddl(UNION, NUMBER), ['DROP INDEX IF EXISTS "c_by_q$text"']);
   });
@@ -98,7 +100,7 @@ describe('a link between two models', () => {
   it('renames a collection with the index beside under the new name', () => {
     const renamed = { $model: '0.1', collections: { d: { ...UNION.collections.c, 'x-rename': 'c' } } };
     assert.deepEqual(ddl(UNION, renamed), ['ALTER TABLE "c" RENAME TO "d"', 'DROP INDEX "c_by_q"', 'DROP INDEX IF EXISTS "c_by_q$text"',
-      'CREATE INDEX "d_by_q" ON "d" ("gx_q")', TEXT_Q.replaceAll('"c', '"d')]);
+      'CREATE INDEX "d_by_q" ON "d" ("gx_q")', TEXT_Q_PLAIN.replaceAll('"c', '"d')]);
   });
 });
 
@@ -149,8 +151,9 @@ describe('a PostgreSQL store over a member of several kinds', { skip: !PG_URL &&
     try {
       await answers(store);
       assert.equal(await seeks(context, store), true);
-      // never unique: a second string the declared unique index does not key is stored
-      await store.collection('c').insert({ id: 'h', q: 'b' });
+      // unique where the declared index is: a second string is refused as SQLite refuses it
+      await assert.rejects(store.collection('c').insert({ id: 'h', q: 'b' }),
+        (/** @type {any} */ error) => error.code === 'JD2005' && error.class === 'constraint' && error.message.includes('"c_by_q$text"'));
     }
     finally { await store.close(); }
     assert.deepEqual(await indexNames(context), ['c_by_q', 'c_by_q$text', 'c_by_r', 'c_by_r$boolean', 'c_by_r$number', 'c_pkey']);
@@ -216,10 +219,10 @@ describe('a PostgreSQL store over a member of several kinds', { skip: !PG_URL &&
     }
   }));
 
-  it('refuses an index under the name beside that keys another read, or is unique, and reads neither back as a kind', () => withPostgres(async (context) => {
+  it('refuses an index under the name beside that keys another read, or is not unique as its declared index is, and reads neither back as a kind', () => withPostgres(async (context) => {
     for (const [label, sql] of [
-      ['another member', `CREATE INDEX "c_by_q$text" ON c (((CASE WHEN jsonb_typeof(("doc" #> '{"r"}')) = 'string' THEN "doc" #>> '{"r"}' END) COLLATE "C"))`],
-      ['unique', TEXT_Q.replace('CREATE INDEX', 'CREATE UNIQUE INDEX')],
+      ['another member', `CREATE UNIQUE INDEX "c_by_q$text" ON c (((CASE WHEN jsonb_typeof(("doc" #> '{"r"}')) = 'string' THEN "doc" #>> '{"r"}' END) COLLATE "C"))`],
+      ['not unique', TEXT_Q_PLAIN],
     ]) {
       await (await openStore(MODEL, { driver: context.driver() })).close();
       await context.pool.query(`SET search_path TO "${context.schema}"; DROP INDEX "c_by_q$text"; ${sql}`);

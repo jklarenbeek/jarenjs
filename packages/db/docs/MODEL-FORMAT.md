@@ -509,7 +509,10 @@ Two indexes over the same path share one generated column. On
 PostgreSQL, whose generated columns carry a real type, a declared index
 over one member of several scalar kinds also gets one index per kind
 besides its column's, over the member read at that kind and named
-`<collection>_<index name>$<kind>`, which no declared name can take
+`<collection>_<index name>$<kind>`, which no declared name can take; beside
+a unique index they are unique, and a unique composite, conditional or
+guarded index gets them too (one per combination of its members' kinds,
+`$<kind>$<kind>`), so it refuses a duplicate of every kind as SQLite does
 ([POSTGRESQL.md](POSTGRESQL.md)). A member
 name the dialect's JSON path grammar cannot carry (an embedded `"` or
 a control character, on SQLite) is `JD0004`. A backslash in a name is

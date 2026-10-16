@@ -646,22 +646,24 @@ what each does is its own documentation's job
   external `$ne`), or a weight for the fetch in the style of the
   external-operand weights.
 - [ ] **On PostgreSQL a comparison of another kind of a union member seeks no
-  composite or conditional index, and no index over a path with a guarded
-  step.** A declared single-path index over a member of several scalar kinds
-  has an index beside it per other kind (`c_by_q$text`) over the document read
-  that comparison spells, so it seeks; a composite (`['$.q', '$.k']`) or
-  conditional index over such a member, and any index over a path whose step
-  the dialect guards (`$.u[0]` under an open container with `items: { type:
-  ['number', 'string'] }`), has none, and that comparison reads every row.
-  Wanted: the same index beside those (for a guarded path, under each spelling
-  of the guard the table may hold).
-- [ ] **On PostgreSQL a unique index over a member of several types keys its
-  first type alone.** Under a unique `$.q` over `['number', 'string']` two
-  documents with `q: 'b'` are both stored, where SQLite refuses the second
-  (`JD2005`): the generated column holds the first type and reads a string as
-  `NULL`. Wanted: a unique index per kind — a new refusal (minor), and
-  `planColumnUpgrade` must fail `JD0023` on a table already holding
-  duplicates.
+  non-unique composite or conditional index, and no non-unique index over a
+  path with a guarded step.** A declared single-path index over a member of
+  several scalar kinds has an index beside it per other kind (`c_by_q$text`)
+  over the document read that comparison spells, and so does every unique
+  index (composite, conditional or guarded, which needs them to refuse a
+  duplicate of each kind), so it seeks; a non-unique composite (`['$.q',
+  '$.k']`) or conditional index over such a member, and a non-unique index
+  over a path whose step the dialect guards (`$.u[0]` under an open container
+  with `items: { type: ['number', 'string'] }`), has none, and that comparison
+  reads every row. Wanted: the same index beside those (for a guarded path,
+  under each spelling of the guard the table may hold).
+- [ ] **On SQLite a unique index over a member that may hold a boolean and a
+  number refuses `true` beside `1`.** The member's untyped generated column
+  holds `true` as `1` and `false` as `0`, so under a unique `$.q` over
+  `['number', 'boolean']` a document with `q: true` is refused `JD2005` beside
+  one with `q: 1`, where the query engine compares them unequal and PostgreSQL
+  stores both. Wanted: a key that keeps a boolean apart from a number (a table
+  change, so the upgrade rebuilds the column).
 - [ ] **On PostgreSQL an ordering over an indexed collection member is sorted,
   never read in index order.** The statement orders `ASC NULLS FIRST` beside
   `"rid"`, which an ascending B-tree index does not provide (`Sort` over `Seq

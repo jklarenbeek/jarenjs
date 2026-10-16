@@ -270,14 +270,17 @@ function looksLikeCollection(dialect, table) {
 }
 
 /**
- * The indexes a table holds beside its plain path indexes that seek another
+ * The indexes a table holds beside its plain path indexes that key another
  * kind of a member of several types (`ddl.js` `kindIndexesOf`): each under
- * the name the plan gives it, neither unique nor partial, keying exactly the
- * read of the member at its kind. The member's type gains that kind after
- * its column's, so the model read back plans the same index beside it.
+ * the name the plan gives it, unique where its declared index is, with no
+ * condition, keying each member either by its column or by exactly the read
+ * of the member at one kind. Each member's type gains the kinds read so
+ * after its column's, so the model read back plans the same indexes beside
+ * it. A declared index that is not unique has them over a single member
+ * path its read does not guard alone.
  * @param {any} dialect
  * @param {any} table
- * @param {Map<string, { type: string | string[] | undefined, segments: import('./dialect.js').JsonPathSegment[] }>} paths
+ * @param {Map<string, { type: string | string[] | undefined, segments: import('./dialect.js').JsonPathSegment[], open: boolean }>} paths
  *   - the members by their generated columns; a folded type is written back
  * @returns {Set<string>} the names of the indexes read so
  */
@@ -285,22 +288,43 @@ function kindIndexesOf(dialect, table, paths) {
   /** @type {Set<string>} */
   const read = new Set();
   if (dialect.readBack?.indexKey === undefined) return read;
-  const byName = new Map(table.indexes.map((/** @type {any} */ index) => [index.name, index]));
+  const doc = dialect.quoteIdentifier(DOC_COLUMN);
   for (const index of table.indexes) {
-    const entry = index.columns.length === 1 && !index.partial ? paths.get(index.columns[0]) : undefined;
-    const pathText = entry === undefined ? null : dialect.jsonPathText(entry.segments);
-    if (entry === undefined || entry.type === undefined || pathText === null) continue;
-    for (const [kind, type] of KIND_TYPES) {
-      const name = kindIndexName(dialect, index.name, kind);
-      const beside = byName.get(name);
-      const term = beside?.terms?.[0];
-      if (beside === undefined || beside.unique || beside.partial || beside.columns.length !== 1 || typeof term !== 'string'
-        || dialect.readBack.indexKey(term, dialect.jsonExtract(dialect.quoteIdentifier(DOC_COLUMN), pathText, kind), beside.conforming) !== null)
-        continue;
-      read.add(name);
-      const types = typeof entry.type === 'string' ? [entry.type] : entry.type;
-      if (!types.includes(type) && columnKindFor(types[0]) !== kind) entry.type = [...types, type];
+    const entries = index.columns.map((/** @type {string | null} */ column) => (column === null ? undefined : paths.get(column)));
+    if (index.partial || entries.length === 0 || entries.some((/** @type {any} */ entry) => entry === undefined)
+      || (!index.unique && (entries.length !== 1 || entries[0].open))) continue;
+    /** The kind each member of an index beside this one is keyed at, `null` for its column. */
+    const matched = [];
+    for (const beside of table.indexes) {
+      if (beside === index || beside.partial || beside.unique !== index.unique || beside.columns.length !== entries.length) continue;
+      const kinds = beside.columns.map((/** @type {string | null} */ column, /** @type {number} */ at) => {
+        if (column !== null) return column === index.columns[at] ? null : undefined;
+        const entry = entries[at];
+        const term = beside.terms?.[at];
+        const pathText = dialect.jsonPathText(entry.segments);
+        if (typeof term !== 'string' || entry.type === undefined || pathText === null) return undefined;
+        return KIND_TYPES.find(([kind]) => dialect.readBack.indexKey(term,
+          dialect.columnRead(doc, { pathText, kind, unpinned: entry.open ? entry.segments : undefined }), beside.conforming) === null)?.[0];
+      });
+      if (kinds.every((/** @type {any} */ kind) => kind !== undefined) && kinds.some((/** @type {any} */ kind) => kind !== null))
+        matched.push({ beside, kinds });
     }
+    const varied = entries.map((/** @type {any} */ _entry, /** @type {number} */ at) => matched.some(({ kinds }) => kinds[at] !== null));
+    /** The kinds each member is read at by an index beside this one. @type {Set<string>[]} */
+    const held = entries.map(() => new Set());
+    for (const { beside, kinds } of matched) {
+      const label = kinds.flatMap((/** @type {any} */ kind, /** @type {number} */ at) => (!varied[at] ? []
+        : [kind ?? columnKindFor(typeof entries[at].type === 'string' ? entries[at].type : entries[at].type?.[0])])).join('$');
+      if (beside.name !== kindIndexName(dialect, index.name, label)) continue;
+      read.add(beside.name);
+      kinds.forEach((/** @type {any} */ kind, /** @type {number} */ at) => { if (kind !== null) held[at].add(kind); });
+    }
+    entries.forEach((/** @type {any} */ entry, /** @type {number} */ at) => {
+      for (const [kind, type] of KIND_TYPES) {
+        const types = typeof entry.type === 'string' ? [entry.type] : entry.type;
+        if (held[at].has(kind) && !types.includes(type) && columnKindFor(types[0]) !== kind) entry.type = [...types, type];
+      }
+    });
   }
   return read;
 }

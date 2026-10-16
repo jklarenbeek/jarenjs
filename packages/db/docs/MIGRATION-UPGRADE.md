@@ -1974,7 +1974,7 @@ column again and seeks its index (an equality, or a range with both ends:
 `SEARCH ... USING INDEX`), where it had read the document since a `TEXT` column
 holds the number `2` as the text `'2'`. A member of one type besides `null` keeps
 the column it had, and PostgreSQL keeps the first type's (with an index beside
-it for each other kind, §47).
+it for each other kind, §47, unique beside a unique index, §48).
 
 Three answers change with it.
 
@@ -2999,7 +2999,8 @@ adopted PostgreSQL layout this release opens, the previous release opens.
   an index beside it for each kind besides its column's (`c_by_q$text` beside
   `c_by_q` over `['number', 'string']`, POSTGRESQL.md), so a comparison of that
   kind, which reads the member out of the document, seeks; the statement and the
-  answers are unchanged, and the index is never unique. A store this release
+  answers are unchanged, and beside a non-unique index the index is not unique
+  (beside a unique one it is, §48). A store this release
   creates has them; a table the previous release created opens and answers as
   before, reading every row for such a comparison, until `planColumnUpgrade` adds
   them (`report.upgraded` names `c.c_by_q$text`). A link creates them with the
@@ -3017,6 +3018,48 @@ it refuses `JD0002` naming the index (`the database has c_by_q$text, … which t
 model does not declare`): drop those indexes (`DROP INDEX "c_by_q$text"`) and it
 opens the table and answers alike. A table `planColumnUpgrade` gave them is the
 same. A table the previous release created and this release opened is unchanged.
+
+## 48. A unique index over a member of several kinds refuses a duplicate of every kind on PostgreSQL
+
+- On PostgreSQL a unique index over a member the schema lets hold several scalar
+  kinds (`q: { type: ['number', 'string'] }`) keyed the member's generated
+  column, which holds the first type and reads every other kind as `NULL`, so two
+  documents with `q: 'b'` were both stored where SQLite refuses the second
+  (`JD2005`). The indexes beside it (§47) are now unique where the declared index
+  is, and stand beside every shape of a unique index: one per combination of the
+  kinds a composite index's members hold (`c_by_qr$text$boolean`), under a
+  conditional index's condition, and over a member under a guarded path step,
+  read under its column's guard. A duplicate of any kind is refused `JD2005`
+  (`class: 'constraint'`, the index named in the message) on a store this release
+  creates; `1` and `'1'` remain two keys, as on SQLite, and a boolean meets
+  booleans alone (SQLite's untyped column holds `true` as `1` and refuses that
+  pair; the query engine does not compare them equal). A write that relied on
+  storing such a duplicate now fails; nothing else answers differently.
+- A table the previous release created keeps refusing a duplicate of the first
+  kind alone until `planColumnUpgrade` adds the indexes. Where it already holds
+  duplicates of another kind, the plan refuses `JD0023` (`class: 'constraint'`)
+  before any step and names them (`duplicates: [['a', 'b']]`, the message lists
+  the documents' keys); change or remove all but one of each and plan again.
+- A link that gives the member of a unique index it keeps another kind creates
+  the unique index for that kind (`planMigration` from `q: 'number'` to
+  `q: ['number', 'string']` under a unique `by_q` plans
+  `CREATE UNIQUE INDEX "c_by_q$text"`); a link that makes a non-unique index
+  unique rebuilds the indexes beside it unique. The model `introspect()` reads
+  back from such a table declares every member's union and the index as
+  declared, so it reopens the table and plans no index; a conditional index is
+  read back as before (`unmapped-index`). On the previous release's tables,
+  `introspect()` → `planModelMigration(derived, model)` for a unique index over
+  a member of several kinds now plans that `CREATE UNIQUE INDEX` where it planned
+  nothing; no other plan changes. Where such a table already holds duplicates of
+  another kind, applying that link fails `JD0023` (`class: 'constraint'`) as any
+  unique index created over violating rows does; `planColumnUpgrade` on the table
+  first names the duplicates to change.
+
+**Downgrade.** The previous release refuses a table with any index beside a
+declared one `JD0002`, as §47 says, unique or not; dropping those indexes
+(`DROP INDEX "c_by_q$text"`, every `<index>$…` the table holds) is the one step
+for both changes, after which it opens the table and answers alike, and its
+unique index again refuses a duplicate of the member's first kind alone.
 
 ## Measured costs
 

@@ -752,8 +752,14 @@ other) a comparison reads that column for its own kind and the document for
 every other at that kind. On PostgreSQL the plan creates an index beside a
 declared index over such a member for each other kind, over exactly that read
 (`kindIndexes`, `<index>$<kind>`), so the server seeks it with no change to the
-statement; the open accepts a table without them, `planColumnUpgrade` adds
-them, and `introspect()` reads them back as the union's kinds. On such a SQLite
+statement. Beside a unique index they are unique and stand beside every shape
+of it (one per combination of a composite's members' kinds, `<index>$<kind>$<kind>`,
+keying each other member by its column; under a conditional index's condition;
+under the guard of a guarded path), so the declared index and they together
+refuse a duplicate of every kind; the open verifies each one's uniqueness,
+condition and keys, accepts a table without them, `planColumnUpgrade` adds them
+(refusing `JD0023` first where the table holds duplicates one would refuse), and
+`introspect()` reads them back as the union's kinds. On such a SQLite
 table a number comparison of a string-first member does not seek. A
 member whose first type besides `null` is `number` stores its numbers as the doubles the query
 engine compares, as its `REAL` column did. `explain().indexes`
