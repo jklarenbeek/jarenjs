@@ -984,9 +984,11 @@ export function postgresDialect(options = undefined) {
         + 'LEFT JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = k.attnum '
         + `WHERE ci.relname = ${stringLiteral(index)} AND ${inNamespace} ORDER BY k.ord`,
       // the columns the index KEYS, apart from any it carries beside them
-      // (`INCLUDE`): what a unique index proves unique, in its own order
+      // (`INCLUDE`): what a unique index proves unique, in its own order —
+      // each key's column, `NULL` for an expression, and the key as the
+      // server deparses it (`term`), which the open reads an expression from
       indexKeyColumns: (index) =>
-        'SELECT a.attname AS name FROM pg_index i '
+        'SELECT a.attname AS name, pg_get_indexdef(i.indexrelid, k.ord::int, false) AS term FROM pg_index i '
         + 'JOIN pg_class ci ON ci.oid = i.indexrelid '
         + 'JOIN pg_namespace n ON n.oid = ci.relnamespace '
         + 'CROSS JOIN LATERAL unnest(i.indkey::int2[]) WITH ORDINALITY AS k(attnum, ord) '

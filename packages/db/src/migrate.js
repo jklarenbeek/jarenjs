@@ -879,12 +879,15 @@ function collectionSteps(name, fromPlan, toPlan, toCollection, dialect, mapping)
   const fromIndexes = new Map(fromPlan.expected.indexes.map((i) => [i.name, i]));
   const toIndexes = new Map(toPlan.expected.indexes.map((i) => [i.name, i]));
 
-  // a derived column's EXPRESSION is part of its identity: the same
-  // path at a different precision, or under the other physical
-  // mapping, is a different column even where name and type agree
-  // and so is a member of several types by any change of its types or their
-  // order: its column is untyped whatever they are, and what differs is how
-  // the first of them makes it read the member. The same index expression read
+  // a column's EXPRESSION is part of its identity: the same path at a
+  // different precision, or under the other physical mapping, is a
+  // different column even where name and type agree. Compared as the
+  // table holds it, the declared expression or the read of the member: the
+  // untyped column of a member of several types reads it as its first type
+  // makes it (a number-first union casts its numbers), so a change of the
+  // types that keeps that read is no change — unless a table an earlier
+  // release created holds the column in the first type's word
+  // (`earlierType`), which the other column does not take. The same index expression read
   // with the guard of a path that leaves a container open and without it is one
   // column (`alternate`): a table holds either, and neither is a change — but
   // the guard names the kind of each digit step (`[0]` off an array, `['0']`
@@ -892,11 +895,11 @@ function collectionSteps(name, fromPlan, toPlan, toCollection, dialect, mapping)
   // A column whose table is known to hold the other spelling (`holds`, its text)
   // is that text, which is a change to any other
   const columnChanged = (a, b) => a.type !== b.type || a.pathText !== b.pathText
-    || (a.members ?? null) !== (b.members ?? null)
     || (a.holds !== undefined ? a.holds !== columnExpression(dialect, b)
       : a.alternate === undefined && b.alternate === undefined
-        ? (a.expression ?? null) !== (b.expression ?? null)
+        ? columnExpression(dialect, a) !== columnExpression(dialect, b)
         : !acceptsColumn(dialect, a, b))
+    || (a.earlierType !== undefined && a.earlierType !== b.type && !(b.legacyTypes ?? []).includes(a.earlierType))
     || (a.stored === true) !== (b.stored === true);
 
   // columns first decide their fate; an index rebuilds when it

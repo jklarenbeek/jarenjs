@@ -1765,8 +1765,10 @@ text (`dialect.readBack`): the condition through that reader, and a generated
 column's expression through `expressionForm`, which reads the planned text and
 the server's deparse into one form — undoing literal types, `ELSE NULL`,
 parentheses, name quoting and the path array's quoting, nothing else — and
-compares them whole. A layout index's condition, a declared `$sql` term the
-open renders through the relational emitter rather than plans, is read by
+compares them whole. A layout index's condition and the key under each of
+its expression terms (the catalog's `pg_get_indexdef` of that key, a
+top-level collation set aside), declared `$sql` terms the open renders
+through the relational emitter rather than plans, are read by
 `conditionForm`: `expressionForm` with a condition's forms (`CAST`, `IN`,
 `LIKE`, `IS DISTINCT FROM`), then one form for every spelling the server keeps
 of one condition — operands ordered, lists gathered, comparisons oriented,

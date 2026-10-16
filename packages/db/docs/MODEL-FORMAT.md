@@ -2823,11 +2823,13 @@ inside the writing transaction lets a concurrent writer slip past it.
 - A layout an application owns (§12) declares its indexes in
   `physical.indexes`; `indexes` beside `physical` is `JD0004`. The mapping
   reports them as `entities[E].declaredIndexes` (`{ name, unique, partial,
-  columns, members, sql, where? }`): each term's column by its physical name and by
-  the member it maps (an expression term, or a column the layout does not
-  map, `null` in both), whether the index declares a condition, the
-  statement whose text SQLite compares, and the declared condition itself,
-  the `$sql` term PostgreSQL renders to compare (§12).
+  columns, members, sql, where?, expressions? }`): each term's column by its
+  physical name and by the member it maps (an expression term, or a column
+  the layout does not map, `null` in both), whether the index declares a
+  condition, the statement whose text SQLite compares, the declared
+  condition itself and, where a term is an expression, each term's `$sql`
+  expression (`null` beside a column term): the `$sql` terms PostgreSQL
+  renders to compare (§12).
 
 **An unknown member of `x-entity` is `JD0030` with a `docPath`.** A
 silently ignored mapping directive is a data-loss bug waiting to
@@ -4520,10 +4522,11 @@ verifies, while another operator, literal, column or list is `JD0002`
 (the message shows both texts); the statement the store plans,
 `explainMapping(model).entities.<E>.declaredIndexes[i].sql` (§9.2), is
 one spelling that always verifies. PostgreSQL, which keeps no CREATE
-text, reads the condition back out of its catalog (`pg_get_expr`) and
-compares it with the declared one as its own relational rendering writes
+text, reads the condition back out of its catalog (`pg_get_expr`), and
+the key it holds under each expression term (`pg_get_indexdef`), and
+compares each with the declared one as its own relational rendering writes
 it, both read into one form, so a spelling the server reads as the same
-condition verifies: `AND` and `OR` operands in any order, a list as `IN`,
+condition or expression verifies: `AND` and `OR` operands in any order, a list as `IN`,
 `= ANY (ARRAY[…])` or an `OR` of equalities (and `NOT IN`, `<> ALL` or an
 `AND` of inequalities), a comparison either way round (`5 < n` and
 `n > 5`), `NOT` over a comparison, a list or a NULL test, `IS [NOT]
@@ -4534,10 +4537,13 @@ cast to a wider type of its kind, `(v)::text` over a `varchar`,
 reads as too — and its literal spellings (`1.50` and `1.5`, `'5'` beside
 an integer, `'t'` beside a boolean). Another operator, literal, column,
 list or conjunct is `JD0002`, the message showing the server's text and
-the rendering. A condition either side does not read is not compared and
-verifies by the index's shape alone, as an expression term does on
-PostgreSQL: a literal the server rewrites by its type (a date, a uuid), a
-function outside the relational vocabulary or one the server respells
+the rendering, and so is an expression term over another function,
+operator, literal or column, or the plain column (`upper(code)` or `code`
+where the layout declares `lower(code)`); an expression term's direction,
+operator class and collation are not compared, as a plain term's are not.
+A condition or key either side does not read is not compared and verifies
+by the index's shape alone: a literal the server rewrites by its type (a
+date, a uuid), a function outside the relational vocabulary or one the server respells
 (`TRIM`), a quantified comparison other than `= ANY` and `<> ALL`, an
 `IS [NOT] TRUE` test, a table-qualified column (which the server never
 writes), and a declaration PostgreSQL has no rendering of (`GLOB`). An

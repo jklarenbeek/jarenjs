@@ -2009,21 +2009,25 @@ declares entities accept it too. It still refuses the documents it refused, and
 a column that differs from the declaration in anything but its type is `JD0002`
 at open, as before.
 
-**A plan that changes the types of a union rebuilds its column.** Any change of
-an indexed member's type list between two models, whether a reorder, a widening,
-a narrowing, or a move across the `number`-first boundary (`['number', 'string']`
-to `['string', 'number']`, or to `['integer', 'string']`), plans the same four
-steps the previous release planned when the first type changed: drop the index,
-drop the column, add the column in the new spelling, create the index. The
-previous release planned nothing for a widening or a reorder that kept the first
-type; the store of this release cannot open without the step, because two untyped
-columns differ in how they read. Applying the link also retypes a table of an
+**A plan that changes how a union's column reads rebuilds it.** A change of an
+indexed member's type list between two models that changes how its untyped
+column reads the member, a move across the `number`-first boundary
+(`['number', 'string']` to `['string', 'number']`, or to `['integer',
+'string']`), plans the same four steps the previous release planned when the
+first type changed: drop the index, drop the column, add the column in the new
+spelling, create the index; the store cannot open without the step. So does a
+change whose column reads alike but whose first type's column, the one a table
+of an earlier release holds, the second model does not take (`['integer',
+'string']` to `['string', 'number']`). Any other change of the types, a reorder
+or a widening behind the same first type (`['number', 'string']` to
+`['number', 'boolean']`), plans no step: the two columns are one definition
+(§46). Applying a link that rebuilds the column also retypes a table of an
 earlier release, whichever type it holds. Narrowing a union to one type retypes
 the column to that type (`REAL` for `'number'`), and the link fails `JD0023`
 (`constraint failed`, nothing changed) when a stored document holds a kind the
-column cannot: migrate the documents first. A plan between two models that
-declare the same types in the same order plans no step, so a table of an earlier
-release that no link touches stays as it is until the link `planColumnUpgrade`
+column cannot: migrate the documents first. A plan that takes no step over the
+column, as between two models that declare the same types in the same order,
+leaves a table of an earlier release as it is until the link `planColumnUpgrade`
 plans from the catalog rebuilds it (§36). To retype it by hand instead, once per
 column, on a copy first, in one transaction: drop the indexes over the column, drop the
 column, add it back untyped with the expression a fresh table carries, and create
@@ -2692,7 +2696,7 @@ change:
   read back opens the table, and the `unmapped-type` row says the union's own
   types are not recorded. A member whose union lists another type first comes
   back untyped, as before. A plan from the model read back to the authored one
-  recreates the column, as it did, and destroys nothing.
+  takes no step over the column (§46).
 - `jaren-db plan --model <model> --store <db> --upgrade-columns [--id <name>]
   [--out <file>]` is new: it prints or writes the link `planColumnUpgrade`
   plans from the catalog (MIGRATION-FORMAT §11), and plans nothing for a
@@ -2935,6 +2939,44 @@ text of a digit name as the other spelling of the path. Its
 unguarded text; do not apply it, or a name `'0'` reads back as an index again.
 A rename link the previous release planned is refused by this release where
 it would leave a join table the open refuses; plan it again.
+
+## 46. A union plan that keeps its column's read, and a PostgreSQL index key read back
+
+- On SQLite a plan between two models whose indexed member lists several types
+  compared the type lists, so one that changed them and not the column — the
+  same first type behind other types, `['number', 'string']` to `['number',
+  'boolean']` or to `['number', 'string', 'boolean']`, `['string', 'number']` to
+  `['string', 'boolean']`, and the model `introspect()` reads back from a
+  number-first union to the authored one — dropped and added the column with the
+  same read and rebuilt its index. It now compares the column as the table holds
+  it, its type and its read, and plans no step where they are equal and the
+  second model takes the column of the first type a table of an earlier release
+  holds (§18). A plan that changes the read, the type, or a column such a table
+  holds in a type the second model does not take rebuilds it as before. The
+  documents, the answers and the store's shape are those of the rebuilt store;
+  a migration document an earlier release planned keeps its steps and runs as
+  written. PostgreSQL, whose column takes the first type, is unchanged.
+- On PostgreSQL a layout index whose term is an expression (`lower(code)`) was
+  verified by the term's position alone, so an index recreated over another
+  expression (`upper(code)`), another column or the plain column opened as the
+  declared one. The open now reads the key the server holds under each
+  expression term back out of the catalog (`pg_get_indexdef`) and compares it
+  with the declared term as it compares a condition (MODEL-FORMAT §12): a
+  spelling the server reads as the same expression opens, another is `JD0002`,
+  the message naming the term, the key the server holds and the declared term
+  as the PostgreSQL rendering writes it. A term's direction, operator class and collation
+  are not compared, and neither is a key either side does not read back (a
+  function the server respells, `TRIM`, or a literal it rewrites by its type).
+  An adopted index the open refuses now held another key than the layout
+  declares: recreate it as declared, or declare the expression it holds.
+  `explainMapping(model).entities.<E>.declaredIndexes[i].expressions` names the
+  `$sql` term of each expression term, `null` beside a column term.
+
+**Downgrade.** The tables, generated columns and indexes this release creates
+are the ones the previous release creates, and it reads the catalog without
+writing it. A store migrated through a link that took no step under this
+release opens under the previous release, which reads that column alike. An
+adopted PostgreSQL layout this release opens, the previous release opens.
 
 ## Measured costs
 

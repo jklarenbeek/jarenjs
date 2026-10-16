@@ -15,7 +15,7 @@ import { DatabaseSync } from 'node:sqlite';
 
 import { compileJsonQuery } from '@jarenjs/json/query';
 import {
-  openStore, planCollection, normalizeModel, planMigration, planQuery, emitPlan,
+  openStore, planCollection, normalizeModel, planMigration, planModelMigration, planQuery, emitPlan,
   sqliteDialect, compareShapeToModel, migrate,
 } from '@jarenjs/db';
 import { nodeDriver } from '@jarenjs/db/node';
@@ -480,7 +480,7 @@ describe('a store an earlier release created, under the tools that plan and migr
 describe('a store this release created, under a plan that changes the union', () => {
   const PAIRS = /** @type {[any, any][]} */ ([
     [['number', 'string'], ['string', 'number']], [['string', 'number'], ['number', 'string']],
-    [['number', 'string'], ['number', 'string', 'boolean']], [['number', 'string'], ['boolean', 'number', 'string']],
+    [['number', 'string'], ['boolean', 'number', 'string']],
     [['number', 'string'], ['integer', 'string']], [['integer', 'string'], ['number', 'string']],
     ['number', ['number', 'string']], ['string', ['string', 'number']],
     [['null', 'number', 'string'], ['string', 'number']], [['number', 'string'], ['number', 'string']],
@@ -511,6 +511,102 @@ describe('a store this release created, under a plan that changes the union', ()
         cleanup();
       }
     }
+  });
+});
+
+describe('a plan between two unions whose columns read alike', () => {
+  /** The model of a member of the type given, or of no declared type (`undefined`). @param {any} type */
+  const declaring = (type) => {
+    const model = modelOf(type ?? 'string');
+    if (type === undefined) model.collections.c.schema.properties = { id: { type: 'string' }, q: {}, r: {} };
+    return model;
+  };
+  const ddlOf = (/** @type {any} */ from, /** @type {any} */ to, /** @type {any} */ dialect = sqliteDialect) =>
+    planMigration(declaring(from), declaring(to), { dialect }).migration.steps.filter((step) => step.kind === 'ddl').map((step) => step.sql);
+  const KEY_READ = 'ALTER TABLE "c" ADD COLUMN "gx_q" ANY GENERATED ALWAYS AS ((CASE WHEN json_type("doc", \'$."q"\') IN (\'integer\', \'real\') '
+    + 'THEN CAST(jsonb_extract("doc", \'$."q"\') AS REAL) ELSE jsonb_extract("doc", \'$."q"\') END)) VIRTUAL';
+  const PLAIN_READ = 'ALTER TABLE "c" ADD COLUMN "gx_q" ANY GENERATED ALWAYS AS (jsonb_extract("doc", \'$."q"\')) VIRTUAL';
+  const rebuild = (/** @type {string} */ add) => ['DROP INDEX "c_by_q"', 'ALTER TABLE "c" DROP COLUMN "gx_q"', add, 'CREATE INDEX "c_by_q" ON "c" ("gx_q")'];
+  /** Two unions whose untyped columns read the member alike, and the type a table an earlier release created under the first holds. */
+  const ALIKE = /** @type {[any, any, string][]} */ ([
+    [['number', 'string'], ['number', 'boolean'], 'REAL'],
+    [['number', 'string'], ['number', 'string', 'boolean'], 'REAL'],
+    [['null', 'number', 'string'], ['number', 'integer'], 'REAL'],
+    [['string', 'number'], ['string', 'boolean'], 'TEXT'],
+    [['integer', 'string'], ['integer', 'boolean'], 'INTEGER'],
+    [['string', 'number'], ['integer', 'string'], 'TEXT'],
+  ]);
+
+  it('plans no step, and the store reopens under the second, seeks and stores every kind', async () => {
+    for (const [from, to] of ALIKE) {
+      const label = `${JSON.stringify(from)} -> ${JSON.stringify(to)}`;
+      assert.deepStrictEqual(ddlOf(from, to), [], label);
+      const { dbPath, cleanup } = tempDbPath();
+      try {
+        const first = await openStore(modelOf(from), { driver: nodeDriver(), path: dbPath });
+        await first.collection('c').insert({ id: 'a', q: 2 });
+        await first.close();
+        const store = await openStore(modelOf(to), { driver: nodeDriver(), path: dbPath });
+        try {
+          const twos = where({ $eq: ['$it.q', 2] });
+          assert.deepStrictEqual(await store.collection('c').execute(twos), 'a', label);
+          assert.deepStrictEqual((await store.collection('c').explain(twos)).indexes, ['c_by_q'], label);
+          await store.collection('c').insert({ id: 'b', q: to.includes('boolean') ? true : 'text' });
+        }
+        finally { await store.close(); }
+      }
+      finally { cleanup(); }
+    }
+  });
+
+  it('plans no step where a table an earlier release created under the first reopens under the second', async () => {
+    for (const [from, to, word] of ALIKE) {
+      const { dbPath, cleanup } = tempDbPath();
+      try {
+        const first = await openStore(modelOf(from), { driver: nodeDriver(), path: dbPath });
+        await first.close();
+        const raw = new DatabaseSync(dbPath);
+        raw.exec('DROP INDEX "c_by_q"');
+        raw.exec('ALTER TABLE "c" DROP COLUMN "gx_q"');
+        raw.exec(`ALTER TABLE "c" ADD COLUMN "gx_q" ${word} GENERATED ALWAYS AS (jsonb_extract("doc", '$."q"')) VIRTUAL`);
+        raw.exec('CREATE INDEX "c_by_q" ON "c" ("gx_q")');
+        raw.prepare('INSERT INTO "c" ("key", "doc") VALUES (?, jsonb(?))').run('a', JSON.stringify({ id: 'a', q: 2 }));
+        raw.close();
+        const store = await openStore(modelOf(to), { driver: nodeDriver(), path: dbPath });
+        try { assert.deepStrictEqual(await store.collection('c').execute(where({ $eq: ['$it.q', 2] })), 'a', `${word} ${JSON.stringify(to)}`); }
+        finally { await store.close(); }
+      }
+      finally { cleanup(); }
+    }
+  });
+
+  it('plans no step from the model introspect() reads back to the authored one', async () => {
+    for (const type of /** @type {any[]} */ ([['number', 'string'], ['number', 'boolean'], ['null', 'number', 'string'], ['string', 'number']])) {
+      const store = await openStore(modelOf(type), { driver: nodeDriver() });
+      try {
+        const { model: derived } = await store.introspect({ keys: { c: '/id' } });
+        const { migration } = planModelMigration(derived, modelOf(type), { dialect: sqliteDialect });
+        assert.deepStrictEqual(migration.steps.filter((/** @type {any} */ step) => step.kind === 'ddl'), [], JSON.stringify(type));
+      }
+      finally { await store.close(); }
+    }
+  });
+
+  it('still rebuilds a column whose read changes, whose type changes, or that a table of an earlier release holds in a type the second does not take', () => {
+    // across the number-first boundary, either way
+    assert.deepStrictEqual(ddlOf(['number', 'string'], ['string', 'number']), rebuild(PLAIN_READ));
+    assert.deepStrictEqual(ddlOf(['string', 'number'], ['number', 'string']), rebuild(KEY_READ));
+    assert.deepStrictEqual(ddlOf(['number', 'string'], ['integer', 'string']), rebuild(PLAIN_READ));
+    // a union to one type and one type to a union
+    assert.deepStrictEqual(ddlOf(['number', 'string'], 'number'),
+      rebuild('ALTER TABLE "c" ADD COLUMN "gx_q" REAL GENERATED ALWAYS AS (jsonb_extract("doc", \'$."q"\')) VIRTUAL'));
+    assert.deepStrictEqual(ddlOf('string', ['string', 'number']), rebuild(PLAIN_READ));
+    // one read, but an INTEGER column of an earlier release does not open under ['string', 'number']
+    assert.deepStrictEqual(ddlOf(['integer', 'string'], ['string', 'number']), rebuild(PLAIN_READ));
+    assert.deepStrictEqual(ddlOf(['string', 'number'], undefined), rebuild(PLAIN_READ));
+    // PostgreSQL keeps the first type's column: one first type is no step, another is
+    assert.deepStrictEqual(ddlOf(['number', 'string'], ['number', 'boolean'], postgresDialect), []);
+    assert.deepStrictEqual(ddlOf(['number', 'string'], ['string', 'number'], postgresDialect).length, 4);
   });
 });
 

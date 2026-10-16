@@ -949,10 +949,10 @@ export function planCollection(name, collection, dialect, options = undefined) {
  * {@link columnSchemaTypeAt}) and carries `legacyTypes`, the types a column
  * over a member's types was once declared in, which a table may still hold. A
  * member whose first type is `number` (null aside) reads its numbers as the
- * doubles the query engine compares, as a `REAL` column does. `members`
- * names the types in their declared order: what a migration compares to see
- * that the union changed, since two such columns are both untyped and differ
- * only in how they read.
+ * doubles the query engine compares, as a `REAL` column does. `earlierType`
+ * is the type an earlier release declared such a column in, its first type's,
+ * which a table may still hold: a migration that keeps the column's read
+ * changes no column unless the other model's column cannot take that type.
  * @param {any} column
  * @param {{ schema: any, segments: import('./dialect.js').JsonPathSegment[], schemaType: string | undefined,
  *   firstType: string | undefined, dialect: any, held: string | undefined }} context - `held` is the type
@@ -968,10 +968,10 @@ function unionColumn(column, { schema, segments, schemaType, firstType, dialect,
   if (held !== undefined && legacyTypes.includes(held)) {
     // the column of the table at hand: its type, the plain expression it was written with, and
     // the document for a kind it cannot answer
-    return { ...column, type: held, kind: undefined, members: members.join(),
+    return { ...column, type: held, kind: undefined,
       ...(held === dialect.typeFor(firstType, 'generated') ? {} : { unreadable: true }) };
   }
-  return { ...column, legacyTypes, members: members.join(), ...(firstType === 'number' ? { kind: 'key' } : {}) };
+  return { ...column, legacyTypes, earlierType: dialect.typeFor(firstType, 'generated'), ...(firstType === 'number' ? { kind: 'key' } : {}) };
 }
 
 /**

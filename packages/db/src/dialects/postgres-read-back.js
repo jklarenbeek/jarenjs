@@ -10,11 +10,12 @@
  * texts are read into one form that undoes exactly those differences and
  * nothing else, so any other difference — a path, a guard, an operator, a
  * collation, a `COALESCE`, a literal's value — is drift, and a text neither
- * side reads is drift too, never a match. A layout's index condition is the
- * one exception: the application, not the plan, created it, so it is read
- * into a form shared by every spelling the server keeps of one condition
- * (`conditionForm`), and a condition either side does not read is not
- * compared. Only the PostgreSQL dialect imports this module.
+ * side reads is drift too, never a match. A layout's index condition and the
+ * key under each of its expression terms are the one exception: the
+ * application, not the plan, created them, so each is read into a form
+ * shared by every spelling the server keeps of one expression
+ * (`conditionForm`), and one either side does not read is not compared.
+ * Only the PostgreSQL dialect imports this module.
  */
 import { modelPath } from '../model-path.js';
 import { POSTGRES_PREDICATE, POSTGRES_PREDICATE_ESCAPED, READ_DEPTH, decimalText, postgresStrings, readPredicate, sqlTokens } from './check-read.js';
@@ -544,12 +545,12 @@ export const postgresReadBack = Object.freeze({
       ? null : `has the condition ${stored}, and the model declares WHERE ${planned}`;
   },
   /**
-   * Whether a layout index's stored condition is another condition than the
-   * declared one: `true` only where both read into one form
-   * ({@link conditionForm}) and the forms differ, so a condition either side
-   * does not read is never drift.
+   * Whether a layout index's stored condition, or the key it holds under an
+   * expression term, is another expression than the declared one: `true` only
+   * where both read into one form ({@link conditionForm}) and the forms
+   * differ, so one either side does not read is never drift.
    * @param {string} stored - the deparse
-   * @param {string} planned - the declared condition, rendered for PostgreSQL
+   * @param {string} planned - the declared condition or term, rendered for PostgreSQL
    * @param {(column: string) => string | undefined} typeOf - a column's catalog type
    * @param {boolean} conforming - the reading session's `standard_conforming_strings`
    * @returns {boolean}

@@ -128,22 +128,25 @@ export function normalizePhysical(physical, properties, keys, path, types = new 
  * column by physical name and by the member it maps — an expression term, or
  * a column the layout does not map, `null` in both — whether the index is
  * unique and whether it declares a condition, the statement that creates it,
- * whose text SQLite keeps, and the condition itself (`where`, the declared
- * `$sql` term), which an engine that deparses renders to compare.
+ * whose text SQLite keeps, the condition itself (`where`, the declared `$sql`
+ * term) and, where a term is an expression, each term's `$sql` expression
+ * (`expressions`, `null` beside a column term), which an engine that deparses
+ * renders to compare.
  * @param {any} index @param {any[]} columns - the layout's columns @param {string} sql
  */
 function declaredIndex(index, columns, sql) {
   const names = index.terms.map((term) => (term?.by?.$sql === 'column' && typeof term.by.name === 'string' ? term.by.name : null));
   return { name: index.name, unique: index.unique === true, partial: index.where !== undefined, columns: names,
     members: names.map((name) => (name === null ? null : columns.find((column) => column.physical === name)?.name ?? null)), sql,
-    ...(index.where === undefined ? {} : { where: index.where }) };
+    ...(index.where === undefined ? {} : { where: index.where }),
+    ...(names.includes(null) ? { expressions: index.terms.map((term, i) => (names[i] === null ? term.by : null)) } : {}) };
 }
 
 /**
- * A declared condition as the dialect's relational rendering writes it, or
- * `undefined` where the dialect cannot render it (a function or a literal
- * its vocabulary does not have): what a deparsing engine's stored condition
- * is compared with.
+ * A declared condition or expression term as the dialect's relational
+ * rendering writes it, or `undefined` where the dialect cannot render it (a
+ * function or a literal its vocabulary does not have): what a deparsing
+ * engine's stored condition or index key is compared with.
  * @param {any} dialect @param {any} where - the declared `$sql` term @returns {string | undefined}
  */
 function renderedCondition(dialect, where) {
@@ -164,11 +167,12 @@ function renderedCondition(dialect, where) {
  * condition's text, an expression term — is compared as SQLite keeps it, the
  * CREATE text, token by token (`sameIndexText`), so an index the application
  * created in its own spelling verifies and another condition is drift. An
- * engine that deparses keeps no text: its stored condition is read back
- * (`readBack.layoutConditionDiffers`) and compared with the declared one as
- * its relational rendering writes it, so a spelling the server reads as the
- * same condition verifies and another condition is drift; a condition either
- * side does not read is not compared, nor is an expression term.
+ * engine that deparses keeps no text: its stored condition, and the key it
+ * holds under each expression term, are read back
+ * (`readBack.layoutConditionDiffers`) and compared with the declared ones as
+ * its relational rendering writes them, so a spelling the server reads as the
+ * same condition or expression verifies and another is drift; one either
+ * side does not read is not compared.
  * @param {any} connection
  * @param {any[]} declared - the layout's `declaredIndexes`
  * @param {any[]} existing - the table's indexes as `readSchema` reports them
@@ -190,13 +194,25 @@ function verifyDeclaredIndexes(connection, declared, existing, columns, fail) {
     if (have === undefined) fail(`index '${index.name}' is missing; apply an explicit migration`);
     if (have.unique !== index.unique) fail(`index '${index.name}' is ${have.unique ? '' : 'not '}unique, the model declares it ${index.unique ? '' : 'not '}unique`);
     if (have.partial !== index.partial) fail(`index '${index.name}' ${have.partial ? 'has a condition the model does not declare' : 'has no condition, the model declares one'}`);
-    // the columns the index keys: an engine that carries other columns beside them reports the keys apart
-    const keyed = dialect.introspect.indexKeyColumns === undefined ? have.columns
+    // the columns the index keys: an engine that carries other columns beside them reports the keys apart,
+    // each with its key as the server deparses it
+    const keyed = dialect.introspect.indexKeyColumns === undefined ? { columns: have.columns, terms: undefined }
       : useStatementOnce(connection, dialect.introspect.indexKeyColumns(have.name), (statement) =>
-        chain(statement.all([]), (rows) => rows.map((row) => (row.name === null || row.name === undefined ? null : String(row.name)))));
-    return chain(keyed, (/** @type {(string | null)[]} */ columns) => {
+        chain(statement.all([]), (rows) => ({
+          columns: rows.map((row) => (row.name === null || row.name === undefined ? null : String(row.name))),
+          terms: rows.map((row) => (typeof row.term === 'string' ? row.term : null)),
+        })));
+    return chain(keyed, (/** @type {{ columns: (string | null)[], terms: (string | null)[] | undefined }} */ { columns, terms }) => {
       if (columns.length !== index.columns.length || index.columns.some((column, j) => column !== null && column !== columns[j]))
         fail(`index '${index.name}' covers (${list(columns)}) in that order, the model declares (${list(index.columns)})`);
+      for (const [j, by] of (readBack === undefined || terms === undefined ? [] : index.expressions ?? []).entries()) {
+        const stored = /** @type {(string | null)[]} */ (terms)[j];
+        // the server deparses a key without its collation, which is not compared, as a plain term's is not
+        const key = by?.$sql === 'collate' ? by.value : by;
+        const planned = key === null || stored === null ? undefined : renderedCondition(dialect, key);
+        if (planned !== undefined && readBack.layoutConditionDiffers(stored, planned, typeOf, have.conforming !== false))
+          fail(`index '${index.name}' keys its term ${j + 1} as\n  ${stored}\nand the model declares\n  ${planned}`);
+      }
       if (text && (index.partial || index.columns.includes(null)) && have.sql !== null && have.sql !== undefined) {
         const wanted = comparableDeclaredSql(index.sql), actual = comparableDeclaredSql(String(have.sql));
         if (!sameIndexText(wanted, actual)) fail(`index '${index.name}' is declared as\n  ${actual}\nand the model declares\n  ${wanted}`);

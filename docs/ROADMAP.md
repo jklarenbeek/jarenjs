@@ -525,12 +525,6 @@ what each does is its own documentation's job
   referenced key spelled and read as `String()` and `Number()` do (the
   referencing table rebuilt ahead of the key's check, or the check taken after
   both).
-- [ ] **A plan between two number-first unions that differ only past the
-  first type recreates an identical column on SQLite.**
-  `['number','string']` -> `['number','boolean']` (and a model read back by
-  `introspect()` -> the authored one) drops and adds `gx_q` with the same
-  `CASE` read, because the plan compares the union's `members`; nothing is
-  lost, the index is rebuilt. Wanted: compare the read, not the member list.
 - [ ] **An integer past 2^53 in an `integer` column answers differently on the
   two engines.** A stored integer a JavaScript number would round is refused
   `JD2003` on both where a row is read whole and, on PostgreSQL, where a
@@ -655,12 +649,14 @@ what each does is its own documentation's job
   the statement does the engine's work and a sort besides and is slower than
   the engine, on PostgreSQL more than on SQLite. Wanted: a cost signal (a
   distinct-count estimate or a bounded-group run-time fallback).
-- [ ] **PostgreSQL verifies a layout index's expression term by shape.** A
-  layout index term that is an expression (`lower(code)`) is verified on
-  PostgreSQL by its position alone, where SQLite compares the CREATE text
-  (MODEL-FORMAT §12), as is a condition the read-back does not read (a date or
-  uuid literal, `TRIM`, a quantified comparison other than `= ANY`). Wanted:
-  read `pg_get_indexdef`'s terms through the same condition form.
+- [ ] **PostgreSQL verifies a layout index condition or expression key it
+  cannot read back by shape.** A layout index's condition, or the key under an
+  expression term, that the PostgreSQL read-back does not read — a date or
+  uuid literal the server rewrites by its type, `TRIM` (deparsed `TRIM(BOTH
+  FROM …)`), a quantified comparison other than `= ANY` and `<> ALL`, `IS
+  [NOT] TRUE` — is not compared, so an index recreated under another such
+  condition or key opens as the declared one, where SQLite compares the CREATE
+  text (MODEL-FORMAT §12). Wanted: read those forms into the condition form.
 
 ## Lexical search (cross-package)
 
