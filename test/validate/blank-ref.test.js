@@ -107,7 +107,7 @@ describe('a blank $recursiveRef', () => {
     const validate = new JarenValidator().compile({ $schema: D19, type: 'object', properties: { p: { $recursiveRef: '' } } });
     assert.deepEqual(answers(validate, [{}, { p: 1 }]), [true, 'JK0011']);
     assert.throws(() => validate({ p: 1 }), {
-      message: `JK0011: $recursiveRef '' is defined only as "#"; to apply the schema it names, write $ref '' at https://github.com/jklarenbeek/jarenjs#/properties/p/%24recursiveRef`,
+      message: `JK0011: $recursiveRef '' is defined only as "#"; to apply the schema it names, write $ref '' at #/properties/p/%24recursiveRef`,
     });
   });
   it('2020-12 ignores it', () => {

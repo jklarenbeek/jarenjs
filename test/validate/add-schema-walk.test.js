@@ -69,7 +69,7 @@ describe('addSchema registers the rest of a document past a place its walk refus
   });
   it('a malformed $id: nothing below it is registered, as before', () => {
     assert.deepEqual(refusal(() => holding(badId()).compile({ $ref: 'https://a.test/c.json' })),
-      ['JK0009', `JK0009: Can not resolve schema for 'https://a.test/c.json#': ${UNHELD}`]);
+      ['JK0009', `JK0009: Can not resolve schema for 'https://a.test/c.json#': ${UNHELD} at #/%24ref`]);
   });
 
   const twice = () => ({ $id: 'https://a.test/a.json', $defs: {
@@ -96,7 +96,7 @@ describe('addSchema registers the rest of a document past a place its walk refus
   it('an identifier declared twice: nothing below its second place is registered, as before', () => {
     for (const uri of ['https://a.test/z.json#', 'https://a.test/w.json#', 'https://a.test/v.json#'])
       assert.deepEqual(refusal(() => holding(twice()).compile({ $ref: uri })),
-        ['JK0009', `JK0009: Can not resolve schema for '${uri}': ${UNHELD}`]);
+        ['JK0009', `JK0009: Can not resolve schema for '${uri}': ${UNHELD} at #/%24ref`]);
   });
 
   it('a loop of references the rest of the document holds is refused by the compile that reaches it', () => {
@@ -166,6 +166,6 @@ describe('addSchema refuses only a loop every reading of the document makes', ()
     // the refused document is not held; what was held still answers
     assert.deepEqual(answers(validator.compile({ $ref: 'https://l.test/root.json#/$defs/k' }), ['s', 1]), [true, false]);
     assert.deepEqual(refusal(() => validator.compile({ $ref: 'https://l.test/d.json' })),
-      ['JK0009', `JK0009: Can not resolve schema for 'https://l.test/d.json#': ${UNHELD}`]);
+      ['JK0009', `JK0009: Can not resolve schema for 'https://l.test/d.json#': ${UNHELD} at #/%24ref`]);
   });
 });

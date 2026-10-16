@@ -104,6 +104,40 @@ delete it or fix it.
 
 ## @jarenjs/validate
 
+- [ ] **A compile refusal names an embedded resource's place two ways.** The
+  walks name a place by its pointer into the document
+  (`#/%24defs/n/properties/a/%24id`), while a `$query`, `$recursiveRef` or
+  `$dynamicRef` refusal and a reference resolved on first use name a place
+  inside an embedded resource (a subschema with its own `$id`) by that
+  resource's URI (`https://x.test/n#/properties/a/%24query`), and spell
+  `$defs` unencoded (`https://held.test/root.json#/$defs/a/%24ref`). One
+  spelling needs the compiler to carry each object's document pointer; it
+  changes `docPath` (an upgrade note).
+- [ ] **A compile refusing a reference of a document registered earlier names
+  no place.** `addSchema({ $id: 'https://h.test/b.json', properties: { x: {
+  $ref: 'https://h.test/missing.json' } } })` then `compile({ type: 'object'
+  })` is refused `JK0009` without a `docPath`: the `$ref` sites are recorded
+  only by the walk of the schema being compiled. Recording them at
+  registration keeps a site per held placeholder on the validator.
+- [ ] **`addSchema` registers a relative `$id` under its raw text.** `new
+  JarenValidator().addSchema({ $id: 'sub/t.json', type: 'string' })` then
+  `compile({ properties: { a: { $ref: 'sub/t.json' } } })` is refused `JK0009`
+  (`https://github.com/jklarenbeek/sub/t.json#` is not held; `t.json` alike):
+  the key is the `$id` as written, not resolved against the origin a compile
+  resolves the reference against. Pass the key (`addSchema(schema,
+  'https://…/t.json')`) or an absolute `$id`.
+- [ ] **A held dialect named with an upper-case scheme or host is read as
+  draft-07.** With a dialect `https://example.com/my-dialect` that extends
+  2020-12 held, `{ $schema: 'HTTPS://EXAMPLE.com/my-dialect', prefixItems: [{
+  type: 'string' }] }` accepts `[1]` (the lower-case spelling refuses it): the
+  held meta-schema is looked up by the `$schema` text as written, in the walk,
+  in `dialectDraft`, in the `$vocabulary` lookup and in `compileAsync`. The
+  names json-schema.org and the Jaren dialect publish are read in any case.
+- [ ] **An unknown type name is refused uncoded.** `compile({ type: 'strin'
+  })` throws a plain `Error` ("The explicit schema type 'strin' is unknown.")
+  with no `code` or `docPath`, and `{ type: 1 }` compiles and accepts every
+  value. A coded refusal located at the `type` keyword is a new code (a
+  minor).
 - [ ] **A draft-07 plain-name `$id` as a reference target outside the
   validator.** In a draft-07 document, `definitions: { a: { $id: '#foo', type:
   'integer' } }` and `properties: { y: { $ref: '#foo' } }`: the validator

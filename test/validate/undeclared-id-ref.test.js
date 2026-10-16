@@ -56,7 +56,7 @@ describe('a draft-07 compile reads an undeclared document one way', () => {
     it(`${label}: only the URI the $id names held, each call that reaches the object is refused`, () => {
       const validate = holding(holder(), numbers()).compile(schema(draft));
       assert.deepEqual(answers(validate), ['JK0008', 'JK0008', 'JK0008', 'JK0008', true]);
-      assert.equal(thrown(() => validate({ q: 5 })), `JK0008: Can not resolve schema for '${NAME}#': ${IGNORED_ID}`);
+      assert.equal(thrown(() => validate({ q: 5 })), `JK0008: Can not resolve schema for '${NAME}#': ${IGNORED_ID} at ${ROOT}#/$defs/a/%24ref`);
     });
   }
 

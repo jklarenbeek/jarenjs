@@ -22,23 +22,32 @@ export const TRAVERSE_SCHEMA_MAP_MAPS = /* @__PURE__ */ Object.freeze(['property
 const META_2019 = ['core', 'applicator', 'validation', 'meta-data', 'format', 'content'];
 const META_2020 = ['core', 'applicator', 'unevaluated', 'validation', 'meta-data', 'format-annotation', 'format-assertion', 'content'];
 
+/** The hyper-schema, link and output meta-schemas each draft publishes beside its dialect. */
+const HYPER_2019 = ['hyper-schema', 'links', 'meta/hyper-schema', 'output/schema', 'output/hyper-schema'];
+const HYPER_2020 = ['hyper-schema', 'links', 'meta/hyper-schema', 'output/schema'];
+
 /**
  * The dialects this package reads by name, each URI as published but for its
- * scheme and an empty fragment (see {@link officialUri}): the official
- * dialect and vocabulary meta-schemas of each draft, and the Jaren 2020-12
- * dialect (2020-12 plus the `$query` vocabulary this package implements).
+ * scheme and an empty fragment (see {@link officialUri}): every meta-schema
+ * json-schema.org publishes for a draft (its dialect, its vocabulary
+ * meta-schemas, its hyper-schema, link and output schemas), and the Jaren
+ * 2020-12 dialect (2020-12 plus the `$query` vocabulary this package
+ * implements).
  * The draft-next dialect, the one that defines `propertyDependencies`, is
  * read as the newest draft this package implements (2020-12).
  * @type {ReadonlyMap<string, number>}
  */
 const KNOWN_DIALECTS = /* @__PURE__ */ new Map([
-  ['//json-schema.org/draft-06/schema', 6],
-  ['//json-schema.org/draft-07/schema', 7],
+  ...['schema', 'hyper-schema', 'links'].map((name) => /** @type {[string, number]} */ ([`//json-schema.org/draft-06/${name}`, 6])),
+  ...['schema', 'hyper-schema', 'links', 'hyper-schema-output'].map((name) => /** @type {[string, number]} */ ([`//json-schema.org/draft-07/${name}`, 7])),
   ['//json-schema.org/draft/2019-09/schema', 2019],
   ...META_2019.map((name) => /** @type {[string, number]} */ ([`//json-schema.org/draft/2019-09/meta/${name}`, 2019])),
+  ...HYPER_2019.map((name) => /** @type {[string, number]} */ ([`//json-schema.org/draft/2019-09/${name}`, 2019])),
   ['//json-schema.org/draft/2020-12/schema', 2020],
   ...META_2020.map((name) => /** @type {[string, number]} */ ([`//json-schema.org/draft/2020-12/meta/${name}`, 2020])),
+  ...HYPER_2020.map((name) => /** @type {[string, number]} */ ([`//json-schema.org/draft/2020-12/${name}`, 2020])),
   ['//json-schema.org/draft/next/schema', 2020],
+  ['//json-schema.org/draft/next/output/schema', 2020],
   ...META_2020.map((name) => /** @type {[string, number]} */ ([`//json-schema.org/draft/next/meta/${name}`, 2020])),
   ['//jarenjs.dev/schemas/2020-12/schema', 2020],
   ['//jarenjs.dev/schemas/2020-12/meta/query', 2020],
@@ -46,13 +55,16 @@ const KNOWN_DIALECTS = /* @__PURE__ */ new Map([
 
 /**
  * A URI as the dialect and vocabulary tables compare it: `http:` and
- * `https:` read alike, and so do a URI and the same URI with an empty
- * fragment (`…/schema#`). Anything else is compared exactly.
+ * `https:` read alike, the host in any case (RFC 3986 makes the scheme and
+ * the host case-insensitive), and a URI and the same URI with an empty
+ * fragment (`…/schema#`) read alike. Anything else, the path included, is
+ * compared exactly.
  * @param {string} uri
  * @returns {string}
  */
 function officialUri(uri) {
-  const rest = uri.startsWith('https:') ? uri.slice(6) : uri.startsWith('http:') ? uri.slice(5) : uri;
+  const web = /^https?:(\/\/[^/?#]*)/i.exec(uri);
+  const rest = web === null ? uri : web[1].toLowerCase() + uri.slice(web[0].length);
   return rest.endsWith('#') ? rest.slice(0, -1) : rest;
 }
 

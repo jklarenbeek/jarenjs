@@ -26,6 +26,8 @@ import {
   placeDraftOf,
   readsForeign,
   unresolvedReference,
+  locatedRefusal,
+  compiledLocation,
   refuseContestedReference,
   isContestedRefusal,
 } from './traverse.js';
@@ -720,6 +722,9 @@ export class ValidationRoot {
 
   /** @returns {TraverseOptions} Schema traversal options */
   get traverse() { return this.#traverse; }
+
+  /** @returns {string} The URI the compiled document is held under */
+  get origin() { return /** @type {string} */ (this.#rootOrigin); }
 
   /** @returns {ValidationOptions} Validation options */
   get options() { return this.#options; }
@@ -1425,9 +1430,9 @@ export class ValidationObject {
         catch (e) {
           // A draft-07 `$ref` that resolves to nothing, whose `$id` would
           // have named another target, says why.
-          throw e?.code === 'JK0009' && createJsonPointer(schemaReference(boundSchema, '$ref'), self.baseUri || boundRefBase, rootRef.traverse).id !== boundRef
+          throw locatedRefusal(e?.code === 'JK0009' && createJsonPointer(schemaReference(boundSchema, '$ref'), self.baseUri || boundRefBase, rootRef.traverse).id !== boundRef
             ? unresolvedReference(boundRef, true)
-            : e;
+            : e, compiledLocation(keywordLocation(path, '$ref'), rootRef.origin));
         }
         const resolvedSchema = obj.schema;
 
@@ -1970,6 +1975,24 @@ export class JarenValidator {
   }
 
   /**
+   * The schema a compile reads: the schema itself, or, when its root `$id`
+   * is a relative reference that names another URI when it is resolved
+   * again against itself (`sub/s.json`), a copy whose `$id` is that
+   * reference resolved once against the origin. Every later step resolves
+   * the root's `$id` against the URI the document is held under, which only
+   * an absolute `$id` leaves unchanged.
+   * @param {boolean | object} schema
+   * @param {TraverseOptions} traverse
+   * @returns {boolean | object}
+   */
+  static #withResolvedRootId(schema, traverse) {
+    if (!isObjectClass(schema) || !isStringType(schema.$id) || isStringWhiteSpace(schema.$id)) return schema;
+    const { id } = createJsonPointer(schema.$id, traverse.origin, traverse, '$id', '#/%24id');
+    if (createJsonPointer(schema.$id, id, traverse).id === id) return schema;
+    return { ...schema, $id: id.endsWith('#') ? id.slice(0, -1) : id };
+  }
+
+  /**
    *
    * @param {boolean | object} schema
    * @param {object[] | undefined} schemas
@@ -1980,6 +2003,8 @@ export class JarenValidator {
   static #traverseSchema(schema, schemas = undefined, fromMap = undefined, opts = new TraverseOptions(), places = undefined) {
     // initialize schema map for all ids and refs
     const schemaMap = new Map(fromMap);
+    /** The first `$ref` of the document naming each target, where a refusal to resolve it is located. */
+    const sites = new Map();
     // The schema's document is read under the draft `compile` reads it
     // under: the one it declares, draft-07 when it declares none.
     const origin = storeSchemaIdsInMap(
@@ -1989,7 +2014,10 @@ export class JarenValidator {
       opts,
       undefined,
       places,
-      detectSchemaDraft(schema, schemaMap));
+      detectSchemaDraft(schema, schemaMap),
+      undefined,
+      undefined,
+      sites);
 
     // Then add the other reference schemas
     if (Array.isArray(schemas) && schemas.length > 0) {
@@ -2003,7 +2031,7 @@ export class JarenValidator {
     }
 
     // make sure all schemas are connected, as this compile reads them
-    restoreSchemaRefsInMap(schemaMap, opts, places, detectSchemaDraft(schema, schemaMap));
+    restoreSchemaRefsInMap(schemaMap, opts, places, detectSchemaDraft(schema, schemaMap), sites);
 
     return { origin: origin, map: schemaMap };
   }
@@ -2559,6 +2587,7 @@ export class JarenValidator {
    * if (checked.valid) checked.value.name; // checked.value is { name: string } here
    */
   compile(schema, schemas = undefined) {
+    schema = JarenValidator.#withResolvedRootId(schema, this.#traverse);
     const { origin, map } = JarenValidator.#traverseSchema(schema, schemas, this.#schemas, this.#traverse, this.#places);
 
     // Detect draft version from schema and update validation options

@@ -49,7 +49,7 @@ import { compileQuerySchema } from './query-keyword.js';
 import { compilePropertyDependencies } from './property-dependencies.js';
 import { compileDollarDataSchema } from './dollar-data.js';
 import { wrapUnevaluated } from './unevaluated.js';
-import { createJsonPointer, keywordLocation } from './traverse.js';
+import { compiledLocation, createJsonPointer, keywordLocation } from './traverse.js';
 import { getDynamicAnchorName, admitsDynamicReference, appliesRefSiblings } from './dynamic-ref.js';
 
 /**
@@ -116,7 +116,7 @@ function compileRecursiveRef(schemaObj, jsonSchema) {
   // the validator holds is refused (`JK0009`), as an unresolvable
   // $dynamicRef is, instead of passing every instance.
   if (ref !== '#') {
-    const place = keywordLocation(schemaObj.path, '$recursiveRef');
+    const place = compiledLocation(keywordLocation(schemaObj.path, '$recursiveRef'), root.origin);
     let refusal;
     if ((schemaObj.declaredDraft ?? schemaObj.options.draftVersion) === 2019) {
       refusal = new SchemaCompileError('JK0011',
@@ -206,7 +206,7 @@ function compileDynamicAnchorRef(schemaObj, jsonSchema) {
   // base URI of its own: it resolves against its own location, as
   // `compileValidator` does
   const baseUri = schemaObj.baseUri || schemaObj.path;
-  const { id: initialTargetUri, fragment: anchorName } = createJsonPointer(ref, baseUri, undefined, '$dynamicRef', keywordLocation(schemaObj.path, '$dynamicRef'));
+  const { id: initialTargetUri, fragment: anchorName } = createJsonPointer(ref, baseUri, undefined, '$dynamicRef', compiledLocation(keywordLocation(schemaObj.path, '$dynamicRef'), root.origin));
   // What the reference resolves through when it reads its initial target.
   const holder = { $ref: initialTargetUri };
   root.refuseContested(initialTargetUri, schemaObj.path, holder);

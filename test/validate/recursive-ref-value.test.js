@@ -44,7 +44,7 @@ describe('a $recursiveRef other than "#" read as 2019-09 is refused JK0011', () 
   it('one that names a held schema, by the call that reaches it', () => {
     const validate = new JarenValidator().compile({ $schema: D19, $defs: STRINGS, properties: { a: { $recursiveRef: '#/$defs/x' } } });
     assert.deepEqual(answers(validate, [{}, { b: 1 }, { a: 1 }, { a: 's' }]), [true, true, 'JK0011', 'JK0011']);
-    assert.equal(thrown(() => validate({ a: 1 })), refusal('#/$defs/x', ORIGIN, '/properties/a'));
+    assert.equal(thrown(() => validate({ a: 1 })), refusal('#/$defs/x', '', '/properties/a'));
   });
 
   it('the repair it names answers', () => {
@@ -61,7 +61,7 @@ describe('a $recursiveRef other than "#" read as 2019-09 is refused JK0011', () 
     it(label, () => {
       const validate = new JarenValidator().compile({ $schema: D19, properties: { a: { $recursiveRef: value } } });
       assert.deepEqual(answers(validate, [{}, { a: 1 }]), [true, 'JK0011']);
-      assert.equal(thrown(() => validate({ a: 1 })), refusal(value, ORIGIN, '/properties/a'));
+      assert.equal(thrown(() => validate({ a: 1 })), refusal(value, '', '/properties/a'));
     });
   }
 

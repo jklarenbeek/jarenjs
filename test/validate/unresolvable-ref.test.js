@@ -34,16 +34,16 @@ describe('a reference nothing holds is refused JK0009 when the schema compiles',
   ]) {
     it(label, () => {
       assert.deepEqual(refusal(() => new JarenValidator().compile(schema)),
-        ['JK0009', `JK0009: Can not resolve schema for '${uri}': ${UNHELD}`]);
+        ['JK0009', `JK0009: Can not resolve schema for '${uri}': ${UNHELD} at #/%24ref`]);
     });
   }
 
   it('a pointer that misses in a held document names the step that misses', () => {
     assert.deepEqual(refusal(() => new JarenValidator().compile({ $ref: '#/$defs/missing' })),
-      ['JK0009', `JK0009: Can not resolve schema for '${BASE}jarenjs#/$defs/missing': '/$defs' is not a schema in '${BASE}jarenjs#'; fix the pointer`]);
+      ['JK0009', `JK0009: Can not resolve schema for '${BASE}jarenjs#/$defs/missing': '/$defs' is not a schema in '${BASE}jarenjs#'; fix the pointer at #/%24ref`]);
     const held = new JarenValidator().addSchema({ $id: 'https://h.test/d.json', $defs: {} });
     assert.deepEqual(refusal(() => held.compile({ $ref: 'https://h.test/d.json#/$defs/x' })),
-      ['JK0009', "JK0009: Can not resolve schema for 'https://h.test/d.json#/$defs/x': '/$defs/x' is not a schema in 'https://h.test/d.json#'; fix the pointer"]);
+      ['JK0009', "JK0009: Can not resolve schema for 'https://h.test/d.json#/$defs/x': '/$defs/x' is not a schema in 'https://h.test/d.json#'; fix the pointer at #/%24ref"]);
   });
 
   it('carries the reason apart from the code', () => {
@@ -55,16 +55,16 @@ describe('a reference nothing holds is refused JK0009 when the schema compiles',
   });
 
   // These were refused when they compiled before; they still are, now coded.
-  for (const [label, schema] of [
-    ['under an anyOf branch', { anyOf: [{ type: 'string' }, { $ref: 'nope.json' }] }],
-    ['under a property', { properties: { a: { $ref: 'nope.json' } } }],
-    ['in a registered document', null],
+  for (const [label, schema, place] of [
+    ['under an anyOf branch', { anyOf: [{ type: 'string' }, { $ref: 'nope.json' }] }, ' at #/anyOf/1/%24ref'],
+    ['under a property', { properties: { a: { $ref: 'nope.json' } } }, ' at #/properties/a/%24ref'],
+    ['in a registered document', null, ''],
   ]) {
     it(`${label}, still at compile`, () => {
       const validator = new JarenValidator();
       if (schema === null) validator.addSchema({ $id: 'https://h.test/b.json', properties: { x: { $ref: 'https://h.test/missing.json' } } });
       assert.deepEqual(refusal(() => validator.compile(schema ?? { type: 'object' })),
-        ['JK0009', `JK0009: Can not resolve schema for '${schema === null ? 'https://h.test/missing.json#' : `${BASE}nope.json#`}': ${UNHELD}`]);
+        ['JK0009', `JK0009: Can not resolve schema for '${schema === null ? 'https://h.test/missing.json#' : `${BASE}nope.json#`}': ${UNHELD}${place}`]);
     });
   }
 
@@ -83,7 +83,7 @@ const HELD = () => ({ $id: 'https://held.test/root.json', $defs: { a: { $id: 'su
 const A = 'https://held.test/sub/a.json';
 const residual = (schema) => new JarenValidator().addSchema(HELD())
   .addSchema({ type: 'number' }, 'https://held.test/sub/name.json').compile(schema);
-const CALL_REFUSAL = ['JK0008', `JK0008: Can not resolve schema for 'https://held.test/name.json#': ${IGNORED_ID}`];
+const CALL_REFUSAL = ['JK0008', `JK0008: Can not resolve schema for 'https://held.test/name.json#': ${IGNORED_ID} at ${A}#/%24ref`];
 const answers = (validate, data) => data.map((d) => {
   try { return validate(d); }
   catch (error) { return [error instanceof SchemaCompileError ? error.code : 'uncoded', error.message]; }
@@ -120,14 +120,14 @@ describe('a reference resolved on first use that resolves to nothing is refused 
       .addSchema({ definitions: {} }, 'https://held.test/name.json')
       .compile({ $ref: A });
     assert.deepEqual(answers(validate, [5]), [['JK0008',
-      `JK0008: Can not resolve schema for 'https://held.test/name.json#/definitions/x': ${IGNORED_ID}`]]);
+      `JK0008: Can not resolve schema for 'https://held.test/name.json#/definitions/x': ${IGNORED_ID} at ${A}#/%24ref`]]);
   });
 
   it('an $id that names the base it sits under changes nothing, and the refusal says JK0009', () => {
     const validate = new JarenValidator()
       .addSchema({ $id: 'https://held.test/root.json', $defs: { a: { $id: 'https://held.test/root.json', $ref: 'name.json' } } })
       .compile({ $ref: 'https://held.test/root.json#/$defs/a' });
-    assert.deepEqual(answers(validate, ['x']), [['JK0009', `JK0009: Can not resolve schema for 'https://held.test/name.json#': ${UNHELD}`]]);
+    assert.deepEqual(answers(validate, ['x']), [['JK0009', `JK0009: Can not resolve schema for 'https://held.test/name.json#': ${UNHELD} at https://held.test/root.json#/$defs/a/%24ref`]]);
   });
 
   it('a target that resolves but does not compile reports its own error', () => {

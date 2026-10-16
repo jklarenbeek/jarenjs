@@ -140,6 +140,19 @@ Settlement semantics, exactly:
 | after `dispose()` | **Nothing** — a late settlement can no longer dispatch. |
 | malformed `id`/`done`/`fail`/`slot` | A `TypeError` from the handler — a host programming error, reported by the loop as `JA2007`. |
 
+A resolved `result` is not checked. The completion is an ordinary
+dispatch, and its payload is host input like any `app.dispatch`
+payload: the completion's patches decide what of it enters the state,
+so a result that carries a `Map` beside the members a patch reads
+(`$payload.result.items`) commits only those members. What a patch
+writes into the state must still be JSON, the invariant every state
+shares (APP-FORMAT §6): install `createJsonStateValidator()` beside
+the task effect and a `Date`, a `NaN` or a `Map` written into the state
+is refused (`JA2005`). An awaiting action reads differently: the runtime,
+not a host dispatch, carries its result to `then`, so it refuses a
+resolved value JSON cannot carry (`JA2028`, APP-FORMAT §3.3) before the
+document reads it.
+
 Tasks in different slots never touch each other. The helper holds no
 state beyond the per-slot records, uses no timers, and has zero
 dependencies (`AbortController` is platform).

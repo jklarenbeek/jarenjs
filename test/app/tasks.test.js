@@ -3,7 +3,7 @@ import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 
-import { createApp, createTaskEffect } from '@jarenjs/app';
+import { createApp, createTaskEffect, createJsonStateValidator } from '@jarenjs/app';
 import { JarenValidator } from '@jarenjs/validate';
 
 /** Synchronous render scheduler for deterministic assertions. */
@@ -369,5 +369,29 @@ describe('createTaskEffect({ projectError }) — the structured error door', fun
   it('a non-function projectError is a host programming error', function () {
     assert.throws(() => createTaskEffect(() => 1, { projectError: /** @type {any} */ ('nope') }),
       /"projectError" must be a function/);
+  });
+});
+
+describe('a resolved task result is host input: the patches decide what enters the state', function () {
+  const doc = (value) => ({ $app: '0.1', state: { data: null }, view: [{ match: '$', body: ['main', {}] }], actions: {
+    load: { effects: [{ run: 'job', with: { id: 'j', done: 'loaded' } }] },
+    loaded: { patch: [{ op: 'replace', path: '/data', value }] } } });
+  /** Run one task that resolves `result`, completing with a patch of `value`. */
+  const settle = async (result, value, validateState = undefined) => {
+    const errors = [];
+    const app = createApp(doc(value), { effects: { job: createTaskEffect(async () => result) }, validateState,
+      onError: (e) => errors.push([e.code, e.detail?.[0]?.instancePath]) });
+    app.dispatch('load');
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    return { data: app.getState().data, errors };
+  };
+
+  it('commits the JSON members a patch reads from a result that also carries a value JSON cannot', async () => {
+    assert.deepStrictEqual(await settle({ items: [1], cache: new Map() }, '$payload.result.items'), { data: [1], errors: [] });
+  });
+
+  it('refuses a result written whole that is not JSON when the host installs the JSON state validator (JA2005)', async () => {
+    for (const [result, place] of [[new Date(0), '/data'], [NaN, '/data'], [new Map(), '/data'], [{ x: undefined }, '/data/x']])
+      assert.deepStrictEqual(await settle(result, '$payload.result', createJsonStateValidator()), { data: null, errors: [['JA2005', place]] });
   });
 });

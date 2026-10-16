@@ -229,6 +229,32 @@ it('refuses an unknown policy value instead of ignoring it', () => {
   assert.equal(compileTextEdits([], [], /** @type {any} */ ({ anchor: undefined, overlap: undefined, sectionEnd: undefined })).valid, true);
 });
 
+it('refuses a configuration key it does not read, or a configuration that is not an object, naming the nearest key', () => {
+  const guide = file('SKILL.md', '# T\n\n- A decimal uses a period separator.\n');
+  const midLine = [edit(guide, 'insert_after', { anchor: 'a period separator', replacement: '- X\n' })];
+  const refusal = (/** @type {any} */ configuration) => {
+    for (const run of [() => compileTextEdits([guide], midLine, configuration), () => applyTextEdits([guide], [], configuration)]) {
+      try { run(); return 'answered'; }
+      catch (error) { if (!(error instanceof CodedError)) throw error; return [error.name, error.code, error.docPath, error.message]; }
+    }
+  };
+  assert.deepEqual(refusal({ anchors: 'widen' }), ['TextEditError', 'JE0001', '/configuration/anchors',
+    "JE0001: unknown configuration key 'anchors' — did you mean 'anchor'? at /configuration/anchors"]);
+  assert.deepEqual(refusal({ Anchor: 'widen' }).slice(2), ['/configuration/Anchor',
+    "JE0001: unknown configuration key 'Anchor' — did you mean 'anchor'? at /configuration/Anchor"]);
+  assert.deepEqual(refusal({ overlaps: 'first-wins' }).slice(1, 3), ['JE0001', '/configuration/overlaps']);
+  assert.deepEqual(refusal({ color: 'red' }).slice(3), [
+    "JE0001: unknown configuration key 'color'; the options are hash, maxFiles, maxEdits, maxBytes, anchor, overlap, sectionEnd at /configuration/color"]);
+  for (const [configuration, kind] of [['widen', 'a string'], [['widen'], 'an array'], [1, 'a number'], [() => 'widen', 'a function']])
+    assert.deepEqual(refusal(configuration), ['TextEditError', 'JE0001', '/configuration',
+      `JE0001: the configuration is an object of options, got ${kind} at /configuration`]);
+  // a member passed as undefined is absent, for every key; so is a null configuration
+  const absent = { hash: undefined, maxFiles: undefined, maxEdits: undefined, maxBytes: undefined, anchor: undefined, overlap: undefined, sectionEnd: undefined };
+  for (const configuration of [absent, null, undefined, {}])
+    assert.deepEqual(compileTextEdits([guide], midLine, configuration).withheld, [{ edit: 0, reason: 'anchor-not-line-boundary' }]);
+  assert.equal(compileTextEdits([guide], midLine, { ...absent, anchor: 'widen' }).valid, true);
+});
+
 it('throws a registered TextEditError naming the code, the place and the reason', () => {
   const codes = edits.TEXT_EDIT_CODES;
   assert.equal(Object.isFrozen(codes), true);

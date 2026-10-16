@@ -62,7 +62,7 @@ describe('a draft-07 $id beside $ref does not set the base of that $ref', () => 
           assert.equal(refused.code, 'JK0008');
           assert.match(refused.message, /^JK0008: Can not resolve schema for 'https:\/\/github\.com\/jklarenbeek\/name\.json#'/);
           assert.match(refused.message, /draft-07 \$ref ignores the \$id beside it/);
-          assert.match(refused.message, /register that URI, or declare \$schema 2019-09 or later$/);
+          assert.match(refused.message, /register that URI, or declare \$schema 2019-09 or later at #\/definitions\/a\/%24ref$/);
         }
       }
       // a target in a document nothing holds is refused the same way

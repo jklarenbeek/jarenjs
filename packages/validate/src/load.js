@@ -25,7 +25,7 @@ import { detectSchemaDraft, dialectDraft } from './schema-keywords.js';
 export const DEFAULT_MAX_LOADS = 100;
 
 /** A `$schema` here names a dialect the validator implements itself, so it is never loaded. */
-const OWN_DIALECT = /^https?:\/\/json-schema\.org\//;
+const OWN_DIALECT = /^https?:\/\/json-schema\.org\//i;
 
 /**
  * The loads in flight, per validator, by document key (`uri#`): a document

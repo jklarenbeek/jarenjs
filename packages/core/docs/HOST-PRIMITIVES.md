@@ -156,7 +156,16 @@ A throw from `compileTextEdits` or `applyTextEdits` is a `CodedError` named
 points into `{ configuration, files, edits, hunks, result }`, naming the option,
 file, edit or hunk at fault (`/edits/3/replacement`, `/hunks/1`,
 `/configuration/anchor`). An unknown `anchor` or `overlap` value, or a
-`sectionEnd` that is not a function, throws `JE0001` rather than being ignored.
+`sectionEnd` that is not a function, throws `JE0001` rather than being ignored,
+and so does a configuration key outside `hash`, `maxFiles`, `maxEdits`,
+`maxBytes`, `anchor`, `overlap` and `sectionEnd` (naming the nearest one:
+`anchors` → `did you mean 'anchor'?`, at `/configuration/anchors`) and a
+configuration that is not an object (`'widen'`, an array; at
+`/configuration`). A member passed as `undefined`, and a `null` configuration,
+are absent. *Upgrade: an unknown key or a configuration that was not an object
+was ignored, so `{ anchors: 'widen' }` answered in line mode
+(`anchor-not-line-boundary`); `{ maxBytes: undefined }` and `{ hash: undefined }`
+threw `JE0001` and now mean the default.*
 *Upgrade: these throws were plain `RangeError`/`TypeError` instances without a
 code; a host that matched on the class reads `code` instead. The reason keeps
 the words the messages had (`stale-base`, `overlap`, `group-incomplete`,
@@ -164,7 +173,7 @@ the words the messages had (`stale-base`, `overlap`, `group-incomplete`,
 
 | Code | Meaning |
 |---|---|
-| `JE0001` | an option is invalid: a limit outside its range, a hash or section hook that is not a function, or an unknown anchor or overlap policy |
+| `JE0001` | an option is invalid: a limit outside its range, a hash or section hook that is not a function, an unknown anchor or overlap policy, a key the configuration does not read, or a configuration that is not an object |
 | `JE0002` | the files, edits or hunks argument is not an array |
 | `JE0003` | a file lacks a safe relative path, its text or its hash, or repeats another file's path |
 | `JE0004` | a file's hash does not match its content under the configured hash |

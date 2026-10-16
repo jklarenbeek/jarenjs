@@ -5,7 +5,6 @@ import { describe, it } from 'node:test';
 import * as assert from 'node:assert/strict';
 import { JarenValidator, SchemaCompileError, TraverseOptions, VALIDATE_CODES } from '@jarenjs/validate';
 
-const ORIGIN = 'https://github.com/jklarenbeek/jarenjs';
 const D20 = 'https://json-schema.org/draft/2020-12/schema';
 const REPAIR = 'is not a valid URI reference; correct it, percent-encoding any character a URI does not allow';
 
@@ -31,7 +30,7 @@ describe('a malformed reference or identifier is refused JK0010', () => {
     ['a root $id', { $id: 'http://[x', type: 'string' }, "$id 'http://[x'", '#/%24id'],
     ['a nested $id', { properties: { a: { $id: 'http://[x' } } }, "$id 'http://[x'", '#/properties/a/%24id'],
     ['a draft-04 id', { id: 'http://[x', type: 'string' }, "id 'http://[x'", '#/id'],
-    ['a $dynamicRef', { $schema: D20, properties: { a: { $dynamicRef: 'http://[x' } } }, "$dynamicRef 'http://[x'", `${ORIGIN}#/properties/a/%24dynamicRef`],
+    ['a $dynamicRef', { $schema: D20, properties: { a: { $dynamicRef: 'http://[x' } } }, "$dynamicRef 'http://[x'", '#/properties/a/%24dynamicRef'],
   ]) {
     it(`${label}, when the schema compiles`, () => {
       assert.deepEqual(refusal(() => new JarenValidator().compile(schema)),
@@ -77,7 +76,7 @@ describe('a malformed reference or identifier is refused JK0010', () => {
     const validate = new JarenValidator().compile({ properties: { a: { $recursiveRef: 'http://[x' } } });
     assert.equal(validate({}), true);
     assert.deepEqual(refusal(() => validate({ a: 1 })),
-      ['JK0010', `JK0010: $recursiveRef 'http://[x' ${REPAIR} at ${ORIGIN}#/properties/a/%24recursiveRef`]);
+      ['JK0010', `JK0010: $recursiveRef 'http://[x' ${REPAIR} at #/properties/a/%24recursiveRef`]);
   });
 });
 

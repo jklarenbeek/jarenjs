@@ -261,7 +261,8 @@ describe("Schema '$query' keyword (Jaren JSON Query assertions)", () => {
       }
       return null;
     };
-    const ROOT = 'https://github.com/jklarenbeek/jarenjs#';
+    // a place of the compiled document is named by its pointer into it
+    const ROOT = '#';
 
     it('refuses a malformed query document with the query compiler\'s code, located under $query', () => {
       assert.deepStrictEqual(refusal({ $query: { $bogus: [1] } }), {
@@ -285,10 +286,10 @@ describe("Schema '$query' keyword (Jaren JSON Query assertions)", () => {
         message: `JQ0005: invalid '$query' document: '$minPrice' is neither bound by an enclosing phrase nor a declared external (declared externals: 'root', 'path') at ${ROOT}/%24query/%24ge/1`,
         cause: { name: 'JsonQueryCompileError', code: 'JQ0005', docPath: '/$ge/1' },
       });
-      // a nested $query: the schema location is spelled as a URI fragment
+      // a nested $query under a root $id: the schema location is the same pointer
       assert.deepStrictEqual(refusal({ $id: 'https://x.test/order', properties: { 'unit price': {
         $query: { $and: [{ $exists: '$root' }, { $gt: ['$', '$floor'] }] } } } }).docPath,
-      'https://x.test/order#/properties/unit%20price/%24query/%24and/1/%24gt/1');
+      '#/properties/unit%20price/%24query/%24and/1/%24gt/1');
       // root and path themselves are of course fine
       assert.doesNotThrow(
         () => new JarenValidator().compile({ $query: { $and: [

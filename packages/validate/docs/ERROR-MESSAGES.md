@@ -291,7 +291,12 @@ is refused by a `SchemaCompileError` with the query compiler's own `JQ0xxx`
 code (`@jarenjs/json`'s QUERY-FORMAT §10.2: `JQ0002` an unknown operator,
 `JQ0005` an external other than `root` and `path`, …), whose `docPath` is the
 refused place under the `$query` keyword and whose `cause` is the query
-compiler's `JsonQueryCompileError`. The query code names the defect in the
+compiler's `JsonQueryCompileError`. Every compile refusal names a place of
+the schema compiled by its pointer into it (`#/properties/total/%24query`),
+with or without a root `$id`, and a place in another document the validator
+holds by that document's URI; inside an embedded resource (a subschema with
+an `$id` of its own), a `$query`, `$recursiveRef` or `$dynamicRef` refusal
+names the place by that resource's URI. The query code names the defect in the
 query's own grammar; a `JK` code over it would send every reader to `cause`.
 
 | Code | Class | Meaning |
@@ -452,7 +457,7 @@ schema at that URI, or declare `$schema` 2019-09 or later so the `$id` sets
 the base):
 
 ```text
-JK0008: Can not resolve schema for 'https://github.com/jklarenbeek/name.json#': a draft-07 $ref ignores the $id beside it; register that URI, or declare $schema 2019-09 or later
+JK0008: Can not resolve schema for 'https://github.com/jklarenbeek/name.json#': a draft-07 $ref ignores the $id beside it; register that URI, or declare $schema 2019-09 or later at #/definitions/a/%24ref
 ```
 
 From 2019-09 on the `$id` sets the base of the `$ref` beside it. A document
@@ -471,9 +476,15 @@ under whichever applicator it sits; one resolved on first use is refused by
 the first call that reaches it:
 
 ```text
-JK0009: Can not resolve schema for 'https://github.com/jklarenbeek/nope.json#': no schema the validator holds has that URI; register it with addSchema, load it with compileAsync, or fix the reference
-JK0009: Can not resolve schema for 'https://github.com/jklarenbeek/jarenjs#/$defs/missing': '/$defs' is not a schema in 'https://github.com/jklarenbeek/jarenjs#'; fix the pointer
+JK0009: Can not resolve schema for 'https://github.com/jklarenbeek/nope.json#': no schema the validator holds has that URI; register it with addSchema, load it with compileAsync, or fix the reference at #/%24ref
+JK0009: Can not resolve schema for 'https://github.com/jklarenbeek/jarenjs#/$defs/missing': '/$defs' is not a schema in 'https://github.com/jklarenbeek/jarenjs#'; fix the pointer at #/%24ref
 ```
+
+The `docPath` is the `$ref` that names the target: in the schema compiled
+(`#/…`), or, for a reference resolved on first use in another document the
+validator holds, in that document (`https://held.test/root.json#/$defs/a/%24ref`).
+A compile that refuses a reference of a document registered earlier names no
+place.
 
 A `$dynamicRef` or `$recursiveRef` whose target nothing resolves is refused
 the same way by the first call that reaches it, never answered (answered, it
@@ -508,7 +519,7 @@ same message at the same place:
 
 ```text
 JK0010: $ref 'http://[x' is not a valid URI reference; correct it, percent-encoding any character a URI does not allow at #/%24ref
-JK0010: $dynamicRef 'http://[x' is not a valid URI reference; correct it, percent-encoding any character a URI does not allow at https://github.com/jklarenbeek/jarenjs#/properties/a/%24dynamicRef
+JK0010: $dynamicRef 'http://[x' is not a valid URI reference; correct it, percent-encoding any character a URI does not allow at #/properties/a/%24dynamicRef
 ```
 
 **`JK0011` — a `$recursiveRef` other than `"#"`.** Draft 2019-09 defines
@@ -521,7 +532,7 @@ answers. A document that declares a draft that does not define the keyword
 whatever its value:
 
 ```text
-JK0011: $recursiveRef '#/$defs/x' is defined only as "#"; to apply the schema it names, write $ref '#/$defs/x' at https://github.com/jklarenbeek/jarenjs#/properties/a/%24recursiveRef
+JK0011: $recursiveRef '#/$defs/x' is defined only as "#"; to apply the schema it names, write $ref '#/$defs/x' at #/properties/a/%24recursiveRef
 ```
 
 **`JK0012` — an identifier that names two schemas.** An `$id`, `$anchor` or

@@ -206,3 +206,35 @@ describe('bundled $defs names stay distinct when their provider-safe spellings m
     keys.forEach((key, i) => assert.deepEqual(Object.keys(strict.schema.$defs[strict.schema.properties[`x${i}`].$ref.slice('#/$defs/'.length)].properties), [key]));
   });
 });
+
+describe('a root $ref beside definitions derives, as the validator compiles it', () => {
+  const d = { type: 'object', properties: { a: { type: 'string' } } };
+  const EXPECTED = {
+    type: 'object', properties: { value: { $ref: '#/$defs/d' } }, required: ['value'], additionalProperties: false,
+    $defs: { d: { type: 'object', properties: { a: { type: ['string', 'null'] } }, required: ['a'], additionalProperties: false } },
+  };
+
+  it('derives the root $ref of an undeclared or draft-07 document, with $defs or definitions, and under a root $id', () => {
+    for (const schema of [
+      { $ref: '#/$defs/d', $defs: { d } }, { $ref: '#/definitions/d', definitions: { d } },
+      { $schema: D07, $ref: '#/definitions/d', definitions: { d } },
+      { $id: 'https://x.test/s.json', $ref: '#/$defs/d', $defs: { d } }, { $id: 's.json', $ref: '#/$defs/d', $defs: { d } },
+      { $schema: D20, $ref: '#/$defs/d', $defs: { d } },
+    ]) {
+      const derived = deriveStrictProfile(schema);
+      assert.deepEqual(derived.schema, EXPECTED, JSON.stringify(schema));
+      const validate = original(schema), strict = profiled(derived.schema);
+      assert.deepEqual([{ a: 'x' }, { a: 1 }].map((value) => [validate(value), strict(derived.toProfile(value))]), [[true, true], [false, false]]);
+      assert.deepEqual(derived.fromProfile(derived.toProfile({ a: 'x' })), { a: 'x' });
+    }
+  });
+
+  it('resolves a nested relative $id and an anchor under an absolute root $id', () => {
+    const derived = deriveStrictProfile({ $id: 'https://x.test/a/s.json', type: 'object', properties: { a: { $ref: 'sub/n.json' }, b: { $ref: '#str' } },
+      $defs: { n: { $id: 'sub/n.json', type: 'string' }, t: { $anchor: 'str', type: 'string' } } });
+    assert.deepEqual(derived.schema, {
+      type: 'object', properties: { a: { anyOf: [{ $ref: '#/$defs/n' }, { type: 'null' }] }, b: { anyOf: [{ $ref: '#/$defs/t' }, { type: 'null' }] } },
+      required: ['a', 'b'], additionalProperties: false, $defs: { n: { type: 'string' }, t: { type: 'string' } },
+    });
+  });
+});

@@ -54,6 +54,55 @@ describe('a $schema names a draft by its exact URI', () => {
       for (const uri of uris) assert.equal(detectSchemaDraft({ $schema: uri }), Number(draft), uri);
   });
 
+  it('reads every other meta-schema json-schema.org publishes for a draft as that draft', () => {
+    // Each URI is the `$id` of a meta-schema json-schema.org serves (the
+    // draft-next output schema: the JSON Schema Test Suite's copy).
+    const published = {
+      6: ['http://json-schema.org/draft-06/hyper-schema#', 'http://json-schema.org/draft-06/links#'],
+      7: ['http://json-schema.org/draft-07/hyper-schema#', 'http://json-schema.org/draft-07/links#', 'http://json-schema.org/draft-07/hyper-schema-output'],
+      2019: ['hyper-schema', 'links', 'meta/hyper-schema', 'output/schema', 'output/hyper-schema']
+        .map((name) => `https://json-schema.org/draft/2019-09/${name}`),
+      2020: [...['hyper-schema', 'links', 'meta/hyper-schema', 'output/schema'].map((name) => `https://json-schema.org/draft/2020-12/${name}`),
+        'https://json-schema.org/draft/next/output/schema'],
+    };
+    for (const [draft, uris] of Object.entries(published))
+      for (const uri of uris) {
+        const bare = uri.replace(/#$/, '').replace(/^https?:/, '');
+        for (const spelling of [`http:${bare}`, `https:${bare}`, `http:${bare}#`, `https:${bare}#`])
+          assert.equal(detectSchemaDraft({ $schema: spelling }), Number(draft), spelling);
+      }
+    const HYPER_2020 = 'https://json-schema.org/draft/2020-12/hyper-schema';
+    const HYPER_2019 = 'https://json-schema.org/draft/2019-09/hyper-schema';
+    assert.equal(new JarenValidator().compile({ $schema: HYPER_2020, ...TUPLE })([1]), false);
+    const dependent = (uri) => new JarenValidator().compile({ $schema: uri, dependentRequired: { a: ['b'] } })({ a: 1 });
+    assert.deepEqual([dependent(HYPER_2019), dependent(HYPER_2020)], [false, false]);
+    // a draft-06 or draft-07 meta-schema is a known draft: neither dynamic reference applies anything there
+    const recursive = (uri, keyword) => new JarenValidator()
+      .compile({ $schema: uri, type: 'object', properties: { a: { [keyword]: '#' } } })({ a: 1 });
+    assert.deepEqual([...published[6], ...published[7]].flatMap((uri) => [recursive(uri, '$recursiveRef'), recursive(uri, '$dynamicRef')]),
+      Array(10).fill(true));
+  });
+
+  it('reads the scheme and host of a dialect URI in any case, its path only as spelled', () => {
+    for (const [uri, draft] of [
+      ['HTTPS://json-schema.org/draft/2020-12/schema', 2020], ['https://JSON-SCHEMA.org/draft/2020-12/schema', 2020],
+      ['Https://Json-Schema.Org/draft/2019-09/meta/core', 2019], ['HTTP://JSON-SCHEMA.ORG/draft-06/schema#', 6],
+      ['HTTPS://jarenjs.dev/schemas/2020-12/schema', 2020],
+      ['https://json-schema.org/DRAFT/2020-12/schema', 7], ['https://json-schema.org/draft/2020-12/Schema', 7],
+    ]) assert.equal(detectSchemaDraft({ $schema: uri }), draft, uri);
+    assert.deepEqual(['HTTPS://json-schema.org/draft/2020-12/schema', 'https://JSON-SCHEMA.org/draft/2020-12/schema']
+      .map((uri) => new JarenValidator().compile({ $schema: uri, ...TUPLE })([1])), [false, false]);
+  });
+
+  it('never asks the host to load a meta-schema json-schema.org publishes, whatever the case of its scheme and host', async () => {
+    const asked = [];
+    const loadSchema = async (/** @type {string} */ uri) => { asked.push(uri); throw new Error(`no document at ${uri}`); };
+    const answers = [];
+    for (const uri of ['HTTPS://json-schema.org/draft/2020-12/schema', 'https://json-schema.org/draft/2020-12/hyper-schema'])
+      answers.push((await compileAsync(new JarenValidator(), { $schema: uri, ...TUPLE }, { loadSchema }))([1]));
+    assert.deepEqual({ asked, answers }, { asked: [], answers: [false, false] });
+  });
+
   it('reads a URI that only contains a draft spelling as draft-07, the reading of every unknown dialect', () => {
     for (const uri of [
       'https://example.com/2020-12/my-dialect', 'https://example.com/2019-09-ext', 'https://example.com/draft/next/schema',

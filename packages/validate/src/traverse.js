@@ -66,6 +66,21 @@ export function keywordLocation(uri, keyword) {
   return encodeJsonPointerPath(uri.includes('#') ? uri : `${uri}#`, keyword);
 }
 
+/**
+ * A schema location as a compile refusal names it: a place in the document
+ * the compile was handed (held under `origin`) by its pointer into that
+ * document (`#/…`), as the walks name it; a place in any other document or
+ * embedded resource by its absolute URI.
+ * @param {string} location - The place, an absolute URI with a pointer fragment
+ * @param {string} origin - The URI the compiled document is held under
+ * @returns {string}
+ */
+export function compiledLocation(location, origin) {
+  const hash = origin.indexOf('#');
+  const document = hash === -1 ? origin : origin.slice(0, hash);
+  return location.startsWith(`${document}#`) ? location.slice(document.length) : location;
+}
+
 export function decodeJsonPointerPath(path) {
   // split and remove the leading empty string
   return path.split('/').map(decodeJsonPointerKey).splice(1);
@@ -318,9 +333,11 @@ function keptRefBase(places, schema, reading) {
  * @param {Map<string, any>} [held] - The schemas the validator already
  *   holds: a `$schema` naming one of them, or one `schemas` holds, is read
  *   by that meta-schema's own `$schema`
+ * @param {Map<string, string>} [sites] - Where to record the first `$ref` of
+ *   the document naming each target (its location in the document)
  * @returns {string} The document's own id
  */
-export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPointerOptions(), onReference = undefined, places = undefined, defaultDraft = null, onFault = undefined, held = undefined) {
+export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPointerOptions(), onReference = undefined, places = undefined, defaultDraft = null, onFault = undefined, held = undefined, sites = undefined) {
   if (!isObjectClass(schema)) {
     const { id } = createJsonPointer(baseUri, undefined, opts);
     schemas.set(id, schema);
@@ -404,7 +421,9 @@ export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPoi
     if (hasId) {
       const idName = isStringType(obj.$id) ? '$id' : 'id';
       let id;
-      try {
+      // the root's `$id` was resolved once, against the base it is read under
+      if (obj === schema && idName === '$id') id = rootUri;
+      else try {
         ({ id } = createJsonPointer(idKeyword, base, opts, idName, encodeJsonPointerPath(path, idName)));
       }
       catch (e) {
@@ -485,6 +504,7 @@ export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPoi
       else places?.keptRefs.delete(ref);
       if (!schemas.has(ref))
         schemas.set(ref, null);
+      if (sites !== undefined && !sites.has(ref)) sites.set(ref, encodeJsonPointerPath(path, '$ref'));
       if (onReference !== undefined) onReference(target, encodeJsonPointerPath(path, '$ref'), keepsBase && draft === null);
 
       // Don't continue here - we need to process other schemas in the same
@@ -628,6 +648,19 @@ export function unresolvedReference(id, ignoredId = false, why = UNHELD) {
 }
 
 /**
+ * A refusal to resolve a reference (`JK0008`, `JK0009`), located at the
+ * `$ref` that names the target; any other error as it is.
+ * @param {unknown} error
+ * @param {string|undefined} place - The `$ref`, as `docPath`
+ * @returns {unknown}
+ */
+export function locatedRefusal(error, place) {
+  return place !== undefined && error instanceof SchemaCompileError && error.docPath === undefined
+    && (error.code === 'JK0008' || error.code === 'JK0009')
+    ? new SchemaCompileError(error.code, error.reason, place) : error;
+}
+
+/**
  * Resolve one reference to the schema it names, without following the
  * target's own reference.
  * @param {Map<string, any>} schemas
@@ -731,11 +764,13 @@ export function isRefCycleError(error) {
  * @param {SchemaPlaces} [places] - What the walks read
  * @param {number|null} [reading] - The draft the compile reads a place that
  *   declares none under
+ * @param {Map<string, string>} [sites] - The `$ref` that names each target in
+ *   the compiled document: a refusal to resolve one is located there
  * @throws {SchemaCompileError} `JK0008` for a target of a draft-07 `$ref`
  *   whose `$id` does not set its base that nothing resolves, `JK0009` for
  *   any other target nothing resolves
  */
-export function restoreSchemaRefsInMap(schemas, opts = new JsonPointerOptions(), places = undefined, reading = null) {
+export function restoreSchemaRefsInMap(schemas, opts = new JsonPointerOptions(), places = undefined, reading = null, sites = undefined) {
   for (const [id, item] of schemas.entries()) {
     if (item != null)
       continue;
@@ -789,7 +824,7 @@ export function restoreSchemaRefsInMap(schemas, opts = new JsonPointerOptions(),
           schemas.delete(id);
           continue;
         }
-        throw failure !== undefined && !kept ? failure : unresolvedReference(id, kept);
+        throw locatedRefusal(failure !== undefined && !kept ? failure : unresolvedReference(id, kept), sites?.get(id));
       }
 
       schemas.set(id, schema);

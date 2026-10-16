@@ -93,7 +93,7 @@ describe('a reference to a plain name no anchor declares is refused (it named th
   for (const [name, spelled] of [['_a', '_a'], ['a b', 'a%20b'], [LONG, LONG]]) {
     it(JSON.stringify(name.length > 12 ? 'a × 40' : name), () => {
       assert.deepEqual(refusal(() => new JarenValidator().compile({ $schema: D20, properties: { p: { $ref: `#${name}` } } })),
-        ['JK0009', `JK0009: Can not resolve schema for '${ORIGIN}#${spelled}': ${UNHELD}`]);
+        ['JK0009', `JK0009: Can not resolve schema for '${ORIGIN}#${spelled}': ${UNHELD} at #/properties/p/%24ref`]);
     });
   }
 });

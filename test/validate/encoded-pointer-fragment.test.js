@@ -71,7 +71,7 @@ describe('a percent-encoded pointer fragment is a pointer', () => {
   it('a pointer that misses is refused JK0009, naming the pointer', () => {
     assert.throws(() => new JarenValidator().compile({ $defs, properties: { p: { $ref: '#%2F$defs%2Fnope' } } }), {
       code: 'JK0009',
-      message: "JK0009: Can not resolve schema for 'https://github.com/jklarenbeek/jarenjs#/$defs/nope': '/$defs/nope' is not a schema in 'https://github.com/jklarenbeek/jarenjs#'; fix the pointer",
+      message: "JK0009: Can not resolve schema for 'https://github.com/jklarenbeek/jarenjs#/$defs/nope': '/$defs/nope' is not a schema in 'https://github.com/jklarenbeek/jarenjs#'; fix the pointer at #/properties/p/%24ref",
     });
   });
 

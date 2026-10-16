@@ -2,6 +2,7 @@
 /** Pure, bounded edits over file values. Filesystem policy belongs to the host. */
 import { hashContent, utf8ByteLength } from '../string.js';
 import { CodedError } from '../errors.js';
+import { refuseUnknownMembers } from '../object.js';
 
 /** @typedef {{ path: string, text: string, hash: string }} TextFile */
 /** @typedef {{ op: 'create_file'|'insert_before'|'insert_after'|'replace_section'|'delete_section',
@@ -25,7 +26,7 @@ import { CodedError } from '../errors.js';
  * |'JE0010'|'JE0011'|'JE0012'|'JE0013'|'JE0014'|'JE0015'|'JE0016'|'JE0017', string>>}
  */
 export const TEXT_EDIT_CODES = Object.freeze({
-  JE0001: 'an option is invalid: a limit outside its range, a hash or section hook that is not a function, or an unknown anchor or overlap policy',
+  JE0001: 'an option is invalid: a limit outside its range, a hash or section hook that is not a function, an unknown anchor or overlap policy, a key the configuration does not read, or a configuration that is not an object',
   JE0002: 'the files, edits or hunks argument is not an array',
   JE0003: 'a file lacks a safe relative path, its text or its hash, or repeats another file\'s path',
   JE0004: 'a file\'s hash does not match its content under the configured hash',
@@ -66,9 +67,21 @@ const byCodeUnits = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
 const canonical = (a, b) => byCodeUnits(a.path, b.path) || a.start - b.start || a.end - b.end
   || byCodeUnits(a.replacement, b.replacement) || byCodeUnits(a.group, b.group) || a.source - b.source;
 const POLICIES = { anchor: ['line', 'widen'], overlap: ['withhold-both', 'first-wins'] };
+const CONFIGURATION_KEYS = ['hash', 'maxFiles', 'maxEdits', 'maxBytes', 'anchor', 'overlap', 'sectionEnd'];
 
+/** The configuration with its defaults: a key it does not read, or a configuration that is not an
+ * object, is refused (it would answer in the default mode); a member passed as `undefined`, and a
+ * `null` configuration, are absent. */
 function settings(options) {
-  const value = { hash: hashContent, maxFiles: 256, maxEdits: 256, maxBytes: 4 * 1024 * 1024, ...options };
+  if (options !== undefined && (typeof options !== 'object' || Array.isArray(options))) {
+    const kind = Array.isArray(options) ? 'an array' : `a ${typeof options}`;
+    throw refusal('JE0001', `the configuration is an object of options, got ${kind}`, '/configuration');
+  }
+  const given = options ?? {};
+  refuseUnknownMembers(given, CONFIGURATION_KEYS,
+    (key, hint) => refusal('JE0001', `unknown configuration key '${key}'${hint}`, '/configuration/' + key));
+  const value = { hash: hashContent, maxFiles: 256, maxEdits: 256, maxBytes: 4 * 1024 * 1024 };
+  for (const key of CONFIGURATION_KEYS) if (given[key] !== undefined) value[key] = given[key];
   const limits = 'text edits require finite file, edit and byte limits and a synchronous hash';
   if (typeof value.hash !== 'function') throw refusal('JE0001', limits, '/configuration/hash');
   for (const [key, most] of [['maxFiles', 4096], ['maxEdits', 4096], ['maxBytes', 64 * 1024 * 1024]])
