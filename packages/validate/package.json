@@ -27,6 +27,10 @@
       "types": "./dist/types/load.d.ts",
       "default": "./src/load.js"
     },
+    "./strict-profile": {
+      "types": "./dist/types/strict-profile.d.ts",
+      "default": "./src/strict-profile.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [

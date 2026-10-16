@@ -40,7 +40,8 @@
     "schema-vocabulary.ts",
     "typed-outcomes.ts",
     "check-compile.ts",
-    "validate-narrow.ts"
+    "validate-narrow.ts",
+    "strict-profile.ts"
   ],
   "include": [
     "linq-*.ts"

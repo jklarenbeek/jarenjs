@@ -301,6 +301,14 @@ failed validation, because a `false` under `not` would read as success.
 | `JK0010` | `SchemaCompileError` | A `$ref`, `$dynamicRef`, `$recursiveRef` or `$id` (`id`) is not a valid URI reference: refused where the text is read, naming the keyword, the text and where it sits |
 | `JK0011` | `SchemaCompileError` | A `$recursiveRef` read as draft 2019-09 is not `"#"`: refused by the first call that reaches it, naming the `$ref` that applies the schema it names |
 | `JK0012` | `SchemaCompileError` | An identifier (`$id`, `$anchor`, `$dynamicAnchor`) names two schemas — a document declares it twice, or it already names another schema the validator holds: refused where the second is read, naming both places |
+| `JK0101` | `SchemaCompileError` | `deriveStrictProfile` (`@jarenjs/validate/strict-profile`): a schema that accepts any value — `true`, `{}`, a node with no `type`, `enum`, `const`, `$ref` or `anyOf`, an array with no `items` schema — has no strict form |
+| `JK0102` | `SchemaCompileError` | `deriveStrictProfile`: an object whose member names are open — `patternProperties`, a schema-valued `additionalProperties` or `unevaluatedProperties`, or no declared `properties` — cannot be closed |
+| `JK0103` | `SchemaCompileError` | `deriveStrictProfile`: a keyword that applies members, items or branches beside its node (`allOf` of more than one branch, `if`/`then`/`else`, `dependentSchemas` or a draft-07 `dependencies` schema beside an object type, `prefixItems`, a `$ref` or `anyOf` beside an object type or beside structural siblings) cannot be carried |
+| `JK0104` | `SchemaCompileError` | `deriveStrictProfile`: a reference cannot be bundled — a `$dynamicRef` or `$recursiveRef`, a document neither the schema nor its `references` hold, or a target that is no schema |
+| `JK0105` | `SchemaCompileError` | `deriveStrictProfile` or `relaxSchema`: a node carries both `oneOf` and `anyOf`, and the profile turns `oneOf` into `anyOf` |
+| `JK0106` | `SchemaCompileError` | `deriveStrictProfile`: a member that `required`, or a `dependentRequired` (draft-07 `dependencies` list) firing on a declared member, requires is not declared under `properties` (or is declared `false`), so a closed object could never hold it |
+| `JK0107` | `SchemaCompileError` | `deriveStrictProfile` or `relaxSchema` was given an argument it does not take |
+| `JK0108` | `SchemaCompileError` | `deriveStrictProfile`: a schema that accepts no value (`false`, an `anyOf` branch `false`, `items: false`) has no strict form |
 | `JK2001` | `SchemaRuntimeError` | Validation nests schema references deeper than `maxReferenceDepth` (default 256): refused where the bound is crossed |
 
 **`JK0001` — a loop that never reads the instance.** A `$ref` that leads
@@ -522,3 +530,26 @@ declares twice keeps its first place. Where anchors are not allowed
 JK0012: 'https://github.com/jklarenbeek/x.json#' is declared twice (first at '#/%24defs/a/%24id'); give one of them another name at #/%24defs/b/%24id
 JK0012: $id declares 'https://a.test/x.json#', which names another schema the validator holds; give one of them another name at #/%24defs/a/%24id
 ```
+
+**`JK0101`–`JK0108` — a schema with no strict form.** `deriveStrictProfile`
+closes every object and requires every member, so it refuses each shape a
+closed profile would read wrong — a profile that could never hold an answer
+the original accepts by declaration, or one that silently accepts what the
+original's members never declared — naming the place in the original schema
+(a place inside a document passed as a reference is named by that
+document's `$id`). Each message ends with its repair:
+
+```text
+JK0101: a schema with no type, enum, const, $ref or anyOf accepts any value, which a strict profile cannot carry; give it a type at #/properties/a
+JK0102: additionalProperties admits members of any name, which a closed profile object cannot carry; declare the members under properties, or use an array of { key, value } entries at #/properties/tags/additionalProperties
+JK0103: allOf beside an object type adds members a closed profile object cannot carry; move the members into the object (or into each branch) at #/allOf
+JK0104: $ref 'https://x.test/a.json' names a document neither the schema nor its references hold; pass it in references at #/properties/a
+JK0105: a node carries both oneOf and anyOf, and a profile turns oneOf into anyOf; merge them into one anyOf at #/properties/a
+JK0106: required member 'id' is not declared under properties, so a closed profile object could never hold it; declare it at #/required
+JK0107: deriveStrictProfile takes a schema and { references }: an array of schema documents
+JK0108: a schema that accepts no value has no strict form at #
+```
+
+A refusal the original's own validator raises while the derivation asks it
+whether a member admits `null` (a `JK0009` for a reference inside a relaxed
+keyword that no document given resolves) passes through unchanged.

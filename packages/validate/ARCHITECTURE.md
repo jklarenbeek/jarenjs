@@ -31,6 +31,7 @@ The validator embraces these architectural principles:
 | `packages/validate/src/output.js` | The JSON Schema standard output formats (`@jarenjs/validate/output`): the unit recorder and the projections |
 | `packages/validate/src/load.js` | `compileAsync` (`@jarenjs/validate/load`): loads the documents a schema's references need, then compiles |
 | `packages/validate/src/validator-state.js` | What each validator holds, for the subpath modules (`load.js`) |
+| `packages/validate/src/strict-profile.js` | Strict structured-output profiles (`@jarenjs/validate/strict-profile`): `relaxSchema`, `deriveStrictProfile` and its two instance maps |
 | `packages/validate/src/array.js` | Array validation logic |
 | `packages/validate/src/object.js` | Object validation logic |
 | `packages/validate/src/string.js` | String validation logic |
@@ -751,6 +752,36 @@ always built):
   errors a failed subschema already explains, and the pruning of the flat
   and condensed forms.
 
+### Strict Structured-Output Profiles (strict-profile.js)
+
+`relaxSchema` and `deriveStrictProfile` live in `strict-profile.js`, the
+`@jarenjs/validate/strict-profile` subpath; the core never imports it. It
+works on schema documents, not on compiled validators, and uses the compile
+pipeline twice, as a client:
+
+- **One walk over schema positions.** Both functions map a node's keywords
+  through `mapPosition`, which descends only where a keyword holds a schema
+  (`SCHEMA_VALUE_KEYWORDS`, `SCHEMA_LIST_KEYWORDS`, `SCHEMA_MAP_KEYWORDS` of
+  `@jarenjs/core/schema`, plus `$defs`, `definitions` and `dependencies`), so
+  a member named like a keyword and `enum`/`const`/`default` data are never
+  rewritten. `relaxNode` is the one relaxation step: the build-time LLM
+  profiles of `@jarenjs/json` (`scripts/lib/schema-profiles.js`) and every
+  strict-profile node run through it.
+- **Bundling by node identity.** An index walk records every schema node's
+  `uri#pointer` and every resource (an `$id`) with its anchors
+  (`collectSameDocumentAnchors`); a `$ref` resolves with
+  `resolveSameDocumentRef` inside the resource its URI names, and the target
+  node gets one `$defs` name in the profile however many references reach it.
+- **The original's validator decides `null`.** Once every reference is
+  bundled, each optional member's place is compiled as `{ $ref: place }` by a
+  `JarenValidator` holding the schema and its references, and run on `null`;
+  only a member it refuses is widened and recorded as a placeholder (a
+  `WeakMap` from the profile's object node to the member names).
+- **The profile's validator picks a union branch.** `fromProfile` and
+  `toProfile` walk an instance beside the profile; at an `anyOf` they compile
+  each branch's place in the profile (registered under a private identifier,
+  read as 2020-12) once, and follow the branches the value matches.
+
 ### Loading Referenced Schemas (load.js)
 
 `compileAsync` lives in `load.js`, the `@jarenjs/validate/load` subpath; the
@@ -1197,6 +1228,7 @@ For broader context on how this package fits into the JarenJS ecosystem:
 | `index.js` | Public API | `JarenValidator`, `ValidationOptions`, `ValidatorOptions` |
 | `messages.js` | Error conversion & i18n | `ValidationError`, `convertInternalErrors`, `messagesEn`, `compileMessageTemplate`, `compileMessageCatalog`, `renderErrorMessage`, `localizeErrors`, `compileErrorMessageSpec` |
 | `output.js` | Standard output formats (`@jarenjs/validate/output`) | `flagOutput`, `basicOutput`, `detailedOutput`, `verboseOutput`, `listOutput`, `hierarchicalOutput` |
+| `strict-profile.js` | Strict structured-output profiles (`@jarenjs/validate/strict-profile`) | `relaxSchema`, `deriveStrictProfile` |
 | `schema.js` | Schema compilation | `compileSchemaObject` |
 | `traverse.js` | Schema traversal | `TraverseOptions`, `storeSchemaIdsInMap`, `resolveRefSchemaDeep` |
 | `tools.js` | Shared utilities | `isBoolOrObjectClass`, `hasSchemaReference`, `createIsSchemaTypeHandler` |

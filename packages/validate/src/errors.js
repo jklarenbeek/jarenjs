@@ -19,7 +19,9 @@
  * first call that reaches it. An identifier (`$id`, `$anchor`,
  * `$dynamicAnchor`) that names two schemas — declared twice in a document,
  * or already naming another schema the validator holds — is refused where
- * the second is read (`JK0012`). When a validator
+ * the second is read (`JK0012`). A schema `deriveStrictProfile`
+ * (`@jarenjs/validate/strict-profile`) cannot make strict is refused where
+ * the derivation reads the place (`JK0101`–`JK0108`). When a validator
  * runs: a validation that nests more schema references than
  * `maxReferenceDepth` (default {@link REFERENCE_DEPTH_CEILING}) is refused
  * where the bound is crossed (`JK2001`), before the host's call stack can
@@ -47,6 +49,14 @@ export const VALIDATE_CODES = Object.freeze({
   JK0010: 'a reference or an identifier is not a valid URI reference',
   JK0011: 'a $recursiveRef read as draft 2019-09 is not "#"',
   JK0012: 'an identifier names two schemas',
+  JK0101: 'a strict profile cannot carry a schema that accepts any value',
+  JK0102: 'a strict profile cannot carry an object whose member names are open',
+  JK0103: 'a strict profile cannot carry a keyword that applies members, items or branches beside its node',
+  JK0104: 'a strict profile cannot bundle a reference',
+  JK0105: 'a profile cannot turn oneOf into anyOf on a node that carries both',
+  JK0106: 'a strict profile cannot close an object around a required member it does not declare',
+  JK0107: 'a profile derivation was given an argument it does not take',
+  JK0108: 'a strict profile cannot carry a schema that accepts no value',
   JK2001: 'validation nests schema references deeper than the reference depth ceiling',
 });
 

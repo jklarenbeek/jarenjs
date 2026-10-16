@@ -1,0 +1,2336 @@
+[
+  {
+    "file": "allOf.json",
+    "description": "nested allOf, to check validation semantics",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "allOf": [
+        {
+          "allOf": [
+            {
+              "type": "null"
+            }
+          ]
+        }
+      ]
+    },
+    "tests": [
+      {
+        "description": "null is valid",
+        "data": null,
+        "valid": true
+      },
+      {
+        "description": "anything non-null is invalid",
+        "data": 123,
+        "valid": false
+      }
+    ]
+  },
+  {
+    "file": "anchor.json",
+    "description": "Location-independent identifier",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$ref": "#foo",
+      "$defs": {
+        "A": {
+          "$anchor": "foo",
+          "type": "integer"
+        }
+      }
+    },
+    "tests": [
+      {
+        "data": 1,
+        "description": "match",
+        "valid": true
+      },
+      {
+        "data": "a",
+        "description": "mismatch",
+        "valid": false
+      }
+    ]
+  },
+  {
+    "file": "anchor.json",
+    "description": "Location-independent identifier with absolute URI",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$ref": "http://localhost:1234/draft2020-12/bar#foo",
+      "$defs": {
+        "A": {
+          "$id": "http://localhost:1234/draft2020-12/bar",
+          "$anchor": "foo",
+          "type": "integer"
+        }
+      }
+    },
+    "tests": [
+      {
+        "data": 1,
+        "description": "match",
+        "valid": true
+      },
+      {
+        "data": "a",
+        "description": "mismatch",
+        "valid": false
+      }
+    ]
+  },
+  {
+    "file": "anchor.json",
+    "description": "Location-independent identifier with base URI change in subschema",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "http://localhost:1234/draft2020-12/root",
+      "$ref": "http://localhost:1234/draft2020-12/nested.json#foo",
+      "$defs": {
+        "A": {
+          "$id": "nested.json",
+          "$defs": {
+            "B": {
+              "$anchor": "foo",
+              "type": "integer"
+            }
+          }
+        }
+      }
+    },
+    "tests": [
+      {
+        "data": 1,
+        "description": "match",
+        "valid": true
+      },
+      {
+        "data": "a",
+        "description": "mismatch",
+        "valid": false
+      }
+    ]
+  },
+  {
+    "file": "anchor.json",
+    "description": "same $anchor with different base uri",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "http://localhost:1234/draft2020-12/foobar",
+      "$defs": {
+        "A": {
+          "$id": "child1",
+          "allOf": [
+            {
+              "$id": "child2",
+              "$anchor": "my_anchor",
+              "type": "number"
+            },
+            {
+              "$anchor": "my_anchor",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "$ref": "child1#my_anchor"
+    },
+    "tests": [
+      {
+        "description": "$ref resolves to /$defs/A/allOf/1",
+        "data": "a",
+        "valid": true
+      },
+      {
+        "description": "$ref does not resolve to /$defs/A/allOf/0",
+        "data": 1,
+        "valid": false
+      }
+    ]
+  },
+  {
+    "file": "anyOf.json",
+    "description": "anyOf with base schema",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "string",
+      "anyOf": [
+        {
+          "maxLength": 2
+        },
+        {
+          "minLength": 4
+        }
+      ]
+    },
+    "tests": [
+      {
+        "description": "mismatch base schema",
+        "data": 3,
+        "valid": false
+      },
+      {
+        "description": "one anyOf valid",
+        "data": "foobar",
+        "valid": true
+      },
+      {
+        "description": "both anyOf invalid",
+        "data": "foo",
+        "valid": false
+      }
+    ]
+  },
+  {
+    "file": "anyOf.json",
+    "description": "nested anyOf, to check validation semantics",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "anyOf": [
+        {
+          "anyOf": [
+            {
+              "type": "null"
+            }
+          ]
+        }
+      ]
+    },
+    "tests": [
+      {
+        "description": "null is valid",
+        "data": null,
+        "valid": true
+      },
+      {
+        "description": "anything non-null is invalid",
+        "data": 123,
+        "valid": false
+      }
+    ]
+  },
+  {
+    "file": "const.json",
+    "description": "const validation",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "const": 2
+    },
+    "tests": [
+      {
+        "description": "same value is valid",
+        "data": 2,
+        "valid": true
+      },
+      {
+        "description": "another value is invalid",
+        "data": 5,
+        "valid": false
+      },
+      {
+        "description": "another type is invalid",
+        "data": "a",
+        "valid": false
+      }
+    ]
+  },
+  {
+    "file": "const.json",
+    "description": "const with object",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "const": {
+        "foo": "bar",
+        "baz": "bax"
+      }
+    },
+    "tests": [
+      {
+        "description": "same object is valid",
+        "data": {
+          "foo": "bar",
+          "baz": "bax"
+        },
+        "valid": true
+      },
+      {
+        "description": "same object with different property order is valid",
+        "data": {
+          "baz": "bax",
+          "foo": "bar"
+        },
+        "valid": true
+      },
+      {
+        "description": "another object is invalid",
+        "data": {
+          "foo": "bar"
+        },
+        "valid": false
+      },
+      {
+        "description": "another type is invalid",
+        "data": [
+          1,
+          2
+        ],
+        "valid": false
+      }
+    ]
+  },
+  {
+    "file": "const.json",
+    "description": "const with array",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "const": [
+        {
+          "foo": "bar"
+        }
+      ]
+    },
+    "tests": [
+      {
+        "description": "same array is valid",
+        "data": [
+          {
+            "foo": "bar"
+          }
+        ],
+        "valid": true
+      },
+      {
+        "description": "another array item is invalid",
+        "data": [
+          2
+        ],
+        "valid": false
+      },
+      {
+        "description": "array with additional items is invalid",
+        "data": [
+          1,
+          2,
+          3
+        ],
+        "valid": false
+      }
+    ]
+  },
+  {
+    "file": "const.json",
+    "description": "const with null",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "const": null
+    },
+    "tests": [
+      {
+        "description": "null is valid",
+        "data": null,
+        "valid": true
+      },
+      {
+        "description": "not null is invalid",
+        "data": 0,
+        "valid": false
+      }
+    ]
+  },
+  {
+    "file": "const.json",
+    "description": "const with false does not match 0",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "const": false
+    },
+    "tests": [
+      {
+        "description": "false is valid",
+        "data": false,
+        "valid": true
+      },
+      {
+        "description": "integer zero is invalid",
+        "data": 0,
+        "valid": false
+      },
+      {
+        "description": "float zero is invalid",
+        "data": 0,
+        "valid": false
+      }
+    ]
+  },
+  {
+    "file": "const.json",
+    "description": "const with true does not match 1",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "const": true
+    },
+    "tests": [
+      {
+        "description": "true is valid",
+        "data": true,
+        "valid": true
+      },
+      {
+        "description": "integer one is invalid",
+        "data": 1,
+        "valid": false
+      },
+      {
+        "description": "float one is invalid",
+        "data": 1,
+        "valid": false
+      }
+    ]
+  },
+  {
+    "file": "const.json",
+    "description": "const with [false] does not match [0]",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "const": [
+        false
+      ]
+    },
+    "tests": [
+      {
+        "description": "[false] is valid",
+        "data": [
+          false
+        ],
+        "valid": true
+      },
+      {
+        "description": "[0] is invalid",
+        "data": [
+          0
+        ],
+        "valid": false
+      },
+      {
+        "description": "[0.0] is invalid",
+        "data": [
+          0
+        ],
+        "valid": false
+      }
+    ]
+  },
+  {
+    "file": "const.json",
+    "description": "const with [true] does not match [1]",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "const": [
+        true
+      ]
+    },
+    "tests": [
+      {
+        "description": "[true] is valid",
+        "data": [
+          true
+        ],
+        "valid": true
+      },
+      {
+        "description": "[1] is invalid",
+        "data": [
+          1
+        ],
+        "valid": false
+      },
+      {
+        "description": "[1.0] is invalid",
+        "data": [
+          1
+        ],
+        "valid": false
+      }
+    ]
+  },
+  {
+    "file": "const.json",
+    "description": "const with {\"a\": false} does not match {\"a\": 0}",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "const": {
+        "a": false
+      }
+    },
+    "tests": [
+      {
+        "description": "{\"a\": false} is valid",
+        "data": {
+          "a": false
+        },
+        "valid": true
+      },
+      {
+        "description": "{\"a\": 0} is invalid",
+        "data": {
+          "a": 0
+        },
+        "valid": false
+      },
+      {
+        "description": "{\"a\": 0.0} is invalid",
+        "data": {
+          "a": 0
+        },
+        "valid": false
+      }
+    ]
+  },
+  {
+    "file": "const.json",
+    "description": "const with {\"a\": true} does not match {\"a\": 1}",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "const": {
+        "a": true
+      }
+    },
+    "tests": [
+      {
+        "description": "{\"a\": true} is valid",
+        "data": {
+          "a": true
+        },
+        "valid": true
+      },
+      {
+        "description": "{\"a\": 1} is invalid",
+        "data": {
+          "a": 1
+        },
+        "valid": false
+      },
+      {
+        "description": "{\"a\": 1.0} is invalid",
+        "data": {
+          "a": 1
+        },
+        "valid": false
+      }
+    ]
+  },
+  {
+    "file": "const.json",
+    "description": "const with 0 does not match other zero-like types",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "const": 0
+    },
+    "tests": [
+      {
+        "description": "false is invalid",
+        "data": false,
+        "valid": false
+      },
+      {
+        "description": "integer zero is valid",
+        "data": 0,
+        "valid": true
+      },
+      {
+        "description": "float zero is valid",
+        "data": 0,
+        "valid": true
+      },
+      {
+        "description": "empty object is invalid",
+        "data": {},
+        "valid": false
+      },
+      {
+        "description": "empty array is invalid",
+        "data": [],
+        "valid": false
+      },
+      {
+        "description": "empty string is invalid",
+        "data": "",
+        "valid": false
+      }
+    ]
+  },
+  {
+    "file": "const.json",
+    "description": "const with 1 does not match true",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "const": 1
+    },
+    "tests": [
+      {
+        "description": "true is invalid",
+        "data": true,
+        "valid": false
+      },
+      {
+        "description": "integer one is valid",
+        "data": 1,
+        "valid": true
+      },
+      {
+        "description": "float one is valid",
+        "data": 1,
+        "valid": true
+      }
+    ]
+  },
+  {
+    "file": "const.json",
+    "description": "const with -2.0 matches integer and float types",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "const": -2
+    },
+    "tests": [
+      {
+        "description": "integer -2 is valid",
+        "data": -2,
+        "valid": true
+      },
+      {
+        "description": "integer 2 is invalid",
+        "data": 2,
+        "valid": false
+      },
+      {
+        "description": "float -2.0 is valid",
+        "data": -2,
+        "valid": true
+      },
+      {
+        "description": "float 2.0 is invalid",
+        "data": 2,
+        "valid": false
+      },
+      {
+        "description": "float -2.00001 is invalid",
+        "data": -2.00001,
+        "valid": false
+      }
+    ]
+  },
+  {
+    "file": "const.json",
+    "description": "float and integers are equal up to 64-bit representation limits",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "const": 9007199254740992
+    },
+    "tests": [
+      {
+        "description": "integer is valid",
+        "data": 9007199254740992,
+        "valid": true
+      },
+      {
+        "description": "integer minus one is invalid",
+        "data": 9007199254740991,
+        "valid": false
+      },
+      {
+        "description": "float is valid",
+        "data": 9007199254740992,
+        "valid": true
+      },
+      {
+        "description": "float minus one is invalid",
+        "data": 9007199254740991,
+        "valid": false
+      }
+    ]
+  },
+  {
+    "file": "const.json",
+    "description": "nul characters in strings",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "const": "hello\u0000there"
+    },
+    "tests": [
+      {
+        "description": "match string with nul",
+        "data": "hello\u0000there",
+        "valid": true
+      },
+      {
+        "description": "do not match string lacking nul",
+        "data": "hellothere",
+        "valid": false
+      }
+    ]
+  },
+  {
+    "file": "default.json",
+    "description": "the default keyword does not do anything if the property is missing",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "alpha": {
+          "type": "number",
+          "maximum": 3,
+          "default": 5
+        }
+      }
+    },
+    "tests": [
+      {
+        "description": "an explicit property value is checked against maximum (passing)",
+        "data": {
+          "alpha": 1
+        },
+        "valid": true
+      },
+      {
+        "description": "an explicit property value is checked against maximum (failing)",
+        "data": {
+          "alpha": 5
+        },
+        "valid": false
+      },
+      {
+        "description": "missing properties are not filled in with the default",
+        "data": {},
+        "valid": true
+      }
+    ]
+  },
+  {
+    "file": "enum.json",
+    "description": "simple enum validation",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "enum": [
+        1,
+        2,
+        3
+      ]
+    },
+    "tests": [
+      {
+        "description": "one of the enum is valid",
+        "data": 1,
+        "valid": true
+      },
+      {
+        "description": "something else is invalid",
+        "data": 4,
+        "valid": false
+      }
+    ]
+  },
+  {
+    "file": "enum.json",
+    "description": "heterogeneous enum validation",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "enum": [
+        6,
+        "foo",
+        [],
+        true,
+        {
+          "foo": 12
+        }
+      ]
+    },
+    "tests": [
+      {
+        "description": "one of the enum is valid",
+        "data": [],
+        "valid": true
+      },
+      {
+        "description": "something else is invalid",
+        "data": null,
+        "valid": false
+      },
+      {
+        "description": "objects are deep compared",
+        "data": {
+          "foo": false
+        },
+        "valid": false
+      },
+      {
+        "description": "valid object matches",
+        "data": {
+          "foo": 12
+        },
+        "valid": true
+      },
+      {
+        "description": "extra properties in object is invalid",
+        "data": {
+          "foo": 12,
+          "boo": 42
+        },
+        "valid": false
+      }
+    ]
+  },
+  {
+    "file": "enum.json",
+    "description": "heterogeneous enum-with-null validation",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "enum": [
+        6,
+        null
+      ]
+    },
+    "tests": [
+      {
+        "description": "null is valid",
+        "data": null,
+        "valid": true
+      },
+      {
+        "description": "number is valid",
+        "data": 6,
+        "valid": true
+      },
+      {
+        "description": "something else is invalid",
+        "data": "test",
+        "valid": false
+      }
+    ]
+  },
+  {
+    "file": "enum.json",
+    "description": "enums in properties",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "foo": {
+          "enum": [
+            "foo"
+          ]
+        },
+        "bar": {
+          "enum": [
+            "bar"
+          ]
+        }
+      },
+      "required": [
+        "bar"
+      ]
+    },
+    "tests": [
+      {
+        "description": "both properties are valid",
+        "data": {
+          "foo": "foo",
+          "bar": "bar"
+        },
+        "valid": true
+      },
+      {
+        "description": "wrong foo value",
+        "data": {
+          "foo": "foot",
+          "bar": "bar"
+        },
+        "valid": false
+      },
+      {
+        "description": "wrong bar value",
+        "data": {
+          "foo": "foo",
+          "bar": "bart"
+        },
+        "valid": false
+      },
+      {
+        "description": "missing optional property is valid",
+        "data": {
+          "bar": "bar"
+        },
+        "valid": true
+      },
+      {
+        "description": "missing required property is invalid",
+        "data": {
+          "foo": "foo"
+        },
+        "valid": false
+      },
+      {
+        "description": "missing all properties is invalid",
+        "data": {},
+        "valid": false
+      }
+    ]
+  },
+  {
+    "file": "enum.json",
+    "description": "enum with escaped characters",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "enum": [
+        "foo\nbar",
+        "foo\rbar"
+      ]
+    },
+    "tests": [
+      {
+        "description": "member 1 is valid",
+        "data": "foo\nbar",
+        "valid": true
+      },
+      {
+        "description": "member 2 is valid",
+        "data": "foo\rbar",
+        "valid": true
+      },
+      {
+        "description": "another string is invalid",
+        "data": "abc",
+        "valid": false
+      }
+    ]
+  },
+  {
+    "file": "enum.json",
+    "description": "enum with false does not match 0",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "enum": [
+        false
+      ]
+    },
+    "tests": [
+      {
+        "description": "false is valid",
+        "data": false,
+        "valid": true
+      },
+      {
+        "description": "integer zero is invalid",
+        "data": 0,
+        "valid": false
+      },
+      {
+        "description": "float zero is invalid",
+        "data": 0,
+        "valid": false
+      }
+    ]
+  },
+  {
+    "file": "enum.json",
+    "description": "enum with [false] does not match [0]",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "enum": [
+        [
+          false
+        ]
+      ]
+    },
+    "tests": [
+      {
+        "description": "[false] is valid",
+        "data": [
+          false
+        ],
+        "valid": true
+      },
+      {
+        "description": "[0] is invalid",
+        "data": [
+          0
+        ],
+        "valid": false
+      },
+      {
+        "description": "[0.0] is invalid",
+        "data": [
+          0
+        ],
+        "valid": false
+      }
+    ]
+  },
+  {
+    "file": "enum.json",
+    "description": "enum with true does not match 1",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "enum": [
+        true
+      ]
+    },
+    "tests": [
+      {
+        "description": "true is valid",
+        "data": true,
+        "valid": true
+      },
+      {
+        "description": "integer one is invalid",
+        "data": 1,
+        "valid": false
+      },
+      {
+        "description": "float one is invalid",
+        "data": 1,
+        "valid": false
+      }
+    ]
+  },
+  {
+    "file": "enum.json",
+    "description": "enum with [true] does not match [1]",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "enum": [
+        [
+          true
+        ]
+      ]
+    },
+    "tests": [
+      {
+        "description": "[true] is valid",
+        "data": [
+          true
+        ],
+        "valid": true
+      },
+      {
+        "description": "[1] is invalid",
+        "data": [
+          1
+        ],
+        "valid": false
+      },
+      {
+        "description": "[1.0] is invalid",
+        "data": [
+          1
+        ],
+        "valid": false
+      }
+    ]
+  },
+  {
+    "file": "enum.json",
+    "description": "enum with 0 does not match false",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "enum": [
+        0
+      ]
+    },
+    "tests": [
+      {
+        "description": "false is invalid",
+        "data": false,
+        "valid": false
+      },
+      {
+        "description": "integer zero is valid",
+        "data": 0,
+        "valid": true
+      },
+      {
+        "description": "float zero is valid",
+        "data": 0,
+        "valid": true
+      }
+    ]
+  },
+  {
+    "file": "enum.json",
+    "description": "enum with [0] does not match [false]",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "enum": [
+        [
+          0
+        ]
+      ]
+    },
+    "tests": [
+      {
+        "description": "[false] is invalid",
+        "data": [
+          false
+        ],
+        "valid": false
+      },
+      {
+        "description": "[0] is valid",
+        "data": [
+          0
+        ],
+        "valid": true
+      },
+      {
+        "description": "[0.0] is valid",
+        "data": [
+          0
+        ],
+        "valid": true
+      }
+    ]
+  },
+  {
+    "file": "enum.json",
+    "description": "enum with 1 does not match true",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "enum": [
+        1
+      ]
+    },
+    "tests": [
+      {
+        "description": "true is invalid",
+        "data": true,
+        "valid": false
+      },
+      {
+        "description": "integer one is valid",
+        "data": 1,
+        "valid": true
+      },
+      {
+        "description": "float one is valid",
+        "data": 1,
+        "valid": true
+      }
+    ]
+  },
+  {
+    "file": "enum.json",
+    "description": "enum with [1] does not match [true]",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "enum": [
+        [
+          1
+        ]
+      ]
+    },
+    "tests": [
+      {
+        "description": "[true] is invalid",
+        "data": [
+          true
+        ],
+        "valid": false
+      },
+      {
+        "description": "[1] is valid",
+        "data": [
+          1
+        ],
+        "valid": true
+      },
+      {
+        "description": "[1.0] is valid",
+        "data": [
+          1
+        ],
+        "valid": true
+      }
+    ]
+  },
+  {
+    "file": "enum.json",
+    "description": "nul characters in strings",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "enum": [
+        "hello\u0000there"
+      ]
+    },
+    "tests": [
+      {
+        "description": "match string with nul",
+        "data": "hello\u0000there",
+        "valid": true
+      },
+      {
+        "description": "do not match string lacking nul",
+        "data": "hellothere",
+        "valid": false
+      }
+    ]
+  },
+  {
+    "file": "items.json",
+    "description": "nested items",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "array",
+      "items": {
+        "type": "array",
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            }
+          }
+        }
+      }
+    },
+    "tests": [
+      {
+        "description": "valid nested array",
+        "data": [
+          [
+            [
+              [
+                1
+              ]
+            ],
+            [
+              [
+                2
+              ],
+              [
+                3
+              ]
+            ]
+          ],
+          [
+            [
+              [
+                4
+              ],
+              [
+                5
+              ],
+              [
+                6
+              ]
+            ]
+          ]
+        ],
+        "valid": true
+      },
+      {
+        "description": "nested array with invalid type",
+        "data": [
+          [
+            [
+              [
+                "1"
+              ]
+            ],
+            [
+              [
+                2
+              ],
+              [
+                3
+              ]
+            ]
+          ],
+          [
+            [
+              [
+                4
+              ],
+              [
+                5
+              ],
+              [
+                6
+              ]
+            ]
+          ]
+        ],
+        "valid": false
+      },
+      {
+        "description": "not deep enough",
+        "data": [
+          [
+            [
+              1
+            ],
+            [
+              2
+            ],
+            [
+              3
+            ]
+          ],
+          [
+            [
+              4
+            ],
+            [
+              5
+            ],
+            [
+              6
+            ]
+          ]
+        ],
+        "valid": false
+      }
+    ]
+  },
+  {
+    "file": "multipleOf.json",
+    "description": "float division = inf",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "integer",
+      "multipleOf": 0.123456789
+    },
+    "tests": [
+      {
+        "description": "always invalid, but naive implementations may raise an overflow error",
+        "data": 1e+308,
+        "valid": false
+      }
+    ]
+  },
+  {
+    "file": "multipleOf.json",
+    "description": "small multiple of large integer",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "integer",
+      "multipleOf": 1e-8
+    },
+    "tests": [
+      {
+        "description": "any integer is a multiple of 1e-8",
+        "data": 12391239123,
+        "valid": true
+      }
+    ]
+  },
+  {
+    "file": "oneOf.json",
+    "description": "oneOf with base schema",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "string",
+      "oneOf": [
+        {
+          "minLength": 2
+        },
+        {
+          "maxLength": 4
+        }
+      ]
+    },
+    "tests": [
+      {
+        "description": "mismatch base schema",
+        "data": 3,
+        "valid": false
+      },
+      {
+        "description": "one oneOf valid",
+        "data": "foobar",
+        "valid": true
+      },
+      {
+        "description": "both oneOf valid",
+        "data": "foo",
+        "valid": false
+      }
+    ]
+  },
+  {
+    "file": "oneOf.json",
+    "description": "nested oneOf, to check validation semantics",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "oneOf": [
+        {
+          "oneOf": [
+            {
+              "type": "null"
+            }
+          ]
+        }
+      ]
+    },
+    "tests": [
+      {
+        "description": "null is valid",
+        "data": null,
+        "valid": true
+      },
+      {
+        "description": "anything non-null is invalid",
+        "data": 123,
+        "valid": false
+      }
+    ]
+  },
+  {
+    "file": "ref.json",
+    "description": "nested refs",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "a": {
+          "type": "integer"
+        },
+        "b": {
+          "$ref": "#/$defs/a"
+        },
+        "c": {
+          "$ref": "#/$defs/b"
+        }
+      },
+      "$ref": "#/$defs/c"
+    },
+    "tests": [
+      {
+        "description": "nested ref valid",
+        "data": 5,
+        "valid": true
+      },
+      {
+        "description": "nested ref invalid",
+        "data": "a",
+        "valid": false
+      }
+    ]
+  },
+  {
+    "file": "ref.json",
+    "description": "Recursive references between schemas",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "http://localhost:1234/draft2020-12/tree",
+      "description": "tree of nodes",
+      "type": "object",
+      "properties": {
+        "meta": {
+          "type": "string"
+        },
+        "nodes": {
+          "type": "array",
+          "items": {
+            "$ref": "node"
+          }
+        }
+      },
+      "required": [
+        "meta",
+        "nodes"
+      ],
+      "$defs": {
+        "node": {
+          "$id": "http://localhost:1234/draft2020-12/node",
+          "description": "node",
+          "type": "object",
+          "properties": {
+            "value": {
+              "type": "number"
+            },
+            "subtree": {
+              "$ref": "tree"
+            }
+          },
+          "required": [
+            "value"
+          ]
+        }
+      }
+    },
+    "tests": [
+      {
+        "description": "valid tree",
+        "data": {
+          "meta": "root",
+          "nodes": [
+            {
+              "value": 1,
+              "subtree": {
+                "meta": "child",
+                "nodes": [
+                  {
+                    "value": 1.1
+                  },
+                  {
+                    "value": 1.2
+                  }
+                ]
+              }
+            },
+            {
+              "value": 2,
+              "subtree": {
+                "meta": "child",
+                "nodes": [
+                  {
+                    "value": 2.1
+                  },
+                  {
+                    "value": 2.2
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "valid": true
+      },
+      {
+        "description": "invalid tree",
+        "data": {
+          "meta": "root",
+          "nodes": [
+            {
+              "value": 1,
+              "subtree": {
+                "meta": "child",
+                "nodes": [
+                  {
+                    "value": "string is invalid"
+                  },
+                  {
+                    "value": 1.2
+                  }
+                ]
+              }
+            },
+            {
+              "value": 2,
+              "subtree": {
+                "meta": "child",
+                "nodes": [
+                  {
+                    "value": 2.1
+                  },
+                  {
+                    "value": 2.2
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "valid": false
+      }
+    ]
+  },
+  {
+    "file": "ref.json",
+    "description": "naive replacement of $ref with its destination is not correct",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "a_string": {
+          "type": "string"
+        }
+      },
+      "enum": [
+        {
+          "$ref": "#/$defs/a_string"
+        }
+      ]
+    },
+    "tests": [
+      {
+        "description": "do not evaluate the $ref inside the enum, matching any string",
+        "data": "this is a string",
+        "valid": false
+      },
+      {
+        "description": "do not evaluate the $ref inside the enum, definition exact match",
+        "data": {
+          "type": "string"
+        },
+        "valid": false
+      },
+      {
+        "description": "match the enum exactly",
+        "data": {
+          "$ref": "#/$defs/a_string"
+        },
+        "valid": true
+      }
+    ]
+  },
+  {
+    "file": "ref.json",
+    "description": "$id must be resolved against nearest parent, not just immediate parent",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "http://example.com/a.json",
+      "$defs": {
+        "x": {
+          "$id": "http://example.com/b/c.json",
+          "not": {
+            "$defs": {
+              "y": {
+                "$id": "d.json",
+                "type": "number"
+              }
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "$ref": "http://example.com/b/d.json"
+        }
+      ]
+    },
+    "tests": [
+      {
+        "description": "number is valid",
+        "data": 1,
+        "valid": true
+      },
+      {
+        "description": "non-number is invalid",
+        "data": "a",
+        "valid": false
+      }
+    ]
+  },
+  {
+    "file": "ref.json",
+    "description": "URN ref with nested pointer ref",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$ref": "urn:uuid:deadbeef-4321-ffff-ffff-1234feebdaed",
+      "$defs": {
+        "foo": {
+          "$id": "urn:uuid:deadbeef-4321-ffff-ffff-1234feebdaed",
+          "$defs": {
+            "bar": {
+              "type": "string"
+            }
+          },
+          "$ref": "#/$defs/bar"
+        }
+      }
+    },
+    "tests": [
+      {
+        "description": "a string is valid",
+        "data": "bar",
+        "valid": true
+      },
+      {
+        "description": "a non-string is invalid",
+        "data": 12,
+        "valid": false
+      }
+    ]
+  },
+  {
+    "file": "ref.json",
+    "description": "ref with absolute-path-reference",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "http://example.com/ref/absref.json",
+      "$defs": {
+        "a": {
+          "$id": "http://example.com/ref/absref/foobar.json",
+          "type": "number"
+        },
+        "b": {
+          "$id": "http://example.com/absref/foobar.json",
+          "type": "string"
+        }
+      },
+      "$ref": "/absref/foobar.json"
+    },
+    "tests": [
+      {
+        "description": "a string is valid",
+        "data": "foo",
+        "valid": true
+      },
+      {
+        "description": "an integer is invalid",
+        "data": 12,
+        "valid": false
+      }
+    ]
+  },
+  {
+    "file": "ref.json",
+    "description": "$id with file URI still resolves pointers - *nix",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "file:///folder/file.json",
+      "$defs": {
+        "foo": {
+          "type": "number"
+        }
+      },
+      "$ref": "#/$defs/foo"
+    },
+    "tests": [
+      {
+        "description": "number is valid",
+        "data": 1,
+        "valid": true
+      },
+      {
+        "description": "non-number is invalid",
+        "data": "a",
+        "valid": false
+      }
+    ]
+  },
+  {
+    "file": "ref.json",
+    "description": "$id with file URI still resolves pointers - windows",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "file:///c:/folder/file.json",
+      "$defs": {
+        "foo": {
+          "type": "number"
+        }
+      },
+      "$ref": "#/$defs/foo"
+    },
+    "tests": [
+      {
+        "description": "number is valid",
+        "data": 1,
+        "valid": true
+      },
+      {
+        "description": "non-number is invalid",
+        "data": "a",
+        "valid": false
+      }
+    ]
+  },
+  {
+    "file": "ref.json",
+    "description": "empty tokens in $ref json-pointer",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "": {
+          "$defs": {
+            "": {
+              "type": "number"
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "$ref": "#/$defs//$defs/"
+        }
+      ]
+    },
+    "tests": [
+      {
+        "description": "number is valid",
+        "data": 1,
+        "valid": true
+      },
+      {
+        "description": "non-number is invalid",
+        "data": "a",
+        "valid": false
+      }
+    ]
+  },
+  {
+    "file": "type.json",
+    "description": "integer type matches integers",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "integer"
+    },
+    "tests": [
+      {
+        "description": "an integer is an integer",
+        "data": 1,
+        "valid": true
+      },
+      {
+        "description": "a float with zero fractional part is an integer",
+        "data": 1,
+        "valid": true
+      },
+      {
+        "description": "a float is not an integer",
+        "data": 1.1,
+        "valid": false
+      },
+      {
+        "description": "a string is not an integer",
+        "data": "foo",
+        "valid": false
+      },
+      {
+        "description": "a string is still not an integer, even if it looks like one",
+        "data": "1",
+        "valid": false
+      },
+      {
+        "description": "an object is not an integer",
+        "data": {},
+        "valid": false
+      },
+      {
+        "description": "an array is not an integer",
+        "data": [],
+        "valid": false
+      },
+      {
+        "description": "a boolean is not an integer",
+        "data": true,
+        "valid": false
+      },
+      {
+        "description": "null is not an integer",
+        "data": null,
+        "valid": false
+      }
+    ]
+  },
+  {
+    "file": "type.json",
+    "description": "number type matches numbers",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "number"
+    },
+    "tests": [
+      {
+        "description": "an integer is a number",
+        "data": 1,
+        "valid": true
+      },
+      {
+        "description": "a float with zero fractional part is a number (and an integer)",
+        "data": 1,
+        "valid": true
+      },
+      {
+        "description": "a float is a number",
+        "data": 1.1,
+        "valid": true
+      },
+      {
+        "description": "a string is not a number",
+        "data": "foo",
+        "valid": false
+      },
+      {
+        "description": "a string is still not a number, even if it looks like one",
+        "data": "1",
+        "valid": false
+      },
+      {
+        "description": "an object is not a number",
+        "data": {},
+        "valid": false
+      },
+      {
+        "description": "an array is not a number",
+        "data": [],
+        "valid": false
+      },
+      {
+        "description": "a boolean is not a number",
+        "data": true,
+        "valid": false
+      },
+      {
+        "description": "null is not a number",
+        "data": null,
+        "valid": false
+      }
+    ]
+  },
+  {
+    "file": "type.json",
+    "description": "string type matches strings",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "string"
+    },
+    "tests": [
+      {
+        "description": "1 is not a string",
+        "data": 1,
+        "valid": false
+      },
+      {
+        "description": "a float is not a string",
+        "data": 1.1,
+        "valid": false
+      },
+      {
+        "description": "a string is a string",
+        "data": "foo",
+        "valid": true
+      },
+      {
+        "description": "a string is still a string, even if it looks like a number",
+        "data": "1",
+        "valid": true
+      },
+      {
+        "description": "an empty string is still a string",
+        "data": "",
+        "valid": true
+      },
+      {
+        "description": "an object is not a string",
+        "data": {},
+        "valid": false
+      },
+      {
+        "description": "an array is not a string",
+        "data": [],
+        "valid": false
+      },
+      {
+        "description": "a boolean is not a string",
+        "data": true,
+        "valid": false
+      },
+      {
+        "description": "null is not a string",
+        "data": null,
+        "valid": false
+      }
+    ]
+  },
+  {
+    "file": "type.json",
+    "description": "boolean type matches booleans",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "boolean"
+    },
+    "tests": [
+      {
+        "description": "an integer is not a boolean",
+        "data": 1,
+        "valid": false
+      },
+      {
+        "description": "zero is not a boolean",
+        "data": 0,
+        "valid": false
+      },
+      {
+        "description": "a float is not a boolean",
+        "data": 1.1,
+        "valid": false
+      },
+      {
+        "description": "a string is not a boolean",
+        "data": "foo",
+        "valid": false
+      },
+      {
+        "description": "an empty string is not a boolean",
+        "data": "",
+        "valid": false
+      },
+      {
+        "description": "an object is not a boolean",
+        "data": {},
+        "valid": false
+      },
+      {
+        "description": "an array is not a boolean",
+        "data": [],
+        "valid": false
+      },
+      {
+        "description": "true is a boolean",
+        "data": true,
+        "valid": true
+      },
+      {
+        "description": "false is a boolean",
+        "data": false,
+        "valid": true
+      },
+      {
+        "description": "null is not a boolean",
+        "data": null,
+        "valid": false
+      }
+    ]
+  },
+  {
+    "file": "type.json",
+    "description": "null type matches only the null object",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "null"
+    },
+    "tests": [
+      {
+        "description": "an integer is not null",
+        "data": 1,
+        "valid": false
+      },
+      {
+        "description": "a float is not null",
+        "data": 1.1,
+        "valid": false
+      },
+      {
+        "description": "zero is not null",
+        "data": 0,
+        "valid": false
+      },
+      {
+        "description": "a string is not null",
+        "data": "foo",
+        "valid": false
+      },
+      {
+        "description": "an empty string is not null",
+        "data": "",
+        "valid": false
+      },
+      {
+        "description": "an object is not null",
+        "data": {},
+        "valid": false
+      },
+      {
+        "description": "an array is not null",
+        "data": [],
+        "valid": false
+      },
+      {
+        "description": "true is not null",
+        "data": true,
+        "valid": false
+      },
+      {
+        "description": "false is not null",
+        "data": false,
+        "valid": false
+      },
+      {
+        "description": "null is null",
+        "data": null,
+        "valid": true
+      }
+    ]
+  },
+  {
+    "file": "type.json",
+    "description": "multiple types can be specified in an array",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": [
+        "integer",
+        "string"
+      ]
+    },
+    "tests": [
+      {
+        "description": "an integer is valid",
+        "data": 1,
+        "valid": true
+      },
+      {
+        "description": "a string is valid",
+        "data": "foo",
+        "valid": true
+      },
+      {
+        "description": "a float is invalid",
+        "data": 1.1,
+        "valid": false
+      },
+      {
+        "description": "an object is invalid",
+        "data": {},
+        "valid": false
+      },
+      {
+        "description": "an array is invalid",
+        "data": [],
+        "valid": false
+      },
+      {
+        "description": "a boolean is invalid",
+        "data": true,
+        "valid": false
+      },
+      {
+        "description": "null is invalid",
+        "data": null,
+        "valid": false
+      }
+    ]
+  },
+  {
+    "file": "type.json",
+    "description": "type as array with one item",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": [
+        "string"
+      ]
+    },
+    "tests": [
+      {
+        "description": "string is valid",
+        "data": "foo",
+        "valid": true
+      },
+      {
+        "description": "number is invalid",
+        "data": 123,
+        "valid": false
+      }
+    ]
+  },
+  {
+    "file": "unevaluatedProperties.json",
+    "description": "unevaluatedProperties false",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "unevaluatedProperties": false
+    },
+    "tests": [
+      {
+        "description": "with no unevaluated properties",
+        "data": {},
+        "valid": true
+      },
+      {
+        "description": "with unevaluated properties",
+        "data": {
+          "foo": "foo"
+        },
+        "valid": false
+      }
+    ]
+  },
+  {
+    "file": "unevaluatedProperties.json",
+    "description": "unevaluatedProperties with adjacent properties",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "foo": {
+          "type": "string"
+        }
+      },
+      "unevaluatedProperties": false
+    },
+    "tests": [
+      {
+        "description": "with no unevaluated properties",
+        "data": {
+          "foo": "foo"
+        },
+        "valid": true
+      },
+      {
+        "description": "with unevaluated properties",
+        "data": {
+          "foo": "foo",
+          "bar": "bar"
+        },
+        "valid": false
+      }
+    ]
+  },
+  {
+    "file": "unevaluatedProperties.json",
+    "description": "unevaluatedProperties with adjacent additionalProperties",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "foo": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true,
+      "unevaluatedProperties": false
+    },
+    "tests": [
+      {
+        "description": "with no additional properties",
+        "data": {
+          "foo": "foo"
+        },
+        "valid": true
+      },
+      {
+        "description": "with additional properties",
+        "data": {
+          "foo": "foo",
+          "bar": "bar"
+        },
+        "valid": true
+      }
+    ]
+  },
+  {
+    "file": "unevaluatedProperties.json",
+    "description": "unevaluatedProperties with not",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "foo": {
+          "type": "string"
+        }
+      },
+      "not": {
+        "not": {
+          "properties": {
+            "bar": {
+              "const": "bar"
+            }
+          },
+          "required": [
+            "bar"
+          ]
+        }
+      },
+      "unevaluatedProperties": false
+    },
+    "tests": [
+      {
+        "description": "with unevaluated properties",
+        "data": {
+          "foo": "foo",
+          "bar": "bar"
+        },
+        "valid": false
+      }
+    ]
+  },
+  {
+    "file": "unevaluatedProperties.json",
+    "description": "unevaluatedProperties + single cyclic ref",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "x": {
+          "$ref": "#"
+        }
+      },
+      "unevaluatedProperties": false
+    },
+    "tests": [
+      {
+        "description": "Empty is valid",
+        "data": {},
+        "valid": true
+      },
+      {
+        "description": "Single is valid",
+        "data": {
+          "x": {}
+        },
+        "valid": true
+      },
+      {
+        "description": "Unevaluated on 1st level is invalid",
+        "data": {
+          "x": {},
+          "y": {}
+        },
+        "valid": false
+      },
+      {
+        "description": "Nested is valid",
+        "data": {
+          "x": {
+            "x": {}
+          }
+        },
+        "valid": true
+      },
+      {
+        "description": "Unevaluated on 2nd level is invalid",
+        "data": {
+          "x": {
+            "x": {},
+            "y": {}
+          }
+        },
+        "valid": false
+      },
+      {
+        "description": "Deep nested is valid",
+        "data": {
+          "x": {
+            "x": {
+              "x": {}
+            }
+          }
+        },
+        "valid": true
+      },
+      {
+        "description": "Unevaluated on 3rd level is invalid",
+        "data": {
+          "x": {
+            "x": {
+              "x": {},
+              "y": {}
+            }
+          }
+        },
+        "valid": false
+      }
+    ]
+  },
+  {
+    "file": "vocabulary.json",
+    "description": "ignore unrecognized optional vocabulary",
+    "schema": {
+      "$schema": "http://localhost:1234/draft2020-12/metaschema-optional-vocabulary.json",
+      "type": "number"
+    },
+    "tests": [
+      {
+        "description": "string value",
+        "data": "foobar",
+        "valid": false
+      },
+      {
+        "description": "number value",
+        "data": 20,
+        "valid": true
+      }
+    ]
+  }
+]

@@ -1520,6 +1520,114 @@ A union `type` (`['string', 'number']`) gives no single target, so coercion is
 skipped rather than guessed. Trimming runs before coercion, so `'  42  '`
 decodes for an integer field.
 
+## Strict structured-output profiles
+
+A provider's strict structured-output mode decodes only answers its schema
+subset can describe: one self-contained document, every object closed
+(`additionalProperties: false`) with every declared member `required`,
+`anyOf` but no `oneOf`, and few value keywords. Most schemas a host writes
+have optional members, so a host either turns strict mode off or derives a
+second schema by hand. `deriveStrictProfile` (`@jarenjs/validate/strict-profile`)
+derives it, together with the map that turns a strict answer back into the
+original's shape:
+
+```js
+import { JarenValidator } from '@jarenjs/validate';
+import { deriveStrictProfile } from '@jarenjs/validate/strict-profile';
+
+const patchSchema = {
+  type: 'object',
+  required: ['ops'],
+  properties: { ops: { type: 'array', items: { $ref: '#/$defs/op' } } },
+  $defs: {
+    op: {
+      type: 'object',
+      required: ['op', 'path'],
+      properties: {
+        op: { enum: ['add', 'replace', 'remove'] },
+        path: { type: 'string', pattern: '^/' },
+        value: { type: 'string' },
+      },
+    },
+  },
+};
+
+const strict = deriveStrictProfile(patchSchema);
+// strict.schema.$defs.op:
+// { type: 'object', required: ['op', 'path', 'value'],
+//   properties: { op: { enum: ['add', 'replace', 'remove'] },
+//     path: { type: 'string', description: '(strict profile: pattern "^/" is relaxed here; the original schema enforces it)' },
+//     value: { type: ['string', 'null'] } },
+//   additionalProperties: false }
+
+// A stand-in for a provider called in strict mode: it answers in the
+// profile's shape, so a member the original lets be absent arrives as null.
+const provider = async (request) => {
+  void request.schema;
+  return { ops: [{ op: 'remove', path: '/draft', value: null }, { op: 'add', path: '/title', value: 'Q3' }] };
+};
+const answer = await provider({ schema: strict.schema, strict: true });
+
+const patch = strict.fromProfile(answer);
+const check = new JarenValidator().compile(patchSchema);
+console.log(JSON.stringify(patch), check(patch));
+// {"ops":[{"op":"remove","path":"/draft"},{"op":"add","path":"/title","value":"Q3"}]} true
+```
+
+What the derivation does, node by node:
+
+- **References are bundled.** Every `$ref` the schema uses — into itself, or
+  into a document passed as `references` (each with an absolute `$id`) — is
+  rewritten to `#/$defs/<name>` of the one profile document. A recursive
+  reference stays recursive.
+- **Objects are closed and every member is required.** An optional member's
+  type is widened to also admit `null`. A member whose original schema
+  already admits `null` is left as it is.
+- **What the profile does not carry moves into `description`.** `pattern`,
+  `format`, lengths, bounds, `uniqueItems`, `contains`, `not` and every other
+  keyword outside the strict subset are restated in the node's description,
+  where the model still reads them; `oneOf` becomes `anyOf`, and an `allOf`
+  of one branch becomes that branch. `relaxSchema` is that rule on its own.
+- **A root that is not an object is wrapped** as the one member `value`
+  (strict modes take an object at the root); `fromProfile` unwraps it.
+
+**How a placeholder `null` is told from a real one.** When the profile is
+derived, the original's own validator is asked whether each optional
+member's schema accepts `null`. Only a member it refuses `null` for is
+widened, and only that member's `null` is removed by `fromProfile`. A member
+typed `['string', 'null']`, a `$ref` to a nullable definition, an `anyOf`
+with a `null` branch or an `enum` that lists `null` keeps its `null`; so
+does an answer read through two union branches that disagree about it.
+`toProfile` is the forward map (absent members filled with `null`, members
+the profile closed out dropped), for few-shot examples and tests.
+
+**The original stays the authority.** Everything the profile drops is a
+relaxation, so validate what `fromProfile` returns with the original
+schema: for every instance the original accepts, `toProfile` gives one the
+profile accepts, and for every answer the profile accepts, `fromProfile`
+gives one the original accepts or refuses with its own errors. Closing is
+the one narrowing: a member an open object never declared cannot be
+written by a model. A schema a closed profile would read wrong — an object
+whose member names are open (`patternProperties`, a map-valued
+`additionalProperties`, no declared `properties`), members contributed or
+required by `allOf`, `if`/`then` or a dependency, a node that accepts any
+value, a `$dynamicRef` — is
+refused with a coded `SchemaCompileError` (`JK0101`–`JK0108`, in
+[ERROR-MESSAGES](./docs/ERROR-MESSAGES.md#9-coded-refusals)) naming the
+place and the repair, never answered with a profile that is silently wrong.
+
+**Which strict modes it targets.** The subset is the one OpenAI's
+Structured Outputs and strict function calling accept (every member
+required, `null` unions for optional ones, `additionalProperties: false`,
+an object root, no `allOf`, `oneOf`, `not` or `if`) with the value keywords
+narrowed to what Anthropic's structured outputs and strict tool use also
+accept (no numeric bounds, lengths or array sizes; these are relaxed into
+descriptions as that provider's own SDKs do). Two limits stay with the
+host: Anthropic's strict mode refuses recursive schemas and `enum` values
+that are not scalars, and OpenAI's caps size (5,000 object properties,
+10 levels of nesting, 1,000 `enum` values), none of which the derivation
+checks.
+
 ## Error messages & i18n
 
 Every collected error carries a stable message key (`msgid`) and raw
@@ -1626,6 +1734,7 @@ Every subpath a consumer can import, derived from the manifest by
 | `@jarenjs/validate/normalize` | JavaScript | declared |
 | `@jarenjs/validate/output` | JavaScript | declared |
 | `@jarenjs/validate/load` | JavaScript | declared |
+| `@jarenjs/validate/strict-profile` | JavaScript | declared |
 | `@jarenjs/validate/package.json` | metadata | — |
 <!--/fact-->
 
