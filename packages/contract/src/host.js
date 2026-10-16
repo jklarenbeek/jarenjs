@@ -45,7 +45,7 @@ import { ContractFailure, isContractFailure } from './errors.js';
  * @property {'http' | 'port' | 'local'} carrier
  * @property {string | null} method - the request line on HTTP; `null` elsewhere
  * @property {string | null} path - the request path, without the query
- * @property {string | null} url - the request target exactly as received, the query included (what a request signature covers); `null` off HTTP
+ * @property {string | null} url - the request target, the query included (what a request signature covers): the bytes the client sent behind the node adapter, the platform `Request`'s WHATWG serialization behind the fetch adapter (dot segments folded, `'` in a query as `%27`; an empty query keeps its `?`); `null` off HTTP
  * @property {Readonly<Record<string, string | readonly string[]>> | null} headers - the raw request headers on HTTP; `null` elsewhere
  * @property {Uint8Array | null} body - the exact request bytes (empty for none) when `serveHttp`'s `identifyBody` asked for them; `null` otherwise and off HTTP
  * @property {unknown} request - the host's own per-request value on HTTP (the dispatch request's `request` member — `toNodeHandler`'s `request` seed, a framework-decorated principal); `null` when none was given and on the other carriers

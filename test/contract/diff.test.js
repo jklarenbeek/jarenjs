@@ -1189,3 +1189,94 @@ describe("diffContracts — the input's own members read closedness and catch-al
     assert.deepStrictEqual([only(required.breaking).rule, only(required.breaking).kind], ['R4', 'input-required-added']);
   });
 });
+
+describe('diffContracts — a member declared false is no member: it compares as what the other side applies to an unnamed one', () => {
+  /** @param {any} input @param {any} [output] @param {any} [root] */
+  const take = (input, output = true, root = {}) => one({ kind: 'command', input, output, http: { method: 'POST', path: '/a' } }, root);
+  const x = { type: 'string' };
+  /** @param {any} properties @param {any} [more] */
+  const closed = (properties, more = {}) => ({ type: 'object', properties, additionalProperties: false, ...more });
+  /** @param {any} properties @param {any} [more] */
+  const open = (properties, more = {}) => ({ type: 'object', properties, ...more });
+  /** Each change as [class, rule, kind, docPath]. @param {any} d */
+  const flat = (d) => ['breaking', 'additive', 'neutral', 'unknown'].flatMap((name) => d[name].map((/** @type {any} */ c) => [name, c.rule, c.kind, c.docPath]));
+  const at = (/** @type {string} */ rest) => '/operations/a.b' + rest;
+
+  it('a closed input that drops or adds a forbidden member accepts the same requests: no change (was breaking R5 / additive R7)', () => {
+    assert.deepStrictEqual(flat(diffContracts(take(closed({ x, m: false })), take(closed({ x })))), []);
+    assert.deepStrictEqual(flat(diffContracts(take(closed({ x })), take(closed({ x, m: false })))), []);
+    // the same through a $ref that resolves to false
+    const never = { $defs: { never: false } };
+    assert.deepStrictEqual(flat(diffContracts(take(closed({ x, m: { $ref: '#/$defs/never' } }), true, never), take(closed({ x }), true, never))), []);
+  });
+
+  it('an open input that forbids a member it allowed refuses an older client that sends it: breaking R6 (was additive R7)', () => {
+    assert.deepStrictEqual(flat(diffContracts(take(open({ x })), take(open({ x, m: false })))),
+      [['breaking', 'R6', 'input-narrowed', at('/input/properties/m')]]);
+    const never = { $defs: { never: false } };
+    assert.deepStrictEqual(flat(diffContracts(take(open({ x }), true, never), take(open({ x, m: { $ref: '#/$defs/never' } }), true, never))),
+      [['breaking', 'R6', 'input-narrowed', at('/input/properties/m')]]);
+  });
+
+  it('an open input that drops a forbidden member now accepts it: additive R7 (was neutral R5 "ignored, not validated")', () => {
+    assert.deepStrictEqual(flat(diffContracts(take(open({ x, m: false })), take(open({ x })))),
+      [['additive', 'R7', 'input-widened', at('/input/properties/m')]]);
+  });
+
+  it('a closed input that opens beside a forbidden member reports the catch-all, not the member', () => {
+    assert.deepStrictEqual(flat(diffContracts(take(closed({ x })), take(open({ x, m: false })))),
+      [['additive', 'R7', 'input-widened', at('/input/additionalProperties')]]);
+  });
+
+  it('one level down, a closed object that drops or adds a forbidden member moves nothing (was breaking R6 / additive R7)', () => {
+    const nest = (/** @type {any} */ o) => take(open({ o }));
+    assert.deepStrictEqual(flat(diffContracts(nest(closed({ x, m: false })), nest(closed({ x })))), []);
+    assert.deepStrictEqual(flat(diffContracts(nest(closed({ x })), nest(closed({ x, m: false })))), []);
+    // an open nested object still narrows when it forbids, widens when it stops forbidding
+    assert.deepStrictEqual(flat(diffContracts(nest(open({ x })), nest(open({ x, m: false })))),
+      [['breaking', 'R6', 'input-narrowed', at('/input/properties/o/properties/m')]]);
+    assert.deepStrictEqual(flat(diffContracts(nest(open({ x, m: false })), nest(open({ x })))),
+      [['additive', 'R7', 'input-widened', at('/input/properties/o/properties/m')]]);
+  });
+
+  it('an output closed around a forbidden member never carried it: dropping or adding it is no change (was breaking R8)', () => {
+    const out = (/** @type {any} */ o) => take(open({ x }), o);
+    assert.deepStrictEqual(flat(diffContracts(out(closed({ x, m: false })), out(closed({ x })))), []);
+    assert.deepStrictEqual(flat(diffContracts(out(closed({ x })), out(closed({ x, m: false })))), []);
+    // open: forbidding narrows the answers (additive R9), allowing again widens them (breaking R8)
+    assert.deepStrictEqual(flat(diffContracts(out(open({ x })), out(open({ x, m: false })))),
+      [['additive', 'R9', 'output-narrowed', at('/output/properties/m')]]);
+    assert.deepStrictEqual(flat(diffContracts(out(open({ x, m: false })), out(open({ x })))),
+      [['breaking', 'R8', 'output-widened', at('/output/properties/m')]]);
+  });
+
+  it('a false member that is required, or beside a catch-all or applicator that may judge it, keeps the member rows', () => {
+    // required and false: the input accepts nothing now
+    assert.deepStrictEqual(flat(diffContracts(take(open({ x }, { required: ['x'] })), take(open({ x: false }, { required: ['x'] })))),
+      [['breaking', 'R6', 'input-narrowed', at('/input/properties/x')]]);
+    assert.deepStrictEqual(flat(diffContracts(take(open({ x })), take(open({ x, m: false }, { required: ['m'] })))),
+      [['breaking', 'R4', 'input-required-added', at('/input/properties/m')]]);
+    // a member the other side requires by name alone: every older request lacked it, so requiring it refuses them
+    assert.deepStrictEqual(flat(diffContracts(take(open({ x, m: false })), take(open({ x }, { required: ['m'] })))),
+      [['breaking', 'R4', 'input-required-added', at('/input/properties/m')]]);
+    // a constraining catch-all judges the member on the other side
+    assert.deepStrictEqual(flat(diffContracts(take(open({ x }, { additionalProperties: x })), take(open({ x, m: false }, { additionalProperties: x })))),
+      [['unknown', 'R15', 'schema-unknown', at('/input/properties/m')]]);
+    // a patternProperties beside a closed object admits the member a dropped false refused: never "no change"
+    const pp = { patternProperties: { '^m': {} } };
+    assert.notDeepStrictEqual(flat(diffContracts(take(closed({ x, m: false }, pp)), take(closed({ x }, pp)))), []);
+    // a catch-all beside the $ref the input is spelled as refuses the member on both sides: never breaking
+    for (const keyword of ['additionalProperties', 'unevaluatedProperties']) {
+      const spelled = { $ref: '#/$defs/I', [keyword]: false };
+      const before = { $defs: { I: open({ x }) } };
+      const after = { $defs: { I: open({ x, m: false }) } };
+      assert.deepStrictEqual(diffContracts(take(spelled, true, before), take(spelled, true, after)).breaking, [], keyword);
+      assert.deepStrictEqual(diffContracts(take(spelled, true, after), take(spelled, true, before)).breaking, [], keyword);
+    }
+    // an applicator under unevaluatedProperties: false may name the member: undecidable, R15
+    const nest = (/** @type {any} */ o) => take(open({ o }));
+    const viaAllOf = (/** @type {any} */ properties) => ({ type: 'object', properties, allOf: [{ properties: { m: {} } }], unevaluatedProperties: false });
+    assert.deepStrictEqual(flat(diffContracts(nest(viaAllOf({ x, m: false })), nest(viaAllOf({ x })))),
+      [['unknown', 'R15', 'schema-unknown', at('/input/properties/o/properties/m')]]);
+  });
+});

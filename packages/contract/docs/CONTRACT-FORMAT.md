@@ -1167,11 +1167,15 @@ nothing is read before `identify`, `meta.body` is `null`, and uploads
 stream as before; a server whose operations do not all need the bytes
 serves the signed ones from a dispatcher of their own. The bytes are
 the pipeline's own buffer: `identify` reads them and does not write
-into them. Behind the `fetch` adapter `url` is the WHATWG-parsed
-`pathname + search` (the platform folds dot segments and
-percent-encodes what it must), so a signer signs the target its own URL
-serializes to; behind the `node` adapter it is the request line's
-target as sent.
+into them. Behind the `node` adapter `url` is the request line's
+target as sent. Behind the `fetch` adapter it is the target the
+platform's `Request` serialized, an empty query keeping its `?`: WHATWG
+URL has already folded dot segments and percent-encoded what its query
+and path sets name (`'` and `"` in a query arrive as `%27` and `%22`, `{` in a path as `%7B`),
+and the client's own bytes are not exposed. So a scheme that must verify
+behind both adapters signs, and verifies, the target as WHATWG URL
+serializes it — `new URL(target, base)`'s `pathname + search` on both
+sides, which reads a raw Node target and a fetch target alike.
 
 A signature mismatch is the operation's own answer: declare it
 (`"errors": { "unauthorized": { "status": 401 } }`) and answer
@@ -2645,6 +2649,24 @@ Riders the rows carry:
   once a neutral R5, is breaking R5 (the server refuses it), and a member
   removed, or added as optional, beside a catch-all that constrains it,
   once a neutral R5 or an additive R7, is R15.
+- **A member declared `false` is no member.** A member whose schema is
+  `false` (directly or through same-document `$ref`s) and that its side
+  does not require, while the other side neither names nor requires it,
+  compares as `false` against what that other side applies to a member it
+  does not name: `false` under a closed object, so adding or dropping it
+  moves nothing; `true` under an open one, so adding it narrows (R6 under
+  an input, R9 under an output) and dropping it widens (R7, R8), at every
+  depth and at the input's top level alike. Beside a catch-all that
+  constrains, an applicator, or the siblings of the `$ref` the input is
+  spelled as, the member rows classify it as before.
+  **Upgrading:** such a member dropped from or added to a closed object,
+  once breaking R5 (input), breaking R8 (output) or additive R7, is no
+  change; added to an open input, once additive R7 `input-member-added`,
+  it is breaking R6 `input-narrowed`, so a `--fail-on breaking` gate
+  that passed it now fails; dropped from an open input, once a neutral
+  R5, it is additive R7 `input-widened`. On an open output, and below
+  the input's top level, the class stays and the change reads as a
+  schema's (`output-narrowed`/`output-widened`, `note: "schema"`).
 - **Applicators read by direction.** Where a branch that narrows (or
   widens) can only narrow (or widen) what its node accepts, and the two
   sides pair branch for branch, a change inside the branch classifies by
@@ -3556,7 +3578,11 @@ hex or base64 header first) is the HMAC-SHA256 of `message` under
 array of them MACed in order (a string as its UTF-8 bytes), so a scheme
 that signs `method`, `url`, a timestamp and the body or its digest is
 assembled without copying the body. A signature of another length is
-`false`. The key is 32–1024 bytes as above.
+`false`. The key is 32–1024 bytes as above. A scheme that signs the
+request target signs the form both adapters agree in (§7.7): the
+`fetch` adapter's `meta.url` is already WHATWG-normalized, the `node`
+adapter's is raw, and `new URL(meta.url, base)`'s `pathname + search`
+reads both alike.
 
 | code | when |
 |---|---|

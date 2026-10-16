@@ -273,8 +273,12 @@ const server = serveHttp(contract, handlers, {
 covers the body as it was sent, so `identifyBody: true` reads the body
 before `identify` — once, under the operation's `maxBodyBytes` (413
 otherwise) — and hands it the exact bytes as `meta.body`, with
-`meta.url` the request target the signature covers; the pipeline then
-parses those same bytes. An opaque upload is buffered instead of
+`meta.url` the request target, query included; the pipeline then
+parses those same bytes. Behind `toNodeHandler` the target is the bytes
+the client sent; behind `toFetchHandler` it is what the platform's
+`Request` serialized (WHATWG URL folds dot segments and percent-encodes,
+`'` in a query as `%27`), so a scheme that verifies behind either signs
+the target as WHATWG URL serializes it, as the example's `target` does. An opaque upload is buffered instead of
 streamed on such a server; without the option nothing is read before
 `identify` and `meta.body` is `null`. `@jarenjs/contract/auth-node`
 (Node only) compares a presented signature in constant time
@@ -315,9 +319,11 @@ const contract = compileContract({
 
 const callerKeys = { shop: Buffer.from('a shared secret of 32 bytes or more') };   // from the host's secret store
 const tokenKey = Buffer.from('the identity provider secret, 32+ bytes');
-// the scheme both servers agree on: method, target, timestamp and the SHA-256 of the raw body
+// the scheme both servers agree on: method, target, timestamp and the SHA-256 of the raw body;
+// the target as WHATWG URL serializes it: both adapters' meta.url agree in that form
+const target = (url) => { const u = new URL(url, 'http://host'); return u.pathname + u.search; };
 const signed = (method, url, stamp, body) =>
-  [method, '\n', url, '\n', stamp, '\n', createHash('sha256').update(body).digest('hex')];
+  [method, '\n', target(url), '\n', stamp, '\n', createHash('sha256').update(body).digest('hex')];
 
 const server = serveHttp(contract, {
   'invoice.paid': (input, ctx) => ({ by: ctx.host.caller }),

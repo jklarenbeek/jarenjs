@@ -97,6 +97,23 @@ function mayCarryBody(method) {
 }
 
 /**
+ * The request target the platform's `Request` serialized: the path and
+ * the query, an empty query keeping its `?` (which `search` reads as
+ * `''`), without a fragment (never on the wire). The platform has already
+ * normalized it — dot segments folded, what WHATWG URL percent-encodes
+ * encoded (`'` in a query is `%27`) — so the client's own bytes are not
+ * recoverable here.
+ * @param {URL} url - the parsed `href`
+ * @param {string} href - `request.url`, a WHATWG serialization
+ * @returns {string}
+ */
+function requestTarget(url, href) {
+  if (url.search !== '') return url.pathname + url.search;
+  const hash = href.indexOf('#');
+  return (hash === -1 ? href : href.slice(0, hash)).endsWith('?') ? url.pathname + '?' : url.pathname;
+}
+
+/**
  * Put a dispatcher behind the WHATWG request/response pair.
  * @param {HttpDispatcher} dispatcher
  * @returns {(request: Request) => Promise<Response>}
@@ -135,7 +152,7 @@ export function toFetchHandler(dispatcher) {
     }
 
     const response = await dispatcher.dispatch({
-      method, url: url.pathname + url.search, headers, body, signal: request.signal,
+      method, url: requestTarget(url, request.url), headers, body, signal: request.signal,
     });
     if (typeof response.stream === 'function') {
       // an SSE response: the pump writes into a ReadableStream that

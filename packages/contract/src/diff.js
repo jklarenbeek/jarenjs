@@ -325,6 +325,42 @@ function constrainingCatchAll(node) {
 }
 
 /**
+ * What an object schema applies to a member its `properties` does not
+ * name, when the walk can say: `false` under a closed object, `true`
+ * under an open one — or `undefined` when a catch-all that constrains
+ * (`patternProperties` included, closed or not) or an applicator may
+ * judge the member instead.
+ * @param {Record<string, any>} node
+ * @returns {boolean | undefined}
+ */
+function unnamedMember(node) {
+  if (carriesApplicator(node) || constrainingCatchAll(node) !== null) return undefined;
+  return !closedObject(node);
+}
+
+/**
+ * A member `X` declares `false` (directly or through same-document
+ * `$ref`s) without requiring it, while `Y` neither names nor requires it,
+ * is no member of its own: what `Y` applies to it — `false` closed, `true`
+ * open — is what its `false` compares against, so a closed object that
+ * drops or adds it moves nothing, and an open one that adds it narrows.
+ * `undefined` for any other pair, which the member rows classify.
+ * @param {string} m
+ * @param {Record<string, any> | null} X - the side naming `m`
+ * @param {Side} x
+ * @param {Record<string, any> | null} Y - the other side
+ * @returns {boolean | undefined} what `Y` applies to `m`
+ */
+function forbiddenOnOneSide(m, X, x, Y) {
+  if (X === null || Y === null) return undefined;
+  const names = (/** @type {Record<string, any>} */ node) => isObject(node.properties) && Object.hasOwn(node.properties, m);
+  const requires = (/** @type {Record<string, any>} */ node) => Array.isArray(node.required) && node.required.includes(m);
+  if (!names(X) || requires(X) || names(Y) || requires(Y)) return undefined;
+  const declared = resolveHops(X.properties[m], x);
+  return 'node' in declared && declared.node === false ? unnamedMember(Y) : undefined;
+}
+
+/**
  * Whether a node reads the annotations its in-place applicators produce:
  * dropping a member from a branch then refuses it instead of freeing it,
  * so no branch change has a direction the branch alone decides.
@@ -955,6 +991,12 @@ function compareObject(A, B, path, a, b, sink, visited) {
       sink.unknown('properties', at, inA ? m : undefined, inB ? m : undefined);
       continue;
     }
+    const aApplied = forbiddenOnOneSide(m, B, b, A);
+    const bApplied = forbiddenOnOneSide(m, A, a, B);
+    if (aApplied !== undefined || bApplied !== undefined) {
+      compareSchema(inA ? aProps[m] : aApplied, inB ? bProps[m] : bApplied, at, a, b, sink, visited);
+      continue;
+    }
     if (inA && !inB) {
       // removed: forbidden under a closed b, unconstrained under an open
       // one, judged by b's catch-all under one that constrains
@@ -1129,10 +1171,23 @@ function compareInput(diff, aOp, bOp, a, b) {
 
   const sink = schemaSink(diff, op, root, 'input');
   const visited = new Map();
+  // the siblings of a `$ref` the input is spelled as judge the members the
+  // target does not name (a catch-all beside it), so a `false` member is
+  // read against what the target applies only when there are none
+  const aBeside = refSiblings(aOp.input?.schema);
+  const bBeside = refSiblings(bOp.input?.schema);
+  const plain = Object.keys(aBeside).length === 0 && Object.keys(bBeside).length === 0;
   for (const m of new Set([...Object.keys(aProps), ...Object.keys(bProps), ...aReq, ...bReq])) {
-    const at = root + '/properties/' + encodeJSONPointerSegment(m);
+    const rel = '/properties/' + encodeJSONPointerSegment(m);
+    const at = root + rel;
     const inA = Object.hasOwn(aProps, m) || aReq.has(m);
     const inB = Object.hasOwn(bProps, m) || bReq.has(m);
+    const aApplied = plain ? forbiddenOnOneSide(m, bEff, b, aEff) : undefined;
+    const bApplied = plain ? forbiddenOnOneSide(m, aEff, a, bEff) : undefined;
+    if (aApplied !== undefined || bApplied !== undefined) {
+      compareSchema(inA ? aProps[m] : aApplied, inB ? bProps[m] : bApplied, rel, a, b, sink, visited);
+      continue;
+    }
     if (inA && !inB) {
       if (bClosed) {
         push(diff.breaking, { kind: 'input-member-removed', op, docPath: at, from: m, rule: 'R5' });
@@ -1159,7 +1214,7 @@ function compareInput(diff, aOp, bOp, a, b) {
       push(diff.additive, { kind: 'input-member-optional', op, docPath: at, from: m, to: m, rule: 'R7' });
     }
     if (Object.hasOwn(aProps, m) && Object.hasOwn(bProps, m)) {
-      compareSchema(aProps[m], bProps[m], '/properties/' + encodeJSONPointerSegment(m), a, b, sink, visited);
+      compareSchema(aProps[m], bProps[m], rel, a, b, sink, visited);
     }
   }
   const aAp = aEff === null || aEff.additionalProperties === undefined ? true : aEff.additionalProperties;
@@ -1170,8 +1225,6 @@ function compareInput(diff, aOp, bOp, a, b) {
   // members, a catch-all) validate the request as much as its members do,
   // and so do the siblings of a `$ref` the input is spelled as (the
   // members are read from what the `$ref` resolves to)
-  const aBeside = refSiblings(aOp.input?.schema);
-  const bBeside = refSiblings(bOp.input?.schema);
   compareUnmodeled(aEff, bEff, '', a, b, sink, visited, readsAnnotations(aBeside) || readsAnnotations(bBeside));
   compareConstraints(aEff, bEff, '', sink);
   if (canon(aBeside) !== canon(bBeside)) sink.unknown('$ref', '', aOp.input?.schema, bOp.input?.schema);

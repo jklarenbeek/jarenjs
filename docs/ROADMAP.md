@@ -299,6 +299,25 @@ costs a descriptor plus examples and no UI code at all.
 
 ## @jarenjs/contract
 
+- [ ] **`diffContracts` misreads three top-level/closed member shapes for real
+  members.** (a) A closed object whose `patternProperties` admits a member's
+  name classes that member's removal as breaking (R5 at the input's top level,
+  R6 nested) though the change widens what is accepted
+  (`{properties:{m:{type:'string'}}, patternProperties:{'^m':{}},
+  additionalProperties:false}` → without `m`). (b) The input's top level has
+  no applicator check: under `unevaluatedProperties: false` beside an `allOf`
+  that names `m`, dropping `m` is breaking R5 at the top level and R15 one
+  level down. (c) At the top level a member named only in `required` on one
+  side and in `properties` on the other is never schema-compared:
+  `{required:['m']}` → `{properties:{m:{type:'string'}}}` (or `m: false`) is
+  additive R7 `input-member-optional` alone, though older requests carrying
+  `m` may be refused.
+- [ ] **`diffContracts` does not read a member schema that accepts nothing
+  unless it is `false`.** `m: { not: {} }` (or any unsatisfiable schema) added
+  to an open input is additive R7 per the R7 row, though every request
+  carrying `m` is refused; only `false` (directly or through same-document
+  `$ref`s) is read as forbidding the member.
+
 - [ ] **`diffContracts` reports a change inside `not`, `if`, `contains`, or a
   union whose variants overlap as R15 `unknown`,** so a `--fail-on breaking`
   gate alone passes a required member dropped there. `not` is anti-monotone (a

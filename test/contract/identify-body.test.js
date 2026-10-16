@@ -17,12 +17,15 @@ import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { createServer, request as httpRequest } from 'node:http';
 
 import { compileContract, ContractRuntimeError } from '@jarenjs/contract';
 import { serveHttp, readBody } from '@jarenjs/contract/http';
 import { servePort, openPortClient } from '@jarenjs/contract/port';
 import { openLocalClient } from '@jarenjs/contract/local';
 import { hmacSha256Matches } from '@jarenjs/contract/auth-node';
+import { toFetchHandler } from '@jarenjs/contract/fetch';
+import { toNodeHandler } from '@jarenjs/contract/node';
 import { json, req } from './helpers.js';
 
 const signed = compileContract({
@@ -251,8 +254,8 @@ describe('README: signed requests and bearer tokens', () => {
     const dir = mkdtempSync(join(tmpdir(), 'contract-readme-'));
     try {
       const file = join(dir, 'recipe.mjs');
-      writeFileSync(file, `${code}\nexport { paid, forged, me, refused };\n`);
-      const { paid, forged, me, refused } = await import(pathToFileURL(file).href);
+      writeFileSync(file, `${code}\nexport { paid, forged, me, refused, server, signed, callerKeys };\n`);
+      const { paid, forged, me, refused, server, signed: scheme, callerKeys } = await import(pathToFileURL(file).href);
       assert.strictEqual(paid.status, 200);
       assert.strictEqual(paid.body, '{"by":"shop"}');
       assert.strictEqual(forged.status, 401);
@@ -260,9 +263,93 @@ describe('README: signed requests and bearer tokens', () => {
       assert.strictEqual(me.status, 200);
       assert.strictEqual(me.body, '{"user":"u-7"}');
       assert.strictEqual(refused.status, 401);
+      // the recipe's scheme verifies a target WHATWG URL re-encodes behind both adapters
+      const target = "/hooks/invoice-paid?via='shop'";
+      const body = '{"invoice":"inv_42"}';
+      const stamp = String(Date.now());
+      const signature = createHmac('sha256', callerKeys.shop).update(scheme('POST', target, stamp, body).join('')).digest('hex');
+      const headers = { 'content-type': 'application/json', 'x-caller': 'shop', 'x-timestamp': stamp, 'x-signature': signature };
+      const viaFetch = await toFetchHandler(server)(new Request('http://host' + target, { method: 'POST', headers, body }));
+      assert.deepStrictEqual([viaFetch.status, await viaFetch.text()], [200, '{"by":"shop"}']);
+      const viaNode = await overNode(toNodeHandler(server), { method: 'POST', path: target, headers }, body);
+      assert.deepStrictEqual(viaNode, [200, '{"by":"shop"}']);
     }
     finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+/**
+ * One request over a real `node:http` server: [status, body text].
+ * @param {any} handler @param {{ method: string, path: string, headers?: Record<string, string> }} line @param {string} [body]
+ * @returns {Promise<[number, string]>}
+ */
+async function overNode(handler, line, body) {
+  const server = createServer(handler);
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve(undefined)));
+  const { port } = /** @type {import('node:net').AddressInfo} */ (server.address());
+  try {
+    return await new Promise((resolve, reject) => {
+      const rq = httpRequest({ host: '127.0.0.1', port, ...line }, (res) => {
+        let text = '';
+        res.setEncoding('utf8');
+        res.on('data', (chunk) => { text += chunk; });
+        res.on('end', () => resolve([res.statusCode ?? 0, text]));
+      });
+      rq.on('error', reject);
+      rq.end(body);
+    });
+  }
+  finally {
+    server.close();
+  }
+}
+
+describe('meta.url behind the two adapters', () => {
+  const target = compileContract({
+    $contract: '0.1', id: 'target', version: '1',
+    operations: {
+      'e.read': { kind: 'read', input: { type: 'object', properties: { x: { type: 'string' } } }, output: true, http: { method: 'GET', path: '/a/b' } },
+    },
+  });
+  /** @returns {{ server: any, seen: (string | null)[] }} */
+  const recording = () => {
+    /** @type {(string | null)[]} */
+    const seen = [];
+    const server = serveHttp(target, { 'e.read': () => true }, { identify: (meta) => { seen.push(meta.url); return { host: null }; } });
+    return { server, seen };
+  };
+  // sent → what the fetch platform's Request serialized
+  const targets = [
+    ["/a/b?x='q'", '/a/b?x=%27q%27'],
+    ['/a/b?x="q"', '/a/b?x=%22q%22'],
+    ['/a/b?', '/a/b?'],
+    ['/a/b?x=a%27b', '/a/b?x=a%27b'],
+    ['/a/b', '/a/b'],
+  ];
+  /** The recipe's canonical target: WHATWG URL's serialization. @param {string} url */
+  const canonical = (url) => { const u = new URL(url, 'http://host'); return u.pathname + u.search; };
+
+  it("the fetch adapter hands identify the target its Request serialized: an empty query keeps its '?', a fragment never reaches it", async () => {
+    const { server, seen } = recording();
+    const handler = toFetchHandler(server);
+    for (const [sent] of targets) assert.strictEqual((await handler(new Request('http://host' + sent))).status, 200);
+    assert.deepStrictEqual(seen, targets.map(([, serialized]) => serialized));
+    seen.length = 0;
+    for (const url of ['http://host/a/b?#f', 'http://host/a/b#f?', 'http://host/a/b#', 'http://host/a/b?x=1#f']) {
+      assert.strictEqual((await handler(new Request(url))).status, 200);
+    }
+    assert.deepStrictEqual(seen, ['/a/b?', '/a/b', '/a/b', '/a/b?x=1']);
+  });
+
+  it('the node adapter hands identify the bytes the client sent; both read alike in the canonical form', async () => {
+    const { server, seen } = recording();
+    for (const [sent] of targets) assert.strictEqual((await overNode(toNodeHandler(server), { method: 'GET', path: sent }))[0], 200);
+    assert.deepStrictEqual(seen, targets.map(([sent]) => sent));
+    for (const [sent, serialized] of targets) {
+      assert.strictEqual(canonical(sent), canonical(serialized), sent);
+    }
+    assert.deepStrictEqual(targets.map(([sent]) => canonical(sent)), ['/a/b?x=%27q%27', '/a/b?x=%22q%22', '/a/b', '/a/b?x=a%27b', '/a/b']);
   });
 });
