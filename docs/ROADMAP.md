@@ -301,16 +301,17 @@ costs a descriptor plus examples and no UI code at all.
 ## @jarenjs/contract
 
 - [ ] **`diffContracts` reports a change inside `not`, `if`, `contains`, or a
-  union no required `const`/`enum` member discriminates as R15 `unknown`,** so
-  a `--fail-on breaking` gate alone passes a required member dropped behind
-  `anyOf: [{ $ref }, { type: 'null' }]` (the nullable spelling of a
-  projection) or inside variants told apart only by `type`. Branches whose
-  `type` sets are disjoint are as provably disjoint as a discriminator; a
-  reordered discriminated union could pair by discriminator value instead of
-  position; a variant added under a new discriminator value is a widening; two
-  `allOf` conjuncts respelled together, and a branch change at a location
-  another conjunct or the node itself also constrains (it would need the two
-  intersected), stay R15.
+  union whose variants overlap as R15 `unknown`,** so a `--fail-on breaking`
+  gate alone passes a required member dropped there. `not` is anti-monotone (a
+  branch narrowed widens the node) and `contains` monotone, so either could be
+  classed with its direction read through; a union mixing variants a type
+  tells apart with object variants a discriminator tells apart (`anyOf: [{ k:
+  'a' }, { k: 'b' }, { type: 'null' }]`, flat) is disjoint but keyed by
+  neither alone; a variant whose discriminator or type set grows into
+  another's would need the two compared value by value. Two `allOf` conjuncts
+  respelled together, and a change at a location another conjunct or the node
+  itself also constrains (it would need the two intersected; a variant added
+  beside the node's own `type` among them), stay R15.
 
 ## @jarenjs/linq & @jarenjs/db — the data pair
 
