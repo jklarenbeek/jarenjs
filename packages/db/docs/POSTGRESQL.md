@@ -541,11 +541,11 @@ records matching tool versions and each recovery assertion:
 
 | Logical backup / restore server | Tables / rows | Archive bytes | Omitted metadata cases detected | Elapsed ms |
 |---|---:|---:|---:|---:|
-| 16.15 (Debian 16.15-1.pgdg12+2) | 14 / 16 | 27446 | 10 | 1165.96 |
-| 17.11 (Debian 17.11-1.pgdg12+2) | 14 / 16 | 27870 | 10 | 1040.15 |
-| 18.6 (Debian 18.6-1.pgdg12+2) | 14 / 16 | 27805 | 10 | 1108.64 |
+| 16.15 (Debian 16.15-1.pgdg12+2) | 14 / 16 | 27443 | 10 | 1157.22 |
+| 17.11 (Debian 17.11-1.pgdg12+2) | 14 / 16 | 27863 | 10 | 1099.73 |
+| 18.6 (Debian 18.6-1.pgdg12+2) | 14 / 16 | 27802 | 10 | 1109.42 |
 
-Archived WAL: 17.11 (Debian 17.11-1.pgdg12+2), 14 tables / 16 rows, 9552.65 ms; source stopped before promotion: true. Physical sequence advances are retained in the result. Power loss and fleet failover were not tested.
+Archived WAL: 17.11 (Debian 17.11-1.pgdg12+2), 14 tables / 16 rows, 7426.68 ms; source stopped before promotion: true. Physical sequence advances are retained in the result. Power loss and fleet failover were not tested.
 
 <!--/fact-->
 

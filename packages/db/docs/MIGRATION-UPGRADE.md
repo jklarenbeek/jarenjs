@@ -2963,8 +2963,8 @@ with the code that produced them.
 
 | Native runtime / SQLite | Apply all links ms | Status loop ms | No-op apply loop ms | Observation loop ms | Measured at |
 |---|---:|---:|---:|---:|---|
-| node 24.20.0 / 3.53.4 | 9.532 | 227.371 | 234.308 | 63.460 | 2026-10-15T18:12:24.927Z |
-| bun 1.4.2 / 3.53.2 | 10.570 | 228.590 | 237.764 | 60.121 | 2026-10-15T18:12:22.010Z |
+| node 24.20.0 / 3.53.4 | 10.429 | 259.035 | 249.956 | 65.863 | 2026-10-16T02:32:32.474Z |
+| bun 1.4.2 / 3.53.2 | 11.946 | 250.268 | 253.296 | 58.573 | 2026-10-16T02:32:29.301Z |
 
 | Native runtime | Current document JSON bytes | Legacy-shaped JSON projection bytes | Side rows / key+value UTF-8 bytes | SQLite page growth bytes |
 |---|---:|---:|---:|---:|
