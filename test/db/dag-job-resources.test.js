@@ -120,7 +120,7 @@ const cases = (open) => {
     await fixture(async (store, _advance, runners) => {
       let outcome;
       const runner = createDagJobRunner(store, { compileDag, documents: { pub: PUBLISH_DAG },
-        owner: 'A', leaseMs: 30, pollInterval: 5,
+        owner: 'A', leaseMs: 300, pollInterval: 5,
         tasks: { publish: async (_props, _signal, resources) => {
           // the claim's own lease is superseded by the first renewal
           await until(() => runner.stats().renewals >= 1, 'a renewal');
