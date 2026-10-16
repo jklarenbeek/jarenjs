@@ -141,6 +141,12 @@ export function equalsDeep(target, source) {
  * (`a circular reference in the first value cannot be compared at /self`,
  * the pointer {@link locateCycle} answers). One reference compared with
  * itself answers `true` at any depth, without a walk.
+ *
+ * Two values that share subtrees (`d = [d, d]`, built separately on each
+ * side) cost their distinct pairs of containers, not the pairs they
+ * reach: past 2^20 pairs compared plainly, the compare carries on
+ * remembering the pairs it found equal, with the same answer, difference,
+ * cycle and depth refusal.
  * @param {any} a
  * @param {any} b
  * @returns {boolean}
@@ -148,16 +154,32 @@ export function equalsDeep(target, source) {
  *   a cycle
  */
 export function equalsJson(a, b) {
+  comparesLeft = PLAIN_COMPARE_BUDGET;
+  let equal;
   try {
-    return equalsJsonAt(a, b, 1);
+    equal = equalsJsonAt(a, b, 1);
   }
   catch (error) {
+    comparedEqual = null;
     throw error === WALK_CEILING ? walkRefusal('compared', [a, b], COMPARED_VALUES) : error;
   }
+  comparedEqual = null;
+  return equal;
 }
 
 // The names `equalsJson`'s refusal gives its two roots.
 const COMPARED_VALUES = ['the first value', 'the second value'];
+
+// The container pairs `equalsJson` compares plainly, each subtree each
+// time it is reached. Two values that share subtrees can reach the same
+// pair exponentially often (`d = [d, d]`), so past this many every pair
+// still to compare goes to `equalsSharedAt`, which remembers the pairs it
+// found equal (`comparedEqual`, for the one call) and compares a
+// remembered one no more.
+const PLAIN_COMPARE_BUDGET = 1 << 20;
+let comparesLeft = PLAIN_COMPARE_BUDGET;
+/** @type {ComparedPairs | null} */
+let comparedEqual = null;
 
 // The nesting `equalsJson` compares on the host's call stack, the fast
 // path every ordinary value takes: a recursive walk stops at the first
@@ -177,6 +199,8 @@ function equalsJsonAt(a, b, depth) {
     return true;
   if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null)
     return false;
+  if (--comparesLeft < 0)
+    return equalsSharedAt(a, b, depth, comparedEqual ??= new Map()) !== 0;
   if (depth > RECURSIVE_COMPARE_DEPTH)
     return equalsJsonWalk(a, b, depth);
   const aIsArray = Array.isArray(a);
@@ -220,6 +244,9 @@ function equalsJsonAt(a, b, depth) {
 function equalsJsonWalk(a, b, depth) {
   /** @type {any[]} */
   const pending = [];
+  // the budget on a local, handed back with a `true`: a `false` ends the
+  // whole compare
+  let left = comparesLeft;
   for (;;) {
     if (depth > JSON_WALK_DEPTH_CEILING)
       throw WALK_CEILING;
@@ -263,12 +290,225 @@ function equalsJsonWalk(a, b, depth) {
       if (count !== 0)
         return false;
     }
-    if (pending.length === 0)
-      return true;
-    depth = pending.pop();
-    b = pending.pop();
-    a = pending.pop();
+    // the next pair, or, past the budget, every pair left on `equalsSharedWalk`
+    for (;;) {
+      if (pending.length === 0) {
+        comparesLeft = left;
+        return true;
+      }
+      depth = pending.pop();
+      b = pending.pop();
+      a = pending.pop();
+      if (--left >= 0)
+        break;
+      if (equalsSharedWalk(a, b, depth, comparedEqual ??= new Map()) === 0)
+        return false;
+    }
   }
+}
+
+/**
+ * The pairs `equalsSharedAt` found equal, each with its height: the
+ * container levels from the pair down to its deepest pair of distinct
+ * containers.
+ * @typedef {Map<object, Map<object, number>>} ComparedPairs
+ */
+
+// A pair is remembered only when comparing it took this many pairs: a
+// small one costs less to compare again than to remember, and a pair
+// compared again costs at most this, so the compare stays linear in the
+// distinct pairs.
+const REMEMBERED_WORK = 32;
+// The pairs the shared compare has compared, for the work of each.
+let sharedCompares = 0;
+
+/**
+ * `equalsJsonAt` remembering the pairs it found equal: a pair
+ * remembered (one that took `REMEMBERED_WORK` pairs to compare) answers
+ * equal again without a walk. It answers
+ * the pair's height, or 0 when the two differ. The order of the checks
+ * is `equalsJsonAt`'s and `equalsJsonWalk`'s, so the first difference,
+ * cycle or depth it meets is theirs; a pair found equal held no cycle,
+ * and one reached again deeper is refused when its height passes the
+ * bound, where the plain walk down it would be.
+ * @param {any} a
+ * @param {any} b
+ * @param {number} depth
+ * @param {ComparedPairs} equal
+ * @returns {number}
+ */
+function equalsSharedAt(a, b, depth, equal) {
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null)
+    return 0;
+  if (depth > RECURSIVE_COMPARE_DEPTH)
+    return equalsSharedWalk(a, b, depth, equal);
+  const known = equal.get(a)?.get(b);
+  if (known !== undefined) {
+    if (depth + known - 1 > JSON_WALK_DEPTH_CEILING)
+      throw WALK_CEILING;
+    return known;
+  }
+  const start = sharedCompares++;
+  let height = 1;
+  const aIsArray = Array.isArray(a);
+  if (aIsArray !== Array.isArray(b))
+    return 0;
+  if (aIsArray) {
+    const alen = a.length;
+    if (alen !== b.length)
+      return 0;
+    for (let i = 0; i < alen; i++) {
+      const x = a[i];
+      const y = b[i];
+      if (x === y)
+        continue;
+      const below = equalsSharedAt(x, y, depth + 1, equal);
+      if (below === 0)
+        return 0;
+      if (below >= height)
+        height = below + 1;
+    }
+  }
+  else {
+    let count = 0;
+    for (const key in a) {
+      if (!hasOwn(a, key))
+        continue;
+      if (!hasOwn(b, key))
+        return 0;
+      const x = a[key];
+      const y = b[key];
+      if (x !== y) {
+        const below = equalsSharedAt(x, y, depth + 1, equal);
+        if (below === 0)
+          return 0;
+        if (below >= height)
+          height = below + 1;
+      }
+      count++;
+    }
+    for (const key in b) {
+      if (hasOwn(b, key))
+        count--;
+    }
+    if (count !== 0)
+      return 0;
+  }
+  if (sharedCompares - start >= REMEMBERED_WORK)
+    rememberEqual(equal, a, b, height);
+  return height;
+}
+
+/**
+ * `equalsJsonWalk` remembering the pairs it found equal, as
+ * {@link equalsSharedAt} does: one frame per pair whose members are
+ * checked, holding the member pairs still to compare, taken last first
+ * as the plain walk's stack takes them.
+ * @param {any} a - An array or object
+ * @param {any} b - An array or object
+ * @param {number} depth
+ * @param {ComparedPairs} equal
+ * @returns {number}
+ */
+function equalsSharedWalk(a, b, depth, equal) {
+  /** @type {{ a: any, b: any, pairs: any[], depth: number, height: number, start: number }[]} */
+  const frames = [];
+  for (;;) {
+    // the pair `a`, `b` at `depth`: known equal, or checked and opened
+    let done = equal.get(a)?.get(b);
+    if (done !== undefined) {
+      if (depth + done - 1 > JSON_WALK_DEPTH_CEILING)
+        throw WALK_CEILING;
+    }
+    else {
+      if (depth > JSON_WALK_DEPTH_CEILING)
+        throw WALK_CEILING;
+      const start = sharedCompares++;
+      /** @type {any[]} */
+      const pairs = [];
+      const aIsArray = Array.isArray(a);
+      if (aIsArray !== Array.isArray(b))
+        return 0;
+      if (aIsArray) {
+        const alen = a.length;
+        if (alen !== b.length)
+          return 0;
+        for (let i = 0; i < alen; i++) {
+          const x = a[i];
+          const y = b[i];
+          if (x === y)
+            continue;
+          if (typeof x !== 'object' || typeof y !== 'object' || x === null || y === null)
+            return 0;
+          pairs.push(x, y);
+        }
+      }
+      else {
+        let count = 0;
+        for (const key in a) {
+          if (!hasOwn(a, key))
+            continue;
+          if (!hasOwn(b, key))
+            return 0;
+          count++;
+          const x = a[key];
+          const y = b[key];
+          if (x === y)
+            continue;
+          if (typeof x !== 'object' || typeof y !== 'object' || x === null || y === null)
+            return 0;
+          pairs.push(x, y);
+        }
+        for (const key in b) {
+          if (hasOwn(b, key))
+            count--;
+        }
+        if (count !== 0)
+          return 0;
+      }
+      if (pairs.length === 0)
+        done = 1;
+      else
+        frames.push({ a, b, pairs, depth, height: 1, start });
+    }
+    // on to the next pair, closing every frame whose pairs all compared equal
+    for (;;) {
+      if (done !== undefined) {
+        if (frames.length === 0)
+          return done;
+        const parent = frames[frames.length - 1];
+        if (done >= parent.height)
+          parent.height = done + 1;
+        done = undefined;
+      }
+      const frame = frames[frames.length - 1];
+      if (frame.pairs.length > 0) {
+        b = frame.pairs.pop();
+        a = frame.pairs.pop();
+        depth = frame.depth + 1;
+        break;
+      }
+      done = frame.height;
+      if (sharedCompares - frame.start >= REMEMBERED_WORK)
+        rememberEqual(equal, frame.a, frame.b, done);
+      frames.pop();
+    }
+  }
+}
+
+/**
+ * Remember that `a` and `b` compared equal, with the pair's height.
+ * @param {ComparedPairs} equal
+ * @param {object} a
+ * @param {object} b
+ * @param {number} height
+ */
+function rememberEqual(equal, a, b, height) {
+  const row = equal.get(a);
+  if (row === undefined)
+    equal.set(a, new Map([[b, height]]));
+  else
+    row.set(b, height);
 }
 
 /**
@@ -374,20 +614,56 @@ export function isUniqueDeepArray(arr) {
  * cycle with a `JsonCycleError` `JO2002` located at the member that closes
  * it (`a circular reference cannot be serialized at /self`, the pointer
  * {@link locateCycle} and `canonicalizeJson` name).
+ *
+ * A value that shares subtrees (`d = [d, d]`) costs its distinct
+ * containers: past 2^18 containers written plainly, the text of each
+ * container is remembered and joined wherever it is reached again, the
+ * same text held as joined pieces. A text longer than the host's longest
+ * string escapes as the host's `RangeError` (`Invalid string length`).
  * @param {*} value - The value to serialize
  * @returns {string|undefined} Deterministic JSON text
  * @throws {CodedError} `JO2001` past 10000 levels of nesting, `JO2002` on
  *   a cycle
+ * @throws {RangeError} When the text is longer than the host's longest
+ *   string
  */
 export function stableStringify(value) {
   if (value === null || typeof value !== 'object')
     return JSON.stringify(value);
+  return writeStable(value);
+}
+
+// The containers `stableStringify` and `semanticKey` write plainly, a
+// subtree each time it is reached. A value that shares subtrees can reach
+// one exponentially often (`d = [d, d]`), so past this many the writer
+// also remembers the text of each container that took `REMEMBERED_WORK`
+// containers to write, and joins it wherever the container is reached
+// again: the same text, held as joined pieces rather than copied.
+const PLAIN_WRITE_BUDGET = 1 << 18;
+
+/**
+ * The text `stableStringify` answers for a container. Past
+ * `PLAIN_WRITE_BUDGET` containers it remembers what it wrote and joins
+ * it where it is reached again. A container remembered held no cycle,
+ * and one reached again deeper is refused when its height passes the
+ * bound, where the plain walk down it would be. Text longer than the
+ * host's longest string escapes as the host's `RangeError`.
+ * @param {object} value - An array or object
+ * @returns {string}
+ */
+function writeStable(value) {
+  /** @type {Map<object, { text: string, height: number }> | null} */
+  let written = null;
   // One frame per open container, so the nesting is not the host's call
-  // stack: `keys` is null for an array, `at` the next member to write and
-  // `key` the member whose container is open above this frame.
-  /** @type {{ value: any, keys: string[] | null, at: number, key: string, out: string, first: boolean }[]} */
+  // stack: `keys` is null for an array, `at` the next member to write,
+  // `key` the member whose container is open above this frame, `height`
+  // the container levels written into it so far and `start` the
+  // containers opened before it.
+  /** @type {StableFrame[]} */
   const frames = [];
-  let frame = openStableFrame(value);
+  let opened = 0;
+  let frame = openStableFrame(value, opened++);
+  let writesLeft = PLAIN_WRITE_BUDGET;
   for (;;) {
     const container = frame.value;
     const keys = frame.keys;
@@ -417,35 +693,66 @@ export function stableStringify(value) {
       child = member;
     }
     if (child !== undefined) {
-      frames.push(frame);
-      if (frames.length >= JSON_WALK_DEPTH_CEILING)
+      const known = written === null ? undefined : written.get(child);
+      if (known === undefined) {
+        if (written === null && --writesLeft < 0)
+          written = new Map();
+        frames.push(frame);
+        if (frames.length >= JSON_WALK_DEPTH_CEILING)
+          throw walkRefusal('serialized', [value]);
+        frame = openStableFrame(child, opened++);
+        continue;
+      }
+      // the child sits one level below `frame`, its deepest container
+      // `height - 1` below that
+      if (frames.length + 1 + known.height > JSON_WALK_DEPTH_CEILING)
         throw walkRefusal('serialized', [value]);
-      frame = openStableFrame(child);
+      closeStableMember(frame, known.text, known.height);
       continue;
     }
     // the container is complete: close it into the frame below
     const text = frame.out + (keys === null ? ']' : '}');
+    if (written !== null && opened - frame.start >= REMEMBERED_WORK)
+      written.set(container, { text, height: frame.height });
     const parent = frames.pop();
     if (parent === undefined)
       return text;
-    if (parent.keys === null)
-      parent.out += (parent.at === 1 ? '' : ',') + text;
-    else {
-      parent.out += (parent.first ? '' : ',') + JSON.stringify(parent.key) + ':' + text;
-      parent.first = false;
-    }
+    closeStableMember(parent, text, frame.height);
     frame = parent;
   }
 }
 
 /**
- * The frame `stableStringify` opens for one container.
- * @param {any} value - An array or object
+ * @typedef {{ value: any, keys: string[] | null, at: number, key: string, out: string, first: boolean, height: number, start: number }} StableFrame
  */
-function openStableFrame(value) {
+
+/**
+ * The frame `writeStable` opens for one container.
+ * @param {any} value - An array or object
+ * @param {number} start - The containers opened before it
+ * @returns {StableFrame}
+ */
+function openStableFrame(value, start) {
   return Array.isArray(value)
-    ? { value, keys: null, at: 0, key: '', out: '[', first: true }
-    : { value, keys: Object.keys(value).sort(), at: 0, key: '', out: '{', first: true };
+    ? { value, keys: null, at: 0, key: '', out: '[', first: true, height: 1, start }
+    : { value, keys: Object.keys(value).sort(), at: 0, key: '', out: '{', first: true, height: 1, start };
+}
+
+/**
+ * Write a member container's complete text into the frame it belongs to.
+ * @param {StableFrame} frame
+ * @param {string} text
+ * @param {number} height - The member's height
+ */
+function closeStableMember(frame, text, height) {
+  if (frame.keys === null)
+    frame.out += (frame.at === 1 ? '' : ',') + text;
+  else {
+    frame.out += (frame.first ? '' : ',') + JSON.stringify(frame.key) + ':' + text;
+    frame.first = false;
+  }
+  if (height >= frame.height)
+    frame.height = height + 1;
 }
 
 /**
@@ -476,6 +783,10 @@ function openStableFrame(value) {
  * three.
  * @param {*} value - The value to derive a fingerprint for
  * @returns {string} base-36 content hash of the stable serialization
+ * @throws {CodedError} `JO2001` past 10000 levels of nesting, `JO2002` on
+ *   a cycle
+ * @throws {RangeError} When the serialization is longer than the host's
+ *   longest string
  */
 export function contentKey(value) {
   return hashContent(stableStringify(value) ?? '');
@@ -546,6 +857,13 @@ function semanticLeaf(value, path) {
 // refusal and locates the member that closes the cycle itself.
 const SEMANTIC_CYCLE = Object.freeze({ cycle: true });
 
+// The containers `semanticKey` may still write plainly; past them every
+// container is written by `semanticShared`, which remembers its text in
+// `semanticWritten` for the one call.
+let semanticWritesLeft = PLAIN_WRITE_BUDGET;
+/** @type {Map<object, { text: string, height: number }> | null} */
+let semanticWritten = null;
+
 // The nesting keyed on the host's call stack, the fast path every
 // ordinary value takes; a value nested deeper continues on
 // `semanticWalk`, which keeps its own stack.
@@ -604,6 +922,8 @@ function semanticToken(value, path, open, ordered, depth) {
   const leaf = semanticLeaf(value, path);
   if (leaf !== undefined)
     return leaf;
+  if (--semanticWritesLeft < 0)
+    return semanticShared(value, path, open, ordered, depth, semanticWritten ??= new Map());
   if (depth > RECURSIVE_SEMANTIC_DEPTH)
     return semanticWalk(value, path, open, ordered, depth);
   const keys = openSemantic(value, path, open, ordered);
@@ -651,6 +971,11 @@ function semanticWalk(value, path, open, ordered, depth) {
     const leaf = semanticLeaf(next, nextPath);
     if (leaf !== undefined)
       out += leaf;
+    else if (--semanticWritesLeft < 0) {
+      out += semanticShared(next, nextPath, open, ordered, depth + frames.length, semanticWritten ??= new Map());
+      if (frames.length === 0)
+        return out;
+    }
     else {
       if (depth + frames.length > JSON_WALK_DEPTH_CEILING)
         throw walkTooDeep('a cache identity');
@@ -683,6 +1008,90 @@ function semanticWalk(value, path, open, ordered, depth) {
       frames.pop();
       if (frames.length === 0)
         return out;
+    }
+  }
+}
+
+/**
+ * {@link semanticToken} for a value `depth` levels down past the plain
+ * budget, on its own stack: it remembers the text of each container that
+ * took `REMEMBERED_WORK` containers to write in `written`, and joins it
+ * where the container is reached again. The text, and the first refusal
+ * met, are the plain walk's: the members are met in the same order and
+ * checked in it, with the same `open` ancestors; a container remembered
+ * held no cycle and no refusal, and one reached again deeper is refused
+ * `JO2001` when its height passes the bound, where the plain walk down it
+ * would be. Text longer than the host's longest string escapes as the
+ * host's `RangeError`.
+ * @param {*} value
+ * @param {string} path - JSON-Pointer-ish trail, for the error message
+ * @param {Set<object>} open - Ancestors on the current path (cycle guard)
+ * @param {boolean} ordered - Object members in enumeration order rather
+ *   than sorted
+ * @param {number} depth
+ * @param {Map<object, { text: string, height: number }>} written
+ * @returns {string}
+ */
+function semanticShared(value, path, open, ordered, depth, written) {
+  /** @type {{ object: any, keys: string[] | null, at: number, path: string, out: string, height: number, start: number }[]} */
+  const frames = [];
+  let opened = 0;
+  /** @type {any} */
+  let next = value;
+  let nextPath = path;
+  for (;;) {
+    // `next` is written, joined, or opened as the frame on top
+    let text = semanticLeaf(next, nextPath);
+    let height = 0;
+    if (text === undefined) {
+      const known = written.get(next);
+      if (known === undefined) {
+        if (depth + frames.length > JSON_WALK_DEPTH_CEILING)
+          throw walkTooDeep('a cache identity');
+        const keys = openSemantic(next, nextPath, open, ordered);
+        frames.push({ object: next, keys, at: 0, path: nextPath, out: keys === null ? '[' : '{', height: 1, start: opened++ });
+      }
+      else {
+        if (depth + frames.length + known.height - 1 > JSON_WALK_DEPTH_CEILING)
+          throw walkTooDeep('a cache identity');
+        text = known.text;
+        height = known.height;
+      }
+    }
+    // on to the next member, closing every container it finishes
+    for (;;) {
+      const frame = frames[frames.length - 1];
+      if (text !== undefined) {
+        if (frame === undefined)
+          return text;
+        frame.out += text;
+        if (height >= frame.height)
+          frame.height = height + 1;
+        text = undefined;
+      }
+      const size = frame.keys === null ? frame.object.length : frame.keys.length;
+      if (frame.at < size) {
+        if (frame.at > 0)
+          frame.out += ',';
+        if (frame.keys === null) {
+          next = frame.object[frame.at];
+          nextPath = `${frame.path}/${frame.at}`;
+        }
+        else {
+          const key = frame.keys[frame.at];
+          frame.out += JSON.stringify(key) + ':';
+          next = frame.object[key];
+          nextPath = `${frame.path}/${key}`;
+        }
+        frame.at++;
+        break;
+      }
+      text = frame.out + (frame.keys === null ? ']' : '}');
+      height = frame.height;
+      if (opened - frame.start >= REMEMBERED_WORK)
+        written.set(frame.object, { text, height });
+      open.delete(frame.object);
+      frames.pop();
     }
   }
 }
@@ -735,7 +1144,10 @@ function semanticWalk(value, path, open, ordered, depth) {
  * `JsonDepthError` `JO2001` (`a value nested deeper than 10000 levels
  * cannot be a cache identity`). A caller that may hold such a value must
  * treat the refusal as "not cacheable" and compute afresh — never as
- * "reuse whatever shares the key".
+ * "reuse whatever shares the key". A value that shares subtrees costs its
+ * distinct containers, as in {@link stableStringify}, with the same key;
+ * a key longer than the host's longest string escapes as the host's
+ * `RangeError`.
  *
  * The identity covers OWN ENUMERABLE string-keyed properties, the same
  * surface JSON reads. Two values differing only in a non-enumerable
@@ -748,6 +1160,8 @@ function semanticWalk(value, path, open, ordered, depth) {
  *   `options` is not a plain `{ ordered?: boolean }`
  * @throws {CodedError} `JO2002` on a cycle, `JO2001` past 10000 levels of
  *   nesting
+ * @throws {RangeError} When the key is longer than the host's longest
+ *   string
  */
 export function semanticKey(value, options = undefined) {
   let ordered = false;
@@ -759,17 +1173,23 @@ export function semanticKey(value, options = undefined) {
       throw new TypeError('semanticKey: options must be a plain { ordered?: boolean }');
     ordered = options.ordered === true;
   }
+  semanticWritesLeft = PLAIN_WRITE_BUDGET;
+  let error;
   try {
-    return semanticToken(value, '', new Set(), ordered, 1);
+    const key = semanticToken(value, '', new Set(), ordered, 1);
+    semanticWritten = null;
+    return key;
   }
-  catch (error) {
-    if (error !== SEMANTIC_CYCLE)
-      throw error;
-    // searched in the walk's own member order, so the member named is the
-    // one the walk met
-    throw new CodedError('JsonCycleError', 'JO2002', 'a circular reference cannot be a cache identity',
-      locateCycleIn(value, ordered ? Object.keys : codePointKeys));
+  catch (thrown) {
+    error = thrown;
+    semanticWritten = null;
   }
+  if (error !== SEMANTIC_CYCLE)
+    throw error;
+  // searched in the walk's own member order, so the member named is the
+  // one the walk met
+  throw new CodedError('JsonCycleError', 'JO2002', 'a circular reference cannot be a cache identity',
+    locateCycleIn(value, ordered ? Object.keys : codePointKeys));
 }
 
 /** @param {object} object @returns {string[]} */

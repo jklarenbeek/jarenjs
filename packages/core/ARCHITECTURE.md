@@ -635,6 +635,13 @@ passed straight in without the `type` discriminator being involved.
 | `mercator.js` | Web Mercator, the projection *out* for anything that draws |
 | `simplify.js` | Douglas-Peucker — dropping the vertices a drawing cannot show |
 
+The GeoJSON measurements (`geometryArea`, `geometryLength`, `containsPosition`,
+`ringsClosed`) read a malformed member without a check on their hot path: the
+recursion reads members as a well-formed value needs, and a `TypeError` from a
+read sends the whole value to the fold, which reads collection lists that cannot
+be iterated as empty and measures a geometry whose leaf code throws again with
+each ring or line that is not an array, or misses a position, holding none.
+
 The three validity testers back the `geoFormats` group in
 [`@jarenjs/formats`](../formats) (`geohash`, `wkt`, `geojson`).
 
@@ -1104,6 +1111,22 @@ default host stack — and their two refusals (`JO2001` past the bound,
 `JO2002` at the member that closes a cycle, located by `locateCycle`) live in
 `walk.js`, a module internal to the package with no `exports` entry, so the
 walks refuse a value alike; `object.js` re-exports `locateCycle`.
+
+Each of those walks has two forms with one answer. The plain form reaches a
+shared subtree each time it is referenced; it counts the containers it opens
+(2^20 pairs for `equalsJson`, 2^18 containers for the writers), and past that
+budget it carries on, for what is left, in a form that keeps a map of what it already
+finished — the pairs `equalsJson` found equal, the text `stableStringify` and
+`semanticKey` wrote — with each entry's height, so a value that shares subtrees
+costs its distinct ones. Only an entry whose subtree held 32 containers (or
+container pairs) is kept: a smaller one costs less to redo than to remember, and
+redoing it opens at most that many containers, so an ordinary value past the
+budget pays a map lookup per container and little else. The second form meets members in the plain form's
+order and refuses what it refuses where it refuses it: an entry is made only for
+a finished subtree, which held no cycle, and an entry met again deeper is
+refused when its height passes the bound. The written text is joined, not
+copied, so it is held in space linear in the distinct containers until a reader
+flattens it.
 
 ```mermaid
 flowchart TB

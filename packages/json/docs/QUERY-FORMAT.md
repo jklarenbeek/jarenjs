@@ -1639,6 +1639,14 @@ answers exactly as the scan it replaces. *Upgrade: such an operand used to
 escape as an uncoded `RangeError`; one nested past the host stack but within
 100000 levels now answers.*
 
+**A malformed member is measured as nothing.** For `$area`, `$length` and
+`$within`, a `features`, `geometries` or `coordinates` list that is not a list
+(`{"type": "FeatureCollection", "features": {}}`), or a ring or line that is
+not an array or misses a position (`null`), adds 0 to an area or length and
+contains nothing; the well-formed members beside it count. `$bbox` and
+`$centroid` already skipped such members. *Upgrade: such an operand used to
+escape as an uncoded `TypeError` from `$area`, `$length` and `$within`.*
+
 | Operator | Definition |
 |---|---|
 | `$bbox` | any value → `[west, south, east, north]`; a value with no positions → empty |

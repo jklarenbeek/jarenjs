@@ -95,6 +95,22 @@ within 10000 levels now has a key. A caller that read a `TypeError` as "not
 cacheable" reads the coded refusal the same way: the formula compile cache and
 the formula batch's input keys report it with its code.*
 
+A value that shares subtrees costs its distinct subtrees, not the subtrees it
+reaches. Past a budget of plain work (2^20 pairs of containers for
+`equalsJson`, 2^18 containers for the writers), `equalsJson` carries on
+remembering the pairs it found equal, and `stableStringify`, `semanticKey` and
+`contentKey` carry on remembering the text they wrote and joining it wherever a
+container is reached again, so 40 levels of `d = [d, d]`,
+built separately on each side, compare at once. Every answer is the plain walk's:
+the same text character for character (a key or fingerprint a host stored
+stays valid), the same difference, and the same cycle, depth or member refusal,
+a container met again deeper refused where the walk down it would pass 10000
+levels. A value past the budget pays a map lookup per container it reaches,
+shared or not. A text longer than the host's longest string escapes as the host's own
+`RangeError` (`Invalid string length`). *Upgrade: two separately built shared
+values took time exponential in their levels to compare, and keying or
+serializing a heavily shared value exhausted the heap and aborted the process.*
+
 The GeoJSON traversal of `@jarenjs/core/geo` holds a bound of its own:
 `eachPosition`, `bboxOf`, `positionsOf`, `centroidOf`, `geoDistance`, `geometryOf`,
 `geometryArea`, `geometryLength`, `containsPosition`, `ringsClosed`,

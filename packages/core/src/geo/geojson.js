@@ -16,7 +16,10 @@
 // Nothing here validates. A malformed object yields null or 0 rather
 // than throwing, because the schema artifacts are where GeoJSON is
 // judged; a measurement function that also validated would report the
-// same defect twice in two vocabularies.
+// same defect twice in two vocabularies. The four measurements
+// (`geometryArea`, `geometryLength`, `containsPosition`, `ringsClosed`)
+// read a malformed member (a list that cannot be iterated, a ring or line
+// that is not an array or misses a position) as nothing.
 //
 // The one refusal is the walk's bound: a value is walked to 100000
 // levels of nesting, on the host's stack for the first 256 and on the
@@ -295,22 +298,22 @@ function nearGeometryOf(value) {
 
 /** @param {any} value @param {number} radius @returns {number} */
 function foldArea(value, radius) {
-  return foldGeometries(value, (inner) => areaAt(inner, radius, 1), add, 0);
+  return foldGeometries(value, (inner) => measuredArea(inner, radius), add, 0);
 }
 
 /** @param {any} value @param {number} radius @returns {number} */
 function foldLength(value, radius) {
-  return foldGeometries(value, (inner) => lengthAt(inner, radius, 1), add, 0);
+  return foldGeometries(value, (inner) => measuredLength(inner, radius), add, 0);
 }
 
 /** @param {any} value @param {number} lon @param {number} lat @returns {boolean} */
 function foldContains(value, lon, lat) {
-  return foldGeometries(value, (inner) => containsAt(inner, lon, lat, 1), either, false, isTrue);
+  return foldGeometries(value, (inner) => measuredContains(inner, lon, lat), either, false, isTrue);
 }
 
 /** @param {any} value @returns {boolean} */
 function foldRingsClosed(value) {
-  return foldGeometries(value, (inner) => ringsClosedAt(inner, 1), both, true, isFalse);
+  return foldGeometries(value, (inner) => measuredRingsClosed(inner), both, true, isFalse);
 }
 
 /** @param {number} sum @param {number} part */
@@ -324,6 +327,180 @@ const isTrue = (answer) => answer;
 /** @param {boolean} answer */
 const isFalse = (answer) => !answer;
 
+// A measurement reads a malformed member as nothing, without a check on
+// its hot path: the recursion reads members as the well-formed value
+// needs, and when a read throws a `TypeError` (a list that cannot be
+// iterated, a ring or position that is missing) the measurement is taken
+// again on the fold, whose collection lists are read by `membersOf` and
+// whose geometries are measured as before, or, when that throws, with
+// each ring or line that cannot be read as one holding no positions. A
+// value that holds no malformed member is measured exactly as before; a
+// malformed one adds 0 to an area or length, contains nothing, and a ring
+// with no positions is not closed.
+
+/** @param {any} geometry @param {number} radius @returns {number} */
+function measuredArea(geometry, radius) {
+  try {
+    return areaAt(geometry, radius, 1);
+  }
+  catch (error) {
+    if (!(error instanceof TypeError))
+      throw error;
+  }
+  const { type, coordinates } = geometry;
+  if (type === 'Polygon')
+    return polygonArea(readableRings(coordinates), radius);
+  let sum = 0;
+  if (type === 'MultiPolygon') {
+    for (const rings of membersOf(coordinates))
+      sum += polygonArea(readableRings(rings), radius);
+  }
+  return sum;
+}
+
+/** @param {any} geometry @param {number} radius @returns {number} */
+function measuredLength(geometry, radius) {
+  try {
+    return lengthAt(geometry, radius, 1);
+  }
+  catch (error) {
+    if (!(error instanceof TypeError))
+      throw error;
+  }
+  const { type, coordinates } = geometry;
+  if (type === 'LineString')
+    return lineLength(readablePositions(coordinates), radius);
+  let sum = 0;
+  if (type === 'MultiLineString' || type === 'Polygon') {
+    for (const line of membersOf(coordinates))
+      sum += lineLength(readablePositions(line), radius);
+  }
+  else if (type === 'MultiPolygon') {
+    for (const rings of membersOf(coordinates)) {
+      for (const ring of membersOf(rings))
+        sum += lineLength(readablePositions(ring), radius);
+    }
+  }
+  return sum;
+}
+
+/** @param {any} geometry @param {number} lon @param {number} lat @returns {boolean} */
+function measuredContains(geometry, lon, lat) {
+  try {
+    return containsAt(geometry, lon, lat, 1);
+  }
+  catch (error) {
+    if (!(error instanceof TypeError))
+      throw error;
+  }
+  const { type, coordinates } = geometry;
+  if (type === 'Polygon')
+    return pointInPolygon(lon, lat, readableRings(coordinates));
+  if (type === 'MultiPolygon') {
+    for (const rings of membersOf(coordinates)) {
+      if (pointInPolygon(lon, lat, readableRings(rings)))
+        return true;
+    }
+  }
+  return false;
+}
+
+/** @param {any} geometry @returns {boolean} */
+function measuredRingsClosed(geometry) {
+  try {
+    return ringsClosedAt(geometry, 1);
+  }
+  catch (error) {
+    if (!(error instanceof TypeError))
+      throw error;
+  }
+  const { type, coordinates } = geometry;
+  if (type === 'Polygon')
+    return everyMember(coordinates, readableRingClosed);
+  if (type === 'MultiPolygon')
+    return everyMember(coordinates, readablePolygonClosed);
+  return true;
+}
+
+/** @param {any} ring */
+const readableRingClosed = (ring) => isRingClosed(closableRing(ring));
+/** @param {any} rings */
+const readablePolygonClosed = (rings) => everyMember(rings, readableRingClosed);
+
+/**
+ * Whether every member of a list passes: an array as `every` reads it
+ * (a hole is skipped), any other list as {@link membersOf} reads it.
+ * @param {any} list
+ * @param {(member: any) => boolean} test
+ * @returns {boolean}
+ */
+function everyMember(list, test) {
+  if (Array.isArray(list))
+    return list.every(test);
+  for (const member of membersOf(list)) {
+    if (!test(member))
+      return false;
+  }
+  return true;
+}
+
+// What a list that cannot be read holds.
+const NO_MEMBERS = Object.freeze([]);
+
+/**
+ * A list of members as `for...of` reads it; one that cannot be iterated
+ * (missing, a number, a plain object) holds none.
+ * @param {any} list
+ * @returns {Iterable<any>}
+ */
+function membersOf(list) {
+  return Array.isArray(list) || (list != null && typeof list[Symbol.iterator] === 'function')
+    ? list
+    : NO_MEMBERS;
+}
+
+/**
+ * A ring or line as the ring helpers can read it: an array with a missing
+ * position (null, undefined, a hole) is malformed and holds no positions,
+ * text is read as it stands, and anything else holds no positions.
+ * @param {any} line
+ * @returns {any}
+ */
+function readablePositions(line) {
+  if (Array.isArray(line)) {
+    for (let i = 0; i < line.length; i++) {
+      if (line[i] == null)
+        return NO_MEMBERS;
+    }
+    return line;
+  }
+  return typeof line === 'string' ? line : NO_MEMBERS;
+}
+
+/**
+ * A ring as `isRingClosed` can read it, which reads only its ends: an
+ * array whose ends are present is read as it stands, a missing inner
+ * position included; one missing an end, or anything that is not an
+ * array or text, holds no positions.
+ * @param {any} ring
+ * @returns {any}
+ */
+function closableRing(ring) {
+  if (Array.isArray(ring))
+    return ring.length < 2 || (ring[0] != null && ring[ring.length - 1] != null) ? ring : NO_MEMBERS;
+  return typeof ring === 'string' ? ring : NO_MEMBERS;
+}
+
+/**
+ * A Polygon's rings as {@link readablePositions} reads each; anything
+ * that is not an array is read as `readablePositions` reads it.
+ * @param {any} rings
+ * @returns {any}
+ */
+function readableRings(rings) {
+  return Array.isArray(rings) ? Array.from(rings, readablePositions) : readablePositions(rings);
+}
+
 /**
  * The measurement of every geometry a value holds, joined in document
  * order: a FeatureCollection's features, a Feature's geometry and a
@@ -332,7 +509,8 @@ const isFalse = (answer) => !answer;
  * sum adds exactly as nested loops would. Anything that is not a
  * geometry adds `none`; a Feature's geometry that is a FeatureCollection
  * is not a geometry ({@link geometryOf}). A collection's members are
- * iterated as `for...of` iterates them.
+ * iterated as `for...of` iterates them, and a list that cannot be
+ * iterated holds none ({@link membersOf}).
  *
  * The walk keeps its own stack, to the bound the module states.
  * @template T
@@ -360,7 +538,7 @@ function foldGeometries(value, measure, join, none, settled = undefined) {
       if (depth > GEOJSON_WALK_DEPTH_CEILING)
         throw geoRefusal(value);
       if (next.type === 'FeatureCollection')
-        items = next.features ?? [];
+        items = membersOf(next.features);
       else {
         // a Feature's geometry, followed to the geometry it holds
         let geometry = next;
@@ -374,7 +552,7 @@ function foldGeometries(value, measure, join, none, settled = undefined) {
         geometry = geometryOf(geometry);
         if (geometry !== null) {
           if (geometry.type === 'GeometryCollection')
-            items = geometry.geometries ?? [];
+            items = membersOf(geometry.geometries);
           else
             part = measure(geometry);
         }
@@ -433,7 +611,7 @@ export function geometryArea(value, radius = EARTH_RADIUS) {
     return areaAt(value, radius, 1);
   }
   catch (error) {
-    if (error !== RECURSION_TOO_DEEP)
+    if (error !== RECURSION_TOO_DEEP && !(error instanceof TypeError))
       throw error;
     return foldArea(value, radius);
   }
@@ -500,7 +678,7 @@ export function geometryLength(value, radius = EARTH_RADIUS) {
     return lengthAt(value, radius, 1);
   }
   catch (error) {
-    if (error !== RECURSION_TOO_DEEP)
+    if (error !== RECURSION_TOO_DEEP && !(error instanceof TypeError))
       throw error;
     return foldLength(value, radius);
   }
@@ -592,7 +770,7 @@ export function containsPosition(value, lon, lat) {
     return containsAt(value, lon, lat, 1);
   }
   catch (error) {
-    if (error !== RECURSION_TOO_DEEP)
+    if (error !== RECURSION_TOO_DEEP && !(error instanceof TypeError))
       throw error;
     return foldContains(value, lon, lat);
   }
@@ -676,7 +854,7 @@ export function ringsClosed(value) {
     return ringsClosedAt(value, 1);
   }
   catch (error) {
-    if (error !== RECURSION_TOO_DEEP)
+    if (error !== RECURSION_TOO_DEEP && !(error instanceof TypeError))
       throw error;
     return foldRingsClosed(value);
   }

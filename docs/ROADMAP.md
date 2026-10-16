@@ -32,25 +32,29 @@ delete it or fix it.
 (RFC 6902) and Merge Patch (RFC 7396). See
 [`packages/json/ARCHITECTURE.md`](../packages/json/ARCHITECTURE.md).
 - [ ] **Geometry measurements crash uncoded on a malformed collection
-  member.** `$area`, `$length` and `$within` over `{ type:
-  'FeatureCollection', features: {} }`, `{ type: 'GeometryCollection',
-  geometries: 5 }` or `{ type: 'MultiPolygon', coordinates: {} }` escape as an
-  uncoded `TypeError` (`object is not iterable`): `geometryArea`,
-  `geometryLength`, `containsPosition` and `ringsClosed` of
-  `@jarenjs/core/geo` iterate a member with `for...of`, where `eachPosition`
-  skips one that is not an array and the module states that malformed input
-  yields null or 0 (`$bbox` over the same FeatureCollection answers empty).
-- [ ] **`$eq` takes exponential time over two separately built shared
-  values.** `equalsJson(a, b)` compares a subtree each time it is reached, so
-  two values each built as `d = [d, d]` 22 levels deep take 65 ms and every 3
-  more levels ×8 (40 levels: hours); one reference against itself answers at
-  once, and `$distinct`/`$groupby` key such values in linear time.
-- [ ] **`semanticKey`, `stableStringify` and `contentKey` exhaust the heap on
-  a heavily shared value.** They write a shared subtree each time it is
-  reached: 22 levels of `d = [d, d]` is a 16777213-character key (semanticKey
-  1.8 s, stableStringify 0.7 s), ×8 per 3 levels, so 40 levels aborts the
-  process out of memory. The formula compile and batch keys call `semanticKey`
-  on host options (`limits`, `revision`).
+  member.**" (lines 34-42). - RETIRE whole: "**`$eq` takes exponential time
+  over two separately built shared values.**" (lines 43-47). - NARROW
+  "**`semanticKey`, `stableStringify` and `contentKey` exhaust the heap on a
+  heavily shared value.**" (lines 48-53) to: "**`semanticKey`,
+  `stableStringify` and `contentKey` escape uncoded on a text longer than the
+  host's longest string.** A heavily shared value (`d = [d, d]`) is written in
+  space linear in its distinct containers, with the same text, until the text
+  passes the host's longest string; then the host's own `RangeError` (`Invalid
+  string length`) escapes. A coded resource refusal needs a new code in the
+  JSON value table (`CANONICAL_CODES` of `@jarenjs/json/canonical` and the
+  `JO` table of the json README), and a reader that flattens such a text (a
+  `Map` lookup on the key, `contentKey`'s hash) still holds it whole. The
+  formula compile and batch keys call `semanticKey` on host options (`limits`,
+  `revision`).
+- [ ] **A position that is not a pair is measured as coordinates of `NaN`.**
+  `geometryLength`, `geometryArea` and `containsPosition` of
+  `@jarenjs/core/geo` (and `$length`, `$area`, `$within`) read a present
+  position that is a number, an object or text (`{ type: 'Polygon',
+  coordinates: [[[0,0], 5, [2,2], [0,0]]] }`) as NaN coordinates: the length
+  is `NaN` and `containsPosition(…, 1, 1)` answers `true`, where the module
+  states malformed input yields null or 0 and a missing position (`null`) now
+  makes the ring hold no positions. Reading it as a missing position changes
+  answers that do not crash today.
 
 ## @jarenjs/json — JSLT
 

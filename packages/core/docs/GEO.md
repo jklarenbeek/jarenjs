@@ -112,6 +112,24 @@ mass), `containsPosition`, `geoDistance` (between representative
 positions), `ringsClosed`. Nothing here validates — malformed input
 yields null or 0 — because judgment lives one module over.
 
+The four measurements — `geometryArea`, `geometryLength`,
+`containsPosition` and `ringsClosed` — read a malformed member as
+nothing. A collection's features or geometries, a multi-geometry's
+coordinates or a polygon's rings that cannot be iterated (a number, a
+plain object) hold no members, and a ring or line that is not an array,
+or that misses a position (`null`, `undefined`, an array hole), holds
+no positions: it adds 0 to an area or a length, contains nothing, and is
+not a closed ring, as an empty ring is not; the well-formed members
+beside it count as before. `ringsClosed` reads only a ring's ends, so a
+ring missing an inner position is closed when its ends match. A list
+that can be iterated (a `Set`, text) is read as `for...of` reads it. A
+position that is present but not a pair (a number, an object) is still
+read, as coordinates of `NaN`: a length over it is `NaN`, an area 0, and
+containment over its edges is not to be relied on. A value with no
+malformed member is measured on the same code as before, at the same
+cost. *Upgrade: such a member used to escape as an uncoded `TypeError`
+(`object is not iterable`), from `$area`, `$length` and `$within` too.*
+
 The one refusal is the walk's bound. A value is walked to 100000
 levels of nesting, on the host's stack for the first 256 and on the
 walk's own past them, so a nest past the host stack answers. The bound
