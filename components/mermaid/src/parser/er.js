@@ -7,11 +7,15 @@
  */
 
 import { collectBraceBody } from '../utils.js';
+import { fail } from '../errors.js';
 
 /** An entity name: a run of non-space characters, or a quoted name that may hold spaces. */
 const NAME = '("[^"]*"|\\S+)';
-/** `LEFT <cardl>--<cardr> RIGHT : label` (relationship). */
-const RE_REL = new RegExp(`^${NAME}\\s+([|}{o]{1,2})(--|\\.\\.)([|}{o]{1,2})\\s+${NAME}\\s*:\\s*(.*)$`);
+/** `LEFT <cardl>--<cardr> RIGHT : label` (relationship); the label may be absent. */
+const RE_REL = new RegExp(`^${NAME}\\s+([|}{o]{1,2})(--|\\.\\.)([|}{o]{1,2})\\s+${NAME}(?:\\s*:\\s*(.*))?$`);
+
+/** A relationship's connector anywhere on a line. */
+const RE_CONNECTOR = /\s[|}{o]{1,2}(?:--|\.\.)[|}{o]{1,2}\s/;
 
 /** The quoted comment that ends an attribute line. */
 const RE_COMMENT = /\s+"([^"]*)"\s*$/;
@@ -33,7 +37,7 @@ function unquote(name) {
  * @param {string[]} lines
  * @returns {object}
  */
-export function parseEr(lines) {
+export function parseEr(lines, lineOffset = 0) {
   /** @type {Map<string, { name: string, attributes: object[] }>} */
   const entityMap = new Map();
   const order = [];
@@ -71,9 +75,15 @@ export function parseEr(lines) {
         leftCard: rel[2],
         rightCard: rel[4],
         identifying: rel[3] === '--',
-        label: unquote(rel[6].trim()),
+        label: unquote((rel[6] ?? '').trim()),
       });
       continue;
+    }
+
+    // a line holding a connector is a relationship or nothing: read as an
+    // entity block, its brace in `o{` would swallow the lines after it
+    if (RE_CONNECTOR.test(` ${line} `)) {
+      fail(`'${line}' is no relationship: LEFT <cardinality>--<cardinality> RIGHT : label`, lineOffset + li + 1);
     }
 
     const brace = line.indexOf('{');

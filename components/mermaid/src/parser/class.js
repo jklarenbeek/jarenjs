@@ -9,9 +9,12 @@
 
 import { collectBraceBody } from '../utils.js';
 import { readNodeClick } from './click.js';
+import { fail } from '../errors.js';
 
 /** Relation operator between two class names, optional `: label`. */
 const RE_RELATION = /^(\S+)\s+([<>|*o.]{0,2}(?:--|\.\.)[<>|*o.]{0,2})\s+(\S+)(?:\s*:\s*(.*))?$/;
+/** A relation operator standing between two words. */
+const RE_OPERATOR = /\s[<>|*o.]{0,2}(?:--|\.\.)[<>|*o.]{0,2}\s/;
 /** `ClassName : member` line form. */
 const RE_MEMBER_LINE = /^(\S+)\s*:\s*(.+)$/;
 
@@ -19,7 +22,7 @@ const RE_MEMBER_LINE = /^(\S+)\s*:\s*(.+)$/;
  * @param {string[]} lines
  * @returns {object}
  */
-export function parseClass(lines) {
+export function parseClass(lines, lineOffset = 0) {
   /** @type {Map<string, { name: string, label: string, members: object[] }>} */
   const classMap = new Map();
   const order = [];
@@ -78,6 +81,12 @@ export function parseClass(lines) {
     if (ml !== null && !line.startsWith('class')) {
       ensure(ml[1]).members.push(member(ml[2].trim()));
       continue;
+    }
+
+    // a relation no form reads is refused, as Mermaid refuses it, where it
+    // was dropped without a word; a note's text is its own
+    if (!line.startsWith('note') && RE_OPERATOR.test(line)) {
+      fail(`'${line}' is no relation: From <operator> To, one per line, with an optional ': label'`, lineOffset + li + 1);
     }
   }
 

@@ -295,12 +295,6 @@ establish registry publication or downstream acceptance.
 
 ## @jarenjs/mermaid
 
-- [ ] **State, class and ER lines no reader matches vanish** —
-  `stateDiagram-v2` `A --> B; B --> C` reads no state and no transition
-  (Mermaid reads two transitions), and a class or ER line that fits no form
-  (`A <|-- B; C <|-- D`, which Mermaid refuses) is dropped without a word.
-  Wanted: the right reading where Mermaid has one, a coded refusal naming the
-  line where it has none (stricter: a minor).
 - [ ] **A sequence message's width does not space the actors** — actors sit a
   fixed gap apart, so a long message (or one an entity code widens) runs past
   its lifelines; Mermaid widens the gap to the message.

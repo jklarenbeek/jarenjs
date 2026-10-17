@@ -241,6 +241,18 @@ fits no pattern — an unmatched `[`, or text between `]` and `/` — reads
 whole as the event, which keeps plain labels meaning what they always
 meant. Pie: `{ title, showData, slices:[{ label, value }] }`.
 
+Every line of these types reads as a statement, or is skipped as a
+directive this tree does not model (`direction`, `classDef`, `style`, a
+note), or is refused. A state line splits at a `;` outside an entity code
+where every piece reads as a statement (`A --> B; B --> C` is two
+transitions, as in Mermaid), and `toMermaid` prints a label's `;` as `#59;`
+only where the line would otherwise split. A state note's text, on its line
+or up to `end note`, is never read as states or transitions. A line holding
+`-->` (state), a relation operator (class) or a cardinality connector (ER)
+that no form reads is refused (`MermaidParseError` with its `line`), as
+Mermaid refuses it, where it was dropped without a word; an ER relationship
+without `: label` reads with the label `""`.
+
 Gantt is `{ meta, rules, sections:[{ name, tasks[] }], domain }` and is
 described in §4.4, because it is the one AST that carries a *resolved*
 answer rather than only what the source said.

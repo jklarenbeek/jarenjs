@@ -14,7 +14,7 @@
  * to re-emit an edited AST as editable Mermaid text.
  */
 
-import { parseState } from './parser/state.js';
+import { parseState, stateStatements } from './parser/state.js';
 import { sequenceStatements } from './parser/sequence.js';
 import { printClick, printNodeClick } from './parser/click.js';
 import { RE_LINK_INSIDE } from './parser/flowchart.js';
@@ -249,10 +249,10 @@ function printSeqStatements(statements, out, depth) {
     if (stmt.kind === 'message') {
       const arrow = arrowToken(stmt.line, stmt.head);
       const act = stmt.activation === 'activate' ? '+' : stmt.activation === 'deactivate' ? '-' : '';
-      out.push(pad + oneStatement(`${stmt.from}${arrow}${act}${stmt.to}: `, stmt.text));
+      out.push(pad + oneStatement(`${stmt.from}${arrow}${act}${stmt.to}: `, stmt.text, sequenceStatements));
     }
     else if (stmt.kind === 'note') {
-      out.push(pad + oneStatement(`note ${stmt.placement} ${stmt.actors.join(',')}: `, stmt.text));
+      out.push(pad + oneStatement(`note ${stmt.placement} ${stmt.actors.join(',')}: `, stmt.text, sequenceStatements));
     }
     else if (stmt.kind === 'activate' || stmt.kind === 'deactivate') {
       out.push(`${pad}${stmt.kind} ${stmt.actor}`);
@@ -274,16 +274,17 @@ function printSeqStatements(statements, out, depth) {
 }
 
 /**
- * A message or note line that reads back as one statement: a `;` in its text
- * prints as `#59;`, which the drawing decodes, only where the line would
- * otherwise split into statements (MERMAID-FORMAT §4.2).
+ * A line that reads back as one statement: a `;` in its text prints as
+ * `#59;`, which the drawing decodes, only where the line would otherwise
+ * split into statements (MERMAID-FORMAT §4.2, §4.3).
  * @param {string} head - the statement up to its text
  * @param {string} text
+ * @param {(line: string) => string[]} statements - the type's statement splitter
  * @returns {string}
  */
-function oneStatement(head, text) {
+function oneStatement(head, text, statements) {
   const line = head + text;
-  return sequenceStatements(line.trim()).length === 1 ? line
+  return statements(line.trim()).length === 1 ? line
     : head + text.replace(/(#[A-Za-z0-9]+;)|;/g, (m, code) => code ?? '#59;');
 }
 
@@ -368,6 +369,15 @@ function sameStates(text, ast) {
 }
 
 /**
+ * One transition's line, read back as the one transition it is.
+ * @param {any} t
+ * @returns {string}
+ */
+function transitionLine(t) {
+  return t.label ? oneStatement(`${t.from} --> ${t.to} : `, t.label, stateStatements) : `${t.from} --> ${t.to}`;
+}
+
+/**
  * @param {any} ast
  * @param {boolean} declareAll declare every state at the top level first
  * @returns {string}
@@ -376,7 +386,7 @@ function printStateLines(ast, declareAll) {
   const out = ['stateDiagram-v2'];
   const nested = ast.states.some((s) => s.parent != null) || ast.transitions.some((t) => t.parent != null);
   if (declareAll) {
-    for (const s of ast.states) out.push(s.label !== s.id ? `${s.id} : ${s.label}` : `state ${s.id}`);
+    for (const s of ast.states) out.push(s.label !== s.id ? oneStatement(`${s.id} : `, s.label, stateStatements) : `state ${s.id}`);
   }
   if (nested) {
     const states = new Map(ast.states.map((s) => [s.id, s]));
@@ -400,11 +410,11 @@ function printStateLines(ast, declareAll) {
       if (declareAll && s.parent == null) continue;
       scope(s.parent);
       out.push('  '.repeat(opened.length)
-        + (declareAll || s.label === s.id ? `state ${s.id}` : `${s.id} : ${s.label}`));
+        + (declareAll || s.label === s.id ? `state ${s.id}` : oneStatement(`${s.id} : `, s.label, stateStatements)));
     }
     for (const t of ast.transitions) {
       scope(t.parent);
-      out.push('  '.repeat(opened.length) + `${t.from} --> ${t.to}${t.label ? ' : ' + t.label : ''}`);
+      out.push('  '.repeat(opened.length) + transitionLine(t));
     }
     scope(null);
     return out.join('\n') + '\n';
@@ -419,12 +429,12 @@ function printStateLines(ast, declareAll) {
       mentioned.add(t.to);
     }
     for (const s of ast.states) {
-      if (s.label !== s.id) out.push(`${s.id} : ${s.label}`);
+      if (s.label !== s.id) out.push(oneStatement(`${s.id} : `, s.label, stateStatements));
       else if (!mentioned.has(s.id)) out.push(`state ${s.id}`);
     }
   }
   for (const t of ast.transitions) {
-    out.push(`${t.from} --> ${t.to}${t.label ? ' : ' + t.label : ''}`);
+    out.push(transitionLine(t));
   }
   return out.join('\n') + '\n';
 }

@@ -498,7 +498,13 @@ entity; a quoted relationship label is read and drawn without its quotes
 quotes a label that is not one word; a `;` ends a sequence statement where each
 piece of the line reads as one (`A->>B: hi; B->>A: yo` is two messages, where
 it was one message whose text held the rest), and `toMermaid` prints a
-message's `;` as `#59;` where the line would otherwise split; a `style` or `classDef` value is plain paint (a color, a number with a
+message's `;` as `#59;` where the line would otherwise split; a state line
+splits at `;` the same way (`A --> B; B --> C` read nothing), a state note's
+text is no longer read as transitions, a state, class or ER line holding a
+transition, relation or relationship that no form reads is refused with its
+line where it was dropped, and an ER relationship without a label reads as
+one (it opened an entity block at the brace of `o{` and swallowed the lines
+after it); a `style` or `classDef` value is plain paint (a color, a number with a
 unit, a dash list, `var(--name)`, `url(#id)` of the same document, or a color
 function such as `rgb(10 20 30)`), and one carrying a `;`, a remote `url()` or
 another function is dropped without a diagnostic, where it was written into the
