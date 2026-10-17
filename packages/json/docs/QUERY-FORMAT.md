@@ -1044,6 +1044,9 @@ single items.
 | `$contains` | `[str, sub]` | `true` iff *str* contains *sub* (`fn:contains`; every string contains `""`). |
 | `$starts-with` | `[str, prefix]` | `true` iff *str* starts with *prefix* (`fn:starts-with`). |
 | `$ends-with` | `[str, suffix]` | `true` iff *str* ends with *suffix* (`fn:ends-with`). |
+| `$substring-before` | `[str, sub]` | The part of *str* before the first occurrence of *sub*: `""` when *str* does not contain *sub*, and when *sub* is `""` (`fn:substring-before`). |
+| `$substring-after` | `[str, sub]` | The part of *str* after the first occurrence of *sub*: `""` when *str* does not contain *sub*, and *str* itself when *sub* is `""` (`fn:substring-after`). |
+| `$translate` | `[str, map, trans]` (exactly 3) | *str* with each code point that occurs in *map* replaced by the code point at the same position in *trans*, or removed when *trans* is shorter; the first occurrence in *map* decides (`fn:translate`). *map* and *trans* MUST each be a single string — the empty sequence too is `JQ2001`, as F&O's `xs:string`. |
 | `$upper` | `{"$upper": e}` | Unicode default uppercase (`fn:upper-case`). |
 | `$lower` | `{"$lower": e}` | Unicode default lowercase (`fn:lower-case`). |
 | `$string-length` | `{"$string-length": e}` | Length in Unicode scalar values (code points), `fn:string-length`. Empty → `0`. |
@@ -1051,6 +1054,7 @@ single items.
 | `$match` | `[input, pattern]` | `true` iff *pattern* matches **all** of *input* (anchored, the RFC 9535 `match()` behavior). |
 | `$search` | `[input, pattern]` | `true` iff *pattern* matches a substring of *input* (RFC 9535 `search()`, XQuery `fn:matches`). |
 | `$replace` | `[input, pattern, replacement]` (exactly 3) | Replaces every non-overlapping match of *pattern* in *input* with *replacement* (`fn:replace`). *replacement* is inserted **literally** — there are no capture-group references (I-Regexp guarantees no capture semantics). |
+| `$tokenize` | `[input, pattern]` | The pieces of *input* between the non-overlapping matches of *pattern*, leftmost first, as a sequence of strings: a match at the start or the end leaves an empty piece there, and an empty *input* has no pieces whatever the pattern (`fn:tokenize#2`: `{"$tokenize": ["a,,b", ","]}` is `"a"`, `""`, `"b"`). *pattern* MUST be a single string — the empty sequence too is `JQ2001`. |
 | `$format-number` | `[value, picture, format?]` (2–3) | *value* spelled through an F&O picture under a decimal format (below; `fn:format-number`). |
 | `$quantity` | `[text, unit, format?]` (2–3) | The first measured quantity in *text* of *unit*'s dimension, as a number in *unit*; none is the empty sequence (below). |
 
@@ -1059,11 +1063,16 @@ interoperable regex dialect RFC 9535 uses — not XSD regular expressions
 (**D5**). I-Regexp has no flags argument, hence `$replace`'s fixed arity 3.
 A *pattern* that is not a syntactically valid I-Regexp makes `$match` and
 `$search` evaluate to `false` (the RFC 9535 rule for nonconforming
-patterns), but is runtime error `JQ2001` in `$replace` (the F&O
-`err:FORX0002` condition — a replacement cannot silently do nothing). A
-`$replace` *pattern* that matches the zero-length string (e.g. `"a*"`) is
-also `JQ2001` (F&O `err:FORX0003`). Pattern *type* errors remain `JQ2001`
-in all three operators per the string-parameter rule above.
+patterns), but is runtime error `JQ2001` in `$replace` and `$tokenize`
+(the F&O `err:FORX0002` condition — a replacement or a split cannot
+silently do nothing). A `$replace` or `$tokenize` *pattern* that matches
+the zero-length string (e.g. `"a*"`) is also `JQ2001` (F&O
+`err:FORX0003`). Pattern *type* errors remain `JQ2001` in all four
+operators per the string-parameter rule above.
+
+`$substring-before`, `$substring-after`, `$translate` and `$tokenize` read
+their text once, so their cost grows with the text's length, not its
+square; a pattern's own matching is the RegExp engine's.
 
 ```json
 { "$seq": [ { "$concat": ["a", "b"] },

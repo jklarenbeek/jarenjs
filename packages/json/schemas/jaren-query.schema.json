@@ -309,6 +309,7 @@
           "$eq", "$ne", "$lt", "$le", "$gt", "$ge",
           "$add", "$sub", "$mul", "$div", "$idiv", "$mod",
           "$contains", "$starts-with", "$ends-with", "$match", "$search",
+          "$substring-before", "$substring-after", "$tokenize",
           "$index-of", "$range", "$get",
           "$start-of", "$end-of", "$date-format",
           "$distance", "$within", "$bbox-intersects", "$geo-simplify",
@@ -406,11 +407,11 @@
       }
     },
     "ternaryOperatorPhrase": {
-      "description": "Operators whose value is an array of exactly three operand expressions: $date-diff [from, to, unit].",
+      "description": "Operators whose value is an array of exactly three operand expressions: $date-diff [from, to, unit], $translate [string, map, translation].",
       "type": "object",
       "minProperties": 1,
       "maxProperties": 1,
-      "propertyNames": { "enum": ["$date-diff"] },
+      "propertyNames": { "enum": ["$date-diff", "$translate"] },
       "additionalProperties": {
         "type": "array",
         "items": { "$ref": "#/$defs/expression" },

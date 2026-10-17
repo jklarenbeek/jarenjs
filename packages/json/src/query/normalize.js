@@ -426,7 +426,7 @@ export const OPERATOR_ALIASES = {
   $subtract: "$sub", $multiply: "$mul", $divide: "$div", $minus: "$sub",
   $times: "$mul", $negate: "$neg", $product: "$mul", $total: "$sum",
   // strings / collections
-  $join: "$string-join", $split: null, $includes: "$contains",
+  $join: "$string-join", $split: "$tokenize", $includes: "$contains",
   $indexof: "$index-of", $find: "$index-of", $keys: "$entries",
   $values: "query/use/entries-get", $has: "$exists", $tostring: "$string",
   $tonumber: "$number", $len_str: "$string-length", $trim: "query/use/trim",

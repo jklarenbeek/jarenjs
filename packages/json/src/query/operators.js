@@ -176,6 +176,14 @@ function stringArg(v, docPath) {
   throw runtimeError('JQ2001', 'query/expected-string', { got: itemRef(v) }, docPath);
 }
 
+// a required string parameter (F&O `xs:string`, not `xs:string?`): a
+// single string, the empty sequence included in what is JQ2001
+function requiredStringArg(v, docPath) {
+  if (typeof v === 'string')
+    return v;
+  throw runtimeError('JQ2001', 'query/expected-string', { got: itemRef(v) }, docPath);
+}
+
 // numeric position/length parameter: a single number, everything else -
 // including the empty sequence - is JQ2001
 function numberArg(v, docPath) {
@@ -610,11 +618,11 @@ function stringUnaryEntry(apply, resultType = RT_STRING) {
 }
 
 // binary string operator over two coerced string arguments
-function stringPairEntry(test) {
+function stringPairEntry(test, resultType = RT_BOOLEAN) {
   return {
     params: ARGS_2,
     result: RESULT_ONE,
-    resultType: RT_BOOLEAN,
+    resultType,
     compile: (gets, args) => {
       const aGet = gets[0];
       const aPath = args[0].docPath;
@@ -623,6 +631,41 @@ function stringPairEntry(test) {
       return (f) => test(stringArg(aGet(f), aPath), stringArg(bGet(f), bPath));
     },
   };
+}
+
+// fn:substring-before / fn:substring-after: the text before or after the
+// first occurrence of the second string (the codepoint collation); a text
+// without it gives "", and the empty string occurs at the start
+function substringBefore(s, sub) {
+  const at = s.indexOf(sub);
+  return at < 0 ? '' : s.slice(0, at);
+}
+
+function substringAfter(s, sub) {
+  const at = s.indexOf(sub);
+  return at < 0 ? '' : s.slice(at + sub.length);
+}
+
+// fn:translate: each code point of `s` found in `map` becomes the code
+// point at the same position of `trans`, or is removed when `trans` is
+// shorter; the first occurrence in `map` decides. One pass over each text.
+function translateCodePoints(s, map, trans) {
+  const to = Array.from(trans);
+  const replacement = new Map();
+  let i = 0;
+  for (const ch of map) {
+    if (!replacement.has(ch))
+      replacement.set(ch, i < to.length ? to[i] : '');
+    i++;
+  }
+  if (replacement.size === 0)
+    return s;
+  let out = '';
+  for (const ch of s) {
+    const r = replacement.get(ch);
+    out += r === undefined ? ch : r;
+  }
+  return out;
 }
 
 // fn:normalize-space: strip leading/trailing XML whitespace (space, tab,
@@ -685,10 +728,10 @@ function regexTestEntry(fullMatch) {
   };
 }
 
-// $replace pattern compilation: null marks an invalid I-Regexp, false a
-// pattern that matches the zero-length string (an error per F&O
-// fn:replace, err:FORX0002/FORX0003 -> JQ2001), otherwise the global
-// RegExp used for replace-all
+// $replace and $tokenize pattern compilation: null marks an invalid
+// I-Regexp, false a pattern that matches the zero-length string (an error
+// per F&O fn:replace and fn:tokenize, err:FORX0002/FORX0003 -> JQ2001),
+// otherwise the global RegExp that finds every match
 function replaceRegexp(pattern) {
   const re = compileIRegexp(pattern, false);
   if (re === null)
@@ -736,6 +779,59 @@ function compileReplace(gets, args) {
     if (lastGre === null || lastGre === false)
       throw replaceRegexpError(lastGre, p, patPath);
     return s.replace(lastGre, () => rep);
+  };
+}
+
+// $tokenize (fn:tokenize): the pieces of the non-empty `s` between the
+// matches of the global RegExp `gre`, leftmost first; a match at either end
+// leaves an empty piece there. `replaceRegexp` refused a pattern that
+// matches the zero-length string, and without lookaround the only
+// zero-length matches are the anchors', which the empty string has too, so
+// every match consumes text: one pass, linear in the text.
+function tokenizeWith(s, gre) {
+  const out = [];
+  let from = 0;
+  gre.lastIndex = 0;
+  for (let m = gre.exec(s); m !== null; m = gre.exec(s)) {
+    out.push(s.slice(from, m.index));
+    from = gre.lastIndex;
+  }
+  out.push(s.slice(from));
+  return seqOf(out);
+}
+
+function compileTokenize(gets, args) {
+  const sGet = gets[0];
+  const sPath = args[0].docPath;
+  const patNode = args[1];
+  const patPath = patNode.docPath;
+  // F&O: the empty text has no pieces, whatever the pattern
+  if (patNode.kind === 'literal' && typeof patNode.value === 'string') {
+    const gre = replaceRegexp(patNode.value);
+    return (f) => {
+      const s = stringArg(sGet(f), sPath);
+      if (s === '')
+        return EMPTY;
+      if (gre === null || gre === false)
+        throw replaceRegexpError(gre, patNode.value, patPath);
+      return tokenizeWith(s, gre);
+    };
+  }
+  const patGet = gets[1];
+  let lastPattern = null;
+  let lastGre = null;
+  return (f) => {
+    const s = stringArg(sGet(f), sPath);
+    const p = requiredStringArg(patGet(f), patPath);
+    if (s === '')
+      return EMPTY;
+    if (p !== lastPattern) {
+      lastPattern = p;
+      lastGre = replaceRegexp(p);
+    }
+    if (lastGre === null || lastGre === false)
+      throw replaceRegexpError(lastGre, p, patPath);
+    return tokenizeWith(s, lastGre);
   };
 }
 
@@ -1422,6 +1518,29 @@ export const OPERATORS = Object.freeze({
   '$contains': stringPairEntry((s, sub) => s.includes(sub)),
   '$starts-with': stringPairEntry((s, prefix) => s.startsWith(prefix)),
   '$ends-with': stringPairEntry((s, suffix) => s.endsWith(suffix)),
+  '$substring-before': stringPairEntry(substringBefore, RT_STRING),
+  '$substring-after': stringPairEntry(substringAfter, RT_STRING),
+
+  // F&O fn:translate: the text an optional string, the two maps required
+  '$translate': {
+    params: ARGS_3,
+    result: RESULT_ONE,
+    resultType: RT_STRING,
+    compile: (gets, args) => {
+      const [sGet, mapGet, transGet] = gets;
+      const [sPath, mapPath, transPath] = args.map((a) => a.docPath);
+      return (f) => translateCodePoints(stringArg(sGet(f), sPath),
+        requiredStringArg(mapGet(f), mapPath), requiredStringArg(transGet(f), transPath));
+    },
+  },
+
+  // F&O fn:tokenize#2 over an I-Regexp (D5): the pieces between matches
+  '$tokenize': {
+    params: ARGS_2,
+    result: RESULT_MANY,
+    resultType: RT_STRING,
+    compile: compileTokenize,
+  },
 
   '$upper': stringUnaryEntry((s) => s.toUpperCase()),
   '$lower': stringUnaryEntry((s) => s.toLowerCase()),
@@ -1465,9 +1584,7 @@ export const OPERATORS = Object.freeze({
       let lastCompiled = null;
       return (f) => {
         const v = value(f);
-        const pictureText = pictureGet(f);
-        if (typeof pictureText !== 'string')
-          throw runtimeError('JQ2001', 'query/expected-string', { got: itemRef(pictureText) }, pictureNode.docPath);
+        const pictureText = requiredStringArg(pictureGet(f), pictureNode.docPath);
         const format = formatGet === null ? DEFAULT_DECIMAL_FORMAT
           : decimalFormatOf(formatGet(f), node, '$format-number', formatArg.docPath, false);
         if (pictureText !== lastPicture || format !== lastFormat) {
@@ -1502,8 +1619,7 @@ export const OPERATORS = Object.freeze({
         const text = textGet(f);
         if (text === EMPTY)
           return EMPTY;
-        if (typeof text !== 'string')
-          throw runtimeError('JQ2001', 'query/expected-string', { got: itemRef(text) }, textPath);
+        requiredStringArg(text, textPath);
         const asked = unit ?? unitOf(unitGet(f), '$quantity', args[1].docPath, false);
         const read = format ?? decimalFormatOf(formatGet(f), node, '$quantity', formatArg.docPath, false);
         return readQuantity(text, asked, read);

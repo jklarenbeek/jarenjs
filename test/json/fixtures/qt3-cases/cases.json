@@ -1,0 +1,832 @@
+[
+ {
+  "set": "fn-format-number",
+  "name": "numberformat01",
+  "test": "format-number(2392.14*36.58,'000,000.000000')",
+  "result": {
+   "kind": "assert-string-value",
+   "value": "087,504.481200"
+  }
+ },
+ {
+  "set": "fn-format-number",
+  "name": "numberformat05",
+  "test": "format-number(0.4857,'###.###%')",
+  "result": {
+   "kind": "assert-string-value",
+   "value": "48.57%"
+  }
+ },
+ {
+  "set": "fn-format-number",
+  "name": "numberformat06",
+  "test": "format-number(0.4857,'###.###‰')",
+  "result": {
+   "kind": "assert-string-value",
+   "value": "485.7‰"
+  }
+ },
+ {
+  "set": "fn-format-number",
+  "name": "numberformat09",
+  "test": "format-number(931.4857,'000.000|###')",
+  "result": {
+   "kind": "assert-string-value",
+   "value": "000.931|486"
+  },
+  "environment": {
+   "decimal-format": [
+    {
+     "decimal-separator": "|",
+     "grouping-separator": "."
+    }
+   ]
+  }
+ },
+ {
+  "set": "fn-format-number",
+  "name": "numberformat11",
+  "test": "format-number(26931.4,'+!!!,!!!.!!!\\-!!,!!!.!!!')",
+  "result": {
+   "kind": "assert-string-value",
+   "value": "+26,931.4"
+  },
+  "environment": {
+   "decimal-format": [
+    {
+     "digit": "!",
+     "pattern-separator": "\\"
+    }
+   ]
+  }
+ },
+ {
+  "set": "fn-format-number",
+  "name": "numberformat14",
+  "test": "format-number(1 div 0e0,'###############################')",
+  "result": {
+   "kind": "assert-string-value",
+   "value": "off-the-scale"
+  },
+  "environment": {
+   "decimal-format": [
+    {
+     "infinity": "off-the-scale"
+    }
+   ]
+  }
+ },
+ {
+  "set": "fn-format-number",
+  "name": "numberformat16",
+  "test": "format-number(0.4857,'###.###m')",
+  "result": {
+   "kind": "assert-string-value",
+   "value": "485.7m"
+  },
+  "environment": {
+   "decimal-format": [
+    {
+     "per-mille": "m"
+    }
+   ]
+  }
+ },
+ {
+  "set": "fn-format-number",
+  "name": "numberformat17",
+  "test": "format-number(-26931.4,'+###,###.###;-###,###.###')",
+  "result": {
+   "kind": "assert-string-value",
+   "value": "-26,931.4"
+  },
+  "environment": {
+   "decimal-format": [
+    {
+     "minus-sign": "_"
+    }
+   ]
+  }
+ },
+ {
+  "set": "fn-format-number",
+  "name": "numberformat19",
+  "test": "concat(format-number(-26931.4,'###,###.###','myminus'), '/',\n            format-number(-42857.1,'###,###.###'))",
+  "result": {
+   "kind": "assert-string-value",
+   "value": "_26,931.4/-42,857.1"
+  },
+  "environment": {
+   "decimal-format": [
+    {
+     "name": "myminus",
+     "minus-sign": "_"
+    }
+   ]
+  }
+ },
+ {
+  "set": "fn-format-number",
+  "name": "numberformat20",
+  "test": "format-number(1234.567,'#*###*###!###','foo:decimal1')",
+  "result": {
+   "kind": "assert-string-value",
+   "value": "1*234!567"
+  },
+  "environment": {
+   "namespace": [
+    {
+     "prefix": "foo",
+     "uri": "http://foo.ns"
+    }
+   ],
+   "decimal-format": [
+    {
+     "name": "foo:decimal1",
+     "decimal-separator": "!",
+     "grouping-separator": "*"
+    },
+    {
+     "name": "decimal1",
+     "decimal-separator": "*",
+     "grouping-separator": "!"
+    }
+   ]
+  }
+ },
+ {
+  "set": "fn-format-number",
+  "name": "numberformat32",
+  "test": "format-number(0.4857,'###.###c')",
+  "result": {
+   "kind": "assert-string-value",
+   "value": "48.57c"
+  },
+  "environment": {
+   "decimal-format": [
+    {
+     "percent": "c"
+    }
+   ]
+  }
+ },
+ {
+  "set": "fn-format-number",
+  "name": "numberformat34",
+  "test": "format-number(4030201.0506,'#!!!,!!!,٠٠٠.٠٠٠٠٠٠0')",
+  "result": {
+   "kind": "assert-string-value",
+   "value": "#٤,٠٣٠,٢٠١.٠٥٠٦٠٠0"
+  },
+  "environment": {
+   "decimal-format": [
+    {
+     "digit": "!",
+     "zero-digit": "٠"
+    }
+   ]
+  }
+ },
+ {
+  "set": "fn-format-number",
+  "name": "numberformat70",
+  "test": "format-number(1234567890.123456,'𚶱000𚶰000')",
+  "result": {
+   "kind": "assert-string-value",
+   "value": "1𚶱234𚶱567𚶱890𚶰123"
+  },
+  "environment": {
+   "decimal-format": [
+    {
+     "decimal-separator": "𚶰",
+     "grouping-separator": "𚶱"
+    }
+   ]
+  }
+ },
+ {
+  "set": "fn-format-number",
+  "name": "numberformat81",
+  "test": "format-number(12.34, '0.000,00', ' b:test ')",
+  "result": {
+   "kind": "assert-string-value",
+   "value": "0.012,34"
+  },
+  "environment": {
+   "namespace": [
+    {
+     "prefix": "a",
+     "uri": "http://a.ns/"
+    },
+    {
+     "prefix": "b",
+     "uri": "http://a.ns/"
+    }
+   ],
+   "decimal-format": [
+    {
+     "name": "a:test",
+     "decimal-separator": ",",
+     "grouping-separator": "."
+    }
+   ]
+  }
+ },
+ {
+  "set": "fn-format-number",
+  "name": "numberformat86",
+  "test": "format-number(0.4857,'###.###%', ())",
+  "result": {
+   "kind": "assert-string-value",
+   "value": "48.57%"
+  }
+ },
+ {
+  "set": "fn-format-number",
+  "name": "numberformat107",
+  "test": "\n      let $x := fn:format-number(12345.678, '9.9999E999', 'BadFormat')\n      return $x\n    ",
+  "result": {
+   "kind": "error",
+   "code": "FODF1280"
+  }
+ },
+ {
+  "set": "fn-format-number",
+  "name": "numberformat110",
+  "test": "\n      let $x := fn:format-number(12345.678, '9.9999e999%')\n      return $x\n    ",
+  "result": {
+   "kind": "error",
+   "code": "FODF1310"
+  }
+ },
+ {
+  "set": "fn-format-number",
+  "name": "numberformatFODF1280",
+  "test": "format-number(931.45, '000.##0', 'foo:bar')",
+  "result": {
+   "kind": "error",
+   "code": "FODF1280"
+  },
+  "environment": {}
+ },
+ {
+  "set": "fn-format-number",
+  "name": "cbcl-fn-format-number-004",
+  "test": "format-number(1 div 0e0,'PREFIX#SUFFIX')",
+  "result": {
+   "kind": "assert-string-value",
+   "value": "PREFIXINFSUFFIX"
+  },
+  "environment": {
+   "decimal-format": [
+    {
+     "infinity": "INF"
+    }
+   ]
+  }
+ },
+ {
+  "set": "fn-format-number",
+  "name": "cbcl-fn-format-number-034",
+  "test": "format-number(xs:double('1e308'), '0%')",
+  "result": {
+   "kind": "assert-string-value",
+   "value": "Infinity%"
+  }
+ },
+ {
+  "set": "fn-format-number",
+  "name": "cbcl-fn-format-number-035",
+  "test": "substring-after(\n              format-number(xs:double('1.102030405060708090'),\n                                    '0.00000000000000000‰'),\n              format-number(xs:double('1.102030405060708090') * 1000, \n                                    '0.00000000000000000')) eq '‰'",
+  "result": {
+   "kind": "assert-true"
+  }
+ },
+ {
+  "set": "fn-format-number",
+  "name": "cbcl-fn-format-number-036",
+  "test": "format-number(xs:double('-1e308'), '0%')",
+  "result": {
+   "kind": "assert-string-value",
+   "value": "-Infinity%"
+  }
+ },
+ {
+  "set": "fn-substring-after",
+  "name": "fn-substring-after-3",
+  "test": "fn:substring-after(\"A Character String\",\"\")",
+  "result": {
+   "kind": "all-of",
+   "children": [
+    {
+     "kind": "assert-eq",
+     "value": "\"A Character String\""
+    },
+    {
+     "kind": "assert-count",
+     "value": "1"
+    }
+   ]
+  }
+ },
+ {
+  "set": "fn-substring-after",
+  "name": "fn-substring-after-4",
+  "test": "fn:substring-after((),\"\")",
+  "result": {
+   "kind": "all-of",
+   "children": [
+    {
+     "kind": "assert-eq",
+     "value": "\"\""
+    },
+    {
+     "kind": "assert-count",
+     "value": "1"
+    }
+   ]
+  }
+ },
+ {
+  "set": "fn-substring-after",
+  "name": "fn-substring-after-6",
+  "test": "fn:substring-after(\"A Character String\",())",
+  "result": {
+   "kind": "all-of",
+   "children": [
+    {
+     "kind": "assert-eq",
+     "value": "\"A Character String\""
+    },
+    {
+     "kind": "assert-count",
+     "value": "1"
+    }
+   ]
+  }
+ },
+ {
+  "set": "fn-substring-before",
+  "name": "fn-substring-before-1",
+  "test": "fn:substring-before(\"\",\"\")",
+  "result": {
+   "kind": "all-of",
+   "children": [
+    {
+     "kind": "assert-eq",
+     "value": "\"\""
+    },
+    {
+     "kind": "assert-count",
+     "value": "1"
+    }
+   ]
+  }
+ },
+ {
+  "set": "fn-substring-before",
+  "name": "fn-substring-before-3",
+  "test": "fn:substring-before(\"A Character String\",\"\")",
+  "result": {
+   "kind": "all-of",
+   "children": [
+    {
+     "kind": "assert-eq",
+     "value": "\"\""
+    },
+    {
+     "kind": "assert-count",
+     "value": "1"
+    }
+   ]
+  }
+ },
+ {
+  "set": "fn-substring-before",
+  "name": "fn-substring-before-5",
+  "test": "fn:substring-before(\"\",())",
+  "result": {
+   "kind": "all-of",
+   "children": [
+    {
+     "kind": "assert-eq",
+     "value": "\"\""
+    },
+    {
+     "kind": "assert-count",
+     "value": "1"
+    }
+   ]
+  }
+ },
+ {
+  "set": "fn-tokenize",
+  "name": "fn-tokenize-1",
+  "test": "fn:tokenize(\"abba\", \".?\")",
+  "result": {
+   "kind": "error",
+   "code": "FORX0003"
+  }
+ },
+ {
+  "set": "fn-tokenize",
+  "name": "fn-tokenize-2",
+  "test": "fn:tokenize(\"The cat sat on the mat\", \"\\s+\", \"t\")",
+  "result": {
+   "kind": "error",
+   "code": "FORX0001"
+  }
+ },
+ {
+  "set": "fn-tokenize",
+  "name": "fn-tokenize-7",
+  "test": "fn:count(fn:tokenize((), \"\\s+\"))",
+  "result": {
+   "kind": "assert-eq",
+   "value": "0"
+  }
+ },
+ {
+  "set": "fn-tokenize",
+  "name": "fn-tokenize-8",
+  "test": "fn:count(fn:tokenize(\"\", \"\\s+\"))",
+  "result": {
+   "kind": "assert-eq",
+   "value": "0"
+  }
+ },
+ {
+  "set": "fn-tokenize",
+  "name": "fn-tokenize-9",
+  "test": "string-join(fn:tokenize(\"abracadabra\", \"(ab)|(a)\"), '#')",
+  "result": {
+   "kind": "assert-string-value",
+   "value": "#r#c#d#r#"
+  }
+ },
+ {
+  "set": "fn-tokenize",
+  "name": "fn-tokenize-10",
+  "test": "fn:tokenize(\"abracadabra\", \"ww\")",
+  "result": {
+   "kind": "assert-string-value",
+   "value": "abracadabra"
+  }
+ },
+ {
+  "set": "fn-translate",
+  "name": "fn-translate3args-1",
+  "test": "translate('---abcABCxyz---','-abcABCxyz','1ABCabcXYZ')",
+  "result": {
+   "kind": "assert-string-value",
+   "value": "111ABCabcXYZ111"
+  }
+ },
+ {
+  "set": "fn-translate",
+  "name": "fn-translate3args-2",
+  "test": "translate('newline\ntab\tspace ','\n\t ','123')",
+  "result": {
+   "kind": "assert-string-value",
+   "value": "newline1tab2space3"
+  }
+ },
+ {
+  "set": "fn-translate",
+  "name": "fn-translate3args-3",
+  "test": "translate('','-','x')",
+  "result": {
+   "kind": "assert-string-value"
+  }
+ },
+ {
+  "set": "fn-translate",
+  "name": "fn-translate3args-4",
+  "test": "translate((),'-','x')",
+  "result": {
+   "kind": "assert-string-value"
+  }
+ },
+ {
+  "set": "fn-translate",
+  "name": "fn-translate3args-5",
+  "test": "translate(1,'-','x')",
+  "result": {
+   "kind": "error",
+   "code": "XPTY0004"
+  }
+ },
+ {
+  "set": "fn-translate",
+  "name": "fn-translate3args-6",
+  "test": "translate('abc',1,'x')",
+  "result": {
+   "kind": "error",
+   "code": "XPTY0004"
+  }
+ },
+ {
+  "set": "op-date-greater-than",
+  "name": "K-DateGT-1",
+  "test": "xs:date(\"2004-07-13\") gt xs:date(\"2004-07-12\")",
+  "result": {
+   "kind": "assert-true"
+  }
+ },
+ {
+  "set": "op-date-greater-than",
+  "name": "K-DateGT-6",
+  "test": "not(xs:date(\"2004-07-11\") ge xs:date(\"2004-07-12\"))",
+  "result": {
+   "kind": "assert-true"
+  }
+ },
+ {
+  "set": "op-dateTime-equal",
+  "name": "op-dateTime-equal2args-1",
+  "test": "xs:dateTime(\"1970-01-01T00:00:00Z\") eq xs:dateTime(\"1970-01-01T00:00:00Z\")",
+  "result": {
+   "kind": "assert-true"
+  }
+ },
+ {
+  "set": "op-dateTime-less-than",
+  "name": "op-dateTime-less-than2args-4",
+  "test": "xs:dateTime(\"1970-01-01T00:00:00Z\") lt xs:dateTime(\"1996-04-07T01:40:52Z\")",
+  "result": {
+   "kind": "assert-true"
+  }
+ },
+ {
+  "set": "op-dateTime-less-than",
+  "name": "op-dateTime-less-than2args-6",
+  "test": "xs:dateTime(\"1970-01-01T00:00:00Z\") ge xs:dateTime(\"1970-01-01T00:00:00Z\")",
+  "result": {
+   "kind": "assert-true"
+  }
+ },
+ {
+  "set": "op-time-equal",
+  "name": "op-time-equal2args-1",
+  "test": "xs:time(\"00:00:00Z\") eq xs:time(\"00:00:00Z\")",
+  "result": {
+   "kind": "assert-true"
+  }
+ },
+ {
+  "set": "op-time-equal",
+  "name": "op-time-equal2args-2",
+  "test": "xs:time(\"08:03:35Z\") eq xs:time(\"00:00:00Z\")",
+  "result": {
+   "kind": "assert-false"
+  }
+ },
+ {
+  "set": "prod-CastableExpr",
+  "name": "CastableAs122",
+  "test": "xs:string(\"2000-01-16T00:00:00Z\") castable as xs:dateTime",
+  "result": {
+   "kind": "assert-true"
+  }
+ },
+ {
+  "set": "prod-CastableExpr",
+  "name": "CastableAs123",
+  "test": "xs:string(\"true\") castable as xs:dateTime",
+  "result": {
+   "kind": "assert-false"
+  }
+ },
+ {
+  "set": "prod-CastableExpr",
+  "name": "CastableAs126",
+  "test": "xs:string(\"13:20:00Z\") castable as xs:time",
+  "result": {
+   "kind": "assert-true"
+  }
+ },
+ {
+  "set": "prod-CastableExpr",
+  "name": "CastableAs128",
+  "test": "xs:string(\"1999-05-31\") castable as xs:date",
+  "result": {
+   "kind": "assert-true"
+  }
+ },
+ {
+  "set": "prod-CastableExpr",
+  "name": "CastableAs131",
+  "test": "xs:string(\"true\") castable as xs:date",
+  "result": {
+   "kind": "assert-false"
+  }
+ },
+ {
+  "set": "prod-CastExpr",
+  "name": "casthc32",
+  "test": "xs:date(\"1999-05-31\") cast as xs:string",
+  "result": {
+   "kind": "assert-string-value",
+   "value": "1999-05-31"
+  }
+ },
+ {
+  "set": "prod-CastExpr",
+  "name": "casthc34",
+  "test": "xs:date(\"1999-05-31\") cast as xs:date",
+  "result": {
+   "kind": "assert-string-value",
+   "value": "1999-05-31"
+  }
+ },
+ {
+  "set": "prod-CastExpr",
+  "name": "CastAs122",
+  "test": "xs:string(\"2000-01-16T00:00:00Z\") cast as xs:dateTime",
+  "result": {
+   "kind": "assert-string-value",
+   "value": "2000-01-16T00:00:00Z"
+  }
+ },
+ {
+  "set": "prod-CastExpr",
+  "name": "CastAs123",
+  "test": "xs:string(\"true\") cast as xs:dateTime",
+  "result": {
+   "kind": "error",
+   "code": "FORG0001"
+  }
+ },
+ {
+  "set": "prod-CastExpr",
+  "name": "CastAs126",
+  "test": "xs:string(\"13:20:00Z\") cast as xs:time",
+  "result": {
+   "kind": "assert-string-value",
+   "value": "13:20:00Z"
+  }
+ },
+ {
+  "set": "prod-CastExpr",
+  "name": "CastAs127",
+  "test": "xs:string(\"true\") cast as xs:time",
+  "result": {
+   "kind": "error",
+   "code": "FORG0001"
+  }
+ },
+ {
+  "set": "prod-CastExpr",
+  "name": "CastAs409",
+  "test": "xs:date(\"1999-05-31\") cast as xs:float",
+  "result": {
+   "kind": "error",
+   "code": "XPTY0004"
+  }
+ },
+ {
+  "set": "prod-CastExpr",
+  "name": "CastAs417",
+  "test": "xs:date(\"1999-05-31\") cast as xs:time",
+  "result": {
+   "kind": "error",
+   "code": "XPTY0004"
+  }
+ },
+ {
+  "set": "prod-CastExpr",
+  "name": "K-SeqExprCast-312",
+  "test": "xs:dateTime(\"2002-02-30T12:44:05\")",
+  "result": {
+   "kind": "error",
+   "code": "FORG0001"
+  }
+ },
+ {
+  "set": "prod-CastExpr",
+  "name": "K-SeqExprCast-315",
+  "test": "xs:dateTime(\"2002-02-15T24:00:00.001\")",
+  "result": {
+   "kind": "error",
+   "code": "FORG0001"
+  }
+ },
+ {
+  "set": "prod-CastExpr",
+  "name": "K-SeqExprCast-321",
+  "test": "xs:dateTime(\"1999-12-01T23:59:12.432-15:00\")",
+  "result": {
+   "kind": "error",
+   "code": "FORG0001"
+  }
+ },
+ {
+  "set": "prod-CastExpr",
+  "name": "K-SeqExprCast-351",
+  "test": "xs:time(\"24:00:00.001\")",
+  "result": {
+   "kind": "error",
+   "code": "FORG0001"
+  }
+ },
+ {
+  "set": "prod-CastExpr",
+  "name": "K-SeqExprCast-379",
+  "test": "xs:date(\"2002-02-30\")",
+  "result": {
+   "kind": "error",
+   "code": "FORG0001"
+  }
+ },
+ {
+  "set": "prod-CastExpr",
+  "name": "K-SeqExprCast-903",
+  "test": "boolean(xs:date(\"2004-10-13\"))",
+  "result": {
+   "kind": "error",
+   "code": "FORG0006"
+  }
+ },
+ {
+  "set": "prod-WhereClause",
+  "name": "K-WhereExpr-3",
+  "test": "count((for $fo in (1, 2, 3) where xs:time(\"08:08:23Z\") return $fo)) eq 3",
+  "result": {
+   "kind": "error",
+   "code": "FORG0006"
+  }
+ },
+ {
+  "set": "misc-CombinedErrorCodes",
+  "name": "FORG0006_01",
+  "test": "fn:boolean( xs:date('2007-01-01') )",
+  "result": {
+   "kind": "any-of",
+   "children": [
+    {
+     "kind": "error",
+     "code": "FORG0006"
+    },
+    {
+     "kind": "error",
+     "code": "XPTY0004"
+    }
+   ]
+  }
+ },
+ {
+  "set": "misc-CombinedErrorCodes",
+  "name": "XPTY0004_40",
+  "test": "+xs:date('2007-11-29')",
+  "result": {
+   "kind": "error",
+   "code": "XPTY0004"
+  }
+ },
+ {
+  "set": "misc-CombinedErrorCodes",
+  "name": "XPTY0004_42",
+  "test": "fn:string-length(xs:date('2007-11-29'))",
+  "result": {
+   "kind": "error",
+   "code": "XPTY0004"
+  }
+ },
+ {
+  "set": "app-spec-examples",
+  "name": "fo-test-fn-format-number-004",
+  "test": "\n        format-number(0.14, '01%')\n      ",
+  "result": {
+   "kind": "assert-deep-eq",
+   "value": "\"14%\""
+  },
+  "environment": {
+   "name": "global",
+   "namespace": [
+    {
+     "prefix": "math",
+     "uri": "http://www.w3.org/2005/xpath-functions/math"
+    },
+    {
+     "prefix": "map",
+     "uri": "http://www.w3.org/2005/xpath-functions/map"
+    },
+    {
+     "prefix": "array",
+     "uri": "http://www.w3.org/2005/xpath-functions/array"
+    }
+   ],
+   "decimal-format": [
+    {
+     "name": "ch",
+     "decimal-separator": "·",
+     "grouping-separator": "ʹ"
+    },
+    {
+     "name": "fortran",
+     "exponent-separator": "E"
+    }
+   ]
+  }
+ }
+]

@@ -65,8 +65,10 @@ import {
   isNameCharCode,
 } from '@jarenjs/core/scan';
 
+import { civilFromDays, daysFromCivil, daysInMonth } from '@jarenjs/core/dates';
 import { setObjectMember } from '@jarenjs/core/object';
 import { LabeledSyntaxError, NESTING_CEILING } from '../errors.js';
+import { DEFAULT_DECIMAL_FORMAT, FormatRefusal, compilePicture } from '../query/format-number.js';
 
 const CC_BACKTICK = 0x60;
 
@@ -250,8 +252,29 @@ function literalText(e) {
 
 // the text a failed literal cast quotes: the literal as it was written
 function literalOperandText(e) {
-  const text = literalText(e);
+  const text = literalText(e) ?? dateLiteralText(e);
   return text === null ? String(e) : text;
+}
+
+// The static type of an emitted expression that carries xs:date,
+// xs:dateTime or xs:time values: the parser reads every use of such a
+// value by its type (XQUERY-FRONTEND.md section 4.9). An expression the
+// constructors and casts emit is registered here by identity; a literal
+// value is emitted as `{"$const": text}` so that it has one.
+const DATE_TYPES = new WeakMap();
+
+const isDateTypeName = (t) => t === 'date' || t === 'dateTime' || t === 'time';
+const isDateOrMaybe = (t) => isDateTypeName(t) || t === 'maybe';
+
+// a date literal the parser emitted: its text, or null
+function dateLiteralText(e) {
+  return e !== null && typeof e === 'object' && DATE_TYPES.has(e) && typeof e.$const === 'string' ? e.$const : null;
+}
+
+function typedDateLiteral(name, text) {
+  const e = { '$const': text };
+  DATE_TYPES.set(e, name);
+  return e;
 }
 
 const trimXsdWhiteSpace = (s) => s.replace(/^[ \t\r\n]+|[ \t\r\n]+$/g, '');
@@ -457,6 +480,213 @@ const stringType = Object.freeze({
   }),
 });
 
+// xs:date, xs:dateTime and xs:time. The engine's dates are RFC 3339
+// strings (QUERY-FORMAT.md section 8.13), and every operator the front-end
+// maps reads a constructed date as the string it is: `eq` and `lt` compare
+// code points and `string()` is the text. So a value is admitted only where
+// the code-point order of its text is its time order and the text is the
+// XSD canonical form: an xs:date without a timezone, an xs:dateTime or an
+// xs:time in UTC without a fraction of a second, in the years 0000 to 9999
+// RFC 3339 spells. A value XSD reads outside that domain (another timezone,
+// a fraction, a year RFC 3339 cannot spell) is refused by name, never
+// answered: as the query is read for a literal operand, with JQ2001 when
+// the cast runs for any other.
+//
+// The text of an xs:dateTime may stand for a string or for a constructed
+// xs:dateTime, which casts to an xs:date or an xs:time where the string
+// does not (and an xs:date to an xs:dateTime); such an operand is refused
+// rather than read one way.
+
+const XSD_TIME = '([0-9]{2}):([0-9]{2}):([0-9]{2})(\\.[0-9]+)?';
+const XSD_TIMEZONE = '(Z|[+-][0-9]{2}:[0-9]{2})?';
+const XSD_DATE = '(-?(?:[1-9][0-9]{3,}|0[0-9]{3}))-([0-9]{2})-([0-9]{2})';
+
+// the XSD lexical spaces, with their fields as groups
+const XSD_DATE_RE = new RegExp(`^${XSD_DATE}${XSD_TIMEZONE}$`);
+const XSD_DATETIME_RE = new RegExp(`^${XSD_DATE}T${XSD_TIME}${XSD_TIMEZONE}$`);
+const XSD_TIME_RE = new RegExp(`^${XSD_TIME}${XSD_TIMEZONE}$`);
+
+// the same shapes as I-Regexp texts for `$match` (no groups are read)
+const DATE_SHAPE = '-?[0-9]{4,}-[0-9]{2}-[0-9]{2}(Z|[+-][0-9]{2}:[0-9]{2})?';
+const DATETIME_SHAPE = '-?[0-9]{4,}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})?';
+const TIME_SHAPE = '[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})?';
+
+// the domain's texts: digits that `$is-date`/`$is-datetime`/`$is-time` then
+// check as a calendar (a day of the month, a leap year) and a clock
+const DOMAIN_TIME = '([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]Z';
+const DATE_DOMAIN = '[0-9]{4}-[0-9]{2}-[0-9]{2}';
+
+// A time of day read by XSD, or null: hours 00 to 23 or 24:00:00 exactly,
+// minutes and seconds 00 to 59, a timezone within 14 hours. `utc` is a
+// zone of zero, `exact` a fraction of zeros or none.
+function readXsdClock(hh, mm, ss, fraction, zone) {
+  const hours = Number(hh);
+  const minutes = Number(mm);
+  const seconds = Number(ss);
+  const exact = fraction === undefined || /^\.0+$/.test(fraction);
+  if (minutes > 59 || seconds > 59 || hours > 24 || (hours === 24 && (minutes !== 0 || seconds !== 0 || !exact)))
+    return null;
+  if (zone !== undefined && zone !== 'Z') {
+    const zoneHours = Number(zone.slice(1, 3));
+    const zoneMinutes = Number(zone.slice(4));
+    if (zoneMinutes > 59 || zoneHours > 14 || (zoneHours === 14 && zoneMinutes !== 0))
+      return null;
+  }
+  return { hours, minutes, seconds, exact, zoned: zone !== undefined, utc: zone === 'Z' || zone === '+00:00' || zone === '-00:00' };
+}
+
+// A calendar date read by XSD (year 0000 included), or null; `spellable`
+// is a year RFC 3339 writes (0000 to 9999).
+function readXsdCalendar(yyyy, mm, dd) {
+  const year = Number(yyyy);
+  const month = Number(mm);
+  const day = Number(dd);
+  if (month < 1 || month > 12 || day < 1 || day > daysInMonth(year, month))
+    return null;
+  return { year, month, day, spellable: /^[0-9]{4}$/.test(yyyy) };
+}
+
+// A text read in an XSD lexical space, or null: `{ calendar, clock, zone }`
+// with the halves the type has.
+function readXsdDate(text) {
+  const f = XSD_DATE_RE.exec(text);
+  const calendar = f === null ? null : readXsdCalendar(f[1], f[2], f[3]);
+  return calendar === null ? null : { calendar, zone: f[4] };
+}
+
+function readXsdDateTime(text) {
+  const f = XSD_DATETIME_RE.exec(text);
+  const calendar = f === null ? null : readXsdCalendar(f[1], f[2], f[3]);
+  const clock = calendar === null ? null : readXsdClock(f[4], f[5], f[6], f[7], f[8]);
+  return clock === null ? null : { calendar, clock };
+}
+
+function readXsdTime(text) {
+  const f = XSD_TIME_RE.exec(text);
+  const clock = f === null ? null : readXsdClock(f[1], f[2], f[3], f[4], f[5]);
+  return clock === null ? null : { clock };
+}
+
+const pad2 = (n) => String(n).padStart(2, '0');
+
+const dateText = ({ year, month, day }) => `${String(year).padStart(4, '0')}-${pad2(month)}-${pad2(day)}`;
+
+// the clock of the domain's text: UTC, no fraction, 24:00:00 as 00:00:00;
+// a reason the clock is outside the domain otherwise
+function clockText(clock) {
+  if (!clock.zoned)
+    return { reason: 'without a timezone' };
+  if (!clock.utc)
+    return { reason: 'with a timezone other than Z' };
+  if (!clock.exact)
+    return { reason: 'with a fraction of a second' };
+  return { text: `${pad2(clock.hours % 24)}:${pad2(clock.minutes)}:${pad2(clock.seconds)}Z` };
+}
+
+// What a date cast gives a string literal: the canonical text, CAST_FAILS
+// for a text outside the type's lexical space (XQuery's FORG0001), or the
+// refusal `refuse` throws for a value outside the domain.
+function foldDateText(name, text, refuse) {
+  const trimmed = trimXsdWhiteSpace(text);
+  const outside = (reason) => refuse(`unsupported construct 'xs:${name} ${reason}'`);
+  if (name === 'date') {
+    const date = readXsdDate(trimmed);
+    if (date === null)
+      return CAST_FAILS;
+    if (date.zone !== undefined)
+      return outside('with a timezone');
+    return date.calendar.spellable ? dateText(date.calendar) : outside('outside the years 0000 to 9999');
+  }
+  const value = name === 'time' ? readXsdTime(trimmed) : readXsdDateTime(trimmed);
+  if (value === null)
+    return CAST_FAILS;
+  const clock = clockText(value.clock);
+  if (clock.reason !== undefined)
+    return outside(clock.reason);
+  if (name === 'time')
+    return clock.text;
+  // 24:00:00 is midnight of the next day (XSD's canonical form)
+  const { calendar } = value;
+  const day = value.clock.hours === 24
+    ? civilFromDays(daysFromCivil(calendar.year, calendar.month, calendar.day) + 1)
+    : calendar;
+  if (!calendar.spellable || day.year > 9999)
+    return outside('outside the years 0000 to 9999');
+  return `${dateText(day)}T${clock.text}`;
+}
+
+// How a value of the date type `from` casts to the date type `to`: itself,
+// the time of a dateTime, no value (XQuery's XPTY0004), or the reason the
+// value it casts to is outside the domain (a dateTime's date keeps its
+// timezone, a date's dateTime has none).
+function dateConversion(from, to) {
+  if (from === to)
+    return 'same';
+  if (from === 'dateTime' && to === 'time')
+    return 'time-part';
+  if (from === 'dateTime' && to === 'date')
+    return 'with a timezone';
+  if (from === 'date' && to === 'dateTime')
+    return 'without a timezone';
+  return 'none';
+}
+
+// A date type. Its operand is read by its static type: a value of another
+// date type converts as XQuery casts it, a number or a boolean has no
+// value (XQuery casts neither to a date), a string literal folds, and a
+// computed string is read by the domain's text and checked as a calendar
+// and a clock. A string in the shape of a value of this type the domain
+// refuses raises; so does, for an operand that may be a date value of any
+// type (`maybe`), a string in the shape of another date type, which may
+// stand for a value of that type that casts here. Any other string has no
+// value.
+function dateType(name) {
+  const domain = { date: DATE_DOMAIN, dateTime: `${DATE_DOMAIN}T${DOMAIN_TIME}`, time: DOMAIN_TIME }[name];
+  const check = { date: '$is-date', dateTime: '$is-datetime', time: '$is-time' }[name];
+  const own = { date: DATE_SHAPE, dateTime: DATETIME_SHAPE, time: TIME_SHAPE }[name];
+  const other = { date: [DATETIME_SHAPE], dateTime: [DATE_SHAPE], time: [DATETIME_SHAPE] }[name];
+  const readString = (operandType) => ({
+    '$let': { xs_text: { '$normalize-space': CAST_ARG } },
+    '$return': {
+      '$if': [
+        { '$match': ['$xs_text', domain] },
+        { '$if': [{ [check]: '$xs_text' }, '$xs_text'] },
+        { '$if': [
+          { '$or': (operandType === 'maybe' ? [own, ...other] : [own]).map((shape) => ({ '$match': ['$xs_text', shape] })) },
+          raisedWith({ '$concat': [`xs:${name}: `, '$xs_text', ' is a value the front-end does not read'] }),
+        ] },
+      ],
+    },
+  });
+  return {
+    fold: (e, refuse, operandType) => {
+      if (typeof e === 'boolean' || typeof e === 'number')
+        return CAST_FAILS;
+      if (isDateTypeName(operandType)) {
+        const conversion = dateConversion(operandType, name);
+        if (conversion !== 'same' && conversion !== 'time-part' && conversion !== 'none')
+          return refuse(`unsupported construct 'xs:${name} ${conversion}'`);
+        // a computed operand is read when the cast runs: it may be empty
+        const text = dateLiteralText(e);
+        if (text === null)
+          return undefined;
+        if (conversion === 'none')
+          return CAST_FAILS;
+        return conversion === 'same' ? e : typedDateLiteral(name, text.slice(11));
+      }
+      const text = literalText(e);
+      return text === null ? undefined : foldDateText(name, text, refuse);
+    },
+    read: (operandType) => {
+      if (isDateTypeName(operandType)) {
+        const conversion = dateConversion(operandType, name);
+        return conversion === 'same' ? CAST_ARG : conversion === 'time-part' ? { '$substring': [CAST_ARG, 11] } : { '$seq': [] };
+      }
+      return { '$if': [{ '$is-string': CAST_ARG }, readString(operandType)] };
+    },
+  };
+}
+
 // The `xs:` types the JSON model has a value for, by local name. The engine
 // has one number type (D1), so the numeric types differ in the values they
 // accept and the errors they raise, not in the value they give.
@@ -479,24 +709,37 @@ const XS_TYPES = Object.freeze({
   'positiveInteger': integerRangeType(1, undefined),
   'nonPositiveInteger': integerRangeType(undefined, 1),
   'negativeInteger': integerRangeType(undefined, 0),
+  'date': dateType('date'),
+  'dateTime': dateType('dateTime'),
+  'time': dateType('time'),
 });
 
 // `e cast as xs:<name>?` (the constructor function) and, when
 // `emptyAllowed` is false, `e cast as xs:<name>`, which raises on the empty
 // sequence. A literal operand folds; any other is bound once to CAST_VAR,
 // outside every name the reading introduces, and read when the query runs,
-// so the cast is lazy.
-function castTo(name, e, emptyAllowed) {
+// so the cast is lazy. `refuse(message)` throws the positioned
+// `unsupported ...` error for a value the subset does not read;
+// `operandType` is the operand's static date type (see typeOf). A cast to a
+// date type is registered with its type.
+function castTo(name, e, emptyAllowed, refuse, operandType) {
+  const cast = castExpression(name, e, emptyAllowed, refuse, operandType);
+  if (isDateTypeName(name) && cast !== null && typeof cast === 'object')
+    DATE_TYPES.set(cast, name);
+  return cast;
+}
+
+function castExpression(name, e, emptyAllowed, refuse, operandType) {
   // `$string` is the cast to xs:string? itself
   if (name === 'string' && emptyAllowed)
     return { '$string': e };
   const type = XS_TYPES[name];
-  const folded = type.fold(e);
+  const folded = type.fold(e, refuse, operandType);
   if (folded === CAST_FAILS)
     return failedLiteralCast(name, literalOperandText(e));
   if (folded !== undefined)
-    return folded;
-  const cast = { '$coalesce': [type.read(), failedCast(name)] };
+    return isDateTypeName(name) && typeof folded === 'string' ? typedDateLiteral(name, folded) : folded;
+  const cast = { '$coalesce': [type.read(operandType), failedCast(name)] };
   return {
     '$let': { [CAST_VAR]: e },
     '$return': {
@@ -510,89 +753,140 @@ function castTo(name, e, emptyAllowed) {
 // `e castable as xs:<name>` (`?` when `emptyAllowed`): whether the cast
 // would give a value - never an error. A literal operand folds to the
 // answer.
-function castableAs(name, e, emptyAllowed) {
+function castableAs(name, e, emptyAllowed, refuse, operandType) {
   const type = XS_TYPES[name];
-  const folded = type.fold(e);
+  const folded = type.fold(e, refuse, operandType);
   if (folded !== undefined)
     return folded !== CAST_FAILS;
   return {
     '$let': { [CAST_VAR]: e },
-    '$return': { '$if': [{ '$exists': CAST_ARG }, { '$exists': type.read() }, emptyAllowed] },
+    '$return': { '$if': [{ '$exists': CAST_ARG }, { '$exists': type.read(operandType) }, emptyAllowed] },
   };
 }
 
 // The `xs:` constructor functions: `xs:T(e)` is `e cast as xs:T?`.
 const XS_TABLE = Object.freeze(Object.fromEntries(Object.keys(XS_TYPES).map((name) => [
   name,
-  { min: 1, max: 1, emit: (args) => castTo(name, args[0], true) },
+  { min: 1, max: 1, emit: (args, refuse, types) => castTo(name, args[0], true, refuse, types[0]) },
 ])));
 
-// fn:tokenize splits at the matches of a regular expression, and the
-// engine has no operator that finds matches; the plain-text pattern is
-// the one case the document can express - the separator's occurrences are
-// the positions where the text holds it, cut into the pieces between them.
-// Plain text means no character an I-Regexp or an XSD pattern reads as
-// syntax. A separator that overlaps itself ("aa" in "aaa") would need the
-// left-to-right scan the document cannot make, so it is refused.
-const REGEXP_SYNTAX_RE = /[\\|.?*+(){}[\]^$]/;
+// fn:tokenize is `$tokenize`, the pieces between the matches of an
+// I-Regexp (D5). F&O's flags argument is read as the query is read: no
+// flags (`""`) is the two-argument call, and `q` (the pattern is plain
+// text) escapes a literal pattern into an I-Regexp that matches that text.
+// The other flags change what a pattern matches in ways an I-Regexp
+// cannot (`i`, `s`, `m`, `x`) and are refused by name, as is a flag
+// computed when the query runs; a letter F&O does not define is F&O's
+// FORX0001, raised when the call is evaluated.
+const TOKENIZE_FLAGS_UNSUPPORTED = 'smix';
+const TOKENIZE_FLAGS = 'smixq';
 
-function overlapsItself(points) {
-  for (let n = 1; n < points.length; n++) {
-    let same = true;
-    for (let i = 0; i < n && same; i++)
-      same = points[i] === points[points.length - n + i];
-    if (same)
-      return true;
-  }
-  return false;
+// the I-Regexp that matches `text` and nothing else: every character an
+// I-Regexp reads as syntax escaped, `^` and `$` included (the translation
+// to a RegExp reads both as anchors), `$` as a class since `\$` is no
+// I-Regexp escape
+function literalPattern(text) {
+  return text.replace(/[\\|.?*+(){}[\]^]/g, '\\$&').replace(/\$/g, '[$]');
 }
 
-// tokenize `text` (an emitted expression) at the occurrences of
-// `separator`, a plain-text string of `size` code points that does not
-// overlap itself; the empty text has no tokens (F&O)
-function tokenizeAt(text, separator, size) {
-  const length = () => ({ '$string-length': '$tk_text' });
-  const cuts = {
-    '$for': { tk_at: { '$range': [0, { '$sub': [length(), size] }] } },
-    '$where': { '$eq': [{ '$substring': ['$tk_text', '$tk_at', size] }, separator] },
-    '$return': '$tk_at',
-  };
-  const piece = {
-    '$let': { tk_from: { '$add': [{ '$get': ['$tk_cuts', '$tk_n'] }, size] } },
-    '$return': {
-      '$substring': ['$tk_text', '$tk_from', { '$sub': [{ '$get': ['$tk_cuts', { '$add': ['$tk_n', 1] }] }, '$tk_from'] }],
-    },
-  };
-  return {
-    '$let': { tk_text: text },
-    '$return': {
-      '$if': [
-        { '$gt': [length(), 0] },
-        {
-          // the cut positions with a virtual cut before the text and one
-          // at its end, so every piece lies between two neighbours
-          '$let': { tk_cuts: [-size, cuts, length()] },
-          '$return': { '$for': { tk_n: { '$range': [0, { '$sub': [{ '$count': '$tk_cuts[*]' }, 2] }] } }, '$return': piece },
-        },
-      ],
-    },
-  };
-}
-
-// fn:tokenize#1 splits the normalized text at its single spaces
 const tokenizeFunction = Object.freeze({
   min: 1,
-  max: 2,
+  max: 3,
   emit: (args, refuse) => {
     if (args.length === 1)
-      return tokenizeAt({ '$normalize-space': args[0] }, ' ', 1);
+      return { '$tokenize': [{ '$normalize-space': args[0] }, ' '] };
+    if (args.length === 2)
+      return { '$tokenize': args };
+    const flags = literalText(args[2]);
+    if (flags === null)
+      return refuse("unsupported construct 'tokenize flags other than a literal'");
+    for (const flag of flags) {
+      if (!TOKENIZE_FLAGS.includes(flag))
+        return raisedWith(`fn:tokenize: invalid flags '${flags}'`);
+    }
+    for (const flag of TOKENIZE_FLAGS_UNSUPPORTED) {
+      if (flags.includes(flag))
+        return refuse(`unsupported construct 'tokenize flag ${flag}'`);
+    }
+    if (flags === '')
+      return { '$tokenize': [args[0], args[1]] };
     const pattern = literalText(args[1]);
-    if (pattern === null || pattern === '' || REGEXP_SYNTAX_RE.test(pattern))
-      return refuse("unsupported construct 'tokenize pattern other than plain text'");
-    const points = Array.from(pattern);
-    if (overlapsItself(points))
-      return refuse("unsupported construct 'tokenize separator that overlaps itself'");
-    return tokenizeAt(args[0], pattern, points.length);
+    if (pattern === null)
+      return refuse("unsupported construct 'tokenize flag q with a computed pattern'");
+    return { '$tokenize': [args[0], emitString(literalPattern(pattern))] };
+  },
+});
+
+//#endregion
+
+//#region fn:format-number
+
+// fn:format-number is `$format-number` (QUERY-FORMAT.md section 8.7). F&O
+// reads the decimal format's name with the white space around it removed
+// (an EQName holds none): a literal name is trimmed as the query is read,
+// and a computed one is passed as it is.
+//
+// A percent or per-mille picture multiplies the value by 100 or 1000 as a
+// double (F&O section 4.7.5), so the product carries the double's rounding
+// and overflows to the infinity of its sign (`Infinity%`), where
+// `$format-number` scales the value's decimal digits exactly. Under the
+// default decimal format (the two-argument call) a literal picture names its
+// sign: the value is multiplied here, formatted under the picture with the
+// sign as a passive character no picture holds, and the sign put back.
+const PICTURE_MULTIPLIERS = Object.freeze({ '%': 100, '\u2030': 1000 });
+const PASSIVE_SIGN = '\uffff';
+
+// the multiplier sign every sub-picture of a default-format picture holds
+// once, MIXED_SIGNS when the two sub-pictures hold different ones, or null:
+// none, or a picture F&O refuses (which `$format-number` then refuses as
+// the query compiles)
+const MIXED_SIGNS = Symbol('mixed signs');
+
+function pictureMultiplierSign(picture) {
+  if (picture.includes(PASSIVE_SIGN))
+    return null;
+  try {
+    compilePicture(picture, DEFAULT_DECIMAL_FORMAT);
+  }
+  catch (e) {
+    if (e instanceof FormatRefusal)
+      return null;
+    throw e;
+  }
+  let sign = null;
+  for (const sub of picture.split(';')) {
+    const signs = Array.from(sub).filter((ch) => hasOwn(PICTURE_MULTIPLIERS, ch));
+    if (signs.length !== 1)
+      return null;
+    if (sign !== null && signs[0] !== sign)
+      return MIXED_SIGNS;
+    sign = signs[0];
+  }
+  return sign;
+}
+
+const formatNumberFunction = Object.freeze({
+  min: 2,
+  max: 3,
+  emit: (args, refuse) => {
+    if (args.length === 3) {
+      const name = literalText(args[2]);
+      return { '$format-number': name === null ? args : [args[0], args[1], emitString(trimXsdWhiteSpace(name))] };
+    }
+    const picture = literalText(args[1]);
+    const sign = picture === null ? null : pictureMultiplierSign(picture);
+    if (sign === null)
+      return { '$format-number': args };
+    if (sign === MIXED_SIGNS)
+      return refuse("unsupported construct 'format-number picture with a percent and a per-mille sub-picture'");
+    const passive = picture.split(sign).join(PASSIVE_SIGN);
+    return {
+      '$replace': [
+        { '$format-number': [{ '$mul': [args[0], PICTURE_MULTIPLIERS[sign]] }, emitString(passive)] },
+        PASSIVE_SIGN,
+        sign,
+      ],
+    };
   },
 });
 
@@ -711,6 +1005,9 @@ const FN_TABLE = Object.freeze({
   'contains': fnArgs('$contains', 2, 2),
   'starts-with': fnArgs('$starts-with', 2, 2),
   'ends-with': fnArgs('$ends-with', 2, 2),
+  'substring-before': fnArgs('$substring-before', 2, 2),
+  'substring-after': fnArgs('$substring-after', 2, 2),
+  'translate': fnArgs('$translate', 3, 3),
   // fn:matches tests a *substring* match (F&O), which is `$search`;
   // `$match` is the anchored RFC 9535 match() - see XQUERY-FRONTEND.md
   'matches': fnArgs('$search', 2, 2),
@@ -729,9 +1026,26 @@ const FN_TABLE = Object.freeze({
   'remove': removeFunction,
   'insert-before': insertBeforeFunction,
   'compare': compareFunction,
+  'format-number': formatNumberFunction,
   // XQuery has no boolean literals; fn:true()/fn:false() are the spelling
   'true': { min: 0, max: 0, emit: () => true },
   'false': { min: 0, max: 0, emit: () => false },
+});
+
+// The arguments F&O types as a string (`xs:string?`, `xs:string`): a date
+// value there is XPTY0004, where the engine would read its text.
+const STRING_ARGUMENTS = Object.freeze({
+  'string-length': [0], 'substring': [0], 'upper-case': [0], 'lower-case': [0], 'normalize-space': [0],
+  'contains': [0, 1], 'starts-with': [0, 1], 'ends-with': [0, 1], 'matches': [0, 1],
+  'substring-before': [0, 1], 'substring-after': [0, 1], 'replace': [0, 1, 2], 'translate': [0, 1, 2],
+  'tokenize': [0, 1, 2], 'compare': [0, 1, 2], 'string-join': [1], 'format-number': [1, 2],
+});
+
+// The functions whose result is items of some of their arguments: the
+// result carries those arguments' date types.
+const ITEM_ARGUMENTS = Object.freeze({
+  'head': [0], 'tail': [0], 'reverse': [0], 'subsequence': [0], 'distinct-values': [0],
+  'min': [0], 'max': [0], 'remove': [0], 'insert-before': [0, 2],
 });
 
 const MAP_FN_TABLE = Object.freeze({
@@ -843,6 +1157,119 @@ export function parseXQuery(source) {
     if (++depth > NESTING_CEILING)
       fail(`the expression nests deeper than ${NESTING_CEILING} levels`, at);
   }
+
+  //#region static date types
+
+  // A date value is the RFC 3339 string the engine holds (section 4.9),
+  // so every operator would read it as a string; XQuery reads it by its
+  // type and raises where a string would answer. The parser types every
+  // expression that can carry one: 'date', 'dateTime' or 'time' (its
+  // values are of that type, if any), 'none' (no date value), 'empty',
+  // 'nested' (an array or a map holding a date value) or 'maybe' (a date
+  // value may be among its items). A use XQuery types as an error raises
+  // XQuery's code when it is evaluated; a use whose operand may or may not
+  // be a date is refused by name.
+  const scope = new Map();
+  const shadowed = [];
+
+  function bind(name, type) {
+    shadowed.push([name, scope.get(name)]);
+    scope.set(name, type);
+  }
+
+  function unbindTo(mark) {
+    while (shadowed.length > mark) {
+      const [name, previous] = shadowed.pop();
+      if (previous === undefined)
+        scope.delete(name);
+      else
+        scope.set(name, previous);
+    }
+  }
+
+  function joinTypes(a, b) {
+    if (a === b || b === 'empty')
+      return a;
+    if (a === 'empty')
+      return b;
+    if (a === 'maybe' || b === 'maybe' || isDateTypeName(a) || isDateTypeName(b))
+      return 'maybe';
+    return a === 'nested' || b === 'nested' ? 'nested' : 'none';
+  }
+
+  const holdsDates = (t) => t !== 'none' && t !== 'empty';
+
+  function typeOf(e) {
+    if (typeof e === 'string') {
+      if (e.charCodeAt(0) !== CC_DOLLAR || e.charCodeAt(1) === CC_DOLLAR)
+        return 'none';
+      const name = /^\$([A-Za-z_][A-Za-z0-9_]*)/.exec(e)?.[1];
+      if (name === undefined)
+        return 'none';
+      const type = scope.get(name) ?? 'none';
+      // a lookup into a date value or a container of one
+      return e.length === name.length + 1 || !holdsDates(type) ? type : 'maybe';
+    }
+    if (Array.isArray(e))
+      return e.some((member) => holdsDates(typeOf(member))) ? 'nested' : 'none';
+    if (e === null || typeof e !== 'object')
+      return 'none';
+    const registered = DATE_TYPES.get(e);
+    if (registered !== undefined)
+      return registered;
+    if (isEmptySeqExpr(e))
+      return 'empty';
+    if (hasOwn(e, '$seq'))
+      return e.$seq.reduce((type, item) => joinTypes(type, typeOf(item)), 'empty');
+    if (hasOwn(e, '$if'))
+      return joinTypes(typeOf(e.$if[1]), e.$if.length === 3 ? typeOf(e.$if[2]) : 'empty');
+    if (hasOwn(e, '$get'))
+      return holdsDates(typeOf(e.$get[0])) ? 'maybe' : 'none';
+    if (hasOwn(e, '$let') && hasOwn(e.$let, LOOKUP_VAR))
+      return holdsDates(typeOf(e.$let[LOOKUP_VAR])) ? 'maybe' : 'none';
+    const keys = Object.keys(e);
+    if (keys.length > 0 && keys.every((key) => key.charCodeAt(0) !== CC_DOLLAR))
+      return keys.some((key) => holdsDates(typeOf(e[key]))) ? 'nested' : 'none';
+    return 'none';
+  }
+
+  // the type of one item a `for` binds: an array's members are its items (D4)
+  function itemTypeOf(e) {
+    const type = typeOf(e);
+    return type === 'nested' ? 'maybe' : type;
+  }
+
+  // `original`, raising XQuery's `code` where it is evaluated with every one
+  // of `operands` non-empty (`all`) or any one of them (`!all`), the message
+  // `says(type)`; refused by name (`use`) when an operand may or may not hold
+  // a date value
+  function typed(original, operands, { code, use, says, at, all = false }) {
+    const types = operands.map(typeOf);
+    if (types.includes('maybe'))
+      return fail(`unsupported construct '${use} of a value that may be a date'`, at);
+    const dates = operands.filter((_, i) => isDateTypeName(types[i]));
+    if (dates.length === 0)
+      return original;
+    const type = types.find(isDateTypeName);
+    const tests = (all ? operands : dates).map((e) => ({ '$exists': e }));
+    return {
+      '$if': [
+        tests.length === 1 ? tests[0] : { [all ? '$and' : '$or']: tests },
+        raisedWith(`${code}: ${says(type)} (position ${at})`),
+        original,
+      ],
+    };
+  }
+
+  // `original`, which reads the effective boolean value of `operand`
+  // (FORG0006 for a date value)
+  const readsEbv = (original, operand, at) => typed(original, [operand], {
+    code: 'FORG0006', use: 'the effective boolean value', at, says: (type) => `an xs:${type} has no effective boolean value`,
+  });
+
+  const ebv = (e, at) => readsEbv(e, e, at);
+
+  //#endregion
 
   function cc(at) {
     return at < len ? source.charCodeAt(at) : -1;
@@ -1093,36 +1520,33 @@ export function parseXQuery(source) {
   }
 
   function parseOr() {
-    const first = parseAnd();
-    let items = null;
-    for (;;) {
-      const save = pos;
-      skipWS();
-      if (isNameStartCode(cc(pos)) && parseNCName() === 'or') {
-        if (items === null)
-          items = [first];
-        items.push(parseAnd());
-        continue;
-      }
-      pos = save;
-      return items === null ? first : { '$or': items };
-    }
+    return parseLogical('or', '$or', parseAnd);
   }
 
   function parseAnd() {
-    const first = parseComparison();
+    return parseLogical('and', '$and', parseComparison);
+  }
+
+  // `a or b ...` / `a and b ...`: each operand is read by its effective
+  // boolean value
+  function parseLogical(word, op, parseOperand) {
+    skipWS();
+    let at = pos;
+    const first = parseOperand();
     let items = null;
     for (;;) {
       const save = pos;
       skipWS();
-      if (isNameStartCode(cc(pos)) && parseNCName() === 'and') {
+      if (isNameStartCode(cc(pos)) && parseNCName() === word) {
         if (items === null)
-          items = [first];
-        items.push(parseComparison());
+          items = [ebv(first, at)];
+        skipWS();
+        at = pos;
+        items.push(ebv(parseOperand(), at));
         continue;
       }
       pos = save;
-      return items === null ? first : { '$and': items };
+      return items === null ? first : { [op]: items };
     }
   }
 
@@ -1196,7 +1620,15 @@ export function parseXQuery(source) {
     if (cc(pos) === CC_EQ && cc(pos + 1) === CC_GT)
       fail("unsupported construct 'arrow expression'", pos);
     pos = afterRight;
-    return { [op]: [left, right] };
+    const comparison = { [op]: [left, right] };
+    // two values of one date type compare in time order; a date value and
+    // any other value is XPTY0004
+    const leftType = typeOf(left);
+    if (isDateTypeName(leftType) && leftType === typeOf(right))
+      return comparison;
+    return typed(comparison, [left, right], {
+      code: 'XPTY0004', use: 'a comparison', at, all: true, says: (type) => `an xs:${type} compares only with an xs:${type}`,
+    });
   }
 
   // StringConcatExpr ::= RangeExpr ("||" RangeExpr)* - variadic $concat.
@@ -1245,8 +1677,14 @@ export function parseXQuery(source) {
         continue;
       }
       if (c === CC_MINUS) {
+        const at = pos;
         pos++;
-        expr = { '$sub': [expr, parseMultiplicative()] };
+        const right = parseMultiplicative();
+        // XQuery subtracts two dates into a duration, a type outside the
+        // subset; every other date operand is XPTY0004, which `$sub` raises
+        if (isDateOrMaybe(typeOf(expr)) && isDateOrMaybe(typeOf(right)))
+          fail("unsupported construct 'date arithmetic'", at);
+        expr = { '$sub': [expr, right] };
         continue;
       }
       pos = save;
@@ -1307,12 +1745,12 @@ export function parseXQuery(source) {
     let at = tryKeyword('cast');
     if (at !== -1) {
       const type = parseSingleType('cast as');
-      expr = castTo(type.name, expr, type.emptyAllowed);
+      expr = castTo(type.name, expr, type.emptyAllowed, (message) => fail(message, at), typeOf(expr));
     }
     at = tryKeyword('castable');
     if (at !== -1) {
       const type = parseSingleType('castable as');
-      expr = castableAs(type.name, expr, type.emptyAllowed);
+      expr = castableAs(type.name, expr, type.emptyAllowed, (message) => fail(message, at), typeOf(expr));
     }
     return expr;
   }
@@ -1353,6 +1791,7 @@ export function parseXQuery(source) {
     skipWS();
     let c = cc(pos);
     if (c === CC_MINUS || c === CC_PLUS) {
+      const at = pos;
       let negs = 0;
       while (c === CC_MINUS || c === CC_PLUS) {
         if (c === CC_MINUS)
@@ -1362,6 +1801,10 @@ export function parseXQuery(source) {
         c = cc(pos);
       }
       let expr = parsePostfix();
+      // unary minus is `$neg`, which raises on a date; unary plus emits
+      // nothing, so a date operand is raised here (XPTY0004)
+      if (negs === 0)
+        return typed(expr, [expr], { code: 'XPTY0004', use: 'unary plus', at, says: (type) => `unary plus takes a number, not an xs:${type}` });
       for (let i = 0; i < negs; i++)
         expr = typeof expr === 'number' ? -expr : { '$neg': expr };
       return expr;
@@ -1759,7 +2202,21 @@ export function parseXQuery(source) {
     const def = table[local];
     if (args.length < def.min || args.length > def.max)
       return fail(`unsupported function '${written}#${args.length}'`, at);
-    return def.emit(args, (message) => fail(message, at));
+    const types = args.map(typeOf);
+    let out = def.emit(args, (message) => fail(message, at), types);
+    if (table !== FN_TABLE)
+      return out;
+    const items = ITEM_ARGUMENTS[local];
+    if (items !== undefined && out !== null && typeof out === 'object')
+      DATE_TYPES.set(out, items.reduce((type, i) => (i < args.length ? joinTypes(type, types[i]) : type), 'empty'));
+    const strings = (STRING_ARGUMENTS[local] ?? []).filter((i) => i < args.length).map((i) => args[i]);
+    if (strings.length > 0)
+      out = typed(out, strings, {
+        code: 'XPTY0004', use: `a string argument of fn:${local}`, at, says: (type) => `fn:${local} takes a string, not an xs:${type}`,
+      });
+    if (local === 'boolean' || local === 'not')
+      out = readsEbv(out, args[0], at);
+    return out;
   }
 
   //#endregion
@@ -1770,7 +2227,9 @@ export function parseXQuery(source) {
   // (`else ()` folds to the two-argument $if form)
   function parseIf() {
     pos++; // consume '('
-    const cond = parseExpr();
+    skipWS();
+    const condAt = pos;
+    const cond = ebv(parseExpr(), condAt);
     skipWS();
     if (cc(pos) !== CC_RPAREN)
       fail("expected ')'");
@@ -1793,6 +2252,7 @@ export function parseXQuery(source) {
   function parseQuantified(kw) {
     const key = kw === 'some' ? '$some' : '$every';
     const bindings = [];
+    const mark = shadowed.length;
     for (;;) {
       skipWS();
       if (cc(pos) !== CC_DOLLAR)
@@ -1801,7 +2261,9 @@ export function parseXQuery(source) {
       const name = parseVarName();
       checkTypeDeclaration();
       expectKeyword('in');
-      bindings.push([name, parseExprSingle()]);
+      const expr = parseExprSingle();
+      bind(name, itemTypeOf(expr));
+      bindings.push([name, expr]);
       skipWS();
       if (cc(pos) === CC_COMMA) {
         pos++;
@@ -1810,7 +2272,10 @@ export function parseXQuery(source) {
       break;
     }
     expectKeyword('satisfies');
-    const cond = parseExprSingle();
+    skipWS();
+    const condAt = pos;
+    const cond = ebv(parseExprSingle(), condAt);
+    unbindTo(mark);
     const groups = [];
     let group = {};
     for (let i = 0; i < bindings.length; i++) {
@@ -1844,6 +2309,7 @@ export function parseXQuery(source) {
   // them into (possibly nested) JSON FLWOR phrases.
   function parseFlwor(firstKw) {
     const clauses = [];
+    const mark = shadowed.length;
     parseBindingClause(firstKw, clauses);
     for (;;) {
       skipWS();
@@ -1857,7 +2323,9 @@ export function parseXQuery(source) {
         continue;
       }
       if (kw === 'where') {
-        clauses.push({ kind: 'where', expr: parseExprSingle(), at });
+        skipWS();
+        const exprAt = pos;
+        clauses.push({ kind: 'where', expr: ebv(parseExprSingle(), exprAt), at });
         continue;
       }
       if (kw === 'group') {
@@ -1881,11 +2349,20 @@ export function parseXQuery(source) {
         if (cc(pos) !== CC_DOLLAR)
           fail("expected '$' after 'count'");
         pos++;
-        clauses.push({ kind: 'count', name: parseVarName(), at });
+        const name = parseVarName();
+        bind(name, 'none');
+        clauses.push({ kind: 'count', name, at });
         continue;
       }
-      if (kw === 'return')
-        return assembleFlwor(clauses, parseExprSingle());
+      if (kw === 'return') {
+        const ret = parseExprSingle();
+        const type = typeOf(ret);
+        unbindTo(mark);
+        const flwor = assembleFlwor(clauses, ret);
+        if (flwor !== ret && flwor !== null && typeof flwor === 'object')
+          DATE_TYPES.set(flwor, type);
+        return flwor;
+      }
       return fail(`expected a FLWOR clause, got '${kw}'`, at);
     }
   }
@@ -1933,14 +2410,20 @@ export function parseXQuery(source) {
             fail(`duplicate variable '$${name}'`, atNameAt);
         }
         expectKeyword('in');
-        clauses.push({ kind: 'for', name, atName, expr: parseExprSingle(), at });
+        const expr = parseExprSingle();
+        bind(name, itemTypeOf(expr));
+        if (atName !== null)
+          bind(atName, 'none');
+        clauses.push({ kind: 'for', name, atName, expr, at });
       }
       else {
         skipWS();
         if (cc(pos) !== CC_COLON || cc(pos + 1) !== CC_EQ)
           fail("expected ':='");
         pos += 2;
-        clauses.push({ kind: 'let', name, expr: parseExprSingle(), at });
+        const expr = parseExprSingle();
+        bind(name, typeOf(expr));
+        clauses.push({ kind: 'let', name, expr, at });
       }
       skipWS();
       if (cc(pos) === CC_COMMA) {
@@ -1972,6 +2455,7 @@ export function parseXQuery(source) {
       const collationAt = tryKeyword('collation');
       if (collationAt >= 0)
         fail("unsupported construct 'collation'", collationAt);
+      bind(name, typeOf(expr));
       keys.push({ name, expr, at: bindAt });
       skipWS();
       if (cc(pos) === CC_COMMA) {

@@ -404,7 +404,7 @@ describe('XQuery front-end parser', () => {
     it('should reject unknown functions with the greppable message', () => {
       failsWith('unknown-fn(1)', "unsupported function 'unknown-fn'", 0);
       failsWith('fn:xyz(1)', "unsupported function 'fn:xyz'", 0);
-      failsWith('xs:date("2020-01-01")', "unsupported function 'xs:date'", 0);
+      failsWith('xs:gYear("2020")', "unsupported function 'xs:gYear'", 0);
       failsWith('math:pi()', "unsupported function 'math:pi'", 0);
       failsWith('map:put($m, "k", 1)', "unsupported function 'map:put'", 0);
     });
@@ -601,8 +601,8 @@ describe('XQuery front-end parser', () => {
     it('should reject the type operators by name', () => {
       failsWith('1 instance of xs:integer', "unsupported construct 'instance of'", 2);
       failsWith('$x treat as item()', "unsupported construct 'treat as'", 3);
-      failsWith('$x castable as xs:date', "unsupported construct 'castable as xs:date'", 15);
-      failsWith('$x cast as xs:date', "unsupported construct 'cast as xs:date'", 11);
+      failsWith('$x castable as xs:gYear', "unsupported construct 'castable as xs:gYear'", 15);
+      failsWith('$x cast as xs:gYear', "unsupported construct 'cast as xs:gYear'", 11);
     });
 
     it('should reject the set operators by name', () => {

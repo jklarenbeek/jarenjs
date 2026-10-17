@@ -671,6 +671,9 @@
           "$ends-with",
           "$match",
           "$search",
+          "$substring-before",
+          "$substring-after",
+          "$tokenize",
           "$index-of",
           "$range",
           "$get",
@@ -921,13 +924,14 @@
       }
     },
     "ternaryOperatorPhrase": {
-      "description": "Operators whose value is an array of exactly three operand expressions: $date-diff [from, to, unit].",
+      "description": "Operators whose value is an array of exactly three operand expressions: $date-diff [from, to, unit], $translate [string, map, translation].",
       "type": "object",
       "minProperties": 1,
       "maxProperties": 1,
       "propertyNames": {
         "enum": [
-          "$date-diff"
+          "$date-diff",
+          "$translate"
         ]
       },
       "additionalProperties": {

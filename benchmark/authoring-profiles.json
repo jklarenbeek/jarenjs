@@ -18,14 +18,14 @@
     },
     {
       "grammar": "query",
-      "sourceHash": "21d89f46750fcf2760d77b19e71574b508fad9d20d4697a6fb643a51df5ff73f",
+      "sourceHash": "4c066c92341b1c4c2cda3735ed974d1a2588e1bc0a07ce98202bd38f1abd0a8a",
       "seamHash": "f0d41be2c687a847bb30b6271a691b76477fbce80460d4aa7388e6a1469ea80e",
       "profileHash": "72217bd6d84bf3512c2a62df0196ec00dfcc55a73a64e20f9e5ba9877541f035",
       "open": [
         "objectExpression"
       ],
       "full": {
-        "bytes": 21234,
+        "bytes": 21337,
         "branches": 48
       },
       "profile": {
@@ -35,14 +35,14 @@
     },
     {
       "grammar": "jslt",
-      "sourceHash": "225263098f97503cea355bba137cb04f180c6ccfee9e3c2d1eac4f473513d45a",
+      "sourceHash": "fe87ae93bbfdc2a3b648d9d9acd848356442135c180e5e0f4a2d12a854460663",
       "seamHash": "05e477048a83ec7fd8b9c4578a0a33bc108da17e7043c35d73f420cefe1ec6fd",
       "profileHash": "8fe3692c07e19b6794712e58f894a526c3d6afa7d486801ff7f94207877f4f8a",
       "open": [
         "queryDocument"
       ],
       "full": {
-        "bytes": 24040,
+        "bytes": 24143,
         "branches": 60
       },
       "profile": {
@@ -60,7 +60,7 @@
         "stylesheetDocument"
       ],
       "full": {
-        "bytes": 50085,
+        "bytes": 50291,
         "branches": 110
       },
       "profile": {
@@ -77,7 +77,7 @@
         "queryDocument"
       ],
       "full": {
-        "bytes": 24665,
+        "bytes": 24768,
         "branches": 52
       },
       "profile": {
@@ -95,7 +95,7 @@
         "stylesheetDocument"
       ],
       "full": {
-        "bytes": 50608,
+        "bytes": 50814,
         "branches": 114
       },
       "profile": {
@@ -112,7 +112,7 @@
         "queryDocument"
       ],
       "full": {
-        "bytes": 23583,
+        "bytes": 23686,
         "branches": 50
       },
       "profile": {
@@ -130,7 +130,7 @@
         "dagDocument"
       ],
       "full": {
-        "bytes": 53928,
+        "bytes": 54134,
         "branches": 123
       },
       "profile": {

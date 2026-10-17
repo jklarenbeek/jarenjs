@@ -77,10 +77,16 @@ const ERROR_CODE_MAP = {
   FOCA0002: ['JQ2001'], // a numeric cast of NaN or an infinity
   FORG0006: ['JQ2001', 'JQ2003'],
   FOAR0001: ['JQ2002'],
+  FORX0001: ['JQ2001'],
   FORX0002: ['JQ2001'],
   FORX0003: ['JQ2001'],
   XPDY0002: ['JQ2006'],
   XPDY0130: ['JQ2007'],
+  // fn:format-number: a picture that breaks F&O's rules is JQ0003 when it
+  // and its format are literal, JQ2001 when computed; an unknown format
+  // name likewise (QUERY-FORMAT.md section 8.7)
+  FODF1310: ['JQ0003', 'JQ2001'],
+  FODF1280: ['JQ0003', 'JQ2001'],
 };
 
 const UNSUPPORTED_RE = /^Invalid XQuery: (unsupported[^]*?) at position \d+ in /;
@@ -110,6 +116,22 @@ const fail = (reason) => ({ verdict: 'fail', reason });
 const unsupported = (detail) => ({ verdict: 'unsupported', detail });
 const reclassify = (reason) => ({ verdict: 'reclassify', reason });
 
+// The environment a case runs in: the externals its params bind and the
+// compile options its decimal-format declarations make (`formats`, null
+// without any; see decimalFormatsOf).
+const NO_ENVIRONMENT = Object.freeze({ externals: {}, formats: null });
+
+// compile a parsed document in the case's environment: its decimal formats
+// registered, and the environment's unnamed one standing in for F&O's
+// default wherever the query leaves the format out
+function compileInEnvironment(doc, environment) {
+  const { formats } = environment;
+  if (formats === null)
+    return compileJsonQuery(doc);
+  return compileJsonQuery(formats.defaultName === null ? doc : withDefaultFormat(doc, formats.defaultName),
+    formats.options);
+}
+
 /**
  * Evaluate an XQuery expression (a test query, an expected value of
  * assert-eq/deep-eq/permutation, or a param select) to its full result
@@ -120,7 +142,7 @@ const reclassify = (reason) => ({ verdict: 'reclassify', reason });
  * @returns {{ items: any[] } | { thrown: string, message: string }
  *   | { verdict: 'unsupported', detail: string }}
  */
-function evalSequence(text, externals) {
+function evalSequence(text, environment) {
   let parsed;
   try {
     parsed = parseXQuery(text);
@@ -134,8 +156,8 @@ function evalSequence(text, externals) {
     throw e;
   }
   try {
-    const query = compileJsonQuery([parsed]);
-    return { items: query(null, externals) };
+    const query = compileInEnvironment([parsed], environment);
+    return { items: query(null, environment.externals) };
   }
   catch (e) {
     if (e.name === 'JsonQueryCompileError' || e.name === 'JsonQueryRuntimeError')
@@ -150,7 +172,7 @@ function evalSequence(text, externals) {
  * bootstrap), and the assertion passes iff the expression's effective
  * boolean value is true (the `$boolean` wrapper).
  */
-function evalAssertExpression(text, items, externals) {
+function evalAssertExpression(text, items, environment) {
   let parsed;
   try {
     parsed = parseXQuery(text);
@@ -165,8 +187,8 @@ function evalAssertExpression(text, items, externals) {
   }
   const doc = { $let: { result: '$__qt3_result[*]' }, $return: { $boolean: parsed } };
   try {
-    const query = compileJsonQuery(doc);
-    const value = query(null, { ...externals, __qt3_result: items });
+    const query = compileInEnvironment(doc, environment);
+    const value = query(null, { ...environment.externals, __qt3_result: items });
     return value === true ? PASS : fail(`assert '${text}' evaluated to ${JSON.stringify(value)}`);
   }
   catch (e) {
@@ -262,7 +284,7 @@ function multisetEquals(actual, expected) {
 
 /**
  * Evaluate one converted QT3 assertion node against the outcome of the
- * test query. `ctx` is `{ items, thrown, thrownMessage, externals }`:
+ * test query. `ctx` is `{ items, thrown, thrownMessage, environment }`:
  * exactly one of `items` (the result sequence as an array) and `thrown`
  * (a JQxxxx / SYNTAX / CRASH code string) is non-null.
  * @returns {{ verdict: 'pass'|'fail'|'unsupported'|'reclassify', ... }}
@@ -311,7 +333,7 @@ function evalAssertion(assertion, ctx) {
   if (ctx.thrown !== null)
     return fail(`expected a result, got ${ctx.thrown}: ${ctx.thrownMessage}`);
 
-  const { items, externals } = ctx;
+  const { items, environment } = ctx;
   switch (kind) {
     case 'assert-true':
       return items.length === 1 && items[0] === true ? PASS : fail(`expected true, got ${JSON.stringify(items)}`);
@@ -324,7 +346,7 @@ function evalAssertion(assertion, ctx) {
       return items.length === expected ? PASS : fail(`expected count ${expected}, got ${items.length}`);
     }
     case 'assert-eq': {
-      const expected = evalSequence(assertion.value, externals);
+      const expected = evalSequence(assertion.value, environment);
       if (expected.verdict === 'unsupported')
         return expected;
       if (expected.thrown !== undefined)
@@ -336,7 +358,7 @@ function evalAssertion(assertion, ctx) {
         : fail(`expected ${JSON.stringify(expected.items[0])}, got ${JSON.stringify(items[0])}`);
     }
     case 'assert-deep-eq': {
-      const expected = evalSequence(assertion.value, externals);
+      const expected = evalSequence(assertion.value, environment);
       if (expected.verdict === 'unsupported')
         return expected;
       if (expected.thrown !== undefined)
@@ -346,7 +368,7 @@ function evalAssertion(assertion, ctx) {
       return fail(`expected ${JSON.stringify(expected.items)}, got ${JSON.stringify(items)}`);
     }
     case 'assert-permutation': {
-      const expected = evalSequence(assertion.value, externals);
+      const expected = evalSequence(assertion.value, environment);
       if (expected.verdict === 'unsupported')
         return expected;
       if (expected.thrown !== undefined)
@@ -370,7 +392,7 @@ function evalAssertion(assertion, ctx) {
     case 'assert-type':
       return evalAssertType(items, assertion.value ?? '');
     case 'assert':
-      return evalAssertExpression(assertion.value ?? '', items, externals);
+      return evalAssertExpression(assertion.value ?? '', items, environment);
     default:
       // classifier keeps XML/serialization kinds out of tier A
       return fail(`unhandled assertion kind '${kind}'`);
@@ -381,40 +403,125 @@ function evalAssertion(assertion, ctx) {
 
 //#region case runner
 
+// QT3 decimal-format properties -> the engine's decimal format members
+// (QUERY-FORMAT.md section 8.7)
+const DECIMAL_FORMAT_MEMBERS = Object.freeze({
+  'decimal-separator': 'decimalSeparator', 'grouping-separator': 'groupingSeparator',
+  'minus-sign': 'minusSign', 'percent': 'percent', 'per-mille': 'perMille',
+  'zero-digit': 'zeroDigit', 'digit': 'digit', 'pattern-separator': 'patternSeparator',
+  'exponent-separator': 'exponentSeparator', 'infinity': 'infinity', 'NaN': 'NaN',
+});
+
+// The name the environment's unnamed declaration is registered under: no
+// EQName spells it, so no query names it by accident.
+const DEFAULT_FORMAT_NAME = '#default';
+
 /**
- * Resolve an environment's params to an externals object. Params whose
- * select expression is missing, not parseable, not evaluable, or not a
- * singleton are not JSON-representable: the case reclassifies to tier C.
- * @returns {{ externals: object } | { verdict: 'reclassify', reason }}
+ * Every spelling a query may name a declared format by: an unprefixed name
+ * as written and as `Q{}local`; a prefixed one under every prefix the
+ * environment binds to its namespace URI, and as `Q{uri}local`.
  */
-export function resolveExternals(env) {
+function formatNameSpellings(name, namespaces) {
+  const colon = name.indexOf(':');
+  if (colon < 0)
+    return [name, `Q{}${name}`];
+  const local = name.slice(colon + 1);
+  const uri = namespaces.find((ns) => ns.prefix === name.slice(0, colon))?.uri;
+  if (uri === undefined)
+    return [name];
+  return [...namespaces.filter((ns) => ns.uri === uri).map((ns) => `${ns.prefix}:${local}`), `Q{${uri}}${local}`];
+}
+
+/**
+ * The compile options an environment's decimal-format declarations make:
+ * `{ options, defaultName }`, or null when it declares none. A record the
+ * engine refuses (a property that is not one character, two that clash)
+ * fails every compile with a TypeError, which the case reports as a crash.
+ */
+function decimalFormatsOf(env) {
+  const declarations = env?.['decimal-format'] ?? [];
+  if (declarations.length === 0)
+    return null;
+  const decimalFormats = {};
+  let defaultName = null;
+  for (const declaration of declarations) {
+    const record = {};
+    for (const [property, value] of Object.entries(declaration)) {
+      if (property !== 'name')
+        record[DECIMAL_FORMAT_MEMBERS[property] ?? property] = value;
+    }
+    if (declaration.name === undefined) {
+      defaultName = DEFAULT_FORMAT_NAME;
+      decimalFormats[DEFAULT_FORMAT_NAME] = record;
+    }
+    else {
+      for (const spelling of formatNameSpellings(declaration.name, env.namespace ?? []))
+        decimalFormats[spelling] = record;
+    }
+  }
+  return { options: { decimalFormats }, defaultName };
+}
+
+// The document with the environment's default format as the third operand
+// of every `$format-number` that has none: F&O reads a picture under the
+// default decimal format, which the environment's unnamed declaration
+// replaces. `$const` quotes data, so its operand is left as it is. The
+// front-end reads a two-argument call's `%` and `‰` as F&O's default
+// percent and per-mille signs (XQUERY-FRONTEND.md section 4.8); the QT3
+// environments that redefine a sign write their pictures with the new one.
+function withDefaultFormat(node, name) {
+  if (Array.isArray(node))
+    return node.map((member) => withDefaultFormat(member, name));
+  if (node === null || typeof node !== 'object')
+    return node;
+  const out = {};
+  for (const [key, value] of Object.entries(node)) {
+    if (key === '$const')
+      out[key] = value;
+    else if (key === '$format-number' && Array.isArray(value) && value.length === 2)
+      out[key] = [...value.map((member) => withDefaultFormat(member, name)), name];
+    else
+      out[key] = withDefaultFormat(value, name);
+  }
+  return out;
+}
+
+/**
+ * Resolve the environment a case runs in: its params as an externals
+ * object and its decimal-format declarations as compile options. Params
+ * whose select expression is missing, not parseable, not evaluable, or not
+ * a singleton are not JSON-representable: the case reclassifies to tier C.
+ * @returns {{ environment: { externals: object, formats: object | null } }
+ *   | { verdict: 'reclassify', reason }}
+ */
+export function resolveCaseEnvironment(env) {
   const externals = {};
   if (env === undefined)
-    return { externals };
+    return { environment: NO_ENVIRONMENT };
   for (const param of env.param ?? []) {
     if (param.select === undefined || param.source !== undefined)
       return reclassify(`param $${param.name} has no JSON-representable value`);
-    const result = evalSequence(param.select, {});
+    const result = evalSequence(param.select, NO_ENVIRONMENT);
     if (result.verdict === 'unsupported' || result.thrown !== undefined)
       return reclassify(`param $${param.name} select '${param.select}' is not JSON-representable`);
     if (result.items.length !== 1)
       return reclassify(`param $${param.name} is not a singleton`);
     externals[param.name] = result.items[0];
   }
-  return { externals };
+  return { environment: { externals, formats: decimalFormatsOf(env) } };
 }
 
 /**
  * Run one tier-A case end to end.
  * @returns {{ verdict: 'pass'|'fail'|'unsupported'|'reclassify', ... }}
  */
-export function runCase(testCase, externals) {
-  const outcome = evalSequence(testCase.test, externals);
+export function runCase(testCase, environment) {
+  const outcome = evalSequence(testCase.test, environment);
   if (outcome.verdict === 'unsupported')
     return outcome;
   const ctx = outcome.thrown !== undefined
-    ? { items: null, thrown: outcome.thrown, thrownMessage: outcome.message, externals }
-    : { items: outcome.items, thrown: null, thrownMessage: null, externals };
+    ? { items: null, thrown: outcome.thrown, thrownMessage: outcome.message, environment }
+    : { items: outcome.items, thrown: null, thrownMessage: null, environment };
   if (ctx.thrown === 'CRASH')
     return fail(`engine crashed: ${ctx.thrownMessage}`);
   return evalAssertion(testCase.result, ctx);
@@ -464,7 +571,7 @@ function main() {
   const surprises = [];
   const records = [];
   const perSet = [];
-  const externalsCache = new Map();
+  const environmentCache = new Map();
   let total = 0;
 
   for (const set of sets) {
@@ -502,12 +609,12 @@ function main() {
       }
 
       const env = resolveEnvironment(testCase, set, index.environments);
-      let resolved = externalsCache.get(env ?? null);
+      let resolved = environmentCache.get(env ?? null);
       if (resolved === undefined) {
-        resolved = resolveExternals(env);
-        externalsCache.set(env ?? null, resolved);
+        resolved = resolveCaseEnvironment(env);
+        environmentCache.set(env ?? null, resolved);
       }
-      const result = resolved.verdict === 'reclassify' ? resolved : runCase(testCase, resolved.externals);
+      const result = resolved.verdict === 'reclassify' ? resolved : runCase(testCase, resolved.environment);
       let bucket;
       let detail;
       switch (result.verdict) {

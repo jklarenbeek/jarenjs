@@ -94,6 +94,11 @@ Divergences from XDM to keep in mind when triaging:
 - `assert-type` maps coarsely: `xs:integer|decimal|double|float|numeric|string|
   boolean|anyAtomicType`, `map(*)`, `array(*)`, `item()`, occurrence indicators,
   `empty-sequence()`. Anything else reclassifies the case to tier C.
+- **Decimal formats** an environment declares are compile options: each named
+  one is registered (`options.decimalFormats`) under every spelling a query may
+  use for its name (`prefix:local` for each prefix the environment binds to its
+  namespace URI, and `Q{uri}local`), and the unnamed one replaces F&O's default
+  by becoming the third operand of every `$format-number` that has none.
 
 ## The baseline
 
@@ -138,6 +143,10 @@ Divergences from XDM to keep in mind when triaging:
     `fn:number` maps to the stricter `$number` cast (`JQ2001` instead of `NaN`),
     `F6` XPath-only grammar restrictions do not apply (the front-end parses
     XQuery 3.1).
+    `F7` dates are read only in the domain whose text orders as time does
+    (XQUERY-FRONTEND.md §4.9): an `xs:date` without a timezone, an
+    `xs:dateTime` or `xs:time` in UTC, no fraction of a second; a value
+    outside it that only a run reads is refused `JQ2001`, where XQuery answers.
 - `status: "bug"` — fails and should not; `issue` describes it. Real bugs are
   wins: fix the trivial ones, keep the rest listed here.
 - `skip: true` — never run in-process: the query would exhaust the heap (the

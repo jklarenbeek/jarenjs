@@ -2,7 +2,6 @@ import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
 
 import { compileXQuery } from '@jarenjs/json/xquery';
-import { JsonQueryRuntimeError } from '@jarenjs/json/query';
 
 import { validated, values, failsAtRun, failsWith } from './emitted.js';
 
@@ -230,8 +229,9 @@ describe('XQuery front-end xs: constructors', () => {
 
   describe('the other xs: types stay outside the subset', () => {
     it('should refuse a type the JSON model has no value for', () => {
-      failsWith('xs:date("2020-01-01")', "unsupported function 'xs:date'", 0);
-      failsWith('xs:dateTime($x)', "unsupported function 'xs:dateTime'", 0);
+      failsWith('xs:dayTimeDuration("P1D")', "unsupported function 'xs:dayTimeDuration'", 0);
+      failsWith('xs:yearMonthDuration($x)', "unsupported function 'xs:yearMonthDuration'", 0);
+      failsWith('xs:duration("P1Y")', "unsupported function 'xs:duration'", 0);
       failsWith('xs:gYear("2020")', "unsupported function 'xs:gYear'", 0);
       failsWith('xs:untypedAtomic($x)', "unsupported function 'xs:untypedAtomic'", 0);
       failsWith('xs:anyURI("a")', "unsupported function 'xs:anyURI'", 0);
@@ -249,8 +249,8 @@ describe('XQuery front-end xs: constructors', () => {
     });
 
     it('should refuse a cast to one of them by name', () => {
-      failsWith('"1" cast as xs:date', "unsupported construct 'cast as xs:date'", 12);
-      failsWith('"1" castable as xs:date?', "unsupported construct 'castable as xs:date'", 16);
+      failsWith('"1" cast as xs:duration', "unsupported construct 'cast as xs:duration'", 12);
+      failsWith('"1" castable as xs:gYear?', "unsupported construct 'castable as xs:gYear'", 16);
     });
   });
 });
@@ -296,14 +296,14 @@ describe('XQuery front-end fn:tokenize', () => {
     assert.deepStrictEqual(values('for $t in tokenize("1,2", ",") return xs:integer($t) * 2'), [2, 4]);
   });
 
-  it('should stay inside the engine sequence guards: the positions are a sequence', () => {
+  it('should emit the engine operator, the one-argument call over the normalized text', () => {
+    assert.deepStrictEqual(validated('tokenize($s, ",")'), { '$tokenize': ['$s', ','] });
+    assert.deepStrictEqual(validated('tokenize($s)'), { '$tokenize': [{ '$normalize-space': '$s' }, ' '] });
+  });
+
+  it('should split a text with more pieces than the sequence guards admit: no sequence of positions is built', () => {
     const query = compileXQuery('tokenize($s, ",")', { limits: { sequenceItems: 20 } });
-    assert.deepStrictEqual(query(null, { s: 'a,'.repeat(10) }), ['a', 'a', 'a', 'a', 'a', 'a', 'a', 'a', 'a', 'a', '']);
-    assert.throws(() => query(null, { s: 'a,'.repeat(20) }), (e) => {
-      assert.ok(e instanceof JsonQueryRuntimeError, e.message);
-      assert.strictEqual(e.code, 'JQ2009');
-      return true;
-    });
+    assert.strictEqual(query(null, { s: 'a,'.repeat(20) }).length, 21);
   });
 
   it('should refuse a non-string operand as a string parameter', () => {
@@ -317,28 +317,66 @@ describe('XQuery front-end fn:tokenize', () => {
     assert.deepStrictEqual(values('for $tk_n in ("x,y") return tokenize($tk_n, ",")'), ['x', 'y']);
   });
 
-  it('should refuse a pattern the document cannot split at', () => {
-    const pattern = "unsupported construct 'tokenize pattern other than plain text'";
-    failsWith('tokenize($s, "b|c")', pattern, 0);
-    failsWith('tokenize($s, "\\s+")', pattern, 0);
-    failsWith('tokenize($s, $p)', pattern, 0);
-    failsWith('tokenize($s, "")', pattern, 0);
-    failsWith('tokenize($s, "a" || "b")', pattern, 0);
-    for (const c of ['.', '?', '*', '+', '(', ')', '{', '}', '[', ']', '^', '$', '|', '\\'])
-      failsWith(`tokenize($s, "a${c === '\\' ? '\\\\' : c}")`, pattern, 0);
+  it('should split at the matches of a regular expression, leftmost first', () => {
+    assert.deepStrictEqual(tokens('abracadabra', '(ab)|(a)'), ['', 'r', 'c', 'd', 'r', '']);
+    assert.deepStrictEqual(tokens('a1b22c', '[0-9]+'), ['a', 'b', 'c']);
+    assert.deepStrictEqual(tokens('1, 15, 24, 50', ',[ ]*'), ['1', '15', '24', '50']);
+    assert.deepStrictEqual(tokens('a.b|c', '[.|]'), ['a', 'b', 'c']);
+    assert.deepStrictEqual(values('tokenize($s, $p)', { s: 'x-y-z', p: '-' }), ['x', 'y', 'z']);
   });
 
-  it('should refuse a separator that overlaps itself: the scan would need its left-to-right matches', () => {
-    const overlap = "unsupported construct 'tokenize separator that overlaps itself'";
-    failsWith('tokenize($s, "aa")', overlap, 0);
-    failsWith('tokenize($s, "abab")', overlap, 0);
-    failsWith('tokenize($s, "aba")', overlap, 0);
-    failsWith('tokenize($s, "--")', overlap, 0);
+  it('should split at a separator that overlaps itself, left to right', () => {
+    assert.deepStrictEqual(tokens('aaa', 'aa'), ['', 'a']);
+    assert.deepStrictEqual(tokens('abababa', 'aba'), ['', 'b', '']);
+    assert.deepStrictEqual(tokens('a--b---c', '--'), ['a', 'b', '-c']);
     assert.deepStrictEqual(tokens('abcab', 'abc'), ['', 'ab']);
   });
 
-  it('should refuse the flags argument and a missing input', () => {
-    failsWith('tokenize($s, ",", "i")', "unsupported function 'tokenize#3'", 0);
+  it('should refuse a pattern that matches the zero-length string, or is no I-Regexp, when it runs', () => {
+    failsAtRun('tokenize($s, "")', { s: 'ab' });
+    failsAtRun('tokenize($s, "a*")', { s: 'ab' });
+    failsAtRun('tokenize($s, ".?")', { s: 'abba' });
+    failsAtRun('tokenize($s, "[")', { s: 'ab' });
+    // XSD's multi-character escapes are not I-Regexp (D5)
+    failsAtRun('tokenize($s, "\\s+")', { s: 'a b' });
+    failsAtRun('tokenize($s, $p)', { s: 'ab', p: 'b*' });
+  });
+
+  it('should give the empty text no tokens whatever the pattern, as F&O does', () => {
+    assert.deepStrictEqual(values('tokenize("", "[")'), []);
+    assert.deepStrictEqual(values('tokenize((), "a*")'), []);
+  });
+
+  it('should refuse a pattern that is not one string, the empty sequence included', () => {
+    failsAtRun('tokenize("a", ())');
+    failsAtRun('tokenize("a", $p)', { p: 1 });
+  });
+
+  it('should read the flags as the query is read: none, and q for plain text', () => {
+    assert.deepStrictEqual(validated('tokenize($s, ",", "")'), { '$tokenize': ['$s', ','] });
+    assert.deepStrictEqual(values('tokenize("a.b.c", ".", "q")'), ['a', 'b', 'c']);
+    assert.deepStrictEqual(values('tokenize("a$b^c(d", "$", "q")'), ['a', 'b^c(d']);
+    assert.deepStrictEqual(values('tokenize("a$b^c(d", "^", "qq")'), ['a$b', 'c(d']);
+    assert.deepStrictEqual(values('tokenize("x\\y[z]", "\\", "q")'), ['x', 'y[z]']);
+    assert.deepStrictEqual(validated('tokenize($s, "a|b", "q")'), { '$tokenize': ['$s', 'a\\|b'] });
+    assert.deepStrictEqual(values('tokenize("a|b", "a|b", "q")'), ['', '']);
+  });
+
+  it('should refuse the flags an I-Regexp cannot honour, and flags or a q pattern computed when the query runs', () => {
+    for (const flag of ['i', 's', 'm', 'x'])
+      failsWith(`tokenize($s, ",", "q${flag}")`, `unsupported construct 'tokenize flag ${flag}'`, 0);
+    failsWith('tokenize($s, ",", $f)', "unsupported construct 'tokenize flags other than a literal'", 0);
+    failsWith('tokenize($s, $p, "q")', "unsupported construct 'tokenize flag q with a computed pattern'", 0);
+  });
+
+  it('should raise F&O FORX0001 for a flag F&O does not define, when the call runs', () => {
+    failsAtRun('tokenize("a", "b", "t")');
+    failsAtRun('tokenize("a", "b", " ")');
+    assert.deepStrictEqual(values('if (false()) then tokenize("a", "b", "t") else 1'), [1]);
+  });
+
+  it('should refuse the arities F&O does not have', () => {
+    failsWith('tokenize($s, ",", "", ())', "unsupported function 'tokenize#4'", 0);
     failsWith('tokenize()', "unsupported function 'tokenize#0'", 0);
     failsWith('fn:tokenize()', "unsupported function 'fn:tokenize#0'", 0);
   });

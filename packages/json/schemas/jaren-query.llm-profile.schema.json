@@ -585,7 +585,7 @@
       }
     },
     "ternaryOperatorPhrase": {
-      "description": "Operators whose value is an array of exactly three operand expressions: $date-diff [from, to, unit]. (LLM profile: a member-name constraint is relaxed here; the canonical schema enforces it)",
+      "description": "Operators whose value is an array of exactly three operand expressions: $date-diff [from, to, unit], $translate [string, map, translation]. (LLM profile: a member-name constraint is relaxed here; the canonical schema enforces it)",
       "type": "object",
       "minProperties": 1,
       "maxProperties": 1,

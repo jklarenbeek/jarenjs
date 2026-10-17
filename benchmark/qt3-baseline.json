@@ -1,8 +1,8 @@
 {
- "$comment": "QT3 baseline: every attributed tier-A failure (see benchmark/qt3-README.md). Deviation ids: D1-D7 QUERY-FORMAT.md section 11; E1/E2 engine rules (comparison/no-atomization, sections 8.4-8.10); E3 resource guards (section 8.9); E4 NaN ordering (section 6.6); F1-F6 front-end approximations (XQUERY-FRONTEND.md section 3). skip: fatal resource exhaustion, never run in-process.",
+ "$comment": "QT3 baseline: every attributed tier-A failure (see benchmark/qt3-README.md). Deviation ids: D1-D7 QUERY-FORMAT.md section 11; E1/E2 engine rules (comparison/no-atomization, sections 8.4-8.10); E3 resource guards (section 8.9); E4 NaN ordering (section 6.6); F1-F7 front-end approximations (XQUERY-FRONTEND.md sections 3 and 4.9). skip: fatal resource exhaustion, never run in-process.",
  "summary": {
-  "pass": 6103,
-  "unsupported-syntax": 16232
+  "pass": 6897,
+  "unsupported-syntax": 15472
  },
  "tests": {
   "ArrayTest-044": {
@@ -29,6 +29,36 @@
    "status": "deviation",
    "id": "D1",
    "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "CastAs120": {
+   "status": "deviation",
+   "id": "F7",
+   "note": "a date outside the domain the front-end reads, refused at run time"
+  },
+  "CastAs121": {
+   "status": "deviation",
+   "id": "F7",
+   "note": "a date outside the domain the front-end reads, refused at run time"
+  },
+  "CastAs124": {
+   "status": "deviation",
+   "id": "F7",
+   "note": "a date outside the domain the front-end reads, refused at run time"
+  },
+  "CastAs125": {
+   "status": "deviation",
+   "id": "F7",
+   "note": "a date outside the domain the front-end reads, refused at run time"
+  },
+  "CastAs129": {
+   "status": "deviation",
+   "id": "F7",
+   "note": "a date outside the domain the front-end reads, refused at run time"
+  },
+  "CastAs130": {
+   "status": "deviation",
+   "id": "F7",
+   "note": "a date outside the domain the front-end reads, refused at run time"
   },
   "CastAs167": {
    "status": "deviation",
@@ -74,6 +104,36 @@
    "status": "deviation",
    "id": "D1",
    "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "CastableAs120": {
+   "status": "deviation",
+   "id": "F7",
+   "note": "a date outside the domain the front-end reads, refused at run time"
+  },
+  "CastableAs121": {
+   "status": "deviation",
+   "id": "F7",
+   "note": "a date outside the domain the front-end reads, refused at run time"
+  },
+  "CastableAs124": {
+   "status": "deviation",
+   "id": "F7",
+   "note": "a date outside the domain the front-end reads, refused at run time"
+  },
+  "CastableAs125": {
+   "status": "deviation",
+   "id": "F7",
+   "note": "a date outside the domain the front-end reads, refused at run time"
+  },
+  "CastableAs129": {
+   "status": "deviation",
+   "id": "F7",
+   "note": "a date outside the domain the front-end reads, refused at run time"
+  },
+  "CastableAs130": {
+   "status": "deviation",
+   "id": "F7",
+   "note": "a date outside the domain the front-end reads, refused at run time"
   },
   "FOAR0001_1": {
    "status": "deviation",
@@ -1030,10 +1090,20 @@
    "id": "D1",
    "note": "xs:long/xs:unsignedLong check their range on the double a text or literal rounds to; past 2^53 that double can lie on the other side of the bound (XQUERY-FRONTEND section 4.6)"
   },
+  "K2-SeqExprCastable-4": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "one number type: a double, not xs:decimal/xs:integer precision or overflow"
+  },
   "K2-TokenizeFunc-6": {
    "status": "deviation",
    "id": "D5",
    "note": "pattern is valid XSD regex but not I-Regexp"
+  },
+  "K2-TokenizeFunc-7": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp, not XSD regex (\\s, \\W, (?:))"
   },
   "LetExpr006": {
    "status": "deviation",
@@ -1374,6 +1444,26 @@
    "status": "deviation",
    "id": "D1",
    "note": "xs:float is an IEEE double here: no single-precision value, range or serialization"
+  },
+  "cbcl-fn-format-number-001": {
+   "status": "deviation",
+   "id": "F5",
+   "note": "fn:number maps to the strict $number cast"
+  },
+  "cbcl-fn-format-number-017": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "one number type: a double, not xs:decimal/xs:integer precision or overflow"
+  },
+  "cbcl-fn-format-number-022": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "one number type: a double, not xs:decimal/xs:integer precision or overflow"
+  },
+  "cbcl-fn-format-number-037": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "one number type: a double, not xs:decimal/xs:integer precision or overflow"
   },
   "cbcl-hash-join-009": {
    "status": "deviation",
@@ -2600,6 +2690,26 @@
    "id": "D1",
    "note": "integers beyond 2^53 lose precision as IEEE doubles"
   },
+  "fn-tokenize-3": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp, not XSD regex (\\s, \\W, (?:))"
+  },
+  "fn-tokenize-33": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp, not XSD regex (\\s, \\W, (?:))"
+  },
+  "fn-tokenize-4": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp, not XSD regex (\\s, \\W, (?:))"
+  },
+  "fn-tokenize-6": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp, not XSD regex (\\s, \\W, (?:))"
+  },
   "fn-true-10": {
    "status": "deviation",
    "id": "E1",
@@ -2675,6 +2785,21 @@
    "id": "E2",
    "note": "aggregates treat an array as one item (no atomization), JQ2001"
   },
+  "fo-test-fn-tokenize-002": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp, not XSD regex (\\s, \\W, (?:))"
+  },
+  "fo-test-fn-tokenize-003": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp, not XSD regex (\\s, \\W, (?:))"
+  },
+  "fo-test-fn-tokenize-004": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp, not XSD regex (\\s, \\W, (?:))"
+  },
   "functx-fn-abs-3": {
    "status": "deviation",
    "id": "D1",
@@ -2730,6 +2855,46 @@
    "id": "D5",
    "note": "pattern is valid XSD regex but not I-Regexp"
   },
+  "functx-fn-tokenize-1": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp, not XSD regex (\\s, \\W, (?:))"
+  },
+  "functx-fn-tokenize-11": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp, not XSD regex (\\s, \\W, (?:))"
+  },
+  "functx-fn-tokenize-2": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp, not XSD regex (\\s, \\W, (?:))"
+  },
+  "functx-fn-tokenize-3": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp, not XSD regex (\\s, \\W, (?:))"
+  },
+  "functx-fn-tokenize-4": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp, not XSD regex (\\s, \\W, (?:))"
+  },
+  "functx-fn-tokenize-7": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp, not XSD regex (\\s, \\W, (?:))"
+  },
+  "functx-fn-tokenize-9": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp, not XSD regex (\\s, \\W, (?:))"
+  },
+  "functx-fn-tokenize-all": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp, not XSD regex (\\s, \\W, (?:))"
+  },
   "map-get-903": {
    "status": "deviation",
    "id": "F3",
@@ -2749,6 +2914,39 @@
    "status": "deviation",
    "id": "D1",
    "note": "IEEE double division: div by 0 is +-Infinity/NaN, not FOAR0001"
+  },
+  "numberformat119": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "one number type: a double, not xs:decimal/xs:integer precision or overflow"
+  },
+  "numberformat120": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "one number type: a double, not xs:decimal/xs:integer precision or overflow"
+  },
+  "numberformat63": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "one number type: a double, not xs:decimal/xs:integer precision or overflow"
+  },
+  "numberformat64": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "one number type: a double, not xs:decimal/xs:integer precision or overflow"
+  },
+  "numberformat87": {
+   "status": "bug",
+   "issue": "the suite converter drops the element-level xmlns:a of the case's decimal-format, so the runner cannot resolve a:test"
+  },
+  "numberformat906InputErr": {
+   "status": "bug",
+   "issue": "error precedence: the invalid picture is refused (JQ0003) before the non-numeric input raises XPTY0004"
+  },
+  "numberformatNaN": {
+   "status": "deviation",
+   "id": "F5",
+   "note": "fn:number maps to the strict $number cast"
   },
   "op-boolean-equal-17": {
    "status": "deviation",
@@ -3294,6 +3492,16 @@
    "status": "deviation",
    "id": "D1",
    "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "quantExpr-30": {
+   "status": "deviation",
+   "id": "F7",
+   "note": "a date outside the domain the front-end reads, refused at run time"
+  },
+  "quantExpr-60": {
+   "status": "deviation",
+   "id": "F7",
+   "note": "a date outside the domain the front-end reads, refused at run time"
   },
   "rangeExpr-28": {
    "status": "deviation",

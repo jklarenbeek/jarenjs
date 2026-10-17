@@ -183,7 +183,7 @@ describe('XQuery front-end cast as and castable as', () => {
   });
 
   it('should refuse a type outside the mapped ones by name', () => {
-    failsWith('"1" cast as xs:date', "unsupported construct 'cast as xs:date'", 12);
+    failsWith('"1" cast as xs:gYear', "unsupported construct 'cast as xs:gYear'", 12);
     failsWith('"1" castable as xs:anyAtomicType', "unsupported construct 'castable as xs:anyAtomicType'", 16);
     failsWith('"1" cast as integer', "unsupported construct 'cast as integer'", 12);
     failsWith('"1" cast as fn:string', "unsupported construct 'cast as fn:string'", 12);
