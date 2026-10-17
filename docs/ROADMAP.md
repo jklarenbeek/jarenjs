@@ -666,17 +666,18 @@ what each does is its own documentation's job
   `5`. SQLite answers all of these as the engine. Wanted: the interval
   comparison the scalar external now makes (decimal edges with tie sides), for
   literals and list items, and for every double, not only those past 2^53.
-- [ ] **On SQLite an ordering over an indexed `integer` member the schema does
-  not bound is sorted, never read in index order.** The order key reads the
-  double (`CAST("gx_v" AS REAL)`) so two spellings of one double past 2^53 tie
-  as the engine's do. A member whose own `minimum`/`maximum` (or their
-  exclusive forms) bound it within ±(2^53 − 1) is read bare in index order (a
-  time-series instant declared `minimum: 0, maximum: 8640000000000000`), but
-  an `$orderby`, a window or a time-series range over an unbounded `integer`
-  member still sorts every row it reads. Wanted: an order the index provides
-  that still ties those spellings for an unbounded member (an index over the
-  double, or a statement that reads in index order and re-sorts only a run
-  holding an integer past ±(2^53 − 1)), measured.
+- [ ] **On SQLite an empty window over an indexed `integer` member the schema
+  does not bound is read twice, and a read of every row is sorted.** The order
+  key reads the double (`CAST("gx_v" AS REAL)`) so two spellings of one double
+  past 2^53 tie as the engine's do. A window with a limit reads the column
+  bare, in index order, behind a probe in its own LIMIT (the column's MIN and
+  MAX past ±(2^53 − 1) leave no row), and an empty answer is read again
+  ordered by the double: a window that holds no row, and every window over
+  rows that hold such an integer, costs both statements, the first a whole
+  index walk where no index serves the filter. A read of every row sorts.
+  Wanted: a statement that tells an empty answer from a probe that found such
+  an integer (a sentinel row whose order SQLite keeps), or an index over the
+  double, measured.
 - [ ] **On SQLite a decimal another writer spelled just past a tie reads as
   the other double.** SQLite 3.53.4 reads
   `1152921504606847104.0000000000000001` as 2^60 and

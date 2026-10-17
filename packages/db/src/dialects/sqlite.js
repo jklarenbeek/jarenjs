@@ -615,6 +615,15 @@ export const sqliteDialect = createDialect({
   // compares the double nearest to it
   numberRead: (sql) => `CAST(${sql} AS REAL)`,
   doubleRead: (sql) => `CAST(${sql} AS REAL)`,
+  // SQLite evaluates a LIMIT once, before the first row: each bound one MIN
+  // or MAX read, which an index over the column (after the equalities the
+  // filter seeks) answers from its end, and NULL (no row) is not past it; a
+  // text or a blob a foreign writer stored sorts past every number, so it
+  // reads as past the bound and the read falls back to the double order
+  limitUnlessWide: (probes, from, limit, offset) => `LIMIT CASE WHEN ${probes.map(({ column, where }) =>
+    `(SELECT MAX(${column}) FROM ${from}${where()}) > 9007199254740991`
+    + ` OR (SELECT MIN(${column}) FROM ${from}${where()}) < -9007199254740991`).join(' OR ')}`
+    + ` THEN 0 ELSE ${limit} END${offset !== undefined && offset > 0 ? ` OFFSET ${offset}` : ''}`,
   // and so a stored JSON integer is read by its digits, and compared exactly
   integerDigits: true,
   rowIdentity,

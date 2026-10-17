@@ -639,6 +639,7 @@ function slotName(slot) {
 /** Where each edge sits in a `[west, south, east, north]` box. */
 const BOX_AT = { w: 0, s: 1, e: 2, n: 3 };
 
+
 /**
  * Bind one edge of the probe box: a plan-time literal box binds its own
  * number, an external one binds a derived slot the binder computes from
@@ -665,12 +666,18 @@ function probeEdge(probe, param, axis) {
  * @param {import('./algebra.js').Plan} plan
  * @param {any} dialect
  * @param {{ table: string, keyColumn: string, docColumn: string, doubleColumns?: Set<string>,
- *   safeIntegerColumns?: Set<string> }} physical - the table's names, the generated columns that hold a
- *   number as a double, and those whose integers the schema bounds within ±(2^53 − 1)
- * @returns {{ sql: string, slots: ParamSlot[], seeks?: any[], columns: string[] }} `columns`
- *   are the generated columns the statements spell
+ *   safeIntegerColumns?: Set<string>, indexedColumns?: Map<string, 'leads' | 'follows'> }} physical - the
+ *   table's names, the generated columns that hold a number as a double, those whose integers the
+ *   schema bounds within ±(2^53 − 1), and those a B-tree index keys (leading one that holds every row,
+ *   or otherwise)
+ * @param {boolean} [probeWide] - whether an ordering may read an integer column bare behind
+ *   the dialect's `limitUnlessWide`; `false` emits the statement that orders by the double
+ * @returns {{ sql: string, slots: ParamSlot[], seeks?: any[], columns: string[],
+ *   fallback?: { sql: string, slots: ParamSlot[] } }} `columns` are the generated columns the
+ *   statements spell; `fallback`, beside a statement that orders an integer column bare and answers
+ *   no row when the probe finds a number past ±(2^53 − 1), is the one that answers when it is empty
  */
-export function emitPlan(plan, dialect, physical) {
+export function emitPlan(plan, dialect, physical, probeWide = true) {
   if (plan.group !== null && plan.aggregate?.fn === 'count') {
     const inner = emitPlan({ ...plan, aggregate: null }, dialect, physical);
     return { ...inner, sql: `SELECT COUNT(*) AS ${dialect.quoteIdentifier('value')} `
@@ -1259,7 +1266,7 @@ export function emitPlan(plan, dialect, physical) {
    * its order is insertion (row identity) order, and the engine's sort is
    * stable — the identity tiebreaker reproduces both, and without it the
    * database is free to answer in index order */
-  const rowOrder = () => [...(plan.order ?? []).map((term) => {
+  const rowOrder = (probed = false) => [...(plan.order ?? []).map((term) => {
     // Jaren's default sorts an empty key least: NULLS FIRST when
     // ascending, NULLS LAST when descending — and mirrored for
     // $empty: 'greatest' (probed against the engine)
@@ -1267,12 +1274,40 @@ export function emitPlan(plan, dialect, physical) {
     // a number orders as the double the engine holds, so two spellings of
     // one double tie and the next term decides between them, as the
     // engine's do; a column that holds the double already, or only safe
-    // integers, orders bare and through its index
+    // integers, orders bare and through its index, and so does a probed
+    // integer column, which holds only safe integers when the probe is false
     const value = valueOf(term.ref, kindOf(term.ref));
-    return `${kindOf(term.ref) === 'number' && !ordersAsDouble(term.ref, value) ? dialect.doubleRead(value) : value} `
+    return `${ordersByDouble(term) && !(probed && probesWide(term)) ? dialect.doubleRead(value) : value} `
       + `${term.desc ? 'DESC' : 'ASC'}${dialect.orderNulls(nullsFirst)}`;
   }), dialect.rowIdentity()];
-  const where = plan.filter === null ? '' : ` WHERE ${emitPred(plan.filter)}`;
+  /** Whether an order term reads its number through `doubleRead`. @param {any} term */
+  const ordersByDouble = (term) => kindOf(term.ref) === 'number'
+    && !ordersAsDouble(term.ref, valueOf(term.ref, 'number'));
+  /** Whether an order term the double read would sort is a generated
+   * column an index keys, which the dialect's `limitUnlessWide` probes
+   * instead: one no index keys is sorted either way. @param {any} term */
+  const probesWide = (term) => valueOf(term.ref, 'number') === q(term.ref.column)
+    && physical.indexedColumns?.has(term.ref.column) === true;
+  const filterOf = () => (plan.filter === null ? '' : ` WHERE ${emitPred(plan.filter)}`);
+  const ordered = plan.aggregate === null && plan.rank === null && plan.bucket === null && plan.group === null;
+  // a window of a few rows over an ordering of indexed integer columns reads
+  // them bare, in their index order, and stops after them, when no row the
+  // filter selects (the window cuts the sorted whole) holds a number past
+  // ±(2^53 − 1), two of which can be one double the engine ties. The probe is
+  // the statement's own LIMIT, read once in its snapshot before any row: over
+  // the whole column from the end of an index it leads (a row the filter drops
+  // only costs the fallback read), else through the filter. A row answered
+  // proves the probe false; an empty answer is read again with the double
+  // order (the fallback). A read of every row gains nothing from the index
+  // order a sort does not give, and sorts
+  const where = filterOf();
+  const probes = probeWide && ordered && plan.window !== null && plan.window.limit !== null
+    && dialect.limitUnlessWide !== undefined
+    ? (plan.order ?? []).filter((term) => ordersByDouble(term) && probesWide(term)).map((term) => ({
+      column: valueOf(term.ref, 'number'),
+      where: physical.indexedColumns?.get(term.ref.column) === 'leads' ? () => '' : filterOf,
+    }))
+    : [];
   // a grouping that keeps an ordering is a distinct of rows ordered by other paths than the one it
   // projects: its rows are numbered in that order, and a group stands where its first row does
   const numbered = plan.group !== null && plan.order !== null;
@@ -1317,15 +1352,15 @@ export function emitPlan(plan, dialect, physical) {
       : `${alias} ${plan.bucket.order === 'desc' ? 'DESC' : 'ASC'}`;
     sql += ` GROUP BY ${alias} ORDER BY ${order}`;
   }
-  if (plan.aggregate === null && plan.rank === null && plan.bucket === null
-    && plan.group === null) {
-    sql += ` ORDER BY ${rowOrder().join(', ')}`;
-  }
-  if (plan.window !== null && plan.aggregate === null) {
+  if (ordered) sql += ` ORDER BY ${rowOrder(probes.length > 0).join(', ')}`;
+  if (probes.length > 0)
+    sql += ` ${dialect.limitUnlessWide(probes, q(physical.table), plan.window.limit, plan.window.offset)}`;
+  else if (plan.window !== null && plan.aggregate === null)
     sql += ` ${dialect.limitClause(plan.window.limit, plan.window.offset)}`;
-  }
   const seeks = (plan.seeks ?? []).map((seek) => emitSeek(seek));
-  return { sql, slots, seeks, columns: [...spelled] };
+  if (probes.length === 0) return { sql, slots, seeks, columns: [...spelled] };
+  const fallback = emitPlan(plan, dialect, physical, false);
+  return { sql, slots, seeks, columns: [...spelled], fallback: { sql: fallback.sql, slots: fallback.slots } };
 
   /**
    * One seek statement: the extreme instant each group carries on the

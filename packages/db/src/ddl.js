@@ -955,6 +955,13 @@ export function planCollection(name, collection, dialect, options = undefined) {
      * holds the digits a writer spelled (`decimalDigits`), where `5` and a
      * conforming `5.00000000000000000001` are two values and one double. */
     safeIntegerColumns: dialect.decimalDigits ? new Set() : safeIntegerColumns,
+    /** The generated columns a B-tree index keys, each with whether it
+     * leads one that holds every row (no condition, `'leads'`) or keys it
+     * otherwise (`'follows'`): an ordering that reads such an integer column
+     * bare probes it for a number past ±(2^53 − 1) from the end of the index
+     * it leads, else through the statement's own filter; a column no index
+     * keys is sorted either way, and is not probed. */
+    indexedColumns: indexedColumnsOf(indexes),
     /** The indexes beside a declared index over a member of several kinds
      * that key its other kinds ({@link kindIndexesOf}): each one's name, its
      * declared index's (`of`), the kinds (`kind`, `text` or `text$boolean`),
@@ -1125,6 +1132,25 @@ export function containerKeysOf(dialect, table, indexes, generated) {
     }
   }
   return { keys, indexes: beside };
+}
+
+/**
+ * The generated columns a planned B-tree index keys: `'leads'` where the
+ * column is the first key of an index that holds every row (no condition),
+ * `'follows'` where it is only a later key or keys a conditional index.
+ * @param {{ columns: string[], where?: any }[]} indexes
+ * @returns {Map<string, 'leads' | 'follows'>}
+ */
+function indexedColumnsOf(indexes) {
+  /** @type {Map<string, 'leads' | 'follows'>} */
+  const out = new Map();
+  for (const index of indexes) {
+    index.columns.forEach((/** @type {string} */ column, /** @type {number} */ at) => {
+      if (at === 0 && index.where === undefined) out.set(column, 'leads');
+      else if (!out.has(column)) out.set(column, 'follows');
+    });
+  }
+  return out;
 }
 
 /**

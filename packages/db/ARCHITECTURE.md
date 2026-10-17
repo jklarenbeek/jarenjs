@@ -774,8 +774,21 @@ column whose schema bounds it within ±(2^53 − 1) on both sides (`minimum` /
 `physical.safeIntegerColumns`): every integer a conforming document holds there
 is its own double, since one past the bound reads as a double the bound
 refuses. Like the type guards, that proof holds over documents that conform —
-keep `compileSchema` injected — and an `integer` column without such bounds is
-sorted. PostgreSQL casts its `numeric` to `double precision`, guarded where
+keep `compileSchema` injected. A window with a limit over an indexed `integer`
+column without such bounds reads it bare too, behind a probe, and stops after
+its rows: two integers are one double only past ±(2^53 − 1), so the
+statement's LIMIT (the dialect's `limitUnlessWide`, which SQLite evaluates
+once, before the first row, in the statement's own snapshot) is zero when the
+column holds such a number — a MIN and a MAX read from the end of the index
+the column leads (`physical.indexedColumns`), or through the statement's own
+filter where it follows another key. A row answered proves the bare order the
+engine's; an empty answer is read again by the entry's `fallback`, which reads
+the double and sorts, so an empty window costs both reads (`explain()` shows
+the probed statement; a profile's full-scan refusal checks each statement
+before it reads). A read of every
+row, and a column no index keys, read the double and sort: the index order
+would save that sort alone, and where the filter selects few rows the sort is
+the cheaper plan. PostgreSQL casts its `numeric` to `double precision`, guarded where
 the cast would raise: a number at or past the
 midpoint between the largest double and 2^1024 reads as the infinity, and one at
 or below 2^-1075 (half the least double, a tie that rounds to zero) as a signed
@@ -1095,7 +1108,7 @@ ranges over. Three shapes follow from that, and they are closed:
 | shape | the document | the plan |
 |---|---|---|
 | **range** | every leading column pinned, a half-open range on the instant, ordered by it | native — `SEARCH … (series=? AND at>? AND at<?)` |
-| **as-of** | the same prefix with ONE instant bound, ordered by the instant, under a finite window | native — the index read backwards, one row (on SQLite, an instant the schema bounds within ±(2^53 − 1); an unbounded `integer` instant is read as the double and the rows the bound selects are sorted) |
+| **as-of** | the same prefix with ONE instant bound, ordered by the instant, under a finite window | native — the index read backwards, one row (on SQLite an unbounded `integer` instant behind the probe for a number past ±(2^53 − 1); when a row the bound selects holds one, those rows are read again as the double and sorted) |
 | **bucket** | a `$groupby` over `$time-bucket`, or a `$resample` whose spec asks for nothing more, that aggregates with `min`, `max` or `count`, or sums or averages an `integer` reading | native — `GROUP BY` over `at - (((at - origin) % every + every) % every)` |
 
 The ladder is integer arithmetic all the way down, and the non-negative

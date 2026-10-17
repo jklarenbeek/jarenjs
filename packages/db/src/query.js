@@ -1315,6 +1315,7 @@ export function createQueryEngine(context) {
     docColumn: physicalPlan.docColumn,
     doubleColumns: physicalPlan.doubleColumns,
     safeIntegerColumns: physicalPlan.safeIntegerColumns,
+    indexedColumns: physicalPlan.indexedColumns,
   };
   /** The k-nearest counters `stats()` reports: how many rows the
    * fetch scored and how many candidates the cut kept, so a
@@ -1570,6 +1571,11 @@ export function createQueryEngine(context) {
       // the plan's own anchor reads, prepared on first use and kept
       // with it: each one binds a TYPED slot in the statement above
       seeks: (emitted.seeks ?? []).map((seek) => ({ ...seek, statement: null })),
+      // the statement that orders by the double, read when the statement
+      // above, which orders an integer column bare unless a row it filters
+      // holds a number past ±(2^53 − 1), answers no row; whether the last run did
+      fallback: emitted.fallback === undefined ? null : { ...emitted.fallback, statement: null, scanChecked: false },
+      fellBack: false,
       externalNames,
       // the externals the profile's mandatory predicate binds in every
       // statement of this entry, diverted or not
@@ -1784,20 +1790,61 @@ export function createQueryEngine(context) {
   /** Bind slots against the call's externals, and the seeks' anchors:
    * the entry's own, or another statement's of the same plan (`slots`),
    * whose typed slots name the same seeks. */
-  const bindSlots = (entry, slots, externals) =>
+  const bindSlots = (entry, slots, externals) => chain(binderOf(entry, externals), (bind) => bind(slots));
+  /** One call's binder of any statement of the entry: the seeks are read
+   * once, and every statement binds the same anchors. */
+  const binderOf = (entry, externals) =>
     (entry.seeks.length === 0
-      ? slots.map((slot) => slotValue(slot, externals))
-      : chain(seekAnchors(entry), (anchors) =>
+      ? (slots) => slots.map((slot) => slotValue(slot, externals))
+      : chain(seekAnchors(entry), (anchors) => (slots) =>
         slots.map((slot) => slotValue(slot, externals, anchors))));
-  const bindParams = (entry, externals) => bindSlots(entry, entry.slots, externals);
 
-  /** Run a bound statement: the bind itself may have to READ first. */
+  /** Whether the entry's fallback answers: its statement orders an integer
+   * column bare and answers no row when a row it filters holds a number
+   * past ±(2^53 − 1), two of which can be one double the engine ties, so an
+   * empty answer is read again by the fallback, which orders by the double.
+   * A row answered proves the bare order the engine's. Noted as the last
+   * run's, for its cost.
+   * @param {any} entry @param {boolean} empty - whether the statement answered no row */
+  const readsWide = (entry, empty) => {
+    entry.fellBack = entry.fallback !== null && empty;
+    return entry.fellBack;
+  };
+  /** Run a bound statement: the bind itself may have to READ first. The
+   * fallback is checked against a profile's full-scan refusal as the
+   * statement was, on first use. */
   const runAll = (entry, externals, statement) =>
-    chain(bindParams(entry, externals), (params) => statement.all(params));
+    chain(binderOf(entry, externals), (bind) => chain(statement.all(bind(entry.slots)), (rows) =>
+      (readsWide(entry, rows.length === 0)
+        ? chain(guardScan(entry, entry.fallback), () =>
+          useRead(connection, entry.fallback, (fallback) => fallback.all(bind(entry.fallback.slots)), entry))
+        : rows)));
   const runGet = (entry, externals, statement) =>
-    chain(bindParams(entry, externals), (params) => statement.get(params));
-  /** How many statements one execution of this entry costs. */
-  const statementCost = (entry) => 1 + entry.seeks.length;
+    chain(bindSlots(entry, entry.slots, externals), (params) => statement.get(params));
+  /** A cursor's own iterator over one statement. @param {string} sql @param {any[]} params */
+  const iterateOwn = (sql, params) =>
+    chain(connection.prepare(sql, { readOnly: true, ephemeral: true }), (statement) => statement.iterate(params));
+  /** A cursor's iterator over an entry's statement: its first row, pulled
+   * here, decides whether the fallback's iterator answers instead
+   * ({@link readsWide}); a row pulled is the first the cursor reads.
+   * @param {any} entry @param {any} iterator @param {() => any} fallback */
+  const guardedIterator = (entry, iterator, fallback) => chain(iterator.next(), (first) => {
+    if (readsWide(entry, first.done === true))
+      return chain(iterator.return?.(undefined), fallback);
+    let held = first;
+    return {
+      next: () => {
+        if (held === null) return iterator.next();
+        const step = held;
+        held = null;
+        return step;
+      },
+      return: (value) => iterator.return?.(value),
+    };
+  });
+  /** How many statements one execution of this entry costs: the last run's,
+   * its fallback read included. */
+  const statementCost = (entry) => 1 + entry.seeks.length + (entry.fellBack ? 1 : 0);
 
   /** The external whose bound value sends this call to the residual —
    * a value the database cannot take, a region with no box, a probe of
@@ -2285,9 +2332,10 @@ export function createQueryEngine(context) {
     return cursorFactory({ ...classified, signal, deadline, now: state.now, wrap: driverWrap, onSettle,
       // the bind may have to READ first (a seek's anchor), so it settles
       // before the statement it binds is prepared
-      open: () => chain(guardScan(entry), () => chain(bindParams(entry, externals),
-        (params) => chain(connection.prepare(entry.sql, { readOnly: true, ephemeral: true }),
-          (statement) => statement.iterate(params)))),
+      open: () => chain(guardScan(entry), () => chain(binderOf(entry, externals), (bind) =>
+        chain(iterateOwn(entry.sql, bind(entry.slots)), (iterator) => (entry.fallback === null ? iterator
+          : guardedIterator(entry, iterator, () => chain(guardScan(entry, entry.fallback),
+            () => iterateOwn(entry.fallback.sql, bind(entry.fallback.slots)))))))),
       items });
   };
 

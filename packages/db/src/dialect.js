@@ -275,6 +275,7 @@ export const MEMBER_WHEN = Symbol('dialect.memberWhen');
  *   numberCast?: (sql: string) => string,
  *   numberRead?: (sql: string) => string,
  *   doubleRead?: (sql: string) => string,
+ *   limitUnlessWide?: (probes: { column: string, where: () => string }[], from: string, limit: number, offset?: number) => string,
  *   distinct?: (left: string, right: string) => string,
  *   mutationRowGuard?: (count: string, limit: number) => string,
  *   boundMutation?: (sql: string, limit: number) => string,
@@ -1094,6 +1095,17 @@ export function createDialect(spec) {
      * the expression alone.
      */
     doubleRead: spec.doubleRead ?? ((sql) => sql),
+    /**
+     * The window clause of a statement that orders integer columns bare:
+     * `limit` rows past `offset`, or none at all when a
+     * row of `from` that a probe's `where()` selects (called once per read
+     * it spells, in text order, each a fresh ` WHERE …` or '') holds a
+     * number past ±(2^53 − 1) in its `column` — the only numbers two of
+     * which can be one double. The engine reads it once, before any row,
+     * in the statement's own snapshot; an empty answer is read again with
+     * the double order. An engine without it orders by {@link doubleRead}.
+     */
+    limitUnlessWide: spec.limitUnlessWide,
     distinct: spec.distinct ?? ((left, right) => `${left} IS NOT ${right}`),
     mutationRowGuard: spec.mutationRowGuard,
     boundMutation: spec.boundMutation,

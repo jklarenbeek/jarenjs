@@ -234,8 +234,29 @@ describe('the emitted statements: one ladder, written once', () => {
     const emitted = sqlOf(plan(RANGE));
     assert.match(emitted.sql, /"gx_at" >= \?/);
     assert.match(emitted.sql, /"gx_at" < \?/);
-    // the order reads the double the engine orders by, so it sorts the range the index seeks
+    // with no index facts, the order reads the double the engine orders by, and sorts the range
     assert.match(emitted.sql, /ORDER BY CAST\("gx_at" AS REAL\) ASC NULLS FIRST, "rowid"$/);
+  });
+
+  it('a window of an unbounded instant the index keys is read in its order unless the range holds a number past 2^53', () => {
+    const FIRST = { $subsequence: [RANGE, 0, 10] };
+    const emitted = emitPlan(plan(FIRST).plan, sqliteDialect, { ...PHYSICAL, indexedColumns: physicalPlan.indexedColumns });
+    assert.deepEqual([physicalPlan.indexedColumns.get('gx_series'), physicalPlan.indexedColumns.get('gx_at')], ['leads', 'follows']);
+    // the instant follows the series in its index, so the probe reads through the range's own filter
+    const where = emitted.sql.slice(emitted.sql.indexOf(' WHERE '), emitted.sql.indexOf(' ORDER BY '));
+    assert.ok(emitted.sql.endsWith(' ORDER BY "gx_at" ASC NULLS FIRST, "rowid" LIMIT CASE WHEN '
+      + `(SELECT MAX("gx_at") FROM "sample"${where}) > 9007199254740991 OR (SELECT MIN("gx_at") FROM "sample"${where}) `
+      + '< -9007199254740991 THEN 0 ELSE 10 END'), emitted.sql);
+    assert.equal(emitted.slots.length, 3 * sqlOf(plan(FIRST)).slots.length);
+    // the statement an empty answer is read again by orders by the double
+    assert.equal(emitted.fallback?.sql, sqlOf(plan(FIRST)).sql);
+    assert.match(emitted.fallback?.sql ?? '', /ORDER BY CAST\("gx_at" AS REAL\) ASC NULLS FIRST, "rowid" LIMIT 10$/);
+    // the as-of row, a window of one, reads the index backwards behind the same probe
+    assert.match(emitPlan(plan(ASOF).plan, sqliteDialect, { ...PHYSICAL, indexedColumns: physicalPlan.indexedColumns }).sql,
+      /ORDER BY "gx_at" DESC NULLS LAST, "rowid" LIMIT CASE WHEN \(SELECT MAX\("gx_at"\) FROM "sample" WHERE .+ THEN 0 ELSE 1 END$/);
+    // a read of every row in the range sorts: the index order would save that sort alone
+    assert.equal(emitPlan(plan(RANGE).plan, sqliteDialect, { ...PHYSICAL, indexedColumns: physicalPlan.indexedColumns }).sql,
+      sqlOf(plan(RANGE)).sql);
   });
 
   it('an instant the schema bounds within ±(2^53 − 1) is read in the order the index seeks it', () => {

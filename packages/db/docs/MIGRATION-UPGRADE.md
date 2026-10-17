@@ -3348,13 +3348,17 @@ PostgreSQL compares such an external with a member's digits exactly.
   digits on PostgreSQL, and on SQLite for an `integer` member and an unindexed
   `number` member, so `$orderby: ['$it.u', '$it.id']` and a window over it
   answered other rows than the engine. The order key reads the double (on
-  SQLite `CAST(… AS REAL)`, on PostgreSQL `double precision`); on SQLite an
-  ordering over an indexed `integer` member is therefore sorted rather than
-  read in index order, unless the member's schema bounds it within
-  ±(2^53 − 1) on both sides (`minimum: 0, maximum: 8640000000000000` for an
-  epoch in milliseconds): such a member is read bare and keeps its index
-  order, as before. Declare those bounds on a time-series instant or another
-  indexed `integer` member a window or range reads in order. An entity's
+  SQLite `CAST(… AS REAL)`, on PostgreSQL `double precision`). On SQLite a
+  read of every row an ordering over an indexed `integer` member selects is
+  therefore sorted rather than read in index order; a window with a limit
+  (`$subsequence`, a range's first rows, an as-of row) keeps its index order,
+  as before, while no row the ordering selects holds an integer past
+  ±(2^53 − 1): the statement checks that in its own LIMIT, and when one is
+  there, or the window is empty, it is read again ordered by the double, a
+  second statement that sorts the rows it reads. A member whose schema bounds
+  it within ±(2^53 − 1) on both sides (`minimum: 0, maximum:
+  8640000000000000` for an epoch in milliseconds) holds none and is read bare
+  in every read. An entity's
   document member and, on PostgreSQL, its `number` column order the same way,
   in a query's `$orderby`, a load's `orderBy` and keyset continuation, and an
   include's `orderBy`: a `page()` over such a column resumed past a run of

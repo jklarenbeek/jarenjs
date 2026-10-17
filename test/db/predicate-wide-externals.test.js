@@ -521,15 +521,19 @@ describe('an ordering over an integer member the schema bounds within ±(2^53 �
               const explained = await t.explain(doc);
               assert.deepEqual([explained.mode, await t.execute(doc)], ['native', await t.execute(doc, { pushdown: false })], `${member} ${label}`);
               if (engine !== 'sqlite') continue;
-              // the proven member's order is its index's, the others read the double and sort
-              const bare = member === 'at';
+              // the proven member's order is its index's; the others read the double and sort,
+              // but in a window read their index's order behind the probe for a number past
+              // ±(2^53 − 1), which finds r12's and r13's here, so the double order answers
+              const bare = member === 'at' || label === 'window';
               assert.equal(explained.sql.includes(`CAST("gx_${member}" AS REAL)`), !bare, `${member} ${label}`);
+              assert.equal(explained.sql.includes(`(SELECT MAX("gx_${member}") FROM "t") > 9007199254740991`),
+                member !== 'at' && label === 'window', `${member} ${label}`);
               const db = new DatabaseSync(path);
               try {
                 const plan = db.prepare(`EXPLAIN QUERY PLAN ${explained.sql}`).all(...explained.sql.split('?').slice(1).map(() => 0))
-                  .map((row) => String(row.detail)).join(' | ');
-                assert.equal(plan.includes('USE TEMP B-TREE FOR ORDER BY'), !bare, `${member} ${label}: ${plan}`);
-                if (bare) assert.match(plan, /USING INDEX t_by_at/, `${member} ${label}`);
+                  .map((row) => String(row.detail));
+                assert.equal(plan.includes('USE TEMP B-TREE FOR ORDER BY'), !bare, `${member} ${label}: ${plan.join(' | ')}`);
+                if (bare) assert.ok(plan.includes(`SCAN t USING INDEX t_by_${member}`), `${member} ${label}: ${plan.join(' | ')}`);
               }
               finally { db.close(); }
             }

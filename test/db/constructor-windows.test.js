@@ -72,9 +72,14 @@ function engineOutcome(/** @type {any} */ query, /** @type {any} */ documents, /
 }
 
 /** The window clause a dialect spells for a limit (or none) and an offset. */
-function windowClause(/** @type {string} */ host, /** @type {[number | null, number]} */ [limit, offset]) {
+/** Whether a statement ends in the window a case expects: on SQLite an
+ * ordering over an indexed integer column reads its window behind the probe
+ * for a number past ±(2^53 − 1), which leaves no row when one is there. */
+function endsWithWindow(/** @type {string} */ host, /** @type {string} */ sql, /** @type {[number | null, number]} */ [limit, offset]) {
   const bound = limit === null ? (host === 'sqlite' ? '-1' : 'ALL') : String(limit);
-  return `LIMIT ${bound}${offset > 0 ? ` OFFSET ${offset}` : ''}`;
+  const tail = offset > 0 ? ` OFFSET ${offset}` : '';
+  return sql.endsWith(`LIMIT ${bound}${tail}`)
+    || (host === 'sqlite' && /LIMIT CASE WHEN .+ > 9007199254740991 /.test(sql) && sql.endsWith(` THEN 0 ELSE ${bound} END${tail}`));
 }
 
 // ————— the operators, proven against the engine —————
@@ -514,7 +519,7 @@ function collectionGroup(name, expected) {
             const strict = () => Promise.resolve().then(() => collection.execute(kase.query, { ...options, strict: true }));
             if (window !== undefined) {
               assert.equal(explained.mode, 'row', label);
-              assert.ok(explained.sql.endsWith(windowClause(host, window)), `${label}: ${explained.sql}`);
+              assert.ok(endsWithWindow(host, explained.sql, window), `${label}: ${explained.sql}`);
               assert.equal(reasonId(explained.residual.reasons[0].reason), 'flwor.projection', label);
               assert.ok(explained.residual.reasons.every((/** @type {any} */ entry) => reasonId(entry.reason) !== null), label);
               assert.equal(explained.streaming, 'row', label);
