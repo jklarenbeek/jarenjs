@@ -57,13 +57,17 @@ function decodeJsonPointerKey(key) {
 
 /**
  * Where a keyword of the schema object a URI names sits, as the location a
- * refusal names (`https://a.test/s.json#/properties/a/%24ref`).
+ * refusal names (`https://a.test/s.json#/properties/a/%24ref`), or a member
+ * or item inside the keyword's value (`…#/properties/a`).
  * @param {string} uri - The schema object's URI
  * @param {string} keyword
+ * @param {...(string|number)} members - The member names and item indexes inside the value
  * @returns {string}
  */
-export function keywordLocation(uri, keyword) {
-  return encodeJsonPointerPath(uri.includes('#') ? uri : `${uri}#`, keyword);
+export function keywordLocation(uri, keyword, ...members) {
+  let location = encodeJsonPointerPath(uri.includes('#') ? uri : `${uri}#`, keyword);
+  for (const member of members) location = encodeJsonPointerPath(location, String(member));
+  return location;
 }
 
 /**

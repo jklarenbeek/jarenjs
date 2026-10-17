@@ -12,6 +12,7 @@ import {
   memberPath,
   extendsChildLocations,
 } from './tools.js';
+import { readsSince } from './schema-keywords.js';
 
 /**
  * Compile the unevaluatedProperties keyword as a final-stage validator.
@@ -177,10 +178,7 @@ export function wrapUnevaluated(schemaObj, jsonSchema, validator) {
   const root = schemaObj.root;
   if (!root.usesUnevaluated) return validator;
   if (jsonSchema == null || typeof jsonSchema !== 'object') return validator;
-  // unevaluatedProperties/unevaluatedItems only exist since draft 2019-09; a
-  // document that declares an older draft via $schema treats them as
-  // unknown keywords.
-  if (schemaObj.declaredDraft != null && schemaObj.declaredDraft < 2019) return validator;
+  if (!readsSince('unevaluatedProperties', schemaObj.declaredDraft)) return validator;
 
   const unevalProps = compileUnevaluatedProperties(schemaObj, jsonSchema);
   const unevalItems = compileUnevaluatedItems(schemaObj, jsonSchema);

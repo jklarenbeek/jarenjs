@@ -128,9 +128,9 @@ describe('which schemas build their children\'s locations', () => {
   });
 
   it('one object read as a map of names and as a schema is judged each way', () => {
-    // As the `properties` map, `$ref` is a member name; as the `items` schema
-    // it is a reference, which may lead to a reader.
-    const shared = { $ref: {} };
+    // As the `properties` map, `data` is a member name; as the `items` schema
+    // it is the `data` keyword, which reads the location.
+    const shared = { data: {} };
     const { valid, touched } = locationTouches({
       allOf: [
         { items: READER_ITEMS },

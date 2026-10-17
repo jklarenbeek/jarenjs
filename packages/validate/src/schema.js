@@ -48,6 +48,7 @@ import { compileDataSchema } from './data.js';
 import { compileQuerySchema } from './query-keyword.js';
 import { compilePropertyDependencies } from './property-dependencies.js';
 import { compileDollarDataSchema } from './dollar-data.js';
+import { admitKeywordValues } from './keyword-values.js';
 import { wrapUnevaluated } from './unevaluated.js';
 import { compiledLocation, createJsonPointer, keywordLocation } from './traverse.js';
 import { getDynamicAnchorName, admitsDynamicReference, appliesRefSiblings } from './dynamic-ref.js';
@@ -305,9 +306,8 @@ function compileTypeSimple(schemaObj, jsonSchema) {
   const type = getStringType(jsonSchema.type);
   if (type == null) return undefined;
 
+  // a name the validator does not know is refused before this compiles
   const isDataType = createIsSchemaTypeHandler(type);
-  if (!isDataType) throw new Error(`The explicit schema type '${type}' is unknown.`);
-
   const addError = schemaObj.createErrorHandler(type, 'type');
 
   return function validateTypeSimple(data, dataPath) {
@@ -320,19 +320,14 @@ function compileTypeSimple(schemaObj, jsonSchema) {
 function compileTypeArray(schemaObj, jsonSchema) {
   const schemaTypes = getUniqueArray(jsonSchema.type);
   if (schemaTypes == null) return undefined;
-  if (schemaTypes.length === 0)
-    throw new Error('The schema type property can not be an empty array.');
 
-  // collect all testable data types
+  // collect all testable data types (an empty list, and a name the
+  // validator does not know, are refused before this compiles)
   const types = [];
   const names = [];
   for (let i = 0; i < schemaTypes.length; ++i) {
     const type = schemaTypes[i];
-    const callback = createIsSchemaTypeHandler(type);
-    if (!callback)
-      throw new Error(`The explicit schema type '${type}' of [${schemaTypes.join(', ')}] is unknown.`);
-
-    types.push(callback);
+    types.push(createIsSchemaTypeHandler(type));
     names.push(type);
   }
 
@@ -465,6 +460,9 @@ export function compileSchemaObject(schemaObj, jsonSchema) {
     refWithSiblings = true;
   }
 
+  // Every keyword read below holds a value of the shape its draft defines.
+  admitKeywordValues(schemaObj, jsonSchema, keys);
+
   // When the metaschema's $vocabulary omits the validation vocabulary,
   // keywords like type/enum/minimum/minLength assert nothing.
   const vocabValidation = schemaObj.options.vocabValidation !== false;
@@ -516,10 +514,8 @@ export function compileSchemaObject(schemaObj, jsonSchema) {
   // Fast path: required-only schema (common case: {"required": ["foo", "bar"]})
   if (vocabValidation && keyCount === 1 && jsonSchema.required !== undefined) {
     const required = jsonSchema.required;
-    // Non-string entries (invalid schemas) can never match a data key;
-    // they stay on the generic Object.keys path.
-    if (Array.isArray(required) && required.length > 0
-      && required.every(key => typeof key === 'string')) {
+    // every entry is a member name: another entry is refused above
+    if (Array.isArray(required) && required.length > 0) {
       const addError = schemaObj.createErrorHandler(required, ['required']);
       const rlen = required.length;
 

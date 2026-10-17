@@ -64,7 +64,7 @@ import {
  * @param {*} value - The value to check
  * @returns {boolean} True if the value is a $data reference object
  */
-function isDollarDataRef(value) {
+export function isDollarDataRef(value) {
   return isObjectClass(value) && isStringType(value.$data);
 }
 
@@ -142,7 +142,7 @@ function compileDollarDataRequired(schemaObj, ref) {
  * of the observable behavior; the shared groups' internal order IS the
  * historical per-keyword dispatch sequence — `@jarenjs/core/schema`
  * documents that order as contract). */
-const DOLLAR_KEYWORD_ORDER = [
+export const DOLLAR_KEYWORD_ORDER = [
   ...NUMERIC_CONSTRAINTS,
   ...STRING_CONSTRAINTS,
   ...ARRAY_CONSTRAINTS,

@@ -30,7 +30,7 @@ import {
   ARRAY_CHILD_KEYWORDS,
 } from './tools.js';
 
-import { readPrefixItems } from './schema-keywords.js';
+import { readPrefixItems, readsSince } from './schema-keywords.js';
 
 //#region Primitives
 function compileMinItems(schemaObj, jsonSchema) {
@@ -132,7 +132,7 @@ function compileContainsMinMax(schemaObj, jsonSchema) {
   // minContains/maxContains belong to the validation vocabulary and exist
   // since draft 2019-09: without either, `contains` needs one match.
   const counted = schemaObj.options.vocabValidation !== false
-    && !(schemaObj.declaredDraft != null && schemaObj.declaredDraft < 2019);
+    && readsSince('minContains', schemaObj.declaredDraft);
   const minContains = counted ? getIntishType(jsonSchema.minContains) : undefined;
   const maxContains = counted ? getIntishType(jsonSchema.maxContains) : undefined;
 
@@ -272,8 +272,10 @@ function compileItemValidator(schemaObj, itemSchema, key, index) {
       if (typeOnly !== undefined) return typeOnly;
     }
 
-    // Fast path: required-only schema - check property directly first
-    if (bare && Array.isArray(itemSchema.required) && Object.keys(itemSchema).length === 1) {
+    // Fast path: required-only schema - check property directly first. A
+    // list naming anything but strings takes the full compile, which refuses it.
+    if (bare && Array.isArray(itemSchema.required) && Object.keys(itemSchema).length === 1
+      && itemSchema.required.every((name) => typeof name === 'string')) {
       const required = itemSchema.required;
       // `in` also answers for the names every object inherits (`toString`);
       // a list naming one of those takes the own-member probe, any other list

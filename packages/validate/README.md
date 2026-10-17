@@ -96,7 +96,8 @@ reads them, compiled in Unicode mode: `"/a/"` matches only text that contains
 `params.pattern` is the string the schema wrote. A RegExp that JavaScript code
 places in a schema keeps its own flags. A string that is no valid Unicode-mode
 source but compiles as a `v`-mode literal (`"/[\\p{L}--[a-z]]/v"`) is still
-read as that literal. *Upgrade: a string written
+read as that literal; one that compiles neither way is refused `JK0014` when
+the schema compiles (it was an uncoded `SyntaxError`). *Upgrade: a string written
 `/source/flags` used to be read as a regular-expression literal, so `"/a/"`
 accepted `"a"` and `"/a/i"` accepted `"A"`; drop the slashes and spell a
 flag inside the source (`"[Aa]"` for case-insensitivity). `params.pattern`
@@ -1052,8 +1053,28 @@ custom prototype as present, except for the names every object inherits
 (`toString`, `constructor`, ...), which must be own members. A member named `constructor`
 is data wherever it appears, so a `$defs` entry of that name is usable and a
 missing `$ref` target beside a `constructor` property is refused at compile
-time like any other. An unknown type name in a `type` list is refused naming
-the type and the list.
+time like any other.
+
+**A keyword value of the wrong shape is refused at compile.** Each keyword the
+validator reads takes the shape its draft's meta-schema gives it — a type name
+or a non-empty list of them, an array for `enum`, member names for `required`,
+an object of schemas for `properties`, a non-empty list of schemas for `anyOf`
+and `oneOf`, a non-negative integer for `minLength`, a number for `minimum`, a
+number greater than 0 for `multipleOf`, a boolean for `uniqueItems`, a regular
+expression for `pattern`, a string for `$ref` — and a value of another shape is
+refused `JK0013` (`JK0014` for a pattern that does not compile), naming the
+keyword, the shape and the place, the member or item of it that is wrong
+included (`#/properties/a`, `#/type/1`). A number written as a string
+(`"3"`), a `$data` reference, a boolean `exclusiveMinimum` beside `minimum`, a
+`RegExp` pattern and `required: true` keep their readings; annotations,
+identifiers, `$defs`, `format`, the content keywords, the extension keywords and
+a keyword the place does not read are not checked. An empty `enum` admits no
+value. *Upgrade: such a value compiled and answered as if the keyword were
+absent — `{ "required": "a" }` required nothing, `{ "type": 1 }` and
+`{ "anyOf": [] }` accepted every value, `{ "required": ["a", 1] }` accepted no
+object — or crashed the compile with an uncoded `Error`, `TypeError` or
+`SyntaxError` (an unknown type name, `{ "items": [5] }`, `{ "pattern": "[" }`);
+and `{ "enum": [] }` accepted every value.*
 
 **Collected errors are exhaustive across independent keywords.** Every
 keyword that can fail independently reports its own fault, rather than the

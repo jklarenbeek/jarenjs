@@ -39,6 +39,9 @@ describe('a compile refusal locates a place of the compiled document by its poin
     [{ $id: 'http://[bad' }, 'JK0010', '/%24id'],
     [{ $ref: '#/nope' }, 'JK0009', '/%24ref'],
     [{ $ref: 'https://x.test/elsewhere.json' }, 'JK0009', '/%24ref'],
+    [{ minLength: -1 }, 'JK0013', '/minLength'],
+    [{ properties: { b: 5 } }, 'JK0013', '/properties/b'],
+    [{ pattern: '[' }, 'JK0014', '/pattern'],
   ];
 
   for (const [root, label] of [[{}, 'without a root $id'], [{ $id: 'https://x.test/order' }, 'under an absolute root $id'], [{ $id: 'sub/order.json' }, 'under a relative root $id']]) {

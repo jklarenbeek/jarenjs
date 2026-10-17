@@ -133,11 +133,18 @@ delete it or fix it.
   held meta-schema is looked up by the `$schema` text as written, in the walk,
   in `dialectDraft`, in the `$vocabulary` lookup and in `compileAsync`. The
   names json-schema.org and the Jaren dialect publish are read in any case.
-- [ ] **An unknown type name is refused uncoded.** `compile({ type: 'strin'
-  })` throws a plain `Error` ("The explicit schema type 'strin' is unknown.")
-  with no `code` or `docPath`, and `{ type: 1 }` compiles and accepts every
-  value. A coded refusal located at the `type` keyword is a new code (a
-  minor).
+- [ ] **An empty `items` array ignores `additionalItems` beside it.** Under
+  draft-07, `{ items: [], additionalItems: false }` accepts `[1]`; the
+  draft-06/07/2019-09 meta-schemas give `items` at least one schema, but `{
+  items: [] }` alone answers right (no item constraint), so a refusal or a
+  zero-length tuple reading has to be decided.
+- [ ] **A `const` whose `$data` is not a string asserts nothing.** `{ const: {
+  $data: 5 } }` accepts every value: `const` is skipped for any truthy
+  `$data`, while only a string `$data` is compiled as a reference.
+- [ ] **`unknownFormats: 'error'` refuses uncoded and lets a non-string format
+  through.** `format: 'foo'` throws a plain `Error` with no `code` or
+  `docPath`; `format: 5` compiles and accepts every value under the same
+  option.
 - [ ] **A draft-07 plain-name `$id` as a reference target outside the
   validator.** In a draft-07 document, `definitions: { a: { $id: '#foo', type:
   'integer' } }` and `properties: { y: { $ref: '#foo' } }`: the validator

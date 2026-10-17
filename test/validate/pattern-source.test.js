@@ -60,7 +60,8 @@ describe('pattern reads a string as a pattern source', () => {
     const validate = compile({ type: 'string', pattern: '/[\\p{L}--[a-z]]/v' });
     assert.equal(validate('A'), true);
     assert.equal(validate('a'), false);
-    assert.throws(() => compile({ type: 'string', pattern: '/[\\p{L}--[a-z]]/' }), SyntaxError);
+    assert.throws(() => compile({ type: 'string', pattern: '/[\\p{L}--[a-z]]/' }),
+      (e) => e.code === 'JK0014' && e.docPath === '#/pattern' && e.cause instanceof SyntaxError);
   });
 
   it('a RegExp a JavaScript caller places in a schema keeps its flags', () => {

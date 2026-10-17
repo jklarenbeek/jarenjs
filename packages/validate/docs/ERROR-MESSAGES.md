@@ -313,6 +313,8 @@ query's own grammar; a `JK` code over it would send every reader to `cause`.
 | `JK0010` | `SchemaCompileError` | A `$ref`, `$dynamicRef`, `$recursiveRef` or `$id` (`id`) is not a valid URI reference: refused where the text is read, naming the keyword, the text and where it sits |
 | `JK0011` | `SchemaCompileError` | A `$recursiveRef` read as draft 2019-09 is not `"#"`: refused by the first call that reaches it, naming the `$ref` that applies the schema it names |
 | `JK0012` | `SchemaCompileError` | An identifier (`$id`, `$anchor`, `$dynamicAnchor`) names two schemas — a document declares it twice, or it already names another schema the validator holds: refused where the second is read, naming both places; in a registered document, refused by the compile that reads it |
+| `JK0013` | `SchemaCompileError` | A keyword the validator reads at a place holds a value that is not of the shape its draft's meta-schema requires (`type: 1`, `required: "a"`, `minLength: -1`, `properties: { "a": 5 }`, `anyOf: []`): refused where the place compiles, naming the keyword, the shape it takes and the value, located at the keyword or at the member or item of it that is wrong |
+| `JK0014` | `SchemaCompileError` | A `pattern`, or a `patternProperties` member name, is no regular expression: refused where the place compiles, located at the keyword or the member, the `SyntaxError` as the `cause` |
 | `JK0101` | `SchemaCompileError` | Retired, no longer raised: `deriveStrictProfile` (`@jarenjs/validate/strict-profile`) carries a schema that accepts any value — `true`, `{}`, a node with no type, a free-form object, a tuple — as JSON text |
 | `JK0102` | `SchemaCompileError` | `deriveStrictProfile`: an object whose member names are open and that no entries array carries — a map beside declared `properties`, a map that may also be an array, a schema-valued `unevaluatedProperties` |
 | `JK0103` | `SchemaCompileError` | `deriveStrictProfile`: a keyword that applies members, items or branches beside its node and that no distribution makes exact — `if`/`then`/`else`, `dependentSchemas` or a draft-07 `dependencies` schema beside an object type, a branch beside an object type that is more than members (a `$ref`, a nested union, an `enum`), a branch giving a member a second schema that is not an `enum` or `const`, an untyped `allOf` of more than one branch, a `$ref` or `anyOf` beside structural siblings |
@@ -556,6 +558,40 @@ JK0012: 'https://github.com/jklarenbeek/x.json#' is declared twice (first at '#/
 JK0012: $id declares 'https://a.test/x.json#', which names another schema the validator holds; give one of them another name at #/%24defs/a/%24id
 JK0012: 'https://d.test/x.json#' names two schemas (in 'https://d.test/r.json', at '#/%24defs/a/%24id' and at '#/%24defs/b/%24id'), and this compile reads it, which would answer by the one registered first; give one of them another name
 JK0012: 'https://d.test/x.json#' names two schemas (one registered under 'https://d.test/one.json', one under 'https://d.test/two.json'), and this compile reads it, which would answer by the one registered first; give one of them another name
+```
+
+**`JK0013`, `JK0014` — a keyword value of the wrong shape.** Every keyword
+the validator reads at a place takes a value of the shape the meta-schema of
+the place's draft gives it: a type name or a non-empty list of them, an array
+for `enum`, a list of member names for `required`, an object of schemas for
+`properties`, a schema or a non-empty list of schemas for the applicators, a
+non-negative integer for the counts, a number for the bounds, a number
+greater than 0 for `multipleOf`, a boolean for `uniqueItems`, a regular
+expression for `pattern`, a string for `$ref`. A value of another shape used
+to compile and answer as if the keyword were absent (`{ "required": "a" }`
+required nothing, `{ "type": 1 }` accepted every value) or crash the compile
+with an uncoded `Error`, `TypeError` or `SyntaxError`; it is refused where
+the place compiles, so a schema a model wrote gets the keyword, the place
+and the shape to repair. The values the validator reads by design keep
+answering: a `$data` reference, a number written as a string (`"3"`), a
+bigint bound, a boolean `exclusiveMinimum`/`exclusiveMaximum` beside its
+bound (the draft-04 form), a `RegExp` pattern, `required: true`, the extended
+type names (`bigint`, `set`, `map`, `tuple`, `regex`), a repeated or `null`
+member of a `type` list, a repeated name in `required`, an empty `allOf` or
+`prefixItems`, and an `items` array under 2020-12 (read as the tuple form).
+What a place does not read is not refused: a keyword its declared draft does
+not define, a validation keyword under a dialect that turns that vocabulary
+off, `then`/`else` without `if`, `additionalItems` without an `items` array,
+`minContains`/`maxContains` without `contains`, the siblings of a draft-07
+`$ref`, the annotations, identifiers, `$defs`/`definitions`, `format`, the
+content keywords and the extension keywords. A regular expression that does
+not compile is `JK0014`:
+
+```text
+JK0013: 'type' takes a type name (array, boolean, integer, null, number, object, string) or a non-empty array of type names, got 'strin'; a value of another shape is no constraint the validator reads at #/type
+JK0013: 'minimum' takes a number, got 'ten'; a value of another shape is no constraint the validator reads at #/properties/total/minimum
+JK0013: 'dependencies' takes an object whose members are schemas (objects or booleans) or arrays of member names, got 1 for member 'a' item 1; a value of another shape is no constraint the validator reads at #/dependencies/a/1
+JK0014: 'pattern' holds '[', which is no regular expression (Invalid regular expression: /[/u: Unterminated character class) at #/pattern
 ```
 
 **`JK0102`–`JK0108` — a schema with no strict form.** `deriveStrictProfile`

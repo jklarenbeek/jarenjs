@@ -18,6 +18,29 @@ export const TRAVERSE_SCHEMA_MAPS = /* @__PURE__ */ SCHEMA_MAP_KEYWORDS
  */
 export const TRAVERSE_SCHEMA_MAP_MAPS = /* @__PURE__ */ Object.freeze(['propertyDependencies']);
 
+/**
+ * The draft that introduced a keyword the validator compiles only from that
+ * draft on: a document that declares an older draft reads it as an unknown
+ * keyword, one that declares none reads it.
+ */
+export const ASSERTION_SINCE = Object.freeze({
+  prefixItems: 2020, dependentRequired: 2019, dependentSchemas: 2019, minContains: 2019, maxContains: 2019,
+  unevaluatedProperties: 2019, unevaluatedItems: 2019,
+});
+
+/**
+ * Whether a place reads a keyword as the draft that introduced it does
+ * ({@link ASSERTION_SINCE}): its document declares no draft, or that draft
+ * or a later one. Every other keyword is read wherever it appears.
+ * @param {string} keyword
+ * @param {number|null|undefined} declaredDraft - The draft the place's document declares, or null when it declares none
+ * @returns {boolean}
+ */
+export function readsSince(keyword, declaredDraft) {
+  const since = Object.hasOwn(ASSERTION_SINCE, keyword) ? /** @type {Record<string, number>} */ (ASSERTION_SINCE)[keyword] : undefined;
+  return since === undefined || declaredDraft == null || declaredDraft >= since;
+}
+
 /** The vocabulary meta-schemas each draft publishes beside its dialect. */
 const META_2019 = ['core', 'applicator', 'validation', 'meta-data', 'format', 'content'];
 const META_2020 = ['core', 'applicator', 'unevaluated', 'validation', 'meta-data', 'format-annotation', 'format-assertion', 'content'];
@@ -168,7 +191,7 @@ export function admitsPropertyDependencies(enabled, declaredDraft) {
  */
 export function readPrefixItems(schemaObj, jsonSchema) {
   const prefixItems = jsonSchema.prefixItems;
-  return (schemaObj.declaredDraft != null && schemaObj.declaredDraft < 2020) || !(isArrayClass(prefixItems) && prefixItems.length >= 1)
+  return !readsSince('prefixItems', schemaObj.declaredDraft) || !(isArrayClass(prefixItems) && prefixItems.length >= 1)
     ? undefined
     : prefixItems;
 }

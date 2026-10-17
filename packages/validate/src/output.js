@@ -28,7 +28,7 @@
 import { isArrayClass, isObjectClass } from '@jarenjs/core';
 import { encodeJSONPointerSegment, decodeJSONPointerSegment } from '@jarenjs/json/pointer';
 import { convertInternalErrors, renderErrorMessage } from './messages.js';
-import { TRAVERSE_SCHEMA_OBJECTS, TRAVERSE_SCHEMA_MAPS, TRAVERSE_SCHEMA_MAP_MAPS, admitsPropertyDependencies } from './schema-keywords.js';
+import { ASSERTION_SINCE, readsSince, TRAVERSE_SCHEMA_OBJECTS, TRAVERSE_SCHEMA_MAPS, TRAVERSE_SCHEMA_MAP_MAPS, admitsPropertyDependencies } from './schema-keywords.js';
 import { admitsDynamicReference } from './dynamic-ref.js';
 import { REF_SIBLING_KEYWORDS } from './tools.js';
 import { createJsonPointer } from './traverse.js';
@@ -136,16 +136,6 @@ const ANNOTATING = new Set([...VALUE_ANNOTATIONS, ...STRING_ANNOTATIONS, ...MEMB
 const ASSERTING = new Set([...REF_SIBLING_KEYWORDS, ...REFERENCE_KEYWORDS]);
 
 /**
- * The draft that introduced a keyword the validator compiles only from that
- * draft on: a document that declares an older draft reads it as an unknown
- * keyword, one that declares none reads it.
- */
-const ASSERTION_SINCE = Object.freeze({
-  prefixItems: 2020, dependentRequired: 2019, dependentSchemas: 2019, minContains: 2019, maxContains: 2019,
-  unevaluatedProperties: 2019, unevaluatedItems: 2019,
-});
-
-/**
  * Whether the validator evaluates `keyword` in a unit's subschema: a keyword
  * of the draft the subschema is read in, by the gates the validator compiles
  * with. An unknown keyword, and one of a later draft, is not evaluated.
@@ -154,8 +144,7 @@ const ASSERTION_SINCE = Object.freeze({
  * @returns {boolean}
  */
 function evaluates(unit, keyword) {
-  const since = /** @type {Record<string, number>} */ (ASSERTION_SINCE)[keyword];
-  if (since !== undefined) return unit.declaredDraft == null || unit.declaredDraft >= since;
+  if (Object.hasOwn(ASSERTION_SINCE, keyword)) return readsSince(keyword, unit.declaredDraft);
   if (keyword === 'propertyDependencies') return admitsPropertyDependencies(unit.propertyDependencies, unit.declaredDraft);
   if (keyword === '$recursiveRef' || keyword === '$dynamicRef') return admitsDynamicReference(keyword, unit.dynamicReferenceDraft);
   if (ASSERTING.has(keyword)) return true;

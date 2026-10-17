@@ -27,6 +27,7 @@ The validator embraces these architectural principles:
 | `packages/validate/src/index.js` | Main validator classes (`JarenValidator`, `ValidationRoot`, `ValidationObject`) |
 | `packages/validate/src/traverse.js` | Schema traversal and ref resolution (`storeSchemaIdsInMap`, `restoreSchemaRefsInMap`) |
 | `packages/validate/src/schema.js` | Schema compilation dispatcher (`compileSchemaObject`) |
+| `packages/validate/src/keyword-values.js` | The admission of keyword values: each keyword a schema object holds and the validator reads there must be of its draft's meta-schema shape (`admitKeywordValues`, `KEYWORD_SHAPES`) |
 | `packages/validate/src/messages.js` | Error conversion, message catalogs, the `errorMessage` keyword specs (`ValidationError`, `messagesEn`, `localizeErrors`) |
 | `packages/validate/src/output.js` | The JSON Schema standard output formats (`@jarenjs/validate/output`): the unit recorder and the projections |
 | `packages/validate/src/load.js` | `compileAsync` (`@jarenjs/validate/load`): loads the documents a schema's references need, then compiles |
@@ -1202,6 +1203,14 @@ document that is (the message then names the step that misses)
 - `JK0010`: the reference or `$id` text is no URI; `createJsonPointer` codes
   the `URL` parse failure, and the callers that know the keyword and its
   place name them
+- `JK0013`, `JK0014`: a keyword value of the wrong shape, or a pattern that
+  is no regular expression; `admitKeywordValues` runs first in
+  `compileSchemaObject`, over the keywords the place reads (its declared
+  draft's, under the vocabularies its dialect keeps on, beside the keyword
+  each depends on), so no keyword compiler sees a value of another shape.
+  `KEYWORD_SHAPES` is the table; `test/validate/keyword-values-meta.test.js`
+  derives it from the meta-schemas `@jarenjs/refs` ships and names each
+  place it reads more widely
 
 ### Performance Degradation on First Validation
 
@@ -1250,6 +1259,7 @@ For broader context on how this package fits into the JarenJS ecosystem:
 | `output.js` | Standard output formats (`@jarenjs/validate/output`) | `flagOutput`, `basicOutput`, `detailedOutput`, `verboseOutput`, `listOutput`, `hierarchicalOutput` |
 | `strict-profile.js` | Strict structured-output profiles (`@jarenjs/validate/strict-profile`) | `relaxSchema`, `deriveStrictProfile` |
 | `schema.js` | Schema compilation | `compileSchemaObject` |
+| `keyword-values.js` | Keyword value admission | `admitKeywordValues`, `KEYWORD_SHAPES` |
 | `traverse.js` | Schema traversal | `TraverseOptions`, `storeSchemaIdsInMap`, `resolveRefSchemaDeep` |
 | `tools.js` | Shared utilities | `isBoolOrObjectClass`, `hasSchemaReference`, `createIsSchemaTypeHandler` |
 | `string.js` | String keywords | `compileStringBasic` |

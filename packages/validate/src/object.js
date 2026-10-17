@@ -12,6 +12,7 @@ import {
 } from '@jarenjs/core/number';
 
 import { createSchemaPatternTester } from './string.js';
+import { readsSince } from './schema-keywords.js';
 
 import {
   trueThat,
@@ -19,7 +20,6 @@ import {
 
 import {
   annotatesFailedMembers,
-  isBoolOrObjectClass,
   getBoolOrObjectClass,
   getArrayClassMinItems,
   isOfSchemaType,
@@ -215,9 +215,7 @@ function compileAdditionalProperties(schemaObj, jsonSchema) {
 
 //#region Dependencies
 function compileDependentRequired(schemaObj, jsonSchema) {
-  // dependentRequired only exists since draft 2019-09; a document that
-  // declares an older draft via $schema treats it as an unknown keyword.
-  if (schemaObj.declaredDraft != null && schemaObj.declaredDraft < 2019)
+  if (!readsSince('dependentRequired', schemaObj.declaredDraft))
     return undefined;
 
   const dependentRequired = getObjectType(jsonSchema.dependentRequired);
@@ -242,27 +240,17 @@ function compileDependentRequired(schemaObj, jsonSchema) {
 }
 
 function compileDependentSchemas(schemaObj, jsonSchema) {
-  // dependentSchemas only exists since draft 2019-09; a document that
-  // declares an older draft via $schema treats it as an unknown keyword.
-  if (schemaObj.declaredDraft != null && schemaObj.declaredDraft < 2019)
+  if (!readsSince('dependentSchemas', schemaObj.declaredDraft))
     return undefined;
 
   const dependentSchemas = getObjectType(jsonSchema.dependentSchemas);
   if (dependentSchemas == null) return undefined;
 
+  // every member is a schema: another value is refused before this compiles
   const validators = new Map();
   for (const key in dependentSchemas) {
-    if (Object.hasOwn(dependentSchemas, key)) {
-      const schema = dependentSchemas[key];
-      if (!isBoolOrObjectClass(schema) && !schemaObj.options.skipErrors)
-        throw new Error(`Expected Schema at '${schemaObj.path}/${key}'`);
-
-      const validator = schemaObj.createValidator(schema, 'dependentSchemas', key);
-      if (validator != null)
-        validators.set(key, validator);
-      else
-        throw new Error(`Expected Validator at '${schemaObj.path}/${key}'`);
-    }
+    if (Object.hasOwn(dependentSchemas, key))
+      validators.set(key, schemaObj.createValidator(dependentSchemas[key], 'dependentSchemas', key));
   }
 
   if (validators.size === 0)
@@ -295,22 +283,17 @@ function compileDependencies(schemaObj, jsonSchema) {
   const schemaDeps = [];
   const requiredDeps = [];
 
+  // every member is a schema or a list of names: another value is refused
+  // before this compiles
   for (let i = 0; i < depKeys.length; i++) {
     const key = depKeys[i];
     const right = dependencies[key];
-    if (isBoolOrObjectClass(right)) {
-      const validator = schemaObj.createValidator(right, 'dependencies', key);
-      if (validator != null)
-        schemaDeps.push({ key, validator });
-      else if (!schemaObj.options.skipErrors)
-        throw new Error(`Expected Validator at '${schemaObj.path}/${key}'`);
-    }
-    else if (isArrayClass(right)) {
+    if (isArrayClass(right)) {
       const addError = schemaObj.createErrorHandler(right, ['dependencies']);
       requiredDeps.push({ key, required: right, addError });
     }
-    else if (!schemaObj.options.skipErrors)
-      throw new Error(`Expected Schema or Array at '${schemaObj.path}/${key}'`);
+    else
+      schemaDeps.push({ key, validator: schemaObj.createValidator(right, 'dependencies', key) });
   }
 
   if (schemaDeps.length === 0 && requiredDeps.length === 0)
@@ -432,35 +415,16 @@ export function compileObjectPrimitives(schemaObj, jsonSchema) {
   if (!hasMin && !hasMax && hasRequired) {
     const rlength = required.length;
     const addError = schemaObj.createErrorHandler(required, ['required']);
-    // Non-string entries (invalid schemas) can never match a data key;
-    // they stay on the Object.keys path below.
-    if (required.every(key => typeof key === 'string')) {
-      return function validateRequiredHasOwn(data, dataPath, _dataRoot, _dataKeys) {
-        // Required properties only apply to objects, not arrays or other types
-        if (typeof data !== 'object' || data === null || Array.isArray(data)) {
-          return true;
-        }
-        let valid = true;
-        for (let i = 0; i < rlength; ++i) {
-          const key = required[i];
-          if (!Object.hasOwn(data, key)) {
-            valid = addError(key, data, dataPath) && valid;
-            if (stopAtFirst) break;
-          }
-        }
-        return valid;
-      };
-    }
-    return function validateRequiredOnly(data, dataPath, dataRoot, dataKeys) {
+    // every entry is a member name: another entry is refused before this compiles
+    return function validateRequiredHasOwn(data, dataPath, _dataRoot, _dataKeys) {
       // Required properties only apply to objects, not arrays or other types
       if (typeof data !== 'object' || data === null || Array.isArray(data)) {
         return true;
       }
-      const keys = dataKeys || Object.keys(data);
       let valid = true;
       for (let i = 0; i < rlength; ++i) {
         const key = required[i];
-        if (keys.indexOf(key) === -1) {
+        if (!Object.hasOwn(data, key)) {
           valid = addError(key, data, dataPath) && valid;
           if (stopAtFirst) break;
         }
@@ -743,9 +707,7 @@ export function compileObjectSchema(schemaObj, jsonSchema) {
     && jsonSchema.dependentRequired == null
     && jsonSchema.minProperties == null
     && jsonSchema.maxProperties == null
-    && (jsonSchema.required == null
-      || (isArrayClass(jsonSchema.required)
-        && jsonSchema.required.every(key => typeof key === 'string')))
+    && (jsonSchema.required == null || isArrayClass(jsonSchema.required))
     && getObjectType(jsonSchema.properties) != null) {
     const propsMap = buildPropertyValidators(schemaObj, jsonSchema);
     if (propsMap == null)

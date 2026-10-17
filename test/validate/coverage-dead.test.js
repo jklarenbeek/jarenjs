@@ -384,16 +384,12 @@ describe('Annotation-only unevaluated* producers under an outer check', function
   });
 });
 
-describe('Non-string required entries stay on the data-keys path', function () {
-  // object.js -> validateRequiredOnly
-  // A non-string entry (an invalid schema) can never match a data key, so
-  // the Object.hasOwn fast path is skipped and the entry always fails.
-  it('should never satisfy a numeric required entry', function () {
-    const validate = new JarenValidator().compile({ required: ['a', 1] });
-
-    assert.isFalse(validate({ a: 1 }), 'the numeric entry never matches');
-    assert.isFalse(validate({ 'a': 1, '1': 2 }), 'a "1" data key does not match the number 1');
-    assert.isTrue(validate('not an object'), 'required only constrains objects');
+describe('A non-string required entry', function () {
+  // It used to compile into a list no object satisfies; it is refused where
+  // the entry sits, so every required path reads member names only.
+  it('is refused at compile, located at the entry', function () {
+    assert.throws(() => new JarenValidator().compile({ required: ['a', 1] }),
+      (e) => e.code === 'JK0013' && e.docPath === '#/required/1');
   });
 });
 
