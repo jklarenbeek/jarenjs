@@ -564,6 +564,96 @@
      2
     ]
    }
+  },
+  {
+   "name": "a count of a concatenation of a nullable member and an integer",
+   "query": {
+    "$count": {
+     "$for": {
+      "p": "$.Person[*]"
+     },
+     "$return": {
+      "id": "$p.id",
+      "v": {
+       "$concat": [
+        "$p.nick",
+        ":",
+        "$p.age"
+       ]
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "a count of a concatenation of a document member",
+   "query": {
+    "$count": {
+     "$for": {
+      "p": "$.Person[*]"
+     },
+     "$return": {
+      "v": {
+       "$concat": [
+        "$p.bio.line"
+       ]
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "a count of a product of a number member",
+   "query": {
+    "$count": {
+     "$for": {
+      "q": "$.Pet[*]"
+     },
+     "$return": {
+      "v": {
+       "$mul": [
+        "$q.weight",
+        2
+       ]
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "a count of a sum of a string member",
+   "query": {
+    "$count": {
+     "$for": {
+      "p": "$.Person[*]"
+     },
+     "$return": {
+      "v": {
+       "$add": [
+        "$p.name",
+        1
+       ]
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "a count of a concatenation of an object member",
+   "query": {
+    "$count": {
+     "$for": {
+      "p": "$.Person[*]"
+     },
+     "$return": {
+      "v": {
+       "$concat": [
+        "$p.bio"
+       ]
+      }
+     }
+    }
+   }
   }
  ]
 }

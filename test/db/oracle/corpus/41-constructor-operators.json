@@ -1,0 +1,1039 @@
+{
+ "group": "constructor operators over scalars and numbers",
+ "schema": {
+  "type": "object",
+  "properties": {
+   "id": {
+    "type": "string"
+   },
+   "s": {
+    "type": "string"
+   },
+   "n": {
+    "type": "integer"
+   },
+   "f": {
+    "type": "number"
+   },
+   "b": {
+    "type": "boolean"
+   },
+   "u": {
+    "type": [
+     "string",
+     "null"
+    ]
+   },
+   "x": {
+    "type": [
+     "number",
+     "null"
+    ]
+   },
+   "m": {
+    "type": [
+     "string",
+     "number"
+    ]
+   },
+   "so": {
+    "type": [
+     "string",
+     "object"
+    ]
+   },
+   "z": {},
+   "a": {
+    "type": "array",
+    "items": {
+     "type": "string"
+    }
+   },
+   "t": {
+    "type": "array",
+    "prefixItems": [
+     {
+      "type": "number"
+     }
+    ],
+    "items": {
+     "type": "string"
+    }
+   }
+  }
+ },
+ "indexes": [
+  {
+   "name": "by_id",
+   "path": "$.id"
+  },
+  {
+   "name": "by_n",
+   "path": "$.n"
+  }
+ ],
+ "documents": [
+  {
+   "id": "a",
+   "s": "ada",
+   "n": 10,
+   "f": 0.1,
+   "b": true,
+   "u": "x",
+   "x": 1.5,
+   "m": "p",
+   "so": "q",
+   "z": 1,
+   "a": [
+    "p"
+   ],
+   "t": [
+    1,
+    "y"
+   ]
+  },
+  {
+   "id": "b",
+   "s": "",
+   "n": -3,
+   "f": 1e+21,
+   "b": false,
+   "u": null,
+   "x": null,
+   "m": 7,
+   "so": {
+    "k": 1
+   },
+   "z": "zz",
+   "a": [],
+   "t": [
+    5
+   ]
+  },
+  {
+   "id": "c",
+   "n": 0,
+   "f": -2.5,
+   "u": "",
+   "x": 0,
+   "z": null,
+   "t": [
+    2,
+    "p",
+    "q"
+   ]
+  },
+  {
+   "id": "d",
+   "s": "Ünï",
+   "f": 0.30000000000000004,
+   "b": true,
+   "m": -0.5,
+   "z": [
+    1
+   ],
+   "a": [
+    "q",
+    "r"
+   ]
+  },
+  {
+   "id": "e",
+   "s": "zed",
+   "n": 2147483648,
+   "f": 1e-7,
+   "x": -7
+  },
+  {
+   "id": "f",
+   "n": 7,
+   "f": 1.7976931348623157e+308
+  },
+  {
+   "s": "no id",
+   "n": 1,
+   "f": 2
+  },
+  {
+   "id": "g",
+   "s": "gee",
+   "n": -9007199254740991,
+   "f": 123456789.125,
+   "b": false,
+   "u": "y",
+   "x": 2.5,
+   "m": 3
+  }
+ ],
+ "cases": [
+  {
+   "name": "a window over a concatenation of a string, a literal and an integer",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "v": {
+        "$concat": [
+         "$it.s",
+         "-",
+         "$it.n"
+        ]
+       }
+      }
+     },
+     1,
+     3
+    ]
+   }
+  },
+  {
+   "name": "a window over a concatenation of a boolean, a nullable string and a float",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "v": {
+        "$concat": [
+         "$it.b",
+         "$it.u",
+         "$it.f"
+        ]
+       }
+      }
+     },
+     0,
+     4
+    ]
+   }
+  },
+  {
+   "name": "a window over a concatenation of scalar literals",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "v": {
+        "$concat": [
+         "$it.id",
+         1.5,
+         true,
+         null
+        ]
+       }
+      }
+     },
+     2,
+     2
+    ]
+   }
+  },
+  {
+   "name": "a window over an empty concatenation",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "v": {
+        "$concat": []
+       }
+      }
+     },
+     0,
+     3
+    ]
+   }
+  },
+  {
+   "name": "a window over a concatenation of members of mixed scalars and nullable numbers",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "v": {
+        "$concat": [
+         "$it.m",
+         "/",
+         "$it.x"
+        ]
+       }
+      }
+     },
+     3,
+     4
+    ]
+   }
+  },
+  {
+   "name": "a window over a concatenation of tuple elements",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "v": {
+        "$concat": [
+         "$it.t[0]",
+         "$it.t[1]",
+         "$it.a[0]"
+        ]
+       }
+      }
+     },
+     0,
+     5
+    ]
+   }
+  },
+  {
+   "name": "a window over a sum of two numeric members",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "v": {
+        "$add": [
+         "$it.n",
+         "$it.f"
+        ]
+       }
+      }
+     },
+     1,
+     4
+    ]
+   }
+  },
+  {
+   "name": "a window over a difference from a literal",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "v": {
+        "$sub": [
+         100,
+         "$it.n"
+        ]
+       }
+      }
+     },
+     0,
+     8
+    ]
+   }
+  },
+  {
+   "name": "a window over a product that overflows to infinity",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "v": {
+        "$mul": [
+         "$it.f",
+         2
+        ]
+       }
+      }
+     },
+     4,
+     3
+    ]
+   }
+  },
+  {
+   "name": "a window over a quotient by a literal",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "v": {
+        "$div": [
+         "$it.n",
+         4
+        ]
+       }
+      }
+     },
+     2,
+     3
+    ]
+   }
+  },
+  {
+   "name": "a window over arithmetic of a number element of a tuple",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "v": {
+        "$add": [
+         "$it.t[0]",
+         0.5
+        ]
+       }
+      }
+     },
+     0,
+     4
+    ]
+   }
+  },
+  {
+   "name": "a window over a reshape of arithmetic and concatenation",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "label": {
+        "$concat": [
+         "$it.s",
+         " by ",
+         "$it.id"
+        ]
+       },
+       "pricing": {
+        "list": "$it.f",
+        "discounted": {
+         "$mul": [
+          "$it.f",
+          0.9
+         ]
+        }
+       }
+      }
+     },
+     1,
+     3
+    ]
+   }
+  },
+  {
+   "name": "a window over an array constructor of a sum and a concatenation",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": [
+       {
+        "$add": [
+         "$it.n",
+         1
+        ]
+       },
+       {
+        "$concat": [
+         "$it.s"
+        ]
+       }
+      ]
+     },
+     0,
+     6
+    ]
+   }
+  },
+  {
+   "name": "a window over a filter and arithmetic",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$where": {
+       "$ge": [
+        "$it.n",
+        0
+       ]
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "v": {
+        "$mul": [
+         "$it.n",
+         "$it.n"
+        ]
+       }
+      }
+     },
+     0,
+     2
+    ]
+   }
+  },
+  {
+   "name": "a count of a concatenation constructor",
+   "query": {
+    "$count": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": {
+      "v": {
+       "$concat": [
+        "$it.s",
+        "$it.b",
+        "$it.u"
+       ]
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "a count of an arithmetic constructor under a filter",
+   "query": {
+    "$count": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$where": {
+      "$ge": [
+       "$it.n",
+       0
+      ]
+     },
+     "$return": {
+      "v": {
+       "$sub": [
+        "$it.n",
+        "$it.f"
+       ]
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "a count of an array constructor of arithmetic",
+   "query": {
+    "$count": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": [
+      {
+       "$div": [
+        "$it.f",
+        3
+       ]
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "a concatenation of an untyped member raises past the window",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "v": {
+        "$concat": [
+         "$it.z"
+        ]
+       }
+      }
+     },
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "a concatenation of a member that may be an object raises past the window",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "v": {
+        "$concat": [
+         "$it.so"
+        ]
+       }
+      }
+     },
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "a concatenation of an array member raises past the window",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "v": {
+        "$concat": [
+         "$it.a"
+        ]
+       }
+      }
+     },
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "a concatenation of a quoted array raises past the window",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "v": {
+        "$concat": [
+         {
+          "$const": [
+           1
+          ]
+         }
+        ]
+       }
+      }
+     },
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "a concatenation of the last element of a tuple stays in the engine",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "v": {
+        "$concat": [
+         "$it.t[-1]"
+        ]
+       }
+      }
+     },
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "a concatenation over a nested operator stays in the engine",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "v": {
+        "$concat": [
+         {
+          "$upper": "$it.s"
+         }
+        ]
+       }
+      }
+     },
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "a sum of a member that may be null raises past the window",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "v": {
+        "$add": [
+         "$it.x",
+         1
+        ]
+       }
+      }
+     },
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "a sum of a string member raises past the window",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "v": {
+        "$add": [
+         "$it.s",
+         1
+        ]
+       }
+      }
+     },
+     2,
+     1
+    ]
+   }
+  },
+  {
+   "name": "a sum of a member of mixed scalars raises past the window",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "v": {
+        "$add": [
+         "$it.m",
+         1
+        ]
+       }
+      }
+     },
+     1,
+     1
+    ]
+   }
+  },
+  {
+   "name": "a sum with a string literal raises past the window",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "v": {
+        "$add": [
+         "$it.n",
+         "1"
+        ]
+       }
+      }
+     },
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "a sum with a null literal raises past the window",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "v": {
+        "$add": [
+         "$it.n",
+         null
+        ]
+       }
+      }
+     },
+     3,
+     1
+    ]
+   }
+  },
+  {
+   "name": "a sum of a boolean member raises past the window",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "v": {
+        "$add": [
+         "$it.b",
+         1
+        ]
+       }
+      }
+     },
+     2,
+     1
+    ]
+   }
+  },
+  {
+   "name": "a product of an element of a tuple of strings raises past the window",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "v": {
+        "$mul": [
+         "$it.t[1]",
+         2
+        ]
+       }
+      }
+     },
+     1,
+     1
+    ]
+   }
+  },
+  {
+   "name": "an integer division stays in the engine",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "v": {
+        "$idiv": [
+         "$it.n",
+         2
+        ]
+       }
+      }
+     },
+     0,
+     2
+    ]
+   }
+  },
+  {
+   "name": "a bare concatenation at the root of the return under a window",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "$concat": [
+        "$it.s"
+       ]
+      }
+     },
+     0,
+     2
+    ]
+   }
+  },
+  {
+   "name": "a count of a concatenation of an untyped member",
+   "query": {
+    "$count": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": {
+      "v": {
+       "$concat": [
+        "$it.z"
+       ]
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "a count of a sum of a member that may be null",
+   "query": {
+    "$count": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": {
+      "v": {
+       "$add": [
+        "$it.x",
+        1
+       ]
+      }
+     }
+    }
+   }
+  }
+ ]
+}

@@ -181,8 +181,13 @@ operators that cannot raise is one `COUNT(*)` that reads no row: `$default` over
 member paths and literals, `$upper`, `$lower` and `$string-length` over a member
 the schema types exactly `string` (reached by no negative index; an adopted
 column must also store text, under no date codec, and read no NULL as a present
-`null`), and `$count` and `$exists` over a member path. The engine evaluates the return of every row, so any other
-operator, a union or an epoch column keeps the count in the engine, which raises
+`null`), `$count` and `$exists` over a member path, `$concat` over literals and
+members typed only as scalars or `null` (a union of them too; a column under no
+codec past the scalar ones), and `$add`, `$sub`, `$mul` and `$div` over number
+literals and members typed exactly `number` or `integer` that read no NULL as a
+present `null`. The engine evaluates the return of every row, so any other
+operator (`$idiv` and `$mod` raise on a zero divisor), an operator over an
+operator, another union or an epoch column keeps the count in the engine, which raises
 where a row does; so
 does a window over an operator projection of an entity, which has no row
 residual (a collection's window over such a constructor is pushed: MODEL-FORMAT

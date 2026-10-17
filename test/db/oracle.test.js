@@ -126,8 +126,13 @@ describe('oracle — generated mode (seeded)', () => {
         : { $key: `$it.${pick(['n', 's'])}`, $dir: pick(['asc', 'desc']),
           $empty: pick(['least', 'greatest']) }];
     }
+    // constructors of operators that cannot raise over typed members (a window rides
+    // in the statement), and one over the untyped `u`, which raises in the engine
     query.$return = chance(0.25)
-      ? { i: '$it.id', v: { $default: ['$it.n', -1] } }
+      ? pick([{ i: '$it.id', v: { $default: ['$it.n', -1] } },
+        { i: '$it.id', v: { $concat: ['$it.s', ':', '$it.n', '$it.b'] } },
+        { i: '$it.id', v: { $mul: ['$it.f', '$it.n'] }, w: { $sub: ['$it.o.k', 0.5] } },
+        { i: '$it.id', v: { $add: ['$it.u', 1] } }])
       : chance(0.15) ? '$it.id' : '$it';
     /** @type {any} */
     let document = query;

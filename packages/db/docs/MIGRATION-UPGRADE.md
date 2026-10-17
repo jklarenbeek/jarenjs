@@ -3221,6 +3221,29 @@ joins (`true` or `"1"` beside `1`): the statement refuses such a table, so
 change or remove one of each first. A table the previous release created and
 this release opened is unchanged.
 
+## 52. Windows and counts over concatenation and arithmetic in a constructor
+
+- A window over an object or array constructor whose operators are `$concat`
+  over literals and members typed only `string`, `number`, `integer`, `boolean`
+  or `null`, or `$add`, `$sub`, `$mul` and `$div` over number literals and
+  members typed exactly `number` or `integer` that read no NULL as a present
+  `null`, such as `{ "label": { "$concat": ["$b.title", " by ", "$b.author"] },
+  "discounted": { "$mul": ["$b.price", 0.9] } }` under a `$subsequence`,
+  fetched every candidate row and ran in the engine. On a collection it plans
+  `row` now, as a constructor of `$upper` does (§7): the window is in the
+  statement and only its rows are fetched and projected. A count of such a
+  constructor is a `COUNT(*)` on a collection and on an entity, and
+  `strict: true` accepts it where it refused `JD0010`. A `$where` conjunct that
+  compares such an operator no longer holds the conjuncts after it out of the
+  statement (`predicate.afterRaising`). The answers are the engine's; as for
+  the operators before, a document that violates its schema (inserts are
+  unvalidated without a `compileSchema` hook) raised `JQ2001` from a row
+  outside the window or from any row of a count, and a row the statement does
+  not read raises nothing now. `$idiv` and `$mod`, which raise on a zero
+  divisor, and an operator over an operator still run in the engine.
+- No table, index or stored value changes; a store the previous release
+  created opens and answers as it did.
+
 ## Measured costs
 
 Exact identity stores complete canonical documents and model endpoints, so

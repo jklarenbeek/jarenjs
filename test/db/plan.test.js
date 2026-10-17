@@ -618,9 +618,10 @@ describe('the planner\'s reason vocabulary', () => {
     'plan.notFlwor': [collection, 3],
     // a constructor yields ONE item per row, so a count over one whose
     // operators cannot raise is a COUNT(*); an operator that can raise is
-    // evaluated for every row by the engine, so its count stays there
+    // evaluated for every row by the engine (an integer division raises on a
+    // zero divisor), so its count stays there
     'plan.countProjection': [collection,
-      { $count: { $for: { it: '$[*]' }, $return: { x: { $add: ['$it.n', 1] } } } }],
+      { $count: { $for: { it: '$[*]' }, $return: { x: { $idiv: ['$it.n', 2] } } } }],
     // a conjunct the hatch takes runs as a registered function; the census plans without the store's hook,
     // so the hook here accepts every fragment
     'plan.registeredFunction': [(document) => planQuery(document, CENSUS_SHAPE,

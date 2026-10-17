@@ -509,8 +509,15 @@ and literals; `$upper`, `$lower` and `$string-length` over a member the schema
 types exactly `string` (a union, an untyped member, a column that stores another
 kind, reads a NULL as a present `null` or decodes its text through a date codec,
 an epoch column and a path with a negative index are none: a schema places an
-element by its position from the start, not from the end of a tuple); and
-`$count` and `$exists` over a member path.
+element by its position from the start, not from the end of a tuple);
+`$count` and `$exists` over a member path; `$concat` over literals and members
+typed only `string`, `number`, `integer`, `boolean` or `null` (a union of them
+too, a column of one of those codecs whatever it reads a NULL as); and `$add`,
+`$sub`, `$mul` and `$div` over number literals and members typed exactly
+`number` or `integer` that read no NULL as a present `null` (doubles overflow to
+an infinity and divide by zero to an infinity or NaN without raising, and an
+absent operand leaves the member out; `$idiv` and `$mod` raise on a zero
+divisor and are none).
 The engine evaluates the return of every row, so only an evaluation that cannot
 raise may go unmade for the rows a window leaves out, or for every row of a
 count. Over such a constructor on a collection the window rides in the statement

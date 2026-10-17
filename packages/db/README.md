@@ -221,8 +221,9 @@ no continuation to emit.
   behind: promoting the half that composes would answer a shape nobody
   asked for. Where the shape is an object or array constructor whose leaves
   are member paths, literals and operators that cannot raise (`$default`,
-  `$upper`, `$lower`, `$string-length`, `$count` and `$exists` over the members
-  MODEL-FORMAT §10.6 names) a count is one `COUNT(*)`, and on a collection a
+  `$upper`, `$lower`, `$string-length`, `$count`, `$exists`, `$concat`, `$add`,
+  `$sub`, `$mul` and `$div` over the members and literals MODEL-FORMAT §10.6
+  names) a count is one `COUNT(*)`, and on a collection a
   window rides in the statement while each fetched row runs the shape. Every
   `explain()` also carries `budget`: the profile that applied, every bound
   it imposed, and the two driver slots (`time`, `estimatedRows`) reported `unavailable` on SQLite rather

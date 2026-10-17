@@ -488,7 +488,11 @@ what each does is its own documentation's job
   array, reached by a negative index),
   group returns that read the grouped row binding, ordering by a floating
   sum/avg or other unproven aggregate expressions and floating numeric
-  aggregates without a rounding proof still run in the engine. One-root scalar
+  aggregates without a rounding proof still run in the engine (SQLite's sum
+  compensates its rounding and PostgreSQL's numeric sum is exact, so neither
+  repeats the engine's left-to-right double addition; a guard that every term
+  is integral would answer exactly but send fractional data, the common case,
+  through a second statement). One-root scalar
   grouping, guarded integer sums/counts, groups ordered by an integer sum/avg
   and, on SQLite, the unordered grouping of a connected join of roots now have
   native plans; over a join of roots an ordered grouping, a window over its
@@ -521,10 +525,12 @@ what each does is its own documentation's job
   runs in the engine.
 - [ ] **Projection and distinct beyond reconstructible trees.** A return
   containing an operator beyond `$default`, `$upper`, `$lower`,
-  `$string-length`, `$count` and `$exists` (each over the members
-  [MODEL-FORMAT §10.6](../packages/db/docs/MODEL-FORMAT.md) names), a whole
-  entity binding inside a constructor or a non-singular path still needs the
-  engine. So does a navigation hop that is chained, ordered inside, correlated
+  `$string-length`, `$count`, `$exists`, `$concat`, `$add`, `$sub`, `$mul` and
+  `$div` (each over the members and literals
+  [MODEL-FORMAT §10.6](../packages/db/docs/MODEL-FORMAT.md) names; `$idiv` and
+  `$mod` raise on a zero divisor, and an operator over an operator is not
+  proven), a whole entity binding inside a constructor or a non-singular path
+  still needs the engine. So does a navigation hop that is chained, ordered inside, correlated
   across comparison families or over a column that can hold a `null`, or read
   as a value without the related entity's key. A hop over a foreign key no
   property declares stays in the engine although a join reads that key

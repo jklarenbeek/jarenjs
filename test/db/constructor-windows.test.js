@@ -81,11 +81,14 @@ function windowClause(/** @type {string} */ host, /** @type {[number | null, num
 
 const ABSENT = Symbol('absent');
 const NOT_STRINGS = [null, 5, true, ['a'], { k: 1 }];
+const NOT_SCALARS = [['a'], [], { k: 1 }, {}];
+const NOT_NUMBERS = [null, '5', true, [1], { k: 1 }];
 
 /**
- * For each operator the planner accepts: the shape it is accepted in, the engine's value over
- * operands that conform and over an absent one, and the operands it raises on.
- * @type {Record<string, { arity: number, operand: string, build: (operand: any) => any,
+ * For each operator the planner accepts: the shape it is accepted in (an arity of `null` takes any number
+ * of operands), the engine's value over operands that conform and over an absent one (`ABSENT` as a value
+ * is a member the constructor leaves out), and the operands it raises on.
+ * @type {Record<string, { arity: number | null, operand: string, build: (operand: any) => any,
  *   answers: [any, any][], raises: any[] }>}
  */
 const PROOFS = {
@@ -101,6 +104,17 @@ const PROOFS = {
     answers: [[5, 1], [null, 1], ['s', 1], [[1, 2], 1], [{ k: 1 }, 1], [ABSENT, 0]], raises: [] },
   '$exists': { arity: 1, operand: 'path', build: (operand) => ({ $exists: operand }),
     answers: [[5, true], [null, true], ['s', true], [[], true], [{}, true], [ABSENT, false]], raises: [] },
+  '$concat': { arity: null, operand: 'scalar', build: (operand) => ({ $concat: [operand, '|'] }),
+    answers: [['aé', 'aé|'], ['', '|'], [5, '5|'], [0.1, '0.1|'], [1e21, '1e+21|'], [-0, '0|'], [-1.5e-7, '-1.5e-7|'],
+      [true, 'true|'], [false, 'false|'], [null, 'null|'], [ABSENT, '|']], raises: NOT_SCALARS },
+  '$add': { arity: 2, operand: 'number', build: (operand) => ({ $add: [operand, 0.2] }),
+    answers: [[0.1, 0.30000000000000004], [-0, 0.2], [1.7976931348623157e308, 1.7976931348623157e308], [ABSENT, ABSENT]], raises: NOT_NUMBERS },
+  '$sub': { arity: 2, operand: 'number', build: (operand) => ({ $sub: [1, operand] }),
+    answers: [[3, -2], [1, 0], [-1.7976931348623157e308, 1.7976931348623157e308], [ABSENT, ABSENT]], raises: NOT_NUMBERS },
+  '$mul': { arity: 2, operand: 'number', build: (operand) => ({ $mul: [operand, -2] }),
+    answers: [[3, -6], [0, -0], [1e308, -Infinity], [ABSENT, ABSENT]], raises: NOT_NUMBERS },
+  '$div': { arity: 2, operand: 'number', build: (operand) => ({ $div: [operand, 0] }),
+    answers: [[3, Infinity], [-3, -Infinity], [0, NaN], [-0, NaN], [ABSENT, ABSENT]], raises: NOT_NUMBERS },
 };
 
 /** One member of one document through the engine: `{ v: <the operator over $it.x> }`. */
@@ -122,7 +136,7 @@ describe('the operators a constructor may apply are proven against the engine', 
     it(`${name}: the engine's value over conforming and absent operands`, () => {
       for (const [value, expected] of proof.answers) {
         const label = `${name} of ${value === ABSENT ? 'an absent member' : JSON.stringify(value)}`;
-        assert.deepEqual(evaluateOver(proof.build, value), { v: expected }, label);
+        assert.deepEqual(evaluateOver(proof.build, value), expected === ABSENT ? {} : { v: expected }, label);
       }
     });
 
@@ -131,8 +145,8 @@ describe('the operators a constructor may apply are proven against the engine', 
         assert.throws(() => evaluateOver(proof.build, value), { code: 'JQ2001' }, `${name} of ${JSON.stringify(value)}`);
       }
       // the operand a rule names is the one that cannot raise: a string operator takes a string member
-      // alone, and the rule that takes any member takes values of every kind
-      if (proof.operand === 'string') assert.ok(proof.raises.length > 0, name);
+      // alone, concatenation a scalar, arithmetic a number, and the rules that take any member take values of every kind
+      if (['string', 'scalar', 'number'].includes(proof.operand)) assert.ok(proof.raises.length > 0, name);
       else assert.equal(proof.raises.length, 0, name);
     });
   }
@@ -193,6 +207,19 @@ describe('a string operand is placed by the schema where the engine reads its pa
     nestedTuple: ['$it.a[0][1]'],
   });
 
+  /** Where a number element sits among strings, concatenation takes it too: every scalar is a string's operand. */
+  const SCALAR_ACCEPTED = /** @type {Record<string, string[]>} */ ({
+    tuple: ['$it.a[0]', '$it.a[1]', '$it.a[2]'],
+    tuple2: ['$it.a[0]', '$it.a[1]', '$it.a[2]'],
+    nestedTuple: ['$it.a[0][0]', '$it.a[0][1]'],
+  });
+  /** The paths arithmetic reads unevaluated: the number elements, and no other. */
+  const NUMBER_ACCEPTED = /** @type {Record<string, string[]>} */ ({
+    tuple: ['$it.a[0]'],
+    tuple2: ['$it.a[1]'],
+    nestedTuple: ['$it.a[0][0]'],
+  });
+
   for (const [name, member] of Object.entries(SCHEMAS)) {
     it(`${name}: a path the planner takes as a string raises on no document the schema admits`, () => {
       const check = new JarenValidator().compile(member);
@@ -217,6 +244,34 @@ describe('a string operand is placed by the schema where the engine reads its pa
         }
       }
       assert.deepEqual(accepted, ACCEPTED[name], name);
+    });
+
+    it(`${name}: a path the planner takes as a scalar or a number raises on no document the schema admits`, () => {
+      const check = new JarenValidator().compile(member);
+      const conforming = POOL.filter((value) => value === ABSENT || check(value));
+      const shape = { collection: 'rows', schema: { type: 'object', properties: { a: member } }, columnByCanonical: new Map() };
+      for (const [operator, build, expected] of /** @type {[string, (path: string) => any, string[]][]} */ ([
+        ['$concat', (path) => ({ $concat: ['<', path] }), SCALAR_ACCEPTED[name] ?? ACCEPTED[name]],
+        ['$add', (path) => ({ $add: [path, 1] }), NUMBER_ACCEPTED[name] ?? []],
+        ['$div', (path) => ({ $div: [2, path] }), NUMBER_ACCEPTED[name] ?? []],
+      ])) {
+        /** @type {string[]} */
+        const accepted = [];
+        for (const path of PATHS) {
+          const leaf = { v: build(path) };
+          const counted = planQuery({ $count: { $for: { it: '$[*]' }, $return: leaf } }, shape);
+          const windowed = planQuery({ $subsequence: [{ $for: { it: '$[*]' }, $return: leaf }, 0, 1] }, shape);
+          assert.equal(counted.mode === 'native', windowed.mode === 'row', `${name} ${operator} ${path}: one proof decides both`);
+          if (counted.mode !== 'native') continue;
+          accepted.push(path);
+          for (const value of conforming) {
+            const document = value === ABSENT ? {} : { a: value };
+            assert.doesNotThrow(() => compileJsonQuery({ $for: { it: '$[*]' }, $return: leaf })([document]),
+              `${name}: ${operator} of ${path} over ${JSON.stringify(document)}`);
+          }
+        }
+        assert.deepEqual(accepted, expected, `${name} ${operator}`);
+      }
     });
   }
 
@@ -298,6 +353,8 @@ const CONSTRUCTOR_WINDOWS = {
     ['a window over the document beside an operator', [2, 1]],
     ['a window over a constructor ordered by a string member', [4, 2]],
     ['a window over a constructor with an empty member name', [2, 1]],
+    ['a window over an arithmetic leaf', [3, 1]],
+    ['a window over a concatenation', [3, 1]],
   ])),
   counts: new Set([
     'a count of a default constructor',
@@ -310,8 +367,6 @@ const CONSTRUCTOR_WINDOWS = {
     'a count of a constructor over the document beside an operator',
   ]),
   kept: new Map([
-    ['a window over an arithmetic leaf', { reason: 'flwor.projection' }],
-    ['a window over a concatenation', { reason: 'flwor.projection' }],
     ['a window over a count of a path that expands', { reason: 'flwor.projection' }],
     ['an upper-case of a member that may be null raises past the window', { reason: 'flwor.projection', raises: 'JQ2001' }],
     ['a count of an upper-case of a member that may be null', { reason: 'plan.countProjection', raises: 'JQ2001' }],
@@ -330,6 +385,52 @@ const CONSTRUCTOR_WINDOWS = {
     ['an operator at the root of the return under a window', { reason: 'flwor.projection' }],
     ['an external in a constructor stays in the engine', { reason: 'flwor.projection' }],
     ['a key that may be null cannot order the window', { reason: 'flwor.orderPath', raises: 'JQ2005' }],
+  ]),
+};
+
+/** @type {Expectations} */
+const CONSTRUCTOR_OPERATORS = {
+  rows: new Map(/** @type {[string, [number | null, number]][]} */ ([
+    ['a window over a concatenation of a string, a literal and an integer', [3, 1]],
+    ['a window over a concatenation of a boolean, a nullable string and a float', [4, 0]],
+    ['a window over a concatenation of scalar literals', [2, 2]],
+    ['a window over an empty concatenation', [3, 0]],
+    ['a window over a concatenation of members of mixed scalars and nullable numbers', [4, 3]],
+    ['a window over a concatenation of tuple elements', [5, 0]],
+    ['a window over a sum of two numeric members', [4, 1]],
+    ['a window over a difference from a literal', [8, 0]],
+    ['a window over a product that overflows to infinity', [3, 4]],
+    ['a window over a quotient by a literal', [3, 2]],
+    ['a window over arithmetic of a number element of a tuple', [4, 0]],
+    ['a window over a reshape of arithmetic and concatenation', [3, 1]],
+    ['a window over an array constructor of a sum and a concatenation', [6, 0]],
+    ['a window over a filter and arithmetic', [2, 0]],
+  ])),
+  counts: new Set([
+    'a count of a concatenation constructor',
+    'a count of an arithmetic constructor under a filter',
+    'a count of an array constructor of arithmetic',
+  ]),
+  kept: new Map([
+    ['a concatenation of an untyped member raises past the window', { reason: 'flwor.projection', raises: 'JQ2001' }],
+    ['a concatenation of a member that may be an object raises past the window', { reason: 'flwor.projection', raises: 'JQ2001' }],
+    ['a concatenation of an array member raises past the window', { reason: 'flwor.projection', raises: 'JQ2001' }],
+    ['a concatenation of a quoted array raises past the window', { reason: 'flwor.projection', raises: 'JQ2001' }],
+    // a tuple's last element may be one of its prefix items, which a schema cannot place from the end
+    ['a concatenation of the last element of a tuple stays in the engine', { reason: 'flwor.projection' }],
+    ['a concatenation over a nested operator stays in the engine', { reason: 'flwor.projection' }],
+    ['a sum of a member that may be null raises past the window', { reason: 'flwor.projection', raises: 'JQ2001' }],
+    ['a sum of a string member raises past the window', { reason: 'flwor.projection', raises: 'JQ2001' }],
+    ['a sum of a member of mixed scalars raises past the window', { reason: 'flwor.projection', raises: 'JQ2001' }],
+    ['a sum with a string literal raises past the window', { reason: 'flwor.projection', raises: 'JQ2001' }],
+    ['a sum with a null literal raises past the window', { reason: 'flwor.projection', raises: 'JQ2001' }],
+    ['a sum of a boolean member raises past the window', { reason: 'flwor.projection', raises: 'JQ2001' }],
+    ['a product of an element of a tuple of strings raises past the window', { reason: 'flwor.projection', raises: 'JQ2001' }],
+    // an integer division raises on a zero divisor
+    ['an integer division stays in the engine', { reason: 'flwor.projection' }],
+    ['a bare concatenation at the root of the return under a window', { reason: 'flwor.projection' }],
+    ['a count of a concatenation of an untyped member', { reason: 'plan.countProjection', raises: 'JQ2001' }],
+    ['a count of a sum of a member that may be null', { reason: 'plan.countProjection', raises: 'JQ2001' }],
   ]),
 };
 
@@ -447,6 +548,10 @@ function collectionGroup(name, expected) {
 
 describe('collections: windows and counts over constructors', () => {
   collectionGroup('windows and counts over constructors', CONSTRUCTOR_WINDOWS);
+});
+
+describe('collections: concatenation and arithmetic over scalar and numeric members', () => {
+  collectionGroup('constructor operators over scalars and numbers', CONSTRUCTOR_OPERATORS);
 });
 
 describe('collections: the leaves of a constructor over unions and open containers', () => {
@@ -629,8 +734,9 @@ describe('a window over a constructor fetches the rows of the window', () => {
   it('the same count over a constructor that can raise reads every row, and so does a window over it', async () => {
     const { store, collection, documents, fetched, reset } = await countedCollection(200);
     try {
-      const counted = { $count: { $for: { it: '$[*]' }, $return: { id: '$it.id', v: { $add: ['$it.n', 1] } } } };
-      const windowed = { $subsequence: [{ $for: { it: '$[*]' }, $orderby: ['$it.id'], $return: { id: '$it.id', v: { $add: ['$it.n', 1] } } }, 10, 5] };
+      // a remainder raises on a zero divisor
+      const counted = { $count: { $for: { it: '$[*]' }, $return: { id: '$it.id', v: { $mod: ['$it.n', 7] } } } };
+      const windowed = { $subsequence: [{ $for: { it: '$[*]' }, $orderby: ['$it.id'], $return: { id: '$it.id', v: { $mod: ['$it.n', 7] } } }, 10, 5] };
       for (const document of [counted, windowed]) {
         assert.equal((await collection.explain(document)).mode, 'set');
         reset();
@@ -775,9 +881,12 @@ const ENTITY_COUNTS = {
     'a count of a constructor over no rows',
     'a count of a constructor of literals and an operator',
     'a count of an upper-case of an element past the prefix of a tuple',
+    'a count of an arithmetic leaf',
+    'a count of a concatenation of a nullable member and an integer',
+    'a count of a concatenation of a document member',
+    'a count of a product of a number member',
   ]),
   kept: new Map([
-    ['a count of an arithmetic leaf', { reason: 'entity.projection' }],
     // the last element of a short tuple is one of its prefix items, a number
     ['a count of an upper-case of the last element of a tuple', { reason: 'entity.projection', raises: 'JQ2001' }],
     ['a count of an upper-case of the first element of a tuple', { reason: 'entity.projection', raises: 'JQ2001' }],
@@ -787,6 +896,8 @@ const ENTITY_COUNTS = {
     ['a count of a constructor with a hop that can reach several rows', { reason: 'entity.hopValue', raises: 'JQ2001' }],
     ['a count of an operator at the root of the return', { reason: 'entity.projection' }],
     ['a count of an operator over a nested operator', { reason: 'entity.projection' }],
+    ['a count of a sum of a string member', { reason: 'entity.projection', raises: 'JQ2001' }],
+    ['a count of a concatenation of an object member', { reason: 'entity.projection', raises: 'JQ2001' }],
     // the entity planner has no row residual: a window over an operator projection is the engine's
     ['a window over an operator projection stays in the engine', { reason: 'entity.projection' }],
     ['an offset window over an operator projection stays in the engine', { reason: 'entity.projection' }],
@@ -945,6 +1056,36 @@ describe('entities: a string operator takes the members the database and the eng
     });
   });
 
+  it('concatenation takes a column of any scalar codec, arithmetic a numeric column alone', async () => {
+    /** member → [concatenation native, its code; arithmetic native, its code] on SQLite */
+    const EXPECTED = /** @type {Record<string, [boolean, string | undefined, boolean, string | undefined]>} */ ({
+      plain: [true, undefined, false, 'JQ2001'],
+      gap: [true, undefined, false, 'JQ2001'], // a NULL is no member: an empty operand concatenates as ''
+      hole: [true, undefined, false, 'JQ2001'], // a NULL is a present `null`, which concatenates as 'null'
+      maybe: [true, undefined, false, 'JQ2001'],
+      tally: [true, undefined, true, undefined], // an integer column
+      day: [false, undefined, false, 'JQ2001'], // a codec past the scalar ones proves nothing
+    });
+    await onBothEnginesPhysical(wordsModel, WORDS_DDL, async (store, host) => {
+      // PostgreSQL keeps a column that reads a NULL as a present `null` out of every native statement
+      const unaddressable = host === 'postgres' ? ['hole', 'maybe'] : [];
+      for (const [member, [joined, joinRaises, summed, sumRaises]] of Object.entries(EXPECTED)) {
+        for (const [operator, native, raises] of /** @type {[string, boolean, string | undefined][]} */ ([
+          ['$concat', joined, joinRaises], ['$add', summed, sumRaises]])) {
+          const label = `${host}: ${operator} of ${member}`;
+          const document = { $count: { $for: { w: '$.Word[*]' }, $return: { w: '$w.wid',
+            v: operator === '$concat' ? { $concat: [`$w.${member}`, '-'] } : { $add: [`$w.${member}`, 1] } } } };
+          const explained = await store.explain(document);
+          assert.equal(explained.mode, native && !unaddressable.includes(member) ? 'native' : 'set', label);
+          const run = await outcome(() => store.execute(document));
+          assert.deepEqual(run, await outcome(() => store.execute(document, { pushdown: false })), label);
+          assert.equal(run.code, raises, label);
+          if (raises === undefined) assert.equal(run.value, 3, label);
+        }
+      }
+    });
+  });
+
   it('a presence test and a default take every member, whatever the column holds', async () => {
     await onBothEnginesPhysical(wordsModel, WORDS_DDL, async (store, host) => {
       for (const [member] of MEMBERS) {
@@ -982,6 +1123,43 @@ describe('entities: a string operator takes the members the database and the eng
       for (const member of ['label', 'at']) {
         assert.deepEqual(await outcome(() => store.execute(counted(member))), { value: 2 }, `${host}: ${member}`);
       }
+    });
+  });
+});
+
+describe('a conjunct over an operator that cannot raise lets a later conjunct narrow the rows', () => {
+  const model = { $model: '0.1', collections: { rows: { key: null, identity: 'integer', indexes: [{ name: 'by_id', path: '$.id' }],
+    schema: { type: 'object', properties: { id: { type: 'string' }, s: { type: 'string' }, n: { type: 'integer' }, z: {} } } } } };
+  const documents = [{ id: 'a', s: 'ada', n: 1, z: 1 }, { id: 'b', s: 'kid', n: 2, z: [1] }, { id: 'c', n: 3, z: 'x' }];
+  const where = (/** @type {any} */ first) => ({ $for: { it: '$[*]' }, $where: { $and: [first, { $eq: ['$it.id', 'a'] }] }, $return: '$it.id' });
+  /** Whether the later equality waits behind the first conjunct: in the engine, or as a registered function of its own. */
+  const behind = (/** @type {any} */ explained) => explained.sql.includes('/$where/$and/1')
+    || (explained.residual?.reasons ?? []).some((/** @type {any} */ entry) => reasonId(entry.reason) === 'predicate.afterRaising');
+
+  it('a concatenation or a sum of typed members is total: the later equality is in the statement', async () => {
+    await onBothEngines(model, async (store, host) => {
+      const rows = store.collection('rows');
+      for (const document of documents) await rows.insert(document);
+      for (const first of [{ $eq: [{ $concat: ['$it.s', '!'] }, 'ada!'] }, { $ne: [{ $add: ['$it.n', 0.5] }, 9] }]) {
+        const query = where(first);
+        const label = `${host}: ${JSON.stringify(first)}`;
+        const explained = await rows.explain(query);
+        assert.equal(behind(explained), false, label);
+        assert.match(explained.sql, /"gx_id" = /, label);
+        assert.deepEqual(await outcome(() => rows.execute(query)), engineOutcome(query, documents), label);
+        assert.deepEqual(await outcome(() => rows.execute(query)), { value: 'a' }, label);
+      }
+    });
+  });
+
+  it('a concatenation of an untyped member can raise: the later equality stays behind it and the engine raises', async () => {
+    await onBothEngines(model, async (store, host) => {
+      const rows = store.collection('rows');
+      for (const document of documents) await rows.insert(document);
+      const query = where({ $eq: [{ $concat: ['$it.z'] }, '1'] });
+      assert.equal(behind(await rows.explain(query)), true, host);
+      assert.deepEqual(await outcome(() => rows.execute(query)), { code: 'JQ2001' }, host);
+      assert.deepEqual(engineOutcome(query, documents), { code: 'JQ2001' }, host);
     });
   });
 });

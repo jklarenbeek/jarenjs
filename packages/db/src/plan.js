@@ -3085,8 +3085,20 @@ function ordersByAccumulation(group) {
  * - `string`: a singular member path that holds a string or nothing, which
  *   gives `""` (a length, `0`) where the member is absent, while a `null`, a
  *   number, an array or an object raises;
- * - `path`: a singular member path of any type.
- * @type {ReadonlyMap<string, { arity: number, operand: 'plain' | 'string' | 'path' }>}
+ * - `path`: a singular member path of any type;
+ * - `scalar`: a string, number, boolean or `null` literal, or a singular
+ *   member path that holds one of those or nothing — concatenation spells a
+ *   scalar as its string and an absent member as `""`, and raises on an
+ *   array or an object;
+ * - `number`: a number literal, or a singular member path that holds a
+ *   number or nothing — arithmetic in doubles answers an infinity or NaN
+ *   where it overflows or divides by zero, and the empty sequence (a member
+ *   the constructor leaves out) for an absent operand, while a `null`, a
+ *   string, a boolean, an array or an object raises.
+ *
+ * An arity of `null` takes any number of operands. Integer division and the
+ * remainder raise on a zero divisor and are not listed.
+ * @type {ReadonlyMap<string, { arity: number | null, operand: 'plain' | 'string' | 'path' | 'scalar' | 'number' }>}
  */
 export const TOTAL_OPERATORS = new Map([
   ['$default', { arity: 2, operand: 'plain' }],
@@ -3095,29 +3107,71 @@ export const TOTAL_OPERATORS = new Map([
   ['$string-length', { arity: 1, operand: 'string' }],
   ['$count', { arity: 1, operand: 'path' }],
   ['$exists', { arity: 1, operand: 'path' }],
+  ['$concat', { arity: null, operand: 'scalar' }],
+  ['$add', { arity: 2, operand: 'number' }],
+  ['$sub', { arity: 2, operand: 'number' }],
+  ['$mul', { arity: 2, operand: 'number' }],
+  ['$div', { arity: 2, operand: 'number' }],
 ]);
 
 /**
- * Whether a reference holds a string or nothing. The schema must type it
- * exactly `string`: the type {@link typeOfPath} reports is the first of a
- * union, and a union with `null` or a number holds what a string operator
- * raises on. The path must be one the schema places as the engine reads it:
- * a name reads the member of an object, a non-negative index the element of
- * an array (a prefix item, else `items`), and every step on another kind of
- * value reads nothing; a negative index is refused. A column must store text,
- * with no codec past `text`, and read no NULL as a present `null`
+ * What a typed operand rule admits ({@link TOTAL_OPERATORS}): the schema
+ * types a member may be declared with — one type, or for `scalar` a union of
+ * them — whether a stored `null` may read back as a present `null`, and the
+ * column storage and codecs that decode to those types alone.
+ * @type {Readonly<Record<'string' | 'scalar' | 'number', { types: string[], union: boolean, nulls: boolean,
+ *   storages: string[], codecs: string[] }>>}
+ */
+const HELD_OPERANDS = {
+  string: { types: ['string'], union: false, nulls: false, storages: ['string'], codecs: ['text'] },
+  scalar: { types: ['string', 'number', 'integer', 'boolean', 'null'], union: true, nulls: true,
+    storages: ['string', 'number', 'integer', 'boolean'], codecs: ['text', 'number', 'integer', 'boolean'] },
+  number: { types: ['number', 'integer'], union: false, nulls: false, storages: ['number', 'integer'], codecs: ['number', 'integer'] },
+};
+
+/** Whether a literal operand is one a rule takes: any value where the rule
+ * takes any (`plain`); for `scalar` and `number`, a value of the kind the
+ * rule names (`$const` quotes arrays and objects too); for `string` and
+ * `path`, none.
+ * @param {string} operand @param {any} value @returns {boolean} */
+function literalOperand(operand, value) {
+  switch (operand) {
+    case 'plain': return true;
+    case 'scalar': return value === null || ['string', 'number', 'boolean'].includes(typeof value);
+    case 'number': return typeof value === 'number';
+    default: return false;
+  }
+}
+
+/**
+ * Whether a reference holds only what a typed operand rule admits
+ * ({@link HELD_OPERANDS}), or nothing. The schema must type it with the
+ * rule's types: the type {@link typeOfPath} reports is the first of a union,
+ * so only the `scalar` rule reads a union, and only when every type in it is
+ * one the rule takes (a union with `null` or a number holds what a string
+ * operator raises on). The path must be one the schema places as the engine
+ * reads it: a name reads the member of an object, a non-negative index the
+ * element of an array (a prefix item, else `items`), and every step on
+ * another kind of value reads nothing; a negative index is refused. A column
+ * must store one of the rule's storages, with no codec past the rule's, and,
+ * unless the rule takes a `null`, read no NULL as a present `null`
  * ({@link nullReading}); an epoch column keeps a number beside the string and
  * proves nothing here.
  * @param {any} ref
  * @param {any} schema - the schema that types the reference
+ * @param {'string' | 'scalar' | 'number'} operand
  * @returns {boolean}
  */
-function holdsOnlyStrings(ref, schema) {
+function holdsOnly(ref, schema, operand) {
+  const held = HELD_OPERANDS[operand];
   if (countsFromTheEnd(ref)) return false;
-  if (schemaNodeAt(schema, ref.segments)?.type !== 'string' || nullReading(ref, schema) !== 'none') return false;
+  const type = schemaNodeAt(schema, ref.segments)?.type;
+  const types = held.union && Array.isArray(type) ? type : [type];
+  if (types.length === 0 || !types.every((entry) => held.types.includes(entry))) return false;
+  if (!held.nulls && nullReading(ref, schema) !== 'none') return false;
   switch (ref.flavor) {
     case undefined: case 'entity-doc': return true;
-    case 'entity-column': return ref.storage === 'string' && (ref.codec === undefined || ref.codec === 'text');
+    case 'entity-column': return held.storages.includes(ref.storage) && (ref.codec === undefined || held.codecs.includes(ref.codec));
     default: return false;
   }
 }
@@ -3133,11 +3187,12 @@ function holdsOnlyStrings(ref, schema) {
  */
 function cannotRaise(op, resolve) {
   const rule = TOTAL_OPERATORS.get(op.name);
-  if (rule === undefined || op.args.length !== rule.arity) return false;
+  if (rule === undefined || (rule.arity !== null && op.args.length !== rule.arity)) return false;
   return op.args.every((/** @type {any} */ arg) => {
-    if (arg.kind === 'literal') return rule.operand === 'plain';
+    if (arg.kind === 'literal') return literalOperand(rule.operand, arg.value);
     const found = resolve(arg);
-    return found !== null && (rule.operand !== 'string' || holdsOnlyStrings(found.ref, found.schema));
+    return found !== null && (rule.operand === 'plain' || rule.operand === 'path'
+      || holdsOnly(found.ref, found.schema, rule.operand));
   });
 }
 

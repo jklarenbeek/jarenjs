@@ -3554,7 +3554,10 @@ over an object or array constructor whose operators cannot raise is a
 operators are `$default` over member paths and literals, `$upper`, `$lower` and
 `$string-length` over a member the schema types exactly `string` (reached by no
 negative index) and whose column, if it has one, stores text and reads no NULL
-as a present `null`, and `$count` and `$exists` over a member path (§10.6). On an entity a window over
+as a present `null`, `$count` and `$exists` over a member path, `$concat` over
+literals and members typed only as scalars or `null`, and `$add`, `$sub`, `$mul`
+and `$div` over number literals and members typed exactly `number` or `integer`
+that read no NULL as a present `null` (§10.6). On an entity a window over
 such a projection stays in the engine. Boolean
 predicates may span bindings when each leaf uses one binding's proven total
 forms. The mandatory column equalities still establish the join graph;
@@ -3889,7 +3892,10 @@ a number appears only where `capabilities.rowEstimates` is filled):
   groups ordered by an integer sum or average (`plan.windowedAccumulation`);
 - projection trees containing an operator other than `$default` over member
   paths and literals, `$upper`, `$lower` and `$string-length` over a member the
-  schema types exactly `string`, and `$count` and `$exists` over a member path,
+  schema types exactly `string`, `$count` and `$exists` over a member path,
+  `$concat` over literals and members typed only as scalars or `null`, and
+  `$add`, `$sub`, `$mul` and `$div` over number literals and members typed
+  exactly `number` or `integer` that read no NULL as a present `null`,
   whole entity binding references or non-singular paths; windows over those
   projections, counts of them, and on an entity every window over an operator
   projection (the entity planner has no row residual; `plan.countProjection`,
