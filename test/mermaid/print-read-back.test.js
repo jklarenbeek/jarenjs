@@ -29,13 +29,13 @@ describe('stateDiagram — the states keep their order through the printer', fun
   it('declares a labelled state where the diagram first uses it', () => {
     const { text, ast } = roundTrip('stateDiagram-v2\n[*] --> Still\nStill --> Moving\nMoving : Moving fast');
     assert.deepEqual(ast.states.map((/** @type {any} */ s) => s.id), ['Still', 'Moving']);
-    assert.equal(text, 'stateDiagram-v2\nstate Still\nMoving : Moving fast\n[*] --> Still\nStill --> Moving\n');
+    assert.equal(text, 'stateDiagram-v2\nStill\nMoving : Moving fast\n[*] --> Still\nStill --> Moving\n');
   });
 
   it('declares a child before the compound state that holds it', () => {
     const { text, ast } = roundTrip('stateDiagram-v2\nS1 : first\nstate S2 {\nstate S1 {\n}\n}');
     assert.deepEqual(ast.states.map((/** @type {any} */ s) => [s.id, s.parent]), [['S1', 'S2'], ['S2', undefined]]);
-    assert.equal(text, 'stateDiagram-v2\nS1 : first\nstate S2\nstate S2 {\n  state S1\n}\n');
+    assert.equal(text, 'stateDiagram-v2\nS1 : first\nS2\nstate S2 {\n  S1\n}\n');
   });
 
   it('prints a diagram whose order is already the printed one exactly as before', () => {
@@ -46,7 +46,7 @@ describe('stateDiagram — the states keep their order through the printer', fun
   it('declares an idle state after the states a transition introduces before it', () => {
     const { text, ast } = roundTrip('stateDiagram-v2\nA : Alpha\nA --> B : go\nstate C');
     assert.deepEqual(ast.states.map((/** @type {any} */ s) => s.id), ['A', 'B', 'C']);
-    assert.equal(text, 'stateDiagram-v2\nA : Alpha\nstate B\nstate C\nA --> B : go\n');
+    assert.equal(text, 'stateDiagram-v2\nA : Alpha\nB\nC\nA --> B : go\n');
   });
 });
 

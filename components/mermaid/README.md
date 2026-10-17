@@ -605,6 +605,35 @@ printed as written), and in a sequence diagram and a panel a `<br>` breaks the
 line (it printed as text), so a message, an actor, a note or a panel row that
 breaks is drawn in its lines and the diagram grows to hold them, and a sequence
 scene's actors, messages and notes gained `lines`.
+Lines real Mermaid reads are read as it reads them, where some were dropped,
+refused or misread: a state block note closes at `end note` in any case and a
+floating `note "x" as N` is one line (either swallowed the rest of the
+diagram), `Note right of A : a --> b` reads, a block note never closed and
+`note over X` are refused at the note's line, a trailing `%%` comment, several
+statements on one line (`A --> B C --> D`), a state name on a line of its own,
+`:::style`, `<<choice>>`, `accTitle` and `accDescr` read as Mermaid reads them,
+and `toMermaid` declares a lone state by its name instead of `state X` (which
+Mermaid reads as no state); a class relation with quoted cardinalities
+(`Customer "1" --> "*" Ticket`, refused before) reads, with
+`fromCardinality`/`toCardinality` that `toMermaid` prints, as do backtick names,
+relations without blanks (`A<|--B`, dropped), lollipops (`bar ()-- foo`,
+dropped), `class B["Bee"]` (a label) and `class C:::k`; a sequence statement
+ends at its closing `;` (`A->>B: hi;` kept `hi;`, and `participant A;` drew a
+second actor `A;`), a note declares the actors it names, and a participant's
+`@{ … }` metadata and a message's `()` half-arrow marks are no longer part of
+the name; a quoted click string after a `;` is one unit (its `;` split it into
+a phantom node); a `MermaidParseError`'s `line` and a gantt task's `line` count
+the front-matter, `init` directives and comment lines (they named a line that
+many lines too early); a flowchart reads `A--yes-->B` (a phantom node `yes`),
+`A --> |text| B` (refused), `A ~~~ B` (an `invisible` stroke; `B` vanished),
+`A e1@--> B`, `A o--o B` and `A x--x B` (circle and cross tails), and
+`A@{ … } --> B`, where the link vanished, and refuses text after a node where a
+link belongs (`A --> B garbage` dropped it); and an ER relationship written
+without blanks (`CUSTOMER||--o{ORDER` read an entity `CUSTOMER||--o` that
+swallowed the lines after it) or with the word cardinalities
+(`CAR 1 to zero or more NAMED-DRIVER`, dropped) reads, an entity's `p[Person]`
+is an `alias` and its `:::style` is dropped (both were part of the name), and a
+one-line entity block whose comment holds a connector reads (it was refused).
 
 ## Exports
 

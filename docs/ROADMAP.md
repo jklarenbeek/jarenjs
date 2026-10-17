@@ -241,6 +241,20 @@ establish registry publication or downstream acceptance.
 
 ## @jarenjs/mermaid
 
+- [ ] **Mermaid forms still read differently from Mermaid** — measured against
+  Mermaid 11.16.1 on its own syntax-doc examples: a flowchart label holding a
+  multi-line markdown string is refused as an unterminated shape; a node's
+  `A@{ shape: …, label: … }` metadata is skipped rather than read into the
+  node's shape and label; a class generic keeps `~T~` in the name in `class
+  X~T~ {` and relation ends but not in `class X~T~` or `X : member` (Mermaid
+  names all of them `X`); a lollipop's interface keeps its written name where
+  Mermaid generates one; a sequence participant's `type` (boundary, database,
+  …) and a message's half-arrow marks are not kept; a state transition label
+  keeps a closing `;` (`A --> B : x;`, Mermaid ends the label there); `state
+  X` with no `{` is read as a state (Mermaid reads none); an ER line `A o--o
+  B` reads as a relationship (Mermaid: three entities) and one without `:
+  label` reads (Mermaid refuses it); a flowchart link to a subgraph id prints
+  a node line for the id that reads back as another tree.
 - [ ] **`htmlLabels:true` — browser check** — flowchart and state labels
   render as HTML in `foreignObject` when the host passes `htmlLabels: true` (a
   diagram's config can turn them off, never on; sized and wrapped by the

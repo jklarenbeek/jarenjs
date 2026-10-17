@@ -92,7 +92,8 @@
           "enum": [
             "solid",
             "thick",
-            "dotted"
+            "dotted",
+            "invisible"
           ]
         },
         "head": {

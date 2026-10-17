@@ -47,10 +47,20 @@ const SHAPE_OPENERS = [
 const RE_EDGE_LABELED = /(<?)(?:--|==|-\.)\s+(.+?)\s+([-.=]{2,})([>ox]?)/y;
 /** Sticky: what opens an inline label, the `<` of a two-way link included. */
 const RE_EDGE_LABEL_OPEN = /(<?)(?:--|==|-\.)\s+/y;
+/**
+ * Sticky: an inline label with no blank after its opening run, `A--yes-->B`.
+ * The text starts with no character a link run reads (`A--o` is a link with a
+ * circle head, as in Mermaid) and holds no run of two link characters.
+ */
+const RE_EDGE_LABELED_TIGHT = /(<?)(?:--|==|-\.)(?![-.=>ox\s|])((?:[^-.=|]|[-.=](?![-.=]))+?)\s*([-.=]{2,})([>ox]?)/y;
 /** Sticky: the link run (a blank before it optional) that closes a quoted inline label. */
 const RE_EDGE_LABEL_CLOSE = /\s*([-.=]{2,})([>ox]?)/y;
-/** Sticky: a plain link operator. */
-const RE_EDGE_PLAIN = /(<?)([-.=]{2,})([>ox]?)/y;
+/** Sticky: a plain link operator, or the invisible `~~~`; a tail mark `o`/`x` stands after a blank. */
+const RE_EDGE_PLAIN = /(<|(?<=\s)[ox])?([-.=]{2,}|~{3,})([>ox]?)/y;
+/** Sticky: an edge id before its link, `e1@-->`; the tree keeps no edge ids. */
+const RE_EDGE_ID = /[A-Za-z_][\w-]*@(?=[-=.~<ox])/y;
+/** `e1@{ … }`: an edge id's animation or curve, which the tree does not keep. */
+const RE_EDGE_META = /^([A-Za-z_][\w-]*)@\{[\s\S]*\}$/;
 /** Sticky: an identifier (vertex id, class name, …). Ids are
  * alphanumeric/underscore (plus Unicode letters); `-`/`.` are excluded
  * so they cannot swallow a following link operator. */
@@ -79,6 +89,8 @@ export function parseFlowchart(lines, lineOffset, direction) {
   const clicks = [];
   /** @type {{ id: string, label: string, direction: string|null, nodes: string[] }[]} */
   const subgraphStack = [];
+  /** @type {Set<string>} */
+  const edgeIds = new Set();
 
   const ensureNode = (id, label, shape) => {
     let node = nodeMap.get(id);
@@ -168,7 +180,11 @@ export function parseFlowchart(lines, lineOffset, direction) {
     // A node/edge chain: split on ';' first (multiple statements per line);
     // a statement after a ';' may be a keyword's
     for (const stmt of splitStatements(line)) {
-      if (!readKeyword(stmt, lineNo)) parseChain(stmt, lineNo, ensureNode, edges, classes);
+      if (readKeyword(stmt, lineNo)) continue;
+      // an edge id's `e1@{ … }` styles that edge; any other `id@{ … }` is a node
+      const meta = RE_EDGE_META.exec(stmt);
+      if (meta !== null && edgeIds.has(meta[1])) continue;
+      parseChain(stmt, lineNo, ensureNode, edges, classes, edgeIds);
     }
   }
 
@@ -189,9 +205,10 @@ export function parseFlowchart(lines, lineOffset, direction) {
  * where one ends: a shape's brackets directly after an id, scanned by
  * `scanToCloser` (a quote counts only where it opens the label and its
  * partner meets the closer, so the apostrophe in `A[it's]` is text), and a
- * link with its pipe or inline label, read by `readEdge`. A `;` inside a
- * label is text — `"fetch is injected; streaming via SSE"` is one node, and
- * so is `[a;b]` — and every other `;` separates.
+ * link with its pipe or inline label, read by `readEdge`, and a quoted string
+ * anywhere else (a click's `"https://e.com/?a=1;b=2"`). A `;` inside a label
+ * or a string is text — `"fetch is injected; streaming via SSE"` is one
+ * node, and so is `[a;b]` — and every other `;` separates.
  * @param {string} line
  * @returns {string[]}
  */
@@ -218,7 +235,8 @@ function splitStatements(line) {
 
 /**
  * Where a label that opens at `at` ends, as the chain reader reads it: a
- * shape directly after an id character, or a link operator with its label.
+ * shape directly after an id character, a link operator with its label, or
+ * a quoted string.
  * @param {string} s
  * @param {number} at
  * @param {Map<[string, string][], number>} unclosed per closer set, the index
@@ -240,6 +258,11 @@ function labelEnd(s, at, unclosed) {
   }
   const c = s.charCodeAt(at);
   if (c === 0x2d /* - */ || c === 0x3d /* = */ || c === 0x3c /* < */) return readEdge(s, at)?.pos ?? at;
+  // a quoted string of a statement (a click's link or tooltip) is one unit
+  if (c === 0x22 /* " */) {
+    const partner = s.indexOf('"', at + 1);
+    return partner === -1 ? at : partner + 1;
+  }
   return at;
 }
 
@@ -274,8 +297,9 @@ const MAX_EDGES = 10000;
  * @param {(id: string, label: string|null, shape: string|null) => object} ensureNode
  * @param {object[]} edges
  * @param {object[]} classes
+ * @param {Set<string>} edgeIds the edge ids read so far
  */
-function parseChain(stmt, lineNo, ensureNode, edges, classes) {
+function parseChain(stmt, lineNo, ensureNode, edges, classes, edgeIds) {
   const s = stmt;
   let pos = skipSpace(s, 0);
   let prevGroup = readVertexGroup(s, pos, lineNo, ensureNode, classes);
@@ -286,11 +310,15 @@ function parseChain(stmt, lineNo, ensureNode, edges, classes) {
   for (;;) {
     pos = skipSpace(s, pos);
     if (pos >= s.length) break;
-    const edge = readEdge(s, pos);
-    if (edge === null) {
-      // Unrecognized trailing content — be lenient, stop.
-      break;
+    RE_EDGE_ID.lastIndex = pos;
+    if (RE_EDGE_ID.test(s)) {
+      edgeIds.add(s.slice(pos, RE_EDGE_ID.lastIndex - 1));
+      pos = RE_EDGE_ID.lastIndex;
     }
+    const edge = readEdge(s, pos);
+    // what follows a node is a link or nothing, as in Mermaid: trailing text
+    // is refused, where it was dropped without a word
+    if (edge === null) fail(`expected a link after a node, found '${s.slice(pos)}'`, lineNo);
     pos = edge.pos;
     pos = skipSpace(s, pos);
     const nextGroup = readVertexGroup(s, pos, lineNo, ensureNode, classes);
@@ -362,7 +390,33 @@ function readVertex(s, pos, lineNo) {
       p = RE_ID.lastIndex;
     }
   }
+  // `A@{ shape: …, label: … }`: the node's metadata, which the tree does
+  // not read yet, is skipped so the statement reads on
+  if (s.charCodeAt(p) === 0x40 /* @ */ && s.charCodeAt(p + 1) === 0x7b /* { */) {
+    const end = metadataEnd(s, p + 2);
+    if (end !== -1) p = end;
+  }
   return { id, label, shape, className, pos: p };
+}
+
+/**
+ * Where a node's `@{ … }` metadata ends: after the `}` that closes it,
+ * outside its quoted values; -1 when none does.
+ * @param {string} s
+ * @param {number} from the index after the `@{`
+ * @returns {number}
+ */
+function metadataEnd(s, from) {
+  for (let i = from; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    if (c === 0x7d /* } */) return i + 1;
+    if (c === 0x22 /* " */) {
+      const close = s.indexOf('"', i + 1);
+      if (close === -1) return -1;
+      i = close;
+    }
+  }
+  return -1;
 }
 
 /**
@@ -451,17 +505,24 @@ function readEdge(s, pos) {
       return { ...info, label, pos: RE_EDGE_LABELED.lastIndex };
     }
   }
+  RE_EDGE_LABELED_TIGHT.lastIndex = pos;
+  const tight = RE_EDGE_LABELED_TIGHT.exec(s);
+  if (tight !== null) {
+    const info = classifyLink(tight[1], tight[3], tight[4]);
+    return { ...info, label: stripQuotes(tight[2].trim()), pos: RE_EDGE_LABELED_TIGHT.lastIndex };
+  }
   RE_EDGE_PLAIN.lastIndex = pos;
   const m = RE_EDGE_PLAIN.exec(s);
   if (m === null || m.index !== pos) return null;
-  const info = classifyLink(m[1], m[2], m[3]);
+  const info = classifyLink(m[1] ?? '', m[2], m[3]);
   let p = RE_EDGE_PLAIN.lastIndex;
-  // Optional |label|: a quoted label is one unit, as in a node's brackets,
-  // so `|"x|y"|` reads `x|y`
-  if (s.charCodeAt(p) === 0x7c /* | */) {
-    const close = scanToCloser(s, p + 1, PIPE_CLOSER);
+  // Optional |label|, blanks before it allowed: a quoted label is one unit,
+  // as in a node's brackets, so `|"x|y"|` reads `x|y`
+  const pipe = skipSpace(s, p);
+  if (s.charCodeAt(pipe) === 0x7c /* | */) {
+    const close = scanToCloser(s, pipe + 1, PIPE_CLOSER);
     if (close !== null) {
-      label = stripQuotes(s.slice(p + 1, close.at).trim());
+      label = stripQuotes(s.slice(pipe + 1, close.at).trim());
       p = close.end;
     }
   }
@@ -470,18 +531,21 @@ function readEdge(s, pos) {
 
 /**
  * Classify a link body into stroke/head/tail/length.
- * @param {string} tailMark leading `<` or ''
- * @param {string} body run of `-`/`.`/`=`
+ * @param {string} tailMark leading `<`/`o`/`x` or ''
+ * @param {string} body run of `-`/`.`/`=`, or of `~` (an invisible link)
  * @param {string} headMark trailing `>`/`o`/`x` or ''
  */
 function classifyLink(tailMark, body, headMark) {
-  const stroke = body.indexOf('=') !== -1 ? 'thick'
-    : body.indexOf('.') !== -1 ? 'dotted' : 'solid';
+  const stroke = body.charCodeAt(0) === 0x7e /* ~ */ ? 'invisible'
+    : body.indexOf('=') !== -1 ? 'thick'
+      : body.indexOf('.') !== -1 ? 'dotted' : 'solid';
   const head = headMark === '>' ? 'arrow' : headMark === 'o' ? 'circle'
     : headMark === 'x' ? 'cross' : 'none';
-  const tail = tailMark === '<' ? 'arrow' : 'none';
+  const tail = tailMark === '<' ? 'arrow' : tailMark === 'o' ? 'circle'
+    : tailMark === 'x' ? 'cross' : 'none';
   let length;
-  if (stroke === 'thick') length = countCharCode(body, 0x3d);
+  if (stroke === 'invisible') length = body.length;
+  else if (stroke === 'thick') length = countCharCode(body, 0x3d);
   else if (stroke === 'dotted') length = countCharCode(body, 0x2e);
   else length = countCharCode(body, 0x2d);
   if (length < 1) length = 1;

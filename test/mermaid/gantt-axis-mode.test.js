@@ -83,7 +83,13 @@ describe('displayMode is a front-matter key that lands in the gantt config', () 
     const doc = parseMermaid(COMPACT + TWO_SECTIONS);
     const again = parseMermaid(toMermaid(doc));
     assert.deepStrictEqual(again.config, doc.config);
-    assert.deepStrictEqual(layoutDiagram(again), layoutDiagram(doc));
+    // a row's `line` is its line in each source: the three front-matter lines
+    // printed back as one init directive move every row up two lines
+    const first = /** @type {any} */ (layoutDiagram(doc));
+    const second = /** @type {any} */ (layoutDiagram(again));
+    assert.deepStrictEqual(second.rows.map((/** @type {any} */ r) => r.line), first.rows.map((/** @type {any} */ r) => r.line - 2));
+    const lineless = (/** @type {any} */ scene) => ({ ...scene, rows: scene.rows.map((/** @type {any} */ row) => ({ ...row, line: 0 })) });
+    assert.deepStrictEqual(lineless(second), lineless(first));
     assert.strictEqual(layoutDiagram(again).compact, true);
   });
 
@@ -156,7 +162,9 @@ describe('topAxis draws the date labels a second time', () => {
       labelY: plain.plot.y + plain.plot.h + 20,
     });
     assert.deepStrictEqual(both.ticks, plain.ticks, 'same ticks, same labels');
-    assert.deepStrictEqual(both.rows, plain.rows, 'the rows do not move');
+    // a row's `line` is its line in the source, one further down under the directive
+    assert.deepStrictEqual(both.rows.map((/** @type {any} */ { line, ...row }) => [line - 1, row]),
+      plain.rows.map((/** @type {any} */ { line, ...row }) => [line, row]), 'the rows do not move');
   });
 
   it('should read the switch as JavaScript truthiness, as Mermaid does', () => {

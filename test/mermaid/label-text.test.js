@@ -195,7 +195,7 @@ describe('line breaks in edge labels', () => {
     const scene = compileMermaid(source).toLayout();
     assert.equal(scene.edges[0].labelH, 38.6);
     assert.equal(scene.nodes[1].h, 51.6);
-    assert.equal(toMermaid(parseMermaid(source)), 'stateDiagram-v2\nstate A\nB : three<br/>four\nA --> B : one<br/>two\n');
+    assert.equal(toMermaid(parseMermaid(source)), 'stateDiagram-v2\nA\nB : three<br/>four\nA --> B : one<br/>two\n');
   });
 
   it('keeps a one-line edge label as one text element', () => {

@@ -14,7 +14,7 @@
  * to re-emit an edited AST as editable Mermaid text.
  */
 
-import { parseState, stateStatements } from './parser/state.js';
+import { parseState, stateStatements, stateDeclaration } from './parser/state.js';
 import { sequenceStatements } from './parser/sequence.js';
 import { printClick, printNodeClick } from './parser/click.js';
 import { RE_LINK_INSIDE } from './parser/flowchart.js';
@@ -214,6 +214,7 @@ function edgeOp(e) {
   const head = e.head === 'arrow' ? '>' : e.head === 'circle' ? 'o' : e.head === 'cross' ? 'x' : '';
   const n = Math.max(1, e.length | 0);
   let mid;
+  if (e.stroke === 'invisible') return '~'.repeat(Math.max(3, n));
   if (e.stroke === 'thick') mid = '='.repeat(n);
   else if (e.stroke === 'dotted') mid = '-' + '.'.repeat(n) + '-';
   else mid = '-'.repeat(Math.max(2, n));
@@ -276,7 +277,8 @@ function printSeqStatements(statements, out, depth) {
 /**
  * A line that reads back as one statement: a `;` in its text prints as
  * `#59;`, which the drawing decodes, only where the line would otherwise
- * split into statements (MERMAID-FORMAT §4.2, §4.3).
+ * split into statements or end its statement early (MERMAID-FORMAT §4.2,
+ * §4.3).
  * @param {string} head - the statement up to its text
  * @param {string} text
  * @param {(line: string) => string[]} statements - the type's statement splitter
@@ -284,7 +286,8 @@ function printSeqStatements(statements, out, depth) {
  */
 function oneStatement(head, text, statements) {
   const line = head + text;
-  return statements(line.trim()).length === 1 ? line
+  const read = statements(line.trim());
+  return read.length === 1 && read[0] === line.trim() ? line
     : head + text.replace(/(#[A-Za-z0-9]+;)|;/g, (m, code) => code ?? '#59;');
 }
 
@@ -318,24 +321,29 @@ function isUnbracedMember(member) {
  */
 function printClass(ast) {
   const out = ['classDiagram'];
+  // a name only words may spell is written bare; any other in backticks
+  const name = (/** @type {string} */ n) => (/^[^\s"`:;<>*|()\-[\]{}~]+$/.test(n) ? n : `\`${n}\``);
   for (const cls of ast.classes) {
+    const head = `class ${name(cls.name)}${cls.label !== cls.name ? `["${cls.label}"]` : ''}`;
     if (cls.members.length === 0) {
-      out.push(`class ${cls.name}`);
+      out.push(head);
     }
     else if (cls.members.some(isUnbracedMember)) {
       // a body ends at its first `}` and drops comment-looking lines, so
       // such a member can only be written as a `Name : member` line
-      out.push(`class ${cls.name}`);
+      out.push(head);
       for (const m of cls.members) out.push(`${cls.name} : ${m.visibility ?? ''}${m.text}`);
     }
     else {
-      out.push(`class ${cls.name} {`);
+      out.push(`${head} {`);
       for (const m of cls.members) out.push(`  ${m.visibility ?? ''}${m.text}`);
       out.push('}');
     }
   }
   for (const r of ast.relations) {
-    out.push(`${r.from} ${r.type} ${r.to}${r.label ? ' : ' + r.label : ''}`);
+    const fromCard = r.fromCardinality === undefined ? '' : ` "${r.fromCardinality}"`;
+    const toCard = r.toCardinality === undefined ? '' : `"${r.toCardinality}" `;
+    out.push(`${name(r.from)}${fromCard} ${r.type} ${toCard}${name(r.to)}${r.label ? ' : ' + r.label : ''}`);
   }
   for (const click of ast.clicks ?? []) out.push(printNodeClick(click));
   return out.join('\n') + '\n';
@@ -386,7 +394,7 @@ function printStateLines(ast, declareAll) {
   const out = ['stateDiagram-v2'];
   const nested = ast.states.some((s) => s.parent != null) || ast.transitions.some((t) => t.parent != null);
   if (declareAll) {
-    for (const s of ast.states) out.push(s.label !== s.id ? oneStatement(`${s.id} : `, s.label, stateStatements) : `state ${s.id}`);
+    for (const s of ast.states) out.push(s.label !== s.id ? oneStatement(`${s.id} : `, s.label, stateStatements) : stateDeclaration(s.id));
   }
   if (nested) {
     const states = new Map(ast.states.map((s) => [s.id, s]));
@@ -410,7 +418,7 @@ function printStateLines(ast, declareAll) {
       if (declareAll && s.parent == null) continue;
       scope(s.parent);
       out.push('  '.repeat(opened.length)
-        + (declareAll || s.label === s.id ? `state ${s.id}` : oneStatement(`${s.id} : `, s.label, stateStatements)));
+        + (declareAll || s.label === s.id ? stateDeclaration(s.id) : oneStatement(`${s.id} : `, s.label, stateStatements)));
     }
     for (const t of ast.transitions) {
       scope(t.parent);
@@ -421,8 +429,9 @@ function printStateLines(ast, declareAll) {
   }
   if (!declareAll) {
     // an id-only state no transition mentions must still be DECLARED, or
-    // the canonical round trip silently drops it (`state x` is the
-    // parser's own spelling for exactly that)
+    // the canonical round trip silently drops it (its name on a line of
+    // its own, which Mermaid reads too, or `state x` where that would not
+    // read back)
     const mentioned = new Set();
     for (const t of ast.transitions) {
       mentioned.add(t.from);
@@ -430,7 +439,7 @@ function printStateLines(ast, declareAll) {
     }
     for (const s of ast.states) {
       if (s.label !== s.id) out.push(oneStatement(`${s.id} : `, s.label, stateStatements));
-      else if (!mentioned.has(s.id)) out.push(`state ${s.id}`);
+      else if (!mentioned.has(s.id)) out.push(stateDeclaration(s.id));
     }
   }
   for (const t of ast.transitions) {
@@ -459,8 +468,9 @@ function printEr(ast) {
   // a name with a space must be quoted to read back as one name
   const name = (/** @type {string} */ n) => (/\s/.test(n) ? `"${n}"` : n);
   for (const e of ast.entities) {
-    if (e.attributes.length === 0) { out.push(name(e.name)); continue; }
-    out.push(`${name(e.name)} {`);
+    const head = name(e.name) + (e.alias === undefined ? '' : /^[^\s"\]]+$/.test(e.alias) ? `[${e.alias}]` : `["${e.alias}"]`);
+    if (e.attributes.length === 0) { out.push(head); continue; }
+    out.push(`${head} {`);
     for (const a of e.attributes) {
       out.push(`  ${a.type} ${a.name}${a.keys.length ? ' ' + a.keys.join(', ') : ''}${a.comment === undefined ? '' : ` "${a.comment}"`}`);
     }

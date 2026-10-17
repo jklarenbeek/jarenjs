@@ -4,10 +4,10 @@
  * the two fully-modeled diagram types; this is the second.
  *
  * Line-oriented, with a block stack for loop/alt/opt/par/critical/break.
- * Explicitly declared participants keep their declaration order; a
- * message to an undeclared actor is legal (the layout pass creates the
- * lifeline), so the AST records only what the source states — faithful
- * and geometry-free. Module-const regexes only.
+ * Participants keep the order they first appear in: a `participant` /
+ * `actor` line, or a message or note naming an actor no line declared,
+ * declares it there, as Mermaid does. Geometry-free; module-const regexes
+ * only.
  */
 
 import {
@@ -20,6 +20,10 @@ import { firstToken } from '../utils.js';
 const RE_MSG = /^([^-<>:]+?)\s*((?:-{1,2})(?:>>|>|x|\)))\s*([+-]?)\s*([^:]+?)\s*:\s*(.*)$/;
 /** `participant A as Alice` / `actor A`. */
 const RE_PARTICIPANT = /^(participant|actor)\s+(.+)$/;
+/** A participant's `@{ … }` metadata: the name before it, the metadata, the rest. */
+const RE_PARTICIPANT_META = /^([^@]*?)\s*@\{([^}]*)\}(.*)$/;
+/** The `"alias"` member of a participant's metadata. */
+const RE_META_ALIAS = /"alias"\s*:\s*"([^"]*)"/;
 /** `note left of A: t` / `note right of A: t` / `note over A,B: t`. */
 const RE_NOTE = /^[Nn]ote\s+(left of|right of|over)\s+([^:]+):\s*(.*)$/;
 
@@ -35,10 +39,11 @@ const RE_SEPARATOR = /#[A-Za-z0-9]+;|;/g;
 
 /**
  * One line's statements. Mermaid ends a statement at `;` (`A->>B: hi;
- * B->>A: yo` is two messages; a message writes the character as `#59;`), so
- * a line splits at every `;` outside an entity code where each piece reads as
- * a statement; a line whose pieces do not all read so is one statement, as
- * before, and its text keeps the `;`.
+ * B->>A: yo` is two messages, and `A->>B: hi;` one message `hi`; a message
+ * writes the character as `#59;`), so a line splits at every `;` outside an
+ * entity code where each piece that is not blank reads as a statement; a
+ * line whose pieces do not all read so is one statement, as before, and its
+ * text keeps the `;`.
  * @param {string} line - trimmed
  * @returns {string[]}
  */
@@ -53,7 +58,7 @@ export function sequenceStatements(line) {
   }
   pieces.push(line.slice(start).trim());
   const statements = pieces.filter((piece) => piece !== '');
-  return statements.length > 1 && statements.every(readsAsStatement) ? statements : [line];
+  return statements.every(readsAsStatement) ? statements : [line];
 }
 
 /**
@@ -98,8 +103,13 @@ export function parseSequence(lines, lineOffset) {
     if (firstWord === 'participant' || firstWord === 'actor') {
       const m = RE_PARTICIPANT.exec(line);
       if (m !== null) {
-        const { id, label } = splitAlias(m[2].trim());
-        declare(id, label, /** @type {any} */ (m[1]));
+        // `Alice@{ "type": "database", "alias": "Store" }`: the box's kind is
+        // not kept; its alias is the label unless an `as` names one
+        const meta = RE_PARTICIPANT_META.exec(m[2]);
+        const written = meta === null ? m[2] : meta[1] + meta[3];
+        const { id, label } = splitAlias(written.trim());
+        const alias = meta === null ? null : RE_META_ALIAS.exec(meta[2]);
+        declare(id, label === id && alias !== null ? alias[1] : label, /** @type {any} */ (m[1]));
       }
       return;
     }
@@ -114,6 +124,8 @@ export function parseSequence(lines, lineOffset) {
       const m = RE_NOTE.exec(line);
       if (m !== null) {
         const actors = m[2].split(',').map((s) => s.trim()).filter(Boolean);
+        // a note on an actor no line has named yet declares it, as a message does
+        for (const actor of actors) declare(actor, actor, 'participant');
         current.push(seqNote(/** @type {any} */ (m[1]), actors, m[3].trim()));
       }
       return;
@@ -153,10 +165,11 @@ export function parseSequence(lines, lineOffset) {
     // A message.
     const mm = RE_MSG.exec(line);
     if (mm !== null) {
-      const from = mm[1].trim();
+      // `A()->>()B`: the half-arrow marks at the actors are not kept
+      const from = mm[1].trim().replace(/\(\)$/, '');
       const arrow = mm[2];
       const activation = mm[3] === '+' ? 'activate' : mm[3] === '-' ? 'deactivate' : null;
-      const to = mm[4].trim();
+      const to = mm[4].trim().replace(/^\(\)/, '');
       const text = mm[5];
       declare(from, from, 'participant');
       declare(to, to, 'participant');

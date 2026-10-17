@@ -39,7 +39,22 @@ const RE_COMMENT = /^\s*%%(?!\{)/;
  * @returns {MermaidConfigResult}
  */
 export function parseMermaidConfig(source, options = {}) {
+  const { config, title, lines } = readMermaidSource(source, options);
+  return { config, title, body: lines.filter((line) => line !== null).join('\n') };
+}
+
+/**
+ * Extract config + title, and every source line in its place: a line of the
+ * front-matter, an init directive or a `%%` comment is `null`, so the index
+ * of a body line is its line in the source, less one.
+ * @param {string} source
+ * @param {{ parseFrontmatter?: (text: string) => any }} [options]
+ * @returns {{ config: Record<string, any>, title: string|null, lines: (string|null)[] }}
+ */
+export function readMermaidSource(source, options = {}) {
   const normalized = source.replace(/\r\n?/g, '\n');
+  /** @type {(string|null)[]} */
+  const out = [];
   /** @type {Record<string, any>} */
   let config = {};
   let title = null;
@@ -66,26 +81,26 @@ export function parseMermaidConfig(source, options = {}) {
           config = mergeConfig(config, { gantt: { displayMode: String(parsed.displayMode) } });
         }
       }
+      for (let i = 0; i < closeAt.end; i++) if (rest.charCodeAt(i) === 0x0a) out.push(null);
       rest = rest.slice(closeAt.end);
     }
   }
 
   // 2. Init directives + comment stripping, line by line.
   const lines = rest.split('\n');
-  const out = [];
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const initMatch = RE_INIT.exec(line);
     if (initMatch) {
       const obj = parseLooseObject(initMatch[1]);
       if (obj && typeof obj === 'object') config = mergeConfig(config, obj);
+      out.push(null);
       continue;
     }
-    if (RE_COMMENT.test(line)) continue;
-    out.push(line);
+    out.push(RE_COMMENT.test(line) ? null : line);
   }
 
-  return { config, title, body: out.join('\n') };
+  return { config, title, lines: out };
 }
 
 /**

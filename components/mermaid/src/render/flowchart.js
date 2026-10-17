@@ -318,7 +318,8 @@ function shapeVnode(node, t) {
 function renderEdge(e, t, fontSize, i, html) {
   const p1 = e.points[0];
   const p2 = e.points[e.points.length - 1];
-  const stroke = t.lineColor;
+  // an invisible link (`~~~`) places its ends and draws no line
+  const stroke = e.stroke === 'invisible' ? 'none' : t.lineColor;
   const strokeWidth = e.stroke === 'thick' ? 3 : 1.5;
   const dash = e.stroke === 'dotted' ? '3 3' : null;
   const lineProps = {

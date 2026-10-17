@@ -66,7 +66,10 @@ Two sources merge into `config` (plain JSON), in source order:
 2. `%%{init: { … }}%%` directives (relaxed JSON: single quotes and bare
    keys tolerated).
 
-Whole-line `%%` comments are stripped. The **raw source is never
+Whole-line `%%` comments are stripped. A line keeps its number through
+all three: a `MermaidParseError`'s `line`, and a gantt task's, is the line in
+the source, the front-matter, `init` directives and comment lines counted.
+The **raw source is never
 consumed** — it stays in the Markdown fence `value`, so `toMarkdown`
 round-trips byte-for-byte while a node is untransformed (§5).
 
@@ -118,7 +121,7 @@ member order (monomorphic; the structural hash is deterministic).
 | Shape | Members |
 |-------|---------|
 | node | `{ id, label, shape }` — shape ∈ rect, round, stadium, subroutine, cylinder, circle, doublecircle, diamond, hexagon, parallelogram, parallelogram_alt, trapezoid, trapezoid_alt, asymmetric |
-| edge | `{ from, to, stroke, head, tail, length, label }` — stroke ∈ solid/thick/dotted; head/tail ∈ none/arrow/circle/cross; `length` preserved so the printer is a fixed point |
+| edge | `{ from, to, stroke, head, tail, length, label }` — stroke ∈ solid/thick/dotted/invisible (`~~~`, which places its ends and draws no line); head/tail ∈ none/arrow/circle/cross (`A o--o B`, `A x--x B`); `length` preserved so the printer is a fixed point |
 | subgraph | `{ id, label, direction, nodes[] }` |
 | classDef / class / style | `{ name, styles }` / `{ node, name }` / `{ node, styles }` |
 | click | `{ ids[], href, target, call, tooltip }` — one action: `href` (a link, never drawn) or `call` (`{ name, args[] }`, recorded and never run); `target` ∈ `_self`/`_blank`/`_parent`/`_top` after a link, else null; `tooltip` the author's text, else null |
@@ -151,10 +154,19 @@ Mermaid reads both. A quoted label is one unit, so its delimiters are text:
 `A["arr[0]"]` reads `arr[0]`, `A -->|"x|y"| B` reads `x|y` and
 `A -- "a --> b" --> B` is one edge labelled `a --> b`. An inline label opens at
 `--`, `==` or `-.` and a blank, as Mermaid opens edge text, so `A --- B --> C`
-is two links. A `;` separates statements outside every label, where the
+is two links; it opens with no blank too where a closing link run follows
+(`A--yes-->B`, `A==t==>B`), unless its first character is one a link run
+reads: `A--oops-->B` is a link `--o` (a circle head) to a node `ops`, as in
+Mermaid. A pipe label may follow its link after blanks (`A --> |text| B`). An
+edge id before a link (`A e1@--> B`) is read and not kept, and an `e1@{ … }`
+statement naming an edge id is skipped; a node's `A@{ shape: …, label: … }`
+metadata is skipped too, so the statement reads on (the shape and label it
+names are not read). Text after a node where a link belongs
+(`A --> B garbage`) is refused, as Mermaid refuses it. A `;` separates statements outside every label, where the
 statement reader finds labels (a quote counts only where it opens one, so the
 apostrophe in `A[it's] --> B; C --> D` is text and the `;` separates), and a `;`
-inside a label is text, quoted or not (`A[a;b]`); a statement after a `;` may be
+inside a label or a quoted string is text, quoted or not (`A[a;b]`,
+`A --> B; click B "https://e.com/?a=1;b=2"`); a statement after a `;` may be
 a keyword's (`A --> B; style A fill:#f00`, and `; end` ends the open subgraph,
 a parse error with none open). The tree keeps everything else as written; one reading
 of it (`src/label-text.js`), shared by the layout and both label renderers,
@@ -201,7 +213,11 @@ row. The tree keeps every code as written, so `toMermaid` prints it back.
 { participants[], statements[], autonumber }
 ```
 
-`participants`: `{ id, label, kind }` (kind ∈ participant/actor).
+`participants`: `{ id, label, kind }` (kind ∈ participant/actor), in the
+order they first appear: a `participant`/`actor` line, or a message or note
+naming an actor no line declared. A participant's `@{ "type": …, "alias": … }`
+metadata is read for its alias, which is the label unless `as` names one; its
+type is not kept. A message's half-arrow marks (`A()->>()B`) are not kept.
 `statements` is ordered; each is a `message`
 (`{ kind, from, to, text, line, head, activation }`), a `note`
 (`{ kind, placement, actors[], text }`), an `activate`/`deactivate`
@@ -210,20 +226,33 @@ row. The tree keeps every code as written, so `toMermaid` prints it back.
 loop/opt/alt/par/critical/break.
 
 A `;` ends a statement, as in Mermaid: `A->>B: hi; B->>A: yo` is two
-messages. A line splits at every `;` outside an entity code only where each
-piece reads as a statement; otherwise it is one statement whose text keeps
-the `;` (`A->>B: hi; there`, which Mermaid refuses). `toMermaid` prints a
-message's or note's `;` as `#59;` only where the line would otherwise split,
-so a tree reads back as the statements it holds and draws the same text.
+messages, and `A->>B: hi;` and `participant A;` end at the `;`. A line splits
+at every `;` outside an entity code only where each piece that is not blank
+reads as a statement; otherwise it is one statement whose text keeps the `;`
+(`A->>B: hi; there`, which Mermaid refuses). `toMermaid` prints a message's
+or note's `;` as `#59;` only where the line would otherwise split or end its
+statement early, so a tree reads back as the statements it holds and draws
+the same text.
 
 ### 4.3 class / er / state / pie
 
 Class: `{ classes:[{ name, label, members[] }], relations[], clicks[] }`, a
+relation being `{ from, to, type, label }` plus `fromCardinality` and
+`toCardinality` when the line quotes one (`Customer "1" --> "*" Ticket`). A
+relation reads with or without blanks around its operator (`A<|--B`), a name
+in backticks (`` `Animal Class!` ``) or as words Mermaid joins (`A --> B C`
+names `BC`), and the lollipop operators (`bar ()-- foo`), whose lollipop end
+names an interface that is no class. `class Name["label"]` sets the label, and
+a `:::style` after a class name is not kept; a
 click shaped as a flowchart's (§4.1) in the forms Mermaid's class grammar reads
 — `click Name href "url"` with an optional tooltip and target, `click Name call
 callback(args)` with an optional tooltip; the flowchart's bare forms are not
 read, and a tree without `clicks` reads as none. ER:
-`{ entities:[{ name, attributes[] }], relationships[] }`, an attribute being
+`{ entities:[{ name, attributes[], alias? }], relationships[] }` (`alias` from
+`p[Person]` or `p["A person"]`; a `:::style` is not kept), a relationship
+reading with or without blanks (`A||--o{B`) and with Mermaid's word
+cardinalities (`only one`, `zero or more`, `1+`, `many(0)`, …) and `to` /
+`optionally to` for `--` / `..`, each kept as written, an attribute being
 `{ type, name, keys[] }` plus the `comment` that ended its line in quotes when
 there was one (keys are `PK`, `FK`, `UK`, comma- or space-separated; `toMermaid`
 prints them comma-separated, as Mermaid writes them). State:
@@ -242,16 +271,38 @@ whole as the event, which keeps plain labels meaning what they always
 meant. Pie: `{ title, showData, slices:[{ label, value }] }`.
 
 Every line of these types reads as a statement, or is skipped as a
-directive this tree does not model (`direction`, `classDef`, `style`, a
-note), or is refused. A state line splits at a `;` outside an entity code
-where every piece reads as a statement (`A --> B; B --> C` is two
-transitions, as in Mermaid), and `toMermaid` prints a label's `;` as `#59;`
-only where the line would otherwise split. A state note's text, on its line
-or up to `end note`, is never read as states or transitions. A line holding
-`-->` (state), a relation operator (class) or a cardinality connector (ER)
-that no form reads is refused (`MermaidParseError` with its `line`), as
-Mermaid refuses it, where it was dropped without a word; an ER relationship
-without `: label` reads with the label `""`.
+directive this tree does not model (`direction`, `classDef`, `class`,
+`style`, `click` in a state diagram, `accTitle`, `accDescr`, a note), or is
+refused. A state line splits at a `;` outside an entity code where every
+piece reads as a statement other than state names alone (`A --> B; B --> C`
+is two transitions, as in Mermaid, and `A --> B : x; C --> D` a label `x`
+and a transition; `A --> B : x; y` keeps the label `x; y`), a `;` the line
+does not split at still ends a statement where the pieces read as
+transitions and state names (`A --> B; C`), and `toMermaid` prints a label's
+`;` as `#59;` only where the line would otherwise split. A state line reads its statements one after another,
+as Mermaid's does: `A --> B C --> D` is two transitions, `A B --> C` a state
+and a transition, a name on a line of its own declares that state, and a
+`%%` outside a label starts a comment. A `:::style` after a state name and a
+`<<choice>>`, `<<fork>>` or `<<join>>` kind are not kept. A state note
+(`note` in any case) is `note left of X : text` or `note right of X : text` on one line, a block from
+`note left of X` / `note right of X` up to a line that starts with
+`end note` (in any case; a statement may follow it there), or a floating
+`note "text" as N`; its text is never read as states or transitions.
+`toMermaid` declares a state no transition names by its name on a line of
+its own, which Mermaid reads as that state (Mermaid reads `state X` with no
+`{` after it as no state), and as `state X` where the name alone would read
+as a keyword.
+
+These lines are refused (`MermaidParseError` with the line in the source),
+each one Mermaid refuses too: a state line holding `-->` whose pieces are
+not transitions and state names (`A --> B --> C`, `A ---> B`, `"A" --> B`),
+a state note in another form (`note over X`), and a block note that no
+`end note` closes (at the note's line); a class line holding a relation
+operator that reads as no relation (`C --> D --> E`, `A ---> B`, two
+relations on one line); an ER line holding a connector, a cardinality pair
+around `--` or `..` (`||--o{`), outside quotes, that reads as no relationship
+(`A ||--o{ B C D`). An ER relationship without
+`: label` reads with the label `""`.
 
 Gantt is `{ meta, rules, sections:[{ name, tasks[] }], domain }` and is
 described in §4.4, because it is the one AST that carries a *resolved*

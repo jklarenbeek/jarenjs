@@ -12,8 +12,8 @@
  */
 
 import { diagramDocument, rawAst } from '../ast.js';
-import { hashContent, toLines, firstToken } from '../utils.js';
-import { parseMermaidConfig } from './config.js';
+import { hashContent, firstToken } from '../utils.js';
+import { readMermaidSource } from './config.js';
 import { parseFlowchart } from './flowchart.js';
 import { parseSequence } from './sequence.js';
 import { parseClass } from './class.js';
@@ -62,8 +62,10 @@ const TYPE_PARSERS = {
  * @returns {import('../ast.js').DiagramDocument}
  */
 export function parseMermaid(source, options = {}) {
-  const { config, title, body } = parseMermaidConfig(source, options);
-  const lines = toLines(body);
+  // every line keeps its place, so a line number is the line in the source:
+  // the front-matter, init directives and `%%` comments read as blank lines
+  const { config, title, lines: kept } = readMermaidSource(source, options);
+  const lines = kept.map((line) => line ?? '');
 
   // First non-blank line carries the diagram keyword.
   let start = 0;

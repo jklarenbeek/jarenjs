@@ -31,19 +31,6 @@ export function firstToken(line) {
 }
 
 /**
- * Split a source string into lines, dropping a single trailing newline
- * and normalizing CRLF/CR to LF first. Comment/blank stripping is the
- * caller's job (each dialect handles its own comment marker).
- * @param {string} source
- * @returns {string[]}
- */
-export function toLines(source) {
-  const normalized = source.replace(/\r\n?/g, '\n');
-  const end = normalized.endsWith('\n') ? normalized.length - 1 : normalized.length;
-  return normalized.slice(0, end).split('\n');
-}
-
-/**
  * Accumulate a `{ ... }` body that may span multiple lines. `head` is
  * the text after the opening brace on the current line; lines are
  * consumed until one contains the closing brace. Returns the body text
@@ -70,4 +57,21 @@ export function collectBraceBody(lines, li, head) {
     parts.push(lines[li]);
   }
   return { body: parts.join('\n'), li };
+}
+
+/** A lone `:`, which opens a label (`:::` names a style class). */
+const RE_LONE_COLON = /(?<!:):(?!:)/;
+
+/**
+ * Where a `%%` comment starts, outside a label (the text after a lone `:`
+ * keeps it, as Mermaid's does, and the colons of a `:::style` are no label);
+ * -1 when the line holds none.
+ * @param {string} line
+ * @returns {number}
+ */
+export function commentStart(line) {
+  const at = line.indexOf('%%');
+  if (at === -1) return -1;
+  const colon = RE_LONE_COLON.exec(line);
+  return colon !== null && colon.index < at ? -1 : at;
 }

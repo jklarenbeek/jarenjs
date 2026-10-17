@@ -65,12 +65,13 @@ export function flowNode(id, label, shape) {
 }
 
 /**
- * A flowchart edge (link). `stroke` is the line style, `head`/`tail`
+ * A flowchart edge (link). `stroke` is the line style (`invisible` for
+ * `~~~`, a link that places its ends and draws nothing), `head`/`tail`
  * the endpoint markers, `length` the dash count (preserved so the
  * canonical printer is a fixed point), `label` the optional edge text.
  * @param {string} from
  * @param {string} to
- * @param {'solid'|'thick'|'dotted'} stroke
+ * @param {'solid'|'thick'|'dotted'|'invisible'} stroke
  * @param {'none'|'arrow'|'circle'|'cross'} head
  * @param {'none'|'arrow'|'circle'|'cross'} tail
  * @param {number} length
