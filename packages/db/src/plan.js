@@ -4290,7 +4290,8 @@ function planHop(inner, outer, entities, mapping, through = false) {
       ? crossBindingComparison(conjunct, scope) : null;
     if (cross !== null && (cross.left.binding === binding || cross.right.binding === binding)) {
       edges.push({ left: { binding: cross.left.binding.name, ref: cross.left.ref },
-        right: { binding: cross.right.binding.name, ref: cross.right.ref } });
+        right: { binding: cross.right.binding.name, ref: cross.right.ref },
+        ...(cross.doubles === true ? { doubles: true } : {}) });
       continue;
     }
     const slots = new Set(); collectBindingSlots(conjunct, scope, slots);
@@ -4305,7 +4306,7 @@ function planHop(inner, outer, entities, mapping, through = false) {
     if (reached === null || reached.member !== null || !hopKeyed(reached.hop, mapping)) return null;
     const unbound = (/** @type {any} */ end) => (end.binding === binding.name ? { ...end, binding: null } : end);
     filter = conjoin(filter, { p: 'hop', hop: { ...reached.hop,
-      edges: reached.hop.edges.map((/** @type {any} */ edge) => ({ left: unbound(edge.left), right: unbound(edge.right) })) } });
+      edges: reached.hop.edges.map((/** @type {any} */ edge) => ({ ...edge, left: unbound(edge.left), right: unbound(edge.right) })) } });
     return { hop: { entity, binding: binding.name, edges, filter }, binding, member: null };
   }
   return { hop: { entity, binding: binding.name, edges, filter }, binding, member: bare ? null : ret };
@@ -4581,10 +4582,16 @@ function columnFamily(binding, ref, undeclaredKeys) {
  * An epoch column is refused too — it stores an integer beside a document
  * string the engine reads, and the two need not order alike across mixed
  * stored precisions.
+ *
+ * Two numbers compare as the doubles the engine holds (`doubles`), so a
+ * column that holds the digits a writer spelled reads its double — but for
+ * two columns that each hold a key or a reference to one, which may be the
+ * `bigint` a database-allocated key takes, compared exactly as a foreign
+ * key's join is, through the key's index.
  * @param {any} node - an `op` node whose name is a comparison
  * @param {Map<number, any>} byName - binding slot → binding
  * @param {boolean} [edge] - the equality attaches a binding: it also reads an undeclared foreign key as the key it references and admits a column that can read an absent null
- * @returns {{ op: string, left: any, right: any } | null}
+ * @returns {{ op: string, left: any, right: any, doubles?: true } | null}
  */
 function crossBindingComparison(node, byName, edge = false) {
   const [left, right] = node.args;
@@ -4598,10 +4605,13 @@ function crossBindingComparison(node, byName, edge = false) {
   if (family === null || family !== columnFamily(rightBinding, rightRef, edge)) return null;
   const reads = [nullReading(leftRef, leftBinding.shape.schema), nullReading(rightRef, rightBinding.shape.schema)];
   if (edge ? reads.every((read) => read === 'present') : reads.some((read) => read !== 'none')) return null;
+  const holdsKey = (/** @type {any} */ binding, /** @type {any} */ ref) =>
+    binding.shape.entityFlavors.get(canonicalOf(ref.segments))?.holdsKey === true;
   return {
     op: COMPARISONS.get(node.name),
     left: { binding: leftBinding, ref: leftRef },
     right: { binding: rightBinding, ref: rightRef },
+    ...(family === 'number' && !(holdsKey(leftBinding, leftRef) && holdsKey(rightBinding, rightRef)) ? { doubles: true } : {}),
   };
 }
 
@@ -4992,7 +5002,7 @@ function planEntityQueryCore(document, entities, mapping, operators) {
     if (bindings.length > 1 && conjunct.kind === 'op' && conjunct.name === '$eq') {
       const edge = crossBindingComparison(conjunct, byName, true);
       if (edge !== null) {
-        edges.push({ left: edge.left, right: edge.right });
+        edges.push({ left: edge.left, right: edge.right, ...(edge.doubles === true ? { doubles: true } : {}) });
         continue;
       }
     }
@@ -5208,6 +5218,7 @@ function planEntityQueryCore(document, entities, mapping, operators) {
             ...(edge.left.ref.codec === undefined ? {} : { codec: edge.left.ref.codec }) },
           right: { binding: edge.right.binding.name, column: edge.right.ref.column,
             ...(edge.right.ref.codec === undefined ? {} : { codec: edge.right.ref.codec }) },
+          ...(edge.doubles === true ? { doubles: true } : {}),
         })),
       })),
       filters: bindings.map((binding) => ({

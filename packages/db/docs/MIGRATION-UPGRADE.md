@@ -3436,6 +3436,30 @@ profile list holding an infinity binds the item as `null`.
 **Downgrade.** The previous release opens every store this one does; on it the
 comparisons above answer by the digits written, as before.
 
+## 58. Two members compared with each other compare the doubles the engine holds
+
+- A comparison of two members (`$eq: ['$it.n', '$it.w']`, every operator)
+  compared the values as stored, so a document another writer stored as
+  `{"u": 1152921504606846976, "v": 1152921504606847000}` was dropped by `$eq`
+  and kept by `$lt` on both engines, where the engine, which reads 2^60 twice,
+  keeps it for `$eq` alone; on PostgreSQL `5.00000000000000000001` against `5`,
+  and `0` against `1e-400`, likewise. Each side is now read as the double
+  ([ARCHITECTURE](../ARCHITECTURE.md), "A path against a path is decided by the
+  family of the two values"): two members of a document, an entity's two
+  columns or a column and a document member, a join's equality or refinement
+  and a hop's correlation over two number columns. A side that holds its
+  double already is read as before, and so are two key columns (a key and a
+  reference to one), which still pair through the key's index.
+- `explain().joins` names such an edge `doubles: true`.
+- On PostgreSQL a number column's double is read through a cheaper guard (one
+  comparison with half the least double, where it multiplied by 2^1075), the
+  same double for every value; an ordering and a group key read it too.
+- No table, index or stored value changes: every statement above is a read or
+  a comparison.
+
+**Downgrade.** The previous release opens every store this one does; on it the
+comparisons above answer by the digits written, as before.
+
 ## Measured costs
 
 Exact identity stores complete canonical documents and model endpoints, so

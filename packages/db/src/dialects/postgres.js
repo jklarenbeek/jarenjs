@@ -56,6 +56,7 @@ import { postgresChecks, POSTGRES_PREDICATE, POSTGRES_PREDICATE_ESCAPED } from '
 import { functionNameKey, postgresReadBack } from './postgres-read-back.js';
 import { modelPath, readsAsIndex } from '../model-path.js';
 import { columnKindFor } from '../scalar-types.js';
+import { decimalEdge } from '../double-interval.js';
 
 /** PostgreSQL truncates an identifier past this many BYTES, silently
  * and with only a notice — so two long generated names would collide
@@ -217,6 +218,13 @@ function typeOfJsonb(atSql) {
     + `ELSE jsonb_typeof(${atSql}) END)`;
 }
 
+/** The least decimal that rounds to the infinity (the midpoint between the
+ * largest double and 2^1024, a tie that rounds to it), as exact digits. */
+const INFINITE_EDGE = String(2n ** 1024n - 2n ** 970n);
+/** Half the least double, 2^-1075 (a tie that rounds to zero), as its exact
+ * decimal, which each row compares with more cheaply than with a product. */
+const ZERO_EDGE = decimalEdge(0, 'high');
+
 /**
  * A `numeric` read as the double the engine holds: the cast rounds a
  * decimal to the nearest double, as `JSON.parse` does, but raises where
@@ -230,10 +238,31 @@ function typeOfJsonb(atSql) {
  * @returns {string} a `double precision`
  */
 function doubleOf(sql) {
-  return `(CASE WHEN abs(${sql}) < power(2::numeric, 1024) - power(2::numeric, 970) `
-    + `AND (abs(${sql}) * power(2::numeric, 1075) > 1 OR ${sql} = 0) THEN (${sql})::float8 `
+  return `(CASE WHEN abs(${sql}) < ${INFINITE_EDGE} AND (abs(${sql}) > ${ZERO_EDGE} OR ${sql} = 0) THEN (${sql})::float8 `
     + `WHEN abs(${sql}) >= 1 THEN sign(${sql})::float8 * 'Infinity'::float8 `
     + `ELSE sign(${sql})::float8 * 0::float8 END)`;
+}
+
+/**
+ * Two `numeric`s equal as the doubles the engine holds ({@link doubleOf}),
+ * beside a range of each around the other that holds every decimal rounding
+ * to the same double, so that an index over either column still finds the
+ * other's rows (a join's inner rows, a hop's): two decimals that round to
+ * one finite double lie within its spacing, at most 2^-52 of its magnitude,
+ * of each other — bounded by 5·10^-16 of either's magnitude, plus 10^-323
+ * for the subnormals and zero, whose spacing is 2^-1074 — and two that round
+ * to an infinity lie past ±10^308, where the range reaches the infinity
+ * `numeric` can hold. The ranges are wider than they need be, never narrower;
+ * the equality of the doubles decides.
+ * @param {string} left - a `numeric` @param {string} right - a `numeric`
+ * @returns {string}
+ */
+function doubleEqual(left, right) {
+  const spread = (/** @type {string} */ sql) => `(abs(${sql}) * 0.0000000000000005 + 1e-323)`;
+  const near = (/** @type {string} */ sql, /** @type {string} */ to) =>
+    `${sql} >= (CASE WHEN ${to} < -1e308 THEN '-Infinity'::numeric WHEN ${to} > 1e308 THEN 1e307 ELSE ${to} - ${spread(to)} END)`
+    + ` AND ${sql} <= (CASE WHEN ${to} > 1e308 THEN 'Infinity'::numeric WHEN ${to} < -1e308 THEN -1e307 ELSE ${to} + ${spread(to)} END)`;
+  return `(${near(left, right)} AND ${near(right, left)} AND ${doubleOf(left)} = ${doubleOf(right)})`;
 }
 
 /**
@@ -727,6 +756,7 @@ export function postgresDialect(options = undefined) {
     numberCast: (sql) => `CAST(${sql} AS DOUBLE PRECISION)`,
     // a number is held by the digits its writer spelled
     doubleRead: doubleOf,
+    doubleEqual,
     physicalTypeMatches: postgresPhysicalTypeMatches,
     qualifyPhysicalColumn: qualifyPostgresPhysicalColumn,
     invariantTriggers: (mapping, all, dialect) => postgresInvariantTriggers(mapping, all, dialect, IDENTIFIER_BYTES),

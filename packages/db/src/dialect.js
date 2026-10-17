@@ -275,6 +275,7 @@ export const MEMBER_WHEN = Symbol('dialect.memberWhen');
  *   numberCast?: (sql: string) => string,
  *   numberRead?: (sql: string) => string,
  *   doubleRead?: (sql: string) => string,
+ *   doubleEqual?: (left: string, right: string) => string,
  *   limitUnlessWide?: (probes: { column: string, where: () => string }[], from: string, limit: number, offset?: number) => string,
  *   distinct?: (left: string, right: string) => string,
  *   mutationRowGuard?: (count: string, limit: number) => string,
@@ -1098,6 +1099,15 @@ export function createDialect(spec) {
      * the expression alone.
      */
     doubleRead: spec.doubleRead ?? ((sql) => sql),
+    /**
+     * Two columns that hold the digits a writer spelled (`decimalDigits`)
+     * equal as the doubles the engine holds, each read through
+     * {@link doubleRead} — the equality a join or a hop's correlation pairs
+     * rows by — with bounds beside it, so that either column's index still
+     * finds the other's rows. Absent where the dialect's columns hold no
+     * such digits.
+     */
+    doubleEqual: spec.doubleEqual,
     /**
      * The window clause of a statement that orders integer columns bare:
      * `limit` rows past `offset`, or none at all when a

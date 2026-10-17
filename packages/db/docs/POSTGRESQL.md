@@ -359,7 +359,13 @@ column (an equality two bounds) and seeks; a list over an indexed member or an
 entity column finds the values in its intervals through the column's index and
 seeks too; a list over any other member reads the member as the double, as an
 ordering does, and costs a membership more than the bare `numeric` did. Two
-members compared with each other are still compared by their digits (ROADMAP).
+numbers compared with each other — two members, an entity's two columns, a
+join's or a hop's columns — are read as the doubles, so they cost the `CASE`
+over each where the bare `numeric`s compared; a join or a hop's equality over
+two number columns bounds each by the other beside the doubles' equality, so
+either column's index still finds the other's rows, but the planner, which
+cannot estimate those bounds, may hash or merge on the doubles instead of
+seeking. Two key columns (a key and a reference to one) compare exactly.
 An entity's key, and a column referencing one, keep the exact comparison: such
 a column may be declared as the allocation a database-allocated key takes
 (`bigserial`, `bigint`), which reads no fractional edge and holds no integer in

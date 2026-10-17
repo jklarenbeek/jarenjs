@@ -672,23 +672,32 @@ what each does is its own documentation's job
 - [ ] **On PostgreSQL an entity's key compares exactly with digits another
   writer spelled.** A literal, a literal list or an external list compared
   with an entity's `integer` or `number` key column, or a column referencing
-  one (`$eq: ['$it.id', 6]`), compares the column exactly, so a row another
-  writer re-keyed `6.00000000000000000001` in a `numeric` key column (an
-  `integer` key the store made without `default: 'auto'`) is dropped where the
-  engine, which reads 6, keeps it. Such a column may instead be the
-  `bigserial`/`bigint` a database-allocated key takes (and a database can hold
-  either), which reads no fractional bound and whose index a `numeric` bound
-  does not serve. Wanted: the interval comparison every other number column
-  makes, for a key column whose type the open has read as `numeric`.
-- [ ] **Two members compared with each other compare by the digits each was
-  spelled by.** `$eq: ['$it.n', '$it.w']` over a document another writer
-  stored as `{"n": 5.00000000000000000001, "w": 5}` (or `{"n": 0, "w":
-  1e-400}`, or `{"n": 1152921504606846976, "w": 1152921504606847000}`) is
-  dropped on PostgreSQL where the engine, which reads both as one double,
-  keeps it, and `$lt` keeps it; on SQLite `$eq: ['$it.u', '$it.v']` over two
-  `integer` members spelled `1152921504606846976` and `1152921504606847000`
-  likewise. Wanted: both sides read as the doubles the engine holds
-  (`doubleRead`), or the interval of one side's double, as a literal now is.
+  one (`$eq: ['$it.id', 6]`), and two such columns compared with each other (a
+  key and a reference to it: a join, a hop's correlation, two references in
+  one row), compare the columns exactly, so a row another writer re-keyed
+  `6.00000000000000000001` in a `numeric` key column (an `integer` key the
+  store made without `default: 'auto'`) is dropped where the engine, which
+  reads 6, keeps it. Such a column may instead be the `bigserial`/`bigint` a
+  database-allocated key takes (and a database can hold either), which reads
+  no fractional bound and whose index a `numeric` bound does not serve, and a
+  key join that read both doubles would lose the key's index. Wanted: the
+  interval comparison every other number column makes, and the double read
+  every other pair of number columns makes, for a key column whose type the
+  open has read as `numeric`.
+- [ ] **On PostgreSQL an entity's `integer` column orders by the digits
+  another writer spelled.** `$orderby: ['$it.b']` over an `integer` column the
+  store made (`numeric`) that another writer set to `1152921504606846976` and
+  `1152921504606847000`, or `5.00000000000000000001` and `5`, orders the two
+  apart where the engine, which reads one double, ties them and keeps the
+  rows' order; a `number` column reads the double (`entityOrderRead`). Wanted:
+  the double read for a codec-less `integer` column's order terms too (query,
+  load, keyset, include), keeping a key's index order.
+- [ ] **On PostgreSQL a join's equality over two non-key number columns no
+  longer seeks.** It reads both columns as the doubles (bounded by ranges of
+  each around the other), which the planner cannot estimate, so it hashes or
+  merges on the doubles where it seeked the bare column's index. Wanted: an
+  index the doubles' equality uses (an expression index over the double),
+  measured.
 - [ ] **On SQLite an empty window over an indexed `integer` member the schema
   does not bound is read twice, and a read of every row is sorted.** The order
   key reads the double (`CAST("gx_v" AS REAL)`) so two spellings of one double

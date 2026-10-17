@@ -203,10 +203,11 @@ describe('the plan of a literal $get', () => {
 describe('the SQL of a comparison between two member paths', () => {
   const pair = (/** @type {string} */ op, /** @type {string} */ left, /** @type {string} */ right) => ({ [op]: [`$it.${left}`, `$it.${right}`] });
 
+  // two numbers compare as the doubles the engine holds: an integer SQLite holds exactly is cast
   it('SQLite: the plain comparison, then the dispatch by family, reading a column only as its own kind', () => {
     assert.equal(whereClause(pair('$lt', 'n', 'f'), sqliteDialect),
       'WHERE (json_type("doc", \'$."n"\') IS NOT NULL AND json_type("doc", \'$."f"\') IS NOT NULL '
-      + 'AND jsonb_extract("doc", \'$."n"\') < jsonb_extract("doc", \'$."f"\')) ORDER BY "rowid"');
+      + 'AND CAST(jsonb_extract("doc", \'$."n"\') AS REAL) < CAST(jsonb_extract("doc", \'$."f"\') AS REAL)) ORDER BY "rowid"');
     assert.equal(whereClause(pair('$eq', 's', 'ns'), sqliteDialect),
       'WHERE (json_type("doc", \'$."s"\') IS NOT NULL AND json_type("doc", \'$."ns"\') IS NOT NULL '
       + 'AND (json_type("doc", \'$."ns"\') = \'text\' AND jsonb_extract("doc", \'$."s"\') = "gx_ns")) ORDER BY "rowid"');
@@ -224,14 +225,16 @@ describe('the SQL of a comparison between two member paths', () => {
     assert.equal(whereClause(pair('$le', 'x', 'y'), sqliteDialect),
       'WHERE (json_type("doc", \'$."x"\') IS NOT NULL AND json_type("doc", \'$."y"\') IS NOT NULL '
       + 'AND ((json_type("doc", \'$."x"\') IN (\'integer\', \'real\') AND json_type("doc", \'$."y"\') IN (\'integer\', \'real\') '
-      + 'AND jsonb_extract("doc", \'$."x"\') <= jsonb_extract("doc", \'$."y"\')) '
+      + 'AND CAST(jsonb_extract("doc", \'$."x"\') AS REAL) <= CAST(jsonb_extract("doc", \'$."y"\') AS REAL)) '
       + 'OR (json_type("doc", \'$."x"\') = \'text\' AND json_type("doc", \'$."y"\') = \'text\' '
       + 'AND "gx_x" <= jsonb_extract("doc", \'$."y"\')))) ORDER BY "rowid"');
   });
 
-  it('PostgreSQL: two members of one family keep the statement they always had, byte for byte', () => {
+  it('PostgreSQL: two members of one family keep their plain comparison, of two numbers the doubles', () => {
+    const number = (/** @type {string} */ name) => `(CASE WHEN jsonb_typeof(("doc" #> '{"${name}"}')) = 'number' THEN (("doc" #> '{"${name}"}'))::numeric END)`;
     assert.equal(whereClause(pair('$lt', 'n', 'f'), PG),
-      'WHERE ((CASE WHEN jsonb_typeof(("doc" #> \'{"n"}\')) = \'string\' THEN \'text\' WHEN jsonb_typeof(("doc" #> \'{"n"}\')) = \'boolean\' THEN (CASE WHEN (("doc" #> \'{"n"}\'))::boolean THEN \'true\' ELSE \'false\' END) ELSE jsonb_typeof(("doc" #> \'{"n"}\')) END) IS NOT NULL AND (CASE WHEN jsonb_typeof(("doc" #> \'{"f"}\')) = \'string\' THEN \'text\' WHEN jsonb_typeof(("doc" #> \'{"f"}\')) = \'boolean\' THEN (CASE WHEN (("doc" #> \'{"f"}\'))::boolean THEN \'true\' ELSE \'false\' END) ELSE jsonb_typeof(("doc" #> \'{"f"}\')) END) IS NOT NULL AND (CASE WHEN jsonb_typeof(("doc" #> \'{"n"}\')) = \'number\' THEN (("doc" #> \'{"n"}\'))::numeric END) < (CASE WHEN jsonb_typeof(("doc" #> \'{"f"}\')) = \'number\' THEN (("doc" #> \'{"f"}\'))::numeric END)) ORDER BY "rid"');
+      'WHERE ((CASE WHEN jsonb_typeof(("doc" #> \'{"n"}\')) = \'string\' THEN \'text\' WHEN jsonb_typeof(("doc" #> \'{"n"}\')) = \'boolean\' THEN (CASE WHEN (("doc" #> \'{"n"}\'))::boolean THEN \'true\' ELSE \'false\' END) ELSE jsonb_typeof(("doc" #> \'{"n"}\')) END) IS NOT NULL AND (CASE WHEN jsonb_typeof(("doc" #> \'{"f"}\')) = \'string\' THEN \'text\' WHEN jsonb_typeof(("doc" #> \'{"f"}\')) = \'boolean\' THEN (CASE WHEN (("doc" #> \'{"f"}\'))::boolean THEN \'true\' ELSE \'false\' END) ELSE jsonb_typeof(("doc" #> \'{"f"}\')) END) IS NOT NULL AND '
+      + `${PG.doubleRead(number('n'))} < ${PG.doubleRead(number('f'))}) ORDER BY "rid"`);
   });
 
   it('PostgreSQL: each family term is true or false, never NULL, so a negation composes', () => {

@@ -512,8 +512,10 @@ export function documentMemberOf(dialect, docSql, ref) {
  * double it holds (`doubleRead`), so two spellings of one double tie and the
  * next term decides between them — a document member's, and a `number`
  * column's where it holds a writer's digits (`decimalDigits`); an `integer`
- * column holds no integer past 2^53 the engine reads, and a physical
- * table's column orders as its codec. A query's order terms, a load's order
+ * column is read bare, which keeps a key's index order — on SQLite it holds
+ * no integer the engine reads but as its own double, on PostgreSQL it holds
+ * a writer's digits and orders two spellings of one double apart (an open
+ * defect) — and a physical table's column orders as its codec. A query's order terms, a load's order
  * and keyset terms and an include's order terms read one term alike.
  * @param {any} dialect
  * @param {any} ref - an entity column's (`flavor: 'entity-column'`, or a
@@ -527,6 +529,40 @@ export function entityOrderRead(dialect, ref, sql) {
     return ref.storage === 'number' && ref.codec === undefined && dialect.decimalDigits ? dialect.doubleRead(sql) : sql;
   const member = documentMemberOf(dialect, sql, ref);
   return kindOf(ref) === 'number' ? dialect.doubleRead(member) : member;
+}
+
+/**
+ * An entity column of the number family compared with another member, read
+ * as the double the engine holds where the column holds the digits a writer
+ * spelled (`decimalDigits`: a `number` or `integer` column the store made,
+ * which `5.00000000000000000001` and `5` leave two values and the engine
+ * one), so two spellings of one double compare equal. A codec's column
+ * holds its own SQL type — a `double precision` the double, an integer type
+ * an integer — and an engine whose column holds a number as an integer or a
+ * double holds no integer the engine reads but its own double; either
+ * compares bare.
+ * @param {any} dialect @param {{ codec?: string }} ref @param {string} sql - the column as it compares
+ * @returns {string}
+ */
+const numberColumnRead = (dialect, ref, sql) => (dialect.decimalDigits && ref.codec === undefined ? dialect.doubleRead(sql) : sql);
+
+/**
+ * Two entity columns a join or a hop's correlation compares. Two numbers
+ * compare as the doubles the engine holds (`doubles`, {@link
+ * numberColumnRead}) — an equality of two columns that both hold a
+ * writer's digits through `doubleEqual`, which keeps either column's index
+ * in reach — and anything else, two key columns among them, as stored.
+ * @param {any} dialect @param {string} op
+ * @param {{ codec?: string }} left @param {string} leftSql - the column as it compares
+ * @param {{ codec?: string }} right @param {string} rightSql
+ * @param {boolean} doubles
+ * @returns {string}
+ */
+function columnPairComparison(dialect, op, left, leftSql, right, rightSql, doubles) {
+  if (doubles && op === 'eq' && dialect.doubleEqual !== undefined && left.codec === undefined && right.codec === undefined)
+    return dialect.doubleEqual(leftSql, rightSql);
+  const read = (/** @type {{ codec?: string }} */ ref, /** @type {string} */ sql) => (doubles ? numberColumnRead(dialect, ref, sql) : sql);
+  return `${read(left, leftSql)} ${SYMBOLS[op]} ${read(right, rightSql)}`;
 }
 
 /**
@@ -835,13 +871,21 @@ export function emitPlan(plan, dialect, physical, probeWide = true) {
    * double already (`physical.doubleColumns`).
    * @param {any} ref @param {string} value - the read {@link valueOf} spells */
   const readsDouble = (ref, value) => value === q(ref.column) && physical.doubleColumns?.has(ref.column) === true;
-  /** Whether a ref's read orders as the double the engine orders by, read
-   * bare: a {@link readsDouble} column, or one whose integers the schema
-   * bounds within ±(2^53 − 1) (`physical.safeIntegerColumns`), each its own
-   * double — either keeps its index order.
+  /** Whether a ref's read holds the double the engine reads, bare: a
+   * {@link readsDouble} column, or one whose integers the schema bounds
+   * within ±(2^53 − 1) (`physical.safeIntegerColumns`), each its own double
+   * — either orders and compares as the engine does, and keeps its index
+   * order.
    * @param {any} ref @param {string} value - the read {@link valueOf} spells */
-  const ordersAsDouble = (ref, value) => readsDouble(ref, value)
+  const holdsDouble = (ref, value) => readsDouble(ref, value)
     || (value === q(ref.column) && physical.safeIntegerColumns?.has(ref.column) === true);
+  /** A number a comparison of two members reads: as the double the engine
+   * holds (`doubleRead`), so that two spellings of one double compare equal
+   * (`1152921504606846976` and `1152921504606847000`, and on an engine that
+   * reads a member by its decimal digits `5.00000000000000000001` and `5`),
+   * unless the read holds that double already ({@link holdsDouble}).
+   * @param {any} ref @param {string} value - the read {@link valueOf} spells */
+  const comparedDouble = (ref, value) => (holdsDouble(ref, value) ? value : dialect.doubleRead(value));
   const pathText = (ref) => pathTextOf(dialect, ref);
   /** The document a query reads a ref's member from: guarded where the
    * engine's path text would read the member off the wrong container. */
@@ -1105,10 +1149,14 @@ export function emitPlan(plan, dialect, physical, probeWide = true) {
   const emitRefCmp = (pred) => {
     const { left, right } = pred;
     // two members of one family, neither able to hold another: the plain
-    // comparison of their values
-    if (plainFamily(pred) !== null) {
-      return compareRefs(pred, (ref) => ({ value: valueOf(ref, kindOf(ref)),
-        present: `${typeOf(ref)} IS NOT NULL` }));
+    // comparison of their values — of two numbers, the doubles the engine
+    // compares
+    const family = plainFamily(pred);
+    if (family !== null) {
+      return compareRefs(pred, (ref) => {
+        const value = valueOf(ref, kindOf(ref));
+        return { value: family === 'number' ? comparedDouble(ref, value) : value, present: `${typeOf(ref)} IS NOT NULL` };
+      });
     }
     const typed = dialect.typedExtract === true;
     const present = (ref) => `${typed ? dialect.jsonExtract(docOf(ref), pathText(ref)) : typeOf(ref)} IS NOT NULL`;
@@ -1127,7 +1175,9 @@ export function emitPlan(plan, dialect, physical, probeWide = true) {
     const within = (/** @type {string} */ family) => {
       const terms = [left, right].filter((side) => typed || side.families.length > 1)
         .map((side) => is(side, family));
-      if (family !== 'null') terms.push(`${valueOf(left, family)} ${symbol} ${valueOf(right, family)}`);
+      const read = (/** @type {any} */ side) => (family === 'number'
+        ? comparedDouble(side, valueOf(side, family)) : valueOf(side, family));
+      if (family !== 'null') terms.push(`${read(left)} ${symbol} ${read(right)}`);
       return terms.length === 0 ? dialect.booleanLiteral(true)
         : terms.length === 1 ? terms[0] : `(${terms.join(' AND ')})`;
     };
@@ -1383,7 +1433,7 @@ export function emitPlan(plan, dialect, physical, probeWide = true) {
   }), dialect.rowIdentity()];
   /** Whether an order term reads its number through `doubleRead`. @param {any} term */
   const ordersByDouble = (term) => kindOf(term.ref) === 'number'
-    && !ordersAsDouble(term.ref, valueOf(term.ref, 'number'));
+    && !holdsDouble(term.ref, valueOf(term.ref, 'number'));
   /** Whether an order term the double read would sort is a generated
    * column an index keys, which the dialect's `limitUnlessWide` probes
    * instead: one no index keys is sorted either way. @param {any} term */
@@ -1752,7 +1802,8 @@ export function createEntityPredicateEmitters(dialect, param, related = undefine
     const side = (/** @type {{ binding: string | null, ref: any }} */ end) => physicalComparable(end.ref,
       `${end.binding === hop.binding ? alias : end.binding === null ? outer
         : related.aliasOf(end.binding)}.${q(end.ref.column)}`, dialect);
-    const conditions = hop.edges.map((/** @type {any} */ edge) => `${side(edge.left)} = ${side(edge.right)}`);
+    const conditions = hop.edges.map((/** @type {any} */ edge) => columnPairComparison(dialect, 'eq',
+      edge.left.ref, side(edge.left), edge.right.ref, side(edge.right), edge.doubles === true));
     if (hop.filter !== null) conditions.push(emitPred(alias, `${alias}.${q('doc')}`, hop.filter, related.tableOf(hop.entity)));
     return { alias, sql: `FROM ${related.tableOf(hop.entity)} AS ${alias} WHERE ${conditions.join(' AND ')}` };
   };
@@ -1767,15 +1818,21 @@ export function createEntityPredicateEmitters(dialect, param, related = undefine
       const symbol = SYMBOLS[pred.op];
       return `((SELECT COUNT(*) ${sql}) ${symbol} ${param({ literal: pred.lit })})`;
     }
-    if (pred.p === 'refCmp') return compareRefs(pred, (ref) => {
-      if (ref.flavor === 'entity-column') {
-        const value = physicalComparable(ref, `${aliasSql}.${q(ref.column)}`, dialect);
-        return { value, present: `${value} IS NOT NULL` };
-      }
-      // Epoch columns retain the document's lexical comparison rule.
-      return { value: memberAt(docSql, ref, ref.type === 'string' ? 'text' : 'number'),
-        present: `${dialect.jsonTypeOf(documentOf(docSql, ref), pathText(ref))} IS NOT NULL` };
-    });
+    if (pred.p === 'refCmp') {
+      // two numbers compare as the doubles the engine holds, but two key
+      // columns (a key and a reference to one) exactly, as a join does
+      const doubles = plainFamily(pred) === 'number' && !(pred.left.holdsKey === true && pred.right.holdsKey === true);
+      return compareRefs(pred, (ref) => {
+        if (ref.flavor === 'entity-column') {
+          const value = physicalComparable(ref, `${aliasSql}.${q(ref.column)}`, dialect);
+          return { value: doubles ? numberColumnRead(dialect, ref, value) : value, present: `${value} IS NOT NULL` };
+        }
+        // Epoch columns retain the document's lexical comparison rule.
+        const value = memberAt(docSql, ref, ref.type === 'string' ? 'text' : 'number');
+        return { value: doubles ? dialect.doubleRead(value) : value,
+          present: `${dialect.jsonTypeOf(documentOf(docSql, ref), pathText(ref))} IS NOT NULL` };
+      });
+    }
     if (pred.p === 'and')
       return balancedJoin(regroupInequalities(dialect, pred.items).map((item) => emitPred(aliasSql, docSql, item, tableSql)), 'AND');
     if (pred.p === 'or')
@@ -1994,10 +2051,11 @@ export function emitEntityPlan(plan, dialect, physicalOf) {
 
   const tableOf = (name) =>
     `${dialect.tableName(physicalOf(entityOf.get(name)).table, physicalOf(entityOf.get(name)).schema)} AS ${aliasOf(name)}`;
-  const onSql = (edge) =>
-    physicalComparable(edge.left, `${aliasOf(edge.left.binding)}.${q(edge.left.column)}`, dialect)
-    + ` ${SYMBOLS[edge.op ?? 'eq']} `
-    + physicalComparable(edge.right, `${aliasOf(edge.right.binding)}.${q(edge.right.column)}`, dialect);
+  const onSql = (edge) => {
+    const side = (/** @type {any} */ end) => physicalComparable(end, `${aliasOf(end.binding)}.${q(end.column)}`, dialect);
+    return columnPairComparison(dialect, edge.op ?? 'eq', edge.left, side(edge.left), edge.right, side(edge.right),
+      edge.doubles === true);
+  };
 
   /** What orders one binding's rows as the engine meets them: its physical key columns, else its row identity. */
   const identityTerms = (binding) => {

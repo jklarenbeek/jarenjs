@@ -697,7 +697,7 @@ generated column where one exists), `?` = the bound operand:
 | `$eq` path, `$seq` of literals | `(jt = 'text' AND v IN (SELECT value FROM json_each(?) WHERE key IS NOT NULL AND type = 'text')) OR (jt IN ('integer','real') AND v IN (… type IN ('integer','real')))` — the strings bind as one JSON list and the numbers as another; a `null`, `true` or `false` in the list is its own `jt` test, OR'd in; an empty list is constant `FALSE` |
 | `$eq` path, `$x[*]` | the same two branches, each binding the external's JSON; `json_each` reaches an array's elements or an object's member values, and a scalar reaches nothing — the engine's `[*]` |
 | ordering vs external | the same two-branch form with `op` |
-| `$eq` path, path | `jtL IS NOT NULL AND jtR IS NOT NULL AND (…)` with one term for each family both members can hold: numbers `jtL IN ('integer','real') AND jtR IN ('integer','real') AND vL = vR`, strings `jtL = 'text' AND jtR = 'text' AND vL = vR`, booleans `jtL IN ('true','false') AND jtR IN ('true','false') AND vL = vR`, nulls `jtL = 'null' AND jtR = 'null'`; a side that can hold only that family omits its test; two members that share no family: constant `FALSE` |
+| `$eq` path, path | `jtL IS NOT NULL AND jtR IS NOT NULL AND (…)` with one term for each family both members can hold: numbers `jtL IN ('integer','real') AND jtR IN ('integer','real') AND vL = vR` (each `v` the double, `CAST(v AS REAL)`, where its column does not hold it), strings `jtL = 'text' AND jtR = 'text' AND vL = vR`, booleans `jtL IN ('true','false') AND jtR IN ('true','false') AND vL = vR`, nulls `jtL = 'null' AND jtR = 'null'`; a side that can hold only that family omits its test; two members that share no family: constant `FALSE` |
 | `$ne` path, path | `jtL IS NOT NULL AND jtR IS NOT NULL AND NOT (…the $eq terms…)`; with no family in common, the two presence tests alone |
 | `$lt/$le/$gt/$ge` path, path | the number and string terms with `op`; constant `FALSE` when the two share neither |
 | `$starts-with` path, string | `jt = 'text' AND (v >= ? AND v < ?)` — the prefix and its code-point successor |
@@ -816,8 +816,10 @@ zero, as `JSON.parse` reads them. Its `numeric` column holds a conforming
 entity's order terms read one term alike (`entityOrderRead`) in a query, a
 load's `orderBy` and keyset continuation, and an include's `orderBy`: a number
 document member as the double, and its `number` column the same way on
-PostgreSQL; its `integer` column holds no integer past 2^53 the engine reads,
-and SQLite's `number` column holds the double.
+PostgreSQL; its `integer` column is read bare, keeping a key's index order —
+on SQLite it holds no integer the engine reads but as its own double, while on
+PostgreSQL it holds a writer's digits and orders two spellings of one double
+apart (ROADMAP) — and SQLite's `number` column holds the double.
 
 **A path against a path is decided by the family of the two values.**
 Only members the schema types as scalars qualify — `string`, `number`,
@@ -834,7 +836,22 @@ every operator, `$ne` included. Each family's term is true or false, never
 NULL`), so a negation composes. Two members of one family that hold nothing
 else (`integer` against `number`) keep the plain `vL op vR`. An entity query
 keeps that plain form alone: its path comparisons over mapped columns
-compare one family, and every other pair stays with the engine.
+compare one family, and every other pair stays with the engine. Two numbers
+compare as the doubles the engine holds, each read as an ordering reads it
+(`doubleRead`), so two spellings of one double are equal —
+`1152921504606846976` and `1152921504606847000`, and on PostgreSQL
+`5.00000000000000000001` and `5`, `0` and `1e-400` — and a side that holds its
+double already (SQLite's `number` column, an `integer` column the schema bounds
+within ±(2^53 − 1)) is read bare. An entity's columns read alike where they hold
+a writer's digits (PostgreSQL's `number` and `integer` columns; a codec's column
+holds its own SQL type, and SQLite's columns no number the engine reads but as
+its double), and so do a join's equality or refinement and a hop's correlation
+over two number columns (the plan's `doubles`), where PostgreSQL bounds each
+column by the other beside the equality of the doubles (`doubleEqual`: two
+decimals that round to one double lie within 5·10^-16 of either's magnitude,
+plus 10^-323), so either column's index still finds the other's rows. Two key
+columns — a key and a reference to one — compare exactly, through the key's
+index: either may be the `bigint` a database-allocated key takes.
 
 **A member's column answers every kind, or its own.** A member the schema
 lets hold more than one type besides `null` (`['string', 'number']`) has, on

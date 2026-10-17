@@ -54,7 +54,12 @@ that claims another kind than its codec decodes is refused at the model
 able to read a NULL as a present `null`, which the engine equates with another
 and SQL does not. A NULL that reads back as no member pairs alike in both, so a
 nullable member still joins natively against a key or against another nullable
-member. A foreign key no property declares compares as the key it references. An
+member. A foreign key no property declares compares as the key it references.
+Two number columns pair as the doubles the engine holds, so two spellings of
+one double pair (on PostgreSQL, whose columns hold the digits a writer spelled,
+each is read as its double, bounded by the other so that either index still
+finds its rows); a key and a reference to one pair exactly, through the key's
+index. An
 equality that fails the rule is no edge: a root it alone would connect is a
 product the engine builds, and beside a real edge it is a conjunct the engine
 decides. The comparisons that refine an edge, and a hop's correlation, follow
