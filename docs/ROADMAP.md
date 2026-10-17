@@ -245,17 +245,21 @@ establish registry publication or downstream acceptance.
 
 ## @jarenjs/md
 
-- [ ] **Canonical printing: delimiter soups.** `toMarkdown` spells a run of
-  emphasis and strong by a search a stretch at a time and, where nothing it
-  finds reads back, prints the block a stretch at a time, each stretch the
-  canonical spelling does not read back as spelled by a guided search (sites
-  in print order, the printed prefix read back after each text node), each
-  search paid in proportion to what the call prints. A stretch the guided
-  search does not reach within its allowance still prints canonically and
-  reads back as other nodes there, as does a node no Markdown reads back as
-  (an empty emphasis or strong); `toMarkdown` does not report either. Wanted:
-  a spelling derived from the delimiter algorithm instead of searched for, and
-  a way to report a stretch that does not read back (a new option: a minor).
+- [ ] **Canonical printing: delimiter runs neither the derivation nor the
+  search reaches.** `toMarkdown` spells emphasis, strong and strikethrough
+  whose canonical spelling does not read back from the delimiter rules, falls
+  back to the search where that spelling does not read back, and names what
+  still does not read back to `onLossy`. Some trees the reader makes are
+  reached by neither and are named `'unread'` instead of reading back: literal
+  `*` or `_` inside nested runs (`*\**2;_"_\*****\*_` is one), and long chains
+  of nested emphasis and strong. Wanted: those spellings derived, so that
+  every tree the reader makes reads back and the search can go; such content
+  costs the derivation and then the search.
+- [ ] **Canonical printing: a paragraph's leading spaces.** `toMarkdown`
+  prints a paragraph whose text starts with one to three spaces (`&#32;a`) as
+  ` a`, which reads back as `a`: the block reader drops them, and `onLossy`
+  weighs inline content only. Wanted: such a space printed as a reference, as
+  a tab and a fourth space already are.
 
 ## @jarenjs/mermaid
 

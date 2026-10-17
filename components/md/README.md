@@ -642,16 +642,18 @@ and prints a tab in text as `&#9;`; it also prints a paragraph that opens with a
 raw-HTML tag after a placeholder definition (`[-]: <>`) so it stays a paragraph,
 puts an HTML block that starts with spaces below its list marker or footnote
 label, ends a list with that definition before an HTML block indented as far as
-the list's last item (the block used to print inside the item), and tries a
-literal `*` or `_` bare where no escaped one reads back, searching a long run a
-stretch at a time (a run of more than four emphasis or strong nodes, or of more
-than 600 printed characters, whose canonical spelling did not read back used to
-print in it; when no spelling the search finds reads back, each stretch now
-prints on its own, in the spelling a guided search finds where the canonical
-one does not read back, where one such stretch used to return the whole block
-to the canonical spelling; only a stretch neither search spells still prints
-canonically and reads back as other nodes, after searches paid in proportion
-to what the call prints, which cost more than the single read-back they used to). In frontmatter, a quote protects a `#`
+the list's last item (the block used to print inside the item), and spells
+emphasis, strong and strikethrough whose canonical spelling does not read back
+from the delimiter rules instead of searching for a spelling: each node's
+delimiter, the literal `*` and `_` beside it that print bare, and the white
+space or letter beside a run that prints as a character reference (`*&#32;x*`;
+it printed `* x*`, which reads back as a list item), and searches for a
+spelling as before only where the derived one does not read back. Content the
+canonical spelling reads back as prints as it did; content a search used to
+spell prints in the derived spelling where that reads back, which can differ. A new option, `onLossy`, is told each node the printed text does not
+read back as, with its path and a code (`'empty'`, `'line-edge'`, `'touching'`
+or `'unread'`); such content used to print canonically and read back as other
+nodes unannounced. In frontmatter, a quote protects a `#`
 only in a scalar that begins with one (`title: It's fine # note` ends at the
 comment); `\xXX` and `\UXXXXXXXX` escapes mean their character, and an escape
 without its digits is a located error, as in YAML (`"C:\users\me"` in double

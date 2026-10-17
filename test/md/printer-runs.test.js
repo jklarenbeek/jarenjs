@@ -1,16 +1,17 @@
 //@ts-check
 /**
  * The printer's output reads back as the document it came from for a run
- * of emphasis and strong however long, wherever a search spells it, and for
- * an HTML block that starts with spaces and stands straight after a list.
+ * of emphasis and strong however long, wherever the spelling derived from
+ * the delimiter rules or the search behind it reaches, and for an HTML
+ * block that starts with spaces and stands straight after a list.
  *
- * A run the canonical spelling merges into one delimiter run is spelled by
- * a search against the parser. The search covers a stretch of the run at a
- * time, with the character each neighbour prints beside its edge, so it is
- * not bounded by the number of delimiter nodes or characters in the run;
- * a stretch it does not spell is left to a guided search, and one neither
- * spells prints canonically without changing the others. The timing tests
- * compare eight times the input and never a wall clock.
+ * A run the canonical spelling merges into one delimiter run is spelled
+ * from the delimiter rules: each node's delimiter, the literal `*` and `_`
+ * beside it that print bare, and the characters beside a run that print
+ * as references; content that does not read back so is spelled by a
+ * search against the parser, and content neither reads back as is named to
+ * `onLossy`. The timing tests compare eight times the input and never a
+ * wall clock.
  * An HTML block that begins with as many spaces as the last list item's
  * content is indented by would print inside that item, so a definition that
  * defines nothing ends the list first.
@@ -108,22 +109,21 @@ function costAgainstReadingBack(hard, length) {
 }
 
 /**
- * A run of delimiters, letters and spaces whose nesting the search a
- * stretch at a time does not spell: most of its emphasis and strong need `_`
- * and its literal `*` and `_` need to be bare, as its source has them.
+ * A run of delimiters, letters and spaces whose canonical spelling does not
+ * read back: most of its emphasis and strong need `_` or runs merged with
+ * their neighbours', and some of its literal `*` and `_` print bare.
  */
 const UNIT = '.___a_b_1ba 1b_1**ab***__a _.1_b11****__1a **_ b***1*a1b.b b b __*__* * a a1__1*****____._. b**___********';
 
-describe('toMarkdown — a run of emphasis and strong no short search spells reads back', function () {
+describe('toMarkdown — a run of emphasis and strong the canonical spelling merges reads back', function () {
   // Each source below is five or more delimiter nodes whose canonical
-  // spelling reads back as something else, and which no spelling of the
-  // first four nodes and six bits does.
+  // spelling reads back as something else.
   const STUBBORN = [
-    ['**a*b***__a***1***__*', '**a*b***__a***1***__\\*\n'],
-    ['*a _ab*****a**b***_*__', '*a _ab*****a**b***_*\\_\\_\n'],
-    ['**__****1***b***__****', '**__****1***b***__**\\*\\*\n'],
-    ['******.*__*b**.***', '\\*_****.*\\_\\_*b**.**_\n'],
-    ['*a!a __a.***`c`**_b_** 1****11*`c`* a a ." ~~**', '*a!a \\_\\_a.*__`c`__*b*\\*\\* 1****11*`c`* a a ." \\~\\~**\n'],
+    ['**a*b***__a***1***__*', '__a*b*__**&#97;_**1**_**\\*\n'],
+    ['*a _ab*****a**b***_*__', '*a _a&#98;*****a**b***_*\\_\\_\n'],
+    ['**__****1***b***__****', '**__****1**_b_**__**\\*\\*\n'],
+    ['******.*__*b**.***', '**__*_._\\_\\__b_*.__*\n'],
+    ['*a!a __a.***`c`**_b_** 1****11*`c`* a a ." ~~**', '*a!a \\_\\_a.*__`c`__*b*\\*\\* &#49;**_*11*`c`_ a a ." \\~\\~**\n'],
   ];
   for (const [source, printed] of STUBBORN) {
     it(`prints ${JSON.stringify(source)} so that it reads back`, () => {
@@ -159,24 +159,25 @@ describe('toMarkdown — a run of emphasis and strong no short search spells rea
   });
 });
 
-describe('toMarkdown — the spelling a search finds is the one printed', function () {
-  it('keeps the first combination of a short run that reads back, six sites deep', () => {
-    // four delimiter nodes and a literal `*` or `_` bare in the second group of escapes:
-    // the search over the whole run needs its sixth bit, as it always has
+describe('toMarkdown — the derived spelling is the one printed', function () {
+  it('prints a short run with literal delimiters beside it', () => {
     assert.equal(canonical('\\\\_\\\\_b__`c`*****__**1\\\\_***a****a'),
-      '\\\\*\\\\*b**`c`\\*\\*\\*\\*\\*\\_\\_**1\\\\_***a****a\n');
+      '\\\\*\\\\_b_*`c`\\*\\*\\*\\*\\*\\_\\_**1\\\\\\_\\*__a__**&#97;\n');
   });
 
-  it('spells a long run a stretch at a time, each against the character its neighbour prints', () => {
-    // the delimiter runs sit against letters, spaces and marks of the stretches beside them
+  it('spells a long run against the character each neighbour prints', () => {
+    // the delimiter runs sit against letters, spaces and marks beside them
     assert.equal(canonical(' __"a .a *_b. ba  b"__ _____**"b_*_*[l](u) a_('),
-      '\\__"a .a \\**b. ba  b"*_ ____*\\*\\*"b*\\*_\\*[l](u) a_(\n');
+      '\\_*"a .a \\*_b. ba  b"_* ____*\\*\\*"b*\\*_\\*[l](u) a_(\n');
     assert.equal(canonical('**`c`_ (a `c`!**_.__***`c`*1[l](u)****** b_`c`[l](u)1_****!'),
-      '**`c`\\_ (a `c`!**_.\\_\\_***`c`*1[l](u)****\\*\\* b_`c`[l](u)1\\_\\*\\*\\*\\*!\n');
+      '**`c`\\_ (a `c`!**_.\\_\\_*__`c`*1[l](u)*__*\\*\\* b_`c`[l](u)1\\_\\*\\*\\*\\*!\n');
+    assert.equal(canonical('b.** **ba_**[l](u) b****b***[l](u)(__ b !__a b*__*** b([l](u)****.a _***.**'),
+      'b.\\*\\* **ba\\_**[l](u) &#98;__**b**\\*[l](u)(\\_\\_ b !**a b\\***__\\* b([l](u)**__.a \\___\\*.**\n');
+  });
+
+  it('prints a run the derivation does not reach, where a strikethrough stands among the runs, as the search spells it', () => {
     assert.equal(canonical('`c`**_!`c`.1* b_~~****__b***! b***a `c` b~~_".(_*1a  b!____****`c`___ ba '),
       '`c`***!`c`.1\\* b*~~****\\_\\_b***! b**\\*a `c` b~~_".(_*1a  b!\\_\\_\\_\\_***\\*`c`\\_\\_\\_ ba\n');
-    assert.equal(canonical('b.** **ba_**[l](u) b****b***[l](u)(__ b !__a b*__*** b([l](u)****.a _***.**'),
-      'b.\\*\\* **ba\\_**[l](u) b****b***[l](u)(\\_\\_ b !__a b\\*__**\\* b([l](u)**__.a \\___\\*.**\n');
   });
 });
 
@@ -209,12 +210,12 @@ describe('toMarkdown — what sits beside a stretch of delimiters is read as the
     assert.equal(canonical('\u{1F600}******\u{1F600}*__*\u{1F600}__**\u{1F600}******\u{1F600}*'),
       '\u{1F600}******\u{1F600}*__\\*\u{1F600}__**\u{1F600}***\\*\\**\u{1F600}*\n');
     assert.equal(canonical('*******\u{1F600}*__\u{1F600}*\u{1F600}*_***.*\u{1F600}1'),
-      '\\*\\*_****\u{1F600}*\\_\\_\u{1F600}*\u{1F600}*\\_***._\u{1F600}1\n');
+      '*****_*\u{1F600}*\\_\\_\u{1F600}_\u{1F600}_\\__**.*\u{1F600}1\n');
   });
 
   it('reads a hard break beside a run as white space', () => {
     assert.equal(canonical('1\\\n_**x*_*_**x* __** ******'),
-      '1\\\n_\\**x*_*\\_**x* \\_\\_** \\*\\*\\*\\*\\*\\*\n');
+      '1\\\n_\\**x*_*\\__*x* \\_\\__* \\*\\*\\*\\*\\*\\*\n');
   });
 });
 
@@ -229,30 +230,30 @@ describe('toMarkdown — a bare delimiter never opens a list or a rule', functio
   });
 });
 
-describe('toMarkdown — content only the guided search spells reads back, at a cost in proportion to its length', function () {
+describe('toMarkdown — a run whose literal delimiters print bare reads back, at a cost in proportion to its length', function () {
   /** @param {number} n */
   const make = (n) => (UNIT + ' plain ').repeat(n);
 
   it('prints it so that it reads back, and each copy of it in a block', () => {
     assert.equal(canonical(UNIT),
-      '.___a\\_b\\_1ba 1b\\_1**ab***__a _.1_b11****__1a **_ b***1*a1b.b b b __*__* * a a1__1*****____._. b**___********\n');
+      '.**_a\\_b\\_1ba 1b\\_&#49;**ab**\\***a _.1\\_b11\\*\\*\\*\\**_1a \\*\\*_ &#98;__*1*&#97;1b.b b b **\\***\\* \\* a a1\\_\\_1__\\*\\*\\**_**._. b\\*\\***\\_\\*\\*\\*\\*\\*\\*\\*\\*\n');
     canonical(make(10));
   });
 
   it('spells a run near the canonical spelling and one far from it', () => {
-    // the first needs `*` where it can and the bare `_` and `*` its texts start
-    // or end with, the second needs most of its emphasis and strong spelled `_`
+    // the first was spelled near the canonical spelling, the second far from it
     assert.equal(canonical('*`c`b1__.**_1`c`***____** bb*b_a .1!"`c` _*`c`!a_[l](u) *_**"***** _'),
-      '*`c`b1\\_\\_.**_1`c`***____** bb*b\\_a .1!"`c` _*`c`!a_[l](u) *_**"***** _\n');
+      '*`c`b1\\_\\_.__\\_1`c`__*\\_\\__*\\*\\* b&#98;*b\\_a .1!"`c` \\_*`c`!a*[l](u) \\*_**"**\\*\\*\\* \\_\n');
     assert.equal(canonical('[l](u) b(a (__a **`c`*(!`c`**a a"***((_**._**a *(_! bb 1*"._*.b_._!***.* ba *[l](u)""~~1_"[l](u)b_~~("'),
-      '[l](u) b(a (__a __`c`_(!`c`__a a"___((\\___._**a *(_! bb 1\\*"._*.b_._!***.* ba *[l](u)""\\~\\~1_"[l](u)b_\\~\\~("\n');
+      '[l](u) b(a (__a **`c`*(!`c`__a a"__*((\\_**.*\\*\\*a \\*(*! bb 1\\*".*\\*.b*.*!\\*\\*_._ ba \\*[l](u)""\\~\\~1*"[l](u)b_\\~\\~("\n');
   });
 
   it('costs at most a bounded multiple of printing a run that reads back at once', function () {
-    // Each search is paid in proportion to what a call prints, so content
-    // that needs every one of them costs a bounded number of reads of itself,
-    // not the thousands a search of every spelling would. The limit sits near
-    // the geometric mean of the bounded multiple and the unbounded search.
+    // Deriving a spelling weighs each node against a few dozen sets of runs
+    // open around it at most, so content that needs it costs a bounded
+    // multiple of printing content that reads back at once, not the thousands
+    // a search of every spelling would. The limit sits near the geometric mean
+    // of the bounded multiple and the unbounded search.
     const hard = parseMarkdown(Array.from({ length: 40 }, () => UNIT).join('\n\n')).ast;
     const { ratio, message } = costAgainstReadingBack(hard, UNIT.length);
     assert.ok(ratio < 150, message);
@@ -264,10 +265,10 @@ describe('toMarkdown — content only the guided search spells reads back, at a 
   });
 });
 
-describe('toMarkdown — a stretch no search spells costs the block none of the others', function () {
+describe('toMarkdown — a node no Markdown reads back as is named, and changes no other block', function () {
   // The parser never makes an emphasis with nothing in it, so no spelling of
-  // one reads back: content that holds one makes every search spend all it is
-  // given, and prints canonically where it stands.
+  // one reads back: content that holds one is printed by the derived spelling
+  // and the node named to `onLossy`.
   const EMPTY = { type: 'emphasis', children: [] };
   /**
    * `n` copies of the guided search's run a word apart, each with an empty
@@ -287,24 +288,27 @@ describe('toMarkdown — a stretch no search spells costs the block none of the 
     return [{ type: 'paragraph', children }];
   };
 
-  it('prints the stretches that read back as they read, and canonically only one no text reads back as', () => {
+  it('prints the rest of its block by the derived spelling and names the empty node', () => {
     const unit = parseMarkdown(UNIT).ast[0].children;
     const ast = [{ type: 'paragraph', children: [...unit, { type: 'text', value: ' plain ' }, EMPTY] }];
-    assert.equal(toMarkdown(ast), canonical(UNIT).slice(0, -1) + ' plain **\n');
+    /** @type {any[]} */
+    const reports = [];
+    assert.equal(toMarkdown(ast, { onLossy: (report) => reports.push(report) }), '.**_a\\_b\\_1ba 1b\\_&#49;**ab**\\***a _.1\\_b11\\*\\*\\*\\**_1a \\*\\*_ &#98;__*1*&#97;1b.b b b **\\***\\* \\* a a1\\_\\_1__\\*\\*\\**_**._. b\\*\\***\\_\\*\\*\\*\\*\\*\\*\\*\\* plain **\n');
+    assert.deepEqual(reports, [{ code: 'empty', path: [0, unit.length + 1], reason: 'an emphasis node with nothing in it, whose opener and closer would be one run' }]);
   });
 
-  it('leaves the blocks after it the pool the search before it left', () => {
-    // the second block is a run whose search needs what the first block's search
-    // left of the pool, and the first holds a node no text reads back as
+  it('leaves the blocks after it as they print on their own', () => {
+    // the second block is a run the canonical spelling does not read back, and
+    // the first holds a node no text reads back as
     const after = parseMarkdown('"_`c`**1b~~1_ ba(__* a  b[l](u)a .`c`1**b____1.~~**_1__ b*[l](u)"" "(*1!a !a _.a~~_[l](u)[l](u)a!!**__*`c`___!~~_*1*****(a ~~a__*~~*[l](u)`c`!_***').ast;
     const ast = [{ type: 'paragraph', children: [{ type: 'strong', children: [EMPTY] }, { type: 'text', value: ' a' }] }, ...after];
     assert.deepEqual(parseMarkdown(toMarkdown(ast)).ast.slice(1), after);
   });
 
-  it('prints a stretch no spelling reads back as canonically, and the same every time', () => {
+  it('prints content holding a node no spelling reads back as the same every time', () => {
     const ast = unspellable(1);
     const text = toMarkdown(ast);
-    assert.equal(text, '.***a\\_b\\_1ba 1b\\_1**ab**\\***a _.1\\_b11\\*\\*\\*\\*_*1a \\*\\** b***1*a1b.b b b **\\***\\* \\* a a1\\_\\_1**\\*\\*\\*__**.*. b\\*\\*****\\_\\*\\*\\*\\*\\*\\*\\*\\*\n');
+    assert.equal(text, '.**_a\\_b\\_1ba 1b\\_&#49;**ab**\\***a _.1\\_b11\\*\\*\\*\\**_1a \\*\\*_ &#98;__*1*&#97;1b.b b b **\\***\\* \\* a a1\\_\\_1__\\*\\*\\**_**._. b\\*\\*__**\\_\\*\\*\\*\\*\\*\\*\\*\\*\n');
     assert.equal(toMarkdown(ast), text);
   });
 

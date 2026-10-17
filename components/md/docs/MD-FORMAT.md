@@ -576,34 +576,42 @@ angle-bracket autolink only where that spelling parses as one — an
 absolute URI or an email address; `[CHANGELOG.md](CHANGELOG.md)` keeps its
 inline form. Strong around a lone emphasis prints its emphasis with
 underscores (`**_x_**`), because `***x***` reads back as the nesting the
-other way round. Emphasis or strong beside or inside another (`*a*` then
-`_b_`, `__**x**y__`) is checked against the parser: when the `*` spelling
-would merge delimiters into one run, the first alternating spelling that
-reads back as the same nodes is the one printed. When none of those does,
-each text node's `*` and `_` may also be left bare, which is how a source
-spells a delimiter run that no escaped character can: every combination of the
-spellings of up to four such nodes in a short run (at most 600 printed
-characters), and, for any longer or denser run, a search a stretch at a time.
-The content splits wherever the join of two neighbours has no delimiter
-character on both sides, since a delimiter run reaches across a join only
-through such characters; each stretch is read back against the parser with a
-character of the kind its neighbours print beside it, and spelled with as few
-nodes and texts the other way as will do, so the cost of the search grows with
-the longest stretch of touching delimiters and not with the run. The result
-is read back as a whole, and stretches a run turns out to reach across are
-searched together. When no spelling those searches find reads back, the
-content prints a stretch at a time: each stretch canonically where that reads
-back, else in the spelling a guided search finds, and canonically only where
-neither does, so a stretch no search spells changes no other stretch's
-spelling. The guided search decides the nodes in the order they print, each
-text with a `*` or `_` at its edge trying it bare first, reads the text
-printed so far back after each text node, and on a prefix that reads back as
-other nodes returns to the last node that can have caused it; it is paid from
-an allowance of its own in proportion to what the block prints. A stretch
-neither search spells, and a node no Markdown reads back as (an emphasis or
-strong node with nothing in it, which the parser never makes), print
-canonically and read back as other nodes there; `toMarkdown` does not report
-it, and a caller that needs to know parses the text again and compares. A
+other way round. Emphasis, strong and strikethrough are printed this way wherever that reads
+back: a block's content that holds any is parsed again once, and where the
+canonical spelling reads back as other nodes, the content is spelled from
+CommonMark's delimiter rules (§6.2 of the specification) instead. Which runs
+can open and which can close follows from the characters beside them;
+the rule of three keeps a run that can both open and close from some of the
+runs before it; and the reader takes two characters from an opener and a
+closer that both have two, the innermost node's first. From these the
+printer chooses, a row of touching nodes at a time and weighing each node
+against the runs left open around it: each node's delimiter (`*` or `_`);
+whether its runs merge with its parent's (`***x***`, emphasis around
+strong); whether literal `*` or `_` beside a run print bare as part of it,
+where the rule of three needs the longer run; and which white space or
+letter beside a run prints as a character reference, which a run reads as
+punctuation (`*&#32;x*`: `* x*` does not open, and reads back as a list
+item). A letter alone between two runs prints one way for both. The runs
+open around a node are one of a few dozen sets, so the cost grows with the
+content. Content the derived spelling does not read back as is spelled by a
+search against the parser instead: the alternating spellings, every
+combination for a short run, a search a stretch at a time, and a guided
+search of each stretch, paid from a pool of parsed characters in proportion
+to what the call prints. A node no Markdown reads back as, and content
+neither the derivation nor the search spells, is named to the `onLossy` option, when the call has
+one, with its path (indices from the document's top-level blocks through
+each node's `children`, a table's rows and cells included) and a code: no
+Markdown reads back as an emphasis, strong or strikethrough node with
+nothing in it (`'empty'`: its opener and closer would be one run), as one
+whose content starts with a soft line break or ends with a line break
+(`'line-edge'`: a run before a line ending cannot open, nor one after it
+close), or as a strikethrough touching another (`'touching'`: two `~~` are
+one run of four, which is no delimiter); `'unread'` names the first node
+of other content no spelling either finds reads back as. A block's inline
+content is weighed as the inline reader reads it; what the block reader
+does around it, such as dropping the spaces a paragraph starts with, is not.
+Without `onLossy` such content prints in the derived spelling and reads
+back as other nodes. A
 destination, a title
 and a fence's info string are escaped as they are read: a backslash before
 punctuation, an `&` that opens a character reference, a tab and a newline
@@ -618,7 +626,7 @@ The normative round-trip guarantees:
 
 1. `parseMarkdown(toMarkdown(doc))` produces an AST deep-equal to
    `doc.ast` for any document this package produced, short of the
-   delimiter runs no search above spells, and printing that
+   nodes `onLossy` names, and printing that
    AST again reproduces the same text (canonical form is a fixed
    point). Both halves are checked over the whole CommonMark example
    corpus, not a sample: a printer that cannot represent a construct it
@@ -635,11 +643,10 @@ The normative round-trip guarantees:
 
 The guarantee is checked over those corpora and over randomly assembled
 documents; it has a known gap outside them, in a shape no real document holds:
-a run of touching delimiters whose spelling the search does not reach (it
-tries the fewest changes first, paid from a pool of parsed characters in
-proportion to what the call prints, which content it cannot spell spends
-whole) or whose nesting needs only some of one text node's `*` or `_` left
-bare is printed canonically and reads back as other nodes. A paragraph that is only raw inline HTML a block would start on (it can
+content of touching delimiters neither the derivation nor the search
+reaches — literal `*` or `_` inside nested runs, long chains of nested
+emphasis and strong — prints in the derived spelling, reads back as other
+nodes, and is named to `onLossy` as `'unread'`. A paragraph that is only raw inline HTML a block would start on (it can
 only follow a link reference definition, which the AST does not keep) prints
 after a definition that defines nothing, `[-]: <>`, and so does an HTML block
 that begins with as many spaces as the last item of the list before it is

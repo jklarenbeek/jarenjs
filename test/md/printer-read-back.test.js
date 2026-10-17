@@ -55,13 +55,14 @@ describe('toMarkdown — delimiter runs that would merge are spelled apart', fun
     assert.equal(canonical('__bar_*a_b*'), '\\_*bar*_a\\_b_\n');
   });
 
-  it('tries every spelling of a few nested delimiters when the alternating ones fail', () => {
+  it('spells a few nested delimiters from the delimiter rules where the alternating ones do not read back', () => {
     assert.equal(canonical('__***.***__'), '__***.***__\n');
-    assert.equal(canonical('__1***bar***__'), '__1***bar***__\n');
+    // a letter beside a run prints as a reference where the run needs punctuation there
+    assert.equal(canonical('__1***bar***__'), '**&#49;_**bar**_**\n');
   });
 
   it('spells strong inside strong with its own delimiter, and leaves a spelling that reads back alone', () => {
-    assert.equal(canonical('__**foo**foo__'), '__**foo**foo__\n');
+    assert.equal(canonical('__**foo**foo__'), '__**foo**&#102;oo__\n');
     assert.equal(canonical('**bar**__***__'), '**bar**__\\*\\*\\*__\n');
     assert.equal(canonical('**a *b* c**'), '**a *b* c**\n');
     assert.equal(canonical('_*a*_'), '_*a*_\n');
@@ -180,8 +181,8 @@ describe('toMarkdown — a block that starts with spaces starts below its marker
 describe('toMarkdown — a literal delimiter can print bare when nothing else reads back', function () {
   it('spells an unmatched delimiter beside the openers it shares a run with', () => {
     assert.equal(canonical(' ***`*_[_*'), '***\\`*_\\[_*\n');
-    assert.equal(canonical('****`\\*a*b*b'), '****\\`\\*a*b*b\n');
-    assert.equal(canonical(' __*\\**_*_**_'), '___\\*_*\\**\\*\\*_\n');
+    assert.equal(canonical('****`\\*a*b*b'), '\\*\\**_\\`\\*a_&#98;*&#98;\n');
+    assert.equal(canonical(' __*\\**_*_**_'), '__*\\**_\\*_\\*\\*_\n');
   });
 });
 
