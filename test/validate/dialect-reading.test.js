@@ -333,6 +333,20 @@ describe('a held schema is named with its scheme and host in any case', () => {
     assert.equal(holding(dialect(PORTED)).compile({ $schema: PORTED, ...TUPLE })([1]), false);
   });
 
+  it('reads the vocabulary and validateSchema of a held dialect by the same key as its draft', () => {
+    const DEEP = 'https://example.com/a/my-dialect';
+    // the validation vocabulary off: `type` asserts nothing under this dialect
+    const quiet = { $id: DEEP, $schema: D2020, $dynamicAnchor: 'meta', $vocabulary: {
+      'https://json-schema.org/draft/2020-12/vocab/core': true, 'https://json-schema.org/draft/2020-12/vocab/applicator': true } };
+    for (const uri of [DEEP, 'HTTPS://EXAMPLE.com/a/my-dialect', 'https://example.com:443/a/my-dialect', 'https://example.com/a/../a/my-dialect']) {
+      // `prefixItems: [false]` refuses [1] only where the 2020-12 draft is read
+      const validate = new JarenValidator().addSchema(quiet).compile({ $schema: uri, type: 'string', prefixItems: [false] });
+      assert.deepEqual([validate(5), validate([1])], [true, false], uri);
+      const validator = new JarenValidator().addMetaSchema({ $id: 'https://example.com/m', type: 'object' });
+      assert.equal(validator.validateSchema({ $schema: uri.replace('a/my-dialect', 'm').replace('a/../a/m', 'x/../m'), type: 'string' }), true, uri);
+    }
+  });
+
   it('switches vocabularies by the meta-schema a $schema names in another case', () => {
     // a meta-schema that omits the validation vocabulary: type asserts nothing
     const id = 'https://example.com/vocab-meta';

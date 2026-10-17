@@ -137,6 +137,23 @@ export function dialectUriKey(uri) {
 }
 
 /**
+ * The held schema a `$schema` URI names: looked up by {@link dialectUriKey}
+ * (the key a `$ref` to it resolves to), then by the URI as written, each
+ * with and without its empty fragment. The one lookup the draft, the
+ * vocabulary and `validateSchema` read a dialect by.
+ * @param {string} uri - The `$schema` value
+ * @param {(key: string) => unknown} get - The schema held under a key
+ * @returns {unknown} the held schema, or undefined
+ */
+export function heldDialect(uri, get) {
+  for (const key of new Set([dialectUriKey(uri), heldUriKey(uri)])) {
+    const held = get(key) ?? (key.endsWith('#') ? get(key.slice(0, -1)) : undefined);
+    if (held !== undefined && held !== null) return held;
+  }
+  return undefined;
+}
+
+/**
  * A URI as the dialect and vocabulary tables compare it: read by
  * {@link caselessUri}, `http:` and `https:` alike, and a URI and the same URI
  * with an empty fragment (`…/schema#`) alike. Anything else, the path
@@ -201,13 +218,10 @@ export function dialectDraft(uri, held = undefined) {
     if (known !== undefined) return known;
     // only an absolute URI can name a schema a validator holds
     if (held === undefined || !/^[a-z][a-z0-9+.-]*:/i.test(uri)) return null;
-    // the key a `$ref` resolves to, then the URI as written for a dialect
-    // registered under a spelling the URL standard reads otherwise
     const key = dialectUriKey(uri);
     if (seen?.has(key)) return null;
     (seen ??= new Set()).add(key);
-    const written = heldUriKey(uri);
-    const meta = held.get(key) ?? held.get(key.slice(0, -1)) ?? held.get(written) ?? held.get(written.slice(0, -1));
+    const meta = heldDialect(uri, (k) => held.get(k));
     if (meta === null || typeof meta !== 'object' || typeof (/** @type {any} */ (meta)).$schema !== 'string') return null;
     uri = /** @type {any} */ (meta).$schema;
   }

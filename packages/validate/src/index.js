@@ -49,7 +49,7 @@ import { isStringWhiteSpace } from '@jarenjs/core/string';
 import { hasRecursiveAnchor, getDynamicAnchorName, collectDynamicAnchors, collectDynamicAnchorsDeep, appliesRefSiblings } from './dynamic-ref.js';
 import { isRecursiveQueryCompileError } from './query-keyword.js';
 import { boundReference, assertReferenceDepth, assertOutputFormat, REFERENCE_DEPTH_CEILING } from './errors.js';
-import { TRAVERSE_SCHEMA_OBJECTS, TRAVERSE_SCHEMA_MAPS, TRAVERSE_SCHEMA_MAP_MAPS, detectSchemaDraft, declaredVocabularies, caselessUri, heldUriKey } from './schema-keywords.js';
+import { TRAVERSE_SCHEMA_OBJECTS, TRAVERSE_SCHEMA_MAPS, TRAVERSE_SCHEMA_MAP_MAPS, detectSchemaDraft, declaredVocabularies, caselessUri, heldUriKey, heldDialect } from './schema-keywords.js';
 import { VALIDATOR_STATE } from './validator-state.js';
 
 export {
@@ -2384,9 +2384,8 @@ export class JarenValidator {
     if (this.#metaSchemas.size == 0)
       return true;
 
-    const schemaId = JarenValidator.normalizeUriKey(
-      (isObjectClass(schema) ? schema.$schema : undefined) || DEFAULT_SCHEMA_DRAFT);
-    const metaSchema = this.#metaSchemas.get(schemaId);
+    const named = (isObjectClass(schema) ? schema.$schema : undefined) || DEFAULT_SCHEMA_DRAFT;
+    const metaSchema = typeof named === 'string' ? heldDialect(named, (key) => this.#metaSchemas.get(key)) : undefined;
     // if the metaSchema is not present, we fail the validation
     if (!metaSchema)
       return false;
@@ -2615,9 +2614,7 @@ export class JarenValidator {
     // sets the formatAssertion option explicitly).
     let formatAssertion = existingValidation.formatAssertion ?? null;
     if (isObjectClass(schema) && isStringType(schema.$schema)) {
-      const metaKey = JarenValidator.normalizeUriKey(schema.$schema);
-      const metaSchema = map.get(metaKey)
-        || map.get(metaKey.endsWith('#') ? metaKey.slice(0, -1) : metaKey + '#');
+      const metaSchema = heldDialect(schema.$schema, (key) => map.get(key));
       if (isObjectClass(metaSchema) && isObjectClass(metaSchema.$vocabulary)) {
         const declared = declaredVocabularies(metaSchema.$vocabulary);
         vocabValidation = declared.validation;
