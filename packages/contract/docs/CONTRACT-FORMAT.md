@@ -2565,7 +2565,7 @@ change at the first pointer where they do.
 | R2 | operation added | additive |
 | R3 | `kind`, `http.method`, `http.path` (shape — variable *names* are not shape), `http.status`, `http.media` (opaqueness included), a member's `http.in` location, or `http.body` changed | breaking; an `http.media` respelled to the same type/subtype — its case or its parameters — is neutral (`media-respelled`), because the binding matches media by type/subtype alone (§7.2 step 5) |
 | R4 | input: a member added to `required` (or a new required member) | breaking |
-| R5 | input: a member removed while the new input schema is closed — `additionalProperties: false` or `unevaluatedProperties: false` — (or the input removed entirely) | breaking; beside a catch-all that constrains it, R15; otherwise `neutral` with a note (the member is now ignored, not validated) |
+| R5 | input: a member removed while the new input schema is closed — `additionalProperties: false` or `unevaluatedProperties: false` — (or the input removed entirely) | breaking; where a `patternProperties` of the closed schema admits the member's name, its schema compares against the pattern's instead (R6/R7, see the riders); beside a catch-all that constrains it, or an applicator, R15; otherwise `neutral` with a note (the member is now ignored, not validated) |
 | R6 | input: a member's schema narrowed (type set shrinks, `enum`/`const` shrinks, `maximum` lowers, `minimum` rises, `maxLength` lowers, `minLength` rises, `pattern` added) | breaking |
 | R7 | input: a member's schema widened (the inverse of R6), an optional member added, or a member dropped from `required` | additive |
 | R8 | output: a member removed, made optional (dropped from `required`), or widened (type set grows, `enum`/`const` grows, a bound relaxes, a `pattern` dropped), or a member added to an object that was closed (`additionalProperties: false` or `unevaluatedProperties: false`) | breaking |
@@ -2575,7 +2575,7 @@ change at the first pointer where they do.
 | R12 | `policy.idempotency` `none/optional → required` (a client must now send a key), or `required/optional → none` (a key an old client still sends, and retries under, is no longer read) | breaking (`idempotency-required`, `idempotency-dropped`); `required → optional` and `none → optional` additive (`idempotency-relaxed`) |
 | R13 | `policy.task`, `policy.retry`, `policy.cache`, `policy.revision`, `policy.stream` (a resume policy, heartbeat or patch bound) or `doc` changed | neutral; a `policy.stream.heartbeatMs` that rises is breaking (`heartbeat-slowed`) — an older client arms its watchdog from its own contract and reports the stream lost (`JC2094`) after twice the interval it expects |
 | R14 | `policy.audience` `public → server` | breaking; the reverse additive |
-| R15 | a schema construct the checker does not model differs between the two (`if`, `not`, `contains`, an `anyOf`/`oneOf` whose variants neither a type nor a discriminator tells apart, an applicator the walk does not read by direction — see the riders —, `$dynamicRef`, a `format`, a *changed* `pattern`, an external or sibling-carrying `$ref`, a changed error `details` schema, …), including one whose text is unchanged while a same-document `$ref` inside it resolves to a schema that changed — reported at the first resolved pointer where the two differ; a constraint, member or requirement present on one side only while the other carries such an applicator (it may have moved inside); a member added or removed beside a catch-all that constrains it (`additionalProperties` or `unevaluatedProperties` as a schema, `patternProperties`, `propertyNames`) | **unknown** — reported, never silently classed |
+| R15 | a schema construct the checker does not model differs between the two (a changed `if`, a `not` or a `contains` on one side only, a `contains` beside `minContains`, `maxContains` or a tuple form, an `anyOf`/`oneOf` whose variants neither a type, a discriminator nor the two together tell apart, an applicator the walk does not read by direction — see the riders —, `$dynamicRef`, a `format`, a *changed* `pattern`, an external or sibling-carrying `$ref`, a changed error `details` schema, …), including one whose text is unchanged while a same-document `$ref` inside it resolves to a schema that changed — reported at the first resolved pointer where the two differ; a constraint present on one side only while the other carries such an applicator, or a member or requirement present on one side only while the other carries one a branch of which may hold it — names or requires it, closes the object, or carries a catch-all or an applicator of its own (it may have moved inside); a member added or removed beside a catch-all that constrains it (`additionalProperties` or `unevaluatedProperties` as a schema, `patternProperties`, `propertyNames`), or one a closed object's `patternProperties` admits where the two sides' matching patterns differ | **unknown** — reported, never silently classed |
 | R16 | a nullable node respelled between `type: [T, 'null']` and a two-branch `anyOf`/`oneOf` with a null-only branch, where both spellings accept exactly the same values | neutral (`schema-respelled`) — the bytes and the revision move, the accepted values do not; a reorder inside one spelling (a type array's items, a union's branches) is no respelling and is silent |
 
 Riders the rows carry:
@@ -2649,16 +2649,70 @@ Riders the rows carry:
   once a neutral R5, is breaking R5 (the server refuses it), and a member
   removed, or added as optional, beside a catch-all that constrains it,
   once a neutral R5 or an additive R7, is R15.
-- **A member declared `false` is no member.** A member whose schema is
-  `false` (directly or through same-document `$ref`s) and that its side
-  does not require, while the other side neither names nor requires it,
-  compares as `false` against what that other side applies to a member it
-  does not name: `false` under a closed object, so adding or dropping it
-  moves nothing; `true` under an open one, so adding it narrows (R6 under
-  an input, R9 under an output) and dropping it widens (R7, R8), at every
-  depth and at the input's top level alike. Beside a catch-all that
-  constrains, an applicator, or the siblings of the `$ref` the input is
-  spelled as, the member rows classify it as before.
+- **A member the other side judges without declaring it.** A closed
+  object (`additionalProperties: false` or `unevaluatedProperties:
+  false`) whose `patternProperties` admits a member's name judges the
+  member by that pattern, not by its closedness: a member dropped from
+  `properties` there compares its schema against the pattern's, and one
+  added compares the pattern's against its own, by R6/R7 under an input
+  and R8/R9 under an output (`{ properties: { m: { type: 'string' } },
+  patternProperties: { '^m': {} }, additionalProperties: false }` without
+  `m` widens: R7 `input-widened` at `…/properties/m/type`). Where both
+  sides apply the same matching patterns, the member's schema compares
+  against `true` with those patterns beside it, so a location they
+  constrain is R15. A member named in `properties` on one side and only
+  in `required` on the other compares its declared schema against what
+  the other side applies to a member it does not name (`true` open,
+  `false` closed; R15 beside a catch-all that constrains), beside the
+  requirement's own row, at the input's top level and below it. And the
+  input's top level reads an applicator as a nested object does: a
+  member or requirement present on one side only while the other carries
+  an applicator a branch of which may hold it is R15; beside one none of
+  whose branches may (`anyOf: [{ required: ['x'] }, { required: ['y'] }]`
+  beside a new required `m`), the member rows classify it. **Upgrading:** such a member dropped from a
+  closed object, once breaking R5 (top level) or R6 (below), now answers
+  additive R7 where the pattern accepts more, and one added, once
+  additive R7, answers breaking R6 where the pattern accepted more; under
+  an output the same reads R8/R9. `{ required: ['m'] }` → `{ properties:
+  { m: { type: 'string' } } }`, once additive R7 `input-member-optional`
+  alone, also reports breaking R6 `input-narrowed`, and under an output,
+  once additive R9 `output-member-added`, is breaking R8
+  `output-member-optional` beside an additive R9 — a `--fail-on breaking`
+  gate that passed them now fails. At the input's top level a member or
+  a requirement added or dropped while the other side carries an
+  applicator that may hold it, once breaking R4/R5 or additive R7, is
+  R15; one level down, a member or requirement beside an applicator that
+  cannot hold it, once R15, classifies by the member rows.
+- **A member that accepts nothing is no member.** A schema the walk
+  proves accepts no value compares as `false` wherever it sits: `false`
+  itself (directly or through same-document `$ref`s), a `not` of a schema
+  that accepts everything (`not: {}`), an empty `enum`, a `const` outside
+  the `enum`, a `const` or every `enum` value outside the type set (the
+  node's `type` met with each `allOf` conjunct's), type sets that do not
+  meet, `minimum` over `maximum` (or `minLength` over `maxLength`) under
+  a type set of only numbers (only strings), an `allOf` conjunct that
+  accepts nothing, an `anyOf`/`oneOf` whose every variant does, or a
+  required member that does under a type set of only `object`. The test
+  is a decision procedure for these shapes only; any other schema is
+  compared as before, never guessed empty. Two such schemas are alike,
+  and one that accepted nothing and now accepts something widens by its
+  own values (`note: "schema"`). A member whose schema accepts nothing
+  and that its side does not require, while the other side neither names
+  nor requires it, compares against what that other side applies to a
+  member it does not name: `false` under a closed object, so adding or
+  dropping it moves nothing; `true` under an open one, so adding it
+  narrows (R6 under an input, R9 under an output) and dropping it widens
+  (R7, R8), at every depth and at the input's top level alike. Beside a
+  catch-all that constrains, an applicator, or the siblings of the `$ref`
+  the input is spelled as, the member rows classify it as before.
+  **Upgrading:** a member whose schema accepts nothing without being
+  `false` — `m: { not: {} }` added to an open input, once additive R7
+  `input-member-added` — is breaking R6 `input-narrowed`, so a
+  `--fail-on breaking` gate that passed it now fails; two schemas that
+  accept nothing, once a guessed narrowing beside a widening (two
+  `const`s outside their type), are no change; and `{ not: {} }` → `{
+  type: 'string' }`, once R15 beside a guessed narrowing, is a widening
+  (R7, R8).
   **Upgrading:** such a member dropped from or added to a closed object,
   once breaking R5 (input), breaking R8 (output) or additive R7, is no
   change; added to an open input, once additive R7 `input-member-added`,
@@ -2678,7 +2732,14 @@ Riders the rows carry:
   alike whose `$ref` resolves apart is read where it is); a `then` or an
   `else` present on both sides beside an `if` that validates alike; a
   `dependentSchemas` member, the keys being the same; a `prefixItems`
-  entry, the list keeping its length; and an `anyOf` or `oneOf` whose
+  entry, the list keeping its length; a `contains` on both sides with no
+  `minContains`, `maxContains` or tuple form (`prefixItems`, an `items`
+  list) beside it (an item that matches fewer schemas meets the bound
+  less often); a `not` on both sides, read with its direction flipped —
+  what the branch accepts the node refuses, so a branch that widens
+  narrows the node and the reverse, and a member event inside it reads as
+  the change of what the node accepts (`note`: the event); and an `anyOf`
+  or `oneOf` whose
   variants are provably disjoint, so an instance meets only the variant
   its key names and the union accepts exactly what that variant does.
   The key is the set of JSON types a variant may accept — its `type`,
@@ -2686,7 +2747,11 @@ Riders the rows carry:
   variant of its own `anyOf`/`oneOf` may accept — where no two variants'
   sets share a type (`integer` lies inside `number`); or else the value
   set of a member every variant requires of an object (`type: "object"`)
-  and holds to a `const` or an `enum`, where no two share a value. So
+  and holds to a `const` or an `enum`, where no two share a value; or
+  else the two together — the value set for each object variant that
+  holds the discriminator, and the type set, without `object`, for every
+  other (`anyOf: [{ "type": "object", "required": ["k"], "properties":
+  { "k": { "const": "a" } } }, { …"b"… }, { "type": "null" }]`). So
   `anyOf: [{ "$ref": "#/$defs/proj" }, { "type": "null" }]`, the nullable
   spelling of a projection, reads `proj` by direction. Variants pair by
   key, not by position, so a reorder alone moves nothing. A variant
@@ -2701,9 +2766,12 @@ Riders the rows carry:
   carries `unevaluatedProperties` or `unevaluatedItems` (a member dropped
   from a branch is then refused, not freed), on the target of an input
   `$ref` beside one, or where a constraint, a member or a requirement sits
-  on one side only (it may have moved into a branch). `not`, `if`,
-  `contains`, a union whose variants overlap, a changed `if`, and an
-  `allOf` or `prefixItems` that grew, shrank or was reordered stay R15.
+  on one side only (it may have moved into a branch). A changed `if`, a
+  `not` or `contains` on one side only, a `contains` beside a count or a
+  tuple form, a union whose variants overlap (a variant whose
+  discriminator value set or type set grows into another's among them),
+  and an `allOf` or `prefixItems` that grew, shrank or was reordered stay
+  R15.
   Nor is a change at a location something else the node applies there
   may also constrain — its own keywords, another `allOf` conjunct,
   another `dependentSchemas` entry, an applicator or a `contains` beside
@@ -2718,7 +2786,11 @@ Riders the rows carry:
   (the nullable `anyOf` of a `$ref` among them), a discriminated union
   that was reordered, and a variant added or removed under a key no other
   variant shares: these answered R15 and now answer breaking or additive
-  — or, for a reorder alone, nothing.
+  — or, for a reorder alone, nothing. So does a change inside a `not` or
+  a `contains` present on both sides, and inside a union whose object
+  variants a discriminator tells apart beside variants a type tells apart
+  (a nullable discriminated union among them): a required member dropped
+  from such a variant of an output, once R15, is breaking R8.
 - **Audience is the compatibility surface.** Operations whose
   `policy.audience` is `server` on **both** sides are skipped entirely;
   an audience flip is R14 and, for public consumers, subsumes the

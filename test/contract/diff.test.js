@@ -622,8 +622,10 @@ describe('diffContracts — validation behind a same-document $ref is compared a
   /**
    * Each shape wraps the reference; `at` is where the reference sits
    * inside it and `note` the keyword the walk does not model there;
-   * `decided` marks a position whose direction the walk reads.
-   * @type {Record<string, { wrap: any, at: string, note: string, decided?: true }>}
+   * `decided` marks a position whose direction the walk reads, and
+   * `flipped` one it reads anti-monotone (what the branch accepts, the
+   * node refuses).
+   * @type {Record<string, { wrap: any, at: string, note: string, decided?: true, flipped?: true }>}
    */
   const shapes = {
     'a discriminated oneOf variant': {
@@ -636,13 +638,13 @@ describe('diffContracts — validation behind a same-document $ref is compared a
     'an anyOf branch another branch overlaps': { wrap: { anyOf: [ref, { type: 'object' }] }, at: '/anyOf/0', note: 'anyOf' },
     'an anyOf branch a type tells apart': { wrap: { anyOf: [ref, { type: 'string' }] }, at: '/anyOf/0', note: 'anyOf', decided: true },
     'an allOf conjunct': { wrap: { allOf: [ref] }, at: '/allOf/0', note: 'allOf', decided: true },
-    'a not': { wrap: { type: 'object', not: ref }, at: '/not', note: 'not' },
+    'a not': { wrap: { type: 'object', not: ref }, at: '/not', note: 'not', decided: true, flipped: true },
     'an if': { wrap: { if: ref, then: { type: 'object' } }, at: '/if', note: 'if' },
     'a then': { wrap: { if: { type: 'object' }, then: ref }, at: '/then', note: 'then', decided: true },
     'an else': { wrap: { if: { type: 'string' }, else: ref }, at: '/else', note: 'else', decided: true },
     'a dependentSchemas member': { wrap: { type: 'object', dependentSchemas: { a: ref } }, at: '/dependentSchemas/a', note: 'dependentSchemas', decided: true },
     'a prefixItems entry': { wrap: { type: 'array', prefixItems: [ref] }, at: '/prefixItems/0', note: 'prefixItems', decided: true },
-    'a contains': { wrap: { type: 'array', contains: ref }, at: '/contains', note: 'contains' },
+    'a contains': { wrap: { type: 'array', contains: ref }, at: '/contains', note: 'contains', decided: true },
     'a patternProperties member': { wrap: { type: 'object', patternProperties: { '^p': ref } }, at: '/patternProperties/^p', note: 'patternProperties' },
     'a $ref beside a sibling': { wrap: { ...ref, description: 'the projection' }, at: '', note: '$ref' },
     'a nullable union whose branch is the $ref': { wrap: { anyOf: [ref, { type: 'null' }] }, at: '/anyOf/0', note: 'anyOf', decided: true },
@@ -695,11 +697,19 @@ describe('diffContracts — validation behind a same-document $ref is compared a
     });
   }
 
-  for (const [shape, { wrap, at }] of Object.entries(shapes).filter(([, s]) => s.decided)) {
-    it(`${shape}: a required member removed or added behind the $ref classifies as on a bare object, in every position but an error's`, () => {
+  for (const [shape, { wrap, at, flipped }] of Object.entries(shapes).filter(([, s]) => s.decided)) {
+    it(`${shape}: a required member removed or added behind the $ref classifies as on a bare object${flipped ? ', its direction flipped' : ''}, in every position but an error's`, () => {
       const pick = (/** @type {any} */ c) => [c.rule, c.kind, c.docPath, c.from, c.to, c.note];
       /** @type {[string, string[], string[], 'breaking' | 'additive', any[]][]} */
-      const cases = [
+      const cases = flipped ? [
+        // a member the branch no longer requires is one the node now refuses without it
+        ['output', ['a', 'b'], ['a'], 'additive', ['R9', 'output-narrowed', `/operations/a.do/output${at}/properties/b`, 'b', 'b', 'made-optional']],
+        ['output', ['a'], ['a', 'b'], 'breaking', ['R8', 'output-widened', `/operations/a.do/output${at}/properties/b`, 'b', 'b', 'made-required']],
+        ['input member', ['a', 'b'], ['a'], 'breaking', ['R6', 'input-narrowed', `/operations/a.do/input/properties/m${at}/properties/b`, 'b', 'b', 'made-optional']],
+        ['input member', ['a'], ['a', 'b'], 'additive', ['R7', 'input-widened', `/operations/a.do/input/properties/m${at}/properties/b`, 'b', 'b', 'made-required']],
+        ['input root', ['a', 'b'], ['a'], 'breaking', ['R6', 'input-narrowed', `/operations/a.do/input/allOf/0${at}/properties/b`, 'b', 'b', 'made-optional']],
+        ['input root', ['a'], ['a', 'b'], 'additive', ['R7', 'input-widened', `/operations/a.do/input/allOf/0${at}/properties/b`, 'b', 'b', 'made-required']],
+      ] : [
         ['output', ['a', 'b'], ['a'], 'breaking', ['R8', 'output-member-optional', `/operations/a.do/output${at}/properties/b`, 'b', 'b', undefined]],
         ['output', ['a'], ['a', 'b'], 'additive', ['R9', 'output-member-guaranteed', `/operations/a.do/output${at}/properties/b`, 'b', 'b', undefined]],
         ['input member', ['a', 'b'], ['a'], 'additive', ['R7', 'input-widened', `/operations/a.do/input/properties/m${at}/properties/b`, 'b', 'b', 'made-optional']],
@@ -880,6 +890,16 @@ describe('diffContracts — a change inside an applicator whose direction is dec
     ['an else under the same if', (n) => ({ if: { type: 'string' }, else: { maximum: n } }), '/else/maximum', 'maximum'],
     ['a dependentSchemas member under the same key', (n) => ({ type: 'object', dependentSchemas: { a: { properties: { b: { type: 'string', maxLength: n } } } } }), '/dependentSchemas/a/properties/b/maxLength', 'maxLength'],
     ['a prefixItems entry', (n) => ({ type: 'array', prefixItems: [{ type: 'string' }, { type: 'string', maxLength: n }] }), '/prefixItems/1/maxLength', 'maxLength'],
+    ['a contains', (n) => ({ type: 'array', contains: { type: 'string', maxLength: n } }), '/contains/maxLength', 'maxLength'],
+    // what the branch accepts the node refuses: a branch bound that rises narrows the node
+    ['a not', (n) => ({ not: { type: 'string', minLength: n } }), '/not/minLength', 'minLength'],
+    // the conjunct beside the not names no member: it masks nothing below it
+    ['a not inside an allOf conjunct', (n) => ({ allOf: [
+      { not: { type: 'object', properties: { v: { type: 'string', minLength: n } }, required: ['v'] } }, { type: 'object' },
+    ] }), '/allOf/0/not/properties/v/minLength', 'minLength'],
+    ['an anyOf whose object variants a discriminator tells apart and the rest a type', (n) => ({ anyOf: [
+      variant('a', { type: 'string', maxLength: n }), variant('b', {}), { type: 'null' },
+    ] }), '/anyOf/0/properties/v/maxLength', 'maxLength'],
   ];
   const pick = (/** @type {any} */ c) => [c.rule, c.kind, c.docPath, c.from, c.to, c.note];
 
@@ -1002,8 +1022,9 @@ describe('diffContracts — a change inside an applicator whose direction is dec
         { allOf: [{ $ref: '#/$defs/c' }, { $ref: '#/$defs/c' }] }, { allOf: [{ $ref: '#/$defs/c' }, { $ref: '#/$defs/c' }] }, [{ c: { maxLength: 5 } }, { c: { maxLength: 3 } }]],
       ['a conjunct beside one that holds an applicator', ['allOf /allOf/1/maxLength'],
         { allOf: [{ anyOf: [{ maxLength: 5 }, { type: 'integer' }] }, { maxLength: 5 }] }, { allOf: [{ anyOf: [{ maxLength: 5 }, { type: 'integer' }] }, { maxLength: 3 }] }],
-      ['a not', ['not /not'], { not: { maxLength: 5 } }, { not: { maxLength: 3 } }],
-      ['a contains', ['contains /contains'], { type: 'array', contains: { maxLength: 5 } }, { type: 'array', contains: { maxLength: 3 } }],
+      ['a contains beside maxContains', ['contains /contains'], { type: 'array', contains: { maxLength: 5 }, maxContains: 2 }, { type: 'array', contains: { maxLength: 3 }, maxContains: 2 }],
+      ['a variant whose type set grew into the discriminated ones', ['anyOf /anyOf'],
+        { anyOf: [variant('a', { maxLength: 5 }), variant('b', {}), { type: 'null' }] }, { anyOf: [variant('a', { maxLength: 3 }), variant('b', {}), { type: ['null', 'object'] }] }],
     ];
     for (const [name, expected, from, to, extraDefs] of unproven) {
       for (const where of /** @type {const} */ (['input', 'output'])) {
@@ -1257,8 +1278,9 @@ describe('diffContracts — a member declared false is no member: it compares as
     assert.deepStrictEqual(flat(diffContracts(take(open({ x })), take(open({ x, m: false }, { required: ['m'] })))),
       [['breaking', 'R4', 'input-required-added', at('/input/properties/m')]]);
     // a member the other side requires by name alone: every older request lacked it, so requiring it refuses them
+    // (and the value it now takes, the open input once refused: its schema compares too)
     assert.deepStrictEqual(flat(diffContracts(take(open({ x, m: false })), take(open({ x }, { required: ['m'] })))),
-      [['breaking', 'R4', 'input-required-added', at('/input/properties/m')]]);
+      [['breaking', 'R4', 'input-required-added', at('/input/properties/m')], ['additive', 'R7', 'input-widened', at('/input/properties/m')]]);
     // a constraining catch-all judges the member on the other side
     assert.deepStrictEqual(flat(diffContracts(take(open({ x }, { additionalProperties: x })), take(open({ x, m: false }, { additionalProperties: x })))),
       [['unknown', 'R15', 'schema-unknown', at('/input/properties/m')]]);

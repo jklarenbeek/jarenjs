@@ -764,10 +764,12 @@ const { breaking, additive, neutral, unknown } = diffContracts(v1, v2);
 // every change classified by the CONTRACT-FORMAT §13 rule table (R1–R16),
 // read as variance — an input is the server's to accept, an output the client's —
 // and read the same inside an allOf, a then/else under the same if, a
-// dependentSchemas member, a prefixItems entry and an anyOf/oneOf variant
-// its type or a required const/enum member tells apart (variants pair by
-// that key, so a reorder moves nothing and a new variant widens), where
-// nothing else the node applies constrains the same place:
+// dependentSchemas member, a prefixItems entry, a contains, a not (its
+// direction flipped) and an anyOf/oneOf variant its type, a required
+// const/enum member or the two together tell apart (variants pair by that
+// key, so a reorder moves nothing and a new variant widens), where nothing
+// else the node applies constrains the same place; a member schema that
+// accepts nothing (false, not: {}, an empty enum, …) forbids the member:
 //   breaking — an operation or error removed, a binding member moved, a new
 //              required input member, a narrowed input, a removed/optional-
 //              ized/WIDENED output (a closed output gaining a member too —
@@ -780,8 +782,8 @@ const { breaking, additive, neutral, unknown } = diffContracts(v1, v2);
 //   neutral  — task mode, retry, cache, policy.revision, policy.stream, doc,
 //              a nullable respelling that accepts the same values (R16), a
 //              media respelling (case, parameters) the wire matches alike
-//   unknown  — what the checker does not model (if/not, a union whose
-//              variants overlap, a CHANGED
+//   unknown  — what the checker does not model (a changed if, a union
+//              whose variants overlap, a CHANGED
 //              pattern, an external $ref, an error details schema, a
 //              constraint moved into an applicator, a member beside a
 //              catch-all — or any of these unchanged as text while a $ref
@@ -805,7 +807,11 @@ isCompatible(clientContract, serverContract);
 
 ```sh
 jaren-contract diff --from api/v1.json --to api/v2.json --fail-on breaking   # exit 1 on a breaking change
+jaren-contract diff --from api/v1.json --to api/v2.json --fail-on breaking,unknown   # and on a change it cannot decide
 ```
+
+A change the diff cannot decide either way is `unknown` (R15), never `additive`:
+a gate that must not pass a change nobody proved compatible names both classes.
 
 `--fail-on` requires at least one change class; a missing or empty value is a
 usage error (exit 2), so an unset CI variable cannot silently disable the gate.

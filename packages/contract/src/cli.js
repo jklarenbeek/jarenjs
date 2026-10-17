@@ -64,6 +64,7 @@ Examples:
   jaren-contract openapi --contract shop.json --out api/ --info-title Shop
   jaren-contract types --contract shop.json --out src/shop.d.ts --check
   jaren-contract diff --from api/v1.json --to api/v2.json --fail-on breaking
+  jaren-contract diff --from api/v1.json --to api/v2.json --fail-on breaking,unknown
   jaren-contract diff --from api/v1.json --to api/v2.json --fail-on breaking --audience all
   jaren-contract lint --contract api/v2.json --fail-on all
 `;

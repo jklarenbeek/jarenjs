@@ -4,7 +4,7 @@
  * `b`, classified by the published rule table (docs/CONTRACT-FORMAT.md
  * §13, rows R1–R16) into `breaking`, `additive`, `neutral` and `unknown`
  * — where `unknown` is the honest fourth class: a schema construct the
- * checker does not model (`if`, `not`, a union whose variants overlap,
+ * checker does not model (a changed `if`, a union whose variants overlap,
  * a changed `pattern`, an external `$ref` that moved) is REPORTED,
  * never silently classed.
  *
@@ -16,9 +16,12 @@
  * (`properties`, `required`, `additionalProperties`) and `items`, and
  * walks the branches of the applicators whose direction is decidable —
  * an `allOf`, a `then`/`else` under the same `if`, a `dependentSchemas`
- * member, a `prefixItems` entry, an `anyOf`/`oneOf` whose variants a type
- * or a discriminator tells apart (paired by that key, wherever they sit) —
- * branch against branch with the same rules. Pure annotations (`title`,
+ * member, a `prefixItems` entry, a `contains`, a `not` (its direction
+ * flipped), an `anyOf`/`oneOf` whose variants a type, a discriminator or
+ * the two together tell apart (paired by that key, wherever they sit) —
+ * branch against branch with the same rules. A schema it proves accepts
+ * nothing (`not: {}`, an empty `enum`, types that do not meet, …) compares
+ * as `false` does. Pure annotations (`title`,
  * `description`, `examples`, `$comment`, `deprecated`) never move a wire
  * byte and are ignored; every other keyword that differs between the two
  * sides lands in `unknown` (R15).
@@ -46,7 +49,7 @@ import { canonicalizeJson } from '@jarenjs/json/canonical';
 import {
   canonicalNullable, splitNullable, SCHEMA_VALUE_KEYWORDS, SCHEMA_MAP_KEYWORDS, SCHEMA_LIST_KEYWORDS,
 } from '@jarenjs/core/schema';
-import { collectSameDocumentAnchors, resolveSameDocumentRef } from '@jarenjs/validate/normalize';
+import { collectSameDocumentAnchors, createSchemaPatternTester, resolveSameDocumentRef } from '@jarenjs/validate/normalize';
 
 import { compileContract } from './compile.js';
 import { ContractHostError } from './errors.js';
@@ -110,6 +113,12 @@ function isObject(value) {
 /**
  * One side of the parallel walk: the schema resolution scope.
  * @typedef {{ doc: any, anchors: Map<string, object> }} Side
+ */
+
+/**
+ * A schema applied beside a branch the walk reads by direction, with the
+ * pointer tokens from the node to the branch's instance location.
+ * @typedef {{ schema: unknown, side: Side, prefix: string[] }} Beside
  */
 
 /**
@@ -302,6 +311,26 @@ const APPLICATORS = ['anyOf', 'oneOf', 'allOf', 'not', 'if', 'then', 'else', 'de
 const carriesApplicator = (node) => APPLICATORS.some((key) => node[key] !== undefined);
 
 /**
+ * Whether an in-place applicator of an object schema may hold the member
+ * `m` — a branch that names or requires it, closes the object, carries a
+ * catch-all or an applicator of its own, or that the walk cannot follow
+ * ({@link mayConstrain}) — so a member or requirement present on the
+ * other side only may have moved into it. An applicator none of whose
+ * branches may hold `m` judges nothing the member rows read.
+ * @param {Record<string, any>} node
+ * @param {string} m
+ * @param {Side} side
+ */
+function applicatorMayHold(node, m, side) {
+  return APPLICATORS.some((key) => {
+    const value = node[key];
+    if (value === undefined) return false;
+    const branches = Array.isArray(value) ? value : key === 'dependentSchemas' && isObject(value) ? Object.values(value) : [value];
+    return branches.some((branch) => mayConstrain(branch, [], side, { member: m }));
+  });
+}
+
+/**
  * Whether an object schema forbids the members it does not name.
  * @param {Record<string, any>} node
  */
@@ -339,11 +368,13 @@ function unnamedMember(node) {
 }
 
 /**
- * A member `X` declares `false` (directly or through same-document
- * `$ref`s) without requiring it, while `Y` neither names nor requires it,
- * is no member of its own: what `Y` applies to it — `false` closed, `true`
- * open — is what its `false` compares against, so a closed object that
- * drops or adds it moves nothing, and an open one that adds it narrows.
+ * A member `X` declares with a schema that accepts nothing — `false`,
+ * directly or through same-document `$ref`s, or any schema
+ * {@link acceptsNothing} proves empty — without requiring it, while `Y`
+ * neither names nor requires it, is no member of its own: what `Y`
+ * applies to it — `false` closed, `true` open — is what its schema
+ * compares against, so a closed object that drops or adds it moves
+ * nothing, and an open one that adds it narrows.
  * `undefined` for any other pair, which the member rows classify.
  * @param {string} m
  * @param {Record<string, any> | null} X - the side naming `m`
@@ -356,8 +387,78 @@ function forbiddenOnOneSide(m, X, x, Y) {
   const names = (/** @type {Record<string, any>} */ node) => isObject(node.properties) && Object.hasOwn(node.properties, m);
   const requires = (/** @type {Record<string, any>} */ node) => Array.isArray(node.required) && node.required.includes(m);
   if (!names(X) || requires(X) || names(Y) || requires(Y)) return undefined;
-  const declared = resolveHops(X.properties[m], x);
-  return 'node' in declared && declared.node === false ? unnamedMember(Y) : undefined;
+  return acceptsNothing(X.properties[m], x) ? unnamedMember(Y) : undefined;
+}
+
+/**
+ * The `patternProperties` entries of an object schema whose pattern
+ * matches the name `m` (`[pattern, schema]`, in document order), as the
+ * validator compiles a pattern; `null` when a pattern does not compile.
+ * @param {Record<string, any>} node
+ * @param {string} m
+ * @returns {[string, unknown][] | null}
+ */
+function matchingPatterns(node, m) {
+  if (!isObject(node.patternProperties)) return [];
+  /** @type {[string, unknown][]} */
+  const found = [];
+  for (const [pattern, schema] of Object.entries(node.patternProperties)) {
+    let matches;
+    try {
+      matches = createSchemaPatternTester(pattern);
+    }
+    catch {
+      return null;
+    }
+    if (matches !== undefined && matches(m)) found.push([pattern, schema]);
+  }
+  return found;
+}
+
+/**
+ * What the side `Y`, which does not name the member `m` in its
+ * `properties`, applies to it, where that is not the member rows' answer
+ * — `X` is the side that names it, `x` and `y` their scopes:
+ * - `Y` closed, with `patternProperties` admitting the name: the pattern
+ *   judges `m` there, not the closedness. One matching pattern while `X`
+ *   has none is what `X`'s schema compares against; the same matching
+ *   patterns on both sides apply beside the member on both, so `X`'s
+ *   schema compares against `true` with those patterns `beside` it (a
+ *   location they constrain is R15, not a direction); anything else, a
+ *   `propertyNames` among it, is `'unknown'`.
+ * - `requiredOnly` (`Y` requires `m` without declaring it): what `Y`
+ *   applies to an unnamed member ({@link unnamedMember}), or `'unknown'`
+ *   where a catch-all or an applicator may judge it.
+ * `undefined` otherwise: the member rows classify it. `'unknown'` comes
+ * as `{ unknown }`, naming the keyword that may judge the member.
+ * @param {string} m
+ * @param {Record<string, any>} X
+ * @param {Side} x
+ * @param {Record<string, any>} Y
+ * @param {Side} y
+ * @param {boolean} requiredOnly
+ * @returns {{ applied: unknown, beside: Beside[] } | { unknown: string } | undefined}
+ */
+function appliedToUnnamed(m, X, x, Y, y, requiredOnly) {
+  if (closedObject(Y) && isObject(Y.patternProperties)) {
+    const theirs = matchingPatterns(Y, m);
+    if (theirs === null) return { unknown: 'patternProperties' };
+    if (theirs.length > 0) {
+      const ours = matchingPatterns(X, m);
+      const named = (/** @type {Record<string, any>} */ node) => node.propertyNames !== undefined && node.propertyNames !== true;
+      if (named(X) || named(Y)) return { unknown: 'propertyNames' };
+      if (ours !== null && ours.length === 0 && theirs.length === 1) return { applied: theirs[0][1], beside: [] };
+      const alike = ours !== null && ours.length === theirs.length
+        && ours.every(([pattern, schema], i) => pattern === theirs[i][0] && !schemasDiffer(schema, theirs[i][1], x, y));
+      if (!alike) return { unknown: 'patternProperties' };
+      /** @type {Beside[]} */
+      const beside = [...ours.map(([, schema]) => ({ schema, side: x, prefix: [] })), ...theirs.map(([, schema]) => ({ schema, side: y, prefix: [] }))];
+      return { applied: true, beside };
+    }
+  }
+  if (!requiredOnly) return undefined;
+  const applied = unnamedMember(Y);
+  return applied === undefined ? { unknown: constrainingCatchAll(Y) ?? 'properties' } : { applied, beside: [] };
 }
 
 /**
@@ -387,6 +488,8 @@ function oneSided(A, B) {
 
 const INTEGER = canon('integer');
 const NUMBER = canon('number');
+const STRING = canon('string');
+const OBJECT = canon('object');
 
 /**
  * Whether a type set (canonical texts) admits every value of the type
@@ -434,6 +537,118 @@ const typesMeet = (x, y) => x.some((t) => typeCovered(t, new Set(y))) || y.some(
 const valuesMeet = (x, y) => x.some((v) => y.includes(v));
 
 /**
+ * The type sets (canonical texts) two schemas both admit: `integer`
+ * where one says `number` and the other `integer`.
+ * @param {string[]} x @param {string[]} y
+ */
+const typesBoth = (x, y) => [...new Set([...x.filter((t) => typeCovered(t, new Set(y))), ...y.filter((t) => typeCovered(t, new Set(x)))])];
+
+/**
+ * The JSON type of a value (a canonical text), `integer` for a whole number.
+ * @param {unknown} v
+ */
+function typeOfValue(v) {
+  if (v === null) return canon('null');
+  if (Array.isArray(v)) return canon('array');
+  if (typeof v === 'number') return canon(Number.isInteger(v) ? 'integer' : 'number');
+  return canon(typeof v);
+}
+
+/** Keywords that leave a schema accepting every value. */
+const INERT = new Set([...ANNOTATIONS, '$defs', 'definitions']);
+
+/**
+ * Whether a schema accepts every value: `true`, or an object of
+ * annotations only (read through bare `$ref` hops).
+ * @param {unknown} schema @param {Side} side
+ */
+function acceptsEverything(schema, side) {
+  const resolved = resolveHops(schema, side);
+  return 'node' in resolved && (resolved.node === true || (isObject(resolved.node) && Object.keys(resolved.node).every((key) => INERT.has(key))));
+}
+
+/**
+ * Whether a schema provably accepts no value — a sound, cheap decision,
+ * never a guess: `false`; a `not` of a schema that accepts everything; an
+ * empty `enum`; a `const` outside the `enum`; a `const` or every `enum`
+ * value outside the type set, which is the node's own `type` met with
+ * each `allOf` conjunct's; type sets that do not meet; bounds out of
+ * order (`minimum` over `maximum`, `minLength` over `maxLength`) under a
+ * type set of only that kind; an `allOf` conjunct that accepts nothing,
+ * or an `anyOf`/`oneOf` whose every variant does; a required member that
+ * accepts nothing under a type set of only `object`. Read through bare
+ * same-document `$ref` hops; any other schema answers `false` and is
+ * compared as before. Each node is read once per side (a diamond of
+ * `$ref`s stays linear).
+ * @param {unknown} schema
+ * @param {Side} side
+ * @param {Set<object>} [within] - the nodes being read (a recursive schema ends undecided)
+ * @returns {boolean}
+ */
+function acceptsNothing(schema, side, within = new Set()) {
+  const resolved = resolveHops(schema, side);
+  if (!('node' in resolved)) return false;
+  const node = resolved.node;
+  if (node === false) return true;
+  if (!isObject(node) || within.has(node)) return false;
+  let known = nothingKnown.get(side);
+  if (known === undefined) nothingKnown.set(side, (known = new WeakMap()));
+  const memo = known.get(node);
+  if (memo !== undefined) return memo;
+  within.add(node);
+  const answer = emptyNode(node, side, within);
+  within.delete(node);
+  known.set(node, answer);
+  return answer;
+}
+
+/** {@link acceptsNothing}'s answers, per side and node. @type {WeakMap<Side, WeakMap<object, boolean>>} */
+const nothingKnown = new WeakMap();
+
+/**
+ * {@link acceptsNothing} for one object schema, its own keywords read.
+ * @param {Record<string, any>} node
+ * @param {Side} side
+ * @param {Set<object>} within
+ * @returns {boolean}
+ */
+function emptyNode(node, side, within) {
+  if (node.not !== undefined && acceptsEverything(node.not, side)) return true;
+  if (Array.isArray(node.enum) && node.enum.length === 0) return true;
+  if (node.const !== undefined && Array.isArray(node.enum) && !node.enum.some((v) => canon(v) === canon(node.const))) return true;
+  /** @type {string[] | null} */
+  let types = typeof node.type === 'string' ? [canon(node.type)] : Array.isArray(node.type) ? node.type.map(canon) : null;
+  const conjuncts = Array.isArray(node.allOf) ? node.allOf : [];
+  for (const conjunct of conjuncts) {
+    const own = resolveHops(conjunct, side);
+    const t = 'node' in own && isObject(own.node) ? own.node.type : undefined;
+    const set = typeof t === 'string' ? [canon(t)] : Array.isArray(t) ? t.map(canon) : null;
+    if (set !== null) types = types === null ? set : typesBoth(types, set);
+  }
+  if (types !== null) {
+    if (types.length === 0) return true;
+    const admitted = new Set(types);
+    const values = node.const !== undefined ? [node.const] : Array.isArray(node.enum) ? node.enum : null;
+    if (values !== null && !values.some((v) => typeCovered(typeOfValue(v), admitted))) return true;
+    const only = (/** @type {string[]} */ kinds) => types !== null && types.every((t) => kinds.includes(t));
+    const outOfOrder = (/** @type {string} */ low, /** @type {string} */ high) =>
+      typeof node[low] === 'number' && typeof node[high] === 'number' && node[low] > node[high];
+    if (only([NUMBER, INTEGER]) && outOfOrder('minimum', 'maximum')) return true;
+    if (only([STRING]) && outOfOrder('minLength', 'maxLength')) return true;
+    if (only([OBJECT]) && Array.isArray(node.required) && isObject(node.properties)) {
+      const props = node.properties;
+      if (node.required.some((m) => typeof m === 'string' && Object.hasOwn(props, m) && acceptsNothing(props[m], side, within))) return true;
+    }
+  }
+  if (conjuncts.some((conjunct) => acceptsNothing(conjunct, side, within))) return true;
+  for (const key of ['anyOf', 'oneOf']) {
+    const variants = node[key];
+    if (Array.isArray(variants) && variants.length > 0 && variants.every((variant) => acceptsNothing(variant, side, within))) return true;
+  }
+  return false;
+}
+
+/**
  * The value set (canonical texts, sorted) a union branch admits for the
  * member `name`, when the branch is an object schema that requires the
  * member and holds it to a `const` or an `enum`; `null` otherwise.
@@ -479,12 +694,43 @@ function pairVariants(xs, ys, a, b) {
   const byType = keyedPairs(xs.map((x) => acceptedTypes(x, a)), ys.map((y) => acceptedTypes(y, b)), typesMeet);
   if (byType !== null) return byType;
   const first = resolveHops(xs[0], a);
-  if (!('node' in first) || !isObject(first.node) || !Array.isArray(first.node.required)) return null;
-  for (const name of first.node.required) {
-    const byValue = keyedPairs(xs.map((x) => discriminatorValues(x, name, a)), ys.map((y) => discriminatorValues(y, name, b)), valuesMeet);
-    if (byValue !== null) return byValue;
+  if ('node' in first && isObject(first.node) && Array.isArray(first.node.required)) {
+    for (const name of first.node.required) {
+      const byValue = keyedPairs(xs.map((x) => discriminatorValues(x, name, a)), ys.map((y) => discriminatorValues(y, name, b)), valuesMeet);
+      if (byValue !== null) return byValue;
+    }
+  }
+  // object variants a discriminator tells apart beside variants a type
+  // tells apart: the key of an object variant is its discriminator value
+  // set, of any other the types it accepts, none of them `object`
+  const discriminated = xs.map((x) => resolveHops(x, a)).find((r) => 'node' in r && isObject(r.node) && Array.isArray(r.node.required));
+  if (discriminated === undefined || !('node' in discriminated)) return null;
+  for (const name of discriminated.node.required) {
+    const keyOf = (/** @type {Side} */ side) => (/** @type {unknown} */ variant) => {
+      const values = discriminatorValues(variant, name, side);
+      if (values !== null) return values.length === 0 ? null : values.map((v) => 'v' + v);
+      const types = acceptedTypes(variant, side);
+      return types === null || types.includes(OBJECT) ? null : types.map((t) => 't' + t);
+    };
+    const mixed = keyedPairs(xs.map(keyOf(a)), ys.map(keyOf(b)), mixedMeet);
+    if (mixed !== null) return mixed;
   }
   return null;
+}
+
+/**
+ * Whether two mixed variant keys ({@link pairVariants}) share a value:
+ * two discriminator value sets by value, two type sets by type, and a
+ * value set (an object variant's) never a type set without `object`.
+ * @param {string[]} x @param {string[]} y
+ */
+function mixedMeet(x, y) {
+  const values = (/** @type {string[]} */ k) => k.filter((s) => s[0] === 'v').map((s) => s.slice(1));
+  const types = (/** @type {string[]} */ k) => k.filter((s) => s[0] === 't').map((s) => s.slice(1));
+  const vx = values(x);
+  const vy = values(y);
+  if (vx.length > 0 || vy.length > 0) return vx.length > 0 && vy.length > 0 && valuesMeet(vx, vy);
+  return typesMeet(types(x), types(y));
 }
 
 /**
@@ -530,6 +776,9 @@ function keyedPairs(xk, yk, meet) {
  * narrows (or widens) narrows (or widens) what the node accepts, and
  * nothing else changed that could have moved into or out of them:
  * `allOf` of the same length with at most one conjunct respelled; `anyOf`/`oneOf` whose variants are provably disjoint ({@link pairVariants});
+ * a `not` on both sides (read anti-monotone: {@link flippedSink}); a
+ * `contains` on both sides without `minContains`, `maxContains` or a
+ * tuple form beside it;
  * `then`/`else` beside an `if` that validates alike; `dependentSchemas`
  * over the same keys; `prefixItems` of the same length. None where the
  * node reads its branches' annotations (`unevaluated*`) or a constraint,
@@ -546,7 +795,7 @@ function decidedApplicators(A, B, a, b) {
   /** @type {Set<string>} */
   const decided = new Set();
   const lists = (/** @type {string} */ key) => Array.isArray(A[key]) && Array.isArray(B[key]) && A[key].length === B[key].length;
-  const candidates = ['allOf', 'anyOf', 'oneOf', 'then', 'else', 'dependentSchemas', 'prefixItems'];
+  const candidates = ['allOf', 'anyOf', 'oneOf', 'not', 'contains', 'then', 'else', 'dependentSchemas', 'prefixItems'];
   if (!candidates.some((key) => A[key] !== undefined || B[key] !== undefined)) return decided;
   if (readsAnnotations(A) || readsAnnotations(B) || oneSided(A, B)) return decided;
   if (lists('allOf')) {
@@ -559,6 +808,12 @@ function decidedApplicators(A, B, a, b) {
   for (const key of ['anyOf', 'oneOf']) {
     if (Array.isArray(A[key]) && Array.isArray(B[key]) && pairVariants(A[key], B[key], a, b) !== null) decided.add(key);
   }
+  if (A.not !== undefined && B.not !== undefined) decided.add('not');
+  // a count bound (`maxContains` is not monotone in what matches) or a
+  // tuple form (it judges the items `contains` reads) keeps `contains` R15
+  const counted = (/** @type {Record<string, any>} */ node) => node.minContains !== undefined || node.maxContains !== undefined
+    || node.prefixItems !== undefined || Array.isArray(node.items);
+  if (A.contains !== undefined && B.contains !== undefined && !counted(A) && !counted(B)) decided.add('contains');
   if (A.if !== undefined && B.if !== undefined && !schemasDiffer(A.if, B.if, a, b)) {
     for (const key of ['then', 'else']) if (A[key] !== undefined && B[key] !== undefined) decided.add(key);
   }
@@ -570,6 +825,9 @@ function decidedApplicators(A, B, a, b) {
 
 /** The in-place applicators, as a set. */
 const IN_PLACE = new Set(APPLICATORS);
+
+/** The in-place applicators whose value is one schema. */
+const SINGLE_BRANCH = new Set(['not', 'if', 'then', 'else']);
 
 /**
  * Whether a schema may constrain the instance location `segments` names
@@ -598,8 +856,9 @@ function mayConstrain(schema, segments, side, what) {
     if (i === segments.length) break;
     const segment = segments[i];
     if (IN_PLACE.has(segment)) {
-      // a branch of the walked side: the instance location stays
-      if (segment !== 'then' && segment !== 'else') i++;
+      // a branch of the walked side: the instance location stays (an
+      // index or a name follows all but the single-schema branches)
+      if (!SINGLE_BRANCH.has(segment)) i++;
       continue;
     }
     if (segment === 'properties') {
@@ -616,6 +875,12 @@ function mayConstrain(schema, segments, side, what) {
       if (Array.isArray(node.prefixItems) && at >= 0 && at < node.prefixItems.length) node = node.prefixItems[at];
       else if (node.items !== undefined && !Array.isArray(node.items)) node = node.items;
       else return node.items !== undefined || node.prefixItems !== undefined || node.contains !== undefined;
+    }
+    else if (segment === 'contains') {
+      // some item: one a tuple form may judge, or whatever `items` says
+      if (node.prefixItems !== undefined || Array.isArray(node.items)) return true;
+      if (node.items !== undefined) node = node.items;
+      else return node.contains !== undefined;
     }
     else return true;
   }
@@ -698,6 +963,29 @@ function movedSink(sink, inB, inA) {
 }
 
 /**
+ * The sink of a `not` branch: what the branch accepts, the node refuses,
+ * so a branch that narrows widens the node and the reverse. A member
+ * event reads as the change of what the node accepts it is (`note`: the
+ * event) — the consumer's view the output rows take of a member does not
+ * apply to a member of a value the node refuses — and one a catch-all
+ * judges is R15.
+ * @param {Sink} sink
+ * @returns {Sink}
+ */
+function flippedSink(sink) {
+  const flip = (/** @type {'narrowed' | 'widened'} */ direction) => (direction === 'narrowed' ? 'widened' : 'narrowed');
+  return {
+    constraint: (direction, keyword, path, from, to) => sink.constraint(flip(direction), keyword, path, from, to),
+    member(event, direction, path, member, _closedBefore, catchAll) {
+      if (direction === 'unknown') sink.unknown(catchAll ?? 'additionalProperties', path, member, member);
+      else if (direction !== null) sink.constraint(flip(direction), event, path, member, member);
+    },
+    unknown: sink.unknown,
+    respelled: sink.respelled,
+  };
+}
+
+/**
  * Walk the branches of a decided applicator ({@link decidedApplicators})
  * pairwise, so a branch change classifies by the rules a bare schema in
  * that position takes, through {@link besideSink}: where what else the
@@ -723,6 +1011,8 @@ function compareBranches(key, A, B, path, a, b, sink, visited) {
    */
   const walk = (x, y, at, beside, into = sink) => compareSchema(x, y, at, a, b, besideSink(into, key, at, beside), visited);
   if (key === 'then' || key === 'else') walk(A[key], B[key], path, node);
+  else if (key === 'not') walk(A.not, B.not, path, node, flippedSink(sink));
+  else if (key === 'contains') walk(A.contains, B.contains, path, node.map((n) => ({ ...n, prefix: ['items'] })));
   else if (key === 'anyOf' || key === 'oneOf') {
     const { pairs, removed, added } = /** @type {NonNullable<ReturnType<typeof pairVariants>>} */ (pairVariants(A[key], B[key], a, b));
     for (const [i, j] of pairs) {
@@ -781,11 +1071,13 @@ function compareSchema(aNode, bNode, path, a, b, sink, visited) {
   }
   let A = ra.node;
   let B = rb.node;
-  // booleans: `true` is the empty schema, `false` accepts nothing
-  if (A === false || B === false) {
-    if (A === false && B === false) return;
-    if (B === false) sink.constraint('narrowed', 'schema', path, A, false);
-    else sink.constraint('widened', 'schema', path, false, B);
+  // booleans: `true` is the empty schema, `false` accepts nothing — and so
+  // does any schema acceptsNothing proves empty, whatever its spelling
+  const noneA = acceptsNothing(A, a);
+  const noneB = acceptsNothing(B, b);
+  if (noneA || noneB) {
+    if (noneA && noneB) return;
+    sink.constraint(noneB ? 'narrowed' : 'widened', 'schema', path, A, B);
     return;
   }
   if (A === true) A = {};
@@ -980,14 +1272,14 @@ function compareObject(A, B, path, a, b, sink, visited) {
   const bCatchAll = bClosed ? null : constrainingCatchAll(B);
   // a member or requirement present on one side only may have moved into
   // an applicator the other side carries: undecidable, R15
-  const aApplies = carriesApplicator(A);
-  const bApplies = carriesApplicator(B);
+  const aApplies = (/** @type {string} */ m) => applicatorMayHold(A, m, a);
+  const bApplies = (/** @type {string} */ m) => applicatorMayHold(B, m, b);
 
   for (const m of new Set([...Object.keys(aProps), ...Object.keys(bProps)])) {
     const at = path + '/properties/' + encodeJSONPointerSegment(m);
     const inA = Object.hasOwn(aProps, m);
     const inB = Object.hasOwn(bProps, m);
-    if ((inA && !inB && bApplies) || (!inA && inB && aApplies)) {
+    if ((inA && !inB && bApplies(m)) || (!inA && inB && aApplies(m))) {
       sink.unknown('properties', at, inA ? m : undefined, inB ? m : undefined);
       continue;
     }
@@ -997,13 +1289,23 @@ function compareObject(A, B, path, a, b, sink, visited) {
       compareSchema(inA ? aProps[m] : aApplied, inB ? bProps[m] : bApplied, at, a, b, sink, visited);
       continue;
     }
-    if (inA && !inB) {
+    // a side that only requires the member, or whose pattern admits it,
+    // applies a schema to it the declaration compares against
+    const unnamed = inA === inB ? undefined
+      : inA ? appliedToUnnamed(m, A, a, B, b, bReq.has(m)) : appliedToUnnamed(m, B, b, A, a, aReq.has(m));
+    // (the requirement, if it moved, still classifies by the rows below)
+    if (unnamed !== undefined && 'unknown' in unnamed) sink.unknown(unnamed.unknown, at, inA ? m : undefined, inB ? m : undefined);
+    else if (unnamed !== undefined) {
+      const into = unnamed.beside.length === 0 ? sink : besideSink(sink, 'patternProperties', at, unnamed.beside);
+      compareSchema(inA ? aProps[m] : unnamed.applied, inB ? bProps[m] : unnamed.applied, at, a, b, into, visited);
+    }
+    else if (inA && !inB) {
       // removed: forbidden under a closed b, unconstrained under an open
       // one, judged by b's catch-all under one that constrains
       sink.member('removed', bClosed ? 'narrowed' : bCatchAll !== null ? 'unknown' : 'widened', at, m, aClosed, bCatchAll);
       continue;
     }
-    if (!inA && inB) {
+    else if (!inA && inB) {
       const unconstrained = bProps[m] === true || (isObject(bProps[m]) && Object.keys(bProps[m]).length === 0);
       if (aCatchAll !== null) sink.member(bReq.has(m) ? 'added-required' : 'added-optional', 'unknown', at, m, aClosed, aCatchAll);
       else if (bReq.has(m)) sink.member('added-required', 'narrowed', at, m, aClosed);
@@ -1012,26 +1314,26 @@ function compareObject(A, B, path, a, b, sink, visited) {
       continue;
     }
     if (!aReq.has(m) && bReq.has(m)) {
-      if (aApplies) sink.unknown('required', at, undefined, m);
+      if (aApplies(m)) sink.unknown('required', at, undefined, m);
       else sink.member('made-required', 'narrowed', at, m, aClosed);
     }
     else if (aReq.has(m) && !bReq.has(m)) {
-      if (bApplies) sink.unknown('required', at, m, undefined);
+      if (bApplies(m)) sink.unknown('required', at, m, undefined);
       else sink.member('made-optional', 'widened', at, m, aClosed);
     }
-    compareSchema(aProps[m], bProps[m], at, a, b, sink, visited);
+    if (inA && inB) compareSchema(aProps[m], bProps[m], at, a, b, sink, visited);
   }
 
   // a required name without a properties entry is still a requirement
   for (const m of bReq) {
     if (!aReq.has(m) && !Object.hasOwn(bProps, m) && !Object.hasOwn(aProps, m)) {
-      if (aApplies) sink.unknown('required', path + '/required', undefined, m);
+      if (aApplies(m)) sink.unknown('required', path + '/required', undefined, m);
       else sink.member('added-required', 'narrowed', path + '/required', m, aClosed);
     }
   }
   for (const m of aReq) {
     if (!bReq.has(m) && !Object.hasOwn(aProps, m) && !Object.hasOwn(bProps, m)) {
-      if (bApplies) sink.unknown('required', path + '/required', m, undefined);
+      if (bApplies(m)) sink.unknown('required', path + '/required', m, undefined);
       else sink.member('made-optional', 'widened', path + '/required', m, aClosed);
     }
   }
@@ -1177,18 +1479,42 @@ function compareInput(diff, aOp, bOp, a, b) {
   const aBeside = refSiblings(aOp.input?.schema);
   const bBeside = refSiblings(bOp.input?.schema);
   const plain = Object.keys(aBeside).length === 0 && Object.keys(bBeside).length === 0;
+  // a member or requirement present on one side only may have moved into
+  // an applicator the other side carries: undecidable, R15
+  const aApplies = (/** @type {string} */ m) => aEff !== null && applicatorMayHold(aEff, m, a);
+  const bApplies = (/** @type {string} */ m) => applicatorMayHold(bEff, m, b);
   for (const m of new Set([...Object.keys(aProps), ...Object.keys(bProps), ...aReq, ...bReq])) {
     const rel = '/properties/' + encodeJSONPointerSegment(m);
     const at = root + rel;
-    const inA = Object.hasOwn(aProps, m) || aReq.has(m);
-    const inB = Object.hasOwn(bProps, m) || bReq.has(m);
+    const namesA = Object.hasOwn(aProps, m);
+    const namesB = Object.hasOwn(bProps, m);
+    const inA = namesA || aReq.has(m);
+    const inB = namesB || bReq.has(m);
+    if ((inA && !inB && bApplies(m)) || (!inA && inB && aApplies(m))) {
+      judged(at, m, (inA ? namesA : namesB) ? 'properties' : 'required');
+      continue;
+    }
     const aApplied = plain ? forbiddenOnOneSide(m, bEff, b, aEff) : undefined;
     const bApplied = plain ? forbiddenOnOneSide(m, aEff, a, bEff) : undefined;
     if (aApplied !== undefined || bApplied !== undefined) {
       compareSchema(inA ? aProps[m] : aApplied, inB ? bProps[m] : bApplied, rel, a, b, sink, visited);
       continue;
     }
-    if (inA && !inB) {
+    // a side that only requires the member, or whose pattern admits it,
+    // applies a schema to it the declaration compares against — read only
+    // without siblings beside the `$ref` the input is spelled as, which
+    // may judge the member instead
+    const requiredOnly = namesA ? bReq.has(m) : aReq.has(m);
+    const unnamed = namesA === namesB || aEff === null ? undefined
+      : !plain ? (requiredOnly ? { unknown: '$ref' } : undefined)
+        : namesA ? appliedToUnnamed(m, aEff, a, bEff, b, requiredOnly) : appliedToUnnamed(m, bEff, b, aEff, a, requiredOnly);
+    // (the requirement, if it moved, still classifies by the rows below)
+    if (unnamed !== undefined && 'unknown' in unnamed) judged(at, m, unnamed.unknown);
+    else if (unnamed !== undefined) {
+      const into = unnamed.beside.length === 0 ? sink : besideSink(sink, 'patternProperties', rel, unnamed.beside);
+      compareSchema(namesA ? aProps[m] : unnamed.applied, namesB ? bProps[m] : unnamed.applied, rel, a, b, into, visited);
+    }
+    else if (inA && !inB) {
       if (bClosed) {
         push(diff.breaking, { kind: 'input-member-removed', op, docPath: at, from: m, rule: 'R5' });
       }
@@ -1201,19 +1527,21 @@ function compareInput(diff, aOp, bOp, a, b) {
       }
       continue;
     }
-    if (!inA && inB) {
+    else if (!inA && inB) {
       if (bReq.has(m)) push(diff.breaking, { kind: 'input-required-added', op, docPath: at, to: m, rule: 'R4' });
       else if (aCatchAll !== null) judged(at, m, aCatchAll);
       else push(diff.additive, { kind: 'input-member-added', op, docPath: at, to: m, rule: 'R7' });
       continue;
     }
     if (!aReq.has(m) && bReq.has(m)) {
-      push(diff.breaking, { kind: 'input-required-added', op, docPath: at, from: m, to: m, rule: 'R4' });
+      if (aApplies(m)) judged(at, m, 'required');
+      else push(diff.breaking, { kind: 'input-required-added', op, docPath: at, from: m, to: m, rule: 'R4' });
     }
     else if (aReq.has(m) && !bReq.has(m)) {
-      push(diff.additive, { kind: 'input-member-optional', op, docPath: at, from: m, to: m, rule: 'R7' });
+      if (bApplies(m)) judged(at, m, 'required');
+      else push(diff.additive, { kind: 'input-member-optional', op, docPath: at, from: m, to: m, rule: 'R7' });
     }
-    if (Object.hasOwn(aProps, m) && Object.hasOwn(bProps, m)) {
+    if (namesA && namesB) {
       compareSchema(aProps[m], bProps[m], rel, a, b, sink, visited);
     }
   }

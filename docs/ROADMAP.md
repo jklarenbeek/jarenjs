@@ -293,37 +293,24 @@ costs a descriptor plus examples and no UI code at all.
 
 ## @jarenjs/contract
 
-- [ ] **`diffContracts` misreads three top-level/closed member shapes for real
-  members.** (a) A closed object whose `patternProperties` admits a member's
-  name classes that member's removal as breaking (R5 at the input's top level,
-  R6 nested) though the change widens what is accepted
-  (`{properties:{m:{type:'string'}}, patternProperties:{'^m':{}},
-  additionalProperties:false}` → without `m`). (b) The input's top level has
-  no applicator check: under `unevaluatedProperties: false` beside an `allOf`
-  that names `m`, dropping `m` is breaking R5 at the top level and R15 one
-  level down. (c) At the top level a member named only in `required` on one
-  side and in `properties` on the other is never schema-compared:
-  `{required:['m']}` → `{properties:{m:{type:'string'}}}` (or `m: false`) is
-  additive R7 `input-member-optional` alone, though older requests carrying
-  `m` may be refused.
-- [ ] **`diffContracts` does not read a member schema that accepts nothing
-  unless it is `false`.** `m: { not: {} }` (or any unsatisfiable schema) added
-  to an open input is additive R7 per the R7 row, though every request
-  carrying `m` is refused; only `false` (directly or through same-document
-  `$ref`s) is read as forbidding the member.
-
-- [ ] **`diffContracts` reports a change inside `not`, `if`, `contains`, or a
-  union whose variants overlap as R15 `unknown`,** so a `--fail-on breaking`
-  gate alone passes a required member dropped there. `not` is anti-monotone (a
-  branch narrowed widens the node) and `contains` monotone, so either could be
-  classed with its direction read through; a union mixing variants a type
-  tells apart with object variants a discriminator tells apart (`anyOf: [{ k:
-  'a' }, { k: 'b' }, { type: 'null' }]`, flat) is disjoint but keyed by
-  neither alone; a variant whose discriminator or type set grows into
-  another's would need the two compared value by value. Two `allOf` conjuncts
-  respelled together, and a change at a location another conjunct or the node
-  itself also constrains (it would need the two intersected; a variant added
-  beside the node's own `type` among them), stay R15.
+- [ ] **`diffContracts` reads only the empty-schema shapes it can prove.** A
+  member schema that accepts nothing in a shape the walk's decision procedure
+  does not cover — exclusive bounds that cross, an integer range holding no
+  integer, a closed object requiring a member it does not admit, a `pattern`
+  no string matches — is still classed as a constrained member (added to an
+  open input: additive R7), though every request carrying it is refused.
+- [ ] **`diffContracts` reports a change inside an `if`, a `not` or `contains`
+  on one side only, a `contains` beside a count, or a union whose variants
+  overlap as R15 `unknown`,** so a `--fail-on breaking` gate alone passes a
+  required member dropped there. An `if` beside only a `then` is anti-monotone
+  in the `if` and beside only an `else` monotone; a `not` or `contains` added
+  narrows and one dropped widens unless the constraint moved there from beside
+  it; `maxContains` is not monotone in what matches; a variant whose
+  discriminator or type set grows into another's would need the two compared
+  value by value. Two `allOf` conjuncts respelled together, and a change at a
+  location another conjunct or the node itself also constrains (it would need
+  the two intersected; a variant added beside the node's own `type` among
+  them), stay R15.
 
 ## @jarenjs/linq & @jarenjs/db — the data pair
 
