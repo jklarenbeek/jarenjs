@@ -16,7 +16,7 @@ import * as assert from 'node:assert';
 
 import { createDialect, sqliteDialect, planCollection, normalizeModel } from '@jarenjs/db';
 
-import { fullDoubleDialect } from './helpers.js';
+import { fullDoubleDialect, kindKey } from './helpers.js';
 
 const MODEL = {
   $model: '0.1',
@@ -63,7 +63,7 @@ describe('SQLite dialect goldens', () => {
       + '"gx_email" TEXT GENERATED ALWAYS AS (jsonb_extract("doc", \'$."email"\')) VIRTUAL, '
       + '"gx_age" INTEGER GENERATED ALWAYS AS (jsonb_extract("doc", \'$."age"\')) VIRTUAL'
       + ') STRICT',
-      'CREATE UNIQUE INDEX "users_by_email" ON "users" ("gx_email")',
+      `CREATE UNIQUE INDEX "users_by_email" ON "users" ("gx_email", ${kindKey('email', 'TEXT')})`,
       'CREATE INDEX "users_by_age" ON "users" ("gx_age")',
     ]);
   });

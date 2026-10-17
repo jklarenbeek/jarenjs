@@ -20,6 +20,7 @@ import { sqliteDialect, planCollection, normalizeModel } from '@jarenjs/db';
 import { postgresDialect, IDENTIFIER_BYTES } from '@jarenjs/db/postgres';
 
 import { runDialectConformance, HOSTILE_NAMES } from './dialect-conformance.js';
+import { kindKey } from './helpers.js';
 import { POSTGRES_LOCK_CLASSES } from '../../packages/db/src/dialects/postgres-locks.js';
 
 const pg = postgresDialect();
@@ -337,13 +338,17 @@ describe('the PostgreSQL mapping', () => {
     assert.strictEqual(sqlite.createSql.length, plan.createSql.length);
     // the TABLE differs in every part that is a spelling — the document
     // type, the storage word, the column types, the extraction. The
-    // INDEXES do not, and should not: `CREATE INDEX <name> ON <table>
-    // (<columns>)` is the same statement in both engines, over the same
-    // declared names, which is exactly what portability means
+    // INDEXES do not: `CREATE INDEX <name> ON <table> (<columns>)` is the
+    // same statement in both engines, over the same declared names, which
+    // is exactly what portability means — but a unique one, which SQLite
+    // keys after its typed column by the member's kind (its column holds a
+    // value of another kind as its own type reads it)
     assert.notStrictEqual(plan.createSql[0], sqlite.createSql[0]);
-    assert.deepStrictEqual(plan.createSql.slice(1), sqlite.createSql.slice(1));
+    assert.deepStrictEqual(plan.createSql.slice(2), sqlite.createSql.slice(2));
+    assert.deepStrictEqual([plan.createSql[1], sqlite.createSql[1]], ['CREATE UNIQUE INDEX "users_by_email" ON "users" ("gx_email")',
+      `CREATE UNIQUE INDEX "users_by_email" ON "users" ("gx_email", ${kindKey('email', 'TEXT')})`]);
     // and the same declared indexes, by name and covered columns
-    assert.deepStrictEqual(plan.expected.indexes, sqlite.expected.indexes);
+    assert.deepStrictEqual(plan.expected.indexes, sqlite.expected.indexes.map(({ terms: _terms, ...index }) => index));
     assert.deepStrictEqual(
       plan.expected.columns.map((column) => column.name).sort(),
       [...sqlite.expected.columns.map((column) => column.name), 'rid'].sort());

@@ -19,6 +19,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { explainMapping, openStore, planCollection, planEntity, normalizeModel, sqliteDialect } from '@jarenjs/db';
 import { postgresDialect } from '@jarenjs/db/postgres';
 import { nodeDriver } from '@jarenjs/db/node';
+import { kindKey } from './helpers.js';
 import { ONE_ACTIVE, SHIFT_ROWS, SHIFT_SCHEMA, SHIFT_VERDICTS, createVerdicts, openRefusal, shiftModel, uniquenessAgreement,
   uniquenessModel } from './invariant-oracle.js';
 
@@ -260,7 +261,7 @@ describe('a collection index with a where (SQLite)', () => {
       finally { await store.close(); }
       assert.deepEqual(out, ['ok', 'ok', 'ok', 'JD2005/constraint']);
       assert.equal(schemaOf(path).find((object) => object.name === 'c_one_active')?.sql,
-        'CREATE UNIQUE INDEX "c_one_active" ON "c" ("gx_e") WHERE "gx_s" IN (\'active\', \'pending\')');
+        `CREATE UNIQUE INDEX "c_one_active" ON "c" ("gx_e", ${kindKey('e', 'TEXT')}) WHERE "gx_s" IN ('active', 'pending')`);
     });
   });
 

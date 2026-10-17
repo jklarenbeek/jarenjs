@@ -174,7 +174,7 @@ export const MEMBER_WHEN = Symbol('dialect.memberWhen');
  *   jsonPathText: (segments: JsonPathSegment[]) => string | null,
  *   jsonExtract: (columnSql: string, pathText: string, kind?: string) => string,
  *   queryGuard?: (documentSql: string, segments: JsonPathSegment[]) => string | null,
- *   booleanKeyTerm?: (documentSql: string, pathText: string) => string,
+ *   kindKeyTerm?: (documentSql: string, pathText: string, columnType: string) => string | null,
  *   containerKey?: { holds: (documentSql: string, pathText: string) => string,
  *     read: (documentSql: string, pathText: string) => string,
  *     triggers: (shape: { table: string, keyColumn: string, docColumn: string, column: string, pathText: string }) => { name: string, sql: string }[] },
@@ -455,7 +455,7 @@ export function createDialect(spec) {
      * as SQL over the table's own columns, which the row-predicate
      * lowering renders with every literal inlined (an engine keeps no
      * parameter in a schema object). `terms` are expressions keyed after
-     * the columns ({@link booleanKeyTerm}).
+     * the columns ({@link kindKeyTerm}).
      * @param {{ name: string, table: string, columns: string[],
      *   unique: boolean, where?: string, terms?: string[] }} shape
      * @returns {string}
@@ -778,15 +778,17 @@ export function createDialect(spec) {
      */
     queryGuard,
     /**
-     * The key a unique index adds after its columns for each member the
-     * engine's untyped column holds (`capabilities.untypedColumns`): whether
-     * the member at `pathText` of the document is a JSON boolean. Such a
-     * column holds `true` as the integer `1` and `false` as `0`, so the
-     * column alone would key a boolean and a number as one value, which the
-     * query engine compares unequal. Undefined where a column of a real SQL
-     * type keys a boolean among booleans.
+     * The key a unique index adds after a generated column of SQL type
+     * `columnType` over the member at `pathText` of the document, where the
+     * column alone would key two values of different kinds as one: the
+     * engine's untyped column (`capabilities.untypedColumns`) holds `true` as
+     * the integer `1`, and a column of a real SQL type holds a value of
+     * another kind than its own as that type reads it. The key tells such
+     * values apart and never two the query engine compares equal; `null`
+     * where the column needs none. Undefined where every column keys a value
+     * of another kind as NULL.
      */
-    booleanKeyTerm: spec.booleanKeyTerm,
+    kindKeyTerm: spec.kindKeyTerm,
     /**
      * How a unique index keys a container (an object or an array) the
      * engine's untyped column holds (`capabilities.untypedColumns`): the

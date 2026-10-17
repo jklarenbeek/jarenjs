@@ -22,7 +22,7 @@ import {
 import { nodeDriver } from '@jarenjs/db/node';
 import { postgresDialect } from '@jarenjs/db/postgres';
 
-import { tempDbPath } from './helpers.js';
+import { kindKey, tempDbPath } from './helpers.js';
 
 /** The key a unique index adds after the column of the member at `name`. @param {string} name */
 const flag = (name) => `(json_type("doc", '$."${name}"') IN ('true', 'false'))`;
@@ -38,9 +38,11 @@ const SHAPES = {
 /** Whether the member `q` of the document holds a container. @param {string} doc */
 const HOLDS = (doc) => `json_type(${doc}, '$."q"') IN ('object', 'array')`;
 /** The key of the container at `q`, as a trigger writes it. @param {string} doc */
-const CONTAINER_KEY = (doc) => `(CASE WHEN ${HOLDS(doc)} THEN (SELECT group_concat(quote("t"."fullkey") || ' ' || (CASE WHEN "t"."type" IN ('integer', 'real') `
-  + `THEN printf('%!.17g', CAST("t"."atom" AS REAL) + 0.0) WHEN "t"."type" = 'text' THEN quote("t"."atom") ELSE "t"."type" END), ',' ORDER BY "t"."fullkey") `
-  + `FROM json_tree(${doc}, '$."q"') AS "t") END)`;
+const CONTAINER_KEY = (doc) => `(CASE WHEN ${HOLDS(doc)} THEN (WITH RECURSIVE "n"("path", "type", "atom", "value") AS (SELECT '', json_type(${doc}, '$."q"'), NULL, jsonb_extract(${doc}, '$."q"') `
+  + `UNION ALL SELECT "n"."path" || (CASE WHEN "n"."type" = 'array' THEN '[' || "e"."key" || ']' ELSE '.' || json_quote("e"."key") END), "e"."type", "e"."atom", "e"."value" `
+  + `FROM "n", jsonb_each("n"."value") AS "e" WHERE "n"."type" IN ('object', 'array')) `
+  + `SELECT group_concat(quote("n"."path") || ' ' || (CASE "n"."type" WHEN 'integer' THEN printf('%!.17g', CAST("n"."atom" AS REAL) + 0.0) `
+  + `WHEN 'real' THEN printf('%!.17g', CAST("n"."atom" AS REAL) + 0.0) WHEN 'text' THEN quote("n"."atom") ELSE "n"."type" END), ',' ORDER BY "n"."path") FROM "n") END)`;
 /** The statement that creates the index named `name`. @param {any} model @param {string} name @param {any} [dialect] */
 const indexSql = (model, name, dialect = sqliteDialect) =>
   planCollection('c', normalizeModel(model).get('c'), dialect).createSql.find((/** @type {string} */ sql) => sql.includes(`INDEX "${name}" `));
@@ -65,20 +67,21 @@ const PAIRS = /** @type {[any[], string][]} */ ([
 ]);
 
 describe('a unique index over a member the untyped column holds, on SQLite', () => {
-  it('keys whether the member is a boolean after its columns, in every shape, and nothing else', () => {
+  it('keys whether the member is a boolean after its columns, in every shape, and a typed column\'s kind', () => {
     const union = { type: ['number', 'boolean'] };
     assert.equal(indexSql(modelOf(union, SHAPES.single), 'c_by_q'), `CREATE UNIQUE INDEX "c_by_q" ON "c" ("gx_q", ${flag('q')})`);
-    assert.equal(indexSql(modelOf(union, SHAPES.composite), 'c_by_qk'), `CREATE UNIQUE INDEX "c_by_qk" ON "c" ("gx_q", "gx_k", ${flag('q')})`);
+    assert.equal(indexSql(modelOf(union, SHAPES.composite), 'c_by_qk'), `CREATE UNIQUE INDEX "c_by_qk" ON "c" ("gx_q", "gx_k", ${flag('q')}, ${kindKey('k', 'TEXT')})`);
     assert.equal(indexSql(modelOf(union, SHAPES.conditional), 'c_by_q'),
       `CREATE UNIQUE INDEX "c_by_q" ON "c" ("gx_q", ${flag('q')}) WHERE "gx_k" = 'x'`);
     assert.equal(indexSql(modelOf(union, [{ name: 'by_qr', path: ['$.q', '$.k', '$.r'], unique: true }], {}), 'c_by_qr'),
-      `CREATE UNIQUE INDEX "c_by_qr" ON "c" ("gx_q", "gx_k", "gx_r", ${flag('q')}, ${flag('r')})`);
+      `CREATE UNIQUE INDEX "c_by_qr" ON "c" ("gx_q", "gx_k", "gx_r", ${flag('q')}, ${kindKey('k', 'TEXT')}, ${flag('r')})`);
     for (const q of [{}, { enum: [1, true] }, { type: ['integer', 'boolean'] }, { type: ['object', 'number', 'boolean'] }, { type: ['number', 'string'] }])
       assert.equal(indexSql(modelOf(q, SHAPES.single), 'c_by_q'), `CREATE UNIQUE INDEX "c_by_q" ON "c" ("gx_q", ${flag('q')})`, JSON.stringify(q));
-    // a non-unique index, a column of one type, and PostgreSQL's typed columns key the column alone
+    // a column of one type keys the member's kind (it holds another kind as its own type reads it)
+    for (const [type, sql] of /** @type {const} */ ([['number', 'REAL'], ['integer', 'INTEGER'], ['boolean', 'INTEGER'], ['string', 'TEXT']]))
+      assert.equal(indexSql(modelOf({ type }, SHAPES.single), 'c_by_q'), `CREATE UNIQUE INDEX "c_by_q" ON "c" ("gx_q", ${kindKey('q', sql)})`, type);
+    // a non-unique index and PostgreSQL's typed columns key the column alone
     assert.equal(indexSql(modelOf(union, [{ name: 'by_q', path: '$.q' }]), 'c_by_q'), 'CREATE INDEX "c_by_q" ON "c" ("gx_q")');
-    for (const type of ['number', 'integer', 'boolean', 'string'])
-      assert.equal(indexSql(modelOf({ type }, SHAPES.single), 'c_by_q'), 'CREATE UNIQUE INDEX "c_by_q" ON "c" ("gx_q")', type);
     assert.equal(indexSql(modelOf(union, SHAPES.single), 'c_by_q', postgresDialect()), 'CREATE UNIQUE INDEX "c_by_q" ON "c" ("gx_q")');
   });
 

@@ -17,7 +17,7 @@ import { compileJsonQuery } from '@jarenjs/json/query';
 import { openStore, planColumnUpgrade, planMigration, migrate, sqliteDialect, planCollection, normalizeModel } from '@jarenjs/db';
 import { nodeDriver } from '@jarenjs/db/node';
 
-import { tempDbPath } from './helpers.js';
+import { kindKey, tempDbPath } from './helpers.js';
 
 const MODEL = { $model: '0.1', collections: { c: { key: '/id',
   schema: { type: 'object', required: ['id'], properties: { id: { type: 'string' },
@@ -95,7 +95,7 @@ describe('planColumnUpgrade on SQLite', () => {
 
       const { migration, report } = await upgradeOf(dbPath);
       // and the column the unique index keys a container of the untyped member by, and the index over it
-      assert.deepStrictEqual(report.upgraded, ['c.gx_q', 'c.gx_r', 'c.gx_n', 'c.kx_n', 'c.c_by_nk$container']);
+      assert.deepStrictEqual(report.upgraded, ['c.gx_q', 'c.gx_r', 'c.gx_n', 'c.c_by_nk', 'c.kx_n', 'c.c_by_nk$container']);
       assert.strictEqual(migration.from, migration.to);
       const triggers = planCollection('c', normalizeModel(MODEL).get('c'), sqliteDialect).createSql
         .filter((/** @type {string} */ sql) => sql.startsWith('CREATE TRIGGER'));
@@ -110,10 +110,10 @@ describe('planColumnUpgrade on SQLite', () => {
         'ALTER TABLE "c" ADD COLUMN "gx_r" ANY GENERATED ALWAYS AS (jsonb_extract("doc", \'$."r"\')) VIRTUAL',
         'ALTER TABLE "c" ADD COLUMN "gx_n" ANY GENERATED ALWAYS AS (jsonb_extract("doc", \'$."n"\')) VIRTUAL',
         'ALTER TABLE "c" ADD COLUMN "kx_n" TEXT', ...triggers, fill,
-        // the unique index keys whether its untyped member is a boolean after its columns
-        'CREATE UNIQUE INDEX "c_by_nk" ON "c" ("gx_n", "gx_k", (json_type("doc", \'$."n"\') IN (\'true\', \'false\')))',
+        // the unique index keys whether its untyped member is a boolean, and its typed member's kind, after its columns
+        `CREATE UNIQUE INDEX "c_by_nk" ON "c" ("gx_n", "gx_k", (json_type("doc", '$."n"') IN ('true', 'false')), ${kindKey('k', 'TEXT')})`,
         'CREATE INDEX "c_by_q" ON "c" ("gx_q")', 'CREATE INDEX "c_by_r" ON "c" ("gx_r")',
-        'CREATE UNIQUE INDEX "c_by_nk$container" ON "c" ("kx_n", "gx_k") WHERE "kx_n" IS NOT NULL',
+        `CREATE UNIQUE INDEX "c_by_nk$container" ON "c" ("kx_n", "gx_k", ${kindKey('k', 'TEXT')}) WHERE "kx_n" IS NOT NULL`,
       ]);
       assert.deepStrictEqual((await migrate({ driver: nodeDriver(), path: dbPath }, [migration], { baseline: MODEL, model: MODEL })).applied, [migration.id]);
       assert.deepStrictEqual(columnTypes(dbPath), { gx_k: 'TEXT', gx_n: 'ANY', gx_q: 'ANY', gx_r: 'ANY' });

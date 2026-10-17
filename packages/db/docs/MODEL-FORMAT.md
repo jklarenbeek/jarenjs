@@ -524,19 +524,29 @@ boolean as the integer `0` or `1`; a unique index keys, after its columns,
 whether each such member is a boolean (`(json_type("doc", '$."q"') IN ('true',
 'false'))`), so `true` and `1` are two keys, as the query engine compares them
 and as PostgreSQL keys them, and a seek over its columns reads it as before.
+A column of one type (`REAL` for `number`, `INTEGER` for `integer` and
+`boolean`, `TEXT` for `string`) holds a value of another kind than its own as
+its type reads it (`true` and `"1"` as the `REAL` `1.0`, `1` and `true` as
+the `TEXT` `'1'`), since the store does not validate a member against its
+type by default; a unique index keys, after such a column, `''` for a value of
+the column's own kind and any other value as its text (a number as the double
+it reads as, a string quoted, any other value as its JSON type), so a document
+is refused beside another only where the query engine compares their members
+equal, and a seek over its columns reads it as before.
 That column holds an object or an array as the bytes it was written in, so a
 unique index over it also has a key for a container whose members are in one
 order: a plain column per such member (`kx_q`, NULL for every value but a
 container) that two triggers write after every insert and every update of the
-document — its nodes, each as its path, its type and, for a string, its text or,
-for a number, the double it reads as, sorted by path — and one unique index
+document — its nodes, each as its path (each member's name as it reads
+decoded), its type and, for a string, its text or, for a number, the double it
+reads as, sorted by path — and one unique index
 beside the declared one per combination of its such members keyed by that
 column (`<collection>_<index name>$container`, `$container$value` for a
 composite), over the rows that hold a container there, under the declared
 condition. Two containers are one key exactly when the query engine compares
 them equal (`{"a": 1, "b": 2}` and `{"b": 2, "a": 1.0}`; `[1, 2]` and `[2, 1]`
-are two), whoever writes the row; a key's path is compared as the document
-spells it. On PostgreSQL a unique index beside one over a member whose
+are two), whoever writes the row and however it escapes a name (`{"\u0041": 1}`
+is `{"A": 1}`). On PostgreSQL a unique index beside one over a member whose
 column holds a scalar keys each container kind its union lists as `jsonb`,
 whose equality is that one (`$object`, `$array`), and a column that holds a
 container keys every kind by its value. A member

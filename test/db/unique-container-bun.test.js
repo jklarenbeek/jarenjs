@@ -3,8 +3,8 @@
  * @file The key a unique index holds for a container on SQLite is written by
  * triggers in the file itself, so a store Bun opens over a file another
  * runtime created refuses a container equal to a stored one in another member
- * order, and writes the key node:sqlite writes. In a file of its own: a host
- * without Bun skips it by name.
+ * order or with a member name escaped, and writes the key node:sqlite writes.
+ * In a file of its own: a host without Bun skips it by name.
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
@@ -37,12 +37,14 @@ describe('a container key in a file two runtimes write', () => {
       const report = JSON.parse(run.stdout.trim().split('\n').at(-1) ?? 'null');
       assert.equal(report?.runtime, 'bun', run.stderr);
       assert.equal(run.status, 0, run.stderr);
-      assert.deepEqual(report.answers, ['JD2005', 'stored', 'stored']);
+      // a name another writer escaped is the name: `{"\u0079":2,"x":1}` is the stored `{"x":1,"y":2}`
+      assert.deepEqual(report.answers, ['JD2005', 'stored', 'stored', 'UNIQUE constraint failed: c.kx_q', 'stored']);
       assert.deepEqual(report.keys, [
-        ['a', `'$."q"' object,'$."q".x' 1.0,'$."q".y' 2.0`],
-        ['c', `'$."q"' array,'$."q"[0]' 1.0,'$."q"[1]' object,'$."q"[1].a' 1.0,'$."q"[1].b' 2.0`],
-        ['d', `'$."q"' object,'$."q".x' 1.0,'$."q".y' 3.0`],
-        ['e', `'$."q"' array,'$."q"[0]' 1.0,'$."q"[1]' object,'$."q"[1].a' 1.0,'$."q"[1].b' 2.0,'$."q"[2]' 3.0`],
+        ['a', `'' object,'."x"' 1.0,'."y"' 2.0`],
+        ['c', `'' array,'[0]' 1.0,'[1]' object,'[1]."a"' 1.0,'[1]."b"' 2.0`],
+        ['d', `'' object,'."x"' 1.0,'."y"' 3.0`],
+        ['e', `'' array,'[0]' 1.0,'[1]' object,'[1]."a"' 1.0,'[1]."b"' 2.0,'[2]' 3.0`],
+        ['g', `'' object,'."z"' 1.0`],
       ]);
     }
     finally { cleanup(); }

@@ -1,5 +1,6 @@
 // Runs under Bun: writes to a file another runtime created, whose unique index keys a container by the key two triggers
-// write. Argument: the file. Prints what each write answered and the key the triggers wrote.
+// write, through the store and as a writer of its own. Argument: the file. Prints what each write answered and the key
+// the triggers wrote.
 import { Database } from 'bun:sqlite';
 import { openStore } from '@jarenjs/db';
 import { bunDriver } from '@jarenjs/db/bun';
@@ -16,6 +17,11 @@ try {
 }
 finally { await store.close(); }
 const raw = new Database(path);
+// a writer of its own, which escapes a member name
+for (const [key, text] of [['f', '{"id":"f","q":{"\\u0079":2,"x":1}}'], ['g', '{"id":"g","q":{"\\u007a":1}}']]) {
+  try { raw.prepare('INSERT INTO "c" ("key", "doc") VALUES (?, jsonb(?))').run(key, text); answers.push('stored'); }
+  catch (error) { answers.push(String(/** @type {any} */ (error).message)); }
+}
 const keys = raw.prepare('SELECT "key", "kx_q" FROM "c" ORDER BY "key"').all().map((row) => [row.key, row.kx_q]);
 raw.close();
 process.stdout.write(`${JSON.stringify({ runtime: typeof Bun === 'undefined' ? 'node' : 'bun', answers, keys })}\n`);

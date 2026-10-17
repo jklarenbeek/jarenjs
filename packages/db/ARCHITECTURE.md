@@ -762,14 +762,19 @@ refuse a duplicate of every kind; the open verifies each one's uniqueness,
 condition and keys, accepts a table without them, `planColumnUpgrade` adds them
 (refusing `JD0023` first where the table holds duplicates one would refuse), and
 `introspect()` reads them back as the union's kinds. On SQLite a unique
-index keys, after its columns, whether each member the untyped column holds is
-a boolean (`dialect.booleanKeyTerm`, the planned index's `terms`), since that
-column holds `true` as `1`; the open accepts the index without them, as an
-earlier release created it, and `planColumnUpgrade` creates it again with them.
+index keys, after its columns, each member's kind where its column alone would
+key two kinds as one (`dialect.kindKeyTerm`, the planned index's `terms`):
+whether the member is a boolean where the column is untyped, since that column
+holds `true` as `1`, and the member's value where it is not of a typed column's
+own kind (`''` where it is), since a `REAL`, `INTEGER` or `TEXT` column holds
+another kind as its type reads it; the open accepts the index without them, or
+with an untyped column's alone (`earlierTerms`), as an earlier release created
+it, and `planColumnUpgrade` creates it again with them.
 That column holds a container as its bytes, so such a member also gets a plain
 column (`containerKeys`, `kx_<member>`) that two triggers fill with the
-container's key, its nodes sorted by path (`dialect.containerKey`; no index
-expression may read `json_tree`), and the unique index keys it in an index
+container's key, its nodes sorted by path with each member's name decoded
+(`dialect.containerKey`; no index expression may read a table-valued function
+or a recursive query), and the unique index keys it in an index
 beside the declared one (`<index>$container`) over the rows that hold one; the
 open accepts a table without them (`withoutContainerKeys`), `planColumnUpgrade`
 adds them, a link that drops one or creates an index over one the from-model

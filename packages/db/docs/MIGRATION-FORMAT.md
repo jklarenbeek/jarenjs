@@ -446,6 +446,15 @@ that rebuilds exactly the ones that differ:
   stays as it is. The new index refuses only pairs the earlier one refused, so
   the link refuses no table and plans no duplicate check; `report.upgraded`
   names it `c.c_by_q`;
+- on SQLite, a unique index over a member whose column has a type (`REAL`,
+  `INTEGER`, `TEXT`) without the key a fresh store adds after that column, the
+  member's kind (`''` for a value of the column's own kind, any other as its
+  text; MODEL-FORMAT §3), or one that keys an untyped column's boolean key
+  without it: the column holds `true` and `"1"` as `1.0`, so it refuses one
+  beside `1`, values the query engine compares unequal, until the link drops
+  the index and creates it with that key (MIGRATION-UPGRADE §51). As above, the
+  new index refuses only pairs the earlier one refused, so the link plans no
+  duplicate check; `report.upgraded` names it `c.c_by_q`;
 - on SQLite, a collection table without the column a unique index over such a
   member keys a container by (`kx_q`), its two triggers and the unique index
   beside the declared one over it (`c_by_q$container`, MODEL-FORMAT §3): no

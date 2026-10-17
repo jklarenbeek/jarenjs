@@ -768,12 +768,14 @@ export function planCollection(name, collection, dialect, options = undefined) {
     // box's one definition (the triggers read them). A vector column
     // has none either: it is fetched whole and ranked, never sought
     if (noBtree) continue;
-    const terms = index.derive ? [] : booleanKeyTerms(dialect, index.unique, columns, generated);
+    const terms = index.derive ? [] : kindKeyTerms(dialect, index.unique, columns, generated);
+    const earlier = index.derive ? [] : kindKeyTerms(dialect, index.unique, columns, generated, true);
     indexes.push({
       name: `${name}_${index.name}`,
       unique: index.unique,
       columns,
       ...(terms.length === 0 ? {} : { terms }),
+      ...(earlier.length === 0 || earlier.length === terms.length ? {} : { earlierTerms: earlier }),
       declared: index,
     });
   }
@@ -964,9 +966,11 @@ export function planCollection(name, collection, dialect, options = undefined) {
           name: index.name,
           unique: index.unique,
           columns: [...index.columns],
-          // the boolean keys after the columns ({@link booleanKeyTerms}); a table
-          // an earlier release created holds the index without them
+          // the kind keys after the columns ({@link kindKeyTerms}); a table an
+          // earlier release created holds the index without them, or with those
+          // over untyped columns alone (`earlierTerms`)
           ...(index.terms === undefined ? {} : { terms: [...index.terms] }),
+          ...(index.earlierTerms === undefined ? {} : { earlierTerms: [...index.earlierTerms] }),
           // the columns a condition reads, for a migration that changes one of them
           ...(index.where === undefined ? {} : { where: index.where, reads: index.reads }),
         }))
@@ -1020,8 +1024,8 @@ export function withoutContainerKeys(dialect, plan, absent) {
  * unique index one index beside it for each combination of its such
  * members keyed by that column rather than their own, but the one keying
  * every member by its own column — the declared index. A beside index keys
- * every other member by its column (and its boolean key,
- * {@link booleanKeyTerms}), under the declared condition, unique, over the
+ * every other member by its column (and its kind key,
+ * {@link kindKeyTerms}), under the declared condition, unique, over the
  * rows whose key columns hold a key (the column is NULL for every value but a
  * container, and NULL keys never meet). Together they refuse a duplicate
  * container in any member order, and nothing the query engine compares
@@ -1070,8 +1074,11 @@ export function containerKeysOf(dialect, table, indexes, generated) {
         const key = keyOf(column);
         return { column: key.column, read: key.read };
       });
-      const flags = columns.flatMap((/** @type {any} */ column, /** @type {number} */ at) => (byKey.has(at) || !varied.includes(at) ? []
-        : [{ expression: /** @type {any} */ (dialect.booleanKeyTerm)(doc, column.pathText) }]));
+      const flags = columns.flatMap((/** @type {any} */ column, /** @type {number} */ at) => {
+        const term = byKey.has(at) || column === undefined || column.pathText === null ? null
+          : /** @type {any} */ (dialect.kindKeyTerm)(doc, column.pathText, column.type);
+        return term === null ? [] : [{ expression: term }];
+      });
       const kind = varied.map((_at, i) => (combination[i] ? 'container' : 'value')).join('$');
       // only a row whose members hold containers there is keyed: a NULL key never meets another
       const where = [...(index.where === undefined ? [] : [`(${index.where})`]),
@@ -1084,27 +1091,31 @@ export function containerKeysOf(dialect, table, indexes, generated) {
 }
 
 /**
- * The keys a unique index adds after its columns on an engine whose
- * generated column over a member of several types (or of none) is untyped:
- * for each such column, whether the member is a JSON boolean
- * (`dialect.booleanKeyTerm`). The column holds `true` as `1` and `false` as
- * `0`, so without it the index would refuse `true` beside `1`, two values the
- * query engine compares unequal; every value it keyed apart stays apart, and
- * two equal values stay one key. A non-unique index refuses nothing and keys
- * the column alone.
+ * The keys a unique index adds after its columns where a column alone would
+ * key two values of different kinds as one (`dialect.kindKeyTerm`): for each
+ * generated column over a member, whether the member is a JSON boolean where
+ * the column is untyped (it holds `true` as `1`), and where it is of a real
+ * SQL type the member's value if it is not of the column's own kind (the
+ * column holds `true` and `"1"` as `1.0`). Without them the index would refuse
+ * two values the query engine compares unequal; every value it keyed apart
+ * stays apart, and two equal values stay one key. A non-unique index refuses
+ * nothing and keys the columns alone.
  * @param {any} dialect
  * @param {boolean | undefined} unique
  * @param {string[]} columns - the index's columns, in key order
  * @param {any[]} generated - the planned generated columns
+ * @param {boolean} [untypedOnly] - the keys over untyped columns alone: the
+ *   index as a table an earlier release created holds it
  * @returns {string[]}
  */
-function booleanKeyTerms(dialect, unique, columns, generated) {
-  if (unique !== true || dialect.booleanKeyTerm === undefined) return [];
+function kindKeyTerms(dialect, unique, columns, generated, untypedOnly = false) {
+  if (unique !== true || dialect.kindKeyTerm === undefined) return [];
   const untyped = dialect.typeFor(undefined, 'generated');
   return columns.flatMap((name) => {
     const column = generated.find((candidate) => candidate.name === name);
-    return column === undefined || column.pathText === null || column.type !== untyped ? []
-      : [dialect.booleanKeyTerm(dialect.quoteIdentifier(DOC_COLUMN), column.pathText)];
+    const term = column === undefined || column.pathText === null || untypedOnly && column.type !== untyped ? null
+      : dialect.kindKeyTerm(dialect.quoteIdentifier(DOC_COLUMN), column.pathText, column.type);
+    return term === null ? [] : [term];
   });
 }
 
@@ -1409,14 +1420,14 @@ function verifyDeclaredSql(connection, plan, disagree) {
       // an index a table an earlier release created goes without (see `verifyShape`)
       const legacyAbsent = new Set((plan.expected?.indexes ?? [])
         .filter((/** @type {any} */ index) => index.legacyAbsent === true).map((/** @type {any} */ index) => index.name));
-      // and a unique index it created without the boolean keys after its columns
-      const termless = termlessIndexSql(dialect, plan);
+      // and a unique index it created without some of the kind keys after its columns
+      const earlier = earlierIndexSql(dialect, plan);
       for (const [name, wanted] of planned) {
         const have = actual.get(name);
         if (have === undefined && legacyAbsent.has(name)) continue;
         if (have === undefined)
           disagree(`the model declares '${name}', which the database does not have`);
-        if (have !== wanted && have !== termless.get(name)) {
+        if (have !== wanted && !(earlier.get(name) ?? []).some((spelling) => spelling.sql === have)) {
           disagree(`'${name}' is declared as\n  ${have}\nand the model declares\n  ${wanted}`);
         }
       }
@@ -1431,35 +1442,42 @@ function verifyDeclaredSql(connection, plan, disagree) {
 }
 
 /**
- * The CREATE text, as {@link comparableDeclaredSql} compares it, of each
- * planned index that keys booleans after its columns
- * ({@link booleanKeyTerms}), spelled without them: the index as a table an
- * earlier release created holds it. Such a table opens and answers as it
- * did (refusing `true` beside `1`); `planColumnUpgrade` creates the index
- * again with the keys.
+ * The CREATE texts, as {@link comparableDeclaredSql} compares them, of each
+ * planned index that keys kinds after its columns ({@link kindKeyTerms}) as
+ * a table an earlier release created holds it: without the keys, or with
+ * those over untyped columns alone (`earlierTerms`), each with the keys it
+ * holds. Such a table opens and answers as it did (refusing `true` beside
+ * `1`); `planColumnUpgrade` creates the index again with every key.
  * @param {any} dialect
  * @param {any} plan
- * @returns {Map<string, string>} by index name
+ * @returns {Map<string, { sql: string, terms: string[] }[]>} by index name
  */
-function termlessIndexSql(dialect, plan) {
+function earlierIndexSql(dialect, plan) {
   return new Map((plan.expected?.indexes ?? []).filter((/** @type {any} */ index) => index.terms !== undefined)
-    .map((/** @type {any} */ index) => [index.name, comparableDeclaredSql(dialect.ddl.createIndex(
-      { name: index.name, table: plan.table, columns: index.columns, unique: index.unique, where: index.where }), MANAGED_SQL_OPTIONS)]));
+    .map((/** @type {any} */ index) => [index.name, [[], ...(index.earlierTerms === undefined ? [] : [index.earlierTerms])]
+      .map((/** @type {string[]} */ terms) => ({ terms, sql: comparableDeclaredSql(dialect.ddl.createIndex(
+        { name: index.name, table: plan.table, columns: index.columns, unique: index.unique, where: index.where, terms }), MANAGED_SQL_OPTIONS) }))]));
 }
 
 /**
- * The planned indexes a table holds without the boolean keys after their
- * columns ({@link termlessIndexSql}), by name, from the table's schema
- * objects as `dialect.introspect.declaredSql` reads them.
+ * The planned indexes a table holds as an earlier release created them
+ * ({@link earlierIndexSql}), by name, with the kind keys each holds, from
+ * the table's schema objects as `dialect.introspect.declaredSql` reads them.
  * @param {any} dialect
  * @param {any} plan
  * @param {{ type: unknown, name: unknown, sql: unknown }[]} rows
- * @returns {Set<string>}
+ * @returns {Map<string, string[]>}
  */
-export function termlessIndexesHeld(dialect, plan, rows) {
-  const termless = termlessIndexSql(dialect, plan);
-  return new Set(rows.filter((row) => String(row.type) === 'index'
-    && termless.get(String(row.name)) === comparableDeclaredSql(String(row.sql), MANAGED_SQL_OPTIONS)).map((row) => String(row.name)));
+export function earlierIndexesHeld(dialect, plan, rows) {
+  const earlier = earlierIndexSql(dialect, plan);
+  /** @type {Map<string, string[]>} */
+  const held = new Map();
+  for (const row of rows) {
+    const sql = comparableDeclaredSql(String(row.sql), MANAGED_SQL_OPTIONS);
+    const spelling = String(row.type) === 'index' ? earlier.get(String(row.name))?.find((candidate) => candidate.sql === sql) : undefined;
+    if (spelling !== undefined) held.set(String(row.name), spelling.terms);
+  }
+  return held;
 }
 
 /**
@@ -1609,13 +1627,14 @@ export function verifyShape(connection, plan, collection, docPath, kind = 'colle
                 // NOT sorted: `(a,b)` and `(b,a)` are different indexes —
                 // one serves an `a`-prefix lookup and the other does not,
                 // and sorting made them compare equal
-                // an expression key reads back without a name: the boolean keys a
+                // an expression key reads back without a name: the kind keys a
                 // unique index adds after its columns, which a table an earlier
-                // release created goes without (the CREATE text is compared below)
+                // release created goes without or holds over its untyped columns
+                // alone (the CREATE text is compared below)
                 const haveColumns = rows.map((row) => (row.name === null || row.name === undefined ? null : String(row.name)));
-                const keyed = (/** @type {number} */ terms) => haveColumns.length === want.columns.length + terms
+                const keyed = (/** @type {readonly string[]} */ terms) => haveColumns.length === want.columns.length + terms.length
                   && haveColumns.every((column, at) => column === (at < want.columns.length ? want.columns[at] : null));
-                if (!keyed(0) && !(want.terms !== undefined && keyed(want.terms.length)))
+                if (![[], want.terms ?? [], want.earlierTerms ?? []].some(keyed))
                   disagree(`index '${have.name}' covers (${haveColumns.map((column) => column ?? '<expression>').join(', ')}) in that order, the model declares (${want.columns.join(', ')})`);
                 // the catalog's shape flag: no NULLS NOT DISTINCT, no key order,
                 // collation or operator class of its own, no INCLUDE column (it reads

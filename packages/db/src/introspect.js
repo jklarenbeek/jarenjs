@@ -298,7 +298,7 @@ function containerKeysHeld(dialect, table, paths, objects) {
   });
   const indexes = table.indexes.flatMap((/** @type {any} */ index) => {
     if (!index.unique || index.partial) return [];
-    const columns = booleanKeyedColumns(dialect, table, index, paths) ?? index.columns;
+    const columns = kindKeyedColumns(dialect, table, index, paths) ?? index.columns;
     return columns.some((/** @type {string | null} */ column) => column === null || !paths.has(column)) ? []
       : [{ name: index.name, unique: true, columns, declared: {} }];
   });
@@ -386,30 +386,33 @@ function kindIndexesOf(dialect, table, paths) {
 }
 
 /**
- * The columns of a unique index that keys, after them, whether each member
- * the engine's untyped column holds is a boolean (`ddl.js`
- * `booleanKeyTerms`): the index whose CREATE text is the one a store creates
- * over those columns. `null` for every other index.
+ * The columns of a unique index that keys, after them, each member's kind
+ * where its column alone would key two kinds as one (`ddl.js`
+ * `kindKeyTerms`): the index whose CREATE text is the one a store creates
+ * over those columns, or the one an earlier release created, with the keys
+ * over untyped columns alone. `null` for every other index.
  * @param {any} dialect
  * @param {any} table
  * @param {{ name: string, unique: boolean, columns: (string | null)[], sql: string | null }} index
  * @param {Map<string, { segments: import('./dialect.js').JsonPathSegment[] }>} paths - by column
  * @returns {string[] | null}
  */
-function booleanKeyedColumns(dialect, table, index, paths) {
+function kindKeyedColumns(dialect, table, index, paths) {
   const at = index.columns.indexOf(null);
-  if (!index.unique || at <= 0 || dialect.booleanKeyTerm === undefined || index.sql === null) return null;
+  if (!index.unique || at <= 0 || dialect.kindKeyTerm === undefined || index.sql === null) return null;
   const columns = /** @type {string[]} */ (index.columns.slice(0, at));
   const untyped = dialect.comparableColumnType(dialect.typeFor(undefined, 'generated'));
-  const terms = columns.flatMap((name) => {
+  const termsOf = (/** @type {boolean} */ untypedOnly) => columns.flatMap((name) => {
     const entry = paths.get(name);
     const column = table.columns.find((/** @type {any} */ candidate) => candidate.name === name);
     const pathText = entry === undefined ? null : dialect.jsonPathText(entry.segments);
-    return pathText === null || column === undefined || dialect.comparableColumnType(column.type) !== untyped ? []
-      : [dialect.booleanKeyTerm(dialect.quoteIdentifier(DOC_COLUMN), pathText)];
+    const term = pathText === null || column === undefined || untypedOnly && dialect.comparableColumnType(column.type) !== untyped ? null
+      : dialect.kindKeyTerm(dialect.quoteIdentifier(DOC_COLUMN), pathText, dialect.comparableColumnType(column.type));
+    return term === null ? [] : [term];
   });
-  const planned = dialect.ddl.createIndex({ name: index.name, table: table.name, columns, unique: true, terms });
-  return terms.length > 0 && comparableDeclaredSql(index.sql) === comparableDeclaredSql(planned) ? columns : null;
+  const held = comparableDeclaredSql(index.sql);
+  return [termsOf(false), termsOf(true)].some((terms) => terms.length > 0
+    && held === comparableDeclaredSql(dialect.ddl.createIndex({ name: index.name, table: table.name, columns, unique: true, terms }))) ? columns : null;
 }
 
 /** The schema type each kind an index beside a declared one seeks reads back as. */
@@ -500,7 +503,7 @@ function deriveCollection(dialect, table, report, keys, functionNames, objects, 
   const indexes = [];
   for (const index of table.indexes) {
     if (besides.has(index.name) || containers.indexes.has(index.name)) continue;
-    const columns = booleanKeyedColumns(dialect, table, index, paths) ?? index.columns;
+    const columns = kindKeyedColumns(dialect, table, index, paths) ?? index.columns;
     if (index.partial || columns.some((/** @type {string | null} */ column) => column === null)) {
       report(loss('unmapped-index', `${table.name}.${index.name}`,
         'a partial predicate or expression term cannot be represented by an unconditional member index'));

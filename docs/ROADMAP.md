@@ -451,20 +451,19 @@ what each does is its own documentation's job
   every kind. Wanted: a decision — key every kind on PostgreSQL (an index per
   kind beside every unique union index: a minor and an insert cost), or state
   the unvalidated-document boundary for uniqueness as for queries.
-- [ ] **On SQLite a container key compares a member name as the document
-  spells it.** The key a unique index holds for an object reads each member's
-  path as `json_tree` spells it, which keeps the name's JSON escapes: a
-  document another writer stored as `{"A": 1}` and one the store writes as
-  `{"A": 1}` are two keys, where the query engine compares them equal. The
-  store writes every name in one spelling, so only a second writer meets it.
-  Wanted: a key built from the decoded names.
-- [ ] **On PostgreSQL a unique index refuses a key past the B-tree's entry
-  limit.** Every unique index keys its member's value whole, so a document
-  whose key there is past PostgreSQL's B-tree entry limit (a long string, a
-  large object or array) is refused `JD2005` (`class: 'error'`, the server's
-  message), though it duplicates nothing, where SQLite stores it. Wanted: a
-  key that holds a value of any size exactly (an exclusion constraint over a
-  hash index), or the limit stated and coded.
+- [ ] **On PostgreSQL an index refuses a key past the B-tree's entry limit.**
+  A declared index over a member is a B-tree keying the value whole, unique or
+  not, so a document whose member is past PostgreSQL's B-tree entry limit (a
+  long string, a large object or array) is refused `JD2005` (`class: 'error'`,
+  the server's message), though it duplicates nothing, where SQLite stores it.
+  An exclusion constraint over a hash index holds a value of any size exactly,
+  but serves equality alone: a range, an ordering or keyset pagination over a
+  unique member would read every row; and a hash index keys one column, so a
+  composite one needs an immutable expression that combines its members
+  (`ROW(...)` and `jsonb_build_array(...)` are refused). Wanted: a decision —
+  keep the stated limit, or a design that keeps both (an exclusion constraint
+  for uniqueness beside a B-tree over a bounded prefix that range and ordering
+  seeks read with an exact recheck; a plan change, a minor).
 - [ ] **On PostgreSQL `introspect()` reads the indexes beside a unique index
   over a container-first union back as no kind.** A member whose union lists a
   container first (`['object', 'string']`) has a `jsonb` column and, beside a
@@ -756,16 +755,6 @@ what each does is its own documentation's job
   with `items: { type: ['number', 'string'] }`), has none, and that comparison
   reads every row. Wanted: the same index beside those (for a guarded path,
   under each spelling of the guard the table may hold).
-- [ ] **On SQLite a unique index over a member of one scalar type refuses a
-  document of another kind beside an equal-looking one.** The store does not
-  validate a member against its declared type by default, and a `REAL` or
-  `INTEGER` column holds a JSON boolean as `1` or `0`: under a unique `$.q`
-  over `type: 'number'` (or `'integer'`) a document with `q: true` is refused
-  `JD2005` beside one with `q: 1`, and under `type: 'boolean'` a `q: 1` beside
-  a `q: true`, where the query engine compares them unequal and PostgreSQL
-  (whose typed column reads the other kind as `NULL`) stores both. Queries
-  answer right (`$eq` native equals the engine). Wanted: a key that keeps the
-  other kind apart for these too (a DDL change, minor).
 - [ ] **On PostgreSQL an ordering over an indexed collection member is sorted,
   never read in index order.** The statement orders `ASC NULLS FIRST` beside
   `"rid"`, which an ascending B-tree index does not provide (`Sort` over `Seq

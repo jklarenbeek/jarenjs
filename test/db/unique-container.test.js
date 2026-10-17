@@ -38,9 +38,11 @@ const planOf = (model, dialect) => planCollection('c', normalizeModel(model).get
 /** Whether the member at `path` of the document holds a container. @param {string} doc @param {string} path */
 const HOLDS = (doc, path) => `json_type(${doc}, '${path}') IN ('object', 'array')`;
 /** The text SQLite keys the container at `path` by. @param {string} doc @param {string} path */
-const KEY_TEXT = (doc, path) => `(SELECT group_concat(quote("t"."fullkey") || ' ' || (CASE WHEN "t"."type" IN ('integer', 'real') `
-  + `THEN printf('%!.17g', CAST("t"."atom" AS REAL) + 0.0) WHEN "t"."type" = 'text' THEN quote("t"."atom") ELSE "t"."type" END), ',' ORDER BY "t"."fullkey") `
-  + `FROM json_tree(${doc}, '${path}') AS "t")`;
+const KEY_TEXT = (doc, path) => `(WITH RECURSIVE "n"("path", "type", "atom", "value") AS (SELECT '', json_type(${doc}, '${path}'), NULL, jsonb_extract(${doc}, '${path}') `
+  + `UNION ALL SELECT "n"."path" || (CASE WHEN "n"."type" = 'array' THEN '[' || "e"."key" || ']' ELSE '.' || json_quote("e"."key") END), "e"."type", "e"."atom", "e"."value" `
+  + `FROM "n", jsonb_each("n"."value") AS "e" WHERE "n"."type" IN ('object', 'array')) `
+  + `SELECT group_concat(quote("n"."path") || ' ' || (CASE "n"."type" WHEN 'integer' THEN printf('%!.17g', CAST("n"."atom" AS REAL) + 0.0) `
+  + `WHEN 'real' THEN printf('%!.17g', CAST("n"."atom" AS REAL) + 0.0) WHEN 'text' THEN quote("n"."atom") ELSE "n"."type" END), ',' ORDER BY "n"."path") FROM "n")`;
 /** The two triggers that write the key column `kx_<member>`. @param {string} member */
 const TRIGGERS = (member) => {
   const path = `$."${member}"`;
@@ -186,10 +188,53 @@ describe('the container key on SQLite', () => {
           /UNIQUE constraint failed: c\.kx_q/);
         raw.prepare('INSERT INTO "c" ("key", "doc") VALUES (?, jsonb(?))').run('s', '{"id":"s","q":[1.0,{"b":2,"a":"1"}]}');
         assert.deepEqual(raw.prepare('SELECT "key", "kx_q" FROM "c" ORDER BY "key"').all().map((row) => [row.key, row.kx_q]), [
-          ['a', null], ['b', `'$."q"' object,'$."q".x' 1.0,'$."q".y' 2.0`],
-          ['s', `'$."q"' array,'$."q"[0]' 1.0,'$."q"[1]' object,'$."q"[1].a' '1','$."q"[1].b' 2.0`]]);
+          ['a', null], ['b', `'' object,'."x"' 1.0,'."y"' 2.0`],
+          ['s', `'' array,'[0]' 1.0,'[1]' object,'[1]."a"' '1','[1]."b"' 2.0`]]);
       }
       finally { raw.close(); }
+    }
+    finally { cleanup(); }
+  });
+
+  it('keys a member name as it reads decoded, however a writer escaped it, as the query engine compares it', async () => {
+    const { dbPath, cleanup } = tempDbPath();
+    try {
+      const store = await openStore(MODEL, { driver: nodeDriver(), path: dbPath });
+      try {
+        await store.collection('c').insert({ id: 'a', q: { A: 1, 'b"c': [{ d: 'é' }], 'e\nf': 2 } });
+        await store.collection('c').insert({ id: 'b', q: { '[0]': 1 } });
+        await store.collection('c').insert({ id: 'c', q: { 'x.y': 1 } });
+      }
+      finally { await store.close(); }
+      const raw = new DatabaseSync(dbPath);
+      try {
+        const write = (/** @type {string} */ key, /** @type {string} */ text) => {
+          try { raw.prepare('INSERT INTO "c" ("key", "doc") VALUES (?, jsonb(?))').run(key, text); return 'stored'; }
+          catch (error) { return /** @type {any} */ (error).message; }
+        };
+        assert.deepEqual([
+          write('r', '{"id":"r","q":{"e\\u000af":2,"b\\u0022c":[{"\\u0064":"\\u00e9"}],"\\u0041":1}}'),
+          write('s', '{"id":"s","q":{"\\u0041":1}}'),
+          write('t', '{"id":"t","q":{"\\u005b0]":1}}'),
+          write('u', '{"id":"u","q":[{"\\u0041":1}]}'),
+          write('v', '{"id":"v","q":[{"A":1.0}]}'),
+          // a name holding a dot is not a path of two names
+          write('x', '{"id":"x","q":{"x":{"y":1}}}'),
+        ], ['UNIQUE constraint failed: c.kx_q', 'stored', 'UNIQUE constraint failed: c.kx_q', 'stored', 'UNIQUE constraint failed: c.kx_q', 'stored']);
+        assert.deepEqual(raw.prepare('SELECT "key", "kx_q" FROM "c" ORDER BY "key"').all().map((row) => [row.key, row.kx_q]), [
+          ['a', `'' object,'."A"' 1.0,'."b\\"c"' array,'."b\\"c"[0]' object,'."b\\"c"[0]."d"' 'é','."e\\nf"' 2.0`],
+          ['b', `'' object,'."[0]"' 1.0`], ['c', `'' object,'."x.y"' 1.0`], ['s', `'' object,'."A"' 1.0`], ['u', `'' array,'[0]' object,'[0]."A"' 1.0`],
+          ['x', `'' object,'."x"' object,'."x"."y"' 1.0`]]);
+      }
+      finally { raw.close(); }
+      // and the store reads each back by the engine's equality
+      const reopened = await openStore(MODEL, { driver: nodeDriver(), path: dbPath });
+      try {
+        assert.deepEqual(await reopened.collection('c').execute({ $for: { it: '$[*]' }, $where: { $eq: ['$it.q', { A: 1 }] }, $return: '$it.id' },
+          { pushdown: false }), 's');
+        assert.equal(await reopened.collection('c').insert({ id: 'w', q: { A: 1 } }).then(() => 'stored', (/** @type {any} */ error) => error.code), 'JD2005');
+      }
+      finally { await reopened.close(); }
     }
     finally { cleanup(); }
   });

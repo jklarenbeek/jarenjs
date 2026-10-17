@@ -13,6 +13,7 @@ import * as fs from 'node:fs';
 
 import { planMigration, shapeHash, sqliteDialect } from '@jarenjs/db';
 import { compileArtifact } from '../json/schema-artifact-helpers.js';
+import { kindKey } from './helpers.js';
 
 const migrationSchema = JSON.parse(
   fs.readFileSync('packages/db/schemas/jaren-migration.schema.json', 'utf8'));
@@ -98,7 +99,7 @@ describe('planning index and column changes', () => {
       'ALTER TABLE "users" DROP COLUMN "gx_first"',
       'ALTER TABLE "users" ADD COLUMN "gx_last" TEXT GENERATED ALWAYS AS '
       + '(jsonb_extract("doc", \'$."last"\')) VIRTUAL',
-      'CREATE UNIQUE INDEX "users_by_last" ON "users" ("gx_last")',
+      `CREATE UNIQUE INDEX "users_by_last" ON "users" ("gx_last", ${kindKey('last', 'TEXT')})`,
     ]);
   });
 

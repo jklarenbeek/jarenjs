@@ -3109,12 +3109,14 @@ created and this release opened is unchanged.
   the query engine's `$eq` compares equal. Such a member now has a plain column
   (`"kx_q" TEXT`) that two triggers (`c$kx_q$insert`, `c$kx_q$update`) write
   after every insert and every update of the document with the container's key —
-  its nodes sorted by path, a number as the double it reads as — and the unique
+  its nodes sorted by path, each member's name as it reads decoded, a number as
+  the double it reads as — and the unique
   index has one index beside it over that column (`CREATE UNIQUE INDEX
   "c_by_q$container" ON "c" ("kx_q") WHERE "kx_q" IS NOT NULL`; a composite has
   one per combination of its such members, `c_by_qr$container$value`; a
   conditional one carries its condition). A container equal to a stored one in
-  any member order, or with a number spelled otherwise (`1.0`), is refused
+  any member order, with a number spelled otherwise (`1.0`), or with a member
+  name another writer escaped (`{"\u0041": 1}` beside `{"A": 1}`), is refused
   `JD2005` (`class: 'constraint'`) whoever writes the file; its message names the
   column (`UNIQUE constraint failed: c.kx_q`). Every other answer stays, and a
   seek over the declared index reads it as before. An insert or an update of a
@@ -3169,6 +3171,55 @@ with an index beside for a container kind `JD0002`, as §48 says; drop it
 (`DROP INDEX "c_by_q$object"`), and drop an index beside a guarded path that a
 link of this release created in the other spelling. A table the previous
 release created and this release opened is unchanged.
+
+## 51. A unique index over a typed member on SQLite keeps a value of another kind apart
+
+- On SQLite the generated column over a member of one type has that SQL type
+  (`REAL` for `number`, `INTEGER` for `integer` and `boolean`, `TEXT` for
+  `string`). The store does not validate a member against its declared type by
+  default, so the column holds a value of another kind as its own type reads
+  it: `true` and `"1"` as the `REAL` `1.0`, `1` and `true` as the `TEXT` `'1'`.
+  A unique index over it keyed the column alone, so under `q: { type: 'number'
+  }` a document with `q: true` (or `q: "1"`) was refused `JD2005` beside one
+  with `q: 1`, under `type: 'boolean'` a `q: 1` beside a `q: true`, and under
+  `type: 'string'` a `q: 1` beside a `q: "1"`, though the query engine compares
+  them unequal and PostgreSQL, whose typed column reads the other kind as
+  `NULL`, stores both. The unique index now keys, after such a column, `''` for
+  a value of the column's own kind and any other value as its text (a number
+  as the double it reads as, a string quoted, any other value as its JSON
+  type): `CREATE UNIQUE INDEX "c_by_q" ON "c" ("gx_q", (CASE json_type("doc",
+  '$."q"') WHEN 'integer' THEN '' WHEN 'real' THEN '' WHEN 'text' THEN
+  quote(json_extract("doc", '$."q"')) ELSE json_type("doc", '$."q"') END))`,
+  in every shape (a composite one after all its columns, and the index beside
+  it that keys an untyped member's container; a conditional one under its
+  condition). Two values are one key exactly when the query engine compares
+  them equal: a value of the column's kind as before (`1` and `1.0` one key),
+  a value of another kind by its text (`"1"` and `"1.0"`, which a `REAL`
+  column holds as one `1.0`, two keys). A seek over the columns reads the index
+  as before, a non-unique index and PostgreSQL are unchanged, and an insert
+  evaluates the key. A duplicate names the index (`UNIQUE constraint failed:
+  index 'c_by_q'`) where the message named the column (`c.gx_q`); its code and
+  fields are as before.
+- A table the previous release created opens and answers as it did, until
+  `planColumnUpgrade` drops the index and creates it with the key
+  (`report.upgraded` names `c.c_by_q`), and so does a table that holds a
+  composite index with an untyped member's boolean key (§49) but not a typed
+  member's kind. The new key splits only what the earlier one joined, so the
+  link refuses no table and plans no duplicate check. `introspect()` reads
+  either index back as the declared one, and a plan from the model it reads
+  back plans the steps it did; the plan that creates an index the read leaves
+  out (a conditional one, `unmapped-index`, as before) creates it with the
+  key. Every plan that creates such an index creates it with the key.
+
+**Downgrade.** The previous release refuses a table with such an index
+`JD0002` (`index 'c_by_q' covers (gx_q, <expression>) in that order, the model
+declares (gx_q)`); create the index again without the key (`DROP INDEX
+"c_by_q"`, then `CREATE UNIQUE INDEX "c_by_q" ON "c" ("gx_q")`, a composite
+one with an untyped member's boolean key kept) and it opens the table and
+answers alike, provided the table holds no two documents the earlier index
+joins (`true` or `"1"` beside `1`): the statement refuses such a table, so
+change or remove one of each first. A table the previous release created and
+this release opened is unchanged.
 
 ## Measured costs
 

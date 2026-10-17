@@ -169,8 +169,8 @@ function memberPathOf(expression) {
  * equal. It reads a table-valued function, which no index expression or
  * generated column may, so a trigger writes it into a plain column of the
  * table after every write of the document, and the unique index keys that
- * column. A container's path keys are compared as the document spells them
- * (the store writes each as JSON text spells it once).
+ * column. A member's name is keyed as it reads decoded, so a name a writer
+ * spelled with escapes (`"\u0041"`) is the name spelled without (`"A"`).
  */
 const CONTAINER_KEY = Object.freeze({
   /**
@@ -211,16 +211,64 @@ const CONTAINER_KEY = Object.freeze({
 
 /**
  * The text {@link CONTAINER_KEY} keys a container by: its nodes, each as its
- * quoted path, then a number as the double it reads as (exactly, `-0` as
- * `0`), a string as its quoted text, any other node as its JSON type, sorted
- * by path.
+ * quoted path (each member's name decoded and quoted as JSON text quotes it,
+ * each element's index in brackets), then its {@link scalarText}, sorted by
+ * path. The paths are built from the root down, one level of members at a
+ * time, because the path a table-valued function reports spells each name as
+ * the document does.
  * @param {string} documentSql @param {string} pathText
  * @returns {string}
  */
 function containerText(documentSql, pathText) {
-  const node = `quote("t"."fullkey") || ' ' || (CASE WHEN "t"."type" IN ('integer', 'real') `
-    + `THEN printf('%!.17g', CAST("t"."atom" AS REAL) + 0.0) WHEN "t"."type" = 'text' THEN quote("t"."atom") ELSE "t"."type" END)`;
-  return `(SELECT group_concat(${node}, ',' ORDER BY "t"."fullkey") FROM json_tree(${documentSql}, ${stringLiteral(pathText)}) AS "t")`;
+  const n = (/** @type {string} */ column) => `"n".${quoteIdentifier(column)}`;
+  return `(WITH RECURSIVE "n"("path", "type", "atom", "value") AS (`
+    + `SELECT '', json_type(${documentSql}, ${stringLiteral(pathText)}), NULL, jsonb_extract(${documentSql}, ${stringLiteral(pathText)}) `
+    + `UNION ALL SELECT ${n('path')} || (CASE WHEN ${n('type')} = 'array' THEN '[' || "e"."key" || ']' ELSE '.' || json_quote("e"."key") END), `
+    + `"e"."type", "e"."atom", "e"."value" FROM "n", jsonb_each(${n('value')}) AS "e" WHERE ${n('type')} IN ('object', 'array')) `
+    + `SELECT group_concat(quote(${n('path')}) || ' ' || ${scalarText(n('type'), n('atom'))}, ',' ORDER BY ${n('path')}) FROM "n")`;
+}
+
+/**
+ * One JSON value as the keys of a unique index spell it where its column
+ * cannot: a number as the double the query engine holds, printed exactly
+ * (`-0` as `0`), a string as its quoted decoded text, any other value as its
+ * JSON type (`true`, `false`, `null`; a container's members
+ * {@link containerText} spells). Two scalars spell alike exactly when the
+ * engine compares them equal. A value of a kind in `own` spells as `''`.
+ * @param {string} typeSql - the value's `json_type`
+ * @param {string} atomSql - the value as SQL reads it
+ * @param {readonly string[]} [own] - kinds keyed by something else
+ * @returns {string}
+ */
+function scalarText(typeSql, atomSql, own = []) {
+  const number = `printf('%!.17g', CAST(${atomSql} AS REAL) + 0.0)`;
+  const spelled = [['integer', number], ['real', number], ['text', `quote(${atomSql})`]];
+  return `(CASE ${typeSql} ${[...own.map((kind) => [kind, "''"]), ...spelled.filter(([kind]) => !own.includes(kind))]
+    .map(([kind, text]) => `WHEN '${kind}' THEN ${text}`).join(' ')} ELSE ${typeSql} END)`;
+}
+
+/** The kinds a typed generated column holds as themselves, by its SQL type. */
+const NATIVE_KINDS = Object.freeze({ REAL: ['integer', 'real'], INTEGER: ['integer', 'real'], TEXT: ['text'] });
+
+/**
+ * The key a unique index adds after a generated column over the member at
+ * `pathText`, where the column keys values of two kinds as one: the untyped
+ * column holds a JSON boolean as the integer `0` or `1`, so it keys whether
+ * the member is a boolean; a typed column holds a value of another kind than
+ * its own as its SQL type reads it (`true` and `"1"` as the `REAL` `1.0`,
+ * `1` as the `TEXT` `'1'`), so it keys `''` for a value of its own kind and
+ * any other value as {@link scalarText} spells it. A value of the column's
+ * own kind is keyed by the column as before, and two values the query engine
+ * compares equal are one key. `null` for a column of any other type.
+ * @param {string} documentSql @param {string} pathText @param {string} columnType
+ * @returns {string | null}
+ */
+function kindKeyTerm(documentSql, pathText, columnType) {
+  const type = `json_type(${documentSql}, ${stringLiteral(pathText)})`;
+  const sqlType = String(columnType).toUpperCase();
+  if (sqlType === 'ANY') return `(${type} IN ('true', 'false'))`;
+  const native = NATIVE_KINDS[/** @type {keyof typeof NATIVE_KINDS} */ (sqlType)];
+  return native === undefined ? null : scalarText(type, `json_extract(${documentSql}, ${stringLiteral(pathText)})`, native);
 }
 
 /** A member read as it is stored: {@link jsonExtract}'s default read. */
@@ -447,9 +495,8 @@ export const sqliteDialect = createDialect({
       default: return `jsonb_extract(${columnSql}, ${member})`;
     }
   },
-  // a unique index's second key for a member the untyped column holds: the
-  // column holds a JSON boolean as the integer 0 or 1, and this tells it apart
-  booleanKeyTerm: (documentSql, pathText) => `(json_type(${documentSql}, ${stringLiteral(pathText)}) IN ('true', 'false'))`,
+  // a unique index's key after a column that keys two kinds as one value
+  kindKeyTerm,
   containerKey: CONTAINER_KEY,
   // the engine-specific piece of a declared interval's CHECK beside
   // `jsonTypeOf`: each bound held to an integer by ITS JSON type — `IS`,

@@ -18,7 +18,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { openStore, planModelMigration, migrate, migrationStatus, sqliteDialect } from '@jarenjs/db';
 import { nodeDriver } from '@jarenjs/db/node';
 import { postgresDialect } from '@jarenjs/db/postgres';
-import { tempDbPath } from './helpers.js';
+import { kindKey, tempDbPath } from './helpers.js';
 import { PG_URL, withPostgres } from './store-core-engines.js';
 import { ONE_ACTIVE, SHIFT_SCHEMA, createVerdicts, shiftModel } from './invariant-oracle.js';
 
@@ -41,6 +41,8 @@ const conditioned = (type) => ({ $model: '0.1', collections: { c: {
 const DIALECTS = /** @type {const} */ ([['sqlite', sqliteDialect], ['postgres', postgresDialect()]]);
 /** The statements of the plan from one model to another. @param {any} from @param {any} to @param {any} dialect */
 const planned = (from, to, dialect) => planModelMigration(from, to, { dialect, id: 'm' }).migration.steps.map((step) => step.sql ?? step.kind);
+/** The key SQLite's unique index adds after the text column of `member`. @param {string} engine @param {string} member */
+const kinded = (engine, member) => (engine === 'sqlite' ? `, ${kindKey(member, 'TEXT')}` : '');
 
 describe('planning an index change', () => {
   for (const [engine, dialect] of DIALECTS) {
@@ -58,11 +60,11 @@ describe('planning an index change', () => {
 
     it(`${engine}: a collection index whose condition changed is dropped and recreated`, () => {
       assert.deepEqual(planned(collectionModel(), collectionModel(IN_XY), dialect), ['DROP INDEX "c_by_s"',
-        `CREATE UNIQUE INDEX "c_by_s" ON "c" ("gx_s") WHERE "gx_s" IN ('x', 'y')`]);
+        `CREATE UNIQUE INDEX "c_by_s" ON "c" ("gx_s"${kinded(engine, 's')}) WHERE "gx_s" IN ('x', 'y')`]);
       assert.deepEqual(planned(collectionModel(IN_XY), collectionModel({ $eq: ['$.s', 'x'] }), dialect), ['DROP INDEX "c_by_s"',
-        `CREATE UNIQUE INDEX "c_by_s" ON "c" ("gx_s") WHERE "gx_s" = 'x'`]);
+        `CREATE UNIQUE INDEX "c_by_s" ON "c" ("gx_s"${kinded(engine, 's')}) WHERE "gx_s" = 'x'`]);
       assert.deepEqual(planned(collectionModel(IN_XY), collectionModel(), dialect), ['DROP INDEX "c_by_s"',
-        'CREATE UNIQUE INDEX "c_by_s" ON "c" ("gx_s")']);
+        `CREATE UNIQUE INDEX "c_by_s" ON "c" ("gx_s"${kinded(engine, 's')})`]);
       assert.deepEqual(planned(collectionModel(IN_XY), collectionModel(IN_XY), dialect), []);
     });
 
@@ -71,7 +73,7 @@ describe('planning an index change', () => {
       const dropIndex = steps.indexOf('DROP INDEX "c_one_a"');
       const dropColumn = steps.findIndex((sql) => /DROP COLUMN "gx_s"/.test(sql));
       const addColumn = steps.findIndex((sql) => /ADD COLUMN "gx_s"/.test(sql));
-      const create = steps.indexOf(`CREATE UNIQUE INDEX "c_one_a" ON "c" ("gx_a") WHERE "gx_s" IS NOT NULL`);
+      const create = steps.indexOf(`CREATE UNIQUE INDEX "c_one_a" ON "c" ("gx_a"${kinded(engine, 'a')}) WHERE "gx_s" IS NOT NULL`);
       assert.ok(dropIndex >= 0 && dropIndex < dropColumn && dropColumn < addColumn && addColumn < create, JSON.stringify(steps));
     });
 

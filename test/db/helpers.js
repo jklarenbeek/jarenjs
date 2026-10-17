@@ -192,6 +192,24 @@ export function tempDbPath() {
 }
 
 /**
+ * The key a unique index adds on SQLite after the typed generated column of
+ * the top-level member `member`: `''` for a value of the column's own kind,
+ * a value of another kind as its text (a number as its double, a string
+ * quoted, any other as its JSON type).
+ * @param {string} member
+ * @param {'TEXT' | 'REAL' | 'INTEGER'} type - the column's SQL type
+ * @param {string} [doc] - the document column as the statement reads it
+ * @returns {string}
+ */
+export function kindKey(member, type, doc = '"doc"') {
+  const at = `${doc}, '$."${member}"'`;
+  const number = `printf('%!.17g', CAST(json_extract(${at}) AS REAL) + 0.0)`;
+  return type === 'TEXT'
+    ? `(CASE json_type(${at}) WHEN 'text' THEN '' WHEN 'integer' THEN ${number} WHEN 'real' THEN ${number} ELSE json_type(${at}) END)`
+    : `(CASE json_type(${at}) WHEN 'integer' THEN '' WHEN 'real' THEN '' WHEN 'text' THEN quote(json_extract(${at})) ELSE json_type(${at}) END)`;
+}
+
+/**
  * Open an adopted store over a fresh SQLite file prepared by `ddl`.
  * @param {string} ddl @param {Record<string, any>} entities
  * @returns {Promise<{ store: any, dbPath: string, close: () => Promise<void> }>}
