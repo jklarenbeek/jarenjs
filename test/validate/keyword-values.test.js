@@ -123,14 +123,31 @@ describe('a keyword value of the wrong shape is refused at compile (JK0013)', ()
       }
       return null;
     };
-    assert.equal(message({ type: 'strin' }),
-      "JK0013: 'type' takes a type name (array, boolean, integer, null, number, object, string) or a non-empty array of type names, got 'strin'; a value of another shape is no constraint the validator reads at #/type");
-    assert.equal(message({ required: 'a' }),
-      "JK0013: 'required' takes an array of member names, got 'a'; a value of another shape is no constraint the validator reads at #/required");
-    assert.equal(message({ properties: { a: { minLength: -1 } } }),
-      "JK0013: 'minLength' takes a non-negative integer, got -1; a value of another shape is no constraint the validator reads at #/properties/a/minLength");
-    assert.equal(message({ properties: { a: 5 } }),
-      "JK0013: 'properties' takes an object whose members are schemas (objects or booleans), got 5 for member 'a'; a value of another shape is no constraint the validator reads at #/properties/a");
+    const tail = '; a value of another shape is no constraint the validator reads at';
+    /** [schema, the shape the message names, the value it got, the place]: one per shape the table holds */
+    const SAYS = /** @type {[any, string, string, string][]} */ ([
+      [{ type: 'strin' }, "'type' takes a type name (array, boolean, integer, null, number, object, string) or a non-empty array of type names", "'strin'", '#/type'],
+      [{ type: ['string', 2] }, "'type' takes a type name (array, boolean, integer, null, number, object, string) or a non-empty array of type names", '2', '#/type/1'],
+      [{ enum: 5 }, "'enum' takes an array", '5', '#/enum'],
+      [{ required: 'a' }, "'required' takes an array of member names", "'a'", '#/required'],
+      [{ dependentRequired: { a: ['b', 1] } }, "'dependentRequired' takes an object of arrays of member names", '1', '#/dependentRequired/a/1'],
+      [{ properties: { a: { minLength: -1 } } }, "'minLength' takes a non-negative integer", '-1', '#/properties/a/minLength'],
+      [{ minimum: 'ten' }, "'minimum' takes a number", "'ten'", '#/minimum'],
+      [{ exclusiveMaximum: null }, "'exclusiveMaximum' takes a number", 'null', '#/exclusiveMaximum'],
+      [{ multipleOf: 0 }, "'multipleOf' takes a number greater than 0", '0', '#/multipleOf'],
+      [{ uniqueItems: 1 }, "'uniqueItems' takes a boolean", '1', '#/uniqueItems'],
+      [{ pattern: 5 }, "'pattern' takes a regular expression", '5', '#/pattern'],
+      [{ $ref: 5 }, "'$ref' takes a string", '5', '#/%24ref'],
+      [{ properties: { a: 5 } }, "'properties' takes an object of schemas", '5', '#/properties/a'],
+      [{ patternProperties: { '^a': 5 } }, "'patternProperties' takes an object of schemas named by regular expressions", '5', '#/patternProperties/%5Ea'],
+      [{ dependencies: { a: ['b', 1] } }, "'dependencies' takes an object of schemas or arrays of member names", '1', '#/dependencies/a/1'],
+      [{ not: 'x' }, "'not' takes a schema", "'x'", '#/not'],
+      [{ items: 5 }, "'items' takes a schema or an array of schemas", '5', '#/items'],
+      [{ allOf: [{}, 5] }, "'allOf' takes an array of schemas", '5', '#/allOf/1'],
+      [{ anyOf: [] }, "'anyOf' takes a non-empty array of schemas", 'an empty array', '#/anyOf'],
+    ]);
+    assert.deepEqual(SAYS.map(([schema]) => message(schema)),
+      SAYS.map(([, says, got, place]) => `JK0013: ${says}, got ${got}${tail} ${place}`));
   });
 
   it('locates a nested place by its pointer into the compiled document, with or without a root $id', () => {
@@ -164,6 +181,14 @@ describe('a regular expression that does not compile is refused (JK0014)', () =>
     catch (e) {
       assert.equal(e.code, 'JK0014');
       assert.ok(e.cause instanceof SyntaxError);
+      assert.equal(e.message, `JK0014: 'pattern' takes a regular expression, got '(', which does not compile (${e.cause.message}) at #/pattern`);
+    }
+    try {
+      new JarenValidator().compile({ patternProperties: { '^a': {}, '[': {} } });
+      assert.fail('compiled');
+    }
+    catch (e) {
+      assert.equal(e.message, `JK0014: 'patternProperties' takes an object of schemas named by regular expressions, got '[', which does not compile (${e.cause.message}) at #/patternProperties/%5B`);
     }
   });
 });

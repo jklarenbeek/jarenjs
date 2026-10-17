@@ -4,11 +4,12 @@
  * meta-schemas' shapes. Each keyword's subschema in the meta-schemas
  * `@jarenjs/refs` ships (draft-06, draft-07, 2019-09 and 2020-12, every
  * vocabulary) is reduced to the name of its shape, and the runtime table
- * (`KEYWORD_SHAPES`) must name the same shape in every draft that defines
- * the keyword, but where a listed reading differs, most because the narrower
- * shape would refuse a schema that answers right (inside a shape, a number written
- * as a string and a bigint are read as numbers, a `RegExp` as a pattern and
- * `required: true` as presence; see `keyword-values.js`). The table lives in the
+ * (`KEYWORD_SHAPES`, its descriptors named by `DESCRIPTORS`) must name the
+ * same shape in every draft that defines the keyword, but where a listed
+ * reading differs, most because the narrower shape would refuse a schema
+ * that answers right (inside a shape, a number written as a string and a
+ * bigint are read as numbers, a `RegExp` as a pattern and `required: true`
+ * as presence; see `keyword-values.js`). The table lives in the
  * validator rather than being read from `@jarenjs/refs` at run time: the
  * validator does not depend on the meta-schema bundle, and a browser
  * bundle should not carry it to check a few dozen keywords. Every keyword
@@ -21,7 +22,24 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { getSchemaDraftByVersion } from '@jarenjs/refs';
-import { KEYWORD_SHAPES, VALIDATION_KEYWORDS } from '../../packages/validate/src/keyword-values.js';
+import { KEYWORD_SHAPES } from '../../packages/validate/src/keyword-values.js';
+
+/**
+ * The runtime table's shape descriptors (see `keyword-values.js`), by the
+ * shape name the derivation below spells for each.
+ */
+const DESCRIPTORS = /** @type {Record<string, string>} */ ({
+  'n|*y': 'type', 'a': 'array', '?[m': 'stringArray', '{[m': 'map<stringArray>', 'c': 'count', 'u': 'number',
+  '?u': 'number|boolean', 'p': 'positive', 'b': 'boolean', 'r': 'regex', 'g': 'string', '{s': 'map<schema>',
+  '/s': 'map<schema>/regex', '{s|[m': 'map<schema|stringArray>', 's': 'schema', 's|[s': 'schema|schemaArray',
+  '[s': 'schemaArray', '+s': 'schemaArray+',
+});
+
+/** @param {string} keyword @returns {string|undefined} The shape name of a keyword's runtime descriptor */
+const runtimeShape = (keyword) => {
+  const rule = /** @type {Record<string, [string, boolean, string?]>} */ (KEYWORD_SHAPES)[keyword];
+  return rule === undefined ? undefined : DESCRIPTORS[rule[0]] ?? `unnamed descriptor ${rule[0]}`;
+};
 
 /** The keywords whose values the validator does not admit, and why. */
 const NOT_ADMITTED = {
@@ -119,7 +137,7 @@ describe('the admitted keyword shapes are the meta-schemas\' shapes', () => {
       const derived = derivedShapes(version);
       for (const [keyword, metaShape] of derived) {
         if (Object.hasOwn(NOT_ADMITTED, keyword)) continue;
-        const runtime = /** @type {Record<string, string>} */ (KEYWORD_SHAPES)[keyword];
+        const runtime = runtimeShape(keyword);
         assert.ok(runtime !== undefined, `draft ${version} defines '${keyword}' (${metaShape}), which is neither admitted nor listed`);
         const spelled = SPELLED[metaShape] ?? metaShape;
         const reading = READINGS.find(([k, , , drafts]) => k === keyword && drafts.includes(version));
@@ -137,6 +155,7 @@ describe('the admitted keyword shapes are the meta-schemas\' shapes', () => {
 
   it('turns off exactly the validation vocabulary\'s keywords (but const, which takes any value)', () => {
     const validation = getSchemaDraftByVersion(2020).schema.find((d) => d.$id.endsWith('meta/validation'));
-    assert.deepEqual([...VALIDATION_KEYWORDS].sort(), Object.keys(validation.properties).filter((k) => k !== 'const').sort());
+    const runtime = Object.keys(KEYWORD_SHAPES).filter((k) => /** @type {Record<string, [string, boolean]>} */ (KEYWORD_SHAPES)[k][1]);
+    assert.deepEqual(runtime.sort(), Object.keys(validation.properties).filter((k) => k !== 'const').sort());
   });
 });

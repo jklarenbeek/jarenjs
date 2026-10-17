@@ -17,9 +17,9 @@
  * form), a `RegExp` or a `/source/flags` literal as `pattern`,
  * `required: true` (the value must be present), the extended type names
  * (`bigint`, `set`, `map`, `tuple`, `regex`), a `null` or repeated member
- * of a `type` list, a repeated member name in `required`, and the empty
- * `allOf` and `prefixItems`. An `items` array under 2020-12 stays the
- * tuple it is read as.
+ * of a `type` list (or `Set`), a repeated member name in `required`, and
+ * the empty `allOf` and `prefixItems`. An `items` array under 2020-12 stays
+ * the tuple it is read as.
  *
  * Not read here, as they decide no answer the validator gives or keep
  * their own rules: the annotations, the identifiers (`$id`, `$anchor`,
@@ -34,6 +34,10 @@
  * that turns that vocabulary off, `then`/`else` without `if`,
  * `additionalItems` without an `items` array, and `minContains`/
  * `maxContains` without `contains`.
+ *
+ * A shape is written once, as a short descriptor that both checks a value
+ * and words the refusal (see {@link SHAPES}), so a keyword's rule and its
+ * message cannot drift apart.
  */
 
 import { isArrayClass } from '@jarenjs/core';
@@ -48,14 +52,14 @@ import { createSchemaPatternTester } from './string.js';
 import { compiledLocation, keywordLocation } from './traverse.js';
 
 /**
- * A wrong value found in a keyword: the value, and the member names or
- * item indexes that lead to it from the keyword (none when it is the
- * keyword's own value), and for a regular expression the error compiling it.
- * @typedef {{ value: unknown, at: (string|number)[], error?: Error }} Fault
+ * A wrong value found in a keyword: the member names or item indexes that
+ * lead to it from the keyword (none when it is the keyword's own value),
+ * the value, and for a regular expression the error compiling it.
+ * @typedef {[(string|number)[], unknown, Error?]} Fault
  */
 
-/** @param {unknown} value @returns {Fault} */
-const own = (value) => ({ value, at: [] });
+/** @param {unknown} value @returns {value is string} */
+const isString = (value) => typeof value === 'string';
 
 /**
  * A number the validator reads as one: a number, a bigint, or a string
@@ -64,56 +68,13 @@ const own = (value) => ({ value, at: [] });
  * @returns {number|bigint|undefined}
  */
 function readNumber(value) {
-  if (typeof value === 'number') return Number.isNaN(value) ? undefined : value;
-  if (typeof value === 'bigint') return value;
-  if (typeof value !== 'string' || value.trim() === '') return undefined;
-  const number = Number(value);
+  const number = typeof value === 'bigint' ? value
+    : typeof value === 'number' || (isString(value) && value.trim() !== '') ? Number(value) : Number.NaN;
   return Number.isNaN(number) ? undefined : number;
 }
 
-/** @param {unknown} value @returns {Fault|undefined} */
-function count(value) {
-  const number = readNumber(value);
-  return number !== undefined && (typeof number === 'bigint' || Number.isInteger(number)) && number >= 0
-    ? undefined
-    : own(value);
-}
-
-/** @param {unknown} value @returns {Fault|undefined} */
-function number(value) {
-  return readNumber(value) === undefined ? own(value) : undefined;
-}
-
-/** @param {unknown} value @returns {Fault|undefined} */
-function bound(value) {
-  return typeof value === 'boolean' ? undefined : number(value);
-}
-
-/** @param {unknown} value @returns {Fault|undefined} */
-function divisor(value) {
-  const read = readNumber(value);
-  return read === undefined || read === 0 || read === 0n ? own(value) : undefined;
-}
-
-/** @param {unknown} value @returns {Fault|undefined} */
-function boolean(value) {
-  return typeof value === 'boolean' ? undefined : own(value);
-}
-
-/** @param {unknown} value @returns {Fault|undefined} */
-function string(value) {
-  return typeof value === 'string' ? undefined : own(value);
-}
-
-/** @param {unknown} value @returns {Fault|undefined} */
-function array(value) {
-  return isArrayClass(value) ? undefined : own(value);
-}
-
-/** @param {unknown} value @returns {Fault|undefined} */
-function schema(value) {
-  return isBoolOrObjectClass(value) ? undefined : own(value);
-}
+/** @param {unknown} value @returns {boolean} */
+const isTypeName = (value) => isString(value) && createIsSchemaTypeHandler(value) !== undefined;
 
 /**
  * Whether a value is an object of members as the compile reads one (a
@@ -122,169 +83,180 @@ function schema(value) {
  * @returns {value is Record<string, unknown>}
  */
 function isMembers(value) {
-  if (value === null || typeof value !== 'object') return false;
-  const prototype = Object.getPrototypeOf(value);
-  return prototype === Object.prototype || prototype === null;
-}
-
-/**
- * The fault of a list, by its items.
- * @param {unknown} value
- * @param {(item: unknown) => boolean} admits
- * @param {number} [least] - The fewest items the list takes
- * @returns {Fault|undefined}
- */
-function listOf(value, admits, least = 0) {
-  if (!isArrayClass(value) || value.length < least) return own(value);
-  for (let i = 0; i < value.length; i++)
-    if (!admits(value[i])) return { value: value[i], at: [i] };
-  return undefined;
-}
-
-/**
- * The fault of an object of members, by its members.
- * @param {unknown} value
- * @param {(member: unknown) => Fault|undefined} fault
- * @returns {Fault|undefined}
- */
-function membersOf(value, fault) {
-  if (!isMembers(value)) return own(value);
-  for (const name in value) {
-    if (!Object.hasOwn(value, name)) continue;
-    const found = fault(value[name]);
-    if (found !== undefined) return { value: found.value, at: [name, ...found.at] };
-  }
-  return undefined;
-}
-
-/** @param {unknown} value @returns {boolean} */
-const isString = (value) => typeof value === 'string';
-
-/** @param {unknown} value @returns {Fault|undefined} */
-const names = (value) => listOf(value, isString);
-
-/**
- * A member of a `type` list: a type name the validator knows, or `null`.
- * @param {unknown} value
- * @returns {boolean}
- */
-function isTypeMember(value) {
-  return value === null || (typeof value === 'string' && createIsSchemaTypeHandler(value) !== undefined);
-}
-
-/** @param {unknown} value @returns {Fault|undefined} */
-function type(value) {
-  if (typeof value === 'string') return isTypeMember(value) ? undefined : own(value);
-  return listOf(value instanceof Set ? Array.from(value) : value, isTypeMember, 1);
-}
-
-/** @param {unknown} value @returns {Fault|undefined} */
-function required(value) {
-  return typeof value === 'boolean' ? undefined : names(value);
-}
-
-/** @param {unknown} value @returns {Fault|undefined} */
-function schemaOrSchemas(value) {
-  return isArrayClass(value) ? listOf(value, isBoolOrObjectClass) : schema(value);
-}
-
-/** @param {unknown} value @returns {Fault|undefined} */
-function pattern(value) {
-  if (isRegExpType(value)) return undefined;
-  if (typeof value !== 'string') return own(value);
-  return regularExpression(value, []);
+  return value !== null && typeof value === 'object' && [Object.prototype, null].includes(Object.getPrototypeOf(value));
 }
 
 /**
  * A regular expression that does not compile, as `pattern` and the
  * `patternProperties` names read one.
  * @param {string} source
- * @param {(string|number)[]} at
  * @returns {Fault|undefined}
  */
-function regularExpression(source, at) {
+function regularExpression(source) {
   try {
     createSchemaPatternTester(source);
   }
   catch (error) {
-    return { value: source, at, error: /** @type {Error} */ (error) };
-  }
-  return undefined;
-}
-
-/** @param {unknown} value @returns {Fault|undefined} */
-function patternSchemas(value) {
-  const found = membersOf(value, schema);
-  if (found !== undefined) return found;
-  for (const name of Object.keys(/** @type {object} */ (value))) {
-    const invalid = regularExpression(name, [name]);
-    if (invalid !== undefined) return invalid;
+    return [[], source, /** @type {Error} */ (error)];
   }
   return undefined;
 }
 
 /**
- * Each shape a keyword value takes: its name in the meta-schema
- * derivation, what a refusal says it takes, and the check.
- * @type {Record<string, { expected: string, fault: (value: unknown) => Fault|undefined }>}
+ * A letter of a shape descriptor: whether a value is one, what a refusal
+ * calls one (`a`/`an` before it, `s` after it for several), and for a
+ * container whose members the rest of the descriptor shapes, how it holds
+ * them (`1` items, `2` named members).
+ * @typedef {[(value: any) => boolean, string, (1|2)?]} Letter
  */
-const SHAPES = {
-  'schema': { expected: 'a schema (an object or a boolean)', fault: schema },
-  'schemaArray': { expected: 'an array of schemas (objects or booleans)', fault: (value) => listOf(value, isBoolOrObjectClass) },
-  'schemaArray+': { expected: 'a non-empty array of schemas (objects or booleans)', fault: (value) => listOf(value, isBoolOrObjectClass, 1) },
-  'schema|schemaArray': { expected: 'a schema (an object or a boolean) or an array of schemas', fault: schemaOrSchemas },
-  'map<schema>': { expected: 'an object whose members are schemas (objects or booleans)', fault: (value) => membersOf(value, schema) },
-  'map<schema>/regex': { expected: 'an object whose members are schemas (objects or booleans), named by regular expressions', fault: patternSchemas },
-  'map<schema|stringArray>': { expected: 'an object whose members are schemas (objects or booleans) or arrays of member names', fault: (value) => membersOf(value, (member) => isArrayClass(member) ? names(member) : schema(member)) },
-  'map<stringArray>': { expected: 'an object whose members are arrays of member names', fault: (value) => membersOf(value, names) },
-  'stringArray': { expected: 'an array of member names', fault: required },
-  'type': { expected: 'a type name (array, boolean, integer, null, number, object, string) or a non-empty array of type names', fault: type },
-  'array': { expected: 'an array', fault: array },
-  'count': { expected: 'a non-negative integer', fault: count },
-  'number': { expected: 'a number', fault: number },
-  'number|boolean': { expected: 'a number', fault: bound },
-  'positive': { expected: 'a number greater than 0', fault: divisor },
-  'boolean': { expected: 'a boolean', fault: boolean },
-  'regex': { expected: 'a regular expression (a string)', fault: pattern },
-  'string': { expected: 'a string', fault: string },
+
+/** @type {Letter} A non-empty array, as `+` and `*` read one. */
+const NON_EMPTY = [(value) => isArrayClass(value) && !(value.length < 1), 'non-empty array', 1];
+/** @type {Letter} An object of members, as `{` and `/` read one. */
+const OBJECT = [isMembers, 'object', 2];
+
+/**
+ * The letters of the shape descriptors ({@link checker} reads them).
+ * @type {Record<string, Letter>}
+ */
+const LETTERS = {
+  '[': [isArrayClass, 'array', 1],
+  '+': NON_EMPTY,
+  '*': NON_EMPTY,
+  '{': OBJECT,
+  '/': OBJECT,
+  s: [isBoolOrObjectClass, 'schema'],
+  m: [isString, 'member name'],
+  g: [isString, 'string'],
+  n: [isTypeName, 'type name (array, boolean, integer, null, number, object, string)'],
+  y: [(value) => value === null || isTypeName(value), 'type name'],
+  a: [isArrayClass, 'array'],
+  c: [(value) => {
+    const number = readNumber(value);
+    return /** @type {number} */ (number) >= 0 && (typeof number === 'bigint' || Number.isInteger(number));
+  }, 'non-negative integer'],
+  u: [(value) => readNumber(value) !== undefined, 'number'],
+  p: [(value) => Boolean(readNumber(value)), 'number greater than 0'],
+  b: [(value) => typeof value === 'boolean', 'boolean'],
+  r: [isString, 'regular expression'],
 };
 
 /**
- * The shape each keyword the validator reads takes, by the name of the
- * meta-schema derivation (`map<schema>`: an object of schemas, `+`: a
- * non-empty list). The test that derives it from the meta-schemas names
- * each place this table reads more widely than the meta-schema.
+ * A fault found in a member or an item, located from its container.
+ * @param {Fault} found
+ * @param {string|number} key - The member name or item index
+ * @returns {Fault}
  */
-export const KEYWORD_SHAPES = Object.freeze({
-  __proto__: null,
-  $ref: 'string', $dynamicRef: 'string', $recursiveRef: 'string',
-  type: 'type', enum: 'array', required: 'stringArray',
-  minLength: 'count', maxLength: 'count', minItems: 'count', maxItems: 'count',
-  minProperties: 'count', maxProperties: 'count', minContains: 'count', maxContains: 'count',
-  minimum: 'number', maximum: 'number', exclusiveMinimum: 'number|boolean', exclusiveMaximum: 'number|boolean',
-  multipleOf: 'positive', uniqueItems: 'boolean', pattern: 'regex',
-  properties: 'map<schema>', patternProperties: 'map<schema>/regex', dependentSchemas: 'map<schema>',
-  dependencies: 'map<schema|stringArray>', dependentRequired: 'map<stringArray>',
-  additionalProperties: 'schema', propertyNames: 'schema', unevaluatedProperties: 'schema',
-  items: 'schema|schemaArray', prefixItems: 'schemaArray', additionalItems: 'schema', contains: 'schema',
-  unevaluatedItems: 'schema',
-  allOf: 'schemaArray', anyOf: 'schemaArray+', oneOf: 'schemaArray+', not: 'schema',
-  if: 'schema', then: 'schema', else: 'schema',
+function within(found, key) {
+  found[0].unshift(key);
+  return found;
+}
+
+/**
+ * The check of a shape descriptor, built once per descriptor: it answers a
+ * value's fault, or undefined when the value is of the shape. A descriptor
+ * is a letter of {@link LETTERS} (`r`: a string that compiles as a regular
+ * expression, or a `RegExp`); a container letter followed by the
+ * descriptor of its members — `[` an array, `+` a non-empty one, `*` a
+ * non-empty one or a `Set`, `{` an object, `/` an object whose member names
+ * are regular expressions; `?` before a descriptor, which admits a boolean
+ * too; or `one|many`, read as `many` for an array (or a `Set`) and as `one`
+ * otherwise. The first wrong member or item is the fault, in the order the
+ * value holds them; for `/` every member's value before any name.
+ * @param {string} shape
+ * @returns {(value: any) => Fault|undefined}
+ */
+function checker(shape) {
+  const head = shape[0];
+  if (head === '?') {
+    const next = checker(shape.slice(1));
+    return (value) => typeof value === 'boolean' ? undefined : next(value);
+  }
+  const [admits, , holds] = LETTERS[head];
+  if (holds === undefined && shape.length > 1) {
+    const bar = shape.indexOf('|');
+    const one = checker(shape.slice(0, bar));
+    const many = checker(shape.slice(bar + 1));
+    return (value) => (isArrayClass(value) || value instanceof Set ? many : one)(value);
+  }
+  if (head === 'r') return (value) => isRegExpType(value) ? undefined : admits(value) ? regularExpression(value) : [[], value];
+  if (holds === undefined) return (value) => admits(value) ? undefined : [[], value];
+  const member = checker(shape.slice(1));
+  return (value) => {
+    if (head === '*' && value instanceof Set) value = [...value];
+    if (!admits(value)) return [[], value];
+    if (holds === 1) {
+      for (let i = 0; i < value.length; i++) {
+        const found = member(value[i]);
+        if (found !== undefined) return within(found, i);
+      }
+      return undefined;
+    }
+    for (const key in value) {
+      const found = Object.hasOwn(value, key) ? member(value[key]) : undefined;
+      if (found !== undefined) return within(found, key);
+    }
+    if (head === '/') {
+      for (const key of Object.keys(value)) {
+        const found = regularExpression(key);
+        if (found !== undefined) return within(found, key);
+      }
+    }
+    return undefined;
+  };
+}
+
+/**
+ * What a refusal says a shape descriptor takes, read as {@link checker}
+ * reads it (the boolean `?` admits is a reading, not named).
+ * @param {string} shape
+ * @param {boolean} [several] - Worded as the members of a container
+ * @returns {string}
+ */
+function says(shape, several = false) {
+  const head = shape[0];
+  const bar = shape.indexOf('|');
+  if (head === '?') return says(shape.slice(1), several);
+  const [, word, holds] = LETTERS[head];
+  if (holds === undefined && bar > 0) return `${says(shape.slice(0, bar), several)} or ${says(shape.slice(bar + 1), several)}`;
+  const named = several ? `${word}s` : `${/^[aeiou]/.test(word) ? 'an' : 'a'} ${word}`;
+  return holds === undefined ? named : `${named} of ${says(shape.slice(1), true)}${head === '/' ? ' named by regular expressions' : ''}`;
+}
+
+/**
+ * The shape each keyword the validator reads takes, as descriptor and
+ * keywords: the validation vocabulary's keywords before the `;` (read
+ * only while a dialect keeps that vocabulary on), the rest after it. A
+ * keyword read only beside another names it after a `:` (`additionalItems`
+ * beside an `items` array; `$` for a dynamic reference, read only under
+ * the drafts that define it).
+ */
+const SHAPES = 'n|*y type,a enum,?[m required,{[m dependentRequired,'
+  + 'c minLength maxLength minItems maxItems minProperties maxProperties minContains:contains maxContains:contains,'
+  + 'u minimum maximum,?u exclusiveMinimum exclusiveMaximum,p multipleOf,b uniqueItems,r pattern;'
+  + 'g $ref $dynamicRef:$ $recursiveRef:$,{s properties dependentSchemas,/s patternProperties,{s|[m dependencies,'
+  + 's additionalProperties propertyNames unevaluatedProperties additionalItems:items contains unevaluatedItems not if then:if else:if,'
+  + 's|[s items,[s prefixItems allOf,+s anyOf oneOf';
+
+/**
+ * Each keyword of {@link SHAPES}: its descriptor, whether it is a
+ * validation-vocabulary keyword, the keyword it is read beside, and the
+ * descriptor's check. The test that derives the shapes from the
+ * meta-schemas names each place a descriptor reads more widely than the
+ * meta-schema.
+ * @type {Record<string, [string, boolean, string|undefined, (value: any) => Fault|undefined]>}
+ */
+export const KEYWORD_SHAPES = { __proto__: null };
+SHAPES.split(';').forEach((keywords, applicator) => {
+  for (const group of keywords.split(',')) {
+    const [shape, ...names] = group.split(' ');
+    const check = checker(shape);
+    for (const name of names) {
+      const [keyword, beside] = name.split(':');
+      KEYWORD_SHAPES[keyword] = [shape, !applicator, beside, check];
+    }
+  }
 });
-
-/** Each keyword's shape, looked up once per keyword a schema object holds. */
-const RULES = /* @__PURE__ */ Object.freeze(Object.fromEntries(
-  Object.entries(KEYWORD_SHAPES).map(([keyword, shape]) => [keyword, SHAPES[shape]])));
-
-/** The validation-vocabulary keywords of {@link KEYWORD_SHAPES}: read only while a dialect keeps that vocabulary on. */
-export const VALIDATION_KEYWORDS = /* @__PURE__ */ new Set([
-  'type', 'enum', 'required', 'dependentRequired', 'multipleOf', 'minimum', 'maximum',
-  'exclusiveMinimum', 'exclusiveMaximum', 'minLength', 'maxLength', 'pattern',
-  'minItems', 'maxItems', 'uniqueItems', 'minContains', 'maxContains', 'minProperties', 'maxProperties',
-]);
-
-/** The keywords a `$data` reference may stand for. */
-const DATA_REFERENCE_KEYWORDS = /* @__PURE__ */ new Set(DOLLAR_KEYWORD_ORDER);
 
 /**
  * Whether the validator reads a keyword of {@link KEYWORD_SHAPES} at a
@@ -293,21 +265,15 @@ const DATA_REFERENCE_KEYWORDS = /* @__PURE__ */ new Set(DOLLAR_KEYWORD_ORDER);
  * @param {import('./index.js').ValidationObject} schemaObj
  * @param {Record<string, any>} jsonSchema
  * @param {string} keyword
+ * @param {[string, boolean, string|undefined, unknown]} rule - Its entry in {@link KEYWORD_SHAPES}
  * @returns {boolean}
  */
-function reads(schemaObj, jsonSchema, keyword) {
-  if (schemaObj.options.vocabValidation === false && VALIDATION_KEYWORDS.has(keyword)) return false;
-  if (!readsSince(keyword, schemaObj.declaredDraft)) return false;
-  switch (keyword) {
-    case '$dynamicRef':
-    case '$recursiveRef': return admitsDynamicReference(keyword, schemaObj.dynamicReferenceDraft);
-    case 'then':
-    case 'else': return jsonSchema.if !== undefined;
-    case 'additionalItems': return isArrayClass(jsonSchema.items);
-    case 'minContains':
-    case 'maxContains': return jsonSchema.contains !== undefined;
-    default: return true;
-  }
+function reads(schemaObj, jsonSchema, keyword, [, validation, beside]) {
+  return !(validation && schemaObj.options.vocabValidation === false)
+    && readsSince(keyword, schemaObj.declaredDraft)
+    && (beside === undefined
+      || (beside === '$' ? admitsDynamicReference(keyword, schemaObj.dynamicReferenceDraft)
+        : beside === 'items' ? isArrayClass(jsonSchema.items) : jsonSchema[beside] !== undefined));
 }
 
 /**
@@ -320,24 +286,17 @@ function reads(schemaObj, jsonSchema, keyword) {
  *   `JK0014` for a regular expression that does not compile
  */
 export function admitKeywordValues(schemaObj, jsonSchema, keys) {
-  for (let i = 0; i < keys.length; i++) {
-    const keyword = keys[i];
-    const rule = Object.hasOwn(RULES, keyword) ? RULES[keyword] : undefined;
+  for (const keyword of keys) {
+    const rule = KEYWORD_SHAPES[keyword];
     if (rule === undefined) continue;
     const value = jsonSchema[keyword];
-    const found = rule.fault(value);
+    const found = rule[3](value);
     if (found === undefined
-      || (DATA_REFERENCE_KEYWORDS.has(keyword) && isDollarDataRef(value))
-      || !reads(schemaObj, jsonSchema, keyword)) continue;
-    const place = compiledLocation(keywordLocation(schemaObj.path, keyword, ...found.at), schemaObj.root.origin);
-    const error = found.error;
-    if (error !== undefined) {
-      const holder = found.at.length === 0 ? `'${keyword}' holds` : `'${keyword}' names a member`;
-      throw new SchemaCompileError('JK0014',
-        `${holder} ${describeValue(found.value)}, which is no regular expression (${error.message})`, place, { cause: error });
-    }
-    const member = found.at.length === 0 ? '' : ` for ${found.at.map((step) => typeof step === 'number' ? `item ${step}` : `member '${step}'`).join(' ')}`;
-    throw new SchemaCompileError('JK0013',
-      `'${keyword}' takes ${rule.expected}, got ${describeValue(found.value)}${member}; a value of another shape is no constraint the validator reads`, place);
+      || (DOLLAR_KEYWORD_ORDER.includes(keyword) && isDollarDataRef(value))
+      || !reads(schemaObj, jsonSchema, keyword, rule)) continue;
+    const [at, wrong, error] = found;
+    throw new SchemaCompileError(error === undefined ? 'JK0013' : 'JK0014',
+      `'${keyword}' takes ${says(rule[0])}, got ${describeValue(wrong)}${error === undefined ? '; a value of another shape is no constraint the validator reads' : `, which does not compile (${error.message})`}`,
+      compiledLocation(keywordLocation(schemaObj.path, keyword, ...at), schemaObj.root.origin), error && { cause: error });
   }
 }

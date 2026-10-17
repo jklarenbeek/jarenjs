@@ -314,7 +314,7 @@ query's own grammar; a `JK` code over it would send every reader to `cause`.
 | `JK0011` | `SchemaCompileError` | A `$recursiveRef` read as draft 2019-09 is not `"#"`: refused by the first call that reaches it, naming the `$ref` that applies the schema it names |
 | `JK0012` | `SchemaCompileError` | An identifier (`$id`, `$anchor`, `$dynamicAnchor`) names two schemas — a document declares it twice, or it already names another schema the validator holds: refused where the second is read, naming both places; in a registered document, refused by the compile that reads it |
 | `JK0013` | `SchemaCompileError` | A keyword the validator reads at a place holds a value that is not of the shape its draft's meta-schema requires (`type: 1`, `required: "a"`, `minLength: -1`, `properties: { "a": 5 }`, `anyOf: []`): refused where the place compiles, naming the keyword, the shape it takes and the value, located at the keyword or at the member or item of it that is wrong |
-| `JK0014` | `SchemaCompileError` | A `pattern`, or a `patternProperties` member name, is no regular expression: refused where the place compiles, located at the keyword or the member, the `SyntaxError` as the `cause` |
+| `JK0014` | `SchemaCompileError` | A `pattern`, or a `patternProperties` member name, is no regular expression: refused where the place compiles, naming the keyword, the shape it takes, the value and the `SyntaxError`'s message, located at the keyword or the member, the `SyntaxError` as the `cause` |
 | `JK0015` | `SchemaCompileError` | Under `unknownFormats: 'error'`, a `format` that asserts names no registered format — an unregistered name, or a value that is no name (`format: 5`): refused where the place compiles, naming the format, the registration that would serve it and the opt-out, located at the keyword |
 | `JK0101` | `SchemaCompileError` | Retired, no longer raised: `deriveStrictProfile` (`@jarenjs/validate/strict-profile`) carries a schema that accepts any value — `true`, `{}`, a node with no type, a free-form object, a tuple — as JSON text |
 | `JK0102` | `SchemaCompileError` | `deriveStrictProfile`: an object whose member names are open and that no entries array carries — a map beside declared `properties`, a map that may also be an array, a schema-valued `unevaluatedProperties` |
@@ -587,14 +587,25 @@ off, `then`/`else` without `if`, `additionalItems` without an `items` array,
 `$ref`, the annotations, identifiers, `$defs`/`definitions`, `format` (under
 `unknownFormats: 'error'` a value that names no format is `JK0015`), the
 content keywords and the extension keywords. A regular expression that does
-not compile is `JK0014`:
+not compile is `JK0014`. The message names the keyword and the shape it
+takes; the place (`docPath`, the message's last words) names the member or
+item of it that is wrong:
 
 ```text
 JK0013: 'type' takes a type name (array, boolean, integer, null, number, object, string) or a non-empty array of type names, got 'strin'; a value of another shape is no constraint the validator reads at #/type
 JK0013: 'minimum' takes a number, got 'ten'; a value of another shape is no constraint the validator reads at #/properties/total/minimum
-JK0013: 'dependencies' takes an object whose members are schemas (objects or booleans) or arrays of member names, got 1 for member 'a' item 1; a value of another shape is no constraint the validator reads at #/dependencies/a/1
-JK0014: 'pattern' holds '[', which is no regular expression (Invalid regular expression: /[/u: Unterminated character class) at #/pattern
+JK0013: 'dependencies' takes an object of schemas or arrays of member names, got 1; a value of another shape is no constraint the validator reads at #/dependencies/a/1
+JK0014: 'pattern' takes a regular expression, got '[', which does not compile (Invalid regular expression: /[/u: Unterminated character class) at #/pattern
 ```
+
+*Upgrade:* the codes and places are unchanged; the wording is shorter. A
+member or item is named by the place alone (no longer also as "for member
+'a' item 1"), a schema is "a schema" (no longer "a schema (an object or a
+boolean)"), an object of members is "an object of …" (no longer "an object
+whose members are …"), and `JK0014` names the shape the keyword takes like `JK0013`, then the
+value and the `SyntaxError`'s message (no longer "'pattern' holds '[',
+which is no regular expression (…)"). A program that matched the old text
+matches the code and `docPath` instead.
 
 **`JK0015` — a format that names no registered format.** With
 `unknownFormats: 'error'`, a `format` keyword that asserts (below draft

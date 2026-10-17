@@ -135,7 +135,7 @@ describe('a reference resolved on first use that resolves to nothing is refused 
       .addSchema({ pattern: '(' }, 'https://held.test/name.json').compile({ $ref: A });
     const [code, message] = answers(validate, ['x'])[0];
     assert.equal(code, 'JK0014');
-    assert.match(message, /^JK0014: 'pattern' holds '\(', which is no regular expression \(Invalid regular expression: /);
+    assert.match(message, /^JK0014: 'pattern' takes a regular expression, got '\(', which does not compile \(Invalid regular expression: /);
   });
 
   it('answers once the URI the draft-07 reading names is registered too', () => {

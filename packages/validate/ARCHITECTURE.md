@@ -1208,7 +1208,9 @@ document that is (the message then names the step that misses)
   `compileSchemaObject`, over the keywords the place reads (its declared
   draft's, under the vocabularies its dialect keeps on, beside the keyword
   each depends on), so no keyword compiler sees a value of another shape.
-  `KEYWORD_SHAPES` is the table; `test/validate/keyword-values-meta.test.js`
+  `KEYWORD_SHAPES` is the table, read from one short shape descriptor per
+  group of keywords that both checks a value and words the refusal;
+  `test/validate/keyword-values-meta.test.js`
   derives it from the meta-schemas `@jarenjs/refs` ships and names each
   place it reads more widely
 - `JK0015`: under `unknownFormats: 'error'`, an asserting `format` that
