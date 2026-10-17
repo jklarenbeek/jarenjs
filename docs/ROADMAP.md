@@ -719,6 +719,12 @@ what each does is its own documentation's job
   column sort every row. Wanted: an index order the engine's empty placement
   can use (an index declared `NULLS FIRST`, or `NULLS LAST` emitted where the
   column refuses NULL), keeping the engine's empty-first order.
+- [ ] **On PostgreSQL an untyped or mixed-kind indexed member never seeks for
+  a number comparison.** Its generated column is `jsonb`, which the emitter
+  does not compare with a number, so a literal, list or external comparison
+  reads the document path and scans the table. A range over the jsonb column
+  (`jsonb_typeof(col) = 'number' AND col >= edge AND col <= edge`, edges as
+  jsonb numbers) would serve its btree index.
 - [ ] **On PostgreSQL a join's equality over two non-key number columns no
   longer seeks.** It reads both columns as the doubles (bounded by ranges of
   each around the other), which the planner cannot estimate, so it hashes or

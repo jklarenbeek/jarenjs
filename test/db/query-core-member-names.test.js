@@ -53,8 +53,16 @@ describe('a member name holding a backslash', () => {
         const byEscaped = { $for: { it: '$[*]' }, $where: { $eq: [String.raw`$it['a\\u0041']`, 1] }, $return: '$it.id' };
         const explained = await docs.explain(byEscaped);
         assert.equal(explained.mode, 'native', host);
-        // indexed, the generated column answers: it holds the member literally named
-        if (indexed) assert.match(explained.sql, /"gx_a_u0041" = /, host);
+        // indexed, the generated column answers: it holds the member literally
+        // named, and the planner reads it through its index. PostgreSQL reads
+        // a member by its decimal digits, so the literal binds as the interval
+        // of decimals that round to its double, both edges on the column
+        if (indexed) {
+          assert.match(explained.sql, host === 'postgres'
+            ? /"gx_a_u0041" >= \$1 AND "gx_a_u0041" <= \$2/ : /"gx_a_u0041" = \?/, host);
+          assert.ok(!explained.sql.includes(String.raw`'{"a\\u0041"}'`), host);
+          assert.match(explained.scanNarrative, /\bdocs_by_escaped\b/, host);
+        }
         assert.equal(await docs.execute(byEscaped), 'q', host);
         const byOther = { $for: { it: '$[*]' }, $where: { $eq: ['$it.aA', 2] }, $orderby: '$it.id', $return: '$it.id' };
         assert.deepEqual(await docs.execute(byOther), ['m', 'q'], host);
