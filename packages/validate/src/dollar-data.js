@@ -34,12 +34,6 @@
  */
 
 import {
-  isObjectClass,
-  isStringType,
-  isObjectType,
-} from '@jarenjs/core';
-
-import {
   equalsDeep,
 } from '@jarenjs/core/object';
 
@@ -58,15 +52,7 @@ import {
   dataRefOptions,
   allValidatorsPass,
 } from './tools.js';
-
-/**
- * Check if a value is a $data reference object
- * @param {*} value - The value to check
- * @returns {boolean} True if the value is a $data reference object
- */
-export function isDollarDataRef(value) {
-  return isObjectClass(value) && isStringType(value.$data);
-}
+import { isDollarDataRef } from './schema-keywords.js';
 
 // The fifteen keyword validators are shared with the `data` keyword (see
 // tools.js). Ajv's `$data` takes the same three forms the `data` keyword does:
@@ -178,9 +164,5 @@ export function compileDollarDataSchema(schemaObj, jsonSchema) {
   }
 
   return allValidatorsPass(validators, schemaObj.options.skipErrors);
-}
-
-export function isDollarDataReference(jsonSchema) {
-  return (jsonSchema !== null && (isObjectType(jsonSchema) && jsonSchema.$data));
 }
 //#endregion

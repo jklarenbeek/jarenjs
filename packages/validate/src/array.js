@@ -21,7 +21,6 @@ import {
 
 import {
   getBoolOrObjectClass,
-  getArrayClassMinItems,
   isOfSchemaType,
   extendsChildLocations,
   annotatesFailedMembers,
@@ -70,10 +69,11 @@ const compileUniqueItems = (schemaObj, jsonSchema) =>
 
 //#region Tuple
 
+// An empty tuple has no positions: every element lies past it, so the
+// additional keyword applies to all of them. An empty prefixItems never gets
+// here (readPrefixItems reads it as absent, and items then applies to all).
 function compileTupleInternal(schemaObj, jsonSchema, itemsKey, additionalKey) {
-  const tuple = getArrayClassMinItems(jsonSchema[itemsKey], 1);
-  if (tuple == null)
-    return undefined;
+  const tuple = jsonSchema[itemsKey];
 
   // Pre-compile all validators upfront
   const validators = new Array(tuple.length);
@@ -410,7 +410,7 @@ function compileArrayChildren(schemaObj, jsonSchema) {
   // Check for prefixItems (draft 2020-12+) first, then items.
   const prefixItems = readPrefixItems(schemaObj, jsonSchema);
   const items = jsonSchema.items;
-  const isTuple = getArrayClassMinItems(items, 1) != null;
+  const isTuple = isArrayClass(items);
 
   const root = schemaObj.root;
   const track = root.usesUnevaluated;

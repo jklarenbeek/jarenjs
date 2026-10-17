@@ -26,7 +26,8 @@
  * `$schema`, …), `$defs`/`definitions` (a reference into a malformed one
  * is refused `JK0009` where it is followed), `format` and the content
  * keywords (a value that names no format or encoding is an annotation, as
- * the specification reads an unknown one), and the extension keywords
+ * the specification reads an unknown one; under `unknownFormats: 'error'`
+ * format.js refuses an asserting one `JK0015`), and the extension keywords
  * (`$query`, `data`, `nullable`, `errorMessage`, `propertyDependencies`).
  * A keyword the place does not read is not admitted either: one its
  * declared draft does not define, a validation keyword under a dialect
@@ -38,10 +39,10 @@
 import { isArrayClass } from '@jarenjs/core';
 import { isRegExpType } from '@jarenjs/core/string';
 
-import { SchemaCompileError } from './errors.js';
-import { readsSince } from './schema-keywords.js';
+import { describeValue, SchemaCompileError } from './errors.js';
+import { isDollarDataRef, readsSince } from './schema-keywords.js';
 import { admitsDynamicReference } from './dynamic-ref.js';
-import { DOLLAR_KEYWORD_ORDER, isDollarDataRef } from './dollar-data.js';
+import { DOLLAR_KEYWORD_ORDER } from './dollar-data.js';
 import { createIsSchemaTypeHandler, isBoolOrObjectClass } from './tools.js';
 import { createSchemaPatternTester } from './string.js';
 import { compiledLocation, keywordLocation } from './traverse.js';
@@ -307,21 +308,6 @@ function reads(schemaObj, jsonSchema, keyword) {
     case 'maxContains': return jsonSchema.contains !== undefined;
     default: return true;
   }
-}
-
-/**
- * Name a refused value: a string quoted (as the other option and keyword
- * refusals quote one), a number, boolean or null as written, anything else
- * by its kind.
- * @param {unknown} value
- * @returns {string}
- */
-function describeValue(value) {
-  if (typeof value === 'string') return `'${value.length > 40 ? `${value.slice(0, 40)}…` : value}'`;
-  if (typeof value === 'bigint') return `${value}n`;
-  if (value === null || typeof value === 'number' || typeof value === 'boolean') return String(value);
-  if (Array.isArray(value)) return value.length === 0 ? 'an empty array' : 'an array';
-  return typeof value === 'object' ? 'an object' : `a ${typeof value}`;
 }
 
 /**

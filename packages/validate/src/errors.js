@@ -24,7 +24,9 @@
  * validator reads at a place whose value is not of the shape its draft's
  * meta-schema requires is refused where the place compiles (`JK0013`), and
  * a `pattern` or `patternProperties` name that is no regular expression
- * `JK0014`. A `$query`
+ * `JK0014`. Under `unknownFormats: 'error'`, a `format` that asserts and
+ * names no registered format (an unregistered name, or a value that is no
+ * name) is refused where the place compiles (`JK0015`). A `$query`
  * document that does not compile is refused with the query compiler's own
  * code (`JQ0xxx`, `@jarenjs/json/query`), located under the `$query`
  * keyword, its error as the `cause`. A schema `deriveStrictProfile`
@@ -59,6 +61,7 @@ export const VALIDATE_CODES = Object.freeze({
   JK0012: 'an identifier names two schemas',
   JK0013: 'a keyword value is not of the shape its draft requires',
   JK0014: 'a pattern or a patternProperties name is not a regular expression',
+  JK0015: "under unknownFormats: 'error', an asserting format names no registered format",
   JK0101: 'retired: a schema that accepts any value is carried as JSON text',
   JK0102: 'a strict profile cannot carry an object whose member names are open',
   JK0103: 'a strict profile cannot carry a keyword that applies members, items or branches beside its node',
@@ -148,6 +151,21 @@ export function assertOutputFormat(value) {
  */
 export function describeCount(value) {
   return typeof value === 'number' ? String(value) : JSON.stringify(value) ?? typeof value;
+}
+
+/**
+ * Name a refused value: a string quoted (as the other option and keyword
+ * refusals quote one), a number, boolean or null as written, anything else
+ * by its kind.
+ * @param {unknown} value
+ * @returns {string}
+ */
+export function describeValue(value) {
+  if (typeof value === 'string') return `'${value.length > 40 ? `${value.slice(0, 40)}…` : value}'`;
+  if (typeof value === 'bigint') return `${value}n`;
+  if (value === null || typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (Array.isArray(value)) return value.length === 0 ? 'an empty array' : 'an array';
+  return typeof value === 'object' ? 'an object' : `a ${typeof value}`;
 }
 
 /**

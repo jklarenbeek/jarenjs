@@ -1211,6 +1211,11 @@ document that is (the message then names the step that misses)
   `KEYWORD_SHAPES` is the table; `test/validate/keyword-values-meta.test.js`
   derives it from the meta-schemas `@jarenjs/refs` ships and names each
   place it reads more widely
+- `JK0015`: under `unknownFormats: 'error'`, an asserting `format` that
+  names no registered format; `compileFormatBasic` (format.js) refuses it
+  after the assertion gate, so an annotation-only `format` and a `$data`
+  reference never reach it, and `getSchemaFormatCompiler` reads only the
+  registry's own members
 
 ### Performance Degradation on First Validation
 

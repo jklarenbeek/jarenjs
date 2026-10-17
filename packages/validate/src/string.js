@@ -17,6 +17,8 @@ import {
   trueThat,
 } from '@jarenjs/core/function';
 
+import { isDollarDataRef } from './schema-keywords.js';
+
 /**
  * Compile a JSON Schema regular expression (`pattern`, a
  * `patternProperties` key) into a repeatable predicate. A string is an
@@ -80,8 +82,8 @@ function compileMaxLength(schemaObj, jsonSchema) {
 }
 
 function compilePattern(schemaObj, jsonSchema) {
-  // Skip if pattern is a $data reference object (has $data property)
-  if (jsonSchema.pattern && typeof jsonSchema.pattern === 'object' && jsonSchema.pattern.$data) return undefined;
+  // A $data reference is compiled with the $data keywords.
+  if (isDollarDataRef(jsonSchema.pattern)) return undefined;
 
   const pattern = jsonSchema.pattern;
   const matches = createSchemaPatternTester(pattern);

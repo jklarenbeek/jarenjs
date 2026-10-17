@@ -33,7 +33,7 @@ const NOT_ADMITTED = {
   examples: 'an annotation', readOnly: 'an annotation', writeOnly: 'an annotation', deprecated: 'an annotation',
   $defs: 'storage: a reference into a malformed one is JK0009 where it is followed',
   definitions: 'storage, as $defs',
-  format: 'a value that names no format is ignored, as the specification reads an unknown format',
+  format: "a value that names no format is ignored, as the specification reads an unknown format (refused JK0015 by the format compiler under unknownFormats: 'error')",
   contentEncoding: 'content keywords: an encoding that names none is an annotation',
   contentMediaType: 'content keywords: a media type that names none is an annotation',
   contentSchema: 'content keywords: applied by no validation',

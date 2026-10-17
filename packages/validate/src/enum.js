@@ -11,14 +11,16 @@ import {
 import {
   getArrayClassMinItems,
 } from './tools.js';
-import { isDollarDataReference } from './dollar-data.js';
+import { isDollarDataRef } from './schema-keywords.js';
 
 function compileConst(schemaObj, jsonSchema) {
   const constant = jsonSchema.const;
   if (constant === undefined)
     return undefined;
 
-  if (isDollarDataReference(constant))
+  // A string $data is a reference (compiled with the $data keywords); an
+  // object with any other $data member is the literal value.
+  if (isDollarDataRef(constant))
     return undefined;
 
   const addError = schemaObj.createErrorHandler(constant, 'const');

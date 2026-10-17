@@ -3,10 +3,16 @@ import {
   isFn,
 } from '@jarenjs/core';
 
+import { describeValue, SchemaCompileError } from './errors.js';
+import { isDollarDataRef } from './schema-keywords.js';
+import { compiledLocation, keywordLocation } from './traverse.js';
+
 /** @typedef {import('./index.js').FormatCompiler} FormatCompiler */
 
 /**
- * Registers a single format compiler under a name.
+ * Registers a single format compiler under a name, as an own member of the
+ * registry (a name the object prototype holds, `constructor` or `__proto__`,
+ * registers like any other).
  * Existing registrations are never overwritten.
  * @param {Record<string, FormatCompiler>} registered - The formats registry object
  * @param {string} name - The format name (e.g. 'email', 'uri', 'date-time')
@@ -14,13 +20,10 @@ import {
  * @returns {boolean} True when the compiler was registered
  */
 export function registerFormatCompiler(registered, name, formatCompiler) {
-  if (registered[name] == null) {
-    if (isFn(formatCompiler)) {
-      registered[name] = formatCompiler;
-      return true;
-    }
-  }
-  return false;
+  if (getSchemaFormatCompiler(registered, name) != null || !isFn(formatCompiler))
+    return false;
+  Object.defineProperty(registered, name, { value: formatCompiler, writable: true, enumerable: true, configurable: true });
+  return true;
 }
 
 /**
@@ -45,15 +48,22 @@ const WRONG_SHAPE_HINT = 'Register the format COMPILERS (stringFormats, dateTime
   + 'numberFormats, jsonFormats, geoFormats) rather than the raw testers (formatTesters) — '
   + 'both are objects full of functions, and only the compilers take (schemaObj, jsonSchema).';
 
+/**
+ * The compiler registered under a format name: an own member of the
+ * registry, so a name only the object prototype holds (`toString`) is
+ * registered nowhere.
+ * @param {Record<string, FormatCompiler>} registered - The formats registry object
+ * @param {unknown} name - The format keyword's value
+ * @returns {FormatCompiler | undefined}
+ */
 export function getSchemaFormatCompiler(registered, name) {
-  if (isStringType(name))
-    return registered[name];
-  else
-    return undefined;
+  return isStringType(name) && Object.hasOwn(registered, name) ? registered[name] : undefined;
 }
 
 export function compileFormatBasic(schemaObj, jsonSchema) {
-  if (!isStringType(jsonSchema.format))
+  const format = jsonSchema.format;
+  // A $data reference is compiled with the $data keywords.
+  if (format === undefined || isDollarDataRef(format))
     return undefined;
 
   // From draft 2020-12 on, format is annotation-only unless assertion is
@@ -64,23 +74,26 @@ export function compileFormatBasic(schemaObj, jsonSchema) {
   // would be complaining about the spec.
   if (schemaObj.options.formatAssertion === false)
     return undefined;
-  const compiler = getSchemaFormatCompiler(
-    schemaObj.formats,
-    jsonSchema.format);
+  const compiler = getSchemaFormatCompiler(schemaObj.formats, format);
 
   // An unregistered name with assertion ON is the silent failure this
   // check exists to end: the author asked for the value to be checked,
   // the registry has nothing to check it with, and without this the
-  // schema compiles to a validator that accepts everything. Raising it
+  // schema compiles to a validator that accepts everything. A value that
+  // is no name at all (a number, null) is the same failure. Raising it
   // at COMPILE time keeps instance validation spec-exact — no data is
   // ever invalidated by an unknown format, the schema's AUTHOR is told.
   if (compiler == null) {
     if (schemaObj.options.unknownFormats === 'ignore')
       return undefined;
-    throw new Error(`Unknown format '${jsonSchema.format}': no compiler is registered for it, `
+    const named = isStringType(format)
+      ? `Unknown format '${format}': no compiler is registered for it`
+      : `'format' holds ${describeValue(format)}, which names no format`;
+    throw new SchemaCompileError('JK0015', `${named}, `
       + 'so this schema would accept every value for that keyword. Register one '
       + '(addFormats(dateTimeFormats) etc. from @jarenjs/formats, or addFormat(name, compiler) '
-      + "for your own), or pass { unknownFormats: 'ignore' } to accept it as an annotation.");
+      + "for your own), or pass { unknownFormats: 'ignore' } to accept it as an annotation",
+    compiledLocation(keywordLocation(schemaObj.path, 'format'), schemaObj.root.origin));
   }
 
   // A format COMPILER is called once per schema location and returns the
@@ -95,12 +108,12 @@ export function compileFormatBasic(schemaObj, jsonSchema) {
     validator = compiler(schemaObj, jsonSchema);
   }
   catch (err) {
-    throw new Error(`Format '${jsonSchema.format}' failed to compile: ${err?.message ?? err}. `
+    throw new Error(`Format '${format}' failed to compile: ${err?.message ?? err}. `
       + `${WRONG_SHAPE_HINT}`, { cause: err });
   }
   // Nullish stays legal: a compiler may decline a schema it cannot serve.
   if (validator != null && !isFn(validator) && !Array.isArray(validator)) {
-    throw new Error(`Format '${jsonSchema.format}' is registered with something that is not a `
+    throw new Error(`Format '${format}' is registered with something that is not a `
       + `format compiler: calling it returned ${typeof validator}, not a validator function. `
       + `${WRONG_SHAPE_HINT}`);
   }

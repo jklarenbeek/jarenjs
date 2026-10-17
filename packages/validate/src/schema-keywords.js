@@ -1,7 +1,18 @@
 //@ts-check
 
-import { isArrayClass } from '@jarenjs/core';
+import { isArrayClass, isObjectClass, isStringType } from '@jarenjs/core';
 import { SCHEMA_VALUE_KEYWORDS, SCHEMA_MAP_KEYWORDS, SCHEMA_LIST_KEYWORDS } from '@jarenjs/core/schema';
+
+/**
+ * Whether a keyword value is a `$data` reference: an object whose `$data` is
+ * a pointer string (empty for the root, relative or absolute). An object with
+ * any other `$data` member is a plain value.
+ * @param {*} value - The keyword value
+ * @returns {boolean}
+ */
+export function isDollarDataRef(value) {
+  return isObjectClass(value) && isStringType(value.$data);
+}
 
 /** Reference walks accept legacy additionalItems, but do not register contentSchema. */
 const REFERENCE_VALUES = /* @__PURE__ */ SCHEMA_VALUE_KEYWORDS.filter((key) => key !== 'contentSchema');

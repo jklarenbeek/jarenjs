@@ -315,6 +315,7 @@ query's own grammar; a `JK` code over it would send every reader to `cause`.
 | `JK0012` | `SchemaCompileError` | An identifier (`$id`, `$anchor`, `$dynamicAnchor`) names two schemas — a document declares it twice, or it already names another schema the validator holds: refused where the second is read, naming both places; in a registered document, refused by the compile that reads it |
 | `JK0013` | `SchemaCompileError` | A keyword the validator reads at a place holds a value that is not of the shape its draft's meta-schema requires (`type: 1`, `required: "a"`, `minLength: -1`, `properties: { "a": 5 }`, `anyOf: []`): refused where the place compiles, naming the keyword, the shape it takes and the value, located at the keyword or at the member or item of it that is wrong |
 | `JK0014` | `SchemaCompileError` | A `pattern`, or a `patternProperties` member name, is no regular expression: refused where the place compiles, located at the keyword or the member, the `SyntaxError` as the `cause` |
+| `JK0015` | `SchemaCompileError` | Under `unknownFormats: 'error'`, a `format` that asserts names no registered format — an unregistered name, or a value that is no name (`format: 5`): refused where the place compiles, naming the format, the registration that would serve it and the opt-out, located at the keyword |
 | `JK0101` | `SchemaCompileError` | Retired, no longer raised: `deriveStrictProfile` (`@jarenjs/validate/strict-profile`) carries a schema that accepts any value — `true`, `{}`, a node with no type, a free-form object, a tuple — as JSON text |
 | `JK0102` | `SchemaCompileError` | `deriveStrictProfile`: an object whose member names are open and that no entries array carries — a map beside declared `properties`, a map that may also be an array, a schema-valued `unevaluatedProperties` |
 | `JK0103` | `SchemaCompileError` | `deriveStrictProfile`: a keyword that applies members, items or branches beside its node and that no distribution makes exact — `if`/`then`/`else`, `dependentSchemas` or a draft-07 `dependencies` schema beside an object type, a branch beside an object type that is more than members (a `$ref`, a nested union, an `enum`), a branch giving a member a second schema that is not an `enum` or `const`, an untyped `allOf` of more than one branch, a `$ref` or `anyOf` beside structural siblings |
@@ -583,7 +584,8 @@ What a place does not read is not refused: a keyword its declared draft does
 not define, a validation keyword under a dialect that turns that vocabulary
 off, `then`/`else` without `if`, `additionalItems` without an `items` array,
 `minContains`/`maxContains` without `contains`, the siblings of a draft-07
-`$ref`, the annotations, identifiers, `$defs`/`definitions`, `format`, the
+`$ref`, the annotations, identifiers, `$defs`/`definitions`, `format` (under
+`unknownFormats: 'error'` a value that names no format is `JK0015`), the
 content keywords and the extension keywords. A regular expression that does
 not compile is `JK0014`:
 
@@ -592,6 +594,22 @@ JK0013: 'type' takes a type name (array, boolean, integer, null, number, object,
 JK0013: 'minimum' takes a number, got 'ten'; a value of another shape is no constraint the validator reads at #/properties/total/minimum
 JK0013: 'dependencies' takes an object whose members are schemas (objects or booleans) or arrays of member names, got 1 for member 'a' item 1; a value of another shape is no constraint the validator reads at #/dependencies/a/1
 JK0014: 'pattern' holds '[', which is no regular expression (Invalid regular expression: /[/u: Unterminated character class) at #/pattern
+```
+
+**`JK0015` — a format that names no registered format.** With
+`unknownFormats: 'error'`, a `format` keyword that asserts (below draft
+2020-12, or with format assertion on) and names no format compiler the
+validator holds is refused where the place compiles: an unregistered name, a
+name only the object prototype holds (`toString`), and a value that is no
+name (a number, `null`, an object that is not a `$data` reference). It used
+to be an uncoded `Error` with no `docPath` for a name, and a non-string value
+compiled to a keyword that accepted every value. Under the default
+`'ignore'`, where `format` is an annotation, and for a `$data` reference, the
+same schemas compile:
+
+```text
+JK0015: Unknown format 'foo': no compiler is registered for it, so this schema would accept every value for that keyword. Register one (addFormats(dateTimeFormats) etc. from @jarenjs/formats, or addFormat(name, compiler) for your own), or pass { unknownFormats: 'ignore' } to accept it as an annotation at #/format
+JK0015: 'format' holds 5, which names no format, so this schema would accept every value for that keyword. Register one (addFormats(dateTimeFormats) etc. from @jarenjs/formats, or addFormat(name, compiler) for your own), or pass { unknownFormats: 'ignore' } to accept it as an annotation at #/properties/a/format
 ```
 
 **`JK0102`–`JK0108` — a schema with no strict form.** `deriveStrictProfile`

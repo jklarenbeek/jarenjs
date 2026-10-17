@@ -160,6 +160,13 @@ it does not require Node's `Buffer` global.
 - maxContains / minContains | _new `draft2019`_
 - unevaluatedItems | _new `draft2019`_
 
+An empty `items` array is a tuple of no positions: every element lies past it,
+so `additionalItems` beside it applies to every element (`{ "items": [],
+"additionalItems": false }` admits only the empty array), as it applies past
+the last position of a longer tuple; alone it constrains no element. *Upgrade:
+`additionalItems` beside an empty `items` array was ignored, so that schema
+accepted every array.*
+
 ### 🔑 Keywords for object
 
 - maxProperties / minProperties
@@ -255,7 +262,7 @@ See also:
 
   Both absolute JSON Pointers (e.g., `/A`, `/limits/min`) and relative JSON Pointers (e.g., `0/parent`, `1/sibling`) are supported. A reference that cannot be compiled (`{ "minimum": "abc" }`) fails the compile, as it does for `$data`; a reference that compiles but finds no value in the instance asserts nothing.
 
-- `$data` | Ajv-style instance references (`{ "minimum": { "$data": "1/limit" } }`) — supports every keyword the `data` list above supports, plus `uniqueItems` and `required`. Takes the same three reference forms: empty for the whole instance, an absolute JSON Pointer (`/limit`), or a Relative JSON Pointer (`1/limit`). Refs compile once at schema compile time through the compiled pointer engine of `@jarenjs/json`, and a reference that cannot be compiled **fails the compile** rather than quietly resolving to nothing — a constraint that disables itself is worse than a rejected schema.
+- `$data` | Ajv-style instance references (`{ "minimum": { "$data": "1/limit" } }`) — supports every keyword the `data` list above supports, plus `uniqueItems` and `required`. Takes the same three reference forms: empty for the whole instance, an absolute JSON Pointer (`/limit`), or a Relative JSON Pointer (`1/limit`). Refs compile once at schema compile time through the compiled pointer engine of `@jarenjs/json`, and a reference that cannot be compiled **fails the compile** rather than quietly resolving to nothing — a constraint that disables itself is worse than a rejected schema. Only a string `$data` is a reference: an object whose `$data` is anything else is a plain value, so `{ "const": { "$data": 5 } }` admits only `{ "$data": 5 }`. *Upgrade: such a `const` accepted every value, and `{ "const": { "$data": "" } }` (the whole instance) refused every value.*
 
 - `$query` | Jaren's cross-field assertion keyword — see [below](#query--cross-field-assertions)
 
@@ -1067,7 +1074,8 @@ keyword, the shape and the place, the member or item of it that is wrong
 included (`#/properties/a`, `#/type/1`). A number written as a string
 (`"3"`), a `$data` reference, a boolean `exclusiveMinimum` beside `minimum`, a
 `RegExp` pattern and `required: true` keep their readings; annotations,
-identifiers, `$defs`, `format`, the content keywords, the extension keywords and
+identifiers, `$defs`, `format` (under `unknownFormats: 'error'` a value that
+names no format is `JK0015`), the content keywords, the extension keywords and
 a keyword the place does not read are not checked. An empty `enum` admits no
 value. *Upgrade: such a value compiled and answered as if the keyword were
 absent — `{ "required": "a" }` required nothing, `{ "type": 1 }` and
@@ -1192,16 +1200,27 @@ because a library has to be able to compile a schema it did not write. The
 cost is a real trap: a `format: 'date-time'` you believed was checking
 timestamps, checking nothing, and looking exactly like one that works.
 
-**`unknownFormats: 'error'` turns that into a compile-time throw.** Set it for
-schemas you own:
+**`unknownFormats: 'error'` turns that into a compile-time refusal**
+(`JK0015`, located at the keyword). Set it for schemas you own:
 
 ```javascript
 new JarenValidator({ unknownFormats: 'error' })
   .compile({ type: 'string', format: 'date-time' });
-// => Error: Unknown format 'date-time': no compiler is registered for it,
-//    so this schema would accept every value for that keyword. Register one
-//    (addFormats(dateTimeFormats) …), or pass { unknownFormats: 'ignore' } …
+// => SchemaCompileError: JK0015: Unknown format 'date-time': no compiler is
+//    registered for it, so this schema would accept every value for that
+//    keyword. Register one (addFormats(dateTimeFormats) …), or pass
+//    { unknownFormats: 'ignore' } … at #/format
 ```
+
+A `format` value that is no name at all (`format: 5`, `null`, an object that
+is not a `$data` reference) names no registered format either, and is refused
+the same way; a `$data` reference is resolved when the instance is validated.
+A name only the object prototype holds (`toString`, `constructor`) is no
+registered format until `addFormat` registers one under it: unknown under
+either setting. *Upgrade: under `'error'` the refusal was an uncoded `Error`
+with no `docPath`, a non-string `format` compiled and accepted every value,
+a prototype name crashed the compile with an uncoded `Error` under either
+setting, and `addFormat` under such a name registered nothing.*
 
 Instance validation is untouched either way — **no data is ever invalidated by
 an unknown format**, so `'error'` stays inside the specification's letter: it
