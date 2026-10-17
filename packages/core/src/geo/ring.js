@@ -25,7 +25,7 @@ import { DEG } from './angle.js';
  * third element (altitude), and RFC 7946 does not require it to match
  * for the ring to close. A ring whose first or last member is not a
  * position, a list whose first two members are numbers (`5`, `'12'`,
- * `[null, null]`), is not closed.
+ * `[null, null]`), is not closed, and neither is a value that is not a list.
  *
  * @param {Array<number[]>} ring - positions
  * @returns {boolean}
@@ -34,8 +34,8 @@ import { DEG } from './angle.js';
  * isRingClosed([[0,0],[1,0],[1,1]]);       // false
  */
 export function isRingClosed(ring) {
-  const n = ring.length;
-  if (n < 2)
+  const n = ring?.length;
+  if (!(n >= 2))
     return false;
   const first = ring[0];
   const last = ring[n - 1];
@@ -57,7 +57,8 @@ export function isRingClosed(ring) {
  *
  * A ring of three or more holding a member that is not a position of
  * finite numbers (`null`, a hole in the list, `'12'`, `[null, null]`,
- * `NaN`), or that is not a list, has no area: `NaN`. Fewer than three
+ * `NaN`, an object with members `0` and `1`), or that is not a list, has no
+ * area: `NaN`. Fewer than three
  * members are `0`.
  *
  * @param {Array<number[]>} ring - positions
@@ -72,17 +73,22 @@ export function ringSignedArea(ring) {
   // fan the triangles from vertex 0 so each term is an orientation
   // determinant rather than a bare cross product; each vertex is read,
   // and checked, once
-  const ox = ring[0]?.[0];
-  const oy = ring[0]?.[1];
-  let ax = ring[1]?.[0];
-  let ay = ring[1]?.[1];
-  if (!(Number.isFinite(ox) && Number.isFinite(oy) && Number.isFinite(ax) && Number.isFinite(ay)))
+  // a position is a list of two or more, as the other ring readers read it
+  const origin = ring[0];
+  const first = ring[1];
+  const ox = origin?.[0];
+  const oy = origin?.[1];
+  let ax = first?.[0];
+  let ay = first?.[1];
+  if (!(Number.isFinite(ox) && Number.isFinite(oy) && Number.isFinite(ax) && Number.isFinite(ay)
+    && origin.length >= 2 && first.length >= 2))
     return NaN;
   let sum = 0;
   for (let i = 2; i < n; i++) {
-    const bx = ring[i]?.[0];
-    const by = ring[i]?.[1];
-    if (!(Number.isFinite(bx) && Number.isFinite(by)))
+    const position = ring[i];
+    const bx = position?.[0];
+    const by = position?.[1];
+    if (!(Number.isFinite(bx) && Number.isFinite(by) && position.length >= 2))
       return NaN;
     sum += orient2d(ox, oy, ax, ay, bx, by);
     ax = bx;
@@ -127,7 +133,9 @@ export function ringWinding(ring) {
  * @returns {number} square metres
  */
 export function sphericalRingArea(ring, radius = EARTH_RADIUS) {
-  const n = ring.length;
+  const n = ring?.length;
+  if (!(n >= 0))
+    return NaN; // not a list: no area
   if (n < 4)
     return 0; // fewer than 3 distinct positions bounds no area
   // consecutive edges share a vertex, so its longitude and sine are

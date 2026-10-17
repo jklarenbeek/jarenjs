@@ -100,9 +100,16 @@ describe('rings', () => {
       [[0, 0], [4, 0], [4, NaN], [0, 4], [0, 0]],
       [[0, 0], [4, 0], [4, 4], [0, 4], []],
       /** @type {any} */ ({ length: 4 }),
+      /** @type {any} */ ([{ 0: 0, 1: 0 }, { 0: 4, 1: 0 }, { 0: 4, 1: 4 }, { 0: 0, 1: 0 }]),
     ]) {
       assert.ok(Number.isNaN(ringSignedArea(ring)), JSON.stringify(ring));
       assert.strictEqual(ringWinding(ring), 0, JSON.stringify(ring));
+    }
+    // every ring reader reads a value that is not a list alike, without a throw
+    for (const value of [null, undefined, 5, { length: 4 }]) {
+      assert.ok(Number.isNaN(ringSignedArea(/** @type {any} */ (value))));
+      assert.strictEqual(isRingClosed(/** @type {any} */ (value)), false);
+      assert.ok(Number.isNaN(sphericalRingArea(/** @type {any} */ (value))) || sphericalRingArea(/** @type {any} */ (value)) === 0);
     }
     // a string pair a coercion reads as numbers used to wind the ring backwards
     assert.strictEqual(ringWinding([[0, 0], ['-4', '0'], [4, 4], [0, 0]]), 0);
