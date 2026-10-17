@@ -231,7 +231,7 @@ The addressing bridge rounds this out: `jsonPointerFromJSONPath(singularQuery)` 
 | `JO2006` | a function or a symbol |
 | `JO2007` | a string or member name with an unpaired surrogate |
 | `JO2008` | an object that is not a plain object or array (a `Date`, a `Map`, a class instance) |
-| `JO2009` | a value whose text is longer than the host's longest string (536870888 characters on Node), refused by `stableStringify`, `semanticKey` and `contentKey` of `@jarenjs/core/object` |
+| `JO2009` | a value whose text is longer than the host's longest string (536870888 characters on Node), refused by `canonicalizeJson` (a `JsonCanonicalizeError` at the document root), by `stableKeyString` of `@jarenjs/json/query` (`… cannot be keyed`) and by `stableStringify`, `semanticKey` and `contentKey` of `@jarenjs/core/object` (a `JsonLengthError`); each told from a call stack exhausted inside the writer by `isPastLongestString` of `@jarenjs/core/object` |
 
 ## The JSONPath compiler
 

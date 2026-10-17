@@ -10,6 +10,7 @@ import {
   CANONICAL_CODES,
 } from '@jarenjs/json/canonical';
 import * as root from '@jarenjs/json';
+import { stableKeyString } from '@jarenjs/json/query';
 import { stableStringify } from '@jarenjs/core/object';
 
 const cyclic = {}; cyclic.self = cyclic;
@@ -61,6 +62,20 @@ describe('canonicalizeJson refuses each kind of non-JSON data with its own code'
     let d = 0;
     for (let i = 0; i < 40; i++) d = [d, d];
     assert.throws(() => stableStringify(d), { name: 'JsonLengthError', code: 'JO2009' });
+  });
+
+  it('a text longer than the host\'s longest string is refused JO2009 by both writers, not the host\'s RangeError', () => {
+    // a string of the host's longest length: its quoted text is one past it
+    // (about 512 MB, one copy)
+    let longest = 'x';
+    for (let length = 2 ** 29; length > 0; length = Math.floor(length / 2)) {
+      try { longest = 'x'.repeat(longest.length + length); }
+      catch { /* past the host's longest: try a smaller step */ }
+    }
+    assert.throws(() => canonicalizeJson([longest]), { name: 'JsonCanonicalizeError', code: 'JO2009', dataPath: '',
+      message: 'a value whose text is longer than the host\'s longest string cannot be canonicalized at the document root' });
+    assert.throws(() => stableKeyString([longest]), { name: 'JsonLengthError', code: 'JO2009',
+      message: 'JO2009: a value whose text is longer than the host\'s longest string cannot be keyed' });
   });
 
   it('the constructor keeps its two-argument form', () => {

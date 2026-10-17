@@ -24,6 +24,7 @@
 
 import { encodeJSONPointerSegment } from './pointer.js';
 import { DATA_DEPTH_CEILING } from './errors.js';
+import { isPastLongestString } from '@jarenjs/core/object';
 
 const hasOwn = Object.hasOwn;
 
@@ -37,9 +38,9 @@ const RE_LONE_SURROGATE = /\p{Surrogate}/u;
  * A cycle and a nesting past the bound are refused with the codes
  * `@jarenjs/core/object`'s equality and walks raise for the same
  * conditions (`JO2002`, `JO2001`), so one catch serves both, and `JO2009`
- * is the refusal of `stableStringify`, `semanticKey` and `contentKey` of
- * `@jarenjs/core/object` for a value whose text is longer than the host's
- * longest string.
+ * is the refusal of this writer, of `stableStringify`, `semanticKey` and
+ * `contentKey` of `@jarenjs/core/object` and of `stableKeyString` for a
+ * value whose text is longer than the host's longest string.
  * @type {Readonly<Record<'JO2001' | 'JO2002' | 'JO2003' | 'JO2004' | 'JO2005' | 'JO2006' | 'JO2007' | 'JO2008' | 'JO2009', string>>}
  */
 export const CANONICAL_CODES = Object.freeze({
@@ -197,14 +198,22 @@ function serializeValue(value, path, stack) {
  *
  * @param {any} value - The JSON value to canonicalize
  * @returns {string} The canonical JSON text
- * @throws {JsonCanonicalizeError} When the value is not JSON data
+ * @throws {JsonCanonicalizeError} When the value is not JSON data, or
+ *   (`JO2009`) its text is longer than the host's longest string
  * @example
  * canonicalizeJson({ b: 1, a: [2, 3] }); // '{"a":[2,3],"b":1}'
  * canonicalizeJson({ 'ä': 1, 'a': 2 }); // '{"a":2,"ä":1}'
  * canonicalizeJson(1e21); // '1e+21'
  */
 export function canonicalizeJson(value) {
-  return serializeValue(value, '', new Set());
+  try {
+    return serializeValue(value, '', new Set());
+  }
+  catch (error) {
+    if (isPastLongestString(error))
+      fail('JO2009', 'a value whose text is longer than the host\'s longest string cannot be canonicalized', '');
+    throw error;
+  }
 }
 
 /**

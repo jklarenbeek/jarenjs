@@ -14,6 +14,7 @@
 
 import { messageRef, queryRuntimeError } from './messages.js';
 import { JSON_WALK_DEPTH_CEILING, walkRefusal } from '../errors.js';
+import { isPastLongestString, textTooLong } from '@jarenjs/core/object';
 
 /**
  * The empty sequence `()` (same singleton-sentinel pattern as
@@ -178,14 +179,16 @@ export function itemRef(v) {
  * @param {any} value - a JSON item (not EMPTY, not a Seq)
  * @returns {string} a deterministic serialization for grouping
  * @throws {CodedError} `JO2001` past 10000 levels of nesting, `JO2002` on
- *   a cycle
+ *   a cycle, `JO2009` for a key longer than the host's longest string
  */
 export function stableKeyString(value) {
   try {
     return stableKeyOf(value);
   }
   catch (error) {
-    throw error === KEY_CEILING ? walkRefusal('keyed', [value]) : error;
+    if (error === KEY_CEILING)
+      throw walkRefusal('keyed', [value]);
+    throw isPastLongestString(error) ? textTooLong('keyed') : error;
   }
 }
 

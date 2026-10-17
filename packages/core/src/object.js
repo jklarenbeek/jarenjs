@@ -13,7 +13,9 @@ import {
   walkTooDeep,
 } from './walk.js';
 
-export { locateCycle };
+// the refusal of a text past the host's longest string, for every writer
+// of a JSON text to raise alike (`JO2009`)
+export { locateCycle, isPastLongestString, textTooLong };
 
 const hasOwn = Object.hasOwn;
 

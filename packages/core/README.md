@@ -120,7 +120,10 @@ shared or not. A text longer than the host's longest string (536870888
 characters on Node) is refused with a `CodedError` named `JsonLengthError`, code
 `JO2009` (`a value whose text is longer than the host's longest string cannot be
 serialized`, `… cannot be a cache identity` from `semanticKey`), the code the JSON
-value table of `@jarenjs/json/canonical` registers. The bound is the host's own,
+value table of `@jarenjs/json/canonical` registers. `isPastLongestString(error)`
+tells the host's refusal of such a text from any other `RangeError` (a call
+stack exhausted), and `textTooLong(verb)` builds the refusal, so a writer
+outside this package refuses alike. The bound is the host's own,
 so every text the host can hold is written as before, and an ordinary value pays
 nothing for it. *Upgrade: two separately built shared values took time
 exponential in their levels to compare, and keying or serializing a heavily

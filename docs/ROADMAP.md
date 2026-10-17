@@ -25,24 +25,12 @@ delete it or fix it.
 - **1.0 stable** — no milestone-level blockers remain; 1.0 is gated on the
   per-package items below rather than on any one feature.
 
-## @jarenjs/core
-
 ## @jarenjs/json — JSONPath & addressing
 
 *The current focus.* JSON Pointer (RFC 6901), the JSONPath engine
 (RFC 9535, passing the complete official compliance suite), JSON Patch
 (RFC 6902) and Merge Patch (RFC 7396). See
 [`packages/json/ARCHITECTURE.md`](../packages/json/ARCHITECTURE.md).
-- [ ] **`canonicalizeJson` and `stableKeyString` escape uncoded on a text
-  longer than the host's longest string.** `canonicalizeJson([s, s])` of
-  `@jarenjs/json/canonical` and `stableKeyString([s, s])` of
-  `@jarenjs/json/query`, `s` a string of 2^28 characters, throw the host's own
-  `RangeError` (`Invalid string length`), where `stableStringify`,
-  `semanticKey` and `contentKey` of `@jarenjs/core/object` refuse the same
-  value with `JO2009` (`JsonLengthError`). The refusal belongs in each writer
-  (`canonicalizeJson` as a `JsonCanonicalizeError` with that code); the host's
-  refusal is told from a call stack exhausted by `isPastLongestString`, which
-  is internal to `@jarenjs/core`.
 
 ## @jarenjs/json — JSLT
 
