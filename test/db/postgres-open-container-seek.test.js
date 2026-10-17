@@ -122,8 +122,9 @@ describe('a comparison over a path that leaves a container open on PostgreSQL', 
       await client.query(`SET search_path TO "${context.schema}"`);
       await client.query('SET enable_seqscan = off');
       for (const [where, index] of [[{ $eq: ['$it.u[0]', 5] }, 'rows_by_u0'], [{ $gt: ["$it.u['0']", 6] }, 'rows_by_un']]) {
-        const { sql } = await store.collection('rows').explain(query(where));
-        const plan = (await client.query({ text: `EXPLAIN ${sql}`, values: [where[Object.keys(where)[0]][1]] })).rows
+        // the literal binds the edges of the interval that rounds to it
+        const { sql, params } = await store.collection('rows').explain(query(where));
+        const plan = (await client.query({ text: `EXPLAIN ${sql}`, values: params.map((/** @type {any} */ slot) => slot.literal) })).rows
           .map((/** @type {any} */ row) => row['QUERY PLAN']).join('\n');
         assert.match(plan, new RegExp(`Index (Only )?Scan on ${index}|Index (Only )?Scan using ${index}`), plan);
       }

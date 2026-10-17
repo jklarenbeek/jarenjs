@@ -4170,6 +4170,9 @@ function peelWrappedResult(document) {
 export function entityShape(entity, entityMapping) {
   /** @type {Map<string, any>} */
   const flavors = new Map();
+  // the columns holding a key: the entity's own (a join table's two sides
+  // among them) and the references to another's
+  const keyHolding = new Set([...entityMapping.keys ?? [], ...entityMapping.foreignKeys.map((/** @type {any} */ fk) => fk.column)]);
   for (const column of entityMapping.columns) {
     const epoch = column.source === 'epoch(document)';
     flavors.set(canonicalOf([{ name: column.name }]), {
@@ -4182,6 +4185,9 @@ export function entityShape(entity, entityMapping) {
       format: epoch ? entity.properties.get(column.name)?.format : undefined,
       unsafe: column.nativeQuery === false || column.codec !== undefined
         && !['text', 'integer', 'number', 'boolean', 'date', 'datetime'].includes(column.codec),
+      // a key, or a reference to one, may be declared as the allocation a
+      // database-allocated key takes (`bigserial`) rather than as its storage
+      holdsKey: column.key === true || keyHolding.has(column.name),
     });
   }
   // an inferred foreign key has no property of its own: its column
@@ -4189,7 +4195,7 @@ export function entityShape(entity, entityMapping) {
   for (const fk of entityMapping.foreignKeys) {
     const fkCanonical = canonicalOf([{ name: fk.column }]);
     if (!flavors.has(fkCanonical))
-      flavors.set(fkCanonical, { column: fk.column, flavor: 'entity-column', storage: fk.referencesType, foreignKey: true });
+      flavors.set(fkCanonical, { column: fk.column, flavor: 'entity-column', storage: fk.referencesType, foreignKey: true, holdsKey: true });
   }
   return {
     collection: entity.name,
@@ -4679,7 +4685,8 @@ export function planEntityPredicate(node, slot, shape) {
     }
     const ref = { ...pred.ref, column: flavored.column,
       flavor: flavored.flavor, storage: flavored.storage, format: flavored.format,
-      codec: flavored.codec, codecColumn: flavored.codecColumn, nullPolicy: flavored.nullPolicy };
+      codec: flavored.codec, codecColumn: flavored.codecColumn, nullPolicy: flavored.nullPolicy,
+      ...(flavored.holdsKey === true ? { holdsKey: true } : {}) };
     if (flavored.codec === 'integer' && pred.p === 'cmp' && typeof pred.operand.lit === 'number') {
       // an integer column takes no fraction, infinity or 64-bit overflow as a
       // value of its own type (PostgreSQL refuses the statement), and holds

@@ -3407,6 +3407,35 @@ index declared with a qualified `sql` name is refused at the second open, one
 over an upper-case name or a cast literal introspects as `unmapped-index`, and a
 profile list holding an infinity binds the item as `null`.
 
+## 57. A literal and a list compare, on PostgreSQL, with any digits another writer spelled
+
+- On PostgreSQL a query's own `$where` literal (`$eq: ['$it.u',
+  1152921504606846976]`), a literal list (`$eq: ['$it.u', { $seq: [2 ** 60, 5]
+  }]`), an external list (`$eq: ['$it.u', '$xs[*]']`) and a store profile
+  predicate's literal compared a number member's `numeric` exactly, so a
+  document another writer stored as `1152921504606846976` was dropped where the
+  engine, which reads 2^60, keeps it. So was any number spelled past a double's
+  precision: literal or external 5 against a stored `5.00000000000000000001`,
+  0 against `1e-400` or `-0`, 0.1 against `0.1000000000000000000001`. Each now
+  compares with the interval of decimals that round to its double, as an
+  external past 2^53 does since §54, for every double; an entity's `number` or
+  `integer` column (but a key, or a column referencing one, which may be a
+  `bigint`) and its document members likewise, in a query, a load and a
+  profile predicate. SQLite answers as before.
+- The statements change, not their reach: an indexed member's literal
+  comparison is a range over its column (an equality two bounds), which still
+  seeks; a list over an indexed member or an entity column finds the values in
+  the list's intervals through the column's index, then the column among them,
+  which still seeks; a list over any other member reads it as the double the
+  engine holds (`double precision`, guarded past the double range) and hashes
+  it against the list's doubles, where it compared the `numeric` with the list
+  before — a dearer read per row ([POSTGRESQL](POSTGRESQL.md)).
+- No table, index or stored value changes: every statement above is a read or
+  a comparison.
+
+**Downgrade.** The previous release opens every store this one does; on it the
+comparisons above answer by the digits written, as before.
+
 ## Measured costs
 
 Exact identity stores complete canonical documents and model endpoints, so

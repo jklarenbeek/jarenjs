@@ -669,17 +669,26 @@ what each does is its own documentation's job
   Scan`), so an `$orderby` sorts every matching row however few a page or a
   narrow `$where` returns. Wanted: an index whose null placement the order
   reads, or an order whose null placement the index provides.
-- [ ] **On PostgreSQL a literal or a membership list compares exactly with
-  digits another writer spelled.** A `$where` literal past ±(2^53 − 1) (`$eq
-  ['$it.u', 1152921504606846976]`), a literal list (`$eq ['$it.u', { $seq:
-  [2^60, 5] }]`) and an external list (`$eq ['$it.u', '$xs[*]']`) compare a
-  member's `numeric` exactly, so a document another writer stored as
-  `1152921504606846976` is dropped where the engine keeps it. So does any
-  number against a decimal spelled past a double's precision: external or
-  literal 5 against a stored `5.00000000000000000001` keeps only the store's
-  `5`. SQLite answers all of these as the engine. Wanted: the interval
-  comparison the scalar external now makes (decimal edges with tie sides), for
-  literals and list items, and for every double, not only those past 2^53.
+- [ ] **On PostgreSQL an entity's key compares exactly with digits another
+  writer spelled.** A literal, a literal list or an external list compared
+  with an entity's `integer` or `number` key column, or a column referencing
+  one (`$eq: ['$it.id', 6]`), compares the column exactly, so a row another
+  writer re-keyed `6.00000000000000000001` in a `numeric` key column (an
+  `integer` key the store made without `default: 'auto'`) is dropped where the
+  engine, which reads 6, keeps it. Such a column may instead be the
+  `bigserial`/`bigint` a database-allocated key takes (and a database can hold
+  either), which reads no fractional bound and whose index a `numeric` bound
+  does not serve. Wanted: the interval comparison every other number column
+  makes, for a key column whose type the open has read as `numeric`.
+- [ ] **Two members compared with each other compare by the digits each was
+  spelled by.** `$eq: ['$it.n', '$it.w']` over a document another writer
+  stored as `{"n": 5.00000000000000000001, "w": 5}` (or `{"n": 0, "w":
+  1e-400}`, or `{"n": 1152921504606846976, "w": 1152921504606847000}`) is
+  dropped on PostgreSQL where the engine, which reads both as one double,
+  keeps it, and `$lt` keeps it; on SQLite `$eq: ['$it.u', '$it.v']` over two
+  `integer` members spelled `1152921504606846976` and `1152921504606847000`
+  likewise. Wanted: both sides read as the doubles the engine holds
+  (`doubleRead`), or the interval of one side's double, as a literal now is.
 - [ ] **On SQLite an empty window over an indexed `integer` member the schema
   does not bound is read twice, and a read of every row is sorted.** The order
   key reads the double (`CAST("gx_v" AS REAL)`) so two spellings of one double

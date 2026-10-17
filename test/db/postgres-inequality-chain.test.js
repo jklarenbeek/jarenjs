@@ -64,7 +64,10 @@ const shapes = (set, member) => [
 /** @param {any} v */
 const sorted = (v) => [...(Array.isArray(v) ? v : v === undefined ? [] : [v])].sort();
 /** @param {string} sql */
-const inequalities = (sql) => (sql.match(/<>/g) ?? []).length;
+// a difference from a number literal is the negated interval of decimals that
+// rounds to it on a column the store made (`NOT (c >= low AND c <= high)`, or
+// `>` and `<` where its ties round away)
+const inequalities = (sql) => (sql.match(/<>|NOT \([^()]*? >=? /g) ?? []).length;
 
 describe('SQLite keeps one comparison per literal', () => {
   it('a 128-literal chain is 128 inequalities in the statement', async () => {

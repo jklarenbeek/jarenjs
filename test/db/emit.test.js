@@ -16,6 +16,7 @@ import {
 } from '@jarenjs/db';
 import { postgresDialect } from '@jarenjs/db/postgres';
 import { fullDoubleDialect } from './helpers.js';
+import { decimalEdge, decimalIntervals } from '../../packages/db/src/double-interval.js';
 
 const MODEL = {
   $model: '0.1',
@@ -509,8 +510,14 @@ describe('PostgreSQL: a literal comparison reads the typed extraction alone', ()
     const eq = whereFor({ $eq: ['$it.sku', 's0'] }, pg);
     assert.strictEqual(eq.where, '("gx_sku" IS NOT NULL AND "gx_sku" = $1)');
     assert.deepStrictEqual(eq.slots, [{ literal: 's0' }]);
+    // a number literal compares with the decimals that round to its double:
+    // past the interval's high edge, which 5 keeps, bound as a literal the
+    // member's own type takes
     const gt = whereFor({ $gt: ['$it.n', 5] }, pg);
     assert.strictEqual(gt.where, `(${N} IS NOT NULL AND ${N} > $1)`);
+    assert.deepStrictEqual(gt.slots, [{ literal: decimalEdge(5, 'high') }]);
+    // an edge its tie rounds away from is outside: 2^60 + 256's significand is odd
+    assert.strictEqual(whereFor({ $gt: ['$it.n', 2 ** 60 + 256] }, pg).where, `(${N} IS NOT NULL AND ${N} >= $1)`);
     assert.strictEqual(discriminators(gt.where), 0);
     // a prefix range and a bound list ride the same column
     assert.strictEqual(whereFor({ '$starts-with': ['$it.sku', 's1'] }, pg).where,
@@ -521,6 +528,31 @@ describe('PostgreSQL: a literal comparison reads the typed extraction alone', ()
     assert.deepStrictEqual(list.slots, [{ literal: '["s0","s2"]' }]);
   });
 
+  it('a list\'s numbers: an indexed column finds the intervals through its index, any other member reads the double', () => {
+    const model = normalizeModel({ $model: '0.1', collections: { items: { key: '/id',
+      schema: { type: 'object', properties: { id: { type: 'string' }, q: { type: 'integer' }, n: { type: 'integer' } } },
+      indexes: [{ name: 'q', path: '$.q' }] } } }).get('items');
+    const layout = planCollection('items', model, pg);
+    const shape = { collection: 'items', schema: model.schema, columnByCanonical: layout.columnByCanonical };
+    const emitted = (/** @type {any} */ predicate) => emitPlan(
+      planQuery({ $for: { it: '$[*]' }, $where: predicate, $return: '$it.id' }, shape).plan, pg, ITEMS_PHYSICAL);
+    const within = (/** @type {string} */ member) => [`${member} >= ("interval_edge".e ->> 0)::numeric`, `${member} > ("interval_edge".e ->> 1)::numeric`,
+      `${member} <= ("interval_edge".e ->> 2)::numeric`, `${member} < ("interval_edge".e ->> 3)::numeric`].join(' AND ');
+    const intervals = (/** @type {string} */ slot) => `"gx_q" IN (SELECT unnest(ARRAY(SELECT DISTINCT "interval_row"."gx_q" FROM `
+      + `jsonb_array_elements((${slot})::jsonb) AS "interval_edge"(e) JOIN "items" AS "interval_row" ON ${within('"interval_row"."gx_q"')})))`;
+    const literal = emitted({ $eq: ['$it.q', { $seq: [5, 2 ** 60] }] });
+    assert.ok(literal.sql.includes(`("gx_q" IS NOT NULL AND ${intervals('$1')})`), literal.sql);
+    assert.deepStrictEqual(literal.slots, [{ literal: decimalIntervals([5, 2 ** 60]) }]);
+    // an external list's slot binds its numbers' intervals; its text branch, the list itself
+    const external = emitted({ $eq: ['$it.q', '$xs[*]'] });
+    assert.ok(external.sql.includes(intervals('$2')), external.sql);
+    assert.deepStrictEqual(external.slots, [{ external: 'xs', json: true, list: true },
+      { external: 'xs', json: true, list: true, intervals: true }]);
+    const unindexed = emitted({ $eq: ['$it.n', { $seq: [5] }] });
+    assert.ok(unindexed.sql.includes(pg.inList(pg.doubleRead(N), '$1', 'double')), unindexed.sql);
+    assert.deepStrictEqual(unindexed.slots, [{ literal: '[5]' }]);
+  });
+
   it('$ne keeps presence through the member\'s JSON value: a null or another type differs, an absent member does not', () => {
     assert.strictEqual(whereFor({ $ne: ['$it.sku', 's0'] }, pg).where,
       '(("doc" #> \'{"sku"}\') IS NOT NULL AND ("gx_sku" IS NULL OR "gx_sku" <> $1))');
@@ -529,7 +561,7 @@ describe('PostgreSQL: a literal comparison reads the typed extraction alone', ()
     // string differs and an absent member does not
     const NS = '(CASE WHEN jsonb_typeof(("doc" #> \'{"sku"}\')) = \'number\' THEN (("doc" #> \'{"sku"}\'))::numeric END)';
     assert.strictEqual(whereFor({ $ne: ['$it.sku', 5] }, pg).where,
-      `(("doc" #> '{"sku"}') IS NOT NULL AND (${NS} IS NULL OR ${NS} <> $1))`);
+      `(("doc" #> '{"sku"}') IS NOT NULL AND (${NS} IS NULL OR NOT (${NS} >= $1 AND ${NS} <= $2)))`);
   });
 
   it('a seek binds its typed slot through the column form the planner builds', () => {
@@ -578,14 +610,17 @@ describe('PostgreSQL: a literal comparison reads the typed extraction alone', ()
       `(${NUM} IS NOT NULL AND ${NUM} >= $1)`);
     assert.strictEqual(emit({ p: 'cmp', op: 'ne', ref: score, operand: { lit: 'x' } }),
       `(${at} IS NOT NULL AND (${TXT} IS NULL OR ${TXT} <> $2))`);
+    // a list's numbers: the member read as the double the engine holds, in
+    // the list's doubles
     const list = emit({ p: 'in', ref: score, operand: { list: ['a', 1] } });
     assert.ok(list.startsWith(`((${TXT} IS NOT NULL AND ${TXT} IN (SELECT `), list);
-    assert.ok(list.includes(`(${NUM} IS NOT NULL AND ${NUM} IN (SELECT `), list);
+    assert.ok(list.includes(`(${NUM} IS NOT NULL AND ${pg.inList(pg.doubleRead(NUM), '$4', 'double')})`), list);
     assert.strictEqual(discriminators(list), 0);
     assert.strictEqual(emit({ p: 'strop', kind: 'contains', ref: score, operand: { lit: 'ab' } }),
       `(${TXT} IS NOT NULL AND strpos(${TXT}, $5::text) > 0)`);
     assert.ok(discriminators(emit({ p: 'typeIs', positive: true, types: ['text'], ref: score })) >= 2);
-    assert.deepStrictEqual(slots.map((slot) => slot.literal), [5, 'x', '["a"]', '[1]', 'ab']);
+    assert.deepStrictEqual(slots.map((slot) => slot.literal),
+      [decimalEdge(5, 'low'), 'x', '["a"]', '[1]', 'ab']);
   });
 });
 
@@ -643,12 +678,12 @@ describe('PostgreSQL: an external against an entity column', () => {
 
 describe('PostgreSQL: a statement spelled for the server that types and compiles it', () => {
   const pg = postgresDialect();
-  /** @param {any} dialect @param {any} pred */
-  const emit = (dialect, pred) => {
+  /** @param {any} dialect @param {any} pred @param {string} [table] - the table `"t"` reads */
+  const emit = (dialect, pred, table = undefined) => {
     /** @type {any[]} */
     const slots = [];
     const emitters = createEntityPredicateEmitters(dialect, (slot) => { slots.push(slot); return dialect.parameterRef(slots.length, 'v'); });
-    return { sql: emitters.emitPred('"t"', '"t"."doc"', pred), slots };
+    return { sql: emitters.emitPred('"t"', '"t"."doc"', pred, table), slots };
   };
   /** @param {string} name @param {string} storage @param {string} [codec] */
   const column = (name, storage, codec) => ({ segments: [{ name }], flavor: 'entity-column', column: name, storage, codec, nullPolicy: 'reject' });
@@ -659,10 +694,18 @@ describe('PostgreSQL: a statement spelled for the server that types and compiles
 
   it('two $ne literals on one member are its presence and one negated list, in the first one\'s place; SQLite keeps each', () => {
     const chain = { p: 'and', items: [ne(n, 1), ne(s, 'a'), ne(n, 2)] };
+    // a number column is read as the double the engine holds, in the list's
+    // doubles; where the caller names the table, its index finds the values
+    // in the intervals of decimals that round to them
     assert.deepStrictEqual(emit(pg, chain), {
-      sql: `(("t"."n" IS NOT NULL AND NOT ("t"."n" IS NOT NULL AND ${pg.inList('"t"."n"', '$1', 'number')})) AND ("t"."s" IS NOT NULL AND "t"."s" <> $2))`,
+      sql: `(("t"."n" IS NOT NULL AND NOT ("t"."n" IS NOT NULL AND ${pg.inList(pg.doubleRead('"t"."n"'), '$1', 'double')})) AND ("t"."s" IS NOT NULL AND "t"."s" <> $2))`,
       slots: [{ literal: '[1,2]' }, { literal: 'a' }],
     });
+    const seeking = emit(pg, chain, '"T"');
+    assert.ok(seeking.sql.startsWith('(("t"."n" IS NOT NULL AND NOT ("t"."n" IS NOT NULL AND "t"."n" IN (SELECT unnest(ARRAY(SELECT DISTINCT "interval_row"."n" FROM '
+      + 'jsonb_array_elements(($1)::jsonb) AS "interval_edge"(e) JOIN "T" AS "interval_row" ON "interval_row"."n" >= ("interval_edge".e ->> 0)::numeric AND '), seeking.sql);
+    assert.deepStrictEqual(seeking.slots, [{ literal: JSON.stringify([1, 2].map((value) =>
+      ['low', 'lowExclusive', 'high', 'highExclusive'].map((edge) => decimalEdge(value, /** @type {any} */ (edge))))) }, { literal: 'a' }]);
     assert.deepStrictEqual(emit(sqliteDialect, chain), {
       sql: '(("t"."n" IS NOT NULL AND "t"."n" <> ?) AND ("t"."s" IS NOT NULL AND "t"."s" <> ?) AND ("t"."n" IS NOT NULL AND "t"."n" <> ?))',
       slots: [{ literal: 1 }, { literal: 'a' }, { literal: 2 }],
@@ -675,7 +718,9 @@ describe('PostgreSQL: a statement spelled for the server that types and compiles
     for (const lit of [3000000000, 32768, -32769]) assert.strictEqual(lt(pg, lit), '("t"."q" IS NOT NULL AND "t"."q" < ($1)::bigint)', String(lit));
     for (const lit of [30000, 32767, -32768]) assert.strictEqual(lt(pg, lit), '("t"."q" IS NOT NULL AND "t"."q" < $1)', String(lit));
     assert.strictEqual(lt(sqliteDialect, 3000000000), '("t"."q" IS NOT NULL AND "t"."q" < ?)');
-    // a column the store made is a bigint already
-    assert.strictEqual(emit(pg, { p: 'cmp', op: 'lt', ref: n, operand: { lit: 3000000000 } }).sql, '("t"."n" IS NOT NULL AND "t"."n" < $1)');
+    // a column the store made is a numeric, which holds any digits a writer
+    // spelled: it compares with the decimals that round to the literal
+    const below = emit(pg, { p: 'cmp', op: 'lt', ref: n, operand: { lit: 3000000000 } });
+    assert.deepStrictEqual(below, { sql: '("t"."n" IS NOT NULL AND "t"."n" < $1)', slots: [{ literal: decimalEdge(3000000000, 'low') }] });
   });
 });

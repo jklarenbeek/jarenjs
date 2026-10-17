@@ -718,9 +718,8 @@ already holds the double (a `number` member's `REAL` column, or the cast read
 of a union whose first type is `number`) is compared bare and seeks too, and
 every other indexed member reads the cast and does not seek. PostgreSQL holds
 each spelling as the exact `numeric` its digits name, so `1152921504606847000`
-and `1152921504606846976` are two numbers there, and a literal or a literal list
-compared with them keeps only the spelling it names — a defect still open
-(ROADMAP), which the external comparison below does not have. An
+and `1152921504606846976` are two numbers there, and a comparison there reads
+the interval described below for literals and lists too. An
 external operand's value is known only when it binds, and a writer may have
 spelled the member by any digits that round to the double (2^60 is
 `1152921504606847000` from a JavaScript writer and `1152921504606846976` from
@@ -745,10 +744,30 @@ each beside the bound a member must lie strictly beyond (`lowExclusive`,
 `highExclusive`) — the edge itself where its tie rounds away, one past it
 where the tie rounds to the double. `$ge` is `v >= low AND v > lowExclusive`,
 `$le` is `v <= high AND v < highExclusive`, `$eq` is both, `$lt` is `v < low OR
-v <= lowExclusive` and `$gt` is `v > high OR v >= highExclusive`. A safe
-integer or a fraction binds as itself with its exclusive bounds one either
-side, the exact comparison it always was, and the statement is again the same
-for every value. An infinity, which a store profile predicate binds where a
+v <= lowExclusive` and `$gt` is `v > high OR v >= highExclusive`. Every double
+is such an interval, a safe integer and a fraction too: a writer spells 5 as
+`5.00000000000000000001` and 0 as `1e-400` or `-0`, which the engine reads as 5
+and 0. The statement is again the same for every value. A literal's tie side
+is known as the statement is written, so each of its bounds is the one
+comparison that side asks for (`$gt 5` is `v > high`, `$eq` is `v >= low AND
+v <= high`, a strict pair where the ties round away), bound as a `numeric`
+literal the member's own column takes, so an indexed member still seeks as a
+range. A membership list's numbers on PostgreSQL are found the same way: over
+a column of the table the statement names (an indexed member's generated
+column, an entity's column), as the column's values that lie in some number's
+interval, found through its index with one range per number, then the column
+among them (the dialect's `intervalIn`; the list binds one JSON array of edge
+tuples, an external list's computed when it binds, the slot's `intervals`),
+which seeks or hashes as a membership in an exact list does; any other member
+is read as the double the engine holds (`doubleRead`) and found among the
+list's doubles (`inList`'s `double` kind) — the same answer, since a decimal
+lies in a double's interval exactly where it rounds to that double, hashed
+once a row where an interval test would cost one a row and number. An
+entity's key, and a column referencing one, keep the exact comparison: either
+may be declared as the allocation a database-allocated key takes (`bigserial`),
+whose type reads no fractional edge, and an integer column holds no integer in
+a safe integer's interval but the integer itself. An
+infinity, which a store profile predicate binds where a
 query's own runs in the engine, is the interval of decimals at and past the
 midpoint between the largest double and 2^1024 (a tie that rounds to the
 infinity), open on its other side: there the edge binds the JSON value `jsonb`

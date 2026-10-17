@@ -2348,7 +2348,10 @@ compares it with the interval of decimals that round to that double, each
 edge with the side its tie falls on, so a document keeps or loses its row as
 the engine decides whatever digits its writer spelled the number by
 (`1152921504606847000`, `1152921504606846976` or `1152921504606846976.5` for
-2^60); on SQLite a column that holds the double (a `number` member's) takes
+2^60). On PostgreSQL every number a predicate compares is compared so, a
+literal and a list's item too, since a writer spells a fraction or a safe
+integer past a double's precision as well (`5.00000000000000000001` for 5);
+on SQLite a column that holds the double (a `number` member's) takes
 the number as it is. The statement is the one a safe integer binds, so it seeks
 as that one does, and a document's own such external runs in it too
 ([ARCHITECTURE](../ARCHITECTURE.md#the-type-truth-table)). A predicate's

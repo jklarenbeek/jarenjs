@@ -294,6 +294,11 @@ function slotValue(slot, externals, anchors = null) {
   if ('external' in slot && slot.json === true) {
     const value = externals[slot.external];
     if (value === undefined) return undefined;
+    // a list's numbers as the intervals of decimals that round to each,
+    // which a column read by its decimal digits is found in (`intervals`):
+    // an array's elements, an object's member values
+    if (slot.intervals === true)
+      return decimalIntervals(Array.isArray(value) ? value : value !== null && typeof value === 'object' ? Object.values(value) : []);
     // one bound of the decimals that round to the number, which a member
     // read by its decimal digits is compared with (`decimal`)
     if (slot.decimal !== undefined) return decimalEdge(value, slot.decimal);
@@ -2546,7 +2551,7 @@ function refuseBuffered(options, classified, docPath) {
 // ————— The entity query surface (the second document kind) —————
 
 import { mergeEntityRow, parseGraphRow } from './graph.js';
-import { decimalEdge, intervalEdge } from './double-interval.js';
+import { decimalEdge, decimalIntervals, intervalEdge } from './double-interval.js';
 import { relationTables, joinTableRoots } from './model.js';
 
 /** The default include depth bound (printed, never silent). */
@@ -3030,7 +3035,8 @@ export function createEntityQueryEngine(context) {
         let where = '';
         if (predicate !== undefined) {
           try {
-            where = ` WHERE ${emitters.emitPred(q('t'), `${q('t')}.${q('doc')}`, predicate)}`;
+            where = ` WHERE ${emitters.emitPred(q('t'), `${q('t')}.${q('doc')}`, predicate,
+              dialect.tableName(mapping.entities[name].table, mapping.entities[name].schema))}`;
           }
           catch (error) {
             if (!(error instanceof UnrepresentablePath)) throw error;
@@ -3730,6 +3736,9 @@ export function createLoadEngine(context, entityName) {
   const render = (node, alias, param, emitters) => {
     const aliasSql = q(alias);
     const docSql = `${aliasSql}.${q('doc')}`;
+    // the table the alias reads, which a membership in a number column
+    // seeks through
+    const tableSql = dialect.tableName(node.entityMapping.table, node.entityMapping.schema);
     const projection = () => {
       const parts = [];
       const named = new Set();
@@ -3750,7 +3759,7 @@ export function createLoadEngine(context, entityName) {
         parts.push(`${slText(include.field)}, ${renderInclude(node, include, alias, param, emitters)}`);
       return parts.join(', ');
     };
-    return { aliasSql, docSql, projection };
+    return { aliasSql, docSql, tableSql, projection };
   };
   const slText = (s) => dialect.stringLiteral(s);
 
@@ -3794,7 +3803,7 @@ export function createLoadEngine(context, entityName) {
     const projection = rendered.projection();
     // the filter is emitted once: each emission takes its own values
     const filter = child.where === null ? null
-      : emitters.emitPred(rendered.aliasSql, rendered.docSql, child.where);
+      : emitters.emitPred(rendered.aliasSql, rendered.docSql, child.where, rendered.tableSql);
     const conditions = [];
     if (relation.kind === 'oneToMany') {
       conditions.push(`${q(childAlias)}.${q(relation.via)} = ${q(parentAlias)}.${q(parentKey)}`);
@@ -3999,7 +4008,7 @@ export function createLoadEngine(context, entityName) {
 
     const conditions = [];
     if (tree.where !== null)
-      conditions.push(emitters.emitPred(rendered.aliasSql, rendered.docSql, tree.where));
+      conditions.push(emitters.emitPred(rendered.aliasSql, rendered.docSql, tree.where, rendered.tableSql));
 
     // pagination: keyset beats a growing OFFSET; the choice is reported,
     // never silent. A scalar `after` is the single unique-column keyset;

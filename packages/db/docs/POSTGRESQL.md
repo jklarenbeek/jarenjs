@@ -347,6 +347,24 @@ largest double and 2^1024 reads as the infinity and one at or below 2^-1075
 That read is a `CASE` over the member and costs every number grouping and
 ordering more than the bare `numeric` did.
 
+A number member, or an entity's `number` or `integer` column, compared with a
+number — a literal, an external, a list's item, a profile predicate's — is
+compared with the interval of decimals that round to that number's double, so
+a document another writer spelled by other digits (`1152921504606846976` for
+2^60, `5.00000000000000000001`, `1e-400` or `-0` for 0) is kept where the
+engine keeps it ([ARCHITECTURE](../ARCHITECTURE.md), "A number past 2^53 is
+compared as the double it is"). A literal binds the interval's edges as
+`numeric` literals, so an indexed member's comparison is a range over its
+column (an equality two bounds) and seeks; a list over an indexed member or an
+entity column finds the values in its intervals through the column's index and
+seeks too; a list over any other member reads the member as the double, as an
+ordering does, and costs a membership more than the bare `numeric` did. Two
+members compared with each other are still compared by their digits (ROADMAP).
+An entity's key, and a column referencing one, keep the exact comparison: such
+a column may be declared as the allocation a database-allocated key takes
+(`bigserial`, `bigint`), which reads no fractional edge and holds no integer in
+a safe integer's interval but the integer itself.
+
 An entity's `integer` and `number` columns are `numeric`, which holds an
 integer past 2^53 exactly. An `integer` member read from its column is refused
 `JD2003` (class `data`, the reason SQLite's refusal of an integer its driver

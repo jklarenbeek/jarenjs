@@ -15,8 +15,10 @@
  * the edges of the interval of decimals that round to its double, each
  * with the side its tie falls on. The statement is the one a safe integer
  * binds, so a seek stays a seek, and a query's own such external runs in it
- * too. A store run is SQLite always, PostgreSQL where JAREN_PG_URL names a
- * server.
+ * too. A literal, a literal list and an external list compare there as
+ * the engine does too, for every double: a writer spells 5 as
+ * `5.00000000000000000001` and 0 as `1e-400`. A store run is SQLite always,
+ * PostgreSQL where JAREN_PG_URL names a server.
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
@@ -26,7 +28,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { queryJson } from '@jarenjs/json/query';
-import { decimalEdge, integersRoundingTo, intervalEdge } from '../../packages/db/src/double-interval.js';
+import { decimalEdge, decimalIntervals, integersRoundingTo, intervalEdge } from '../../packages/db/src/double-interval.js';
 import { boundsSafeIntegers } from '../../packages/db/src/ddl.js';
 import { ENGINES, skipFor, withStore } from './store-core-engines.js';
 
@@ -442,10 +444,25 @@ describe('the integers a double stands for', () => {
     assert.deepEqual(edges(-(2 ** 53)), ['-9007199254740993', '-9007199254740994', '-9007199254740991.5', '-9007199254740990.5']);
     // 2^64 lies past the 64-bit integers, which a decimal does not stop at
     assert.deepEqual(edges(2 ** 64), ['18446744073709550592', '18446744073709550591', '18446744073709553664', '18446744073709553665']);
-    // a safe integer or a fraction stands for itself; anything else is its JSON
-    assert.deepEqual(edges(5), ['5', '4', '5', '6']);
-    assert.deepEqual(edges(0.5), ['0.5', '-0.5', '0.5', '1.5']);
+    // every double is such an interval: 5's doubles lie 2^-50 apart, and
+    // its even significand keeps both ties
+    assert.deepEqual(edges(5), ['4.999999999999999555910790149937383830547332763671875', '3.999999999999999555910790149937383830547332763671875',
+      '5.000000000000000444089209850062616169452667236328125', '6.000000000000000444089209850062616169452667236328125']);
+    // 0.5 is a power of two, so the double below it is half as far as the one above
+    assert.deepEqual(edges(0.5), ['0.4999999999999999722444243843710864894092082977294921875', '-0.5000000000000000277555756156289135105907917022705078125',
+      '0.500000000000000055511151231257827021181583404541015625', '1.500000000000000055511151231257827021181583404541015625']);
+    // zero is one interval whatever its sign, out to half the least double either side
+    assert.deepEqual(edges(-0), edges(0));
+    assert.deepEqual([decimalEdge(0, 'low'), decimalEdge(0, 'high')], [`-${ZERO_EDGE}`, ZERO_EDGE]);
+    // the least double's odd significand rounds both ties away: one to zero, one to the next double
+    const threeHalves = String(3n * 5n ** 1075n);
+    const leastHigh = `0.${'0'.repeat(1075 - threeHalves.length)}${threeHalves}`;
+    assert.deepEqual(edges(Number.MIN_VALUE), [ZERO_EDGE, ZERO_EDGE, leastHigh, leastHigh]);
+    // the largest double's high edge is where the infinity begins, which its tie rounds to
+    assert.deepEqual([decimalEdge(Number.MAX_VALUE, 'high'), decimalEdge(Number.MAX_VALUE, 'highExclusive')], [INFINITE_EDGE, INFINITE_EDGE]);
+    // anything else is its JSON
     assert.deepEqual(edges('text'), ['"text"', '"text"', '"text"', '"text"']);
+    assert.deepEqual(edges(NaN), ['null', 'null', 'null', 'null']);
   });
 
   it('bind as 64-bit integers, or as the double where an edge lies past them', () => {
@@ -543,4 +560,188 @@ describe('an ordering over an integer member the schema bounds within Â±(2^53 âˆ
       finally { rmSync(dir, { recursive: true, force: true }); }
     });
   }
+});
+
+// the numbers a query names: integers past 2^53 and at it, safe integers, zero,
+// fractions, and a double near the top of the range
+const LITERALS = [2 ** 60, 2 ** 60 + 256, 2 ** 53, 5, 0, 0.1, -0.1, 1.5, -(2 ** 60), 1e300];
+const LISTS = [[2 ** 60, 5], [0.1, 0], [5], [2 ** 53, -(2 ** 60), 1.5]];
+// the digits another writer spells a number by beyond the store's own: an
+// integer past 2^53 by its exact digits, a number by decimals past a double's
+// precision on either side of it and at its interval's edges, by an exponent,
+// past the double range, and zero by a sign and by a number too small to be a
+// double. SQLite reads a JSON fraction as the double its own conversion rounds
+// it to, which is not the engine's at or near a tie (a listed loss), so the
+// decimals near an edge are PostgreSQL's alone
+/** @param {string} engine */
+const spellings = (engine) => ['1152921504606846976', '1152921504606846977', '-1152921504606846976', '9007199254740993',
+  '5.0', '5e0', '0.0', '-0', '1e400', '-1e400', '1e-400', '-1e-400', '1e300',
+  ...(engine === 'postgres' ? ['1152921504606846975.9', '9007199254740992.5', '9007199254740991.5', '5.00000000000000000001',
+    '4.99999999999999999999', '0.1000000000000000000001', '0.1000000000000000055511151231257827', '-0.1000000000000000000001',
+    '1.50000000000000000001', '1.0000000000000000000001e300', ...[5, 0.1, 1.5, 0].flatMap((value) => [decimalEdge(value, 'low'), decimalEdge(value, 'high')])] : [])];
+
+for (const engine of ENGINES) {
+  describe(`a literal, a literal list and an external list against digits another writer spelled, ${engine}`, { skip: skipFor(engine) }, () => {
+    it('keep the rows the engine keeps, on members read by their digits, indexed and not', async () => {
+      await withForeignWriter(engine, async (store, write) => {
+        const big = store.collection('big');
+        for (const [i, value] of LITERALS.entries()) {
+          const integer = Number.isInteger(value) && Math.abs(value) < 2 ** 63 ? value : undefined;
+          await big.insert({ id: `s${i}`, u: integer, v: integer, n: value, w: value });
+        }
+        for (const [i, digits] of spellings(engine).entries()) {
+          const integer = /^-?\d+$/.test(digits) && digits.replace('-', '').length < 20 ? `,"u":${digits},"v":${digits}` : '';
+          await write(`f${i}`, `{"id":"f${i}"${integer},"n":${digits},"w":${digits}}`);
+        }
+        // what the engine reads: every document, as the numbers it holds
+        const documents = await big.execute({ $for: { it: '$[*]' }, $orderby: ['$it.id'], $return: '$it' }, { pushdown: false });
+        const differ = [];
+        const compare = async (/** @type {any} */ predicate, externals = {}) => {
+          const expected = queryJson(kept(predicate), documents, externals);
+          const answered = await big.execute(kept(predicate), { externals });
+          if (JSON.stringify(answered) !== JSON.stringify(expected)) differ.push({ predicate, externals, answered, expected });
+        };
+        for (const member of ['u', 'v', 'n', 'w']) {
+          for (const op of OPERATORS)
+            for (const x of LITERALS.filter((value) => member === 'n' || member === 'w' || Number.isInteger(value))) await compare({ [op]: [`$it.${member}`, x] });
+          for (const list of LISTS) {
+            await compare({ $eq: [`$it.${member}`, { $seq: list }] });
+            await compare({ $ne: [`$it.${member}`, { $seq: list }] });
+            await compare({ $eq: [`$it.${member}`, '$xs[*]'] }, { xs: list });
+            await compare({ $not: { $eq: [`$it.${member}`, '$xs[*]'] } }, { xs: list });
+            await compare({ $eq: [`$it.${member}`, '$xs[*]'] }, { xs: { a: list[0], b: 'text' } });
+          }
+          // two differences on one member are one negated list
+          await compare({ $and: [{ $ne: [`$it.${member}`, 5] }, { $ne: [`$it.${member}`, 2 ** 60] }] });
+        }
+        assert.deepEqual(differ, []);
+        // each runs in the statement, but for an external list holding an
+        // integer past 2^53 on SQLite, which the engine answers there
+        for (const [predicate, externals, mode] of /** @type {const} */ ([[{ $eq: ['$it.v', 5] }, {}, 'native'],
+          [{ $eq: ['$it.v', { $seq: [5, 2 ** 60] }] }, {}, 'native'], [{ $eq: ['$it.w', { $seq: [0.1] }] }, {}, 'native'],
+          [{ $eq: ['$it.v', '$xs[*]'] }, { xs: [5, 0.1] }, 'native'],
+          [{ $eq: ['$it.v', '$xs[*]'] }, { xs: [5, 2 ** 60] }, engine === 'postgres' ? 'native' : 'set']]))
+          assert.equal((await big.explain(kept(predicate), { externals })).mode, mode, JSON.stringify(predicate));
+        // a profile predicate's literal, as a query's own
+        const profile = { predicates: { big: { $eq: ['$it.n', 5] } } };
+        assert.deepEqual(await big.execute(ALL, { profile }), queryJson(kept({ $eq: ['$it.n', 5] }), documents));
+      });
+    });
+
+    it('keep the rows the engine keeps on an entity\'s number columns and document member', async () => {
+      const model = { $model: '0.1', entities: { K: { schema: { type: 'object', required: ['id'], properties: {
+        id: { type: 'string', 'x-entity': { key: true } }, n: { type: 'number' }, i: { type: 'integer' },
+        meta: { type: 'object', properties: { m: { type: 'number' } } } } }, indexes: [{ name: 'by_n', path: '$.n' }] } } };
+      await withRawWriter(engine, model, async (store, run) => {
+        const K = store.entity('K');
+        for (const [j, value] of [2 ** 60, 5, 0, 0.1, -(2 ** 60), 1.5].entries())
+          await K.create({ id: `o${j}`, n: value, i: Number.isInteger(value) ? value : 7, meta: { m: value } });
+        const foreign = engine === 'postgres'
+          ? ['1152921504606846976', '5.00000000000000000001', '1e-400', '0.1000000000000000000001', '-1152921504606846976', '4.99999999999999999999']
+          : ['1152921504606846976', '5.0', '0.0', '0.1', '-1152921504606846976', '5e0'];
+        for (const [j, digits] of foreign.entries()) {
+          await K.create({ id: `f${j}`, n: 1, i: 1, meta: { m: 1 } });
+          // SQLite holds an integer column's number as an integer or not at all
+          const integer = engine === 'postgres' || /^-?\d+$/.test(digits) ? digits : String(Math.trunc(Number(digits)));
+          const doc = `'{"meta": {"m": ${digits}}}'`;
+          await run(`UPDATE "K" SET "n" = ${digits}, "i" = ${integer}, "doc" = ${engine === 'postgres' ? `${doc}::jsonb` : `jsonb(${doc})`} WHERE "id" = 'f${j}'`);
+        }
+        const all = { $for: { it: '$.K[*]' }, $orderby: ['$it.id'], $return: '$it.id' };
+        const differ = [];
+        const ids = (/** @type {any[]} */ rows) => rows.map((row) => row.id).sort();
+        const compare = async (/** @type {any} */ predicate, externals = {}) => {
+          const where = { ...all, $where: predicate };
+          const oracle = await store.execute(where, { externals, pushdown: false });
+          const answered = await store.execute(where, { externals });
+          if (JSON.stringify(answered) !== JSON.stringify(oracle)) differ.push({ predicate, externals, answered, oracle });
+          if (Object.keys(externals).length > 0) return;
+          // a load takes the same predicate, its literals bound
+          // (a sequence of one id is the id, of none is nothing)
+          const loaded = ids(await K.load({ where: predicate }));
+          if (JSON.stringify(loaded) !== JSON.stringify(oracle === undefined ? [] : [oracle].flat().sort()))
+            differ.push({ predicate, loaded, oracle });
+        };
+        for (const member of ['n', 'i', 'meta.m']) {
+          for (const op of OPERATORS)
+            for (const x of [2 ** 60, 5, 0, 0.1, -(2 ** 60)].filter((value) => member !== 'i' || Number.isInteger(value))) await compare({ [op]: [`$it.${member}`, x] });
+          for (const list of [[2 ** 60, 5], [0.1, 0], [5]]) {
+            await compare({ $eq: [`$it.${member}`, { $seq: list }] });
+            await compare({ $eq: [`$it.${member}`, '$xs[*]'] }, { xs: list });
+          }
+        }
+        assert.deepEqual(differ, []);
+      });
+    });
+  });
+}
+
+for (const engine of ENGINES) {
+  describe(`a key column against a literal and a list, ${engine}`, { skip: skipFor(engine) }, () => {
+    it('keeps the exact comparison on a database-allocated key, a reference to one and a join table\'s sides', async () => {
+      // each may be a `bigint` on PostgreSQL, which reads no fractional bound
+      const model = { $model: '0.1', entities: {
+        Post: { schema: { type: 'object', required: ['pid'], properties: {
+          pid: { type: 'integer', 'x-entity': { key: true, default: 'auto' } }, title: { type: 'string' },
+          tags: { 'x-entity': { relation: { to: 'Tag', many: true } } } } } },
+        Comment: { schema: { type: 'object', properties: {
+          cid: { type: 'string', 'x-entity': { key: true } }, postId: { type: 'integer' },
+          post: { 'x-entity': { relation: { to: 'Post', via: 'postId', onDelete: 'cascade' } } } } } },
+        Tag: { schema: { type: 'object', properties: { name: { type: 'string', 'x-entity': { key: true } } } } } } };
+      await withStore(engine, model, async (store) => {
+        for (const title of ['a', 'b', 'c']) await store.entity('Post').create({ title });
+        await store.entity('Comment').create({ cid: 'c1', postId: 2 });
+        await store.entity('Tag').create({ name: 'red' });
+        store.entity('Post').link(2, 'tags', 'red');
+        await store.saveChanges();
+        const differ = [];
+        for (const [root, member] of [['Post', 'pid'], ['Comment', 'postId'], ['Post_Tag', 'Post_key']]) {
+          for (const [where, externals] of /** @type {[any, any][]} */ ([[{ $eq: [`$it.${member}`, 2] }, {}], [{ $lt: [`$it.${member}`, 3] }, {}],
+            [{ $ne: [`$it.${member}`, 2] }, {}], [{ $eq: [`$it.${member}`, { $seq: [2, 3] }] }, {}], [{ $eq: [`$it.${member}`, '$xs[*]'] }, { xs: [2] }]])) {
+            const query = { $for: { it: `$.${root}[*]` }, $where: where, $orderby: [`$it.${member}`], $return: `$it.${member}` };
+            const oracle = await store.execute(query, { externals, pushdown: false });
+            const answered = await store.execute(query, { externals });
+            if (JSON.stringify(answered) !== JSON.stringify(oracle)) differ.push({ root, where, answered, oracle });
+          }
+        }
+        assert.deepEqual(differ, []);
+        assert.deepEqual(await store.execute({ $for: { it: '$.Post_Tag[*]' }, $where: { $eq: ['$it.Post_key', 2] }, $return: '$it.Tag_key' }), 'red');
+      });
+    });
+  });
+}
+
+describe('a literal and a list against a column of numbers by their digits, PostgreSQL', { skip: skipFor('postgres') }, () => {
+  it('still seek through the column\'s index, the external list too', async () => {
+    const model = { $model: '0.1', collections: MODEL.collections, entities: { K: { schema: { type: 'object', required: ['id'], properties: {
+      id: { type: 'string', 'x-entity': { key: true } }, n: { type: 'number' } } }, indexes: [{ name: 'by_n', path: '$.n' }] } } };
+    await withRawWriter('postgres', model, async (store, run) => {
+      await run(`INSERT INTO "big" ("key", "doc") SELECT 'k' || g, jsonb_build_object('id', 'k' || g, 'v', g, 'w', g) FROM generate_series(1, 20000) g;
+        INSERT INTO "K" ("id", "n", "doc") SELECT 'k' || g, g, '{}'::jsonb FROM generate_series(1, 20000) g; ANALYZE "big"; ANALYZE "K"`);
+      const big = store.collection('big');
+      const own = (/** @type {any} */ where) => ({ $for: { it: '$[*]' }, $where: where, $return: '$it.id' });
+      const entity = (/** @type {any} */ where) => ({ $for: { it: '$.K[*]' }, $where: where, $return: '$it.id' });
+      const plans = {
+        literal: await big.explain(own({ $eq: ['$it.v', 5] })),
+        list: await big.explain(own({ $eq: ['$it.v', { $seq: [5, 70, 9000] }] })),
+        entityList: await store.explain(entity({ $eq: ['$it.n', { $seq: [5, 70, 9000] }] })),
+        entityExternalList: await store.explain(entity({ $eq: ['$it.n', '$xs[*]'] }), { externals: { xs: [5, 70, 9000] } }),
+      };
+      const seeks = Object.fromEntries(Object.entries(plans).map(([name, plan]) =>
+        [name, /Index (Only )?Scan using "?(big_by_v|K_by_n)"? on "?(big|K)"?( t0)?\b/.test(String(plan.scanNarrative)) && !/Seq Scan/.test(String(plan.scanNarrative))]));
+      assert.deepEqual(seeks, { literal: true, list: true, entityList: true, entityExternalList: true }, JSON.stringify(Object.values(plans).map((plan) => plan.scanNarrative)));
+      assert.deepEqual(await big.execute(own({ $eq: ['$it.v', { $seq: [5, 70, 9000] }] })), ['k5', 'k70', 'k9000']);
+      assert.deepEqual(await store.execute({ ...entity({ $eq: ['$it.n', '$xs[*]'] }), $orderby: ['$it.n'] }, { externals: { xs: [9000, 5, 70] } }), ['k5', 'k70', 'k9000']);
+      // a load reads the same column through the same intervals
+      const load = await store.entity('K').explainLoad({ where: { $eq: ['$it.n', { $seq: [5, 70, 9000] }] } });
+      assert.match(load.sql, /\bIN \(SELECT unnest\(ARRAY\(SELECT DISTINCT "interval_row"\."n" FROM .* AS "interval_row" ON /);
+    });
+  });
+});
+
+describe('the intervals a list\'s numbers stand for', () => {
+  it('are one tuple of decimal edges a finite number, and none for anything else', () => {
+    const tuple = (/** @type {number} */ value) => ['low', 'lowExclusive', 'high', 'highExclusive'].map((edge) => decimalEdge(value, /** @type {any} */ (edge)));
+    assert.equal(decimalIntervals([5, 'a', 2 ** 60, Infinity, NaN, null, -0]), JSON.stringify([tuple(5), tuple(2 ** 60), tuple(0)]));
+    assert.equal(decimalIntervals([]), '[]');
+  });
 });

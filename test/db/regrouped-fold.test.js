@@ -145,7 +145,9 @@ const sorted = (value) => [...(Array.isArray(value) ? value : value === undefine
 
 /**
  * The cases, once per engine.
- * @param {{ store: () => any, placeholders: (sql: string) => number, instantSeek?: RegExp }} engine
+ * @param {{ store: () => any, placeholders: (sql: string) => number, instantSeek?: RegExp, equalityBounds: number }} engine
+ *   `equalityBounds`: the values a finite number literal's equality binds (PostgreSQL binds the two edges of the
+ *   interval of decimals that round to it)
  */
 function cases(engine) {
   const items = () => engine.store().collection('items');
@@ -220,21 +222,21 @@ function cases(engine) {
 
   it('an infinity never becomes a bound, and NaN binds nothing: the other items keep their place', async () => {
     const n = (/** @type {string} */ op, /** @type {number} */ value) => ({ [op]: ['$it.n', value] });
-    for (const [label, predicate, placeholders] of /** @type {[string, any, number][]} */ ([
+    for (const [label, predicate, placeholders, equalities = 0] of /** @type {[string, any, number, number?][]} */ ([
       ['NaN first', { $or: [n('$gt', NaN), n('$gt', 5)] }, 1],
       ['NaN second', { $or: [n('$gt', 5), n('$gt', NaN)] }, 1],
       ['NaN inclusive first', { $or: [n('$ge', NaN), n('$gt', 5)] }, 1],
       ['NaN inclusive second', { $or: [n('$gt', 5), n('$ge', NaN)] }, 1],
-      ['NaN equality', { $or: [n('$eq', NaN), n('$eq', 7)] }, 1],
+      ['NaN equality', { $or: [n('$eq', NaN), n('$eq', 7)] }, 1, 1],
       ['Infinity upper', { $or: [n('$lt', Infinity), n('$lt', 5)] }, 2],
       ['-Infinity lower', { $or: [n('$gt', -Infinity), n('$gt', 5)] }, 2],
-      ['Infinity equality', { $or: [n('$eq', Infinity), n('$eq', 7)] }, 2],
+      ['Infinity equality', { $or: [n('$eq', Infinity), n('$eq', 7)] }, 2, 1],
       ['-0 equality', { $or: [n('$eq', -0), n('$eq', 7)] }, 1],
       ['-0 ray', { $or: [n('$gt', -0), n('$gt', 0)] }, 1],
     ])) {
       const expected = await agrees(predicate, label);
       assert.ok(expected.length > 0, label);
-      assert.equal((await items().explain(overItems(predicate))).params.length, placeholders, label);
+      assert.equal((await items().explain(overItems(predicate))).params.length, placeholders + equalities * (engine.equalityBounds - 1), label);
     }
   });
 
@@ -310,7 +312,7 @@ describe('a disjunction regrouped by member (SQLite)', () => {
   });
   after(async () => { await store?.close(); });
   cases({ store: () => store, placeholders: (sql) => (sql.match(/\?/g) ?? []).length,
-    instantSeek: /SEARCH t0 USING INDEX Item_at/ });
+    instantSeek: /SEARCH t0 USING INDEX Item_at/, equalityBounds: 1 });
 
   it('a live registration over a regrouped filter is maintained across writes', async () => {
     const liveStore = await openStore(MODEL, { driver: nodeDriver(), path: ':memory:', capture: true });
@@ -366,5 +368,5 @@ describe('a disjunction regrouped by member (PostgreSQL)', { skip: !url && 'JARE
       finally { await admin.end(); }
     }
   });
-  cases({ store: () => store, placeholders: (sql) => new Set(sql.match(/\$\d+/g) ?? []).size });
+  cases({ store: () => store, placeholders: (sql) => new Set(sql.match(/\$\d+/g) ?? []).size, equalityBounds: 2 });
 });

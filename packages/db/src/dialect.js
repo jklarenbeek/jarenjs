@@ -280,7 +280,9 @@ export const MEMBER_WHEN = Symbol('dialect.memberWhen');
  *   mutationRowGuard?: (count: string, limit: number) => string,
  *   boundMutation?: (sql: string, limit: number) => string,
  *   codepoint?: (value: string) => string,
- *   inList?: (valueSql: string, listSql: string, kind: 'text' | 'number') => string,
+ *   inList?: (valueSql: string, listSql: string, kind: 'text' | 'number' | 'double') => string,
+ *   intervalIn?: (valueSql: string, tuplesSql: string, tableSql: string, columnSql: string,
+ *     within: (memberSql: string, edgeAt: (index: number) => string) => string) => string,
  *   physicalTypeMatches?: (codec: string, type: string) => boolean,
  *   schema?: string,
  *   relational?: any,
@@ -973,10 +975,11 @@ export function createDialect(spec) {
      * Whether the engine reads every stored JSON number by its decimal
      * digits, exactly, and compares it exactly with a bound number. A
      * writer spells a double by any decimal that rounds to it, so such an
-     * engine compares a member with an external number against the
-     * interval of decimals that round to the external's double, bound as
-     * its edges with the side each tie falls on (`decimalEdge`): what the
-     * engine's double comparison answers whatever digits the document holds.
+     * engine compares a member with a number — an external, a literal, a
+     * list's item — against the interval of decimals that round to its
+     * double, bound as its edges with the side each tie falls on
+     * (`decimalEdge`): what the engine's double comparison answers whatever
+     * digits the document holds.
      */
     decimalDigits: spec.decimalDigits === true,
     /** The MEMBER side of an external comparison, at the branch's kind. */
@@ -1111,9 +1114,19 @@ export function createDialect(spec) {
     boundMutation: spec.boundMutation,
     codepoint: spec.codepoint,
     /** Membership of a value in a JSON list bound as one parameter, one
-     * kind (`'text'` or `'number'`) at a time — the one IN-list spelling
-     * every membership test and `cellIn` share. */
+     * kind (`'text'` or `'number'`, or `'double'` on a dialect that reads
+     * every number by its decimal digits) at a time — the one IN-list
+     * spelling every membership test and `cellIn` share. */
     inList: spec.inList,
+    /**
+     * Membership of a table's column in the intervals of decimals that
+     * round to a list's doubles, bound as one JSON array of edge tuples
+     * (`[low, lowExclusive, high, highExclusive]`), on a dialect that reads
+     * every number by its decimal digits (`decimalDigits`); `within` spells
+     * a member's test against one tuple, given the SQL of each of its edges.
+     * Absent where the dialect has none.
+     */
+    intervalIn: spec.intervalIn,
     physicalTypeMatches: spec.physicalTypeMatches,
     schema: spec.schema,
     relational: spec.relational,

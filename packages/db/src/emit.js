@@ -22,6 +22,7 @@ import { plainFamily, bindsText, ranksGroupsApart } from './algebra.js';
 import { physicalSelection, integerParameter } from './physical.js';
 import { columnKindFor } from './scalar-types.js';
 import { isNumericType } from './types.js';
+import { decimalEdge, decimalIntervals, INTERVAL_EDGES } from './double-interval.js';
 
 /**
  * Join boolean terms with `op`, nesting long chains in halves — depth
@@ -130,32 +131,118 @@ const beyondSafeInteger = (value) => typeof value === 'number' && Number.isInteg
 
 /**
  * A member read by its decimal digits (`dialect.decimalDigits`) compared with
- * the number an external holds. The member holds any decimal another writer
- * spelled, which may lie on an edge of the interval of decimals that round to
- * the external's double, or within a half-unit of one: each edge binds with
- * the bound a member must lie strictly beyond besides (`decimal`,
- * `decimalEdge`), which is the edge itself where its tie rounds away. A safe
- * integer or a fraction binds as itself, which is equality. A difference
- * (`ne`) is the equality, for the caller to negate.
- * @param {any} dialect
- * @param {(slot: any) => string} param
- * @param {string} external - the external's name
+ * a double. The member holds any decimal a writer spelled, which may lie
+ * anywhere in the interval of decimals that round to the double — on an edge
+ * of it, or within a half-unit of one — for every double, not only an
+ * integer past 2^53 (`5.00000000000000000001` is 5 to the engine, `1e-400`
+ * is 0): each edge binds with the bound a member must lie strictly beyond
+ * besides (`decimalEdge`), which is the edge itself where its tie rounds
+ * away. `edgeOf` spells one bound: an external's slot, a literal's, or a
+ * column of a list's edges. Where the tie side is known as the statement is
+ * written (`closed`, a literal's), each bound is the one comparison that
+ * side asks for. A difference (`ne`) is the equality, for the caller to
+ * negate.
+ * @param {(edge: 'low' | 'high' | 'lowExclusive' | 'highExclusive') => string} edgeOf
  * @param {string} op
- * @param {string} member - the member's SQL, in the dialect's external number form
+ * @param {string} member
+ * @param {boolean} [closed] - whether the interval holds its edges, where known
  * @returns {string}
  */
-function decimalComparison(dialect, param, external, op, member) {
+function decimalComparison(edgeOf, op, member, closed = undefined) {
+  if (closed !== undefined) {
+    const atLeast = () => `${member} ${closed ? '>=' : '>'} ${edgeOf('low')}`;
+    const atMost = () => `${member} ${closed ? '<=' : '<'} ${edgeOf('high')}`;
+    if (op === 'lt') return `${member} ${closed ? '<' : '<='} ${edgeOf('low')}`;
+    if (op === 'le') return atMost();
+    if (op === 'gt') return `${member} ${closed ? '>' : '>='} ${edgeOf('high')}`;
+    if (op === 'ge') return atLeast();
+    return `${atLeast()} AND ${atMost()}`;
+  }
   // each a function: a slot is taken where its placeholder is written
-  /** @param {'low' | 'high' | 'lowExclusive' | 'highExclusive'} edge */
-  const decimalOf = (edge) => dialect.externalRef(param({ external, json: true, decimal: edge, compared: true }), 'number');
-  const fromLow = () => `${member} >= ${decimalOf('low')} AND ${member} > ${decimalOf('lowExclusive')}`;
-  const toHigh = () => `${member} <= ${decimalOf('high')} AND ${member} < ${decimalOf('highExclusive')}`;
-  if (op === 'lt') return `(${member} < ${decimalOf('low')} OR ${member} <= ${decimalOf('lowExclusive')})`;
+  const fromLow = () => `${member} >= ${edgeOf('low')} AND ${member} > ${edgeOf('lowExclusive')}`;
+  const toHigh = () => `${member} <= ${edgeOf('high')} AND ${member} < ${edgeOf('highExclusive')}`;
+  if (op === 'lt') return `(${member} < ${edgeOf('low')} OR ${member} <= ${edgeOf('lowExclusive')})`;
   if (op === 'le') return toHigh();
-  if (op === 'gt') return `(${member} > ${decimalOf('high')} OR ${member} >= ${decimalOf('highExclusive')})`;
+  if (op === 'gt') return `(${member} > ${edgeOf('high')} OR ${member} >= ${edgeOf('highExclusive')})`;
   if (op === 'ge') return fromLow();
   return `${fromLow()} AND ${toHigh()}`;
 }
+
+/**
+ * The bounds an external's double binds for {@link decimalComparison}: its
+ * slots, in the dialect's external number form, each a guarded
+ * comparison's (an integer past 2^53 and an infinity bind their interval).
+ * @param {any} dialect @param {(slot: any) => string} param @param {string} external - the external's name
+ * @returns {(edge: 'low' | 'high' | 'lowExclusive' | 'highExclusive') => string}
+ */
+const externalEdges = (dialect, param, external) => (edge) =>
+  dialect.externalRef(param({ external, json: true, decimal: edge, compared: true }), 'number');
+
+/** The SQL operator of each comparison. @type {Record<string, string>} */
+const SYMBOLS = { eq: '=', ne: '<>', lt: '<', le: '<=', gt: '>', ge: '>=' };
+
+/**
+ * A member compared with a literal: a finite number, on an engine that reads
+ * the member by its decimal digits, against the interval of decimals that
+ * round to it ({@link decimalComparison}), its edges bound as literals the
+ * member's own type takes, so a column still seeks; anything else as itself.
+ * `ne` answers the difference.
+ * @param {any} dialect @param {(slot: any) => string} param
+ * @param {string} op @param {string} member @param {unknown} lit
+ * @returns {string}
+ */
+function literalComparison(dialect, param, op, member, lit) {
+  if (!(dialect.decimalDigits && typeof lit === 'number' && Number.isFinite(lit)))
+    return `${member} ${SYMBOLS[op]} ${param({ literal: lit })}`;
+  // a tie the double keeps leaves its edge outside the bound beyond it
+  const closed = decimalEdge(lit, 'low') !== decimalEdge(lit, 'lowExclusive');
+  const compared = decimalComparison((edge) => param({ literal: decimalEdge(lit, edge) }), op === 'ne' ? 'eq' : op, member, closed);
+  return op === 'ne' ? `NOT (${compared})` : compared;
+}
+
+/**
+ * A member's membership in a list's numbers, on an engine that reads the
+ * member by its decimal digits (`dialect.decimalDigits`): in the interval of
+ * decimals that round to one of them, as {@link decimalComparison} reads one.
+ * A list over a column of a table the statement names (`seek`) binds each
+ * number's edges (an external's through its slot, `intervals`), so the
+ * column's index still seeks (`dialect.intervalIn`); any other member is
+ * read as the double the engine holds (`doubleRead`) against the list's
+ * doubles — the same answer, hashed once per row, where an interval test
+ * would cost one per row and item. A list's infinity, which its JSON spells
+ * `null`, is no number of it, as before.
+ * @param {any} dialect @param {(slot: any) => string} param @param {string} value - the member
+ * @param {{ numbers: number[] } | { external: string }} list
+ * @param {{ table: string, column: string } | null} seek
+ * @returns {string}
+ */
+function decimalMembership(dialect, param, value, list, seek) {
+  if (seek !== null && dialect.intervalIn !== undefined) {
+    const tuples = 'numbers' in list ? param({ literal: decimalIntervals(list.numbers) })
+      : param({ external: list.external, json: true, list: true, intervals: true });
+    return dialect.intervalIn(value, tuples, seek.table, seek.column,
+      (/** @type {string} */ member, /** @type {(index: number) => string} */ edgeAt) =>
+        decimalComparison((edge) => edgeAt(INTERVAL_EDGES.indexOf(edge)), 'eq', member));
+  }
+  const listSql = 'numbers' in list ? param({ literal: numberList(list.numbers) })
+    : param({ external: list.external, json: true, list: true });
+  return inListSql(dialect, dialect.doubleRead(value), listSql, 'double');
+}
+
+/**
+ * Whether an entity column is compared with a literal or a list by the
+ * intervals of decimals that round to its numbers: a `number` or `integer`
+ * column the store made (no codec), on an engine that reads it by its
+ * decimal digits — but not a key or a column referencing one, which may be
+ * declared as the allocation a database-allocated key takes (`bigserial`),
+ * where an interval's fractional edge is no value the column's type reads
+ * and a safe integer's interval holds no integer but itself; such a column
+ * keeps the exact comparison, which the server types from the column.
+ * @param {any} dialect @param {any} ref - the column's ref
+ * @returns {boolean}
+ */
+const decimalColumn = (dialect, ref) => dialect.decimalDigits && ref.codec === undefined && ref.holdsKey !== true
+  && (ref.storage === 'number' || ref.storage === 'integer');
 
 /**
  * The member a comparison reads: as the double the engine holds where the
@@ -528,7 +615,7 @@ export function bucketAbsentGuard(bucket) {
 function compareRefs(pred, read) {
   const left = read(pred.left);
   const right = read(pred.right);
-  const symbol = { eq: '=', ne: '<>', lt: '<', le: '<=', gt: '>', ge: '>=' }[pred.op];
+  const symbol = SYMBOLS[pred.op];
   return `(${left.present} AND ${right.present} AND ${left.value} ${symbol} ${right.value})`;
 }
 
@@ -554,15 +641,16 @@ function typedTotal(valueSql, form) {
  * answers false — exactly the engine's answer.
  * @param {string} presentSql - the member as JSON
  * @param {string} valueSql - the member read at the literal's kind
- * @param {string} paramSql - the literal's slot
+ * @param {string} differsSql - the member's difference from the literal,
+ *   over `valueSql` ({@link literalComparison})
  * @returns {string}
  */
-function typedDiffers(presentSql, valueSql, paramSql) {
-  return `(${presentSql} IS NOT NULL AND (${valueSql} IS NULL OR ${valueSql} <> ${paramSql}))`;
+function typedDiffers(presentSql, valueSql, differsSql) {
+  return `(${presentSql} IS NOT NULL AND (${valueSql} IS NULL OR ${differsSql}))`;
 }
 
 /**
- * @typedef {{ external: string, nullable?: boolean, json?: boolean, list?: boolean, digits?: 'low' | 'high',
+ * @typedef {{ external: string, nullable?: boolean, json?: boolean, list?: boolean, intervals?: boolean, digits?: 'low' | 'high',
  *     decimal?: 'low' | 'high' | 'lowExclusive' | 'highExclusive', compared?: boolean } | { literal: unknown } |
  *   { derived: { kind: 'bboxAxis', external: string,
  *     axis: 'w' | 's' | 'e' | 'n' } } |
@@ -582,7 +670,9 @@ function typedDiffers(presentSql, valueSql, paramSql) {
  *   (`dialect.integerDigits`); one marked `decimal` binds one bound of
  *   the interval of decimals that round to it, as JSON text, for a member
  *   the database reads by its decimal digits (`dialect.decimalDigits`,
- *   `decimalEdge`); any other value binds as itself. Every
+ *   `decimalEdge`); a membership list's marked `intervals` binds the
+ *   edge tuples of its numbers' intervals (`decimalIntervals`) instead of
+ *   its JSON; any other value binds as itself. Every
  *   slot of a guarded external comparison is marked `compared`: it
  *   answers as the engine does for a number past 2^53 too.
  *
@@ -881,15 +971,16 @@ export function emitPlan(plan, dialect, physical, probeWide = true) {
    */
   const emitCmp = (pred) => {
     const jt = typeOf(pred.ref);
-    const symbol = { eq: '=', ne: '<>', lt: '<', le: '<=', gt: '>', ge: '>=' }[pred.op];
+    const symbol = SYMBOLS[pred.op];
     if ('lit' in pred.operand) {
       const lit = pred.operand.lit;
       const kind = typeof lit === 'number' ? 'number' : 'text';
       const value = comparedValue(pred.ref, kind, beyondSafeInteger(lit));
+      const compared = () => literalComparison(dialect, param, pred.op, value, lit);
       if (dialect.typedExtract === true) {
         return pred.op === 'ne'
-          ? typedDiffers(dialect.jsonExtract(docOf(pred.ref), pathText(pred.ref)), value, param({ literal: lit }))
-          : typedTotal(value, `${value} ${symbol} ${param({ literal: lit })}`);
+          ? typedDiffers(dialect.jsonExtract(docOf(pred.ref), pathText(pred.ref)), value, compared())
+          : typedTotal(value, compared());
       }
       const typeGuard = kind === 'number'
         ? `${jt} IN ${NUMERIC()}`
@@ -900,11 +991,11 @@ export function emitPlan(plan, dialect, physical, probeWide = true) {
         const notType = kind === 'number'
           ? `${jt} NOT IN ${NUMERIC()}`
           : `${jt} <> ${sl('text')}`;
-        return `(${jt} IS NOT NULL AND (${notType} OR ${value} <> ${param({ literal: lit })}))`;
+        return `(${jt} IS NOT NULL AND (${notType} OR ${compared()}))`;
       }
       // the presence prefix keeps the form TOTAL: `NULL IN (...)` is
       // NULL, and a NULL escaping through a NOT flips a row's fate
-      return `(${jt} IS NOT NULL AND ${typeGuard} AND ${value} ${symbol} ${param({ literal: lit })})`;
+      return `(${jt} IS NOT NULL AND ${typeGuard} AND ${compared()})`;
     }
     // a seek operand never reaches here: the planner binds a seek against
     // the column that answers it (`colCmp`, through `slotFor`)
@@ -939,7 +1030,7 @@ export function emitPlan(plan, dialect, physical, probeWide = true) {
       return `${member} BETWEEN ${edgeOf('low')} AND ${edgeOf('high')}`;
     };
     /** @param {string} member */
-    const decimalTest = (member) => decimalComparison(dialect, param, name, pred.op, member);
+    const decimalTest = (member) => decimalComparison(externalEdges(dialect, param, name), pred.op, member);
     const textBranch = `(${jt} IS NOT NULL AND ${jt} = ${sl('text')} AND `
       + `${dialect.valueTypeOf(external())} = ${sl('text')} AND `
       + `${compare('text')} ${pred.op === 'ne' ? '=' : symbol} ${dialect.externalRef(external(), 'text')})`;
@@ -964,25 +1055,35 @@ export function emitPlan(plan, dialect, physical, probeWide = true) {
    */
   const emitIn = (pred) => {
     const jt = typeOf(pred.ref);
-    const branch = (/** @type {'text' | 'number'} */ kind, /** @type {string} */ listSql, wide = false) => {
+    /**
+     * @param {'text' | 'number'} kind
+     * @param {() => string} listSql - the list's slot, taken where it is written
+     * @param {{ numbers: number[] } | { external: string }} list
+     */
+    const branch = (kind, listSql, list, wide = false) => {
       const value = comparedValue(pred.ref, kind, wide);
+      const membership = kind === 'number' && dialect.decimalDigits
+        ? decimalMembership(dialect, param, value, list,
+          pred.ref.column !== null && value === q(pred.ref.column) ? { table: q(physical.table), column: value } : null)
+        : inListSql(dialect, value, listSql(), kind);
       // an external's list is typed per branch by its own filter; the
       // member keeps the discriminator beside it, as every external does
       if (dialect.typedExtract === true && !('ext' in pred.operand))
-        return typedTotal(value, inListSql(dialect, value, listSql, kind));
+        return typedTotal(value, membership);
       const guard = kind === 'number' ? `${jt} IN ${NUMERIC()}` : `${jt} = ${sl('text')}`;
-      return `(${jt} IS NOT NULL AND ${guard} AND ${inListSql(dialect, value, listSql, kind)})`;
+      return `(${jt} IS NOT NULL AND ${guard} AND ${membership})`;
     };
     if ('ext' in pred.operand) {
+      const list = { external: pred.operand.ext };
       const slot = () => param({ external: pred.operand.ext, json: true, list: true });
-      return `(${branch('text', slot())} OR ${branch('number', slot())})`;
+      return `(${branch('text', slot, list)} OR ${branch('number', slot, list)})`;
     }
     const texts = pred.operand.list.filter((value) => typeof value === 'string');
     const numbers = pred.operand.list.filter((value) => typeof value === 'number');
     const branches = [];
-    if (texts.length > 0) branches.push(branch('text', param({ literal: textList(dialect, texts) })));
+    if (texts.length > 0) branches.push(branch('text', () => param({ literal: textList(dialect, texts) }), { numbers: [] }));
     if (numbers.length > 0)
-      branches.push(branch('number', param({ literal: numberList(numbers) }), numbers.some(beyondSafeInteger)));
+      branches.push(branch('number', () => param({ literal: numberList(numbers) }), { numbers }, numbers.some(beyondSafeInteger)));
     return branches.length === 1 ? branches[0] : `(${branches.join(' OR ')})`;
   };
 
@@ -1418,7 +1519,7 @@ export function emitPlan(plan, dialect, physical, probeWide = true) {
  * @param {any} dialect
  * @param {(slot: ParamSlot) => string} param
  * @param {{ tableOf: (entity: string) => string, aliasOf?: (binding: string) => string }} [related]
- * @returns {{ emitPred: (aliasSql: string, docSql: string, pred: any) => string,
+ * @returns {{ emitPred: (aliasSql: string, docSql: string, pred: any, tableSql?: string) => string,
  *   hopFrom: (hop: any, outer?: string) => { alias: string, sql: string } }}
  */
 export function createEntityPredicateEmitters(dialect, param, related = undefined) {
@@ -1447,18 +1548,21 @@ export function createEntityPredicateEmitters(dialect, param, related = undefine
     const typed = dialect.typedExtract === true;
     if (pred.p === 'in') {
       // the collection's membership form, over the entity's document
-      const branch = (/** @type {'text' | 'number'} */ kind, /** @type {string} */ listSql, wide = false) => {
+      /** @param {'text' | 'number'} kind @param {() => string} listSql @param {number[]} numbers */
+      const branch = (kind, listSql, numbers, wide = false) => {
         const value = comparedAs(dialect, memberAt(docSql, pred.ref, kind), wide);
-        if (typed) return typedTotal(value, inListSql(dialect, value, listSql, kind));
+        const membership = kind === 'number' && dialect.decimalDigits
+          ? decimalMembership(dialect, param, value, { numbers }, null) : inListSql(dialect, value, listSql(), kind);
+        if (typed) return typedTotal(value, membership);
         const guard = kind === 'number' ? `${jt} IN ${NUMERIC()}` : `${jt} = ${sl('text')}`;
-        return `(${jt} IS NOT NULL AND ${guard} AND ${inListSql(dialect, value, listSql, kind)})`;
+        return `(${jt} IS NOT NULL AND ${guard} AND ${membership})`;
       };
       const texts = pred.operand.list.filter((/** @type {any} */ value) => typeof value === 'string');
       const numbers = pred.operand.list.filter((/** @type {any} */ value) => typeof value === 'number');
       const branches = [];
-      if (texts.length > 0) branches.push(branch('text', param({ literal: textList(dialect, texts) })));
+      if (texts.length > 0) branches.push(branch('text', () => param({ literal: textList(dialect, texts) }), []));
       if (numbers.length > 0)
-        branches.push(branch('number', param({ literal: numberList(numbers) }), numbers.some(beyondSafeInteger)));
+        branches.push(branch('number', () => param({ literal: numberList(numbers) }), numbers, numbers.some(beyondSafeInteger)));
       return branches.length === 1 ? branches[0] : `(${branches.join(' OR ')})`;
     }
     if (pred.p === 'typeIs') {
@@ -1477,25 +1581,26 @@ export function createEntityPredicateEmitters(dialect, param, related = undefine
       return `(${jt} IS NOT NULL AND ${jt} = ${sl('text')} AND ${form})`;
     }
     const lit = pred.operand.lit;
-    const symbol = { eq: '=', ne: '<>', lt: '<', le: '<=', gt: '>', ge: '>=' }[pred.op];
     const kind = typeof lit === 'number' ? 'number' : 'text';
     const value = comparedAs(dialect, memberAt(docSql, pred.ref, kind), beyondSafeInteger(lit));
+    const compared = () => literalComparison(dialect, param, pred.op, value, lit);
     if (typed) {
       return pred.op === 'ne'
-        ? typedDiffers(memberAt(docSql, pred.ref, undefined), value, param({ literal: lit }))
-        : typedTotal(value, `${value} ${symbol} ${param({ literal: lit })}`);
+        ? typedDiffers(memberAt(docSql, pred.ref, undefined), value, compared())
+        : typedTotal(value, compared());
     }
     if (pred.op === 'ne') {
       const notType = kind === 'number'
         ? `${jt} NOT IN ${NUMERIC()}` : `${jt} <> ${sl('text')}`;
-      return `(${jt} IS NOT NULL AND (${notType} OR ${value} <> ${param({ literal: lit })}))`;
+      return `(${jt} IS NOT NULL AND (${notType} OR ${compared()}))`;
     }
     const typeGuard = kind === 'number'
       ? `${jt} IN ${NUMERIC()}` : `${jt} = ${sl('text')}`;
-    return `(${jt} IS NOT NULL AND ${typeGuard} AND ${value} ${symbol} ${param({ literal: lit })})`;
+    return `(${jt} IS NOT NULL AND ${typeGuard} AND ${compared()})`;
   };
 
-  const emitColumnPred = (aliasSql, pred) => {
+  /** @param {string} aliasSql @param {any} pred @param {string} [tableSql] - the table `aliasSql` reads, where the caller names it */
+  const emitColumnPred = (aliasSql, pred, tableSql = undefined) => {
     const column = physicalComparable(pred.ref, `${aliasSql}.${q(pred.ref.column)}`, dialect);
     const presentNull = pred.ref.nullPolicy === 'null';
     const present = presentNull ? dialect.booleanLiteral(true) : `${column} IS NOT NULL`;
@@ -1522,6 +1627,15 @@ export function createEntityPredicateEmitters(dialect, param, related = undefine
       // column holds no string or number
       const kind = pred.ref.storage === 'string' ? 'text' : pred.ref.storage === 'boolean' ? null : 'number';
       if (kind === null) return dialect.booleanLiteral(false);
+      if (decimalColumn(dialect, pred.ref)) {
+        // a number column holds the decimal digits a writer spelled, as a
+        // document member does; it seeks where the caller names its table
+        const list = 'ext' in pred.operand ? { external: pred.operand.ext }
+          : { numbers: pred.operand.list.filter((/** @type {any} */ value) => typeof value === 'number') };
+        if ('numbers' in list && list.numbers.length === 0) return dialect.booleanLiteral(false);
+        return `(${column} IS NOT NULL AND ${decimalMembership(dialect, param, column, list,
+          tableSql === undefined ? null : { table: tableSql, column: q(pred.ref.column) })})`;
+      }
       if ('ext' in pred.operand) {
         return `(${column} IS NOT NULL AND ${inListSql(dialect, column,
           param({ external: pred.operand.ext, json: true, list: true }), kind)})`;
@@ -1532,7 +1646,7 @@ export function createEntityPredicateEmitters(dialect, param, related = undefine
       const list = kind === 'text' ? textList(dialect, values) : numberList(values);
       return `(${column} IS NOT NULL AND ${inListSql(dialect, column, param({ literal: list }), kind)})`;
     }
-    const symbol = { eq: '=', ne: '<>', lt: '<', le: '<=', gt: '>', ge: '>=' }[pred.op];
+    const symbol = SYMBOLS[pred.op];
     if ('ext' in pred.operand) {
       if (dialect.name === 'sqlite') {
         // SQL NULL is a present Jaren null only for an explicit null
@@ -1562,7 +1676,7 @@ export function createEntityPredicateEmitters(dialect, param, related = undefine
         // guarded comparison's, which answers as the engine does for an
         // integer past 2^53 and an infinity too
         const typeIsNumber = () => `${dialect.valueTypeOf(param({ external: pred.operand.ext, json: true, compared: true }))} IN ${NUMERIC()}`;
-        const test = () => decimalComparison(dialect, param, pred.operand.ext, pred.op,
+        const test = () => decimalComparison(externalEdges(dialect, param, pred.operand.ext), pred.op,
           dialect.externalCompare(column, 'number'));
         return pred.op === 'ne'
           ? `(${column} IS NOT NULL AND (NOT (${typeIsNumber()}) OR NOT (${test()})))`
@@ -1589,6 +1703,12 @@ export function createEntityPredicateEmitters(dialect, param, related = undefine
       : pred.ref.storage === 'boolean' ? 'boolean' : 'number';
     if (storageKind === 'boolean' || litKind === 'other' || storageKind !== litKind)
       return pred.op === 'ne' ? present : dialect.booleanLiteral(false);
+    if (decimalColumn(dialect, pred.ref)) {
+      // a number column the store made holds the decimal digits a writer
+      // spelled, as a document member does (only a mapped column, which
+      // carries a codec, reads a NULL as a present null)
+      return `(${column} IS NOT NULL AND ${literalComparison(dialect, param, pred.op, column, lit)})`;
+    }
     const value = integerColumnLiteral(dialect, pred.ref, lit, param({ literal: lit }));
     if (presentNull && pred.op === 'ne') return dialect.distinct(column, value);
     return `(${column} IS NOT NULL AND ${column} ${symbol} ${value})`;
@@ -1633,15 +1753,18 @@ export function createEntityPredicateEmitters(dialect, param, related = undefine
       `${end.binding === hop.binding ? alias : end.binding === null ? outer
         : related.aliasOf(end.binding)}.${q(end.ref.column)}`, dialect);
     const conditions = hop.edges.map((/** @type {any} */ edge) => `${side(edge.left)} = ${side(edge.right)}`);
-    if (hop.filter !== null) conditions.push(emitPred(alias, `${alias}.${q('doc')}`, hop.filter));
+    if (hop.filter !== null) conditions.push(emitPred(alias, `${alias}.${q('doc')}`, hop.filter, related.tableOf(hop.entity)));
     return { alias, sql: `FROM ${related.tableOf(hop.entity)} AS ${alias} WHERE ${conditions.join(' AND ')}` };
   };
 
-  const emitPred = (aliasSql, docSql, pred) => {
+  /** @param {string} aliasSql @param {string} docSql @param {any} pred
+   * @param {string} [tableSql] - the table `aliasSql` reads, where the caller names it: a membership in its
+   *   number column then seeks through the column's index on an engine that reads it by its decimal digits */
+  const emitPred = (aliasSql, docSql, pred, tableSql = undefined) => {
     if (pred.p === 'hop') return `EXISTS (SELECT 1 ${hopFrom(pred.hop, aliasSql).sql})`;
     if (pred.p === 'hopCount') {
       const { sql } = hopFrom(pred.hop);
-      const symbol = { eq: '=', ne: '<>', lt: '<', le: '<=', gt: '>', ge: '>=' }[pred.op];
+      const symbol = SYMBOLS[pred.op];
       return `((SELECT COUNT(*) ${sql}) ${symbol} ${param({ literal: pred.lit })})`;
     }
     if (pred.p === 'refCmp') return compareRefs(pred, (ref) => {
@@ -1654,14 +1777,14 @@ export function createEntityPredicateEmitters(dialect, param, related = undefine
         present: `${dialect.jsonTypeOf(documentOf(docSql, ref), pathText(ref))} IS NOT NULL` };
     });
     if (pred.p === 'and')
-      return balancedJoin(regroupInequalities(dialect, pred.items).map((item) => emitPred(aliasSql, docSql, item)), 'AND');
+      return balancedJoin(regroupInequalities(dialect, pred.items).map((item) => emitPred(aliasSql, docSql, item, tableSql)), 'AND');
     if (pred.p === 'or')
-      return balancedJoin(pred.items.map((item) => emitPred(aliasSql, docSql, item)), 'OR');
-    if (pred.p === 'not') return `NOT ${emitPred(aliasSql, docSql, pred.item)}`;
+      return balancedJoin(pred.items.map((item) => emitPred(aliasSql, docSql, item, tableSql)), 'OR');
+    if (pred.p === 'not') return `NOT ${emitPred(aliasSql, docSql, pred.item, tableSql)}`;
     if (pred.p === 'const')
       return pred.value ? dialect.booleanLiteral(true) : dialect.booleanLiteral(false);
     if (pred.ref?.flavor === 'entity-column')
-      return emitColumnPred(aliasSql, pred);
+      return emitColumnPred(aliasSql, pred, tableSql);
     if (pred.ref?.flavor === 'entity-epoch') {
       // only an instant comparison uses the column; presence, type
       // tests, string operators and non-instant literals ride the
@@ -1726,7 +1849,8 @@ export function emitEntityPlan(plan, dialect, physicalOf) {
       return balancedJoin((pred.p === 'and' ? regroupInequalities(dialect, pred.items) : pred.items)
         .map((item) => emitPred(bindingName, item)), pred.p === 'and' ? 'AND' : 'OR');
     if (pred.p === 'not') return `NOT (${emitPred(bindingName, pred.item)})`;
-    return emitters.emitPred(aliasOf(bindingName), docOf(bindingName), pred);
+    const { table, schema } = physicalOf(entityOf.get(bindingName));
+    return emitters.emitPred(aliasOf(bindingName), docOf(bindingName), pred, dialect.tableName(table, schema));
   };
 
   /**
@@ -1870,10 +1994,9 @@ export function emitEntityPlan(plan, dialect, physicalOf) {
 
   const tableOf = (name) =>
     `${dialect.tableName(physicalOf(entityOf.get(name)).table, physicalOf(entityOf.get(name)).schema)} AS ${aliasOf(name)}`;
-  const JOIN_OPS = { eq: '=', ne: '<>', lt: '<', le: '<=', gt: '>', ge: '>=' };
   const onSql = (edge) =>
     physicalComparable(edge.left, `${aliasOf(edge.left.binding)}.${q(edge.left.column)}`, dialect)
-    + ` ${JOIN_OPS[edge.op ?? 'eq']} `
+    + ` ${SYMBOLS[edge.op ?? 'eq']} `
     + physicalComparable(edge.right, `${aliasOf(edge.right.binding)}.${q(edge.right.column)}`, dialect);
 
   /** What orders one binding's rows as the engine meets them: its physical key columns, else its row identity. */

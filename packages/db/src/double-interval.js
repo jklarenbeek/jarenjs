@@ -11,7 +11,10 @@
  * greater above its high one. One derivation serves both readings: a
  * database that holds an integer by its digits and a fraction as a double
  * (SQLite) binds the interval's integers, one that holds every number by
- * its decimal digits (PostgreSQL's `numeric`) binds its decimal edges.
+ * its decimal digits (PostgreSQL's `numeric`) binds its decimal edges — of
+ * every double there, since a writer may spell a fraction or a safe integer
+ * past a double's precision too (`5.00000000000000000001` is 5 to the
+ * engine).
  */
 
 /** The least decimal that rounds to Infinity: the midpoint between the
@@ -23,54 +26,75 @@ const INT64_MIN = -(2n ** 63n);
 const INT64_MAX = 2n ** 63n - 1n;
 
 /**
- * The interval of reals that round to the double `value` under
- * round-half-to-even, as twice its edges (each edge is the midpoint to the
- * neighbouring double, an integer or one half past one), whether it holds
- * them (a tie rounds to `value` where its last significand bit is even),
- * or `null` for a number that is not an integer past ±(2^53 - 1) (a safe
- * integer, a fraction: each stands for itself alone). Below a power of two
- * the neighbour is half as far, and below 2^53 it is one away, so 2^53's
- * low edge is the one that is not an integer.
+ * The interval of reals that round to the finite double `value` under
+ * round-half-to-even: its two edges, each the midpoint to the neighbouring
+ * double, as exact rationals `low / 2^shift` and `high / 2^shift` (a
+ * double and its midpoints are dyadic, so each has a finite decimal
+ * spelling), and whether it holds them (a tie rounds to `value` where its
+ * last significand bit is even). Below a power of two the neighbour is half
+ * as far (not below the least normal double, whose neighbours are the
+ * evenly spaced subnormals), and zero's neighbours are the least double
+ * either side, so `-0` and `0` stand for one interval. `null` for an
+ * infinity or NaN.
  * @param {number} value
- * @returns {{ twiceLow: bigint, twiceHigh: bigint, closed: boolean } | null}
+ * @returns {{ low: bigint, high: bigint, shift: bigint, closed: boolean } | null}
  */
 function midpointsOf(value) {
-  if (!Number.isInteger(value) || Number.isSafeInteger(value)) return null;
-  const magnitude = BigInt(Math.abs(value));
-  const bits = magnitude.toString(2).length;
-  // the spacing of the doubles at and above `magnitude`, and below it
-  const above = 1n << BigInt(bits - 53);
-  const below = magnitude === 1n << BigInt(bits - 1) ? above / 2n : above;
-  const closed = (magnitude / above) % 2n === 0n;
-  const twiceLow = 2n * magnitude - below;
-  const twiceHigh = 2n * magnitude + above;
-  return value > 0 ? { twiceLow, twiceHigh, closed } : { twiceLow: -twiceHigh, twiceHigh: -twiceLow, closed };
+  if (!Number.isFinite(value)) return null;
+  const view = new DataView(new ArrayBuffer(8));
+  view.setFloat64(0, Math.abs(value));
+  const bits = view.getBigUint64(0);
+  const exponent = bits >> 52n;
+  const fraction = bits & ((1n << 52n) - 1n);
+  // `value` is significand * 2^power; its midpoints lie a half spacing out,
+  // so in quarters of the spacing above it each edge is an integer
+  const significand = exponent === 0n ? fraction : fraction | (1n << 52n);
+  const power = (exponent === 0n ? 1n : exponent) - 1075n;
+  const below = fraction === 0n && exponent > 1n ? 1n : 2n;
+  const quarter = power - 2n;
+  const scale = (/** @type {bigint} */ edge) => (quarter >= 0n ? edge << quarter : edge);
+  const shift = quarter >= 0n ? 0n : -quarter;
+  const low = scale(4n * significand - below);
+  const high = scale(4n * significand + 2n);
+  const closed = significand % 2n === 0n;
+  return value < 0 ? { low: -high, high: -low, shift, closed } : { low, high, shift, closed };
 }
 
 /**
  * The closed interval of integers that round to the double `value` under
  * round-half-to-even, or `null` for a number that is not an integer past
- * ±(2^53 - 1) ({@link midpointsOf}). An edge that is an integer is kept
- * where its tie rounds to `value` and stepped inside otherwise; one half
- * past an integer is rounded inside.
+ * ±(2^53 - 1) (a safe integer, a fraction: no other integer rounds to it).
+ * An edge that is an integer is kept where its tie rounds to `value` and
+ * stepped inside otherwise; one between integers is rounded inside.
  * @param {number} value
  * @returns {{ low: bigint, high: bigint } | null}
  */
 export function integersRoundingTo(value) {
-  const midpoints = midpointsOf(value);
-  if (midpoints === null) return null;
-  const { twiceLow, twiceHigh, closed } = midpoints;
+  if (!Number.isInteger(value) || Number.isSafeInteger(value)) return null;
+  const { low, high, shift, closed } = /** @type {NonNullable<ReturnType<typeof midpointsOf>>} */ (midpointsOf(value));
   const inward = closed ? 0n : 1n;
+  // `>>` floors, so an edge between integers rounds inside as its floor
+  // plus one below and its floor above
+  const whole = (/** @type {bigint} */ edge) => (edge & ((1n << shift) - 1n)) === 0n;
   return {
-    low: twiceLow % 2n === 0n ? twiceLow / 2n + inward : (twiceLow + 1n) / 2n,
-    high: twiceHigh % 2n === 0n ? twiceHigh / 2n - inward : (twiceHigh - 1n) / 2n,
+    low: whole(low) ? (low >> shift) + inward : (low >> shift) + 1n,
+    high: whole(high) ? (high >> shift) - inward : high >> shift,
   };
 }
 
-/** The JSON text of half of `twice`, exactly. @param {bigint} twice @returns {string} */
-const halfText = (twice) => {
-  const magnitude = twice < 0n ? -twice : twice;
-  return `${twice < 0n ? '-' : ''}${magnitude / 2n}${magnitude % 2n === 0n ? '' : '.5'}`;
+/**
+ * The exact decimal text of `numerator / 2^shift`: `numerator * 5^shift`
+ * over `10^shift`, trailing zeros dropped.
+ * @param {bigint} numerator @param {bigint} shift @returns {string}
+ */
+const decimalText = (numerator, shift) => {
+  const magnitude = numerator < 0n ? -numerator : numerator;
+  const sign = numerator < 0n ? '-' : '';
+  if (shift === 0n) return `${sign}${magnitude}`;
+  const digits = String(magnitude * 5n ** shift).padStart(Number(shift) + 1, '0');
+  const point = digits.length - Number(shift);
+  const fraction = digits.slice(point).replace(/0+$/, '');
+  return `${sign}${digits.slice(0, point)}${fraction === '' ? '' : `.${fraction}`}`;
 };
 
 /**
@@ -81,14 +105,15 @@ const halfText = (twice) => {
  * beyond besides: the edge itself where its tie rounds away, a number
  * outside it where the tie rounds to `value`. So `m >= low AND m >
  * lowExclusive` is "at or above the interval's low edge" whichever way its
- * tie rounds, and `m <= high AND m < highExclusive` likewise. A safe
- * integer or a fraction stands for itself alone, with ties held. An
+ * tie rounds, and `m <= high AND m < highExclusive` likewise. Every
+ * finite double is such an interval: a writer spells 5 as
+ * `5.00000000000000000001` too, and 0 as `1e-400`. An
  * infinity is the interval of decimals at and past the midpoint between the
  * largest double and 2^1024 ({@link INFINITE_EDGE}, whose tie rounds to the
  * infinity), open on its other side: there it binds the JSON value that
  * `jsonb` orders past every number (`true`) or before every one (`null`), so
  * `m <= true` holds of every number and `m > true` of none. Anything else
- * binds as its JSON text.
+ * (a NaN, a string) binds as its JSON text.
  * @param {unknown} value
  * @param {'low' | 'high' | 'lowExclusive' | 'highExclusive'} edge
  * @returns {string}
@@ -100,15 +125,15 @@ export function decimalEdge(value, edge) {
     return inner === null ? (value > 0 ? 'true' : 'null') : `${value > 0 ? '' : '-'}${inner}`;
   }
   const midpoints = typeof value === 'number' ? midpointsOf(value) : null;
-  if (midpoints === null) {
-    if (typeof value !== 'number' || edge === 'low' || edge === 'high') return JSON.stringify(value);
-    return JSON.stringify(edge === 'lowExclusive' ? value - 1 : value + 1);
-  }
-  const { twiceLow, twiceHigh, closed } = midpoints;
-  if (edge === 'low') return halfText(twiceLow);
-  if (edge === 'high') return halfText(twiceHigh);
-  if (edge === 'lowExclusive') return halfText(closed ? twiceLow - 2n : twiceLow);
-  return halfText(closed ? twiceHigh + 2n : twiceHigh);
+  if (midpoints === null) return JSON.stringify(value);
+  const { low, high, shift, closed } = midpoints;
+  // one past an edge the tie keeps: a bound every member at or past the
+  // edge lies strictly beyond
+  const one = 1n << shift;
+  if (edge === 'low') return decimalText(low, shift);
+  if (edge === 'high') return decimalText(high, shift);
+  if (edge === 'lowExclusive') return decimalText(closed ? low - one : low, shift);
+  return decimalText(closed ? high + one : high, shift);
 }
 
 /**
@@ -127,4 +152,22 @@ export function intervalEdge(value, edge) {
   if (interval === null) return value;
   const bound = interval[edge];
   return bound < INT64_MIN || bound > INT64_MAX ? value : bound;
+}
+
+/** The bounds a list's tuple holds, in order ({@link decimalIntervals}). */
+export const INTERVAL_EDGES = /** @type {const} */ (['low', 'lowExclusive', 'high', 'highExclusive']);
+
+/**
+ * The intervals of decimals that round to a list's numbers, as the JSON
+ * text of one `[low, lowExclusive, high, highExclusive]` tuple per finite
+ * number ({@link decimalEdge}), for a member read by its decimal digits to
+ * be found in. An item that is not a finite number stands for no interval:
+ * a string is another kind's, and an infinity, which the list's JSON spells
+ * `null`, was never a number of it.
+ * @param {unknown[]} items
+ * @returns {string}
+ */
+export function decimalIntervals(items) {
+  return JSON.stringify(items.filter((item) => typeof item === 'number' && Number.isFinite(item))
+    .map((item) => INTERVAL_EDGES.map((edge) => decimalEdge(item, edge))));
 }

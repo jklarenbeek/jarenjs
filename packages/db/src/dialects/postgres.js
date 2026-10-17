@@ -887,8 +887,9 @@ export function postgresDialect(options = undefined) {
     // against number in `jsonb`'s own numeric order.
     externalEncoding: 'json',
     // a JSON number is a `numeric` here, held by the decimal digits the
-    // writer spelled, so a number branch compares with the interval of
-    // decimals that round to the external's double
+    // writer spelled, so a number compares with the interval of decimals
+    // that round to the double it is compared with: an external's, a
+    // literal's, a list item's
     decimalDigits: true,
     externalCompare: (valueSql, kind) =>
       (kind === 'number' ? `to_jsonb(${valueSql})` : valueSql),
@@ -902,7 +903,10 @@ export function postgresDialect(options = undefined) {
     // a number as the `numeric` a number member reads as and a number
     // column is declared as, so the comparison casts neither side and the
     // column's index seeks. An adopted integer column compares cast to
-    // `numeric`, which its own index does not serve
+    // `numeric`, which its own index does not serve. A `double` is a member
+    // read as the double the engine holds (`doubleRead`) against the
+    // doubles the list's numbers are: a decimal is in the interval of
+    // decimals that round to a double exactly where it reads as that double
     inList: (valueSql, listSql, kind) => {
       const list = `((${listSql})::jsonb)`;
       const items = `(SELECT jsonb_array_elements(${list}) WHERE jsonb_typeof(${list}) = 'array' UNION ALL `
@@ -910,7 +914,23 @@ export function postgresDialect(options = undefined) {
         + "ELSE '{}'::jsonb END) AS m)";
       return kind === 'text'
         ? `${valueSql} IN (SELECT (i.e #>> '{}') COLLATE "C" FROM ${items} AS i(e) WHERE jsonb_typeof(i.e) = 'string')`
-        : `${valueSql} IN (SELECT (i.e #>> '{}')::numeric FROM ${items} AS i(e) WHERE jsonb_typeof(i.e) = 'number')`;
+        : `${valueSql} IN (SELECT (i.e #>> '{}')::${kind === 'double' ? 'float8' : 'numeric'} FROM ${items} AS i(e) `
+          + "WHERE jsonb_typeof(i.e) = 'number')";
+    },
+    // Membership of a column in the intervals of decimals that round to a
+    // list's doubles, bound as one JSON array of edge tuples: the column's
+    // values that lie in some interval, found through the column's own
+    // index (one range seek a tuple), then the column among them, which
+    // seeks or hashes as a membership in an exact list does. The array
+    // hides how many values the inner read finds from the planner, which
+    // otherwise prices the range join as a large one and scans the outer
+    // table
+    intervalIn: (valueSql, tuplesSql, tableSql, columnSql, within) => {
+      const inner = `"interval_row".${columnSql}`;
+      const edge = (/** @type {number} */ index) => `("interval_edge".e ->> ${index})::numeric`;
+      return `${valueSql} IN (SELECT unnest(ARRAY(SELECT DISTINCT ${inner} FROM `
+        + `jsonb_array_elements((${tuplesSql})::jsonb) AS "interval_edge"(e) JOIN ${tableSql} AS "interval_row" `
+        + `ON ${within(inner, edge)})))`;
     },
     // the half-open range over the prefix, seekable through a B-tree on
     // a `C`-collated column. Both operands are byte-ordered — the column

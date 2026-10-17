@@ -15,6 +15,7 @@ import assert from 'node:assert/strict';
 
 import { openStore, reasonId } from '@jarenjs/db';
 import { postgresDriver } from '@jarenjs/db/postgres';
+import { decimalEdge, decimalIntervals } from '../../packages/db/src/double-interval.js';
 
 const url = process.env.JAREN_PG_URL;
 const key = { 'x-entity': { key: true } };
@@ -124,7 +125,8 @@ describe('PostgreSQL: membership over thousands of values', { skip: !url && 'JAR
     const items = store.collection('items');
     const plan = await items.explain(overItems(mixedChain(400)));
     assert.equal(plan.mode, 'native');
-    assert.deepEqual(plan.params, [{ literal: JSON.stringify(IDS.slice(0, 200)) }, { literal: 100000 }]);
+    // the bound is the high edge of the interval of decimals that round to 100000, which it keeps
+    assert.deepEqual(plan.params, [{ literal: JSON.stringify(IDS.slice(0, 200)) }, { literal: decimalEdge(100000, 'high') }]);
     assert.deepEqual(sorted(await items.execute(overItems(mixedChain(400)))), expectedFor(400));
     assert.deepEqual(sorted(await items.execute(overItems(mixedChain(400)), { pushdown: false })), expectedFor(400));
     const entityPlan = await store.explain(overItem(mixedChain(400)));
@@ -133,7 +135,7 @@ describe('PostgreSQL: membership over thousands of values', { skip: !url && 'JAR
     assert.deepEqual(await store.execute(overItem(mixedChain(400))), expectedFor(400));
     // the whole 5,000-term chain is the same two values
     assert.deepEqual((await items.explain(overItems(mixedChain()))).params,
-      [{ literal: JSON.stringify(IDS.slice(0, 2500)) }, { literal: 100000 }]);
+      [{ literal: JSON.stringify(IDS.slice(0, 2500)) }, { literal: decimalEdge(100000, 'high') }]);
     assert.deepEqual(sorted(await items.execute(overItems(mixedChain()))), sorted(EXPECTED));
     assert.deepEqual(await store.execute(overItem(mixedChain())), sorted(EXPECTED));
     assert.equal((await store.entity('Item').load({ where: mixedChain() })).length, EXPECTED.length);
@@ -171,7 +173,7 @@ describe('PostgreSQL: membership over thousands of values', { skip: !url && 'JAR
       (/** @type {any} */ error) => error.code === 'JD0032' && /more predicate terms/.test(error.message));
   });
 
-  it('a number list compares as numeric, the type a number column is declared as, so the column index seeks it', async () => {
+  it('a number list finds the intervals of its numbers through the column\'s index, and the column among their values', async () => {
     const query = overItem({ $eq: ['$it.n', '$ids[*]'] });
     assert.deepEqual(await store.execute(query, { externals: { ids: [1, 2.5, 1999] } }), ['i1', 'i1999']);
     const plan = await store.explain(query, { externals: { ids: [1, 2] } });
@@ -179,8 +181,10 @@ describe('PostgreSQL: membership over thousands of values', { skip: !url && 'JAR
     await admin.query(`SET search_path TO "${schema}"`);
     await admin.query('SET enable_seqscan = off');
     try {
-      const rows = (await admin.query({ text: `EXPLAIN ${plan.sql}`, values: [JSON.stringify([1, 2])] })).rows;
-      assert.match(rows.map((/** @type {any} */ row) => row['QUERY PLAN']).join('\n'), /Index Cond: \(\(n = .*::numeric\)/);
+      const rows = (await admin.query({ text: `EXPLAIN ${plan.sql}`, values: [decimalIntervals([1, 2])] })).rows;
+      const text = rows.map((/** @type {any} */ row) => row['QUERY PLAN']).join('\n');
+      assert.match(text, /Index Scan using "Item_n" on "Item" t0\s+\(.*\)\n\s+Index Cond: \(\(n = /, text);
+      assert.match(text, /Index Only Scan using "Item_n" on "Item" interval_row\s+\(.*\)\n\s+Index Cond: \(\(n >= /, text);
     }
     finally {
       await admin.query('RESET enable_seqscan');
