@@ -21,7 +21,7 @@ import { IDENTIFIER, ENGINE_TABLES } from './engine-metadata.js';
 import { DbCompileError } from './errors.js';
 import { chain } from './driver.js';
 import { BBOX_COMPONENTS, BBOX_INDEX_ORDER, derivedMappingFor } from './derive.js';
-import { expressionSql, expressionStem, expressionFunctions } from './expression.js';
+import { expressionSql, expressionStem, expressionFunctions, normalizeExpression } from './expression.js';
 import { foldIdentifier } from './invariants.js';
 import { SCALAR_TYPES, columnKindFor } from './scalar-types.js';
 import { verifyRulePrograms } from './physical.js';
@@ -29,7 +29,7 @@ import { rowPaths, rowPredicate, storedBoolean } from './dialects/row-predicate.
 import { planTable } from './dialects/sqlite-schema.js';
 import { readIntervalCheck, readsConforming } from './dialects/check-read.js';
 import { comparableDeclaredSql } from './schema-sql.js';
-import { modelPath, readModelPath, readsAsIndex } from './model-path.js';
+import { memberNames, modelPath, readModelPath, readsAsIndex } from './model-path.js';
 export { normalizeDeclaredSql, comparableDeclaredSql } from './schema-sql.js';
 
 const MANAGED_SQL_OPTIONS = Object.freeze({ columnOrder: /** @type {const} */ ('ignore') });
@@ -1645,7 +1645,10 @@ export function verifyShape(connection, plan, collection, docPath, kind = 'colle
                   ? readBack.condition(have.predicate, want.where, plan.conditionColumns ?? [], have.conforming)
                   : have.predicate === null ? null : `has the condition ${have.predicate}, which the model does not declare`;
                 if (difference !== null) disagree(`index '${have.name}' ${difference}`);
-                return collectColumns(i + 1);
+                // an expression key, where the engine keeps no CREATE text, is read
+                // back from the catalog and compared as the model plans it
+                return chain(readBack === undefined || (want.terms ?? []).length === 0 ? null
+                  : verifyIndexTerms(connection, have, want, disagree), () => collectColumns(i + 1));
               }));
           };
           // the table's rule programs: from the catalog where the engine keeps
@@ -1662,6 +1665,36 @@ export function verifyShape(connection, plan, collection, docPath, kind = 'colle
                 verifyDeclaredSql(connection, plan, disagree)))));
         }));
     })));
+}
+
+/**
+ * The expression keys a declared index holds after its columns, on an engine
+ * that keeps no CREATE text: each read back from the catalog as the server
+ * deparses it and compared with the planned term (the dialect's
+ * `readBack.indexKey`), under a deterministic collation — a nondeterministic one
+ * (case-insensitive, say) would refuse values the model keys apart, and the
+ * deparse of a key does not spell its collation.
+ * @param {any} connection
+ * @param {{ name: string, conforming: boolean }} have - the catalog's index
+ * @param {{ columns: string[], terms: string[] }} want - the planned index
+ * @param {(difference: string) => any} disagree
+ * @returns {any} value-or-promise
+ */
+function verifyIndexTerms(connection, have, want, disagree) {
+  const dialect = connection.dialect;
+  return chain(connection.prepare(dialect.introspect.indexKeyColumns(have.name)), (statement) =>
+    chain(statement.all([]), (keys) => {
+      want.terms.forEach((planned, at) => {
+        // the key's position holds an expression: the column check before this one compared it
+        const key = keys[want.columns.length + at];
+        if (typeof key?.term !== 'string') return disagree(`index '${have.name}' keys an expression it does not report`);
+        const difference = dialect.readBack.indexKey(key.term, planned, have.conforming);
+        if (difference !== null) disagree(`index '${have.name}' ${difference}`);
+        if (key.deterministic === false || key.deterministic === 0)
+          disagree(`index '${have.name}' keys ${key.term} under a nondeterministic collation, which refuses values the model keys apart`);
+      });
+      return null;
+    }));
 }
 
 /**
@@ -1924,10 +1957,11 @@ const expectedColumnsOf = (columns, legacyTypes, dialect) => [...columns
  * @param {any} entities - the full `explainMapping` result (key types
  *   come from the referenced entity's columns)
  * @param {any} dialect
- * @param {{ deferCycles?: boolean }} [options] - `deferCycles`: on a dialect
+ * @param {{ deferCycles?: boolean, expressions?: Record<string, any> }} [options] - `deferCycles`: on a dialect
  *   that alters a table in place, leave the foreign keys that close a cycle
  *   out of the table and plan them as `deferredForeignKeys`, statements to
- *   run once every table of the cycle exists
+ *   run once every table of the cycle exists; `expressions`, the host's
+ *   declared index functions an expression index calls (`openStore`'s)
  * @returns {{ table: string, createSql: string[], expected: any,
  *   columnNames: Set<string>, objects?: { name: string, what: string, docPath: string }[],
  *   programs?: any[], conditionColumns?: { name: string, physical: string, codec: string }[],
@@ -2063,8 +2097,11 @@ export function planEntity(name, entityMapping, entities, dialect, options = {})
     const indexPath = `${entityPath}/indexes/${i}`;
     const indexName = `${name}_${index.name}`;
     refuseLongName(dialect, indexName, `index '${index.name}'`, `${indexPath}/name`);
+    const terms = index.expression === undefined ? undefined
+      : [entityIndexTerm(index, dialect, options.expressions, `${indexPath}/expression`)];
     const where = index.where === undefined ? undefined : indexCondition(index.where, conditionColumns, dialect, `${indexPath}/where`, unreadable);
-    const declared = { name: indexName, unique: index.unique, columns: [...index.columns], ...(where === undefined ? {} : { where }) };
+    const declared = { name: indexName, unique: index.unique, columns: [...index.columns],
+      ...(terms === undefined ? {} : { terms, reads: [...index.reads] }), ...(where === undefined ? {} : { where }) };
     objects.push({ name: indexName, what: `index '${index.name}'`, docPath: `${indexPath}/name`, rename: 'the index' });
     createSql.push(dialect.ddl.createIndex({ ...declared, table: name }));
     expectedIndexes.push(declared);
@@ -2102,6 +2139,38 @@ export function planEntity(name, entityMapping, entities, dialect, options = {})
       indexes: expectedIndexes.sort((a, b) => (a.name < b.name ? -1 : 1)),
     },
   };
+}
+
+/**
+ * The key an entity index over a declared expression holds (MODEL-FORMAT
+ * §7A): the host's function over the columns of the members it reads, each
+ * read as the text a collection's expression reads (`textOperand`). Only an
+ * engine whose functions live in the database (`catalogFunctions`) computes
+ * one for every writer of the table; elsewhere it is `JD0004`, naming the
+ * engine and the repair. The declarations are checked as a collection's are,
+ * and the key must read back where the engine keeps no CREATE text.
+ * @param {any} index - the mapping's entry @param {any} dialect
+ * @param {Record<string, any> | undefined} declarations - the host's `expressions`
+ * @param {string} docPath - the index's `expression` pointer
+ * @returns {string}
+ */
+export function entityIndexTerm(index, dialect, declarations, docPath) {
+  const members = index.reads.map((/** @type {string} */ member) => `'${modelPath([{ name: member }])}'`).join(', ');
+  if (dialect.capabilities.catalogFunctions !== true) {
+    throw new DbCompileError('JD0004', `index '${index.name}' over an expression reading ${members} cannot be kept on ${dialect.name}: `
+      + 'the engine computes a declared function only on a connection that registered it, so every other writer of the '
+      + 'table — a raw SQL client included — could no longer insert or delete a row. Index the member itself (path), '
+      + 'declare the expression index on a collection, or keep the entity on PostgreSQL, whose server computes the '
+      + "declaration's IMMUTABLE 'sql' function on every connection", docPath);
+  }
+  const expression = normalizeExpression(index.expression, docPath, declarations ?? {});
+  const term = expressionSql(expression, dialect, { declarations: declarations ?? {}, registered: false, docPath,
+    memberSql: (member) => dialect.textOperand(dialect.quoteIdentifier(/** @type {string[]} */ (memberNames(member))[0])) });
+  if (dialect.readBack !== undefined && !dialect.readBack.expressionReads(term)) {
+    throw new DbCompileError('JD0004', `index '${index.name}' keys ${term}, which the ${dialect.name} catalog would not read `
+      + 'back exactly, so no open could verify it', docPath);
+  }
+  return term;
 }
 
 /**
@@ -2243,13 +2312,16 @@ export function clipToBytes(text, bytes) {
  * verified with. A name too long for PostgreSQL becomes a short hash of its
  * table, so two tables can meet in one name: the plan refuses that rather
  * than install one table's program over the other's.
- * @param {any} model @param {{ dialect: any }} options @returns {any[]} */
+ * An entity index over an expression is planned with the table, so a model
+ * that declares one takes the host's `expressions`, as `openStore` does.
+ * @param {any} model @param {{ dialect: any, expressions?: Record<string, any> }} options @returns {any[]} */
 export function planInvariants(model, options) {
   const mapping = explainMapping(model);
   const dialect = options.dialect;
   if (typeof dialect.invariantTriggers !== 'function') throw new DbCompileError('JD0005', 'this dialect cannot lower database invariants');
   const items = Object.entries(mapping.entities).flatMap(([name, entity]) => (entity.document === false
-    ? dialect.invariantTriggers(entity, mapping, dialect) : planEntity(name, entity, mapping, dialect).programs ?? []));
+    ? dialect.invariantTriggers(entity, mapping, dialect)
+    : planEntity(name, entity, mapping, dialect, { expressions: options.expressions }).programs ?? []));
   /** @type {Map<string, string>} */
   const owners = new Map();
   for (const item of items) {

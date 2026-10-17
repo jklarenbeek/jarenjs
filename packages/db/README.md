@@ -964,6 +964,7 @@ oracle run on both. What differs is declared rather than discovered:
 | an entity key with `default: "auto"` | the `INTEGER PRIMARY KEY`: the largest key plus one, so a rolled-back number is handed out again | a `bigserial` sequence: a rolled-back insert leaves a gap, and an explicit key is not seen — the allocation that meets one is `JD2001` |
 | `integer` and `number` | `INTEGER` and `REAL` | both `numeric` |
 | a `boolean` member | `INTEGER` 1/0 | `smallint` 1/0 |
+| an entity index over a declared expression | refused `JD0004`: only the registering connection computes the function | an index over the host's `sql` function, kept for every writer |
 | an untyped indexed path | `ANY` — compares with anything | `jsonb` — the predicate reads the document instead |
 | configuration | the closed pragma set, read back at open | the operator's; `store.capabilities.pragmas` is all `null` |
 | drift detection | the stored `CREATE` text, exactly | the structural check (columns, indexes, foreign keys), each index condition and generated column's expression read back from the catalog, and every trigger and rewrite rule on the table: a rule's program read field by field, any other one drift |
@@ -1387,6 +1388,16 @@ single statement runs. That is not ceremony: an index over a function is
 a schema dependency, and a database whose column is computed by
 `lower(…)` cannot be written from a connection that has no `lower`.
 
+An entity declares the same `expression` in an `indexes` entry, over its
+string members' columns. PostgreSQL keeps it as an index over the
+declaration's `sql` function — `CREATE UNIQUE INDEX "User_by_lower_email"
+ON "User" (lower(("email" COLLATE "default")))` — which the server computes
+on every connection, so a raw SQL writer meets it and writes as before.
+SQLite refuses it (`JD0004`, naming the index and the repair): a function
+only the registering connection computes would leave every other writer
+of the table unable to insert or delete a row. MODEL-FORMAT §7A has the
+rules.
+
 `@jarenjs/linq/model`'s `expressionIndex()` writes the same document
 from a lambda: `expressionIndex({ call: 'lower', args: [(d) => d.email] },
 { unique: true })`.
@@ -1446,8 +1457,10 @@ where the condition reads back into the query grammar and renders to
 exactly what the database holds. That `where` is the reader's canonical
 form — a boolean compared as the stored `1` or `0`, a one-item `$seq` as a
 plain `$eq`, nested `$and`/`$or` flattened — equal in meaning and in the SQL
-it renders to the condition as declared. An index no model could declare —
-over an expression, an unmapped column or the row identity; with an
+it renders to the condition as declared. An index over a declared
+expression comes back as its `expression` entry where `introspect({
+expressions })` reads its key back by the declarations. An index no model
+could declare — over any other expression, an unmapped column or the row identity; with an
 `INCLUDE` column, an operator class, a collation or a key order of its own;
 whose name another planned object already takes with ASCII case folded —
 and every collection's partial index is reported as `unmapped-index`,

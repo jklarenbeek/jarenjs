@@ -97,6 +97,12 @@ export const DIALECT_CAPABILITIES = Object.freeze({
   /** Referential integrity is always enforced, so no per-connection
    * switch is set or verified at open. */
   foreignKeysAlwaysOn: false,
+  /** A function an index calls lives in the DATABASE — PostgreSQL's
+   * catalog — so every connection that writes the table computes it, not
+   * only the one that registered it. An entity index over a declared
+   * expression (MODEL-FORMAT §7A) needs it, and the dialect's
+   * `textOperand`, which reads a column as an expression's member. */
+  catalogFunctions: false,
   /** A per-row identity that reproduces INSERTION order — SQLite's
    * `rowid`, or a declared identity column this dialect adds to every
    * table it creates. A collection is a sequence; without one, its
@@ -256,7 +262,8 @@ export const MEMBER_WHEN = Symbol('dialect.memberWhen');
  *   memberPathOf?: (expression: string) => (JsonPathSegment[] | null),
  *   memberGuarded?: (expression: string) => boolean,
  *   memberReadsNumbersFirst?: (expression: string) => boolean,
- *   expressionOf?: (expression: string, byName: Record<string, string>) => (any | null),
+ *   expressionOf?: (expression: string, byName: Record<string, string>, columns?: readonly string[]) => (any | null),
+ *   textOperand?: (columnSql: string) => string,
  *   readGenerated?: (rows: any[]) => { name: string, expression: string }[],
  *   physicalRead?: (codec: string, sql: string) => string,
  *   physicalCompare?: (codec: string, sql: string, column?: any) => string,
@@ -1019,9 +1026,17 @@ export function createDialect(spec) {
      * engine's function name back to the model's — the same name where
      * the store registered it, the host's `sql` name where the engine
      * has its own. `null` for anything this dialect did not write, which
-     * the introspector reports rather than guesses.
+     * the introspector reports rather than guesses. Given an entity
+     * table's `columns`, it reads the key of an entity index instead,
+     * whose members are those columns read by {@link textOperand}.
      */
     expressionOf: spec.expressionOf,
+    /**
+     * A column as an index expression's member on an entity table: the
+     * value and collation a collection's expression reads out of its
+     * document. Only an engine with `catalogFunctions` has one.
+     */
+    textOperand: spec.textOperand,
     /**
      * The `{ name, expression }` pairs behind `introspect.generated`'s
      * rows. Two engines answer that question with different row shapes

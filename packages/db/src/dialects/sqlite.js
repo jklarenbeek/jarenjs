@@ -448,6 +448,9 @@ export const sqliteDialect = createDialect({
     foreignKeysAlwaysOn: false,
     // the implicit `rowid` every non-WITHOUT ROWID table carries
     rowIdentity: true,
+    // nothing in the file carries a function: a registered one exists on
+    // the connection that registered it alone
+    catalogFunctions: false,
     // a GROUP BY / ORDER BY term may name a result alias, so a bucket
     // ladder is written once rather than three times
     groupByAlias: true,

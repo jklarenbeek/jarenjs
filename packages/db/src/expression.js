@@ -71,6 +71,34 @@ function refuse(reason, docPath) {
  * @returns {any}
  */
 export function normalizeExpression(node, docPath, declarations, depth = 0) {
+  // `null` reads as no declarations here, as it always has: only the
+  // shape reading below skips them
+  return normalizeNode(node, docPath, declarations ?? {}, depth);
+}
+
+/**
+ * Normalize one expression node's SHAPE alone — the three kinds, the
+ * depth, the scalars, a call's identifier and its argument list — without
+ * the host's declarations, which a model read with no store does not
+ * carry: the form an entity's index keeps until a planner that has them
+ * normalizes it again ({@link normalizeExpression}).
+ * @param {any} node
+ * @param {string} docPath
+ * @returns {any}
+ */
+export function expressionShape(node, docPath) {
+  return normalizeNode(node, docPath, null, 0);
+}
+
+/**
+ * @param {any} node
+ * @param {string} docPath
+ * @param {Record<string, any> | null | undefined} declarations - `null`:
+ *   the shape alone ({@link expressionShape})
+ * @param {number} depth
+ * @returns {any}
+ */
+function normalizeNode(node, docPath, declarations, depth) {
   if (depth > EXPRESSION_DEPTH) {
     throw refuse(`an index expression nests deeper than ${EXPRESSION_DEPTH}`, docPath);
   }
@@ -119,6 +147,13 @@ export function normalizeExpression(node, docPath, declarations, depth = 0) {
   if (!Array.isArray(args))
     throw refuse('a call node\'s args is an array', `${docPath}/args`);
 
+  if (declarations === null) {
+    return Object.freeze({
+      call: node.call,
+      args: Object.freeze(args.map((argument, i) =>
+        normalizeNode(argument, `${docPath}/args/${i}`, null, depth + 1))),
+    });
+  }
   const declared = declarations?.[node.call];
   if (declared === undefined) {
     const known = Object.keys(declarations ?? {}).sort();
@@ -141,7 +176,7 @@ export function normalizeExpression(node, docPath, declarations, depth = 0) {
   return Object.freeze({
     call: node.call,
     args: Object.freeze(args.map((argument, i) =>
-      normalizeExpression(argument, `${docPath}/args/${i}`, declarations, depth + 1))),
+      normalizeNode(argument, `${docPath}/args/${i}`, declarations, depth + 1))),
   });
 }
 
@@ -217,15 +252,18 @@ export function expressionStem(node) {
  * before any DDL — which is the whole point of resolving it at open.
  * @param {any} node - a normalized expression
  * @param {any} dialect
- * @param {{ docColumnSql: string, declarations: Record<string, any>,
+ * @param {{ docColumnSql?: string, declarations: Record<string, any>,
  *   registered: boolean, docPath: string,
- *   segmentsOf: (member: string) => import('./dialect.js').JsonPathSegment[],
+ *   segmentsOf?: (member: string) => import('./dialect.js').JsonPathSegment[],
  *   unpinnedOf?: (segments: import('./dialect.js').JsonPathSegment[]) =>
- *     (import('./dialect.js').JsonPathSegment[] | undefined) }} context -
+ *     (import('./dialect.js').JsonPathSegment[] | undefined),
+ *   memberSql?: (member: string) => string }} context -
  *   `registered` is whether this connection can register a deterministic
  *   function; `unpinnedOf`, where given, answers the segments of a member
  *   the dialect reads under its guard, because the schema leaves a container
- *   of its path open (a member is read unguarded when it is absent)
+ *   of its path open (a member is read unguarded when it is absent);
+ *   `memberSql`, where given, reads a member in place of the document read
+ *   (an entity's column)
  * @returns {string}
  */
 export function expressionSql(node, dialect, context) {
@@ -237,7 +275,8 @@ export function expressionSql(node, dialect, context) {
         : String(node.value);
   }
   if (Object.hasOwn(node, 'member')) {
-    const segments = context.segmentsOf(node.member);
+    if (context.memberSql !== undefined) return context.memberSql(node.member);
+    const segments = /** @type {Function} */ (context.segmentsOf)(node.member);
     const pathText = dialect.jsonPathText(segments);
     if (pathText === null) {
       throw refuse(`the index expression reads '${node.member}', a member name the dialect's `
@@ -246,7 +285,7 @@ export function expressionSql(node, dialect, context) {
     // the member's own SCALAR, not its JSON text: a declared function is
     // a function of the VALUE, and `lower` of a string must be the same
     // answer on both engines rather than one of them quoting it first
-    return dialect.columnRead(context.docColumnSql,
+    return dialect.columnRead(/** @type {string} */ (context.docColumnSql),
       { pathText, kind: 'scalar', unpinned: context.unpinnedOf?.(segments) });
   }
   const declared = context.declarations[node.call];

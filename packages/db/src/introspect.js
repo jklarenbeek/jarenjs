@@ -30,7 +30,8 @@
 import { chain, useStatementOnce } from './driver.js';
 import { DbCompileError } from './errors.js';
 import { readOptionsOrNull } from './options.js';
-import { KEY_COLUMN, DOC_COLUMN, SCALAR_CODECS, indexCondition, canonicalOf, kindIndexName, containerKeysOf, kindIndexSql } from './ddl.js';
+import { KEY_COLUMN, DOC_COLUMN, SCALAR_CODECS, indexCondition, canonicalOf, kindIndexName, containerKeysOf, kindIndexSql,
+  entityIndexTerm } from './ddl.js';
 import { columnKindFor } from './scalar-types.js';
 import { readPredicate, readIntervalCheck, sqlTokens, SQLITE_PREDICATE } from './dialects/check-read.js';
 import { comparableDeclaredSql } from './schema-sql.js';
@@ -38,7 +39,7 @@ import { isKeyword } from './sql.js';
 import { foldIdentifier } from './invariants.js';
 import { MODEL_VERSION, ENGINE_TABLES, IDENTIFIER } from './engine-metadata.js';
 import { registeredName, expressionMembers } from './expression.js';
-import { modelPath, readModelPath, readsAsIndex } from './model-path.js';
+import { memberNames, modelPath, readModelPath, readsAsIndex } from './model-path.js';
 import { isJsonObject, setObjectMember } from '@jarenjs/core/object';
 
 /**
@@ -736,9 +737,11 @@ function indexName(table, physical) {
  * @param {(row: any) => void} report
  * @param {{ child: string, column: string, fk: any }[]} edges - receives each
  *   foreign key: its edge is declared once every entity is derived
+ * @param {EntityExpressions} expressions - the host's declarations, by which an
+ *   index over an expression reads back
  * @returns {any}
  */
-function deriveEntity(dialect, table, report, edges) {
+function deriveEntity(dialect, table, report, edges, expressions) {
   const identity = dialect.identityColumn?.name;
   const primaryKey = new Set(table.primaryKey ?? []);
   const fkByColumn = new Map(table.foreignKeys.map((fk) => [fk.column, fk]));
@@ -776,7 +779,7 @@ function deriveEntity(dialect, table, report, edges) {
   }
   const indexes = [];
   for (const index of others) {
-    const declared = entityIndexOf(dialect, table, index, readable);
+    const declared = entityIndexOf(dialect, table, index, readable, expressions);
     const first = typeof declared === 'string' ? undefined : claim(index.name);
     if (typeof declared === 'string') report(loss('unmapped-index', `${table.name}.${index.name}`, declared));
     else if (first !== undefined) collision(index, first);
@@ -940,21 +943,38 @@ function conditionText(sql) {
  * as every open compares it — the stored CREATE text where the engine keeps
  * one, the catalog's condition and shape where it does not — so a derived
  * index never claims more than the database enforces.
+ * An index over one expression key derives an `expression` entry where the
+ * dialect reads the key back as a declared function over the string columns
+ * the entity maps (MODEL-FORMAT §7A) — which takes the host's declarations.
  * @param {any} dialect @param {any} table @param {any} index
  * @param {{ name: string, physical: string, codec: string }[]} readable
+ * @param {EntityExpressions} [expressions]
  * @returns {any} the entry, or the reason as a string
  */
-function entityIndexOf(dialect, table, index, readable) {
+function entityIndexOf(dialect, table, index, readable, expressions = undefined) {
   const name = index.name.slice(table.name.length + 1);
   if (!index.name.startsWith(`${table.name}_`) || !IDENTIFIER.test(name))
     return `the index name does not start with '${table.name}_', the prefix of every index a model declares on the entity`;
-  if (index.columns.some((/** @type {string | null} */ column) => !readable.some((c) => c.physical === column)))
-    return `the index covers (${index.columns.map((/** @type {string | null} */ column) => column ?? '<expression>').join(', ')}), `
-      + 'which are not all scalar columns the entity maps';
-  /** @type {any} */
   /** @param {string} member */
   const pathOf = (member) => modelPath([{ name: member }]);
-  const declared = { name, path: index.columns.length === 1 ? pathOf(index.columns[0]) : index.columns.map(pathOf),
+  /** @type {string | undefined} */
+  let term;
+  /** @type {any} */
+  let declared;
+  if (index.columns.length === 1 && index.columns[0] === null && typeof index.terms?.[0] === 'string') {
+    term = /** @type {string} */ (index.terms[0]);
+    const strings = readable.filter((column) => column.codec === 'text').map((column) => column.physical);
+    const expression = dialect.expressionOf?.(term, expressions?.byName ?? {}, strings) ?? null;
+    if (expression === null || !Object.hasOwn(expression, 'call')) {
+      return `the index keys ${term}, which does not read back as a declared function over the string columns the entity maps `
+        + '(pass the declarations the model was opened with as introspect({ expressions }))';
+    }
+    declared = { name, expression, ...(index.unique ? { unique: true } : {}) };
+  }
+  else if (index.columns.some((/** @type {string | null} */ column) => !readable.some((c) => c.physical === column)))
+    return `the index covers (${index.columns.map((/** @type {string | null} */ column) => column ?? '<expression>').join(', ')}), `
+      + 'which are not all scalar columns the entity maps';
+  else declared = { name, path: index.columns.length === 1 ? pathOf(index.columns[0]) : index.columns.map(pathOf),
     ...(index.unique ? { unique: true } : {}) };
   const keepsText = dialect.capabilities?.declaredSqlText === true;
   /** @type {string | undefined} */
@@ -972,8 +992,31 @@ function entityIndexOf(dialect, table, index, readable) {
     catch { return 'the partial predicate reads back as a condition the model refuses'; }
     declared.where = where;
   }
+  if (term !== undefined) {
+    // the key the derived entry plans, compared with the one the catalog holds
+    /** @type {string | null} */
+    let planned = null;
+    try {
+      planned = entityIndexTerm({ name, expression: declared.expression,
+        reads: expressionMembers(declared.expression).map((path) => /** @type {string[]} */ (memberNames(path))[0]) },
+      dialect, expressions?.declarations, `/entities/${table.name}/indexes`);
+    }
+    catch { planned = null; }
+    if (planned === null || dialect.readBack?.indexKey(term, planned, index.conforming) !== null)
+      return `the index keys ${term}, which is not the key the derived expression plans`;
+    if (!index.plain || (dialect.readBack?.condition(index.predicate, rendered, readable, index.conforming) ?? null) !== null)
+      return 'the index is not the plain ascending B-tree, under the condition, that the derived expression plans';
+    return declared;
+  }
   return plannedDifference(dialect, table, index, rendered, readable) ?? declared;
 }
+
+/**
+ * The host's index-function declarations as introspection reads an entity's
+ * expression index back by them: the engine's function names back to the
+ * model's (`byName`), and the declarations themselves.
+ * @typedef {{ byName: Record<string, string>, declarations?: Record<string, any> }} EntityExpressions
+ */
 
 /**
  * How a declared index differs from the one a model plans over its columns
@@ -1106,7 +1149,7 @@ export function introspectModel(connection, options = undefined) {
           + 'nor an entity'));
         continue;
       }
-      setObjectMember(entities, table.name, deriveEntity(dialect, table, add, edges));
+      setObjectMember(entities, table.name, deriveEntity(dialect, table, add, edges, { byName, declarations: options?.expressions }));
     }
     declareEdges(dialect, entities, schema.tables, edges, add);
     for (let i = report.length - 1; i >= 0; i--)

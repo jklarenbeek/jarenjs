@@ -16,7 +16,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { explainMapping, openStore, planCollection, planEntity, normalizeModel, sqliteDialect } from '@jarenjs/db';
+import { explainMapping, openStore, planCollection, planEntity, planInvariants, normalizeModel, sqliteDialect } from '@jarenjs/db';
 import { postgresDialect } from '@jarenjs/db/postgres';
 import { nodeDriver } from '@jarenjs/db/node';
 import { kindKey } from './helpers.js';
@@ -134,6 +134,12 @@ describe('the mapping of an entity index', () => {
   });
 });
 
+/** `lower` over one member. @param {string} member */
+const lowerOf = (member) => ({ call: 'lower', args: [{ member }] });
+const LOWER_DAY = lowerOf('$.day');
+/** The declaration a store is handed for `lower`. */
+const LOWER = { lower: { arity: 1, deterministic: true, apply: (/** @type {any} */ value) => String(value).toLowerCase(), sql: 'lower' } };
+
 /** An entity model whose `Shift` declares one more member and the given index. @param {any} index @param {any} [extra] */
 const shiftWith = (index, extra = {}) => shiftModel([index], { ...SHIFT, properties: { ...SHIFT.properties, ...extra } });
 
@@ -173,8 +179,33 @@ describe('entity index refusals, each at its member', () => {
       'JD0005', '/entities/Shift/indexes/0/uniqe', /unknown index member 'uniqe' — did you mean 'unique'\?/],
     ['a unique that is not a boolean', shiftModel([{ name: 'one_active', path: '$.day', unique: 'true' }]),
       'JD0005', '/entities/Shift/indexes/0/unique', /true or false/],
-    ['an expression', shiftModel([{ name: 'lower_day', expression: { call: 'lower', args: [{ member: '$.day' }] } }]),
-      'JD0004', '/entities/Shift/indexes/0/expression', /expression/],
+    ['an expression, on SQLite', shiftModel([{ name: 'lower_day', expression: LOWER_DAY }]),
+      'JD0004', '/entities/Shift/indexes/0/expression', /index 'lower_day' over an expression reading '\$\.day' cannot be kept on sqlite: [\s\S]*only on a connection that registered it[\s\S]*raw SQL client[\s\S]*PostgreSQL/],
+    ['an expression and a path', shiftModel([{ name: 'lower_day', path: '$.day', expression: LOWER_DAY }]),
+      'JD0004', '/entities/Shift/indexes/0/expression', /a path OR an expression/],
+    ['an expression that calls no function', shiftModel([{ name: 'lower_day', expression: { member: '$.day' } }]),
+      'JD0004', '/entities/Shift/indexes/0/expression', /calls no function: a lone member is a path index/],
+    ['an expression node of two kinds', shiftModel([{ name: 'lower_day', expression: { call: 'lower', args: [{ member: '$.day', value: 1 }] } }]),
+      'JD0004', '/entities/Shift/indexes/0/expression/args/0', /exactly one of 'member', 'value', 'call', and this one names 2/],
+    ['an expression over a nested member', shiftWith({ name: 'lower_city', expression: lowerOf('$.profile.city') },
+      { profile: { type: 'object', properties: { city: { type: 'string' } } } }),
+    'JD0004', '/entities/Shift/indexes/0/expression', /reads '\$\.profile\.city', which is not one member[\s\S]*map it as a column/],
+    ['an expression over a document member', shiftWith({ name: 'lower_profile', expression: lowerOf('$.profile') }, { profile: { type: 'object' } }),
+      'JD0004', '/entities/Shift/indexes/0/expression', /reads '\$\.profile', which the entity's document holds[\s\S]*map it as a column/],
+    ['an expression over an integer member', shiftWith({ name: 'lower_n', expression: lowerOf('$.n') }, { n: { type: 'integer' } }),
+      'JD0004', '/entities/Shift/indexes/0/expression', /reads '\$\.n', whose column holds an integer: an index expression on an entity reads string members/],
+    ['an expression over a boolean member', shiftWith({ name: 'lower_flag', expression: lowerOf('$.flag') }, { flag: { type: 'boolean' } }),
+      'JD0004', '/entities/Shift/indexes/0/expression', /reads '\$\.flag', whose column holds a boolean/],
+    ['an expression over an epoch member', shiftWith({ name: 'lower_at', expression: lowerOf('$.at') },
+      { at: { type: 'string', format: 'date-time', 'x-entity': { column: 'integer' } } }),
+    'JD0004', '/entities/Shift/indexes/0/expression', /reads '\$\.at', whose column holds an epoch \(milliseconds\)/],
+    ['an expression over a member no property names', shiftModel([{ name: 'lower_x', expression: lowerOf('$.x') }]),
+      'JD0004', '/entities/Shift/indexes/0/expression', /reads '\$\.x', which names no property of entity 'Shift'/],
+    ['an expression over a relation', { $model: '0.1', entities: {
+      User: { schema: { type: 'object', properties: { id: { type: 'string', 'x-entity': { key: true } } } } },
+      Shift: { schema: { ...SHIFT, properties: { ...SHIFT.properties, user: { 'x-entity': { relation: { to: 'User', via: 'userId', onDelete: 'setNull' } } } } },
+        indexes: [{ name: 'lower_user', expression: lowerOf('$.user') }] } } },
+    'JD0004', '/entities/Shift/indexes/0/expression', /reads '\$\.user', which names a relation/],
     ['indexes on a physical layout', { $model: '0.1', entities: { Shift: { schema: SHIFT, indexes: [ONE_ACTIVE], physical: { table: 'shift', columns: {
       id: { name: 'id', codec: 'text', null: 'reject' }, employeeId: { name: 'employee_id', codec: 'text', null: 'reject' },
       day: { name: 'day', codec: 'text', null: 'reject' }, status: { name: 'status', codec: 'text', null: 'absent' } } } } } },
@@ -182,12 +213,30 @@ describe('entity index refusals, each at its member', () => {
   ]);
   for (const [label, model, code, docPath, message] of CASES) {
     it(`${label}: ${code} at ${docPath}`, async () => {
-      const error = await openRefusal(model, { driver: nodeDriver() });
+      const error = await openRefusal(model, { driver: nodeDriver(), expressions: LOWER });
       assert.equal(error?.code, code, `${label}: ${error?.message}`);
       assert.equal(error.docPath, docPath, error.message);
       assert.match(error.message, message);
     });
   }
+
+  it('an expression index keys no probe of a rule: its key is no member\'s value, on the one engine that plans it', () => {
+    const model = { $model: '0.1', entities: {
+      User: { schema: { type: 'object', required: ['id'], properties: { id: { type: 'string', 'x-entity': { key: true } }, email: { type: 'string' } } },
+        indexes: [{ name: 'by_lower_email', expression: lowerOf('$.email'), unique: true }] },
+      Line: { schema: { type: 'object', required: ['id'], properties: { id: { type: 'integer', 'x-entity': { key: true } }, owner: { type: 'string' } } },
+        physical: { table: 'lines', columns: { id: { name: 'id', codec: 'integer', null: 'reject' }, owner: { name: 'owner', codec: 'text', null: 'absent' } } },
+        invariants: [{ name: 'owned', on: ['insert'], enforcement: 'database', assert: { '$exists-row': { entity: 'User', match: { email: '$.new.owner' } } } }] } } };
+    assert.throws(() => planInvariants(model, { dialect: postgresDialect(), expressions: LOWER }), (/** @type {any} */ error) => error.code === 'JD0005'
+      && /\$exists-row on 'User' is keyed by the unique index 'by_lower_email', which has an expression term/.test(error.message));
+    // the plan takes the declarations as a store does
+    const users = { $model: '0.1', entities: { User: model.entities.User } };
+    assert.deepEqual(planInvariants(users, { dialect: postgresDialect(), expressions: LOWER }), []);
+    assert.throws(() => planInvariants(users, { dialect: postgresDialect() }), (/** @type {any} */ error) => error.code === 'JD0004'
+      && error.docPath === '/entities/User/indexes/0/expression/call');
+    assert.throws(() => planInvariants(users, { dialect: sqliteDialect, expressions: LOWER }), (/** @type {any} */ error) => error.code === 'JD0004'
+      && /cannot be kept on sqlite/.test(error.message));
+  });
 
   it('a name PostgreSQL cannot hold whole is JD0004 at the member, for an entity and a collection index', () => {
     const dialect = postgresDialect();

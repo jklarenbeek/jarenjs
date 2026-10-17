@@ -27,6 +27,7 @@ import { columnCodec, normalizePhysical } from './physical.js';
 import { normalizeInvariants, resolveInvariants } from './invariants.js';
 import { schemaPosition } from './schema-positions.js';
 import { memberNames, modelPath } from './model-path.js';
+import { expressionMembers, expressionShape } from './expression.js';
 
 /** The closed `x-entity` vocabulary; anything else is `JD0030`. */
 const ENTITY_MEMBERS = new Set(['key', 'unique', 'index', 'default', 'column', 'relation', 'version']);
@@ -204,10 +205,13 @@ function checkDefault(declared, docPath) {
  * object naming an index over column-mapped top-level members, possibly
  * unique and partial. Which members map to columns is known once relations
  * resolve, so `mappingOf` resolves the paths; the `where` is lowered, and
- * refused, where it is rendered.
+ * refused, where it is rendered. An entry with an `expression` keeps its
+ * shape and the members it reads (`members`, in the order it reads them),
+ * and no `paths`.
  * @param {any} spec - the entity declaration
  * @param {string} docPath - the entity's pointer
- * @returns {{ name: string, paths: string[], unique: boolean, where: any, docPath: string }[]}
+ * @returns {{ name: string, paths: string[], members?: string[], expression?: any,
+ *   unique: boolean, where: any, docPath: string }[]}
  */
 function normalizeEntityIndexes(spec, docPath) {
   const declared = spec.indexes;
@@ -232,12 +236,29 @@ function normalizeEntityIndexes(spec, docPath) {
     if (index.unique !== undefined && typeof index.unique !== 'boolean')
       throw modelError(`unique is true or false, got ${JSON.stringify(index.unique)}`, `${indexPath}/unique`);
     if (index.expression !== undefined) {
-      // SQLite maintains an index over a function only on a connection that
-      // registered it: every other writer of the table could not insert or
-      // delete a row
-      throw modelError('an entity index over an expression is not supported: SQLite maintains it only on a connection '
-        + 'that registered its function, which would leave the table unwritable for every other writer — '
-        + 'index the member itself, or declare the expression index on a collection', `${indexPath}/expression`, 'JD0004');
+      // the shape only: the host's declarations, and whether the engine
+      // computes the function on every connection, are the planner's
+      // (`planEntity`), which has both
+      const expressionPath = `${indexPath}/expression`;
+      if (index.path !== undefined) {
+        throw modelError('an index declares a path OR an expression: an expression names the members it reads itself',
+          expressionPath, 'JD0004');
+      }
+      const expression = expressionShape(index.expression, expressionPath);
+      if (!Object.hasOwn(expression, 'call')) {
+        throw modelError(`index '${index.name}' declares an expression that calls no function: a lone member is a `
+          + 'path index (declare it as { "path": "$.<member>" }), and a lone value keys nothing', expressionPath, 'JD0004');
+      }
+      const members = expressionMembers(expression).map((path) => {
+        const member = indexMember(path);
+        if (member === undefined) {
+          throw modelError(`index '${index.name}' reads '${path}', which is not one member written $.<member> `
+            + `or $['<member>']: ${COLUMN_MAPPED}`, expressionPath, 'JD0004');
+        }
+        return member;
+      });
+      return { name: index.name, paths: [], members, expression,
+        unique: index.unique === true, where: index.where, docPath: indexPath };
     }
     const paths = Array.isArray(index.path) ? index.path : [index.path];
     if (paths.length === 0 || paths.some((path) => typeof path !== 'string' || path === ''))
@@ -754,13 +775,38 @@ export function compileEntityModel(model) {
 /**
  * An entity's declared indexes over its columns: each path's member must have
  * a column of its own — a mapped scalar, an epoch column, or the column a
- * foreign key adds — and the index lists those columns in declared order.
+ * foreign key adds — and the index lists those columns in declared order. An
+ * expression's members must each have a column that holds a string — a mapped
+ * scalar, or a foreign key's column over a string key — read as the text a
+ * collection's expression reads; the index keys no column of its own
+ * (`columns` is empty) and keeps the expression and the columns it reads.
  * @param {any} entity - normalized @param {any[]} columns @param {any[]} foreignKeys
- * @returns {{ name: string, columns: string[], unique: boolean, where?: any }[]}
+ * @returns {{ name: string, columns: string[], unique: boolean, where?: any, expression?: any, reads?: string[] }[]}
  */
 function entityIndexesOf(entity, columns, foreignKeys) {
   const mapped = new Set([...columns.map((column) => column.name), ...foreignKeys.map((fk) => fk.column)]);
   return entity.indexes.map((/** @type {any} */ index) => {
+    if (index.expression !== undefined) {
+      for (const member of index.members) {
+        const column = columns.find((candidate) => candidate.name === member);
+        const fk = foreignKeys.find((candidate) => candidate.column === member);
+        const holds = column !== undefined ? (column.source === 'epoch(document)' ? 'epoch' : column.storage)
+          : fk !== undefined ? fk.referencesType : undefined;
+        if (holds === 'string') continue;
+        const property = entity.properties.get(member);
+        const path = modelPath([{ name: member }]);
+        throw modelError(`index '${index.name}' reads '${path}', ` + (holds === 'epoch'
+          ? 'whose column holds an epoch (milliseconds) where the member is a string: an index expression reads a member as its text'
+          : holds !== undefined
+            ? `whose column holds ${holds === 'integer' ? 'an integer' : holds === 'number' ? 'a number' : `a ${holds}`}: an index expression on an entity `
+              + 'reads string members, as their columns hold them — a function of another type has no one reading of it on every engine'
+            : property === undefined ? `which names no property of entity '${entity.name}'`
+              : property.relation !== undefined ? 'which names a relation, which has no column of its own — read the foreign key it declares'
+                : `which the entity's document holds: ${COLUMN_MAPPED}`), `${index.docPath}/expression`, 'JD0004');
+      }
+      return { name: index.name, columns: [], expression: index.expression, reads: [...new Set(index.members)],
+        unique: index.unique, ...(index.where === undefined ? {} : { where: index.where }) };
+    }
     for (const member of index.paths) {
       if (mapped.has(member)) continue;
       const property = entity.properties.get(member);

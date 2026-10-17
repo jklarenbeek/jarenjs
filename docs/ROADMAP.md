@@ -451,17 +451,12 @@ what each does is its own documentation's job
   `unmapped-index`, so the model it reads back does not reopen the table
   (`JD0002`). Wanted: read those kinds back into the member's union, as for a
   scalar-first member.
-- [ ] **Expression indexes on entities.** An entity declares composite,
-  unique and partial indexes over its members (MODEL-FORMAT §9.2), but an
-  entry with an `expression` is refused (`JD0004`, §7A): an entity table has
-  no generated column to carry the expression, and SQLite maintains an index
-  over a function only on a connection that registered it, so every other
-  writer of the table — the raw SQL client a database rule exists for
-  included — could no longer insert or delete a row. Wanted: a carrier for
-  the expression on entities as a collection has one, or an expression the
-  engine evaluates on every connection, with the row-predicate module's call
-  nodes (§7A), open verification, the migration planner's index diff and
-  introspection.
+- [ ] **Replication over an entity expression index.** Replication orders an
+  envelope's writes by unique columns, never by an expression index's key
+  ([MODEL-FORMAT §7A](../packages/db/docs/MODEL-FORMAT.md)): a value the
+  host's function folds together, taken by one write before another releases
+  it, refuses `JD2005` where a plain unique column applies. Wanted: the slot
+  keyed by the declaration's `apply`.
 - [ ] **Database invariants over a store-owned layout, beyond its scalar
   columns.** A store-owned entity takes `enforcement: "database"` rules over
   the scalar and foreign-key columns its table maps, installed with the table

@@ -143,7 +143,9 @@ const replayOrder = (mapping, columnValue) => {
     };
     for (const fk of entity.foreignKeys ?? []) if (fk.unique) slot([fk.column]);
     for (const index of entity.indexes ?? []) if (index.unique) slot([index.property]);
-    for (const index of entity.entityIndexes ?? []) if (index.unique) slot(index.columns, index.where);
+    // an index over an expression keys no column's value: it has no slot, so a
+    // value its function folds together is not ordered by it (MODEL-FORMAT §7A)
+    for (const index of entity.entityIndexes ?? []) if (index.unique && index.expression === undefined) slot(index.columns, index.where);
     if (cascades.length > 0 || slots.length > 0) tables.set(table, { cascades, slots });
   }
   /** The rows a row's stored cascading keys name. @param {any} plan @param {any} doc @returns {string[]} */

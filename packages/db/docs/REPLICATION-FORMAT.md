@@ -142,7 +142,10 @@ cascade would otherwise apply to it first. The write that releases a value of
 an entity's unique slot — a one-to-one key, a unique member, a unique index,
 composite or partial (a partial index holds the rows its condition is true
 for) — runs before the write that takes it, because uniqueness is checked as
-each write runs. So a transaction that moves a child to a new parent and
+each write runs. An index over a declared expression is no such slot: its key
+is the host's function of the members (MODEL-FORMAT §7A), so a value it folds
+together keeps the envelope's order and refuses `JD2005` when the taking write
+comes first. So a transaction that moves a child to a new parent and
 deletes the old one applies and resets, and so does one that passes unique
 values between entity rows, unless no order can replay it: values rotated
 between rows, or a row moved off a removed parent that takes a value the

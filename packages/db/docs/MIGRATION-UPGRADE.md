@@ -3244,6 +3244,35 @@ this release opened is unchanged.
 - No table, index or stored value changes; a store the previous release
   created opens and answers as it did.
 
+## 53. An entity index over a declared expression, on PostgreSQL
+
+- An entity `indexes` entry with an `expression` was refused `JD0004` on every
+  engine. On PostgreSQL it now plans an index over the host's declared `sql`
+  function, its members each a string column read as a collection's
+  expression reads it: `{ "name": "by_lower_email", "expression": { "call":
+  "lower", "args": [{ "member": "$.email" }] }, "unique": true }` creates
+  `CREATE UNIQUE INDEX "User_by_lower_email" ON "User" (lower(("email"
+  COLLATE "default")))`, which the server computes on every connection, so a
+  raw SQL writer inserts and deletes rows as before and meets the index
+  (MODEL-FORMAT §7A). `openStore`, `planModelMigration`, `planInvariants` and
+  `introspect` take the declarations as `expressions`, as for a collection's
+  expression index. On SQLite such an entry stays `JD0004`, now raised where
+  the table is planned and naming the index, the members it reads and the
+  repair; a model that declares none plans, opens and answers as before.
+- The PostgreSQL catalog read of an index's keys now also reads whether each
+  key's collation is deterministic, and an open refuses (`JD0002`) an
+  expression key a model plans that the database holds under a
+  nondeterministic one. No table, index or stored value the previous release
+  created changes, and its stores open, plan and introspect as before.
+
+**Downgrade.** The previous release refuses a model that declares such an
+index `JD0004` at its `expression` before it reads a table. Remove the entry
+from the model and drop the index (`DROP INDEX "User_by_lower_email"`): the
+previous release then opens the table, which holds nothing else this release
+created, and answers alike; an open of the model without the entry and with
+the index still present is `JD0002` (`the database has User_by_lower_email,
+which the model does not declare`).
+
 ## Measured costs
 
 Exact identity stores complete canonical documents and model endpoints, so

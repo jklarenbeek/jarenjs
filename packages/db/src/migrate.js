@@ -1303,7 +1303,7 @@ export function planMigration(fromModel, toModel, options = undefined) {
     }
   }
 
-  const programs = planEntityChanges(fromModel, toModel, dialect, steps, report, transform);
+  const programs = planEntityChanges(fromModel, toModel, dialect, steps, report, transform, options?.expressions);
   // a list's repair runs last: after every structural step it may read
   steps.push(...(transform?.finish() ?? []));
   // the rule programs a table gains come after the repair: a program judges
@@ -1785,11 +1785,14 @@ function mistypedMemberStep(dialect, table, member, kind) {
  * @param {any} dialect
  * @param {any[]} steps
  * @param {any} report
+ * @param {any} [transform]
+ * @param {Record<string, any>} [expressions] - the host's declared index
+ *   functions, which an entity index over an expression calls
  * @returns {any[]} the steps that create the rule programs an existing table
  *   gains, for the caller to run after every other step (a program judges
  *   the writes after it, a transform's included)
  */
-function planEntityChanges(fromModel, toModel, dialect, steps, report, transform = null) {
+function planEntityChanges(fromModel, toModel, dialect, steps, report, transform = null, expressions = undefined) {
   /** @type {any[]} */
   const programs = [];
   const fromEntities = normalizeEntities(fromModel);
@@ -1822,7 +1825,7 @@ function planEntityChanges(fromModel, toModel, dialect, steps, report, transform
     renamedFrom.set(name, hint);
     report.renamed.push({ from: hint, to: name });
     // a rule program is named after its table: the old ones go before the rename
-    steps.push(...dropPrograms(planEntity(hint, fromMapping.entities[hint], fromMapping, dialect).programs ?? [], new Set(), hint));
+    steps.push(...dropPrograms(planEntity(hint, fromMapping.entities[hint], fromMapping, dialect, { expressions }).programs ?? [], new Set(), hint));
     steps.push({ kind: 'ddl', sql: dialect.ddl.renameTable(hint, name),
       note: `rename entity '${hint}' to '${name}'` });
   }
@@ -1971,7 +1974,7 @@ function planEntityChanges(fromModel, toModel, dialect, steps, report, transform
   // again at the end under the new name
   const recompiled = (tables) => [...new Set(tables)].flatMap((table) => {
     if (fromMapping.entities[table] === undefined) return [];
-    return (planEntity(table, fromMapping.entities[table], fromMapping, dialect).programs ?? [])
+    return (planEntity(table, fromMapping.entities[table], fromMapping, dialect, { expressions }).programs ?? [])
       .filter((item) => item.type === 'function')
       .map((item) => ({ kind: 'ddl', sql: item.sql.replace(/^CREATE FUNCTION /, 'CREATE OR REPLACE FUNCTION '),
         note: `compile the rule function '${item.name}' of '${table}' again against the converted columns` }));
@@ -1990,7 +1993,7 @@ function planEntityChanges(fromModel, toModel, dialect, steps, report, transform
 
     if (fromEntity === undefined) {
       report.added.push(name);
-      const added = planEntity(name, tm, toMapping, dialect, { deferCycles: true });
+      const added = planEntity(name, tm, toMapping, dialect, { deferCycles: true, expressions });
       for (const sql of added.createSql)
         steps.push({ kind: 'ddl', sql, note: `create entity '${name}'` });
       for (const sql of added.deferredForeignKeys ?? [])
@@ -2040,8 +2043,8 @@ function planEntityChanges(fromModel, toModel, dialect, steps, report, transform
         needsRebuild ? [] : recompiled([name, ...referencing.map((reference) => reference.table)])));
     }
 
-    const fromPlan = planEntity(fromName, fm, fromMapping, dialect);
-    const toPlan = planEntity(name, tm, toMapping, dialect);
+    const fromPlan = planEntity(fromName, fm, fromMapping, dialect, { expressions });
+    const toPlan = planEntity(name, tm, toMapping, dialect, { expressions });
     // the rules' programs: one that changes, and all of a rebuilt table (whose
     // triggers its DROP takes, but not a PostgreSQL function), are dropped
     // before the table's own work and created again last of all, after the
@@ -2056,7 +2059,7 @@ function planEntityChanges(fromModel, toModel, dialect, steps, report, transform
     }
 
     if (needsRebuild) {
-      steps.push(...renderRebuild(name, fromName, fm, tm, toMapping, dialect, report));
+      steps.push(...renderRebuild(name, fromName, fm, tm, toMapping, dialect, report, expressions));
     }
     else {
       // index diff first (a column cannot drop under a live index);
@@ -2068,7 +2071,7 @@ function planEntityChanges(fromModel, toModel, dialect, steps, report, transform
       const fromIndexByName = new Map(fromPlanIndexes.map((index) => [index.name, index]));
       const indexDies = (index) => !toIndexByName.has(index.name)
         || indexChanged(index, toIndexByName.get(index.name))
-        || index.columns.some((column) => disturbed.has(column));
+        || [...index.columns, ...(index.reads ?? [])].some((column) => disturbed.has(column));
       for (const index of fromPlanIndexes) {
         if (indexDies(index)) {
           steps.push({ kind: 'ddl', sql: dialect.ddl.dropIndex(index.name),
@@ -2140,7 +2143,7 @@ function planEntityChanges(fromModel, toModel, dialect, steps, report, transform
         if (source === undefined || indexDies(source)) {
           steps.push({ kind: 'ddl',
             sql: dialect.ddl.createIndex({ name: index.name, table: name,
-              columns: index.columns, unique: index.unique, where: index.where }),
+              columns: index.columns, unique: index.unique, where: index.where, terms: index.terms }),
             note: `create index '${index.name}' on '${name}'` });
         }
       }
@@ -2198,7 +2201,7 @@ function planEntityChanges(fromModel, toModel, dialect, steps, report, transform
     report.removed.push(name);
     report.destructive = true;
     // a table's triggers go with it; a PostgreSQL function does not
-    steps.push(...dropPrograms(planEntity(name, fromMapping.entities[name], fromMapping, dialect).programs ?? [], new Set(), name));
+    steps.push(...dropPrograms(planEntity(name, fromMapping.entities[name], fromMapping, dialect, { expressions }).programs ?? [], new Set(), name));
     steps.push({ kind: 'ddl', sql: dialect.ddl.dropTable(name),
       note: `DESTRUCTIVE: drop entity '${name}' and every row in it` });
   }
@@ -2729,13 +2732,14 @@ function retypeCheckSql(dialect, table, column, from, to, instant, joined) {
  * and every serial column — an allocated key, the `rid` — continues from
  * the old table's sequence: `create` carries its position across before the
  * old table is dropped, and `indexes` advances it past the copied values.
+ * `expressions` are the host's declared index functions.
  */
-function renderRebuild(name, fromName, fm, tm, toMapping, dialect, report) {
+function renderRebuild(name, fromName, fm, tm, toMapping, dialect, report, expressions = undefined) {
   const q = dialect.quoteIdentifier;
   const pathText = (memberName) => dialect.jsonPathText([{ name: memberName }]);
   const temporary = `${name}__rebuild`;
-  const create = [planEntity(temporary, tm, toMapping, dialect).createSql[0]];
-  const finalPlan = planEntity(name, tm, toMapping, dialect);
+  const create = [planEntity(temporary, tm, toMapping, dialect, { expressions }).createSql[0]];
+  const finalPlan = planEntity(name, tm, toMapping, dialect, { expressions });
   // the rule programs end `createSql`, and are not this step's
   const indexes = finalPlan.createSql.slice(1, finalPlan.createSql.length - (finalPlan.programs?.length ?? 0));
 
@@ -2972,7 +2976,7 @@ function createShapeHolding(connection, model, expressions, legacy) {
   const entities = asHistory(() => normalizeEntities(model));
   if (entities.size > 0) {
     const mapping = asHistory(() => explainMapping(model));
-    const plans = Object.keys(mapping.entities).map((name) => planEntity(name, mapping.entities[name], mapping, dialect, { deferCycles: true }));
+    const plans = Object.keys(mapping.entities).map((name) => planEntity(name, mapping.entities[name], mapping, dialect, { deferCycles: true, expressions }));
     for (const plan of plans) statements.push(...plan.createSql);
     for (const name of Object.keys(mapping.joinTables)) {
       const created = planJoinTable(name, mapping.joinTables[name], mapping, dialect).createSql;

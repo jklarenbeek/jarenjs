@@ -593,14 +593,22 @@ function intervalSpelling(conforming) {
  * The declared index EXPRESSION a generated column computes, out of the
  * SQL this dialect wrote for it. Here the engine calls its OWN
  * immutable function, so `byName` maps the host's `sql` name back to the
- * model's — a mapping only the host's declarations carry.
+ * model's — a mapping only the host's declarations carry. Given an entity
+ * table's string `columns`, the expression is an entity index's key, whose
+ * member is one of those columns as `textOperand` reads it
+ * (`email COLLATE "default"` in the server's deparse).
  * @param {string} expression
  * @param {Record<string, string>} byName
+ * @param {readonly string[]} [columns]
  * @returns {any | null}
  */
-function expressionOf(expression, byName) {
+function expressionOf(expression, byName, columns = undefined) {
   return readExpression(expression, {
-    memberOf: (text) => {
+    memberOf: columns !== undefined ? (text) => {
+      const match = /^\s*(?:([a-z_][a-z0-9_$]*)|"((?:[^"]|"")+)")\s+COLLATE\s+"default"\s*$/.exec(text);
+      const name = match === null ? null : match[1] ?? match[2].replace(/""/g, '"');
+      return name !== null && columns.includes(name) ? { member: modelPath([{ name }]) } : null;
+    } : (text) => {
       // a member read here is `doc #>> '{…}'` and nothing else: the
       // typed forms belong to a plain path index, not to an expression
       if (!/#>>/.test(text)) return null;
@@ -694,6 +702,9 @@ export function postgresDialect(options = undefined) {
       foreignKeysAlwaysOn: true,
       // through the declared `rid` column, not through `ctid`
       rowIdentity: true,
+      // a declared index function is the host's IMMUTABLE one in the
+      // database itself, which every connection calls
+      catalogFunctions: true,
     },
     tableSuffix: '',
     // PostgreSQL has no indexable virtual generated column, so an
@@ -860,6 +871,11 @@ export function postgresDialect(options = undefined) {
     memberPathOf,
     memberGuarded,
     expressionOf,
+    // an entity column as an index expression's member: its text under the
+    // database's default collation, the very value and collation a
+    // collection's expression reads out of the document (`#>>`), so one
+    // declared function answers alike over both
+    textOperand: (columnSql) => `(${columnSql} COLLATE "default")`,
     // the catalog already answers one row per generated column
     readChecks: postgresChecks,
     readGenerated: (rows) => rows.map((row) => ({
@@ -991,9 +1007,12 @@ export function postgresDialect(options = undefined) {
       // the columns the index KEYS, apart from any it carries beside them
       // (`INCLUDE`): what a unique index proves unique, in its own order —
       // each key's column, `NULL` for an expression, and the key as the
-      // server deparses it (`term`), which the open reads an expression from
+      // server deparses it (`term`), which the open reads an expression from,
+      // and whether its collation is deterministic (`NULL` for a key of a
+      // type without one), which that deparse does not spell
       indexKeyColumns: (index) =>
-        'SELECT a.attname AS name, pg_get_indexdef(i.indexrelid, k.ord::int, false) AS term FROM pg_index i '
+        'SELECT a.attname AS name, pg_get_indexdef(i.indexrelid, k.ord::int, false) AS term, '
+        + '(SELECT co.collisdeterministic FROM pg_collation co WHERE co.oid = i.indcollation[(k.ord - 1)::int]) AS deterministic FROM pg_index i '
         + 'JOIN pg_class ci ON ci.oid = i.indexrelid '
         + 'JOIN pg_namespace n ON n.oid = ci.relnamespace '
         + 'CROSS JOIN LATERAL unnest(i.indkey::int2[]) WITH ORDINALITY AS k(attnum, ord) '

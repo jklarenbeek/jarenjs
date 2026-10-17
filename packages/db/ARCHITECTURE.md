@@ -72,7 +72,7 @@ column with no scalar type, `RETURNING`, upsert, savepoints, an
 up-front write lock, a result alias in `GROUP BY`, in-place `ALTER`,
 virtual tables, triggers, a configuration vocabulary, a stored CREATE
 text, always-on referential integrity, an insertion-ordered row
-identity. What the store does where the answer is `false` is a
+identity, an index function the database itself holds. What the store does where the answer is `false` is a
 FALLBACK or a coded refusal on the common path, never a skip:
 
 | Capability off | What the common path does instead |
@@ -84,6 +84,7 @@ FALLBACK or a coded refusal on the common path, never a skip:
 | `untypedColumns` | a comparison against a member the schema does not type reads the member out of the document instead of the column: same answer, unindexed |
 | `indexableGeneratedColumns` | the derived-column mapping is the STORED one — the store writes the values and the columns are ordinary |
 | `rowIdentity` (with a declared identity column) | the dialect adds that column to every table it creates, and it IS `rowIdentity()` |
+| `catalogFunctions` | an entity index over a declared expression is `JD0004` where its table is planned, naming the index, its members and the repair: a function only the registering connection computes would leave every other writer unable to write the table (MODEL-FORMAT §7A) |
 | `immediateTransactions` | `mode: 'immediate'` takes no lock before the body, and a read-then-write body takes its row locks when it writes; no shipped dialect answers `false` any more |
 
 Two subsystems say so on the connection rather than in the dialect,
@@ -327,6 +328,7 @@ common fallback, never a skip.
 | `foreignKeysAlwaysOn` | — (set and verified per connection) | yes |
 | `rowIdentity` | yes (`rowid`) | yes (the declared `rid` column) |
 | `savepointStartsTransaction` | yes | — (a top-level transaction is `BEGIN`/`COMMIT`) |
+| `catalogFunctions` | — (an entity index over an expression is `JD0004`) | yes (the host's IMMUTABLE `sql` function) |
 
 And the two subsystems that are SQLite's own, declared on the
 CONNECTION rather than the dialect because they are a library's

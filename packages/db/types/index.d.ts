@@ -2284,7 +2284,10 @@ export declare function translateProfilePredicate(predicate: unknown, shape: unk
 export declare function applyMandatoryPredicate(plan: unknown, predicate: unknown): unknown;
 export declare function applyRowBound(plan: unknown, maxRows: number): unknown;
 export declare function translatePatch(ops: readonly unknown[], doc: unknown, dialect: Dialect): unknown;
-export declare function planEntity(name: string, entityMapping: unknown, mapping: unknown, dialect: Dialect): unknown;
+/** Plan an entity's table. `expressions` are the host's declared index
+ * functions an entity index over an expression calls (MODEL-FORMAT §7A). */
+export declare function planEntity(name: string, entityMapping: unknown, mapping: unknown, dialect: Dialect,
+  options?: { deferCycles?: boolean; expressions?: Record<string, ExpressionFunction> }): unknown;
 export declare function planJoinTable(name: string, joinTable: unknown, mapping: unknown, dialect: Dialect): unknown;
 export declare function entityCore(connection: unknown, entity: unknown, entityMapping: unknown, validate: unknown): unknown;
 export declare function chain<T, R>(value: T | Promise<T>, next: (value: T) => R): R | Promise<R>;
@@ -2713,7 +2716,7 @@ export interface InvariantProgram {
 export type PlannedInvariant =
   | { type: 'function'; name: string; owner: string; rule: string; sql: string }
   | { type: 'trigger'; name: string; owner: string; rule: string; sql: string; program?: InvariantProgram };
-export declare function planInvariants(model: unknown, options: { dialect: Dialect }): PlannedInvariant[];
+export declare function planInvariants(model: unknown, options: { dialect: Dialect; expressions?: Record<string, ExpressionFunction> }): PlannedInvariant[];
 /** A reviewed preservation document. The supplied steps retain their types;
  * untyped saved steps remain unknown until the caller validates them. */
 export interface MigrationPhysicalHeader {

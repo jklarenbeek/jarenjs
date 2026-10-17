@@ -92,7 +92,9 @@ export function probeTarget(entity) {
     uniques: [...entity.indexes.filter((/** @type {any} */ index) => index.unique)
       .map((/** @type {any} */ index) => ({ name: index.property, members: [index.property], partial: false })),
     ...(entity.entityIndexes ?? []).filter((/** @type {any} */ index) => index.unique)
-      .map((/** @type {any} */ index) => ({ name: index.name, members: index.columns, partial: index.where !== undefined }))] };
+      // an expression key is no member's value: `null`, as a physical layout's expression term
+      .map((/** @type {any} */ index) => ({ name: index.name, members: index.expression === undefined ? index.columns : [null],
+        partial: index.where !== undefined }))] };
 }
 
 /** Replace each `$exists-row` with a read of its answer, collecting the probes.
@@ -298,7 +300,8 @@ function uniqueIndexesOf(entity) {
   return [...[...entity.properties.values()].filter((property) => property.unique && !property.key)
     .map((property) => ({ name: property.name, members: [property.name], partial: false })),
   ...entity.indexes.filter((/** @type {any} */ index) => index.unique)
-    .map((/** @type {any} */ index) => ({ name: index.name, members: index.paths, partial: index.where !== undefined }))];
+    .map((/** @type {any} */ index) => ({ name: index.name, members: index.expression === undefined ? index.paths : [null],
+      partial: index.where !== undefined }))];
 }
 
 /**

@@ -2166,12 +2166,61 @@ anything else, or that does not read, is `JD0002`; a planned expression
 that could not be read back is refused where it is planned (`JD0004`).
 SQLite compares the CREATE text itself.
 
-**An entity index takes no expression** (`JD0004` at its `expression`):
-an entity table has no generated column, and SQLite maintains an index
-over a function only on a connection that registered it — every other
-writer of the table, the raw SQL client a database rule exists for
-included, could no longer insert or delete a row. Index the member
-itself (§9.2), or declare the expression index on a collection.
+**An entity index over an expression** (§9.2) takes `expression` in
+place of `path` (both are `JD0004`), and its root is a call: a lone
+member is a `path` index and a lone value keys nothing. Each member it
+reads is one top-level member, `$.<member>` or `$['<member>']`, whose
+column holds a string — a mapped string scalar, or a foreign key's
+column over a string key. A member the document holds, a nested path, a
+relation, an epoch member (its column holds milliseconds) and an
+`integer`, `number` or `boolean` member (its column holds a type of its
+own: a boolean `1` or `0` where `apply` takes `true`) are `JD0004` at
+the `expression`, naming the member.
+
+On PostgreSQL the index keys the declaration's `sql` function over the
+columns, with no column of its own:
+
+```sql
+CREATE UNIQUE INDEX "User_by_lower_email" ON "User" (lower(("email" COLLATE "default")))
+```
+
+Each column is read as a collection's expression reads its member — its
+text under the database's default collation, where the column holds it
+under `"C"` — so one declaration answers alike over a collection and an
+entity. The server computes the function on every connection, so the
+index holds for the store and for a raw SQL writer alike, which inserts
+and deletes rows as before; a violation is `JD2005`. A missing member is
+SQL NULL, and the function's answer over it is keyed as any other (a
+`NULL` key never meets another in a unique index). Every open reads each
+key back out of the catalog and compares it with the planned key as a
+generated column's expression is compared, and refuses (`JD0002`)
+another function or argument, another collation of a member, a key
+under a nondeterministic collation (a case-insensitive one refuses
+values the model keys apart, and the server's deparse of a key does not
+spell it), a lost `unique` and a changed condition. The planner creates,
+drops and recreates the index (a changed expression or condition is a
+drop and a create); `planModelMigration` and `planInvariants` take the
+declarations as `expressions`, as `openStore` does, and without the
+function refuse `JD0004` at the `call`. `introspect({ expressions })`
+reads the key back into the expression; without the declarations it is
+an `unmapped-index` row. Replication orders an envelope's writes by the
+columns of a unique index, never by an expression's key: a value the
+function folds together, taken by one write before another releases it,
+keeps the envelope's order and is refused `JD2005`
+([REPLICATION-FORMAT](REPLICATION-FORMAT.md#applying-and-exporting)).
+
+**On SQLite an entity index over an expression stays `JD0004`** at its
+`expression`, naming the index, the members it reads and the repair.
+SQLite maintains an index over a function only on a connection that
+registered it, so every other writer of the table — the raw SQL client a
+database rule exists for included — could no longer insert or delete a
+row; nothing in the file carries a function. No SQLite built-in stands
+in for a declaration: the store cannot prove one answers as `apply`
+(SQLite's `lower` folds ASCII alone), and a collection's index over the
+same declaration calls `apply`. Index the member itself, declare the
+expression index on a collection, or keep the entity on PostgreSQL. A
+layout an application owns (§12) keys an expression term of its own in
+`physical.indexes`.
 
 ## 8. The safe execution profile
 
@@ -2801,7 +2850,9 @@ inside the writing transaction lets a concurrent writer slip past it.
   `where`; any other member is `JD0005` at the member. `derive`,
   `precision`, `dims` and `physical` are recognized first and refused
   `JD0004` — they need a generated column, which an entity table never
-  has — and `expression` is refused `JD0004` (§7A).
+  has. `expression` in place of `path` keys a declared function over
+  string members: an index PostgreSQL keeps and SQLite refuses `JD0004`
+  (§7A).
 - `name` is an identifier, unique within the entity; the index is
   named `<Entity>_<name>`, in the one namespace every name a model
   plans shares (§2) — the same name as a `unique` or `index`
@@ -2832,7 +2883,9 @@ inside the writing transaction lets a concurrent writer slip past it.
 - The mapping keeps one-column entries apart: `explainMapping()`'s
   `entities[E].indexes` lists the `unique` and `index` properties
   exactly as before, and the entity-level indexes are
-  `entities[E].entityIndexes` (`{ name, columns, unique, where? }`). A
+  `entities[E].entityIndexes` (`{ name, columns, unique, where? }`; one
+  over an expression has no `columns`, and carries its `expression` and
+  the columns it `reads`). A
   composite or partial unique index never anchors a pagination cursor
   (§10.5): it is not a unique column.
 - Every open verifies the index: SQLite compares the stored CREATE

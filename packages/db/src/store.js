@@ -3026,7 +3026,8 @@ export function openStore(model, options) {
               expressions: options.expressions, registered: registersFunctions }));
         if (mapping !== null) {
           for (const name of Object.keys(mapping.entities))
-            entityPlans.set(name, planEntity(name, mapping.entities[name], mapping, dialect, { deferCycles: true }));
+            entityPlans.set(name, planEntity(name, mapping.entities[name], mapping, dialect,
+              { deferCycles: true, expressions: options.expressions }));
           for (const joinName of Object.keys(mapping.joinTables)) {
             entityPlans.set(joinName,
               planJoinTable(joinName, mapping.joinTables[joinName], mapping, dialect));
