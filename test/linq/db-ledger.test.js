@@ -332,6 +332,13 @@ describe('createDbLedger — sweep(now, { limit })', () => {
     assert.strictEqual(await ledger.sweep(1000, { limit: 1_000_000 }), 3);
   });
 
+  // The sweep reads the expiry index range in index order, behind a probe in
+  // its own LIMIT that the column holds no integer past the safe range (the
+  // expiry member declares no bounds): two seeks on the same index, no table
+  // scan and no sort.
+  const SWEEP_PLAN = 'SCALAR SUBQUERY 1; SEARCH ledger USING INDEX ledger_by_expires; SCALAR SUBQUERY 2; '
+    + 'SEARCH ledger USING INDEX ledger_by_expires; SEARCH ledger USING INDEX ledger_by_expires (gx_expiresAt<?)';
+
   it('a bounded call reads only the rows it deletes, in index order: 50 rows read whether the table holds 1,000 or 8,000, and whether 100 or all of them are expired', async () => {
     const counting = countingDriver();
     for (const [table, expired] of [[1000, 100], [8000, 100], [8000, 8000]]) {
@@ -343,7 +350,7 @@ describe('createDbLedger — sweep(now, { limit })', () => {
       counting.reset();
       assert.strictEqual(await ledger.sweep(1e9, { limit: 50 }), 50);
       assert.strictEqual(counting.read, 50, `${table} records, ${expired} expired`);
-      assert.deepStrictEqual(counting.plans, ['SEARCH ledger USING INDEX ledger_by_expires (gx_expiresAt<?)'],
+      assert.deepStrictEqual(counting.plans, [SWEEP_PLAN],
         'one statement: the expiry index range in index order, no table scan and no sort');
       assert.strictEqual((await client.collections.ledger.toArray()).length, table - 50);
     }
@@ -372,7 +379,7 @@ describe('createDbLedger — sweep(now, { limit })', () => {
     // the three settled records past expiry and the two claims past their own expiry
     assert.strictEqual(safe.swept, 5);
     assert.strictEqual(safe.sweepRead.read, 5);
-    assert.deepStrictEqual(safe.sweepRead.plans, ['SEARCH ledger USING INDEX ledger_by_expires (gx_expiresAt<?)']);
+    assert.deepStrictEqual(safe.sweepRead.plans, [SWEEP_PLAN]);
     assert.strictEqual(safe.left, 997);
     for (const limit of [2 ** 53, Number.MAX_VALUE]) {
       assert.deepStrictEqual(await run(limit), safe, String(limit));
