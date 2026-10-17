@@ -1,11 +1,11 @@
 {
   "bundles": {
     "schema": 45306,
-    "chain": 246938,
+    "chain": 248608,
     "model": 57500,
     "jslt": 27870,
     "migration": 35055,
-    "db": 1092604,
+    "db": 1099452,
     "contract": 58879,
     "flow": 27972,
     "app": 60363,
@@ -13,12 +13,12 @@
     "charts": 6600,
     "project": 4724,
     "jtlt": 24585,
-    "messages": 14597,
+    "messages": 14663,
     "formula": 12404
   },
   "chain": {
     "own": 53670,
-    "withSchemaPen": 271842,
+    "withSchemaPen": 273512,
     "shared": 20402
   },
   "components": {

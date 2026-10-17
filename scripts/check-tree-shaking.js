@@ -246,7 +246,8 @@ if (chainEdgeLeak.length > 0)
 // Raised to 244,400 (measured 244372): core's linear-time equality and linear-space keys over shared values (2833) and the documented answers for malformed geometry positions add 3828, net of the shared geometry walker's 798 saved.
 // Raised to 245,700 (measured 245689): the locale number syntax core's parseNumber and $quantity now share (net 528), the coded over-long key and the host-string bound (364), and the geometry reading of a position that is no number pair (425) add 1317.
 // Raised to 247,200 (measured 247106): equality and ordering of dates, patterns and big integers by value (523), the join's NaN key matching the scan (385), missing geometry positions answered as documented (331), the refused leading zero group (94) and the thenable check refusal add 1417.
-if (chainBytes > 247200)
+// Raised to 248,700 (measured 248608): the query engine's position-finding string operators, pattern tokenize, translate and the coded $error operator add 1670.
+if (chainBytes > 248700)
   throw new Error(`The chain bundle grew to ${chainBytes} bytes.`);
 
 console.log(`Tree-shaking smoke test passed (${chainBytes} byte chain bundle; no schema-pen module, no client module, no store/validator/formats bytes).`);
@@ -653,7 +654,8 @@ if (asyncLiveLeak.length)
 // Raised to 1,067,600 (measured 1067514): the per-kind union and unique indexes with the boolean key that keeps true apart from 1 (ddl 3983) and their read-back (introspect 2076), the validator's exact dialect and vocabulary matching (1942), and the native grouping and seek plans (790) add 8895.
 // Raised to 1,081,000 (measured 1080970): the validator's compile-time keyword value shapes read from the draft meta-schemas (keyword-values 5392) and its coded refusals, and the per-kind unique keys on both engines with decoded member names and typed-column kinds (ddl, introspect, sqlite dialect 6894) add 13456.
 // Raised to 1,092,700 (measured 1092604): entity expression indexes planned, verified at open and read back (ddl, model, introspect, expression), integers past 2^53 read and compared by the doubles that round to them on every engine and host (double-interval, emit, query, dialects), windows and counts over concatenation and arithmetic (plan), the probe that keeps an unbounded integer order on its index and the coded refusals the hunts added add 13757; the keyword-value shape table saves 2123.
-if (clientBytes > 1092700)
+// Raised to 1,099,500 (measured 1099452): literals, lists, member pairs, joins and integer orderings compared and ordered as the engine's doubles (emit, plan, query, double-interval), the query engine's new string and error operators, and one identifier reading for every compile site (validate traverse, index, normalize) add 6848.
+if (clientBytes > 1099500)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 
