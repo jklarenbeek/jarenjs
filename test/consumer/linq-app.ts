@@ -6,7 +6,7 @@
 // the state builder); a form rule's document is typed the same way. The
 // runtime twins live in test/linq/app-pen.test.js and forms-pen.test.js.
 import {
-  action, add, append, bind, defineApp, effect, remove, replace, sub, taskSlot, transition, when,
+  action, add, append, awaiting, bind, defineApp, effect, remove, replace, sub, taskSlot, transition, when,
 } from '@jarenjs/linq/app';
 import type {
   ActionScope, ActionsOf, AppDocument, AppResult, Binding, EffectDeclaration, PatchOp,
@@ -119,6 +119,29 @@ action((st: Expr<State>, x) => transition({
   // @ts-expect-error — only the default slice and the requested fields are bound
   state: x.event.altKey,
 }), { event: ['shiftKey'] as const });
+
+// ——— an awaiting action: each member sees its own scope ———
+const awaited = awaiting({
+  start: (st: Expr<State>, x) => transition({ patch: [append((c: Expr<State>) => c.todos, { text: x.payload.text, done: false })] }),
+  run: 'save',
+  with: (st: Expr<State>, x) => ({ text: x.payload.text }),
+  then: (st: Expr<State>, x) => transition({ state: x.result }),
+  catch: (st: Expr<State>, x) => when(x.error.code.eq('JA2028'), transition({ state: x.error.message })),
+}, { payload: Payload });
+void awaited;
+
+awaiting({
+  run: 'save',
+  // @ts-expect-error — $error is bound in catch, not in then
+  then: (st: Expr<State>, x) => transition({ state: x.error }),
+});
+awaiting({
+  run: 'save',
+  // @ts-expect-error — $result is bound in then, not in catch
+  catch: (st: Expr<State>, x) => transition({ state: x.result }),
+});
+// @ts-expect-error — run is required
+awaiting({ then: () => transition({}) });
 
 // ——— a bind() to an undeclared action does not compile ———
 const good: Binding<Action> = bind<Action>('todo/add');

@@ -197,6 +197,50 @@ export function action<const Fields extends readonly string[], State = unknown>(
   options: { readonly event: Fields },
 ): ActionDeclaration<unknown>;
 
+/** The `$error` a `catch` continuation reads (APP-FORMAT §3.3). */
+export interface AwaitError {
+  readonly code: 'JA2006' | 'JA2007' | 'JA2028';
+  readonly message: string;
+}
+
+/** The members of an awaiting action, each captured over its own scope. */
+export interface AwaitSpec<State, Payload, Fields extends string, Result> {
+  /** The registered effect awaited. */
+  readonly run: string;
+  /** The start transition, over `$event` and `$payload`. */
+  readonly start?: (state: ValueExpr<State>, externals: ActionScope<Payload, Fields>) => unknown;
+  /** The effect's props, read from the state the start produced; or a query document written by hand. */
+  readonly with?: ((state: ValueExpr<State>, externals: ActionScope<Payload, Fields>) => unknown) | Json;
+  /** The await's identity: a newer await on it supersedes this one. The action's name when absent. */
+  readonly slot?: string;
+  /** The continuation on success, over the state then and `$result`. */
+  readonly then?: (state: ValueExpr<State>,
+    externals: ActionScope<Payload, Fields> & { readonly result: ValueExpr<Result> }) => unknown;
+  /** The continuation on failure, over the state then and `$error`. */
+  readonly catch?: (state: ValueExpr<State>,
+    externals: ActionScope<Payload, Fields> & { readonly error: ValueExpr<AwaitError> }) => unknown;
+}
+
+/**
+ * One awaiting action (APP-FORMAT §3.3): commit `start`, await the
+ * effect `run`, continue with `then` over `$result` or `catch` over
+ * `$error` in a transaction of its own. `payload` and `event` are TYPES,
+ * as for {@link action}.
+ */
+export function awaiting<State = unknown, Result = unknown>(
+  spec: AwaitSpec<State, unknown, never, Result>,
+): ActionDeclaration<unknown>;
+export function awaiting<
+  B extends AnyBuilder, const Fields extends readonly string[] = [], State = unknown, Result = unknown,
+>(
+  spec: AwaitSpec<State, Infer<B>, Fields[number], Result>,
+  options: { readonly payload: B; readonly event?: Fields },
+): ActionDeclaration<Infer<B>>;
+export function awaiting<const Fields extends readonly string[], State = unknown, Result = unknown>(
+  spec: AwaitSpec<State, unknown, Fields[number], Result>,
+  options: { readonly event: Fields },
+): ActionDeclaration<unknown>;
+
 /**
  * A value position: anything but a {@link Conditional}. A `when()` is a
  * transition — an action's result or a branch of another `when()` — and

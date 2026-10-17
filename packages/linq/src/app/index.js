@@ -16,6 +16,7 @@
 
 export { defineApp } from './define.js';
 export { action, transition, effect, bind } from './action.js';
+export { awaiting } from './await.js';
 export { add, append, replace, remove, move, copy, test } from './patch.js';
 export { sub } from './sub.js';
 export { when } from './conditional.js';

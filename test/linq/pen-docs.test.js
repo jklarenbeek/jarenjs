@@ -94,7 +94,7 @@ const DOCS = [
   ['client', 'the client', 'DB-CLIENT.md', 4],
   ['contract', 'the contract pen', 'CONTRACT-PEN.md', 6],
   ['flow', 'the flow pen', 'FLOW-PEN.md', 7],
-  ['app', 'the app pen', 'APP-PEN.md', 7],
+  ['app', 'the app pen', 'APP-PEN.md', 8],
   ['forms', 'the forms pen', 'FORMS-PEN.md', 6],
   ['charts', 'the chart pen', 'CHARTS-PEN.md', 1],
   ['project', 'the project pen', 'PROJECT-PEN.md', 1],

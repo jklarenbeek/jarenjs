@@ -175,18 +175,37 @@ export function action(fn, options = undefined) {
     throw new LinqBuildError('JL0101',
       `action() takes a callback (s, x) => transition(…), got ${describeValue(fn)}`);
   }
-  if (options !== undefined) {
-    if (!isJsonObject(options)) {
-      throw new LinqBuildError('JL0101',
-        `action() options are { payload?, event? }, got ${describeValue(options)}`);
-    }
-    closedTo(options, ACTION_MEMBERS, 'action()');
-    if (options.payload !== undefined) {
-      typeOnly(options.payload, 'action() payload', "the dispatch's $payload", '/payload');
-    }
-    if (options.event !== undefined) readEventFields(options.event, 'action()');
+  readActionOptions(options, 'action()');
+  return declareAction(captureAction('action()', fn));
+}
+
+/**
+ * Check an action's `{ payload?, event? }` options: both are TYPES, so
+ * nothing is emitted for them.
+ * @param {any} options
+ * @param {string} who - the call they were handed to, for the message
+ * @throws {LinqBuildError} `JL0101` a member the pen does not know, or a
+ *   `payload` that is not a builder; `JL0102` an `event` field §3.1 excludes
+ */
+export function readActionOptions(options, who) {
+  if (options === undefined) return;
+  if (!isJsonObject(options)) {
+    throw new LinqBuildError('JL0101',
+      `${who} options are { payload?, event? }, got ${describeValue(options)}`);
   }
-  const document = captureAction('action()', fn);
+  closedTo(options, ACTION_MEMBERS, who);
+  if (options.payload !== undefined) {
+    typeOnly(options.payload, `${who} payload`, "the dispatch's $payload", '/payload');
+  }
+  if (options.event !== undefined) readEventFields(options.event, who);
+}
+
+/**
+ * One action declaration over its document, branded for `defineApp`.
+ * @param {any} document
+ * @returns {any}
+ */
+export function declareAction(document) {
   const out = { document };
   Object.defineProperty(out, ACTION, { value: true, enumerable: false });
   return Object.freeze(out);

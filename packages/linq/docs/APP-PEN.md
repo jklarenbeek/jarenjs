@@ -140,6 +140,7 @@ and nothing else — a transition is data, so a test can read it.
 | `transition({ state?, patch?, effects? })` | the transition object of APP-FORMAT §3.2, in the order the runtime applies it | `Transition`; `state` does not take a `Conditional` (§5.7) | native; another member `JL0101`; a `when()` in the state or in a patch operation `JL0101` |
 | `effect(run, with?)` | `{ run, with? }` (§5.1); `with` is a value in the ACTION's scope, not a callback | `EffectDeclaration<Run>` — `Run` is a literal; `with` does not take a `Conditional` | native; an empty `run` `JL0101`; a `when()` in `with` `JL0101` |
 | `when(cond, then, otherwise?)` | `{ "$if": [cond, then, otherwise?] }` — the branches spelled as the action spells its own result; no `otherwise` is the empty sequence, the no-op transition | `Conditional`; `cond` is a `BoolExpr` or a boolean, a branch a `Transition` or a `Conditional` | native; a condition or a branch that is not one `JL0101` — another `when()` is a branch, never a condition, and a branch written as an object is held to `transition()`'s own rules; outside an action's capture (none, a subscription's, a view's, a chain's) `JL0005` |
+| `awaiting({ run, start?, with?, slot?, then?, catch? }, { payload?, event? })` | one awaiting action `{ "$await": … }` (APP-FORMAT §3.3), each member captured over the scope the runtime binds there: `start` and `with` over `$event` and `$payload`, `then` adding `$result`, `catch` adding `$error`; `with` may be a query document written by hand | `ActionDeclaration<Payload>`; `x.result` is bound in `then` only and `x.error` (`AwaitError`, `{ code, message }`) in `catch` only, so the other does not compile | native; a member §3.3 does not list, an empty `run` or `slot`, or a `start`/`then`/`catch` that is not a callback `JL0101`; a name the member's scope does not bind `JL0104`; a `when()` in `with` `JL0005` |
 | `taskSlot(name, { at, mode?, fail? })` | the slot's `initial` value `{ id: 0, status: 'idle', error: null }` and four actions, `<name>/start`, `<name>/done`, `<name>/fail` and `<name>/cancel`, each answered under its own name for a spread into `actions` | `TaskSlot<Name, State>`: the names are template literals, so `ActionsOf<>` stays exact | native; an option it does not take, a `mode` outside `switch`/`exhaust`/`concat`/`parallel`, a start prop the slot owns (`id`, `done`, `fail`, `slot`), `fail()` on a slot without `fail: true`, or an `at` that answers no path into the state `JL0101` |
 
 Returning nothing from an action is the format's own no-op, and
@@ -727,6 +728,71 @@ time, and no pen can resolve it — the state decides which action a
 render-time binding dispatches. Those the pen skips, and the runtime
 checks them per dispatch as it always did.
 
+### 3.8 An awaiting action
+
+**Opening a detail view**: the start, the request, and both endings as
+one action. The newest `open` wins whatever order the responses arrive
+in, because a newer await on the slot supersedes the older.
+
+```js
+import { awaiting, defineApp, replace, transition, when } from '@jarenjs/linq/app';
+import * as s from '@jarenjs/linq/schema';
+
+export const detail = defineApp({
+  state: s.object({
+    status: s.string().default('idle'),
+    detail: s.any().default(null),
+    error: s.any().default(null),
+  }),
+  view: [],
+  actions: {
+    open: awaiting({
+      start: () => transition({ patch: [replace((c) => c.status, 'loading')] }),
+      run: 'fetchJson',
+      with: (st, x) => ({ id: x.payload }),
+      slot: 'detail',
+      then: (st, x) => transition({ patch: [
+        replace((c) => c.status, 'done'),
+        replace((c) => c.detail, x.result),
+      ] }),
+      catch: (st, x) => when(x.error.code.eq('JA2028'), transition({ patch: [
+        replace((c) => c.status, 'error'),
+        replace((c) => c.error, x.error),
+      ] })),
+    }),
+  },
+}).document;
+```
+```json
+{
+  "$app": "0.1",
+  "state": { "status": "idle", "detail": null, "error": null },
+  "view": [],
+  "actions": {
+    "open": { "$await": {
+      "start": { "patch": [{ "op": "replace", "path": "/status", "value": "loading" }] },
+      "run": "fetchJson",
+      "with": { "id": "$payload" },
+      "slot": "detail",
+      "then": { "patch": [
+        { "op": "replace", "path": "/status", "value": "done" },
+        { "op": "replace", "path": "/detail", "value": "$result" }
+      ] },
+      "catch": { "$if": [{ "$eq": ["$error.code", "JA2028"] }, { "patch": [
+        { "op": "replace", "path": "/status", "value": "error" },
+        { "op": "replace", "path": "/error", "value": "$error" }
+      ] }] }
+    } }
+  }
+}
+```
+
+Under `createApp(document, { effects: { fetchJson } })`, `await
+app.settled({ awaits: true })` after a dispatch answers the state the
+continuation committed (APP-FORMAT §8.1). `x.result` read in `catch`, or
+`x.error` in `then`, is `JL0104` here, where the app would have refused
+the document with `JA0004` when it compiled.
+
 ## 4. Refusals
 
 The app pen raises these `LinqBuildError` codes and no others —
@@ -780,6 +846,9 @@ Raised at the door, before anything is captured.
 | `when(c, { nope: 1 })`, `when(c, st.n)` | `when() then is a transition — transition({ state?, patch?, effects? }) — or another when(), got a Object instance at /then`; `when() then is a transition — transition({ … }) — or another when(), got an expression that is neither at /then` — and the same for `otherwise` | `transition({ … })`, or a `when()` |
 | `when(c, { patch: 'x' })`, `when(c, { effects: [{ run: 'save' }] })` | `when() then patch is an array of add/replace/remove/move/copy/test operations, got a string at /then`; `when() then effects[0] is effect(run, with?), got a Object instance at /then` — a branch written as an object is held to `transition()`'s rules, at build time rather than at dispatch | `transition({ patch: […] })`, or `effects: [effect('save')]` |
 | `transition({ state: when(c, t) })`, `transition({ patch: [replace((st) => st.n, when(c, t))] })`, `effect('log', { msg: when(c, t) })`, `when(when(c, t), t)` | `transition() state is a value, got a when() — a when() is a transition: an action returns it, or another when() takes it as a branch; write the when() around the transition instead, when(cond, transition({ … })) at /state`; `transition() patch[0] takes values, got a when() — … at /patch/0/value`; `effect() props are a value, got a when() — … at /with/msg`; `when() takes a condition — a captured boolean expression or a boolean, got a when() — … at /cond` — each with the same tail as the first. A `when()` is found anywhere inside the value and named at its own pointer (`/state/list/1`); at dispatch it would replace the value with the branch's transition object | `when(c, transition({ state: … }))`, returned from the action |
+| `awaiting(7)`, `awaiting({ run: 'f', nope: 1 })` | `awaiting() takes { run, start?, with?, slot?, then?, catch? }, got 7`; `awaiting() does not take 'nope' — it takes start, run, with, slot, then, catch at /nope` | the members APP-FORMAT §3.3 lists |
+| `awaiting({ run: '' })`, `awaiting({ run: 'f', slot: 3 })` | `awaiting() run is the registered effect's name as a non-empty string, got a string at /run`; `awaiting() slot is the await's identity as a non-empty string, got 3 at /slot` | `run: 'fetchJson'`, `slot: 'detail'` |
+| `awaiting({ run: 'f', start: {} })` | `awaiting() start is a callback (s, x) => transition(…), got a Object instance at /start` | `start: () => transition({ … })` |
 | `taskSlot('')`, `taskSlot('x', 7)` | `taskSlot() takes a slot name as a non-empty string, got a string`; `taskSlot() options are { at, mode?, fail? }, got 7` | `taskSlot('scan', { at })` |
 | `taskSlot('x', { at, nope: 1 })` | `taskSlot() does not take 'nope' — it takes at, mode, fail at /nope` | one of the three |
 | `taskSlot('x', { at: 's.tasks.x' })`, `{ at, mode: 'merge' }`, `{ at, fail: 'yes' }` | `taskSlot() at is a lambda over the state to the slot — (s) => s.tasks.x — got a string at /at`; `taskSlot() mode is one of switch, exhaust, concat, parallel, got a string at /mode`; `taskSlot() fail is a boolean, got a string at /fail` | `at: (s) => s.tasks.x`, a mode `createTaskEffect` takes, `fail: true` |
