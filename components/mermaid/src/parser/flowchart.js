@@ -39,14 +39,24 @@ const SHAPE_OPENERS = [
   ['>', [[']', 'asymmetric']]],
 ];
 
-/** Sticky: an edge with an inline ` text ` label between two link runs. */
-const RE_EDGE_LABELED = /(<?)([-.=]{2,})\s+(.+?)\s+([-.=]{2,})([>ox]?)/y;
+/**
+ * Sticky: an edge with an inline ` text ` label between two link runs. The
+ * opening run is exactly `--`, `==` or `-.` and a blank, as Mermaid opens edge
+ * text: `A --- B --> C` is two links, never a link labelled `B`.
+ */
+const RE_EDGE_LABELED = /(<?)(?:--|==|-\.)\s+(.+?)\s+([-.=]{2,})([>ox]?)/y;
+/** Sticky: what opens an inline label, the `<` of a two-way link included. */
+const RE_EDGE_LABEL_OPEN = /(<?)(?:--|==|-\.)\s+/y;
+/** Sticky: the link run (a blank before it optional) that closes a quoted inline label. */
+const RE_EDGE_LABEL_CLOSE = /\s*([-.=]{2,})([>ox]?)/y;
 /** Sticky: a plain link operator. */
 const RE_EDGE_PLAIN = /(<?)([-.=]{2,})([>ox]?)/y;
 /** Sticky: an identifier (vertex id, class name, …). Ids are
  * alphanumeric/underscore (plus Unicode letters); `-`/`.` are excluded
  * so they cannot swallow a following link operator. */
 const RE_ID = /[A-Za-z0-9_À-￿][\wÀ-￿]*/y;
+/** Sticky: one character an identifier may hold. */
+const RE_ID_CHAR = /[\wÀ-￿]/y;
 
 /**
  * Parse a flowchart body (config already stripped) into the flowchart
@@ -88,11 +98,14 @@ export function parseFlowchart(lines, lineOffset, direction) {
     return node;
   };
 
-  for (let li = 0; li < lines.length; li++) {
-    const line = lines[li].trim();
-    if (line === '') continue;
-    const lineNo = lineOffset + li + 1;
-
+  /**
+   * Read a statement that opens with a keyword (`subgraph`, `end`,
+   * `direction`, `classDef`, `class`, `style`, `click`, `linkStyle`).
+   * @param {string} line
+   * @param {number} lineNo
+   * @returns {boolean} whether it was one
+   */
+  const readKeyword = (line, lineNo) => {
     // subgraph … end
     if (line === 'end') {
       const group = subgraphStack.pop();
@@ -100,56 +113,62 @@ export function parseFlowchart(lines, lineOffset, direction) {
       // A finished subgraph goes to the list only when it is top-level;
       // nested subgraphs still record membership via their id.
       subgraphs.push(flowSubgraph(group.id, group.label, group.direction, group.nodes));
-      continue;
+      return true;
     }
     if (line.startsWith('subgraph')) {
       const rest = line.slice('subgraph'.length).trim();
       const sg = parseSubgraphHeader(rest);
       subgraphStack.push({ id: sg.id, label: sg.label, direction: null, nodes: [] });
-      continue;
+      return true;
     }
     if (line.startsWith('direction ')) {
       const dir = line.slice('direction '.length).trim();
       if (subgraphStack.length > 0) subgraphStack[subgraphStack.length - 1].direction = dir;
-      continue;
+      return true;
     }
     if (line.startsWith('classDef ')) {
       const rest = line.slice('classDef '.length).trim();
       const sp = rest.indexOf(' ');
-      if (sp === -1) { classDefs.push(flowClassDef(rest, '')); continue; }
-      classDefs.push(flowClassDef(rest.slice(0, sp).trim(), rest.slice(sp + 1).trim()));
-      continue;
+      if (sp === -1) classDefs.push(flowClassDef(rest, ''));
+      else classDefs.push(flowClassDef(rest.slice(0, sp).trim(), rest.slice(sp + 1).trim()));
+      return true;
     }
     if (line.startsWith('class ')) {
       const rest = line.slice('class '.length).trim();
       const sp = rest.lastIndexOf(' ');
-      if (sp === -1) continue;
+      if (sp === -1) return true;
       const nodeList = rest.slice(0, sp).split(',').map((s) => s.trim()).filter(Boolean);
       const name = rest.slice(sp + 1).trim();
       for (const n of nodeList) classes.push(flowClass(n, name));
-      continue;
+      return true;
     }
     if (line.startsWith('style ')) {
       const rest = line.slice('style '.length).trim();
       const sp = rest.indexOf(' ');
-      if (sp === -1) continue;
-      styles.push(flowStyle(rest.slice(0, sp).trim(), rest.slice(sp + 1).trim()));
-      continue;
+      if (sp !== -1) styles.push(flowStyle(rest.slice(0, sp).trim(), rest.slice(sp + 1).trim()));
+      return true;
     }
     if (line.startsWith('click ')) {
       // a line that is none of Mermaid's click forms stays parse-accepted
       // and out of the tree, as every click line was before they were read
       const read = readNodeClick(line.endsWith(';') ? line.slice(0, -1).trimEnd() : line, true);
       if (read !== null) clicks.push(read);
-      continue;
+      return true;
     }
-    if (line.startsWith('linkStyle ')) {
-      continue; // parse-accept, not modeled in v1
-    }
+    // parse-accept, not modeled in v1
+    return line.startsWith('linkStyle ');
+  };
 
-    // A node/edge chain: split on ';' first (multiple statements per line).
+  for (let li = 0; li < lines.length; li++) {
+    const line = lines[li].trim();
+    if (line === '') continue;
+    const lineNo = lineOffset + li + 1;
+    // a line that opens with a keyword is that one statement, read whole
+    if (readKeyword(line, lineNo)) continue;
+    // A node/edge chain: split on ';' first (multiple statements per line);
+    // a statement after a ';' may be a keyword's
     for (const stmt of splitStatements(line)) {
-      parseChain(stmt, lineNo, ensureNode, edges, classes);
+      if (!readKeyword(stmt, lineNo)) parseChain(stmt, lineNo, ensureNode, edges, classes);
     }
   }
 
@@ -164,35 +183,64 @@ export function parseFlowchart(lines, lineOffset, direction) {
 }
 
 /**
- * Split a line on top-level `;` (rarely used, but valid).
+ * Split a line on its statement separators, the `;`s outside every label.
  *
- * Only a `;` OUTSIDE a quoted label separates statements. A label is text —
- * `"fetch is injected; streaming via SSE"` is one node, not two statements —
- * and splitting inside it produced an unterminated-shape error on a document
- * that is perfectly good Mermaid.
+ * A label is found as the chain reader finds it, so the two never disagree on
+ * where one ends: a shape's brackets directly after an id, scanned by
+ * `scanToCloser` (a quote counts only where it opens the label and its
+ * partner meets the closer, so the apostrophe in `A[it's]` is text), and a
+ * link with its pipe or inline label, read by `readEdge`. A `;` inside a
+ * label is text — `"fetch is injected; streaming via SSE"` is one node, and
+ * so is `[a;b]` — and every other `;` separates.
  * @param {string} line
  * @returns {string[]}
  */
 function splitStatements(line) {
   if (line.indexOf(';') === -1) return [line];
   const out = [];
+  /** @type {Map<[string, string][], number>} */
+  const unclosed = new Map();
   let start = 0;
-  let quote = '';
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
-    if (quote !== '') {
-      if (ch === quote) quote = '';
+  for (let i = 0; i < line.length;) {
+    if (line.charCodeAt(i) !== 0x3b /* ; */) {
+      const end = labelEnd(line, i, unclosed);
+      i = end > i ? end : i + 1;
       continue;
     }
-    if (ch === '"' || ch === '\'') { quote = ch; continue; }
-    if (ch !== ';') continue;
     const part = line.slice(start, i).trim();
     if (part !== '') out.push(part);
-    start = i + 1;
+    start = ++i;
   }
   const tail = line.slice(start).trim();
   if (tail !== '') out.push(tail);
   return out;
+}
+
+/**
+ * Where a label that opens at `at` ends, as the chain reader reads it: a
+ * shape directly after an id character, or a link operator with its label.
+ * @param {string} s
+ * @param {number} at
+ * @param {Map<[string, string][], number>} unclosed per closer set, the index
+ *   from which the line holds none of them: a shape that never closes is not
+ *   scanned for again, so a line of unclosed shapes splits in linear time
+ * @returns {number} the index after the label, or `at` when none opens there
+ */
+function labelEnd(s, at, unclosed) {
+  RE_ID_CHAR.lastIndex = at - 1;
+  if (at > 0 && RE_ID_CHAR.test(s)) {
+    const opened = matchOpener(s, at);
+    if (opened !== null) {
+      if (opened.contentStart >= (unclosed.get(opened.closers) ?? Infinity)) return at;
+      const closed = scanToCloser(s, opened.contentStart, opened.closers);
+      if (closed !== null) return closed.end;
+      unclosed.set(opened.closers, opened.contentStart);
+      return at;
+    }
+  }
+  const c = s.charCodeAt(at);
+  if (c === 0x2d /* - */ || c === 0x3d /* = */ || c === 0x3c /* < */) return readEdge(s, at)?.pos ?? at;
+  return at;
 }
 
 /**
@@ -376,18 +424,35 @@ function scanToCloser(s, from, closers) {
  * @returns {{ stroke: string, head: string, tail: string, length: number, label: string|null, pos: number } | null}
  */
 function readEdge(s, pos) {
-  RE_EDGE_LABELED.lastIndex = pos;
-  let m = RE_EDGE_LABELED.exec(s);
   let label = null;
-  if (m !== null && m.index === pos) {
-    // the inline form's text reads as the pipe form's: quotes stripped and
-    // `<br>` a line break, as Mermaid reads both
-    label = stripQuotes(m[3].trim());
-    const info = classifyLink(m[1], m[4], m[5]);
-    return { ...info, label, pos: RE_EDGE_LABELED.lastIndex };
+  RE_EDGE_LABEL_OPEN.lastIndex = pos;
+  const open = RE_EDGE_LABEL_OPEN.exec(s);
+  if (open !== null) {
+    // a quoted label is one unit, as in the pipe form: the link operators
+    // inside its quotes are text, so `A -- "a --> b" --> B` is one edge
+    const text = RE_EDGE_LABEL_OPEN.lastIndex;
+    const quote = s[text];
+    const partner = quote === '"' || quote === '\'' ? s.indexOf(quote, text + 1) : -1;
+    if (partner !== -1) {
+      RE_EDGE_LABEL_CLOSE.lastIndex = partner + 1;
+      const close = RE_EDGE_LABEL_CLOSE.exec(s);
+      if (close !== null) {
+        const info = classifyLink(open[1], close[1], close[2]);
+        return { ...info, label: stripQuotes(s.slice(text, partner + 1)), pos: RE_EDGE_LABEL_CLOSE.lastIndex };
+      }
+    }
+    RE_EDGE_LABELED.lastIndex = pos;
+    const m = RE_EDGE_LABELED.exec(s);
+    if (m !== null) {
+      // the inline form's text reads as the pipe form's: quotes stripped and
+      // `<br>` a line break, as Mermaid reads both
+      label = stripQuotes(m[2].trim());
+      const info = classifyLink(m[1], m[3], m[4]);
+      return { ...info, label, pos: RE_EDGE_LABELED.lastIndex };
+    }
   }
   RE_EDGE_PLAIN.lastIndex = pos;
-  m = RE_EDGE_PLAIN.exec(s);
+  const m = RE_EDGE_PLAIN.exec(s);
   if (m === null || m.index !== pos) return null;
   const info = classifyLink(m[1], m[2], m[3]);
   let p = RE_EDGE_PLAIN.lastIndex;

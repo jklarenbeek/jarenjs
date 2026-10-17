@@ -148,7 +148,15 @@ whose grammar permits those characters in ids.
 quotes around it, with `<br>` (`<br/>`, `<br />`) read as a newline — the
 pipe form `A -->|"x"| B` and the inline form `A -- "x" --> B` alike, as
 Mermaid reads both. A quoted label is one unit, so its delimiters are text:
-`A["arr[0]"]` reads `arr[0]` and `A -->|"x|y"| B` reads `x|y`. The tree keeps everything else as written; one reading
+`A["arr[0]"]` reads `arr[0]`, `A -->|"x|y"| B` reads `x|y` and
+`A -- "a --> b" --> B` is one edge labelled `a --> b`. An inline label opens at
+`--`, `==` or `-.` and a blank, as Mermaid opens edge text, so `A --- B --> C`
+is two links. A `;` separates statements outside every label, where the
+statement reader finds labels (a quote counts only where it opens one, so the
+apostrophe in `A[it's] --> B; C --> D` is text and the `;` separates), and a `;`
+inside a label is text, quoted or not (`A[a;b]`); a statement after a `;` may be
+a keyword's (`A --> B; style A fill:#f00`, and `; end` ends the open subgraph,
+a parse error with none open). The tree keeps everything else as written; one reading
 of it (`src/label-text.js`), shared by the layout and both label renderers,
 decides how it is drawn, and a state diagram's labels are read the same way
 (a transition or description keeps its `<br/>` in the tree and breaks there):
@@ -170,11 +178,22 @@ decides how it is drawn, and a state diagram's labels are read the same way
   windows-1252. A code for a character XML cannot carry (a control other
   than tab, newline and return; U+FFFE; U+FFFF) is U+FFFD, and tab, newline
   and return draw as a space (Mermaid breaks the line at `#10;`). A named
-  code (`#quot;`) prints as written: this component carries no table of
-  named references. A code is decoded last, inside the text the line breaks
+  code (`#quot;` is `"`, `#amp;` is `&`) is the HTML standard's named
+  reference of that name, read from `@jarenjs/core/text/entities`; a name the
+  standard does not hold (`#nope;`, and `#x2665;`, which Mermaid reads as a
+  name) stays as written. A code is decoded last, inside the text the line breaks
   and the emphasis left, so what it decodes to is always text — `#60;br#62;`
   never breaks a line, `#42;#42;` is never bold, and `#60;script#62;` is
   escaped like any label text (Mermaid decodes first and reads the result).
+
+The other types' drawn text reads the same way, without markdown strings: a
+sequence actor, message and note, and a class or ER panel's heading and rows,
+break at `<br>` and decode their entity codes (`A->>B: I #9829; you #59; ok`
+draws `I ♥ you ; ok`), and the layout sizes each for its lines — a message's
+extra lines stack above its arrow and push what follows down. A sequence
+block's label and a gantt title, section and task name, which are drawn on one
+line, decode their codes and keep a `<br>` as text, as Mermaid draws a gantt
+row. The tree keeps every code as written, so `toMermaid` prints it back.
 
 ### 4.2 sequence
 

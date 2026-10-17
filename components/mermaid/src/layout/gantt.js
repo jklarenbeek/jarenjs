@@ -39,6 +39,7 @@
  */
 
 import { textWidth, sanitizeHref, encodeUrlAttribute } from '@jarenjs/view/helpers';
+import { decodeEntityCodes } from '../label-text.js';
 import { axisTicksTime, timeTicksEvery } from '@jarenjs/core/dates';
 import { coord as round } from '../utils.js';
 import { compileAxisFormat } from '../parser/gantt-grammar.js';
@@ -69,14 +70,20 @@ const LABEL_GAP = 5;
  */
 export function layoutGantt(ast, options = {}) {
   const rules = ast.rules;
-  const title = ast.meta.title ?? null;
+  // a title, a section's and a task's name are drawn on one line, as Mermaid
+  // draws them (its `<br>` is text there), so of the one reading of a
+  // diagram's text (`label-text.js`) only the entity codes apply: decoded
+  // here, the text is measured, elided and drawn as it reads
+  const title = typeof ast.meta.title === 'string' ? decodeEntityCodes(ast.meta.title) : null;
+  /** @type {string[][]} each task's name, section by section */
+  const names = ast.sections.map((section) => section.tasks.map((task) => decodeEntityCodes(task.name)));
   const switches = ganttSwitches(options.config, ast.meta);
 
   // --- the label column
   let labelW = 0;
-  for (const section of ast.sections)
-    for (const task of section.tasks)
-      labelW = Math.max(labelW, textWidth(task.name, FONT_SIZE));
+  for (const sectionNames of names)
+    for (const name of sectionNames)
+      labelW = Math.max(labelW, textWidth(name, FONT_SIZE));
   labelW = Math.min(LABEL_MAX, Math.ceil(labelW)) + 2 * LABEL_PAD;
 
   const plotX = MARGIN + labelW;
@@ -109,6 +116,7 @@ export function layoutGantt(ast, options = {}) {
     let laneCount = 0;
     for (let ti = 0; ti < section.tasks.length; ti++) {
       const task = section.tasks[ti];
+      const name = names[si][ti];
       const lane = laneOf === null ? ti : laneOf[ti];
       laneCount = Math.max(laneCount, lane + 1);
       const rowY = rowsTop + lane * ROW_H;
@@ -125,10 +133,10 @@ export function layoutGantt(ast, options = {}) {
       const href = hrefs.get(task.id) ?? null;
       // a milestone is a diamond centred on its instant, so its span is the diamond's
       const label = switches.compact
-        ? placeLabel(task.name, milestone ? x - MILESTONE_R : x, milestone ? x + MILESTONE_R : x + w,
+        ? placeLabel(name, milestone ? x - MILESTONE_R : x, milestone ? x + MILESTONE_R : x + w,
           width - MARGIN)
         : {
-          name: elide(task.name, labelW - 2 * LABEL_PAD),
+          name: elide(name, labelW - 2 * LABEL_PAD),
           labelX: MARGIN + LABEL_PAD,
           labelAnchor: 'start',
         };
@@ -162,7 +170,7 @@ export function layoutGantt(ast, options = {}) {
     }
     y = rowsTop + laneCount * ROW_H;
     sections.push({
-      name: named ? section.name : null,
+      name: named ? decodeEntityCodes(section.name) : null,
       index: si,
       y: sectionTop,
       h: y - sectionTop,

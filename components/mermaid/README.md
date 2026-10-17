@@ -562,7 +562,7 @@ either end (`A -->|semi;colon| B` did not parse, and `A -->|x|y| B` read back as
 an edge to a new node `y`) and a subgraph title with a quote or space at either
 end, a state transition or
 description breaks at `<br>` (the tag was printed), a decimal entity code
-(`#9829;`) is decoded (named codes such as `#quot;` still print as written),
+(`#9829;`) is decoded,
 and a markdown string (`` "`**bold**`" ``) draws its bold and italic runs
 (its backticks and stars were printed), which `toMermaid` now writes quoted;
 and a subgraph holding a first-rank or first-column node no longer draws its
@@ -579,6 +579,21 @@ declaration of the root style into itself); a diagram's config token holding a
 remote `url()` is dropped, as a `style` statement's is (a host's own theme still
 may name one); and an HTML label wraps a markdown line only at a space, where a
 word whose style changes inside it (`**three**four`) could break between its runs.
+A quoted inline edge label is one unit (`A -- "a --> b" --> B` read an edge to a
+node `b` labelled `"a` and dropped `B`, and `A -- "x"-->B` was refused), an inline label opens only at `--`, `==`
+or `-.` and a blank (`A --- B --> C` read one edge `A`→`C` labelled `B`), a `;`
+separates flowchart statements only outside a label (after the apostrophe in
+`A[it's] --> B; C --> D` no `;` separated and `C --> D` vanished, and `A[a;b]`
+was refused), and a statement after a `;` may be a keyword's (`A --> B; style A
+fill:#f00` read a node `style`; `A --> B; end` read a node `end`, and now ends the
+open subgraph or, with none open, is the parse error Mermaid also gives). A named entity code (`#quot;`, `#amp;`) is
+decoded in every label, where it printed as written; and the text of a sequence
+actor, message and note, a class or ER panel's rows and a sequence block and
+gantt row is read as a flowchart label is: its entity codes are decoded (they
+printed as written), and in a sequence diagram and a panel a `<br>` breaks the
+line (it printed as text), so a message, an actor, a note or a panel row that
+breaks is drawn in its lines and the diagram grows to hold them, and a sequence
+scene's actors, messages and notes gained `lines`.
 
 ## Exports
 

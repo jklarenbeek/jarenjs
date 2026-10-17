@@ -295,38 +295,31 @@ establish registry publication or downstream acceptance.
 
 ## @jarenjs/mermaid
 
-- [ ] **Flowchart statements: two silent misreads of quotes** — the inline
-  edge form reads a label holding a link operator inside its quotes as two
-  edges (`A -- "a --> b" --> B` is an edge `A`→`b` labelled `"a`, and `B`
-  vanishes); and a `;` after an apostrophe in an unquoted label is not a
-  statement separator (`A[it's] --> B; C --> D` drops `C --> D` without a
-  word), because the statement splitter takes every `'` for a quote where the
-  bracket reader does not. The printer never writes either form (it prints the
-  pipe form and one statement per line), so only hand-written source is
-  affected. Wanted: the inline reader honours a quoted label as the pipe
-  reader does, and the splitter applies the bracket reader's quote rule.
+- [ ] **Sequence statements: `;` does not separate them** — Mermaid ends a
+  sequence statement at `;` (`A->>B: hi; B->>A: yo` is two messages; `#59;` is
+  how a message writes the character); here the line is one message whose text
+  holds the rest. Wanted: split at a `;` outside entity codes where every
+  piece reads as a statement (text otherwise), with `toMermaid` printing a
+  message's `;` as `#59;` so a tree reads back as one message — a printed form
+  change.
+- [ ] **State, class and ER lines no reader matches vanish** —
+  `stateDiagram-v2` `A --> B; B --> C` reads no state and no transition
+  (Mermaid reads two transitions), and a class or ER line that fits no form
+  (`A <|-- B; C <|-- D`, which Mermaid refuses) is dropped without a word.
+  Wanted: the right reading where Mermaid has one, a coded refusal naming the
+  line where it has none (stricter: a minor).
+- [ ] **A sequence message's width does not space the actors** — actors sit a
+  fixed gap apart, so a long message (or one an entity code widens) runs past
+  its lifelines; Mermaid widens the gap to the message.
+- [ ] **An ER relationship label keeps its quotes** — `A ||--o{ B : "has x"`
+  draws `"has x"` (Mermaid draws `has x`); the tree and `toMermaid` keep them
+  too.
 - [ ] **`htmlLabels:true` — browser check** — flowchart and state labels
   render as HTML in `foreignObject` when the host passes `htmlLabels: true` (a
   diagram's config can turn them off, never on; sized and wrapped by the
   advance table; `safe: true` keeps SVG text; MERMAID-FORMAT §3, §6–7). Not
   yet checked in a browser engine: label centering, overflow past the box, and
   color under a host-linked theme in light and dark, with pan and zoom.
-- [ ] **Named entity codes in labels** — flowchart and state labels decode
-  Mermaid's decimal entity codes (`#9829;`) and draw markdown strings
-  (MERMAID-FORMAT §4.1), but a named code (`#quot;`, `#amp;`, `#lt;`) still
-  prints as written: Mermaid's table is the browser's, the WHATWG named
-  references, and the only copy in this repository is the Markdown
-  component's, which no other component may import. Wanted: that table hoisted
-  into `@jarenjs/core`, imported by both components, and looked up for a
-  non-decimal code in the label reading — a new core export, so a minor; it
-  grows the mermaid bundle by the table's size.
-- [ ] **Entity codes and line breaks in the other diagram types** — sequence
-  messages, notes and actors, class and ER panels and gantt rows print
-  Mermaid's entity codes as written (`A->>B: I #9829; you #59; ok` draws
-  `#9829;` and `#59;`, Mermaid's documented way to write `;` in a message) and
-  a message's `<br/>` as text. Wanted: the flowchart label reading (decimal
-  codes decoded last, `<br>` a line break) at each type's measured and drawn
-  text, so a message is measured and drawn in the lines it breaks into.
 - [ ] **Full layout for the secondary types** — class and ER render as structured panels, not domain-specific layouts; mindmap/gitGraph/journey/timeline parse-accept with a placeholder. Real layouts are the next coverage push (tracked honestly in the benchmark scorecard).
 - [ ] **Layout/perf workstream** — dagre-lite handles ranks and straight
   edges; orthogonal edge routing, subgraph clustering and crossing reduction

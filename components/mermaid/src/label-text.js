@@ -1,8 +1,11 @@
 //@ts-check
 /**
- * @file The one reading of a flowchart or state label's text, shared by the
- * layout that measures a label and both renderers that draw it (SVG text and
- * HTML labels), so the box is always sized for the lines that are drawn.
+ * @file The one reading of a diagram's text, shared by the layout that
+ * measures it and the renderer that draws it (SVG text and HTML labels), so a
+ * box is always sized for the lines that are drawn: a flowchart or state label,
+ * a sequence actor, message or note, a class or ER panel's rows, and a gantt
+ * row's name (which Mermaid draws on one line, its `<br>` as text, so only its
+ * entity codes are read).
  *
  * A label breaks into lines at a newline and at `<br>` (`<br/>`, `<br />`),
  * whichever form the label was written in. A label wrapped in backticks is a
@@ -13,6 +16,9 @@
  * read as a line break, as emphasis or as markup: decoded text is text, and
  * the renderers escape it like any other.
  */
+
+import { namedEntities } from '@jarenjs/core/text/entities';
+import { textAt, num } from '@jarenjs/view/helpers';
 
 /** A line break inside a label: a newline or Mermaid's `<br>` spellings. */
 const RE_LINE_BREAK = /\n|<br\s*\/?>/i;
@@ -52,32 +58,40 @@ const C1_REMAP = {
  */
 
 /**
- * Decode Mermaid's decimal entity codes (`#35;` is `#`, `#9829;` is ♥) as an
- * HTML parser reads the reference Mermaid turns each into: zero, a surrogate
- * or a value past U+10FFFF is U+FFFD and U+0080–U+009F is windows-1252. Two
- * readings differ, both so the output stays well-formed text: a code for a
- * character XML cannot carry (a control other than tab, newline and carriage
- * return; U+FFFE; U+FFFF) is U+FFFD, and tab, newline and carriage return
- * are a space, which is how SVG and an unwrapped HTML label draw them (Mermaid
- * breaks the line at `#10;`). A named code (`#quot;`) stays as written: this
- * component carries no table of named references.
+ * Decode Mermaid's entity codes as an HTML parser reads the reference Mermaid
+ * turns each into. A decimal code (`#35;` is `#`, `#9829;` is ♥): zero, a
+ * surrogate or a value past U+10FFFF is U+FFFD and U+0080–U+009F is
+ * windows-1252. A named code (`#quot;` is `"`, `#amp;` is `&`) is the HTML
+ * standard's named reference of that name, case and all; a name the standard
+ * does not hold (`#nope;`, and `#x2665;`, which Mermaid reads as a name)
+ * stays as written, as the browser shows it. Two readings differ, both so the
+ * output stays well-formed text: a code for a character XML cannot carry (a
+ * control other than tab, newline and carriage return; U+FFFE; U+FFFF) is
+ * U+FFFD, and tab, newline and carriage return (`#10;`, `#NewLine;`) are a
+ * space, which is how SVG and an unwrapped HTML label draw them (Mermaid
+ * breaks the line at `#10;`).
  * @param {string} text
  * @returns {string}
  */
 export function decodeEntityCodes(text) {
   if (text.indexOf('#') === -1) return text;
   return text.replace(RE_ENTITY_CODE, (code, body) => {
-    if (!RE_DECIMAL.test(body)) return code;
-    return String.fromCodePoint(decimalCodePoint(Number(body)));
+    if (RE_DECIMAL.test(body)) return String.fromCodePoint(textCodePoint(Number(body)));
+    const named = namedEntities().get(body);
+    if (named === undefined) return code;
+    let out = '';
+    for (const ch of named) out += String.fromCodePoint(textCodePoint(/** @type {number} */ (ch.codePointAt(0))));
+    return out;
   });
 }
 
 /**
- * The code point a decimal reference reads as (see {@link decodeEntityCodes}).
+ * The code point a reference reads as in drawn text (see
+ * {@link decodeEntityCodes}).
  * @param {number} n
  * @returns {number}
  */
-function decimalCodePoint(n) {
+function textCodePoint(n) {
   if (n === 0 || n > 0x10FFFF || (n >= 0xD800 && n <= 0xDFFF)) return 0xFFFD;
   if (n === 0x09 || n === 0x0A || n === 0x0D) return 0x20;
   if (n < 0x20 || n === 0xFFFE || n === 0xFFFF) return 0xFFFD;
@@ -108,7 +122,37 @@ export function readLabel(label) {
       .map((line) => line.trim()).filter((line) => line !== '');
     return lines.length === 0 ? [''] : lines.map(emphasisRuns);
   }
-  return label.split(RE_LINE_BREAK).map(decodeEntityCodes);
+  return readTextLines(label);
+}
+
+/**
+ * Read plain text — a label that is not a markdown string, or the text of a
+ * type that has none (a sequence message, a class member) — into the lines it
+ * is drawn as: broken at each line break, then its entity codes decoded, so
+ * nothing a code decodes to breaks a line.
+ * @param {string} text the text as the AST holds it
+ * @returns {string[]}
+ */
+export function readTextLines(text) {
+  return text.split(RE_LINE_BREAK).map(decodeEntityCodes);
+}
+
+/**
+ * Draw plain lines one under another, the first one's baseline at `y`, all
+ * anchored at `x` as `props` anchors them: one line is one `<text>`, as a
+ * single-line label always was, and more are its `<tspan>`s.
+ * @param {number} x
+ * @param {number} y the first line's baseline
+ * @param {string[]} lines the lines as {@link readTextLines} read them
+ * @param {number} fontSize
+ * @param {number} lineHeight the advance from one line to the next
+ * @param {Record<string, any>} [props] the `<text>` element's attributes
+ * @returns {any}
+ */
+export function textBlock(x, y, lines, fontSize, lineHeight, props = {}) {
+  if (lines.length === 1) return textAt(x, y, lines[0], fontSize, props);
+  return ['text', { 'font-size': fontSize, ...props },
+    ...lines.map((line, i) => ['tspan', { x: num(x), y: num(y + i * lineHeight) }, line])];
 }
 
 /**

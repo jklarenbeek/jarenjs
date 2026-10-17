@@ -78,8 +78,9 @@ const RE_NEEDS_QUOTE = /[[\](){}<>|"';]|^[\s/\\]|[\s/\\]$/;
 
 /**
  * What a pipe-form edge label needs its quotes for: a `|` (which ends it), a
- * `;` (which ends the statement), and a quote or a space at either end
- * (stripped or trimmed on the way back in).
+ * `;` (quoted, so the label is one unit to a reader that splits statements
+ * before it reads labels), and a quote or a space at either end (stripped or
+ * trimmed on the way back in).
  */
 const RE_EDGE_NEEDS_QUOTE = /[|;]|^[\s"']|[\s"']$/;
 

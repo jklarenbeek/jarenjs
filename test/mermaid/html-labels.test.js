@@ -85,8 +85,8 @@ describe('htmlLabels — the labels are HTML inside a foreignObject', () => {
     const body = 'flowchart LR\n  A["#quot;q#quot; #9829;"] --> B["`**md** x`"] --> C["<b>x</b>"]';
     const html = svgOf(body, HOST);
     const svg = svgOf(body);
-    assert.equal(count(html, '<div>#quot;q#quot; \u2665</div>'), 1);
-    assert.equal(count(svg, '>#quot;q#quot; \u2665</tspan>'), 1);
+    assert.equal(count(html, '<div>"q" \u2665</div>'), 1);
+    assert.equal(count(svg, '>"q" \u2665</tspan>'), 1);
     assert.equal(count(html, '<div><strong>md</strong> x</div>'), 1);
     assert.equal(count(svg, '><tspan font-weight="bold">md</tspan><tspan> x</tspan></tspan>'), 1);
     assert.equal(count(html, '<div>&lt;b&gt;x&lt;/b&gt;</div>'), 1);

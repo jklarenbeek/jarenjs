@@ -12,9 +12,13 @@
  * A class's or an entity's box is a node of its name, and each row of the
  * relations box an edge between the two it names, marked as every type marks
  * them (`marks.js`); a placeholder draws nothing a reader can point at.
+ * A panel's heading and rows are read as every type's text is read
+ * (`label-text.js`: broken at `<br>`, entity codes decoded), and measured and
+ * drawn in those lines.
  */
 
 import { svgRoot, group, rect, path, textAt, num, textWidth } from '@jarenjs/view/helpers';
+import { readTextLines, textBlock } from '../label-text.js';
 import { nodeMark, edgeMark, withTooltip, clickTooltips } from './marks.js';
 
 /**
@@ -40,24 +44,31 @@ export function renderStructured(title, sections, theme, hash) {
   const fs = 13;
   const rowH = 22;
   const headH = 26;
-  const boxW = Math.max(180, ...sections.flatMap((s) => [
-    textWidth(s.heading, fs, 700) + 24,
-    ...s.rows.map((r) => textWidth(r, fs) + 24),
+  const read = sections.map((s) => ({ heading: readTextLines(s.heading), rows: s.rows.map(readTextLines) }));
+  const boxW = Math.max(180, ...read.flatMap((s) => [
+    ...s.heading.map((line) => textWidth(line, fs, 700) + 24),
+    ...s.rows.flat().map((line) => textWidth(line, fs) + 24),
   ]));
   const gap = 16;
   const children = [];
   let y = 40;
   children.push(textAt(16, 24, title, fs + 3, { 'font-weight': 'bold', fill: t.nodeText }));
-  for (const section of sections) {
-    const boxH = headH + section.rows.length * rowH + 8;
+  for (let si = 0; si < sections.length; si++) {
+    const section = sections[si];
+    const { heading, rows } = read[si];
+    // a line of a heading or a row takes a row's height
+    const sectionHeadH = headH + (heading.length - 1) * rowH;
+    const boxH = sectionHeadH + rows.reduce((n, lines) => n + lines.length, 0) * rowH + 8;
     const box = [
       rect(16, y, boxW, boxH, { rx: 4, fill: t.nodeFill, stroke: t.nodeStroke, 'stroke-width': 1, class: 'mm-panel' }),
-      textAt(26, y + 17, section.heading, fs,
+      textBlock(26, y + 17, heading, fs, rowH,
         section.id === null ? { 'font-weight': 'bold', fill: t.nodeText } : { 'font-weight': 'bold', class: 'mm-label', fill: t.nodeText }),
-      path(`M16,${num(y + headH)} h${boxW}`, { stroke: t.nodeStroke, 'stroke-width': 1 }),
+      path(`M16,${num(y + sectionHeadH)} h${boxW}`, { stroke: t.nodeStroke, 'stroke-width': 1 }),
     ];
-    for (let i = 0; i < section.rows.length; i++) {
-      const row = textAt(26, y + headH + 16 + i * rowH, section.rows[i], fs, { fill: t.nodeText });
+    let rowY = y + sectionHeadH + 16;
+    for (let i = 0; i < rows.length; i++) {
+      const row = textBlock(26, rowY, rows[i], fs, rowH, { fill: t.nodeText });
+      rowY += rows[i].length * rowH;
       const edge = section.edges?.[i];
       box.push(edge === undefined ? row : group(edgeMark(i, edge.from, edge.to, 'rel-' + i), [row]));
     }

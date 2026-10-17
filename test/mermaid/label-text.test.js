@@ -49,8 +49,8 @@ describe('entity codes in labels', () => {
     assert.equal(decodeEntityCodes('#1;|#12;|#31;|#65534;|#65535;|#9;|#10;|#13;'), '�|�|�|�|�| | | ');
   });
 
-  it('leaves what Mermaid does not read as a decimal code as written, named codes included', () => {
-    assert.equal(decodeEntityCodes('#x2665; #+65; # 65; #65 #quot; #foo;'), '#x2665; #+65; # 65; #65 #quot; #foo;');
+  it('leaves what is neither a decimal code nor a named reference as written', () => {
+    assert.equal(decodeEntityCodes('#x2665; #+65; # 65; #65 #quot #foo; #Quot;'), '#x2665; #+65; # 65; #65 #quot #foo; #Quot;');
   });
 
   it('never lets a decoded character become markup, a line break or emphasis', () => {
