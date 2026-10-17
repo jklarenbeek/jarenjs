@@ -91,14 +91,6 @@ delete it or fix it.
   the key is the `$id` as written, not resolved against the origin a compile
   resolves the reference against. Pass the key (`addSchema(schema,
   'https://…/t.json')`) or an absolute `$id`.
-- [ ] **A held dialect named by a URI that differs beyond case is read as
-  draft-07.** With `https://example.com/a/my-dialect` (extends 2020-12) held,
-  `$schema: 'https://example.com:443/a/my-dialect'` or
-  `'https://example.com/a/../a/my-dialect'` accepts `[1]` under `prefixItems:
-  [{ type: 'string' }]`, while a `$ref` to either spelling reaches the held
-  schema (the URL parse drops the default port and dot segments; the `$schema`
-  lookup reads scheme and host case only). Look the dialect up by the key a
-  `$ref` resolves to.
 - [ ] **A draft-04 `id` and a percent-spelled `$anchor` outside the
   validator.** The validator reads `id: '#foo'` under every draft (draft-07 `{
   definitions: { a: { id: '#foo', type: 'integer' } }, properties: { y: {

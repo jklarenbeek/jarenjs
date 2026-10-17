@@ -311,6 +311,28 @@ describe('a held schema is named with its scheme and host in any case', () => {
       .map((validator) => validator.compile({ $ref: 'https://example.com/s' })([1])), [false, false]);
   });
 
+  it('reads a $schema naming a held dialect with its default port or dot segments by that dialect, as a $ref to it resolves', async () => {
+    const DEEP = 'https://example.com/a/my-dialect';
+    for (const uri of ['https://example.com:443/a/my-dialect', 'https://example.com/a/../a/my-dialect', 'https://example.com/a/./my-dialect']) {
+      assert.deepEqual([[1], ['a']].map(holding(dialect(DEEP)).compile({ $schema: uri, ...TUPLE })), [false, true], uri);
+      // and compileAsync asks the loader for the URI a $ref to it would name
+      const asked = [];
+      const validate = await compileAsync(holding(), { $schema: uri, ...TUPLE }, {
+        loadSchema: async (/** @type {string} */ wanted) => {
+          asked.push(wanted);
+          if (wanted === DEEP || wanted === `${DEEP}#`) return dialect(DEEP);
+          throw new Error(`no document at ${wanted}`);
+        },
+      });
+      assert.deepEqual([validate([1]), asked.map((wanted) => wanted.replace(/#$/, ''))], [false, [DEEP]], uri);
+    }
+    // a path that differs is another dialect: unheld, read as draft-07
+    assert.equal(holding(dialect(DEEP)).compile({ $schema: 'https://example.com/b/my-dialect', ...TUPLE })([1]), true);
+    // a dialect registered under a spelling the URL standard reads otherwise is still read by that spelling
+    const PORTED = 'https://example.com:443/p/my-dialect';
+    assert.equal(holding(dialect(PORTED)).compile({ $schema: PORTED, ...TUPLE })([1]), false);
+  });
+
   it('switches vocabularies by the meta-schema a $schema names in another case', () => {
     // a meta-schema that omits the validation vocabulary: type asserts nothing
     const id = 'https://example.com/vocab-meta';

@@ -369,9 +369,11 @@ its hyper-schema, link and output schemas — and the Jaren 2020-12 dialect,
 with `http:` and `https:`, the host in any case (`HTTPS://JSON-SCHEMA.org/…`;
 RFC 3986 makes scheme and host case-insensitive, never the path), and a
 trailing empty fragment (`#`), read alike. A dialect the validator holds is
-looked up by its `$schema` with the scheme and host in any case too, the
-path, the query and every percent-encoding as written — as every schema it
-holds is registered and referenced (`addSchema` keys, `$id`, `$ref`,
+looked up by its `$schema` as a `$ref` to the same URI resolves — the scheme
+and host in any case, a default port and dot segments dropped
+(`https://example.com:443/a/../a/d` names `https://example.com/a/d`), the query and
+every percent-encoding as written, and failing that by the URI as written —
+as every schema it holds is registered and referenced (`addSchema` keys, `$id`, `$ref`,
 `getSchema`, `validateSchema` and `compileAsync` alike, in every scheme).
 *Upgrade: a held dialect named with an upper-case scheme or host
 (`HTTPS://EXAMPLE.com/my-dialect` for `https://example.com/my-dialect`) was

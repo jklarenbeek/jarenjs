@@ -19,7 +19,7 @@ import { isBoolOrObjectClass } from './tools.js';
 import { storeSchemaIdsInMap, DEFAULT_ORIGIN } from './traverse.js';
 import { SchemaCompileError, describeCount, describeKind } from './errors.js';
 import { VALIDATOR_STATE } from './validator-state.js';
-import { detectSchemaDraft, dialectDraft, heldUriKey } from './schema-keywords.js';
+import { detectSchemaDraft, dialectDraft, dialectUriKey } from './schema-keywords.js';
 
 /** The default of the `maxLoads` option: the most documents one `compileAsync` call loads. */
 export const DEFAULT_MAX_LOADS = 100;
@@ -160,7 +160,7 @@ export async function compileAsync(validator, schema, options) {
   // a meta-schema is loaded first, and the schema walked once it is held.
   const dialect = isObjectClass(schema) && isStringType(schema.$schema) ? schema.$schema : '';
   const fragment = dialect.indexOf('#');
-  const dialectKey = heldUriKey(dialect);
+  const dialectKey = dialectUriKey(dialect);
   const loadsDialect = dialect !== '' && !OWN_DIALECT.test(dialect) && (fragment === -1 || fragment === dialect.length - 1);
   let walkLater = loadsDialect && !held(dialectKey) && dialectDraft(dialect) === null;
   /** @type {[string, string|undefined, boolean?][]} The documents to reach next, with the reference that needs each (none for a schema the validator held) and whether only a call resolves it */
