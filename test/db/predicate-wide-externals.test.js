@@ -9,12 +9,14 @@
  * exact integer they name, so there the external binds as the two edges of
  * the interval of integers that round to its double: equal inside it, less
  * below its low edge, greater above its high one. A column that holds the
- * double (a `number` member's) compares with the number as it is, and
- * PostgreSQL compares both as the engine does over the digits the store
- * wrote. The statement is the one a safe integer binds, so a seek stays a
- * seek, and a query's own such external runs in it too. A store run is
- * SQLite always, PostgreSQL where JAREN_PG_URL names a server; documents
- * another writer spelled are SQLite's.
+ * double (a `number` member's) compares with the number as it is.
+ * PostgreSQL holds every JSON number as the `numeric` its digits spell, a
+ * decimal another writer chose included, so there the external binds as
+ * the edges of the interval of decimals that round to its double, each
+ * with the side its tie falls on. The statement is the one a safe integer
+ * binds, so a seek stays a seek, and a query's own such external runs in it
+ * too. A store run is SQLite always, PostgreSQL where JAREN_PG_URL names a
+ * server.
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
@@ -24,7 +26,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { queryJson } from '@jarenjs/json/query';
-import { integersRoundingTo, intervalEdge } from '../../packages/db/src/double-interval.js';
+import { decimalEdge, integersRoundingTo, intervalEdge } from '../../packages/db/src/double-interval.js';
 import { ENGINES, skipFor, withStore } from './store-core-engines.js';
 
 const MODEL = {
@@ -32,7 +34,8 @@ const MODEL = {
   collections: {
     big: {
       key: '/id',
-      schema: { type: 'object', properties: { id: { type: 'string' }, u: { type: 'integer' }, v: { type: 'integer' }, n: { type: 'number' } } },
+      schema: { type: 'object', properties: { id: { type: 'string' }, u: { type: 'integer' }, v: { type: 'integer' }, n: { type: 'number' },
+        w: { type: 'number' } } },
       indexes: [{ name: 'by_v', path: '$.v' }, { name: 'by_n', path: '$.n' }],
     },
   },
@@ -98,11 +101,18 @@ for (const engine of ENGINES) {
 }
 
 /**
- * Open `MODEL` on SQLite with a writer beside the store that stores a
+ * Open `MODEL` on `engine` with a writer beside the store that stores a
  * document by the JSON text it is given, digits as written.
+ * @param {string} engine
  * @param {(store: any, write: (key: string, text: string) => Promise<void>) => Promise<void>} fn
  */
-async function withForeignWriter(fn) {
+async function withForeignWriter(engine, fn) {
+  if (engine === 'postgres') {
+    return withStore('postgres', MODEL, (store, pg) => fn(store, async (key, text) => {
+      const { pool, schema } = /** @type {{ pool: any, schema: string }} */ (pg);
+      await pool.query(`INSERT INTO "${schema}"."big" ("key", "doc") VALUES ($1, $2::jsonb)`, [key, text]);
+    }));
+  }
   const dir = mkdtempSync(join(tmpdir(), 'jaren-wide-externals-'));
   const path = join(dir, 'store.sqlite');
   try {
@@ -124,34 +134,53 @@ const EDGES = [2 ** 60, 2 ** 60 + 256, 2 ** 53, -(2 ** 60)].flatMap((value) => {
   return [interval.low - 1n, interval.low, interval.high, interval.high + 1n, BigInt(value)];
 });
 
-describe('an external past 2^53 against digits another writer spelled, sqlite', () => {
-  it('keeps the rows the engine keeps, in a profile predicate and in a query\'s own $where', async () => {
-    await withForeignWriter(async (store, write) => {
-      const big = store.collection('big');
-      // the store's own documents spell each number by its shortest digits
-      for (const [i, value] of NUMBERS.entries()) await big.insert({ id: `s${i}`, u: value, v: value, n: value });
-      for (const [i, digits] of EDGES.entries()) await write(`f${i}`, `{"id":"f${i}","u":${digits},"v":${digits},"n":${digits}}`);
-      // what the engine reads: every document, as the numbers it holds
-      const documents = await big.execute({ $for: { it: '$[*]' }, $orderby: ['$it.id'], $return: '$it' }, { pushdown: false });
-      assert.equal(documents.length, NUMBERS.length + EDGES.length);
-      const differ = [];
-      for (const member of ['u', 'v', 'n']) {
-        for (const op of OPERATORS) {
-          const predicate = { [op]: [`$it.${member}`, '$x'] };
-          for (const x of [2 ** 60, 2 ** 60 + 256, 2 ** 53, -(2 ** 60), 2 ** 63, -(2 ** 63), 5]) {
-            const expected = queryJson(kept(predicate), documents, { x });
-            const profiled = await big.execute(ALL, { externals: { x }, profile: { externals: ['x'], predicates: { big: predicate } } });
-            const own = await big.execute(kept(predicate), { externals: { x } });
-            if (JSON.stringify(profiled) !== JSON.stringify(expected)) differ.push({ member, op, x, profiled, expected });
-            if (JSON.stringify(own) !== JSON.stringify(expected)) differ.push({ member, op, x, own, expected });
+// the decimals at and within a half-unit of each edge of the interval that
+// rounds to a double, PostgreSQL's `numeric` holding each as spelled (SQLite
+// reads a JSON fraction as the double its own conversion rounds it to): the
+// edge itself (a tie, which rounds to an even significand), a hair and a half
+// either side, and 2^53's low edge, which lies half-way between integers
+const DECIMALS = [2 ** 60, 2 ** 60 + 256, 2 ** 53, -(2 ** 53), -(2 ** 60 + 256)].flatMap((value) =>
+  [decimalEdge(value, 'low'), decimalEdge(value, 'high')].flatMap((edge) => {
+    const [whole, half = ''] = edge.replace('-', '').split('.');
+    const sign = edge.startsWith('-') ? '-' : '';
+    const at = (/** @type {bigint} */ offset, /** @type {string} */ fraction) => `${sign}${BigInt(whole) + offset}.${fraction}`;
+    return half === ''
+      ? [edge, at(-1n, '9999999999999999999'), at(0n, '0000000000000000001'), at(-1n, '5'), at(0n, '5')]
+      : [edge, at(0n, '4999999999999999999'), at(0n, '5000000000000000001'), at(0n, '0'), at(1n, '0')];
+  }));
+
+for (const engine of ENGINES) {
+  describe(`an external past 2^53 against digits another writer spelled, ${engine}`, { skip: skipFor(engine) }, () => {
+    it('keeps the rows the engine keeps, in a profile predicate and in a query\'s own $where', async () => {
+      await withForeignWriter(engine, async (store, write) => {
+        const big = store.collection('big');
+        // the store's own documents spell each number by its shortest digits
+        for (const [i, value] of NUMBERS.entries()) await big.insert({ id: `s${i}`, u: value, v: value, n: value, w: value });
+        const foreign = [...EDGES.map(String), ...(engine === 'postgres' ? DECIMALS : [])];
+        for (const [i, digits] of foreign.entries())
+          await write(`f${i}`, `{"id":"f${i}","u":${digits},"v":${digits},"n":${digits},"w":${digits}}`);
+        // what the engine reads: every document, as the numbers it holds
+        const documents = await big.execute({ $for: { it: '$[*]' }, $orderby: ['$it.id'], $return: '$it' }, { pushdown: false });
+        assert.equal(documents.length, NUMBERS.length + foreign.length);
+        const differ = [];
+        for (const member of ['u', 'v', 'n', 'w']) {
+          for (const op of OPERATORS) {
+            const predicate = { [op]: [`$it.${member}`, '$x'] };
+            for (const x of [2 ** 60, 2 ** 60 + 256, 2 ** 53, -(2 ** 53), -(2 ** 60), -(2 ** 60 + 256), 2 ** 63, -(2 ** 63), 2 ** 64, 5]) {
+              const expected = queryJson(kept(predicate), documents, { x });
+              const profiled = await big.execute(ALL, { externals: { x }, profile: { externals: ['x'], predicates: { big: predicate } } });
+              const own = await big.execute(kept(predicate), { externals: { x } });
+              if (JSON.stringify(profiled) !== JSON.stringify(expected)) differ.push({ member, op, x, profiled, expected });
+              if (JSON.stringify(own) !== JSON.stringify(expected)) differ.push({ member, op, x, own, expected });
+            }
           }
         }
-      }
-      assert.deepEqual(differ, []);
-      assert.equal((await big.explain(kept({ $eq: ['$it.v', '$x'] }), { externals: { x: 2 ** 60 } })).mode, 'native');
+        assert.deepEqual(differ, []);
+        assert.equal((await big.explain(kept({ $eq: ['$it.v', '$x'] }), { externals: { x: 2 ** 60 } })).mode, 'native');
+      });
     });
   });
-});
+}
 
 describe('the integers a double stands for', () => {
   it('are the interval round-half-to-even sends to it, ties kept by an even significand', () => {
@@ -170,6 +199,24 @@ describe('the integers a double stands for', () => {
         [value, value, true, true], String(value));
     }
     for (const value of [0, 5, -(2 ** 53) + 1, 2 ** 53 - 1, 0.5, 2 ** 52 + 0.5]) assert.equal(integersRoundingTo(value), null);
+  });
+
+  it('bind as decimal edges, with the side each tie falls on, for a member read by its decimal digits', () => {
+    const edges = (/** @type {unknown} */ value) =>
+      ['low', 'lowExclusive', 'high', 'highExclusive'].map((edge) => decimalEdge(value, /** @type {any} */ (edge)));
+    // 2^60: an even significand, so both ties round to it and each edge is held
+    assert.deepEqual(edges(2 ** 60), ['1152921504606846912', '1152921504606846911', '1152921504606847104', '1152921504606847105']);
+    // 2^60 + 256: an odd one, so neither is
+    assert.deepEqual(edges(2 ** 60 + 256), ['1152921504606847104', '1152921504606847104', '1152921504606847360', '1152921504606847360']);
+    // 2^53: its low edge lies half-way to the integer below it
+    assert.deepEqual(edges(2 ** 53), ['9007199254740991.5', '9007199254740990.5', '9007199254740993', '9007199254740994']);
+    assert.deepEqual(edges(-(2 ** 53)), ['-9007199254740993', '-9007199254740994', '-9007199254740991.5', '-9007199254740990.5']);
+    // 2^64 lies past the 64-bit integers, which a decimal does not stop at
+    assert.deepEqual(edges(2 ** 64), ['18446744073709550592', '18446744073709550591', '18446744073709553664', '18446744073709553665']);
+    // a safe integer or a fraction stands for itself; anything else is its JSON
+    assert.deepEqual(edges(5), ['5', '4', '5', '6']);
+    assert.deepEqual(edges(0.5), ['0.5', '-0.5', '0.5', '1.5']);
+    assert.deepEqual(edges('text'), ['"text"', '"text"', '"text"', '"text"']);
   });
 
   it('bind as 64-bit integers, or as the double where an edge lies past them', () => {

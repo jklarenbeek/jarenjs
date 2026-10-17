@@ -293,7 +293,10 @@ function slotValue(slot, externals, anchors = null) {
   // missing-external error
   if ('external' in slot && slot.json === true) {
     const value = externals[slot.external];
-    return value === undefined ? undefined : JSON.stringify(value);
+    if (value === undefined) return undefined;
+    // one bound of the decimals that round to the number, which a member
+    // read by its decimal digits is compared with (`decimal`)
+    return slot.decimal !== undefined ? decimalEdge(value, slot.decimal) : JSON.stringify(value);
   }
   if ('derived' in slot)
     return derivedSlotValue(slot.derived, slot.derived.kind === 'bboxAxis'
@@ -2488,7 +2491,7 @@ function refuseBuffered(options, classified, docPath) {
 // ————— The entity query surface (the second document kind) —————
 
 import { mergeEntityRow, parseGraphRow } from './graph.js';
-import { intervalEdge } from './double-interval.js';
+import { decimalEdge, intervalEdge } from './double-interval.js';
 import { relationTables, joinTableRoots } from './model.js';
 
 /** The default include depth bound (printed, never silent). */

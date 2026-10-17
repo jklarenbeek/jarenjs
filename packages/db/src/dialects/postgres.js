@@ -826,6 +826,10 @@ export function postgresDialect(options = undefined) {
     // that holds every scalar: text against text under `C`, and number
     // against number in `jsonb`'s own numeric order.
     externalEncoding: 'json',
+    // a JSON number is a `numeric` here, held by the decimal digits the
+    // writer spelled, so a number branch compares with the interval of
+    // decimals that round to the external's double
+    decimalDigits: true,
     externalCompare: (valueSql, kind) =>
       (kind === 'number' ? `to_jsonb(${valueSql})` : valueSql),
     externalRef: (paramSql, kind) => (kind === 'text'

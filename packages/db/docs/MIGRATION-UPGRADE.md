@@ -3307,6 +3307,15 @@ which the model does not declare`).
   equality seeked before). A query's own such external, which ran in the
   engine over the whole collection (`explain()` reported `set`), now runs in
   that statement (`native`).
+- On PostgreSQL the same comparison now keeps the engine's rows too: a
+  member is a `numeric` holding the decimal its writer spelled, and the
+  external was compared with it exactly, so over a document another writer
+  stored (`1152921504606846976`, or a decimal such as
+  `1152921504606846911.5`) `$eq ['$it.u', '$x']` with x = 2^60 kept only the
+  store's own document, and `$ne`, `$lt`, `$le`, `$gt`, `$ge` differed alike.
+  Such a comparison binds the edges of the decimals that round to the
+  external's double, each with the side its tie falls on, in one statement
+  for every value; a safe integer or a fraction compares exactly as before.
 - No table, index or stored value changes: the decoder and the included
   child's projection are read-side, and a store the previous release created
   opens, plans and answers as before.
@@ -3314,7 +3323,21 @@ which the model does not declare`).
 **Downgrade.** The previous release opens every store this one does. On it,
 SQLite reads of an integer past 2^53 are refused `JD2003` again, Bun reads one
 a double does not hold as the nearest double, an included child reads one as
-the nearest double, and a query's own external past 2^53 runs in the engine.
+the nearest double, a query's own external past 2^53 runs in the engine, and
+PostgreSQL compares such an external with a member's digits exactly.
+
+## 55. A read on Bun sees a commit made beside the store
+
+- On Bun (`bunDriver()`), after an `explain()`, or a read under a profile
+  that refuses a full scan (whose plan is checked first, a live query's
+  included), the store's later reads
+  kept reading the snapshot taken then: a row another connection committed
+  afterwards was not seen until the store was reopened, and in a rollback
+  journal (`journalMode: 'delete'`) that connection's write was refused
+  `SQLITE_BUSY` instead. The statement such a read prepares for one use is now
+  finalized when the read ends, and every later read sees every commit. No
+  stored value or statement changes; Node and the other SQLite hosts answered
+  this way already.
 
 ## Measured costs
 

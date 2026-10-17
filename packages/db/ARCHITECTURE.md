@@ -732,7 +732,20 @@ which is the exact comparison it always was. The statement is the same for
 every value, the member's index still seeks it as a range, and the rows kept
 are the engine's whatever digits the document holds — for a store profile
 predicate's external and for a document's own alike, which therefore runs in
-the database too.
+the database too. PostgreSQL holds every JSON number as the `numeric` its
+writer spelled, a decimal included (`1152921504606846911.5`), and a decimal
+may lie on an edge of the interval of numbers that round to the double, or
+within a half-unit of one, where a tie rounds to the double only when its
+significand is even (the dialect's `decimalDigits`). There the number branch
+binds the interval's decimal edges (the slots' `decimal`): `low` and `high`,
+each beside the bound a member must lie strictly beyond (`lowExclusive`,
+`highExclusive`) — the edge itself where its tie rounds away, one past it
+where the tie rounds to the double. `$ge` is `v >= low AND v > lowExclusive`,
+`$le` is `v <= high AND v < highExclusive`, `$eq` is both, `$lt` is `v < low OR
+v <= lowExclusive` and `$gt` is `v > high OR v >= highExclusive`. A safe
+integer or a fraction binds as itself with its exclusive bounds one either
+side, the exact comparison it always was, and the statement is again the same
+for every value.
 
 **A path against a path is decided by the family of the two values.**
 Only members the schema types as scalars qualify — `string`, `number`,

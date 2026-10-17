@@ -512,7 +512,7 @@ function typedDiffers(presentSql, valueSql, paramSql) {
 
 /**
  * @typedef {{ external: string, nullable?: boolean, json?: boolean, list?: boolean, digits?: 'low' | 'high',
- *     compared?: boolean } | { literal: unknown } |
+ *     decimal?: 'low' | 'high' | 'lowExclusive' | 'highExclusive', compared?: boolean } | { literal: unknown } |
  *   { derived: { kind: 'bboxAxis', external: string,
  *     axis: 'w' | 's' | 'e' | 'n' } } |
  *   { derived: { kind: 'circleAxis', centre: { external: string } | { literal: unknown },
@@ -528,7 +528,10 @@ function typedDiffers(presentSql, valueSql, paramSql) {
  *   living in the emitter. An external slot marked `digits` binds one
  *   edge (`low`, `high`) of the interval of integers that round to a
  *   number past 2^53, for a member the database reads by its digits
- *   (`dialect.integerDigits`); any other value binds as itself. Every
+ *   (`dialect.integerDigits`); one marked `decimal` binds one bound of
+ *   the interval of decimals that round to it, as JSON text, for a member
+ *   the database reads by its decimal digits (`dialect.decimalDigits`,
+ *   `decimalEdge`); any other value binds as itself. Every
  *   slot of a guarded external comparison is marked `compared`: it
  *   answers as the engine does for a number past 2^53 too.
  *
@@ -861,12 +864,33 @@ export function emitPlan(plan, dialect, physical) {
     const edgeOf = (edge) => dialect.externalRef(param({ external: name, digits: edge, compared: true }), 'number');
     /** @param {string} member */
     const numberTest = (member) => {
+      if (dialect.decimalDigits) return decimalTest(member);
       if (!digits) return `${member} ${pred.op === 'ne' ? '=' : symbol} ${dialect.externalRef(external(), 'number')}`;
       if (pred.op === 'lt') return `${member} < ${edgeOf('low')}`;
       if (pred.op === 'le') return `${member} <= ${edgeOf('high')}`;
       if (pred.op === 'gt') return `${member} > ${edgeOf('high')}`;
       if (pred.op === 'ge') return `${member} >= ${edgeOf('low')}`;
       return `${member} BETWEEN ${edgeOf('low')} AND ${edgeOf('high')}`;
+    };
+    // a member read by its decimal digits (`dialect.decimalDigits`) holds
+    // any decimal another writer spelled, which may lie on an edge of the
+    // interval of decimals that round to the external's double, or within
+    // a half-unit of one: each edge binds with the bound a member must lie
+    // strictly beyond besides (`decimal`, `decimalEdge`), which is the edge
+    // itself where its tie rounds away. A safe integer or a fraction binds
+    // as itself, which is equality
+    /** @param {'low' | 'high' | 'lowExclusive' | 'highExclusive'} edge */
+    const decimalOf = (edge) => dialect.externalRef(param({ external: name, json: true, decimal: edge, compared: true }), 'number');
+    /** @param {string} member */
+    const decimalTest = (member) => {
+      // each a function: a slot is taken where its placeholder is written
+      const fromLow = () => `${member} >= ${decimalOf('low')} AND ${member} > ${decimalOf('lowExclusive')}`;
+      const toHigh = () => `${member} <= ${decimalOf('high')} AND ${member} < ${decimalOf('highExclusive')}`;
+      if (pred.op === 'lt') return `(${member} < ${decimalOf('low')} OR ${member} <= ${decimalOf('lowExclusive')})`;
+      if (pred.op === 'le') return toHigh();
+      if (pred.op === 'gt') return `(${member} > ${decimalOf('high')} OR ${member} >= ${decimalOf('highExclusive')})`;
+      if (pred.op === 'ge') return fromLow();
+      return `${fromLow()} AND ${toHigh()}`;
     };
     const textBranch = `(${jt} IS NOT NULL AND ${jt} = ${sl('text')} AND `
       + `${dialect.valueTypeOf(external())} = ${sl('text')} AND `

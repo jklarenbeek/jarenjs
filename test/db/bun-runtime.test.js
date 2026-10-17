@@ -106,6 +106,28 @@ describe('the Bun binding releases uncached prepared statements', () => {
     assert.deepStrictEqual(close.mock.calls[0].arguments, [true], 'native close also drains unreachable statements');
   });
 
+  it('finalizes a statement its one use releases, which close then leaves alone', (t) => {
+    const unregistered = [];
+    t.mock.method(globalThis, 'FinalizationRegistry', function () {
+      return { register() {}, unregister(token) { unregistered.push(token.deref()); return true; } };
+    });
+    const finalized = [];
+    const db = new BunShapedDatabase(':memory:');
+    const prepare = db.prepare.bind(db);
+    t.mock.method(db, 'prepare', (sql) => ({ ...prepare(sql), finalize() { finalized.push(sql); } }));
+    const connection = adaptBunDatabase(db);
+    const plan = connection.prepare('EXPLAIN QUERY PLAN SELECT 1');
+    connection.prepare('SELECT 2');
+    assert.deepStrictEqual(plan.all().map((/** @type {any} */ row) => row.detail), ['SCAN CONSTANT ROW']);
+    plan.finalize();
+    assert.deepStrictEqual(finalized, ['EXPLAIN QUERY PLAN SELECT 1']);
+    assert.equal(unregistered.length, 1);
+    connection.close();
+    // the open's own probe statements, then the one still held, never the released one again
+    assert.deepStrictEqual(finalized.filter((sql) => sql.startsWith('EXPLAIN')), ['EXPLAIN QUERY PLAN SELECT 1']);
+    assert.equal(finalized.at(-1), 'SELECT 2');
+  });
+
   for (const failureMode of ['statement', 'database', 'both']) {
     it(`closes every resource when ${failureMode} cleanup fails`, (t) => {
       const statementError = new Error('statement finalization failed');

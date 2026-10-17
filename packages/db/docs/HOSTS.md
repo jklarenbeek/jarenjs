@@ -867,7 +867,12 @@ Closing a Bun connection requests immediate native database closure. This also
 finalizes prepared statements whose JavaScript weak references have cleared;
 file release does not depend on a later garbage-collection cycle. Reachable
 statement cleanup and native close errors remain observable. Statements cannot
-outlive the connection, including when adapting an existing Bun database.
+outlive the connection, including when adapting an existing Bun database. A
+statement the store prepares for one use — an `explain()`'s plan, a profile's
+full-scan check — is finalized when that use ends: `bun:sqlite` has no
+statement reset, and an `EXPLAIN` it has read to the end still counts as
+active, which kept the connection's read transaction open, so the store read
+an old snapshot and a writer beside it in a rollback journal was refused busy.
 
 Both hosts back up through SQLite's online backup, page by page into a sibling
 temporary, and publish it with the shared atomic publisher; both include

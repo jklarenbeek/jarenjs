@@ -5,6 +5,7 @@ import { createQueryEngine, createEntityQueryEngine, createQueryState } from './
 import { SAFE_PROFILE } from './profile.js';
 import { createCursor, drainPage, isCursorBudgetError } from './cursor.js';
 import { DbCompileError, DbRuntimeError } from './errors.js';
+import { releaseStatement } from './driver.js';
 
 /** One serialized evaluator owns its counters and compiled plan. No per-call
  * budget is placed on another query's shared cache entry.
@@ -34,7 +35,8 @@ export function createLiveExecutor(context, bounds, signal) {
       // does read is past it, refused below (its page is never larger than the
       // credit left). The query owner caches this wrapper, not a native
       // statement. Ephemeral iterator statements leave with their cursor,
-      // including failed reads.
+      // including failed reads; an EXPLAIN's leaves when its read ends (a
+      // binding with no reset keeps a read transaction open on one it read).
       const statement = await source.prepare(sql, { ...metadata, ephemeral: true });
       // EXPLAIN is a metadata command rather than a cursor-select on some hosts.
       // Its driver owns buffering bounds; its answer still spends input credit.
@@ -55,6 +57,9 @@ export function createLiveExecutor(context, bounds, signal) {
         // item too large for its page)
         if (isCursorBudgetError(error)) throw refused();
         throw error;
+      }
+      finally {
+        if (explain) releaseStatement(statement);
       }
       rows += page.work.rows; bytes += page.work.bytes;
       if (rows > bounds.maxInputRows || bytes > bounds.maxInputBytes || (!one && page.hasMore !== false))

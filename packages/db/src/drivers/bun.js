@@ -73,13 +73,28 @@ export function adaptBunDatabase(db, options) {
     /** @param {string} sql */
     prepare: (sql) => {
       const statement = exactIntegers(db.prepare(sql));
+      /** @type {WeakRef<any> | null} */
+      let ref = null;
       if (typeof statement.finalize === 'function') {
-        const ref = new WeakRef(statement);
+        ref = new WeakRef(statement);
         statements.add(ref);
         collected.register(statement, ref, ref);
       }
       const names = columnNamesOf(statement);
       return {
+        // the release a one-use statement ends with (an explain's plan, a
+        // scan check's): Bun has no reset, and an EXPLAIN it read to the
+        // end still counts as active, which keeps the connection's read
+        // transaction open past every later statement, so the store reads
+        // the snapshot it took then and a rollback journal's writer beside
+        // it is refused busy. Finalizing ends it
+        finalize: () => {
+          if (ref !== null) {
+            statements.delete(ref);
+            collected.unregister(ref);
+          }
+          statement.finalize?.();
+        },
         run: (params = []) => {
           const result = decodeRunResult(statement.run(...params));
           // Bun's result can include trigger side effects. The driver

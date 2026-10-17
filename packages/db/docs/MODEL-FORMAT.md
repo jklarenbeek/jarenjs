@@ -2314,14 +2314,16 @@ one holding a function or a symbol, which no database binds. Against a member th
 comparison matches nothing on either side, and the call answers — a
 boolean, an object or an array in place of a single value too, which SQLite
 binds as a value of no JSON kind. A predicate's integer past 2^53 keeps
-the rows the engine keeps: PostgreSQL compares it as the engine does over the
-digits the store wrote, and SQLite, which reads a stored JSON integer as the
+the rows the engine keeps: SQLite, which reads a stored JSON integer as the
 exact integer its digits spell, compares that integer with the interval of
-integers that round to the external's double, bound as its two edges, so a
-document keeps or loses its row as the engine decides whatever digits its
-writer spelled the number by (`1152921504606847000` or `1152921504606846976`
-for 2^60); a column that holds the double (a `number` member's) takes the
-number as it is. The statement is the one a safe integer binds, so it seeks
+integers that round to the external's double, bound as its two edges, and
+PostgreSQL, which holds every JSON number as the decimal its writer spelled,
+compares it with the interval of decimals that round to that double, each
+edge with the side its tie falls on, so a document keeps or loses its row as
+the engine decides whatever digits its writer spelled the number by
+(`1152921504606847000`, `1152921504606846976` or `1152921504606846976.5` for
+2^60); on SQLite a column that holds the double (a `number` member's) takes
+the number as it is. The statement is the one a safe integer binds, so it seeks
 as that one does, and a document's own such external runs in it too
 ([ARCHITECTURE](../ARCHITECTURE.md#the-type-truth-table)). One the
 predicate would read otherwise than the JSON value it stands for (a `Date`

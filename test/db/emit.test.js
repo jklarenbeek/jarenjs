@@ -484,6 +484,26 @@ describe('PostgreSQL: a literal comparison reads the typed extraction alone', ()
   const discriminators = (text) => (text.match(/THEN 'text' WHEN jsonb_typeof/g) ?? []).length;
   const N = '(CASE WHEN jsonb_typeof(("doc" #> \'{"n"}\')) = \'number\' THEN (("doc" #> \'{"n"}\'))::numeric END)';
 
+  it('an external compares a number with the decimals that round to its double, each edge with its tie side', () => {
+    assert.strictEqual(pg.decimalDigits, true);
+    const M = `to_jsonb(${N})`;
+    const forms = {
+      $eq: `${M} >= (($4)::jsonb) AND ${M} > (($5)::jsonb) AND ${M} <= (($6)::jsonb) AND ${M} < (($7)::jsonb)`,
+      $lt: `(${M} < (($4)::jsonb) OR ${M} <= (($5)::jsonb))`,
+      $le: `${M} <= (($4)::jsonb) AND ${M} < (($5)::jsonb)`,
+      $gt: `(${M} > (($4)::jsonb) OR ${M} >= (($5)::jsonb))`,
+      $ge: `${M} >= (($4)::jsonb) AND ${M} > (($5)::jsonb)`,
+    };
+    const edges = { $eq: ['low', 'lowExclusive', 'high', 'highExclusive'], $lt: ['low', 'lowExclusive'],
+      $le: ['high', 'highExclusive'], $gt: ['high', 'highExclusive'], $ge: ['low', 'lowExclusive'] };
+    for (const [op, form] of Object.entries(forms)) {
+      const { where, slots } = whereFor({ [op]: ['$it.n', '$x'] }, pg);
+      assert.ok(where.includes(`IN ('number') AND ${form}))`), `${op}: ${where}`);
+      assert.deepStrictEqual(slots.slice(3), edges[/** @type {keyof typeof edges} */ (op)]
+        .map((decimal) => ({ external: 'x', json: true, decimal, compared: true })), op);
+    }
+  });
+
   it('an indexed member reads its generated column, an unindexed one its typed CASE, no discriminator beside either', () => {
     assert.strictEqual(pg.typedExtract, true);
     const eq = whereFor({ $eq: ['$it.sku', 's0'] }, pg);

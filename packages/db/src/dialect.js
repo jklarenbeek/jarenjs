@@ -221,6 +221,7 @@ export const MEMBER_WHEN = Symbol('dialect.memberWhen');
  *   jsonInteger: (columnSql: string) => string,
  *   externalEncoding?: 'value' | 'json',
  *   integerDigits?: boolean,
+ *   decimalDigits?: boolean,
  *   externalCompare?: (valueSql: string, kind: string) => string,
  *   externalRef?: (paramSql: string, kind: string) => string,
  *   valueTypeOf: (paramSql: string) => string,
@@ -961,6 +962,16 @@ export function createDialect(spec) {
      * included child reads by that rule (`parseGraphRow`).
      */
     integerDigits: spec.integerDigits === true,
+    /**
+     * Whether the engine reads every stored JSON number by its decimal
+     * digits, exactly, and compares it exactly with a bound number. A
+     * writer spells a double by any decimal that rounds to it, so such an
+     * engine compares a member with an external number against the
+     * interval of decimals that round to the external's double, bound as
+     * its edges with the side each tie falls on (`decimalEdge`): what the
+     * engine's double comparison answers whatever digits the document holds.
+     */
+    decimalDigits: spec.decimalDigits === true,
     /** The MEMBER side of an external comparison, at the branch's kind. */
     externalCompare: spec.externalCompare ?? ((valueSql) => valueSql),
     /** The PARAMETER side of an external comparison, at the same kind. */
