@@ -227,13 +227,15 @@ it('a throw from snapshot, commit or restore is read the same way', async () => 
     assert.deepEqual(snapshot.errors, [{ ...expected, stage: 'snapshot' }], `${name} from snapshot`);
     const committed = await createGuardedRefiner({ ...base, commit: () => { throw make(); } }).commit({});
     assert.deepEqual(committed.errors, [{ ...expected, stage: 'commit' }], `${name} from commit`);
-    // a restore that throws undefined is indistinguishable from one that
-    // succeeded (`restoreError` is the thrown value), so it is not read here
-    if (name === 'undefined')
-      continue;
+    // a restore that throws, even `undefined`, is told from one that worked
     const restored = await createGuardedRefiner({ ...base, commit: () => { throw new TypeError('disk'); },
       snapshot: () => 't', restore: () => { throw make(); } }).commit({});
     assert.deepEqual(restored.errors, [{ code: 'JG2002', docPath: '', message: 'disk', stage: 'commit' },
       { ...expected, stage: 'restore' }], `${name} from restore`);
+    assert.ok('restoreError' in restored, `${name}: the restore's throw is kept`);
   }
+  const worked = await createGuardedRefiner({ ...base, commit: () => { throw new TypeError('disk'); },
+    snapshot: () => 't', restore: () => null }).commit({});
+  assert.ok(!('restoreError' in worked), 'a restore that worked keeps no restoreError');
+  assert.equal(worked.errors.length, 1);
 });

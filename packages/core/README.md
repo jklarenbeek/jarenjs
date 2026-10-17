@@ -585,7 +585,7 @@ they were, so `{ valid: false }` prepared with no `errors` and committed
 `{ ok: false, stage: 'validation' }` with none.* A commit answers `{ ok: true, value, snapshot }` or
 `{ ok: false, stage, errors }` with `stage` one of `'validation'`, `'snapshot'`
 and `'commit'`: only the last two carry the thrown `cause`, and only `'commit'`
-the snapshot token and an optional `restoreError`. A throw from a hook,
+the snapshot token and, when the `restore` hook threw, `restoreError` — the thrown value, kept even when it is `undefined`. A throw from a hook,
 `snapshot`, `commit` or `restore` is reported as a `GuardedFailure`
 `{ code, docPath, message, stage }`, read as `checkCompile` reads a throw:
 `code` is the thrown value's own when it is non-empty text and the registered

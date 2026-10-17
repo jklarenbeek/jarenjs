@@ -197,17 +197,23 @@ export function createGuardedRefiner(options) {
       return { ok: true, value, snapshot: token };
     }
     catch (cause) {
+      // a restore that threw is told from one that worked by the throw
+      // itself, not by its value: it may throw `undefined`
+      let restoreFailed = false;
       let restoreError;
       if (options.restore) {
         try {
           const restored = await options.restore(token);
           if (restored?.error !== undefined) throw new Error(restored.error);
         }
-        catch (error) { restoreError = error; }
+        catch (error) {
+          restoreFailed = true;
+          restoreError = error;
+        }
       }
       return { ok: false, stage: 'commit', cause, snapshot: token,
-        ...(restoreError === undefined ? {} : { restoreError }),
-        errors: [failure(cause, 'commit'), ...(restoreError === undefined ? [] : [failure(restoreError, 'restore')])] };
+        ...(restoreFailed ? { restoreError } : {}),
+        errors: [failure(cause, 'commit'), ...(restoreFailed ? [failure(restoreError, 'restore')] : [])] };
     }
   }
 

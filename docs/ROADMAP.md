@@ -39,17 +39,6 @@ delete it or fix it.
   and `0`) at no cost to a well-formed ring, as the containment helpers have
   (a patch).
 
-- [ ] **A restore that throws `undefined` is reported as a restore that
-  succeeded.** `createGuardedRefiner`'s `commit` keeps the thrown value as
-  `restoreError` and tests it against `undefined`, so a `restore` hook that
-  throws `undefined` after a failed commit answers `{ ok: false, stage:
-  'commit', errors: [<commit failure>] }` with no `restoreError` and no
-  `'restore'` failure record, the answer of a restore that worked. A snapshot,
-  commit or hook that throws `undefined` is reported (as `JG2002`, message
-  `'undefined'`). Wanted: the restore's throw kept apart from its absence; a
-  new failure record in an answer hosts read (a patch, a wrong answer made
-  right).
-
 ## @jarenjs/json — JSONPath & addressing
 
 *The current focus.* JSON Pointer (RFC 6901), the JSONPath engine
