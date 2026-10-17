@@ -815,11 +815,14 @@ zero, as `JSON.parse` reads them. Its `numeric` column holds a conforming
 `5.00000000000000000001` apart from `5`, so bounds prove nothing there. An
 entity's order terms read one term alike (`entityOrderRead`) in a query, a
 load's `orderBy` and keyset continuation, and an include's `orderBy`: a number
-document member as the double, and its `number` column the same way on
-PostgreSQL; its `integer` column is read bare, keeping a key's index order —
-on SQLite it holds no integer the engine reads but as its own double, while on
-PostgreSQL it holds a writer's digits and orders two spellings of one double
-apart (ROADMAP) — and SQLite's `number` column holds the double.
+document member as the double, and its `number` and `integer` columns the same
+way on PostgreSQL, whose `numeric` holds a writer's digits (a schema bound
+included, as above). A column holding a key there — an `integer` key, a
+database-allocated one, a reference to one, a join table's sides — is read
+bare and keeps its index order: two keys are two values the store wrote, and
+the column may be the `bigint` a database-allocated key takes. On SQLite the
+`integer` column holds no integer the engine reads but as its own double, and
+the `number` column holds the double; both read bare.
 
 **A path against a path is decided by the family of the two values.**
 Only members the schema types as scalars qualify — `string`, `number`,

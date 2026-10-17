@@ -50,7 +50,7 @@ import { DbCompileError, DbRuntimeError, wrapDriverError, refuseRoundedInteger }
 import { chain, attempt, createStatementOwner, useStatementOnce } from './driver.js';
 import { readOptions, readControls, isPlainOptions, refuseUnknownMembers } from './options.js';
 import {
-  planQuery, planEntityQuery, entityShape, planEntityPredicate, entityPathRef, bindsLoneSurrogate, LONE_SURROGATE_REFUSAL,
+  planQuery, planEntityQuery, entityShape, keyHoldingColumns, planEntityPredicate, entityPathRef, bindsLoneSurrogate, LONE_SURROGATE_REFUSAL,
   isRootScanSource, isEntityRootSource, BIND_REASONS, PLANNER_REASONS, admitsMixedTypes,
   predicateTerms, boundPredicateTerms, mapHops, hopsOf, scalarFamilies, entityRoot,
 } from './plan.js';
@@ -4023,6 +4023,7 @@ export function createLoadEngine(context, entityName) {
     const structural = after !== undefined && typeof after === 'object';
     const keysetMode = keyset || structural;
     const keyColumns = tree.entityMapping.keys;
+    const keyHolding = keyHoldingColumns(tree.entityMapping);
     const uniqueColumns = new Set([
       keyColumns.length === 1 ? keyColumns[0] : null,
       ...tree.entityMapping.indexes.filter((index) => index.unique)
@@ -4051,10 +4052,11 @@ export function createLoadEngine(context, entityName) {
      * column itself goes with the comparison: a dialect may spell the bare
      * column for a term a load orders or seeks by (a native uuid, a text
      * column collated by code point), which no predicate, join edge or
-     * grouping asks for. A `number` column that holds a writer's digits
-     * reads the double, so two spellings of one double tie in the order and
-     * in a continuation's comparison alike ({@link entityOrderRead}); a key
-     * column is read bare, so its index still orders and seeks — two keys
+     * grouping asks for. A `number` or `integer` column that holds a
+     * writer's digits reads the double, so two spellings of one double tie
+     * in the order and in a continuation's comparison alike ({@link
+     * entityOrderRead}); a key column, and an `integer` column referencing
+     * a key, is read bare, so its index still orders and seeks — two keys
      * are two values the store wrote, never two spellings of one double.
      * @param {string} property
      */
@@ -4063,7 +4065,8 @@ export function createLoadEngine(context, entityName) {
       const sql = `${rendered.aliasSql}.${q(column?.physical ?? column?.name ?? property)}`;
       if (column === undefined) return sql;
       const comparable = physicalEntity ? physicalComparable(column, sql, dialect, column) : sql;
-      return keyColumns.includes(property) ? comparable : entityOrderRead(dialect, column, comparable);
+      return keyColumns.includes(property) ? comparable
+        : entityOrderRead(dialect, keyHolding.has(column.name) ? { ...column, holdsKey: true } : column, comparable);
     };
     // the per-row proof that a text key survives its text encoding is
     // SQLite's (textKeyPlan reads the raw bytes beside the key): a typed

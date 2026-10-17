@@ -334,9 +334,11 @@ store never reads the key after one; on SQLite it does, after a unique failure
 that does not name the key.
 
 A number group key or distinct leaf, a number an `$orderby` orders by, and an
-entity's `number` column (other than a key, which is read bare and keeps its
-index) or number member a load's `orderBy`, its keyset continuation and an
-include's `orderBy` order by, is read as the double the engine holds: the `numeric` cast to `double precision`,
+entity's `number` or `integer` column or number member a query's `$orderby`, a
+load's `orderBy`, its keyset continuation and an include's `orderBy` order by,
+is read as the double the engine holds — other than a column holding a key (an
+`integer` key, a database-allocated one, a reference to one, a join table's
+sides), which is read bare and keeps its index: the `numeric` cast to `double precision`,
 so a number a foreign writer or trusted SQL stored with more digits than a
 double holds (`1.0000000000000001`, `1152921504606846976` for 2^60), or two
 spellings of one denormal, is one key with the store's own spelling, and ties

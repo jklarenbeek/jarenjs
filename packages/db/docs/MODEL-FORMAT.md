@@ -3079,7 +3079,9 @@ The consequence to plan for: an ordering on an instant member does not
 use that member's index. A list that wants "most recent first" from an
 index orders by a plain `integer` column the application owns and
 writes monotonically (a creation sequence), and uses the instant
-member in predicates, where the shadow column does its work.
+member in predicates, where the shadow column does its work. On
+PostgreSQL such a column orders by the double it holds, as every
+`integer` column that holds no key does there, so a sort serves it.
 
 ### 9.4 Relations and referential integrity
 

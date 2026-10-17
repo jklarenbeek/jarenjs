@@ -4158,6 +4158,18 @@ function peelWrappedResult(document) {
 // ————— The entity document kind (one planner, two document kinds) —————
 
 /**
+ * The columns of an entity that hold a key: its own (a join table's two
+ * sides among them) and the references to another's. Such a column may be
+ * declared as the allocation a database-allocated key takes (`bigserial`),
+ * and keeps its exact comparison and its index order.
+ * @param {{ keys?: string[], foreignKeys: { column: string }[] }} entityMapping
+ * @returns {Set<string>}
+ */
+export function keyHoldingColumns(entityMapping) {
+  return new Set([...entityMapping.keys ?? [], ...entityMapping.foreignKeys.map((fk) => fk.column)]);
+}
+
+/**
  * Build the planner shape for one entity: canonical top-level paths
  * map to REAL columns (flavor `entity-column`), epoch date columns to
  * their derived integer twins (flavor `entity-epoch`), and everything
@@ -4170,9 +4182,7 @@ function peelWrappedResult(document) {
 export function entityShape(entity, entityMapping) {
   /** @type {Map<string, any>} */
   const flavors = new Map();
-  // the columns holding a key: the entity's own (a join table's two sides
-  // among them) and the references to another's
-  const keyHolding = new Set([...entityMapping.keys ?? [], ...entityMapping.foreignKeys.map((/** @type {any} */ fk) => fk.column)]);
+  const keyHolding = keyHoldingColumns(entityMapping);
   for (const column of entityMapping.columns) {
     const epoch = column.source === 'epoch(document)';
     flavors.set(canonicalOf([{ name: column.name }]), {
@@ -4230,6 +4240,7 @@ export function entityPathRef(node, slot, shape) {
       nullPolicy: flavored.nullPolicy,
       codec: flavored.codec,
       codecColumn: flavored.codecColumn,
+      ...(flavored.holdsKey === true ? { holdsKey: true } : {}),
     };
   }
   // a nested path rides the JSONB document with the phase-A guards;

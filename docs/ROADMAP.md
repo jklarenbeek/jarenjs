@@ -684,14 +684,13 @@ what each does is its own documentation's job
   interval comparison every other number column makes, and the double read
   every other pair of number columns makes, for a key column whose type the
   open has read as `numeric`.
-- [ ] **On PostgreSQL an entity's `integer` column orders by the digits
-  another writer spelled.** `$orderby: ['$it.b']` over an `integer` column the
-  store made (`numeric`) that another writer set to `1152921504606846976` and
-  `1152921504606847000`, or `5.00000000000000000001` and `5`, orders the two
-  apart where the engine, which reads one double, ties them and keeps the
-  rows' order; a `number` column reads the double (`entityOrderRead`). Wanted:
-  the double read for a codec-less `integer` column's order terms too (query,
-  load, keyset, include), keeping a key's index order.
+- [ ] **On PostgreSQL an entity's ordering never reads an index.** An entity
+  order term is `ASC NULLS FIRST` (descending `DESC NULLS LAST`) with the row
+  identity appended, which a default btree scan does not give, so a window, a
+  load's `orderBy` and a keyset page over a key, a reference or an indexed
+  column sort every row. Wanted: an index order the engine's empty placement
+  can use (an index declared `NULLS FIRST`, or `NULLS LAST` emitted where the
+  column refuses NULL), keeping the engine's empty-first order.
 - [ ] **On PostgreSQL a join's equality over two non-key number columns no
   longer seeks.** It reads both columns as the doubles (bounded by ranges of
   each around the other), which the planner cannot estimate, so it hashes or

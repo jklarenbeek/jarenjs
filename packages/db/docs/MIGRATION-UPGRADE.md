@@ -3460,6 +3460,31 @@ comparisons above answer by the digits written, as before.
 **Downgrade.** The previous release opens every store this one does; on it the
 comparisons above answer by the digits written, as before.
 
+## 59. An entity's `integer` column orders by the double on PostgreSQL
+
+- An entity's `integer` column (a `numeric` the store made) now orders as the
+  double the engine reads, as its `number` column does since §56: a row another
+  writer set to `1152921504606846976` beside the store's `1152921504606847000`
+  (both 2^60), or `5.00000000000000000001` beside `5`, came out in the order of
+  their digits in a query's `$orderby` and its windows, a hop's order key, a
+  load's `orderBy` and an include's `orderBy`, where the engine ties them and
+  keeps the rows' order; a `page()` over such a column resumed by the digits
+  and skipped or repeated rows inside a run of equal doubles. A schema bound
+  does not exempt the column (its `numeric` holds a conforming fraction). A
+  column holding a key — an `integer` key, a database-allocated one, a
+  reference to one, a join table's sides — is read bare, as before, and keeps
+  its index order. SQLite and a codec's column (`double precision`, an integer
+  type) answer as before.
+- The double read is the `CASE` a `number` column's order already pays, so
+  such an ordering, and a page's continuation, costs more than the bare
+  `numeric` did. The index on such a column never served the order (an
+  ascending order puts empty values first and a descending one last, which a
+  scan of its index does not) and still serves a `$where` over the column.
+- No table, index or stored value changes: every statement above is a read.
+
+**Downgrade.** The previous release opens every store this one does; on it
+those orderings answer by the digits written, as before.
+
 ## Measured costs
 
 Exact identity stores complete canonical documents and model endpoints, so

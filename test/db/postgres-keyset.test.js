@@ -154,7 +154,9 @@ describe('a keyset page over a physical PostgreSQL table', { skip: !url && 'JARE
       assert.match(explained.sql, /WHERE \("r"\."order", "r"\."seq"\) > \(\$1, \$2\) ORDER BY "r"\."order" ASC NULLS FIRST, "r"\."seq" ASC NULLS FIRST$/);
       // a declared term of a managed entity can hold NULL: the expansion, the key appended whole
       const byQty = await lines.explainLoad({ orderBy: '$it.qty', after: (await lines.page({ orderBy: '$it.qty' }, { limit: 1 })).continuation });
-      assert.match(byQty.sql, /WHERE \("r"\."qty" > \$1 OR \("r"\."qty" = \$2 AND "r"\."order" > \$3\) OR \("r"\."qty" = \$4 AND "r"\."order" = \$5 AND "r"\."seq" > \$6\)\)/);
+      // the `integer` term reads the double a writer's digits stand for, the key columns bare
+      assert.match(byQty.sql.replace(/\(CASE WHEN abs\(("r"\."\w+")\) < .*? END\)/g, 'double($1)'),
+        /WHERE \(double\("r"\."qty"\) > \$1 OR \(double\("r"\."qty"\) = \$2 AND "r"\."order" > \$3\) OR \(double\("r"\."qty"\) = \$4 AND "r"\."order" = \$5 AND "r"\."seq" > \$6\)\)/);
       assert.deepEqual((await everyPage(lines, { orderBy: '$it.qty' }, 2)).items.map((row) => `${row.order}/${row.seq}`),
         ['1/1', '1/2', '3/1', '3/2', '2/1', '2/2']);
     }

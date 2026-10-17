@@ -191,7 +191,10 @@ for (const host of HOSTS) describe(`${host.name}: a keyset walk shares one plan`
     const last = await users.page(spec, { limit: 5, after: later.continuation });
     assert.deepStrictEqual(last.items.map((/** @type {any} */ user) => user.id), ['u11', 'u12']);
     const explained = await users.explainLoad({ ...spec, after: later.continuation });
-    assert.match(explained.sql, /WHERE \("r"\."age" > [?$]\d* OR \("r"\."age" = [?$]\d* AND "r"\."id" > [?$]\d*\)\)/);
+    // an `integer` column holds a writer's digits on PostgreSQL: its term reads the double there
+    const age = host.name === 'PostgreSQL' ? 'double\\("r"\\."age"\\)' : '"r"\\."age"';
+    assert.match(explained.sql.replace(/\(CASE WHEN abs\(("r"\."\w+")\) < .*? END\)/g, 'double($1)'),
+      new RegExp(`WHERE \\(${age} > [?$]\\d* OR \\(${age} = [?$]\\d* AND "r"\\."id" > [?$]\\d*\\)\\)`));
     assert.strictEqual(explained.pagination, 'keyset');
   });
 

@@ -237,7 +237,9 @@ function decimalMembership(dialect, param, value, list, seek) {
  * declared as the allocation a database-allocated key takes (`bigserial`),
  * where an interval's fractional edge is no value the column's type reads
  * and a safe integer's interval holds no integer but itself; such a column
- * keeps the exact comparison, which the server types from the column.
+ * keeps the exact comparison, which the server types from the column, and
+ * its index order ({@link entityOrderRead} orders every other one by the
+ * double).
  * @param {any} dialect @param {any} ref - the column's ref
  * @returns {boolean}
  */
@@ -510,23 +512,27 @@ export function documentMemberOf(dialect, docSql, ref) {
 /**
  * An entity's order term read as the engine orders it: a number as the
  * double it holds (`doubleRead`), so two spellings of one double tie and the
- * next term decides between them — a document member's, and a `number`
- * column's where it holds a writer's digits (`decimalDigits`); an `integer`
- * column is read bare, which keeps a key's index order — on SQLite it holds
- * no integer the engine reads but as its own double, on PostgreSQL it holds
- * a writer's digits and orders two spellings of one double apart (an open
- * defect) — and a physical table's column orders as its codec. A query's order terms, a load's order
- * and keyset terms and an include's order terms read one term alike.
+ * next term decides between them — a document member's, and a `number` or
+ * `integer` column's where it holds a writer's digits (`decimalDigits`, the
+ * {@link decimalColumn}s and a `number` key). A column holding a key (an
+ * `integer` key or a reference to one) is read bare and keeps its index
+ * order: it may be the `bigserial` a database-allocated key takes, and two
+ * keys are two values the store wrote. On SQLite an `integer` column holds
+ * no integer the engine reads but as its own double, and a physical table's
+ * column orders as its codec; both read bare. A query's order terms, a
+ * load's order and keyset terms and an include's order terms read one term
+ * alike.
  * @param {any} dialect
  * @param {any} ref - an entity column's (`flavor: 'entity-column'`, or a
- *   load's mapping column, which names no flavor: `storage`, `codec`) or a
- *   document member's
+ *   load's mapping column, which names no flavor: `storage`, `codec`,
+ *   `holdsKey`) or a document member's
  * @param {string} sql - the column as it compares, or the document column
  * @returns {string}
  */
 export function entityOrderRead(dialect, ref, sql) {
   if (ref.flavor === 'entity-column' || ref.flavor === undefined)
-    return ref.storage === 'number' && ref.codec === undefined && dialect.decimalDigits ? dialect.doubleRead(sql) : sql;
+    return decimalColumn(dialect, ref) || (ref.storage === 'number' && ref.codec === undefined && dialect.decimalDigits)
+      ? dialect.doubleRead(sql) : sql;
   const member = documentMemberOf(dialect, sql, ref);
   return kindOf(ref) === 'number' ? dialect.doubleRead(member) : member;
 }
