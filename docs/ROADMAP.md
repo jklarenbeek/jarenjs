@@ -91,33 +91,22 @@ delete it or fix it.
   the key is the `$id` as written, not resolved against the origin a compile
   resolves the reference against. Pass the key (`addSchema(schema,
   'https://…/t.json')`) or an absolute `$id`.
-- [ ] **A held dialect named with an upper-case scheme or host is read as
-  draft-07.** With a dialect `https://example.com/my-dialect` that extends
-  2020-12 held, `{ $schema: 'HTTPS://EXAMPLE.com/my-dialect', prefixItems: [{
-  type: 'string' }] }` accepts `[1]` (the lower-case spelling refuses it): the
-  held meta-schema is looked up by the `$schema` text as written, in the walk,
-  in `dialectDraft`, in the `$vocabulary` lookup and in `compileAsync`. The
-  names json-schema.org and the Jaren dialect publish are read in any case.
-- [ ] **A draft-07 plain-name `$id` as a reference target outside the
-  validator.** In a draft-07 document, `definitions: { a: { $id: '#foo', type:
-  'integer' } }` and `properties: { y: { $ref: '#foo' } }`: the validator
-  applies it (`{ y: 1 }` true, `{ y: '1' }` false), but `compileNormalizer`
-  with `coerceTypes` leaves `'1'` as sent, `@jarenjs/emit` types `y: unknown`,
-  and `deriveStrictProfile` refuses `JK0104` ("resolves to no schema"):
-  `collectSameDocumentAnchors` collects `$anchor` only. Collect a
-  fragment-only `$id` as a plain name where the place is read under a draft
-  before 2019-09.
-- [ ] **The normalizer reads a plain-anchor target under the root's draft.**
-  `compileNormalizer` reads the target of a `#name` reference under the
-  document's root `$schema`, where the validator reads it under the nearest
-  `$schema` above its place: with an undeclared root, `$defs: { S: {}, B: {
-  $schema: <2020-12>, $defs: { C: { $anchor: 'c', $ref: '#/$defs/S', type:
-  'integer' } } } }` and `properties: { q: { $ref: '#c' } }`, the validator
-  reads `C`'s sibling `type` (`{ q: '12' }` false, `{ q: 12 }` true), but
-  `coerceTypes` leaves `'12'` as sent, so the normalized value still fails;
-  `@jarenjs/emit`, which reads by place as the validator does, types the input
-  `q?: S & (number | string)`. Read an anchor target by the nearest `$schema`
-  above it, as a pointer target is read.
+- [ ] **A held dialect named by a URI that differs beyond case is read as
+  draft-07.** With `https://example.com/a/my-dialect` (extends 2020-12) held,
+  `$schema: 'https://example.com:443/a/my-dialect'` or
+  `'https://example.com/a/../a/my-dialect'` accepts `[1]` under `prefixItems:
+  [{ type: 'string' }]`, while a `$ref` to either spelling reaches the held
+  schema (the URL parse drops the default port and dot segments; the `$schema`
+  lookup reads scheme and host case only). Look the dialect up by the key a
+  `$ref` resolves to.
+- [ ] **A draft-04 `id` and a percent-spelled `$anchor` outside the
+  validator.** The validator reads `id: '#foo'` under every draft (draft-07 `{
+  definitions: { a: { id: '#foo', type: 'integer' } }, properties: { y: {
+  $ref: '#foo' } } }` refuses `{ y: '1' }`), and keys `$anchor: 'a%20b'` as
+  spelled so `$ref: '#a%20b'` reaches it; `compileNormalizer` (and emit, the
+  strict profile) collect neither, leaving `'1'` as sent. Decide whether the
+  validator reads draft-04 `id` at all past draft-04, then read both as it
+  does.
 - [ ] **Strict profiles of the JTLT grammar and of two schemas for one
   member.** `deriveStrictProfile` (`@jarenjs/validate/strict-profile`) carries
   a value of any shape as JSON text, a map as `{ key, value }` entries, and an

@@ -32,6 +32,7 @@ import {
   TRAVERSE_SCHEMA_MAP_MAPS,
   dialectDraft,
   admitsPropertyDependencies,
+  caselessUri,
 } from './schema-keywords.js';
 import { admitsDynamicReference } from './dynamic-ref.js';
 
@@ -198,7 +199,9 @@ function parseJsonPointer(refUri, baseUri, opts) {
     }
   }
 
-  const [uri, fragment] = atFragment(url.href);
+  // the URL standard lowers the scheme, and the host of a web scheme; every
+  // other host is lowered here, so each URI is held and looked up by one spelling
+  const [uri, fragment] = atFragment(caselessUri(url.href));
   const [leftUri, search] = uri.split('?');
 
   if (!isStringWhiteSpace(fragment)) {

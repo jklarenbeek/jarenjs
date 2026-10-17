@@ -49,7 +49,7 @@ import { isStringWhiteSpace } from '@jarenjs/core/string';
 import { hasRecursiveAnchor, getDynamicAnchorName, collectDynamicAnchors, collectDynamicAnchorsDeep, appliesRefSiblings } from './dynamic-ref.js';
 import { isRecursiveQueryCompileError } from './query-keyword.js';
 import { boundReference, assertReferenceDepth, assertOutputFormat, REFERENCE_DEPTH_CEILING } from './errors.js';
-import { TRAVERSE_SCHEMA_OBJECTS, TRAVERSE_SCHEMA_MAPS, TRAVERSE_SCHEMA_MAP_MAPS, detectSchemaDraft, declaredVocabularies } from './schema-keywords.js';
+import { TRAVERSE_SCHEMA_OBJECTS, TRAVERSE_SCHEMA_MAPS, TRAVERSE_SCHEMA_MAP_MAPS, detectSchemaDraft, declaredVocabularies, caselessUri, heldUriKey } from './schema-keywords.js';
 import { VALIDATOR_STATE } from './validator-state.js';
 
 export {
@@ -2058,7 +2058,8 @@ export class JarenValidator {
       schema.forEach((s, index) => this.addSchema(s, key ? `${key}[${index}]` : undefined));
     }
     else if (isBoolOrObjectClass(schema)) {
-      const schemaKey = key || (isObjectClass(schema) ? schema.$id : undefined);
+      const named = key || (isObjectClass(schema) ? schema.$id : undefined);
+      const schemaKey = typeof named === 'string' ? caselessUri(named) : named;
       if (schemaKey) {
         const before = new Map(this.#schemas);
         const contestedBefore = new Map(this.#places.contested);
@@ -2303,8 +2304,16 @@ export class JarenValidator {
     return jarenValidateSchema;
   }
 
+  /**
+   * The key a schema is held under for a URI: its scheme and host in lower
+   * case (RFC 3986 reads both in any case), the rest as written, and an
+   * empty fragment where it has none. Anything but a string is returned as is.
+   * @template T
+   * @param {T} key - A schema URI
+   * @returns {T}
+   */
   static normalizeUriKey(key) {
-    return typeof key === 'string' && !key.includes('#') ? key + '#' : key;
+    return /** @type {T} */ (typeof key === 'string' ? heldUriKey(key) : key);
   }
 
   /**

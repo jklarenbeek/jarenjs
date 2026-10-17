@@ -278,7 +278,8 @@ Concretely, a producer:
   Following a ref into another document would mean owning a resolution scope,
   which is `@jarenjs/validate`'s job, not this format's. Within the document,
   the resolved forms are exactly the ones `compileNormalizer` resolves — `#`,
-  `#/pointer` and plain `#anchor` (outside embedded `$id` resources). A
+  `#/pointer` and plain `#anchor` (an `$anchor`, or a fragment-only `$id`
+  such as `$id: '#foo'`; outside embedded `$id` resources). A
   `$ref`'s siblings are read as the validator and `compileNormalizer` read
   them, by the draft the node is read under (its own `$schema`, else the
   nearest one above it, else draft-07): from 2019-09 on they compose with the

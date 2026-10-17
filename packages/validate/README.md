@@ -368,8 +368,20 @@ and draft-next (read as 2020-12) — the dialect, its vocabulary meta-schemas,
 its hyper-schema, link and output schemas — and the Jaren 2020-12 dialect,
 with `http:` and `https:`, the host in any case (`HTTPS://JSON-SCHEMA.org/…`;
 RFC 3986 makes scheme and host case-insensitive, never the path), and a
-trailing empty fragment (`#`), read alike (a dialect the validator holds is looked
-up by its `$schema` as written). *Upgrade: the hyper-schema, link and
+trailing empty fragment (`#`), read alike. A dialect the validator holds is
+looked up by its `$schema` with the scheme and host in any case too, the
+path, the query and every percent-encoding as written — as every schema it
+holds is registered and referenced (`addSchema` keys, `$id`, `$ref`,
+`getSchema`, `validateSchema` and `compileAsync` alike, in every scheme).
+*Upgrade: a held dialect named with an upper-case scheme or host
+(`HTTPS://EXAMPLE.com/my-dialect` for `https://example.com/my-dialect`) was
+read as draft-07, its `$vocabulary` was not read, `validateSchema` answered
+`false` for want of the meta-schema, and `compileAsync` asked `loadSchema`
+for it as spelled; now it is read by the held meta-schema and the loader is
+asked for `https://example.com/my-dialect`. A schema registered again under
+a key in another case replaces the first, as under the same key; and outside
+the web schemes (`app://Example.COM/x`) an `$id` and a `$ref` that differ only
+in the host's case now name one schema (one was refused `JK0009`).* *Upgrade: the hyper-schema, link and
 output schemas (`https://json-schema.org/draft/2020-12/hyper-schema`,
 `http://json-schema.org/draft-06/links#`) and an upper-case scheme or host
 were read as an unknown dialect, draft-07: under
@@ -1686,12 +1698,25 @@ positions that need no changes. `prefixItems` is read where the validator
 reads it: a document that declares a draft before 2020-12 treats it as an
 unknown keyword (its `items` then applies to every item), and a same-document
 reference target is read in the draft its place in the document declares (the
-nearest `$schema` on the way to it; the root's for an anchor). *Upgrade: the
+nearest `$schema` on the way to it, for an anchor the nearest one above the
+place that declares it). *Upgrade: the
 normalizer used to coerce and default `prefixItems` positions under every
 draft, so `{ $schema: 2019-09, prefixItems: [{ type: 'integer' }], items: {
 type: 'string' } }` turned `['5']`, which the validator accepts, into `[5]`,
-which it rejects.* Same-document anchors are collected from schema
-positions; anchor-looking keys in defaults, constants and examples are data.
+which it rejects; and an anchor's target was read under the root's draft, so
+under an undeclared root a 2020-12 target `{ $anchor: 'c', $ref: '#/$defs/S',
+type: 'integer' }` left `'12'` as sent, where the validator reads its `type`
+and refuses `'12'`: it is now coerced to `12`.* Same-document anchors are
+collected from schema positions; anchor-looking keys in defaults, constants
+and examples are data. A fragment-only `$id` (`$id: '#foo'`, the draft-07
+spelling of an anchor) names its schema object as the validator names it, in
+every draft, and starts no resource: the anchors below it are the document's.
+From 2019-09 on the drafts' meta-schemas forbid a fragment in `$id`; such an
+`$id` is read leniently as that name rather than refused, since every
+reference to it answers as the name it spells (`validateSchema` against the
+draft's meta-schema reports it). *Upgrade: a reference to such a name was not followed (nothing behind it was
+coerced or defaulted), `@jarenjs/emit` typed it `unknown` and
+`deriveStrictProfile` refused it `JK0104` ("resolves to no schema").*
 
 A `$ref`'s siblings are read where the validator reads them. Before draft
 2019-09, and in a document that declares no draft (read as draft-07, as

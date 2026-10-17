@@ -628,11 +628,12 @@ describe('compileNormalizer — reads prefixItems where the validator does', () 
     deepStrictEqual(normalize({ $defs: { t: tuple }, $ref: '#/$defs/t' }, ['5']), [5]);
     deepStrictEqual(normalize({ $schema: D19, $defs: { t: { $anchor: 'tuple', ...tuple } }, $ref: '#tuple' }, ['5']), ['5']);
     deepStrictEqual(normalize({ $schema: D20, $defs: { t: { $anchor: 'tuple', ...tuple } }, $ref: '#tuple' }, ['5']), [5]);
-    // an anchor is read in the root's draft: a subschema reached inline under
-    // another declared draft is compiled once per draft
+    // an anchor's target is read in the draft its own place declares, as the
+    // validator reads it, whichever way it is reached first (r was left as sent)
     const anchored = { $schema: D19, properties: { e: { $schema: D20, items: { $anchor: 'tup', ...tuple } }, r: { items: { $ref: '#tup' } } } };
-    deepStrictEqual(normalize(anchored, { e: [['5']], r: [['5']] }), { e: [[5]], r: [['5']] });
-    deepStrictEqual(normalize({ $schema: D19, properties: { r: { items: { $ref: '#tup' } }, e: anchored.properties.e } }, { e: [['5']], r: [['5']] }), { e: [[5]], r: [['5']] });
+    deepStrictEqual(both(anchored, { e: [['5']], r: [['5']] }), { normalized: { e: [[5]], r: [[5]] }, before: false, after: true });
+    deepStrictEqual(both({ $schema: D19, properties: { r: { items: { $ref: '#tup' } }, e: anchored.properties.e } }, { e: [['5']], r: [['5']] }),
+      { normalized: { e: [[5]], r: [[5]] }, before: false, after: true });
     // one subschema reached inline and through a reference reads the same
     deepStrictEqual(both({ $schema: D19, properties: { a: tuple, b: { $ref: '#/properties/a' } } }, { a: ['5'], b: ['5'] }),
       { normalized: { a: ['5'], b: ['5'] }, before: true, after: true });

@@ -1106,7 +1106,8 @@ Map<string, ValidationObject> {
 | `resolveRefSchemaShallow` | traverse.js | Resolve single ref hop (baseUri + fragment) |
 | `resolveRefSchemaDeep` | traverse.js | Follow ref chain to final schema |
 | `restoreSchemaRefsInMap` | traverse.js | Flatten all ref chains at load time |
-| `createJsonPointer` | traverse.js | Parse URI into components (id, leftUri, fragment) |
+| `createJsonPointer` | traverse.js | Parse URI into components (id, leftUri, fragment), its scheme and host lowered by `caselessUri` |
+| `caselessUri` / `heldUriKey` | schema-keywords.js | The one spelling of a URI a schema is held and looked up by: scheme and host in lower case (RFC 3986), the rest as written; `heldUriKey` adds the empty fragment (`addSchema`, `getSchema`, `dialectDraft`, `compileAsync`) |
 | `JarenValidator.compile` | index.js | Main entry point for schema compilation, draft/vocabulary selection |
 | `JarenValidator.#precompileRefs` | index.js | Pre-create ValidationObjects for all refs |
 | `ValidationObject.compileValidator` | index.js | Compile validator, ref combination, dynamic-anchor registration |

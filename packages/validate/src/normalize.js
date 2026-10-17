@@ -126,26 +126,67 @@ function coerceToType(value, type) {
 }
 
 /**
- * Collect the `$anchor` declarations of one schema document: a map from
- * anchor name to the schema node that declares it. Exported because
- * `@jarenjs/emit` resolves the same references when it derives types, and two
- * walks with different scope rules would make a generated type disagree with
- * this normalizer — the one defect class that package must not have.
+ * Collect the plain names of one schema document: a map from name to the
+ * schema node that declares it, by an `$anchor` or by a fragment-only `$id`
+ * (`$id: '#foo'`, the draft-07 spelling of an anchor, which the validator
+ * reads as a name in every draft), keyed as {@link resolveSameDocumentRef}
+ * reads a reference to it. Exported because `@jarenjs/emit` resolves the
+ * same references when it derives types, and two walks with different scope
+ * rules would make a generated type disagree with this normalizer — the one
+ * defect class that package must not have.
  *
  * The scope is the same-document scope the rest of this module uses: a
- * subtree that declares its own `$id` is an embedded resource with its own
- * anchor scope, so it is not descended. First declaration wins, which keeps
- * the map deterministic for a document that (invalidly) repeats a name.
+ * subtree that declares any other `$id` is an embedded resource with its own
+ * anchor scope, so it is not descended; a fragment-only `$id` starts no
+ * resource. First declaration wins, which keeps the map deterministic for a
+ * document that (invalidly) repeats a name.
  * @param {object|boolean} root - The root schema of the document
  * @param {{ propertyDependencies?: boolean }} [options] - `propertyDependencies: true` also walks the
  *   subschemas of the `propertyDependencies` keyword (off, it is an unknown keyword and not walked)
- * @returns {Map<string, object>} anchor name -> schema node
+ * @returns {Map<string, object>} name -> schema node
  */
 export function collectSameDocumentAnchors(root, options = {}) {
+  return collectPlainNames(root, options, undefined);
+}
+
+/**
+ * The name a fragment-only `$id` declares, as a reference to it is read: its
+ * fragment decoded once. Undefined for an `$id` that is no plain name (one
+ * with a path, an empty fragment or a JSON Pointer) or does not decode.
+ * @param {string} id
+ * @returns {string|undefined}
+ */
+function plainIdName(id) {
+  const text = referenceText(id);
+  if (text.length < 2 || text[0] !== '#' || text[1] === '/') return undefined;
+  try {
+    return decodeURIComponent(text.slice(1));
+  }
+  catch (_e) {
+    return undefined;
+  }
+}
+
+/**
+ * {@link collectSameDocumentAnchors}, recording in `drafts` the draft each
+ * named node is read under (the nearest `$schema` at or above it, null where
+ * none is declared), so a reference to a name reads its target there.
+ * @param {object|boolean} root
+ * @param {{ propertyDependencies?: boolean }} options
+ * @param {Map<object, number|null>|undefined} drafts
+ * @returns {Map<string, object>}
+ */
+function collectPlainNames(root, options, drafts) {
   /** @type {Map<string, object>} */
   const anchors = new Map();
   if (!isJsonObject(root)) return anchors;
   const seen = new Set();
+  /** @param {string} name @param {object} node @param {number|null} draft */
+  const declare = (name, node, draft) => {
+    if (anchors.has(name)) return;
+    anchors.set(name, node);
+    drafts?.set(node, draft);
+  };
   /** @param {any} node @param {boolean} isRoot @param {number|null} inheritedDraft */
   const walk = (node, isRoot, inheritedDraft) => {
     if (!isJsonContainer(node) || seen.has(node)) return;
@@ -156,9 +197,12 @@ export function collectSameDocumentAnchors(root, options = {}) {
     }
     // The draft a document declares is inherited by everything below it.
     const draft = typeof node.$schema === 'string' ? detectSchemaDraft(node) : inheritedDraft;
-    if (!isRoot && typeof node.$id === 'string') return;
-    if (typeof node.$anchor === 'string' && !anchors.has(node.$anchor))
-      anchors.set(node.$anchor, node);
+    if (typeof node.$id === 'string') {
+      const name = plainIdName(node.$id);
+      if (name !== undefined) declare(name, node, draft);
+      else if (!isRoot) return;
+    }
+    if (typeof node.$anchor === 'string') declare(node.$anchor, node, draft);
     // Only schema positions declare anchors. Annotation values such as
     // defaults and examples are instance data, even when they contain $anchor.
     for (const key of Object.keys(node)) {
@@ -634,9 +678,11 @@ function compileNode(node, ctx) {
     // validation still resolves it through the full ref machinery.
     if (target !== undefined && target !== node) {
       // The target is read in the draft its place in the document declares:
-      // the nearest `$schema` on the way to it (the root's, for an anchor).
+      // the nearest `$schema` on the way to it, for a name the one above the
+      // place that declares it (the root's, for the document itself).
       let declaredDraft = null;
-      for (const passed of trail.length === 0 ? [ctx.root] : trail) {
+      if (trail.length === 0 && ctx.nameDrafts.has(target)) declaredDraft = ctx.nameDrafts.get(target);
+      else for (const passed of trail.length === 0 ? [ctx.root] : trail) {
         if (isJsonObject(passed) && typeof passed.$schema === 'string') declaredDraft = detectSchemaDraft(passed);
       }
       const step = compileNode(target, declaredDraft === ctx.declaredDraft ? ctx : { ...ctx, declaredDraft });
@@ -771,10 +817,14 @@ export function compileNormalizer(schema, options = {}) {
     coerceJsonText: options.coerceJsonText,
   };
 
+  /** @type {Map<object, number|null>} */
+  const nameDrafts = new Map();
   const ctx = {
     options: resolved,
     root: schema,
-    anchors: collectSameDocumentAnchors(schema),
+    anchors: collectPlainNames(schema, {}, nameDrafts),
+    /** The draft each named node is read under, as its place in the document declares it */
+    nameDrafts,
     /** @type {number|null} The draft the schema being compiled declares, or null when none does */
     declaredDraft: null,
     /** @type {Map<string, Map<object, Function|null>>} The compiled steps per stripping mode and draft */

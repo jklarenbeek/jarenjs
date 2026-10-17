@@ -290,3 +290,86 @@ describe('a $vocabulary entry switches a vocabulary on by its exact URI', () => 
     assert.equal(answer({ 'https://json-schema.org/draft/2020-12/vocab/format-assertion': false }), false);
   });
 });
+
+describe('a held schema is named with its scheme and host in any case', () => {
+  // RFC 3986 makes the scheme and the host case-insensitive: a URI that
+  // differs from a held schema's only there names that schema. Its path and
+  // its percent-encodings are compared as written.
+  const MINE = 'https://example.com/my-dialect';
+  const SPELLINGS = ['HTTPS://EXAMPLE.com/my-dialect', 'https://EXAMPLE.COM/my-dialect', 'Https://Example.Com/my-dialect#'];
+
+  it('reads a $schema naming a held dialect in another case by that dialect (accepted [1] as draft-07)', () => {
+    for (const uri of SPELLINGS) {
+      assert.deepEqual([[1], ['a']].map(holding(dialect(MINE)).compile({ $schema: uri, ...TUPLE })), [false, true], uri);
+      assert.equal(detectSchemaDraft({ $schema: uri }, { get: (key) => holding(dialect(MINE)).getSchema(key) }), 2020, uri);
+    }
+    // a dialect held under an upper-case $id is named in lower case too
+    assert.deepEqual([[1], ['a']].map(holding(dialect('HTTPS://EXAMPLE.COM/my-dialect')).compile({ $schema: MINE, ...TUPLE })), [false, true]);
+    // a schema registered under such a $schema reads the same, whichever was registered first
+    const S = { $id: 'https://example.com/s', $schema: SPELLINGS[0], ...TUPLE };
+    assert.deepEqual([holding(dialect(MINE), S), holding(S, dialect(MINE))]
+      .map((validator) => validator.compile({ $ref: 'https://example.com/s' })([1])), [false, false]);
+  });
+
+  it('switches vocabularies by the meta-schema a $schema names in another case', () => {
+    // a meta-schema that omits the validation vocabulary: type asserts nothing
+    const id = 'https://example.com/vocab-meta';
+    const meta = { ...dialect(id), $vocabulary: { 'https://json-schema.org/draft/2020-12/vocab/core': true } };
+    for (const uri of [id, 'HTTPS://Example.COM/vocab-meta'])
+      assert.equal(holding(meta).compile({ $schema: uri, type: 'string' })(12), true, uri);
+  });
+
+  it('checks a schema against the held meta-schema its $schema names in another case', () => {
+    const validator = new JarenValidator().addMetaSchema(draft2020.schema, draft2020.draft);
+    assert.equal(validator.validateSchema({ $schema: 'HTTPS://JSON-SCHEMA.ORG/draft/2020-12/schema', type: 'string' }), true);
+    assert.equal(validator.validateSchema({ $schema: 'HTTPS://JSON-SCHEMA.ORG/draft/2020-12/schema', type: 5 }), false);
+    assert.equal(validator.getSchema('HTTPS://JSON-SCHEMA.ORG/draft/2020-12/schema'), validator.getSchema(D2020));
+  });
+
+  it('asks compileAsync\'s loader for a dialect by its held name, and not at all when it is held', async () => {
+    /** @type {string[]} */
+    const asked = [];
+    const loadSchema = async (/** @type {string} */ uri) => {
+      asked.push(uri);
+      if (uri === MINE) return dialect(MINE);
+      throw new Error(`no document at ${uri}`);
+    };
+    const loaded = await compileAsync(holding(), { $schema: SPELLINGS[0], ...TUPLE }, { loadSchema });
+    const held = await compileAsync(holding(dialect(MINE)), { $schema: SPELLINGS[1], ...TUPLE }, { loadSchema });
+    assert.deepEqual([loaded([1]), held([1]), asked], [false, false, [MINE]]);
+  });
+
+  it('resolves a $ref in another case to the held schema, in every scheme', () => {
+    const v = new JarenValidator().addSchema({ $id: 'https://example.com/x.json', type: 'integer' });
+    assert.deepEqual(['1', 1].map(v.compile({ $ref: 'HTTPS://EXAMPLE.com/x.json' })), [false, true]);
+    // a scheme the URL standard reads with an opaque host is read by RFC 3986 too
+    const tag = new JarenValidator().addSchema({ $id: 'app://Example.COM/x.json', type: 'integer' });
+    assert.deepEqual(['1', 1].map(tag.compile({ $ref: 'APP://example.com/x.json' })), [false, true]);
+    assert.deepEqual([[1], ['a']].map(holding(dialect('app://example.com/d')).compile({ $schema: 'APP://EXAMPLE.COM/d', ...TUPLE })), [false, true]);
+    // an $id inside a document, and a $ref to it, read alike whatever their case
+    const inside = { $defs: { x: { $id: 'app://Example.COM/x.json', type: 'integer' } }, properties: { a: { $ref: 'app://example.COM/x.json' } } };
+    assert.deepEqual([{ a: '1' }, { a: 1 }].map(new JarenValidator().compile(inside)), [false, true]);
+  });
+
+  it('replaces a schema registered again under a key in another case, as under the same key', () => {
+    for (const key of ['https://example.com/a', 'HTTPS://EXAMPLE.com/a']) {
+      const v = new JarenValidator().addSchema({ type: 'string' }, key).addSchema({ type: 'integer' }, key);
+      // answered by the first registration (1 false, 's' true) under the upper-case key
+      assert.deepEqual([1, 's'].map(v.compile({ $ref: key })), [true, false], key);
+      assert.deepEqual(v.getSchema(key.toLowerCase()), { type: 'integer' }, key);
+    }
+  });
+
+  it('compares the path and its percent-encodings as written', () => {
+    // a dialect named by another path, or another percent-encoding case, is none held: draft-07
+    for (const [id, uri] of [[MINE, 'https://example.com/MY-DIALECT'], ['https://example.com/a%2Fb', 'https://example.com/a%2fb']])
+      assert.deepEqual([[1], ['a']].map(holding(dialect(id)).compile({ $schema: uri, ...TUPLE })), [true, true], uri);
+    // so does a percent-encoding in a host
+    assert.deepEqual([[1], ['a']].map(holding(dialect('app://ex%4Ample.com/d')).compile({ $schema: 'app://ex%4ample.com/d', ...TUPLE })), [true, true]);
+    // the user part of an authority keeps its case
+    assert.deepEqual([[1], ['a']].map(holding(dialect('https://Me@example.com/d')).compile({ $schema: 'https://me@EXAMPLE.com/d', ...TUPLE })), [true, true]);
+    // the official names read in any case, as before
+    assert.equal(detectSchemaDraft({ $schema: 'HTTPS://JSON-SCHEMA.ORG/draft/2020-12/schema' }), 2020);
+    assert.equal(detectSchemaDraft({ $schema: 'https://json-schema.org/draft/2020-12/SCHEMA' }), 7);
+  });
+});

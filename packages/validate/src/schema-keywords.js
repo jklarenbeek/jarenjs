@@ -87,18 +87,49 @@ const KNOWN_DIALECTS = /* @__PURE__ */ new Map([
   ['//jarenjs.dev/schemas/2020-12/meta/query', 2020],
 ]);
 
+/** A URI's scheme and authority: the user part, then the host and port. */
+const SCHEME_AUTHORITY = /^([a-z][a-z0-9+.-]*:)(?:\/\/((?:[^/?#@]*@)?)([^/?#]*))?/i;
+
 /**
- * A URI as the dialect and vocabulary tables compare it: `http:` and
- * `https:` read alike, the host in any case (RFC 3986 makes the scheme and
- * the host case-insensitive), and a URI and the same URI with an empty
- * fragment (`…/schema#`) read alike. Anything else, the path included, is
- * compared exactly.
+ * A URI with its scheme and its host in lower case, as RFC 3986 reads them
+ * (both are case-insensitive): every URI a validator holds a schema under,
+ * and every URI it looks one up by, is read through this one spelling. The
+ * user part, the path, the query, the fragment and every percent-encoding
+ * keep their case; text that is no absolute URI is returned as written.
+ * @param {string} uri
+ * @returns {string}
+ */
+export function caselessUri(uri) {
+  const head = SCHEME_AUTHORITY.exec(uri);
+  if (head === null) return uri;
+  const [all, scheme, user = '', host] = head;
+  const lowered = scheme.toLowerCase() + (host === undefined ? ''
+    : `//${user}${host.replace(/%[0-9a-f]{2}|[A-Z]+/gi, (part) => part[0] === '%' ? part : part.toLowerCase())}`);
+  return lowered === all ? uri : lowered + uri.slice(all.length);
+}
+
+/**
+ * The key a validator holds a schema document under: its URI read by
+ * {@link caselessUri}, with an empty fragment when it has none.
+ * @param {string} uri
+ * @returns {string}
+ */
+export function heldUriKey(uri) {
+  const key = caselessUri(uri);
+  return key.includes('#') ? key : `${key}#`;
+}
+
+/**
+ * A URI as the dialect and vocabulary tables compare it: read by
+ * {@link caselessUri}, `http:` and `https:` alike, and a URI and the same URI
+ * with an empty fragment (`…/schema#`) alike. Anything else, the path
+ * included, is compared exactly.
  * @param {string} uri
  * @returns {string}
  */
 function officialUri(uri) {
-  const web = /^https?:(\/\/[^/?#]*)/i.exec(uri);
-  const rest = web === null ? uri : web[1].toLowerCase() + uri.slice(web[0].length);
+  const key = caselessUri(uri);
+  const rest = /^https?:\/\//.test(key) ? key.slice(key.indexOf(':') + 1) : key;
   return rest.endsWith('#') ? rest.slice(0, -1) : rest;
 }
 
@@ -153,7 +184,7 @@ export function dialectDraft(uri, held = undefined) {
     if (known !== undefined) return known;
     // only an absolute URI can name a schema a validator holds
     if (held === undefined || !/^[a-z][a-z0-9+.-]*:/i.test(uri)) return null;
-    const key = uri.includes('#') ? uri : `${uri}#`;
+    const key = heldUriKey(uri);
     if (seen?.has(key)) return null;
     (seen ??= new Set()).add(key);
     const meta = held.get(key) ?? (key.endsWith('#') ? held.get(key.slice(0, -1)) : undefined);
