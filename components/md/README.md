@@ -653,7 +653,17 @@ canonical spelling reads back as prints as it did; content a search used to
 spell prints in the derived spelling where that reads back, which can differ. A new option, `onLossy`, is told each node the printed text does not
 read back as, with its path and a code (`'empty'`, `'line-edge'`, `'touching'`
 or `'unread'`); such content used to print canonically and read back as other
-nodes unannounced. In frontmatter, a quote protects a `#`
+nodes unannounced. A text that ends a printed line with a space (before a soft
+break, or last in a paragraph or a setext heading's line) prints that space as
+`&#32;`: it printed bare and read back without it, and two such spaces before a
+soft break read back as a hard break. A fence's language that holds a space,
+or a language or meta with white space at an edge, prints it as a reference
+(`` ```a&#32;b ``: it printed `` ```a b ``, which reads back as language `a`
+and meta `b`). `onLossy` also names a line break in a table cell or an ATX
+heading, a line break that starts (a soft one) or ends a block's content or
+follows another as a soft break (`'line-edge'`), and a code block with an
+empty language or a meta and no language; they printed as other nodes
+unannounced. In frontmatter, a quote protects a `#`
 only in a scalar that begins with one (`title: It's fine # note` ends at the
 comment); `\xXX` and `\UXXXXXXXX` escapes mean their character, and an escape
 without its digits is a located error, as in YAML (`"C:\users\me"` in double

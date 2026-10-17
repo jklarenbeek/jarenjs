@@ -210,7 +210,10 @@ function deeper(pc) {
 
 /** @type {Record<string, (node: MdNode, pc: PrintContext, run: number) => string>} */
 const INLINE_PRINTERS = {
-  text: (node, pc) => escapeText(node.value, printsBare(node, pc)),
+  text: (node, pc) => {
+    const printed = escapeText(node.value, printsBare(node, pc));
+    return printing.lineEnds.has(node) ? printed.slice(0, -1) + '&#32;' : printed;
+  },
   emphasis: (node, pc, run) => {
     if (pc.style !== 0) {
       const mark = underscoreFor(node, pc, run) ? '_' : '*';
@@ -1165,7 +1168,7 @@ function layOut(nodes, spelled, pieces) {
       const tail = taken === undefined ? 0 : taken.tail;
       const fixed = spelled.coded.get(node);
       if (value.length > tail) {
-        pieces.push({ kind: 'text', value: value.slice(0, value.length - tail), head: fixed === true, tail: false, whole: value.length === node.value.length && tail === 0, fixed });
+        pieces.push({ kind: 'text', value: value.slice(0, value.length - tail), head: fixed === true, tail: printing.lineEnds.has(node), whole: value.length === node.value.length && tail === 0, fixed });
       }
       if (tail > 0) pieces.push({ kind: 'mark', mark: value.charAt(value.length - 1), length: tail, need: 0 });
     }
@@ -1960,6 +1963,76 @@ function printStretches(nodes, allowance) {
 }
 
 /**
+ * Collect the texts of a block's content that end a printed line with a
+ * space: one before a soft break, at any depth, and the last of the
+ * content. The block reader drops white space at the end of a line, and
+ * reads two spaces before a soft break as a hard break, so such a text
+ * prints its last space as a character reference (a tab always prints as
+ * one, `escapeText`). The last text inside an emphasis, a link's text or
+ * any other node is followed by that node's closing characters, not by the
+ * end of the line.
+ * @param {MdNode[]} nodes
+ * @param {boolean} last the end of these nodes is the end of a line
+ * @param {Set<MdNode>} into
+ */
+function collectLineEnds(nodes, last, into) {
+  for (let i = 0; i < nodes.length; i++) {
+    const node = nodes[i];
+    if (node.type === 'text') {
+      const next = nodes[i + 1];
+      if ((next === undefined ? last : next.type === 'softBreak') && node.value.endsWith(' ')) into.add(node);
+    }
+    else if (Array.isArray(node.children)) collectLineEnds(node.children, false, into);
+  }
+}
+
+/**
+ * Name to `onLossy` a block's content no Markdown reads back as for its line
+ * breaks: content that starts with a soft break (the block reader drops the
+ * empty first line), ends with a soft or hard break (it ends no line), or
+ * holds a soft or hard break followed by a soft one (an empty line, which
+ * ends a paragraph). Inside an emphasis, strong or strikethrough node the
+ * same shapes are `findUnreachable`'s.
+ * @param {MdNode[]} nodes
+ */
+function reportLineEdge(nodes) {
+  if (printing.reports === null || nodes.length === 0) return;
+  const last = nodes.length - 1;
+  const at = nodes[0].type === 'softBreak' ? [0] : isLineBreak(nodes[last]) ? [last] : emptyLineAt(nodes, []);
+  if (at === null) return;
+  printing.reports.push({ code: 'line-edge', path: printing.path.concat(at),
+    reason: 'a line break where the block\'s content starts or ends, or a soft line break right after another line break, which no block reads back as' });
+}
+
+/**
+ * Is this node a soft or hard line break?
+ * @param {MdNode} node
+ * @returns {boolean}
+ */
+function isLineBreak(node) {
+  return node.type === 'softBreak' || node.type === 'break';
+}
+
+/**
+ * The path to the first soft break, at any depth, that follows another line
+ * break in the same list: the line between them prints empty.
+ * @param {MdNode[]} nodes
+ * @param {number[]} path
+ * @returns {number[] | null}
+ */
+function emptyLineAt(nodes, path) {
+  for (let i = 0; i < nodes.length; i++) {
+    const node = nodes[i];
+    if (i > 0 && node.type === 'softBreak' && isLineBreak(nodes[i - 1])) return path.concat(i);
+    if (Array.isArray(node.children)) {
+      const found = emptyLineAt(node.children, path.concat(i));
+      if (found !== null) return found;
+    }
+  }
+  return null;
+}
+
+/**
  * Print the inline content of one block. The canonical spelling is the
  * one printed where it reads back as the same nodes; where it does not,
  * emphasis and strong take the spelling `assignMarks` derives, and where
@@ -1967,9 +2040,15 @@ function printStretches(nodes, allowance) {
  * (`searchedSpelling`). Content none reads back as is printed in the
  * derived spelling and reported to `onLossy`, when the call has one.
  * @param {MdNode[]} nodes
+ * @param {boolean} [cell] the content prints on one line, a table cell's, where a soft break prints as a space and the cell guards its own edges (`guardCellEdges`)
  * @returns {string}
  */
-function printRun(nodes) {
+function printRun(nodes, cell = false) {
+  printing.lineEnds.clear();
+  if (!cell) {
+    collectLineEnds(nodes, true, printing.lineEnds);
+    reportLineEdge(nodes);
+  }
   const canonical = printInlines(nodes, CANONICAL);
   searchPool.left += SEARCH_CHARS_PER_CHAR * canonical.length;
   if (printing.reports === null && readsBackAsIs(nodes, WHITE, 0)) return canonical;
@@ -2022,20 +2101,26 @@ function searchedSpelling(nodes, canonical) {
  * nothing in it, whose opener and closer would be one run; `'line-edge'`,
  * one whose content starts with a soft line break or ends with a line
  * break, since a run before a line ending cannot open and one after it
- * cannot close; `'touching'`, a strikethrough touching another, whose two
+ * cannot close, and a line break where a block's content starts (a soft
+ * one) or ends, or a soft one right after another line break (a blank line);
+ * `'touching'`, a strikethrough touching another, whose two
  * `~~` are one run of four, which is no delimiter. `'unread'` names the
  * first node of any other content no spelling the printer derives or
- * searches out reads back as. A block's inline content is weighed as the inline reader reads
+ * searches out reads back as; it also names a line break in a table cell
+ * or an ATX heading, which print on one line, and a code block with an
+ * empty language, or a meta and no language, which no info string reads
+ * back as. A block's inline content is weighed as the inline reader reads
  * the lines the block prints (see `readBack`), not what the block reader does around it.
  * @typedef {{ code: 'empty' | 'line-edge' | 'touching' | 'unread', path: number[], reason: string }} LossReport
  */
 
 /**
  * Where a call to `toMarkdown` is: the path to the block it is printing,
- * and the losses found so far, when the call reports them.
- * @type {{ path: number[], reports: LossReport[] | null }}
+ * the losses found so far, when the call reports them, and the texts of the
+ * block's content that end a printed line with a space (`collectLineEnds`).
+ * @type {{ path: number[], reports: LossReport[] | null, lineEnds: Set<MdNode> }}
  */
-const printing = { path: [], reports: null };
+const printing = { path: [], reports: null, lineEnds: new Set() };
 
 /**
  * A node, as a report names what it reads back as.
@@ -2251,11 +2336,47 @@ function printParagraph(children) {
   return FILLER_DEFINITION + '\n' + lines.join('\n');
 }
 
+/**
+ * The path to the first soft or hard break of inline content, at any depth.
+ * @param {MdNode[]} nodes
+ * @param {number[]} path
+ * @returns {number[] | null}
+ */
+function lineBreakAt(nodes, path) {
+  for (let i = 0; i < nodes.length; i++) {
+    const node = nodes[i];
+    if (isLineBreak(node)) return path.concat(i);
+    if (Array.isArray(node.children)) {
+      const found = lineBreakAt(node.children, path.concat(i));
+      if (found !== null) return found;
+    }
+  }
+  return null;
+}
+
+/**
+ * Name to `onLossy` a line break in content a block prints on one line (a
+ * table cell, an ATX heading): its reader ends at the line's end, so the
+ * break reads back as a space or ends the block. Content already named
+ * while it printed is not named twice: a report names the first node lost.
+ * A newline in any other node (raw HTML) names the content's block.
+ * @param {MdNode[]} nodes
+ * @param {string} text what the content printed as
+ * @param {string} block the block, with its article
+ * @param {number} reported how many losses were named before the content printed
+ */
+function reportLineBreak(nodes, text, block, reported) {
+  if (printing.reports === null || printing.reports.length > reported || text.indexOf('\n') === -1) return;
+  printing.reports.push({ code: 'unread', path: printing.path.concat(lineBreakAt(nodes, []) ?? []),
+    reason: 'a line break in ' + block + ', which prints on one line' });
+}
+
 /** @type {Record<string, (node: MdNode, alt?: boolean, spare?: boolean) => string>} */
 const BLOCK_PRINTERS = {
   paragraph: (node) => printParagraph(node.children),
 
   heading: (node) => {
+    const reported = printing.reports === null ? 0 : printing.reports.length;
     const text = printRun(node.children);
     // An ATX heading is one line, so a heading whose text carries a soft
     // break has to print in its setext form or lose the break — which
@@ -2264,6 +2385,7 @@ const BLOCK_PRINTERS = {
     if (node.depth <= 2 && text.indexOf('\n') !== -1) {
       return printParagraph(node.children) + '\n' + (node.depth === 1 ? '===' : '---');
     }
+    reportLineBreak(node.children, text, 'an ATX heading', reported);
     // the ATX reader trims the text's edges, as the cell reader does
     return '#'.repeat(node.depth) + ' ' + guardCellEdges(text);
   },
@@ -2320,7 +2442,14 @@ const BLOCK_PRINTERS = {
     return parts.join(node.tight ? '\n' : '\n\n');
   },
 
-  code: (node) => printFence(node.lang, node.meta, node.value),
+  code: (node) => {
+    // the reader's language is never empty, and a meta comes after one
+    if (printing.reports !== null && (node.lang === '' || (node.lang == null && node.meta != null))) {
+      printing.reports.push({ code: 'unread', path: printing.path.slice(),
+        reason: 'a code block with an empty language, or a meta and no language, which no info string reads back as' });
+    }
+    return printFence(node.lang, node.meta, node.value);
+  },
 
   html: (node) => node.value,
 
@@ -2348,7 +2477,10 @@ const BLOCK_PRINTERS = {
       let line = '|';
       for (let c = 0; c < cells.length; c++) {
         printing.path.push(r, c);
-        line += ' ' + guardCellEdges(printRun(cells[c].children).replace(/\n/g, ' ')) + ' |';
+        const reported = printing.reports === null ? 0 : printing.reports.length;
+        const text = printRun(cells[c].children, true);
+        reportLineBreak(cells[c].children, text, 'a table cell', reported);
+        line += ' ' + guardCellEdges(text.replace(/\n/g, ' ')) + ' |';
         printing.path.length -= 2;
       }
       out.push(line);
@@ -2379,7 +2511,7 @@ const BLOCK_PRINTERS = {
  * @returns {string}
  */
 function printFence(lang, meta, value) {
-  const info = escapeTarget(lang === null ? '' : meta === null ? lang : lang + ' ' + meta);
+  const info = printInfo(lang, meta);
   // A backtick info string cannot sit on a backtick fence (the spec
   // forbids it, precisely so the fence stays findable), so such a block
   // prints on a tilde fence instead.
@@ -2396,6 +2528,27 @@ function printFence(lang, meta, value) {
   // An info string that starts with the fence character would lengthen
   // the fence, so it stands one space off.
   return fence + (info.charCodeAt(0) === code ? ' ' : '') + info + '\n' + body + fence;
+}
+
+/** White space the info string reader trims from the info string's edges and the meta's (`String#trim`). */
+const RE_TRIMMED = /^\s|\s$/g;
+
+/**
+ * A fence's info string, read back as this language and meta: the reader
+ * trims the info string, ends the language at its first space or tab and
+ * trims the meta, so a space in the language and white space at either
+ * edge of the language or the meta print as character references (a tab
+ * already does, `escapeTarget`).
+ * @param {string | null} lang
+ * @param {string | null} meta
+ * @returns {string}
+ */
+function printInfo(lang, meta) {
+  if (lang === null) return '';
+  /** @type {(ch: string) => string} */
+  const reference = (ch) => '&#' + /** @type {number} */ (ch.codePointAt(0)) + ';';
+  const word = escapeTarget(lang).replace(/ /g, '&#32;').replace(RE_TRIMMED, reference);
+  return meta === null ? word : word + ' ' + escapeTarget(meta).replace(RE_TRIMMED, reference);
 }
 
 /**
@@ -2522,6 +2675,7 @@ export function toMarkdown(docOrAst, options = {}) {
   finally {
     printing.reports = null;
     printing.path.length = 0;
+    printing.lineEnds.clear();
   }
   if (onLossy !== undefined) {
     const seen = new Set();

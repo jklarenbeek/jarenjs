@@ -275,14 +275,6 @@ establish registry publication or downstream acceptance.
   of nested emphasis and strong. Wanted: those spellings derived, so that
   every tree the reader makes reads back and the search can go; such content
   costs the derivation and then the search.
-- [ ] **Canonical printing: white space at the end of a paragraph line.** A
-  text that ends in a space before a soft break or at the end of a paragraph
-  or of a setext heading's line (`a\nb&#32;\n===` prints `b ` bare, reads back
-  `b`, unreported) (`a&#32;`, `a&#32;\nb`) prints the space bare, and the
-  reader drops it; two such spaces before a soft break print `a \nb`, which
-  reads back as a hard break. Wanted: that space printed as a reference where
-  it ends a line, decided at the text node (a string-level guard would also
-  rewrite raw HTML that ends a line), with `onLossy` naming any it cannot.
 
 ## @jarenjs/mermaid
 

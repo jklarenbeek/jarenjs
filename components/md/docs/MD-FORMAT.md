@@ -605,9 +605,14 @@ Markdown reads back as an emphasis, strong or strikethrough node with
 nothing in it (`'empty'`: its opener and closer would be one run), as one
 whose content starts with a soft line break or ends with a line break
 (`'line-edge'`: a run before a line ending cannot open, nor one after it
-close), or as a strikethrough touching another (`'touching'`: two `~~` are
+close; the code also names a line break where a block's content starts, a
+soft one, or ends, and a soft break right after another line break, a blank
+line that ends the paragraph), or as a strikethrough touching another (`'touching'`: two `~~` are
 one run of four, which is no delimiter); `'unread'` names the first node
-of other content no spelling either finds reads back as. A block's inline
+of other content no spelling either finds reads back as, a line break in a
+table cell or an ATX heading (both print on one line), and a code block
+with an empty language, or a meta and no language (no info string reads
+back as either). A block's inline
 content is weighed as the inline reader reads the lines the block prints,
 each continuation line's leading space or tab printed as a reference; what
 the block reader does around it, such as dropping the spaces a paragraph
@@ -617,15 +622,21 @@ back as other nodes. A
 destination, a title
 and a fence's info string are escaped as they are read: a backslash before
 punctuation, an `&` that opens a character reference, a tab and a newline
-print as an escape or a reference, and a destination that starts with `<`
+print as an escape or a reference; a space in an info string's language,
+and white space at either edge of its language or its meta, print as a
+reference (the reader trims both and ends the language at a space); and a destination that starts with `<`
 or holds a control character prints in angle brackets. A list item made of
 markers alone prints its first block the other way (`- * -`), a raw-HTML
 node that begins a continuation line prints four spaces in, and a tab in
 text prints as `&#9;`. White space the block reader drops prints its
 outermost character as a reference: a space or tab that starts a paragraph
 line (`&#32;a`; one to three spaces were dropped, four read as indented
-code), and one at either edge of a table cell or an ATX heading's text
-(`# &#32;a`; the heading reader trims both edges). A tab inside paragraph, heading and table text is a
+code), one at either edge of a table cell or an ATX heading's text
+(`# &#32;a`; the heading reader trims both edges), and a space that ends a
+printed line: a text's last space before a soft break or at the end of a
+paragraph or a setext heading's line (`a&#32;`; the block reader drops white
+space at a line's end, and two spaces before a soft break read as a hard
+break). Raw HTML and a code span print as they are wherever they end. A tab inside paragraph, heading and table text is a
 tab in the AST, as it is inside code and HTML blocks.
 
 The normative round-trip guarantees:
