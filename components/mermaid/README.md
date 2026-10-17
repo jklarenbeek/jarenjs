@@ -266,7 +266,7 @@ error, not a silent English fallback. Task ids and dates stay ASCII data
 either way — an RTL name is text, not syntax.
 
 At scale, parse (which is also schedule resolution), layout and render
-are reported separately in the benchmark: <!--fact:mermaid.ganttScale-->at 10,000 tasks, ~39 ms to parse and resolve, ~3.7 ms to lay out and ~7.8 ms to render<!--/fact-->.
+are reported separately in the benchmark: <!--fact:mermaid.ganttScale-->at 10,000 tasks, ~34 ms to parse and resolve, ~4 ms to lay out and ~7.9 ms to render<!--/fact-->.
 
 
 ## Styling, notes and interaction
@@ -454,7 +454,7 @@ detection + Jison + validation — so it is heavy and noisy; these are
 representative, not a bare-grammar microbenchmark.)
 
 Rendering through `diagramToVnode` costs a consumer
-**<!--fact:bundle.mermaid-->92,901<!--/fact--> bytes** minified and
+**<!--fact:bundle.mermaid-->93,276<!--/fact--> bytes** minified and
 tree-shaken, and the import graph holds no chart or Markdown module: a pie
 renderer, when a host wants one, is charts' and is handed in.
 `npm run test:tree-shaking` measures both.
