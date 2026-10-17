@@ -307,11 +307,9 @@ function slotValue(slot, externals, anchors = null) {
     return anchors[slot.typed.seek];
   }
   const value = externals[slot.external];
-  // the digits a document spells the number by, which the member it is
-  // compared with is read as (`digits`): a double past 2^63 is spelled
-  // past the 64-bit integers, and the database reads both as doubles
-  if (slot.digits === true && typeof value === 'number' && Number.isInteger(value)
-    && !Number.isSafeInteger(value) && Math.abs(value) < 2 ** 63) return BigInt(String(value));
+  // one edge of the integers that round to the number, which a member read
+  // by its digits is compared with (`digits`)
+  if (slot.digits !== undefined && typeof value === 'number') return intervalEdge(value, slot.digits);
   // a slot that binds the value itself reaches the statement only with a
   // value the admission let through: a boolean, an object or an array of
   // a family the member cannot hold (a store predicate's, which cannot
@@ -362,23 +360,31 @@ const FOREIGN_VALUE = new Uint8Array(0);
  * How one external reaches the statement. An external reached ONLY
  * through derived slots is bindable when its bound value HAS a box —
  * the object itself never had to be bindable. One reached directly
- * must be a string or a finite number, as before; a k-nearest PROBE
+ * must be a string or a finite number, as before — and, where the
+ * database reads a JSON integer by its digits, not an integer past 2^53
+ * unless every slot it reaches is a guarded comparison's (`compared`),
+ * which binds the interval such a number stands for; a k-nearest PROBE
  * reaches no slot (it is scored in the engine) and is bindable when
  * its value is a vector of the column's width; and an external in the
  * document that reaches nothing at all still forces the diversion,
  * because the residual needs the engine's own semantics for it.
  * @param {import('./emit.js').ParamSlot[]} slots
  * @param {import('./algebra.js').PlanRank | null} rank
- * @returns {Map<string, 'plain' | 'derived' | 'probe' | 'list'>}
+ * @returns {Map<string, 'plain' | 'compared' | 'derived' | 'probe' | 'list'>}
  */
 function externalSlotKinds(slots, rank) {
-  /** @type {Map<string, 'plain' | 'derived' | 'probe' | 'list'>} */
+  /** @type {Map<string, 'plain' | 'compared' | 'derived' | 'probe' | 'list'>} */
   const kinds = new Map();
   for (const slot of slots) {
     // a membership list binds the external's JSON whatever it holds; the
     // same external compared as a scalar elsewhere keeps the scalar rule
     if ('external' in slot && slot.list === true) {
       if (!kinds.has(slot.external)) kinds.set(slot.external, 'list');
+    }
+    // a guarded comparison's slot answers as the engine does for any
+    // number; the same external bound anywhere else keeps the plain rule
+    else if ('external' in slot && slot.compared === true) {
+      if (!kinds.has(slot.external)) kinds.set(slot.external, 'compared');
     }
     else if ('external' in slot) kinds.set(slot.external, 'plain');
     else if ('derived' in slot) {
@@ -1269,7 +1275,8 @@ export function createQueryEngine(context) {
   const dialect = connection.dialect;
   // SQLite reads a JSON integer by its digits, where the engine (and
   // PostgreSQL's `numeric`, over the shortest digits the store writes)
-  // compares the double: an external past 2^53 is not compared alike
+  // compares the double: an external past 2^53 is not compared alike,
+  // except in a guarded comparison, which binds the interval it stands for
   const exactIntegers = dialect.name === 'sqlite';
   const shape = {
     collection: collection.name,
@@ -1798,6 +1805,9 @@ export function createQueryEngine(context) {
       if (invalidDerived) return true;
       if (kind === 'derived') return false;
       if (kind === 'list') return !listBindable(externals[name], exactIntegers, dialect);
+      // a number past 2^53 in a guarded comparison binds the interval it
+      // stands for, which the engine's double comparison agrees with
+      if (kind === 'compared') return !bindable(externals[name], false, dialect);
       // a probe binds when SOME declared width takes it; a width the
       // model does not declare is the diversion it always was
       if (kind === 'probe') return rankAlternativeFor(entry, externals[name]) === null;
@@ -2478,6 +2488,7 @@ function refuseBuffered(options, classified, docPath) {
 // ————— The entity query surface (the second document kind) —————
 
 import { mergeEntityRow, parseGraphRow } from './graph.js';
+import { intervalEdge } from './double-interval.js';
 import { relationTables, joinTableRoots } from './model.js';
 
 /** The default include depth bound (printed, never silent). */
@@ -3666,7 +3677,8 @@ export function createLoadEngine(context, entityName) {
       const named = new Set();
       for (const column of node.entityMapping.columns) {
         named.add(column.name);
-        parts.push(`${slText(column.name)}, ${aliasSql}.${q(column.name)}`);
+        const columnSql = `${aliasSql}.${q(column.name)}`;
+        parts.push(`${slText(column.name)}, ${column.storage === 'integer' ? dialect.jsonInteger(columnSql) : columnSql}`);
       }
       for (const fk of node.entityMapping.foreignKeys) {
         if (named.has(fk.column)) continue; // a declared via property
@@ -4299,7 +4311,7 @@ export function createLoadEngine(context, entityName) {
       open: () => chain(entry.textKeys === null ? null : decodingOfText(), () =>
         chain(connection.prepare(entry.sql, { readOnly: true, ephemeral: true }), (statement) => statement.iterate(params))),
       items: (row) => {
-        const item = each(checkRoot(entry, parseGraphRow(entry.tree, provenRow(entry, row), '__doc'), ++pulled));
+        const item = each(checkRoot(entry, parseGraphRow(entry.tree, provenRow(entry, row), '__doc', dialect.integerDigits), ++pulled));
         if (entry.stored !== null) {
           storedText.set(item, new Map(entry.stored.map(({ property, physical }) => [property, row[physical]])));
         }
@@ -4338,7 +4350,7 @@ export function createLoadEngine(context, entityName) {
       const { entry, params } = bindLoad(spec, false, profileOf(options));
       return useRead(connection, entry, (statement) => chain(entry.textKeys === null ? null : decodingOfText(), () =>
         chain(statement.all(params), (rows) =>
-          rows.map((row, i) => checkRoot(entry, parseGraphRow(entry.tree, provenRow(entry, row), '__doc'), i + 1)))));
+          rows.map((row, i) => checkRoot(entry, parseGraphRow(entry.tree, provenRow(entry, row), '__doc', dialect.integerDigits), i + 1)))));
     },
     /**
      * The graph cursor: ONE root graph per pull, its includes attached

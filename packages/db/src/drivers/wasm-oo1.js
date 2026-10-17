@@ -1,6 +1,7 @@
 //@ts-check
-import { sqliteResultError } from '../errors.js';
+import { sqliteResultError, storedIntegerNumber } from '../errors.js';
 import { wasmSessions } from './wasm-session.js';
+import { decodeIntegers } from './sqlite-integers.js';
 
 /**
  * Adapt an already-constructed `sqlite3.oo1` database (the official
@@ -19,6 +20,8 @@ import { wasmSessions } from './wasm-session.js';
  * @returns {any} the raw binding for {@link openConnection}
  */
 export function adaptOo1Database(sqlite3, db) {
+  /** The last rowid as a number: a bigint where the build has them. @param {any} value */
+  const storedInteger = (value) => (typeof value === 'bigint' ? storedIntegerNumber(value) : value);
   const capture = wasmSessions(sqlite3, db);
   // SQLite turns an exception thrown inside a registered function into a
   // generic result-code error that keeps only its text; the function's own
@@ -61,6 +64,10 @@ export function adaptOo1Database(sqlite3, db) {
           else statement.bind(i + 1, value);
         }
       };
+      // the wasm build hands an integer past ±(2^53 - 1) back as a bigint,
+      // which the shared decoder turns into the number it is, or refuses as
+      // node:sqlite refuses one
+      const names = Array.from({ length: statement.columnCount ?? 0 }, (_, i) => statement.getColumnName(i));
       const resetAfter = (fn) => {
         let result;
         try { result = surfacing(fn); }
@@ -75,26 +82,24 @@ export function adaptOo1Database(sqlite3, db) {
           statement.step();
           return {
             changes: db.changes(),
-            lastInsertRowid: Number(
-              sqlite3.capi.sqlite3_last_insert_rowid(db)),
+            lastInsertRowid: storedInteger(sqlite3.capi.sqlite3_last_insert_rowid(db)),
           };
         }),
         get: (params = []) => resetAfter(() => {
           bind(params);
-          const row = statement.step() ? statement.get({}) : undefined;
-          return row;
+          return statement.step() ? decodeIntegers(statement.get({}), names) : undefined;
         }),
         all: (params = []) => resetAfter(() => {
           bind(params);
           const rows = [];
-          while (statement.step()) rows.push(statement.get({}));
+          while (statement.step()) rows.push(decodeIntegers(statement.get({}), names));
           return rows;
         }),
         iterate: (params = []) => {
           bind(params);
           return {
             next() {
-              if (surfacing(() => statement.step())) return { done: false, value: statement.get({}) };
+              if (surfacing(() => statement.step())) return { done: false, value: decodeIntegers(statement.get({}), names) };
               statement.reset();
               return { done: true, value: undefined };
             },

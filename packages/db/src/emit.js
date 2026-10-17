@@ -511,7 +511,8 @@ function typedDiffers(presentSql, valueSql, paramSql) {
 }
 
 /**
- * @typedef {{ external: string, nullable?: boolean, json?: boolean, list?: boolean, digits?: boolean } | { literal: unknown } |
+ * @typedef {{ external: string, nullable?: boolean, json?: boolean, list?: boolean, digits?: 'low' | 'high',
+ *     compared?: boolean } | { literal: unknown } |
  *   { derived: { kind: 'bboxAxis', external: string,
  *     axis: 'w' | 's' | 'e' | 'n' } } |
  *   { derived: { kind: 'circleAxis', centre: { external: string } | { literal: unknown },
@@ -524,9 +525,12 @@ function typedDiffers(presentSql, valueSql, paramSql) {
  *   shape the prefix successor uses — compute in JavaScript what SQL
  *   cannot, bind an ordinary parameter — and it stays closed on
  *   purpose: a general expression slot would be a second query language
- *   living in the emitter. An external slot marked `digits` binds a
- *   number past 2^53 as the integer its shortest digits spell, for a
- *   member the database reads by its digits (`dialect.integerDigits`).
+ *   living in the emitter. An external slot marked `digits` binds one
+ *   edge (`low`, `high`) of the interval of integers that round to a
+ *   number past 2^53, for a member the database reads by its digits
+ *   (`dialect.integerDigits`); any other value binds as itself. Every
+ *   slot of a guarded external comparison is marked `compared`: it
+ *   answers as the engine does for a number past 2^53 too.
  *
  *   A TYPED slot is the other direction: a scalar whose JSON type is
  *   PROVEN before the statement binds — the database's own answer to
@@ -780,12 +784,16 @@ export function emitPlan(plan, dialect, physical) {
    * dialect's encoding with it, because the binder has no dialect: a
    * `json` slot binds the value's JSON text, which is the one encoding
    * a placeholder can hold whatever the member's type turns out to be.
+   * Its one reader is the guarded comparison, every slot of which answers
+   * as the engine does for any number (`compared`): a text branch a number
+   * fails, a number branch read by digits against the interval, and a
+   * column of doubles compared as one.
    * @param {string} name
    * @returns {string}
    */
   const externalSlot = (name) => param(dialect.externalEncoding === 'json'
-    ? { external: name, json: true }
-    : { external: name });
+    ? { external: name, json: true, compared: true }
+    : { external: name, compared: true });
 
   /** The slot a bare column comparison binds through: a plan-time
    * literal, or the scalar one of the plan's own seeks answers. An
@@ -841,18 +849,31 @@ export function emitPlan(plan, dialect, physical) {
     const external = () => externalSlot(name);
     const compare = (kind) => dialect.externalCompare(valueOf(pred.ref, kind), kind);
     // a member read by its digits compares with an external past 2^53 as
-    // the engine does when the external binds as the integer its own
-    // shortest digits spell (`digits`, `dialect.integerDigits`); a column
-    // that holds the double compares with the number as it is
+    // the engine does against the interval of integers that round to the
+    // external's double, bound as its two edges (`digits`,
+    // `dialect.integerDigits`): equal inside it, less below its low edge,
+    // greater above its high one, whatever digits the document spells the
+    // number by. A safe integer or a fraction binds as itself at both edges,
+    // which is equality. A column that holds the double compares with the
+    // number as it is
     const digits = dialect.integerDigits && !readsDouble(pred.ref, valueOf(pred.ref, 'number'));
-    const against = (kind) => dialect.externalRef(kind === 'number' && digits
-      ? param({ external: name, digits: true }) : external(), kind);
+    /** @param {'low' | 'high'} edge */
+    const edgeOf = (edge) => dialect.externalRef(param({ external: name, digits: edge, compared: true }), 'number');
+    /** @param {string} member */
+    const numberTest = (member) => {
+      if (!digits) return `${member} ${pred.op === 'ne' ? '=' : symbol} ${dialect.externalRef(external(), 'number')}`;
+      if (pred.op === 'lt') return `${member} < ${edgeOf('low')}`;
+      if (pred.op === 'le') return `${member} <= ${edgeOf('high')}`;
+      if (pred.op === 'gt') return `${member} > ${edgeOf('high')}`;
+      if (pred.op === 'ge') return `${member} >= ${edgeOf('low')}`;
+      return `${member} BETWEEN ${edgeOf('low')} AND ${edgeOf('high')}`;
+    };
     const textBranch = `(${jt} IS NOT NULL AND ${jt} = ${sl('text')} AND `
       + `${dialect.valueTypeOf(external())} = ${sl('text')} AND `
-      + `${compare('text')} ${pred.op === 'ne' ? '=' : symbol} ${against('text')})`;
+      + `${compare('text')} ${pred.op === 'ne' ? '=' : symbol} ${dialect.externalRef(external(), 'text')})`;
     const numberBranch = `(${jt} IS NOT NULL AND ${jt} IN ${NUMERIC()} AND `
       + `${dialect.valueTypeOf(external())} IN ${NUMERIC()} AND `
-      + `${compare('number')} ${pred.op === 'ne' ? '=' : symbol} ${against('number')})`;
+      + `${numberTest(compare('number'))})`;
     const equalInSomeBranch = `(${textBranch} OR ${numberBranch})`;
     return pred.op === 'ne'
       ? `(${jt} IS NOT NULL AND NOT ${equalInSomeBranch})`

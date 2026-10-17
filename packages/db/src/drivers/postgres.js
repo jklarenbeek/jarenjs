@@ -37,7 +37,8 @@
 import { chain, openConnection, baseCapabilities } from '../driver.js';
 import { createAsyncContext } from './async-context.js';
 import { postgresDialect } from '../dialects/postgres.js';
-import { DbCompileError, DbRuntimeError, wrapDriverError, connectionLost, isConnectionLoss, ROUNDED_INTEGERS } from '../errors.js';
+import { DbCompileError, DbRuntimeError, wrapDriverError, connectionLost, isConnectionLoss, ROUNDED_INTEGERS,
+  roundedIntegerDigits } from '../errors.js';
 import { workerQueue } from './worker-queue.js';
 import { rowBytes, queueFailure } from './worker-protocol.js';
 import { postgresSettings, postgresChannel, POSTGRES_DEFAULTS, POSTGRES_ADAPTER_OPTIONS } from './postgres-options.js';
@@ -70,42 +71,6 @@ export function postgresNotifications(source, options) {
 const NUMERIC_OIDS = new Set([21, 23, 26, 700, 701, 1700]);
 /** `numeric`: an entity's `integer` and `number` columns, held exactly. */
 const NUMERIC_OID = 1700;
-
-/**
- * The full decimal a double spells: its shortest spelling, with an
- * exponent (`1e+21`) written out as the digits it stands for.
- * @param {number} number
- * @returns {string}
- */
-function spelledInFull(number) {
-  const text = String(number);
-  const exponent = /^(-?)(\d)(?:\.(\d+))?e\+(\d+)$/.exec(text);
-  if (exponent === null) return text;
-  const digits = exponent[2] + (exponent[3] ?? '');
-  return exponent[1] + digits + '0'.repeat(Number(exponent[4]) - digits.length + 1);
-}
-
-/**
- * The digits of the integer a stored `numeric` holds when its JavaScript
- * number rounds it — the number is neither the stored integer nor spelled by
- * its digits (an integer past the double range is neither) — else `null`. An
- * integral value kept with a scale (`9007199254740993.0`, which a retype from
- * text leaves) is the integer its digits before the point spell. Every integer within
- * ±(2^53 - 1), every fraction, every integer a double holds exactly, and
- * every integer a JavaScript number wrote (its digits ARE that number's
- * spelling: 2^60 is written `1152921504606847000`) does not.
- * @param {any} value - the wire's text
- * @returns {string | null}
- */
-function roundedIntegerDigits(value) {
-  const integral = typeof value === 'string' ? /^(-?\d+)(?:\.0+)?$/.exec(value) : null;
-  if (integral === null) return null;
-  const digits = integral[1];
-  const number = Number(digits);
-  return !Number.isSafeInteger(number)
-    && !(Number.isFinite(number) && (BigInt(digits) === BigInt(number) || spelledInFull(number) === digits))
-    ? digits : null;
-}
 
 /** `json` and `jsonb`: parsed by the client unless the host said
  * otherwise, and the row decoder reads text. */

@@ -2314,15 +2314,16 @@ one holding a function or a symbol, which no database binds. Against a member th
 comparison matches nothing on either side, and the call answers — a
 boolean, an object or an array in place of a single value too, which SQLite
 binds as a value of no JSON kind. A predicate's integer past 2^53 keeps
-the rows the engine keeps: PostgreSQL compares it as the engine does, and
-SQLite, which reads a stored JSON integer as the exact integer its digits
-spell, binds it as the integer its own shortest digits spell (2^60 as
-`1152921504606847000`), the digits a document holds for the same number,
-which order as the doubles do; a column that holds the double (a `number`
-member's) takes the number as it is. The statement is the one a safe
-integer binds, so it seeks as that one does. A stored integer another
-writer spelled with other digits than the shortest is compared by those
-digits (a document's own such external runs in the engine instead). One the
+the rows the engine keeps: PostgreSQL compares it as the engine does over the
+digits the store wrote, and SQLite, which reads a stored JSON integer as the
+exact integer its digits spell, compares that integer with the interval of
+integers that round to the external's double, bound as its two edges, so a
+document keeps or loses its row as the engine decides whatever digits its
+writer spelled the number by (`1152921504606847000` or `1152921504606846976`
+for 2^60); a column that holds the double (a `number` member's) takes the
+number as it is. The statement is the one a safe integer binds, so it seeks
+as that one does, and a document's own such external runs in it too
+([ARCHITECTURE](../ARCHITECTURE.md#the-type-truth-table)). One the
 predicate would read otherwise than the JSON value it stands for (a `Date`
 by its instant, a `Map` as `{}`), or a `bigint`, is refused `JD0041` (§10.1). `explain()` given externals
 refuses what the run it explains refuses; given none, it answers the plan

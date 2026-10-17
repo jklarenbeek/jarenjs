@@ -35,6 +35,7 @@ import { sqliteDialect } from '../dialects/sqlite.js';
 import { PRAGMAS, PRAGMA_NAMES } from '../pragmas.js';
 import { copyBunDatabase, mainFileOf, publishSqliteFile, removeSqliteFile } from './snapshot.js';
 import { nativeDatabaseIdentity } from './file-identity.js';
+import { decodeIntegers, decodeRunResult } from './sqlite-integers.js';
 export { snapshotDatabase } from './snapshot.js';
 
 /**
@@ -46,6 +47,18 @@ export { snapshotDatabase } from './snapshot.js';
  * @returns {any} a Connection, or a promise of one
  */
 export function adaptBunDatabase(db, options) {
+  // bun:sqlite hands an integer past ±(2^53 - 1) back as the nearest double
+  // without a word: every statement reads integers as bigints, which the
+  // shared decoder turns into the numbers they are, or refuses as
+  // node:sqlite refuses one. Bun names a statement's columns before it runs
+  // but declares their types only after, so every column is decoded.
+  /** @param {any} statement */
+  const exactIntegers = (statement) => {
+    if (typeof statement.safeIntegers === 'function') statement.safeIntegers(true);
+    return statement;
+  };
+  /** @param {any} statement @returns {string[]} */
+  const columnNamesOf = (statement) => (Array.isArray(statement.columnNames) ? statement.columnNames : []);
   // Bun closes its query cache, but prepare() creates uncached statements
   // that keep the SQLite file open until finalized. Track only weak
   // references: a long-lived connection must not retain every past query.
@@ -59,15 +72,16 @@ export function adaptBunDatabase(db, options) {
     exec: (sql) => db.run(sql),
     /** @param {string} sql */
     prepare: (sql) => {
-      const statement = db.prepare(sql);
+      const statement = exactIntegers(db.prepare(sql));
       if (typeof statement.finalize === 'function') {
         const ref = new WeakRef(statement);
         statements.add(ref);
         collected.register(statement, ref, ref);
       }
+      const names = columnNamesOf(statement);
       return {
         run: (params = []) => {
-          const result = statement.run(...params);
+          const result = decodeRunResult(statement.run(...params));
           // Bun's result can include trigger side effects. The driver
           // contract counts the data statement's own affected rows.
           changesStatement ??= db.prepare('SELECT changes() AS changes');
@@ -76,8 +90,12 @@ export function adaptBunDatabase(db, options) {
         // the driver contract says a missing row reads UNDEFINED;
         // bun:sqlite answers null — normalize at the seam, or every
         // create-or-verify and absence check misfires
-        get: (params = []) => statement.get(...params) ?? undefined,
-        all: (params = []) => statement.all(...params),
+        get: (params = []) => decodeIntegers(statement.get(...params) ?? undefined, names),
+        all: (params = []) => {
+          const rows = statement.all(...params);
+          for (let i = 0; i < rows.length; i++) decodeIntegers(rows[i], names);
+          return rows;
+        },
         // the native lazy iterator when this build has one; the
         // driver-level wrapper composes one over `all` when it does not,
         // and `iterate` stays absent here so that fallback is reached
@@ -86,8 +104,8 @@ export function adaptBunDatabase(db, options) {
             // Bun's iterator.return() does not reset the native statement.
             // Give each cursor its own statement and finalize on every exit;
             // cached queries and concurrent cursors remain independently usable.
-            const cursorStatement = db.prepare(sql);
-            try { yield* cursorStatement.iterate(...params); }
+            const cursorStatement = exactIntegers(db.prepare(sql));
+            try { for (const row of cursorStatement.iterate(...params)) yield decodeIntegers(row, names); }
             finally { cursorStatement.finalize?.(); }
           } }
           : undefined),

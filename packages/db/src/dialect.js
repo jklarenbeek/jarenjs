@@ -218,6 +218,7 @@ export const MEMBER_WHEN = Symbol('dialect.memberWhen');
  *   maxPredicateTerms?: number,
  *   jsonObject: (pairsSql: string) => string,
  *   jsonEmbed: (columnSql: string) => string,
+ *   jsonInteger: (columnSql: string) => string,
  *   externalEncoding?: 'value' | 'json',
  *   integerDigits?: boolean,
  *   externalCompare?: (valueSql: string, kind: string) => string,
@@ -933,6 +934,11 @@ export function createDialect(spec) {
      * what an enclosing object embeds, as opposed to what a caller
      * reads back. On an engine with one JSON type the two differ. */
     jsonEmbed: spec.jsonEmbed,
+    /** An `integer` column inside a graph load's JSON: as itself, or,
+     * holding an integer past ±(2^53 - 1), as `{ "digits": <its text> }`,
+     * which the reader holds to the rule a row read whole is held to
+     * (`parseGraphRow`): JSON numbers would reach it already rounded. */
+    jsonInteger: spec.jsonInteger,
     /**
      * How an EXTERNAL operand's value reaches a statement. `'value'`
      * binds it as itself — a dynamically typed engine compares it with
@@ -946,11 +952,13 @@ export function createDialect(spec) {
     /**
      * Whether the engine reads a stored JSON integer as the exact integer
      * its digits spell, and compares it exactly with a bound number. A
-     * document spells a number past 2^53 by its shortest digits, so such
-     * an engine compares a member it reads that way with an external past
-     * 2^53 as the engine does when the external binds as the integer ITS
-     * shortest digits spell: those digits are the ones the document holds
-     * for the same number, and they order as the doubles do.
+     * writer spells a number past 2^53 by any digits that round to it, so
+     * such an engine compares a member it reads that way with an external
+     * past 2^53 against the interval of integers that round to the
+     * external's double, bound as its two edges: what the engine's double
+     * comparison answers whatever digits the document holds. Such an engine
+     * also holds an `integer` column's exact integer, which a graph load's
+     * included child reads by that rule (`parseGraphRow`).
      */
     integerDigits: spec.integerDigits === true,
     /** The MEMBER side of an external comparison, at the branch's kind. */

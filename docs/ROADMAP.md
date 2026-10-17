@@ -559,18 +559,11 @@ what each does is its own documentation's job
   referenced key spelled and read as `String()` and `Number()` do (the
   referencing table rebuilt ahead of the key's check, or the check taken after
   both).
-- [ ] **An integer past 2^53 in an `integer` column answers differently on the
-  two engines.** A stored integer a JavaScript number would round is refused
-  `JD2003` on both where a row is read whole and, on PostgreSQL, where a
-  native statement projects the member; but one the store wrote (2**53+2,
-  2**60) reads back exactly on PostgreSQL (`numeric`) and is refused on SQLite
-  (`INTEGER`), whose create accepts it, and on PostgreSQL an included child
-  (`load({ include })`) and change capture still read a rounding one as the
-  nearest double. Wanted: one answer for an integer past ±(2^53 − 1): on
-  SQLite an integer a double holds exactly read as that number (each SQLite
-  driver decodes the column itself — drivers/node.js, bun.js, wasm.js and the
-  worker hosts), and an included child's and the capture journal's integer
-  columns refused as the row read whole is (graph.js, capture.js).
+- [ ] **An integer column another writer spelled by a JavaScript number's
+  digits reads differently on the two engines.** `1152921504606847000` written
+  beside the store into an `integer` column is refused `JD2003` on SQLite and
+  read as 2^60 on PostgreSQL. Wanted: one answer, without making SQLite's
+  exact column comparisons differ from the engine.
 - [ ] **A join table carries no column beyond its two keys.** A many-to-many
   join table is a read-only root (`$.<JoinTable>[*]`, MODEL-FORMAT §10.7)
   whose rows are its two keys, so "which pairs were attached since Friday" has
@@ -661,19 +654,27 @@ what each does is its own documentation's job
   Scan`), so an `$orderby` sorts every matching row however few a page or a
   narrow `$where` returns. Wanted: an index whose null placement the order
   reads, or an order whose null placement the index provides.
-- [ ] **A store predicate's external past 2^53 compares exactly with digits
-  another writer spelled, in SQLite.** A store profile predicate's external
-  integer past ±(2^53 − 1) binds on SQLite as the integer its own shortest
-  digits spell (2^60 as `1152921504606847000`), the digits a document the
-  store wrote holds for the same number, so the predicate keeps the rows the
-  engine keeps over the store's own documents, in the statement a safe integer
-  binds. A document another writer stored with other digits for such a number
-  (`1152921504606846976`, which the engine reads as 2^60) is compared by those
-  digits and kept or dropped otherwise than the engine. A document's own such
-  external still runs in the engine over the whole collection. Wanted: a
-  seekable double form of the comparison (the integer interval that rounds to
-  the double, bound as two integers), which would also keep a document's such
-  external on its index.
+- [ ] **On PostgreSQL an external past 2^53 compares exactly with digits
+  another writer spelled.** A store profile predicate's, or a query's own,
+  external number past ±(2^53 − 1) is compared with a document member as
+  `jsonb` numbers, exactly: over documents the store wrote (2^60 as
+  `1152921504606847000`) it keeps the engine's rows, but a document another
+  writer stored with other digits for the same double (`1152921504606846976`)
+  is kept or dropped otherwise than the engine — `$eq ['$it.u', '$x']`, x =
+  2^60, keeps only the store's own document where the engine keeps both, and
+  `$ne`, `$lt`, `$le`, `$gt`, `$ge` differ alike, on `integer` and `number`
+  members, indexed or not. Wanted: the comparison SQLite now makes (the
+  interval of numbers that round to the external's double), which on `numeric`
+  must also place a decimal another writer spelled within a half-unit of an
+  edge (a tie that rounds away from an odd significand).
+- [ ] **On Bun a native query leaves the store reading an old snapshot.**
+  After `store.execute()` of a native statement (`$for '$.K[*]' $orderby
+  $return '$it.v'`) on `bunDriver()` over a file, a row another connection
+  then commits is not seen by the store's later reads (`get` answers the value
+  from before the write) until the store is reopened; a `get`, `load` or
+  `explain` before the write does not do it, and node:sqlite does not. Wanted:
+  every statement reset or finalized, and every read transaction ended, when
+  its read ends.
 - [ ] **On PostgreSQL a column that reads a NULL as a present `null` is read
   in the engine.** No column whose policy is `null: 'null'` is read natively
   on PostgreSQL (`nativeQuery` is false for it), so a grouping ordered by such

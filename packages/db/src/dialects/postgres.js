@@ -791,6 +791,11 @@ export function postgresDialect(options = undefined) {
     jsonValue: (columnSql) => `to_jsonb(${columnSql})`,
     jsonText: (columnSql) => `(${columnSql})::text`,
     jsonEmbed: (columnSql) => `(${columnSql})`,
+    // an integer past 2^53 crosses as its digits (with the scale a retype
+    // left), both branches jsonb
+    jsonInteger: (columnSql) => `CASE WHEN ${columnSql} NOT BETWEEN ${-Number.MAX_SAFE_INTEGER} `
+      + `AND ${Number.MAX_SAFE_INTEGER} THEN jsonb_build_object('digits', (${columnSql})::text) `
+      + `ELSE to_jsonb(${columnSql}) END`,
     jsonAgg: (exprSql) => `jsonb_agg(${exprSql})`,
     jsonObject: (pairsSql) => `jsonb_build_object(${pairsSql})`,
     jsonTypeOf: (columnSql, pathText) =>

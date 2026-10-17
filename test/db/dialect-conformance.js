@@ -180,13 +180,16 @@ export function runDialectConformance(dialect, { describe, it, assert }) {
         // one JSON type the two spellings differ
         jsonEmbed: dialect.jsonEmbed(doc),
         jsonObject: dialect.jsonObject(`${dialect.stringLiteral('a')}, ${doc}`),
+        // an included child's integer column, which crosses as its digits
+        // past 2^53
+        jsonInteger: dialect.jsonInteger(doc),
       };
       for (const [name, sql] of Object.entries(forms)) {
         assert.strictEqual(typeof sql, 'string', `${name} answered no SQL`);
         assert.ok(sql.length > 0, `${name} answered empty SQL`);
       }
       for (const name of ['jsonExtract', 'jsonTypeOf', 'jsonText', 'jsonAgg',
-        'jsonSet', 'jsonRemove', 'jsonAppend', 'jsonEmbed', 'jsonObject']) {
+        'jsonSet', 'jsonRemove', 'jsonAppend', 'jsonEmbed', 'jsonObject', 'jsonInteger']) {
         assert.ok(forms[name].includes(doc), `${name} does not read the document column`);
       }
       assert.ok(forms.jsonObject.includes(dialect.stringLiteral('a')),

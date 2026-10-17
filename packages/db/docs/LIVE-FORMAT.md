@@ -77,9 +77,11 @@ same ops differently; they MUST agree as sets.
 Changesets (not patchsets) are used because they carry OLD values —
 that is what makes the minimal nested diff and the add/remove/replace
 discrimination possible; the price is a larger in-memory blob per
-transaction, stated here. Integer values beyond ±2⁵³ convert lossily
-to JS numbers (a raw-SQL concern only; JS documents cannot produce
-them).
+transaction, stated here. An integer value beyond ±(2⁵³ − 1) reads as
+every SQLite driver reads a stored one: as the number it is where a double
+holds it exactly (2⁶⁰) or a JavaScript number spells it by its digits, and
+refused `JD2003` where the number would round it (9007199254740993, which
+only a write outside the store can leave).
 
 ## 4. Capture modes and their limitations
 

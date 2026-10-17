@@ -3273,6 +3273,49 @@ created, and answers alike; an open of the model without the entry and with
 the index still present is `JD0002` (`the database has User_by_lower_email,
 which the model does not declare`).
 
+## 54. An integer past 2^53 reads alike on both engines and every SQLite host
+
+- On SQLite an `integer` column holding an integer past ±(2^53 − 1) that a
+  double holds exactly — 2^53 + 2, 2^60, every such integer the store itself
+  writes — now reads back as that number on every read (`get`, `load`, a
+  native projection, an included child), as on PostgreSQL; it was refused
+  `JD2003` although the store's own create accepted it. One a double does not
+  hold (`9007199254740993`, which only a writer beside the store leaves) is
+  refused `JD2003` as before. Every SQLite host reads through one decoder:
+  node:sqlite, the Node worker, the worker pool and the child process as
+  above; bun:sqlite, which read such an integer as the nearest double without
+  a word (`9007199254740993` as `9007199254740992`), now refuses it `JD2003`
+  too; sqlite-wasm, whose rows carried a `bigint` that failed the read with an
+  uncoded `TypeError` (`Do not know how to serialize a BigInt`), reads as
+  node:sqlite does. Code that read such a value on Bun repairs the stored
+  value.
+- A graph load's included child (`load({ include })`) read an `integer`
+  column's integer past 2^53 as the nearest double on both engines, where the
+  row read whole refuses it; it is now refused `JD2003` alike (on PostgreSQL
+  by the rule a row read whole follows there, `9007199254740993.0` included).
+- On SQLite a changeset's integer a double does not hold — a trigger beside
+  the store can write one — failed the write's capture `JD2003` instead of
+  recording the nearest double; the write is not committed.
+- On SQLite a comparison of a document member with an external number past
+  2^53 now keeps the rows the query engine keeps whatever digits the document
+  spells the number by: a store profile predicate's external compared the
+  digits a JavaScript writer spells (`1152921504606847000` for 2^60) exactly,
+  so a document another writer stored as `1152921504606846976` was kept or
+  dropped otherwise than the engine. Such a comparison binds the two edges of
+  the integers that round to the external's double, in one statement for
+  every value, and still seeks the member's index (as a range where an
+  equality seeked before). A query's own such external, which ran in the
+  engine over the whole collection (`explain()` reported `set`), now runs in
+  that statement (`native`).
+- No table, index or stored value changes: the decoder and the included
+  child's projection are read-side, and a store the previous release created
+  opens, plans and answers as before.
+
+**Downgrade.** The previous release opens every store this one does. On it,
+SQLite reads of an integer past 2^53 are refused `JD2003` again, Bun reads one
+a double does not hold as the nearest double, an included child reads one as
+the nearest double, and a query's own external past 2^53 runs in the engine.
+
 ## Measured costs
 
 Exact identity stores complete canonical documents and model endpoints, so

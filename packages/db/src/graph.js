@@ -19,7 +19,7 @@ import { setObjectMember } from '@jarenjs/core/object';
 import { utf8ByteLength } from '@jarenjs/core/string';
 import { columnCodec } from './physical.js';
 
-import { DbRuntimeError, refuseRoundedInteger } from './errors.js';
+import { DbRuntimeError, refuseRoundedInteger, roundedIntegerDigits, integerReadFailure, storedIntegerNumber } from './errors.js';
 import { jsonBytes, decodeCountedJson } from './json-bytes.js';
 
 /**
@@ -116,9 +116,12 @@ function foldForeignKeys(entityMapping, row, doc) {
  *   `{ entityMapping, includes: { name, field, many, count, child }[] }`
  * @param {any} row
  * @param {string} docField
+ * @param {boolean} [exactIntegers] - whether the engine holds an `integer`
+ *   column's exact integer (SQLite: `dialect.integerDigits`), which an
+ *   included child reads by that rule rather than PostgreSQL's
  * @returns {any}
  */
-export function parseGraphRow(node, row, docField = '__doc') {
+export function parseGraphRow(node, row, docField = '__doc', exactIntegers = false) {
   const sizes = new WeakMap();
   const doc = mergeEntityRow(node.entityMapping, row, docField);
   for (const include of node.includes) {
@@ -133,10 +136,28 @@ export function parseGraphRow(node, row, docField = '__doc') {
     }
     const parsed = checkBounds(node, include, row, raw, sizes);
     setObjectMember(doc, include.name, include.many
-      ? parsed.map((child) => parseGraphChild(include.child, child, sizes))
-      : parseGraphChild(include.child, parsed, sizes));
+      ? parsed.map((child) => parseGraphChild(include.child, child, sizes, exactIntegers))
+      : parseGraphChild(include.child, parsed, sizes, exactIntegers));
   }
   return doc;
+}
+
+/**
+ * An included child's `integer` column holding an integer past ±(2^53 - 1),
+ * which crosses as its digits (`dialect.jsonInteger`): the number they spell,
+ * refused where the row read whole refuses it — on an engine that holds the
+ * exact integer (`exact`, SQLite) wherever the number would round it, and on
+ * one that holds the digits a JavaScript number wrote (PostgreSQL) where they
+ * are not that number's either.
+ * @param {string} digits
+ * @param {boolean} exact
+ * @returns {number}
+ */
+function includedInteger(digits, exact) {
+  if (exact) return storedIntegerNumber(BigInt(digits));
+  const rounded = roundedIntegerDigits(digits);
+  if (rounded !== null) throw integerReadFailure(rounded);
+  return Number(digits);
 }
 
 /**
@@ -146,15 +167,18 @@ export function parseGraphRow(node, row, docField = '__doc') {
  * and nested includes under their fields.
  * @param {any} node
  * @param {any} child
+ * @param {WeakMap<object, number>} sizes
+ * @param {boolean} exactIntegers - as {@link parseGraphRow} takes it
  * @returns {any}
  */
-function parseGraphChild(node, child, sizes) {
+function parseGraphChild(node, child, sizes, exactIntegers) {
   const doc = typeof child.__doc === 'string' ? JSON.parse(child.__doc) : child.__doc;
   for (const column of node.entityMapping.columns) {
     if (column.source === 'epoch(document)') continue;
     const value = child[column.name];
     if (value === null || value === undefined) continue;
-    setObjectMember(doc, column.name, column.storage === 'boolean' ? value === 1 : value);
+    setObjectMember(doc, column.name, column.storage === 'boolean' ? value === 1
+      : column.storage === 'integer' && typeof value === 'object' ? includedInteger(value.digits, exactIntegers) : value);
   }
   foldForeignKeys(node.entityMapping, child, doc);
   for (const include of node.includes) {
@@ -169,8 +193,8 @@ function parseGraphChild(node, child, sizes) {
     }
     const parsed = checkBounds(node, include, child, raw, sizes);
     setObjectMember(doc, include.name, include.many
-      ? parsed.map((grandchild) => parseGraphChild(include.child, grandchild, sizes))
-      : parseGraphChild(include.child, parsed, sizes));
+      ? parsed.map((grandchild) => parseGraphChild(include.child, grandchild, sizes, exactIntegers))
+      : parseGraphChild(include.child, parsed, sizes, exactIntegers));
   }
   return doc;
 }

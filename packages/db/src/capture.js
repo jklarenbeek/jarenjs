@@ -36,7 +36,7 @@ import { createJSONPatch } from '@jarenjs/json/patch';
 import { encodeJSONPointerSegment, decodeJSONPointerSegment } from '@jarenjs/json/pointer';
 import { setObjectMember } from '@jarenjs/core/object';
 
-import { DbCompileError, DbRuntimeError, wrapDriverError } from './errors.js';
+import { DbCompileError, DbRuntimeError, wrapDriverError, storedIntegerNumber } from './errors.js';
 import { chain, attempt, useStatementOnce } from './driver.js';
 import { createCursor, drainPage, PAGE_LIMIT_DEFAULT } from './cursor.js';
 import { readOptionsOrNull } from './options.js';
@@ -93,10 +93,8 @@ function readValue(bytes, at) {
   if (type === 5) return { value: null, next: at };
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   if (type === 1) {
-    const big = view.getBigInt64(at);
-    // JS documents cannot produce integers beyond 2^53 through this
-    // store; a raw-SQL value beyond it converts lossily (documented)
-    return { value: Number(big), next: at + 8 };
+    // a changeset's integer reads as every SQLite driver reads a stored one
+    return { value: storedIntegerNumber(view.getBigInt64(at)), next: at + 8 };
   }
   if (type === 2) return { value: view.getFloat64(at), next: at + 8 };
   const { value: length, next } = readVarint(bytes, at);

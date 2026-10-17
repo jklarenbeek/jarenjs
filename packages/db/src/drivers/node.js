@@ -11,6 +11,7 @@ import { sqliteDialect } from '../dialects/sqlite.js';
 import { PRAGMA_NAMES } from '../pragmas.js';
 import { nativeDatabaseIdentity } from './file-identity.js';
 import { mainFileOf, publishSqliteFile, removeSqliteFile } from './snapshot.js';
+import { integerColumns, decodeIntegers, decodeRunResult, decodingIterator } from './sqlite-integers.js';
 
 /**
  * Adapt an already-constructed `node:sqlite` `DatabaseSync` (or any
@@ -32,11 +33,30 @@ export function adaptNodeDatabase(db, options) {
     /** @param {string} sql */
     prepare: (sql) => {
       const statement = db.prepare(sql);
+      // node:sqlite refuses every integer past ±(2^53 - 1), even one a
+      // double holds exactly: a statement with a column that can hand one
+      // back reads integers as bigints, which the shared decoder turns into
+      // the numbers they are (or refuses as node:sqlite does); a statement
+      // whose columns cannot reads as it always did, at no cost
+      const names = typeof statement.columns === 'function' ? integerColumns(statement.columns()) : [];
+      if (names.length === 0) {
+        return {
+          run: (params = []) => statement.run(...params),
+          get: (params = []) => statement.get(...params),
+          all: (params = []) => statement.all(...params),
+          iterate: (params = []) => statement.iterate(...params),
+        };
+      }
+      statement.setReadBigInts(true);
       return {
-        run: (params = []) => statement.run(...params),
-        get: (params = []) => statement.get(...params),
-        all: (params = []) => statement.all(...params),
-        iterate: (params = []) => statement.iterate(...params),
+        run: (params = []) => decodeRunResult(statement.run(...params)),
+        get: (params = []) => decodeIntegers(statement.get(...params), names),
+        all: (params = []) => {
+          const rows = statement.all(...params);
+          for (let i = 0; i < rows.length; i++) decodeIntegers(rows[i], names);
+          return rows;
+        },
+        iterate: (params = []) => decodingIterator(statement.iterate(...params), names),
       };
     },
     close: () => db.close(),

@@ -442,6 +442,7 @@ export function fullDoubleDialect(createDialect) {
       name: String(row.name), expression: String(row.expression ?? ''),
     })),
     jsonEmbed: (column) => `JEMBED(${column})`,
+    jsonInteger: (column) => `JINT(${column})`,
     valueTypeOf: (param) => `VTYPE(${param})`,
     strStartsWith: (value, lower, upper) => `SW(${value}, ${lower}, ${upper})`,
     strStartsWithExact: (value, a, b) => `SWX(${value}, ${a}, ${b})`,

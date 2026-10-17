@@ -351,9 +351,9 @@ it: the number is neither the stored integer nor spelled by its digits, as
 before the point are the integer. Every integer within
 ±(2^53 − 1), every integer a double holds exactly and every integer a
 JavaScript number wrote (2^60 is stored as `1152921504606847000`) reads as the
-number, so the store's own data reads as before. SQLite refuses every integer
-past ±(2^53 − 1) its `INTEGER` column holds, the store's own writes included;
-PostgreSQL refuses only the read that would change the value. A `number`
+number, so the store's own data reads as before. SQLite holds the exact
+integer and refuses one a double does not hold, so the store's own data reads
+back alike on both engines. A `number`
 member reads the double nearest to its column's value, as SQLite's `REAL`
 column holds it, and so does a `numeric` a statement computes (an aggregate, a
 cast of a document member), as the engine reads the member it comes from. The
@@ -361,8 +361,12 @@ driver tells a stored value from a computed one by the table the server names
 for a result column; a client that names none reads every `numeric` as the
 nearest double. The refusal is made where a row is read whole (`get`, `load`,
 `page`, a query that returns the entity) and where a native statement projects
-the `integer` member (`$return: '$it.v'`, or a constructor of it); an included
-child and change capture still read such a value as the nearest double.
+the `integer` member (`$return: '$it.v'`, or a constructor of it), and where a
+graph load includes the entity (`load({ include })`): an included child's
+columns cross inside JSON, whose numbers the client would read already
+rounded, so such an integer crosses there as its digits and is held to the
+same rule. Change capture records the documents the store read whole or wrote,
+and so never carries one.
 
 ## The writer lock and the lock family
 

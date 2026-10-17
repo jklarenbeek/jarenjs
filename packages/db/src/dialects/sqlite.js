@@ -556,6 +556,11 @@ export const sqliteDialect = createDialect({
   // `json()` tags the value with SQLite's JSON subtype, which is what
   // makes an enclosing `json_object` embed it rather than quote it
   jsonEmbed: (columnSql) => `json(${columnSql})`,
+  // an integer past 2^53 crosses as its digits; the `json_object` keeps its
+  // JSON subtype through the CASE, so the enclosing object embeds it
+  jsonInteger: (columnSql) => `CASE WHEN typeof(${columnSql}) = 'integer' AND ${columnSql} `
+    + `NOT BETWEEN ${-Number.MAX_SAFE_INTEGER} AND ${Number.MAX_SAFE_INTEGER} `
+    + `THEN json_object('digits', CAST(${columnSql} AS TEXT)) ELSE ${columnSql} END`,
   // a dynamically typed engine binds an external as itself and compares
   // it with whatever the member holds
   externalEncoding: 'value',
@@ -604,8 +609,9 @@ export const sqliteDialect = createDialect({
   groupAggregate: (fn, valueSql) => (valueSql === null
     ? 'COUNT(*)'
     : `${{ sum: 'SUM', avg: 'AVG', min: 'MIN', max: 'MAX' }[fn]}(${valueSql})`),
-  // an integer text past 2^53 is stored as an INTEGER the driver refuses to
-  // hand back (JD2003) and compares exactly, where the engine holds and
+  // an integer text past 2^53 is read as the exact INTEGER its digits name,
+  // which the drivers hand back only where a double holds it (JD2003
+  // otherwise) and which compares exactly, where the engine holds and
   // compares the double nearest to it
   numberRead: (sql) => `CAST(${sql} AS REAL)`,
   // and so a stored JSON integer is read by its digits, and compared exactly

@@ -619,6 +619,62 @@ export function refuseRoundedInteger(row, name) {
   if (text !== undefined) throw integerReadFailure(text);
 }
 
+/**
+ * The full decimal a double spells: its shortest spelling, with an
+ * exponent (`1e+21`) written out as the digits it stands for.
+ * @param {number} number
+ * @returns {string}
+ */
+function spelledInFull(number) {
+  const text = String(number);
+  const exponent = /^(-?)(\d)(?:\.(\d+))?e\+(\d+)$/.exec(text);
+  if (exponent === null) return text;
+  const digits = exponent[2] + (exponent[3] ?? '');
+  return exponent[1] + digits + '0'.repeat(Number(exponent[4]) - digits.length + 1);
+}
+
+/**
+ * The digits of the integer a stored value holds when its JavaScript
+ * number rounds it — the number is neither the stored integer nor spelled by
+ * its digits (an integer past the double range is neither) — else `null`. An
+ * integral value kept with a scale (`9007199254740993.0`, which a retype from
+ * text leaves in a PostgreSQL `numeric`) is the integer its digits before the
+ * point spell. Every integer within ±(2^53 - 1), every fraction, every
+ * integer a double holds exactly (2^53 + 2, 2^60), and every integer a
+ * JavaScript number wrote (its digits ARE that number's spelling: 2^60 is
+ * written `1152921504606847000`, which is how the store writes it to a
+ * PostgreSQL `numeric`) does not. The PostgreSQL driver reads a stored
+ * `numeric` by this rule, and an included child's integer columns there are
+ * held to it; a SQLite column holds the exact integer the store bound
+ * ({@link storedIntegerNumber}).
+ * @param {any} value - the stored value's text
+ * @returns {string | null}
+ */
+export function roundedIntegerDigits(value) {
+  const integral = typeof value === 'string' ? /^(-?\d+)(?:\.0+)?$/.exec(value) : null;
+  if (integral === null) return null;
+  const digits = integral[1];
+  const number = Number(digits);
+  return !Number.isSafeInteger(number)
+    && !(Number.isFinite(number) && (BigInt(digits) === BigInt(number) || spelledInFull(number) === digits))
+    ? digits : null;
+}
+
+/**
+ * The number a stored 64-bit integer reads as: an integer a double holds
+ * exactly (every one within ±(2^53 - 1), 2^53 + 2, 2^60 — every integer the
+ * store writes, which binds a JavaScript number) reads as that number, and
+ * any other is refused as node:sqlite refuses one past ±(2^53 - 1)
+ * ({@link integerReadFailure}): the number would round it.
+ * @param {bigint} value
+ * @returns {number}
+ */
+export function storedIntegerNumber(value) {
+  const number = Number(value);
+  if (Number.isSafeInteger(number) || BigInt(number) === value) return number;
+  throw integerReadFailure(String(value));
+}
+
 /** The text a database invariant's refusal starts with (MODEL-FORMAT §13). */
 export const INVARIANT_MARKER = 'jaren invariant:';
 /** The SQLSTATE a database invariant raises on PostgreSQL: class 23,

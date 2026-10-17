@@ -2186,7 +2186,7 @@ export declare function emitPlan(plan: unknown, dialect: Dialect, physical: unkn
 export declare function createEntityPredicateEmitters(dialect: Dialect, param: unknown, related?: unknown): unknown;
 export declare function emitEntityPlan(plan: unknown, dialect: Dialect, physicalOf: unknown): unknown;
 export declare function mergeEntityRow(entityMapping: unknown, row: unknown, docField?: string): unknown;
-export declare function parseGraphRow(node: unknown, row: unknown, docField?: string): unknown;
+export declare function parseGraphRow(node: unknown, row: unknown, docField?: string, exactIntegers?: boolean): unknown;
 export declare function selectPlan(collection: string): unknown;
 export declare function conjoin(plan: unknown, predicate: unknown): unknown;
 export declare function assertNoSqlText(plan: unknown): void;
