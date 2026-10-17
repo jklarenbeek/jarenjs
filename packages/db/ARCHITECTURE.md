@@ -943,9 +943,12 @@ generated column carries SQLite affinity, so on an unvalidated store a
 row that violates the schema — the string `'020'` under an `integer`
 path — reads as the integer `20` in the column while `json_type` still
 says text, and a pushed comparison answers rows the engine (comparing
-the JSON value) does not. Keep `compileSchema` injected: with the hook
-no such row is ever stored, and without it the pushdown is exact only
-over documents that happen to conform.
+the JSON value) does not. On PostgreSQL the typed read holds a value of
+another JSON type as NULL, so an ordering, a group key or an aggregate
+reads such a row's member as empty ([POSTGRESQL](docs/POSTGRESQL.md)).
+Keep `compileSchema` injected: with the hook the store writes no such
+row, and without it, or over a row another writer stored, the pushdown
+is exact only over documents that happen to conform.
 
 **Bind-time diversion.** SQLite cannot bind a boolean, and a
 `null`-valued external needs Jaren's null semantics, not SQL's. At

@@ -405,6 +405,31 @@ a column may be declared as the allocation a database-allocated key takes
 (`bigserial`, `bigint`), which reads no fractional edge and holds no integer in
 a safe integer's interval but the integer itself.
 
+A collection member the schema types `number` or `integer` is read typed: its
+generated column, and the `CASE` a statement reads an unindexed one by, hold a
+value of another JSON type — a string, a boolean, an object, an array, or a
+`null` the schema does not admit — as NULL, the empty member. Such a document
+reaches the table through the store's own `put` on a store opened without a
+`compileSchema` hook ([MODEL-FORMAT](MODEL-FORMAT.md), "Without a hook, writes
+are unvalidated"), or through another writer. A comparison of the member with a
+literal, an external or a list answers as the engine; an ordering, a group key,
+an aggregate (`$min`, `$max`, and an `integer` member's `$sum` and `$avg`), a
+comparison of the member with another member, and the value a grouping
+projects read the NULL where the engine
+refuses (`JQ2005`, `JQ2001`), orders the values or answers the value itself: an
+ordering puts the document among the empty members, and a stored `"x"` groups
+as the string `"null"`. This is the store's documented loss — native and
+residual answers agree only over documents that conform to the schema
+([ARCHITECTURE](../ARCHITECTURE.md), "Two documented preconditions"). SQLite
+stops elsewhere: its STRICT generated column refuses the write of a text, an
+object or an array in an indexed `number` or `integer` member (`JD2005`, class
+`constraint`) but stores `true` as 1 and the text `"5"` as 5 there, and refuses
+nothing in an unindexed member, whose projected value and aggregates read the
+text `"x"` as `"0"` and `0`. Neither refusal is made here: one at the write would refuse
+documents a store without the hook keeps and compares right, and one in the
+statement would read every row a `$max` over an indexed member now finds by
+its index alone.
+
 An entity's `integer` and `number` columns are `numeric`, which holds an
 integer past 2^53 exactly. An `integer` member read from its column is refused
 `JD2003` (class `data`, the reason SQLite's refusal of an integer its driver

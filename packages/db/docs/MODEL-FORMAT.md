@@ -1191,10 +1191,14 @@ stored: a typed generated column carries SQLite affinity, so a value
 that violates the collection schema — the string `'020'` under an
 `integer` path — reads as the integer `20` in the column while the
 document still holds text, and a pushed `$eq: ['$it.n', '20']` finds
-a row the engine, which compares the JSON value, does not. On an
-unvalidated store the native and residual paths agree only over
-documents that conform to the schema; with the hook injected no other
-document is ever stored.
+a row the engine, which compares the JSON value, does not. On
+PostgreSQL a typed `number` or `integer` member holding another JSON
+type reads as NULL instead, so an ordering, a group key or an aggregate
+over it reads the empty member where the engine refuses or answers the
+value ([POSTGRESQL](POSTGRESQL.md)). On an unvalidated store the native
+and residual paths agree only over documents that conform to the
+schema; with the hook injected the store writes no other document, and
+one another writer stores is outside that guard alike.
 `@jarenjs/db` never runs a validator of its own; what it imports from
 `@jarenjs/validate` is only the pure same-document `$ref`/`$anchor`
 resolution in `@jarenjs/validate/normalize`, for model compilation.

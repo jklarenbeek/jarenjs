@@ -728,13 +728,6 @@ what each does is its own documentation's job
   returning it reads PostgreSQL's `NaN` (above every number, equal to itself)
   where the engine refuses. Wanted: a physical mapping's number column
   qualified or refused at open, or documented as the mapping's loss.
-- [ ] **On PostgreSQL a collection orders a typed number member another writer
-  stored as a non-number.** A document whose `number` member holds a string
-  (`jsonb_set(doc, '{a}', '"x"')`, which the store's validation never writes)
-  orders natively by the generated column's NULL (`$orderby ['$it.a']` →
-  ["b","a","c"]) where the engine refuses `JQ2005`; SQLite's STRICT generated
-  `REAL` column refuses such a write. Wanted: the engine's refusal, or the
-  documented loss.
 - [ ] **On PostgreSQL an entity's ordering never reads an index.** An entity
   order term is `ASC NULLS FIRST` (descending `DESC NULLS LAST`) with the row
   identity appended, which a default btree scan does not give, so a window, a
