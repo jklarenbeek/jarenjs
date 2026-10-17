@@ -15,6 +15,7 @@
  */
 
 import { parseState } from './parser/state.js';
+import { sequenceStatements } from './parser/sequence.js';
 import { printClick, printNodeClick } from './parser/click.js';
 import { RE_LINK_INSIDE } from './parser/flowchart.js';
 import { isMarkdownString } from './label-text.js';
@@ -248,10 +249,10 @@ function printSeqStatements(statements, out, depth) {
     if (stmt.kind === 'message') {
       const arrow = arrowToken(stmt.line, stmt.head);
       const act = stmt.activation === 'activate' ? '+' : stmt.activation === 'deactivate' ? '-' : '';
-      out.push(`${pad}${stmt.from}${arrow}${act}${stmt.to}: ${stmt.text}`);
+      out.push(pad + oneStatement(`${stmt.from}${arrow}${act}${stmt.to}: `, stmt.text));
     }
     else if (stmt.kind === 'note') {
-      out.push(`${pad}note ${stmt.placement} ${stmt.actors.join(',')}: ${stmt.text}`);
+      out.push(pad + oneStatement(`note ${stmt.placement} ${stmt.actors.join(',')}: `, stmt.text));
     }
     else if (stmt.kind === 'activate' || stmt.kind === 'deactivate') {
       out.push(`${pad}${stmt.kind} ${stmt.actor}`);
@@ -270,6 +271,20 @@ function printSeqStatements(statements, out, depth) {
       out.push(`${pad}end`);
     }
   }
+}
+
+/**
+ * A message or note line that reads back as one statement: a `;` in its text
+ * prints as `#59;`, which the drawing decodes, only where the line would
+ * otherwise split into statements (MERMAID-FORMAT §4.2).
+ * @param {string} head - the statement up to its text
+ * @param {string} text
+ * @returns {string}
+ */
+function oneStatement(head, text) {
+  const line = head + text;
+  return sequenceStatements(line.trim()).length === 1 ? line
+    : head + text.replace(/(#[A-Za-z0-9]+;)|;/g, (m, code) => code ?? '#59;');
 }
 
 /**

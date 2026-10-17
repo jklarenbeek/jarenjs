@@ -115,3 +115,30 @@ describe('named entity codes, in every type', () => {
     assert.ok(svgOf('sequenceDiagram\nA->>B: #quot;hi#quot;').includes('>"hi"</text>'));
   });
 });
+
+describe('sequenceDiagram — a `;` ends a statement, as in Mermaid', () => {
+  const texts = (/** @type {string} */ src) => parseMermaid(src).ast.statements.map((/** @type {any} */ s) => s.kind === 'block'
+    ? [s.blockType, s.branches[0].label, s.branches[0].statements.map((/** @type {any} */ t) => t.text)] : [s.kind, s.text]);
+
+  it('splits a line into the statements Mermaid reads', () => {
+    assert.deepEqual(texts('sequenceDiagram\n  A->>B: hi; B->>A: yo'), [['message', 'hi'], ['message', 'yo']]);
+    assert.deepEqual(texts('sequenceDiagram\n  loop x; A->>B: a; end'), [['loop', 'x', ['a']]]);
+    assert.deepEqual(texts('sequenceDiagram\n  note over A: n; A->>B: m'), [['note', 'n'], ['message', 'm']]);
+  });
+
+  it('keeps an entity code\'s `;`, and a line whose pieces are not all statements, as text', () => {
+    assert.deepEqual(texts('sequenceDiagram\n  A->>B: I #9829; you #59; ok'), [['message', 'I #9829; you #59; ok']]);
+    assert.deepEqual(texts('sequenceDiagram\n  A->>B: hi; there'), [['message', 'hi; there']]);
+  });
+
+  it('prints a `;` as #59; only where the line would split, so the tree reads back as one statement', () => {
+    const doc = parseMermaid('sequenceDiagram\n  A->>B: hi; there\n  B->>A: x #9829; y');
+    const message = doc.ast.statements[0];
+    doc.ast.statements.push({ ...message, text: 'p #9829; q; B->>A: r' });
+    const text = toMermaid(doc);
+    assert.match(text, /^A->>B: hi; there$/m);
+    assert.match(text, /^A->>B: p #9829; q#59; B->>A: r$/m);
+    assert.deepEqual(parseMermaid(text).ast.statements.map((/** @type {any} */ s) => s.text),
+      ['hi; there', 'x #9829; y', 'p #9829; q#59; B->>A: r']);
+  });
+});

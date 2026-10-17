@@ -295,13 +295,6 @@ establish registry publication or downstream acceptance.
 
 ## @jarenjs/mermaid
 
-- [ ] **Sequence statements: `;` does not separate them** — Mermaid ends a
-  sequence statement at `;` (`A->>B: hi; B->>A: yo` is two messages; `#59;` is
-  how a message writes the character); here the line is one message whose text
-  holds the rest. Wanted: split at a `;` outside entity codes where every
-  piece reads as a statement (text otherwise), with `toMermaid` printing a
-  message's `;` as `#59;` so a tree reads back as one message — a printed form
-  change.
 - [ ] **State, class and ER lines no reader matches vanish** —
   `stateDiagram-v2` `A --> B; B --> C` reads no state and no transition
   (Mermaid reads two transitions), and a class or ER line that fits no form

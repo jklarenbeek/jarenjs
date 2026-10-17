@@ -26,6 +26,45 @@ const RE_NOTE = /^[Nn]ote\s+(left of|right of|over)\s+([^:]+):\s*(.*)$/;
 /** Block openers whose first word starts a frame. */
 const OPEN_BLOCKS = new Set(['loop', 'opt', 'alt', 'par', 'critical', 'break', 'rect']);
 
+/** The words that start a statement this reader reads by its first word. */
+const STATEMENT_WORDS = new Set([...OPEN_BLOCKS, 'participant', 'actor', 'activate', 'deactivate',
+  'else', 'and', 'option', 'end', 'autonumber']);
+
+/** A `;` that ends an entity code (`#59;`, `#quot;`) is part of the text. */
+const RE_SEPARATOR = /#[A-Za-z0-9]+;|;/g;
+
+/**
+ * One line's statements. Mermaid ends a statement at `;` (`A->>B: hi;
+ * B->>A: yo` is two messages; a message writes the character as `#59;`), so
+ * a line splits at every `;` outside an entity code where each piece reads as
+ * a statement; a line whose pieces do not all read so is one statement, as
+ * before, and its text keeps the `;`.
+ * @param {string} line - trimmed
+ * @returns {string[]}
+ */
+export function sequenceStatements(line) {
+  if (line.indexOf(';') === -1) return [line];
+  const pieces = [];
+  let start = 0;
+  for (const m of line.matchAll(RE_SEPARATOR)) {
+    if (m[0] !== ';') continue;
+    pieces.push(line.slice(start, m.index).trim());
+    start = /** @type {number} */ (m.index) + 1;
+  }
+  pieces.push(line.slice(start).trim());
+  const statements = pieces.filter((piece) => piece !== '');
+  return statements.length > 1 && statements.every(readsAsStatement) ? statements : [line];
+}
+
+/**
+ * Whether one piece of a line is a statement this reader reads.
+ * @param {string} piece
+ * @returns {boolean}
+ */
+function readsAsStatement(piece) {
+  return STATEMENT_WORDS.has(firstToken(piece)) || RE_NOTE.test(piece) || RE_MSG.test(piece);
+}
+
 /**
  * @param {string[]} lines body lines (config stripped)
  * @param {number} lineOffset absolute line number of `lines[0]`
@@ -46,13 +85,15 @@ export function parseSequence(lines, lineOffset) {
     participants.push(seqParticipant(id, label ?? id, kind));
   };
 
-  for (let li = 0; li < lines.length; li++) {
-    const line = lines[li].trim();
-    if (line === '') continue;
-    const lineNo = lineOffset + li + 1;
+  /**
+   * Read one statement into the open block.
+   * @param {string} line
+   * @param {number} lineNo
+   */
+  const read = (line, lineNo) => {
     const firstWord = firstToken(line);
 
-    if (line === 'autonumber') { autonumber = true; continue; }
+    if (line === 'autonumber') { autonumber = true; return; }
 
     if (firstWord === 'participant' || firstWord === 'actor') {
       const m = RE_PARTICIPANT.exec(line);
@@ -60,13 +101,13 @@ export function parseSequence(lines, lineOffset) {
         const { id, label } = splitAlias(m[2].trim());
         declare(id, label, /** @type {any} */ (m[1]));
       }
-      continue;
+      return;
     }
 
     if (firstWord === 'activate' || firstWord === 'deactivate') {
       const actor = line.slice(firstWord.length).trim();
       current.push(seqActivation(/** @type {any} */ (firstWord), actor));
-      continue;
+      return;
     }
 
     if (/^[Nn]ote\s/.test(line)) {
@@ -75,7 +116,7 @@ export function parseSequence(lines, lineOffset) {
         const actors = m[2].split(',').map((s) => s.trim()).filter(Boolean);
         current.push(seqNote(/** @type {any} */ (m[1]), actors, m[3].trim()));
       }
-      continue;
+      return;
     }
 
     // Block control.
@@ -84,13 +125,13 @@ export function parseSequence(lines, lineOffset) {
       if (firstWord === 'rect') {
         // Background rectangle: parse-accept, statements flow to parent.
         stack.push({ block: null, parent: current, skip: true });
-        continue;
+        return;
       }
       const block = seqBlock(/** @type {any} */ (firstWord), [{ label, statements: [] }]);
       current.push(block);
       stack.push({ block, parent: current, skip: false });
       current = block.branches[0].statements;
-      continue;
+      return;
     }
     if (firstWord === 'else' || firstWord === 'and' || firstWord === 'option') {
       const top = stack[stack.length - 1];
@@ -100,13 +141,13 @@ export function parseSequence(lines, lineOffset) {
       const branch = { label: line.slice(firstWord.length).trim(), statements: [] };
       top.block.branches.push(branch);
       current = branch.statements;
-      continue;
+      return;
     }
     if (line === 'end') {
       const entry = stack.pop();
       if (entry === undefined) fail("unexpected 'end'", lineNo);
       current = entry.parent;
-      continue;
+      return;
     }
 
     // A message.
@@ -121,10 +162,17 @@ export function parseSequence(lines, lineOffset) {
       declare(to, to, 'participant');
       const { line: lineStyle, head } = classifyArrow(arrow);
       current.push(seqMessage(from, to, text, lineStyle, head, /** @type {any} */ (activation)));
-      continue;
+      return;
     }
 
     // Unknown directive — lenient parse-accept (title:, links, etc.).
+  };
+
+  for (let li = 0; li < lines.length; li++) {
+    const whole = lines[li].trim();
+    if (whole === '') continue;
+    const lineNo = lineOffset + li + 1;
+    for (const line of sequenceStatements(whole)) read(line, lineNo);
   }
 
   return sequenceAst(participants, rootStatements, autonumber);

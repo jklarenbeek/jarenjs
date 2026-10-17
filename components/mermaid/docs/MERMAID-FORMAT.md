@@ -209,6 +209,13 @@ row. The tree keeps every code as written, so `toMermaid` prints it back.
 (`{ kind:'block', blockType, branches:[{ label, statements[] }] }`) for
 loop/opt/alt/par/critical/break.
 
+A `;` ends a statement, as in Mermaid: `A->>B: hi; B->>A: yo` is two
+messages. A line splits at every `;` outside an entity code only where each
+piece reads as a statement; otherwise it is one statement whose text keeps
+the `;` (`A->>B: hi; there`, which Mermaid refuses). `toMermaid` prints a
+message's or note's `;` as `#59;` only where the line would otherwise split,
+so a tree reads back as the statements it holds and draws the same text.
+
 ### 4.3 class / er / state / pie
 
 Class: `{ classes:[{ name, label, members[] }], relations[], clicks[] }`, a
