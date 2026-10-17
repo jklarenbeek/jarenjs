@@ -91,6 +91,23 @@ describe('rings', () => {
     assert.strictEqual(ringSignedArea(CW), -2, 'sign follows the winding');
   });
 
+  it('should answer a malformed ring NaN and 0, never a throw or the sign of a coerced number', () => {
+    for (const ring of [
+      [[0, 0], [4, 0], null, [0, 4], [0, 0]],
+      [null, [4, 0], [4, 4], [0, 0]],
+      [[0, 0], [4, 0], ['4', '4'], [0, 4], [0, 0]],
+      [[0, 0], [4, 0], [null, null], [0, 4], [0, 0]],
+      [[0, 0], [4, 0], [4, NaN], [0, 4], [0, 0]],
+      [[0, 0], [4, 0], [4, 4], [0, 4], []],
+      /** @type {any} */ ({ length: 4 }),
+    ]) {
+      assert.ok(Number.isNaN(ringSignedArea(ring)), JSON.stringify(ring));
+      assert.strictEqual(ringWinding(ring), 0, JSON.stringify(ring));
+    }
+    // a string pair a coercion reads as numbers used to wind the ring backwards
+    assert.strictEqual(ringWinding([[0, 0], ['-4', '0'], [4, 4], [0, 0]]), 0);
+  });
+
   it('should measure real area on the sphere', () => {
     // one degree square at the equator is about 12,360 km2
     near(sphericalRingArea(CCW) / 1e6, 12360, 0.01, '1 degree square at the equator');

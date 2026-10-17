@@ -56,8 +56,9 @@ cut.
 ## Rings — `ring.js`
 
 `isRingClosed`, `ringSignedArea` (shoelace over `orient2d` terms —
-the *sign* is the point), `ringWinding` (1 = counter-clockwise, the
-RFC 7946 exterior convention), `sphericalRingArea` (m², spherical
+the *sign* is the point; `NaN` for a ring holding a member that is not a
+position of finite numbers), `ringWinding` (1 = counter-clockwise, the
+RFC 7946 exterior convention; `0` where the area is `NaN`), `sphericalRingArea` (m², spherical
 excess), `pointInRing` / `pointInPolygon` (even-odd rule, boundary
 counts as inside, exact predicate per crossing).
 

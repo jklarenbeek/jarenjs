@@ -55,21 +55,38 @@ export function isRingClosed(ring) {
  * magnitude is a planar quantity in degree-space and is NOT an area on
  * the Earth — use `sphericalRingArea` for that.
  *
+ * A ring of three or more holding a member that is not a position of
+ * finite numbers (`null`, a hole in the list, `'12'`, `[null, null]`,
+ * `NaN`), or that is not a list, has no area: `NaN`. Fewer than three
+ * members are `0`.
+ *
  * @param {Array<number[]>} ring - positions
  * @returns {number} twice the signed area; positive = counter-clockwise
  */
 export function ringSignedArea(ring) {
+  if (!Array.isArray(ring))
+    return NaN;
   const n = ring.length;
   if (n < 3)
     return 0;
   // fan the triangles from vertex 0 so each term is an orientation
-  // determinant rather than a bare cross product
-  const [ox, oy] = ring[0];
+  // determinant rather than a bare cross product; each vertex is read,
+  // and checked, once
+  const ox = ring[0]?.[0];
+  const oy = ring[0]?.[1];
+  let ax = ring[1]?.[0];
+  let ay = ring[1]?.[1];
+  if (!(Number.isFinite(ox) && Number.isFinite(oy) && Number.isFinite(ax) && Number.isFinite(ay)))
+    return NaN;
   let sum = 0;
-  for (let i = 1; i < n - 1; i++) {
-    const a = ring[i];
-    const b = ring[i + 1];
-    sum += orient2d(ox, oy, a[0], a[1], b[0], b[1]);
+  for (let i = 2; i < n; i++) {
+    const bx = ring[i]?.[0];
+    const by = ring[i]?.[1];
+    if (!(Number.isFinite(bx) && Number.isFinite(by)))
+      return NaN;
+    sum += orient2d(ox, oy, ax, ay, bx, by);
+    ax = bx;
+    ay = by;
   }
   return sum;
 }
@@ -82,11 +99,15 @@ export function ringSignedArea(ring) {
  * and holes clockwise — the right-hand rule. Parsers are told to accept
  * non-conforming data, so this reports rather than rejects.
  *
+ * A ring that has no area (`ringSignedArea` is `NaN`: a member that is not
+ * a position of finite numbers) winds neither way: `0`.
+ *
  * @param {Array<number[]>} ring - positions
  * @returns {number} 1, -1 or 0
  */
 export function ringWinding(ring) {
-  return Math.sign(ringSignedArea(ring));
+  const area = ringSignedArea(ring);
+  return area > 0 ? 1 : area < 0 ? -1 : 0;
 }
 
 /**
