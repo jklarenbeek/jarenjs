@@ -352,7 +352,26 @@ export function postgresChecks(rows) {
   return rows.map((row) => ({ name: String(row.name), sql: String(row.expression ?? ''),
     ...(row.validated === undefined || row.validated === null ? {} : { validated: Number(row.validated) === 1 }),
     conforming: readsConforming(row),
+    ...notNaNOf(sqlTokens(String(row.expression ?? ''))),
     ...(row.unsafe_collation ? null : enumOf(sqlTokens(String(row.expression ?? '')), postgresCast)) }));
+}
+
+/** The CHECK a store gives a PostgreSQL `numeric` column of an entity or join
+ * table (`dialect.numberCheck`), as the catalog deparses it, `(a <> 'NaN'::numeric)`:
+ * `{ column, notNaN: true }`, or `null` for any other text.
+ * @param {{ kind: string, value: string }[]} tokens @returns {{ column: string, notNaN: true } | null} */
+function notNaNOf(tokens) {
+  const cursor = tokenCursor(tokens);
+  const take = cursor.take;
+  let open = 0;
+  while (take('(')) open++;
+  const column = tokens[cursor.at++];
+  if (!column || !['identifier', 'word'].includes(column.kind)) return null;
+  if (!(take('<') && take('>'))) return null;
+  const nan = tokens[cursor.at++];
+  if (nan?.kind !== 'string' || nan.value !== 'NaN' || !take('::') || !take('NUMERIC')) return null;
+  while (open > 0 && take(')')) open--;
+  return open === 0 && cursor.at === tokens.length ? { column: column.value, notNaN: true } : null;
 }
 
 /** Only exact scalar casts emitted by the native catalog are understood. */

@@ -273,6 +273,7 @@ export const MEMBER_WHEN = Symbol('dialect.memberWhen');
  *   physicalValueType?: (codec: string, sql: string) => string,
  *   physicalDifferent?: (codec: string, left: string, right: string) => string,
  *   numberCast?: (sql: string) => string,
+ *   numberCheck?: (columnSql: string) => string,
  *   numberRead?: (sql: string) => string,
  *   doubleRead?: (sql: string) => string,
  *   doubleEqual?: (left: string, right: string, key?: 'left' | 'right') => string,
@@ -292,7 +293,7 @@ export const MEMBER_WHEN = Symbol('dialect.memberWhen');
  *   qualifyPhysicalColumn?: (column: any, actual: any, kind: string, database?: any, catalogColumn?: any) => void,
  *   invariantTriggers?: (mapping: any, all: any, dialect: any) => any[],
  *   readChecks?: (rows: any[]) => { name: string, sql?: string, validated?: boolean, conforming?: boolean,
- *     column?: string, values?: any[] }[],
+ *     column?: string, values?: any[], notNaN?: boolean }[],
  *   introspect: { version: () => string, compileOptions: () => string,
  *     pragma: (name: string) => string,
  *     tableExists: () => string, columns: (table: string) => string,
@@ -435,16 +436,17 @@ export function createDialect(spec) {
         + `AND ${start} < ${end}${duration})`;
     },
     /**
-     * Add a named CHECK to an existing table — a declared interval arriving
-     * through a migration, on an engine that alters a table in place. The
-     * engine checks every stored row as it adds the constraint, inside the
-     * statement's transaction.
-     * @param {{ table: string, name: string, sql: string }} shape - `sql` is
-     *   the CHECK's expression, as {@link intervalCheck} renders one
+     * Add a CHECK to an existing table — a declared interval arriving
+     * through a migration, or a number column's own, on an engine that alters
+     * a table in place. The engine checks every stored row as it adds the
+     * constraint, inside the statement's transaction.
+     * @param {{ table: string, name?: string, sql: string }} shape - `sql` is
+     *   the CHECK's expression, as {@link intervalCheck} renders one; without
+     *   a `name` the engine names it, as it names a column's own CHECK
      * @returns {string}
      */
     addCheck({ table, name, sql }) {
-      return `ALTER TABLE ${q(table)} ADD CONSTRAINT ${q(name)} CHECK (${sql})`;
+      return `ALTER TABLE ${q(table)} ADD ${name === undefined ? '' : `CONSTRAINT ${q(name)} `}CHECK (${sql})`;
     },
     /**
      * Add one foreign key to an existing table, named as the engine names a
@@ -1081,6 +1083,14 @@ export function createDialect(spec) {
     physicalValueType: spec.physicalValueType,
     physicalDifferent: spec.physicalDifferent,
     numberCast: spec.numberCast ?? ((sql) => `CAST(${sql} AS REAL)`),
+    /**
+     * The CHECK a number column an entity or join table declares carries on
+     * an engine whose number type holds a value no JSON number is, which
+     * every comparison and order of the column would read otherwise than the
+     * engine; `undefined` where the type holds none (SQLite's `REAL` stores
+     * a NaN as NULL).
+     */
+    numberCheck: spec.numberCheck,
     /**
      * A JSON number a statement hands BACK to the host, or compares with
      * an integer past 2^53, as the double the engine holds. An engine that

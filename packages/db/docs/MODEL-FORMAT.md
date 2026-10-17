@@ -34,7 +34,10 @@ written otherwise is reported as its own loss (`unmapped-object`,
 A collection's declared interval comes back from its CHECK as the `intervals`
 entry that declared it, the span typed an object of two required `integer`
 bounds, which is no loss; a CHECK of another shape or name, or one added
-`NOT VALID`, is `unmapped-constraint`.
+`NOT VALID`, is `unmapped-constraint`. An entity's number column's
+`CHECK (column <> 'NaN')` on PostgreSQL (§9.3) is the store's own, validated,
+and declares nothing beyond the column's type: no loss, nothing in the derived
+schema.
 Repeated inspection is read-only; `strict: true` refuses losses with `JD0002`.
 
 The loss rows are the contract for what the model vocabulary cannot say;
@@ -2998,6 +3001,7 @@ Stated once, mechanically applied, and returned as data by
 | scalar (`string`/`number`/`integer`/`boolean`) at the top level | a real typed column |
 | `format: date-time`/`date` with `column: "integer"` | an epoch-milliseconds `INTEGER` column; the document keeps the RFC 3339 string, the column carries the derived epoch |
 | `enum` of scalars | a column plus a `CHECK (column IN (…))` — a `null` member of the enum is left to the column's nullability, never written into the list. The set names the column's type, so `{ "enum": ["draft", "open"] }` with no `type` is a `TEXT` column; a set MIXING JSON types has no one column type and goes to the document, like a union |
+| `number`/`integer` (an epoch, a key and a column referencing one included) on PostgreSQL | a `numeric` column plus a `CHECK (column <> 'NaN')`, unless an enum's CHECK lists its values: `numeric` holds a `NaN`, which no JSON number is and which a comparison or an order would read otherwise than the engine (POSTGRESQL.md) |
 | a union of several scalar types (`['string', 'integer']`) | the JSONB document — a column has one affinity and a union has several; `['integer', 'null']` is that scalar, nullable |
 | a nullable member spelled as a union, `{ "anyOf": [{ "type": "string" }, { "type": "null" }] }` | the JSONB document, while `{ "type": ["string", "null"] }` gets a nullable column — the mapper reads the spelling, not the value set (below) |
 | nested object / array, or `column: "json"` | the JSONB document column, queryable by path exactly as in phase A |

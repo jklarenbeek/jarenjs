@@ -104,6 +104,8 @@ for (const engine of ENGINES) {
         const store = await h.open(textModel('number'));
         for (const at of raw.keys()) await store.entity('T').create({ id: `r${at}`, v: 1 });
         await store.close();
+        // a table an earlier release created holds no CHECK refusing the NaN
+        if (engine === 'postgres') await h.run('ALTER TABLE "T" DROP CONSTRAINT "T_v_check"');
         for (const [at, value] of raw.entries()) await h.run(`UPDATE "T" SET "v" = ${value} WHERE "id" = 'r${at}'`);
         await migrate(h.target, [planned(h.dialect, textModel('number'), textModel('string'))],
           { baseline: textModel('number'), model: textModel('string'), shadow: false });

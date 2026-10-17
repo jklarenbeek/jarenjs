@@ -2010,6 +2010,32 @@ const expectedColumnsOf = (columns, legacyTypes, dialect) => [...columns
   .sort((a, b) => (a.name < b.name ? -1 : 1));
 
 /**
+ * The CHECK a number column of an entity or join table carries where it has no
+ * enum's: on an engine whose number type holds a value no JSON number is
+ * (`dialect.numberCheck`, PostgreSQL's `numeric` and its `'NaN'`), the refusal
+ * of that value, so no writer stores a row every comparison and order of the
+ * column would read otherwise than the engine; `undefined` for any other column
+ * or engine.
+ * @param {any} dialect @param {string} columnName @param {string} type - the column's declared type
+ * @returns {string | undefined}
+ */
+export function numberCheckOf(dialect, columnName, type) {
+  return dialect.numberCheck !== undefined && type === dialect.typeFor('number', 'generated')
+    ? dialect.numberCheck(dialect.quoteIdentifier(columnName)) : undefined;
+}
+
+/**
+ * The planned columns whose CHECK is a number column's own (`numberCheckOf`),
+ * each with that CHECK.
+ * @param {{ name: string, type: string, check?: string }[]} columns @param {any} dialect
+ * @returns {{ column: string, check: string }[]}
+ */
+const numberChecksOf = (columns, dialect) => columns.flatMap((column) => {
+  const check = numberCheckOf(dialect, column.name, column.type);
+  return check !== undefined && column.check === check ? [{ column: column.name, check }] : [];
+});
+
+/**
  * Plan one ENTITY's physical shape from the mapping data
  * `explainMapping` derived: the relational table (typed columns,
  * checks, foreign keys, the JSONB document column), its indexes, and
@@ -2029,7 +2055,8 @@ const expectedColumnsOf = (columns, legacyTypes, dialect) => [...columns
  *   columnNames: Set<string>, objects?: { name: string, what: string, docPath: string }[],
  *   programs?: any[], conditionColumns?: { name: string, physical: string, codec: string }[],
  *   declaredCalls?: Map<string, { index: string, term: string, docPath: string }>,
- *   deferredForeignKeys?: string[], autoKey?: string, keyAllocates?: boolean }}
+ *   deferredForeignKeys?: string[], autoKey?: string, keyAllocates?: boolean,
+ *   numberChecks?: { column: string, check: string }[], keys?: string[] }}
  */
 export function planEntity(name, entityMapping, entities, dialect, options = {}) {
   if (entityMapping.document === false) {
@@ -2090,18 +2117,22 @@ export function planEntity(name, entityMapping, entities, dialect, options = {})
   const columns = [];
   for (const column of entityMapping.columns) {
     if (fkNames.has(column.name)) continue;
+    const type = column.key ? keyHolding(column.name, column, false) : storageType(column.storage);
     columns.push({
       name: column.name,
-      type: column.key ? keyHolding(column.name, column, false) : storageType(column.storage),
+      type,
       primaryKey: singleKey && column.key,
       notNull: column.key && !singleKey,
-      check: column.check !== undefined ? renderCheck(column.name, column.check) : undefined,
+      // an enum's list admits no NaN, so it is the column's whole CHECK
+      check: column.check !== undefined ? renderCheck(column.name, column.check) : numberCheckOf(dialect, column.name, type),
     });
   }
   for (const fk of entityMapping.foreignKeys) {
+    const type = keyHolding(fk.column, entities.entities[fk.references].columns.find((/** @type {any} */ column) => column.key), true);
     columns.push({
       name: fk.column,
-      type: keyHolding(fk.column, entities.entities[fk.references].columns.find((/** @type {any} */ column) => column.key), true),
+      type,
+      check: numberCheckOf(dialect, fk.column, type),
       references: { table: fk.references, column: fk.referencesKey, onDelete: fk.onDelete },
     });
   }
@@ -2193,6 +2224,9 @@ export function planEntity(name, entityMapping, entities, dialect, options = {})
     columnNames: new Set(columns.map((column) => column.name)),
     ...(autoColumn === undefined ? {} : { autoKey: autoColumn.name }),
     expectedForeignKeys: expectedForeignKeysOf(columns),
+    /** The number columns' own CHECKs (`numberCheckOf`), and the key columns that name a row. */
+    numberChecks: numberChecksOf(columns, dialect),
+    keys: [...entityMapping.keys],
     /** The statements that add the cycle's foreign keys, run after every table of the cycle exists. */
     deferredForeignKeys: columns.filter((column) => deferred.has(column.name))
       .map((column) => dialect.ddl.addForeignKey({ table: name, column: column.name, references: column.references })),
@@ -2295,7 +2329,8 @@ function rulePrograms(name, entityMapping, entities, dialect, declared, readable
  * @param {any} entities - the full mapping
  * @param {any} dialect
  * @returns {{ table: string, createSql: string[], expected: any,
- *   objects: { name: string, what: string, docPath: string }[] }}
+ *   objects: { name: string, what: string, docPath: string }[],
+ *   numberChecks: { column: string, check: string }[], keys: string[] }}
  */
 export function planJoinTable(tableName, join, entities, dialect) {
   // the join table and its columns are named from the two entities
@@ -2313,6 +2348,7 @@ export function planJoinTable(tableName, join, entities, dialect) {
     return {
       name: side.column,
       type,
+      check: numberCheckOf(dialect, side.column, type),
       references: { table: side.entity, column: side.referencesKey, onDelete: 'cascade' },
     };
   };
@@ -2336,6 +2372,8 @@ export function planJoinTable(tableName, join, entities, dialect) {
     }), dialect.ddl.createIndex({ ...index, table: tableName })],
     objects,
     expectedForeignKeys: expectedForeignKeysOf(columns),
+    numberChecks: numberChecksOf(columns, dialect),
+    keys: [join.left.column, join.right.column],
     expected: {
       columns: expectedColumnsOf(columns, legacyTypes, dialect),
       indexes: [{ ...index, legacyAbsent: true }],

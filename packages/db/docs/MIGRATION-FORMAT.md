@@ -465,7 +465,18 @@ that rebuilds exactly the ones that differ:
   `report.upgraded` names `c.kx_q` and `c.c_by_q$container`. Where the table
   already holds documents the index would refuse, the plan refuses `JD0023`
   (`class: 'constraint'`) before any step, naming them in `duplicates`, as
-  above.
+  above;
+- on PostgreSQL, a `numeric` column of an entity or a join table without the
+  `CHECK (col <> 'NaN')` a fresh store gives it ([POSTGRESQL](POSTGRESQL.md)),
+  which no earlier release created: another writer could store a `NaN`, which
+  a comparison or an order of the column reads otherwise than the engine. The
+  link adds the CHECK (`ALTER TABLE "E" ADD CHECK ("a" <> 'NaN')`) and changes
+  nothing else; `report.upgraded` names the column, `E.a`. Where the table holds
+  a row whose column is `NaN`, the plan refuses `JD0023` (`class:
+  'constraint'`) before any step, naming `table`, `columns` and the `rows` by
+  their key read as text (`[['b']]`); write a number or NULL in its place and
+  plan again. A migration that rebuilds such a table before the upgrade fails
+  `JD0023` naming the CHECK its copy breaks, with nothing changed.
 
 The steps are the ones a model change plans for the same column: drop the
 indexes over it (and the CHECK that reads it), drop the column, add it as a fresh
@@ -475,8 +486,9 @@ like any other, and a table that refuses the rebuilt definition (a stored docume
 of the other container kind that collides in a unique index over the rebuilt
 column) fails the link `JD0023` with nothing changed: migrate the documents first. `report.upgraded` names each rebuilt definition
 (`c.gx_q`, `rows.slot_interval`). A definition that is neither spelling is left
-as it is for the open path to refuse (`JD0002`). Entity tables, the document schema
-and every other difference between models are not planned here.
+as it is for the open path to refuse (`JD0002`). An entity table's other
+definitions, the document schema and every other difference between models are
+not planned here.
 
 The upgrade is a plan of its own, never a side effect of `planMigration` or
 `migrate()`: a plan between models stays a function of the models, so the plan

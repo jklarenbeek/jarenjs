@@ -1069,8 +1069,9 @@ export async function hybridGrid(engine) {
           await fixture.exec('DELETE FROM "Row"');
           verdicts.push(expected);
         }
+        // a NaN is refused by the number column's own CHECK before the rule reads it
         if (expression === HYBRID_GRID_PREDICATES.at(-1)) for (const sql of HYBRID_WRONG_STORAGE[/** @type {'sqlite' | 'postgres'} */ (engine.name)])
-          await assert.rejects(insert(3, sql), /jaren invariant:truth/, sql);
+          await assert.rejects(insert(3, sql), sql.includes("'NaN'") ? /violates check constraint "Row_n_check"/ : /jaren invariant:truth/, sql);
       }
       finally { await store.close(); }
     }

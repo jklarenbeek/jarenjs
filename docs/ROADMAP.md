@@ -703,15 +703,24 @@ what each does is its own documentation's job
   lose the key's index. Wanted: the interval comparison every other number
   column makes, and the double read every other pair of number columns makes,
   for a key column whose type the open has read as `numeric`.
-- [ ] **On PostgreSQL a `NaN` another writer stored in a number column is
-  refused only where a statement returns its column.** A row whose `numeric`
-  column holds `'NaN'` is refused `JD2003` by the engine's read and by every
-  statement that returns the column, but a statement that compares or orders
-  the column without returning it reads PostgreSQL's `NaN`, which orders above
-  every number and equals itself (`$gt: ['$it.a', 5]` returning ids keeps the
-  row, `$lt` drops it), where the engine refuses. Wanted: a `CHECK (col <>
-  'NaN')` on the number columns the store makes (with the DDL minor's
-  downgrade proof), or a guard that raises in the statement.
+- [ ] **On PostgreSQL a `NaN` another writer stored in a number column of a
+  table the store did not create with its CHECK is refused only where a
+  statement returns its column.** The store gives every `numeric` column of an
+  entity or join table it creates `CHECK (col <> 'NaN')`, and
+  `planColumnUpgrade` adds it to a table an earlier release created; until
+  that link applies, and in a table a physical mapping adopts (not the store's
+  to alter), a row whose column holds `'NaN'` is refused `JD2003` where a
+  statement returns the column, while one that compares or orders it without
+  returning it reads PostgreSQL's `NaN` (above every number, equal to itself)
+  where the engine refuses. Wanted: a physical mapping's number column
+  qualified or refused at open, or documented as the mapping's loss.
+- [ ] **On PostgreSQL a collection orders a typed number member another writer
+  stored as a non-number.** A document whose `number` member holds a string
+  (`jsonb_set(doc, '{a}', '"x"')`, which the store's validation never writes)
+  orders natively by the generated column's NULL (`$orderby ['$it.a']` →
+  ["b","a","c"]) where the engine refuses `JQ2005`; SQLite's STRICT generated
+  `REAL` column refuses such a write. Wanted: the engine's refusal, or the
+  documented loss.
 - [ ] **On PostgreSQL an entity's ordering never reads an index.** An entity
   order term is `ASC NULLS FIRST` (descending `DESC NULLS LAST`) with the row
   identity appended, which a default btree scan does not give, so a window, a

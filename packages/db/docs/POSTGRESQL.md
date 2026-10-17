@@ -381,13 +381,25 @@ infinity (`$lt: ['$it.n', Infinity]`, a JavaScript host's), alone or in a
 literal list, compares with the decimals at and past the one that rounds to it,
 as an external infinity does.
 
-A `numeric` column the store made holds no `NaN` the store writes, and the JSON
-number model holds none, but another writer can store one (`UPDATE … SET n =
-'NaN'`), which PostgreSQL orders above every number and equals to itself where
-the engine orders and equals it with nothing: a row read with such a value is
-refused `JD2003` naming the column, by the engine's read and by every statement
-that returns the column. A statement that compares the column without returning
-it reads PostgreSQL's `NaN` and answers where the engine refuses.
+A `numeric` column holds `NaN`, which the JSON number model does not, and
+which PostgreSQL orders above every number and equals to itself where the engine
+refuses the row. Every `numeric` column of an entity or a join table the store
+creates — a mapped number or integer member, an epoch, a key and a column
+referencing one — carries `CHECK (col <> 'NaN')` (a column with an enum keeps
+the enum's CHECK, which admits none), so another writer's `UPDATE … SET n =
+'NaN'` fails `23514` and every comparison and order of the column answers as the
+engine; `introspect()` reads that CHECK as the store's own. The CHECK costs a
+write nothing measurable and a read nothing, where a guard in each statement
+would read every row of the table. A collection's generated column computes
+from its document, whose `jsonb` holds no `NaN` (a `NaN` numeric becomes the
+JSON string `"NaN"`). A table an earlier release created has no such CHECK: it
+opens and answers as before, `planColumnUpgrade` adds it (refused `JD0023`
+naming the rows while one holds a `NaN`, MIGRATION-FORMAT §3), and until then,
+as in a table the store maps but did not create (a physical mapping), a row read
+with a `NaN` is refused `JD2003` naming the column, by the engine's read and by
+every statement that returns the column, while a statement that compares or
+orders the column without returning it reads PostgreSQL's `NaN` and answers
+where the engine refuses.
 An entity's key, and a column referencing one, keep the exact comparison: such
 a column may be declared as the allocation a database-allocated key takes
 (`bigserial`, `bigint`), which reads no fractional edge and holds no integer in

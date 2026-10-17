@@ -313,11 +313,13 @@ describe('two number columns of a join and a hop, PostgreSQL', { skip: skipFor('
     });
   });
 
-  it('refuse a numeric NaN another writer stored, wherever a row holding it is read', async () => {
+  it('refuse a numeric NaN another writer stored in a table an earlier release created, wherever a row holding it is read', async () => {
     await withStore('postgres', MODEL, async (store, pg) => {
       const { pool, schema } = /** @type {{ pool: any, schema: string }} */ (pg);
       for (const [id, a] of [['a', 1], ['b', 5], ['c', 7], ['d', 3]]) await store.entity('E').create({ id, a, c: a });
       for (const [id, y] of [['a', 1], ['b', 5]]) await store.entity('B').create({ id, y });
+      // a table an earlier release created holds no CHECK refusing the NaN
+      await pool.query(`ALTER TABLE "${schema}"."E" DROP CONSTRAINT "E_a_check", DROP CONSTRAINT "E_c_check"`);
       await pool.query(`UPDATE "${schema}"."E" SET "a" = 'NaN', "c" = 'NaN' WHERE "id" = 'b'`);
       const rows = (/** @type {any} */ where) => ({ $for: { it: '$.E[*]' }, ...(where === undefined ? {} : { $where: where }),
         $orderby: ['$it.id'], $return: { id: '$it.id', a: '$it.a' } });

@@ -1019,6 +1019,9 @@ export function postgresDialect(options = undefined) {
     textOperand: (columnSql) => `(${columnSql} COLLATE "default")`,
     // the catalog already answers one row per generated column
     readChecks: postgresChecks,
+    // `numeric` holds 'NaN', which no JSON number is: it orders above every
+    // number and equals itself, where the engine refuses the row (`JD2003`)
+    numberCheck: (columnSql) => `${columnSql} <> 'NaN'`,
     readGenerated: (rows) => rows.map((row) => ({
       name: String(row.name), expression: String(row.expression ?? ''),
     })),

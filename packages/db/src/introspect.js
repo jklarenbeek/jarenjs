@@ -815,6 +815,9 @@ function deriveEntity(dialect, table, report, edges, expressions) {
   }
   for (const check of table.checks) {
     const property = Object.hasOwn(properties, check.column) ? properties[check.column] : undefined;
+    // the CHECK a store gives a number column on an engine whose number type holds
+    // a NaN: the column's own, which declares nothing beyond its type
+    if (check.notNaN === true && check.validated !== false && (property?.type === 'number' || property?.type === 'integer')) continue;
     const family = property?.type === 'integer' ? 'number'
       : property?.type === 'string' ? 'string' : property?.type;
     if (check.values === undefined || property === undefined

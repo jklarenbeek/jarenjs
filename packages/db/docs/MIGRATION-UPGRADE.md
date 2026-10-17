@@ -3524,6 +3524,43 @@ those orderings answer by the digits written, as before.
 answers above are the ones it gave, and a continuation holding `$numberDouble`
 is refused by the database's driver (it never resumes at a wrong row).
 
+## 61. A number column refuses a NaN on PostgreSQL
+
+On PostgreSQL every `numeric` column of an entity or a join table the store
+creates — a mapped `number` or `integer` member, an epoch, a key and a column
+referencing one — now carries `CHECK (col <> 'NaN')`, unless an enum's CHECK
+lists its values ([POSTGRESQL](POSTGRESQL.md), [MODEL-FORMAT §9.3](MODEL-FORMAT.md#93-the-hybrid-mapping)).
+Another writer's `UPDATE … SET n = 'NaN'` fails `23514`, where it was stored
+and then read by a statement that compared or ordered the column without
+returning it as PostgreSQL's `NaN`, above every number and equal to itself:
+`$gt: ['$it.a', 5]` returning ids kept the row, `$lt` dropped it, where the
+engine refuses the row (`JD2003`). A column a migration adds is created with
+the CHECK. SQLite's tables are unchanged: its `REAL` stores no NaN (a NaN the
+server computes is stored as NULL, a text is refused by the `STRICT` table), and
+a collection's generated column reads its document, whose JSON holds none.
+
+- A table an earlier release created holds no such CHECK. It opens, reads,
+  introspects and plans exactly as before, and its answers are the previous
+  release's: a stored `NaN` is refused `JD2003` where a statement returns its
+  column, and read as PostgreSQL's `NaN` where one only compares or orders it.
+  `planColumnUpgrade` adds the CHECK to each such column
+  ([MIGRATION-FORMAT §3](MIGRATION-FORMAT.md#upgrading-the-definitions-a-table-holds));
+  where a row holds a `NaN`, the plan refuses `JD0023` before any step, naming
+  the table, the columns and the rows by their key. Write a number or NULL in
+  its place and plan again. A migration that rebuilds such a table first fails
+  `JD0023` naming the CHECK its copy breaks, with nothing changed.
+- `introspect()` reads the CHECK as the store's own: no `unmapped-constraint`
+  row, nothing in the derived schema.
+- A table the store maps but did not create (a physical mapping) is not the
+  store's to alter: it keeps the previous release's answers.
+
+**Downgrade.** The previous release opens, reads, queries and plans a table this
+one creates as it does its own (it compares no CHECK of an entity table on
+PostgreSQL), and its `introspect()` reports each number column's CHECK as
+`unmapped-constraint` beside the same derived model. A migration document this
+release plans carries the CHECK in the column it adds, and keeps creating it
+when the previous release applies it.
+
 ## Measured costs
 
 Exact identity stores complete canonical documents and model endpoints, so
