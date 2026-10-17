@@ -135,7 +135,7 @@ describe('app.settled() — the drain, or the frame', () => {
     app.destroy();
   });
 
-  it('takes { frame } and nothing else', () => {
+  it('takes { frame, awaits, signal } and nothing else', () => {
     const { app } = mount();
     for (const options of [null, 1, [], { frame: 'yes' }, { frames: true }]) {
       assert.throws(() => app.settled(/** @type {any} */ (options)),

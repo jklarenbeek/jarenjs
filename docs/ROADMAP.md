@@ -256,11 +256,6 @@ is an opt-in formatter policy with unchanged default bytes. SQLite
 have source and isolated-package fixtures. These source capabilities do not
 establish registry publication or downstream acceptance.
 
-- [ ] **Settling on awaits in flight.** `app.settled()` answers when the queue
-  drains; an awaiting action's effect in flight is not queued, so a server
-  render or a test that dispatches one has no handle on its continuation
-  (APP-FORMAT §3.3). Open: a settled form that also waits, bounded, for the
-  awaits in flight.
 - [ ] **The app pen writes no awaiting action.** `@jarenjs/linq/app` builds
   query actions only; an `{ "$await": … }` action (APP-FORMAT §3.3) is written
   by hand beside the pen's document. Open: a builder capturing

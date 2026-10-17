@@ -440,6 +440,102 @@ describe('cancellation', () => {
   }
 });
 
+describe('settled({ awaits: true }) waits for the awaits in flight', () => {
+  it('settled() answers while the effect is in flight; awaits: true after its continuation', async () => {
+    const { app, calls } = mount();
+    app.dispatch('search', 'ada');
+    assert.equal((await app.settled()).status, 'loading');
+    /** @type {any[]} */
+    const seen = [];
+    const waiting = app.settled({ awaits: true }).then((state) => seen.push(state.status));
+    await drain();
+    assert.deepEqual(seen, [], 'the effect has not settled');
+    calls[0].resolve(['Ada']);
+    await waiting;
+    assert.deepEqual(seen, ['done']);
+    assert.deepEqual(app.getState().users, ['Ada']);
+  });
+
+  it('resolves at once when nothing is in flight, and after a failure continued through catch', async () => {
+    const { app, calls } = mount();
+    assert.equal((await app.settled({ awaits: true })).status, 'idle');
+    app.dispatch('search', 'ada');
+    const waiting = app.settled({ awaits: true });
+    calls[0].reject(new Error('offline'));
+    assert.deepEqual((await waiting).error, { code: 'JA2028', message: 'offline' });
+  });
+
+  it('waits past a superseded await for the one its slot holds', async () => {
+    const { app, calls } = mount();
+    app.dispatch('search', 'a');
+    app.dispatch('search', 'ab');
+    /** @type {any[]} */
+    const seen = [];
+    const waiting = app.settled({ awaits: true }).then((state) => seen.push(state.users));
+    calls[0].resolve(['dropped']);
+    await drain();
+    assert.deepEqual(seen, [], 'the superseded settlement ends no wait');
+    calls[1].resolve(['kept']);
+    await waiting;
+    assert.deepEqual(seen, [['kept']]);
+  });
+
+  it('waits for an await the continuation\'s transaction started', async () => {
+    const { app, calls } = mount();
+    let again = true;
+    app.subscribe((state) => {
+      if (state.status === 'done' && again) {
+        again = false;
+        app.dispatch('search', 'second');
+      }
+    });
+    app.dispatch('search', 'first');
+    /** @type {any[]} */
+    const seen = [];
+    const waiting = app.settled({ awaits: true }).then((state) => seen.push([state.query, state.status]));
+    calls[0].resolve(['one']);
+    await drain();
+    assert.equal(calls.length, 2, 'the continuation\'s transaction started a second await');
+    assert.deepEqual(seen, []);
+    calls[1].resolve(['two']);
+    await waiting;
+    assert.deepEqual(seen, [['second', 'done']]);
+  });
+
+  it('stop() answers a waiter with the state then; the late settlement changes nothing', async () => {
+    const { app, calls } = mount();
+    app.dispatch('search', 'ada');
+    const waiting = app.settled({ awaits: true });
+    app.stop();
+    assert.equal((await waiting).status, 'loading');
+    calls[0].resolve(['late']);
+    await drain();
+    assert.equal(app.getState().status, 'loading');
+  });
+
+  it('a signal bounds the wait: its abort rejects with the reason, and the app goes on', async () => {
+    const { app, calls } = mount();
+    app.dispatch('search', 'ada');
+    const controller = new AbortController();
+    const waiting = app.settled({ awaits: true, signal: controller.signal });
+    const reason = new Error('took too long');
+    controller.abort(reason);
+    await assert.rejects(waiting, (error) => error === reason);
+    const aborted = AbortSignal.abort('already');
+    await assert.rejects(app.settled({ signal: aborted }), (error) => error === 'already');
+    calls[0].resolve(['Ada']);
+    assert.equal((await app.settled({ awaits: true, signal: new AbortController().signal })).status, 'done');
+  });
+
+  it('refuses an option of the wrong kind', () => {
+    const { app } = mount();
+    assert.throws(() => app.settled({ awaits: 'yes' }), { name: 'TypeError', message: 'app.settled: options.awaits is a boolean' });
+    assert.throws(() => app.settled({ signal: {} }), { name: 'TypeError', message: 'app.settled: options.signal is an AbortSignal' });
+    assert.throws(() => app.settled({ await: true }),
+      { name: 'TypeError', message: "app.settled: does not take 'await' — it takes frame, awaits and signal" });
+  });
+});
+
 describe('the README example runs as written', () => {
   it('a model-authored action awaiting a fetch effect: loading, superseded, done', async () => {
     const md = fs.readFileSync(new URL('../../packages/app/README.md', import.meta.url), 'utf8');

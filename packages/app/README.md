@@ -309,9 +309,9 @@ renderToString(createApp(doc).getVnode());
 
 ## API
 
-`createApp(appDoc, options)` → `{ dispatch(name, payload?), getState(), setState(next), getVnode(), render(), settled({ frame? }?), subscribe(listener), observe(observer), stop(), destroy() }`
+`createApp(appDoc, options)` → `{ dispatch(name, payload?), getState(), setState(next), getVnode(), render(), settled({ frame?, awaits?, signal? }?), subscribe(listener), observe(observer), stop(), destroy() }`
 
-`await app.settled()` resolves with the state once the queue has drained — the dispatches an effect queued included; `await app.settled({ frame: true })` resolves after the next committed frame, when the DOM shows that state (APP-FORMAT §8.1).
+`await app.settled()` resolves with the state once the queue has drained — the dispatches an effect queued included; `await app.settled({ awaits: true })` also waits for every awaiting action's effect in flight and its continuation, so a server render or a test that dispatched one reads the finished state; `await app.settled({ frame: true })` resolves after the next committed frame, when the DOM shows that state; a `signal` bounds either wait (APP-FORMAT §8.1).
 
 Also exported: `compileActions`, `compileSubs`, `createFormView`, `createFormActions`, `formEventFields`, `createTaskEffect`, `createJsonStateValidator`, `createFocusEffect`, `createTransactionLog`, `createSplitterWidget`, `createDocStore`, `encodeShare`, `decodeShare`, and the error classes (`AppCompileError`, `AppRuntimeError`, `HostValueError`, `toError`, `APP_CODES`).
 

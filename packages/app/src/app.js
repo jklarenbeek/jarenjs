@@ -559,6 +559,14 @@ export function createApp(appDoc, options = {}) {
   const drainWaiters = [];
   /** @type {Array<(state: any) => void>} */
   const frameWaiters = [];
+  /**
+   * `settled({ awaits: true })` callers: each is answered once no drain
+   * runs and no await is in flight (APP-FORMAT §3.3), then as `settleOne`
+   * answers it. `stop()`/`destroy()` release them; an aborted `signal`
+   * rejects one.
+   * @type {Array<{ frame: boolean, resolve: (state: any) => void }>}
+   */
+  const awaitWaiters = [];
   /** The state the frame in progress paints: a waiter settles on a frame
    * only while the state is still that one. @type {any} */
   let paintedState;
@@ -702,8 +710,11 @@ export function createApp(appDoc, options = {}) {
 
   /** The drain ended: every caller that waited on it is answered. */
   function settleDrainWaiters() {
-    if (drainWaiters.length === 0) return;
     for (const waiter of drainWaiters.splice(0)) settleOne(waiter.frame, waiter.resolve);
+    // a continuation may have started another await: those waiters wait on
+    if (awaitSlots.size === 0) {
+      for (const waiter of awaitWaiters.splice(0)) settleOne(waiter.frame, waiter.resolve);
+    }
   }
 
   /** A frame committed — or none will: every frame waiter is answered. */
@@ -1605,6 +1616,7 @@ export function createApp(appDoc, options = {}) {
     stateListeners.clear();
     // a stopped loop renders no more frames: nobody waits for one
     for (const waiter of drainWaiters.splice(0)) waiter.resolve(state);
+    for (const waiter of awaitWaiters.splice(0)) waiter.resolve(state);
     settleFrameWaiters();
   }
 
@@ -1899,33 +1911,77 @@ export function createApp(appDoc, options = {}) {
      * Wait for the app to settle (APP-FORMAT §8.1). Without options it
      * resolves when the drain in progress ends — every queued dispatch,
      * the ones its effects queued included, has committed — or at once
-     * when the queue is idle. With `{ frame: true }` it resolves after the
-     * next committed frame and its `afterRender`: the DOM shows the state
-     * it resolves with. A headless or stopped app, or one with no frame
-     * pending, resolves at once.
-     * @param {{ frame?: boolean }} [settleOptions]
+     * when the queue is idle. With `{ awaits: true }` it also waits until
+     * no awaiting action's effect is in flight (APP-FORMAT §3.3): every
+     * continuation, and every await a continuation started, has
+     * committed. With `{ frame: true }` it resolves after the next
+     * committed frame and its `afterRender`: the DOM shows the state it
+     * resolves with. A headless or stopped app, or one with no frame
+     * pending, resolves at once. `signal` bounds the wait: its abort
+     * rejects the promise with the signal's reason.
+     * @param {{ frame?: boolean, awaits?: boolean, signal?: AbortSignal }} [settleOptions]
      * @returns {Promise<any>} the state then
-     * @throws {TypeError} an option it does not take, or `frame` that is
-     *   not a boolean
+     * @throws {TypeError} an option it does not take, `frame` or `awaits`
+     *   that is not a boolean, or `signal` that is not an AbortSignal
      */
     settled(settleOptions = undefined) {
       let frame = false;
+      let awaits = false;
+      /** @type {AbortSignal | null} */
+      let signal = null;
       if (settleOptions !== undefined) {
         if (!isJsonObject(settleOptions)) {
-          throw new TypeError('app.settled: options are { frame?: boolean }');
+          throw new TypeError('app.settled: options are { frame?: boolean, awaits?: boolean, signal?: AbortSignal }');
         }
         for (const key of Object.keys(settleOptions)) {
-          if (key !== 'frame') throw new TypeError(`app.settled: does not take '${key}' — it takes frame`);
+          if (key !== 'frame' && key !== 'awaits' && key !== 'signal') {
+            throw new TypeError(`app.settled: does not take '${key}' — it takes frame, awaits and signal`);
+          }
         }
-        if (settleOptions.frame !== undefined && typeof settleOptions.frame !== 'boolean') {
-          throw new TypeError('app.settled: options.frame is a boolean');
+        for (const key of /** @type {const} */ (['frame', 'awaits'])) {
+          if (settleOptions[key] !== undefined && typeof settleOptions[key] !== 'boolean') {
+            throw new TypeError(`app.settled: options.${key} is a boolean`);
+          }
+        }
+        if (settleOptions.signal !== undefined && !(settleOptions.signal instanceof AbortSignal)) {
+          throw new TypeError('app.settled: options.signal is an AbortSignal');
         }
         frame = settleOptions.frame === true;
+        awaits = settleOptions.awaits === true;
+        signal = settleOptions.signal ?? null;
       }
-      return new Promise((resolve) => {
-        if (draining && running) drainWaiters.push({ frame, resolve });
-        else settleOne(frame, resolve);
+      return new Promise((resolve, reject) => {
+        if (signal !== null) {
+          if (signal.aborted) {
+            reject(signal.reason);
+            return;
+          }
+          const aborted = signal;
+          const waiter = { frame, resolve: (/** @type {any} */ value) => {
+            aborted.removeEventListener('abort', onAbort);
+            resolve(value);
+          } };
+          const onAbort = () => {
+            for (const list of [drainWaiters, awaitWaiters]) {
+              const at = list.indexOf(waiter);
+              if (at !== -1) list.splice(at, 1);
+            }
+            const at = frameWaiters.indexOf(waiter.resolve);
+            if (at !== -1) frameWaiters.splice(at, 1);
+            reject(aborted.reason);
+          };
+          aborted.addEventListener('abort', onAbort, { once: true });
+          park(waiter);
+        }
+        else park({ frame, resolve });
       });
+
+      /** @param {{ frame: boolean, resolve: (state: any) => void }} waiter */
+      function park(waiter) {
+        if (awaits && running && (draining || awaitSlots.size > 0)) awaitWaiters.push(waiter);
+        else if (draining && running) drainWaiters.push(waiter);
+        else settleOne(waiter.frame, waiter.resolve);
+      }
     },
     /**
      * Observe state changes. The listener receives the new state and the

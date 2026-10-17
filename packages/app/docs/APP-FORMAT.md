@@ -272,6 +272,10 @@ that aborts the request by other means sees it continue through `catch`
 (`JA2028`), so the document always learns how its await ended.
 `app.settled()` (§8.1) answers when the queue settles; an await in
 flight is not queued, so it does not wait for it.
+`app.settled({ awaits: true })` does: it answers once the queue has
+settled and no await is in flight, so it waits for every continuation
+and for any await a continuation's transaction started; a superseded
+await's dropped settlement ends no wait.
 
 ## 4. Event bindings
 
@@ -674,6 +678,13 @@ two moments, because "settled" means two things:
   effect that dispatched reads the state its dispatch produced with
   `await app.settled()` instead of guessing how many microtasks the
   loop takes.
+- `app.settled({ awaits: true })` — the queue has settled **and no
+  awaiting action's effect is in flight** (§3.3): it resolves after the
+  last continuation committed, including the continuations of awaits a
+  continuation's transaction started; at once when nothing is in
+  flight. A server render or a test that dispatched an awaiting action
+  reads the finished state with it. An effect that never settles never
+  ends this wait: bound it with `signal`.
 - `app.settled({ frame: true })` — the **screen** has settled: it
   resolves after the next committed frame, once that frame's
   `afterRender` (§8.4) ran, so the DOM shows the state it resolves
@@ -685,8 +696,14 @@ two moments, because "settled" means two things:
   that fails to render reports through `onError` and still answers its
   waiters, unless the error sink scheduled another frame.
 
-The options are closed: anything other than a boolean `frame` is a
-`TypeError`.
+`awaits` and `frame` combine: the frame waited for is the one after
+the awaits settled. `signal`, an `AbortSignal`, bounds any of these
+waits: its abort rejects the promise with the signal's reason (at once
+when it is already aborted) and changes nothing in the app. `stop()`
+and `destroy()` answer every waiter with the state then.
+
+The options are closed: anything other than a boolean `frame`, a
+boolean `awaits` and an `AbortSignal` `signal` is a `TypeError`.
 
 ### 8.2 Boot, stop, destroy
 
