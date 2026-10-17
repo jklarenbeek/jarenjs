@@ -36,15 +36,15 @@ is the index of those guides, and it is how a reader reaches any of them.
 <!--fact:pens.index-->
 | Document | Lines | What it writes, and when to open it |
 |---|---:|---|
-| [LINQ-FORMAT.md](LINQ-FORMAT.md) | 971 | this file, the binder and the family's **normative reference**: what a pen is, the rules all of them keep, the shared `JL01xx` table, and the cross-pen views derived from the guides it indexes. **Read it when** you want a rule that is true of every pen, an index of the documents, or one place to look up a method without knowing which pen owns it |
+| [LINQ-FORMAT.md](LINQ-FORMAT.md) | 972 | this file, the binder and the family's **normative reference**: what a pen is, the rules all of them keep, the shared `JL01xx` table, and the cross-pen views derived from the guides it indexes. **Read it when** you want a rule that is true of every pen, an index of the documents, or one place to look up a method without knowing which pen owns it |
 | [QUERY-PEN.md](QUERY-PEN.md) | 2,179 | the chain, `.` — query documents (`jaren-query`) and the provider seam. **Read it when** you are querying data, or implementing a provider that answers a query document |
 | [SCHEMA-PEN.md](SCHEMA-PEN.md) | 1,266 | `./schema` — JSON Schema 2020-12: the structural keywords, the constraints and the annotations, each with a method of its own, plus `$query`, `$defs`/`$ref` recursion and the normalizer's per-field predicates. **Read it when** you are describing the shape of data — for validation, for a form, or as the base of an entity |
-| [MODEL-PEN.md](MODEL-PEN.md) | 1,240 | `./model` — the `x-entity` vocabulary on JSON Schema, and the `$model` 0.1 document `openStore` accepts unchanged. **Read it when** you are declaring a store's entities, their keys and their relations |
+| [MODEL-PEN.md](MODEL-PEN.md) | 1,244 | `./model` — the `x-entity` vocabulary on JSON Schema, and the `$model` 0.1 document `openStore` accepts unchanged. **Read it when** you are declaring a store's entities, their keys and their relations |
 | [JSLT-PEN.md](JSLT-PEN.md) | 980 | `./jslt` — `$jslt` 0.1 stylesheets: the envelope and its rules, whose bodies are captured over the matched value. **Read it when** you are transforming one document into another |
 | [MIGRATION-PEN.md](MIGRATION-PEN.md) | 957 | `./migration` — `$migration` 0.2 documents: exact model endpoints and the ordered steps the runner takes. **Read it when** you are moving a store from one model to the next |
 | [CONTRACT-PEN.md](CONTRACT-PEN.md) | 1,226 | `./contract` — `$contract` 0.1 documents: the operations, their schemas, their declared behavior and their REST binding. **Read it when** you are declaring an API and want its client, its server and its tools typed from one document |
 | [FLOW-PEN.md](FLOW-PEN.md) | 1,046 | `./flow` — `jaren-fsm` 0.1 machines and `jaren-dag` 0.1 dataflows, every query-valued member captured. **Read it when** you are declaring a state machine or a dependency graph of tasks |
-| [APP-PEN.md](APP-PEN.md) | 1,312 | `./app` — the `jaren-app` 0.1 document `createApp` runs, and the JSON Schema of its state beside it. **Read it when** you are declaring a whole application: state, view, actions, effects |
+| [APP-PEN.md](APP-PEN.md) | 1,381 | `./app` — the `jaren-app` 0.1 document `createApp` runs, and the JSON Schema of its state beside it. **Read it when** you are declaring a whole application: state, view, actions, effects |
 | [FORMS-PEN.md](FORMS-PEN.md) | 947 | `./forms` — the `x-form` vocabulary on JSON Schema, and `assertOnSubmit()`, the same rules' layer-3 `$query` twin. **Read it when** you are turning a schema into a form |
 | [MESSAGES-PEN.md](MESSAGES-PEN.md) | 105 | `./messages` — JSON message catalogs and message references. **Read it when** you want checked translation keys, placeholders and explicit completeness. |
 | [JTLT-PEN.md](JTLT-PEN.md) | 83 | `./jtlt` — text templates with JSLT dispatch and query expressions. **Read it when** you want to author Markdown, XML or source text as portable JSON. |
@@ -205,15 +205,15 @@ and the bundle is the byte count the tree-shaking probe builds.
 <!--fact:pens.census-->
 | Document | Subpath | Lines | Mapping rows | Worked examples | Refusals | Bundle |
 |---|---|---:|---:|---:|---:|---:|
-| [LINQ-FORMAT.md](LINQ-FORMAT.md) | — | 971 | — | — | — | — |
+| [LINQ-FORMAT.md](LINQ-FORMAT.md) | — | 972 | — | — | — | — |
 | [QUERY-PEN.md](QUERY-PEN.md) | `.` | 2,179 | 34 | 8 | 17 | 246,897 B |
 | [SCHEMA-PEN.md](SCHEMA-PEN.md) | `./schema` | 1,266 | 82 | 10 | 4 | 45,306 B |
-| [MODEL-PEN.md](MODEL-PEN.md) | `./model` | 1,240 | 31 | 7 | 3 | 57,113 B |
+| [MODEL-PEN.md](MODEL-PEN.md) | `./model` | 1,244 | 31 | 7 | 3 | 57,113 B |
 | [JSLT-PEN.md](JSLT-PEN.md) | `./jslt` | 980 | 17 | 8 | 3 | 27,870 B |
 | [MIGRATION-PEN.md](MIGRATION-PEN.md) | `./migration` | 957 | 13 | 5 | 4 | 34,682 B |
 | [CONTRACT-PEN.md](CONTRACT-PEN.md) | `./contract` | 1,226 | 38 | 6 | 3 | 58,879 B |
 | [FLOW-PEN.md](FLOW-PEN.md) | `./flow` | 1,046 | 16 | 7 | 3 | 27,972 B |
-| [APP-PEN.md](APP-PEN.md) | `./app` | 1,312 | 24 | 7 | 4 | 60,326 B |
+| [APP-PEN.md](APP-PEN.md) | `./app` | 1,381 | 25 | 8 | 4 | 60,326 B |
 | [FORMS-PEN.md](FORMS-PEN.md) | `./forms` | 947 | 18 | 6 | 3 | 49,576 B |
 | [MESSAGES-PEN.md](MESSAGES-PEN.md) | `./messages` | 105 | 9 | 2 | 1 | 14,597 B |
 | [JTLT-PEN.md](JTLT-PEN.md) | `./jtlt` | 83 | 13 | 1 | 2 | 24,585 B |
@@ -221,7 +221,7 @@ and the bundle is the byte count the tree-shaking probe builds.
 | [CHARTS-PEN.md](CHARTS-PEN.md) | `./charts` | 100 | 21 | 1 | 1 | 6,600 B |
 | [DB-CLIENT.md](DB-CLIENT.md) | `./db` | 1,446 | 54 | 5 | 2 | 1,080,970 B |
 | [FORMULA-PEN.md](FORMULA-PEN.md) | `./formula` | 41 | 2 | — | — | 12,033 B |
-| **16 documents** | | **13,983** | **381** | **74** | | |
+| **16 documents** | | **14,057** | **382** | **75** | | |
 <!--/fact-->
 
 A pen whose mapping rows are far below its worked examples is a pen
@@ -736,6 +736,7 @@ it says.
 | `transition({ state?, patch?, effects? })` | the transition object of APP-FORMAT §3.2, in the order the runtime applies it | `Transition`; `state` does not take a `Conditional` (§5.7) | native; another member `JL0101`; a `when()` in the state or in a patch operation `JL0101` |
 | `effect(run, with?)` | `{ run, with? }` (§5.1); `with` is a value in the ACTION's scope, not a callback | `EffectDeclaration<Run>` — `Run` is a literal; `with` does not take a `Conditional` | native; an empty `run` `JL0101`; a `when()` in `with` `JL0101` |
 | `when(cond, then, otherwise?)` | `{ "$if": [cond, then, otherwise?] }` — the branches spelled as the action spells its own result; no `otherwise` is the empty sequence, the no-op transition | `Conditional`; `cond` is a `BoolExpr` or a boolean, a branch a `Transition` or a `Conditional` | native; a condition or a branch that is not one `JL0101` — another `when()` is a branch, never a condition, and a branch written as an object is held to `transition()`'s own rules; outside an action's capture (none, a subscription's, a view's, a chain's) `JL0005` |
+| `awaiting({ run, start?, with?, slot?, then?, catch? }, { payload?, event? })` | one awaiting action `{ "$await": … }` (APP-FORMAT §3.3), each member captured over the scope the runtime binds there: `start` and `with` over `$event` and `$payload`, `then` adding `$result`, `catch` adding `$error`; `with` may be a query document written by hand, whose names the app checks when it compiles (`JA0004`) | `ActionDeclaration<Payload>`; `x.result` is bound in `then` only and `x.error` (`AwaitError`, `{ code, message }`) in `catch` only, so the other does not compile | native; a member §3.3 does not list, an empty `run` or `slot`, or a `start`/`then`/`catch` that is not a callback `JL0101`; a name a member's callback reads that its scope does not bind `JL0104`; a `when()` in `with` `JL0005` |
 | `taskSlot(name, { at, mode?, fail? })` | the slot's `initial` value `{ id: 0, status: 'idle', error: null }` and four actions, `<name>/start`, `<name>/done`, `<name>/fail` and `<name>/cancel`, each answered under its own name for a spread into `actions` | `TaskSlot<Name, State>`: the names are template literals, so `ActionsOf<>` stays exact | native; an option it does not take, a `mode` outside `switch`/`exhaust`/`concat`/`parallel`, a start prop the slot owns (`id`, `done`, `fail`, `slot`), `fail()` on a slot without `fail: true`, or an `at` that answers no path into the state `JL0101` |
 
 **The seven patch operations**

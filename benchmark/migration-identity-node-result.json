@@ -1,6 +1,6 @@
 {
   "format": "jaren-migration-identity-cost/1",
-  "measuredAt": "2026-10-17T09:39:21.657Z",
+  "measuredAt": "2026-10-17T15:28:05.137Z",
   "runtime": {
     "name": "node",
     "version": "24.20.0",
@@ -9,27 +9,27 @@
     "arch": "x64",
     "cpu": "AMD Ryzen 9 5900HX with Radeon Graphics",
     "loadavg": [
-      2.21,
-      2.41,
-      2.39
+      2.5,
+      2.09,
+      1.89
     ]
   },
   "sourceHashes": {
     "benchmark/migration-identity.js": "0d608730e6720bf82cfff19f131d69ada2cf63e668b2002cf6c0bf7e80271d34",
     "packages/core/src/model.js": "cd26457ba13cdb0e4a4c331f878b2e90c7f5d6c93efb6b6eab794af412a88f7c",
     "packages/core/src/schema.js": "4a6cde5ef765377b8f0f391964312b72901417bd4f89bc23512df6c59f5a2ab0",
-    "packages/json/src/canonical.js": "5746d62eab05ff1b224e96c1a20267a33dfde7d5533ffac7878f57992bc89350",
+    "packages/json/src/canonical.js": "d4ac6bcd7a664f450ade79720a2e1526e7f8cbe36f2bd2aa11357f1e5667915d",
     "packages/linq/src/migration/define.js": "b2f8b1c2700d24224e7dbb47996cc8246f1b5c560354290c79f5c047e4030ff6",
     "packages/linq/src/migration/steps.js": "a4a21b3d61f05fba8b5adfb07f828e0e0dc574f1f2abbd474bf99641d5c52311",
-    "packages/db/src/migrate.js": "02e9a506bea525ec5711e6998229fc6d7a93772e25404d824f6b437dffd5100f",
+    "packages/db/src/migrate.js": "eea34c27cd34e419a43bd3f5bfff8846e6273bcecc85cc742b2621c58ed8a44c",
     "packages/db/src/migration-history.js": "1ebe6baa64f73d40a8191f5f929dce75785bc58163c80b7866e8cac6de6d6400",
-    "packages/db/src/model.js": "16a190ff7752b9236b0df6e09eada3b0766210dbd2b66cda443e7b92e06aee03",
+    "packages/db/src/model.js": "88137e44d1b1cc0c077ebc9efe8bb5feda889df2a4604d347cdfc3d83443bbc9",
     "packages/db/src/migration-target.js": "2a083fab968f6807ec10db982f4fc9ec83b9da7dde3744239149f6e9e18c7cb4",
     "packages/db/src/document-steps.js": "6a9d17dfd9f49fad38d7dc07d5d29282ac82ef0de8b445708bd66c5decc29aa2",
     "packages/db/src/schema-positions.js": "04c7ae34365fdc06ecb76c6e08c6813bab77e49ff0f38285d1081e731a0725c1",
-    "packages/validate/src/schema-keywords.js": "e34666a2f0655a6a17720ccb6db8aea89b26154d7dde4a0de7507042bec66609",
+    "packages/validate/src/schema-keywords.js": "f6d39e0365b5dcd5aa2d058a16305a4782104119bb8dfc4b5ea3fab97b01b267",
     "packages/db/src/driver.js": "46f4c27e7224bb7896fd64c4a8148cac2c2c28085308505b8cef924edaaf8b7c",
-    "packages/db/src/drivers/node.js": "d312b58399cbd135fcb74ba454ed0f5021f8b533ac0c76001b12c6a6dd5db53f"
+    "packages/db/src/drivers/node.js": "ab7744548d9994e9607ac5979fa4efcc59fa7ff0a6b233679b2d1ff998628d9b"
   },
   "rounds": 5,
   "calls": 500,
@@ -43,41 +43,41 @@
   },
   "samples": [
     {
-      "applyMs": 23.209204999999997,
-      "statusMs": 242.964031,
-      "repeatMs": 233.90857500000004,
-      "observationMs": 69.67625500000008
+      "applyMs": 24.921677000000017,
+      "statusMs": 258.381715,
+      "repeatMs": 249.78459300000003,
+      "observationMs": 82.15774599999997
     },
     {
-      "applyMs": 9.259605999999962,
-      "statusMs": 225.539675,
-      "repeatMs": 226.15157199999987,
-      "observationMs": 59.89338799999996
+      "applyMs": 10.355188999999996,
+      "statusMs": 237.07564700000012,
+      "repeatMs": 240.42927199999986,
+      "observationMs": 72.75644899999998
     },
     {
-      "applyMs": 9.74199099999987,
-      "statusMs": 216.993827,
-      "repeatMs": 243.90526999999997,
-      "observationMs": 60.041782999999896
+      "applyMs": 9.640581000000111,
+      "statusMs": 239.18037000000004,
+      "repeatMs": 252.67724999999996,
+      "observationMs": 73.89554699999985
     },
     {
-      "applyMs": 8.745830999999953,
-      "statusMs": 220.4032709999999,
-      "repeatMs": 224.392153,
-      "observationMs": 63.94105899999977
+      "applyMs": 9.682849999999917,
+      "statusMs": 245.42611099999976,
+      "repeatMs": 241.1751079999999,
+      "observationMs": 73.58719400000018
     },
     {
-      "applyMs": 8.57059500000014,
-      "statusMs": 222.36222100000032,
-      "repeatMs": 224.8101099999999,
-      "observationMs": 58.93530700000019
+      "applyMs": 9.788094999999885,
+      "statusMs": 236.28710200000023,
+      "repeatMs": 240.2480360000004,
+      "observationMs": 68.47820599999977
     }
   ],
   "medianMs": {
-    "applyMs": 9.259605999999962,
-    "statusMs": 222.36222100000032,
-    "repeatMs": 226.15157199999987,
-    "observationMs": 60.041782999999896
+    "applyMs": 9.788094999999885,
+    "statusMs": 239.18037000000004,
+    "repeatMs": 241.1751079999999,
+    "observationMs": 73.58719400000018
   },
   "checks": {
     "exactRows": true,

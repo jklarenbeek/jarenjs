@@ -421,6 +421,7 @@ Every subpath a consumer can import, derived from the manifest by
 | `@jarenjs/core/text/basic` | JavaScript | declared |
 | `@jarenjs/core/text/edits` | JavaScript | declared |
 | `@jarenjs/core/text/email` | JavaScript | declared |
+| `@jarenjs/core/text/entities` | JavaScript | declared |
 | `@jarenjs/core/text/host` | JavaScript | declared |
 | `@jarenjs/core/text/i18n` | JavaScript | declared |
 | `@jarenjs/core/text/identifiers` | JavaScript | declared |
