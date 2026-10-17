@@ -445,6 +445,8 @@ export const ja = {
   'query/input-undefined': '入力ドキュメントが undefined です（undefined は JSON 値ではありません）',
   'query/lexical-threw': 'レキシカル検索プロバイダーが例外をスローしました',
   'query/lexical-result': 'レキシカル検索プロバイダーが無効または不完全な結果を返しました',
+  'query/raised': '{code}',
+  'query/raised-message': '{code}: {message}',
   //#endregion
 
   //#region @jarenjs/json formulas (the messages of formulaMessagesEn)

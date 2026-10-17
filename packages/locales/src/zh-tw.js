@@ -448,6 +448,8 @@ export const zhTW = {
   'query/input-undefined': '輸入文件為 undefined，而 undefined 不是 JSON 值',
   'query/lexical-threw': '詞彙搜尋提供者擲回例外',
   'query/lexical-result': '詞彙搜尋提供者傳回了無效或不完整的結果',
+  'query/raised': '{code}',
+  'query/raised-message': '{code}：{message}',
   //#endregion
 
   //#region @jarenjs/json formulas (the messages of formulaMessagesEn)

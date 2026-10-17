@@ -90,14 +90,20 @@ Divergences from XDM to keep in mind when triaging:
 - **Error codes** match by family via the spec's mapping column
   (QUERY-FORMAT.md §10): e.g. expected `XPTY0004` accepts `JQ2001`/`JQ2004`/
   `JQ2005`; expected `XPST0003` accepts a front-end syntax error. An expected
-  code with no JQ mapping fails and is triaged into the baseline.
+  code with no JQ mapping fails and is triaged into the baseline. An error the
+  query raises itself (`$error`, `JQ2017`: `fn:error` and the front-end's
+  runtime refusals, XQUERY-FRONTEND.md §4.10) matches by the code it carries,
+  read in XQuery's errors namespace (`err:FOER0000` is `FOER0000`, and
+  `Q{http://www.example.com/}EXER3141` is itself).
 - `assert-type` maps coarsely: `xs:integer|decimal|double|float|numeric|string|
   boolean|anyAtomicType`, `map(*)`, `array(*)`, `item()`, occurrence indicators,
   `empty-sequence()`. Anything else reclassifies the case to tier C.
 - **Decimal formats** an environment declares are compile options: each named
   one is registered (`options.decimalFormats`) under every spelling a query may
-  use for its name (`prefix:local` for each prefix the environment binds to its
-  namespace URI, and `Q{uri}local`), and the unnamed one replaces F&O's default
+  use for its name (`prefix:local` for each prefix the declaration itself or the
+  environment binds to its namespace URI, and `Q{uri}local`; the converter keeps
+  a declaration's own `xmlns:` attributes as its `namespaces`), and the unnamed
+  one replaces F&O's default
   by becoming the third operand of every `$format-number` that has none.
 
 ## The baseline
@@ -146,7 +152,8 @@ Divergences from XDM to keep in mind when triaging:
     `F7` dates are read only in the domain whose text orders as time does
     (XQUERY-FRONTEND.md §4.9): an `xs:date` without a timezone, an
     `xs:dateTime` or `xs:time` in UTC, no fraction of a second; a value
-    outside it that only a run reads is refused `JQ2001`, where XQuery answers.
+    outside it that only a run reads is refused (`JQ2017` carrying the code
+    `unsupported`), where XQuery answers.
 - `status: "bug"` — fails and should not; `issue` describes it. Real bugs are
   wins: fix the trivial ones, keep the rest listed here.
 - `skip: true` — never run in-process: the query would exhaust the heap (the

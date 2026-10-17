@@ -74,16 +74,6 @@ delete it or fix it.
   component functions (`year-from-date`, `hours-from-time`, …) onto
   `$year`/`$hours`/…; `tokenize` flags `i`, `s`, `m`, `x`, which need I-Regexp
   flags; and the `declare decimal-format` prolog.
-- [ ] **The QT3 converter drops namespace declarations on `<decimal-format>`
-  elements** — `benchmark/tools/qt3-convert.js` keeps `name="a:test"` but not
-  its `xmlns:a`, so numberformat87 cannot resolve the name (the runner
-  registers prefixed names by the environment's namespace list).
-- [ ] **A runtime refusal of the XQuery front-end reads as a number cast.** A
-  value the front-end reads only at run time and refuses (a date outside its
-  domain, a failed cast) raises through `$number` of the reason's text, so the
-  message reads `JQ2001: '<reason>' is not a JSON number`, and `fn:error` has
-  no mapping. Wanted: an engine `$error` operator raising a coded error with
-  its own message and code, which those refusals and `fn:error` map onto.
 
 ## @jarenjs/validate
 

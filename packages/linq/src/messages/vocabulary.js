@@ -756,6 +756,13 @@ export const CATALOGS = deepFreeze({
     ],
     "query/input-undefined": [],
     "query/lexical-threw": [],
-    "query/lexical-result": []
+    "query/lexical-result": [],
+    "query/raised": [
+      "code"
+    ],
+    "query/raised-message": [
+      "code",
+      "message"
+    ]
   }
 });

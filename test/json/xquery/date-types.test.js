@@ -14,13 +14,13 @@ const D = 'xs:date("2007-01-01")';
 const DT = 'xs:dateTime("2007-01-01T00:00:00Z")';
 const T = 'xs:time("08:00:00Z")';
 
-/** asserts `text` raises JQ2001 naming XQuery's `code` and the position */
+/** asserts `text` raises `$error` (JQ2017) with XQuery's `code`, the message naming the position */
 function raises(text, code, position, externals = {}) {
   assert.throws(() => compileXQuery(text)(null, externals), (e) => {
     assert.ok(e instanceof JsonQueryRuntimeError, `expected a runtime error, got ${e.name}: ${e.message}`);
-    assert.strictEqual(e.code, 'JQ2001', e.message);
-    assert.ok(e.message.includes(`${code}: `), e.message);
-    assert.ok(e.message.includes(`(position ${position})`), e.message);
+    assert.strictEqual(e.code, 'JQ2017', e.message);
+    assert.strictEqual(e.params.code, `err:${code}`, e.message);
+    assert.ok(e.params.message.endsWith(`(position ${position})`), e.message);
     return true;
   });
 }

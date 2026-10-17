@@ -2074,6 +2074,28 @@ absent, derives from the data; there is no `$now`, for the same reason §8.13
 has no `current-dateTime`. A compiled query gives the same answer for the same
 document forever.
 
+### 8.17 Raising an error — `$error`
+
+| Operator | Signature | Result |
+|---|---|---|
+| `$error` | `{"$error": [code, message?, value?]}` (1–3) | never returns: raises `JQ2017` (§10.3) with the document's own code and message (XQuery `fn:error`). |
+
+The query raises an error of its own where `$error` is evaluated — never
+when the query compiles, a constant one included — so a branch that is not
+taken raises nothing: `{"$if": ["$.ok", "$.x", {"$error": ["E-NOT-OK",
+"the order is not ok"]}]}`. The operands are evaluated in order. `code` is
+one string (anything else, the empty sequence included, is `JQ2001`);
+`message` follows the string parameter rule (§8.7), and when it is empty
+(`""` or the empty sequence) the error carries the code alone; `value` is
+any sequence, whose items are carried as they are. The error's `params`
+are the carried members — `{"code": "E-NOT-OK", "message": "the order is
+not ok"}`, with `value` (an array of the items) when the third operand is
+given — and its message renders them alone: `JQ2017: E-NOT-OK: the order is
+not ok at /$if/2/$error` (message id `query/raised-message`; `query/raised`
+without a message), so a host or a model reads the code it chose, not a
+sentence about it. The code is the document's to choose; the engine reads
+nothing into it.
+
 
 ## 9. Variables, scoping, and external parameters
 
@@ -2199,6 +2221,7 @@ a query error raised inside a formula keeps its own message, a reference in
 | `JQ2014` | Invalid formula outcome | — |
 | `JQ2015` | Invalid reviewed rule plan | — |
 | `JQ2016` | A descendant segment over a circular reference: the value it walks holds a cycle, named by the data member that closes it (§5.1) | — |
+| `JQ2017` | An error the query raised itself: `$error`, carrying the document's own code and message (§8.17) | the code carried (`fn:error`) |
 
 ---
 

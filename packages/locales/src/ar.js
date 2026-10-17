@@ -508,6 +508,8 @@ export const ar = {
   'query/input-undefined': 'قيمة مستند الإدخال undefined، وهي ليست قيمة ⁨JSON⁩',
   'query/lexical-threw': 'طرح الموفّر المعجمي استثناءً',
   'query/lexical-result': 'أرجع الموفّر المعجمي نتيجة غير صالحة أو غير مكتملة',
+  'query/raised': '⁨{code}⁩',
+  'query/raised-message': '⁨{code}⁩: ⁨{message}⁩',
   //#endregion
 
   //#region @jarenjs/json formulas (the messages of formulaMessagesEn)

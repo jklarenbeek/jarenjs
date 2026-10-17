@@ -828,5 +828,155 @@
     }
    ]
   }
+ },
+ {
+  "set": "fn-format-number",
+  "name": "numberformat87",
+  "test": "format-number(12.34, '0.000,00', 'Q{http://a.ns/}test ')",
+  "result": {
+   "kind": "assert-string-value",
+   "value": "0.012,34"
+  },
+  "environment": {
+   "decimal-format": [
+    {
+     "name": "a:test",
+     "decimal-separator": ",",
+     "grouping-separator": ".",
+     "namespaces": [
+      {
+       "prefix": "a",
+       "uri": "http://a.ns/"
+      }
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "set": "misc-CombinedErrorCodes",
+  "name": "FOER0000",
+  "test": "error()",
+  "result": {
+   "kind": "error",
+   "code": "FOER0000"
+  }
+ },
+ {
+  "set": "fn-error",
+  "name": "fn-error-2",
+  "test": "fn:error(fn:QName('http://www.example.com/HR', 'myerr:toohighsal'), 'Does not apply because salary is too high')",
+  "result": {
+   "kind": "error",
+   "code": "*"
+  }
+ },
+ {
+  "set": "fn-error",
+  "name": "fn-error-3",
+  "test": "fn:error('Wrong Argument Type')",
+  "result": {
+   "kind": "error",
+   "code": "XPTY0004"
+  }
+ },
+ {
+  "set": "fn-error",
+  "name": "fn-error-4",
+  "test": "fn:error(fn:QName('http://www.w3.org/2005/xqt-errors', 'err:FOCH0004'))",
+  "result": {
+   "kind": "error",
+   "code": "FOCH0004"
+  }
+ },
+ {
+  "set": "fn-error",
+  "name": "fn-error-6",
+  "test": "fn:error((), 'err:FOER0000','error raised by this test by setting first argument to empty sequence')",
+  "result": {
+   "kind": "error",
+   "code": "FOER0000"
+  }
+ },
+ {
+  "set": "fn-error",
+  "name": "K-ErrorFunc-6",
+  "test": "error((), \"description\")",
+  "result": {
+   "kind": "error",
+   "code": "FOER0000"
+  }
+ },
+ {
+  "set": "prod-TryCatchExpr",
+  "name": "try-catch-fn-error-1",
+  "test": "fn:error(fn:QName(\"http://www.example.com/\", \"example:EXER3141\"))",
+  "result": {
+   "kind": "error",
+   "code": "Q{http://www.example.com/}EXER3141"
+  }
+ },
+ {
+  "set": "prod-ValueComp",
+  "name": "K-ValCompTypeChecking-36",
+  "test": "error() eq error()",
+  "result": {
+   "kind": "error",
+   "code": "FOER0000"
+  }
+ },
+ {
+  "set": "op-numeric-add",
+  "name": "K-NumericAdd-31",
+  "test": "3 + error()",
+  "result": {
+   "kind": "error",
+   "code": "FOER0000"
+  }
+ },
+ {
+  "set": "misc-ErrorsAndOptimization",
+  "name": "errors-and-optimization-1",
+  "test": "if (true()) then 1 else error(QName('http://www.example.com/errors', 'err:oops'), \"Oops, this error should not be raised!\")",
+  "result": {
+   "kind": "assert-eq",
+   "value": "1"
+  }
+ },
+ {
+  "set": "prod-CastExpr",
+  "name": "CastAs093",
+  "test": "xs:string(\"true\") cast as xs:float",
+  "result": {
+   "kind": "error",
+   "code": "FORG0001"
+  }
+ },
+ {
+  "set": "prod-CastExpr",
+  "name": "CastAs180",
+  "test": "xs:float(\"INF\") cast as xs:integer",
+  "result": {
+   "kind": "error",
+   "code": "FOCA0002"
+  }
+ },
+ {
+  "set": "prod-CastExpr",
+  "name": "CastAs224",
+  "test": "xs:double(\"1e5\") cast as xs:date",
+  "result": {
+   "kind": "error",
+   "code": "XPTY0004"
+  }
+ },
+ {
+  "set": "fn-tokenize",
+  "name": "K-TokenizeFunc-3",
+  "test": "tokenize(\"input\", \"pattern\", \" \")",
+  "result": {
+   "kind": "error",
+   "code": "FORX0001"
+  }
  }
 ]

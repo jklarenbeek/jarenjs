@@ -1,8 +1,8 @@
 {
  "$comment": "QT3 baseline: every attributed tier-A failure (see benchmark/qt3-README.md). Deviation ids: D1-D7 QUERY-FORMAT.md section 11; E1/E2 engine rules (comparison/no-atomization, sections 8.4-8.10); E3 resource guards (section 8.9); E4 NaN ordering (section 6.6); F1-F7 front-end approximations (XQUERY-FRONTEND.md sections 3 and 4.9). skip: fatal resource exhaustion, never run in-process.",
  "summary": {
-  "pass": 6897,
-  "unsupported-syntax": 15472
+  "pass": 7002,
+  "unsupported-syntax": 15367
  },
  "tests": {
   "ArrayTest-044": {
@@ -1439,6 +1439,11 @@
    "status": "deviation",
    "id": "E3",
    "note": "resource guard: a materialized $range over 1,000,000 items is refused JQ2007"
+  },
+  "cbcl-error-004": {
+   "status": "deviation",
+   "id": "F1",
+   "note": "value comparisons map to general comparisons: false instead of the empty sequence over empty operands"
   },
   "cbcl-float-002": {
    "status": "deviation",
@@ -2934,10 +2939,6 @@
    "status": "deviation",
    "id": "D1",
    "note": "one number type: a double, not xs:decimal/xs:integer precision or overflow"
-  },
-  "numberformat87": {
-   "status": "bug",
-   "issue": "the suite converter drops the element-level xmlns:a of the case's decimal-format, so the runner cannot resolve a:test"
   },
   "numberformat906InputErr": {
    "status": "bug",

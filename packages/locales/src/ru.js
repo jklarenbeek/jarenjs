@@ -470,6 +470,8 @@ export const ru = {
   'query/input-undefined': 'входной документ равен undefined, что не является значением JSON',
   'query/lexical-threw': 'лексический провайдер выбросил исключение',
   'query/lexical-result': 'лексический провайдер вернул недопустимый или неполный результат',
+  'query/raised': '{code}',
+  'query/raised-message': '{code}: {message}',
   //#endregion
 
   //#region @jarenjs/json formulas (the messages of formulaMessagesEn)

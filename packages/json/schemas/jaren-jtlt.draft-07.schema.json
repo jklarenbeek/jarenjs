@@ -314,6 +314,9 @@
           "$ref": "#/definitions/timeBucketPhrase"
         },
         {
+          "$ref": "#/definitions/errorPhrase"
+        },
+        {
           "$ref": "#/definitions/applyPhrase"
         }
       ]
@@ -1160,6 +1163,24 @@
           ]
         }
       },
+      "additionalProperties": false
+    },
+    "errorPhrase": {
+      "description": "$error [code, message?, value?]: raises JQ2017 where it is evaluated, carrying the code (one string), the message (a string; empty leaves the code alone) and the value's items.",
+      "type": "object",
+      "properties": {
+        "$error": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/expression"
+          },
+          "minItems": 1,
+          "maxItems": 3
+        }
+      },
+      "required": [
+        "$error"
+      ],
       "additionalProperties": false
     },
     "applyPhrase": {

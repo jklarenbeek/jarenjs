@@ -448,6 +448,8 @@ export const ko = {
   'query/input-undefined': '입력 문서가 undefined입니다 (undefined는 JSON 값이 아닙니다)',
   'query/lexical-threw': '어휘 검색 공급자에서 예외가 발생했습니다',
   'query/lexical-result': '어휘 검색 공급자가 유효하지 않거나 불완전한 결과를 반환했습니다',
+  'query/raised': '{code}',
+  'query/raised-message': '{code}: {message}',
   //#endregion
 
   //#region @jarenjs/json formulas (the messages of formulaMessagesEn)

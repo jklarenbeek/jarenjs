@@ -47,12 +47,22 @@ export function values(text, externals = {}) {
   return compileXQuery(`[${text}]`)(null, externals);
 }
 
-/** asserts `text` runs into the engine's type error JQ2001 */
-export function failsAtRun(text, externals = {}) {
+/**
+ * asserts `text` runs into the engine's type error JQ2001, or, given the
+ * `code` the front-end's refusal carries (`err:FORG0001`, `unsupported`),
+ * into that refusal: `$error`, JQ2017
+ */
+export function failsAtRun(text, externals = {}, code = undefined) {
   validated(text);
   assert.throws(() => compileXQuery(`[${text}]`)(null, externals), (e) => {
     assert.ok(e instanceof JsonQueryRuntimeError, `expected a runtime error, got ${e.name}: ${e.message}`);
-    assert.strictEqual(e.code, 'JQ2001', e.message);
+    if (code === undefined) {
+      assert.strictEqual(e.code, 'JQ2001', e.message);
+    }
+    else {
+      assert.strictEqual(e.code, 'JQ2017', e.message);
+      assert.strictEqual(e.params.code, code, e.message);
+    }
     return true;
   });
 }

@@ -62,7 +62,8 @@ const SYNTAX = 'SYNTAX';
 // variables are externals, detected at run time, QUERY-FORMAT.md section 9).
 // XQDY0137 (duplicate map key), XQST0089 (duplicate range variable), and
 // XQST0049 (duplicate variable declaration) are made static by the
-// front-end, so SYNTAX satisfies them too.
+// front-end, so SYNTAX satisfies them too. An error the query raises
+// itself is compared by the code it carries (raisedCode), not by this map.
 const ERROR_CODE_MAP = {
   XPST0003: [SYNTAX, 'JQ0001', 'JQ0003', 'JQ0004'],
   XPST0017: ['JQ0002'],
@@ -102,8 +103,22 @@ function unsupportedDetail(e) {
 function errorMatches(expectedCode, thrownCode) {
   if (expectedCode === '*')
     return thrownCode !== null;
+  // an error the query raised itself carries XQuery's own code
+  if (thrownCode === expectedCode)
+    return true;
   const accepted = ERROR_CODE_MAP[expectedCode];
   return accepted !== undefined && accepted.includes(thrownCode);
+}
+
+// The code a query error is compared by: the engine's own (`JQ2001`), or,
+// for an error the query raised itself (`$error`, JQ2017: fn:error and the
+// front-end's runtime refusals), the code it carries, read in XQuery's
+// errors namespace (`err:FOER0000` is `FOER0000`).
+function raisedCode(e) {
+  if (e.code !== 'JQ2017')
+    return e.code;
+  const code = e.params.code;
+  return code.startsWith('err:') ? code.slice(4) : code;
 }
 
 //#endregion
@@ -161,7 +176,7 @@ function evalSequence(text, environment) {
   }
   catch (e) {
     if (e.name === 'JsonQueryCompileError' || e.name === 'JsonQueryRuntimeError')
-      return { thrown: e.code, message: e.message };
+      return { thrown: raisedCode(e), message: e.message };
     return { thrown: 'CRASH', message: `${e.name}: ${e.message}` };
   }
 }
@@ -447,7 +462,7 @@ function decimalFormatsOf(env) {
   for (const declaration of declarations) {
     const record = {};
     for (const [property, value] of Object.entries(declaration)) {
-      if (property !== 'name')
+      if (property !== 'name' && property !== 'namespaces')
         record[DECIMAL_FORMAT_MEMBERS[property] ?? property] = value;
     }
     if (declaration.name === undefined) {
@@ -455,7 +470,10 @@ function decimalFormatsOf(env) {
       decimalFormats[DEFAULT_FORMAT_NAME] = record;
     }
     else {
-      for (const spelling of formatNameSpellings(declaration.name, env.namespace ?? []))
+      // the element's own namespace declarations come first: they are in
+      // scope where its name is written
+      const namespaces = [...declaration.namespaces ?? [], ...env.namespace ?? []];
+      for (const spelling of formatNameSpellings(declaration.name, namespaces))
         decimalFormats[spelling] = record;
     }
   }

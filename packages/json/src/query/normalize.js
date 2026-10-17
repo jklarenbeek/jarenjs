@@ -435,6 +435,8 @@ export const OPERATOR_ALIASES = {
   // conditionals ($coalesce is a real operator; the guesses are here)
   $case: "$if", $cond: "$if", $switch: "$if", $ternary: "$if",
   $ifnull: "$default", $ifempty: "$default", $nvl: "$default",
+  // raising an error
+  $throw: "$error", $raise: "$error",
   // spatial: the PostGIS/Turf spellings, and the American plural
   $wkt: "query/use/geo-parse-text",
   "$parse-wkt": "$geo-parse", "$from-wkt": "$geo-parse", $st_geomfromtext: "$geo-parse",

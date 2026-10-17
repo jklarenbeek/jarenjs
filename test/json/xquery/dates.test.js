@@ -44,14 +44,14 @@ describe('XQuery front-end xs:date, xs:dateTime and xs:time', () => {
       for (const text of ['2001-02-29', '2004-13-01', '+2004-08-01', '02004-08-01', '2002-02-15T24:01:00Z',
         '2002-02-15T21:01:60Z', '1999-12-01T23:59:12-15:00', '24:00:00.001Z', 'true', ''])
         for (const type of ['date', 'dateTime', 'time'])
-          failsAtRun(`xs:${type}("${text}")`);
+          failsAtRun(`xs:${type}("${text}")`, {}, 'err:FORG0001');
       assert.deepStrictEqual(values('if (false()) then xs:date("x") else 1'), [1]);
     });
 
     it('should fail a number or a boolean, which XQuery does not cast to a date (XPTY0004)', () => {
-      failsAtRun('xs:date(1)');
-      failsAtRun('xs:time(true())');
-      failsAtRun('2000 cast as xs:dateTime');
+      failsAtRun('xs:date(1)', {}, 'err:XPTY0004');
+      failsAtRun('xs:time(true())', {}, 'err:XPTY0004');
+      failsAtRun('2000 cast as xs:dateTime', {}, 'err:XPTY0004');
       assert.deepStrictEqual(values('1 castable as xs:date'), [false]);
     });
   });
@@ -74,9 +74,9 @@ describe('XQuery front-end xs:date, xs:dateTime and xs:time', () => {
     });
 
     it('should read a string literal as a string, whatever date it spells (FORG0001)', () => {
-      failsAtRun('xs:date("2000-01-01T00:00:00Z")');
-      failsAtRun('xs:time("2000-01-01T00:00:00Z")');
-      failsAtRun('"2000-01-01" cast as xs:dateTime');
+      failsAtRun('xs:date("2000-01-01T00:00:00Z")', {}, 'err:FORG0001');
+      failsAtRun('xs:time("2000-01-01T00:00:00Z")', {}, 'err:FORG0001');
+      failsAtRun('"2000-01-01" cast as xs:dateTime', {}, 'err:FORG0001');
       assert.deepStrictEqual(values('"2000-01-01T00:00:00Z" castable as xs:date'), [false]);
     });
 
@@ -89,7 +89,7 @@ describe('XQuery front-end xs:date, xs:dateTime and xs:time', () => {
       failsWith('xs:dateTime(xs:date("2000-01-01"))', "unsupported construct 'xs:dateTime without a timezone'", 0);
       failsWith('let $d := xs:date("2000-01-01") return xs:dateTime($d)', "unsupported construct 'xs:dateTime without a timezone'", 39);
       // XQuery casts neither a date to a time nor a time to a date (XPTY0004)
-      failsAtRun('xs:time(xs:date("2000-01-01"))');
+      failsAtRun('xs:time(xs:date("2000-01-01"))', {}, 'err:XPTY0004');
       assert.deepStrictEqual(values('let $t := xs:time("12:00:00Z") return $t castable as xs:date'), [false]);
       assert.deepStrictEqual(values('let $t := xs:time(()) return xs:date($t)'), []);
     });
@@ -112,8 +112,8 @@ describe('XQuery front-end xs:date, xs:dateTime and xs:time', () => {
       assert.deepStrictEqual(values('$s castable as xs:date', { s: '2001-02-29' }), [false]);
       assert.deepStrictEqual(values('$s castable as xs:time', { s: 'noon' }), [false]);
       assert.deepStrictEqual(values('$s castable as xs:dateTime', { s: 5 }), [false]);
-      failsAtRun('xs:date($s)', { s: '2001-02-29' });
-      failsAtRun('xs:date($s)', { s: null });
+      failsAtRun('xs:date($s)', { s: '2001-02-29' }, 'err:FORG0001');
+      failsAtRun('xs:date($s)', { s: null }, 'err:XPTY0004');
     });
 
     it('should raise for a text of the type the domain refuses, never answer false', () => {
@@ -122,8 +122,8 @@ describe('XQuery front-end xs:date, xs:dateTime and xs:time', () => {
       for (const [type, text] of [['time', '24:00:00Z'], ['time', '23:59:60Z'], ['date', '2000-01-01Z'],
         ['dateTime', '2000-01-01T00:00:00+01:00'], ['dateTime', '2000-01-01T00:00:00.5Z'], ['time', '12:00:00'],
         ['date', '10000-01-01']]) {
-        failsAtRun(`xs:${type}($s)`, { s: text });
-        failsAtRun(`$s castable as xs:${type}`, { s: text });
+        failsAtRun(`xs:${type}($s)`, { s: text }, 'unsupported');
+        failsAtRun(`$s castable as xs:${type}`, { s: text }, 'unsupported');
       }
     });
 
@@ -131,7 +131,8 @@ describe('XQuery front-end xs:date, xs:dateTime and xs:time', () => {
       assert.deepStrictEqual(values('$s castable as xs:date', { s: '2000-01-01T00:00:00Z' }), [false]);
       assert.deepStrictEqual(values('$s castable as xs:dateTime', { s: '2000-01-01' }), [false]);
       // an item of a sequence that holds a dateTime value and a string
-      failsAtRun('for $v in (xs:dateTime("2000-01-01T00:00:00Z"), $s) return $v castable as xs:date', { s: '2000-01-01T00:00:00Z' });
+      failsAtRun('for $v in (xs:dateTime("2000-01-01T00:00:00Z"), $s) return $v castable as xs:date', { s: '2000-01-01T00:00:00Z' },
+        'unsupported');
     });
 
     it('should not capture, or be captured by, the names a user chose', () => {
@@ -158,8 +159,8 @@ describe('XQuery front-end xs:date, xs:dateTime and xs:time', () => {
     });
 
     it('should not cast a date to a number or a boolean (XPTY0004)', () => {
-      failsAtRun('xs:date("1999-05-31") cast as xs:integer');
-      failsAtRun('xs:date("1999-05-31") cast as xs:boolean');
+      failsAtRun('xs:date("1999-05-31") cast as xs:integer', {}, 'err:XPTY0004');
+      failsAtRun('xs:date("1999-05-31") cast as xs:boolean', {}, 'err:XPTY0004');
       assert.deepStrictEqual(values('xs:date("1999-05-31") castable as xs:double'), [false]);
     });
   });

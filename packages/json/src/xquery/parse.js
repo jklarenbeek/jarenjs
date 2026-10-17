@@ -220,20 +220,53 @@ const notANumber = () => ({ '$div': [0, 0] });
 const positiveInfinity = () => ({ '$div': [1, 0] });
 const negativeInfinity = () => ({ '$div': [-1, 0] });
 
-// A cast that cannot succeed fails when the query runs (XQuery raises
-// FORG0001 when the cast is evaluated, never when the query is read), as
-// the engine's cast error JQ2001: `$number` of a text that names the
-// failure, which no JSON number spells.
-function raisedWith(text) {
-  return { '$number': text };
+// A refusal the front-end can only make when the query runs - a cast that
+// fails (XQuery raises FORG0001 when the cast is evaluated, never when the
+// query is read), a type error of a date value, a value outside the
+// front-end's domain - raises the engine's `$error` (JQ2017) with XQuery's
+// code in its errors namespace (`err:FORG0001`) and a message that names
+// the refusal. `code` and `message` are expressions; an emitted literal
+// message never starts with '$'.
+const xqueryCode = (code) => 'err:' + code;
+
+// the code of a runtime refusal XQuery would not make: a value the
+// front-end does not read (a date outside its domain), where XQuery answers
+const UNSUPPORTED_VALUE = 'unsupported';
+
+function raisedWith(code, message) {
+  return { '$error': [code, message] };
 }
 
-function failedLiteralCast(name, text) {
-  return raisedWith(`xs:${name}: ${text}`);
+// The code of a cast that fails on a literal operand: a string outside the
+// type's lexical space or a number outside its range is FORG0001; a number
+// or a boolean has no date, nor has a date value of a type that does not
+// cast to the asked one (XPTY0004).
+function failedLiteralCast(name, e, operandType) {
+  const typeError = isDateTypeName(operandType) || (isDateTypeName(name) && literalText(e) === null);
+  return raisedWith(xqueryCode(typeError ? 'XPTY0004' : 'FORG0001'), `xs:${name}: ${literalOperandText(e)}`);
 }
 
-function failedCast(name) {
-  return raisedWith({ '$concat': [`xs:${name}: `, CAST_ARG] });
+// The code of a cast that fails on the one item at CAST_ARG, read as the
+// cast runs: a date value (`operandType`) that does not cast is XPTY0004; a
+// string outside the lexical space is FORG0001; a number is FOCA0002 when it
+// is NaN or an infinity, FORG0001 outside the type's range, and has no date
+// (XPTY0004); anything else - null, an array, an object, a boolean that is
+// no date, two or more items - is the type error XPTY0004.
+function failedCast(name, operandType) {
+  const message = {
+    '$if': [isAtomic(CAST_ARG), { '$concat': [`xs:${name}: `, CAST_ARG] }, `xs:${name}: the operand is not one atomic value`],
+  };
+  if (isDateTypeName(operandType))
+    return raisedWith(xqueryCode('XPTY0004'), message);
+  const number = isDateTypeName(name)
+    ? xqueryCode('XPTY0004')
+    : { '$if': [isFiniteNumber(CAST_ARG), xqueryCode('FORG0001'), xqueryCode('FOCA0002')] };
+  const code = {
+    '$if': [
+      { '$is-string': CAST_ARG }, xqueryCode('FORG0001'),
+      { '$if': [{ '$is-number': CAST_ARG }, number, xqueryCode('XPTY0004')] }],
+  };
+  return raisedWith(code, message);
 }
 
 // what a literal operand folds to when the cast cannot succeed
@@ -281,6 +314,8 @@ const trimXsdWhiteSpace = (s) => s.replace(/^[ \t\r\n]+|[ \t\r\n]+$/g, '');
 
 // true when the number `e` is finite: an infinity or NaN minus itself is NaN
 const isFiniteNumber = (e) => ({ '$eq': [{ '$sub': [e, e] }, 0] });
+// one string, number, boolean or null: an item `$string` writes as its text
+const isAtomic = (e) => ({ '$or': ['$is-string', '$is-number', '$is-boolean', '$is-null'].map((op) => ({ [op]: e })) });
 
 // the number a numeric cast gives a string literal: a number, the
 // non-finite document, or CAST_FAILS when the text is outside the type's
@@ -474,7 +509,7 @@ const stringType = Object.freeze({
   fold: () => undefined,
   read: () => ({
     '$if': [
-      { '$or': ['$is-string', '$is-number', '$is-boolean', '$is-null'].map((op) => ({ [op]: CAST_ARG })) },
+      isAtomic(CAST_ARG),
       { '$string': CAST_ARG },
     ],
   }),
@@ -653,7 +688,7 @@ function dateType(name) {
         { '$if': [{ [check]: '$xs_text' }, '$xs_text'] },
         { '$if': [
           { '$or': (operandType === 'maybe' ? [own, ...other] : [own]).map((shape) => ({ '$match': ['$xs_text', shape] })) },
-          raisedWith({ '$concat': [`xs:${name}: `, '$xs_text', ' is a value the front-end does not read'] }),
+          raisedWith(UNSUPPORTED_VALUE, { '$concat': [`xs:${name}: `, '$xs_text', ' is a value the front-end does not read'] }),
         ] },
       ],
     },
@@ -736,16 +771,16 @@ function castExpression(name, e, emptyAllowed, refuse, operandType) {
   const type = XS_TYPES[name];
   const folded = type.fold(e, refuse, operandType);
   if (folded === CAST_FAILS)
-    return failedLiteralCast(name, literalOperandText(e));
+    return failedLiteralCast(name, e, operandType);
   if (folded !== undefined)
     return isDateTypeName(name) && typeof folded === 'string' ? typedDateLiteral(name, folded) : folded;
-  const cast = { '$coalesce': [type.read(operandType), failedCast(name)] };
+  const cast = { '$coalesce': [type.read(operandType), failedCast(name, operandType)] };
   return {
     '$let': { [CAST_VAR]: e },
     '$return': {
       '$if': emptyAllowed
         ? [{ '$exists': CAST_ARG }, cast]
-        : [{ '$exists': CAST_ARG }, cast, failedLiteralCast(name, 'the empty sequence')],
+        : [{ '$exists': CAST_ARG }, cast, raisedWith(xqueryCode('XPTY0004'), `xs:${name}: the empty sequence`)],
     },
   };
 }
@@ -802,7 +837,7 @@ const tokenizeFunction = Object.freeze({
       return refuse("unsupported construct 'tokenize flags other than a literal'");
     for (const flag of flags) {
       if (!TOKENIZE_FLAGS.includes(flag))
-        return raisedWith(`fn:tokenize: invalid flags '${flags}'`);
+        return raisedWith(xqueryCode('FORX0001'), `fn:tokenize: invalid flags '${flags}'`);
     }
     for (const flag of TOKENIZE_FLAGS_UNSUPPORTED) {
       if (flags.includes(flag))
@@ -915,7 +950,7 @@ function withIntegerPosition(fn, at, body) {
     '$if': [
       { '$eq': [{ '$sub': [at, { '$idiv': [at, 1] }] }, 0] },
       body,
-      raisedWith({ '$concat': [`fn:${fn}: position `, at] }),
+      raisedWith(xqueryCode('XPTY0004'), { '$concat': [`fn:${fn}: position `, at] }),
     ],
   };
 }
@@ -975,6 +1010,72 @@ const compareFunction = Object.freeze({
 
 //#endregion
 
+//#region fn:error
+
+// XQuery's errors namespace, which the `err` prefix is bound to
+const ERRORS_NAMESPACE = 'http://www.w3.org/2005/xqt-errors';
+
+const NCNAME = '[\\p{L}_][\\p{L}\\p{N}_.\\-]*';
+const LEXICAL_QNAME_RE = new RegExp(`^(?:(${NCNAME}):)?(${NCNAME})$`, 'u');
+
+// The code text of an error QName the query names by a constructor, as the
+// raised error carries it: `err:<local>` in the errors namespace, the local
+// name in no namespace, `Q{uri}local` in any other. Registered by identity:
+// a QName is read only as the code fn:error raises (the parser emits it
+// for the first argument of fn:error alone, and fn:error takes it out).
+const QNAME_CODES = new WeakMap();
+
+// `fn:QName(uri, lexical)` or `xs:QName(lexical)` over literal names, read
+// as the query is read; `refuse(message)` throws the positioned refusal
+function emitQName(xs, written, args, refuse) {
+  if (args.length !== (xs ? 1 : 2))
+    return refuse(`unsupported function '${written}#${args.length}'`);
+  const texts = args.map(literalText);
+  if (texts.includes(null))
+    return refuse("unsupported construct 'a QName of a computed name'");
+  const lexical = xs ? trimXsdWhiteSpace(texts[0]) : texts[1];
+  const name = LEXICAL_QNAME_RE.exec(lexical);
+  if (name === null)
+    return refuse("unsupported construct 'a QName that is not a name'");
+  const [, prefix, local] = name;
+  let uri = texts[0];
+  if (xs) {
+    // the prefixes xs:QName resolves: `err`, and none (no namespace)
+    if (prefix !== undefined && prefix !== 'err')
+      return refuse(`unsupported construct 'xs:QName with the prefix ${prefix}'`);
+    uri = prefix === undefined ? '' : ERRORS_NAMESPACE;
+  }
+  else if (uri === '' && prefix !== undefined) {
+    return refuse("unsupported construct 'a QName with a prefix and no namespace'");
+  }
+  const code = uri === ERRORS_NAMESPACE ? xqueryCode(local) : uri === '' ? local : `Q{${uri}}${local}`;
+  const node = { '$const': code };
+  QNAME_CODES.set(node, code);
+  return node;
+}
+
+// fn:error([code [, description [, error object]]]) is `$error`: the code
+// a QName constructor names, `err:FOER0000` without one; a code of another
+// type is XQuery's type error, raised where the call is evaluated.
+const errorFunction = Object.freeze({
+  min: 0,
+  max: 3,
+  emit: (args, refuse, types) => {
+    const rest = args.slice(1);
+    if (args.length === 0 || isEmptySeqExpr(args[0]))
+      return { '$error': [xqueryCode('FOER0000'), ...rest] };
+    const code = QNAME_CODES.get(args[0]);
+    if (code !== undefined)
+      return { '$error': [code, ...rest] };
+    const atomic = literalText(args[0]) !== null || typeof args[0] === 'number' || typeof args[0] === 'boolean';
+    if (atomic || isDateTypeName(types[0]))
+      return raisedWith(xqueryCode('XPTY0004'), 'fn:error takes an xs:QName as its code');
+    return refuse("unsupported construct 'fn:error code other than a QName constructor'");
+  },
+});
+
+//#endregion
+
 // The supported built-in functions (bare or `fn:`-prefixed), one entry
 // per name: `{ min, max, emit(args, refuse) }` over already-emitted
 // argument expressions; `refuse(message)` throws the positioned
@@ -1027,6 +1128,7 @@ const FN_TABLE = Object.freeze({
   'insert-before': insertBeforeFunction,
   'compare': compareFunction,
   'format-number': formatNumberFunction,
+  'error': errorFunction,
   // XQuery has no boolean literals; fn:true()/fn:false() are the spelling
   'true': { min: 0, max: 0, emit: () => true },
   'false': { min: 0, max: 0, emit: () => false },
@@ -1039,6 +1141,7 @@ const STRING_ARGUMENTS = Object.freeze({
   'contains': [0, 1], 'starts-with': [0, 1], 'ends-with': [0, 1], 'matches': [0, 1],
   'substring-before': [0, 1], 'substring-after': [0, 1], 'replace': [0, 1, 2], 'translate': [0, 1, 2],
   'tokenize': [0, 1, 2], 'compare': [0, 1, 2], 'string-join': [1], 'format-number': [1, 2],
+  'error': [1],
 });
 
 // The functions whose result is items of some of their arguments: the
@@ -1145,6 +1248,9 @@ export function parseXQuery(source) {
   // expression nesting: every ExprSingle, and every phrase a FLWOR's
   // clauses nest into, is one level of the emitted document
   let depth = 0;
+  // where the first argument of the fn:error call being read starts: a
+  // QName constructor there is the code it raises (-1 outside one)
+  let errorCodeAt = -1;
 
   function fail(message, at = pos) {
     throw new XQuerySyntaxError(message, source, at);
@@ -1227,6 +1333,9 @@ export function parseXQuery(source) {
       return holdsDates(typeOf(e.$get[0])) ? 'maybe' : 'none';
     if (hasOwn(e, '$let') && hasOwn(e.$let, LOOKUP_VAR))
       return holdsDates(typeOf(e.$let[LOOKUP_VAR])) ? 'maybe' : 'none';
+    // it never gives a value, so it joins as the empty sequence does
+    if (hasOwn(e, '$error'))
+      return 'empty';
     const keys = Object.keys(e);
     if (keys.length > 0 && keys.every((key) => key.charCodeAt(0) !== CC_DOLLAR))
       return keys.some((key) => holdsDates(typeOf(e[key]))) ? 'nested' : 'none';
@@ -1255,7 +1364,7 @@ export function parseXQuery(source) {
     return {
       '$if': [
         tests.length === 1 ? tests[0] : { [all ? '$and' : '$or']: tests },
-        raisedWith(`${code}: ${says(type)} (position ${at})`),
+        raisedWith(xqueryCode(code), `${says(type)} (position ${at})`),
         original,
       ],
     };
@@ -2108,7 +2217,20 @@ export function parseXQuery(source) {
       if (prefix === null && name === 'function')
         fail("unsupported construct 'inline function expression'", at);
       pos++; // consume '('
-      const args = parseArguments();
+      const isCode = at === errorCodeAt;
+      let args;
+      if ((prefix === null || prefix === 'fn') && name === 'error') {
+        const outer = errorCodeAt;
+        skipWS();
+        errorCodeAt = pos;
+        args = parseArguments();
+        errorCodeAt = outer;
+      }
+      else {
+        args = parseArguments();
+      }
+      if (isCode && name === 'QName' && (prefix === null || prefix === 'fn' || prefix === 'xs'))
+        return emitQName(prefix === 'xs', written, args, (message) => fail(message, at));
       return emitFunctionCall(prefix, name, written, args, at);
     }
     if (next === CC_HASH)

@@ -47,6 +47,7 @@ q(null, { doc: data }); // parse + compile convenience; returns the engine's com
   | `unsupported construct 'xs:date with a timezone'`, `'xs:dateTime without a timezone'`, ... | a date or time value outside the values the front-end reads (§4.9) |
   | `unsupported construct '<use> of a value that may be a date'`, `'date arithmetic'` | a use of a value whose date type the query does not fix, the difference of two dates (§3, §4.9) |
   | `unsupported construct 'format-number picture with a percent and a per-mille sub-picture'` | a picture whose sub-pictures multiply by different signs (§4.8) |
+  | `unsupported construct 'fn:error code other than a QName constructor'`, `'a QName of a computed name'`, `'xs:QName with the prefix <p>'`, ... | an `fn:error` code the front-end cannot read as the query is read (§4.10) |
   | `unsupported clause order: '<kw>' after '<kw>'` | FLWOR clause sequence that cannot be expressed by nesting (§5.1) |
   | `unsupported variable name '<name>'`, `unsupported lookup index 0 ...` | lexeme outside the JSON format's rules |
 
@@ -163,9 +164,10 @@ compileXQuery(text)(null, { doc: inputDocument });
 > `xs:float` is a double (no single-precision rounding, range or
 > overflow to `INF`), `xs:integer(7.9)` is `7`, and an integer or decimal
 > beyond 2^53 loses precision (`xs:long` and `xs:unsignedLong` check their
-> range on that double). A cast that fails raises `JQ2001` (the
-> analogue of `FORG0001`, `FOCA0002` and `XPTY0004` alike), when the cast is
-> evaluated, never when the query is read. `xs:date`, `xs:dateTime` and
+> range on that double). A cast that fails raises the engine's `$error`
+> (`JQ2017`) with XQuery's own code — `err:FORG0001`, `err:FOCA0002` or
+> `err:XPTY0004` (§4.10) — when the cast is evaluated, never when the query
+> is read. `xs:date`, `xs:dateTime` and
 > `xs:time` are mapped for the values whose RFC 3339 text the engine reads
 > right (§4.9); the other `xs:` types (durations, the `g` types, binary,
 > `xs:untypedAtomic`, ...) stay outside the subset (§6).
@@ -177,9 +179,10 @@ compileXQuery(text)(null, { doc: inputDocument });
 > read it as the string it is. The front-end therefore types it: the result
 > of a date constructor or cast, a variable bound to one, the items `head`,
 > `subsequence`, `if` or a FLWOR pass on, carry the date type, and every use
-> XQuery types as an error raises XQuery's code where it is evaluated —
-> `JQ2001` whose message names it and the position (`'FORG0006: an xs:date
-> has no effective boolean value (position 0)'`). Within one type the answers
+> XQuery types as an error raises XQuery's code where it is evaluated — the
+> engine's `$error` (`JQ2017`) carrying `err:FORG0006` and a message that
+> names the position (`an xs:date has no effective boolean value (position
+> 0)`). Within one type the answers
 > are XQuery's: comparisons order by time, `string()`, `concat` and
 > `string-join` give the canonical text, `min` and `max` pick by time. §4.9
 > lists the uses. A use whose operand may or may not be a date (an item of
@@ -324,6 +327,7 @@ Any other prefix, any name not listed, or any arity not listed is an error
 | `insert-before` | 3 | a `$let` phrase: the items before the position, the inserts, the rest (§4.7) |
 | `compare` | 2–3 | a `$let` phrase ordering two strings by code point; the third argument only the codepoint collation (§4.7) |
 | `true`, `false` | 0 | the literals `true` / `false` |
+| `error` | 0–3 | `{"$error": [code, description?, error-object?]}`; the code read from a QName constructor as the query is read (§4.10) |
 | `map:get` | 2 | `{"$get": [map, key]}` (key never adjusted) |
 | `array:get` | 2 | `{"$get": [array, pos−1]}` (**position adjusted**, §3) |
 | `xs:string` | 1 | `{"$string": e}` |
@@ -338,10 +342,10 @@ Any other prefix, any name not listed, or any arity not listed is an error
 | Operand | `xs:double`, `xs:float` | `xs:decimal` | `xs:integer` |
 |---|---|---|---|
 | string | XSD `double` text (below) | XSD `decimal` text | XSD `integer` text |
-| number | itself (`NaN`, `INF` too) | itself; `NaN`, `INF` are `JQ2001` | truncated toward zero; `NaN`, `INF` are `JQ2001` |
+| number | itself (`NaN`, `INF` too) | itself; `NaN`, `INF` are `err:FOCA0002` | truncated toward zero; `NaN`, `INF` are `err:FOCA0002` |
 | boolean | `1` / `0` | `1` / `0` | `1` / `0` |
 | empty sequence | empty | empty | empty |
-| `null`, array, object, two or more items | `JQ2001` | `JQ2001` | `JQ2001` |
+| `null`, array, object, two or more items | `err:XPTY0004` | `err:XPTY0004` | `err:XPTY0004` |
 
 XSD text is read after trimming space, tab, CR and LF; an optional sign
 follows; the digits may carry leading zeros and a bare leading or trailing
@@ -349,14 +353,16 @@ dot (`.5`, `5.`). `double` and `float` text also takes an exponent
 (`1.5E3`, `5.e3`) and the spellings `INF`, `+INF`, `-INF` and `NaN`;
 `decimal` and `integer` text takes no exponent, no `INF`, no `NaN`, and an
 integer no dot. Negative zero survives only in a double (`xs:double("-0")`);
-an integer or a decimal has none. Anything else is `JQ2001`, with the type
-and the text in the message (`xs:integer: 1.5`).
+an integer or a decimal has none. Anything else is `err:FORG0001`, with
+the type and the text in the message (`xs:integer: 1.5`). Each code here is
+the one a failed cast carries as the engine's `$error` raises it (§4.10).
 
 A **literal** operand folds when the query is parsed: `xs:integer(" +007 ")`
 emits `7`, `xs:double("INF")` emits `{"$div": [1, 0]}` (JSON has no literal
 for the non-finite doubles), `xs:double("-INF")` `{"$div": [-1, 0]}`,
 `xs:double("NaN")` `{"$div": [0, 0]}`, and a literal outside the type's text
-emits a cast that fails when it runs (`{"$number": "xs:integer: 1.5"}`).
+emits a cast that fails when it runs (`{"$error": ["err:FORG0001",
+"xs:integer: 1.5"]}`).
 Any other operand is bound once to the variable `xs_arg` in a `$let` phrase
 whose `$return` reads it by the table above, so the cast is lazy: `if
 (false()) then xs:integer("x") else 1` is `1`. The phrase is larger than the
@@ -376,9 +382,10 @@ array or object is `JQ2001`, and a number serializes the way JavaScript does
 `xs:unsignedByte`, `xs:nonNegativeInteger`, `xs:positiveInteger`,
 `xs:nonPositiveInteger` and `xs:negativeInteger` read their operand as
 `xs:integer` does and keep the integer only inside the type's range;
-outside it the cast fails with `JQ2001` (XQuery's `FORG0001`), the type and
-the operand in the message: `xs:byte("127")` emits `127`, `xs:byte(300)`
-emits `{"$number": "xs:byte: 300"}`, `xs:unsignedInt("-0")` emits `0`. For
+outside it the cast fails with `err:FORG0001`, the type and the operand in
+the message: `xs:byte("127")` emits `127`, `xs:byte(300)` emits
+`{"$error": ["err:FORG0001", "xs:byte: 300"]}`, `xs:unsignedInt("-0")`
+emits `0`. For
 any other operand the phrase reads the integer and keeps it with a `$where`
 on the range (bound to `xs_int`). The ranges of `xs:long` and
 `xs:unsignedLong` reach past 2^53, where an integer is a double (**D1**): a
@@ -390,7 +397,7 @@ fails, `xs:long("-9223372036854775809")` rounds to -2^63 and gives it, and
 
 **`cast as` and `castable as`.** `E cast as xs:T?` is the constructor
 `xs:T(E)`; `E cast as xs:T` is the same cast, except that the empty
-sequence fails with `JQ2001` (XQuery's `XPTY0004`). `E castable as xs:T` is
+sequence fails with `err:XPTY0004`. `E castable as xs:T` is
 `true` when the cast gives a value and `false` when it would fail, and is
 never an error itself: both read the operand the same way, and the cast
 raises only where that reading gives no value. The empty sequence is
@@ -422,7 +429,7 @@ into the I-Regexp that matches it (`tokenize($s, ".", "q")` emits
 matches in ways an I-Regexp cannot express and are refused by name
 (`unsupported construct 'tokenize flag i'`), as are flags computed when the
 query runs and `q` with a computed pattern; a letter F&O does not define is
-F&O's `FORX0001`, `JQ2001` when the call runs.
+F&O's `err:FORX0001`, raised when the call runs.
 
 *Upgrade: `tokenize` used to emit a `$let` phrase over the separator's
 positions, whose cost grew with the square of the text's length and whose
@@ -448,7 +455,9 @@ reads the operands back as `"$rm_args[0][*]"` and `"$rm_args[1][*]"`
   nothing, one below 1 inserts before the first item and one past the end
   appends.
 - The position is an `xs:integer`: one finite integral number, else
-  `JQ2001` (XQuery's `XPTY0004`). With one number type (**D1**), `1.0` and
+  `err:XPTY0004` (a number that is not one, or the empty sequence) or the
+  engine's `JQ2001` (a value that is no number). With one number type
+  (**D1**), `1.0` and
   `1e0` are integers here, where XQuery refuses a decimal or a double.
 - `compare(a, b)` is `-1`, `0` or `1` as `a` sorts before, with or after `b`
   by code point — the order `$lt` gives two strings, so U+FFFD sorts before
@@ -513,16 +522,18 @@ A value XSD reads but the domain does not hold is refused by name, never
 answered: a literal as the query is read (`unsupported construct 'xs:date
 with a timezone'`, `'xs:dateTime without a timezone'`, `'xs:time with a
 timezone other than Z'`, `'xs:dateTime with a fraction of a second'`,
-`'xs:date outside the years 0000 to 9999'`), a computed operand with
-`JQ2001` when the cast runs, in `castable as` too, which would otherwise
-answer `false` for a value XQuery casts. Normalizing another timezone to
+`'xs:date outside the years 0000 to 9999'`), a computed operand when the
+cast runs, in `castable as` too, which would otherwise answer `false` for a
+value XQuery casts: the engine's `$error` with the code `unsupported`, which
+names no XQuery error because XQuery answers (`xs:date: 1999-05-31Z is a
+value the front-end does not read`). Normalizing another timezone to
 UTC would keep the order and lose the text `string()` gives.
 
 A cast reads its operand by its static type (§3). A string, literal or
 computed, is read as one: a text in another date type's lexical space has
-no value (`xs:date("2000-01-01T00:00:00Z")` is XQuery's `FORG0001`,
-`JQ2001`), as have a text in no date shape, a number and a boolean (XQuery
-casts neither to a date: `XPTY0004`); the empty sequence gives the empty
+no value (`xs:date("2000-01-01T00:00:00Z")` is XQuery's `err:FORG0001`),
+as have a text in no date shape, a number and a boolean (XQuery casts
+neither to a date: `err:XPTY0004`); the empty sequence gives the empty
 sequence. A date value casts as XQuery casts it: to its own type it is
 itself, an `xs:dateTime` to an `xs:time` is its time, an `xs:date` and an
 `xs:time` have no value as each other (`XPTY0004`), and the two casts whose
@@ -548,6 +559,51 @@ The duration types (`xs:duration`, `xs:dayTimeDuration`,
 neither by length (`"P1D"` sorts before `"PT12H"`) nor equals its canonical
 twin (`"P1Y"` and `"P12M"` are one duration), and the engine has no
 operator that compares or canonicalizes one.
+
+### 4.10 `fn:error` and the refusals made when the query runs
+
+`fn:error` is the engine's `$error` (QUERY-FORMAT.md §8.17), which raises
+`JsonQueryRuntimeError` `JQ2017` where it is evaluated, never when the query
+is read, carrying the code as `params.code`, the description as
+`params.message` and the error object's items as `params.value`. The code is
+read as the query is read, from the first argument, which is the empty
+sequence (or absent) or a QName constructor over literal names:
+
+| First argument | Code carried |
+|---|---|
+| absent, `()` | `err:FOER0000` |
+| `QName("http://www.w3.org/2005/xqt-errors", "p:FOCH0004")`, `xs:QName("err:FOCH0004")` | `err:FOCH0004` (any prefix: the namespace decides) |
+| `QName("", "local")`, `xs:QName("local")` | `local` |
+| `QName("http://www.example.com/HR", "myerr:toohighsal")` | `Q{http://www.example.com/HR}toohighsal` |
+| a string, a number, a boolean or a date value | the call raises `err:XPTY0004` instead (a code is an `xs:QName`) |
+
+`QName` and `fn:QName` take two literal strings, `xs:QName` one, whose
+prefix may only be `err` or none (the front-end binds no other namespace);
+a QName constructor anywhere but as the whole first argument of `fn:error`
+stays `unsupported function 'QName'`, and any other code — a variable, a
+computed name — is refused by name (§1). `fn:error#4` is not XQuery
+(`unsupported function 'error#4'`). A description that is the empty
+sequence or `""` raises the code alone; XQuery would raise `XPTY0004` for
+the empty sequence there. As in XQuery, a branch that is not taken raises
+nothing: `if ($ok) then $x else error()` is `$x`.
+
+The refusals the front-end can only make when the query runs raise the
+same `$error`, with XQuery's code and a message that names the refusal:
+
+| Refusal | Code carried | Message |
+|---|---|---|
+| a cast that fails (§4.6, §4.9) | `err:FORG0001`, `err:FOCA0002`, `err:XPTY0004` | `xs:integer: 1.5`, `xs:byte: the operand is not one atomic value` |
+| a use of a date value XQuery types as an error (§4.9) | `err:FORG0006`, `err:XPTY0004` | `an xs:date has no effective boolean value (position 8)` |
+| a position of `remove`/`insert-before` that is no integer (§4.7) | `err:XPTY0004` | `fn:remove: position 1.5` |
+| a `tokenize` flag F&O does not define (§4.6) | `err:FORX0001` | `fn:tokenize: invalid flags 't'` |
+| a date value outside the domain (§4.9) | `unsupported` | `xs:date: 1999-05-31Z is a value the front-end does not read` |
+
+*Upgrade: these refusals raised `JQ2001` through a number cast of the
+message (`JQ2001: 'xs:integer: 1.5' is not a JSON number`, the XQuery code
+inside the message text where there was one); they raise `JQ2017` now, with
+XQuery's code in `params.code`. Code that matched `JQ2001` for a failed cast
+or a typed date use matches `JQ2017`. `fn:error` was `unsupported function
+'fn:error'`.*
 
 ## 5. FLWOR
 

@@ -27,6 +27,8 @@ import { execFileSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import { XMLParser } from 'fast-xml-parser';
 
+import { isMainModule } from '../../scripts/lib/main-module.js';
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SUITE_DIR = path.join(__dirname, '..', 'qt3tests');
 const OUTPUT_DIR = path.join(__dirname, '..', 'qt3-json');
@@ -40,11 +42,15 @@ const OUTPUT_DIR = path.join(__dirname, '..', 'qt3-json');
 // numeric character references ('&#xA;') undecoded while still expanding
 // '&amp;' - after which '&amp;#xA;' and '&#xA;' are indistinguishable.
 // One left-to-right pass over the raw text is the correct XML semantics.
+// Namespace prefixes are kept by the parser (its own prefix removal drops
+// every xmlns:* attribute) and removed by tagOf and attrsOf instead, so
+// that an element's own namespace declarations can be read
+// (namespaceDeclarationsOf).
 const parser = new XMLParser({
   preserveOrder: true,
   ignoreAttributes: false,
   attributeNamePrefix: '',
-  removeNSPrefix: true,
+  removeNSPrefix: false,
   trimValues: false,
   parseTagValue: false,
   parseAttributeValue: false,
@@ -100,7 +106,8 @@ function decodeXmlEntities(s) {
   return out + s.slice(i);
 }
 
-function tagOf(node) {
+// the name a node is stored under, its prefix included
+function qualifiedTagOf(node) {
   for (const key of Object.keys(node)) {
     if (key !== ':@')
       return key;
@@ -108,18 +115,38 @@ function tagOf(node) {
   return undefined;
 }
 
+// a name without its namespace prefix
+const localName = (name) => name.slice(name.indexOf(':') + 1);
+
+const isNamespaceDeclaration = (name) => name === 'xmlns' || name.startsWith('xmlns:');
+
+function tagOf(node) {
+  const tag = qualifiedTagOf(node);
+  return tag === undefined ? undefined : localName(tag);
+}
+
+/** The attributes by local name; namespace declarations are not attributes. */
 function attrsOf(node) {
   const raw = node[':@'];
   if (raw === undefined)
     return {};
   const attrs = {};
-  for (const key of Object.keys(raw))
-    attrs[key] = decodeXmlEntities(raw[key]);
+  for (const key of Object.keys(raw)) {
+    if (!isNamespaceDeclaration(key))
+      attrs[localName(key)] = decodeXmlEntities(raw[key]);
+  }
   return attrs;
 }
 
+/** The prefixed namespaces an element declares itself, as `{ prefix, uri }`. */
+function namespaceDeclarationsOf(node) {
+  const raw = node[':@'] ?? {};
+  return Object.keys(raw).filter((key) => key.startsWith('xmlns:'))
+    .map((key) => ({ prefix: key.slice(6), uri: decodeXmlEntities(raw[key]) }));
+}
+
 function childrenOf(node) {
-  const tag = tagOf(node);
+  const tag = qualifiedTagOf(node);
   return tag === undefined ? [] : node[tag];
 }
 
@@ -181,7 +208,8 @@ function convertDependency(node) {
 
 /**
  * <environment> -> plain object grouping child elements by tag, each child
- * kept raw as its attribute map (plus `text` when it has text content).
+ * kept raw as its attribute map (plus `text` when it has text content, and
+ * a decimal-format's own namespace declarations as `namespaces`).
  * Tags seen in the suite: namespace, schema, source, param, collection,
  * resource, decimal-format, static-base-uri, collation, context-item.
  */
@@ -196,6 +224,13 @@ function convertEnvironment(node) {
     const text = textOf(child).trim();
     if (text !== '')
       entry.text = text;
+    if (tag === 'decimal-format') {
+      // a prefixed format name resolves by the namespaces the element
+      // itself declares (`xmlns:a` beside `name="a:test"`)
+      const namespaces = namespaceDeclarationsOf(child);
+      if (namespaces.length > 0)
+        entry.namespaces = namespaces;
+    }
     if (tag === 'collection' || tag === 'source') {
       // collections nest <source> children; keep them
       const sources = elements(child, 'source').map((s) => ({ ...attrsOf(s) }));
@@ -205,6 +240,19 @@ function convertEnvironment(node) {
     (env[tag] ??= []).push(entry);
   }
   return env;
+}
+
+/**
+ * The text of one `<environment>` element, converted as a test case's
+ * inline environment is.
+ * @param {string} xml
+ * @returns {object}
+ */
+export function convertEnvironmentText(xml) {
+  const environment = parser.parse(xml).find((node) => tagOf(node) === 'environment');
+  if (environment === undefined)
+    throw new TypeError('the text holds no <environment> element');
+  return convertEnvironment(environment);
 }
 
 const COMBINATOR_KINDS = new Set(['all-of', 'any-of', 'not']);
@@ -371,6 +419,7 @@ function main() {
     console.warn(`warning: ${duplicateNames} duplicate test-case name(s) across sets (baseline keys are per-name)`);
 }
 
-main();
+if (isMainModule(import.meta.url))
+  main();
 
 //#endregion

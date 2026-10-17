@@ -120,6 +120,7 @@ const ARGS_2 = Object.freeze({ kinds: Object.freeze(['expr', 'expr']), min: 2 })
 const ARGS_3 = Object.freeze({ kinds: Object.freeze(['expr', 'expr', 'expr']), min: 3 });
 const ARGS_1_2 = Object.freeze({ kinds: Object.freeze(['expr', 'expr']), min: 1 });
 const ARGS_2_3 = Object.freeze({ kinds: Object.freeze(['expr', 'expr', 'expr']), min: 2 });
+const ARGS_1_3 = Object.freeze({ kinds: Object.freeze(['expr', 'expr', 'expr']), min: 1 });
 const ARGS_0N = Object.freeze({ kinds: Object.freeze(['expr']), min: 0, variadic: true });
 const ARGS_1N = Object.freeze({ kinds: Object.freeze(['expr']), min: 1, variadic: true });
 // the schema operators $valid/$assert: [expr, schema] (section 8.11)
@@ -2577,6 +2578,35 @@ export const OPERATORS = Object.freeze({
         catch (e) {
           throw seriesRefusal(e, specPath);
         }
+      };
+    },
+  },
+
+  //#endregion
+
+  //#region section 8.17 - raising an error
+
+  // [code, message?, value?]: the document's own error, JQ2017, raised
+  // where it is evaluated and never while the query compiles. The code is
+  // one string; a message that is empty (or the empty sequence) leaves the
+  // code alone; the value's items are carried as they are. Its result
+  // cardinality is ONE because it has none: it never returns, so no
+  // sequence check around it is ever reached.
+  '$error': {
+    params: ARGS_1_3,
+    result: RESULT_ONE,
+    compile: (gets, args, docPath) => {
+      const [codeGet, messageGet, valueGet] = gets;
+      return (f) => {
+        const params = { code: requiredStringArg(codeGet(f), args[0].docPath) };
+        const message = messageGet === undefined ? '' : stringArg(messageGet(f), args[1].docPath);
+        if (message !== '')
+          params.message = message;
+        if (valueGet !== undefined) {
+          const v = valueGet(f);
+          params.value = v === EMPTY ? [] : v instanceof Seq ? v.items.slice() : [v];
+        }
+        throw runtimeError('JQ2017', message === '' ? 'query/raised' : 'query/raised-message', params, docPath);
       };
     },
   },

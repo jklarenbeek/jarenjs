@@ -44,6 +44,7 @@ export const QUERY_CODES = Object.freeze({
   JQ2014: 'invalid formula outcome',
   JQ2015: 'invalid reviewed rule plan',
   JQ2016: 'a descendant segment over a circular reference',
+  JQ2017: 'an error the query raised ($error), with its own code and message',
 });
 
 /**

@@ -18,15 +18,15 @@
     },
     {
       "grammar": "query",
-      "sourceHash": "4c066c92341b1c4c2cda3735ed974d1a2588e1bc0a07ce98202bd38f1abd0a8a",
+      "sourceHash": "380bb0edd72206612bc1f28c07eb4a1467f400c74f8566fb52551f0244f4e88f",
       "seamHash": "f0d41be2c687a847bb30b6271a691b76477fbce80460d4aa7388e6a1469ea80e",
       "profileHash": "72217bd6d84bf3512c2a62df0196ec00dfcc55a73a64e20f9e5ba9877541f035",
       "open": [
         "objectExpression"
       ],
       "full": {
-        "bytes": 21337,
-        "branches": 48
+        "bytes": 21749,
+        "branches": 49
       },
       "profile": {
         "bytes": 3564,
@@ -35,15 +35,15 @@
     },
     {
       "grammar": "jslt",
-      "sourceHash": "fe87ae93bbfdc2a3b648d9d9acd848356442135c180e5e0f4a2d12a854460663",
+      "sourceHash": "cfe6d62d914668514b2112994fa2d4adf7088383e866f536a9979387090e872b",
       "seamHash": "05e477048a83ec7fd8b9c4578a0a33bc108da17e7043c35d73f420cefe1ec6fd",
       "profileHash": "8fe3692c07e19b6794712e58f894a526c3d6afa7d486801ff7f94207877f4f8a",
       "open": [
         "queryDocument"
       ],
       "full": {
-        "bytes": 24143,
-        "branches": 60
+        "bytes": 24555,
+        "branches": 61
       },
       "profile": {
         "bytes": 3491,
@@ -60,8 +60,8 @@
         "stylesheetDocument"
       ],
       "full": {
-        "bytes": 50291,
-        "branches": 110
+        "bytes": 51115,
+        "branches": 112
       },
       "profile": {
         "bytes": 4559,
@@ -77,8 +77,8 @@
         "queryDocument"
       ],
       "full": {
-        "bytes": 24768,
-        "branches": 52
+        "bytes": 25180,
+        "branches": 53
       },
       "profile": {
         "bytes": 3026,
@@ -95,8 +95,8 @@
         "stylesheetDocument"
       ],
       "full": {
-        "bytes": 50814,
-        "branches": 114
+        "bytes": 51638,
+        "branches": 116
       },
       "profile": {
         "bytes": 5128,
@@ -112,8 +112,8 @@
         "queryDocument"
       ],
       "full": {
-        "bytes": 23686,
-        "branches": 50
+        "bytes": 24098,
+        "branches": 51
       },
       "profile": {
         "bytes": 2634,
@@ -130,8 +130,8 @@
         "dagDocument"
       ],
       "full": {
-        "bytes": 54134,
-        "branches": 123
+        "bytes": 54958,
+        "branches": 125
       },
       "profile": {
         "bytes": 3685,

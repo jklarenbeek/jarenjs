@@ -42,9 +42,9 @@ describe('XQuery front-end derived integer types', () => {
         assert.deepStrictEqual(values(`xs:${type}($v)`, { v: String(BigInt(bound)) }), [bound], `${type} "${bound}"`);
       }
       if (low !== null)
-        failsAtRun(`xs:${type}($v)`, { v: beyond(low, -1) });
+        failsAtRun(`xs:${type}($v)`, { v: beyond(low, -1) }, 'err:FORG0001');
       if (high !== null)
-        failsAtRun(`xs:${type}($v)`, { v: beyond(high, 1) });
+        failsAtRun(`xs:${type}($v)`, { v: beyond(high, 1) }, 'err:FORG0001');
     }
   });
 
@@ -54,13 +54,13 @@ describe('XQuery front-end derived integer types', () => {
     assert.deepStrictEqual(validated('xs:byte(-128.9)'), -128);
     assert.deepStrictEqual(validated('xs:unsignedInt("-0")'), 0);
     assert.deepStrictEqual(validated('xs:positiveInteger(true())'), 1);
-    assert.deepStrictEqual(validated('xs:byte("128")'), { '$number': 'xs:byte: 128' });
-    assert.deepStrictEqual(validated('xs:byte(300)'), { '$number': 'xs:byte: 300' });
-    assert.deepStrictEqual(validated('xs:positiveInteger("0")'), { '$number': 'xs:positiveInteger: 0' });
-    assert.deepStrictEqual(validated('xs:negativeInteger(false())'), { '$number': 'xs:negativeInteger: false' });
-    assert.deepStrictEqual(validated('xs:short("1.5")'), { '$number': 'xs:short: 1.5' });
+    assert.deepStrictEqual(validated('xs:byte("128")'), { '$error': ['err:FORG0001', 'xs:byte: 128'] });
+    assert.deepStrictEqual(validated('xs:byte(300)'), { '$error': ['err:FORG0001', 'xs:byte: 300'] });
+    assert.deepStrictEqual(validated('xs:positiveInteger("0")'), { '$error': ['err:FORG0001', 'xs:positiveInteger: 0'] });
+    assert.deepStrictEqual(validated('xs:negativeInteger(false())'), { '$error': ['err:FORG0001', 'xs:negativeInteger: false'] });
+    assert.deepStrictEqual(validated('xs:short("1.5")'), { '$error': ['err:FORG0001', 'xs:short: 1.5'] });
     assert.deepStrictEqual(values('if (false()) then xs:byte(300) else 1'), [1]);
-    failsAtRun('xs:byte(300)');
+    failsAtRun('xs:byte(300)', {}, 'err:FORG0001');
   });
 
   it('should read the operand as xs:integer does before checking the range', () => {
@@ -70,9 +70,13 @@ describe('XQuery front-end derived integer types', () => {
     assert.deepStrictEqual(asByte(-128.9), [-128]);
     assert.deepStrictEqual(asByte(true), [1]);
     assert.deepStrictEqual(values('xs:byte(())'), []);
-    for (const bad of ['128', '-129', '1.5', '1e2', 'x', 128.5, NaN, Infinity, null, [1], { a: 1 }])
-      failsAtRun('xs:byte($v)', { v: bad });
-    failsAtRun('xs:byte((1, 2))');
+    for (const bad of ['128', '-129', '1.5', '1e2', 'x', 128.5])
+      failsAtRun('xs:byte($v)', { v: bad }, 'err:FORG0001');
+    for (const bad of [NaN, Infinity])
+      failsAtRun('xs:byte($v)', { v: bad }, 'err:FOCA0002');
+    for (const bad of [null, [1], { a: 1 }])
+      failsAtRun('xs:byte($v)', { v: bad }, 'err:XPTY0004');
+    failsAtRun('xs:byte((1, 2))', {}, 'err:XPTY0004');
   });
 
   it('should name the type and the operand in the error', () => {
@@ -82,9 +86,9 @@ describe('XQuery front-end derived integer types', () => {
 
   it('should read a value past 2^53 as its double before checking the range (D1)', () => {
     // 2^63 - 1 rounds to 2^63, outside xs:long; -2^63 - 1 rounds to -2^63, inside
-    failsAtRun('xs:long($v)', { v: '9223372036854775807' });
+    failsAtRun('xs:long($v)', { v: '9223372036854775807' }, 'err:FORG0001');
     assert.deepStrictEqual(values('xs:long($v)', { v: '-9223372036854775809' }), [-(2 ** 63)]);
-    failsAtRun('xs:unsignedLong($v)', { v: '18446744073709551615' });
+    failsAtRun('xs:unsignedLong($v)', { v: '18446744073709551615' }, 'err:FORG0001');
   });
 
   it('should not capture, or be captured by, the names a user chose', () => {
@@ -113,7 +117,7 @@ describe('XQuery front-end cast as and castable as', () => {
     assert.deepStrictEqual(values('$v cast as xs:integer', { v: ' 5 ' }), [5]);
     assert.deepStrictEqual(values('() cast as xs:integer?'), []);
     for (const type of ['string', 'boolean', 'integer', 'decimal', 'double', 'float', 'int'])
-      failsAtRun(`() cast as xs:${type}`);
+      failsAtRun(`() cast as xs:${type}`, {}, 'err:XPTY0004');
     assert.throws(() => compileXQuery('() cast as xs:int')(null, {}), /xs:int: the empty sequence/);
   });
 
@@ -153,8 +157,8 @@ describe('XQuery front-end cast as and castable as', () => {
 
   it('should give no integer or decimal for a text past the double range, and say so to castable as', () => {
     const huge = '1' + '0'.repeat(400);
-    failsAtRun('xs:integer($v)', { v: huge });
-    failsAtRun('$v cast as xs:decimal', { v: '-' + huge });
+    failsAtRun('xs:integer($v)', { v: huge }, 'err:FORG0001');
+    failsAtRun('$v cast as xs:decimal', { v: '-' + huge }, 'err:FORG0001');
     assert.deepStrictEqual(values('$v castable as xs:integer, $v castable as xs:decimal', { v: huge }), [false, false]);
     assert.deepStrictEqual(values('xs:double($v), $v castable as xs:double', { v: huge }), [Infinity, true]);
   });

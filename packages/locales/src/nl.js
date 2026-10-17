@@ -449,6 +449,8 @@ export const nl = {
   'query/input-undefined': 'het invoerdocument is undefined, wat geen JSON-waarde is',
   'query/lexical-threw': 'de lexicale provider gooide een fout',
   'query/lexical-result': 'de lexicale provider gaf een ongeldig of onvolledig resultaat terug',
+  'query/raised': '{code}',
+  'query/raised-message': '{code}: {message}',
   //#endregion
 
   //#region @jarenjs/json formulas (the messages of formulaMessagesEn)

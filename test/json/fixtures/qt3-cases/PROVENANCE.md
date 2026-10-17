@@ -7,12 +7,16 @@
 environment resolved inline. They come from these upstream catalogs:
 
 - `fn/format-number.xml` and `app/spec-examples.xml` (`fn:format-number`,
-  with and without an environment's `decimal-format` declarations);
+  with and without an environment's `decimal-format` declarations, a
+  declaration's own namespace declarations included);
 - `fn/tokenize.xml`, `fn/translate.xml`, `fn/substring-before.xml` and
   `fn/substring-after.xml`;
 - `op/dateTime-less-than.xml`, `op/time-equal.xml`, `op/date-greater-than.xml`,
   `op/dateTime-equal.xml`, `prod/CastExpr.xml`, `prod/CastableExpr.xml`,
-  `prod/WhereClause.xml` and `misc/CombinedErrorCodes.xml`.
+  `prod/WhereClause.xml` and `misc/CombinedErrorCodes.xml`;
+- `fn/error.xml`, `prod/TryCatchExpr.xml`, `prod/ValueComp.xml`,
+  `op/numeric-add.xml` and `misc/ErrorsAndOptimization.xml` (`fn:error`, and
+  the code an error the query raises carries).
 
 They are vendored rather than read from the `benchmark/qt3tests` submodule (or
 its gitignored conversion) so the test runs in a fresh clone with no submodule

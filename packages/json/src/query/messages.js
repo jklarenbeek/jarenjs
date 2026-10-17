@@ -235,6 +235,10 @@ export const queryMessagesEn = Object.freeze({
   'query/input-undefined': 'the input document is undefined, which is not a JSON value',
   'query/lexical-threw': 'lexical provider threw',
   'query/lexical-result': 'lexical provider returned an invalid or incomplete result',
+  // JQ2017: an error the document raised ($error); its code and message
+  // are the document's own, so the sentence holds nothing else
+  'query/raised': '{code}',
+  'query/raised-message': '{code}: {message}',
 });
 
 /** The compiled English catalog (module-level singleton). */

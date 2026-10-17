@@ -40,11 +40,17 @@ describe('XQuery front-end fn:remove and fn:insert-before', () => {
   it('should take a position that is one integral number, and refuse anything else', () => {
     assert.deepStrictEqual(values('remove((1, 2, 3), 2e0)'), [1, 3]);
     assert.deepStrictEqual(values('remove((1, 2, 3), $p)', { p: -0 }), [1, 2, 3]);
-    for (const p of [1.5, NaN, Infinity, -Infinity, '1', null, [1], true]) {
+    // a number that is no integer is XQuery's type error; what is no number
+    // is the engine's own, raised by the arithmetic that reads it
+    for (const p of [1.5, NaN, Infinity, -Infinity]) {
+      failsAtRun('remove((1, 2, 3), $p)', { p }, 'err:XPTY0004');
+      failsAtRun('insert-before((1, 2, 3), $p, 0)', { p }, 'err:XPTY0004');
+    }
+    for (const p of ['1', null, [1], true]) {
       failsAtRun('remove((1, 2, 3), $p)', { p });
       failsAtRun('insert-before((1, 2, 3), $p, 0)', { p });
     }
-    failsAtRun('remove((1, 2, 3), ())');
+    failsAtRun('remove((1, 2, 3), ())', {}, 'err:XPTY0004');
     failsAtRun('insert-before((1, 2, 3), (1, 2), 0)');
   });
 

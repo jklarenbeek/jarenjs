@@ -448,6 +448,8 @@ export const pt = {
   'query/input-undefined': 'o documento de entrada é undefined, o que não é um valor JSON',
   'query/lexical-threw': 'o provedor léxico lançou uma exceção',
   'query/lexical-result': 'o provedor léxico retornou um resultado inválido ou incompleto',
+  'query/raised': '{code}',
+  'query/raised-message': '{code}: {message}',
   //#endregion
 
   //#region @jarenjs/json formulas (the messages of formulaMessagesEn)

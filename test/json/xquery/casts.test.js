@@ -64,28 +64,28 @@ describe('XQuery front-end xs: constructors', () => {
     });
 
     it('should emit a literal outside the lexical space as a cast that fails when run', () => {
-      assert.deepStrictEqual(validated('xs:integer("1.5")'), { '$number': 'xs:integer: 1.5' });
-      assert.deepStrictEqual(validated('xs:decimal("1e3")'), { '$number': 'xs:decimal: 1e3' });
-      assert.deepStrictEqual(validated('xs:double("inf")'), { '$number': 'xs:double: inf' });
-      assert.deepStrictEqual(validated('xs:float("")'), { '$number': 'xs:float: ' });
-      assert.deepStrictEqual(validated('xs:boolean("yes")'), { '$number': 'xs:boolean: yes' });
+      assert.deepStrictEqual(validated('xs:integer("1.5")'), { '$error': ['err:FORG0001', 'xs:integer: 1.5'] });
+      assert.deepStrictEqual(validated('xs:decimal("1e3")'), { '$error': ['err:FORG0001', 'xs:decimal: 1e3'] });
+      assert.deepStrictEqual(validated('xs:double("inf")'), { '$error': ['err:FORG0001', 'xs:double: inf'] });
+      assert.deepStrictEqual(validated('xs:float("")'), { '$error': ['err:FORG0001', 'xs:float: '] });
+      assert.deepStrictEqual(validated('xs:boolean("yes")'), { '$error': ['err:FORG0001', 'xs:boolean: yes'] });
       // beyond the double range an integer or a decimal has no value at all
       const huge = '1' + '0'.repeat(400);
-      assert.deepStrictEqual(validated(`xs:integer("${huge}")`), { '$number': `xs:integer: ${huge}` });
-      assert.deepStrictEqual(validated(`xs:decimal("-${huge}")`), { '$number': `xs:decimal: -${huge}` });
+      assert.deepStrictEqual(validated(`xs:integer("${huge}")`), { '$error': ['err:FORG0001', `xs:integer: ${huge}`] });
+      assert.deepStrictEqual(validated(`xs:decimal("-${huge}")`), { '$error': ['err:FORG0001', `xs:decimal: -${huge}`] });
     });
 
     it('should fail a bad literal when the cast runs, never when the query is read', () => {
       assert.deepStrictEqual(values('if (false()) then xs:integer("x") else 1'), [1]);
-      failsAtRun('xs:integer("x")');
-      failsAtRun('xs:double("1.2.3")');
-      failsAtRun('xs:decimal("INF")');
-      failsAtRun('xs:integer("1" || "e3")');
+      failsAtRun('xs:integer("x")', {}, 'err:FORG0001');
+      failsAtRun('xs:double("1.2.3")', {}, 'err:FORG0001');
+      failsAtRun('xs:decimal("INF")', {}, 'err:FORG0001');
+      failsAtRun('xs:integer("1" || "e3")', {}, 'err:FORG0001');
     });
 
     it('should not read a variable-looking literal as a reference', () => {
-      assert.deepStrictEqual(validated('xs:integer("$x")'), { '$number': 'xs:integer: $x' });
-      failsAtRun('xs:integer("$x")');
+      assert.deepStrictEqual(validated('xs:integer("$x")'), { '$error': ['err:FORG0001', 'xs:integer: $x'] });
+      failsAtRun('xs:integer("$x")', {}, 'err:FORG0001');
     });
 
     it('should map xs:string onto $string', () => {
@@ -116,7 +116,7 @@ describe('XQuery front-end xs: constructors', () => {
       assert.deepStrictEqual(asInteger('00'), [0]);
       assert.deepStrictEqual(asInteger('-12'), [-12]);
       for (const bad of ['1.5', '1e3', '', ' ', 'abc', '+', '-', '1 2', '0x10', '--1', 'NaN', 'INF'])
-        failsAtRun('xs:integer($s)', { s: bad });
+        failsAtRun('xs:integer($s)', { s: bad }, 'err:FORG0001');
     });
 
     it('should read decimal text: a dot, no exponent, no INF', () => {
@@ -129,7 +129,7 @@ describe('XQuery front-end xs: constructors', () => {
       assert.deepStrictEqual(asDecimal('-0.0'), [0]);
       assert.deepStrictEqual(asDecimal(' 2.25 '), [2.25]);
       for (const bad of ['1e3', '.', '', 'INF', 'NaN', '1.2.3', '1,5'])
-        failsAtRun('xs:decimal($s)', { s: bad });
+        failsAtRun('xs:decimal($s)', { s: bad }, 'err:FORG0001');
     });
 
     it('should read double text: exponents, bare dots, INF and NaN', () => {
@@ -147,7 +147,7 @@ describe('XQuery front-end xs: constructors', () => {
       assert.deepStrictEqual(asDouble('NaN'), [NaN]);
       assert.deepStrictEqual(asDouble('1e999'), [Infinity]);
       for (const bad of ['1e', '1e+', 'inf', 'nan', '+NaN', 'Infinity', '0x10', '1_0', '+-1', '1.2.3', '1 2', '', '.', 'e5'])
-        failsAtRun('xs:double($s)', { s: bad });
+        failsAtRun('xs:double($s)', { s: bad }, 'err:FORG0001');
     });
 
     it('should read boolean text: true, false, 1 and 0 after trimming, nothing else', () => {
@@ -156,7 +156,7 @@ describe('XQuery front-end xs: constructors', () => {
       assert.deepStrictEqual(asBoolean('false'), [false]);
       assert.deepStrictEqual(asBoolean('\t0 '), [false]);
       for (const bad of ['TRUE', 'True', 'yes', '12', '', '01', 'false true'])
-        failsAtRun('xs:boolean($s)', { s: bad });
+        failsAtRun('xs:boolean($s)', { s: bad }, 'err:FORG0001');
     });
 
     it('should convert numbers: integers truncate, decimals refuse the non-finite', () => {
@@ -171,8 +171,8 @@ describe('XQuery front-end xs: constructors', () => {
       assert.deepStrictEqual(asDouble(NaN), [NaN]);
       assert.deepStrictEqual(asDouble(-Infinity), [-Infinity]);
       for (const bad of [NaN, Infinity, -Infinity]) {
-        failsAtRun('xs:integer($s)', { s: bad });
-        failsAtRun('xs:decimal($s)', { s: bad });
+        failsAtRun('xs:integer($s)', { s: bad }, 'err:FOCA0002');
+        failsAtRun('xs:decimal($s)', { s: bad }, 'err:FOCA0002');
       }
     });
 
@@ -194,10 +194,10 @@ describe('XQuery front-end xs: constructors', () => {
       for (const cast of ['xs:integer', 'xs:decimal', 'xs:double', 'xs:float', 'xs:boolean', 'xs:string'])
         assert.deepStrictEqual(values(`${cast}(())`), [], cast);
       for (const cast of ['xs:integer', 'xs:decimal', 'xs:double', 'xs:float', 'xs:boolean']) {
-        failsAtRun(`${cast}($s)`, { s: null });
-        failsAtRun(`${cast}($s)`, { s: [1] });
-        failsAtRun(`${cast}($s)`, { s: { a: 1 } });
-        failsAtRun(`${cast}((1, 2))`);
+        failsAtRun(`${cast}($s)`, { s: null }, 'err:XPTY0004');
+        failsAtRun(`${cast}($s)`, { s: [1] }, 'err:XPTY0004');
+        failsAtRun(`${cast}($s)`, { s: { a: 1 } }, 'err:XPTY0004');
+        failsAtRun(`${cast}((1, 2))`, {}, 'err:XPTY0004');
       }
     });
 
@@ -370,8 +370,8 @@ describe('XQuery front-end fn:tokenize', () => {
   });
 
   it('should raise F&O FORX0001 for a flag F&O does not define, when the call runs', () => {
-    failsAtRun('tokenize("a", "b", "t")');
-    failsAtRun('tokenize("a", "b", " ")');
+    failsAtRun('tokenize("a", "b", "t")', {}, 'err:FORX0001');
+    failsAtRun('tokenize("a", "b", " ")', {}, 'err:FORX0001');
     assert.deepStrictEqual(values('if (false()) then tokenize("a", "b", "t") else 1'), [1]);
   });
 

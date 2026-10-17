@@ -447,6 +447,8 @@ export const tr = {
   'query/input-undefined': 'girdi belgesi undefined; bu bir JSON değeri değil',
   'query/lexical-threw': 'sözcüksel sağlayıcı bir özel durum oluşturdu',
   'query/lexical-result': 'sözcüksel sağlayıcı geçersiz ya da eksik bir sonuç döndürdü',
+  'query/raised': '{code}',
+  'query/raised-message': '{code}: {message}',
   //#endregion
 
   //#region @jarenjs/json formulas (the messages of formulaMessagesEn)
