@@ -493,7 +493,9 @@ so it reads back as it was; an `erDiagram` entity name in quotes may hold spaces
 in a relationship as in a block (`"PRODUCT CATEGORY" ||--o{ PRODUCT : has` used
 to vanish into a bogus entity), the quotes are not part of the name, and a name
 with a space prints in quotes, and a bare entity line (`"E F"`, `G`) declares an
-entity; a `style` or `classDef` value is plain paint (a color, a number with a
+entity; a quoted relationship label is read and drawn without its quotes
+(`A ||--o{ B : "has x"` draws `has x`, as Mermaid does), and `toMermaid`
+quotes a label that is not one word; a `style` or `classDef` value is plain paint (a color, a number with a
 unit, a dash list, `var(--name)`, `url(#id)` of the same document, or a color
 function such as `rgb(10 20 30)`), and one carrying a `;`, a remote `url()` or
 another function is dropped without a diagnostic, where it was written into the

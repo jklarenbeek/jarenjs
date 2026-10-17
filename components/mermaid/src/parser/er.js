@@ -20,7 +20,8 @@ const RE_COMMENT = /\s+"([^"]*)"\s*$/;
 const RE_BARE = new RegExp(`^${NAME}$`);
 
 /**
- * An entity name as written, without the quotes that spell it.
+ * An entity name or a relationship label as written, without the quotes
+ * that spell it.
  * @param {string} name
  * @returns {string}
  */
@@ -70,7 +71,7 @@ export function parseEr(lines) {
         leftCard: rel[2],
         rightCard: rel[4],
         identifying: rel[3] === '--',
-        label: rel[6].trim(),
+        label: unquote(rel[6].trim()),
       });
       continue;
     }

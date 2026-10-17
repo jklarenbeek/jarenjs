@@ -415,6 +415,17 @@ function printStateLines(ast, declareAll) {
 }
 
 /**
+ * A relationship label as Mermaid reads it: one word that does not open
+ * with a quote as it stands, anything else (a space, nothing at all) in quotes — Mermaid has no escape inside
+ * them, so a quote there prints as its entity code, which the drawing decodes.
+ * @param {string} label
+ * @returns {string}
+ */
+function erLabel(label) {
+  return /^[^\s"]\S*$/.test(label) ? label : `"${label.replaceAll('"', '#34;')}"`;
+}
+
+/**
  * @param {any} ast
  * @returns {string}
  */
@@ -431,7 +442,7 @@ function printEr(ast) {
     out.push('}');
   }
   for (const r of ast.relationships) {
-    out.push(`${name(r.left)} ${r.leftCard}${r.identifying ? '--' : '..'}${r.rightCard} ${name(r.right)} : ${r.label}`);
+    out.push(`${name(r.left)} ${r.leftCard}${r.identifying ? '--' : '..'}${r.rightCard} ${name(r.right)} : ${erLabel(r.label)}`);
   }
   return out.join('\n') + '\n';
 }

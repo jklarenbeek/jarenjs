@@ -11,7 +11,8 @@
 import { describe, it } from 'node:test';
 import * as assert from 'node:assert/strict';
 
-import { parseMermaid, toMermaid } from '@jarenjs/mermaid';
+import { parseMermaid, renderMermaid, toMermaid } from '@jarenjs/mermaid';
+import { renderToString } from '@jarenjs/view';
 
 const SOURCE = `erDiagram
   "PRODUCT CATEGORY" ||--o{ PRODUCT : has
@@ -64,5 +65,28 @@ describe('erDiagram — quoted entity names', function () {
     const doc = parseMermaid('erDiagram\n  "" ||--o{ A : x\n  ""\n  B');
     assert.deepEqual(doc.ast.entities.map((/** @type {any} */ e) => e.name), ['B']);
     assert.deepEqual(doc.ast.relationships, []);
+  });
+});
+
+describe('erDiagram — a quoted relationship label', function () {
+  it('reads the label without its quotes, draws it so and prints it back in them', () => {
+    const doc = parseMermaid('erDiagram\n  A ||--o{ B : "has x"\n  B ||--|| C : owns\n  C ||--|| D : ""');
+    assert.deepEqual(doc.ast.relationships.map((/** @type {any} */ r) => r.label), ['has x', 'owns', '']);
+    const text = toMermaid(doc);
+    assert.match(text, /^A \|\|--o\{ B : "has x"$/m);
+    assert.match(text, /^B \|\|--\|\| C : owns$/m);
+    assert.match(text, /^C \|\|--\|\| D : ""$/m);
+    assert.deepEqual(parseMermaid(text).ast, doc.ast);
+    const svg = renderToString(renderMermaid('erDiagram\n  A ||--o{ B : "has x"'));
+    assert.ok(svg.includes('>A ||--o{ B : has x<'), 'the drawn relationship row');
+    assert.ok(!svg.includes('"has x"') && !svg.includes('&quot;has x&quot;'), 'no quotes drawn');
+  });
+
+  it('prints a quote inside a label with spaces as its entity code, which reads back as that code', () => {
+    const doc = parseMermaid('erDiagram\n  A ||--o{ B : say"hi"');
+    assert.equal(doc.ast.relationships[0].label, 'say"hi"');
+    assert.match(toMermaid(doc), /^A \|\|--o\{ B : say"hi"$/m);
+    const spaced = { ...doc, ast: { ...doc.ast, relationships: [{ ...doc.ast.relationships[0], label: 'say "hi"' }] } };
+    assert.match(toMermaid(spaced), /^A \|\|--o\{ B : "say #34;hi#34;"$/m);
   });
 });
