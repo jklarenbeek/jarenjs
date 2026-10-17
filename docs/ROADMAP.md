@@ -641,27 +641,24 @@ what each does is its own documentation's job
   Scan`), so an `$orderby` sorts every matching row however few a page or a
   narrow `$where` returns. Wanted: an index whose null placement the order
   reads, or an order whose null placement the index provides.
-- [ ] **On PostgreSQL an external past 2^53 compares exactly with digits
-  another writer spelled.** A store profile predicate's, or a query's own,
-  external number past ±(2^53 − 1) is compared with a document member as
-  `jsonb` numbers, exactly: over documents the store wrote (2^60 as
-  `1152921504606847000`) it keeps the engine's rows, but a document another
-  writer stored with other digits for the same double (`1152921504606846976`)
-  is kept or dropped otherwise than the engine — `$eq ['$it.u', '$x']`, x =
-  2^60, keeps only the store's own document where the engine keeps both, and
-  `$ne`, `$lt`, `$le`, `$gt`, `$ge` differ alike, on `integer` and `number`
-  members, indexed or not. Wanted: the comparison SQLite now makes (the
-  interval of numbers that round to the external's double), which on `numeric`
-  must also place a decimal another writer spelled within a half-unit of an
-  edge (a tie that rounds away from an odd significand).
-- [ ] **On Bun a native query leaves the store reading an old snapshot.**
-  After `store.execute()` of a native statement (`$for '$.K[*]' $orderby
-  $return '$it.v'`) on `bunDriver()` over a file, a row another connection
-  then commits is not seen by the store's later reads (`get` answers the value
-  from before the write) until the store is reopened; a `get`, `load` or
-  `explain` before the write does not do it, and node:sqlite does not. Wanted:
-  every statement reset or finalized, and every read transaction ended, when
-  its read ends.
+- [ ] **On PostgreSQL a literal or a membership list compares exactly with
+  digits another writer spelled.** A `$where` literal past ±(2^53 − 1) (`$eq
+  ['$it.u', 1152921504606846976]`), a literal list (`$eq ['$it.u', { $seq:
+  [2^60, 5] }]`) and an external list (`$eq ['$it.u', '$xs[*]']`) compare a
+  member's `numeric` exactly, so a document another writer stored as
+  `1152921504606846976` is dropped where the engine keeps it. So does any
+  number against a decimal spelled past a double's precision: external or
+  literal 5 against a stored `5.00000000000000000001` keeps only the store's
+  `5`. SQLite answers all of these as the engine. Wanted: the interval
+  comparison the scalar external now makes (decimal edges with tie sides), for
+  literals and list items, and for every double, not only those past 2^53.
+- [ ] **On SQLite a decimal another writer spelled just past a tie reads as
+  the other double.** SQLite 3.53.4 reads
+  `1152921504606847104.0000000000000001` as 2^60 and
+  `9007199254740993.0000000000000001` as 2^53 (`json_extract`, `CAST AS
+  REAL`), where the engine (`JSON.parse`) reads 2^60 + 256 and 2^53 + 2; every
+  read and comparison of such a member differs from the engine. Wanted: a read
+  that rounds as the engine does, or a documented loss.
 - [ ] **On PostgreSQL a column that reads a NULL as a present `null` is read
   in the engine.** No column whose policy is `null: 'null'` is read natively
   on PostgreSQL (`nativeQuery` is false for it), so a grouping ordered by such
