@@ -129,6 +129,35 @@ const beyondSafeInteger = (value) => typeof value === 'number' && Number.isInteg
   && !Number.isSafeInteger(value);
 
 /**
+ * A member read by its decimal digits (`dialect.decimalDigits`) compared with
+ * the number an external holds. The member holds any decimal another writer
+ * spelled, which may lie on an edge of the interval of decimals that round to
+ * the external's double, or within a half-unit of one: each edge binds with
+ * the bound a member must lie strictly beyond besides (`decimal`,
+ * `decimalEdge`), which is the edge itself where its tie rounds away. A safe
+ * integer or a fraction binds as itself, which is equality. A difference
+ * (`ne`) is the equality, for the caller to negate.
+ * @param {any} dialect
+ * @param {(slot: any) => string} param
+ * @param {string} external - the external's name
+ * @param {string} op
+ * @param {string} member - the member's SQL, in the dialect's external number form
+ * @returns {string}
+ */
+function decimalComparison(dialect, param, external, op, member) {
+  // each a function: a slot is taken where its placeholder is written
+  /** @param {'low' | 'high' | 'lowExclusive' | 'highExclusive'} edge */
+  const decimalOf = (edge) => dialect.externalRef(param({ external, json: true, decimal: edge, compared: true }), 'number');
+  const fromLow = () => `${member} >= ${decimalOf('low')} AND ${member} > ${decimalOf('lowExclusive')}`;
+  const toHigh = () => `${member} <= ${decimalOf('high')} AND ${member} < ${decimalOf('highExclusive')}`;
+  if (op === 'lt') return `(${member} < ${decimalOf('low')} OR ${member} <= ${decimalOf('lowExclusive')})`;
+  if (op === 'le') return toHigh();
+  if (op === 'gt') return `(${member} > ${decimalOf('high')} OR ${member} >= ${decimalOf('highExclusive')})`;
+  if (op === 'ge') return fromLow();
+  return `${fromLow()} AND ${toHigh()}`;
+}
+
+/**
  * The member a comparison reads: as the double the engine holds where the
  * other side holds an integer past 2^53 ({@link beyondSafeInteger}), as
  * itself otherwise — and so through its index.
@@ -872,26 +901,8 @@ export function emitPlan(plan, dialect, physical) {
       if (pred.op === 'ge') return `${member} >= ${edgeOf('low')}`;
       return `${member} BETWEEN ${edgeOf('low')} AND ${edgeOf('high')}`;
     };
-    // a member read by its decimal digits (`dialect.decimalDigits`) holds
-    // any decimal another writer spelled, which may lie on an edge of the
-    // interval of decimals that round to the external's double, or within
-    // a half-unit of one: each edge binds with the bound a member must lie
-    // strictly beyond besides (`decimal`, `decimalEdge`), which is the edge
-    // itself where its tie rounds away. A safe integer or a fraction binds
-    // as itself, which is equality
-    /** @param {'low' | 'high' | 'lowExclusive' | 'highExclusive'} edge */
-    const decimalOf = (edge) => dialect.externalRef(param({ external: name, json: true, decimal: edge, compared: true }), 'number');
     /** @param {string} member */
-    const decimalTest = (member) => {
-      // each a function: a slot is taken where its placeholder is written
-      const fromLow = () => `${member} >= ${decimalOf('low')} AND ${member} > ${decimalOf('lowExclusive')}`;
-      const toHigh = () => `${member} <= ${decimalOf('high')} AND ${member} < ${decimalOf('highExclusive')}`;
-      if (pred.op === 'lt') return `(${member} < ${decimalOf('low')} OR ${member} <= ${decimalOf('lowExclusive')})`;
-      if (pred.op === 'le') return toHigh();
-      if (pred.op === 'gt') return `(${member} > ${decimalOf('high')} OR ${member} >= ${decimalOf('highExclusive')})`;
-      if (pred.op === 'ge') return fromLow();
-      return `${fromLow()} AND ${toHigh()}`;
-    };
+    const decimalTest = (member) => decimalComparison(dialect, param, name, pred.op, member);
     const textBranch = `(${jt} IS NOT NULL AND ${jt} = ${sl('text')} AND `
       + `${dialect.valueTypeOf(external())} = ${sl('text')} AND `
       + `${compare('text')} ${pred.op === 'ne' ? '=' : symbol} ${dialect.externalRef(external(), 'text')})`;
@@ -1223,7 +1234,11 @@ export function emitPlan(plan, dialect, physical) {
     // ascending, NULLS LAST when descending — and mirrored for
     // $empty: 'greatest' (probed against the engine)
     const nullsFirst = term.emptyGreatest === term.desc;
-    return `${valueOf(term.ref, kindOf(term.ref))} `
+    // a number orders as the double the engine holds, so two spellings of
+    // one double tie and the next term decides between them, as the
+    // engine's do; a column that holds the double already orders bare
+    const value = valueOf(term.ref, kindOf(term.ref));
+    return `${kindOf(term.ref) === 'number' && !readsDouble(term.ref, value) ? dialect.doubleRead(value) : value} `
       + `${term.desc ? 'DESC' : 'ASC'}${dialect.orderNulls(nullsFirst)}`;
   }), dialect.rowIdentity()];
   const where = plan.filter === null ? '' : ` WHERE ${emitPred(plan.filter)}`;
@@ -1474,6 +1489,19 @@ export function createEntityPredicateEmitters(dialect, param, related = undefine
         return `(${column} IS NOT NULL AND ${guard()} AND ${column} ${symbol} ${value()})`;
       }
       const kind = pred.ref.storage === 'string' ? 'text' : 'number';
+      if (kind === 'number' && pred.ref.storage !== 'boolean' && dialect.decimalDigits) {
+        // a number column holds the decimal digits a writer spelled, so it
+        // compares with the interval of decimals that round to the
+        // external's double, as a document member does; each slot is a
+        // guarded comparison's, which answers as the engine does for an
+        // integer past 2^53 and an infinity too
+        const typeIsNumber = () => `${dialect.valueTypeOf(param({ external: pred.operand.ext, json: true, compared: true }))} IN ${NUMERIC()}`;
+        const test = () => decimalComparison(dialect, param, pred.operand.ext, pred.op,
+          dialect.externalCompare(column, 'number'));
+        return pred.op === 'ne'
+          ? `(${column} IS NOT NULL AND (NOT (${typeIsNumber()}) OR NOT (${test()})))`
+          : `(${column} IS NOT NULL AND ${typeIsNumber()} AND ${test()})`;
+      }
       // a boolean column holds neither a string nor a number, so nothing it
       // holds equals or orders against an external that binds; the
       // comparison keeps the external's slot, which is how a boolean, null
@@ -1832,9 +1860,17 @@ export function emitEntityPlan(plan, dialect, physicalOf) {
       // the engine's — because mixed stored precisions would let the
       // integer column sort differently; any other document member
       // orders as its declared type, a number numerically
-      const read = (alias) => term.ref.flavor === 'entity-column'
-        ? physicalComparable(term.ref, `${alias}.${q(term.ref.column)}`, dialect)
-        : documentMemberOf(dialect, `${alias}.${q('doc')}`, term.ref);
+      // A number orders as the double the engine holds (`doubleRead`), so
+      // two spellings of one double tie: a document member's, and a number
+      // column's where it holds a writer's digits (`decimalDigits`). An
+      // integer column holds no integer past 2^53 the engine reads
+      const read = (alias) => (term.ref.flavor === 'entity-column'
+        ? term.ref.storage === 'number' && term.ref.codec === undefined && dialect.decimalDigits
+          ? dialect.doubleRead(`${alias}.${q(term.ref.column)}`)
+          : physicalComparable(term.ref, `${alias}.${q(term.ref.column)}`, dialect)
+        : kindOf(term.ref) === 'number'
+          ? dialect.doubleRead(documentMemberOf(dialect, `${alias}.${q('doc')}`, term.ref))
+          : documentMemberOf(dialect, `${alias}.${q('doc')}`, term.ref));
       // a hop key is the member of the one related row: no value, which
       // the empty placement orders, where the hop finds none
       let value;

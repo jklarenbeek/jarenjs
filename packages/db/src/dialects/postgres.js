@@ -53,7 +53,7 @@ import { postgresReplication } from './postgres-replication.js';
 import { POSTGRES_LOCK_CLASSES, OWNER_LOCK, transactionLock } from './postgres-locks.js';
 import { readExpression } from './expression-read.js';
 import { postgresChecks, POSTGRES_PREDICATE, POSTGRES_PREDICATE_ESCAPED } from './check-read.js';
-import { postgresReadBack } from './postgres-read-back.js';
+import { functionNameKey, postgresReadBack } from './postgres-read-back.js';
 import { modelPath, readsAsIndex } from '../model-path.js';
 import { columnKindFor } from '../scalar-types.js';
 
@@ -218,6 +218,25 @@ function typeOfJsonb(atSql) {
 }
 
 /**
+ * A `numeric` read as the double the engine holds: the cast rounds a
+ * decimal to the nearest double, as `JSON.parse` does, but raises where
+ * that double would be an infinity or a zero — a number past the double
+ * range, which only another writer can spell — so those read as the
+ * engine's infinity or (signed) zero instead: at and past the midpoint
+ * between the largest double and 2^1024 (whose tie rounds to the infinity),
+ * and at and below 2^-1075, half the least double (whose tie rounds to
+ * zero).
+ * @param {string} sql - a `numeric`
+ * @returns {string} a `double precision`
+ */
+function doubleOf(sql) {
+  return `(CASE WHEN abs(${sql}) < power(2::numeric, 1024) - power(2::numeric, 970) `
+    + `AND (abs(${sql}) * power(2::numeric, 1075) > 1 OR ${sql} = 0) THEN (${sql})::float8 `
+    + `WHEN abs(${sql}) >= 1 THEN sign(${sql})::float8 * 'Infinity'::float8 `
+    + `ELSE sign(${sql})::float8 * 0::float8 END)`;
+}
+
+/**
  * The member at a path, read as the SQL type a comparison of the given
  * KIND needs. Every typed form is a `CASE` over `jsonb_typeof`, and the
  * guard is INSIDE it for two reasons: a cast that can raise is not a
@@ -234,12 +253,13 @@ function jsonExtract(columnSql, pathText, kind) {
     case 'text':
       return `((CASE WHEN jsonb_typeof(${at}) = 'string' `
         + `THEN ${columnSql} #>> ${stringLiteral(pathText)} END) COLLATE "C")`;
-    // `double` is a number a GROUP KEY reads: the numeric itself, whose equality ignores
-    // the scale its JSON text was written with (`1` and `1.0` are one key) and which needs
-    // no text of either to group by
     case 'number':
-    case 'double':
       return `(CASE WHEN jsonb_typeof(${at}) = 'number' THEN (${at})::numeric END)`;
+    // `double` is a number a GROUP KEY reads: the double the engine holds, so that
+    // every spelling of one double is one key (`1` and `1.0`, `1152921504606846976`
+    // and `1152921504606847000`) and no text of either is needed to group by
+    case 'double':
+      return doubleOf(`(CASE WHEN jsonb_typeof(${at}) = 'number' THEN (${at})::numeric END)`);
     case 'boolean':
       return `(CASE WHEN jsonb_typeof(${at}) = 'boolean' `
         + `THEN (CASE WHEN (${at})::boolean THEN 1 ELSE 0 END) END)`;
@@ -589,20 +609,55 @@ function intervalSpelling(conforming) {
   };
 }
 
+/** The numeric types a deparse casts a number constant to. */
+const NUMBER_CAST = /^(?:\((.*)\)|(.*))::(?:smallint|integer|bigint|numeric|real|double precision)$/s;
+
+/**
+ * The digits of a number constant the server keeps cast — a negative one or
+ * one past the 4-byte integers as quoted digits (`'-1'::integer`,
+ * `'2147483648'::bigint`), one passed where a function takes another numeric
+ * type cast again (`(5)::numeric`, `('2147483648'::bigint)::numeric`) — or
+ * `null` for any other text.
+ * @param {string} text
+ * @returns {string | null}
+ */
+function castNumber(text) {
+  let body = text.trim();
+  let cast = false;
+  for (let match = NUMBER_CAST.exec(body); match !== null; match = NUMBER_CAST.exec(body)) {
+    body = (match[1] ?? match[2]).trim();
+    cast = true;
+  }
+  const quoted = /^'(.*)'$/s.exec(body);
+  const digits = quoted === null ? body : quoted[1];
+  return cast && /^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$/.test(digits) ? digits : null;
+}
+
 /**
  * The declared index EXPRESSION a generated column computes, out of the
  * SQL this dialect wrote for it. Here the engine calls its OWN
  * immutable function, so `byName` maps the host's `sql` name back to the
- * model's — a mapping only the host's declarations carry. Given an entity
+ * model's — a mapping only the host's declarations carry — each name read
+ * as the server deparses it ({@link functionNameKey}: folded to lower case,
+ * without the schema the store's search path finds it in). Given an entity
  * table's string `columns`, the expression is an entity index's key, whose
  * member is one of those columns as `textOperand` reads it
- * (`email COLLATE "default"` in the server's deparse).
+ * (`email COLLATE "default"` in the server's deparse). A number the server
+ * does not keep as an unadorned constant — a negative one, one past the
+ * 4-byte integers — comes back as its digits cast (`'-1'::integer`).
  * @param {string} expression
  * @param {Record<string, string>} byName
  * @param {readonly string[]} [columns]
+ * @param {string} [schema] - the store's own schema, if it names one
  * @returns {any | null}
  */
-function expressionOf(expression, byName, columns = undefined) {
+function expressionOf(expression, byName, columns = undefined, schema = undefined) {
+  /** @type {Map<string, string>} */
+  const byKey = new Map();
+  for (const [sql, name] of Object.entries(byName)) {
+    const key = functionNameKey(sql, schema);
+    if (!byKey.has(key)) byKey.set(key, name);
+  }
   return readExpression(expression, {
     memberOf: columns !== undefined ? (text) => {
       const match = /^\s*(?:([a-z_][a-z0-9_$]*)|"((?:[^"]|"")+)")\s+COLLATE\s+"default"\s*$/.exec(text);
@@ -615,9 +670,10 @@ function expressionOf(expression, byName, columns = undefined) {
       const segments = memberPathOf(text);
       return segments === null ? null : { member: modelPath(segments) };
     },
-    nameOf: (name) => byName[name] ?? null,
+    nameOf: (name) => (Object.hasOwn(byName, name) ? byName[name] : byKey.get(functionNameKey(name, schema)) ?? null),
     stringOf: (text) => (/^'(?:[^']|'')*'(?:::text)?$/.test(text)
       ? text.replace(/::text$/, '').slice(1, -1).replace(/''/g, "'") : null),
+    numberOf: castNumber,
   });
 }
 
@@ -669,6 +725,8 @@ export function postgresDialect(options = undefined) {
     mutationRowGuard: (count, limit) => `CAST(CASE WHEN ${count} > ${limit} THEN 'jaren-mutation-row-bound' ELSE '1' END AS INTEGER) = 1`,
     boundMutation: (sql, limit) => `WITH "_jaren_result" AS (${sql}) SELECT * FROM "_jaren_result" LIMIT ${limit + 1}`,
     numberCast: (sql) => `CAST(${sql} AS DOUBLE PRECISION)`,
+    // a number is held by the digits its writer spelled
+    doubleRead: doubleOf,
     physicalTypeMatches: postgresPhysicalTypeMatches,
     qualifyPhysicalColumn: qualifyPostgresPhysicalColumn,
     invariantTriggers: (mapping, all, dialect) => postgresInvariantTriggers(mapping, all, dialect, IDENTIFIER_BYTES),
@@ -677,7 +735,7 @@ export function postgresDialect(options = undefined) {
     // and generated column's expression back from its deparse and compares it
     // with the planned one; a layout index's condition as one condition
     // across the spellings the server keeps for it
-    readBack: postgresReadBack,
+    readBack: postgresReadBack(options?.searchPath),
     capabilities: {
       jsonb: true,
       generatedColumns: true,
@@ -762,6 +820,8 @@ export function postgresDialect(options = undefined) {
       && (error.constraint === 'pg_type_typname_nsp_index' && error.table === 'pg_type'
         || error.constraint === 'pg_class_relname_nsp_index' && error.table === 'pg_class'
         || error.constraint === 'pg_proc_proname_args_nsp_index' && error.table === 'pg_proc'),
+    // `undefined_function`: no function of the called name takes the arguments passed
+    isUndefinedFunction: (error) => error?.code === '42883',
     // a DERIVED column's expression names a function the HOST supplies;
     // this dialect creates none and assumes none. Every driver this
     // package ships for PostgreSQL declares
@@ -879,7 +939,7 @@ export function postgresDialect(options = undefined) {
     schemaTypeOf,
     memberPathOf,
     memberGuarded,
-    expressionOf,
+    expressionOf: (expression, byName, columns) => expressionOf(expression, byName, columns, options?.searchPath),
     // an entity column as an index expression's member: its text under the
     // database's default collation, the very value and collation a
     // collection's expression reads out of the document (`#>>`), so one

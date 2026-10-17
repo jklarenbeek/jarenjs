@@ -296,7 +296,13 @@ function slotValue(slot, externals, anchors = null) {
     if (value === undefined) return undefined;
     // one bound of the decimals that round to the number, which a member
     // read by its decimal digits is compared with (`decimal`)
-    return slot.decimal !== undefined ? decimalEdge(value, slot.decimal) : JSON.stringify(value);
+    if (slot.decimal !== undefined) return decimalEdge(value, slot.decimal);
+    // a guarded comparison reads this slot for its JSON type alone, and an
+    // infinity, whose JSON text is `null`, is a number there: its finite
+    // edge stands in for it
+    if (slot.compared === true && (value === Infinity || value === -Infinity))
+      return decimalEdge(value, value > 0 ? 'low' : 'high');
+    return JSON.stringify(value);
   }
   if ('derived' in slot)
     return derivedSlotValue(slot.derived, slot.derived.kind === 'bboxAxis'

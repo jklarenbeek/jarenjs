@@ -155,9 +155,11 @@ ordered by other paths that ordering lowers over: the statement then numbers the
 that order, as the join above does, and takes each group at its first row, so a row
 without the key stays in the ordering where `$empty` places it. A literal window over it
 lowers. A group key that holds a number is read as the number the engine parses (a double
-on SQLite, the numeric itself on PostgreSQL), so `2` and `2.0` are one key and a whole number
-beyond 2^53, which a client that writes doubles leaves as an integer text, is a key like any
-other: the driver is never asked for it as an integer. The statement groups every row it
+on SQLite, the `numeric` cast to a double on PostgreSQL), so `2` and `2.0` are one key, and so
+are two spellings of one double past 2^53 or past its precision (`1152921504606847000` and
+`1152921504606846976`), and a whole number beyond 2^53, which a client that writes doubles
+leaves as an integer text, is a key like any other: the driver is never asked for it as an
+integer. The statement groups every row it
 reads, and the planner cannot know how many groups there are: with nearly as many groups
 as rows a statement that puts the groups in the engine's order of first appearance does the
 engine's own work and a sort of the groups besides, and can be slower than the engine. A

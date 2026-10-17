@@ -118,6 +118,10 @@ describe('SQLite dialect goldens', () => {
     assert.strictEqual(sqliteDialect.typeFor('boolean', 'generated'), 'INTEGER');
     assert.strictEqual(sqliteDialect.typeFor(undefined, 'generated'), 'ANY');
     assert.strictEqual(sqliteDialect.typeFor(undefined, 'key'), 'TEXT');
+    // a number an ordering or a group key reads, as the double: SQLite casts its exact
+    // integer, and a dialect that holds a number as the double leaves it alone
+    assert.strictEqual(sqliteDialect.doubleRead('"gx_age"'), 'CAST("gx_age" AS REAL)');
+    assert.strictEqual(doubleDialect.doubleRead('"gx_age"'), '"gx_age"');
   });
 
   // A prefix predicate is the one string operator with a sargable

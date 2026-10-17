@@ -6,8 +6,8 @@
  *
  * The grammar is tiny and closed, because the emitter's is: a call is
  * `name(arg, …)`, an argument is another call, a member read, or a
- * literal. What differs between engines is only how a member and a
- * function name are SPELLED, so both pass those two in and share
+ * literal. What differs between engines is only how a member, a
+ * function name and a literal are SPELLED, so both pass those in and share
  * everything else — a second copy of this walk is a second place for
  * the two halves to drift apart.
  */
@@ -16,7 +16,10 @@
  * @param {string} sql
  * @param {{ memberOf: (text: string) => (any | null),
  *   nameOf: (text: string) => (string | null),
- *   stringOf: (text: string) => (string | null) }} spelling
+ *   stringOf: (text: string) => (string | null),
+ *   numberOf?: (text: string) => (string | null) }} spelling - `numberOf`
+ *   reads a number an engine spells otherwise than by its bare digits, as
+ *   those digits
  * @returns {any | null} the expression, or `null` for SQL this dialect
  *   did not write
  */
@@ -34,6 +37,11 @@ export function readExpression(sql, spelling) {
  */
 function parseNode(text, spelling) {
   let source = text.trimStart();
+  // a number an engine spells otherwise than by its bare digits — cast,
+  // perhaps in parentheses — before the parentheses are read as a group
+  const literal = spelling.numberOf === undefined ? null : headOf(source);
+  const digits = literal === null ? null : spelling.numberOf(literal.body.trim());
+  if (literal !== null && digits !== null) return { node: { value: Number(digits) }, rest: literal.rest };
   // a parenthesised node: the emitter brackets a member read, and an
   // engine that re-renders adds its own
   if (source.startsWith('(')) {

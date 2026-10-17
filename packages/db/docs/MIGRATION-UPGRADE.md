@@ -3339,6 +3339,63 @@ PostgreSQL compares such an external with a member's digits exactly.
   stored value or statement changes; Node and the other SQLite hosts answered
   this way already.
 
+## 56. Two spellings of one double, an infinity, and an expression index as the server spells it
+
+- An `$orderby` over a number member now ties two spellings of one double, as
+  the engine does, and the next term decides between them: a document another
+  writer stored as `1152921504606846976` and the store's `1152921504606847000`
+  (both 2^60), or `0.1` and its exact decimal, came out in the order of their
+  digits on PostgreSQL, and on SQLite for an `integer` member and an unindexed
+  `number` member, so `$orderby: ['$it.u', '$it.id']` and a window over it
+  answered other rows than the engine. The order key reads the double (on
+  SQLite `CAST(… AS REAL)`, on PostgreSQL `double precision`); on SQLite an
+  ordering over an indexed `integer` member is therefore sorted rather than
+  read in index order. An entity's document member and, on PostgreSQL, its
+  `number` column order the same way.
+- On PostgreSQL a `$groupby` key, a `$distinct` item and a count of distinct
+  values of a number member now group two spellings of one double together, as
+  on SQLite and in the engine (two groups of one before, one group of two now).
+  A number past the double range reads as the engine's infinity, and one below
+  half the least double as zero, rather than as its digits.
+- On PostgreSQL a store profile predicate comparing a number member or an
+  entity's number column with an infinite external (`$lt: ['$it.n', '$x']`,
+  x = `Infinity`, a natural "no upper bound") kept no row, its external bound
+  as JSON `null`; it now keeps the engine's rows. An entity's `number` or
+  `integer` column compared with an external past 2^53 now keeps the engine's
+  rows whatever digits another writer stored, in a query's own `$where` and in
+  a profile predicate alike, as a document member does since §54.
+- A store profile predicate whose external list holds an infinity (`$eq:
+  ['$it.n', '$xs[*]']`, xs = `[Infinity, 5]`) is now refused `JD0011` on every
+  engine and surface: the list crosses as JSON, which binds the item as
+  `null`, so a document another writer stored past the double range was
+  dropped where the engine keeps it. Bind finite numbers in the list; a
+  query's own such list runs in the engine as before. A `JD0011` refusal now
+  names the member as the document names it (`'n'`), not the column an index
+  reads it from (`'gx_n'`).
+- On PostgreSQL an expression index (an entity's, or a collection's column)
+  whose declaration's `sql` names the function with its schema
+  (`pg_catalog.lower`, or the store's own schema) was created and then refused
+  at every later open (`JD0002 … keys lower((email COLLATE "default")), and the
+  model declares pg_catalog.lower(…)`); it now verifies as the server spells
+  it, and a schema the store's search path does not hold is still compared by
+  name. Such a name, an upper-case one (`LOWER`), and a number literal the
+  server keeps cast — a negative one (`'-1'::integer`), one past the 4-byte
+  integers, one passed to a function that takes `numeric` (`(5)::numeric`) —
+  verified at open but introspected as an `unmapped-index`, and the derived
+  model did not reopen; each now introspects back into the model.
+- On PostgreSQL an entity expression index whose declared function the server
+  has not for the arguments passed (`left(text, bigint)`, a literal past the
+  4-byte integers) is now refused `JD0004` at the index's `expression`, naming
+  the server's message, where it was `JD0002 the store could not be opened`.
+- No table, index or stored value changes: every statement above is a read or
+  a comparison, and the index SQL a store creates is unchanged.
+
+**Downgrade.** The previous release opens every store this one does. On it,
+the orderings, groups and comparisons above answer as before, an expression
+index declared with a qualified `sql` name is refused at the second open, one
+over an upper-case name or a cast literal introspects as `unmapped-index`, and a
+profile list holding an infinity binds the item as `null`.
+
 ## Measured costs
 
 Exact identity stores complete canonical documents and model endpoints, so

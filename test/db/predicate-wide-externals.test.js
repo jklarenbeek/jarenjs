@@ -182,6 +182,191 @@ for (const engine of ENGINES) {
   });
 }
 
+/**
+ * Open `model` on `engine` with a raw SQL writer beside the store, which
+ * runs a statement over the store's own tables.
+ * @param {string} engine @param {any} model
+ * @param {(store: any, run: (sql: string) => Promise<void>) => Promise<void>} fn
+ */
+async function withRawWriter(engine, model, fn) {
+  if (engine === 'postgres') {
+    return withStore('postgres', model, (store, pg) => fn(store, async (sql) => {
+      const { pool, schema } = /** @type {{ pool: any, schema: string }} */ (pg);
+      const client = await pool.connect();
+      try { await client.query(`SET search_path TO "${schema}"; ${sql}`); }
+      finally { await client.query('RESET search_path'); client.release(); }
+    }));
+  }
+  const dir = mkdtempSync(join(tmpdir(), 'jaren-wide-raw-'));
+  const path = join(dir, 'store.sqlite');
+  try {
+    await withStore('sqlite', model, (store) => fn(store, async (sql) => {
+      const db = new DatabaseSync(path);
+      try { db.exec(sql); }
+      finally { db.close(); }
+    }), { path });
+  }
+  finally { rmSync(dir, { recursive: true, force: true }); }
+}
+
+// the least decimal that rounds to Infinity (the midpoint between the largest
+// double and 2^1024, a tie that rounds to the infinity), and half the least
+// double (a tie that rounds to zero), each as exact decimal digits
+const INFINITE_EDGE = String(2n ** 1024n - 2n ** 970n);
+const ZERO_EDGE = (() => { const digits = String(5n ** 1075n); return `0.${'0'.repeat(1075 - digits.length)}${digits}`; })();
+// numbers past the double range and at the edges of the infinities and of
+// zero, which only another writer spells; the edges are ties, and SQLite
+// does not round a decimal at or just past a tie as the engine does (a
+// listed loss), so they are PostgreSQL's alone
+/** @param {string} engine */
+const far = (engine) => ['1e400', '-1e400', '2e400', '1e-400',
+  ...(engine === 'postgres' ? [INFINITE_EDGE, `-${INFINITE_EDGE}`, String(2n ** 1024n - 2n ** 970n - 1n), ZERO_EDGE, `-${ZERO_EDGE}`, `${ZERO_EDGE}1`] : [])];
+
+for (const engine of ENGINES) {
+  describe(`an infinity and a number past the double range, ${engine}`, { skip: skipFor(engine) }, () => {
+    it('a profile predicate\'s infinity keeps the rows the engine keeps; a query\'s own runs in the engine', async () => {
+      await withForeignWriter(engine, async (store, write) => {
+        const big = store.collection('big');
+        for (const [i, value] of NUMBERS.entries()) await big.insert({ id: `s${i}`, n: value, w: value });
+        for (const [i, digits] of far(engine).entries()) await write(`f${i}`, `{"id":"f${i}","n":${digits},"w":${digits}}`);
+        const documents = await big.execute({ $for: { it: '$[*]' }, $orderby: ['$it.id'], $return: '$it' }, { pushdown: false });
+        const differ = [];
+        for (const member of ['n', 'w']) {
+          for (const op of OPERATORS) {
+            const predicate = { [op]: [`$it.${member}`, '$x'] };
+            for (const x of [Infinity, -Infinity, Number.MAX_VALUE, -Number.MAX_VALUE]) {
+              const expected = queryJson(kept(predicate), documents, { x });
+              const profiled = await big.execute(ALL, { externals: { x }, profile: { externals: ['x'], predicates: { big: predicate } } });
+              const own = await big.execute(kept(predicate), { externals: { x } });
+              if (JSON.stringify(profiled) !== JSON.stringify(expected)) differ.push({ member, op, x, profiled, expected });
+              if (JSON.stringify(own) !== JSON.stringify(expected)) differ.push({ member, op, x, own, expected });
+            }
+          }
+        }
+        assert.deepEqual(differ, []);
+        // what reads as the infinity: past the double range, and at the edge where PostgreSQL holds it
+        assert.deepEqual(queryJson(kept({ $ge: ['$it.n', '$x'] }), documents, { x: Infinity }), engine === 'postgres' ? ['f0', 'f2', 'f4'] : ['f0', 'f2']);
+        assert.equal((await big.explain(ALL, { externals: { x: Infinity },
+          profile: { externals: ['x'], predicates: { big: { $lt: ['$it.n', '$x'] } } } })).mode, 'native');
+      });
+    });
+
+    it('refuses a profile predicate\'s list holding an infinity, which binds as null, and answers every other list', async () => {
+      await withForeignWriter(engine, async (store, write) => {
+        const big = store.collection('big');
+        await big.insert({ id: 's0', n: 5 });
+        await big.insert({ id: 's1', n: 7 });
+        await write('f0', '{"id":"f0","n":1e400}');
+        await write('f1', '{"id":"f1","n":-1e400}');
+        const documents = await big.execute({ $for: { it: '$[*]' }, $orderby: ['$it.id'], $return: '$it' }, { pushdown: false });
+        for (const predicate of [{ $eq: ['$it.n', '$xs[*]'] }, { $not: { $eq: ['$it.n', '$xs[*]'] } }]) {
+          const profile = { externals: ['xs'], predicates: { big: predicate } };
+          for (const xs of [[Infinity, 5], [-Infinity], { a: 5, b: Infinity }]) {
+            await assert.rejects(async () => big.execute(ALL, { externals: { xs }, profile }), (/** @type {any} */ error) => error.code === 'JD0011'
+              && /its list holds -?Infinity, which the list's JSON binds as null and the engine compares with a number written past the double range in 'n',/.test(error.message));
+            // the query's own list runs in the engine
+            assert.deepEqual(await big.execute(kept(predicate), { externals: { xs } }), queryJson(kept(predicate), documents, { xs }));
+          }
+          for (const xs of [[5, 7], [NaN, 5], { a: 7 }, [], 5])
+            assert.deepEqual(await big.execute(ALL, { externals: { xs }, profile }), queryJson(kept(predicate), documents, { xs }), JSON.stringify(xs));
+        }
+      });
+    });
+  });
+
+  describe(`equal doubles spelled by other digits, ${engine}`, { skip: skipFor(engine) }, () => {
+    it('order, group and count apart as the engine does, in the statement', async () => {
+      await withForeignWriter(engine, async (store, write) => {
+        const big = store.collection('big');
+        // the store's spelling and another writer's of one double each
+        const pairs = [[-(2 ** 62), '-4611686018427387904'], [2 ** 60, '1152921504606846976'], [2 ** 60 + 256, '1152921504606847100'],
+          [2 ** 53, '9007199254740993'], [5, '5.0']];
+        for (const [i, [own, foreign]] of pairs.entries()) {
+          await big.insert({ id: `o${i}`, u: own, v: own, n: own, w: own });
+          await write(`f${i}`, `{"id":"f${i}","u":${foreign},"v":${foreign},"n":${foreign},"w":${foreign}}`);
+        }
+        const fractions = [[0.1, '0.1000000000000000055511151231257827021181583404541015625'], [1.5, '1.50000000000000000000001']];
+        for (const [i, [own, foreign]] of fractions.entries()) {
+          await big.insert({ id: `p${i}`, n: own, w: own });
+          await write(`q${i}`, `{"id":"q${i}","n":${foreign},"w":${foreign}}`);
+        }
+        for (const [i, digits] of far(engine).entries()) await write(`z${i}`, `{"id":"z${i}","n":${digits},"w":${digits}}`);
+        const differ = [];
+        for (const member of ['u', 'v', 'n', 'w']) {
+          const ordered = { $for: { it: '$[*]' }, $orderby: [`$it.${member}`, '$it.id'], $return: '$it.id' };
+          for (const [label, doc] of [['orderby', ordered],
+            ['orderby desc', { ...ordered, $orderby: [{ $key: `$it.${member}`, $dir: 'desc' }, '$it.id'] }],
+            ['window', { $subsequence: [ordered, 1, 3] }],
+            ['distinct', { $distinct: { $for: { it: '$[*]' }, $return: `$it.${member}` } }],
+            ['group', { $for: { it: '$[*]' }, $groupby: { k: `$it.${member}` }, $return: { k: '$k', c: { $count: '$it' } } }],
+            ['group ordered', { $for: { it: '$[*]' }, $groupby: { k: `$it.${member}` }, $orderby: ['$k'], $return: { k: '$k', c: { $count: '$it' } } }],
+            ['count distinct', { $count: { $distinct: { $for: { it: '$[*]' }, $return: `$it.${member}` } } }]]) {
+            const native = await big.execute(doc);
+            const oracle = await big.execute(doc, { pushdown: false });
+            const mode = (await big.explain(doc)).mode;
+            // a count of a distinct runs in the engine on both, as before
+            if (JSON.stringify(native) !== JSON.stringify(oracle) || mode !== (label === 'count distinct' ? 'set' : 'native'))
+              differ.push({ member, label, mode, native, oracle });
+          }
+        }
+        assert.deepEqual(differ, []);
+      });
+    });
+
+    it('order an entity\'s number column and document member as the engine does', async () => {
+      const model = { $model: '0.1', entities: { K: { schema: { type: 'object', required: ['id'], properties: {
+        id: { type: 'string', 'x-entity': { key: true } }, n: { type: 'number' }, meta: { type: 'object', properties: { w: { type: 'integer' } } } } } } } };
+      await withRawWriter(engine, model, async (store, run) => {
+        const K = store.entity('K');
+        await K.create({ id: 'a', n: 2 ** 60 + 256, meta: { w: 2 ** 60 } });
+        await K.create({ id: 'b', n: 2 ** 60, meta: { w: 2 ** 60 } });
+        await K.create({ id: 'c', n: 1, meta: { w: 1 } });
+        // 'a' now holds digits above the store's 2^60 that round to it, as 'b' holds it
+        await run(`UPDATE "K" SET "n" = 1152921504606847100, "doc" = ${engine === 'postgres' ? '' : 'jsonb'}('{"meta": {"w": 1152921504606847100}}') WHERE "id" = 'a'`);
+        const differ = [];
+        for (const member of ['n', 'meta.w']) {
+          for (const doc of [{ $for: { it: '$.K[*]' }, $orderby: [`$it.${member}`, '$it.id'], $return: '$it.id' },
+            { $for: { it: '$.K[*]' }, $orderby: [{ $key: `$it.${member}`, $dir: 'desc' }, { $key: '$it.id', $dir: 'desc' }], $return: '$it.id' }]) {
+            const native = await store.execute(doc);
+            const oracle = await store.execute(doc, { pushdown: false });
+            if (JSON.stringify(native) !== JSON.stringify(oracle)) differ.push({ member, native, oracle });
+          }
+        }
+        assert.deepEqual(differ, []);
+      });
+    });
+  });
+
+  describe(`an entity number column against a wide or infinite external, ${engine}`, { skip: skipFor(engine) }, () => {
+    it('keeps the rows the engine keeps, in a query\'s own $where and in a profile predicate', async () => {
+      const model = { $model: '0.1', entities: { K: { schema: { type: 'object', required: ['id'], properties: {
+        id: { type: 'string', 'x-entity': { key: true } }, n: { type: 'number' } } } } } };
+      await withRawWriter(engine, model, async (store, run) => {
+        const K = store.entity('K');
+        for (const [id, n] of [['o0', 2 ** 60], ['o1', 2 ** 60 + 256], ['o2', 5], ['o3', -(2 ** 60)], ['f0', 1]]) await K.create({ id, n });
+        await run('UPDATE "K" SET "n" = 1152921504606846976 WHERE "id" = \'f0\'');
+        const all = { $for: { it: '$.K[*]' }, $orderby: ['$it.id'], $return: '$it.id' };
+        const differ = [];
+        for (const op of OPERATORS) {
+          const predicate = { [op]: ['$it.n', '$x'] };
+          const where = { ...all, $where: predicate };
+          for (const x of [2 ** 60, 2 ** 60 + 256, -(2 ** 60), 5, Infinity, -Infinity]) {
+            const oracle = await store.execute(where, { externals: { x }, pushdown: false });
+            const own = await store.execute(where, { externals: { x } });
+            const profiled = await store.execute(all, { externals: { x }, profile: { externals: ['x'], predicates: { K: predicate } } });
+            if (JSON.stringify(own) !== JSON.stringify(oracle) || JSON.stringify(profiled) !== JSON.stringify(oracle))
+              differ.push({ op, x, own, profiled, oracle });
+          }
+        }
+        assert.deepEqual(differ, []);
+        // SQLite's column holds the double, and a query's own integer past 2^53 runs in the engine there
+        assert.equal((await store.explain({ ...all, $where: { $eq: ['$it.n', '$x'] } }, { externals: { x: 2 ** 60 } })).mode,
+          engine === 'postgres' ? 'native' : 'set');
+      });
+    });
+  });
+}
+
 describe('the integers a double stands for', () => {
   it('are the interval round-half-to-even sends to it, ties kept by an even significand', () => {
     // 2^60: the doubles are 128 apart below it and 256 above, and its

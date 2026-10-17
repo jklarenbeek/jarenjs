@@ -211,6 +211,125 @@ describe('an entity index over a declared expression on PostgreSQL', { skip: !PG
     });
   });
 
+  it('verifies and introspects a qualified or upper-case function name as the server deparses it, and still compares a schema off the path', async () => {
+    const other = `jaren_expr_other_${process.pid}`;
+    const { default: pg } = await import('pg');
+    const admin = new pg.Pool({ connectionString: PG_URL, max: 1 });
+    await admin.query(`CREATE SCHEMA IF NOT EXISTS "${other}"; `
+      + `CREATE OR REPLACE FUNCTION "${other}".fold(text) RETURNS text IMMUTABLE LANGUAGE sql AS 'SELECT lower($1)'; `
+      + `CREATE OR REPLACE FUNCTION "${other}".lower(text) RETURNS text IMMUTABLE LANGUAGE sql AS 'SELECT upper($1)'`);
+    /** A declaration of `fold` over the server's function `sql`. @param {string} sql */
+    const folding = (sql) => ({ fold: { arity: 1, deterministic: true, apply: (/** @type {any} */ value) => String(value).toLowerCase(), sql } });
+    const model = userModel([{ name: 'by_fold', unique: true, expression: { call: 'fold', args: [{ member: '$.email' }] } }]);
+    /** Open, reopen, introspect and reopen the derived model. @param {(schema: string) => string} sqlOf @param {any} [pathOwn] */
+    const roundTrip = async (sqlOf, pathOwn = false) => withPostgres(async ({ pool, schema, driver }) => {
+      await pool.query(`CREATE FUNCTION "${schema}".fold(text) RETURNS text IMMUTABLE LANGUAGE sql AS 'SELECT lower($1)'`);
+      const expressions = folding(sqlOf(schema));
+      // a store on the connection's own search path names no schema, and finds the function there
+      const own = pathOwn ? new pg.Pool({ connectionString: PG_URL, max: 1, options: `-c search_path=${schema}` }) : null;
+      const open = (/** @type {any} */ declared) => openStore(declared, { driver: own === null ? driver() : postgresDriver(own), expressions });
+      try {
+        const first = await open(model);
+        await first.entity('User').create({ id: 'u1', email: 'A@x' });
+        assert.equal(await created(first.entity('User'), { id: 'u2', email: 'a@X' }), 'JD2005');
+        await first.close();
+        const store = await open(model);
+        let derived;
+        try {
+          const read = await store.introspect({ expressions });
+          derived = read.model;
+          assert.deepEqual(read.report.filter((/** @type {any} */ row) => row.code === 'unmapped-index'), []);
+        }
+        finally { await store.close(); }
+        assert.deepEqual(derived.entities.User.indexes, model.entities.User.indexes);
+        const steps = planMigration(derived, model, { dialect: postgresDialect({ searchPath: schema }), expressions }).migration.steps;
+        assert.deepEqual(steps.filter((/** @type {any} */ step) => step.kind === 'ddl'), []);
+        await (await open(derived)).close();
+        return (await indexDefinitions(pool, schema)).filter((row) => row.startsWith('User_by'));
+      }
+      finally { await own?.end(); }
+    });
+    try {
+      assert.deepEqual(await roundTrip(() => 'pg_catalog.lower'),
+        ['User_by_fold: CREATE UNIQUE INDEX "User_by_fold" ON "User" USING btree (lower((email COLLATE "default")))']);
+      assert.deepEqual(await roundTrip(() => 'LOWER'),
+        ['User_by_fold: CREATE UNIQUE INDEX "User_by_fold" ON "User" USING btree (lower((email COLLATE "default")))']);
+      for (const pathOwn of [false, true]) {
+        assert.deepEqual(await roundTrip((schema) => `${schema}.fold`, pathOwn),
+          ['User_by_fold: CREATE UNIQUE INDEX "User_by_fold" ON "User" USING btree (fold((email COLLATE "default")))']);
+      }
+      // a schema the store's path does not hold keeps its name in the deparse and is compared by it
+      assert.deepEqual(await roundTrip(() => `${other}.fold`),
+        [`User_by_fold: CREATE UNIQUE INDEX "User_by_fold" ON "User" USING btree (${other}.fold((email COLLATE "default")))`]);
+      await withPostgres(async ({ pool, schema, driver }) => {
+        await (await openStore(model, { driver: driver(), expressions: folding('lower') })).close();
+        await pool.query(`DROP INDEX "${schema}"."User_by_fold"; CREATE UNIQUE INDEX "User_by_fold" ON "${schema}"."User" (lower(("email" COLLATE "default")))`);
+        const error = await openRefusal(model, { driver: driver(), expressions: folding(`${other}.lower`) });
+        assert.equal(error?.code, 'JD0002', error?.message);
+        assert.match(error.message, new RegExp(`keys lower\\(\\(email COLLATE "default"\\)\\), and the model declares ${other}\\.lower`));
+      });
+    }
+    finally {
+      await admin.query(`DROP SCHEMA IF EXISTS "${other}" CASCADE`);
+      await admin.end();
+    }
+  });
+
+  it('verifies and introspects a collection\'s expression column over a qualified function name and a negative literal', async () => {
+    // `lowered` alone names the server's `lower`: of two declarations of one function, introspection reads the one spelled as the server spells it
+    const declared = (/** @type {string} */ schema) => ({ prefix: EXPRESSIONS.prefix,
+      fold: { arity: 1, deterministic: true, apply: (/** @type {any} */ value) => String(value).toLowerCase(), sql: `${schema}.fold` },
+      lowered: { arity: 1, deterministic: true, apply: (/** @type {any} */ value) => String(value).toLowerCase(), sql: 'pg_catalog.lower' } });
+    for (const expression of [{ call: 'fold', args: [{ member: '$.email' }] }, { call: 'lowered', args: [{ member: '$.email' }] },
+      { call: 'prefix', args: [{ call: 'lowered', args: [{ member: '$.email' }] }, { value: -1 }] }]) {
+      await withPostgres(async ({ pool, schema, driver }) => {
+        await pool.query(`CREATE FUNCTION "${schema}".fold(text) RETURNS text IMMUTABLE LANGUAGE sql AS 'SELECT lower($1)'`);
+        const expressions = declared(schema);
+        const model = { $model: '0.1', collections: { u: { key: '/id', schema: { type: 'object', properties: { id: { type: 'string' }, email: { type: 'string' } } },
+          indexes: [{ name: 'by_x', expression }] } } };
+        const first = await openStore(model, { driver: driver(), expressions });
+        await first.collection('u').insert({ id: 'a', email: 'A@x' });
+        await first.close();
+        const store = await openStore(model, { driver: driver(), expressions });
+        let derived;
+        try { derived = (await store.introspect({ expressions, keys: { u: '/id' } })).model; }
+        finally { await store.close(); }
+        assert.deepEqual(derived.collections.u.indexes, model.collections.u.indexes, JSON.stringify(expression));
+        const steps = planMigration(derived, model, { dialect: postgresDialect({ searchPath: schema }), expressions }).migration.steps;
+        assert.deepEqual(steps.filter((/** @type {any} */ step) => step.kind === 'ddl'), []);
+        await (await openStore(derived, { driver: driver(), expressions })).close();
+      });
+    }
+  });
+
+  it('introspects a number literal the server keeps cast, and refuses one no function takes at the declaration', async () => {
+    const expressions = { ...EXPRESSIONS,
+      tagged: { arity: 2, deterministic: true, apply: (/** @type {any} */ value, /** @type {any} */ n) => `${value}${n}`, sql: 'tagged' } };
+    const literals = [['left', -1], ['tagged', 5], ['tagged', 2147483648], ['tagged', -1.5], ['tagged', 2.5]];
+    for (const [fn, value] of literals) {
+      await withPostgres(async ({ pool, schema, driver }) => {
+        await pool.query(`CREATE FUNCTION "${schema}".tagged(text, numeric) RETURNS text IMMUTABLE LANGUAGE sql AS 'SELECT $1 || $2::text'`);
+        const call = fn === 'left' ? 'prefix' : 'tagged';
+        const model = userModel([{ name: 'by_x', expression: { call, args: [LOWER_EMAIL, { value }] } }]);
+        await (await openStore(model, { driver: driver(), expressions })).close();
+        const store = await openStore(model, { driver: driver(), expressions });
+        let derived;
+        try { derived = (await store.introspect({ expressions })).model; }
+        finally { await store.close(); }
+        assert.deepEqual(derived.entities.User.indexes, model.entities.User.indexes, `${fn} ${value}`);
+        await (await openStore(derived, { driver: driver(), expressions })).close();
+      });
+    }
+    await withPostgres(async ({ pool, schema, driver }) => {
+      const model = userModel([{ name: 'by_x', expression: { call: 'prefix', args: [LOWER_EMAIL, { value: 2147483648 }] } }]);
+      const error = await openRefusal(model, { driver: driver(), expressions });
+      assert.equal(error?.code, 'JD0004', error?.message);
+      assert.equal(error.docPath, '/entities/User/indexes/0/expression');
+      assert.match(error.message, /index 'by_x' keys left\(lower\(\("email" COLLATE "default"\)\), 2147483648\), which the server cannot create: function left\(text, bigint\) does not exist/);
+      assert.deepEqual(await indexDefinitions(pool, schema), []);
+    });
+  });
+
   it('replication orders a value a unique column passes between rows, and keeps the envelope order for an expression key', async () => {
     const { default: pg } = await import('pg');
     const pool = new pg.Pool({ connectionString: PG_URL, max: 3 });

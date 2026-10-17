@@ -14,6 +14,10 @@
  * its decimal digits (PostgreSQL's `numeric`) binds its decimal edges.
  */
 
+/** The least decimal that rounds to Infinity: the midpoint between the
+ * largest double and 2^1024, whose tie rounds to the even 2^1024. */
+const INFINITE_EDGE = 2n ** 1024n - 2n ** 970n;
+
 /** The 64-bit integers a database column holds. */
 const INT64_MIN = -(2n ** 63n);
 const INT64_MAX = 2n ** 63n - 1n;
@@ -78,13 +82,23 @@ const halfText = (twice) => {
  * outside it where the tie rounds to `value`. So `m >= low AND m >
  * lowExclusive` is "at or above the interval's low edge" whichever way its
  * tie rounds, and `m <= high AND m < highExclusive` likewise. A safe
- * integer or a fraction stands for itself alone, with ties held; anything
- * else binds as its JSON text.
+ * integer or a fraction stands for itself alone, with ties held. An
+ * infinity is the interval of decimals at and past the midpoint between the
+ * largest double and 2^1024 ({@link INFINITE_EDGE}, whose tie rounds to the
+ * infinity), open on its other side: there it binds the JSON value that
+ * `jsonb` orders past every number (`true`) or before every one (`null`), so
+ * `m <= true` holds of every number and `m > true` of none. Anything else
+ * binds as its JSON text.
  * @param {unknown} value
  * @param {'low' | 'high' | 'lowExclusive' | 'highExclusive'} edge
  * @returns {string}
  */
 export function decimalEdge(value, edge) {
+  if (value === Infinity || value === -Infinity) {
+    const inner = edge === (value > 0 ? 'low' : 'high') ? INFINITE_EDGE
+      : edge === (value > 0 ? 'lowExclusive' : 'highExclusive') ? INFINITE_EDGE - 1n : null;
+    return inner === null ? (value > 0 ? 'true' : 'null') : `${value > 0 ? '' : '-'}${inner}`;
+  }
   const midpoints = typeof value === 'number' ? midpointsOf(value) : null;
   if (midpoints === null) {
     if (typeof value !== 'number' || edge === 'low' || edge === 'high') return JSON.stringify(value);

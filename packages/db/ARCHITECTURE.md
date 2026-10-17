@@ -716,8 +716,11 @@ safe integer or a fraction the exact comparison and the double one agree, so
 those statements are unchanged and seek as before; a generated column that
 already holds the double (a `number` member's `REAL` column, or the cast read
 of a union whose first type is `number`) is compared bare and seeks too, and
-every other indexed member reads the cast and does not seek. PostgreSQL reads
-both spellings of the digits as one `numeric` and changes nothing. An
+every other indexed member reads the cast and does not seek. PostgreSQL holds
+each spelling as the exact `numeric` its digits name, so `1152921504606847000`
+and `1152921504606846976` are two numbers there, and a literal or a literal list
+compared with them keeps only the spelling it names — a defect still open
+(ROADMAP), which the external comparison below does not have. An
 external operand's value is known only when it binds, and a writer may have
 spelled the member by any digits that round to the double (2^60 is
 `1152921504606847000` from a JavaScript writer and `1152921504606846976` from
@@ -745,7 +748,34 @@ where the tie rounds to the double. `$ge` is `v >= low AND v > lowExclusive`,
 v <= lowExclusive` and `$gt` is `v > high OR v >= highExclusive`. A safe
 integer or a fraction binds as itself with its exclusive bounds one either
 side, the exact comparison it always was, and the statement is again the same
-for every value.
+for every value. An infinity, which a store profile predicate binds where a
+query's own runs in the engine, is the interval of decimals at and past the
+midpoint between the largest double and 2^1024 (a tie that rounds to the
+infinity), open on its other side: there the edge binds the JSON value `jsonb`
+orders past every number (`true`, for `Infinity`) or before every one (`null`,
+for `-Infinity`), so `v <= true` holds of every number and `v > true` of none,
+and the slot the branch reads the external's JSON type from binds the finite
+edge, since an infinity's JSON text is `null`. An entity's `number` or
+`integer` column compares with an external by the same edges (its `numeric`
+holds a writer's digits as a document member does), where SQLite's column of
+doubles compares with the number as it is.
+
+**An ordering, a group key and a distinct read a number as the double.** Two
+spellings of one double (`1152921504606847000` and `1152921504606846976`, `0.1`
+and its exact decimal) are one value to the engine: they tie in an `$orderby`,
+where the next term decides, and are one group and one distinct item. A
+database that holds a number by its digits orders them apart, so a number
+member's order key and group key are read as the double (the dialect's
+`doubleRead`): SQLite casts an integer, which it holds exactly, to `REAL`; a
+column that already holds the double (a `number` member's `REAL` column) is
+read bare and still orders through its index, while an `integer` member's
+column no longer does and is sorted. PostgreSQL casts its `numeric` to `double
+precision`, guarded where the cast would raise: a number at or past the
+midpoint between the largest double and 2^1024 reads as the infinity, and one at
+or below 2^-1075 (half the least double, a tie that rounds to zero) as a signed
+zero, as `JSON.parse` reads them. An entity's `number` column is cast the same
+way on PostgreSQL; its `integer` column holds no integer past 2^53 the engine
+reads, and SQLite's `number` column holds the double.
 
 **A path against a path is decided by the family of the two values.**
 Only members the schema types as scalars qualify — `string`, `number`,

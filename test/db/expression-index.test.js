@@ -242,6 +242,27 @@ describe('the column each dialect builds', () => {
     assert.strictEqual(postgresDialect().expressionOf('"left"((doc #>> \'{a}\'::text[]), 3)', { right: 'prefix' }), null);
   });
 
+  it('PostgreSQL reads a function by the name the server deparses, and a number constant it keeps cast', () => {
+    const own = postgresDialect({ searchPath: 's' });
+    const member = "(doc #>> '{a}'::text[])";
+    // the server folds an unquoted name and drops the schema its path finds the function in
+    for (const [sql, deparse] of [['pg_catalog.lower', 'lower'], ['LOWER', 'lower'], ['s.fold', 'fold'], ['other.fold', 'other.fold']])
+      assert.deepStrictEqual(own.expressionOf(`${deparse}(${member})`, { [sql]: 'f' }), { call: 'f', args: [{ member: '$.a' }] }, sql);
+    // a schema the path does not hold is part of the name
+    assert.strictEqual(own.expressionOf(`fold(${member})`, { 'other.fold': 'f' }), null);
+    assert.strictEqual(own.readBack.indexKey(`fold(${member})`, `other.fold(${member})`, true),
+      `keys fold(${member}), and the model declares other.fold(${member})`);
+    for (const planned of ['pg_catalog.lower', 's.lower', 'LOWER'])
+      assert.strictEqual(own.readBack.indexKey(`lower(${member})`, `${planned}(${member})`, true), null, planned);
+    // on the connection's own path the open knows no schema, and compares a call by its bare name
+    assert.strictEqual(postgresDialect().readBack.indexKey(`fold(${member})`, `public.fold(${member})`, true), null);
+    for (const [deparse, value] of [["'-1'::integer", -1], ["'2147483648'::bigint", 2147483648], ["('2147483648'::bigint)::numeric", 2147483648],
+      ['(5)::numeric', 5], ["'-1.5'::numeric", -1.5], ['2.5', 2.5], ["'1000000000000000000000'::numeric", 1e21]])
+      assert.deepStrictEqual(own.expressionOf(`f(${member}, ${deparse})`, { f: 'f' }), { call: 'f', args: [{ member: '$.a' }, { value }] }, deparse);
+    // a cast that is no number's stays unread
+    assert.strictEqual(own.expressionOf(`f(${member}, ('x'::text)::numeric)`, { f: 'f' }), null);
+  });
+
   it('one column serves every index that declares the same expression', () => {
     const shared = {
       $model: '0.1',

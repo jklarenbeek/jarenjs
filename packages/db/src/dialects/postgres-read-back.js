@@ -508,13 +508,59 @@ const memberOf = (columns) => (/** @type {string} */ identifier) => {
   return column === undefined ? null : { path: modelPath([{ name: column.name }]), codec: column.codec };
 };
 
+/** A stored condition read into the query grammar ({@link postgresReadBack}'s `read`).
+ * @param {string} stored @param {{ name: string, physical: string, codec: string }[]} columns
+ * @param {boolean} conforming @returns {any} */
+const readStored = (stored, columns, conforming) =>
+  readPredicate(stored, conforming ? POSTGRES_PREDICATE : POSTGRES_PREDICATE_ESCAPED, memberOf(columns));
+
 /**
- * The read-back the PostgreSQL dialect hands the open (`dialect.readBack`).
+ * A function's name as a deparse and the plan both name it. The server folds
+ * an unquoted name to lower case, and writes a call's schema only where the
+ * bare name would not find the function on the reading session's search
+ * path: never `pg_catalog`, which every path searches first, and not the
+ * store's own schema (`schema`) — the one a schema-bound store's path holds —
+ * unless a `pg_catalog` function of that name shadows it. So `pg_catalog.`
+ * and the store's own schema are set aside on both sides, and every schema
+ * where the path is the connection's own (`schema` undefined), whose schemas
+ * the open does not know: there a call compares by its bare name.
+ * @param {string} name - a name as written (`pg_catalog.lower`, `LOWER`)
+ * @param {string | undefined} schema - the store's own schema, if it names one
+ * @returns {string}
+ */
+export function functionNameKey(name, schema) {
+  const parts = name.toLowerCase().split('.');
+  return parts.length > 1 && (schema === undefined || parts[0] === 'pg_catalog' || parts[0] === schema)
+    ? parts.slice(1).join('.') : parts.join('.');
+}
+
+/**
+ * An expression's form ({@link expressionForm}) with each call named by its
+ * {@link functionNameKey}, so a deparse and a plan that call one function
+ * are one form however each qualifies it.
+ * @param {any} form @param {string | undefined} schema
+ * @returns {any}
+ */
+function namedCalls(form, schema) {
+  if (Array.isArray(form)) return form.map((item) => namedCalls(item, schema));
+  if (form === null || typeof form !== 'object') return form;
+  /** @type {Record<string, any>} */
+  const out = {};
+  for (const [key, value] of Object.entries(form))
+    out[key] = key === 'call' && typeof value === 'string' ? functionNameKey(value, schema) : namedCalls(value, schema);
+  return out;
+}
+
+/**
+ * The read-back the PostgreSQL dialect hands the open (`dialect.readBack`),
+ * for a store in `schema` (`undefined`: the connection's own search path).
  * The planner asks first whether a planned condition or expression reads back
  * at all, and refuses one that does not (`JD0004`) rather than meet it as
  * drift; the open then compares the catalog's deparse with the plan.
+ * @param {string | undefined} schema
+ * @returns {any}
  */
-export const postgresReadBack = Object.freeze({
+export const postgresReadBack = (schema) => Object.freeze({
   /** Whether a planned index condition reads back.
    * @param {string} planned @param {{ name: string, physical: string, codec: string }[]} columns */
   conditionReads: (planned, columns) => readPredicate(planned, POSTGRES_PREDICATE, memberOf(columns)) !== null,
@@ -526,8 +572,7 @@ export const postgresReadBack = Object.freeze({
    * @param {boolean} conforming - the reading session's `standard_conforming_strings`
    * @returns {any}
    */
-  read: (stored, columns, conforming) =>
-    readPredicate(stored, conforming ? POSTGRES_PREDICATE : POSTGRES_PREDICATE_ESCAPED, memberOf(columns)),
+  read: readStored,
   /**
    * How an index's stored condition differs from the planned one, or `null`.
    * @param {string | null} stored - the deparse, `null` for none
@@ -539,7 +584,7 @@ export const postgresReadBack = Object.freeze({
   condition(stored, planned, columns, conforming) {
     if (stored === null) return planned === undefined ? null : `has no condition, and the model declares WHERE ${planned}`;
     if (planned === undefined) return `has the condition ${stored}, which the model does not declare`;
-    const have = postgresReadBack.read(stored, columns, conforming);
+    const have = readStored(stored, columns, conforming);
     const want = readPredicate(planned, POSTGRES_PREDICATE, memberOf(columns));
     return have !== null && want !== null && JSON.stringify(have) === JSON.stringify(want)
       ? null : `has the condition ${stored}, and the model declares WHERE ${planned}`;
@@ -569,8 +614,8 @@ export const postgresReadBack = Object.freeze({
    * @returns {string | null}
    */
   expression(stored, planned, conforming) {
-    const have = expressionForm(stored, conforming);
-    const want = expressionForm(planned, true);
+    const have = namedCalls(expressionForm(stored, conforming), schema);
+    const want = namedCalls(expressionForm(planned, true), schema);
     return have !== null && want !== null && JSON.stringify(have) === JSON.stringify(want)
       ? null : `computes ${stored}, and the model declares ${planned}`;
   },
@@ -584,8 +629,8 @@ export const postgresReadBack = Object.freeze({
    * @returns {string | null}
    */
   indexKey(stored, planned, conforming) {
-    const have = expressionForm(stored, conforming);
-    const form = expressionForm(planned, true);
+    const have = namedCalls(expressionForm(stored, conforming), schema);
+    const form = namedCalls(expressionForm(planned, true), schema);
     const want = form !== null && form.collate !== undefined ? form.of : form;
     return have !== null && want !== null && JSON.stringify(have) === JSON.stringify(want)
       ? null : `keys ${stored}, and the model declares ${planned}`;

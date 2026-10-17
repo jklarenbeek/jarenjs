@@ -175,7 +175,7 @@ describe("reading a generated column's expression back", () => {
     for (const [plannedSql, stored] of STORED) {
       assert.notEqual(expressionForm(plannedSql, true), null, plannedSql);
       assert.deepEqual(expressionForm(stored, true), expressionForm(plannedSql, true), stored);
-      assert.equal(postgresReadBack.expression(stored, plannedSql, true), null, stored);
+      assert.equal(postgresReadBack(undefined).expression(stored, plannedSql, true), null, stored);
     }
   });
 
@@ -190,8 +190,8 @@ describe("reading a generated column's expression back", () => {
       "(CASE WHEN (jsonb_typeof((doc #> '{a}'::text[])) = 'string'::text) THEN (doc #>> '{a}'::text[]) ELSE 'x'::text END COLLATE \"C\")",
       "(CASE WHEN (jsonb_typeof((doc #> '{a,0}'::text[])) = 'string'::text) THEN (doc #>> '{a,0}'::text[]) ELSE NULL::text END COLLATE \"C\")",
       "lower((doc #>> '{a}'::text[]))", '', 'CASE',
-    ]) assert.notEqual(postgresReadBack.expression(stored, text, true), null, stored);
-    assert.notEqual(postgresReadBack.expression("\"left\"((doc #>> '{a}'::text[]), 4)", 'left(("doc" #>> \'{"a"}\'), 3)', true), null);
+    ]) assert.notEqual(postgresReadBack(undefined).expression(stored, text, true), null, stored);
+    assert.notEqual(postgresReadBack(undefined).expression("\"left\"((doc #>> '{a}'::text[]), 4)", 'left(("doc" #>> \'{"a"}\'), 3)', true), null);
   });
 });
 
@@ -201,7 +201,7 @@ describe("comparing a layout index's condition read back", () => {
   /** @param {string} column */
   const typeOf = (column) => TYPES[column];
   /** @param {string} stored @param {string} planned @param {boolean} [conforming] */
-  const differs = (stored, planned, conforming = true) => postgresReadBack.layoutConditionDiffers(stored, planned, typeOf, conforming);
+  const differs = (stored, planned, conforming = true) => postgresReadBack(undefined).layoutConditionDiffers(stored, planned, typeOf, conforming);
   // the deparse PostgreSQL 16, 17 and 18 hand back for each condition, beside the PostgreSQL rendering of a declared one
   const SAME = [
     ["(s = ANY (ARRAY['a'::text, 'b'::text]))", "(\"s\" IN ('b', 'a'))"],

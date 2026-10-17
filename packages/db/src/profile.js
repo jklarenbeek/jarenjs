@@ -474,7 +474,8 @@ export function predicateLeaves(pred, familiesOf, nullBinds, dialect, out = []) 
     case 'cmp': case 'in':
       if (!('ext' in pred.operand)) break;
       out.push({ name: pred.operand.ext, op: pred.p === 'in' ? 'eq' : pred.op, list: pred.p === 'in',
-        member: pred.ref.column ?? pred.ref.segments.map((/** @type {any} */ segment) => segment.name ?? `[${segment.index}]`).join('.'),
+        // the member as the document names it, not the column an index reads it from
+        member: pred.ref.segments?.map((/** @type {any} */ segment) => segment.name ?? `[${segment.index}]`).join('.') ?? pred.ref.column,
         families: familiesOf(pred.ref), nullBinds, dialect });
       break;
     default:
@@ -548,16 +549,32 @@ function unwrittenText(leaf, value) {
 }
 
 /**
+ * The infinity a membership leaf's list holds, named, or `null`. The list
+ * crosses as JSON, whose text has no infinity: the item binds as `null`,
+ * which matches no number, where the engine's `Infinity` equals a number
+ * written past the double range.
+ * @param {PredicateLeaf} leaf @param {any} value
+ * @returns {string | null}
+ */
+function infiniteItem(leaf, value) {
+  if (!leaf.list || value === null || typeof value !== 'object') return null;
+  const found = (Array.isArray(value) ? value : Object.values(value))
+    .find((item) => item === Infinity || item === -Infinity);
+  return found === undefined ? null : String(found);
+}
+
+/**
  * Admit the externals a store profile's mandatory predicate binds, for one
  * call or point read of `root` — the one rule every surface that binds one
  * follows: a missing external is refused `JD0011` (a mandatory predicate
  * runs in the database or not at all), so is one holding a function or a
  * symbol, which no database binds, and so is a value its member can
  * hold that the database compares otherwise than the engine
- * ({@link strayFamily}), and a string the database would not receive as
- * written ({@link unwrittenText}), since the predicate would keep other rows
- * than it does. Every other value is admitted: one its member cannot hold
- * matches nothing on either side.
+ * ({@link strayFamily}), a string the database would not receive as
+ * written ({@link unwrittenText}), and a list holding an infinity
+ * ({@link infiniteItem}), since the predicate would keep other rows than it
+ * does. Every other value is admitted: one its member cannot hold matches
+ * nothing on either side.
  * @param {string} root - the collection or entity
  * @param {readonly string[]} names - every external the predicate names
  * @param {readonly PredicateLeaf[]} leaves - its comparisons of one
@@ -591,6 +608,12 @@ export function admitPredicateExternals(root, names, leaves, externals, how) {
     if (text !== null) {
       throw how.refusal(`${prefix(`'$${leaf.name}'`)} — it holds ${text}, so the predicate would keep other rows `
         + `than it does in '${leaf.member}'; bind a well-formed string without U+0000 there`);
+    }
+    const infinite = infiniteItem(leaf, bound[leaf.name]);
+    if (infinite !== null) {
+      throw how.refusal(`${prefix(`'$${leaf.name}'`)} — its list holds ${infinite}, which the list's JSON binds as `
+        + `null and the engine compares with a number written past the double range in '${leaf.member}', so the `
+        + 'predicate would keep other rows than it does; bind finite numbers in the list');
     }
   }
 }

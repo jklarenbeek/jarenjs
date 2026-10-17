@@ -191,6 +191,7 @@ export const MEMBER_WHEN = Symbol('dialect.memberWhen');
  *     expressionReads: (planned: string) => boolean,
  *     expression: (stored: string, planned: string, conforming: boolean) => string | null },
  *   isCreateRace?: (error: any) => boolean,
+ *   isUndefinedFunction?: (error: any) => boolean,
  *   capture?: { check: (options: any) => void, beforeWrite: (connection: any) => any,
  *     afterLog?: (connection: any) => any },
  *   jobs?: any,
@@ -273,6 +274,7 @@ export const MEMBER_WHEN = Symbol('dialect.memberWhen');
  *   physicalDifferent?: (codec: string, left: string, right: string) => string,
  *   numberCast?: (sql: string) => string,
  *   numberRead?: (sql: string) => string,
+ *   doubleRead?: (sql: string) => string,
  *   distinct?: (left: string, right: string) => string,
  *   mutationRowGuard?: (count: string, limit: number) => string,
  *   boundMutation?: (sql: string, limit: number) => string,
@@ -838,6 +840,10 @@ export function createDialect(spec) {
      */
     readBack: spec.readBack,
     isCreateRace: spec.isCreateRace,
+    /** Whether a driver failure is the server finding no function of a
+     * called name for the arguments it was passed (an index over a declared
+     * expression's CREATE). Undefined where the engine reports none. */
+    isUndefinedFunction: spec.isUndefinedFunction,
     capture: spec.capture,
     jobs: spec.jobs,
     replication: spec.replication,
@@ -1080,6 +1086,14 @@ export function createDialect(spec) {
      * alone.
      */
     numberRead: spec.numberRead ?? ((sql) => sql),
+    /**
+     * A number an ordering or a group key reads, as the double the engine
+     * holds, so that two spellings of one double — the digits another
+     * writer chose and the shortest ones the store writes — tie and group as
+     * the engine's do. An engine that holds a number as the double leaves
+     * the expression alone.
+     */
+    doubleRead: spec.doubleRead ?? ((sql) => sql),
     distinct: spec.distinct ?? ((left, right) => `${left} IS NOT ${right}`),
     mutationRowGuard: spec.mutationRowGuard,
     boundMutation: spec.boundMutation,

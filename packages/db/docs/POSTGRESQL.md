@@ -333,13 +333,17 @@ reads `JD2005` naming it. A PostgreSQL failure aborts its transaction, so the
 store never reads the key after one; on SQLite it does, after a unique failure
 that does not name the key.
 
-A number group key or distinct leaf is read as PostgreSQL's exact `numeric`,
+A number group key or distinct leaf, and a number an `$orderby` orders by, is
+read as the double the engine holds: the `numeric` cast to `double precision`,
 so a number a foreign writer or trusted SQL stored with more digits than a
-double holds (`1.0000000000000001`), or two spellings of one denormal, groups
-apart where the engine, which compares doubles, holds them equal. Every number
-the store itself writes is canonical, so the store's own data groups as the
-engine groups. Reading the key as `double precision` was measured and made
-every number grouping slower, so it is not done.
+double holds (`1.0000000000000001`, `1152921504606846976` for 2^60), or two
+spellings of one denormal, is one key with the store's own spelling, and ties
+with it in an ordering, where the next term decides, as in the engine. The cast
+raises past the double range, so a number at or past the midpoint between the
+largest double and 2^1024 reads as the infinity and one at or below 2^-1075
+(half the least double) as a signed zero, which is what `JSON.parse` reads.
+That read is a `CASE` over the member and costs every number grouping and
+ordering more than the bare `numeric` did.
 
 An entity's `integer` and `number` columns are `numeric`, which holds an
 integer past 2^53 exactly. An `integer` member read from its column is refused

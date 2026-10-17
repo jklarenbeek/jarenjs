@@ -741,17 +741,31 @@ function immediately(connection, fn, retry = true) {
  * plainly, and so does the table's own CREATE, so a rival that committed the
  * table after this open's probe fails the CREATE TABLE — a create race the
  * bracket retries into verification — rather than a program.
+ * An index over a declared expression whose function the server has not
+ * for the arguments the declaration passes (`dialect.isUndefinedFunction`) is
+ * the declaration's fault, not the table's: `JD0004` at its `expression`.
  * @param {any} connection
- * @param {{ createSql: string[], programs?: { sql: string }[] }} plan
+ * @param {{ createSql: string[], programs?: { sql: string }[],
+ *   declaredCalls?: Map<string, { index: string, term: string, docPath: string }> }} plan
  * @returns {any} value-or-promise
  */
 function runCreate(connection, plan) {
   const dialect = connection.dialect;
   const plain = new Set((plan.programs?.length ?? 0) === 0 || dialect.capabilities.declaredSqlText === true ? []
     : [plan.createSql[0], ...(plan.programs ?? []).map((program) => program.sql)]);
+  /** @param {string} sql @param {any} failure */
+  const declarationFailure = (sql, failure) => {
+    const call = plan.declaredCalls?.get(sql);
+    if (call === undefined || dialect.isUndefinedFunction?.(failure) !== true) return failure;
+    return new DbCompileError('JD0004', `index '${call.index}' keys ${call.term}, which the server cannot create: `
+      + `${failure?.message ?? String(failure)}. Declare as 'sql' an IMMUTABLE function the server has for the `
+      + 'arguments the expression passes (a number literal past the 4-byte integers is a bigint there)',
+    call.docPath, failure);
+  };
   const run = (/** @type {number} */ j) => (j >= plan.createSql.length
     ? null
-    : chain(connection.exec(plain.has(plan.createSql[j]) ? plan.createSql[j] : dialect.ddl.idempotent(plan.createSql[j])), () => run(j + 1)));
+    : chain(attempt(() => connection.exec(plain.has(plan.createSql[j]) ? plan.createSql[j] : dialect.ddl.idempotent(plan.createSql[j])),
+      (failure) => declarationFailure(plan.createSql[j], failure)), () => run(j + 1)));
   return run(0);
 }
 

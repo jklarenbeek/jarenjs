@@ -234,7 +234,8 @@ describe('the emitted statements: one ladder, written once', () => {
     const emitted = sqlOf(plan(RANGE));
     assert.match(emitted.sql, /"gx_at" >= \?/);
     assert.match(emitted.sql, /"gx_at" < \?/);
-    assert.match(emitted.sql, /ORDER BY "gx_at" ASC NULLS FIRST, "rowid"$/);
+    // the order reads the double the engine orders by, so it sorts the range the index seeks
+    assert.match(emitted.sql, /ORDER BY CAST\("gx_at" AS REAL\) ASC NULLS FIRST, "rowid"$/);
   });
 });
 

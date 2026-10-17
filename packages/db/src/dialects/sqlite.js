@@ -614,6 +614,7 @@ export const sqliteDialect = createDialect({
   // otherwise) and which compares exactly, where the engine holds and
   // compares the double nearest to it
   numberRead: (sql) => `CAST(${sql} AS REAL)`,
+  doubleRead: (sql) => `CAST(${sql} AS REAL)`,
   // and so a stored JSON integer is read by its digits, and compared exactly
   integerDigits: true,
   rowIdentity,

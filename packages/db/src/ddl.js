@@ -914,9 +914,11 @@ export function planCollection(name, collection, dialect, options = undefined) {
     anyKindColumns: new Set(generated.filter((g) => g.legacyTypes !== undefined).map((g) => g.name)),
     /** The generated columns that hold a number as the double the engine
      * holds: one declared as a `number` member's column is, and so is one
-     * whose read casts a number to it (`kind: 'key'`, a number-first union).
-     * A comparison with an integer past 2^53 compares such a column bare. */
-    doubleColumns: new Set(generated.filter((g) => g.kind === 'key'
+     * whose read casts a number to it (`kind: 'key'`, a number-first union) —
+     * on an engine whose number column holds a double, never one that holds
+     * the digits a writer spelled (`decimalDigits`). A comparison with an
+     * integer past 2^53, and an ordering, read such a column bare. */
+    doubleColumns: new Set(dialect.decimalDigits ? [] : generated.filter((g) => g.kind === 'key'
       || g.type === dialect.typeFor('number', 'generated')).map((g) => g.name)),
     /** The indexes beside a declared index over a member of several kinds
      * that key its other kinds ({@link kindIndexesOf}): each one's name, its
@@ -1965,6 +1967,7 @@ const expectedColumnsOf = (columns, legacyTypes, dialect) => [...columns
  * @returns {{ table: string, createSql: string[], expected: any,
  *   columnNames: Set<string>, objects?: { name: string, what: string, docPath: string }[],
  *   programs?: any[], conditionColumns?: { name: string, physical: string, codec: string }[],
+ *   declaredCalls?: Map<string, { index: string, term: string, docPath: string }>,
  *   deferredForeignKeys?: string[], autoKey?: string, keyAllocates?: boolean }}
  */
 export function planEntity(name, entityMapping, entities, dialect, options = {}) {
@@ -2093,6 +2096,8 @@ export function planEntity(name, entityMapping, entities, dialect, options = {})
       return `'${member}' lives in the entity's document: an index condition reads column-mapped members — map it as a column (a top-level scalar property)`;
     return `'${member}' has no column on entity '${name}': an index condition reads column-mapped members`;
   };
+  /** The CREATE of each index over a declared expression, by its SQL. @type {Map<string, { index: string, term: string, docPath: string }>} */
+  const declaredCalls = new Map();
   (entityMapping.entityIndexes ?? []).forEach((/** @type {any} */ index, /** @type {number} */ i) => {
     const indexPath = `${entityPath}/indexes/${i}`;
     const indexName = `${name}_${index.name}`;
@@ -2104,6 +2109,7 @@ export function planEntity(name, entityMapping, entities, dialect, options = {})
       ...(terms === undefined ? {} : { terms, reads: [...index.reads] }), ...(where === undefined ? {} : { where }) };
     objects.push({ name: indexName, what: `index '${index.name}'`, docPath: `${indexPath}/name`, rename: 'the index' });
     createSql.push(dialect.ddl.createIndex({ ...declared, table: name }));
+    if (terms !== undefined) declaredCalls.set(createSql[createSql.length - 1], { index: index.name, term: terms[0], docPath: `${indexPath}/expression` });
     expectedIndexes.push(declared);
   });
   // the database rules' programs, created with the table and verified with it
@@ -2130,6 +2136,9 @@ export function planEntity(name, entityMapping, entities, dialect, options = {})
     deferredForeignKeys: columns.filter((column) => deferred.has(column.name))
       .map((column) => dialect.ddl.addForeignKey({ table: name, column: column.name, references: column.references })),
     objects,
+    /** The CREATE of each index over a declared expression, by its SQL: what a
+     * server that has no function the declaration names for those arguments refuses. */
+    declaredCalls,
     /** The programs of the entity's database rules, in install order (their SQL ends `createSql`). */
     programs,
     /** The members an index condition may read, by their columns. */

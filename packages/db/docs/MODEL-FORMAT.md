@@ -2201,9 +2201,23 @@ spell it), a lost `unique` and a changed condition. The planner creates,
 drops and recreates the index (a changed expression or condition is a
 drop and a create); `planModelMigration` and `planInvariants` take the
 declarations as `expressions`, as `openStore` does, and without the
-function refuse `JD0004` at the `call`. `introspect({ expressions })`
-reads the key back into the expression; without the declarations it is
-an `unmapped-index` row. Replication orders an envelope's writes by the
+function refuse `JD0004` at the `call`. A function the server has not
+for the arguments the expression passes (`left(text, bigint)` over a
+literal past the 4-byte integers) is refused `JD0004` at the
+`expression` when the index is created, naming the server's message.
+The server folds an unquoted `sql` name to lower case and writes a
+call's schema only where its search path would not find the function,
+so the open compares names as the server spells them: `LOWER`,
+`pg_catalog.lower` and `lower` are one function, and so are `fold` and
+`<schema>.fold` in the store's own schema (on a store over the
+connection's own search path, whose schemas the open does not know, a
+call compares by its bare name), while a schema the path does not hold
+stays part of the name. `introspect({ expressions })`
+reads the key back into the expression, a number constant the server
+keeps cast (`'-1'::integer`, `(5)::numeric`) included; without the
+declarations it is an `unmapped-index` row. Of two declarations that
+name one server function, introspection reads the one spelled as the
+server spells it. Replication orders an envelope's writes by the
 columns of a unique index, never by an expression's key: a value the
 function folds together, taken by one write before another releases it,
 keeps the envelope's order and is refused `JD2005`
@@ -2310,7 +2324,9 @@ receive as written, which the predicate compares in its place and so keeps
 another tenant's rows: one holding a lone surrogate, which a driver binds
 as U+FFFD (as an item of a membership list, whose JSON escape SQLite reads
 as written, on PostgreSQL only), and on PostgreSQL one holding U+0000; and
-one holding a function or a symbol, which no database binds. Against a member that cannot hold it the
+one holding a function or a symbol, which no database binds; and a list
+holding an infinity, which its JSON binds as `null` where the engine's
+`Infinity` equals a number another writer stored past the double range. Against a member that cannot hold it the
 comparison matches nothing on either side, and the call answers — a
 boolean, an object or an array in place of a single value too, which SQLite
 binds as a value of no JSON kind. A predicate's integer past 2^53 keeps
@@ -2318,6 +2334,7 @@ the rows the engine keeps: SQLite, which reads a stored JSON integer as the
 exact integer its digits spell, compares that integer with the interval of
 integers that round to the external's double, bound as its two edges, and
 PostgreSQL, which holds every JSON number as the decimal its writer spelled,
+in a document member and in an entity's `number` or `integer` column alike,
 compares it with the interval of decimals that round to that double, each
 edge with the side its tie falls on, so a document keeps or loses its row as
 the engine decides whatever digits its writer spelled the number by
@@ -2325,7 +2342,10 @@ the engine decides whatever digits its writer spelled the number by
 2^60); on SQLite a column that holds the double (a `number` member's) takes
 the number as it is. The statement is the one a safe integer binds, so it seeks
 as that one does, and a document's own such external runs in it too
-([ARCHITECTURE](../ARCHITECTURE.md#the-type-truth-table)). One the
+([ARCHITECTURE](../ARCHITECTURE.md#the-type-truth-table)). A predicate's
+infinity keeps the engine's rows as well (on PostgreSQL it is the interval of
+decimals at and past the midpoint between the largest double and 2^1024),
+where a document's own infinity runs in the engine. One the
 predicate would read otherwise than the JSON value it stands for (a `Date`
 by its instant, a `Map` as `{}`), or a `bigint`, is refused `JD0041` (§10.1). `explain()` given externals
 refuses what the run it explains refuses; given none, it answers the plan

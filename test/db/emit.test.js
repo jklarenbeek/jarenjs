@@ -602,22 +602,31 @@ describe('PostgreSQL: an external against an entity column', () => {
   const json = { external: 'x', json: true };
   const type = (/** @type {number} */ slot) => pg.valueTypeOf(`$${slot}`);
   const numeric = `IN (${pg.numericTypeNames.map(pg.stringLiteral).join(', ')})`;
+  /** The interval of decimals that round to the external's double, its edges from `first` on. @param {number} first */
+  const within = (first) => [`>= ${pg.externalRef(`$${first}`, 'number')}`, `> ${pg.externalRef(`$${first + 1}`, 'number')}`,
+    `<= ${pg.externalRef(`$${first + 2}`, 'number')}`, `< ${pg.externalRef(`$${first + 3}`, 'number')}`]
+    .map((bound) => `to_jsonb("t"."c") ${bound}`).join(' AND ');
 
   it('ne is true for a present value of the external\'s other type, and compares only the external\'s own', () => {
     const text = emit(column('string'), 'ne');
     assert.strictEqual(text.sql, `("t"."c" IS NOT NULL AND (NOT (${type(1)} = 'text') OR "t"."c" <> ${pg.externalRef('$2', 'text')}))`);
     assert.deepStrictEqual(text.slots, [json, json]);
+    // a number column holds the digits a writer spelled: it differs from the interval of decimals that round to the external's double
     const number = emit(column('number'), 'ne');
-    assert.strictEqual(number.sql, `("t"."c" IS NOT NULL AND (NOT (${type(1)} ${numeric}) OR to_jsonb("t"."c") <> ${pg.externalRef('$2', 'number')}))`);
+    assert.strictEqual(number.sql, `("t"."c" IS NOT NULL AND (NOT (${type(1)} ${numeric}) OR NOT (${within(2)})))`);
+    assert.deepStrictEqual(number.slots, [{ ...json, compared: true },
+      ...['low', 'lowExclusive', 'high', 'highExclusive'].map((decimal) => ({ ...json, decimal, compared: true }))]);
   });
 
   it('equality and orderings keep the guarded form: the external must be of the column\'s type', () => {
     for (const [op, symbol] of [['eq', '='], ['lt', '<'], ['ge', '>=']]) {
       assert.strictEqual(emit(column('string'), op).sql,
         `("t"."c" IS NOT NULL AND ${type(1)} = 'text' AND "t"."c" ${symbol} ${pg.externalRef('$2', 'text')})`, op);
-      assert.strictEqual(emit(column('number'), op).sql,
-        `("t"."c" IS NOT NULL AND ${type(1)} ${numeric} AND to_jsonb("t"."c") ${symbol} ${pg.externalRef('$2', 'number')})`, op);
     }
+    const at = (/** @type {number} */ slot) => pg.externalRef(`$${slot}`, 'number');
+    for (const [op, test] of [['eq', within(2)], ['lt', `(to_jsonb("t"."c") < ${at(2)} OR to_jsonb("t"."c") <= ${at(3)})`],
+      ['ge', `to_jsonb("t"."c") >= ${at(2)} AND to_jsonb("t"."c") > ${at(3)}`]])
+      assert.strictEqual(emit(column('number'), op).sql, `("t"."c" IS NOT NULL AND ${type(1)} ${numeric} AND ${test})`, op);
   });
 
   it('a boolean column holds neither a string nor a number: nothing equals or orders, every present value differs', () => {
