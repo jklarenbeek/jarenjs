@@ -619,7 +619,10 @@ print as an escape or a reference, and a destination that starts with `<`
 or holds a control character prints in angle brackets. A list item made of
 markers alone prints its first block the other way (`- * -`), a raw-HTML
 node that begins a continuation line prints four spaces in, and a tab in
-text prints as `&#9;`. A tab inside paragraph, heading and table text is a
+text prints as `&#9;`. White space the block reader drops prints its
+outermost character as a reference: a space or tab that starts a paragraph
+line (`&#32;a`; one to three spaces were dropped, four read as indented
+code), and one at either edge of a table cell. A tab inside paragraph, heading and table text is a
 tab in the AST, as it is inside code and HTML blocks.
 
 The normative round-trip guarantees:

@@ -60,18 +60,34 @@ function escapeText(value, bare = false) {
 }
 
 /**
+ * A printed cell whose text starts or ends with white space: the cell
+ * reader trims both edges, so the outermost white space character prints
+ * as a character reference and reads back as the text it is.
+ * @param {string} text
+ * @returns {string}
+ */
+function guardCellEdges(text) {
+  const reference = (/** @type {string} */ ch) => (ch === '\t' ? '&#9;' : '&#32;');
+  let out = text;
+  if (/^[ \t]/.test(out)) out = reference(out[0]) + out.slice(1);
+  if (/[ \t]$/.test(out)) out = out.slice(0, -1) + reference(out[out.length - 1]);
+  return out;
+}
+
+/**
  * Escape a printed paragraph/cell line that would otherwise open a
  * block construct at line start.
  * @param {string} line
  * @returns {string}
  */
 function guardLineStart(line) {
-  // Leading whitespace cannot be escaped with a backslash, and four
-  // spaces (or one tab) of it would re-parse as indented code, so the
-  // first whitespace character prints as a character reference — which
-  // is how the text came in (`&#9;foo`) and how it goes back out.
+  // Leading whitespace cannot be escaped with a backslash: one to three
+  // spaces are dropped by the block reader, and four (or one tab) would
+  // re-parse as indented code, so the first whitespace character prints
+  // as a character reference — which is how the text came in (`&#32;foo`,
+  // `&#9;foo`) and how it goes back out.
   if (line.charCodeAt(0) === 0x09) return '&#9;' + line.slice(1);
-  if (line.startsWith('    ')) return '&#32;' + line.slice(1);
+  if (line.charCodeAt(0) === 0x20) return '&#32;' + line.slice(1);
   if (!RE_DANGEROUS_LINE.test(line) && !scanThematicBreak(line, 0)) return line;
   // A backslash escapes ASCII PUNCTUATION and nothing else, so an
   // ordered-list line is disarmed at its delimiter (`1\. text`): `\1.`
@@ -2325,7 +2341,7 @@ const BLOCK_PRINTERS = {
       let line = '|';
       for (let c = 0; c < cells.length; c++) {
         printing.path.push(r, c);
-        line += ' ' + printRun(cells[c].children).replace(/\n/g, ' ') + ' |';
+        line += ' ' + guardCellEdges(printRun(cells[c].children).replace(/\n/g, ' ')) + ' |';
         printing.path.length -= 2;
       }
       out.push(line);
