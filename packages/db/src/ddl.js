@@ -335,6 +335,29 @@ export function schemaTypeAt(schema, segments) {
 }
 
 /**
+ * Whether a schema node admits integers and `null` alone, each within
+ * ±(2^53 − 1), by its own `type` and bounds: a `maximum` at or below
+ * 2^53 − 1 or an `exclusiveMaximum` at or below 2^53, and the mirror below.
+ * A validator reads a document's number as the double its digits round to,
+ * and any integer past those bounds rounds to a double the bound refuses,
+ * so every conforming document holds a safe integer here, each its own
+ * double. A bound elsewhere (`allOf`, `$ref`) proves nothing.
+ * @param {any} node
+ * @returns {boolean}
+ */
+export function boundsSafeIntegers(node) {
+  const types = typeof node?.type === 'string' ? [node.type] : Array.isArray(node?.type) ? node.type : [];
+  const kinds = types.filter((/** @type {unknown} */ type) => type !== 'null');
+  if (kinds.length !== 1 || kinds[0] !== 'integer') return false;
+  const safe = Number.MAX_SAFE_INTEGER;
+  const below = (typeof node.maximum === 'number' && node.maximum <= safe)
+    || (typeof node.exclusiveMaximum === 'number' && node.exclusiveMaximum <= safe + 1);
+  const above = (typeof node.minimum === 'number' && node.minimum >= -safe)
+    || (typeof node.exclusiveMinimum === 'number' && node.exclusiveMinimum >= -(safe + 1));
+  return below && above;
+}
+
+/**
  * The schema type a path's generated column takes its storage from: the
  * member's declared type, except where the engine's columns can hold any
  * value (`capabilities.untypedColumns`) and the member's union lists several
@@ -671,6 +694,8 @@ export function planCollection(name, collection, dialect, options = undefined) {
   const expressions = [];
   /** Where each index's own generated columns start in `generated`. @type {number[]} */
   const firstColumn = [];
+  /** The `integer` columns whose member the schema bounds within ±(2^53 − 1). @type {Set<string>} */
+  const safeIntegerColumns = new Set();
 
   for (const index of collection.indexes) {
     firstColumn.push(generated.length);
@@ -760,6 +785,8 @@ export function planCollection(name, collection, dialect, options = undefined) {
             : dialect.columnRead(doc, { ...column, unpinned: segments });
         generated.push({ ...column, ...(unpinned === undefined ? {} : { unpinned }),
           ...(alternate === undefined ? {} : { alternate }) });
+        if (column.type === dialect.typeFor('integer', 'generated') && boundsSafeIntegers(schemaNodeAt(collection.schema, segments)))
+          safeIntegerColumns.add(columnName);
       }
       columns.push(columnName);
     }
@@ -920,6 +947,14 @@ export function planCollection(name, collection, dialect, options = undefined) {
      * integer past 2^53, and an ordering, read such a column bare. */
     doubleColumns: new Set(dialect.decimalDigits ? [] : generated.filter((g) => g.kind === 'key'
       || g.type === dialect.typeFor('number', 'generated')).map((g) => g.name)),
+    /** The generated `integer` columns whose member the schema bounds within
+     * ±(2^53 − 1) ({@link boundsSafeIntegers}): two integers such a column
+     * holds are two doubles, so an ordering reads it bare and keeps its
+     * index order, as it reads a {@link doubleColumns} one — on an engine
+     * whose column holds a number as an integer or a double, never one that
+     * holds the digits a writer spelled (`decimalDigits`), where `5` and a
+     * conforming `5.00000000000000000001` are two values and one double. */
+    safeIntegerColumns: dialect.decimalDigits ? new Set() : safeIntegerColumns,
     /** The indexes beside a declared index over a member of several kinds
      * that key its other kinds ({@link kindIndexesOf}): each one's name, its
      * declared index's (`of`), the kinds (`kind`, `text` or `text$boolean`),

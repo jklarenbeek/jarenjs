@@ -666,20 +666,17 @@ what each does is its own documentation's job
   `5`. SQLite answers all of these as the engine. Wanted: the interval
   comparison the scalar external now makes (decimal edges with tie sides), for
   literals and list items, and for every double, not only those past 2^53.
-- [ ] **On SQLite an ordering over an indexed `integer` member is sorted,
-  never read in index order.** The order key reads the double (`CAST("gx_v" AS
-  REAL)`) so two spellings of one double past 2^53 tie as the engine's do, and
-  an `$orderby`, a window over it or a time-series range over an `integer`
-  epoch column sorts every row it reads where the index read them in order.
-  Wanted: an order the index provides that still ties those spellings (an
-  index over the double, or a statement that reads in index order and re-sorts
-  only a run holding an integer past ±(2^53 − 1)), measured.
-- [ ] **On PostgreSQL an entity load's `orderBy` over a `number` column orders
-  two spellings of one double by their digits.** `load({ orderBy: ['$it.n',
-  '$it.id'] })` over rows holding `1152921504606847100` and the store's
-  `1152921504606847000` (both 2^60) answers `["b","a"]` where the engine
-  answers `["a","b"]`; a query's `$orderby` reads the double since this
-  release. Wanted: the load's order and keyset terms read the double too.
+- [ ] **On SQLite an ordering over an indexed `integer` member the schema does
+  not bound is sorted, never read in index order.** The order key reads the
+  double (`CAST("gx_v" AS REAL)`) so two spellings of one double past 2^53 tie
+  as the engine's do. A member whose own `minimum`/`maximum` (or their
+  exclusive forms) bound it within ±(2^53 − 1) is read bare in index order (a
+  time-series instant declared `minimum: 0, maximum: 8640000000000000`), but
+  an `$orderby`, a window or a time-series range over an unbounded `integer`
+  member still sorts every row it reads. Wanted: an order the index provides
+  that still ties those spellings for an unbounded member (an index over the
+  double, or a statement that reads in index order and re-sorts only a run
+  holding an integer past ±(2^53 − 1)), measured.
 - [ ] **On SQLite a decimal another writer spelled just past a tie reads as
   the other double.** SQLite 3.53.4 reads
   `1152921504606847104.0000000000000001` as 2^60 and

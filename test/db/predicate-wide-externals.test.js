@@ -27,6 +27,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { queryJson } from '@jarenjs/json/query';
 import { decimalEdge, integersRoundingTo, intervalEdge } from '../../packages/db/src/double-interval.js';
+import { boundsSafeIntegers } from '../../packages/db/src/ddl.js';
 import { ENGINES, skipFor, withStore } from './store-core-engines.js';
 
 const MODEL = {
@@ -335,6 +336,49 @@ for (const engine of ENGINES) {
         assert.deepEqual(differ, []);
       });
     });
+
+    it('order and page an entity load, and order its include, as the engine does', async () => {
+      const member = { n: { type: 'number' }, meta: { type: 'object', properties: { w: { type: 'integer' } } } };
+      const model = { $model: '0.1', entities: {
+        K: { schema: { type: 'object', required: ['id'], properties: { id: { type: 'string', 'x-entity': { key: true } }, ...member,
+          js: { 'x-entity': { relation: { to: 'J', many: true, via: 'kId', onDelete: 'cascade' } } } } } },
+        J: { schema: { type: 'object', required: ['id', 'kId'], properties: { id: { type: 'string', 'x-entity': { key: true } },
+          kId: { type: 'string' }, ...member } } } } };
+      await withRawWriter(engine, model, async (store, run) => {
+        const K = store.entity('K');
+        const J = store.entity('J');
+        for (const [id, n] of [['a', 2 ** 60 + 256], ['b', 2 ** 60], ['c', 1], ['d', 2 ** 60]]) {
+          await K.create({ id, n, meta: { w: n } });
+          await J.create({ id, kId: 'a', n, meta: { w: n } });
+        }
+        // 'a' now holds digits above the store's 2^60 that round to it, as 'b' and 'd' hold it
+        for (const table of ['K', 'J']) {
+          await run(`UPDATE "${table}" SET "n" = 1152921504606847100, "doc" = ${engine === 'postgres' ? '' : 'jsonb'}`
+            + `('{"meta": {"w": 1152921504606847100}}') WHERE "id" = 'a'`);
+        }
+        const ids = (/** @type {any[]} */ rows) => rows.map((row) => row.id);
+        const differ = [];
+        for (const path of ['n', 'meta.w']) {
+          for (const desc of [false, true]) {
+            const terms = [{ $key: `$it.${path}`, $dir: desc ? 'desc' : 'asc' }, { $key: '$it.id', $dir: desc ? 'desc' : 'asc' }];
+            const oracle = await store.execute({ $for: { it: '$.K[*]' }, $orderby: terms, $return: '$it.id' }, { pushdown: false });
+            const load = ids(await K.asNoTracking().load({ orderBy: terms }));
+            const included = ids((await K.asNoTracking().load({ where: { $eq: ['$it.id', 'a'] }, include: { js: { orderBy: terms } } }))[0].js);
+            if (JSON.stringify(load) !== JSON.stringify(oracle)) differ.push({ path, desc, load, oracle });
+            if (JSON.stringify(included) !== JSON.stringify(oracle)) differ.push({ path, desc, included, oracle });
+          }
+        }
+        // a keyset page resumes past a page boundary inside a run of equal doubles: a, b and d are one double
+        const paged = [];
+        let continuation;
+        for (let i = 0; i < 5 && (i === 0 || continuation != null); i++) {
+          const page = await K.page({ orderBy: ['$it.n', '$it.id'] }, { limit: 1, ...(continuation === undefined ? {} : { after: continuation }) });
+          paged.push(...ids(page.items));
+          continuation = page.continuation;
+        }
+        assert.deepEqual({ differ, paged }, { differ: [], paged: ['c', 'a', 'b', 'd'] });
+      });
+    });
   });
 
   describe(`an entity number column against a wide or infinite external, ${engine}`, { skip: skipFor(engine) }, () => {
@@ -414,4 +458,85 @@ describe('the integers a double stands for', () => {
     assert.equal(intervalEdge(-(2 ** 63), 'high'), -(2n ** 63n) + 512n);
     for (const value of [5, 0.5, 'text', null]) assert.equal(intervalEdge(value, 'low'), value);
   });
+});
+
+describe('an ordering over an integer member the schema bounds within ±(2^53 − 1)', () => {
+  const SAFE = Number.MAX_SAFE_INTEGER;
+  it('is proven by the member\'s own type and bounds alone', () => {
+    assert.deepEqual([
+      { type: 'integer', minimum: -SAFE, maximum: SAFE },
+      { type: ['integer', 'null'], exclusiveMinimum: -(SAFE + 1), exclusiveMaximum: SAFE + 1 },
+      // an epoch in milliseconds, within the instants a JavaScript Date holds
+      { type: 'integer', minimum: -8640000000000000, maximum: 8640000000000000 },
+      { type: 'integer', minimum: 0, exclusiveMinimum: -(SAFE + 3), maximum: 10, exclusiveMaximum: SAFE + 3 },
+    ].map(boundsSafeIntegers), [true, true, true, true]);
+    // 2^53 + 1 rounds to 2^53, which an inclusive 2^53 admits; an
+    // exclusive bound one double further admits 2^53 itself
+    assert.deepEqual([
+      { type: 'integer', minimum: -SAFE, maximum: SAFE + 1 },
+      { type: 'integer', minimum: -(SAFE + 1), maximum: SAFE },
+      { type: 'integer', exclusiveMinimum: -SAFE, exclusiveMaximum: SAFE + 3 },
+      { type: 'integer', exclusiveMinimum: -(SAFE + 3), exclusiveMaximum: SAFE },
+      { type: 'integer', minimum: 0 },
+      { type: 'integer', maximum: 10 },
+      { type: 'number', minimum: 0, maximum: 10 },
+      { type: ['integer', 'number'], minimum: 0, maximum: 10 },
+      { type: ['integer', 'string'], minimum: 0, maximum: 10 },
+      { minimum: 0, maximum: 10 },
+      { type: 'integer', allOf: [{ minimum: 0, maximum: 10 }] },
+      { type: 'integer', minimum: '0', maximum: '10' },
+    ].map(boundsSafeIntegers), Array(12).fill(false));
+  });
+
+  for (const engine of ENGINES) {
+    it(`reads a proven column bare, in its index order, and every other integer as the double, ${engine}`, { skip: skipFor(engine) }, async () => {
+      const model = { $model: '0.1', collections: { t: { key: '/id', schema: { type: 'object', properties: { id: { type: 'string' },
+        at: { type: 'integer', minimum: 0, maximum: 8640000000000000 }, u: { type: 'integer' }, w: { type: 'integer', minimum: 0, maximum: 2 ** 53 } } },
+      indexes: [{ name: 'by_at', path: '$.at' }, { name: 'by_u', path: '$.u' }, { name: 'by_w', path: '$.w' }] } } };
+      const dir = mkdtempSync(join(tmpdir(), 'jaren-safe-order-'));
+      const path = join(dir, 'store.sqlite');
+      try {
+        await withStore(engine, model, async (store, pg) => {
+          const t = store.collection('t');
+          // ties in every member, so the row identity decides between them
+          for (let i = 0; i < 12; i++) await t.insert({ id: `r${String(i).padStart(2, '0')}`, at: 1767225600000 + (i % 4) * 1000, u: (i * 5) % 7, w: i % 3 });
+          await t.insert({ id: 'r12', at: 1767225600000, u: 2 ** 60, w: 2 ** 53 });
+          // another writer's spellings of the doubles r12 holds, each of which a validator reads as
+          // that double: a decimal past an integer, which conforms to the bounds that prove `at`, and
+          // integers past 2^53, which `w`'s bound of 2^53 admits and so does not prove
+          const foreign = '{"id":"r13","at":1767225600000.00000000000001,"u":1152921504606846976,"w":9007199254740993}';
+          if (pg === null) {
+            const db = new DatabaseSync(path);
+            try { db.prepare('INSERT INTO "t" ("key", "doc") VALUES (?, jsonb(?))').run('r13', foreign); }
+            finally { db.close(); }
+          }
+          else {
+            const { pool, schema } = /** @type {{ pool: any, schema: string }} */ (pg);
+            await pool.query(`INSERT INTO "${schema}"."t" ("key", "doc") VALUES ($1, $2::jsonb)`, ['r13', foreign]);
+          }
+          for (const member of ['at', 'u', 'w']) {
+            const ordered = { $for: { it: '$[*]' }, $orderby: [`$it.${member}`], $return: '$it.id' };
+            for (const [label, doc] of [['asc', ordered], ['desc', { ...ordered, $orderby: [{ $key: `$it.${member}`, $dir: 'desc' }] }],
+              ['window', { $subsequence: [ordered, 2, 4] }]]) {
+              const explained = await t.explain(doc);
+              assert.deepEqual([explained.mode, await t.execute(doc)], ['native', await t.execute(doc, { pushdown: false })], `${member} ${label}`);
+              if (engine !== 'sqlite') continue;
+              // the proven member's order is its index's, the others read the double and sort
+              const bare = member === 'at';
+              assert.equal(explained.sql.includes(`CAST("gx_${member}" AS REAL)`), !bare, `${member} ${label}`);
+              const db = new DatabaseSync(path);
+              try {
+                const plan = db.prepare(`EXPLAIN QUERY PLAN ${explained.sql}`).all(...explained.sql.split('?').slice(1).map(() => 0))
+                  .map((row) => String(row.detail)).join(' | ');
+                assert.equal(plan.includes('USE TEMP B-TREE FOR ORDER BY'), !bare, `${member} ${label}: ${plan}`);
+                if (bare) assert.match(plan, /USING INDEX t_by_at/, `${member} ${label}`);
+              }
+              finally { db.close(); }
+            }
+          }
+        }, engine === 'sqlite' ? { path } : undefined);
+      }
+      finally { rmSync(dir, { recursive: true, force: true }); }
+    });
+  }
 });

@@ -3350,8 +3350,15 @@ PostgreSQL compares such an external with a member's digits exactly.
   answered other rows than the engine. The order key reads the double (on
   SQLite `CAST(… AS REAL)`, on PostgreSQL `double precision`); on SQLite an
   ordering over an indexed `integer` member is therefore sorted rather than
-  read in index order. An entity's document member and, on PostgreSQL, its
-  `number` column order the same way.
+  read in index order, unless the member's schema bounds it within
+  ±(2^53 − 1) on both sides (`minimum: 0, maximum: 8640000000000000` for an
+  epoch in milliseconds): such a member is read bare and keeps its index
+  order, as before. Declare those bounds on a time-series instant or another
+  indexed `integer` member a window or range reads in order. An entity's
+  document member and, on PostgreSQL, its `number` column order the same way,
+  in a query's `$orderby`, a load's `orderBy` and keyset continuation, and an
+  include's `orderBy`: a `page()` over such a column resumed past a run of
+  equal doubles by their digits before, and answered a row twice.
 - On PostgreSQL a `$groupby` key, a `$distinct` item and a count of distinct
   values of a number member now group two spellings of one double together, as
   on SQLite and in the engine (two groups of one before, one group of two now).

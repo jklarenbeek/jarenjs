@@ -237,6 +237,18 @@ describe('the emitted statements: one ladder, written once', () => {
     // the order reads the double the engine orders by, so it sorts the range the index seeks
     assert.match(emitted.sql, /ORDER BY CAST\("gx_at" AS REAL\) ASC NULLS FIRST, "rowid"$/);
   });
+
+  it('an instant the schema bounds within ±(2^53 − 1) is read in the order the index seeks it', () => {
+    const bounded = structuredClone(MODEL);
+    bounded.collections.sample.schema.properties.at = { type: 'integer', minimum: 0, maximum: 8640000000000000 };
+    const sample = normalizeModel(bounded).get('sample');
+    const physical = planCollection('sample', sample, sqliteDialect);
+    assert.deepEqual([...physical.safeIntegerColumns], ['gx_at']);
+    const planned = planQuery(RANGE, { ...SHAPE, schema: sample.schema, columnByCanonical: physical.columnByCanonical });
+    const emitted = emitPlan(planned.plan, sqliteDialect, { ...PHYSICAL, safeIntegerColumns: physical.safeIntegerColumns });
+    assert.match(emitted.sql, /"gx_at" >= \?/);
+    assert.match(emitted.sql, /ORDER BY "gx_at" ASC NULLS FIRST, "rowid"$/);
+  });
 });
 
 describe('the ladder folds what it can and refuses what it cannot', () => {

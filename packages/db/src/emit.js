@@ -421,6 +421,28 @@ export function documentMemberOf(dialect, docSql, ref) {
 }
 
 /**
+ * An entity's order term read as the engine orders it: a number as the
+ * double it holds (`doubleRead`), so two spellings of one double tie and the
+ * next term decides between them — a document member's, and a `number`
+ * column's where it holds a writer's digits (`decimalDigits`); an `integer`
+ * column holds no integer past 2^53 the engine reads, and a physical
+ * table's column orders as its codec. A query's order terms, a load's order
+ * and keyset terms and an include's order terms read one term alike.
+ * @param {any} dialect
+ * @param {any} ref - an entity column's (`flavor: 'entity-column'`, or a
+ *   load's mapping column, which names no flavor: `storage`, `codec`) or a
+ *   document member's
+ * @param {string} sql - the column as it compares, or the document column
+ * @returns {string}
+ */
+export function entityOrderRead(dialect, ref, sql) {
+  if (ref.flavor === 'entity-column' || ref.flavor === undefined)
+    return ref.storage === 'number' && ref.codec === undefined && dialect.decimalDigits ? dialect.doubleRead(sql) : sql;
+  const member = documentMemberOf(dialect, sql, ref);
+  return kindOf(ref) === 'number' ? dialect.doubleRead(member) : member;
+}
+
+/**
  * Whether an integer sum over `valueSql` is exact in double arithmetic,
  * as a column beside the aggregate: every partial sum is exact when the
  * largest magnitude times the number of terms fits in ±(2^53 - 1). The
@@ -642,8 +664,9 @@ function probeEdge(probe, param, axis) {
  * Emit one plan as SQL plus its ordered parameter slots.
  * @param {import('./algebra.js').Plan} plan
  * @param {any} dialect
- * @param {{ table: string, keyColumn: string, docColumn: string, doubleColumns?: Set<string> }} physical - the
- *   table's names, and the generated columns that hold a number as a double
+ * @param {{ table: string, keyColumn: string, docColumn: string, doubleColumns?: Set<string>,
+ *   safeIntegerColumns?: Set<string> }} physical - the table's names, the generated columns that hold a
+ *   number as a double, and those whose integers the schema bounds within ±(2^53 − 1)
  * @returns {{ sql: string, slots: ParamSlot[], seeks?: any[], columns: string[] }} `columns`
  *   are the generated columns the statements spell
  */
@@ -715,6 +738,13 @@ export function emitPlan(plan, dialect, physical) {
    * double already (`physical.doubleColumns`).
    * @param {any} ref @param {string} value - the read {@link valueOf} spells */
   const readsDouble = (ref, value) => value === q(ref.column) && physical.doubleColumns?.has(ref.column) === true;
+  /** Whether a ref's read orders as the double the engine orders by, read
+   * bare: a {@link readsDouble} column, or one whose integers the schema
+   * bounds within ±(2^53 − 1) (`physical.safeIntegerColumns`), each its own
+   * double — either keeps its index order.
+   * @param {any} ref @param {string} value - the read {@link valueOf} spells */
+  const ordersAsDouble = (ref, value) => readsDouble(ref, value)
+    || (value === q(ref.column) && physical.safeIntegerColumns?.has(ref.column) === true);
   const pathText = (ref) => pathTextOf(dialect, ref);
   /** The document a query reads a ref's member from: guarded where the
    * engine's path text would read the member off the wrong container. */
@@ -1236,9 +1266,10 @@ export function emitPlan(plan, dialect, physical) {
     const nullsFirst = term.emptyGreatest === term.desc;
     // a number orders as the double the engine holds, so two spellings of
     // one double tie and the next term decides between them, as the
-    // engine's do; a column that holds the double already orders bare
+    // engine's do; a column that holds the double already, or only safe
+    // integers, orders bare and through its index
     const value = valueOf(term.ref, kindOf(term.ref));
-    return `${kindOf(term.ref) === 'number' && !readsDouble(term.ref, value) ? dialect.doubleRead(value) : value} `
+    return `${kindOf(term.ref) === 'number' && !ordersAsDouble(term.ref, value) ? dialect.doubleRead(value) : value} `
       + `${term.desc ? 'DESC' : 'ASC'}${dialect.orderNulls(nullsFirst)}`;
   }), dialect.rowIdentity()];
   const where = plan.filter === null ? '' : ` WHERE ${emitPred(plan.filter)}`;
@@ -1860,17 +1891,9 @@ export function emitEntityPlan(plan, dialect, physicalOf) {
       // the engine's — because mixed stored precisions would let the
       // integer column sort differently; any other document member
       // orders as its declared type, a number numerically
-      // A number orders as the double the engine holds (`doubleRead`), so
-      // two spellings of one double tie: a document member's, and a number
-      // column's where it holds a writer's digits (`decimalDigits`). An
-      // integer column holds no integer past 2^53 the engine reads
-      const read = (alias) => (term.ref.flavor === 'entity-column'
-        ? term.ref.storage === 'number' && term.ref.codec === undefined && dialect.decimalDigits
-          ? dialect.doubleRead(`${alias}.${q(term.ref.column)}`)
-          : physicalComparable(term.ref, `${alias}.${q(term.ref.column)}`, dialect)
-        : kindOf(term.ref) === 'number'
-          ? dialect.doubleRead(documentMemberOf(dialect, `${alias}.${q('doc')}`, term.ref))
-          : documentMemberOf(dialect, `${alias}.${q('doc')}`, term.ref));
+      // a number orders as the double the engine holds ({@link entityOrderRead})
+      const read = (alias) => entityOrderRead(dialect, term.ref, term.ref.flavor === 'entity-column'
+        ? physicalComparable(term.ref, `${alias}.${q(term.ref.column)}`, dialect) : `${alias}.${q('doc')}`);
       // a hop key is the member of the one related row: no value, which
       // the empty placement orders, where the hop finds none
       let value;

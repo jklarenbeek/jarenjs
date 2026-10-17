@@ -257,9 +257,15 @@ for the index to seek, exactly as for any other composite index, and
 the schema is the type source as always: type the instant `integer` and
 a bucket ladder is pushed as integer arithmetic; type it `number` and
 the ladder stays a core refinement, because a truncating division over
-a real would put an instant in the wrong bucket. Which shapes are
-pushed, and the reason each refinement is one, are in ARCHITECTURE.md's
-"The temporal plan".
+a real would put an instant in the wrong bucket. On SQLite an `integer`
+instant is read in the order its index seeks it only where the schema
+bounds it within ±(2^53 − 1) on both sides — `{ "type": "integer",
+"minimum": 0, "maximum": 8640000000000000 }` for milliseconds — and is
+otherwise read as the double, so that two spellings of one double past
+2^53 tie as in the engine, and a range or an as-of window sorts every row
+it reads (ARCHITECTURE.md, "An ordering, a group key and a distinct read
+a number as the double"). Which shapes are pushed, and the reason each
+refinement is one, are in ARCHITECTURE.md's "The temporal plan".
 
 ### 2.1 Derived indexes (spatial and vector storage)
 

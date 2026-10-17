@@ -768,14 +768,24 @@ database that holds a number by its digits orders them apart, so a number
 member's order key and group key are read as the double (the dialect's
 `doubleRead`): SQLite casts an integer, which it holds exactly, to `REAL`; a
 column that already holds the double (a `number` member's `REAL` column) is
-read bare and still orders through its index, while an `integer` member's
-column no longer does and is sorted. PostgreSQL casts its `numeric` to `double
-precision`, guarded where the cast would raise: a number at or past the
+read bare and still orders through its index, and so is an `integer` member's
+column whose schema bounds it within ±(2^53 − 1) on both sides (`minimum` /
+`exclusiveMinimum` and `maximum` / `exclusiveMaximum` on the member itself,
+`physical.safeIntegerColumns`): every integer a conforming document holds there
+is its own double, since one past the bound reads as a double the bound
+refuses. Like the type guards, that proof holds over documents that conform —
+keep `compileSchema` injected — and an `integer` column without such bounds is
+sorted. PostgreSQL casts its `numeric` to `double precision`, guarded where
+the cast would raise: a number at or past the
 midpoint between the largest double and 2^1024 reads as the infinity, and one at
 or below 2^-1075 (half the least double, a tie that rounds to zero) as a signed
-zero, as `JSON.parse` reads them. An entity's `number` column is cast the same
-way on PostgreSQL; its `integer` column holds no integer past 2^53 the engine
-reads, and SQLite's `number` column holds the double.
+zero, as `JSON.parse` reads them. Its `numeric` column holds a conforming
+`5.00000000000000000001` apart from `5`, so bounds prove nothing there. An
+entity's order terms read one term alike (`entityOrderRead`) in a query, a
+load's `orderBy` and keyset continuation, and an include's `orderBy`: a number
+document member as the double, and its `number` column the same way on
+PostgreSQL; its `integer` column holds no integer past 2^53 the engine reads,
+and SQLite's `number` column holds the double.
 
 **A path against a path is decided by the family of the two values.**
 Only members the schema types as scalars qualify — `string`, `number`,
@@ -1085,7 +1095,7 @@ ranges over. Three shapes follow from that, and they are closed:
 | shape | the document | the plan |
 |---|---|---|
 | **range** | every leading column pinned, a half-open range on the instant, ordered by it | native — `SEARCH … (series=? AND at>? AND at<?)` |
-| **as-of** | the same prefix with ONE instant bound, ordered by the instant, under a finite window | native — the index read backwards, one row |
+| **as-of** | the same prefix with ONE instant bound, ordered by the instant, under a finite window | native — the index read backwards, one row (on SQLite, an instant the schema bounds within ±(2^53 − 1); an unbounded `integer` instant is read as the double and the rows the bound selects are sorted) |
 | **bucket** | a `$groupby` over `$time-bucket`, or a `$resample` whose spec asks for nothing more, that aggregates with `min`, `max` or `count`, or sums or averages an `integer` reading | native — `GROUP BY` over `at - (((at - origin) % every + every) % every)` |
 
 The ladder is integer arithmetic all the way down, and the non-negative

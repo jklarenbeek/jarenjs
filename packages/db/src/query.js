@@ -56,7 +56,7 @@ import {
 } from './plan.js';
 import { emitPlan, emitEntityPlan, createEntityPredicateEmitters, UnrepresentablePath, UnrepresentableIdentity,
   entityTableColumns, physicalComparable, bindsAsWritten, bindsUnheldText, UNHELD_TEXT_REFUSAL,
-  documentMemberOf, bucketGuards, bucketAbsentGuard } from './emit.js';
+  entityOrderRead, bucketGuards, bucketAbsentGuard } from './emit.js';
 import { modelPath } from './model-path.js';
 import { selectPlan, conjoin, effectiveOrder, planOrder, ordersByColumn } from './algebra.js';
 import {
@@ -1314,6 +1314,7 @@ export function createQueryEngine(context) {
     keyColumn: physicalPlan.keyColumn,
     docColumn: physicalPlan.docColumn,
     doubleColumns: physicalPlan.doubleColumns,
+    safeIntegerColumns: physicalPlan.safeIntegerColumns,
   };
   /** The k-nearest counters `stats()` reports: how many rows the
    * fetch scored and how many candidates the cut kept, so a
@@ -3757,10 +3758,10 @@ export function createLoadEngine(context, entityName) {
     const orderSql = (child.order ?? []).map((term) => {
       // epoch paths order by the document string (codepoint = the
       // engine's order); only plain mapped columns order natively, and
-      // any other document member orders as its declared type
-      const value = term.ref.flavor === 'entity-column'
-        ? `${rendered.aliasSql}.${q(term.ref.column)}`
-        : documentMemberOf(dialect, rendered.docSql, term.ref);
+      // any other document member orders as its declared type, a number
+      // as the double the engine holds ({@link entityOrderRead})
+      const value = entityOrderRead(dialect, term.ref, term.ref.flavor === 'entity-column'
+        ? `${rendered.aliasSql}.${q(term.ref.column)}` : rendered.docSql);
       const nullsFirst = term.emptyGreatest === term.desc;
       return `${value} ${term.desc ? 'DESC' : 'ASC'}${dialect.orderNulls(nullsFirst)}`;
     });
@@ -3993,13 +3994,19 @@ export function createLoadEngine(context, entityName) {
      * column itself goes with the comparison: a dialect may spell the bare
      * column for a term a load orders or seeks by (a native uuid, a text
      * column collated by code point), which no predicate, join edge or
-     * grouping asks for.
+     * grouping asks for. A `number` column that holds a writer's digits
+     * reads the double, so two spellings of one double tie in the order and
+     * in a continuation's comparison alike ({@link entityOrderRead}); a key
+     * column is read bare, so its index still orders and seeks — two keys
+     * are two values the store wrote, never two spellings of one double.
      * @param {string} property
      */
     const termSql = (property) => {
       const column = columnOfProperty(property);
       const sql = `${rendered.aliasSql}.${q(column?.physical ?? column?.name ?? property)}`;
-      return physicalEntity && column !== undefined ? physicalComparable(column, sql, dialect, column) : sql;
+      if (column === undefined) return sql;
+      const comparable = physicalEntity ? physicalComparable(column, sql, dialect, column) : sql;
+      return keyColumns.includes(property) ? comparable : entityOrderRead(dialect, column, comparable);
     };
     // the per-row proof that a text key survives its text encoding is
     // SQLite's (textKeyPlan reads the raw bytes beside the key): a typed
@@ -4156,11 +4163,11 @@ export function createLoadEngine(context, entityName) {
         + `${term.desc ? 'DESC' : 'ASC'}${dialect.orderNulls(term.nullsFirst)}`)
       : order.map((term) => {
         // a document member orders as its declared type, as an include's
-        // and a query's do: a string by code point, a JSON null and a
-        // missing member as one empty key
+        // and a query's do: a string by code point, a number as the double
+        // the engine holds, a JSON null and a missing member as one empty key
         const value = term.ref.flavor === 'entity-column'
           ? termSql(propertyOfPhysical(term.ref.column))
-          : documentMemberOf(dialect, rendered.docSql, term.ref);
+          : entityOrderRead(dialect, term.ref, rendered.docSql);
         const nullsFirst = term.emptyGreatest === term.desc;
         return `${value} ${term.desc ? 'DESC' : 'ASC'}${dialect.orderNulls(nullsFirst)}`;
       });
