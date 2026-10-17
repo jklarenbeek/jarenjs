@@ -35,8 +35,10 @@ const ENTRY_MEMBERS = Object.freeze(['name', 'path', 'expression', 'unique', 'de
   'dims', 'physical', 'where']);
 
 /** The entry members an ENTITY index cannot carry: each needs a generated
- * column (an expression's included), which an entity table never has. */
-const GENERATED_MEMBERS = Object.freeze(['expression', 'derive', 'precision', 'dims', 'physical']);
+ * column, which an entity table never has. An `expression` it carries: the
+ * store indexes it over the entity's own columns where the engine computes
+ * the function itself, and refuses it at open where it cannot (SQLite). */
+const GENERATED_MEMBERS = Object.freeze(['derive', 'precision', 'dims', 'physical']);
 
 /** The JSON type each typed index option takes. The store reads only
  * `true` as unique, so a `unique: 1` would open a NON-unique index.
@@ -216,6 +218,21 @@ export function entityIndex(entry, at) {
         + 'index the member itself, or declare the index on a collection', `${at}/${key}`);
     }
     if (OPTION_TYPES[key] !== undefined) indexOption(entry[key], key, what);
+  }
+  if (entry.expression !== undefined) {
+    if (entry.path !== undefined)
+      throw new LinqBuildError('JL0101', `${what} takes a path or an expression, not both`, `${at}/expression`);
+    /** @param {any} node */
+    const walk = (node) => {
+      if (node?.member !== undefined && !MEMBER.test(node.member)) {
+        throw new LinqBuildError('JL0102',
+          `${what} expression reads ${node.member}, which is not one top-level member: (d) => d.member, or '$.member'`,
+          `${at}/expression`);
+      }
+      if (Array.isArray(node?.args)) node.args.forEach(walk);
+    };
+    walk(entry.expression);
+    return requireJson(entry, what);
   }
   if (Array.isArray(entry.path) && entry.path.length === 0)
     throw new LinqBuildError('JL0101', `${what} path is a member path or a non-empty array of them`, `${at}/path`);

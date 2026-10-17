@@ -320,7 +320,10 @@ column of its own in any case (§6).
   one-column index is `unique()` or `index()` on the member, and a
   composite, unique or partial one is `.indexes([m.index(…)])` on the
   entity's object builder — over members with a column of their own, and
-  never derived, because an entity table has no generated column. A
+  never derived, because an entity table has no generated column. An
+  `m.expressionIndex()` there reads top-level members only; the store
+  computes it over the entity's string columns on PostgreSQL and refuses it
+  at open on SQLite (`JD0004`, MODEL-FORMAT §7A). A
   `collection()` declaration handed to `entities` is refused (`JL0102`)
   rather than emitted as a document the store would reject.
 - **`uuid()` is the format, `identity('uuid')` is the key.** The schema
@@ -890,7 +893,8 @@ the pen raises it earlier, at build, with the same meaning.
 | `m.defineModel({ entities: { A: m.object({ a: m.integer().identity('auto'), b: m.string().key() }) } })` | `identity('auto') on A.a: a store-allocated key is a SINGLE key, and A declares a composite one (a, b)` — `docPath` `/entities/A/schema/properties/a/x-entity/default` | one `key()`, or a caller-supplied composite |
 | `m.defineModel({ entities: { User: m.object({ posts: m.rel.hasMany('Psot', …) }), Post: … } })` | `relation target 'Psot' on User.posts is not a declared entity — the model declares 'User', 'Post'` — `docPath` `/entities/User/schema/properties/posts/x-entity/relation/to` | the declared name |
 | `m.defineModel({ entities: { A: m.collection(b, { key: '/id', indexes: [] }) } })` | `entities.A is a collection() declaration — an entity has no key pointer and no indexes option: its key is key() on a member, and its indexes are unique()/index() on a member or .indexes([index(…)]) on its object builder (no derived index: an entity table has no generated column)` — `docPath` `/entities/A` | put it under `collections`, or spell the entity as a builder |
-| `m.object({ … }).indexes([m.index((p) => p.loc, { derive: 'geohash' })])`, `.indexes([m.expressionIndex(…)])` | `indexes()[0] takes no 'derive': an entity table has no generated column — index the member itself, or declare the index on a collection` — `docPath` `/entities/A/indexes/0/derive` | a plain `m.index()` over a column-mapped member, or the index on a collection |
+| `m.object({ … }).indexes([m.index((p) => p.loc, { derive: 'geohash' })])` | `indexes()[0] takes no 'derive': an entity table has no generated column — index the member itself, or declare the index on a collection` — `docPath` `/entities/A/indexes/0/derive` | a plain `m.index()` over a column-mapped member, or the index on a collection |
+| `.indexes([m.expressionIndex({ call: 'lower', args: ['$.profile.city'] })])` | `indexes()[0] expression reads $.profile.city, which is not one top-level member: (d) => d.member, or '$.member'` — `docPath` `/entities/A/indexes/0/expression` | an expression over the entity's own members |
 | `m.object({ … }).indexes([m.index((p) => p.profile.city)])` | `indexes()[0] path $.profile.city is not one top-level member: (d) => d.member, or '$.member'` — `docPath` `/entities/A/indexes/0/path` | map the member as a top-level scalar and index it |
 | `m.index((p) => p.a, { where: (p) => p.status })` | `index() where takes a predicate — an operator result such as (d) => d.status.eq('active') — not a string` | `(p) => p.status.eq('active')` |
 | `m.defineModel({ entities: { A: m.object({ id: m.string().key(), p: m.object({ c: m.string() }).indexes([…]) }) } })`, `m.collection(m.object({ … }).indexes([…]), …)` | `indexes() on entities.A.p is not written — an entity declares its indexes on its own object builder, and a collection in collection()'s indexes option` — `docPath` `/entities/A` | `.indexes()` on the entity's own builder, or `collection()`'s `indexes` |

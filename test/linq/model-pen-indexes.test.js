@@ -6,9 +6,10 @@
  * lowers. The emitted document is the hand-written one, and the store opened
  * over it refuses exactly the rows the hand-written index refuses. What the
  * store would refuse and the builder can see is refused at build: a member
- * outside the grammar (`JL0101`), an option that needs a generated column, an
- * expression, a path that is not one top-level member, and `.indexes()` where
- * no declaration would carry it (`JL0102`).
+ * outside the grammar (`JL0101`), an option that needs a generated column, a
+ * path or an expression member that is not one top-level member, and
+ * `.indexes()` where no declaration would carry it (`JL0102`). An expression
+ * over the entity's own members is emitted: the store decides per engine.
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
@@ -80,11 +81,22 @@ describe('entity indexes in the model pen', () => {
     assert.equal(codeOf(() => m.index('$.day', { where: '"status" = 1' })), 'JL0101');
     assert.equal(codeOf(() => m.index('$.day', { where: (s) => s.status })), 'JL0102');
     assert.equal(codeOf(define([m.index('$.day', { derive: 'geohash' })])), 'JL0102');
-    assert.equal(codeOf(define([m.expressionIndex({ call: 'lower', args: ['$.day'] })])), 'JL0102');
+    assert.equal(codeOf(define([m.expressionIndex({ call: 'lower', args: ['$.profile.city'] })])), 'JL0102');
+    assert.equal(codeOf(define([{ name: 'x', path: '$.day', expression: { call: 'lower', args: [{ member: '$.day' }] } }])), 'JL0101');
     assert.equal(codeOf(define([m.index('$.profile.city')])), 'JL0102');
     assert.equal(codeOf(define([m.index((s) => s.get('has space'))])), 'JL0102');
     assert.equal(codeOf(() => shift().indexes(/** @type {any} */ ({}))), 'JL0101');
     assert.equal(codeOf(() => m.string().indexes([])), 'JL0102');
+  });
+
+  it('emits an expression over the entity\'s own members, which the store indexes where the engine computes it', async () => {
+    const model = m.defineModel({ entities: { Shift: shift().indexes([m.expressionIndex({ call: 'lower', args: ['$.day'] }, { unique: true })]) } });
+    assert.deepEqual(model.entities.Shift.indexes,
+      [{ name: 'by_lower_day', expression: { call: 'lower', args: [{ member: '$.day' }] }, unique: true }]);
+    // SQLite maintains an index over a function only on the connection that
+    // registered it, so the store refuses it there, at open (MODEL-FORMAT §7A)
+    const expressions = { lower: { arity: 1, deterministic: true, apply: (/** @type {string} */ v) => v.toLowerCase(), sql: 'lower' } };
+    await assert.rejects(openStore(model, { driver: nodeDriver(':memory:'), expressions }), (/** @type {any} */ error) => error.code === 'JD0004');
   });
 
   it('refuses indexes() where no declaration carries it: on a nested member, and on a collection', () => {
