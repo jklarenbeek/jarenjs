@@ -175,6 +175,9 @@ export const MEMBER_WHEN = Symbol('dialect.memberWhen');
  *   jsonExtract: (columnSql: string, pathText: string, kind?: string) => string,
  *   queryGuard?: (documentSql: string, segments: JsonPathSegment[]) => string | null,
  *   booleanKeyTerm?: (documentSql: string, pathText: string) => string,
+ *   containerKey?: { holds: (documentSql: string, pathText: string) => string,
+ *     read: (documentSql: string, pathText: string) => string,
+ *     triggers: (shape: { table: string, keyColumn: string, docColumn: string, column: string, pathText: string }) => { name: string, sql: string }[] },
  *   rowPredicateFlavor?: any,
  *   readBack?: { conditionReads: (planned: string, columns: any[]) => boolean,
  *     condition: (stored: string | null, planned: string | undefined, columns: any[], conforming: boolean) => string | null,
@@ -365,19 +368,22 @@ export function createDialect(spec) {
     },
     /**
      * One collection's physical table: a key column, the JSON document
-     * column, a virtual generated column per indexed path, and a named
-     * CHECK per declared interval.
+     * column, a virtual generated column per indexed path, a plain column
+     * per key a trigger writes ({@link containerKey}), and a named CHECK per
+     * declared interval.
      * @param {{ table: string, keyColumn: string, keyType: string,
      *   docColumn: string, generated: { name: string, type: string,
-     *   pathText: string }[], checks?: { name: string, sql: string }[] }} shape
+     *   pathText: string }[], plain?: { name: string, type: string }[],
+     *   checks?: { name: string, sql: string }[] }} shape
      * @returns {string}
      */
-    createTable({ table, keyColumn, keyType, docColumn, generated, checks = [] }) {
+    createTable({ table, keyColumn, keyType, docColumn, generated, plain = [], checks = [] }) {
       const columns = [
         `${q(keyColumn)} ${keyType} PRIMARY KEY`,
         `${q(docColumn)} ${spec.docColumnType} NOT NULL`,
         ...identityColumnSql(),
         ...generated.map((g) => generatedColumnSql(docColumn, g)),
+        ...plain.map((column) => `${q(column.name)} ${column.type}`),
         ...checks.map((check) => `CONSTRAINT ${q(check.name)} CHECK (${check.sql})`),
       ];
       return `CREATE TABLE ${q(table)} (${columns.join(', ')})${spec.tableSuffix}`;
@@ -781,6 +787,16 @@ export function createDialect(spec) {
      * type keys a boolean among booleans.
      */
     booleanKeyTerm: spec.booleanKeyTerm,
+    /**
+     * How a unique index keys a container (an object or an array) the
+     * engine's untyped column holds (`capabilities.untypedColumns`): the
+     * column holds its bytes in the order its members were written, so the
+     * index keys a plain column a trigger writes the container's key into
+     * instead, its members in one order (`read`, NULL where the member holds
+     * no container; `holds`, whether it does; `triggers`, the two that keep
+     * the column). Undefined where a column keys a container by its value.
+     */
+    containerKey: spec.containerKey,
     /**
      * The document expression a QUERY reads the member at `segments`
      * from: the document itself, or, where {@link queryGuard} holds a

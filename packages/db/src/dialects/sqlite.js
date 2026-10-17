@@ -157,6 +157,72 @@ function memberPathOf(expression) {
   return parsePathText(match[1].replace(/''/g, "'"));
 }
 
+/**
+ * The key a unique index holds for a member the untyped column holds as an
+ * object or an array. The column holds a container as its JSONB, whose bytes
+ * follow the order its members were written in, so two objects the query
+ * engine compares equal (`{"a":1,"b":2}`, `{"b":2,"a":1}`) would be two keys.
+ * This key is the container's text with its members in one order: one entry
+ * per node of the tree (its path, its JSON type, and a string as its quoted
+ * text or a number as the double the engine holds, printed exactly), sorted by
+ * path, so two containers are one key exactly when the engine compares them
+ * equal. It reads a table-valued function, which no index expression or
+ * generated column may, so a trigger writes it into a plain column of the
+ * table after every write of the document, and the unique index keys that
+ * column. A container's path keys are compared as the document spells them
+ * (the store writes each as JSON text spells it once).
+ */
+const CONTAINER_KEY = Object.freeze({
+  /**
+   * Whether the member at `pathText` of the document is an object or an array.
+   * @param {string} documentSql @param {string} pathText
+   * @returns {string}
+   */
+  holds: (documentSql, pathText) => `json_type(${documentSql}, ${stringLiteral(pathText)}) IN ('object', 'array')`,
+  /**
+   * The key of the container at `pathText`, NULL where the member is none.
+   * @param {string} documentSql @param {string} pathText
+   * @returns {string}
+   */
+  read: (documentSql, pathText) => `(CASE WHEN ${CONTAINER_KEY.holds(documentSql, pathText)} THEN ${containerText(documentSql, pathText)} END)`,
+  /**
+   * The two triggers that keep the key column of one member: after an insert
+   * of a document that holds a container there, and after an update of the
+   * document that holds one there or held one.
+   * @param {{ table: string, keyColumn: string, docColumn: string, column: string, pathText: string }} shape
+   * @returns {{ name: string, sql: string }[]}
+   */
+  triggers: ({ table, keyColumn, docColumn, column, pathText }) => {
+    const q = quoteIdentifier;
+    const row = `WHERE ${q(keyColumn)} = NEW.${q(keyColumn)}`;
+    const holds = CONTAINER_KEY.holds(`NEW.${q(docColumn)}`, pathText);
+    const insert = `${table}$${column}$insert`, update = `${table}$${column}$update`;
+    return [
+      { name: insert,
+        sql: `CREATE TRIGGER ${q(insert)} AFTER INSERT ON ${q(table)} WHEN ${holds} BEGIN `
+          + `UPDATE ${q(table)} SET ${q(column)} = ${containerText(`NEW.${q(docColumn)}`, pathText)} ${row}; END` },
+      { name: update,
+        sql: `CREATE TRIGGER ${q(update)} AFTER UPDATE OF ${q(docColumn)} ON ${q(table)} `
+          + `WHEN NEW.${q(column)} IS NOT NULL OR ${holds} BEGIN `
+          + `UPDATE ${q(table)} SET ${q(column)} = ${CONTAINER_KEY.read(`NEW.${q(docColumn)}`, pathText)} ${row}; END` },
+    ];
+  },
+});
+
+/**
+ * The text {@link CONTAINER_KEY} keys a container by: its nodes, each as its
+ * quoted path, then a number as the double it reads as (exactly, `-0` as
+ * `0`), a string as its quoted text, any other node as its JSON type, sorted
+ * by path.
+ * @param {string} documentSql @param {string} pathText
+ * @returns {string}
+ */
+function containerText(documentSql, pathText) {
+  const node = `quote("t"."fullkey") || ' ' || (CASE WHEN "t"."type" IN ('integer', 'real') `
+    + `THEN printf('%!.17g', CAST("t"."atom" AS REAL) + 0.0) WHEN "t"."type" = 'text' THEN quote("t"."atom") ELSE "t"."type" END)`;
+  return `(SELECT group_concat(${node}, ',' ORDER BY "t"."fullkey") FROM json_tree(${documentSql}, ${stringLiteral(pathText)}) AS "t")`;
+}
+
 /** A member read as it is stored: {@link jsonExtract}'s default read. */
 const PLAIN_READ = /^\s*\(*\s*jsonb_extract\s*\(\s*"[^"]*"\s*,\s*'((?:[^']|'')*)'\s*\)\s*\)*\s*$/;
 /** A member read with its numbers as doubles: {@link jsonExtract}'s `key` read. */
@@ -384,6 +450,7 @@ export const sqliteDialect = createDialect({
   // a unique index's second key for a member the untyped column holds: the
   // column holds a JSON boolean as the integer 0 or 1, and this tells it apart
   booleanKeyTerm: (documentSql, pathText) => `(json_type(${documentSql}, ${stringLiteral(pathText)}) IN ('true', 'false'))`,
+  containerKey: CONTAINER_KEY,
   // the engine-specific piece of a declared interval's CHECK beside
   // `jsonTypeOf`: each bound held to an integer by ITS JSON type — `IS`,
   // not `=`, because a half span's absent bound reads NULL and a CHECK

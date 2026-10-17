@@ -35,6 +35,12 @@ const SHAPES = {
   composite: [{ name: 'by_qk', path: ['$.q', '$.k'], unique: true }],
   conditional: [{ name: 'by_k', path: '$.k' }, { name: 'by_q', path: '$.q', unique: true, where: { $eq: ['$.k', 'x'] } }],
 };
+/** Whether the member `q` of the document holds a container. @param {string} doc */
+const HOLDS = (doc) => `json_type(${doc}, '$."q"') IN ('object', 'array')`;
+/** The key of the container at `q`, as a trigger writes it. @param {string} doc */
+const CONTAINER_KEY = (doc) => `(CASE WHEN ${HOLDS(doc)} THEN (SELECT group_concat(quote("t"."fullkey") || ' ' || (CASE WHEN "t"."type" IN ('integer', 'real') `
+  + `THEN printf('%!.17g', CAST("t"."atom" AS REAL) + 0.0) WHEN "t"."type" = 'text' THEN quote("t"."atom") ELSE "t"."type" END), ',' ORDER BY "t"."fullkey") `
+  + `FROM json_tree(${doc}, '$."q"') AS "t") END)`;
 /** The statement that creates the index named `name`. @param {any} model @param {string} name @param {any} [dialect] */
 const indexSql = (model, name, dialect = sqliteDialect) =>
   planCollection('c', normalizeModel(model).get('c'), dialect).createSql.find((/** @type {string} */ sql) => sql.includes(`INDEX "${name}" `));
@@ -116,12 +122,16 @@ describe('a unique index over a member the untyped column holds, on SQLite', () 
     const steps = (/** @type {any} */ from, /** @type {any} */ to) => planMigration(from, to, { dialect: sqliteDialect }).migration.steps
       .filter((/** @type {any} */ step) => step.kind === 'ddl' && step.sql.includes('INDEX')).map((/** @type {any} */ step) => step.sql);
     const created = `CREATE UNIQUE INDEX "c_by_q" ON "c" ("gx_q", ${flag('q')})`;
+    // and the index beside it that keys a container by its key column
+    const container = 'CREATE UNIQUE INDEX "c_by_q$container" ON "c" ("kx_q") WHERE "kx_q" IS NOT NULL';
     assert.deepEqual(steps(modelOf({ type: 'number' }, SHAPES.single), modelOf({ type: ['number', 'boolean'] }, SHAPES.single)),
-      ['DROP INDEX "c_by_q"', created]);
+      ['DROP INDEX "c_by_q"', created, container]);
     assert.deepEqual(steps(modelOf({ type: ALL }, [{ name: 'by_q', path: '$.q' }]), modelOf({ type: ALL }, SHAPES.single)),
-      ['DROP INDEX "c_by_q"', created]);
-    assert.deepEqual(steps(modelOf({ type: ALL }, SHAPES.single), modelOf({ type: ALL }, [{ name: 'by_q', path: '$.q' }])),
-      ['DROP INDEX "c_by_q"', 'CREATE INDEX "c_by_q" ON "c" ("gx_q")']);
+      ['DROP INDEX "c_by_q"', created, container]);
+    // a unique index that leaves takes the key column with it, by a rebuild of the table
+    const plain = planMigration(modelOf({ type: ALL }, SHAPES.single), modelOf({ type: ALL }, [{ name: 'by_q', path: '$.q' }]), { dialect: sqliteDialect })
+      .migration.steps.filter((/** @type {any} */ step) => step.kind !== 'transform');
+    assert.deepEqual(plain.map((/** @type {any} */ step) => [step.kind, step.indexes]), [['rebuild', ['CREATE INDEX "c_by_q" ON "c" ("gx_q")']]]);
     assert.deepEqual(steps(modelOf({ type: ['number', 'string'] }, SHAPES.single), modelOf({ type: ['number', 'string', 'boolean'] }, SHAPES.single)), []);
     assert.deepEqual(steps(modelOf({ type: ALL }, SHAPES.single), modelOf({ type: ALL }, SHAPES.single)), []);
   });
@@ -174,8 +184,13 @@ describe('a unique index over a member the untyped column holds, on SQLite', () 
         assert.equal(await insertInto(dbPath, model, { id: 'e', q: 1, k: 'x' }), 'JD2005');
         assert.equal(await shapeDifference(dbPath, model), null);
         const { migration, report } = await upgradeOf(dbPath, model);
-        assert.deepEqual(report.upgraded, [`c.${name}`]);
-        assert.deepEqual(migration.steps.map((/** @type {any} */ step) => step.sql), [`DROP INDEX "${name}"`, indexSql(model, name)]);
+        // and the column a unique index keys a container by, its triggers, its every value and the index over it
+        assert.deepEqual(report.upgraded, [`c.${name}`, 'c.kx_q', `c.${name}$container`]);
+        const triggers = planCollection('c', normalizeModel(model).get('c'), sqliteDialect).createSql
+          .filter((/** @type {string} */ sql) => sql.startsWith('CREATE TRIGGER'));
+        assert.deepEqual(migration.steps.map((/** @type {any} */ step) => step.sql), [`DROP INDEX "${name}"`,
+          'ALTER TABLE "c" ADD COLUMN "kx_q" TEXT', ...triggers, `UPDATE "c" SET "kx_q" = ${CONTAINER_KEY('"doc"')} WHERE ${HOLDS('"doc"')}`,
+          indexSql(model, name), indexSql(model, `${name}$container`)]);
         assert.deepEqual((await migrate({ driver: nodeDriver(), path: dbPath }, [migration], { baseline: model, model })).applied, [migration.id]);
         assert.deepEqual((await upgradeOf(dbPath, model)).migration.steps, []);
         assert.equal(await shapeDifference(dbPath, model), null);

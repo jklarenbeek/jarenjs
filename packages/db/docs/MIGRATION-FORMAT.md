@@ -114,8 +114,9 @@ rewrites names without changing the model, so both endpoints are equal.
   column into the document, a backfill, an `INSERT … SELECT` — §9.4; a
   dry run always prints it with its note.
 - `kind: "rebuild"` is the restructure of §10 — an entity's, or on SQLite
-  a collection's whose interval declaration changes — self-contained:
-  the `CREATE` of the new shape, the copy and the index DDL.
+  a collection's whose interval declaration changes or whose container keys
+  change (below) — self-contained: the `CREATE` of the new shape, the copy
+  and the index DDL.
 - `kind: "table"` carries `{ plan }`, the COMPLETE saved artifact from
   `planTableMigration`. It delegates to the guarded table executor,
   retaining source/checksum, row/storage, identity and object checks.
@@ -375,6 +376,16 @@ explicit `id` (`jaren-db plan --id`).
   target CHECK (§6): a non-zero count is `JD0021`, naming the collection,
   the interval, the count and the first keys, and nothing changes.
   Identical declarations plan nothing.
+- On SQLite a unique index over a member the untyped column holds keys a
+  container by a plain column two triggers write (`kx_q`, MODEL-FORMAT §3).
+  A link that adds such a column plans `ALTER TABLE … ADD COLUMN "kx_q" TEXT`,
+  its two triggers, the `UPDATE` that writes it for every stored document and
+  then the unique index over it. A link that drops one, renames its collection,
+  or creates an index over one the from-model already keys plans ONE `rebuild`
+  step of the collection instead: a table an earlier release created does not
+  hold the column, SQLite has no `DROP COLUMN IF EXISTS`, and the rebuild
+  creates the target shape from the key and the document, writing every
+  copied row's key, whatever the table held.
 
 ### Upgrading the definitions a table holds
 
@@ -412,13 +423,15 @@ that rebuilds exactly the ones that differ:
 - on PostgreSQL, a collection table without an index a fresh store creates
   beside a declared index over a member of several scalar kinds, one per kind
   besides the column's (`c_by_q$text` beside `c_by_q` over `['number',
-  'string']`, POSTGRESQL.md), unique beside a unique index: no earlier release
-  created them, and a link that gives a member another kind beside a non-unique
-  index it keeps plans none. A comparison of that kind reads every row, and a
-  unique index refuses a duplicate of the column's kind alone, until the link
-  creates the index; the link changes nothing else, and `report.upgraded`
-  names it `c.c_by_q$text`. Where the table already holds documents a unique
-  one would refuse — two `q: 'b'` that the earlier table stored — the plan
+  'string']`, POSTGRESQL.md), unique beside a unique index, which also has one
+  per container kind the union lists (`c_by_q$object`, `c_by_q$array`): no
+  earlier release created them, and a link that gives a member another kind
+  beside a non-unique index it keeps plans none. A comparison of that kind reads
+  every row, and a unique index refuses a duplicate of the column's kind alone,
+  until the link creates the index; the link changes nothing else, and
+  `report.upgraded` names it `c.c_by_q$text`. Where the table already holds
+  documents a unique one would refuse — two `q: 'b'`, or two equal objects,
+  that the earlier table stored — the plan
   refuses `JD0023` (`class: 'constraint'`) before any step, naming them in
   `duplicates` (`[['a', 'b']]`) beside `collection` and `index`; change or
   remove all but one of each and plan again. A duplicate written between the
@@ -432,7 +445,18 @@ that rebuilds exactly the ones that differ:
   the index and creates it with that key (MIGRATION-UPGRADE §49). The column
   stays as it is. The new index refuses only pairs the earlier one refused, so
   the link refuses no table and plans no duplicate check; `report.upgraded`
-  names it `c.c_by_q`.
+  names it `c.c_by_q`;
+- on SQLite, a collection table without the column a unique index over such a
+  member keys a container by (`kx_q`), its two triggers and the unique index
+  beside the declared one over it (`c_by_q$container`, MODEL-FORMAT §3): no
+  earlier release created them, so its unique index keys a container by the
+  bytes it was written in and stores `{"b": 2, "a": 1}` beside `{"a": 1,
+  "b": 2}` (MIGRATION-UPGRADE §50). The link adds the column, the triggers, the
+  `UPDATE` that writes the key of every stored document and the index;
+  `report.upgraded` names `c.kx_q` and `c.c_by_q$container`. Where the table
+  already holds documents the index would refuse, the plan refuses `JD0023`
+  (`class: 'constraint'`) before any step, naming them in `duplicates`, as
+  above.
 
 The steps are the ones a model change plans for the same column: drop the
 indexes over it (and the CHECK that reads it), drop the column, add it as a fresh
@@ -477,7 +501,9 @@ index over its second key column (a link an earlier release planned neither
 creates, renames nor drops that index; one this release plans creates it,
 and the shadow's acceptance takes a join table with it or without it), and
 each collection without the indexes beside its declared ones over a member of
-several kinds (PostgreSQL; the upgrade link creates them); a supplied
+several kinds (PostgreSQL) and without its container key columns, their
+triggers and the indexes over them (SQLite) — the upgrade link creates them,
+and a link that needs a held one rebuilds the table; a supplied
 `shadowFixture(connection)` instead creates the historical schema and
 fixture rows. Physical preservation plans require that initializer or an
 explicit `shadow: false`, because a query mapping cannot recreate all

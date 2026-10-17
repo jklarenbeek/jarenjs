@@ -254,6 +254,11 @@ function jsonExtract(columnSql, pathText, kind) {
     case 'key':
       return `(CASE WHEN jsonb_typeof(${at}) = 'number' THEN trim_scale((${at})::numeric)::text `
         + `ELSE ${columnSql} #>> ${stringLiteral(pathText)} END)`;
+    // a unique KEY over a member that may hold an object or an array: the container as
+    // `jsonb`, whose equality is the engine's (member order aside, numbers by value)
+    case 'object':
+    case 'array':
+      return `(CASE WHEN jsonb_typeof(${at}) = '${kind}' THEN ${at} END)`;
     default:
       return at;
   }

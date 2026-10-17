@@ -45,7 +45,7 @@ import { modelIdentity, migrationIdentity } from './migration-identity.js';
 import { migrationChecksum, historyStatements, readMigrationHistory, checkHistoryObservation, checkAppliedRows,
   historyHeader, identityRows, checkHistoryIdentity, checkHistoryChain, writeIdentityRows } from './migration-history.js';
 export { HISTORY_TABLE, ENGINE_TABLES };
-import { planCollection, verifyShape, legacyColumnTypes, termlessIndexesHeld, planEntity, planJoinTable, joinIndexName, clipToBytes, plannedExpression, acceptsColumn, columnExpression, creationOrder, kindIndexSql, kindIndexTerms, kindIndexDropSql } from './ddl.js';
+import { DOC_COLUMN, planCollection, withoutContainerKeys, verifyShape, legacyColumnTypes, termlessIndexesHeld, planEntity, planJoinTable, joinIndexName, clipToBytes, plannedExpression, acceptsColumn, columnExpression, creationOrder, kindIndexSql, kindIndexTerms, kindIndexDropSql } from './ddl.js';
 import { normalizeEntities, explainMapping, asHistory } from './model.js';
 import { derivedValue, memberAt, registerDeriveFunctions } from './derive.js';
 import { mergeEntityRow } from './graph.js';
@@ -719,7 +719,10 @@ function intervalDifference(fromPlan, toPlan, disturbedColumns) {
 /**
  * A collection's rebuild: the ONE step an engine without `ADD CONSTRAINT`
  * (SQLite) takes where a declared interval's CHECK is added, changed or
- * dropped — the documented procedure (§10) over the whole target shape, so
+ * dropped, and where a container key column leaves, its triggers change or an
+ * index is created over one the from-model keys (a table may not hold it, and
+ * SQLite spells no `DROP COLUMN IF EXISTS`) — the
+ * documented procedure (§10) over the whole target shape, so
  * every other column and index step of the collection is this step's. The
  * copy names the row identity, the key and the document — the collection's
  * order survives the dropped table, and so do the ids of an R*Tree, which
@@ -732,9 +735,10 @@ function intervalDifference(fromPlan, toPlan, disturbedColumns) {
  * @param {string} name @param {any} fromPlan @param {any} toPlan @param {any} toCollection
  * @param {any} dialect @param {any} mapping - what `planCollection` takes
  * @param {(a: any, b: any) => boolean} columnChanged
+ * @param {string} reason - why the table is rebuilt, for the step's note
  * @returns {{ steps: any[], backfilled: string[] }}
  */
-function renderCollectionRebuild(name, fromPlan, toPlan, toCollection, dialect, mapping, columnChanged) {
+function renderCollectionRebuild(name, fromPlan, toPlan, toCollection, dialect, mapping, columnChanged, reason) {
   const q = dialect.quoteIdentifier;
   const temporary = `${name}__rebuild`;
   const fromColumns = new Map(fromPlan.generated.map((/** @type {any} */ g) => [g.name, g]));
@@ -757,14 +761,29 @@ function renderCollectionRebuild(name, fromPlan, toPlan, toCollection, dialect, 
     table: name,
     create: [planCollection(temporary, toCollection, dialect, mapping).createSql[0]],
     copy: `INSERT INTO ${q(temporary)} (${columns}) SELECT ${columns} FROM ${q(name)}`,
-    indexes,
-    note: `rebuild '${name}' (its declared intervals changed, and this engine adds or drops a CHECK by rebuilding the table)`,
+    // the copy writes no container key: each is written for every row it copied
+    indexes: [...indexes, ...(toPlan.containerKeys ?? []).map((/** @type {any} */ key) => containerKeyFill(dialect, name, key))],
+    note: `rebuild '${name}' (${reason})`,
   }];
   if (backfilled.length > 0) {
     steps.push(deriveStep(name, toPlan, backfilled,
       `backfill derived column(s) ${backfilled.join(', ')} on '${name}' after the rebuild`));
   }
   return { steps, backfilled };
+}
+
+/**
+ * The statement that writes a container key column (`ddl.js`
+ * `containerKeysOf`) for every stored document that holds a container there,
+ * as its trigger writes it for a document written after.
+ * @param {any} dialect @param {string} table
+ * @param {{ column: string, pathText: string, read: string }} key
+ * @returns {string}
+ */
+function containerKeyFill(dialect, table, key) {
+  const q = dialect.quoteIdentifier;
+  return `UPDATE ${q(table)} SET ${q(key.column)} = ${key.read} `
+    + `WHERE ${dialect.containerKey.holds(q(DOC_COLUMN), key.pathText)}`;
 }
 
 /**
@@ -948,11 +967,41 @@ function collectionSteps(name, fromPlan, toPlan, toCollection, dialect, mapping)
   // ONE rebuild step of the whole target shape, which makes every other
   // column and index step of this collection the rebuild's own
   const intervals = intervalDifference(fromPlan, toPlan, disturbedColumns);
-  const rebuilding = intervals.changed && dialect.capabilities.alterTableFull !== true;
+  // a container key column (`ddl.js` `containerKeysOf`) the from-model plans leaves, its
+  // triggers name the table otherwise (a renamed collection), or an index is created over
+  // it, by the same rebuild: a table an earlier release created holds none of them, SQLite
+  // spells no `DROP COLUMN IF EXISTS`, and the rebuild creates the target shape from the
+  // key and the document, whatever the table holds
+  const toTriggers = new Set((toPlan.containerKeys ?? []).flatMap((/** @type {any} */ key) => key.triggers.map((/** @type {any} */ trigger) => trigger.sql)));
+  const toKeys = new Set((toPlan.containerKeys ?? []).map((/** @type {any} */ key) => key.column));
+  const fromKeys = new Set((fromPlan.containerKeys ?? []).map((/** @type {any} */ key) => key.column));
+  const indexNeedsRebuild = (/** @type {string} */ indexName, /** @type {any} */ fromIndex) => {
+    const target = toIndexes.get(indexName);
+    return target === undefined || indexChanged(fromIndex, target)
+      || [...fromIndex.columns, ...(fromIndex.reads ?? [])].some((column) => disturbedColumns.has(column));
+  };
+  const fromKindSql = new Map((fromPlan.kindIndexes ?? []).map((/** @type {any} */ index) => [index.name, kindIndexSql(dialect, name, index)]));
+  // an index beside a declared one that keys a container key column is its own: created
+  // again where its statement or a column it keys or its condition reads changes, not
+  // with its declared index (whose member's column it does not key)
+  const keysContainer = (/** @type {any} */ index) => index.keys.some((/** @type {any} */ key) => 'read' in key);
+  const containerIndexChanged = (/** @type {any} */ index) => fromKindSql.get(index.name) !== kindIndexSql(dialect, name, index)
+    || [...index.keys.flatMap((/** @type {any} */ key) => ('column' in key ? [key.column] : [])), ...(toIndexes.get(index.of)?.reads ?? [])]
+      .some((column) => disturbedColumns.has(column));
+  // one the link creates over a container key column the from-model keys: the table may
+  // not hold that column either
+  const overHeldKey = (/** @type {any} */ index) => index.keys.some((/** @type {any} */ key) => 'read' in key && fromKeys.has(key.column))
+    && containerIndexChanged(index);
+  const keysChange = (fromPlan.containerKeys ?? []).some((/** @type {any} */ key) => !toKeys.has(key.column)
+    || key.triggers.some((/** @type {any} */ trigger) => !toTriggers.has(trigger.sql)))
+    || (toPlan.kindIndexes ?? []).some(overHeldKey);
+  const rebuilding = (intervals.changed || keysChange) && dialect.capabilities.alterTableFull !== true;
   /** @type {string[]} */
   let backfilled = [];
   if (rebuilding) {
-    const rebuilt = renderCollectionRebuild(name, fromPlan, toPlan, toCollection, dialect, mapping, columnChanged);
+    const rebuilt = renderCollectionRebuild(name, fromPlan, toPlan, toCollection, dialect, mapping, columnChanged,
+      intervals.changed ? 'its declared intervals changed, and this engine adds or drops a CHECK by rebuilding the table'
+        : 'the indexes over a container key column change, and a table an earlier release created does not hold the column');
     steps.push(...rebuilt.steps);
     backfilled = rebuilt.backfilled;
   }
@@ -961,11 +1010,6 @@ function collectionSteps(name, fromPlan, toPlan, toCollection, dialect, mapping)
       steps.push({ kind: 'ddl', sql: dialect.ddl.dropCheck({ table: name, name: interval.constraint }),
         note: `drop the CHECK '${interval.constraint}' of interval '${interval.name}' on '${name}'` });
     }
-    const indexNeedsRebuild = (indexName, fromIndex) => {
-      const target = toIndexes.get(indexName);
-      return target === undefined || indexChanged(fromIndex, target)
-        || [...fromIndex.columns, ...(fromIndex.reads ?? [])].some((column) => disturbedColumns.has(column));
-    };
     for (const [indexName, fromIndex] of fromIndexes) {
       if (indexNeedsRebuild(indexName, fromIndex)) {
         steps.push({ kind: 'ddl', sql: dialect.ddl.dropIndex(indexName),
@@ -973,11 +1017,17 @@ function collectionSteps(name, fromPlan, toPlan, toCollection, dialect, mapping)
       }
     }
     // an index beside a declared one that seeks another kind of its member leaves with
-    // it, and when the member no longer holds that kind; a table may not hold it (one an
-    // earlier release created, or one a link gave the kind without rebuilding the index)
-    const toKindIndexes = new Set((toPlan.kindIndexes ?? []).map((/** @type {any} */ index) => index.name));
+    // it, when the member no longer holds that kind, and when the link reads the member
+    // otherwise (a guarded path whose container the model declares the other way); a
+    // table may not hold it (one an earlier release created, or one a link gave the kind
+    // without rebuilding the index)
+    const toKindIndexes = new Map((toPlan.kindIndexes ?? []).map((/** @type {any} */ index) => [index.name, index]));
+    /** @param {any} index - a beside index of the target plan */
+    const kindIndexRead = (index) => fromKindSql.has(index.name) && fromKindSql.get(index.name) !== kindIndexSql(dialect, name, index);
     for (const index of fromPlan.kindIndexes ?? []) {
-      if (!toKindIndexes.has(index.name) || indexNeedsRebuild(index.of, fromIndexes.get(index.of))) {
+      const target = toKindIndexes.get(index.name);
+      if (target === undefined || (keysContainer(target) ? containerIndexChanged(target)
+        : kindIndexRead(target) || indexNeedsRebuild(index.of, fromIndexes.get(index.of)))) {
         steps.push({ kind: 'ddl', sql: kindIndexDropSql(dialect, index.name),
           note: `drop the ${index.kind} index '${index.name}' beside '${index.of}' on '${name}'` });
       }
@@ -1008,6 +1058,15 @@ function collectionSteps(name, fromPlan, toPlan, toCollection, dialect, mapping)
       steps.push(deriveStep(name, toPlan, backfilled,
         `backfill derived column(s) ${backfilled.join(', ')} on '${name}'`));
     }
+    // a container key arrives with its triggers and is written for every stored
+    // document before the indexes over it are created
+    for (const key of toPlan.containerKeys ?? []) {
+      if (fromKeys.has(key.column)) continue;
+      steps.push({ kind: 'ddl', sql: dialect.ddl.addColumn({ table: name, column: { name: key.column, type: key.type } }),
+        note: `add the container key column '${key.column}' on '${name}'` });
+      for (const trigger of key.triggers) steps.push({ kind: 'ddl', sql: trigger.sql, note: `create the trigger '${trigger.name}' on '${name}'` });
+      steps.push({ kind: 'ddl', sql: containerKeyFill(dialect, name, key), note: `write the container key '${key.column}' of every stored document on '${name}'` });
+    }
     /** The declared indexes this link creates. @type {Set<string>} */
     const createdIndexes = new Set();
     for (const [indexName, toIndex] of toIndexes) {
@@ -1023,12 +1082,13 @@ function collectionSteps(name, fromPlan, toPlan, toCollection, dialect, mapping)
         });
       }
     }
-    // an index beside a declared one arrives with it, and a unique one also where the
-    // link gives a kept index's member the kind (it refuses that kind's duplicates); one
-    // a table lacks beside an index it keeps is otherwise `planColumnUpgrade`'s to add
-    const fromKindIndexes = new Set((fromPlan.kindIndexes ?? []).map((/** @type {any} */ index) => index.name));
+    // an index beside a declared one arrives with it, again where the link reads its member
+    // otherwise, and a unique one also where the link gives a kept index's member the kind
+    // (it refuses that kind's duplicates); one a table lacks beside an index it keeps is
+    // otherwise `planColumnUpgrade`'s to add
     for (const index of toPlan.kindIndexes ?? []) {
-      if (createdIndexes.has(index.of) || (index.unique && !fromKindIndexes.has(index.name))) {
+      if (keysContainer(index) ? containerIndexChanged(index)
+        : createdIndexes.has(index.of) || (index.unique && !fromKindSql.has(index.name)) || kindIndexRead(index)) {
         steps.push({ kind: 'ddl', sql: kindIndexSql(dialect, name, index),
           note: `create the ${index.kind} index '${index.name}' beside '${index.of}' on '${name}'` });
       }
@@ -1372,8 +1432,12 @@ export function planColumnUpgrade(connection, model, options = undefined) {
       for (const { collection, plan } of collections) {
         const holding = held.get(plan.table);
         if (holding === undefined) continue;
-        upgraded.push(...[...holding.types.keys(), ...holding.columns, ...holding.checks, ...holding.indexes].map((name) => `${plan.table}.${name}`));
-        steps.push(...collectionSteps(collection.name, heldPlanOf(plan, holding), plan, collection, dialect, mapping).steps);
+        const heldPlan = heldPlanOf(dialect, plan, holding);
+        const besideKeys = (plan.kindIndexes ?? []).filter((/** @type {any} */ index) => !heldPlan.kindIndexes.some((/** @type {any} */ kept) => kept.name === index.name))
+          .map((/** @type {any} */ index) => index.name);
+        upgraded.push(...[...holding.types.keys(), ...holding.columns, ...holding.checks, ...holding.indexes, ...holding.containers, ...besideKeys]
+          .map((name) => `${plan.table}.${name}`));
+        steps.push(...collectionSteps(collection.name, heldPlan, plan, collection, dialect, mapping).steps);
       }
       for (const { table, index, sql } of missing) {
         upgraded.push(`${table}.${index}`);
@@ -1397,11 +1461,14 @@ export function planColumnUpgrade(connection, model, options = undefined) {
 
 /**
  * Refuse, before any step runs, a link that creates a unique index beside a
- * declared one (`ddl.js` `kindIndexesOf`) over a table that already holds two
- * documents with one value of a kind the declared index's column did not
- * key: an earlier release's table, whose unique index refused the first
- * kind's duplicates alone, stored them. `JD0023` (`class: 'constraint'`)
- * names each set of such documents, so the host can change them first.
+ * declared one (`ddl.js` `kindIndexesOf`, `containerKeysOf`) over a table that
+ * already holds two documents with one value of a kind the declared index's
+ * column did not key, or one container whose members were written in another
+ * order: an earlier release's table, whose unique index refused the first
+ * kind's duplicates alone, or a container's written the same way, stored
+ * them. A container key column the link adds is read as its trigger writes
+ * it. `JD0023` (`class: 'constraint'`) names each set of such documents, so
+ * the host can change them first.
  * @param {any} connection
  * @param {{ plan: any, index: any }[]} indexes
  * @returns {any} value-or-promise
@@ -1412,11 +1479,17 @@ function refuseDuplicates(connection, indexes) {
   const next = (/** @type {number} */ i) => {
     if (i >= indexes.length) return null;
     const { plan, index } = indexes[i];
-    const keys = kindIndexTerms(dialect, index);
-    const holds = [...keys.map((key) => `${key} IS NOT NULL`), ...(index.where === undefined ? [] : [`(${index.where})`])].join(' AND ');
-    const sql = `SELECT ${q('k')}, ${q('g')} FROM (SELECT ${q(plan.keyColumn)} AS ${q('k')}, `
+    // a container key column the link adds is read as its trigger writes it, and the
+    // rows are those the declared condition holds
+    const terms = kindIndexTerms(dialect, index, true);
+    const where = index.keys.some((/** @type {any} */ key) => 'read' in key) ? index.condition : index.where;
+    const keys = terms.map((_term, at) => q(`k${at}`));
+    const sql = `SELECT ${q('k')}, ${q('g')} FROM (SELECT ${q('k')}, `
       + `count(*) OVER (PARTITION BY ${keys.join(', ')}) AS ${q('n')}, dense_rank() OVER (ORDER BY ${keys.join(', ')}) AS ${q('g')} `
-      + `FROM ${q(plan.table)} WHERE ${holds}) AS ${q('d')} WHERE ${q('n')} > 1 ORDER BY ${q('g')}, ${q('k')} LIMIT ${DUPLICATES_NAMED + 1}`;
+      + `FROM (SELECT ${q(plan.keyColumn)} AS ${q('k')}, ${terms.map((term, at) => `${term} AS ${keys[at]}`).join(', ')} `
+      + `FROM ${q(plan.table)}${where === undefined ? '' : ` WHERE ${where}`}) AS ${q('r')} `
+      + `WHERE ${keys.map((key) => `${key} IS NOT NULL`).join(' AND ')}) AS ${q('d')} `
+      + `WHERE ${q('n')} > 1 ORDER BY ${q('g')}, ${q('k')} LIMIT ${DUPLICATES_NAMED + 1}`;
     return chain(connection.prepare(sql), (statement) => chain(statement.all([]), (rows) => {
       if (rows.length === 0) return next(i + 1);
       /** @type {Map<string, string[]>} */
@@ -1427,9 +1500,12 @@ function refuseDuplicates(connection, indexes) {
       }
       const duplicates = [...groups.values()];
       const declared = index.declared.name;
+      const stored = index.keys.some((/** @type {any} */ key) => 'read' in key)
+        ? 'that duplicate one another with a container whose members were written in another order'
+        : 'that duplicate one another at a kind the index\'s column did not key';
       throw Object.assign(refuse('JD0023', `the unique index '${declared}' of collection '${plan.table}' refuses a duplicate `
-        + `of any kind its members hold, but the table holds documents that duplicate one another at a kind the index's `
-        + `column did not key, which an earlier release stored: ${duplicates.map((keys) => keys.map((key) => JSON.stringify(key)).join(' and ')).join('; ')}`
+        + `of any kind its members hold, but the table holds documents ${stored}, which an earlier release stored: `
+        + `${duplicates.map((keys) => keys.map((key) => JSON.stringify(key)).join(' and ')).join('; ')}`
         + `${rows.length > DUPLICATES_NAMED ? ', and more' : ''} — change or remove all but one of each, then plan the upgrade again`),
       { class: 'constraint', retryable: false, collection: plan.table, index: declared, duplicates });
     }));
@@ -1510,16 +1586,18 @@ function missingIndexes(connection, plans, wanted) {
  * (`columns`, `checks`) — read back through the dialect's exact read-back, so
  * a definition that is neither spelling is left to the open path, which
  * refuses it — and a unique index without the boolean keys a fresh store
- * creates after its columns (`indexes`, read from its CREATE text). A table
- * that holds every definition as planned has no entry.
+ * creates after its columns (`indexes`, read from its CREATE text), and the
+ * columns a unique index keys a container by that it lacks (`containers`,
+ * `ddl.js` `containerKeysOf`). A table that holds every definition as planned
+ * has no entry.
  * @param {any} connection
  * @param {any[]} plans - from `planCollection`, one per collection
- * @returns {any} value-or-promise of `Map<string, { types: Map<string, string>, columns: Set<string>, checks: Set<string>, indexes: Set<string> }>`
+ * @returns {any} value-or-promise of `Map<string, { types: Map<string, string>, columns: Set<string>, checks: Set<string>, indexes: Set<string>, containers: Set<string> }>`
  */
 function heldDefinitionsOf(connection, plans) {
   const dialect = connection.dialect;
   const readBack = dialect.capabilities.declaredSqlText === true ? undefined : dialect.readBack;
-  /** @type {Map<string, { types: Map<string, string>, columns: Set<string>, checks: Set<string>, indexes: Set<string> }>} */
+  /** @type {Map<string, { types: Map<string, string>, columns: Set<string>, checks: Set<string>, indexes: Set<string>, containers: Set<string> }>} */
   const held = new Map();
   const next = (/** @type {number} */ i) => {
     if (i >= plans.length) return held;
@@ -1527,9 +1605,11 @@ function heldDefinitionsOf(connection, plans) {
     const spelled = readBack === undefined ? [] : plan.generated.filter((column) => column.alternate !== undefined);
     const checked = readBack === undefined ? [] : (plan.intervals ?? []).filter((interval) => interval.alternate !== undefined);
     const keyed = plan.expected.indexes.some((/** @type {any} */ index) => index.terms !== undefined);
-    if (!plan.generated.some((column) => column.legacyTypes !== undefined) && spelled.length === 0 && checked.length === 0 && !keyed)
+    const containers = plan.containerKeys ?? [];
+    if (!plan.generated.some((column) => column.legacyTypes !== undefined) && spelled.length === 0 && checked.length === 0 && !keyed
+      && containers.length === 0)
       return next(i + 1);
-    const holding = { types: new Map(), columns: new Set(), checks: new Set(), indexes: new Set() };
+    const holding = { types: new Map(), columns: new Set(), checks: new Set(), indexes: new Set(), containers: new Set() };
     const record = () => (!keyed ? recorded()
       : chain(connection.prepare(dialect.introspect.declaredSql(plan.table)), (statement) => chain(statement.all([]), (objects) => {
         // as the plan of the table's own column types keys them (a column held in a type
@@ -1538,12 +1618,17 @@ function heldDefinitionsOf(connection, plans) {
         return recorded();
       })));
     const recorded = () => {
-      if (holding.types.size + holding.columns.size + holding.checks.size + holding.indexes.size > 0) held.set(plan.table, holding);
+      if (holding.types.size + holding.columns.size + holding.checks.size + holding.indexes.size + holding.containers.size > 0)
+        held.set(plan.table, holding);
       return next(i + 1);
     };
     return chain(connection.prepare(dialect.introspect.columns(plan.table)), (statement) =>
       chain(statement.all([]), (rows) => {
         holding.types = legacyColumnTypes(dialect, plan, rows);
+        // a table without a column a unique index keys a container by: none of a table
+        // that does not exist (no rows), which has nothing to upgrade
+        if (rows.length > 0)
+          for (const key of containers) if (!rows.some((row) => String(row.name) === key.column)) holding.containers.add(key.column);
         for (const column of spelled) {
           const row = rows.find((candidate) => String(candidate.name) === column.name);
           if (row === undefined || row.default_value === null || row.default_value === undefined) continue;
@@ -1572,13 +1657,16 @@ function heldDefinitionsOf(connection, plans) {
  * The plan of a collection as its table holds it: the generated columns
  * {@link heldDefinitionsOf} read in one of their member's types keep that type,
  * a column or CHECK held in the other spelling carries that text (`holds`),
- * which {@link collectionSteps} compares exactly, and an index held without
- * its boolean keys has none, which {@link indexChanged} reads as a change.
- * @param {any} plan @param {{ types: Map<string, string>, columns: Set<string>, checks: Set<string>, indexes: Set<string> }} holding
+ * which {@link collectionSteps} compares exactly, an index held without
+ * its boolean keys has none, which {@link indexChanged} reads as a change, and
+ * a container key column the table lacks is not planned, nor its triggers and
+ * the indexes over it, which the link then creates.
+ * @param {any} dialect
+ * @param {any} plan @param {{ types: Map<string, string>, columns: Set<string>, checks: Set<string>, indexes: Set<string>, containers: Set<string> }} holding
  * @returns {any}
  */
-function heldPlanOf(plan, holding) {
-  const base = holding.types.size > 0 ? plan.replan(holding.types) : plan;
+function heldPlanOf(dialect, plan, holding) {
+  const base = withoutContainerKeys(dialect, holding.types.size > 0 ? plan.replan(holding.types) : plan, holding.containers);
   return { ...base,
     expected: { ...base.expected, indexes: base.expected.indexes.map((/** @type {any} */ index) => {
       if (!holding.indexes.has(index.name)) return index;
@@ -2845,16 +2933,19 @@ export function createModelShape(connection, model, expressions = undefined) {
  * {@link createModelShape}, with some generated columns in the type a table
  * holds them in, some join tables without the index over their second
  * key column, (`bareKinds`) every collection without the indexes beside
- * its declared ones over a member of several kinds, and (`termless`) some
- * unique indexes without the boolean keys after their columns, as an earlier
- * release created them.
+ * its declared ones over a member of several kinds and without its container
+ * key columns, (`termless`) some unique indexes without the boolean keys after
+ * their columns, and (`containers`) some collections without some
+ * container key columns, their triggers and the indexes over them, as an
+ * earlier release created them.
  * @param {any} connection
  * @param {any} model
  * @param {any} expressions
  * @param {{ columns: Map<string, Map<string, string>>, bareJoins: Set<string> | 'all', bareKinds?: boolean,
- *   termless?: Map<string, Set<string>> }} legacy -
+ *   termless?: Map<string, Set<string>>, containers?: Map<string, Set<string>> }} legacy -
  *   `columns` by table, then by column; `bareJoins` the join tables created without
- *   that index, or `'all'` of them; `termless` by table, the indexes' names
+ *   that index, or `'all'` of them; `termless` by table, the indexes' names;
+ *   `containers` by table, the container key columns
  * @returns {any}
  */
 function createShapeHolding(connection, model, expressions, legacy) {
@@ -2862,8 +2953,11 @@ function createShapeHolding(connection, model, expressions, legacy) {
   /** @type {string[]} */
   const statements = [];
   for (const collection of normalizeModel(model, expressions).values()) {
-    const plan = planCollection(collection.name, collection, dialect,
+    const planned = planCollection(collection.name, collection, dialect,
       { ...mappingFor(connection, expressions), legacyColumns: legacy.columns.get(collection.name) });
+    const plan = withoutContainerKeys(dialect, planned, legacy.bareKinds === true
+      ? new Set((planned.containerKeys ?? []).map((/** @type {any} */ key) => key.column))
+      : legacy.containers?.get(collection.name) ?? new Set());
     const beside = new Set(legacy.bareKinds === true ? plan.kindIndexes.map((/** @type {any} */ index) => kindIndexSql(dialect, plan.table, index)) : []);
     const termless = legacy.termless?.get(plan.table);
     /** @type {Map<string, string>} */
@@ -2964,11 +3058,13 @@ export function compareShapeToModel(driver, connection, model, registerFunctions
  * shape to hold too: the generated columns of its collection tables declared
  * in another of their member's types than the model's plan declares, by table
  * and column, the join tables without the index over their second key column,
- * and the unique indexes without the boolean keys after their columns, by table.
+ * the unique indexes without the boolean keys after their columns, and the
+ * container key columns it lacks, by table.
  * @param {any} connection - the database
  * @param {any} model
  * @param {any} expressions
- * @returns {any} value-or-promise of `{ columns: Map<string, Map<string, string>>, bareJoins: Set<string>, termless: Map<string, Set<string>> }`
+ * @returns {any} value-or-promise of `{ columns: Map<string, Map<string, string>>, bareJoins: Set<string>,
+ *   termless: Map<string, Set<string>>, containers: Map<string, Set<string>> }`
  */
 function legacyShapeOf(connection, model, expressions) {
   const plans = [...normalizeModel(model, expressions).values()]
@@ -2977,6 +3073,7 @@ function legacyShapeOf(connection, model, expressions) {
     columns: new Map([...held].filter(([, holding]) => holding.types.size > 0).map(([table, holding]) => [table, holding.types])),
     bareJoins: new Set(missing.map((entry) => entry.table)),
     termless: new Map([...held].filter(([, holding]) => holding.indexes.size > 0).map(([table, holding]) => [table, holding.indexes])),
+    containers: new Map([...held].filter(([, holding]) => holding.containers.size > 0).map(([table, holding]) => [table, holding.containers])),
   })));
 }
 

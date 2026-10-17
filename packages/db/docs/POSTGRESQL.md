@@ -80,16 +80,25 @@ shape of it: a composite index has one per combination of the kinds its members
 hold other than all their first kinds together (`c_by_qr$text$boolean`), keying
 each such member by its extraction at that kind and every other member by its
 column; a conditional one carries the declared condition; and a member under a
-guarded path step (below) is read under the guard its column is. Together with
-the declared index they key every scalar kind, so a duplicate of any kind is
-refused `JD2005` (`class: 'constraint'`) as SQLite refuses it, and a value of
-one kind never meets a value of another: `1` and `'1'` are two keys on both
-engines. A boolean meets booleans alone, as the query engine compares it and as
-SQLite's unique index keys it. A member whose
-union lists a container first has a `jsonb` column that holds every kind; beside
-another member it is keyed by that column. A non-unique composite or
-conditional index, and a non-unique one over a path whose steps the dialect
-guards, has none.
+guarded path step (below) is read under the guard its column is. A unique one
+also has one per container kind the union lists (`c_by_q$object`,
+`c_by_q$array` beside `c_by_q` over `['number', 'string', 'object',
+'array']`), keying the member read as `jsonb` at that kind, whose equality is
+the query engine's: an object's members in any order, a number by its value.
+Together with the declared index they key every kind the union lists, so a
+duplicate of any of them is refused `JD2005` (`class: 'constraint'`) as SQLite
+refuses it, and a value of one kind never meets a value of another: `1` and
+`'1'` are two keys on both engines, as are `{}` and `[]`. A boolean meets
+booleans alone, as the query engine compares it and as SQLite's unique index
+keys it. A member whose union lists a container first, or that has no type,
+has a `jsonb` column that holds every kind; beside another member it is keyed
+by that column. That column keys a JSON `null` as a value, so a unique index
+over it refuses a second `null`, which SQLite (whose column holds it as SQL
+`NULL`) and a member whose column holds a scalar store. A key PostgreSQL's
+B-tree cannot hold — an entry past its size limit, a long string or a
+large container under any unique index — is refused `JD2005` with the server's
+message. A non-unique composite or conditional index, and a non-unique one over
+a path whose steps the dialect guards, has none, nor one for a container kind.
 
 The statement is the same with or without them: a table an earlier release
 created has none, answers as before by reading every row, and refuses a
@@ -137,9 +146,11 @@ guard whatever the schema declares: unguarded it is the index's text, which the
 catalog reads back as that index, so `introspect()` derived an array where an
 object was declared and an interval over it did not reopen. The store's own interval check
 reads an index step off an array and a name off an object, on every engine. A
-table holds either spelling of such a column, index expression and CHECK and
-opens as it is: a model that changes how it declares the container plans no
-change to them (one that moves the path between an index step and a name
+table holds either spelling of such a column, index expression and CHECK, and
+of the key of an index beside a unique one over such a path, and opens as it
+is: a model that changes how it declares the container plans no change to the
+column, the expression or the CHECK, and drops and creates each index beside in
+the spelling it reads (one that moves the path between an index step and a name
 rebuilds them, the guard naming the kind of step), and a table an earlier release created, which holds the
 unguarded definitions, keeps reading an object's key `0` at an index step (and
 answers `JD2005` from its CHECK for a bad span there), and keeps a name `'0'`

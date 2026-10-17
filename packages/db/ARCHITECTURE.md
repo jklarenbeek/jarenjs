@@ -755,7 +755,9 @@ declared index over such a member for each other kind, over exactly that read
 statement. Beside a unique index they are unique and stand beside every shape
 of it (one per combination of a composite's members' kinds, `<index>$<kind>$<kind>`,
 keying each other member by its column; under a conditional index's condition;
-under the guard of a guarded path), so the declared index and they together
+under the guard of a guarded path, or the other spelling of it a table whose
+model declared the container the other way holds), and one per container kind
+the union lists, keying it as `jsonb`, so the declared index and they together
 refuse a duplicate of every kind; the open verifies each one's uniqueness,
 condition and keys, accepts a table without them, `planColumnUpgrade` adds them
 (refusing `JD0023` first where the table holds duplicates one would refuse), and
@@ -763,7 +765,15 @@ condition and keys, accepts a table without them, `planColumnUpgrade` adds them
 index keys, after its columns, whether each member the untyped column holds is
 a boolean (`dialect.booleanKeyTerm`, the planned index's `terms`), since that
 column holds `true` as `1`; the open accepts the index without them, as an
-earlier release created it, and `planColumnUpgrade` creates it again with them. On such a SQLite
+earlier release created it, and `planColumnUpgrade` creates it again with them.
+That column holds a container as its bytes, so such a member also gets a plain
+column (`containerKeys`, `kx_<member>`) that two triggers fill with the
+container's key, its nodes sorted by path (`dialect.containerKey`; no index
+expression may read `json_tree`), and the unique index keys it in an index
+beside the declared one (`<index>$container`) over the rows that hold one; the
+open accepts a table without them (`withoutContainerKeys`), `planColumnUpgrade`
+adds them, a link that drops one or creates an index over one the from-model
+keys rebuilds the table, and `introspect()` reads them back as the plan's. On such a SQLite
 table a number comparison of a string-first member does not seek. A
 member whose first type besides `null` is `number` stores its numbers as the doubles the query
 engine compares, as its `REAL` column did. `explain().indexes`

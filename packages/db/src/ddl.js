@@ -855,9 +855,11 @@ export function planCollection(name, collection, dialect, options = undefined) {
     generated,
     checks: intervals.map((interval) => ({ name: interval.constraint, sql: interval.sql })),
   };
-  const kindIndexes = kindIndexesOf(collection.schema, dialect, indexes, generated);
+  const containers = containerKeysOf(dialect, name, indexes, generated);
+  const kindIndexes = [...kindIndexesOf(collection.schema, dialect, indexes, generated), ...containers.indexes];
+  const containerKeys = containers.keys;
   const createSql = [
-    dialect.ddl.createTable(tableShape),
+    dialect.ddl.createTable({ ...tableShape, plain: containerKeys.map((key) => ({ name: key.column, type: key.type })) }),
     ...indexes.map((index) => dialect.ddl.createIndex({
       name: index.name,
       table: name,
@@ -867,6 +869,7 @@ export function planCollection(name, collection, dialect, options = undefined) {
       ...(index.terms === undefined ? {} : { terms: index.terms }),
     })),
     ...kindIndexes.map((index) => kindIndexSql(dialect, name, index)),
+    ...containerKeys.flatMap((key) => key.triggers.map((trigger) => trigger.sql)),
     ...virtualTables.flatMap((virtual) =>
       [virtual.createSql, ...virtual.triggers.map((trigger) => trigger.sql)]),
   ];
@@ -874,10 +877,13 @@ export function planCollection(name, collection, dialect, options = undefined) {
   // virtual tables and triggers named from a column stem: one namespace
   const objects = [
     { name, what: `the table for collection '${name}'`, docPath: collectionPath, rename: 'the collection' },
-    ...ownObjects(dialect, name, [{ name: KEY_COLUMN, type: keyType }, { name: DOC_COLUMN, type: dialect.docColumnType }, ...generated], collectionPath),
+    ...ownObjects(dialect, name, [{ name: KEY_COLUMN, type: keyType }, { name: DOC_COLUMN, type: dialect.docColumnType }, ...generated,
+      ...containerKeys.map((key) => ({ name: key.column, type: key.type }))], collectionPath),
     ...indexes.map((index) => ({ name: index.name, what: `index '${index.declared.name}'`, docPath: `${index.declared.docPath}/name`, rename: 'the index' })),
     ...kindIndexes.map((index) => ({ name: index.name, what: `the ${index.kind} index beside '${index.declared.name}'`,
       docPath: `${index.declared.docPath}/name`, rename: 'the index' })),
+    ...containerKeys.flatMap((key) => key.triggers.map((trigger) => ({ name: trigger.name,
+      what: `the trigger that writes the container key '${key.column}'`, docPath: collectionPath }))),
     ...virtualTables.flatMap((virtual) => [virtual, ...virtual.triggers].map((object) => ({ name: object.name,
       what: `the schema object '${object.name}' of a derived index`, docPath: collectionPath }))),
   ];
@@ -918,6 +924,13 @@ export function planCollection(name, collection, dialect, options = undefined) {
      * read back as an expression; a table an earlier release created goes
      * without them and opens as it is. */
     kindIndexes,
+    /** The plain columns a unique index keys a container by on an engine whose
+     * generated column holds it as written ({@link containerKeysOf}): each
+     * one's name (`column`), the generated column of its member (`of`), the
+     * member's path, the two triggers that write it and its `read` over the
+     * document. A table an earlier release created goes without them, their
+     * triggers and the indexes over them, and opens as it is. */
+    containerKeys,
     /** The generated columns that read their member off the document under
      * the dialect's guard (a path that leaves a container open), as the
      * table holds them: a table this plan creates holds every one, and the
@@ -941,6 +954,7 @@ export function planCollection(name, collection, dialect, options = undefined) {
         // `pragma_table_xinfo` reports, and it is the difference a file
         // moved between the two physical mappings shows up as
         ...generated.map((g) => ({ name: g.name, type: g.type, generated: g.stored !== true })),
+        ...containerKeys.map((key) => ({ name: key.column, type: key.type, generated: false })),
       ],
       indexes: indexes
         // the COLUMNS keep their declared order — an index is ordered, and
@@ -966,6 +980,107 @@ export function planCollection(name, collection, dialect, options = undefined) {
       planCollection(name, collection, dialect, { ...options, legacyColumns }),
   });
   return plan;
+}
+
+/**
+ * A collection's plan as a table holds it that goes without some of its
+ * container key columns ({@link containerKeysOf}) — one an earlier release
+ * created: without them, their triggers and the indexes that key them. The
+ * plan itself where the table holds every one.
+ * @param {any} dialect
+ * @param {any} plan - from {@link planCollection}
+ * @param {Set<string>} absent - the container key columns the table lacks
+ * @returns {any}
+ */
+export function withoutContainerKeys(dialect, plan, absent) {
+  const keys = plan.containerKeys ?? [];
+  if (!keys.some((/** @type {any} */ key) => absent.has(key.column))) return plan;
+  const kept = keys.filter((/** @type {any} */ key) => !absent.has(key.column));
+  const lacks = (/** @type {any} */ index) => index.keys.some((/** @type {any} */ key) => 'column' in key && absent.has(key.column));
+  const dropped = new Set([
+    ...keys.filter((/** @type {any} */ key) => absent.has(key.column)).flatMap((/** @type {any} */ key) => key.triggers.map((/** @type {any} */ trigger) => trigger.sql)),
+    ...plan.kindIndexes.filter(lacks).map((/** @type {any} */ index) => kindIndexSql(dialect, plan.table, index)),
+  ]);
+  const table = dialect.ddl.createTable({ table: plan.table, keyColumn: plan.keyColumn, keyType: plan.keyType, docColumn: plan.docColumn,
+    generated: plan.generated, plain: kept.map((/** @type {any} */ key) => ({ name: key.column, type: key.type })),
+    checks: (plan.intervals ?? []).map((/** @type {any} */ interval) => ({ name: interval.constraint, sql: interval.sql })) });
+  const held = { ...plan, containerKeys: kept, kindIndexes: plan.kindIndexes.filter((/** @type {any} */ index) => !lacks(index)),
+    createSql: [table, ...plan.createSql.slice(1).filter((/** @type {string} */ sql) => !dropped.has(sql))],
+    expected: { ...plan.expected, columns: plan.expected.columns.filter((/** @type {any} */ column) => !absent.has(column.name)) } };
+  Object.defineProperty(held, 'replan', { value: plan.replan });
+  return held;
+}
+
+/**
+ * The container keys of a collection's unique indexes, on an engine whose
+ * generated column over a member of several types (or of none) is untyped
+ * and holds an object or an array as its bytes (`dialect.containerKey`):
+ * one plain column per such member of a unique index, written by two
+ * triggers with the container's key (its members in one order), and per
+ * unique index one index beside it for each combination of its such
+ * members keyed by that column rather than their own, but the one keying
+ * every member by its own column — the declared index. A beside index keys
+ * every other member by its column (and its boolean key,
+ * {@link booleanKeyTerms}), under the declared condition, unique, over the
+ * rows whose key columns hold a key (the column is NULL for every value but a
+ * container, and NULL keys never meet). Together they refuse a duplicate
+ * container in any member order, and nothing the query engine compares
+ * unequal. A non-unique index refuses nothing and has none.
+ * @param {any} dialect
+ * @param {string} table
+ * @param {any[]} indexes - the planned declared indexes
+ * @param {any[]} generated - the planned generated columns
+ * @returns {{ keys: { column: string, of: string, type: string, pathText: string, read: string,
+ *   triggers: { name: string, sql: string }[] }[], indexes: any[] }}
+ */
+export function containerKeysOf(dialect, table, indexes, generated) {
+  /** @type {any[]} */
+  const keys = [];
+  /** @type {any[]} */
+  const beside = [];
+  const containerKey = dialect.containerKey;
+  if (containerKey === undefined) return { keys, indexes: beside };
+  const untyped = dialect.typeFor(undefined, 'generated');
+  const doc = dialect.quoteIdentifier(DOC_COLUMN);
+  /** @param {any} column */
+  const keyOf = (column) => {
+    const name = `kx_${column.name.replace(/^gx_/, '')}`;
+    let key = keys.find((candidate) => candidate.column === name);
+    if (key === undefined) {
+      key = { column: name, of: column.name, type: dialect.typeFor('string', 'generated'), pathText: column.pathText,
+        read: containerKey.read(doc, column.pathText),
+        triggers: containerKey.triggers({ table, keyColumn: KEY_COLUMN, docColumn: DOC_COLUMN, column: name, pathText: column.pathText }) };
+      keys.push(key);
+    }
+    return key;
+  };
+  for (const index of indexes) {
+    const declared = index.declared;
+    if (index.unique !== true || declared.derive || declared.expression !== undefined) continue;
+    const columns = index.columns.map((/** @type {string} */ name) => generated.find((candidate) => candidate.name === name));
+    const varied = columns.flatMap((/** @type {any} */ column, /** @type {number} */ at) =>
+      (column !== undefined && column.pathText !== null && column.type === untyped ? [at] : []));
+    if (varied.length === 0) continue;
+    for (const at of varied) keyOf(columns[at]);
+    // which varied members a beside index keys by their container key
+    for (const combination of besideCombinations(varied.map(() => [false, true]))) {
+      const byKey = new Set(varied.filter((_at, i) => combination[i]));
+      const indexKeys = columns.map((/** @type {any} */ column, /** @type {number} */ at) => {
+        if (!byKey.has(at)) return { column: index.columns[at] };
+        const key = keyOf(column);
+        return { column: key.column, read: key.read };
+      });
+      const flags = columns.flatMap((/** @type {any} */ column, /** @type {number} */ at) => (byKey.has(at) || !varied.includes(at) ? []
+        : [{ expression: /** @type {any} */ (dialect.booleanKeyTerm)(doc, column.pathText) }]));
+      const kind = varied.map((_at, i) => (combination[i] ? 'container' : 'value')).join('$');
+      // only a row whose members hold containers there is keyed: a NULL key never meets another
+      const where = [...(index.where === undefined ? [] : [`(${index.where})`]),
+        ...indexKeys.filter((key) => 'read' in key).map((key) => `${dialect.quoteIdentifier(key.column)} IS NOT NULL`)].join(' AND ');
+      beside.push({ name: kindIndexName(dialect, index.name, kind), of: index.name, kind, unique: true, keys: [...indexKeys, ...flags],
+        where, ...(index.where === undefined ? {} : { condition: index.where }), declared });
+    }
+  }
+  return { keys, indexes: beside };
 }
 
 /**
@@ -1007,7 +1122,12 @@ function booleanKeyTerms(dialect, unique, columns, generated) {
  * unique when the declared index is: together they key every scalar kind,
  * so a duplicate of any kind is refused, and a value of one kind never
  * meets one of another (`1` and `'1'` are two keys, as are `true` and `1`).
- * A non-unique index has them only over a single member path with no
+ * Beside a unique index an object and an array its union lists after a
+ * scalar are kinds too, read as `jsonb`, whose equality is the query
+ * engine's (members in any order, numbers by value). A key under a guarded
+ * path step carries the other spelling of the guard (`alternate`), which a
+ * table whose model declared the container the other way holds. A
+ * non-unique index has them only over a single member path with no
  * condition and no guarded step (one a comparison seeks); a unique one
  * has them over every shape.
  * @param {any} schema
@@ -1015,7 +1135,7 @@ function booleanKeyTerms(dialect, unique, columns, generated) {
  * @param {any[]} indexes - the planned declared indexes
  * @param {any[]} generated - the planned generated columns
  * @returns {{ name: string, of: string, kind: string, unique: boolean,
- *   keys: ({ column: string } | { expression: string })[], where?: string, declared: any }[]}
+ *   keys: ({ column: string } | { expression: string, alternate?: string })[], where?: string, declared: any }[]}
  */
 function kindIndexesOf(schema, dialect, indexes, generated) {
   if (dialect.capabilities.untypedColumns === true) return [];
@@ -1030,11 +1150,15 @@ function kindIndexesOf(schema, dialect, indexes, generated) {
       const column = byName.get(index.columns[at]);
       const types = schemaNodeAt(schema, segments)?.type;
       const first = columnKindFor(schemaTypeAt(schema, segments));
+      // an object or an array is a kind of a unique index's member whose column holds a
+      // scalar, keyed as `jsonb`; a column that holds a container keeps every kind
+      const kindOf = (/** @type {any} */ type) => columnKindFor(type)
+        ?? (declared.unique === true && first !== undefined && (type === 'object' || type === 'array') ? type : undefined);
       const kinds = !Array.isArray(types) || column === undefined || column.pathText === null ? []
-        : [...new Set(types.map((/** @type {any} */ type) => columnKindFor(type)))]
+        : [...new Set(types.map(kindOf))]
           .filter((kind) => kind !== undefined && kind !== first);
       const guarded = dialect.queryGuard(doc, segments) !== null;
-      return { column: index.columns[at], kinds: /** @type {string[]} */ (kinds), first: /** @type {string} */ (first), read: column, guarded };
+      return { column: index.columns[at], kinds: /** @type {string[]} */ (kinds), first: /** @type {string} */ (first), read: column, guarded, segments };
     });
     // a member whose union lists a container first has a `jsonb` column that keeps every
     // kind: beside another member it is keyed by that column alone
@@ -1042,21 +1166,36 @@ function kindIndexesOf(schema, dialect, indexes, generated) {
     if (varied.length === 0) return [];
     if (declared.unique !== true && (positions.length !== 1 || declared.where !== undefined || positions[0].guarded)) return [];
     // every combination of the varied members' kinds but the one of their first kinds
-    /** @type {string[][]} */
-    let combinations = [[]];
-    for (const position of varied)
-      combinations = combinations.flatMap((combination) => [position.first, ...position.kinds].map((kind) => [...combination, kind]));
-    return combinations.filter((combination) => combination.some((kind, at) => kind !== varied[at].first)).map((combination) => {
+    return besideCombinations(varied.map((position) => [position.first, ...position.kinds])).map((combination) => {
       const kind = combination.join('$');
       const keys = positions.map((position) => {
         const at = varied.indexOf(position);
-        return at === -1 || combination[at] === position.first ? { column: position.column }
-          : { expression: dialect.columnRead(doc, { pathText: position.read.pathText, kind: combination[at], unpinned: position.read.unpinned }) };
+        if (at === -1 || combination[at] === position.first) return { column: position.column };
+        const read = (/** @type {any} */ unpinned) => dialect.columnRead(doc, { pathText: position.read.pathText, kind: combination[at], unpinned });
+        // a guarded path's other spelling, the one a table holds whose model declared the
+        // container the other way, as its column has ({@link verifyKindIndexes})
+        return { expression: read(position.read.unpinned),
+          ...(position.guarded ? { alternate: read(position.read.unpinned === undefined ? position.segments : undefined) } : {}) };
       });
       return { name: kindIndexName(dialect, index.name, kind), of: index.name, kind, unique: declared.unique === true, keys,
         ...(index.where === undefined ? {} : { where: index.where }), declared };
     });
   });
+}
+
+/**
+ * Every combination of one choice per member, the first choice of each
+ * member first, but the combination of every member's first choice — the
+ * declared index's own: the keys of the indexes beside it.
+ * @template T
+ * @param {T[][]} choices - per member, its declared choice first
+ * @returns {T[][]}
+ */
+function besideCombinations(choices) {
+  /** @type {T[][]} */
+  let combinations = [[]];
+  for (const options of choices) combinations = combinations.flatMap((combination) => options.map((option) => [...combination, option]));
+  return combinations.slice(1);
 }
 
 /**
@@ -1088,14 +1227,18 @@ export function kindIndexSql(dialect, table, index) {
 }
 
 /**
- * The key terms of an index {@link kindIndexesOf} plans, in order: a
- * column by its name, a member read at a kind by its expression.
+ * The key terms of an index {@link kindIndexesOf} or {@link containerKeysOf}
+ * plans, in order: a column by its name, a member read at a kind by its
+ * expression; `reading`, a container key column by the read of the document
+ * a trigger writes into it, for a table that does not hold the column yet.
  * @param {any} dialect
- * @param {{ keys: ({ column: string } | { expression: string })[] }} index
+ * @param {{ keys: ({ column: string, read?: string } | { expression: string })[] }} index
+ * @param {boolean} [reading]
  * @returns {string[]}
  */
-export function kindIndexTerms(dialect, index) {
-  return index.keys.map((key) => ('column' in key ? dialect.quoteIdentifier(key.column) : key.expression));
+export function kindIndexTerms(dialect, index, reading = false) {
+  return index.keys.map((key) => (reading && 'read' in key ? key.read
+    : 'column' in key ? dialect.quoteIdentifier(key.column) : key.expression));
 }
 
 /**
@@ -1345,8 +1488,14 @@ export function verifyShape(connection, plan, collection, docPath, kind = 'colle
   // text would carry — each index's condition and shape, each generated
   // column's expression — through the dialect's exact read-back
   const readBack = dialect.capabilities.declaredSqlText === true ? undefined : dialect.readBack;
-  return chain(adoptLegacyColumns(connection, plan), () => chain(connection.prepare(dialect.introspect.columns(plan.table)), (columnsStatement) =>
+  const declared = plan;
+  return chain(adoptLegacyColumns(connection, declared), () => chain(connection.prepare(dialect.introspect.columns(declared.table)), (columnsStatement) =>
     chain(columnsStatement.all([]), (columnRows) => {
+      // a table an earlier release created goes without the columns a unique index keys a
+      // container by, their triggers and the indexes over them, and opens as it is
+      const heldNames = new Set(columnRows.map((row) => String(row.name)));
+      const plan = withoutContainerKeys(dialect, declared, new Set((declared.containerKeys ?? [])
+        .map((/** @type {any} */ key) => key.column).filter((/** @type {string} */ column) => !heldNames.has(column))));
       // both sides through the dialect's own reduction, so a declared
       // type the catalog reports differently (an auto-key's allocation
       // clause, a width the engine normalizes) compares as itself
@@ -1484,7 +1633,10 @@ export function verifyShape(connection, plan, collection, docPath, kind = 'colle
           // no CREATE text, every other trigger or rewrite rule on the table
           // undeclared drift; a CREATE text comparison covers them below
           const heldKindIndexes = indexRows.filter((row) => String(row.origin) === 'c' && kindIndexes.has(String(row.name)));
-          return chain(collectColumns(0), () => chain(verifyKindIndexes(connection, kindIndexes, heldKindIndexes, plan.conditionColumns ?? [], disagree), () =>
+          // an engine that keeps CREATE text compares theirs below
+          const besides = () => (dialect.capabilities.declaredSqlText === true ? null
+            : verifyKindIndexes(connection, kindIndexes, heldKindIndexes, plan.conditionColumns ?? [], disagree));
+          return chain(collectColumns(0), () => chain(besides(), () =>
             chain(verifyIntervalChecks(connection, plan, disagree), () =>
               chain(verifyRulePrograms(connection, plan.table, plan.programs ?? [], disagree,
                 { installed: dialect.capabilities.declaredSqlText !== true, undeclared: true }), () =>
@@ -1523,9 +1675,13 @@ function verifyKindIndexes(connection, planned, rows, conditionColumns, disagree
           : keys.map((key, at) => {
             const planKey = want.keys[at];
             if ('column' in planKey) return key.name === planKey.column ? null : `keys ${key.term ?? key.name} where the model keys ${planKey.column}`;
-            return key.name !== null && key.name !== undefined ? `keys ${key.name} where the model keys ${planKey.expression}`
-              : typeof key.term !== 'string' ? 'keys an expression it does not report'
-                : dialect.readBack.indexKey(key.term, planKey.expression, readsConforming(row));
+            if (key.name !== null && key.name !== undefined) return `keys ${key.name} where the model keys ${planKey.expression}`;
+            if (typeof key.term !== 'string') return 'keys an expression it does not report';
+            const difference = dialect.readBack.indexKey(key.term, planKey.expression, readsConforming(row));
+            // a guarded path read the other way: a table whose container the model declared
+            // the other way opens as it did, as its column does
+            return difference === null || planKey.alternate === undefined
+              || dialect.readBack.indexKey(key.term, planKey.alternate, readsConforming(row)) !== null ? difference : null;
           }).find((found) => found !== null) ?? null;
         if (difference !== null) disagree(`index '${name}' ${difference}`);
         return step(i + 1);

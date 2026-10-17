@@ -3100,6 +3100,76 @@ a `1` (or `false` beside `0`) under the index: the statement refuses such a
 table, so change or remove one of each first. A table the previous release
 created and this release opened is unchanged.
 
+## 50. A unique index keys an object or an array by its value, on both engines
+
+- On SQLite a unique index over a member the untyped column holds (a union
+  listing `object` or `array`, a `type: 'object'` or `'array'` member, or one of
+  no type) keyed a container by the bytes it was written in, so a document with
+  `q: {"b": 2, "a": 1}` was stored beside one with `q: {"a": 1, "b": 2}`, which
+  the query engine's `$eq` compares equal. Such a member now has a plain column
+  (`"kx_q" TEXT`) that two triggers (`c$kx_q$insert`, `c$kx_q$update`) write
+  after every insert and every update of the document with the container's key —
+  its nodes sorted by path, a number as the double it reads as — and the unique
+  index has one index beside it over that column (`CREATE UNIQUE INDEX
+  "c_by_q$container" ON "c" ("kx_q") WHERE "kx_q" IS NOT NULL`; a composite has
+  one per combination of its such members, `c_by_qr$container$value`; a
+  conditional one carries its condition). A container equal to a stored one in
+  any member order, or with a number spelled otherwise (`1.0`), is refused
+  `JD2005` (`class: 'constraint'`) whoever writes the file; its message names the
+  column (`UNIQUE constraint failed: c.kx_q`). Every other answer stays, and a
+  seek over the declared index reads it as before. An insert or an update of a
+  document that holds a container there costs the trigger's work.
+- On PostgreSQL a unique index over a member whose union lists a scalar first
+  and an object or an array after it (`['number', 'string', 'object']`) did not
+  key a container at all (the column reads it as `NULL`), so two equal objects
+  were both stored, where SQLite refused the second; a composite one the same.
+  Each such container kind now has an index beside the declared one
+  (`c_by_q$object`, `c_by_q$array`) over the member read as `jsonb`, whose
+  equality is the query engine's, so the second is refused `JD2005`. Such an
+  index holds an entry no larger than PostgreSQL's B-tree allows, as every
+  unique index does: a container past it is refused `JD2005` with the server's
+  message, as a long string beside it already was.
+- A table the previous release created opens and answers as it did, until
+  `planColumnUpgrade` adds what it lacks: on SQLite the column, its triggers, the
+  `UPDATE` that writes the key of every stored document and the index
+  (`report.upgraded` names `c.kx_q` and `c.c_by_q$container`); on PostgreSQL the
+  indexes (`c.c_by_q$object`). Where the table already holds documents one would
+  refuse, the plan refuses `JD0023` (`class: 'constraint'`) before any step,
+  naming them in `duplicates`; change or remove all but one of each and plan
+  again.
+- On SQLite a link that makes an index unique over such a member adds the
+  column, its triggers, the `UPDATE` and the index; one that drops a column (the
+  index no longer unique, the member typed), renames the collection, or creates
+  an index over a column the from-model already keys is one `rebuild` step of
+  the collection, which a table the previous release created takes as well
+  (MIGRATION-FORMAT §3). On PostgreSQL a link that gives the member of a unique
+  index it keeps a container kind creates its index. `introspect()` reads the
+  column, its triggers and the indexes back as the plan's, so the model it reads
+  back plans them again and reports no loss for them; on the previous release's
+  tables, `introspect()` → `planModelMigration(derived, model)` now plans those
+  structures for a model that declares a unique index the read leaves out (a
+  conditional one, as before) and, on PostgreSQL, the `CREATE UNIQUE INDEX` of a
+  container kind of a union that lists one after a scalar, where it planned
+  nothing for them; nothing it planned is removed.
+- On PostgreSQL a link that declares the container of a unique index's guarded
+  path (`$.u[0]`, `u` from an open container to `type: 'array'`), or stops
+  declaring it, planned no step for the indexes beside it (`c_by_u0$text`),
+  which kept the other spelling of the guard, and `migrate()` and the next open
+  refused the table `JD0002`. The link now drops and creates each of them in the
+  spelling the target reads, and the open and `introspect()` accept either
+  spelling of their key, as they do the column's.
+
+**Downgrade.** On SQLite the previous release refuses a table with a container
+key column `JD0002` (`undeclared: 'kx_q'`); drop the indexes over it, then its
+two triggers, then the column (`DROP INDEX "c_by_q$container"; DROP TRIGGER
+"c$kx_q$insert"; DROP TRIGGER "c$kx_q$update"; ALTER TABLE "c" DROP COLUMN
+"kx_q"`) and it opens the table and answers alike, its unique index again
+storing a container beside its reordered twin. On PostgreSQL it refuses a table
+with an index beside for a container kind `JD0002`, as §48 says; drop it
+(`DROP INDEX "c_by_q$object"`), and drop an index beside a guarded path that a
+link of this release created in the other spelling. A table the previous
+release created and this release opened is unchanged.
+
 ## Measured costs
 
 Exact identity stores complete canonical documents and model endpoints, so

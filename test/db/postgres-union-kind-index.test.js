@@ -44,7 +44,7 @@ describe('the index beside a declared index over a member of several kinds', () 
     assert.deepEqual(plan.expected.indexes.map((/** @type {any} */ index) => index.name), ['c_by_q', 'c_by_r']);
   });
 
-  it('is not planned where the read is one kind, a composite, a condition, a guarded step or an engine with untyped columns', () => {
+  it('is not planned where the read is one kind, a composite, a condition or a guarded step, nor for a scalar kind on an engine with untyped columns', () => {
     const none = [
       modelOf({ q: { type: ['integer', 'number', 'null'] } }, [{ name: 'by_q', path: '$.q' }]),
       modelOf({ q: { type: ['string', 'object', 'array'] } }, [{ name: 'by_q', path: '$.q' }]),
@@ -53,8 +53,11 @@ describe('the index beside a declared index over a member of several kinds', () 
       modelOf({ u: { items: { type: ['number', 'string'] } } }, [{ name: 'by_u', path: '$.u[0]' }]),
     ];
     for (const model of none) assert.deepEqual(planOf(model).kindIndexes, [], JSON.stringify(model.collections.c.indexes));
+    // an engine with untyped columns keys every scalar kind in the column: beside a unique index it keys
+    // only a container, by the column a trigger writes its key into
     const sqlite = planOf(MODEL, sqliteDialect);
-    assert.deepEqual([sqlite.kindIndexes, sqlite.createSql.filter((/** @type {string} */ sql) => /^CREATE (UNIQUE )?INDEX "[^"]*\$/.test(sql))], [[], []]);
+    assert.deepEqual([sqlite.kindIndexes.map((/** @type {any} */ index) => index.kind), sqlite.createSql.filter((/** @type {string} */ sql) => /^CREATE (UNIQUE )?INDEX "[^"]*\$/.test(sql))],
+      [['container'], ['CREATE UNIQUE INDEX "c_by_q$container" ON "c" ("kx_q") WHERE "kx_q" IS NOT NULL']]);
   });
 
   it('takes a name no declared index or collection can, kept within the 63 bytes of an identifier', () => {

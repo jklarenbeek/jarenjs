@@ -25,7 +25,12 @@ and so do the rule programs of a store-owned entity (§13.4): the derived model
 declares no `invariants`, so it neither opens over that table (`JD0002`, an
 undeclared trigger) nor migrates to the authored model (the plan's `CREATE`s
 meet the installed programs and fail `JD0023`); the model that declares the
-rules is the one that opens it.
+rules is the one that opens it. The two triggers that write a collection's
+container key (§3), its key column and the unique index over it are read back
+exactly as a store creates them for the unique indexes over the members the
+table holds — the derived model plans them again — and are no loss; one
+written otherwise is reported as its own loss (`unmapped-object`,
+`unmapped-column`, `unmapped-index`).
 A collection's declared interval comes back from its CHECK as the `intervals`
 entry that declared it, the span typed an object of two required `integer`
 bounds, which is no loss; a CHECK of another shape or name, or one added
@@ -512,13 +517,29 @@ besides its column's, over the member read at that kind and named
 `<collection>_<index name>$<kind>`, which no declared name can take; beside
 a unique index they are unique, and a unique composite, conditional or
 guarded index gets them too (one per combination of its members' kinds,
-`$<kind>$<kind>`), so it refuses a duplicate of every kind as SQLite does
-([POSTGRESQL.md](POSTGRESQL.md)). On SQLite the generated column over a member
+`$<kind>$<kind>`), so it refuses a duplicate of every kind its member holds
+as SQLite does ([POSTGRESQL.md](POSTGRESQL.md)). On SQLite the generated column over a member
 of several types, or of none, is the engine's untyped one, which holds a JSON
 boolean as the integer `0` or `1`; a unique index keys, after its columns,
 whether each such member is a boolean (`(json_type("doc", '$."q"') IN ('true',
 'false'))`), so `true` and `1` are two keys, as the query engine compares them
-and as PostgreSQL keys them, and a seek over its columns reads it as before. A member
+and as PostgreSQL keys them, and a seek over its columns reads it as before.
+That column holds an object or an array as the bytes it was written in, so a
+unique index over it also has a key for a container whose members are in one
+order: a plain column per such member (`kx_q`, NULL for every value but a
+container) that two triggers write after every insert and every update of the
+document — its nodes, each as its path, its type and, for a string, its text or,
+for a number, the double it reads as, sorted by path — and one unique index
+beside the declared one per combination of its such members keyed by that
+column (`<collection>_<index name>$container`, `$container$value` for a
+composite), over the rows that hold a container there, under the declared
+condition. Two containers are one key exactly when the query engine compares
+them equal (`{"a": 1, "b": 2}` and `{"b": 2, "a": 1.0}`; `[1, 2]` and `[2, 1]`
+are two), whoever writes the row; a key's path is compared as the document
+spells it. On PostgreSQL a unique index beside one over a member whose
+column holds a scalar keys each container kind its union lists as `jsonb`,
+whose equality is that one (`$object`, `$array`), and a column that holds a
+container keys every kind by its value. A member
 name the dialect's JSON path grammar cannot carry (an embedded `"` or
 a control character, on SQLite) is `JD0004`. A backslash in a name is
 written escaped, so the path names the member literally — never the

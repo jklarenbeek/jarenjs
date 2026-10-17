@@ -14,7 +14,7 @@ import * as assert from 'node:assert';
 import { DatabaseSync } from 'node:sqlite';
 
 import { compileJsonQuery } from '@jarenjs/json/query';
-import { openStore, planColumnUpgrade, planMigration, migrate, sqliteDialect } from '@jarenjs/db';
+import { openStore, planColumnUpgrade, planMigration, migrate, sqliteDialect, planCollection, normalizeModel } from '@jarenjs/db';
 import { nodeDriver } from '@jarenjs/db/node';
 
 import { tempDbPath } from './helpers.js';
@@ -94,8 +94,13 @@ describe('planColumnUpgrade on SQLite', () => {
       assert.deepStrictEqual(planMigration(MODEL, MODEL, { dialect: sqliteDialect }).migration.steps, []);
 
       const { migration, report } = await upgradeOf(dbPath);
-      assert.deepStrictEqual(report.upgraded, ['c.gx_q', 'c.gx_r', 'c.gx_n']);
+      // and the column the unique index keys a container of the untyped member by, and the index over it
+      assert.deepStrictEqual(report.upgraded, ['c.gx_q', 'c.gx_r', 'c.gx_n', 'c.kx_n', 'c.c_by_nk$container']);
       assert.strictEqual(migration.from, migration.to);
+      const triggers = planCollection('c', normalizeModel(MODEL).get('c'), sqliteDialect).createSql
+        .filter((/** @type {string} */ sql) => sql.startsWith('CREATE TRIGGER'));
+      assert.strictEqual(triggers.length, 2);
+      const fill = migration.steps.find((/** @type {any} */ step) => step.sql.startsWith('UPDATE "c" SET "kx_n" = (CASE WHEN json_type("doc", \'$."n"\') IN (\'object\', \'array\')'))?.sql;
       assert.match(migration.id, /^upgrade-/);
       assert.deepStrictEqual(migration.steps.map((/** @type {any} */ step) => step.sql), [
         'DROP INDEX "c_by_nk"', 'DROP INDEX "c_by_q"', 'DROP INDEX "c_by_r"',
@@ -104,9 +109,11 @@ describe('planColumnUpgrade on SQLite', () => {
         + 'THEN CAST(jsonb_extract("doc", \'$."q"\') AS REAL) ELSE jsonb_extract("doc", \'$."q"\') END)) VIRTUAL',
         'ALTER TABLE "c" ADD COLUMN "gx_r" ANY GENERATED ALWAYS AS (jsonb_extract("doc", \'$."r"\')) VIRTUAL',
         'ALTER TABLE "c" ADD COLUMN "gx_n" ANY GENERATED ALWAYS AS (jsonb_extract("doc", \'$."n"\')) VIRTUAL',
+        'ALTER TABLE "c" ADD COLUMN "kx_n" TEXT', ...triggers, fill,
         // the unique index keys whether its untyped member is a boolean after its columns
         'CREATE UNIQUE INDEX "c_by_nk" ON "c" ("gx_n", "gx_k", (json_type("doc", \'$."n"\') IN (\'true\', \'false\')))',
         'CREATE INDEX "c_by_q" ON "c" ("gx_q")', 'CREATE INDEX "c_by_r" ON "c" ("gx_r")',
+        'CREATE UNIQUE INDEX "c_by_nk$container" ON "c" ("kx_n", "gx_k") WHERE "kx_n" IS NOT NULL',
       ]);
       assert.deepStrictEqual((await migrate({ driver: nodeDriver(), path: dbPath }, [migration], { baseline: MODEL, model: MODEL })).applied, [migration.id]);
       assert.deepStrictEqual(columnTypes(dbPath), { gx_k: 'TEXT', gx_n: 'ANY', gx_q: 'ANY', gx_r: 'ANY' });

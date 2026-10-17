@@ -416,6 +416,46 @@ what each does is its own documentation's job
 ([linq](../packages/linq/README.md) ·
 [db](../packages/db/README.md)). What remains open:
 
+- [ ] **On PostgreSQL a unique index over a `jsonb` column keys a JSON
+  `null`.** A member whose union lists a container first (`['object',
+  'string', 'null']`), or that has no type, has a `jsonb` generated column,
+  which holds a JSON `null` as a value: a unique index over it refuses a
+  second document with `q: null` (`JD2005`), where SQLite, whose column holds
+  it as SQL `NULL`, and a member whose column holds a scalar store both, as
+  two missing members are. Wanted: one answer for two nulls on both engines (a
+  column or key that reads a JSON `null` as SQL `NULL`; a table change, a
+  minor).
+- [ ] **A unique index over a document whose member holds a kind its schema
+  does not list answers differently on the two engines.** The store does not
+  validate a member against its declared types by default: under a unique
+  `$.q` over `['number', 'string']` two documents with `q: true` (or two equal
+  objects) are both stored on PostgreSQL, whose indexes key only the kinds the
+  union lists, and the second is refused on SQLite, whose untyped column keys
+  every kind. Wanted: a decision — key every kind on PostgreSQL (an index per
+  kind beside every unique union index: a minor and an insert cost), or state
+  the unvalidated-document boundary for uniqueness as for queries.
+- [ ] **On SQLite a container key compares a member name as the document
+  spells it.** The key a unique index holds for an object reads each member's
+  path as `json_tree` spells it, which keeps the name's JSON escapes: a
+  document another writer stored as `{"A": 1}` and one the store writes as
+  `{"A": 1}` are two keys, where the query engine compares them equal. The
+  store writes every name in one spelling, so only a second writer meets it.
+  Wanted: a key built from the decoded names.
+- [ ] **On PostgreSQL a unique index refuses a key past the B-tree's entry
+  limit.** Every unique index keys its member's value whole, so a document
+  whose key there is past PostgreSQL's B-tree entry limit (a long string, a
+  large object or array) is refused `JD2005` (`class: 'error'`, the server's
+  message), though it duplicates nothing, where SQLite stores it. Wanted: a
+  key that holds a value of any size exactly (an exclusion constraint over a
+  hash index), or the limit stated and coded.
+- [ ] **On PostgreSQL `introspect()` reads the indexes beside a unique index
+  over a container-first union back as no kind.** A member whose union lists a
+  container first (`['object', 'string']`) has a `jsonb` column and, beside a
+  unique index over it, an index per scalar kind (`c_by_q$text`);
+  `introspect()` leaves the member untyped and reports that index
+  `unmapped-index`, so the model it reads back does not reopen the table
+  (`JD0002`). Wanted: read those kinds back into the member's union, as for a
+  scalar-first member.
 - [ ] **Expression indexes on entities.** An entity declares composite,
   unique and partial indexes over its members (MODEL-FORMAT §9.2), but an
   entry with an `expression` is refused (`JD0004`, §7A): an entity table has

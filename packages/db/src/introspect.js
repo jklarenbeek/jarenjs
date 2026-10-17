@@ -30,7 +30,7 @@
 import { chain, useStatementOnce } from './driver.js';
 import { DbCompileError } from './errors.js';
 import { readOptionsOrNull } from './options.js';
-import { KEY_COLUMN, DOC_COLUMN, SCALAR_CODECS, indexCondition, canonicalOf, kindIndexName } from './ddl.js';
+import { KEY_COLUMN, DOC_COLUMN, SCALAR_CODECS, indexCondition, canonicalOf, kindIndexName, containerKeysOf, kindIndexSql } from './ddl.js';
 import { columnKindFor } from './scalar-types.js';
 import { readPredicate, readIntervalCheck, sqlTokens, SQLITE_PREDICATE } from './dialects/check-read.js';
 import { comparableDeclaredSql } from './schema-sql.js';
@@ -264,9 +264,61 @@ function looksLikeCollection(dialect, table) {
   for (const column of table.columns) {
     if (column.name === KEY_COLUMN || column.name === DOC_COLUMN
       || column.name === identity) continue;
-    if (!column.generated) return false;
+    // a column a unique index keys a container by, beside its member's
+    // generated column ({@link containerKeysHeld} reads it exactly)
+    if (!column.generated && !(dialect.containerKey !== undefined && column.name.startsWith('kx_')
+      && byName.get(`gx_${column.name.slice(3)}`)?.generated === true)) return false;
   }
   return true;
+}
+
+/**
+ * The container key columns a collection table holds (`ddl.js`
+ * `containerKeysOf`), each with the two triggers that write it and the
+ * indexes beside a unique index that key it, exactly as a store creates them
+ * for the unique indexes over the members the table holds: what a model read
+ * back plans again, so none is a loss. A column, trigger or index that is
+ * not exactly that is left to be reported.
+ * @param {any} dialect
+ * @param {any} table
+ * @param {Map<string, { segments: import('./dialect.js').JsonPathSegment[] }>} paths - the members by their generated columns
+ * @param {{ type: string, name: string, owner: string, sql: string | null }[]} objects - the schema's objects
+ * @returns {{ columns: Set<string>, triggers: Set<string>, indexes: Set<string> }}
+ */
+function containerKeysHeld(dialect, table, paths, objects) {
+  const held = { columns: new Set(), triggers: new Set(), indexes: new Set() };
+  if (dialect.containerKey === undefined) return held;
+  const untyped = dialect.typeFor(undefined, 'generated');
+  const comparable = dialect.comparableColumnType;
+  const generated = table.columns.flatMap((/** @type {any} */ column) => {
+    const entry = paths.get(column.name);
+    const pathText = entry === undefined ? null : dialect.jsonPathText(entry.segments);
+    return pathText === null ? [] : [{ name: column.name, pathText,
+      type: comparable(column.type) === comparable(untyped) ? untyped : column.type }];
+  });
+  const indexes = table.indexes.flatMap((/** @type {any} */ index) => {
+    if (!index.unique || index.partial) return [];
+    const columns = booleanKeyedColumns(dialect, table, index, paths) ?? index.columns;
+    return columns.some((/** @type {string | null} */ column) => column === null || !paths.has(column)) ? []
+      : [{ name: index.name, unique: true, columns, declared: {} }];
+  });
+  const planned = containerKeysOf(dialect, table.name, indexes, generated);
+  const same = (/** @type {string | null | undefined} */ have, /** @type {string} */ want) =>
+    typeof have === 'string' && comparableDeclaredSql(have) === comparableDeclaredSql(want);
+  for (const key of planned.keys) {
+    const column = table.columns.find((/** @type {any} */ candidate) => candidate.name === key.column);
+    if (column === undefined || column.generated || comparable(column.type) !== comparable(key.type)) continue;
+    if (!key.triggers.every((trigger) => same(objects.find((object) => object.type === 'trigger'
+      && object.owner === table.name && object.name === trigger.name)?.sql, trigger.sql))) continue;
+    held.columns.add(key.column);
+    for (const trigger of key.triggers) held.triggers.add(trigger.name);
+  }
+  for (const index of planned.indexes) {
+    if (!index.keys.every((/** @type {any} */ key) => !('read' in key) || held.columns.has(key.column))) continue;
+    if (same(table.indexes.find((/** @type {any} */ candidate) => candidate.name === index.name)?.sql, kindIndexSql(dialect, table.name, index)))
+      held.indexes.add(index.name);
+  }
+  return held;
 }
 
 /**
@@ -303,8 +355,12 @@ function kindIndexesOf(dialect, table, paths) {
         const term = beside.terms?.[at];
         const pathText = dialect.jsonPathText(entry.segments);
         if (typeof term !== 'string' || entry.type === undefined || pathText === null) return undefined;
-        return KIND_TYPES.find(([kind]) => dialect.readBack.indexKey(term,
-          dialect.columnRead(doc, { pathText, kind, unpinned: entry.open ? entry.segments : undefined }), beside.conforming) === null)?.[0];
+        // the read under the guard the column carries, or the other spelling of a guarded path
+        // (a table whose model a link declared the container the other way)
+        const spellings = [entry.open ? entry.segments : undefined,
+          ...(dialect.queryGuard(doc, entry.segments) === null ? [] : [entry.open ? undefined : entry.segments])];
+        return KIND_TYPES.find(([kind]) => spellings.some((unpinned) => dialect.readBack.indexKey(term,
+          dialect.columnRead(doc, { pathText, kind, unpinned }), beside.conforming) === null))?.[0];
       });
       if (kinds.every((/** @type {any} */ kind) => kind !== undefined) && kinds.some((/** @type {any} */ kind) => kind !== null))
         matched.push({ beside, kinds });
@@ -357,7 +413,7 @@ function booleanKeyedColumns(dialect, table, index, paths) {
 }
 
 /** The schema type each kind an index beside a declared one seeks reads back as. */
-const KIND_TYPES = /** @type {const} */ ([['text', 'string'], ['number', 'number'], ['boolean', 'boolean']]);
+const KIND_TYPES = /** @type {const} */ ([['text', 'string'], ['number', 'number'], ['boolean', 'boolean'], ['object', 'object'], ['array', 'array']]);
 
 /**
  * Derive one collection. The schema it answers holds exactly the
@@ -368,9 +424,12 @@ const KIND_TYPES = /** @type {const} */ ([['text', 'string'], ['number', 'number
  * @param {any} table
  * @param {(row: any) => void} report
  * @param {Record<string, string> | undefined} keys
+ * @param {Record<string, string>} functionNames - the engine's function names back to the model's
+ * @param {{ type: string, name: string, owner: string, sql: string | null }[]} objects - the schema's objects
+ * @param {Set<string>} owned - collects the triggers the collection's container keys own
  * @returns {any}
  */
-function deriveCollection(dialect, table, report, keys, functionNames) {
+function deriveCollection(dialect, table, report, keys, functionNames, objects, owned) {
   const identity = dialect.identityColumn?.name;
   const byName = new Map(table.columns.map((column) => [column.name, column]));
   const expressions = new Map(table.generated.map((entry) => [entry.name, entry.expression]));
@@ -427,12 +486,20 @@ function deriveCollection(dialect, table, report, keys, functionNames) {
   }
 
   const besides = kindIndexesOf(dialect, table, paths);
+  const containers = containerKeysHeld(dialect, table, paths, objects);
+  for (const trigger of containers.triggers) owned.add(trigger);
+  for (const column of table.columns) {
+    if (column.generated || column.name === KEY_COLUMN || column.name === DOC_COLUMN || column.name === identity
+      || containers.columns.has(column.name)) continue;
+    report(loss('unmapped-column', `${table.name}.${column.name}`,
+      'a plain column beside the generated ones that is not a container key a unique index over the members the table holds keys'));
+  }
 
   /** The columns a plain path index covers — what a declaration requires of an interval's bounds. @type {Set<string>} */
   const indexedColumns = new Set();
   const indexes = [];
   for (const index of table.indexes) {
-    if (besides.has(index.name)) continue;
+    if (besides.has(index.name) || containers.indexes.has(index.name)) continue;
     const columns = booleanKeyedColumns(dialect, table, index, paths) ?? index.columns;
     if (index.partial || columns.some((/** @type {string | null} */ column) => column === null)) {
       report(loss('unmapped-index', `${table.name}.${index.name}`,
@@ -996,6 +1063,8 @@ export function introspectModel(connection, options = undefined) {
       add(loss('unmapped-view', view,
         'a view is not a shape a model document can declare'));
     }
+    /** The triggers a collection's container keys own, which a model read back creates again. @type {Set<string>} */
+    const owned = new Set();
     for (const object of schema.objects) {
       if (object.type === 'trigger') add({ ...loss('unmapped-object', object.name,
         'an application-owned trigger program must be explicitly preserved; inspection grants no drop permission'),
@@ -1023,7 +1092,7 @@ export function introspectModel(connection, options = undefined) {
         continue;
       }
       if (looksLikeCollection(dialect, table)) {
-        setObjectMember(collections, table.name, deriveCollection(dialect, table, add, options?.keys, byName));
+        setObjectMember(collections, table.name, deriveCollection(dialect, table, add, options?.keys, byName, schema.objects, owned));
         continue;
       }
       const hasDocument = table.columns.some((column) => column.name === DOC_COLUMN);
@@ -1037,6 +1106,8 @@ export function introspectModel(connection, options = undefined) {
       setObjectMember(entities, table.name, deriveEntity(dialect, table, add, edges));
     }
     declareEdges(dialect, entities, schema.tables, edges, add);
+    for (let i = report.length - 1; i >= 0; i--)
+      if (report[i].code === 'unmapped-object' && owned.has(report[i].object)) report.splice(i, 1);
 
     // a join table's edge belongs to the two entities it joins, and it
     // is declared on ONE of them — the shape cannot say which, so it is
