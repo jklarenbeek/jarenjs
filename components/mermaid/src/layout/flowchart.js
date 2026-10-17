@@ -314,7 +314,9 @@ function wrapLine(line, width) {
     return out;
   }
   // a markdown line: the same greedy walk over its words, each measured in
-  // its own weight, and a break drops the spaces it falls on
+  // its own weights, and a break drops the spaces it falls on. A word ends
+  // only at a space: one whose style changes inside it (`**three**four`) is
+  // one word of several runs, as a browser keeps it on one line
   /** @type {import('../label-text.js').LabelRun[][]} */
   const out = [];
   /** @type {import('../label-text.js').LabelRun[]} */
@@ -322,28 +324,37 @@ function wrapLine(line, width) {
   let currentW = 0;
   /** @type {import('../label-text.js').LabelRun[]} */
   let gap = [];
+  /** @type {import('../label-text.js').LabelRun[]} */
+  let word = [];
+  const place = () => {
+    if (word.length === 0) return;
+    const gapW = current.length === 0 ? 0 : lineWidth(gap);
+    const wordW = lineWidth(word);
+    if (current.length !== 0 && currentW + gapW + wordW > width) {
+      out.push(current);
+      current = [];
+      currentW = 0;
+    }
+    else if (current.length !== 0) {
+      for (const g of gap) appendRun(current, g);
+      currentW += gapW;
+    }
+    for (const piece of word) appendRun(current, piece);
+    currentW += wordW;
+    gap = [];
+    word = [];
+  };
   for (const run of line) {
     const words = run.text.split(' ');
     for (let i = 0; i < words.length; i++) {
-      if (i > 0) gap.push({ text: ' ', type: run.type });
-      if (words[i] === '') continue;
-      const word = { text: words[i], type: run.type };
-      const gapW = current.length === 0 ? 0 : lineWidth(gap);
-      const wordW = lineWidth([word]);
-      if (current.length !== 0 && currentW + gapW + wordW > width) {
-        out.push(current);
-        current = [];
-        currentW = 0;
+      if (i > 0) {
+        place();
+        gap.push({ text: ' ', type: run.type });
       }
-      else if (current.length !== 0) {
-        for (const g of gap) appendRun(current, g);
-        currentW += gapW;
-      }
-      appendRun(current, word);
-      currentW += wordW;
-      gap = [];
+      if (words[i] !== '') word.push({ text: words[i], type: run.type });
     }
   }
+  place();
   if (current.length !== 0) out.push(current);
   return out;
 }

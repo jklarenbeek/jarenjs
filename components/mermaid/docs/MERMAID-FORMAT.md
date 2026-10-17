@@ -97,8 +97,12 @@ members named like a theme token (`nodeFill`, `nodeText`, …, the keys of
 are ignored. Every override value, a host's included, becomes one
 `--mm-*` custom-property value on the root's inline style, so a value that
 could end that declaration or open another (`;`, `{`, `}`, `<`, a
-backslash, a line break, `/*`, an unclosed quote) or is neither a string
-nor a finite number is dropped and the theme keeps its own value.
+backslash, a line break, `/*`, an unclosed quote, a `(` or `[` that does not
+close in order, which opens a block no `;` ends) or is neither a string
+nor a finite number is dropped and the theme keeps its own value. A config
+token holding a `url()` other than a same-document `url(#id)` is dropped
+too, under every render option, as a `style` statement's remote `url()` is;
+a host's own `theme` option may name one.
 
 ## 4. The AST vocabulary
 
@@ -143,7 +147,8 @@ whose grammar permits those characters in ids.
 **Label text.** A node, edge or subgraph label holds its text without the
 quotes around it, with `<br>` (`<br/>`, `<br />`) read as a newline — the
 pipe form `A -->|"x"| B` and the inline form `A -- "x" --> B` alike, as
-Mermaid reads both. The tree keeps everything else as written; one reading
+Mermaid reads both. A quoted label is one unit, so its delimiters are text:
+`A["arr[0]"]` reads `arr[0]` and `A -->|"x|y"| B` reads `x|y`. The tree keeps everything else as written; one reading
 of it (`src/label-text.js`), shared by the layout and both label renderers,
 decides how it is drawn, and a state diagram's labels are read the same way
 (a transition or description keeps its `<br/>` in the tree and breaks there):
@@ -561,7 +566,14 @@ state first. The class printer writes a member that holds a `}` or starts with
 comment-looking lines; the pie printer writes a label's line break as `<br/>`
 and a value as a plain decimal. The flowchart printer writes a markdown string
 in quotes (`` ["`**a**`"] ``, `` |"`b`"| ``), which Mermaid needs to read it as
-one, and an edge label in the pipe form.
+one, and an edge label in the pipe form, quoted where it holds a `|` or a `;` or
+starts or ends with a quote or a space (`` |"semi;colon"| ``), so every label
+reads back as the same graph. Mermaid has no escape inside quotes, so a label
+that no quoting can hold prints one character as its decimal entity code, which
+draws as that character and reads back as the code: `"` as `#34;` where a label
+holds both quote kinds beside a `;` or its own closer, and the closer (`|`, `]`,
+`)`, `}`) where a label holds it beside a link operator (`a --> b|c` prints
+`` |"a --> b#124;c"| ``).
 
 The printer is canonical, not verbatim: it does not preserve source
 whitespace or comments. Two round-trip modes coexist:
@@ -664,7 +676,9 @@ in SSR, not in a browser — so the geometry is the same wherever it is
 computed. The scene then carries `htmlLabels: true` and the wrapped
 `lines` of every node and edge label — a line is its text, or a markdown
 line's runs (`{ text, type }`, type `normal`/`strong`/`em`), wrapped word by
-word with each word keeping its style; the SVG-text scene has neither. Every
+word with each word keeping its style (a word ends only at a space, so one whose
+style changes inside it, `**three**four`, stays on one line); the SVG-text scene
+has neither. Every
 label is measured as it is read (§4.1): decoded, one line per break, and a
 bold run in the table's bold advance.
 

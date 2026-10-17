@@ -555,14 +555,30 @@ each relations row under an `mm-edge` group; a sequence scene's messages gained
 an edge label with a `<br>` draws the lines it was measured for (its text was
 drawn on one line, over a background sized for two), the inline form
 `A -- "x" --> B` reads as the pipe form (its quotes and `<br/>` were kept as
-text, so its AST `label` and its printed form change), a state transition or
+text, so its AST `label` and its printed form change), a quoted pipe-form label
+is one unit (`A -->|"x|y"| B` read the label `"x` and an edge on to a node `y`),
+`toMermaid` quotes an edge label holding a `|` or a `;`, or a quote or space at
+either end (`A -->|semi;colon| B` did not parse, and `A -->|x|y| B` read back as
+an edge to a new node `y`) and a subgraph title with a quote or space at either
+end, a state transition or
 description breaks at `<br>` (the tag was printed), a decimal entity code
 (`#9829;`) is decoded (named codes such as `#quot;` still print as written),
 and a markdown string (`` "`**bold**`" ``) draws its bold and italic runs
 (its backticks and stars were printed), which `toMermaid` now writes quoted;
 and a subgraph holding a first-rank or first-column node no longer draws its
 frame and title above or left of the canvas: the diagram moves to hold every
-frame, so its nodes, edges and size change.
+frame, so its nodes, edges and size change. A node or edge label that no
+quoting can hold — both quote kinds beside a `;` or the label's own closer, or
+its closer beside a link operator — used to print source that did not parse or
+read back as another graph, and now prints that one character as its decimal
+entity code (`"` as `#34;`, `|` as `#124;`): the diagram reads back as the same
+graph and draws the same text, and the label reads back spelled with the code. A
+theme token, from a diagram's config or a host's theme, whose `(`, `[` or string
+does not close is dropped (it opened a block that read every later `--mm-*`
+declaration of the root style into itself); a diagram's config token holding a
+remote `url()` is dropped, as a `style` statement's is (a host's own theme still
+may name one); and an HTML label wraps a markdown line only at a space, where a
+word whose style changes inside it (`**three**four`) could break between its runs.
 
 ## Exports
 

@@ -331,8 +331,11 @@ function matchOpener(s, pos) {
   return null;
 }
 
+/** The closer of a pipe-form edge label. */
+const PIPE_CLOSER = /** @type {[string, string][]} */ ([['|', 'edge']]);
+
 /** A link operator (`-->`, `---`, `==>`, `-.->`, `--o`, `--x`, `<-->`) inside text. */
-const RE_LINK_INSIDE = /<?(?:-{2,}[>ox-]|={2,}[>ox=]|-\.+-[>ox-]?)/;
+export const RE_LINK_INSIDE = /<?(?:-{2,}[>ox-]|={2,}[>ox=]|-\.+-[>ox-]?)/;
 
 /**
  * Scan for the earliest closer sequence from `from`. A label that opens
@@ -388,12 +391,13 @@ function readEdge(s, pos) {
   if (m === null || m.index !== pos) return null;
   const info = classifyLink(m[1], m[2], m[3]);
   let p = RE_EDGE_PLAIN.lastIndex;
-  // Optional |label|
+  // Optional |label|: a quoted label is one unit, as in a node's brackets,
+  // so `|"x|y"|` reads `x|y`
   if (s.charCodeAt(p) === 0x7c /* | */) {
-    const close = s.indexOf('|', p + 1);
-    if (close !== -1) {
-      label = stripQuotes(s.slice(p + 1, close).trim());
-      p = close + 1;
+    const close = scanToCloser(s, p + 1, PIPE_CLOSER);
+    if (close !== null) {
+      label = stripQuotes(s.slice(p + 1, close.at).trim());
+      p = close.end;
     }
   }
   return { ...info, label, pos: p };

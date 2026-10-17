@@ -173,6 +173,20 @@ describe('htmlLabels — parity with the SVG-text layout', () => {
     assert.deepEqual([scene.nodes[0].w, scene.nodes[0].h], [119.81, 85.2]);
   });
 
+  it('wraps a markdown line only at a space, never where the style changes inside a word', () => {
+    const source = (/** @type {number} */ width) => `%%{init: {"flowchart": {"wrappingWidth": ${width}}}}%%\n`
+      + 'flowchart LR\n  A["`one two **three**four five`"]';
+    assert.deepEqual(layout(source(110), HOST).nodes[0].lines, [
+      [{ text: 'one two', type: 'normal' }],
+      [{ text: 'three', type: 'strong' }, { text: 'four five', type: 'normal' }],
+    ]);
+    for (let width = 40; width <= 260; width += 5) {
+      const lines = layout(source(width), HOST).nodes[0].lines
+        .map((/** @type {any[]} */ line) => line.map((run) => run.text).join(''));
+      assert.equal(lines.join(' '), 'one two threefour five', String(width));
+    }
+  });
+
   it('hands toLayout() the geometry it draws', () => {
     const source = 'flowchart TD\n  A[The quick brown fox jumps over the lazy dog twice] --> B';
     const compiled = compileMermaid(source, HOST);
@@ -253,6 +267,35 @@ describe('a diagram\'s config reaches the root style only as theme tokens', () =
     assert.ok(styleOf(svgOf('%%{init: {"nodeFill": "#ff0000"}}%%' + BODY)).includes('--mm-node-fill:#ff0000;'));
     assert.ok(svgOf('%%{init: {"nodeFill": "#ff0000"}}%%' + BODY).includes('fill="#ff0000"'));
     assert.equal(svgOf('%%{init: {"theme": "dark"}}%%' + BODY), svgOf(BODY.trimStart(), { theme: 'dark' }));
+  });
+
+  it('drops a token whose bracket or string never closes, which swallowed every declaration after it', () => {
+    const plain = styleOf(svgOf(BODY.trimStart()));
+    for (const bad of ['red(', 'red[', 'red)', 'a[b)', 'f(a))', '\'a"b\'"']) {
+      assert.equal(styleOf(svgOf(`%%{init: {"nodeFill": ${JSON.stringify(bad)}}}%%` + BODY)), plain, bad);
+      assert.equal(styleOf(svgOf(BODY.trimStart(), { theme: { nodeFill: bad } })), plain, bad);
+    }
+    for (const good of ['color-mix(in srgb, red 50%, blue)', 'rgb(1 2 3 / 0.5)', 'var(--x, rgb(1, 2, 3))']) {
+      assert.ok(styleOf(svgOf(`%%{init: {"nodeFill": "${good}"}}%%` + BODY)).includes(`--mm-node-fill:${good};`), good);
+    }
+    const font = '"Font (Pro", serif';
+    // a bracket inside a string is text
+    assert.ok(styleOf(svgOf(BODY.trimStart(), { theme: { fontFamily: font } }))
+      .includes(`--mm-font-family:${font.replaceAll('"', '&quot;')};`));
+  });
+
+  it('paints no remote url() from a diagram\'s config, as a style statement does not', () => {
+    const remote = 'url(https://evil.example/p.svg#g)';
+    const source = `%%{init: {"nodeFill": "${remote}", "nodeStroke": "URL(//evil.example/s.svg#s)", "lineColor": "url(#grad)"}}%%` + BODY;
+    for (const options of [{}, HOST, { safe: true }]) {
+      const svg = svgOf(source, options);
+      assert.equal(svg.includes('evil.example'), false, JSON.stringify(options));
+      assert.ok(svg.includes('--mm-line-color:url(#grad);'), JSON.stringify(options));
+      assert.ok(styleOf(svg).includes('--mm-node-fill:#dbeafe;'), JSON.stringify(options));
+    }
+    assert.equal(svgOf(`flowchart LR\n  A --> B\n  style A fill:${remote}`).includes('evil.example'), false);
+    // a host's own theme is the host's choice
+    assert.ok(styleOf(svgOf(BODY.trimStart(), { theme: { nodeFill: remote } })).includes(`--mm-node-fill:${remote};`));
   });
 
   it('drops an unusable override a host passes too, and keeps a usable one', () => {

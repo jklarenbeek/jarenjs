@@ -309,6 +309,16 @@ establish registry publication or downstream acceptance.
 
 ## @jarenjs/mermaid
 
+- [ ] **Flowchart statements: two silent misreads of quotes** — the inline
+  edge form reads a label holding a link operator inside its quotes as two
+  edges (`A -- "a --> b" --> B` is an edge `A`→`b` labelled `"a`, and `B`
+  vanishes); and a `;` after an apostrophe in an unquoted label is not a
+  statement separator (`A[it's] --> B; C --> D` drops `C --> D` without a
+  word), because the statement splitter takes every `'` for a quote where the
+  bracket reader does not. The printer never writes either form (it prints the
+  pipe form and one statement per line), so only hand-written source is
+  affected. Wanted: the inline reader honours a quoted label as the pipe
+  reader does, and the splitter applies the bracket reader's quote rule.
 - [ ] **`htmlLabels:true` — browser check** — flowchart and state labels
   render as HTML in `foreignObject` when the host passes `htmlLabels: true` (a
   diagram's config can turn them off, never on; sized and wrapped by the

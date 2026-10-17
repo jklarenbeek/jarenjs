@@ -136,11 +136,20 @@ export function diagramToVnode(docOrSource, options = {}) {
 }
 
 /**
+ * A `url()` that is not a same-document `url(#id)`: a reference to a
+ * resource outside the document, which `styles.js` refuses as the paint of a
+ * `style` statement.
+ */
+const RE_REMOTE_URL = /url\((?!#[\w-]+\))/i;
+
+/**
  * The theme a diagram's own config names: its `theme` when that is a name,
- * otherwise only the config members that are theme tokens (`nodeFill`, …).
- * The whole config used to be the override object, so every key — a
- * `flowchart` block, a `htmlLabels` flag, any string an author wrote — was
- * stamped onto the root's style as a `--mm-*` property.
+ * otherwise only the config members that are theme tokens (`nodeFill`, …),
+ * less any token holding a remote `url()` (the rule the `style` statement
+ * path keeps, so neither way of styling a diagram makes the page fetch
+ * something). The whole config used to be the override object, so every
+ * key — a `flowchart` block, a `htmlLabels` flag, any string an author
+ * wrote — was stamped onto the root's style as a `--mm-*` property.
  * @param {Record<string, any> | undefined} config
  * @returns {string | Record<string, any>}
  */
@@ -149,7 +158,11 @@ function authoredTheme(config) {
   if (typeof config.theme === 'string') return config.theme;
   /** @type {Record<string, any>} */
   const tokens = {};
-  for (const key of Object.keys(config)) if (Object.hasOwn(THEMES.default, key)) tokens[key] = config[key];
+  for (const key of Object.keys(config)) {
+    const value = config[key];
+    if (!Object.hasOwn(THEMES.default, key) || (typeof value === 'string' && RE_REMOTE_URL.test(value))) continue;
+    tokens[key] = value;
+  }
   return tokens;
 }
 

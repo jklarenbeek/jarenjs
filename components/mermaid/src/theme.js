@@ -173,9 +173,10 @@ export const HOST_VARS = {
  *
  * Every override value becomes one custom-property value on the root's
  * inline style, so a value that could end that declaration or open another
- * (`;`, `{`, `}`, `<`, a backslash, a line break, `/*`, an unclosed quote), and
- * a value that is neither a string nor a finite number (which used to print
- * as `[object Object]`), is dropped: the theme keeps its own value for it.
+ * (`;`, `{`, `}`, `<`, a backslash, a line break, `/*`, an unclosed quote, a
+ * `(` or `[` that does not close in order), and a value that is neither a
+ * string nor a finite number (which used to print as `[object Object]`), is
+ * dropped: the theme keeps its own value for it.
  * @param {string | Record<string, any>} [nameOrOverrides]
  * @returns {{ name: string, tokens: Record<string, string>, cssVars: Record<string, string> }}
  */
@@ -188,13 +189,29 @@ const RE_UNUSABLE = /[;{}<\\\n\r\f]|\/\*/;
 
 /**
  * Whether a value can stand as one custom-property value and nothing more.
+ * Outside its strings, every `(` and `[` closes, in order: an unclosed one,
+ * like an unclosed string, opens a block no `;` ends, and the declarations
+ * after it would be read into it.
  * @param {unknown} value
  * @returns {boolean}
  */
 function usableValue(value) {
   if (typeof value === 'number') return Number.isFinite(value);
   if (typeof value !== 'string' || RE_UNUSABLE.test(value)) return false;
-  return (value.split('"').length - 1) % 2 === 0 && (value.split("'").length - 1) % 2 === 0;
+  if ((value.split('"').length - 1) % 2 !== 0 || (value.split("'").length - 1) % 2 !== 0) return false;
+  /** @type {string[]} */
+  const closers = [];
+  let quote = '';
+  for (const ch of value) {
+    if (quote !== '') {
+      if (ch === quote) quote = '';
+    }
+    else if (ch === '"' || ch === "'") quote = ch;
+    else if (ch === '(') closers.push(')');
+    else if (ch === '[') closers.push(']');
+    else if ((ch === ')' || ch === ']') && closers.pop() !== ch) return false;
+  }
+  return quote === '' && closers.length === 0;
 }
 
 /**

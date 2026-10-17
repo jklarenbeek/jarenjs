@@ -4,7 +4,9 @@
  * The reverse arrow of `parseMermaid`, mirroring
  * `@jarenjs/md`'s `to-md.js`: one specialized closure per diagram type,
  * a **round-trip fixed point** — `parseMermaid(toMermaid(doc))`
- * deep-equals `doc.ast` for the fully-modeled types.
+ * deep-equals `doc.ast` for the fully-modeled types (but for a label no
+ * quoting can hold, which reads back spelled with an entity code: see
+ * `labelSource`).
  *
  * The printer is *canonical*, not verbatim: it does not preserve source
  * whitespace or comments (the stored Markdown fence `value` gives
@@ -14,6 +16,7 @@
 
 import { parseState } from './parser/state.js';
 import { printClick, printNodeClick } from './parser/click.js';
+import { RE_LINK_INSIDE } from './parser/flowchart.js';
 import { isMarkdownString } from './label-text.js';
 
 //#region public ----------------------------------------------------
@@ -66,7 +69,7 @@ export function toMermaid(docOrAst) {
 //#region flowchart -------------------------------------------------
 
 /**
- * Protect delimiters and literal quotes without removing label text. A
+ * What a node label needs its quotes for: delimiters and literal quotes. A
  * slash or backslash at either end would join the shape's own brackets
  * (`[/x` opens a parallelogram), and outer whitespace is trimmed on the way
  * back in.
@@ -74,13 +77,50 @@ export function toMermaid(docOrAst) {
 const RE_NEEDS_QUOTE = /[[\](){}<>|"';]|^[\s/\\]|[\s/\\]$/;
 
 /**
- * A markdown string in the quotes Mermaid needs to read it as one: unquoted,
- * its backticks are plain text there. Any other label prints as it is.
- * @param {string} text
+ * What a pipe-form edge label needs its quotes for: a `|` (which ends it), a
+ * `;` (which ends the statement), and a quote or a space at either end
+ * (stripped or trimmed on the way back in).
+ */
+const RE_EDGE_NEEDS_QUOTE = /[|;]|^[\s"']|[\s"']$/;
+
+/**
+ * What a subgraph title, which runs to its line's last `]`, needs its quotes
+ * for: a quote or a space at either end.
+ */
+const RE_TITLE_NEEDS_QUOTE = /^[\s"']|[\s"']$/;
+
+/**
+ * A label as source text that reads back as the same label. A line break
+ * prints as `<br/>` (printed raw it would end the statement). A label that
+ * `needsQuote` matches, and a markdown string (unquoted, its backticks are
+ * plain text), print quoted, in the quote kind the label does not hold; a
+ * quoted label is one unit, so its delimiters are text.
+ *
+ * Mermaid has no escape inside a quoted label, so two labels no quoting can
+ * hold print one character as its entity code, which renders as that
+ * character and reads back as the code: a label holding both quote kinds
+ * beside a `;` or its own `closer` prints `"` as `#34;`, and a label holding
+ * its `closer` beside a link operator (which ends a quoted unit) prints the
+ * closer as its code (`|` as `#124;`).
+ * @param {string} label
+ * @param {string | null} closer the last character of the delimiter that ends
+ *   the label in its statement (`]`, `)`, `}`, `|`), or `null` where the
+ *   label runs to the end of its line
+ * @param {RegExp} needsQuote what the label needs its quotes for where it stands
  * @returns {string}
  */
-function markdownQuoted(text) {
-  return isMarkdownString(text) ? `"${text}"` : text;
+function labelSource(label, closer, needsQuote) {
+  let text = label.replace(/\n/g, '<br/>');
+  if (closer !== null) {
+    const closes = text.includes(closer);
+    if (closes || text.includes(';')) {
+      if (text.includes('"') && text.includes("'")) text = text.replaceAll('"', '#34;');
+      if (closes && RE_LINK_INSIDE.test(text)) text = text.replaceAll(closer, `#${closer.charCodeAt(0)};`);
+    }
+  }
+  if (!needsQuote.test(text) && !isMarkdownString(text)) return text;
+  const quote = text.includes('"') && !text.includes("'") ? "'" : '"';
+  return quote + text + quote;
 }
 
 /**
@@ -99,7 +139,7 @@ function printFlowchart(ast) {
   // 2. Subgraphs: reference members by bare id (membership only).
   for (const sg of ast.subgraphs) {
     out.push(sg.label && sg.label !== ''
-      ? `subgraph ${sg.id} [${markdownQuoted(sg.label.replace(/\n/g, '<br/>'))}]`
+      ? `subgraph ${sg.id} [${labelSource(sg.label, null, RE_TITLE_NEEDS_QUOTE)}]`
       : `subgraph ${sg.id}`);
     if (sg.direction) out.push('  direction ' + sg.direction);
     for (const id of sg.nodes) out.push('  ' + id);
@@ -109,7 +149,7 @@ function printFlowchart(ast) {
   // 3. Edges in AST order.
   for (const e of ast.edges) {
     const op = edgeOp(e);
-    const label = e.label != null ? `|${markdownQuoted(e.label.replace(/\n/g, '<br/>'))}|` : '';
+    const label = e.label != null ? `|${labelSource(e.label, '|', RE_EDGE_NEEDS_QUOTE)}|` : '';
     out.push(`${e.from} ${op}${label} ${e.to}`);
   }
 
@@ -134,34 +174,31 @@ function nodeDecl(node) {
   return node.id + wrapShape(node.shape, node.label);
 }
 
+/** Each shape's opening and closing delimiters; any other shape is a rectangle. */
+const SHAPE_DELIMITERS = /** @type {Record<string, [string, string]>} */ ({
+  round: ['(', ')'],
+  stadium: ['([', '])'],
+  subroutine: ['[[', ']]'],
+  cylinder: ['[(', ')]'],
+  circle: ['((', '))'],
+  doublecircle: ['(((', ')))'],
+  diamond: ['{', '}'],
+  hexagon: ['{{', '}}'],
+  parallelogram: ['[/', '/]'],
+  parallelogram_alt: ['[\\', '\\]'],
+  trapezoid: ['[/', '\\]'],
+  trapezoid_alt: ['[\\', '/]'],
+  asymmetric: ['>', ']'],
+});
+
 /**
  * @param {string} shape
  * @param {string} label
  * @returns {string}
  */
 function wrapShape(shape, label) {
-  // The parser turns `<br/>` into a newline; printing that newline raw would
-  // end the statement. Emitting the tag back is what makes a transformed
-  // diagram round-trip to source that still parses.
-  const text = label.replace(/\n/g, '<br/>');
-  const quote = text.includes('"') && !text.includes("'") ? "'" : '"';
-  const l = RE_NEEDS_QUOTE.test(text) || isMarkdownString(text) ? quote + text + quote : text;
-  switch (shape) {
-    case 'round': return `(${l})`;
-    case 'stadium': return `([${l}])`;
-    case 'subroutine': return `[[${l}]]`;
-    case 'cylinder': return `[(${l})]`;
-    case 'circle': return `((${l}))`;
-    case 'doublecircle': return `(((${l})))`;
-    case 'diamond': return `{${l}}`;
-    case 'hexagon': return `{{${l}}}`;
-    case 'parallelogram': return `[/${l}/]`;
-    case 'parallelogram_alt': return `[\\${l}\\]`;
-    case 'trapezoid': return `[/${l}\\]`;
-    case 'trapezoid_alt': return `[\\${l}/]`;
-    case 'asymmetric': return `>${l}]`;
-    default: return `[${l}]`;
-  }
+  const [open, close] = Object.hasOwn(SHAPE_DELIMITERS, shape) ? SHAPE_DELIMITERS[shape] : ['[', ']'];
+  return open + labelSource(label, close[close.length - 1], RE_NEEDS_QUOTE) + close;
 }
 
 /**
