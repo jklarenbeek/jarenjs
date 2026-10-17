@@ -1360,12 +1360,18 @@ function holdsDelimited(nodes) {
 const READ_BACK = { defs: new Map(), inlines: new Map(), gfm: true, ctx: {} };
 
 /**
- * Parse printed text the way the read-back check does.
+ * Parse printed text the way the read-back check does. Every line after
+ * the first is read as the block prints it, its start guarded
+ * (`guardLineStart`): the inline reader drops a continuation line's leading
+ * white space, which the block prints as a character reference.
  * @param {string} text
  * @returns {MdNode[]}
  */
 function readBack(text) {
-  return parseInlines(text, { ...READ_BACK, defs: new Map() });
+  const printed = text.indexOf('\n') === -1
+    ? text
+    : text.split('\n').map((line, i) => (i === 0 ? line : guardLineStart(line))).join('\n');
+  return parseInlines(printed, { ...READ_BACK, defs: new Map() });
 }
 
 // ------------------------------------------------------------------
@@ -2020,7 +2026,7 @@ function searchedSpelling(nodes, canonical) {
  * `~~` are one run of four, which is no delimiter. `'unread'` names the
  * first node of any other content no spelling the printer derives or
  * searches out reads back as. A block's inline content is weighed as the inline reader reads
- * it, not what the block reader does around it.
+ * the lines the block prints (see `readBack`), not what the block reader does around it.
  * @typedef {{ code: 'empty' | 'line-edge' | 'touching' | 'unread', path: number[], reason: string }} LossReport
  */
 
@@ -2258,7 +2264,8 @@ const BLOCK_PRINTERS = {
     if (node.depth <= 2 && text.indexOf('\n') !== -1) {
       return printParagraph(node.children) + '\n' + (node.depth === 1 ? '===' : '---');
     }
-    return '#'.repeat(node.depth) + ' ' + text;
+    // the ATX reader trims the text's edges, as the cell reader does
+    return '#'.repeat(node.depth) + ' ' + guardCellEdges(text);
   },
 
   // `***`, not `---`: the printer's bullet is `-`, and `- ---` is a

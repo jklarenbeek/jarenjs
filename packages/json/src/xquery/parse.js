@@ -181,12 +181,18 @@ function fnAdjustedStart(op) {
 // the binding, outside the scope of the name the shift introduces.
 const INDEX_VAR = 'io_at';
 
+// A date value is equal only to a value of its own type, and F&O's
+// fn:index-of reads two values that do not compare as unequal: a search of
+// dates of one type among values of another finds nothing, where the
+// engine would compare their texts. Both operands are still evaluated.
 const indexOfFunction = Object.freeze({
   min: 2,
   max: 2,
-  emit: (args) => ({
+  emit: (args, refuse, [within, sought]) => ({
     '$for': { [INDEX_VAR]: { '$index-of': args } },
-    '$return': { '$add': ['$' + INDEX_VAR, 1] },
+    '$return': within !== sought && [within, sought].some(isDateTypeName) && [within, sought].every((t) => t === 'none' || isDateTypeName(t))
+      ? { '$seq': [] }
+      : { '$add': ['$' + INDEX_VAR, 1] },
   }),
 });
 
@@ -666,6 +672,26 @@ function dateConversion(from, to) {
   return 'none';
 }
 
+// The reading of a computed xs:dateTime text `$xs_value` at 24:00:00: the
+// midnight that starts the next day, the error `unread` past 9999-12-31,
+// no value for a day the calendar does not have, and `otherwise` for any
+// other text.
+function nextDay(unread, otherwise) {
+  return {
+    '$if': [
+      { '$match': ['$xs_value', `${DATE_DOMAIN}T24:00:00Z`] },
+      {
+        '$let': { xs_day: { '$concat': [{ '$substring': ['$xs_value', 0, 10] }, 'T00:00:00Z'] } },
+        '$return': { '$if': [
+          { '$is-datetime': '$xs_day' },
+          { '$if': [{ '$eq': ['$xs_day', '9999-12-31T00:00:00Z'] }, unread, { '$date-add': ['$xs_day', 1, 'day'] }] },
+        ] },
+      },
+      otherwise,
+    ],
+  };
+}
+
 // A date type. Its operand is read by its static type: a value of another
 // date type converts as XQuery casts it, a number or a boolean has no
 // value (XQuery casts neither to a date), a string literal folds, and a
@@ -680,17 +706,25 @@ function dateType(name) {
   const check = { date: '$is-date', dateTime: '$is-datetime', time: '$is-time' }[name];
   const own = { date: DATE_SHAPE, dateTime: DATETIME_SHAPE, time: TIME_SHAPE }[name];
   const other = { date: [DATETIME_SHAPE], dateTime: [DATE_SHAPE], time: [DATETIME_SHAPE] }[name];
+  const unread = raisedWith(UNSUPPORTED_VALUE, { '$concat': [`xs:${name}: `, '$xs_text', ' is a value the front-end does not read'] });
+  const outsideDomain = (operandType) => ({ '$if': [
+    { '$or': (operandType === 'maybe' ? [own, ...other] : [own]).map((shape) => ({ '$match': ['$xs_text', shape] })) },
+    unread,
+  ] });
+  // the text a literal folds to (see foldDateText): a zone of zero is `Z`,
+  // a fraction of zeros is dropped, and 24:00:00 is midnight of the next day
+  const value = name === 'date' ? '$xs_text' : { '$replace': ['$xs_text', '(\\.0+)?([+-]00:00|Z)$', 'Z'] };
   const readString = (operandType) => ({
     '$let': { xs_text: { '$normalize-space': CAST_ARG } },
     '$return': {
-      '$if': [
-        { '$match': ['$xs_text', domain] },
-        { '$if': [{ [check]: '$xs_text' }, '$xs_text'] },
-        { '$if': [
-          { '$or': (operandType === 'maybe' ? [own, ...other] : [own]).map((shape) => ({ '$match': ['$xs_text', shape] })) },
-          raisedWith(UNSUPPORTED_VALUE, { '$concat': [`xs:${name}: `, '$xs_text', ' is a value the front-end does not read'] }),
-        ] },
-      ],
+      '$let': { xs_value: name === 'time' ? { '$replace': [value, '^24:00:00Z$', '00:00:00Z'] } : value },
+      '$return': {
+        '$if': [
+          { '$match': ['$xs_value', domain] },
+          { '$if': [{ [check]: '$xs_value' }, '$xs_value'] },
+          name === 'dateTime' ? nextDay(unread, outsideDomain(operandType)) : outsideDomain(operandType),
+        ],
+      },
     },
   });
   return {
@@ -929,6 +963,28 @@ const formatNumberFunction = Object.freeze({
 
 //#region fn:remove, fn:insert-before, fn:compare
 
+// `e` with every node `replacements` holds (by identity) replaced by its
+// value there; the rest is shared, never edited
+function replaced(e, replacements) {
+  if (replacements.has(e))
+    return replacements.get(e);
+  if (e === null || typeof e !== 'object')
+    return e;
+  let out = null;
+  for (const key of Object.keys(e)) {
+    const member = replaced(e[key], replacements);
+    if (member !== e[key]) {
+      out ??= Array.isArray(e) ? e.slice() : { ...e };
+      // a map key the user wrote may be '__proto__'
+      Object.defineProperty(out, key, { value: member, writable: true, enumerable: true, configurable: true });
+    }
+  }
+  return out ?? e;
+}
+
+// the variable a guard of a date use binds its operands to (see `typed`)
+const TYPED_VAR = 'ty_args';
+
 // The operands of a composed function, each evaluated once and outside
 // every name the composition introduces: one array per operand, in an
 // array bound to `name` (an array constructor keeps the items of an
@@ -1151,6 +1207,13 @@ const ITEM_ARGUMENTS = Object.freeze({
   'min': [0], 'max': [0], 'remove': [0], 'insert-before': [0, 2],
 });
 
+// The functions that compare the items of some of their arguments: a date
+// compares only with a value of its own type, so an argument that may or
+// may not hold a date is refused (see `operandTypes`)
+const COMPARED_ARGUMENTS = Object.freeze({
+  'min': [0], 'max': [0], 'distinct-values': [0], 'index-of': [0, 1],
+});
+
 const MAP_FN_TABLE = Object.freeze({
   'get': { min: 2, max: 2, emit: (args) => ({ '$get': args }) },
 });
@@ -1196,6 +1259,9 @@ const LOOKUP_VAR = 'lk_base';
 function isPathExpr(e) {
   return typeof e === 'string' && e.charCodeAt(0) === CC_DOLLAR && e.charCodeAt(1) !== CC_DOLLAR;
 }
+
+// the name of the variable a path expression reads, or undefined
+const pathVariable = (e) => /^\$([A-Za-z_][A-Za-z0-9_]*)/.exec(e)?.[1];
 
 // True when the emitted expression evaluates to at most one item whatever
 // the input, so a lookup on it is exactly the single-item `$get`: literals,
@@ -1309,7 +1375,7 @@ export function parseXQuery(source) {
     if (typeof e === 'string') {
       if (e.charCodeAt(0) !== CC_DOLLAR || e.charCodeAt(1) === CC_DOLLAR)
         return 'none';
-      const name = /^\$([A-Za-z_][A-Za-z0-9_]*)/.exec(e)?.[1];
+      const name = pathVariable(e);
       if (name === undefined)
         return 'none';
       const type = scope.get(name) ?? 'none';
@@ -1348,24 +1414,46 @@ export function parseXQuery(source) {
     return type === 'nested' ? 'maybe' : type;
   }
 
+  // the static types of `operands`, refused by name (`use`) when one may or
+  // may not hold a date value
+  function operandTypes(operands, use, at) {
+    const types = operands.map(typeOf);
+    if (types.includes('maybe'))
+      fail(`unsupported construct '${use} of a value that may be a date'`, at);
+    return types;
+  }
+
   // `original`, raising XQuery's `code` where it is evaluated with every one
   // of `operands` non-empty (`all`) or any one of them (`!all`), the message
   // `says(type)`; refused by name (`use`) when an operand may or may not hold
-  // a date value
+  // a date value. Each operand is emitted once, so a guard nested in a guard
+  // grows the document by a constant: with `all`, `original` holds nothing
+  // but the operands, which are bound once to TYPED_VAR; without, a date
+  // operand that passes the test is the empty sequence, which `original`
+  // reads in its place.
   function typed(original, operands, { code, use, says, at, all = false }) {
-    const types = operands.map(typeOf);
-    if (types.includes('maybe'))
-      return fail(`unsupported construct '${use} of a value that may be a date'`, at);
+    const types = operandTypes(operands, use, at);
     const dates = operands.filter((_, i) => isDateTypeName(types[i]));
     if (dates.length === 0)
       return original;
-    const type = types.find(isDateTypeName);
-    const tests = (all ? operands : dates).map((e) => ({ '$exists': e }));
+    const raise = raisedWith(xqueryCode(code), `${says(types.find(isDateTypeName))} (position ${at})`);
+    if (all)
+      return withOperands(TYPED_VAR, operands, (refs) => ({
+        '$if': [
+          { '$and': refs.map((ref) => ({ '$exists': ref })) },
+          raise,
+          replaced(original, new Map(operands.map((e, i) => [e, refs[i]]))),
+        ],
+      }));
+    const tests = dates.map((e) => ({ '$exists': e }));
+    // a variable reference stays: it is short, and a name it spells may be
+    // bound again within `original`
+    const objects = dates.filter((e) => e !== null && typeof e === 'object');
     return {
       '$if': [
-        tests.length === 1 ? tests[0] : { [all ? '$and' : '$or']: tests },
-        raisedWith(xqueryCode(code), `${says(type)} (position ${at})`),
-        original,
+        tests.length === 1 ? tests[0] : { '$or': tests },
+        raise,
+        replaced(original, new Map(objects.map((e) => [e, { '$seq': [] }]))),
       ],
     };
   }
@@ -2325,6 +2413,8 @@ export function parseXQuery(source) {
     if (args.length < def.min || args.length > def.max)
       return fail(`unsupported function '${written}#${args.length}'`, at);
     const types = args.map(typeOf);
+    if (table === FN_TABLE && hasOwn(COMPARED_ARGUMENTS, local))
+      operandTypes(COMPARED_ARGUMENTS[local].map((i) => args[i]), `fn:${local}`, at);
     let out = def.emit(args, (message) => fail(message, at), types);
     if (table !== FN_TABLE)
       return out;
@@ -2573,11 +2663,15 @@ export function parseXQuery(source) {
       if (cc(pos) !== CC_COLON || cc(pos + 1) !== CC_EQ)
         fail("unsupported construct 'group by' binding without ':='", bindAt);
       pos += 2;
+      skipWS();
+      const exprAt = pos;
       const expr = parseExprSingle();
       const collationAt = tryKeyword('collation');
       if (collationAt >= 0)
         fail("unsupported construct 'collation'", collationAt);
-      bind(name, typeOf(expr));
+      // a date and a value of another type are two keys, where the engine
+      // would compare their texts
+      bind(name, operandTypes([expr], 'a group by key', exprAt)[0]);
       keys.push({ name, expr, at: bindAt });
       skipWS();
       if (cc(pos) === CC_COMMA) {
@@ -2594,7 +2688,16 @@ export function parseXQuery(source) {
   function parseOrderByClause(clauses, at) {
     const specs = [];
     for (;;) {
+      skipWS();
+      const keyAt = pos;
       const key = parseExprSingle();
+      // a date and a value of another type do not order (XPTY0004), where
+      // the engine would order their texts: a variable or a path that may
+      // hold a date is checked where the phrase returns (see
+      // guardOrderKeys), any other key is refused
+      const mayBeDate = isPathExpr(key) && typeOf(key) === 'maybe';
+      if (!isPathExpr(key))
+        operandTypes([key], 'an order by key', keyAt);
       let desc = false;
       let greatest = false;
       if (tryKeyword('ascending') < 0 && tryKeyword('descending') >= 0)
@@ -2608,7 +2711,7 @@ export function parseXQuery(source) {
       const collationAt = tryKeyword('collation');
       if (collationAt >= 0)
         fail("unsupported construct 'collation'", collationAt);
-      specs.push({ key, desc, greatest });
+      specs.push({ key, desc, greatest, mayBeDate, at: keyAt });
       skipWS();
       if (cc(pos) === CC_COMMA) {
         pos++;
@@ -2641,6 +2744,32 @@ export function parseXQuery(source) {
     for (let i = 0; i < specs.length; i++)
       out[i] = emitOrderBySpec(specs[i]);
     return out;
+  }
+
+  // `ret`, the return of a phrase ordered by `specs`, refusing a tuple whose
+  // key may be a date. The engine has ordered the keys without an error, so
+  // they are numbers or strings, and a key in no date's shape is no date: a
+  // string in one may be a date the engine compared with another string's
+  // text, and raises (`unsupported`). The key is a variable or a path
+  // (parseOrderByClause), read again here: the phrase binds no other name
+  // before its return but `countName`, which such a key may not read.
+  function guardOrderKeys(specs, countName, ret) {
+    const keys = specs.filter((spec) => spec.mayBeDate).map((spec) => spec.key);
+    if (keys.length === 0)
+      return ret;
+    const counted = specs.find((spec) => spec.mayBeDate && pathVariable(spec.key) === countName);
+    if (counted !== undefined)
+      fail("unsupported construct 'an order by key of a value that may be a date'", counted.at);
+    const mayBeDate = (key) => ({
+      '$and': [{ '$is-string': key }, { '$or': [DATE_SHAPE, DATETIME_SHAPE, TIME_SHAPE].map((shape) => ({ '$match': [key, shape] })) }],
+    });
+    return {
+      '$if': [
+        keys.length === 1 ? mayBeDate(keys[0]) : { '$or': keys.map(mayBeDate) },
+        raisedWith(UNSUPPORTED_VALUE, 'order by: a key that may be a date is a value the front-end does not order'),
+        ret,
+      ],
+    };
   }
 
   //#region clause packing
@@ -2762,9 +2891,11 @@ export function parseXQuery(source) {
       lastSlot = slot;
     }
 
-    const retExpr = i < clauses.length
+    let retExpr = i < clauses.length
       ? buildChain(clauses, i, ret, enclosingMulti || multi)
       : ret;
+    if (orderSpecs !== null)
+      retExpr = guardOrderKeys(orderSpecs, countName, retExpr);
 
     const phrase = {};
     if (forObj !== null)

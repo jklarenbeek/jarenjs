@@ -178,19 +178,29 @@ compileXQuery(text)(null, { doc: inputDocument });
 > `xs:time` is its RFC 3339 text (§4.9), and every engine operator would
 > read it as the string it is. The front-end therefore types it: the result
 > of a date constructor or cast, a variable bound to one, the items `head`,
-> `subsequence`, `if` or a FLWOR pass on, carry the date type, and every use
+> `subsequence`, `if` or a FLWOR pass on, carry the date type, and a use
 > XQuery types as an error raises XQuery's code where it is evaluated — the
 > engine's `$error` (`JQ2017`) carrying `err:FORG0006` and a message that
 > names the position (`an xs:date has no effective boolean value (position
-> 0)`). Within one type the answers
+> 0)`); arithmetic raises the engine's own `JQ2001`, which carries no XQuery
+> code (§4.9). Within one type the answers
 > are XQuery's: comparisons order by time, `string()`, `concat` and
-> `string-join` give the canonical text, `min` and `max` pick by time. §4.9
+> `string-join` give the canonical text, `min`, `max`, `distinct-values`,
+> `index-of`, `order by` and `group by` compare by time. §4.9
 > lists the uses. A use whose operand may or may not be a date (an item of
 > `(xs:date(...), "a")`, a member looked up in an array or a map that holds
 > one) is refused by name (`unsupported construct 'the effective boolean
-> value of a value that may be a date'`). The difference of two dates is a
+> value of a value that may be a date'`, `'fn:min of a value that may be a
+> date'`, `'an order by key of a value that may be a date'`). The difference of two dates is a
 > duration, a type outside the subset (`unsupported construct 'date
 > arithmetic'`).
+>
+> *Upgrade: `min`, `max`, `distinct-values`, `order by` and `group by` used
+> to compare a date's text with a string or with another date type's text
+> and answer (`min((xs:date("2007-01-01"), "2006-01-01"))` gave
+> `"2006-01-01"`); an operand that may hold both is now refused (§4.9), and
+> `index-of` finds no date among values of another type (`index-of((xs:date("2007-01-01")),
+> "2007-01-01")` is `()`, where it gave `1`).*
 
 ## 4. The supported subset
 
@@ -511,12 +521,17 @@ values whose text sorts in time order and is XSD's canonical form:
 | `xs:dateTime` | UTC (`Z`, `+00:00`, `-00:00`), no fraction of a second, years 0000 to 9999 | `"2000-01-01T12:00:00Z"` |
 | `xs:time` | UTC, no fraction of a second | `"12:00:00Z"` |
 
-XSD white space around the text is trimmed, a fraction of zeros is dropped
+XSD white space around the text is trimmed, a zone of zero is written `Z`,
+a fraction of zeros is dropped
 (`"12:00:00.000Z"` is `12:00:00Z`), and `24:00:00` is midnight of the next
 day (`xs:dateTime("1999-12-31T24:00:00Z")` is `"2000-01-01T00:00:00Z"`, as
-XSD's canonical form writes it). A literal folds when the query is parsed;
-any other operand is bound to `xs_arg` and read when the cast runs, by the
-domain's text and the engine's `$is-date`, `$is-datetime` or `$is-time`.
+XSD's canonical form writes it), for every operand. A literal folds when the query is parsed;
+any other operand is bound to `xs_arg` and read when the cast runs: its
+text is written the same way, then read by the domain's text and the
+engine's `$is-date`, `$is-datetime` or `$is-time`. *Upgrade: a computed
+text with `+00:00`, `-00:00`, a fraction of zeros or `24:00:00` used to be
+refused as a value the front-end does not read (and `castable as` raised);
+it now gives the value its literal gives.*
 
 A value XSD reads but the domain does not hold is refused by name, never
 answered: a literal as the query is read (`unsupported construct 'xs:date
@@ -552,7 +567,24 @@ the date operand non-empty:
 | a string argument: `string-length`, `substring`, `contains`, `starts-with`, `ends-with`, `upper-case`, `lower-case`, `normalize-space`, `matches`, `replace`, `tokenize`, `substring-before`, `substring-after`, `translate`, `compare`, the separator of `string-join`, the picture and format of `format-number` | `XPTY0004` |
 | a comparison with anything but a value of its own date type (a string, a number, another date type, an external value) | `XPTY0004` |
 | unary plus | `XPTY0004` |
-| unary minus, `+`, `*`, `div`, `idiv`, `mod`, `to`, a numeric function (raised by the engine's operator, which takes no string) | `XPTY0004` |
+| unary minus, `+`, `*`, `div`, `idiv`, `mod`, `to`, a numeric function | XQuery's `XPTY0004`, raised as the engine's own `JQ2001` (its operator takes no string), which carries no XQuery code |
+
+The functions and clauses that compare items — `min`, `max`,
+`distinct-values`, `index-of`, an `order by` key and a `group by` key —
+compare a date only with a value of its own type. An operand that holds
+values of one date type, the empty sequence or no date at all answers as
+XQuery does; one that may hold a date and a value of another type (two
+date types among them) is refused by name, where XQuery raises (`min`,
+`max`: `FORG0006`; `order by`: `XPTY0004`) or tells the items apart
+(`distinct-values`, `group by`). An `order by` key that is a variable or a
+path is read when the query runs instead: the engine orders the keys first
+(a key of two items, or a number and a string, is its `JQ2005`), and a
+tuple whose key is a string in a date's shape then raises the engine's
+`$error` with the code `unsupported` (`order by: a key that may be a date
+is a value the front-end does not order`). `index-of` of dates of one type among
+values of another — or of another type's value among dates — is `()`, as
+F&O's `eq` reads two values that do not compare, both operands still
+evaluated.
 
 The duration types (`xs:duration`, `xs:dayTimeDuration`,
 `xs:yearMonthDuration`) stay outside the subset: a duration's text orders
@@ -597,6 +629,7 @@ same `$error`, with XQuery's code and a message that names the refusal:
 | a position of `remove`/`insert-before` that is no integer (§4.7) | `err:XPTY0004` | `fn:remove: position 1.5` |
 | a `tokenize` flag F&O does not define (§4.6) | `err:FORX0001` | `fn:tokenize: invalid flags 't'` |
 | a date value outside the domain (§4.9) | `unsupported` | `xs:date: 1999-05-31Z is a value the front-end does not read` |
+| an `order by` key that may be a date, in a date's shape (§4.9) | `unsupported` | `order by: a key that may be a date is a value the front-end does not order` |
 
 *Upgrade: these refusals raised `JQ2001` through a number cast of the
 message (`JQ2001: 'xs:integer: 1.5' is not a JSON number`, the XQuery code

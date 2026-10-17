@@ -116,10 +116,24 @@ describe('XQuery front-end xs:date, xs:dateTime and xs:time', () => {
       failsAtRun('xs:date($s)', { s: null }, 'err:XPTY0004');
     });
 
+    it('should read the texts a literal folds as the literal reads them', () => {
+      for (const [type, text, canonical] of [['dateTime', '2007-01-01T10:00:00+00:00', '2007-01-01T10:00:00Z'],
+        ['dateTime', '2007-01-01T10:00:00-00:00', '2007-01-01T10:00:00Z'], ['dateTime', '2007-01-01T10:00:00.000Z', '2007-01-01T10:00:00Z'],
+        ['dateTime', '2007-12-31T24:00:00Z', '2008-01-01T00:00:00Z'], ['dateTime', ' 2007-12-31T24:00:00.0+00:00 ', '2008-01-01T00:00:00Z'],
+        ['time', '24:00:00Z', '00:00:00Z'], ['time', '24:00:00.000-00:00', '00:00:00Z'], ['time', '10:00:00+00:00', '10:00:00Z']]) {
+        assert.deepStrictEqual(values(`xs:${type}("${text}")`), [canonical]);
+        assert.deepStrictEqual(values(`xs:${type}($s)`, { s: text }), [canonical]);
+        assert.deepStrictEqual(values(`$s castable as xs:${type}`, { s: text }), [true]);
+      }
+      // a day the calendar does not have is no value, a year past 9999 is refused
+      failsAtRun('xs:dateTime($s)', { s: '2007-02-29T24:00:00Z' }, 'err:FORG0001');
+      failsAtRun('xs:dateTime($s)', { s: '9999-12-31T24:00:00Z' }, 'unsupported');
+    });
+
     it('should raise for a text of the type the domain refuses, never answer false', () => {
-      // 24:00:00 is a time XSD reads, and a leap second one it does not:
-      // both are refused rather than told apart
-      for (const [type, text] of [['time', '24:00:00Z'], ['time', '23:59:60Z'], ['date', '2000-01-01Z'],
+      // a leap second is a time XSD does not read, refused rather than told
+      // apart from one the domain refuses
+      for (const [type, text] of [['time', '23:59:60Z'], ['date', '2000-01-01Z'],
         ['dateTime', '2000-01-01T00:00:00+01:00'], ['dateTime', '2000-01-01T00:00:00.5Z'], ['time', '12:00:00'],
         ['date', '10000-01-01']]) {
         failsAtRun(`xs:${type}($s)`, { s: text }, 'unsupported');
@@ -138,6 +152,8 @@ describe('XQuery front-end xs:date, xs:dateTime and xs:time', () => {
     it('should not capture, or be captured by, the names a user chose', () => {
       assert.deepStrictEqual(values('let $xs_text := "2000-01-01" return xs:date($xs_text)'), ['2000-01-01']);
       assert.deepStrictEqual(values('let $xs_arg := "12:00:00Z" return xs:time($xs_arg)'), ['12:00:00Z']);
+      assert.deepStrictEqual(values('let $xs_value := "10:00:00+00:00" return xs:time($xs_value)'), ['10:00:00Z']);
+      assert.deepStrictEqual(values('let $xs_day := "2000-01-01T24:00:00Z" return xs:dateTime($xs_day)'), ['2000-01-02T00:00:00Z']);
     });
   });
 

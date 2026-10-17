@@ -608,8 +608,10 @@ whose content starts with a soft line break or ends with a line break
 close), or as a strikethrough touching another (`'touching'`: two `~~` are
 one run of four, which is no delimiter); `'unread'` names the first node
 of other content no spelling either finds reads back as. A block's inline
-content is weighed as the inline reader reads it; what the block reader
-does around it, such as dropping the spaces a paragraph starts with, is not.
+content is weighed as the inline reader reads the lines the block prints,
+each continuation line's leading space or tab printed as a reference; what
+the block reader does around it, such as dropping the spaces a paragraph
+starts with, is not.
 Without `onLossy` such content prints in the derived spelling and reads
 back as other nodes. A
 destination, a title
@@ -622,7 +624,8 @@ node that begins a continuation line prints four spaces in, and a tab in
 text prints as `&#9;`. White space the block reader drops prints its
 outermost character as a reference: a space or tab that starts a paragraph
 line (`&#32;a`; one to three spaces were dropped, four read as indented
-code), and one at either edge of a table cell. A tab inside paragraph, heading and table text is a
+code), and one at either edge of a table cell or an ATX heading's text
+(`# &#32;a`; the heading reader trims both edges). A tab inside paragraph, heading and table text is a
 tab in the AST, as it is inside code and HTML blocks.
 
 The normative round-trip guarantees:

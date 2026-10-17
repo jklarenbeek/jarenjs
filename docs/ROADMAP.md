@@ -75,6 +75,16 @@ delete it or fix it.
   `$year`/`$hours`/…; `tokenize` flags `i`, `s`, `m`, `x`, which need I-Regexp
   flags; and the `declare decimal-format` prolog.
 
+- [ ] **A value that may be a date is refused, even where it answers.** A use
+  whose operand may hold a date and a value of another type (`min(($x,
+  xs:date(...)))`, a `group by` or computed `order by` key over
+  `(xs:date(...), $x)`) is refused by name, and an `order by` variable whose
+  key is a string in a date's shape raises `unsupported` when the query runs —
+  also where the other part is empty at run time and XQuery answers. Wanted: a
+  date value the engine tells apart from a string at run time, so these
+  compare as XQuery compares them. Arithmetic on a date raises the engine's
+  `JQ2001` without XQuery's `XPTY0004`.
+
 ## @jarenjs/validate
 
 - [ ] **A compile refusal names an embedded resource's place two ways.** The
@@ -253,11 +263,12 @@ establish registry publication or downstream acceptance.
   costs the derivation and then the search.
 - [ ] **Canonical printing: white space at the end of a paragraph line.** A
   text that ends in a space before a soft break or at the end of a paragraph
-  (`a&#32;`, `a&#32;\nb`) prints the space bare, and the reader drops it; two
-  such spaces before a soft break print `a \nb`, which reads back as a hard
-  break. Wanted: that space printed as a reference where it ends a line,
-  decided at the text node (a string-level guard would also rewrite raw HTML
-  that ends a line), with `onLossy` naming any it cannot.
+  or of a setext heading's line (`a\nb&#32;\n===` prints `b ` bare, reads back
+  `b`, unreported) (`a&#32;`, `a&#32;\nb`) prints the space bare, and the
+  reader drops it; two such spaces before a soft break print `a \nb`, which
+  reads back as a hard break. Wanted: that space printed as a reference where
+  it ends a line, decided at the text node (a string-level guard would also
+  rewrite raw HTML that ends a line), with `onLossy` naming any it cannot.
 
 ## @jarenjs/mermaid
 
