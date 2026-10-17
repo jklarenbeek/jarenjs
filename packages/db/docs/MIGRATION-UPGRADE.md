@@ -3551,8 +3551,8 @@ with the code that produced them.
 
 | Native runtime / SQLite | Apply all links ms | Status loop ms | No-op apply loop ms | Observation loop ms | Measured at |
 |---|---:|---:|---:|---:|---|
-| node 24.20.0 / 3.53.4 | 9.788 | 239.180 | 241.175 | 73.587 | 2026-10-17T15:28:05.137Z |
-| bun 1.4.2 / 3.53.2 | 9.677 | 195.271 | 204.257 | 49.074 | 2026-10-17T15:28:02.062Z |
+| node 24.20.0 / 3.53.4 | 9.466 | 231.995 | 238.801 | 70.296 | 2026-10-17T20:57:33.558Z |
+| bun 1.4.2 / 3.53.2 | 9.669 | 196.113 | 200.305 | 48.889 | 2026-10-17T20:57:30.524Z |
 
 | Native runtime | Current document JSON bytes | Legacy-shaped JSON projection bytes | Side rows / key+value UTF-8 bytes | SQLite page growth bytes |
 |---|---:|---:|---:|---:|
