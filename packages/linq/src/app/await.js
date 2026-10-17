@@ -5,11 +5,14 @@
  * failure, as one `{ "$await": … }` action.
  *
  * Each member is its own query with its own closed scope, and the pen
- * captures each in exactly that scope, so a name the runtime does not
- * bind there is `JL0104` here rather than the `JA0004` the app would
+ * captures each callback in exactly that scope, so a name the runtime does
+ * not bind there is `JL0104` here rather than the `JA0004` the app would
  * raise when it compiles: `start` and `with` see `$event` and `$payload`,
  * `then` adds `$result` and `catch` adds `$error`. `start`, `then` and
  * `catch` are transitions (a `when()` may guard them); `with` is a value.
+ * A `with` written by hand as a query document is taken as it is: the app
+ * checks its names when it compiles (`JA0004`), since only the query
+ * compiler knows the names the document binds itself (`$for`, `$let`).
  */
 
 import { isJsonObject } from '@jarenjs/core/object';
