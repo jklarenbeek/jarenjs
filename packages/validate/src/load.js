@@ -16,7 +16,8 @@
 
 import { isObjectClass, isStringType } from '@jarenjs/core';
 import { isBoolOrObjectClass } from './tools.js';
-import { storeSchemaIdsInMap, DEFAULT_ORIGIN } from './traverse.js';
+import { storeSchemaIdsInMap } from './traverse.js';
+import { DEFAULT_ORIGIN } from './origin.js';
 import { SchemaCompileError, describeCount, describeKind } from './errors.js';
 import { VALIDATOR_STATE } from './validator-state.js';
 import { detectSchemaDraft, dialectDraft, dialectUriKey } from './schema-keywords.js';

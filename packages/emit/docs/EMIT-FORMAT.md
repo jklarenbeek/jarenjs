@@ -277,10 +277,13 @@ Concretely, a producer:
 - **Cross-document `$ref`.** A model compiles the document it was given.
   Following a ref into another document would mean owning a resolution scope,
   which is `@jarenjs/validate`'s job, not this format's. Within the document,
-  the resolved forms are exactly the ones `compileNormalizer` resolves — `#`,
-  `#/pointer` and plain `#anchor` (an `$anchor`, a `$dynamicAnchor`, or a
-  fragment-only `$id` such as `$id: '#foo'`, or the draft-04 `id: '#foo'` in a
-  document that declares no known draft; outside embedded `$id` resources),
+  a reference resolves exactly as `compileNormalizer` and the validator
+  resolve it: against the base URI of the resource holding it (the document,
+  or a subschema whose `$id` names a URI, relative or absolute, which starts an
+  embedded resource), to `#`, `#/pointer` or a plain `#anchor` of the resource
+  it names (an `$anchor`, a `$dynamicAnchor`, or a fragment-only `$id` such as
+  `$id: '#foo'`, or the draft-04 `id: '#foo'` in a document that declares no
+  known draft; each a name of the resource holding it),
   a name matched as the URI spells it (`#a b` is `#a%20b`; `#%41` is not
   `#A`), as the validator matches it. A
   `$ref`'s siblings are read as the validator and `compileNormalizer` read

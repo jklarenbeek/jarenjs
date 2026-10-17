@@ -35,12 +35,12 @@ import {
 } from '@jarenjs/core/schema';
 import { parseJSONPointer } from '@jarenjs/json';
 import {
-  collectSameDocumentAnchors,
-  detectSchemaDraft,
+  indexSchemaResources,
   readsRefAlone,
   referenceText,
   resolveNormalizeSwitch,
-  resolveSameDocumentRef,
+  resolveSchemaReference,
+  schemaPlace,
 } from '@jarenjs/validate/normalize';
 
 /** The model format version this module produces and consumes. */
@@ -270,26 +270,33 @@ function droppedConstraints(node) {
 }
 
 /**
- * Resolve a same-document `$ref` to `{ node, name }`, or null when it
- * addresses nothing this compiler can reach. The resolution itself is
- * imported from `@jarenjs/validate/normalize` so a reference resolves here
- * with exactly the rules the runtime normalizer uses — including plain
- * `#anchor` refs and the embedded-`$id` scope boundary. `name` is what a
- * reader of the schema calls the target: the pointer's last token, the
- * anchor name, or `Root`.
+ * Resolve a `$ref` to `{ node, name }`, or null when it addresses nothing
+ * this compiler can reach. The resolution itself is imported from
+ * `@jarenjs/validate/normalize` so a reference resolves here with exactly
+ * the rules the runtime normalizer uses: against the base of the resource
+ * holding it (an embedded `$id` starts one), to a pointer or a plain
+ * `#anchor` of the resource it names. `name` is what a reader of the schema
+ * calls the target: the pointer's last token, the anchor name, the last
+ * segment of a resource's URI, or `Root`.
+ * @param {string} ref - The reference
+ * @param {object} holder - The schema object holding it
+ * @param {object} ctx - The compile context
  */
-function resolveRef(ref, ctx) {
-  const node = resolveSameDocumentRef(ref, ctx.root, ctx.anchors);
+function resolveRef(ref, holder, ctx) {
+  const node = resolveSchemaReference(ref, schemaPlace(ctx.resources, holder).refBase, ctx.resources);
   if (node === undefined) return null;
   // named from the text the resolver read, white space dropped as it drops it
   const text = referenceText(ref);
+  const hash = text.indexOf('#');
+  const fragment = hash === -1 ? '' : text.slice(hash + 1);
   let name = null;
-  if (text === '#') name = 'Root';
-  else if (text.startsWith('#/')) {
-    const tokens = parseJSONPointer(text.slice(1));
+  if (fragment.startsWith('/')) {
+    const tokens = parseJSONPointer(fragment);
     name = tokens.length > 0 ? tokens[tokens.length - 1] : 'Root';
   }
-  else name = text.slice(1);
+  else if (fragment !== '' || hash === 0) name = text === '#' ? 'Root' : fragment;
+  else if (text === '') name = '';
+  else name = text.slice(0, hash === -1 ? text.length : hash).split('/').at(-1).replace(/\.json$/, '') || 'Root';
   return { node, name };
 }
 
@@ -327,28 +334,6 @@ function unionOf(types) {
 }
 
 /**
- * The draft each container of one document is read under: the nearest
- * `$schema` at or above it, or null where none is declared. It is the reading
- * `compileNormalizer` carries down its walk and along a reference's pointer,
- * so a node reads one way here whichever way it is reached.
- * @param {any} root - The root schema
- * @returns {Map<object, number|null>}
- */
-function collectDeclaredDrafts(root) {
-  /** @type {Map<object, number|null>} */
-  const drafts = new Map();
-  /** @param {any} node @param {number|null} inherited */
-  const walk = (node, inherited) => {
-    if (node === null || typeof node !== 'object' || drafts.has(node)) return;
-    const draft = !Array.isArray(node) && typeof node.$schema === 'string' ? detectSchemaDraft(node) : inherited;
-    drafts.set(node, draft);
-    for (const key of Object.keys(node)) walk(node[key], draft);
-  };
-  walk(root, null);
-  return drafts;
-}
-
-/**
  * The keywords a schema node is read by. Before draft 2019-09, and where no
  * draft is declared, the validator and `compileNormalizer` read a node holding
  * a `$ref` as its target alone (`readsRefAlone`): nothing beside the `$ref`
@@ -361,7 +346,7 @@ function collectDeclaredDrafts(root) {
  */
 function readingOf(node, ctx) {
   if (!isJsonObject(node) || typeof node.$ref !== 'string'
-    || !readsRefAlone(node, ctx.drafts.get(node) ?? null)) return node;
+    || !readsRefAlone(node, schemaPlace(ctx.resources, node).draft)) return node;
   return typeof node.description === 'string'
     ? { $ref: node.$ref, description: node.description }
     : { $ref: node.$ref };
@@ -423,7 +408,7 @@ function normalizationChangesType(node, ctx) {
   let differs = false;
 
   if (typeof node.$ref === 'string') {
-    const target = resolveSameDocumentRef(node.$ref, ctx.root, ctx.anchors);
+    const target = resolveRef(node.$ref, node, ctx)?.node;
     if (target !== undefined && target !== node)
       differs = normalizationChangesType(target, ctx);
   }
@@ -498,10 +483,8 @@ function createContext(root, options, shared) {
     variant: null,
     /** The suffix for accepted-variant declaration names. */
     suffix: options.variantSuffix ?? 'Input',
-    /** @type {Map<string, object>} the document's $anchor declarations */
-    anchors: shared.anchors,
-    /** @type {Map<object, number|null>} the draft each node is read under */
-    drafts: shared.drafts,
+    /** The document's resources: the base each `$ref` resolves against, the draft each node is read under */
+    resources: shared.resources,
     /** @type {Map<object, boolean>} node -> normalization changes its type */
     differs: shared.differs,
     /** @type {Set<object>} nodes being analyzed, for cycle detection */
@@ -548,8 +531,7 @@ function createPlainContext(ctx) {
     normalize: null,
     variant: null,
     suffix: ctx.suffix,
-    anchors: ctx.anchors,
-    drafts: ctx.drafts,
+    resources: ctx.resources,
     differs: ctx.differs,
     analyzing: ctx.analyzing,
     // Same array: plain declarations are emitted in discovery order among
@@ -797,7 +779,7 @@ function shapeOf(schema, ctx, hint) {
   // nothing else collapses to a plain alias below, and an unresolvable one
   // contributes nothing, leaving the node honestly wider.
   if (typeof node.$ref === 'string') {
-    const target = resolveRef(node.$ref, ctx);
+    const target = resolveRef(node.$ref, schema, ctx);
     // A ref that resolves to the node itself asserts nothing — and spelled
     // out it would be a circular alias, which is not a type.
     if (target !== null && target.node !== schema)
@@ -1067,12 +1049,12 @@ export function compileEmitModel(schema, options = {}) {
   const name = options.name ?? 'Root';
   const normalize = options.normalize ?? null;
 
-  // State shared across the two passes: the anchor map, the normalization
-  // analysis memos, and the PLAIN universe's names — plain declarations are
-  // variant-less by construction, so one set serves both sides.
+  // State shared across the two passes: the document's resources, the
+  // normalization analysis memos, and the PLAIN universe's names — plain
+  // declarations are variant-less by construction, so one set serves both
+  // sides.
   const shared = {
-    anchors: collectSameDocumentAnchors(schema),
-    drafts: collectDeclaredDrafts(schema),
+    resources: indexSchemaResources(schema),
     differs: new Map(),
     analyzing: new Set(),
     plainNamed: new Map(),

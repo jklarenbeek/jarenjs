@@ -46,7 +46,8 @@
 
 import { equalsJson, isJsonObject, setObjectMember } from '@jarenjs/core/object';
 import { SCHEMA_VALUE_KEYWORDS, SCHEMA_MAP_KEYWORDS, SCHEMA_LIST_KEYWORDS, ANNOTATION_KEYWORDS } from '@jarenjs/core/schema';
-import { collectSameDocumentAnchors, resolveSameDocumentRef, readsRefAlone } from './normalize.js';
+import { indexSchemaResources, readsRefAlone, resolveSchemaReference } from './normalize.js';
+import { withoutFragment } from './origin.js';
 import { detectSchemaDraft, dialectDraft, identifierKeyword } from './schema-keywords.js';
 import { createJsonPointer, encodeJsonPointerPath } from './traverse.js';
 import { SchemaCompileError, SchemaRuntimeError } from './errors.js';
@@ -227,12 +228,6 @@ function strictNote(keyword, value) {
     : `(strict profile: the ${keyword} keyword is relaxed here; the original schema enforces it)`;
 }
 
-/** @param {string} uri */
-function withoutFragment(uri) {
-  const hash = uri.indexOf('#');
-  return hash === -1 ? uri : uri.slice(0, hash);
-}
-
 /**
  * @typedef {object} StrictProfile
  * @property {Record<string, unknown>} schema - The profile document to hand
@@ -283,8 +278,11 @@ export function deriveStrictProfile(schema, options = {}) {
   const located = new Map();
   /** The draft each node is read under: its own `$schema`, else its document's; null where none is declared. */
   const drafts = new Map();
-  /** Resource documents by their absolute identifier. */
-  const resources = new Map();
+  /**
+   * The resources of the documents, as the validator registers them: the
+   * base each node sits under and each `$ref` resolves against.
+   */
+  const resources = indexSchemaResources(schema, { base: SCHEMA_BASE });
   /** The nodes a draft-04 `id` identifies: identity there, as `$id` is. */
   const idNodes = new WeakSet();
   /**
@@ -312,18 +310,16 @@ export function deriveStrictProfile(schema, options = {}) {
       draft = detectSchemaDraft(node);
       declared = dialectDraft(node.$schema);
     }
-    // an identifier read beside a `$ref` read alone sets no base, and one
+    // the base the resource index places the node under: an identifier
     // that names only a fragment (a draft-07 plain name) starts no resource
     const keyword = identifierKeyword(node, declared);
     if (keyword === 'id') idNodes.add(node);
-    if (keyword !== undefined && at !== `${base}#`) {
-      const named = identified(node[keyword], base, at, keyword);
-      if (named !== base && !readsRefAlone(node, draft)) {
-        base = named;
-        at = `${base}#`;
-      }
+    if (keyword !== undefined && at !== `${base}#`) identified(node[keyword], base, at, keyword);
+    const place = resources.places.get(node);
+    if (place !== undefined && place.base !== base) {
+      base = place.base;
+      at = `${base}#`;
     }
-    if (at === `${base}#`) resources.set(base, { node, anchors: collectSameDocumentAnchors(node) });
     located.set(node, at);
     drafts.set(node, draft);
     for (const key of Object.keys(node)) mapPosition(key, node[key], at, (child, there) => index(child, base, there, draft, declared));
@@ -337,6 +333,7 @@ export function deriveStrictProfile(schema, options = {}) {
     catch { base = undefined; }
     if (base === undefined)
       throw new SchemaCompileError('JK0107', 'deriveStrictProfile: every reference is a schema object with an absolute $id');
+    indexSchemaResources(reference, { base, into: resources });
     index(reference, base, `${base}#`, null, null);
   }
 
@@ -347,11 +344,12 @@ export function deriveStrictProfile(schema, options = {}) {
   const accepts = (place, value) => {
     if (original === undefined) {
       original = new JarenValidator();
-      // held under the base the index read it at, without an `$id` of its
-      // own: a draft-07 `$ref` beside the root's `$id` ignores it
+      // held under the base the index read it at, named by it, so a
+      // resource embedded in it resolves against it; without an `$id` where
+      // a draft-07 `$ref` beside the root's `$id` ignores it
       if (isJsonObject(schema)) {
         const { $id: _id, ...document } = schema;
-        original.addSchema(document, rootBase);
+        original.addSchema(readsRefAlone(schema, null) ? document : { ...document, $id: rootBase }, rootBase);
       }
       else original.addSchema({}, rootBase);
       for (const reference of references) original.addSchema(reference);
@@ -387,10 +385,9 @@ export function deriveStrictProfile(schema, options = {}) {
     let url;
     try { url = new URL(ref, base); }
     catch { throw refusal('JK0104', `$ref '${ref}' is not a URI reference`, at); }
-    const resource = resources.get(withoutFragment(url.href));
-    if (resource === undefined)
+    if (!resources.resources.has(withoutFragment(url.href)))
       throw refusal('JK0104', `$ref '${ref}' names a document neither the schema nor its references hold; pass it in references`, at);
-    const target = resolveSameDocumentRef(url.hash === '' ? '#' : url.hash, resource.node, resource.anchors);
+    const target = resolveSchemaReference(ref, base, resources);
     if (typeof target !== 'boolean' && (target === undefined || !located.has(target)))
       throw refusal('JK0104', `$ref '${ref}' resolves to no schema`, at);
     return /** @type {object|boolean} */ (target);
@@ -403,7 +400,7 @@ export function deriveStrictProfile(schema, options = {}) {
     if (member === false) return true;
     if (!isJsonObject(member) || typeof member.$ref !== 'string') return false;
     const first = located.get(member);
-    try { return targetOf(member.$ref, first === undefined ? base : withoutFragment(first), first ?? `${base}#`) === false; }
+    try { return targetOf(member.$ref, resources.places.get(member)?.refBase ?? base, first ?? `${base}#`) === false; }
     catch { return false; }
   };
 
@@ -658,9 +655,10 @@ export function deriveStrictProfile(schema, options = {}) {
     if (node === true) return carrier(true, null);
     if (!isJsonObject(node)) throw refusal('JK0108', 'a schema that accepts no value has no strict form; remove it', at);
     // a node read where the index first met it carries that resource's base,
-    // so a reference inside an embedded `$id` resolves against its own
+    // so a reference inside an embedded `$id` resolves against its own (the
+    // enclosing one's, for an `$id` beside a `$ref` read alone)
     const first = located.get(node);
-    if (first !== undefined) { at = first; base = withoutFragment(first); }
+    if (first !== undefined) { at = first; base = resources.places.get(node)?.refBase ?? withoutFragment(first); }
     // before draft 2019-09, and where no draft is declared, the original
     // reads a `$ref` alone: nothing beside it applies, so nothing beside it
     // shapes the profile (a description still documents the node)

@@ -38,9 +38,11 @@ The decisions that live here, and nowhere else:
   on); before it, and where no draft is declared, the node is its target
   alone (`readsRefAlone` from `@jarenjs/validate/normalize`, the rule the
   validator and the normalizer read). The reference itself resolves through
-  the helpers `@jarenjs/validate/normalize` exports (`#`, `#/pointer`, plain
-  `#anchor`, embedded-`$id` scope boundary), so a ref means here exactly what
-  it means to the runtime normalizer.
+  the resource index `@jarenjs/validate/normalize` exports
+  (`indexSchemaResources`, `resolveSchemaReference`: each reference against
+  the base of the resource holding it, an embedded `$id` starting one; `#`,
+  `#/pointer`, plain `#anchor` inside the resource it names), so a ref means
+  here exactly what it means to the runtime normalizer and the validator.
 - **Honest widening.** Every keyword in `DROPPED_CONSTRAINTS` is recorded on
   the node it came from and flattened into `doc` lines — including
   integer-ness, `not`, active conditionals, dependent/unevaluated keywords

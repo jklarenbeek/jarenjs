@@ -36,6 +36,7 @@ import {
   identifierKeyword,
 } from './schema-keywords.js';
 import { admitsDynamicReference } from './dynamic-ref.js';
+import { DEFAULT_ORIGIN } from './origin.js';
 
 import { SchemaCompileError } from './errors.js';
 
@@ -921,9 +922,6 @@ export function restoreSchemaRefsInMap(schemas, opts = new JsonPointerOptions(),
     }
   }
 }
-
-/** The base a schema without `$id` sits under when the host names no `origin`. */
-export const DEFAULT_ORIGIN = 'https://github.com/jklarenbeek/jarenjs';
 
 export class TraverseOptions extends JsonPointerOptions {
   constructor(

@@ -47,13 +47,13 @@ import {
   readPrefixItems,
 } from './schema-keywords.js';
 import { createSchemaPatternTester } from './string.js';
+import { DEFAULT_ORIGIN, withoutFragment } from './origin.js';
 import { appliesRefSiblings } from './dynamic-ref.js';
 
 // The validator's reading of a `pattern` string, for a consumer that checks
 // one without compiling a schema (a form field, per keystroke); and of the
-// draft a `$schema` declares, which `@jarenjs/emit` reads beside
-// {@link readsRefAlone} so a generated type reads a `$ref`'s siblings as this
-// module does.
+// draft a `$schema` declares, for a consumer that reads a `$ref`'s siblings
+// as this module does ({@link readsRefAlone}).
 export { createSchemaPatternTester, detectSchemaDraft };
 
 const hasOwn = Object.hasOwn;
@@ -128,6 +128,203 @@ function coerceToType(value, type) {
 }
 
 /**
+ * @typedef {object} SchemaPlace Where one schema object of a document sits
+ * @property {string} base - The base URI of the resource holding it: its own, when its identifier starts one
+ * @property {string} refBase - The base its `$ref` resolves against: `base`, or the enclosing
+ *   resource's where its identifier sits beside a `$ref` read alone (before draft 2019-09)
+ * @property {number|null} draft - The draft it is read under: the nearest `$schema` at or above
+ *   it ({@link detectSchemaDraft}), null where none is declared
+ * @property {number|null} declared - The known draft its document declares ({@link dialectDraft}),
+ *   null for none or an unknown one
+ */
+
+/**
+ * @typedef {object} SchemaResources The schema resources of one or more documents
+ * @property {Map<object, SchemaPlace>} places - Every schema object, by identity
+ * @property {Map<string, { node: object|boolean, names: Map<string, object> }>} resources - Each
+ *   resource by its base URI (no fragment): its root and its plain names
+ */
+
+/**
+ * Index the schema resources of a document as the validator registers
+ * them: the document is one resource, and every subschema whose identifier
+ * (`$id`, or the draft-04 `id` where the validator reads it:
+ * {@link identifierKeyword}) names a URI starts another, at that URI
+ * resolved against the base of the resource holding it — relative and
+ * absolute alike. A fragment-only identifier (`$id: '#foo'`) starts none;
+ * it is a plain name of the resource holding it, as `$anchor` and
+ * `$dynamicAnchor` are, keyed as the URI spells the name. A name spelled as
+ * a JSON Pointer (`$anchor: '/a'`) declares nothing: `#/a` is a pointer. A
+ * `$ref` resolves against the base of the resource holding it, except where
+ * an identifier sits beside a `$ref` the validator reads alone (before draft
+ * 2019-09): that identifier still names its subschema, and the `$ref`
+ * resolves against the enclosing resource. First declaration wins, which
+ * keeps the index deterministic for a document that (invalidly) repeats a
+ * name or an identifier. Exported because `@jarenjs/emit` and the strict
+ * profile resolve references through it: three readings of one document's
+ * scope would make a type or a profile disagree with this normalizer.
+ * @param {object|boolean} root - The root schema of the document
+ * @param {{ base?: string, propertyDependencies?: boolean, into?: SchemaResources }} [options] -
+ *   `base`: the URI the document is read under where it names none (the validator's default
+ *   origin); `propertyDependencies: true` also walks the subschemas of `propertyDependencies`;
+ *   `into`: an index to add the document to (a second document beside the first)
+ * @returns {SchemaResources}
+ */
+export function indexSchemaResources(root, options = {}) {
+  /** @type {SchemaResources} */
+  const index = options.into ?? { places: new Map(), resources: new Map() };
+  const base = options.base ?? DEFAULT_ORIGIN;
+  const document = { node: root, names: new Map() };
+  if (isJsonObject(root)) placeSchemas(index, root, base, null, null, document, options.propertyDependencies);
+  else if (!index.resources.has(base)) index.resources.set(base, document);
+  return index;
+}
+
+/**
+ * Walk one subtree of schema positions, placing every schema object in it;
+ * `resource` (when given) receives the names it declares and the resources
+ * it starts are registered. Without `resource`, a subtree a JSON Pointer
+ * reached outside the schema positions: placed only, as the validator
+ * reads it, registering nothing.
+ * @param {SchemaResources} index
+ * @param {any} start
+ * @param {string} startBase
+ * @param {number|null} startDraft
+ * @param {number|null} startDeclared
+ * @param {{ node: object|boolean, names: Map<string, object> }|undefined} startResource
+ * @param {boolean|undefined} propertyDependencies
+ */
+function placeSchemas(index, start, startBase, startDraft, startDeclared, startResource, propertyDependencies) {
+  const { places, resources } = index;
+  const seen = new Set();
+  /**
+   * @param {any} node @param {string} base @param {number|null} parentDraft
+   * @param {number|null} parentDeclared
+   * @param {{ node: object|boolean, names: Map<string, object> }|undefined} resource
+   * @param {boolean} isRoot
+   */
+  const walk = (node, base, parentDraft, parentDeclared, resource, isRoot) => {
+    if (!isJsonContainer(node) || seen.has(node) || places.has(node)) return;
+    seen.add(node);
+    if (Array.isArray(node)) {
+      for (let i = 0; i < node.length; i++) walk(node[i], base, parentDraft, parentDeclared, resource, false);
+      return;
+    }
+    // The draft a document declares is inherited by everything below it.
+    const draft = typeof node.$schema === 'string' ? detectSchemaDraft(node) : parentDraft;
+    const declared = typeof node.$schema === 'string' ? dialectDraft(node.$schema) : parentDeclared;
+    const declare = (/** @type {string|undefined} */ name) => {
+      if (resource !== undefined && name !== undefined && !resource.names.has(name)) resource.names.set(name, node);
+    };
+    let own = base;
+    const idName = identifierKeyword(node, declared);
+    const name = idName === undefined ? undefined : plainNameKey(node[idName]);
+    if (name !== undefined) declare(name);
+    else if (idName !== undefined) {
+      // An embedded resource, under the URI its identifier names, with names
+      // of its own (one that is no URI reference, which the validator
+      // refuses, names no URI and still has its own names)
+      own = resourceBase(node[idName], base) ?? base;
+      if (resource !== undefined && !isRoot) resource = { node, names: new Map() };
+    }
+    if (resource !== undefined && (isRoot || own !== base) && !resources.has(own)) resources.set(own, resource);
+    places.set(node, { base: own, refBase: !isRoot && readsRefAlone(node, parentDraft) ? base : own, draft, declared });
+    for (const keyword of ['$anchor', '$dynamicAnchor'])
+      if (typeof node[keyword] === 'string') declare(plainNameKey(`#${node[keyword]}`));
+    // Only schema positions are schemas. Annotation values such as defaults
+    // and examples are instance data, even when they contain $id or $anchor.
+    for (const key of Object.keys(node)) {
+      if (TRAVERSE_SCHEMA_OBJECTS.includes(key)) walk(node[key], own, draft, declared, resource, false);
+      else if (TRAVERSE_SCHEMA_MAPS.includes(key) && isJsonObject(node[key])) {
+        for (const child of Object.values(node[key])) walk(child, own, draft, declared, resource, false);
+      }
+      else if (TRAVERSE_SCHEMA_MAP_MAPS.includes(key) && admitsPropertyDependencies(propertyDependencies, draft)
+        && isJsonObject(node[key])) {
+        for (const inner of Object.values(node[key])) {
+          if (!isJsonObject(inner)) continue;
+          for (const child of Object.values(inner)) walk(child, own, draft, declared, resource, false);
+        }
+      }
+    }
+  };
+  walk(start, startBase, startDraft, startDeclared, startResource, startResource !== undefined);
+}
+
+/**
+ * The resource URI an identifier names against `base`, without its
+ * fragment; undefined for one that is no URI reference.
+ * @param {string} id
+ * @param {string} base
+ * @returns {string|undefined}
+ */
+function resourceBase(id, base) {
+  try {
+    return withoutFragment(new URL(referenceText(id), base).href);
+  }
+  catch (_e) {
+    return undefined;
+  }
+}
+
+/**
+ * Resolve a `$ref` of an indexed document to the schema it names: the URI
+ * the reference spells against `base` (the {@link SchemaPlace}'s `refBase`
+ * of the object holding it) names a resource of the index, and its fragment
+ * resolves inside that resource as {@link resolveSameDocumentRef} reads one —
+ * a JSON Pointer from the resource's root (crossing into a resource embedded
+ * below it, as the validator's does), a plain name among the resource's own.
+ * A target the walk did not place (a pointer into a non-schema position) is
+ * placed here, under the base and draft of the nearest placed object above
+ * it. A reference to a document the index does not hold is not followed.
+ * @param {string} ref - The reference as written
+ * @param {string} base - The base it resolves against
+ * @param {SchemaResources} index
+ * @returns {object|boolean|undefined} The addressed schema, or undefined
+ */
+export function resolveSchemaReference(ref, base, index) {
+  let url;
+  try {
+    url = new URL(isStringWhiteSpace(ref) ? '' : referenceText(ref), base);
+  }
+  catch (_e) {
+    return undefined;
+  }
+  const resource = index.resources.get(withoutFragment(url.href));
+  if (resource === undefined) return undefined;
+  /** @type {unknown[]} */
+  const trail = [];
+  const target = followSameDocumentRef(url.hash === '' ? '#' : url.hash, resource.node, resource.names, trail);
+  if (isJsonObject(target) && !index.places.has(target)) {
+    let { base: at, draft, declared } = schemaPlace(index, resource.node);
+    for (const passed of trail) {
+      const place = index.places.get(/** @type {object} */ (passed));
+      if (place !== undefined) ({ base: at, draft, declared } = place);
+      else if (isJsonObject(passed) && typeof passed.$schema === 'string') {
+        draft = detectSchemaDraft(passed);
+        declared = dialectDraft(passed.$schema);
+      }
+    }
+    placeSchemas(index, target, at, draft, declared, undefined, false);
+  }
+  return target;
+}
+
+/**
+ * The place of a schema object of an indexed document; one the index does
+ * not hold (a document that is no object) reads as the first document's
+ * root.
+ * @param {SchemaResources} index
+ * @param {unknown} node
+ * @returns {SchemaPlace}
+ */
+export function schemaPlace(index, node) {
+  const place = index.places.get(/** @type {object} */ (node));
+  if (place !== undefined) return place;
+  const [base] = index.resources.keys();
+  return { base, refBase: base, draft: null, declared: null };
+}
+
+/**
  * Collect the plain names of one schema document: a map from name to the
  * schema node that declares it, by an `$anchor`, a `$dynamicAnchor` or a
  * fragment-only identifier (`$id: '#foo'`, the draft-07 spelling of an
@@ -135,24 +332,17 @@ function coerceToType(value, type) {
  * draft-04 `id: '#foo'` where the validator reads `id`:
  * {@link identifierKeyword}), keyed as the URI spells the name — as the
  * validator keys it and {@link resolveSameDocumentRef} reads a reference to
- * it. A name spelled as a JSON Pointer (`$anchor: '/a'`) declares nothing:
- * `#/a` is a pointer. Exported because `@jarenjs/emit` resolves the same
- * references when it derives types, and two walks with different scope
- * rules would make a generated type disagree with this normalizer — the one
- * defect class that package must not have.
- *
- * The scope is the same-document scope the rest of this module uses: a
- * subtree that declares any other identifier is an embedded resource with
- * its own anchor scope, so it is not descended; a fragment-only one starts
- * no resource. First declaration wins, which keeps the map deterministic for
- * a document that (invalidly) repeats a name.
+ * it. The names of the document's own resource only: a subtree whose
+ * identifier names a URI is an embedded resource with its own names
+ * ({@link indexSchemaResources} indexes them all).
  * @param {object|boolean} root - The root schema of the document
  * @param {{ propertyDependencies?: boolean }} [options] - `propertyDependencies: true` also walks the
  *   subschemas of the `propertyDependencies` keyword (off, it is an unknown keyword and not walked)
  * @returns {Map<string, object>} name -> schema node
  */
 export function collectSameDocumentAnchors(root, options = {}) {
-  return collectPlainNames(root, options, undefined);
+  const index = indexSchemaResources(root, { propertyDependencies: options.propertyDependencies });
+  return /** @type {{ names: Map<string, object> }} */ (index.resources.get(schemaPlace(index, root).base)).names;
 }
 
 /**
@@ -173,78 +363,16 @@ function plainNameKey(ref) {
 }
 
 /**
- * {@link collectSameDocumentAnchors}, recording in `drafts` the draft each
- * named node is read under (the nearest `$schema` at or above it, null where
- * none is declared), so a reference to a name reads its target there.
- * @param {object|boolean} root
- * @param {{ propertyDependencies?: boolean }} options
- * @param {Map<object, number|null>|undefined} drafts
- * @returns {Map<string, object>}
- */
-function collectPlainNames(root, options, drafts) {
-  /** @type {Map<string, object>} */
-  const anchors = new Map();
-  if (!isJsonObject(root)) return anchors;
-  const seen = new Set();
-  /** @param {string|undefined} name @param {object} node @param {number|null} draft */
-  const declare = (name, node, draft) => {
-    if (name === undefined || anchors.has(name)) return;
-    anchors.set(name, node);
-    drafts?.set(node, draft);
-  };
-  /**
-   * @param {any} node @param {boolean} isRoot @param {number|null} inheritedDraft
-   * @param {number|null} inheritedDeclared - The known draft the document declares, null for none or an unknown one
-   */
-  const walk = (node, isRoot, inheritedDraft, inheritedDeclared) => {
-    if (!isJsonContainer(node) || seen.has(node)) return;
-    seen.add(node);
-    if (Array.isArray(node)) {
-      for (let i = 0; i < node.length; i++) walk(node[i], false, inheritedDraft, inheritedDeclared);
-      return;
-    }
-    // The draft a document declares is inherited by everything below it.
-    const draft = typeof node.$schema === 'string' ? detectSchemaDraft(node) : inheritedDraft;
-    const declared = typeof node.$schema === 'string' ? dialectDraft(node.$schema) : inheritedDeclared;
-    const idName = identifierKeyword(node, declared);
-    if (idName !== undefined) {
-      const name = plainNameKey(node[idName]);
-      if (name !== undefined) declare(name, node, draft);
-      else if (!isRoot) return;
-    }
-    for (const keyword of ['$anchor', '$dynamicAnchor'])
-      if (typeof node[keyword] === 'string') declare(plainNameKey(`#${node[keyword]}`), node, draft);
-    // Only schema positions declare anchors. Annotation values such as
-    // defaults and examples are instance data, even when they contain $anchor.
-    for (const key of Object.keys(node)) {
-      if (TRAVERSE_SCHEMA_OBJECTS.includes(key)) walk(node[key], false, draft, declared);
-      else if (TRAVERSE_SCHEMA_MAPS.includes(key) && isJsonObject(node[key])) {
-        for (const child of Object.values(node[key])) walk(child, false, draft, declared);
-      }
-      else if (TRAVERSE_SCHEMA_MAP_MAPS.includes(key) && admitsPropertyDependencies(options.propertyDependencies, draft)
-        && isJsonObject(node[key])) {
-        for (const inner of Object.values(node[key])) {
-          if (!isJsonObject(inner)) continue;
-          for (const child of Object.values(inner)) walk(child, false, draft, declared);
-        }
-      }
-    }
-  };
-  walk(root, true, null, null);
-  return anchors;
-}
-
-/**
  * Resolve a same-document `$ref` — `#` (or a blank reference, which names the
  * document as `#` does), `#/` followed by a JSON Pointer, or
- * `#name` for a plain `$anchor` — to the schema it addresses. The reference
+ * `#name` for a plain `$anchor` — to the schema it addresses, read from the
+ * document's root. The reference
  * is read as the validator's URL parse reads it: the C0 controls and spaces
  * around it are dropped, and every tab and line break inside it. URI fragment
  * escapes are decoded once, before JSON Pointer token escapes. Refs into other
- * documents are not followed: a normalizer compiles one schema, and reaching
- * a registered sibling would mean owning the whole resolution scope that
- * `compile` owns. Exported for `@jarenjs/emit`, which must resolve references
- * with exactly these rules when it derives the accepted/normalized variants.
+ * documents are not followed. A reference inside an embedded resource (a
+ * subschema whose `$id` names a URI) resolves against that resource, not the
+ * document: resolve it with {@link resolveSchemaReference}.
  * @param {string} ref - The reference
  * @param {object|boolean} root - The root schema being compiled
  * @param {Map<string, object>} [anchors] - The document's anchor map, from
@@ -684,19 +812,14 @@ function compileNode(node, ctx) {
   if (jsonTextStep !== null) steps.push(jsonTextStep);
 
   if (typeof node.$ref === 'string') {
-    const trail = [];
-    const target = followSameDocumentRef(node.$ref, ctx.root, ctx.anchors, trail);
+    // Resolved against the base of the resource holding the node, and read
+    // in the draft its place in the document declares, as the validator
+    // reads it.
+    const target = resolveSchemaReference(node.$ref, schemaPlace(ctx.resources, node).refBase, ctx.resources);
     // A ref this module cannot follow is left alone rather than guessed at;
     // validation still resolves it through the full ref machinery.
     if (target !== undefined && target !== node) {
-      // The target is read in the draft its place in the document declares:
-      // the nearest `$schema` on the way to it, for a name the one above the
-      // place that declares it (the root's, for the document itself).
-      let declaredDraft = null;
-      if (trail.length === 0 && ctx.nameDrafts.has(target)) declaredDraft = ctx.nameDrafts.get(target);
-      else for (const passed of trail.length === 0 ? [ctx.root] : trail) {
-        if (isJsonObject(passed) && typeof passed.$schema === 'string') declaredDraft = detectSchemaDraft(passed);
-      }
+      const declaredDraft = isJsonObject(target) ? schemaPlace(ctx.resources, target).draft : ctx.declaredDraft;
       const step = compileNode(target, declaredDraft === ctx.declaredDraft ? ctx : { ...ctx, declaredDraft });
       if (step !== null) steps.push(step);
     }
@@ -773,9 +896,10 @@ function admitNormalizeOptions(options) {
  * ```
  *
  * **What is normalized.** `properties`, `patternProperties`,
- * `additionalProperties`, `items`/`prefixItems`/`additionalItems`, same-document
- * `$ref` (`#`, `#/pointer` and plain `#anchor` forms), and `allOf` (composed,
- * with stripping disabled inside it). Before draft 2019-09, and where no draft
+ * `additionalProperties`, `items`/`prefixItems`/`additionalItems`, `$ref`
+ * within the document (resolved against the base of the resource holding it,
+ * as the validator resolves it: {@link resolveSchemaReference}), and `allOf`
+ * (composed, with stripping disabled inside it). Before draft 2019-09, and where no draft
  * is declared, a node holding a `$ref` normalizes as its target alone, as the
  * validator reads it: nothing beside the `$ref`, its `default` included. With `coerceJsonText`, a string holding
  * an object's or array's JSON text is decoded wherever such a node's `type`
@@ -829,14 +953,10 @@ export function compileNormalizer(schema, options = {}) {
     coerceJsonText: options.coerceJsonText,
   };
 
-  /** @type {Map<object, number|null>} */
-  const nameDrafts = new Map();
   const ctx = {
     options: resolved,
-    root: schema,
-    anchors: collectPlainNames(schema, {}, nameDrafts),
-    /** The draft each named node is read under, as its place in the document declares it */
-    nameDrafts,
+    /** The document's resources: the base each reference resolves against, the draft each node is read under */
+    resources: indexSchemaResources(schema),
     /** @type {number|null} The draft the schema being compiled declares, or null when none does */
     declaredDraft: null,
     /** @type {Map<string, Map<object, Function|null>>} The compiled steps per stripping mode and draft */

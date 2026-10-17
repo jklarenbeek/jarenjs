@@ -448,9 +448,13 @@ the generated file's doc comment.
 
 **Not mapped**: `if`/`then`/`else` and `not` contribute nothing to the type —
 they have no sound type-level equivalent, so they are recorded (see above)
-rather than guessed at. Cross-document `$ref`s are not followed — a model
+rather than guessed at. A `$ref` resolves against the base of the resource
+holding it (the document, or a subschema whose `$id` names a URI), as the
+validator resolves it; one into another document is not followed — a model
 compiles the document it was handed — and an unresolvable reference
-contributes nothing, leaving the node honestly wider.
+contributes nothing, leaving the node honestly wider. *Upgrade: a reference
+inside an embedded `$id` resource resolved against the document's root, so
+`#/definitions/x` there was typed by the root's `x`, not the resource's.*
 
 ## Honest comparison
 

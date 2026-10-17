@@ -1712,10 +1712,25 @@ Walked: `properties`, `patternProperties`, `additionalProperties`,
 stripping disabled inside them because one branch cannot know what a sibling
 declares.
 
-Same-document references use the fragment forms `#`, `#/pointer` and `#anchor`,
-and a blank `$ref`, which names the document as `#` does; absolute URI spellings
-are not followed by the normalizer. *Upgrade: a blank `$ref` was not followed, so
-nothing behind it was coerced or defaulted.* Defaults materialize
+A reference resolves as the validator resolves it: against the base URI of
+the resource holding it. The document is one resource, and a subschema whose
+`$id` (or the draft-04 `id`, where the validator reads it) names a URI —
+relative or absolute — starts another, embedded in it. So `#`, `#/pointer` and
+`#anchor` name that resource's root, a pointer from its root and one of its
+own names; a blank `$ref` names it as `#` does; and a URI naming another
+resource of the same document (`thing.json#/definitions/x`) is followed. A
+reference to another document is not. Before 2019-09, an `$id` beside a
+`$ref` the validator reads alone still names its subschema, and that `$ref`
+resolves against the enclosing resource. *Upgrade: a blank `$ref` was not
+followed, so nothing behind it was coerced or defaulted. A reference inside an
+embedded resource resolved against the document's root, so `{ $id:
+'http://example.com/root.json', definitions: { x: { type: 'integer' } },
+properties: { y: { $id: 'thing', definitions: { x: { type: 'string' } },
+properties: { z: { $ref: '#/definitions/x' } } } } }` with `coerceTypes`
+turned `{ y: { z: '1' } }`, which the validator accepts, into `{ y: { z: 1 }
+}`, which it rejects; a name declared inside an embedded resource was not
+reached, and a reference naming an embedded resource by its URI was not
+followed.* Defaults materialize
 only on directly annotated, absent properties: an own property set to
 `undefined` remains present, and a default found only behind a `$ref` does not
 create an absent property. A supplied value still follows that reference.
@@ -1737,7 +1752,8 @@ and refuses `'12'`: it is now coerced to `12`.* Same-document anchors are
 collected from schema positions; anchor-looking keys in defaults, constants
 and examples are data. A fragment-only `$id` (`$id: '#foo'`, the draft-07
 spelling of an anchor) names its schema object as the validator names it, in
-every draft, and starts no resource: the anchors below it are the document's;
+every draft, and starts no resource: the anchors below it are those of the
+resource holding it;
 the draft-04 `id` does the same where the validator reads it (a document that
 declares no known draft), and a `$dynamicAnchor` names its object as an
 `$anchor` does. A name is matched as the URI spells it, as the validator

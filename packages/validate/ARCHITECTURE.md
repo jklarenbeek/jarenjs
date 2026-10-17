@@ -142,8 +142,8 @@ draft-04 `id` it does not read, so the `JK0009` for a reference to either
 names it and the repair. Which keyword identifies a schema object — `$id`,
 or `id` where the document declares no known draft — is one function,
 `identifierKeyword` (schema-keywords.js), read by this walk, by
-`collectSameDocumentAnchors` (normalizer, emit), by the strict profile's
-resource index and, through `identifierOf` (traverse.js), by every place the
+`indexSchemaResources` (normalize.js: the resource index the normalizer, emit
+and the strict profile resolve references through) and, through `identifierOf` (traverse.js), by every place the
 compile derives a base or a location from an identifier: the compiled object,
 a child's location, a pointer's descent, the loop check and the precompile of
 registered documents. A
@@ -780,13 +780,16 @@ pipeline twice, as a client:
   profiles of `@jarenjs/json` (`scripts/lib/schema-profiles.js`) and every
   strict-profile node run through it.
 - **Bundling by node identity.** An index walk records every schema node's
-  `uri#pointer`, the draft it is read under, and every resource (an `$id`)
-  with its anchors (`collectSameDocumentAnchors`); a node the original reads
-  as its `$ref` alone (`readsRefAlone`, the rule `compileNormalizer` and
-  `@jarenjs/emit` read) is profiled as that `$ref`, and an `$id` beside it
-  sets no base. A `$ref` resolves with
-  `resolveSameDocumentRef` inside the resource its URI names, and the target
-  node gets one `$defs` name in the profile however many references reach it.
+  `uri#pointer` and the draft it is read under, under the base the resource
+  index (`indexSchemaResources`, the one `compileNormalizer` and
+  `@jarenjs/emit` read) places it at; a node the original reads as its `$ref`
+  alone (`readsRefAlone`) is profiled as that `$ref`, which resolves against
+  the enclosing resource even where an `$id` beside it names its own. A
+  `$ref` resolves with `resolveSchemaReference` inside the resource its URI
+  names, and the target node gets one `$defs` name in the profile however many
+  references reach it. The original's validator holds the schema under the
+  base the index read it at, named by an `$id` of that base (none where its
+  root `$ref` is read alone), so a resource embedded in it resolves there too.
 - **The original's validator decides `null`.** Once every reference is
   bundled, each optional member's place is compiled as `{ $ref: place }` by a
   `JarenValidator` holding the schema and its references, and run on `null`;
@@ -1119,7 +1122,8 @@ Map<string, ValidationObject> {
 | `restoreSchemaRefsInMap` | traverse.js | Flatten all ref chains at load time |
 | `createJsonPointer` | traverse.js | Parse URI into components (id, leftUri, fragment), its scheme and host lowered by `caselessUri` |
 | `caselessUri` / `heldUriKey` | schema-keywords.js | The one spelling of a URI a schema is held and looked up by: scheme and host in lower case (RFC 3986), the rest as written; `heldUriKey` adds the empty fragment (`addSchema`, `getSchema`, `dialectDraft`, `compileAsync`) |
-| `identifierKeyword` | schema-keywords.js | The keyword that identifies a schema object: `$id`, else the draft-04 `id` where its document declares no known draft (the walk, `collectSameDocumentAnchors`, the strict profile's index) |
+| `identifierKeyword` | schema-keywords.js | The keyword that identifies a schema object: `$id`, else the draft-04 `id` where its document declares no known draft (the walk, `indexSchemaResources`, the strict profile's index) |
+| `indexSchemaResources` / `resolveSchemaReference` | normalize.js | The resources of a document as the validator registers them (each embedded `$id` starts one; each with its plain names) and the base each schema object's `$ref` resolves against; one reference resolved inside the resource its URI names. The normalizer, `@jarenjs/emit` and the strict profile resolve through it |
 | `identifierOf` / `declaredDraftOf` | traverse.js | The identifier text a compile reads a base from (`$id`, or `id` where `identifierKeyword` reads it), by the draft the walks recorded for the object |
 | `JarenValidator.compile` | index.js | Main entry point for schema compilation, draft/vocabulary selection |
 | `JarenValidator.#precompileRefs` | index.js | Pre-create ValidationObjects for all refs |
@@ -1283,6 +1287,7 @@ For broader context on how this package fits into the JarenJS ecosystem:
 | `keyword-values.js` | Keyword value admission | `admitKeywordValues`, `KEYWORD_SHAPES` |
 | `traverse.js` | Schema traversal | `TraverseOptions`, `storeSchemaIdsInMap`, `resolveRefSchemaDeep` |
 | `tools.js` | Shared utilities | `isBoolOrObjectClass`, `hasSchemaReference`, `createIsSchemaTypeHandler` |
+| `origin.js` | The default base a schema without `$id` is read under (the compile, `compileAsync`, the resource index), and the resource a URI names | `DEFAULT_ORIGIN`, `withoutFragment` |
 | `string.js` | String keywords | `compileStringBasic` |
 | `number.js` | Number keywords | `compileNumberBasic` |
 | `bigint.js` | BigInt keywords | `compileBigIntBasic` |

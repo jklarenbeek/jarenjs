@@ -109,14 +109,28 @@ delete it or fix it.
   the key is the `$id` as written, not resolved against the origin a compile
   resolves the reference against. Pass the key (`addSchema(schema,
   'https://…/t.json')`) or an absolute `$id`.
-- [ ] **The normalizer resolves a reference inside an embedded resource
-  against the root.** `{ $id: 'http://example.com/root.json', definitions: {
-  x: { type: 'integer' } }, properties: { y: { $id: 'thing', definitions: { x:
-  { type: 'string' } }, properties: { z: { $ref: '#/definitions/x' } } } } }`:
-  the validator reads `thing`'s `x` and accepts `{ y: { z: '1' } }`;
-  `compileNormalizer(…, { coerceTypes: true })` reads the root's `x` and
-  returns `{ y: { z: 1 } }`, which the validator rejects. `@jarenjs/emit` and
-  the strict profile use the same resolver.
+- [ ] **A held document's place below a fragment-only `$id` is refused as a
+  cycle.** `addSchema({ type: 'object', definitions: { x: { type: 'integer',
+  $id: '#nm' } }, properties: { r: { $ref: '#/definitions/x' }, y: { $id:
+  '#thing', type: 'object', definitions: { x: { type: 'string' } },
+  properties: { a: { $ref: '#/properties/y/definitions/x' } } } } },
+  'jaren-strict:/schema.json')` then `compile({ $ref:
+  'jaren-strict:/schema.json#/properties/y/properties/a' })` throws `JK0001`
+  ("…#thing refers to itself and never reads the instance"), where compiling
+  the document directly answers (`{ y: { a: 's' } }` true, `{ y: { a: 1 } }`
+  false). `deriveStrictProfile` checks each member's place this way, so it
+  refuses such documents `JK0001`.
+- [ ] **`addSchema(document, key)` reads an embedded relative `$id` against
+  the default origin.** `addSchema({ definitions: { x: { type: 'integer' } },
+  properties: { y: { $id: 'thing', definitions: { x: { type: 'string' } },
+  properties: { z: { $ref: '#/definitions/x' } } } } },
+  'http://example.com/root.json')` then `compile({ $ref:
+  'http://example.com/root.json' })` is refused `JK0009` ("Can not resolve
+  'https://github.com/jklarenbeek/thing#/definitions/x'") although the
+  registration walk holds `thing` at `http://example.com/thing` (the same
+  document with `$id: 'http://example.com/root.json'` answers). Distinct from
+  "`addSchema` registers a relative `$id` under its raw text" (a root `$id`);
+  here the root has none and the key names it.
 - [ ] **A percent-encoded unreserved character is not the character in a
   reference.** `$ref: '#%41'` does not reach `$anchor: 'A'`, nor
   `http://x.test/%61.json` an `$id` of `http://x.test/a.json` (JK0009): URIs
