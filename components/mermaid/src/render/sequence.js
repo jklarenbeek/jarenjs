@@ -11,6 +11,7 @@
 
 import { svgRoot, group, rect, path, line, polygon, textAt, textLines, num } from '@jarenjs/view/helpers';
 import { textBlock } from '../label-text.js';
+import { SELF_LOOP_W } from '../layout/sequence.js';
 import { nodeMark, edgeMark } from './marks.js';
 
 /** The advance from one line of a text to the next (`textLines`' own). */
@@ -95,7 +96,7 @@ function renderMessage(m, t, fs, i) {
   if (dash) lineProps['stroke-dasharray'] = dash;
 
   if (m.self) {
-    const loopW = 40;
+    const loopW = SELF_LOOP_W;
     const y0 = m.y;
     const y1 = m.y + 26;
     parts.push(path(`M${num(m.x1)},${num(y0)} h${loopW} v${y1 - y0} h${-loopW}`, lineProps));

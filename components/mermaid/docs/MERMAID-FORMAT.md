@@ -691,7 +691,9 @@ Layout is a separate pure pass (`layoutDiagram`) producing a
 `measureText`, a per-codepoint advance-width table for a default
 sans-serif — an approximation, no `getBBox`, no DOM. Flowchart layout is
 a compact dagre-lite (longest-path ranks, banded coordinates, straight
-border-clipped edges); sequence layout resolves lifelines, message
+border-clipped edges); sequence layout resolves lifelines — spaced one gap
+apart, or as far as a message's, a self-message's or a side note's text
+between them needs, as Mermaid widens an actor gap — message
 y-advance, activation bars, notes and block frames. Geometry is
 deterministic, so golden-JSON tests catch drift.
 

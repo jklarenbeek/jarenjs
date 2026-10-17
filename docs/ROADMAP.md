@@ -295,9 +295,6 @@ establish registry publication or downstream acceptance.
 
 ## @jarenjs/mermaid
 
-- [ ] **A sequence message's width does not space the actors** — actors sit a
-  fixed gap apart, so a long message (or one an entity code widens) runs past
-  its lifelines; Mermaid widens the gap to the message.
 - [ ] **`htmlLabels:true` — browser check** — flowchart and state labels
   render as HTML in `foreignObject` when the host passes `htmlLabels: true` (a
   diagram's config can turn them off, never on; sized and wrapped by the

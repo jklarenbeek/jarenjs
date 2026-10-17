@@ -32,6 +32,50 @@ const BLOCK_LABEL_H = 24;
 const BLOCK_PAD = 12;
 /** The advance from one line of text to the next (`textLines`' own). */
 const LINE_H = FONT_SIZE * 1.2;
+/** A self-message's loop width; its text starts `SELF_TEXT_GAP` past it. */
+export const SELF_LOOP_W = 40;
+const SELF_TEXT_GAP = 6;
+/** The room a message's or a note's text keeps from a lifeline. */
+const TEXT_ROOM = 10;
+/** A note beside a lifeline sits this far from it. */
+const NOTE_GAP = 10;
+
+/**
+ * The distance each pair of actors' lifelines needs, so that no message's
+ * text runs past the lifelines it spans and no self-message's or side
+ * note's text runs into the next lifeline, as Mermaid widens an actor gap to
+ * its messages. Keyed `left,right` by actor index; the leftmost actor's
+ * left-of notes are keyed `-1,0`.
+ * @param {any[]} statements
+ * @param {Map<string, number>} index - actor id -> position
+ * @param {Map<string, number>} [needs]
+ * @returns {Map<string, number>}
+ */
+function lifelineNeeds(statements, index, needs = new Map()) {
+  const need = (/** @type {number} */ left, /** @type {number} */ right, /** @type {number} */ distance) => {
+    const key = `${left},${right}`;
+    needs.set(key, Math.max(needs.get(key) ?? 0, distance));
+  };
+  for (const stmt of statements) {
+    if (stmt.kind === 'message') {
+      const from = index.get(stmt.from) ?? 0;
+      const to = index.get(stmt.to) ?? 0;
+      const textW = widest(readTextLines(stmt.text));
+      if (from === to) need(from, from + 1, SELF_LOOP_W + SELF_TEXT_GAP + textW + TEXT_ROOM);
+      else need(Math.min(from, to), Math.max(from, to), textW + 2 * TEXT_ROOM);
+    }
+    else if (stmt.kind === 'note' && stmt.placement !== 'over') {
+      const at = stmt.actors.map((/** @type {string} */ id) => index.get(id) ?? 0);
+      const textW = widest(readTextLines(stmt.text)) + 2 * NOTE_PAD;
+      if (stmt.placement === 'right of') need(Math.max(...at), Math.max(...at) + 1, NOTE_GAP + textW + TEXT_ROOM);
+      else need(Math.min(...at) - 1, Math.min(...at), NOTE_GAP + textW + TEXT_ROOM);
+    }
+    else if (stmt.kind === 'block') {
+      for (const branch of stmt.branches) lifelineNeeds(branch.statements, index, needs);
+    }
+  }
+  return needs;
+}
 
 /**
  * The widest of some lines of text.
@@ -64,18 +108,28 @@ export function layoutSequence(ast) {
   /** @type {Map<string, any>} */
   const byId = new Map();
 
-  // Actor centers, left to right.
-  let cursor = MARGIN;
+  // Actor centers, left to right: each one gap past the box before it, or
+  // further where a message or a note between it and an earlier actor needs
+  // the room (the leftmost actor's left-of notes push it right of the margin)
+  const needs = lifelineNeeds(ast.statements, new Map(actors.map((a, i) => [a.id, i])));
+  let right = 0;
   for (let i = 0; i < actors.length; i++) {
     const a = actors[i];
-    a.x = cursor + a.w / 2;
-    a.boxX = cursor;
+    let x = i === 0
+      ? Math.max(MARGIN + a.w / 2, MARGIN + (needs.get('-1,0') ?? 0))
+      : actors[i - 1].x + actors[i - 1].w / 2 + ACTOR_GAP + a.w / 2;
+    for (let k = 0; k < i; k++) x = Math.max(x, actors[k].x + (needs.get(`${k},${i}`) ?? 0));
+    a.x = x;
+    a.boxX = x - a.w / 2;
     a.boxY = TOP;
     a.h = actorH;
     byId.set(a.id, a);
-    cursor += a.w + ACTOR_GAP;
+    right = Math.max(right, x + a.w / 2);
   }
-  const width = Math.max(cursor - ACTOR_GAP + MARGIN, ACTOR_MIN_W + 2 * MARGIN);
+  // the last actor's self-messages and right-of notes reach past its box
+  const last = actors.length - 1;
+  if (last >= 0) right = Math.max(right, actors[last].x + (needs.get(`${last},${last + 1}`) ?? 0));
+  const width = Math.max(right + MARGIN, ACTOR_MIN_W + 2 * MARGIN);
 
   const centerOf = (id) => (byId.get(id)?.x ?? MARGIN);
 

@@ -97,7 +97,9 @@ Text is measured with a per-codepoint advance-width table for a default
 sans-serif at unit em — an approximation, single-pass, no allocation, no
 DOM. Flowchart layout is a compact dagre-lite: longest-path rank
 assignment, stable within-rank ordering, banded coordinate assignment,
-straight border-clipped edges. Sequence layout resolves lifelines,
+straight border-clipped edges. Sequence layout resolves lifelines (each
+actor one gap past the last, or further where a message, a self-message or
+a side note between two lifelines needs the room for its text),
 message y-advance, activation bars, notes and nested block frames. All
 pure and deterministic, so golden-JSON tests review any geometry drift.
 HTML labels (`htmlLabels`) are measured the same way: a line wider than
@@ -126,9 +128,8 @@ reads only the markers every renderer writes, so it imports no renderer.
   sized and wrapped by the advance table, not by the host's font, and
   `safe: true` keeps them SVG text for the view safe policy, which drops
   `foreignObject` (MERMAID-FORMAT §3, §6–7).
-- Markdown strings draw bold and italic only (MERMAID-FORMAT §4.1), and a
-  sequence message's width does not space the actors: a long message runs
-  past its lifelines. See ROADMAP.
+- Markdown strings draw bold and italic only (MERMAID-FORMAT §4.1). See
+  ROADMAP.
 - Pixel parity with browser-Mermaid is a non-goal; layout is a
   deterministic approximation.
 - Class and ER render as structured panels (not full domain-specific
