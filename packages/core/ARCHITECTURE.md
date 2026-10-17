@@ -694,11 +694,11 @@ WKT↔GeoJSON converter (`npm run benchmark:geo`, Node <!--fact:geo.node-->v24.2
 <!--fact:geo.wktTable-->
 | scenario | Jaren | rival | ratio |
 |---|---|---|---|
-| wkt parse (POINT) | 462.3 ns | 1.30 µs (wellknown) | **2.8×** |
-| wkt parse (2000-vertex polygon) | 842.00 µs | 2.30 ms (wellknown) | **2.7×** |
-| wkt stringify (2000-vertex polygon) | 163.90 µs | 215.60 µs (wellknown) | **1.3×** |
-| wkt validate (POINT) | 246.2 ns | 1.27 µs (wellknown) | **5.2×** |
-| wkt validate (2000-vertex polygon) | 476.20 µs | 1.91 ms (wellknown) | **4.0×** |
+| wkt parse (POINT) | 425.8 ns | 1.29 µs (wellknown) | **3.0×** |
+| wkt parse (2000-vertex polygon) | 861.70 µs | 2.28 ms (wellknown) | **2.6×** |
+| wkt stringify (2000-vertex polygon) | 166.50 µs | 221.10 µs (wellknown) | **1.3×** |
+| wkt validate (POINT) | 281.4 ns | 1.31 µs (wellknown) | **4.7×** |
+| wkt validate (2000-vertex polygon) | 481.60 µs | 1.92 ms (wellknown) | **4.0×** |
 <!--/fact-->
 
 The last two rows are the ones the sink exists for: `wellknown` has no
@@ -749,21 +749,21 @@ below derive from the committed measurement and are refreshed with it.
 <!--fact:geo.table-->
 | scenario | Jaren | rival | ratio |
 |---|---|---|---|
-| distance (two positions) | 18.6 ns | 109.9 ns (turf) | **5.9×** |
-| distance (vs geolib, ellipsoidal) | 49.7 ns | 611.8 ns (geolib) | **12.3×** |
-| distance (equirectangular screen) | 25.1 ns | — | — |
-| point in polygon (12-vertex) | 78.5 ns | 203.2 ns (turf) | **2.6×** |
-| point in polygon (2000-vertex) | 7.02 µs | 3.74 µs (turf) | 0.5× |
-| polygon area (2000-vertex) | 17.18 µs | 18.43 µs (turf) | **1.1×** |
-| line length (500 positions) | 20.51 µs | 62.54 µs (turf) | **3.0×** |
-| bounding box (2000-vertex) | 21.51 µs | 12.95 µs (turf) | 0.6× |
-| centroid (2000-vertex) | 16.80 µs | 21.63 µs (turf) | **1.3×** |
-| index build (100k boxes) | 14.33 ms | 10.71 ms (flatbush) | 0.7× |
-| index probe (100k boxes) | 544.3 ns | 633.7 ns (flatbush) | **1.2×** |
-| linear scan (100k boxes, no index) | 145.10 µs | — | — |
+| distance (two positions) | 19.3 ns | 108.3 ns (turf) | **5.6×** |
+| distance (vs geolib, ellipsoidal) | 51.8 ns | 615.3 ns (geolib) | **11.9×** |
+| distance (equirectangular screen) | 24.1 ns | — | — |
+| point in polygon (12-vertex) | 83.3 ns | 203.7 ns (turf) | **2.4×** |
+| point in polygon (2000-vertex) | 7.16 µs | 3.70 µs (turf) | 0.5× |
+| polygon area (2000-vertex) | 18.91 µs | 18.49 µs (turf) | 1.0× |
+| line length (500 positions) | 20.54 µs | 62.26 µs (turf) | **3.0×** |
+| bounding box (2000-vertex) | 21.14 µs | 12.79 µs (turf) | 0.6× |
+| centroid (2000-vertex) | 16.66 µs | 21.65 µs (turf) | **1.3×** |
+| index build (100k boxes) | 13.97 ms | 10.71 ms (flatbush) | 0.8× |
+| index probe (100k boxes) | 527.2 ns | 632.8 ns (flatbush) | **1.2×** |
+| linear scan (100k boxes, no index) | 156.60 µs | — | — |
 <!--/fact-->
 
-The losses are kept, and named by the same measurement: on the committed run <!--fact:geo.losses-->three rows lose to a rival: point in polygon (2000-vertex) at 0.5× (turf), bounding box (2000-vertex) at 0.6× (turf), index build (100k boxes) at 0.7× (flatbush)<!--/fact-->.
+The losses are kept, and named by the same measurement: on the committed run <!--fact:geo.losses-->four rows lose to a rival: point in polygon (2000-vertex) at 0.5× (turf), polygon area (2000-vertex) at 1.0× (turf), bounding box (2000-vertex) at 0.6× (turf), index build (100k boxes) at 0.8× (flatbush)<!--/fact-->.
 **Point-in-polygon on a large ring runs at about half Turf's speed**
 (<!--fact:geo.pip2000-->0.5×<!--/fact--> at 2000 vertices) because every edge that could
 matter goes through the exact orientation predicate, where Turf uses naive
@@ -774,7 +774,7 @@ predicate on edges that cannot affect the answer, which took this from 0.2×
 to about 0.5×; the rest is the predicate itself, and making geography
 reachable across the suite never traded it away. The bounding box
 of the same ring and the index build against Flatbush sit within a few tenths
-of level (<!--fact:geo.bbox2000-->0.6×<!--/fact--> and <!--fact:geo.indexBuild-->0.7×<!--/fact-->) and move
+of level (<!--fact:geo.bbox2000-->0.6×<!--/fact--> and <!--fact:geo.indexBuild-->0.8×<!--/fact-->) and move
 between runs and Node versions; they are published as measured rather than
 rounded to a win.
 

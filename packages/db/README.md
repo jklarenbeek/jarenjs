@@ -835,12 +835,12 @@ as-of join over one seeded corpus by plain references, by the temporal
 kernel, by a generic query document, by hand-written SQL and by the
 store — every route checked against the others before a timing is
 taken. At <!--fact:series.corpus-->100,000 samples at 1-second spacing, Node v24.20.0<!--/fact-->,
-the store is measured three ways at once — <!--fact:series.storeShapes-->the planned range costs 4.2× the hand-written statement and 2585.6× the resident cut, and the index-bounded bucket (its mean added in the engine) 4.9× the hand-written GROUP BY, 1.1× SLOWER than the generic query route, and 286.9× the one-pass loop<!--/fact-->.
+the store is measured three ways at once — <!--fact:series.storeShapes-->the planned range costs 4.4× the hand-written statement and 2304.0× the resident cut, and the index-bounded bucket (its mean added in the engine) 5.0× the hand-written GROUP BY, 1.2× SLOWER than the generic query route, and 299.9× the one-pass loop<!--/fact-->.
 The range row is not the planner's price: the statement selects two
 COLUMNS where the store renders and parses a whole JSON document per
 row, which is what storing documents costs.
 
-And what a refinement costs, with the loss in it: <!--fact:series.storeRefinement-->A window measured in time is not pushed: the store answers it at 17.2× the kernel over an array already in memory, over 100,000 candidates the index bounded. The batched as-of join reads 91,682 rows in 2 statements and costs 1437.5× fifty-one separate index reads — a bound is what it buys, not a speed-up. Without a tolerance the open side has no bound the probes imply, so the plan reads the data's own: the last instant each series carries at or before the earliest probe, folded to the least of them. That anchor is the extra statement, and what it saves depends on where the probes sit — evenly spread ones, as here, leave the least below them to skip.<!--/fact-->
+And what a refinement costs, with the loss in it: <!--fact:series.storeRefinement-->A window measured in time is not pushed: the store answers it at 31.0× the kernel over an array already in memory, over 100,000 candidates the index bounded. The batched as-of join reads 91,682 rows in 2 statements and costs 1486.9× fifty-one separate index reads — a bound is what it buys, not a speed-up. Without a tolerance the open side has no bound the probes imply, so the plan reads the data's own: the last instant each series carries at or before the earliest probe, folded to the least of them. That anchor is the extra statement, and what it saves depends on where the probes sit — evenly spread ones, as here, leave the least below them to skip.<!--/fact-->
 
 **A refinement is named, never quiet.** `explain().series` reports
 `mode` — `native`, `hybrid` or `engine` — the declared index the fetch
@@ -1327,13 +1327,13 @@ disagree.
 <!--fact:live.eventTimeTable-->
 | view | maintained | re-run | ratio |
 |---|---:|---:|---:|
-| bucket (60 s ladder, mean), 1000 rows | 121 µs | 1.1 ms | 9.1× |
-| rolling (5 min window, mean), 1000 rows | 421 µs | 3.89 ms | 9.2× |
-| bucket (60 s ladder, mean), 10000 rows | 137 µs | 10.7 ms | 78.0× |
-| rolling (5 min window, mean), 10000 rows | 13.2 ms | 66.3 ms | 5.0× |
+| bucket (60 s ladder, mean), 1000 rows | 137 µs | 1.14 ms | 8.3× |
+| rolling (5 min window, mean), 1000 rows | 463 µs | 3.98 ms | 8.6× |
+| bucket (60 s ladder, mean), 10000 rows | 152 µs | 11.1 ms | 72.6× |
+| rolling (5 min window, mean), 10000 rows | 13.4 ms | 65.9 ms | 4.9× |
 <!--/fact-->
 
-The gain is <!--fact:live.eventTimeBand-->78.0× for the bucket and 5.0× for the rolling at 10,000 readings<!--/fact-->. A bucket
+The gain is <!--fact:live.eventTimeBand-->72.6× for the bucket and 4.9× for the rolling at 10,000 readings<!--/fact-->. A bucket
 view is nearly flat in the series length, because a write folds one
 bucket again and the rest of the ladder is untouched. A rolling view is
 not, and the table says so: its answer is one row per reading, so the

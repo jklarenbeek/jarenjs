@@ -330,7 +330,8 @@ if (modelEngineLeak.length > 0)
 // Raised to 56,500 (measured 56406): the shared capture's coded refusal of every array and string method on a member, and the predicate a to-many relation's array method needs, add 2338.
 // Raised to 57,100 (measured 57054): the shared capture's reading of an index off a relation as a hop for in() and all() add 648.
 // Raised to 57,200 (measured 57113): core's shared-value equality and key helpers the model pen carries add 26.
-if (modelBytes > 57200)
+// Raised to 57,600 (measured 57500): an entity index's expression read, its members held to one top-level member each, add 387.
+if (modelBytes > 57600)
   throw new Error(`The model pen bundle grew to ${modelBytes} bytes.`);
 const schemaModelLeak = Object.entries(schemaInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/model/') && info.bytesInOutput > 0);
@@ -465,7 +466,8 @@ if (migrationEngineLeak.length > 0)
 // Raised to 34,000 (measured 33951): the shared capture's reading of an index off a relation as a hop for in() and all() add 647.
 // Raised to 34,100 (measured 34044): the canonical form's data depth bound add 93.
 // Raised to 34,700 (measured 34613): the coded canonicalization refusals (510) and core's shared-value helpers add 536.
-if (migrationBytes > 34700)
+// Raised to 35,100 (measured 35055): the canonical writer's coded refusal of a text past the host's longest string, with the core check that tells it from a stack overflow, add 373.
+if (migrationBytes > 35100)
   throw new Error(`The migration pen bundle grew to ${migrationBytes} bytes.`);
 const chainMigrationLeak = Object.entries(chainInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/migration/') && info.bytesInOutput > 0);
@@ -650,7 +652,8 @@ if (asyncLiveLeak.length)
 // Raised to 1,058,700 (measured 1058619): the PostgreSQL layout index's expression key read back through the relational grammar add 486.
 // Raised to 1,067,600 (measured 1067514): the per-kind union and unique indexes with the boolean key that keeps true apart from 1 (ddl 3983) and their read-back (introspect 2076), the validator's exact dialect and vocabulary matching (1942), and the native grouping and seek plans (790) add 8895.
 // Raised to 1,081,000 (measured 1080970): the validator's compile-time keyword value shapes read from the draft meta-schemas (keyword-values 5392) and its coded refusals, and the per-kind unique keys on both engines with decoded member names and typed-column kinds (ddl, introspect, sqlite dialect 6894) add 13456.
-if (clientBytes > 1081000)
+// Raised to 1,092,700 (measured 1092604): entity expression indexes planned, verified at open and read back (ddl, model, introspect, expression), integers past 2^53 read and compared by the doubles that round to them on every engine and host (double-interval, emit, query, dialects), windows and counts over concatenation and arithmetic (plan), the probe that keeps an unbounded integer order on its index and the coded refusals the hunts added add 13757; the keyword-value shape table saves 2123.
+if (clientBytes > 1092700)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 

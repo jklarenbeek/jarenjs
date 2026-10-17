@@ -1183,10 +1183,10 @@ never builds one; the migration between two of them is
 
 ## 7. Cost
 
-`@jarenjs/linq/db` builds to **<!--fact:bundle.db-->1,080,970<!--/fact--> bytes** as a minified,
+`@jarenjs/linq/db` builds to **<!--fact:bundle.db-->1,092,604<!--/fact--> bytes** as a minified,
 tree-shaken ESM bundle — the figure `scripts/check-tree-shaking.js`
 measures and `npm run test:tree-shaking` reports, published rounded
-(<!--fact:bundle.db.kb-->1081<!--/fact--> kB) beside the other subpath prices in
+(<!--fact:bundle.db.kb-->1093<!--/fact--> kB) beside the other subpath prices in
 [docs/CONSUMING.md](../../../docs/CONSUMING.md).
 
 It is by far the largest of them, and the reason is §1.1's edge rather
@@ -1217,7 +1217,7 @@ What the probe asserts, and fails the build on:
   asserts the same exclusion.
 
 A consumer who wants the model pen's types without the store pays
-`./model`'s <!--fact:bundle.model-->57,113<!--/fact--> bytes and installs no peer; one who wants to run
+`./model`'s <!--fact:bundle.model-->57,500<!--/fact--> bytes and installs no peer; one who wants to run
 queries against an array rather than a database pays the chain's price
 (§17 of [QUERY-PEN.md](QUERY-PEN.md)) and installs no peer. `./db` is
 the one subpath whose `package.json` entry carries an optional peer at
@@ -1230,7 +1230,7 @@ beside Prisma, Drizzle and Kysely over the same SQLite corpus, equality
 asserted before anything is timed and statement counts printed beside
 the timings.
 
-Against the store it fronts, the door is nearly free: <!--fact:orm.clientDoorPrice-->1.0× on a point read, 1.0× on an indexed predicate at 10 % selectivity, 1.0× on the two-level graph load<!--/fact-->
+Against the store it fronts, the door is nearly free: <!--fact:orm.clientDoorPrice-->0.9× on a point read, 1.1× on an indexed predicate at 10 % selectivity, 1.0× on the two-level graph load<!--/fact-->
 — because it issues the same documents the store would. What it does
 NOT amortize is capture: a chain re-captures its callbacks and re-emits
 its document on **every** call, by design, which is the predicate row's
@@ -1238,7 +1238,7 @@ difference and which a caller with a hot query removes by holding the
 `Sequence` (or the emitted document) instead of rebuilding it.
 
 Against the rivals, at this corpus, it is faster on <!--fact:orm.clientVsRivals-->7 of 9 against Prisma, 2 of 9 against Drizzle, 1 of 9 against Kysely<!--/fact-->,
-and here is every row where the *fastest* rival beats it — <!--fact:orm.clientLosses-->update one column by primary key 20.2× (Drizzle), nested json member filter 11.6× (Kysely), graph load 5.3× (Kysely), cold start 5.1× (Prisma), indexed predicate over 500 users, ids only 2.7× (Kysely), posts per user 2.5× (Kysely), pagination over 5000 comments, page size 20 2.0× (Kysely), insert 2.0× (Kysely), point read by primary key 1.6× (Drizzle)<!--/fact-->.
+and here is every row where the *fastest* rival beats it — <!--fact:orm.clientLosses-->update one column by primary key 21.2× (Drizzle), nested json member filter 11.2× (Kysely), cold start 6.1× (Prisma), graph load 5.3× (Kysely), indexed predicate over 500 users, ids only 3.2× (Kysely), posts per user 2.5× (Kysely), pagination over 5000 comments, page size 20 2.2× (Kysely), insert 2.0× (Kysely), point read by primary key 1.7× (Drizzle)<!--/fact-->.
 
 Three things make that list readable rather than damning, and none of
 them removes a row from it. **Kysely is a SQL builder**: on every row it
