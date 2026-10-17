@@ -244,25 +244,44 @@ function doubleOf(sql) {
 }
 
 /**
- * Two `numeric`s equal as the doubles the engine holds ({@link doubleOf}),
- * beside a range of each around the other that holds every decimal rounding
- * to the same double, so that an index over either column still finds the
- * other's rows (a join's inner rows, a hop's): two decimals that round to
- * one finite double lie within its spacing, at most 2^-52 of its magnitude,
- * of each other — bounded by 5·10^-16 of either's magnitude, plus 10^-323
- * for the subnormals and zero, whose spacing is 2^-1074 — and two that round
- * to an infinity lie past ±10^308, where the range reaches the infinity
- * `numeric` can hold. The ranges are wider than they need be, never narrower;
- * the equality of the doubles decides.
- * @param {string} left - a `numeric` @param {string} right - a `numeric`
+ * A range around the `numeric` `to` that holds every decimal rounding to
+ * the same double as it: two decimals that round to one finite double lie
+ * within its spacing, at most 2^-52 of its magnitude, of each other —
+ * bounded by 5·10^-16 of either's magnitude, plus 10^-323 for the
+ * subnormals and zero, whose spacing is 2^-1074 — and two that round to an
+ * infinity lie past ±10^308, where the range reaches the infinity `numeric`
+ * can hold. The range is wider than it need be, never narrower.
+ * @param {string} sql - the `numeric` bounded @param {string} to - a `numeric`
  * @returns {string}
  */
-function doubleEqual(left, right) {
-  const spread = (/** @type {string} */ sql) => `(abs(${sql}) * 0.0000000000000005 + 1e-323)`;
-  const near = (/** @type {string} */ sql, /** @type {string} */ to) =>
-    `${sql} >= (CASE WHEN ${to} < -1e308 THEN '-Infinity'::numeric WHEN ${to} > 1e308 THEN 1e307 ELSE ${to} - ${spread(to)} END)`
-    + ` AND ${sql} <= (CASE WHEN ${to} > 1e308 THEN 'Infinity'::numeric WHEN ${to} < -1e308 THEN -1e307 ELSE ${to} + ${spread(to)} END)`;
-  return `(${near(left, right)} AND ${near(right, left)} AND ${doubleOf(left)} = ${doubleOf(right)})`;
+function nearDouble(sql, to) {
+  const spread = `(abs(${to}) * 0.0000000000000005 + 1e-323)`;
+  return `${sql} >= (CASE WHEN ${to} < -1e308 THEN '-Infinity'::numeric WHEN ${to} > 1e308 THEN 1e307 ELSE ${to} - ${spread} END)`
+    + ` AND ${sql} <= (CASE WHEN ${to} > 1e308 THEN 'Infinity'::numeric WHEN ${to} < -1e308 THEN -1e307 ELSE ${to} + ${spread} END)`;
+}
+
+/**
+ * Two `numeric`s equal as the doubles the engine holds ({@link doubleOf}),
+ * beside a range of each around the other ({@link nearDouble}), so that an
+ * index over either column still finds the other's rows (a join's inner
+ * rows, a hop's); the equality of the doubles decides. Where one side alone
+ * holds a key (`key`), the key is compared exactly, as two keys are, with
+ * the shortest decimal of the other's double — the digits the store writes
+ * a key by (`float8` text, PostgreSQL 12's shortest round trip at the
+ * default `extra_float_digits`, the setting every `float8` the driver reads
+ * relies on) — an equality on the key itself, which the planner estimates
+ * and its index serves, and which a hash join can hash; the other side keeps
+ * its range around the key, so its own index still finds the key's rows.
+ * @param {string} left - a `numeric` @param {string} right - a `numeric`
+ * @param {'left' | 'right'} [key] - the side that alone holds a key
+ * @returns {string}
+ */
+function doubleEqual(left, right, key = undefined) {
+  if (key !== undefined) {
+    const [keySql, other] = key === 'left' ? [left, right] : [right, left];
+    return `(${keySql} = (${doubleOf(other)})::text::numeric AND ${nearDouble(other, keySql)})`;
+  }
+  return `(${nearDouble(left, right)} AND ${nearDouble(right, left)} AND ${doubleOf(left)} = ${doubleOf(right)})`;
 }
 
 /**
@@ -297,11 +316,14 @@ function jsonExtract(columnSql, pathText, kind) {
     // one column that can carry every scalar is what it needs
     case 'scalar':
       return `(${columnSql} #>> ${stringLiteral(pathText)})`;
-    // a group KEY that may hold any scalar: a number as the number it is, with no
-    // trailing zeros of the scale its JSON text was written with (`1` and `1.0` are
-    // one key), every other scalar as its text
+    // a group KEY that may hold any scalar: a number as the text of the double the
+    // engine holds, as `double` reads one (`1`, `1.0` and `1.00000000000000000001` are
+    // one key, `1152921504606846976` and `1152921504606847000` another), its zero
+    // unsigned as the double's equality is (`-0` and `0` are one key) — `float8`
+    // text is the shortest decimal that reads back as that double, which the
+    // decoder reads beside the type — every other scalar as its text
     case 'key':
-      return `(CASE WHEN jsonb_typeof(${at}) = 'number' THEN trim_scale((${at})::numeric)::text `
+      return `(CASE WHEN jsonb_typeof(${at}) = 'number' THEN (${doubleOf(`(${at})::numeric`)} + 0::float8)::text `
         + `ELSE ${columnSql} #>> ${stringLiteral(pathText)} END)`;
     // a unique KEY over a member that may hold an object or an array: the container as
     // `jsonb`, whose equality is the engine's (member order aside, numbers by value)

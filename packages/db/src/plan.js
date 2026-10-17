@@ -754,18 +754,21 @@ function membershipOperand(node) {
  * The membership plan for one member and one list. String and number
  * items bind as the list; a `null` or a boolean in it is the type test
  * `$eq` against that literal already plans (a present null, a present
- * boolean), composed by `or`. An empty list matches nothing.
+ * boolean), and an infinity, which the list's JSON cannot spell, the
+ * equality with it, composed by `or`. An empty list matches nothing.
  * @param {import('./algebra.js').PlanRef} ref
  * @param {{ list: any[] } | { ext: string }} operand
  */
 function membershipPlan(ref, operand) {
   if ('ext' in operand) return exactly({ p: 'in', ref, operand });
-  const scalars = [...new Set(operand.list.filter((value) => typeof value === 'string' || typeof value === 'number'))];
+  const infinite = (/** @type {unknown} */ value) => value === Infinity || value === -Infinity;
+  const scalars = [...new Set(operand.list.filter((value) => typeof value === 'string' || (typeof value === 'number' && !infinite(value))))];
   const typeNames = [...new Set(operand.list.filter((value) => value === null || typeof value === 'boolean')
     .map((value) => (value === null ? 'null' : value ? 'true' : 'false')))];
   /** @type {any[]} */
   const items = [];
   if (scalars.length > 0) items.push({ p: 'in', ref, operand: { list: scalars } });
+  for (const lit of new Set(operand.list.filter(infinite))) items.push({ p: 'cmp', op: 'eq', ref, operand: { lit } });
   for (const typeName of typeNames) items.push({ p: 'typeIs', ref, types: [typeName], positive: true });
   if (items.length === 0) return exactly({ p: 'const', value: false });
   return exactly(items.length === 1 ? items[0] : { p: 'or', items });
@@ -4301,8 +4304,7 @@ function planHop(inner, outer, entities, mapping, through = false) {
       ? crossBindingComparison(conjunct, scope) : null;
     if (cross !== null && (cross.left.binding === binding || cross.right.binding === binding)) {
       edges.push({ left: { binding: cross.left.binding.name, ref: cross.left.ref },
-        right: { binding: cross.right.binding.name, ref: cross.right.ref },
-        ...(cross.doubles === true ? { doubles: true } : {}) });
+        right: { binding: cross.right.binding.name, ref: cross.right.ref }, ...doublesOf(cross) });
       continue;
     }
     const slots = new Set(); collectBindingSlots(conjunct, scope, slots);
@@ -4598,11 +4600,13 @@ function columnFamily(binding, ref, undeclaredKeys) {
  * column that holds the digits a writer spelled reads its double — but for
  * two columns that each hold a key or a reference to one, which may be the
  * `bigint` a database-allocated key takes, compared exactly as a foreign
- * key's join is, through the key's index.
+ * key's join is, through the key's index. Where one side alone holds a key
+ * (`key` names it), an equality keeps that side's exact comparison against
+ * the other's double, and with it the key's index.
  * @param {any} node - an `op` node whose name is a comparison
  * @param {Map<number, any>} byName - binding slot → binding
  * @param {boolean} [edge] - the equality attaches a binding: it also reads an undeclared foreign key as the key it references and admits a column that can read an absent null
- * @returns {{ op: string, left: any, right: any, doubles?: true } | null}
+ * @returns {{ op: string, left: any, right: any, doubles?: true, key?: 'left' | 'right' } | null}
  */
 function crossBindingComparison(node, byName, edge = false) {
   const [left, right] = node.args;
@@ -4618,13 +4622,26 @@ function crossBindingComparison(node, byName, edge = false) {
   if (edge ? reads.every((read) => read === 'present') : reads.some((read) => read !== 'none')) return null;
   const holdsKey = (/** @type {any} */ binding, /** @type {any} */ ref) =>
     binding.shape.entityFlavors.get(canonicalOf(ref.segments))?.holdsKey === true;
+  const leftKey = holdsKey(leftBinding, leftRef);
+  const rightKey = holdsKey(rightBinding, rightRef);
   return {
     op: COMPARISONS.get(node.name),
     left: { binding: leftBinding, ref: leftRef },
     right: { binding: rightBinding, ref: rightRef },
-    ...(family === 'number' && !(holdsKey(leftBinding, leftRef) && holdsKey(rightBinding, rightRef)) ? { doubles: true } : {}),
+    ...(family === 'number' && !(leftKey && rightKey) ? { doubles: true } : {}),
+    ...(family === 'number' && node.name === '$eq' && leftKey !== rightKey ? { key: leftKey ? 'left' : 'right' } : {}),
   };
 }
+
+/**
+ * How an equality {@link crossBindingComparison} proved reads its two
+ * numbers, as an edge carries it: as doubles, and which side, if one alone,
+ * holds a key.
+ * @param {{ doubles?: true, key?: 'left' | 'right' }} comparison
+ * @returns {{ doubles?: true, key?: 'left' | 'right' }}
+ */
+const doublesOf = (comparison) => ({ ...(comparison.doubles === true ? { doubles: true } : {}),
+  ...(comparison.key === undefined ? {} : { key: comparison.key }) });
 
 /** An integer column holds nothing at or beyond the 64-bit edge. */
 const INT64_EDGE = 2 ** 63;
@@ -5013,7 +5030,7 @@ function planEntityQueryCore(document, entities, mapping, operators) {
     if (bindings.length > 1 && conjunct.kind === 'op' && conjunct.name === '$eq') {
       const edge = crossBindingComparison(conjunct, byName, true);
       if (edge !== null) {
-        edges.push({ left: edge.left, right: edge.right, ...(edge.doubles === true ? { doubles: true } : {}) });
+        edges.push({ left: edge.left, right: edge.right, ...doublesOf(edge) });
         continue;
       }
     }
@@ -5229,7 +5246,7 @@ function planEntityQueryCore(document, entities, mapping, operators) {
             ...(edge.left.ref.codec === undefined ? {} : { codec: edge.left.ref.codec }) },
           right: { binding: edge.right.binding.name, column: edge.right.ref.column,
             ...(edge.right.ref.codec === undefined ? {} : { codec: edge.right.ref.codec }) },
-          ...(edge.doubles === true ? { doubles: true } : {}),
+          ...doublesOf(edge),
         })),
       })),
       filters: bindings.map((binding) => ({

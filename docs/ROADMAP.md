@@ -691,16 +691,27 @@ what each does is its own documentation's job
   with an entity's `integer` or `number` key column, or a column referencing
   one (`$eq: ['$it.id', 6]`), and two such columns compared with each other (a
   key and a reference to it: a join, a hop's correlation, two references in
-  one row), compare the columns exactly, so a row another writer re-keyed
-  `6.00000000000000000001` in a `numeric` key column (an `integer` key the
-  store made without `default: 'auto'`) is dropped where the engine, which
-  reads 6, keeps it. Such a column may instead be the `bigserial`/`bigint` a
-  database-allocated key takes (and a database can hold either), which reads
-  no fractional bound and whose index a `numeric` bound does not serve, and a
-  key join that read both doubles would lose the key's index. Wanted: the
-  interval comparison every other number column makes, and the double read
-  every other pair of number columns makes, for a key column whose type the
-  open has read as `numeric`.
+  one row), and such a column joined to, or correlated with, a non-key number
+  column (compared with the shortest decimal of that column's double, so its
+  own digits read as the engine reads them), compare the columns exactly, so a
+  row another writer re-keyed `6.00000000000000000001` in a `numeric` key
+  column (an `integer` key the store made without `default: 'auto'`) is
+  dropped where the engine, which reads 6, keeps it. Such a column may instead
+  be the `bigserial`/`bigint` a database-allocated key takes (and a database
+  can hold either), which reads no fractional bound and whose index a
+  `numeric` bound does not serve, and a key join that read both doubles would
+  lose the key's index. Wanted: the interval comparison every other number
+  column makes, and the double read every other pair of number columns makes,
+  for a key column whose type the open has read as `numeric`.
+- [ ] **On PostgreSQL a `NaN` another writer stored in a number column is
+  refused only where a statement returns its column.** A row whose `numeric`
+  column holds `'NaN'` is refused `JD2003` by the engine's read and by every
+  statement that returns the column, but a statement that compares or orders
+  the column without returning it reads PostgreSQL's `NaN`, which orders above
+  every number and equals itself (`$gt: ['$it.a', 5]` returning ids keeps the
+  row, `$lt` drops it), where the engine refuses. Wanted: a `CHECK (col <>
+  'NaN')` on the number columns the store makes (with the DDL minor's
+  downgrade proof), or a guard that raises in the statement.
 - [ ] **On PostgreSQL an entity's ordering never reads an index.** An entity
   order term is `ASC NULLS FIRST` (descending `DESC NULLS LAST`) with the row
   identity appended, which a default btree scan does not give, so a window, a

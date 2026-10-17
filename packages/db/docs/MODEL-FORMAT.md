@@ -3897,6 +3897,15 @@ property and appends the key a physical table's order ends with.
   "key": vpk }          // the row's primary key (a record for a composite key)
 ```
 
+A value JSON has no number for — the infinity the engine reads where another
+writer stored a number past the double range — is spelled `{ "$numberDouble":
+"Infinity" }` (or `"-Infinity"`), in `keys` and in `key`, so a continuation a
+host keeps as JSON resumes where it was handed out; `JSON.stringify` would
+write `null`, which resumes from the empty values' place. *Upgrade: such a
+continuation carried the number itself, which a JSON round trip turned into
+`null`; one kept that way resumes wrong, and a walk restarted from its first
+page reads it right.*
+
 `order` is the ordering's identity: a continuation replayed against a
 different ordering is the refusal `JD0035`, never a wrong page (the terms are
 compared member by member, not as the text a serializer wrote, so a

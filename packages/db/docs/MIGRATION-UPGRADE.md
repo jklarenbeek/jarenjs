@@ -3485,6 +3485,45 @@ comparisons above answer by the digits written, as before.
 **Downgrade.** The previous release opens every store this one does; on it
 those orderings answer by the digits written, as before.
 
+## 60. A key joined from a number column seeks again, and four answers that match the engine
+
+- On PostgreSQL §58 read a join's or a hop's equality between an entity's
+  number column and a key column (`$eq: ['$o.score', '$p.id']`, a `numeric`
+  key) as both doubles, which the planner cannot estimate: it hashed the key's
+  whole table where it had seeked the key's index. The key is now compared
+  exactly, as two keys are, with the shortest decimal of the other column's
+  double — an equality on the key, which its index serves — beside a range of
+  the column around the key, which the column's own index serves; the answers
+  are the ones §58 gave. `explain().joins` names the side that holds the key
+  (`key: 'right'`) beside `doubles: true`.
+- On PostgreSQL a group key or `$distinct` leaf over a member of numbers and
+  strings (`type: ['number', 'string']`) keyed a number by its digits, so `5`,
+  `5.00000000000000000001` and `4.99999999999999999999` were three groups, and
+  the store's 2^60 and another writer's `1152921504606846976` two, where the
+  engine has one; it now keys the double, as a member of numbers alone does
+  since §56, and `0` and `-0` are one key too.
+- A query's own literal infinity, which only a JavaScript host can write
+  (`$lt: ['$it.n', Infinity]`), compared on PostgreSQL by the digits of a
+  member another writer spelled past the double range (`1e400`), and an
+  infinity in a literal list (`{ $seq: [Infinity, 5] }`) matched nothing on
+  both engines, where the engine reads that member as the infinity. Each now
+  compares as the same value in an external does.
+- A page's continuation spells an infinite order value or key as `{
+  "$numberDouble": "Infinity" }` ([MODEL-FORMAT](MODEL-FORMAT.md), "The
+  continuation"), where it carried the number, which a JSON round trip turned
+  into `null`: such a walk resumed from the empty values' place, skipping rows
+  or never ending. A continuation kept that way before the upgrade still
+  resumes wrong; restart its walk.
+- On PostgreSQL a row whose `numeric` column another writer set to `NaN` is
+  refused `JD2003` naming the column wherever it is read — by the engine and by
+  every statement that returns the column — where it was read as `NaN`, which
+  no JSON number is ([POSTGRESQL](POSTGRESQL.md)).
+- No table, index or stored value changes: every statement above is a read.
+
+**Downgrade.** The previous release opens every store this one does; on it the
+answers above are the ones it gave, and a continuation holding `$numberDouble`
+is refused by the database's driver (it never resumes at a wrong row).
+
 ## Measured costs
 
 Exact identity stores complete canonical documents and model endpoints, so

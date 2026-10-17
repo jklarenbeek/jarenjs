@@ -333,7 +333,9 @@ reads `JD2005` naming it. A PostgreSQL failure aborts its transaction, so the
 store never reads the key after one; on SQLite it does, after a unique failure
 that does not name the key.
 
-A number group key or distinct leaf, a number an `$orderby` orders by, and an
+A number group key or distinct leaf (a member that may hold a string beside
+its numbers as well, whose number is keyed by the text of its double), a number
+an `$orderby` orders by, and an
 entity's `number` or `integer` column or number member a query's `$orderby`, a
 load's `orderBy`, its keyset continuation and an include's `orderBy` order by,
 is read as the double the engine holds — other than a column holding a key (an
@@ -367,7 +369,25 @@ over each where the bare `numeric`s compared; a join or a hop's equality over
 two number columns bounds each by the other beside the doubles' equality, so
 either column's index still finds the other's rows, but the planner, which
 cannot estimate those bounds, may hash or merge on the doubles instead of
-seeking. Two key columns (a key and a reference to one) compare exactly.
+seeking. Two key columns (a key and a reference to one) compare exactly. A
+number column joined to a key column, or correlated with one in a hop, compares
+the key exactly with the shortest decimal of the column's double (its
+`double precision` text, the digits the store writes a key by), an equality on
+the key that its index serves and a hash join can hash, beside a range of the
+column around the key that the column's own index serves; that text is the
+shortest round trip only at PostgreSQL's default `extra_float_digits` (1),
+which every `double precision` the driver reads relies on too. A literal
+infinity (`$lt: ['$it.n', Infinity]`, a JavaScript host's), alone or in a
+literal list, compares with the decimals at and past the one that rounds to it,
+as an external infinity does.
+
+A `numeric` column the store made holds no `NaN` the store writes, and the JSON
+number model holds none, but another writer can store one (`UPDATE … SET n =
+'NaN'`), which PostgreSQL orders above every number and equals to itself where
+the engine orders and equals it with nothing: a row read with such a value is
+refused `JD2003` naming the column, by the engine's read and by every statement
+that returns the column. A statement that compares the column without returning
+it reads PostgreSQL's `NaN` and answers where the engine refuses.
 An entity's key, and a column referencing one, keep the exact comparison: such
 a column may be declared as the allocation a database-allocated key takes
 (`bigserial`, `bigint`), which reads no fractional edge and holds no integer in

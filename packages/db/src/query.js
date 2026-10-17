@@ -130,6 +130,27 @@ function retainEntry(state, key, entry) {
 }
 
 /**
+ * A continuation's value as JSON can carry it: an infinity, which
+ * `JSON.stringify` writes as `null`, as `{ "$numberDouble": "Infinity" }`
+ * (or `"-Infinity"`), every other value as it is.
+ * @param {unknown} value
+ * @returns {unknown}
+ */
+const jsonOfNumber = (value) => (value === Infinity || value === -Infinity ? { $numberDouble: String(value) } : value);
+
+/**
+ * A continuation's value as {@link jsonOfNumber} spelled it: the infinity a
+ * `$numberDouble` names, every other value as it is.
+ * @param {unknown} value
+ * @returns {unknown}
+ */
+function numberOfJson(value) {
+  if (value === null || typeof value !== 'object' || Object.keys(value).length !== 1) return value;
+  const spelled = /** @type {any} */ (value).$numberDouble;
+  return spelled === 'Infinity' ? Infinity : spelled === '-Infinity' ? -Infinity : value;
+}
+
+/**
  * What of a load's `after` is part of its plan's identity. A structural
  * continuation resumes by values, which every call binds; the SQL text
  * depends only on which of its order keys are NULL, so the specification
@@ -3926,17 +3947,17 @@ export function createLoadEngine(context, entityName) {
     }
     const keyOf = (column) => {
       if (keyColumns.length === 1) {
-        if (typeof after.key !== 'string' && typeof after.key !== 'number')
+        if (typeof after.key !== 'string' && typeof numberOfJson(after.key) !== 'number')
           throw mismatch("'key' must be the row's primary key, a scalar");
         return after.key;
       }
       const value = after.key?.[column];
-      if (typeof value !== 'string' && typeof value !== 'number')
+      if (typeof value !== 'string' && typeof numberOfJson(value) !== 'number')
         throw mismatch(`'key' must carry every key column { ${keyColumns.join(', ')} }`);
       return value;
     };
     return identity.map((term, i) => {
-      const value = i < declared ? (after.keys[i] ?? null) : keyOf(term.column);
+      const value = numberOfJson(i < declared ? (after.keys[i] ?? null) : keyOf(term.column));
       if (term.stored !== true) return encodeColumn(term.column, value);
       if (typeof value !== 'string') throw mismatch(`'${term.column}' resumes from its stored text`);
       return value;
@@ -4400,13 +4421,16 @@ export function createLoadEngine(context, entityName) {
    * the ordering's identity (so it cannot be replayed against another
    * ordering), the declared order-key values as the DOCUMENT carries
    * them (a `stored` term's, as its row held it), and the row's primary
-   * key, the tie-breaker. Signing, tenant scoping, expiry and wire
+   * key, the tie-breaker — an infinity, which JSON has no number for, as
+   * `{ "$numberDouble": "Infinity" }` ({@link jsonOfNumber}), so a
+   * continuation a host keeps as JSON resumes where it was handed out.
+   * Signing, tenant scoping, expiry and wire
    * encoding are the host's: the store has no principal and no key, and
    * a signature it invented would be theatre.
    */
   const continuationOf = (entry, doc) => {
     const held = storedText.get(doc);
-    const valueOf = (/** @type {string} */ column) => (held?.has(column) ? held.get(column) : doc[column]);
+    const valueOf = (/** @type {string} */ column) => (held?.has(column) ? held.get(column) : jsonOfNumber(doc[column]));
     return deepFreeze({
       order: entry.identity,
       keys: entry.declared.map((column) => valueOf(column) ?? null),

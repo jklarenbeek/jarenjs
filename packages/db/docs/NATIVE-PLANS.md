@@ -59,7 +59,10 @@ Two number columns pair as the doubles the engine holds, so two spellings of
 one double pair (on PostgreSQL, whose columns hold the digits a writer spelled,
 each is read as its double, bounded by the other so that either index still
 finds its rows); a key and a reference to one pair exactly, through the key's
-index. An
+index, and a key and another number column pair the key exactly with the
+column's double (on PostgreSQL its shortest decimal), still through the key's
+index; `explain().joins` names that edge `doubles: true` beside `key`, the side
+that holds the key. An
 equality that fails the rule is no edge: a root it alone would connect is a
 product the engine builds, and beside a real edge it is a conjunct the engine
 decides. The comparisons that refine an edge, and a hop's correlation, follow

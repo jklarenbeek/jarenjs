@@ -156,7 +156,9 @@ describe('PostgreSQL: a conjunction of $ne literals over one member is one negat
     assert.equal(await counted('Item', chain([0.3, 0.1, 2], 'w')), 3);
     assert.equal(await counted('Item', { $and: [{ $ne: ['$it.n', 1] }, { $ne: ['$it.sku', 'a'] }] }), 2);
     assert.equal(await counted('Item', { $and: [{ $ne: ['$it.n', 1] }, { $ne: ['$it.sku', 'a'] }, { $ne: ['$it.n', 2] }] }), 1);
-    assert.equal(await counted('mixed', chain([Infinity, 1, 2])), 1);
+    // an infinity, which the list's JSON cannot spell, keeps its own comparison: outside the decimals that round to it
+    const infinite = (await store.collection('mixed').explain({ $for: { it: '$[*]' }, $where: chain([Infinity, 1, 2]), $return: '$it.id' })).sql;
+    assert.equal((infinite.match(/OR NOT \(\(CASE WHEN jsonb_typeof/g) ?? []).length, 1);
     // an instant kept as an epoch column: its `$ne` and its list both read the document's text, by code point
     const instants = chain(['2026-01-01T00:00:00Z', '2026-03-01T00:00:00Z'], 'at');
     assert.equal(await counted('Item', instants), 0);

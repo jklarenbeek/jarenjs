@@ -38,7 +38,7 @@ const MODEL = {
     big: {
       key: '/id',
       schema: { type: 'object', properties: { id: { type: 'string' }, u: { type: 'integer' }, v: { type: 'integer' }, n: { type: 'number' },
-        w: { type: 'number' } } },
+        w: { type: 'number' }, x: { type: ['number', 'string'] } } },
       indexes: [{ name: 'by_v', path: '$.v' }, { name: 'by_n', path: '$.n' }],
     },
   },
@@ -222,6 +222,8 @@ const ZERO_EDGE = (() => { const digits = String(5n ** 1075n); return `0.${'0'.r
 // does not round a decimal at or just past a tie as the engine does (a
 // listed loss), so they are PostgreSQL's alone
 /** @param {string} engine */
+/** A JSON replacer that spells the numbers JSON cannot (`Infinity`, `NaN`). @param {string} _ @param {unknown} value */
+const spellNonFinite = (_, value) => (typeof value === 'number' && !Number.isFinite(value) ? String(value) : value);
 const far = (engine) => ['1e400', '-1e400', '2e400', '1e-400',
   ...(engine === 'postgres' ? [INFINITE_EDGE, `-${INFINITE_EDGE}`, String(2n ** 1024n - 2n ** 970n - 1n), ZERO_EDGE, `-${ZERO_EDGE}`, `${ZERO_EDGE}1`] : [])];
 
@@ -277,6 +279,108 @@ for (const engine of ENGINES) {
     });
   });
 
+  describe(`a query's literal infinity, alone and in a literal list, ${engine}`, { skip: skipFor(engine) }, () => {
+    const LITERALS = [Infinity, -Infinity, NaN];
+    const LISTS = [[Infinity, 5], [-Infinity], [Infinity, -Infinity], [NaN, 5], [Infinity, '5', 7]];
+    it('keep the documents the engine keeps, in the statement', async () => {
+      await withForeignWriter(engine, async (store, write) => {
+        const big = store.collection('big');
+        for (const [i, value] of [5, 7, -3, Number.MAX_VALUE, -Number.MAX_VALUE].entries()) await big.insert({ id: `s${i}`, n: value, w: value, x: value });
+        await big.insert({ id: 't0', x: '5' });
+        for (const [i, digits] of far(engine).entries()) await write(`f${i}`, `{"id":"f${i}","n":${digits},"w":${digits},"x":${digits}}`);
+        const differ = [];
+        const compare = async (/** @type {any} */ where) => {
+          const doc = kept(where);
+          const mode = (await big.explain(doc)).mode;
+          const native = await big.execute(doc);
+          const oracle = await big.execute(doc, { pushdown: false });
+          if (JSON.stringify(native) !== JSON.stringify(oracle) || mode !== 'native') differ.push({ where, mode, native, oracle });
+        };
+        for (const member of ['n', 'w', 'x']) {
+          for (const op of OPERATORS) for (const lit of LITERALS) await compare({ [op]: [`$it.${member}`, lit] });
+          for (const list of LISTS) {
+            await compare({ $eq: [`$it.${member}`, { $seq: list }] });
+            await compare({ $not: { $eq: [`$it.${member}`, { $seq: list }] } });
+          }
+        }
+        assert.deepEqual(differ, [], JSON.stringify(differ, spellNonFinite));
+      });
+    });
+
+    it('keep the rows the engine keeps on an entity\'s number column and document member', async () => {
+      const model = { $model: '0.1', entities: { K: { schema: { type: 'object', required: ['id'], properties: {
+        id: { type: 'string', 'x-entity': { key: true } }, n: { type: 'number' }, b: { type: 'integer' },
+        meta: { type: 'object', properties: { m: { type: 'number' } } } } }, indexes: [{ name: 'by_n', path: '$.n' }] } } };
+      await withRawWriter(engine, model, async (store, run) => {
+        const K = store.entity('K');
+        for (const [id, n] of [['o0', 5], ['o1', 7], ['o2', -3], ['o3', Number.MAX_VALUE], ['f0', 1], ['f1', 1]])
+          await K.create({ id, n, b: Math.trunc(Math.min(n, 9)), meta: { m: n } });
+        const json = (/** @type {string} */ text) => (engine === 'postgres' ? `'${text}'::jsonb` : `jsonb('${text}')`);
+        // past the double range: the engine reads each as an infinity
+        await run(`UPDATE "K" SET "n" = 9e999, "doc" = ${json('{"meta":{"m":1e400}}')} WHERE "id" = 'f0'`);
+        await run(`UPDATE "K" SET "n" = -9e999, "doc" = ${json('{"meta":{"m":-1e400}}')} WHERE "id" = 'f1'`);
+        const differ = [];
+        const compare = async (/** @type {any} */ where) => {
+          const doc = { $for: { it: '$.K[*]' }, $where: where, $orderby: ['$it.id'], $return: '$it.id' };
+          const native = await store.execute(doc);
+          const oracle = await store.execute(doc, { pushdown: false });
+          if (JSON.stringify(native) !== JSON.stringify(oracle)) differ.push({ where, native, oracle });
+        };
+        for (const member of ['n', 'b', 'meta.m']) {
+          for (const op of OPERATORS) for (const lit of LITERALS) await compare({ [op]: [`$it.${member}`, lit] });
+          for (const list of LISTS) {
+            await compare({ $eq: [`$it.${member}`, { $seq: list }] });
+            await compare({ $not: { $eq: [`$it.${member}`, { $seq: list }] } });
+          }
+        }
+        assert.deepEqual(differ, [], JSON.stringify(differ, spellNonFinite));
+      });
+    });
+    it('page an entity over an infinite order value, the continuation carried through JSON', async () => {
+      const model = { $model: '0.1', entities: {
+        E: { schema: { type: 'object', required: ['id'], properties: { id: { type: 'string', 'x-entity': { key: true } }, a: { type: 'number' } } } },
+        N: { schema: { type: 'object', required: ['id'], properties: { id: { type: 'number', 'x-entity': { key: true } }, a: { type: 'number' } } } } } };
+      await withRawWriter(engine, model, async (store, run) => {
+        const E = store.entity('E');
+        const N = store.entity('N');
+        for (const [id, a] of [['a', 1], ['b', 2], ['c', 3], ['d', 4], ['e', 5]]) await E.create({ id, a });
+        for (const [id, a] of [[1, 1], [2, 2], [3, 3], [4, 4]]) await N.create({ id, a });
+        // past the double range: the engine reads each as an infinity
+        await run('UPDATE "E" SET "a" = 9e999 WHERE "id" IN (\'a\', \'b\')');
+        await run('UPDATE "E" SET "a" = -9e999 WHERE "id" = \'c\'');
+        await run('UPDATE "N" SET "id" = 9e999 WHERE "id" = 2');
+        await run('UPDATE "N" SET "id" = -9e999 WHERE "id" = 3');
+        const walk = async (/** @type {any} */ entity, /** @type {any[]} */ orderBy, /** @type {boolean} */ json) => {
+          const seen = [];
+          let after;
+          for (let i = 0; i < 12; i++) {
+            const page = await entity.page({ orderBy }, { limit: 2, ...(after === undefined ? {} : { after }) });
+            seen.push(...page.items.map((/** @type {any} */ row) => row.id));
+            if (page.continuation === null) return seen;
+            after = json ? JSON.parse(JSON.stringify(page.continuation)) : page.continuation;
+          }
+          return [...seen, 'unending'];
+        };
+        const differ = [];
+        for (const [entity, name, path] of [[E, 'E', '$it.a'], [N, 'N', '$it.id']]) {
+          for (const dir of ['asc', 'desc']) {
+            const orderBy = [{ $key: path, $dir: dir }, { $key: '$it.id', $dir: dir }];
+            const oracle = await store.execute({ $for: { it: `$.${name}[*]` }, $orderby: orderBy, $return: '$it.id' }, { pushdown: false });
+            for (const json of [false, true]) {
+              const paged = await walk(entity, orderBy, json);
+              if (JSON.stringify(paged, spellNonFinite) !== JSON.stringify(oracle, spellNonFinite)) differ.push({ name, dir, json, paged, oracle });
+            }
+          }
+        }
+        assert.deepEqual(differ, [], JSON.stringify(differ, spellNonFinite));
+        // an infinity is spelled as JSON can carry it, the key's too
+        const first = await N.page({ orderBy: [{ $key: '$it.id', $dir: 'desc' }] }, { limit: 1 });
+        assert.deepEqual(first.continuation.keys, [{ $numberDouble: 'Infinity' }]);
+        assert.deepEqual(first.continuation.key, { $numberDouble: 'Infinity' });
+      });
+    });
+  });
+
   describe(`equal doubles spelled by other digits, ${engine}`, { skip: skipFor(engine) }, () => {
     it('order, group and count apart as the engine does, in the statement', async () => {
       await withForeignWriter(engine, async (store, write) => {
@@ -285,17 +389,20 @@ for (const engine of ENGINES) {
         const pairs = [[-(2 ** 62), '-4611686018427387904'], [2 ** 60, '1152921504606846976'], [2 ** 60 + 256, '1152921504606847100'],
           [2 ** 53, '9007199254740993'], [5, '5.0']];
         for (const [i, [own, foreign]] of pairs.entries()) {
-          await big.insert({ id: `o${i}`, u: own, v: own, n: own, w: own });
-          await write(`f${i}`, `{"id":"f${i}","u":${foreign},"v":${foreign},"n":${foreign},"w":${foreign}}`);
+          await big.insert({ id: `o${i}`, u: own, v: own, n: own, w: own, x: own });
+          await write(`f${i}`, `{"id":"f${i}","u":${foreign},"v":${foreign},"n":${foreign},"w":${foreign},"x":${foreign}}`);
         }
-        const fractions = [[0.1, '0.1000000000000000055511151231257827021181583404541015625'], [1.5, '1.50000000000000000000001']];
+        const fractions = [[0.1, '0.1000000000000000055511151231257827021181583404541015625'], [1.5, '1.50000000000000000000001'],
+          [0, '-0'], [0, '-1e-400'], [5, '4.99999999999999999999']];
         for (const [i, [own, foreign]] of fractions.entries()) {
-          await big.insert({ id: `p${i}`, n: own, w: own });
-          await write(`q${i}`, `{"id":"q${i}","n":${foreign},"w":${foreign}}`);
+          await big.insert({ id: `p${i}`, n: own, w: own, x: own });
+          await write(`q${i}`, `{"id":"q${i}","n":${foreign},"w":${foreign},"x":${foreign}}`);
         }
-        for (const [i, digits] of far(engine).entries()) await write(`z${i}`, `{"id":"z${i}","n":${digits},"w":${digits}}`);
+        for (const [i, digits] of far(engine).entries()) await write(`z${i}`, `{"id":"z${i}","n":${digits},"w":${digits},"x":${digits}}`);
+        // a member of two kinds holds a string beside its numbers
+        await big.insert({ id: 's0', x: '5' });
         const differ = [];
-        for (const member of ['u', 'v', 'n', 'w']) {
+        for (const member of ['u', 'v', 'n', 'w', 'x']) {
           const ordered = { $for: { it: '$[*]' }, $orderby: [`$it.${member}`, '$it.id'], $return: '$it.id' };
           for (const [label, doc] of [['orderby', ordered],
             ['orderby desc', { ...ordered, $orderby: [{ $key: `$it.${member}`, $dir: 'desc' }, '$it.id'] }],
@@ -304,6 +411,8 @@ for (const engine of ENGINES) {
             ['group', { $for: { it: '$[*]' }, $groupby: { k: `$it.${member}` }, $return: { k: '$k', c: { $count: '$it' } } }],
             ['group ordered', { $for: { it: '$[*]' }, $groupby: { k: `$it.${member}` }, $orderby: ['$k'], $return: { k: '$k', c: { $count: '$it' } } }],
             ['count distinct', { $count: { $distinct: { $for: { it: '$[*]' }, $return: `$it.${member}` } } }]]) {
+            // a string and a number have no order: the engine refuses one
+            if (member === 'x' && !['distinct', 'group', 'count distinct'].includes(label)) continue;
             const native = await big.execute(doc);
             const oracle = await big.execute(doc, { pushdown: false });
             const mode = (await big.explain(doc)).mode;

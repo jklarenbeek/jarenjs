@@ -145,9 +145,11 @@ function normalizeRows(result) {
     const convert = converterFor(field.dataTypeID);
     // a `numeric` read straight from a table column (the server names its
     // table) is a stored value: an integer its number rounds is noted on the
-    // row, which an `integer` member refuses as SQLite does (`JD2003`); one a
-    // statement computes — an aggregate, a cast of a document member — is the
-    // double nearest to it, as the engine reads the member it comes from
+    // row, which an `integer` member refuses as SQLite does (`JD2003`), and a
+    // `NaN` another writer stored, which no JSON number is, is refused
+    // (`JD2003`); one a statement computes — an aggregate, a cast of a
+    // document member — is the double nearest to it, as the engine reads the
+    // member it comes from
     const stored = field.dataTypeID === NUMERIC_OID && Number.isInteger(field.tableID) && field.tableID !== 0;
     if (convert !== null) converters.push({ name: field.name, convert, stored });
   }
@@ -155,6 +157,10 @@ function normalizeRows(result) {
   for (const row of rows) {
     for (const { name, convert, stored } of converters) {
       const value = row[name];
+      if (stored && value === 'NaN') {
+        throw new DbRuntimeError('JD2003', `PostgreSQL column '${name}' holds the numeric 'NaN', which is no JSON number `
+          + 'and which no comparison or order reads as the query engine does; write a number or NULL in its place');
+      }
       const rounded = stored ? roundedIntegerDigits(value) : null;
       if (rounded !== null) {
         if (!Object.hasOwn(row, ROUNDED_INTEGERS)) Object.defineProperty(row, ROUNDED_INTEGERS, { value: {} });

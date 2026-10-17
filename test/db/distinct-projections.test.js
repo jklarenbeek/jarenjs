@@ -408,10 +408,11 @@ describe('a group key is read as a number only where its member may hold one', (
 
   it('leaves the statement of a key that holds no number as it reads a member', async () => {
     await overCollection(SCHEMA, [{ id: 1, s: 'a', n: 1, b: true, m: 1, z: null }], [], async (rows, label, host) => {
-      // a number is read as the double the engine parses (SQLite) or as the numeric itself (PostgreSQL), so a whole number
-      // beyond 2^53 and the spellings 2 and 2.0 cannot split or raise; only a member that may also hold a string is read guarded
+      // a number is read as the double the engine parses (on PostgreSQL from its numeric, a member that may also hold a
+      // string as that double's text), so a whole number beyond 2^53 and the spellings 2 and 2.0 cannot split or raise;
+      // only a member that may also hold a string is read guarded
       const reads = host === 'sqlite' ? /CAST\(jsonb_extract\(/ : /::numeric/;
-      const guarded = host === 'sqlite' ? /THEN CAST\(jsonb_extract\(/ : /trim_scale\(/;
+      const guarded = host === 'sqlite' ? /THEN CAST\(jsonb_extract\(/ : /\+ 0::float8\)::text/;
       const folds = /IN \('integer', 'real'\) THEN 'integer'/;
       for (const [path, kind] of /** @type {[string, 'none' | 'pure' | 'mixed'][]} */ ([
         ['$it.s', 'none'], ['$it.b', 'none'], ['$it.z', 'none'], ['$it.n', 'pure'], ['$it.m', 'mixed']])) {

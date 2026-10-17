@@ -182,21 +182,27 @@ const externalEdges = (dialect, param, external) => (edge) =>
 const SYMBOLS = { eq: '=', ne: '<>', lt: '<', le: '<=', gt: '>', ge: '>=' };
 
 /**
- * A member compared with a literal: a finite number, on an engine that reads
- * the member by its decimal digits, against the interval of decimals that
- * round to it ({@link decimalComparison}), its edges bound as literals the
+ * A member compared with a literal: a number, on an engine that reads the
+ * member by its decimal digits, against the interval of decimals that round
+ * to it ({@link decimalComparison}), its edges bound as literals the
  * member's own type takes, so a column still seeks; anything else as itself.
+ * An infinity's interval runs from the decimal at which numbers round to it
+ * to the infinity a `numeric` holds, both edges closed, so a member a writer
+ * spelled past the double range compares as the engine's infinity does.
  * `ne` answers the difference.
  * @param {any} dialect @param {(slot: any) => string} param
  * @param {string} op @param {string} member @param {unknown} lit
  * @returns {string}
  */
 function literalComparison(dialect, param, op, member, lit) {
-  if (!(dialect.decimalDigits && typeof lit === 'number' && Number.isFinite(lit)))
+  if (!(dialect.decimalDigits && typeof lit === 'number' && !Number.isNaN(lit)))
     return `${member} ${SYMBOLS[op]} ${param({ literal: lit })}`;
+  const infinite = !Number.isFinite(lit);
   // a tie the double keeps leaves its edge outside the bound beyond it
-  const closed = decimalEdge(lit, 'low') !== decimalEdge(lit, 'lowExclusive');
-  const compared = decimalComparison((edge) => param({ literal: decimalEdge(lit, edge) }), op === 'ne' ? 'eq' : op, member, closed);
+  const closed = infinite || decimalEdge(lit, 'low') !== decimalEdge(lit, 'lowExclusive');
+  const edgeOf = (/** @type {'low' | 'high' | 'lowExclusive' | 'highExclusive'} */ edge) => (infinite && (edge === 'low') !== (lit > 0)
+    ? String(lit) : decimalEdge(lit, edge));
+  const compared = decimalComparison((edge) => param({ literal: edgeOf(edge) }), op === 'ne' ? 'eq' : op, member, closed);
   return op === 'ne' ? `NOT (${compared})` : compared;
 }
 
@@ -209,8 +215,10 @@ function literalComparison(dialect, param, op, member, lit) {
  * column's index still seeks (`dialect.intervalIn`); any other member is
  * read as the double the engine holds (`doubleRead`) against the list's
  * doubles — the same answer, hashed once per row, where an interval test
- * would cost one per row and item. A list's infinity, which its JSON spells
- * `null`, is no number of it, as before.
+ * would cost one per row and item. No list here holds an infinity, which
+ * its JSON would spell `null`: a literal list's is compared on its own (the
+ * planner's membership plan), and an external list holding one runs in the
+ * engine.
  * @param {any} dialect @param {(slot: any) => string} param @param {string} value - the member
  * @param {{ numbers: number[] } | { external: string }} list
  * @param {{ table: string, column: string } | null} seek
@@ -557,16 +565,19 @@ const numberColumnRead = (dialect, ref, sql) => (dialect.decimalDigits && ref.co
  * compare as the doubles the engine holds (`doubles`, {@link
  * numberColumnRead}) — an equality of two columns that both hold a
  * writer's digits through `doubleEqual`, which keeps either column's index
- * in reach — and anything else, two key columns among them, as stored.
+ * in reach, and where one side alone holds a key (`key`), that key exactly
+ * against the other's double, through the key's index — and anything else,
+ * two key columns among them, as stored.
  * @param {any} dialect @param {string} op
  * @param {{ codec?: string }} left @param {string} leftSql - the column as it compares
  * @param {{ codec?: string }} right @param {string} rightSql
  * @param {boolean} doubles
+ * @param {'left' | 'right'} [key] - the side that alone holds a key
  * @returns {string}
  */
-function columnPairComparison(dialect, op, left, leftSql, right, rightSql, doubles) {
+function columnPairComparison(dialect, op, left, leftSql, right, rightSql, doubles, key = undefined) {
   if (doubles && op === 'eq' && dialect.doubleEqual !== undefined && left.codec === undefined && right.codec === undefined)
-    return dialect.doubleEqual(leftSql, rightSql);
+    return dialect.doubleEqual(leftSql, rightSql, key);
   const read = (/** @type {{ codec?: string }} */ ref, /** @type {string} */ sql) => (doubles ? numberColumnRead(dialect, ref, sql) : sql);
   return `${read(left, leftSql)} ${SYMBOLS[op]} ${read(right, rightSql)}`;
 }
@@ -1809,7 +1820,7 @@ export function createEntityPredicateEmitters(dialect, param, related = undefine
       `${end.binding === hop.binding ? alias : end.binding === null ? outer
         : related.aliasOf(end.binding)}.${q(end.ref.column)}`, dialect);
     const conditions = hop.edges.map((/** @type {any} */ edge) => columnPairComparison(dialect, 'eq',
-      edge.left.ref, side(edge.left), edge.right.ref, side(edge.right), edge.doubles === true));
+      edge.left.ref, side(edge.left), edge.right.ref, side(edge.right), edge.doubles === true, edge.key));
     if (hop.filter !== null) conditions.push(emitPred(alias, `${alias}.${q('doc')}`, hop.filter, related.tableOf(hop.entity)));
     return { alias, sql: `FROM ${related.tableOf(hop.entity)} AS ${alias} WHERE ${conditions.join(' AND ')}` };
   };
@@ -2060,7 +2071,7 @@ export function emitEntityPlan(plan, dialect, physicalOf) {
   const onSql = (edge) => {
     const side = (/** @type {any} */ end) => physicalComparable(end, `${aliasOf(end.binding)}.${q(end.column)}`, dialect);
     return columnPairComparison(dialect, edge.op ?? 'eq', edge.left, side(edge.left), edge.right, side(edge.right),
-      edge.doubles === true);
+      edge.doubles === true, edge.key);
   };
 
   /** What orders one binding's rows as the engine meets them: its physical key columns, else its row identity. */

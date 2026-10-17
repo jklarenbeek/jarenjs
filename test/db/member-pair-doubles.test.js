@@ -47,6 +47,12 @@ const MODEL = {
   },
 };
 const OPERATORS = ['$eq', '$ne', '$lt', '$le', '$gt', '$ge'];
+/** A number column beside an `integer` key and a `number` key it is joined to. */
+const KEYED = { $model: '0.1', entities: {
+  K: { schema: { type: 'object', required: ['id'], properties: { id: { type: 'integer', 'x-entity': { key: true } }, name: { type: 'string' } } } },
+  N: { schema: { type: 'object', required: ['id'], properties: { id: { type: 'number', 'x-entity': { key: true } }, name: { type: 'string' } } } },
+  O: { schema: { type: 'object', required: ['id'], properties: { id: { type: 'string', 'x-entity': { key: true } },
+    score: { type: 'number' }, tag: { type: 'string' } } }, indexes: [{ name: 'by_tag', path: '$.tag' }, { name: 'by_score', path: '$.score' }] } } };
 const INTEGER = /^-?\d+$/;
 
 /**
@@ -66,13 +72,14 @@ const pairs = (engine) => [['1152921504606846976', '1152921504606847000'], ['115
     ['0.1', '0.1000000000000000000001'], ['1152921504606846975.9', '1152921504606846976']]) : [['5.0', '5']])];
 
 /**
- * Open `MODEL` on `engine` with a raw SQL writer beside the store.
+ * Open `model` (`MODEL` unless named) on `engine` with a raw SQL writer beside the store.
  * @param {string} engine
  * @param {(store: any, run: (sql: string) => Promise<void>) => Promise<void>} fn
+ * @param {any} [model]
  */
-async function withRawWriter(engine, fn) {
+async function withRawWriter(engine, fn, model = MODEL) {
   if (engine === 'postgres') {
-    return withStore('postgres', MODEL, (store, pg) => fn(store, async (sql) => {
+    return withStore('postgres', model, (store, pg) => fn(store, async (sql) => {
       const { pool, schema } = /** @type {{ pool: any, schema: string }} */ (pg);
       const client = await pool.connect();
       try { await client.query(`SET search_path TO "${schema}"; ${sql}`); }
@@ -82,7 +89,7 @@ async function withRawWriter(engine, fn) {
   const dir = mkdtempSync(join(tmpdir(), 'jaren-member-pair-'));
   const path = join(dir, 'store.sqlite');
   try {
-    await withStore('sqlite', MODEL, (store) => fn(store, async (sql) => {
+    await withStore('sqlite', model, (store) => fn(store, async (sql) => {
       const db = new DatabaseSync(path);
       try { db.exec(sql); }
       finally { db.close(); }
@@ -210,6 +217,40 @@ for (const engine of ENGINES) {
         assert.doesNotMatch(references.sql, /::float8|AS REAL/);
       });
     });
+
+    it('join a number column to a key as the engine does, the key compared exactly', async () => {
+      await withRawWriter(engine, async (store, run) => {
+        for (const id of [5, 6, 0, -3, 2 ** 60]) await store.entity('K').create({ id, name: `k${id}` });
+        for (const id of [0.1, 5, 2 ** 60, 1e-7, 1e21]) await store.entity('N').create({ id, name: `n${id}` });
+        const scores = [5, 6, 0.1, 2 ** 60, 1e21, 1e-7, -3, 7];
+        for (const [i, score] of scores.entries()) await store.entity('O').create({ id: `s${i}`, score, tag: i % 2 === 0 ? 'hot' : 'cold' });
+        // the digits another writer spells: each the double of a key, or of none
+        const spelled = ['1152921504606846976', '1152921504606846977', '-0', '1e-400', '5.0',
+          ...(engine === 'postgres' ? ['5.00000000000000000001', '4.99999999999999999999', '0.1000000000000000000001',
+            '0.1000000000000000055511151231257827', '1e400', '1000000000000000000000.0000001'] : [])];
+        for (const [i, digits] of spelled.entries())
+          await run(`INSERT INTO "O" ("id", "score", "tag", "doc") VALUES ('w${i}', ${digits}, 'hot', ${engine === 'postgres' ? "'{}'::jsonb" : "jsonb('{}')"})`);
+        const differ = [];
+        const compare = async (/** @type {any} */ query) => {
+          assert.equal((await store.explain(query)).mode, 'native', JSON.stringify(query));
+          const answered = await store.execute(query);
+          const oracle = await store.execute(query, { pushdown: false });
+          if (JSON.stringify(answered) !== JSON.stringify(oracle)) differ.push({ query, answered, oracle });
+        };
+        for (const key of ['K', 'N']) {
+          for (const where of [{ $eq: ['$o.score', '$k.id'] }, { $eq: ['$k.id', '$o.score'] },
+            { $and: [{ $eq: ['$o.tag', 'hot'] }, { $eq: ['$o.score', '$k.id'] }] }]) {
+            await compare({ $for: { o: '$.O[*]', k: `$.${key}[*]` }, $where: where, $orderby: ['$o.id', '$k.id'], $return: { o: '$o.id', k: '$k.id' } });
+            await compare({ $for: { k: `$.${key}[*]`, o: '$.O[*]' }, $where: where, $orderby: ['$o.id', '$k.id'], $return: { o: '$o.id', k: '$k.id' } });
+          }
+          await compare({ $for: { o: '$.O[*]' }, $orderby: ['$o.id'], $return: { id: '$o.id',
+            k: { $count: { $for: { k: `$.${key}[*]` }, $where: { $eq: ['$k.id', '$o.score'] }, $return: '$k' } } } });
+          await compare({ $for: { k: `$.${key}[*]` }, $orderby: ['$k.id'], $return: { id: '$k.id',
+            o: { $count: { $for: { o: '$.O[*]' }, $where: { $eq: ['$o.score', '$k.id'] }, $return: '$o' } } } });
+        }
+        assert.deepEqual(differ, []);
+      }, KEYED);
+    });
   });
 }
 
@@ -247,6 +288,50 @@ describe('two number columns of a join and a hop, PostgreSQL', { skip: skipFor('
         }
       }
       finally { await store.close(); }
+    });
+  });
+
+  it('seek a key through its index from a number column, and the column through its own from the key', async () => {
+    await withStore('postgres', KEYED, async (store, pg) => {
+      const { pool, schema } = /** @type {{ pool: any, schema: string }} */ (pg);
+      await pool.query(`INSERT INTO "${schema}"."K" (id, name, doc) SELECT g, 'k' || g, '{}'::jsonb FROM generate_series(1, 20000) g`);
+      await pool.query(`INSERT INTO "${schema}"."O" (id, score, tag, doc) SELECT 'o' || g, g, CASE WHEN g <= 10 THEN 'hot' ELSE 'cold' END, '{}'::jsonb `
+        + 'FROM generate_series(1, 20000) g');
+      await pool.query(`ANALYZE "${schema}"."K"; ANALYZE "${schema}"."O"`);
+      const fromColumn = { $for: { o: '$.O[*]', k: '$.K[*]' }, $where: { $and: [{ $eq: ['$o.tag', 'hot'] }, { $eq: ['$o.score', '$k.id'] }] },
+        $return: { o: '$o.id', k: '$k.name' } };
+      const explained = await store.explain(fromColumn);
+      assert.match(explained.scanNarrative, /Index (Only )?Scan using "K_pkey"/, explained.scanNarrative);
+      assert.deepEqual(explained.joins[1].on, [{ op: 'eq', left: { binding: 'o', column: 'score' }, right: { binding: 'k', column: 'id' },
+        doubles: true, key: 'right' }]);
+      assert.equal((await store.execute(fromColumn)).length, 10);
+      const fromKey = { $for: { k: '$.K[*]', o: '$.O[*]' }, $where: { $and: [{ $eq: ['$k.name', 'k77'] }, { $eq: ['$k.id', '$o.score'] }] },
+        $return: { o: '$o.id', k: '$k.name' } };
+      const reverse = await store.explain(fromKey);
+      assert.match(reverse.scanNarrative, /Index (Only )?Scan using "O_by_score"/, reverse.scanNarrative);
+      assert.deepEqual(await store.execute(fromKey), { o: 'o77', k: 'k77' });
+    });
+  });
+
+  it('refuse a numeric NaN another writer stored, wherever a row holding it is read', async () => {
+    await withStore('postgres', MODEL, async (store, pg) => {
+      const { pool, schema } = /** @type {{ pool: any, schema: string }} */ (pg);
+      for (const [id, a] of [['a', 1], ['b', 5], ['c', 7], ['d', 3]]) await store.entity('E').create({ id, a, c: a });
+      for (const [id, y] of [['a', 1], ['b', 5]]) await store.entity('B').create({ id, y });
+      await pool.query(`UPDATE "${schema}"."E" SET "a" = 'NaN', "c" = 'NaN' WHERE "id" = 'b'`);
+      const rows = (/** @type {any} */ where) => ({ $for: { it: '$.E[*]' }, ...(where === undefined ? {} : { $where: where }),
+        $orderby: ['$it.id'], $return: { id: '$it.id', a: '$it.a' } });
+      const refused = (/** @type {any} */ error) => error.code === 'JD2003' && /'NaN'/.test(error.message);
+      // the JSON number model holds no NaN: the engine's read refuses the row, and so does every statement that returns its column
+      for (const query of [rows(), rows({ $gt: ['$it.a', 5] }), rows({ $eq: ['$it.a', '$it.c'] }), rows({ $ne: ['$it.a', 1] }),
+        { $for: { it: '$.E[*]' }, $orderby: ['$it.a', '$it.id'], $return: '$it' }]) {
+        await assert.rejects(async () => store.execute(query, { pushdown: false }), refused);
+        await assert.rejects(async () => store.execute(query), refused, JSON.stringify(query));
+      }
+      await assert.rejects(async () => store.entity('E').asNoTracking().load({}), refused);
+      await assert.rejects(async () => store.entity('E').asNoTracking().load({ where: { $eq: ['$it.id', 'b'] } }), refused);
+      // a statement that never returns the row answers without it
+      assert.deepEqual(await store.execute(rows({ $lt: ['$it.a', 5] })), [{ id: 'a', a: 1 }, { id: 'd', a: 3 }]);
     });
   });
 

@@ -146,8 +146,8 @@ const sorted = (value) => [...(Array.isArray(value) ? value : value === undefine
 /**
  * The cases, once per engine.
  * @param {{ store: () => any, placeholders: (sql: string) => number, instantSeek?: RegExp, equalityBounds: number }} engine
- *   `equalityBounds`: the values a finite number literal's equality binds (PostgreSQL binds the two edges of the
- *   interval of decimals that round to it)
+ *   `equalityBounds`: the values a number literal's equality binds (PostgreSQL binds the two edges of the
+ *   interval of decimals that round to it, an infinity's too)
  */
 function cases(engine) {
   const items = () => engine.store().collection('items');
@@ -230,7 +230,7 @@ function cases(engine) {
       ['NaN equality', { $or: [n('$eq', NaN), n('$eq', 7)] }, 1, 1],
       ['Infinity upper', { $or: [n('$lt', Infinity), n('$lt', 5)] }, 2],
       ['-Infinity lower', { $or: [n('$gt', -Infinity), n('$gt', 5)] }, 2],
-      ['Infinity equality', { $or: [n('$eq', Infinity), n('$eq', 7)] }, 2, 1],
+      ['Infinity equality', { $or: [n('$eq', Infinity), n('$eq', 7)] }, 2, 2],
       ['-0 equality', { $or: [n('$eq', -0), n('$eq', 7)] }, 1],
       ['-0 ray', { $or: [n('$gt', -0), n('$gt', 0)] }, 1],
     ])) {
