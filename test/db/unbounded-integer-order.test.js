@@ -135,6 +135,14 @@ describe('an ordering over an unbounded indexed integer member', () => {
       await assertEngineOrder(t, ordered('u'));
       // a profile that refuses a full-table scan admits the probe
       assert.deepEqual(await t.execute(first(ordered('u'), 3), { profile: { refuseFullScan: true } }), ['r02', 'r05', 'r04']);
+      // a cursor left after its first item closes the guarded read, and the store reads on
+      const taken = [];
+      for await (const item of t.query(first(ordered('u'), 3))) {
+        taken.push(item);
+        break;
+      }
+      assert.deepEqual(taken, ['r02']);
+      assert.deepEqual(await t.execute(first(ordered('u'), 2)), ['r02', 'r05']);
     });
   });
 

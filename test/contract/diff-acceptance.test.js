@@ -239,5 +239,10 @@ describe('diffContracts — not, contains and a union keyed by type and discrimi
     agrees('input', member({ anyOf: [variant({ const: 'a' }), variant({ const: 'b' }), { type: 'null' }] }),
       member({ anyOf: [variant({ enum: ['a', 'b'] }), variant({ const: 'b' }), { type: 'null' }] }), [],
       [['unknown', 'R15', 'schema-unknown', '/properties/x/anyOf']]);
+    // two type sets in a mixed union that overlap (`number` holds every `integer`): the pairing compares the
+    // type sets and finds them meeting, so neither direction is decided
+    agrees('input', member({ anyOf: [variant({ const: 'a' }), { type: 'number' }, { type: 'null' }] }),
+      member({ anyOf: [variant({ const: 'a' }), { type: 'integer' }, { type: 'null' }] }), [],
+      [['unknown', 'R15', 'schema-unknown', '/properties/x/anyOf']]);
   });
 });
