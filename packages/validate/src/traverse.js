@@ -33,6 +33,7 @@ import {
   dialectDraft,
   admitsPropertyDependencies,
   caselessUri,
+  identifierKeyword,
 } from './schema-keywords.js';
 import { admitsDynamicReference } from './dynamic-ref.js';
 
@@ -259,6 +260,10 @@ function atFragment(uri) {
  *   `$schema` names a dialect the walk could not resolve (its meta-schema not
  *   held yet), that URI: a compile that holds the meta-schema reads the place
  *   by it ({@link placeDraftOf}, {@link readsForeign})
+ * @property {Map<string, string>} unread - The identifiers a place writes
+ *   but no keyword declares (a draft-04 `id` under a declared later draft,
+ *   an anchor spelled as a JSON Pointer), each with why: a refusal to
+ *   resolve a reference to one says so
  * @property {Map<string, string>} contested - The identifiers two different
  *   registered places declare, each with what names both: a compile that
  *   reads one is refused (`JK0012`), as it would answer by whichever place
@@ -400,6 +405,22 @@ export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPoi
     if (!declared.has(id)) declared.set(id, place);
     return true;
   };
+  /**
+   * Record why an identifier written here names nothing, so a refusal to
+   * resolve a reference to it says so (`JK0009`).
+   * @param {string} text - The identifier as written
+   * @param {string} against - The base it resolves against
+   * @param {string} why - What names nothing, and the repair
+   */
+  const unread = (text, against, why) => {
+    if (places === undefined) return;
+    try {
+      places.unread.set(createJsonPointer(text, against, opts).id, why);
+    }
+    catch (_e) {
+      // no URI reference: no reference can name it either
+    }
+  };
 
   // A `$schema` is read through the meta-schemas this walk registers and the
   // ones the validator already holds.
@@ -422,11 +443,14 @@ export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPoi
     if (dialect !== undefined) places?.dialects.set(obj, dialect);
     else places?.dialects.delete(obj);
 
-    // Handle $id (draft 6+) or id (draft 4) for identifying subschemas
-    const idKeyword = isStringType(obj.$id) ? obj.$id : isStringType(obj.id) ? obj.id : undefined;
+    // `$id`, or the draft-04 `id` where no known draft is declared
+    const declaredDraft = foreign ? null : draft;
+    const idName = identifierKeyword(obj, declaredDraft);
+    const idKeyword = idName === undefined ? undefined : obj[idName];
     const hasId = isStringType(idKeyword) && !isStringWhiteSpace(idKeyword);
+    if (idName === undefined && isStringType(obj.id) && !isStringWhiteSpace(obj.id))
+      unread(obj.id, base, `it is named only by id at '${encodeJsonPointerPath(path, 'id')}', which from draft-06 on is no keyword and names nothing; spell it ${draft !== null && draft >= 2019 && /^#[^/]/.test(obj.id) ? `$anchor: '${obj.id.slice(1)}'` : `$id: '${obj.id}'`}`);
     if (hasId) {
-      const idName = isStringType(obj.$id) ? '$id' : 'id';
       let id;
       // the root's `$id` was resolved once, against the base it is read under
       if (obj === schema && idName === '$id') id = rootUri;
@@ -457,19 +481,26 @@ export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPoi
     // Where anchors are not allowed, a plain-name fragment names the
     // document: an anchor declares nothing.
     if (opts.anchorsAllowed == true && isStringType(obj.$anchor) && !isStringWhiteSpace(obj.$anchor)) {
-      const { id } = createJsonPointer(`#${obj.$anchor}`, baseUri, opts);
-      if (!declare(id, obj, path, '$anchor'))
-        continue;
-
-      // we reset the baseUri when the $anchor property is set.
-      if (!id.startsWith('#')) // except when anchors are global
-        baseUri = id;
+      const { id, fragment } = createJsonPointer(`#${obj.$anchor}`, baseUri, opts);
+      // a name spelled as a JSON Pointer would shadow the place the pointer
+      // names: it declares nothing, and `#/…` stays a pointer
+      if (pointerShaped(fragment))
+        unread(`#${obj.$anchor}`, baseUri, pointerAnchor('$anchor', obj.$anchor, path));
+      else {
+        if (!declare(id, obj, path, '$anchor'))
+          continue;
+        // we reset the baseUri when the $anchor property is set.
+        if (!id.startsWith('#')) // except when anchors are global
+          baseUri = id;
+      }
     }
 
     // Handle $dynamicAnchor (draft 2020-12) - similar to $anchor but for $dynamicRef
     if (opts.anchorsAllowed == true && isStringType(obj.$dynamicAnchor) && !isStringWhiteSpace(obj.$dynamicAnchor)) {
-      const { id } = createJsonPointer(`#${obj.$dynamicAnchor}`, baseUri, opts);
-      if (!declare(id, obj, path, '$dynamicAnchor'))
+      const { id, fragment } = createJsonPointer(`#${obj.$dynamicAnchor}`, baseUri, opts);
+      if (pointerShaped(fragment))
+        unread(`#${obj.$dynamicAnchor}`, baseUri, pointerAnchor('$dynamicAnchor', obj.$dynamicAnchor, path));
+      else if (!declare(id, obj, path, '$dynamicAnchor'))
         continue;
 
       // Note: $dynamicAnchor does NOT change the baseUri like $anchor does
@@ -603,6 +634,55 @@ export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPoi
 const UNHELD = 'no schema the validator holds has that URI; register it with addSchema, load it with compileAsync, or fix the reference';
 
 /**
+ * The identifier a schema object declares where a compile computes a base
+ * or a resource from it, read as the walk reads it: a non-empty `$id`, else
+ * the draft-04 `id` where the object's document declares no known draft
+ * ({@link identifierKeyword}).
+ * @param {any} schema - A schema object
+ * @param {number|null} declaredDraft - The known draft its document declares
+ *   ({@link declaredDraftOf}), null for none or an unknown one
+ * @returns {any} The `$id` (as written) or the `id`, or undefined
+ */
+export function identifierOf(schema, declaredDraft) {
+  if (!isObjectClass(schema)) return undefined;
+  if (schema.$id) return schema.$id;
+  return identifierKeyword(schema, declaredDraft) === 'id' && !isStringWhiteSpace(schema.id) ? schema.id : undefined;
+}
+
+/**
+ * The known draft a walked schema object's document declares: null for
+ * none, for a `$schema` naming no draft this package knows, and for a place
+ * no walk recorded.
+ * @param {object} schema
+ * @param {{ drafts?: WeakMap<object, number|null>, foreign?: WeakSet<object> }|undefined} places
+ * @returns {number|null}
+ */
+export function declaredDraftOf(schema, places) {
+  return places?.foreign?.has(schema) ? null : places?.drafts?.get(schema) ?? null;
+}
+
+/**
+ * Whether a fragment the URL parse read is a JSON Pointer: a plain name
+ * spelled like one names nothing.
+ * @param {string|null|undefined} fragment
+ * @returns {boolean}
+ */
+function pointerShaped(fragment) {
+  return typeof fragment === 'string' && fragment.startsWith('/');
+}
+
+/**
+ * Why a reference spelled as a pointer-shaped anchor names nothing.
+ * @param {string} keyword - `$anchor` or `$dynamicAnchor`
+ * @param {string} name - The anchor as written
+ * @param {string} path - The place declaring it
+ * @returns {string}
+ */
+function pointerAnchor(keyword, name, path) {
+  return `'#${name}' is a JSON Pointer, and the ${keyword} '${name}' at '${encodeJsonPointerPath(path, keyword)}' spelled like it names nothing; give the anchor a plain name (a letter or '_', then letters, digits, '-', '.', '_')`;
+}
+
+/**
  * Refuse reading an identifier two registered places declare (`JK0012`):
  * the answer would be the first registered place's, whichever was meant.
  * @param {SchemaPlaces|undefined} places - What the walks read
@@ -732,8 +812,9 @@ export function resolveRefSchemaShallow(schemas, refUri, baseUri, opts = new Jso
       throw unresolvedReference(id, false, `'${current}' is not a schema in '${leftUri}'; fix the pointer`);
 
     schema = schema[part];
-    if (isObjectClass(schema) && isStringType(schema.$id) && !isStringWhiteSpace(schema.$id)) {
-      const { id } = createJsonPointer(schema.$id, base, opts, '$id');
+    const identifier = identifierOf(schema, declaredDraftOf(schema, places));
+    if (isStringType(identifier) && !isStringWhiteSpace(identifier)) {
+      const { id } = createJsonPointer(identifier, base, opts, schema.$id ? '$id' : 'id');
       base = id;
     }
   }
@@ -831,7 +912,9 @@ export function restoreSchemaRefsInMap(schemas, opts = new JsonPointerOptions(),
           schemas.delete(id);
           continue;
         }
-        throw locatedRefusal(failure !== undefined && !kept ? failure : unresolvedReference(id, kept), sites?.get(id));
+        const unread = kept ? undefined : places?.unread.get(id);
+        throw locatedRefusal(unread !== undefined ? unresolvedReference(id, false, unread)
+          : failure !== undefined && !kept ? failure : unresolvedReference(id, kept), sites?.get(id));
       }
 
       schemas.set(id, schema);
@@ -1125,6 +1208,8 @@ export function assertRootReadsInstance(schemas, rootId, root, reading, opts = n
   /** @type {Map<object, Map<string, number>>} */
   const visited = new Map();
   const ids = [];
+  // what the walks read, for the identifiers a pointer passes on its way
+  const read = /** @type {SchemaPlaces} */ (/** @type {unknown} */ ({ drafts: reading.drafts, foreign: reading.foreign, contested: new Map() }));
   let schema = root;
   let base = rootId;
   let at = rootId;
@@ -1133,8 +1218,9 @@ export function assertRootReadsInstance(schemas, rootId, root, reading, opts = n
   // finitely many; the cap only ends a walk whose bases never repeat.
   for (let steps = 0; steps <= schemas.size * 4 + 64; steps++) {
     if (!isObjectClass(schema)) return;
-    if (isStringType(schema.$id) && !isStringWhiteSpace(schema.$id)) {
-      base = createJsonPointer(schema.$id, base, opts, '$id').id;
+    const identifier = identifierOf(schema, declaredDraftOf(schema, reading));
+    if (isStringType(identifier) && !isStringWhiteSpace(identifier)) {
+      base = createJsonPointer(identifier, base, opts, schema.$id ? '$id' : 'id').id;
       at = base;
     }
     rootResource ??= resourceOf(base);
@@ -1168,7 +1254,7 @@ export function assertRootReadsInstance(schemas, rootId, root, reading, opts = n
     }
     let target;
     try {
-      target = resolveRefSchemaShallow(schemas, ref, base, opts);
+      target = resolveRefSchemaShallow(schemas, ref, base, opts, read);
     }
     catch {
       return; // a target not loaded is reported where it is used

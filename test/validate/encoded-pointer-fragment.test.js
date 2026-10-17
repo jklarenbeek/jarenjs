@@ -88,9 +88,16 @@ describe('a percent-encoded pointer fragment is a pointer', () => {
     assert.deepEqual(answers(loaded, ['s', 1]), [true, false]);
   });
 
-  it('an anchor spelled with a leading %2F is named by the same spelling', () => {
-    const validate = new JarenValidator().compile({ $schema: D20, $defs: { y: { $anchor: '%2Fa', type: 'string' } }, properties: { p: { $ref: '#%2Fa' } } });
-    assert.deepEqual(answers(validate, [{ p: 's' }, { p: 1 }]), [true, false]);
+  it('an anchor spelled with a leading %2F names nothing: the reference stays a pointer', () => {
+    // the pointer names a schema: it is that schema, not the anchor's
+    const shadowed = new JarenValidator().compile({ $schema: D20, a: { type: 'boolean' }, $defs: { y: { $anchor: '%2Fa', type: 'string' } }, properties: { p: { $ref: '#%2Fa' } } });
+    assert.deepEqual(answers(shadowed, [{ p: true }, { p: 's' }]), [true, false]);
+    // the pointer names nothing: refused, naming the anchor and the repair
+    assert.throws(() => new JarenValidator().compile({ $schema: D20, $defs: { y: { $anchor: '%2Fa', type: 'string' } }, properties: { p: { $ref: '#%2Fa' } } }), {
+      code: 'JK0009',
+      docPath: '#/properties/p/%24ref',
+      reason: "Can not resolve schema for 'https://github.com/jklarenbeek/jarenjs#/a': '#%2Fa' is a JSON Pointer, and the $anchor '%2Fa' at '#/%24defs/y/%24anchor' spelled like it names nothing; give the anchor a plain name (a letter or '_', then letters, digits, '-', '.', '_')",
+    });
   });
 
   it('a plain name is still a plain name', () => {

@@ -47,7 +47,7 @@
 import { equalsJson, isJsonObject, setObjectMember } from '@jarenjs/core/object';
 import { SCHEMA_VALUE_KEYWORDS, SCHEMA_MAP_KEYWORDS, SCHEMA_LIST_KEYWORDS, ANNOTATION_KEYWORDS } from '@jarenjs/core/schema';
 import { collectSameDocumentAnchors, resolveSameDocumentRef, readsRefAlone } from './normalize.js';
-import { detectSchemaDraft } from './schema-keywords.js';
+import { detectSchemaDraft, dialectDraft, identifierKeyword } from './schema-keywords.js';
 import { createJsonPointer, encodeJsonPointerPath } from './traverse.js';
 import { SchemaCompileError, SchemaRuntimeError } from './errors.js';
 import { JarenValidator } from './index.js';
@@ -285,23 +285,39 @@ export function deriveStrictProfile(schema, options = {}) {
   const drafts = new Map();
   /** Resource documents by their absolute identifier. */
   const resources = new Map();
+  /** The nodes a draft-04 `id` identifies: identity there, as `$id` is. */
+  const idNodes = new WeakSet();
   /**
-   * The base an `$id` names, refused as the validator refuses an `$id` that
+   * Whether a member of a node is its identity, dropped without a note.
+   * @param {object} node @param {string} key
+   */
+  const isIdentity = (node, key) => IDENTITY.has(key) || (key === 'id' && idNodes.has(node));
+  /**
+   * The base an identifier names, refused as the validator refuses one that
    * is no URI reference.
    * @param {string} id @param {string} base @param {string} at - The node's location
+   * @param {string} keyword - `$id`, or the draft-04 `id` ({@link identifierKeyword})
    */
-  const identified = (id, base, at) => {
-    createJsonPointer(id, base, undefined, '$id', placeOf(encodeJsonPointerPath(at, '$id')));
+  const identified = (id, base, at, keyword) => {
+    createJsonPointer(id, base, undefined, keyword, placeOf(encodeJsonPointerPath(at, keyword)));
     return withoutFragment(new URL(id, base).href);
   };
-  /** @param {unknown} node @param {string} base @param {string} at @param {number|null} draft */
-  const index = (node, base, at, draft) => {
+  /**
+   * @param {unknown} node @param {string} base @param {string} at @param {number|null} draft
+   * @param {number|null} declared - The known draft the document declares, null for none or an unknown one
+   */
+  const index = (node, base, at, draft, declared) => {
     if (!isJsonObject(node) || located.has(node)) return;
-    if (typeof node.$schema === 'string') draft = detectSchemaDraft(node);
-    // an `$id` read beside a `$ref` read alone sets no base, and one that
-    // names only a fragment (a draft-07 plain name) starts no resource
-    if (typeof node.$id === 'string' && at !== `${base}#`) {
-      const named = identified(node.$id, base, at);
+    if (typeof node.$schema === 'string') {
+      draft = detectSchemaDraft(node);
+      declared = dialectDraft(node.$schema);
+    }
+    // an identifier read beside a `$ref` read alone sets no base, and one
+    // that names only a fragment (a draft-07 plain name) starts no resource
+    const keyword = identifierKeyword(node, declared);
+    if (keyword === 'id') idNodes.add(node);
+    if (keyword !== undefined && at !== `${base}#`) {
+      const named = identified(node[keyword], base, at, keyword);
       if (named !== base && !readsRefAlone(node, draft)) {
         base = named;
         at = `${base}#`;
@@ -310,17 +326,18 @@ export function deriveStrictProfile(schema, options = {}) {
     if (at === `${base}#`) resources.set(base, { node, anchors: collectSameDocumentAnchors(node) });
     located.set(node, at);
     drafts.set(node, draft);
-    for (const key of Object.keys(node)) mapPosition(key, node[key], at, (child, there) => index(child, base, there, draft));
+    for (const key of Object.keys(node)) mapPosition(key, node[key], at, (child, there) => index(child, base, there, draft, declared));
   };
-  const rootBase = isJsonObject(schema) && typeof schema.$id === 'string' ? identified(schema.$id, SCHEMA_BASE, `${SCHEMA_BASE}#`) : SCHEMA_BASE;
-  index(schema, rootBase, `${rootBase}#`, null);
+  const rootKeyword = isJsonObject(schema) ? identifierKeyword(schema, typeof schema.$schema === 'string' ? dialectDraft(schema.$schema) : null) : undefined;
+  const rootBase = rootKeyword !== undefined ? identified(schema[rootKeyword], SCHEMA_BASE, `${SCHEMA_BASE}#`, rootKeyword) : SCHEMA_BASE;
+  index(schema, rootBase, `${rootBase}#`, null, null);
   for (const reference of references) {
     let base;
     try { base = isJsonObject(reference) && typeof reference.$id === 'string' ? withoutFragment(new URL(reference.$id).href) : undefined; }
     catch { base = undefined; }
     if (base === undefined)
       throw new SchemaCompileError('JK0107', 'deriveStrictProfile: every reference is a schema object with an absolute $id');
-    index(reference, base, `${base}#`, null);
+    index(reference, base, `${base}#`, null, null);
   }
 
   /** The original's own validator, asked whether a place's schema accepts a value. */
@@ -434,7 +451,7 @@ export function deriveStrictProfile(schema, options = {}) {
     if (isJsonObject(node)) {
       for (const key of Object.keys(node)) {
         if (key === 'title' || key === 'description') setObjectMember(out, key, node[key]);
-        else if (!IDENTITY.has(key) && key !== 'type' && !unenforced(key)) notes.push(strictNote(key, node[key]));
+        else if (!isIdentity(node, key) && key !== 'type' && !unenforced(key)) notes.push(strictNote(key, node[key]));
       }
     }
     appendNotes(out, notes);
@@ -467,7 +484,7 @@ export function deriveStrictProfile(schema, options = {}) {
     const notes = ['(strict profile: this object is written as an array of { key, value } entries, one per member, each key once; the original schema enforces it)'];
     for (const key of Object.keys(node)) {
       if (key === 'title' || key === 'description') setObjectMember(out, key, node[key]);
-      else if (!IDENTITY.has(key) && !unenforced(key) && !['type', 'properties', 'patternProperties', 'additionalProperties'].includes(key)) notes.push(strictNote(key, node[key]));
+      else if (!isIdentity(node, key) && !unenforced(key) && !['type', 'properties', 'patternProperties', 'additionalProperties'].includes(key)) notes.push(strictNote(key, node[key]));
     }
     const keyNote = patterns.length === 0 ? '(strict profile: a member name)'
       : `(strict profile: a member name; a name matching ${patterns.map((pattern) => JSON.stringify(pattern)).join(' or ')} takes that pattern's value schema${rest === false ? ', and every name matches one' : ''}; the original schema enforces it)`;
@@ -537,7 +554,7 @@ export function deriveStrictProfile(schema, options = {}) {
       }
       if (typeof branch.description === 'string') record.notes.push(branch.description);
       for (const key of Object.keys(branch)) {
-        if (!['type', 'properties', 'required', 'title', 'description', 'additionalProperties'].includes(key) && !IDENTITY.has(key) && !unenforced(key))
+        if (!['type', 'properties', 'required', 'title', 'description', 'additionalProperties'].includes(key) && !isIdentity(branch, key) && !unenforced(key))
           record.notes.push(strictNote(key, branch[key]));
       }
       return true;
@@ -615,7 +632,7 @@ export function deriveStrictProfile(schema, options = {}) {
     for (const [shape, narrow] of [[one, other], [other, one]]) {
       if (!narrowing(narrow.schema) || !isJsonObject(shape.schema)) continue;
       const extra = /** @type {any} */ (narrow.schema);
-      const notes = Object.keys(extra).filter((key) => !IDENTITY.has(key) && key !== 'title' && (key === 'description' || !unenforced(key)))
+      const notes = Object.keys(extra).filter((key) => !isIdentity(extra, key) && key !== 'title' && (key === 'description' || !unenforced(key)))
         .map((key) => (key === 'description' ? extra.description : strictNote(key, extra[key])));
       const widened = /** @type {any} */ ({ ...shape.schema });
       // the copy is read under the draft of the place it copies
@@ -690,7 +707,7 @@ export function deriveStrictProfile(schema, options = {}) {
     /** @type {Set<string>} */
     const dropped = new Set();
     for (const key of Object.keys(node)) {
-      if (IDENTITY.has(key) || CARRIED.has(key)) continue;
+      if (isIdentity(node, key) || CARRIED.has(key)) continue;
       if (unenforced(key)) {
         dropped.add(key);
         continue;
@@ -738,7 +755,7 @@ export function deriveStrictProfile(schema, options = {}) {
     if (arrays && node.items === false)
       throw refusal('JK0108', 'an array whose items accept no value has no strict form; remove the array type', encodeJsonPointerPath(at, 'items'));
     const kept = {};
-    for (const key of Object.keys(node)) if (!IDENTITY.has(key) && !dropped.has(key)) setObjectMember(kept, key, node[key]);
+    for (const key of Object.keys(node)) if (!isIdentity(node, key) && !dropped.has(key)) setObjectMember(kept, key, node[key]);
     if (objects) {
       // closing replaces both; a schema-valued one was refused above
       delete kept.unevaluatedProperties;

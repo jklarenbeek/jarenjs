@@ -244,6 +244,23 @@ export function detectSchemaDraft(schema, held = undefined) {
 }
 
 /**
+ * The keyword that identifies a schema object, as every reader of this
+ * package reads it (the validator's walk, `compileNormalizer`,
+ * `@jarenjs/emit`, `deriveStrictProfile`): `$id` when it is a string, else
+ * the draft-04 spelling `id` where the object's document declares no draft
+ * this package knows — none, or a `$schema` naming another dialect such as
+ * draft-04 itself. Under a declared draft-06 or later `id` is no keyword:
+ * it names nothing and sets no base.
+ * @param {any} node - A schema object
+ * @param {number|null|undefined} declaredDraft - The draft its document declares, null when it declares none or one this package does not know
+ * @returns {'$id'|'id'|undefined}
+ */
+export function identifierKeyword(node, declaredDraft) {
+  if (typeof node.$id === 'string') return '$id';
+  return declaredDraft == null && typeof node.id === 'string' ? 'id' : undefined;
+}
+
+/**
  * Whether `propertyDependencies` is a keyword at a schema location: the
  * `propertyDependencies` option is on and the location's document does not
  * declare a draft older than 2020-12. Everywhere else it is an unknown

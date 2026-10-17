@@ -29,25 +29,29 @@ describe('compileNormalizer — the non-mutation contract', () => {
     deepStrictEqual(schema.default, { port: '8080', name: '  jaren  ', stray: true });
   });
 
-  it('decodes same-document reference fragments once before resolving pointer tokens or anchors', () => {
+  it('decodes a same-document pointer fragment once before its tokens, and matches an anchor as the URI spells it', () => {
     const schema = {
       $defs: {
         'a b': { type: 'integer' },
         '%20': { type: 'string' },
         'a/b': { type: 'integer' },
         anchored: { $anchor: 'amount', type: 'integer' },
+        spaced: { $anchor: 'a b', type: 'integer' },
       },
       type: 'object',
       properties: {
         port: { $ref: '#/$defs/a%20b' },
         literal: { $ref: '#/$defs/%2520' },
         slash: { $ref: '#%2F$defs%2Fa~1b' },
+        // `#a b` and `#a%20b` are one URI; `#%61mount` is not `#amount`,
+        // and the validator refuses it (JK0009)
         anchored: { $ref: '#%61mount' },
+        spaced: { $ref: '#a%20b' },
       },
     };
     const normalize = compileNormalizer(schema, ALL);
-    deepStrictEqual(normalize({ port: '8080', literal: '  value  ', slash: '2', anchored: '3' }),
-      { port: 8080, literal: 'value', slash: 2, anchored: 3 });
+    deepStrictEqual(normalize({ port: '8080', literal: '  value  ', slash: '2', anchored: '3', spaced: '4' }),
+      { port: 8080, literal: 'value', slash: 2, anchored: '3', spaced: 4 });
     strictEqual(resolveSameDocumentRef('#/$defs/a%20b', schema), schema.$defs['a b']);
     strictEqual(resolveSameDocumentRef('#/$defs/%2520', schema), schema.$defs['%20']);
     strictEqual(resolveSameDocumentRef('#/$defs/%', schema), undefined);

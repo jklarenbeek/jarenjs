@@ -51,7 +51,32 @@ anchor that was no HTML identifier of at most 31 characters (`a b`, `_a`, `1a`, 
 longer name) threw an uncoded `Error` ("… already exists") where it was
 declared, and in a registered document ended its registration there; a
 reference to such a name named the whole document, so with no anchor of that
-name `{ "$ref": "#_a" }` answered as the document.*
+name `{ "$ref": "#_a" }` answered as the document.* A percent-encoding is part
+of the spelling: `$anchor: 'a%20b'` is named by `#a%20b` (and `#a b`), and
+`#%41` does not name `$anchor: 'A'`; `@jarenjs/validate/normalize`,
+`@jarenjs/emit` and `deriveStrictProfile` match a name the same way.
+An anchor spelled as a JSON Pointer (`$anchor: '/a'`, `$anchor: '%2Fa'`, or a
+`$dynamicAnchor` so spelled) names nothing: `#/a` stays the pointer, so it names
+the member `a` when that is a schema, and is otherwise refused `JK0009`, naming
+the anchor and asking for a plain name. *Upgrade: such an anchor was what `#/a`
+named, even where the pointer named another schema.*
+The draft-04 identifier `id` is read as `$id` is only where a document declares
+no draft this package knows: none, or a `$schema` naming another dialect, the
+draft-04 one included. From draft-06 on `id` is no keyword: under a declared
+draft-06, draft-07, 2019-09 or 2020-12 it names nothing and sets no base, so
+`{ $schema: draft-07, definitions: { a: { id: '#foo', type: 'integer' } },
+properties: { y: { $ref: '#foo' } } }` is refused `JK0009` ("it is named only
+by id at '#/definitions/a/id', which from draft-06 on is no keyword and names
+nothing; spell it $id: '#foo'"; from 2019-09 on, `$anchor: 'foo'`). *Upgrade:
+`id` named its schema under every draft, so that schema accepted `{ y: 1 }`
+and rejected `{ y: '1' }`, and an `id` with a path re-based the references
+below it (`{ id: 'thing', properties: { z: { $ref: '#/definitions/x' } } }`
+under a declared draft-07 was refused `JK0009`; it now reads the document's
+`definitions/x`). Where `id` is read it now sets the base for the compile as
+`$id` does: before, it did so only for registering names, so in a document
+that declares no draft a `$ref` below such an `id`, or a pointer passing
+through it, read the outer document's members, and a refusal below it was
+located in the outer document.*
 A fragment that decodes to one starting with `/` is a JSON Pointer:
 `{ "$ref": "#%2F$defs%2Fx" }` names `$defs/x`, and a `%2F` separates tokens as a
 `/` does wherever it sits in a pointer (`#/$defs/a%2Fb` names `b` in `a`;
@@ -1712,7 +1737,16 @@ and refuses `'12'`: it is now coerced to `12`.* Same-document anchors are
 collected from schema positions; anchor-looking keys in defaults, constants
 and examples are data. A fragment-only `$id` (`$id: '#foo'`, the draft-07
 spelling of an anchor) names its schema object as the validator names it, in
-every draft, and starts no resource: the anchors below it are the document's.
+every draft, and starts no resource: the anchors below it are the document's;
+the draft-04 `id` does the same where the validator reads it (a document that
+declares no known draft), and a `$dynamicAnchor` names its object as an
+`$anchor` does. A name is matched as the URI spells it, as the validator
+matches it. *Upgrade: a draft-04 `id: '#foo'` named nothing here, so a
+reference to it left its value as sent where the validator reads the target; a
+`$ref` to a `$dynamicAnchor` was not followed; and a name was matched decoded,
+so `#%61mount` reached `$anchor: 'amount'` (which the validator refuses,
+`JK0009`) while neither `#a%20b` nor `#a b` reached `$anchor: 'a%20b'`
+(which it does).*
 From 2019-09 on the drafts' meta-schemas forbid a fragment in `$id`; such an
 `$id` is read leniently as that name rather than refused, since every
 reference to it answers as the name it spells (`validateSchema` against the

@@ -41,6 +41,8 @@ import {
   TRAVERSE_SCHEMA_MAPS,
   TRAVERSE_SCHEMA_MAP_MAPS,
   detectSchemaDraft,
+  dialectDraft,
+  identifierKeyword,
   admitsPropertyDependencies,
   readPrefixItems,
 } from './schema-keywords.js';
@@ -127,19 +129,23 @@ function coerceToType(value, type) {
 
 /**
  * Collect the plain names of one schema document: a map from name to the
- * schema node that declares it, by an `$anchor` or by a fragment-only `$id`
- * (`$id: '#foo'`, the draft-07 spelling of an anchor, which the validator
- * reads as a name in every draft), keyed as {@link resolveSameDocumentRef}
- * reads a reference to it. Exported because `@jarenjs/emit` resolves the
- * same references when it derives types, and two walks with different scope
+ * schema node that declares it, by an `$anchor`, a `$dynamicAnchor` or a
+ * fragment-only identifier (`$id: '#foo'`, the draft-07 spelling of an
+ * anchor, which the validator reads as a name in every draft, or the
+ * draft-04 `id: '#foo'` where the validator reads `id`:
+ * {@link identifierKeyword}), keyed as the URI spells the name — as the
+ * validator keys it and {@link resolveSameDocumentRef} reads a reference to
+ * it. A name spelled as a JSON Pointer (`$anchor: '/a'`) declares nothing:
+ * `#/a` is a pointer. Exported because `@jarenjs/emit` resolves the same
+ * references when it derives types, and two walks with different scope
  * rules would make a generated type disagree with this normalizer — the one
  * defect class that package must not have.
  *
  * The scope is the same-document scope the rest of this module uses: a
- * subtree that declares any other `$id` is an embedded resource with its own
- * anchor scope, so it is not descended; a fragment-only `$id` starts no
- * resource. First declaration wins, which keeps the map deterministic for a
- * document that (invalidly) repeats a name.
+ * subtree that declares any other identifier is an embedded resource with
+ * its own anchor scope, so it is not descended; a fragment-only one starts
+ * no resource. First declaration wins, which keeps the map deterministic for
+ * a document that (invalidly) repeats a name.
  * @param {object|boolean} root - The root schema of the document
  * @param {{ propertyDependencies?: boolean }} [options] - `propertyDependencies: true` also walks the
  *   subschemas of the `propertyDependencies` keyword (off, it is an unknown keyword and not walked)
@@ -150,21 +156,20 @@ export function collectSameDocumentAnchors(root, options = {}) {
 }
 
 /**
- * The name a fragment-only `$id` declares, as a reference to it is read: its
- * fragment decoded once. Undefined for an `$id` that is no plain name (one
- * with a path, an empty fragment or a JSON Pointer) or does not decode.
- * @param {string} id
+ * The plain name a fragment-only reference spells, as the validator's URL
+ * parse spells it (`#a b` and `#a%20b` are both `a%20b`; `#%41` is not
+ * `#A`). Undefined for a reference that is no plain name: one with a path,
+ * an empty fragment, or a fragment that reads as a JSON Pointer (`#/a`,
+ * `#%2Fa`).
+ * @param {string} ref
  * @returns {string|undefined}
  */
-function plainIdName(id) {
-  const text = referenceText(id);
-  if (text.length < 2 || text[0] !== '#' || text[1] === '/') return undefined;
-  try {
-    return decodeURIComponent(text.slice(1));
-  }
-  catch (_e) {
-    return undefined;
-  }
+function plainNameKey(ref) {
+  const text = referenceText(ref);
+  if (text.length < 2 || text[0] !== '#') return undefined;
+  const href = new URL(text, 'jaren:/').href;
+  const name = href.slice(href.indexOf('#') + 1);
+  return name.replace(/%2f/gi, '/').startsWith('/') ? undefined : name;
 }
 
 /**
@@ -181,45 +186,51 @@ function collectPlainNames(root, options, drafts) {
   const anchors = new Map();
   if (!isJsonObject(root)) return anchors;
   const seen = new Set();
-  /** @param {string} name @param {object} node @param {number|null} draft */
+  /** @param {string|undefined} name @param {object} node @param {number|null} draft */
   const declare = (name, node, draft) => {
-    if (anchors.has(name)) return;
+    if (name === undefined || anchors.has(name)) return;
     anchors.set(name, node);
     drafts?.set(node, draft);
   };
-  /** @param {any} node @param {boolean} isRoot @param {number|null} inheritedDraft */
-  const walk = (node, isRoot, inheritedDraft) => {
+  /**
+   * @param {any} node @param {boolean} isRoot @param {number|null} inheritedDraft
+   * @param {number|null} inheritedDeclared - The known draft the document declares, null for none or an unknown one
+   */
+  const walk = (node, isRoot, inheritedDraft, inheritedDeclared) => {
     if (!isJsonContainer(node) || seen.has(node)) return;
     seen.add(node);
     if (Array.isArray(node)) {
-      for (let i = 0; i < node.length; i++) walk(node[i], false, inheritedDraft);
+      for (let i = 0; i < node.length; i++) walk(node[i], false, inheritedDraft, inheritedDeclared);
       return;
     }
     // The draft a document declares is inherited by everything below it.
     const draft = typeof node.$schema === 'string' ? detectSchemaDraft(node) : inheritedDraft;
-    if (typeof node.$id === 'string') {
-      const name = plainIdName(node.$id);
+    const declared = typeof node.$schema === 'string' ? dialectDraft(node.$schema) : inheritedDeclared;
+    const idName = identifierKeyword(node, declared);
+    if (idName !== undefined) {
+      const name = plainNameKey(node[idName]);
       if (name !== undefined) declare(name, node, draft);
       else if (!isRoot) return;
     }
-    if (typeof node.$anchor === 'string') declare(node.$anchor, node, draft);
+    for (const keyword of ['$anchor', '$dynamicAnchor'])
+      if (typeof node[keyword] === 'string') declare(plainNameKey(`#${node[keyword]}`), node, draft);
     // Only schema positions declare anchors. Annotation values such as
     // defaults and examples are instance data, even when they contain $anchor.
     for (const key of Object.keys(node)) {
-      if (TRAVERSE_SCHEMA_OBJECTS.includes(key)) walk(node[key], false, draft);
+      if (TRAVERSE_SCHEMA_OBJECTS.includes(key)) walk(node[key], false, draft, declared);
       else if (TRAVERSE_SCHEMA_MAPS.includes(key) && isJsonObject(node[key])) {
-        for (const child of Object.values(node[key])) walk(child, false, draft);
+        for (const child of Object.values(node[key])) walk(child, false, draft, declared);
       }
       else if (TRAVERSE_SCHEMA_MAP_MAPS.includes(key) && admitsPropertyDependencies(options.propertyDependencies, draft)
         && isJsonObject(node[key])) {
         for (const inner of Object.values(node[key])) {
           if (!isJsonObject(inner)) continue;
-          for (const child of Object.values(inner)) walk(child, false, draft);
+          for (const child of Object.values(inner)) walk(child, false, draft, declared);
         }
       }
     }
   };
-  walk(root, true, null);
+  walk(root, true, null, null);
   return anchors;
 }
 
@@ -276,10 +287,11 @@ function followSameDocumentRef(ref, root, anchors, trail) {
   if (!ref.startsWith('#')) return undefined;
   let node = root;
   let tokens;
+  const name = plainNameKey(ref);
+  if (name !== undefined) return anchors?.get(name);
   try {
     const fragment = decodeURIComponent(ref.slice(1));
-    if (!fragment.startsWith('/'))
-      return anchors === undefined ? undefined : anchors.get(fragment);
+    if (!fragment.startsWith('/')) return undefined;
     tokens = parseJSONPointer(fragment);
   }
   catch (_e) {

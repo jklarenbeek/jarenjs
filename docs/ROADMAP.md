@@ -99,14 +99,20 @@ delete it or fix it.
   the key is the `$id` as written, not resolved against the origin a compile
   resolves the reference against. Pass the key (`addSchema(schema,
   'https://…/t.json')`) or an absolute `$id`.
-- [ ] **A draft-04 `id` and a percent-spelled `$anchor` outside the
-  validator.** The validator reads `id: '#foo'` under every draft (draft-07 `{
-  definitions: { a: { id: '#foo', type: 'integer' } }, properties: { y: {
-  $ref: '#foo' } } }` refuses `{ y: '1' }`), and keys `$anchor: 'a%20b'` as
-  spelled so `$ref: '#a%20b'` reaches it; `compileNormalizer` (and emit, the
-  strict profile) collect neither, leaving `'1'` as sent. Decide whether the
-  validator reads draft-04 `id` at all past draft-04, then read both as it
-  does.
+- [ ] **The normalizer resolves a reference inside an embedded resource
+  against the root.** `{ $id: 'http://example.com/root.json', definitions: {
+  x: { type: 'integer' } }, properties: { y: { $id: 'thing', definitions: { x:
+  { type: 'string' } }, properties: { z: { $ref: '#/definitions/x' } } } } }`:
+  the validator reads `thing`'s `x` and accepts `{ y: { z: '1' } }`;
+  `compileNormalizer(…, { coerceTypes: true })` reads the root's `x` and
+  returns `{ y: { z: 1 } }`, which the validator rejects. `@jarenjs/emit` and
+  the strict profile use the same resolver.
+- [ ] **A percent-encoded unreserved character is not the character in a
+  reference.** `$ref: '#%41'` does not reach `$anchor: 'A'`, nor
+  `http://x.test/%61.json` an `$id` of `http://x.test/a.json` (JK0009): URIs
+  are compared as the URL standard spells them, where RFC 3986 §6.2.2.2 makes
+  them equivalent. A coded refusal, not a wrong answer; reading them alike is
+  one rule for every URI part, in all four tools.
 - [ ] **Strict profiles of the JTLT grammar and of two schemas for one
   member.** `deriveStrictProfile` (`@jarenjs/validate/strict-profile`) carries
   a value of any shape as JSON text, a map as `{ key, value }` entries, and an

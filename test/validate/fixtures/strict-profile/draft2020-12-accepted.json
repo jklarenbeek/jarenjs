@@ -1816,6 +1816,42 @@
   },
   {
     "file": "dynamicRef.json",
+    "description": "A $ref to a $dynamicAnchor in the same schema resource behaves like a normal $ref to an $anchor",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "https://test.json-schema.org/ref-dynamicAnchor-same-schema/root",
+      "type": "array",
+      "items": {
+        "$ref": "#items"
+      },
+      "$defs": {
+        "foo": {
+          "$dynamicAnchor": "items",
+          "type": "string"
+        }
+      }
+    },
+    "tests": [
+      {
+        "description": "An array of strings is valid",
+        "data": [
+          "foo",
+          "bar"
+        ],
+        "valid": true
+      },
+      {
+        "description": "An array containing non-strings is invalid",
+        "data": [
+          "foo",
+          42
+        ],
+        "valid": false
+      }
+    ]
+  },
+  {
+    "file": "dynamicRef.json",
     "description": "$dynamicRef points to a boolean schema",
     "schema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",

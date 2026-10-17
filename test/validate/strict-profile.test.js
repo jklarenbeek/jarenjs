@@ -521,7 +521,7 @@ describe('the correctness contract over the JSON-Schema-Test-Suite (draft 2020-1
         }
       }
     }
-    assert.deepEqual(counts, { groups: 223, forward: 539, accepted: 750, restoredValid: 557, restoredRefused: 193, roundTrip: 536 });
+    assert.deepEqual(counts, { groups: 224, forward: 540, accepted: 751, restoredValid: 558, restoredRefused: 193, roundTrip: 537 });
   });
 
   const suite = new URL('../../benchmark/suite/tests/draft2020-12/', import.meta.url);
@@ -543,7 +543,7 @@ describe('the correctness contract over the JSON-Schema-Test-Suite (draft 2020-1
       }
     }
     assert.deepEqual(accepted, groups.map((group) => `${group.file} / ${group.description}`));
-    assert.deepEqual(codes, { JK0009: 2, JK0102: 1, JK0103: 102, JK0104: 29, JK0108: 7 });
+    assert.deepEqual(codes, { JK0009: 2, JK0102: 1, JK0103: 102, JK0104: 28, JK0108: 7 });
   });
 });
 

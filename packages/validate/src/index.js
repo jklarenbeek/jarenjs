@@ -30,6 +30,8 @@ import {
   compiledLocation,
   refuseContestedReference,
   isContestedRefusal,
+  identifierOf,
+  declaredDraftOf,
 } from './traverse.js';
 
 import {
@@ -824,6 +826,17 @@ export class ValidationRoot {
   }
 
   /**
+   * The identifier a walked schema object declares, as the walk read it: a
+   * non-empty `$id`, else the draft-04 `id` where its document declares no
+   * known draft. An internal collaborator of the compiler.
+   * @param {any} schema - A schema object the walks recorded
+   * @returns {any} The `$id` or the `id`, or undefined
+   */
+  identifierOf(schema) {
+    return identifierOf(schema, declaredDraftOf(schema, this.#places));
+  }
+
+  /**
    * Checks if an object exists at the given path without creating it.
    * @param {string} path - The URI path to check
    * @returns {ValidationObject|null|undefined} The existing object, null if marked unresolved, or undefined if not known
@@ -1545,10 +1558,13 @@ export class ValidationObject {
     // Calculate the effective base URI for this schema.
     // The effective base is what children should use for resolving relative $refs.
     // If this schema has an $id, it becomes the new base for children.
-    if (isObjectClass(schema) && schema.$id) {
+    // (`$id`, or the draft-04 `id` where no known draft is declared)
+    const identifier = identifierOf(schema, root.inForeignDialect(path, schema) ? null : this.#declaredDraft);
+    if (identifier !== undefined) {
       // This schema has its own $id - resolve it against the parent's baseUri
       // to get the absolute base for children
-      const { id: resolvedId } = createJsonPointer(schema.$id, baseUri, undefined, '$id', keywordLocation(path, '$id'));
+      const keyword = schema.$id ? '$id' : 'id';
+      const { id: resolvedId } = createJsonPointer(identifier, baseUri, undefined, keyword, keywordLocation(path, keyword));
       this.#effectiveBaseUri = resolvedId.endsWith('#') ? resolvedId.slice(0, -1) : resolvedId;
     } else {
       // No $id - inherit parent's base
@@ -1567,7 +1583,7 @@ export class ValidationObject {
     // Its anchors have the same lifetime as that evaluation. Keep this
     // wrapper separate so a ref's lazy validator cache cannot discard it.
     const draft = this.#declaredDraft ?? root.options.draftVersion;
-    if (draft >= 2020 && isObjectClass(schema) && isStringType(schema.$id)
+    if (draft >= 2020 && isStringType(identifier)
       && path !== baseUri) {
       const anchors = collectDynamicAnchorsDeep(schema, root.options.propertyDependencies === true, this.#declaredDraft, root.held);
       if (anchors.length > 0) {
@@ -1703,13 +1719,15 @@ export class ValidationObject {
       basePath = basePath.slice(0, -1);
     }
 
-    // Check if schema has $id - this affects how we calculate the path
-    const hasId = isObjectClass(schema) && schema.$id;
+    // Check if schema has $id (or the draft-04 `id` where it is read) - this
+    // affects how we calculate the path
+    const identifier = root.identifierOf(schema);
+    const hasId = identifier !== undefined;
 
     // If schema has $id, resolve it against basePath to get the new base URI
     // Otherwise, use the current path
     const id = hasId
-      ? createJsonPointer(schema.$id, basePath || this.#path, undefined, '$id').id
+      ? createJsonPointer(identifier, basePath || this.#path, undefined, schema.$id ? '$id' : 'id').id
       : this.#path;
 
     // If schema has $id, use the resolved ID as the path (it defines the schema's location)
@@ -1920,7 +1938,7 @@ export class JarenValidator {
   /** @type {TraverseOptions} The traversal options, carrying the `propertyDependencies` switch of the validation options */
   #traverse = new TraverseOptions();
   /** @type {import('./traverse.js').SchemaPlaces} What the walks read at each registered schema's place */
-  #places = { drafts: new WeakMap(), refBases: new WeakMap(), keptRefs: new Set(), undecidedBases: new WeakMap(), lateTargets: new Set(), foreign: new WeakSet(), dialects: new WeakMap(), contested: new Map() };
+  #places = { drafts: new WeakMap(), refBases: new WeakMap(), keptRefs: new Set(), unread: new Map(), undecidedBases: new WeakMap(), lateTargets: new Set(), foreign: new WeakSet(), dialects: new WeakMap(), contested: new Map() };
   /** @type {Map<string, string>} The key of the document each registered identifier came from */
   #registeredIn = new Map();
   /** @type {WeakSet<object>} The documents `addSchema` registered under a key of their own */
@@ -2417,10 +2435,11 @@ export class JarenValidator {
 
       // Only process schemas with $id that are stored under their $id path
       // (not JSON pointer paths)
-      if (!isObjectClass(schema) || !schema.$id) continue;
+      const identifier = root.identifierOf(schema);
+      if (identifier === undefined) continue;
 
       // Check if this id matches the resolved $id
-      const { id: resolvedId } = createJsonPointer(schema.$id, origin, undefined, '$id', keywordLocation(id, '$id'));
+      const { id: resolvedId } = createJsonPointer(identifier, origin, undefined, schema.$id ? '$id' : 'id', keywordLocation(id, schema.$id ? '$id' : 'id'));
       if (id === resolvedId || id === resolvedId + '#') {
         // This is a canonical $id path - create with origin as base
         try {
@@ -2445,7 +2464,8 @@ export class JarenValidator {
 
       // Skip schemas without $id that aren't refs - they're subschemas
       // that will be reached through traversal from a parent
-      const hasId = isObjectClass(schema) && schema.$id;
+      const identifier = root.identifierOf(schema);
+      const hasId = identifier !== undefined;
       const isJsonPointerPath = id.includes('#/');
       const isCanonicalPath = !isJsonPointerPath && id.endsWith('#');
 
@@ -2468,8 +2488,9 @@ export class JarenValidator {
         // If so, the baseDoc is already the resolved $id and we shouldn't
         // apply $id resolution during traversal (that would double-resolve).
         let rootIdMatchesBaseDoc = false;
-        if (rootSchema && isObjectClass(rootSchema) && rootSchema.$id) {
-          const { id: resolvedRootId } = createJsonPointer(rootSchema.$id, origin, undefined, '$id', keywordLocation(rootId, '$id'));
+        const rootIdentifier = root.identifierOf(rootSchema);
+        if (rootIdentifier !== undefined) {
+          const { id: resolvedRootId } = createJsonPointer(rootIdentifier, origin, undefined, rootSchema.$id ? '$id' : 'id', keywordLocation(rootId, rootSchema.$id ? '$id' : 'id'));
           const resolvedRootBase = resolvedRootId.endsWith('#') ? resolvedRootId.slice(0, -1) : resolvedRootId;
           if (baseDoc === resolvedRootBase) {
             rootIdMatchesBaseDoc = true;
@@ -2484,12 +2505,13 @@ export class JarenValidator {
           const part = pointerParts[i];
 
           // Check if current schema has $id (before moving to child)
-          if (isObjectClass(currentSchema) && currentSchema.$id) {
+          const currentIdentifier = root.identifierOf(currentSchema);
+          if (currentIdentifier !== undefined) {
             const isRootSchema = (i === 0);
             const shouldApplyId = !isRootSchema || !rootIdMatchesBaseDoc;
 
             if (shouldApplyId) {
-              const { id: resolvedId } = createJsonPointer(currentSchema.$id, currentBaseUri, undefined, '$id');
+              const { id: resolvedId } = createJsonPointer(currentIdentifier, currentBaseUri, undefined, currentSchema.$id ? '$id' : 'id');
               currentBaseUri = resolvedId.endsWith('#') ? resolvedId.slice(0, -1) : resolvedId;
             }
           }
@@ -2519,13 +2541,14 @@ export class JarenValidator {
           }
 
           // If candidate has an $id, it could be our base
-          if (isObjectClass(candidateSchema) && candidateSchema.$id) {
+          const candidateIdentifier = root.identifierOf(candidateSchema);
+          if (candidateIdentifier !== undefined) {
             // Try resolving our $id against this candidate's resolved $id
-            const { id: candidateResolvedId } = createJsonPointer(candidateSchema.$id, origin, undefined, '$id');
+            const { id: candidateResolvedId } = createJsonPointer(candidateIdentifier, origin, undefined, candidateSchema.$id ? '$id' : 'id');
             const candidateBase = candidateResolvedId.endsWith('#') ? candidateResolvedId.slice(0, -1) : candidateResolvedId;
 
             try {
-              const { id: testResolvedId } = createJsonPointer(schema.$id, candidateBase, undefined, '$id');
+              const { id: testResolvedId } = createJsonPointer(identifier, candidateBase, undefined, schema.$id ? '$id' : 'id');
               const testResolvedIdWithHash = testResolvedId.endsWith('#') ? testResolvedId : testResolvedId + '#';
 
               if (id === testResolvedIdWithHash || id === testResolvedId) {

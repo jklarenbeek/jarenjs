@@ -501,7 +501,17 @@ no `$anchor` or `$dynamicAnchor` declares (`#nope`) names nothing; a name is
 matched as the URI spells it, whatever characters it holds (`#a b` is
 `#a%20b`). A fragment that decodes to one starting with `/` is a JSON Pointer
 (`#%2F$defs%2Fx` is `#/$defs/x`): its `%2F`s separate tokens as its `/`s do,
-so `#/$defs/a%2Fb` names `b` in `a` (`#/$defs/a~1b` names `a/b`). A blank
+so `#/$defs/a%2Fb` names `b` in `a` (`#/$defs/a~1b` names `a/b`), and an
+anchor spelled like one (`$anchor: '/a'`) names nothing. A draft-04 `id`
+names nothing under a declared draft-06 or later. A reference only such an
+anchor or `id` would reach is refused naming it and the repair:
+
+```text
+JK0009: Can not resolve schema for 'https://github.com/jklarenbeek/jarenjs#foo': it is named only by id at '#/definitions/a/id', which from draft-06 on is no keyword and names nothing; spell it $id: '#foo' at #/properties/y/%24ref
+JK0009: Can not resolve schema for 'https://github.com/jklarenbeek/jarenjs#/foo': '#/foo' is a JSON Pointer, and the $anchor '/foo' at '#/%24defs/a/%24anchor' spelled like it names nothing; give the anchor a plain name (a letter or '_', then letters, digits, '-', '.', '_') at #/properties/y/%24ref
+```
+
+A blank
 `$ref` or `$dynamicRef` is the empty URI reference and names the current
 resource, as `#` does.
 

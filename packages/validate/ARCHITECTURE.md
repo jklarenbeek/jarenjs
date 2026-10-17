@@ -135,7 +135,18 @@ allowed an `$anchor` or `$dynamicAnchor` registers nothing. A plain-name
 fragment (`#a b`, `#_a`) is keyed as the URI spells it,
 so an anchor and a reference to it meet whatever characters the name holds; a
 fragment that decodes to `/…` is a pointer, its `%2F`s read as `/`s
-(`parseJsonPointer`), so every later per-token decode stays the only one. A
+(`parseJsonPointer`), so every later per-token decode stays the only one. An
+anchor spelled as a pointer registers nothing (it would shadow the place the
+pointer names); the walk records it in `places.unread`, as it records a
+draft-04 `id` it does not read, so the `JK0009` for a reference to either
+names it and the repair. Which keyword identifies a schema object — `$id`,
+or `id` where the document declares no known draft — is one function,
+`identifierKeyword` (schema-keywords.js), read by this walk, by
+`collectSameDocumentAnchors` (normalizer, emit), by the strict profile's
+resource index and, through `identifierOf` (traverse.js), by every place the
+compile derives a base or a location from an identifier: the compiled object,
+a child's location, a pointer's descent, the loop check and the precompile of
+registered documents. A
 blank `$ref` or `$dynamicRef` counts as a reference (`hasSchemaReference`)
 and resolves as `#` (`schemaReference`), the current resource, never against
 a base that carries a pointer fragment.
@@ -1108,6 +1119,8 @@ Map<string, ValidationObject> {
 | `restoreSchemaRefsInMap` | traverse.js | Flatten all ref chains at load time |
 | `createJsonPointer` | traverse.js | Parse URI into components (id, leftUri, fragment), its scheme and host lowered by `caselessUri` |
 | `caselessUri` / `heldUriKey` | schema-keywords.js | The one spelling of a URI a schema is held and looked up by: scheme and host in lower case (RFC 3986), the rest as written; `heldUriKey` adds the empty fragment (`addSchema`, `getSchema`, `dialectDraft`, `compileAsync`) |
+| `identifierKeyword` | schema-keywords.js | The keyword that identifies a schema object: `$id`, else the draft-04 `id` where its document declares no known draft (the walk, `collectSameDocumentAnchors`, the strict profile's index) |
+| `identifierOf` / `declaredDraftOf` | traverse.js | The identifier text a compile reads a base from (`$id`, or `id` where `identifierKeyword` reads it), by the draft the walks recorded for the object |
 | `JarenValidator.compile` | index.js | Main entry point for schema compilation, draft/vocabulary selection |
 | `JarenValidator.#precompileRefs` | index.js | Pre-create ValidationObjects for all refs |
 | `ValidationObject.compileValidator` | index.js | Compile validator, ref combination, dynamic-anchor registration |
