@@ -286,10 +286,13 @@ since two code-point columns of different collations compared bare resolve no
 collation, and a collection group key an `$orderby` orders is read at its own
 kind (`COLLATE "C"` for a string, `numeric` for a number) instead of from the
 projected text, so neither the database's collation nor the digits of a number
-decide the order. What does not seek: the page's `ORDER BY` spells the identity's
-null placement (`ASC NULLS FIRST`), which is not the order an ascending index
-provides, so the rows past the row value are sorted rather than read in index
-order. A text keyset requires the `UTF8` database encoding, read at open — no
+decide the order. An identity term over a column that holds no NULL (a key,
+or a column the catalog declares `NOT NULL`) is spelled with the default null
+placement, the order its index provides in either direction, so a page over
+the key reads the rows past the row value in index order. What does not seek:
+a term over a column that may hold NULL spells the engine's empty-first
+placement (`ASC NULLS FIRST`, `DESC NULLS LAST`), which is not the order a
+default index provides, so its rows are sorted. A text keyset requires the `UTF8` database encoding, read at open — no
 per-row byte proof runs here — and refuses `JD0032` naming any other. An
 explicit `orderBy` over a text or uuid column with the `null` NULL policy stays
 refused, as every such column is for the typed path.

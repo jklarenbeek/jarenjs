@@ -955,6 +955,9 @@ export function planCollection(name, collection, dialect, options = undefined) {
      * holds the digits a writer spelled (`decimalDigits`), where `5` and a
      * conforming `5.00000000000000000001` are two values and one double. */
     safeIntegerColumns: dialect.decimalDigits ? new Set() : safeIntegerColumns,
+    /** The generated columns that hold their member as JSON, which a number
+     * compares with in JSON's own number order ({@link jsonColumnsOf}). */
+    jsonColumns: jsonColumnsOf(dialect, generated, indexes, kindIndexes),
     /** The generated columns a B-tree index keys, each with whether it
      * leads one that holds every row (no condition, `'leads'`) or keys it
      * otherwise (`'follows'`): an ordering that reads such an integer column
@@ -1151,6 +1154,28 @@ function indexedColumnsOf(indexes) {
     });
   }
   return out;
+}
+
+/**
+ * The generated columns that hold their member as the document does, as
+ * JSON, on an engine whose columns carry a SQL type (`untypedColumns` off): a
+ * member the schema leaves untyped, or whose union lists a container first.
+ * A number compares with such a column in JSON's own number order, which the
+ * column's index serves — except a column whose declared index has an index
+ * beside it that keys the member read as a number alone ({@link kindIndexesOf}),
+ * which a number comparison already seeks through.
+ * @param {any} dialect
+ * @param {any[]} generated - the planned generated columns
+ * @param {any[]} indexes - the planned declared indexes
+ * @param {any[]} kindIndexes - the indexes beside them
+ * @returns {Set<string>}
+ */
+function jsonColumnsOf(dialect, generated, indexes, kindIndexes) {
+  if (dialect.capabilities.untypedColumns === true) return new Set();
+  const seeksAsNumber = new Set(kindIndexes.filter((index) => index.kind === 'number' && index.keys.length === 1)
+    .flatMap((index) => indexes.find((declared) => declared.name === index.of)?.columns ?? []));
+  return new Set(generated.filter((column) => column.type === dialect.docColumnType && !seeksAsNumber.has(column.name))
+    .map((column) => column.name));
 }
 
 /**

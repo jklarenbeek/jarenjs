@@ -215,13 +215,14 @@ function literalComparison(dialect, param, op, member, lit) {
  * column's index still seeks (`dialect.intervalIn`); any other member is
  * read as the double the engine holds (`doubleRead`) against the list's
  * doubles — the same answer, hashed once per row, where an interval test
- * would cost one per row and item. No list here holds an infinity, which
+ * would cost one per row and item. A column that holds its member as JSON
+ * (`seek.json`) is compared with each edge read as a JSON number. No list here holds an infinity, which
  * its JSON would spell `null`: a literal list's is compared on its own (the
  * planner's membership plan), and an external list holding one runs in the
  * engine.
  * @param {any} dialect @param {(slot: any) => string} param @param {string} value - the member
  * @param {{ numbers: number[] } | { external: string }} list
- * @param {{ table: string, column: string } | null} seek
+ * @param {{ table: string, column: string, json?: boolean } | null} seek
  * @returns {string}
  */
 function decimalMembership(dialect, param, value, list, seek) {
@@ -230,7 +231,7 @@ function decimalMembership(dialect, param, value, list, seek) {
       : param({ external: list.external, json: true, list: true, intervals: true });
     return dialect.intervalIn(value, tuples, seek.table, seek.column,
       (/** @type {string} */ member, /** @type {(index: number) => string} */ edgeAt) =>
-        decimalComparison((edge) => edgeAt(INTERVAL_EDGES.indexOf(edge)), 'eq', member));
+        decimalComparison((edge) => edgeAt(INTERVAL_EDGES.indexOf(edge)), 'eq', member), seek.json === true);
   }
   const listSql = 'numbers' in list ? param({ literal: numberList(list.numbers) })
     : param({ external: list.external, json: true, list: true });
@@ -888,6 +889,19 @@ export function emitPlan(plan, dialect, physical, probeWide = true) {
    * double already (`physical.doubleColumns`).
    * @param {any} ref @param {string} value - the read {@link valueOf} spells */
   const readsDouble = (ref, value) => value === q(ref.column) && physical.doubleColumns?.has(ref.column) === true;
+  /** Whether a number compares with a ref's generated column as JSON
+   * (`physical.jsonColumns`), on an engine that reads a member by its decimal
+   * digits: the column holds the member as the document does, and a number
+   * in it orders against an edge spelled as a JSON number as its `numeric`
+   * does, which the column's index serves — where the read at the number
+   * kind is the document's (the column's type is no number's), which scans.
+   * A column a guarded document stands in for is not read.
+   * @param {any} ref */
+  const comparesAsJson = (ref) => dialect.decimalDigits === true && ref.column !== null
+    && physical.jsonColumns?.has(ref.column) === true && !(ref.unpinned === true && docOf(ref) !== docColumn);
+  /** A JSON column's test that it holds a number, TOTAL: false where it holds
+   * nothing ({@link comparesAsJson}). @param {string} member */
+  const jsonNumberAt = (member) => `${member} IS NOT NULL AND ${dialect.valueTypeOf(member)} IN ${NUMERIC()}`;
   /** Whether a ref's read holds the double the engine reads, bare: a
    * {@link readsDouble} column, or one whose integers the schema bounds
    * within ±(2^53 − 1) (`physical.safeIntegerColumns`), each its own double
@@ -1035,6 +1049,14 @@ export function emitPlan(plan, dialect, physical, probeWide = true) {
     const symbol = SYMBOLS[pred.op];
     if ('lit' in pred.operand) {
       const lit = pred.operand.lit;
+      // a finite number against a JSON column: the interval of decimals that
+      // round to it, its edges JSON numbers, between which the column holds
+      // numbers alone; a one-sided bound is kept to numbers by the test. A
+      // difference seeks nothing and reads the member as any other does
+      if (typeof lit === 'number' && Number.isFinite(lit) && pred.op !== 'ne' && comparesAsJson(pred.ref)) {
+        const member = col(pred.ref.column);
+        return `(${jsonNumberAt(member)} AND ${literalComparison(dialect, param, pred.op, member, lit)})`;
+      }
       const kind = typeof lit === 'number' ? 'number' : 'text';
       const value = comparedValue(pred.ref, kind, beyondSafeInteger(lit));
       const compared = () => literalComparison(dialect, param, pred.op, value, lit);
@@ -1095,9 +1117,11 @@ export function emitPlan(plan, dialect, physical, probeWide = true) {
     const textBranch = `(${jt} IS NOT NULL AND ${jt} = ${sl('text')} AND `
       + `${dialect.valueTypeOf(external())} = ${sl('text')} AND `
       + `${compare('text')} ${pred.op === 'ne' ? '=' : symbol} ${dialect.externalRef(external(), 'text')})`;
+    // a JSON column compares as JSON with the external's edges, which
+    // the guards keep to a number on both sides
     const numberBranch = `(${jt} IS NOT NULL AND ${jt} IN ${NUMERIC()} AND `
       + `${dialect.valueTypeOf(external())} IN ${NUMERIC()} AND `
-      + `${numberTest(compare('number'))})`;
+      + `${numberTest(comparesAsJson(pred.ref) ? col(pred.ref.column) : compare('number'))})`;
     const equalInSomeBranch = `(${textBranch} OR ${numberBranch})`;
     return pred.op === 'ne'
       ? `(${jt} IS NOT NULL AND NOT ${equalInSomeBranch})`
@@ -1122,10 +1146,12 @@ export function emitPlan(plan, dialect, physical, probeWide = true) {
      * @param {{ numbers: number[] } | { external: string }} list
      */
     const branch = (kind, listSql, list, wide = false) => {
-      const value = comparedValue(pred.ref, kind, wide);
+      // a JSON column holds a number of the list's intervals as JSON
+      const json = kind === 'number' && comparesAsJson(pred.ref);
+      const value = json ? col(pred.ref.column) : comparedValue(pred.ref, kind, wide);
       const membership = kind === 'number' && dialect.decimalDigits
         ? decimalMembership(dialect, param, value, list,
-          pred.ref.column !== null && value === q(pred.ref.column) ? { table: q(physical.table), column: value } : null)
+          pred.ref.column !== null && value === q(pred.ref.column) ? { table: q(physical.table), column: value, json } : null)
         : inListSql(dialect, value, listSql(), kind);
       // an external's list is typed per branch by its own filter; the
       // member keeps the discriminator beside it, as every external does
@@ -2136,7 +2162,9 @@ export function emitEntityPlan(plan, dialect, physicalOf) {
         value = `(SELECT ${read(alias)} ${from})`;
       }
       const nullsFirst = term.emptyGreatest === term.desc;
-      return `${value} ${term.desc ? 'DESC' : 'ASC'}${dialect.orderNulls(nullsFirst)}`;
+      // a column that holds no NULL places none, which a hop's missing row is
+      const notNull = term.hop === undefined && term.ref.flavor === 'entity-column' && term.ref.notNull === true;
+      return `${value} ${term.desc ? 'DESC' : 'ASC'}${dialect.orderNulls(nullsFirst, notNull)}`;
     });
     // the engine's nested-loop order: binding-order row identities
     for (const binding of plan.bindings) terms.push(...identityTerms(binding));

@@ -81,7 +81,7 @@ FALLBACK or a coded refusal on the common path, never a skip:
 | `declaredSqlText` | the drift check is the structural one — columns and their types, indexes and their covered columns in order, foreign-key tuples — plus what the catalog reads back exactly in place of the CREATE text (the dialect's `readBack`): each index's condition and shape and each generated column's expression; an object the model never declared is no longer detectable |
 | `foreignKeysAlwaysOn` (on) | the open path neither sets nor reads back the referential-integrity switch |
 | `virtualTables` / `triggers` | a `physical: 'rtree'` column set maps back onto the B-tree over the four edge columns, and `explain().prefilters[].via` says so |
-| `untypedColumns` | a comparison against a member the schema does not type reads the member out of the document instead of the column: same answer, unindexed |
+| `untypedColumns` | a comparison against a member the schema does not type reads the member out of the document instead of the column, same answer, unindexed — except a number comparison on an engine that reads a number by its decimal digits, which ranges over the column (`jsonb`) in JSON's number order between edges spelled as JSON numbers, and seeks its index |
 | `indexableGeneratedColumns` | the derived-column mapping is the STORED one — the store writes the values and the columns are ordinary |
 | `rowIdentity` (with a declared identity column) | the dialect adds that column to every table it creates, and it IS `rowIdentity()` |
 | `catalogFunctions` | an entity index over a declared expression is `JD0004` where its table is planned, naming the index, its members and the repair: a function only the registering connection computes would leave every other writer unable to write the table (MODEL-FORMAT §7A) |
@@ -150,7 +150,7 @@ worked around:
 |---|---|---|
 | `integer` and `number` are both `numeric` | `bigint` would reject a document the model accepts — `3.5` in a member the schema types `integer` — inside a generated column's cast, and a storage decision that can refuse a valid document is not one | introspection cannot tell the two apart on the way back |
 | a `boolean` member is `smallint` holding 1 or 0 | the shared forms compare a boolean against those integers (a type test, a projected pair's type name); a `boolean` column would make each an operator-resolution error rather than a row | introspection reads the column back as a number |
-| a path the schema does not type is `jsonb` | there is no honest scalar type for it, and `capabilities.untypedColumns: false` says so | a comparison against such a member reads the document rather than the column: the same answer, unindexed |
+| a path the schema does not type is `jsonb` | there is no honest scalar type for it, and `capabilities.untypedColumns: false` says so | a text or boolean comparison against such a member reads the document rather than the column: the same answer, unindexed; a number comparison ranges over the column, whose `jsonb` order places every number between the other JSON types and orders numbers as `numeric` does, kept to numbers by a `jsonb_typeof` test |
 
 Three engine differences the emitter had to be taught, rather than the
 dialect papering over:
@@ -317,7 +317,7 @@ common fallback, never a skip.
 |---|---|---|
 | `jsonb` | yes (`BLOB` + the JSONB family) | yes (`jsonb`) |
 | `generatedColumns` / `indexableGeneratedColumns` | yes, `VIRTUAL` | yes, `STORED` |
-| `untypedColumns` | yes (`ANY`, also for a member of several types) | — (the member is read from the document; a member of several types has a column of its first type) |
+| `untypedColumns` | yes (`ANY`, also for a member of several types) | — (the member is read from the document, a number compared over its `jsonb` column; a member of several types has a column of its first type) |
 | `returning`, `upsert`, `savepoints` | yes | yes |
 | `immediateTransactions` | yes (`BEGIN IMMEDIATE`) | yes (`BEGIN`, then the store's advisory writer lock, `tx.writerLock`) |
 | `groupByAlias` | yes | yes |
@@ -819,8 +819,12 @@ document member as the double, and its `number` and `integer` columns the same
 way on PostgreSQL, whose `numeric` holds a writer's digits (a schema bound
 included, as above). A column holding a key there — an `integer` key, a
 database-allocated one, a reference to one, a join table's sides — is read
-bare and keeps its index order: two keys are two values the store wrote, and
-the column may be the `bigint` a database-allocated key takes. On SQLite the
+bare: two keys are two values the store wrote, and the column may be the
+`bigint` a database-allocated key takes. A term over a column that holds no
+NULL (a key, or a column the catalog declares `NOT NULL`) is spelled with the
+default null placement, which is its index's order in either direction; one
+that may hold NULL (a reference) spells the engine's empty-first placement
+(`ASC NULLS FIRST`, `DESC NULLS LAST`), which no default index gives, and sorts. On SQLite the
 `integer` column holds no integer the engine reads but as its own double, and
 the `number` column holds the double; both read bare.
 

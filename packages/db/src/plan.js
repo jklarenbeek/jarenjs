@@ -4201,6 +4201,10 @@ export function entityShape(entity, entityMapping) {
       // a key, or a reference to one, may be declared as the allocation a
       // database-allocated key takes (`bigserial`) rather than as its storage
       holdsKey: column.key === true || keyHolding.has(column.name),
+      // a column that holds no NULL: one the catalog declares NOT NULL (read
+      // at the open of an adopted table or view), else a key of a table (a
+      // join table's two sides among them), which its primary key keeps from NULL
+      notNull: column.notNull ?? ((entityMapping.keys ?? []).includes(column.name) && entityMapping.kind !== 'view'),
     });
   }
   // an inferred foreign key has no property of its own: its column
@@ -4244,6 +4248,7 @@ export function entityPathRef(node, slot, shape) {
       codec: flavored.codec,
       codecColumn: flavored.codecColumn,
       ...(flavored.holdsKey === true ? { holdsKey: true } : {}),
+      ...(flavored.notNull === true ? { notNull: true } : {}),
     };
   }
   // a nested path rides the JSONB document with the phase-A guards;

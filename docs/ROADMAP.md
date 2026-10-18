@@ -720,19 +720,21 @@ what each does is its own documentation's job
   returning it reads PostgreSQL's `NaN` (above every number, equal to itself)
   where the engine refuses. Wanted: a physical mapping's number column
   qualified or refused at open, or documented as the mapping's loss.
-- [ ] **On PostgreSQL an entity's ordering never reads an index.** An entity
-  order term is `ASC NULLS FIRST` (descending `DESC NULLS LAST`) with the row
-  identity appended, which a default btree scan does not give, so a window, a
-  load's `orderBy` and a keyset page over a key, a reference or an indexed
-  column sort every row. Wanted: an index order the engine's empty placement
-  can use (an index declared `NULLS FIRST`, or `NULLS LAST` emitted where the
-  column refuses NULL), keeping the engine's empty-first order.
-- [ ] **On PostgreSQL an untyped or mixed-kind indexed member never seeks for
-  a number comparison.** Its generated column is `jsonb`, which the emitter
-  does not compare with a number, so a literal, list or external comparison
-  reads the document path and scans the table. A range over the jsonb column
-  (`jsonb_typeof(col) = 'number' AND col >= edge AND col <= edge`, edges as
-  jsonb numbers) would serve its btree index.
+- [ ] **On PostgreSQL an entity's ordering over a column that may hold NULL
+  never reads an index.** A term over a reference or an indexed column is `ASC
+  NULLS FIRST` (descending `DESC NULLS LAST`), the engine's empty-first
+  placement, which a default B-tree does not give, so a window, a load's
+  `orderBy` and a keyset page over it sort every row (a key and a column the
+  catalog declares `NOT NULL` read their index). Wanted: indexes the store
+  creates declared `NULLS FIRST` (a DDL change: the previous release reads
+  such an index as not plain), measured; an ascending scan still reads the
+  whole null group first. A non-key `number`/`integer` column orders by the
+  double and needs an expression index besides.
+- [ ] **On PostgreSQL a collection's external list never seeks.** A membership
+  in an external list reads a text branch beside the number branch (`OR`),
+  which reads the document, so the statement scans even where the number
+  branch ranges over an index; a typed `number` member's external comparison
+  reads `to_jsonb(column)` and scans too.
 - [ ] **On PostgreSQL a join's equality over two non-key number columns no
   longer seeks.** It reads both columns as the doubles (bounded by ranges of
   each around the other), which the planner cannot estimate, so it hashes or

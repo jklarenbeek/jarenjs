@@ -976,10 +976,13 @@ export function postgresDialect(options = undefined) {
     // seeks or hashes as a membership in an exact list does. The array
     // hides how many values the inner read finds from the planner, which
     // otherwise prices the range join as a large one and scans the outer
-    // table
-    intervalIn: (valueSql, tuplesSql, tableSql, columnSql, within) => {
+    // table. A column that holds its member as `jsonb` (`json`) reads each
+    // edge as a JSON number, which orders against the column's numbers as a
+    // `numeric` does and above or below every other JSON type, so a range
+    // between two edges holds numbers alone
+    intervalIn: (valueSql, tuplesSql, tableSql, columnSql, within, json = false) => {
       const inner = `"interval_row".${columnSql}`;
-      const edge = (/** @type {number} */ index) => `("interval_edge".e ->> ${index})::numeric`;
+      const edge = (/** @type {number} */ index) => `("interval_edge".e ->> ${index})::${json ? 'jsonb' : 'numeric'}`;
       return `${valueSql} IN (SELECT unnest(ARRAY(SELECT DISTINCT ${inner} FROM `
         + `jsonb_array_elements((${tuplesSql})::jsonb) AS "interval_edge"(e) JOIN ${tableSql} AS "interval_row" `
         + `ON ${within(inner, edge)})))`;
@@ -996,7 +999,11 @@ export function postgresDialect(options = undefined) {
     strEndsWith: (valueSql, patternA, patternB, patternC) =>
       `(length(${patternA}::text) = 0 OR right(${valueSql}, length(${patternB}::text)) = ${patternC})`,
     strContains: (valueSql, patternSql) => `strpos(${valueSql}, ${patternSql}::text) > 0`,
-    orderNulls: (nullsFirst) => (nullsFirst ? ' NULLS FIRST' : ' NULLS LAST'),
+    // a term over a column that holds no NULL (`notNull`) places none, and
+    // spelled with the default placement (`NULLS LAST` ascending, `NULLS
+    // FIRST` descending) it is the order a B-tree index gives in either
+    // direction, which the engine's empty-first placement is not
+    orderNulls: (nullsFirst, notNull = false) => (notNull ? '' : nullsFirst ? ' NULLS FIRST' : ' NULLS LAST'),
     // the same fixed ladder, in exact arithmetic: `%` truncates towards
     // zero here as it does in C, so `((x % m) + m) % m` is the
     // non-negative remainder and an instant before 1970 lands in its own

@@ -182,11 +182,12 @@ describe('a column holding a key, PostgreSQL', { skip: skipFor('postgres') }, ()
       await pool.query(`INSERT INTO ${s}."K" (id, v, doc) SELECT g + 1, g, '{}'::jsonb FROM generate_series(1, 20000) g;
         INSERT INTO ${s}."A" ("kId", doc) SELECT (g % 20000) + 1, '{}'::jsonb FROM generate_series(1, 20000) g;
         ANALYZE ${s}."K"; ANALYZE ${s}."A";`);
-      // an integer key, a database-allocated one, a reference to one and a join table's side
-      for (const [root, member] of [['K', 'id'], ['A', 'aid'], ['A', 'kId'], ['K_T', 'K_key']]) {
+      // an integer key, a database-allocated one, a reference to one and a join table's side: a key holds
+      // no NULL and is spelled with the default placement, its index's order; a reference may hold one
+      for (const [root, member, placement] of [['K', 'id', ''], ['A', 'aid', ''], ['A', 'kId', ' NULLS LAST'], ['K_T', 'K_key', '']]) {
         const query = { $for: { it: `$.${root}[*]` }, $orderby: [{ $key: `$it.${member}`, $dir: 'desc' }], $return: `$it.${member}` };
         for (const doc of [query, { $subsequence: [query, 1, 3] }]) {
-          assert.match((await store.explain(doc)).sql, new RegExp(`ORDER BY "t0"\\."${member}" DESC NULLS LAST, "t0"\\."rid"`), `${root}.${member}`);
+          assert.match((await store.explain(doc)).sql, new RegExp(`ORDER BY "t0"\\."${member}" DESC${placement}, "t0"\\."rid"`), `${root}.${member}`);
           assert.deepEqual(await store.execute(doc), await store.execute(doc, { pushdown: false }));
         }
       }
@@ -198,11 +199,11 @@ describe('a column holding a key, PostgreSQL', { skip: skipFor('postgres') }, ()
       assert.deepEqual(seen.map((statement) => statement.text.replace(/^SELECT .*? FROM "(\w+)" AS "r"/, '$1')
         .replace(/\(SELECT jsonb_agg.*? FROM \(SELECT "r_as"\.\* FROM "A" AS "r_as" WHERE (.*?)\) AS "r_as"\) AS "__as"/, 'include $1')), [
         'A ORDER BY "r"."kId" ASC NULLS FIRST, "r"."rid" LIMIT 3',
-        'K ORDER BY "r"."id" ASC NULLS FIRST LIMIT 4',
-        'K WHERE ("r"."id" > $1) ORDER BY "r"."id" ASC NULLS FIRST LIMIT 4',
+        'K ORDER BY "r"."id" ASC LIMIT 4',
+        'K WHERE ("r"."id" > $1) ORDER BY "r"."id" ASC LIMIT 4',
         'K WHERE ("r"."id" IS NOT NULL AND "r"."id" = $1) ORDER BY "r"."rid"']);
       const include = seen[3];
-      assert.match(include.text, /WHERE "r_as"\."kId" = "r"\."id" ORDER BY "r_as"\."kId" ASC NULLS FIRST, "r_as"\."aid" ASC NULLS FIRST, "r_as"\."rid"/);
+      assert.match(include.text, /WHERE "r_as"\."kId" = "r"\."id" ORDER BY "r_as"\."kId" ASC NULLS FIRST, "r_as"\."aid" ASC, "r_as"\."rid"/);
       const client = await pool.connect();
       try {
         await client.query(`SET search_path TO ${s}`);

@@ -1341,6 +1341,7 @@ export function createQueryEngine(context) {
     docColumn: physicalPlan.docColumn,
     doubleColumns: physicalPlan.doubleColumns,
     safeIntegerColumns: physicalPlan.safeIntegerColumns,
+    jsonColumns: physicalPlan.jsonColumns,
     indexedColumns: physicalPlan.indexedColumns,
   };
   /** The k-nearest counters `stats()` reports: how many rows the
@@ -3841,7 +3842,8 @@ export function createLoadEngine(context, entityName) {
       const value = entityOrderRead(dialect, term.ref, term.ref.flavor === 'entity-column'
         ? `${rendered.aliasSql}.${q(term.ref.column)}` : rendered.docSql);
       const nullsFirst = term.emptyGreatest === term.desc;
-      return `${value} ${term.desc ? 'DESC' : 'ASC'}${dialect.orderNulls(nullsFirst)}`;
+      return `${value} ${term.desc ? 'DESC' : 'ASC'}${dialect.orderNulls(nullsFirst,
+        term.ref.flavor === 'entity-column' && term.ref.notNull === true)}`;
     });
     orderSql.push(`${rendered.aliasSql}.${rowIdentityOf(dialect, child.entityMapping)}`);
     const inner = relation.kind === 'manyToMany'
@@ -4126,6 +4128,11 @@ export function createLoadEngine(context, entityName) {
         }
       }
     };
+    // a term that cannot hold NULL: a key column, or a mapped column the
+    // catalog declares NOT NULL (recorded at open, whatever policy the
+    // model declares); a managed entity's declared columns can
+    const notNull = (/** @type {any} */ term) => keyColumns.includes(term.column)
+      || (physicalEntity && columnOfProperty(term.column)?.notNull === true);
     /** @type {ReturnType<typeof orderIdentity> | null} */
     let identity = null;
     /** The values a call's `after` binds, checked against this ordering; `null` without one.
@@ -4151,11 +4158,6 @@ export function createLoadEngine(context, entityName) {
         afterValues = (given) => continuationValues(given, identity, order.length, keyColumns);
         const values = afterValues(after);
         const column = (/** @type {any} */ term) => termSql(term.column);
-        // a term that cannot hold NULL: a key column, or a mapped column the
-        // catalog declares NOT NULL (recorded at open, whatever policy the
-        // model declares); a managed entity's declared columns can
-        const notNull = (/** @type {any} */ term) => keyColumns.includes(term.column)
-          || (physicalEntity && columnOfProperty(term.column)?.notNull === true);
         if (identity.length > 1 && identity.every((term, i) => notNull(term) && values[i] !== null
           && term.desc === identity[0].desc)) {
           // one direction over terms that cannot hold NULL: the row value
@@ -4241,7 +4243,7 @@ export function createLoadEngine(context, entityName) {
     if (conditions.length > 0) sql += ` WHERE ${conditions.join(' AND ')}`;
     const orderSql = identity !== null
       ? identity.map((term) => `${termSql(term.column)} `
-        + `${term.desc ? 'DESC' : 'ASC'}${dialect.orderNulls(term.nullsFirst)}`)
+        + `${term.desc ? 'DESC' : 'ASC'}${dialect.orderNulls(term.nullsFirst, notNull(term))}`)
       : order.map((term) => {
         // a document member orders as its declared type, as an include's
         // and a query's do: a string by code point, a number as the double
@@ -4250,7 +4252,8 @@ export function createLoadEngine(context, entityName) {
           ? termSql(propertyOfPhysical(term.ref.column))
           : entityOrderRead(dialect, term.ref, rendered.docSql);
         const nullsFirst = term.emptyGreatest === term.desc;
-        return `${value} ${term.desc ? 'DESC' : 'ASC'}${dialect.orderNulls(nullsFirst)}`;
+        return `${value} ${term.desc ? 'DESC' : 'ASC'}${dialect.orderNulls(nullsFirst,
+          term.ref.flavor === 'entity-column' && term.ref.notNull === true)}`;
       });
     if (identity === null) orderSql.push(...(physicalEntity ? keyColumns.map((key) => termSql(key)) : [`${rendered.aliasSql}.${rowIdentityOf(dialect, tree.entityMapping)}`]));
     sql += ` ORDER BY ${orderSql.join(', ')}`;

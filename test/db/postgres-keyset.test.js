@@ -126,13 +126,13 @@ describe('a keyset page over a physical PostgreSQL table', { skip: !url && 'JARE
       // the composite keys compare as ONE row value, bound positionally; a one-term identity is the plain comparison
       const pair = store.entity('Pair');
       assert.match((await pair.explainLoad({ after: (await pair.page({}, { limit: 2 })).continuation })).sql,
-        /WHERE \("r"\."b", "r"\."a"\) > \(\$1, \$2\) ORDER BY "r"\."b" ASC NULLS FIRST, "r"\."a" ASC NULLS FIRST$/);
+        /WHERE \("r"\."b", "r"\."a"\) > \(\$1, \$2\) ORDER BY "r"\."b" ASC, "r"\."a" ASC$/);
       const tagged = store.entity('Tagged');
       assert.match((await tagged.explainLoad({ after: (await tagged.page({}, { limit: 2 })).continuation })).sql,
-        /WHERE \("r"\."seq", "r"\."id"\) > \(\$1, \$2\) ORDER BY "r"\."seq" ASC NULLS FIRST, "r"\."id" ASC NULLS FIRST$/);
+        /WHERE \("r"\."seq", "r"\."id"\) > \(\$1, \$2\) ORDER BY "r"\."seq" ASC, "r"\."id" ASC$/);
       const token = store.entity('Token');
       assert.match((await token.explainLoad({ after: (await token.page({}, { limit: 2 })).continuation })).sql,
-        /WHERE \("r"\."id" > \$1\) ORDER BY "r"\."id" ASC NULLS FIRST$/);
+        /WHERE \("r"\."id" > \$1\) ORDER BY "r"\."id" ASC$/);
     }
     finally { await close(); }
   });
@@ -151,7 +151,7 @@ describe('a keyset page over a physical PostgreSQL table', { skip: !url && 'JARE
       const first = await lines.page({}, { limit: 2 });
       const explained = await lines.explainLoad({ after: first.continuation });
       assert.equal(explained.pagination, 'keyset');
-      assert.match(explained.sql, /WHERE \("r"\."order", "r"\."seq"\) > \(\$1, \$2\) ORDER BY "r"\."order" ASC NULLS FIRST, "r"\."seq" ASC NULLS FIRST$/);
+      assert.match(explained.sql, /WHERE \("r"\."order", "r"\."seq"\) > \(\$1, \$2\) ORDER BY "r"\."order" ASC, "r"\."seq" ASC$/);
       // a declared term of a managed entity can hold NULL: the expansion, the key appended whole
       const byQty = await lines.explainLoad({ orderBy: '$it.qty', after: (await lines.page({ orderBy: '$it.qty' }, { limit: 1 })).continuation });
       // the `integer` term reads the double a writer's digits stand for, the key columns bare
@@ -178,7 +178,7 @@ describe('a keyset page over a physical PostgreSQL table', { skip: !url && 'JARE
       const plan = await set.explainLoad({ after: deep, take: 10 });
       assert.equal(plan.pagination, 'keyset');
       // this database's default collation is a code-point one, so the text term is the bare column: no COLLATE, and no byte projection
-      assert.match(plan.sql, /WHERE \("r"\."a", "r"\."b"\) > \(\$1, \$2\) ORDER BY "r"\."a" ASC NULLS FIRST, "r"\."b" ASC NULLS FIRST/);
+      assert.match(plan.sql, /WHERE \("r"\."a", "r"\."b"\) > \(\$1, \$2\) ORDER BY "r"\."a" ASC, "r"\."b" ASC/);
       assert.doesNotMatch(plan.sql, /COLLATE|BLOB/);
       // the continuation's values, written out in identity order: the row value is the key index's condition, and no filter removes rows
       const explained = (await pool.query({ text: `EXPLAIN ${plan.sql}`, values: [19000, '8'] })).rows.map((row) => row['QUERY PLAN']).join('\n');
@@ -282,7 +282,7 @@ describe('a keyset page over a physical PostgreSQL table', { skip: !url && 'JARE
       // the engine orders the decoded text; the load orders the native column: one order
       assert.equal((await store.explain(ordered)).mode, 'set');
       // the bare native column, and the key the ORDER BY of every load over a physical table ends with
-      assert.match((await token.explainLoad({ orderBy: '$it.id' })).sql, /ORDER BY "r"\."id" ASC NULLS FIRST, "r"\."id"$/);
+      assert.match((await token.explainLoad({ orderBy: '$it.id' })).sql, /ORDER BY "r"\."id" ASC, "r"\."id"$/);
       assert.deepEqual((await token.load({ orderBy: '$it.id', after: UUIDS[1] })).map((row) => row.id), UUIDS.slice(2));
       // a uuid equality against a mixed-case literal stays in the engine: the native column would match it, the decoded value does not
       const mixed = { $for: { it: '$.Token[*]' }, $where: { $eq: ['$it.id', 'A0000000-0000-4000-8000-000000000000'] }, $return: '$it.id' };
