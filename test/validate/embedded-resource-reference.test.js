@@ -263,20 +263,16 @@ describe('the normalizer and the strict profile read the place the validator rea
       catch { continue; }
       counts.schemas++;
       const n = coerce(schema);
-      // a place below a fragment-only `$id` is checked by the normalizer
-      // only: the validator's held-place compile refuses it (`JK0001`)
       let profile;
       let strict;
-      if (!label.includes('$id=#')) {
-        try {
-          profile = deriveStrictProfile(schema);
-          strict = validate(profile.schema);
-          counts.derived++;
-        }
-        catch (e) {
-          counts.refused++;
-          wrong.push(`${label}: ${/** @type {Error} */ (e).message}`);
-        }
+      try {
+        profile = deriveStrictProfile(schema);
+        strict = validate(profile.schema);
+        counts.derived++;
+      }
+      catch (e) {
+        counts.refused++;
+        wrong.push(`${label}: ${/** @type {Error} */ (e).message}`);
       }
       for (const path of leaves) {
         const type = placeType(v, path);
@@ -308,6 +304,6 @@ describe('the normalizer and the strict profile read the place the validator rea
       }
     }
     assert.deepEqual(wrong.slice(0, 5), []);
-    assert.deepEqual(counts, { schemas: 918, instances: 12240, accepted: 3346, lost: 0, misread: 0, derived: 702, refused: 0, profileMisread: 0 });
+    assert.deepEqual(counts, { schemas: 918, instances: 12240, accepted: 3346, lost: 0, misread: 0, derived: 918, refused: 0, profileMisread: 0 });
   });
 });

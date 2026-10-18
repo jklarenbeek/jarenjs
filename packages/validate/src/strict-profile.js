@@ -344,13 +344,9 @@ export function deriveStrictProfile(schema, options = {}) {
   const accepts = (place, value) => {
     if (original === undefined) {
       original = new JarenValidator();
-      // held under the base the index read it at, named by it, so a
-      // resource embedded in it resolves against it; without an `$id` where
-      // a draft-07 `$ref` beside the root's `$id` ignores it
-      if (isJsonObject(schema)) {
-        const { $id: _id, ...document } = schema;
-        original.addSchema(readsRefAlone(schema, null) ? document : { ...document, $id: rootBase }, rootBase);
-      }
+      // held under the base the index read it at, which `addSchema` names it
+      // by, so a resource embedded in it resolves against it
+      if (isJsonObject(schema)) original.addSchema(schema, rootBase);
       else original.addSchema({}, rootBase);
       for (const reference of references) original.addSchema(reference);
     }

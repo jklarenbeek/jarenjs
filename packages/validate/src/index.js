@@ -32,6 +32,7 @@ import {
   isContestedRefusal,
   identifierOf,
   declaredDraftOf,
+  keptRefBase,
 } from './traverse.js';
 
 import {
@@ -51,7 +52,7 @@ import { isStringWhiteSpace } from '@jarenjs/core/string';
 import { hasRecursiveAnchor, getDynamicAnchorName, collectDynamicAnchors, collectDynamicAnchorsDeep, appliesRefSiblings } from './dynamic-ref.js';
 import { isRecursiveQueryCompileError } from './query-keyword.js';
 import { boundReference, assertReferenceDepth, assertOutputFormat, REFERENCE_DEPTH_CEILING } from './errors.js';
-import { TRAVERSE_SCHEMA_OBJECTS, TRAVERSE_SCHEMA_MAPS, TRAVERSE_SCHEMA_MAP_MAPS, detectSchemaDraft, declaredVocabularies, caselessUri, heldUriKey, heldDialect } from './schema-keywords.js';
+import { TRAVERSE_SCHEMA_OBJECTS, TRAVERSE_SCHEMA_MAPS, TRAVERSE_SCHEMA_MAP_MAPS, detectSchemaDraft, declaredVocabularies, caselessUri, heldUriKey, heldDialect, identifierKeyword, dialectDraft } from './schema-keywords.js';
 import { VALIDATOR_STATE } from './validator-state.js';
 
 export {
@@ -979,6 +980,19 @@ export class ValidationRoot {
   get held() { return this.#schemas; }
 
   /**
+   * The base the `$ref` of a schema object resolves against where the `$id`
+   * beside it does not set it, as the walk that registered the object read
+   * it. An internal collaborator of the compiler; not part of the package's
+   * API.
+   * @param {object} schema - The schema object holding the `$ref`
+   * @param {number|null} reading - The draft the compile reads the object under
+   * @returns {string|undefined}
+   */
+  keptRefBase(schema, reading) {
+    return keptRefBase(this.#places, schema, reading);
+  }
+
+  /**
    * The schema a reference names, without following that schema's own
    * reference. An internal collaborator of the compiler; not part of the
    * package's API.
@@ -1294,9 +1308,12 @@ export class ValidationObject {
     //   $id does not change the base URI - resolve against the parent's base.
     // - Draft 2019-09+: $id establishes the base URI for the schema object it
     //   appears in, INCLUDING a sibling $ref (self.baseUri accounts for $id).
+    // The walk that registered the object recorded the base it read such a
+    // `$ref` against: a target reached by its own `$id`, or a document
+    // root reached from another document, is built without its parent's.
     const refBase = appliesRefSiblings(draftVersion)
       ? (self.baseUri || baseUri || path)
-      : (baseUri || path);
+      : (root.keptRefBase(schema, draftVersion) || baseUri || path);
     const { id: ref } = createJsonPointer(schemaReference(schema, '$ref'), refBase, root.traverse, '$ref', keywordLocation(path, '$ref'));
     // A schema that references itself decides nothing: validating it re-enters
     // the same validator on the same instance until the stack runs out.
@@ -1943,6 +1960,8 @@ export class JarenValidator {
   #registeredIn = new Map();
   /** @type {WeakSet<object>} The documents `addSchema` registered under a key of their own */
   #documents = new WeakSet();
+  /** @type {WeakMap<object, object>} The caller's own document of each copy `addSchema` holds with a resolved root `$id` */
+  #originals = new WeakMap();
 
   /**
    * Creates a new JarenValidator instance.
@@ -2058,6 +2077,10 @@ export class JarenValidator {
    * Adds schema(s) to the validator instance.
    * This method does not compile schemas - it only registers them for reference.
    * Dependencies can be added in any order, and circular dependencies are supported.
+   * A document answers as the same document compiled with the URI it is
+   * held under as its root `$id`: a relative root `$id` is resolved against
+   * the key (or the origin), and a root without an identifier is named by
+   * the key. `getSchema` answers the object added.
    * @param {JSONSchemaLike | boolean | (JSONSchemaLike | boolean)[]} schema - The schema(s) to add
    * @param {string} [key] - Optional key/URI to register the schema under
    * @returns {this} This validator instance for chaining (the polymorphic `this` keeps the collectErrors type parameter across a chain)
@@ -2076,6 +2099,9 @@ export class JarenValidator {
       schema.forEach((s, index) => this.addSchema(s, key ? `${key}[${index}]` : undefined));
     }
     else if (isBoolOrObjectClass(schema)) {
+      const document = this.#heldDocument(schema, key);
+      if (document !== schema) this.#originals.set(document, schema);
+      schema = document;
       const named = key || (isObjectClass(schema) ? schema.$id : undefined);
       const schemaKey = typeof named === 'string' ? caselessUri(named) : named;
       if (schemaKey) {
@@ -2116,6 +2142,42 @@ export class JarenValidator {
       }
     }
     return this;
+  }
+
+  /**
+   * The document `addSchema` holds: read as the same document compiled with
+   * the URI it is held under as its root `$id`. A relative root `$id` is
+   * resolved once, against the key, or against the origin when there is
+   * none, as a compile resolves a reference to it; a root that declares no
+   * identifier (no string `$id`, nor a draft-04 `id` where one is read),
+   * held under a key that is an absolute URI of a document (no fragment), is
+   * named by the key. Either
+   * way a copy is held, and `getSchema` answers the caller's own object. A
+   * fragment-only root `$id` (`#node`) is such a relative reference: it names
+   * the document by the key and the name.
+   * @param {any} schema
+   * @param {string|undefined} key
+   * @returns {any}
+   */
+  #heldDocument(schema, key) {
+    if (!isObjectClass(schema)) return schema;
+    const id = schema.$id;
+    if (isStringType(id) && !isStringWhiteSpace(id)) {
+      if (URL.canParse(id)) return schema;
+      let resolved;
+      try {
+        resolved = createJsonPointer(id, key ?? this.#traverse.origin, this.#traverse).id;
+      }
+      catch {
+        return schema; // no URI reference: every compile refuses it (`JK0010`)
+      }
+      return { ...schema, $id: resolved.endsWith('#') ? resolved.slice(0, -1) : resolved };
+    }
+    // a key with a fragment names a place, not the document
+    if (typeof key !== 'string' || !URL.canParse(key) || /#./.test(key)) return schema;
+    const declared = isStringType(schema.$schema) ? dialectDraft(schema.$schema, this.#schemas) : null;
+    if (identifierKeyword(schema, declared) === 'id') return schema;
+    return { ...schema, $id: key.endsWith('#') ? key.slice(0, -1) : key };
   }
 
   /**
@@ -2384,8 +2446,18 @@ export class JarenValidator {
    * @returns {JSONSchema | boolean | null} The registered schema, or null if not found
    */
   getSchema(key) {
-    key = JarenValidator.normalizeUriKey(key)
-    return this.#schemas.get(key) ?? null;
+    let held = this.#schemas.get(JarenValidator.normalizeUriKey(key));
+    // a relative key names what `addSchema` held a relative `$id` under:
+    // the `$id` resolved against the origin
+    if (held == null && typeof key === 'string' && !URL.canParse(key)) {
+      try {
+        held = this.#schemas.get(createJsonPointer(key, this.#traverse.origin, this.#traverse).id);
+      }
+      catch {
+        // no URI reference: nothing is held under it
+      }
+    }
+    return held == null ? null : this.#originals.get(held) ?? held;
   }
 
   /**

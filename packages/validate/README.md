@@ -953,6 +953,15 @@ some instances reach still compiles and answers every instance that does not rea
 `{ "anyOf": [{ "type": "string" }, { "$ref": "#" }] }` accepts `"a"` — and a reference that
 passes through `properties`, `items` or another applicator that descends into the
 instance before it comes back is recursion and is unchanged.
+A place a pointer names below an identifier is that place, not the identifier's
+schema: a chain of references through two places below one `$id`
+(`#/properties/y/$defs/a` → `#/properties/y/$defs/b`) is no loop, below an `$id` that
+names a URI or below a fragment-only one (`#thing`). *Upgrade: every place a pointer
+named below an identifier was taken for the identifier's own schema, so such a chain was
+refused `JK0001` (`…/thing.json# refers to itself and never reads the instance`), as was a
+held document's place below a fragment-only `$id` reached by a pointer, and with it the
+strict profile of such a document; a loop now names each place
+(`…/thing.json#/$defs/a -> …/thing.json#/$defs/b -> …`).*
 
 Documents can be added in any order: a resource embedded in one
 (`$defs: { e: { $id: 'https://x.test/e.json' } }`) is found by a reference
@@ -1033,6 +1042,33 @@ the schema at `https://github.com/jklarenbeek/sub/s.json`, and `#/$defs/s` or
 `s.json#/$defs/s` inside it resolve there. *Upgrade: a root `$id` with a directory
 segment (`sub/s.json`) was resolved a second time against itself, and the compile threw
 an uncoded `Error` ("JSON Schema MUST be a boolean or Object Type").*
+
+`addSchema` holds a document as the same document compiled with the URI it is held
+under as its root `$id`. A relative root `$id` is resolved once, against the key, or
+against the `origin` when there is none, as a compile resolves a reference to it:
+`addSchema({ $id: 'sub/t.json', type: 'string' })` holds it at
+`https://github.com/jklarenbeek/sub/t.json`, which `$ref: 'sub/t.json'` names (and
+`getSchema('sub/t.json')` still answers it). A root that declares no identifier is
+named by its key (a key without a fragment), so `addSchema({ definitions: { x: { type: 'integer' } }, properties:
+{ y: { $id: 'thing', definitions: { x: { type: 'string' } }, properties: { z: { $ref:
+'#/definitions/x' } } } } }, 'http://example.com/root.json')` reads `z` as a string, as the
+document with `$id: 'http://example.com/root.json'` does; a root `$ref`, beside the key or
+beside a root `$id`, resolves against the document; a document `compileAsync` loads is
+named by the URI it was loaded from. A fragment-only root `$id` (`#node`) is such a
+relative reference: it names the document by the key (or the `origin`) and the name,
+`…/key.json#node`. A root draft-04 `id` (where no draft is declared) keeps naming the
+document. `getSchema` answers the object you added. *Upgrade: a relative root `$id` was
+registered under its text, so a reference to it was refused `JK0009`
+(`https://github.com/jklarenbeek/sub/t.json#` is not held); under a key, an embedded
+relative `$id` was read against the `origin` (`JK0009` naming
+`https://github.com/jklarenbeek/thing#/definitions/x`), as were the pointers and the
+name of a document whose root `$id` is fragment-only; and a draft-07 or undeclared root
+`$ref` beside a held document's root `$id` resolved against the document that compiled
+it: refused `JK0008`, or, where that document holds the same pointer, answered by its
+schema (`addSchema({ $id: 'http://k.test/s.json', $ref: '#/definitions/d', definitions: {
+d: { type: 'string' } } })` then `compile({ definitions: { d: { type: 'integer' } },
+properties: { p: { $ref: 'http://k.test/s.json' } } })` accepted `{ p: 1 }` and refused
+`{ p: 's' }`; it now reads its own `d`).*
 
 An identifier (`$id`, `$anchor`, `$dynamicAnchor`) names one schema. A schema being
 compiled that declares one twice, or declares one that already names another schema

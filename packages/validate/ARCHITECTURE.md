@@ -124,6 +124,18 @@ flowchart TD
 
 **Important**: At this phase, refs are stored as `null` placeholders. The actual resolution happens later.
 
+**The document held is the one the compile reads** (`#heldDocument`): a
+relative root `$id` is resolved once against the key (the `origin` without
+one), and a root that declares no identifier is given the key as its `$id`,
+so every later step, which reads a document's base from its root identifier,
+reads it as the same document compiled with that `$id`. Either way a shallow
+copy is held; `#originals` maps it back, so `getSchema` answers the caller's
+object. A fragment-only root `$id` is resolved the same way; a root draft-04
+`id` is kept. A
+draft-07 `$ref` beside an `$id` resolves against the base the walk recorded
+for it (`keptRefBase`), not the base the object happens to be built under: a
+held document's root is built from another document's compile.
+
 A place the walk refuses does not end the registration: `addSchema` passes
 `storeSchemaIdsInMap` an `onFault` that takes the refusal, and the walk goes
 on (a `$ref` that is no URI registers no target; an `$id` that is no URI, or
@@ -182,7 +194,7 @@ compile(schema, schemas)
 - Merges instance-level schemas (`this.#schemas`) with compile-time schemas
 - After `restoreSchemaRefsInMap`, all ref values are resolved schemas (not null)
 - **Ref chains are flattened**: `A → B → C` becomes `A → C`
-- **A chain that comes back to an id it visited is a loop** that never reads the instance; `resolveRefSchemaDeep` throws a `RefCycleError` (`SchemaCompileError`, `JK0001`, `src/errors.js`) naming it (`A -> B -> A`, or `A refers to itself`), and the compile paths that tolerate a not-yet-resolvable target rethrow it
+- **A chain that comes back to an id it visited is a loop** that never reads the instance (a hop's id is the place it names, spelled from the last resource its pointer enters: `resolveRefSchemaShallow` names a place below an identifier by the identifier's URI and the rest of the pointer, and a fragment-only `$id` starts no resource); `resolveRefSchemaDeep` throws a `RefCycleError` (`SchemaCompileError`, `JK0001`, `src/errors.js`) naming it (`A -> B -> A`, or `A refers to itself`), and the compile paths that tolerate a not-yet-resolvable target rethrow it
 - **A root that comes back to itself before reading the instance** is the same refusal: `assertRootReadsInstance` follows, from the compiled root, each `$ref` and the one in-place applicator a schema evaluates first on every instance (`firstInPlaceSubschema`), and throws when the walk returns to a schema already on it. It runs once the compilation's options are known: whether a keyword beside the applicator can fail an instance (`canFail`) is read from `REF_SIBLING_KEYWORDS`, the list a `$ref` reads its asserting siblings from, narrowed by what compiles to no validator under those options (`format` without an asserting compiler, the content keywords without content validation, a subschema keyword holding `true` or `{}`). A `$dynamicRef` or `$recursiveRef` its place's draft defines (`admitsDynamicReference`, reading the `drafts` the walks record) is followed while the walk stays in the root resource; elsewhere it is an unknown keyword the walk passes over. A loop only some instances reach is left to the reference depth bound below
 - **Validation nests at most `maxReferenceDepth` (default `REFERENCE_DEPTH_CEILING`, 256) references.** Each wrapped reference compares the one shared count with its own compilation's option (`JK0002` refuses an option that is not a positive safe integer). Every loop through compiled closures contains a reference resolved when first used (a target still under construction cannot be captured eagerly) or a dynamic reference, so `boundReference` wraps exactly those — the lazy `$ref` resolver, `$dynamicRef` and `$recursiveRef` — with one module-level count, restored in a `finally`. Past the bound it throws `SchemaRuntimeError` `JK2001`: thrown, never folded into `false`, because `not` would invert a folded failure. A reference to a target already built calls the target directly and costs nothing
 
@@ -840,7 +852,8 @@ the compile pipeline:
   or after it embeds is no refusal: which load settles first changes
   nothing.
 - **Loaded documents are registered by `addSchema`** under the URI they were
-  loaded from, and walked with that URI as their base. A schema the
+  loaded from, and walked with that URI as their base (and named by it where
+  their root declares no identifier). A schema the
   validator held before the call is not walked again: its unresolved
   references are already in the registry as `null` entries, and the
   documents they name are loaded too.

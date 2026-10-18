@@ -309,7 +309,7 @@ export function readsForeign(places, place, held) {
  *   declares none under, `null` when no compile is reading it
  * @returns {string|undefined}
  */
-function keptRefBase(places, schema, reading) {
+export function keptRefBase(places, schema, reading) {
   return places?.refBases.get(schema)
     ?? (reading !== null && reading < 2019 ? places?.undecidedBases.get(schema) : undefined);
 }
@@ -763,7 +763,7 @@ export function locatedRefusal(error, place) {
  *   through names two registered places
  */
 export function resolveRefSchemaShallow(schemas, refUri, baseUri, opts = new JsonPointerOptions(), places = undefined) {
-  let { id: base, leftUri, fragment } = createJsonPointer(refUri, baseUri, opts);
+  const { id: base, leftUri, fragment } = createJsonPointer(refUri, baseUri, opts);
   const id = base;
   if (!schemas.has(leftUri))
     throw unresolvedReference(id);
@@ -804,23 +804,41 @@ export function resolveRefSchemaShallow(schemas, refUri, baseUri, opts = new Jso
 
   // Decode and resolve the JSON pointer
   const fragments = decodeJsonPointerPath(fragment);
+  // The tokens as the reference spells them, for the id of the place.
+  const spelled = fragment.split('/').slice(1);
 
-  // Traverse the schema based on the JSON pointer
+  // Traverse the schema based on the JSON pointer. The place reached is
+  // named from the last resource the pointer enters (an identifier naming a
+  // URI starts one), as the walk registered it: two places below one
+  // identifier are two places, and a loop is told from a chain by them. A
+  // fragment-only identifier names its own object and starts no resource.
   let current = '';
-  for (const part of fragments) {
+  let resource = leftUri;
+  let from = 0;
+  /** The identifier's URI when the place the pointer ends at declares one */
+  let declared;
+  for (let n = 0; n < fragments.length; n++) {
+    const part = fragments[n];
     current = current + '/' + part;
     if (!isBoolOrObjectClass(schema[part]) && !Array.isArray(schema[part]))
       throw unresolvedReference(id, false, `'${current}' is not a schema in '${leftUri}'; fix the pointer`);
 
     schema = schema[part];
+    declared = undefined;
     const identifier = identifierOf(schema, declaredDraftOf(schema, places));
     if (isStringType(identifier) && !isStringWhiteSpace(identifier)) {
-      const { id } = createJsonPointer(identifier, base, opts, schema.$id ? '$id' : 'id');
-      base = id;
+      const named = createJsonPointer(identifier, resource, opts, schema.$id ? '$id' : 'id');
+      if (!identifier.startsWith('#')) {
+        resource = named.leftUri;
+        from = n + 1;
+        declared = named.id;
+      }
+      else if (named.fragment != null && !named.fragment.startsWith('/'))
+        declared = named.id;
     }
   }
 
-  return { id: base, schema };
+  return { id: declared ?? (from === spelled.length ? resource : `${resource}/${spelled.slice(from).join('/')}`), schema };
 }
 
 /**
