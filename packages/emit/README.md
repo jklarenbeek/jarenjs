@@ -503,6 +503,13 @@ What each family is for, and what it costs:
   the model is a generator, and the model is what the TypeScript and
   Markdown routes both read. It imports the validator's schema
   normalizer, so it is the heaviest of the three by itself.
+  A node's draft is read from its `$schema` by name: a custom dialect
+  reads as draft-07. Pass `dialects: validator` (a `JarenValidator`
+  holding the dialect's meta-schema) to `compileEmitModel`,
+  `emitTypeScript` or `emitMarkdown` and each `$schema` is read as that
+  validator's compile reads it — a dialect extending 2020-12 types a
+  `$ref`'s siblings beside it. The CLI reads names only: a validator is
+  no JSON value. *Upgrade: `dialects` is new; without it nothing changes.*
 - **`./typescript`**: `emitTypeScript(schema, options)` is schema → model →
   declaration text in one call; `renderTypeScript(model, options)` renders a
   model you already compiled (the CLI compiles once and renders per target

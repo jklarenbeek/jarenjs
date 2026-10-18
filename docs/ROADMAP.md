@@ -102,15 +102,6 @@ delete it or fix it.
   })` is refused `JK0009` without a `docPath`: the `$ref` sites are recorded
   only by the walk of the schema being compiled. Recording them at
   registration keeps a site per held placeholder on the validator.
-- [ ] **A root `$id` that is only a fragment refuses the pointers of a
-  compiled schema.** `new JarenValidator().compile({ $id: '#root',
-  definitions: { s: { type: 'string' } }, properties: { a: { $ref:
-  '#/definitions/s' } } })` is refused `JK0009` ("Can not resolve schema for
-  'https://github.com/jklarenbeek/jarenjs#/definitions/s'"), in draft-07 and
-  2020-12 alike, where the same document held with `addSchema(document,
-  'http://k.test/r.json')` answers (`{ a: 's' }` true, `{ a: 1 }` false). The
-  compile reads the root's plain name as its base and never registers the
-  document under the origin.
 - [ ] **A percent-encoded unreserved character is not the character in a
   reference.** `$ref: '#%41'` does not reach `$anchor: 'A'`, nor
   `http://x.test/%61.json` an `$id` of `http://x.test/a.json` (JK0009): URIs
@@ -140,16 +131,45 @@ delete it or fix it.
   bundle than the validator's budget and measured no faster than the log on
   suite-size instances; a smaller encoding of it, or gating that pays for
   itself, is the open work.
-- [ ] **The normalizer reads a dialect by name only** — `compileNormalizer`,
-  `deriveStrictProfile` and `@jarenjs/emit` hold no meta-schemas, so a
-  `$schema` naming a custom dialect is read as draft-07 there while `compile`
-  reads it through the meta-schema the validator holds: under a held dialect
-  `https://example.com/my-dialect` that extends 2020-12, `{ $schema:
-  'https://example.com/my-dialect', $defs: { s: { type: 'object' } }, $ref:
-  '#/$defs/s', properties: { a: { default: 1 } } }` applies the `$ref`'s
-  siblings when it validates, and the normalizer's `useDefaults` fills nothing
-  (`{}`, not `{ a: 1 }`). Handing the standalone readers the validator's
-  meta-schemas is the open work.
+- [ ] **A default the normalizer fills beside a `$ref` or in an `allOf` branch
+  can be a member `additionalProperties: false` refuses.**
+  `compileNormalizer({ $schema:
+  'https://json-schema.org/draft/2020-12/schema', $defs: { s: { type:
+  'object', properties: { a: { type: 'string', default: 'x' } } } }, $ref:
+  '#/$defs/s', properties: { b: { type: 'integer' } }, additionalProperties:
+  false }, { useDefaults: true })({})` returns `{ a: 'x' }`, which the
+  validator refuses where it accepted `{}`; `{ allOf: [{ properties: { a: {
+  default: 'x' } } }], properties: { b: {} }, additionalProperties: false }`
+  alike. A silent wrong answer: the normalized value fails a schema its input
+  passed.
+- [ ] **The validator reads `$vocabulary` from the compile root only.** Under
+  a held dialect whose `$vocabulary` omits the validation vocabulary,
+  `compile({ $schema: OFF, type: 'object', properties: { b: { type: 'integer'
+  } }, required: ['b'] })` accepts `{ b: 'n' }` and `{}`, while the same
+  document held with `addSchema(doc, key)` and compiled as `{ $ref: key }`
+  refuses both. `compileNormalizer`, `@jarenjs/emit` and `deriveStrictProfile`
+  (with `dialects`) read the draft only, as the `$ref` compile does: emit
+  types `b: number`.
+- [ ] **@jarenjs/emit types `prefixItems` under draft-07.** `emitTypeScript({
+  $schema: 'http://json-schema.org/draft-07/schema#', type: 'array',
+  prefixItems: [{ type: 'integer' }] })` is `[TItem1?, ...Array<unknown>]`
+  while the validator (and the normalizer) read `prefixItems` as an unknown
+  keyword there and accept `['x']` (packages/emit/src/model.js `arrayShape`
+  and the variant analysis read `prefixItems` in every draft;
+  `readPrefixItems` gates it by draft in the normalizer).
+- [ ] **A root `$id` spelled as a pointer names the place it spells.**
+  `compile({ $id: '#/definitions/s', definitions: { s: { type: 'string' } },
+  properties: { a: { $ref: '#/definitions/s' } } })` accepts `{ a: 1 }`:
+  `#/definitions/s` is registered as the root, so the `$ref` reaches the root;
+  held under a key alike (unchanged by this slice).
+- [ ] **A held document without a key whose root `$id` is only a fragment
+  refuses its pointers.** `addSchema({ $id: '#root', definitions: { s: { type:
+  'string' } }, properties: { a: { $ref: '#/definitions/s' } } })` then
+  `compile({ $ref: 'https://github.com/jklarenbeek/jarenjs#root' })` is
+  refused JK0009 (`…jarenjs#/definitions/s`), where `compile` of the document
+  answers. Registering the document under the origin in the validator would
+  make a later compile of a document without `$id` refused JK0012 (it answers
+  today), so it was left.
 - [ ] **A required vocabulary the validator does not implement is processed**
   — a meta-schema whose `$vocabulary` declares an unknown vocabulary `true` is
   processed with that vocabulary's keywords read as annotations, where 2020-12

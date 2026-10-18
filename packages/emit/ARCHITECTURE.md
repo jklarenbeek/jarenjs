@@ -43,6 +43,8 @@ The decisions that live here, and nowhere else:
   the base of the resource holding it, an embedded `$id` starting one; `#`,
   `#/pointer`, plain `#anchor` inside the resource it names), so a ref means
   here exactly what it means to the runtime normalizer and the validator.
+  A node's draft comes from the same index: its `$schema` by name, or, with
+  the `dialects` option, through the meta-schemas the validator handed holds.
 - **Honest widening.** Every keyword in `DROPPED_CONSTRAINTS` is recorded on
   the node it came from and flattened into `doc` lines — including
   integer-ness, `not`, active conditionals, dependent/unevaluated keywords

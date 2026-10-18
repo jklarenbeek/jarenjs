@@ -429,9 +429,19 @@ that then finds nothing there is refused `JK0008` naming that URI — register
 the dialect first. A `$schema` that names
 no draft either way — an unregistered
 dialect, or meta-schemas that lead to none or back to themselves — is read as
-draft-07. The normalizer, `deriveStrictProfile` and `detectSchemaDraft`
-without its `held` argument hold no meta-schemas, so they read a `$schema` by
-its URI only, and a custom dialect as draft-07. A `$vocabulary` turns the
+draft-07. `detectSchemaDraft` without its `held` argument holds no
+meta-schemas, so it reads a `$schema` by its URI only, and a custom dialect as
+draft-07; so do `compileNormalizer`, `indexSchemaResources`,
+`deriveStrictProfile` and `@jarenjs/emit` unless they are handed the validator
+as `dialects` (`compileNormalizer(schema, { useDefaults: true, dialects:
+validator })`): then each `$schema` is read through the meta-schemas that
+validator holds, as its compile reads it — under a held
+`https://example.com/my-dialect` that extends 2020-12, `{ $schema:
+'https://example.com/my-dialect', $defs: { s: { type: 'object' } }, $ref:
+'#/$defs/s', properties: { a: { default: 1 } } }` fills `{ a: 1 }` (`{}` by
+name alone). They read the draft only: a `$vocabulary` without the validation
+vocabulary is not read by them. *Upgrade: `dialects` is new; without it
+nothing changes.* A `$vocabulary` turns the
 validation and format-assertion vocabularies on by their exact URIs only,
 declared `true` or `false` alike (`false` only lets a validator that does not
 implement a vocabulary go on without it). *Upgrade: the draft came from a
@@ -1056,8 +1066,13 @@ document with `$id: 'http://example.com/root.json'` does; a root `$ref`, beside 
 beside a root `$id`, resolves against the document; a document `compileAsync` loads is
 named by the URI it was loaded from. A fragment-only root `$id` (`#node`) is such a
 relative reference: it names the document by the key (or the `origin`) and the name,
-`…/key.json#node`. A root draft-04 `id` (where no draft is declared) keeps naming the
-document. `getSchema` answers the object you added. *Upgrade: a relative root `$id` was
+`…/key.json#node`. `compile` reads such a document alike: `compile({ $id: '#root',
+definitions: { s: { type: 'string' } }, properties: { a: { $ref: '#/definitions/s' } }
+})` resolves its pointers against the `origin` (a root `$id` such as `…/r.json#root`
+against `…/r.json`), where no other schema the validator holds has that URI, and answers
+`{ a: 's' }` true, `{ a: 1 }` false. *Upgrade: such a compile was refused `JK0009`
+(`https://github.com/jklarenbeek/jarenjs#/definitions/s` is not held).* A root draft-04
+`id` (where no draft is declared) keeps naming the document. `getSchema` answers the object you added. *Upgrade: a relative root `$id` was
 registered under its text, so a reference to it was refused `JK0009`
 (`https://github.com/jklarenbeek/sub/t.json#` is not held); under a key, an embedded
 relative `$id` was read against the `origin` (`JK0009` naming
@@ -1694,13 +1709,16 @@ so each is a decision you make rather than one you inherit.
 `compileNormalizer(schema)` with no options is the identity. The option set
 is closed, and each refusal is a `TypeError` that says what is wrong: a
 member other than `useDefaults`, `removeAdditional`, `coerceTypes`,
-`trimStrings` and `coerceJsonText` names the nearest one (`coerceType` — did you mean
+`trimStrings`, `coerceJsonText` and `dialects` names the nearest one (`coerceType` — did you mean
 `coerceTypes`?), a value of the wrong type names the member and what it takes
 (`coerceTypes: 'yes'`, a member set to `null`, a `removeAdditional` other
-than `true`, `false` or `'all'`), and options that are not a plain object —
+than `true`, `false` or `'all'`, a `dialects` that is no `JarenValidator`), and options that are not a plain object —
 `null` among them — are refused as such. A misspelt or mistyped switch used
 to compile a normalizer with that switch off, in silence, and `null` options
 used to throw a raw `TypeError` (`Cannot read properties of null`).
+`dialects: validator` reads each `$schema` through the meta-schemas that
+validator holds, as its compile does; without it a custom dialect reads as
+draft-07 (see *How a `$schema` is read* under *Vocabularies and cross-draft references*).
 
 ### Per-field control, not just a global switch
 

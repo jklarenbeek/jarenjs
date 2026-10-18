@@ -131,7 +131,10 @@ so every later step, which reads a document's base from its root identifier,
 reads it as the same document compiled with that `$id`. Either way a shallow
 copy is held; `#originals` maps it back, so `getSchema` answers the caller's
 object. A fragment-only root `$id` is resolved the same way; a root draft-04
-`id` is kept. A
+`id` is kept. `compile` reads a root `$id` with a fragment (`#root`, `…/r.json#root`)
+as naming the document too: `#traverseSchema` also registers the document
+under the URI before the fragment, where no other schema the validator holds
+has it, so its pointers resolve as under a key. A
 draft-07 `$ref` beside an `$id` resolves against the base the walk recorded
 for it (`keptRefBase`), not the base the object happens to be built under: a
 held document's root is built from another document's compile.
@@ -1136,7 +1139,7 @@ Map<string, ValidationObject> {
 | `createJsonPointer` | traverse.js | Parse URI into components (id, leftUri, fragment), its scheme and host lowered by `caselessUri` |
 | `caselessUri` / `heldUriKey` | schema-keywords.js | The one spelling of a URI a schema is held and looked up by: scheme and host in lower case (RFC 3986), the rest as written; `heldUriKey` adds the empty fragment (`addSchema`, `getSchema`, `dialectDraft`, `compileAsync`) |
 | `identifierKeyword` | schema-keywords.js | The keyword that identifies a schema object: `$id`, else the draft-04 `id` where its document declares no known draft (the walk, `indexSchemaResources`, the strict profile's index) |
-| `indexSchemaResources` / `resolveSchemaReference` | normalize.js | The resources of a document as the validator registers them (each embedded `$id` starts one; each with its plain names) and the base each schema object's `$ref` resolves against; one reference resolved inside the resource its URI names. The normalizer, `@jarenjs/emit` and the strict profile resolve through it |
+| `indexSchemaResources` / `resolveSchemaReference` | normalize.js | The resources of a document as the validator registers them (each embedded `$id` starts one; each with its plain names) and the base each schema object's `$ref` resolves against; one reference resolved inside the resource its URI names. The normalizer, `@jarenjs/emit` and the strict profile resolve through it. Each `$schema` is read by name, or, handed a validator as `dialects` (`heldDialects`), through the meta-schemas it holds (`index.held`), the map its compile reads a dialect through |
 | `identifierOf` / `declaredDraftOf` | traverse.js | The identifier text a compile reads a base from (`$id`, or `id` where `identifierKeyword` reads it), by the draft the walks recorded for the object |
 | `JarenValidator.compile` | index.js | Main entry point for schema compilation, draft/vocabulary selection |
 | `JarenValidator.#precompileRefs` | index.js | Pre-create ValidationObjects for all refs |

@@ -245,7 +245,7 @@ describe('a $schema naming a meta-schema the validator holds is read by that met
     assert.deepEqual([validate([1]), validate(['a'])], [false, true]);
   });
 
-  it('leaves the normalizer, which holds no meta-schemas, reading only names', () => {
+  it('leaves the normalizer, handed no validator as dialects, reading only names', () => {
     const shape = { $defs: { s: { type: 'object' } }, $ref: '#/$defs/s', properties: { a: { default: 1 } } };
     const fill = (uri) => compileNormalizer({ $schema: uri, ...shape }, { useDefaults: true })({});
     // 2020-12 by name: the $ref applies its siblings, so their default fills

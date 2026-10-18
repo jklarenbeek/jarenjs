@@ -424,7 +424,7 @@ describe('compileNormalizer — a closed option set', () => {
     refuses({ coerceType: true }, "compileNormalizer: unknown option 'coerceType' — did you mean 'coerceTypes'?");
     refuses({ useDefault: true }, "compileNormalizer: unknown option 'useDefault' — did you mean 'useDefaults'?");
     refuses({ strip: true },
-      "compileNormalizer: unknown option 'strip'; the options are useDefaults, removeAdditional, coerceTypes, trimStrings, coerceJsonText");
+      "compileNormalizer: unknown option 'strip'; the options are useDefaults, removeAdditional, coerceTypes, trimStrings, coerceJsonText, dialects");
   });
 
   it('refuses a mistyped option value', () => {
@@ -432,6 +432,8 @@ describe('compileNormalizer — a closed option set', () => {
     refuses({ useDefaults: 1 }, "compileNormalizer: 'useDefaults' must be true, false or a function of the schema node");
     refuses({ trimStrings: null }, "compileNormalizer: 'trimStrings' must be true, false or a function of the schema node");
     refuses({ removeAdditional: 'yes' }, "compileNormalizer: 'removeAdditional' must be true, false or 'all'");
+    for (const dialects of [{}, null, new Map(), { get: () => undefined }])
+      refuses({ dialects }, "compileNormalizer: 'dialects' must be a JarenValidator, whose held meta-schemas name the dialects");
   });
 
   it('refuses options that are not a plain object, null included', () => {

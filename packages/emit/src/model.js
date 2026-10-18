@@ -132,6 +132,12 @@ export const EMIT_MODEL_VERSION = '0.1';
  *   downstream consumer of the model does. Keywords are read from the
  *   property node itself (a vocabulary declares them inline, not through
  *   `$ref`). Absent by default, so existing models are byte-identical.
+ * @property {object} [dialects] - A `JarenValidator` whose held meta-schemas
+ *   name the dialects the schema's `$schema` URIs may name: each `$schema` is
+ *   read through them as that validator's compile reads it (a custom dialect
+ *   extending 2020-12 reads as 2020-12). Without it a `$schema` is read by its
+ *   name alone, and a custom dialect as draft-07. It also reads the
+ *   `normalize` variants.
  */
 
 /** Keywords that constrain a value without narrowing its TYPE — the
@@ -346,7 +352,7 @@ function unionOf(types) {
  */
 function readingOf(node, ctx) {
   if (!isJsonObject(node) || typeof node.$ref !== 'string'
-    || !readsRefAlone(node, schemaPlace(ctx.resources, node).draft)) return node;
+    || !readsRefAlone(node, schemaPlace(ctx.resources, node).draft, ctx.resources.held)) return node;
   return typeof node.description === 'string'
     ? { $ref: node.$ref, description: node.description }
     : { $ref: node.$ref };
@@ -1054,7 +1060,7 @@ export function compileEmitModel(schema, options = {}) {
   // declarations are variant-less by construction, so one set serves both
   // sides.
   const shared = {
-    resources: indexSchemaResources(schema),
+    resources: indexSchemaResources(schema, { dialects: options.dialects }),
     differs: new Map(),
     analyzing: new Set(),
     plainNamed: new Map(),

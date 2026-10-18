@@ -2035,9 +2035,11 @@ export class JarenValidator {
    * @param {object[] | undefined} schemas
    * @param {TraverseOptions} opts
    * @param {import('./traverse.js').SchemaPlaces} [places] - Where the walks record what each place reads
+   * @param {boolean} [namesDocument] - Whether a root `$id` with a fragment also names the
+   *   document: a compile's own map, which no later compile reads
    * @returns {{origin:string, map: Map}}
    */
-  static #traverseSchema(schema, schemas = undefined, fromMap = undefined, opts = new TraverseOptions(), places = undefined) {
+  static #traverseSchema(schema, schemas = undefined, fromMap = undefined, opts = new TraverseOptions(), places = undefined, namesDocument = false) {
     // initialize schema map for all ids and refs
     const schemaMap = new Map(fromMap);
     /** The first `$ref` of the document naming each target, where a refusal to resolve it is located. */
@@ -2055,6 +2057,18 @@ export class JarenValidator {
       undefined,
       undefined,
       sites);
+    // A root `$id` with a fragment (`#root`, `…/s.json#root`) names the
+    // document too: its pointers resolve against the URI before the
+    // fragment, as `addSchema(document, key)` holds it under the key. The URI
+    // is taken only where no other schema holds it, and only for a compile:
+    // a meta-schema held so under the origin would take it from every later
+    // document without an `$id` (`JK0012`).
+    const hash = namesDocument && isObjectClass(schema) && isStringType(schema.$id) ? origin.indexOf('#') : -1;
+    if (hash > 0 && hash < origin.length - 1) {
+      const document = origin.slice(0, hash);
+      for (const key of [document, `${document}#`])
+        if (schemaMap.get(key) == null) schemaMap.set(key, schema);
+    }
 
     // Then add the other reference schemas
     if (Array.isArray(schemas) && schemas.length > 0) {
@@ -2691,7 +2705,7 @@ export class JarenValidator {
    */
   compile(schema, schemas = undefined) {
     schema = JarenValidator.#withResolvedRootId(schema, this.#traverse);
-    const { origin, map } = JarenValidator.#traverseSchema(schema, schemas, this.#schemas, this.#traverse, this.#places);
+    const { origin, map } = JarenValidator.#traverseSchema(schema, schemas, this.#schemas, this.#traverse, this.#places, true);
 
     // Detect draft version from schema and update validation options
     const draftVersion = detectSchemaDraft(schema, map);

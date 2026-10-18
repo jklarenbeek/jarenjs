@@ -48,7 +48,8 @@ import { equalsJson, isJsonObject, setObjectMember } from '@jarenjs/core/object'
 import { SCHEMA_VALUE_KEYWORDS, SCHEMA_MAP_KEYWORDS, SCHEMA_LIST_KEYWORDS, ANNOTATION_KEYWORDS } from '@jarenjs/core/schema';
 import { indexSchemaResources, readsRefAlone, resolveSchemaReference } from './normalize.js';
 import { withoutFragment } from './origin.js';
-import { detectSchemaDraft, dialectDraft, identifierKeyword } from './schema-keywords.js';
+import { detectSchemaDraft, dialectDraft, heldDialect, identifierKeyword } from './schema-keywords.js';
+import { VALIDATOR_STATE } from './validator-state.js';
 import { createJsonPointer, encodeJsonPointerPath } from './traverse.js';
 import { SchemaCompileError, SchemaRuntimeError } from './errors.js';
 import { JarenValidator } from './index.js';
@@ -255,8 +256,10 @@ function strictNote(keyword, value) {
  * for the transform; the original schema remains the authority for what an
  * answer means.
  * @param {object|boolean} schema - The schema answers must satisfy (any draft from 07)
- * @param {{ references?: object[] }} [options] - `references`: the other
- *   schema documents its `$ref`s name, each with an absolute `$id`
+ * @param {{ references?: object[], dialects?: object }} [options] - `references`: the other
+ *   schema documents its `$ref`s name, each with an absolute `$id`; `dialects`: a
+ *   `JarenValidator` whose held meta-schemas a `$schema` is read through, as its compile
+ *   reads it — without it a `$schema` naming no known draft (a custom dialect) reads as draft-07
  * @returns {StrictProfile}
  * @throws {SchemaCompileError} `JK0102` an object whose member names are
  *   open and that no entries array carries, `JK0103` a keyword that adds
@@ -272,6 +275,9 @@ export function deriveStrictProfile(schema, options = {}) {
   const references = options?.references ?? [];
   if (!isSchemaValue(schema) || !Array.isArray(references))
     throw new SchemaCompileError('JK0107', 'deriveStrictProfile takes a schema and { references }: an array of schema documents');
+  const dialects = options?.dialects;
+  if (dialects !== undefined && !VALIDATOR_STATE.has(dialects))
+    throw new SchemaCompileError('JK0107', "deriveStrictProfile takes { dialects } as a JarenValidator, whose held meta-schemas name the dialects");
   if (schema === false) throw refusal('JK0108', 'a schema that accepts no value has no strict form', '#');
 
   /** Every schema node of the documents, by the resource and pointer it sits at. */
@@ -282,7 +288,10 @@ export function deriveStrictProfile(schema, options = {}) {
    * The resources of the documents, as the validator registers them: the
    * base each node sits under and each `$ref` resolves against.
    */
-  const resources = indexSchemaResources(schema, { base: SCHEMA_BASE });
+  const resources = indexSchemaResources(schema, { base: SCHEMA_BASE, dialects });
+  const { held } = resources;
+  /** The `$schema` URIs of the documents, which the original reads through `held`'s meta-schemas. */
+  const named = new Set();
   /** The nodes a draft-04 `id` identifies: identity there, as `$id` is. */
   const idNodes = new WeakSet();
   /**
@@ -307,8 +316,9 @@ export function deriveStrictProfile(schema, options = {}) {
   const index = (node, base, at, draft, declared) => {
     if (!isJsonObject(node) || located.has(node)) return;
     if (typeof node.$schema === 'string') {
-      draft = detectSchemaDraft(node);
-      declared = dialectDraft(node.$schema);
+      draft = detectSchemaDraft(node, held);
+      declared = dialectDraft(node.$schema, held);
+      named.add(node.$schema);
     }
     // the base the resource index places the node under: an identifier
     // that names only a fragment (a draft-07 plain name) starts no resource
@@ -324,7 +334,7 @@ export function deriveStrictProfile(schema, options = {}) {
     drafts.set(node, draft);
     for (const key of Object.keys(node)) mapPosition(key, node[key], at, (child, there) => index(child, base, there, draft, declared));
   };
-  const rootKeyword = isJsonObject(schema) ? identifierKeyword(schema, typeof schema.$schema === 'string' ? dialectDraft(schema.$schema) : null) : undefined;
+  const rootKeyword = isJsonObject(schema) ? identifierKeyword(schema, typeof schema.$schema === 'string' ? dialectDraft(schema.$schema, held) : null) : undefined;
   const rootBase = rootKeyword !== undefined ? identified(schema[rootKeyword], SCHEMA_BASE, `${SCHEMA_BASE}#`, rootKeyword) : SCHEMA_BASE;
   index(schema, rootBase, `${rootBase}#`, null, null);
   for (const reference of references) {
@@ -344,6 +354,19 @@ export function deriveStrictProfile(schema, options = {}) {
   const accepts = (place, value) => {
     if (original === undefined) {
       original = new JarenValidator();
+      // each dialect the documents name, read as `held` reads it: a chain
+      // of the `$schema` each meta-schema declares, up to a known draft
+      if (held !== undefined) {
+        for (let uri of named) {
+          while (/^[a-z][a-z0-9+.-]*:/i.test(uri) && dialectDraft(uri) === null && original.getSchema(uri) === null) {
+            const meta = heldDialect(uri, (key) => held.get(key));
+            if (!isJsonObject(meta) || typeof meta.$schema !== 'string') break;
+            // its draft is all the original reads of it
+            original.addSchema({ $schema: meta.$schema }, uri);
+            uri = meta.$schema;
+          }
+        }
+      }
       // held under the base the index read it at, which `addSchema` names it
       // by, so a resource embedded in it resolves against it
       if (isJsonObject(schema)) original.addSchema(schema, rootBase);
@@ -658,7 +681,7 @@ export function deriveStrictProfile(schema, options = {}) {
     // before draft 2019-09, and where no draft is declared, the original
     // reads a `$ref` alone: nothing beside it applies, so nothing beside it
     // shapes the profile (a description still documents the node)
-    if (typeof node.$ref === 'string' && readsRefAlone(node, drafts.get(node) ?? null))
+    if (typeof node.$ref === 'string' && readsRefAlone(node, drafts.get(node) ?? null, held))
       node = typeof node.description === 'string' ? { $ref: node.$ref, description: node.description } : { $ref: node.$ref };
     for (const key of ['$dynamicRef', '$recursiveRef']) {
       if (Object.hasOwn(node, key)) throw refusal('JK0104', `a ${key} resolves by dynamic scope, which one bundled document cannot carry`, encodeJsonPointerPath(at, key));

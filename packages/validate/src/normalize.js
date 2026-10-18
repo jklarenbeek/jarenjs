@@ -49,6 +49,7 @@ import {
 import { createSchemaPatternTester } from './string.js';
 import { DEFAULT_ORIGIN, withoutFragment } from './origin.js';
 import { appliesRefSiblings } from './dynamic-ref.js';
+import { VALIDATOR_STATE } from './validator-state.js';
 
 // The validator's reading of a `pattern` string, for a consumer that checks
 // one without compiling a schema (a form field, per keystroke); and of the
@@ -83,7 +84,29 @@ const hasOwn = Object.hasOwn;
  * @property {boolean|((schemaNode: Record<string, unknown>) => boolean)} [coerceTypes=false] - Convert a value to the node's declared scalar `type` when it is convertible
  * @property {boolean|((schemaNode: Record<string, unknown>) => boolean)} [trimStrings=false] - Trim leading/trailing whitespace from strings, before coercion
  * @property {boolean|((schemaNode: Record<string, unknown>) => boolean)} [coerceJsonText=false] - Decode a string holding the JSON text of an object or array where the node's `type` wants that container and admits no string, then normalize the decoded value
+ * @property {object} [dialects] - A `JarenValidator` whose held meta-schemas name the
+ *   dialects the schema's `$schema` URIs may name ({@link heldDialects}). Without it a `$schema`
+ *   is read by its name alone: a custom dialect reads as draft-07
  */
+
+/**
+ * The schemas a validator holds, by URI: the map its compile reads a
+ * `$schema` through ({@link dialectDraft}), so a reader handed it reads a
+ * custom dialect's draft exactly as that validator does — one reading, no
+ * copy. `undefined` when no validator is given, where a `$schema` is read by
+ * its name alone.
+ * @param {unknown} dialects - The `dialects` option: a `JarenValidator`, or undefined
+ * @param {string} who - The function the option was given to, for the refusal
+ * @returns {{ get(key: string): unknown }|undefined}
+ * @throws {TypeError} When `dialects` is given and is no `JarenValidator`: a
+ *   misspelt value would otherwise read every custom dialect as draft-07 without a word
+ */
+function heldDialects(dialects, who) {
+  if (dialects === undefined) return undefined;
+  const state = typeof dialects === 'object' && dialects !== null ? VALIDATOR_STATE.get(dialects) : undefined;
+  if (state === undefined) throw new TypeError(`${who}: 'dialects' must be a JarenValidator, whose held meta-schemas name the dialects`);
+  return state.schemas;
+}
 
 /**
  * Convert `value` to `type` when the conversion is unambiguous, otherwise
@@ -143,6 +166,8 @@ function coerceToType(value, type) {
  * @property {Map<object, SchemaPlace>} places - Every schema object, by identity
  * @property {Map<string, { node: object|boolean, names: Map<string, object> }>} resources - Each
  *   resource by its base URI (no fragment): its root and its plain names
+ * @property {{ get(key: string): unknown }} [held] - The schemas a validator holds, by URI, a
+ *   `$schema` is read through ({@link heldDialects}); absent where it is read by its name alone
  */
 
 /**
@@ -164,15 +189,21 @@ function coerceToType(value, type) {
  * profile resolve references through it: three readings of one document's
  * scope would make a type or a profile disagree with this normalizer.
  * @param {object|boolean} root - The root schema of the document
- * @param {{ base?: string, propertyDependencies?: boolean, into?: SchemaResources }} [options] -
+ * @param {{ base?: string, propertyDependencies?: boolean, into?: SchemaResources, dialects?: object }} [options] -
  *   `base`: the URI the document is read under where it names none (the validator's default
  *   origin); `propertyDependencies: true` also walks the subschemas of `propertyDependencies`;
- *   `into`: an index to add the document to (a second document beside the first)
+ *   `into`: an index to add the document to (a second document beside the first), read through
+ *   the dialects it was made with; `dialects`: a `JarenValidator` whose held meta-schemas a
+ *   `$schema` is read through, as that validator's compile reads it ({@link heldDialects}),
+ *   where without it a `$schema` naming no known draft reads as draft-07
  * @returns {SchemaResources}
+ * @throws {TypeError} When `dialects` is given and is no `JarenValidator`
  */
 export function indexSchemaResources(root, options = {}) {
   /** @type {SchemaResources} */
   const index = options.into ?? { places: new Map(), resources: new Map() };
+  const held = heldDialects(options.dialects, 'indexSchemaResources');
+  if (held !== undefined) index.held = held;
   const base = options.base ?? DEFAULT_ORIGIN;
   const document = { node: root, names: new Map() };
   if (isJsonObject(root)) placeSchemas(index, root, base, null, null, document, options.propertyDependencies);
@@ -195,7 +226,7 @@ export function indexSchemaResources(root, options = {}) {
  * @param {boolean|undefined} propertyDependencies
  */
 function placeSchemas(index, start, startBase, startDraft, startDeclared, startResource, propertyDependencies) {
-  const { places, resources } = index;
+  const { places, resources, held } = index;
   const seen = new Set();
   /**
    * @param {any} node @param {string} base @param {number|null} parentDraft
@@ -211,8 +242,8 @@ function placeSchemas(index, start, startBase, startDraft, startDeclared, startR
       return;
     }
     // The draft a document declares is inherited by everything below it.
-    const draft = typeof node.$schema === 'string' ? detectSchemaDraft(node) : parentDraft;
-    const declared = typeof node.$schema === 'string' ? dialectDraft(node.$schema) : parentDeclared;
+    const draft = typeof node.$schema === 'string' ? detectSchemaDraft(node, held) : parentDraft;
+    const declared = typeof node.$schema === 'string' ? dialectDraft(node.$schema, held) : parentDeclared;
     const declare = (/** @type {string|undefined} */ name) => {
       if (resource !== undefined && name !== undefined && !resource.names.has(name)) resource.names.set(name, node);
     };
@@ -228,7 +259,7 @@ function placeSchemas(index, start, startBase, startDraft, startDeclared, startR
       if (resource !== undefined && !isRoot) resource = { node, names: new Map() };
     }
     if (resource !== undefined && (isRoot || own !== base) && !resources.has(own)) resources.set(own, resource);
-    places.set(node, { base: own, refBase: !isRoot && readsRefAlone(node, parentDraft) ? base : own, draft, declared });
+    places.set(node, { base: own, refBase: !isRoot && readsRefAlone(node, parentDraft, held) ? base : own, draft, declared });
     for (const keyword of ['$anchor', '$dynamicAnchor'])
       if (typeof node[keyword] === 'string') declare(plainNameKey(`#${node[keyword]}`));
     // Only schema positions are schemas. Annotation values such as defaults
@@ -300,8 +331,8 @@ export function resolveSchemaReference(ref, base, index) {
       const place = index.places.get(/** @type {object} */ (passed));
       if (place !== undefined) ({ base: at, draft, declared } = place);
       else if (isJsonObject(passed) && typeof passed.$schema === 'string') {
-        draft = detectSchemaDraft(passed);
-        declared = dialectDraft(passed.$schema);
+        draft = detectSchemaDraft(passed, index.held);
+        declared = dialectDraft(passed.$schema, index.held);
       }
     }
     placeSchemas(index, target, at, draft, declared, undefined, false);
@@ -499,7 +530,7 @@ function buildObjectStep(node, ctx) {
       if (step !== null) hasStep = true;
       // Keep the property's step with its default. Matching pattern steps
       // are composed below so absent and supplied members normalize alike.
-      if (isJsonObject(sub) && sub.default !== undefined && !readsRefAlone(sub, ctx.declaredDraft)
+      if (isJsonObject(sub) && sub.default !== undefined && !readsRefAlone(sub, ctx.declaredDraft, ctx.resources.held)
         && resolveNormalizeSwitch(options.useDefaults, sub))
         defaults.push(key, sub.default, step);
     }
@@ -753,11 +784,13 @@ function buildScalarStep(node, ctx, refAlone) {
  * the same way.
  * @param {Record<string, any>} node - A schema object
  * @param {number|null} declaredDraft - The draft its parent is read under, or null when none is declared
+ * @param {{ get(key: string): unknown }} [held] - The schemas a validator holds, a `$schema` of the
+ *   node is read through ({@link SchemaResources}' `held`); its name alone without
  * @returns {boolean}
  */
-export function readsRefAlone(node, declaredDraft) {
+export function readsRefAlone(node, declaredDraft, held = undefined) {
   if (typeof node.$ref !== 'string') return false;
-  const draft = typeof node.$schema === 'string' ? detectSchemaDraft(node) : declaredDraft;
+  const draft = typeof node.$schema === 'string' ? detectSchemaDraft(node, held) : declaredDraft;
   return !appliesRefSiblings(draft ?? 7);
 }
 
@@ -779,7 +812,7 @@ function compileNode(node, ctx) {
   // read as draft-07, where the validator reads one it holds by its
   // meta-schema.
   if (typeof node.$schema === 'string') {
-    const declaredDraft = detectSchemaDraft(node);
+    const declaredDraft = detectSchemaDraft(node, ctx.resources.held);
     if (declaredDraft !== ctx.declaredDraft) ctx = { ...ctx, declaredDraft };
   }
 
@@ -804,7 +837,7 @@ function compileNode(node, ctx) {
   // Such a node normalizes as its target and nothing else, so a sibling the
   // validator never reads cannot coerce, decode, strip or default a value
   // the reference accepts into one it refuses.
-  const refAlone = readsRefAlone(node, ctx.declaredDraft);
+  const refAlone = readsRefAlone(node, ctx.declaredDraft, ctx.resources.held);
 
   // Decoding comes first: every other step of this node, the reference and
   // the `allOf` branches included, reads the decoded container.
@@ -858,7 +891,7 @@ function compileNode(node, ctx) {
 }
 
 /** The members of `NormalizeOptions`; any other is refused. */
-const NORMALIZE_OPTIONS = Object.freeze(['useDefaults', 'removeAdditional', 'coerceTypes', 'trimStrings', 'coerceJsonText']);
+const NORMALIZE_OPTIONS = Object.freeze(['useDefaults', 'removeAdditional', 'coerceTypes', 'trimStrings', 'coerceJsonText', 'dialects']);
 
 /**
  * Refuse a malformed options object before anything compiles: every
@@ -879,6 +912,7 @@ function admitNormalizeOptions(options) {
   const strip = options.removeAdditional;
   if (strip !== undefined && typeof strip !== 'boolean' && strip !== 'all')
     throw new TypeError("compileNormalizer: 'removeAdditional' must be true, false or 'all'");
+  heldDialects(options.dialects, 'compileNormalizer');
 }
 
 /**
@@ -913,6 +947,12 @@ function admitNormalizeOptions(options) {
  * A property default runs through that property's schema and every matching
  * `patternProperties` schema, in the same order as a supplied member.
  *
+ * **Which dialect.** A `$schema` is read by its name: a URI naming a known
+ * draft reads as that draft, and any other — a custom dialect — as draft-07.
+ * A validator reads a custom dialect through the meta-schema it holds (one
+ * extending 2020-12 reads as 2020-12); pass that validator as `dialects` to
+ * read each `$schema` as its compile does.
+ *
  * **What is not, and why.** `anyOf`, `oneOf`, `if`/`then`/`else` and `not`
  * are not descended: which branch applies is only known after validating,
  * and normalizing under a branch can change which branch validates. Nothing
@@ -927,6 +967,7 @@ function admitNormalizeOptions(options) {
  * @throws {TypeError} When `options` is not a plain object, names a member
  *   outside `NormalizeOptions`, or gives one a value of the wrong type - a
  *   misspelt switch would otherwise compile a normalizer that does nothing
+ *   (`dialects` that is no `JarenValidator` included)
  * @example
  * const normalize = compileNormalizer({
  *   type: 'object',
@@ -956,7 +997,7 @@ export function compileNormalizer(schema, options = {}) {
   const ctx = {
     options: resolved,
     /** The document's resources: the base each reference resolves against, the draft each node is read under */
-    resources: indexSchemaResources(schema),
+    resources: indexSchemaResources(schema, { dialects: options.dialects }),
     /** @type {number|null} The draft the schema being compiled declares, or null when none does */
     declaredDraft: null,
     /** @type {Map<string, Map<object, Function|null>>} The compiled steps per stripping mode and draft */
@@ -968,7 +1009,7 @@ export function compileNormalizer(schema, options = {}) {
 
   // A root `default` answers the "the whole document was absent" case, which
   // no member walk can reach.
-  const rootDefault = isJsonObject(schema) && schema.default !== undefined && !readsRefAlone(schema, null)
+  const rootDefault = isJsonObject(schema) && schema.default !== undefined && !readsRefAlone(schema, null, ctx.resources.held)
     && resolveNormalizeSwitch(resolved.useDefaults, schema)
     ? schema.default
     : undefined;
