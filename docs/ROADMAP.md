@@ -731,13 +731,6 @@ what each does is its own documentation's job
   Wanted: a statement that tells an empty answer from a probe that found such
   an integer (a sentinel row whose order SQLite keeps), or an index over the
   double, measured.
-- [ ] **On SQLite a decimal another writer spelled just past a tie reads as
-  the other double.** SQLite 3.53.4 reads
-  `1152921504606847104.0000000000000001` as 2^60 and
-  `9007199254740993.0000000000000001` as 2^53 (`json_extract`, `CAST AS
-  REAL`), where the engine (`JSON.parse`) reads 2^60 + 256 and 2^53 + 2; every
-  read and comparison of such a member differs from the engine. Wanted: a read
-  that rounds as the engine does, or a documented loss.
 - [ ] **On PostgreSQL a column that reads a NULL as a present `null` is read
   in the engine.** No column whose policy is `null: 'null'` is read natively
   on PostgreSQL (`nativeQuery` is false for it), so a grouping ordered by such

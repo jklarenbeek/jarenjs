@@ -963,6 +963,7 @@ oracle run on both. What differs is declared rather than discovered:
 | an entity's row order (ties, and a plain `$.E[*]`) | its `rowid`: insertion order, but KEY order for an `integer` key, which is the `rowid` | its `rid`: insertion order, whatever the key — order by the key to answer alike |
 | an entity key with `default: "auto"` | the `INTEGER PRIMARY KEY`: the largest key plus one, so a rolled-back number is handed out again | a `bigserial` sequence: a rolled-back insert leaves a gap, and an explicit key is not seen — the allocation that meets one is `JD2001` |
 | `integer` and `number` | `INTEGER` and `REAL` | both `numeric` |
+| a number another writer spelled by more digits than a double needs (a fraction, an exponent, an integer past the 64-bit ones) | SQLite's own conversion, which keeps the significant digits that fit its 64-bit accumulator (19 or 20) and drops the rest: one just past a tie between two doubles is the double nearer zero (`9007199254740993.0000000000000001` is 2^53, where the engine reads 2^53 + 2) to every native comparison, ordering, grouping and projected member; a document read whole is the engine's ([ARCHITECTURE](ARCHITECTURE.md), "SQLite's double is its own conversion's") | the `numeric` its digits spell, compared by the interval of decimals that round to the engine's double ([POSTGRESQL](docs/POSTGRESQL.md)) |
 | a `boolean` member | `INTEGER` 1/0 | `smallint` 1/0 |
 | an entity index over a declared expression | refused `JD0004`: only the registering connection computes the function | an index over the host's `sql` function, kept for every writer |
 | an untyped indexed path | `ANY` — compares with anything | `jsonb` — the predicate reads the document instead |
@@ -1832,6 +1833,11 @@ its side-effect-free status read are in
   See the dialect table and host contracts.
 - **Replication transport is supplied by the host.** Portable logical replication
   ships; arbitrary external writes are not captured as local row events.
+- **SQLite rounds a decimal by the digits it keeps.** A number another writer
+  spelled past 19 or 20 significant digits, just past a tie between two
+  doubles, is the double nearer zero to every native read of the member on
+  SQLite; the engine and a document read whole read the other. See the
+  dialect table.
 - **No statement timeout** on SQLite (the drivers expose no interrupt;
   the capability slot is honestly `false`), and no row estimates there
   either; PostgreSQL's planner gives a labelled one.

@@ -680,8 +680,10 @@ const LISTS = [[2 ** 60, 5], [0.1, 0], [5], [2 ** 53, -(2 ** 60), 1.5]];
 // precision on either side of it and at its interval's edges, by an exponent,
 // past the double range, and zero by a sign and by a number too small to be a
 // double. SQLite reads a JSON fraction as the double its own conversion rounds
-// it to, which is not the engine's at or near a tie (a listed loss), so the
-// decimals near an edge are PostgreSQL's alone
+// it to, which is not the engine's just past a tie it drops the deciding digits
+// of (a documented loss: the README's dialect table, pinned by
+// sqlite-decimal-conversion.test.js), so the decimals near an edge are
+// PostgreSQL's alone
 /** @param {string} engine */
 const spellings = (engine) => ['1152921504606846976', '1152921504606846977', '-1152921504606846976', '9007199254740993',
   '5.0', '5e0', '0.0', '-0', '1e400', '-1e400', '1e-400', '-1e-400', '1e300',

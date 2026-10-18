@@ -824,6 +824,28 @@ the column may be the `bigint` a database-allocated key takes. On SQLite the
 `integer` column holds no integer the engine reads but as its own double, and
 the `number` column holds the double; both read bare.
 
+**SQLite's double is its own conversion's.** Everything above that reads a
+number on SQLite as "the double" reads the one SQLite converts the JSON text
+to — for a fraction, an exponent or an integer past the 64-bit integers (an
+integer within them it holds exactly, as above). That conversion keeps the
+significant digits that fit its 64-bit accumulator, 19 or 20 of them, drops the
+rest and rounds what it kept, where the engine (`JSON.parse`) rounds every
+digit. The two agree on every number the store writes and on any spelling
+whose digits SQLite keeps whole; they differ only where the dropped digits
+decide a tie between two doubles, and there SQLite's is the engine's
+neighbour nearer zero: `9007199254740993.0000000000000001`, which another
+writer may spell, is 2^53 + 2 to the engine and 2^53 to SQLite, and
+`1152921504606847104.0000000000000001` is 2^60 + 256 and 2^60. A native
+comparison, membership, ordering, grouping or projected member reads that
+member as SQLite's double — an indexed member's generated column holds it —
+so it answers as the engine would over that double; a document read whole
+comes back as its text and is the engine's. No interval binds around it:
+the text is converted before any comparison sees it, and a reading that
+rounds every digit is a function only the registering connection computes.
+The README's dialect table lists the loss, and the conversion pins
+([sqlite-decimal-conversion.test.js](../../test/db/sqlite-decimal-conversion.test.js))
+fail once a build rounds every digit.
+
 **A path against a path is decided by the family of the two values.**
 Only members the schema types as scalars qualify — `string`, `number`,
 `integer` and `boolean`, each optionally with `null` — because those never
