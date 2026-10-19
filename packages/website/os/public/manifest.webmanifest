@@ -1,0 +1,19 @@
+{
+  "name": "Radiant OS — a Turing machine that dances",
+  "short_name": "Radiant OS",
+  "description": "A browser OS that is a Turing machine: dancing heads paint the tape, a council of its own parts amends the program, and you hold the veto. Built on Jaren documents, offline-first.",
+  "id": "/jarenjs/os/",
+  "start_url": "/jarenjs/os/",
+  "scope": "/jarenjs/os/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#fff7e6",
+  "theme_color": "#2563eb",
+  "categories": ["entertainment", "education", "developer"],
+  "icons": [
+    { "src": "/jarenjs/os/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/jarenjs/os/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/jarenjs/os/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "/jarenjs/os/radiant.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

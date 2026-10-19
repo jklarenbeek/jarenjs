@@ -38,6 +38,8 @@ export const BANNED_HUES = [
 /** Where a hue may hide: everything the site ships, source and built. */
 const TREES = [
   { dir: 'packages/website/src', patterns: ['**/*.{js,css,html,json,svg}'], required: true },
+  // Radiant OS's own page: its HTML, manifest, service worker and icon
+  { dir: 'packages/website/os', patterns: ['**/*.{js,css,html,json,svg,webmanifest}'], required: true },
   { dir: 'packages/website/dist', patterns: ['**/*.{js,css,html,svg}'], required: false },
 ];
 

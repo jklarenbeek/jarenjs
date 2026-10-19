@@ -1,0 +1,50 @@
+{
+  "$dag": "0.1",
+  "nodes": {
+    "state": { "kind": "input" },
+    "theme": {
+      "kind": "query",
+      "query": {
+        "leader": "$.leader",
+        "tokens": [
+          { "name": "os-paper", "value": "$.paper" },
+          { "name": "os-ink", "value": "$.ink" },
+          { "name": "os-lead", "value": "$.leader.color" },
+          { "name": "os-lead-ink", "value": "$.leader.ink" },
+          { "$for": { "c": { "$in": "$.palette[*]", "$at": "i" } }, "$return": { "name": { "$concat": ["os-symbol-", "$i"] }, "value": "$c" } }
+        ],
+        "members": [{ "$for": { "m": "$.members[*]" }, "$return": { "id": "$m.id", "color": "$m.color" } }]
+      }
+    },
+    "css": { "kind": "task", "run": "render", "with": { "template": "theme", "data": "$" } },
+    "machine": {
+      "kind": "query",
+      "query": {
+        "title": "$.title", "tick": "$.tick", "width": "$.width", "height": "$.height",
+        "rules": "$.rules", "heads": "$.heads", "palette": "$.palette"
+      }
+    },
+    "js": { "kind": "task", "run": "render", "with": { "template": "machine", "data": "$" } },
+    "artwork": {
+      "kind": "query",
+      "query": {
+        "title": "$.title", "tick": "$.tick", "harmony": "$.harmony", "paper": "$.paper", "ink": "$.ink", "svg": "$.svg",
+        "council": [{ "$for": { "m": "$.members[*]" }, "$return": { "name": "$m.name", "merit": "$m.merit" } }]
+      }
+    },
+    "html": { "kind": "task", "run": "render", "with": { "template": "artwork", "data": "$" } },
+    "out": { "kind": "output" }
+  },
+  "edges": [
+    { "from": "state", "to": "theme" },
+    { "from": "theme", "to": "css" },
+    { "from": "state", "to": "machine" },
+    { "from": "machine", "to": "js" },
+    { "from": "state", "to": "artwork" },
+    { "from": "artwork", "to": "html" },
+    { "from": "css", "to": "out", "port": "css" },
+    { "from": "js", "to": "out", "port": "js" },
+    { "from": "html", "to": "out", "port": "html" },
+    { "from": "state", "to": "out", "port": "svg", "select": "$.svg" }
+  ]
+}

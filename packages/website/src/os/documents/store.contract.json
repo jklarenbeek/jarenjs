@@ -1,0 +1,44 @@
+{
+  "$contract": "0.1",
+  "id": "radiant-store",
+  "version": "1",
+  "operations": {
+    "store.info": {
+      "kind": "read",
+      "doc": "Which storage the OS database landed on.",
+      "output": { "type": "object", "required": ["mode"], "properties": { "mode": { "type": "string" }, "detail": { "type": "string" } } }
+    },
+    "artwork.put": {
+      "kind": "command",
+      "input": { "type": "object", "required": ["artwork"], "properties": { "artwork": { "type": "object" } } },
+      "output": { "type": "object", "required": ["id"], "properties": { "id": { "type": "string" } } }
+    },
+    "artwork.list": {
+      "kind": "read",
+      "output": { "type": "array", "items": { "type": "object" } }
+    },
+    "artwork.get": {
+      "kind": "read",
+      "input": { "type": "object", "required": ["id"], "properties": { "id": { "type": "string" } } },
+      "output": { "type": ["object", "null"] }
+    },
+    "amendment.put": {
+      "kind": "command",
+      "input": { "type": "object", "required": ["amendment"], "properties": { "amendment": { "type": "object" } } },
+      "output": { "type": "object", "required": ["id"], "properties": { "id": { "type": "string" } } }
+    },
+    "amendment.list": {
+      "kind": "read",
+      "output": { "type": "array", "items": { "type": "object" } }
+    },
+    "session.put": {
+      "kind": "command",
+      "input": { "type": "object", "required": ["state"], "properties": { "state": { "type": "object" } } },
+      "output": { "type": "object", "required": ["at"], "properties": { "at": { "type": "string" } } }
+    },
+    "session.get": {
+      "kind": "read",
+      "output": { "type": ["object", "null"] }
+    }
+  }
+}

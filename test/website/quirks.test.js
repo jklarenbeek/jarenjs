@@ -23,14 +23,17 @@ const SCOPE = 'https://host/jarenjs/';
 const keyUrl = (k) => (typeof k === 'string' ? k : k.url);
 const response = (body, ok) => ({ ok, status: ok ? 200 : 404, body, clone() { return { ...this }; } });
 
-/** Evaluate sw.js in a sandbox; returns its listeners and the cache spies. */
-function bootSw(fetchImpl) {
+/** Evaluate sw.js in a sandbox; returns its listeners and the cache spies.
+ * @param {any} fetchImpl @param {string[]} [cacheKeys] - the caches the origin already holds */
+function bootSw(fetchImpl, cacheKeys = []) {
   /** @type {Map<string, Function>} */
   const listeners = new Map();
   /** @type {Map<string, any>} */
   const store = new Map();
   /** @type {{ key: string, ok: boolean }[]} */
   const puts = [];
+  /** @type {string[]} */
+  const deleted = [];
   const cache = {
     addAll: (urls) => {
       for (const u of urls) store.set(u, response(`precached:${u}`, true));
@@ -52,15 +55,15 @@ function bootSw(fetchImpl) {
     caches: {
       open: () => Promise.resolve(cache),
       match: (k) => Promise.resolve(store.get(keyUrl(k))),
-      keys: () => Promise.resolve([]),
-      delete: () => Promise.resolve(true),
+      keys: () => Promise.resolve(cacheKeys),
+      delete: (/** @type {string} */ key) => { deleted.push(key); return Promise.resolve(true); },
     },
     fetch: fetchImpl,
     URL,
   };
   vm.createContext(context);
   new vm.Script(SW_SOURCE, { filename: 'sw.js' }).runInContext(context);
-  return { listeners, store, puts };
+  return { listeners, store, puts, deleted };
 }
 
 const runInstall = async (listeners) => {
@@ -138,5 +141,18 @@ describe('website — the service worker (Node vm harness)', function () {
     online = false;
     offline = await dispatchFetch(sw.listeners, SCOPE, 'navigate');
     assert.strictEqual(offline.body, `network:${SCOPE}?from=pwa`);
+  });
+
+  it('leaves Radiant OS — its requests and its caches — to its own worker', async function () {
+    const sw = bootSw(() => Promise.resolve(response('fresh', true)),
+      ['jaren-website-v28', 'jaren-website-v29', 'radiant-os-v1', 'someone-else']);
+    let activated;
+    sw.listeners.get('activate')({ waitUntil: (/** @type {Promise<any>} */ p) => { activated = p; } });
+    await activated;
+    assert.deepStrictEqual(sw.deleted, ['jaren-website-v28'], 'only this worker’s own old caches are retired');
+    for (const [url, mode] of [[`${SCOPE}os/`, 'navigate'], [`${SCOPE}os/assets/index-abc.js`, 'no-cors'], [`${SCOPE}os/sw.js`, 'no-cors']]) {
+      assert.strictEqual(await dispatchFetch(sw.listeners, url, mode), null, `${url} is the OS's to serve`);
+    }
+    assert.deepStrictEqual(sw.puts, []);
   });
 });

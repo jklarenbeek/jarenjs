@@ -6,11 +6,15 @@
      provenance): stale-while-revalidate
    Every cache.put is gated on response.ok: a 404/502 must never be
    cached forever, and a bad navigation response must never replace the
-   shell — nor may a navigation to anything but the shell itself. */
+   shell — nor may a navigation to anything but the shell itself.
+   Radiant OS (os/) is a separate app with its own worker on this origin:
+   this worker leaves its requests to it and its caches alone. */
 
+const PREFIX = 'jaren-website-';
 const CACHE = 'jaren-website-v29';
 const BASE = self.registration.scope; // e.g. https://host/jarenjs/
 const SHELL_PATH = new URL(BASE).pathname;
+const OS_BASE = `${BASE}os/`;
 
 /* Precached at install AND served by the fetch handler's cache-first
    branch below — a precache no branch serves is unreachable (the fonts
@@ -46,13 +50,13 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
+      .then((keys) => Promise.all(keys.filter((k) => k.startsWith(PREFIX) && k !== CACHE).map((k) => caches.delete(k))))
       .then(() => self.clients.claim()));
 });
 
 self.addEventListener('fetch', (event) => {
   const request = event.request;
-  if (request.method !== 'GET' || !request.url.startsWith(BASE)) return;
+  if (request.method !== 'GET' || !request.url.startsWith(BASE) || request.url.startsWith(OS_BASE)) return;
 
   if (request.mode === 'navigate') {
     /* Only a navigation to the shell's own path refreshes the cached

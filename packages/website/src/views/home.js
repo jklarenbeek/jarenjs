@@ -43,6 +43,15 @@ export const HOME_RULES = [
         ],
       ],
       ['section', { class: 'container section' },
+        ['div', { class: 'callout wide' },
+          ['h3', {}, '$.os.title'],
+          ['p', {}, '$.os.lead'],
+          // a separate app at its own scope (its own manifest and service
+          // worker), so a page load, not a route
+          ['a', { href: 'os/', class: 'btn' }, 'Open Radiant OS'],
+        ],
+      ],
+      ['section', { class: 'container section' },
         ['div', { class: 'callout accent wide' },
           ['h3', {}, '$.meta.title'],
           ['p', {}, '$.meta.lead'],

@@ -1,0 +1,59 @@
+{
+  "$model": "0.1",
+  "collections": {
+    "artworks": {
+      "key": "/id",
+      "schema": {
+        "type": "object",
+        "required": ["id", "title", "at", "tick", "harmony", "world", "program", "merits"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "title": { "type": "string", "minLength": 1, "maxLength": 60 },
+          "at": { "type": "string" },
+          "tick": { "type": "integer", "minimum": 0 },
+          "harmony": { "type": "number" },
+          "world": {
+            "type": "object",
+            "required": ["width", "height", "tape", "heads", "tick"],
+            "properties": {
+              "width": { "type": "integer", "minimum": 4, "maximum": 64 },
+              "height": { "type": "integer", "minimum": 4, "maximum": 64 },
+              "tape": { "type": "array", "items": { "type": "integer", "minimum": 0, "maximum": 5 } },
+              "heads": { "type": "array" },
+              "tick": { "type": "integer", "minimum": 0 }
+            }
+          },
+          "program": { "type": "object", "required": ["machine", "tempo"] },
+          "merits": { "type": "object", "additionalProperties": { "type": "number" } }
+        }
+      }
+    },
+    "constitution": {
+      "key": "/id",
+      "schema": {
+        "type": "object",
+        "required": ["id", "session", "by", "title", "status", "change"],
+        "properties": {
+          "id": { "type": "string" },
+          "session": { "type": "integer", "minimum": 0 },
+          "by": { "type": "string" },
+          "title": { "type": "string" },
+          "status": { "enum": ["enacted", "vetoed", "repealed"] },
+          "change": { "type": "object" }
+        }
+      }
+    },
+    "sessions": {
+      "key": "/id",
+      "schema": {
+        "type": "object",
+        "required": ["id", "at", "state"],
+        "properties": {
+          "id": { "type": "string" },
+          "at": { "type": "string" },
+          "state": { "type": "object" }
+        }
+      }
+    }
+  }
+}

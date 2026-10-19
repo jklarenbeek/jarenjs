@@ -330,6 +330,14 @@ must match — mermaid (`components/mermaid/src/theme.js` ↔ the `--mm-*` fallb
   itself, because the browser compares the worker's own bytes on every navigation and
   the new worker's `install` re-fetches the whole precache under the same name.
 
+- Radiant OS (`packages/website/os/`) is a separate installable app with its own
+  manifest (`theme_color` `#2563eb`, `background_color` `#fff7e6` — the OS paper),
+  icons (drawn by the same `scripts/make-icons.js`, pinned by the icons test) and
+  worker. Each worker owns one cache prefix — `jaren-website-` and `radiant-os-` — and
+  retires only its own; the site's worker answers nothing under `os/`. The Tangle
+  edition (`/tangleai/os/`, same origin) uses `tangle-radiant-os-`, which neither
+  prefix matches.
+
 ## 10. Verification method
 
 A visual pass is verified the way the original audit was made:
@@ -364,3 +372,29 @@ All of the above (plus the browser matrix) run together as `npm run site:gate`, 
 the one command a visual change must end green on.
 
 **Code blocks keep their tabs.** `.md pre` sets `tab-size: 4`, so a tab in code (which the Markdown parser keeps) is as wide as the four spaces it once became; no token is involved.
+
+## 11. Radiant OS
+
+Radiant OS (`packages/website/src/os/`) is drawn in its own hand — bold outlined
+figures in the spirit of 1980s subway and street art — and holds every rule above.
+
+- **Palette.** The tape's inks are paper plus five brights in this order: blue
+  `#2563eb`, amber `#fbbf24`, red `#ef4444`, green `#16a34a`, cyan `#06b6d4`; the
+  human, who holds the veto, wears orange `#f97316`, which no tape symbol uses. No pink,
+  no purple (§1). Light mode is paper (`#fff7e6`) with ink `#11131c`; dark mode is the
+  subway — chalk `#f4efe1` on `#0c0f17`.
+- **One line weight.** Every figure is drawn twice — an ink pass widened by the outline,
+  then the fill — so overlapping limbs read as one silhouette with one outline; the chrome
+  uses the same 3px line and hard offset shadow.
+- **The leader's colour.** The JTLT theme template renders `--os-lead` (the merit
+  leader's ink) and `--os-lead-ink`, the text colour `inkFor` picks for it, so text on
+  the lead colour always meets §1's contrast floor whichever member leads.
+- **Motion.** The stage animates in its own frame loop (hops, rising blocks, stamps, the
+  veto hand) and never dispatches per frame. Under `prefers-reduced-motion: reduce` — or
+  the OS's own motion toggle — the stage draws the final state of every change at once
+  and runs no loop, and the chrome's few CSS animations (`transform` and `opacity` only)
+  sit behind both.
+- **The stage is an image, the chrome is the interface.** The stage is
+  `role="img"` with a live label (tick, harmony, dancers); everything it shows that can
+  be acted on — the verdict, the members, the rules — is also a real control in the
+  window beside it, and V, A and Space mirror the verdict and the run toggle.

@@ -1,0 +1,90 @@
+{
+  "$dag": "0.1",
+  "nodes": {
+    "verdict": { "kind": "input" },
+    "mutual": {
+      "kind": "query",
+      "query": {
+        "$sum": {
+          "$for": { "e": { "$entries": "$.delta" } },
+          "$where": { "$ne": ["$e.key", "harmony"] },
+          "$return": {
+            "$if": [{ "$gt": ["$e.value", 0.004] }, 1,
+              { "$if": [{ "$lt": ["$e.value", -0.004] }, -1, 0] }]
+          }
+        }
+      }
+    },
+    "gains": {
+      "kind": "query",
+      "query": {
+        "$let": {
+          "vetoed": { "$eq": ["$.verdict.status", "vetoed"] },
+          "sign": {
+            "$if": [{ "$gt": ["$.verdict.delta.harmony", 0.002] }, 1,
+              { "$if": [{ "$lt": ["$.verdict.delta.harmony", -0.002] }, -1, 0] }]
+          }
+        },
+        "$return": {
+          "$from-entries": {
+            "$for": { "m": { "$entries": "$.verdict.merits" } },
+            "$let": {
+              "vote": {
+                "$default": [{
+                  "$head": {
+                    "$for": { "b": "$.verdict.ballots[*]" },
+                    "$where": { "$and": [{ "$eq": ["$b.voter", "$m.key"] }, { "$eq": ["$b.proposal", "$.verdict.proposal"] }] },
+                    "$return": "$b.vote"
+                  }
+                }, 0]
+              },
+              "own": {
+                "$if": [{ "$ne": ["$m.key", "$.verdict.proposer"] }, 0,
+                  { "$if": ["$vetoed", -0.08,
+                    { "$add": [{ "$mul": ["$.verdict.delta.harmony", 6] }, { "$mul": ["$.mutual", 0.05] }] }] }]
+              },
+              "judged": {
+                "$if": ["$vetoed",
+                  { "$mul": [{ "$max": { "$seq": [0, "$vote"] } }, -0.04] },
+                  { "$mul": [{ "$mul": ["$vote", "$sign"] }, 0.15] }]
+              }
+            },
+            "$return": { "key": "$m.key", "value": { "$add": ["$own", "$judged"] } }
+          }
+        }
+      }
+    },
+    "merits": {
+      "kind": "query",
+      "query": {
+        "$from-entries": {
+          "$for": { "m": { "$entries": "$.verdict.merits" } },
+          "$let": {
+            "next": {
+              "$add": [1, {
+                "$mul": [{
+                  "$sub": [{ "$add": ["$m.value", { "$default": [{ "$get": ["$.gains", "$m.key"] }, 0] }] }, 1]
+                }, 0.96]
+              }]
+            }
+          },
+          "$return": {
+            "key": "$m.key",
+            "value": { "$max": { "$seq": [0.2, { "$min": { "$seq": [5, "$next"] } }] } }
+          }
+        }
+      }
+    },
+    "out": { "kind": "output" }
+  },
+  "edges": [
+    { "from": "verdict", "to": "mutual" },
+    { "from": "verdict", "to": "gains", "port": "verdict" },
+    { "from": "mutual", "to": "gains", "port": "mutual" },
+    { "from": "verdict", "to": "merits", "port": "verdict" },
+    { "from": "gains", "to": "merits", "port": "gains" },
+    { "from": "merits", "to": "out", "port": "merits" },
+    { "from": "gains", "to": "out", "port": "gains" },
+    { "from": "mutual", "to": "out", "port": "mutual" }
+  ]
+}
