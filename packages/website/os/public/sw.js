@@ -3,7 +3,8 @@
      from the list the build writes (precache.json: scripts, styles, the
      database worker, the SQLite wasm) — so an OS installed once boots
      with no network at all, not only after every chunk happened to load;
-   - navigations: network-first, falling back to the cached shell;
+   - navigations and the library (library.json, the documentation the
+     Library app reads): network-first, falling back to the cached copy;
    - hashed assets and precached statics: cache-first;
    - every cache.put is gated on response.ok, and only navigations to
      the shell itself refresh the cached shell.
@@ -11,9 +12,10 @@
    prefix: the classic site's worker shares this origin. */
 
 const PREFIX = 'radiant-os-';
-const CACHE = `${PREFIX}v1`;
+const CACHE = `${PREFIX}v2`;
 const BASE = self.registration.scope; // e.g. https://host/jarenjs/os/
 const SHELL_PATH = new URL(BASE).pathname;
+const LIBRARY = `${BASE}library.json`;
 
 const PRECACHE = [
   BASE,
@@ -63,6 +65,14 @@ self.addEventListener('fetch', (event) => {
       fetch(request)
         .then((response) => (isShell ? putOk(BASE, response) : response))
         .catch(() => caches.match(BASE)));
+    return;
+  }
+
+  if (request.url === LIBRARY) {
+    event.respondWith(
+      fetch(request)
+        .then((response) => putOk(LIBRARY, response))
+        .catch(() => caches.match(LIBRARY)));
     return;
   }
 

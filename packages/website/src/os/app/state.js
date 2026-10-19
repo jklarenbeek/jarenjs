@@ -11,6 +11,7 @@ import { createWorld, isWorld } from '../kernel/machine.js';
 import { measure } from '../kernel/metrics.js';
 import { MEMBERS, DANCERS, isTempo } from '../kernel/council.js';
 import { SESSION_EVERY, VERDICT_MS } from '../kernel/session.js';
+import { studioState, restoreStudio, studioSlice } from './studio-state.js';
 
 /** The tape inks, symbol by symbol: paper, then the five brights the
  * council wears. Blue leads (the Jaren brand), amber follows, then red,
@@ -43,7 +44,7 @@ export const SEATS = Object.freeze(Object.fromEntries(MEMBERS.map((m) => [m.id, 
 
 /**
  * A fresh OS: the default program, a blank floor, every merit at one.
- * @param {{ edition: string, title: string, theme?: 'light' | 'dark', reduce?: boolean, app?: string }} options
+ * @param {{ edition: string, title: string, theme?: 'light' | 'dark' | 'neon', reduce?: boolean, app?: string }} options
  */
 export function initialState(options) {
   const machine = rulesToFsm(DEFAULT_RULES);
@@ -90,6 +91,7 @@ export function initialState(options) {
     exports: { format: 'css', text: '', name: '', mime: '', status: 'idle' },
     gallery: { items: [], status: 'idle', title: '' },
     source: { doc: 'machine' },
+    ...studioState(options.theme),
   };
 }
 
@@ -106,6 +108,7 @@ export function restoreState(fresh, saved) {
   const tempo = isTempo(saved.program?.tempo) ? saved.program.tempo : fresh.program.tempo;
   return {
     ...fresh,
+    ...restoreStudio(/** @type {any} */ (fresh), saved),
     program: isProgram(saved.program?.machine) ? { ...fresh.program, machine: saved.program.machine, tempo } : fresh.program,
     world,
     machine: { ...fresh.machine, measure: measure(world) },
@@ -124,6 +127,7 @@ export function restoreState(fresh, saved) {
  * @param {any} state */
 export function sessionSlice(state) {
   return {
+    ...studioSlice(state),
     program: { machine: state.program.machine, tempo: state.program.tempo },
     world: state.world,
     council: { session: state.council.session, merits: state.council.merits, leader: state.council.leader, log: state.council.log },

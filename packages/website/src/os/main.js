@@ -3,8 +3,9 @@
  * Radiant OS, jaren edition — the browser bootstrap. Everything that
  * needs a real browser lives here and nowhere else: the database worker,
  * the service worker, the stylesheet the JTLT theme renders into, file
- * downloads, saved preferences, WebMCP. The OS itself (`createOs`) runs
- * the same with or without any of them.
+ * downloads, saved preferences, sound (opened on the first gesture, as
+ * browsers require), reading aloud, the library the build ships, WebMCP.
+ * The OS itself (`createOs`) runs the same with or without any of them.
  */
 
 import './os.css';
@@ -16,6 +17,9 @@ import storeDoc from './documents/store.contract.json' with { type: 'json' };
 import { createMemoryStore } from './kernel/store.js';
 import { createOs } from './app/createOs.js';
 import { sessionSlice } from './app/state.js';
+import { APPS } from './app/view.js';
+import { createAudio } from './engine/audio.js';
+import { GAMES } from './games/registry.js';
 import { prefersReducedMotion } from '../lib/motion.js';
 
 const PREFS_KEY = 'radiant-os-prefs';
@@ -42,16 +46,92 @@ const ABOUT = {
 
 /** Saved preferences, or the system's. */
 function readPrefs() {
-  /** @type {{ theme?: 'light' | 'dark', reduce?: boolean }} */
+  /** @type {{ theme?: 'light' | 'dark' | 'neon', reduce?: boolean }} */
   let saved = {};
   try { saved = JSON.parse(localStorage.getItem(PREFS_KEY) ?? '{}') ?? {}; }
   catch { saved = {}; }
   return {
-    theme: saved.theme === 'dark' || saved.theme === 'light'
+    theme: saved.theme === 'dark' || saved.theme === 'light' || saved.theme === 'neon'
       ? saved.theme
       : (window.matchMedia?.('(prefers-color-scheme: dark)')?.matches ? 'dark' : 'light'),
     reduce: typeof saved.reduce === 'boolean' ? saved.reduce : prefersReducedMotion(window),
   };
+}
+
+/**
+ * The studio's sound. A browser opens an audio context only after a
+ * gesture, so none is made before one: until the first press every
+ * effect is quietly skipped, and `arm` calls back once sound is allowed.
+ */
+function browserAudio() {
+  const Context = window.AudioContext ?? /** @type {any} */ (window).webkitAudioContext;
+  if (typeof Context !== 'function') return null;
+  let allowed = false;
+  const audio = createAudio({ createContext: () => (allowed ? new Context() : null) });
+  /** @param {() => void} onFirst */
+  const arm = (onFirst) => {
+    const unlock = () => {
+      window.removeEventListener('pointerdown', unlock, true);
+      window.removeEventListener('keydown', unlock, true);
+      allowed = true;
+      if (audio.unlock()) onFirst();
+    };
+    window.addEventListener('pointerdown', unlock, true);
+    window.addEventListener('keydown', unlock, true);
+  };
+  return { audio, arm };
+}
+
+/**
+ * Reading aloud through the browser's speech synthesis, a sentence at a
+ * time so the page can light the one being read.
+ * @returns {import('./app/studio-host.js').Speech | null}
+ */
+function browserSpeech() {
+  const synth = window.speechSynthesis;
+  if (!synth || typeof SpeechSynthesisUtterance !== 'function') return null;
+  // each reading has its own token: a cancelled one's late callbacks are ignored
+  let token = 0;
+  return {
+    speak(lines, hooks) {
+      synth.cancel();
+      const mine = ++token;
+      const say = (/** @type {number} */ i) => {
+        if (mine !== token) return;
+        if (i >= lines.length) { hooks.end(); return; }
+        const utterance = new SpeechSynthesisUtterance(lines[i]);
+        utterance.lang = document.documentElement.lang || 'en';
+        utterance.onstart = () => { if (mine === token) hooks.sentence(i); };
+        utterance.onend = () => say(i + 1);
+        utterance.onerror = () => { if (mine === token) { token += 1; hooks.end(); } };
+        synth.speak(utterance);
+      };
+      say(0);
+    },
+    cancel() {
+      token += 1;
+      synth.cancel();
+    },
+  };
+}
+
+/**
+ * Where a link asks the OS to open: `?app=<app>`, or `?game=<game>` for
+ * a game on the arcade's shelf — one address per app and per game.
+ * Nothing it does not know: the OS opens as it would without one.
+ */
+function landing() {
+  const params = new URLSearchParams(location.search);
+  const app = params.get('app');
+  const game = params.get('game');
+  const known = game !== null && Object.hasOwn(GAMES, game) ? game : null;
+  return { app: APPS.some((a) => a.id === app) ? app : (known ? 'arcade' : null), game: known };
+}
+
+/** The library the build ships: every package's documentation and the OS guide. */
+async function loadLibrary() {
+  const response = await fetch(new URL('library.json', document.baseURI));
+  return response.ok ? response.json() : null;
 }
 
 /**
@@ -105,6 +185,8 @@ async function boot() {
   const prefs = readPrefs();
   const store = await openStore();
   const saved = await store.invoke('session.get').then((/** @type {any} */ o) => (o.ok ? o.value?.state ?? null : null));
+  const sound = browserAudio();
+  const land = landing();
   node.textContent = '';
   const os = createOs({
     node,
@@ -121,8 +203,25 @@ async function boot() {
     download,
     savePrefs: (p) => { try { localStorage.setItem(PREFS_KEY, JSON.stringify(p)); } catch { /* private mode: the toggle still works for this visit */ } },
     keys: window,
+    games: GAMES,
+    audio: sound?.audio ?? null,
+    speech: browserSpeech(),
+    loadLibrary,
     // a boundary failure is reported, never thrown into the frame loop
     onError: (error) => { report(error); },
+  });
+  // a landing app opens the way a press on the dock opens it (the library loads, the coach notices)
+  if (land.app) os.app.dispatch('os/app', land.app);
+  if (land.game) os.app.dispatch('arcade/open', land.game);
+  sound?.arm(() => os.app.dispatch('studio/music', 'ensure'));
+  // a hidden tab is quiet, and a game in play waits for you to come back
+  document.addEventListener('visibilitychange', () => {
+    const s = os.app.getState();
+    if (document.hidden) {
+      sound?.audio.pause();
+      if (s.arcade.flow.current === 'playing') os.app.dispatch('arcade/pause');
+    }
+    else if (!s.studio.paused && s.arcade.flow.current !== 'paused') sound?.audio.resume();
   });
   const info = await store.invoke('store.info');
   if (info.ok) os.app.dispatch('os/storage', info.value);

@@ -14,7 +14,7 @@ import { QUEUE_MAX } from '../../packages/website/src/os/kernel/session.js';
 import { MEMBERS } from '../../packages/website/src/os/kernel/council.js';
 import { initialState } from '../../packages/website/src/os/app/state.js';
 
-const HUMAN_ONLY = ['council.veto', 'council.approve', 'council.repeal'];
+const HUMAN_ONLY = ['council.veto', 'council.approve', 'council.repeal', 'crew.start', 'crew.idea', 'crew.end', 'crew.review'];
 
 /** A memory store behind the outcome shape a port client answers with. */
 function memoryPort() {
@@ -60,7 +60,7 @@ function system(options = {}) {
 describe('the OS contract', () => {
   it('compiles, and keeps the human’s operations off every projection', () => {
     assert.equal(osContract.id, 'radiant');
-    assert.equal(osContract.describe().operations.length, 14, 'served, all of them');
+    assert.equal(osContract.describe().operations.length, 35, 'served, all of them');
     const audience = Object.entries(contractDoc.operations).filter(([, op]) => /** @type {any} */ (op).policy?.audience === 'server');
     assert.deepEqual(audience.map(([id]) => id), HUMAN_ONLY);
     for (const [, op] of audience) assert.deepEqual(/** @type {any} */ (op).input.properties.by, { const: 'human' }, 'and the schema says it twice');
@@ -84,7 +84,7 @@ describe('the system calls', () => {
     assert.equal(outcome.value.edition, 'test');
     assert.equal(outcome.value.members.length, MEMBERS.length);
     assert.ok(!outcome.value.operations.some((/** @type {string} */ id) => HUMAN_ONLY.includes(id)));
-    assert.equal(outcome.value.operations.length, 11);
+    assert.equal(outcome.value.operations.length, 28);
     assert.ok(outcome.value.operations.includes('council.propose'));
   });
 
@@ -257,7 +257,11 @@ describe('the agent tools', () => {
     const tools = system().sys.tools();
     assert.deepEqual(tools.map((t) => t.name), [
       'radiant_os_describe', 'radiant_machine_read', 'radiant_machine_control', 'radiant_council_read', 'radiant_council_propose',
-      'radiant_council_say', 'radiant_council_convene', 'radiant_art_export', 'radiant_gallery_save', 'radiant_gallery_list', 'radiant_gallery_open',
+      'radiant_council_say', 'radiant_council_convene', 'radiant_art_export', 'radiant_gallery_save', 'radiant_gallery_list',
+      'radiant_gallery_open', 'radiant_board_read', 'radiant_board_add', 'radiant_board_edit', 'radiant_board_link', 'radiant_board_remove',
+      'radiant_mail_read', 'radiant_mail_send', 'radiant_library_search', 'radiant_library_read', 'radiant_crew_read', 'radiant_crew_build',
+      'radiant_crew_say', 'radiant_crew_done', 'radiant_arcade_read', 'radiant_arcade_tool', 'radiant_studio_camera',
+      'radiant_studio_light',
     ]);
     for (const tool of tools) {
       assert.equal(typeof tool.description, 'string');
@@ -280,5 +284,11 @@ describe('the agent tools', () => {
     await tool('radiant_council_propose', { seat: 'critic' }).execute({ by: 'human', change: { kind: 'tape', op: 'clear' } }, undefined);
     assert.equal(s.sent.at(-1)?.[1].by, 'critic');
     assert.equal((await tool('radiant_council_read').execute({}, undefined)).ok, true, 'tools without input take an empty object');
+    const add = tool('radiant_board_add');
+    assert.equal(add.inputSchema.properties.by, undefined, 'the seat is no part of what a tool asks for');
+    assert.ok(!add.inputSchema.required.includes('by'));
+    assert.equal((await add.execute({ kind: 'note', text: 'a model’s note' }, undefined)).ok, true);
+    const pinned = s.sent.filter(([action]) => action === 'board/set').at(-1)?.[1];
+    assert.equal(pinned?.cards.at(-1)?.by, 'oracle', 'a call that sent no seat speaks for the agent’s');
   });
 });

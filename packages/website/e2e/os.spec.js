@@ -77,7 +77,7 @@ test('once installed, boots with the server gone', async ({ page, site }) => {
   await expect.poll(() => page.evaluate(() => !!navigator.serviceWorker.controller)).toBe(true);
   // the worker precached everything the build emitted at install
   await expect.poll(() => page.evaluate(async () => {
-    const cache = await caches.open('radiant-os-v1');
+    const cache = await caches.open('radiant-os-v2');
     return (await cache.keys()).filter((request) => request.url.includes('/assets/')).length;
   })).toBeGreaterThan(3);
   await site.down();

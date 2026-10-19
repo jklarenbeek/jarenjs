@@ -165,7 +165,9 @@ describe('the OS document', () => {
     assert.match(html, /class="os" data-theme="light" data-app="council" data-phase="idle" data-motion="full"/);
     assert.match(html, /<span class="os-edition">test edition<\/span>/);
     assert.match(html, /class="os-stage-svg"/, 'the stage draws through the view renderer where no canvas exists');
-    assert.equal(findNode(t.container, (n) => n.getAttribute?.('class') === 'os-dock')?.childNodes.length, APPS.length);
+    const dock = findNode(t.container, (n) => n.getAttribute?.('class') === 'os-dock');
+    assert.equal(dock?.childNodes.filter((/** @type {any} */ n) => n.tagName === 'button').length, APPS.length);
+    assert.equal(dock?.childNodes.filter((/** @type {any} */ n) => n.getAttribute?.('class') === 'os-dock-gap').length, 2, 'studio, machine, system');
     assert.match(html, /Convene now/);
     assert.match(html, /aria-label="Members by merit"/);
     await t.settle();
@@ -219,7 +221,11 @@ describe('the OS document', () => {
     assert.deepEqual(t.prefs.at(-1), { theme: 'dark', reduce: true });
     assert.match(t.html(), /data-theme="dark"[^>]*data-motion="reduce"/);
     dispatch('os/theme');
+    assert.equal(t.state().os.theme, 'neon', 'the third art direction');
+    assert.equal(t.state().settings.art, 'neon');
+    dispatch('os/theme');
     assert.equal(t.state().os.theme, 'light');
+    assert.equal(t.state().settings.art, 'pop');
 
     dispatch('os/notice', { tone: 'warn', text: 'Careful' });
     assert.match(t.html(), /os-notice tone-warn/);
@@ -476,7 +482,7 @@ describe('the OS document', () => {
     await t.settle();
     const saves = t.store.calls.filter(([op]) => op === 'session.put');
     assert.equal(saves.length, 1);
-    assert.deepEqual(Object.keys(saves[0][1].state), ['program', 'world', 'council']);
+    assert.deepEqual(Object.keys(saves[0][1].state), ['settings', 'mail', 'board', 'crew', 'arcade', 'coach', 'profile', 'program', 'world', 'council']);
     t.os.destroy();
     assert.equal(t.store.calls.filter(([op]) => op === 'session.put').length, 2, 'shutting down saves once more');
 

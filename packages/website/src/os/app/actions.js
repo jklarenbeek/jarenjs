@@ -67,8 +67,15 @@ export const ACTIONS = {
       { op: 'replace', path: '/os/notice', value: { tone: 'warn', text: { $concat: ['The machine stopped: ', '$payload'] } } },
     ],
   },
-  'machine/run': { patch: [{ op: 'replace', path: '/machine/running', value: { $boolean: '$payload' } }] },
-  'machine/toggle': { patch: [{ op: 'replace', path: '/machine/running', value: { $not: '$.machine.running' } }] },
+  // the desk's music comes back with the machine, after a stop
+  'machine/run': {
+    patch: [{ op: 'replace', path: '/machine/running', value: { $boolean: '$payload' } }],
+    effects: [{ $if: [{ $boolean: '$payload' }, { run: 'music', with: 'ensure' }] }],
+  },
+  'machine/toggle': {
+    patch: [{ op: 'replace', path: '/machine/running', value: { $not: '$.machine.running' } }],
+    effects: [{ $if: [{ $not: '$.machine.running' }, { run: 'music', with: 'ensure' }] }],
+  },
   'machine/burst': {
     patch: [{ op: 'replace', path: '/machine/burst', value: { $if: [{ $eq: ['$.machine.burst', 1] }, 8, 1] } }],
   },
@@ -78,6 +85,7 @@ export const ACTIONS = {
     patch: [
       { op: 'replace', path: '/machine/draft', value: '$payload' },
       { op: 'replace', path: '/machine/forecast', value: null },
+      { op: 'add', path: '/coach/marks/draft', value: { $add: [{ $default: ['$.coach.marks.draft', 0] }, 1] } },
     ],
     effects: [{ run: 'forecast', with: '$payload' }],
   },
@@ -94,8 +102,9 @@ export const ACTIONS = {
         { op: 'replace', path: '/machine/draft', value: null },
         { op: 'replace', path: '/machine/forecast', value: null },
         { op: 'replace', path: '/os/app', value: 'council' },
+        { op: 'add', path: '/coach/marks/propose', value: { $add: [{ $default: ['$.coach.marks.propose', 0] }, 1] } },
       ],
-      effects: [invoke('council.propose', { by: 'human', change: '$.machine.draft' })],
+      effects: [invoke('council.propose', { by: 'human', change: '$.machine.draft' }), { run: 'sound', with: 'pop' }],
     }],
   },
 
@@ -112,7 +121,7 @@ export const ACTIONS = {
   'council/draft': { patch: [{ op: 'replace', path: '/council/draft', value: '$event.value' }] },
   'council/say': {
     $if: [{ $gt: [{ '$string-length': { '$normalize-space': '$.council.draft' } }, 0] }, {
-      patch: [{ op: 'replace', path: '/council/draft', value: '' }],
+      patch: [{ op: 'replace', path: '/council/draft', value: '' }, { op: 'add', path: '/coach/marks/say', value: { $add: [{ $default: ['$.coach.marks.say', 0] }, 1] } }],
       effects: [invoke('council.say', { by: 'human', text: { '$normalize-space': '$.council.draft' } })],
     }],
   },
@@ -129,10 +138,23 @@ export const ACTIONS = {
       { op: 'replace', path: '/council/window', value: '$payload.window' },
       { $if: [{ $exists: '$payload.next' }, { op: 'replace', path: '/council/next', value: '$payload.next' }] },
     ],
+    // a session's verdict is news: the winner's case goes into the session's thread
+    effects: [{ $if: [{ $eq: ['$payload.phase', 'veto'] }, { run: 'post', with: {
+      thread: { $concat: ['council-', '$payload.session'] }, subject: { $concat: ['Council, session ', '$payload.session'] },
+      folder: 'council', from: '$payload.winner.by', to: ['human'],
+      text: { $concat: ['The council passed “', '$payload.winner.title', '”. ', '$payload.winner.why', ' — veto it, or let it pass.'] },
+    } }] }, { $if: [{ $eq: ['$payload.phase', 'veto'] }, { run: 'sound', with: 'chime' }] }],
   },
   'council/queue': { patch: [{ op: 'replace', path: '/council/queue', value: '$payload' }] },
   'council/enqueue': { patch: [{ op: 'add', path: '/council/queue/-', value: '$payload' }] },
-  'council/said': { patch: [{ op: 'replace', path: '/council/chat', value: prepend('$payload', '$.council.chat', 12) }] },
+  // every word to the council is also filed in its session's mail thread
+  'council/said': {
+    patch: [{ op: 'replace', path: '/council/chat', value: prepend('$payload', '$.council.chat', 12) }],
+    effects: [{ run: 'post', with: {
+      thread: { $concat: ['council-', '$.council.session'] }, subject: { $concat: ['Council, after session ', '$.council.session'] },
+      folder: 'council', from: '$payload.by', to: ['painter', 'dancer', 'critic', 'architect', 'oracle'], text: '$payload.text',
+    } }],
+  },
   'council/enacted': {
     $let: { seq: { $add: ['$.os.seq', 1] } },
     $return: {
@@ -143,7 +165,7 @@ export const ACTIONS = {
         { op: 'replace', path: '/os/seq', value: '$seq' },
         { op: 'replace', path: '/events', value: event('enact', '$payload.amendment.by', '$payload.amendment.change') },
       ],
-      effects: [{ run: 'record', with: '$payload.amendment' }],
+      effects: [{ run: 'record', with: '$payload.amendment' }, { run: 'sound', with: 'pass' }],
     },
   },
   'council/vetoed': {
@@ -154,7 +176,7 @@ export const ACTIONS = {
         { op: 'replace', path: '/os/seq', value: '$seq' },
         { op: 'replace', path: '/events', value: event('veto', '$payload.amendment.by', '$payload.amendment.change') },
       ],
-      effects: [{ run: 'record', with: '$payload.amendment' }],
+      effects: [{ run: 'record', with: '$payload.amendment' }, { run: 'sound', with: 'veto' }],
     },
   },
   'council/rested': {
@@ -223,17 +245,26 @@ export const ACTIONS = {
   // ── the chrome ─────────────────────────────────────────────────────
   // opening an app that shows something rendered asks for it once
   'os/app': {
-    patch: [{ op: 'replace', path: '/os/app', value: '$payload' }],
+    patch: [
+      { op: 'replace', path: '/os/app', value: '$payload' },
+      { op: 'add', path: { $concat: ['/coach/marks/open_', '$payload'] }, value: { $add: [{ $default: [{ $get: ['$.coach.marks', { $concat: ['open_', '$payload'] }] }, 0] }, 1] } },
+    ],
     effects: [
       { $if: [{ $and: [{ $eq: ['$payload', 'exports'] }, { $eq: ['$.exports.status', 'idle'] }] },
         { run: 'redispatch', with: { action: 'exports/format', payload: '$.exports.format' } }] },
       { $if: [{ $eq: ['$payload', 'gallery'] }, { run: 'redispatch', with: { action: 'gallery/refresh' } }] },
+      { $if: [{ $and: [{ $eq: ['$payload', 'library'] }, { $eq: ['$.library.status', 'idle'] }] }, { run: 'library-load' }] },
+      { run: 'sound', with: 'open' },
     ],
   },
+  // the theme button walks the three art directions: paper, the subway, neon
   'os/theme': {
-    $let: { next: { $if: [{ $eq: ['$.os.theme', 'dark'] }, 'light', 'dark'] } },
+    $let: {
+      next: { $if: [{ $eq: ['$.os.theme', 'light'] }, 'dark', { $if: [{ $eq: ['$.os.theme', 'dark'] }, 'neon', 'light'] }] },
+      art: { $if: [{ $eq: ['$.os.theme', 'light'] }, 'chalk', { $if: [{ $eq: ['$.os.theme', 'dark'] }, 'neon', 'pop'] }] },
+    },
     $return: {
-      patch: [{ op: 'replace', path: '/os/theme', value: '$next' }],
+      patch: [{ op: 'replace', path: '/os/theme', value: '$next' }, { op: 'replace', path: '/settings/art', value: '$art' }],
       effects: [{ run: 'prefs', with: { theme: '$next', reduce: '$.os.reduce' } }],
     },
   },

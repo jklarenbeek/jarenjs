@@ -20,6 +20,8 @@ import { stageWidget } from '../stage/widget.js';
 import { sculptureWidget } from '../stage/sculpture.js';
 import { initialState, restoreState, sessionSlice } from './state.js';
 import { ACTIONS } from './actions.js';
+import { STUDIO_ACTIONS } from './studio-actions.js';
+import { createStudioHost } from './studio-host.js';
 import { VIEW } from './view.js';
 import { viewModel } from './viewmodel.js';
 
@@ -54,7 +56,7 @@ export function describeFailure(outcome) {
  * @typedef {{
  *   node?: Element, document?: Document,
  *   edition: string, title: string, about?: any,
- *   theme?: 'light' | 'dark', reduce?: boolean, app?: string,
+ *   theme?: 'light' | 'dark' | 'neon', reduce?: boolean, app?: string,
  *   store?: { invoke: (op: string, input?: any) => Promise<any> } | null,
  *   saved?: any,
  *   oracle?: (context: any, signal: AbortSignal) => Promise<any>,
@@ -65,6 +67,13 @@ export function describeFailure(outcome) {
  *   timers?: Timers, now?: () => number,
  *   schedule?: (flush: () => void) => void,
  *   onError?: (error: any) => void,
+ *   games?: Record<string, import('../games/game.js').GameModule>,
+ *   audio?: ReturnType<typeof import('../engine/audio.js').createAudio> | null,
+ *   speech?: import('./studio-host.js').Speech | null,
+ *   loadLibrary?: (() => Promise<any>) | null,
+ *   askDocs?: ((question: string, hits: any[]) => Promise<{ text: string, citations: any[] }>) | null,
+ *   crewTurn?: ((project: any) => Promise<void>) | null,
+ *   onBudget?: (tier: string) => void,
  * }} OsOptions
  */
 
@@ -91,13 +100,35 @@ export function createOs(options) {
     clearTimer: (id) => timers.clearTimeout(id),
     now,
   });
-  const system = createSystem({
+  // the studio is bound to the contract the system serves, and the system
+  // to the studio's library and arcade: each reaches the other late
+  /** @type {any} */
+  let system = null;
+  const studio = createStudioHost({
+    getState,
+    dispatch,
+    timers,
+    now,
+    council,
+    invoke: (op, input) => system.client.invoke(op, input),
+    games: options.games ?? {},
+    audio: options.audio ?? null,
+    speech: options.speech ?? null,
+    loadLibrary: options.loadLibrary ?? null,
+    askDocs: options.askDocs ?? null,
+    crewTurn: options.crewTurn ?? null,
+    ...(options.onBudget ? { onBudget: options.onBudget } : {}),
+    report,
+  });
+  system = createSystem({
     edition: options.edition,
     title: options.title,
     getState,
     dispatch,
     council,
     store: options.store ?? null,
+    now,
+    ...studio.system,
   });
 
   // what the tape unit remembers between ticks: the tapes the dancer's
@@ -168,6 +199,7 @@ export function createOs(options) {
     redispatch(props, send) {
       send(props.action, props.payload ?? null);
     },
+    ...studio.effects,
   };
 
   const subs = {
@@ -182,7 +214,7 @@ export function createOs(options) {
       const id = timers.setInterval(() => send('os/clock', now()), 500);
       return () => timers.clearInterval(id);
     },
-    /** The human's keys: V vetoes, A lets it pass, Space runs or pauses.
+    /** The human's keys: V vetoes, A lets it pass, Space runs or pauses the machine, Esc or P pauses everything.
      * @param {unknown} _props @param {(a: string) => void} send */
     keys(_props, send) {
       const target = options.keys;
@@ -192,6 +224,10 @@ export function createOs(options) {
         const tag = /** @type {any} */ (e.target)?.tagName;
         if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || /** @type {any} */ (e.target)?.isContentEditable) return;
         const key = e.key.toLowerCase();
+        // Esc and P pause anywhere, M mutes anywhere; while a game is in front its keys are the game's
+        if (key === 'escape' || key === 'p') { e.preventDefault(); send('os/pause'); return; }
+        if (key === 'm') { send('settings/mute'); return; }
+        if (getState().arcade.game !== null) return;
         if (key === 'v') send('council/veto');
         else if (key === 'a') send('council/approve');
         else if (key === ' ' && tag !== 'BUTTON' && tag !== 'A') { e.preventDefault(); send('machine/toggle'); }
@@ -206,6 +242,7 @@ export function createOs(options) {
       const id = timers.setInterval(save, AUTOSAVE_MS);
       return () => { timers.clearInterval(id); save(); };
     },
+    ...studio.subs,
     /** Re-render the theme the chrome wears when the leader or the light
      * changes. Deferred a turn: the first start happens while the app is
      * still booting, before its state can be read. */
@@ -222,6 +259,8 @@ export function createOs(options) {
   const state = restoreState(fresh, options.saved);
   state.os.about = options.about ?? { lead: '', sections: [], links: [] };
   state.os.now = null;
+  // the arcade's shelf: what the games say about themselves
+  state.arcade.shelf = Object.values(options.games ?? {}).map((g) => ({ id: g.id, title: g.title, blurb: g.blurb, duel: /** @type {any} */ (g).duel === true }));
 
   const doc = {
     $app: '0.1',
@@ -229,6 +268,7 @@ export function createOs(options) {
     view: VIEW,
     actions: {
       ...ACTIONS,
+      ...STUDIO_ACTIONS,
       'os/clock': { patch: [{ op: 'replace', path: '/os/now', value: '$payload' }] },
     },
     subs: [
@@ -237,6 +277,7 @@ export function createOs(options) {
       { run: 'keys' },
       { run: 'autosave' },
       { run: 'theme', withQuery: { leader: '$.council.leader', theme: '$.os.theme' } },
+      ...studio.entries,
     ],
   };
 
@@ -245,16 +286,19 @@ export function createOs(options) {
     ...(options.document ? { document: options.document } : {}),
     effects,
     subs,
-    widgets: { stage: stageWidget, sculpture: sculptureWidget },
+    widgets: { stage: stageWidget, sculpture: sculptureWidget, ...studio.widgets },
     viewModel,
     onError: report,
     ...(options.schedule ? { schedule: options.schedule } : {}),
   });
+  // the saved sound mix, before the first note
+  studio.effects.mix();
 
   return {
     app,
     system,
     council,
+    studio,
     /** Stop the OS: timers, the council, the app. */
     destroy() {
       council.dispose();

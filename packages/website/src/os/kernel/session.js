@@ -73,6 +73,9 @@ export function createCouncilDriver(host) {
 
   /** @type {{ runId: string, input: any, snapshot: any, started: number, timer: any, winner: any } | null} */
   let open = null;
+  /** When the verdict clock was held, or null while it runs. */
+  /** @type {number | null} */
+  let heldAt = null;
   /** Enactments waiting to be judged: the counterfactual's measure and the tick it is due. */
   /** @type {Array<{ amendment: any, due: number, baseline: any, ballots: any[] }>} */
   const pending = [];
@@ -215,7 +218,8 @@ export function createCouncilDriver(host) {
       open.snapshot = result.snapshot;
       open.winner = data.winner;
       clearTimer(open.timer);
-      open.timer = setTimer(() => { void resume(null); }, Math.max(0, deadline - clock()));
+      // a verdict that opens while the clock is held starts counting on release
+      open.timer = heldAt === null ? setTimer(() => { void resume(null); }, Math.max(0, deadline - clock())) : null;
       host.dispatch('council/phase', {
         phase: 'veto', session: data.session, proposals: data.proposals,
         scores: data.scores.map((/** @type {{ id: string, score: number }} */ s) => ({ id: s.id, score: round3(s.score) })),
@@ -383,6 +387,31 @@ export function createCouncilDriver(host) {
       const state = host.getState();
       const outcome = simulate({ machine: state.program.machine, tempo: state.program.tempo }, state.world, change);
       return { title: describeChange(change), before: roundMeasure(outcome.before), after: roundMeasure(outcome.after) };
+    },
+
+    /**
+     * Hold the verdict clock (the pause menu) or let it run again. The
+     * time left is kept: on release the deadline moves by as long as the
+     * clock was held, and the countdown the human sees moves with it.
+     * @param {boolean} on
+     */
+    hold(on) {
+      if (on) {
+        if (!open || open.timer === null || heldAt !== null) return;
+        clearTimer(open.timer);
+        open.timer = null;
+        heldAt = clock();
+        return;
+      }
+      if (heldAt === null) return;
+      const shift = clock() - heldAt;
+      heldAt = null;
+      if (!open || !open.snapshot) return;
+      open.started += shift;
+      const timer = open.snapshot.control.timers?.[0];
+      const deadline = open.started + (timer?.at ?? VERDICT_MS);
+      open.timer = setTimer(() => { void resume(null); }, Math.max(0, deadline - clock()));
+      host.dispatch('council/deadline', deadline);
     },
 
     /** Stop every timer (the OS is shutting down). */

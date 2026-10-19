@@ -3,18 +3,148 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <title>Radiant OS — a Turing machine that dances</title>
-    <meta name="description" content="Radiant OS: a browser operating system that is a Turing machine, drawn as dancing figures and governed by a council of its own parts. Built on Jaren documents — FSM, DAG, workflow, contract, JSLT, JTLT — offline-first." />
+    <title>Radiant OS — a turn-based studio where a Turing machine dances</title>
+    <meta name="description" content="Build small apps turn by turn with a crew of dancing figures, play three games, and read, hear and ask the Jaren docs. A browser OS, offline and WebMCP-ready." />
+    <link rel="canonical" href="https://jklarenbeek.github.io/jarenjs/os/" />
     <meta name="theme-color" content="#2563eb" media="(prefers-color-scheme: light)" />
     <meta name="theme-color" content="#0c0f17" media="(prefers-color-scheme: dark)" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Jaren" />
+    <meta property="og:title" content="Radiant OS — a turn-based studio where a Turing machine dances" />
+    <meta property="og:description" content="You bring the ideas, a crew of dancing figures builds, you review and ship. Three games, a library you can talk to, a camera and light you direct — all in the browser, offline." />
+    <meta property="og:url" content="https://jklarenbeek.github.io/jarenjs/os/" />
+    <meta property="og:image" content="https://jklarenbeek.github.io/jarenjs/os/og-card.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Cut-out dancers on a painted floor of tape, drawn in a bold black line" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Radiant OS — a turn-based studio where a Turing machine dances" />
+    <meta name="twitter:description" content="You bring the ideas, a crew of dancing figures builds, you review and ship. Three games and a library you can talk to, offline." />
+    <meta name="twitter:image" content="https://jklarenbeek.github.io/jarenjs/os/og-card.png" />
     <link rel="manifest" href="%BASE_URL%manifest.webmanifest" />
     <link rel="icon" type="image/svg+xml" href="%BASE_URL%radiant.svg" />
     <link rel="apple-touch-icon" href="%BASE_URL%icon-192.png" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "WebApplication",
+            "@id": "https://jklarenbeek.github.io/jarenjs/os/#app",
+            "name": "Radiant OS",
+            "alternateName": "Radiant OS, jaren edition",
+            "url": "https://jklarenbeek.github.io/jarenjs/os/",
+            "description": "A browser studio where you and a crew of dancing figures build small apps together, turn by turn: a two-dimensional Turing machine governed by a council under your veto, with three games, a documentation library you can read, hear and ask, and a camera and light you direct.",
+            "applicationCategory": "DeveloperApplication",
+            "applicationSubCategory": "Educational game",
+            "operatingSystem": "Any (web browser)",
+            "browserRequirements": "Requires JavaScript; works offline once visited.",
+            "inLanguage": "en",
+            "isAccessibleForFree": true,
+            "offers": { "@type": "Offer", "price": "0", "priceCurrency": "EUR" },
+            "license": "https://opensource.org/licenses/MIT",
+            "image": "https://jklarenbeek.github.io/jarenjs/os/og-card.png",
+            "screenshot": "https://jklarenbeek.github.io/jarenjs/os/og-card.png",
+            "author": { "@type": "Person", "name": "joham", "url": "https://github.com/jklarenbeek" },
+            "isPartOf": { "@type": "WebSite", "name": "Jaren", "url": "https://jklarenbeek.github.io/jarenjs/" },
+            "featureList": [
+              "A turn-based crew game: employers add ideas, the crew builds blocks, humans review and ship",
+              "Hot-seat play for up to four people at one keyboard",
+              "A board of linked notes and to-dos",
+              "Mail that keeps every conversation between people and language models",
+              "A library of the Jaren documentation to read, listen to and ask",
+              "A directed camera and time-of-day lighting",
+              "Three art directions: Pop Shop, Subway Chalk and Neon Night",
+              "WebMCP tools for language models, without the human-only veto",
+              "Works offline"
+            ],
+            "hasPart": [
+              {
+                "@type": "VideoGame",
+                "name": "Monkey Grove",
+                "url": "https://jklarenbeek.github.io/jarenjs/os/?game=grove",
+                "description": "A garden of number puzzles on a ladder of skills that adapts to the player.",
+                "genre": ["Educational", "Puzzle"],
+                "gamePlatform": "Web browser",
+                "playMode": ["SinglePlayer", "MultiPlayer"]
+              },
+              {
+                "@type": "VideoGame",
+                "name": "Tape Dancers",
+                "url": "https://jklarenbeek.github.io/jarenjs/os/?game=dancers",
+                "description": "A Turing-machine puzzle: write the rules a dancer follows on a tape and paint the picture each level asks for.",
+                "genre": ["Educational", "Puzzle", "Programming"],
+                "gamePlatform": "Web browser",
+                "playMode": "SinglePlayer"
+              },
+              {
+                "@type": "VideoGame",
+                "name": "Bench Arena",
+                "url": "https://jklarenbeek.github.io/jarenjs/os/?game=arena",
+                "description": "Benchmarking as a race: Jaren engines measured live, tool-call budgets for language models, and your own reflex.",
+                "genre": ["Racing", "Simulation"],
+                "gamePlatform": "Web browser",
+                "playMode": "SinglePlayer"
+              }
+            ]
+          },
+          {
+            "@type": "SoftwareSourceCode",
+            "name": "Radiant OS source",
+            "codeRepository": "https://github.com/jklarenbeek/jarenjs",
+            "programmingLanguage": "JavaScript",
+            "runtimePlatform": "Web browser",
+            "targetProduct": { "@id": "https://jklarenbeek.github.io/jarenjs/os/#app" }
+          }
+        ]
+      }
+    </script>
+    <style>
+      /* the page before the OS boots: what a reader without scripts, and every crawler, sees */
+      .os-preboot { box-sizing: border-box; max-width: 46rem; margin: 2rem auto; padding: 1.5rem 1.5rem 1.25rem; font: 1rem/1.55 ui-rounded, "SF Pro Rounded", "Nunito", system-ui, sans-serif; color: #11131c; background: #fffdf6; border: 3px solid #11131c; border-radius: 14px; box-shadow: 6px 6px 0 #11131c; }
+      html { background: #fff7e6; }
+      .os-preboot h1 { margin: 0 0 .25rem; font-size: 2rem; line-height: 1.1; }
+      .os-preboot h2 { margin: 1.25rem 0 .25rem; font-size: 1.1rem; }
+      .os-preboot ul { margin: 0; padding-left: 1.2rem; }
+      .os-preboot a { color: #2563eb; font-weight: 700; }
+      .os-preboot .os-preboot-lead { font-size: 1.1rem; }
+      .os-preboot .os-preboot-dots { display: flex; gap: .4rem; margin: .5rem 0 0; }
+      .os-preboot .os-preboot-dots span { width: .9rem; height: .9rem; border: 3px solid #11131c; border-radius: 50%; }
+      @media (prefers-color-scheme: dark) {
+        html { background: #0c0f17; }
+        .os-preboot { color: #f4efe1; background: #141826; border-color: #f4efe1; box-shadow: 6px 6px 0 #f4efe1; }
+        .os-preboot a { color: #7dd3fc; }
+        .os-preboot .os-preboot-dots span { border-color: #f4efe1; }
+      }
+    </style>
   </head>
   <body>
-    <div id="os"><noscript>Radiant OS needs JavaScript to dance. <a href="../">Back to the Jaren site</a>.</noscript></div>
+    <div id="os">
+      <article class="os-preboot">
+        <h1>Radiant OS</h1>
+        <div class="os-preboot-dots" aria-hidden="true"><span style="background:#2563eb"></span><span style="background:#fbbf24"></span><span style="background:#ef4444"></span><span style="background:#16a34a"></span></div>
+        <p class="os-preboot-lead">A studio in your browser where you and a crew of dancing figures build small apps together, turn by turn, like a board game. You bring the ideas and you decide what ships. The crew does the building.</p>
+        <p>The floor is the tape of a two-dimensional Turing machine. Its heads — the Painter, the Dancer, the Critic and the Architect — paint it by one program, a council of them amends that program, and the veto is always yours. Everything it runs is a <a href="../">Jaren</a> document.</p>
+        <h2>The studio</h2>
+        <ul>
+          <li><a href="?app=crew">Crew</a> — start a project, add ideas, watch the crew build blocks, review and ship an app you can use. Up to four people take turns at one keyboard.</li>
+          <li><a href="?app=board">Board</a> — notes and to-dos on a wall, linked into an order of work.</li>
+          <li><a href="?app=mail">Mail</a> — every conversation between people, the crew, the council and the docs.</li>
+          <li><a href="?app=library">Library</a> — the documentation to read, to hear read aloud and to ask questions.</li>
+          <li><a href="?app=settings">Settings</a> — three art directions, sound and music, the camera, the light of the hour, motion and the language model's tool budget.</li>
+        </ul>
+        <h2>The arcade</h2>
+        <ul>
+          <li><a href="?game=grove">Monkey Grove</a> — a garden of number puzzles on a ladder of skills that grows with you.</li>
+          <li><a href="?game=dancers">Tape Dancers</a> — write the rules a dancer follows on a Turing tape.</li>
+          <li><a href="?game=arena">Bench Arena</a> — benchmarks as a race, and the tool budget your language model can take.</li>
+        </ul>
+        <p>Works offline once visited. Language models reach it over WebMCP. <a href="https://github.com/jklarenbeek/jarenjs">Source on GitHub</a>.</p>
+        <noscript><p><strong>Radiant OS needs JavaScript to dance.</strong> <a href="../">Back to the Jaren site</a>.</p></noscript>
+      </article>
+    </div>
     <script type="module" src="../src/os/main.js"></script>
   </body>
 </html>

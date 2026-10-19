@@ -14,7 +14,7 @@ import vm from 'node:vm';
 
 const SW_SOURCE = readFileSync(new URL('../../packages/website/os/public/sw.js', import.meta.url), 'utf8');
 const SCOPE = 'https://host/jarenjs/os/';
-const BUILT = ['assets/index-abc.js', 'assets/index-abc.css', 'assets/db-worker-def.js', 'assets/sqlite3-123.wasm'];
+const BUILT = ['assets/index-abc.js', 'assets/index-abc.css', 'assets/db-worker-def.js', 'assets/sqlite3-123.wasm', 'library.json'];
 
 const keyUrl = (/** @type {any} */ k) => (typeof k === 'string' ? k : k.url);
 const response = (/** @type {any} */ body, /** @type {boolean} */ ok) => ({
@@ -149,6 +149,22 @@ describe('the Radiant OS service worker', () => {
     assert.equal((await dispatchFetch(sw.listeners, `${SCOPE}assets/index-new.js`))?.body, `network:${SCOPE}assets/index-new.js`);
   });
 
+  it('reads the library fresh while online and from the cache offline', async () => {
+    const { net, fetchImpl } = network();
+    const sw = bootSw(fetchImpl);
+    await lifecycle(sw.listeners, 'install');
+    const library = `${SCOPE}library.json`;
+    assert.equal((await dispatchFetch(sw.listeners, library))?.body, `network:${library}`, 'an online visit reads the newest docs');
+    assert.equal(sw.store.get(library).body, `network:${library}`, 'and keeps them');
+    net.online = false;
+    assert.equal((await dispatchFetch(sw.listeners, library))?.body, `network:${library}`);
+
+    const failing = bootSw((request) => Promise.resolve(response('gone', !keyUrl(request).endsWith('library.json'))));
+    await lifecycle(failing.listeners, 'install');
+    await dispatchFetch(failing.listeners, library);
+    assert.ok(!failing.puts.includes(library), 'a failed read never replaces the cached docs');
+  });
+
   it('answers only its own scope, and only reads', async () => {
     const { fetchImpl } = network();
     const sw = bootSw(fetchImpl);
@@ -158,8 +174,8 @@ describe('the Radiant OS service worker', () => {
   });
 
   it('retires only its own old caches', async () => {
-    const sw = bootSw(() => Promise.reject(new Error('offline')), ['radiant-os-v0', 'radiant-os-v1', 'jaren-website-v29', 'other']);
+    const sw = bootSw(() => Promise.reject(new Error('offline')), ['radiant-os-v0', 'radiant-os-v1', 'radiant-os-v2', 'jaren-website-v29', 'other']);
     await lifecycle(sw.listeners, 'activate');
-    assert.deepEqual(sw.deleted, ['radiant-os-v0']);
+    assert.deepEqual(sw.deleted, ['radiant-os-v0', 'radiant-os-v1']);
   });
 });

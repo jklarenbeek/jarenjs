@@ -13,60 +13,20 @@
  */
 
 import { SCENE_RULES } from './scene.js';
+import { icon, button, when, pill, head } from './vnodes.js';
+import { STUDIO_APPS, STUDIO_RULES, STUDIO_OVERLAYS, spotClass } from './studio-view.js';
 
 /** The dock: every app, in order. */
 export const APPS = Object.freeze([
-  { id: 'council', label: 'Council' },
-  { id: 'machine', label: 'Machine' },
-  { id: 'source', label: 'Source' },
-  { id: 'exports', label: 'Exports' },
-  { id: 'gallery', label: 'Gallery' },
-  { id: 'about', label: 'About' },
+  ...STUDIO_APPS.filter((a) => a.group === 'studio'),
+  { id: 'council', label: 'Council', group: 'machine' },
+  { id: 'machine', label: 'Machine', group: 'machine' },
+  { id: 'source', label: 'Source', group: 'machine' },
+  { id: 'exports', label: 'Exports', group: 'machine' },
+  { id: 'gallery', label: 'Gallery', group: 'machine' },
+  ...STUDIO_APPS.filter((a) => a.group === 'system'),
+  { id: 'about', label: 'About', group: 'system' },
 ]);
-
-/** Line icons in the OS's own drawing style: round caps, one weight,
- * drawn with `currentColor` so they follow the theme. */
-const ICONS = /** @type {Record<string, any[]>} */ ({
-  council: [
-    ['circle', { cx: 6, cy: 7, r: 2.2 }], ['circle', { cx: 12, cy: 5, r: 2.2 }], ['circle', { cx: 18, cy: 7, r: 2.2 }],
-    ['path', { d: 'M6 10v6M12 8v8M18 10v6M3 13l3-2 3 2M9 11l3-2 3 2M15 13l3-2 3 2M4 21l2-5 2 5M10 21l2-5 2 5M16 21l2-5 2 5' }],
-  ],
-  machine: [
-    ['path', { d: 'M3 18h18M3 22h18M7 18v4M11 18v4M15 18v4M19 18v4' }],
-    ['circle', { cx: 12, cy: 5, r: 2.4 }], ['path', { d: 'M12 8v6M8 10l4 2 4-2M9 16l3-2 3 2' }],
-  ],
-  source: [['path', { d: 'M8 4L3 12l5 8M16 4l5 8-5 8M13.5 6l-3 12' }]],
-  exports: [['path', { d: 'M12 3v11M7 9l5 5 5-5M4 15v5h16v-5' }]],
-  gallery: [['path', { d: 'M3 4h18v16H3zM3 16l5-5 4 4 3-3 6 6' }], ['circle', { cx: 15.5, cy: 8.5, r: 1.6 }]],
-  about: [['circle', { cx: 12, cy: 12, r: 8.5 }], ['path', { d: 'M12 11v6M12 7.5v.5' }]],
-  hand: [['path', { d: 'M7 13V6.5a1.5 1.5 0 013 0V11M10 11V4.5a1.5 1.5 0 013 0V11M13 11V5.5a1.5 1.5 0 013 0V12M16 12V8.5a1.5 1.5 0 013 0V14c0 4-3 7-7 7s-6-2-7.5-5L3 13.5a1.6 1.6 0 012.7-1.7L7 13.5' }]],
-  run: [['path', { d: 'M7 4l12 8-12 8z' }]],
-  pause: [['path', { d: 'M8 4v16M16 4v16' }]],
-  step: [['path', { d: 'M5 4l9 8-9 8zM18 4v16' }]],
-  fast: [['path', { d: 'M3 5l8 7-8 7zM12 5l8 7-8 7z' }]],
-  theme: [['circle', { cx: 12, cy: 12, r: 4 }], ['path', { d: 'M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1' }]],
-  motion: [['path', { d: 'M4 12c2-4 4-4 6 0s4 4 6 0 3-3 4-2M4 6h2M4 18h2' }]],
-  radiant: [
-    ['circle', { cx: 12, cy: 12, r: 4.2 }],
-    ['path', { d: 'M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1' }],
-  ],
-});
-
-/** @param {string} name */
-const icon = (name) => ['svg', { class: 'os-icon', viewBox: '0 0 24 24', 'aria-hidden': 'true', focusable: 'false' }, ...ICONS[name]];
-
-/** A plain button bound to an action.
- * @param {any} props @param {...any} children */
-const button = (props, ...children) => ['button', { type: 'button', class: 'os-btn', ...props }, ...children];
-
-/** Render `then` only while `cond` holds. @param {any} cond @param {any} then */
-const when = (cond, then) => ({ $if: [cond, then] });
-
-/** One status pill. @param {string} label @param {any} value */
-const pill = (label, value) => ['span', { class: 'os-pill' }, ['span', { class: 'os-pill-label' }, label], ' ', ['span', { class: 'os-pill-value' }, value]];
-
-/** An app window's heading. @param {string} title @param {any} lead */
-const head = (title, lead) => ['header', { class: 'os-app-head' }, ['h2', {}, title], ['p', { class: 'os-app-lead' }, lead]];
 
 const BAR = ['header', { class: 'os-bar' },
   ['a', { class: 'os-brand', href: '#', 'aria-label': 'Radiant OS — home', on: { click: { action: 'os/app', with: 'about', preventDefault: true } } },
@@ -104,7 +64,7 @@ const BAR = ['header', { class: 'os-bar' },
 ];
 
 const VERDICT = when({ $eq: ['$.council.phase', 'veto'] },
-  ['section', { class: 'os-verdict', 'aria-label': 'Your verdict', 'data-member': '$.council.winner.by' },
+  ['section', { class: spotClass('os-verdict', 'verdict'), 'data-coach': 'verdict', 'aria-label': 'Your verdict', 'data-member': '$.council.winner.by' },
     ['p', { class: 'os-verdict-kicker' }, { $concat: ['Session ', '$.council.session', ' passed an amendment by the ', '$.council.winner.by', ' · score ', '$.council.winner.score'] }],
     ['h2', { class: 'os-verdict-title', 'aria-live': 'assertive' }, '$.council.winner.title'],
     ['p', { class: 'os-verdict-why' }, '$.council.winner.why'],
@@ -120,12 +80,17 @@ const NOTICE = when({ $exists: '$.os.notice.text' },
     ['button', { type: 'button', class: 'os-notice-close', 'aria-label': 'Dismiss', on: { click: 'os/dismiss' } }, '✕']]);
 
 const DOCK = ['nav', { class: 'os-dock', 'aria-label': 'Apps' },
-  ...APPS.map((app) => ['button', {
-    type: 'button',
-    class: 'os-dock-btn',
-    'aria-pressed': { $if: [{ $eq: ['$.os.app', app.id] }, 'true', 'false'] },
-    on: { click: { action: 'os/app', with: app.id } },
-  }, icon(app.id), ['span', { class: 'os-dock-label' }, app.label]])];
+  ...APPS.flatMap((app, i) => [
+    ...(i > 0 && APPS[i - 1].group !== app.group ? [['span', { class: 'os-dock-gap', 'aria-hidden': 'true' }]] : []),
+    ['button', {
+      type: 'button',
+      class: spotClass('os-dock-btn', `dock-${app.id}`),
+      'data-coach': `dock-${app.id}`,
+      'data-group': app.group,
+      'aria-pressed': { $if: [{ $eq: ['$.os.app', app.id] }, 'true', 'false'] },
+      on: { click: { action: 'os/app', with: app.id } },
+    }, icon(app.id), ['span', { class: 'os-dock-label' }, app.label],
+    ...(app.id === 'mail' ? [when({ $gt: ['$.ui.studio.mail.unread', 0] }, ['span', { class: 'os-count', 'aria-label': 'unread' }, '$.ui.studio.mail.unread'])] : [])]])];
 
 const WINDOW = ['section', { class: 'os-window', 'aria-label': { $concat: ['$.os.app', ' window'] } },
   ...APPS.map((app) => when({ $eq: ['$.os.app', app.id] }, { $apply: ['$', app.id] }))];
@@ -153,12 +118,19 @@ const SHELL_RULES = [
           label: '$.ui.label',
           tempo: '$.program.tempo',
           onPick: { action: 'stage/pick' },
+          light: '$.settings.light',
+          orbit: '$.settings.camera.orbit',
+          ragdoll: '$.settings.motion.ragdoll',
+          shot: { name: '$.studio.shot', seq: '$.studio.shotSeq' },
+          burst: { fx: '$.studio.burst', seq: '$.studio.burstSeq' },
+          cheer: { who: '$.studio.cheer', seq: '$.studio.cheerSeq' },
         },
       }],
       VERDICT,
       NOTICE,
       WINDOW],
-    DOCK],
+    DOCK,
+    ...STUDIO_OVERLAYS],
   },
 ];
 
@@ -172,7 +144,7 @@ const COUNCIL_RULES = [
       when({ $exists: '$.ui.proposals[*]' },
         ['section', { class: 'os-proposals' }, ['h3', {}, 'On the table'], ['ol', {}, [{ $apply: '$.ui.proposals[*]' }]]]),
       ['div', { class: 'os-row' },
-        button({ class: 'os-btn os-btn-primary', disabled: { $if: [{ $ne: ['$.council.phase', 'idle'] }, true, null] }, on: { click: 'council/convene' } }, 'Convene now'),
+        button({ class: spotClass('os-btn os-btn-primary', 'council-convene'), 'data-coach': 'council-convene', disabled: { $if: [{ $ne: ['$.council.phase', 'idle'] }, true, null] }, on: { click: 'council/convene' } }, 'Convene now'),
         ['span', { class: 'os-hint' }, { $concat: ['Next session at tick ', '$.council.next', '.'] }]],
       ['section', { class: 'os-chat' },
         ['h3', {}, 'Speak to the council'],
@@ -237,7 +209,7 @@ const MACHINE_RULES = [
         ['svg', { class: 'os-spark', viewBox: '0 0 100 30', preserveAspectRatio: 'none', role: 'img', 'aria-label': 'Harmony over the last minute' },
           ['polyline', { points: '$.ui.spark' }]]),
       ['div', { class: 'os-table-scroll' },
-        ['table', { class: 'os-rules' },
+        ['table', { class: spotClass('os-rules', 'machine-rules'), 'data-coach': 'machine-rules' },
           ['caption', {}, 'Rules — click a part of a rule to draft a change'],
           ['thead', {}, ['tr', {}, ['th', { scope: 'col' }, 'state'],
             [{ $for: { s: '$.ui.symbols[*]' }, $return: ['th', { scope: 'col', key: '$s.index' },
@@ -250,7 +222,7 @@ const MACHINE_RULES = [
           ['p', {}, { $if: [{ $ne: ['$.ui.draftTitle', ''] }, '$.ui.draftTitle', 'Forecasting…'] }],
           ['ul', { class: 'os-forecast' }, [{ $apply: '$.ui.forecast[*]' }]],
           ['div', { class: 'os-row' },
-            button({ class: 'os-btn os-btn-primary', on: { click: 'machine/propose' } }, 'Propose to the council'),
+            button({ class: spotClass('os-btn os-btn-primary', 'machine-propose'), 'data-coach': 'machine-propose', on: { click: 'machine/propose' } }, 'Propose to the council'),
             button({ on: { click: 'machine/discard' } }, 'Discard')]])],
   },
   {
@@ -401,5 +373,6 @@ export const VIEW = Object.freeze({
     ...EXPORTS_RULES,
     ...GALLERY_RULES,
     ...ABOUT_RULES,
+    ...STUDIO_RULES,
   ],
 });

@@ -1,7 +1,7 @@
 {
-  "name": "Radiant OS — a Turing machine that dances",
+  "name": "Radiant OS — a turn-based studio where a Turing machine dances",
   "short_name": "Radiant OS",
-  "description": "A browser OS that is a Turing machine: dancing heads paint the tape, a council of its own parts amends the program, and you hold the veto. Built on Jaren documents, offline-first.",
+  "description": "Build small apps turn by turn with a crew of dancing figures, play Monkey Grove, Tape Dancers and Bench Arena, and read, hear and ask the Jaren documentation. A Turing machine governed by a council under your veto, offline-first.",
   "id": "/jarenjs/os/",
   "start_url": "/jarenjs/os/",
   "scope": "/jarenjs/os/",
@@ -9,11 +9,99 @@
   "orientation": "any",
   "background_color": "#fff7e6",
   "theme_color": "#2563eb",
-  "categories": ["entertainment", "education", "developer"],
+  "categories": [
+    "education",
+    "games",
+    "developer",
+    "entertainment"
+  ],
   "icons": [
-    { "src": "/jarenjs/os/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
-    { "src": "/jarenjs/os/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
-    { "src": "/jarenjs/os/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
-    { "src": "/jarenjs/os/radiant.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+    {
+      "src": "/jarenjs/os/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/jarenjs/os/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/jarenjs/os/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/jarenjs/os/radiant.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Crew",
+      "short_name": "Crew",
+      "description": "Start a project with the crew",
+      "url": "/jarenjs/os/?app=crew",
+      "icons": [
+        {
+          "src": "/jarenjs/os/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "Library",
+      "short_name": "Library",
+      "description": "Read, hear and ask the docs",
+      "url": "/jarenjs/os/?app=library",
+      "icons": [
+        {
+          "src": "/jarenjs/os/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "Monkey Grove",
+      "short_name": "Grove",
+      "description": "Number puzzles in the grove",
+      "url": "/jarenjs/os/?game=grove",
+      "icons": [
+        {
+          "src": "/jarenjs/os/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "Tape Dancers",
+      "short_name": "Dancers",
+      "description": "Write a Turing machine",
+      "url": "/jarenjs/os/?game=dancers",
+      "icons": [
+        {
+          "src": "/jarenjs/os/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "/jarenjs/os/og-card.png",
+      "sizes": "1200x630",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "Radiant OS: dancers on a floor of tape"
+    }
   ]
 }

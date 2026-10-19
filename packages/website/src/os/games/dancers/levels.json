@@ -1,0 +1,383 @@
+{
+  "tiers": [
+    { "id": "chalk", "name": "Chalk", "blurb": "One state: the dancer knows only the ink under its feet." },
+    { "id": "spray", "name": "Spray", "blurb": "Two states: one bit of memory between the beats." },
+    { "id": "mural", "name": "Mural", "blurb": "Three states and more: loops, carries and comparisons." },
+    { "id": "radiant", "name": "Radiant", "blurb": "Busy beavers: the most ink from the fewest states." }
+  ],
+  "levels": [
+    {
+      "id": "end",
+      "name": "Find the End",
+      "tier": "chalk",
+      "skill": "move",
+      "difficulty": 380,
+      "symbols": 3,
+      "maxSteps": 40,
+      "prompt": "Dance right along the wall of colour and stop on the first paper cell after it. Leave every cell as it is.",
+      "tests": [
+        { "input": [1, 2, 2, 1], "goal": [1, 2, 2, 1], "end": 4 },
+        { "input": [2, 1], "goal": [2, 1], "end": 2 },
+        { "input": [1, 1, 2, 1, 2, 2], "goal": [1, 1, 2, 1, 2, 2], "end": 6 }
+      ],
+      "par": { "states": 1, "steps": 15 },
+      "solution": {
+        "q0": [
+          { "write": 0, "move": "S", "next": "halt" },
+          { "write": 1, "move": "R", "next": "q0" },
+          { "write": 2, "move": "R", "next": "q0" }
+        ]
+      }
+    },
+    {
+      "id": "coat",
+      "name": "Fresh Coat",
+      "tier": "chalk",
+      "skill": "write",
+      "difficulty": 420,
+      "symbols": 3,
+      "maxSteps": 40,
+      "prompt": "Paint every cell of the wall blue, then halt.",
+      "tests": [
+        { "input": [2, 2, 2], "goal": [1, 1, 1] },
+        { "input": [2, 1, 2, 2, 1], "goal": [1, 1, 1, 1, 1] },
+        { "input": [2], "goal": [1] }
+      ],
+      "par": { "states": 1, "steps": 12 },
+      "solution": {
+        "q0": [
+          { "write": 0, "move": "S", "next": "halt" },
+          { "write": 1, "move": "R", "next": "q0" },
+          { "write": 1, "move": "R", "next": "q0" }
+        ]
+      }
+    },
+    {
+      "id": "flip",
+      "name": "Flip",
+      "tier": "chalk",
+      "skill": "branch",
+      "difficulty": 480,
+      "symbols": 3,
+      "maxSteps": 40,
+      "prompt": "Flip the wall: every blue cell turns yellow and every yellow cell turns blue.",
+      "tests": [
+        { "input": [1, 2, 2, 1], "goal": [2, 1, 1, 2] },
+        { "input": [2], "goal": [1] },
+        { "input": [1, 1, 2, 1, 2], "goal": [2, 2, 1, 2, 1] }
+      ],
+      "par": { "states": 1, "steps": 13 },
+      "solution": {
+        "q0": [
+          { "write": 0, "move": "S", "next": "halt" },
+          { "write": 2, "move": "R", "next": "q0" },
+          { "write": 1, "move": "R", "next": "q0" }
+        ]
+      }
+    },
+    {
+      "id": "bounce",
+      "name": "Bounce",
+      "tier": "spray",
+      "skill": "move",
+      "difficulty": 540,
+      "symbols": 4,
+      "maxSteps": 80,
+      "prompt": "Dance to the end of the wall, stamp red on the paper after it, then dance back and halt on the paper before the wall.",
+      "tests": [
+        { "input": [0, 1, 2, 1, 0], "head": 1, "goal": [0, 1, 2, 1, 3], "end": 0 },
+        { "input": [0, 2, 0], "head": 1, "goal": [0, 2, 3], "end": 0 },
+        { "input": [0, 1, 1, 2, 2, 0], "head": 1, "goal": [0, 1, 1, 2, 2, 3], "end": 0 }
+      ],
+      "par": { "states": 2, "steps": 22 },
+      "solution": {
+        "q0": [
+          { "write": 3, "move": "L", "next": "q1" },
+          { "write": 1, "move": "R", "next": "q0" },
+          { "write": 2, "move": "R", "next": "q0" },
+          { "write": 3, "move": "R", "next": "q0" }
+        ],
+        "q1": [
+          { "write": 0, "move": "S", "next": "halt" },
+          { "write": 1, "move": "L", "next": "q1" },
+          { "write": 2, "move": "L", "next": "q1" },
+          { "write": 3, "move": "L", "next": "q1" }
+        ]
+      }
+    },
+    {
+      "id": "copy",
+      "name": "Copycat",
+      "tier": "spray",
+      "skill": "write",
+      "difficulty": 600,
+      "symbols": 4,
+      "maxSteps": 80,
+      "prompt": "Remember the ink of the first cell, dance past the red wall, and stamp that ink on the paper after it.",
+      "tests": [
+        { "input": [1, 3, 3, 3], "goal": [1, 3, 3, 3, 1] },
+        { "input": [2, 3, 3], "goal": [2, 3, 3, 2] },
+        { "input": [2], "goal": [2, 2] },
+        { "input": [1, 3], "goal": [1, 3, 1] }
+      ],
+      "par": { "states": 2, "steps": 14 },
+      "solution": {
+        "q0": [
+          { "write": 1, "move": "S", "next": "halt" },
+          { "write": 1, "move": "R", "next": "q0" },
+          { "write": 2, "move": "R", "next": "q1" },
+          { "write": 3, "move": "R", "next": "q0" }
+        ],
+        "q1": [
+          { "write": 2, "move": "S", "next": "halt" },
+          { "write": 1, "move": "R", "next": "q1" },
+          { "write": 2, "move": "R", "next": "q1" },
+          { "write": 3, "move": "R", "next": "q1" }
+        ]
+      }
+    },
+    {
+      "id": "parity",
+      "name": "Parity",
+      "tier": "spray",
+      "skill": "branch",
+      "difficulty": 660,
+      "symbols": 4,
+      "maxSteps": 80,
+      "prompt": "Count the blue cells as you dance along the wall. At the end, stamp yellow on the paper if the count is even, red if it is odd.",
+      "tests": [
+        { "input": [1, 2, 1, 1], "goal": [1, 2, 1, 1, 3] },
+        { "input": [2, 2], "goal": [2, 2, 2] },
+        { "input": [1, 1], "goal": [1, 1, 2] },
+        { "input": [1], "goal": [1, 3] },
+        { "input": [2, 1, 2, 2, 1, 1], "goal": [2, 1, 2, 2, 1, 1, 3] }
+      ],
+      "par": { "states": 2, "steps": 20 },
+      "solution": {
+        "q0": [
+          { "write": 2, "move": "S", "next": "halt" },
+          { "write": 1, "move": "R", "next": "q1" },
+          { "write": 2, "move": "R", "next": "q0" },
+          { "write": 3, "move": "R", "next": "q0" }
+        ],
+        "q1": [
+          { "write": 3, "move": "S", "next": "halt" },
+          { "write": 1, "move": "R", "next": "q0" },
+          { "write": 2, "move": "R", "next": "q1" },
+          { "write": 3, "move": "R", "next": "q1" }
+        ]
+      }
+    },
+    {
+      "id": "plus",
+      "name": "Plus One",
+      "tier": "spray",
+      "skill": "carry",
+      "difficulty": 720,
+      "symbols": 3,
+      "maxSteps": 80,
+      "prompt": "The wall is a binary number: blue is 1 and yellow is 0. The dancer starts on its first digit. Add one to it.",
+      "tests": [
+        { "input": [0, 1, 2, 1, 1], "head": 1, "goal": [0, 1, 1, 2, 2] },
+        { "input": [0, 2], "head": 1, "goal": [0, 1] },
+        { "input": [0, 1, 1, 1], "head": 1, "goal": [1, 2, 2, 2] },
+        { "input": [0, 1, 2, 2], "head": 1, "goal": [0, 1, 2, 1] }
+      ],
+      "par": { "states": 2, "steps": 24 },
+      "solution": {
+        "q0": [
+          { "write": 0, "move": "L", "next": "q1" },
+          { "write": 1, "move": "R", "next": "q0" },
+          { "write": 2, "move": "R", "next": "q0" }
+        ],
+        "q1": [
+          { "write": 1, "move": "S", "next": "halt" },
+          { "write": 2, "move": "L", "next": "q1" },
+          { "write": 1, "move": "S", "next": "halt" }
+        ]
+      }
+    },
+    {
+      "id": "sum",
+      "name": "Unary Sum",
+      "tier": "mural",
+      "skill": "loop",
+      "difficulty": 780,
+      "symbols": 3,
+      "maxSteps": 100,
+      "prompt": "Two rows of blue joined by a yellow plus: add them into one unbroken row of blue, then dance back and take a bow on its first cell.",
+      "tests": [
+        { "input": [1, 1, 1, 2, 1, 1], "goal": [1, 1, 1, 1, 1], "end": 0 },
+        { "input": [1, 2, 1], "goal": [1, 1], "end": 0 },
+        { "input": [2, 1, 1], "goal": [1, 1], "end": 0 },
+        { "input": [1, 1, 2], "goal": [1, 1], "end": 0 }
+      ],
+      "par": { "states": 3, "steps": 38 },
+      "solution": {
+        "q0": [
+          { "write": 0, "move": "L", "next": "q1" },
+          { "write": 1, "move": "R", "next": "q0" },
+          { "write": 1, "move": "R", "next": "q0" }
+        ],
+        "q1": [
+          { "write": 0, "move": "S", "next": "halt" },
+          { "write": 0, "move": "L", "next": "q2" },
+          { "write": 2, "move": "S", "next": "halt" }
+        ],
+        "q2": [
+          { "write": 0, "move": "R", "next": "halt" },
+          { "write": 1, "move": "L", "next": "q2" },
+          { "write": 2, "move": "L", "next": "q2" }
+        ]
+      }
+    },
+    {
+      "id": "mirror",
+      "name": "Mirror Mirror",
+      "tier": "mural",
+      "skill": "compare",
+      "difficulty": 840,
+      "symbols": 4,
+      "maxSteps": 120,
+      "prompt": "Does the wall read the same both ways? Halt on a blue cell for yes and on a red cell for no. You may wipe the wall as you check it.",
+      "tests": [
+        { "input": [1, 2, 1], "mark": 1 },
+        { "input": [1, 2, 2, 1], "mark": 1 },
+        { "input": [1, 2], "mark": 3 },
+        { "input": [2, 1, 1], "mark": 3 },
+        { "input": [2], "mark": 1 },
+        { "input": [1, 1, 2, 1], "mark": 3 }
+      ],
+      "par": { "states": 6, "steps": 50 },
+      "solution": {
+        "q0": [
+          { "write": 1, "move": "S", "next": "halt" },
+          { "write": 0, "move": "R", "next": "q1" },
+          { "write": 0, "move": "R", "next": "q2" },
+          { "write": 3, "move": "S", "next": "halt" }
+        ],
+        "q1": [
+          { "write": 0, "move": "L", "next": "q3" },
+          { "write": 1, "move": "R", "next": "q1" },
+          { "write": 2, "move": "R", "next": "q1" },
+          { "write": 3, "move": "R", "next": "q1" }
+        ],
+        "q2": [
+          { "write": 0, "move": "L", "next": "q4" },
+          { "write": 1, "move": "R", "next": "q2" },
+          { "write": 2, "move": "R", "next": "q2" },
+          { "write": 3, "move": "R", "next": "q2" }
+        ],
+        "q3": [
+          { "write": 1, "move": "S", "next": "halt" },
+          { "write": 0, "move": "L", "next": "q5" },
+          { "write": 3, "move": "S", "next": "halt" },
+          { "write": 3, "move": "S", "next": "halt" }
+        ],
+        "q4": [
+          { "write": 1, "move": "S", "next": "halt" },
+          { "write": 3, "move": "S", "next": "halt" },
+          { "write": 0, "move": "L", "next": "q5" },
+          { "write": 3, "move": "S", "next": "halt" }
+        ],
+        "q5": [
+          { "write": 0, "move": "R", "next": "q0" },
+          { "write": 1, "move": "L", "next": "q5" },
+          { "write": 2, "move": "L", "next": "q5" },
+          { "write": 3, "move": "L", "next": "q5" }
+        ]
+      }
+    },
+    {
+      "id": "brackets",
+      "name": "Balance",
+      "tier": "mural",
+      "skill": "compare",
+      "difficulty": 900,
+      "symbols": 4,
+      "maxSteps": 120,
+      "prompt": "Blue opens a bracket and yellow closes one. Are they balanced? Halt on a blue cell for yes and on a red cell for no. Red is yours for crossing pairs off.",
+      "tests": [
+        { "input": [1, 2], "mark": 1 },
+        { "input": [1, 1, 2, 2], "mark": 1 },
+        { "input": [1, 2, 1, 2], "mark": 1 },
+        { "input": [2, 1], "mark": 3 },
+        { "input": [1, 1, 2], "mark": 3 },
+        { "input": [1, 2, 2], "mark": 3 }
+      ],
+      "par": { "states": 3, "steps": 59 },
+      "solution": {
+        "q0": [
+          { "write": 0, "move": "L", "next": "q2" },
+          { "write": 1, "move": "R", "next": "q0" },
+          { "write": 3, "move": "L", "next": "q1" },
+          { "write": 3, "move": "R", "next": "q0" }
+        ],
+        "q1": [
+          { "write": 3, "move": "S", "next": "halt" },
+          { "write": 3, "move": "R", "next": "q0" },
+          { "write": 3, "move": "S", "next": "halt" },
+          { "write": 3, "move": "L", "next": "q1" }
+        ],
+        "q2": [
+          { "write": 1, "move": "S", "next": "halt" },
+          { "write": 3, "move": "S", "next": "halt" },
+          { "write": 3, "move": "S", "next": "halt" },
+          { "write": 3, "move": "L", "next": "q2" }
+        ]
+      }
+    },
+    {
+      "id": "bb2",
+      "name": "Busy Beaver II",
+      "tier": "radiant",
+      "skill": "optimize",
+      "difficulty": 960,
+      "symbols": 2,
+      "maxSteps": 40,
+      "prompt": "Busy beaver: start on blank paper and halt with as many blue cells on the tape as you can. The two-state champion leaves 4.",
+      "tests": [
+        { "input": [0], "ones": 4 }
+      ],
+      "par": { "states": 2, "steps": 6 },
+      "solution": {
+        "q0": [
+          { "write": 1, "move": "R", "next": "q1" },
+          { "write": 1, "move": "L", "next": "q1" }
+        ],
+        "q1": [
+          { "write": 1, "move": "L", "next": "q0" },
+          { "write": 1, "move": "R", "next": "halt" }
+        ]
+      }
+    },
+    {
+      "id": "bb3",
+      "name": "Busy Beaver III",
+      "tier": "radiant",
+      "skill": "optimize",
+      "difficulty": 1020,
+      "symbols": 2,
+      "maxSteps": 60,
+      "prompt": "The three-state champion halts with 6 blue cells on blank paper. Match it, in as few steps as you can.",
+      "tests": [
+        { "input": [0], "ones": 6 }
+      ],
+      "par": { "states": 3, "steps": 11 },
+      "solution": {
+        "q0": [
+          { "write": 1, "move": "R", "next": "q1" },
+          { "write": 1, "move": "L", "next": "q2" }
+        ],
+        "q1": [
+          { "write": 1, "move": "R", "next": "q2" },
+          { "write": 1, "move": "R", "next": "halt" }
+        ],
+        "q2": [
+          { "write": 1, "move": "L", "next": "q0" },
+          { "write": 0, "move": "L", "next": "q1" }
+        ]
+      }
+    }
+  ]
+}

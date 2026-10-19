@@ -397,4 +397,28 @@ figures in the spirit of 1980s subway and street art — and holds every rule ab
 - **The stage is an image, the chrome is the interface.** The stage is
   `role="img"` with a live label (tick, harmony, dancers); everything it shows that can
   be acted on — the verdict, the members, the rules — is also a real control in the
-  window beside it, and V, A and Space mirror the verdict and the run toggle.
+  window beside it, and V, A and Space mirror the verdict and the run toggle. The same
+  holds for every canvas the studio adds: the board's cards are also a list of real
+  buttons (tick, link, remove), and a game's HUD, menus and rule grid are HTML.
+- **Three art directions.** Pop Shop is the light theme above, Subway Chalk the dark
+  one, and Neon Night (`data-theme="neon"`) a third: night `#070b18`, a glowing line
+  `#7dd3fc`, lime `#a3e635` for the primary action and the sentence being read aloud.
+  Each dresses the chrome and the stage (`STAGE_THEMES`) together, is picked in Settings
+  or cycled from the status bar, and is saved with the preferences. None adds a pink or
+  a purple.
+- **Light and the camera are systems, not decoration.** `engine/light.js` turns the hour
+  of the day into a sun, cel bands and shadow polygons, with pools of light at night;
+  `engine/director.js` cuts, moves, follows and orbits the camera through named shots,
+  and the council's phases cue them (a crane when it convenes, in close for the verdict,
+  home after). The camera drifts only after nine seconds without input.
+- **Liveliness never blocks.** Ragdolls (`engine/ragdoll.js`, Verlet) spring back to the
+  pose the program asks for within about a second: a knock is a reaction, never a state
+  anyone has to clear. Under reduced motion there are no ragdolls, bursts, shakes or
+  flashes, and the camera holds still.
+- **Sound is synthesized and asked for.** `engine/audio.js` makes every effect and the
+  music (a step sequencer; the desk's melody is the row of tape under the painter) and
+  opens its context only after the first press, as browsers require. Master, music and
+  effects have their own levels, M mutes anywhere, and captions show what is said.
+- **A game pauses like a game.** Escape or P pauses everything — the machine, the music
+  and the council's verdict clock — and a game in front gets its own pause menu
+  (continue, restart, options, quit); quitting from it lets the studio go again.
