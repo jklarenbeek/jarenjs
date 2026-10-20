@@ -231,6 +231,7 @@ html, body {
 .os-app h2 { margin: 0; font-size: 1.5rem; font-weight: 900; text-transform: uppercase; letter-spacing: -0.01em; }
 .os-app h3 { margin: 6px 0 0; font-size: 1rem; font-weight: 900; text-transform: uppercase; letter-spacing: 0.02em; }
 .os-app p { margin: 0; overflow-wrap: anywhere; }
+.os-app h4 { margin: 0; }
 .os-app-lead { color: var(--os-muted); }
 .os-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .os-hint { color: var(--os-muted); font-size: 0.85rem; }
@@ -1087,6 +1088,7 @@ html, body {
 .os-coach-head .os-meter { flex: 1 1 auto; }
 .os-coach-figure { display: inline-grid; place-items: center; width: 2.2rem; height: 2.2rem; border: 2px solid var(--os-ink); border-radius: 50%; background: #fde68a; color: #11131c; }
 .os-coach-quest { font-weight: 900; text-transform: uppercase; font-size: 0.8rem; }
+.os-coach-card p { margin: 0; }
 .os-coach-text { font-weight: 600; }
 .os-coach-open { box-shadow: var(--os-shadow); }
 .os-toast {

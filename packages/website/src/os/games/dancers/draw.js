@@ -167,7 +167,7 @@ export function draw(state, ctx) {
     if (shadow) floor.push(shadow);
     const top = cell === head ? lerpColor(INKS[ink], theme.glow, 0.5) : undefined;
     groups.push(blockGroup(view, box, INKS[ink], { theme, light, px, top }));
-    groups.push(labelGroup(view, [x, 0.02, 1.05], String(cell + 1), { theme, size: 0.34, alpha: 0.8 }));
+    groups.push(labelGroup(view, [x, 0.02, 0.9], String(cell + 1), { theme, size: 0.3, alpha: 0.8 }));
   }
 
   if (goal) {
@@ -188,7 +188,7 @@ export function draw(state, ctx) {
   }
   if (test.mark !== undefined) notes.push(`this tape answers ${INK_NAMES[test.mark]}`);
   if (test.ones !== undefined) notes.push(`${test.ones} blue or more`);
-  if (notes.length > 0) groups.push(labelGroup(view, [0, 0.02, NOTE_Z], notes.join(' · '), { theme, size: 0.36 }));
+  if (notes.length > 0) groups.push(labelGroup(view, [0, 0.02, NOTE_Z], notes.join(' · '), { theme, size: 0.32 }));
 
   if (wrong !== null) {
     const x = cellX(test, wrong);
@@ -244,7 +244,7 @@ export function draw(state, ctx) {
   }
 
   const tapeNote = level.tests.length > 1 ? `tape ${run.test + 1} of ${level.tests.length} · ` : '';
-  groups.push(labelGroup(view, [0, 0.02, CAPTION_Z], `${tapeNote}step ${run.total + run.steps} · par ${level.par.steps}`, { theme, size: 0.4 }));
+  groups.push(labelGroup(view, [0, 0.02, CAPTION_Z], `${tapeNote}step ${run.total + run.steps} · par ${level.par.steps}`, { theme, size: 0.34 }));
 
   return { items: [...floor, ...flatten(groups)], figures: [{ id: 'dancer', pose }] };
 }
