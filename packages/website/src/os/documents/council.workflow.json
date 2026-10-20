@@ -1,0 +1,80 @@
+{
+  "$workflow": "0.2",
+  "revision": "radiant-council/1",
+  "initial": "convene",
+  "states": {
+    "convene": {
+      "work": {
+        "dag": {
+          "$dag": "0.1",
+          "nodes": {
+            "session": { "kind": "input" },
+            "proposals": { "kind": "task", "run": "propose", "version": "1" },
+            "ballots": { "kind": "task", "run": "deliberate", "version": "1" },
+            "tally": {
+              "kind": "query",
+              "query": {
+                "$let": {
+                  "scored": [{
+                    "$for": { "p": "$.proposals[*]" },
+                    "$let": {
+                      "score": {
+                        "$sum": {
+                          "$for": { "b": "$.ballots.ballots[*]" },
+                          "$where": { "$eq": ["$b.proposal", "$p.id"] },
+                          "$return": { "$mul": ["$b.vote", { "$default": [{ "$get": ["$.session.merits", "$b.voter"] }, 1] }] }
+                        }
+                      }
+                    },
+                    "$return": { "proposal": "$p", "score": "$score" }
+                  }]
+                },
+                "$return": {
+                  "session": "$.session.session",
+                  "proposals": [{ "$for": { "s": "$scored[*]" }, "$return": "$s.proposal" }],
+                  "scores": [{ "$for": { "s": "$scored[*]" }, "$return": { "id": "$s.proposal.id", "score": "$s.score" } }],
+                  "ballots": "$.ballots.ballots",
+                  "outcomes": "$.ballots.outcomes",
+                  "winner": {
+                    "$head": {
+                      "$for": { "s": "$scored[*]" },
+                      "$where": { "$gt": ["$s.score", 0] },
+                      "$orderby": { "$key": "$s.score", "$dir": "desc" },
+                      "$return": { "proposal": "$s.proposal", "score": "$s.score" }
+                    }
+                  }
+                }
+              }
+            },
+            "out": { "kind": "output" }
+          },
+          "edges": [
+            { "from": "session", "to": "proposals" },
+            { "from": "session", "to": "ballots", "port": "session" },
+            { "from": "proposals", "to": "ballots", "port": "proposals" },
+            { "from": "session", "to": "tally", "port": "session" },
+            { "from": "proposals", "to": "tally", "port": "proposals" },
+            { "from": "ballots", "to": "tally", "port": "ballots" },
+            { "from": "tally", "to": "out" }
+          ]
+        }
+      },
+      "then": "decide"
+    },
+    "decide": {
+      "choose": [{ "guard": { "$exists": "$.context.data.winner" }, "to": "verdict" }],
+      "otherwise": "rest"
+    },
+    "verdict": {
+      "on": [
+        { "event": "veto", "to": "vetoed" },
+        { "event": "approve", "to": "enact" }
+      ],
+      "after": { "ms": 9000, "to": "enact" }
+    },
+    "enact": { "work": { "task": "enact", "version": "1" }, "then": "adjourn" },
+    "vetoed": { "work": { "task": "veto", "version": "1" }, "then": "adjourn" },
+    "rest": { "work": { "task": "rest", "version": "1" }, "then": "adjourn" },
+    "adjourn": { "final": true }
+  }
+}

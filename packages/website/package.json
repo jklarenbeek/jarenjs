@@ -8,7 +8,9 @@
   "license": "MIT",
   "scripts": {
     "dev": "npm run site:data && vite",
-    "build": "npm run site:data && vite build",
+    "dev:os": "vite --config vite.os.config.js",
+    "build": "npm run site:data && vite build && vite build --config vite.os.config.js",
+    "build:os": "vite build --config vite.os.config.js",
     "site:data": "node ../../scripts/generate-build-info.js && node ../../scripts/generate-site-data.js && node ../../scripts/generate-studio-offline.js",
     "preview": "vite preview",
     "lint": "eslint src",

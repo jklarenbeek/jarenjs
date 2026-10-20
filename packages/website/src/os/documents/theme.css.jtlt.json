@@ -1,0 +1,18 @@
+{
+  "$jtlt": "0.1",
+  "rules": [
+    {
+      "match": "$",
+      "body": [
+        "/* Radiant OS — the theme the council wears, rendered by JTLT from its state.\n",
+        "   Leader: ", "$.leader.name", " (merit ", "$.leader.merit", "). */\n",
+        ":root {\n",
+        { "$apply": "$.tokens[*]" },
+        "}\n",
+        { "$apply": "$.members[*]" }
+      ]
+    },
+    { "match": "$.tokens[*]", "body": ["  --", "$.name", ": ", "$.value", ";\n"] },
+    { "match": "$.members[*]", "body": [".os [data-member=\"", "$.id", "\"] { --member: ", "$.color", "; }\n"] }
+  ]
+}

@@ -1,0 +1,40 @@
+{
+  "$jtlt": "0.1",
+  "rules": [
+    {
+      "match": "$",
+      "body": [
+        "// ", "$.title", " — the Radiant OS machine as a standalone module.\n",
+        "// Rendered by JTLT from the program document at tick ", "$.tick", ".\n",
+        "// A turmite: each head reads its cell, writes, turns, moves; the tape is a torus.\n\n",
+        "export const WIDTH = ", "$.width", ";\n",
+        "export const HEIGHT = ", "$.height", ";\n",
+        "export const RULES = ", { "$json": "$.rules" }, ";\n",
+        "export const HEADS = ", { "$json": "$.heads" }, ";\n",
+        "export const PALETTE = ", { "$json": "$.palette" }, ";\n\n",
+        "const DX = [0, 1, 0, -1];\nconst DY = [-1, 0, 1, 0];\nconst TURN = { L: 3, R: 1, U: 2, N: 0 };\n\n",
+        "/** Run the machine for `steps` steps over every head, in head order. */\n",
+        "export function run(steps, tape = new Array(WIDTH * HEIGHT).fill(0), heads = HEADS.map((h) => ({ ...h }))) {\n",
+        "  for (let n = 0; n < steps; n++) {\n",
+        "    for (const h of heads) {\n",
+        "      const cell = h.y * WIDTH + h.x;\n",
+        "      const rule = RULES[h.state][tape[cell]];\n",
+        "      tape[cell] = rule.write;\n",
+        "      h.dir = (h.dir + TURN[rule.turn]) % 4;\n",
+        "      h.state = rule.next;\n",
+        "      h.x = (h.x + DX[h.dir] + WIDTH) % WIDTH;\n",
+        "      h.y = (h.y + DY[h.dir] + HEIGHT) % HEIGHT;\n",
+        "    }\n",
+        "  }\n",
+        "  return { tape, heads };\n",
+        "}\n\n",
+        "/** The tape as text, one character per symbol. */\n",
+        "export function toText(tape, glyphs = ' .:+*#') {\n",
+        "  const rows = [];\n",
+        "  for (let y = 0; y < HEIGHT; y++) rows.push(tape.slice(y * WIDTH, (y + 1) * WIDTH).map((s) => glyphs[s]).join(''));\n",
+        "  return rows.join('\\n');\n",
+        "}\n"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,52 @@
+{
+  "$jslt": "0.1",
+  "rules": [
+    {
+      "match": "$",
+      "body": {
+        "width": "$.world.width",
+        "height": "$.world.height",
+        "tape": "$.world.tape",
+        "palette": "$.program.palette",
+        "tick": "$.world.tick",
+        "tempo": "$.program.tempo",
+        "running": "$.machine.running",
+        "theme": "$.os.theme",
+        "focus": "$.os.focus",
+        "heads": [{
+          "$for": { "h": "$.world.heads[*]" },
+          "$let": {
+            "seat": { "$get": ["$.council.seats", "$h.id"] },
+            "merit": { "$default": [{ "$get": ["$.council.merits", "$h.id"] }, 1] }
+          },
+          "$return": {
+            "id": "$h.id", "x": "$h.x", "y": "$h.y", "dir": "$h.dir",
+            "ink": "$seat.ink", "merit": "$merit",
+            "lead": { "$eq": ["$h.id", "$.council.leader"] },
+            "pose": "$seat.pose", "figure": "$seat.figure"
+          }
+        }],
+        "seats": [{
+          "$for": { "id": { "$seq": ["oracle", "human"] } },
+          "$let": {
+            "seat": { "$get": ["$.council.seats", "$id"] },
+            "merit": { "$default": [{ "$get": ["$.council.merits", "$id"] }, 1] }
+          },
+          "$return": {
+            "id": "$id", "ink": "$seat.ink", "merit": "$merit",
+            "lead": { "$eq": ["$id", "$.council.leader"] },
+            "pose": "$seat.pose", "figure": "$seat.figure"
+          }
+        }],
+        "session": {
+          "phase": "$.council.phase",
+          "winner": "$.council.winner",
+          "deadline": "$.council.deadline",
+          "window": "$.council.window",
+          "proposals": "$.council.proposals"
+        },
+        "events": "$.events"
+      }
+    }
+  ]
+}

@@ -25,7 +25,8 @@ export async function serveSite() {
   const server = createServer(async (request, response) => {
     const path = new URL(request.url ?? '/', 'http://localhost').pathname;
     if (!path.startsWith(BASE)) { response.writeHead(404).end(); return; }
-    const name = path.slice(BASE.length) || 'index.html';
+    // a directory answers with its index: the site at /jarenjs/, Radiant OS at /jarenjs/os/
+    const name = `${path.slice(BASE.length)}${path.endsWith('/') ? 'index.html' : ''}`;
     try {
       const body = await readFile(join(DIST, name));
       response.writeHead(200, { 'Content-Type': TYPES[extname(name)] ?? 'application/octet-stream' }).end(body);

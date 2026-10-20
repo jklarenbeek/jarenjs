@@ -222,24 +222,12 @@ export const DEFAULT_SCHEMA_DRAFT = 'http://json-schema.org/draft-07/schema#'
 
 export { detectSchemaDraft };
 
-const isBrowser = typeof window !== 'undefined';
-
-const performance = (() => isBrowser
-  // eslint-disable-next-line no-undef
-  ? window.performance
-  : {
-    now: function performanceNow(start) {
-      // @ts-ignore
-      const ps = process;
-      if (!start) return ps.hrtime();
-      const end = ps.hrtime(start);
-      return Math.round((end[0] * 1000) + (end[1] / 1000000));
-    },
-  })();
-
 class InternalValidationError {
   constructor(obj, key, expected, dataKey, value, rest) {
-    this.timeStamp = performance.now();
+    // the platform clock every supported runtime has — a window, a worker,
+    // Node, Bun; a worker has no `window` and no `process`, so neither may
+    // stand in for it
+    this.timeStamp = globalThis.performance.now();
     this.object = obj;
     this.key = key;
     this.expected = expected;

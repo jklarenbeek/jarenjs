@@ -5,6 +5,12 @@
  * "J" glyph, written as valid RGBA PNGs through node:zlib. Full-bleed
  * squares serve both `any` and `maskable` purposes, and iOS gets a real
  * PNG for its apple-touch-icon. Run from the repository root: node packages/website/scripts/make-icons.js
+ *
+ * The same writer draws Radiant OS's icons (os/public/icon-*.png): the
+ * radiant figure of `os/public/radiant.svg` — an amber dancer, arms up,
+ * outlined in ink, with its motion marks — on the OS's blue, rasterized
+ * from signed distances so the edges are smooth and the bytes are the
+ * same on every run. The drawing sits inside the maskable safe circle.
  */
 
 import { writeFileSync } from 'node:fs';
@@ -90,9 +96,68 @@ function renderIcon(size) {
   return pixels;
 }
 
+const OS_BG = [0x25, 0x63, 0xeb]; // the OS blue, the brand's CTA step
+const OS_INK = [0x11, 0x13, 0x1c];
+const OS_FIGURE = [0xfb, 0xbf, 0x24]; // amber
+
+/** The radiant figure in radiant.svg's 64-unit frame: [x1, y1, x2, y2] segments. */
+const OS_RAYS = [[9, 23, 4, 21], [10, 32, 4, 32], [55, 23, 60, 21], [54, 32, 60, 32], [17, 8, 14, 3], [47, 8, 50, 3]];
+const OS_BODY = [[32, 29, 32, 43], [32, 29, 16, 16], [32, 29, 48, 16], [32, 43, 23, 57], [32, 43, 41, 57]];
+const OS_HEAD = [32, 13];
+
+/** Distance from (px, py) to the segment (x1, y1)–(x2, y2). */
+function segmentDistance(px, py, [x1, y1, x2, y2]) {
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const t = Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / (dx * dx + dy * dy)));
+  const ex = px - (x1 + t * dx);
+  const ey = py - (y1 + t * dy);
+  return Math.sqrt(ex * ex + ey * ey);
+}
+
+/** Signed distance to a set of round-capped strokes of half-width `r`, plus an optional disc. */
+function strokesDistance(px, py, segments, r, disc) {
+  let d = Infinity;
+  for (const s of segments) d = Math.min(d, segmentDistance(px, py, s) - r);
+  if (disc) {
+    const ex = px - OS_HEAD[0];
+    const ey = py - OS_HEAD[1];
+    d = Math.min(d, Math.sqrt(ex * ex + ey * ey) - disc);
+  }
+  return d;
+}
+
+function renderOsIcon(size) {
+  const pixels = Buffer.alloc(size * size * 4);
+  const scale = (size / 64) * 0.86; // pixels per unit, inside the maskable safe zone
+  const offset = (size - 64 * scale) / 2;
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const u = (x + 0.5 - offset) / scale;
+      const v = (y + 0.5 - offset) / scale;
+      const ink = Math.min(strokesDistance(u, v, OS_RAYS, 1.6, 0), strokesDistance(u, v, OS_BODY, 4.2, 6.6));
+      const fill = strokesDistance(u, v, OS_BODY, 2.5, 4.6);
+      const inkCover = Math.max(0, Math.min(1, 0.5 - ink * scale));
+      const fillCover = Math.max(0, Math.min(1, 0.5 - fill * scale));
+      const at = (y * size + x) * 4;
+      for (let c = 0; c < 3; c++) {
+        const under = OS_BG[c] + (OS_INK[c] - OS_BG[c]) * inkCover;
+        pixels[at + c] = Math.round(under + (OS_FIGURE[c] - under) * fillCover);
+      }
+      pixels[at + 3] = 0xff;
+    }
+  }
+  return pixels;
+}
+
 const here = dirname(fileURLToPath(import.meta.url));
 for (const size of [192, 512]) {
   const path = join(here, '..', 'public', `icon-${size}.png`);
   const bytes = writePng(path, size, renderIcon(size));
   process.stdout.write(`icon-${size}.png: ${bytes} bytes\n`);
+}
+for (const size of [192, 512]) {
+  const path = join(here, '..', 'os', 'public', `icon-${size}.png`);
+  const bytes = writePng(path, size, renderOsIcon(size));
+  process.stdout.write(`os/icon-${size}.png: ${bytes} bytes\n`);
 }

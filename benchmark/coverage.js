@@ -445,6 +445,12 @@ function runDeadCodeAudit(opts) {
     // this adapter; its headless intent engine and collection pins stay audited.
     '--exclude', 'components/collection/src/component/drag.js',
     '--exclude', 'packages/website/src/offline-runtime.js',
+    // Radiant OS follows the same boundary: its browser bootstrap (the
+    // database worker, the service worker, WebMCP) and its sqlite-wasm
+    // worker; createOs and every kernel, stage and app module they wire
+    // stay audited through test/website/os-*.test.js
+    '--exclude', 'packages/website/src/os/main.js',
+    '--exclude', 'packages/website/src/os/db-worker.js',
     '--temp-directory', opts.tempDir,
     '--clean',
     process.execPath, '--no-warnings=ExperimentalWarning', '--test', 'test/**/*.test.js',

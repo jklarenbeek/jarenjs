@@ -1,0 +1,990 @@
+{
+  "$contract": "0.1",
+  "id": "radiant",
+  "version": "2",
+  "$defs": {
+    "Seat": { "enum": ["painter", "dancer", "critic", "architect", "oracle", "human"] },
+    "Tastes": {
+      "type": "object",
+      "required": ["balance", "symmetry", "structure", "motion", "harmony"],
+      "properties": {
+        "balance": { "type": "number", "minimum": 0, "maximum": 1 },
+        "symmetry": { "type": "number", "minimum": 0, "maximum": 1 },
+        "structure": { "type": "number", "minimum": 0, "maximum": 1 },
+        "motion": { "type": "number", "minimum": 0, "maximum": 1 },
+        "harmony": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "Change": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "state", "symbol", "member", "value"],
+          "properties": {
+            "kind": { "const": "rule" },
+            "state": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,15}$" },
+            "symbol": { "type": "integer", "minimum": 0, "maximum": 5 },
+            "member": { "enum": ["write", "turn", "next"] },
+            "value": { "type": ["integer", "string"] }
+          },
+          "allOf": [
+            {
+              "if": { "properties": { "member": { "const": "write" } } },
+              "then": {
+                "properties": { "value": { "type": "integer", "minimum": 0, "maximum": 5 } }
+              }
+            },
+            {
+              "if": { "properties": { "member": { "const": "turn" } } },
+              "then": { "properties": { "value": { "enum": ["L", "R", "U", "N"] } } }
+            },
+            {
+              "if": { "properties": { "member": { "const": "next" } } },
+              "then": {
+                "properties": { "value": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,15}$" } }
+              }
+            }
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "op"],
+          "properties": { "kind": { "const": "tape" }, "op": { "enum": ["mirror", "clear"] } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "tempo"],
+          "properties": {
+            "kind": { "const": "tempo" },
+            "tempo": { "type": "integer", "minimum": 2, "maximum": 30 }
+          }
+        }
+      ]
+    },
+    "Proposal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "by", "title", "why", "change"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "by": { "$ref": "#/$defs/Seat" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "why": { "type": "string", "maxLength": 280 },
+        "change": { "$ref": "#/$defs/Change" }
+      }
+    },
+    "Amendment": {
+      "type": "object",
+      "required": ["id", "session", "by", "title", "status", "change"],
+      "properties": {
+        "id": { "type": "string" },
+        "session": { "type": "integer", "minimum": 0 },
+        "by": { "$ref": "#/$defs/Seat" },
+        "title": { "type": "string" },
+        "status": { "enum": ["enacted", "vetoed", "repealed"] },
+        "change": { "$ref": "#/$defs/Change" },
+        "score": { "type": "number" },
+        "reward": { "type": ["number", "null"] }
+      }
+    },
+    "Member": {
+      "type": "object",
+      "required": ["id", "name", "taste", "merit", "motto"],
+      "properties": {
+        "id": { "$ref": "#/$defs/Seat" },
+        "name": { "type": "string" },
+        "taste": { "type": ["string", "null"] },
+        "merit": { "type": "number", "minimum": 0 },
+        "motto": { "type": "string" }
+      }
+    },
+    "Session": {
+      "type": "object",
+      "required": ["phase", "session", "members", "proposals", "winner", "deadline", "log"],
+      "properties": {
+        "phase": { "enum": ["idle", "convening", "veto", "enacting"] },
+        "session": { "type": "integer", "minimum": 0 },
+        "members": { "type": "array", "items": { "$ref": "#/$defs/Member" } },
+        "proposals": { "type": "array", "items": { "$ref": "#/$defs/Proposal" } },
+        "winner": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/Proposal" }] },
+        "deadline": { "type": ["integer", "null"] },
+        "log": { "type": "array", "items": { "$ref": "#/$defs/Amendment" } }
+      }
+    },
+    "Ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id", "label"],
+      "properties": {
+        "kind": { "enum": ["mail", "doc", "idea", "game"] },
+        "id": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "label": { "type": "string", "minLength": 1, "maxLength": 80 }
+      }
+    },
+    "Card": {
+      "type": "object",
+      "required": ["id", "kind", "text", "done", "color", "x", "y"],
+      "properties": {
+        "id": { "type": "string" },
+        "kind": { "enum": ["note", "todo"] },
+        "text": { "type": "string" },
+        "done": { "type": "boolean" },
+        "color": { "type": "integer", "minimum": 0, "maximum": 5 },
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "ref": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/Ref" }] },
+        "by": { "type": "string" },
+        "blocked": { "type": "boolean" }
+      }
+    },
+    "Link": {
+      "type": "object",
+      "required": ["id", "from", "to", "kind"],
+      "properties": {
+        "id": { "type": "string" },
+        "from": { "type": "string" },
+        "to": { "type": "string" },
+        "kind": { "enum": ["relates", "blocks"] }
+      }
+    },
+    "ThreadSummary": {
+      "type": "object",
+      "required": ["id", "subject", "folder", "people", "unread", "count", "last"],
+      "properties": {
+        "id": { "type": "string" },
+        "subject": { "type": "string" },
+        "folder": { "type": "string" },
+        "people": { "type": "array", "items": { "type": "string" } },
+        "updated": { "type": "number" },
+        "unread": { "type": "integer" },
+        "count": { "type": "integer" },
+        "last": { "type": "string" }
+      }
+    },
+    "Message": {
+      "type": "object",
+      "required": ["id", "from", "to", "text", "at"],
+      "properties": {
+        "id": { "type": "string" },
+        "from": { "type": "string" },
+        "to": { "type": "array", "items": { "type": "string" } },
+        "text": { "type": "string" },
+        "at": { "type": "number" },
+        "tool": { "type": "object" }
+      }
+    },
+    "Block": {
+      "description": "One building block of an app the crew builds. One block is one small tool call.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "text"],
+          "properties": {
+            "kind": { "const": "title" },
+            "text": { "type": "string", "minLength": 1, "maxLength": 60 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "text"],
+          "properties": {
+            "kind": { "const": "note" },
+            "text": { "type": "string", "minLength": 1, "maxLength": 400 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "label"],
+          "properties": {
+            "kind": { "const": "counter" },
+            "label": { "type": "string", "minLength": 1, "maxLength": 40 },
+            "step": { "type": "integer", "minimum": 1, "maximum": 100 },
+            "start": { "type": "integer", "minimum": -1000, "maximum": 1000 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "label", "items"],
+          "properties": {
+            "kind": { "const": "checklist" },
+            "label": { "type": "string", "minLength": 1, "maxLength": 40 },
+            "items": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 12,
+              "items": { "type": "string", "minLength": 1, "maxLength": 60 }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "label"],
+          "properties": {
+            "kind": { "const": "input" },
+            "label": { "type": "string", "minLength": 1, "maxLength": 40 },
+            "placeholder": { "type": "string", "minLength": 0, "maxLength": 40 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "label"],
+          "properties": {
+            "kind": { "const": "toggle" },
+            "label": { "type": "string", "minLength": 1, "maxLength": 40 },
+            "on": { "type": "boolean" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "question", "options", "answer"],
+          "properties": {
+            "kind": { "const": "quiz" },
+            "question": { "type": "string", "minLength": 1, "maxLength": 120 },
+            "options": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 4,
+              "items": { "type": "string", "minLength": 1, "maxLength": 40 }
+            },
+            "answer": { "type": "integer", "minimum": 0, "maximum": 3 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "label", "colors"],
+          "properties": {
+            "kind": { "const": "palette" },
+            "label": { "type": "string", "minLength": 1, "maxLength": 40 },
+            "colors": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 6,
+              "items": { "type": "integer", "minimum": 0, "maximum": 5 }
+            }
+          }
+        }
+      ]
+    },
+    "Shot": { "enum": ["home", "wide", "crane", "close", "hero", "map", "verdict"] }
+  },
+  "operations": {
+    "os.describe": {
+      "kind": "read",
+      "doc": "What this Radiant OS is: its edition, its council and the operations it answers. Start here.",
+      "output": {
+        "type": "object",
+        "required": ["edition", "title", "members", "operations"],
+        "properties": {
+          "edition": { "type": "string" },
+          "title": { "type": "string" },
+          "members": { "type": "array", "items": { "$ref": "#/$defs/Member" } },
+          "operations": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "machine.read": {
+      "kind": "read",
+      "doc": "The Turing machine: its program (a jaren-fsm document whose transition q*6+s is the rule for state q reading symbol s), its tape summary and the council's tastes measured on it.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "tape": {
+            "type": "boolean",
+            "description": "Include the whole tape (row-major symbols)."
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "required": ["program", "tempo", "running", "tick", "width", "height", "heads", "measure"],
+        "properties": {
+          "program": { "type": "object" },
+          "tempo": { "type": "integer" },
+          "running": { "type": "boolean" },
+          "tick": { "type": "integer", "minimum": 0 },
+          "width": { "type": "integer" },
+          "height": { "type": "integer" },
+          "heads": { "type": "array" },
+          "tape": { "type": "array", "items": { "type": "integer", "minimum": 0, "maximum": 5 } },
+          "measure": { "$ref": "#/$defs/Tastes" }
+        }
+      }
+    },
+    "machine.control": {
+      "kind": "command",
+      "doc": "Run, pause or single-step the machine on this screen. The program itself only changes by an amendment the council passes.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["action"],
+        "properties": {
+          "action": { "enum": ["run", "pause", "step"] },
+          "steps": { "type": "integer", "minimum": 1, "maximum": 500 }
+        }
+      },
+      "output": {
+        "type": "object",
+        "required": ["running", "tick"],
+        "properties": { "running": { "type": "boolean" }, "tick": { "type": "integer" } }
+      }
+    },
+    "council.read": {
+      "kind": "read",
+      "doc": "The council: members and their merit, the session in progress, the proposal awaiting the human's verdict and the constitution of enacted, vetoed and repealed amendments.",
+      "output": { "$ref": "#/$defs/Session" }
+    },
+    "council.propose": {
+      "kind": "command",
+      "doc": "Queue one amendment for the next session. A rule change edits one transition of the program; a tape change folds or washes the floor; a tempo change sets the steps per second. Every member then judges it by simulation; merit weighs the votes; the human may veto the winner.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["by", "change"],
+        "properties": {
+          "by": { "$ref": "#/$defs/Seat" },
+          "title": { "type": "string", "minLength": 1, "maxLength": 80 },
+          "why": { "type": "string", "maxLength": 280 },
+          "change": { "$ref": "#/$defs/Change" }
+        }
+      },
+      "output": {
+        "type": "object",
+        "required": ["id", "queued"],
+        "properties": { "id": { "type": "string" }, "queued": { "type": "integer", "minimum": 1 } }
+      },
+      "errors": { "unknown-state": { "status": 422 }, "queue-full": { "status": 429 } }
+    },
+    "council.say": {
+      "kind": "command",
+      "doc": "Say something to the council. The words are kept beside the session; members that read language (the oracle) may answer with a proposal.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["by", "text"],
+        "properties": {
+          "by": { "$ref": "#/$defs/Seat" },
+          "text": { "type": "string", "minLength": 1, "maxLength": 280 }
+        }
+      },
+      "output": {
+        "type": "object",
+        "required": ["id"],
+        "properties": { "id": { "type": "string" } }
+      }
+    },
+    "council.convene": {
+      "kind": "command",
+      "doc": "Convene a session now instead of waiting for the machine's clock.",
+      "input": { "type": "object", "additionalProperties": false, "properties": {} },
+      "output": {
+        "type": "object",
+        "required": ["session", "phase"],
+        "properties": { "session": { "type": "integer" }, "phase": { "type": "string" } }
+      },
+      "errors": { "in-session": { "status": 409 } }
+    },
+    "council.veto": {
+      "kind": "command",
+      "policy": { "audience": "server" },
+      "doc": "The human's veto of the amendment awaiting a verdict. It is the human's alone: no tool projection of this contract carries it.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["by", "proposal"],
+        "properties": { "by": { "const": "human" }, "proposal": { "type": "string" } }
+      },
+      "output": {
+        "type": "object",
+        "required": ["session", "vetoed"],
+        "properties": { "session": { "type": "integer" }, "vetoed": { "type": "string" } }
+      },
+      "errors": { "not-awaiting": { "status": 409 } }
+    },
+    "council.approve": {
+      "kind": "command",
+      "policy": { "audience": "server" },
+      "doc": "The human waves the awaiting amendment through before its countdown ends.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["by", "proposal"],
+        "properties": { "by": { "const": "human" }, "proposal": { "type": "string" } }
+      },
+      "output": {
+        "type": "object",
+        "required": ["session", "enacted"],
+        "properties": { "session": { "type": "integer" }, "enacted": { "type": "string" } }
+      },
+      "errors": { "not-awaiting": { "status": 409 } }
+    },
+    "council.repeal": {
+      "kind": "command",
+      "policy": { "audience": "server" },
+      "doc": "The human's veto after the fact: undo an enacted rule or tempo amendment, restoring the program member it changed.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["by", "amendment"],
+        "properties": { "by": { "const": "human" }, "amendment": { "type": "string" } }
+      },
+      "output": {
+        "type": "object",
+        "required": ["repealed"],
+        "properties": { "repealed": { "type": "string" } }
+      },
+      "errors": { "not-found": { "status": 404 }, "not-repealable": { "status": 409 } }
+    },
+    "art.export": {
+      "kind": "read",
+      "doc": "The artwork as text, rendered by JTLT templates: the live theme as CSS, the canvas as a standalone HTML page, the program as a JavaScript module, or the still frame as SVG.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["format"],
+        "properties": { "format": { "enum": ["css", "html", "js", "svg"] } }
+      },
+      "output": {
+        "type": "object",
+        "required": ["name", "mime", "text"],
+        "properties": {
+          "name": { "type": "string" },
+          "mime": { "type": "string" },
+          "text": { "type": "string" }
+        }
+      }
+    },
+    "gallery.save": {
+      "kind": "command",
+      "doc": "Keep the current artwork — tape, program and the council that made it — in the OS's own database.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["title"],
+        "properties": { "title": { "type": "string", "minLength": 1, "maxLength": 60 } }
+      },
+      "output": {
+        "type": "object",
+        "required": ["id", "at"],
+        "properties": { "id": { "type": "string" }, "at": { "type": "string" } }
+      },
+      "errors": { "storage": { "status": 503 } }
+    },
+    "gallery.list": {
+      "kind": "read",
+      "doc": "The kept artworks, newest first.",
+      "output": {
+        "type": "object",
+        "required": ["items", "storage"],
+        "properties": {
+          "storage": { "type": "string" },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["id", "title", "at", "harmony", "tick"],
+              "properties": {
+                "id": { "type": "string" },
+                "title": { "type": "string" },
+                "at": { "type": "string" },
+                "harmony": { "type": "number" },
+                "tick": { "type": "integer" }
+              }
+            }
+          }
+        }
+      },
+      "errors": { "storage": { "status": 503 } }
+    },
+    "gallery.open": {
+      "kind": "command",
+      "doc": "Put a kept artwork back on the floor: its tape, heads and program.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id"],
+        "properties": { "id": { "type": "string" } }
+      },
+      "output": {
+        "type": "object",
+        "required": ["opened"],
+        "properties": { "opened": { "type": "string" } }
+      },
+      "errors": {
+        "not-found": { "status": 404 },
+        "unreadable": { "status": 422 },
+        "storage": { "status": 503 }
+      }
+    },
+    "board.read": {
+      "kind": "read",
+      "doc": "Everything pinned to the board: notes and todos (with whether a todo waits on an unfinished blocker) and the lines between them.",
+      "output": {
+        "type": "object",
+        "required": ["cards", "links"],
+        "properties": {
+          "cards": { "type": "array", "items": { "$ref": "#/$defs/Card" } },
+          "links": { "type": "array", "items": { "$ref": "#/$defs/Link" } }
+        }
+      }
+    },
+    "board.add": {
+      "kind": "command",
+      "doc": "Pin a note or a todo to the board, optionally pointing at a mail thread, a document section, a crew idea or a game.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["by", "kind", "text"],
+        "properties": {
+          "by": { "$ref": "#/$defs/Seat" },
+          "kind": { "enum": ["note", "todo"] },
+          "text": { "type": "string", "minLength": 1, "maxLength": 280 },
+          "color": { "type": "integer", "minimum": 0, "maximum": 5 },
+          "x": { "type": "number", "minimum": 0, "maximum": 1600 },
+          "y": { "type": "number", "minimum": 0, "maximum": 1000 },
+          "ref": { "$ref": "#/$defs/Ref" }
+        }
+      },
+      "output": {
+        "type": "object",
+        "required": ["id"],
+        "properties": { "id": { "type": "string" } }
+      },
+      "errors": { "full": { "status": 409 } }
+    },
+    "board.edit": {
+      "kind": "command",
+      "doc": "Change a card's words, tick a todo, recolour or move a card. A card moved onto another is pushed clear.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["by", "id"],
+        "properties": {
+          "by": { "$ref": "#/$defs/Seat" },
+          "id": { "type": "string", "minLength": 1, "maxLength": 40 },
+          "text": { "type": "string", "minLength": 1, "maxLength": 280 },
+          "done": { "type": "boolean" },
+          "color": { "type": "integer", "minimum": 0, "maximum": 5 },
+          "x": { "type": "number", "minimum": 0, "maximum": 1600 },
+          "y": { "type": "number", "minimum": 0, "maximum": 1000 }
+        }
+      },
+      "output": {
+        "type": "object",
+        "required": ["id"],
+        "properties": { "id": { "type": "string" } }
+      },
+      "errors": { "not-found": { "status": 404 } }
+    },
+    "board.link": {
+      "kind": "command",
+      "doc": "Connect two cards. A 'blocks' link means the first must be done before the second; a link that would close a cycle of blockers is refused.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["by", "from", "to"],
+        "properties": {
+          "by": { "$ref": "#/$defs/Seat" },
+          "from": { "type": "string", "minLength": 1, "maxLength": 40 },
+          "to": { "type": "string", "minLength": 1, "maxLength": 40 },
+          "kind": { "enum": ["relates", "blocks"] }
+        }
+      },
+      "output": {
+        "type": "object",
+        "required": ["id"],
+        "properties": { "id": { "type": "string" } }
+      },
+      "errors": {
+        "not-found": { "status": 404 },
+        "self": { "status": 422 },
+        "duplicate": { "status": 409 },
+        "cycle": { "status": 422 },
+        "full": { "status": 409 }
+      }
+    },
+    "board.remove": {
+      "kind": "command",
+      "doc": "Take a card (with its lines) or a single line off the board.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["by", "id"],
+        "properties": {
+          "by": { "$ref": "#/$defs/Seat" },
+          "id": { "type": "string", "minLength": 1, "maxLength": 40 }
+        }
+      },
+      "output": {
+        "type": "object",
+        "required": ["removed"],
+        "properties": { "removed": { "type": "string" } }
+      },
+      "errors": { "not-found": { "status": 404 } }
+    },
+    "mail.read": {
+      "kind": "read",
+      "doc": "The post office: thread summaries (of one folder, or all), or one thread with its messages when `thread` is given. Every conversation between people and models is filed here.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [],
+        "properties": {
+          "folder": { "enum": ["all", "inbox", "council", "crew", "library", "coach", "arcade"] },
+          "thread": { "type": "string", "minLength": 1, "maxLength": 40 }
+        }
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "threads": { "type": "array", "items": { "$ref": "#/$defs/ThreadSummary" } },
+          "thread": { "$ref": "#/$defs/ThreadSummary" },
+          "messages": { "type": "array", "items": { "$ref": "#/$defs/Message" } }
+        }
+      },
+      "errors": { "not-found": { "status": 404 } }
+    },
+    "mail.send": {
+      "kind": "command",
+      "doc": "Write a message: into a thread, or a new one with a subject. Writing to the oracle asks it to answer.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["by", "text"],
+        "properties": {
+          "by": { "$ref": "#/$defs/Seat" },
+          "thread": { "type": "string", "minLength": 1, "maxLength": 40 },
+          "subject": { "type": "string", "minLength": 1, "maxLength": 80 },
+          "to": { "type": "array", "maxItems": 6, "items": { "$ref": "#/$defs/Seat" } },
+          "text": { "type": "string", "minLength": 1, "maxLength": 2000 }
+        }
+      },
+      "output": {
+        "type": "object",
+        "required": ["thread", "id"],
+        "properties": { "thread": { "type": "string" }, "id": { "type": "string" } }
+      },
+      "errors": { "not-found": { "status": 404 } }
+    },
+    "library.search": {
+      "kind": "read",
+      "doc": "Search the documentation: the sections that best answer a question, each with the sentence that matched.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["query"],
+        "properties": {
+          "query": { "type": "string", "minLength": 1, "maxLength": 160 },
+          "limit": { "type": "integer", "minimum": 1, "maximum": 8 }
+        }
+      },
+      "output": {
+        "type": "object",
+        "required": ["hits"],
+        "properties": {
+          "hits": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["doc", "section", "title", "heading", "excerpt"],
+              "properties": {
+                "doc": { "type": "string" },
+                "section": { "type": "integer" },
+                "title": { "type": "string" },
+                "heading": { "type": "string" },
+                "excerpt": { "type": "string" },
+                "score": { "type": "number" }
+              }
+            }
+          }
+        }
+      },
+      "errors": { "unavailable": { "status": 503 } }
+    },
+    "library.read": {
+      "kind": "read",
+      "doc": "Read a document a few sections at a time — a page small enough for any model to take in one call; `next` says where the following page starts.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["doc"],
+        "properties": {
+          "doc": { "type": "string", "minLength": 1, "maxLength": 40 },
+          "from": { "type": "integer", "minimum": 0 },
+          "count": { "type": "integer", "minimum": 1, "maximum": 4 }
+        }
+      },
+      "output": {
+        "type": "object",
+        "required": ["doc", "title", "sections", "next"],
+        "properties": {
+          "doc": { "type": "string" },
+          "title": { "type": "string" },
+          "sections": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["index", "heading", "text"],
+              "properties": {
+                "index": { "type": "integer" },
+                "heading": { "type": "string" },
+                "text": { "type": "string" },
+                "code": { "type": "boolean" }
+              }
+            }
+          },
+          "next": { "type": ["integer", "null"] }
+        }
+      },
+      "errors": { "not-found": { "status": 404 }, "unavailable": { "status": 503 } }
+    },
+    "crew.read": {
+      "kind": "read",
+      "doc": "The crew's project: the brief, whose turn it is, the ideas and what was built for them, and the catalogue of building blocks. The crew builds; the people decide.",
+      "output": {
+        "type": "object",
+        "required": ["project", "catalog"],
+        "properties": {
+          "project": { "type": ["object", "null"] },
+          "catalog": { "type": "array", "items": { "type": "object" } }
+        }
+      }
+    },
+    "crew.start": {
+      "kind": "command",
+      "doc": "Start a project with the people at the keyboard as its employers.",
+      "policy": { "audience": "server" },
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["by", "title", "players"],
+        "properties": {
+          "by": { "const": "human" },
+          "title": { "type": "string", "minLength": 1, "maxLength": 60 },
+          "brief": { "type": "string", "minLength": 0, "maxLength": 280 },
+          "players": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 4,
+            "items": { "type": "string", "minLength": 1, "maxLength": 24 }
+          },
+          "goal": { "type": "integer", "minimum": 2, "maximum": 12 }
+        }
+      },
+      "output": {
+        "type": "object",
+        "required": ["id"],
+        "properties": { "id": { "type": "string" } }
+      }
+    },
+    "crew.idea": {
+      "kind": "command",
+      "doc": "The employer whose turn it is adds an idea, in plain words.",
+      "policy": { "audience": "server" },
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["by", "text"],
+        "properties": {
+          "by": { "const": "human" },
+          "text": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "kind": { "enum": ["feature", "polish", "fix", "fun"] }
+        }
+      },
+      "output": {
+        "type": "object",
+        "required": ["id"],
+        "properties": { "id": { "type": "string" } }
+      },
+      "errors": {
+        "no-project": { "status": 409 },
+        "not-your-turn": { "status": 409 },
+        "turn-full": { "status": 409 },
+        "empty": { "status": 422 }
+      }
+    },
+    "crew.end": {
+      "kind": "command",
+      "doc": "The employer whose turn it is passes; after the last employer the crew takes its turn.",
+      "policy": { "audience": "server" },
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["by"],
+        "properties": { "by": { "const": "human" } }
+      },
+      "output": {
+        "type": "object",
+        "required": ["phase"],
+        "properties": { "phase": { "type": "string" } }
+      },
+      "errors": { "no-project": { "status": 409 }, "not-your-turn": { "status": 409 } }
+    },
+    "crew.build": {
+      "kind": "command",
+      "doc": "A crew member builds ONE block for one waiting idea during the crew's turn. Build blocks one call at a time.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["by", "idea", "block"],
+        "properties": {
+          "by": { "$ref": "#/$defs/Seat" },
+          "idea": { "type": "string", "minLength": 1, "maxLength": 40 },
+          "block": { "$ref": "#/$defs/Block" }
+        }
+      },
+      "output": {
+        "type": "object",
+        "required": ["task"],
+        "properties": { "task": { "type": "string" } }
+      },
+      "errors": {
+        "no-project": { "status": 409 },
+        "not-crew-turn": { "status": 409 },
+        "not-found": { "status": 404 },
+        "invalid-block": { "status": 422 },
+        "round-full": { "status": 409 }
+      }
+    },
+    "crew.say": {
+      "kind": "command",
+      "doc": "A crew member says something about an idea; it is filed in the idea's mail thread.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["by", "text"],
+        "properties": {
+          "by": { "$ref": "#/$defs/Seat" },
+          "idea": { "type": "string", "minLength": 1, "maxLength": 40 },
+          "text": { "type": "string", "minLength": 1, "maxLength": 400 }
+        }
+      },
+      "output": {
+        "type": "object",
+        "required": ["id"],
+        "properties": { "id": { "type": "string" } }
+      },
+      "errors": { "no-project": { "status": 409 } }
+    },
+    "crew.done": {
+      "kind": "command",
+      "doc": "The crew is done building for this round; the employers' review begins.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["by"],
+        "properties": { "by": { "$ref": "#/$defs/Seat" } }
+      },
+      "output": {
+        "type": "object",
+        "required": ["phase"],
+        "properties": { "phase": { "type": "string" } }
+      },
+      "errors": { "no-project": { "status": 409 }, "not-crew-turn": { "status": 409 } }
+    },
+    "crew.review": {
+      "kind": "command",
+      "doc": "An employer's verdict on a built block: approve it into the app, or veto it. Absolute, and never a tool.",
+      "policy": { "audience": "server" },
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["by", "task", "verdict"],
+        "properties": {
+          "by": { "const": "human" },
+          "task": { "type": "string", "minLength": 1, "maxLength": 40 },
+          "verdict": { "enum": ["approve", "veto"] }
+        }
+      },
+      "output": {
+        "type": "object",
+        "required": ["phase"],
+        "properties": { "phase": { "type": "string" }, "stars": { "type": "integer" } }
+      },
+      "errors": {
+        "no-project": { "status": 409 },
+        "not-in-review": { "status": 409 },
+        "not-found": { "status": 404 }
+      }
+    },
+    "arcade.read": {
+      "kind": "read",
+      "doc": "What the arcade is playing: the game, its phase and what its screen shows, plus the moves a model may make in it.",
+      "output": {
+        "type": "object",
+        "required": ["game", "phase"],
+        "properties": {
+          "game": { "type": ["string", "null"] },
+          "phase": { "type": "string" },
+          "hud": { "type": ["object", "null"] },
+          "tools": { "type": "array", "items": { "type": "object" } }
+        }
+      }
+    },
+    "arcade.tool": {
+      "kind": "command",
+      "doc": "Make one of the playing game's moves (see arcade.read for the moves and their inputs) — a hint for the player, a rule for a dancer, a reading of the race.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["by", "name"],
+        "properties": {
+          "by": { "$ref": "#/$defs/Seat" },
+          "name": { "type": "string", "minLength": 1, "maxLength": 40 },
+          "input": { "type": "object" }
+        }
+      },
+      "output": { "type": "object", "required": ["result"], "properties": { "result": {} } },
+      "errors": {
+        "no-game": { "status": 409 },
+        "not-found": { "status": 404 },
+        "invalid": { "status": 422 }
+      }
+    },
+    "studio.camera": {
+      "kind": "command",
+      "doc": "Call a camera shot on the stage: the director travels there.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["by", "shot"],
+        "properties": { "by": { "$ref": "#/$defs/Seat" }, "shot": { "$ref": "#/$defs/Shot" } }
+      },
+      "output": {
+        "type": "object",
+        "required": ["shot"],
+        "properties": { "shot": { "type": "string" } }
+      }
+    },
+    "studio.light": {
+      "kind": "command",
+      "doc": "Set the stage's light: the hour of the sun (0–24) and how many cel bands a face is cut into.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["by"],
+        "properties": {
+          "by": { "$ref": "#/$defs/Seat" },
+          "hour": { "type": "number", "minimum": 0, "maximum": 24 },
+          "bands": { "type": "integer", "minimum": 1, "maximum": 6 }
+        }
+      },
+      "output": {
+        "type": "object",
+        "required": ["hour", "bands"],
+        "properties": { "hour": { "type": "number" }, "bands": { "type": "integer" } }
+      }
+    }
+  }
+}

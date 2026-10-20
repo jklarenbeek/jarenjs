@@ -1,0 +1,76 @@
+{
+  "$quests": "0.1",
+  "quests": [
+    {
+      "id": "first-dance", "title": "First dance", "skill": "machine", "difficulty": 470, "xp": 30,
+      "steps": [
+        { "text": "Open the Machine app in the dock — the dancers are reading their program from it.", "target": "dock-machine", "check": { "$ge": [{ "$default": ["$.marks.open_machine", 0] }, 1] } },
+        { "text": "Click any rule cell: you draft a change and the machine forecasts what it would do.", "target": "machine-rules", "check": { "$ge": [{ "$default": ["$.marks.draft", 0] }, 1] } },
+        { "text": "Propose your change to the council. It goes through the same contract an agent uses.", "target": "machine-propose", "check": { "$ge": [{ "$default": ["$.marks.propose", 0] }, 1] } }
+      ]
+    },
+    {
+      "id": "the-council", "title": "The council", "skill": "council", "difficulty": 520, "xp": 40,
+      "steps": [
+        { "text": "Open the Council and tell it what you would like to see — more symmetry, more colour…", "target": "dock-council", "check": { "$ge": [{ "$default": ["$.marks.say", 0] }, 1] } },
+        { "text": "Convene the council now. Each member proposes, judges by simulating, and votes by merit.", "target": "council-convene", "check": { "$ge": ["$.sessions", 1] } },
+        { "text": "Your verdict: veto the winner, or let it pass. The veto is always yours.", "target": "verdict", "check": { "$ge": ["$.verdicts", 1] } }
+      ]
+    },
+    {
+      "id": "the-board", "title": "Pin it up", "skill": "data", "difficulty": 500, "xp": 30,
+      "steps": [
+        { "text": "Open the Board and pin a note.", "target": "dock-board", "check": { "$ge": ["$.notes", 1] } },
+        { "text": "Add a todo, then connect two cards — drag from one card’s dot to another.", "target": "board-link", "check": { "$ge": ["$.links", 1] } },
+        { "text": "Tick a todo off.", "target": "board-cards", "check": { "$ge": ["$.ticked", 1] } }
+      ]
+    },
+    {
+      "id": "your-crew", "title": "Your crew", "skill": "apps", "difficulty": 600, "xp": 60,
+      "steps": [
+        { "text": "Open Crew and start a project. You are the employer; the council’s members are your crew.", "target": "dock-crew", "check": { "$ge": [{ "$default": ["$.marks.crew_start", 0] }, 1] } },
+        { "text": "Add an idea in plain words — “a counter for glasses of water” — then end your turn.", "target": "crew-idea", "check": { "$ge": [{ "$default": ["$.marks.crew_turn", 0] }, 1] } },
+        { "text": "Review what the crew built: approve it into the app, or veto it.", "target": "crew-review", "check": { "$ge": [{ "$default": ["$.marks.crew_review", 0] }, 1] } }
+      ]
+    },
+    {
+      "id": "the-post", "title": "Every word on file", "skill": "ai", "difficulty": 540, "xp": 30,
+      "steps": [
+        { "text": "Open Mail: every conversation between you and the models is a thread here.", "target": "dock-mail", "check": { "$ge": [{ "$default": ["$.marks.open_mail", 0] }, 1] } },
+        { "text": "Open a thread to read it.", "target": "mail-threads", "check": { "$ge": [{ "$default": ["$.marks.mail_read", 0] }, 1] } },
+        { "text": "Write to the oracle. It answers from the documentation.", "target": "mail-compose", "check": { "$ge": [{ "$default": ["$.marks.mail_send", 0] }, 1] } }
+      ]
+    },
+    {
+      "id": "the-library", "title": "Read, listen, ask", "skill": "documents", "difficulty": 560, "xp": 40,
+      "steps": [
+        { "text": "Open the Library and pick a document.", "target": "dock-library", "check": { "$ge": [{ "$default": ["$.marks.doc_open", 0] }, 1] } },
+        { "text": "Press Listen: the page is read aloud, one highlighted sentence at a time.", "target": "library-listen", "check": { "$ge": [{ "$default": ["$.marks.listen", 0] }, 1] } },
+        { "text": "Ask the documentation a question.", "target": "library-ask", "check": { "$ge": [{ "$default": ["$.marks.ask", 0] }, 1] } }
+      ]
+    },
+    {
+      "id": "the-arcade", "title": "Play", "skill": "turing", "difficulty": 640, "xp": 60,
+      "steps": [
+        { "text": "Open the Arcade and play a chamber of Monkey Grove.", "target": "dock-arcade", "check": { "$ge": [{ "$default": ["$.marks.play_grove", 0] }, 1] } },
+        { "text": "Program a dancer in Tape Dancers and solve a level.", "target": "arcade-dancers", "check": { "$ge": [{ "$default": ["$.marks.win_dancers", 0] }, 1] } },
+        { "text": "Run a race in the Bench Arena.", "target": "arcade-arena", "check": { "$ge": [{ "$default": ["$.marks.win_arena", 0] }, 1] } }
+      ]
+    },
+    {
+      "id": "the-director", "title": "Lights, camera", "skill": "documents", "difficulty": 580, "xp": 30,
+      "steps": [
+        { "text": "Open Settings and change the art direction.", "target": "dock-settings", "check": { "$ge": [{ "$default": ["$.marks.art", 0] }, 1] } },
+        { "text": "Move the sun: set the hour of the light.", "target": "settings-light", "check": { "$ge": [{ "$default": ["$.marks.light", 0] }, 1] } },
+        { "text": "Call a camera shot.", "target": "settings-camera", "check": { "$ge": [{ "$default": ["$.marks.shot", 0] }, 1] } }
+      ]
+    },
+    {
+      "id": "ship-it", "title": "Ship it", "skill": "apps", "difficulty": 760, "xp": 120,
+      "steps": [
+        { "text": "Finish a project with your crew: approve enough blocks to launch it.", "target": "dock-crew", "check": { "$ge": [{ "$default": ["$.marks.crew_ship", 0] }, 1] } },
+        { "text": "Open the app you shipped from the Made shelf in Crew.", "target": "crew-made", "check": { "$ge": [{ "$default": ["$.marks.made_open", 0] }, 1] } }
+      ]
+    }
+  ]
+}

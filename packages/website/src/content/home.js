@@ -7,7 +7,7 @@
  * No engine card is here: every one of them is written by the workspace
  * that publishes the engine and collected by the build, so the grid a
  * reader sees is the packages' own words. What stays is what describes
- * the SITE — the hero, and the three blocks about what this page is.
+ * the SITE — the hero, and the blocks about what this page is and the apps it hosts.
  */
 
 export const HOME_CONTENT = {
@@ -36,6 +36,10 @@ export const HOME_CONTENT = {
   studio: {
     title: 'The Studio: documents that run',
     lead: 'A second, self-authored app document hosted next to the site\'s own: you author a complete Jaren application as one JSON value, the jaren-app meta-schema gates every boot structurally, and the real app runtime runs it live. Jaren validates the document’s shape (a structural gate, not a sanitizer: an app document names host actions and effects, so this is for self-authored apps, not untrusted input). No eval, no server, no scaffolding.',
+  },
+  os: {
+    title: 'Radiant OS: a browser OS that is a Turing machine',
+    lead: 'A third app document, installable and offline: a Turing machine whose program is a jaren-fsm document, danced in 3D by outlined figures on the floor it paints. A council of its own parts amends that program in jaren-workflow sessions, weighted by merit a jaren-dag keeps; every call passes one $contract — yours, its members’ and a language model’s over WebMCP — and the veto is always yours. The chrome is a JSLT stylesheet, the exports are JTLT templates, and the gallery is SQLite through @jarenjs/db.',
   },
   meta: {
     title: 'This site is the demo',

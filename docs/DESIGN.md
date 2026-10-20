@@ -330,6 +330,14 @@ must match — mermaid (`components/mermaid/src/theme.js` ↔ the `--mm-*` fallb
   itself, because the browser compares the worker's own bytes on every navigation and
   the new worker's `install` re-fetches the whole precache under the same name.
 
+- Radiant OS (`packages/website/os/`) is a separate installable app with its own
+  manifest (`theme_color` `#2563eb`, `background_color` `#fff7e6` — the OS paper),
+  icons (drawn by the same `scripts/make-icons.js`, pinned by the icons test) and
+  worker. Each worker owns one cache prefix — `jaren-website-` and `radiant-os-` — and
+  retires only its own; the site's worker answers nothing under `os/`. The Tangle
+  edition (`/tangleai/os/`, same origin) uses `tangle-radiant-os-`, which neither
+  prefix matches.
+
 ## 10. Verification method
 
 A visual pass is verified the way the original audit was made:
@@ -364,3 +372,53 @@ All of the above (plus the browser matrix) run together as `npm run site:gate`, 
 the one command a visual change must end green on.
 
 **Code blocks keep their tabs.** `.md pre` sets `tab-size: 4`, so a tab in code (which the Markdown parser keeps) is as wide as the four spaces it once became; no token is involved.
+
+## 11. Radiant OS
+
+Radiant OS (`packages/website/src/os/`) is drawn in its own hand — bold outlined
+figures in the spirit of 1980s subway and street art — and holds every rule above.
+
+- **Palette.** The tape's inks are paper plus five brights in this order: blue
+  `#2563eb`, amber `#fbbf24`, red `#ef4444`, green `#16a34a`, cyan `#06b6d4`; the
+  human, who holds the veto, wears orange `#f97316`, which no tape symbol uses. No pink,
+  no purple (§1). Light mode is paper (`#fff7e6`) with ink `#11131c`; dark mode is the
+  subway — chalk `#f4efe1` on `#0c0f17`.
+- **One line weight.** Every figure is drawn twice — an ink pass widened by the outline,
+  then the fill — so overlapping limbs read as one silhouette with one outline; the chrome
+  uses the same 3px line and hard offset shadow.
+- **The leader's colour.** The JTLT theme template renders `--os-lead` (the merit
+  leader's ink) and `--os-lead-ink`, the text colour `inkFor` picks for it, so text on
+  the lead colour always meets §1's contrast floor whichever member leads.
+- **Motion.** The stage animates in its own frame loop (hops, rising blocks, stamps, the
+  veto hand) and never dispatches per frame. Under `prefers-reduced-motion: reduce` — or
+  the OS's own motion toggle — the stage draws the final state of every change at once
+  and runs no loop, and the chrome's few CSS animations (`transform` and `opacity` only)
+  sit behind both.
+- **The stage is an image, the chrome is the interface.** The stage is
+  `role="img"` with a live label (tick, harmony, dancers); everything it shows that can
+  be acted on — the verdict, the members, the rules — is also a real control in the
+  window beside it, and V, A and Space mirror the verdict and the run toggle. The same
+  holds for every canvas the studio adds: the board's cards are also a list of real
+  buttons (tick, link, remove), and a game's HUD, menus and rule grid are HTML.
+- **Three art directions.** Pop Shop is the light theme above, Subway Chalk the dark
+  one, and Neon Night (`data-theme="neon"`) a third: night `#070b18`, a glowing line
+  `#7dd3fc`, lime `#a3e635` for the primary action and the sentence being read aloud.
+  Each dresses the chrome and the stage (`STAGE_THEMES`) together, is picked in Settings
+  or cycled from the status bar, and is saved with the preferences. None adds a pink or
+  a purple.
+- **Light and the camera are systems, not decoration.** `engine/light.js` turns the hour
+  of the day into a sun, cel bands and shadow polygons, with pools of light at night;
+  `engine/director.js` cuts, moves, follows and orbits the camera through named shots,
+  and the council's phases cue them (a crane when it convenes, in close for the verdict,
+  home after). The camera drifts only after nine seconds without input.
+- **Liveliness never blocks.** Ragdolls (`engine/ragdoll.js`, Verlet) spring back to the
+  pose the program asks for within about a second: a knock is a reaction, never a state
+  anyone has to clear. Under reduced motion there are no ragdolls, bursts, shakes or
+  flashes, and the camera holds still.
+- **Sound is synthesized and asked for.** `engine/audio.js` makes every effect and the
+  music (a step sequencer; the desk's melody is the row of tape under the painter) and
+  opens its context only after the first press, as browsers require. Master, music and
+  effects have their own levels, M mutes anywhere, and captions show what is said.
+- **A game pauses like a game.** Escape or P pauses everything — the machine, the music
+  and the council's verdict clock — and a game in front gets its own pause menu
+  (continue, restart, options, quit); quitting from it lets the studio go again.

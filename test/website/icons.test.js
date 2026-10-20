@@ -10,8 +10,10 @@ import { inflateSync } from 'node:zlib';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 
-/** Read only the generator's fixed RGBA8, non-interlaced, unfiltered PNG format. */
-function pixels(path, size) {
+/** Read only the generator's fixed RGBA8, non-interlaced, unfiltered PNG format.
+ * @param {string} path @param {number} size
+ * @param {number[]} [corner] - the background the top-left pixel shows @param {string} [what] */
+function pixels(path, size, corner = [0x3b, 0x82, 0xf6, 0xff], what = 'docs/DESIGN.md logo blue') {
   const png = readFileSync(path);
   assert.deepEqual([...png.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
   assert.equal(png.toString('ascii', 12, 16), 'IHDR');
@@ -27,14 +29,14 @@ function pixels(path, size) {
   const rows = inflateSync(Buffer.concat(compressed));
   assert.equal(rows.length, size * (size * 4 + 1));
   for (let y = 0; y < size; y++) assert.equal(rows[y * (size * 4 + 1)], 0, 'the icon generator uses filter 0');
-  assert.deepEqual([...rows.subarray(1, 5)], [0x3b, 0x82, 0xf6, 0xff], 'docs/DESIGN.md logo blue');
+  assert.deepEqual([...rows.subarray(1, 5)], corner, what);
   return rows;
 }
 
 it('PWA icons and their deterministic generator use the current blue logo palette', (t) => {
   const temp = mkdtempSync(join(tmpdir(), 'jaren-icons-'));
   t.after(() => rmSync(temp, { recursive: true, force: true }));
-  mkdirSync(join(temp, 'scripts')); mkdirSync(join(temp, 'public'));
+  mkdirSync(join(temp, 'scripts')); mkdirSync(join(temp, 'public')); mkdirSync(join(temp, 'os/public'), { recursive: true });
   const source = readFileSync(join(root, 'packages/website/scripts/make-icons.js'), 'utf8')
     .replace("'@jarenjs/core/checksum'", JSON.stringify(import.meta.resolve('@jarenjs/core/checksum')));
   const script = join(temp, 'scripts/make-icons.mjs');
@@ -45,5 +47,9 @@ it('PWA icons and their deterministic generator use the current blue logo palett
     const tracked = pixels(join(root, `packages/website/public/icon-${size}.png`), size);
     const generated = pixels(join(temp, `public/icon-${size}.png`), size);
     assert.deepEqual(tracked, generated, `icon-${size}.png is current`);
+    // Radiant OS wears the OS blue its manifest names as theme_color
+    const os = pixels(join(root, `packages/website/os/public/icon-${size}.png`), size, [0x25, 0x63, 0xeb, 0xff], 'the Radiant OS blue');
+    assert.deepEqual(os, pixels(join(temp, `os/public/icon-${size}.png`), size, [0x25, 0x63, 0xeb, 0xff], 'the Radiant OS blue'),
+      `os/public/icon-${size}.png is current`);
   }
 });

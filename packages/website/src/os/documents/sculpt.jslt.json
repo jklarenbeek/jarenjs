@@ -1,0 +1,29 @@
+{
+  "$jslt": "0.1",
+  "rules": [
+    {
+      "match": { "schema": { "type": "object" } },
+      "body": { "kind": "figure", "at": "$path", "size": { "$count": { "$entries": "$" } }, "children": [{ "$apply": "$.*" }] }
+    },
+    {
+      "match": { "schema": { "type": "array" } },
+      "body": { "kind": "chain", "at": "$path", "size": { "$count": "$[*]" }, "children": [{ "$apply": "$[*]" }] }
+    },
+    {
+      "match": { "schema": { "type": "string" } },
+      "body": { "kind": "speech", "at": "$path", "text": { "$substring": ["$", 0, 28] } }
+    },
+    {
+      "match": { "schema": { "type": "number" } },
+      "body": { "kind": "rays", "at": "$path", "value": "$" }
+    },
+    {
+      "match": { "schema": { "type": "boolean" } },
+      "body": { "kind": "heart", "at": "$path", "value": "$" }
+    },
+    {
+      "match": { "schema": { "type": "null" } },
+      "body": { "kind": "ghost", "at": "$path" }
+    }
+  ]
+}

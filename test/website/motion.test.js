@@ -325,7 +325,7 @@ describe('website — the motion layer', function () {
     assert.ok(prefersReducedMotion(view));
   });
 
-  it('is the ONLY module that knows the motion APIs, and only the browser bootstrap loads it', function () {
+  it('is the ONLY module that knows the motion APIs, and only the browser bootstraps load it', function () {
     // motion is browser-only by construction: the headless site renders
     // final values because nothing on the Node path can ask for anything
     // else. That is a property of the import graph, not of a test double.
@@ -336,8 +336,8 @@ describe('website — the motion layer', function () {
 
     const importers = files.filter((file) =>
       /from '[^']*motion\.js'/.test(readFileSync(path.join(SRC, file), 'utf8')));
-    assert.deepStrictEqual(importers, ['main.js'],
-      'the app document, its viewmodel and every boundary stay unable to move anything');
+    assert.deepStrictEqual(importers, ['main.js', 'os/main.js'],
+      'the app documents (the site and Radiant OS), their viewmodels and every boundary stay unable to move anything');
   });
 
   it('degrades on a host without the APIs, and before the shell has mounted', function () {

@@ -40,7 +40,8 @@ const ROOT = fileURLToPath(new URL('../', import.meta.url));
 /**
  * The committed Markdown surface. Workspace `site.md` documents are
  * included: they are rendered on the site, so a diagram in one is as
- * public as a diagram in a README.
+ * public as a diagram in a README. So is Markdown a package ships from
+ * its source — Radiant OS's field guide is read in its Library.
  *
  * `test/**` is deliberately outside it. A fixture's job is sometimes to
  * be malformed — the collector's refusals are proven against documents
@@ -52,6 +53,7 @@ const PATTERNS = [
   'docs/**/*.md',
   'packages/*/*.md',
   'packages/*/docs/*.md',
+  'packages/*/src/**/*.md',
   'components/*/*.md',
   'components/*/docs/*.md',
   'benchmark/*.md',
