@@ -120,18 +120,24 @@ describe('the trigger rendering', () => {
     }
   });
 
-  it('reads an absent column only as a predicate\'s operand: an audit value and a probe\'s match value still refuse it', () => {
+  it('reads an absent column as a predicate\'s operand and a probe\'s keyed match value: an audit value and any other match value refuse it', () => {
     const audited = /** @type {any} */ (structuredClone(ruleModel));
     audited.entities.Entry.physical.columns.start.null = 'absent';
     audited.entities.Entry.invariants[0].assert = { $le: ['$.new.start', '$.new.end'] };
     const probing = /** @type {any} */ (familyModel('database'));
     probing.entities.Line.physical.columns.doc.null = 'absent';
-    for (const [, dialect] of DIALECTS) {
+    probing.entities.Line.physical.columns.note.null = 'absent';
+    const rule = probing.entities.Line.invariants[2];
+    for (const [name, dialect] of DIALECTS) {
       assert.doesNotThrow(() => planInvariants(audited, { dialect }));
       audited.entities.Entry.invariants[0].audit.values = { entry: '$.new.start' };
       assert.throws(() => planInvariants(audited, { dialect }), { code: 'JD0005', message: /'start' needs a scalar column codec/ });
       audited.entities.Entry.invariants[0].audit.values = { entry: '$.new.id', operation: '$.op' };
-      assert.throws(() => planInvariants(probing, { dialect }), { code: 'JD0005', message: /'doc' needs a scalar column codec/ });
+      // the key compares with `=`, which a missing member's SQL NULL never meets: no row matches, as the store's probe answers
+      rule.assert = { '$exists-row': { entity: 'Doc', match: { id: '$.new.doc', status: 'draft', sealed: null } } };
+      assert.match(planInvariants(probing, { dialect }).map((item) => item.sql).join('\n'), /"_jaren_row"\."id" = NEW\."doc_id" AND/, name);
+      rule.assert = { '$exists-row': { entity: 'Doc', match: { id: '$.new.doc', status: '$.new.note' } } };
+      assert.throws(() => planInvariants(probing, { dialect }), { code: 'JD0005', message: /'note' needs a scalar column codec/ });
     }
   });
 

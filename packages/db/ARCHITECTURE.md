@@ -1930,7 +1930,11 @@ the migration planner diffs them. `verifyRulePrograms` in `physical.js` is the
 one check of installed programs — on PostgreSQL each read back from the catalog
 field by field — that a physical layout's open and `verifyShape` share, the
 latter refusing any trigger or rewrite rule on a store-owned table the model
-does not declare.
+does not declare. An open's two brackets of shape work (its collections, its
+entities) each read every table's programs out of one catalog read of the
+namespace (`namespacePrograms`), taken when the first table asks; a table that
+read did not see, or whose programs there depart from the plan, reads its own
+before it is refused.
 
 An index condition (MODEL-FORMAT §2, §9.2) is that lowering's index rendering,
 every operand read as an absent member and every condition written in one

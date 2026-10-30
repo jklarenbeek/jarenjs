@@ -167,11 +167,11 @@ const UNLOWERED_ARITHMETIC = ['$mul', '$div', '$idiv', '$mod'];
  * One lowering: the functions that lower, and the domain checks its column
  * reads collect in the order they are read (an index condition collects none).
  * @param {{ rendering?: 'trigger' | 'predicate', releasedText?: boolean, flavor: any, dialect: any, resolve: PathResolver,
- *   fail: (reason: string) => never, probe?: (args: any, value: (expression: any) => string) => string }} context -
+ *   fail: (reason: string) => never, probe?: (args: any, value: (expression: any, keyed: boolean) => string) => string }} context -
  *   `flavor` spells `true`, `false`, the null-safe `equal` and `different`, reads a column (`column(column, ref)` →
  *   `{ value, domain }`) and may spell a text literal (`text(value, plain)`, `plain` the dialect's own) and an integer
  *   column as an arithmetic operand (`integer(column, ref)`); `probe` lowers an `$exists-row`, its match values rendered
- *   by `value`, and without it a probe refuses; `releasedText` keeps the text installed programs were planned with,
+ *   by `value` (`keyed` for a member the probe is keyed by), and without it a probe refuses; `releasedText` keeps the text installed programs were planned with,
  *   which compares two columns of different JSON types by type alone, so two JSON nulls there are unequal (installed
  *   programs are verified by their text)
  * @returns {{ predicate: (node: any) => string, scalar: (value: any, raw?: boolean) => string,
@@ -189,10 +189,12 @@ export function rowPredicate({ rendering = 'trigger', releasedText = false, flav
   /** @type {Set<string>} */
   const domains = new Set();
   // `raw` reads a column as its stored value, for a probe's own comparison;
-  // only a predicate's own operand (`operand`) reads an absent column. Every
-  // other expression is refused rather than compared as its text
-  /** @param {any} value @param {boolean} [raw] @param {boolean} [operand] @returns {string} */
-  const scalar = (value, raw = false, operand = false) => {
+  // a predicate's own operand (`operand`) and a probe's keyed match value
+  // (`keyed`, compared with `=`, which SQL NULL never meets, as no row matches
+  // a missing key) read an absent column. Every other expression is refused
+  // rather than compared as its text
+  /** @param {any} value @param {boolean} [raw] @param {boolean} [operand] @param {boolean} [keyed] @returns {string} */
+  const scalar = (value, raw = false, operand = false, keyed = false) => {
     if (isArithmetic(value)) return operand ? arithmetic(value) : fail(SCALARS);
     if (value !== null && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length === 1
       && UNLOWERED_ARITHMETIC.includes(Object.keys(value)[0]))
@@ -202,7 +204,7 @@ export function rowPredicate({ rendering = 'trigger', releasedText = false, flav
       if (path.refused !== undefined) return fail(path.refused);
       if (path.text !== undefined) return text(path.text);
       const { column, name } = path;
-      if (!column || (column.null === 'absent' && !operand) || !RULE_CODECS.includes(column.codec)) return fail(`'${name}' needs a scalar column codec`);
+      if (!column || (column.null === 'absent' && !operand && !keyed) || !RULE_CODECS.includes(column.codec)) return fail(`'${name}' needs a scalar column codec`);
       if (path.unavailable) return fail('a property of an unavailable record is absent, not SQL NULL');
       const ref = /** @type {string} */ (path.ref);
       if (!trigger) return ref;
@@ -376,7 +378,7 @@ export function rowPredicate({ rendering = 'trigger', releasedText = false, flav
       return `(${operands.map((a) => predicate(a, negated)).join(key === '$and' ? ' AND ' : ' OR ')})`;
     }
     if (key === '$not') return `(NOT (${predicate(args, true)}))`;
-    if (key === '$exists-row' && probe !== undefined) return probe(args, (expression) => scalar(expression, true));
+    if (key === '$exists-row' && probe !== undefined) return probe(args, (expression, keyed) => scalar(expression, true, false, keyed));
     if (key === '$exists') return exists(args);
     if (!Object.hasOwn(OPERATORS, key) || !Array.isArray(args) || args.length !== 2) return fail(`unsupported predicate '${key}'`);
     return args.some(isSeq) ? membership(key, args, negated) : compare(key, args, negated);

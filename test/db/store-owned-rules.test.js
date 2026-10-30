@@ -13,8 +13,8 @@ import { DatabaseSync } from 'node:sqlite';
 import { migrate, normalizeEntities, openStore, planInvariants, planModelMigration, sqliteDialect } from '@jarenjs/db';
 import { adaptNodeDatabase, nodeDriver } from '@jarenjs/db/node';
 import { postgresDialect } from '@jarenjs/db/postgres';
-import { actionChainModel, BOOKING_TRANSFORM, bookingModel, childRuleMeetsParentAction, narrowedBookingModel, storeRulesMeetForeignKeyActions }
-  from './invariant-oracle.js';
+import { actionChainModel, BOOKING_TRANSFORM, bookingModel, childRuleMeetsParentAction, narrowedBookingModel, PROBING_VERDICTS, probingAgreement,
+  sqliteEngine, storeRulesMeetForeignKeyActions } from './invariant-oracle.js';
 import { tempDbPath } from './helpers.js';
 
 const TENANT = postgresDialect({ searchPath: 'tenant' });
@@ -24,6 +24,8 @@ const DIALECTS = /** @type {const} */ ([['sqlite', sqliteDialect], ['postgres', 
 const ruled = (/** @type {Record<string, unknown>} */ rule, /** @type {Record<string, unknown>} */ properties = {}) => ({ $model: '0.1', entities: {
   E: { schema: { type: 'object', properties: { id: { type: 'string', 'x-entity': { key: true } }, a: { type: 'integer' }, ...properties } },
     invariants: [{ name: 'r', on: ['insert', 'update'], enforcement: 'database', assert: { $ge: ['$.new.a', 0] }, ...rule }] } } });
+/** A member that may hold a JSON null. */
+const nullableText = { type: ['string', 'null'] };
 /** A physical table another entity's rule could write or read. */
 const LOG = { schema: { type: 'object', properties: { id: { type: 'integer', 'x-entity': { key: true } }, a: { type: 'integer' } } },
   physical: { table: 'log', columns: { id: { name: 'id', codec: 'integer', null: 'reject' }, a: { name: 'a', codec: 'integer', null: 'null' } } } };
@@ -89,7 +91,7 @@ describe('a database rule on a store-owned layout, on SQLite', () => {
     finally { cleanup(); }
   });
 
-  it('refuses at the member what a store-owned layout does not lower: an epoch, document or relation member, an audit, an effect, columns, a probe', () => {
+  it('refuses at the member what a store-owned layout does not lower: an epoch, document or relation member, an audit, an effect, columns, a probe\'s value of another codec', () => {
     const at = { type: 'string', format: 'date-time', 'x-entity': { column: 'integer' } };
     const parented = /** @type {any} */ (ruled({ assert: { $eq: ['$.new.parent', 1] } }));
     parented.entities.P = { schema: { type: 'object', properties: { id: { type: 'integer', 'x-entity': { key: true } } } } };
@@ -97,8 +99,12 @@ describe('a database rule on a store-owned layout, on SQLite', () => {
     parented.entities.E.schema.properties.parent = { 'x-entity': { relation: { to: 'P', via: 'parentId', onDelete: 'cascade' } } };
     const logged = /** @type {any} */ (ruled({ audit: { entity: 'Log', values: { a: '$.new.a' } } }));
     logged.entities.Log = LOG;
-    const probing = /** @type {any} */ (ruled({ assert: { '$exists-row': { entity: 'Log', match: { id: 1 } } } }));
-    probing.entities.Log = LOG;
+    /** A probe of the physical `Log` by its key, matched with `value`, beside further members. @param {unknown} value */
+    const probing = (value, properties = {}) => {
+      const model = /** @type {any} */ (ruled({ assert: { '$exists-row': { entity: 'Log', match: { id: value } } } }, properties));
+      model.entities.Log = LOG;
+      return model;
+    };
     const CASES = [
       ['an epoch member', ruled({ assert: { $le: ['$.new.at', '$.new.at'] } }, { at }), 'assert', /'at' holds an epoch \(milliseconds\) in its column/],
       ['an array member', ruled({ assert: { $eq: ['$.new.tags', 1] } }, { tags: { type: 'array' } }), 'assert', /'tags' lives in the entity's document/],
@@ -108,7 +114,12 @@ describe('a database rule on a store-owned layout, on SQLite', () => {
       ['an audit', logged, 'audit', /a database rule on a store-owned layout writes no audit row/],
       ['an effect', ruled({ on: ['update'], assert: true, effects: [{ increment: 'a' }] }), 'effects', /a database rule on a store-owned layout increments no member/],
       ['columns', ruled({ on: ['update'], columns: ['a'] }), 'columns', /invariant columns name the columns of a physical layout; a document is written whole/],
-      ['a probe', probing, 'assert', /a database rule on a store-owned layout reads no other row/],
+      ['a probe\'s text value', probing('$.new.t', { t: { type: 'string' } }), 'assert', /matches integer column 'id' with text member 't'; a match compares one codec/],
+      ['a probe\'s number value', probing('$.new.n', { n: { type: 'number' } }), 'assert', /matches integer column 'id' with number member 'n'/],
+      ['a probe\'s boolean value', probing('$.new.f', { f: { type: 'boolean' } }), 'assert', /'f' is a boolean, which a layout the store owns keeps as 0 or 1/],
+      ['a probe\'s epoch value', probing('$.new.at', { at }), 'assert', /'at' holds an epoch \(milliseconds\) in its column/],
+      ['a probe\'s relation value', (() => { const model = probing('$.new.parent'); model.entities.E.schema.properties = parented.entities.E.schema.properties;
+        model.entities.P = parented.entities.P; return model; })(), 'assert', /'parent' is a relation, which has no column of its own/],
     ];
     for (const [label, model, member, message] of CASES) {
       const refused = { code: 'JD0005', docPath: `/entities/E/invariants/0/${member}`, message };
@@ -119,7 +130,57 @@ describe('a database rule on a store-owned layout, on SQLite', () => {
     const via = /** @type {any} */ (structuredClone(parented));
     via.entities.E.invariants[0].assert = { $gt: ['$.new.parentId', 0] };
     for (const [, dialect] of DIALECTS) assert.match(planInvariants(via, { dialect })[0].sql, /"parentId"/);
+    // a probe keyed by an integer member, of the target's codec, lowers; so does a store rule's probe of another codec,
+    // which the store binds through the target's codec
+    for (const [name, dialect] of DIALECTS) assert.match(planInvariants(probing('$.new.a'), { dialect }).map((item) => item.sql).join('\n'),
+      name === 'sqlite' ? /EXISTS \(SELECT 1 FROM "log" AS "_jaren_row" WHERE "_jaren_row"\."id" = NEW\."a"\)/
+        : /EXISTS \(SELECT 1 FROM "tenant"\."log" AS "_jaren_row" WHERE "_jaren_row"\."id" = NEW\."a"\)/);
+    const stored = probing('$.new.t', { t: { type: 'string' } });
+    stored.entities.E.invariants[0].enforcement = 'store';
+    assert.doesNotThrow(() => normalizeEntities(stored));
+    // an integer member into a number column is exact
+    const weighed = probing('$.new.a');
+    weighed.entities.Log = structuredClone(LOG);
+    weighed.entities.Log.schema.properties.w = { type: 'number' };
+    weighed.entities.Log.physical.columns.w = { name: 'w', codec: 'number', null: 'reject' };
+    weighed.entities.Log.physical.indexes = [{ name: 'log_w', unique: true, terms: [{ by: { $sql: 'column', name: 'w' } }] }];
+    weighed.entities.E.invariants[0].assert = { '$exists-row': { entity: 'Log', match: { w: '$.new.a' } } };
+    for (const [name, dialect] of DIALECTS) assert.match(planInvariants(weighed, { dialect }).map((item) => item.sql).join('\n'), /"_jaren_row"\."w" = NEW\."a"/, name);
+    // a target member the target may leave missing, not keyed, matches a value that is never missing: a
+    // literal, or under the trigger the rule's own key; a member the rule's row may leave missing refuses,
+    // and so does any member under a store rule, whose document may not hold its key yet
+    /** A probe of the store-owned `T` keyed by `k`, matching its `name` with `value`. @param {unknown} value @param {string} enforcement */
+    const named = (value, enforcement) => {
+      const model = /** @type {any} */ (ruled({ enforcement, assert: { '$exists-row': { entity: 'T', match: { k: '$.new.a', name: value } } } }, { s: { type: 'string' } }));
+      model.entities.T = { schema: { type: 'object', properties: { k: { type: 'integer', 'x-entity': { key: true } }, name: { type: 'string' } } } };
+      return model;
+    };
+    for (const [name, dialect] of DIALECTS) {
+      for (const value of ['$.new.id', 'x']) assert.doesNotThrow(() => planInvariants(named(value, 'database'), { dialect }), `${name} ${value}`);
+      assert.throws(() => planInvariants(named('$.new.s', 'database'), { dialect }), { code: 'JD0005', message: /member 'name' needs a scalar column codec/ }, name);
+    }
+    // from a physical layout: a `reject` column is never missing, a `null` one may hold SQL NULL
+    const physicalSource = (/** @type {string} */ member) => {
+      const model = named(`$.new.${member}`, 'database');
+      model.entities.E = { schema: { type: 'object', properties: { id: { type: 'integer', 'x-entity': { key: true } }, s: { type: 'string' }, n: nullableText } },
+        physical: { table: 'p', columns: { id: { name: 'id', codec: 'integer', null: 'reject' }, s: { name: 's', codec: 'text', null: 'reject' },
+          n: { name: 'n', codec: 'text', null: 'null' } } },
+        invariants: [{ name: 'r', on: ['insert'], enforcement: 'database', assert: { '$exists-row': { entity: 'T', match: { k: '$.new.id', name: `$.new.${member}` } } } }] };
+      return model;
+    };
+    for (const [name, dialect] of DIALECTS) {
+      assert.doesNotThrow(() => planInvariants(physicalSource('s'), { dialect }), name);
+      assert.throws(() => planInvariants(physicalSource('n'), { dialect }), { code: 'JD0005', message: /member 'name' needs a scalar column codec/ }, name);
+    }
+    assert.doesNotThrow(() => normalizeEntities(named('x', 'store')));
+    assert.throws(() => normalizeEntities(named('$.new.id', 'store')), { code: 'JD0005', message: /member 'name' needs a scalar column codec/ });
   });
+
+  for (const enforcement of /** @type {const} */ (['database', 'store'])) {
+    it(`${enforcement}: a rule reading other rows by key, by a unique member and by a member a row may leave missing answers as the engine over the rows read back`, async () => {
+      assert.equal(await probingAgreement(sqliteEngine(), enforcement), PROBING_VERDICTS[enforcement]);
+    });
+  }
 
   it('reopens over its own programs, and refuses a dropped one or a table that gained a rule, naming the entity', async () => {
     const { dbPath, cleanup } = tempDbPath();

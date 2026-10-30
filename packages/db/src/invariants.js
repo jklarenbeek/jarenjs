@@ -233,10 +233,11 @@ function pathsOf(node, out = []) {
 /**
  * What a database rule on a store-owned layout cannot lower, refused at the
  * member: an audit row or an increment (a trigger's writes are invisible to
- * journal capture, which such an entity may run), a probe of another row, and
- * a read of a member that has no column to compare — an epoch member, whose
- * column holds milliseconds while the rule compares the member's text, a
- * member the document holds, a relation. Its `columns` keep their own refusal.
+ * journal capture, which such an entity may run), and a read of a member that
+ * has no column to compare — an epoch member, whose column holds milliseconds
+ * while the rule compares the member's text, a member the document holds, a
+ * relation — a probe's match value among them. Its `columns` keep their own
+ * refusal.
  * @param {any} entity - normalized @param {any} rule - normalized
  * @param {(property: any) => string} storageOf @param {(reason: string, member: string) => never} fail
  */
@@ -244,8 +245,6 @@ function refuseStoreOwnedRule(entity, rule, storageOf, fail) {
   const capture = 'a trigger\'s writes are invisible to journal capture';
   if (rule.audit !== undefined) fail(`database invariant: a database rule on a store-owned layout writes no audit row: ${capture}`, 'audit');
   if (rule.effects !== undefined) fail(`database invariant: a database rule on a store-owned layout increments no member: ${capture}`, 'effects');
-  if (rule.probes.length > 0)
-    fail('database invariant: a database rule on a store-owned layout reads no other row: $exists-row lowers from an explicit column layout', 'assert');
   for (const path of pathsOf(rule.assert)) {
     const name = recordPath(path)?.name;
     const property = name === undefined ? undefined : entity.properties.get(name);
@@ -368,6 +367,15 @@ export function resolveInvariants(entities, codecOf, storageOf) {
         if (increments.has(effect.increment)) fail(`'${effect.increment}' is incremented by one rule only`, 'effects');
         increments.add(effect.increment);
       }
+      /** Whether a match value always has one: a literal other than `null`; under the trigger, which
+       * reads no record its operation lacks, also a member whose column holds no SQL NULL — a
+       * physical layout's `reject` column, a store-owned layout's key. @param {any} value */
+      const alwaysPresent = (value) => {
+        if (!(typeof value === 'string' && value.startsWith('$') && !value.startsWith('$$'))) return ruleLiteral(value) !== null;
+        const path = recordPath(value);
+        return rule.enforcement === 'database' && path !== null
+          && (layout !== null ? columnOf(path.name)?.null === 'reject' : entity.properties.get(path.name)?.key === true);
+      };
       for (const probe of rule.probes) {
         const refuse = (/** @type {string} */ reason) => fail(reason, 'assert');
         const target = entities.get(probe.entity);
@@ -394,8 +402,12 @@ export function resolveInvariants(entities, codecOf, storageOf) {
         for (const [member, value] of Object.entries(probe.match)) {
           const column = /** @type {any} */ (columns.find((c) => c.name === member));
           // a member the probe is keyed by compares with `=`, which SQL NULL never meets, so a column
-          // whose SQL NULL is a missing member serves there; any other member compares null-safely
-          if (column.null === 'absent' && !keys.includes(member)) refuse(`$exists-row member '${member}' needs a scalar column codec`);
+          // whose SQL NULL is a missing member serves there; any other member compares null-safely, so
+          // such a column serves only against a value that is never missing — a literal other than
+          // `null`, or, for the trigger, a member whose column holds no SQL NULL — which no row missing
+          // the member matches, as the engine finds a missing member equal to no value
+          if (column.null === 'absent' && !keys.includes(member) && !alwaysPresent(value))
+            refuse(`$exists-row member '${member}' needs a scalar column codec`);
           if (column.null === 'absent' && ruleLiteral(value) === null)
             refuse(`'${member}' reads SQL NULL as an absent member, so it never holds null: a probe matches it with a value`);
           // a keyed member compares with `=`, which no null meets: a key holds none, a unique index admits any number
@@ -407,8 +419,16 @@ export function resolveInvariants(entities, codecOf, storageOf) {
           if (path !== null) {
             const name = path.name;
             if (layout === null) {
-              if (entity.properties.get(name)?.relation !== undefined || !entity.properties.has(name))
+              const property = entity.properties.get(name);
+              if (property?.relation !== undefined || property === undefined)
                 refuse(`$exists-row value '${value}': '${entity.name}' has no stored property '${name}'`);
+              // the trigger compares the member's own column with the target's, as one codec on both
+              // sides; the store binds the member through the target's codec (a store rule keeps that)
+              const codec = STORE_OWNED_CODECS[/** @type {keyof typeof STORE_OWNED_CODECS} */ (property.type)];
+              if (rule.enforcement === 'database' && codec === 'boolean')
+                refuse(`$exists-row value '${value}': '${name}' is a boolean, which a layout the store owns keeps as 0 or 1: a probe matches no boolean member of one`);
+              if (rule.enforcement === 'database' && codec !== column.codec && !(codec === 'integer' && column.codec === 'number'))
+                refuse(`$exists-row matches ${column.codec} column '${member}' with ${codec} member '${name}'; a match compares one codec`);
               continue;
             }
             const source = columnOf(name);

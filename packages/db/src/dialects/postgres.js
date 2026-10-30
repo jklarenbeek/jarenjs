@@ -1183,7 +1183,9 @@ export function postgresDialect(options = undefined) {
       // every trigger of one table where a table is named — and every
       // rewrite rule on it (a `kind: 'rule'` row with no program), which
       // changes what a write does as a trigger does; a view's own `_RETURN`
-      // rule is the view itself
+      // rule is the view itself. Over the whole namespace it also lists each
+      // table it saw (a `kind: 'table'` row), so a reader knows which tables
+      // its answer covers
       invariantPrograms: (/** @type {string | undefined} */ table) =>
         "SELECT t.tgname AS name, c.relname AS owner, 'trigger' AS kind, pg_catalog.jsonb_build_object("
         + "'timing', CASE WHEN t.tgtype::integer & 2 <> 0 THEN 'BEFORE' WHEN t.tgtype::integer & 64 <> 0 THEN 'INSTEAD OF' ELSE 'AFTER' END, "
@@ -1204,6 +1206,8 @@ export function postgresDialect(options = undefined) {
         + 'FROM pg_catalog.pg_rewrite r JOIN pg_catalog.pg_class c ON c.oid = r.ev_class '
         + 'JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace '
         + `WHERE r.rulename <> '_RETURN' AND ${inNamespace}${table === undefined ? '' : ` AND c.relname = ${stringLiteral(table)}`} `
+        + (table === undefined ? "UNION ALL SELECT NULL, c.relname, 'table', NULL FROM pg_catalog.pg_class c "
+          + `JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE c.relkind IN ('r', 'p') AND ${inNamespace} ` : '')
         + 'ORDER BY owner, kind, name',
       objects: () =>
         "SELECT 'trigger' AS type, t.tgname AS name, c.relname AS owner, "

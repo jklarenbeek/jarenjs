@@ -12,8 +12,8 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { migrate, openStore, planInvariants, planModelMigration } from '@jarenjs/db';
 import { postgresDialect } from '@jarenjs/db/postgres';
-import { BOOKING_TRANSFORM, bookingModel, childRuleMeetsParentAction, narrowedBookingModel, storeRulesMeetForeignKeyActions }
-  from './invariant-oracle.js';
+import { BOOKING_TRANSFORM, bookingModel, childRuleMeetsParentAction, narrowedBookingModel, postgresEngine, PROBING_VERDICTS, probingAgreement,
+  storeRulesMeetForeignKeyActions } from './invariant-oracle.js';
 import { PG_URL, withPostgres } from './store-core-engines.js';
 
 const skip = !PG_URL && 'JAREN_PG_URL is not set';
@@ -42,6 +42,31 @@ const withPlain = () => {
   model.entities.Plain = { schema: { type: 'object', properties: { id: { type: 'string', 'x-entity': { key: true } }, v: { type: 'integer' } } } };
   return model;
 };
+
+/** The plain entity verified first, then the booking, ruled or not. @param {boolean} [ruled] */
+const plainFirst = (ruled = true) => ({ $model: '0.1', entities: { Plain: withPlain().entities.Plain, Booking: bookingModel(ruled).entities.Booking } });
+
+/** A driver whose connections list every read of rule programs — `namespace` for the read of the whole namespace, else
+ * the table one read names — and may run `afterSnapshot` once the namespace read has its rows, before the open sees them.
+ * @param {any} base @param {string[]} reads @param {() => Promise<void>} [afterSnapshot] */
+const snapshotting = (base, reads, afterSnapshot = undefined) => ({ ...base, open: async (/** @type {any[]} */ ...args) => {
+  const connection = await base.open(...args);
+  const whole = connection.dialect.introspect.invariantPrograms(undefined);
+  return { ...connection, prepare: async (/** @type {string} */ sql, /** @type {any} */ metadata) => {
+    const statement = await connection.prepare(sql, metadata);
+    const table = sql === whole ? 'namespace' : /FROM pg_catalog\.pg_trigger t JOIN .* AND c\.relname = '([^']*)'/s.exec(sql)?.[1];
+    if (table !== undefined) reads.push(table);
+    if (sql !== whole || afterSnapshot === undefined) return statement;
+    return { ...statement, all: async (/** @type {any[]} */ params) => {
+      const rows = await statement.all(params);
+      await afterSnapshot();
+      return rows;
+    } };
+  } };
+} });
+
+/** A rival's commit of `steps` on a connection of its own. @param {any} pool @param {string} schema @param {string[]} steps */
+const commitRival = (pool, schema, steps) => pool.query(['BEGIN', `SET LOCAL search_path TO "${schema}"`, ...steps, 'COMMIT'].join(';\n'));
 
 describe('a database rule on a store-owned layout, on PostgreSQL', { skip }, () => {
   it('refuses an inverted span from the store and from an outside writer (SQLSTATE 23J01), and accepts an ordered one', () =>
@@ -129,7 +154,7 @@ describe('a database rule on a store-owned layout, on PostgreSQL', { skip }, () 
       const store = await openStore(bookingModel(), { driver: logging(driver(), log, async (table) => {
         if (table !== 'Booking' || raced++ > 0) return;
         // the rival commits on a connection of its own, between this open's probe and its create
-        await pool.query(['BEGIN', `SET LOCAL search_path TO "${schema}"`, ...rival, 'COMMIT'].join(';\n'));
+        await commitRival(pool, schema, rival);
       }) });
       try {
         assert.equal(raced, 1);
@@ -142,6 +167,12 @@ describe('a database rule on a store-owned layout, on PostgreSQL', { skip }, () 
       }
       finally { await store.close(); }
     }));
+
+  for (const enforcement of /** @type {const} */ (['database', 'store'])) {
+    it(`${enforcement}: a rule reading other rows by key, by a unique member and by a member a row may leave missing answers as the engine over the rows read back`, async () => {
+      assert.equal(await probingAgreement(postgresEngine(), enforcement), PROBING_VERDICTS[enforcement]);
+    });
+  }
 
   it('verifies its programs field by field on every open, and refuses a dropped or changed function and an undeclared trigger', () =>
     withPostgres(async ({ pool, schema, driver }) => {
@@ -179,6 +210,71 @@ describe('a database rule on a store-owned layout, on PostgreSQL', { skip }, () 
         await reopen(`CREATE RULE guard AS ON UPDATE TO "${schema}"."${table}" DO INSTEAD NOTHING`,
           new RegExp(`entity '${table}': .*the database has the rewrite rule 'guard', which the model does not declare`),
           `DROP RULE guard ON "${schema}"."${table}"`);
+    }));
+
+  it('reads the programs of every table an open verifies in one read of the namespace per bracket, not one read per table', () =>
+    withPostgres(async ({ driver }) => {
+      const note = { key: '/id', schema: { type: 'object', properties: { id: { type: 'string' } } } };
+      // the collections' tables are verified in a bracket of their own, before the entities'
+      const model = { ...withPlain(), collections: { notes: note, tags: note } };
+      await (await openStore(model, { driver: driver() })).close();
+      const reads = /** @type {string[]} */ ([]);
+      await (await openStore(model, { driver: snapshotting(driver(), reads) })).close();
+      assert.deepEqual(reads, ['namespace', 'namespace']);
+    }));
+
+  // the namespace read holds no row of a table it did not see: the ruled table would read as missing its programs,
+  // a table without programs as without an undeclared trigger
+  for (const undeclared of [false, true])
+    it(`a table a rival commits after the namespace read is verified by a read of its own: ${undeclared ? 'an undeclared trigger on a table without programs is refused' : 'a ruled one opens'}`, () =>
+      withPostgres(async ({ pool, schema, driver }) => {
+        const plain = { $model: '0.1', entities: { Plain: withPlain().entities.Plain } };
+        await (await openStore(plain, { driver: driver() })).close();
+        const model = plainFirst(!undeclared);
+        // the booking table, with its programs where ruled, and on request a trigger the model does not declare
+        const rival = [...planModelMigration(plain, model, { dialect: postgresDialect({ searchPath: schema }), id: 'rival' })
+          .migration.steps.map((/** @type {any} */ step) => step.sql),
+        ...(undeclared ? ['CREATE FUNCTION app_guard() RETURNS trigger LANGUAGE plpgsql AS $$BEGIN RETURN NULL; END$$',
+          'CREATE TRIGGER app_guard AFTER INSERT ON "Booking" FOR EACH ROW EXECUTE FUNCTION app_guard()'] : [])];
+        const reads = /** @type {string[]} */ ([]);
+        let raced = 0;
+        // the plain table's check reads the namespace; the rival commits before that read's rows reach the open
+        const open = openStore(model, { driver: snapshotting(driver(), reads, async () => {
+          if (raced++ === 0) await commitRival(pool, schema, rival);
+        }) });
+        if (undeclared) {
+          await assert.rejects(open.then((store) => store.close()), (/** @type {any} */ error) => {
+            assert.equal(error.code, 'JD0002');
+            assert.match(error.message, /entity 'Booking': .*the database has the trigger 'app_guard', which the model does not declare/);
+            return true;
+          });
+          assert.deepEqual([raced, reads], [1, ['namespace', 'Booking']]);
+          return;
+        }
+        const store = await open;
+        try {
+          assert.deepEqual([raced, reads], [1, ['namespace', 'Booking']]);
+          await assert.rejects(store.entity('Booking').create({ id: 'a', startsAt: 5, endsAt: 1 }), { code: 'JD2096' });
+        }
+        finally { await store.close(); }
+      }));
+
+  it('a table whose rule a rival migrates in after the namespace read is judged by a read of its own, and opens', () =>
+    withPostgres(async ({ pool, schema, driver }) => {
+      await (await openStore(plainFirst(false), { driver: driver() })).close();
+      const rival = planModelMigration(plainFirst(false), plainFirst(), { dialect: postgresDialect({ searchPath: schema }), id: 'rival' })
+        .migration.steps.map((/** @type {any} */ step) => step.sql);
+      const reads = /** @type {string[]} */ ([]);
+      let raced = 0;
+      // the namespace read sees the booking table without the rule's programs; its own read, after the rival's commit, with them
+      const store = await openStore(plainFirst(), { driver: snapshotting(driver(), reads, async () => {
+        if (raced++ === 0) await commitRival(pool, schema, rival);
+      }) });
+      try {
+        assert.deepEqual([raced, reads], [1, ['namespace', 'Booking']]);
+        await assert.rejects(store.entity('Booking').create({ id: 'a', startsAt: 5, endsAt: 1 }), { code: 'JD2096' });
+      }
+      finally { await store.close(); }
     }));
 });
 

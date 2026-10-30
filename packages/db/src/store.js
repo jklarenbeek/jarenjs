@@ -45,7 +45,7 @@ import { createBackup } from './backup.js';
 import { normalizeProfile, assertProfileRoots, pointReadFilter, boundedJoinSides } from './profile.js';
 import { compileEntityModel, joinTableRoots } from './model.js';
 import { entityCore, insertAttempt } from './entity.js';
-import { requireCodePointText, verifyPhysical } from './physical.js';
+import { requireCodePointText, verifyPhysical, namespacePrograms } from './physical.js';
 import { trustedSql, synchronousBody, RELEASE } from './sql.js';
 import { relationalEngine } from './relational.js';
 import { createTracker, membershipKeys } from './tracker.js';
@@ -788,6 +788,8 @@ function ensureShape(connection, collections, plans, createsNothing) {
   // taking a write lock
   const bracket = createsNothing !== null ? (fn) => fn() : (fn) => immediately(connection, fn);
   return bracket(() => {
+    // one read of the namespace's rule programs serves every table verified here
+    const programs = namespacePrograms(connection);
     const step = (i) => {
       if (i >= names.length) return null;
       const name = names[i];
@@ -809,7 +811,7 @@ function ensureShape(connection, collections, plans, createsNothing) {
             }));
           }
           recordKeyConstraint(plan, row);
-          return chain(verifyShape(connection, plan, name, collection.docPath),
+          return chain(verifyShape(connection, plan, name, collection.docPath, 'collection', undefined, programs),
             () => step(i + 1));
         }));
     };
@@ -844,13 +846,15 @@ function ensureEntityShape(connection, entityPlans, entities, createsNothing) {
     return run(0);
   };
   return bracket(() => {
+    // one read of the namespace's rule programs serves every table verified here
+    const programs = namespacePrograms(connection);
     const step = (i) => {
       if (i >= names.length) return addDeferred();
       const name = names[i];
       const plan = entityPlans.get(name);
       const docPath = entities.get(name)?.docPath ?? `/entities/${name}`;
       if (plan.physical) return chain(readSchema(connection), (schema) =>
-        chain(verifyPhysical(connection, plan.physical, schema), () => {
+        chain(verifyPhysical(connection, plan.physical, schema, programs), () => {
           plan.keyConstraint = physicalKeyConstraint(schema, plan.physical.table);
           return step(i + 1);
         }));
@@ -870,7 +874,7 @@ function ensureEntityShape(connection, entityPlans, entities, createsNothing) {
             }));
           }
           recordKeyConstraint(plan, row);
-          return chain(verifyShape(connection, plan, name, docPath, 'entity'), () =>
+          return chain(verifyShape(connection, plan, name, docPath, 'entity', undefined, programs), () =>
             chain(connection.prepare(dialect.introspect.foreignKeyList(name)), (fkStatement) =>
               chain(fkStatement.all([]), (fkRows) => {
                 // the whole TUPLE, not the count: a key that changed

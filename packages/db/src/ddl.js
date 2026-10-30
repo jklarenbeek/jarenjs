@@ -1580,9 +1580,11 @@ export function earlierIndexesHeld(dialect, plan, rows) {
  * @param {'collection' | 'entity'} [kind] - what `collection` names, for the refusal
  * @param {(difference: string) => never} [refuse] - raises the refusal of a
  *   difference, which names the table first; `JD0002` where none is given
+ * @param {(table: string) => any} [programs] - the namespace's rule programs
+ *   read once for every table one bracket verifies (`namespacePrograms`)
  * @returns {any} value-or-promise
  */
-export function verifyShape(connection, plan, collection, docPath, kind = 'collection', refuse = undefined) {
+export function verifyShape(connection, plan, collection, docPath, kind = 'collection', refuse = undefined, programs = undefined) {
   const dialect = connection.dialect;
   const disagree = (/** @type {string} */ difference) => {
     if (refuse !== undefined) return refuse(`${kind} '${collection}': ${difference}`);
@@ -1749,7 +1751,7 @@ export function verifyShape(connection, plan, collection, docPath, kind = 'colle
           return chain(collectColumns(0), () => chain(besides(), () =>
             chain(verifyIntervalChecks(connection, plan, disagree), () =>
               chain(verifyRulePrograms(connection, plan.table, plan.programs ?? [], disagree,
-                { installed: dialect.capabilities.declaredSqlText !== true, undeclared: true }), () =>
+                { installed: dialect.capabilities.declaredSqlText !== true, undeclared: true, namespace: programs }), () =>
                 verifyDeclaredSql(connection, plan, disagree)))));
         }));
     })));

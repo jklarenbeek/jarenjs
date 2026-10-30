@@ -421,33 +421,43 @@ function programDifferences(want, have, at = '') {
  * point, which SQLite's BINARY collation is only over UTF-8: both are checked
  * wherever a program is planned. `installed: false` checks only those two,
  * for programs about to be created.
+ * `namespace` answers the table's rows out of one read of the whole
+ * namespace ({@link namespacePrograms}), or `null` for a table that read did
+ * not see, which reads its own; a table whose rows there depart from the plan
+ * reads its own before it is refused, so a refusal judges what the catalog
+ * holds now (a rival may have committed a migration of its programs since).
  * @param {any} connection
  * @param {string} table
  * @param {any[]} triggers - the planned program items
  * @param {(why: string) => never} fail
- * @param {{ installed?: boolean, undeclared?: boolean }} [options]
+ * @param {{ installed?: boolean, undeclared?: boolean, namespace?: (table: string) => any }} [options]
  * @returns {any} value-or-promise
  */
-export function verifyRulePrograms(connection, table, triggers, fail, { installed = true, undeclared = false } = {}) {
+export function verifyRulePrograms(connection, table, triggers, fail, { installed = true, undeclared = false, namespace = undefined } = {}) {
   const dialect = connection.dialect;
   const programs = triggers.filter((trigger) => trigger.type !== 'function' && trigger.program !== undefined);
+  /** The first way the table's catalog rows depart from the plan, or `null`. @param {any[]} rows @returns {string | null} */
+  const departure = (rows) => {
+    const owned = rows.filter((row) => row.owner === table && row.kind !== 'table');
+    const installed = owned.filter((row) => row.kind !== 'rule');
+    for (const trigger of programs) {
+      const row = installed.find((r) => r.name === trigger.name);
+      const actual = row === undefined ? undefined : typeof row.program === 'string' ? JSON.parse(row.program) : row.program;
+      const changed = actual === undefined ? [] : programDifferences(trigger.program, actual);
+      if (actual === undefined || changed.length > 0)
+        return `invariant trigger '${trigger.name}' is missing or changed${changed.length ? ` (${changed.join(', ')})` : ''}; apply an explicit migration`;
+    }
+    const extra = undeclared ? owned.find((row) => row.kind === 'rule' || !programs.some((trigger) => trigger.name === row.name)) : undefined;
+    if (extra === undefined) return null;
+    const what = extra.kind === 'rule' ? 'rewrite rule' : 'trigger';
+    return `the database has the ${what} '${extra.name}', which the model does not declare — an undeclared ${what} changes what a write does`;
+  };
   const read = !installed || (programs.length === 0 && !undeclared) || dialect.introspect.invariantPrograms === undefined ? null
-    : useStatementOnce(connection, dialect.introspect.invariantPrograms(table), (s) => chain(s.all([]), (rows) => {
-      const owned = rows.filter((row) => row.owner === table);
-      const installed = owned.filter((row) => row.kind !== 'rule');
-      for (const trigger of programs) {
-        const row = installed.find((r) => r.name === trigger.name);
-        const actual = row === undefined ? undefined : typeof row.program === 'string' ? JSON.parse(row.program) : row.program;
-        const changed = actual === undefined ? [] : programDifferences(trigger.program, actual);
-        if (actual === undefined || changed.length > 0)
-          fail(`invariant trigger '${trigger.name}' is missing or changed${changed.length ? ` (${changed.join(', ')})` : ''}; apply an explicit migration`);
-      }
-      const extra = undeclared ? owned.find((row) => row.kind === 'rule' || !programs.some((trigger) => trigger.name === row.name)) : undefined;
-      if (extra !== undefined) {
-        const what = extra.kind === 'rule' ? 'rewrite rule' : 'trigger';
-        fail(`the database has the ${what} '${extra.name}', which the model does not declare — an undeclared ${what} changes what a write does`);
-      }
-    }));
+    : chain(namespace === undefined ? null : namespace(table), (/** @type {any[] | null} */ shared) => (shared !== null && departure(shared) === null ? null
+      : useStatementOnce(connection, dialect.introspect.invariantPrograms(table), (s) => chain(s.all([]), (/** @type {any[]} */ rows) => {
+        const why = departure(rows);
+        if (why !== null) fail(why);
+      }))));
   const recursion = !triggers.some((trigger) => trigger.selfUpdate) ? null
     : useStatementOnce(connection, dialect.introspect.pragma('recursive_triggers'), (s) => chain(s.get([]), (row) => {
       if (Number(row?.recursive_triggers) !== 0) fail('an increment rule updates its own row, and recursive_triggers would run its trigger again; switch it off');
@@ -457,6 +467,32 @@ export function verifyRulePrograms(connection, table, triggers, fail, { installe
   return chain(recursion, () => chain(encoding, () => read));
 }
 
+/**
+ * One read of every rule program and rewrite rule in the store's namespace,
+ * with the tables it holds, shared by the tables one bracket of an open
+ * verifies (`verifyRulePrograms`' `namespace`) in place of a read per table:
+ * made when the first table asks, it answers every table that existed then
+ * as of that one moment — a table's programs are created with it, in one
+ * transaction — and `null` for a table a rival committed after it, which
+ * reads its own, as does a table whose answer departs from its plan.
+ * `undefined` where the dialect reads no programs from its catalog (an
+ * engine that keeps CREATE text compares that).
+ * @param {any} connection @returns {((table: string) => any) | undefined}
+ */
+export function namespacePrograms(connection) {
+  const introspect = connection.dialect.introspect;
+  if (introspect.invariantPrograms === undefined) return undefined;
+  /** @type {any} */
+  let snapshot;
+  return (table) => {
+    snapshot ??= chain(useStatementOnce(connection, introspect.invariantPrograms(undefined), (s) => s.all([])), (/** @type {any[]} */ rows) => {
+      snapshot = { rows, tables: new Set(rows.filter((row) => row.kind === 'table').map((row) => row.owner)) };
+      return snapshot;
+    });
+    return chain(snapshot, (/** @type {any} */ read) => (read.tables.has(table) ? read.rows : null));
+  };
+}
+
 /** Verify an existing mapped object without executing DDL: its columns, its
  * declared indexes and its rule programs. Unmapped columns and all
  * application-owned programs remain physical facts, never inferred drops.
@@ -464,8 +500,10 @@ export function verifyRulePrograms(connection, table, triggers, fail, { installe
  * which every reader of the mapping shares: whether it can hold NULL
  * (`notNull`), and the database's text encoding (`databaseEncoding`)
  * where the dialect reads the database's own catalog row.
- * @param {any} connection @param {any} mapping @param {any} schema @returns {any} */
-export function verifyPhysical(connection, mapping, schema) {
+ * @param {any} connection @param {any} mapping @param {any} schema
+ * @param {(table: string) => any} [programs] - the namespace's rule programs read once ({@link namespacePrograms})
+ * @returns {any} */
+export function verifyPhysical(connection, mapping, schema, programs = undefined) {
   const fail = (why) => { throw new DbCompileError('JD0002', `physical '${mapping.table}': ${why}`); };
   if (!connection.dialect.physicalTypeMatches) fail('this backend has no qualified physical codecs');
   if (connection.dialect.physicalNamespaceRequired && connection.dialect.schema === undefined)
@@ -480,7 +518,7 @@ export function verifyPhysical(connection, mapping, schema) {
     const actual = schema.objects.find((o) => o.type === 'trigger' && o.name === trigger.name);
     if (!actual || actual.sql?.trim().replace(/;$/, '') !== trigger.sql.trim().replace(/;$/, '')) fail(`invariant trigger '${trigger.name}' is missing or changed; apply an explicit migration`);
   }
-  const programs = verifyRulePrograms(connection, mapping.table, mapping.triggers ?? [], fail);
+  const verified = verifyRulePrograms(connection, mapping.table, mapping.triggers ?? [], fail, { namespace: programs });
   const read = mapping.kind === 'view'
     ? useStatementOnce(connection, connection.dialect.introspect.columns(mapping.table), (s) =>
       chain(s.all([]), (columns) => ({ columns: columns.map((c) => ({ ...c, generated: !!c.hidden })), primaryKey: [] })))
@@ -488,7 +526,7 @@ export function verifyPhysical(connection, mapping, schema) {
   // the database's own row of its catalog, where the dialect reads one
   // (PostgreSQL): its text encoding, default collation and locale provider
   const database = schema.catalog?.find((o) => o.type === 'schema')?.metadata ?? null;
-  return chain(programs, () => chain(read, (table) => {
+  return chain(verified, () => chain(read, (table) => {
     if (mapping.kind !== 'view' && JSON.stringify(table.primaryKey) !== JSON.stringify(mapping.keys.map((k) => mapping.columns.find((c) => c.name === k).physical))) fail('ordered primary key disagrees');
     for (const column of mapping.columns) {
       const actual = table.columns.find((c) => c.name === column.physical);

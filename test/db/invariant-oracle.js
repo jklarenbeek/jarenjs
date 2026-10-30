@@ -1557,3 +1557,158 @@ export async function oddNameVerdicts(store) {
 }
 /** What `oddNameVerdicts` answers for every name. */
 export const ODD_NAME_VERDICTS = ['ok', 'JD2005/constraint', 'ok', 'ok', 'JD2096/constraint'];
+
+/** A store-owned `Line` whose rules read other rows: a store-owned `Doc` by its key and by its unique
+ * `code`, and a physical `Bin` by its key, each probe keyed by a member a line may leave missing and
+ * matching a target member the target may leave missing against a literal.
+ * @param {'database' | 'store'} enforcement */
+export const probingModel = (enforcement) => ({ $model: '0.1', entities: {
+  Doc: { schema: { type: 'object', properties: {
+    id: { type: 'integer', 'x-entity': { key: true } }, status: { type: 'string' }, code: { type: 'string', 'x-entity': { unique: true } } } } },
+  Bin: { schema: { type: 'object', properties: { code: { type: 'string', 'x-entity': { key: true } }, kind: nullableText } },
+    physical: { table: 'bins', columns: { code: column('code', 'text'), kind: column('kind', 'text', 'null') } } },
+  Line: { schema: { type: 'object', properties: {
+    id: { type: 'integer', 'x-entity': { key: true } }, docId: { type: 'integer' }, docCode: { type: 'string' }, bin: { type: 'string' } } },
+  invariants: [
+    { name: 'open_doc', on: ['insert', 'update'], enforcement, assert: { $or: [{ $not: { $exists: '$.new.docId' } },
+      { '$exists-row': { entity: 'Doc', match: { id: '$.new.docId', status: 'open' } } }] } },
+    { name: 'coded', on: ['insert'], enforcement, assert: { $or: [{ $not: { $exists: '$.new.docCode' } },
+      { '$exists-row': { entity: 'Doc', match: { code: '$.new.docCode' } } }] } },
+    { name: 'binned', on: ['insert', 'update'], enforcement, assert: { '$exists-row': { entity: 'Bin', match: { code: '$.new.bin', kind: 'shelf' } } } },
+    { name: 'kept', on: ['delete'], enforcement, assert: { $not: { '$exists-row': { entity: 'Doc', match: { id: '$.old.docId', status: 'held' } } } } },
+  ] },
+} });
+/** `probingAgreement`'s counts, one per enforcement on both engines: a store rule meets no raw write. */
+export const PROBING_VERDICTS = {
+  database: '{"ok":116,"binned":72,"coded":30,"open_doc":208,"kept":20}',
+  store: '{"ok":50,"binned":40,"coded":15,"open_doc":108,"kept":10}',
+};
+export const PROBING_TABLES = { sqlite: 'CREATE TABLE bins(code TEXT PRIMARY KEY, kind TEXT)', postgres: 'CREATE TABLE bins(code text PRIMARY KEY, kind text)' };
+
+/**
+ * A rule's verdict computed without SQL: each `$exists-row` is answered from
+ * the target's rows as the store reads them back — a row whose every matched
+ * member equals its value, where a value a record leaves missing (or `null`)
+ * equals nothing — and the query engine evaluates the rest.
+ * @param {any} assertion @param {any} record `{ old, new, op }` @param {Record<string, Record<string, unknown>[]>} targets
+ */
+export function judgeWithProbes(assertion, record, targets) {
+  /** @param {any} node @returns {any} */
+  const answered = (node) => {
+    if (Array.isArray(node)) return node.map(answered);
+    if (node === null || typeof node !== 'object') return node;
+    if (Object.hasOwn(node, '$exists-row')) {
+      const { entity, match } = node['$exists-row'];
+      return targets[entity].some((row) => Object.entries(match).every(([member, value]) => {
+        const path = typeof value === 'string' ? /^\$\.(old|new)\.(.+)$/.exec(value) : null;
+        const wanted = path === null ? value : record[path[1]]?.[path[2]];
+        return wanted !== undefined && wanted !== null && row[member] === wanted;
+      }));
+    }
+    return Object.fromEntries(Object.entries(node).map(([key, value]) => [key, answered(value)]));
+  };
+  return compileJsonQuery(answered(assertion))(record) === true;
+}
+
+/**
+ * Every `probingModel` rule over a grid of lines — each probe's key present,
+ * missing, matching a row, a row whose other member differs or is missing,
+ * a row only a raw writer stored, a letter-case variant, no row — written by
+ * the store and by a raw SQL writer, inserted, updated and deleted, while a
+ * raw writer also changes the targets between rounds: each write is refused
+ * in the name of its first failing rule, in declaration order, exactly when
+ * `judgeWithProbes` over the targets as the store reads them back fails it,
+ * and accepted otherwise. Values only a raw writer stores in a key a probe
+ * reads (an integer past the safe range; on PostgreSQL a fraction) are
+ * refused. Returns how many writes met each verdict.
+ * @param {RuleEngine} engine @param {'database' | 'store'} enforcement @returns {Promise<string>}
+ */
+export async function probingAgreement(engine, enforcement) {
+  const model = probingModel(enforcement);
+  const rules = model.entities.Line.invariants;
+  const fixture = await engine.fixture(PROBING_TABLES);
+  try {
+    const store = await openStore(model, { driver: fixture.driver });
+    try {
+      const docs = store.entity('Doc'), lines = store.entity('Line');
+      await docs.create({ id: 1, status: 'open', code: 'a' });
+      await docs.create({ id: 2, status: 'closed', code: 'b' });
+      await docs.create({ id: 4, status: 'held', code: 'A' });
+      // rows only a raw writer stores: a doc with no status nor code, an open one coded with a non-ASCII letter
+      await fixture.exec(`INSERT INTO "Doc" (id, doc) VALUES (3, ${rawDoc(engine)})`);
+      await fixture.exec(`INSERT INTO "Doc" (id, status, code, doc) VALUES (5, 'open', 'é', ${rawDoc(engine)})`);
+      await fixture.exec("INSERT INTO bins VALUES ('x', 'shelf'), ('X', NULL), ('y', 'floor'), ('é', 'shelf')");
+      const targets = async () => ({ Doc: (await Promise.all([1, 2, 3, 4, 5].map((id) => docs.get(id)))).filter(Boolean),
+        Bin: (await fixture.all('SELECT code, kind FROM bins')).map((row) => ({ code: row.code, kind: row.kind ?? null })) });
+      /** The first rule on `op` the record fails, or `ok`: a database rule judges no update that changes
+       * nothing, while a document's `update()` rewrites it, which its store rules judge on every call. */
+      const expected = async (/** @type {string} */ op, /** @type {any} */ before, /** @type {any} */ after) => {
+        if (enforcement === 'database' && op === 'update' && JSON.stringify(before) === JSON.stringify(after)) return 'ok';
+        const seen = await targets();
+        return rules.find((rule) => rule.on.includes(op) && !judgeWithProbes(rule.assert, { old: before, new: after, op }, seen))?.name ?? 'ok';
+      };
+      /** @param {() => Promise<unknown>} write */
+      const verdict = (write) => write().then(() => 'ok', (error) => {
+        const rule = /jaren invariant:(\w+)|persistence invariant '(\w+)'/.exec(String(error?.message));
+        if (rule === null) throw error;
+        return rule[1] ?? rule[2];
+      });
+      const insertSql = (/** @type {any} */ line) => {
+        const members = Object.keys(line);
+        return `INSERT INTO "Line" (${members.map((m) => `"${m}"`).join(', ')}, doc) VALUES (${members.map((m) => rawValue(line[m])).join(', ')}, ${rawDoc(engine)})`;
+      };
+      const verdicts = [];
+      let next = 1;
+      /** @type {any[]} */
+      const kept = [];
+      const grid = [];
+      for (const docId of [undefined, 1, 2, 3, 4, 5, 9]) for (const docCode of [undefined, 'a', 'A', 'z', 'é'])
+        for (const bin of ['x', 'X', 'y', 'é', 'q']) grid.push(presentOf({ docId, docCode, bin }));
+      // a store rule covers the store's own writes; a raw writer meets only a database rule
+      const writers = enforcement === 'database' ? ['store', 'raw'] : ['store'];
+      for (const line of grid) for (const writer of writers) {
+        const row = { id: next++, ...line };
+        const want = await expected('insert', null, row);
+        const got = await verdict(() => (writer === 'store' ? lines.create(row) : fixture.exec(insertSql(row))));
+        assert.equal(got, want, `${writer} insert ${JSON.stringify(row)}`);
+        if (got === 'ok') { assert.deepEqual(await lines.get(row.id), row); kept.push(row); }
+        verdicts.push(got);
+      }
+      // another writer moves the targets: a doc closes, a held one opens, a bin's kind goes missing
+      await fixture.exec('UPDATE "Doc" SET status = \'closed\' WHERE id = 1');
+      await fixture.exec('UPDATE "Doc" SET status = \'open\' WHERE id = 4');
+      await fixture.exec("UPDATE bins SET kind = NULL WHERE code = 'é'");
+      const moves = [{ docId: 4 }, { docId: 1 }, { bin: 'é' }, { bin: 'x', docId: 5 }];
+      for (const [i, row] of kept.entries()) {
+        const changes = moves[i % moves.length];
+        const after = { ...row, ...changes };
+        const want = await expected('update', row, after);
+        const set = Object.entries(changes).map(([m, v]) => `"${m}" = ${rawValue(v)}`).join(', ');
+        const raw = i % 2 === 1 && enforcement === 'database';
+        const got = await verdict(() => (raw ? fixture.exec(`UPDATE "Line" SET ${set} WHERE id = ${row.id}`) : lines.update(row.id, changes)));
+        assert.equal(got, want, `update ${JSON.stringify(row)} with ${JSON.stringify(changes)}`);
+        if (got === 'ok') Object.assign(row, changes);
+        assert.deepEqual(await lines.get(row.id), row);
+        verdicts.push(got);
+      }
+      await fixture.exec('UPDATE "Doc" SET status = \'held\' WHERE id = 5');
+      for (const [i, row] of kept.entries()) {
+        const want = await expected('delete', row, null);
+        const raw = i % 2 === 1 && enforcement === 'database';
+        const got = await verdict(() => (raw ? fixture.exec(`DELETE FROM "Line" WHERE id = ${row.id}`) : lines.delete(row.id)));
+        assert.equal(got, want, `delete ${JSON.stringify(row)}`);
+        assert.deepEqual(await lines.get(row.id), got === 'ok' ? undefined : row);
+        verdicts.push(got);
+      }
+      // a key a probe reads that no integer member reads back: the trigger refuses it as a value of its domain
+      if (enforcement === 'database') for (const value of engine.name === 'sqlite' ? ['9007199254740993'] : ['9007199254740993', '1.5'])
+        await assert.rejects(fixture.exec(`INSERT INTO "Line" (id, "docId", bin, doc) VALUES (999, ${value}, 'x', ${rawDoc(engine)})`), /jaren invariant:open_doc/, value);
+      /** @type {Record<string, number>} */
+      const counts = {};
+      for (const got of verdicts) counts[got] = (counts[got] ?? 0) + 1;
+      return JSON.stringify(counts);
+    }
+    finally { await store.close(); }
+  }
+  finally { await fixture.dispose(); }
+}

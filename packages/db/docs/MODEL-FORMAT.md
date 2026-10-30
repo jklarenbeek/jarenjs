@@ -4884,7 +4884,8 @@ rule and the member (`/entities/Entry/invariants/1/enforcement`) — an
 escape as the engine's own `JQ` error with an empty `docPath`), a database
 rule on a view (at `enforcement`, §13.4), what a database rule on a
 store-owned layout cannot lower (an `audit` or `effects` at that member, a
-probe or a member with no column of its own at `assert`, §13.4) and an
+member with no column of its own at `assert`, a probe's match value among
+them, §13.4) and an
 `audit` into an entity with no writable column layout (at `audit`, §13.5)
 among them. A database rule the trigger lowering cannot translate (an
 operator outside the bounded subset, a column codec it cannot compare,
@@ -4976,13 +4977,21 @@ document — whose column has the target column's codec (an integer into a
 number column is exact), and a literal is a value the target column holds, so
 the database, its other engine and the store compare one value one way;
 anything else refuses at planning. A database rule's match value reads a
-`null` or `reject` column: a member that an `absent` column (§13.4) leaves
-missing has no value to match. A matched member whose target column reads SQL
-NULL as absent serves as a keyed member — `=` never meets SQL NULL, and a
-`null` literal against it refuses — and as no other; a store-owned target's
-epoch, document and boolean members (kept as 0 or 1, which no probe value is)
-refuse at planning. A database rule on a store-owned layout still reads no
-other row (§13.4).
+`null` or `reject` column, and an `absent` one (§13.4) only for a member the
+probe is keyed by: `=` never meets SQL NULL, so a value the row leaves missing
+matches no row, as the engine finds a missing member equal to no value. A
+matched member whose target column reads SQL NULL as absent serves as a keyed
+member — `=` never meets SQL NULL, and a `null` literal against it refuses —
+and as any other only against a value that is never missing: a literal other
+than `null`, or, in a database rule, a member whose column holds no SQL NULL
+(a `reject` column, the key of a layout the store owns), since the null-safe
+comparison would otherwise find a row that leaves the member missing equal to
+a value the rule's row leaves missing; a store-owned target's epoch, document
+and boolean members (kept as 0 or 1, which no probe value is) refuse at
+planning. A database rule on a store-owned layout probes as one on a physical
+layout does, its match values read from the columns of its own members
+(§13.4): an epoch, document or relation member refuses at `assert`, and so does
+a boolean member, kept as 0 or 1.
 `$exists-row` asks for a row of another table; `$exists` (§13.4) asks whether
 a member of the rule's own record is present. A probe composes with `$not`,
 `$and` and `$or` — "the parent is a draft, or it is gone" is
@@ -5062,8 +5071,10 @@ column holds milliseconds while the rule compares the member's text
 array, an object, a union, `column: "json"`) or a relation, at `assert`; an
 `audit` or `effects`, at that member, since journal capture cannot see what a
 trigger writes and such an entity may run capture, live queries or
-replication; `$exists-row`, at `assert`; and `columns` keep their own refusal
-("a document is written whole").
+replication; and `columns` keep their own refusal ("a document is written
+whole"). A probe of another table (`$exists-row`, §13.2) lowers as it does
+from a physical layout, its match values read from these columns; a boolean
+member, kept as 1 or 0, refuses as a match value.
 
 A fresh open creates the programs with the table — on SQLite through the
 same `IF NOT EXISTS` statements as the table, on PostgreSQL, which has no
@@ -5073,7 +5084,13 @@ this open's probe and its create retries into verification — and every open
 verifies them: SQLite by their CREATE text, PostgreSQL field by field (below),
 where any other trigger on a table the store owns, ruled or not, is drift
 (`JD0002`), as on SQLite, and so is a rewrite rule (`CREATE RULE`) on it,
-which changes what a write does as an undeclared trigger does. A table
+which changes what a write does as an undeclared trigger does. PostgreSQL
+reads the programs and rewrite rules of the tables an open verifies in one
+catalog read of the namespace for its collections and one for its entities,
+each taken when the first such table is checked; a table
+that read did not see (a rival committed it since) and a table whose programs
+there depart from the model are each read again on their own, so a refusal
+names what the catalog holds when that table is checked. A table
 dropped outside the store (`DROP TABLE` by hand) takes its triggers with it
 but not its PostgreSQL functions, which the next open of that entity meets
 when it creates the table again (`JD0002`, the function "already exists with

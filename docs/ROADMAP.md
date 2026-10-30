@@ -409,16 +409,19 @@ what each does is its own documentation's job
   keyed by the declaration's `apply`.
 - [ ] **Database invariants over a store-owned layout, beyond its scalar
   columns.** A store-owned entity takes `enforcement: "database"` rules over
-  the scalar and foreign-key columns its table maps, installed with the table
-  and verified at every open (MODEL-FORMAT §13.4). Still refused (`JD0005`): a
-  rule that reads an epoch member, a member the document holds or a relation;
-  an `audit` or `effects`, whose trigger writes journal capture cannot see;
-  and `$exists-row`, whose probe needs the target table's key columns and
-  their declared types. Wanted: those. Introspection reports such a table's
-  triggers as unmapped objects, so a model derived from the database neither
-  reopens nor migrates to the authored one. Every PostgreSQL open reads each
-  store-owned table's triggers and rewrite rules with a query per table (about
-  1.2–1.5 ms each); one read per namespace would bound it.
+  the scalar and foreign-key columns its table maps, `$exists-row` probes of
+  another table among them (a rule about a related row probes it by its
+  foreign-key column), installed with the table and verified at every open
+  (MODEL-FORMAT §13.4). Still refused (`JD0005`): a rule that reads an epoch
+  member, whose column holds milliseconds while the rule compares the member's
+  text, or a member the document holds; and an `audit` or `effects`, whose
+  trigger writes journal capture cannot see. Wanted: those — the epoch member
+  needs the text it reads back rebuilt from milliseconds in SQL on both
+  engines, the document member a JSON read inside the trigger with the
+  engine's missing/null/type semantics, each with an oracle of its own.
+  Introspection reports such a table's triggers as unmapped objects, so a
+  model derived from the database neither reopens nor migrates to the
+  authored one: no reader turns an installed program back into its rule.
 - [ ] **Pushdown beyond the proven scalar shapes.** Group keys the schema does
   not declare as scalars alone (untyped, a union that lists an object or an
   array, reached by a negative index),
@@ -525,15 +528,18 @@ what each does is its own documentation's job
   Still outside: `$mul`, `$div`, `$idiv`, `$mod` and arithmetic over a
   `number` operand (the engine's double rounding and division are not SQL's);
   `$starts-with` (a code-point prefix spelling and an oracle of its own on each
-  engine); an arbitrary trigger program (a `TableTrigger` stays SQLite SQL); a
-  probe of the rule's own table (PostgreSQL runs row triggers at statement end
-  and SQLite per row); an aggregate over other rows; and the stored-row walk of
-  a migration that adds a rule (it judges no stored row today). Store-only rules
-  retain their explicit writer qualification. SQLite's change test compares
-  each column under its declared collation and stored spelling (§13.4), where
-  PostgreSQL and the store compare by codec; comparing by code point would
-  change the text of every installed update program, so it waits for a
-  reviewed migration of installed programs.
+  engine); and the stored-row walk of a migration that adds a rule (it judges
+  no stored row today). Store-only rules retain their explicit writer
+  qualification. SQLite's change test compares each column under its declared
+  collation and stored spelling (§13.4), where PostgreSQL and the store compare
+  by codec; comparing by code point would change the text of every installed
+  update program, so it waits for a reviewed migration of installed programs.
+- [ ] **A PostgreSQL open's per-table catalog reads.** Opening verifies each
+  table the store owns with catalog reads of its own — existence, columns,
+  indexes and their columns, foreign keys, checks — and reads the whole schema
+  once per physical entity; the rule programs and rewrite rules already come
+  from one read of the namespace. One read per namespace for each would bound
+  an open of many tables.
 - [ ] **Broader native authoring for legacy SQL.** The executable census now
   proves five adopted-column read families and three SQLite mutation families
   ([native contracts](../packages/db/docs/NATIVE-PLANS.md)). Receipt history

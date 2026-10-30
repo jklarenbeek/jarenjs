@@ -53,11 +53,13 @@ export function compileInvariants(mapping, all, dialect, flavor) {
   const columns = mapping.columns;
   /** A probe of another table, keyed as the model check keyed it (the target's
    * key, or a declared unique index covering the match), its match values read
-   * as the rule reads them. @param {any} args @param {(expression: any) => string} value */
+   * as the rule reads them: a keyed one may read a column whose SQL NULL is
+   * a missing member, which matches no row as the store's probe answers.
+   * @param {any} args @param {(expression: any, keyed: boolean) => string} value */
   const probe = (args, value) => {
     const target = probeTarget(all.entities[args.entity]);
     const keys = probeKeys(target.keys, target.uniques, Object.keys(args.match), args.entity, fail);
-    return existsRowSql({ match: args.match, target, keys }, dialect, value);
+    return existsRowSql({ match: args.match, target, keys }, dialect, (expression, column) => value(expression, keys.includes(column.name)));
   };
   // an incremented member is the database's, like a version: never a change;
   // a store-owned table's document column holds the rest of the row

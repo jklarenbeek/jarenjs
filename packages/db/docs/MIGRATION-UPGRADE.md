@@ -1103,7 +1103,9 @@ value the store did not honor now refuse by code, before any statement:
   after the migration's transform steps, so a transform can carry stored
   rows into conformance). What such a rule cannot
   lower is `JD0005` at the member: a read of an epoch, document or relation
-  member, `audit`, `effects` and `$exists-row`; `columns` keep their refusal.
+  member, `audit`, `effects` and `$exists-row` (which lowers since
+  [§62](#62-a-database-rule-on-a-store-owned-layout-probes-another-table-and-a-postgresql-open-reads-its-programs-once));
+  `columns` keep their refusal.
   Such a rule judges the rows the database's own foreign-key actions write,
   where a store rule then ran for none of them (it judges them now,
   [§27](#27-store-rules-judge-the-rows-a-foreign-key-action-removes-or-nulls)):
@@ -1122,8 +1124,9 @@ value the store did not honor now refuse by code, before any statement:
   rule (`CREATE RULE`), that the model does not declare on any table the
   store owns — an entity's, a join table's, a collection's — as SQLite's open
   already refused a trigger. Drop such a trigger or rule, or keep that table
-  out of the store's model. That check is one catalog read per store-owned
-  table on every PostgreSQL open, ruled or not.
+  out of the store's model. That check was one catalog read per store-owned
+  table on every PostgreSQL open, ruled or not (one read of the namespace
+  since [§62](#62-a-database-rule-on-a-store-owned-layout-probes-another-table-and-a-postgresql-open-reads-its-programs-once)).
 - A store rule on a store-owned layout judged an insert's document as written:
   a member written `null` passed `{ "$eq": ["$.new.n", null] }` on the insert
   and failed every update of the same row, which reads the member back
@@ -3560,6 +3563,43 @@ PostgreSQL), and its `introspect()` reports each number column's CHECK as
 `unmapped-constraint` beside the same derived model. A migration document this
 release plans carries the CHECK in the column it adds, and keeps creating it
 when the previous release applies it.
+
+## 62. A database rule on a store-owned layout probes another table, and a PostgreSQL open reads its programs once
+
+A database rule on a layout the store owns now lowers `$exists-row`
+([MODEL-FORMAT §13.2](MODEL-FORMAT.md#132-existence-probes)), which was
+refused `JD0005` at `assert`: its trigger reads the probed row by the target's
+key or a unique index the target's open verifies, as a rule on a physical
+layout does, so the database refuses another writer's row the rule's probe
+finds wanting as it refuses the store's. Its match values read the columns of
+the rule's own members. A boolean member (kept as 1 or 0) and a member whose
+codec is not the target column's (an `integer` into a `number` column is
+exact) refuse at planning, as the epoch, document and relation members such a
+rule could not read before still do.
+
+- Two probes plan where they were refused, on a physical layout as on one the
+  store owns: a database rule's value read from a column whose SQL NULL is a
+  missing member, for a member the probe is keyed by — `=` never meets SQL
+  NULL, so a missing value matches no row, as the engine answers — and a
+  target member whose column reads SQL NULL as a missing member, not keyed,
+  matched with a value that is never missing (a literal other than `null`, or
+  in a database rule a member whose column holds no SQL NULL). Every model the
+  previous release accepted plans the same programs as before.
+- On PostgreSQL an open reads the trigger programs and rewrite rules of the
+  tables it verifies in one catalog read of the namespace for its collections
+  and one for its entities, where it read each table's on its own. A table that
+  read did not see (a rival committed it since) and a table whose programs
+  there depart from the model are each read again on their own before the open
+  refuses, so a rival's migration committed meanwhile is judged as it stands;
+  a table is judged as the catalog held it at the read that answered for it.
+
+**Downgrade.** A store whose model both releases accept opens, reads, queries,
+introspects and plans in the previous release as in this one, and a migration
+either plans applies alike. The previous release refuses a store-owned table
+with a database rule that probes: the model at planning (`JD0005`, "reads no
+other row"), and a model without that rule at open (`JD0002`, the rule's
+trigger undeclared). Drop such a rule through a planned migration
+(`planModelMigration`) before the previous release opens the store.
 
 ## Measured costs
 
