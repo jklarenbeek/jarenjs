@@ -13,7 +13,7 @@
     "packages/website/src/examples/adoption-model.js": "7e990a688127108a8e7b158c5030f777baef9a2b5bfcabaf156115ff76551577",
     "packages/website/src/examples/adoption-fixture.js": "16479fa5b6fab527767b763780d9cf2dd24143bdca25f7990ac74cc8779ec567",
     "packages/db/src/jobs.js": "865fd96e486c0444065ce838fabf4cb487655df8fdf3fe7387a52d4188bd6e70",
-    "packages/db/src/store.js": "f9f15a6b2d28ac460aa783fc00b2bed967ce14fb51d3350110d85a633161c2db"
+    "packages/db/src/store.js": "dbd22579a7876e624201627b6eefae44758d5e7f74b810fe7aaffdcf8eefc98f"
   },
   "report": [
     {
@@ -28,7 +28,7 @@
           "secondWrites": 0,
           "secondRevisions": 0,
           "changes": 256,
-          "searchMs": 309.59379400000006,
+          "searchMs": 342.78666000000004,
           "searchHash": "e1a757541681300c320a4f07aa0742b817d9363eb284bfd0d061691e76de93bf",
           "startupDDL": 0,
           "history": 3,
@@ -59,11 +59,11 @@
               "body": "{\"id\":\"catalog-1022\"}"
             }
           ],
-          "elapsedMs": 740.088976,
-          "teardownMs": 0.22073100000000068,
-          "runtime": "v24.20.0",
-          "heapBytes": 90448024,
-          "peakRssBytes": 279367680
+          "elapsedMs": 813.938357,
+          "teardownMs": 0.25575499999990825,
+          "runtime": "v24.22.1",
+          "heapBytes": 90004960,
+          "peakRssBytes": 297627648
         },
         {
           "consumer": "archive-stock",
@@ -74,7 +74,7 @@
           "secondWrites": 0,
           "secondRevisions": 0,
           "changes": 512,
-          "searchMs": 2455.5259379999998,
+          "searchMs": 2587.889499,
           "searchHash": "51902a33caf8dad05035c9e56096dde0af6c44bb7491692213654b689fcd58ae",
           "startupDDL": 0,
           "history": 1,
@@ -110,11 +110,11 @@
               "body": "{\"query\":\"query Items($after: String) { items(after: $after) { id } }\",\"variables\":{\"after\":\"430\"}}"
             }
           ],
-          "elapsedMs": 3894.7895940000003,
-          "teardownMs": 0.20675399999981892,
-          "runtime": "v24.20.0",
-          "heapBytes": 332367488,
-          "peakRssBytes": 902008832
+          "elapsedMs": 4054.796681,
+          "teardownMs": 0.2165049999994153,
+          "runtime": "v24.22.1",
+          "heapBytes": 333291056,
+          "peakRssBytes": 912883712
         },
         {
           "consumer": "catalog",
@@ -128,11 +128,11 @@
           "startupDDL": 0,
           "history": 3,
           "wire": [],
-          "elapsedMs": 93.69850899999997,
-          "teardownMs": 0.8006280000000174,
-          "runtime": "v24.20.0",
-          "heapBytes": 42458560,
-          "peakRssBytes": 131465216
+          "elapsedMs": 101.69605199999998,
+          "teardownMs": 0.876564999999971,
+          "runtime": "v24.22.1",
+          "heapBytes": 42988784,
+          "peakRssBytes": 140251136
         }
       ],
       "crashExit": 73,
@@ -151,7 +151,7 @@
           "secondWrites": 0,
           "secondRevisions": 0,
           "changes": 256,
-          "searchMs": 242.994,
+          "searchMs": 258.98249100000004,
           "searchHash": "e1a757541681300c320a4f07aa0742b817d9363eb284bfd0d061691e76de93bf",
           "startupDDL": 0,
           "history": 3,
@@ -182,11 +182,11 @@
               "body": "{\"id\":\"catalog-1022\"}"
             }
           ],
-          "elapsedMs": 601.066603,
-          "teardownMs": 0.26154700000006414,
+          "elapsedMs": 624.173691,
+          "teardownMs": 0.28145599999993465,
           "runtime": "1.4.2",
-          "heapBytes": 71084456,
-          "peakRssBytes": 280039424
+          "heapBytes": 71106963,
+          "peakRssBytes": 285253632
         },
         {
           "consumer": "archive-stock",
@@ -197,7 +197,7 @@
           "secondWrites": 0,
           "secondRevisions": 0,
           "changes": 512,
-          "searchMs": 1831.008863,
+          "searchMs": 2142.350244,
           "searchHash": "51902a33caf8dad05035c9e56096dde0af6c44bb7491692213654b689fcd58ae",
           "startupDDL": 0,
           "history": 1,
@@ -233,11 +233,11 @@
               "body": "{\"query\":\"query Items($after: String) { items(after: $after) { id } }\",\"variables\":{\"after\":\"430\"}}"
             }
           ],
-          "elapsedMs": 3015.8152889999997,
-          "teardownMs": 0.25471299999981056,
+          "elapsedMs": 3406.317677,
+          "teardownMs": 0.24276400000007925,
           "runtime": "1.4.2",
-          "heapBytes": 346775137,
-          "peakRssBytes": 1062293504
+          "heapBytes": 347128307,
+          "peakRssBytes": 1041100800
         },
         {
           "consumer": "catalog",
@@ -251,11 +251,11 @@
           "startupDDL": 0,
           "history": 3,
           "wire": [],
-          "elapsedMs": 77.56731200000002,
-          "teardownMs": 0.7793389999999931,
+          "elapsedMs": 81.59470400000001,
+          "teardownMs": 0.8026039999999739,
           "runtime": "1.4.2",
-          "heapBytes": 10350575,
-          "peakRssBytes": 87728128
+          "heapBytes": 10473599,
+          "peakRssBytes": 85532672
         }
       ],
       "crashExit": 73,
@@ -274,7 +274,7 @@
           "secondWrites": 0,
           "secondRevisions": 0,
           "changes": 256,
-          "searchMs": 251.799859,
+          "searchMs": 272.08801199999994,
           "searchHash": "e1a757541681300c320a4f07aa0742b817d9363eb284bfd0d061691e76de93bf",
           "startupDDL": 0,
           "history": 3,
@@ -305,11 +305,11 @@
               "body": "{\"id\":\"catalog-1022\"}"
             }
           ],
-          "elapsedMs": 611.024734,
-          "teardownMs": 0.20835799999997562,
+          "elapsedMs": 640.905737,
+          "teardownMs": 0.2794309999999314,
           "runtime": "1.4.2",
-          "heapBytes": 94085372,
-          "peakRssBytes": 288399360
+          "heapBytes": 53148354,
+          "peakRssBytes": 278634496
         },
         {
           "consumer": "archive-stock",
@@ -320,7 +320,7 @@
           "secondWrites": 0,
           "secondRevisions": 0,
           "changes": 512,
-          "searchMs": 1806.135104,
+          "searchMs": 1806.370703,
           "searchHash": "51902a33caf8dad05035c9e56096dde0af6c44bb7491692213654b689fcd58ae",
           "startupDDL": 0,
           "history": 1,
@@ -356,11 +356,11 @@
               "body": "{\"query\":\"query Items($after: String) { items(after: $after) { id } }\",\"variables\":{\"after\":\"430\"}}"
             }
           ],
-          "elapsedMs": 3059.5027210000003,
-          "teardownMs": 0.25702700000010736,
+          "elapsedMs": 3086.248231,
+          "teardownMs": 0.27496100000007573,
           "runtime": "1.4.2",
-          "heapBytes": 345383440,
-          "peakRssBytes": 1016549376
+          "heapBytes": 337998427,
+          "peakRssBytes": 1049149440
         },
         {
           "consumer": "catalog",
@@ -374,17 +374,17 @@
           "startupDDL": 0,
           "history": 3,
           "wire": [],
-          "elapsedMs": 74.30556899999999,
-          "teardownMs": 0.7789490000000114,
+          "elapsedMs": 79.233405,
+          "teardownMs": 0.7841669999999965,
           "runtime": "1.4.2",
-          "heapBytes": 9831813,
-          "peakRssBytes": 74719232
+          "heapBytes": 9881548,
+          "peakRssBytes": 73904128
         }
       ],
       "crashExit": 73,
       "remoteSends": 2,
       "recoverySends": 0,
-      "binaryBytes": 84149728
+      "binaryBytes": 84190688
     },
     {
       "label": "node-executable",
@@ -398,7 +398,7 @@
           "secondWrites": 0,
           "secondRevisions": 0,
           "changes": 256,
-          "searchMs": 349.03157600000003,
+          "searchMs": 361.2306300000001,
           "searchHash": "e1a757541681300c320a4f07aa0742b817d9363eb284bfd0d061691e76de93bf",
           "startupDDL": 0,
           "history": 3,
@@ -429,11 +429,11 @@
               "body": "{\"id\":\"catalog-1022\"}"
             }
           ],
-          "elapsedMs": 781.712942,
-          "teardownMs": 0.20377899999994042,
-          "runtime": "v24.20.0",
-          "heapBytes": 81357840,
-          "peakRssBytes": 271634432
+          "elapsedMs": 816.592985,
+          "teardownMs": 0.22327900000004774,
+          "runtime": "v24.22.1",
+          "heapBytes": 82323200,
+          "peakRssBytes": 271036416
         },
         {
           "consumer": "archive-stock",
@@ -444,7 +444,7 @@
           "secondWrites": 0,
           "secondRevisions": 0,
           "changes": 512,
-          "searchMs": 2399.194101,
+          "searchMs": 2550.828775,
           "searchHash": "51902a33caf8dad05035c9e56096dde0af6c44bb7491692213654b689fcd58ae",
           "startupDDL": 0,
           "history": 1,
@@ -480,11 +480,11 @@
               "body": "{\"query\":\"query Items($after: String) { items(after: $after) { id } }\",\"variables\":{\"after\":\"430\"}}"
             }
           ],
-          "elapsedMs": 3843.208998,
-          "teardownMs": 0.24562599999990198,
-          "runtime": "v24.20.0",
-          "heapBytes": 327460832,
-          "peakRssBytes": 821612544
+          "elapsedMs": 4004.4500379999995,
+          "teardownMs": 0.21378099999947153,
+          "runtime": "v24.22.1",
+          "heapBytes": 327629368,
+          "peakRssBytes": 818057216
         },
         {
           "consumer": "catalog",
@@ -498,17 +498,17 @@
           "startupDDL": 0,
           "history": 3,
           "wire": [],
-          "elapsedMs": 99.757733,
-          "teardownMs": 0.619923,
-          "runtime": "v24.20.0",
-          "heapBytes": 22857768,
-          "peakRssBytes": 91140096
+          "elapsedMs": 110.50074099999999,
+          "teardownMs": 0.7162820000000067,
+          "runtime": "v24.22.1",
+          "heapBytes": 21587664,
+          "peakRssBytes": 91156480
         }
       ],
       "crashExit": 73,
       "remoteSends": 2,
       "recoverySends": 0,
-      "binaryBytes": 129436864
+      "binaryBytes": 129895616
     }
   ],
   "workerHosts": {
@@ -518,41 +518,41 @@
     "scans": 5,
     "eventLoopBoundMs": 50,
     "sideEffectImportBytes": {
-      "bun": 506309,
-      "esbuild": 569604
+      "bun": 510068,
+      "esbuild": 575702
     },
     "hosts": [
       {
         "host": "worker",
         "written": 20001,
         "streamed": 20001,
-        "longReadMs": 258.3131870000001,
+        "longReadMs": 318.710914,
         "eventLoopDelayMs": {
-          "p50": 0.040639,
-          "p99": 0.982527,
-          "max": 1.412615
+          "p50": 0.049727,
+          "p99": 1.148927,
+          "max": 1.814562
         }
       },
       {
         "host": "pool",
         "written": 20001,
         "streamed": 20001,
-        "longReadMs": 319.7584999999999,
+        "longReadMs": 376.6475140000002,
         "eventLoopDelayMs": {
-          "p50": 0.051583,
-          "p99": 0.989183,
-          "max": 2.122474
+          "p50": 0.061727,
+          "p99": 1.232895,
+          "max": 1.828739
         }
       },
       {
         "host": "in-thread",
         "written": 20001,
         "streamed": 20001,
-        "longReadMs": 85.38961399999971,
+        "longReadMs": 88.21290399999998,
         "eventLoopDelayMs": {
-          "p50": 0.058719,
-          "p99": 85.393407,
-          "max": 85.383661
+          "p50": 0.068351,
+          "p99": 88.014847,
+          "max": 88.01481
         }
       }
     ],

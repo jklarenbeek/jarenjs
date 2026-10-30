@@ -175,11 +175,11 @@ days of the year. The mapped pre-filter scans every window alike — the
 comparison between two columns that keeps an inverted span for the engine
 binds no index — and the exact plan seeks the start index from the
 window's end and reads every span that started before it, so on SQLite it
-wins early in the year and loses late in it — the declared plan is <!--fact:series.spanVerdict-->25.7× faster at day 10, 2.6× faster at day 180 and 1.6× faster at day 355<!--/fact-->.
+wins early in the year and loses late in it — the declared plan is <!--fact:series.spanVerdict-->32.5× faster at day 10, 2.6× faster at day 180 and 1.6× faster at day 355<!--/fact-->.
 A `maxDuration` is the late window's cure: no span meeting a window began
 more than that long before it, so the plan bounds the start from below as
 well and the seek reads the window's neighbourhood alone, whatever the
-day — with the duration bounded the plan is <!--fact:series.spanBoundedVerdict-->407.1× faster at day 10, 515.6× faster at day 180 and 857.4× faster at day 355<!--/fact-->.
+day — with the duration bounded the plan is <!--fact:series.spanBoundedVerdict-->440.5× faster at day 10, 514.3× faster at day 180 and 835.7× faster at day 355<!--/fact-->.
 PostgreSQL chooses per window — a bitmap read of one bound's index where
 the window is selective, a sequential scan where it is not — and at no
 measured window was the exact plan slower than the scan it replaces; with
@@ -189,9 +189,9 @@ measured window, the middle one included.
 <!--fact:series.spanTable-->
 | window | spans met | mapped pre-filter (scan) | declared interval (seek) | the declaration is | with `maxDuration` (two-sided seek) | the bound is |
 |---|---:|---:|---:|---|---:|---|
-| day 10 | 38 | 33 ms | 1.3 ms | 25.7× faster | 0.08 ms | 407.1× faster |
-| day 180 | 38 | 36 ms | 14 ms | 2.6× faster | 0.07 ms | 515.6× faster |
-| day 355 | 20 | 42 ms | 26 ms | 1.6× faster | 0.05 ms | 857.4× faster |
+| day 10 | 38 | 33 ms | 1 ms | 32.5× faster | 0.074 ms | 440.5× faster |
+| day 180 | 38 | 36 ms | 14 ms | 2.6× faster | 0.07 ms | 514.3× faster |
+| day 355 | 20 | 43 ms | 27 ms | 1.6× faster | 0.051 ms | 835.7× faster |
 <!--/fact-->
 
 On PostgreSQL `#>` resolves the key `"0"` of an object where the span's path
