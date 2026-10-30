@@ -655,7 +655,8 @@ if (asyncLiveLeak.length)
 // Raised to 1,081,000 (measured 1080970): the validator's compile-time keyword value shapes read from the draft meta-schemas (keyword-values 5392) and its coded refusals, and the per-kind unique keys on both engines with decoded member names and typed-column kinds (ddl, introspect, sqlite dialect 6894) add 13456.
 // Raised to 1,092,700 (measured 1092604): entity expression indexes planned, verified at open and read back (ddl, model, introspect, expression), integers past 2^53 read and compared by the doubles that round to them on every engine and host (double-interval, emit, query, dialects), windows and counts over concatenation and arithmetic (plan), the probe that keeps an unbounded integer order on its index and the coded refusals the hunts added add 13757; the keyword-value shape table saves 2123.
 // Raised to 1,099,500 (measured 1099452): literals, lists, member pairs, joins and integer orderings compared and ordered as the engine's doubles (emit, plan, query, double-interval), the query engine's new string and error operators, and one identifier reading for every compile site (validate traverse, index, normalize) add 6848.
-if (clientBytes > 1099500)
+// Raised to 1,105,000 (measured 1104967): the validator's vocabularies read per place from the dialect governing it, one resource index for every reader of a schema, the identifier read without a pointer fragment and the normalizer's check of a default against a closed place (validate 3733), and PostgreSQL's NaN check on number columns, an untyped member's jsonb range and a key's order read from its index (db 1755) add 5515.
+if (clientBytes > 1105000)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 

@@ -233,19 +233,19 @@ changes, until it is measured again:
 
 <!--fact:postgres.membership-->
 
-Measured 2026-10-17T20:57:39.861Z: PostgreSQL 17.11 (Debian 17.11-1.pgdg12+2) (jit=on, jit_above_cost=100000, jit_inline_above_cost=500000, jit_optimize_above_cost=500000), Node 24.20.0, pg 8.23.0; 2000 documents in each table, analyzed first; the median of 31 calls after 6 warm-up calls; host load (one-minute average) 2.31 before and 2.20 after, on 16 cores.
+Measured 2026-10-30T17:45:06.100Z: PostgreSQL 17.11 (Debian 17.11-1.pgdg12+2) (jit=on, jit_above_cost=100000, jit_inline_above_cost=500000, jit_optimize_above_cost=500000), Node 24.22.1, pg 8.23.0; 2000 documents in each table, analyzed first; the median of 31 calls after 6 warm-up calls; host load (one-minute average) 1.15 before and 1.14 after, on 16 cores.
 
 One statement carries at most 128 leaf predicates. A chain of `$and` pairs (pairs) is not regrouped, so every term is a leaf; the same number of terms written as equalities on one member and ranges on another (regrouped) becomes one membership list and one bound.
 
 | Chain | Terms | Leaf predicates | Plan | `execute()` ms | The engine alone, ms | Rows |
 |---|---:|---:|---|---:|---:|---:|
-| pairs | 50 | 50 | native | 2.36 | 10.41 | 25 |
-| pairs | 100 | 100 | native | 2.59 | 13.22 | 50 |
-| pairs | 200 | 200 | engine, `predicate.termBound` | 19.46 | same route | 100 |
-| pairs | 400 | 400 | engine, `predicate.termBound` | 32.48 | same route | 200 |
-| regrouped | 400 | 2 | native | 3.86 | 45.74 | 200 |
+| pairs | 50 | 50 | native | 2.57 | 12.34 | 25 |
+| pairs | 100 | 100 | native | 3.14 | 15.24 | 50 |
+| pairs | 200 | 200 | engine, `predicate.termBound` | 21.67 | same route | 100 |
+| pairs | 400 | 400 | engine, `predicate.termBound` | 33.29 | same route | 200 |
+| regrouped | 400 | 2 | native | 4.49 | 43.21 | 200 |
 
-The native statements under `EXPLAIN (ANALYZE)`: the planner priced them at 147.29 to 288.37 against jit_above_cost=100000, the server planned them in 0.08 to 0.34 ms and ran them in 0.13 to 1.71 ms, and its JIT compiled 0 of the 3.
+The native statements under `EXPLAIN (ANALYZE)`: the planner priced them at 147.29 to 288.37 against jit_above_cost=100000, the server planned them in 0.10 to 0.38 ms and ran them in 0.40 to 4.94 ms, and its JIT compiled 0 of the 3.
 
 The planner's own estimate, `explain().budget.estimatedRows`, against the rows each statement returns:
 
@@ -692,11 +692,11 @@ records matching tool versions and each recovery assertion:
 
 | Logical backup / restore server | Tables / rows | Archive bytes | Omitted metadata cases detected | Elapsed ms |
 |---|---:|---:|---:|---:|
-| 16.15 (Debian 16.15-1.pgdg12+2) | 14 / 16 | 27503 | 10 | 1137.20 |
-| 17.11 (Debian 17.11-1.pgdg12+2) | 14 / 16 | 27926 | 10 | 1022.07 |
-| 18.6 (Debian 18.6-1.pgdg12+2) | 14 / 16 | 27864 | 10 | 1164.71 |
+| 16.15 (Debian 16.15-1.pgdg12+2) | 14 / 16 | 27446 | 10 | 1823.83 |
+| 17.11 (Debian 17.11-1.pgdg12+2) | 14 / 16 | 27866 | 10 | 1130.88 |
+| 18.6 (Debian 18.6-1.pgdg12+2) | 14 / 16 | 27804 | 10 | 1192.18 |
 
-Archived WAL: 17.11 (Debian 17.11-1.pgdg12+2), 14 tables / 16 rows, 5808.37 ms; source stopped before promotion: true. Physical sequence advances are retained in the result. Power loss and fleet failover were not tested.
+Archived WAL: 17.11 (Debian 17.11-1.pgdg12+2), 14 tables / 16 rows, 5819.00 ms; source stopped before promotion: true. Physical sequence advances are retained in the result. Power loss and fleet failover were not tested.
 
 <!--/fact-->
 

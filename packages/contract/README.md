@@ -831,12 +831,12 @@ benchmark-figure gate so no number here is typed by hand:
 
 - **Route match**: the compiled matcher resolves the probe mix —
   static hot paths, variables, the static-beats-variable case, a miss —
-  at <!--fact:contract.match.vs-fmw-->177 ns per lookup vs find-my-way's 183 ns<!--/fact-->;
-  hono's TrieRouter is <!--fact:contract.match.vs-hono-->1.8x<!--/fact--> behind, and its RegExpRouter refuses this
+  at <!--fact:contract.match.vs-fmw-->172 ns per lookup vs find-my-way's 187 ns<!--/fact-->;
+  hono's TrieRouter is <!--fact:contract.match.vs-hono-->1.9x<!--/fact--> behind, and its RegExpRouter refuses this
   route table outright (a static path registered after a param sibling).
 - **Dispatch, in-process**: the whole pipeline (route, decode, validate
   input, handler, validate output,
-  serialize) is <!--fact:contract.dispatch.vs-fastify-->2.4–10.3x<!--/fact-->
+  serialize) is <!--fact:contract.dispatch.vs-fastify-->2.3–9.9x<!--/fact-->
   faster than Fastify driven through its own `inject` — a number that
   includes Fastify's mock-stream harness, which is why the next row
   exists.
@@ -861,7 +861,7 @@ benchmark-figure gate so no number here is typed by hand:
   cached representation, validate on rebuild and serve by revision instead of
   paying validation on every request.
 - **Revision**: computing it
-  costs <!--fact:contract.revision.ms-->2.4 ms<!--/fact--> for the 123-operation
+  costs <!--fact:contract.revision.ms-->2.3 ms<!--/fact--> for the 123-operation
   contract, once per process.
 
 ## What it is not
