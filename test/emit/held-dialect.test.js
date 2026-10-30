@@ -115,6 +115,9 @@ describe('the readers of a document under a held dialect read it as the document
       return counts;
     };
     assert.deepEqual(census(true), { normalized: 280, normalizedDiffer: 0, emitted: 70, emittedDiffer: 0, profiles: 35, profilesDiffer: 0 });
-    assert.deepEqual(census(false), { normalized: 280, normalizedDiffer: 71, emitted: 70, emittedDiffer: 40, profiles: 35, profilesDiffer: 20 });
+    // By name alone a custom dialect reads as draft-07, where `prefixItems`
+    // is no keyword: the tuple body under each dialect extending 2020-12
+    // (e20, chain20, vocabOff) emits an array, not its translation's tuple.
+    assert.deepEqual(census(false), { normalized: 280, normalizedDiffer: 71, emitted: 70, emittedDiffer: 46, profiles: 35, profilesDiffer: 20 });
   });
 });

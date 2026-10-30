@@ -131,37 +131,29 @@ delete it or fix it.
   bundle than the validator's budget and measured no faster than the log on
   suite-size instances; a smaller encoding of it, or gating that pays for
   itself, is the open work.
-- [ ] **A default the normalizer fills beside a `$ref` or in an `allOf` branch
-  can be a member `additionalProperties: false` refuses.**
-  `compileNormalizer({ $schema:
-  'https://json-schema.org/draft/2020-12/schema', $defs: { s: { type:
-  'object', properties: { a: { type: 'string', default: 'x' } } } }, $ref:
-  '#/$defs/s', properties: { b: { type: 'integer' } }, additionalProperties:
-  false }, { useDefaults: true })({})` returns `{ a: 'x' }`, which the
-  validator refuses where it accepted `{}`; `{ allOf: [{ properties: { a: {
-  default: 'x' } } }], properties: { b: {} }, additionalProperties: false }`
-  alike. A silent wrong answer: the normalized value fails a schema its input
-  passed.
-- [ ] **The validator reads `$vocabulary` from the compile root only.** Under
-  a held dialect whose `$vocabulary` omits the validation vocabulary,
-  `compile({ $schema: OFF, type: 'object', properties: { b: { type: 'integer'
-  } }, required: ['b'] })` accepts `{ b: 'n' }` and `{}`, while the same
-  document held with `addSchema(doc, key)` and compiled as `{ $ref: key }`
-  refuses both. `compileNormalizer`, `@jarenjs/emit` and `deriveStrictProfile`
-  (with `dialects`) read the draft only, as the `$ref` compile does: emit
-  types `b: number`.
-- [ ] **@jarenjs/emit types `prefixItems` under draft-07.** `emitTypeScript({
-  $schema: 'http://json-schema.org/draft-07/schema#', type: 'array',
-  prefixItems: [{ type: 'integer' }] })` is `[TItem1?, ...Array<unknown>]`
-  while the validator (and the normalizer) read `prefixItems` as an unknown
-  keyword there and accept `['x']` (packages/emit/src/model.js `arrayShape`
-  and the variant analysis read `prefixItems` in every draft;
-  `readPrefixItems` gates it by draft in the normalizer).
-- [ ] **A root `$id` spelled as a pointer names the place it spells.**
-  `compile({ $id: '#/definitions/s', definitions: { s: { type: 'string' } },
-  properties: { a: { $ref: '#/definitions/s' } } })` accepts `{ a: 1 }`:
-  `#/definitions/s` is registered as the root, so the `$ref` reaches the root;
-  held under a key alike (unchanged by this slice).
+- [ ] **A default the normalizer fills can fail a keyword other than a by-name
+  closer.** A filled default is kept out only where an `additionalProperties:
+  false` or `unevaluatedProperties: false` at its place refuses its member;
+  `{}` still normalizes to a value the validator refuses under `{ allOf: [{
+  properties: { a: { default: 'x' } } }], additionalProperties: { type:
+  'integer' } }`, `{ properties: { a: { default: 1 }, b: {} },
+  dependentRequired: { a: ['b'] } }` (2020-12), `{ properties: { a: { default:
+  1 } }, maxProperties: 0 }`, `{ allOf: [{ properties: { a: { default: 1 } }
+  }, { properties: { a: false } }] }`, and `{ b: 1 }` under `{ properties: {
+  a: { default: 1 }, b: {} }, dependentSchemas: { a: { properties: { a: {} },
+  additionalProperties: false } } }` (the filled member brings a closer of
+  other members into force). A default its own schema refuses (`{ type:
+  'integer', default: 'x' }`) is filled as written. Deciding them needs the
+  default checked against the schemas it meets.
+- [ ] **The readers do not read `$vocabulary`.** Under a held dialect whose
+  `$vocabulary` omits the validation vocabulary, the validator accepts `{ b:
+  'n' }` and `{}` for `{ $schema: OFF, type: 'object', properties: { b: {
+  type: 'integer' } }, required: ['b'] }`, compiled directly or through a
+  `$ref`, while with `dialects` `@jarenjs/emit` types `b: number` and requires
+  it, `deriveStrictProfile` derives `{ b: { type: 'integer' } }` required, and
+  `compileNormalizer` coerces `b` by its `type`: they read the draft only.
+  Reading it means each reader drops the validation keywords where the dialect
+  governing a place leaves them out.
 - [ ] **A held document without a key whose root `$id` is only a fragment
   refuses its pointers.** `addSchema({ $id: '#root', definitions: { s: { type:
   'string' } }, properties: { a: { $ref: '#/definitions/s' } } })` then

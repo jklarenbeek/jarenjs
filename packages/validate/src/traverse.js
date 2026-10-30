@@ -34,6 +34,7 @@ import {
   admitsPropertyDependencies,
   caselessUri,
   identifierKeyword,
+  identifierText,
 } from './schema-keywords.js';
 import { admitsDynamicReference } from './dynamic-ref.js';
 import { DEFAULT_ORIGIN } from './origin.js';
@@ -261,6 +262,10 @@ function atFragment(uri) {
  *   `$schema` names a dialect the walk could not resolve (its meta-schema not
  *   held yet), that URI: a compile that holds the meta-schema reads the place
  *   by it ({@link placeDraftOf}, {@link readsForeign})
+ * @property {WeakMap<object, string>} dialectUris - For a place under a
+ *   `$schema` (the nearest one on the way to it, its document's or an
+ *   embedded resource's), that URI: the compiler reads the vocabularies its
+ *   meta-schema declares there (`ValidationRoot#optionsAt`)
  * @property {Map<string, string>} unread - The identifiers a place writes
  *   but no keyword declares (a draft-04 `id` under a declared later draft,
  *   an anchor spelled as a JSON Pointer), each with why: a refusal to
@@ -357,8 +362,11 @@ export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPoi
     return id;
   }
 
-  const { id: rootUri } = createJsonPointer(schema.$id, baseUri, opts, '$id', '#/%24id');
-  if (!isStringType(schema.$id) || isStringWhiteSpace(schema.$id)) {
+  // A root `$id` read without a JSON Pointer fragment ({@link identifierText}):
+  // one that is only such a fragment names nothing, as no `$id` does.
+  const rootId = isStringType(schema.$id) && !isStringWhiteSpace(schema.$id) ? identifierText(schema.$id) : undefined;
+  const { id: rootUri } = createJsonPointer(rootId, baseUri, opts, '$id', '#/%24id');
+  if (rootId === undefined) {
     // A URI only a reference names (a `null` placeholder) holds no schema.
     const held = schemas.get(rootUri);
     if (held != null && held !== schema)
@@ -426,11 +434,11 @@ export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPoi
   // A `$schema` is read through the meta-schemas this walk registers and the
   // ones the validator already holds.
   const dialects = { get: (/** @type {string} */ key) => schemas.get(key) ?? held?.get(key) };
-  /** @type {{ obj: any, base: string, path: string, draft: number|null, foreign: boolean, dialect: string|undefined }[]} */
-  const queue = [{ obj: schema, base: rootUri, path: '#', draft: null, foreign: false, dialect: undefined }];
+  /** @type {{ obj: any, base: string, path: string, draft: number|null, foreign: boolean, dialect: string|undefined, dialectUri: string|undefined }[]} */
+  const queue = [{ obj: schema, base: rootUri, path: '#', draft: null, foreign: false, dialect: undefined, dialectUri: undefined }];
   while (queue.length > 0) {
     // @ts-ignore
-    const { obj, base, path, draft: inheritedDraft, foreign: inheritedForeign, dialect: inheritedDialect } = queue.shift();
+    const { obj, base, path, draft: inheritedDraft, foreign: inheritedForeign, dialect: inheritedDialect, dialectUri: inheritedUri } = queue.shift();
     // The draft a document declares is inherited by everything below it. A
     // `$schema` that names no draft yet is read as draft-07 and foreign here,
     // and is kept, so a compile that holds its meta-schema reads it by that.
@@ -443,12 +451,21 @@ export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPoi
     const dialect = named === undefined ? inheritedDialect : named === null ? obj.$schema : undefined;
     if (dialect !== undefined) places?.dialects.set(obj, dialect);
     else places?.dialects.delete(obj);
+    // the dialect whose vocabularies the place is read under
+    const dialectUri = isStringType(obj.$schema) ? obj.$schema : inheritedUri;
+    if (dialectUri !== undefined) places?.dialectUris.set(obj, dialectUri);
+    else places?.dialectUris.delete(obj);
 
     // `$id`, or the draft-04 `id` where no known draft is declared
     const declaredDraft = foreign ? null : draft;
     const idName = identifierKeyword(obj, declaredDraft);
     const idKeyword = idName === undefined ? undefined : obj[idName];
-    const hasId = isStringType(idKeyword) && !isStringWhiteSpace(idKeyword);
+    // read without a JSON Pointer fragment, which names nothing: the place
+    // the pointer spells keeps its own name
+    const idText = isStringType(idKeyword) && !isStringWhiteSpace(idKeyword) ? identifierText(idKeyword) : undefined;
+    const hasId = idText !== undefined;
+    if (idText !== idKeyword && isStringType(idKeyword) && idName !== undefined)
+      unread(idKeyword, base, pointerIdentifier(idName, idKeyword, path));
     if (idName === undefined && isStringType(obj.id) && !isStringWhiteSpace(obj.id))
       unread(obj.id, base, `it is named only by id at '${encodeJsonPointerPath(path, 'id')}', which from draft-06 on is no keyword and names nothing; spell it ${draft !== null && draft >= 2019 && /^#[^/]/.test(obj.id) ? `$anchor: '${obj.id.slice(1)}'` : `$id: '${obj.id}'`}`);
     if (hasId) {
@@ -456,7 +473,7 @@ export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPoi
       // the root's `$id` was resolved once, against the base it is read under
       if (obj === schema && idName === '$id') id = rootUri;
       else try {
-        ({ id } = createJsonPointer(idKeyword, base, opts, idName, encodeJsonPointerPath(path, idName)));
+        ({ id } = createJsonPointer(idText, base, opts, idName, encodeJsonPointerPath(path, idName)));
       }
       catch (e) {
         fault(e);
@@ -574,13 +591,13 @@ export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPoi
                 throw new Error(`${nextpath} is not a schema`);
             }
 
-            queue.push({ obj: item, base: baseUri, path: nextpath, draft, foreign, dialect });
+            queue.push({ obj: item, base: baseUri, path: nextpath, draft, foreign, dialect, dialectUri });
           }
         }
         else {
           const nextpath = encodeJsonPointerPath(path, key);
 
-          queue.push({ obj: value, base: baseUri, path: nextpath, draft, foreign, dialect });
+          queue.push({ obj: value, base: baseUri, path: nextpath, draft, foreign, dialect, dialectUri });
         }
       }
       // or is the property a map of key and schema objects?
@@ -599,7 +616,7 @@ export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPoi
               throw new Error(`${nextpath} is not a schema`);
           }
 
-          queue.push({ obj: item, base: baseUri, path: nextpath, draft, foreign, dialect });
+          queue.push({ obj: item, base: baseUri, path: nextpath, draft, foreign, dialect, dialectUri });
         }
       }
       // or a map of maps (member name -> member value -> schema objects)?
@@ -622,7 +639,7 @@ export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPoi
                 throw new Error(`${nextpath} is not a schema`);
             }
 
-            queue.push({ obj: item, base: baseUri, path: nextpath, draft, foreign, dialect });
+            queue.push({ obj: item, base: baseUri, path: nextpath, draft, foreign, dialect, dialectUri });
           }
         }
       }
@@ -638,16 +655,17 @@ const UNHELD = 'no schema the validator holds has that URI; register it with add
  * The identifier a schema object declares where a compile computes a base
  * or a resource from it, read as the walk reads it: a non-empty `$id`, else
  * the draft-04 `id` where the object's document declares no known draft
- * ({@link identifierKeyword}).
+ * ({@link identifierKeyword}), each without a JSON Pointer fragment
+ * ({@link identifierText}).
  * @param {any} schema - A schema object
  * @param {number|null} declaredDraft - The known draft its document declares
  *   ({@link declaredDraftOf}), null for none or an unknown one
- * @returns {any} The `$id` (as written) or the `id`, or undefined
+ * @returns {any} The `$id` or the `id`, or undefined
  */
 export function identifierOf(schema, declaredDraft) {
   if (!isObjectClass(schema)) return undefined;
-  if (schema.$id) return schema.$id;
-  return identifierKeyword(schema, declaredDraft) === 'id' && !isStringWhiteSpace(schema.id) ? schema.id : undefined;
+  if (schema.$id) return isStringType(schema.$id) ? identifierText(schema.$id) : schema.$id;
+  return identifierKeyword(schema, declaredDraft) === 'id' && !isStringWhiteSpace(schema.id) ? identifierText(schema.id) : undefined;
 }
 
 /**
@@ -681,6 +699,18 @@ function pointerShaped(fragment) {
  */
 function pointerAnchor(keyword, name, path) {
   return `'#${name}' is a JSON Pointer, and the ${keyword} '${name}' at '${encodeJsonPointerPath(path, keyword)}' spelled like it names nothing; give the anchor a plain name (a letter or '_', then letters, digits, '-', '.', '_')`;
+}
+
+/**
+ * Why a reference spelled as the pointer an identifier's fragment spells
+ * does not reach the place declaring it.
+ * @param {string} keyword - `$id` or `id`
+ * @param {string} id - The identifier as written
+ * @param {string} path - The place declaring it
+ * @returns {string}
+ */
+function pointerIdentifier(keyword, id, path) {
+  return `the fragment of the ${keyword} '${id}' at '${encodeJsonPointerPath(path, keyword)}' is a JSON Pointer, which names no place: the pointer reads the document; name the place with $anchor (draft-07 and earlier: an $id fragment with a plain name)`;
 }
 
 /**

@@ -154,7 +154,12 @@ fragment that decodes to `/…` is a pointer, its `%2F`s read as `/`s
 anchor spelled as a pointer registers nothing (it would shadow the place the
 pointer names); the walk records it in `places.unread`, as it records a
 draft-04 `id` it does not read, so the `JK0009` for a reference to either
-names it and the repair. Which keyword identifies a schema object — `$id`,
+names it and the repair. An identifier whose fragment is spelled as a pointer
+is read without that fragment, by one function, `identifierText`
+(schema-keywords.js), in this walk, `identifierOf`, `indexSchemaResources`,
+`#withResolvedRootId` and `#heldDocument`; the walk records the fragment in
+`places.unread` too, and a root `$id` that is nothing else reads as none.
+Which keyword identifies a schema object — `$id`,
 or `id` where the document declares no known draft — is one function,
 `identifierKeyword` (schema-keywords.js), read by this walk, by
 `indexSchemaResources` (normalize.js: the resource index the normalizer, emit
@@ -431,6 +436,18 @@ resolve their `$ref`s against the owner's `addSchema` registrations. The
 resulting ESM cycle — `index.js` → `schema.js` → `query-keyword.js` →
 `query.js` → `index.js` — is benign: `query.js` only *reads* the hoisted
 `JarenValidator` declaration at call time, never at module-evaluation time.
+
+**Vocabularies per place**: the walk records, for each schema object, the
+nearest `$schema` on the way to it in its own document (`places.dialectUris`),
+and the constructor's seventh argument reads what that dialect switches on
+(`dialectVocabularies`: the validation vocabulary and format assertion as its
+meta-schema's `$vocabulary` declares them, and the format and content
+assertions its draft defaults). `optionsAt(path, schema)` hands each
+`ValidationObject` the compilation's options with that dialect's switches —
+one `ValidationOptions` per dialect URI, made once — so a held document reads
+alike compiled directly and through a `$ref`, and a place under no `$schema`
+reads the compilation's. `addMetaSchema` passes none: a meta-schema compiles
+under the validator's options everywhere.
 
 ### ValidationObject
 
@@ -1141,6 +1158,10 @@ Map<string, ValidationObject> {
 | `identifierKeyword` | schema-keywords.js | The keyword that identifies a schema object: `$id`, else the draft-04 `id` where its document declares no known draft (the walk, `indexSchemaResources`, the strict profile's index) |
 | `indexSchemaResources` / `resolveSchemaReference` | normalize.js | The resources of a document as the validator registers them (each embedded `$id` starts one; each with its plain names) and the base each schema object's `$ref` resolves against; one reference resolved inside the resource its URI names. The normalizer, `@jarenjs/emit` and the strict profile resolve through it. Each `$schema` is read by name, or, handed a validator as `dialects` (`heldDialects`), through the meta-schemas it holds (`index.held`), the map its compile reads a dialect through |
 | `identifierOf` / `declaredDraftOf` | traverse.js | The identifier text a compile reads a base from (`$id`, or `id` where `identifierKeyword` reads it), by the draft the walks recorded for the object |
+| `identifierText` | schema-keywords.js | An identifier read without a fragment spelled as a JSON Pointer, which names nothing (every reader of an `$id`/`id`) |
+| `readsPrefixItems` / `readPrefixItems` | schema-keywords.js | Whether a place reads `prefixItems` (2020-12, or no draft declared), the one gate the validator, the normalizer and `@jarenjs/emit` read; `readPrefixItems` also reads an empty one as none |
+| `defaultPlace` / `unfilledDefaults` | normalize.js | The schema objects that may apply at one place of an instance (beside, below a branch, from every parent object), whose by-name refusals (`additionalProperties: false`, `unevaluatedProperties: false`) keep a default out; `unfilledDefaults` names the defaults so left unfilled, for `@jarenjs/emit` |
+| `ValidationRoot#optionsAt` / `dialectVocabularies` | index.js | The options a schema object compiles under: the compilation's, with the vocabularies and draft-defaulted assertions of the dialect governing its place |
 | `JarenValidator.compile` | index.js | Main entry point for schema compilation, draft/vocabulary selection |
 | `JarenValidator.#precompileRefs` | index.js | Pre-create ValidationObjects for all refs |
 | `ValidationObject.compileValidator` | index.js | Compile validator, ref combination, dynamic-anchor registration |

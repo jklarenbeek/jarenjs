@@ -52,7 +52,7 @@ import { isStringWhiteSpace } from '@jarenjs/core/string';
 import { hasRecursiveAnchor, getDynamicAnchorName, collectDynamicAnchors, collectDynamicAnchorsDeep, appliesRefSiblings } from './dynamic-ref.js';
 import { isRecursiveQueryCompileError } from './query-keyword.js';
 import { boundReference, assertReferenceDepth, assertOutputFormat, REFERENCE_DEPTH_CEILING } from './errors.js';
-import { TRAVERSE_SCHEMA_OBJECTS, TRAVERSE_SCHEMA_MAPS, TRAVERSE_SCHEMA_MAP_MAPS, detectSchemaDraft, declaredVocabularies, caselessUri, heldUriKey, heldDialect, identifierKeyword, dialectDraft } from './schema-keywords.js';
+import { TRAVERSE_SCHEMA_OBJECTS, TRAVERSE_SCHEMA_MAPS, TRAVERSE_SCHEMA_MAP_MAPS, detectSchemaDraft, declaredVocabularies, caselessUri, heldUriKey, heldDialect, identifierKeyword, identifierText, dialectDraft } from './schema-keywords.js';
 import { VALIDATOR_STATE } from './validator-state.js';
 
 export {
@@ -340,6 +340,45 @@ function placeDraft(places, schemas, path, schema) {
 }
 
 /**
+ * @typedef {object} DialectVocabularies What a dialect switches on
+ * @property {boolean} validation - Whether the validation vocabulary asserts (`type`, `minimum`, ...)
+ * @property {boolean} formatAssertion - Whether `format` asserts
+ * @property {boolean} contentValidation - Whether `contentEncoding`/`contentMediaType` assert
+ */
+
+/**
+ * What the dialect a `$schema` URI names switches on, as its meta-schema
+ * declares it in `$vocabulary` and its draft defaults it. A dialect whose
+ * meta-schema declares no `$vocabulary` (or is not held), and a place under
+ * no `$schema`, keep validation on; `format` asserts where the option says
+ * so, else where the dialect declares the format-assertion vocabulary, else
+ * below draft 2020-12; the content keywords assert where the option says
+ * so, else below draft 2019-09. The draft is the dialect's, or the
+ * compile's for a place under no `$schema`.
+ * @param {unknown} uri - The `$schema` value, or undefined for none
+ * @param {Map<string, any>} schemas - The compilation's schemas by URI
+ * @param {boolean|null} formatOption - The `formatAssertion` option, null when unset
+ * @param {boolean|null} contentOption - The `contentValidation` option, null when unset
+ * @param {number} draftVersion - The draft the compile reads
+ * @returns {DialectVocabularies}
+ */
+function dialectVocabularies(uri, schemas, formatOption, contentOption, draftVersion) {
+  let validation = true;
+  let formatAssertion = formatOption;
+  let draft = draftVersion;
+  if (isStringType(uri)) {
+    draft = detectSchemaDraft({ $schema: uri }, schemas);
+    const metaSchema = heldDialect(uri, (key) => schemas.get(key));
+    if (isObjectClass(metaSchema) && isObjectClass(metaSchema.$vocabulary)) {
+      const declared = declaredVocabularies(metaSchema.$vocabulary);
+      validation = declared.validation;
+      if (formatAssertion == null && declared.formatAssertion) formatAssertion = true;
+    }
+  }
+  return { validation, formatAssertion: formatAssertion ?? draft < 2020, contentValidation: contentOption ?? draft < 2019 };
+}
+
+/**
  * The schema object the walks recorded for a schema: itself, or, for a
  * flattened copy, the object at its location.
  * @param {WeakMap<object, unknown>} drafts - What the walks recorded per place
@@ -493,6 +532,10 @@ export class ValidationRoot {
   #errorMessages = null;
   /** @type {UnitRecorder|null} The recorder of an output format's units (`@jarenjs/validate/output`), or null when this compilation records none */
   #recorder = null;
+  /** @type {((uri: string) => DialectVocabularies)|undefined} What a dialect switches on, or undefined when every place reads the compilation's options */
+  #vocabularies = undefined;
+  /** @type {Map<string, ValidationOptions>} The options each `$schema` URI governing a place is read under */
+  #dialectOptions = new Map();
 
   /** Keywords whose value is a map of arbitrary names to schemas; those
    * names must not be mistaken for keywords (e.g. a metaschema declaring
@@ -669,12 +712,17 @@ export class ValidationRoot {
    * @param {object|null} [owner] - The owning JarenValidator instance; extension
    *   keywords ('$query') compile embedded schema literals against it so their
    *   `$ref`s resolve to the owner's `addSchema` registrations
+   * @param {(uri: string) => DialectVocabularies} [vocabularies] - What the
+   *   dialect a `$schema` URI names switches on; a place under a `$schema`
+   *   compiles under it ({@link ValidationRoot#optionsAt}). Without it, every
+   *   place compiles under `opts`
    */
-  constructor(origin, schemas, formats, opts = new ValidationOptions(), traverse = new TraverseOptions, owner = null) {
+  constructor(origin, schemas, formats, opts = new ValidationOptions(), traverse = new TraverseOptions, owner = null, vocabularies = undefined) {
     const schema = schemas.get(origin);
     this.#rootOrigin = origin;
     this.#schemas = schemas;
     this.#formats = formats;
+    this.#vocabularies = vocabularies;
 
     assertRelativePointerDialect(opts.relativePointerDialect);
     assertReferenceDepth(opts.maxReferenceDepth);
@@ -731,6 +779,39 @@ export class ValidationRoot {
 
   /** @returns {ValidationOptions} Validation options */
   get options() { return this.#options; }
+
+  /**
+   * The options a schema object is compiled under: the compilation's, with
+   * the vocabularies of the dialect governing its place — the nearest
+   * `$schema` on the way to it in its own document, so a document compiled
+   * directly and through a `$ref` reads alike. A place under no `$schema`
+   * reads the compilation's, as it reads the compilation's draft. An
+   * internal collaborator of the compiler.
+   * @param {string} path - The schema's location
+   * @param {any} schema - The schema, or a copy of it
+   * @returns {ValidationOptions}
+   */
+  optionsAt(path, schema) {
+    const places = this.#places;
+    const read = this.#vocabularies;
+    if (read === undefined || places === undefined || !isObjectClass(schema)) return this.#options;
+    const uri = places.dialectUris.get(placeOf(places.drafts, this.#schemas, path, schema));
+    if (uri === undefined) return this.#options;
+    let options = this.#dialectOptions.get(uri);
+    if (options === undefined) {
+      const { validation, formatAssertion, contentValidation } = read(uri);
+      const own = this.#options;
+      options = own;
+      if (validation !== own.vocabValidation || formatAssertion !== own.formatAssertion || contentValidation !== own.contentValidation) {
+        options = Object.assign(new ValidationOptions(), own);
+        options.vocabValidation = validation;
+        options.formatAssertion = formatAssertion;
+        options.contentValidation = contentValidation;
+      }
+      this.#dialectOptions.set(uri, options);
+    }
+    return options;
+  }
 
   /** @returns {object} Registered format validators */
   get formats() { return this.#formats; }
@@ -1550,6 +1631,8 @@ export class ValidationObject {
   #effectiveBaseUri = null;
   /** @type {number|null} Draft version declared by this schema's document ($schema), inherited by subschemas; null when never declared */
   #declaredDraft = null;
+  /** @type {ValidationOptions} The options this object compiles under: its root's, with the vocabularies of the dialect governing its place */
+  #options;
 
   /**
    * Creates a new ValidationObject.
@@ -1588,6 +1671,7 @@ export class ValidationObject {
       this.#effectiveBaseUri = baseUri;
     }
 
+    this.#options = root.optionsAt(path, schema);
     this.#validator = ValidationObject.compileValidator(this, path, schema, baseUri);
     // Recording output units, applying this subschema is one.
     const recorder = root.recorder;
@@ -1640,9 +1724,9 @@ export class ValidationObject {
     return this.#resourceValidator ?? this.#validator;
   }
 
-  /** @returns {ValidationOptions} The validation options */
+  /** @returns {ValidationOptions} The validation options this object compiles under */
   get options() {
-    return this.#root.options;
+    return this.#options;
   }
 
   /** @returns {object} The registered format validators */
@@ -1955,7 +2039,7 @@ export class JarenValidator {
   /** @type {TraverseOptions} The traversal options, carrying the `propertyDependencies` switch of the validation options */
   #traverse = new TraverseOptions();
   /** @type {import('./traverse.js').SchemaPlaces} What the walks read at each registered schema's place */
-  #places = { drafts: new WeakMap(), refBases: new WeakMap(), keptRefs: new Set(), unread: new Map(), undecidedBases: new WeakMap(), lateTargets: new Set(), foreign: new WeakSet(), dialects: new WeakMap(), contested: new Map() };
+  #places = { drafts: new WeakMap(), refBases: new WeakMap(), keptRefs: new Set(), unread: new Map(), undecidedBases: new WeakMap(), lateTargets: new Set(), foreign: new WeakSet(), dialects: new WeakMap(), dialectUris: new WeakMap(), contested: new Map() };
   /** @type {Map<string, string>} The key of the document each registered identifier came from */
   #registeredIn = new Map();
   /** @type {WeakSet<object>} The documents `addSchema` registered under a key of their own */
@@ -2024,8 +2108,12 @@ export class JarenValidator {
    */
   static #withResolvedRootId(schema, traverse) {
     if (!isObjectClass(schema) || !isStringType(schema.$id) || isStringWhiteSpace(schema.$id)) return schema;
-    const { id } = createJsonPointer(schema.$id, traverse.origin, traverse, '$id', '#/%24id');
-    if (createJsonPointer(schema.$id, id, traverse).id === id) return schema;
+    // read without a JSON Pointer fragment; one that is only such a fragment
+    // is read as no `$id` by the walk
+    const text = identifierText(schema.$id);
+    if (text === undefined) return schema;
+    const { id } = createJsonPointer(text, traverse.origin, traverse, '$id', '#/%24id');
+    if (text === schema.$id && createJsonPointer(text, id, traverse).id === id) return schema;
     return { ...schema, $id: id.endsWith('#') ? id.slice(0, -1) : id };
   }
 
@@ -2177,10 +2265,17 @@ export class JarenValidator {
     if (!isObjectClass(schema)) return schema;
     const id = schema.$id;
     if (isStringType(id) && !isStringWhiteSpace(id)) {
-      if (URL.canParse(id)) return schema;
+      // read without a JSON Pointer fragment: one that is only such a
+      // fragment is no identifier, held as a document without `$id` is
+      const text = identifierText(id);
+      if (text === undefined) {
+        const { $id: _pointer, ...document } = schema;
+        return this.#heldDocument(document, key);
+      }
+      if (text === id && URL.canParse(id)) return schema;
       let resolved;
       try {
-        resolved = createJsonPointer(id, key ?? this.#traverse.origin, this.#traverse).id;
+        resolved = createJsonPointer(text, key ?? this.#traverse.origin, this.#traverse).id;
       }
       catch {
         return schema; // no URI reference: every compile refuses it (`JK0010`)
@@ -2710,37 +2805,21 @@ export class JarenValidator {
     // Detect draft version from schema and update validation options
     const draftVersion = detectSchemaDraft(schema, map);
     const existingValidation = this.#options.validation || new ValidationOptions();
-    // For draft7, contentValidation defaults to true; for 2019-09+, defaults to false
-    const contentValidationDefault = draftVersion < 2019;
 
-    // When the schema declares a custom metaschema via $schema, its
-    // $vocabulary decides which keyword vocabularies are asserted. A
-    // metaschema that omits the validation vocabulary turns keywords like
-    // 'type' and 'minimum' into annotations that assert nothing.
-    let vocabValidation = true;
-    // In draft 2020-12 the format keyword is annotation-only unless the
-    // metaschema opts into the format-assertion vocabulary (or the user
-    // sets the formatAssertion option explicitly).
-    let formatAssertion = existingValidation.formatAssertion ?? null;
-    if (isObjectClass(schema) && isStringType(schema.$schema)) {
-      const metaSchema = heldDialect(schema.$schema, (key) => map.get(key));
-      if (isObjectClass(metaSchema) && isObjectClass(metaSchema.$vocabulary)) {
-        const declared = declaredVocabularies(metaSchema.$vocabulary);
-        vocabValidation = declared.validation;
-        if (formatAssertion == null && declared.formatAssertion) {
-          formatAssertion = true;
-        }
-      }
-    }
-    if (formatAssertion == null) {
-      formatAssertion = draftVersion < 2020;
-    }
+    // The vocabularies a dialect's meta-schema declares, and the assertions
+    // its draft defaults (`format` below 2020-12, the content keywords below
+    // 2019-09), decide which keywords assert where that dialect governs: the
+    // root's here, each place's own where another `$schema` governs it
+    // (`ValidationRoot#optionsAt`).
+    const vocabularies = (/** @type {unknown} */ uri) => dialectVocabularies(uri, map,
+      existingValidation.formatAssertion ?? null, existingValidation.contentValidation ?? null, draftVersion);
+    const { validation: vocabValidation, formatAssertion, contentValidation } = vocabularies(isObjectClass(schema) ? schema.$schema : undefined);
 
     const validationOptions = new ValidationOptions(
       existingValidation.skipErrors ?? true,
       existingValidation.useGrapheme ?? true,
       existingValidation.collectErrors ?? false,
-      existingValidation.contentValidation ?? contentValidationDefault,
+      contentValidation,
       draftVersion,
       vocabValidation,
       formatAssertion,
@@ -2771,7 +2850,8 @@ export class JarenValidator {
       this.#formats,
       validationOptions,
       this.#traverse,
-      this
+      this,
+      vocabularies
     );
 
     // Pre-create validation objects for all refs

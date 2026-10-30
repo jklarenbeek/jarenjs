@@ -154,7 +154,11 @@ that out across the reference graph, including cycles, so a schema with one defa
 declaration; everything unaffected keeps a single shared name on both sides.
 
 **Only three normalizations produce a difference.** `useDefaults` moves a member
-across the optional boundary, `coerceTypes` widens what the input accepts, and
+across the optional boundary — where the normalizer fills its default at every
+place it meets the object declaring it; a default a schema object at some place
+refuses by its name (`unfilledDefaults`) leaves the member required after
+normalizing only where `required` lists it (*upgrade: it was required after
+normalizing there, where the normalizer now leaves it out*), `coerceTypes` widens what the input accepts, and
 `coerceJsonText` widens an object or array node by `string` exactly where the
 normalizer decodes JSON text into it (the node's own `type` names `object` or
 `array` and not `string`; never inside `anyOf`/`oneOf`, never beside a `$ref`
@@ -405,7 +409,7 @@ of your own.
 | *omitted* `additionalProperties` | `[key: string]: unknown` — the object is **open**, see below |
 | `additionalProperties: false` | a closed interface unless `patternProperties` supplies an index signature; with no members or patterns, `Record<string, never>` (an empty interface would let a primitive through) |
 | `items` | `Array<T>` |
-| `prefixItems`, array-form `items` | a tuple: the first `minItems` positions required, the rest optional, and an **open** rest (`...Array<unknown>`) unless `items: false`/`additionalItems: false` closes it — JSON Schema accepts shorter and longer arrays, so the type does too |
+| `prefixItems`, array-form `items` | a tuple: the first `minItems` positions required, the rest optional, and an **open** rest (`...Array<unknown>`) unless `items: false`/`additionalItems: false` closes it — JSON Schema accepts shorter and longer arrays, so the type does too. `prefixItems` only where the validator reads it: a document that declares a draft before 2020-12 reads it as an unknown keyword, so its `items` types every item (*upgrade: it was a tuple there too, narrower than what the validator accepts*) |
 | `$ref` (same document, including cycles) | a reference to the named declaration — `#/pointer` and plain `#anchor` forms, resolving exactly as `compileNormalizer` resolves them; a root `$ref` aliases its target, and siblings intersect with it where the node's draft applies them (2019-09 on) — before it, and where no draft is declared, the node is its target alone, as the validator reads it: siblings add no type, constraint, default or variant |
 | `allOf` | an intersection |
 | `anyOf`, `oneOf` | a union |

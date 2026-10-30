@@ -261,6 +261,22 @@ export function identifierKeyword(node, declaredDraft) {
 }
 
 /**
+ * An identifier (`$id`, or the draft-04 `id`) as every reader of this
+ * package reads it: a fragment spelled as a JSON Pointer (`#/a`, `#%2Fa`)
+ * names nothing — `#/a` stays a pointer into the document, as it does for an
+ * anchor spelled so — so the identifier is read without it, and one that is
+ * nothing else names nothing.
+ * @param {string} id - The identifier as written
+ * @returns {string|undefined} The identifier, or undefined when it names nothing
+ */
+export function identifierText(id) {
+  const hash = id.indexOf('#');
+  if (hash === -1 || !/^(?:\/|%2f)/i.test(id.slice(hash + 1).replace(/[\t\n\r]/g, ''))) return id;
+  const rest = id.slice(0, hash);
+  return rest.trim() === '' ? undefined : rest;
+}
+
+/**
  * Whether `propertyDependencies` is a keyword at a schema location: the
  * `propertyDependencies` option is on and the location's document does not
  * declare a draft older than 2020-12. Everywhere else it is an unknown
@@ -274,17 +290,31 @@ export function admitsPropertyDependencies(enabled, declaredDraft) {
 }
 
 /**
- * The `prefixItems` array a schema applies, or `undefined`. A document that
- * declares a draft before 2020-12 via `$schema` treats `prefixItems` as an
- * unknown keyword; a document that declares none reads it. The validator's
- * item keywords and the normalizer read it through this one predicate.
+ * Whether a place reads `prefixItems`: a document that declares a draft
+ * before 2020-12 via `$schema` treats it as an unknown keyword; a document
+ * that declares none reads it. The validator's item keywords, the
+ * normalizer ({@link readPrefixItems}) and `@jarenjs/emit` read the keyword
+ * through this one gate.
+ * @param {number|null|undefined} declaredDraft - The draft the place's document declares, or null when it declares none
+ * @returns {boolean}
+ */
+export function readsPrefixItems(declaredDraft) {
+  return readsSince('prefixItems', declaredDraft);
+}
+
+/**
+ * The `prefixItems` array a schema applies, or `undefined`: none where the
+ * place does not read the keyword ({@link readsPrefixItems}), and none for
+ * an empty one, whose `items` then applies to every item as it would after
+ * a prefix of no positions. The validator's item keywords and the
+ * normalizer read it through this one predicate.
  * @param {{ declaredDraft: number|null }} schemaObj - The compiled object, or anything carrying its declared draft
  * @param {any} jsonSchema
  * @returns {unknown[] | undefined}
  */
 export function readPrefixItems(schemaObj, jsonSchema) {
   const prefixItems = jsonSchema.prefixItems;
-  return !readsSince('prefixItems', schemaObj.declaredDraft) || !(isArrayClass(prefixItems) && prefixItems.length >= 1)
+  return !readsPrefixItems(schemaObj.declaredDraft) || !(isArrayClass(prefixItems) && prefixItems.length >= 1)
     ? undefined
     : prefixItems;
 }

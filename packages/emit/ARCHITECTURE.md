@@ -44,7 +44,12 @@ The decisions that live here, and nowhere else:
   `#/pointer`, plain `#anchor` inside the resource it names), so a ref means
   here exactly what it means to the runtime normalizer and the validator.
   A node's draft comes from the same index: its `$schema` by name, or, with
-  the `dialects` option, through the meta-schemas the validator handed holds.
+  the `dialects` option, through the meta-schemas the validator handed holds,
+  and that draft gates `prefixItems` through the validator's own gate
+  (`readsPrefixItems`). Which defaults the normalizer leaves unfilled — a
+  member a schema object at some place refuses by its name — comes from it
+  too (`unfilledDefaults`), so a normalized member is required only where
+  the normalizer fills it at every place.
 - **Honest widening.** Every keyword in `DROPPED_CONSTRAINTS` is recorded on
   the node it came from and flattened into `doc` lines — including
   integer-ness, `not`, active conditionals, dependent/unevaluated keywords

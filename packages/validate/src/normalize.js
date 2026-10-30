@@ -43,19 +43,23 @@ import {
   detectSchemaDraft,
   dialectDraft,
   identifierKeyword,
+  identifierText,
   admitsPropertyDependencies,
   readPrefixItems,
+  readsPrefixItems,
+  readsSince,
 } from './schema-keywords.js';
 import { createSchemaPatternTester } from './string.js';
 import { DEFAULT_ORIGIN, withoutFragment } from './origin.js';
-import { appliesRefSiblings } from './dynamic-ref.js';
+import { admitsDynamicReference, appliesRefSiblings } from './dynamic-ref.js';
 import { VALIDATOR_STATE } from './validator-state.js';
 
 // The validator's reading of a `pattern` string, for a consumer that checks
-// one without compiling a schema (a form field, per keystroke); and of the
+// one without compiling a schema (a form field, per keystroke); of the
 // draft a `$schema` declares, for a consumer that reads a `$ref`'s siblings
-// as this module does ({@link readsRefAlone}).
-export { createSchemaPatternTester, detectSchemaDraft };
+// as this module does ({@link readsRefAlone}); and of where `prefixItems`
+// is a keyword, which a draft before 2020-12 reads as an unknown one.
+export { createSchemaPatternTester, detectSchemaDraft, readsPrefixItems };
 
 const hasOwn = Object.hasOwn;
 
@@ -79,7 +83,8 @@ const hasOwn = Object.hasOwn;
  * these string fields, leave those alone" — without the option becoming a
  * blunt instrument and without any runtime cost.
  * @typedef {object} NormalizeOptions
- * @property {boolean|((schemaNode: Record<string, unknown>) => boolean)} [useDefaults=false] - Materialize `default` for absent object properties, recursively
+ * @property {boolean|((schemaNode: Record<string, unknown>) => boolean)} [useDefaults=false] - Materialize `default` for absent object properties, recursively,
+ *   where every schema object that may apply at the object's place admits the member by its name ({@link unfilledDefaults})
  * @property {boolean|'all'} [removeAdditional=false] - Strip unknown properties: `true` only where `additionalProperties: false`, `'all'` wherever an object shape is declared
  * @property {boolean|((schemaNode: Record<string, unknown>) => boolean)} [coerceTypes=false] - Convert a value to the node's declared scalar `type` when it is convertible
  * @property {boolean|((schemaNode: Record<string, unknown>) => boolean)} [trimStrings=false] - Trim leading/trailing whitespace from strings, before coercion
@@ -249,13 +254,15 @@ function placeSchemas(index, start, startBase, startDraft, startDeclared, startR
     };
     let own = base;
     const idName = identifierKeyword(node, declared);
-    const name = idName === undefined ? undefined : plainNameKey(node[idName]);
+    // read without a JSON Pointer fragment, which names nothing
+    const idText = idName === undefined ? undefined : identifierText(node[idName]);
+    const name = idText === undefined ? undefined : plainNameKey(idText);
     if (name !== undefined) declare(name);
-    else if (idName !== undefined) {
+    else if (idText !== undefined) {
       // An embedded resource, under the URI its identifier names, with names
       // of its own (one that is no URI reference, which the validator
       // refuses, names no URI and still has its own names)
-      own = resourceBase(node[idName], base) ?? base;
+      own = resourceBase(idText, base) ?? base;
       if (resource !== undefined && !isRoot) resource = { node, names: new Map() };
     }
     if (resource !== undefined && (isRoot || own !== base) && !resources.has(own)) resources.set(own, resource);
@@ -499,6 +506,395 @@ function composeSteps(steps) {
   };
 }
 
+//#region where a default is filled
+
+// A default fills an absent member, and every schema object that may apply
+// at the object's place then reads that member: the object holding the
+// default, the ones beside it (a `$ref` target, the other `allOf` branches)
+// and the ones under a branch (`anyOf`, `oneOf`, `not`, `if`/`then`/`else`,
+// `dependentSchemas`, `dependencies`, a dynamic reference's targets). One of
+// them that refuses the member by its name — an
+// `additionalProperties: false` it is not declared beside, an
+// `unevaluatedProperties: false` it is not evaluated under — would refuse
+// the normalized value where the validator accepted the input, so such a
+// default is not filled. A branch's object counts, whichever branch the
+// instance takes: which one applies is known only after validating.
+// A place's schemas are read from the ones its parent's schemas apply to it
+// (every object's `properties`, matching `patternProperties`,
+// `additionalProperties`, the items keywords), so two branches that each
+// describe a member are one place for that member's value.
+
+/**
+ * @typedef {object} DefaultPlace The schema objects that may apply at one place of an instance
+ * @property {string} id - Its memo key: the same schema objects make the same place
+ * @property {object[]} nodes - Every schema object that may apply there and reads its members or
+ *   items ({@link PLACE_KEYWORDS}); the others refuse nothing and apply nothing below it
+ * @property {(key: string) => boolean} admits - Whether none of them refuses a member named `key` by its name
+ * @property {Map<string, DefaultPlace>} children - The places below it, by site
+ */
+
+/**
+ * The draft a schema object is read under ({@link SchemaPlace}).
+ * @param {object} node @param {object} ctx
+ * @returns {number|null}
+ */
+function draftOf(node, ctx) {
+  return schemaPlace(ctx.resources, node).draft;
+}
+
+/**
+ * The pattern testers of a schema object's `patternProperties`, read as the
+ * validator reads a pattern.
+ * @param {any} node @param {object} ctx
+ * @returns {[string, (key: string) => boolean][]}
+ */
+function patternsOf(node, ctx) {
+  let testers = ctx.patterns.get(node);
+  if (testers === undefined) {
+    testers = isJsonObject(node.patternProperties)
+      ? Object.getOwnPropertyNames(node.patternProperties).map((source) => [source, createSchemaPatternTester(source)])
+      : [];
+    ctx.patterns.set(node, testers);
+  }
+  return testers;
+}
+
+/**
+ * Whether a member is declared beside an object's `additionalProperties`:
+ * its `properties` name it or one of its `patternProperties` matches it.
+ * @param {any} node @param {string} key @param {object} ctx
+ * @returns {boolean}
+ */
+function declaresMember(node, key, ctx) {
+  return (isJsonObject(node.properties) && hasOwn(node.properties, key))
+    || patternsOf(node, ctx).some(([, matches]) => matches(key));
+}
+
+/**
+ * The schema an object's `$ref` names in the document, resolved once.
+ * @param {any} node @param {object} ctx
+ * @returns {unknown}
+ */
+function refTarget(node, ctx) {
+  if (ctx.targets.has(node)) return ctx.targets.get(node);
+  const target = resolveSchemaReference(node.$ref, schemaPlace(ctx.resources, node).refBase, ctx.resources);
+  ctx.targets.set(node, target);
+  return target;
+}
+
+/**
+ * The targets of an object's dynamic references (`$dynamicRef` from draft
+ * 2020-12 on, `$recursiveRef` in 2019-09): the one each resolves to as a
+ * `$ref`, and every object of the document declaring the anchor the dynamic
+ * scope can resolve it to instead.
+ * @param {any} node @param {number|null} draft @param {object} ctx
+ * @returns {unknown[]}
+ */
+function dynamicTargets(node, draft, ctx) {
+  const targets = [];
+  for (const [keyword, anchor] of [['$dynamicRef', '$dynamicAnchor'], ['$recursiveRef', '$recursiveAnchor']]) {
+    const ref = node[keyword];
+    if (typeof ref !== 'string' || !admitsDynamicReference(/** @type {'$dynamicRef'|'$recursiveRef'} */ (keyword), draft)) continue;
+    const target = resolveSchemaReference(ref, schemaPlace(ctx.resources, node).refBase, ctx.resources);
+    if (target !== undefined) targets.push(target);
+    const name = keyword === '$recursiveRef' ? true : ref.slice(ref.indexOf('#') + 1);
+    const key = `${anchor}:${name}`;
+    let declaring = ctx.anchors.get(key);
+    if (declaring === undefined) {
+      declaring = [...ctx.resources.places.keys()].filter((candidate) => candidate[anchor] === name);
+      ctx.anchors.set(key, declaring);
+    }
+    targets.push(...declaring);
+  }
+  return targets;
+}
+
+/**
+ * The subschemas that apply at the same place as a schema object, as the
+ * validator reads them (`alone` where it reads only the object's `$ref`).
+ * @param {any} node @param {object} ctx
+ * @returns {{ alone: boolean, subschemas: unknown[] }}
+ */
+function inPlaceSubschemas(node, ctx) {
+  const draft = draftOf(node, ctx);
+  const subschemas = [];
+  if (typeof node.$ref === 'string') subschemas.push(refTarget(node, ctx));
+  if (readsRefAlone(node, draft, ctx.resources.held)) return { alone: true, subschemas };
+  subschemas.push(...dynamicTargets(node, draft, ctx));
+  for (const keyword of ['allOf', 'anyOf', 'oneOf'])
+    if (Array.isArray(node[keyword])) subschemas.push(...node[keyword]);
+  if (node.not !== undefined) subschemas.push(node.not);
+  if (node.if !== undefined) subschemas.push(node.if, node.then, node.else);
+  if (isJsonObject(node.dependentSchemas) && readsSince('dependentSchemas', draft))
+    subschemas.push(...Object.values(node.dependentSchemas));
+  if (isJsonObject(node.dependencies))
+    subschemas.push(...Object.values(node.dependencies).filter((value) => !Array.isArray(value)));
+  return { alone: false, subschemas };
+}
+
+/**
+ * Whether a schema object evaluates a member on every way it passes, as
+ * `unevaluatedProperties` reads the annotations below it: its own
+ * `properties`, `patternProperties`, `additionalProperties` and (below the
+ * object asking) `unevaluatedProperties`; a `$ref` target or an `allOf`
+ * branch that does; every `anyOf`/`oneOf` branch and dynamic target; `if`
+ * or `then`, and `else`. A `false` schema never passes, so it never leaves
+ * the member unevaluated.
+ * @param {unknown} node @param {string} key @param {object} ctx
+ * @param {Set<object>} trail - The objects being asked, a cycle answering no
+ * @param {boolean} [asking] - Whether `node` is the object whose `unevaluatedProperties` asks
+ * @returns {boolean}
+ */
+function evaluatesMember(node, key, ctx, trail, asking = false) {
+  if (node === false) return true;
+  if (!isJsonObject(node) || trail.has(node)) return false;
+  trail.add(node);
+  const evaluates = (/** @type {unknown} */ schema) => evaluatesMember(schema, key, ctx, trail);
+  const draft = draftOf(node, ctx);
+  const target = typeof node.$ref === 'string' ? refTarget(node, ctx) : undefined;
+  let answer;
+  if (readsRefAlone(node, draft, ctx.resources.held)) answer = evaluates(target);
+  else {
+    const dynamic = dynamicTargets(node, draft, ctx);
+    answer = declaresMember(node, key, ctx) || node.additionalProperties !== undefined
+      || (!asking && node.unevaluatedProperties !== undefined && readsSince('unevaluatedProperties', draft))
+      || evaluates(target)
+      || (dynamic.length > 0 && dynamic.every(evaluates))
+      || (Array.isArray(node.allOf) && node.allOf.some(evaluates))
+      || (Array.isArray(node.anyOf) && node.anyOf.length > 0 && node.anyOf.every(evaluates))
+      || (Array.isArray(node.oneOf) && node.oneOf.length > 0 && node.oneOf.every(evaluates))
+      || (node.if !== undefined && (evaluates(node.if) || evaluates(node.then)) && evaluates(node.else));
+  }
+  trail.delete(node);
+  return answer;
+}
+
+/**
+ * Whether a schema object refuses a member by its name alone, whatever its
+ * value: an `additionalProperties: false` it is not declared beside, or an
+ * `unevaluatedProperties: false` (from draft 2019-09 on) it is not
+ * evaluated under.
+ * @param {any} node @param {string} key @param {object} ctx
+ * @returns {boolean}
+ */
+function refusesMember(node, key, ctx) {
+  if (node.additionalProperties === false && !declaresMember(node, key, ctx)) return true;
+  return node.unevaluatedProperties === false && readsSince('unevaluatedProperties', draftOf(node, ctx))
+    && !evaluatesMember(node, key, ctx, new Set(), true);
+}
+
+/**
+ * A schema object's number in this compile, for a key naming it.
+ * @param {object} node @param {object} ctx
+ * @returns {number}
+ */
+function nodeId(node, ctx) {
+  let id = ctx.nodeIds.get(node);
+  if (id === undefined) ctx.nodeIds.set(node, id = ctx.nodeIds.size);
+  return id;
+}
+
+/** The keywords through which a schema object refuses a member or applies a subschema below its place. */
+const PLACE_KEYWORDS = ['properties', 'patternProperties', 'additionalProperties', 'unevaluatedProperties',
+  'items', 'prefixItems', 'additionalItems', 'contains', 'unevaluatedItems'];
+
+/**
+ * The key naming a set of schema objects, the same for the same set.
+ * @param {object[]} nodes @param {object} ctx
+ * @returns {string}
+ */
+function nodesKey(nodes, ctx) {
+  if (nodes.length === 1) return `|${nodeId(nodes[0], ctx)}`;
+  return `|${[...new Set(nodes.map((node) => nodeId(node, ctx)))].sort((a, b) => a - b).join(',')}`;
+}
+
+/**
+ * The place the given schema objects apply at, with every object that may
+ * apply beside them. A place is the set of those objects that carry a
+ * keyword reading its members or items, so two that share it are one.
+ * @param {unknown[]} entries @param {object} ctx
+ * @returns {DefaultPlace}
+ */
+function defaultPlace(entries, ctx) {
+  const objects = entries.filter(isJsonObject);
+  const entryKey = nodesKey(objects, ctx);
+  let place = ctx.entryPlaces.get(entryKey);
+  if (place !== undefined) return place;
+  const nodes = [];
+  const seen = new Set();
+  const queue = objects;
+  while (queue.length > 0) {
+    const node = queue.pop();
+    if (!isJsonObject(node) || seen.has(node)) continue;
+    seen.add(node);
+    const { alone, subschemas } = inPlaceSubschemas(node, ctx);
+    if (!alone && PLACE_KEYWORDS.some((keyword) => node[keyword] !== undefined)) nodes.push(node);
+    queue.push(...subschemas);
+  }
+  const id = nodesKey(nodes, ctx);
+  place = ctx.defaultPlaces.get(id);
+  if (place !== undefined) {
+    ctx.entryPlaces.set(entryKey, place);
+    return place;
+  }
+  const admitted = new Map();
+  place = {
+    id,
+    nodes,
+    admits(key) {
+      let answer = admitted.get(key);
+      if (answer === undefined) admitted.set(key, answer = !nodes.some((node) => refusesMember(node, key, ctx)));
+      return answer;
+    },
+    children: new Map(),
+  };
+  ctx.defaultPlaces.set(id, place);
+  ctx.entryPlaces.set(entryKey, place);
+  return place;
+}
+
+/**
+ * The place below `place` that a site of it reaches, from the subschemas
+ * each of its objects applies there.
+ * @param {DefaultPlace} place @param {string} site - The site's key
+ * @param {(node: any, push: (schema: unknown) => void) => void} collect - Pushes an object's subschemas for the site
+ * @param {object} ctx
+ * @returns {DefaultPlace}
+ */
+function placeBelow(place, site, collect, ctx) {
+  let child = place.children.get(site);
+  if (child === undefined) {
+    const entries = [];
+    const push = (/** @type {unknown} */ schema) => { if (isJsonObject(schema)) entries.push(schema); };
+    for (const node of place.nodes) {
+      collect(node, push);
+      if (node.unevaluatedProperties !== undefined && site.startsWith('p') && readsSince('unevaluatedProperties', draftOf(node, ctx)))
+        push(node.unevaluatedProperties);
+      if (node.unevaluatedItems !== undefined && site.startsWith('i') && readsSince('unevaluatedItems', draftOf(node, ctx)))
+        push(node.unevaluatedItems);
+      if (site.startsWith('i')) push(node.contains);
+    }
+    place.children.set(site, child = defaultPlace(entries, ctx));
+  }
+  return child;
+}
+
+/**
+ * The place of a member's value, for a member named `key`.
+ * @param {DefaultPlace} place @param {string} key @param {object} ctx
+ * @returns {DefaultPlace}
+ */
+function memberPlace(place, key, ctx) {
+  return placeBelow(place, `p:${key}`, (node, push) => {
+    if (isJsonObject(node.properties) && hasOwn(node.properties, key)) push(node.properties[key]);
+    for (const [source, matches] of patternsOf(node, ctx)) if (matches(key)) push(node.patternProperties[source]);
+    if (!declaresMember(node, key, ctx)) push(node.additionalProperties);
+  }, ctx);
+}
+
+/**
+ * The place of the values of the members a `patternProperties` entry or an
+ * `additionalProperties` of `holder` applies to: every subschema another
+ * object may apply to such a member.
+ * @param {DefaultPlace} place @param {any} holder @param {string|undefined} source - The pattern, undefined for `additionalProperties`
+ * @param {object} ctx
+ * @returns {DefaultPlace}
+ */
+function membersPlace(place, holder, source, ctx) {
+  const matches = source === undefined
+    ? (/** @type {string} */ key) => !declaresMember(holder, key, ctx)
+    : createSchemaPatternTester(source);
+  return placeBelow(place, `p${source === undefined ? '+' : '~'}${nodeId(holder, ctx)}:${source ?? ''}`, (node, push) => {
+    if (isJsonObject(node.properties))
+      for (const key of Object.getOwnPropertyNames(node.properties)) if (matches(key)) push(node.properties[key]);
+    // the holder's own `additionalProperties` applies to no member one of
+    // its patterns matches, and its patterns to no member it reads as additional
+    if (source === undefined || node !== holder) push(node.additionalProperties);
+    if (source !== undefined || node !== holder)
+      for (const [pattern] of patternsOf(node, ctx)) push(node.patternProperties[pattern]);
+  }, ctx);
+}
+
+/**
+ * The tuple spelling an object's items are read in, as {@link buildArrayStep} reads it.
+ * @param {any} node @param {object} ctx
+ * @returns {{ prefix: unknown[], rest: unknown }}
+ */
+function itemsOf(node, ctx) {
+  const itemsIsTuple = Array.isArray(node.items);
+  const prefix = itemsIsTuple ? node.items : readPrefixItems({ declaredDraft: draftOf(node, ctx) }, node);
+  return { prefix: Array.isArray(prefix) ? prefix : [], rest: itemsIsTuple ? node.additionalItems : node.items };
+}
+
+/**
+ * The place of an item's value: the item at `index`, or with `rest`, every
+ * item from `index` on.
+ * @param {DefaultPlace} place @param {number} index @param {boolean} rest @param {object} ctx
+ * @returns {DefaultPlace}
+ */
+function itemPlace(place, index, rest, ctx) {
+  return placeBelow(place, `i${rest ? '+' : ''}${index}`, (node, push) => {
+    const items = itemsOf(node, ctx);
+    for (let i = index; i < items.prefix.length && (rest || i === index); i++) push(items.prefix[i]);
+    if (rest || index >= items.prefix.length) push(items.rest);
+  }, ctx);
+}
+
+/**
+ * The context a subschema at a place below the one being compiled compiles
+ * in: that place, reached through `site`; the same context where no
+ * default is filled.
+ * @param {any} ctx
+ * @param {(place: DefaultPlace, ...rest: any[]) => DefaultPlace} site - {@link memberPlace}, {@link membersPlace} or {@link itemPlace}
+ * @param {...any} args - The site's arguments, before the context
+ * @returns {any}
+ */
+function below(ctx, site, ...args) {
+  return ctx.defaultPlace === undefined ? ctx : { ...ctx, defaultPlace: site(ctx.defaultPlace, ...args, ctx) };
+}
+
+/**
+ * Whether a document holds an object refusing a member by its name
+ * (`additionalProperties: false`, `unevaluatedProperties: false`) anywhere,
+ * a subschema a pointer reaches outside the schema positions included:
+ * without one, every place admits every default.
+ * @param {unknown} document
+ * @returns {boolean}
+ */
+function refusesAnyMember(document) {
+  const seen = new Set();
+  const queue = [document];
+  while (queue.length > 0) {
+    const value = queue.pop();
+    if (!isJsonContainer(value) || seen.has(value)) continue;
+    seen.add(value);
+    if (Array.isArray(value)) {
+      for (let i = 0; i < value.length; i++) queue.push(value[i]);
+      continue;
+    }
+    if (value.additionalProperties === false || value.unevaluatedProperties === false) return true;
+    for (const key in value) if (hasOwn(value, key)) queue.push(value[key]);
+  }
+  return false;
+}
+
+/**
+ * Whether a default of `holder` fills the member `key` at the place being
+ * compiled; one a schema object there refuses is recorded as left unfilled.
+ * @param {object} holder - The object whose `properties` declares the member
+ * @param {string} key @param {object} ctx
+ * @returns {boolean}
+ */
+function fillsDefault(holder, key, ctx) {
+  if (ctx.defaultPlace === undefined || ctx.defaultPlace.admits(key)) return true;
+  let keys = ctx.unfilled.get(holder);
+  if (keys === undefined) ctx.unfilled.set(holder, keys = new Set());
+  keys.add(key);
+  return false;
+}
+
+//#endregion
+
 /**
  * Build the object step: strip unknown members, normalize known ones, then
  * materialize defaults. That order is what makes the result stable - a
@@ -525,13 +921,13 @@ function buildObjectStep(node, ctx) {
     for (let i = 0; i < keys.length; i++) {
       const key = keys[i];
       const sub = properties[key];
-      const step = compileNode(sub, ctx);
+      const step = compileNode(sub, below(ctx, memberPlace, key));
       propertySteps.set(key, step);
       if (step !== null) hasStep = true;
       // Keep the property's step with its default. Matching pattern steps
       // are composed below so absent and supplied members normalize alike.
       if (isJsonObject(sub) && sub.default !== undefined && !readsRefAlone(sub, ctx.declaredDraft, ctx.resources.held)
-        && resolveNormalizeSwitch(options.useDefaults, sub))
+        && resolveNormalizeSwitch(options.useDefaults, sub) && fillsDefault(node, key, ctx))
         defaults.push(key, sub.default, step);
     }
   }
@@ -543,7 +939,7 @@ function buildObjectStep(node, ctx) {
     const sources = Object.getOwnPropertyNames(patternProperties);
     for (let i = 0; i < sources.length; i++) {
       const matches = createSchemaPatternTester(sources[i]);
-      const step = compileNode(patternProperties[sources[i]], ctx);
+      const step = compileNode(patternProperties[sources[i]], below(ctx, membersPlace, node, sources[i]));
       patternSteps.push(matches, step);
       if (step !== null) hasStep = true;
     }
@@ -551,7 +947,7 @@ function buildObjectStep(node, ctx) {
 
   const additionalStep = additional === undefined || typeof additional === 'boolean'
     ? null
-    : compileNode(additional, ctx);
+    : compileNode(additional, below(ctx, membersPlace, node, undefined));
 
   // `true` strips only where the schema says the members are forbidden;
   // 'all' additionally strips members a declared shape simply does not
@@ -637,13 +1033,16 @@ function buildArrayStep(node, ctx) {
   const itemsIsTuple = Array.isArray(node.items);
   const prefixSource = itemsIsTuple ? node.items : readPrefixItems(ctx, node);
   const restSource = itemsIsTuple ? node.additionalItems : node.items;
+  // A prefix with no work still occupies its declared positions: the tail
+  // schema applies only after it, even when its step table was elided.
+  const prefixLength = Array.isArray(prefixSource) ? prefixSource.length : 0;
 
   let prefixSteps = null;
   if (Array.isArray(prefixSource)) {
     prefixSteps = new Array(prefixSource.length);
     let used = false;
     for (let i = 0; i < prefixSource.length; i++) {
-      prefixSteps[i] = compileNode(prefixSource[i], ctx);
+      prefixSteps[i] = compileNode(prefixSource[i], below(ctx, itemPlace, i, false));
       if (prefixSteps[i] !== null) used = true;
     }
     if (!used) prefixSteps = null;
@@ -651,12 +1050,9 @@ function buildArrayStep(node, ctx) {
 
   const restStep = restSource === undefined || typeof restSource === 'boolean'
     ? null
-    : compileNode(restSource, ctx);
+    : compileNode(restSource, below(ctx, itemPlace, prefixLength, true));
 
   if (prefixSteps === null && restStep === null) return null;
-  // A prefix with no work still occupies its declared positions: the tail
-  // schema applies only after it, even when its step table was elided.
-  const prefixLength = Array.isArray(prefixSource) ? prefixSource.length : 0;
 
   return function normalizeArray(value) {
     if (!Array.isArray(value)) return value;
@@ -817,8 +1213,9 @@ function compileNode(node, ctx) {
   }
 
   // One node reached under two drafts (inline and as a reference target)
-  // normalizes per draft.
-  const memoKey = `${ctx.allowStrip}${ctx.declaredDraft}`;
+  // normalizes per draft, and at two places per place (the defaults it
+  // fills: {@link defaultPlace}).
+  const memoKey = `${ctx.allowStrip}${ctx.declaredDraft}${ctx.defaultPlace?.id ?? ''}`;
   let memo = ctx.memos.get(memoKey);
   if (memo === undefined) ctx.memos.set(memoKey, memo = new Map());
   const cached = memo.get(node);
@@ -848,7 +1245,7 @@ function compileNode(node, ctx) {
     // Resolved against the base of the resource holding the node, and read
     // in the draft its place in the document declares, as the validator
     // reads it.
-    const target = resolveSchemaReference(node.$ref, schemaPlace(ctx.resources, node).refBase, ctx.resources);
+    const target = refTarget(node, ctx);
     // A ref this module cannot follow is left alone rather than guessed at;
     // validation still resolves it through the full ref machinery.
     if (target !== undefined && target !== node) {
@@ -888,6 +1285,74 @@ function compileNode(node, ctx) {
   // Callers that resolved this node while it was being built hold `deferred`;
   // everyone else gets the direct function.
   return built === null ? null : deferred;
+}
+
+/**
+ * The compile context of a normalizer of `schema`: the options resolved,
+ * the document's resources and, where defaults are filled, the place of its
+ * root ({@link defaultPlace}).
+ * @param {object|boolean} schema
+ * @param {NormalizeOptions} options
+ * @returns {any}
+ */
+function normalizerContext(schema, options) {
+  admitNormalizeOptions(options);
+  const resolved = {
+    useDefaults: options.useDefaults,
+    removeAdditional: options.removeAdditional === 'all'
+      ? 'all'
+      : options.removeAdditional === true,
+    coerceTypes: options.coerceTypes,
+    trimStrings: options.trimStrings,
+    coerceJsonText: options.coerceJsonText,
+  };
+  const ctx = {
+    options: resolved,
+    /** The document's resources: the base each reference resolves against, the draft each node is read under */
+    resources: indexSchemaResources(schema, { dialects: options.dialects }),
+    /** @type {number|null} The draft the schema being compiled declares, or null when none does */
+    declaredDraft: null,
+    /** @type {Map<string, Map<object, Function|null>>} The compiled steps per stripping mode, draft and place */
+    memos: new Map(),
+    allowStrip: true,
+    /** @type {DefaultPlace|undefined} The place being compiled, where defaults are filled */
+    defaultPlace: undefined,
+    /** @type {Map<string, DefaultPlace>} Every place met, by its id */
+    defaultPlaces: new Map(),
+    /** @type {Map<string, DefaultPlace>} Every place met, by the objects it was reached from */
+    entryPlaces: new Map(),
+    /** @type {Map<object, unknown>} Each `$ref`'s target */
+    targets: new Map(),
+    /** @type {Map<object, number>} Each schema object a place names, numbered */
+    nodeIds: new Map(),
+    /** @type {Map<object, [string, (key: string) => boolean][]>} Each object's pattern testers */
+    patterns: new Map(),
+    /** @type {Map<string, object[]>} The objects declaring each dynamic anchor */
+    anchors: new Map(),
+    /** @type {Map<object, Set<string>>} The members whose default a place refuses, by the object declaring them */
+    unfilled: new Map(),
+  };
+  if ((resolved.useDefaults === true || typeof resolved.useDefaults === 'function') && refusesAnyMember(schema))
+    ctx.defaultPlace = defaultPlace([schema], ctx);
+  return ctx;
+}
+
+/**
+ * The defaults `compileNormalizer(schema, options)` leaves unfilled at some
+ * place of the document: one whose member a schema object that may apply
+ * there refuses by its name (an `additionalProperties: false` it is not
+ * declared beside, an `unevaluatedProperties: false` it is not evaluated
+ * under). Exported for `@jarenjs/emit`, whose normalized types claim a
+ * defaulted member present only where the normalizer fills it.
+ * @param {object|boolean} schema - The schema a normalizer is compiled from
+ * @param {NormalizeOptions} [options] - Its options (`useDefaults` and `dialects` decide)
+ * @returns {Map<object, Set<string>>} The member names, by the schema object whose `properties` declares them
+ * @throws {TypeError} As {@link compileNormalizer} does for `options`
+ */
+export function unfilledDefaults(schema, options = {}) {
+  const ctx = normalizerContext(schema, options);
+  compileNode(schema, ctx);
+  return ctx.unfilled;
 }
 
 /** The members of `NormalizeOptions`; any other is refused. */
@@ -945,7 +1410,12 @@ function admitNormalizeOptions(options) {
  * defaulting branch first, when one application must be enough. A materialized root default passes
  * through the same normalization steps as an explicitly supplied value.
  * A property default runs through that property's schema and every matching
- * `patternProperties` schema, in the same order as a supplied member.
+ * `patternProperties` schema, in the same order as a supplied member. A
+ * default is not filled where a schema object that may apply at its place —
+ * beside it, or under a branch, which only validating decides — refuses its
+ * member by its name: an `additionalProperties: false` it is not declared
+ * beside, an `unevaluatedProperties: false` it is not evaluated under
+ * ({@link unfilledDefaults}); the validator would refuse the normalized value.
  *
  * **Which dialect.** A `$schema` is read by its name: a URI naming a known
  * draft reads as that draft, and any other — a custom dialect — as draft-07.
@@ -983,28 +1453,8 @@ function admitNormalizeOptions(options) {
  * input;             // { name: '  jaren  ', port: '9000', stray: 1 } - untouched
  */
 export function compileNormalizer(schema, options = {}) {
-  admitNormalizeOptions(options);
-  const resolved = {
-    useDefaults: options.useDefaults,
-    removeAdditional: options.removeAdditional === 'all'
-      ? 'all'
-      : options.removeAdditional === true,
-    coerceTypes: options.coerceTypes,
-    trimStrings: options.trimStrings,
-    coerceJsonText: options.coerceJsonText,
-  };
-
-  const ctx = {
-    options: resolved,
-    /** The document's resources: the base each reference resolves against, the draft each node is read under */
-    resources: indexSchemaResources(schema, { dialects: options.dialects }),
-    /** @type {number|null} The draft the schema being compiled declares, or null when none does */
-    declaredDraft: null,
-    /** @type {Map<string, Map<object, Function|null>>} The compiled steps per stripping mode and draft */
-    memos: new Map(),
-    allowStrip: true,
-  };
-
+  const ctx = normalizerContext(schema, options);
+  const resolved = ctx.options;
   const step = compileNode(schema, ctx);
 
   // A root `default` answers the "the whole document was absent" case, which

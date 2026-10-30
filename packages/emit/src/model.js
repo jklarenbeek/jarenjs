@@ -36,11 +36,13 @@ import {
 import { parseJSONPointer } from '@jarenjs/json';
 import {
   indexSchemaResources,
+  readsPrefixItems,
   readsRefAlone,
   referenceText,
   resolveNormalizeSwitch,
   resolveSchemaReference,
   schemaPlace,
+  unfilledDefaults,
 } from '@jarenjs/validate/normalize';
 
 /** The model format version this module produces and consumes. */
@@ -359,6 +361,19 @@ function readingOf(node, ctx) {
 }
 
 /**
+ * A node's `prefixItems` where the validator and `compileNormalizer` read
+ * the keyword (`readsPrefixItems`): a document that declares a draft before
+ * 2020-12 reads it as an unknown keyword, so its `items` applies to every
+ * item there.
+ * @param {any} node - The schema node
+ * @param {object} ctx - The compile context
+ * @returns {unknown} The keyword's value, or undefined where it is no keyword
+ */
+function prefixItemsOf(node, ctx) {
+  return readsPrefixItems(schemaPlace(ctx.resources, node).draft) ? node.prefixItems : undefined;
+}
+
+/**
  * Whether `compileNormalizer` decodes JSON text at this node under
  * `coerceJsonText`: the node's own `type` names `object` or `array` and not
  * `string`, and the switch resolves on. This mirrors the gate of the
@@ -434,7 +449,8 @@ function normalizationChangesType(node, ctx) {
       const sub = properties[keys[i]];
       const subRead = readingOf(sub, ctx);
       if (isJsonObject(subRead) && subRead.default !== undefined
-        && resolveNormalizeSwitch(options.useDefaults, subRead)) {
+        && resolveNormalizeSwitch(options.useDefaults, subRead)
+        && (!ctx.unfilled.get(read)?.has(keys[i]) || (Array.isArray(read.required) && read.required.includes(keys[i])))) {
         differs = true;
         break;
       }
@@ -446,7 +462,7 @@ function normalizationChangesType(node, ctx) {
   // keywords the normalizer reads, so it decides which ones this reads.
   if (!differs) {
     const itemsIsTuple = Array.isArray(read.items);
-    const prefixSource = itemsIsTuple ? read.items : read.prefixItems;
+    const prefixSource = itemsIsTuple ? read.items : prefixItemsOf(read, ctx);
     const restSource = itemsIsTuple ? read.additionalItems : read.items;
     if (Array.isArray(prefixSource)) {
       for (let i = 0; i < prefixSource.length && !differs; i++)
@@ -491,6 +507,8 @@ function createContext(root, options, shared) {
     suffix: options.variantSuffix ?? 'Input',
     /** The document's resources: the base each `$ref` resolves against, the draft each node is read under */
     resources: shared.resources,
+    /** @type {Map<object, Set<string>>} The members whose default the normalizer leaves unfilled at some place, by the object declaring them */
+    unfilled: shared.unfilled,
     /** @type {Map<object, boolean>} node -> normalization changes its type */
     differs: shared.differs,
     /** @type {Set<object>} nodes being analyzed, for cycle detection */
@@ -847,7 +865,7 @@ function ownShape(node, ctx, hint) {
     || node.patternProperties !== undefined
     || node.additionalProperties !== undefined
     || Array.isArray(node.required);
-  const hasArrayKeywords = node.items !== undefined || node.prefixItems !== undefined;
+  const hasArrayKeywords = node.items !== undefined || prefixItemsOf(node, ctx) !== undefined;
 
   // No `type`: the applicator keywords describe the container cases, but
   // they do not IMPLY them — `properties` applies only when the value
@@ -923,14 +941,17 @@ function objectShape(node, ctx, hint) {
       // A defaulted member is optional for a caller — even when `required`
       // lists it, because the normalizer materializes it before validation
       // runs — and present afterwards. That asymmetry is the whole reason
-      // the two variants exist.
+      // the two variants exist. Present afterwards wherever this object
+      // applies only where the normalizer fills it at every place it meets
+      // the object: a place refusing the member by its name leaves it
+      // unfilled (`unfilledDefaults`).
       const declaredRequired = required.indexOf(key) !== -1;
       const member = {
         kind: 'member',
         name: key,
         type: typeOf(sub, ctx, `${hint}${toIdentifier(key)}`, true),
         required: defaulted
-          ? ctx.variant !== 'accepted'
+          ? ctx.variant !== 'accepted' && (declaredRequired || !ctx.unfilled.get(node)?.has(key))
           : declaredRequired,
         constraints,
         doc: docLinesFor(subNode, constraints),
@@ -1003,9 +1024,10 @@ function objectShape(node, ctx, hint) {
 /** An array or tuple type. */
 function arrayShape(node, ctx, hint) {
   const itemsIsTuple = Array.isArray(node.items);
+  const prefixItems = prefixItemsOf(node, ctx);
   const prefixSource = itemsIsTuple
     ? node.items
-    : (Array.isArray(node.prefixItems) ? node.prefixItems : null);
+    : (Array.isArray(prefixItems) ? prefixItems : null);
 
   if (prefixSource !== null) {
     // JSON Schema tuples are not fixed-length: `prefixItems` constrains the
@@ -1059,8 +1081,14 @@ export function compileEmitModel(schema, options = {}) {
   // normalization analysis memos, and the PLAIN universe's names — plain
   // declarations are variant-less by construction, so one set serves both
   // sides.
+  const useDefaults = normalize?.useDefaults;
   const shared = {
     resources: indexSchemaResources(schema, { dialects: options.dialects }),
+    // the members whose default the normalizer leaves unfilled at some
+    // place of the document, by the object declaring them
+    unfilled: useDefaults === true || typeof useDefaults === 'function'
+      ? unfilledDefaults(schema, { useDefaults, dialects: options.dialects })
+      : new Map(),
     differs: new Map(),
     analyzing: new Set(),
     plainNamed: new Map(),
