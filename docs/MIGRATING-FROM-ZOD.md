@@ -231,34 +231,34 @@ behavior change.
 
 ## Performance
 
-From `npm run benchmark:contracts` (Node v22, 20 000 iterations; reproduce it
-yourself rather than trusting the table). The row that matters is the third —
-normalize, validate, and map errors, which is what a request handler does.
-Times are per operation; lower is better.
+From `npm run benchmark:contracts`, measured on <!--fact:contracts.measured-->2026-10-30 with Node v24.22.1, 20,000 iterations<!--/fact-->
+(reproduce it yourself rather than trusting the table). The row that matters
+is the third — normalize, validate, and map errors, which is what a request
+handler does. Times are per operation; lower is better, and the fastest engine
+of each scenario is in bold.
 
 **Adapter row (invalid input), the comparable measurement:**
 
-| Scenario | Jaren | Zod 4 | Zod 3 | zod/mini | Ajv |
+<!--fact:contracts.adapter.table-->
+| Scenario | @jarenjs/validate | zod 4 | zod 3 | zod/mini | ajv |
 | --- | --- | --- | --- | --- | --- |
-| command (uuid/enum/date-time) | **5.1 µs** | 20.5 µs | 9.6 µs | 13.5 µs | 2.7 µs |
-| config (defaults + coercion) | **3.8 µs** | 14.5 µs | 7.5 µs | 10.6 µs | 2.6 µs |
-| collection (50 records) | **20.6 µs** | 27.1 µs | 27.6 µs | 30.9 µs | 27.8 µs |
+| command — uuid, enum, date-time; no defaults | 4.53 µs | 4.43 µs | 9.29 µs | 3.86 µs | **2.4 µs** |
+| config — defaults and numeric coercion | 3.25 µs | 2.42 µs | 5.78 µs | 2.88 µs | **1.98 µs** |
+| collection — 50 nested records | 17.5 µs | **13.2 µs** | 24.8 µs | 20.9 µs | 21.1 µs |
+<!--/fact-->
 
-Jaren is 1.3–4.0× faster than every Zod flavor on all three. **Ajv is faster
-than Jaren on two of the three** (1.9× on command, 1.5× on config) and slower
-on the third (1.3×) — that is the honest picture, and it is the expected
-shape: Ajv generates source with `new Function`, Jaren compiles closures
-because the no-`eval` rule is what makes it CSP-safe. Taken as a geometric
-mean across the three scenarios against the *fastest rival per scenario*,
-Jaren comes out **1.3× slower** — which is what the benchmarks page reports
-rather than quoting only the scenarios it wins. The remaining gap on small
-schemas is the price of closure-compiled validators that run under a strict
-Content-Security-Policy; a code-generating backend is not planned.
+The table is regenerated from each release's own measurement, so read it row
+by row rather than trusting a summary written once. Ajv generates source with
+`new Function`, while Jaren compiles closures because the no-`eval` rule is
+what makes it CSP-safe; that price shows most on small schemas, and a
+code-generating backend is not planned. The benchmarks page reports a
+geometric mean against the *fastest rival per scenario* rather than quoting
+only the scenarios Jaren wins.
 
-Compilation is paid once per process and is where Jaren is generally slowest
-— Zod 3 builds a schema 2.2–8.5× faster. If you compile thousands of schemas
-at boot, measure it; if you compile them once at module load, it does not
-matter.
+Compilation is paid once per process and is where Jaren is slowest; the
+benchmarks page carries the current compile figures. If you compile thousands
+of schemas at boot, measure it; if you compile them once at module load, it
+does not matter.
 
 ## Staging a migration
 

@@ -485,6 +485,27 @@ const FACTS = {
       '|---|---|---|---|---|', ...rows, ''].join('\n');
   },
 
+  // ——— the Zod migration guide: the contracts suite's adapter row
+  // (normalize, validate and map issues on invalid input — the comparable
+  // measurement) and the run that measured it. The fastest engine of each
+  // scenario is bold, whoever it is: a guide that bolds its own column on
+  // every row stops being true the release a rival gets faster.
+  'contracts.adapter.table': () => {
+    const t = data('contracts').tables.find((x) => x.title.startsWith('Normalize + validate'));
+    if (t === undefined) throw new Error('contracts.json carries no adapter table — regenerate it before quoting one');
+    const rows = t.rows.map((r) => {
+      const best = Math.min(...r.results.filter(Number.isFinite));
+      const cells = r.results.map((v) => (!Number.isFinite(v) ? '—' : v === best ? `**${us(v)} µs**` : `${us(v)} µs`));
+      return `| ${r.name} | ${cells.join(' | ')} |`;
+    });
+    return ['', `| Scenario | ${t.columns.join(' | ')} |`, `|${' --- |'.repeat(t.columns.length + 1)}`, ...rows, ''].join('\n');
+  },
+  'contracts.measured': () => {
+    const d = data('contracts');
+    if (typeof d.date !== 'string') throw new Error('contracts.json carries no measurement date — regenerate it before quoting its numbers');
+    return `${d.date.slice(0, 10)} with Node ${d.node}, ${thousands(d.iterations)} iterations`;
+  },
+
   // ——— @jarenjs/contract: match and dispatch vs the routing stack.
   // Two rivals, named apart on purpose: `fastify inject` includes
   // Fastify's own request harness, and the harness-free column
@@ -1289,6 +1310,7 @@ const spanVerdict = (r) => (r >= 1 ? `${ratio(r)}× faster` : `${ratio(1 / r)}×
 const DOCS = [
   'README.md',
   'docs/CONSUMING.md',
+  'docs/MIGRATING-FROM-ZOD.md',
   'packages/linq/docs/QUERY-PEN.md',
   'packages/linq/docs/SCHEMA-PEN.md',
   'packages/linq/docs/MODEL-PEN.md',
