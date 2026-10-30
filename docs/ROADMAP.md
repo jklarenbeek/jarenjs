@@ -337,23 +337,44 @@ costs a descriptor plus examples and no UI code at all.
 ## @jarenjs/contract
 
 - [ ] **`diffContracts` reads only the empty-schema shapes it can prove.** A
-  member schema that accepts nothing in a shape the walk's decision procedure
-  does not cover — exclusive bounds that cross, an integer range holding no
-  integer, a closed object requiring a member it does not admit, a `pattern`
-  no string matches — is still classed as a constrained member (added to an
-  open input: additive R7), though every request carrying it is refused.
-- [ ] **`diffContracts` reports a change inside an `if`, a `not` or `contains`
-  on one side only, a `contains` beside a count, or a union whose variants
-  overlap as R15 `unknown`,** so a `--fail-on breaking` gate alone passes a
-  required member dropped there. An `if` beside only a `then` is anti-monotone
-  in the `if` and beside only an `else` monotone; a `not` or `contains` added
-  narrows and one dropped widens unless the constraint moved there from beside
-  it; `maxContains` is not monotone in what matches; a variant whose
-  discriminator or type set grows into another's would need the two compared
-  value by value. Two `allOf` conjuncts respelled together, and a change at a
-  location another conjunct or the node itself also constrains (it would need
-  the two intersected; a variant added beside the node's own `type` among
-  them), stay R15.
+  member schema that accepts nothing only where two of its constraints meet —
+  a `pattern` beside length bounds, `multipleOf` beside a range, `minItems`
+  over `maxItems`, `minProperties` over `maxProperties` or below the number of
+  members it requires, a `propertyNames` that refuses a required name — or a
+  `pattern` whose emptiness rests on a lookaround, a back-reference, a word
+  boundary or a modifier group, is still classed as a constrained member
+  (added to an open input: additive R7), though every request carrying it is
+  refused: deciding it would need the constraints intersected, or the
+  pattern's language computed.
+- [ ] **`diffContracts` reports an `if` beside both a `then` and an `else`, a
+  `contains` under both counts, or a union whose variants overlap as R15
+  `unknown`,** so a `--fail-on breaking` gate alone passes a required member
+  dropped there. A value that crosses such an `if` moves from one branch to
+  the other, and a value one overlapping variant drops another may still
+  accept: deciding either would need two schemas compared value by value;
+  with a `minContains` above 0 beside a `maxContains`, the count is not
+  monotone in what matches. An `if` that changed while its branch changed or
+  appeared, one added or dropped beside a branch, an `if` change at a keyword
+  its branch also bounds, a changed `contains` beside a tuple form or beside
+  counts that changed (or any count where the document declares a draft
+  before 2019-09), two `allOf` conjuncts respelled together, and a change at
+  a location another conjunct or the node itself also constrains (it would
+  need the two intersected; a variant added beside the node's own `type`
+  among them) stay R15 too.
+- [ ] **`diffContracts` reads exclusive bounds, `multipleOf` and the item and
+  member counts as R15.** A change to `exclusiveMinimum`, `exclusiveMaximum`,
+  `multipleOf`, `minItems`, `maxItems`, `minProperties`, `maxProperties`,
+  `minContains` or `maxContains` is reported R15 `unknown`, though each but
+  `multipleOf` moves the accepted values one way as `minimum` does, so a
+  `--fail-on breaking` gate alone passes an input whose `exclusiveMaximum` or
+  `maxItems` fell.
+- [ ] **`diffContracts` reads keywords a declared older draft leaves inert.**
+  Under a schema whose `$schema` names draft-07, a changed `prefixItems` item
+  or `dependentSchemas` entry reports breaking R6 and additive R7, and
+  `unevaluatedProperties: false` reads as closing the object (an output member
+  added: breaking R8, where an open output answers additive R9), though the
+  validator reads `prefixItems` only from 2020-12 and the other two only from
+  2019-09, so neither side constrains anything there.
 
 ## @jarenjs/linq & @jarenjs/db — the data pair
 

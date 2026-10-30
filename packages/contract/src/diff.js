@@ -4,9 +4,9 @@
  * `b`, classified by the published rule table (docs/CONTRACT-FORMAT.md
  * §13, rows R1–R16) into `breaking`, `additive`, `neutral` and `unknown`
  * — where `unknown` is the honest fourth class: a schema construct the
- * checker does not model (a changed `if`, a union whose variants overlap,
- * a changed `pattern`, an external `$ref` that moved) is REPORTED,
- * never silently classed.
+ * checker does not model (an `if` beside both a `then` and an `else`, a
+ * union whose variants overlap, a changed `pattern`, an external `$ref`
+ * that moved) is REPORTED, never silently classed.
  *
  * The schema comparison walks the two sides in parallel over the resolved
  * same-document structure — a bare `{ "$ref": "#/$defs/X" }` hop is
@@ -15,12 +15,16 @@
  * `maxLength`, `minLength`, `pattern`) plus object structure
  * (`properties`, `required`, `additionalProperties`) and `items`, and
  * walks the branches of the applicators whose direction is decidable —
- * an `allOf`, a `then`/`else` under the same `if`, a `dependentSchemas`
- * member, a `prefixItems` entry, a `contains`, a `not` (its direction
- * flipped), an `anyOf`/`oneOf` whose variants a type, a discriminator or
- * the two together tell apart (paired by that key, wherever they sit) —
- * branch against branch with the same rules. A schema it proves accepts
- * nothing (`not: {}`, an empty `enum`, types that do not meet, …) compares
+ * an `allOf`, a `then`/`else` under the same `if`, an `if` beside only a
+ * `then` (its direction flipped) or only an `else`, a `dependentSchemas`
+ * member, a `prefixItems` entry, a `contains` (flipped under a
+ * `maxContains` with `minContains: 0`), a `not` (flipped), an
+ * `anyOf`/`oneOf` whose variants a type, a discriminator or the two
+ * together tell apart (paired by that key, wherever they sit) — branch
+ * against branch with the same rules; a `not` or a `contains` on one
+ * side only narrows or widens by its own values. A schema it proves
+ * accepts nothing (`not: {}`, an empty `enum`, types that do not meet,
+ * bounds that hold no number, a `pattern` no string matches, …) compares
  * as `false` does. Pure annotations (`title`,
  * `description`, `examples`, `$comment`, `deprecated`) never move a wire
  * byte and are ignored; every other keyword that differs between the two
@@ -47,9 +51,9 @@
 import { decodeJSONPointerSegment, encodeJSONPointerSegment } from '@jarenjs/json/pointer';
 import { canonicalizeJson } from '@jarenjs/json/canonical';
 import {
-  canonicalNullable, splitNullable, SCHEMA_VALUE_KEYWORDS, SCHEMA_MAP_KEYWORDS, SCHEMA_LIST_KEYWORDS,
+  canonicalNullable, splitNullable, SCHEMA_VALUE_KEYWORDS, SCHEMA_MAP_KEYWORDS, SCHEMA_LIST_KEYWORDS, TYPE_SCOPED_KEYWORDS,
 } from '@jarenjs/core/schema';
-import { collectSameDocumentAnchors, createSchemaPatternTester, resolveSameDocumentRef } from '@jarenjs/validate/normalize';
+import { collectSameDocumentAnchors, createSchemaPatternTester, detectSchemaDraft, resolveSameDocumentRef } from '@jarenjs/validate/normalize';
 
 import { compileContract } from './compile.js';
 import { ContractHostError } from './errors.js';
@@ -311,22 +315,24 @@ const APPLICATORS = ['anyOf', 'oneOf', 'allOf', 'not', 'if', 'then', 'else', 'de
 const carriesApplicator = (node) => APPLICATORS.some((key) => node[key] !== undefined);
 
 /**
- * Whether an in-place applicator of an object schema may hold the member
- * `m` — a branch that names or requires it, closes the object, carries a
- * catch-all or an applicator of its own, or that the walk cannot follow
- * ({@link mayConstrain}) — so a member or requirement present on the
- * other side only may have moved into it. An applicator none of whose
- * branches may hold `m` judges nothing the member rows read.
+ * Whether an in-place applicator of a schema may hold what `what` names
+ * at the schema's own location — the member `member` (a branch that
+ * names or requires it, closes the object, or carries a catch-all) or
+ * the keyword `keyword` — or a branch carries an applicator of its own or
+ * cannot be followed ({@link mayConstrain}): a member, a requirement or a
+ * constraint present on the other side only may have moved into it. An
+ * applicator none of whose branches may hold it judges nothing the rows
+ * that read it read.
  * @param {Record<string, any>} node
- * @param {string} m
  * @param {Side} side
+ * @param {{ keyword?: string, member?: string }} what
  */
-function applicatorMayHold(node, m, side) {
+function applicatorMayHold(node, side, what) {
   return APPLICATORS.some((key) => {
     const value = node[key];
     if (value === undefined) return false;
     const branches = Array.isArray(value) ? value : key === 'dependentSchemas' && isObject(value) ? Object.values(value) : [value];
-    return branches.some((branch) => mayConstrain(branch, [], side, { member: m }));
+    return branches.some((branch) => mayConstrain(branch, [], side, what));
   });
 }
 
@@ -490,6 +496,7 @@ const INTEGER = canon('integer');
 const NUMBER = canon('number');
 const STRING = canon('string');
 const OBJECT = canon('object');
+const ARRAY = canon('array');
 
 /**
  * Whether a type set (canonical texts) admits every value of the type
@@ -544,6 +551,14 @@ const valuesMeet = (x, y) => x.some((v) => y.includes(v));
 const typesBoth = (x, y) => [...new Set([...x.filter((t) => typeCovered(t, new Set(y))), ...y.filter((t) => typeCovered(t, new Set(x)))])];
 
 /**
+ * The type set (canonical texts) a `type` keyword's value names, or
+ * `null` where it names none.
+ * @param {unknown} type
+ * @returns {string[] | null}
+ */
+const typeSet = (type) => (typeof type === 'string' ? [canon(type)] : Array.isArray(type) ? type.map(canon) : null);
+
+/**
  * The JSON type of a value (a canonical text), `integer` for a whole number.
  * @param {unknown} v
  */
@@ -572,11 +587,16 @@ function acceptsEverything(schema, side) {
  * never a guess: `false`; a `not` of a schema that accepts everything; an
  * empty `enum`; a `const` outside the `enum`; a `const` or every `enum`
  * value outside the type set, which is the node's own `type` met with
- * each `allOf` conjunct's; type sets that do not meet; bounds out of
- * order (`minimum` over `maximum`, `minLength` over `maxLength`) under a
- * type set of only that kind; an `allOf` conjunct that accepts nothing,
- * or an `anyOf`/`oneOf` whose every variant does; a required member that
- * accepts nothing under a type set of only `object`. Read through bare
+ * each `allOf` conjunct's; type sets that do not meet; under a type set
+ * of only numbers, bounds (exclusive ones among them) that hold no
+ * number — under only `integer`, no integer ({@link rangeHoldsNothing});
+ * under only strings, `minLength` over `maxLength` or a `pattern` no
+ * string matches ({@link patternMatchesNothing}); under only `object`, a
+ * required member the object refuses every value of ({@link
+ * refusesMember}: its own schema or a matching pattern's accepts
+ * nothing, or a closed object does not admit it); an `allOf` conjunct
+ * that accepts nothing, or an `anyOf`/`oneOf` whose every variant does.
+ * Read through bare
  * same-document `$ref` hops; any other schema answers `false` and is
  * compared as before. Each node is read once per side (a diamond of
  * `$ref`s stays linear).
@@ -617,12 +637,11 @@ function emptyNode(node, side, within) {
   if (Array.isArray(node.enum) && node.enum.length === 0) return true;
   if (node.const !== undefined && Array.isArray(node.enum) && !node.enum.some((v) => canon(v) === canon(node.const))) return true;
   /** @type {string[] | null} */
-  let types = typeof node.type === 'string' ? [canon(node.type)] : Array.isArray(node.type) ? node.type.map(canon) : null;
+  let types = typeSet(node.type);
   const conjuncts = Array.isArray(node.allOf) ? node.allOf : [];
   for (const conjunct of conjuncts) {
     const own = resolveHops(conjunct, side);
-    const t = 'node' in own && isObject(own.node) ? own.node.type : undefined;
-    const set = typeof t === 'string' ? [canon(t)] : Array.isArray(t) ? t.map(canon) : null;
+    const set = typeSet('node' in own && isObject(own.node) ? own.node.type : undefined);
     if (set !== null) types = types === null ? set : typesBoth(types, set);
   }
   if (types !== null) {
@@ -633,12 +652,11 @@ function emptyNode(node, side, within) {
     const only = (/** @type {string[]} */ kinds) => types !== null && types.every((t) => kinds.includes(t));
     const outOfOrder = (/** @type {string} */ low, /** @type {string} */ high) =>
       typeof node[low] === 'number' && typeof node[high] === 'number' && node[low] > node[high];
-    if (only([NUMBER, INTEGER]) && outOfOrder('minimum', 'maximum')) return true;
+    if (only([NUMBER, INTEGER]) && rangeHoldsNothing(node, only([INTEGER]))) return true;
     if (only([STRING]) && outOfOrder('minLength', 'maxLength')) return true;
-    if (only([OBJECT]) && Array.isArray(node.required) && isObject(node.properties)) {
-      const props = node.properties;
-      if (node.required.some((m) => typeof m === 'string' && Object.hasOwn(props, m) && acceptsNothing(props[m], side, within))) return true;
-    }
+    if (only([STRING]) && typeof node.pattern === 'string' && patternMatchesNothing(node.pattern)) return true;
+    if (only([OBJECT]) && Array.isArray(node.required)
+      && node.required.some((m) => typeof m === 'string' && refusesMember(node, m, side, within))) return true;
   }
   if (conjuncts.some((conjunct) => acceptsNothing(conjunct, side, within))) return true;
   for (const key of ['anyOf', 'oneOf']) {
@@ -647,6 +665,300 @@ function emptyNode(node, side, within) {
   }
   return false;
 }
+
+/**
+ * Whether the numeric bounds of a schema hold no number — or, with
+ * `integers`, no integer: the greatest lower bound past the least upper
+ * one, or equal to it while either is exclusive (`exclusiveMinimum: 3,
+ * exclusiveMaximum: 3`); for integers, each bound rounded to the integer
+ * it admits first (`minimum: 1.2, maximum: 1.8` holds none). A bound
+ * that is not a number (a draft-04 boolean `exclusiveMaximum`) is not
+ * read, so the range read is never narrower than the validator's.
+ * @param {Record<string, any>} node
+ * @param {boolean} integers
+ */
+function rangeHoldsNothing(node, integers) {
+  const bound = (/** @type {string} */ key) => (typeof node[key] === 'number' ? node[key] : undefined);
+  const min = bound('minimum');
+  const max = bound('maximum');
+  const exclusiveMin = bound('exclusiveMinimum');
+  const exclusiveMax = bound('exclusiveMaximum');
+  if (integers) {
+    const low = Math.max(min === undefined ? -Infinity : Math.ceil(min), exclusiveMin === undefined ? -Infinity : Math.floor(exclusiveMin) + 1);
+    const high = Math.min(max === undefined ? Infinity : Math.floor(max), exclusiveMax === undefined ? Infinity : Math.ceil(exclusiveMax) - 1);
+    return low > high;
+  }
+  let low = min ?? -Infinity;
+  let lowOpen = false;
+  if (exclusiveMin !== undefined && exclusiveMin >= low) {
+    low = exclusiveMin;
+    lowOpen = true;
+  }
+  let high = max ?? Infinity;
+  let highOpen = false;
+  if (exclusiveMax !== undefined && exclusiveMax <= high) {
+    high = exclusiveMax;
+    highOpen = true;
+  }
+  return low > high || (low === high && (lowOpen || highOpen));
+}
+
+/**
+ * Whether an object schema refuses every value of the member `m`: its
+ * `properties` entry, or a `patternProperties` entry whose pattern
+ * matches the name, accepts nothing; or, where neither names it, the
+ * `additionalProperties` that judges it does (`false` among them) — or,
+ * without one, an `unevaluatedProperties` that does, where no
+ * applicator or dynamic reference beside it may evaluate the member
+ * instead. A pattern that does not compile answers no.
+ * @param {Record<string, any>} node
+ * @param {string} m
+ * @param {Side} side
+ * @param {Set<object>} within
+ */
+function refusesMember(node, m, side, within) {
+  const named = isObject(node.properties) && Object.hasOwn(node.properties, m);
+  if (named && acceptsNothing(node.properties[m], side, within)) return true;
+  const patterns = matchingPatterns(node, m);
+  if (patterns === null) return false;
+  if (patterns.some(([, schema]) => acceptsNothing(schema, side, within))) return true;
+  if (named || patterns.length > 0) return false;
+  if (node.additionalProperties !== undefined) return acceptsNothing(node.additionalProperties, side, within);
+  return node.unevaluatedProperties !== undefined && !carriesApplicator(node)
+    && node.$dynamicRef === undefined && node.$recursiveRef === undefined && !declaresOlderDraft(side)
+    && acceptsNothing(node.unevaluatedProperties, side, within);
+}
+
+/**
+ * Whether a side's document declares, anywhere, a draft older than
+ * 2019-09 — a `$schema` the validator reads as one ({@link
+ * detectSchemaDraft}). Under such a draft `minContains`, `maxContains`
+ * and `unevaluatedProperties` are no keywords, so a reading that needs
+ * them applied is not made where one may sit.
+ * @param {Side} side
+ */
+function declaresOlderDraft(side) {
+  let known = olderDraftKnown.get(side);
+  if (known === undefined) olderDraftKnown.set(side, (known = holdsOlderDraft(side.doc, new Set())));
+  return known;
+}
+
+/** {@link declaresOlderDraft}'s answers, per side. @type {WeakMap<Side, boolean>} */
+const olderDraftKnown = new WeakMap();
+
+/**
+ * Whether a value holds an object whose `$schema` names a draft older
+ * than 2019-09.
+ * @param {unknown} value
+ * @param {Set<object>} seen
+ * @returns {boolean}
+ */
+function holdsOlderDraft(value, seen) {
+  if (value === null || typeof value !== 'object' || seen.has(value)) return false;
+  seen.add(value);
+  if (isObject(value) && typeof value.$schema === 'string' && detectSchemaDraft(value) < 2019) return true;
+  return Object.values(value).some((inner) => holdsOlderDraft(inner, seen));
+}
+
+//#region whether a pattern matches no string
+
+// A pattern is read as the set of signatures its matches may have, three
+// bits each: the match passes a `^` before it consumes a character, it
+// passes a `$` after its last one, it consumes one. Without the `m` flag
+// `^` holds only where the text starts and `$` where it ends, so a
+// sequence drops a pair whose `^` follows a consumed character or whose
+// `$` precedes one; an alternative unites; a class that admits no
+// character (`[]`, `[^\s\S]`) has no signature. A construct the reading
+// does not model — a lookaround, a word boundary, a back-reference, a
+// modifier group — reads as the empty match that constrains nothing, so
+// the set only ever over-approximates: an empty set is a proof.
+const CARET = 1;
+const DOLLAR = 2;
+const CONSUMES = 4;
+/** The signature set of the empty match alone. */
+const EMPTY_MATCH = 1;
+/** The signature set of one character. */
+const ONE_CHAR = 1 << CONSUMES;
+
+/**
+ * The signatures of a match of `x` followed by a match of `y`.
+ * @param {number} x @param {number} y
+ */
+function followedBy(x, y) {
+  let out = 0;
+  for (let s = 0; s < 8; s++) {
+    if ((x & (1 << s)) === 0) continue;
+    for (let t = 0; t < 8; t++) {
+      if ((y & (1 << t)) === 0 || ((s & CONSUMES) && (t & CARET)) || ((s & DOLLAR) && (t & CONSUMES))) continue;
+      out |= 1 << (s | t);
+    }
+  }
+  return out;
+}
+
+/**
+ * The signatures of `x` repeated `min` to `max` times. The powers of a
+ * set walk at most 256 sets, so they cycle: the range is read over one
+ * turn of the cycle past `min`.
+ * @param {number} x @param {number} min @param {number} max
+ */
+function repeated(x, min, max) {
+  if (!Number.isSafeInteger(min)) return EMPTY_MATCH;
+  const powers = [EMPTY_MATCH];
+  const index = new Map([[EMPTY_MATCH, 0]]);
+  let next = followedBy(EMPTY_MATCH, x);
+  while (!index.has(next)) {
+    index.set(next, powers.length);
+    powers.push(next);
+    next = followedBy(next, x);
+  }
+  const start = /** @type {number} */ (index.get(next));
+  const period = powers.length - start;
+  let out = 0;
+  for (let k = min; k <= Math.min(max, min + powers.length); k++) {
+    out |= powers[k < powers.length ? k : start + ((k - start) % period)];
+  }
+  return out;
+}
+
+/**
+ * Whether a `pattern` matches no string, as the validator compiles it: a
+ * source that does not compile in Unicode mode (the validator then reads
+ * a `/source/flags` literal, or refuses it) answers no, and so does any
+ * other pattern the signature reading above cannot prove empty.
+ * @param {string} source
+ */
+function patternMatchesNothing(source) {
+  try {
+    void new RegExp(source, 'u');
+  }
+  catch {
+    return false;
+  }
+  const n = source.length;
+  let i = 0;
+  let unread = false;
+  const at = (/** @type {number} */ k) => (k < n ? source[k] : '');
+  const skipPast = (/** @type {string} */ close) => {
+    const end = source.indexOf(close, i);
+    if (end < 0) unread = true;
+    i = end < 0 ? n : end + 1;
+  };
+  const hexAt = (/** @type {number} */ k) => (/^[0-9a-fA-F]{4}$/.test(source.slice(k, k + 4)) ? Number.parseInt(source.slice(k, k + 4), 16) : -1);
+  /** One escape after the `\` at `i`, in a class or out of one: the letter it names. */
+  const escape = () => {
+    const letter = at(i + 1);
+    if (letter === 'p' || letter === 'P' || (letter === 'u' && at(i + 2) === '{')) skipPast('}');
+    else if (letter === 'k') skipPast('>');
+    else if (letter === 'u') {
+      const lead = hexAt(i + 2);
+      i += 6;
+      // an escaped surrogate pair is one code point in Unicode mode
+      if (lead >= 0xD800 && lead <= 0xDBFF && at(i) === '\\' && at(i + 1) === 'u' && hexAt(i + 2) >= 0xDC00 && hexAt(i + 2) <= 0xDFFF) i += 6;
+    }
+    else if (letter === 'x') i += 4;
+    else if (letter === 'c') i += 3;
+    else if (letter >= '1' && letter <= '9') {
+      i += 2;
+      while (at(i) >= '0' && at(i) <= '9') i++;
+    }
+    else i += 2;
+    return letter;
+  };
+  const characterClass = () => {
+    i++;
+    const negated = at(i) === '^';
+    if (negated) i++;
+    const letters = new Set();
+    let members = 0;
+    while (i < n && at(i) !== ']') {
+      members++;
+      if (at(i) === '\\') letters.add(escape());
+      else i += source.codePointAt(i) > 0xFFFF ? 2 : 1;
+    }
+    i++;
+    const everything = ['dD', 'sS', 'wW'].some((pair) => letters.has(pair[0]) && letters.has(pair[1]));
+    return (negated ? everything : members === 0) ? 0 : ONE_CHAR;
+  };
+  const group = () => {
+    let reads = true;
+    if (at(i + 1) !== '?') i++;
+    else if (at(i + 2) === ':') i += 3;
+    else if (at(i + 2) === '<' && at(i + 3) !== '=' && at(i + 3) !== '!') skipPast('>');
+    else {
+      // a lookaround (`(?!)` never matches) or a modifier group
+      const negative = at(i + 2) === '!' || (at(i + 2) === '<' && at(i + 3) === '!');
+      reads = false;
+      if (at(i + 2) === '=' || at(i + 2) === '!' || at(i + 2) === '<') i += at(i + 2) === '<' ? 4 : 3;
+      else skipPast(':');
+      if (negative && at(i) === ')') {
+        i++;
+        return 0;
+      }
+    }
+    const body = disjunction();
+    if (at(i) !== ')') unread = true;
+    i++;
+    return reads ? body : EMPTY_MATCH;
+  };
+  const atom = () => {
+    const c = at(i);
+    if (c === '^' || c === '$') {
+      i++;
+      return 1 << (c === '^' ? CARET : DOLLAR);
+    }
+    if (c === '[') return characterClass();
+    if (c === '(') return group();
+    if (c === '\\') {
+      const letter = escape();
+      return 'bBk123456789'.includes(letter) ? EMPTY_MATCH : ONE_CHAR;
+    }
+    i += source.codePointAt(i) > 0xFFFF ? 2 : 1;
+    return ONE_CHAR;
+  };
+  const quantified = (/** @type {number} */ x) => {
+    const c = at(i);
+    let min = 1;
+    let max = 1;
+    if (c === '*' || c === '+' || c === '?') {
+      i++;
+      min = c === '+' ? 1 : 0;
+      max = c === '?' ? 1 : Infinity;
+    }
+    else if (c === '{') {
+      const bounds = /^\{(\d+)(,(\d*))?\}/.exec(source.slice(i));
+      if (bounds === null) {
+        unread = true;
+        return x;
+      }
+      i += bounds[0].length;
+      min = Number(bounds[1]);
+      max = bounds[2] === undefined ? min : bounds[3] === '' ? Infinity : Number(bounds[3]);
+    }
+    else return x;
+    if (at(i) === '?') i++;
+    return repeated(x, min, max);
+  };
+  /** @returns {number} */
+  const alternative = () => {
+    let out = EMPTY_MATCH;
+    while (i < n && at(i) !== '|' && at(i) !== ')') out = followedBy(out, quantified(atom()));
+    return out;
+  };
+  /** @returns {number} */
+  function disjunction() {
+    let out = alternative();
+    while (at(i) === '|') {
+      i++;
+      out |= alternative();
+    }
+    return out;
+  }
+  const set = disjunction();
+  return set === 0 && !unread && i === n;
+}
+
+//#endregion
 
 /**
  * The value set (canonical texts, sorted) a union branch admits for the
@@ -777,9 +1089,12 @@ function keyedPairs(xk, yk, meet) {
  * nothing else changed that could have moved into or out of them:
  * `allOf` of the same length with at most one conjunct respelled; `anyOf`/`oneOf` whose variants are provably disjoint ({@link pairVariants});
  * a `not` on both sides (read anti-monotone: {@link flippedSink}); a
- * `contains` on both sides without `minContains`, `maxContains` or a
- * tuple form beside it;
- * `then`/`else` beside an `if` that validates alike; `dependentSchemas`
+ * `contains` on both sides, without a tuple form beside it, under the
+ * same counts — read by {@link containsReading}, anti-monotone under
+ * `maxContains` with `minContains: 0`; a `not` or a `contains` on one
+ * side only (a constraint added or dropped), where no branch of the other
+ * side's applicators may hold it; the conditional keywords
+ * {@link conditionalPositions} names; `dependentSchemas`
  * over the same keys; `prefixItems` of the same length. None where the
  * node reads its branches' annotations (`unevaluated*`) or a constraint,
  * member or requirement sits on one side only. Every other applicator
@@ -795,7 +1110,7 @@ function decidedApplicators(A, B, a, b) {
   /** @type {Set<string>} */
   const decided = new Set();
   const lists = (/** @type {string} */ key) => Array.isArray(A[key]) && Array.isArray(B[key]) && A[key].length === B[key].length;
-  const candidates = ['allOf', 'anyOf', 'oneOf', 'not', 'contains', 'then', 'else', 'dependentSchemas', 'prefixItems'];
+  const candidates = ['allOf', 'anyOf', 'oneOf', 'not', 'contains', 'if', 'then', 'else', 'dependentSchemas', 'prefixItems'];
   if (!candidates.some((key) => A[key] !== undefined || B[key] !== undefined)) return decided;
   if (readsAnnotations(A) || readsAnnotations(B) || oneSided(A, B)) return decided;
   if (lists('allOf')) {
@@ -809,18 +1124,182 @@ function decidedApplicators(A, B, a, b) {
     if (Array.isArray(A[key]) && Array.isArray(B[key]) && pairVariants(A[key], B[key], a, b) !== null) decided.add(key);
   }
   if (A.not !== undefined && B.not !== undefined) decided.add('not');
-  // a count bound (`maxContains` is not monotone in what matches) or a
-  // tuple form (it judges the items `contains` reads) keeps `contains` R15
-  const counted = (/** @type {Record<string, any>} */ node) => node.minContains !== undefined || node.maxContains !== undefined
-    || node.prefixItems !== undefined || Array.isArray(node.items);
-  if (A.contains !== undefined && B.contains !== undefined && !counted(A) && !counted(B)) decided.add('contains');
-  if (A.if !== undefined && B.if !== undefined && !schemasDiffer(A.if, B.if, a, b)) {
-    for (const key of ['then', 'else']) if (A[key] !== undefined && B[key] !== undefined) decided.add(key);
+  // a tuple form (it judges the items `contains` reads) keeps a changed
+  // `contains` R15, and so do counts that changed or that bound it on both
+  // sides (`containsReading`)
+  const tuple = (/** @type {Record<string, any>} */ node) => node.prefixItems !== undefined || Array.isArray(node.items);
+  if (A.contains !== undefined && B.contains !== undefined && !tuple(A) && !tuple(B)
+    && canon(A.minContains) === canon(B.minContains) && canon(A.maxContains) === canon(B.maxContains)
+    && containsReading(A, declaresOlderDraft(a) || declaresOlderDraft(b)) !== null) decided.add('contains');
+  // on one side only, either is a constraint added or dropped — unless it
+  // may have moved there from a branch of the other side's applicators
+  for (const key of ['not', 'contains']) {
+    if ((A[key] === undefined) === (B[key] === undefined)) continue;
+    const [without, side] = A[key] === undefined ? [A, a] : [B, b];
+    if (!applicatorMayHold(without, side, { keyword: key })) decided.add(key);
   }
+  for (const key of conditionalPositions(A, B, a, b)) decided.add(key);
   if (isObject(A.dependentSchemas) && isObject(B.dependentSchemas)
     && canon(Object.keys(A.dependentSchemas).sort()) === canon(Object.keys(B.dependentSchemas).sort())) decided.add('dependentSchemas');
   if (lists('prefixItems')) decided.add('prefixItems');
   return decided;
+}
+
+/**
+ * The conditional keywords of a schema pair the walk reads by direction:
+ * - an `if` alike on both sides: a `then` or an `else` on either side,
+ *   read against `true` where the other side has none;
+ * - no `if` on either side: a `then` or an `else`, which then applies to
+ *   nothing (no change);
+ * - an `if` beside no `then` and no `else` on either side, whether it
+ *   changed or sits on one side only: it judges nothing (no change);
+ * - an `if` that changed beside only a `then`, alike on both sides — the
+ *   node accepts what fails the `if` or passes the `then`, so it is
+ *   anti-monotone in the `if` — or only an `else`, alike on both sides
+ *   (what passes the `if` or the `else`: monotone).
+ * None for any other pair: an `if` beside both a `then` and an `else`
+ * (moving an instance between them would need the two compared value by
+ * value), an `if` added or dropped beside a branch, and an `if` that
+ * changed while its branch changed or appeared beside it.
+ * @param {Record<string, any>} A
+ * @param {Record<string, any>} B
+ * @param {Side} a
+ * @param {Side} b
+ * @returns {string[]}
+ */
+function conditionalPositions(A, B, a, b) {
+  const branches = ['then', 'else'].filter((key) => A[key] !== undefined || B[key] !== undefined);
+  if (A.if === undefined && B.if === undefined) return branches;
+  if (A.if === undefined || B.if === undefined) return branches.length === 0 ? ['if'] : [];
+  if (!schemasDiffer(A.if, B.if, a, b)) return branches;
+  if (branches.length === 0) return ['if'];
+  const [key] = branches;
+  return branches.length === 1 && A[key] !== undefined && B[key] !== undefined && !schemasDiffer(A[key], B[key], a, b) ? ['if'] : [];
+}
+
+/**
+ * How the items a `contains` matches decide what its node accepts, read
+ * from the counts beside it: `'monotone'` without a `maxContains` (at
+ * least `minContains` items — one by default — must match, so a branch
+ * that widens widens the node), `'flipped'` under a `maxContains` with
+ * `minContains: 0` (at most that many may match, so a branch that widens
+ * narrows the node), `'vacuous'` under `minContains: 0` alone (no count
+ * to meet: the node accepts what it would without the `contains`), and
+ * `null` where a count bounds both ends (not monotone in what matches),
+ * is not a number, or may be no keyword at all (`older`: a document
+ * declares a draft before 2019-09, {@link declaresOlderDraft}).
+ * @param {Record<string, any>} node
+ * @param {boolean} older
+ * @returns {'monotone' | 'flipped' | 'vacuous' | null}
+ */
+function containsReading(node, older) {
+  const { minContains: min, maxContains: max } = node;
+  if (min === undefined && max === undefined) return 'monotone';
+  if (older || (min !== undefined && typeof min !== 'number') || (max !== undefined && typeof max !== 'number')) return null;
+  if (max === undefined) return min === 0 ? 'vacuous' : 'monotone';
+  return min === 0 ? 'flipped' : null;
+}
+
+/** The JSON types (canonical texts). */
+const JSON_TYPES = ['array', 'boolean', 'integer', 'null', 'number', 'object', 'string'].map(canon);
+
+/** Each keyword that judges values of one JSON type only, with that type (canonical text; the numeric ones under `number`). */
+const SCOPED_TYPE = new Map(/** @type {const} */ (['string', 'number', 'array', 'object'])
+  .flatMap((type) => TYPE_SCOPED_KEYWORDS[type].map((key) => /** @type {[string, string]} */ ([key, canon(type)]))));
+
+/** Where a pointer token below a node leads: into a member of an object, or into an item of an array. */
+const LEADS_INTO = new Map([...['properties', 'patternProperties', 'additionalProperties', 'propertyNames', 'unevaluatedProperties', 'required'].map((k) => [k, OBJECT]),
+  ...['items', 'prefixItems', 'contains', 'unevaluatedItems'].map((k) => [k, ARRAY])]);
+
+/**
+ * The JSON types (canonical texts) a schema may refuse a value of, or
+ * `null` for any: none for a schema that accepts everything, and for one
+ * whose every keyword judges values of one type only (`maxLength`,
+ * `required`, …) or is a `type`, the types those keywords judge and the
+ * types the `type` leaves out.
+ * @param {unknown} schema
+ * @param {Side} side
+ * @returns {string[] | null}
+ */
+function refusableTypes(schema, side) {
+  if (acceptsEverything(schema, side)) return [];
+  const resolved = resolveHops(schema, side);
+  if (!('node' in resolved) || !isObject(resolved.node)) return null;
+  const types = new Set();
+  for (const key of Object.keys(resolved.node)) {
+    if (INERT.has(key)) continue;
+    const listed = key === 'type' ? typeSet(resolved.node.type) : null;
+    const type = SCOPED_TYPE.get(key);
+    if (listed !== null) {
+      for (const t of JSON_TYPES) if (!typeCovered(t, new Set(listed))) types.add(t);
+    }
+    else if (type === undefined) return null;
+    else types.add(type);
+  }
+  return [...types];
+}
+
+/**
+ * The JSON types (canonical texts) of the values a change may move into
+ * or out of what a schema accepts, or `null` for any, read from where it
+ * sits (`tokens`, below the schema; the in-place branches on the way
+ * keep the location): a change inside a member or an item moves only
+ * objects or arrays; a keyword that judges one type only moves values of
+ * that type; a `type` that narrowed moves the types it dropped, one that
+ * widened the types it added.
+ * @param {string[]} tokens
+ * @param {'narrowed' | 'widened' | null} direction - `null` for a member event
+ * @param {string} keyword
+ * @param {unknown} from
+ * @param {unknown} to
+ * @returns {string[] | null}
+ */
+function movedTypes(tokens, direction, keyword, from, to) {
+  let i = 0;
+  while (i < tokens.length && IN_PLACE.has(tokens[i])) i += SINGLE_BRANCH.has(tokens[i]) ? 1 : 2;
+  if (i < tokens.length) return LEADS_INTO.has(tokens[i]) ? [/** @type {string} */ (LEADS_INTO.get(tokens[i]))] : null;
+  if (keyword === 'type') {
+    const set = (/** @type {unknown} */ v) => new Set(v === undefined ? JSON_TYPES : (Array.isArray(v) ? v : [v]).map(canon));
+    const [x, y] = direction === 'narrowed' ? [set(from), set(to)] : [set(to), set(from)];
+    return [...x].filter((t) => !typeCovered(t, y));
+  }
+  const type = SCOPED_TYPE.get(keyword);
+  return type === undefined ? null : [type];
+}
+
+/**
+ * The sink of a conditional branch whose change matters for values of
+ * some types only: a `then` sees the values its `if` may accept, an
+ * `else` the values it may refuse, and an `if` moves values the branch
+ * beside it then judges, which matters only where the branch may refuse
+ * them. A change that moves only values of other types ({@link
+ * movedTypes}) moves nothing the node accepts.
+ * @param {Sink} sink
+ * @param {string} branchPath - pointer to the branch
+ * @param {string[]} types - the types (canonical texts) a change matters for
+ * @returns {Sink}
+ */
+function typedSink(sink, branchPath, types) {
+  /**
+   * @param {string} location @param {'narrowed' | 'widened' | null} direction
+   * @param {string} keyword @param {unknown} from @param {unknown} to
+   */
+  const moves = (location, direction, keyword, from, to) => {
+    const moved = movedTypes(tokensBelow(location, branchPath), direction, keyword, from, to);
+    return moved === null || typesMeet(moved, types);
+  };
+  return {
+    constraint(direction, keyword, path, from, to) {
+      const location = keyword === 'schema' ? path : path.slice(0, path.lastIndexOf('/'));
+      if (moves(location, direction, keyword, from, to)) sink.constraint(direction, keyword, path, from, to);
+    },
+    member(event, direction, path, member, closedBefore, catchAll) {
+      const container = path.slice(0, path.lastIndexOf(path.endsWith('/required') ? '/required' : '/properties/'));
+      if (moves(container, null, 'required', member, member)) sink.member(event, direction, path, member, closedBefore, catchAll);
+    },
+    unknown: sink.unknown,
+    respelled: sink.respelled,
+  };
 }
 
 /** The in-place applicators, as a set. */
@@ -991,7 +1470,10 @@ function flippedSink(sink) {
  * that position takes, through {@link besideSink}: where what else the
  * node applies may constrain the same location, the change is R15. Union
  * variants pair by key ({@link pairVariants}); one added or removed is the
- * union widened or narrowed by its own values (`note: 'schema'`).
+ * union widened or narrowed by its own values (`note: 'schema'`). A `not`
+ * or a `contains` on one side only narrows (added) or widens (dropped)
+ * the node by its own values (`note` the keyword). A conditional branch
+ * moves only the values that reach it ({@link typedSink}).
  * @param {string} key
  * @param {Record<string, any>} A - the node on side `a`
  * @param {Record<string, any>} B - the node on side `b`
@@ -1002,17 +1484,70 @@ function flippedSink(sink) {
  * @param {Map<object, Set<object>>} visited
  */
 function compareBranches(key, A, B, path, a, b, sink, visited) {
+  const conditional = (/** @type {string} */ k) => k === 'if' || k === 'then' || k === 'else';
   const own = (/** @type {Record<string, any>} */ node) => Object.fromEntries(Object.entries(node).filter(([k]) =>
-    k !== key && !ANNOTATIONS.has(k) && !RESOLUTION.has(k) && !((key === 'then' || key === 'else') && (k === 'if' || k === 'then' || k === 'else'))));
+    k !== key && !ANNOTATIONS.has(k) && !RESOLUTION.has(k) && !(conditional(key) && conditional(k))));
   const node = [{ schema: own(A), side: a, prefix: /** @type {string[]} */ ([]) }, { schema: own(B), side: b, prefix: /** @type {string[]} */ ([]) }];
   /**
    * @param {unknown} x @param {unknown} y @param {string} at
    * @param {{ schema: unknown, side: Side, prefix: string[] }[]} beside @param {Sink} [into]
+   * @param {string[] | null} [types] - the types a change matters for ({@link typedSink}), `null` for all
    */
-  const walk = (x, y, at, beside, into = sink) => compareSchema(x, y, at, a, b, besideSink(into, key, at, beside), visited);
-  if (key === 'then' || key === 'else') walk(A[key], B[key], path, node);
-  else if (key === 'not') walk(A.not, B.not, path, node, flippedSink(sink));
-  else if (key === 'contains') walk(A.contains, B.contains, path, node.map((n) => ({ ...n, prefix: ['items'] })));
+  const walk = (x, y, at, beside, into = sink, types = null) => {
+    const masked = besideSink(into, key, at, beside);
+    compareSchema(x, y, at, a, b, types === null ? masked : typedSink(masked, at, types), visited);
+  };
+  /** The union of two type sets, `null` (every type) where either is. @param {(string[] | null)[]} sets */
+  const union = (sets) => (sets.includes(null) ? null : /** @type {string[][]} */ (sets).flat());
+  if (key === 'then' || key === 'else') {
+    // without an `if`, a `then` or an `else` applies to nothing; with
+    // one, it sees the values the `if` accepts or refuses
+    const reach = (/** @type {unknown} */ condition, /** @type {Side} */ side) => (key === 'then' ? acceptedTypes(condition, side) : refusableTypes(condition, side));
+    if (A.if !== undefined || B.if !== undefined) walk(A[key] ?? true, B[key] ?? true, path, node, sink, union([reach(A.if, a), reach(B.if, b)]));
+  }
+  else if (key === 'if') {
+    // beside no branch, an `if` judges nothing; beside one, what crosses
+    // it is judged by the branch, which may also constrain the location
+    // the `if` changed at (unless it accepts nothing) and refuses values
+    // of some types only
+    const branch = A.then !== undefined || B.then !== undefined ? 'then' : A.else !== undefined || B.else !== undefined ? 'else' : null;
+    if (branch === null) return;
+    const branches = /** @type {[unknown, Side][]} */ ([[A[branch], a], [B[branch], b]]);
+    const refusable = union(branches.map(([schema, side]) => refusableTypes(schema, side)));
+    if (refusable !== null && refusable.length === 0) return;
+    const judging = branches.filter(([schema, side]) => !acceptsNothing(schema, side)).map(([schema, side]) => ({ schema, side, prefix: /** @type {string[]} */ ([]) }));
+    walk(A.if, B.if, path, [...node, ...judging], branch === 'then' ? flippedSink(sink) : sink, refusable);
+  }
+  else if (key === 'not') {
+    if (A.not !== undefined && B.not !== undefined) walk(A.not, B.not, path, node, flippedSink(sink));
+    else {
+      // added, it refuses what its branch accepts; dropped, it refuses
+      // nothing more — unless its branch accepts nothing, or nothing the
+      // node's own `type` lets through
+      const [holder, side] = A.not === undefined ? [B, b] : [A, a];
+      const admitted = typeSet(holder.type);
+      const types = acceptedTypes(holder.not, side);
+      const apart = admitted !== null && types !== null && !typesMeet(admitted, types);
+      if (!apart && !acceptsNothing(holder.not, side)) sink.constraint(A.not === undefined ? 'narrowed' : 'widened', 'not', path, A.not, B.not);
+    }
+  }
+  else if (key === 'contains') {
+    const older = declaresOlderDraft(a) || declaresOlderDraft(b);
+    if (A.contains !== undefined && B.contains !== undefined) {
+      const reading = containsReading(A, older);
+      if (reading !== 'vacuous') walk(A.contains, B.contains, path, node.map((n) => ({ ...n, prefix: ['items'] })), reading === 'flipped' ? flippedSink(sink) : sink);
+    }
+    else {
+      // added, it refuses the arrays none of whose items it matches —
+      // unless a count lets them through, or the node's own `type` admits
+      // no array
+      const holder = A.contains === undefined ? B : A;
+      const admitted = typeSet(holder.type);
+      if (containsReading(holder, older) !== 'vacuous' && (admitted === null || typeCovered(ARRAY, new Set(admitted)))) {
+        sink.constraint(A.contains === undefined ? 'narrowed' : 'widened', 'contains', path, A.contains, B.contains);
+      }
+    }
+  }
   else if (key === 'anyOf' || key === 'oneOf') {
     const { pairs, removed, added } = /** @type {NonNullable<ReturnType<typeof pairVariants>>} */ (pairVariants(A[key], B[key], a, b));
     for (const [i, j] of pairs) {
@@ -1206,6 +1741,26 @@ function compareConstraints(A, B, path, sink) {
     else sink.constraint(d, k, path + '/' + k, A[k], B[k]);
   };
 
+  // `const` and `enum` admit one value set together (a `const` is a
+  // one-value `enum`; with both, the values they share): a node that
+  // respells its value set from one to the other moves only the values it
+  // adds or drops, read at the keyword `b` spells it with
+  const valueSet = (/** @type {Record<string, any>} */ node) => (node.const !== undefined
+    ? (Array.isArray(node.enum) ? node.enum.filter((/** @type {unknown} */ v) => canon(v) === canon(node.const)) : [node.const])
+    : Array.isArray(node.enum) ? node.enum : null);
+  const beforeValues = valueSet(A);
+  const afterValues = valueSet(B);
+  const respelled = beforeValues !== null && afterValues !== null
+    && ((A.const === undefined) !== (B.const === undefined) || (A.enum === undefined) !== (B.enum === undefined));
+  if (respelled) {
+    const keyword = B.const !== undefined ? 'const' : 'enum';
+    const from = A.const !== undefined ? A.const : A.enum;
+    const before = new Set(beforeValues.map(canon));
+    const after = new Set(afterValues.map(canon));
+    if ([...before].some((v) => !after.has(v))) sink.constraint('narrowed', keyword, path + '/' + keyword, from, B[keyword]);
+    if ([...after].some((v) => !before.has(v))) sink.constraint('widened', keyword, path + '/' + keyword, from, B[keyword]);
+  }
+
   // type and enum/const compare as value sets: what was removed narrows,
   // what was added widens — an incomparable change (string → integer)
   // honestly reports BOTH
@@ -1215,7 +1770,7 @@ function compareConstraints(A, B, path, sink) {
     ['const', (/** @type {any} */ v) => (v === undefined ? null : [v])],
   ];
   for (const [key, toSet] of /** @type {[string, (v: any) => any[] | null][]} */ (sets)) {
-    if (canon(A[key]) === canon(B[key])) continue;
+    if (canon(A[key]) === canon(B[key]) || (respelled && key !== 'type')) continue;
     const before = toSet(A[key]);
     const after = toSet(B[key]);
     if (before === null) emit('narrowed', key); // unconstrained → constrained
@@ -1272,8 +1827,8 @@ function compareObject(A, B, path, a, b, sink, visited) {
   const bCatchAll = bClosed ? null : constrainingCatchAll(B);
   // a member or requirement present on one side only may have moved into
   // an applicator the other side carries: undecidable, R15
-  const aApplies = (/** @type {string} */ m) => applicatorMayHold(A, m, a);
-  const bApplies = (/** @type {string} */ m) => applicatorMayHold(B, m, b);
+  const aApplies = (/** @type {string} */ m) => applicatorMayHold(A, a, { member: m });
+  const bApplies = (/** @type {string} */ m) => applicatorMayHold(B, b, { member: m });
 
   for (const m of new Set([...Object.keys(aProps), ...Object.keys(bProps)])) {
     const at = path + '/properties/' + encodeJSONPointerSegment(m);
@@ -1481,8 +2036,8 @@ function compareInput(diff, aOp, bOp, a, b) {
   const plain = Object.keys(aBeside).length === 0 && Object.keys(bBeside).length === 0;
   // a member or requirement present on one side only may have moved into
   // an applicator the other side carries: undecidable, R15
-  const aApplies = (/** @type {string} */ m) => aEff !== null && applicatorMayHold(aEff, m, a);
-  const bApplies = (/** @type {string} */ m) => applicatorMayHold(bEff, m, b);
+  const aApplies = (/** @type {string} */ m) => aEff !== null && applicatorMayHold(aEff, a, { member: m });
+  const bApplies = (/** @type {string} */ m) => applicatorMayHold(bEff, b, { member: m });
   for (const m of new Set([...Object.keys(aProps), ...Object.keys(bProps), ...aReq, ...bReq])) {
     const rel = '/properties/' + encodeJSONPointerSegment(m);
     const at = root + rel;

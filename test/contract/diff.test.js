@@ -639,7 +639,9 @@ describe('diffContracts — validation behind a same-document $ref is compared a
     'an anyOf branch a type tells apart': { wrap: { anyOf: [ref, { type: 'string' }] }, at: '/anyOf/0', note: 'anyOf', decided: true },
     'an allOf conjunct': { wrap: { allOf: [ref] }, at: '/allOf/0', note: 'allOf', decided: true },
     'a not': { wrap: { type: 'object', not: ref }, at: '/not', note: 'not', decided: true, flipped: true },
-    'an if': { wrap: { if: ref, then: { type: 'object' } }, at: '/if', note: 'if' },
+    'an if beside a then': { wrap: { if: ref, then: { required: ['c'] } }, at: '/if', note: 'if', decided: true, flipped: true },
+    'an if beside an else': { wrap: { if: ref, else: { required: ['c'] } }, at: '/if', note: 'if', decided: true },
+    'an if beside a then and an else': { wrap: { if: ref, then: { required: ['c'] }, else: { required: ['d'] } }, at: '/if', note: 'if' },
     'a then': { wrap: { if: { type: 'object' }, then: ref }, at: '/then', note: 'then', decided: true },
     'an else': { wrap: { if: { type: 'string' }, else: ref }, at: '/else', note: 'else', decided: true },
     'a dependentSchemas member': { wrap: { type: 'object', dependentSchemas: { a: ref } }, at: '/dependentSchemas/a', note: 'dependentSchemas', decided: true },
@@ -730,6 +732,16 @@ describe('diffContracts — validation behind a same-document $ref is compared a
       });
     });
   }
+
+  it('an if beside a then that refuses objects no value of: a required member the if adds or drops is no change, in every position but an error\'s', () => {
+    const wrap = { if: ref, then: { type: 'object' } };
+    for (const position of ['output', 'input member', 'input root']) {
+      for (const [from, to] of [[['a', 'b'], ['a']], [['a'], ['a', 'b']]]) {
+        const d = diffContracts(doc(proj(from), wrap, positions[position].op), doc(proj(to), wrap, positions[position].op));
+        onlyClasses(d, []);
+      }
+    }
+  });
 
   it('an enum narrowed behind the $ref in a discriminated union classifies at the enum, and in one whose branches overlap reports R15 there', () => {
     const { wrap } = shapes['a discriminated oneOf variant'];
@@ -900,6 +912,14 @@ describe('diffContracts — a change inside an applicator whose direction is dec
     ['an anyOf whose object variants a discriminator tells apart and the rest a type', (n) => ({ anyOf: [
       variant('a', { type: 'string', maxLength: n }), variant('b', {}), { type: 'null' },
     ] }), '/anyOf/0/properties/v/maxLength', 'maxLength'],
+    // what passes the if must pass the then: an if bound that falls narrows the node
+    ['an if beside only a then', (n) => ({ if: { type: 'string', minLength: n }, then: { maxLength: 0 } }), '/if/minLength', 'minLength'],
+    // what fails the if must pass the else: an if bound that falls narrows the node
+    ['an if beside only an else', (n) => ({ if: { type: 'string', maxLength: n }, else: { type: 'integer' } }), '/if/maxLength', 'maxLength'],
+    ['a contains beside minContains', (n) => ({ type: 'array', contains: { type: 'string', maxLength: n }, minContains: 2 }), '/contains/maxLength', 'maxLength'],
+    // at most one item may match: a contains bound that falls narrows the node
+    ['a contains beside maxContains under minContains 0', (n) => ({ type: 'array', contains: { type: 'string', minLength: n }, minContains: 0, maxContains: 1 }),
+      '/contains/minLength', 'minLength'],
   ];
   const pick = (/** @type {any} */ c) => [c.rule, c.kind, c.docPath, c.from, c.to, c.note];
 
@@ -1003,8 +1023,8 @@ describe('diffContracts — a change inside an applicator whose direction is dec
         { type: 'object', oneOf: [variant('a', {}), variant('b', {})] }, { type: 'object', oneOf: [variant('a', {}), variant('b', {}), variant('c', {})] }],
       ['a then beside a changed if', ['if /if', 'then /then'], { if: { type: 'string' }, then: { maxLength: 5 } }, { if: { type: 'number' }, then: { maxLength: 3 } }],
       ['a then behind an if whose $ref resolves apart', ['if /if/type', 'then /then'], { if: { $ref: '#/$defs/c' }, then: { maxLength: 5 } }, { if: { $ref: '#/$defs/c' }, then: { maxLength: 3 } }, [{ c: { type: 'string' } }, { c: { type: 'number' } }]],
-      ['a then without an if', ['then /then'], { then: { maxLength: 5 } }, { then: { maxLength: 3 } }],
-      ['a then that appeared', ['then /then'], { if: { type: 'string' } }, { if: { type: 'string' }, then: { maxLength: 3 } }],
+      ['an if beside a then and an else', ['if /if'], { if: { maxLength: 5 }, then: x, else: y }, { if: { maxLength: 3 }, then: x, else: y }],
+      ['a not that may have moved out of a conjunct', ['allOf /allOf/0/not', 'not /not'], { allOf: [{ not: x }] }, { not: x, allOf: [{}] }],
       ['a dependentSchemas key added', ['dependentSchemas /dependentSchemas'], { dependentSchemas: { a: { maxProperties: 5 } } }, { dependentSchemas: { a: { maxProperties: 5 }, b: {} } }],
       ['a prefixItems that grew', ['prefixItems /prefixItems'], { type: 'array', prefixItems: [{ maxLength: 5 }] }, { type: 'array', prefixItems: [{ maxLength: 3 }, {}] }],
       ['a constraint another conjunct still holds', ['allOf /allOf/1/minLength'],

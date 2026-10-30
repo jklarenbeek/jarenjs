@@ -2566,7 +2566,7 @@ change at the first pointer where they do.
 | R3 | `kind`, `http.method`, `http.path` (shape — variable *names* are not shape), `http.status`, `http.media` (opaqueness included), a member's `http.in` location, or `http.body` changed | breaking; an `http.media` respelled to the same type/subtype — its case or its parameters — is neutral (`media-respelled`), because the binding matches media by type/subtype alone (§7.2 step 5) |
 | R4 | input: a member added to `required` (or a new required member) | breaking |
 | R5 | input: a member removed while the new input schema is closed — `additionalProperties: false` or `unevaluatedProperties: false` — (or the input removed entirely) | breaking; where a `patternProperties` of the closed schema admits the member's name, its schema compares against the pattern's instead (R6/R7, see the riders); beside a catch-all that constrains it, or an applicator, R15; otherwise `neutral` with a note (the member is now ignored, not validated) |
-| R6 | input: a member's schema narrowed (type set shrinks, `enum`/`const` shrinks, `maximum` lowers, `minimum` rises, `maxLength` lowers, `minLength` rises, `pattern` added) | breaking |
+| R6 | input: a member's schema narrowed (type set shrinks, the value set of `enum` and `const` shrinks, `maximum` lowers, `minimum` rises, `maxLength` lowers, `minLength` rises, `pattern` added) | breaking |
 | R7 | input: a member's schema widened (the inverse of R6), an optional member added, or a member dropped from `required` | additive |
 | R8 | output: a member removed, made optional (dropped from `required`), or widened (type set grows, `enum`/`const` grows, a bound relaxes, a `pattern` dropped), or a member added to an object that was closed (`additionalProperties: false` or `unevaluatedProperties: false`) | breaking |
 | R9 | output: a member added to an open object, a member added to `required`, or narrowed | additive |
@@ -2575,7 +2575,7 @@ change at the first pointer where they do.
 | R12 | `policy.idempotency` `none/optional → required` (a client must now send a key), or `required/optional → none` (a key an old client still sends, and retries under, is no longer read) | breaking (`idempotency-required`, `idempotency-dropped`); `required → optional` and `none → optional` additive (`idempotency-relaxed`) |
 | R13 | `policy.task`, `policy.retry`, `policy.cache`, `policy.revision`, `policy.stream` (a resume policy, heartbeat or patch bound) or `doc` changed | neutral; a `policy.stream.heartbeatMs` that rises is breaking (`heartbeat-slowed`) — an older client arms its watchdog from its own contract and reports the stream lost (`JC2094`) after twice the interval it expects |
 | R14 | `policy.audience` `public → server` | breaking; the reverse additive |
-| R15 | a schema construct the checker does not model differs between the two (a changed `if`, a `not` or a `contains` on one side only, a `contains` beside `minContains`, `maxContains` or a tuple form, an `anyOf`/`oneOf` whose variants neither a type, a discriminator nor the two together tell apart, an applicator the walk does not read by direction — see the riders —, `$dynamicRef`, a `format`, a *changed* `pattern`, an external or sibling-carrying `$ref`, a changed error `details` schema, …), including one whose text is unchanged while a same-document `$ref` inside it resolves to a schema that changed — reported at the first resolved pointer where the two differ; a constraint present on one side only while the other carries such an applicator, or a member or requirement present on one side only while the other carries one a branch of which may hold it — names or requires it, closes the object, or carries a catch-all or an applicator of its own (it may have moved inside); a member added or removed beside a catch-all that constrains it (`additionalProperties` or `unevaluatedProperties` as a schema, `patternProperties`, `propertyNames`), or one a closed object's `patternProperties` admits where the two sides' matching patterns differ | **unknown** — reported, never silently classed |
+| R15 | a schema construct the checker does not model differs between the two (an `if` beside both a `then` and an `else`, one that changed beside a branch that changed or appeared too, or one added or dropped beside a branch; a `not` or a `contains` on one side only that a branch of the other side's applicators may hold; a changed `contains` beside a tuple form, beside counts that changed, or beside a `maxContains` with a `minContains` other than 0; an `anyOf`/`oneOf` whose variants neither a type, a discriminator nor the two together tell apart, an applicator the walk does not read by direction — see the riders —, `$dynamicRef`, a `format`, a *changed* `pattern`, an external or sibling-carrying `$ref`, a changed error `details` schema, …), including one whose text is unchanged while a same-document `$ref` inside it resolves to a schema that changed — reported at the first resolved pointer where the two differ; a constraint present on one side only while the other carries such an applicator, or a member or requirement present on one side only while the other carries one a branch of which may hold it — names or requires it, closes the object, or carries a catch-all or an applicator of its own (it may have moved inside); a member added or removed beside a catch-all that constrains it (`additionalProperties` or `unevaluatedProperties` as a schema, `patternProperties`, `propertyNames`), or one a closed object's `patternProperties` admits where the two sides' matching patterns differ | **unknown** — reported, never silently classed |
 | R16 | a nullable node respelled between `type: [T, 'null']` and a two-branch `anyOf`/`oneOf` with a null-only branch, where both spellings accept exactly the same values | neutral (`schema-respelled`) — the bytes and the revision move, the accepted values do not; a reorder inside one spelling (a type array's items, a union's branches) is no respelling and is silent |
 
 Riders the rows carry:
@@ -2635,6 +2635,15 @@ Riders the rows carry:
   depth. The input's other keywords — an applicator, a bound such as
   `minProperties`, an R6 keyword on the input itself, the siblings of the
   `$ref` the input is spelled as — take the same walk as any schema node.
+  A `const` and an `enum` admit one value set together (a `const` is a
+  one-value `enum`; with both, the values they share): a node that
+  respells it from one keyword to the other moves only the values it
+  adds or drops, read at the keyword `b` spells it with — `enum: ['a']`
+  → `const: 'a'` is no change, `enum: ['a', 'b']` → `const: 'a'` narrows.
+  **Upgrading:** such a respelling reported a narrowing at the keyword
+  added beside a widening at the one dropped, so a `--fail-on breaking`
+  gate failed on a respelling that moved nothing; it now reports only
+  what the values did.
   **Upgrading:** a pair of contracts that differed only behind a
   same-document `$ref` (inside an applicator or a keyword the walk does
   not model, in an error schema, under `additionalProperties`, below a
@@ -2689,10 +2698,27 @@ Riders the rows carry:
   that accepts everything (`not: {}`), an empty `enum`, a `const` outside
   the `enum`, a `const` or every `enum` value outside the type set (the
   node's `type` met with each `allOf` conjunct's), type sets that do not
-  meet, `minimum` over `maximum` (or `minLength` over `maxLength`) under
-  a type set of only numbers (only strings), an `allOf` conjunct that
-  accepts nothing, an `anyOf`/`oneOf` whose every variant does, or a
-  required member that does under a type set of only `object`. The test
+  meet; under a type set of only numbers, bounds that hold no number —
+  `minimum` over `maximum`, an exclusive bound at or past the other
+  (`exclusiveMinimum: 3, exclusiveMaximum: 3`), and under only `integer`
+  a range that holds no integer (`minimum: 1.2, maximum: 1.8`); under
+  only strings, `minLength` over `maxLength` or a `pattern` no string
+  matches; under only `object`, a required member the object refuses
+  every value of — its own schema or a matching `patternProperties`
+  schema accepts nothing, or a closed object does not admit it (no
+  `properties` entry, no matching pattern, and an `additionalProperties`
+  that accepts nothing, or `unevaluatedProperties: false` with no
+  applicator beside it); an `allOf` conjunct that accepts nothing, or an
+  `anyOf`/`oneOf` whose every variant does. A `pattern` is read as the
+  validator compiles it — Unicode mode, `^` and `$` only at the ends of
+  the text — and matches nothing where every match must pass a class
+  that admits no character (`[]`, `[^\s\S]`), a `^` after a consumed
+  character, a `$` before one, or `(?!)` (`a^`, `x[]+|y$z`, `(^a){2}`);
+  emptiness that rests on a lookaround, a back-reference, a word boundary
+  or a modifier group is not read (`(?=a)b` is compared as any pattern).
+  A bound that is not a number (a draft-04 boolean `exclusiveMaximum`) is
+  not read, and neither is `unevaluatedProperties` where the document
+  declares a draft before 2019-09 anywhere (there it is no keyword). The test
   is a decision procedure for these shapes only; any other schema is
   compared as before, never guessed empty. Two such schemas are alike,
   and one that accepted nothing and now accepts something widens by its
@@ -2708,7 +2734,10 @@ Riders the rows carry:
   **Upgrading:** a member whose schema accepts nothing without being
   `false` — `m: { not: {} }` added to an open input, once additive R7
   `input-member-added` — is breaking R6 `input-narrowed`, so a
-  `--fail-on breaking` gate that passed it now fails; two schemas that
+  `--fail-on breaking` gate that passed it now fails, and so is one that
+  accepts nothing through bounds that cross, an integer range without an
+  integer, a closed object requiring a member it does not admit, or a
+  `pattern` no string matches; two schemas that
   accept nothing, once a guessed narrowing beside a widening (two
   `const`s outside their type), are no change; and `{ not: {} }` → `{
   type: 'string' }`, once R15 beside a guessed narrowing, is a widening
@@ -2733,12 +2762,26 @@ Riders the rows carry:
   `else` present on both sides beside an `if` that validates alike; a
   `dependentSchemas` member, the keys being the same; a `prefixItems`
   entry, the list keeping its length; a `contains` on both sides with no
-  `minContains`, `maxContains` or tuple form (`prefixItems`, an `items`
-  list) beside it (an item that matches fewer schemas meets the bound
-  less often); a `not` on both sides, read with its direction flipped —
+  tuple form (`prefixItems`, an `items` list) beside it and the same
+  counts — under a `minContains` alone (one by default) an item that
+  matches fewer schemas meets the bound less often, under a `maxContains`
+  with `minContains: 0` it is read with its direction flipped (at most
+  that many items may match), and under `minContains: 0` alone it judges
+  nothing (where the document declares a draft before 2019-09 anywhere,
+  the counts may be no keywords, and a `contains` beside one stays R15);
+  an `if` that changed beside only a `then`, or only an `else`,
+  alike on both sides — the node accepts what fails the `if` or passes
+  the `then`, so the `if` is read with its direction flipped, or what
+  passes the `if` or the `else`, read as it is; a `then` or an `else` on
+  one side only beside an `if` alike on both, read against `true`; a
+  `not` on both sides, read with its direction flipped —
   what the branch accepts the node refuses, so a branch that widens
   narrows the node and the reverse, and a member event inside it reads as
-  the change of what the node accepts (`note`: the event); and an `anyOf`
+  the change of what the node accepts (`note`: the event); a `not` or a
+  `contains` on one side only — added, it narrows the node by its own
+  values; dropped, it widens it (`note`: the keyword) — unless a branch
+  of the other side's applicators may hold it (it may have moved there);
+  and an `anyOf`
   or `oneOf` whose
   variants are provably disjoint, so an instance meets only the variant
   its key names and the union accepts exactly what that variant does.
@@ -2766,12 +2809,28 @@ Riders the rows carry:
   carries `unevaluatedProperties` or `unevaluatedItems` (a member dropped
   from a branch is then refused, not freed), on the target of an input
   `$ref` beside one, or where a constraint, a member or a requirement sits
-  on one side only (it may have moved into a branch). A changed `if`, a
-  `not` or `contains` on one side only, a `contains` beside a count or a
-  tuple form, a union whose variants overlap (a variant whose
-  discriminator value set or type set grows into another's among them),
-  and an `allOf` or `prefixItems` that grew, shrank or was reordered stay
-  R15.
+  on one side only (it may have moved into a branch). Some of these judge
+  nothing, and a change there is no change: an `if` beside no `then` and
+  no `else`, a `then` or an `else` beside no `if`, a `not` of a schema
+  that accepts nothing or of values the node's own `type` refuses, a
+  `contains` beside a `type` without `array` or under `minContains: 0`
+  alone. A conditional branch sees only the values that reach it — a
+  `then` those its `if` may accept, an `else` those it may refuse, read
+  by type — and a changed `if` moves values the branch beside it then
+  judges, which matters only for values of a type that branch may
+  refuse; so a change that moves only values of other types is no change
+  (`if: { type: 'object' }, then: { maxLength: 5 }` → `{ maxLength: 3 }`,
+  and an `if` that drops a member requirement beside `then: { type:
+  'object' }`). An `if` beside both a `then` and an `else` (moving a
+  value from one to the other would need the two compared value by
+  value), one that changed while its branch changed or appeared, or one
+  added or dropped beside a branch; a changed `contains` beside a tuple
+  form, beside counts that changed, or beside a `maxContains` and a
+  `minContains` other than 0 (not monotone in what matches); a union
+  whose variants overlap (a variant whose discriminator value set or type
+  set grows into another's among them — the values another variant still
+  accepts would need comparing value by value); and an `allOf` or
+  `prefixItems` that grew, shrank or was reordered stay R15.
   Nor is a change at a location something else the node applies there
   may also constrain — its own keywords, another `allOf` conjunct,
   another `dependentSchemas` entry, an applicator or a `contains` beside
@@ -2790,7 +2849,15 @@ Riders the rows carry:
   a `contains` present on both sides, and inside a union whose object
   variants a discriminator tells apart beside variants a type tells apart
   (a nullable discriminated union among them): a required member dropped
-  from such a variant of an output, once R15, is breaking R8.
+  from such a variant of an output, once R15, is breaking R8. And so do
+  an `if` beside only a `then` or only an `else`, a `contains` under a
+  count, and a `not` or a `contains` on one side only: a member value an
+  `if` beside a `then: { required: [...] }` newly passes, or a `not`
+  added to an input, once R15, is breaking R6, so a `--fail-on breaking`
+  gate that passed them now fails; and an `if` or a branch that judges
+  nothing, once R15, reports nothing. A `then` or an `else` whose change
+  moves only values its `if` keeps from it, once breaking or additive,
+  reports nothing.
 - **Audience is the compatibility surface.** Operations whose
   `policy.audience` is `server` on **both** sides are skipped entirely;
   an audience flip is R14 and, for public consumers, subsumes the
