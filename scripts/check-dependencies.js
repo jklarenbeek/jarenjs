@@ -84,16 +84,6 @@ const MERMAID_PARSER = 'lodash-es pinned by chevrotain under @mermaid-js/parser,
 const BRACE_EXPANSION = 'minimatch\'s brace expansion in eslint, c8, rimraf and the benchmark workspace\'s glob; '
   + 'build tooling only, cleared by a lockfile refresh, never by an override';
 
-// GHSA-vfj7-8cjw-p6xm (reviewed 2026-10-02): braces <=3.0.3 has unbounded
-// recursion for deeply nested brace PATTERNS. There is no patched braces
-// release; gh-pages 6.3.0 is also the latest release. The website deploy
-// scripts use gh-pages' fixed default patterns, not patterns supplied by site
-// visitors. npm suggests downgrading gh-pages to 6.1.1. Keep the current
-// deployment tool and name its transitive findings (micromatch, fast-glob,
-// globby, gh-pages); none is in a published package's closure.
-const GH_PAGES = 'unpatched nested-pattern stack exhaustion in braces under gh-pages (via globby, fast-glob, micromatch); '
-  + 'repository-controlled deployment patterns only, absent from shipped packages';
-
 // the Prisma ORM benchmark rival (orm suite): a stack exhaustion in
 // `deepmerge-ts` (<8.0.0) when merging RECURSIVE object graphs, reached only
 // through Prisma's own config loader (`@prisma/config`). Every Prisma
@@ -126,6 +116,14 @@ const KATEX = 'prototype gadget in the Mermaid benchmark rival\'s KaTeX; the pat
 const POUCHDB = 'uuid pinned inside the pouchdb benchmark rival family (db suite); '
   + 'pinned to the version the store benchmark measures';
 
+// the contracts suite's Zod 3 rival column (`zod3`, an alias of zod 3.x beside
+// the zod 4 column): the advisory covers every release below 4.6.6, so no
+// 3.x release clears it, and moving the alias to 4.x would erase the column
+// it exists for. The memory exhaustion needs Zod itself validating an
+// oversized constrained collection.
+const ZOD3 = 'zod 3.x under the zod3 alias, the contracts benchmark\'s Zod 3 rival column; every 3.x release is in the '
+  + 'vulnerable range and the zod 4 column measures the patched line; absent from published package closures';
+
 /**
  * Advisories known to live in build tooling or a benchmark rival only, keyed
  * by advisory id, each with the package it is filed against, the severity it
@@ -141,12 +139,12 @@ export const KNOWN_TOOLING_ADVISORIES = Object.freeze({
   'GHSA-q2hr-2g5m-vwhr': { package: 'brace-expansion', severity: 'moderate', reason: BRACE_EXPANSION },
   'GHSA-qhr7-859c-m2p7': { package: 'brace-expansion', severity: 'high', reason: BRACE_EXPANSION },
   'GHSA-6j4f-fj2g-mc7p': { package: 'brace-expansion', severity: 'high', reason: BRACE_EXPANSION },
-  'GHSA-vfj7-8cjw-p6xm': { package: 'braces', severity: 'high', reason: GH_PAGES },
   'GHSA-ggr8-5vv4-36mx': { package: 'deepmerge-ts', severity: 'high', reason: PRISMA },
   'GHSA-gpj5-g38j-94v9': { package: 'drizzle-orm', severity: 'high', reason: DRIZZLE },
   'GHSA-2883-xcg3-v3hh': { package: 'js-yaml', severity: 'high', reason: JS_YAML },
   'GHSA-238p-pmpm-9mq7': { package: 'katex', severity: 'low', reason: KATEX },
   'GHSA-w5hq-g745-h8pq': { package: 'uuid', severity: 'moderate', reason: POUCHDB },
+  'GHSA-mrhx-c7xc-m3w5': { package: 'zod', severity: 'high', reason: ZOD3 },
 });
 
 /*

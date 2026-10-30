@@ -57,12 +57,12 @@ describe('the advisory list is keyed by advisory id', () => {
   });
 
   it('passes exactly the recorded advisories, and a package flagged only through one of them', () => {
-    const vulnerabilities = { ...recordedAudit(), 'gh-pages': { name: 'gh-pages', severity: 'high', via: ['braces'] } };
+    const vulnerabilities = { ...recordedAudit(), chevrotain: { name: 'chevrotain', severity: 'high', via: ['lodash-es'] } };
     const findings = auditFindings(vulnerabilities);
     assert.deepStrictEqual(findings.failures, []);
     assert.strictEqual(findings.advisories, Object.keys(KNOWN_TOOLING_ADVISORIES).length);
     assert.strictEqual(findings.packages, Object.keys(vulnerabilities).length);
-    assert.ok(findings.lines.some((line) => /GHSA-vfj7-8cjw-p6xm braces \(flags gh-pages\)/.test(line)), findings.lines.join('\n'));
+    assert.ok(findings.lines.some((line) => /GHSA-r5fr-rjxr-66jc lodash-es \(flags chevrotain\)/.test(line)), findings.lines.join('\n'));
   });
 
   it('fails a new advisory on a package the list already covers, whatever the package name', () => {
