@@ -143,13 +143,6 @@ delete it or fix it.
   document) fills its defaults as written, and the checks assert no `format`
   (they register none). Deciding them needs the dependent places found, or the
   whole normalized document validated.
-- [ ] **A default holding the object that declares it normalizes without
-  end.** `compileNormalizer({ $schema:
-  'https://json-schema.org/draft/2020-12/schema', properties: { o: { $ref:
-  '#', default: {} } } }, { useDefaults: true })` compiles, and every call on
-  an object throws an uncoded `RangeError`: the filled `{}` runs through the
-  same schema, which fills `o` again. Wanted: a bound (a default filled once
-  inside its own copy) or a coded compile refusal.
 - [ ] **A meta-schema of a draft without `$vocabulary` still switches the
   validation vocabulary.** `addMetaSchema({ $schema:
   'http://json-schema.org/draft-07/schema#', $id: X, $vocabulary: {
@@ -185,20 +178,6 @@ delete it or fix it.
   still extends them even when nothing it can reach reads one. Following those
   needs every `$dynamicAnchor` the compilation can enter by that name, and the
   embedded resource's base.
-- [ ] **Compiling a deeply nested schema still recurses per level.** A schema
-  nested 20,000 levels deep (`properties`, `items` or `allOf` chains, under
-  any `$schema`) throws `RangeError` while it compiles: two passes recurse
-  once per level (`#walkKeywords`, then `createValidator` →
-  `compileSchemaObject` → `buildPropertyValidators`). A fixed bound that fires
-  before a small host stack also refuses schemas a default host compiles
-  today, so the fix is that bound plus an option to raise it (a minor), as
-  `maxReferenceDepth` is, or an iterative compile. The same per-level
-  recursion remains in `compileMergePatch`/`applyMergePatch` over a
-  100,000-deep patch, and in `equalsDeep` (and `uniqueItems` through
-  `isUniqueDeepArray`), `deepFreeze` and `semanticKey` over a 100,000-deep
-  value; `equalsJson`, `stableStringify`, `createJSONPatch` and
-  `createMergePatch` walk on their own stack and refuse past 10000 levels with
-  `JO2001`.
 - [ ] **A `v`-mode literal `pattern` is still read as a literal.** `pattern`,
   `patternProperties` keys, the `regex` format and `@jarenjs/forms`' field
   `pattern` read a string as an ECMA-262 source in Unicode mode, so `"/a/"`
@@ -241,6 +220,27 @@ delete it or fix it.
   `{ type: 'integer', multipleOf: 10000000 }` accepts `9`): the check compares
   `data / multipleOf` with its rounding at a fixed tolerance, so the larger
   the step, the farther from a multiple an accepted value may lie.
+- [ ] **The normalizer still recurses per level of schema and of instance.**
+  `compileNormalizer` over a schema nested 20,000 levels throws an uncoded
+  `RangeError` while it compiles (its placement walk and its compile recurse
+  per level, where the validator refuses past `maxSchemaDepth` with
+  `JK0017`), and normalizing an instance nested a few thousand levels against
+  a recursive schema (`{ properties: { a: { $ref: '#' } } }`, any option)
+  throws `RangeError` on every call: the normalizer holds no reference bound
+  like the validator's `JK2001`. A `default` nested past the host stack is
+  copied by the recursive `cloneJson` and throws alike.
+- [ ] **The normalizer loops on an in-place reference cycle.**
+  `compileNormalizer({ allOf: [{ $ref: '#' }] })` compiles, and every call
+  throws an uncoded `RangeError`: the branch runs the root on the same value
+  without end, where the validator refuses the schema `JK0001` when it
+  compiles.
+- [ ] **Validation's reference bound counts hops, not the levels between
+  them.** A deep instance validated against a recursive schema whose `$ref`
+  sits K levels below its target nests 256 × K levels before `JK2001` can
+  fire: with K = 100 (`{ items: … 99 levels … { $ref: '#' } }`) a
+  100,000-deep array throws an uncoded `RangeError` on the default stack,
+  where the direct shapes (`{ items: { $ref: '#' } }`, `{ properties: { a: {
+  $ref: '#' } } }`) answer `JK2001`.
 
 ## @jarenjs/view & @jarenjs/app
 
@@ -395,6 +395,13 @@ costs a descriptor plus examples and no UI code at all.
   with one the contract's `S` is read and the external document's never is.
   `diffContracts` resolves it the same way, so it agrees with a reading the
   compile should refuse or resolve in the external document.
+- [ ] **A command's input nested past the host stack is refused uncoded.** A
+  contract command and a subscription copy their input through `cloneJson`
+  (`@jarenjs/core/object`) before freezing it (`deepFreeze(cloneJson(input))`),
+  and `cloneJson` recurses per level: an input nested 100,000 levels, or a
+  cyclic one, throws an uncoded `RangeError` there, though `deepFreeze` walks
+  any depth.
+
 ## @jarenjs/linq & @jarenjs/db — the data pair
 
 The fluent front door and the SQLite document store shipped as a pair;

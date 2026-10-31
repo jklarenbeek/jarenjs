@@ -27,11 +27,29 @@ const hasOwn = Object.hasOwn;
  * must match; an own `constructor` member is data). Not the same as
  * `equalsJson`, which compares JSON values
  * only and is the hot-path variant — keep both.
+ *
+ * Past 256 levels the compare keeps its own stack, so a value nested past
+ * the host's call stack is compared at any depth. Two values holding
+ * cycles compare as the infinite values they unfold to: a pair of
+ * containers met again inside its own compare is taken as equal, so the
+ * answer is decided by the members that differ, if any (`a = [a]` equals
+ * `b = [b]`; `a = [a, 1]` does not equal `b = [b, 2]`).
  * @param {any} target
  * @param {any} source
  * @returns {boolean}
  */
 export function equalsDeep(target, source) {
+  return equalsDeepAt(target, source, 1);
+}
+
+/**
+ * `equalsDeep` for a pair `depth` containers down from the root.
+ * @param {any} target
+ * @param {any} source
+ * @param {number} depth
+ * @returns {boolean}
+ */
+function equalsDeepAt(target, source, depth) {
   if (target === source) return true;
   if (target == null) return false;
   if (source == null) return false;
@@ -44,6 +62,9 @@ export function equalsDeep(target, source) {
   if (isScalarType(target))
     return false;
 
+  if (depth > RECURSIVE_COMPARE_DEPTH)
+    return equalsDeepWalk(target, source);
+
   const constructor = Object.getPrototypeOf(target)?.constructor;
   if (constructor !== Object.getPrototypeOf(source)?.constructor)
     return false;
@@ -55,7 +76,7 @@ export function equalsDeep(target, source) {
       return false;
     for (let i = 0; i < tks.length; ++i) {
       const key = tks[i];
-      if (!hasOwn(source, key) || !equalsDeep(target[key], source[key]))
+      if (!hasOwn(source, key) || !equalsDeepAt(target[key], source[key], depth + 1))
         return false;
     }
     return true;
@@ -67,7 +88,7 @@ export function equalsDeep(target, source) {
     for (const [key, value] of target) {
       if (source.has(key) === false)
         return false;
-      if (!equalsDeep(value, source.get(key)))
+      if (!equalsDeepAt(value, source.get(key), depth + 1))
         return false;
     }
     return true;
@@ -77,21 +98,14 @@ export function equalsDeep(target, source) {
     if (target.length !== source.length)
       return false;
     for (let i = 0; i < target.length; ++i) {
-      if (!equalsDeep(target[i], source[i]))
+      if (!equalsDeepAt(target[i], source[i], depth + 1))
         return false;
     }
     return true;
   }
 
-  if (constructor === Set) {
-    if (target.size !== source.size)
-      return false;
-    for (const value of target) {
-      if (source.has(value) === false)
-        return false;
-    }
-    return true;
-  }
+  if (constructor === Set)
+    return equalSets(target, source);
 
   if (constructor === RegExp) {
     return target.toString() === source.toString();
@@ -101,15 +115,8 @@ export function equalsDeep(target, source) {
   if (constructor === Date)
     return Object.is(target.getTime(), source.getTime());
 
-  if (isTypedArray(target)) {
-    if (target.length !== source.length)
-      return false;
-    for (let i = 0; i < target.length; ++i) {
-      if (target[i] !== source[i])
-        return false;
-    }
-    return true;
-  }
+  if (isTypedArray(target))
+    return equalTypedArrays(target, source);
 
   // we could test for instance of Array, Map and Set in order
   // to differentiate between types of equality.. but we dont.
@@ -119,10 +126,153 @@ export function equalsDeep(target, source) {
   if (tkeys.length === 0) return true;
   for (let i = 0; i < tkeys.length; ++i) {
     const key = tkeys[i];
-    if (!hasOwn(source, key) || !equalsDeep(target[key], source[key]))
+    if (!hasOwn(source, key) || !equalsDeepAt(target[key], source[key], depth + 1))
       return false;
   }
   return true;
+}
+
+/**
+ * Two Sets of the same constructor hold the same members (by identity).
+ * @param {Set<any>} target @param {Set<any>} source @returns {boolean}
+ */
+function equalSets(target, source) {
+  if (target.size !== source.size)
+    return false;
+  for (const value of target) {
+    if (source.has(value) === false)
+      return false;
+  }
+  return true;
+}
+
+/**
+ * Two typed arrays of the same constructor hold the same elements.
+ * @param {any} target @param {any} source @returns {boolean}
+ */
+function equalTypedArrays(target, source) {
+  if (target.length !== source.length)
+    return false;
+  for (let i = 0; i < target.length; ++i) {
+    if (target[i] !== source[i])
+      return false;
+  }
+  return true;
+}
+
+/**
+ * One pair of containers `equalsDeepWalk` compares member by member:
+ * `keys` the own enumerable keys of an object, `entries` the entries of a
+ * Map, neither for an array; `at` the next key or index.
+ * @typedef {{ target: any, source: any, keys: string[] | null, entries: Iterator<[any, any]> | null, at: number }} DeepPair
+ */
+
+/**
+ * How `equalsDeep` reads one pair before any member of it: `true` or
+ * `false` when that decides it, else the pair whose members it compares
+ * next, in `equalsDeepAt`'s order and with its checks.
+ * @param {any} target
+ * @param {any} source
+ * @returns {boolean | DeepPair}
+ */
+function openDeepPair(target, source) {
+  if (target === source) return true;
+  if (target == null || source == null) return false;
+  if (isBooleanType(target) || isBooleanType(source)) return false;
+  if (isFn(target))
+    return isFn(source) && target.toString() === source.toString();
+  if (isScalarType(target)) return false;
+  const constructor = Object.getPrototypeOf(target)?.constructor;
+  if (constructor !== Object.getPrototypeOf(source)?.constructor) return false;
+  if (constructor === Map)
+    return target.size === source.size && { target, source, keys: null, entries: target.entries(), at: 0 };
+  if (constructor === Array)
+    return target.length === source.length && { target, source, keys: null, entries: null, at: 0 };
+  if (constructor === Set) return equalSets(target, source);
+  if (constructor === RegExp) return target.toString() === source.toString();
+  if (constructor === Date) return Object.is(target.getTime(), source.getTime());
+  if (constructor !== Object && isTypedArray(target)) return equalTypedArrays(target, source);
+  // an object, or any other class instance: its own enumerable members
+  const keys = Object.keys(target);
+  return keys.length === Object.keys(source).length && { target, source, keys, entries: null, at: 0 };
+}
+
+/**
+ * `equalsDeep` for a pair nested past `RECURSIVE_COMPARE_DEPTH`: the same
+ * depth-first compare, on a stack of its own so the nesting it reaches is
+ * not the host's. A pair met again while it is still open above is the
+ * compare come back to where it was: it is taken as equal, so only a
+ * member that differs makes the answer `false`.
+ * @param {any} target
+ * @param {any} source
+ * @returns {boolean}
+ */
+function equalsDeepWalk(target, source) {
+  const first = openDeepPair(target, source);
+  if (typeof first === 'boolean') return first;
+  /** @type {DeepPair[]} */
+  const pairs = [first];
+  /** @type {Map<object, number>} how many pairs open on the way down hold each target container */
+  const open = new Map([[target, 1]]);
+  for (;;) {
+    const pair = pairs[pairs.length - 1];
+    let t;
+    let s;
+    let more = true;
+    if (pair.keys !== null) {
+      if (pair.at < pair.keys.length) {
+        const key = pair.keys[pair.at++];
+        if (!hasOwn(pair.source, key)) return false;
+        t = pair.target[key];
+        s = pair.source[key];
+      }
+      else more = false;
+    }
+    else if (pair.entries !== null) {
+      const step = pair.entries.next();
+      if (step.done === true) more = false;
+      else {
+        const [key, value] = step.value;
+        if (pair.source.has(key) === false) return false;
+        t = value;
+        s = pair.source.get(key);
+      }
+    }
+    else if (pair.at < pair.target.length) {
+      t = pair.target[pair.at];
+      s = pair.source[pair.at];
+      pair.at++;
+    }
+    else more = false;
+    if (!more) {
+      pairs.pop();
+      const holding = /** @type {number} */ (open.get(pair.target));
+      if (holding === 1) open.delete(pair.target);
+      else open.set(pair.target, holding - 1);
+      if (pairs.length === 0) return true;
+      continue;
+    }
+    const next = openDeepPair(t, s);
+    if (next === false) return false;
+    if (next === true) continue;
+    // a target is open twice only on a cycle, so only then are the open pairs searched
+    const holding = open.get(t);
+    if (holding !== undefined && isOpenPair(pairs, t, s)) continue;
+    open.set(t, (holding ?? 0) + 1);
+    pairs.push(next);
+  }
+}
+
+/**
+ * Whether the pair `target`, `source` is open on the way down.
+ * @param {DeepPair[]} pairs @param {object} target @param {object} source
+ * @returns {boolean}
+ */
+function isOpenPair(pairs, target, source) {
+  for (let i = pairs.length - 1; i >= 0; i--) {
+    if (pairs[i].target === target && pairs[i].source === source) return true;
+  }
+  return false;
 }
 
 
@@ -1416,11 +1566,13 @@ const CYCLE_DEPTH = 8;
  * Freeze everything under `value`, answering how many objects it walked.
  * Objects are remembered as "open" only from `CYCLE_DEPTH` down: a cycle
  * revisits some object at ever greater depth, so it is met there, and the
- * ordinary shallow document pays nothing for it.
+ * ordinary shallow document pays nothing for it. Past
+ * `RECURSIVE_FREEZE_DEPTH` levels the walk goes on in `freezeDeep`.
  * @param {object} value @param {number} depth @returns {number}
  */
 function freezeWalk(value, depth) {
   if (deepFrozen.has(value)) return 0;
+  if (depth >= RECURSIVE_FREEZE_DEPTH) return freezeDeep(value);
   const tracked = depth >= CYCLE_DEPTH;
   if (tracked) open.add(value);
   let walked = 1;
@@ -1441,6 +1593,52 @@ function freezeWalk(value, depth) {
   Object.freeze(value);
   if (walked >= DEEP_FROZEN_SIZE) deepFrozen.add(value);
   return walked;
+}
+
+// The nesting `deepFreeze` walks on the host's call stack, the path every
+// ordinary document takes; an object nested deeper is frozen by
+// `freezeDeep`, which keeps its own stack.
+const RECURSIVE_FREEZE_DEPTH = 256;
+
+/**
+ * `freezeWalk` for an object `RECURSIVE_FREEZE_DEPTH` levels down, on a
+ * stack of its own so the nesting it reaches is not the host's: the same
+ * walk, members frozen before the object holding them, every object
+ * remembered as open while its members are walked.
+ * @param {object} value @returns {number}
+ */
+function freezeDeep(value) {
+  /** @type {{ value: any, keys: string[] | null, at: number, walked: number }[]} */
+  const frames = [];
+  let next = value;
+  for (;;) {
+    if (next !== undefined) {
+      open.add(next);
+      frames.push({ value: next, keys: Array.isArray(next) ? null : Object.keys(next), at: 0, walked: 1 });
+      next = undefined;
+    }
+    const frame = frames[frames.length - 1];
+    const keys = frame.keys;
+    const container = frame.value;
+    const size = keys === null ? container.length : keys.length;
+    let at = frame.at;
+    while (at < size) {
+      const member = container[keys === null ? at : keys[at]];
+      at++;
+      if (typeof member === 'object' && member !== null && !open.has(member) && !deepFrozen.has(member)) {
+        next = member;
+        break;
+      }
+    }
+    frame.at = at;
+    if (next !== undefined) continue;
+    frames.pop();
+    open.delete(frame.value);
+    Object.freeze(frame.value);
+    if (frame.walked >= DEEP_FROZEN_SIZE) deepFrozen.add(frame.value);
+    if (frames.length === 0) return frame.walked;
+    frames[frames.length - 1].walked += frame.walked;
+  }
 }
 
 /**

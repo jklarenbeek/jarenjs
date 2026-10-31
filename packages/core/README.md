@@ -71,6 +71,16 @@ value nested past the host stack, or a cycle, used to escape as an uncoded
 10000 levels, with no location — code that caught `JO2001` for a cycle catches
 `JO2002`.*
 
+`equalsDeep`, `isUniqueDeepArray` (which compares through it) and `deepFreeze`
+(`@jarenjs/core/object`) walk a deep value on their own stack too, with no bound:
+a value nested past the host stack is compared, or frozen, at any depth. Two
+values holding cycles compare as the infinite values they unfold to: a pair met
+again inside its own compare is taken as equal, so `a = [a]` equals `b = [b]`
+and `a = [a, 1]` does not equal `b = [b, 2]`. Every other answer is unchanged.
+*Upgrade: such a value, or two values whose compare follows a cycle, threw an
+uncoded `RangeError`, and so did the `uniqueItems`, `const` and `enum` checks of
+`@jarenjs/validate` over such an instance.*
+
 `locateCycle(value)` (`@jarenjs/core/object`) answers that pointer for any
 value: the first member, walking arrays by index and object members in sorted
 order (the order `stableStringify` and `canonicalizeJson` write them, so the

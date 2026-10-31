@@ -1242,6 +1242,7 @@ function answers(schema, value, ctx) {
  */
 function settleFills(ctx) {
   const { list, targets } = ctx.fills;
+  ctx.fills.guarding = true;
   for (const fill of list) {
     let branches = false;
     for (const [schema, certain] of memberSchemas(fill.place, fill.key, ctx)) {
@@ -1251,6 +1252,7 @@ function settleFills(ctx) {
     if (branches || readsPresence(fill.place, fill.key, ctx)) for (const entry of fill.place.entries) targets.add(entry);
   }
   for (const fill of list) settleFill(fill, ctx);
+  ctx.fills.guarding = ctx.fills.reentered;
 }
 
 /**
@@ -1282,18 +1284,67 @@ function stepOrder(node, ctx, out = [], trail = new Set()) {
  * @returns {unknown}
  */
 function filledValue(fill, ctx) {
-  let value = fill.step === null ? cloneJson(fill.value) : fill.step(cloneJson(fill.value));
-  for (const entry of fill.place.entries) {
-    const order = stepOrder(entry, ctx);
-    const at = order.indexOf(fill.holder);
-    if (at === -1) continue;
-    for (const node of order.slice(at + 1)) {
-      const step = ctx.fills.members.get(`${fill.place.id}#${nodeId(node, ctx)}`)?.(fill.key);
-      if (step != null) value = step(value);
+  return copyThrough(ctx, fill.holder, fill.key, (copy) => {
+    let value = fill.step === null ? copy : fill.step(copy);
+    for (const entry of fill.place.entries) {
+      const order = stepOrder(entry, ctx);
+      const at = order.indexOf(fill.holder);
+      if (at === -1) continue;
+      for (const node of order.slice(at + 1)) {
+        const step = ctx.fills.members.get(`${fill.place.id}#${nodeId(node, ctx)}`)?.(fill.key);
+        if (step != null) value = step(value);
+      }
+      break;
     }
-    break;
+    return value;
+  }, cloneJson(fill.value));
+}
+
+/**
+ * Run `step` over a copy of the default of the member `key` that `holder`
+ * declares while that default is copying: a default holding the object
+ * that declares it reaches its own member again inside the copy (through
+ * the copy's own normalizers or a later step's), and fills nothing more
+ * there, so it is filled once rather than without end.
+ * @param {object} ctx @param {object} holder @param {string} key
+ * @param {Function} step @param {unknown} value
+ * @returns {unknown}
+ */
+function copyThrough(ctx, holder, key, step, value) {
+  const copying = ctx.fills.copying;
+  let keys = copying.get(holder);
+  if (keys === undefined) copying.set(holder, keys = new Set());
+  if (keys.has(key)) return step(value);
+  keys.add(key);
+  try {
+    return step(value);
   }
-  return value;
+  finally {
+    keys.delete(key);
+  }
+}
+
+/**
+ * The normalizer of a document some of whose defaults reach their own
+ * member inside their copy: each call records the copies its defaults
+ * fill, so a later step (another `allOf` branch, the object holding a
+ * `$ref` to the one declaring it) that runs one through normalizers fills
+ * nothing more of that default either. The record lasts the call.
+ * @param {object} fills - The compile's fills
+ * @param {Function} step
+ * @returns {Function}
+ */
+function recordingCopies(fills, step) {
+  return function normalizeRecordingCopies(value) {
+    const outer = fills.copies;
+    fills.copies = new Map();
+    try {
+      return step(value);
+    }
+    finally {
+      fills.copies = outer;
+    }
+  };
 }
 
 /**
@@ -1314,9 +1365,9 @@ function settleFill(fill, ctx) {
     value = fill.filled = filledValue(fill, ctx);
   }
   catch (error) {
-    // a copy that fills itself again without end (a default holding the
-    // object that declares it) is filled as written, and runs out of stack
-    // when it normalizes, as it did before it was checked
+    // a copy nested past what the host's stack copies or normalizes is
+    // filled as written, and runs out of stack again when a call fills it,
+    // as it did before it was checked
     if (!(error instanceof RangeError)) throw error;
     return fill.fill = 'always';
   }
@@ -1493,14 +1544,18 @@ function buildObjectStep(node, ctx) {
     });
   }
 
+  const fills = ctx.fills;
   return function normalizeObject(value) {
     if (!isJsonObject(value)) return value;
     let out = value;
+    const copies = fills.copies;
     const keys = Object.keys(value);
     for (let i = 0; i < keys.length; i++) {
       const key = keys[i];
       const current = value[key];
       let next = current;
+      // a default's copy a later step runs through normalizers fills nothing more of that default
+      const copy = copies === null || current === null || typeof current !== 'object' ? undefined : copies.get(current);
       // JSON Schema applies EVERY applicable subschema to a member, so a
       // member covered by `properties` and by one or more `patternProperties`
       // is normalized by all of them in turn. `additionalProperties` applies
@@ -1508,12 +1563,12 @@ function buildObjectStep(node, ctx) {
       // undefined = not declared; null = declared with nothing to do.
       const named = propertySteps.get(key);
       let covered = named !== undefined;
-      if (named != null) next = named(next);
+      if (named != null) next = copy === undefined ? named(next) : copyThrough(ctx, copy[0], copy[1], named, next);
       for (let p = 0; p < patternCount; p += 2) {
         if (!patternSteps[p](key)) continue;
         covered = true;
         const patternStep = patternSteps[p + 1];
-        if (patternStep !== null) next = patternStep(next);
+        if (patternStep !== null) next = copy === undefined ? patternStep(next) : copyThrough(ctx, copy[0], copy[1], patternStep, next);
       }
       if (!covered) {
         if (strip) {
@@ -1521,7 +1576,7 @@ function buildObjectStep(node, ctx) {
           delete out[key];
           continue;
         }
-        if (additionalStep !== null) next = additionalStep(next);
+        if (additionalStep !== null) next = copy === undefined ? additionalStep(next) : copyThrough(ctx, copy[0], copy[1], additionalStep, next);
       }
       if (next !== current) {
         if (out === value) out = { ...value };
@@ -1533,6 +1588,11 @@ function buildObjectStep(node, ctx) {
     for (let i = 0; i < defaultCount; i += 4) {
       const key = defaults[i];
       if (hasOwn(value, key)) continue;
+      // inside its own copy a default fills nothing more ({@link copyThrough})
+      if (fills.guarding && fills.copying.get(node)?.has(key) === true) {
+        fills.reentered = true;
+        continue;
+      }
       const fill = defaults[i + 3];
       const how = fill === null ? 'always' : settleFill(fill, ctx);
       if (how === 'never' || how === 'deciding') continue;
@@ -1542,7 +1602,8 @@ function buildObjectStep(node, ctx) {
       // same order as a supplied value.
       const step = defaults[i + 2];
       const materialized = cloneJson(defaults[i + 1]);
-      const filled = step === null ? materialized : step(materialized);
+      const filled = step === null ? materialized : fills.guarding ? copyThrough(ctx, node, key, step, materialized) : step(materialized);
+      if (fills.copies !== null && filled !== null && typeof filled === 'object') fills.copies.set(filled, [node, key]);
       if (how === 'check') {
         (checked ??= []).push([/** @type {DefaultFill} */ (fill), filled]);
         continue;
@@ -1865,6 +1926,14 @@ function normalizerContext(schema, options) {
       checks: undefined,
       /** @type {Map<string, (key: string) => Function|null>} What each object's step at a place does to a member, by place and object */
       members: new Map(),
+      /** @type {Map<object, Set<string>>} The defaults whose copy runs through normalizers right now, by the object declaring them ({@link copyThrough}) */
+      copying: new Map(),
+      /** @type {boolean} Whether a default reached its own member inside its copy */
+      reentered: false,
+      /** @type {boolean} Whether a fill marks its copy and checks the marks ({@link copyThrough}): while the fills settle, and after only where a default reached its own member */
+      guarding: false,
+      /** @type {Map<object, [object, string]>|null} During a call of {@link recordingCopies}: each copy a default filled, with that default */
+      copies: null,
     },
     /** @type {Map<object, unknown>} Each `$ref`'s target */
     targets: new Map(),
@@ -2012,8 +2081,9 @@ export function compileNormalizer(schema, options = {}) {
   const ctx = normalizerContext(schema, options);
   const resolved = ctx.options;
   schema = ctx.document;
-  const step = compileNode(schema, ctx);
+  const compiled = compileNode(schema, ctx);
   settleFills(ctx);
+  const step = compiled !== null && ctx.fills.reentered ? recordingCopies(ctx.fills, compiled) : compiled;
 
   // A root `default` answers the "the whole document was absent" case, which
   // no member walk can reach.

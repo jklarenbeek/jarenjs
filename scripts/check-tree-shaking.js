@@ -153,7 +153,8 @@ if (engineLeak.length > 0)
 // Raised to 44,600 (measured 44599): the shared capture's coded refusal of every array and string method on a member, and the predicate a to-many relation's array method needs, add 2336.
 // Raised to 45,300 (measured 45247): the shared capture's reading of an index off a relation as a hop for in() and all() add 648.
 // Raised to 45,400 (measured 45306): core's shared-value equality and key helpers the schema pen carries add 26.
-if (schemaBytes > 45400)
+// Raised to 45,900 (measured 45829): core's deepFreeze freezing past 256 levels on its own frames, which every pen shares, add 523.
+if (schemaBytes > 45900)
   throw new Error(`The schema pen bundle grew to ${schemaBytes} bytes.`);
 
 console.log(`Tree-shaking smoke test passed (${schemaBytes} byte schema-pen bundle; no chain module, no engine).`);
@@ -247,7 +248,8 @@ if (chainEdgeLeak.length > 0)
 // Raised to 245,700 (measured 245689): the locale number syntax core's parseNumber and $quantity now share (net 528), the coded over-long key and the host-string bound (364), and the geometry reading of a position that is no number pair (425) add 1317.
 // Raised to 247,200 (measured 247106): equality and ordering of dates, patterns and big integers by value (523), the join's NaN key matching the scan (385), missing geometry positions answered as documented (331), the refused leading zero group (94) and the thenable check refusal add 1417.
 // Raised to 248,700 (measured 248608): the query engine's position-finding string operators, pattern tokenize, translate and the coded $error operator add 1670.
-if (chainBytes > 248700)
+// Raised to 249,200 (measured 249134): core's deep equality and freezing past 256 levels on their own frames (object 526) add 526.
+if (chainBytes > 249200)
   throw new Error(`The chain bundle grew to ${chainBytes} bytes.`);
 
 console.log(`Tree-shaking smoke test passed (${chainBytes} byte chain bundle; no schema-pen module, no client module, no store/validator/formats bytes).`);
@@ -332,7 +334,8 @@ if (modelEngineLeak.length > 0)
 // Raised to 57,100 (measured 57054): the shared capture's reading of an index off a relation as a hop for in() and all() add 648.
 // Raised to 57,200 (measured 57113): core's shared-value equality and key helpers the model pen carries add 26.
 // Raised to 57,600 (measured 57500): an entity index's expression read, its members held to one top-level member each, add 387.
-if (modelBytes > 57600)
+// Raised to 58,100 (measured 58023): core's deepFreeze freezing past 256 levels on its own frames, which every pen shares (object 523) add 523.
+if (modelBytes > 58100)
   throw new Error(`The model pen bundle grew to ${modelBytes} bytes.`);
 const schemaModelLeak = Object.entries(schemaInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/model/') && info.bytesInOutput > 0);
@@ -392,7 +395,8 @@ if (jsltEngineLeak.length > 0)
 // Raised to 24,900 (measured 24836): the shared capture's refusal to coerce a method read without its call add 391.
 // Raised to 27,200 (measured 27164): the shared capture's coded refusal of every array and string method on a member, and the predicate a to-many relation's array method needs, add 2328.
 // Raised to 27,900 (measured 27811): the shared capture's reading of an index off a relation as a hop for in() and all() add 647.
-if (jsltBytes > 27900)
+// Raised to 28,400 (measured 28392): core's deepFreeze freezing past 256 levels on its own frames, which every pen shares (object 522) add 522.
+if (jsltBytes > 28400)
   throw new Error(`The JSLT pen bundle grew to ${jsltBytes} bytes.`);
 const chainJsltLeak = Object.entries(chainInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/jslt/') && info.bytesInOutput > 0);
@@ -468,7 +472,8 @@ if (migrationEngineLeak.length > 0)
 // Raised to 34,100 (measured 34044): the canonical form's data depth bound add 93.
 // Raised to 34,700 (measured 34613): the coded canonicalization refusals (510) and core's shared-value helpers add 536.
 // Raised to 35,100 (measured 35055): the canonical writer's coded refusal of a text past the host's longest string, with the core check that tells it from a stack overflow, add 373.
-if (migrationBytes > 35100)
+// Raised to 35,600 (measured 35577): core's deepFreeze freezing past 256 levels on its own frames, which every pen shares (object 522) add 522.
+if (migrationBytes > 35600)
   throw new Error(`The migration pen bundle grew to ${migrationBytes} bytes.`);
 const chainMigrationLeak = Object.entries(chainInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/migration/') && info.bytesInOutput > 0);
@@ -658,7 +663,8 @@ if (asyncLiveLeak.length)
 // Raised to 1,105,000 (measured 1104967): the validator's vocabularies read per place from the dialect governing it, one resource index for every reader of a schema, the identifier read without a pointer fragment and the normalizer's check of a default against a closed place (validate 3733), and PostgreSQL's NaN check on number columns, an untyped member's jsonb range and a key's order read from its index (db 1755) add 5515.
 // Raised to 1,106,000 (measured 1105968): a database rule's probes of another table on a store-owned layout, with their codec and missing-value checks (invariants 449, invariant-sql 29, row-predicate 18), and one read of a PostgreSQL namespace's rule programs per open (physical 432, store 49, ddl 24) add 1001.
 // Raised to 1,107,700 (measured 1107602): the validator's refusal of a required vocabulary it does not implement, one reading of a dialect's vocabularies for the validator and the schema readers, and the normalizer's check of each default against the schemas it meets (schema-keywords 774, normalize 406, errors 374, index 76) add 1634.
-if (clientBytes > 1107700)
+// Raised to 1,110,700 (measured 1110695): deep equality and freezing at any depth on their own frames (core object 2176), and the validator's coded refusal of a schema nested past maxSchemaDepth, with the walks that reach it before the host stack does (validate index 431, errors 282, traverse 204) add 3093.
+if (clientBytes > 1110700)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 
@@ -716,7 +722,8 @@ if (contractPenLeak.length > 0)
 // Raised to 55,900 (measured 55835): the shared capture's refusal to coerce a method read without its call add 391.
 // Raised to 58,200 (measured 58172): the shared capture's coded refusal of every array and string method on a member, and the predicate a to-many relation's array method needs, add 2337.
 // Raised to 58,900 (measured 58820): the shared capture's reading of an index off a relation as a hop for in() and all() add 648.
-if (contractPenBytes > 58900)
+// Raised to 59,500 (measured 59402): core's deepFreeze freezing past 256 levels on its own frames, which every pen shares (object 523) add 523.
+if (contractPenBytes > 59500)
   throw new Error(`The contract pen bundle grew to ${contractPenBytes} bytes.`);
 const chainContractLeak = Object.entries(chainInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/contract/') && info.bytesInOutput > 0);
@@ -783,7 +790,8 @@ if (flowPenLeak.length > 0)
 // Raised to 25,000 (measured 24934): the shared capture's refusal to coerce a method read without its call add 390.
 // Raised to 27,300 (measured 27266): the shared capture's coded refusal of every array and string method on a member, and the predicate a to-many relation's array method needs, add 2332.
 // Raised to 28,000 (measured 27913): the shared capture's reading of an index off a relation as a hop for in() and all() add 647.
-if (flowPenBytes > 28000)
+// Raised to 28,500 (measured 28494): core's deepFreeze freezing past 256 levels on its own frames, which every pen shares (object 522) add 522.
+if (flowPenBytes > 28500)
   throw new Error(`The flow pen bundle grew to ${flowPenBytes} bytes.`);
 const chainFlowLeak = Object.entries(chainInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/flow/') && info.bytesInOutput > 0);
@@ -846,7 +854,8 @@ if (appPenLeak.length > 0)
 // Raised to 59,700 (measured 59619): the shared capture's coded refusal of every array and string method on a member, and the predicate a to-many relation's array method needs, add 2338.
 // Raised to 60,300 (measured 60267): the shared capture's reading of an index off a relation as a hop for in() and all() add 648.
 // Raised to 60,400 (measured 60313): core's located cycle refusal add 46.
-if (appPenBytes > 60400)
+// Raised to 60,900 (measured 60886): core's deepFreeze freezing past 256 levels on its own frames, which every pen shares (object 523) add 523.
+if (appPenBytes > 60900)
   throw new Error(`The app pen bundle grew to ${appPenBytes} bytes.`);
 const chainAppLeak = Object.entries(chainInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/app/') && info.bytesInOutput > 0);
@@ -907,7 +916,8 @@ if (formsPenLeak.length > 0)
 // Raised to 46,600 (measured 46534): the shared capture's refusal to coerce a method read without its call add 392.
 // Raised to 48,900 (measured 48869): the shared capture's coded refusal of every array and string method on a member, and the predicate a to-many relation's array method needs, add 2335.
 // Raised to 49,600 (measured 49517): the shared capture's reading of an index off a relation as a hop for in() and all() add 648.
-if (formsPenBytes > 49600)
+// Raised to 50,100 (measured 50099): core's deepFreeze freezing past 256 levels on its own frames, which every pen shares (object 523) add 523.
+if (formsPenBytes > 50100)
   throw new Error(`The forms pen bundle grew to ${formsPenBytes} bytes.`);
 const chainFormsLeak = Object.entries(chainInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/forms/') && info.bytesInOutput > 0);

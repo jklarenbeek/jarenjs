@@ -814,6 +814,7 @@ shared factory rather than inheriting.
 | `propertyDependencies` | **`false`** | Whether the proposed `propertyDependencies` keyword asserts or is an unknown keyword |
 | `relativePointerDialect` | **`'handrews-01'`** | Which Relative JSON Pointer grammar `data`, `$data` and the `relative-json-pointer` format speak; `'bhutton-00'` also accepts index manipulation (`0+1`, `1-1/name`, `0-1#`) |
 | `maxReferenceDepth` | **`256`** | How many schema references one validation may nest before it throws `JK2001`; fixed by default so every host answers alike, raising it lets the host's call stack decide again |
+| `maxSchemaDepth` | **`128`** | How many levels deep one compile may nest subschemas before it throws `JK0017`; fixed by default so every host answers alike, raising it lets the host's call stack decide again |
 
 ### The return shape is `collectErrors`
 
@@ -1160,6 +1161,22 @@ an instance overflowed the call stack with an uncoded `RangeError`, and an insta
 nested between the bound and the host's stack limit used to validate, and validates again
 with `maxReferenceDepth` raised; the default is fixed so the answer is the same on every
 host.*
+
+One compile nests subschemas at most 128 levels deep, whatever keyword holds each level
+(`properties`, `items`, `allOf`, `not`, a reference compiled in place); one level more
+throws a `SchemaCompileError` whose `code` is `JK0017`, naming the first subschema past
+the bound, where a host stack half the default size still compiles and validates every
+level. A reference resolved on first use builds its target when a call first reaches it,
+so that call is the one refused. The `maxSchemaDepth` option moves the bound (`new
+JarenValidator({ maxSchemaDepth: 1000 })`); a value that is not a positive safe integer
+is refused `JK0002`. Data nested inside a schema (`const`, `enum`, `default`, `examples`,
+an unknown keyword's value) is no subschema: the compile walks it at any depth, and
+`const`, `enum` and `uniqueItems` compare an instance at any depth. *Upgrade: a schema
+nested past the host's stack (a chain of 20,000 `properties`, `items` or `allOf` levels
+under any `$schema`), or holding data nested that deep, threw an uncoded `RangeError`
+while it compiled, and a deep instance under `uniqueItems` while it validated; a schema
+nested between 128 levels and the host's stack limit used to compile, and compiles again
+with `maxSchemaDepth` raised.*
 
 An uncompilable reference in the `data` keyword (`{ "data": { "minimum": "abc" } }`) is
 refused when the schema is compiled, as it is for `$data`. *Upgrade: the keyword compiled
@@ -1816,6 +1833,16 @@ followed.* Defaults materialize
 only on directly annotated, absent properties: an own property set to
 `undefined` remains present, and a default found only behind a `$ref` does not
 create an absent property. A supplied value still follows that reference.
+A default holding the object that declares it is filled once: under `{
+properties: { o: { $ref: '#', default: {} } } }` the filled `{}` runs through
+the schema that fills `o`, and inside its own copy (through the copy's own
+normalizers or a later step's, such as another `allOf` branch) that default
+fills nothing more, so `{}` normalizes to `{ o: {} }`, while a supplied `{ o:
+{} }` gets its own `o` (`{ o: { o: {} } }`). So for such a document a second pass
+fills one level more than the first: the default's copy stays as filled, a
+supplied object gets the default. The validator's checks of a default read the
+copy as it is filled. *Upgrade: every call that filled such a default threw an
+uncoded `RangeError`.*
 
 Tuple tail normalization starts after the declared prefix, including prefix
 positions that need no changes. `prefixItems` is read where the validator

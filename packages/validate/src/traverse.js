@@ -1152,13 +1152,31 @@ function canFail(key, value, reading) {
  * @returns {boolean}
  */
 function passesEverything(schema, reading) {
-  if (schema === true) return true;
-  if (!isObjectClass(schema) || hasSchemaReference(schema, '$ref') || appliesDynamicReference(schema, '$recursiveRef', reading))
-    return false;
-  for (const key of Object.keys(schema)) {
-    if (canFail(key, schema[key], reading)) return false;
+  // The subschemas a keyword applies to members or items are read on a
+  // stack of their own, each before the keys after it (as `canFail` would
+  // recurse into them), so a chain nested past the host stack is read too.
+  /** @type {{ schema: Record<string, any>, keys: string[], at: number }[]} */
+  const open = [];
+  let next = schema;
+  for (;;) {
+    if (next !== true) {
+      if (!isObjectClass(next) || hasSchemaReference(next, '$ref') || appliesDynamicReference(next, '$recursiveRef', reading))
+        return false;
+      open.push({ schema: next, keys: Object.keys(next), at: 0 });
+    }
+    next = undefined;
+    while (next === undefined && open.length > 0) {
+      const frame = open[open.length - 1];
+      if (frame.at === frame.keys.length) {
+        open.pop();
+        continue;
+      }
+      const key = frame.keys[frame.at++];
+      if (PASS_THROUGH_KEYWORDS.has(key)) next = frame.schema[key];
+      else if (canFail(key, frame.schema[key], reading)) return false;
+    }
+    if (next === undefined) return true;
   }
-  return true;
 }
 
 /**

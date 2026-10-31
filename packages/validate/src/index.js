@@ -51,7 +51,7 @@ import { equalsJson, mergeMap } from '@jarenjs/core/object';
 import { isStringWhiteSpace } from '@jarenjs/core/string';
 import { hasRecursiveAnchor, getDynamicAnchorName, collectDynamicAnchors, collectDynamicAnchorsDeep, appliesRefSiblings } from './dynamic-ref.js';
 import { isRecursiveQueryCompileError } from './query-keyword.js';
-import { boundReference, assertReferenceDepth, assertOutputFormat, unimplementedVocabulary, REFERENCE_DEPTH_CEILING } from './errors.js';
+import { boundReference, assertDepthOption, assertOutputFormat, schemaTooDeep, unimplementedVocabulary, REFERENCE_DEPTH_CEILING, SCHEMA_DEPTH_CEILING } from './errors.js';
 import { TRAVERSE_SCHEMA_OBJECTS, TRAVERSE_SCHEMA_MAPS, TRAVERSE_SCHEMA_MAP_MAPS, detectSchemaDraft, dialectVocabulary, caselessUri, heldUriKey, heldDialect, identifierKeyword, identifierText, dialectDraft } from './schema-keywords.js';
 import { VALIDATOR_STATE } from './validator-state.js';
 
@@ -270,6 +270,7 @@ export class ValidationOptions {
    * @param {'handrews-01'|'bhutton-00'} [relativePointerDialect='handrews-01'] - Which Relative JSON Pointer grammar the `data` and `$data` keywords and the `relative-json-pointer` format speak: `'handrews-01'` is draft-handrews-relative-json-pointer-01 (what the format suite asserts); `'bhutton-00'` is draft-bhutton-relative-json-pointer-00, which also accepts index manipulation (`0+1`, `1-1/name`, `0-1#`). Any other value is a TypeError when a schema compiles.
    * @param {number} [maxReferenceDepth=256] - The deepest nesting of schema references one validation enters before it throws `JK2001` (a positive safe integer, else `JK0002` when a schema compiles). Fixed by default so the answer is the same on every host; raising it lets the host's call stack decide again.
    * @param {OutputFormat<any>} [outputFormat] - A JSON Schema standard output format from `@jarenjs/validate/output`, returned by a compiled validator instead of a boolean or `{ valid, errors }`; unset, the return shape is `collectErrors`'. Any other value is refused `JK0003` when a schema compiles.
+   * @param {number} [maxSchemaDepth=128] - The deepest nesting of subschemas one compile builds before it throws `JK0017` (a positive safe integer, else `JK0002` when a schema compiles). Fixed by default so the answer is the same on every host; raising it lets the host's call stack decide again.
    */
   constructor(
     skipErrors = true,
@@ -284,7 +285,8 @@ export class ValidationOptions {
     propertyDependencies = false,
     relativePointerDialect = 'handrews-01',
     maxReferenceDepth = REFERENCE_DEPTH_CEILING,
-    outputFormat = undefined
+    outputFormat = undefined,
+    maxSchemaDepth = SCHEMA_DEPTH_CEILING
   ) {
     /** @type {boolean} Whether to stop at first error or continue */
     this.skipErrors = skipErrors;
@@ -312,6 +314,8 @@ export class ValidationOptions {
     this.maxReferenceDepth = maxReferenceDepth;
     /** @type {OutputFormat<any>|undefined} The standard output format a compiled validator returns, or undefined for the `collectErrors` shapes */
     this.outputFormat = outputFormat;
+    /** @type {number} The deepest nesting of subschemas one compile builds */
+    this.maxSchemaDepth = maxSchemaDepth;
   }
 }
 
@@ -468,6 +472,11 @@ export class ValidationRoot {
     // them is resolved when it is first used, not by building the object a
     // second time (see `resolveObject`).
     const building = self.#building;
+    // Each object under construction holds the host's call stack: the
+    // compile refuses to nest past the bound rather than exhaust it.
+    const ceiling = self.#options.maxSchemaDepth ?? SCHEMA_DEPTH_CEILING;
+    if (building.size >= ceiling)
+      throw schemaTooDeep(ceiling, path);
     building.add(path);
     let obj;
     try {
@@ -582,37 +591,58 @@ export class ValidationRoot {
    * @returns {boolean} True when `visit` stopped the walk
    */
   static #walkKeywords(node, seen, visit, isSchema = true, mapMaps = false) {
-    if (node == null || typeof node !== 'object') return false;
-    if (seen.has(node)) return false;
-    seen.add(node);
-    if (Array.isArray(node)) {
-      for (let i = 0; i < node.length; ++i) {
-        if (ValidationRoot.#walkKeywords(node[i], seen, visit, isSchema, mapMaps)) return true;
+    // One frame per open container, on a stack of its own rather than the
+    // host's, so a document nested past the host stack (a deep `const` or
+    // `default` among them) is walked; the keywords are offered in the order
+    // a recursive walk offers them, each value walked before the next key.
+    // `inner` holds the values of a map of maps still to walk as maps.
+    const enter = (value, schema) => {
+      if (value == null || typeof value !== 'object' || seen.has(value)) return null;
+      seen.add(value);
+      return { node: value, keys: Array.isArray(value) ? null : Object.keys(value), at: 0, isSchema: schema, inner: null, innerAt: 0 };
+    };
+    const first = enter(node, isSchema);
+    if (first === null) return false;
+    const frames = [first];
+    while (frames.length > 0) {
+      const frame = frames[frames.length - 1];
+      let child = null;
+      if (frame.inner !== null) {
+        if (frame.innerAt < frame.inner.length)
+          child = enter(frame.inner[frame.innerAt++], false);
+        else
+          frame.inner = null;
       }
-      return false;
-    }
-    const keys = Object.keys(node);
-    for (let i = 0; i < keys.length; ++i) {
-      const key = keys[i];
-      if (isSchema) {
-        if (visit(node, key)) return true;
-        if (key === '$query' || key === 'errorMessage') continue;
-        if (mapMaps && TRAVERSE_SCHEMA_MAP_MAPS.includes(key)) {
+      else if (frame.keys === null) {
+        if (frame.at < frame.node.length)
+          child = enter(frame.node[frame.at++], frame.isSchema);
+        else
+          frames.pop();
+      }
+      else if (frame.at >= frame.keys.length) {
+        frames.pop();
+      }
+      else {
+        const key = frame.keys[frame.at++];
+        if (!frame.isSchema)
+          child = enter(frame.node[key], true);
+        else if (visit(frame.node, key))
+          return true;
+        else if (key === '$query' || key === 'errorMessage')
+          continue;
+        else if (mapMaps && TRAVERSE_SCHEMA_MAP_MAPS.includes(key)) {
           // member name -> member value -> schema: both levels are names.
-          const outer = node[key];
-          if (outer === null || typeof outer !== 'object' || Array.isArray(outer)) continue;
-          for (const inner of Object.values(outer)) {
-            if (ValidationRoot.#walkKeywords(inner, seen, visit, false, mapMaps)) return true;
+          const outer = frame.node[key];
+          if (outer !== null && typeof outer === 'object' && !Array.isArray(outer)) {
+            frame.inner = Object.values(outer);
+            frame.innerAt = 0;
           }
-          continue;
         }
-        if (ValidationRoot.#SCAN_MAP_KEYWORDS.has(key)) {
-          // The value is a name->schema map: its keys are names, its values schemas.
-          if (ValidationRoot.#walkKeywords(node[key], seen, visit, false, mapMaps)) return true;
-          continue;
-        }
+        else
+          // The value of a name->schema map keyword: its keys are names, its values schemas.
+          child = enter(frame.node[key], !ValidationRoot.#SCAN_MAP_KEYWORDS.has(key));
       }
-      if (ValidationRoot.#walkKeywords(node[key], seen, visit, true, mapMaps)) return true;
+      if (child !== null) frames.push(child);
     }
     return false;
   }
@@ -726,7 +756,8 @@ export class ValidationRoot {
     this.#vocabularies = vocabularies;
 
     assertRelativePointerDialect(opts.relativePointerDialect);
-    assertReferenceDepth(opts.maxReferenceDepth);
+    assertDepthOption('maxReferenceDepth', opts.maxReferenceDepth);
+    assertDepthOption('maxSchemaDepth', opts.maxSchemaDepth);
     assertOutputFormat(opts.outputFormat);
     this.#recorder = opts.outputFormat?.recorder?.(schemas) ?? null;
     this.#options = opts;
@@ -1921,7 +1952,7 @@ export class ValidatorOptions {
       /** @type {object[]} Initial schemas to register */
       this.schemas = opts.schemas || [];
       // If collectErrors is passed directly, create ValidationOptions with it
-      if (opts.collectErrors != null || opts.skipErrors != null || opts.useGrapheme != null || opts.contentValidation != null || opts.draftVersion != null || opts.formatAssertion != null || opts.messages != null || opts.unknownFormats != null || opts.propertyDependencies != null || opts.relativePointerDialect != null || opts.maxReferenceDepth != null || opts.outputFormat !== undefined) {
+      if (opts.collectErrors != null || opts.skipErrors != null || opts.useGrapheme != null || opts.contentValidation != null || opts.draftVersion != null || opts.formatAssertion != null || opts.messages != null || opts.unknownFormats != null || opts.propertyDependencies != null || opts.relativePointerDialect != null || opts.maxReferenceDepth != null || opts.outputFormat !== undefined || opts.maxSchemaDepth != null) {
         const collectErrors = opts.collectErrors ?? false;
         this.validation = new ValidationOptions(
           // collecting errors implies actually recording them
@@ -1940,7 +1971,8 @@ export class ValidatorOptions {
           opts.propertyDependencies ?? false,
           opts.relativePointerDialect ?? 'handrews-01',
           opts.maxReferenceDepth ?? REFERENCE_DEPTH_CEILING,
-          opts.outputFormat
+          opts.outputFormat,
+          opts.maxSchemaDepth ?? SCHEMA_DEPTH_CEILING
         );
       } else {
         /** @type {ValidationOptions} Validation behavior options */
@@ -2012,6 +2044,7 @@ export class ValidatorOptions {
  * @property {'handrews-01'|'bhutton-00'} [relativePointerDialect] - The Relative JSON Pointer grammar of `data`, `$data` and the `relative-json-pointer` format: `'handrews-01'` (default) or `'bhutton-00'`, which also accepts index manipulation (`0+1`, `1-1/name`, `0-1#`)
  * @property {number} [maxReferenceDepth] - The deepest nesting of schema references one validation enters before it throws `JK2001` (default 256, the same on every host; a larger value lets the host's call stack decide again). Also bounds `validateSchema`. Not a positive safe integer: `JK0002` when a schema compiles
  * @property {TOutput} [outputFormat] - Return a JSON Schema standard output instead of a boolean or `{ valid, errors }`: a format from `@jarenjs/validate/output`; it takes precedence over `collectErrors`. Another value (a format's name as a string included): `JK0003` when a schema compiles
+ * @property {number} [maxSchemaDepth] - The deepest nesting of subschemas one compile builds before it throws `JK0017` (default 128, the same on every host; a larger value lets the host's call stack decide again). Not a positive safe integer: `JK0002` when a schema compiles
  */
 
 /**
@@ -2831,7 +2864,8 @@ export class JarenValidator {
       existingValidation.propertyDependencies ?? false,
       existingValidation.relativePointerDialect ?? 'handrews-01',
       existingValidation.maxReferenceDepth ?? REFERENCE_DEPTH_CEILING,
-      existingValidation.outputFormat
+      existingValidation.outputFormat,
+      existingValidation.maxSchemaDepth ?? SCHEMA_DEPTH_CEILING
     );
     // A recording output format records the errors of every keyword;
     // `flag` is the boolean validator, which stops at the first failure.

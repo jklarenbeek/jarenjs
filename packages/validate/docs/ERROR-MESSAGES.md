@@ -302,7 +302,7 @@ query's own grammar; a `JK` code over it would send every reader to `cause`.
 | Code | Class | Meaning |
 |---|---|---|
 | `JK0001` | `SchemaCompileError` | A loop of references and in-place applicators never reads the instance: refused by `compile()` |
-| `JK0002` | `SchemaCompileError` | The `maxReferenceDepth` option is not a positive safe integer: refused when a schema compiles |
+| `JK0002` | `SchemaCompileError` | The `maxReferenceDepth` or `maxSchemaDepth` option is not a positive safe integer: refused when a schema compiles |
 | `JK0003` | `SchemaCompileError` | The `outputFormat` option is not a format of `@jarenjs/validate/output`: refused when a schema compiles |
 | `JK0004` | `SchemaCompileError` | `compileAsync`'s `loadSchema` threw or rejected for a document a schema references |
 | `JK0005` | `SchemaCompileError` | `compileAsync`'s `loadSchema` returned something that is not a schema (an object or a boolean) |
@@ -317,6 +317,7 @@ query's own grammar; a `JK` code over it would send every reader to `cause`.
 | `JK0014` | `SchemaCompileError` | A `pattern`, or a `patternProperties` member name, is no regular expression: refused where the place compiles, naming the keyword, the shape it takes, the value and the `SyntaxError`'s message, located at the keyword or the member, the `SyntaxError` as the `cause` |
 | `JK0015` | `SchemaCompileError` | Under `unknownFormats: 'error'`, a `format` that asserts names no registered format — an unregistered name, or a value that is no name (`format: 5`): refused where the place compiles, naming the format, the registration that would serve it and the opt-out, located at the keyword |
 | `JK0016` | `SchemaCompileError` | A schema of a dialect whose meta-schema requires (`$vocabulary`, `true`) a vocabulary the validator does not implement: refused where a place under that dialect compiles, naming the meta-schema and the vocabulary, located at the `$schema` naming it; `compileNormalizer`, `deriveStrictProfile` and `@jarenjs/emit` handed the dialects as `dialects` refuse it alike |
+| `JK0017` | `SchemaCompileError` | A schema nests subschemas deeper than `maxSchemaDepth` (default 128): refused where the bound is crossed, located at the first subschema past it, when a schema compiles or by the first call that reaches a reference resolved on first use |
 | `JK0101` | `SchemaCompileError` | Retired, no longer raised: `deriveStrictProfile` (`@jarenjs/validate/strict-profile`) carries a schema that accepts any value — `true`, `{}`, a node with no type, a free-form object, a tuple — as JSON text |
 | `JK0102` | `SchemaCompileError` | `deriveStrictProfile`: an object whose member names are open and that no entries array carries — a map beside declared `properties`, a map that may also be an array, a schema-valued `unevaluatedProperties` |
 | `JK0103` | `SchemaCompileError` | `deriveStrictProfile`: a keyword that applies members, items or branches beside its node and that no distribution makes exact — `if`/`then`/`else`, `dependentSchemas` or a draft-07 `dependencies` schema beside an object type, a branch beside an object type that is more than members (a `$ref`, a nested union, an `enum`), a branch giving a member a second schema that is not an `enum` or `const`, an untyped `allOf` of more than one branch, a `$ref` or `anyOf` beside structural siblings |
@@ -384,7 +385,30 @@ included, so an application with legitimately deep data gets its answers
 back. Raising it hands the decision back to the host: past the default, a
 deep enough instance can overflow the call stack again, at a depth that
 differs from host to host. Anything but a positive safe integer is refused
-`JK0002` when a schema compiles; `null` or absent means the default.
+`JK0002` when a schema compiles; `null` or absent means the default. The
+same holds for `maxSchemaDepth` (`JK0017`, below).
+
+**`JK0017` — the schema depth bound.** One compile builds subschemas at
+most `maxSchemaDepth` (default 128) levels deep: each level, whatever
+keyword holds it (`properties`, `items`, `allOf`, `not`, a reference
+compiled in place, ...), takes the host's call stack while it compiles,
+and again while an instance as deep validates. The bound sits where a host
+stack half the default size still compiles and validates every keyword's
+levels in every reporting mode, so a schema nested deeper is refused with
+a code instead of exhausting the stack with an uncoded `RangeError` at a
+depth that differs from host to host. The message names the first
+subschema past the bound:
+
+```text
+JK0017: the schema nests subschemas more than 128 levels deep, deeper than a small host call stack compiles and validates; raise maxSchemaDepth to compile it at https://github.com/jklarenbeek/jarenjs#/properties/a/properties/a/…
+```
+
+A reference resolved on first use builds its target when a call first
+reaches it, so that call is the one refused. Data nested inside a schema
+(`const`, `enum`, `default`, `examples`, an unknown keyword's value) is no
+subschema and is walked at any depth. `new JarenValidator({ maxSchemaDepth:
+1000 })` raises the bound; past the default, a deep enough schema can
+exhaust the host's stack again.
 
 **`JK0003` — the output format.** The `outputFormat` option takes one of
 the formats `@jarenjs/validate/output` exports (`flagOutput`,

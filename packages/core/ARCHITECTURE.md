@@ -1149,6 +1149,15 @@ into the coded refusal, and `isPastLongestString` tells it from another
 `RangeError` (a call stack exhausted) by the message the host gives a string
 past its longest, read once from the host.
 
+`equalsDeep` and `deepFreeze` hold no bound: they answer at any depth.
+`equalsDeep` compares the first 256 levels on the host's stack, as
+`equalsJson` does, and a pair nested deeper on a stack of its own, depth
+first in the same member order; it remembers the pairs open on the way down,
+so a pair met again inside its own compare (two values holding cycles) is
+taken as equal and the answer rests on the members that differ.
+`deepFreeze` keeps one frame per open object and freezes members before the
+object holding them, as the recursive walk did.
+
 Each of those walks has two forms with one answer. The plain form reaches a
 shared subtree each time it is referenced; it counts the containers it opens
 (2^20 pairs for `equalsJson`, 2^18 containers for the writers), and past that
@@ -1168,7 +1177,7 @@ flattens it.
 ```mermaid
 flowchart TB
     subgraph ObjectModule["object.js"]
-        EqualsDeep["equalsDeep(target, source)<br/>Recursive equality check"]
+        EqualsDeep["equalsDeep(target, source)<br/>Deep equality check"]
 
         subgraph SupportedTypes["Supports"]
             Objects["Plain objects"]

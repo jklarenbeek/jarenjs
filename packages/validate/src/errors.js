@@ -2,8 +2,11 @@
 /**
  * @file The validator's coded refusals. When a schema compiles: a loop of
  * references that never reads the instance (`JK0001`), an invalid
- * `maxReferenceDepth` option (`JK0002`) and an `outputFormat` option that
- * is not an output format (`JK0003`). When `compileAsync`
+ * `maxReferenceDepth` or `maxSchemaDepth` option (`JK0002`), an
+ * `outputFormat` option that is not an output format (`JK0003`) and a
+ * schema that nests subschemas deeper than `maxSchemaDepth` (default
+ * {@link SCHEMA_DEPTH_CEILING}), refused where the bound is crossed
+ * before the host's call stack can overflow (`JK0017`). When `compileAsync`
  * (`@jarenjs/validate/load`) loads what a schema references: a document the
  * loader fails to load (`JK0004`), one that is not a schema (`JK0005`), a
  * compilation that needs more loads than its bound (`JK0006`) and an
@@ -51,7 +54,7 @@ import { CodedError } from '@jarenjs/core/errors';
  */
 export const VALIDATE_CODES = Object.freeze({
   JK0001: 'a loop of references and in-place applicators never reads the instance',
-  JK0002: 'the maxReferenceDepth option is not a positive safe integer',
+  JK0002: 'the maxReferenceDepth or maxSchemaDepth option is not a positive safe integer',
   JK0003: 'outputFormat is not a format of @jarenjs/validate/output',
   JK0004: 'compileAsync: the loadSchema function failed to load a referenced schema',
   JK0005: 'compileAsync: a loaded document is not a schema (an object or a boolean)',
@@ -66,6 +69,7 @@ export const VALIDATE_CODES = Object.freeze({
   JK0014: 'a pattern or a patternProperties name is not a regular expression',
   JK0015: "under unknownFormats: 'error', an asserting format names no registered format",
   JK0016: 'a meta-schema requires a vocabulary the validator does not implement',
+  JK0017: 'a schema nests subschemas deeper than the schema depth ceiling',
   JK0101: 'retired: a schema that accepts any value is carried as JSON text',
   JK0102: 'a strict profile cannot carry an object whose member names are open',
   JK0103: 'a strict profile cannot carry a keyword that applies members, items or branches beside its node',
@@ -88,6 +92,16 @@ export const VALIDATE_CODES = Object.freeze({
  * refusal is the same on every host.
  */
 export const REFERENCE_DEPTH_CEILING = 256;
+
+/**
+ * The default deepest nesting of subschemas one compile builds (the
+ * `maxSchemaDepth` option): the compile, and the validation of an instance
+ * as deep, take the host's call stack per level, so the bound sits where
+ * a host stack half the default size still holds every keyword's levels
+ * in every reporting mode. Fixed by default, so a refusal is the same on
+ * every host.
+ */
+export const SCHEMA_DEPTH_CEILING = 128;
 
 /**
  * Error thrown when a schema is refused while it is compiled (`JK0xxx`
@@ -138,14 +152,30 @@ export function unimplementedVocabulary(dialect, vocabulary, location = undefine
 }
 
 /**
- * Refuse a `maxReferenceDepth` option that is not a positive safe integer.
+ * Refuse a depth option (`maxReferenceDepth`, `maxSchemaDepth`) that is not
+ * a positive safe integer.
+ * @param {string} name - The option's name
  * @param {unknown} value - The option, `undefined` when not given
  * @throws {SchemaCompileError} `JK0002`
  */
-export function assertReferenceDepth(value) {
+export function assertDepthOption(name, value) {
   if (value !== undefined && !(Number.isSafeInteger(value) && /** @type {number} */ (value) > 0))
     throw new SchemaCompileError('JK0002',
-      `maxReferenceDepth must be a positive safe integer, got ${describeCount(value)}`);
+      `${name} must be a positive safe integer, got ${describeCount(value)}`);
+}
+
+/**
+ * The refusal of a schema whose subschemas nest deeper than the compile's
+ * `maxSchemaDepth`: compiling on, the compile or a validation of an
+ * instance as deep could exhaust the host's call stack, at a depth that
+ * differs from host to host, with an uncoded `RangeError`.
+ * @param {number} ceiling - The compilation's `maxSchemaDepth`
+ * @param {string} location - The subschema past the bound, as `docPath`
+ * @returns {SchemaCompileError} `JK0017`
+ */
+export function schemaTooDeep(ceiling, location) {
+  return new SchemaCompileError('JK0017', `the schema nests subschemas more than ${ceiling} levels deep, `
+    + 'deeper than a small host call stack compiles and validates; raise maxSchemaDepth to compile it', location);
 }
 
 /**
