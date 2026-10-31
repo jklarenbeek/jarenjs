@@ -31,7 +31,7 @@ export const LINQ_CODES = /* @__PURE__ */ Object.freeze({
   JL0105: 'a relation hop cannot lower: a composite or undeclared key, an incomplete many-to-many entry, or a malformed relation record',
   JL0106: 'a migration step names a table the target model does not declare, or a draft it cannot match',
   JL0107: 'a client operation named a member that is not the relation kind it needs',
-  JL0108: 'a captured expression or a method read without its call was converted to a JavaScript primitive, serialized with JSON.stringify, or had an array or a string method called on a member',
+  JL0108: 'a captured expression or a method read without its call was converted to a JavaScript primitive, serialized with JSON.stringify, had an array or a string method called on a member, or had a member read off a method read',
   JL0109: 'a captured callback read its argument and answered a JavaScript boolean',
   JL2001: 'first/single found no element',
   JL2002: 'single found more than one element',
@@ -142,7 +142,10 @@ export const LINQ_CODES = /* @__PURE__ */ Object.freeze({
  *    spelling that works (`u.tags.all().eq('a')`, `u.name.upper()`).
  *    So is a method name read without its call and then coerced
  *    (`u.name.length > 0`, `${u.name.upper}`): it is a function, and the
- *    message names the method and its call (`.length(…)`)
+ *    message names the method and its call (`.length(…)`); and a member
+ *    read off such a method read that the function does not have
+ *    (`u.day.eq(x)`, written for a member named `day`), the message naming
+ *    the call and `get('day')`
  *  - `JL0109` — a captured callback read its argument and answered a
  *    plain JavaScript boolean: `===`, `!==`, `!`, `typeof` and `== null`
  *    test the capture proxy, never the value, so the document would hold

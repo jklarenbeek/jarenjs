@@ -182,9 +182,11 @@ describe('the asynchronous provider (§12)', () => {
 
   it('every terminal pushes its own wrapper, as the synchronous surface does', async () => {
     const pred = { $gt: ['$it.stars', 3] };
+    // the untouched root is an operand as the phrase over it, and a quantifier's binding as itself
+    const all = { $for: { it: '$.Post[*]' }, $return: '$it' };
     /** @type {[string, (s: any) => Promise<any>, any, any, any][]} */
     const table = [
-      ['count', (s) => s.count(), { $count: '$.Post[*]' }, 3, 3],
+      ['count', (s) => s.count(), { $count: all }, 3, 3],
       ['sum', (s) => s.select((p) => p.stars).sum(),
         { $sum: { $for: { it: '$.Post[*]' }, $return: '$it.stars' } }, 8, 8],
       ['average', (s) => s.select((p) => p.stars).average(),
@@ -193,24 +195,24 @@ describe('the asynchronous provider (§12)', () => {
         { $min: { $for: { it: '$.Post[*]' }, $return: '$it.stars' } }, 1, 1],
       ['max', (s) => s.select((p) => p.stars).max(),
         { $max: { $for: { it: '$.Post[*]' }, $return: '$it.stars' } }, 4, 4],
-      ['any', (s) => s.any(), { $exists: '$.Post[*]' }, true, true],
+      ['any', (s) => s.any(), { $exists: all }, true, true],
       ['any(pred)', (s) => s.any((p) => p.stars.gt(3)),
         { $some: { it: '$.Post[*]' }, $satisfies: pred }, true, true],
       ['all', (s) => s.all((p) => p.stars.gt(3)),
         { $every: { it: '$.Post[*]' }, $satisfies: pred }, false, false],
-      ['first', (s) => s.first(), [{ $subsequence: ['$.Post[*]', 0, 1] }], [POSTS[0]], POSTS[0]],
+      ['first', (s) => s.first(), [{ $subsequence: [all, 0, 1] }], [POSTS[0]], POSTS[0]],
       ['firstOrDefault', (s) => s.firstOrDefault(null),
-        [{ $subsequence: ['$.Post[*]', 0, 1] }], [POSTS[0]], POSTS[0]],
-      ['single', (s) => s.single(), [{ $subsequence: ['$.Post[*]', 0, 2] }], [POSTS[1]], POSTS[1]],
+        [{ $subsequence: [all, 0, 1] }], [POSTS[0]], POSTS[0]],
+      ['single', (s) => s.single(), [{ $subsequence: [all, 0, 2] }], [POSTS[1]], POSTS[1]],
       ['singleOrDefault', (s) => s.singleOrDefault(null),
-        [{ $subsequence: ['$.Post[*]', 0, 2] }], [POSTS[1]], POSTS[1]],
-      ['last', (s) => s.last(), [{ $subsequence: [{ $reverse: '$.Post[*]' }, 0, 1] }], [POSTS[2]], POSTS[2]],
+        [{ $subsequence: [all, 0, 2] }], [POSTS[1]], POSTS[1]],
+      ['last', (s) => s.last(), [{ $subsequence: [{ $reverse: all }, 0, 1] }], [POSTS[2]], POSTS[2]],
       ['lastOrDefault', (s) => s.lastOrDefault(null),
-        [{ $subsequence: [{ $reverse: '$.Post[*]' }, 0, 1] }], [POSTS[2]], POSTS[2]],
-      ['elementAt', (s) => s.elementAt(1), [{ $subsequence: ['$.Post[*]', 1, 1] }], [POSTS[1]], POSTS[1]],
+        [{ $subsequence: [{ $reverse: all }, 0, 1] }], [POSTS[2]], POSTS[2]],
+      ['elementAt', (s) => s.elementAt(1), [{ $subsequence: [all, 1, 1] }], [POSTS[1]], POSTS[1]],
       ['elementAtOrDefault', (s) => s.elementAtOrDefault(1, null),
-        [{ $subsequence: ['$.Post[*]', 1, 1] }], [POSTS[1]], POSTS[1]],
-      ['toArray', (s) => s.toArray(), ['$.Post[*]'], POSTS, POSTS],
+        [{ $subsequence: [all, 1, 1] }], [POSTS[1]], POSTS[1]],
+      ['toArray', (s) => s.toArray(), [all], POSTS, POSTS],
     ];
     for (const [name, run, document, answer, value] of table) {
       const { provider, calls } = asyncRecorder('$.Post[*]', { answer });

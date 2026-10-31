@@ -33,7 +33,15 @@
  * over an inner phrase's result would unpack again. The one source left
  * bare is a PROVIDER's own root (`'$.Post[*]'`): a stored document is an
  * object, so D4 never applies there, and the bare root is the shape the
- * provider's planner pushes. The streaming async surface keeps items by
+ * provider's planner pushes — as the source of a `$for` or a quantifier.
+ * Where the root would stand as an operand the provider is handed the
+ * phrase over it instead ({@link rootPhrase}): a window over the root's
+ * own phrase closes that phrase, with the projection of a `select` right
+ * after the window folded in when it maps each row to exactly one item
+ * and cannot raise ({@link projectsOneItem}), so `take(5).select(f)` is
+ * `$subsequence` over `{ $for: { it: '$.Post[*]' }, $return: f }` — the
+ * shape a store translates — and an untouched chain's terminals and
+ * cursor take the phrase too. The streaming async surface keeps items by
  * construction, so the two surfaces agree on every row shape.
  */
 
@@ -323,6 +331,97 @@ export function fanProjection(projection) {
 }
 
 /**
+ * A provider's own root as the phrase that iterates it: what the provider
+ * is handed where the root would stand as an operand rather than as the
+ * source of a binding (a terminal's, a window's, the cursor's), because a
+ * store plans `{ $for: { it: '$.Post[*]' }, $return: '$it' }` there and
+ * refuses the bare path under strict execution.
+ * @param {string} root
+ * @returns {any}
+ */
+export function rootPhrase(root) {
+  return { $for: { it: root }, $return: '$it' };
+}
+
+/** A path over one binding with no wildcard step (`$it.name`,
+ * `$it['odd key']`, `$it.list[0]`, `$k`): at most one item, never a raise. */
+const SINGULAR_PATH_RE = /^\$[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*|\[-?\d+\]|\['(?:[^'\\]|\\.)*'\])*$/;
+/** The same steps with `[*]` among them: any number of items, never a raise. */
+const PATH_RE = /^\$[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*|\[-?\d+\]|\[\*\]|\['(?:[^'\\]|\\.)*'\])*$/;
+
+/** Where a value of a projection stands: the whole return (exactly one
+ * item), an object member (at most one) or an array element (any). */
+const WHOLE = 0;
+const MEMBER = 1;
+const ELEMENT = 2;
+
+/**
+ * Whether a projection maps every row to exactly ONE item and can never
+ * raise, so a window commutes with it: `take(n).select(f)` answers what
+ * `select(f).take(n)` does. The engine evaluates a phrase's `$return` for
+ * every row before `$subsequence` picks positions, so a projection that
+ * could raise must stay inside its window; one that can yield no item (a
+ * bare path to a member a row lacks) or several (a fanned path, a
+ * `selectMany`) would move the window across rows. Only constructors
+ * qualify: an object constructor whose members are each at most one item
+ * (a singular path, a literal, `$const`, a constructor — a member of two
+ * items raises), an array constructor whose elements are paths, literals,
+ * `$const` or constructors, `$const`, a literal and the row itself. Every
+ * operator, phrase and lowered hop is refused, raising or not.
+ * @param {any} projection - a captured expression
+ * @returns {boolean}
+ */
+function projectsOneItem(projection) {
+  // an explicit stack: a constructor is as deep as its callback wrote it
+  const pending = [projection, WHOLE];
+  while (pending.length > 0) {
+    const position = pending.pop();
+    const value = pending.pop();
+    if (value === null || typeof value === 'number' || typeof value === 'boolean') continue;
+    if (typeof value === 'string') {
+      // a literal (a leading `$` is doubled), the row, or a path its position admits
+      if (value.charCodeAt(0) !== 0x24 || value.charCodeAt(1) === 0x24 || value === '$it'
+        || (position === MEMBER && SINGULAR_PATH_RE.test(value))
+        || (position === ELEMENT && PATH_RE.test(value))) continue;
+      return false;
+    }
+    if (Array.isArray(value)) {
+      for (const element of value) pending.push(element, ELEMENT);
+      continue;
+    }
+    const keys = Object.keys(value);
+    if (keys.length === 1 && keys[0] === '$const') continue;
+    if (keys.some((key) => key.charCodeAt(0) === 0x24)) return false;
+    for (const key of keys) pending.push(value[key], MEMBER);
+  }
+  return true;
+}
+
+/**
+ * The return a window gives the provider root's phrase it closes, so the
+ * window takes the FLWOR a store plans rather than the bare path or a
+ * phrase that binds the window: the projection of a `select` right after
+ * the windows when it maps each row to exactly one item and cannot raise
+ * ({@link projectsOneItem}) — that `select` then runs inside the windows —
+ * and the rows themselves otherwise.
+ * @param {any} phrase - the root's phrase, its return slot empty
+ * @param {readonly any[]} stages
+ * @param {number} at - the window's index in `stages`
+ * @returns {number} the index of the folded `select`, or -1
+ */
+function windowReturn(phrase, stages, at) {
+  let next = at + 1;
+  while (next < stages.length && (stages[next].kind === 'take' || stages[next].kind === 'skip')) next++;
+  const after = stages[next];
+  if (after !== undefined && after.kind === 'select' && projectsOneItem(after.projection)) {
+    phrase.ret = after.projection;
+    return next;
+  }
+  phrase.ret = '$it';
+  return -1;
+}
+
+/**
  * A deep, independent copy of an emitted query document. Plain data
  * only, which is exactly what a document is — every captured expression
  * has already passed the JSON-domain boundary in `expression.js`, so
@@ -416,16 +515,24 @@ const andJoin = (a, b) => (a === EMPTY ? b : { $and: [a, b] });
  *   (`'$[*]'` for a plain source; a stripped document for
  *   `fromDocument`)
  * @param {readonly any[]} stages
- * @param {{ bareRoot?: boolean }} [options] - `bareRoot` iterates the
- *   root without packing (a provider's own root; see the header)
+ * @param {{ bareRoot?: boolean, ownRoot?: boolean }} [options] -
+ *   `bareRoot` iterates the root without packing (a provider's root; see
+ *   the header); `ownRoot` says it is the root the provider itself
+ *   declares (an entity set's `'$.Post[*]'`), whose items are the rows a
+ *   store holds, so a window over its phrase closes that phrase
  * @returns {any} the emitted query document (plain JSON)
  */
 export function emitDocument(root, stages, options = undefined) {
   let phrase = openPhrase(root, options?.bareRoot === true);
+  const ownRoot = options?.ownRoot === true;
   /** Close the open phrase and reopen over its result. */
   const reseat = () => { phrase = openPhrase(closePhrase(phrase)); };
+  /** The index of the `select` a window folded into the root's phrase. */
+  let folded = -1;
 
-  for (const stage of stages) {
+  for (let at = 0; at < stages.length; at++) {
+    if (at === folded) continue;
+    const stage = stages[at];
     switch (stage.kind) {
       case 'where':
         // a second where in the same phrase COMBINES ($and); only a
@@ -486,11 +593,14 @@ export function emitDocument(root, stages, options = undefined) {
         break;
       }
       case 'skip':
-        phrase = openPhrase({ $subsequence: [closePhrase(phrase), stage.count] });
+      case 'take': {
+        // a window over a provider's own root takes the root's phrase
+        if (phrase.bare && ownRoot) folded = windowReturn(phrase, stages, at);
+        const windowed = closePhrase(phrase);
+        phrase = openPhrase({ $subsequence: stage.kind === 'skip'
+          ? [windowed, stage.count] : [windowed, 0, stage.count] });
         break;
-      case 'take':
-        phrase = openPhrase({ $subsequence: [closePhrase(phrase), 0, stage.count] });
-        break;
+      }
       case 'distinct':
         phrase = openPhrase({ $distinct: closePhrase(phrase) });
         break;
@@ -527,25 +637,30 @@ export function emitDocument(root, stages, options = undefined) {
  * items`, and a SINGLE item that is itself an array would be
  * indistinguishable from two items — so every element-window terminal
  * emits `[window]` (one array item, Rule 3 constructor: elements
- * flatten) and reads its elements.
+ * flatten) and reads its elements. A provider's own root, untouched, is
+ * an operand only as the phrase over it ({@link rootPhrase}); a
+ * quantifier binds the root itself, as a `$for` does.
  * @param {any} expr - the emitted chain expression
  * @param {string} terminal
  * @param {readonly any[]} [args]
+ * @param {boolean} [bareRoot] - whether `expr` is a provider's own root,
+ *   untouched
  * @returns {any}
  */
-export function wrapTerminal(expr, terminal, args = []) {
+export function wrapTerminal(expr, terminal, args = [], bareRoot = false) {
+  const operand = bareRoot ? rootPhrase(expr) : expr;
   switch (terminal) {
-    case 'toArray': return [expr];
-    case 'first': return [{ $subsequence: [expr, 0, 1] }];
-    case 'single': return [{ $subsequence: [expr, 0, 2] }];
-    case 'last': return [{ $subsequence: [{ $reverse: expr }, 0, 1] }];
-    case 'elementAt': return [{ $subsequence: [expr, args[0], 1] }];
-    case 'count': return { $count: expr };
-    case 'sum': return { $sum: expr };
-    case 'average': return { $avg: expr };
-    case 'min': return { $min: expr };
-    case 'max': return { $max: expr };
-    case 'exists': return { $exists: expr };
+    case 'toArray': return [operand];
+    case 'first': return [{ $subsequence: [operand, 0, 1] }];
+    case 'single': return [{ $subsequence: [operand, 0, 2] }];
+    case 'last': return [{ $subsequence: [{ $reverse: operand }, 0, 1] }];
+    case 'elementAt': return [{ $subsequence: [operand, args[0], 1] }];
+    case 'count': return { $count: operand };
+    case 'sum': return { $sum: operand };
+    case 'average': return { $avg: operand };
+    case 'min': return { $min: operand };
+    case 'max': return { $max: operand };
+    case 'exists': return { $exists: operand };
     case 'some': return { $some: { it: expr }, $satisfies: args[0] };
     case 'every': return { $every: { it: expr }, $satisfies: args[0] };
     /* c8 ignore next 2 -- terminals are produced by Sequence alone */

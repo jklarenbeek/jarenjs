@@ -20,7 +20,7 @@ import {
   groupRoot,
 } from './expression.js';
 import {
-  emitDocument, wrapTerminal, snapshot, fanProjection, isReservedBinding, RESERVED_BINDINGS_TEXT,
+  emitDocument, wrapTerminal, rootPhrase, snapshot, fanProjection, isReservedBinding, RESERVED_BINDINGS_TEXT,
   PROJECTING_STAGES, requireNonNegativeInteger, requireNoArgument, requireNoTrailingArgument, requireDefaultValue,
   readOptions, orderSpec,
   RUN_BINDINGS, mergeBindings,
@@ -132,6 +132,14 @@ export class Sequence {
    * one `$for` source the emitter leaves unpacked (document.js). */
   #isBareRoot() {
     return this.#sourceKind === 'provider' && this.#stages.length === 0;
+  }
+
+  /** Whether the items come from the root the provider itself declares
+   * (an entity set's `'$.Post[*]'`) — rows a store holds — rather than the
+   * whole input of a provider that declares none, or a stored document
+   * (`fromDocument`). */
+  #ownRoot() {
+    return this.#sourceKind === 'provider' && this.#root === this.#source.root;
   }
 
   #declared() {
@@ -500,7 +508,7 @@ export class Sequence {
   toDocument(...unread) {
     requireNoTrailingArgument(unread, 'toDocument');
     return snapshot(emitDocument(this.#root, this.#stages,
-      { bareRoot: this.#sourceKind === 'provider' }));
+      { bareRoot: this.#sourceKind === 'provider', ownRoot: this.#ownRoot() }));
   }
 
   /** The compiled view of the chain: the document, its externals, its
@@ -548,7 +556,7 @@ export class Sequence {
   /** @param {string} terminal @param {readonly any[]} [args]
    * @param {readonly string[]} [lists] - the terminal predicate's own */
   #execute(terminal, args, lists = []) {
-    const document = wrapTerminal(this.toDocument(), terminal, args);
+    const document = wrapTerminal(this.toDocument(), terminal, args, this.#isBareRoot() && this.#ownRoot());
     const externalNames = [...this.#params.keys()];
     const externals = this.#externals(lists);
     if (this.#sourceKind === 'provider') {
@@ -602,10 +610,8 @@ export class Sequence {
 
   * [Symbol.iterator]() {
     if (this.#sourceKind === 'provider' && typeof this.#source.syncQuery === 'function') {
-      const document = this.toDocument();
-      const cursor = this.#source.syncQuery(document === this.#root
-        ? { $for: { it: this.#root }, $return: '$it' } : document,
-      { externals: this.#externals() });
+      const cursor = this.#source.syncQuery(this.#isBareRoot() ? rootPhrase(this.#root) : this.toDocument(),
+        { externals: this.#externals() });
       if (cursor == null || typeof cursor[Symbol.iterator] !== 'function')
         throw new LinqRuntimeError('JL2004', 'syncQuery() must return a synchronous iterable cursor');
       yield* cursor;

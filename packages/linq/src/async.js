@@ -45,7 +45,7 @@ import {
   SOURCE_OPTION_KEYS,
 } from './provider.js';
 import {
-  emitDocument, wrapTerminal, snapshot, fanProjection, isReservedBinding, RESERVED_BINDINGS_TEXT,
+  emitDocument, wrapTerminal, rootPhrase, snapshot, fanProjection, isReservedBinding, RESERVED_BINDINGS_TEXT,
   PROJECTING_STAGES, requireNonNegativeInteger, requireNoArgument, requireNoTrailingArgument, requireDefaultValue,
   readOptions, orderSpec,
   RUN_BINDINGS, mergeBindings,
@@ -213,9 +213,18 @@ export class AsyncSequence {
   }
 
   /** Whether this sequence is a provider's own root, untouched — the
-   * one `$for` source the emitter leaves unpacked (document.js). */
-  #isBareRoot() {
-    return this.#origin.kind === 'provider' && this.#stages.length === 0;
+   * one `$for` source the emitter leaves unpacked (document.js) — over
+   * its stages or over the first `stages` of them.
+   * @param {readonly any[]} [stages] */
+  #isBareRoot(stages = this.#stages) {
+    return this.#origin.kind === 'provider' && stages.length === 0;
+  }
+
+  /** Whether the items come from the root the provider itself declares
+   * (an entity set's `'$.Post[*]'`) — rows a store holds — rather than the
+   * whole input of a provider that declares none. */
+  #ownRoot() {
+    return this.#origin.kind === 'provider' && this.#origin.root === this.#origin.source.root;
   }
 
   /** The root expression the stages iterate: a provider's own root, the
@@ -228,7 +237,7 @@ export class AsyncSequence {
   /** The document for a run of stages over this origin's root. */
   #documentOf(stages) {
     return emitDocument(this.#rootExpression(), stages,
-      { bareRoot: this.#origin.kind === 'provider' });
+      { bareRoot: this.#origin.kind === 'provider', ownRoot: this.#ownRoot() });
   }
 
   /** Hand one document to the provider, whole, with the bound
@@ -241,7 +250,8 @@ export class AsyncSequence {
   /** A pushed element window over `stages`: the provider must answer
    * exactly one array, as on the synchronous surface (`JL2006`). */
   async #pushWindow(terminal, args = undefined, stages = this.#stages) {
-    const result = await this.#push(wrapTerminal(this.#documentOf(stages), terminal, args));
+    const result = await this.#push(wrapTerminal(this.#documentOf(stages), terminal, args,
+      this.#isBareRoot(stages) && this.#ownRoot()));
     if (!Array.isArray(result)) {
       throw new LinqRuntimeError('JL2006',
         `the provider answered ${terminal}() with ${result === undefined ? 'undefined'
@@ -255,7 +265,8 @@ export class AsyncSequence {
    * @param {string} terminal @param {readonly any[]} [args]
    * @param {readonly string[]} [lists] - the quantifier predicate's own */
   #pushTerminal(terminal, args = undefined, lists = []) {
-    return this.#push(wrapTerminal(this.#documentOf(this.#stages), terminal, args), lists);
+    return this.#push(wrapTerminal(this.#documentOf(this.#stages), terminal, args,
+      this.#isBareRoot() && this.#ownRoot()), lists);
   }
 
   /** Compile one per-item evaluator: the stage expression under
@@ -643,8 +654,9 @@ export class AsyncSequence {
   /**
    * The pushed window as a STREAM. A provider that offers the cursor
    * protocol (`cursor(document, options)` — as the store's entity sets
-   * do) is handed the unwrapped document and answers one
-   * item per pull from an open statement; the generator's `for await`
+   * do) is handed the unwrapped document — the provider's own root,
+   * untouched, as the phrase over it — and answers one item per pull
+   * from an open statement; the generator's `for await`
    * releases that statement on break, throw and exhaustion alike,
    * exactly once. A provider without one keeps the element window it
    * always had: the `toArray`-wrapped document run whole, its array
@@ -656,7 +668,9 @@ export class AsyncSequence {
   #providerStream(stages, values) {
     const source = this.#origin.source;
     if (typeof source.cursor === 'function') {
-      return source.cursor(this.#documentOf(stages), { externals: values });
+      const document = this.#documentOf(stages);
+      return source.cursor(this.#isBareRoot(stages) && this.#ownRoot() ? rootPhrase(document) : document,
+        { externals: values });
     }
     return this.#materializedWindow(stages);
   }

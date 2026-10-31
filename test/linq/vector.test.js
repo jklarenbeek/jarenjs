@@ -13,7 +13,7 @@ import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 
-import { from } from '@jarenjs/linq';
+import { from, LinqBuildError } from '@jarenjs/linq';
 import { sectionOf } from '../format-sections.js';
 
 const MEMORIES = [
@@ -40,14 +40,15 @@ describe('the vector family emits §8.15', () => {
 
   it('reads a member named similarity through get() — the method shadows it', () => {
     // every METHODS name shadows a data member of the same name, and a
-    // stored score called `similarity` is the bite with the worst
-    // error: `m.similarity` is the METHOD, so calling it as a member is
-    // a plain TypeError about a function, not a coded build error
+    // stored score called `similarity` is the bite: `m.similarity` is the
+    // METHOD, so a member read off it is the coded refusal naming
+    // get('similarity'), where it was a plain TypeError about a function
     assert.deepStrictEqual(
       emitted((m) => m.get('similarity').similarity([1, 0]).gt(0.5)),
       { $gt: [{ $similarity: ["$it['similarity']", { $const: [1, 0] }] }, 0.5] });
     assert.throws(() => from([]).where((m) => m.similarity.similarity([1, 0]).gt(0.5)),
-      TypeError);
+      (/** @type {any} */ e) => e instanceof LinqBuildError && e.code === 'JL0108'
+        && /so \.similarity is read off the function .* get\('similarity'\)$/.test(e.message));
   });
 
   it('emits the published k-nearest recipe, not a knn method', () => {

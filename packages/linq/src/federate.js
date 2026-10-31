@@ -20,7 +20,7 @@
 import { LinqBuildError, LinqRuntimeError, spellValue } from './errors.js';
 import { compileDocument, isProviderSource, providerRoot } from './provider.js';
 import { memberSegment } from './expression.js';
-import { readOptions } from './document.js';
+import { readOptions, rootPhrase } from './document.js';
 import { parseJSONPath } from '@jarenjs/json/path';
 
 /** The strategies this boundary knows. One, for now, and it says so. */
@@ -344,7 +344,7 @@ async function fetchSide(member, document, options, budget, keep, open, combined
 function childDocument(side) {
   if (side.nested) return side.packed;
   const own = providerRoot(side.member.provider);
-  if (side.packed === null) return { $for: { it: own }, $return: '$it' };
+  if (side.packed === null) return rootPhrase(own);
   const binding = Object.keys(side.packed.$for)[0];
   return { ...side.packed, $for: { ...side.packed.$for, [binding]: own } };
 }

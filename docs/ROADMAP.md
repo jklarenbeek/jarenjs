@@ -234,6 +234,14 @@ delete it or fix it.
   accepts it. The walk records the dialect of the places it enters only;
   reading the nearest `$schema` on the way, as such a target's draft is now
   read, is the open work.
+- [ ] **Importing the normalizer loads the whole validator and the query
+  compiler.** `@jarenjs/validate/normalize` imports the validator to check
+  defaults and reaches `@jarenjs/json`'s query compiler (with core's geo,
+  series, dates and math), so Node loads all of it for every importer,
+  `@jarenjs/contract/http` (through its revision and bundle helpers) and
+  `@jarenjs/db/relational` among them; bundlers shake most of it out, Node's
+  module loader does not. Wanted: the reference helpers in a module of their
+  own, and the validator loaded only where defaults are checked.
 
 ## @jarenjs/view & @jarenjs/app
 
@@ -271,6 +279,13 @@ establish registry publication or downstream acceptance.
   corpus in Chromium, Firefox and WebKit, with synthetic composition events,
   Firefox's automation input sequence, and synthetic composition during
   collection scroll and focused-row removal.
+- [ ] **A cleared form control removes its member, with no opt-out.** The form
+  actions read an empty input as absent, so `form/input` and `form/number` on
+  a cleared control delete the member from the data (`{ dir: '/srv', age: 44
+  }` becomes `{}`), and a host that reads the member as text meets
+  `undefined`; `createFormActions` accepts an unknown option such as `{
+  cleared: 'empty' }` without checking it. Wanted: an opt-out that keeps `''`
+  for text and `null` for a number, and the options checked.
 
 ## @jarenjs/md
 
@@ -842,6 +857,73 @@ what each does is its own documentation's job
   [NOT] TRUE` — is not compared, so an index recreated under another such
   condition or key opens as the declared one, where SQLite compares the CREATE
   text (MODEL-FORMAT §12). Wanted: read those forms into the condition form.
+- [ ] **`sql.binary` keeps two operands and drops the rest.** The relational
+  builder `sql.binary(op, left, right)` ignores every further argument, so
+  `sql.binary('AND', a, b, c)` compiles to `a AND b` and `sql.binary('OR', x,
+  y, z)` to `x OR y`: a predicate is lost and nothing reports it (a node
+  built by hand with an extra member is refused `JD0038`). Wanted: n operands
+  for the associative `AND`/`OR`, and a coded refusal of a third operand to
+  every other operator.
+- [ ] **The relational grammar cannot match a literal substring.** `LIKE`
+  takes no `ESCAPE`, so `%` and `_` in a needle stay wildcards, and the
+  SQLite function set has no `instr` (refused `JD0038`), so a document cannot
+  match `100%` as text on SQLite or portably (PostgreSQL alone can, with a
+  backslash-escaped `LIKE` needle). Wanted: `LIKE ... ESCAPE` on both
+  engines, or a portable contains, and `instr`/`strpos` in the function sets.
+- [ ] **The relational grammar's catalog reads are undocumented.** A table's
+  columns, types, nullability and key positions read through `{ from:
+  'pragma_table_info', columns: {...}, where: <arg = table> }` on SQLite (the
+  eponymous table and its hidden `arg` column), at the root and inside a
+  transaction view, and through a `pg_attribute` join on PostgreSQL, but no
+  document says so, and the call spellings (`from: { table, args }`,
+  `sql.call('pragma_table_info', ...)`) are refused `JD0038`.
+- [ ] **Under `transactions: 'strict'`, a job's settlement treats a contended
+  gate as a failed attempt.** A handler that returns while another root
+  transaction holds the store's connection has its `complete()` refused
+  `JD0012`; the worker reports the attempt `failed` (in `onOutcome` and
+  `stats()`), its own `fail()` write is refused the same way, and the job
+  runs again when its lease expires, though the work finished. Renewal
+  already reads a contended gate as a storage reason, not lease loss
+  (JOBS-FORMAT §6). Wanted: settlement that waits for the gate within the
+  lease.
+- [ ] **A cancelled run cannot record how it ended.** After `requestCancel`,
+  a run's checkpoint saves are refused (`JL2009`: cancellation stops
+  admission), and `finish(id, 'cancelled', lease)` takes no summary (a fourth
+  argument is ignored; the record's summary is `{ status: 'cancelled' }`), so
+  the progress a run reached and when it stopped cannot be recorded under its
+  lease. Wanted: a final summary and checkpoint on `finish`.
+- [ ] **An in-thread root cursor holds the event loop until it ends.** On
+  in-thread SQLite a root cursor's pulls (`store.relational.iterate`, an
+  entity root cursor) settle in microtasks, so no timer or I/O callback runs
+  until the cursor is drained (a 100,000-row read lets no 1 ms interval
+  fire), where a worker host interleaves them; the documents state per-pull
+  admission but not this. Wanted: the documents saying so, and an optional
+  yield every N pulls.
+- [ ] **A worker endpoint URL Node cannot turn into a path is refused
+  uncoded.** `nodeWorkerDriver({ endpoint })` and `nodeWorkerPoolDriver({
+  endpoint })` check only the URL's protocol, so an open over
+  `file://example.com/w.js` (a host) or `file:///tmp/a%2Fb.js` (an encoded
+  slash) rejects with Node's `TypeError` (`ERR_INVALID_FILE_URL_HOST`,
+  `ERR_INVALID_FILE_URL_PATH`), where an endpoint whose worker never starts
+  is refused `JD0003` (HOSTS.md).
+- [ ] **A database rule cannot probe another table by a non-unique column.**
+  `$exists-row` must match the target's key member or every column of a
+  unique index (`JD0005` otherwise, MODEL-FORMAT §13.2), so a rule such as "a
+  row of this kind exists for this customer", keyed by a non-unique indexed
+  column, is refused on both engines. Wanted: a probe by any indexed column
+  set, lowered to an `EXISTS` over that index.
+- [ ] **A count or a reversal over an entity window stays the engine's under
+  strict execution.** `take(n).count()`, `skip(n).count()` and
+  `select(f).take(n).count()` emit `{ $count: { $subsequence: ... } }`, and
+  `last()` a `$reverse` over the entity phrase; the planner leaves both to the
+  engine, so strict execution refuses them (`JD0010`, 'op') while the residual
+  answers.
+- [ ] **A method read's own function members embed silently.** Inside a
+  captured expression, a method read without its call keeps the function's
+  own members, so `select((r) => ({ len: r.day.length }))` emits `{ $const: {
+  len: 0 } }` (the date-part method's `length`) where a member named `day` was
+  meant; `name` and `toString()` alike. Refusing them is a stricter refusal (a
+  minor).
 
 ## Lexical search (cross-package)
 
@@ -883,6 +965,13 @@ validated command/receipt transaction with current-authority and snapshot checks
   runs on physical devices, and a manual accessibility pass. Qualified on this
   host: automated synthetic Node/Bun and browser results, which do not prove
   those outcomes.
+- [ ] **Saved formulas that format Dutch dates or parse grams do not
+  translate.** `translateFormulaBody` refuses `toLocaleDateString('nl-NL')`
+  and `new Intl.DateTimeFormat('nl-NL').format(...)`, and has no rule for a
+  grams parse (`parseFloat` of `"1,5 kg"`); both translate only through a host
+  helper mapped onto `$date-format` or `$quantity`, and FORMULA-FORMAT
+  documents no route for dates. Wanted: a date-formatting translation with
+  the locale's picture, and a grams rule.
 
 ## Provider execution and durable domain workflows (cross-package)
 
@@ -956,6 +1045,22 @@ production cutover. Streaming DAG input is not required by this composition.
   with synthetic restart, takeover and observer evidence that does not
   substitute for those runs. Source provenance, review decisions and posted
   history keep their domain schemas and rules.
+- [ ] **Deciding a paused external effect needs a claim of its own job.** An
+  effect left unresolved and paused (its job cancelled) is decided through
+  `reconcile`, which asserts a live lease of that job before it reads a
+  recorded decision; `requeue` then `claim({ kinds })` returns whichever job
+  is next, so with another effect pending the lease belongs to the wrong job
+  (`JL2009 foreign reconciliation job`), and `claim` takes no job id. Wanted:
+  a claim by job id, or a decision fenced by the effect record's revision
+  instead of a lease.
+- [ ] **An external effect's job spends the queue's attempt budget across
+  pauses.** `requeue` keeps a job's attempt count, so an effect paused and
+  resumed four times reaches the default budget on its next attempt; if that
+  attempt's lease expires mid-send, the claim dead-letters the job and the leg
+  stays `sending` where `recover` would have run. `jobs.reset` restarts the
+  count (deleting the job's checkpoints) and the store-wide `jobs.maxAttempts`
+  raises every job's budget; neither works per effect. Wanted: a budget per
+  effect, or a resumption that is not an attempt.
 
 ## Native application adoption — external qualification
 
@@ -1076,3 +1181,17 @@ machine — the opt-in workflow or a local one — and its result recorded here.
   end-to-end test uses real keyboard input, where OS-level IME and focus
   behaviour shows. The ICU cross-check of number formatting skips unless the
   runtime's ICU is the one it was measured against.
+- [ ] **Two db recovery tests spawn `bun` without a skip.**
+  `test/db/relational-recovery.test.js` and
+  `test/db/sqlite-migration-identity-recovery.test.js` run a Bun leg
+  unconditionally, so on a host without `bun` they fail eight assertions
+  (`spawnSync bun ENOENT`), where every other test/db file skips with "no bun
+  binary on PATH".
+- [ ] **Several db tests leave handles open or need symbolic links.**
+  `adopted-history.test.js` opens `new DatabaseSync(dbPath)` twice and never
+  closes it, so its cleanup meets `EPERM` on Windows; `store-source.test.js`
+  opens five stores before its `try`, so a refused `vfs=unix` open leaves them
+  unclosed and the process does not exit; `backup.test.js`,
+  `snapshot-database.test.js` and `store-source.test.js` create symbolic links
+  with no skip on `EPERM` (a junction cannot link a file); and the compiled
+  backup fixture detects Bun's compiled mode by its POSIX root only.

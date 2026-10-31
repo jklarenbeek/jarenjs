@@ -15,7 +15,9 @@
  * and stays undetectable; the format doc says so.)
  *
  * Method names shadow member access: `u.eq` is the operator, never the
- * data member — reach a colliding member with `u.get('eq')`.
+ * data member — reach a colliding member with `u.get('eq')`. A member read
+ * off a method read without its call (`u.day.eq(v)`, written for a member
+ * named `day`) is `JL0108` naming both spellings, at the read.
  *
  * A root whose items are an entity's rows carries the entity's RELATION
  * TABLE (QUERY-PEN §3, MODEL-FORMAT §10.1): a member access naming a
@@ -1074,9 +1076,41 @@ function refuseMethodValue(name) {
   throw new LinqBuildError('JL0108',
     `.${name} is a method of a captured expression, read here without its call, so it is a `
     + `function and not the value — ==, +, a template literal, String() and < would act on the `
-    + `function itself; call it as .${name}(…), or read a document member of that name with `
-    + `get('${name}')`);
+    + `function itself; ${methodSpellings(name)}`);
 }
+
+/**
+ * The two things a method read without its call can have meant, as every
+ * refusal of one spells them: the method's call, and the document member
+ * the method's name shadows (§3).
+ * @param {string} name
+ */
+const methodSpellings = (name) =>
+  `call it as .${name}(…), or read a document member of that name with get('${name}')`;
+
+/** The name a method read was read under, kept on the function it answers
+ * so that a misuse of it can name it. */
+const METHOD_NAME = Symbol('jaren-linq-method');
+
+/**
+ * A method read without its call (`u.day`): the call, and the function's
+ * own members (`call`, `apply`, `bind`, …), are the function's as before,
+ * and a member the function does not have — `u.day.eq(x)`, which reads a
+ * member off the METHOD where a document member named `day` was meant
+ * (§3: a method name shadows a member) — is a coded refusal naming the
+ * call and `get('day')`, where it read `undefined` and the call after it
+ * threw a plain `TypeError`.
+ * @type {ProxyHandler<any>}
+ */
+const METHOD_READ = {
+  get(target, key, receiver) {
+    if (typeof key === 'symbol' || key in target) return Reflect.get(target, key, receiver);
+    throw new LinqBuildError('JL0108',
+      `.${target[METHOD_NAME]} is a method of a captured expression, read here without its call, so `
+      + `${SHORTHAND_RE.test(key) ? `.${key}` : `[${JSON.stringify(key)}]`} is read off the function and not `
+      + `off a value — ${methodSpellings(target[METHOD_NAME])}`);
+  },
+};
 
 /**
  * The capture proxy's `toJSON`: always a refusal (JL0108). `JSON.stringify(x)`
@@ -1259,9 +1293,11 @@ function makeExpr(doc, epoch, pathable, extra = undefined) {
         };
         // read without its call it is still a function, which `>`, `+`, `==`,
         // a template literal and `String()` would turn into a wrong value
-        // (`false`, the closure's source): coercing it is the refusal
+        // (`false`, the closure's source): coercing it is the refusal, and so
+        // is reading a member off it (`METHOD_READ`)
         Object.defineProperty(read, Symbol.toPrimitive, { value: () => refuseMethodValue(prop) });
-        return read;
+        Object.defineProperty(read, METHOD_NAME, { value: prop });
+        return new Proxy(read, METHOD_READ);
       }
       // a member read the liveness rule refuses is no read
       assertLive(record);

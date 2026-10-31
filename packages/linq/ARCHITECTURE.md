@@ -44,7 +44,13 @@ into one `$and`, and the item binding is always `it` (nested documents
 shadow it deliberately, so emitted documents stay hand-readable). Every
 iterated source is bound through an array constructor so an
 array-valued row stays one item under the engine's `$for` unpacking
-(the format doc's §5); only a provider's own root is bound bare.
+(the format doc's §5); only a provider's own root is bound bare. Where
+the root a provider declares would be an operand — under a window, a
+terminal or the cursor — it is the phrase over that root, the shape a
+store plans; a window closes the root's own phrase and folds in a
+following `select` whose projection maps each row to exactly one item
+and cannot raise (a constructor of singular paths and literals), so
+`take(n).select(f)` windows `{ $for: { it: root }, $return: f }`.
 Element terminals emit `[window]` array wrappers because the engine's
 result shape is `undefined | item | items` — the wrapper is what keeps
 an array-VALUED item unambiguous. Aggregate terminals wrap the whole

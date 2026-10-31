@@ -164,7 +164,11 @@ value becomes the expression:
   (`{ "$get": [ …, "$$id" ] }`), never a reference to a variable or a
   parameter named `id`.
 - Method names SHADOW member access: `u.eq` is the operator, never
-  the member. `u.get('eq')` reaches the member.
+  the member. `u.get('eq')` reaches the member. A member read off such a
+  method read, without its call — `r.day.eq(p.day)`, written for a
+  member named `day` — is `JL0108` at the read, naming the call
+  (`.day(…)`) and `get('day')` (§14.9); it was a plain `TypeError:
+  r.day.eq is not a function`.
 - Returned object literals become constructors: plain-keyed objects
   are Rule 1 map constructors, arrays are Rule 3 array constructors,
   and a data object with `$`-prefixed keys embeds through `$map`.
@@ -213,7 +217,9 @@ value becomes the expression:
   an ordinary data-member name. A method name read without its call
   (`u.tags.length`, `u.name.upper`) is a function, and `>`, `+`, `==`, a
   template literal or `String()` over it is `JL0108` naming the method and
-  its call (§14.9), not the constant `false` or the closure's source text. Serialize the finished chain's
+  its call (§14.9), not the constant `false` or the closure's source text;
+  so is a member read off it that the function does not have
+  (`u.name.upper.eq('A')`). Serialize the finished chain's
   `toDocument()` result, after capture, to inspect or persist a query.
 - **The parameters argument is not a value.** A callback's last
   argument is the parameters proxy (§7): `p.tenantId` reads one declared
@@ -311,11 +317,12 @@ names the family the way `geoParse`/`geoText` already do.
 Every method name shadows a data member of the same name — that is what
 the null prototype on the method table is for, and what `get(name)`
 escapes. A position stored as `at` is the case that bites: `p.at` is the
-index method, so it reads `p.get('at').within(region)`. A stored score
-named `similarity` is the same bite with a worse error — `r.similarity`
-is the *method*, so calling it as a member yields a `TypeError` about a
-function rather than a coded build error, because the surface never sees
-a member access at all. `r.get('similarity')` reads the data. A stock
+index method, so it reads `p.get('at').within(region)`, and `p.at.within(region)`
+is `JL0108` naming `get('at')`. A stored score named `similarity` is the
+same bite — `r.similarity` is the *method*, so `r.similarity.gt(0.8)`
+reads a member off the method and is `JL0108` naming the call and
+`get('similarity')`, where it used to be a `TypeError` about a function.
+`r.get('similarity')` reads the data. A stock
 movement stored as `in` (beside `out`) bites the same way since `in()`
 became membership: `s.in` is the method, and `s.get('in')` reads the
 quantity.
@@ -427,7 +434,26 @@ phrase and a join side are packed the same way. `from([[1, 2], [3]])
 async surface agrees by construction. The one source left bare is a
 PROVIDER's own root (`$.Post[*]`): a stored document is an object, so D4
 never applies there, and the bare root is the shape the provider's
-planner pushes.
+planner pushes — as a `$for` source and as a quantifier's binding.
+Where the root a provider declares would stand as an operand, the
+provider is handed the phrase over it, `{ "$for": { "it": "$.Post[*]" },
+"$return": "$it" }`, which a store plans where strict execution refuses
+the bare path (`JD0010`). A window closes the root's own phrase:
+`take(5).select((p) => ({ id: p.id }))` emits `{ "$subsequence": [{
+"$for": { "it": "$.Post[*]" }, "$return": { "id": "$it.id" } }, 0, 5] }`,
+the `select` right after the windows folded in because a constructor of
+singular paths and literals maps each row to exactly one item and cannot
+raise. A bare path, an operator, a fanned member, a hop or `selectMany`
+keeps the window inside: the engine evaluates a phrase's return for every
+row before the window picks positions, and those could raise past the
+window, drop a row or add one. An untouched chain's terminals and cursor
+take the phrase too (`count()` is `{ "$count": <the phrase> }`, while
+`any(pred)` still binds the root), and `toDocument()` of it is still the
+root. Those chains used to emit the window inside the projection's
+binding, or the bare root, and were refused `JD0010` under strict
+execution while the residual answered them; they now plan natively, with
+the same rows. A provider that declares no root (the whole input) and a
+stored document (`fromDocument`) emit what they did.
 
 **Constants come back frozen and shared on the sync surface.** A
 literal object or array in a projection, a `defaultIfEmpty` fallback or
@@ -717,7 +743,7 @@ the normative home, this table mirrors it):
 | `JL0105` | a relation hop on the chain cannot lower: a many-to-many entry that does not name its join row's columns, a composite or undeclared key, or a malformed relation entry (§3, §4 "relation navigation") |
 | `JL0106` | a migration step names a table the target model does not declare, or a draft it cannot match |
 | `JL0107` | the client (`@jarenjs/linq/db`, [DB-CLIENT.md](DB-CLIENT.md)) named a member that is not the relation kind the operation needs: `include()` over a member that is not a declared relation, `link()`/`unlink()` over a relation that is not many-to-many |
-| `JL0108` | a captured expression — in any pen's callback, or the chain's — was converted to a JavaScript primitive (`==`, `+`, a template literal or `<` met the capture proxy, or met a method read without its call, `u.name.length > 0`), met `JSON.stringify`, or had an array or a string method called on a member (`u.tags.includes('a')`) (§14.9) |
+| `JL0108` | a captured expression — in any pen's callback, or the chain's — was converted to a JavaScript primitive (`==`, `+`, a template literal or `<` met the capture proxy, or met a method read without its call, `u.name.length > 0`), met `JSON.stringify`, had an array or a string method called on a member (`u.tags.includes('a')`), or had a member read off a method read without its call (`u.day.eq(x)`, for a member named `day`) (§14.9) |
 | `JL0109` | a captured callback — in any pen, or the chain — read its argument and answered a plain JavaScript boolean: `===`, `!==`, `!`, `typeof` or `== null` tested the capture proxy, never the value (§14.10) |
 
 Runtime errors (`LinqRuntimeError`):
@@ -862,7 +888,8 @@ operators; a per-element async *predicate* is `mapAsync` then `where`.
   shape the store's own row cursor implements (`QueryCursor`), adopted
   as-is. A provider that offers `cursor(document, options)` — the
   store's entity sets do — is handed the pushed document there when the
-  chain is ITERATED, so a `for await` pulls one row at a time from an
+  chain is ITERATED (an untouched chain over the root the provider
+  declares as the phrase over that root, §5), so a `for await` pulls one row at a time from an
   open statement and a `break` releases it; `toArray()` and the other
   terminals still push one whole window. A store's collection offers no
   `cursor()`: a chain over one is pushed as that one window when it is
@@ -1688,7 +1715,12 @@ embed `false` or the closure's source text; converting it to a primitive is
 refused with `JL0108`, the message naming the method (`.length`) and its call
 (`.length(…)`). Calling it builds the expression as before, `typeof` of it is
 `'function'`, and a document member that shares the method's name is read with
-`get('length')`.
+`get('length')`. Reading a member off it that the function does not have —
+`r.day.eq(p.day)`, the spelling a member named `day` invites, or
+`p.at.within(region)` — is refused at the read with the same two spellings,
+the message naming the member read (`.eq`) too; it used to read `undefined`,
+so the call after it was a raw `TypeError: r.day.eq is not a function`. The
+function's own members (`call`, `apply`, `bind`) read as before.
 Off a relation target (`p.author.tags.includes('a')`) the message names
 the spellings it names on a member of the row itself, and both run there:
 `p.author.tags.all().eq('a')` holds when any element equals `'a'`, and
