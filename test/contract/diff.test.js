@@ -475,6 +475,25 @@ describe('diffContracts — the rule table, row by row', () => {
       }
     });
 
+    it('a keyword the walk does not model, in a non-null branch that moved, is R15 at the branch where the change lies', () => {
+      /** @param {any} schema */
+      const reads = (schema) => one(readOp({ output: schema }));
+      const from = { anyOf: [{ type: 'null' }, { type: 'object', dependentRequired: { a: ['b'] } }] };
+      /** @type {[any, string][]} */
+      const cases = [
+        // dropped: only `a` holds it, so the pointer takes the branch's position in `a`
+        [{ anyOf: [{ type: 'object' }, { type: 'null' }] }, '/anyOf/1/dependentRequired'],
+        // changed: both hold it, so the pointer stays where `b` holds the branch
+        [{ anyOf: [{ type: 'object', dependentRequired: { a: ['c'] } }, { type: 'null' }] }, '/anyOf/0/dependentRequired'],
+      ];
+      for (const [to, at] of cases) {
+        const d = diffContracts(reads(from), reads(to));
+        onlyClasses(d, ['unknown']);
+        assert.deepStrictEqual(d.unknown.map((c) => [c.rule, c.kind, c.note, c.docPath]),
+          [['R15', 'schema-unknown', 'dependentRequired', '/operations/a.b/output' + at]]);
+      }
+    });
+
     it('a recursive nullable definition, respelled and changed, terminates and reports each once', () => {
       // both spellings canonicalize and differ, so the walk descends the
       // canonical forms into `next` and back to the definition: the pair
