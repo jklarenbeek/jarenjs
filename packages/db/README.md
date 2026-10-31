@@ -1328,13 +1328,13 @@ disagree.
 <!--fact:live.eventTimeTable-->
 | view | maintained | re-run | ratio |
 |---|---:|---:|---:|
-| bucket (60 s ladder, mean), 1000 rows | 136 µs | 1.07 ms | 7.8× |
-| rolling (5 min window, mean), 1000 rows | 513 µs | 4.14 ms | 8.1× |
-| bucket (60 s ladder, mean), 10000 rows | 144 µs | 10.9 ms | 75.5× |
-| rolling (5 min window, mean), 10000 rows | 13.6 ms | 68 ms | 5.0× |
+| bucket (60 s ladder, mean), 1000 rows | 143 µs | 1.13 ms | 7.9× |
+| rolling (5 min window, mean), 1000 rows | 579 µs | 5.46 ms | 9.4× |
+| bucket (60 s ladder, mean), 10000 rows | 149 µs | 11.5 ms | 77.3× |
+| rolling (5 min window, mean), 10000 rows | 13.6 ms | 70.5 ms | 5.2× |
 <!--/fact-->
 
-The gain is <!--fact:live.eventTimeBand-->75.5× for the bucket and 5.0× for the rolling at 10,000 readings<!--/fact-->. A bucket
+The gain is <!--fact:live.eventTimeBand-->77.3× for the bucket and 5.2× for the rolling at 10,000 readings<!--/fact-->. A bucket
 view is nearly flat in the series length, because a write folds one
 bucket again and the rest of the ladder is untouched. A rolling view is
 not, and the table says so: its answer is one row per reading, so the

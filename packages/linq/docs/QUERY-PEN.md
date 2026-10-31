@@ -2133,14 +2133,14 @@ are shorter:
 ## 17. Cost
 
 A consumer importing `from` from `@jarenjs/linq` and calling one
-terminal bundles **<!--fact:bundle.chain-->249,134<!--/fact--> bytes** (esbuild, ESM, minified, tree-shaken,
+terminal bundles **<!--fact:bundle.chain-->250,815<!--/fact--> bytes** (esbuild, ESM, minified, tree-shaken,
 `platform: 'neutral'`). The figure is measured by
 `scripts/check-tree-shaking.js`'s chain probe and compared with this
 section on every `npm run test:tree-shaking`: it is derived, never typed,
 and a stale one is red here rather than wrong in a document somebody
 reads.
 
-Of that, **<!--fact:bundle.chain.own-->53,670<!--/fact--> bytes** are the chain's own modules — `sequence.js`,
+Of that, **<!--fact:bundle.chain.own-->55,351<!--/fact--> bytes** are the chain's own modules — `sequence.js`,
 `async.js`, `expression.js`, `document.js`, `provider.js`,
 `concurrency.js`, `errors.js` and `schema-of.js`. The rest is the query
 ENGINE and the core it stands on: a chain's document has to
@@ -2161,13 +2161,13 @@ making:
   `@jarenjs/formats`** — the client's optional peers. A consumer of the
   chain alone installs nothing new;
 - **no pen bytes at all**, in either direction: the pens carry no chain
-  module either, which is what keeps a <!--fact:bundle.jslt.kb-->28<!--/fact--> kB JSLT
-  pen <!--fact:bundle.jslt.kb-->28<!--/fact--> kB.
+  module either, which is what keeps a <!--fact:bundle.jslt.kb-->29<!--/fact--> kB JSLT
+  pen <!--fact:bundle.jslt.kb-->29<!--/fact--> kB.
 
 `docs/CONSUMING.md` states the rounded price of every subpath in one
 table, each figure held equal to the same measurements. Two of its rows
-are the ones to read together: the chain at <!--fact:bundle.chain.kb-->249<!--/fact--> kB and
-`./db` at <!--fact:bundle.db.kb-->1118<!--/fact--> kB.
+are the ones to read together: the chain at <!--fact:bundle.chain.kb-->251<!--/fact--> kB and
+`./db` at <!--fact:bundle.db.kb-->1120<!--/fact--> kB.
 The client costs what the store costs, by construction, and the chain
 costs what running a query costs.
 
@@ -2176,7 +2176,7 @@ the reason is worth knowing: a bundler counts a shared module once, and
 the chain and every pen share the expression capture (`expression.js`)
 and the coded errors under it (`errors.js`, and `@jarenjs/core`'s error
 and object helpers). A consumer importing the chain AND the schema pen
-bundles **<!--fact:bundle.chain.withSchemaPen-->274,038<!--/fact--> bytes** — **<!--fact:bundle.chain.shared-->20,925<!--/fact--> bytes** less than the sum of the
+bundles **<!--fact:bundle.chain.withSchemaPen-->275,719<!--/fact--> bytes** — **<!--fact:bundle.chain.shared-->21,317<!--/fact--> bytes** less than the sum of the
 figure above and [SCHEMA-PEN.md](SCHEMA-PEN.md#7-cost) §7's, which is
 what those shared modules weigh. The probe measures that pair too, so
 the saving is derived like everything else here. What the chain does NOT
