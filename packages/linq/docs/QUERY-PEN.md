@@ -2101,7 +2101,7 @@ are shorter:
 ## 17. Cost
 
 A consumer importing `from` from `@jarenjs/linq` and calling one
-terminal bundles **<!--fact:bundle.chain-->248,608<!--/fact--> bytes** (esbuild, ESM, minified, tree-shaken,
+terminal bundles **<!--fact:bundle.chain-->249,134<!--/fact--> bytes** (esbuild, ESM, minified, tree-shaken,
 `platform: 'neutral'`). The figure is measured by
 `scripts/check-tree-shaking.js`'s chain probe and compared with this
 section on every `npm run test:tree-shaking`: it is derived, never typed,
@@ -2110,8 +2110,8 @@ reads.
 
 Of that, **<!--fact:bundle.chain.own-->53,670<!--/fact--> bytes** are the chain's own modules — `sequence.js`,
 `async.js`, `expression.js`, `document.js`, `provider.js`,
-`concurrency.js`, `errors.js` and `schema-of.js`. The remaining ~170 kB
-is the query ENGINE and the core it stands on: a chain's document has to
+`concurrency.js`, `errors.js` and `schema-of.js`. The rest is the query
+ENGINE and the core it stands on: a chain's document has to
 run somewhere, and the in-memory runner is the reference semantics every
 provider is measured against (§8). A consumer that only ever hands
 `toDocument()` to a provider still pays it today, because the terminal
@@ -2135,7 +2135,7 @@ making:
 `docs/CONSUMING.md` states the rounded price of every subpath in one
 table, each figure held equal to the same measurements. Two of its rows
 are the ones to read together: the chain at <!--fact:bundle.chain.kb-->249<!--/fact--> kB and
-`./db` at <!--fact:bundle.db.kb-->1108<!--/fact--> kB.
+`./db` at <!--fact:bundle.db.kb-->1111<!--/fact--> kB.
 The client costs what the store costs, by construction, and the chain
 costs what running a query costs.
 
@@ -2144,7 +2144,7 @@ the reason is worth knowing: a bundler counts a shared module once, and
 the chain and every pen share the expression capture (`expression.js`)
 and the coded errors under it (`errors.js`, and `@jarenjs/core`'s error
 and object helpers). A consumer importing the chain AND the schema pen
-bundles **<!--fact:bundle.chain.withSchemaPen-->273,512<!--/fact--> bytes** — **<!--fact:bundle.chain.shared-->20,402<!--/fact--> bytes** less than the sum of the
+bundles **<!--fact:bundle.chain.withSchemaPen-->274,038<!--/fact--> bytes** — **<!--fact:bundle.chain.shared-->20,925<!--/fact--> bytes** less than the sum of the
 figure above and [SCHEMA-PEN.md](SCHEMA-PEN.md#7-cost) §7's, which is
 what those shared modules weigh. The probe measures that pair too, so
 the saving is derived like everything else here. What the chain does NOT
