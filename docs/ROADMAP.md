@@ -234,15 +234,6 @@ delete it or fix it.
   accepts it. The walk records the dialect of the places it enters only;
   reading the nearest `$schema` on the way, as such a target's draft is now
   read, is the open work.
-- [ ] **Two readers of a schema's references load the validator through the
-  normalizer.** `@jarenjs/db`'s model (and so `@jarenjs/db/relational`)
-  imports `collectSameDocumentAnchors` and `resolveSameDocumentRef` from
-  `@jarenjs/validate/normalize`, and `@jarenjs/forms` those two and
-  `createSchemaPatternTester`; that subpath loads the validator (it checks
-  defaults) and, through it, `@jarenjs/json`'s query compiler, which
-  bundlers shake out and Node's module loader does not.
-  `@jarenjs/validate/references` serves the same functions and imports
-  neither. Wanted: both import it.
 - [ ] **The validator's own modules load `@jarenjs/json`'s index.**
   `tools.js`, `dollar-data.js` and `content.js` import `compileDataRef`,
   `JSONPOINTER_NOTHING` and `isValidJSON` from `@jarenjs/json`, whose index

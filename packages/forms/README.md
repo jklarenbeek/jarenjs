@@ -6,7 +6,7 @@ Framework-agnostic form generation for JSON Schema. Turns a schema into a render
 2. **Cross field, every keystroke** — visibility, enablement, computed values, and preemptive assertions expressed as [Jaren JSON Query](../json/docs/QUERY-FORMAT.md) documents in an `x-form` annotation, compiled once per model by [`@jarenjs/json`](../json) and evaluated per keystroke as cheap closures.
 3. **Authoritative, on submit** — the complete compiled schema validation with [`@jarenjs/validate`](../validate), which owns `required` combinations, `dependentSchemas`, `if/then/else`, `unevaluatedProperties`, and (via the `$query` keyword) the very same cross-field rules.
 
-No DOM, no framework: render the model with React, Vue, vanilla JS or anything else. Forms never runs the validator — apps wire the authoritative layer themselves; all it imports from `@jarenjs/validate` is two pure pieces of `@jarenjs/validate/normalize`: the same-document `$ref`/`$anchor` resolution and the `pattern` reading. See it in action in the [Jaren playground](https://jklarenbeek.github.io/jarenjs/#/playground).
+No DOM, no framework: render the model with React, Vue, vanilla JS or anything else. Forms never runs the validator — apps wire the authoritative layer themselves; all it imports from `@jarenjs/validate` is two pure pieces of `@jarenjs/validate/references`: the same-document `$ref`/`$anchor` resolution and the `pattern` reading. See it in action in the [Jaren playground](https://jklarenbeek.github.io/jarenjs/#/playground).
 
 ## Usage
 
@@ -118,7 +118,7 @@ depends on it — the schema is the contract.
 
 `validateField(field, value)` returns `[{ keyword, message }]` using `@jarenjs/core` directly:
 
-- **strings**: grapheme-aware `minLength`/`maxLength` (`getStringLength`), `pattern` (`createSchemaPatternTester` from [`@jarenjs/validate/normalize`](../validate), cached: an ECMA-262 source in Unicode mode, so `"/a/"` matches only text that contains `/a/`; a pattern that compiles neither way asserts nothing per keystroke), and 50+ `format` testers from the [`@jarenjs/formats`](../formats) `formatTesters` registry — the same name → predicate table the authoritative validator's format compilers wrap, so both layers accept exactly the same strings
+- **strings**: grapheme-aware `minLength`/`maxLength` (`getStringLength`), `pattern` (`createSchemaPatternTester` from [`@jarenjs/validate/references`](../validate), cached: an ECMA-262 source in Unicode mode, so `"/a/"` matches only text that contains `/a/`; a pattern that compiles neither way asserts nothing per keystroke), and 50+ `format` testers from the [`@jarenjs/formats`](../formats) `formatTesters` registry — the same name → predicate table the authoritative validator's format compilers wrap, so both layers accept exactly the same strings
 - **numbers**: type/integer checks, bounds, `multipleOf`. A number (or a bigint) is a number, as to the validator; a numeric string, an array or a date is a `type` error. Upgrade note: layer 1 used to accept anything that converts to a number
 - **enum/const**: deep equality (`equalsDeep`)
 - **arrays**: `minItems`/`maxItems`/`uniqueItems` (`isUniqueDeepArray`)

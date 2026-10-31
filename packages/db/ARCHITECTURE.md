@@ -418,8 +418,9 @@ schema: `migrate(..., { shadowDriver })` is where the host names one.
 
 Dependency arrows: `core → json → db`, plus `validate → db` for
 exactly ONE reason: the entity walk resolves `$ref` and merges `allOf`
-through the schema resolvers `@jarenjs/validate/normalize` exports for
-other packages to walk schemas with (emit already does). Validation
+through the schema resolvers `@jarenjs/validate/references` exports for
+other packages to walk schemas with (emit reads the same ones through the
+normalizer), a module that loads no validator. Validation
 itself still arrives only through the injected `compileSchema` hook —
 this package never calls the validator. No linq, no app, no view, no
 flow. The linq package couples by contract (`execute(document,

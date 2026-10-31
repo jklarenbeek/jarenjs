@@ -6,7 +6,7 @@
  * hybrid mapping rule is golden-testable rather than folklore.
  *
  * Entity mapping enumerates top-level properties, resolving `$ref`
- * and shallow-merging `allOf` through `@jarenjs/validate/normalize`.
+ * and shallow-merging `allOf` through `@jarenjs/validate/references`.
  * Nested values stay in the JSONB document. A separate recursive guard
  * uses the shared schema-position vocabulary to refuse mapping
  * annotations the entity walk would not read; named map members and
@@ -15,7 +15,7 @@
 
 import {
   collectSameDocumentAnchors, resolveSameDocumentRef,
-} from '@jarenjs/validate/normalize';
+} from '@jarenjs/validate/references';
 import { compileJsonQuery } from '@jarenjs/json/query';
 import { isJsonObject, isJsonContainer, setObjectMember } from '@jarenjs/core/object';
 

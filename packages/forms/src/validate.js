@@ -21,7 +21,7 @@
 import {
   getStringLength,
 } from '@jarenjs/core/string';
-import { createSchemaPatternTester } from '@jarenjs/validate/normalize';
+import { createSchemaPatternTester } from '@jarenjs/validate/references';
 
 import {
   equalsDeep,

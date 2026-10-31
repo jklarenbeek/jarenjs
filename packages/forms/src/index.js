@@ -10,7 +10,7 @@
  * compiled Jaren JSON Queries, before the complete compiled schema
  * validation runs (app-wired; forms never RUNS the validator — its imports
  * from that package are the pure same-document ref resolution and the
- * `pattern` reading in `@jarenjs/validate/normalize`). The
+ * `pattern` reading in `@jarenjs/validate/references`). The
  * data helpers keep form values in plain JSON semantics, addressed by
  * JSON pointer through the @jarenjs/json compiled pointer engine.
  */

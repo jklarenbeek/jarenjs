@@ -21,7 +21,7 @@ import { encodeJSONPointerSegment } from '@jarenjs/json/pointer';
 import {
   collectSameDocumentAnchors,
   resolveSameDocumentRef,
-} from '@jarenjs/validate/normalize';
+} from '@jarenjs/validate/references';
 
 import {
   getFormatInfo,
