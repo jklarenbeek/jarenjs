@@ -1982,9 +1982,13 @@ only SQLite. Every planner lists the schema objects it names, the engine's own
 relations included, and `refuseNameCollisions` holds them to one namespace
 (ASCII case folded): each planner for its table, the store for the whole model.
 
-`dialects/sqlite-relational.js` owns the explicit SQLite expression and statement
-compiler; `dialects/sqlite-schema.js` reuses it for ordered tables, indexes and
-triggers, sharing its column/reference renderer with native ADD COLUMN.
+`relational.js` owns the structural expression and statement compiler, and
+`dialects/sqlite-relational.js` and `dialects/postgres-relational.js` the
+vocabulary each engine admits (functions, types, collations, PostgreSQL's
+operator spellings and the collation under which its `lower` folds ASCII
+letters only); `dialects/sqlite-schema.js` reuses the compiler for ordered
+tables, indexes and triggers, sharing its column/reference renderer with
+native ADD COLUMN.
 `table-migration.js` owns reviewed source/settings guards for additive/object
 changes and source/target guards for native copying
 and preservation checks, with catalog/pragma spellings in the SQLite dialect.

@@ -871,26 +871,6 @@ what each does is its own documentation's job
   [NOT] TRUE` — is not compared, so an index recreated under another such
   condition or key opens as the declared one, where SQLite compares the CREATE
   text (MODEL-FORMAT §12). Wanted: read those forms into the condition form.
-- [ ] **`sql.binary` keeps two operands and drops the rest.** The relational
-  builder `sql.binary(op, left, right)` ignores every further argument, so
-  `sql.binary('AND', a, b, c)` compiles to `a AND b` and `sql.binary('OR', x,
-  y, z)` to `x OR y`: a predicate is lost and nothing reports it (a node
-  built by hand with an extra member is refused `JD0038`). Wanted: n operands
-  for the associative `AND`/`OR`, and a coded refusal of a third operand to
-  every other operator.
-- [ ] **The relational grammar cannot match a literal substring.** `LIKE`
-  takes no `ESCAPE`, so `%` and `_` in a needle stay wildcards, and the
-  SQLite function set has no `instr` (refused `JD0038`), so a document cannot
-  match `100%` as text on SQLite or portably (PostgreSQL alone can, with a
-  backslash-escaped `LIKE` needle). Wanted: `LIKE ... ESCAPE` on both
-  engines, or a portable contains, and `instr`/`strpos` in the function sets.
-- [ ] **The relational grammar's catalog reads are undocumented.** A table's
-  columns, types, nullability and key positions read through `{ from:
-  'pragma_table_info', columns: {...}, where: <arg = table> }` on SQLite (the
-  eponymous table and its hidden `arg` column), at the root and inside a
-  transaction view, and through a `pg_attribute` join on PostgreSQL, but no
-  document says so, and the call spellings (`from: { table, args }`,
-  `sql.call('pragma_table_info', ...)`) are refused `JD0038`.
 - [ ] **Under `transactions: 'strict'`, a job's settlement treats a contended
   gate as a failed attempt.** A handler that returns while another root
   transaction holds the store's connection has its `complete()` refused
@@ -938,6 +918,12 @@ what each does is its own documentation's job
   len: 0 } }` (the date-part method's `length`) where a member named `day` was
   meant; `name` and `toString()` alike. Refusing them is a stricter refusal (a
   minor).
+- [ ] **`sql.call` lets an option replace the call's own members.** The
+  relational builder spreads `options` over the node it builds, so an option
+  named `name` or `args` replaces that member: `sql.call('lower', [1], { name:
+  'upper' })` plans `UPPER(?)`, and `{ distinct: true, args: [b] }` counts `b`.
+  Wanted: the options checked, as `sql.like` and `sql.contains` check theirs
+  (a stricter refusal, so a minor).
 
 ## Lexical search (cross-package)
 

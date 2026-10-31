@@ -5,7 +5,7 @@ export type SqlInput = SqlValue | SqlExpression;
 export type SqlOperator = '=' | '<>' | '<' | '<=' | '>' | '>=' | 'IS' | 'IS NOT'
   | '+' | '-' | '*' | '/' | '%' | '||' | 'AND' | 'OR' | 'LIKE' | 'NOT LIKE' | 'GLOB';
 export type SqlFunction = 'coalesce' | 'nullif' | 'trim' | 'ltrim' | 'rtrim' | 'lower' | 'upper'
-  | 'length' | 'abs' | 'round' | 'typeof' | 'json_extract' | 'json_valid' | 'json_type'
+  | 'length' | 'instr' | 'strpos' | 'abs' | 'round' | 'typeof' | 'json_extract' | 'json_valid' | 'json_type'
   | 'count' | 'sum' | 'total' | 'avg' | 'min' | 'max'
   | 'date' | 'time' | 'datetime' | 'julianday' | 'unixepoch' | 'strftime'
   | 'jsonb_typeof' | 'json_typeof' | 'octet_length';
@@ -16,7 +16,8 @@ export type SqlExpression =
   | { readonly $sql: 'column'; readonly name: string; readonly table?: string }
   | { readonly $sql: 'value'; readonly value: SqlValue }
   | { readonly $sql: 'param'; readonly name: string }
-  | { readonly $sql: 'binary'; readonly op: SqlOperator; readonly left: SqlInput; readonly right: SqlInput }
+  | { readonly $sql: 'binary'; readonly op: SqlOperator; readonly left: SqlInput; readonly right: SqlInput; readonly escape?: string }
+  | { readonly $sql: 'contains'; readonly value: SqlInput; readonly text: SqlInput; readonly caseInsensitive?: boolean }
   | { readonly $sql: 'not'; readonly value: SqlInput }
   | { readonly $sql: 'in'; readonly value: SqlInput; readonly values: readonly SqlInput[] | SqlSelect; readonly negate?: boolean }
   | { readonly $sql: 'call'; readonly name: SqlFunction; readonly args: readonly SqlInput[]; readonly distinct?: boolean }
@@ -105,7 +106,19 @@ export declare const sql: {
   column(name: string, table?: string): SqlExpression;
   value(value: SqlValue): SqlExpression;
   param(name: string): SqlExpression;
+  /** `AND` and `OR` take any number of operands, nested from the left as SQL
+   * reads `a AND b AND c` (within the 64-level nesting limit); every other
+   * operator takes two, and a third is refused `JD0038`. */
+  binary(op: 'AND' | 'OR', left: SqlInput, right: SqlInput, ...more: SqlInput[]): SqlExpression;
   binary(op: SqlOperator, left: SqlInput, right: SqlInput): SqlExpression;
+  /** `LIKE` (`NOT LIKE` when `negate`); a one-character `escape` makes `%`,
+   * `_` and itself literal in `pattern`. Case follows each engine's LIKE:
+   * SQLite folds ASCII letters, PostgreSQL folds none. */
+  like(value: SqlInput, pattern: SqlInput, options?: { readonly escape?: string; readonly negate?: boolean }): SqlExpression;
+  /** Whether `text` occurs in `value`, each character compared as itself
+   * (`%` and `_` included), with one answer on every engine: case-sensitive,
+   * or with `caseInsensitive` folding ASCII letters and no others. */
+  contains(value: SqlInput, text: SqlInput, options?: { readonly caseInsensitive?: boolean }): SqlExpression;
   not(value: SqlInput): SqlExpression;
   in(value: SqlInput, values: readonly SqlInput[] | SqlSelect, negate?: boolean): SqlExpression;
   call(name: SqlFunction, args: readonly SqlInput[], options?: { distinct?: boolean }): SqlExpression;

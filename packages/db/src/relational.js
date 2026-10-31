@@ -34,8 +34,37 @@ export const sql = Object.freeze({
   value: (value) => node('value', { value }),
   /** @param {string} name */
   param: (name) => node('param', { name }),
-  /** @param {'='|'<>'|'<'|'<='|'>'|'>='|'IS'|'IS NOT'|'+'|'-'|'*'|'/'|'%'|'||'|'AND'|'OR'|'LIKE'|'NOT LIKE'|'GLOB'} op @param {any} left @param {any} right */
-  binary: (op, left, right) => node('binary', { op, left, right }),
+  /** Two operands. `AND` and `OR`, being associative, take any number,
+   * nested from the left as SQL reads `a AND b AND c` (so the 64-level
+   * nesting limit bounds the count); every other operator refuses a third
+   * (`JD0038`), which would otherwise be left out of the statement.
+   * @param {'='|'<>'|'<'|'<='|'>'|'>='|'IS'|'IS NOT'|'+'|'-'|'*'|'/'|'%'|'||'|'AND'|'OR'|'LIKE'|'NOT LIKE'|'GLOB'} op
+   * @param {any} left @param {any} right @param {...any} more */
+  binary: (op, left, right, ...more) => {
+    if (more.length && op !== 'AND' && op !== 'OR')
+      fail(`sql.binary('${String(op)}') takes two operands, not ${more.length + 2}: an operand past the second would be left out of the statement; nest the expression (only AND and OR take more)`);
+    return more.reduce((tree, operand) => node('binary', { op, left: tree, right: operand }), node('binary', { op, left, right }));
+  },
+  /** `LIKE` (`NOT LIKE` when `negate`), with an optional one-character
+   * `escape` that makes `%`, `_` and itself literal in `pattern`. Case
+   * follows each engine's LIKE: SQLite folds ASCII letters, PostgreSQL
+   * folds none.
+   * @param {any} value @param {any} pattern @param {{escape?: string, negate?: boolean}} [options] */
+  like: (value, pattern, options = {}) => {
+    check(options, ['escape', 'negate'], 'LIKE options');
+    if (options.negate !== undefined && typeof options.negate !== 'boolean') fail('LIKE negate must be boolean');
+    return node('binary', { op: options.negate ? 'NOT LIKE' : 'LIKE', left: value, right: pattern,
+      ...(options.escape === undefined ? {} : { escape: options.escape }) });
+  },
+  /** Whether `text` occurs in `value`, every character compared as itself
+   * (`%` and `_` included), with one answer on every engine: case-sensitive,
+   * or with `caseInsensitive` folding ASCII letters and no others.
+   * @param {any} value @param {any} text @param {{caseInsensitive?: boolean}} [options] */
+  contains: (value, text, options = {}) => {
+    check(options, ['caseInsensitive'], 'contains options');
+    return node('contains', { value, text,
+      ...(options.caseInsensitive === undefined ? {} : { caseInsensitive: options.caseInsensitive }) });
+  },
   /** @param {any} value */
   not: (value) => node('not', { value }),
   /** @param {any} value @param {any[]|object} values @param {boolean} [negate] */
@@ -80,6 +109,13 @@ export function relationalEmitter(options = {}) {
     if (typeof value === 'boolean') return dialect.booleanLiteral(value);
     return String(value);
   };
+  // both engines take exactly one character (PostgreSQL's empty escape, which
+  // turns escaping off, is an error on SQLite)
+  const likeEscape = (value) => {
+    if (value.op !== 'LIKE' && value.op !== 'NOT LIKE') return fail('ESCAPE applies to LIKE and NOT LIKE only');
+    if (typeof value.escape !== 'string' || [...value.escape].length !== 1 || value.escape === '\0') return fail('a LIKE escape is one character other than NUL');
+    return literal(value.escape);
+  };
   const expr = (value, depth = 0) => {
     if (depth > 64) return fail('SQL expression nesting exceeds 64');
     if (!isJsonObject(value) || value instanceof Uint8Array) return literal(value);
@@ -94,9 +130,20 @@ export function relationalEmitter(options = {}) {
         if (options.inline || !own(options.externals ?? {}, value.name)) return fail(`missing or unavailable SQL parameter '${value.name}'`);
         return literal(options.externals[value.name]);
       case 'binary':
-        check(value, ['$sql', 'op', 'left', 'right'], 'binary expression');
+        check(value, ['$sql', 'op', 'left', 'right', 'escape'], 'binary expression');
         if (!binary.has(value.op) || strategy?.refusedOperators.includes(value.op)) return fail('unsupported SQL operator');
-        return `(${next(value.left)} ${strategy?.operators[value.op] ?? value.op} ${next(value.right)})`;
+        return `(${next(value.left)} ${strategy?.operators[value.op] ?? value.op} ${next(value.right)}${
+          value.escape === undefined ? '' : ` ESCAPE ${likeEscape(value)}`})`;
+      case 'contains': {
+        check(value, ['$sql', 'value', 'text', 'caseInsensitive'], 'contains');
+        if (value.caseInsensitive !== undefined && typeof value.caseInsensitive !== 'boolean') fail('contains caseInsensitive must be boolean');
+        // the dialect's own substring test, the one query predicates use;
+        // folded, each side is lowered under the collation in which `lower`
+        // folds ASCII letters only, which SQLite's always does
+        const side = (term) => next(value.caseInsensitive
+          ? sql.call('lower', [strategy?.asciiCase ? sql.collate(term, strategy.asciiCase) : term]) : term);
+        return `(${dialect.strContains(side(value.value), side(value.text))})`;
+      }
       case 'not': check(value, ['$sql', 'value'], 'not'); return `(NOT ${next(value.value)})`;
       case 'in': {
         check(value, ['$sql', 'value', 'values', 'negate'], 'in');

@@ -7,6 +7,14 @@ const table = defineTable({ name: 'images', columns: [
   { name: 'id', type: 'INTEGER', identity: 'autoincrement' }, { name: 'data', type: 'BLOB' },
 ], primaryKey: ['id'], indexes: [{ name: 'has_data', terms: [{ by: sql.column('id') }], where: sql.binary('IS NOT', sql.column('data'), null) }] });
 const query: SqlSelect = { from: 'images', columns: { id: sql.column('id'), data: sql.column('data') } };
+// AND and OR take any number of operands; any other operator takes two
+const premises: SqlSelect = { from: 'images', where: sql.binary('AND', sql.binary('>', sql.column('id'), 0),
+  sql.binary('IS NOT', sql.column('data'), null), sql.contains(sql.column('name'), '100%', { caseInsensitive: true })) };
+// @ts-expect-error a third operand to a comparison
+sql.binary('=', sql.column('id'), 1, 2);
+const literal: SqlSelect = { from: 'images', where: sql.like(sql.column('name'), '%100!%%', { escape: '!', negate: false }),
+  columns: { at: sql.call('instr', [sql.column('name'), '100%']), pg: sql.call('strpos', [sql.column('name'), '100%']) } };
+void premises; void literal;
 async function example() {
   const db = await relationalNodeDriver().open(':memory:');
   const engine = relational(db);

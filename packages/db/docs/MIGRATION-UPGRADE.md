@@ -3641,6 +3641,38 @@ trigger undeclared). Drop such a rule through a planned migration
 **Downgrade.** Nothing a store writes changed: the previous release opens,
 reads, queries and plans every store this one opens, as before.
 
+## 65. `sql.binary` keeps every operand, and text matches a literal substring on both engines
+
+- `sql.binary(op, left, right, …)` built its node from the first two operands
+  and left out the rest, so `sql.binary('AND', a, b, c)` compiled to `a AND b`:
+  the third predicate was lost, and nothing reported it. `AND` and `OR` now
+  keep every operand, nested from the left (`((a AND b) AND c)`, as SQL reads
+  `a AND b AND c`). Every other operator refuses a third operand, an explicit
+  `undefined` included, with `JD0038` when the expression is built. A builder
+  passed straight to `map` or `reduce` with its operator bound
+  (`values.map(sql.binary.bind(null, '=', column))`) received the callback's
+  index and array as extra operands, which it used to drop: pass it a
+  function that gives it two. A call with two operands builds the same node,
+  and plans the same SQL, as before
+  ([SQLITE-RELATIONAL](SQLITE-RELATIONAL.md#choose-the-expression-semantics)).
+- A database an earlier release created under a model whose index condition
+  passed `sql.binary` a third operand holds the index without that operand.
+  It is `JD0002` at open, and the message prints both statements: drop the
+  index and create it as the model declares it.
+- `sql.like(value, pattern, { escape, negate })` writes `LIKE … ESCAPE`, and
+  `sql.contains(value, text, { caseInsensitive })` matches a literal substring
+  with one answer on both engines. The function sets gain `instr` (SQLite)
+  and `strpos` (PostgreSQL).
+
+**Downgrade.** Every statement an expression with two operands plans is
+unchanged, so the previous release opens, reads, queries, introspects and
+plans every store this one opens, unless the store's model declares a schema
+expression with `sql.contains`, with `sql.like` and an escape, or with `AND`
+or `OR` over more than two operands. The previous release has no
+`sql.contains` or `sql.like` and refuses the nodes they build (`JD0038`).
+It builds `AND` and `OR` from the first two operands, so an index this
+release created under such a condition is `JD0002` at open.
+
 ## Measured costs
 
 Exact identity stores complete canonical documents and model endpoints, so

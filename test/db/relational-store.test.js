@@ -175,6 +175,29 @@ for (const [host, driverOf] of HOSTS) {
       }
       finally { await close(); }
     });
+
+    it('reads any table\'s physical columns from the catalog, at the root and inside a transaction: pragma_table_info as a table', async () => {
+      const { store, raw, close } = await fixture(await driverOf());
+      try {
+        await raw.exec('CREATE TABLE legacy(a TEXT, b INTEGER NOT NULL)');
+        // the eponymous table, filtered on its hidden `arg` column: the table whose columns it lists
+        const columns = (/** @type {string} */ table) => ({ from: 'pragma_table_info',
+          columns: { name: c('name'), type: c('type'), notnull: c('notnull'), pk: c('pk') }, where: b('=', c('arg'), table), orderBy: [{ by: c('cid') }] });
+        const read = async (/** @type {any} */ engine, /** @type {string} */ table) =>
+          (await engine.all(columns(table))).map((/** @type {any} */ row) => ({ ...row }));
+        const legacy = [{ name: 'a', type: 'TEXT', notnull: 0, pk: 0 }, { name: 'b', type: 'INTEGER', notnull: 1, pk: 0 }];
+        const items = [{ name: 'id', type: 'INTEGER', notnull: 0, pk: 1 }, { name: 'label', type: 'TEXT', notnull: 0, pk: 0 }];
+        assert.deepEqual(await read(store.relational, 'legacy'), legacy, 'a table without a key, which introspect() leaves out');
+        assert.deepEqual(await read(store.relational, 'items'), items);
+        assert.deepEqual((await read(store.relational, 'B')).filter((row) => row.pk > 0).map((row) => row.name), ['id'], 'an entity\'s own table');
+        assert.deepEqual(await read(store.relational, 'absent'), []);
+        assert.deepEqual(await store.transaction(async (tx) => [await read(tx.relational, 'legacy'), await read(tx.relational, 'items')]), [legacy, items]);
+        // the call spellings are not the grammar's
+        await assert.rejects(store.relational.all({ from: /** @type {any} */ ({ table: 'pragma_table_info', args: ['legacy'] }) }), coded('JD0038'));
+        await assert.rejects(store.relational.all({ columns: { n: sql.call(/** @type {any} */ ('pragma_table_info'), ['legacy']) } }), coded('JD0038'));
+      }
+      finally { await close(); }
+    });
   });
 }
 
@@ -378,6 +401,36 @@ describe('store.relational on PostgreSQL', { skip: (!url && 'JAREN_PG_URL is not
       assert.equal(wrote, false, 'the write waits for the cursor');
       await cursor.return();
       assert.equal((await pending).affected, 1);
+    }
+    finally { await store.close(); await pool.end(); }
+  });
+
+  it('reads any table\'s physical columns from the catalog, at the root and inside a transaction: pg_attribute joined to its table and schema', async () => {
+    const { postgresDriver } = await import('@jarenjs/db/postgres');
+    const pool = new pg.Pool({ connectionString: url, max: 1 });
+    const driver = postgresDriver(pool, { schema });
+    /** @type {any} */
+    let raw;
+    const store = await openStore(MODEL, { driver: { ...driver, open: async (/** @type {any[]} */ ...args) => (raw = await driver.open(...args)) } });
+    try {
+      // a dropped column keeps its number, so `position` is the column's own number, not a count
+      await raw.exec('CREATE TABLE legacy(a text, gone integer, b integer NOT NULL); ALTER TABLE legacy DROP COLUMN gone');
+      const catalog = (/** @type {string} */ table) => ({
+        from: { table: 'pg_attribute', as: 'a' },
+        joins: [{ source: { table: 'pg_class', as: 't' }, on: b('=', c('attrelid', 'a'), c('oid', 't')) },
+          { source: { table: 'pg_namespace', as: 's' }, on: b('=', c('relnamespace', 't'), c('oid', 's')) }],
+        columns: { name: sql.cast(c('attname', 'a'), 'TEXT'), notnull: c('attnotnull', 'a'), position: c('attnum', 'a') },
+        where: b('AND', b('=', sql.cast(c('nspname', 's'), 'TEXT'), schema), b('=', sql.cast(c('relname', 't'), 'TEXT'), table),
+          b('>', c('attnum', 'a'), 0), sql.not(c('attisdropped', 'a'))),
+        orderBy: [{ by: c('attnum', 'a') }],
+      });
+      const read = async (/** @type {any} */ engine, /** @type {string} */ table) =>
+        (await engine.all(catalog(table))).map((/** @type {any} */ row) => ({ ...row }));
+      const legacy = [{ name: 'a', notnull: 0, position: 1 }, { name: 'b', notnull: 1, position: 3 }];
+      assert.deepEqual(await read(store.relational, 'legacy'), legacy, 'a table without a key');
+      assert.deepEqual((await read(store.relational, 'B'))[0], { name: 'id', notnull: 1, position: 1 }, 'an entity\'s own table');
+      assert.deepEqual(await read(store.relational, 'absent'), []);
+      assert.deepEqual(await store.transaction(async (tx) => read(tx.relational, 'legacy')), legacy);
     }
     finally { await store.close(); await pool.end(); }
   });

@@ -5,11 +5,14 @@ export const postgresRelational = Object.freeze({
   refusedOperators: Object.freeze(['GLOB']),
   operators: Object.freeze({ IS: 'IS NOT DISTINCT FROM', 'IS NOT': 'IS DISTINCT FROM' }),
   distinct: 'IS DISTINCT FROM',
-  functions: new Set(['coalesce', 'nullif', 'trim', 'ltrim', 'rtrim', 'lower', 'upper', 'length',
+  functions: new Set(['coalesce', 'nullif', 'trim', 'ltrim', 'rtrim', 'lower', 'upper', 'length', 'strpos',
     'abs', 'round', 'count', 'sum', 'avg', 'min', 'max', 'jsonb_typeof', 'json_typeof', 'octet_length']),
   types: new Set(['SMALLINT', 'INTEGER', 'BIGINT', 'REAL', 'DOUBLE PRECISION', 'TEXT', 'BYTEA', 'NUMERIC',
     'BOOLEAN', 'UUID', 'JSON', 'JSONB', 'DATE', 'TIMESTAMP', 'TIMESTAMPTZ']),
   collations: new Set(['C', 'POSIX']),
+  // `lower` under this collation folds ASCII letters only, as SQLite's does,
+  // whatever collation the database or the column declares
+  asciiCase: 'C',
   // COALESCE, NULLIF and TRIM are parser expressions, not catalog functions.
   functionName: (name) => ['coalesce', 'nullif', 'trim'].includes(name)
     ? name.toUpperCase() : `pg_catalog.${name}`,

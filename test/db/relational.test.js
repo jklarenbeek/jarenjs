@@ -187,3 +187,114 @@ it('driver failures are classified on every path: execute, reads and cursor pull
   assert.throws(() => r.get(malformed), classified('error', /malformed JSON/));
   assert.throws(() => r.iterate(malformed).next(), classified('error', /malformed JSON/));
 }));
+
+const OPERATORS = /** @type {const} */ (['=', '<>', '<', '<=', '>', '>=', 'IS', 'IS NOT', '+', '-', '*', '/', '%', '||', 'AND', 'OR', 'LIKE', 'NOT LIKE', 'GLOB']);
+const refused = (/** @type {string} */ text) => (/** @type {any} */ error) => error.code === 'JD0038' && error.message.includes(text);
+/** The builder as an untyped caller reaches it: any count of arguments. */
+const loose = /** @type {(...args: any[]) => any} */ (b);
+
+it('sql.binary keeps every operand: AND and OR nest any number from the left, every other operator refuses a third (JD0038)', async () => fixture((db, r) => {
+  // every two-operand call builds the node and plans the SQL it did before
+  for (const op of OPERATORS) {
+    const node = b(op, c('x'), 2);
+    assert.deepEqual(Object.keys(node), ['$sql', 'op', 'left', 'right']);
+    assert.deepEqual(node, { $sql: 'binary', op, left: { $sql: 'column', name: 'x' }, right: 2 });
+    assert.deepEqual(planRelational({ columns: { v: node } }), { sql: `SELECT ("x" ${op} ?) AS "v"`, params: [2], access: 'read' });
+  }
+  // a missing operand still builds the node it did, refused when compiled
+  assert.deepEqual(loose('AND', c('x')), { $sql: 'binary', op: 'AND', left: { $sql: 'column', name: 'x' }, right: undefined });
+  assert.throws(() => planRelational({ columns: { v: loose('AND', c('x')) } }), refused('SQL values are'));
+  const key = (/** @type {any} */ value) => b('=', c('key'), value);
+  assert.deepEqual(b('AND', key('a'), key('b'), key('c')), b('AND', b('AND', key('a'), key('b')), key('c')));
+  assert.deepEqual(b('OR', 1, 2, 3, 4), { $sql: 'binary', op: 'OR',
+    left: { $sql: 'binary', op: 'OR', left: { $sql: 'binary', op: 'OR', left: 1, right: 2 }, right: 3 }, right: 4 });
+  assert.deepEqual(planRelational({ from: 't', columns: { key: c('key') }, where: b('AND', key('a'), key('a'), key('zzz')) }), {
+    sql: 'SELECT "key" AS "key" FROM "t" WHERE ((("key" = ?) AND ("key" = ?)) AND ("key" = ?))', params: ['a', 'a', 'zzz'], access: 'read' });
+  // the nesting limit bounds the count: 64 comparisons nest within it, a 65th does not
+  planRelational({ from: 't', where: loose('AND', ...Array(64).fill(key('a'))) });
+  assert.throws(() => planRelational({ from: 't', where: loose('AND', ...Array(65).fill(key('a'))) }), refused('nesting exceeds 64'));
+  for (const op of OPERATORS.filter((o) => o !== 'AND' && o !== 'OR'))
+    assert.throws(() => loose(op, 1, 2, 3), refused(`sql.binary('${op}') takes two operands, not 3: an operand past the second would be left out`));
+  assert.throws(() => loose('<', 1, 2, 3, 4), refused("sql.binary('<') takes two operands, not 4"));
+  assert.throws(() => loose('=', 1, 2, undefined), refused("sql.binary('=') takes two operands, not 3"), 'an explicit extra argument counts');
+
+  db.exec("CREATE TABLE t(key TEXT PRIMARY KEY); INSERT INTO t VALUES ('a'), ('b'), ('c')");
+  const rows = (/** @type {any} */ where) => r.all({ from: 't', columns: { key: c('key') }, where, orderBy: [{ by: c('key') }] }).map((row) => row.key);
+  const native = (/** @type {string} */ where) => db.prepare(`SELECT key FROM t WHERE ${where} ORDER BY key`).all([]).map((row) => row.key);
+  // the answers a dropped operand gave: AND(a, a, zzz) matched a, OR(x, y, a) matched nothing
+  assert.deepEqual(rows(b('AND', key('a'), key('a'), key('zzz'))), []);
+  assert.deepEqual(rows(b('OR', key('x'), key('y'), key('a'))), ['a']);
+  // the builder, the node nested by hand and SQLite's own reading of the flat predicate agree
+  for (const [built, nested, text] of /** @type {[any, any, string][]} */ ([
+    [b('AND', key('a'), key('a'), key('zzz')), b('AND', b('AND', key('a'), key('a')), key('zzz')), "key = 'a' AND key = 'a' AND key = 'zzz'"],
+    [b('OR', key('x'), key('y'), key('a')), b('OR', b('OR', key('x'), key('y')), key('a')), "key = 'x' OR key = 'y' OR key = 'a'"],
+    [b('OR', key('a'), key('zz'), key('c'), key('b')), b('OR', b('OR', b('OR', key('a'), key('zz')), key('c')), key('b')), "key = 'a' OR key = 'zz' OR key = 'c' OR key = 'b'"],
+    [b('AND', b('<>', c('key'), 'a'), b('<>', c('key'), 'b'), b('IS NOT', c('key'), null)), b('AND', b('AND', b('<>', c('key'), 'a'), b('<>', c('key'), 'b')), b('IS NOT', c('key'), null)),
+      "key <> 'a' AND key <> 'b' AND key IS NOT NULL"],
+    [b('OR', b('AND', key('a'), key('a'), key('a')), key('c'), b('AND', key('b'), key('zzz'))),
+      b('OR', b('OR', b('AND', b('AND', key('a'), key('a')), key('a')), key('c')), b('AND', key('b'), key('zzz'))),
+      "(key = 'a' AND key = 'a' AND key = 'a') OR key = 'c' OR (key = 'b' AND key = 'zzz')"],
+  ])) {
+    assert.deepEqual(rows(built), rows(nested), text);
+    assert.deepEqual(rows(built), native(text), text);
+  }
+  // three-valued logic: every combination of true, false and NULL as SQLite reads `x AND y AND z`
+  const truth = [1, 0, null];
+  for (const op of /** @type {const} */ (['AND', 'OR'])) for (const x of truth) for (const y of truth) for (const z of truth)
+    assert.equal(r.get({ columns: { v: b(op, x, y, z) } }).v, db.prepare(`SELECT ? ${op} ? ${op} ? AS v`).get([x, y, z]).v, `${x} ${op} ${y} ${op} ${z}`);
+}));
+
+it('a literal substring matches as text: sql.contains, LIKE with an ESCAPE, and instr', async () => fixture((db, r) => {
+  const TITLES = ['a 100% b', 'a 1000 b', 'x100_y', 'a_b', 'aXb', 'A_B', 'Éa_b', 'éA_B'];
+  db.exec('CREATE TABLE t(n INTEGER PRIMARY KEY, title TEXT)');
+  for (const title of [...TITLES, null]) r.execute({ op: 'insert', table: 't', values: { title } });
+  const t = c('title');
+  const rows = (/** @type {any} */ where) => r.all({ from: 't', columns: { title: t }, where, orderBy: [{ by: c('n') }] }).map((row) => row.title);
+  assert.deepEqual(rows(sql.contains(t, '100%')), ['a 100% b']);
+  assert.deepEqual(rows(sql.contains(t, 'a_b')), ['a_b', 'Éa_b']);
+  assert.deepEqual(rows(sql.contains(t, 'a_b', { caseInsensitive: true })), ['a_b', 'A_B', 'Éa_b', 'éA_B']);
+  assert.deepEqual(rows(sql.contains(t, 'éa', { caseInsensitive: true })), ['éA_B'], 'only ASCII letters fold');
+  // the oracle: a substring as JavaScript reads one, ASCII letters folded on request
+  const ascii = (/** @type {string} */ s) => s.replace(/[A-Z]/g, (ch) => ch.toLowerCase());
+  for (const needle of ['', '%', '_', '100%', '%%', 'a_b', 'A_B', 'X', 'é', 'É', ' 1000 ', 'a 100% b!'])
+    for (const caseInsensitive of [false, true])
+      assert.deepEqual(rows(sql.contains(t, needle, { caseInsensitive })),
+        TITLES.filter((title) => (caseInsensitive ? ascii(title).includes(ascii(needle)) : title.includes(needle))), `'${needle}' ${caseInsensitive}`);
+  assert.deepEqual(planRelational({ columns: { v: sql.contains(t, 'x') } }).sql, 'SELECT (instr("title", ?) > 0) AS "v"');
+  assert.deepEqual(planRelational({ columns: { v: sql.contains(t, 'x', { caseInsensitive: true }) } }).sql,
+    'SELECT (instr(LOWER("title"), LOWER(?)) > 0) AS "v"');
+
+  // without an escape `%` and `_` stay wildcards; with one they are text, and SQLite's LIKE folds ASCII letters
+  assert.deepEqual(sql.like(t, '%100%%'), b('LIKE', t, '%100%%'));
+  assert.deepEqual(sql.like(t, '%100%%', { negate: true }), b('NOT LIKE', t, '%100%%'));
+  assert.deepEqual(rows(sql.like(t, '%100%%')), ['a 100% b', 'a 1000 b', 'x100_y']);
+  assert.deepEqual(rows(sql.like(t, '%100!%%', { escape: '!' })), ['a 100% b']);
+  assert.deepEqual(rows(sql.like(t, '%a!_b%', { escape: '!' })), ['a_b', 'A_B', 'Éa_b', 'éA_B']);
+  assert.deepEqual(rows(sql.like(t, '%a!_b%', { escape: '!', negate: true })), ['a 100% b', 'a 1000 b', 'x100_y', 'aXb']);
+  assert.deepEqual(rows(sql.like(t, '%a!', { escape: '!' })), [], 'a pattern ending in its escape matches nothing on SQLite');
+  assert.deepEqual(planRelational({ from: 't', columns: { title: t }, where: sql.like(t, '%100!%%', { escape: '!' }) }),
+    { sql: 'SELECT "title" AS "title" FROM "t" WHERE ("title" LIKE ? ESCAPE ?)', params: ['%100!%%', '!'], access: 'read' });
+  assert.equal(r.get({ columns: { at: call('instr', ['a 100% b', '100%']) } }).at, 3);
+  // schema expressions write the escape and the needle as literals
+  const codes = planTable(defineTable({ name: 'codes', columns: [{ name: 'code', type: 'TEXT',
+    check: b('AND', sql.like(c('code'), 'A!_%', { escape: '!' }), sql.contains(c('code'), '%', { caseInsensitive: true })) }] }));
+  assert.match(codes.createSql[0], /CHECK \(\(\("code" LIKE 'A!_%' ESCAPE '!'\) AND \(instr\(LOWER\("code"\), LOWER\('%'\)\) > 0\)\)\)/);
+  for (const text of codes.createSql) db.exec(text);
+  r.execute({ op: 'insert', table: 'codes', values: { code: 'A_5%' } });
+  for (const code of ['AB5%', 'A_5']) assert.throws(() => r.execute({ op: 'insert', table: 'codes', values: { code } }), /CHECK/, code);
+
+  for (const [node, text] of /** @type {[any, string][]} */ ([
+    [{ $sql: 'binary', op: '=', left: t, right: 'x', escape: '!' }, 'ESCAPE applies to LIKE and NOT LIKE only'],
+    [sql.like(t, 'x', { escape: '' }), 'one character'],
+    [sql.like(t, 'x', { escape: '!!' }), 'one character'],
+    [sql.like(t, 'x', { escape: /** @type {any} */ (1) }), 'one character'],
+    [sql.like(t, 'x', { escape: '\0' }), 'one character other than NUL'],
+    [sql.contains(t, 'x', { caseInsensitive: /** @type {any} */ ('yes') }), 'caseInsensitive must be boolean'],
+    [{ $sql: 'contains', value: t, text: 'x', nocase: true }, "unknown contains member 'nocase'"],
+    [call(/** @type {any} */ ('strpos'), [t, 'x']), 'unsupported SQL function'],
+  ])) assert.throws(() => planRelational({ columns: { v: node } }), refused(text), text);
+  // the builders refuse an option they do not know rather than leave it out
+  assert.throws(() => sql.like(t, 'x', /** @type {any} */ ({ escpae: '!' })), refused("unknown LIKE options member 'escpae'"));
+  assert.throws(() => sql.like(t, 'x', /** @type {any} */ ({ negate: 'yes' })), refused('LIKE negate must be boolean'));
+  assert.throws(() => sql.contains(t, 'x', /** @type {any} */ ({ nocase: true })), refused("unknown contains options member 'nocase'"));
+}));

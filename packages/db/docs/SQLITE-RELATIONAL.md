@@ -57,9 +57,9 @@ the result. SQLite may itself sort or build temporary query structures.
 Selections support table and subquery sources, inner/left/cross joins, correlated
 `sql.scalar`/`sql.exists`, CASE, IN/NOT IN, DISTINCT, grouped and distinct
 aggregates, HAVING, UNION/UNION ALL and ordered windows. The declaration file
-lists the closed operators and functions, including trim/coalesce, LIKE, JSON
-extraction/type inspection, casts and SQLite date functions. Neither arbitrary function names
-nor a raw-expression escape hatch is accepted.
+lists the closed operators and functions, including trim/coalesce, LIKE, substring
+position (`instr`), JSON extraction/type inspection, casts and SQLite date functions.
+Neither arbitrary function names nor a raw-expression escape hatch is accepted.
 
 `sql.call('json_type', [document, path])` distinguishes a missing path (SQL NULL)
 from JSON null (text `'null'`) and reports SQLite's native scalar/container type
@@ -67,6 +67,37 @@ names. Omitting the path inspects the whole document. SQL-null input stays null;
 malformed JSON raises SQLite's error. It composes with CASE and synchronous
 cursors without decoding or rewriting the original column. See
 [SQLite JSON type inspection](https://www.sqlite.org/json1.html#the_json_type_function).
+
+`sql.binary(op, left, right)` takes two operands. `AND` and `OR`, being
+associative, take any number: `sql.binary('AND', a, b, c)` is
+`((a AND b) AND c)`, nested from the left as SQL reads `a AND b AND c`. Each
+operand past the second nests one level deeper, so the 64-level nesting limit
+bounds the count (64 comparisons in a top-level `where`; `sql.in` takes a
+longer list of values). Every other operator refuses a third operand with
+`JD0038` when the expression is built.
+
+Three expressions match text. They differ in what `%` and `_` mean and in
+how case is compared:
+
+| Expression | `%` and `_` in the needle | Case |
+|---|---|---|
+| `sql.contains(value, text)` | characters like any other | compared exactly, on both engines |
+| `sql.contains(value, text, { caseInsensitive: true })` | characters like any other | ASCII letters fold, every other character compared exactly, on both engines |
+| `sql.like(value, pattern, { escape: '!' })` | wildcards, characters after the escape | SQLite folds ASCII letters; PostgreSQL folds none |
+
+`sql.contains` is the dialect's own substring test, the one a query's
+substring predicate uses: `instr(value, text) > 0` on SQLite and
+`strpos(value, text::text) > 0` on PostgreSQL. One document therefore answers the
+same on both engines. An empty needle matches every non-null value.
+`caseInsensitive` lowers both sides where `lower` folds ASCII letters only:
+SQLite's `lower` always does, and on PostgreSQL both sides take
+`COLLATE "C"`, whatever collation the column or the database declares.
+
+`sql.like` writes `LIKE … ESCAPE` (`NOT LIKE` with `negate: true`). The escape
+is one character other than NUL, and it makes `%`, `_` and itself literal. A
+pattern that ends in its escape matches nothing on SQLite and is the server's
+error on PostgreSQL. To get the position itself, call `instr` on SQLite or
+`strpos` on PostgreSQL: each dialect names the function as its engine does.
 
 ## Exact writes and bytes
 
@@ -342,6 +373,51 @@ public `connection.dialect.introspect.tables()` statement. A native selection ca
 `sql.column('rowid')` to inspect actual text storage in otherwise unknown shapes.
 Declared affinity does not determine a value's storage class. WITHOUT ROWID tables
 and shadowed rowid aliases require an explicit different identity selection.
+
+A table's physical columns can be read for any table, mapped or not, a table
+without a key included: read SQLite's `pragma_table_info` as a table. Its
+hidden `arg` column names the table to list. The statement runs wherever the
+engine does: at a store's root under its gate and inside a transaction view,
+on the store's own connection.
+
+```js
+const c = sql.column;
+const columns = (table) => ({
+  from: 'pragma_table_info',
+  columns: { name: c('name'), type: c('type'), notnull: c('notnull'), pk: c('pk') },
+  where: sql.binary('=', c('arg'), table),
+  orderBy: [{ by: c('cid') }],
+});
+await store.relational.all(columns('legacy'));
+// [{ name: 'a', type: 'TEXT', notnull: 0, pk: 0 }, { name: 'b', type: 'INTEGER', notnull: 1, pk: 0 }]
+```
+
+`pk` is the column's position in the primary key, and `0` outside it. A table
+that does not exist answers no rows. The call spellings
+(`from: { table, args }`, `sql.call('pragma_table_info', …)`) are refused with
+`JD0038`. On PostgreSQL the same read joins the catalog:
+
+```js
+const columns = (schema, table) => ({
+  from: { table: 'pg_attribute', as: 'a' },
+  joins: [
+    { source: { table: 'pg_class', as: 't' }, on: sql.binary('=', c('attrelid', 'a'), c('oid', 't')) },
+    { source: { table: 'pg_namespace', as: 's' }, on: sql.binary('=', c('relnamespace', 't'), c('oid', 's')) },
+  ],
+  columns: { name: sql.cast(c('attname', 'a'), 'TEXT'), notnull: c('attnotnull', 'a'), position: c('attnum', 'a') },
+  where: sql.binary('AND',
+    sql.binary('=', sql.cast(c('nspname', 's'), 'TEXT'), schema),
+    sql.binary('=', sql.cast(c('relname', 't'), 'TEXT'), table),
+    sql.binary('>', c('attnum', 'a'), 0), sql.not(c('attisdropped', 'a'))),
+  orderBy: [{ by: c('attnum', 'a') }],
+});
+```
+
+`attnum > 0` leaves out the system columns, and `attisdropped` leaves out a
+dropped column. A dropped column keeps its number, so `position` is the
+column's own number, not a count. PostgreSQL keeps a key's columns in an array
+(`pg_index.indkey`), and the grammar has no operator for arrays, so this read
+gives no key positions on PostgreSQL.
 
 Both host driver entries export `snapshotDatabase(connection, newPath)`. It
 reserves a new destination, refuses any existing file (even empty), copies
