@@ -24,17 +24,20 @@
  * these controls MUST register them.
  *
  * A cleared text or number control removes its member (an empty control
- * means absent); a cleared array element keeps its slot. Every control
- * shows the state: the text family and the textarea are controlled and
- * write on every keystroke, and the `json` editor, which commits on
- * `change`, is keyed by its text — a new value is a new editor, focused
- * or not, and a render that leaves the value alone keeps what the
- * operator is typing.
+ * means absent), unless the actions are made with `cleared: 'empty'`,
+ * which writes `''` or `null` instead; a cleared array element keeps its
+ * slot in both modes. Every control shows the state: the text family and
+ * the textarea are controlled and write on every keystroke, and the
+ * `json` editor, which commits on `change`, is keyed by its text — a new
+ * value is a new editor, focused or not, and a render that leaves the
+ * value alone keeps what the operator is typing.
  * The remaining limitation: standard actions require intermediate
  * object/array containers to exist in the data. `createInitialData`
  * supplies those containers for a new form; loaded documents must supply
  * them too.
  */
+import { refuseUnknownMembers } from '@jarenjs/core/object';
+import { describeOption } from './errors.js';
 
 /** The default action names shared by both factories. */
 const DEFAULT_ACTIONS = Object.freeze({
@@ -103,7 +106,45 @@ export function formEventFields() {
  *   the English defaults apply when absent.
  * @property {string} [dataPointer] - (actions) JSON Pointer to the form
  *   data inside the app state (default `'/data'`).
+ * @property {'remove' | 'empty'} [cleared] - (actions) What a cleared
+ *   text or number control writes: `'remove'` (default) removes its
+ *   member, so `required` reports it missing; `'empty'` writes `''` from
+ *   a text control and `null` from a number control.
  */
+
+/**
+ * Every {@link FormViewOptions} member: one options object may serve
+ * both factories, so the actions accept the view's members and ignore
+ * them.
+ */
+const FORM_OPTIONS = ['root', 'classPrefix', 'actions', 'addLabel', 'removeLabel', 'requiredMarker', 'labels', 'dataPointer', 'cleared'];
+
+/**
+ * Refuse options the actions would misread: a value that is not an
+ * object (`null` crashed, and a string, an array or a function read as
+ * no options, so a data pointer passed bare wrote under `/data`), a
+ * member outside {@link FormViewOptions} (naming the nearest one: a
+ * misspelt `cleared` left every cleared control removing its member
+ * without a word), and a `cleared` that is neither `'remove'` nor
+ * `'empty'`. Any other object is read as before, a class instance's and
+ * an inherited member included, and a member that is `undefined` or
+ * `null` is absent, as the actions read every member.
+ * @param {unknown} options
+ * @returns {'remove' | 'empty'} the cleared mode
+ */
+function checkFormActionOptions(options) {
+  const refuse = (/** @type {string} */ reason) => new TypeError(`createFormActions: ${reason}`);
+  if (options === null || typeof options !== 'object' || Array.isArray(options)) {
+    throw refuse(`options must be an object, got ${describeOption(options)}`);
+  }
+  const members = /** @type {Record<string, any>} */ (options);
+  refuseUnknownMembers(members, FORM_OPTIONS, (key, hint) => refuse(`unknown option '${key}'${hint}`));
+  const cleared = members.cleared ?? 'remove';
+  if (cleared !== 'remove' && cleared !== 'empty') {
+    throw refuse(`options.cleared must be 'remove' or 'empty', got ${describeOption(cleared)}`);
+  }
+  return cleared;
+}
 
 /**
  * The standard form rule set: a JSLT rule array rendering a
@@ -316,11 +357,27 @@ export function createFormView(options = {}) {
  * `add` is set-or-replace for object members, so untouched (absent)
  * fields are created on first input.
  *
+ * `options.cleared` decides what a cleared text or number control
+ * writes (APP-FORMAT §3.4): by default (`'remove'`) it removes its
+ * member, so `required` reports it missing; `'empty'` writes `''` from a
+ * text control and `null` from a number control. Every other write is
+ * the same in both modes: a cleared array element keeps its slot (`''`
+ * or `null`), a checkbox writes `false`, and the select and the `json`
+ * editor write what {@link formEventFields} decodes (`null` for empty
+ * text).
+ *
+ * Every {@link FormViewOptions} member is accepted, so one options object
+ * can serve both factories.
+ *
  * @param {FormViewOptions} [options]
  * @returns {Record<string, any>} An `actions` fragment (plain JSON) to
  *   spread into an app document.
+ * @throws {TypeError} when `options` is not an object, names a member
+ *   outside {@link FormViewOptions}, or holds a `cleared` other than
+ *   `'remove'` or `'empty'`.
  */
 export function createFormActions(options = {}) {
+  const cleared = checkFormActionOptions(options);
   const dataPointer = options.dataPointer ?? '/data';
   const act = { ...DEFAULT_ACTIONS, ...options.actions };
   const target = { $concat: [dataPointer, '$payload.pointer'] };
@@ -328,25 +385,30 @@ export function createFormActions(options = {}) {
   // element nodes must be written with `replace` instead. The view-model
   // `element` flag travels through the binding payload.
   const writeOp = { $if: ['$payload.element', 'replace', 'add'] };
-  // A cleared text or number control removes its member: an empty control
-  // means absent, as `parseFieldInput('')` says, so a required member is
-  // reported missing rather than satisfied by `''` or `null`. The write
-  // comes first and the second op settles it: `remove` when the control is
-  // cleared, else a `test` of the value just written, which cannot fail.
-  // Writing first makes clearing total: RFC 6902 refuses to remove a member
-  // that is already absent. An array element cannot be absent without
-  // renumbering the ones after it, so a cleared element keeps its slot:
-  // `''` from a text control, `null` from a number control. The empty
-  // string is false (QUERY-FORMAT §2.2), so "cleared, and not an element"
-  // is one `$or`: the actions ship inside app documents and share links,
-  // so they stay small.
+  // By default a cleared text or number control removes its member: an
+  // empty control means absent, as `parseFieldInput('')` says, so a
+  // required member is reported missing rather than satisfied by `''` or
+  // `null`. The write comes first and the second op settles it: `remove`
+  // when the control is cleared, else a `test` of the value just written,
+  // which cannot fail. Writing first makes clearing total: RFC 6902
+  // refuses to remove a member that is already absent. An array element
+  // cannot be absent without renumbering the ones after it, so a cleared
+  // element keeps its slot: `''` from a text control, `null` from a number
+  // control. The empty string is false (QUERY-FORMAT §2.2), so "cleared,
+  // and not an element" is one `$or`: the actions ship inside app
+  // documents and share links, so they stay small. Under
+  // `cleared: 'empty'` the write stands alone and leaves `''` from a text
+  // control and `null` from a number control, for a host that reads the
+  // member as text or as a nullable number.
   const settle = { $if: [{ $or: ['$event.value', '$payload.element'] }, 'test', 'remove'] };
+  /** A text or number control's write of `value`, then the op that settles it when a cleared control removes its member.
+   * @param {string} value */
+  const writeControl = (value) => (cleared === 'remove'
+    ? [{ op: writeOp, path: target, value }, { op: settle, path: target, value }]
+    : [{ op: writeOp, path: target, value }]);
   return {
     [act.input]: {
-      patch: [
-        { op: writeOp, path: target, value: '$event.value' },
-        { op: settle, path: target, value: '$event.value' },
-      ],
+      patch: writeControl('$event.value'),
     },
     [act.check]: {
       patch: [{ op: writeOp, path: target, value: '$event.checked' }],
@@ -379,10 +441,7 @@ export function createFormActions(options = {}) {
         },
       },
       $return: {
-        patch: [
-          { op: writeOp, path: target, value: '$v' },
-          { op: settle, path: target, value: '$v' },
-        ],
+        patch: writeControl('$v'),
       },
     },
     // the two JSON-carrying controls (typed select, json editor) share

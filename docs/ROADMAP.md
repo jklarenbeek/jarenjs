@@ -278,13 +278,16 @@ establish registry publication or downstream acceptance.
   corpus in Chromium, Firefox and WebKit, with synthetic composition events,
   Firefox's automation input sequence, and synthetic composition during
   collection scroll and focused-row removal.
-- [ ] **A cleared form control removes its member, with no opt-out.** The form
-  actions read an empty input as absent, so `form/input` and `form/number` on
-  a cleared control delete the member from the data (`{ dir: '/srv', age: 44
-  }` becomes `{}`), and a host that reads the member as text meets
-  `undefined`; `createFormActions` accepts an unknown option such as `{
-  cleared: 'empty' }` without checking it. Wanted: an opt-out that keeps `''`
-  for text and `null` for a number, and the options checked.
+- [ ] **A number a host hands over as `0` reads as a cleared control.**
+  `form/number` tests `$event.value` for truth, so a host that dispatches the
+  number `0` (not the text `'0'` an `<input type=number>` hands over, which
+  writes 0) removes the member under the default and writes `null` under
+  `cleared: 'empty'`; `false` and `null` read the same way. Wanted: a number
+  written as itself, `0` included.
+- [ ] **`createFormView` accepts an unknown option without checking it.** A
+  misspelt member is dropped in silence: `createFormView({ clasPrefix: 'acme'
+  })` renders `class="jaren-form"`. Wanted: the options checked as
+  `createFormActions` checks them, accepting every `FormViewOptions` member.
 
 ## @jarenjs/md
 
@@ -364,6 +367,13 @@ costs a descriptor plus examples and no UI code at all.
   UI also need project identity, storage ownership and a migration policy:
   the current documented lifetime is in-memory, reset on committed model or
   seed changes. Reusing the data page's shared database would break isolation.
+- [ ] **The studio flow inspector and the play page refuse number text the
+  standard form actions read.** Their own copies of the form actions
+  (`flow/f-number`, `play/f-number`) read `$event.value` with `$number`
+  directly, so `.5`, `-.5` and `01` from an `<input type=number>` are refused
+  `JA2002` and the field keeps its old value, where `createFormActions`'
+  `form/number` reads 0.5, -0.5 and 1. Wanted: the copies read the text as the
+  standard action does.
 
 ## @jarenjs/contract
 

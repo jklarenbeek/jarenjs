@@ -277,6 +277,44 @@ settled and no await is in flight, so it waits for every continuation
 and for any await a continuation's transaction started; a superseded
 await's dropped settlement ends no wait.
 
+### 3.4 The standard form actions
+
+`createFormActions(options)` returns the action documents the standard
+form view (`createFormView`) binds: `form/input` (the text, email, url,
+password, color, date, datetime-local and time inputs and the textarea),
+`form/number`, `form/check` (the checkbox), `form/json` (the select and
+the `json` editor, whose value `formEventFields` decodes, §5.4),
+`form/add` and `form/remove` (`options.actions` renames them). The four
+value writes go to `dataPointer` (default `/data`) plus the binding's
+pointer, with `replace` for an array element and `add` for an object
+member; `form/add` appends an item and `form/remove` removes the member
+or element. What a cleared control writes is `options.cleared`:
+
+| Cleared control | `'remove'` (default) | `'empty'` |
+|---|---|---|
+| a text, date or textarea member | removed | `''` |
+| a number member | removed | `null` |
+| an array element | keeps its slot: `''` from text, `null` from a number | the same |
+| a checkbox | `false` | the same |
+| a select or `json` editor | the decoded value: `null` for empty text | the same |
+
+The default removes because an empty control means absent: the form's
+schema then reports a required member missing, where `''` or `null`
+would satisfy `required`, and clearing a member that is already absent
+changes nothing. An array element keeps its slot because removing it
+would renumber the elements after it. `'empty'` is for a host whose code
+reads the member as text or as a nullable number; a member cleared under
+it stays present, so the schema refuses it only through a keyword such
+as `minLength` or `type`.
+
+The options are checked when the actions are made: options that are not
+an object, a member outside the documented set (every `createFormView`
+option is accepted, so one object can serve both), and a `cleared` other
+than `'remove'` or `'empty'` throw a `TypeError` naming them. Upgrade
+note: since v0.94.0 a cleared text or number control removes its member,
+where it used to write `''` or `null`; `cleared: 'empty'` restores those
+writes.
+
 ## 4. Event bindings
 
 A vnode `on` binding (opaque to the view layer) is interpreted by this
