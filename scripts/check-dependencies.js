@@ -84,6 +84,14 @@ const MERMAID_PARSER = 'lodash-es pinned by chevrotain under @mermaid-js/parser,
 const BRACE_EXPANSION = 'minimatch\'s brace expansion in eslint, c8, rimraf and the benchmark workspace\'s glob; '
   + 'build tooling only, cleared by a lockfile refresh, never by an override';
 
+// glob's AbortSignal cancellation bypass and minimatch's globparts
+// amplification: glob 13 under rimraf, glob 10 and minimatch 9 and 10 under
+// c8's test-exclude, glob 11 in the benchmark workspace and minimatch 3 under
+// eslint. The patched glob 14 and minimatch 11 sit outside every range those
+// tools declare, and what they are handed is the repository's own patterns.
+const GLOB_TOOLING = 'glob and minimatch under rimraf, c8 (test-exclude), eslint and the benchmark workspace\'s file listing; '
+  + 'build and test tooling only, over the repository\'s own patterns; the patched glob 14 and minimatch 11 are outside every declared range';
+
 // the Prisma ORM benchmark rival (orm suite): a stack exhaustion in
 // `deepmerge-ts` (<8.0.0) when merging RECURSIVE object graphs, reached only
 // through Prisma's own config loader (`@prisma/config`). Every Prisma
@@ -139,6 +147,8 @@ export const KNOWN_TOOLING_ADVISORIES = Object.freeze({
   'GHSA-q2hr-2g5m-vwhr': { package: 'brace-expansion', severity: 'moderate', reason: BRACE_EXPANSION },
   'GHSA-qhr7-859c-m2p7': { package: 'brace-expansion', severity: 'high', reason: BRACE_EXPANSION },
   'GHSA-6j4f-fj2g-mc7p': { package: 'brace-expansion', severity: 'high', reason: BRACE_EXPANSION },
+  'GHSA-3g3m-2fjr-6pw4': { package: 'glob', severity: 'moderate', reason: GLOB_TOOLING },
+  'GHSA-g3hv-75wg-m249': { package: 'minimatch', severity: 'moderate', reason: GLOB_TOOLING },
   'GHSA-ggr8-5vv4-36mx': { package: 'deepmerge-ts', severity: 'high', reason: PRISMA },
   'GHSA-gpj5-g38j-94v9': { package: 'drizzle-orm', severity: 'high', reason: DRIZZLE },
   'GHSA-2883-xcg3-v3hh': { package: 'js-yaml', severity: 'high', reason: JS_YAML },
