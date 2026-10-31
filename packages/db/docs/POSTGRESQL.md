@@ -692,11 +692,11 @@ records matching tool versions and each recovery assertion:
 
 | Logical backup / restore server | Tables / rows | Archive bytes | Omitted metadata cases detected | Elapsed ms |
 |---|---:|---:|---:|---:|
-| 16.15 (Debian 16.15-1.pgdg12+2) | 14 / 16 | 27502 | 10 | 1548.95 |
-| 17.11 (Debian 17.11-1.pgdg12+2) | 14 / 16 | 27923 | 10 | 1181.93 |
-| 18.6 (Debian 18.6-1.pgdg12+2) | 14 / 16 | 27866 | 10 | 1395.11 |
+| 16.15 (Debian 16.15-1.pgdg12+2) | 14 / 16 | 27504 | 10 | 1436.57 |
+| 17.11 (Debian 17.11-1.pgdg12+2) | 14 / 16 | 27924 | 10 | 1095.55 |
+| 18.6 (Debian 18.6-1.pgdg12+2) | 14 / 16 | 27923 | 10 | 1461.04 |
 
-Archived WAL: 17.11 (Debian 17.11-1.pgdg12+2), 14 tables / 16 rows, 5861.01 ms; source stopped before promotion: true. Physical sequence advances are retained in the result. Power loss and fleet failover were not tested.
+Archived WAL: 17.11 (Debian 17.11-1.pgdg12+2), 14 tables / 16 rows, 9179.30 ms; source stopped before promotion: true. Physical sequence advances are retained in the result. Power loss and fleet failover were not tested.
 
 <!--/fact-->
 
@@ -711,10 +711,10 @@ retains earlier Bun memory-budget losses even when a later sample passes.
 
 | Existing SQLite adoption executable | Workload | RSS bytes | Frozen reference bytes | RSS disposition |
 |---|---|---:|---:|---|
-| bun-executable | catalog | 290967552 | 536870912 | within reference |
-| bun-executable | archive-stock | 1024733184 | 1073741824 | within reference |
-| node-executable | catalog | 271351808 | 536870912 | within reference |
-| node-executable | archive-stock | 822226944 | 1073741824 | within reference |
+| bun-executable | catalog | 307998720 | 536870912 | within reference |
+| bun-executable | archive-stock | 1070141440 | 1073741824 | within reference |
+| node-executable | catalog | 273371136 | 536870912 | within reference |
+| node-executable | archive-stock | 820985856 | 1073741824 | within reference |
 
 These larger physical SQLite workloads are separate from the small build-selected managed application. Functional recovery success does not imply memory-budget success. Earlier samples remain in the resource history.
 

@@ -674,7 +674,8 @@ if (asyncLiveLeak.length)
 // Raised to 1,119,900 (measured 1119876): a window over a declared root closed as a FLWOR with a one-item projection folded inside it (document 1036), the async cursor's FLWOR over an untouched root (async 185) and the captured expression's coded refusal of a member read off a method read (expression 393) add 1614.
 // Raised to 1,121,000 (measured 1120990): an open's one catalog read for every physical layout, verified under a read and written under the bracket only to create or before a refusal (store 581, introspect 533) add 1114.
 // Raised to 1,122,300 (measured 1122279): the relational builder's n-ary AND/OR and its coded refusal of a third operand elsewhere, the escaped LIKE and the portable contains (relational 1281, sqlite-relational 8) add 1289.
-if (clientBytes > 1122300)
+// Raised to 1,123,000 (measured 1122646): the worker's settlement retried while the store's gate is held, and a renewal that hands its lease over inside its gated call (jobs 507), less the normalizer the model's reference reading no longer brings (normalize 134), minifier renames elsewhere net 59, add 432.
+if (clientBytes > 1123000)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 
