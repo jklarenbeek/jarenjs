@@ -136,3 +136,43 @@ it('an actual worker pauses uncertain effects and a requeued lease can reconcile
   }
   finally { await worker?.stop(); await executor.close(); await f.client.close(); }
 });
+
+it('with another effect pending, an operator decision lands on the paused effect without a lease, and the next claim of its job completes it without resending', async () => {
+  const f = await fixture();
+  /** @type {string[]} */
+  const sent = [];
+  const store = createDbEffectStore(f.client, { operations: 'effects' });
+  const executor = createProviderExecutor({ transport: async (request) => {
+    sent.push(request.url);
+    if (request.url.endsWith('/b')) throw new Error('lost response');
+    return new Response('{"providerId":"one"}');
+  } });
+  let worker;
+  try {
+    await store.prepare(plan);
+    const effects = createExternalEffects({ store, executor, authorize: () => true, classify });
+    const paused = Promise.withResolvers();
+    worker = f.client.store.jobs.createWorker({ handlers: { external: effects.handler }, pollInterval: 1, onOutcome: paused.resolve });
+    worker.start(); assert.equal((await paused.promise).outcome, 'cancelled'); await worker.stop();
+    assert.equal((await f.client.store.jobs.get('job')).state, 'cancelled');
+    // another effect of the kind is pending now: a requeue and a claim by kind would hand the operator its job
+    await store.prepare({ ...plan, id: 'other', jobId: 'other-job',
+      legs: [{ id: 'c', maxAttempts: 1, request: { url: 'https://effect.example/c', method: 'POST', body: '{}', safety: 'single-send' } }] });
+    const record = await store.get('op');
+    await f.client.transaction((tx) => createDbEffectStore(tx, { operations: 'effects' }).reconcile('op', 'b', record.revision, null,
+      { id: 'readback', actor: 'operator', reason: 'correlated receipt', action: 'confirm', evidence: { receipt: 'two' } }));
+    // after the decision, a requeue lets the worker continue from it
+    await f.client.store.jobs.requeue('job');
+    /** @type {any[]} */
+    const settled = [];
+    const both = Promise.withResolvers();
+    worker = f.client.store.jobs.createWorker({ handlers: { external: effects.handler }, pollInterval: 1,
+      onOutcome: (event) => { settled.push([event.jobId, event.outcome]); if (settled.length === 2) both.resolve(undefined); } });
+    worker.start(); await both.promise; await worker.stop();
+    assert.deepEqual(settled.sort(), [['job', 'completed'], ['other-job', 'completed']]);
+    assert.deepEqual(sent, ['https://effect.example/a', 'https://effect.example/b', 'https://effect.example/c']);
+    assert.deepEqual((await store.get('op')).legs.map((leg) => leg.state), ['confirmed', 'confirmed']);
+    assert.equal((await f.client.store.jobs.get('job')).state, 'done');
+  }
+  finally { await worker?.stop(); await executor.close(); await f.client.close(); }
+});

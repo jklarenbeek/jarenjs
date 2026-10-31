@@ -6,6 +6,8 @@ import { closedOptions } from './options.js';
 
 const zero = Object.freeze({ changes: 0, writes: 0, revisions: 0 });
 const OPTIONS = Object.freeze(['runs', 'events', 'statuses', 'summary', 'canReset', 'maxPage', 'maxBytes']);
+/** What `finish` reads from its options: the final observation's record fields. */
+const FINISH_OPTIONS = Object.freeze(['summary', 'checkpoint']);
 /**
  * Checkpoints remain the existing workflow's format. Status mapping and public
  * summaries are application policy; events never contain the checkpoint input,
@@ -41,6 +43,13 @@ export function createDbRunStore(client, options) {
     await tx.jobs.assertLease(lease);
   };
   const same = (record, identity) => record.workflow === identity.workflow && record.schemaVersion === identity.schemaVersion && record.jobId === identity.jobId;
+  /** Refuse a checkpoint the run cannot take next: another run's, not the
+   * generation after the record's, or a status outside the vocabulary. */
+  const requireNext = (record, checkpoint) => {
+    if (checkpoint === null || typeof checkpoint !== 'object' || checkpoint.runId !== record.id
+      || checkpoint.generation !== (record.checkpoint?.generation ?? 0) + 1 || !Object.hasOwn(statuses, checkpoint.status))
+      throw refuseRecord('checkpoint run, generation or status mismatch');
+  };
   const write = async (tx, record) => {
     if (!Number.isSafeInteger(record.revision + 1)) throw refuseRecord('run revision exhausted');
     record.revision++;
@@ -88,8 +97,7 @@ export function createDbRunStore(client, options) {
         await guard(tx, record, lease);
         if (record.cancelRequested) throw refuseRecord('run cancellation stops admission');
         if ((record.checkpoint?.generation ?? 0) !== expectedGeneration) return false;
-        if (checkpoint.runId !== id || checkpoint.generation !== expectedGeneration + 1 || !Object.hasOwn(statuses, checkpoint.status))
-          throw refuseRecord('checkpoint run, generation or status mismatch');
+        requireNext(record, checkpoint);
         record.checkpoint = checkpoint;
         record.status = statuses[checkpoint.status];
         record.summary = copyRecord(summary(checkpoint));
@@ -136,16 +144,35 @@ export function createDbRunStore(client, options) {
         return write(tx, record);
       });
     },
-    /** Called after workers drain and before resources close.
-     * @param {string} id @param {'cancelled' | 'failed'} state @param {any} lease */
-    finish(id, state, lease) {
+    /** Called after workers drain and before resources close. The final
+     * observation may carry the host's public `summary` and the workflow's
+     * last `checkpoint`: the wind-up, written under the same lease even
+     * after `requestCancel`, which stops admitting new work, not recording
+     * how the run ended. The status is always `state`'s.
+     * @param {string} id @param {'cancelled' | 'failed'} state @param {any} lease
+     * @param {{ summary?: Record<string, any>, checkpoint?: any }} [finishOptions] */
+    finish(id, state, lease, finishOptions) {
       if (!['cancelled', 'failed'].includes(state)) throw new TypeError('finish state must be cancelled or failed');
+      // `null` is no options, as a fourth argument has always been read
+      closedOptions(finishOptions ?? undefined, FINISH_OPTIONS, 'finish()');
+      const final = finishOptions?.summary === undefined ? { status: state } : copyRecord(finishOptions.summary);
+      if (final === null || typeof final !== 'object' || Array.isArray(final)) throw new TypeError('finish summary must be a JSON object');
+      // the summary may say how the run ended, never that it ended otherwise
+      if (!Object.hasOwn(final, 'status')) final.status = state;
+      else if (final.status !== state) throw refuseRecord('final run summary states another status');
+      const checkpoint = finishOptions?.checkpoint === undefined ? undefined : copyRecord(finishOptions.checkpoint);
       return inside(async (tx) => {
         const record = await requireRun(tx, id);
         await guard(tx, record, lease);
         // a completed run is final: its status is the one thing `requestCancel` also refuses to rewrite
         if (record.status === statuses[state] || record.status === statuses.done) return { record, ...zero };
-        record.status = statuses[state]; record.summary = { status: state };
+        if (checkpoint !== undefined) {
+          requireNext(record, checkpoint);
+          // a workflow that reached done is saved, and then it is not finished
+          if (checkpoint.status === 'done') throw refuseRecord('a done checkpoint cannot finish a run as cancelled or failed');
+          record.checkpoint = checkpoint;
+        }
+        record.status = statuses[state]; record.summary = final;
         return write(tx, record);
       });
     },

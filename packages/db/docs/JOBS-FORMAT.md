@@ -221,7 +221,8 @@ it does for collections (MODEL-FORMAT §5.1):
   created: its claims, renewals, checkpoint stores and settlements take
   the root gate even when an application transaction happens to be open,
   and creating a worker through a transaction view does not bind its
-  future loop to that transaction.
+  future loop to that transaction. A settlement the gate refuses as
+  contended is tried again inside the lease, not failed (§6).
 - **A checkpoint store keeps the ownership of the jobs view that created
   it** — root stores gate, transaction-scoped stores stay pinned to
   their exact scope and cannot switch.
@@ -322,7 +323,25 @@ a third of its lease, and at most every 2^31 − 1 milliseconds:
   contended gate — the current immutable lease stays in force, the
   handler's signal stays live, and the next renewal is armed; if the
   lease truly expires first, the next fenced call answers `JD2067` and
-  that is the one recorded loss;
+  that is the one recorded loss. A renewal hands its new lease to the
+  attempt inside its own gated call, so a settlement queued behind it
+  settles under that lease rather than being refused as superseded;
+- **a settlement the gate refuses as contended is not a failure either.**
+  The completion write and the failure write take the root gate, and
+  while another caller holds the connection the gate refuses them
+  `JD0012` — at once under `transactions: 'strict'`, after `queueTimeout`
+  in the queue under `'wait'` — so the write never ran. The worker tries
+  it again under the attempt's current lease every `pollInterval`, and at
+  least once per renewal period, until the gate admits it: a handler that
+  returned is recorded `completed` once, and a failure is reported only
+  once its write has landed. A hold that outlives the lease ends in the
+  one recorded loss: the admitted write answers `JD2067`, or `JD2066` when
+  another claim took the job first. Any other refusal (a result JSON
+  cannot express, a storage failure) fails the attempt as before. A
+  cancellation or a lost lease that lands while the write waits is
+  recorded as itself, and `stop()` abandons the write: no outcome is
+  reported, and the leased row recovers by lease expiry (§5), as a
+  cancelled loop's does;
 - an attempt whose lease is **lost** — superseded or expired — has its
   signal aborted with the refusal as the reason, and is then barred from
   settling. It is its own outcome: `lostSettlements`, never a completion
@@ -330,9 +349,9 @@ a third of its lease, and at most every 2^31 − 1 milliseconds:
   was still doing) and never a failure (which would burn a retry the job
   never spent);
 - `onOutcome` is called once per settled attempt —
-  `{ outcome: 'completed' | 'failed' | 'lost', jobId, kind, attempt,
-  generation, code?, reason? }`. An observer that throws never affects
-  the loop;
+  `{ outcome: 'completed' | 'failed' | 'lost' | 'cancelled', jobId, kind,
+  attempt, generation, phase?, code?, reason? }` (`cancelled`: §10). An
+  observer that throws never affects the loop;
 - `leases()` lists the leases this worker holds right now, one per
   in-flight attempt. In-flight state is keyed by the fence TOKEN, never
   by the owner: one worker reuses one owner, and two attempts of one job
@@ -647,9 +666,16 @@ every task of a DAG job checks the same lease with `resources.assertLease(tx)` (
 `createWorker({ effectSafety(job, context), ... })` optionally gates each handler
 admission. Only `true` admits; any other resolved value pauses the queue attempt
 in its existing `cancelled` state without running the handler. The worker
-`context.pause()` exposes the same operation. An authorized operator can
-explicitly `requeue` and claim it for reconciliation; it never becomes an
-unreclaimable completed job merely because its external outcome is unknown.
+`context.pause()` exposes the same operation. A paused job has no lease, so an
+authorized operator records the decision without one — the mapped effect
+store's `reconcile` with a `null` lease, fenced by the effect record's revision
+([DB-CLIENT](../../linq/docs/DB-CLIENT.md#durable-mapped-records)) — and then
+`requeue`s the job: whichever worker claims it next continues from that
+decision. A claim selects by kind, never by id, so a requeue followed by a
+claim hands the operator whichever job of the kind comes first. The job never
+becomes an unreclaimable completed job merely because its external outcome is
+unknown, and every pause spends one of its attempts, which `requeue` keeps
+(§10): an effect plan declares its job's claim budget.
 A thrown policy error follows the ordinary failure path and is checked again on
 a later attempt. `createDagJobRunner` forwards the same hook. The hook supplements
 the mapped effect store's mandatory pre-dispatch fence and durable intent; it is

@@ -570,7 +570,9 @@ export function createDbEffectStore(client: DurableClient, options: {
   begin(id: string, legId: string, revision: number, lease: import('@jarenjs/db').JobLease): Promise<any>;
   settle(id: string, legId: string, revision: number, lease: import('@jarenjs/db').JobLease, outcome: any): Promise<any>;
   recover(id: string, revision: number, lease: import('@jarenjs/db').JobLease): Promise<any>;
-  reconcile(id: string, legId: string, revision: number, lease: import('@jarenjs/db').JobLease, decision: any): Promise<any>;
+  /** `lease: null` decides without one — an operator on a paused effect: fenced by
+   * `revision` alone, and refused (`JL2009`) while the plan's job is leased. */
+  reconcile(id: string, legId: string, revision: number, lease: import('@jarenjs/db').JobLease | null, decision: any): Promise<any>;
 };
 /** Application run/checkpoint records and bounded public revision pages. */
 export function createDbRunStore(client: DurableClient, options: {
@@ -583,6 +585,10 @@ export function createDbRunStore(client: DurableClient, options: {
   get(id: string): Promise<any>;
   page(id: string, options?: { after?: number; limit?: number }): Promise<any>;
   requestCancel(id: string, revision: number, evidence: { actor: string; reason: string }): Promise<any>;
-  finish(id: string, state: 'cancelled' | 'failed', lease: import('@jarenjs/db').JobLease): Promise<any>;
+  /** The final observation: `summary` replaces `{ status }` (its `status`, when
+   * given, is `state`), `checkpoint` is the workflow's last one, written even
+   * after `requestCancel` (DB-CLIENT, durable mapped records). */
+  finish(id: string, state: 'cancelled' | 'failed', lease: import('@jarenjs/db').JobLease,
+    options?: { summary?: Record<string, unknown>; checkpoint?: unknown }): Promise<any>;
   reset(id: string, revision: number, evidence: any, lease: import('@jarenjs/db').JobLease): Promise<any>;
 };

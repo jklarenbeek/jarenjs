@@ -1396,18 +1396,43 @@ repeat. Erasure is unsupported and refused.
 `createDbEffectStore(client, { operations, maxLegs?, maxBytes? })` provides
 `prepare`, `get`, `begin`, `settle`, `recover` and `reconcile`. A reviewed plan
 contains `id`, `jobId`, `kind`, `actor`, `reason`, `hashVersion` and bounded `legs`.
-Each leg names `id`, a provider `request` and `maxAttempts`; arbitrary reviewed
-selection/payload declarations stay in the frozen plan. Preparation plus its
+Each leg names `id`, a provider `request` and `maxAttempts`, that leg's SEND
+budget (a single-send leg's is 1); arbitrary reviewed selection/payload
+declarations stay in the frozen plan. A plan may also declare `jobClaimBudget`,
+the CLAIM budget of its job: the `maxAttempts` the job is enqueued with
+([JOBS-FORMAT §2](../../db/docs/JOBS-FORMAT.md#2-the-job-record)), a positive
+integer (`TypeError` otherwise, before anything is written); without one the
+store's `jobs.maxAttempts` (default 5) applies. Every claim of the job spends
+one, and so does every pause: a paused job's `requeue` keeps its attempt count,
+so once the budget is spent, the next claim dead-letters an attempt that crashed
+while `sending`, and `recover` never runs for it (JOBS-FORMAT §5). `jobs.reset`
+(JOBS-FORMAT §10) restarts the count, and deletes the job's checkpoint rows,
+though not the effect record. The budget is the job's from its enqueue, so a
+repeated preparation changes no job; a plan field named `jobClaimBudget` used
+to be reviewed data like any other. Preparation plus its
 optional local callback and enqueue co-commit. Repeated preparation is a no-op;
-changed reviewed bytes refuse. Each sending/settlement operation compares the
+changed reviewed bytes refuse, a changed `jobClaimBudget` included. Each sending/settlement operation compares the
 operation revision and uses `tx.jobs.assertLease` against the plan's job ID.
 Remote I/O occurs outside these transactions. Confirmed/rejected/unresolved
 states and individual leg attempts survive lease takeover.
 
 Reconciliation requires a unique decision `id`, `actor`, `reason`, `action`
-(`confirm`, `reject`, `retry`) and public `evidence`. Repeating identical evidence
-is a zero-write/revision no-op; a reused decision ID with different evidence
-refuses. Idempotent retries preserve the provider key and original attempt
+(`confirm`, `reject`, `retry`) and public `evidence`.
+`reconcile(id, legId, revision, lease, decision)` takes the plan job's current
+lease, or `null` for a decision made without one: an operator's command on a
+paused effect, whose job is `cancelled` and so has no lease. That decision is
+fenced by the record's `revision` alone, refused `JL2009` while the job is
+leased (the lease holder decides then), and checked in the transaction that
+moves the revision, which can be the command's own: an effect store over a
+transaction client nests in it. Under SQLite that transaction keeps a claim
+from landing between the check and the write; on PostgreSQL a claim that lands
+between them meets the moved revision at its own next write. A missing
+(`undefined`) lease is still refused as a foreign job; a `null` one used to be
+too. After the decision, `requeue` the job, and whichever worker claims it
+next continues from the decision: a requeue followed by a claim by kind can
+hand the operator another job of that kind, and a decision needs none.
+Repeating identical evidence is a zero-write/revision no-op under either fence,
+whoever holds the job; a reused decision ID with different evidence refuses. Idempotent retries preserve the provider key and original attempt
 budget. Absence without an authoritative non-application guarantee is not retry
 permission. A single-send leg remains limited to one attempt; a proven negative
 may be rejected and followed by a separately reviewed operation. Compensation
@@ -1425,10 +1450,26 @@ and generation, not inputs or results. `get` is trusted/private;
 `page(id, { after, limit })` exposes bounded public events and current summary.
 Missing event history returns `reset-required` with the current durable cursor.
 
-`requestCancel` compares the observed revision and records actor/reason;
-`finish` persists a final cancelled/failed observation after draining, and leaves a
-completed run as it is (it used to rewrite `done` to `failed`, which `requestCancel`
-refuses for the same run).
+A snapshot that is no checkpoint of this run's next generation refuses `JL2009`,
+`null` included (it used to throw an uncoded `TypeError`).
+
+`requestCancel` compares the observed revision and records actor/reason; after
+it `load` and `save` refuse `JL2009`, because a cancellation stops admitting
+work. `finish(id, state, lease, { summary?, checkpoint? })` persists the final
+cancelled/failed observation after draining, under the same lease, and the
+cancellation does not stop it: the wind-up records how the run ended, it admits
+no work. The run's status becomes the state's. `summary`, a JSON object
+(`TypeError` otherwise), replaces the `{ status }` written without one, in the
+record and in its event, held to `maxBytes` as `save` holds a summary
+(`JL2009`); its `status` is filled in when absent and must be the state
+(`JL2009` otherwise), so a summary can say how the run ended, never that it
+ended otherwise. `checkpoint` is the workflow's last one, checked as `save`
+checks one (this run's, the next generation, a status of the vocabulary:
+`JL2009` otherwise) and never `done`; as with `save`, the checkpoint itself is
+not byte-checked. Any other option is a `TypeError` naming the nearest, and
+`null` is no options. A run already in that status, or done, is left as it is,
+options included. `finish` used to drop a fourth argument without notice, and to
+rewrite `done` to `failed`, which `requestCancel` refuses for the same run.
 `reset` changes only this run's checkpoint and requires current revision,
 inactive status, actor/reason and a transactional `canReset(tx, record)` policy.
 The default refuses; the policy must consult receipts and unresolved effects.

@@ -335,8 +335,14 @@ public evidence. Timeout, abort, disconnect, invalid response or lost settlement
 remain unresolved. Restart recovers stale sending intent without resending it.
 Read-back and operator decisions use the store's explicit `reconcile` method.
 Register `effects.handler` with the existing queue worker to pause unresolved or
-refused operations in the queue's cancelled state. Explicit requeue/claim then
-provides a fresh reconciliation fence; confirmed operations complete normally.
+refused operations in the queue's cancelled state. A paused operation's job has
+no lease, so an operator's decision passes `null` for it and is fenced by the
+operation record's revision; a `requeue` of the job then lets a worker continue
+from the decision, and confirmed operations complete normally. A requeue
+followed by a claim cannot be aimed at one operation: a claim selects by kind,
+and can hand back another pending operation's job. Each pause spends one attempt of
+the job's claim budget, which the plan declares as `jobClaimBudget` (the store's
+`jobs.maxAttempts` otherwise); a leg's `maxAttempts` budgets its sends.
 
 `createDomainRun(document, { store, schemaVersion, tasks })` compiles the existing
 workflow once and binds its checkpoint CAS to application run records.

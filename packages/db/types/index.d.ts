@@ -2467,6 +2467,9 @@ export interface JobWorkerOptions {
     signal: AbortSignal }) => unknown>;
   /** A positive integer; the loops claiming concurrently. */
   concurrency?: number;
+  /** How long an idle loop sleeps; also how soon a settlement the store's
+   * gate refused as contended (`JD0012`) is tried again — at most a third
+   * of `leaseMs` (JOBS-FORMAT §6). */
   pollInterval?: number;
   leaseMs?: number;
   owner?: string;

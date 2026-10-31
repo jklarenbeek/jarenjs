@@ -3673,6 +3673,28 @@ or `OR` over more than two operands. The previous release has no
 It builds `AND` and `OR` from the first two operands, so an index this
 release created under such a condition is `JD0002` at open.
 
+## 66. A worker settles through a contended gate instead of failing the attempt
+
+- Under `transactions: 'strict'`, a handler that returned while another
+  caller held the store's connection was reported `failed`: the gate refused
+  the completion write `JD0012`, it refused the failure write behind it too,
+  so the row stayed leased, and the lease's expiry ran the finished work
+  again. The worker now tries the write again inside the lease until the
+  gate admits it, and records the attempt `completed` once; a handler that
+  threw is reported `failed` once its failure is written. Under the default
+  `'wait'` the same holds for a settlement that waited out `queueTimeout`
+  behind a transaction: it is queued again instead of failing the attempt
+  ([JOBS-FORMAT §6](JOBS-FORMAT.md#6-workers-and-concurrency)).
+- A `stop()` while such a write waits reports no outcome for the attempt,
+  where it used to report `failed`; its leased row recovers by lease
+  expiry, as before.
+- A completion queued behind its attempt's own lease renewal was refused
+  `JD2066` and reported `lost`, and the job ran again once the renewed
+  lease expired. It now settles under the renewed lease.
+
+**Downgrade.** Nothing a store writes changed: the previous release opens,
+reads, queries and plans every store this one opens, as before.
+
 ## Measured costs
 
 Exact identity stores complete canonical documents and model endpoints, so

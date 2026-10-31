@@ -869,6 +869,12 @@ export function createJobEngine(options) {
    * amount of retrying will change that. */
   const LOST_CODES = new Set(['JD2065', 'JD2066', 'JD2067']);
   const isLeaseLost = (error) => LOST_CODES.has(/** @type {any} */ (error)?.code);
+  /** The store's gate refused the call because another caller holds the
+   * connection — a transaction, or a store-level call still in flight:
+   * at once under `transactions: 'strict'`, after `queueTimeout` in the
+   * queue under `'wait'`. `JD0012` means exactly that on a worker's path,
+   * and the call never ran, so it decided nothing. */
+  const isContended = (error) => /** @type {any} */ (error)?.code === 'JD0012';
 
   /**
    * §6: N claim-execute loops over one handler registry.
@@ -915,6 +921,10 @@ export function createJobEngine(options) {
     // a third of the lease, and no longer than a timer keeps: a longer delay fires
     // every millisecond
     const renewEvery = Math.min(TIMER_MAX, Math.max(1, Math.floor(leaseMs / 3)));
+    // a settlement the gate refused as contended is tried again at the
+    // worker's own poll cadence, and never less often than it renews, so
+    // a retry lands inside the lease it is made under while there is one
+    const settleRetryMs = Math.min(pollInterval, renewEvery);
     const stats = {
       claims: 0, completions: 0, failures: 0, polls: 0, wakes: 0, claimErrors: 0,
       /** Attempts cancelled through `cancel()` while their handler ran. */
@@ -1046,15 +1056,20 @@ export function createJobEngine(options) {
       if (!renewing || !running || attempt.lost !== null || attempt.settled) return;
       attempt.timer = setTimeout(() => {
         if (attempt.lost !== null || attempt.settled) return;
-        io(() => renew(attempt.lease, { leaseMs }), 'a lease renewal', shutdown.signal)
-          .then((next) => {
-            if (attempt.settled) return;
+        io(() => chain(renew(attempt.lease, { leaseMs }), (next) => {
+          // adopted INSIDE the gated call: when it ends, the gate hands the
+          // connection straight to the next queued call, and a settlement
+          // queued behind this renewal must read the lease it just minted —
+          // with the old one the fence refuses it as superseded
+          if (!attempt.settled) {
             attempts.delete(attempt.lease.token);
             attempt.lease = next;
             attempts.set(next.token, attempt);
             stats.renewals += 1;
-            armRenewal(attempt);
-          })
+          }
+          return next;
+        }), 'a lease renewal', shutdown.signal)
+          .then(() => armRenewal(attempt))
           .catch((error) => {
             // Only the fence's three codes (LOST_CODES) prove this
             // attempt no longer holds the job. Anything else — a busy
@@ -1079,6 +1094,9 @@ export function createJobEngine(options) {
       const { promise: done, resolve: finish } = Promise.withResolvers();
       const attempt = {
         job, lease: job.lease, controller, lost: null, settled: false, timer: null,
+        // the stop of the session that claimed it: once aborted, never again
+        // this attempt's to settle, whatever a later start() does
+        shutdown: shutdown.signal,
         // the handler winds up for either reason: the worker is stopping,
         // or the job is no longer this attempt's to finish
         signal: AbortSignal.any([shutdown.signal, controller.signal]),
@@ -1149,22 +1167,86 @@ export function createJobEngine(options) {
       });
     };
 
+    /** Wait `settleRetryMs` before settling again. The attempt's signal cuts
+     * it short: it aborts on `stop()`, on a cancellation and on a lost
+     * lease — each an outcome the next turn of `settle` records. */
+    const settleLater = (attempt) => new Promise((resolve) => {
+      const { signal } = attempt;
+      const done = () => {
+        clearTimeout(timer);
+        signal.removeEventListener('abort', done);
+        resolve(undefined);
+      };
+      // already aborted, still one timer turn: two tries never follow each
+      // other inside one turn of the event loop, whatever decides the next
+      const timer = setTimeout(done, signal.aborted ? 0 : settleRetryMs);
+      if (!signal.aborted) signal.addEventListener('abort', done, { once: true });
+    });
+
+    /**
+     * Write one attempt's settlement — `write(lease)` under the attempt's
+     * CURRENT lease — reading a contended gate as "not yet", exactly as a
+     * renewal does: the write never ran, so it is tried again after
+     * `settleRetryMs` until the gate admits it. Admitted, it lands once,
+     * or the fence answers that the lease was lost meanwhile and that is
+     * the attempt's one loss; any other refusal is thrown, as before.
+     * Between tries an outcome decided elsewhere wins: `stop()` abandons
+     * the settlement — no outcome, the leased row recovers by expiry
+     * (§5), as a cancelled loop's does — and a cancellation or a lost
+     * lease is recorded as itself.
+     * @param {any} attempt
+     * @param {{ cancelled: boolean }} loopSession
+     * @param {'completion' | 'failure'} phase
+     * @param {(lease: any) => any} write
+     * @returns {Promise<boolean>} whether the write landed (`false`: another
+     *   outcome was recorded instead, or none was)
+     */
+    const settle = async (attempt, loopSession, phase, write) => {
+      for (;;) {
+        try {
+          await io(() => write(attempt.lease), 'a job settlement');
+          return true;
+        }
+        catch (error) {
+          if (isLeaseLost(error)) {
+            recordLost(attempt, phase, error);
+            return false;
+          }
+          if (!isContended(error)) throw error;
+        }
+        // the attempt's own session decides, not `running`: a start() made
+        // before this stop() drained must not revive the write, whose signal
+        // stays aborted, so its pause would shrink to one timer turn
+        if (!attempt.shutdown.aborted && !loopSession.cancelled) await settleLater(attempt);
+        if (attempt.shutdown.aborted || loopSession.cancelled) return false;
+        if (attempt.cancelled) {
+          recordCancelled(attempt);
+          return false;
+        }
+        if (attempt.lost !== null) {
+          recordLost(attempt, phase, attempt.lost);
+          return false;
+        }
+      }
+    };
+
     /**
      * Record one failed attempt. Reporting a failure must never itself
      * fail the loop, so a storage error here is swallowed after the
      * attempt count has already been incremented by the claim — but a
      * FENCE refusal is not a storage error: it says this attempt does
      * not hold the job, and that is a lost settlement, not a failure.
+     * Nor is a contended gate one: `settle` waits it out, and a failure
+     * whose write was never admitted is never reported.
+     * @param {any} attempt
+     * @param {unknown} error
+     * @param {{ cancelled: boolean }} loopSession
      */
-    const recordFailure = async (attempt, error) => {
+    const recordFailure = async (attempt, error, loopSession) => {
       try {
-        await io(() => fail(attempt.lease, error, workerOptions), 'a job settlement');
+        if (!await settle(attempt, loopSession, 'failure', (lease) => fail(lease, error, workerOptions))) return;
       }
-      catch (refusal) {
-        if (isLeaseLost(refusal)) {
-          recordLost(attempt, 'failure', refusal);
-          return;
-        }
+      catch {
         // the lease will expire and the job will be re-claimed, or dead-lettered
         // when this was its final attempt (§5);
         // a worker must not die because the failure write failed
@@ -1204,7 +1286,7 @@ export function createJobEngine(options) {
             recordLost(attempt, 'failure', attempt.lost);
             return;
           }
-          await recordFailure(attempt, error);
+          await recordFailure(attempt, error, loopSession);
           return;
         }
         if (loopSession.cancelled) return;
@@ -1219,21 +1301,19 @@ export function createJobEngine(options) {
           recordLost(attempt, 'completion', attempt.lost);
           return;
         }
+        let landed;
         try {
           // a §7 handler may have completed transactionally already;
           // settling twice from ONE attempt is idempotent
-          await io(() => complete(attempt.lease, result ?? null), 'a job settlement');
+          landed = await settle(attempt, loopSession, 'completion', (lease) => complete(lease, result ?? null));
         }
         catch (error) {
-          if (isLeaseLost(error)) {
-            recordLost(attempt, 'completion', error);
-            return;
-          }
           // an unrepresentable result, or a storage failure at the
           // completion write: this attempt failed, the worker did not
-          await recordFailure(attempt, error);
+          await recordFailure(attempt, error, loopSession);
           return;
         }
+        if (!landed) return;
         stats.completions += 1;
         notify({
           outcome: 'completed',

@@ -870,21 +870,26 @@ what each does is its own documentation's job
   [NOT] TRUE` — is not compared, so an index recreated under another such
   condition or key opens as the declared one, where SQLite compares the CREATE
   text (MODEL-FORMAT §12). Wanted: read those forms into the condition form.
-- [ ] **Under `transactions: 'strict'`, a job's settlement treats a contended
-  gate as a failed attempt.** A handler that returns while another root
-  transaction holds the store's connection has its `complete()` refused
-  `JD0012`; the worker reports the attempt `failed` (in `onOutcome` and
-  `stats()`), its own `fail()` write is refused the same way, and the job
-  runs again when its lease expires, though the work finished. Renewal
-  already reads a contended gate as a storage reason, not lease loss
-  (JOBS-FORMAT §6). Wanted: settlement that waits for the gate within the
-  lease.
-- [ ] **A cancelled run cannot record how it ended.** After `requestCancel`,
-  a run's checkpoint saves are refused (`JL2009`: cancellation stops
-  admission), and `finish(id, 'cancelled', lease)` takes no summary (a fourth
-  argument is ignored; the record's summary is `{ status: 'cancelled' }`), so
-  the progress a run reached and when it stopped cannot be recorded under its
-  lease. Wanted: a final summary and checkpoint on `finish`.
+- [ ] **A settling call over its own attempt's row answers as if it had
+  settled it, whatever the row settled as.** The fence's same-generation
+  idempotence ignores the row's state: `complete(lease)` over the attempt's
+  `cancelled` row answers `true` (so a cancellation admitted just before a
+  queued worker completion under `'wait'` is reported `completed`), and
+  `cancel(id, { lease })` over its `done` row answers `false` ("it already
+  was" cancelled). Wanted: same-generation idempotence only for the state the
+  call writes.
+- [ ] **A worker started again before its `stop()` resolved keeps the old
+  loops running.** The loops test the worker-wide flag, not their session, so
+  `start()` before `stop()` resolves revives them; `stop()` then cancels the
+  new session and unregisters the worker. With `concurrency: 1`, two handlers
+  ran at once, claims continued after `stop()` resolved, and a loop polled the
+  store after `store.close()`. Wanted: `start()` refused until `stop()` has
+  resolved, or loops bound to their own session.
+- [ ] **A run store's `page` reads an open option bag.** `page(id, { afer: 2
+  })` answers every revision where `{ after: 2 }` answers those after the
+  second, and `page(id, null)` throws an uncoded `TypeError`, where the run
+  store's other calls refuse a malformed option by name. Wanted: the bag
+  closed, as `finish`'s is.
 - [ ] **An in-thread root cursor holds the event loop until it ends.** On
   in-thread SQLite a root cursor's pulls (`store.relational.iterate`, an
   entity root cursor) settle in microtasks, so no timer or I/O callback runs
@@ -1044,22 +1049,18 @@ production cutover. Streaming DAG input is not required by this composition.
   with synthetic restart, takeover and observer evidence that does not
   substitute for those runs. Source provenance, review decisions and posted
   history keep their domain schemas and rules.
-- [ ] **Deciding a paused external effect needs a claim of its own job.** An
-  effect left unresolved and paused (its job cancelled) is decided through
-  `reconcile`, which asserts a live lease of that job before it reads a
-  recorded decision; `requeue` then `claim({ kinds })` returns whichever job
-  is next, so with another effect pending the lease belongs to the wrong job
-  (`JL2009 foreign reconciliation job`), and `claim` takes no job id. Wanted:
-  a claim by job id, or a decision fenced by the effect record's revision
-  instead of a lease.
-- [ ] **An external effect's job spends the queue's attempt budget across
-  pauses.** `requeue` keeps a job's attempt count, so an effect paused and
-  resumed four times reaches the default budget on its next attempt; if that
-  attempt's lease expires mid-send, the claim dead-letters the job and the leg
-  stays `sending` where `recover` would have run. `jobs.reset` restarts the
-  count (deleting the job's checkpoints) and the store-wide `jobs.maxAttempts`
-  raises every job's budget; neither works per effect. Wanted: a budget per
-  effect, or a resumption that is not an attempt.
+- [ ] **On PostgreSQL a claim can land inside a lease-less effect decision.**
+  `reconcile(id, legId, revision, null, decision)` reads the plan's job in the
+  transaction that moves the effect record's revision and refuses while it is
+  leased. On SQLite that transaction keeps a claim out until it commits; on
+  PostgreSQL the claim is one `UPDATE … FOR UPDATE SKIP LOCKED` outside the
+  store's writer lock and the job read takes no row lock, so another store can
+  claim the job between the read and the commit, and the decision lands while
+  the job is leased. The moved revision refuses that claimant's next write made
+  with the revision it read before (`JL2009`), so nothing is written wrongly;
+  the rule that the lease holder decides while the job is leased is what
+  lapses. Wanted: a row-locked job read on the transaction's `jobs` view
+  (`SELECT … FOR UPDATE`, as `assertLease` takes) for the lease-less decision.
 
 ## Native application adoption — external qualification
 

@@ -51,6 +51,8 @@ export function createDbEffectStore(client, options) {
           || (leg.request.safety === 'single-send' && leg.maxAttempts !== 1)
           || (leg.request.safety === 'provider-idempotent' && !leg.request.idempotencyKey))
         || (frozen.compensationOf !== undefined && frozen.compensationAuthorized !== true)
+        // the job's claim budget, held to the rule enqueue holds `maxAttempts` to
+        || (frozen.jobClaimBudget !== undefined && !(Number.isInteger(frozen.jobClaimBudget) && frozen.jobClaimBudget >= 1))
         || new TextEncoder().encode(canonicalizeJson(frozen)).byteLength > maxBytes)
         throw new TypeError('effect preparation needs bounded reviewed legs, replay safety, attempt budgets and explicit compensation authority');
       const fingerprint = canonicalizeJson(frozen);
@@ -65,7 +67,10 @@ export function createDbEffectStore(client, options) {
         const record = { id: frozen.id, plan: frozen, fingerprint, revision: 1,
           legs: frozen.legs.map((leg) => ({ id: leg.id, state: 'prepared', attempts: 0, evidence: null, intent: null })), decisions: [] };
         await records.put(tx, record, true);
-        await tx.jobs.enqueue(frozen.kind, { operationId: frozen.id }, { id: frozen.jobId });
+        // a leg's `maxAttempts` budgets its SENDS; the job's claims are
+        // budgeted here, or by the store's `jobs.maxAttempts` default
+        await tx.jobs.enqueue(frozen.kind, { operationId: frozen.id }, frozen.jobClaimBudget === undefined
+          ? { id: frozen.jobId } : { id: frozen.jobId, maxAttempts: frozen.jobClaimBudget });
         return { record, changes: 1, writes: 1, revisions: 1 };
       });
     },
@@ -117,6 +122,9 @@ export function createDbEffectStore(client, options) {
     /** Explicit read-back or operator decisions; absence is evidence only under
      * the declared authoritative non-application guarantee. Idempotent retries
      * retain the reviewed request/key and the original durable attempt budget.
+     * A `null` lease is a decision made with none — an operator's on a paused
+     * effect: fenced by the record's revision alone, and refused while the
+     * plan's job is leased, because then the lease holder decides.
      * @param {string} id @param {string} legId @param {number} revision @param {any} lease @param {any} decision */
     reconcile(id, legId, revision, lease, decision) {
       const proof = copyRecord(decision);
@@ -124,15 +132,25 @@ export function createDbEffectStore(client, options) {
         || !['confirm', 'reject', 'retry'].includes(proof.action) || !Object.hasOwn(proof, 'evidence')) throw refuseRecord('reconciliation needs actor/reason and evidence');
       return inside(async (tx) => {
         const record = await requireRecord(tx, id);
-        if (lease?.jobId !== record.plan.jobId) throw refuseRecord('foreign reconciliation job');
-        await tx.jobs.assertLease(lease);
+        if (lease !== null) {
+          if (lease?.jobId !== record.plan.jobId) throw refuseRecord('foreign reconciliation job');
+          await tx.jobs.assertLease(lease);
+        }
         const entry = { ...proof, legId };
         const prior = record.decisions.find((value) => value.id === proof.id);
         if (prior) {
           if (canonicalizeJson(prior) !== canonicalizeJson(entry)) throw refuseRecord('reconciliation decision collision');
           return { record, ...zero };
         }
-        await guard(tx, record, revision, lease);
+        if (lease !== null) await guard(tx, record, revision, lease);
+        else {
+          // read in the transaction that moves the revision, so the job
+          // cannot be claimed between this check and the decision's write
+          // on SQLite; a claim on PostgreSQL that lands between them meets
+          // the moved revision at its own next write
+          if ((await tx.jobs.get(record.plan.jobId))?.state === 'leased') throw refuseRecord('the operation job is leased: its lease holder decides');
+          if (record.revision !== revision) throw refuseRecord('stale operation revision');
+        }
         const leg = legOf(record, legId), plan = record.plan.legs.find((value) => value.id === legId);
         if (terminal(leg.state) || !['sending', 'unresolved'].includes(leg.state)) throw refuseRecord('only unresolved intent can be reconciled');
         if (proof.action === 'retry' && (plan.request.safety !== 'provider-idempotent' && proof.guarantee !== 'authoritative-non-application'))
