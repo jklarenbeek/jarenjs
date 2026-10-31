@@ -22,7 +22,6 @@ import {
 } from '@jarenjs/core/string';
 
 import {
-  encodeJSONPointerSegment,
   decodeJSONPointerSegment,
 } from '@jarenjs/json/pointer';
 
@@ -37,19 +36,9 @@ import {
   identifierText,
 } from './schema-keywords.js';
 import { admitsDynamicReference } from './dynamic-ref.js';
-import { DEFAULT_ORIGIN } from './origin.js';
+import { DEFAULT_ORIGIN, encodeJsonPointerPath, withoutFragment } from './origin.js';
 
 import { SchemaCompileError } from './errors.js';
-
-function encodeJsonPointerKey(key) {
-  return encodeURIComponent(encodeJSONPointerSegment(key));
-}
-
-export function encodeJsonPointerPath(path, key, index) {
-  return index == null
-    ? `${path}/${encodeJsonPointerKey(key)}`
-    : `${path}/${encodeJsonPointerKey(key)}/${encodeJsonPointerKey(String(index))}`;
-}
 
 function decodeJsonPointerKey(key) {
   // Lenient decode: `$ref` fragments arrive here unvalidated, so a stray
@@ -1254,16 +1243,6 @@ function firstInPlaceSubschema(schema, reading) {
 }
 
 /**
- * The part of a schema id before its fragment: the resource it lies in.
- * @param {string} id
- * @returns {string}
- */
-function resourceOf(id) {
-  const hash = id.indexOf('#');
-  return hash === -1 ? id : id.slice(0, hash);
-}
-
-/**
  * Refuses a root schema whose evaluation, on every instance, comes back to a
  * schema it is still evaluating without having read the instance: following
  * the `$ref` (always evaluated first) or the one in-place applicator each
@@ -1299,7 +1278,7 @@ export function assertRootReadsInstance(schemas, rootId, root, reading, opts = n
       base = createJsonPointer(identifier, base, opts, schema.$id ? '$id' : 'id').id;
       at = base;
     }
-    rootResource ??= resourceOf(base);
+    rootResource ??= withoutFragment(base);
     const location = at.includes('#') ? at : at + '#';
     let bases = visited.get(schema);
     const seen = bases?.get(base);
@@ -1317,7 +1296,7 @@ export function assertRootReadsInstance(schemas, rootId, root, reading, opts = n
       if (first === undefined) return;
       if (first[0] === '$dynamicRef' || first[0] === '$recursiveRef') {
         const dynamic = first[0] === '$dynamicRef' ? schemaReference(schema, '$dynamicRef') : first[1];
-        if (resourceOf(base) !== rootResource || typeof dynamic !== 'string' || !dynamic.startsWith('#')
+        if (withoutFragment(base) !== rootResource || typeof dynamic !== 'string' || !dynamic.startsWith('#')
           || (first[0] === '$recursiveRef' && dynamic !== '#'))
           return;
         ref = dynamic;

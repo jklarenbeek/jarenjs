@@ -19,7 +19,6 @@ import {
   resolveRefSchemaShallow,
   isReferenceHop,
   traverseOptionsFor,
-  encodeJsonPointerPath,
   decodeJsonPointerPath,
   TraverseOptions,
   createJsonPointer,
@@ -55,6 +54,7 @@ import { isRecursiveQueryCompileError } from './query-keyword.js';
 import { boundReference, assertDepthOption, assertOutputFormat, schemaTooDeep, unimplementedVocabulary, REFERENCE_DEPTH_CEILING, SCHEMA_DEPTH_CEILING } from './errors.js';
 import { TRAVERSE_SCHEMA_OBJECTS, TRAVERSE_SCHEMA_MAPS, TRAVERSE_SCHEMA_MAP_MAPS, detectSchemaDraft, dialectVocabulary, caselessUri, heldUriKey, heldDialect, identifierKeyword, identifierText, dialectDraft } from './schema-keywords.js';
 import { VALIDATOR_STATE } from './validator-state.js';
+import { encodeJsonPointerPath } from './origin.js';
 
 export {
   registerFormatCompilers

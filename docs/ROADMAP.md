@@ -234,14 +234,22 @@ delete it or fix it.
   accepts it. The walk records the dialect of the places it enters only;
   reading the nearest `$schema` on the way, as such a target's draft is now
   read, is the open work.
-- [ ] **Importing the normalizer loads the whole validator and the query
-  compiler.** `@jarenjs/validate/normalize` imports the validator to check
-  defaults and reaches `@jarenjs/json`'s query compiler (with core's geo,
-  series, dates and math), so Node loads all of it for every importer,
-  `@jarenjs/contract/http` (through its revision and bundle helpers) and
-  `@jarenjs/db/relational` among them; bundlers shake most of it out, Node's
-  module loader does not. Wanted: the reference helpers in a module of their
-  own, and the validator loaded only where defaults are checked.
+- [ ] **Two readers of a schema's references load the validator through the
+  normalizer.** `@jarenjs/db`'s model (and so `@jarenjs/db/relational`)
+  imports `collectSameDocumentAnchors` and `resolveSameDocumentRef` from
+  `@jarenjs/validate/normalize`, and `@jarenjs/forms` those two and
+  `createSchemaPatternTester`; that subpath loads the validator (it checks
+  defaults) and, through it, `@jarenjs/json`'s query compiler, which
+  bundlers shake out and Node's module loader does not.
+  `@jarenjs/validate/references` serves the same functions and imports
+  neither. Wanted: both import it.
+- [ ] **The validator's own modules load `@jarenjs/json`'s index.**
+  `tools.js`, `dollar-data.js` and `content.js` import `compileDataRef`,
+  `JSONPOINTER_NOTHING` and `isValidJSON` from `@jarenjs/json`, whose index
+  re-exports the query compiler (with core's geo, series, dates and math),
+  so `@jarenjs/validate/output` and `@jarenjs/validate/load`, which load no
+  validator, load the query compiler under Node. Wanted: those imports from
+  `@jarenjs/json/pointer` and `@jarenjs/json/basic`, which hold them.
 
 ## @jarenjs/view & @jarenjs/app
 

@@ -66,7 +66,7 @@ import {
 } from '@jarenjs/core/schema';
 import { shortestDecimal } from '@jarenjs/core/math';
 import { JarenValidator } from '@jarenjs/validate';
-import { collectSameDocumentAnchors, createSchemaPatternTester, detectSchemaDraft, resolveSameDocumentRef } from '@jarenjs/validate/normalize';
+import { collectSameDocumentAnchors, createSchemaPatternTester, detectSchemaDraft, resolveSameDocumentRef } from '@jarenjs/validate/references';
 
 import { compileContract, followRef } from './compile.js';
 import { contractScope } from './held.js';

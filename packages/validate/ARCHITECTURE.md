@@ -31,7 +31,9 @@ The validator embraces these architectural principles:
 | `packages/validate/src/messages.js` | Error conversion, message catalogs, the `errorMessage` keyword specs (`ValidationError`, `messagesEn`, `localizeErrors`) |
 | `packages/validate/src/output.js` | The JSON Schema standard output formats (`@jarenjs/validate/output`): the unit recorder and the projections |
 | `packages/validate/src/load.js` | `compileAsync` (`@jarenjs/validate/load`): loads the documents a schema's references need, then compiles |
-| `packages/validate/src/validator-state.js` | What each validator holds, for the subpath modules (`load.js`) |
+| `packages/validate/src/validator-state.js` | What each validator holds, for the subpath modules (`load.js`), and the meta-schemas a validator given as `dialects` holds, for the readers of a schema (`heldDialects`) |
+| `packages/validate/src/normalize.js` | Schema-driven normalization (`@jarenjs/validate/normalize`): `compileNormalizer`, which checks each default with the validator, and the readings it shares with `@jarenjs/emit` |
+| `packages/validate/src/references.js` | The reading of a document's references (`@jarenjs/validate/references`): the resource index, same-document references and plain names, without the validator or `@jarenjs/json`'s query compiler, so a reader that needs only these loads only these; `normalize.js` re-exports them |
 | `packages/validate/src/strict-profile.js` | Strict structured-output profiles (`@jarenjs/validate/strict-profile`): `relaxSchema`, `deriveStrictProfile` and its two instance maps |
 | `packages/validate/src/array.js` | Array validation logic |
 | `packages/validate/src/object.js` | Object validation logic |
@@ -162,7 +164,7 @@ is read without that fragment, by one function, `identifierText`
 Which keyword identifies a schema object — `$id`,
 or `id` where the document declares no known draft — is one function,
 `identifierKeyword` (schema-keywords.js), read by this walk, by
-`indexSchemaResources` (normalize.js: the resource index the normalizer, emit
+`indexSchemaResources` (references.js: the resource index the normalizer, emit
 and the strict profile resolve references through) and, through `identifierOf` (traverse.js), by every place the
 compile derives a base or a location from an identifier: the compiled object,
 a child's location, a pointer's descent, the loop check and the precompile of
@@ -1174,7 +1176,7 @@ Map<string, ValidationObject> {
 | `createJsonPointer` | traverse.js | Parse URI into components (id, leftUri, fragment), its scheme and host lowered by `caselessUri` |
 | `caselessUri` / `heldUriKey` | schema-keywords.js | The one spelling of a URI a schema is held and looked up by: scheme and host in lower case (RFC 3986), the rest as written; `heldUriKey` adds the empty fragment (`addSchema`, `getSchema`, `dialectDraft`, `compileAsync`) |
 | `identifierKeyword` | schema-keywords.js | The keyword that identifies a schema object: `$id`, else the draft-04 `id` where its document declares no known draft (the walk, `indexSchemaResources`, the strict profile's index) |
-| `indexSchemaResources` / `resolveSchemaReference` | normalize.js | The resources of a document as the validator registers them (each embedded `$id` starts one; each with its plain names) and the base each schema object's `$ref` resolves against; one reference resolved inside the resource its URI names. The normalizer, `@jarenjs/emit` and the strict profile resolve through it. Each `$schema` is read by name, or, handed a validator as `dialects` (`heldDialects`), through the meta-schemas it holds (`index.held`), the map its compile reads a dialect through |
+| `indexSchemaResources` / `resolveSchemaReference` | references.js | The resources of a document as the validator registers them (each embedded `$id` starts one; each with its plain names) and the base each schema object's `$ref` resolves against; one reference resolved inside the resource its URI names. The normalizer, `@jarenjs/emit` and the strict profile resolve through it. Each `$schema` is read by name, or, handed a validator as `dialects` (`heldDialects`), through the meta-schemas it holds (`index.held`), the map its compile reads a dialect through |
 | `identifierOf` / `declaredDraftOf` | traverse.js | The identifier text a compile reads a base from (`$id`, or `id` where `identifierKeyword` reads it), by the draft the walks recorded for the object |
 | `identifierText` | schema-keywords.js | An identifier read without a fragment spelled as a JSON Pointer, which names nothing (every reader of an `$id`/`id`) |
 | `readsPrefixItems` / `readPrefixItems` | schema-keywords.js | Whether a place reads `prefixItems` (2020-12, or no draft declared), the one gate the validator, the normalizer and `@jarenjs/emit` read; `readPrefixItems` also reads an empty one as none |
@@ -1347,7 +1349,8 @@ For broader context on how this package fits into the JarenJS ecosystem:
 | `keyword-values.js` | Keyword value admission | `admitKeywordValues`, `KEYWORD_SHAPES` |
 | `traverse.js` | Schema traversal | `TraverseOptions`, `storeSchemaIdsInMap`, `resolveRefSchemaDeep` |
 | `tools.js` | Shared utilities | `isBoolOrObjectClass`, `hasSchemaReference`, `createIsSchemaTypeHandler` |
-| `origin.js` | The default base a schema without `$id` is read under (the compile, `compileAsync`, the resource index), and the resource a URI names | `DEFAULT_ORIGIN`, `withoutFragment` |
+| `origin.js` | The default base a schema without `$id` is read under (the compile, `compileAsync`, the resource index), the resource a URI names, and a location's JSON Pointer tokens escaped for a URI fragment | `DEFAULT_ORIGIN`, `withoutFragment`, `encodeJsonPointerPath` |
+| `references.js` | The reading of a document's references (`@jarenjs/validate/references`), without the validator | `indexSchemaResources`, `resolveSchemaReference`, `collectSameDocumentAnchors`, `resolveSameDocumentRef` |
 | `string.js` | String keywords | `compileStringBasic` |
 | `number.js` | Number keywords | `compileNumberBasic`, `multipleOfTester` |
 | `bigint.js` | BigInt keywords | `compileBigIntBasic` |

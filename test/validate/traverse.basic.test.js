@@ -4,9 +4,9 @@ import * as assert from '../assert.node.js';
 import {
   storeSchemaIdsInMap,
   resolveRefSchemaShallow,
-  encodeJsonPointerPath,
   decodeJsonPointerPath,
 } from '../../packages/validate/src/traverse.js';
+import { encodeJsonPointerPath } from '../../packages/validate/src/origin.js';
 
 describe('Schema Traversal', function () {
   const rootSchema = {

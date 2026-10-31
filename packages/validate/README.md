@@ -145,6 +145,7 @@ flag inside the source (`"[Aa]"` for case-insensitivity). `params.pattern`
 used to carry the compiled source, with every `/` escaped as `\/`.*
 
 The same reading is exported as `createSchemaPatternTester(pattern)` from
+`@jarenjs/validate/references` (which loads no validator) and
 `@jarenjs/validate/normalize`: it
 returns a repeatable `(text) => boolean` predicate (`undefined` for no
 pattern) and throws a `SyntaxError` for a string that compiles neither way.
@@ -2092,6 +2093,34 @@ coercion does, so `'\u00a0{"a":1}'` decodes in the first pass rather than
 trimming into text the second pass would decode. Decoding
 uses `JSON.parse`, so an integer beyond ±(2⁵³−1) inside the text becomes the
 nearest double, as it would in the call's outer JSON.
+
+### Reading references without the validator
+
+`compileNormalizer` checks each default with the validator, so importing
+`@jarenjs/validate/normalize` loads the validator and, through it,
+`@jarenjs/json`'s query compiler. A reader that only resolves a schema's
+references imports `@jarenjs/validate/references`: the same functions the
+normalizer resolves through (`collectSameDocumentAnchors`,
+`resolveSameDocumentRef`, `indexSchemaResources`, `resolveSchemaReference`,
+`schemaPlace`, `referenceText` and `readsRefAlone`, with
+`createSchemaPatternTester` and `detectSchemaDraft`), from a module that
+imports neither. A bundler drops what an import does not use; Node's module
+loader loads every module a static import names, so for a server the subpath
+is what it pays at startup. `@jarenjs/contract`'s HTTP transport reads a
+contract's references through it.
+
+```javascript
+import { collectSameDocumentAnchors, resolveSameDocumentRef } from '@jarenjs/validate/references';
+
+const schema = {
+  $defs: { userId: { $anchor: 'user-id', type: 'string', minLength: 1 } },
+  properties: { owner: { $ref: '#user-id' } },
+};
+const anchors = collectSameDocumentAnchors(schema);       // Map { 'user-id' => the $defs member }
+resolveSameDocumentRef('#user-id', schema, anchors);      // { $anchor: 'user-id', type: 'string', minLength: 1 }
+resolveSameDocumentRef('#/$defs/userId', schema, anchors); // the same object
+resolveSameDocumentRef('other.json#/a', schema, anchors); // undefined: another document is not followed
+```
 
 ## Strict structured-output profiles
 

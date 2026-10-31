@@ -19,6 +19,10 @@
       "types": "./dist/types/normalize.d.ts",
       "default": "./src/normalize.js"
     },
+    "./references": {
+      "types": "./dist/types/references.d.ts",
+      "default": "./src/references.js"
+    },
     "./output": {
       "types": "./dist/types/output.d.ts",
       "default": "./src/output.js"

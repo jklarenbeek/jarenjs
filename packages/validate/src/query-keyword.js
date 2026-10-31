@@ -27,7 +27,8 @@ import { decodeJSONPointerSegment } from '@jarenjs/json/pointer';
 
 import { SchemaCompileError } from './errors.js';
 import { createTypeTestCompiler } from './query.js';
-import { compiledLocation, encodeJsonPointerPath, keywordLocation } from './traverse.js';
+import { compiledLocation, keywordLocation } from './traverse.js';
+import { encodeJsonPointerPath } from './origin.js';
 
 /** The externals a `$query` is bound to per call. */
 const BOUND_EXTERNALS = Object.freeze(['root', 'path']);

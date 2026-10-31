@@ -46,11 +46,12 @@
 
 import { equalsJson, isJsonObject, setObjectMember } from '@jarenjs/core/object';
 import { SCHEMA_VALUE_KEYWORDS, SCHEMA_MAP_KEYWORDS, SCHEMA_LIST_KEYWORDS, ANNOTATION_KEYWORDS } from '@jarenjs/core/schema';
-import { indexSchemaResources, readsRefAlone, resolveSchemaReference, withoutUnreadVocabularies } from './normalize.js';
-import { withoutFragment } from './origin.js';
+import { withoutUnreadVocabularies } from './normalize.js';
+import { indexSchemaResources, readsRefAlone, resolveSchemaReference } from './references.js';
+import { encodeJsonPointerPath, withoutFragment } from './origin.js';
 import { detectSchemaDraft, dialectDraft, holdDialects, identifierKeyword } from './schema-keywords.js';
 import { VALIDATOR_STATE } from './validator-state.js';
-import { createJsonPointer, encodeJsonPointerPath } from './traverse.js';
+import { createJsonPointer } from './traverse.js';
 import { SchemaCompileError, SchemaRuntimeError } from './errors.js';
 import { JarenValidator } from './index.js';
 

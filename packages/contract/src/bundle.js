@@ -3,24 +3,25 @@
  * @file Same-document schema reachability and bundling — the one place in
  * the suite that answers "which `$defs` does this schema need?" and
  * "make this schema stand alone". The public projection keeps exactly
- * the reachable `$defs` of the retained operations (05 hashes that); a
- * tool definition carries its input schema with the reachable `$defs`
- * inlined under the schema's own `$defs`, because a tool schema must be
- * self-contained.
+ * the reachable `$defs` of the retained operations (the contract's
+ * revision hashes that); a tool definition carries its input schema with
+ * the reachable `$defs` inlined under the schema's own `$defs`, because a
+ * tool schema must be self-contained.
  *
  * Reachability follows same-document `$ref`s (`#`, `#/…` pointers,
  * `#anchor`) with the resolver `compileContract` itself uses
- * (`@jarenjs/validate/normalize`), so a reference the compiler accepted
- * resolves here by the same rules. A target is attributed to the `$defs`
- * entry that CONTAINS it — `#/$defs/Product/properties/id` needs
- * `Product` — and the entry is walked in turn. References that do not
- * land inside `$defs` (`#`, a pointer into another operation's schema,
- * an absolute `$id`) are left as written: the document states where
- * shared schemas live, and that is `$defs`.
+ * (`@jarenjs/validate/references`, which loads no validator), so a
+ * reference the compiler accepted resolves here by the same rules. A
+ * target is attributed to the `$defs` entry that CONTAINS it —
+ * `#/$defs/Product/properties/id` needs `Product` — and the entry is
+ * walked in turn. References that do not land inside `$defs` (`#`, a
+ * pointer into another operation's schema, an absolute `$id`) are left
+ * as written: the document states where shared schemas live, and that
+ * is `$defs`.
  */
 
 import { isJsonObject, setObjectMember } from '@jarenjs/core/object';
-import { collectSameDocumentAnchors, resolveSameDocumentRef } from '@jarenjs/validate/normalize';
+import { collectSameDocumentAnchors, resolveSameDocumentRef } from '@jarenjs/validate/references';
 import { parseJSONPointer } from '@jarenjs/json/pointer';
 
 /** JSON-value keywords whose content is data, not schema — not walked for `$ref`. */
