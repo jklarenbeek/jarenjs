@@ -770,9 +770,16 @@ const { breaking, additive, neutral, unknown } = diffContracts(v1, v2);
 // variant its type, a required const/enum member or the two together tell
 // apart (variants pair by that key, so a reorder moves nothing and a new
 // variant widens), where nothing else the node applies constrains the same
-// place; a not or a contains added narrows and one dropped widens; a member
-// schema that accepts nothing (false, not: {}, an empty enum, bounds that
-// cross, a pattern no string matches, …) forbids the member:
+// place; a not or a contains added narrows and one dropped widens; an
+// exclusive bound, a multipleOf step and an item, member or contains count
+// read by direction as maximum is (each end of the numbers one bound, a
+// draft-04 boolean exclusiveMaximum among them); every schema is read under
+// the draft its $schema names (before 2020-12 prefixItems, before 2019-09
+// dependentSchemas, dependentRequired, the contains counts and unevaluated*
+// are no keywords);
+// a member schema that accepts nothing (false, not: {}, an empty enum,
+// bounds that cross or hold no multiple, counts out of order, a pattern no
+// string matches, …) forbids the member:
 //   breaking — an operation or error removed, a binding member moved, a new
 //              required input member, a narrowed input, a removed/optional-
 //              ized/WIDENED output (a closed output gaining a member too —
@@ -787,11 +794,12 @@ const { breaking, additive, neutral, unknown } = diffContracts(v1, v2);
 //              media respelling (case, parameters) the wire matches alike
 //   unknown  — what the checker does not model (an if beside both a then
 //              and an else, a union whose variants overlap, a CHANGED
-//              pattern, an external $ref, an error details schema, a
+//              pattern, a multipleOf neither step of which divides the
+//              other, an external $ref, an error details schema, a
 //              constraint moved into an applicator, a member beside a
-//              catch-all — or any of these unchanged as text while a $ref
-//              inside resolves to a changed schema): REPORTED, never
-//              silently classed
+//              catch-all, a place whose draft it cannot tell — or any of
+//              these unchanged as text while a $ref inside resolves to a
+//              changed schema): REPORTED, never silently classed
 // each Change = { kind, op, docPath, from?, to?, rule } — the docPath a
 // validator error would name, $refs resolved
 

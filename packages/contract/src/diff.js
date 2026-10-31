@@ -11,9 +11,12 @@
  * The schema comparison walks the two sides in parallel over the resolved
  * same-document structure — a bare `{ "$ref": "#/$defs/X" }` hop is
  * followed with the same rules the compiler used — and models exactly the
- * R6 keyword set (`type`, `const`, `enum`, `maximum`, `minimum`,
- * `maxLength`, `minLength`, `pattern`) plus object structure
- * (`properties`, `required`, `additionalProperties`) and `items`, and
+ * R6 keyword set (`type`, `const`, `enum`, the numeric bounds `maximum`,
+ * `minimum`, `exclusiveMaximum` and `exclusiveMinimum` — one end each,
+ * the draft-04 boolean among them —, `multipleOf`, `maxLength`,
+ * `minLength`, the item, member and `contains` counts, `pattern`) plus
+ * object structure (`properties`, `required`, `additionalProperties`)
+ * and `items`, and
  * walks the branches of the applicators whose direction is decidable —
  * an `allOf`, a `then`/`else` under the same `if`, an `if` beside only a
  * `then` (its direction flipped) or only an `else`, a `dependentSchemas`
@@ -24,8 +27,14 @@
  * against branch with the same rules; a `not` or a `contains` on one
  * side only narrows or widens by its own values. A schema it proves
  * accepts nothing (`not: {}`, an empty `enum`, types that do not meet,
- * bounds that hold no number, a `pattern` no string matches, …) compares
- * as `false` does. Pure annotations (`title`,
+ * bounds that hold no number or no multiple of `multipleOf`, counts out
+ * of order, a `pattern` no string matches, …) compares as `false` does.
+ * Each schema object is read as the validator reads its place: a keyword
+ * the draft governing it does not know yet (`prefixItems` before
+ * 2020-12; `dependentSchemas`, `dependentRequired`, `minContains`,
+ * `maxContains` and the `unevaluated*` pair before 2019-09) is no
+ * keyword there, and a place whose draft the walk cannot tell compares
+ * by its text. Pure annotations (`title`,
  * `description`, `examples`, `$comment`, `deprecated`) never move a wire
  * byte and are ignored; every other keyword that differs between the two
  * sides lands in `unknown` (R15).
@@ -53,6 +62,8 @@ import { canonicalizeJson } from '@jarenjs/json/canonical';
 import {
   canonicalNullable, splitNullable, SCHEMA_VALUE_KEYWORDS, SCHEMA_MAP_KEYWORDS, SCHEMA_LIST_KEYWORDS, TYPE_SCOPED_KEYWORDS,
 } from '@jarenjs/core/schema';
+import { shortestDecimal } from '@jarenjs/core/math';
+import { JarenValidator } from '@jarenjs/validate';
 import { collectSameDocumentAnchors, createSchemaPatternTester, detectSchemaDraft, resolveSameDocumentRef } from '@jarenjs/validate/normalize';
 
 import { compileContract } from './compile.js';
@@ -91,8 +102,39 @@ export { isCompatible, compatReason } from './compat.js';
  */
 
 /** Keywords compared as constraints (the R6 set). */
-const CONSTRAINTS = ['type', 'const', 'enum', 'maximum', 'minimum', 'maxLength', 'minLength', 'pattern'];
+const CONSTRAINTS = ['type', 'const', 'enum', 'maximum', 'minimum', 'exclusiveMaximum', 'exclusiveMinimum', 'multipleOf',
+  'maxLength', 'minLength', 'pattern', 'maxItems', 'minItems', 'maxProperties', 'minProperties', 'maxContains', 'minContains'];
 const CONSTRAINT_SET = new Set(CONSTRAINTS);
+
+/**
+ * The two keywords bounding each end of the numbers a schema admits, the
+ * upper end first: the walk reads each end as one bound ({@link numericEnd}).
+ */
+const NUMERIC_ENDS = [['maximum', 'exclusiveMaximum'], ['minimum', 'exclusiveMinimum']];
+/**
+ * Each numeric bound keyword, with the keywords bounding the same end: a
+ * change at one is masked where a schema beside it holds the other
+ * ({@link mayConstrain}).
+ */
+const SAME_END = new Map(NUMERIC_ENDS.flatMap((keys) => keys.map((key) => /** @type {[string, string[]]} */ ([key, keys]))));
+
+/**
+ * The length and count bounds, each with the way it tightens and the
+ * bound its absence stands for (one that admits every value).
+ * @type {[string, 'lower' | 'higher', number][]}
+ */
+const COUNT_BOUNDS = [['maxLength', 'lower', Infinity], ['minLength', 'higher', 0], ['maxItems', 'lower', Infinity], ['minItems', 'higher', 0],
+  ['maxProperties', 'lower', Infinity], ['minProperties', 'higher', 0]];
+
+/**
+ * The keywords the validator reads only from the draft that introduced
+ * them, with that draft: a place governed by a `$schema` naming an
+ * earlier draft reads such a keyword as an unknown one. The validator
+ * reads every other keyword wherever it appears — `if`, `contains`,
+ * `const`, a numeric `exclusiveMaximum` and a boolean one alike.
+ */
+const READ_SINCE = new Map([['prefixItems', 2020], ['dependentSchemas', 2019], ['dependentRequired', 2019],
+  ['minContains', 2019], ['maxContains', 2019], ['unevaluatedProperties', 2019], ['unevaluatedItems', 2019]]);
 
 /** Keywords the object-structure pass owns. */
 const STRUCTURE = new Set(['properties', 'required', 'additionalProperties', 'items']);
@@ -115,8 +157,17 @@ function isObject(value) {
 }
 
 /**
- * One side of the parallel walk: the schema resolution scope.
- * @typedef {{ doc: any, anchors: Map<string, object> }} Side
+ * One side of the parallel walk: the schema resolution scope, and the
+ * drafts its schema objects are read under ({@link readPlaces}).
+ * @typedef {{ doc: any, anchors: Map<string, object>, places: Places }} Side
+ */
+
+/**
+ * The drafts each schema object of one contract is read under, as bits
+ * ({@link BEFORE_2019}, {@link IN_2019}, {@link FROM_2020}) — more than
+ * one where the walk cannot tell which — and each object as read there,
+ * by {@link placed}.
+ * @typedef {{ drafts: Map<object, number>, read: WeakMap<object, { node: any } | { opaque: string }> }} Places
  */
 
 /**
@@ -127,23 +178,160 @@ function isObject(value) {
 
 /**
  * Resolve bare `{ $ref }` hops (same-document only). Returns the resolved
- * node, or a marker for the shapes the walk cannot model.
+ * node as its place reads it ({@link placed}), or a marker naming the
+ * keyword of a shape the walk cannot model.
  * @param {any} node
  * @param {Side} side
- * @returns {{ node: any } | { external: string } | { opaque: true }}
+ * @returns {{ node: any } | { external: string } | { opaque: string }}
  */
 function resolveHops(node, side) {
   const seen = new Set();
   while (isObject(node) && typeof node.$ref === 'string') {
-    if (Object.keys(node).length > 1) return { opaque: true }; // $ref with siblings — not modeled
+    if (Object.keys(node).length > 1) return { opaque: '$ref' }; // $ref with siblings — not modeled
     if (!node.$ref.startsWith('#')) return { external: node.$ref };
-    if (seen.has(node)) return { opaque: true };
+    if (seen.has(node)) return { opaque: '$ref' };
     seen.add(node);
     const target = resolveSameDocumentRef(node.$ref, side.doc, side.anchors);
-    if (target === undefined) return { opaque: true };
+    if (target === undefined) return { opaque: '$ref' };
     node = target;
   }
-  return { node };
+  return placed(node, side);
+}
+
+/** A place read under a draft before 2019-09: none of the {@link READ_SINCE} keywords is one there. */
+const BEFORE_2019 = 1;
+/** A place read under 2019-09: every {@link READ_SINCE} keyword but `prefixItems` is one there. */
+const IN_2019 = 2;
+/** A place read under 2020-12 or later, or under no declared draft: every keyword is one there. */
+const FROM_2020 = 4;
+/** A place the walk cannot tell the draft of. */
+const ANY_DRAFT = BEFORE_2019 | IN_2019 | FROM_2020;
+
+/**
+ * The drafts that read a {@link READ_SINCE} keyword, as bits.
+ * @param {number} since
+ */
+const readingFrom = (since) => (since >= 2020 ? FROM_2020 : IN_2019 | FROM_2020);
+
+/**
+ * The draft of a schema object that declares `$schema`, as bits: the one
+ * its URI names ({@link detectSchemaDraft}), read as a validator holding
+ * no meta-schema reads it — a dialect it does not know reads as draft-07.
+ * @param {Record<string, any>} node
+ */
+function declaredDrafts(node) {
+  const draft = detectSchemaDraft(node);
+  return draft < 2019 ? BEFORE_2019 : draft < 2020 ? IN_2019 : FROM_2020;
+}
+
+/**
+ * The drafts every schema object of a contract may be read under, as the
+ * validator reads each place: an object declaring `$schema` under the
+ * draft it names, any other under the drafts its parent schema object is
+ * read under — from an operation's schemas and the root definitions,
+ * which the document declares no draft for. The validator reads the
+ * target of a `$ref` under its own place's draft where the reference sits
+ * below the schema it compiles, and under the target's own `$schema` alone
+ * (or none) at the end of a chain of bare references that schema starts;
+ * the two differ only below a resource declaring an older draft, so a
+ * target that declares no `$schema` is read under both. A schema of
+ * another document (an input reached through `options.schemas`) that
+ * declares none is read under any draft.
+ * @param {Contract} contract
+ * @param {Map<string, object>} anchors
+ * @returns {Places}
+ */
+function readPlaces(contract, anchors) {
+  const doc = contract.doc;
+  /** @type {Map<object, number>} */
+  const drafts = new Map();
+  /** @param {unknown} value @param {number} inherited */
+  const visit = (value, inherited) => {
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item, inherited);
+      return;
+    }
+    if (!isObject(value)) return;
+    const before = drafts.get(value) ?? 0;
+    const mask = (typeof value.$schema === 'string' ? declaredDrafts(value) : inherited) | before;
+    if (mask === before) return;
+    drafts.set(value, mask);
+    for (const [key, inner] of Object.entries(value)) {
+      if (SCHEMA_VALUES.has(key) || SCHEMA_LISTS.has(key)) visit(inner, mask);
+      else if ((SCHEMA_MAPS.has(key) || key === '$defs' || key === 'definitions') && isObject(inner)) visit(Object.values(inner), mask);
+    }
+    if (typeof value.$ref === 'string' && value.$ref.startsWith('#')) visit(resolveSameDocumentRef(value.$ref, doc, anchors), FROM_2020);
+  };
+  for (const key of ['$defs', 'definitions']) if (isObject(doc[key])) visit(Object.values(doc[key]), FROM_2020);
+  for (const id of contract.ids) {
+    const op = contract.operations[id];
+    visit(op.input?.schema, FROM_2020);
+    visit(op.output.schema, FROM_2020);
+    visit(Object.values(op.errors).map((error) => error.schema), FROM_2020);
+  }
+  for (const id of contract.ids) {
+    const effective = contract.operations[id].input?.effective;
+    if (isObject(effective) && !drafts.has(effective)) visit(effective, ANY_DRAFT);
+  }
+  return { drafts, read: new WeakMap() };
+}
+
+/**
+ * A schema object as its place reads it ({@link readPlaces}): without
+ * the {@link READ_SINCE} keywords no draft it may be read under knows,
+ * or, where some do and some do not, a marker naming the first such
+ * keyword — the walk cannot tell whether it applies. An object the
+ * contract's walk did not place (one the walk composed from read ones)
+ * is read as it is.
+ * @param {unknown} node
+ * @param {Side} side
+ * @returns {{ node: any } | { opaque: string }}
+ */
+function placed(node, side) {
+  if (!isObject(node)) return { node };
+  const mask = side.places.drafts.get(node);
+  if (mask === undefined || mask === FROM_2020) return { node };
+  let found = side.places.read.get(node);
+  if (found === undefined) {
+    /** @type {string[]} */
+    const inert = [];
+    for (const [keyword, since] of READ_SINCE) {
+      if (node[keyword] === undefined) continue;
+      const reading = readingFrom(since);
+      if ((mask & reading) === 0) inert.push(keyword);
+      else if ((mask & ~reading) !== 0) {
+        found = { opaque: keyword };
+        break;
+      }
+    }
+    found ??= { node: inert.length === 0 ? node : Object.fromEntries(Object.entries(node).filter(([key]) => !inert.includes(key))) };
+    side.places.read.set(node, found);
+  }
+  return found;
+}
+
+/**
+ * The first {@link READ_SINCE} keyword of two schema objects whose places
+ * read it differently — a keyword on one side, an unknown one on the
+ * other, or one the walk cannot tell on either — or `null`: two spellings
+ * alike as text validate apart where their drafts read them apart.
+ * @param {Record<string, any>} x
+ * @param {Record<string, any>} y
+ * @param {Side} a
+ * @param {Side} b
+ * @returns {string | null}
+ */
+function readApart(x, y, a, b) {
+  const mx = a.places.drafts.get(x) ?? FROM_2020;
+  const my = b.places.drafts.get(y) ?? FROM_2020;
+  if (mx === my) return null;
+  for (const [keyword, since] of READ_SINCE) {
+    if (x[keyword] === undefined && y[keyword] === undefined) continue;
+    const reading = readingFrom(since);
+    const read = (/** @type {number} */ mask) => `${(mask & reading) !== 0}${(mask & ~reading) !== 0}`;
+    if (read(mx) !== read(my)) return keyword;
+  }
+  return null;
 }
 
 /** Keywords whose value is one schema (a tuple `items` included). */
@@ -218,7 +406,8 @@ function divergenceInList(x, y, path, a, b, pairs) {
 
 /**
  * {@link divergence} for two schemas: a same-document `$ref` on either
- * side is followed (an external one compares by its text).
+ * side is followed (an external one compares by its text), and a keyword
+ * their places' drafts read apart ({@link readApart}) is where they differ.
  * @param {unknown} x @param {unknown} y @param {string} path
  * @param {Side} a @param {Side} b @param {Map<object, Set<object>>} pairs
  * @returns {{ path: string, from: unknown, to: unknown } | null}
@@ -229,6 +418,8 @@ function schemaDivergence(x, y, path, a, b, pairs) {
   if (seen !== undefined && seen.has(y)) return null; // in progress: the cycle closes on itself
   if (seen === undefined) pairs.set(x, (seen = new Set()));
   seen.add(y);
+  const unread = readApart(x, y, a, b);
+  if (unread !== null) return { path: path + '/' + unread, from: x[unread], to: y[unread] };
   for (const key of new Set([...Object.keys(x), ...Object.keys(y)])) {
     if (ANNOTATIONS.has(key) || (RESOLUTION.has(key) && key !== '$ref')) continue;
     if (!Object.hasOwn(x, key) || !Object.hasOwn(y, key)) {
@@ -306,6 +497,27 @@ function nullableSpelling(node) {
  */
 function nonNullBranch(branches) {
   return branches.findIndex((branch) => splitNullable({ anyOf: [branch, { type: 'null' }] }) !== null);
+}
+
+/**
+ * The one spelling of a nullable node ({@link canonicalNullable}) as its
+ * places read it: a union's spelling takes the keywords of its non-null
+ * branch, which are read where the branch sits ({@link placed}) — so a
+ * keyword its draft does not know yet is none there — and the node has
+ * no one spelling (`null`) where the walk cannot tell the branch's draft.
+ * @param {Record<string, any>} node - already read at its own place
+ * @param {Side} side
+ * @returns {Record<string, any> | null}
+ */
+function canonicalAt(node, side) {
+  const canonical = canonicalNullable(node);
+  if (canonical === null || nullableSpelling(node) === 'type') return canonical;
+  const branches = node[nullableSpelling(node)];
+  const branch = branches[nonNullBranch(branches)];
+  const read = placed(branch, side);
+  if ('opaque' in read) return null;
+  return read.node === branch ? canonical
+    : Object.fromEntries(Object.entries(canonical).filter(([key]) => !Object.hasOwn(branch, key) || Object.hasOwn(read.node, key)));
 }
 
 /** The in-place applicators: a constraint may sit inside one, so one on one side only may have moved. */
@@ -589,13 +801,18 @@ function acceptsEverything(schema, side) {
  * value outside the type set, which is the node's own `type` met with
  * each `allOf` conjunct's; type sets that do not meet; under a type set
  * of only numbers, bounds (exclusive ones among them) that hold no
- * number — under only `integer`, no integer ({@link rangeHoldsNothing});
- * under only strings, `minLength` over `maxLength` or a `pattern` no
- * string matches ({@link patternMatchesNothing}); under only `object`, a
+ * number — under only `integer`, no integer ({@link rangeHoldsNothing})
+ * — or no value the validator takes for a multiple of `multipleOf`
+ * ({@link holdsNoMultiple}); under only strings, `minLength` over
+ * `maxLength` or a `pattern` no string matches ({@link
+ * patternMatchesNothing}); under only arrays, `minItems` over
+ * `maxItems`; under only `object`, `minProperties` over `maxProperties`,
+ * fewer `maxProperties` than the distinct members it requires, or a
  * required member the object refuses every value of ({@link
  * refusesMember}: its own schema or a matching pattern's accepts
- * nothing, or a closed object does not admit it); an `allOf` conjunct
- * that accepts nothing, or an `anyOf`/`oneOf` whose every variant does.
+ * nothing, a closed object does not admit it, or `propertyNames` refuses
+ * its name); an `allOf` conjunct that accepts nothing, or an
+ * `anyOf`/`oneOf` whose every variant does.
  * Read through bare
  * same-document `$ref` hops; any other schema answers `false` and is
  * compared as before. Each node is read once per side (a diamond of
@@ -652,11 +869,14 @@ function emptyNode(node, side, within) {
     const only = (/** @type {string[]} */ kinds) => types !== null && types.every((t) => kinds.includes(t));
     const outOfOrder = (/** @type {string} */ low, /** @type {string} */ high) =>
       typeof node[low] === 'number' && typeof node[high] === 'number' && node[low] > node[high];
-    if (only([NUMBER, INTEGER]) && rangeHoldsNothing(node, only([INTEGER]))) return true;
+    if (only([NUMBER, INTEGER]) && (rangeHoldsNothing(node, only([INTEGER])) || holdsNoMultiple(node, only([INTEGER])))) return true;
     if (only([STRING]) && outOfOrder('minLength', 'maxLength')) return true;
     if (only([STRING]) && typeof node.pattern === 'string' && patternMatchesNothing(node.pattern)) return true;
-    if (only([OBJECT]) && Array.isArray(node.required)
-      && node.required.some((m) => typeof m === 'string' && refusesMember(node, m, side, within))) return true;
+    if (only([ARRAY]) && outOfOrder('minItems', 'maxItems')) return true;
+    const required = Array.isArray(node.required) ? node.required.filter((/** @type {unknown} */ m) => typeof m === 'string') : [];
+    if (only([OBJECT]) && (outOfOrder('minProperties', 'maxProperties')
+      || (typeof node.maxProperties === 'number' && new Set(required).size > node.maxProperties))) return true;
+    if (only([OBJECT]) && required.some((/** @type {string} */ m) => refusesMember(node, m, side, within))) return true;
   }
   if (conjuncts.some((conjunct) => acceptsNothing(conjunct, side, within))) return true;
   for (const key of ['anyOf', 'oneOf']) {
@@ -667,44 +887,154 @@ function emptyNode(node, side, within) {
 }
 
 /**
+ * One end of the numbers a schema admits, as the validator reads
+ * `maximum` beside `exclusiveMaximum` (`upper`), or `minimum` beside
+ * `exclusiveMinimum`: a numeric exclusive bound is an open end, a
+ * boolean one (draft-04) makes the plain bound open (`true`) or leaves
+ * it closed, and of two bounds the tighter one holds. `null` where
+ * nothing bounds the end; `undefined` where a value is no number (a
+ * numeric string the validator also reads) and the end is not read.
+ * @param {Record<string, any>} node
+ * @param {boolean} upper
+ * @returns {{ value: number, open: boolean, keyword: string } | null | undefined}
+ */
+function numericEnd(node, upper) {
+  const [plainKey, exclusiveKey] = NUMERIC_ENDS[upper ? 0 : 1];
+  const plain = node[plainKey];
+  const exclusive = node[exclusiveKey];
+  if ((plain !== undefined && typeof plain !== 'number')
+    || (exclusive !== undefined && typeof exclusive !== 'number' && typeof exclusive !== 'boolean')) return undefined;
+  /** @type {{ value: number, open: boolean, keyword: string } | null} */
+  let end = typeof plain === 'number' ? { value: plain, open: exclusive === true, keyword: plainKey } : null;
+  if (typeof exclusive === 'number' && (end === null || (upper ? exclusive <= end.value : exclusive >= end.value))) {
+    end = { value: exclusive, open: true, keyword: exclusiveKey };
+  }
+  return end;
+}
+
+/**
+ * One end of the numbers ({@link numericEnd}) read over the integers: the
+ * last integer an upper end admits, or the first a lower one does, closed.
+ * @param {{ value: number, open: boolean, keyword: string }} end
+ * @param {boolean} upper
+ */
+const integerEnd = (end, upper) => ({
+  ...end,
+  value: upper ? (end.open ? Math.ceil(end.value) - 1 : Math.floor(end.value)) : (end.open ? Math.floor(end.value) + 1 : Math.ceil(end.value)),
+  open: false,
+});
+
+/**
+ * The first and last number the numeric bounds of a schema admit, each
+ * open or closed — or, with `integers`, the first and last integer, both
+ * closed — or `null` where an end is unbounded or not read.
+ * @param {Record<string, any>} node
+ * @param {boolean} integers
+ * @returns {[{ value: number, open: boolean }, { value: number, open: boolean }] | null}
+ */
+function numericRange(node, integers) {
+  const low = numericEnd(node, false);
+  const high = numericEnd(node, true);
+  if (low === null || low === undefined || high === null || high === undefined) return null;
+  return integers ? [integerEnd(low, false), integerEnd(high, true)] : [low, high];
+}
+
+/**
  * Whether the numeric bounds of a schema hold no number — or, with
  * `integers`, no integer: the greatest lower bound past the least upper
  * one, or equal to it while either is exclusive (`exclusiveMinimum: 3,
- * exclusiveMaximum: 3`); for integers, each bound rounded to the integer
- * it admits first (`minimum: 1.2, maximum: 1.8` holds none). A bound
- * that is not a number (a draft-04 boolean `exclusiveMaximum`) is not
- * read, so the range read is never narrower than the validator's.
+ * exclusiveMaximum: 3`, or `maximum: 3` beside a draft-04
+ * `exclusiveMaximum: true`); for integers, each bound rounded to the
+ * integer it admits first (`minimum: 1.2, maximum: 1.8` holds none). A
+ * bound that is no number is not read ({@link numericEnd}), so the range
+ * read is never narrower than the validator's.
  * @param {Record<string, any>} node
  * @param {boolean} integers
  */
 function rangeHoldsNothing(node, integers) {
-  const bound = (/** @type {string} */ key) => (typeof node[key] === 'number' ? node[key] : undefined);
-  const min = bound('minimum');
-  const max = bound('maximum');
-  const exclusiveMin = bound('exclusiveMinimum');
-  const exclusiveMax = bound('exclusiveMaximum');
-  if (integers) {
-    const low = Math.max(min === undefined ? -Infinity : Math.ceil(min), exclusiveMin === undefined ? -Infinity : Math.floor(exclusiveMin) + 1);
-    const high = Math.min(max === undefined ? Infinity : Math.floor(max), exclusiveMax === undefined ? Infinity : Math.ceil(exclusiveMax) - 1);
-    return low > high;
+  const range = numericRange(node, integers);
+  if (range === null) return false;
+  const [low, high] = range;
+  return low.value > high.value || (low.value === high.value && (low.open || high.open));
+}
+
+/**
+ * Whether the numeric bounds of a schema hold no value the validator
+ * takes for a multiple of its `multipleOf` (or, with `integers`, no
+ * integer it does): no exact multiple lies between or at its ends — read
+ * on the decimals the document spells, so `0.1` divides `0.3` — and the
+ * validator refuses both ends. The validator takes a value within a
+ * small distance of a multiple for one, so an end at a multiple holds
+ * values it takes even where the end is open; between two consecutive
+ * multiples the values nearest one are the ends, so where it refuses
+ * both (an open end too, whose neighbours inside lie farther still) it
+ * takes nothing between them.
+ * @param {Record<string, any>} node
+ * @param {boolean} integers
+ */
+function holdsNoMultiple(node, integers) {
+  const step = node.multipleOf;
+  if (typeof step !== 'number' || !(step > 0)) return false;
+  const range = numericRange(node, integers);
+  if (range === null) return false;
+  const [low, high] = range;
+  const [m, lo, hi] = onOneScale([step, low.value, high.value]);
+  if (ceilDivide(lo, m) <= floorDivide(hi, m)) return false;
+  const takes = multipleTester(step);
+  return !takes(low.value) && !takes(high.value);
+}
+
+/**
+ * Finite numbers as integers over one power of ten — the decimals their
+ * shortest spelling writes ({@link shortestDecimal}: `0.1` is `1 × 10⁻¹`,
+ * not the binary fraction nearest it) — so dividing one by another leaves
+ * no float remainder.
+ * @param {number[]} values
+ * @returns {bigint[]}
+ */
+function onOneScale(values) {
+  const decimals = values.map(shortestDecimal);
+  const scale = Math.max(...decimals.map((d) => d.scale));
+  return decimals.map((d, i) => (values[i] < 0 ? -1n : 1n) * BigInt(d.digits) * 10n ** BigInt(scale - d.scale));
+}
+
+/** @param {bigint} n @param {bigint} d - positive */
+const floorDivide = (n, d) => (n >= 0n ? n / d : -((-n + d - 1n) / d));
+/** @param {bigint} n @param {bigint} d - positive */
+const ceilDivide = (n, d) => -floorDivide(-n, d);
+
+/**
+ * Whether every multiple of `to` is one of `from` — `to` is `from` times
+ * a whole number — on the decimals both spell ({@link onOneScale}).
+ * @param {number} from @param {number} to
+ */
+function multipleOfEach(from, to) {
+  const [x, y] = onOneScale([from, to]);
+  return y % x === 0n;
+}
+
+/** {@link multipleTester}'s validators, by step. @type {Map<number, (value: unknown) => boolean>} */
+const multipleTesters = new Map();
+
+/**
+ * Whether the validator takes a value for a multiple of `step`, as a
+ * schema of `multipleOf` alone compiles.
+ * @param {number} step
+ * @returns {(value: unknown) => boolean}
+ */
+function multipleTester(step) {
+  let takes = multipleTesters.get(step);
+  if (takes === undefined) {
+    const validate = new JarenValidator().compile({ multipleOf: step });
+    takes = (value) => validate(value) === true;
+    multipleTesters.set(step, takes);
   }
-  let low = min ?? -Infinity;
-  let lowOpen = false;
-  if (exclusiveMin !== undefined && exclusiveMin >= low) {
-    low = exclusiveMin;
-    lowOpen = true;
-  }
-  let high = max ?? Infinity;
-  let highOpen = false;
-  if (exclusiveMax !== undefined && exclusiveMax <= high) {
-    high = exclusiveMax;
-    highOpen = true;
-  }
-  return low > high || (low === high && (lowOpen || highOpen));
+  return takes;
 }
 
 /**
  * Whether an object schema refuses every value of the member `m`: its
+ * `propertyNames` refuses the name ({@link namesRefuse}); its
  * `properties` entry, or a `patternProperties` entry whose pattern
  * matches the name, accepts nothing; or, where neither names it, the
  * `additionalProperties` that judges it does (`false` among them) — or,
@@ -717,6 +1047,7 @@ function rangeHoldsNothing(node, integers) {
  * @param {Set<object>} within
  */
 function refusesMember(node, m, side, within) {
+  if (node.propertyNames !== undefined && namesRefuse(node.propertyNames, m, side, within)) return true;
   const named = isObject(node.properties) && Object.hasOwn(node.properties, m);
   if (named && acceptsNothing(node.properties[m], side, within)) return true;
   const patterns = matchingPatterns(node, m);
@@ -725,40 +1056,47 @@ function refusesMember(node, m, side, within) {
   if (named || patterns.length > 0) return false;
   if (node.additionalProperties !== undefined) return acceptsNothing(node.additionalProperties, side, within);
   return node.unevaluatedProperties !== undefined && !carriesApplicator(node)
-    && node.$dynamicRef === undefined && node.$recursiveRef === undefined && !declaresOlderDraft(side)
+    && node.$dynamicRef === undefined && node.$recursiveRef === undefined
     && acceptsNothing(node.unevaluatedProperties, side, within);
 }
 
+/** The keywords a `propertyNames` schema is read by on a literal name: none needs the document, a draft or a validator option. */
+const NAME_KEYWORDS = new Set(['type', 'const', 'enum', 'minLength', 'maxLength', 'pattern', 'not', 'allOf', 'anyOf', 'oneOf', ...ANNOTATIONS]);
+
 /**
- * Whether a side's document declares, anywhere, a draft older than
- * 2019-09 — a `$schema` the validator reads as one ({@link
- * detectSchemaDraft}). Under such a draft `minContains`, `maxContains`
- * and `unevaluatedProperties` are no keywords, so a reading that needs
- * them applied is not made where one may sit.
+ * Whether a `propertyNames` schema refuses the name `name`: it accepts
+ * nothing, or — spelled with {@link NAME_KEYWORDS} alone, so it reads
+ * the same wherever it sits — the validator refuses the name.
+ * @param {unknown} schema
+ * @param {string} name
  * @param {Side} side
+ * @param {Set<object>} within
  */
-function declaresOlderDraft(side) {
-  let known = olderDraftKnown.get(side);
-  if (known === undefined) olderDraftKnown.set(side, (known = holdsOlderDraft(side.doc, new Set())));
-  return known;
+function namesRefuse(schema, name, side, within) {
+  if (acceptsNothing(schema, side, within)) return true;
+  if (!isObject(schema)) return false;
+  let takes = nameTesters.get(schema);
+  if (takes === undefined) {
+    const spelledAlone = (/** @type {unknown} */ value) => typeof value === 'boolean' || (isObject(value)
+      && Object.entries(value).every(([key, inner]) => NAME_KEYWORDS.has(key) && (key === 'not' ? spelledAlone(inner)
+        : key === 'allOf' || key === 'anyOf' || key === 'oneOf' ? Array.isArray(inner) && inner.every(spelledAlone) : true)));
+    takes = null;
+    if (spelledAlone(schema)) {
+      try {
+        const validate = new JarenValidator().compile(schema);
+        takes = (/** @type {string} */ m) => validate(m) === true;
+      }
+      catch {
+        // a value the validator refuses to compile is the contract compile's to refuse, not read here
+      }
+    }
+    nameTesters.set(schema, takes);
+  }
+  return takes !== null && !takes(name);
 }
 
-/** {@link declaresOlderDraft}'s answers, per side. @type {WeakMap<Side, boolean>} */
-const olderDraftKnown = new WeakMap();
-
-/**
- * Whether a value holds an object whose `$schema` names a draft older
- * than 2019-09.
- * @param {unknown} value
- * @param {Set<object>} seen
- * @returns {boolean}
- */
-function holdsOlderDraft(value, seen) {
-  if (value === null || typeof value !== 'object' || seen.has(value)) return false;
-  seen.add(value);
-  if (isObject(value) && typeof value.$schema === 'string' && detectSchemaDraft(value) < 2019) return true;
-  return Object.values(value).some((inner) => holdsOlderDraft(inner, seen));
-}
+/** {@link namesRefuse}'s readings of a `propertyNames` schema on a literal name, `null` where it is not read so. @type {WeakMap<object, ((name: string) => boolean) | null>} */
+const nameTesters = new WeakMap();
 
 //#region whether a pattern matches no string
 
@@ -1130,7 +1468,7 @@ function decidedApplicators(A, B, a, b) {
   const tuple = (/** @type {Record<string, any>} */ node) => node.prefixItems !== undefined || Array.isArray(node.items);
   if (A.contains !== undefined && B.contains !== undefined && !tuple(A) && !tuple(B)
     && canon(A.minContains) === canon(B.minContains) && canon(A.maxContains) === canon(B.maxContains)
-    && containsReading(A, declaresOlderDraft(a) || declaresOlderDraft(b)) !== null) decided.add('contains');
+    && containsReading(A) !== null) decided.add('contains');
   // on one side only, either is a constraint added or dropped — unless it
   // may have moved there from a branch of the other side's applicators
   for (const key of ['not', 'contains']) {
@@ -1185,17 +1523,16 @@ function conditionalPositions(A, B, a, b) {
  * `minContains: 0` (at most that many may match, so a branch that widens
  * narrows the node), `'vacuous'` under `minContains: 0` alone (no count
  * to meet: the node accepts what it would without the `contains`), and
- * `null` where a count bounds both ends (not monotone in what matches),
- * is not a number, or may be no keyword at all (`older`: a document
- * declares a draft before 2019-09, {@link declaresOlderDraft}).
+ * `null` where a count bounds both ends (not monotone in what matches)
+ * or is not a number. A count the place's draft does not know yet is no
+ * keyword in the node read there ({@link placed}).
  * @param {Record<string, any>} node
- * @param {boolean} older
  * @returns {'monotone' | 'flipped' | 'vacuous' | null}
  */
-function containsReading(node, older) {
+function containsReading(node) {
   const { minContains: min, maxContains: max } = node;
   if (min === undefined && max === undefined) return 'monotone';
-  if (older || (min !== undefined && typeof min !== 'number') || (max !== undefined && typeof max !== 'number')) return null;
+  if ((min !== undefined && typeof min !== 'number') || (max !== undefined && typeof max !== 'number')) return null;
   if (max === undefined) return min === 0 ? 'vacuous' : 'monotone';
   return min === 0 ? 'flipped' : null;
 }
@@ -1311,7 +1648,8 @@ const SINGLE_BRANCH = new Set(['not', 'if', 'then', 'else']);
 /**
  * Whether a schema may constrain the instance location `segments` names
  * (pointer tokens of the walk, under the schema's own location) with the
- * keyword `keyword` — or, for `member`, constrain that member of the
+ * keyword `keyword` — a numeric bound with either keyword of its end
+ * ({@link SAME_END}) — or, for `member`, constrain that member of the
  * object found there. Unsure is yes: a hop the walk cannot follow, an
  * applicator met on the way (constraints may sit inside it), a keyword
  * that covers the location without naming it (`patternProperties`,
@@ -1369,7 +1707,7 @@ function mayConstrain(schema, segments, side, what) {
       || closedObject(node) || constrainingCatchAll(node) !== null;
   }
   if (what.keyword === undefined || what.keyword === 'schema') return true;
-  return node[what.keyword] !== undefined;
+  return (SAME_END.get(what.keyword) ?? [what.keyword]).some((key) => node[key] !== undefined);
 }
 
 /**
@@ -1532,9 +1870,8 @@ function compareBranches(key, A, B, path, a, b, sink, visited) {
     }
   }
   else if (key === 'contains') {
-    const older = declaresOlderDraft(a) || declaresOlderDraft(b);
     if (A.contains !== undefined && B.contains !== undefined) {
-      const reading = containsReading(A, older);
+      const reading = containsReading(A);
       if (reading !== 'vacuous') walk(A.contains, B.contains, path, node.map((n) => ({ ...n, prefix: ['items'] })), reading === 'flipped' ? flippedSink(sink) : sink);
     }
     else {
@@ -1543,7 +1880,7 @@ function compareBranches(key, A, B, path, a, b, sink, visited) {
       // no array
       const holder = A.contains === undefined ? B : A;
       const admitted = typeSet(holder.type);
-      if (containsReading(holder, older) !== 'vacuous' && (admitted === null || typeCovered(ARRAY, new Set(admitted)))) {
+      if (containsReading(holder) !== 'vacuous' && (admitted === null || typeCovered(ARRAY, new Set(admitted)))) {
         sink.constraint(A.contains === undefined ? 'narrowed' : 'widened', 'contains', path, A.contains, B.contains);
       }
     }
@@ -1600,8 +1937,9 @@ function compareSchema(aNode, bNode, path, a, b, sink, visited) {
     return;
   }
   if ('opaque' in ra || 'opaque' in rb) {
-    if (canon(aNode) !== canon(bNode)) sink.unknown('$ref', path, aNode, bNode);
-    else reportDivergence(schemaDivergence(aNode, bNode, path, a, b, new Map()), '$ref', sink);
+    const keyword = 'opaque' in ra ? ra.opaque : /** @type {{ opaque: string }} */ (rb).opaque;
+    if (canon(aNode) !== canon(bNode)) sink.unknown(keyword, path, aNode, bNode);
+    else reportDivergence(schemaDivergence(aNode, bNode, path, a, b, new Map()), keyword, sink);
     return;
   }
   let A = ra.node;
@@ -1633,8 +1971,8 @@ function compareSchema(aNode, bNode, path, a, b, sink, visited) {
   // meaning exactly when canonicalNullable can say so (the value sets are
   // equal). A respelling alone is neutral R16; a respelling beside a real
   // change reports both, and the change is read on the one spelling.
-  const canonA = canonicalNullable(A);
-  const canonB = canonA === null ? null : canonicalNullable(B);
+  const canonA = canonicalAt(A, a);
+  const canonB = canonA === null ? null : canonicalAt(B, b);
   if (canonA !== null && canonB !== null) {
     const spellingA = nullableSpelling(A);
     const spellingB = nullableSpelling(B);
@@ -1659,7 +1997,7 @@ function compareSchema(aNode, bNode, path, a, b, sink, visited) {
   }
 
   const structure = compareUnmodeled(A, B, path, a, b, sink, visited);
-  compareConstraints(A, B, path, sink);
+  compareConstraints(A, B, path, a, b, sink);
   if (structure) {
     compareObject(A, B, path, a, b, sink, visited);
     if (A.items !== undefined || B.items !== undefined) {
@@ -1727,19 +2065,22 @@ function reportDivergence(found, keyword, sink) {
  * @param {Record<string, any>} A
  * @param {Record<string, any>} B
  * @param {string} path
+ * @param {Side} a
+ * @param {Side} b
  * @param {Sink} sink
  */
-function compareConstraints(A, B, path, sink) {
+function compareConstraints(A, B, path, a, b, sink) {
   // a constraint present on one side only may have moved into an
   // applicator the other side carries (anyOf, allOf, …): which way the
   // accepted values moved cannot be decided, so it is R15, never a guess
   const aApplies = carriesApplicator(A);
   const bApplies = carriesApplicator(B);
+  const movedAway = (/** @type {string} */ k) => (A[k] === undefined ? aApplies : B[k] === undefined ? bApplies : false);
   const emit = (/** @type {'narrowed' | 'widened'} */ d, /** @type {string} */ k) => {
-    const oneSided = A[k] === undefined ? aApplies : B[k] === undefined ? bApplies : false;
-    if (oneSided) sink.unknown(k, path + '/' + k, A[k], B[k]);
+    if (movedAway(k)) sink.unknown(k, path + '/' + k, A[k], B[k]);
     else sink.constraint(d, k, path + '/' + k, A[k], B[k]);
   };
+  const unknown = (/** @type {string} */ k) => sink.unknown(k, path + '/' + k, A[k], B[k]);
 
   // `const` and `enum` admit one value set together (a `const` is a
   // one-value `enum`; with both, the values they share): a node that
@@ -1784,25 +2125,103 @@ function compareConstraints(A, B, path, sink) {
     }
   }
 
-  // numeric/length bounds: which way did the accepted range move?
-  for (const [key, tighterWhen] of /** @type {[string, 'lower' | 'higher'][]} */ ([
-    ['maximum', 'lower'], ['maxLength', 'lower'], ['minimum', 'higher'], ['minLength', 'higher'],
-  ])) {
+  // a keyword that judges values of one type only (a bound, a count, a
+  // pattern) moves nothing where the `type` of either side admits no value
+  // of that type: what it would move the type refuses there already
+  const typesA = typeSet(A.type);
+  const typesB = typeSet(B.type);
+  const judges = (/** @type {string} */ k) => {
+    const scope = SCOPED_TYPE.get(k);
+    return scope === undefined || [typesA, typesB].every((set) => set === null || typesMeet([scope], set));
+  };
+  // the numbers both sides admit are integers only: an end is read as the
+  // first or last integer it admits (`exclusiveMaximum: 6` is `maximum: 5`)
+  const integers = [typesA, typesB].every((set) => set !== null && !set.includes(NUMBER));
+
+  // the bounds: which way did the accepted range move? Each end of the
+  // numbers reads its two keywords as one bound ({@link numericEnd}), so a
+  // change the other keyword of the end masks moves nothing
+  /** @param {boolean} upper */
+  const end = (upper) => {
+    const changed = NUMERIC_ENDS[upper ? 0 : 1].filter((k) => canon(A[k]) !== canon(B[k]) && judges(k));
+    if (changed.length === 0) return;
+    /** @param {Record<string, any>} node */
+    const read = (node) => {
+      const found = numericEnd(node, upper);
+      return integers && found !== null && found !== undefined ? integerEnd(found, upper) : found;
+    };
+    const from = read(A);
+    const to = read(B);
+    if (from === undefined || to === undefined) {
+      changed.forEach(unknown);
+      return;
+    }
+    /** @type {'narrowed' | 'widened' | null} */
+    let direction;
+    if (from === null || to === null) direction = from !== null ? 'widened' : to !== null ? 'narrowed' : null;
+    else if (from.value === to.value) direction = from.open === to.open ? null : to.open ? 'narrowed' : 'widened';
+    else direction = (upper ? to.value < from.value : to.value > from.value) ? 'narrowed' : 'widened';
+    if (direction === null) return;
+    const moved = changed.find(movedAway);
+    if (moved !== undefined) unknown(moved);
+    else {
+      // read at the keyword that bounds the end in `b`, else in `a`
+      const at = [to?.keyword, from?.keyword].find((k) => k !== undefined && changed.includes(k)) ?? changed[0];
+      sink.constraint(direction, at, path + '/' + at, A[at], B[at]);
+    }
+  };
+  // a length or a count bound: one that is absent admits every value
+  /** @param {string} key @param {'lower' | 'higher'} tighterWhen @param {number} unbounded */
+  const count = (key, tighterWhen, unbounded) => {
+    if (canon(A[key]) === canon(B[key]) || !judges(key)) return;
     const from = A[key];
     const to = B[key];
-    if (from === to) continue;
-    if (typeof from !== 'number' && from !== undefined) { sink.unknown(key, path + '/' + key, from, to); continue; }
-    if (typeof to !== 'number' && to !== undefined) { sink.unknown(key, path + '/' + key, from, to); continue; }
-    if (from === undefined) emit('narrowed', key);
-    else if (to === undefined) emit('widened', key);
-    else if (tighterWhen === 'lower' ? to < from : to > from) emit('narrowed', key);
-    else emit('widened', key);
-  }
+    if ((from !== undefined && typeof from !== 'number') || (to !== undefined && typeof to !== 'number')) unknown(key);
+    else {
+      const was = from ?? unbounded;
+      const is = to ?? unbounded;
+      if (was !== is) emit((tighterWhen === 'lower' ? is < was : is > was) ? 'narrowed' : 'widened', key);
+    }
+  };
+  end(true);
+  count(...COUNT_BOUNDS[0]);
+  end(false);
+  count(...COUNT_BOUNDS[1]);
 
-  if (A.pattern !== B.pattern) {
+  if (A.pattern !== B.pattern && judges('pattern')) {
     if (A.pattern === undefined) emit('narrowed', 'pattern');
     else if (B.pattern === undefined) emit('widened', 'pattern');
     else sink.unknown('pattern', path + '/pattern', A.pattern, B.pattern); // two regex languages are not comparable
+  }
+
+  // a step that is a whole multiple of the other admits only multiples of
+  // that one: narrowed one way, widened the other, read on the decimals
+  // both spell; where neither divides the other, which values move rests
+  // on the bounds beside them (R15)
+  if (canon(A.multipleOf) !== canon(B.multipleOf) && judges('multipleOf')) {
+    const step = (/** @type {unknown} */ v) => typeof v === 'number' && v > 0;
+    const from = A.multipleOf;
+    const to = B.multipleOf;
+    if ((from !== undefined && !step(from)) || (to !== undefined && !step(to))) unknown('multipleOf');
+    else if (from === undefined) emit('narrowed', 'multipleOf');
+    else if (to === undefined) emit('widened', 'multipleOf');
+    else if (multipleOfEach(from, to)) emit('narrowed', 'multipleOf');
+    else if (multipleOfEach(to, from)) emit('widened', 'multipleOf');
+    else unknown('multipleOf');
+  }
+
+  for (const bound of COUNT_BOUNDS.slice(2)) count(...bound);
+
+  // the contains counts judge only beside a contains: by direction where
+  // it matches alike on both sides (one item by default, any number above);
+  // beside one that changed, R15 — what matches and how many must are read
+  // together; beside one on one side only, its own reading takes them
+  if (A.contains !== undefined && B.contains !== undefined) {
+    const alike = !schemasDiffer(A.contains, B.contains, a, b);
+    for (const [key, tighterWhen, unbounded] of /** @type {[string, 'lower' | 'higher', number][]} */ ([['maxContains', 'lower', Infinity], ['minContains', 'higher', 1]])) {
+      if (alike) count(key, tighterWhen, unbounded);
+      else if (canon(A[key]) !== canon(B[key]) && judges(key)) unknown(key);
+    }
   }
 }
 
@@ -2002,15 +2421,36 @@ function schemaSink(diff, op, root, what) {
 function compareInput(diff, aOp, bOp, a, b) {
   const op = aOp.id;
   const root = opPath(op) + '/input';
-  const aEff = aOp.input === null ? null : aOp.input.effective;
-  const bEff = bOp.input === null ? null : bOp.input.effective;
-  if (aEff === null && bEff === null) return;
+  if (bOp.input === null) {
+    if (aOp.input !== null) {
+      push(diff.breaking, {
+        kind: 'input-removed', op, docPath: root, from: aOp.input.schema, rule: 'R5',
+        note: 'the operation no longer takes input — anything an older client sends is refused',
+      });
+    }
+    return;
+  }
+  const sink = schemaSink(diff, op, root, 'input');
+  // each input as its place reads it: one whose draft the walk cannot
+  // tell is compared by its text, its spelling's and what it resolves to
+  // ({@link placed})
+  const aRead = aOp.input === null ? null : placed(aOp.input.effective, a);
+  const bRead = placed(bOp.input.effective, b);
+  if ((aRead !== null && 'opaque' in aRead) || 'opaque' in bRead) {
+    const keyword = aRead !== null && 'opaque' in aRead ? aRead.opaque : /** @type {{ opaque: string }} */ (bRead).opaque;
+    if (aOp.input === null || schemasDiffer(aOp.input.effective, bOp.input.effective, a, b) || schemasDiffer(aOp.input.schema, bOp.input.schema, a, b)) {
+      sink.unknown(keyword, '', aOp.input?.effective, bOp.input.effective);
+    }
+    return;
+  }
+  const aEff = aRead === null ? null : aRead.node;
+  const bEff = bRead.node;
 
   const aProps = aEff !== null && isObject(aEff.properties) ? aEff.properties : {};
-  const bProps = bEff !== null && isObject(bEff.properties) ? bEff.properties : {};
+  const bProps = isObject(bEff.properties) ? bEff.properties : {};
   const aReq = new Set(aEff !== null && Array.isArray(aEff.required) ? aEff.required : []);
-  const bReq = new Set(bEff !== null && Array.isArray(bEff.required) ? bEff.required : []);
-  const bClosed = bEff === null || closedObject(bEff);
+  const bReq = new Set(Array.isArray(bEff.required) ? bEff.required : []);
+  const bClosed = closedObject(bEff);
   // a catch-all that constrains the members the input does not name judges
   // a member moved out of (or into) `properties`: undecidable, R15
   const aCatchAll = aEff === null || closedObject(aEff) ? null : constrainingCatchAll(aEff);
@@ -2018,15 +2458,6 @@ function compareInput(diff, aOp, bOp, a, b) {
   const judged = (/** @type {string} */ at, /** @type {string} */ m, /** @type {string} */ catchAll) =>
     push(diff.unknown, { kind: 'schema-unknown', op, docPath: at, from: m, to: m, rule: 'R15', note: catchAll });
 
-  if (aEff !== null && bEff === null) {
-    push(diff.breaking, {
-      kind: 'input-removed', op, docPath: root, from: aOp.input?.schema, rule: 'R5',
-      note: 'the operation no longer takes input — anything an older client sends is refused',
-    });
-    return;
-  }
-
-  const sink = schemaSink(diff, op, root, 'input');
   const visited = new Map();
   // the siblings of a `$ref` the input is spelled as judge the members the
   // target does not name (a catch-all beside it), so a `false` member is
@@ -2109,7 +2540,7 @@ function compareInput(diff, aOp, bOp, a, b) {
   // and so do the siblings of a `$ref` the input is spelled as (the
   // members are read from what the `$ref` resolves to)
   compareUnmodeled(aEff, bEff, '', a, b, sink, visited, readsAnnotations(aBeside) || readsAnnotations(bBeside));
-  compareConstraints(aEff, bEff, '', sink);
+  compareConstraints(aEff, bEff, '', a, b, sink);
   if (canon(aBeside) !== canon(bBeside)) sink.unknown('$ref', '', aOp.input?.schema, bOp.input?.schema);
   else reportDivergence(schemaDivergence(aBeside, bBeside, '', a, b, new Map()), '$ref', sink);
 }
@@ -2299,9 +2730,9 @@ export function diffContracts(a, b, options = undefined) {
   /** @type {ContractDiff} */
   const diff = { breaking: [], additive: [], neutral: [], unknown: [] };
   /** @type {Side} */
-  const sideA = { doc: A.doc, anchors: collectSameDocumentAnchors(A.doc) };
+  const sideA = side(A);
   /** @type {Side} */
-  const sideB = { doc: B.doc, anchors: collectSameDocumentAnchors(B.doc) };
+  const sideB = side(B);
 
   for (const id of new Set([...A.ids, ...B.ids])) {
     const aOp = Object.hasOwn(A.operations, id) ? A.operations[id] : null;
@@ -2312,6 +2743,17 @@ export function diffContracts(a, b, options = undefined) {
     if (server) markServerChanges(diff, marks);
   }
   return diff;
+}
+
+/**
+ * One contract as a side of the walk: its document, the names declared
+ * in it, and the drafts its schema objects are read under.
+ * @param {Contract} contract
+ * @returns {Side}
+ */
+function side(contract) {
+  const anchors = collectSameDocumentAnchors(contract.doc);
+  return { doc: contract.doc, anchors, places: readPlaces(contract, anchors) };
 }
 
 /** The four classes, in the order a diff lists them. */

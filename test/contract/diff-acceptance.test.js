@@ -15,6 +15,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert';
 
 import { JarenValidator } from '@jarenjs/validate';
+import { compileContract } from '@jarenjs/contract';
 import { diffContracts } from '@jarenjs/contract/diff';
 
 /** @param {any} op @param {any} $defs */
@@ -123,7 +124,7 @@ describe('diffContracts — a member the other side judges by a pattern, an appl
 });
 
 describe('diffContracts — a member schema that accepts nothing forbids the member, as false does', () => {
-  const samples = [null, true, 0, 1, 1.5, 2, 3, 3.25, -2, '', 'a', 'abc', 'xa', 'a\n', [], [1], {}, { k: 1 }, { k: 'x' }];
+  const samples = [null, true, 0, 0.10000001, 0.3, 1, 1.0000005, 1.5, 2, 3, 3.25, -2, '', 'a', 'abc', 'xa', 'a\n', [], [1], {}, { k: 1 }, { k: 'x' }];
   /** Shapes the walk proves accept nothing. @type {[string, any][]} */
   const nothing = [
     ['not of everything', { not: {} }],
@@ -156,6 +157,15 @@ describe('diffContracts — a member schema that accepts nothing forbids the mem
     ['a pattern of a class that admits nothing', { type: 'string', pattern: '[^\\s\\S]' }],
     ['a pattern repeating a match anchored at the start', { type: 'string', pattern: '(^a){2}' }],
     ['a pattern every alternative of which is empty', { type: 'string', pattern: 'x[]+|y$z' }],
+    ['a draft-04 boolean exclusive maximum at the minimum', { type: 'number', minimum: 3, maximum: 3, exclusiveMaximum: true }],
+    ['items out of order', { type: 'array', minItems: 3, maxItems: 2 }],
+    ['member counts out of order', { type: 'object', minProperties: 2, maxProperties: 1 }],
+    ['fewer members allowed than it requires', { type: 'object', required: ['a', 'b', 'a'], maxProperties: 1 }],
+    ['a range holding no multiple', { type: 'number', minimum: 1.1, maximum: 1.9, multipleOf: 1 }],
+    ['an open decimal range holding no multiple', { type: 'number', exclusiveMinimum: 0.31, exclusiveMaximum: 0.39, multipleOf: 0.1 }],
+    ['an integer range holding no multiple', { type: 'integer', minimum: 1, maximum: 4, multipleOf: 5 }],
+    ['a propertyNames refusing the required name', { type: 'object', required: ['k'], propertyNames: { maxLength: 0 } }],
+    ['a propertyNames pattern refusing the required name', { type: 'object', required: ['k'], propertyNames: { not: { pattern: '^k' } } }],
   ];
   /** Shapes that look alike but accept something: classed as any constrained member. @type {[string, any][]} */
   const something = [
@@ -176,6 +186,15 @@ describe('diffContracts — a member schema that accepts nothing forbids the mem
     ['a pattern of an empty class repeated any number of times', { type: 'string', pattern: '[]*' }],
     ['a pattern of a dollar then a caret', { type: 'string', pattern: '$^' }],
     ['a pattern one alternative of which matches', { type: 'string', pattern: 'a|[]' }],
+    ['items in order', { type: 'array', minItems: 1, maxItems: 1 }],
+    ['items out of order without a type', { minItems: 3, maxItems: 2 }],
+    ['the required members within the member count', { type: 'object', required: ['k', 'k'], maxProperties: 1 }],
+    ['a range holding a multiple', { type: 'number', minimum: 1.1, maximum: 2.1, multipleOf: 1 }],
+    ['a range holding a decimal multiple', { type: 'number', minimum: 0.25, maximum: 0.35, multipleOf: 0.1 }],
+    ['a range about zero holding its multiple', { type: 'number', minimum: -0.5, maximum: 0.5, multipleOf: 1 }],
+    ['an open range at a multiple', { type: 'number', exclusiveMinimum: 0.1, exclusiveMaximum: 0.2, multipleOf: 0.1 }],
+    ['a range next to a multiple, close enough for the validator', { type: 'number', minimum: 1.0000001, maximum: 1.5, multipleOf: 1 }],
+    ['a propertyNames admitting the required name', { type: 'object', required: ['k'], propertyNames: { maxLength: 1 } }],
   ];
   /**
    * Shapes that accept nothing in a way the procedure does not read (a
@@ -185,6 +204,8 @@ describe('diffContracts — a member schema that accepts nothing forbids the mem
   const unread = [
     ['a pattern whose lookahead contradicts it', { type: 'string', pattern: '(?=a)b' }],
     ['a pattern of a word boundary and its negation', { type: 'string', pattern: '\\b\\B' }],
+    ['an integer range holding a multiple only between its integers', { type: 'integer', minimum: 6, maximum: 9, multipleOf: 2.5 }],
+    ['a propertyNames spelled with a keyword not read on a literal', { type: 'object', required: ['k'], propertyNames: { if: { minLength: 1 }, then: false } }],
   ];
   const $defs = { none: { not: {} } };
   const open = { type: 'object' };
@@ -394,12 +415,102 @@ describe('diffContracts — a conditional, a not or a contains read by direction
   });
 });
 
-describe('diffContracts — under a draft before 2019-09 the counts and unevaluatedProperties are no keywords', () => {
+describe('diffContracts — each schema place read under the draft its $schema names', () => {
   const draft7 = 'http://json-schema.org/draft-07/schema#';
+  const draft2019 = 'https://json-schema.org/draft/2019-09/schema';
+  const draft2020 = 'https://json-schema.org/draft/2020-12/schema';
+  /** @param {string} type */
+  const tuple = (type) => ({ type: 'array', prefixItems: [{ type }] });
+  const tuples = [['a'], [1], [], 'a'].map((x) => ({ x }));
 
-  it('a contains beside minContains 0 is read as a contains that needs one match may be: R15, not "no change"', () => {
+  /**
+   * {@link agrees}, the witnesses read by the two contracts' own
+   * validators, which compile each schema inside its document.
+   * @param {'input' | 'output'} where
+   * @param {any} a @param {any} b
+   * @param {any} defsA @param {any} defsB
+   * @param {unknown[]} witnesses
+   * @param {[string, string, string, string][]} expected
+   */
+  function agreesInDocument(where, a, b, defsA, defsB, witnesses, expected) {
+    const before = compileContract(take(where, a, defsA));
+    const after = compileContract(take(where, b, defsB));
+    const d = diffContracts(before, after);
+    assert.deepStrictEqual(flat(d, where), expected);
+    const accepts = (/** @type {any} */ contract, /** @type {unknown} */ x) => contract.operations['a.b'][where].validate(x).valid;
+    const lost = witnesses.filter((x) => (where === 'input' ? accepts(before, x) && !accepts(after, x) : accepts(after, x) && !accepts(before, x)));
+    if (d.breaking.length > 0) assert.ok(lost.length > 0, `breaking without a witness: ${JSON.stringify(d.breaking)}`);
+    if (d.breaking.length === 0 && d.unknown.length === 0) assert.deepStrictEqual(lost, [], 'a witness the diff did not class breaking');
+  }
+
+  it('the validator reads prefixItems from 2020-12 and the other keywords the walk gates from 2019-09, and contains, if and both exclusive bound spellings under every draft', () => {
+    /** Each keyword, a schema of it and a value it refuses where it is read. @type {[string, any, unknown][]} */
+    const keywords = [
+      ['prefixItems', { prefixItems: [{ type: 'string' }] }, [1]],
+      ['dependentSchemas', { dependentSchemas: { a: { required: ['b'] } } }, { a: 1 }],
+      ['dependentRequired', { dependentRequired: { a: ['b'] } }, { a: 1 }],
+      ['minContains', { contains: { const: 1 }, minContains: 2 }, [1]],
+      ['maxContains', { contains: { const: 1 }, maxContains: 1 }, [1, 1]],
+      ['unevaluatedProperties', { unevaluatedProperties: false }, { a: 1 }],
+      ['unevaluatedItems', { unevaluatedItems: false }, [1]],
+      ['contains', { contains: { const: 1 } }, [2]],
+      ['if', { if: { const: 1 }, then: false }, 1],
+      ['exclusiveMaximum', { exclusiveMaximum: 3 }, 3],
+      ['a boolean exclusiveMaximum', { maximum: 3, exclusiveMaximum: true }, 3],
+    ];
+    const names = keywords.map(([name]) => name);
+    const reads = (/** @type {string | undefined} */ $schema) => keywords
+      .filter(([, schema, refused]) => !new JarenValidator().compile($schema === undefined ? schema : { $schema, ...schema })(refused))
+      .map(([name]) => name);
+    assert.deepStrictEqual(reads(undefined), names);
+    assert.deepStrictEqual(reads(draft2020), names);
+    assert.deepStrictEqual(reads(draft2019), names.filter((name) => name !== 'prefixItems'));
+    for (const $schema of ['http://json-schema.org/draft-04/schema#', 'http://json-schema.org/draft-06/schema#', draft7, 'https://example.com/a-dialect']) {
+      assert.deepStrictEqual(reads($schema), ['contains', 'if', 'exclusiveMaximum', 'a boolean exclusiveMaximum'], $schema);
+    }
+  });
+
+  it('a prefixItems entry or a dependentSchemas member that changed where the draft does not read it changes nothing (was breaking R6 beside additive R7)', () => {
+    /** @param {string} $schema @param {string} type */
+    const spelled = ($schema, type) => ({ $schema, ...member(tuple(type)) });
+    agrees('input', spelled(draft7, 'string'), spelled(draft7, 'number'), tuples, []);
+    agrees('input', spelled(draft2019, 'string'), spelled(draft2019, 'number'), tuples, []);
+    // a dialect the validator does not know reads as draft-07
+    agrees('input', spelled('https://example.com/a-dialect', 'string'), spelled('https://example.com/a-dialect', 'number'), tuples, []);
+    agrees('input', spelled(draft2020, 'string'), spelled(draft2020, 'number'), tuples,
+      [['breaking', 'R6', 'input-narrowed', '/properties/x/prefixItems/0/type'], ['additive', 'R7', 'input-widened', '/properties/x/prefixItems/0/type']]);
+    /** @param {string} $schema @param {string} required */
+    const dependent = ($schema, required) => ({ $schema, type: 'object', dependentSchemas: { a: { required: [required] } } });
+    const objects = [{ a: 1, b: 1 }, { a: 1, c: 1 }, { a: 1 }, {}];
+    agrees('input', dependent(draft7, 'b'), dependent(draft7, 'c'), objects, []);
+    agrees('input', dependent(draft2019, 'b'), dependent(draft2019, 'c'), objects,
+      [['breaking', 'R6', 'input-narrowed', '/dependentSchemas/a/required'], ['additive', 'R7', 'input-widened', '/dependentSchemas/a/required']]);
+  });
+
+  it('unevaluatedProperties: false where the draft does not read it closes nothing: an output member added is additive R9 (was breaking R8)', () => {
+    /** @param {Record<string, any>} properties */
+    const output = (properties) => ({ $schema: draft7, type: 'object', properties, unevaluatedProperties: false });
+    agrees('output', output({ a: string }), output({ a: string, b: string }), [{ a: 'x', b: 'y' }, { a: 'x', b: 1 }],
+      [['additive', 'R9', 'output-member-added', '/properties/b']]);
+    // a nullable union respelled as a type array reads its branch where the branch sits
+    /** @param {any} v */
+    const holder = (v) => ({ $schema: draft7, type: 'object', properties: { v } });
+    const union = holder({ anyOf: [{ type: 'object', properties: { a: string }, unevaluatedProperties: false }, { type: 'null' }] });
+    const array = holder({ type: ['object', 'null'], properties: { a: string, b: string }, unevaluatedProperties: false });
+    agrees('output', union, array, [{ v: null }, { v: { a: 'x', b: 'y' } }, { v: { a: 'x', b: 1 } }],
+      [['additive', 'R9', 'output-member-added', '/properties/v/properties/b'], ['neutral', 'R16', 'schema-respelled', '/properties/v']]);
+  });
+
+  it('a member that declares draft-07 is read under it: a constrained member added beside its unevaluatedProperties narrows the member (was additive R7)', () => {
+    /** @param {Record<string, any>} properties */
+    const x = (properties) => member({ $schema: draft7, type: 'object', properties, unevaluatedProperties: false });
+    agrees('input', x({ n: {} }), x({ n: {}, m: string }), [{ x: { m: 1 } }, { x: { m: 'a' } }, { x: { n: 1 } }],
+      [['breaking', 'R6', 'input-narrowed', '/properties/x/properties/m']]);
+  });
+
+  it('under draft-07 minContains is no keyword: a contains beside minContains 0 still needs one match, so a contains that narrows narrows the node (was R15)', () => {
     const arrays = (/** @type {string[]} */ required) => ({ $schema: draft7, type: 'object', properties: { x: { type: 'array', contains: { required }, minContains: 0 } } });
-    agrees('input', arrays(['a']), arrays(['a', 'b']), [{ x: [{ a: 1 }] }, { x: [] }], [['unknown', 'R15', 'schema-unknown', '/properties/x/contains']]);
+    agrees('input', arrays(['a']), arrays(['a', 'b']), [{ x: [{ a: 1 }] }, { x: [] }], [['breaking', 'R6', 'input-narrowed', '/properties/x/contains/required']]);
   });
 
   it('an object closed by unevaluatedProperties requiring a member is no empty schema there: added to an open input it is the additive R7 row', () => {
@@ -408,6 +519,141 @@ describe('diffContracts — under a draft before 2019-09 the counts and unevalua
     assert.strictEqual(new JarenValidator().compile(adding)({ m: { k: 1 } }), true);
     const d = diffContracts(take('input', { $schema: draft7, type: 'object' }), take('input', adding));
     assert.deepStrictEqual(flat(d, 'input'), [['additive', 'R7', 'input-member-added', '/properties/m']]);
+  });
+
+  it('a definition that declares its own draft is read under it behind a $ref; a $schema moved to a draft that reads the keyword is reported where the keyword sits (was nothing)', () => {
+    /** @param {string} $schema @param {string} type */
+    const defs = ($schema, type) => ({ T: { $schema, ...tuple(type) } });
+    const ref = { $ref: '#/$defs/T' };
+    agreesInDocument('input', member(ref), member(ref), defs(draft7, 'string'), defs(draft7, 'number'), tuples, []);
+    agreesInDocument('output', ref, ref, defs(draft7, 'string'), defs(draft7, 'number'), [['a'], [1]], []);
+    agreesInDocument('input', member(ref), member(ref), defs(draft7, 'string'), defs(draft2020, 'string'), tuples,
+      [['unknown', 'R15', 'schema-unknown', '/properties/x/prefixItems']]);
+    agrees('input', { $schema: draft7, ...member(tuple('string')) }, { $schema: draft2020, ...member(tuple('string')) }, tuples,
+      [['unknown', 'R15', 'schema-unknown', '/properties/x/prefixItems']]);
+    // compared by its text, an if beside both branches validates apart where its keywords are read apart
+    /** @param {string} $schema */
+    const conditional = ($schema) => ({ $schema, ...member({ if: { dependentRequired: { a: ['b'] } }, then: { required: ['c'] }, else: { required: ['d'] } }) });
+    agrees('input', conditional(draft7), conditional(draft2020), [{ x: { a: 1, c: 1 } }, { x: { a: 1, b: 1, c: 1 } }, { x: { d: 1 } }],
+      [['unknown', 'R15', 'schema-unknown', '/properties/x/if/dependentRequired']]);
+  });
+
+  it('a definition below a resource declaring draft-07 is read under it from a $ref below the schema, under none at the end of a chain the schema starts: a change there is R15 (was breaking R6 beside additive R7)', () => {
+    /** @param {string} type */
+    const defs = (type) => ({ lib: { $schema: draft7, $defs: { T: tuple(type) } } });
+    const ref = { $ref: '#/$defs/lib/$defs/T' };
+    agreesInDocument('input', member(ref), member(ref), defs('string'), defs('number'), tuples,
+      [['unknown', 'R15', 'schema-unknown', '/properties/x/prefixItems/0/type']]);
+    agreesInDocument('output', ref, ref, defs('string'), defs('number'), [['a'], [1]],
+      [['unknown', 'R15', 'schema-unknown', '/prefixItems/0/type']]);
+    agreesInDocument('input', member(ref), member(ref), defs('string'), defs('string'), tuples, []);
+    // alike as text beside a resource that now declares a draft reading the keyword, it may have moved
+    agreesInDocument('input', member(ref), member(ref), defs('string'), { lib: { $schema: draft2020, $defs: { T: tuple('string') } } }, tuples,
+      [['unknown', 'R15', 'schema-unknown', '/properties/x/prefixItems']]);
+  });
+
+  it('an input in another document that declares no $schema of its own may sit under any draft: a keyword the drafts read apart leaves it compared by its text (was breaking R5)', () => {
+    // the compiled contract does not carry the draft-07 the document declares above the definition
+    /** @param {Record<string, any>} properties */
+    const compiled = (properties) => compileContract(take('input', { $ref: 'https://x.example/lib.json#/$defs/In' }), {
+      schemas: [{ $id: 'https://x.example/lib.json', $schema: draft7, $defs: { In: { type: 'object', properties, unevaluatedProperties: false } } }],
+    });
+    const before = compiled({ m: string, n: string });
+    assert.deepStrictEqual(flat(diffContracts(before, compiled({ m: string })), 'input'), [['unknown', 'R15', 'schema-unknown', '']]);
+    assert.deepStrictEqual(flat(diffContracts(before, compiled({ m: string, n: string })), 'input'), []);
+  });
+});
+
+describe('diffContracts — exclusive bounds, multipleOf and the item, member and contains counts read by direction', () => {
+  const numbers = [-1, 0, 0.3, 0.5, 1, 1.5, 2, 2.5, 3, 4, 5, 5.5, 6, 7, 10].map((x) => ({ x }));
+  /** @param {Record<string, any>} bounds */
+  const number = (bounds) => member({ type: 'number', ...bounds });
+
+  it('an exclusive bound reads as maximum and minimum do, each end one bound with the plain keyword beside it (was R15)', () => {
+    agrees('input', number({ exclusiveMaximum: 10 }), number({ exclusiveMaximum: 5 }), numbers, [['breaking', 'R6', 'input-narrowed', '/properties/x/exclusiveMaximum']]);
+    agrees('input', number({ exclusiveMinimum: 5 }), number({ exclusiveMinimum: 1 }), numbers, [['additive', 'R7', 'input-widened', '/properties/x/exclusiveMinimum']]);
+    agrees('input', number({}), number({ exclusiveMinimum: 1 }), numbers, [['breaking', 'R6', 'input-narrowed', '/properties/x/exclusiveMinimum']]);
+    // an exclusive bound at the maximum takes that one value out
+    agrees('input', number({ maximum: 5 }), number({ maximum: 5, exclusiveMaximum: 5 }), numbers, [['breaking', 'R6', 'input-narrowed', '/properties/x/exclusiveMaximum']]);
+    // a change the other keyword of its end masks moves nothing
+    agrees('input', number({ maximum: 3, exclusiveMaximum: 10 }), number({ maximum: 3, exclusiveMaximum: 5 }), numbers, []);
+    // respelled from one keyword to the other: read where b bounds the end
+    agrees('input', number({ maximum: 5 }), number({ exclusiveMaximum: 6 }), numbers, [['additive', 'R7', 'input-widened', '/properties/x/exclusiveMaximum']]);
+    agrees('output', { type: 'number', exclusiveMaximum: 5 }, { type: 'number', exclusiveMaximum: 10 }, numbers.map(({ x }) => x),
+      [['breaking', 'R8', 'output-widened', '/exclusiveMaximum']]);
+  });
+
+  it('a draft-04 boolean exclusive bound makes the plain bound beside it open: set or cleared it moves that one value, beside no plain bound nothing (was R15)', () => {
+    agrees('input', number({ maximum: 5 }), number({ maximum: 5, exclusiveMaximum: true }), numbers, [['breaking', 'R6', 'input-narrowed', '/properties/x/exclusiveMaximum']]);
+    agrees('input', number({ minimum: 1, exclusiveMinimum: true }), number({ minimum: 1, exclusiveMinimum: false }), numbers,
+      [['additive', 'R7', 'input-widened', '/properties/x/exclusiveMinimum']]);
+    agrees('input', number({ maximum: 5, exclusiveMaximum: true }), number({ maximum: 6, exclusiveMaximum: true }), numbers,
+      [['additive', 'R7', 'input-widened', '/properties/x/maximum']]);
+    agrees('input', number({}), number({ exclusiveMaximum: true }), numbers, []);
+  });
+
+  it('where both sides admit only integers an end is the first or last integer it admits, and a bound beside a type that admits no value it judges moves nothing (was R6 or R15)', () => {
+    /** @param {Record<string, any>} bounds */
+    const integer = (bounds) => member({ type: 'integer', ...bounds });
+    const integers = [3, 4, 5, 6].map((x) => ({ x }));
+    agrees('input', integer({ exclusiveMaximum: 6 }), integer({ maximum: 5 }), integers, []);
+    agrees('input', integer({ maximum: 5, exclusiveMaximum: true }), integer({ maximum: 4 }), integers, []);
+    agrees('input', integer({ maximum: 4.5 }), integer({ maximum: 4 }), integers, []);
+    agrees('input', integer({ maximum: 5 }), integer({ maximum: 4.5 }), integers, [['breaking', 'R6', 'input-narrowed', '/properties/x/maximum']]);
+    const values = ['', 'ab', 1, [1, 2, 3]].map((x) => ({ x }));
+    agrees('input', member({ type: 'integer' }), member({ type: 'integer', maxLength: 1 }), values, []);
+    agrees('input', member({ type: 'string' }), member({ type: 'string', maxItems: 2 }), values, []);
+    agrees('input', member({ type: 'string', pattern: '^a' }), member({ type: 'integer', pattern: '^b' }), values,
+      [['breaking', 'R6', 'input-narrowed', '/properties/x/type'], ['additive', 'R7', 'input-widened', '/properties/x/type']]);
+  });
+
+  it('a bound a conjunct changes while another holds the other keyword of its end is R15, and so is one that may have moved into an applicator: what the node admits need not move', () => {
+    agrees('input', member({ allOf: [{ exclusiveMaximum: 5 }, { maximum: 2 }] }), member({ allOf: [{ exclusiveMaximum: 4 }, { maximum: 2 }] }), numbers,
+      [['unknown', 'R15', 'schema-unknown', '/properties/x/allOf/0/exclusiveMaximum']]);
+    agrees('input', member({ allOf: [{ exclusiveMaximum: 5 }] }), member({ exclusiveMaximum: 5, allOf: [{}] }), numbers,
+      [['unknown', 'R15', 'schema-unknown', '/properties/x/allOf'], ['unknown', 'R15', 'schema-unknown', '/properties/x/exclusiveMaximum']]);
+  });
+
+  it('multipleOf narrows to a whole multiple of its step and widens to a whole fraction of it, on the decimals it spells; a step neither divides stays R15 (was R15)', () => {
+    agrees('input', number({ multipleOf: 1 }), number({ multipleOf: 2 }), numbers, [['breaking', 'R6', 'input-narrowed', '/properties/x/multipleOf']]);
+    agrees('input', number({ multipleOf: 0.5 }), number({ multipleOf: 0.1 }), numbers, [['additive', 'R7', 'input-widened', '/properties/x/multipleOf']]);
+    // 0.3 is three times 0.1 on the decimals, not on the binary fractions nearest them
+    agrees('input', number({ multipleOf: 0.1 }), number({ multipleOf: 0.3 }), [0.1, 0.3, 0.6].map((x) => ({ x })),
+      [['breaking', 'R6', 'input-narrowed', '/properties/x/multipleOf']]);
+    agrees('input', number({ multipleOf: 0.01 }), number({ multipleOf: 0.1 }), [0.07, 0.3, 1].map((x) => ({ x })),
+      [['breaking', 'R6', 'input-narrowed', '/properties/x/multipleOf']]);
+    agrees('input', number({}), number({ multipleOf: 2 }), numbers, [['breaking', 'R6', 'input-narrowed', '/properties/x/multipleOf']]);
+    agrees('input', number({ multipleOf: 2 }), number({}), numbers, [['additive', 'R7', 'input-widened', '/properties/x/multipleOf']]);
+    agrees('input', number({ multipleOf: 2 }), number({ multipleOf: 3 }), numbers, [['unknown', 'R15', 'schema-unknown', '/properties/x/multipleOf']]);
+  });
+
+  it('the item and member counts read as the lengths do, and a bound that admits every value moves nothing (was R15; a minLength of 0 added was breaking R6)', () => {
+    const arrays = [[], [1], [1, 2], [1, 2, 3]].map((x) => ({ x }));
+    agrees('input', member({ type: 'array', maxItems: 3 }), member({ type: 'array', maxItems: 2 }), arrays, [['breaking', 'R6', 'input-narrowed', '/properties/x/maxItems']]);
+    agrees('input', member({ type: 'array' }), member({ type: 'array', minItems: 1 }), arrays, [['breaking', 'R6', 'input-narrowed', '/properties/x/minItems']]);
+    agrees('input', member({ type: 'array', minItems: 2 }), member({ type: 'array' }), arrays, [['additive', 'R7', 'input-widened', '/properties/x/minItems']]);
+    agrees('input', member({ type: 'array' }), member({ type: 'array', minItems: 0 }), arrays, []);
+    const objects = [{}, { a: 1 }, { a: 1, b: 1 }].map((x) => ({ x }));
+    agrees('input', member({ type: 'object', maxProperties: 2 }), member({ type: 'object', maxProperties: 1 }), objects,
+      [['breaking', 'R6', 'input-narrowed', '/properties/x/maxProperties']]);
+    agrees('input', member({ type: 'object', minProperties: 1 }), member({ type: 'object', minProperties: 0 }), objects,
+      [['additive', 'R7', 'input-widened', '/properties/x/minProperties']]);
+    agrees('output', { type: 'array', maxItems: 1 }, { type: 'array', maxItems: 2 }, [[], [1], [1, 2]], [['breaking', 'R8', 'output-widened', '/maxItems']]);
+    agrees('input', member(string), member({ type: 'string', minLength: 0 }), ['', 'a'].map((x) => ({ x })), []);
+  });
+
+  it('a contains count reads by direction beside a contains alike on both sides, one match by default; beside one that changed it stays R15, beside none it judges nothing (was R15)', () => {
+    const arrays = [[], [1], [1, 1], [1, 1, 1], [2]].map((x) => ({ x }));
+    /** @param {Record<string, any>} counts @param {any} [contains] */
+    const counted = (counts, contains = { const: 1 }) => member({ type: 'array', contains, ...counts });
+    agrees('input', counted({ minContains: 1 }), counted({ minContains: 2 }), arrays, [['breaking', 'R6', 'input-narrowed', '/properties/x/minContains']]);
+    agrees('input', counted({}), counted({ maxContains: 2 }), arrays, [['breaking', 'R6', 'input-narrowed', '/properties/x/maxContains']]);
+    agrees('input', counted({ maxContains: 1 }), counted({ maxContains: 3 }), arrays, [['additive', 'R7', 'input-widened', '/properties/x/maxContains']]);
+    agrees('input', counted({}), counted({ minContains: 1 }), arrays, []);
+    agrees('input', counted({}), counted({ minContains: 0 }), arrays, [['additive', 'R7', 'input-widened', '/properties/x/minContains']]);
+    agrees('input', member({ type: 'array', minContains: 1 }), member({ type: 'array', minContains: 3 }), arrays, []);
+    agrees('input', counted({ minContains: 1 }), counted({ minContains: 2 }, { const: 2 }), arrays,
+      [['unknown', 'R15', 'schema-unknown', '/properties/x/contains'], ['unknown', 'R15', 'schema-unknown', '/properties/x/minContains']]);
   });
 });
 

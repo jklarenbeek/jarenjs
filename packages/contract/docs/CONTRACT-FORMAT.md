@@ -2566,7 +2566,7 @@ change at the first pointer where they do.
 | R3 | `kind`, `http.method`, `http.path` (shape — variable *names* are not shape), `http.status`, `http.media` (opaqueness included), a member's `http.in` location, or `http.body` changed | breaking; an `http.media` respelled to the same type/subtype — its case or its parameters — is neutral (`media-respelled`), because the binding matches media by type/subtype alone (§7.2 step 5) |
 | R4 | input: a member added to `required` (or a new required member) | breaking |
 | R5 | input: a member removed while the new input schema is closed — `additionalProperties: false` or `unevaluatedProperties: false` — (or the input removed entirely) | breaking; where a `patternProperties` of the closed schema admits the member's name, its schema compares against the pattern's instead (R6/R7, see the riders); beside a catch-all that constrains it, or an applicator, R15; otherwise `neutral` with a note (the member is now ignored, not validated) |
-| R6 | input: a member's schema narrowed (type set shrinks, the value set of `enum` and `const` shrinks, `maximum` lowers, `minimum` rises, `maxLength` lowers, `minLength` rises, `pattern` added) | breaking |
+| R6 | input: a member's schema narrowed (type set shrinks, the value set of `enum` and `const` shrinks, `maximum` or `exclusiveMaximum` lowers, `minimum` or `exclusiveMinimum` rises, `multipleOf` steps to a whole multiple of itself, `maxLength`, `maxItems`, `maxProperties` or `maxContains` lowers, `minLength`, `minItems`, `minProperties` or `minContains` rises, `pattern` added) | breaking |
 | R7 | input: a member's schema widened (the inverse of R6), an optional member added, or a member dropped from `required` | additive |
 | R8 | output: a member removed, made optional (dropped from `required`), or widened (type set grows, `enum`/`const` grows, a bound relaxes, a `pattern` dropped), or a member added to an object that was closed (`additionalProperties: false` or `unevaluatedProperties: false`) | breaking |
 | R9 | output: a member added to an open object, a member added to `required`, or narrowed | additive |
@@ -2575,7 +2575,7 @@ change at the first pointer where they do.
 | R12 | `policy.idempotency` `none/optional → required` (a client must now send a key), or `required/optional → none` (a key an old client still sends, and retries under, is no longer read) | breaking (`idempotency-required`, `idempotency-dropped`); `required → optional` and `none → optional` additive (`idempotency-relaxed`) |
 | R13 | `policy.task`, `policy.retry`, `policy.cache`, `policy.revision`, `policy.stream` (a resume policy, heartbeat or patch bound) or `doc` changed | neutral; a `policy.stream.heartbeatMs` that rises is breaking (`heartbeat-slowed`) — an older client arms its watchdog from its own contract and reports the stream lost (`JC2094`) after twice the interval it expects |
 | R14 | `policy.audience` `public → server` | breaking; the reverse additive |
-| R15 | a schema construct the checker does not model differs between the two (an `if` beside both a `then` and an `else`, one that changed beside a branch that changed or appeared too, or one added or dropped beside a branch; a `not` or a `contains` on one side only that a branch of the other side's applicators may hold; a changed `contains` beside a tuple form, beside counts that changed, or beside a `maxContains` with a `minContains` other than 0; an `anyOf`/`oneOf` whose variants neither a type, a discriminator nor the two together tell apart, an applicator the walk does not read by direction — see the riders —, `$dynamicRef`, a `format`, a *changed* `pattern`, an external or sibling-carrying `$ref`, a changed error `details` schema, …), including one whose text is unchanged while a same-document `$ref` inside it resolves to a schema that changed — reported at the first resolved pointer where the two differ; a constraint present on one side only while the other carries such an applicator, or a member or requirement present on one side only while the other carries one a branch of which may hold it — names or requires it, closes the object, or carries a catch-all or an applicator of its own (it may have moved inside); a member added or removed beside a catch-all that constrains it (`additionalProperties` or `unevaluatedProperties` as a schema, `patternProperties`, `propertyNames`), or one a closed object's `patternProperties` admits where the two sides' matching patterns differ | **unknown** — reported, never silently classed |
+| R15 | a schema construct the checker does not model differs between the two (an `if` beside both a `then` and an `else`, one that changed beside a branch that changed or appeared too, or one added or dropped beside a branch; a `not` or a `contains` on one side only that a branch of the other side's applicators may hold; a changed `contains` beside a tuple form, beside counts that changed, or beside a `maxContains` with a `minContains` other than 0, and a count beside a `contains` that changed; a `multipleOf` neither step of which divides the other; a keyword some draft does not know yet at a place whose draft the walk cannot tell (see the riders); an `anyOf`/`oneOf` whose variants neither a type, a discriminator nor the two together tell apart, an applicator the walk does not read by direction — see the riders —, `$dynamicRef`, a `format`, a *changed* `pattern`, an external or sibling-carrying `$ref`, a changed error `details` schema, …), including one whose text is unchanged while a same-document `$ref` inside it resolves to a schema that changed — reported at the first resolved pointer where the two differ; a constraint present on one side only while the other carries such an applicator, or a member or requirement present on one side only while the other carries one a branch of which may hold it — names or requires it, closes the object, or carries a catch-all or an applicator of its own (it may have moved inside); a member added or removed beside a catch-all that constrains it (`additionalProperties` or `unevaluatedProperties` as a schema, `patternProperties`, `propertyNames`), or one a closed object's `patternProperties` admits where the two sides' matching patterns differ | **unknown** — reported, never silently classed |
 | R16 | a nullable node respelled between `type: [T, 'null']` and a two-branch `anyOf`/`oneOf` with a null-only branch, where both spellings accept exactly the same values | neutral (`schema-respelled`) — the bytes and the revision move, the accepted values do not; a reorder inside one spelling (a type array's items, a union's branches) is no respelling and is silent |
 
 Riders the rows carry:
@@ -2644,6 +2644,37 @@ Riders the rows carry:
   added beside a widening at the one dropped, so a `--fail-on breaking`
   gate failed on a respelling that moved nothing; it now reports only
   what the values did.
+  The bounds read by direction as `maximum` and `minimum` always did.
+  Each end of the numbers is one bound — `maximum` beside
+  `exclusiveMaximum`, numeric or the draft-04 boolean that makes the
+  `maximum` open, and `minimum` beside `exclusiveMinimum` alike — so a
+  change the other keyword of its end masks moves nothing (`maximum: 3,
+  exclusiveMaximum: 10` → `exclusiveMaximum: 5`), a respelling reads at
+  the keyword that bounds the end in `b`, and where both sides admit only
+  integers an end is the first or last integer it admits
+  (`exclusiveMaximum: 6` and `maximum: 5` are one bound). `maxLength`,
+  `minLength`, `maxItems`, `minItems`, `maxProperties` and
+  `minProperties` read as lengths, an absent one standing for the bound
+  that admits every value (`minItems: 0` added moves nothing).
+  `minContains` (one by default) and `maxContains` read so beside a
+  `contains` alike on both sides; beside none they judge nothing, and
+  beside one that changed they are R15 (what matches and how many must
+  are read together). A `multipleOf` step that is a whole multiple of the
+  other narrows and a whole fraction of it widens, read on the decimals
+  the document spells — `0.1` → `0.3` narrows, though `0.3 / 0.1` is
+  no whole number on their binary fractions —; a step neither divides is R15,
+  since which values move rests on the bounds beside it. A bound, a count
+  or a `pattern` beside a `type`, on either side, that admits no value it
+  judges moves nothing, and one that is no number (a numeric string,
+  which the validator reads as one) is R15.
+  **Upgrading:** an exclusive bound, `multipleOf` and the item, member
+  and `contains` counts answered R15 `unknown`; they now answer breaking
+  or additive, so a `--fail-on breaking` gate fails on an input whose
+  `maxItems` or `exclusiveMaximum` fell. A bound, a length or a `pattern`
+  that changed beside a `type` admitting no value it judges, an integer
+  bound that moved between two values admitting the same integers, and a
+  `minLength: 0` added or dropped, once breaking or additive, report
+  nothing.
   **Upgrading:** a pair of contracts that differed only behind a
   same-document `$ref` (inside an applicator or a keyword the walk does
   not model, in an error schema, under `additionalProperties`, below a
@@ -2700,25 +2731,37 @@ Riders the rows carry:
   node's `type` met with each `allOf` conjunct's), type sets that do not
   meet; under a type set of only numbers, bounds that hold no number —
   `minimum` over `maximum`, an exclusive bound at or past the other
-  (`exclusiveMinimum: 3, exclusiveMaximum: 3`), and under only `integer`
-  a range that holds no integer (`minimum: 1.2, maximum: 1.8`); under
+  (`exclusiveMinimum: 3, exclusiveMaximum: 3`, or `maximum: 3` beside a
+  draft-04 `exclusiveMaximum: true` and `minimum: 3`), and under only
+  `integer` a range that holds no integer (`minimum: 1.2, maximum:
+  1.8`) — or bounds that hold no value the validator takes for a multiple
+  of `multipleOf`: no exact multiple lies between them, read on the
+  decimals the document spells, and the validator refuses both ends (it
+  takes a value close enough to a multiple for one, so `exclusiveMinimum:
+  0.1, exclusiveMaximum: 0.2, multipleOf: 0.1` accepts something); under
   only strings, `minLength` over `maxLength` or a `pattern` no string
-  matches; under only `object`, a required member the object refuses
-  every value of — its own schema or a matching `patternProperties`
-  schema accepts nothing, or a closed object does not admit it (no
-  `properties` entry, no matching pattern, and an `additionalProperties`
-  that accepts nothing, or `unevaluatedProperties: false` with no
-  applicator beside it); an `allOf` conjunct that accepts nothing, or an
-  `anyOf`/`oneOf` whose every variant does. A `pattern` is read as the
+  matches; under only arrays, `minItems` over `maxItems`; under only
+  `object`, `minProperties` over `maxProperties`, a `maxProperties` below
+  the number of distinct members it requires, or a required member the
+  object refuses every value of — its own schema or a matching
+  `patternProperties` schema accepts nothing, a closed object does not
+  admit it (no `properties` entry, no matching pattern, and an
+  `additionalProperties` that accepts nothing, or `unevaluatedProperties:
+  false` with no applicator beside it), or `propertyNames` refuses its
+  name (a `propertyNames` that accepts nothing, or one spelled with
+  `type`, `const`, `enum`, the lengths, `pattern`, `not`, `allOf`, `anyOf`
+  and `oneOf` alone, for which the validator is asked about the name);
+  an `allOf` conjunct that accepts nothing, or an `anyOf`/`oneOf` whose
+  every variant does. A `pattern` is read as the
   validator compiles it — Unicode mode, `^` and `$` only at the ends of
   the text — and matches nothing where every match must pass a class
   that admits no character (`[]`, `[^\s\S]`), a `^` after a consumed
   character, a `$` before one, or `(?!)` (`a^`, `x[]+|y$z`, `(^a){2}`);
   emptiness that rests on a lookaround, a back-reference, a word boundary
   or a modifier group is not read (`(?=a)b` is compared as any pattern).
-  A bound that is not a number (a draft-04 boolean `exclusiveMaximum`) is
-  not read, and neither is `unevaluatedProperties` where the document
-  declares a draft before 2019-09 anywhere (there it is no keyword). The test
+  A bound that is not a number is not read, nor a keyword the place's
+  draft does not know yet (`unevaluatedProperties` before 2019-09: see
+  *Each place is read under the draft its `$schema` names*). The test
   is a decision procedure for these shapes only; any other schema is
   compared as before, never guessed empty. Two such schemas are alike,
   and one that accepted nothing and now accepts something widens by its
@@ -2736,8 +2779,11 @@ Riders the rows carry:
   `input-member-added` — is breaking R6 `input-narrowed`, so a
   `--fail-on breaking` gate that passed it now fails, and so is one that
   accepts nothing through bounds that cross, an integer range without an
-  integer, a closed object requiring a member it does not admit, or a
-  `pattern` no string matches; two schemas that
+  integer, a closed object requiring a member it does not admit, a
+  `pattern` no string matches, counts out of order, a `maxProperties`
+  below its required members, bounds that hold no multiple of
+  `multipleOf`, or a `propertyNames` that refuses a required name; two
+  schemas that
   accept nothing, once a guessed narrowing beside a widening (two
   `const`s outside their type), are no change; and `{ not: {} }` → `{
   type: 'string' }`, once R15 beside a guessed narrowing, is a widening
@@ -2767,8 +2813,8 @@ Riders the rows carry:
   matches fewer schemas meets the bound less often, under a `maxContains`
   with `minContains: 0` it is read with its direction flipped (at most
   that many items may match), and under `minContains: 0` alone it judges
-  nothing (where the document declares a draft before 2019-09 anywhere,
-  the counts may be no keywords, and a `contains` beside one stays R15);
+  nothing (where the place's draft precedes 2019-09 the counts are no
+  keywords there, and the `contains` reads as one that needs one match);
   an `if` that changed beside only a `then`, or only an `else`,
   alike on both sides — the node accepts what fails the `if` or passes
   the `then`, so the `if` is read with its direction flipped, or what
@@ -2858,6 +2904,43 @@ Riders the rows carry:
   nothing, once R15, reports nothing. A `then` or an `else` whose change
   moves only values its `if` keeps from it, once breaking or additive,
   reports nothing.
+- **Each place is read under the draft its `$schema` names.** The
+  validator reads `prefixItems` only from 2020-12, and
+  `dependentSchemas`, `dependentRequired`, `minContains`, `maxContains`,
+  `unevaluatedProperties` and `unevaluatedItems` only from 2019-09: under
+  an earlier draft each is an unknown keyword, while `if`, `contains`,
+  `const` and both spellings of the exclusive bounds it reads in every
+  draft. The walk reads each schema object as the validator reads its
+  place — under the `$schema` it declares, else under the draft its
+  parent schema object is read under; an operation's schemas and the
+  root definitions declare none, so below no `$schema` every keyword
+  applies, and a dialect the validator does not know reads as draft-07.
+  Where the draft does not read a keyword it is none: a `prefixItems`
+  entry or a `dependentSchemas` member that changed there changes
+  nothing, `unevaluatedProperties: false` closes nothing (an output
+  member added is additive R9, a constrained member added to an input
+  object narrows it), and a `contains` beside a `minContains` still needs
+  one match. A `$schema` that moved to a draft that reads a keyword, or
+  away from one, reads as the keyword added or dropped: R15 where the
+  keyword sits, but a `contains` count by direction. The validator reads
+  the target of a `$ref` under its own place's draft where the reference
+  sits below the schema it compiles, and under the target's own
+  `$schema` alone (or none) at the end of a chain of bare references the
+  schema starts; below a resource declaring an older draft the two
+  differ, so a target there that declares no `$schema` of its own is
+  compared by its text where it holds such a keyword — R15 where it
+  changed — and so is a schema of another document (an input reached
+  through `options.schemas`) that declares none, since the compiled
+  contract does not carry that document's draft. **Upgrading:** a
+  `prefixItems` entry or a `dependentSchemas` member changed where the
+  draft does not read it, once breaking R6 beside additive R7, reports
+  nothing; an output member added beside `unevaluatedProperties: false`
+  there, once breaking R8, is additive R9, and a constrained member added
+  to an input object closed so, once additive R7, is breaking R6; a
+  `contains` beside counts in a document that declared an older draft
+  anywhere, once R15, reads by direction; and a `$schema` moved between
+  drafts that read a keyword apart, once reported as nothing, reports
+  the keyword as added or dropped.
 - **Audience is the compatibility surface.** Operations whose
   `policy.audience` is `server` on **both** sides are skipped entirely;
   an audience flip is R14 and, for public consumers, subsumes the

@@ -464,14 +464,14 @@ describe('diffContracts — the rule table, row by row', () => {
       const tight = { type: 'object', maxProperties: 2 };
       /** @type {[any, any, string, string, string[]][]} */
       const cases = [
-        [{ anyOf: [{ type: 'null' }, z] }, { anyOf: [tight, { type: 'null' }] }, '/anyOf/1/properties/z', '/anyOf/0/maxProperties', ['unknown', 'breaking']],
-        [{ oneOf: [z, { type: 'null' }] }, { anyOf: [tight, { type: 'null' }] }, '/oneOf/0/properties/z', '/anyOf/0/maxProperties', ['neutral', 'unknown', 'breaking']],
+        [{ anyOf: [{ type: 'null' }, z] }, { anyOf: [tight, { type: 'null' }] }, '/anyOf/1/properties/z', '/anyOf/0/maxProperties', ['additive', 'breaking']],
+        [{ oneOf: [z, { type: 'null' }] }, { anyOf: [tight, { type: 'null' }] }, '/oneOf/0/properties/z', '/anyOf/0/maxProperties', ['neutral', 'additive', 'breaking']],
       ];
       for (const [from, to, removed, added, classes] of cases) {
         const d = diffContracts(reads(from), reads(to));
         onlyClasses(d, classes);
         assert.deepStrictEqual(d.breaking.map((c) => [c.rule, c.kind, c.docPath]), [['R8', 'output-member-removed', '/operations/a.b/output' + removed]]);
-        assert.deepStrictEqual(d.unknown.map((c) => [c.rule, c.note, c.docPath]), [['R15', 'maxProperties', '/operations/a.b/output' + added]]);
+        assert.deepStrictEqual(d.additive.map((c) => [c.rule, c.note, c.docPath]), [['R9', 'maxProperties', '/operations/a.b/output' + added]]);
       }
     });
 
@@ -488,9 +488,9 @@ describe('diffContracts — the rule table, row by row', () => {
         tree({ type: ['object', 'null'], properties: { next: { $ref: '#/$defs/node' } } }),
         tree({ anyOf: [{ type: 'object', minProperties: 1, properties: { next: { $ref: '#/$defs/node' } } }, { type: 'null' }] }));
       assert.deepStrictEqual(d.neutral.map((c) => [c.rule, c.docPath]), [['R16', '/operations/a.b/output']]);
-      assert.deepStrictEqual(d.unknown.map((c) => [c.rule, c.note, c.docPath]),
-        [['R15', 'minProperties', '/operations/a.b/output/minProperties']]);
-      onlyClasses(d, ['neutral', 'unknown']);
+      assert.deepStrictEqual(d.additive.map((c) => [c.rule, c.note, c.docPath]),
+        [['R9', 'minProperties', '/operations/a.b/output/minProperties']]);
+      onlyClasses(d, ['neutral', 'additive']);
     });
   });
 });
@@ -846,9 +846,9 @@ describe('diffContracts — validation behind a same-document $ref is compared a
     const take = (input, defs = {}) => one({ kind: 'command', input, output: true, http: { method: 'POST', path: '/a' } }, { $defs: defs });
     const base = { type: 'object', properties: { m: { type: 'string' } } };
     const bound = diffContracts(take(base), take({ ...base, minProperties: 1 }));
-    onlyClasses(bound, ['unknown']);
-    assert.deepStrictEqual(only(bound.unknown), {
-      kind: 'schema-unknown', op: 'a.b', docPath: '/operations/a.b/input/minProperties', from: undefined, to: 1, rule: 'R15', note: 'minProperties',
+    onlyClasses(bound, ['breaking']);
+    assert.deepStrictEqual(only(bound.breaking), {
+      kind: 'input-narrowed', op: 'a.b', docPath: '/operations/a.b/input/minProperties', from: undefined, to: 1, rule: 'R6', note: 'minProperties',
     });
     const applicator = diffContracts(take({ ...base, allOf: [{ required: ['m'] }] }), take({ ...base, allOf: [] }));
     onlyClasses(applicator, ['unknown']);
@@ -1145,13 +1145,13 @@ describe('diffContracts — a change inside an applicator whose direction is dec
       const after = { oneOf: [sum('b'), sum('a', { type: 'object', properties: { y: { type: 'string' }, w: { type: 'string' } } })] };
       const d = diffContracts(take('output', before), take('output', after));
       const v = (/** @type {number} */ i) => `${at.output}/oneOf/${i}/properties/v`;
-      assert.deepStrictEqual(d.unknown.map(pick), [['R15', 'schema-unknown', v(0) + '/maxProperties', 5, undefined, 'maxProperties']]);
       assert.deepStrictEqual(d.breaking.map(pick), [
+        ['R8', 'output-widened', v(0) + '/maxProperties', 5, undefined, 'maxProperties'],
         ['R8', 'output-member-removed', v(0) + '/properties/z', 'z', 'z', undefined],
         ['R8', 'output-widened', v(0) + '/properties/y/maxLength', 4, undefined, 'maxLength'],
       ]);
       assert.deepStrictEqual(d.additive.map(pick), [['R9', 'output-member-added', v(1) + '/properties/w', 'w', 'w', undefined]]);
-      onlyClasses(d, ['unknown', 'breaking', 'additive']);
+      onlyClasses(d, ['breaking', 'additive']);
     });
 
     it('a discriminator value that moved: the variant it named is removed, the one it names now is added, the one kept is read in place', () => {

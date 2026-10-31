@@ -226,6 +226,21 @@ delete it or fix it.
   `dependentRequired` at the present member (`/a`) in collected errors and
   `basic`, at the object in `list`. One rule changes collected `instancePath`
   (an upgrade note).
+- [ ] **The validator reads the end of a chain of bare `$ref`s under no
+  draft.** With `urn:doc` holding `$defs: { o: { $ref: '#/$defs/r/$defs/s' },
+  r: { $schema: draft-07, $defs: { s: { prefixItems: [{ type: 'string' }] } }
+  } }`, `compile({ $ref: 'urn:doc#/$defs/o' })([1])` is false (`prefixItems`
+  applied), while `compile({ $ref: 'urn:doc#/$defs/r/$defs/s' })`, a `$ref` to
+  `o` below the compiled schema (`{ items: { $ref: 'urn:doc#/$defs/o' } }` on
+  `[[1]]`) and the normalizer's `schemaPlace` all read `s` under draft-07
+  (`[1]` valid). `diffContracts` answers R15 at such a target: a contract
+  operation whose schema is a bare `$ref` chain to it is read the first way,
+  a member `$ref` to it the second.
+- [ ] **`multipleOf` takes a value within an absolute 1e-6 of a whole
+  quotient.** `{ multipleOf: 10000000 }` accepts `5`, `9` and `20000001` (and
+  `{ type: 'integer', multipleOf: 10000000 }` accepts `9`): the check compares
+  `data / multipleOf` with its rounding at a fixed tolerance, so the larger
+  the step, the farther from a multiple an accepted value may lie.
 
 ## @jarenjs/view & @jarenjs/app
 
@@ -346,45 +361,40 @@ costs a descriptor plus examples and no UI code at all.
 ## @jarenjs/contract
 
 - [ ] **`diffContracts` reads only the empty-schema shapes it can prove.** A
-  member schema that accepts nothing only where two of its constraints meet —
-  a `pattern` beside length bounds, `multipleOf` beside a range, `minItems`
-  over `maxItems`, `minProperties` over `maxProperties` or below the number of
-  members it requires, a `propertyNames` that refuses a required name — or a
-  `pattern` whose emptiness rests on a lookaround, a back-reference, a word
-  boundary or a modifier group, is still classed as a constrained member
-  (added to an open input: additive R7), though every request carrying it is
-  refused: deciding it would need the constraints intersected, or the
-  pattern's language computed.
+  member schema that accepts nothing only through its `pattern` — beside
+  length bounds, or by a lookaround, a back-reference, a word boundary or a
+  modifier group —, through a `multipleOf` whose multiples in an integer range
+  all fall between its integers (`type: 'integer', minimum: 6, maximum: 9,
+  multipleOf: 2.5`), or through a `propertyNames` spelled with another keyword
+  (a `$ref`, a `format`, an `if`) that refuses a required name, is still
+  classed as a constrained member (added to an open input: additive R7),
+  though every request carrying it is refused: deciding it would need the
+  pattern's language computed, the integer multiples read against the
+  validator's `multipleOf` tolerance, or the `propertyNames` read in its
+  document.
 - [ ] **`diffContracts` reports an `if` beside both a `then` and an `else`, a
-  `contains` under both counts, or a union whose variants overlap as R15
-  `unknown`,** so a `--fail-on breaking` gate alone passes a required member
-  dropped there. A value that crosses such an `if` moves from one branch to
-  the other, and a value one overlapping variant drops another may still
-  accept: deciding either would need two schemas compared value by value;
-  with a `minContains` above 0 beside a `maxContains`, the count is not
+  `contains` changed under both counts, or a union whose variants overlap as
+  R15 `unknown`,** so a `--fail-on breaking` gate alone passes a required
+  member dropped there. A value that crosses such an `if` moves from one
+  branch to the other, and a value one overlapping variant drops another may
+  still accept: deciding either would need two schemas compared value by
+  value; with a `minContains` above 0 beside a `maxContains`, the count is not
   monotone in what matches. An `if` that changed while its branch changed or
   appeared, one added or dropped beside a branch, an `if` change at a keyword
   its branch also bounds, a changed `contains` beside a tuple form or beside
-  counts that changed (or any count where the document declares a draft
-  before 2019-09), two `allOf` conjuncts respelled together, and a change at
-  a location another conjunct or the node itself also constrains (it would
+  counts that changed, two `allOf` conjuncts respelled together, and a change
+  at a location another conjunct or the node itself also constrains (it would
   need the two intersected; a variant added beside the node's own `type`
   among them) stay R15 too.
-- [ ] **`diffContracts` reads exclusive bounds, `multipleOf` and the item and
-  member counts as R15.** A change to `exclusiveMinimum`, `exclusiveMaximum`,
-  `multipleOf`, `minItems`, `maxItems`, `minProperties`, `maxProperties`,
-  `minContains` or `maxContains` is reported R15 `unknown`, though each but
-  `multipleOf` moves the accepted values one way as `minimum` does, so a
-  `--fail-on breaking` gate alone passes an input whose `exclusiveMaximum` or
-  `maxItems` fell.
-- [ ] **`diffContracts` reads keywords a declared older draft leaves inert.**
-  Under a schema whose `$schema` names draft-07, a changed `prefixItems` item
-  or `dependentSchemas` entry reports breaking R6 and additive R7, and
-  `unevaluatedProperties: false` reads as closing the object (an output member
-  added: breaking R8, where an open output answers additive R9), though the
-  validator reads `prefixItems` only from 2020-12 and the other two only from
-  2019-09, so neither side constrains anything there.
-
+- [ ] **A `#` reference inside a schema another document holds resolves
+  against the contract.** An input `{ $ref:
+  'https://x.example/lib.json#/$defs/In' }` registered through
+  `options.schemas`, whose `In` holds `m: { $ref: '#/$defs/S' }`, compiles,
+  but its validator resolves `#/$defs/S` against the contract document: with
+  no `$defs.S` there every request throws `JK0009` when it is validated, and
+  with one the contract's `S` is read and the external document's never is.
+  `diffContracts` resolves it the same way, so it agrees with a reading the
+  compile should refuse or resolve in the external document.
 ## @jarenjs/linq & @jarenjs/db — the data pair
 
 The fluent front door and the SQLite document store shipped as a pair;
