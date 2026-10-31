@@ -698,7 +698,7 @@ against Prisma, Drizzle and Kysely — is
 A pen builds a **definition** — once, at module load — and the engine
 compiles the document it emitted. That is the only place its price is
 paid, and `benchmark/db.js` measures it as ns per build beside the
-hand-written literal each pen must emit byte for byte — <!--fact:linq.penBuildCost-->schema 47.5×, model 85.3×, JSLT 49.0× a hand-written literal, and the migration pen 1.4× a hand-written document carrying the same exact endpoints and compatibility fingerprints<!--/fact-->.
+hand-written literal each pen must emit byte for byte — <!--fact:linq.penBuildCost-->schema 64.7×, model 107.7×, JSLT 63.7× a hand-written literal, and the migration pen 1.4× a hand-written document carrying the same exact endpoints and compatibility fingerprints<!--/fact-->.
 
 Multiples that size are what typed builders, `$defs` hoisting, a
 deep-freeze and a coded refusal per mistake cost against typing the JSON
