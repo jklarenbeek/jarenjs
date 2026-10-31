@@ -166,7 +166,20 @@ const CITY_MODEL = {
 const tmp = mkdtempSync(path.join(os.tmpdir(), 'orm-bench-'));
 const fileOf = (name) => path.join(tmp, name);
 
+// every timed row starts on a settled heap: the garbage an earlier section
+// left is collected before the row, not by a collection inside a short row
+// (a few hundred calls can last no longer than one collection)
+const collectGarbage = IS_BUN
+  ? () => globalThis.Bun.gc(true)
+  : await (async () => {
+    const { setFlagsFromString } = await import('node:v8');
+    const { runInNewContext } = await import('node:vm');
+    setFlagsFromString('--expose-gc');
+    return runInNewContext('gc');
+  })();
+
 async function timeAsync(fn, iterations) {
+  collectGarbage();
   await fn();
   await fn();
   const start = process.hrtime.bigint();
