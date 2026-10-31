@@ -175,11 +175,11 @@ days of the year. The mapped pre-filter scans every window alike — the
 comparison between two columns that keeps an inverted span for the engine
 binds no index — and the exact plan seeks the start index from the
 window's end and reads every span that started before it, so on SQLite it
-wins early in the year and loses late in it — the declared plan is <!--fact:series.spanVerdict-->32.5× faster at day 10, 2.6× faster at day 180 and 1.6× faster at day 355<!--/fact-->.
+wins early in the year and loses late in it — the declared plan is <!--fact:series.spanVerdict-->34.5× faster at day 10, 2.7× faster at day 180 and 1.6× faster at day 355<!--/fact-->.
 A `maxDuration` is the late window's cure: no span meeting a window began
 more than that long before it, so the plan bounds the start from below as
 well and the seek reads the window's neighbourhood alone, whatever the
-day — with the duration bounded the plan is <!--fact:series.spanBoundedVerdict-->440.5× faster at day 10, 514.3× faster at day 180 and 835.7× faster at day 355<!--/fact-->.
+day — with the duration bounded the plan is <!--fact:series.spanBoundedVerdict-->444.9× faster at day 10, 530.4× faster at day 180 and 870.8× faster at day 355<!--/fact-->.
 PostgreSQL chooses per window — a bitmap read of one bound's index where
 the window is selective, a sequential scan where it is not — and at no
 measured window was the exact plan slower than the scan it replaces; with
@@ -189,9 +189,9 @@ measured window, the middle one included.
 <!--fact:series.spanTable-->
 | window | spans met | mapped pre-filter (scan) | declared interval (seek) | the declaration is | with `maxDuration` (two-sided seek) | the bound is |
 |---|---:|---:|---:|---|---:|---|
-| day 10 | 38 | 33 ms | 1 ms | 32.5× faster | 0.074 ms | 440.5× faster |
-| day 180 | 38 | 36 ms | 14 ms | 2.6× faster | 0.07 ms | 514.3× faster |
-| day 355 | 20 | 43 ms | 27 ms | 1.6× faster | 0.051 ms | 835.7× faster |
+| day 10 | 38 | 33 ms | 0.95 ms | 34.5× faster | 0.074 ms | 444.9× faster |
+| day 180 | 38 | 37 ms | 14 ms | 2.7× faster | 0.069 ms | 530.4× faster |
+| day 355 | 20 | 43 ms | 27 ms | 1.6× faster | 0.049 ms | 870.8× faster |
 <!--/fact-->
 
 On PostgreSQL `#>` resolves the key `"0"` of an object where the span's path
@@ -347,9 +347,9 @@ Three things follow, and none of them is optional:
   per-mapping cell.
 
 **What it costs, both halves** (`benchmark/spatial.js`, the store's own
-rows over 50 000 points): the same `$within` measures <!--fact:spatial.rtreeStore-->0.48 ms against 2.1 ms — 4.3× in the R\*Tree's favour<!--/fact-->, and loading them
-costs <!--fact:spatial.rtreeLoad-->761 ms against 457 ms for 50,000 documents in one transaction — 1.7× the write cost<!--/fact-->. Isolated from the store on a raw
-connection, the same probe is <!--fact:spatial.rtree-->0.33 ms against 1.9 ms — 5.8× in the R\*Tree's favour<!--/fact-->. Read speed bought with write cost and a
+rows over 50 000 points): the same `$within` measures <!--fact:spatial.rtreeStore-->0.48 ms against 2.2 ms — 4.6× in the R\*Tree's favour<!--/fact-->, and loading them
+costs <!--fact:spatial.rtreeLoad-->801 ms against 464 ms for 50,000 documents in one transaction — 1.7× the write cost<!--/fact-->. Isolated from the store on a raw
+connection, the same probe is <!--fact:spatial.rtree-->0.33 ms against 2.1 ms — 6.3× in the R\*Tree's favour<!--/fact-->. Read speed bought with write cost and a
 second table: choose it deliberately, per index, which is why it is
 neither automatic nor a store-wide option.
 
@@ -382,8 +382,8 @@ Three things follow:
 
 **What it buys, and what it costs.** Measured against the same query
 over a collection with no such column — the whole embedding parsed out
-of the stored JSON per row — the column is worth <!--fact:vector.jsonDoc-->15.6× the plan at 10,000 × 768<!--/fact-->
-on the read, and costs <!--fact:vector.write-->10.2 s against 4.9 s for 50,000 documents in one transaction — 2.1× the write cost<!--/fact-->
+of the stored JSON per row — the column is worth <!--fact:vector.jsonDoc-->14.5× the plan at 10,000 × 768<!--/fact-->
+on the read, and costs <!--fact:vector.write-->9.9 s against 4.8 s for 50,000 documents in one transaction — 2.1× the write cost<!--/fact-->
 on the way in, because every write pays a JSON round trip of the member
 plus the normalize and the pack. On
 disk it is <!--fact:vector.storage-->3,072 B packed against 16,141 B as a JSON number array inside the document — 5.3× smaller<!--/fact-->
@@ -2780,12 +2780,12 @@ pushes everything BUT the spatial conjunct):
 <!--fact:spatial.udfTable-->
 | shape | pushed (ms) | residual (ms) | verdict |
 |---|---|---|---|
-| solo `$within` over a full scan | 101 | 76 | ~even |
-| indexed `$eq` **and** `$within` (~5 % pass the index) | 6.2 | 56 | push **9.0×** |
-| `$within` with `LIMIT 10` | 104 | 73 | ~even |
+| solo `$within` over a full scan | 103 | 78 | ~even |
+| indexed `$eq` **and** `$within` (~5 % pass the index) | 6.8 | 59 | push **8.8×** |
+| `$within` with `LIMIT 10` | 101 | 74 | ~even |
 <!--/fact-->
 
-So the spatial hatch <!--fact:spatial.udfVerdict-->earns its row: 9.0× beside the selective conjunct and 0.7× under the LIMIT<!--/fact-->,
+So the spatial hatch <!--fact:spatial.udfVerdict-->earns its row: 8.8× beside the selective conjunct and 0.7× under the LIMIT<!--/fact-->,
 by the same rule as `$sqrt`: a sole `$within` over a full scan is a
 loss (the UDF re-parses every row in the callback, and the exact
 containment test is dearer than a square root), a `$within` beside
