@@ -50,6 +50,8 @@ const MEMBERS = ['s', 'n', 't', 'm', 'u', 'zz'];
 const RAYS = ['$lt', '$le', '$gt', '$ge'];
 const ROWS = 80;
 const CHAINS = 300;
+/** Seeds per test: each run keeps its own time limit, and the PostgreSQL leg makes every chain seven round trips. */
+const CHAINS_PER_RUN = 100;
 /** Rows the explicit cases name: the astral row sorts above U+FFFF by code point, below it by code unit. */
 const FIXED = [{ id: 'astral', s: '\u{10000}' }, { id: 'top', s: '￿' }, { id: 'emoji', s: '😀' }, { id: 'low', s: 'a' }];
 
@@ -152,21 +154,24 @@ const sorted = (value) => [...(Array.isArray(value) ? value : value === undefine
 function cases(engine) {
   const items = () => engine.store().collection('items');
 
-  it(`${CHAINS} random chains of 2-60 terms answer as the engine does, natively, over the collection and the entity`, { timeout: 120_000 }, async () => {
-    for (let number = 1; number <= CHAINS; number++) {
-      const predicate = chain(seeded(number), '$it');
-      const label = `chain ${number}: ${JSON.stringify(predicate).slice(0, 200)}`;
-      const engineRows = sorted(await items().execute(overItems(predicate), { pushdown: false }));
-      assert.deepEqual(sorted(await items().execute(overItems(predicate))), engineRows, label);
-      assert.equal((await items().explain(overItems(predicate))).mode, 'native', label);
-      const store = engine.store();
-      const engineItems = sorted(await store.execute(overItem(predicate), { pushdown: false }));
-      assert.deepEqual(sorted(await store.execute(overItem(predicate))), engineItems, label);
-      assert.equal((await store.explain(overItem(predicate))).mode, 'native', label);
-      assert.deepEqual(sorted((await store.entity('Item').load({ where: predicate })).map((/** @type {any} */ row) => row.id)),
-        engineItems, label);
-    }
-  });
+  for (let first = 1; first <= CHAINS; first += CHAINS_PER_RUN) {
+    const last = Math.min(CHAINS, first + CHAINS_PER_RUN - 1);
+    it(`random chains ${first}-${last} of 2-60 terms answer as the engine does, natively, over the collection and the entity`, { timeout: 120_000 }, async () => {
+      for (let number = first; number <= last; number++) {
+        const predicate = chain(seeded(number), '$it');
+        const label = `chain ${number}: ${JSON.stringify(predicate).slice(0, 200)}`;
+        const engineRows = sorted(await items().execute(overItems(predicate), { pushdown: false }));
+        assert.deepEqual(sorted(await items().execute(overItems(predicate))), engineRows, label);
+        assert.equal((await items().explain(overItems(predicate))).mode, 'native', label);
+        const store = engine.store();
+        const engineItems = sorted(await store.execute(overItem(predicate), { pushdown: false }));
+        assert.deepEqual(sorted(await store.execute(overItem(predicate))), engineItems, label);
+        assert.equal((await store.explain(overItem(predicate))).mode, 'native', label);
+        assert.deepEqual(sorted((await store.entity('Item').load({ where: predicate })).map((/** @type {any} */ row) => row.id)),
+          engineItems, label);
+      }
+    });
+  }
 
   it('two lower rays on a string fold to the least bound by code point, which keeps the astral rows', async () => {
     const predicate = { $or: [{ $gt: ['$it.s', '￿'] }, { $gt: ['$it.s', '\u{10000}'] }] };
