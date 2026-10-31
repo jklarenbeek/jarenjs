@@ -380,7 +380,7 @@ describe('diffContracts — the rule table, row by row', () => {
     onlyClasses(invisible, []);
   });
 
-  it('R15: a change to an anyOf whose branches overlap lands in unknown — NEVER in neutral — as do format, a changed pattern and an external $ref', () => {
+  it('R15: a change to an anyOf whose branches overlap lands in unknown — NEVER in neutral — as do format, a changed pattern and an external $ref a side cannot read', () => {
     // every integer is a number: the new branch is not disjoint from the old one
     const anyOf = diffContracts(
       commandWith({ anyOf: [{ type: 'number' }] }),
@@ -397,13 +397,21 @@ describe('diffContracts — the rule table, row by row', () => {
     const pattern = only(diffContracts(commandWith({ type: 'string', pattern: '^a' }), commandWith({ type: 'string', pattern: '^b' })).unknown);
     assert.deepStrictEqual([pattern.rule, pattern.note], ['R15', 'pattern']);
 
-    const registered = (/** @type {string} */ id) => compileContract(commandWith({ $ref: id }), {
-      schemas: [{ $id: id, type: 'string' }],
+    const registered = (/** @type {string} */ id, type = 'string') => compileContract(commandWith({ $ref: id }), {
+      schemas: [{ $id: id, type }],
     });
+    // a moved external `$ref` is read by what each side's own document holds there
+    assert.deepStrictEqual(diffContracts(registered('https://x.example/s.json'), registered('https://y.example/s.json')),
+      { breaking: [], additive: [], neutral: [], unknown: [] });
+    const moved = diffContracts(registered('https://x.example/s.json'), registered('https://y.example/s.json', 'integer'));
+    assert.deepStrictEqual([...moved.breaking, ...moved.additive].map((c) => [c.rule, c.docPath]),
+      [['R6', '/operations/a.b/input/properties/x/type'], ['R7', '/operations/a.b/input/properties/x/type']]);
+    // ...and compared by its text where a side's compile is out of reach (a
+    // contract another copy of the package compiled)
     const external = only(diffContracts(
-      registered('https://x.example/s.json'),
-      registered('https://y.example/s.json')).unknown);
-    assert.strictEqual(external.rule, 'R15');
+      { ...registered('https://x.example/s.json') },
+      { ...registered('https://y.example/s.json') }).unknown);
+    assert.deepStrictEqual([external.rule, external.docPath], ['R15', '/operations/a.b/input/properties/x']);
 
     const detailsSchema = only(diffContracts(
       one({ ...readOp(), errors: { gone: { status: 410, schema: { type: 'object' } } } }),

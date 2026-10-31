@@ -6,11 +6,13 @@
  * — where `unknown` is the honest fourth class: a schema construct the
  * checker does not model (an `if` beside both a `then` and an `else`, a
  * union whose variants overlap, a changed `pattern`, an external `$ref`
- * that moved) is REPORTED, never silently classed.
+ * it cannot read) is REPORTED, never silently classed.
  *
  * The schema comparison walks the two sides in parallel over the resolved
- * same-document structure — a bare `{ "$ref": "#/$defs/X" }` hop is
- * followed with the same rules the compiler used — and models exactly the
+ * structure — a bare `{ "$ref": "#/$defs/X" }` hop is followed with the
+ * same rules the compiler used, and so is one into another document the
+ * side was compiled with (`options.schemas`), a `$ref` inside it read
+ * against that document — and models exactly the
  * R6 keyword set (`type`, `const`, `enum`, the numeric bounds `maximum`,
  * `minimum`, `exclusiveMaximum` and `exclusiveMinimum` — one end each,
  * the draft-04 boolean among them —, `multipleOf`, `maxLength`,
@@ -38,7 +40,7 @@
  * `description`, `examples`, `$comment`, `deprecated`) never move a wire
  * byte and are ignored; every other keyword that differs between the two
  * sides lands in `unknown` (R15).
- * "Differs" is read through every same-document `$ref`: a construct the
+ * "Differs" is read through every `$ref` a side resolves: a construct the
  * walk does not model is equal only when what its references resolve to
  * is, so a change behind an unchanged spelling is reported, never lost.
  *
@@ -66,7 +68,8 @@ import { shortestDecimal } from '@jarenjs/core/math';
 import { JarenValidator } from '@jarenjs/validate';
 import { collectSameDocumentAnchors, createSchemaPatternTester, detectSchemaDraft, resolveSameDocumentRef } from '@jarenjs/validate/normalize';
 
-import { compileContract } from './compile.js';
+import { compileContract, followRef } from './compile.js';
+import { contractScope } from './held.js';
 import { ContractHostError } from './errors.js';
 import { bareMedia } from './http/wire.js';
 import { isCompiledContract } from './public.js';
@@ -157,10 +160,15 @@ function isObject(value) {
 }
 
 /**
- * One side of the parallel walk: the schema resolution scope, and the
- * drafts its schema objects are read under ({@link readPlaces}).
- * @typedef {{ doc: any, anchors: Map<string, object>, places: Places }} Side
+ * One side of the parallel walk: the schema resolution scope — the
+ * document, its names, and the scope its compile resolved refs in, which
+ * holds the other documents those refs reach (`undefined` for a contract
+ * `compileContract` did not return) —, and the drafts its schema objects
+ * are read under ({@link readPlaces}).
+ * @typedef {{ doc: any, anchors: Map<string, object>, places: Places, scope: RefScope | undefined }} Side
  */
+
+/** @typedef {import('./compile.js').RefScope} RefScope */
 
 /**
  * The drafts each schema object of one contract is read under, as bits
@@ -177,9 +185,27 @@ function isObject(value) {
  */
 
 /**
- * Resolve bare `{ $ref }` hops (same-document only). Returns the resolved
- * node as its place reads it ({@link placed}), or a marker naming the
- * keyword of a shape the walk cannot model.
+ * The schema the `$ref` of `node` names on one side, read against the
+ * document holding `node` ({@link followRef}): a same-document one inside
+ * the contract, and one into or inside another document the side's
+ * validator holds against that document. `undefined` where it does not
+ * resolve — among them an external one of a side whose compile scope the
+ * walk cannot reach.
+ * @param {Record<string, any>} node
+ * @param {Side} side
+ * @returns {any}
+ */
+function refTarget(node, side) {
+  if (side.scope !== undefined) return followRef(node.$ref, node, side.scope);
+  return node.$ref.startsWith('#') ? resolveSameDocumentRef(node.$ref, side.doc, side.anchors) : undefined;
+}
+
+/**
+ * Resolve bare `{ $ref }` hops — inside the document, and into and
+ * inside another document the side holds ({@link refTarget}). Returns the
+ * resolved node as its place reads it ({@link placed}), or a marker naming
+ * the keyword of a shape the walk cannot model, or the text of an external
+ * `$ref` it cannot read.
  * @param {any} node
  * @param {Side} side
  * @returns {{ node: any } | { external: string } | { opaque: string }}
@@ -188,11 +214,12 @@ function resolveHops(node, side) {
   const seen = new Set();
   while (isObject(node) && typeof node.$ref === 'string') {
     if (Object.keys(node).length > 1) return { opaque: '$ref' }; // $ref with siblings — not modeled
-    if (!node.$ref.startsWith('#')) return { external: node.$ref };
     if (seen.has(node)) return { opaque: '$ref' };
     seen.add(node);
-    const target = resolveSameDocumentRef(node.$ref, side.doc, side.anchors);
-    if (target === undefined) return { opaque: '$ref' };
+    const target = refTarget(node, side);
+    if (target === undefined) {
+      return node.$ref.startsWith('#') || side.scope?.held?.places.has(node) ? { opaque: '$ref' } : { external: node.$ref };
+    }
     node = target;
   }
   return placed(node, side);
@@ -235,13 +262,15 @@ function declaredDrafts(node) {
  * (or none) at the end of a chain of bare references that schema starts;
  * the two differ only below a resource declaring an older draft, so a
  * target that declares no `$schema` is read under both. A schema of
- * another document (an input reached through `options.schemas`) that
- * declares none is read under any draft.
+ * another document (one registered through `options.schemas`, reached by
+ * a `$ref` read against the document holding it) that declares none is
+ * read under any draft.
  * @param {Contract} contract
  * @param {Map<string, object>} anchors
+ * @param {RefScope | undefined} scope - the scope the contract's compile resolved refs in
  * @returns {Places}
  */
-function readPlaces(contract, anchors) {
+function readPlaces(contract, anchors, scope) {
   const doc = contract.doc;
   /** @type {Map<object, number>} */
   const drafts = new Map();
@@ -260,7 +289,13 @@ function readPlaces(contract, anchors) {
       if (SCHEMA_VALUES.has(key) || SCHEMA_LISTS.has(key)) visit(inner, mask);
       else if ((SCHEMA_MAPS.has(key) || key === '$defs' || key === 'definitions') && isObject(inner)) visit(Object.values(inner), mask);
     }
-    if (typeof value.$ref === 'string' && value.$ref.startsWith('#')) visit(resolveSameDocumentRef(value.$ref, doc, anchors), FROM_2020);
+    if (typeof value.$ref !== 'string') return;
+    if (scope === undefined) {
+      if (value.$ref.startsWith('#')) visit(resolveSameDocumentRef(value.$ref, doc, anchors), FROM_2020);
+      return;
+    }
+    const target = followRef(value.$ref, value, scope);
+    visit(target, scope.held?.places.has(target) ? ANY_DRAFT : FROM_2020);
   };
   for (const key of ['$defs', 'definitions']) if (isObject(doc[key])) visit(Object.values(doc[key]), FROM_2020);
   for (const id of contract.ids) {
@@ -405,9 +440,10 @@ function divergenceInList(x, y, path, a, b, pairs) {
 }
 
 /**
- * {@link divergence} for two schemas: a same-document `$ref` on either
- * side is followed (an external one compares by its text), and a keyword
- * their places' drafts read apart ({@link readApart}) is where they differ.
+ * {@link divergence} for two schemas: a `$ref` on either side is followed
+ * where the side resolves it ({@link refTarget}; an external one it cannot
+ * read compares by its text), and a keyword their places' drafts read
+ * apart ({@link readApart}) is where they differ.
  * @param {unknown} x @param {unknown} y @param {string} path
  * @param {Side} a @param {Side} b @param {Map<object, Set<object>>} pairs
  * @returns {{ path: string, from: unknown, to: unknown } | null}
@@ -426,8 +462,8 @@ function schemaDivergence(x, y, path, a, b, pairs) {
       return { path: path + '/' + encodeJSONPointerSegment(key), from: x[key], to: y[key] };
     }
     if (key === '$ref') {
-      const ta = sameDocumentTarget(x.$ref, a);
-      const tb = sameDocumentTarget(y.$ref, b);
+      const ta = typeof x.$ref === 'string' ? refTarget(x, a) : undefined;
+      const tb = typeof y.$ref === 'string' ? refTarget(y, b) : undefined;
       // the target is read at this node's own pointer: the resolved structure
       const found = ta === undefined || tb === undefined
         ? (x.$ref === y.$ref ? null : { path: path + '/$ref', from: x.$ref, to: y.$ref })
@@ -439,17 +475,6 @@ function schemaDivergence(x, y, path, a, b, pairs) {
     if (found !== null) return found;
   }
   return null;
-}
-
-/**
- * The schema a same-document `$ref` names on one side, or `undefined`
- * for an external or unresolvable one.
- * @param {unknown} ref
- * @param {Side} side
- */
-function sameDocumentTarget(ref, side) {
-  if (typeof ref !== 'string' || !ref.startsWith('#')) return undefined;
-  return resolveSameDocumentRef(ref, side.doc, side.anchors);
 }
 
 /**
@@ -2753,7 +2778,8 @@ export function diffContracts(a, b, options = undefined) {
  */
 function side(contract) {
   const anchors = collectSameDocumentAnchors(contract.doc);
-  return { doc: contract.doc, anchors, places: readPlaces(contract, anchors) };
+  const scope = contractScope(contract);
+  return { doc: contract.doc, anchors, places: readPlaces(contract, anchors, scope), scope };
 }
 
 /** The four classes, in the order a diff lists them. */

@@ -31,7 +31,8 @@
 
 import { isJsonObject } from '@jarenjs/core/object';
 
-import { compileContract } from './compile.js';
+import { compileContract, followRef } from './compile.js';
+import { contractScope } from './held.js';
 import { CONTRACT_CODES, ContractHostError } from './errors.js';
 import { isCompiledContract } from './public.js';
 
@@ -128,7 +129,7 @@ function bodyLimitUnsatisfiable(op, contract, base, findings) {
   const effective = op.input.effective;
   const required = new Set(Array.isArray(effective.required) ? effective.required : []);
   const properties = isJsonObject(effective.properties) ? effective.properties : {};
-  const scope = { doc: contract.doc, seen: new Set() };
+  const scope = { doc: contract.doc, seen: new Set(), refs: contractScope(contract) };
   let least;
   // an optional body member left out sends no body at all
   if (op.http.body !== null) least = required.has(op.http.body) ? minimumBytes(properties[op.http.body], scope, 0) : 0;
@@ -162,7 +163,7 @@ function bodyLimitExceedable(op, contract, base, findings) {
   const properties = isJsonObject(effective.properties) ? effective.properties : {};
   const members = op.http.body !== null ? [op.http.body]
     : Object.keys(op.http.in).filter((m) => op.http.in[m] === 'body');
-  const scope = { doc: contract.doc, seen: new Set() };
+  const scope = { doc: contract.doc, seen: new Set(), refs: contractScope(contract) };
   /** @type {{ path: string, length: number } | null} */
   let widest = null;
   for (const m of members) {
@@ -192,6 +193,31 @@ function narrowsStringWitness(schema) {
 }
 
 /**
+ * What the size walks read and where they have been: the contract
+ * document, the `$ref` hops they are inside, and the scope the contract's
+ * compile resolved refs in (which schema objects another document holds).
+ * @typedef {{ doc: any, seen: Set<unknown>, refs: import('./compile.js').RefScope | undefined }} LintScope
+ */
+
+/**
+ * Where a size walk follows a `$ref`: a `#/$defs/…` entry of the contract
+ * document, or — written inside a schema another document holds — what it
+ * names there, read against that document; with the key the walk marks
+ * the hop by while inside it. `null` where it is not followed.
+ * @param {Record<string, any>} schema - a schema object holding a `$ref`
+ * @param {LintScope} scope
+ * @returns {{ key: unknown, target: unknown } | null}
+ */
+function lintRef(schema, scope) {
+  if (scope.refs?.held?.places.has(schema)) {
+    const target = followRef(schema.$ref, schema, scope.refs);
+    return target === undefined ? null : { key: target, target };
+  }
+  if (!schema.$ref.startsWith('#/$defs/')) return null;
+  return { key: schema.$ref, target: scope.doc.$defs?.[decodeURIComponent(schema.$ref.slice('#/$defs/'.length))] };
+}
+
+/**
  * The largest local string length this conservative traversal can witness:
  * a `string` type (alone or in a union),
  * an integer `maxLength`, with narrowing assertions left unanalysed.
@@ -199,7 +225,7 @@ function narrowsStringWitness(schema) {
  * local witness does not prove the whole body's satisfiability.
  * @param {unknown} schema
  * @param {string} path - a pointer into the input, for the message
- * @param {{ doc: any, seen: Set<unknown> }} scope
+ * @param {LintScope} scope
  * @param {number} depth
  * @returns {{ path: string, length: number } | null}
  */
@@ -211,11 +237,11 @@ function widestString(schema, path, scope, depth) {
   if (typeof schema.$ref === 'string') {
     if (Object.keys(schema).some((key) => !['$ref', '$defs', '$id', '$schema', '$comment',
       'title', 'description', 'default', 'examples', 'deprecated', 'readOnly', 'writeOnly'].includes(key))) return null;
-    if (!schema.$ref.startsWith('#/$defs/') || scope.seen.has(schema.$ref)) return null;
-    const target = scope.doc.$defs?.[decodeURIComponent(schema.$ref.slice('#/$defs/'.length))];
-    scope.seen.add(schema.$ref);
-    const found = widestString(target, path, scope, depth + 1);
-    scope.seen.delete(schema.$ref);
+    const hop = lintRef(schema, scope);
+    if (hop === null || scope.seen.has(hop.key)) return null;
+    scope.seen.add(hop.key);
+    const found = widestString(hop.target, path, scope, depth + 1);
+    scope.seen.delete(hop.key);
     return found;
   }
   /** @type {{ path: string, length: number } | null} */
@@ -242,18 +268,18 @@ function widestString(schema, path, scope, depth) {
  * The fewest bytes a value valid under `schema` can encode to — a lower
  * bound that never overstates: an unknown shape counts one byte.
  * @param {unknown} schema
- * @param {{ doc: any, seen: Set<unknown> }} scope
+ * @param {LintScope} scope
  * @param {number} depth
  * @returns {number}
  */
 function minimumBytes(schema, scope, depth) {
   if (depth > 32 || !isJsonObject(schema)) return 1;
   if (typeof schema.$ref === 'string') {
-    if (!schema.$ref.startsWith('#/$defs/') || scope.seen.has(schema.$ref)) return 1;
-    const target = scope.doc.$defs?.[decodeURIComponent(schema.$ref.slice('#/$defs/'.length))];
-    scope.seen.add(schema.$ref);
-    const n = minimumBytes(target, scope, depth + 1);
-    scope.seen.delete(schema.$ref);
+    const hop = lintRef(schema, scope);
+    if (hop === null || scope.seen.has(hop.key)) return 1;
+    scope.seen.add(hop.key);
+    const n = minimumBytes(hop.target, scope, depth + 1);
+    scope.seen.delete(hop.key);
     return n;
   }
   if (Object.hasOwn(schema, 'const')) return utf8Bytes(JSON.stringify(schema.const) ?? 'null');
@@ -268,7 +294,7 @@ function minimumBytes(schema, scope, depth) {
 /**
  * @param {unknown} type
  * @param {Record<string, any>} schema
- * @param {{ doc: any, seen: Set<unknown> }} scope
+ * @param {LintScope} scope
  * @param {number} depth
  * @returns {number}
  */

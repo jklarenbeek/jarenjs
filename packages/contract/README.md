@@ -795,7 +795,7 @@ const { breaking, additive, neutral, unknown } = diffContracts(v1, v2);
 //   unknown  — what the checker does not model (an if beside both a then
 //              and an else, a union whose variants overlap, a CHANGED
 //              pattern, a multipleOf neither step of which divides the
-//              other, an external $ref, an error details schema, a
+//              other, an external $ref it cannot read, an error details schema, a
 //              constraint moved into an applicator, a member beside a
 //              catch-all, a place whose draft it cannot tell — or any of
 //              these unchanged as text while a $ref inside resolves to a

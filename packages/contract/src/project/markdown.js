@@ -17,6 +17,7 @@ import { renderMarkdown } from '@jarenjs/emit/markdown';
 
 import { ContractHostError } from '../errors.js';
 import { retainedOperations } from '../public.js';
+import { contractScope, heldRefUri } from '../held.js';
 import { contractTypeModel } from './typescript.js';
 
 /**
@@ -123,16 +124,21 @@ function typeLink(name) {
 /**
  * A short label of a member schema for a table cell: the type (with a
  * format), a `$ref` target, an enum, a constant, or the schema as JSON
- * when it is none of those. Detail lives in the Types section.
+ * when it is none of those. Detail lives in the Types section; a `$ref`
+ * written inside a schema another document holds is labelled by the URI
+ * it names there.
  * @param {unknown} schema
+ * @param {import('../compile.js').RefScope | undefined} refs - the scope the contract's compile resolved refs in
  * @returns {string}
  */
-function schemaLabel(schema) {
+function schemaLabel(schema, refs) {
   if (schema === true || schema === undefined) return 'any';
   if (schema === false) return 'never';
   if (!isJsonObject(schema)) return 'any';
   if (typeof schema.$ref === 'string') {
     const ref = schema.$ref;
+    const held = heldRefUri(ref, schema, refs);
+    if (held !== undefined) return `\`${held}\``;
     const name = ref.startsWith('#/$defs/') ? ref.slice('#/$defs/'.length).split('/')[0] : null;
     return name !== null && name.length > 0 ? typeLink(name) : `\`${ref}\``;
   }
@@ -141,7 +147,7 @@ function schemaLabel(schema) {
   const type = Array.isArray(schema.type) ? schema.type.join(' \\| ') : (typeof schema.type === 'string' ? schema.type : null);
   if (type !== null) {
     let label = `\`${type}\``;
-    if (type === 'array' && isJsonObject(schema.items)) label += ` of ${schemaLabel(schema.items)}`;
+    if (type === 'array' && isJsonObject(schema.items)) label += ` of ${schemaLabel(schema.items, refs)}`;
     if (typeof schema.format === 'string') label += ` (${schema.format})`;
     return label;
   }
@@ -152,9 +158,10 @@ function schemaLabel(schema) {
  * The rows of one operation section.
  * @param {CompiledOperation} op
  * @param {Record<string, any>} row - the type-model row of the operation (names)
+ * @param {import('../compile.js').RefScope | undefined} refs - the scope the contract's compile resolved refs in
  * @returns {Record<string, unknown>}
  */
-function operationRows(op, row) {
+function operationRows(op, row, refs) {
   const http = op.http;
   /** @type {Record<string, unknown>[]} */
   const parameters = [];
@@ -172,7 +179,7 @@ function operationRows(op, row) {
     }
     parameters.push({
       name, in: loc, required: loc === 'path' || required.includes(name) ? 'yes' : 'no',
-      schema: schemaLabel(/** @type {any} */ (transport).schemas[name]),
+      schema: schemaLabel(/** @type {any} */ (transport).schemas[name], refs),
     });
   }
   if (op.policy.idempotency !== 'none') {
@@ -236,7 +243,7 @@ export function toMarkdown(contract, options = {}) {
   const input = {
     title: options.title ?? (contract.id === null ? 'jaren-contract' : contract.id),
     compat: contract.compat.slice(),
-    operations: ops.map((op, i) => operationRows(op, rows[i])),
+    operations: ops.map((op, i) => operationRows(op, rows[i], contractScope(contract))),
     types: renderMarkdown(model),
   };
   if (contract.version !== null) input.version = contract.version;

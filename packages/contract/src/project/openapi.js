@@ -39,6 +39,7 @@ import { createTypeTestCompiler } from '@jarenjs/validate/query';
 import { ContractCompileError, ContractHostError, CONTRACT_CODES } from '../errors.js';
 import { HTTP_ERRORS } from '../http/wire.js';
 import { publicProjection, retainedOperations } from '../public.js';
+import { contractScope, heldRefUri } from '../held.js';
 import OPENAPI_STYLESHEET from './openapi.jslt.json' with { type: 'json' };
 
 /**
@@ -139,6 +140,8 @@ function at(base, key) {
  *   copy; every node is mapped once (the projection's roots cover every
  *   member), so a member's mapped schema is a lookup, and a keyword is
  *   reported once
+ * @property {import('../compile.js').RefScope | undefined} refs - the scope
+ *   the contract's compile resolved refs in: which nodes another document holds
  */
 
 /**
@@ -173,13 +176,20 @@ function refuseOrDrop(ctx, docPath, keyword, reason, lenientDrops) {
  * `#/$defs/X…` becomes `#/components/schemas/X…`; anything else inside the
  * document (`#`, an anchor, a pointer into an operation) has no place
  * there — refused, or dropped under `lenient`. An absolute reference is
- * kept as written. Returns `undefined` for a dropped reference.
+ * kept as written, and one written inside a schema another document holds
+ * becomes the absolute URI it names there. Returns `undefined` for a
+ * dropped reference.
  * @param {string} ref
  * @param {string} docPath - of the schema node
  * @param {MapContext} ctx
+ * @param {unknown} holder - the schema node the `$ref` is written in
  * @returns {string | undefined}
  */
-function mapRef(ref, docPath, ctx) {
+function mapRef(ref, docPath, ctx, holder) {
+  // written inside another document: the URI it names there, kept as an
+  // absolute reference the OpenAPI reader resolves as it does any other
+  const held = heldRefUri(ref, holder, ctx.refs);
+  if (held !== undefined) return held;
   if (!ref.startsWith('#')) return ref;
   if (ref.startsWith('#/$defs/')) {
     const rest = ref.slice('#/$defs/'.length);
@@ -226,7 +236,7 @@ function mapSchema(node, docPath, ctx) {
     const key = keys[i];
     const value = node[key];
     if (key === '$ref' && typeof value === 'string') {
-      const mapped = mapRef(value, docPath, ctx);
+      const mapped = mapRef(value, docPath, ctx, node);
       if (mapped !== undefined) out.$ref = mapped;
       continue;
     }
@@ -510,7 +520,7 @@ export function toOpenApi(contract, options = {}) {
 
   const pub = /** @type {any} */ (publicProjection(contract));
   /** @type {MapContext} */
-  const ctx = { lenient, dropped: [], defs: new Set(Object.keys(pub.$defs ?? {})), mapped: new Map() };
+  const ctx = { lenient, dropped: [], defs: new Set(Object.keys(pub.$defs ?? {})), mapped: new Map(), refs: contractScope(contract) };
 
   /** @type {Record<string, any>} */
   const schemas = {};

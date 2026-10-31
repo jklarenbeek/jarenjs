@@ -18,19 +18,25 @@
  * `$ref` resolution rides the validator: the document is registered under
  * a synthetic id and each operation schema is compiled as a `$ref` into
  * it, so `#/$defs/Product` means the contract's own `$defs` and an
- * absolute `$id` means one of `options.schemas`. Unresolved is `JC0007`
- * at compile — never at request time.
+ * absolute `$id` means one of `options.schemas`. A `$ref` written inside
+ * one of those reads against its own document wherever the contract reads
+ * it (`followRef`), and an operation schema that is a run of `$ref`s
+ * leaving the document compiles from the `$ref` that leaves it, as a
+ * validator holding the other document compiles it. Unresolved is
+ * `JC0007` at compile — never at request time.
  */
 
 import { isJsonObject, setObjectMember, deepFreeze } from '@jarenjs/core/object';
-import { splitNullable } from '@jarenjs/core/schema';
+import { splitNullable, ANNOTATION_KEYWORDS } from '@jarenjs/core/schema';
 import { JarenValidator } from '@jarenjs/validate';
 import {
   compileNormalizer, collectSameDocumentAnchors, resolveSameDocumentRef,
+  indexSchemaResources, resolveSchemaReference,
 } from '@jarenjs/validate/normalize';
 import { encodeJSONPointerSegment, parseJSONPointer } from '@jarenjs/json/pointer';
 
 import { ContractCompileError } from './errors.js';
+import { keepScope, heldRefUri } from './held.js';
 import { CONTRACT_GRAMMARS } from './grammars.js';
 import { compatEntryKind, isNumericVersion } from './compat.js';
 
@@ -300,12 +306,166 @@ function snapshot(value, docPath, path) {
 
 /**
  * The reference resolver of one compile: same-document refs through the
- * document's anchors, absolute refs through the validator's registry.
+ * document's anchors, absolute refs through the validator's registry, and
+ * a ref written inside another document against that document.
  * @typedef {Object} RefScope
  * @property {any} src - the snapshotted document
  * @property {Map<string, object>} anchors
  * @property {JarenValidator<any>} validator
+ * @property {SchemaResources | undefined} held - the other documents the
+ *   document's refs reach, and every document their own refs reach, each
+ *   indexed under the URI the validator holds it by: where each of their
+ *   schema objects sits, so a ref written in one reads against its base
+ * @property {Map<string, unknown>} documents - each document of `held`, by that URI
  */
+
+/** @typedef {import('@jarenjs/validate/normalize').SchemaResources} SchemaResources */
+
+/**
+ * A URI without its fragment.
+ * @param {string} href
+ * @returns {string}
+ */
+function withoutFragment(href) {
+  const hash = href.indexOf('#');
+  return hash === -1 ? href : href.slice(0, hash);
+}
+
+/**
+ * Hold the document the validator holds at `uri` in `scope.held`, with
+ * every document its refs name that the validator holds too, so a ref
+ * written inside any of them reads against the document holding it.
+ * @param {RefScope} scope
+ * @param {string} uri - absolute, without a fragment
+ * @param {unknown} [node] - the schema the validator holds at `uri`, when already read
+ * @returns {boolean} whether the validator holds a document there
+ */
+function holdDocument(scope, uri, node = scope.validator.getSchema(uri)) {
+  if (scope.held?.resources.has(uri)) return true;
+  if (node === null || node === undefined) return false;
+  const before = scope.held === undefined ? 0 : scope.held.places.size;
+  scope.held = indexSchemaResources(/** @type {object | boolean} */ (node), { base: uri, into: scope.held });
+  scope.documents.set(uri, node);
+  const placed = [...scope.held.places].slice(before);
+  for (let i = 0; i < placed.length; i++) {
+    const [object, place] = placed[i];
+    const ref = /** @type {any} */ (object).$ref;
+    if (typeof ref !== 'string') continue;
+    let next;
+    try {
+      next = withoutFragment(new URL(ref, place.refBase).href);
+    }
+    catch {
+      continue;
+    }
+    holdDocument(scope, next);
+  }
+  return true;
+}
+
+/**
+ * The schema a `$ref` written in `holder` names, read against the
+ * document holding it: written in the contract document, it resolves
+ * inside it (`#…`) or through the validator's registry (an absolute URI);
+ * written inside another document, against that document's base — so
+ * `#/$defs/S` inside a registered schema means that schema's `$defs`, as
+ * the validator holding it reads it. `undefined` when it does not resolve.
+ * @param {string} ref
+ * @param {unknown} holder - the schema object the `$ref` is written in
+ * @param {RefScope} scope
+ * @returns {any}
+ */
+export function followRef(ref, holder, scope) {
+  const place = scope.held?.places.get(/** @type {object} */ (holder));
+  if (place !== undefined) {
+    const uri = heldRefUri(ref, holder, scope);
+    return uri !== undefined && holdDocument(scope, withoutFragment(uri))
+      ? resolveSchemaReference(ref, place.refBase, /** @type {SchemaResources} */ (scope.held))
+      : undefined;
+  }
+  if (ref.startsWith('#')) return resolveSameDocumentRef(ref, scope.src, scope.anchors);
+  const hash = ref.indexOf('#');
+  const base = hash === -1 ? ref : ref.slice(0, hash);
+  const external = scope.validator.getSchema(base);
+  if (external === null || external === undefined) return undefined;
+  const target = resolveSameDocumentRef(decodeFragment(hash === -1 ? '#' : ref.slice(hash)), external, collectSameDocumentAnchors(external));
+  if (URL.canParse(base)) {
+    const uri = withoutFragment(new URL(base).href);
+    holdDocument(scope, uri, external);
+    // a target below a non-schema position is placed by reading it there
+    if (isJsonObject(target) && !scope.held?.places.has(target)) resolveSchemaReference(ref, uri, /** @type {SchemaResources} */ (scope.held));
+  }
+  return target;
+}
+
+/**
+ * The absolute ref a place's leading run of `$ref`-only hops (annotations
+ * beside them read nothing) leaves the document by, or `null` where the run
+ * stays inside it. The validator compiles such a run as one schema at the
+ * place it starts from, so a ref inside the schema it leaves for would
+ * read against the contract; the place compiles from that ref instead, as
+ * a validator holding the other document compiles it.
+ * @param {unknown} node
+ * @param {RefScope} scope
+ * @returns {string | null}
+ */
+function leavingRef(node, scope) {
+  let cur = node;
+  for (let hops = 0; hops < 32 && refAlone(cur); hops++) {
+    const ref = /** @type {any} */ (cur).$ref;
+    if (!ref.startsWith('#')) return URL.canParse(ref) ? ref : null;
+    cur = resolveSameDocumentRef(ref, scope.src, scope.anchors);
+  }
+  return null;
+}
+
+/**
+ * Whether a schema is a `$ref` with nothing but annotations beside it.
+ * @param {unknown} node
+ * @returns {boolean}
+ */
+function refAlone(node) {
+  if (!isJsonObject(node) || typeof node.$ref !== 'string') return false;
+  const keys = Object.keys(node);
+  for (let i = 0; i < keys.length; i++) {
+    if (keys[i] !== '$ref' && !ANNOTATION_KEYWORDS.includes(keys[i])) return false;
+  }
+  return true;
+}
+
+/**
+ * The definitions a sub-schema rooted on the document carries so that the
+ * other documents `held` resolve inside it: the document's own `$defs`
+ * with each held document beside them under a name the document does not
+ * use, or nothing where it holds none. Placed before the members, the
+ * held documents are where their schema objects sit when read.
+ * @param {RefScope} scope
+ * @returns {{ $defs?: Record<string, unknown> }}
+ */
+function heldDefinitions(scope) {
+  if (scope.documents.size === 0) return {};
+  const defs = isJsonObject(scope.src.$defs) ? { ...scope.src.$defs } : {};
+  let n = 0;
+  for (const node of scope.documents.values()) {
+    while (Object.hasOwn(defs, `held-${n}`)) n++;
+    setObjectMember(defs, `held-${n}`, node);
+  }
+  return { $defs: defs };
+}
+
+/**
+ * The non-null branch of a nullable member, as a schema that reads where
+ * the member sits: `splitNullable` yields a fresh object, so a `$ref` the
+ * branch carries inside another document is made absolute against it.
+ * @param {any} branch - `splitNullable`'s schema
+ * @param {unknown} member - the member's effective schema
+ * @param {RefScope} scope
+ * @returns {any}
+ */
+function heldBranch(branch, member, scope) {
+  const uri = isJsonObject(branch) && typeof branch.$ref === 'string' ? heldRefUri(branch.$ref, member, scope) : undefined;
+  return uri === undefined ? branch : { ...branch, $ref: uri };
+}
 
 /**
  * A URI fragment as a same-document reference: percent-decoded when it
@@ -332,20 +492,7 @@ function decodeFragment(frag) {
 function effectiveSchema(node, scope) {
   let cur = node;
   for (let hops = 0; hops < 32 && isJsonObject(cur) && typeof cur.$ref === 'string'; hops++) {
-    const ref = cur.$ref;
-    let target;
-    if (ref.startsWith('#')) {
-      target = resolveSameDocumentRef(ref, scope.src, scope.anchors);
-    }
-    else {
-      const hash = ref.indexOf('#');
-      const base = hash === -1 ? ref : ref.slice(0, hash);
-      const frag = hash === -1 ? '#' : ref.slice(hash);
-      const external = scope.validator.getSchema(base);
-      target = external === null || external === undefined
-        ? undefined
-        : resolveSameDocumentRef(decodeFragment(frag), external, collectSameDocumentAnchors(external));
-    }
+    const target = followRef(cur.$ref, cur, scope);
     if (target === undefined) return undefined;
     cur = target;
   }
@@ -394,6 +541,7 @@ function checkRefs(node, docPath, scope, isRoot) {
           `the $ref '${ref}' names a registered schema but its fragment does not resolve inside it`,
           at(docPath, '$ref'));
       }
+      if (URL.canParse(base)) holdDocument(scope, withoutFragment(new URL(base).href), external);
     }
   }
   const keys = Object.keys(node);
@@ -1051,7 +1199,7 @@ export function compileContract(doc, options = {}) {
   if (!isJsonObject(doc)) throw refuse('JC0001', 'the contract document must be an object', '');
   const src = deepFreeze(snapshot(doc, '', new Set()));
   /** @type {RefScope} */
-  const scope = { src, anchors: collectSameDocumentAnchors(src), validator };
+  const scope = { src, anchors: collectSameDocumentAnchors(src), validator, held: undefined, documents: new Map() };
 
   checkRoot(src, scope);
 
@@ -1158,11 +1306,12 @@ export function compileContract(doc, options = {}) {
   /**
    * @param {(string | number)[]} tokens
    * @param {string} docPath
+   * @param {unknown} node - the schema at `tokens`
    * @returns {CompiledValidate}
    */
-  function compileAt(tokens, docPath) {
+  function compileAt(tokens, docPath, node) {
     try {
-      return validator.compile({ $ref: synthetic + fragment(tokens) });
+      return validator.compile({ $ref: leavingRef(node, scope) ?? synthetic + fragment(tokens) });
     }
     catch (err) {
       throw refuse('JC0007', `the schema failed to compile: ${asCause(err)?.message ?? 'unresolved'}`, docPath, asCause(err));
@@ -1181,7 +1330,7 @@ export function compileContract(doc, options = {}) {
     /** @type {CompiledInput | null} */
     let input = null;
     if (p.input !== null) {
-      const validate = compileAt(['operations', p.id, 'input'], at(base, 'input'));
+      const validate = compileAt(['operations', p.id, 'input'], at(base, 'input'), p.input);
       /** @type {InputTransport | null} */
       let transport = null;
       const pathMembers = [];
@@ -1208,12 +1357,13 @@ export function compileContract(doc, options = {}) {
         // `type: ['array', 'null']` does
         const eff = effectiveSchema(schema, scope);
         const split = splitNullable(eff);
-        setObjectMember(decodePick, m, split === null ? schema : split.schema);
+        const decode = split === null ? schema : heldBranch(split.schema, eff, scope);
+        setObjectMember(decodePick, m, decode);
         if (loc === 'path') pathMembers.push(m);
         else {
           if (loc === 'query') queryMembers.push(m);
           else headerMembers.push(m);
-          const branch = split === null ? eff : effectiveSchema(split.schema, scope);
+          const branch = split === null ? eff : effectiveSchema(decode, scope);
           const type = isJsonObject(branch) ? branch.type : undefined;
           if (type === 'array' || (Array.isArray(type) && type.includes('array'))) repeated.push(m);
           if (loc === 'query' && (type === 'object' || type === 'array'
@@ -1223,11 +1373,12 @@ export function compileContract(doc, options = {}) {
       if (pathMembers.length + queryMembers.length + headerMembers.length > 0) {
         // the sub-schema is rooted on the document itself, so every
         // same-document `$ref` a member schema carries resolves exactly as
-        // it does for the validator
+        // it does for the validator, and it carries the other documents the
+        // refs reach, so a member one of them holds reads against it
         // JSON query values have the same typing discipline as a JSON
         // body: validate them verbatim, never coerce their descendants.
         const scalarPick = Object.fromEntries(Object.entries(decodePick).filter(([name]) => !queryJson.includes(name)));
-        const sub = { ...src, type: 'object', properties: scalarPick };
+        const sub = { ...src, ...heldDefinitions(scope), type: 'object', properties: scalarPick };
         const normalize = compileNormalizer(sub, { coerceTypes: true });
         const declaredRequired = Array.isArray(p.inputEffective.required) ? p.inputEffective.required : [];
         transport = {
@@ -1242,7 +1393,7 @@ export function compileContract(doc, options = {}) {
     }
 
     /** @type {CompiledOutput} */
-    const output = { schema: p.output, validate: compileAt(['operations', p.id, 'output'], at(base, 'output')),
+    const output = { schema: p.output, validate: compileAt(['operations', p.id, 'output'], at(base, 'output'), p.output),
       admitsNull: admitsNull(effectiveSchema(p.output, scope)) };
 
     /** @type {Record<string, CompiledErrorDecl>} */
@@ -1254,7 +1405,7 @@ export function compileContract(doc, options = {}) {
         schema: e.schema,
         validate: e.schema === null
           ? null
-          : compileAt(['operations', p.id, 'errors', e.code, 'schema'], at(at(at(base, 'errors'), e.code), 'schema')),
+          : compileAt(['operations', p.id, 'errors', e.code, 'schema'], at(at(at(base, 'errors'), e.code), 'schema'), e.schema),
       });
     }
 
@@ -1292,5 +1443,7 @@ export function compileContract(doc, options = {}) {
     revision: (options) => contractRevision(contract, options),
     $defs: src.$defs === undefined ? Object.freeze({}) : src.$defs,
   };
-  return freezeAll(contract);
+  const frozen = freezeAll(contract);
+  keepScope(frozen, scope);
+  return frozen;
 }

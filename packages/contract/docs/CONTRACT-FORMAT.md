@@ -163,7 +163,22 @@ a schema passed as `compileContract(doc, { schemas })` by its `$id`
 document with its validator under a synthetic id and compiles every
 operation schema as a reference into it, so `#/$defs/Product` inside an
 operation means the contract's own `$defs`, exactly as a reader expects.
-That registration is **one per compile**: the document is added to the
+A `$ref` written inside a schema passed in `schemas` reads against *that*
+schema's document — its `$id`, its `$defs`, its anchors and the resources
+embedded in it, and the documents it names in turn — as a validator
+holding the document reads it, wherever the contract reads the schema:
+the operation's validators, the input's members and their transport
+decoding, an output's null check, the client's URL check,
+`diffContracts`, lint and the projections. An operation schema that is a `$ref` into such a document
+(directly, or through `$ref`s of the contract's own with nothing but
+annotations beside them) compiles from that `$ref`, so a validation
+error's `schemaPath` names the constraint where that document holds it.
+**Upgrading:** such a `$ref` was read against the contract — every request
+threw `JK0009` where the contract defines no definition of that name, and
+the contract's own definition was read where it does; it now reads the
+registered document's, so a contract whose input then reaches a schema
+that is no object, or whose output for a `204` no longer admits null, is
+refused when it compiles (`JC0005`, `JC0012`). That registration is **one per compile**: the document is added to the
 (possibly host-injected, `compileContract(doc, { validator })`) validator
 under `urn:jaren:contract:<n>`, `n` a process-wide counter, and is never
 removed — a host sharing one validator across many compiles keeps them
@@ -2557,7 +2572,15 @@ direction, any keyword it does not model, a `$ref` beside siblings, an error's s
 every same-document `$ref` inside resolves to on each side (through
 `$defs`, `definitions` and chains of `$ref`s; a recursive definition
 terminates), and two spellings whose resolved schemas differ report the
-change at the first pointer where they do.
+change at the first pointer where they do. A `$ref` into a document
+registered through `compileContract(doc, { schemas })` is followed into
+the document *that side* was compiled with, and a `$ref` inside it reads
+against it (§2.3), so a change inside a registered document is classed
+by the rules below like one in the contract. **Upgrading:** an external
+`$ref` that moved, once R15, is read by what each side's document holds
+there (alike, it reports nothing); a change inside a registered
+document, once reported as nothing or read against the contract's own
+definitions, is classed by the rules.
 
 | # | Change | Class |
 |---|---|---|
@@ -2575,7 +2598,7 @@ change at the first pointer where they do.
 | R12 | `policy.idempotency` `none/optional → required` (a client must now send a key), or `required/optional → none` (a key an old client still sends, and retries under, is no longer read) | breaking (`idempotency-required`, `idempotency-dropped`); `required → optional` and `none → optional` additive (`idempotency-relaxed`) |
 | R13 | `policy.task`, `policy.retry`, `policy.cache`, `policy.revision`, `policy.stream` (a resume policy, heartbeat or patch bound) or `doc` changed | neutral; a `policy.stream.heartbeatMs` that rises is breaking (`heartbeat-slowed`) — an older client arms its watchdog from its own contract and reports the stream lost (`JC2094`) after twice the interval it expects |
 | R14 | `policy.audience` `public → server` | breaking; the reverse additive |
-| R15 | a schema construct the checker does not model differs between the two (an `if` beside both a `then` and an `else`, one that changed beside a branch that changed or appeared too, or one added or dropped beside a branch; a `not` or a `contains` on one side only that a branch of the other side's applicators may hold; a changed `contains` beside a tuple form, beside counts that changed, or beside a `maxContains` with a `minContains` other than 0, and a count beside a `contains` that changed; a `multipleOf` neither step of which divides the other; a keyword some draft does not know yet at a place whose draft the walk cannot tell (see the riders); an `anyOf`/`oneOf` whose variants neither a type, a discriminator nor the two together tell apart, an applicator the walk does not read by direction — see the riders —, `$dynamicRef`, a `format`, a *changed* `pattern`, an external or sibling-carrying `$ref`, a changed error `details` schema, …), including one whose text is unchanged while a same-document `$ref` inside it resolves to a schema that changed — reported at the first resolved pointer where the two differ; a constraint present on one side only while the other carries such an applicator, or a member or requirement present on one side only while the other carries one a branch of which may hold it — names or requires it, closes the object, or carries a catch-all or an applicator of its own (it may have moved inside); a member added or removed beside a catch-all that constrains it (`additionalProperties` or `unevaluatedProperties` as a schema, `patternProperties`, `propertyNames`), or one a closed object's `patternProperties` admits where the two sides' matching patterns differ | **unknown** — reported, never silently classed |
+| R15 | a schema construct the checker does not model differs between the two (an `if` beside both a `then` and an `else`, one that changed beside a branch that changed or appeared too, or one added or dropped beside a branch; a `not` or a `contains` on one side only that a branch of the other side's applicators may hold; a changed `contains` beside a tuple form, beside counts that changed, or beside a `maxContains` with a `minContains` other than 0, and a count beside a `contains` that changed; a `multipleOf` neither step of which divides the other; a keyword some draft does not know yet at a place whose draft the walk cannot tell (see the riders); an `anyOf`/`oneOf` whose variants neither a type, a discriminator nor the two together tell apart, an applicator the walk does not read by direction — see the riders —, `$dynamicRef`, a `format`, a *changed* `pattern`, a sibling-carrying `$ref`, an external `$ref` the walk cannot read (a contract another copy of the package compiled), a changed error `details` schema, …), including one whose text is unchanged while a same-document `$ref` inside it resolves to a schema that changed — reported at the first resolved pointer where the two differ; a constraint present on one side only while the other carries such an applicator, or a member or requirement present on one side only while the other carries one a branch of which may hold it — names or requires it, closes the object, or carries a catch-all or an applicator of its own (it may have moved inside); a member added or removed beside a catch-all that constrains it (`additionalProperties` or `unevaluatedProperties` as a schema, `patternProperties`, `propertyNames`), or one a closed object's `patternProperties` admits where the two sides' matching patterns differ | **unknown** — reported, never silently classed |
 | R16 | a nullable node respelled between `type: [T, 'null']` and a two-branch `anyOf`/`oneOf` with a null-only branch, where both spellings accept exactly the same values | neutral (`schema-respelled`) — the bytes and the revision move, the accepted values do not; a reorder inside one spelling (a type array's items, a union's branches) is no respelling and is silent |
 
 Riders the rows carry:
@@ -2929,7 +2952,7 @@ Riders the rows carry:
   schema starts; below a resource declaring an older draft the two
   differ, so a target there that declares no `$schema` of its own is
   compared by its text where it holds such a keyword — R15 where it
-  changed — and so is a schema of another document (an input reached
+  changed — and so is a schema of another document (one registered
   through `options.schemas`) that declares none, since the compiled
   contract does not carry that document's draft. **Upgrading:** a
   `prefixItems` entry or a `dependentSchemas` member changed where the

@@ -241,6 +241,17 @@ delete it or fix it.
   100,000-deep array throws an uncoded `RangeError` on the default stack,
   where the direct shapes (`{ items: { $ref: '#' } }`, `{ properties: { a: {
   $ref: '#' } } }`) answer `JK2001`.
+- [ ] **The validator reads the end of a chain of bare `$ref`s that crosses
+  into another document against the document the chain starts in.** With
+  `https://x.example/lib.json` holding `$defs: { S: { type: 'string' }, In: {
+  type: 'object', properties: { m: { $ref: '#/$defs/S' } } } }` and `urn:a`
+  holding `x: { $ref: 'https://x.example/lib.json#/$defs/In' }`, `compile({
+  $ref: 'urn:a#/x' })({ m: 1 })` throws `JK0009` for `urn:a#/$defs/S` (and is
+  true where `urn:a` defines `$defs.S` as a number), where compiling
+  `{ $ref: 'https://x.example/lib.json#/$defs/In' }` directly answers false.
+  A contract compiles a place whose `$ref` leaves its document from that
+  reference itself, so contracts read it right; a validator caller who
+  compiles such a chain does not.
 
 ## @jarenjs/view & @jarenjs/app
 
@@ -386,21 +397,17 @@ costs a descriptor plus examples and no UI code at all.
   at a location another conjunct or the node itself also constrains (it would
   need the two intersected; a variant added beside the node's own `type`
   among them) stay R15 too.
-- [ ] **A `#` reference inside a schema another document holds resolves
-  against the contract.** An input `{ $ref:
-  'https://x.example/lib.json#/$defs/In' }` registered through
-  `options.schemas`, whose `In` holds `m: { $ref: '#/$defs/S' }`, compiles,
-  but its validator resolves `#/$defs/S` against the contract document: with
-  no `$defs.S` there every request throws `JK0009` when it is validated, and
-  with one the contract's `S` is read and the external document's never is.
-  `diffContracts` resolves it the same way, so it agrees with a reading the
-  compile should refuse or resolve in the external document.
 - [ ] **A command's input nested past the host stack is refused uncoded.** A
   contract command and a subscription copy their input through `cloneJson`
   (`@jarenjs/core/object`) before freezing it (`deepFreeze(cloneJson(input))`),
   and `cloneJson` recurses per level: an input nested 100,000 levels, or a
   cyclic one, throws an uncoded `RangeError` there, though `deepFreeze` walks
   any depth.
+- [ ] **An external `$ref` fragment is percent-decoded twice at compile.**
+  `{ $ref: 'https://x.example/lib.json#/$defs/a%2520b' }` into a registered
+  schema whose `$defs` holds `a%20b` is refused `JC0007` ("its fragment does
+  not resolve"), though the validator resolves it to `a%20b`: the compile
+  decodes the fragment before the shared resolver decodes it again.
 
 ## @jarenjs/linq & @jarenjs/db — the data pair
 

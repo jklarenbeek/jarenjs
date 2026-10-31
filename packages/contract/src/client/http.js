@@ -36,6 +36,7 @@ import { JarenValidator } from '@jarenjs/validate';
 import { createSseEventDecoder } from '@jarenjs/core/text/sse';
 
 import { ContractHostError } from '../errors.js';
+import { contractScope, heldUri } from '../held.js';
 import { admitOptions, admitSignal, admitSubscribeOptions } from '../options.js';
 import { resolveHostRuntime } from '../runtime.js';
 import { isReadableStream, isAsyncByteSource } from '../http/body.js';
@@ -1524,13 +1525,25 @@ export function openHttpClient(contract, options = {}) {
       const transport = /** @type {import('../compile.js').CompiledInput} */ (route.op.input).transport;
       if (transport !== null && transport.members.path.length + transport.members.query.length > 0) {
         // the path/query members only, rooted on the contract document so
-        // their `$ref`s resolve as they do for the validator; compiled on
-        // first use because only a URL builder needs it
+        // their `$ref`s resolve as they do for the validator — a member
+        // another document holds by its URI there, on a validator holding
+        // every document the contract's refs reach; compiled on first use
+        // because only a URL builder needs it
         const names = [...transport.members.path, ...transport.members.query];
+        const refs = contractScope(contract);
         /** @type {Record<string, unknown>} */
         const pick = {};
-        for (let i = 0; i < names.length; i++) setObjectMember(pick, names[i], transport.schemas[names[i]]);
+        for (let i = 0; i < names.length; i++) {
+          const schema = transport.schemas[names[i]];
+          const held = refs === undefined ? undefined : heldUri(schema, refs);
+          setObjectMember(pick, names[i], held === undefined ? schema : { $ref: held });
+        }
         if (validator === null) validator = new JarenValidator({ collectErrors: true, skipErrors: false });
+        if (refs !== undefined) {
+          for (const [uri, node] of refs.documents) {
+            if (validator.getSchema(uri) === null) validator.addSchema(/** @type {any} */ (node), uri);
+          }
+        }
         route.transport.validate = validator.compile({
           ...contract.doc, type: 'object', properties: pick, required: transport.required.filter((r) => names.includes(r)),
         });
