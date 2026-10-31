@@ -1003,6 +1003,18 @@ export function traverseOptionsFor(traverse, propertyDependencies) {
 }
 
 /**
+ * Whether a schema reached through a `$ref` is a pure hop that
+ * {@link resolveRefSchemaDeep} follows and flattens away: a `$ref` with no
+ * keyword beside it that asserts.
+ * @param {any} item - The schema a reference reached
+ * @param {TraverseOptions} opts
+ * @returns {boolean}
+ */
+export function isReferenceHop(item, opts) {
+  return isObjectClass(item) && hasSchemaReference(item, '$ref') && !hasRefSiblings(item, opts.propertyDependencies === true);
+}
+
+/**
  * Follow a chain of pure `$ref` hops to its end and flatten it.
  * @param {Map<string, any>} schemas - The schema map
  * @param {string} baseUri - The base the first reference resolves against
@@ -1051,7 +1063,7 @@ export function resolveRefSchemaDeep(schemas, baseUri, refschema, opts = new Tra
     // written and compiled as a schema object, where the resource's
     // draft decides whether its siblings assert (draft-07 ignores them).
     if (hasSchemaReference(item, '$ref')) {
-      if (item !== refschema && hasRefSiblings(item, opts.propertyDependencies === true))
+      if (item !== refschema && !isReferenceHop(item, opts))
         return { id: base, schema: item };
       const ref = schemaReference(item, '$ref');
       const { id, schema } = resolveRefSchemaShallow(schemas, ref, base, opts, places);

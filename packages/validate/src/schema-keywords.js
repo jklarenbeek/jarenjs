@@ -228,22 +228,27 @@ export function declaredVocabularies(vocabulary) {
  * What the dialect a `$schema` URI names switches on, as the meta-schema a
  * validator holds under it declares in `$vocabulary` ({@link
  * declaredVocabularies}): the validation vocabulary stays on, and the
- * format-assertion one off, where the meta-schema is not held or declares
- * no `$vocabulary`. A required vocabulary this package does not implement
- * is named only where the dialect's draft defines `$vocabulary` (2019-09
- * on). The one reading of a dialect's vocabularies, for the validator and
- * for every reader handed it.
+ * format-assertion one off, where the meta-schema is not held, declares no
+ * `$vocabulary`, or is read itself where the member is no keyword: its own
+ * `$schema` names a draft before 2019-09, or a dialect read as draft-07
+ * ({@link detectSchemaDraft}: draft-04, one this package does not know). A
+ * meta-schema without a `$schema` of its own is read under no draft, where
+ * every keyword is read, `$vocabulary` among them. A required vocabulary
+ * this package does not implement is named only where the dialect's draft
+ * defines `$vocabulary` (2019-09 on). The one reading of a dialect's
+ * vocabularies, for the validator and for every reader handed it.
  * @param {string} uri - The `$schema` value
  * @param {(key: string) => unknown} get - The schema a validator holds under a key
- * @param {number|null} draft - The dialect's draft ({@link dialectDraft})
+ * @param {number} draft - The draft the dialect is read under ({@link detectSchemaDraft})
  * @returns {{ validation: boolean, formatAssertion: boolean, unimplemented: string|undefined }}
  */
 export function dialectVocabulary(uri, get, draft) {
   const metaSchema = heldDialect(uri, get);
-  if (!isObjectClass(metaSchema) || !isObjectClass(metaSchema.$vocabulary))
+  if (!isObjectClass(metaSchema) || !isObjectClass(metaSchema.$vocabulary)
+    || (draft < 2019 && isStringType(metaSchema.$schema)))
     return { validation: true, formatAssertion: false, unimplemented: undefined };
   const declared = declaredVocabularies(metaSchema.$vocabulary);
-  if (draft != null && draft < 2019) declared.unimplemented = undefined;
+  if (draft < 2019) declared.unimplemented = undefined;
   return declared;
 }
 

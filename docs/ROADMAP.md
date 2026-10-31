@@ -143,14 +143,6 @@ delete it or fix it.
   document) fills its defaults as written, and the checks assert no `format`
   (they register none). Deciding them needs the dependent places found, or the
   whole normalized document validated.
-- [ ] **A meta-schema of a draft without `$vocabulary` still switches the
-  validation vocabulary.** `addMetaSchema({ $schema:
-  'http://json-schema.org/draft-07/schema#', $id: X, $vocabulary: {
-  …/vocab/core: true } })` then `compile({ $schema: X, type: 'string' })`
-  accepts `1`: the member is read as a vocabulary declaration though draft-07
-  has no such keyword (a required unknown vocabulary is refused only from
-  2019-09 on). Reading it only there turns validation back on for such
-  dialects (a minor).
 - [ ] **Checking defaults costs a validator compile.** A normalizer with
   `useDefaults` compiles a `JarenValidator` of the schemas its defaults meet
   (a copy of the self-contained ones, `$ref`s to the rest), once, and a bundle
@@ -205,21 +197,6 @@ delete it or fix it.
   `dependentRequired` at the present member (`/a`) in collected errors and
   `basic`, at the object in `list`. One rule changes collected `instancePath`
   (an upgrade note).
-- [ ] **The validator reads the end of a chain of bare `$ref`s under no
-  draft.** With `urn:doc` holding `$defs: { o: { $ref: '#/$defs/r/$defs/s' },
-  r: { $schema: draft-07, $defs: { s: { prefixItems: [{ type: 'string' }] } }
-  } }`, `compile({ $ref: 'urn:doc#/$defs/o' })([1])` is false (`prefixItems`
-  applied), while `compile({ $ref: 'urn:doc#/$defs/r/$defs/s' })`, a `$ref` to
-  `o` below the compiled schema (`{ items: { $ref: 'urn:doc#/$defs/o' } }` on
-  `[[1]]`) and the normalizer's `schemaPlace` all read `s` under draft-07
-  (`[1]` valid). `diffContracts` answers R15 at such a target: a contract
-  operation whose schema is a bare `$ref` chain to it is read the first way,
-  a member `$ref` to it the second.
-- [ ] **`multipleOf` takes a value within an absolute 1e-6 of a whole
-  quotient.** `{ multipleOf: 10000000 }` accepts `5`, `9` and `20000001` (and
-  `{ type: 'integer', multipleOf: 10000000 }` accepts `9`): the check compares
-  `data / multipleOf` with its rounding at a fixed tolerance, so the larger
-  the step, the farther from a multiple an accepted value may lie.
 - [ ] **The normalizer still recurses per level of schema and of instance.**
   `compileNormalizer` over a schema nested 20,000 levels throws an uncoded
   `RangeError` while it compiles (its placement walk and its compile recurse
@@ -241,17 +218,22 @@ delete it or fix it.
   100,000-deep array throws an uncoded `RangeError` on the default stack,
   where the direct shapes (`{ items: { $ref: '#' } }`, `{ properties: { a: {
   $ref: '#' } } }`) answer `JK2001`.
-- [ ] **The validator reads the end of a chain of bare `$ref`s that crosses
-  into another document against the document the chain starts in.** With
-  `https://x.example/lib.json` holding `$defs: { S: { type: 'string' }, In: {
-  type: 'object', properties: { m: { $ref: '#/$defs/S' } } } }` and `urn:a`
-  holding `x: { $ref: 'https://x.example/lib.json#/$defs/In' }`, `compile({
-  $ref: 'urn:a#/x' })({ m: 1 })` throws `JK0009` for `urn:a#/$defs/S` (and is
-  true where `urn:a` defines `$defs.S` as a number), where compiling
-  `{ $ref: 'https://x.example/lib.json#/$defs/In' }` directly answers false.
-  A contract compiles a place whose `$ref` leaves its document from that
-  reference itself, so contracts read it right; a validator caller who
-  compiles such a chain does not.
+- [ ] **A form field's `multipleOf` takes a value within an absolute 1e-6 of a
+  whole quotient.** `validateAllFields(buildFormModel({ type: 'object',
+  properties: { n: { type: 'number', multipleOf: 10000000 } } }), { n: 5 })`
+  reports no error (nor for `20000001`, nor `0.30000000000000004` under
+  `multipleOf: 0.1`), where the validator refuses them: `@jarenjs/forms`'
+  field check compares the float quotient with its rounding at a fixed
+  tolerance. Reading the decimals both spell, as the validator does, refuses
+  values it took (a minor).
+- [ ] **A `$ref` target below a keyword no draft defines reads the compile's
+  vocabularies.** Under a held dialect without the validation vocabulary,
+  with `urn:doc` holding `{ $schema: dialect, components: { schemas: { p: {
+  type: 'string' } } } }`, `compile({ $ref: 'urn:doc#/components/schemas/p' })`
+  refuses `1`, where a `$defs` member of the same document is reached and
+  accepts it. The walk records the dialect of the places it enters only;
+  reading the nearest `$schema` on the way, as such a target's draft is now
+  read, is the open work.
 
 ## @jarenjs/view & @jarenjs/app
 
@@ -380,8 +362,8 @@ costs a descriptor plus examples and no UI code at all.
   (a `$ref`, a `format`, an `if`) that refuses a required name, is still
   classed as a constrained member (added to an open input: additive R7),
   though every request carrying it is refused: deciding it would need the
-  pattern's language computed, the integer multiples read against the
-  validator's `multipleOf` tolerance, or the `propertyNames` read in its
+  pattern's language computed, the multiples of the step that are
+  integers counted, or the `propertyNames` read in its
   document.
 - [ ] **`diffContracts` reports an `if` beside both a `then` and an `else`, a
   `contains` changed under both counts, or a union whose variants overlap as
@@ -408,6 +390,13 @@ costs a descriptor plus examples and no UI code at all.
   schema whose `$defs` holds `a%20b` is refused `JC0007` ("its fragment does
   not resolve"), though the validator resolves it to `a%20b`: the compile
   decodes the fragment before the shared resolver decodes it again.
+- [ ] **`diffContracts` reads a same-document `$ref` target under 2020-12
+  beside its own place's draft.** `readPlaces` gives every such target
+  `FROM_2020` because the validator once read the end of a chain of bare
+  `$ref`s under no draft; it now reads every reach of a target at its own
+  place, so a keyword the two readings part on at a target below a resource
+  of an older draft (`prefixItems` under a draft-07 `$defs` member) still
+  answers R15 where the validator decides it.
 
 ## @jarenjs/linq & @jarenjs/db — the data pair
 

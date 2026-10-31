@@ -665,7 +665,8 @@ if (asyncLiveLeak.length)
 // Raised to 1,107,700 (measured 1107602): the validator's refusal of a required vocabulary it does not implement, one reading of a dialect's vocabularies for the validator and the schema readers, and the normalizer's check of each default against the schemas it meets (schema-keywords 774, normalize 406, errors 374, index 76) add 1634.
 // Raised to 1,110,700 (measured 1110695): deep equality and freezing at any depth on their own frames (core object 2176), and the validator's coded refusal of a schema nested past maxSchemaDepth, with the walks that reach it before the host stack does (validate index 431, errors 282, traverse 204) add 3093.
 // Raised to 1,117,100 (measured 1117079): the store's refusal of a non-JSON external the call's externals alone pick through a conditional, a computed operand, $entries, a nested phrase or a constructor path, decided by the engine before any statement (query 6384) add 6384.
-if (clientBytes > 1117100)
+// Raised to 1,118,300 (measured 1118262): the validator's exact multipleOf on the decimals both spell, a reference chain's end read at its own place, and a target below a keyword no draft defines read under the nearest $schema on the way (validate index 569, number 522, traverse 55, tools 23, schema-keywords 14) add 1183.
+if (clientBytes > 1118300)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 

@@ -17,6 +17,7 @@ import {
   assertRootReadsInstance,
   resolveRefSchemaDeep,
   resolveRefSchemaShallow,
+  isReferenceHop,
   traverseOptionsFor,
   encodeJsonPointerPath,
   decodeJsonPointerPath,
@@ -330,7 +331,9 @@ export class ValidationOptions {
 /**
  * The draft a schema's place declares, as the walks that registered it read
  * it: a reference target is compiled under the draft of the document that
- * holds it. A flattened copy of a target is found by its location.
+ * holds it. A flattened copy of a target is found by its location, and a
+ * place no walk recorded reads as the nearest one on the way to it
+ * ({@link unwalkedReading}).
  * @param {import('./traverse.js').SchemaPlaces|undefined} places - What the walks read
  * @param {Map<string, any>} schemas - The compilation's schemas by URI
  * @param {string} path - The schema's location
@@ -340,7 +343,44 @@ export class ValidationOptions {
 function placeDraft(places, schemas, path, schema) {
   const drafts = places?.drafts;
   if (drafts === undefined) return null;
-  return placeDraftOf(places, placeOf(drafts, schemas, path, schema), schemas) ?? null;
+  const place = placeOf(drafts, schemas, path, schema);
+  return drafts.has(place) ? placeDraftOf(places, place, schemas) ?? null : unwalkedReading(places, schemas, path).draft;
+}
+
+/**
+ * How a schema object no walk recorded is read: one a pointer reaches below
+ * a position the walks do not enter (a keyword no draft defines, as the
+ * `components` of an OpenAPI document). It reads as the nearest object on
+ * the way to it in its document, itself included, that a walk recorded or
+ * that declares a `$schema` of its own, as the normalizer's index places it
+ * (`resolveSchemaReference`): a draft-07 document's `#/components/schemas/a`
+ * is read as draft-07.
+ * @param {import('./traverse.js').SchemaPlaces} places - What the walks read
+ * @param {Map<string, any>} schemas - The compilation's schemas by URI
+ * @param {string} path - The object's location
+ * @returns {{ draft: number|null, foreign: boolean }} The draft it is read
+ *   under (null for none), and whether its `$schema` names no draft this
+ *   package knows ({@link readsForeign})
+ */
+function unwalkedReading(places, schemas, path) {
+  const pointer = path.indexOf('#/');
+  let node = schemas.get(pointer === -1 ? path : path.slice(0, pointer + 1));
+  const parts = pointer === -1 ? [] : decodeJsonPointerPath(path.slice(pointer + 1));
+  let draft = null;
+  let foreign = false;
+  for (let i = 0; ; i++) {
+    if (places.drafts.has(node)) {
+      draft = placeDraftOf(places, node, schemas) ?? null;
+      foreign = readsForeign(places, node, schemas);
+    }
+    else if (isObjectClass(node) && isStringType(node.$schema)) {
+      const named = dialectDraft(node.$schema, schemas);
+      draft = named ?? 7;
+      foreign = named === null;
+    }
+    if (i === parts.length) return { draft, foreign };
+    node = node?.[parts[i]];
+  }
 }
 
 /**
@@ -356,7 +396,8 @@ function placeDraft(places, schemas, path, schema) {
  * What the dialect a `$schema` URI names switches on, as its meta-schema
  * declares it in `$vocabulary` ({@link dialectVocabulary}) and its draft
  * defaults it. A dialect whose meta-schema declares no `$vocabulary` (or is
- * not held), and a place under no `$schema`, keep validation on; `format`
+ * not held, or is of a draft before 2019-09, where the member is no
+ * keyword), and a place under no `$schema`, keep validation on; `format`
  * asserts where the option says so, else where the dialect declares the
  * format-assertion vocabulary, else below draft 2020-12; the content
  * keywords assert where the option says so, else below draft 2019-09. The
@@ -938,7 +979,9 @@ export class ValidationRoot {
    */
   inForeignDialect(path, schema) {
     const places = this.#places;
-    return places !== undefined && readsForeign(places, placeOf(places.drafts, this.#schemas, path, schema), this.#schemas);
+    if (places === undefined) return false;
+    const place = placeOf(places.drafts, this.#schemas, path, schema);
+    return places.drafts.has(place) ? readsForeign(places, place, this.#schemas) : unwalkedReading(places, this.#schemas, path).foreign;
   }
 
   /**
@@ -2637,6 +2680,22 @@ export class JarenValidator {
    * @param {Map} schemas - The schemas map
    * @param {string} origin - The origin schema ID
    */
+  /**
+   * The pure `$ref` hop a pointer id names in its document, or undefined
+   * where it names another schema, or nothing: the object at its location,
+   * walked as `placeOf` walks one.
+   * @param {Map<string, any>} schemas
+   * @param {string} id - A key of the map holding a JSON Pointer fragment
+   * @param {TraverseOptions} traverse
+   * @returns {object|undefined}
+   */
+  static #referenceHopAt(schemas, id, traverse) {
+    const pointer = id.indexOf('#/');
+    let node = schemas.get(id.slice(0, pointer + 1));
+    for (const part of decodeJsonPointerPath(id.slice(pointer + 1))) node = node?.[part];
+    return isReferenceHop(node, traverse) ? node : undefined;
+  }
+
   static #precompileRefs(root, schemas, origin) {
     // Pre-create validation objects for all refs in the schemas map
     // This moves ref resolution from validation time to compile time
@@ -2687,6 +2746,12 @@ export class JarenValidator {
       const isCanonicalPath = !isJsonPointerPath && id.endsWith('#');
 
       if (!hasId && !isJsonPointerPath) continue;
+
+      // A pointer to a pure `$ref` hop holds the end of the chain it starts,
+      // flattened: built from it here, that end would be read at the hop's
+      // place, under its draft and against its base. The hop is built
+      // instead, and its reference reaches the end under the end's own id.
+      const hop = isJsonPointerPath ? JarenValidator.#referenceHopAt(schemas, id, root.traverse) : undefined;
 
       // Calculate baseUri for this schema
       let baseUri = origin;
@@ -2780,7 +2845,7 @@ export class JarenValidator {
       }
 
       try {
-        root.createObject(id, schema, baseUri);
+        root.createObject(id, hop ?? schema, baseUri);
       } catch (_e) {
         if (isRecursiveQueryCompileError(_e) || (isRefCycleError(_e) && inDocument(id, origin))) throw _e;
         // Ref may not be resolvable yet, that's ok

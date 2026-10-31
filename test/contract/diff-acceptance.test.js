@@ -164,6 +164,9 @@ describe('diffContracts — a member schema that accepts nothing forbids the mem
     ['a range holding no multiple', { type: 'number', minimum: 1.1, maximum: 1.9, multipleOf: 1 }],
     ['an open decimal range holding no multiple', { type: 'number', exclusiveMinimum: 0.31, exclusiveMaximum: 0.39, multipleOf: 0.1 }],
     ['an integer range holding no multiple', { type: 'integer', minimum: 1, maximum: 4, multipleOf: 5 }],
+    // the validator decides a multiple exactly: an open end at one excludes it, and a value near one is none
+    ['an open range between consecutive multiples', { type: 'number', exclusiveMinimum: 0.1, exclusiveMaximum: 0.2, multipleOf: 0.1 }],
+    ['a range starting just past a multiple, ending before the next', { type: 'number', minimum: 1.0000001, maximum: 1.5, multipleOf: 1 }],
     ['a propertyNames refusing the required name', { type: 'object', required: ['k'], propertyNames: { maxLength: 0 } }],
     ['a propertyNames pattern refusing the required name', { type: 'object', required: ['k'], propertyNames: { not: { pattern: '^k' } } }],
   ];
@@ -192,8 +195,9 @@ describe('diffContracts — a member schema that accepts nothing forbids the mem
     ['a range holding a multiple', { type: 'number', minimum: 1.1, maximum: 2.1, multipleOf: 1 }],
     ['a range holding a decimal multiple', { type: 'number', minimum: 0.25, maximum: 0.35, multipleOf: 0.1 }],
     ['a range about zero holding its multiple', { type: 'number', minimum: -0.5, maximum: 0.5, multipleOf: 1 }],
-    ['an open range at a multiple', { type: 'number', exclusiveMinimum: 0.1, exclusiveMaximum: 0.2, multipleOf: 0.1 }],
-    ['a range next to a multiple, close enough for the validator', { type: 'number', minimum: 1.0000001, maximum: 1.5, multipleOf: 1 }],
+    ['an open end at a multiple, the next one inside', { type: 'number', exclusiveMinimum: 0.2, maximum: 0.3, multipleOf: 0.1 }],
+    ['an open end just below a multiple', { type: 'number', exclusiveMinimum: 0.25, maximum: 0.35, multipleOf: 0.1 }],
+    ['a range starting just before a multiple', { type: 'number', minimum: 0.9999999, maximum: 1.5, multipleOf: 1 }],
     ['a propertyNames admitting the required name', { type: 'object', required: ['k'], propertyNames: { maxLength: 1 } }],
   ];
   /**

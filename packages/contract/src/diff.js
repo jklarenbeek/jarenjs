@@ -986,14 +986,13 @@ function rangeHoldsNothing(node, integers) {
 /**
  * Whether the numeric bounds of a schema hold no value the validator
  * takes for a multiple of its `multipleOf` (or, with `integers`, no
- * integer it does): no exact multiple lies between or at its ends — read
- * on the decimals the document spells, so `0.1` divides `0.3` — and the
- * validator refuses both ends. The validator takes a value within a
- * small distance of a multiple for one, so an end at a multiple holds
- * values it takes even where the end is open; between two consecutive
- * multiples the values nearest one are the ends, so where it refuses
- * both (an open end too, whose neighbours inside lie farther still) it
- * takes nothing between them.
+ * integer it does): no exact multiple lies within its ends, an open end
+ * at a multiple excluding it — read on the decimals the document spells,
+ * so `0.1` divides `0.3`, as the validator decides a multiple on the
+ * decimals the value and the step spell. A value the validator takes
+ * spells one of those multiples inside the bounds, so where none lies
+ * there it takes nothing (`exclusiveMinimum: 0.1, exclusiveMaximum: 0.2,
+ * multipleOf: 0.1` holds none).
  * @param {Record<string, any>} node
  * @param {boolean} integers
  */
@@ -1004,9 +1003,9 @@ function holdsNoMultiple(node, integers) {
   if (range === null) return false;
   const [low, high] = range;
   const [m, lo, hi] = onOneScale([step, low.value, high.value]);
-  if (ceilDivide(lo, m) <= floorDivide(hi, m)) return false;
-  const takes = multipleTester(step);
-  return !takes(low.value) && !takes(high.value);
+  const first = low.open ? floorDivide(lo, m) + 1n : ceilDivide(lo, m);
+  const last = high.open ? ceilDivide(hi, m) - 1n : floorDivide(hi, m);
+  return first > last;
 }
 
 /**
@@ -1036,25 +1035,6 @@ const ceilDivide = (n, d) => -floorDivide(-n, d);
 function multipleOfEach(from, to) {
   const [x, y] = onOneScale([from, to]);
   return y % x === 0n;
-}
-
-/** {@link multipleTester}'s validators, by step. @type {Map<number, (value: unknown) => boolean>} */
-const multipleTesters = new Map();
-
-/**
- * Whether the validator takes a value for a multiple of `step`, as a
- * schema of `multipleOf` alone compiles.
- * @param {number} step
- * @returns {(value: unknown) => boolean}
- */
-function multipleTester(step) {
-  let takes = multipleTesters.get(step);
-  if (takes === undefined) {
-    const validate = new JarenValidator().compile({ multipleOf: step });
-    takes = (value) => validate(value) === true;
-    multipleTesters.set(step, takes);
-  }
-  return takes;
 }
 
 /**

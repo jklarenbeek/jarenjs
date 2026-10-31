@@ -2758,10 +2758,11 @@ Riders the rows carry:
   draft-04 `exclusiveMaximum: true` and `minimum: 3`), and under only
   `integer` a range that holds no integer (`minimum: 1.2, maximum:
   1.8`) — or bounds that hold no value the validator takes for a multiple
-  of `multipleOf`: no exact multiple lies between them, read on the
-  decimals the document spells, and the validator refuses both ends (it
-  takes a value close enough to a multiple for one, so `exclusiveMinimum:
-  0.1, exclusiveMaximum: 0.2, multipleOf: 0.1` accepts something); under
+  of `multipleOf`: no exact multiple lies within them, an open end at a
+  multiple excluding it, read on the decimals the document spells as the
+  validator decides a multiple (`exclusiveMinimum: 0.1, exclusiveMaximum:
+  0.2, multipleOf: 0.1` holds none, and `minimum: 1.0000001, maximum: 1.5,
+  multipleOf: 1` none either); under
   only strings, `minLength` over `maxLength` or a `pattern` no string
   matches; under only arrays, `minItems` over `maxItems`; under only
   `object`, `minProperties` over `maxProperties`, a `maxProperties` below
@@ -2819,6 +2820,12 @@ Riders the rows carry:
   R5, it is additive R7 `input-widened`. On an open output, and below
   the input's top level, the class stays and the change reads as a
   schema's (`output-narrowed`/`output-widened`, `note: "schema"`).
+  **Upgrading:** the validator decides `multipleOf` exactly, so bounds
+  that hold a multiple only at an open end or only within its former
+  tolerance (`exclusiveMinimum: 0.1, exclusiveMaximum: 0.2, multipleOf:
+  0.1`; `minimum: 1.0000001, maximum: 1.5, multipleOf: 1`) hold none: such
+  a member added to an open input, once additive R7 `input-member-added`,
+  is breaking R6 `input-narrowed`.
 - **Applicators read by direction.** Where a branch that narrows (or
   widens) can only narrow (or widen) what its node accepts, and the two
   sides pair branch for branch, a change inside the branch classifies by

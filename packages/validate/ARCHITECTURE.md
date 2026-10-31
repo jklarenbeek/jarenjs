@@ -222,6 +222,7 @@ compile()
   ├── #precompileRefs(root, schemaMap, origin)
   │     └── For each ref in schemaMap:
   │           ├── Skip if already compiled
+  │           ├── A pointer to a pure $ref hop: build the hop, not the flattened end
   │           └── root.createObject(id, schema, origin)
   │                 └── ValidationObject(root, id, schema, baseUri)
   │                       └── compileValidator() → returns validator function
@@ -242,7 +243,7 @@ compile()
 - **Key property**: `#validator` - the compiled function that validates data
 - For refs: `#validator` is the target validator function (direct reference)
 
-**The Critical Optimization**: `#precompileRefs()` iterates through `schemaMap` and creates `ValidationObject` instances for every ref. This moves object creation from validation-time to compile-time.
+**The Critical Optimization**: `#precompileRefs()` iterates through `schemaMap` and creates `ValidationObject` instances for every ref. This moves object creation from validation-time to compile-time. The map holds a chain's end under each pointer to a pure `$ref` hop (`isReferenceHop`); the object under such a pointer is built from the hop itself, so its reference reaches the end under the end's own id, read at the end's place — under the draft that place declares and against its own base — as a `$ref` straight to it reads it. The output formats name each hop from these objects.
 
 ### Phase 4: Validation
 
@@ -443,12 +444,17 @@ nearest `$schema` on the way to it in its own document (`places.dialectUris`),
 and the constructor's seventh argument reads what that dialect switches on
 (`dialectVocabularies`: the validation vocabulary and format assertion as its
 meta-schema's `$vocabulary` declares them, read by `dialectVocabulary`
-(schema-keywords.js), and the format and content assertions its draft
-defaults). `optionsAt(path, schema)` hands each `ValidationObject` the
+(schema-keywords.js) where that member is a keyword of the meta-schema itself
+— of 2019-09 on, or under no `$schema` of its own — and the format and
+content assertions its draft defaults). `optionsAt(path, schema)` hands each `ValidationObject` the
 compilation's options with that dialect's switches — one `ValidationOptions`
 per dialect URI, made once — so a held document reads alike compiled
 directly and through a `$ref`, and a place under no `$schema` reads the
-compilation's. A dialect whose meta-schema (of 2019-09 on) requires a
+compilation's. A reference target is compiled under the draft its place
+declares (`placeDraft`); one no walk recorded — below a keyword no draft
+defines — reads the nearest `$schema` on the way to it in its document, or
+the nearest recorded place's draft (`unwalkedReading`), as the normalizer's
+index places it. A dialect whose meta-schema (of 2019-09 on) requires a
 vocabulary this package does not implement is refused there, the root's
 place included, `JK0016` (`unimplementedVocabulary`, errors.js).
 `addMetaSchema` passes none: a meta-schema compiles under the validator's
@@ -1162,6 +1168,9 @@ Map<string, ValidationObject> {
 | `resolveRefSchemaShallow` | traverse.js | Resolve single ref hop (baseUri + fragment) |
 | `resolveRefSchemaDeep` | traverse.js | Follow ref chain to final schema |
 | `restoreSchemaRefsInMap` | traverse.js | Flatten all ref chains at load time |
+| `isReferenceHop` | traverse.js | Whether a schema a reference reached is a pure `$ref` hop that `resolveRefSchemaDeep` flattens away (no asserting sibling); `#precompileRefs` builds such a hop rather than the end held under its pointer |
+| `placeDraft` / `unwalkedReading` | index.js | The draft a reference target compiles under: its place's, or, for a place no walk recorded, the nearest `$schema` (or recorded place) on the way to it |
+| `multipleOfTester` | number.js | Whether a value is a whole multiple of a step, decided on the decimals both spell (`shortestDecimal`), exactly at every magnitude; the schema's `multipleOf` and a `$data` step read it |
 | `createJsonPointer` | traverse.js | Parse URI into components (id, leftUri, fragment), its scheme and host lowered by `caselessUri` |
 | `caselessUri` / `heldUriKey` | schema-keywords.js | The one spelling of a URI a schema is held and looked up by: scheme and host in lower case (RFC 3986), the rest as written; `heldUriKey` adds the empty fragment (`addSchema`, `getSchema`, `dialectDraft`, `compileAsync`) |
 | `identifierKeyword` | schema-keywords.js | The keyword that identifies a schema object: `$id`, else the draft-04 `id` where its document declares no known draft (the walk, `indexSchemaResources`, the strict profile's index) |
@@ -1340,7 +1349,7 @@ For broader context on how this package fits into the JarenJS ecosystem:
 | `tools.js` | Shared utilities | `isBoolOrObjectClass`, `hasSchemaReference`, `createIsSchemaTypeHandler` |
 | `origin.js` | The default base a schema without `$id` is read under (the compile, `compileAsync`, the resource index), and the resource a URI names | `DEFAULT_ORIGIN`, `withoutFragment` |
 | `string.js` | String keywords | `compileStringBasic` |
-| `number.js` | Number keywords | `compileNumberBasic` |
+| `number.js` | Number keywords | `compileNumberBasic`, `multipleOfTester` |
 | `bigint.js` | BigInt keywords | `compileBigIntBasic` |
 | `array.js` | Array keywords | `compileArraySchema` |
 | `object.js` | Object keywords | `compileObjectSchema` |

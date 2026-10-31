@@ -42,6 +42,7 @@ import {
 } from '@jarenjs/core/schema';
 
 import { createSchemaPatternTester } from './string.js';
+import { multipleOfTester } from './number.js';
 
 //#region Object
 export function isBoolOrObjectClass(obj) {
@@ -258,6 +259,22 @@ export function assertRelativePointerDialect(dialect) {
 }
 
 /**
+ * A `multipleOf` check for a step resolved per call ({@link multipleOfTester}),
+ * which reads the step's decimal again only when the step changes.
+ * @returns {(data: number, step: number) => boolean}
+ */
+function lastStepMultipleOf() {
+  /** @type {number|undefined} */
+  let step;
+  /** @type {((value: number) => boolean)|undefined} */
+  let isMultipleOf;
+  return (data, next) => {
+    if (isMultipleOf === undefined || next !== step) isMultipleOf = multipleOfTester(step = next);
+    return isMultipleOf(data);
+  };
+}
+
+/**
  * Build the keyword validators the two data-reference keywords share
  * verbatim. The `data` keyword (json-everything) and the Ajv-style `$data`
  * keyword both resolve a ref with `compileDataRef`: empty for the root, an
@@ -352,11 +369,7 @@ export function createDataRefCompilers() {
       (data, min) => data > min),
     exclusiveMaximum: constraint('exclusiveMaximum', isNumberType, isNumberType,
       (data, max) => data < max),
-    multipleOf: constraint('multipleOf', isNumberType, isNumberType,
-      (data, multipleOf) => {
-        const q = data / multipleOf;
-        return Math.abs(q - Math.round(q)) < 1e-6;
-      }),
+    multipleOf: constraint('multipleOf', isNumberType, isNumberType, lastStepMultipleOf()),
     minLength: constraint('minLength', isJsonString, isNumberType,
       (data, min, useGrapheme) => getStringLength(data, useGrapheme) >= min),
     maxLength: constraint('maxLength', isJsonString, isNumberType,
