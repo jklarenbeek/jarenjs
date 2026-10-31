@@ -2385,6 +2385,7 @@ Every subpath a consumer can import, derived from the manifest by
 | `@jarenjs/validate` | JavaScript | declared |
 | `@jarenjs/validate/query` | JavaScript | declared |
 | `@jarenjs/validate/normalize` | JavaScript | declared |
+| `@jarenjs/validate/references` | JavaScript | declared |
 | `@jarenjs/validate/output` | JavaScript | declared |
 | `@jarenjs/validate/load` | JavaScript | declared |
 | `@jarenjs/validate/strict-profile` | JavaScript | declared |
