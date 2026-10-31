@@ -44,6 +44,8 @@
  */
 
 import { writeFileSync } from 'node:fs';
+import { setFlagsFromString } from 'node:v8';
+import { runInNewContext } from 'node:vm';
 
 import { openStore } from '@jarenjs/db';
 import { canonicalizeJson } from '@jarenjs/json/canonical';
@@ -143,7 +145,14 @@ const asArray = (result) =>
   (result === undefined ? [] : Array.isArray(result) ? result : [result]);
 const idSet = (ids) => [...ids].sort();
 
+// every timed row starts on a settled heap: the garbage an earlier section
+// left is collected before the row, not by a scavenge inside a short row
+// (a 50-call row lasts a few milliseconds, as long as one collection)
+setFlagsFromString('--expose-gc');
+const collectGarbage = runInNewContext('gc');
+
 async function timeAsync(fn, iterations) {
+  collectGarbage();
   await fn();
   await fn();
   const start = process.hrtime.bigint();
@@ -152,6 +161,7 @@ async function timeAsync(fn, iterations) {
 }
 
 function timeSync(fn, iterations) {
+  collectGarbage();
   fn();
   fn();
   const start = process.hrtime.bigint();
