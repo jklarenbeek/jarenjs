@@ -46,10 +46,13 @@ The decisions that live here, and nowhere else:
   A node's draft comes from the same index: its `$schema` by name, or, with
   the `dialects` option, through the meta-schemas the validator handed holds,
   and that draft gates `prefixItems` through the validator's own gate
-  (`readsPrefixItems`). Which defaults the normalizer leaves unfilled — a
-  member a schema object at some place refuses by its name — comes from it
-  too (`unfilledDefaults`), so a normalized member is required only where
-  the normalizer fills it at every place.
+  (`readsPrefixItems`); the document typed is the one that validator reads
+  (`withoutUnreadVocabularies`: no validation keyword where the dialect
+  governing a place leaves that vocabulary out). Which defaults the
+  normalizer leaves unfilled — a member the validator refuses at some
+  place, or fills only per instance — comes from it too
+  (`unfilledDefaults`), so a normalized member is required only where the
+  normalizer fills it at every place, for every instance.
 - **Honest widening.** Every keyword in `DROPPED_CONSTRAINTS` is recorded on
   the node it came from and flattened into `doc` lines — including
   integer-ness, `not`, active conditionals, dependent/unevaluated keywords

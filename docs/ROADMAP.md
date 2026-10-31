@@ -131,29 +131,44 @@ delete it or fix it.
   bundle than the validator's budget and measured no faster than the log on
   suite-size instances; a smaller encoding of it, or gating that pays for
   itself, is the open work.
-- [ ] **A default the normalizer fills can fail a keyword other than a by-name
-  closer.** A filled default is kept out only where an `additionalProperties:
-  false` or `unevaluatedProperties: false` at its place refuses its member;
-  `{}` still normalizes to a value the validator refuses under `{ allOf: [{
-  properties: { a: { default: 'x' } } }], additionalProperties: { type:
-  'integer' } }`, `{ properties: { a: { default: 1 }, b: {} },
-  dependentRequired: { a: ['b'] } }` (2020-12), `{ properties: { a: { default:
-  1 } }, maxProperties: 0 }`, `{ allOf: [{ properties: { a: { default: 1 } }
-  }, { properties: { a: false } }] }`, and `{ b: 1 }` under `{ properties: {
-  a: { default: 1 }, b: {} }, dependentSchemas: { a: { properties: { a: {} },
-  additionalProperties: false } } }` (the filled member brings a closer of
-  other members into force). A default its own schema refuses (`{ type:
-  'integer', default: 'x' }`) is filled as written. Deciding them needs the
-  default checked against the schemas it meets.
-- [ ] **The readers do not read `$vocabulary`.** Under a held dialect whose
-  `$vocabulary` omits the validation vocabulary, the validator accepts `{ b:
-  'n' }` and `{}` for `{ $schema: OFF, type: 'object', properties: { b: {
-  type: 'integer' } }, required: ['b'] }`, compiled directly or through a
-  `$ref`, while with `dialects` `@jarenjs/emit` types `b: number` and requires
-  it, `deriveStrictProfile` derives `{ b: { type: 'integer' } }` required, and
-  `compileNormalizer` coerces `b` by its `type`: they read the draft only.
-  Reading it means each reader drops the validation keywords where the dialect
-  governing a place leaves them out.
+- [ ] **A default the normalizer fills can fail a schema above its place.** The
+  validator decides each default against the schemas it meets at its place,
+  not against one above it that reads the whole value or the member through an
+  instance reference: `{ o: {} }` still normalizes to a value the validator
+  refuses under `{ enum: [{ o: {} }], properties: { o: { properties: { a: {
+  default: 1 } } } } }`, `[{}, { a: 1 }]` under `{ type: 'array', uniqueItems:
+  true, items: { properties: { a: { default: 1 } } } }`, and `{ b: 9 }` under
+  `{ properties: { a: { default: 5 }, b: { maximum: { $data: '1/a' } } } }`. A
+  document the checking validator cannot compile alone (a `$ref` to another
+  document) fills its defaults as written, and the checks assert no `format`
+  (they register none). Deciding them needs the dependent places found, or the
+  whole normalized document validated.
+- [ ] **A default holding the object that declares it normalizes without
+  end.** `compileNormalizer({ $schema:
+  'https://json-schema.org/draft/2020-12/schema', properties: { o: { $ref:
+  '#', default: {} } } }, { useDefaults: true })` compiles, and every call on
+  an object throws an uncoded `RangeError`: the filled `{}` runs through the
+  same schema, which fills `o` again. Wanted: a bound (a default filled once
+  inside its own copy) or a coded compile refusal.
+- [ ] **A meta-schema of a draft without `$vocabulary` still switches the
+  validation vocabulary.** `addMetaSchema({ $schema:
+  'http://json-schema.org/draft-07/schema#', $id: X, $vocabulary: {
+  …/vocab/core: true } })` then `compile({ $schema: X, type: 'string' })`
+  accepts `1`: the member is read as a vocabulary declaration though draft-07
+  has no such keyword (a required unknown vocabulary is refused only from
+  2019-09 on). Reading it only there turns validation back on for such
+  dialects (a minor).
+- [ ] **Checking defaults costs a validator compile.** A normalizer with
+  `useDefaults` compiles a `JarenValidator` of the schemas its defaults meet
+  (a copy of the self-contained ones, `$ref`s to the rest), once, and a bundle
+  that imports `compileNormalizer` carries the validator whether or not it
+  fills defaults. A smaller check (shared across the normalizers of one
+  document, or skipped where no schema met can refuse) is the open work.
+- [ ] **Deriving a strict profile compiles the held document once per place.**
+  `deriveStrictProfile` decides each place by compiling a `{ $ref }` to it
+  against the held document, so its cost grows with the number of places
+  times the size of the document; one compile of the document, read at each
+  place, is the open work.
 - [ ] **A held document without a key whose root `$id` is only a fragment
   refuses its pointers.** `addSchema({ $id: '#root', definitions: { s: { type:
   'string' } }, properties: { a: { $ref: '#/definitions/s' } } })` then
@@ -162,12 +177,6 @@ delete it or fix it.
   answers. Registering the document under the origin in the validator would
   make a later compile of a document without `$id` refused JK0012 (it answers
   today), so it was left.
-- [ ] **A required vocabulary the validator does not implement is processed**
-  — a meta-schema whose `$vocabulary` declares an unknown vocabulary `true` is
-  processed with that vocabulary's keywords read as annotations, where 2020-12
-  asks a validator to refuse it. Refusing it is a stricter refusal, and must
-  keep admitting the Jaren dialect's query vocabulary, which this package
-  implements.
 - [ ] **A dynamic reference keeps instance locations on** — once a `$data`,
   `data` or `$query` reader exists anywhere in the compilation, a `$ref` is
   resolved during the compile-time scan and only a target that reaches a

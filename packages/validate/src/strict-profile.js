@@ -46,9 +46,9 @@
 
 import { equalsJson, isJsonObject, setObjectMember } from '@jarenjs/core/object';
 import { SCHEMA_VALUE_KEYWORDS, SCHEMA_MAP_KEYWORDS, SCHEMA_LIST_KEYWORDS, ANNOTATION_KEYWORDS } from '@jarenjs/core/schema';
-import { indexSchemaResources, readsRefAlone, resolveSchemaReference } from './normalize.js';
+import { indexSchemaResources, readsRefAlone, resolveSchemaReference, withoutUnreadVocabularies } from './normalize.js';
 import { withoutFragment } from './origin.js';
-import { detectSchemaDraft, dialectDraft, heldDialect, identifierKeyword } from './schema-keywords.js';
+import { detectSchemaDraft, dialectDraft, holdDialects, identifierKeyword } from './schema-keywords.js';
 import { VALIDATOR_STATE } from './validator-state.js';
 import { createJsonPointer, encodeJsonPointerPath } from './traverse.js';
 import { SchemaCompileError, SchemaRuntimeError } from './errors.js';
@@ -259,7 +259,9 @@ function strictNote(keyword, value) {
  * @param {{ references?: object[], dialects?: object }} [options] - `references`: the other
  *   schema documents its `$ref`s name, each with an absolute `$id`; `dialects`: a
  *   `JarenValidator` whose held meta-schemas a `$schema` is read through, as its compile
- *   reads it — without it a `$schema` naming no known draft (a custom dialect) reads as draft-07
+ *   reads it, a place whose dialect leaves the validation vocabulary out carrying none of its
+ *   validation keywords — without it a `$schema` naming no known draft (a custom dialect) reads
+ *   as draft-07
  * @returns {StrictProfile}
  * @throws {SchemaCompileError} `JK0102` an object whose member names are
  *   open and that no entries array carries, `JK0103` a keyword that adds
@@ -268,17 +270,22 @@ function strictNote(keyword, value) {
  *   `anyOf` on one node, `JK0106` a required member the object does not
  *   declare, `JK0107` an argument it does not take, `JK0108` a schema that
  *   accepts no value, `JK0010` an `$id` that is no URI reference (as the
- *   validator refuses it); each names the place. The original is compiled too, so
+ *   validator refuses it), `JK0016` a dialect requiring a vocabulary the validator does
+ *   not implement; each names the place. The original is compiled too, so
  *   its own refusals (`JK0009` for a reference nothing holds) surface here
  */
 export function deriveStrictProfile(schema, options = {}) {
-  const references = options?.references ?? [];
-  if (!isSchemaValue(schema) || !Array.isArray(references))
+  const givenReferences = options?.references ?? [];
+  if (!isSchemaValue(schema) || !Array.isArray(givenReferences))
     throw new SchemaCompileError('JK0107', 'deriveStrictProfile takes a schema and { references }: an array of schema documents');
   const dialects = options?.dialects;
   if (dialects !== undefined && !VALIDATOR_STATE.has(dialects))
     throw new SchemaCompileError('JK0107', "deriveStrictProfile takes { dialects } as a JarenValidator, whose held meta-schemas name the dialects");
   if (schema === false) throw refusal('JK0108', 'a schema that accepts no value has no strict form', '#');
+  // each document as the validator holding its dialects reads it: without
+  // the validation keywords where the dialect governing a place leaves them out
+  schema = withoutUnreadVocabularies(schema, { dialects });
+  const references = givenReferences.map((reference) => withoutUnreadVocabularies(reference, { dialects }));
 
   /** Every schema node of the documents, by the resource and pointer it sits at. */
   const located = new Map();
@@ -354,19 +361,8 @@ export function deriveStrictProfile(schema, options = {}) {
   const accepts = (place, value) => {
     if (original === undefined) {
       original = new JarenValidator();
-      // each dialect the documents name, read as `held` reads it: a chain
-      // of the `$schema` each meta-schema declares, up to a known draft
-      if (held !== undefined) {
-        for (let uri of named) {
-          while (/^[a-z][a-z0-9+.-]*:/i.test(uri) && dialectDraft(uri) === null && original.getSchema(uri) === null) {
-            const meta = heldDialect(uri, (key) => held.get(key));
-            if (!isJsonObject(meta) || typeof meta.$schema !== 'string') break;
-            // its draft is all the original reads of it
-            original.addSchema({ $schema: meta.$schema }, uri);
-            uri = meta.$schema;
-          }
-        }
-      }
+      // each dialect the documents name, read as `held` reads it
+      holdDialects(original, named, held);
       // held under the base the index read it at, which `addSchema` names it
       // by, so a resource embedded in it resolves against it
       if (isJsonObject(schema)) original.addSchema(schema, rootBase);

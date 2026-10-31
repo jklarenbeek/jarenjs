@@ -26,7 +26,10 @@
  * a `pattern` or `patternProperties` name that is no regular expression
  * `JK0014`. Under `unknownFormats: 'error'`, a `format` that asserts and
  * names no registered format (an unregistered name, or a value that is no
- * name) is refused where the place compiles (`JK0015`). A `$query`
+ * name) is refused where the place compiles (`JK0015`). A schema of a
+ * dialect whose meta-schema requires (`$vocabulary`, `true`) a vocabulary
+ * this package does not implement is refused where a place under that
+ * dialect compiles (`JK0016`). A `$query`
  * document that does not compile is refused with the query compiler's own
  * code (`JQ0xxx`, `@jarenjs/json/query`), located under the `$query`
  * keyword, its error as the `cause`. A schema `deriveStrictProfile`
@@ -62,6 +65,7 @@ export const VALIDATE_CODES = Object.freeze({
   JK0013: 'a keyword value is not of the shape its draft requires',
   JK0014: 'a pattern or a patternProperties name is not a regular expression',
   JK0015: "under unknownFormats: 'error', an asserting format names no registered format",
+  JK0016: 'a meta-schema requires a vocabulary the validator does not implement',
   JK0101: 'retired: a schema that accepts any value is carried as JSON text',
   JK0102: 'a strict profile cannot carry an object whose member names are open',
   JK0103: 'a strict profile cannot carry a keyword that applies members, items or branches beside its node',
@@ -115,6 +119,22 @@ export class SchemaRuntimeError extends CodedError {
   constructor(code, reason, location = undefined) {
     super('SchemaRuntimeError', code, reason, location);
   }
+}
+
+/**
+ * The refusal of a schema whose dialect's meta-schema requires a vocabulary
+ * this package does not implement: read on, that vocabulary's keywords
+ * would be annotations and assert nothing, where 2019-09 and 2020-12 ask a
+ * validator to refuse the schema.
+ * @param {string} dialect - The `$schema` URI naming the meta-schema
+ * @param {string} vocabulary - The vocabulary's URI, as the meta-schema's `$vocabulary` spells it
+ * @param {string} [location] - Where in the schema, as `docPath`
+ * @returns {SchemaCompileError} `JK0016`
+ */
+export function unimplementedVocabulary(dialect, vocabulary, location = undefined) {
+  return new SchemaCompileError('JK0016', `the meta-schema '${dialect}' requires the vocabulary '${vocabulary}', `
+    + 'which this validator does not implement, so its keywords would assert nothing; declare it false in that '
+    + "meta-schema's $vocabulary to read them as annotations, or name a dialect without it", location);
 }
 
 /**

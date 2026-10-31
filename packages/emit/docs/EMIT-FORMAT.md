@@ -203,10 +203,11 @@ Everything unaffected is referenced by its single shared name from both sides.
 
 **Three normalizations produce a difference, and only three.** `useDefaults` moves
 a member from optional to required across the boundary, where the normalizer
-fills its default at every place it meets the object declaring it; one a
-schema object at some place refuses by its name is left unfilled there
-(`unfilledDefaults` of `@jarenjs/validate/normalize`), so the member is
-required on the normalized side only where `required` lists it. `coerceTypes` widens
+fills its default at every place it meets the object declaring it; one the
+validator refuses at some place, or that the normalizer fills there only for
+some instances, is left unfilled (`unfilledDefaults` of
+`@jarenjs/validate/normalize`), so the member is required on the normalized
+side only where `required` lists it. `coerceTypes` widens
 the accepted side to the types the normalizer will convert *from*.
 `coerceJsonText` widens the accepted side of an object or array node by
 `string`, exactly where the normalizer decodes JSON text: the node's own `type`

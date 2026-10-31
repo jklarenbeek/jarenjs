@@ -43,6 +43,7 @@ import {
   resolveSchemaReference,
   schemaPlace,
   unfilledDefaults,
+  withoutUnreadVocabularies,
 } from '@jarenjs/validate/normalize';
 
 /** The model format version this module produces and consumes. */
@@ -137,9 +138,11 @@ export const EMIT_MODEL_VERSION = '0.1';
  * @property {object} [dialects] - A `JarenValidator` whose held meta-schemas
  *   name the dialects the schema's `$schema` URIs may name: each `$schema` is
  *   read through them as that validator's compile reads it (a custom dialect
- *   extending 2020-12 reads as 2020-12). Without it a `$schema` is read by its
- *   name alone, and a custom dialect as draft-07. It also reads the
- *   `normalize` variants.
+ *   extending 2020-12 reads as 2020-12), and a place whose dialect leaves the
+ *   validation vocabulary out of its `$vocabulary` types none of its
+ *   validation keywords (`type`, `required`, `enum`, ...), which assert
+ *   nothing there. Without it a `$schema` is read by its name alone, and a
+ *   custom dialect as draft-07. It also reads the `normalize` variants.
  */
 
 /** Keywords that constrain a value without narrowing its TYPE — the
@@ -1076,6 +1079,9 @@ function arrayShape(node, ctx, hint) {
 export function compileEmitModel(schema, options = {}) {
   const name = options.name ?? 'Root';
   const normalize = options.normalize ?? null;
+  // the document as the validator holding its dialects reads it: without
+  // the validation keywords where the dialect governing a place leaves them out
+  schema = withoutUnreadVocabularies(schema, { dialects: options.dialects }, 'compileEmitModel');
 
   // State shared across the two passes: the document's resources, the
   // normalization analysis memos, and the PLAIN universe's names — plain

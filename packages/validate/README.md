@@ -250,7 +250,7 @@ See also:
 - $dynamicRef | _new `draft2020`_
 - $dynamicAnchor | _new `draft2020`_
 - $data | _(Ajv specific)_
-- [$vocabulary](https://github.com/json-schema-org/json-schema-spec/blob/main/proposals/vocabularies.md) | _new `draft2019`_ - a custom metaschema that omits the validation vocabulary turns keywords like `type` and `minimum` into annotations; a metaschema that declares the `format-assertion` vocabulary turns format assertion on
+- [$vocabulary](https://github.com/json-schema-org/json-schema-spec/blob/main/proposals/vocabularies.md) | _new `draft2019`_ - a custom metaschema that omits the validation vocabulary turns keywords like `type` and `minimum` into annotations; a metaschema that declares the `format-assertion` vocabulary turns format assertion on; one that requires a vocabulary this package does not implement is refused (`JK0016`)
 
 ### 🔑 Non-standard keywords
 
@@ -401,7 +401,7 @@ See also:
 
 ### 👉 Vocabularies and cross-draft references
 
-A schema's `$schema` declaration is honored per document: referenced documents that declare a different draft are processed with that draft's keyword set (a draft-07 document ignores `dependentRequired`, `dependentSchemas`, `minContains`, `maxContains`, `unevaluatedProperties` and `unevaluatedItems`; a 2019-09 or draft-07 document ignores `prefixItems`, so its `items: false` forbids every item; a draft-07 or 2020-12 document ignores `$recursiveRef`, a draft-07 or 2019-09 one `$dynamicRef`, while one whose `$schema` names no known draft reads both). A document that declares no `$schema` reads every keyword. A `$ref` target is processed with the draft its own place declares — the nearest `$schema` on the way to it in the document that holds it, the referencing one or another — however it is compiled (`compile`, `addSchema` + `compile`, `compileAsync`). *Upgrade: a reference target was compiled with no declared draft, so `{ "$schema": "https://json-schema.org/draft/2019-09/schema", "$defs": { "t": { "prefixItems": [{ "type": "integer" }] } }, "$ref": "#/$defs/t" }` rejected `["5"]`, which the same `prefixItems` written inline accepts; the other declared-draft gates (`dependentRequired`, `dependentSchemas`, `minContains`, `maxContains`, `unevaluatedProperties`, `unevaluatedItems`, `propertyDependencies`) read a target the same way, so collected errors lose the failures of keywords the target's draft does not have. The keywords beside a target's own `$ref` assert by its document's draft too: a draft-07 target `{ "$ref": "#/definitions/y", "minimum": 5 }` referenced from a 2020-12 schema no longer asserts `minimum`, and a 2020-12 one referenced from a draft-07 schema now does; and a 2020-12 document referenced from a draft-07 schema, or from one that declares no draft, now counts the items its `contains` matches as evaluated for its `unevaluatedItems`.* Custom metaschemas with `$vocabulary` are respected — omitting the validation vocabulary turns validation keywords into annotations (`type` and `required` inside `items`, `minContains`/`maxContains` beside `contains`, and `maxItems`, which then no longer bounds the items `items` and `contains` look at), and declaring the format-assertion vocabulary turns format assertion on. Each place reads the vocabularies of the dialect governing it — the nearest `$schema` on the way to it in its own document, an embedded resource's own included — and so do the assertions a draft defaults (`format` before 2020-12, `contentEncoding`/`contentMediaType` before 2019-09), so a held document answers alike compiled directly and through a `$ref`; a place under no `$schema` reads the compile's, and the `formatAssertion` and `contentValidation` options decide everywhere. *Upgrade: every place read the vocabularies and those defaults of the compile's root. Under a held dialect without the validation vocabulary, `{ $ref: key }` to a document declaring it, `{ type: 'object', properties: { b: { type: 'integer' } }, required: ['b'] }`, refused `{ b: 'n' }` and `{}`, which compiling the document accepts (both now accepted), and a 2020-12 document referenced from a root under that dialect asserted nothing; a held draft-07 document's `format: 'email'` accepted `'x'` through a `$ref` from a 2020-12 root (now refused, as compiling it alone does), a 2020-12 one's refused `'x'` through a `$ref` from a draft-07 root (now accepted), and a draft-07 document's `contentMediaType` asserted nothing under a 2020-12 root (now asserts).* *Upgrade: under a metaschema without the validation vocabulary, `{ "items": { "type": "string" } }` used to reject `[5]`, `minContains`/`maxContains` counted, and `{ "maxItems": 1, "items": { "properties": { "x": false } } }` accepted `[{}, { "x": 1 }]` because it stopped at the first item; a 2019-09 or draft-07 document with `prefixItems` beside `items: false` accepted any array, and a draft-07 document asserted `minContains`, `maxContains`, `unevaluatedProperties` and `unevaluatedItems`.*
+A schema's `$schema` declaration is honored per document: referenced documents that declare a different draft are processed with that draft's keyword set (a draft-07 document ignores `dependentRequired`, `dependentSchemas`, `minContains`, `maxContains`, `unevaluatedProperties` and `unevaluatedItems`; a 2019-09 or draft-07 document ignores `prefixItems`, so its `items: false` forbids every item; a draft-07 or 2020-12 document ignores `$recursiveRef`, a draft-07 or 2019-09 one `$dynamicRef`, while one whose `$schema` names no known draft reads both). A document that declares no `$schema` reads every keyword. A `$ref` target is processed with the draft its own place declares — the nearest `$schema` on the way to it in the document that holds it, the referencing one or another — however it is compiled (`compile`, `addSchema` + `compile`, `compileAsync`). *Upgrade: a reference target was compiled with no declared draft, so `{ "$schema": "https://json-schema.org/draft/2019-09/schema", "$defs": { "t": { "prefixItems": [{ "type": "integer" }] } }, "$ref": "#/$defs/t" }` rejected `["5"]`, which the same `prefixItems` written inline accepts; the other declared-draft gates (`dependentRequired`, `dependentSchemas`, `minContains`, `maxContains`, `unevaluatedProperties`, `unevaluatedItems`, `propertyDependencies`) read a target the same way, so collected errors lose the failures of keywords the target's draft does not have. The keywords beside a target's own `$ref` assert by its document's draft too: a draft-07 target `{ "$ref": "#/definitions/y", "minimum": 5 }` referenced from a 2020-12 schema no longer asserts `minimum`, and a 2020-12 one referenced from a draft-07 schema now does; and a 2020-12 document referenced from a draft-07 schema, or from one that declares no draft, now counts the items its `contains` matches as evaluated for its `unevaluatedItems`.* Custom metaschemas with `$vocabulary` are respected — omitting the validation vocabulary turns validation keywords into annotations (`type` and `required` inside `items`, `minContains`/`maxContains` beside `contains`, and `maxItems`, which then no longer bounds the items `items` and `contains` look at), and declaring the format-assertion vocabulary turns format assertion on. A meta-schema whose `$vocabulary` requires (`true`) a vocabulary this package does not implement — any but those of 2019-09, 2020-12 and draft-next (the hyper-schema one's keywords are annotations, as they are read) and the Jaren query vocabulary — refuses a schema of its dialect `JK0016`, naming the meta-schema and the vocabulary, where a place under that dialect compiles (in a held document a `$ref` reaches, by the first call that reaches it, as any refusal of a held document): read on, that vocabulary's keywords would be annotations and assert nothing, where 2019-09 and 2020-12 ask a validator to refuse the schema. Declared `false`, or in a meta-schema of a draft without `$vocabulary`, it is read as before. *Upgrade: such a schema compiled, and the unknown vocabulary's keywords asserted nothing.* Each place reads the vocabularies of the dialect governing it — the nearest `$schema` on the way to it in its own document, an embedded resource's own included — and so do the assertions a draft defaults (`format` before 2020-12, `contentEncoding`/`contentMediaType` before 2019-09), so a held document answers alike compiled directly and through a `$ref`; a place under no `$schema` reads the compile's, and the `formatAssertion` and `contentValidation` options decide everywhere. *Upgrade: every place read the vocabularies and those defaults of the compile's root. Under a held dialect without the validation vocabulary, `{ $ref: key }` to a document declaring it, `{ type: 'object', properties: { b: { type: 'integer' } }, required: ['b'] }`, refused `{ b: 'n' }` and `{}`, which compiling the document accepts (both now accepted), and a 2020-12 document referenced from a root under that dialect asserted nothing; a held draft-07 document's `format: 'email'` accepted `'x'` through a `$ref` from a 2020-12 root (now refused, as compiling it alone does), a 2020-12 one's refused `'x'` through a `$ref` from a draft-07 root (now accepted), and a draft-07 document's `contentMediaType` asserted nothing under a 2020-12 root (now asserts).* *Upgrade: under a metaschema without the validation vocabulary, `{ "items": { "type": "string" } }` used to reject `[5]`, `minContains`/`maxContains` counted, and `{ "maxItems": 1, "items": { "properties": { "x": false } } }` accepted `[{}, { "x": 1 }]` because it stopped at the first item; a 2019-09 or draft-07 document with `prefixItems` beside `items: false` accepted any array, and a draft-07 document asserted `minContains`, `maxContains`, `unevaluatedProperties` and `unevaluatedItems`.*
 
 **How a `$schema` is read.** A `$schema` names a draft by its exact URI: every
 meta-schema json-schema.org publishes for draft-06, draft-07, 2019-09, 2020-12
@@ -455,9 +455,20 @@ validator holds, as its compile reads it — under a held
 `https://example.com/my-dialect` that extends 2020-12, `{ $schema:
 'https://example.com/my-dialect', $defs: { s: { type: 'object' } }, $ref:
 '#/$defs/s', properties: { a: { default: 1 } } }` fills `{ a: 1 }` (`{}` by
-name alone). They read the draft only: a `$vocabulary` without the validation
-vocabulary is not read by them, where the validator reads it at each place.
-*Upgrade: `dialects` is new; without it nothing changes.* A `$vocabulary` turns the
+name alone). They read each place's vocabularies as the validator does: where
+the dialect governing a place leaves the validation vocabulary out of its
+`$vocabulary`, they type, require, profile and coerce by none of that place's
+validation keywords (`type`, `required`, `enum`, ...: the document they read
+is `withoutUnreadVocabularies(schema, { dialects })`), and a dialect requiring
+a vocabulary this package does not implement refuses them `JK0016`, as it
+refuses the validator. *Upgrade: `dialects` is new; without it nothing
+changes.* *Upgrade: they read the draft only, so under a held dialect without
+the validation vocabulary `{ type: 'object', properties: { b: { type:
+'integer' } }, required: ['b'] }`, which the validator accepts as `{ b: 'n' }`
+and as `{}`, was emitted as a required `b: number`, profiled as a required `{
+b: { type: 'integer' } }` and normalized with `coerceTypes` from `{ b: '5' }`
+to `{ b: 5 }`; it is now emitted with `b?: unknown`, profiled as any value and
+left `{ b: '5' }`.* A `$vocabulary` turns the
 validation and format-assertion vocabularies on by their exact URIs only,
 declared `true` or `false` alike (`false` only lets a validator that does not
 implement a vocabulary go on without it). *Upgrade: the draft came from a
@@ -472,7 +483,8 @@ draft-07: `{ "$schema": "https://example.com/my-dialect", "prefixItems": [{
 `$vocabulary` declares `https://example.com/vocab/validation-extras` (or
 `https://example.com/vocab/format-assertion-lite`) but not the validation (or
 format-assertion) vocabulary asserted `type` (`format`); both are now
-annotations there.*
+annotations there (declared `false`; required, that vocabulary refuses the
+schema `JK0016`).*
 
 Modern reference chains preserve supported sibling assertions, including
 dependent schemas and dynamic references. Draft-07 retains its reference-only
@@ -1869,7 +1881,10 @@ is shaped exactly like a supplied one rather than keeping its string.
 each branch, then the schema's own keywords, every step working on what the
 step before it returned. That order is the contract, and the normalizer does
 not iterate branches to a fixed point. The consequence shows when one branch
-supplies a default and another coerces the same member:
+supplies a default and another coerces the same member: a default's copy runs
+through its own member's normalizers and the steps after the one filling it,
+not the ones before, and is filled only where the validator accepts it there
+(below):
 
 ```javascript
 const schema = {
@@ -1880,43 +1895,75 @@ const schema = {
 };
 const normalize = compileNormalizer(schema, { useDefaults: true, coerceTypes: true });
 
-normalize({});                // { count: '42' }  - the coercion had already run
-normalize(normalize({}));     // { count: 42 }    - a second application coerces it
+normalize({});                // {}            - '42' would stay a string the integer type refuses
+normalize({ count: '42' });   // { count: 42 } - a supplied member is coerced
 ```
 
-Keep one application enough by putting the `type` and the `default` on the same
-property schema, or by listing the branch that supplies the default first.
-Defining cross-branch default processing would change the order existing
-normalizers rely on, so the order stays as declared.
+Fill it by putting the `type` and the `default` on the same property schema,
+or by listing the branch that supplies the default first: its copy then runs
+through the coercing branch after it, and `{ count: 42 }` is filled. Defining
+cross-branch default processing would change the order existing normalizers
+rely on, so the order stays as declared. *Upgrade: the default was filled as
+`'42'`, which the validator refuses, and a second application coerced it.*
 
-**A default fills only a member every schema object at its place admits.**
-The objects that may apply at an object's place are the one holding the
-default, the ones beside it (a `$ref` target, the other `allOf` branches) and
-the ones under a branch (`anyOf`, `oneOf`, `not`, `if`/`then`/`else`,
-`dependentSchemas`, a dynamic reference's targets); at a member's or an
-item's place, every subschema the objects of its parent apply there
-(`properties`, matching `patternProperties`, `additionalProperties`, the items
-keywords). A default whose member one of them refuses by its name — an
-`additionalProperties: false` it is not declared beside (by `properties` or a
-matching `patternProperties`), or from 2019-09 on an `unevaluatedProperties:
-false` it is not evaluated under — is not filled, since the validator would
-refuse the normalized value where it accepted the input: `{ allOf: [{
-properties: { a: { default: 'x' } } }], properties: { b: {} },
-additionalProperties: false }` leaves `{}` as it is. An object under a branch
-counts whichever branch the instance takes, because which one applies is
-known only after validating: a default an `anyOf` branch's
-`additionalProperties: false` refuses is not filled even where another
-branch would accept the member. A schema-valued `additionalProperties` the
-member meets is not checked against the default, as the member's own schema
-is not. `unfilledDefaults(schema, options)` names, by the schema object whose
-`properties` declares each, the defaults a normalizer compiled with those
-options leaves unfilled so, and `@jarenjs/emit` reads it. *Upgrade: such a
-default was filled, so the 2020-12 `{ $defs: { s: { type: 'object',
-properties: { a: { type: 'string', default: 'x' } } } }, $ref: '#/$defs/s',
-properties: { b: { type: 'integer' } }, additionalProperties: false }` turned
-`{}`, which the validator accepts, into `{ a: 'x' }`, which it refuses; it now
-stays `{}`, and so does a default a branch's object refuses where another
-branch would have accepted it filled.*
+**The validator decides each default, against the schemas it meets at its
+place.** The objects that may apply at an object's place are the one holding
+the default and the ones beside it (a `$ref` target, the other `allOf`
+branches), which apply wherever it does, and the ones under a branch (`anyOf`,
+`oneOf`, `not`, `if`/`then`/`else`, `dependentSchemas`, `dependencies`, a
+dynamic reference's targets), which apply as the instance decides; at a
+member's or an item's place, every subschema the objects of its parent apply
+there (`properties`, matching `patternProperties`, `additionalProperties`, the
+items keywords). A default is **never filled** where one that applies for
+certain refuses its copy as the place ends up holding it — its own schema,
+another object's schema for the member, a matching `patternProperties`, an
+`additionalProperties` it is not declared beside (by `properties` or a
+matching `patternProperties`) or, from 2019-09 on, an `unevaluatedProperties`
+it is not evaluated under, `false` among them — or its name
+(`propertyNames`), since the validator would refuse the normalized value
+where it accepted the input: `{ allOf: [{ properties: { a: { default: 'x' } }
+}], properties: { b: {} }, additionalProperties: false }`, `{ allOf: [{
+properties: { a: { default: 'x' } } }], additionalProperties: { type:
+'integer' } }` and `{ properties: { a: { type: 'integer', default: 'x' } } }`
+leave `{}` as it is. Where the member can change another answer — an object
+under a branch refuses it, or one counts the members (`maxProperties`),
+compares the whole object (`enum`, `const`) or reads its presence
+(`dependentRequired`, `dependentSchemas`, `dependencies` naming it, and under a
+branch `required` or `minProperties`) — it is **filled per instance**, where
+every schema applied at the place answers the filled object as it answered
+the object without it: under `{ properties: { a: { default: 1 }, b: {} },
+dependentRequired: { a: ['b'] } }` `{}` stays `{}` and `{ b: 2 }` becomes `{ b:
+2, a: 1 }`, and a default an `anyOf` branch's `additionalProperties: false`
+refuses is filled where another branch accepts the filled object. A default
+filled always costs nothing per call; one filled per instance costs a
+validation of the object at its place for each schema applied there. The
+checks run on a validator holding the document, compiled once with the
+normalizer and without formats: a document that validator cannot compile
+alone (a `$ref` to another document) fills its defaults as written, and a
+`format` it would need a registered format to assert does not keep a default
+out. A schema above the place that reads the whole value (`enum`, `const`,
+`uniqueItems` of an array holding the object) or reads it through `$data` is
+not consulted. `unfilledDefaults(schema, options)` names, by the schema object
+whose `properties` declares each, the defaults a normalizer compiled with
+those options never fills or fills per instance, and `@jarenjs/emit` reads
+it. *Upgrade: a default was kept out only where an `additionalProperties:
+false` or `unevaluatedProperties: false` refused its member by name, so a
+default its own schema refuses, a schema-valued `additionalProperties` it
+meets, `{ properties: { a: { default: 1 } }, maxProperties: 0 }`, `{ allOf:
+[{ properties: { a: { default: 1 } } }, { properties: { a: false } }] }`, a
+`dependentRequired`, a `dependentSchemas` bringing a closer of the other
+members into force (`{ b: 1 }` under `{ properties: { a: { default: 1 }, b: {}
+}, dependentSchemas: { a: { properties: { a: {} }, additionalProperties: false
+} } }`), an object `enum`, and a `not`, `if` or `oneOf` reading its presence
+turned an instance the validator accepts into one it refuses; each now stays
+as sent. A closer under a branch kept a default out whatever branch the
+instance took: `{ properties: { a: { default: 'x' } }, anyOf: [{ properties: {
+b: {} }, additionalProperties: false }, {}] }` now fills `{}` to `{ a: 'x' }`,
+which the validator accepts. Before that, a default was filled wherever a
+by-name closer at its place refused it: the 2020-12 `{ $defs: { s: { type:
+'object', properties: { a: { type: 'string', default: 'x' } } } }, $ref:
+'#/$defs/s', properties: { b: { type: 'integer' } }, additionalProperties: false
+}` turned `{}` into `{ a: 'x' }`; it stays `{}`.*
 
 Not walked: `anyOf`, `oneOf`, `if`/`then`/`else`, `not`. Which branch applies
 is only known after validating, and normalizing under one branch can change

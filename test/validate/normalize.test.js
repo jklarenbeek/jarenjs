@@ -350,10 +350,11 @@ describe('compileNormalizer — schema shapes', () => {
     const defaulting = { properties: { count: { default: '42' } } };
     const options = { useDefaults: true, coerceTypes: true };
 
-    // The coercing branch runs first, so the default arrives after it.
+    // The coercing branch runs first, so the default arrives after it, as
+    // '42', which that branch's integer type refuses: it is not filled.
     const coercingFirst = compileNormalizer({ allOf: [coercing, defaulting] }, options);
-    deepStrictEqual(coercingFirst({}), { count: '42' });
-    deepStrictEqual(coercingFirst(coercingFirst({})), { count: 42 });
+    deepStrictEqual(coercingFirst({}), {});
+    deepStrictEqual(coercingFirst({ count: '42' }), { count: 42 });
 
     // The defaulting branch first: one application is enough.
     const defaultingFirst = compileNormalizer({ allOf: [defaulting, coercing] }, options);
@@ -536,7 +537,7 @@ describe('compileNormalizer — member schemas compose', () => {
       type: 'object',
       properties: {
         count: { default: '42' },
-        label: { type: 'integer', default: ' 7 ' },
+        label: { default: ' 7 ' },
         cfg: { default: { port: '8080' } },
       },
       patternProperties: {

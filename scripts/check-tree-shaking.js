@@ -657,7 +657,8 @@ if (asyncLiveLeak.length)
 // Raised to 1,099,500 (measured 1099452): literals, lists, member pairs, joins and integer orderings compared and ordered as the engine's doubles (emit, plan, query, double-interval), the query engine's new string and error operators, and one identifier reading for every compile site (validate traverse, index, normalize) add 6848.
 // Raised to 1,105,000 (measured 1104967): the validator's vocabularies read per place from the dialect governing it, one resource index for every reader of a schema, the identifier read without a pointer fragment and the normalizer's check of a default against a closed place (validate 3733), and PostgreSQL's NaN check on number columns, an untyped member's jsonb range and a key's order read from its index (db 1755) add 5515.
 // Raised to 1,106,000 (measured 1105968): a database rule's probes of another table on a store-owned layout, with their codec and missing-value checks (invariants 449, invariant-sql 29, row-predicate 18), and one read of a PostgreSQL namespace's rule programs per open (physical 432, store 49, ddl 24) add 1001.
-if (clientBytes > 1106000)
+// Raised to 1,107,700 (measured 1107602): the validator's refusal of a required vocabulary it does not implement, one reading of a dialect's vocabularies for the validator and the schema readers, and the normalizer's check of each default against the schemas it meets (schema-keywords 774, normalize 406, errors 374, index 76) add 1634.
+if (clientBytes > 1107700)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 

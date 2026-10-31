@@ -155,10 +155,14 @@ declaration; everything unaffected keeps a single shared name on both sides.
 
 **Only three normalizations produce a difference.** `useDefaults` moves a member
 across the optional boundary — where the normalizer fills its default at every
-place it meets the object declaring it; a default a schema object at some place
-refuses by its name (`unfilledDefaults`) leaves the member required after
-normalizing only where `required` lists it (*upgrade: it was required after
-normalizing there, where the normalizer now leaves it out*), `coerceTypes` widens what the input accepts, and
+place it meets the object declaring it; a default the validator refuses at some
+place, or that the normalizer fills only for some instances (a member count, a
+presence it reads, a branch: `unfilledDefaults`), leaves the member required
+after normalizing only where `required` lists it (*upgrade: it was required
+after normalizing where a schema-valued `additionalProperties`, its own schema,
+a `false` member schema, `maxProperties`, `dependentRequired`, `dependentSchemas`
+or a branch reading it keeps the default out, which the normalizer now does*),
+`coerceTypes` widens what the input accepts, and
 `coerceJsonText` widens an object or array node by `string` exactly where the
 normalizer decodes JSON text into it (the node's own `type` names `object` or
 `array` and not `string`; never inside `anyOf`/`oneOf`, never beside a `$ref`
@@ -512,8 +516,16 @@ What each family is for, and what it costs:
   holding the dialect's meta-schema) to `compileEmitModel`,
   `emitTypeScript` or `emitMarkdown` and each `$schema` is read as that
   validator's compile reads it — a dialect extending 2020-12 types a
-  `$ref`'s siblings beside it. The CLI reads names only: a validator is
-  no JSON value. *Upgrade: `dialects` is new; without it nothing changes.*
+  `$ref`'s siblings beside it, and a place whose dialect leaves the
+  validation vocabulary out of its `$vocabulary` types none of its
+  validation keywords (`type`, `required`, `enum`, ...), which assert
+  nothing there (a dialect requiring a vocabulary the validator does not
+  implement is refused `JK0016`, as the validator refuses it). The CLI
+  reads names only: a validator is no JSON value. *Upgrade: `dialects` is
+  new; without it nothing changes.* *Upgrade: under a dialect without the
+  validation vocabulary, `{ type: 'object', properties: { b: { type:
+  'integer' } }, required: ['b'] }` typed a required `b: number`, which the
+  validator does not assert; it types `b?: unknown` now.*
 - **`./typescript`**: `emitTypeScript(schema, options)` is schema → model →
   declaration text in one call; `renderTypeScript(model, options)` renders a
   model you already compiled (the CLI compiles once and renders per target

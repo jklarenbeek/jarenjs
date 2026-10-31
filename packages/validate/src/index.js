@@ -51,8 +51,8 @@ import { equalsJson, mergeMap } from '@jarenjs/core/object';
 import { isStringWhiteSpace } from '@jarenjs/core/string';
 import { hasRecursiveAnchor, getDynamicAnchorName, collectDynamicAnchors, collectDynamicAnchorsDeep, appliesRefSiblings } from './dynamic-ref.js';
 import { isRecursiveQueryCompileError } from './query-keyword.js';
-import { boundReference, assertReferenceDepth, assertOutputFormat, REFERENCE_DEPTH_CEILING } from './errors.js';
-import { TRAVERSE_SCHEMA_OBJECTS, TRAVERSE_SCHEMA_MAPS, TRAVERSE_SCHEMA_MAP_MAPS, detectSchemaDraft, declaredVocabularies, caselessUri, heldUriKey, heldDialect, identifierKeyword, identifierText, dialectDraft } from './schema-keywords.js';
+import { boundReference, assertReferenceDepth, assertOutputFormat, unimplementedVocabulary, REFERENCE_DEPTH_CEILING } from './errors.js';
+import { TRAVERSE_SCHEMA_OBJECTS, TRAVERSE_SCHEMA_MAPS, TRAVERSE_SCHEMA_MAP_MAPS, detectSchemaDraft, dialectVocabulary, caselessUri, heldUriKey, heldDialect, identifierKeyword, identifierText, dialectDraft } from './schema-keywords.js';
 import { VALIDATOR_STATE } from './validator-state.js';
 
 export {
@@ -344,17 +344,19 @@ function placeDraft(places, schemas, path, schema) {
  * @property {boolean} validation - Whether the validation vocabulary asserts (`type`, `minimum`, ...)
  * @property {boolean} formatAssertion - Whether `format` asserts
  * @property {boolean} contentValidation - Whether `contentEncoding`/`contentMediaType` assert
+ * @property {string|undefined} unimplemented - A vocabulary its meta-schema requires that this
+ *   package does not implement, which refuses a schema of the dialect (`JK0016`)
  */
 
 /**
  * What the dialect a `$schema` URI names switches on, as its meta-schema
- * declares it in `$vocabulary` and its draft defaults it. A dialect whose
- * meta-schema declares no `$vocabulary` (or is not held), and a place under
- * no `$schema`, keep validation on; `format` asserts where the option says
- * so, else where the dialect declares the format-assertion vocabulary, else
- * below draft 2020-12; the content keywords assert where the option says
- * so, else below draft 2019-09. The draft is the dialect's, or the
- * compile's for a place under no `$schema`.
+ * declares it in `$vocabulary` ({@link dialectVocabulary}) and its draft
+ * defaults it. A dialect whose meta-schema declares no `$vocabulary` (or is
+ * not held), and a place under no `$schema`, keep validation on; `format`
+ * asserts where the option says so, else where the dialect declares the
+ * format-assertion vocabulary, else below draft 2020-12; the content
+ * keywords assert where the option says so, else below draft 2019-09. The
+ * draft is the dialect's, or the compile's for a place under no `$schema`.
  * @param {unknown} uri - The `$schema` value, or undefined for none
  * @param {Map<string, any>} schemas - The compilation's schemas by URI
  * @param {boolean|null} formatOption - The `formatAssertion` option, null when unset
@@ -366,16 +368,15 @@ function dialectVocabularies(uri, schemas, formatOption, contentOption, draftVer
   let validation = true;
   let formatAssertion = formatOption;
   let draft = draftVersion;
+  let unimplemented;
   if (isStringType(uri)) {
     draft = detectSchemaDraft({ $schema: uri }, schemas);
-    const metaSchema = heldDialect(uri, (key) => schemas.get(key));
-    if (isObjectClass(metaSchema) && isObjectClass(metaSchema.$vocabulary)) {
-      const declared = declaredVocabularies(metaSchema.$vocabulary);
-      validation = declared.validation;
-      if (formatAssertion == null && declared.formatAssertion) formatAssertion = true;
-    }
+    const declared = dialectVocabulary(uri, (key) => schemas.get(key), draft);
+    validation = declared.validation;
+    unimplemented = declared.unimplemented;
+    if (formatAssertion == null && declared.formatAssertion) formatAssertion = true;
   }
-  return { validation, formatAssertion: formatAssertion ?? draft < 2020, contentValidation: contentOption ?? draft < 2019 };
+  return { validation, formatAssertion: formatAssertion ?? draft < 2020, contentValidation: contentOption ?? draft < 2019, unimplemented };
 }
 
 /**
@@ -799,7 +800,9 @@ export class ValidationRoot {
     if (uri === undefined) return this.#options;
     let options = this.#dialectOptions.get(uri);
     if (options === undefined) {
-      const { validation, formatAssertion, contentValidation } = read(uri);
+      const { validation, formatAssertion, contentValidation, unimplemented } = read(uri);
+      if (unimplemented !== undefined)
+        throw unimplementedVocabulary(uri, unimplemented, compiledLocation(isStringType(schema.$schema) ? keywordLocation(path, '$schema') : path, /** @type {string} */ (this.#rootOrigin)));
       const own = this.#options;
       options = own;
       if (validation !== own.vocabValidation || formatAssertion !== own.formatAssertion || contentValidation !== own.contentValidation) {

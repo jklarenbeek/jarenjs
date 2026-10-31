@@ -467,7 +467,7 @@ function main() {
     writeJsonResults('contracts', {
       node: process.version,
       iterations: options.iterations,
-      caveat: 'The verdict table is not apples-to-apples and its ratio flatters Jaren: Jaren answers with a predicate that allocates nothing, while Zod has no predicate mode and builds its normalized output on the way. The adapter table is the comparable one.',
+      caveat: 'The verdict table is not apples-to-apples and its ratio flatters Jaren: Jaren answers with a predicate that allocates nothing, while Zod has no predicate mode and builds its normalized output on the way. The adapter table is the comparable one. Compiling a schema with defaults costs Jaren more than one without: it checks each default against every schema the default meets, so normalizing never turns a request its validator accepts into one it refuses. Handed a default its own schema refuses, ajv fills it and then refuses the request, zod 3 refuses the request, and zod 4 and zod/mini return the default unchecked.',
       tables: measurements.map(([key, title]) => ({
         title,
         columns: engineKeys.map((k) => ENGINE_LABELS[k]),

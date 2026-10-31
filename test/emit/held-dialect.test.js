@@ -82,6 +82,29 @@ describe('the readers of a document under a held dialect read it as the document
       [{}, { q: '5' }, { q: ' s ' }, { w: {} }]],
   };
   const NORMALIZE = [{ useDefaults: true, coerceTypes: true, trimStrings: true }, { removeAdditional: 'all', useDefaults: true }];
+  const VALIDATION = ['type', 'enum', 'const', 'required', 'dependentRequired', 'minLength', 'maxLength', 'minItems', 'maxItems',
+    'minProperties', 'maxProperties', 'minContains', 'maxContains', 'minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum',
+    'multipleOf', 'uniqueItems', 'pattern'];
+  const MARK = 'https://d.test/mark';
+  /**
+   * A body as the draft the validator reads its dialect as: under a dialect
+   * leaving the validation vocabulary out (vocabOff), without the
+   * validation keywords below the `$schema` naming it.
+   * @param {string} name @param {(uri: string) => any} body
+   */
+  const translate = (name, body) => {
+    if (name !== 'vocabOff') return body(DIALECTS[name][1]);
+    /** @param {any} node @param {boolean} off @returns {any} */
+    const drop = (node, off) => {
+      if (Array.isArray(node)) return node.map((item) => drop(item, off));
+      if (node === null || typeof node !== 'object') return node;
+      if (node.$schema === MARK) off = true;
+      return Object.fromEntries(Object.entries(node).filter(([key]) => !(off && VALIDATION.includes(key)))
+        .map(([key, value]) => [key, key === 'default' || key === 'const' || key === 'enum' ? value : drop(value, off)])
+        .map(([key, value]) => [key, value === MARK ? DIALECTS[name][1] : value]));
+    };
+    return drop(body(MARK), false);
+  };
   /** @param {() => unknown} fn */
   const outcome = (fn) => { try { return JSON.stringify(fn()); } catch (e) { return `throws ${/** @type {any} */ (e).code ?? /** @type {any} */ (e).name}`; } };
 
@@ -93,7 +116,7 @@ describe('the readers of a document under a held dialect read it as the document
         const held = holder();
         const uri = DIALECTS[name][0]?.$id ?? DIALECTS[name][1];
         const document = body(uri);
-        const translated = body(DIALECTS[name][1]);
+        const translated = translate(name, body);
         const option = withOption ? { dialects: held } : {};
         for (const options of NORMALIZE) for (const instance of instances) {
           counts.normalized++;
@@ -115,9 +138,21 @@ describe('the readers of a document under a held dialect read it as the document
       return counts;
     };
     assert.deepEqual(census(true), { normalized: 280, normalizedDiffer: 0, emitted: 70, emittedDiffer: 0, profiles: 35, profilesDiffer: 0 });
+    // the translation is the validator's reading: it answers alike on both
+    for (const name of Object.keys(DIALECTS)) for (const [body, instances] of Object.values(BODIES)) {
+      const held = holder();
+      const uri = DIALECTS[name][0]?.$id ?? DIALECTS[name][1];
+      const verdicts = (/** @type {any} */ schema) => outcome(() => { const validate = held.compile(schema); return instances.map((instance) => validate(structuredClone(instance))); });
+      assert.equal(verdicts(body(uri)), verdicts(translate(name, body)), `${name} ${body.toString().slice(0, 40)}`);
+    }
     // By name alone a custom dialect reads as draft-07, where `prefixItems`
     // is no keyword: the tuple body under each dialect extending 2020-12
     // (e20, chain20, vocabOff) emits an array, not its translation's tuple.
-    assert.deepEqual(census(false), { normalized: 280, normalizedDiffer: 71, emitted: 70, emittedDiffer: 46, profiles: 35, profilesDiffer: 20 });
+    // Under vocabOff the translation reads no validation keyword, while the
+    // name alone reads them: `type` coerces `p` of nestedRef (2 more
+    // normalizations differ) where the translation, like draft-07's `$ref`
+    // read alone, leaves `b` of rootRef, `a` of nestedDialect and `q` of
+    // idBesideRef as sent (3 fewer); the tuple body's profile differs too.
+    assert.deepEqual(census(false), { normalized: 280, normalizedDiffer: 70, emitted: 70, emittedDiffer: 46, profiles: 35, profilesDiffer: 21 });
   });
 });

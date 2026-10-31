@@ -60,14 +60,17 @@ describe('a default a schema object at its place refuses is not filled', () => {
   });
 
   it('a schema object under a branch the instance may take refuses it', () => {
-    // which branch applies is known only after validating: a closer in any
-    // branch keeps the member out, even where another branch would pass
+    // which branch applies is known only after validating, so the validator
+    // decides per instance: a closer in a branch keeps the member out where
+    // the filled object would be refused, and lets it in where another
+    // branch accepts it
     const closer = (/** @type {object} */ rest) => ({ properties: { a: { default: 'x' } }, ...rest });
     assert.deepEqual(run(closer({ anyOf: [CLOSED(), { required: ['z'] }] }), {}), [{}, true, true]);
     assert.deepEqual(run(closer({ oneOf: [CLOSED(), { required: ['z'] }] }), {}), [{}, true, true]);
     assert.deepEqual(run(closer({ if: {}, then: CLOSED() }), {}), [{}, true, true]);
     assert.deepEqual(run(closer({ not: { not: CLOSED() } }), {}), [{}, true, true]);
-    assert.deepEqual(run(closer({ anyOf: [CLOSED(), {}] }), {}), [{}, true, true]);
+    assert.deepEqual(run(closer({ anyOf: [CLOSED(), {}] }), {}), [{ a: 'x' }, true, true]);
+    assert.deepEqual(run(closer({ anyOf: [CLOSED(), { required: ['z'] }] }), { z: 1 }), [{ z: 1, a: 'x' }, true, true]);
     // a schema dependency, which applies once its member is present
     assert.deepEqual(run(closer({ dependencies: { c: ['b'], b: CLOSED() } }), { b: 1 }), [{ b: 1 }, true, true]);
     assert.deepEqual(run({ $schema: D20, ...closer({ dependentSchemas: { b: CLOSED() } }) }, { b: 1 }), [{ b: 1 }, true, true]);

@@ -60,7 +60,7 @@ describe('emit — $ref siblings per declared draft', () => {
   });
 
   it('does not default a member whose default sits beside a $ref the draft reads alone', () => {
-    const schema = { type: 'object', properties: { p: { $ref: '#/$defs/S', default: 5 } }, $defs: { S: { type: 'string' } } };
+    const schema = { type: 'object', properties: { p: { $ref: '#/$defs/S', default: 'five' } }, $defs: { S: { type: 'string' } } };
     assert.deepEqual(compileNormalizer(schema, { useDefaults: true })({}), {});
     const model = compileEmitModel(schema, { name: 'U', normalize: { useDefaults: true } });
     const member = decl(model, 'U').type.members[0];
@@ -68,10 +68,14 @@ describe('emit — $ref siblings per declared draft', () => {
     assert.equal(decl(model, 'UInput'), undefined);
     // where the draft applies the default, it is materialized and the twin follows
     const declared = { $schema: DRAFT_2020, ...schema };
-    assert.deepEqual(compileNormalizer(declared, { useDefaults: true })({}), { p: 5 });
+    assert.deepEqual(compileNormalizer(declared, { useDefaults: true })({}), { p: 'five' });
     const twin = compileEmitModel(declared, { name: 'U', normalize: { useDefaults: true } });
     assert.equal(decl(twin, 'U').type.members[0].required, true);
     assert.equal(decl(twin, 'UInput').type.members[0].required, false);
+    // a default the target refuses is not filled, and the twin does not claim it
+    const refused = { $schema: DRAFT_2020, ...schema, properties: { p: { $ref: '#/$defs/S', default: 5 } } };
+    assert.deepEqual(compileNormalizer(refused, { useDefaults: true })({}), {});
+    assert.equal(decl(compileEmitModel(refused, { name: 'U', normalize: { useDefaults: true } }), 'UInput'), undefined);
   });
 
   it('does not widen by a coercion of the sibling type the draft never reads', () => {

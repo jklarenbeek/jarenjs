@@ -441,13 +441,21 @@ resulting ESM cycle — `index.js` → `schema.js` → `query-keyword.js` →
 nearest `$schema` on the way to it in its own document (`places.dialectUris`),
 and the constructor's seventh argument reads what that dialect switches on
 (`dialectVocabularies`: the validation vocabulary and format assertion as its
-meta-schema's `$vocabulary` declares them, and the format and content
-assertions its draft defaults). `optionsAt(path, schema)` hands each
-`ValidationObject` the compilation's options with that dialect's switches —
-one `ValidationOptions` per dialect URI, made once — so a held document reads
-alike compiled directly and through a `$ref`, and a place under no `$schema`
-reads the compilation's. `addMetaSchema` passes none: a meta-schema compiles
-under the validator's options everywhere.
+meta-schema's `$vocabulary` declares them, read by `dialectVocabulary`
+(schema-keywords.js), and the format and content assertions its draft
+defaults). `optionsAt(path, schema)` hands each `ValidationObject` the
+compilation's options with that dialect's switches — one `ValidationOptions`
+per dialect URI, made once — so a held document reads alike compiled
+directly and through a `$ref`, and a place under no `$schema` reads the
+compilation's. A dialect whose meta-schema (of 2019-09 on) requires a
+vocabulary this package does not implement is refused there, the root's
+place included, `JK0016` (`unimplementedVocabulary`, errors.js).
+`addMetaSchema` passes none: a meta-schema compiles under the validator's
+options everywhere. The readers handed a validator as `dialects` read the
+same switches through `withoutUnreadVocabularies` (normalize.js): the
+document they read drops the validation keywords where the dialect governing
+a place leaves that vocabulary out (`VALIDATION_KEYWORDS`), and refuses
+`JK0016` alike.
 
 ### ValidationObject
 
@@ -1160,7 +1168,8 @@ Map<string, ValidationObject> {
 | `identifierOf` / `declaredDraftOf` | traverse.js | The identifier text a compile reads a base from (`$id`, or `id` where `identifierKeyword` reads it), by the draft the walks recorded for the object |
 | `identifierText` | schema-keywords.js | An identifier read without a fragment spelled as a JSON Pointer, which names nothing (every reader of an `$id`/`id`) |
 | `readsPrefixItems` / `readPrefixItems` | schema-keywords.js | Whether a place reads `prefixItems` (2020-12, or no draft declared), the one gate the validator, the normalizer and `@jarenjs/emit` read; `readPrefixItems` also reads an empty one as none |
-| `defaultPlace` / `unfilledDefaults` | normalize.js | The schema objects that may apply at one place of an instance (beside, below a branch, from every parent object), whose by-name refusals (`additionalProperties: false`, `unevaluatedProperties: false`) keep a default out; `unfilledDefaults` names the defaults so left unfilled, for `@jarenjs/emit` |
+| `defaultPlace` / `settleFill` / `unfilledDefaults` | normalize.js | The schema objects that may apply at one place of an instance (for certain: beside, through `$ref` and `allOf`; as the instance decides: below a branch; from every parent object), against which the validator decides each default: never filled where a schema applying for certain refuses its copy as the place ends up holding it (`filledValue`, `stepOrder`) or its name, filled per instance where a branch or a count, presence or whole-object keyword could change an answer (`readsPresence`, `placeAnswers`: every entry of the place answers alike), always else. The checks run on one `JarenValidator` holding the document (`checkerOf`), compiled once; `unfilledDefaults` names the defaults never filled or filled per instance, for `@jarenjs/emit` |
+| `withoutUnreadVocabularies` / `dialectVocabulary` / `holdDialects` | normalize.js, schema-keywords.js | The document as the validator holding its dialects reads it (no validation keyword where the governing dialect leaves that vocabulary out; `JK0016` for an unimplemented required vocabulary), the one reading of a dialect's `$vocabulary`, and the dialect stubs a reader's own validator holds |
 | `ValidationRoot#optionsAt` / `dialectVocabularies` | index.js | The options a schema object compiles under: the compilation's, with the vocabularies and draft-defaulted assertions of the dialect governing its place |
 | `JarenValidator.compile` | index.js | Main entry point for schema compilation, draft/vocabulary selection |
 | `JarenValidator.#precompileRefs` | index.js | Pre-create ValidationObjects for all refs |
@@ -1273,6 +1282,10 @@ document that is (the message then names the step that misses)
   after the assertion gate, so an annotation-only `format` and a `$data`
   reference never reach it, and `getSchemaFormatCompiler` reads only the
   registry's own members
+- `JK0016`: a dialect whose meta-schema requires a vocabulary this package
+  does not implement (`declaredVocabularies` names it against
+  `IMPLEMENTED_VOCABULARIES`); `optionsAt` refuses it where a place under
+  the dialect compiles, `withoutUnreadVocabularies` for the readers
 
 ### Performance Degradation on First Validation
 

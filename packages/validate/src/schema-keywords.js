@@ -52,6 +52,14 @@ export function readsSince(keyword, declaredDraft) {
   return since === undefined || declaredDraft == null || declaredDraft >= since;
 }
 
+/**
+ * The keywords of the validation vocabulary, which a place reads only while
+ * the dialect governing it keeps that vocabulary on.
+ */
+export const VALIDATION_KEYWORDS = Object.freeze(['type', 'enum', 'const', 'required', 'dependentRequired',
+  'minLength', 'maxLength', 'minItems', 'maxItems', 'minProperties', 'maxProperties', 'minContains', 'maxContains',
+  'minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum', 'multipleOf', 'uniqueItems', 'pattern']);
+
 /** The vocabulary meta-schemas each draft publishes beside its dialect. */
 const META_2019 = ['core', 'applicator', 'validation', 'meta-data', 'format', 'content'];
 const META_2020 = ['core', 'applicator', 'unevaluated', 'validation', 'meta-data', 'format-annotation', 'format-assertion', 'content'];
@@ -181,23 +189,86 @@ const FORMAT_ASSERTION_VOCABULARIES = /* @__PURE__ */ new Set([
 ]);
 
 /**
+ * The vocabularies this package implements: every vocabulary of 2019-09,
+ * 2020-12 and the draft-next dialect read as 2020-12 (the hyper-schema
+ * vocabulary's keywords are annotations, which is how they are read), and
+ * the Jaren query vocabulary (`$query`).
+ */
+const IMPLEMENTED_VOCABULARIES = /* @__PURE__ */ new Set([
+  ...[...META_2019, 'hyper-schema'].map((name) => `//json-schema.org/draft/2019-09/vocab/${name}`),
+  ...['2020-12', 'next'].flatMap((draft) => [...META_2020, 'hyper-schema'].map((name) => `//json-schema.org/draft/${draft}/vocab/${name}`)),
+  '//jarenjs.dev/schemas/2020-12/vocab/query',
+]);
+
+/**
  * Which of the vocabularies this package switches on a meta-schema's
  * `$vocabulary` declares, each matched by its exact URI (`http:`/`https:`
  * and an empty fragment read alike). A vocabulary declared `false` is
  * declared too: `false` only lets a validator that does not implement it go
- * on without it.
+ * on without it. One declared `true` that this package does not implement
+ * is named, as the meta-schema spells it: a validator must refuse a schema
+ * of that dialect rather than read its keywords as annotations.
  * @param {Record<string, unknown>} vocabulary - A meta-schema's `$vocabulary`
- * @returns {{ validation: boolean, formatAssertion: boolean }}
+ * @returns {{ validation: boolean, formatAssertion: boolean, unimplemented: string|undefined }}
  */
 export function declaredVocabularies(vocabulary) {
   let validation = false;
   let formatAssertion = false;
+  let unimplemented;
   for (const uri of Object.keys(vocabulary)) {
     const key = officialUri(uri);
     if (VALIDATION_VOCABULARIES.has(key)) validation = true;
     else if (FORMAT_ASSERTION_VOCABULARIES.has(key)) formatAssertion = true;
+    else if (vocabulary[uri] === true && unimplemented === undefined && !IMPLEMENTED_VOCABULARIES.has(key)) unimplemented = uri;
   }
-  return { validation, formatAssertion };
+  return { validation, formatAssertion, unimplemented };
+}
+
+/**
+ * What the dialect a `$schema` URI names switches on, as the meta-schema a
+ * validator holds under it declares in `$vocabulary` ({@link
+ * declaredVocabularies}): the validation vocabulary stays on, and the
+ * format-assertion one off, where the meta-schema is not held or declares
+ * no `$vocabulary`. A required vocabulary this package does not implement
+ * is named only where the dialect's draft defines `$vocabulary` (2019-09
+ * on). The one reading of a dialect's vocabularies, for the validator and
+ * for every reader handed it.
+ * @param {string} uri - The `$schema` value
+ * @param {(key: string) => unknown} get - The schema a validator holds under a key
+ * @param {number|null} draft - The dialect's draft ({@link dialectDraft})
+ * @returns {{ validation: boolean, formatAssertion: boolean, unimplemented: string|undefined }}
+ */
+export function dialectVocabulary(uri, get, draft) {
+  const metaSchema = heldDialect(uri, get);
+  if (!isObjectClass(metaSchema) || !isObjectClass(metaSchema.$vocabulary))
+    return { validation: true, formatAssertion: false, unimplemented: undefined };
+  const declared = declaredVocabularies(metaSchema.$vocabulary);
+  if (draft != null && draft < 2019) declared.unimplemented = undefined;
+  return declared;
+}
+
+/**
+ * Hold in `validator` each dialect the given `$schema` URIs name, as `held`
+ * holds it: a chain of the `$schema` each meta-schema declares, up to a
+ * known draft, so the validator reads each URI as the draft the validator
+ * holding `held` reads it as. Its draft is all a reader's validator reads
+ * of a dialect: the document it compiles is read through its dialects
+ * already. For the readers that ask a validator of their own whether a
+ * schema of the document accepts a value.
+ * @param {{ getSchema(key: string): unknown, addSchema(schema: object, key: string): unknown }} validator
+ * @param {Iterable<string>} named - The `$schema` URIs the documents name
+ * @param {{ get(key: string): unknown }|undefined} held - The schemas the dialects' validator holds
+ */
+export function holdDialects(validator, named, held) {
+  if (held === undefined) return;
+  for (let uri of named) {
+    while (/^[a-z][a-z0-9+.-]*:/i.test(uri) && dialectDraft(uri) === null && validator.getSchema(uri) === null) {
+      const meta = heldDialect(uri, (key) => held.get(key));
+      if (!isObjectClass(meta) || !isStringType(meta.$schema)) break;
+      validator.addSchema({ $schema: meta.$schema }, uri);
+      uri = meta.$schema;
+    }
+  }
 }
 
 /**

@@ -268,8 +268,11 @@ describe('a $vocabulary entry switches a vocabulary on by its exact URI', () => 
       const id = 'https://example.com/vocab-meta';
       return holding(meta(id, vocabulary)).compile({ $schema: id, type: 'string' })(12);
     };
-    assert.equal(answer({ 'https://example.com/vocab/validation-extras': true }), true);
-    assert.equal(answer({ 'https://example.com/v2/vocab/validation': true }), true);
+    // a look-alike URI switches nothing on (declared optional: one this
+    // validator does not implement, required, refuses the schema JK0016)
+    assert.equal(answer({ 'https://example.com/vocab/validation-extras': false }), true);
+    assert.equal(answer({ 'https://example.com/v2/vocab/validation': false }), true);
+    assert.throws(() => answer({ 'https://example.com/v2/vocab/validation': true }), { code: 'JK0016' });
     assert.equal(answer({}), true);
     assert.equal(answer({ 'https://json-schema.org/draft/2020-12/vocab/validation': true }), false);
     // `false` lets a validator that does not implement it go on: this one does
@@ -284,7 +287,7 @@ describe('a $vocabulary entry switches a vocabulary on by its exact URI', () => 
         .addFormats(stringFormats);
       return validator.compile({ $schema: id, format: 'email' })('not an email');
     };
-    assert.equal(answer({ 'https://example.com/vocab/format-assertion-lite': true }), true);
+    assert.equal(answer({ 'https://example.com/vocab/format-assertion-lite': false }), true);
     assert.equal(answer({}), true);
     assert.equal(answer({ 'https://json-schema.org/draft/2020-12/vocab/format-assertion': true }), false);
     assert.equal(answer({ 'https://json-schema.org/draft/2020-12/vocab/format-assertion': false }), false);

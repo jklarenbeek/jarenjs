@@ -255,10 +255,12 @@ code-generating backend is not planned. The benchmarks page reports a
 geometric mean against the *fastest rival per scenario* rather than quoting
 only the scenarios Jaren wins.
 
-Compilation is paid once per process and is where Jaren is slowest; the
-benchmarks page carries the current compile figures. If you compile thousands
-of schemas at boot, measure it; if you compile them once at module load, it
-does not matter.
+Compilation is paid once per process and is where Jaren is slowest: every
+rival builds a schema faster, and a schema with defaults costs Jaren more
+again, because it checks each default against the schemas it meets so that
+normalizing never turns an accepted request into a refused one. If you compile
+thousands of schemas at boot, measure it; if you compile them once at module
+load, it does not matter.
 
 ## Staging a migration
 

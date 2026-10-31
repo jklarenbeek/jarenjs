@@ -316,6 +316,7 @@ query's own grammar; a `JK` code over it would send every reader to `cause`.
 | `JK0013` | `SchemaCompileError` | A keyword the validator reads at a place holds a value that is not of the shape its draft's meta-schema requires (`type: 1`, `required: "a"`, `minLength: -1`, `properties: { "a": 5 }`, `anyOf: []`): refused where the place compiles, naming the keyword, the shape it takes and the value, located at the keyword or at the member or item of it that is wrong |
 | `JK0014` | `SchemaCompileError` | A `pattern`, or a `patternProperties` member name, is no regular expression: refused where the place compiles, naming the keyword, the shape it takes, the value and the `SyntaxError`'s message, located at the keyword or the member, the `SyntaxError` as the `cause` |
 | `JK0015` | `SchemaCompileError` | Under `unknownFormats: 'error'`, a `format` that asserts names no registered format — an unregistered name, or a value that is no name (`format: 5`): refused where the place compiles, naming the format, the registration that would serve it and the opt-out, located at the keyword |
+| `JK0016` | `SchemaCompileError` | A schema of a dialect whose meta-schema requires (`$vocabulary`, `true`) a vocabulary the validator does not implement: refused where a place under that dialect compiles, naming the meta-schema and the vocabulary, located at the `$schema` naming it; `compileNormalizer`, `deriveStrictProfile` and `@jarenjs/emit` handed the dialects as `dialects` refuse it alike |
 | `JK0101` | `SchemaCompileError` | Retired, no longer raised: `deriveStrictProfile` (`@jarenjs/validate/strict-profile`) carries a schema that accepts any value — `true`, `{}`, a node with no type, a free-form object, a tuple — as JSON text |
 | `JK0102` | `SchemaCompileError` | `deriveStrictProfile`: an object whose member names are open and that no entries array carries — a map beside declared `properties`, a map that may also be an array, a schema-valued `unevaluatedProperties` |
 | `JK0103` | `SchemaCompileError` | `deriveStrictProfile`: a keyword that applies members, items or branches beside its node and that no distribution makes exact — `if`/`then`/`else`, `dependentSchemas` or a draft-07 `dependencies` schema beside an object type, a branch beside an object type that is more than members (a `$ref`, a nested union, an `enum`), a branch giving a member a second schema that is not an `enum` or `const`, an untyped `allOf` of more than one branch, a `$ref` or `anyOf` beside structural siblings |
@@ -631,6 +632,26 @@ same schemas compile:
 ```text
 JK0015: Unknown format 'foo': no compiler is registered for it, so this schema would accept every value for that keyword. Register one (addFormats(dateTimeFormats) etc. from @jarenjs/formats, or addFormat(name, compiler) for your own), or pass { unknownFormats: 'ignore' } to accept it as an annotation at #/format
 JK0015: 'format' holds 5, which names no format, so this schema would accept every value for that keyword. Register one (addFormats(dateTimeFormats) etc. from @jarenjs/formats, or addFormat(name, compiler) for your own), or pass { unknownFormats: 'ignore' } to accept it as an annotation at #/properties/a/format
+```
+
+**`JK0016` — a required vocabulary the validator does not implement.** A
+meta-schema's `$vocabulary` names the vocabularies its dialect uses; one
+declared `true` is required, and 2019-09 and 2020-12 ask a validator that
+does not implement it to refuse a schema of that dialect rather than read
+its keywords as annotations, which assert nothing. The vocabularies this
+package implements are those of 2019-09, 2020-12 and draft-next (the
+hyper-schema vocabulary's keywords are annotations, as they are read) and the
+Jaren query vocabulary (`$query`). A schema of such a dialect is refused
+where a place under it compiles — the compile's root, an embedded resource
+declaring it, or a held document a `$ref` reaches, by the first call that
+reaches it, as any refusal of a held document — located at the `$schema`
+naming the dialect. Declared `false`, or in a meta-schema of a draft without
+`$vocabulary` (draft-07 and before), the vocabulary is read as before: its
+keywords are annotations. It used to compile, its keywords asserting
+nothing:
+
+```text
+JK0016: the meta-schema 'https://v.test/meta-unknown' requires the vocabulary 'https://v.test/vocab/unknown', which this validator does not implement, so its keywords would assert nothing; declare it false in that meta-schema's $vocabulary to read them as annotations, or name a dialect without it at #/%24schema
 ```
 
 **`JK0102`–`JK0108` — a schema with no strict form.** `deriveStrictProfile`
