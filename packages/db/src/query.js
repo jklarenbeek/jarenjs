@@ -45,6 +45,7 @@ import { physicalSelection, columnCodec, textKeyPlan, textKeyDecoding, checkText
 import { createSemanticCache } from '@jarenjs/core/cache';
 import { analyzeQuery, compileJsonQuery, JsonQueryRuntimeError, renderQueryMessage } from '@jarenjs/json/query';
 import { compileJSONPath, parseJSONPath } from '@jarenjs/json/path';
+import { parseJSONPointer } from '@jarenjs/json/pointer';
 
 import { DbCompileError, DbRuntimeError, wrapDriverError, refuseRoundedInteger } from './errors.js';
 import { chain, attempt, createStatementOwner, useStatementOnce } from './driver.js';
@@ -775,6 +776,17 @@ function isOpaque(value) {
  * @returns {{ value: any, at: string } | null}
  */
 function opaqueWithin(root, bigints = false) {
+  return firstWithin(root, (value) => isOpaque(value) || (bigints && typeof value === 'bigint'));
+}
+
+/**
+ * The first value at or inside `root` that `matches` names, in document
+ * order, with the JSON Pointer of where it stands; `null` when there is
+ * none.
+ * @param {any} root @param {(value: any) => boolean} matches
+ * @returns {{ value: any, at: string } | null}
+ */
+function firstWithin(root, matches) {
   // iterative: a document nested thousands deep compiles, so its walk
   // must not take a frame per level; a container met twice (a shared
   // subtree or a cycle) is read once
@@ -783,10 +795,9 @@ function opaqueWithin(root, bigints = false) {
   const pending = [[root, '']];
   while (pending.length > 0) {
     const [value, at] = /** @type {[any, string]} */ (pending.pop());
-    if (bigints && typeof value === 'bigint') return { value, at };
+    if (matches(value)) return { value, at };
     if (value === null || typeof value !== 'object' || seen.has(value)) continue;
     seen.add(value);
-    if (isOpaque(value)) return { value, at };
     const keys = Object.keys(value);
     // pushed last first, so the first member is read first
     for (let k = keys.length - 1; k >= 0; k--) pending.push([value[keys[k]], `${at}/${escapePointerToken(keys[k])}`]);
@@ -805,16 +816,24 @@ const HOST_MEMBERS = new Set(['fn', 'entry', 'collation']);
 
 /**
  * The variables a node binds — a `$for` or `$let` binding, a quantifier's,
- * a grouping key's, a `$fold` accumulator's (its initial value) — each
- * `{ slot, expr }`: the slot a reference to the variable names, and the
- * expression its value is.
- * @param {any} node @returns {{ slot: number, expr: any }[]}
+ * a grouping key's, a `$fold` accumulator's (its initial value), a
+ * `{ $let, $return }` phrase's — each `{ slot, name, expr, single,
+ * phrase }`: the slot a reference to the variable names, its name, the
+ * expression its value is, whether that value is the whole of the
+ * expression's (a `$let`) rather than one item of it, one group's key or
+ * where a fold starts, and whether a `{ $let, $return }` phrase binds it.
+ * @param {any} node
+ * @returns {{ slot: number, name: string, expr: any, single: boolean, phrase: boolean }[]}
  */
 function bindingsOf(node) {
+  /** @param {any} binding @param {boolean} single */
+  const site = (binding, single) => ({ slot: binding.slot, name: binding.name, expr: binding.expr, single, phrase: node.kind === 'let' });
   if (node.kind === 'flwor') {
-    return [...node.forBindings, ...node.letBindings, ...(node.groupby?.keys ?? []), ...(node.fold === null ? [] : [node.fold])];
+    return [...node.forBindings.map((binding) => site(binding, false)), ...node.letBindings.map((binding) => site(binding, true)),
+      ...(node.groupby?.keys ?? []).map((binding) => site(binding, false)), ...(node.fold === null ? [] : [site(node.fold, false)])];
   }
-  if (node.kind === 'quant') return node.bindings;
+  if (node.kind === 'quant') return node.bindings.map((binding) => site(binding, false));
+  if (node.kind === 'let') return node.bindings.map((binding) => site(binding, true));
   return [];
 }
 
@@ -824,18 +843,27 @@ function bindingsOf(node) {
  * `$index-of`, or a grouping key: `$since`, `$xs[*]`, `$o.d` — found
  * anywhere in its analysed tree (QUERY-FORMAT Appendix C), and followed
  * through what hands their items to the operand ({@link reachedExternals}),
- * each named by the external and the steps that reach the compared items.
- * A comparison of one external reference with the same reference answers
- * alike whatever it holds, and is left out. A value the query returns or
- * hands to a host function is passed by reference, and one an operator
- * computes from the external (its count, its text) is not followed.
+ * each named by the external and the steps that reach the compared items
+ * — or, for an operand the call's externals alone decide, by the engine's
+ * own evaluation of it. A comparison of one external reference with the
+ * same reference answers alike whatever it holds, and is left out where a
+ * call compares nothing else ({@link sameReference}). A value the query
+ * returns or hands to a host function is passed by reference, and one an
+ * operator computes from the external (its count, its text) is not
+ * followed. What only this tree's conditions, computed keys, constructors
+ * and nested phrases reach comes after what a reference reaches through
+ * variables and the operators that hand items through, so a call either
+ * refuses keeps the reason it gave.
  * @param {any} root - the analysed tree
- * @param {string | null} [predicate] - the profile root whose predicate the
+ * @param {string | null} predicate - the profile root whose predicate the
  *   tree is, or null for the caller's document
- * @returns {{ name: string, segments: readonly any[], docPath: string, predicate: string | null }[]}
+ * @param {{ document: any, options?: any }} source - the document the tree
+ *   was analysed from, and the options its parts compile with
+ *   ({@link closedQuery})
+ * @returns {ComparedExternal[]}
  */
-function comparedExternals(root, predicate = null) {
-  /** @type {Map<number, any>} each bound variable's expression, by slot */
+function comparedExternals(root, predicate, source) {
+  /** @type {Map<number, ReturnType<typeof bindingsOf>[number]>} each bound variable, by slot */
   const bound = new Map();
   /** @type {any[][]} the operands one comparison or equating operator reads, together */
   const operands = [];
@@ -850,7 +878,7 @@ function comparedExternals(root, predicate = null) {
     // a literal's and a raw argument's value is JSON, a path's segments
     // are its own grammar: neither holds a node
     if (node.kind === 'literal' || node.kind === 'raw' || node.kind === 'path') continue;
-    for (const binding of bindingsOf(node)) bound.set(binding.slot, binding.expr);
+    for (const binding of bindingsOf(node)) bound.set(binding.slot, binding);
     if (node.kind === 'op' && (COMPARISONS.has(node.name) || EQUATING.has(node.name))) operands.push(node.args);
     if (node.kind === 'flwor') for (const key of node.groupby?.keys ?? []) operands.push([key.expr]);
     const keys = Object.keys(node);
@@ -858,18 +886,36 @@ function comparedExternals(root, predicate = null) {
       if (!HOST_MEMBERS.has(keys[k])) pending.push(node[keys[k]]);
     }
   }
-  /** @type {{ name: string, segments: readonly any[], docPath: string, predicate: string | null }[]} */
+  const scope = { bound, document: source.document, options: source.options, closed: new Map(), reading: new Map() };
+  /** @type {ComparedExternal[]} */
   const found = [];
   for (const args of operands) {
-    const refs = args.map((arg) => reachedExternals(arg, bound).map((ref) => ({ arg, ref }))).flat();
-    const same = refs.length === 2 && args.length === 2 && refs[0].arg !== refs[1].arg
-      && refs[0].ref.name === refs[1].ref.name
-      && JSON.stringify(refs[0].ref.segments) === JSON.stringify(refs[1].ref.segments);
-    if (same) continue;
-    for (const { arg, ref } of refs) found.push({ name: ref.name, segments: ref.segments, docPath: arg.docPath, predicate });
+    // the two sides of one comparison, for the reference compared with itself
+    const group = {};
+    args.forEach((arg, side) => {
+      for (const ref of reachedExternals(arg, scope)) {
+        found.push({ ...ref, docPath: arg.docPath, predicate, pair: args.length === 2 ? { group, side } : undefined });
+      }
+    });
   }
-  return found;
+  // stable: each kind keeps the tree's order
+  return found.sort((a, b) => Number(a.indirect) - Number(b.indirect));
 }
+
+/**
+ * One place a comparison reads an external: `name` and the `segments`
+ * that reach the compared items from its value — or `evaluate`, the
+ * engine's query for an operand the externals alone decide, which `reads`
+ * the externals named — taken where every guard holds for the call
+ * (`$if`'s condition, a `$coalesce` operand before it found empty), at the
+ * comparison's `docPath`, in the store profile's predicate for the root
+ * `predicate`, on one `side` of a two-sided comparison `group`; `indirect`
+ * where a condition, a computed key or bound, a constructor, a nested
+ * phrase or a `{ $let, $return }` binding was followed to reach it.
+ * @typedef {{ name?: string, segments: readonly any[], evaluate?: any, reads?: readonly string[],
+ *   guards: readonly { query: any, at: string, holds: boolean | 'empty' }[], indirect: boolean,
+ *   docPath: string, predicate: string | null, pair: { group: object, side: number } | undefined }} ComparedExternal
+ */
 
 /**
  * The operators whose items are items of an operand, handed through as
@@ -892,47 +938,320 @@ const HANDED_THROUGH = new Map([
  * The externals an operand's items are read from, each with the steps
  * that reach its items from the external's value: a reference to one
  * (`$since`, `$xs[*]`, `$o.d`), through the variables bound to one (`$s`
- * after `$let: { s: '$since' }`, `$q.d` after `$for: { q: '$xs[*]' }`, a
- * quantifier or a `$fold` accumulator over it), through an operator that
- * hands an operand's items through ({@link HANDED_THROUGH}), through each
- * operand of a `$seq`, and through each member of an array or object
- * constructor that is the operand itself, whose value holds them. A slot
- * is bound once in a tree, and a binding refers only to slots bound before
- * it, so the walk ends; it is iterative, as an operand may nest deep.
- * @param {any} operand @param {Map<number, any>} bound - each bound variable's expression, by slot
- * @returns {{ name: string, segments: any[] }[]}
+ * after `$let: { s: '$since' }` or in a `{ $let, $return }` phrase, `$q.d`
+ * after `$for: { q: '$xs[*]' }`, a quantifier or a `$fold` accumulator
+ * over it), through an operator that hands an operand's items through
+ * ({@link HANDED_THROUGH}), through each operand of a `$seq`, through each
+ * member of an array or object constructor that is the operand itself,
+ * whose value holds them, and through the operand an expression picks
+ * where the call's externals alone decide which ({@link pickedOperands}).
+ * Any other operand those externals alone decide — a nested phrase among
+ * them — is the engine's to evaluate per call ({@link closedQuery}). A
+ * slot is bound once in a tree, and a binding refers only to slots bound
+ * before it, so the walk ends; it is iterative, as an operand may nest
+ * deep.
+ * @param {any} operand @param {any} scope - each bound variable by slot,
+ *   and the document the tree was analysed from ({@link comparedExternals})
+ * @returns {Omit<ComparedExternal, 'docPath' | 'predicate' | 'pair'>[]}
  */
-function reachedExternals(operand, bound) {
+function reachedExternals(operand, scope) {
+  /** @type {Omit<ComparedExternal, 'docPath' | 'predicate' | 'pair'>[]} */
   const found = [];
-  /** @type {[any, any[]][]} each node and the steps read from its items after it */
-  const pending = [[operand, []]];
+  /** @type {[any, any[], any[], boolean][]} each node, the steps read from its items after it, the guards a
+   * call checks before reading them, and whether a picked operand, a constructor's member or a phrase's
+   * binding was followed to reach it */
+  const pending = [[operand, [], [], false]];
   while (pending.length > 0) {
-    const [node, after] = /** @type {[any, any[]]} */ (pending.pop());
+    const [node, after, guards, indirect] = /** @type {[any, any[], any[], boolean]} */ (pending.pop());
+    const step = node?.kind === 'op' && HANDED_THROUGH.has(node.name)
+      ? /** @type {Function} */ (HANDED_THROUGH.get(node.name))(node.args) : null;
     if (node?.kind === 'var' || node?.kind === 'path') {
       const steps = [...(node.segments ?? []), ...after];
-      if (node.external === true) found.push({ name: node.name, segments: steps });
+      if (node.external === true) found.push({ name: node.name, segments: steps, guards, indirect });
       else {
-        const expr = bound.get(node.kind === 'var' ? node.slot : node.rootSlot);
-        if (expr !== undefined) pending.push([expr, steps]);
+        const binding = scope.bound.get(node.kind === 'var' ? node.slot : node.rootSlot);
+        if (binding !== undefined) pending.push([binding.expr, steps, guards, indirect || binding.phrase]);
       }
     }
     else if (node?.kind === 'op' && node.name === '$seq') {
-      for (let k = node.args.length - 1; k >= 0; k--) pending.push([node.args[k], after]);
+      for (let k = node.args.length - 1; k >= 0; k--) pending.push([node.args[k], after, guards, indirect]);
     }
-    else if (node?.kind === 'op' && HANDED_THROUGH.has(node.name)) {
-      const step = /** @type {Function} */ (HANDED_THROUGH.get(node.name))(node.args);
-      if (step !== null) pending.push([node.args[0], [step, ...after]]);
-    }
-    // a constructor read whole holds each member's items; one a step reads
-    // into is not followed
+    else if (step !== null) pending.push([node.args[0], [step, ...after], guards, indirect]);
+    // a constructor read whole holds each member's items
     else if (node?.kind === 'array' && after.length === 0) {
-      for (let k = node.elements.length - 1; k >= 0; k--) pending.push([node.elements[k], []]);
+      for (let k = node.elements.length - 1; k >= 0; k--) pending.push([node.elements[k], [], guards, indirect]);
     }
     else if (node?.kind === 'object' && after.length === 0) {
-      for (let k = node.entries.length - 1; k >= 0; k--) pending.push([node.entries[k].expr, []]);
+      for (let k = node.entries.length - 1; k >= 0; k--) pending.push([node.entries[k].expr, [], guards, indirect]);
+    }
+    else if (node !== null && typeof node === 'object') {
+      const picked = pickedOperands(node, after, guards, scope);
+      if (picked !== null) {
+        for (let k = picked.length - 1; k >= 0; k--) pending.push([...picked[k], true]);
+        continue;
+      }
+      // what reads no external holds nothing a comparison could misread
+      const closed = node.kind === 'literal' || node.kind === 'raw'
+        || (closedReads(node, scope)?.reads.length ?? 0) === 0 ? null : closedQuery(node, scope);
+      if (closed !== null) found.push({ evaluate: closed.query, reads: closed.reads, segments: after, guards, indirect: true });
     }
   }
   return found;
+}
+
+/**
+ * The operands an expression hands its items from where the call's
+ * externals alone decide which, each with the steps read from its items
+ * and the guards a call checks first: `$if`'s branches, each under its
+ * condition; each operand of `$coalesce` or `$default`, under the ones
+ * before it being empty, up to the first whose emptiness a row decides;
+ * the target of `$get` or `$subsequence` at a computed key or bounds,
+ * evaluated per call; the member pairs of `$entries`; the members of an
+ * array or object constructor that a path's names, indexes, slices or
+ * wildcard select; the return of a nested phrase that drops, groups and
+ * folds no item. `[]` where a row or the collection decides it (an `$if`
+ * on a row's member, a key a row computes); `null` for any other
+ * expression.
+ * @param {any} node @param {any[]} after @param {any[]} guards @param {any} scope
+ * @returns {[any, any[], any[]][] | null}
+ */
+function pickedOperands(node, after, guards, scope) {
+  if (node.kind === 'op') {
+    switch (node.name) {
+      case '$if': {
+        const test = closedQuery(node.args[0], scope);
+        if (test === null) return [];
+        const under = (/** @type {boolean} */ holds) => [...guards, { query: test.query, at: node.args[0].docPath, holds }];
+        return [[node.args[1], after, under(true)], ...node.args.slice(2).map((arg) => /** @type {[any, any[], any[]]} */ ([arg, after, under(false)]))];
+      }
+      case '$coalesce': case '$default': {
+        /** @type {[any, any[], any[]][]} */
+        const picked = [];
+        /** @type {any[]} */
+        const empty = [];
+        for (const arg of node.args) {
+          picked.push([arg, after, [...guards, ...empty]]);
+          const test = picked.length === node.args.length ? null : closedQuery(arg, scope);
+          if (test === null) break;
+          empty.push({ query: test.query, at: arg.docPath, holds: 'empty' });
+        }
+        return picked;
+      }
+      case '$get': {
+        const key = closedQuery(node.args[1], scope);
+        return key === null ? [] : [[node.args[0], [{ through: '$get', at: node.args[1].docPath, keyQuery: key.query }, ...after], guards]];
+      }
+      case '$subsequence': {
+        const bounds = node.args.slice(1).map((/** @type {any} */ arg) => closedQuery(arg, scope));
+        if (bounds.includes(null)) return [];
+        return [[node.args[0], [{ through: '$subsequence', at: node.docPath, boundQueries: bounds.map((bound) => bound?.query),
+          positions: compileJsonQuery({ $subsequence: [{ $range: [0, '$last'] }, '$start', ...bounds.length > 1 ? ['$length'] : []] }) },
+        ...after], guards]];
+      }
+      case '$entries': return [[node.args[0], [{ through: '$entries' }, ...after], guards]];
+      default: return null;
+    }
+  }
+  if ((node.kind === 'array' || node.kind === 'object') && after.length > 0 && !('through' in after[0]) && !after[0].descendant) {
+    const members = constructorMembers(node, after[0].selectors);
+    if (members !== null) return members.map((member) => [member, after.slice(1), guards]);
+  }
+  // a nested phrase that drops, groups or folds no item returns what its
+  // return reads for every item it binds
+  if (node.kind === 'let' || (node.kind === 'flwor' && node.where === null && node.count === null && node.groupby === null
+    && node.fold === null && node.forBindings.every((/** @type {any} */ binding) => binding.window === null))) {
+    return [[node.ret, after, guards]];
+  }
+  return null;
+}
+
+/** The cardinality of an expression that always yields exactly one item
+ * (QUERY-FORMAT C.2, `CARD_ONE`). */
+const ONE_ITEM = 1;
+
+/**
+ * The members of a constructor that one path segment's selectors select:
+ * an object's member by its name, every member for a wildcard; an array's
+ * element by its index (a negative one from the end) or a slice, where
+ * every element is exactly one item so an index names one element, every
+ * element for a wildcard. A name in an array and an index in an object
+ * select nothing; `null` for a filter, or an index or slice into elements
+ * whose item counts a call decides.
+ * @param {any} node - an `array` or `object` node @param {readonly any[]} selectors
+ * @returns {any[] | null}
+ */
+function constructorMembers(node, selectors) {
+  const out = [];
+  for (const selector of selectors) {
+    if (selector.kind === 'wildcard') {
+      out.push(...(node.kind === 'object' ? node.entries.map((/** @type {any} */ entry) => entry.expr) : node.elements));
+    }
+    else if (selector.kind === 'name') {
+      if (node.kind === 'object') out.push(...node.entries.filter((/** @type {any} */ entry) => entry.name === selector.name).map((/** @type {any} */ entry) => entry.expr));
+    }
+    else if (selector.kind === 'index' || selector.kind === 'slice') {
+      if (node.kind === 'object') continue;
+      if (!node.elements.every((/** @type {any} */ element) => element.card === ONE_ITEM)) return null;
+      out.push(...(selector.kind === 'index' ? elementAt(node.elements, selector.index) : sliced(node.elements, selector)));
+    }
+    else return null;
+  }
+  return out;
+}
+
+/**
+ * The engine's query for an expression the call's externals alone decide,
+ * and the externals it reads ({@link closedReads}): compiled from the
+ * expression's own text in the analysed document, inside a
+ * `{ $let, $return }` for each `$let` bound outside it that it reads, so
+ * the engine evaluates it as the document does. `null` for an expression
+ * a row, the collection or host code decides, or whose text does not
+ * compile alone. Compiled once per tree.
+ * @param {any} node @param {any} scope
+ * @returns {{ query: any, reads: string[] } | null}
+ */
+function closedQuery(node, scope) {
+  if (scope.closed.has(node)) return scope.closed.get(node);
+  let result = null;
+  const reading = closedReads(node, scope);
+  const text = reading === null ? undefined : closedText(node, reading.outer, scope);
+  if (reading !== null && text !== undefined) {
+    try { result = { query: compileJsonQuery(text, scope.options), reads: reading.reads }; }
+    catch { /* a part that does not compile alone is not evaluated */ }
+  }
+  scope.closed.set(node, result);
+  return result;
+}
+
+/**
+ * What an expression reads where the call's externals alone decide its
+ * value: the externals, in the order it names them, and the slots of the
+ * `$let`s bound outside it that it reads, directly or through another
+ * such `$let`. `null` where it reads the input document (`$`, or `$` in a
+ * filter), a variable a row or an item binds (`$for`, a quantifier, a
+ * group's key, a fold, a window, `$at`, `$count`), or runs host code a
+ * call must not run before its statement (a registered function or
+ * operator, a collation, a schema check).
+ * @param {any} root @param {any} scope
+ * @returns {{ reads: string[], outer: Set<number> } | null}
+ */
+function closedReads(root, scope) {
+  if (scope.reading.has(root)) return scope.reading.get(root);
+  scope.reading.set(root, null);
+  /** @type {any[]} */
+  const nodes = [];
+  /** @type {Set<number>} the slots the expression's own phrases bind */
+  const inner = new Set();
+  const pending = [root];
+  while (pending.length > 0) {
+    const node = pending.pop();
+    if (node === null || typeof node !== 'object') continue;
+    if (Array.isArray(node)) {
+      for (let k = node.length - 1; k >= 0; k--) pending.push(node[k]);
+      continue;
+    }
+    nodes.push(node);
+    // a literal's and a raw argument's value is JSON, a path's segments
+    // are its own grammar: neither holds a node
+    if (node.kind === 'literal' || node.kind === 'raw' || node.kind === 'path' || node.kind === 'var') continue;
+    for (const binding of bindingsOf(node)) inner.add(binding.slot);
+    if (node.kind === 'flwor') {
+      for (const binding of node.forBindings) inner.add(binding.atSlot);
+      if (node.count !== null) inner.add(node.count.slot);
+    }
+    for (const key of Object.keys(node)) if (!HOST_MEMBERS.has(key)) pending.push(node[key]);
+  }
+  /** @type {string[]} */
+  const reads = [];
+  /** @type {Set<number>} */
+  const outer = new Set();
+  for (const node of nodes) {
+    if (node.kind === 'call' || node.entry !== undefined || (node.collation ?? null) !== null
+      || (node.kind === 'raw' && Object.hasOwn(node, 'test')) || (node.kind === 'flwor' && node.asChecks !== null)) return null;
+    if (node.kind !== 'var' && node.kind !== 'path') continue;
+    if (node.kind === 'path' && segmentsReadInput(node.segments)) return null;
+    if (node.external === true) {
+      if (!reads.includes(node.name)) reads.push(node.name);
+      continue;
+    }
+    const slot = node.kind === 'var' ? node.slot : node.rootSlot;
+    if (inner.has(slot)) continue;
+    const binding = scope.bound.get(slot);
+    const through = binding === undefined || !binding.single ? null : closedReads(binding.expr, scope);
+    if (through === null) return null;
+    outer.add(slot);
+    for (const each of through.outer) outer.add(each);
+    for (const name of through.reads) if (!reads.includes(name)) reads.push(name);
+  }
+  const result = { reads, outer };
+  scope.reading.set(root, result);
+  return result;
+}
+
+/**
+ * The text the engine compiles for an expression the call's externals
+ * alone decide ({@link closedReads}): the expression as the analysed
+ * document holds it at its `docPath`, inside a `{ $let, $return }` for
+ * each variable bound outside it that it reads, the earliest bound
+ * outermost. `undefined` where the document holds no such text, or two
+ * of those variables share a name.
+ * @param {any} node @param {Set<number>} outer @param {any} scope @returns {any}
+ */
+function closedText(node, outer, scope) {
+  let text = textAt(scope.document, node.docPath);
+  const names = new Set();
+  for (const slot of [...outer].sort((a, b) => b - a)) {
+    const binding = scope.bound.get(slot);
+    const value = textAt(scope.document, binding.expr.docPath);
+    if (text === undefined || value === undefined || names.has(binding.name)) return undefined;
+    names.add(binding.name);
+    text = { $let: { [binding.name]: value }, $return: text };
+  }
+  return text;
+}
+
+/**
+ * The part of a document a JSON Pointer names, or `undefined` where it
+ * names none.
+ * @param {any} document @param {string} pointer @returns {any}
+ */
+function textAt(document, pointer) {
+  let value = document;
+  for (const token of parseJSONPointer(pointer)) {
+    if (value === null || typeof value !== 'object') return undefined;
+    if (Array.isArray(value)) value = /^(?:0|[1-9][0-9]*)$/.test(token) ? value[Number(token)] : undefined;
+    else value = Object.hasOwn(value, token) ? value[token] : undefined;
+  }
+  return value;
+}
+
+/**
+ * Whether a path's filters read the input document, at any depth
+ * (`$xs[?@.k == $[0].k]`).
+ * @param {readonly any[]} segments @returns {boolean}
+ */
+function segmentsReadInput(segments) {
+  /** @param {readonly any[]} list */
+  const filtersOf = (list) => list.flatMap((segment) => segment.selectors
+    .filter((/** @type {any} */ selector) => selector.kind === 'filter').map((/** @type {any} */ selector) => selector.expr));
+  const pending = filtersOf(segments);
+  while (pending.length > 0) {
+    const node = pending.pop();
+    switch (node.kind) {
+      case 'or': case 'and': pending.push(...node.operands); break;
+      case 'not': pending.push(node.operand); break;
+      case 'logical': pending.push(node.expr); break;
+      case 'ftest': pending.push(node.func); break;
+      case 'cmp': pending.push(node.left, node.right); break;
+      case 'func': pending.push(...node.args); break;
+      case 'exists': case 'query':
+        if (!node.query.relative) return true;
+        pending.push(...filtersOf(node.query.segments));
+        break;
+      default:
+    }
+  }
+  return false;
 }
 
 /**
@@ -950,7 +1269,7 @@ export function profileComparedExternals(profile, roots, operators) {
     const expression = rootEntry(profile.predicates, root);
     if (expression === undefined) continue;
     const wrapper = predicateQuery(expression);
-    found.push(...comparedExternals(analyzeQuery(wrapper, operators).root, root));
+    found.push(...comparedExternals(analyzeQuery(wrapper, operators).root, root, { document: wrapper, options: limitsOf(profile) }));
   }
   return found;
 }
@@ -964,12 +1283,14 @@ export function profileComparedExternals(profile, roots, operators) {
  * A filter selects as the engine does, and what it compares or hands to a
  * function on the way is read too: each such value goes into `read`.
  * `null` for a filter this does not evaluate ({@link filterSelection}).
- * @param {any} value @param {readonly any[]} segments
+ * @param {readonly any[]} values - the external's value, or the items the
+ *   engine evaluated an operand to
+ * @param {readonly any[]} segments
  * @param {any[]} read - collects the values a filter reads on the way
  * @returns {any[] | null}
  */
-function referencedValues(value, segments, read) {
-  let current = [value];
+function referencedValues(values, segments, read) {
+  let current = values;
   for (const segment of segments) {
     if ('through' in segment) {
       current = handedThrough(current, segment);
@@ -1003,7 +1324,7 @@ function referencedValues(value, segments, read) {
           if (filter === null) return null;
           for (const candidate of Array.isArray(item) ? item : Object.values(item)) {
             for (const query of filter.queries) {
-              const reached = referencedValues(candidate, query.segments, read);
+              const reached = referencedValues([candidate], query.segments, read);
               if (reached === null) return null;
               if (query.reads) read.push(...reached);
             }
@@ -1021,9 +1342,11 @@ function referencedValues(value, segments, read) {
  * What an operator that hands items through ({@link HANDED_THROUGH}) keeps
  * of its operand's items: `$head` the first, `$tail` all but the first,
  * `$reverse` all, `$subsequence` those at the positions the engine selects
- * for the literal bounds, `$get` the member or element its literal key
- * names of a single target (an object {@link isOpaque} names standing for
- * it); `null` where the engine refuses the bounds.
+ * for the bounds, `$get` the member or element its key names of a single
+ * target (an object {@link isOpaque} names standing for it), `$entries` a
+ * `{ key, value }` pair for each own member of each object item, as the
+ * engine builds them (an object {@link isOpaque} names standing for its
+ * pairs); `null` where the engine refuses the bounds.
  * @param {any[]} items @param {any} step @returns {any[] | null}
  */
 function handedThrough(items, step) {
@@ -1031,6 +1354,8 @@ function handedThrough(items, step) {
     case '$head': return items.slice(0, 1);
     case '$tail': return items.slice(1);
     case '$reverse': return items;
+    case '$entries': return items.flatMap((item) => (item === null || typeof item !== 'object' || Array.isArray(item) ? []
+      : isOpaque(item) ? [item] : Object.keys(item).map((key) => ({ key, value: item[key] }))));
     case '$subsequence': {
       let positions;
       try { positions = step.positions(null, { last: items.length - 1 }); }
@@ -1038,8 +1363,9 @@ function handedThrough(items, step) {
       return (positions === undefined ? [] : Array.isArray(positions) ? positions : [positions]).map((p) => items[p]);
     }
     default: {
-      // `$get` reads one target: an empty or several-item operand is empty
-      if (items.length !== 1) return [];
+      // `$get` reads one target at one key: an empty or several-item
+      // operand is empty, and so is a computed key of no item or several
+      if (items.length !== 1 || step.key === undefined) return [];
       const [target] = items;
       const key = step.key;
       if (target === null || typeof target !== 'object') return [];
@@ -1217,38 +1543,146 @@ function sliced(array, slice) {
  * `Date` equals or orders against, and matches no row — or a
  * `bigint`, which the engine compares with no number, so `$gt ['$e.n', '$min']`
  * with `min` `2n` matches none either; so is one a filter on the way
- * compares or hands to a function. Run per call, after the compiled entry
- * is found: the externals are the call's own.
- * @param {readonly { name: string, segments: readonly any[], docPath: string, predicate: string | null }[]} compared
+ * compares or hands to a function, and one an operand picks where the
+ * call's externals alone decide it (`{ $if: ['$flag', '$since', '$e.at'] }`
+ * with `flag` true). Run per call, after the compiled entry is found and
+ * before any statement: the externals are the call's own.
+ * @param {readonly ComparedExternal[]} compared
  * @param {any} externals - the call's externals
  * @param {string} spelling - the member, as the reason names it
  */
 export function refuseOpaqueExternals(compared, externals, spelling) {
   if (compared.length === 0 || externals === null || typeof externals !== 'object') return;
   for (const ref of compared) {
-    if (!Object.hasOwn(externals, ref.name)) continue;
-    /** @type {any[]} */
-    const read = [];
-    const values = referencedValues(externals[ref.name], ref.segments, read);
-    // what a filter on the way read is checked beside what is compared
-    for (const value of values === null ? [] : read.length === 0 ? values : [...values, ...read]) {
-      // a list of ids is mostly primitives: no walk for those
-      const found = typeof value === 'bigint' ? { value, at: '' }
-        : value === null || typeof value !== 'object' ? null : opaqueWithin(value, true);
-      if (found === null) continue;
-      // the document's comparison is named by its docPath, which the
-      // error carries; a profile predicate is the store's, not the caller's
-      const where = ref.predicate === null ? 'a comparison'
-        : `the store profile's predicate for '${ref.predicate}'`;
-      // a bigint is no JSON number: the engine compares it with none
-      const bigint = typeof found.value === 'bigint';
-      throw new DbCompileError('JD0041',
-        `${spelling} external '$${ref.name}' holds ${bigint ? 'a bigint' : instanceOf(found.value)}`
-        + `${found.at === '' ? '' : ` at ${found.at}`}, which ${where} reads as `
-        + (bigint ? 'no number — pass the number it stands for, Number(value)' : opaqueReading(found.value)),
-        ref.predicate === null ? ref.docPath : undefined);
+    const found = misread(ref, externals);
+    if (found === null || sameReference(ref, compared, externals)) continue;
+    // the document's comparison is named by its docPath, which the
+    // error carries; a profile predicate is the store's, not the caller's
+    const where = ref.predicate === null ? 'a comparison'
+      : `the store profile's predicate for '${ref.predicate}'`;
+    // a bigint is no JSON number: the engine compares it with none
+    const bigint = typeof found.value === 'bigint';
+    throw new DbCompileError('JD0041',
+      `${spelling} external '$${found.name}' holds ${bigint ? 'a bigint' : instanceOf(found.value)}`
+      + `${found.at === '' ? '' : ` at ${found.at}`}, which ${where} reads as `
+      + (bigint ? 'no number — pass the number it stands for, Number(value)' : opaqueReading(found.value)),
+      ref.predicate === null ? ref.docPath : undefined);
+  }
+}
+
+/**
+ * The first value a compared external reads for this call that a
+ * comparison reads otherwise than it stands for ({@link isOpaque}, or a
+ * `bigint`), with the external that holds it and where it stands in the
+ * value compared — in the external, where the value compared is one the
+ * engine built (an `$entries` pair, a constructor's value); `null` where
+ * the call reads none. A reference the call
+ * does not reach reads none: one whose external the call does not pass,
+ * or whose guard fails, and one whose computed key, bound or evaluated
+ * operand the engine refuses for these externals (the call then answers,
+ * or is refused, as it would be). A reference that only the call's
+ * externals decide is evaluated only where one of them holds such a value.
+ * @param {ComparedExternal} ref @param {any} externals
+ * @returns {{ name: string, value: any, at: string } | null}
+ */
+function misread(ref, externals) {
+  /** @type {any[]} */
+  const read = [];
+  let values;
+  const names = ref.evaluate === undefined ? [/** @type {string} */ (ref.name)] : /** @type {readonly string[]} */ (ref.reads);
+  if (ref.evaluate === undefined && ref.guards.length === 0 && !ref.segments.some(isComputedStep)) {
+    if (!Object.hasOwn(externals, names[0])) return null;
+    values = referencedValues([externals[names[0]]], ref.segments, read);
+  }
+  else {
+    // only an external holding what a comparison misreads is worth the
+    // engine's evaluation
+    if (!names.some((name) => Object.hasOwn(externals, name) && opaqueWithin(externals[name], true) !== null)) return null;
+    try {
+      if (!guardsHold(ref.guards, externals)) return null;
+      values = referencedValues(ref.evaluate === undefined ? [externals[names[0]]] : ref.evaluate.items(null, externals),
+        ref.segments.map((step) => resolvedStep(step, externals)), read);
+    }
+    catch { return null; }
+  }
+  // what a filter on the way read is checked beside what is compared
+  for (const value of values === null ? [] : read.length === 0 ? values : [...values, ...read]) {
+    // a list of ids is mostly primitives: no walk for those
+    const found = typeof value === 'bigint' ? { value, at: '' }
+      : value === null || typeof value !== 'object' ? null : opaqueWithin(value, true);
+    if (found === null) continue;
+    if (!ref.indirect) return { name: names[0], ...found };
+    // a pair or a constructor the engine built is no value an external
+    // holds: the external holding what it found names the refusal, and
+    // where it holds it
+    for (const name of names) {
+      const held = Object.hasOwn(externals, name) ? firstWithin(externals[name], (item) => item === found.value) : null;
+      if (held !== null) {
+        return { name, value: found.value, at: firstWithin(externals[name], (item) => item === value) === null ? held.at : found.at };
+      }
     }
   }
+  return null;
+}
+
+/** Whether a step reads a key or bounds the call's externals compute. @param {any} step @returns {boolean} */
+function isComputedStep(step) {
+  return step.keyQuery !== undefined || step.boundQueries !== undefined;
+}
+
+/**
+ * A step with the key or bounds this call's externals compute, read as
+ * the engine reads them: `$get` takes a key of one item and reads nothing
+ * for any other, `$subsequence` hands the bounds to the engine's own
+ * positions; any other step as it is.
+ * @param {any} step @param {any} externals @returns {any}
+ */
+function resolvedStep(step, externals) {
+  if (step.keyQuery !== undefined) {
+    const key = step.keyQuery.items(null, externals);
+    return { through: '$get', key: key.length === 1 ? key[0] : undefined };
+  }
+  if (step.boundQueries === undefined) return step;
+  const [start, length] = step.boundQueries.map((/** @type {any} */ query) => {
+    const items = query.items(null, externals);
+    return items.length === 1 ? items[0] : items;
+  });
+  return { through: '$subsequence',
+    positions: (/** @type {any} */ data, /** @type {any} */ bound) => step.positions(data, { last: bound.last, start, length }) };
+}
+
+/**
+ * Whether every guard of a compared reference holds for the call's
+ * externals: an `$if` condition's effective boolean value is the branch's,
+ * a `$coalesce` operand before it is empty. Throws what the engine raises.
+ * @param {ComparedExternal['guards']} guards @param {any} externals @returns {boolean}
+ */
+function guardsHold(guards, externals) {
+  return guards.every((guard) => (guard.holds === 'empty' ? !guard.query.exists(null, externals)
+    : guard.query.ebv(null, externals) === guard.holds));
+}
+
+/**
+ * Whether a call compares this reference with the same reference and
+ * nothing else: the one reference on each side of its comparison whose
+ * guards hold, both reading one external by the same steps — which
+ * answers alike whatever the external holds.
+ * @param {ComparedExternal} ref @param {readonly ComparedExternal[]} compared @param {any} externals
+ * @returns {boolean}
+ */
+function sameReference(ref, compared, externals) {
+  if (ref.pair === undefined || ref.evaluate !== undefined) return false;
+  const group = ref.pair.group;
+  const live = compared.filter((other) => other.pair?.group === group && holdsFor(other.guards, externals));
+  return live.length === 2 && live[0].pair?.side !== live[1].pair?.side
+    && live.every((other) => other.evaluate === undefined && other.name === ref.name
+      && JSON.stringify(other.segments) === JSON.stringify(ref.segments));
+}
+
+/** {@link guardsHold}, a guard the engine refuses failing. @param {ComparedExternal['guards']} guards @param {any} externals */
+function holdsFor(guards, externals) {
+  try { return guardsHold(guards, externals); }
+  catch { return false; }
 }
 
 /**
@@ -1282,7 +1716,28 @@ export function liveComparedExternals(document, operators, profile, roots) {
   let root;
   try { root = analyzeQuery(document, operators ?? undefined).root; }
   catch { return []; }
-  return [...comparedExternals(root), ...profileComparedExternals(profile, roots, operators ?? undefined)];
+  return [...comparedExternals(root, null, { document, options: limitsOf(profile) }),
+    ...profileComparedExternals(profile, roots, operators ?? undefined)];
+}
+
+/**
+ * The document a store's plan analysed, for the parts of it a call's
+ * externals alone decide ({@link closedQuery}): a document of one array
+ * element is planned as that element (`wrapped`), and a profile's limits
+ * bound what is evaluated.
+ * @param {any} document @param {{ wrapped?: boolean }} planned @param {any} profile
+ */
+function analysedSource(document, planned, profile) {
+  return { document: planned.wrapped === true ? document[0] : document, options: limitsOf(profile) };
+}
+
+/**
+ * The compile options that bound what a profile's engine evaluates, as a
+ * residual's are bounded; `undefined` without a profile.
+ * @param {any} profile @returns {{ limits: any } | undefined}
+ */
+function limitsOf(profile) {
+  return profile?.limits === undefined ? undefined : { limits: profile.limits };
 }
 
 /**
@@ -1586,7 +2041,7 @@ export function createQueryEngine(context) {
     const externalNames = planned.analysis.externals.map((e) => e.name);
     // what each call's externals must hold as JSON: checked per call, as
     // the externals are the call's own
-    const compared = [...comparedExternals(planned.analysis.root),
+    const compared = [...comparedExternals(planned.analysis.root, null, analysedSource(document, planned, profile)),
       ...profileComparedExternals(profile, [collection.name], operators ?? undefined)];
     const limits = profile === null ? undefined : profile.limits;
     const entry = {
@@ -2935,7 +3390,7 @@ export function createEntityQueryEngine(context) {
       predicateOnly: new Set(predicated.flatMap((name) => predicateNamesOf(profile, name))
         .filter((name) => !planned.analysis.externals.some((/** @type {any} */ ref) => ref.name === name))),
       // what each call's externals must hold as JSON, checked per call
-      compared: [...comparedExternals(planned.analysis.root),
+      compared: [...comparedExternals(planned.analysis.root, null, analysedSource(document, planned, profile)),
         ...profileComparedExternals(profile, predicated, analyzeOpts)],
       rowBound: profile === null ? null : profile.maxRows,
       byteBound: profile === null ? null : profile.maxBytes,

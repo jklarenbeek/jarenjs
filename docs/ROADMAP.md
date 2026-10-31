@@ -663,24 +663,46 @@ what each does is its own documentation's job
   join table with a third column from an entity (it reads exactly two
   foreign-key columns as one); and the migration strategy that adds or drops a
   column on a join table (none exists).
-- [ ] **A non-JSON external reached through a conditional, a computed operand
-  or a nested phrase is read as `{}`.** An external the engine compares or
-  equates, reached through name, index, wildcard, slice, filter and descendant
-  segments, through `$let`, `$for` (its window too), quantifier, grouping and
-  `$fold` variables, or handed through by `$head`, `$tail`, `$reverse`,
-  `$subsequence` with literal bounds, `$get` with a literal key, `$seq` or an
-  array or object constructor compared whole, that holds a `Date`, a `Map` or
-  another object with no own member, or a `bigint`, is refused `JD0041`
-  ([MODEL-FORMAT §10.1](../packages/db/docs/MODEL-FORMAT.md)), and so is one a
-  filter compares or hands to a path function on the way. One reached through
-  `$if`, `$coalesce` or `$default`, through `$subsequence` or `$get` with a
-  computed bound or key, through `$entries`, a nested phrase's return or a
-  path into a constructor, or through a filter that reads the input document
-  (`$xs[?@.k == $[0].k]`), is still compared as `{}` and matches no row. Which
-  operand those hand through depends on a row or on the collection, so a
-  refusal by what the external holds would refuse calls that answer right.
-  Wanted: follow them where the operand they pick is decided by the externals
-  alone.
+- [ ] **A non-JSON external a row or an iteration variable picks is read as `{}`.**
+  An external the engine compares or equates — reached through name, index,
+  wildcard, slice, filter and descendant segments, through `$let` (in a
+  `{ $let, $return }` phrase too), `$for` (its window too), quantifier,
+  grouping and `$fold` variables, handed through by `$head`, `$tail`,
+  `$reverse`, `$seq`, `$entries` or a constructor compared whole, or picked
+  where the call's externals alone decide the pick (the branch an `$if`
+  condition takes, the first operand of `$coalesce` or `$default` that is not
+  empty, the target of `$subsequence` or `$get` at the bounds or key they
+  compute, a member a path names in a constructor, a nested phrase's return)
+  — that holds a `Date`, a `Map` or another object with no own member, or a
+  `bigint`, is refused `JD0041` before any statement runs
+  ([MODEL-FORMAT §10.1](../packages/db/docs/MODEL-FORMAT.md)). One whose pick
+  a row, the collection or an iteration variable decides — an `$if` whose
+  condition, a `$coalesce` or `$default` operand after one that, or a
+  `$subsequence` or `$get` whose bounds or key reads a row, the input
+  document or a `$for`, quantifier, grouping, window or `$fold` variable, or
+  calls a registered function; a nested phrase that does so and filters,
+  groups, counts, windows or folds; an array constructor's element by index
+  or slice where the constructor reads a row and an element of it is not
+  exactly one item; a filter that reads the input document
+  (`$xs[?@.k == $[0].k]`) — is still compared as `{}` and matches no row
+  where a row or an item picks it. Which operand those hand through is
+  decided per row or per item, so a refusal by what the external holds would
+  refuse calls whose rows never pick it, which answer right. Wanted: the
+  comparison itself reporting a non-JSON item it reads, row by row; and a
+  pick an iteration variable over the externals decides, followed item by
+  item.
+- [ ] **`JD0041` follows a position in a `$seq` operand by operand.** A
+  positional operator over a `$seq` (`$head`, `$tail`, `$subsequence`, `$get`)
+  is applied to each operand's items as if each stood alone: a comparison
+  with `{ $head: { $seq: ['$e.at', '$a'] } }` reads each row's own `at`,
+  never `$a`, yet a `Date` under `$a` is refused `JD0041` though the call
+  answers as its ISO string does; and `{ $tail: { $seq: ['$e.tenant', '$a'] } }`,
+  which reads `$a` for every row, matches no row with a `Date` (its ISO
+  string answers "b") and is not refused
+  ([MODEL-FORMAT §10.1](../packages/db/docs/MODEL-FORMAT.md)). Wanted: follow
+  a position in a concatenation by the item counts before it — decided per
+  call where each earlier operand is exactly one item or the externals
+  decide it.
 - [ ] **A handle refuses a chain over one database a second store names
   differently.** A handle takes a chain over another store's view when both
   read one database (one SQLite file by its canonical path, one shared-cache

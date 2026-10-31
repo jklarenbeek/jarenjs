@@ -5,21 +5,27 @@
  * nor `null` and which has no own enumerable member (a `Date`, a `Map`), at
  * the external's root or inside it, named by a direct operand of `$eq $ne
  * $lt $le $gt $ge` — `$since`, `$xs[*]`, `$o.d` — or by the store profile's
- * predicate. `$gt ['$e.at', '$since']` with `since` a `Date` matched no row,
- * with and without pushdown, where its ISO string answers. Every other use
- * answers as before: a `Date` returned or handed to a host function is the
- * caller's own value, one the document never compares is not read, and
- * plain and null-prototype objects, class instances read by their fields,
- * arrays and primitives compare as JSON. A store run is SQLite always,
- * PostgreSQL where JAREN_PG_URL names a server.
+ * predicate, or handed to one by the operand an expression picks where the
+ * call's externals alone decide which (`$if` on an external flag, the first
+ * `$coalesce` operand that is not empty, a computed `$get` key, a nested
+ * phrase's return), before any statement runs. `$gt ['$e.at', '$since']`
+ * with `since` a `Date` matched no row, with and without pushdown, where its
+ * ISO string answers. Every other use answers as before: a `Date` returned
+ * or handed to a host function is the caller's own value, one the document
+ * never compares or the externals pick past is not read, one only a row
+ * could pick is left to the row, and plain and null-prototype objects,
+ * class instances read by their fields, arrays and primitives compare as
+ * JSON. A store run is SQLite always, PostgreSQL where JAREN_PG_URL names a
+ * server.
  */
 
 import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
 
-import { sql } from '@jarenjs/db';
+import { openStore, sql } from '@jarenjs/db';
 import { createLiveSubscription } from '@jarenjs/db/app';
 import { ENGINES, skipFor, withStore } from './store-core-engines.js';
+import { statementCountingDriver } from './helpers.js';
 
 const MODEL = {
   $model: '0.1',
@@ -44,8 +50,9 @@ const ROWS = [['a', '2026-01-01T00:00:00Z', 't1'], ['b', '2026-06-01T00:00:00Z',
 const SINCE = new Date('2026-03-01T00:00:00Z');
 const ISO = SINCE.toISOString();
 
-/** A collection document comparing each row with what `value` names. @param {any} where */
-const evs = (where) => ({ $for: { e: '$[*]' }, $where: where, $return: '$e.id' });
+/** A collection document comparing each row with what `value` names, after the clauses `extra` adds.
+ * @param {any} where @param {any} [extra] */
+const evs = (where, extra = {}) => ({ $for: { e: '$[*]' }, ...extra, $where: where, $return: '$e.id' });
 /** The same over the entity root. @param {any} where */
 const rowsOf = (where) => ({ $for: { e: '$.Event[*]' }, $where: where, $return: '$e.id' });
 const AFTER = { $gt: ['$e.at', '$since'] };
@@ -302,6 +309,135 @@ for (const engine of ENGINES) {
       });
     });
 
+    it('one an operand picks where the call\'s externals alone decide which', async () => {
+      await seeded(engine, async (store) => {
+        const ev = store.collection('ev');
+        const member = "collection('ev').execute";
+        const W = '/$where/$gt/1';
+        /** @type {[any, any, any, string, string, string?, string?][]} each document, externals of which `name` holds a
+         * non-JSON value the externals pick, their JSON form, the external, where it is compared, and where it holds it */
+        const cases = [
+          // a condition the externals decide: a flag, a $let bound to one, a computed one, a literal beside a row
+          [evs({ $gt: ['$e.at', { $if: ['$f', '$a', '$b'] }] }), { f: true, a: SINCE, b: ISO }, { f: true, a: ISO, b: ISO }, 'a', W],
+          [evs({ $gt: ['$e.at', { $if: ['$f', '$b', '$a'] }] }), { f: false, a: SINCE, b: ISO }, { f: false, a: ISO, b: ISO }, 'a', W],
+          [evs({ $gt: ['$e.at', { $if: ['$g', '$a', '$b'] }] }, { $let: { g: '$f' } }), { f: true, a: SINCE, b: ISO }, { f: true, a: ISO, b: ISO }, 'a', W],
+          [evs({ $gt: ['$e.at', { $if: [{ $eq: ['$mode', 'from'] }, '$a', '$b'] }] }), { mode: 'from', a: SINCE, b: ISO }, { mode: 'from', a: ISO, b: ISO }, 'a', W],
+          [evs({ $gt: ['$e.at', { $if: [true, '$a', '$e.tenant'] }] }), { a: SINCE }, { a: ISO }, 'a', W],
+          // the first operand that is not empty
+          [evs({ $gt: ['$e.at', { $coalesce: ['$o.x', '$a'] }] }), { o: {}, a: SINCE }, { o: {}, a: ISO }, 'a', W],
+          [evs({ $gt: ['$e.at', { $coalesce: ['$a', '$e.tenant'] }] }), { a: SINCE }, { a: ISO }, 'a', W],
+          [evs({ $gt: ['$e.at', { $coalesce: ['$xs[*]', '$a'] }] }), { xs: [], a: SINCE }, { xs: [], a: ISO }, 'a', W],
+          [evs({ $gt: ['$e.at', { $default: ['$o.x', '$a'] }] }), { o: {}, a: SINCE }, { o: {}, a: ISO }, 'a', W],
+          // a computed key or bounds
+          [evs({ $gt: ['$e.at', { $get: ['$o', '$k'] }] }), { o: { at: SINCE }, k: 'at' }, { o: { at: ISO }, k: 'at' }, 'o', W],
+          [evs({ $gt: ['$e.at', { $get: ['$xs', '$i'] }] }), { xs: [ISO, SINCE], i: 1 }, { xs: [ISO, ISO], i: 1 }, 'xs', W],
+          [evs({ $gt: ['$e.at', { $subsequence: ['$xs[*]', '$i', '$n'] }] }), { xs: [ISO, SINCE], i: 1, n: 1 }, { xs: [ISO, ISO], i: 1, n: 1 }, 'xs', W],
+          // member pairs, read by member or compared whole
+          [evs({ $gt: ['$e.at', '$p.value'] }, { $let: { p: { $entries: '$o' } } }), { o: { at: SINCE } }, { o: { at: ISO } }, 'o', W],
+          [evs({ $eq: [{ key: 'at', value: ISO }, { $entries: '$o' }] }), { o: { at: SINCE } }, { o: { at: ISO } }, 'o', '/$where/$eq/1', '/at'],
+          // a nested phrase's return: a $let, a $for that drops nothing, one the engine filters
+          [evs({ $gt: ['$e.at', { $let: { s: '$a' }, $return: '$s' }] }), { a: SINCE }, { a: ISO }, 'a', W],
+          [evs({ $gt: ['$e.at', { $let: { s: '$a' }, $return: { $seq: ['$s', '$e.tenant'] } }] }), { a: SINCE }, { a: ISO }, 'a', W],
+          [evs({ $gt: ['$e.at', { $for: { x: '$xs[*]' }, $return: '$x' }] }), { xs: [SINCE] }, { xs: [ISO] }, 'xs', W],
+          [evs({ $gt: ['$e.at', { $for: { x: '$xs[*]' }, $where: { $not: { '$is-number': '$x' } }, $return: '$x' }] }),
+            { xs: [SINCE, 3] }, { xs: [ISO, 3] }, 'xs', W],
+          // a path into a constructor: a named member beside a row's, an element of one-item elements, every element
+          [evs({ $gt: ['$e.at', '$c.at'] }, { $let: { c: { at: '$a', id: '$e.id' } } }), { a: SINCE }, { a: ISO }, 'a', W],
+          [evs({ $gt: ['$e.at', '$c[1]'] }, { $let: { c: ['$b', '$a'] } }), { a: SINCE, b: ISO }, { a: ISO, b: ISO }, 'a', W],
+          [evs({ $gt: ['$e.at', '$c[*]'] }, { $let: { c: ['$e.id', '$a'] } }), { a: SINCE }, { a: ISO }, 'a', W],
+          // a { $let, $return } phrase around the comparison
+          [{ $let: { s: '$a' }, $return: evs({ $gt: ['$e.at', '$s'] }) }, { a: SINCE }, { a: ISO }, 'a', '/$return/$where/$gt/1'],
+          [evs({ $eq: [{ x: 1 }, { $coalesce: ['$o.q', '$m'] }] }), { o: {}, m: new Map([['x', 1]]) }, { o: {}, m: { x: 1 } }, 'm', '/$where/$eq/1', '', 'Map'],
+        ];
+        for (const [document, dated, json, name, docPath, at = '', kind = 'Date'] of cases) {
+          const label = JSON.stringify(document);
+          for (const pushdown of [true, false]) {
+            const expected = await ev.execute(document, { externals: json, pushdown: false });
+            assert.notStrictEqual(expected, undefined, label);
+            assert.deepStrictEqual(await ev.execute(document, { externals: json, pushdown }), expected, label);
+            const { error } = await refusal(() => ev.execute(document, { externals: dated, pushdown }));
+            assert.strictEqual(error.message, compared(member, name, docPath, at, kind), label);
+            assert.strictEqual(error.docPath, docPath, label);
+          }
+        }
+        // a call refused before keeps its reason: what a reference reaches is checked first
+        const both = { $let: { s: '$a' }, $return: evs({ $and: [{ $gt: ['$e.at', '$s'] }, { $gt: ['$e.at', '$b'] }] }) };
+        assert.strictEqual((await refusal(() => ev.execute(both, { externals: { a: SINCE, b: SINCE } }))).error.message,
+          compared(member, 'b', '/$return/$where/$and/1/$gt/1'));
+        // a bigint the externals pick reads as no number, as one compared directly does
+        assert.strictEqual((await refusal(() => ev.execute(evs({ $gt: ['$e.at', { $if: ['$f', '$m', ISO] }] }), { externals: { f: true, m: 2n } }))).error.message,
+          `JD0041: ${member} external '$m' holds a bigint, which a comparison reads as no number — pass the number it stands for, Number(value) at ${W}`);
+        // the entity engine and a live registration read the same way
+        const pick = rowsOf({ $gt: ['$e.at', { $if: ['$f', '$a', '$b'] }] });
+        assert.strictEqual(await store.entity('Event').execute(pick, { externals: { f: true, a: ISO, b: ISO } }), 2);
+        assert.strictEqual((await refusal(() => store.entity('Event').execute(pick, { externals: { f: true, a: SINCE, b: ISO } }))).error.message,
+          compared('entity execute()', 'a', W));
+        if (engine === 'sqlite') {
+          const live = await refusal(() => ev.live(evs({ $gt: ['$e.at', { $coalesce: ['$o.x', '$a'] }] }), { externals: { o: {}, a: SINCE } }));
+          assert.strictEqual(live.error.message, compared("collection('ev').live", 'a', W));
+          assert.strictEqual(store.stats().liveQueries, 0);
+        }
+      });
+    });
+
+    it('what the externals pick instead, and what only a row could pick, answers as the JSON value it stands for', async () => {
+      await seeded(engine, async (store) => {
+        const ev = store.collection('ev');
+        /** @type {[any, any, any][]} each document, externals holding a Date the call never compares, and the answer */
+        const cases = [
+          // the externals pick another operand
+          [evs({ $gt: ['$e.at', { $if: ['$f', '$a', '$b'] }] }), { f: false, a: SINCE, b: ISO }, 'b'],
+          [evs({ $gt: ['$e.at', { $coalesce: ['$o.x', '$a'] }] }), { o: { x: ISO }, a: SINCE }, 'b'],
+          [evs({ $gt: ['$e.at', { $coalesce: ['$xs[*]', '$a'] }] }), { xs: [ISO], a: SINCE }, 'b'],
+          [evs({ $gt: ['$e.at', { $get: ['$o', '$k'] }] }), { o: { at: ISO, other: SINCE }, k: 'at' }, 'b'],
+          [evs({ $gt: ['$e.at', { $get: ['$xs', '$i'] }] }), { xs: [ISO, SINCE], i: 0 }, 'b'],
+          [evs({ $gt: ['$e.at', { $subsequence: ['$xs[*]', '$i', '$n'] }] }), { xs: [ISO, SINCE], i: 0, n: 1 }, 'b'],
+          [evs({ $gt: ['$e.at', { $for: { x: '$xs[*]' }, $where: { '$is-string': '$x' }, $return: '$x' }] }), { xs: [ISO, SINCE] }, 'b'],
+          [evs({ $gt: ['$e.at', '$c[0]'] }, { $let: { c: ['$b', '$a'] } }), { a: SINCE, b: ISO }, 'b'],
+          // a key of no item reads nothing, whatever the target holds
+          [evs({ $gt: ['$e.at', { $get: ['$m', '$o.k'] }] }), { m: new Map([['at', ISO]]), o: {} }, undefined],
+          // only a row could pick it, and none does: a refusal by what it holds would refuse each right answer
+          [evs({ $gt: ['$e.at', { $if: [{ $eq: ['$e.id', 'zz'] }, '$a', '$b'] }] }), { a: SINCE, b: ISO }, 'b'],
+          [evs({ $gt: ['$e.tenant', { $coalesce: ['$e.at', '$a'] }] }), { a: SINCE }, ['a', 'b']],
+          [evs({ $gt: ['$e.at', { $get: ['$o', '$e.tenant'] }] }), { o: { t1: ISO, t2: ISO, t3: SINCE } }, 'b'],
+          [evs({ $gt: ['$e.at', { $for: { x: '$xs[*]' }, $where: { $eq: ['$x.k', '$e.tenant'] }, $return: '$x.at' }] }),
+            { xs: [{ k: 't2', at: ISO }, { k: 't3', at: SINCE }] }, 'b'],
+          [evs({ $gt: ['$e.at', '$c[1]'] }, { $let: { c: ['$e.missing', '$a'] } }), { a: SINCE }, undefined],
+          // the collection decides: its count, a filter that reads it
+          [evs({ $gt: ['$e.at', { $if: [{ $eq: [{ $count: '$[*]' }, 2] }, '$b', '$a'] }] }), { a: SINCE, b: ISO }, 'b'],
+          [evs({ $gt: ['$e.at', { $if: [{ $exists: '$xs[?@.k == $[0].tenant]' }, '$b', '$a'] }] }), { xs: [{ k: 't1' }], a: SINCE, b: ISO }, 'b'],
+          // an iteration variable decides, item by item
+          [{ $for: { e: '$[*]', w: '$ws[*]' }, $where: { $gt: ['$e.at', { $if: [{ $eq: [{ $count: '$w.items[*]' }, 2] }, '$a', '$b'] }] }, $return: '$e.id' },
+            { ws: [{ items: [1] }, { items: [2] }], a: SINCE, b: ISO }, ['b', 'b']],
+        ];
+        /** The JSON value a Date stands for, wherever it stands. @param {any} value @returns {any} */
+        const json = (value) => (value === SINCE ? ISO : Array.isArray(value) ? value.map(json)
+          : value !== null && typeof value === 'object' ? Object.fromEntries(Object.entries(value).map(([key, item]) => [key, json(item)])) : value);
+        for (const [document, externals, answer] of cases) {
+          const label = JSON.stringify(document);
+          for (const pushdown of [true, false]) {
+            assert.deepStrictEqual(await ev.execute(document, { externals, pushdown }), answer, label);
+            assert.deepStrictEqual(await ev.execute(document, { externals: json(externals), pushdown }), answer, label);
+          }
+        }
+        // a condition the engine refuses for these externals is not followed: the call is refused as the engine refuses it
+        const many = evs({ $gt: ['$e.at', { $if: ['$xs[*]', '$a', '$b'] }] });
+        for (const externals of [{ xs: [1, 2], a: SINCE, b: ISO }, { xs: [1, 2], a: ISO, b: ISO }]) {
+          assert.strictEqual((await refusal(() => ev.execute(many, { externals }))).error.code, 'JQ2003');
+        }
+      });
+    });
+
+    it('a reference compared with itself under the condition that picks it answers alike', async () => {
+      await seeded(engine, async (store) => {
+        const ev = store.collection('ev');
+        const document = evs({ $eq: ['$a', { $if: ['$f', '$a', '$b'] }] });
+        assert.deepStrictEqual(await ev.execute(document, { externals: { f: true, a: SINCE, b: ISO } }), ['a', 'b']);
+        assert.strictEqual((await refusal(() => ev.execute(document, { externals: { f: false, a: SINCE, b: ISO } }))).error.message,
+          compared("collection('ev').execute", 'a', '/$where/$eq/0'));
+      });
+    });
+
     it('a filter that reads the input document is not followed, and answers as the engine', async () => {
       await seeded(engine, async (store) => {
         const document = evs({ $gt: ['$e.at', '$xs[?@.k == $[0].k].at'] });
@@ -322,6 +458,25 @@ for (const engine of ENGINES) {
     });
   });
 }
+
+describe('an external the externals pick is refused before any statement runs', () => {
+  it('reads no row on the refused call, and the JSON value it stands for does', async () => {
+    const counters = { iterate: 0, next: 0, return: 0, all: 0 };
+    const store = await openStore(MODEL, { driver: statementCountingDriver(counters) });
+    try {
+      for (const [id, at, tenant] of ROWS) await store.collection('ev').insert({ id, at, tenant });
+      const document = evs({ $gt: ['$e.at', { $coalesce: ['$o.x', '$a'] }] });
+      for (const pushdown of [true, false]) {
+        Object.assign(counters, { iterate: 0, next: 0, return: 0, all: 0 });
+        assert.strictEqual((await refusal(() => store.collection('ev').execute(document, { externals: { o: {}, a: SINCE }, pushdown }))).error.code, 'JD0041');
+        assert.deepStrictEqual(counters, { iterate: 0, next: 0, return: 0, all: 0 });
+        assert.strictEqual(await store.collection('ev').execute(document, { externals: { o: {}, a: ISO }, pushdown }), 'b');
+        assert.ok(counters.all + counters.iterate > 0);
+      }
+    }
+    finally { await store.close(); }
+  });
+});
 
 describe('a relational statement binds an external as a SQL value or refuses it', () => {
   it('a Date parameter is refused, its ISO string bound', async () => {

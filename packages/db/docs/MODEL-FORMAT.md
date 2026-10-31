@@ -3336,14 +3336,21 @@ An external is a call's own value, so the same members check it per
 call, against the compiled document: an external the engine compares or
 equates — a direct operand of `$eq`, `$ne`, `$lt`, `$le`, `$gt`, `$ge`,
 `$distinct` or `$index-of`, or a grouping key (`$since`, `$ids[*]`,
-`$window.from`), or one a variable is bound to first (`$let`, `$for` and
-its window, a quantifier, a grouping key, a `$fold` accumulator's initial
-value) and compared through it (`$s` after `$let: { s: '$since' }`), or
-one an operator hands through to the comparison as it is (`$head`,
-`$tail`, `$reverse`, `$subsequence` with literal bounds, `$get` with a
-literal key, each operand of `$seq`, each member of an array or object
-constructor compared whole), in the document or in the store profile's
-predicate over a root it reads, followed through the path it reaches
+`$window.from`), or one a variable is bound to first (`$let`, in a
+`{ $let, $return }` phrase too, `$for` and its window, a quantifier, a
+grouping key, a `$fold` accumulator's initial value) and compared through
+it (`$s` after `$let: { s: '$since' }`), or one an operator hands through
+to the comparison as it is (`$head`, `$tail`, `$reverse`, `$subsequence`
+with literal bounds, `$get` with a literal key, each operand of `$seq`,
+each member of an array or object constructor compared whole, the member
+pairs of `$entries`), or one an expression picks where the call's
+externals alone decide which (the branch an `$if` condition takes, the
+first operand of `$coalesce` or `$default` that is not empty, the target
+of `$subsequence` or `$get` at the bounds or key the externals compute, a
+member a path names in a constructor — an object's by its name, an
+array's by its index where each element is one item — and a nested
+phrase's return), in the document or in the store profile's predicate
+over a root it reads, followed through the path it reaches
 (name, index, wildcard, slice, filter and descendant segments; a filter
 selects as the engine does, and a value it compares or hands to a path
 function on the way, `length(@.at)`, is read too) — that holds such
@@ -3376,13 +3383,36 @@ one the document never compares is not read; a plain or null-prototype
 object, a class instance read by its fields, an array and a primitive
 compare as JSON; a value a filter or an operator leaves behind (`$tail`
 dropping it, `$get` of another member) and one a filter only tests the
-existence of, or counts, is not read. One reached through a filter that
-reads the input document (`$xs[?@.k == $[0].k]`), through `$if`,
-`$coalesce` or `$default`, through `$subsequence` or `$get` with a computed
-bound or key, through `$entries`, a nested phrase's return or a path into
-a constructor, or one an operator computes a value from (a function's
-result), is not followed and is compared as the engine reads it (a `Date`
-by its instant, so equal to no stored text; a `Map` as `{}`). A `bigint` such a position reads is `JD0041` the same way
+existence of, or counts, is not read, nor is one the externals pick past
+(the branch an `$if` condition does not take, a `$coalesce` operand after
+the one it stops at). Each condition, key and bound the externals decide,
+and an operand they decide as a whole (a nested phrase filtering an
+external list, `{ $for: { x: '$xs[*]' }, $where: …, $return: '$x' }`), is
+evaluated by the engine over the call's externals before any statement
+runs; one it refuses for them is not followed, and the call answers or is
+refused as it would be. One whose pick a row, the collection or an
+iteration variable decides — an `$if` whose condition, a `$coalesce` or
+`$default` operand after one that, or a `$subsequence` or `$get` whose
+bounds or key reads a row, the input document or a `$for`, quantifier,
+grouping, window or `$fold` variable, or calls a registered function
+(`{ $if: ['$e.flag', '$since', '$e.at'] }`), a nested phrase that does
+so and filters, groups, counts, windows or folds, an array constructor's
+element by index or slice where the constructor reads a row and an
+element of it is not exactly one item, a filter that reads the input
+document (`$xs[?@.k == $[0].k]`) — and one an operator computes a value
+from (a function's result), is not followed and is compared as the engine
+reads it (a `Date` by its instant, so equal to no stored text; a `Map` as
+`{}`): which operand such an expression hands through is decided per row
+or per item, not per call, so a refusal by what the external holds would
+refuse calls whose rows or items never pick it, which answer right.
+*Upgrade: an external the externals alone pick — through `$if`,
+`$coalesce`, `$default`, `$subsequence` or `$get` at computed bounds or
+key, `$entries`, a nested phrase's return, a path into a constructor, or a
+`{ $let, $return }` phrase — was compared as the engine reads it and
+matched no row; it is now refused `JD0041` with the repair a direct
+operand gets. A reference compared with itself under the condition that
+picks it (`$eq ['$a', { $if: ['$f', '$a', '$b'] }]` with `f` true) was
+refused and now answers, as a reference compared with itself does.* A `bigint` such a position reads is `JD0041` the same way
 (`… external '$min' holds a bigint, which a comparison reads as no number —
 pass the number it stands for, Number(value) at /$where/$gt/1`): the engine
 compares it with no number, so `$gt ['$e.n', '$min']` with `min: 2n` matched

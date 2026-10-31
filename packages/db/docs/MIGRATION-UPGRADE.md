@@ -3601,6 +3601,23 @@ other row"), and a model without that rule at open (`JD0002`, the rule's
 trigger undeclared). Drop such a rule through a planned migration
 (`planModelMigration`) before the previous release opens the store.
 
+## 63. An external the call's externals pick through a condition, a computed key or a nested phrase
+
+- An external a comparison reads through an operand the call's externals alone pick — the
+  branch an `$if` condition takes (`{ $gt: ['$e.at', { $if: ['$useSince', '$since', '$from'] }] }`),
+  the first operand of `$coalesce` or `$default` that is not empty, the target of `$subsequence`
+  or `$get` at bounds or a key the externals compute, the member pairs of `$entries`, a member a
+  path names in a constructor, a nested phrase's return, or a variable a `{ $let, $return }`
+  phrase binds — that holds a `Date` or another object read as `{}`, or a `bigint`, was compared
+  as the engine reads it and matched no row; it is now refused `JD0041` before any statement
+  runs, as a direct operand is. Pass the JSON value it stands for, a `Date` as its
+  `toISOString()`. One the externals pick past (the branch a condition does not take), and one
+  whose pick a row, the collection or an iteration variable decides, answers as before
+  ([MODEL-FORMAT §10.1](MODEL-FORMAT.md#101-entity-query-documents)).
+- A reference compared with itself under the condition that picks it
+  (`$eq: ['$a', { $if: ['$f', '$a', '$b'] }]` with `f` true) was refused `JD0041`, and now
+  answers, as a reference compared with itself does.
+
 ## Measured costs
 
 Exact identity stores complete canonical documents and model endpoints, so

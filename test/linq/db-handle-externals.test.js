@@ -5,9 +5,10 @@
  * (`JL0004`); one given under the call's `externals` reaches the store,
  * which refuses it where a comparison reads it as `{}` (`JD0041`) on every
  * member a handle runs a chain through — `execute`, `query`, `explain` and
- * `live` — where it matched no row. Its ISO string answers, and a `Date`
- * the chain never compares is not read. A store run is SQLite always,
- * PostgreSQL where JAREN_PG_URL names a server.
+ * `live` — where it matched no row, and so is a document the handle hands
+ * on whole where its condition picks the `Date`. Its ISO string answers,
+ * and a `Date` the chain never compares is not read. A store run is SQLite
+ * always, PostgreSQL where JAREN_PG_URL names a server.
  */
 
 import { after, before, describe, it } from 'node:test';
@@ -105,6 +106,16 @@ for (const host of [{ name: 'sqlite', postgres: false }, ...(url ? [{ name: 'pos
       }
       // a binding is checked by params() itself, before the store
       assert.strictEqual((await refusal(() => visits.execute(later(SINCE)))).code, 'JL0004');
+    });
+
+    it('a document the handle hands on is refused where its condition picks the Date, as the store refuses it', async () => {
+      const visits = client.collections.visits;
+      const document = { $for: { v: '$[*]' }, $where: { $gt: ['$v.seen', { $if: ['$useSince', '$since', '$v.seen'] }] }, $return: '$v.id' };
+      assert.strictEqual(await visits.execute(document, { externals: { useSince: true, since: SINCE.toISOString() } }), 'b');
+      assert.strictEqual((await refusal(() => visits.execute(document, { externals: { useSince: true, since: SINCE } }))).message,
+        refused("collection('visits').execute"));
+      // the condition leaves it behind: never compared, so never read
+      assert.strictEqual(await visits.execute(document, { externals: { useSince: false, since: SINCE } }), undefined);
     });
 
     it('its ISO string answers, and a Date the chain never compares is not read', async () => {
