@@ -206,9 +206,59 @@ function readIntrospectOptions(options) {
  */
 export function readSchema(connection, options = undefined) {
   readIntrospectOptions(options);
+  const wanted = options?.tables === undefined ? null : new Set(options.tables);
+  return chain(readNamespace(connection, wanted), ({ names, views, objects, inspected }) => {
+    const step = (i, out) => (i >= names.length
+      ? { tables: out, views, objects }
+      : chain(readTable(connection, names[i], objects), (table) => step(i + 1, [...out, table])));
+    return chain(step(0, []), (schema) => chain(readNativeCatalog(connection, inspected),
+      (catalog) => (catalog === undefined ? schema : { ...schema, catalog })));
+  });
+}
+
+/**
+ * The catalog an open verifies its physical entities against, read once for
+ * all of them: the namespace's tables, views and objects, and its native
+ * catalog where the dialect reads one, as {@link readSchema} reads them for
+ * the whole database, with a table's own columns, indexes and foreign keys
+ * read when an entity first asks for that table. Each answer has
+ * `readSchema`'s shape and holds the one table asked for (none where the
+ * namespace has no such table): an open of N entities over T tables reads
+ * the namespace once and N tables, not the whole database N times.
+ * @param {any} connection
+ * @returns {(table: string) => any} value-or-promise of `{ tables, views, objects, catalog? }`
+ */
+export function namespaceSchema(connection) {
+  /** @type {any} */
+  let namespace;
+  /** @type {Map<string, any>} */
+  const read = new Map();
+  return (table) => {
+    namespace ??= chain(readNamespace(connection, null), (lists) => chain(readNativeCatalog(connection, lists.inspected),
+      (catalog) => (namespace = { ...lists, known: new Set(lists.names), catalog })));
+    return chain(namespace, (/** @type {any} */ lists) => {
+      if (!read.has(table)) read.set(table, lists.known.has(table) ? readTable(connection, table, lists.objects) : null);
+      return chain(read.get(table), (/** @type {any} */ entry) => {
+        read.set(table, entry);
+        return { tables: entry === null ? [] : [entry], views: lists.views, objects: lists.objects,
+          ...(lists.catalog === undefined ? {} : { catalog: lists.catalog }) };
+      });
+    });
+  };
+}
+
+/**
+ * One read of the namespace's lists: its tables and views (never the
+ * engine's), and every object, a table without a row of its own standing
+ * for itself, within `wanted` (every table where `null`); `inspected`
+ * admits a catalog row of those tables.
+ * @param {any} connection
+ * @param {Set<string> | null} wanted
+ * @returns {any} value-or-promise of `{ names: string[], views: string[], objects: any[], inspected: (row: any) => boolean }`
+ */
+function readNamespace(connection, wanted) {
   const dialect = connection.dialect;
   const engine = ENGINE_TABLES;
-  const wanted = options?.tables === undefined ? null : new Set(options.tables);
   return chain(useStatementOnce(connection, dialect.introspect.tables(), (statement) => statement.all([])), (rows) => {
     const views = [];
     const names = [];
@@ -234,18 +284,27 @@ export function readSchema(connection, options = undefined) {
       const objects = complete.filter(inspected)
         .map((row) => ({ type: String(row.type), name: String(row.name),
           owner: String(row.owner), sql: row.sql ?? null }));
-      const step = (i, out) => (i >= names.length
-        ? { tables: out, views, objects }
-        : chain(readTable(connection, names[i], objects), (table) => step(i + 1, [...out, table])));
-      return chain(step(0, []), (schema) => dialect.introspect.catalog === undefined ? schema
-        : useStatementOnce(connection, dialect.introspect.catalog(), (statement) =>
-          chain(statement.all([]), (native) => ({ ...schema, catalog: native
-            .filter(inspected)
-            .map((row) => ({ type: String(row.type), name: String(row.name), owner: String(row.owner),
-              schema: String(row.schema), sql: row.sql ?? null,
-              metadata: typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata })) }))));
+      return { names, views, objects, inspected };
     });
   });
+}
+
+/**
+ * The dialect's own catalog rows of the inspected tables, where it reads
+ * one; `undefined` where it does not.
+ * @param {any} connection
+ * @param {(row: any) => boolean} inspected
+ * @returns {any} value-or-promise
+ */
+function readNativeCatalog(connection, inspected) {
+  const dialect = connection.dialect;
+  return dialect.introspect.catalog === undefined ? undefined
+    : useStatementOnce(connection, dialect.introspect.catalog(), (statement) =>
+      chain(statement.all([]), (native) => native
+        .filter(inspected)
+        .map((row) => ({ type: String(row.type), name: String(row.name), owner: String(row.owner),
+          schema: String(row.schema), sql: row.sql ?? null,
+          metadata: typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata }))));
 }
 
 /**

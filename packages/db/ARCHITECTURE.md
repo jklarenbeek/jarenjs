@@ -1790,11 +1790,17 @@ consumed by `src/store.js` and never reached by a query:
   errnos, the PostgreSQL client's uncoded sentences — `JD2087`, class
   `connection`, retryable only while no transaction outcome is at stake.
 
-The open path itself creates or verifies the shape inside an IMMEDIATE
-transaction with idempotent DDL (one dialect spelling, applied on the
-open path only) and retries once on a classed busy failure, so two
-processes creating one fresh file never meet the deferred-upgrade
-`SQLITE_BUSY` the busy handler cannot retry. The job queue's
+The open path itself verifies the shape of tables that exist under a read
+transaction (`verifyOrCreate` in `store.js`): one consistent view, no write
+lock. An open that must create a table stops at the first one missing and
+runs the work again inside an IMMEDIATE transaction, verifying every table
+there and creating with idempotent DDL (one dialect spelling, applied on the
+open path only), as does one whose read found a difference to refuse, so a
+refusal is judged under the writer. The bracket retries once on a classed
+busy failure, so two processes creating one fresh file never meet the
+deferred-upgrade `SQLITE_BUSY` the busy handler cannot retry. PostgreSQL's
+immediate bracket is a plain `BEGIN`, which takes no lock, so there the work
+runs inside it as it always did. The job queue's
 administration (`page`, `cancel`, `requeue`, `sweep`) lives in
 `src/jobs.js` beside the fence it authorises through (JOBS-FORMAT §10).
 
@@ -1934,7 +1940,12 @@ does not declare. An open's two brackets of shape work (its collections, its
 entities) each read every table's programs out of one catalog read of the
 namespace (`namespacePrograms`), taken when the first table asks; a table that
 read did not see, or whose programs there depart from the plan, reads its own
-before it is refused.
+before it is refused. The entities' bracket verifies every physical layout
+against one read of the catalog (`namespaceSchema` in `introspect.js`): the
+namespace's tables, objects and native catalog rows once, as an unscoped
+`readSchema` reads them, and each mapped table's columns, indexes and foreign
+keys once, when the first entity that maps it asks; a layout that departs
+from the plan by that read is read again on its own before it is refused.
 
 An index condition (MODEL-FORMAT §2, §9.2) is that lowering's index rendering,
 every operand read as an absent member and every condition written in one

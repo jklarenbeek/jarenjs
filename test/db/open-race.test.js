@@ -281,7 +281,8 @@ describe('the mechanism', () => {
     const { dbPath, cleanup } = tempDbPath();
     let holder;
     try {
-      const seed = await openStore(MODEL, { driver: nodeDriver(), path: dbPath });
+      // the file exists without the model's table, so the open must take the writer to create it
+      const seed = await openStore({ $model: '0.1', collections: { seeded: MODEL.collections.notes } }, { driver: nodeDriver(), path: dbPath });
       await seed.close();
       holder = new DatabaseSync(dbPath);
       holder.exec('BEGIN EXCLUSIVE');
@@ -295,6 +296,25 @@ describe('the mechanism', () => {
       holder = null;
       const recovered = await openStore(MODEL, { driver: nodeDriver(), path: dbPath });
       await recovered.close();
+    }
+    finally {
+      holder?.close();
+      cleanup();
+    }
+  });
+
+  it('an open whose every table exists verifies under a read and opens while another connection holds the writer', async () => {
+    const { dbPath, cleanup } = tempDbPath();
+    let holder;
+    try {
+      const seed = await openStore(MODEL, { driver: nodeDriver(), path: dbPath });
+      await seed.close();
+      holder = new DatabaseSync(dbPath);
+      holder.exec('BEGIN EXCLUSIVE');
+      const { driver, executed } = recordingDriver(nodeDriver());
+      const store = await openStore(MODEL, { driver, path: dbPath, busyTimeout: 40 });
+      await store.close();
+      assert.deepStrictEqual(executed.filter((sql) => /^(BEGIN|COMMIT|ROLLBACK)/.test(sql)), ['BEGIN', 'COMMIT']);
     }
     finally {
       holder?.close();

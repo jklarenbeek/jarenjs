@@ -592,12 +592,26 @@ what each does is its own documentation's job
   collation and stored spelling (§13.4), where PostgreSQL and the store compare
   by codec; comparing by code point would change the text of every installed
   update program, so it waits for a reviewed migration of installed programs.
-- [ ] **A PostgreSQL open's per-table catalog reads.** Opening verifies each
-  table the store owns with catalog reads of its own — existence, columns,
-  indexes and their columns, foreign keys, checks — and reads the whole schema
-  once per physical entity; the rule programs and rewrite rules already come
-  from one read of the namespace. One read per namespace for each would bound
-  an open of many tables.
+- [ ] **An open's per-table catalog reads.** Opening verifies each table the
+  store owns, and each table a physical entity maps, with catalog reads of its
+  own — existence, columns, indexes and their columns, foreign keys, checks —
+  so its statements grow with its tables, each a round trip on PostgreSQL and
+  on the worker, pool and process hosts; the namespace's table list, objects
+  and catalog rows, and on PostgreSQL its rule programs and rewrite rules,
+  already come from one read per open. One read of the namespace for each
+  per-table read would bound an open of many tables.
+- [ ] **The job tables' and the change log's first-open bracket.** An open
+  with `jobs: true` or `capture` creates or verifies its job tables and its
+  change log under `BEGIN IMMEDIATE` on every open, so another connection's
+  write waits for those statements even when every table exists, where the
+  model's own tables are verified holding no write lock. Verifying them first
+  under the read, and taking the bracket only to create or upgrade one, would
+  leave the writer free for the whole open.
+- [ ] **A migration's target validation reads the whole schema once per
+  physical entity.** `validateTargetState` verifies each physical entity of the
+  target model against a read of the whole database, so its catalog statements
+  grow with entities × tables, as an open's did; the open's one read of the
+  namespace would bound it.
 - [ ] **Broader native authoring for legacy SQL.** The executable census now
   proves five adopted-column read families and three SQLite mutation families
   ([native contracts](../packages/db/docs/NATIVE-PLANS.md)). Receipt history

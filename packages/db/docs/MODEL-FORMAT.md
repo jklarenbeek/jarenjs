@@ -1003,6 +1003,23 @@ native statement, which retains its own busy timeout. Exhaustion closes the
 acquired connection and rejects `JD0002` with the original busy cause. This
 startup policy does not replay ordinary application writes.
 
+Opening verifies the tables that already exist without the write lock. On
+SQLite the verification runs under a read transaction, one consistent view
+of the catalog, so another connection can take the writer, or open the same
+store, while it runs (in rollback-journal mode a writer's commit waits for
+that read to end, as for any reader). Only an open that must create a table, or that found a
+table departing from its model, then takes the immediate bracket
+(`BEGIN IMMEDIATE`) and verifies every table again inside it: a refusal
+judges the catalog under the writer, after a migration in flight commits. On
+SQLite a store that creates nothing (read-only, or `adopt: true`) verifies
+under the read transaction alone. The job tables (`jobs`) and the change log
+(`capture`) are still created or verified in short immediate brackets of
+their own. PostgreSQL's bracket takes no lock (a plain `BEGIN`), and its shape
+work runs there as it did. On both engines the open reads the catalog once
+for all the physical layouts it maps — the namespace's tables, objects and
+catalog rows once, and each mapped table's columns, indexes and foreign keys
+once — so its statements grow with the entities, not with entities × tables.
+
 **Maintenance is a typed operation, never raw SQL.** Four store members
 run what an operator runs on a production database, each under the
 store gate (so none interleaves an in-flight write) and each answering
@@ -4653,7 +4670,9 @@ persistence ladder are specified in [execution hosts](HOSTS.md).
 
 An entity's optional `physical` member declares an existing column-only layout.
 Omitting it retains the hybrid mapping. Opening a physical entity MUST verify
-its existing table or view and MUST NOT create it. `adopt: true` also prevents
+its existing table or view and MUST NOT create it; the open verifies every
+physical entity against one read of the catalog and holds no write lock
+while it does ([§4](#4-the-driver-contract-and-the-synchronous-fast-path)). `adopt: true` also prevents
 creation of hybrid tables and infrastructure. Inspection, adoption and explicit
 migration are separate operations.
 

@@ -672,7 +672,8 @@ if (asyncLiveLeak.length)
 // Raised to 1,117,100 (measured 1117079): the store's refusal of a non-JSON external the call's externals alone pick through a conditional, a computed operand, $entries, a nested phrase or a constructor path, decided by the engine before any statement (query 6384) add 6384.
 // Raised to 1,118,300 (measured 1118262): the validator's exact multipleOf on the decimals both spell, a reference chain's end read at its own place, and a target below a keyword no draft defines read under the nearest $schema on the way (validate index 569, number 522, traverse 55, tools 23, schema-keywords 14) add 1183.
 // Raised to 1,119,900 (measured 1119876): a window over a declared root closed as a FLWOR with a one-item projection folded inside it (document 1036), the async cursor's FLWOR over an untouched root (async 185) and the captured expression's coded refusal of a member read off a method read (expression 393) add 1614.
-if (clientBytes > 1119900)
+// Raised to 1,121,000 (measured 1120990): an open's one catalog read for every physical layout, verified under a read and written under the bracket only to create or before a refusal (store 581, introspect 533) add 1114.
+if (clientBytes > 1121000)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 

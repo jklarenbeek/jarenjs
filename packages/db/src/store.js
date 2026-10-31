@@ -30,7 +30,7 @@ import { equalsJson, isJsonObject } from '@jarenjs/core/object';
 import { utf8ByteLength } from '@jarenjs/core/string';
 
 import { DbCompileError, DbRuntimeError, wrapDriverError, isDriverError, classifyDriverError } from './errors.js';
-import { chain, toPromise, isThenable, attempt, abortReason, createStatementOwner, useStatementOnce } from './driver.js';
+import { chain, toPromise, isThenable, attempt, abortReason, createStatementOwner, useStatementOnce, releaseStatement } from './driver.js';
 import { createSessionRouter } from './sessions.js';
 import { isPlainOptions, refuseUnknownMembers, refuseUnknownModelMembers, readOptions, readControls } from './options.js';
 import { canonicalKeyText, namesNoNumber, noNumberKeyReason, numericKeyValue } from './key-text.js';
@@ -60,7 +60,7 @@ import { classifyEntityLive } from './live-join.js';
 import { normalizeEventTime } from './live-time.js';
 import { createJobEngine, JOB_DEFAULTS, checkStopOptions } from './jobs.js';
 import { createOwnerLease, OWNER_LEASE_DEFAULT_MS, OWNER_LEASE_MIN_MS } from './owner.js';
-import { introspectModel, readSchema } from './introspect.js';
+import { introspectModel, namespaceSchema } from './introspect.js';
 import { collectEntityRoots, entityRoot, intervalBounds } from './plan.js';
 import {
   DERIVE_KINDS, PHYSICAL_KINDS, PRECISION_MIN, PRECISION_MAX, DIMS_MIN, DIMS_MAX,
@@ -673,7 +673,7 @@ function recordKeyConstraint(plan, row) {
  * constraint of its own, and the server names that one when a key is found
  * twice: the names of every partition below the table follow its own, as
  * they stood at the open.
- * @param {any} schema - `readSchema`'s answer
+ * @param {any} schema - the open's read of the catalog ({@link namespaceSchema})
  * @param {string} table
  * @returns {string | string[] | undefined}
  */
@@ -698,9 +698,9 @@ function physicalKeyConstraint(schema, table) {
 
 /**
  * Run `fn` inside an IMMEDIATE transaction on an otherwise idle
- * connection — the open path's shape work. A deferred transaction (a
- * bare savepoint) takes its write lock only when the first write
- * arrives, and a concurrent commit between the probe and the CREATE
+ * connection — the open path's shape work where it creates. A deferred
+ * transaction (a bare savepoint) takes its write lock only when the first
+ * write arrives, and a concurrent commit between the probe and the CREATE
  * turns that upgrade into the one SQLITE_BUSY the busy handler cannot
  * retry; taking the write lock first makes the wait an ordinary busy
  * wait the timeout covers. Exactly the bracket the migration runner
@@ -713,15 +713,30 @@ function physicalKeyConstraint(schema, table) {
  */
 function immediately(connection, fn, retry = true) {
   const dialect = connection.dialect;
-  const commit = (value) => chain(connection.exec(dialect.tx.commit), () => value);
-  const rollback = (error) => chain(connection.exec(dialect.tx.rollback), () => {
+  return bracketed(connection, dialect.tx.beginImmediate, fn, (error) => {
     // The winner's CREATE has committed before a catalog collision returns.
     // Re-read and verify that shape in a fresh transaction, once per bracket;
     // collection and entity creation can race independently during one open.
     if (retry && dialect.isCreateRace?.(error) === true) return immediately(connection, fn, false);
     throw error;
   });
-  return chain(connection.exec(dialect.tx.beginImmediate), () => {
+}
+
+/**
+ * Run `fn` inside the transaction `begin` opens on an otherwise idle
+ * connection: what it returns is committed, and what it throws is rolled
+ * back and handed to `failed`, which answers in its place or throws.
+ * @param {any} connection
+ * @param {string} begin
+ * @param {() => any} fn - value-or-promise
+ * @param {(error: any) => any} failed - value-or-promise
+ * @returns {any} value-or-promise
+ */
+function bracketed(connection, begin, fn, failed) {
+  const dialect = connection.dialect;
+  const commit = (value) => chain(connection.exec(dialect.tx.commit), () => value);
+  const rollback = (error) => chain(connection.exec(dialect.tx.rollback), () => failed(error));
+  return chain(connection.exec(begin), () => {
     let out;
     try {
       out = fn();
@@ -730,6 +745,48 @@ function immediately(connection, fn, retry = true) {
       return rollback(error);
     }
     return isThenable(out) ? out.then(commit, rollback) : commit(out);
+  });
+}
+
+/** What an open's shape work run outside the write lock raises at the first table it must create. */
+const MUST_CREATE = new Error('the open must create a table');
+
+/**
+ * Run an open's shape work, `verify(creates)`, holding no write lock where
+ * the store creates nothing or every table it needs already exists: under
+ * a read transaction, one consistent view of the catalog, a store that
+ * creates nothing refuses a missing table (`JD0002`) and any other store
+ * stops there (`MUST_CREATE`). Only then does the work run again, inside the
+ * immediate bracket, verifying every table once more and creating what is
+ * missing — and so does one that found a difference, so a refusal judges
+ * the catalog under the write lock, after any writer before it committed (a
+ * migration in flight). Where the immediate bracket takes no lock
+ * (PostgreSQL's is a plain `BEGIN`, and its catalog checks read again before
+ * they refuse) the work runs as it always has there: inside the bracket
+ * where the store creates, outside any transaction where it creates nothing.
+ * The work runs on the connection it is handed: the read's releases what it
+ * prepared when the read stops short, since the bracket prepares its own and
+ * a binding that keeps every preparation (a worker host, up to its
+ * `maxStatements`) would hold both.
+ * @param {any} connection
+ * @param {string | null} createsNothing - what the store is when it may
+ *   create no table, for the refusal; `null` when it creates what is missing
+ * @param {(creates: boolean, connection: any) => any} verify - value-or-promise
+ * @returns {any} value-or-promise
+ */
+function verifyOrCreate(connection, createsNothing, verify) {
+  const dialect = connection.dialect;
+  const create = () => immediately(connection, () => verify(true, connection));
+  if (dialect.tx.beginImmediate === dialect.tx.begin) return createsNothing === null ? create() : verify(false, connection);
+  const prepared = /** @type {any[]} */ ([]);
+  const reading = { ...connection, prepare: (/** @type {any[]} */ ...args) => chain(connection.prepare(...args), (statement) => {
+    prepared.push(statement);
+    return statement;
+  }) };
+  return bracketed(connection, dialect.tx.begin, () => verify(false, reading), (error) => {
+    for (const statement of prepared) releaseStatement(statement);
+    if (createsNothing !== null || (error !== MUST_CREATE && !(error instanceof DbCompileError))) throw error;
+    return create();
   });
 }
 
@@ -770,8 +827,9 @@ function runCreate(connection, plan) {
 }
 
 /**
- * Create or verify every collection's physical shape, inside one
- * immediate transaction.
+ * Create or verify every collection's physical shape: verified holding no
+ * write lock, created inside one immediate transaction
+ * ({@link verifyOrCreate}).
  * @param {any} connection
  * @param {Map<string, any>} collections
  * @param {Map<string, any>} plans
@@ -784,10 +842,7 @@ function ensureShape(connection, collections, plans, createsNothing) {
   const dialect = connection.dialect;
   const names = [...collections.keys()];
   if (names.length === 0) return null;
-  // a store that creates nothing (read-only, or adopted) verifies without
-  // taking a write lock
-  const bracket = createsNothing !== null ? (fn) => fn() : (fn) => immediately(connection, fn);
-  return bracket(() => {
+  return verifyOrCreate(connection, createsNothing, (creates, connection) => {
     // one read of the namespace's rule programs serves every table verified here
     const programs = namespacePrograms(connection);
     const step = (i) => {
@@ -803,6 +858,7 @@ function ensureShape(connection, collections, plans, createsNothing) {
                 `collection '${name}': the table does not exist and ${createsNothing} creates nothing`,
                 collection.docPath);
             }
+            if (!creates) throw MUST_CREATE;
             // the server numbers a key name another relation holds, so the
             // name is read back from the table just created
             return chain(runCreate(connection, plan), () => chain(statement.get([name]), (created) => {
@@ -837,7 +893,6 @@ function ensureEntityShape(connection, entityPlans, entities, createsNothing) {
   // forward references, so a child declared before its parent would not open
   const names = creationOrder([...entityPlans.keys()],
     (name) => (entityPlans.get(name).expectedForeignKeys ?? []).map((/** @type {any} */ fk) => fk.references));
-  const bracket = createsNothing !== null ? (fn) => fn() : (fn) => immediately(connection, fn);
   /** The tables this open created: a cycle's foreign keys are added once they all exist. */
   const created = [];
   const addDeferred = () => {
@@ -845,19 +900,39 @@ function ensureEntityShape(connection, entityPlans, entities, createsNothing) {
     const run = (/** @type {number} */ k) => (k >= statements.length ? null : chain(connection.exec(statements[k]), () => run(k + 1)));
     return run(0);
   };
-  return bracket(() => {
-    // one read of the namespace's rule programs serves every table verified here
+  return verifyOrCreate(connection, createsNothing, (creates, connection) => {
+    // one read of the namespace's rule programs serves every table verified here,
+    // and one read of its catalog every physical entity
     const programs = namespacePrograms(connection);
+    const catalog = namespaceSchema(connection);
+    /** A physical layout verified against the shared read, and one that departs from the plan
+     * there against a read of its own before it is refused, so a refusal judges the catalog as
+     * it stands (a rival may have committed the table, or a migration of it, since).
+     * @param {any} mapping @returns {any} value-or-promise of the read that verified it */
+    const verifiedPhysical = (mapping) => {
+      const against = (/** @type {any} */ schema) => chain(verifyPhysical(connection, mapping, schema, programs), () => schema);
+      const again = (/** @type {any} */ error) => {
+        if (!(error instanceof DbCompileError)) throw error;
+        return chain(namespaceSchema(connection)(mapping.table), against);
+      };
+      let out;
+      try {
+        out = chain(catalog(mapping.table), against);
+      }
+      catch (error) {
+        return again(error);
+      }
+      return isThenable(out) ? out.then(undefined, again) : out;
+    };
     const step = (i) => {
       if (i >= names.length) return addDeferred();
       const name = names[i];
       const plan = entityPlans.get(name);
       const docPath = entities.get(name)?.docPath ?? `/entities/${name}`;
-      if (plan.physical) return chain(readSchema(connection), (schema) =>
-        chain(verifyPhysical(connection, plan.physical, schema, programs), () => {
-          plan.keyConstraint = physicalKeyConstraint(schema, plan.physical.table);
-          return step(i + 1);
-        }));
+      if (plan.physical) return chain(verifiedPhysical(plan.physical), (schema) => {
+        plan.keyConstraint = physicalKeyConstraint(schema, plan.physical.table);
+        return step(i + 1);
+      });
       return chain(connection.prepare(dialect.introspect.tableExists()), (statement) =>
         chain(statement.get([name]), (row) => {
           if (row === undefined) {
@@ -866,6 +941,7 @@ function ensureEntityShape(connection, entityPlans, entities, createsNothing) {
                 `entity '${name}': the table does not exist and ${createsNothing} creates nothing`,
                 docPath);
             }
+            if (!creates) throw MUST_CREATE;
             // the text encoding its rule programs compare by is checked when the store opens
             return chain(runCreate(connection, plan), () => chain(statement.get([name]), (made) => {
               created.push(name);
@@ -3272,11 +3348,11 @@ export function openStore(model, options) {
               .filter((table) => captureShapes.get(table).kind === 'entity'))
             : null;
           // every first-open object — the change log and its state row
-          // here, the job tables below — is created or verified under
-          // the same immediate bracket as the collections' shape, so two
-          // processes opening one fresh file cannot race the seed row or
-          // a column upgrade; a read-only store creates nothing and takes
-          // no lock
+          // here, the job tables below — is created or verified under an
+          // immediate bracket of its own, the bracket a table of the
+          // model is created in, so two processes opening one fresh file
+          // cannot race the seed row or a column upgrade; a read-only
+          // store creates nothing and takes no lock
           const firstOpen = readOnly ? (fn) => fn() : (fn) => immediately(connection, fn);
           let replicationEngine = null;
           // the engine is built only once the shapes are aligned: it

@@ -3618,6 +3618,29 @@ trigger undeclared). Drop such a rule through a planned migration
   (`$eq: ['$a', { $if: ['$f', '$a', '$b'] }]` with `f` true) was refused `JD0041`, and now
   answers, as a reference compared with itself does.
 
+## 64. An open verifies existing tables without the write lock, and reads the catalog once
+
+- A SQLite store whose tables all exist was verified inside `BEGIN IMMEDIATE`,
+  so the open held the writer for the whole verification though it wrote
+  nothing: another connection's write waited for it, and a second process
+  opening the same file was refused `JD0002` (busy) once its `busyTimeout`
+  ran out. The open now verifies under a read transaction and takes the
+  writer only to create a table, or to judge again, before refusing it, a
+  table that departs from the model. Such an open no longer takes the writer,
+  and under WAL, the store's default journal mode, it no longer waits for
+  another connection's or refuses busy; in rollback-journal mode its read
+  still waits while a writer commits. A store opened with `jobs: true` or `capture`
+  still takes the writer briefly for its job tables or change log
+  ([MODEL-FORMAT §4](MODEL-FORMAT.md#4-the-driver-contract-and-the-synchronous-fast-path)).
+- An open read the whole database's catalog once for each physical entity it
+  maps, so its statements grew with entities × tables, on SQLite and on
+  PostgreSQL; it now reads the namespace's catalog once and each mapped
+  table's own catalog rows once. Every refusal is the one it was, with the
+  same code and message.
+
+**Downgrade.** Nothing a store writes changed: the previous release opens,
+reads, queries and plans every store this one opens, as before.
+
 ## Measured costs
 
 Exact identity stores complete canonical documents and model endpoints, so
