@@ -903,22 +903,41 @@ what each does is its own documentation's job
   second, and `page(id, null)` throws an uncoded `TypeError`, where the run
   store's other calls refuse a malformed option by name. Wanted: the bag
   closed, as `finish`'s is.
-- [ ] **A database rule's probe on PostgreSQL holds no lock on the row it
-  found.** A database rule's `$exists-row` reads the target under read
-  committed without a row lock, so another transaction may delete or change
-  the one row a probe found — by the key, a unique index or another index —
-  and commit while the probing write is open, whether that write ran before
-  the probe read the row or after; both commit, and the probing row stands
-  without the row its rule required. SQLite's writer lock admits no such
-  interleaving, and a store rule's probe locks the row it finds
-  (MODEL-FORMAT §13.2). Wanted: the trigger's probe locks it as the store's
-  does — `FOR KEY SHARE` when every matched member is a key column (the key,
-  or a column of a unique index over plain column terms without a
-  condition), `FOR SHARE` otherwise, since an update that changes only
-  another column takes `FOR NO KEY UPDATE`, which `FOR KEY SHARE` admits;
-  that changes the text of every installed PostgreSQL program that probes,
-  so it needs a reviewed migration of installed programs (MODEL-FORMAT
-  §13.4).
+- [ ] **A locking probe's refusal under row-level security reads as the
+  rule's.** On PostgreSQL a probe that locks the row it finds reads it
+  through the table's UPDATE policy as well as its SELECT policy, so for a
+  writer whose UPDATE policy is narrower a row it may read but not lock is
+  missed, and the write is refused in the rule's name (`JD2096`, `jaren
+  invariant:<rule>`) though the row exists (MODEL-FORMAT §13.3). Wanted:
+  where a locked read finds nothing and an unlocked one finds the row, a
+  distinct coded refusal that names the policy (the writer may read the row
+  but not lock it) instead of the rule's message.
+- [ ] **A physical layout's SQLite program is compared exactly.** The open
+  compares a physical layout's rule trigger by its exact CREATE text where
+  a store-owned one compares it formatting aside, so a formatting-only edit
+  opens a store-owned table and refuses a physical one (`JD0002`).
+- [ ] **PostgreSQL acceptance reads no program an ordinary link leaves.** A
+  link that names no rule program (an index, say) applies over a program no
+  release planned, and the next open refuses the table (`JD0002`), where
+  SQLite refuses the link (`JD0023`); `migrationStatus(…, { model })`
+  reports `drift: null` over it. Wanted: acceptance and status read every
+  store-owned table's programs as the open does.
+- [ ] **`planColumnUpgrade`'s default id repeats.** Its default
+  `upgrade-<model hash>` names a later release's column upgrade of the same
+  model alike, which the history refuses (`JD0013`) unless the host passes
+  `id`. Wanted: suffix it past the history's ids, as `planProgramUpgrade`
+  does.
+- [ ] **A drifted store-owned program has no planned route.** "apply an
+  explicit migration" in a store-owned table's refusal has no planner that
+  plans one for a program no release planned (`planProgramUpgrade` refuses
+  it, by design: it would overwrite a hand edit). Wanted: a reviewed
+  `repair` that reinstalls planned programs over a named drift.
+- [ ] **A changed rule's PostgreSQL program is dropped and created.**
+  `planModelMigration` replaces a rule program whose function source alone
+  changed by `DROP TRIGGER`, `DROP FUNCTION`, `CREATE FUNCTION`,
+  `CREATE TRIGGER`, whose ACCESS EXCLUSIVE lock waits for every open reader
+  and writer of the table. Wanted: `CREATE OR REPLACE FUNCTION` when the
+  trigger stays, as `planProgramUpgrade` plans.
 - [ ] **A ruled update reads its row `FOR UPDATE`, which a probe's
   `FOR KEY SHARE` holds up.** The store's update of a row a store rule
   judges reads it `FOR UPDATE` (MODEL-FORMAT §13.3), so it waits for every

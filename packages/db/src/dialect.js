@@ -293,7 +293,7 @@ export const MEMBER_WHEN = Symbol('dialect.memberWhen');
  *   migration?: any,
  *   physicalNamespaceRequired?: boolean,
  *   qualifyPhysicalColumn?: (column: any, actual: any, kind: string, database?: any, catalogColumn?: any) => void,
- *   invariantTriggers?: (mapping: any, all: any, dialect: any) => any[],
+ *   invariantTriggers?: (mapping: any, all: any, dialect: any, spelling?: number) => any[],
  *   readChecks?: (rows: any[]) => { name: string, sql?: string, validated?: boolean, conforming?: boolean,
  *     column?: string, values?: any[], notNaN?: boolean }[],
  *   introspect: { version: () => string, compileOptions: () => string,

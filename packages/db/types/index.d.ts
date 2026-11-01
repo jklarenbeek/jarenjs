@@ -873,6 +873,17 @@ export interface SyncStore {
   saveChanges?(): SaveReport;
 }
 
+/** A database rule's program a store holds as an earlier release planned
+ * it (`Store.earlierPrograms`). */
+export interface EarlierProgram {
+  /** The table it is installed on. */
+  readonly table: string;
+  /** The program's name: its trigger's, and on PostgreSQL its function's. */
+  readonly program: string;
+  /** The spelling that release planned, `0` the oldest. */
+  readonly spelling: number;
+}
+
 export interface Store {
   readonly replication?: Replication;
   /** Native statements over any table (MODEL-FORMAT §5.3): the relational
@@ -898,6 +909,11 @@ export interface Store {
   /** The relation tables of every entity, keyed by entity name (present
    * with entities; MODEL-FORMAT §10.1). */
   readonly relations?: Readonly<Record<string, RelationTable>>;
+  /** The database rules' programs the open found as an earlier release
+   * planned them (MODEL-FORMAT §13.4): each keeps judging writes as that
+   * release's did until a reviewed link replaces it (`planProgramUpgrade`).
+   * Empty when every program is this release's; taken once, at open. */
+  readonly earlierPrograms: readonly EarlierProgram[];
   /** The unit of work (§11); present only with entities. */
   saveChanges?(): Promise<SaveReport>;
   /**
@@ -1955,6 +1971,38 @@ export interface ColumnUpgradePlan {
  * A value on a synchronous connection, a promise on an asynchronous one. */
 export declare function planColumnUpgrade(connection: unknown, model: unknown,
   options?: ColumnUpgradeOptions): ColumnUpgradePlan | Promise<ColumnUpgradePlan>;
+/** The options of `planProgramUpgrade` (a closed set: `JD0013` names another). */
+export interface ProgramUpgradeOptions {
+  /** The link's name in the history; `programs-<spelling>-<hash>` by default,
+   * suffixed `-2`, `-3`, … past the ids the history holds. */
+  id?: string;
+  /** The host's declared index-expression functions. */
+  expressions?: Record<string, unknown>;
+  /** The reviewed target of a link that replaces a physical layout's
+   * program; computed (SQLite) or read in a rolled-back transaction
+   * (PostgreSQL) when omitted. */
+  physicalTarget?: unknown;
+  /** The spelling to install, this release's by default; an earlier one
+   * plans a link back, after which the release that planned it opens the
+   * store. */
+  spelling?: number;
+}
+export interface ProgramUpgradePlan {
+  /** A link from the model to itself; no step when the programs are this
+   * release's. A physical layout's carries its preservation plan. */
+  migration: ExactMigrationDocument;
+  /** `<table>.<program>`: each program the link replaces, and each one the
+   * model plans on a table that holds none of it — a planned migration
+   * installs those (MIGRATION-FORMAT §9), not this link. */
+  report: { upgraded: string[]; absent: string[] };
+}
+/** Plan the reviewed link that replaces the database rules' programs a
+ * database holds as an earlier release planned them, read from the catalog
+ * (MIGRATION-FORMAT §3); a program holding a text no release planned refuses
+ * the plan (`JD0002`, naming each).
+ * A value on a synchronous connection, a promise on an asynchronous one. */
+export declare function planProgramUpgrade(connection: unknown, model: unknown,
+  options?: ProgramUpgradeOptions): ProgramUpgradePlan | Promise<ProgramUpgradePlan>;
 export interface MigrationStatusReport {
   applied: string[];
   pending: string[];

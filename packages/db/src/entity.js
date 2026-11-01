@@ -576,9 +576,10 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
   /**
    * A store rule's `$exists-row`: the probe SQL the database's trigger runs,
    * its values bound, read inside the write's own transaction, which holds
-   * the row it finds where writers do not serialize — `FOR KEY SHARE` when
-   * the probe compares key columns only, else `FOR SHARE` (§13.2). A key
-   * member with no value, or one its column cannot hold, matches no row.
+   * the row a strictly positive probe finds where writers do not serialize —
+   * `FOR KEY SHARE` when the probe compares key columns only, else
+   * `FOR SHARE` (§13.2); any other probe reads unlocked. A key member with no
+   * value, or one its column cannot hold, matches no row.
    * @param {any} spec a resolved probe @param {any} record `{ old, new, op }`
    */
   const probe = (spec, record) => {
@@ -593,7 +594,7 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
       if (encoded === null && spec.keys.includes(column.name)) none = true;
       params.push(encoded);
       return dialect.parameterRef(params.length, 'v');
-    }, spec.keyShare ? dialect.rowKeyShareLockSuffix : dialect.rowShareLockSuffix);
+    }, !spec.positive ? '' : spec.keyShare ? dialect.rowKeyShareLockSuffix : dialect.rowShareLockSuffix);
     if (none) return false;
     return attempt(() => chain(prepared(`probe:${sql}`, `SELECT ${sql} AS ${q('hit')}`), (statement) =>
       chain(statement.get(params), (row) => row?.hit === true || Number(row?.hit) === 1)),

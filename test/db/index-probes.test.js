@@ -128,7 +128,9 @@ const existsOf = (sql, shape) => {
 
 describe('a probe keyed by an index that is not unique', () => {
   it('plans on both dialects, its indexed members compared with = and the others null-safely, under either enforcement', () => {
-    for (const sql of plannedEverywhere(ownedModel([BY_OWNER]))) assert.match(sql, /WHERE "_jaren_row"\."owner" = NEW\."owner"\)/);
+    // on PostgreSQL the probe locks the row it finds, FOR SHARE through a column no unique index holds
+    const locks = ['', ' FOR SHARE'];
+    plannedEverywhere(ownedModel([BY_OWNER])).forEach((sql, i) => assert.ok(sql.includes(`WHERE "_jaren_row"."owner" = NEW."owner"${locks[i]})`), sql));
     for (const sql of plannedEverywhere(ownedModel([BY_OWNER], { owner: '$.new.owner', status: 'open' }))) {
       assert.match(sql, /"_jaren_row"\."owner" = NEW\."owner" AND NOT \(/);
       assert.doesNotMatch(sql, /"_jaren_row"\."status" = /);
@@ -136,10 +138,10 @@ describe('a probe keyed by an index that is not unique', () => {
     assert.doesNotThrow(() => normalizeEntities(ownedModel([BY_OWNER], undefined, 'store')));
     // a layout the store owns: an indexed member and a foreign key's column
     const [sqlite, postgres] = plannedEverywhere(shopModel('database'));
-    for (const sql of [sqlite, postgres]) {
-      assert.match(sql, /FROM ("tenant"\.)?"Customer" AS "_jaren_row" WHERE "_jaren_row"\."segment" = NEW\."segment"\)/);
-      assert.match(sql, /FROM ("tenant"\.)?"Doc" AS "_jaren_row" WHERE "_jaren_row"\."customer" = NEW\."customer"\)/);
-      assert.match(sql, /FROM ("tenant"\.)?"Customer" AS "_jaren_row" WHERE "_jaren_row"\."id" = NEW\."customer"\)/);
+    for (const [sql, table, share, keyShare] of [[sqlite, '', '', ''], [postgres, '"tenant".', ' FOR SHARE', ' FOR KEY SHARE']]) {
+      assert.ok(sql.includes(`FROM ${table}"Customer" AS "_jaren_row" WHERE "_jaren_row"."segment" = NEW."segment"${share})`), sql);
+      assert.ok(sql.includes(`FROM ${table}"Doc" AS "_jaren_row" WHERE "_jaren_row"."customer" = NEW."customer"${share})`), sql);
+      assert.ok(sql.includes(`FROM ${table}"Customer" AS "_jaren_row" WHERE "_jaren_row"."id" = NEW."customer"${keyShare})`), sql);
     }
     assert.doesNotThrow(() => normalizeEntities(shopModel('store')));
   });

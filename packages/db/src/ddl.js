@@ -32,7 +32,9 @@ import { comparableDeclaredSql } from './schema-sql.js';
 import { memberNames, modelPath, readModelPath, readsAsIndex } from './model-path.js';
 export { normalizeDeclaredSql, comparableDeclaredSql } from './schema-sql.js';
 
-const MANAGED_SQL_OPTIONS = Object.freeze({ columnOrder: /** @type {const} */ ('ignore') });
+/** How the open compares a store-owned table's CREATE texts with the plan's
+ * (`comparableDeclaredSql`): formatting aside, its columns in any order. */
+export const MANAGED_SQL_OPTIONS = Object.freeze({ columnOrder: /** @type {const} */ ('ignore') });
 
 /** The fixed physical column names of the 0.1 mapping. */
 export const KEY_COLUMN = 'key';
@@ -1751,8 +1753,12 @@ export function verifyShape(connection, plan, collection, docPath, kind = 'colle
           return chain(collectColumns(0), () => chain(besides(), () =>
             chain(verifyIntervalChecks(connection, plan, disagree), () =>
               chain(verifyRulePrograms(connection, plan.table, plan.programs ?? [], disagree,
-                { installed: dialect.capabilities.declaredSqlText !== true, undeclared: true, namespace: programs }), () =>
-                verifyDeclaredSql(connection, plan, disagree)))));
+                { installed: dialect.capabilities.declaredSqlText !== true, undeclared: true, namespace: programs, spelled: plan.programsAt }),
+              (/** @type {any[]} */ held) => {
+                // the programs it holds as an earlier release planned them, which the store reports
+                plan.earlierPrograms = held;
+                return verifyDeclaredSql(connection, plan, disagree);
+              }))));
         }));
     })));
 }
@@ -2091,7 +2097,9 @@ export function planEntity(name, entityMapping, entities, dialect, options = {})
       throw new DbCompileError('JD0005', 'this dialect cannot verify declared database invariant triggers');
     const declared = entityMapping.ddl && dialect.name === 'sqlite' ? planTable(entityMapping.ddl) : null;
     return { table: entityMapping.table,
-      physical: { ...entityMapping, triggers: dialect.invariantTriggers?.(entityMapping, entities, dialect) ?? [] },
+      physical: { ...entityMapping, triggers: dialect.invariantTriggers?.(entityMapping, entities, dialect) ?? [],
+        /** The programs as an earlier release planned them (`program-spellings.js`), which the open recognizes. */
+        triggersAt: (/** @type {number} */ spelling) => dialect.invariantTriggers?.(entityMapping, entities, dialect, spelling) ?? [] },
       createSql: declared?.createSql ?? [], expected: declared?.expected ?? { columns: [], indexes: [] },
       columnNames: new Set(entityMapping.columns.map((c) => c.physical)) };
   }
@@ -2263,6 +2271,9 @@ export function planEntity(name, entityMapping, entities, dialect, options = {})
     declaredCalls,
     /** The programs of the entity's database rules, in install order (their SQL ends `createSql`). */
     programs,
+    /** The same programs as an earlier release planned them (`program-spellings.js`), which the open recognizes. */
+    programsAt: (/** @type {number} */ spelling) => (programs.length === 0 ? []
+      : rulePrograms(name, entityMapping, entities, dialect, columns, conditionColumns, spelling)),
     /** The members an index condition may read, by their columns. */
     conditionColumns,
     expected: {
@@ -2336,9 +2347,10 @@ function conditionColumnsOf(entityMapping, entities) {
  * @param {string} name @param {any} entityMapping @param {any} entities - the full mapping @param {any} dialect
  * @param {{ name: string, type: string }[]} declared - the table's planned columns
  * @param {{ name: string, physical: string, codec: string }[]} readable - the columns a rule may read
+ * @param {number} [spelling] - the text a release planned; this release's by default
  * @returns {any[]}
  */
-function rulePrograms(name, entityMapping, entities, dialect, declared, readable) {
+function rulePrograms(name, entityMapping, entities, dialect, declared, readable, spelling = undefined) {
   if (typeof dialect.invariantTriggers !== 'function')
     throw new DbCompileError('JD0005', 'this dialect cannot verify declared database invariant triggers');
   const typeOf = new Map(declared.map((column) => [column.name, column.type]));
@@ -2346,7 +2358,7 @@ function rulePrograms(name, entityMapping, entities, dialect, declared, readable
     generated: false, stored: typeOf.get(column.physical) }));
   const documentColumn = { name: DOC_COLUMN, physical: DOC_COLUMN, codec: 'json', null: 'reject', generated: false, stored: dialect.docColumnType };
   return dialect.invariantTriggers({ table: name, keys: entityMapping.keys, columns, documentColumn, document: false,
-    version: entityMapping.version, invariants: entityMapping.invariants }, entities, dialect);
+    version: entityMapping.version, invariants: entityMapping.invariants }, entities, dialect, spelling);
 }
 
 /**

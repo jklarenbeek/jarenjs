@@ -11,6 +11,7 @@ import { planTable } from './dialects/sqlite-schema.js';
 import { sqlitePhysicalColumnType, sqliteTableMigration } from './dialects/sqlite.js';
 import { comparableDeclaredSql } from './schema-sql.js';
 import { foldIdentifier } from './invariants.js';
+import { CURRENT_SPELLING } from './dialects/program-spellings.js';
 import { sqlTokens } from './dialects/check-read.js';
 import { isKeyword } from './sql.js';
 import { relationalEmitter } from './relational.js';
@@ -399,6 +400,14 @@ export function physicalOrderable(column, dialect) {
   };
 }
 
+/** A physical layout's rule trigger, on an engine that keeps its CREATE text
+ * (SQLite), compared with the planned one as its open compares it: exactly,
+ * but for surrounding blanks and a closing semicolon.
+ * @param {string} want @param {string | null | undefined} have @returns {boolean} */
+export function sameTriggerText(want, have) {
+  return typeof have === 'string' && have.trim().replace(/;$/, '') === want.trim().replace(/;$/, '');
+}
+
 /** The fields at which an installed program departs from the planned one.
  * @param {any} want @param {any} have @param {string} [at] @returns {string[]} */
 function programDifferences(want, have, at = '') {
@@ -426,38 +435,48 @@ function programDifferences(want, have, at = '') {
  * not see, which reads its own; a table whose rows there depart from the plan
  * reads its own before it is refused, so a refusal judges what the catalog
  * holds now (a rival may have committed a migration of its programs since).
+ * A program that departs from the plan but equals what an earlier release
+ * planned for the model (`spelled`, each earlier spelling of
+ * `program-spellings.js` rendered when a program first departs) is held at
+ * that spelling: neither refused nor taken for current, but answered, so the
+ * store can report it and a reviewed link replace it (`planProgramUpgrade`).
  * @param {any} connection
  * @param {string} table
  * @param {any[]} triggers - the planned program items
  * @param {(why: string) => never} fail
- * @param {{ installed?: boolean, undeclared?: boolean, namespace?: (table: string) => any }} [options]
- * @returns {any} value-or-promise
+ * @param {{ installed?: boolean, undeclared?: boolean, namespace?: (table: string) => any,
+ *   spelled?: (spelling: number) => any[] }} [options] - `spelled`, the table's planned items as spelling `n` plans them
+ * @returns {any} value-or-promise of the programs held at an earlier spelling, `{ program, spelling }[]`
  */
-export function verifyRulePrograms(connection, table, triggers, fail, { installed = true, undeclared = false, namespace = undefined } = {}) {
+export function verifyRulePrograms(connection, table, triggers, fail, { installed = true, undeclared = false, namespace = undefined, spelled = undefined } = {}) {
   const dialect = connection.dialect;
   const programs = triggers.filter((trigger) => trigger.type !== 'function' && trigger.program !== undefined);
-  /** The first way the table's catalog rows depart from the plan, or `null`. @param {any[]} rows @returns {string | null} */
+  const earlier = earlierSpellings(spelled);
+  /** The first way the table's catalog rows depart from the plan, or the programs they hold at an earlier spelling.
+   * @param {any[]} rows @returns {string | { program: string, spelling: number }[]} */
   const departure = (rows) => {
-    const owned = rows.filter((row) => row.owner === table && row.kind !== 'table');
-    const installed = owned.filter((row) => row.kind !== 'rule');
-    for (const trigger of programs) {
-      const row = installed.find((r) => r.name === trigger.name);
-      const actual = row === undefined ? undefined : typeof row.program === 'string' ? JSON.parse(row.program) : row.program;
-      const changed = actual === undefined ? [] : programDifferences(trigger.program, actual);
-      if (actual === undefined || changed.length > 0)
+    const held = [];
+    for (const { trigger, changed, spelling } of heldPrograms(rows, table, programs, earlier)) {
+      if (spelling === CURRENT_SPELLING) continue;
+      if (spelling < 0)
         return `invariant trigger '${trigger.name}' is missing or changed${changed.length ? ` (${changed.join(', ')})` : ''}; apply an explicit migration`;
+      held.push({ program: trigger.name, spelling });
     }
+    const owned = rows.filter((row) => row.owner === table && row.kind !== 'table');
     const extra = undeclared ? owned.find((row) => row.kind === 'rule' || !programs.some((trigger) => trigger.name === row.name)) : undefined;
-    if (extra === undefined) return null;
+    if (extra === undefined) return held;
     const what = extra.kind === 'rule' ? 'rewrite rule' : 'trigger';
     return `the database has the ${what} '${extra.name}', which the model does not declare — an undeclared ${what} changes what a write does`;
   };
-  const read = !installed || (programs.length === 0 && !undeclared) || dialect.introspect.invariantPrograms === undefined ? null
-    : chain(namespace === undefined ? null : namespace(table), (/** @type {any[] | null} */ shared) => (shared !== null && departure(shared) === null ? null
-      : useStatementOnce(connection, dialect.introspect.invariantPrograms(table), (s) => chain(s.all([]), (/** @type {any[]} */ rows) => {
-        const why = departure(rows);
-        if (why !== null) fail(why);
-      }))));
+  const read = !installed || (programs.length === 0 && !undeclared) || dialect.introspect.invariantPrograms === undefined ? []
+    : chain(namespace === undefined ? null : namespace(table), (/** @type {any[] | null} */ shared) => {
+      const answer = shared === null ? null : departure(shared);
+      return Array.isArray(answer) ? answer
+        : useStatementOnce(connection, dialect.introspect.invariantPrograms(table), (s) => chain(s.all([]), (/** @type {any[]} */ rows) => {
+          const why = departure(rows);
+          return typeof why === 'string' ? fail(why) : why;
+        }));
+    });
   const recursion = !triggers.some((trigger) => trigger.selfUpdate) ? null
     : useStatementOnce(connection, dialect.introspect.pragma('recursive_triggers'), (s) => chain(s.get([]), (row) => {
       if (Number(row?.recursive_triggers) !== 0) fail('an increment rule updates its own row, and recursive_triggers would run its trigger again; switch it off');
@@ -465,6 +484,50 @@ export function verifyRulePrograms(connection, table, triggers, fail, { installe
   const encoding = triggers.length === 0 ? null
     : requireCodePointText(connection, 'database rules compare text by code point', fail);
   return chain(recursion, () => chain(encoding, () => read));
+}
+
+/**
+ * How a table's catalog rows hold each of its planned programs (the trigger
+ * items that carry `program`): `spelling` is the spelling whose planned program
+ * the installed one equals, field by field — this release's, else the newest
+ * earlier one (`earlier`) — or -1 for a program that equals none, `changed`
+ * naming the fields at which it departs from this release's plan, or one the
+ * table does not hold (`actual` undefined).
+ * @param {any[]} rows - the catalog's program rows (`introspect.invariantPrograms`)
+ * @param {string} table @param {any[]} programs - the planned trigger items
+ * @param {(name: string, equal: (want: any) => boolean) => number} earlier - {@link earlierSpellings}
+ * @returns {{ trigger: any, actual: any, changed: string[], spelling: number }[]}
+ */
+export function heldPrograms(rows, table, programs, earlier) {
+  const installed = rows.filter((row) => row.owner === table && row.kind !== 'table' && row.kind !== 'rule');
+  return programs.map((trigger) => {
+    const row = installed.find((r) => r.name === trigger.name);
+    const actual = row === undefined ? undefined : typeof row.program === 'string' ? JSON.parse(row.program) : row.program;
+    const changed = actual === undefined ? [] : programDifferences(trigger.program, actual);
+    const spelling = actual === undefined ? -1 : changed.length === 0 ? CURRENT_SPELLING
+      : earlier(trigger.name, (want) => programDifferences(want.program, actual).length === 0);
+    return { trigger, actual, changed, spelling };
+  });
+}
+
+/**
+ * The earlier spelling at which an installed program equals what that release
+ * planned, newest first, or -1: each spelling's items rendered once, when the
+ * first program departs from the plan, so a current store renders none.
+ * @param {((spelling: number) => any[]) | undefined} spelled - the table's planned items at spelling `n`
+ * @returns {(name: string, equal: (want: any) => boolean) => number}
+ */
+export function earlierSpellings(spelled) {
+  /** @type {Map<number, any[]>} */
+  const rendered = new Map();
+  return (name, equal) => {
+    if (spelled !== undefined) for (let spelling = CURRENT_SPELLING - 1; spelling >= 0; spelling--) {
+      if (!rendered.has(spelling)) rendered.set(spelling, spelled(spelling));
+      const want = /** @type {any[]} */ (rendered.get(spelling)).find((item) => item.type !== 'function' && item.name === name);
+      if (want !== undefined && equal(want)) return spelling;
+    }
+    return -1;
+  };
 }
 
 /**
@@ -516,9 +579,9 @@ export function verifyPhysical(connection, mapping, schema, programs = undefined
     // a deparsing server answers with its own text, read field by field below
     if (trigger.type === 'function' || trigger.program !== undefined) continue;
     const actual = schema.objects.find((o) => o.type === 'trigger' && o.name === trigger.name);
-    if (!actual || actual.sql?.trim().replace(/;$/, '') !== trigger.sql.trim().replace(/;$/, '')) fail(`invariant trigger '${trigger.name}' is missing or changed; apply an explicit migration`);
+    if (!actual || !sameTriggerText(trigger.sql, actual.sql)) fail(`invariant trigger '${trigger.name}' is missing or changed; apply an explicit migration`);
   }
-  const verified = verifyRulePrograms(connection, mapping.table, mapping.triggers ?? [], fail, { namespace: programs });
+  const verified = verifyRulePrograms(connection, mapping.table, mapping.triggers ?? [], fail, { namespace: programs, spelled: mapping.triggersAt });
   const read = mapping.kind === 'view'
     ? useStatementOnce(connection, connection.dialect.introspect.columns(mapping.table), (s) =>
       chain(s.all([]), (columns) => ({ columns: columns.map((c) => ({ ...c, generated: !!c.hidden })), primaryKey: [] })))
@@ -526,7 +589,9 @@ export function verifyPhysical(connection, mapping, schema, programs = undefined
   // the database's own row of its catalog, where the dialect reads one
   // (PostgreSQL): its text encoding, default collation and locale provider
   const database = schema.catalog?.find((o) => o.type === 'schema')?.metadata ?? null;
-  return chain(verified, () => chain(read, (table) => {
+  return chain(verified, (/** @type {any[]} */ held) => chain(read, (table) => {
+    // the programs it holds as an earlier release planned them, which the store reports
+    mapping.earlierPrograms = held;
     if (mapping.kind !== 'view' && JSON.stringify(table.primaryKey) !== JSON.stringify(mapping.keys.map((k) => mapping.columns.find((c) => c.name === k).physical))) fail('ordered primary key disagrees');
     for (const column of mapping.columns) {
       const actual = table.columns.find((c) => c.name === column.physical);

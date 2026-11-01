@@ -3760,8 +3760,61 @@ the probing write is refused by the rule.
   through before, now fails them with `JD2083` (`readonly`); a grant of
   `UPDATE` on one column of the table admits them again.
 - SQLite, whose writer lock admits no such interleaving, and every database
-  rule are unchanged: a database rule's probe still locks no row, and every
-  installed program keeps its text, so every store opens as before.
+  rule are unchanged: a database rule's probe still locks no row (until §69),
+  and every installed program keeps its text, so every store opens as before.
+
+## 69. A database rule's probe on PostgreSQL locks the row it finds, and earlier programs are reported
+
+The PostgreSQL programs of a database rule now lock the row a probe finds, as
+a store rule's probe does since §68
+([MODEL-FORMAT §13.2](MODEL-FORMAT.md#132-existence-probes)), where the probe
+stands in a strictly positive position — reached through `$and`, `$or` and an
+even number of `$not`s alone: `FOR KEY SHARE` when every member it matches is a
+key column, `FOR SHARE` otherwise. A probe under an odd number of `$not`s reads
+without a lock, a store rule's too: a row it finds refuses the write, and no
+lock holds an absence.
+
+- A store this release creates installs the locking programs. A store an
+  earlier release created opens as before, with no DDL: its programs keep
+  their text and judge writes as that release's did, so their probes lock no
+  row, and the store names each in `store.earlierPrograms`; `jaren-db check`
+  and `status` add a `programs:` line (no exit code changes). A program whose
+  text no release planned is refused (`JD0002`) as before.
+- `planProgramUpgrade(connection, model)` plans the reviewed link that
+  replaces them ([MIGRATION-FORMAT §3](MIGRATION-FORMAT.md#upgrading-the-programs-a-table-holds)):
+  one `CREATE OR REPLACE FUNCTION` per probing function, which takes no table
+  lock; apply it as the next link with `{ model }`, or on its target for a
+  physical layout. Deploy this release everywhere first, then grant what the
+  new programs need, then apply the link.
+- After the link, and in a store this release creates: a writer role needs
+  the `UPDATE` privilege on at least one column of each table a locking probe
+  reads — without it PostgreSQL refuses the write (`42501`, a store write
+  `JD2083`); a delete or a change of a found row waits for the probing
+  transaction, and two transactions can deadlock (`JD2005`, retryable), as
+  §68 says of store rules. Under row-level security a locking read passes the
+  table's UPDATE policy as well as its SELECT policy, so a writer references
+  only rows it may also lock: a row outside a narrower UPDATE policy is
+  missed and the write is refused in the rule's name (`JD2096`).
+- A store rule's negated probe, and one whose answer its assertion compares,
+  reads unlocked again: a role that may only read the probed table no longer
+  fails such a write with `JD2083`, the probe no longer waits for a writer
+  holding the row it finds (it reads the row as last committed), and under
+  row-level security it sees every row the SELECT policy shows, so a write
+  that such a row forbids is refused again where the lock let it through.
+- A migration on PostgreSQL whose last link names a rule program of a table
+  the store owns now reads back that table's programs before it commits and
+  refuses the link (`JD0023`) where one holds a text no release planned, as
+  SQLite's shape comparison does.
+- SQLite is unchanged: no program and no probe there takes a lock, and its
+  stores open as before.
+
+**Downgrade.** A release before this one refuses a store whose PostgreSQL
+probing programs this release created or replaced (`JD0002`, `function.source`).
+Apply the link back first — `planProgramUpgrade(connection, model, { spelling: 0 })`,
+a forward link that installs the programs those releases planned — and such a
+release opens the store again. A store whose database rules probe only under
+an odd number of `$not`s, or not at all, and every SQLite store, is unaffected:
+their programs read as before.
 
 ## Measured costs
 

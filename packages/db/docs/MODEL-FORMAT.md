@@ -5085,17 +5085,23 @@ a member of the rule's own record is present. A probe composes with `$not`,
 ```
 
 Store enforcement answers a probe with the SQL the database's trigger runs,
-its values bound, inside the write's transaction, and on PostgreSQL with a
-lock on the row it finds.
+its values bound, inside the write's transaction; on PostgreSQL both lock the
+row a probe finds where that row decides that the write passes (below).
 
 SQLite runs each write under the database's one writer lock, so no other
 write commits between a probe and the commit of the write it judged, and a
-probe there locks nothing. On PostgreSQL a store rule's probe locks the row
-it finds until the write's transaction ends, as a foreign key's check does:
-`FOR KEY SHARE` when every member it matches is a key column — the target's
-key, or a column of a unique index over plain column terms without a
-condition — and `FOR SHARE` when any other is matched, whatever keys the
-probe. A delete, and an update that changes a key column, take `FOR UPDATE`,
+probe there locks nothing. On PostgreSQL a probe in a strictly positive
+position — reached from the assertion through `$and`, `$or` and an even
+number of `$not`s alone — locks the row it finds until the write's
+transaction ends, as a foreign key's check does, a store rule's probe and a
+database rule's program alike: `FOR KEY SHARE` when every member it matches
+is a key column — the target's key, or a column of a unique index over plain
+column terms without a condition — and `FOR SHARE` when any other is
+matched, whatever keys the probe. A probe under an odd number of `$not`s
+reads without a lock: a row it finds refuses the write, and no lock holds an
+absence; so does a store rule's probe whose answer the assertion compares or
+uses as a value, which no found row decides. A delete, and an update that
+changes a key column, take `FOR UPDATE`,
 which waits for either lock; an update that changes only other columns takes
 `FOR NO KEY UPDATE`, which `FOR KEY SHARE` admits and `FOR SHARE` waits for,
 so a probe that matches such a column holds the row against that update too.
@@ -5106,13 +5112,13 @@ it first and is still open makes the probe wait for its end and read the row
 as that write left it, so a committed delete or change refuses the probing
 write. A probe that finds no row locks nothing, so a row another transaction
 inserts while the probing write is open may commit beside it: a negated
-probe ("the parent is gone") is not held. A database rule's probe locks
-nothing either: another transaction may delete or change the row it found —
-by the key or by an index alike — and commit while the probing write is
-open, whether that write ran before the probe read the row (read committed
-reads the version committed when the statement began) or after it; both
-commit. A foreign key (§9.4) holds the row it references against that. What
-the store's lock costs is §13.3's.
+probe ("the parent is gone") is not held. A database rule's program an
+earlier release installed (§13.4) locks nothing: another transaction may
+delete or change the row it found — by the key or by an index alike — and
+commit while the probing write is open, whether that write ran before the
+probe read the row (read committed reads the version committed when the
+statement began) or after it; both commit, until a reviewed link installs the
+locking program. What the lock costs is §13.3's.
 
 ### 13.3 Store enforcement
 
@@ -5171,8 +5177,15 @@ and then update it, under `FOR SHARE`, or under either lock when the update
 is such a ruled one — which fails one of them with `JD2005` (`busy`,
 retryable) while the other commits. The lock needs the `UPDATE` privilege on
 at least one column of the target: a role that may only read the target
-fails the probing write with `JD2083` (`readonly`). SQLite's probe takes no
-lock.
+fails the probing write with `JD2083` (`readonly`) — a database rule's
+program with PostgreSQL's `42501`, which a store write reports as `JD2083`.
+Row-level security reads a locking read through the table's UPDATE policy
+as well as its SELECT policy, so a writer references only rows it may also
+lock: where its UPDATE policy is narrower than its SELECT policy, a locking
+probe misses a row the writer may read, and the write is refused in the
+rule's name (`JD2096`, `jaren invariant:<rule>`) though the row exists. A
+negated probe, which reads unlocked, sees every row the SELECT policy shows.
+SQLite's probe takes no lock.
 
 ### 13.4 Database enforcement
 
@@ -5316,14 +5329,14 @@ trigger program (a `TableTrigger` stays SQLite SQL, which PostgreSQL does not
 run); an aggregate over other rows (no bounded expression reads them —
 `$exists-row` finds one row through a verified key or index); and SQLite's
 change test, which compares each column under its declared collation (below):
-comparing by code point would change the text of every installed update
-program, so it waits for a reviewed migration of installed programs.
+comparing by code point would change the text of installed update programs,
+so it waits for a release that spells it and plans its upgrade (below).
 
 The exception: `$eq` and `$ne` between two `null` columns of different JSON
 types (a `text` and an `integer` column, say) compare by type alone, so where
 both hold SQL NULL the rule finds them unequal, while the query engine finds two
 nulls equal. Installed programs are verified by their text (below), so this
-spelling stays until a reviewed migration of installed programs changes it;
+spelling stays until a release changes it and plans its upgrade (below);
 test the nulls explicitly instead (`{ "$eq": ["$.new.t", null] }` is null-safe).
 
 `planInvariants(model, { dialect })` returns reviewable statements in install
@@ -5331,7 +5344,14 @@ order, each with the `drop` statement that removes it; for a physical layout
 an explicit migration installs them, one `ddl` step each (MIGRATION-FORMAT,
 "Installing database rules"), a store-owned layout's are the ones its table
 is created with, and opening verifies those programs (`JD0002` names what is
-missing or changed). One document plans for both engines:
+missing or changed). A program that equals what an earlier release planned
+for the model is not changed: the store opens, the program keeps judging
+writes as that release's did — on PostgreSQL, before the probe's lock, its
+probes lock nothing — and the store reports it in `store.earlierPrograms`
+(`{ table, program, spelling }`, taken at open); `planProgramUpgrade` plans
+the reviewed link that replaces it (MIGRATION-FORMAT, "Upgrading the programs
+a table holds"), and `jaren-db check` and `status` name it. A text no release
+planned is refused as before. One document plans for both engines:
 
 - **SQLite** — one AFTER trigger per table and operation, plus one `AFTER UPDATE
   OF` trigger per distinct `columns` set (`_jaren_rule_<length>_<table>_<op>`,

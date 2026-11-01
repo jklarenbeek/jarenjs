@@ -17,7 +17,7 @@ import { pathToFileURL } from 'url';
 import { loadDocument as loadDocumentFile, isDocumentFile } from '@jarenjs/json/node';
 
 import {
-  planModelMigration, planColumnUpgrade, migrate, migrationStatus, migrationHistory, adoptMigrationHistory,
+  planModelMigration, planColumnUpgrade, planProgramUpgrade, migrate, migrationStatus, migrationHistory, adoptMigrationHistory,
   shapeHash, compareShapeToModel,
   sqliteDialect, normalizeModel, normalizeEntities, explainMapping,
   planCollection, planEntity, planJoinTable, HISTORY_TABLE, entityEmitModel,
@@ -38,6 +38,7 @@ Usage:
   jaren-db plan     --from <model> --to <model> [--store <db>] [--id <name>] [--out <file>]
   jaren-db plan     --model <model> [--snapshot <file>] [--store <db>] [--id <name>] --out <file>
   jaren-db plan     --model <model> --store <db> --upgrade-columns [--id <name>] [--out <file>]
+  jaren-db plan     --model <model> --store <db> --upgrade-programs [--id <name>] [--out <file>]
   jaren-db snapshot --model <model> [--snapshot <file>] [--types <file>]
   jaren-db status   --model <model> --store <db> [--migrations <dir>] [--snapshot <file>]
   jaren-db apply    --store <db> --baseline <model> --migrations <dir> [--model <m>] [--dry-run] [--yes]
@@ -71,11 +72,20 @@ plan      Diff two model FILES into an exact 0.2 migration document,
           the model the database holds to itself; the snapshot is neither
           read nor advanced, and a database that holds what this release
           creates plans nothing and writes nothing. Apply the link as the
-          next of --migrations.
+          next of --migrations. With --upgrade-programs, plan instead the
+          link that replaces the database rules' programs the --store
+          tables hold as an earlier release planned them, likewise from
+          the model to itself; a program that holds a text no release
+          planned refuses the plan, naming it, and one the model plans
+          on a table that holds none of it is named for a planned
+          migration to install.
 snapshot  Write the model's snapshot; with --types, emit's TypeScript
           declaration for it (needs @jarenjs/emit beside @jarenjs/db).
 status    Applied, pending, drift (a hand-modified database) and — with
-          a snapshot — an unplanned model change.
+          a snapshot — an unplanned model change; with --model, a line
+          naming each rule program the database holds as an earlier
+          release planned it (plan --upgrade-programs replaces them).
+          That line changes no exit code.
 apply     Print every statement, then apply. Destructive steps (drop
           table/column, rebuild) require --yes or an interactive
           confirmation naming what is lost. --dry-run only prints.
@@ -106,7 +116,7 @@ documents Run a migration's DOCUMENT steps (jslt, query) over a file of
           migration or source failure, 2 a misuse of this command line.
 
 status, check, history, apply --dry-run, plan --store (with or without
---upgrade-columns) and adopt-history never create a --store database named by a plain path: one that does not
+--upgrade-columns or --upgrade-programs) and adopt-history never create a --store database named by a plain path: one that does not
 exist is refused (exit 1). An apply that is only printed, or that finds
 nothing pending without --yes, creates nothing either. :memory: is an
 empty database. A file: URI reaches SQLite as written, so its own mode
@@ -142,7 +152,7 @@ const VALUE_FLAGS = new Set([
  * snapshot beside the model instead, and `apply --check` applied.
  */
 const COMMAND_FLAGS = Object.freeze({
-  plan: ['--from', '--to', '--model', '--store', '--id', '--out', '--snapshot', '--upgrade-columns'],
+  plan: ['--from', '--to', '--model', '--store', '--id', '--out', '--snapshot', '--upgrade-columns', '--upgrade-programs'],
   snapshot: ['--model', '--snapshot', '--types'],
   status: ['--model', '--store', '--migrations', '--snapshot', '--baseline'],
   check: ['--model', '--store', '--migrations', '--snapshot', '--baseline'],
@@ -163,7 +173,7 @@ function parseArgs(argv) {
     snapshot: null, types: null, observed: null, physicalTarget: null,
     inputs: [], maxRows: undefined, maxBytes: undefined, maxDistinct: undefined,
     in: null, format: null, outFormat: null, collection: null,
-    batchSize: null, inPlace: false, check: false, upgradeColumns: false,
+    batchSize: null, inPlace: false, check: false, upgradeColumns: false, upgradePrograms: false,
     dryRun: false, yes: false, help: false,
   };
   const historyCommand = options.command === 'history' || options.command === 'adopt-history';
@@ -211,6 +221,7 @@ function parseArgs(argv) {
       case '--in-place': options.inPlace = true; break;
       case '--check': options.check = true; break;
       case '--upgrade-columns': options.upgradeColumns = true; break;
+      case '--upgrade-programs': options.upgradePrograms = true; break;
       case '--dry-run': options.dryRun = true; break;
       case '--yes': options.yes = true; break;
       case '--help': case '-h': options.help = true; break;
@@ -323,7 +334,9 @@ const renderSteps = (migration) => {
 };
 
 async function commandPlan(options) {
-  if (options.upgradeColumns) return commandPlanUpgrade(options);
+  if (options.upgradeColumns && options.upgradePrograms) fail('plan takes --upgrade-columns or --upgrade-programs, not both');
+  if (options.upgradeColumns) return commandPlanUpgrade(options, UPGRADES.columns);
+  if (options.upgradePrograms) return commandPlanUpgrade(options, UPGRADES.programs);
   let fromModel;
   let toModel;
   let snapshotFile = null;
@@ -392,20 +405,31 @@ async function commandPlan(options) {
   }
 }
 
+/** The two links a plan reads from the catalog: the flag, the planner, what
+ * a current database prints and what the planned link does. */
+const UPGRADES = Object.freeze({
+  columns: { flag: '--upgrade-columns', plan: planColumnUpgrade, current: 'the tables of %s hold what this release creates for the model',
+    does: 'rebuilds or creates' },
+  programs: { flag: '--upgrade-programs', plan: planProgramUpgrade, current: 'the rule programs of %s are what this release plans for the model',
+    does: 'replaces' },
+});
+
 /**
- * `plan --upgrade-columns`: the link `planColumnUpgrade` plans from the catalog
- * of --store for the model the database holds, printed or written as `plan`
+ * `plan --upgrade-columns` and `plan --upgrade-programs`: the link
+ * `planColumnUpgrade` or `planProgramUpgrade` plans from the catalog of
+ * --store for the model the database holds, printed or written as `plan`
  * writes a migration. The store is first verified against the model, as `plan
  * --store` verifies the from-model; a database that holds what this release
  * creates plans no step, and nothing is written.
+ * @param {any} options @param {typeof UPGRADES.columns} upgrade
  */
-async function commandPlanUpgrade(options) {
+async function commandPlanUpgrade(options, upgrade) {
   if (options.from !== null || options.to !== null)
-    fail('plan --upgrade-columns takes --model, the model the database holds, not --from and --to');
+    fail(`plan ${upgrade.flag} takes --model, the model the database holds, not --from and --to`);
   if (options.snapshot !== null)
-    fail('plan --upgrade-columns plans from the database, not from a --snapshot');
+    fail(`plan ${upgrade.flag} plans from the database, not from a --snapshot`);
   if (options.model === null || options.store === null)
-    fail('plan --upgrade-columns needs --model and --store');
+    fail(`plan ${upgrade.flag} needs --model and --store`);
   const model = await loadDocument(options.model, 'model', 'model');
   requireStore(options.store);
   const driver = nodeDriver();
@@ -414,7 +438,7 @@ async function commandPlanUpgrade(options) {
   try {
     const drift = await Promise.resolve(compareShapeToModel(driver, connection, model, undefined));
     if (drift !== null) fail(`the store does not match the model (${drift}) — is this the model the database holds?`);
-    planned = await Promise.resolve(planColumnUpgrade(connection, model, options.id === null ? undefined : { id: options.id }));
+    planned = await Promise.resolve(upgrade.plan(connection, model, options.id === null ? undefined : { id: options.id }));
   }
   catch (error) {
     fail(error.message);
@@ -423,8 +447,11 @@ async function commandPlanUpgrade(options) {
     await connection.close();
   }
   const { migration, report } = planned;
+  // a program the model plans on a table that holds none of it is a planned migration's to install
+  if (report.absent?.length > 0)
+    console.error(`NOTE: the database holds none of ${report.absent.join(', ')}, which a planned migration installs (MIGRATION-FORMAT §9), not this link`);
   if (migration.steps.length === 0) {
-    console.log(`no upgrade — the tables of ${options.store} hold what this release creates for the model; nothing to plan`);
+    console.log(`no upgrade — ${upgrade.current.replace('%s', options.store)}; nothing to plan`);
     return;
   }
   const rendered = JSON.stringify(migration, null, 2);
@@ -435,7 +462,7 @@ async function commandPlanUpgrade(options) {
   else {
     console.log(rendered);
   }
-  console.error(`NOTE: the link rebuilds or creates ${report.upgraded.join(', ')} — apply it as the next link of the chain`);
+  console.error(`NOTE: the link ${upgrade.does} ${report.upgraded.join(', ')} — apply it as the next link of the chain`);
 }
 
 async function commandStatus(options, { asCheck }) {
@@ -476,6 +503,23 @@ async function commandStatus(options, { asCheck }) {
   if (model !== undefined && status.pending.length === 0) {
     console.log(`drift:    ${unplanned !== null ? 'not checked — the model differs from its snapshot'
       : status.drift === null ? 'none — in sync' : status.drift}`);
+  }
+  // a rule program the database holds as an earlier release planned it, named for its upgrade; no exit changes
+  if (model !== undefined && status.pending.length === 0 && unplanned === null
+    && [...normalizeEntities(model).values()].some((entity) => entity.invariants.some((rule) => rule.enforcement === 'database'))) {
+    let connection = null;
+    try {
+      connection = await nodeDriver().open(existingStore(options.store), {});
+      const { report } = await Promise.resolve(planProgramUpgrade(connection, model));
+      if (report.upgraded.length > 0)
+        console.log(`programs: ${report.upgraded.join(', ')} held as an earlier release planned them — plan --upgrade-programs replaces them`);
+    }
+    catch {
+      // informational only: a program no release planned is the drift line's to name
+    }
+    finally {
+      await connection?.close();
+    }
   }
   if (snapshotInUse) {
     console.log(`model:    ${unplanned === null ? 'planned — matches its snapshot' : `UNPLANNED change — ${unplanned}`}`);

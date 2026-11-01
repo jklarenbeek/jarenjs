@@ -167,7 +167,7 @@ const UNLOWERED_ARITHMETIC = ['$mul', '$div', '$idiv', '$mod'];
  * One lowering: the functions that lower, and the domain checks its column
  * reads collect in the order they are read (an index condition collects none).
  * @param {{ rendering?: 'trigger' | 'predicate', releasedText?: boolean, flavor: any, dialect: any, resolve: PathResolver,
- *   fail: (reason: string) => never, probe?: (args: any, value: (expression: any, keyed: boolean) => string) => string }} context -
+ *   fail: (reason: string) => never, probe?: (args: any, value: (expression: any, keyed: boolean) => string, positive: boolean) => string }} context -
  *   `flavor` spells `true`, `false`, the null-safe `equal` and `different`, reads a column (`column(column, ref)` →
  *   `{ value, domain }`) and may spell a text literal (`text(value, plain)`, `plain` the dialect's own) and an integer
  *   column as an arithmetic operand (`integer(column, ref)`); `probe` lowers an `$exists-row`, its match values rendered
@@ -365,8 +365,10 @@ export function rowPredicate({ rendering = 'trigger', releasedText = false, flav
     if (read.column.null !== 'absent') return flavor.true;
     return trigger ? `(${read.ref} IS NOT NULL)` : `${read.ref} IS NOT NULL`;
   };
-  /** @param {any} node @param {boolean} [negated] whether a `$not` encloses it @returns {string} */
-  const predicate = (node, negated = false) => {
+  /** @param {any} node @param {boolean} [negated] whether a `$not` encloses it
+   * @param {boolean} [positive] whether an even number of `$not`s encloses it, reached through `$and`, `$or` and `$not` alone
+   * @returns {string} */
+  const predicate = (node, negated = false, positive = true) => {
     if (typeof node === 'boolean') return node ? flavor.true : flavor.false;
     if (!node || typeof node !== 'object' || Array.isArray(node) || Object.keys(node).length !== 1) return fail('predicate must be a bounded query expression');
     const [key, args] = Object.entries(node)[0];
@@ -374,11 +376,11 @@ export function rowPredicate({ rendering = 'trigger', releasedText = false, flav
       if (!Array.isArray(args) || !args.length) return fail('logical predicates require operands');
       // an index condition joins a nested $and (or $or) to its parent and writes one operand as itself
       const operands = trigger ? args : joined(key, args);
-      if (!trigger && operands.length === 1) return predicate(operands[0], negated);
-      return `(${operands.map((a) => predicate(a, negated)).join(key === '$and' ? ' AND ' : ' OR ')})`;
+      if (!trigger && operands.length === 1) return predicate(operands[0], negated, positive);
+      return `(${operands.map((a) => predicate(a, negated, positive)).join(key === '$and' ? ' AND ' : ' OR ')})`;
     }
-    if (key === '$not') return `(NOT (${predicate(args, true)}))`;
-    if (key === '$exists-row' && probe !== undefined) return probe(args, (expression, keyed) => scalar(expression, true, false, keyed));
+    if (key === '$not') return `(NOT (${predicate(args, true, !positive)}))`;
+    if (key === '$exists-row' && probe !== undefined) return probe(args, (expression, keyed) => scalar(expression, true, false, keyed), positive);
     if (key === '$exists') return exists(args);
     if (!Object.hasOwn(OPERATORS, key) || !Array.isArray(args) || args.length !== 2) return fail(`unsupported predicate '${key}'`);
     return args.some(isSeq) ? membership(key, args, negated) : compare(key, args, negated);

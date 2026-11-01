@@ -6,7 +6,8 @@
  * triggers. */
 import { hashContent } from '@jarenjs/core/string';
 import { DbCompileError, INVARIANT_MARKER } from '../errors.js';
-import { existsRowSql, probeKeys, probeTarget, sameTable } from '../invariants.js';
+import { existsRowSql, keyColumnsOnly, probeKeys, probeTarget, sameTable } from '../invariants.js';
+import { CURRENT_SPELLING, PROGRAM_SPELLINGS } from './program-spellings.js';
 import { rowPredicate, rulePaths, safeRange } from './row-predicate.js';
 
 /** SQLite's flavor of the row-predicate lowering. SQLite spells types by
@@ -40,13 +41,16 @@ export const SQLITE = {
  * condition that is true when the write must be refused), the audit inserts
  * and the increments, in declaration order. A program's `name` is its suffix
  * after the table: the operation, or `update_of_<hash of its columns>`.
- * @param {any} mapping @param {any} all @param {any} dialect @param {any} flavor
+ * `spelling` picks the text a release planned (`program-spellings.js`): this
+ * release's by default, an earlier one to recognize what a store holds.
+ * @param {any} mapping @param {any} all @param {any} dialect @param {any} flavor @param {number} [spelling]
  * @returns {{ op: string, name: string, columns: string[], rules: string[], checks: { rule: string, when: string }[],
  *   audits: { rule: string, table: string, names: string[], values: string[], when: string }[],
  *   increments: { rule: string, column: string, when: string }[] }[]}
  */
-export function compileInvariants(mapping, all, dialect, flavor) {
+export function compileInvariants(mapping, all, dialect, flavor, spelling = CURRENT_SPELLING) {
   const q = dialect.quoteIdentifier;
+  const spelled = PROGRAM_SPELLINGS[spelling];
   /** @param {string} why @returns {never} */
   const fail = (why) => { throw new DbCompileError('JD0005', `database invariant: ${why}`); };
   const rules = mapping.invariants ?? [];
@@ -55,11 +59,19 @@ export function compileInvariants(mapping, all, dialect, flavor) {
    * key, or an index its open verifies covering the match), its match values
    * read as the rule reads them: a keyed one may read a column whose SQL NULL
    * is a missing member, which matches no row as the store's probe answers.
-   * @param {any} args @param {(expression: any, keyed: boolean) => string} value */
-  const probe = (args, value) => {
+   * Where writers do not serialize, a probe that an even number of `$not`s
+   * encloses locks the row it finds as the store's does (`keyColumnsOnly`):
+   * that row decides that the write passes. A negated probe's found row
+   * refuses the write, and no lock holds an absence, so it reads unlocked,
+   * through the writer's SELECT policy. SQLite spells no lock.
+   * @param {any} args @param {(expression: any, keyed: boolean) => string} value @param {boolean} positive */
+  const probe = (args, value, positive) => {
     const target = probeTarget(all.entities[args.entity]);
-    const keys = probeKeys(target.keys, target.indexes, Object.keys(args.match), args.entity, fail);
-    return existsRowSql({ match: args.match, target, keys }, dialect, (expression, column) => value(expression, keys.includes(column.name)));
+    const matched = Object.keys(args.match);
+    const keys = probeKeys(target.keys, target.indexes, matched, args.entity, fail);
+    const lock = !spelled.lockedProbe || !positive ? ''
+      : keyColumnsOnly(target.keys, target.indexes, matched) ? dialect.rowKeyShareLockSuffix : dialect.rowShareLockSuffix;
+    return existsRowSql({ match: args.match, target, keys }, dialect, (expression, column) => value(expression, keys.includes(column.name)), lock);
   };
   // an incremented member is the database's, like a version: never a change;
   // a store-owned table's document column holds the rest of the row
@@ -129,8 +141,8 @@ export function compileInvariants(mapping, all, dialect, flavor) {
 /** An increment is the trigger's last statement, a guarded update of its own
  * row: a trigger never fires itself while `recursive_triggers` is off, which
  * the store asserts at open. Each program carries the statement that drops it.
- * @param {any} mapping @param {any} all @param {any} dialect @returns {any[]} */
-export function sqliteInvariantTriggers(mapping, all, dialect) {
+ * @param {any} mapping @param {any} all @param {any} dialect @param {number} [spelling] @returns {any[]} */
+export function sqliteInvariantTriggers(mapping, all, dialect, spelling = CURRENT_SPELLING) {
   const q = dialect.quoteIdentifier;
   const sl = dialect.stringLiteral;
   // the row an increment updates, by its key columns
@@ -138,7 +150,7 @@ export function sqliteInvariantTriggers(mapping, all, dialect) {
     const column = q(/** @type {any} */ (mapping.columns.find((c) => c.name === key)).physical);
     return `${column} = NEW.${column}`;
   }).join(' AND ');
-  return compileInvariants(mapping, all, dialect, SQLITE).map((program) => {
+  return compileInvariants(mapping, all, dialect, SQLITE, spelling).map((program) => {
     const bodies = [
       ...program.checks.map((check) => `SELECT RAISE(ABORT, ${sl(`${INVARIANT_MARKER}${check.rule}`)}) WHERE ${check.when};`),
       ...program.audits.map((audit) => `INSERT INTO ${audit.table} (${audit.names.join(', ')}) SELECT ${audit.values.join(', ')}${audit.when ? ` WHERE ${audit.when}` : ''};`),

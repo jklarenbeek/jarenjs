@@ -403,7 +403,10 @@ no continuation to emit.
   a plan (MIGRATION-FORMAT §11). `jaren-db plan --model <model> --store <db>
   --upgrade-columns` prints, or with `--out` writes, the link
   `planColumnUpgrade` plans from the database's catalog for the definitions a
-  table an earlier release created still holds (MIGRATION-FORMAT §3).
+  table an earlier release created still holds (MIGRATION-FORMAT §3), and
+  `--upgrade-programs` the link `planProgramUpgrade` plans for the database
+  rules' programs an earlier release installed, which a store opens and
+  reports in `store.earlierPrograms`.
 - **A document migration does not need the database.** Its `jslt` and
   `query` steps act on documents, so `migrateDocuments` runs them over
   arrays and `streamDocuments` over a source it may walk only once,

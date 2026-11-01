@@ -3113,6 +3113,8 @@ export function openStore(model, options) {
       const plans = new Map();
       /** @type {Map<string, any>} */
       const entityPlans = new Map();
+      /** The rule programs the open found as an earlier release planned them, `{ table, program, spelling }`. @type {readonly any[]} */
+      let earlierPrograms = Object.freeze([]);
       // Planning can REFUSE — a derived index over a member the schema
       // does not type as geography is JD0004 here, not at normalization,
       // because the physical mapping it plans is a property of the
@@ -3242,6 +3244,11 @@ export function openStore(model, options) {
         chain(needsDeriveFunctions ? registerDeriveFunctions(connection) : null, () =>
         chain(ensureShape(connection, collections, plans, createsNothing), () =>
         chain(ensureEntityShape(connection, entityPlans, entities, createsNothing), () => {
+          // the rule programs the open found as an earlier release planned them
+          earlierPrograms = Object.freeze([...entityPlans.values()].flatMap((plan) => {
+            const verified = plan.physical ?? plan;
+            return (verified.earlierPrograms ?? []).map((/** @type {any} */ held) => Object.freeze({ table: verified.table, ...held }));
+          }));
           // ————— change capture (LIVE-FORMAT §§1–6) —————
           const captureOption = options.capture ?? (options.replication === undefined ? undefined : true);
           const captureRequested = captureOption === true
@@ -4537,6 +4544,8 @@ export function openStore(model, options) {
                 gatedRead(() => entityEngine.explain(document, queryOptions), undefined, signalOf('explain', [document, queryOptions]))),
             roots: entityEngine === null ? undefined : Object.freeze([...entities.keys()]),
             relations: entityEngine === null ? undefined : entityEngine.relations,
+            // what a reviewed link would replace (`planProgramUpgrade`), as the open found it
+            earlierPrograms,
             // entity live queries re-run on invalidation — declared,
             // not attempted (LIVE-FORMAT §7). Registration takes the
             // store gate through its INITIAL query, like a collection's

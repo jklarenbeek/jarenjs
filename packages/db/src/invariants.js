@@ -132,10 +132,19 @@ export function probeTarget(entity) {
         members: index.expression === undefined ? index.columns : [null], partial: index.where !== undefined, unique: index.unique }))) };
 }
 
-/** Replace each `$exists-row` with a read of its answer, collecting the probes.
- * @param {any} node @param {any[]} probes @param {(why: string) => never} fail @returns {any} */
-function withProbes(node, probes, fail) {
-  if (Array.isArray(node)) return node.map((item) => withProbes(item, probes, fail));
+/** Replace each `$exists-row` with a read of its answer, collecting the
+ * probes, each with whether it stands in a strictly positive position —
+ * reached from the assertion through `$and`, `$or` and an even number of
+ * `$not`s alone — the one position where the row it finds decides that the
+ * write passes, so the one where a probe locks that row (§13.2). Under an
+ * odd number of `$not`s a found row refuses the write, and anywhere else (a
+ * comparison of its answer, an operand) the answer is no monotone verdict:
+ * those probes read unlocked.
+ * @param {any} node @param {any[]} probes @param {(why: string) => never} fail
+ * @param {number} [polarity] - 1 strictly positive, -1 under an odd number of `$not`s, 0 any other position
+ * @returns {any} */
+function withProbes(node, probes, fail, polarity = 1) {
+  if (Array.isArray(node)) return node.map((item) => withProbes(item, probes, fail, 0));
   if (!node || typeof node !== 'object' || Object.hasOwn(node, '$const')) return node;
   if (Object.hasOwn(node, '$exists-row')) {
     const probe = node['$exists-row'];
@@ -143,10 +152,14 @@ function withProbes(node, probes, fail) {
       || Object.keys(probe).some((key) => !['entity', 'match'].includes(key)) || typeof probe.entity !== 'string'
       || !isJsonObject(probe.match) || Object.keys(probe.match).length === 0)
       fail('$exists-row is { entity, match: { <member>: <value>, … } }');
-    probes.push({ entity: probe.entity, match: probe.match });
+    probes.push({ entity: probe.entity, match: probe.match, positive: polarity === 1 });
     return { $eq: [`$.probes[${probes.length - 1}]`, true] };
   }
-  return Object.fromEntries(Object.entries(node).map(([key, value]) => [key, withProbes(value, probes, fail)]));
+  const logical = Object.keys(node).length === 1;
+  return Object.fromEntries(Object.entries(node).map(([key, value]) => [key,
+    logical && (key === '$and' || key === '$or') && Array.isArray(value) ? value.map((item) => withProbes(item, probes, fail, polarity))
+      : logical && key === '$not' && isJsonObject(value) ? withProbes(value, probes, fail, -polarity)
+        : withProbes(value, probes, fail, 0)]));
 }
 
 /** Whether every leaf of an arithmetic node is a record path or an integer
@@ -335,18 +348,19 @@ export function probeKeys(keys, indexes, matched, entity, refuse) {
 /**
  * Whether a probe compares key columns only — the target's key, and the
  * columns of its unique indexes over plain column terms without a condition,
- * which PostgreSQL counts as key columns — so that the store's probe locks
- * the row it finds `FOR KEY SHARE`: a delete, and an update that changes a
- * key column, each take `FOR UPDATE`, which waits for it. An update that
- * changes only other columns takes `FOR NO KEY UPDATE`, which `FOR KEY SHARE`
- * admits, so a probe that compares any other column — whatever keys it —
- * locks `FOR SHARE`, which waits for every update.
+ * which PostgreSQL counts as key columns — so that a probe, the store's and
+ * a database rule's program alike, locks the row it finds `FOR KEY SHARE`: a
+ * delete, and an update that changes a key column, each take `FOR UPDATE`,
+ * which waits for it. An update that changes only other columns takes
+ * `FOR NO KEY UPDATE`, which `FOR KEY SHARE` admits, so a probe that compares
+ * any other column — whatever keys it — locks `FOR SHARE`, which waits for
+ * every update.
  * @param {string[]} keys - the target's key members
  * @param {ProbeIndex[]} indexes - the target's indexes its open verifies
  * @param {string[]} matched - the members the probe matches
  * @returns {boolean}
  */
-function keyColumnsOnly(keys, indexes, matched) {
+export function keyColumnsOnly(keys, indexes, matched) {
   const unique = indexes.filter((index) => index.unique && plainIndex(index));
   return matched.every((member) => keys.includes(member) || unique.some((index) => index.members.includes(member)));
 }
@@ -603,7 +617,8 @@ export function checkInvariants(rules, op, before, after, context = {}) {
  * (`=`, an indexed read) and whose other members match null-safely, so a
  * `null` literal means IS NULL. `value` renders one match value; `lock` is a
  * row-lock suffix the read takes on the row it finds (the store's probe
- * passes one, a database rule's program none).
+ * passes one, and so does a database rule's program as this release spells
+ * it, `program-spellings.js`).
  * @param {any} probe a resolved probe @param {any} dialect
  * @param {(expression: any, column: any) => string} value @param {string} [lock]
  * @returns {string}

@@ -678,7 +678,8 @@ if (asyncLiveLeak.length)
 // Raised to 1,124,600 (measured 1124594): a root cursor's turn for the event loop — the option's validation and by-name refusal (options 888), the paced admission and the one serializer (cursor 446), the cursor option sets and the synchronous twin's refusal (query 326), the root call sites and the transaction view's refusal (store 183), iterate's read by policy (relational 179) and the job page's member (jobs 90) — less minifier renames elsewhere net 164, add 1948.
 // Raised to 1,125,500 (measured 1125414): a database rule's existence probe keyed by any index its open verifies — a target's indexes, unique and not, merged with its foreign-key columns, and the refusal naming the members an index must cover (invariants 820), add 820.
 // Raised to 1,125,800 (measured 1125750): a store rule's existence probe locking the row it finds — the lock chosen by whether it compares key columns only, and the dialect's two row-lock spellings (invariants 186, dialect 94, entity 56), add 336.
-if (clientBytes > 1125800)
+// Raised to 1,127,200 (measured 1127121): a database rule's installed programs recognized by the release whose text they hold and reported at open (physical 623, store 191, ddl 150, program-spellings 103), and a probe that locks the row it finds only where that row lets the write pass, a database rule's program and a store rule's alike (invariants 156, invariant-sql 120, row-predicate 14, entity 14), add 1371.
+if (clientBytes > 1127200)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 

@@ -784,7 +784,7 @@ export function postgresDialect(options = undefined) {
     doubleEqual,
     physicalTypeMatches: postgresPhysicalTypeMatches,
     qualifyPhysicalColumn: qualifyPostgresPhysicalColumn,
-    invariantTriggers: (mapping, all, dialect) => postgresInvariantTriggers(mapping, all, dialect, IDENTIFIER_BYTES),
+    invariantTriggers: (mapping, all, dialect, spelling) => postgresInvariantTriggers(mapping, all, dialect, IDENTIFIER_BYTES, spelling),
     rowPredicateFlavor: POSTGRES,
     // the server keeps no CREATE text, so the open reads each index condition
     // and generated column's expression back from its deparse and compares it

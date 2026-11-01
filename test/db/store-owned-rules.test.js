@@ -132,9 +132,12 @@ describe('a database rule on a store-owned layout, on SQLite', () => {
     for (const [, dialect] of DIALECTS) assert.match(planInvariants(via, { dialect })[0].sql, /"parentId"/);
     // a probe keyed by an integer member, of the target's codec, lowers; so does a store rule's probe of another codec,
     // which the store binds through the target's codec
-    for (const [name, dialect] of DIALECTS) assert.match(planInvariants(probing('$.new.a'), { dialect }).map((item) => item.sql).join('\n'),
-      name === 'sqlite' ? /EXISTS \(SELECT 1 FROM "log" AS "_jaren_row" WHERE "_jaren_row"\."id" = NEW\."a"\)/
-        : /EXISTS \(SELECT 1 FROM "tenant"\."log" AS "_jaren_row" WHERE "_jaren_row"\."id" = NEW\."a"\)/);
+    // (on PostgreSQL locking the row it finds by the key FOR KEY SHARE)
+    for (const [name, dialect] of DIALECTS) {
+      const sql = planInvariants(probing('$.new.a'), { dialect }).map((item) => item.sql).join('\n');
+      assert.ok(sql.includes(name === 'sqlite' ? 'EXISTS (SELECT 1 FROM "log" AS "_jaren_row" WHERE "_jaren_row"."id" = NEW."a")'
+        : 'EXISTS (SELECT 1 FROM "tenant"."log" AS "_jaren_row" WHERE "_jaren_row"."id" = NEW."a" FOR KEY SHARE)'), sql);
+    }
     const stored = probing('$.new.t', { t: { type: 'string' } });
     stored.entities.E.invariants[0].enforcement = 'store';
     assert.doesNotThrow(() => normalizeEntities(stored));

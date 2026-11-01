@@ -62,9 +62,13 @@ const refusedEverywhere = (model, expected) => {
 describe('a probe keyed by a unique index', () => {
   it('is refused until the target declares an index over the matched members, naming what keys a probe', () => {
     refusedEverywhere(codedModel('database', null), { code: 'JD0005', message: /must match its key member 'id', or every column of an index its open verifies.*declare one over 'code'/s });
-    // an index that is not unique keys the probe too, as the unique one does
-    for (const indexes of [[ORDERS_CODE], [{ ...ORDERS_CODE, unique: false }]]) for (const [, dialect] of DIALECTS)
-      assert.match(planInvariants(codedModel('database', indexes), { dialect })[0].sql, /WHERE "_jaren_row"\."code" = NEW\."sku"\)/);
+    // an index that is not unique keys the probe too, as the unique one does; on PostgreSQL the probe locks the
+    // row it finds FOR KEY SHARE through a unique index's column and FOR SHARE through another's
+    for (const indexes of [[ORDERS_CODE], [{ ...ORDERS_CODE, unique: false }]]) for (const [name, dialect] of DIALECTS) {
+      const lock = name === 'sqlite' ? '' : indexes[0].unique ? ' FOR KEY SHARE' : ' FOR SHARE';
+      const sql = planInvariants(codedModel('database', indexes), { dialect })[0].sql;
+      assert.ok(sql.includes(`WHERE "_jaren_row"."code" = NEW."sku"${lock})`), sql);
+    }
     for (const [, dialect] of DIALECTS) assert.equal(planInvariants(codedModel('database'), { dialect }).length, dialect === sqliteDialect ? 2 : 4);
     assert.doesNotThrow(() => normalizeEntities(codedModel('store')));
     // a composite unique index keys a probe that matches every one of its columns, in any order, beside other members

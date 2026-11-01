@@ -45,7 +45,7 @@ import { modelIdentity, migrationIdentity } from './migration-identity.js';
 import { migrationChecksum, historyStatements, readMigrationHistory, checkHistoryObservation, checkAppliedRows,
   historyHeader, identityRows, checkHistoryIdentity, checkHistoryChain, writeIdentityRows } from './migration-history.js';
 export { HISTORY_TABLE, ENGINE_TABLES };
-import { DOC_COLUMN, planCollection, withoutContainerKeys, verifyShape, legacyColumnTypes, earlierIndexesHeld, planEntity, planJoinTable, joinIndexName, clipToBytes, plannedExpression, acceptsColumn, columnExpression, creationOrder, kindIndexSql, kindIndexTerms, kindIndexDropSql, numberCheckOf } from './ddl.js';
+import { DOC_COLUMN, planCollection, withoutContainerKeys, verifyShape, legacyColumnTypes, earlierIndexesHeld, planEntity, planJoinTable, joinIndexName, clipToBytes, plannedExpression, acceptsColumn, columnExpression, creationOrder, kindIndexSql, kindIndexTerms, kindIndexDropSql, numberCheckOf, planInvariants, MANAGED_SQL_OPTIONS } from './ddl.js';
 import { normalizeEntities, explainMapping, asHistory } from './model.js';
 import { derivedValue, memberAt, registerDeriveFunctions } from './derive.js';
 import { mergeEntityRow } from './graph.js';
@@ -58,7 +58,8 @@ import { applyTableMigration } from './table-migration.js';
 import { withForeignKeySettings } from './foreign-key-scope.js';
 import { withMigrationConnection, checkMigrationTarget, physicalTargetOf, comparePhysicalTarget, verifyShadowOwnership, physicalObjectKey, migrationOwnerOf, lockMigration, migrationWriterSettings, preservationSchemaOf, verifyPreservation, checkPhysicalPreservation } from './migration-target.js';
 import { readSchema } from './introspect.js';
-import { nonCodePointEncoding, verifyPhysical } from './physical.js';
+import { nonCodePointEncoding, verifyPhysical, verifyRulePrograms, heldPrograms, earlierSpellings, sameTriggerText } from './physical.js';
+import { CURRENT_SPELLING, PROGRAM_SPELLINGS } from './dialects/program-spellings.js';
 import { walkPhysicalRows, transformPhysicalRows } from './physical-transform.js';
 import {
   MIGRATION_VERSION, isPerDocumentAssertion, compileDocumentStep, checkMigrationDocument, checkReplacement,
@@ -1468,6 +1469,257 @@ export function planColumnUpgrade(connection, model, options = undefined) {
       return chain(refuseDuplicates(connection, unique), () =>
         chain(refuseStoredNaN(connection, unchecked), () => ({ migration, report: { upgraded } })));
     }))));
+}
+
+/**
+ * Plan the reviewed link that replaces the database rules' programs a database
+ * holds as an earlier release planned them (MIGRATION-FORMAT §3, "Upgrading
+ * the programs a table holds"), read from the catalog. Each program the model
+ * plans is classified as the open classifies it: this release's spelling, an
+ * earlier one (`program-spellings.js`), or a text no release planned — and
+ * every earlier one is replaced as this release plans it: on PostgreSQL its
+ * function by `CREATE OR REPLACE FUNCTION` where its trigger stays as it is,
+ * which takes no table lock, and otherwise, as on SQLite, by dropping and
+ * creating it. A program that holds a text no release planned is refused
+ * (`JD0002`, naming each): the link would overwrite a hand edit. A program the
+ * model plans on a table that holds none of it is not this plan's to install —
+ * a planned migration installs it (MIGRATION-FORMAT §9) — and the report names
+ * it. A database whose programs are this release's plans no step, which is
+ * how a host learns that a store is behind: the plan is the probe.
+ * `spelling` plans the link to that spelling instead, a link back after which
+ * the release that planned it opens the store. The link goes from the model to
+ * itself and is applied by {@link migrate} as the next link of the chain; one
+ * that replaces a physical layout's program is planned as
+ * {@link planPhysicalMigration} plans one, every other source object
+ * preserved, its target the host's `physicalTarget` or else the catalog the
+ * steps leave: computed from the CREATE texts where the engine keeps them,
+ * read where it deparses them in a transaction this plan rolls back.
+ * @param {any} connection - an open connection to the database, as `migrate` opens one
+ * @param {any} model - the model the database holds (its tables open under it)
+ * @param {{ id?: string, expressions?: Record<string, any>, physicalTarget?: any, spelling?: number }} [options] -
+ *   `id` the link's name (`programs-<spelling>-<hash>` by default, suffixed past the ids
+ *   the history holds); `expressions` the host's declared index-expression functions;
+ *   `physicalTarget` the reviewed target of a physical link; `spelling` the spelling to
+ *   install, this release's by default
+ * @returns {any} value-or-promise of `{ migration, report: { upgraded: string[], absent: string[] } }`:
+ *   `upgraded` names each program the link replaces, `absent` each one the model plans
+ *   on a table that holds none of it, `<table>.<program>`
+ */
+export function planProgramUpgrade(connection, model, options = undefined) {
+  readOptions(options, ['id', 'expressions', 'physicalTarget', 'spelling'], 'planProgramUpgrade()');
+  if (options?.id !== undefined && options.id !== null && (typeof options.id !== 'string' || options.id === ''))
+    throw refuse('JD0013', `planProgramUpgrade() option 'id' is a non-empty string, the migration's name in the history, got ${JSON.stringify(options.id)}`);
+  const wanted = options?.spelling ?? CURRENT_SPELLING;
+  if (!Number.isInteger(wanted) || wanted < 0 || wanted > CURRENT_SPELLING)
+    throw refuse('JD0013', `planProgramUpgrade() option 'spelling' is a spelling a release planned, 0 to ${CURRENT_SPELLING}, got ${JSON.stringify(options?.spelling)}`);
+  const dialect = connection.dialect;
+  // the plan refuses what the model's programs cannot be, as planInvariants does
+  planInvariants(model, { dialect, expressions: options?.expressions });
+  const mapping = explainMapping(model);
+  const tables = Object.entries(mapping.entities)
+    .filter(([, entity]) => (entity.invariants ?? []).some((/** @type {any} */ rule) => rule.enforcement === 'database'))
+    .map(([name, entity]) => {
+      const plan = planEntity(name, entity, mapping, dialect, { expressions: options?.expressions });
+      return plan.physical ? { table: plan.physical.table, physical: true, items: plan.physical.triggers, at: plan.physical.triggersAt }
+        : { table: plan.table, physical: false, items: plan.programs, at: plan.programsAt };
+    });
+  const deparsed = dialect.introspect.invariantPrograms !== undefined;
+  return chain(heldRulePrograms(connection, tables), (held) => {
+    /** @type {string[]} */
+    const upgraded = [], absent = [], drifted = [];
+    /** @type {any[]} */
+    const steps = [];
+    let physical = false;
+    // each object a step replaces, by type and name, with the CREATE text it leaves
+    /** @type {Map<string, string>} */
+    const replaced = new Map();
+    for (const entry of tables) {
+      const programs = held.get(entry.table);
+      if (programs === null) continue;
+      /** @type {Map<number, any[]>} */
+      const spelled = new Map([[CURRENT_SPELLING, entry.items]]);
+      const at = (/** @type {number} */ spelling) => {
+        if (!spelled.has(spelling)) spelled.set(spelling, entry.at(spelling));
+        return /** @type {any[]} */ (spelled.get(spelling));
+      };
+      for (const { trigger, actual, spelling } of programs) {
+        const name = `${entry.table}.${trigger.name}`;
+        if (actual === undefined) { absent.push(name); continue; }
+        if (spelling < 0) { drifted.push(`the program '${trigger.name}' on '${entry.table}'`); continue; }
+        const items = (/** @type {number} */ n) => at(n).filter((item) => item.name === trigger.name);
+        const from = items(spelling), to = items(wanted);
+        if (from.length === to.length && from.every((item, i) => item.sql === to[i].sql)) continue;
+        upgraded.push(name);
+        physical ||= entry.physical;
+        const replacing = programSteps(from, to, programNote(trigger.name, entry.table, spelling, wanted));
+        steps.push(...replacing);
+        for (const item of replacing.length === 1 ? to.filter((each) => each.type === 'function') : [...from, ...to])
+          replaced.set(item.type === 'function' ? `function:${item.name}()` : `${item.type}:${item.name}`, to.find((each) => each.type === item.type)?.sql);
+      }
+    }
+    if (drifted.length > 0) {
+      throw new DbCompileError('JD0002', `planProgramUpgrade(): ${drifted.join(', ')} ${drifted.length > 1 ? 'hold texts' : 'holds a text'} no `
+        + 'release planned for this model, which a link would overwrite; restore it, or install it from planInvariants\' statements, and plan again');
+    }
+    const identity = migrationIdentity(model, model);
+    const hash = hashContent(identity.to);
+    const named = options?.id ?? null;
+    return chain(named !== null ? named : unusedMigrationId(connection, `programs-${wanted}-${hash.slice(0, 8)}`), (id) => {
+      const report = { upgraded, absent };
+      if (!physical) return { migration: { $migration: MIGRATION_VERSION, id, from: hash, to: hash, identity, steps }, report };
+      return chain(preservationSchemaOf(connection), (/** @type {any[]} */ source) => {
+        const dispositions = Object.fromEntries(source.map((object) => [physicalObjectKey(object),
+          replaced.has(`${object.type}:${object.name}`) ? 'replace' : 'preserve']));
+        return chain(options?.physicalTarget !== undefined ? options.physicalTarget
+          : deparsed ? reviewedPhysicalTarget(connection, steps) : computedPhysicalTarget(source, replaced),
+        (physicalTarget) => chain(planPhysicalMigration(connection, model, model, { id, steps, dispositions, physicalTarget }),
+          (migration) => ({ migration, report })));
+      });
+    });
+  });
+}
+
+/**
+ * What the catalog holds of each rule table's planned programs, by table:
+ * `null` for a table the database does not hold (the open creates it, with its
+ * programs), else each planned program classified as the open classifies it
+ * ({@link heldPrograms}): on an engine that deparses programs (PostgreSQL) by
+ * its catalog row read back field by field, from one read of the namespace; on
+ * one that keeps CREATE text (SQLite) by that text, under the comparison the
+ * table's open makes — formatting aside for a table the store owns, exact for a
+ * physical layout's.
+ * @param {any} connection
+ * @param {{ table: string, physical: boolean, items: any[], at: (spelling: number) => any[] }[]} tables
+ * @returns {any} value-or-promise of `Map<string, { trigger: any, actual: any, spelling: number }[] | null>`
+ */
+function heldRulePrograms(connection, tables) {
+  const dialect = connection.dialect;
+  if (dialect.introspect.invariantPrograms !== undefined) {
+    return chain(tables.length === 0 ? [] : useStatementOnce(connection, dialect.introspect.invariantPrograms(undefined), (s) => s.all([])),
+      (/** @type {any[]} */ rows) => new Map(tables.map((entry) => [entry.table, rows.some((row) => row.kind === 'table' && row.owner === entry.table)
+        ? heldPrograms(rows, entry.table, entry.items.filter((item) => item.type !== 'function' && item.program !== undefined), earlierSpellings(entry.at))
+        : null])));
+  }
+  /** @type {Map<string, any>} */
+  const out = new Map();
+  const next = (/** @type {number} */ i) => (i >= tables.length ? out
+    : chain(useStatementOnce(connection, dialect.introspect.declaredSql(tables[i].table), (s) => s.all([])), (/** @type {any[]} */ rows) => {
+      const entry = tables[i];
+      const same = entry.physical ? sameTriggerText
+        : (/** @type {string} */ want, /** @type {string} */ have) => comparableDeclaredSql(want, MANAGED_SQL_OPTIONS) === comparableDeclaredSql(have, MANAGED_SQL_OPTIONS);
+      const earlier = earlierSpellings(entry.at);
+      out.set(entry.table, !rows.some((row) => row.type === 'table' && row.name === entry.table) ? null
+        : entry.items.filter((item) => item.type === 'trigger').map((trigger) => {
+          const actual = rows.find((row) => row.type === 'trigger' && row.name === trigger.name)?.sql;
+          const spelling = actual === undefined ? -1 : same(trigger.sql, actual) ? CURRENT_SPELLING
+            : earlier(trigger.name, (want) => same(want.sql, actual));
+          return { trigger, actual, spelling };
+        }));
+      return next(i + 1);
+    }));
+  return next(0);
+}
+
+/**
+ * The steps that replace one installed program: `from` the items the spelling
+ * it holds planned for it, `to` the items the link installs — on PostgreSQL its
+ * function and the trigger that calls it, on SQLite its trigger. Where the
+ * trigger stays as it is (its fields, and the function it calls by name,
+ * return type and arguments), one step replaces the function in place, which
+ * keeps the trigger and takes no table lock; otherwise the trigger and its
+ * function are dropped and created again, one statement a step.
+ * @param {any[]} from @param {any[]} to @param {string} note
+ * @returns {{ kind: 'ddl', sql: string, note: string }[]}
+ */
+export function programSteps(from, to, note) {
+  const fn = to.find((item) => item.type === 'function');
+  /** @param {any[]} items */
+  const kept = (items) => {
+    const program = items.find((item) => item.type !== 'function')?.program;
+    return program === undefined ? null : canonicalizeJson({ ...program, function: { schema: program.function.schema, name: program.function.name,
+      returns: program.function.returns, arguments: program.function.arguments } });
+  };
+  if (fn !== undefined && kept(from) !== null && kept(from) === kept(to))
+    return [{ kind: 'ddl', sql: fn.sql.replace(/^CREATE FUNCTION /, 'CREATE OR REPLACE FUNCTION '), note }];
+  // dropping a PostgreSQL trigger waits for every open reader and writer of its table
+  const noted = fn === undefined ? note : `${note}; dropping its trigger takes the table's ACCESS EXCLUSIVE lock`;
+  return [...[...from].reverse().map((item) => ({ kind: /** @type {const} */ ('ddl'), sql: item.drop, note: noted })),
+    ...to.map((item) => ({ kind: /** @type {const} */ ('ddl'), sql: item.sql, note: noted }))];
+}
+
+/**
+ * A physical link's target where the engine keeps each object's CREATE text
+ * (SQLite): the source objects as they are, but each one the steps replace as
+ * the text they leave.
+ * @param {any[]} source - the objects the plan preserves or replaces ({@link preservationSchemaOf})
+ * @param {Map<string, string>} replaced - by `<type>:<name>`, the CREATE text a replaced object is left with
+ * @returns {{ objects: { type: string, name: string, owner: string, sql: string }[] }}
+ */
+export function computedPhysicalTarget(source, replaced) {
+  return { objects: source.filter((object) => ['table', 'view', 'index', 'trigger'].includes(object.type))
+    .map((object) => ({ type: object.type, name: object.name, owner: object.owner, sql: replaced.get(`${object.type}:${object.name}`) ?? object.sql })) };
+}
+
+/**
+ * A physical link's target where the engine deparses what it keeps
+ * (PostgreSQL): the catalog the steps leave, read inside a transaction that is
+ * rolled back, so planning changes nothing.
+ * @param {any} connection @param {{ sql: string }[]} steps
+ * @returns {any} value-or-promise of `{ dialect, schema, catalog }`
+ */
+function reviewedPhysicalTarget(connection, steps) {
+  const review = new Error('the review of a physical target is rolled back');
+  /** @type {any} */
+  let target;
+  const settle = (/** @type {any} */ error) => {
+    if (error !== review) throw error;
+    return target;
+  };
+  let out;
+  try {
+    out = connection.transaction((/** @type {any} */ tx) => {
+      const run = (/** @type {number} */ i) => (i >= steps.length ? null : chain(tx.exec(steps[i].sql), () => run(i + 1)));
+      return chain(run(0), () => chain(preservationSchemaOf(tx), (catalog) => {
+        target = { dialect: connection.dialect.name, schema: connection.dialect.schema, catalog };
+        throw review;
+      }));
+    });
+  }
+  catch (error) {
+    return settle(error);
+  }
+  return isThenable(out) ? out.then(() => target, settle) : target;
+}
+
+/**
+ * A replacement step's note: the program, and what the spelling the link
+ * installs changes in it.
+ * @param {string} program @param {string} table @param {number} from @param {number} to
+ * @returns {string}
+ */
+function programNote(program, table, from, to) {
+  const was = PROGRAM_SPELLINGS[from], will = PROGRAM_SPELLINGS[to];
+  const changes = [];
+  if (was.lockedProbe !== will.lockedProbe) {
+    changes.push(will.lockedProbe ? 'each probe no $not encloses locks the row it finds, FOR KEY SHARE when every member it matches is a key column '
+      + 'and FOR SHARE otherwise, which needs a writer\'s UPDATE privilege on the table it probes'
+      : 'each probe locks no row, as releases before the lock planned it');
+  }
+  return `replace the rule program '${program}' on '${table}' as ${to === CURRENT_SPELLING ? 'this release plans it' : `spelling ${to} planned it`}`
+    + `${changes.length ? `: ${changes.join('; ')}` : ''}`;
+}
+
+/** An unused id for a link: `base`, or `base-2`, `base-3`, … past the ids the
+ * database's history holds, so a link planned again after another of the same
+ * model never repeats one (`JD0013`).
+ * @param {any} connection @param {string} base @returns {any} value-or-promise of the id */
+function unusedMigrationId(connection, base) {
+  return chain(readMigrationHistory(connection), (observed) => {
+    const ids = new Set(observed.history.rows.map((/** @type {any} */ row) => String(row.id)));
+    let id = base;
+    for (let n = 2; ids.has(id); n++) id = `${base}-${n}`;
+    return id;
+  });
 }
 
 /**
@@ -3698,18 +3950,54 @@ function validateTargetState(connection, model, options) {
   return chain(verifyNext(0), () => verifyEntity(0));
 }
 
-/** One target-model acceptance owner for apply, adoption and the replay boundary. */
-function acceptMigrationModel(connection, model, options, driver, physical, target) {
+/** One target-model acceptance owner for apply, adoption and the replay boundary;
+ * `steps`, the chain's last link's, where it was applied in this run. */
+function acceptMigrationModel(connection, model, options, driver, physical, target, steps = undefined) {
   if (model === undefined) return null;
   return chain(validateTargetState(connection, model, options), () => {
     const entities = normalizeEntities(model);
     if (entities.size === 0 || physical || target !== undefined || [...entities.values()].some((entity) => entity.physical)) return null;
     if (typeof driver?.open !== 'function') throw refuse('JD0021', 'borrowed model comparison requires shadowDriver or a complete physicalTarget');
-    if (connection.dialect.capabilities.declaredSqlText !== true) return acceptJoinTables(connection, model);
+    if (connection.dialect.capabilities.declaredSqlText !== true)
+      return chain(acceptJoinTables(connection, model), () => acceptPrograms(connection, model, options.expressions, steps ?? []));
     return chain(compareShapeToModel(driver, connection, model, options.registerFunctions, options.expressions), (difference) => {
       if (difference !== null) throw refuse('JD0023', `the migrated shape does not equal the target model's: ${difference}`);
     });
   });
+}
+
+/**
+ * On an engine that keeps no CREATE text to compare (PostgreSQL), the rule
+ * programs of each table the store owns whose programs the chain's last link
+ * replaces, creates or drops — a step that names one the model plans — read
+ * back as the next open reads them ({@link verifyRulePrograms}): a link that
+ * leaves a program no release planned, or a trigger the model does not
+ * declare, is refused `JD0023` before it commits, as SQLite's shape
+ * comparison refuses it. A program an earlier release planned passes, as the
+ * open opens it.
+ * @param {any} connection @param {any} model @param {Record<string, any> | undefined} expressions
+ * @param {any[]} steps - the last link's steps
+ * @returns {any} value-or-promise
+ */
+function acceptPrograms(connection, model, expressions, steps) {
+  const dialect = connection.dialect;
+  const statements = steps.flatMap((step) => (['ddl', 'sql'].includes(step?.kind) && typeof step.sql === 'string' ? [step.sql] : []));
+  if (statements.length === 0) return null;
+  const mapping = explainMapping(model);
+  const plans = Object.entries(mapping.entities)
+    .filter(([, entity]) => (entity.invariants ?? []).some((/** @type {any} */ rule) => rule.enforcement === 'database'))
+    .map(([name, entity]) => planEntity(name, entity, mapping, dialect, { expressions }))
+    .filter((plan) => plan.programs.some((/** @type {any} */ item) => statements.some((sql) => sql.includes(dialect.quoteIdentifier(item.name)))));
+  const next = (/** @type {number} */ i) => {
+    if (i >= plans.length) return null;
+    const plan = plans[i];
+    const refusal = (/** @type {string} */ difference) => {
+      throw refuse('JD0023', `the migrated shape does not equal the target model's: entity '${plan.table}': ${difference}; the next open `
+        + 'would refuse the table (JD0002), so nothing was changed');
+    };
+    return chain(verifyRulePrograms(connection, plan.table, plan.programs, refusal, { undeclared: true, spelled: plan.programsAt }), () => next(i + 1));
+  };
+  return next(0);
 }
 
 /**
@@ -4203,7 +4491,7 @@ function runMigration(target, migrations, options, replay = undefined, shadowRep
           // validation and its shape, against the last link
           const finalChecks = (scope, migration) => acceptMigrationModel(scope, options.model,
             { compileSchema: options.compileSchema, batchSize, expressions: options.expressions,
-              registerFunctions: options.registerFunctions }, referenceDriver, migration.physical, finalTarget);
+              registerFunctions: options.registerFunctions }, referenceDriver, migration.physical, finalTarget, migration.steps);
           const record = (scope, migration) => chain(readMigrationHistory(scope, true), (current) => {
             const rows = current.history.rows, at = expectedRows.length;
             if (rows.length !== at + 1 || rows[at].id !== migration.id

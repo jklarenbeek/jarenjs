@@ -8,6 +8,7 @@
 import { hashContent, utf8ByteLength } from '@jarenjs/core/string';
 import { DbCompileError, INVARIANT_MARKER, INVARIANT_SQLSTATE } from '../errors.js';
 import { compileInvariants } from './invariant-sql.js';
+import { CURRENT_SPELLING } from './program-spellings.js';
 import { safeRange } from './row-predicate.js';
 
 /** The search path every rule function runs under, as the catalog keeps it. */
@@ -125,13 +126,14 @@ function triggerFunction(dialect, table, name, rule, on, source) {
         returns: 'trigger', arguments: '', volatility: 'v', securityDefiner: false, config: [`search_path=${SEARCH_PATH}`], source } } }];
 }
 
-/** @param {any} mapping @param {any} all @param {any} dialect @param {number} limit @returns {any[]} */
-export function postgresInvariantTriggers(mapping, all, dialect, limit) {
+/** @param {any} mapping @param {any} all @param {any} dialect @param {number} limit
+ * @param {number} [spelling] - the text a release planned (`program-spellings.js`) @returns {any[]} */
+export function postgresInvariantTriggers(mapping, all, dialect, limit, spelling = CURRENT_SPELLING) {
   if (dialect.schema === undefined && (mapping.invariants ?? []).some((rule) => rule.enforcement === 'database'))
     throw new DbCompileError('JD0005', 'database invariant: PostgreSQL rules install in the driver-owned schema; name it with searchPath');
   const q = dialect.quoteIdentifier;
   const sl = dialect.stringLiteral;
-  const programs = compileInvariants(mapping, all, dialect, POSTGRES);
+  const programs = compileInvariants(mapping, all, dialect, POSTGRES, spelling);
   // TRUNCATE removes rows without a row trigger: on a table whose deletes a
   // rule judges, a statement program refuses it in the delete rule's name
   const deletes = programs.find((program) => program.op === 'delete');

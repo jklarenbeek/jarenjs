@@ -512,6 +512,66 @@ carries the DDL it planned and keeps creating that release's definitions when it
 applies; planning the link again creates this release's, and the upgrade after
 it rebuilds what it created.
 
+### Upgrading the programs a table holds
+
+A database rule's programs (MODEL-FORMAT §13.4) carry no mark of the release
+that installed them, so the open recognizes one only as the exact text a
+release planned for the model: this release's, an earlier release's, or none.
+A program an earlier release installed opens unchanged and keeps judging writes
+as that release's did — on PostgreSQL its probes lock no row — and the store
+names it in `store.earlierPrograms`; a text no release planned is refused
+(`JD0002`). Nothing is replaced at open. `planProgramUpgrade(connection, model,
+options?)` reads the catalog and plans the reviewed link that replaces each
+earlier program as this release plans it:
+
+- On PostgreSQL, a program whose trigger stays as it is is replaced by
+  `CREATE OR REPLACE FUNCTION` alone: no table lock, so it waits for no open
+  reader or writer of the table, keeps the function's owner and grants, and
+  every statement that starts after the link commits runs the new body. A
+  program whose trigger changes is dropped and created again, which takes the
+  table's ACCESS EXCLUSIVE lock (the step's note says so).
+- On SQLite, a program is dropped and created again inside the link's
+  transaction, under the writer lock. No SQLite text has changed between
+  releases yet, so a SQLite store plans no step.
+- A program that holds a text no release planned refuses the plan (`JD0002`,
+  naming each): a link would overwrite a hand edit. Restore it, or install it
+  from `planInvariants`' statements, and plan again.
+- A program the model plans on a table that holds none of it — a rule added to
+  a populated table — is not this link's: a planned migration installs it (§9),
+  and `report.absent` names it. A table the database does not hold is left to
+  the open, which creates it with its programs.
+
+Tables the store owns take a link from the model to itself, applied with
+`{ model }`; its acceptance reads back the programs of every table whose program
+a step names, as the next open reads them, and refuses the link (`JD0023`) before
+it commits where one holds a text no release planned. A link that replaces a
+physical layout's program is planned as `planPhysicalMigration` plans one: every
+other source object `preserve`d, the replaced ones `replace`d, and its target the
+host's `physicalTarget`, else the catalog its steps leave — computed from the
+CREATE texts on SQLite, read inside a transaction the plan rolls back on
+PostgreSQL. A database whose programs are this release's plans no step, so the
+plan is the probe:
+
+```js
+const connection = await driver.open();
+let upgrade;
+try { upgrade = await planProgramUpgrade(connection, model); }
+finally { await connection.close(); }
+if (upgrade.migration.steps.length > 0)
+  await migrate({ driver }, [...previousMigrations, upgrade.migration], { baseline, model });
+```
+
+The link's `id` defaults to `programs-<spelling>-<hash of the model>`, suffixed
+`-2`, `-3`, … past the ids the history already holds. `report.upgraded` names each
+program it replaces, `<table>.<program>`. Grant every writer role what the new
+programs need before applying the link (MIGRATION-UPGRADE, §69): on PostgreSQL a
+probe's lock needs the `UPDATE` privilege on a column of the table it probes.
+`{ spelling: 0 }` plans the link back to the programs the releases before the
+probe's lock installed, after which such a release opens the store again: a
+forward link, recorded like any other. At the command line, `jaren-db plan
+--model <model> --store <db> --upgrade-programs` prints or writes the same link
+(§11).
+
 ## 4. The shadow database
 
 When pending work exists and `shadow` is not `false`, the whole chain
@@ -1378,6 +1438,7 @@ drop the index) on a schema the store accepts.
 jaren-db plan     --from <model> --to <model> [--store <db>] [--id x] [--out file]
 jaren-db plan     --model <model> [--snapshot <file>] [--store <db>] [--id x] --out file
 jaren-db plan     --model <model> --store <db> --upgrade-columns [--id x] [--out file]
+jaren-db plan     --model <model> --store <db> --upgrade-programs [--id x] [--out file]
 jaren-db snapshot --model <model> [--snapshot <file>] [--types <file>]
 jaren-db status   --model <model> --store <db> [--migrations <dir>] [--snapshot <file>]
 jaren-db apply    --store <db> --baseline <model> --migrations <dir> [--model <m>] [--dry-run] [--yes]
@@ -1441,6 +1502,12 @@ jaren-db documents --migrations <dir> --in <file|-> (--out <file|-> | --in-place
   the CLI says so and writes nothing. The command line passes no functions,
   so a model that declares an index expression is refused `JD0004`, as by
   `plan --store`; plan its upgrade through the API with `{ expressions }`.
+- `plan --upgrade-programs` plans, the same way, the link `planProgramUpgrade`
+  plans (§3, "Upgrading the programs a table holds"): stderr names each program
+  it replaces and each one the model plans on a table that holds none of it,
+  for a planned migration; a program that holds a text no release planned is
+  refused, naming it; the two upgrade flags are refused together. A store whose
+  programs are this release's plans no step, and nothing is written.
 - `snapshot` writes the model's snapshot (`--snapshot`, the same
   default) — from the model the store was created with, before the
   first `plan --model`; with `--types <file>` it also writes emit's
@@ -1480,11 +1547,14 @@ jaren-db documents --migrations <dir> --in <file|-> (--out <file|-> | --in-place
   changes no history or application rows. A no-pending `--dry-run` reports
   only the preview; it does not claim target acceptance.
 - `status` lists applied/pending and reports drift (§12); on a
-  database without a history table it creates nothing (§6). Normal status,
+  database without a history table it creates nothing (§6). With `--model`,
+  `status` and `check` add a `programs:` line naming each rule program the
+  database holds as an earlier release planned it; the line changes no exit
+  code. Normal status,
   check and apply (including `--dry-run`) refuse unverifiable legacy history
   and pending 0.1 with `JD0028`; a printout is not a legacy bypass.
 - `status`, `check`, `history`, `apply --dry-run`, `plan --store` (with or
-  without `--upgrade-columns`) and `adopt-history` never create a `--store` database named by a plain path: a
+  without `--upgrade-columns` or `--upgrade-programs`) and `adopt-history` never create a `--store` database named by a plain path: a
   `--store` naming a file that does not exist is refused (`the database file
   does not exist: <path>`, exit 1) and no file is left behind, because opening
   it would create an empty file and report it as an empty history. They open
