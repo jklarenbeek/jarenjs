@@ -5,8 +5,9 @@
  *
  * These checks run synchronously on every keystroke, powered directly by
  * @jarenjs/core primitives (grapheme-aware string length, deep equality),
- * the format testers and the validator's own `pattern` reading
- * (`createSchemaPatternTester`). They give the user immediate feedback per
+ * the format testers, the validator's own `pattern` reading
+ * (`createSchemaPatternTester`) and its own `multipleOf` test
+ * (`multipleOfTester`). They give the user immediate feedback per
  * field BEFORE the complete compiled schema validation runs - which
  * remains authoritative for cross-field rules (required combinations,
  * dependencies, unevaluatedProperties, ...). Cross-field feedback per
@@ -21,6 +22,8 @@
 import {
   getStringLength,
 } from '@jarenjs/core/string';
+import { getNumbishType } from '@jarenjs/core/number';
+import { multipleOfTester } from '@jarenjs/core/math';
 import { createSchemaPatternTester } from '@jarenjs/validate/references';
 
 import {
@@ -64,6 +67,18 @@ function getPatternTester(source) {
       return null;
     }
   });
+}
+
+// Bounded LRU of `multipleOf` testers, one per step: the validator's own
+// test, on the decimals the value and the step spell. A step is what the
+// validator reads as one: a number, or a string whose text is one (`"5"`).
+// A bigint bounds no number, and zero or a value of another shape is
+// refused when the schema compiles (`JK0013`), so it asserts nothing per
+// keystroke (`null`), as a pattern that does not compile.
+const multipleOfCache = createBoundedCache(500);
+function getMultipleOfTester(multipleOf) {
+  const step = typeof multipleOf === 'number' || typeof multipleOf === 'string' ? getNumbishType(multipleOf) : undefined;
+  return step ? multipleOfCache.getOrCreate(step, multipleOfTester) : null;
 }
 
 /**
@@ -184,8 +199,8 @@ export function validateField(field, value, catalog = undefined) {
         pushError(errors, catalog, 'exclusiveMaximum', { limit: c.exclusiveMaximum });
       }
       if (c.multipleOf !== undefined) {
-        const quotient = num / c.multipleOf;
-        if (Math.abs(quotient - Math.round(quotient)) >= 1e-6) {
+        const isMultipleOf = getMultipleOfTester(c.multipleOf);
+        if (isMultipleOf !== null && !isMultipleOf(num)) {
           pushError(errors, catalog, 'multipleOf', { multipleOf: c.multipleOf });
         }
       }

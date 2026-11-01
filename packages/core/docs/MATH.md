@@ -65,6 +65,27 @@ SVG pixels (Y flipped); `surfaceNormal(a, b, c)` returns the face normal
 as a `Vec3f64`. Reusable for any 3D projection (the x·y·z plotter is the
 first consumer; Mermaid draws no 3D and does not use it).
 
+## Decimals — `decimal.js`
+
+A double's decimals as digit strings, `{ digits, scale }` for
+`digits × 10^-scale`: `shortestDecimal(x)` (the digits `String(x)`
+prints), `exactDecimal(x)` (every digit of the stored value),
+`shiftDecimal`, `roundDecimal` and `decimalToNumber`, with `roundExact`
+(above) built on them.
+
+`multipleOfTester(step)` is the one test of JSON Schema's `multipleOf`,
+built once per step: a value is a multiple when the decimals it and the
+step spell divide whole, exactly at every magnitude — `0.3` is a multiple
+of `0.1` and `0.30000000000000004` is none, `20000001` is none of
+`10000000`, `1e308` is one of `0.5`, and `0.5` is one of `1e-15`, though
+the float quotient drifts. A step's multiples are those of its magnitude
+(`-0.1` reads as `0.1`). A value that is not finite is no multiple; under
+a step that is not finite, or zero, a value is one where the quotient is
+whole (every finite value of an infinite step, nothing of zero).
+`@jarenjs/validate` decides `multipleOf` with it, for a written step and a
+`$data` one, and `@jarenjs/forms` checks a field with it, so the two
+answer alike.
+
 ## Number formatting — `format.js`
 
 `formatNumber(value, { notation:'auto'|'fixed'|'sci'|'eng', precision,

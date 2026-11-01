@@ -218,14 +218,22 @@ delete it or fix it.
   100,000-deep array throws an uncoded `RangeError` on the default stack,
   where the direct shapes (`{ items: { $ref: '#' } }`, `{ properties: { a: {
   $ref: '#' } } }`) answer `JK2001`.
-- [ ] **A form field's `multipleOf` takes a value within an absolute 1e-6 of a
-  whole quotient.** `validateAllFields(buildFormModel({ type: 'object',
-  properties: { n: { type: 'number', multipleOf: 10000000 } } }), { n: 5 })`
-  reports no error (nor for `20000001`, nor `0.30000000000000004` under
-  `multipleOf: 0.1`), where the validator refuses them: `@jarenjs/forms`'
-  field check compares the float quotient with its rounding at a fixed
-  tolerance. Reading the decimals both spell, as the validator does, refuses
+- [ ] **A form field reads a boolean `exclusiveMinimum` or `exclusiveMaximum`
+  as a number.** Under `{ type: 'number', maximum: 5, exclusiveMaximum: true }`
+  `validateAllFields` reports `exclusiveMaximum` (limit `true`) for `4`, and
+  under `exclusiveMaximum: false` it refuses `0` and `5`, where the validator
+  reads the draft-04 boolean as making `maximum` exclusive or not and takes all
+  three; under `{ minimum: 5, exclusiveMinimum: true }` it takes `5`, which
+  the validator refuses. `@jarenjs/forms`' field check compares the value with
+  the keyword's own value; reading the bounds as the validator does refuses
   values it took (a minor).
+- [ ] **A form field takes a bigint where the validator's `type` refuses one.**
+  `validateAllFields(buildFormModel({ type: 'object', properties: { n: { type:
+  'number' } } }), { n: 21n })` reports no error, where `new JarenValidator()
+  .compile({ type: 'number' })(21n)` is false (`'integer'` alike), though the
+  package README says a bigint is a number "as to the validator"; the bounds
+  and `multipleOf` then read it through `Number`, which rounds past 2^53.
+  Which of the two is right is the open decision (refusing is a minor).
 - [ ] **A `$ref` target below a keyword no draft defines reads the compile's
   vocabularies.** Under a held dialect without the validation vocabulary,
   with `urn:doc` holding `{ $schema: dialect, components: { schemas: { p: {

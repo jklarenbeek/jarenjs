@@ -1172,7 +1172,7 @@ Map<string, ValidationObject> {
 | `restoreSchemaRefsInMap` | traverse.js | Flatten all ref chains at load time |
 | `isReferenceHop` | traverse.js | Whether a schema a reference reached is a pure `$ref` hop that `resolveRefSchemaDeep` flattens away (no asserting sibling); `#precompileRefs` builds such a hop rather than the end held under its pointer |
 | `placeDraft` / `unwalkedReading` | index.js | The draft a reference target compiles under: its place's, or, for a place no walk recorded, the nearest `$schema` (or recorded place) on the way to it |
-| `multipleOfTester` | number.js | Whether a value is a whole multiple of a step, decided on the decimals both spell (`shortestDecimal`), exactly at every magnitude; the schema's `multipleOf` and a `$data` step read it |
+| `multipleOfTester` | `@jarenjs/core/math` (decimal.js), through number.js | Whether a value is a whole multiple of a step, decided on the decimals both spell (`shortestDecimal`), exactly at every magnitude; the schema's `multipleOf` and a `$data` step read it, and `@jarenjs/forms`' field check shares it |
 | `createJsonPointer` | traverse.js | Parse URI into components (id, leftUri, fragment), its scheme and host lowered by `caselessUri` |
 | `caselessUri` / `heldUriKey` | schema-keywords.js | The one spelling of a URI a schema is held and looked up by: scheme and host in lower case (RFC 3986), the rest as written; `heldUriKey` adds the empty fragment (`addSchema`, `getSchema`, `dialectDraft`, `compileAsync`) |
 | `identifierKeyword` | schema-keywords.js | The keyword that identifies a schema object: `$id`, else the draft-04 `id` where its document declares no known draft (the walk, `indexSchemaResources`, the strict profile's index) |
@@ -1352,7 +1352,7 @@ For broader context on how this package fits into the JarenJS ecosystem:
 | `origin.js` | The default base a schema without `$id` is read under (the compile, `compileAsync`, the resource index), the resource a URI names, and a location's JSON Pointer tokens escaped for a URI fragment | `DEFAULT_ORIGIN`, `withoutFragment`, `encodeJsonPointerPath` |
 | `references.js` | The reading of a document's references (`@jarenjs/validate/references`), without the validator | `indexSchemaResources`, `resolveSchemaReference`, `collectSameDocumentAnchors`, `resolveSameDocumentRef` |
 | `string.js` | String keywords | `compileStringBasic` |
-| `number.js` | Number keywords | `compileNumberBasic`, `multipleOfTester` |
+| `number.js` | Number keywords | `compileNumberBasic`, `multipleOfTester` (from `@jarenjs/core/math`) |
 | `bigint.js` | BigInt keywords | `compileBigIntBasic` |
 | `array.js` | Array keywords | `compileArraySchema` |
 | `object.js` | Object keywords | `compileObjectSchema` |

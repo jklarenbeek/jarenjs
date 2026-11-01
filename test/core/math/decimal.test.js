@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  exactDecimal, shortestDecimal, shiftDecimal, roundDecimal, decimalToNumber, roundExact,
+  exactDecimal, shortestDecimal, shiftDecimal, roundDecimal, decimalToNumber, roundExact, multipleOfTester,
 } from '@jarenjs/core/math';
 
 describe('#decimal digits of a double', function () {
@@ -93,5 +93,38 @@ describe('#roundExact (F&O fn:round and fn:round-half-to-even)', function () {
     assert.ok(Object.is(roundExact(-1234.5, -1e9), -0));
     assert.equal(roundExact(Number.MAX_VALUE, -400), 0);
     assert.equal(roundExact(Number.MIN_VALUE, 1074), Number.MIN_VALUE);
+  });
+});
+
+describe('#multipleOfTester (multipleOf on the decimals both numbers spell)', function () {
+  /** @param {number} step @param {number[]} values */
+  const answers = (step, values) => values.map(multipleOfTester(step));
+
+  it('reads a step and a value as the decimals they spell', () => {
+    assert.deepEqual(answers(0.1, [0.3, 0.7, 0.30000000000000004, 0.10000001]), [true, true, false, false]);
+    assert.deepEqual(answers(10000000, [5, 20000001, 20000000, -10000000, 0, -0]), [false, false, true, true, true, true]);
+    // a step's multiples are those of its magnitude
+    assert.deepEqual(answers(-0.1, [0.3, -0.3, 0.30000000000000004]), [true, true, false]);
+    // a true multiple whose float quotient drifts
+    assert.deepEqual(answers(1e-15, [0.5, 0.25, 1.5e-15]), [true, true, false]);
+  });
+
+  it('answers exactly at every magnitude', () => {
+    // every whole number is a multiple of 0.5; 1e308 spells a 1 and 308 zeros, no multiple of 3
+    assert.deepEqual(answers(0.5, [1e308, 7]), [true, true]);
+    assert.deepEqual(answers(3, [1e308, 3e300, 9007199254740990, 9007199254740991]), [false, true, true, false]);
+    // past 2^53 a whole value is read as it is spelled, not by its float quotient
+    assert.deepEqual(answers(3, [29999999999999990, 30000000000000000]), [false, true]);
+    assert.deepEqual(answers(7, [69999999999999980]), [false]);
+    // past a quotient of 1e15, and under a step finer than 1e-22
+    assert.deepEqual(answers(0.1, [123456789012345.6, 123456789012345.66]), [true, false]);
+    assert.deepEqual(answers(1e-23, [0.5, 1e-22, 1.5e-23]), [true, true, false]);
+  });
+
+  it('takes no value that is not finite, and reads a step that is not finite, or zero, by its quotient', () => {
+    assert.deepEqual(answers(2, [Infinity, -Infinity, NaN]), [false, false, false]);
+    assert.deepEqual(answers(Infinity, [5, -1e308, Infinity]), [true, true, false]);
+    assert.deepEqual(answers(0, [0, 1]), [false, false]);
+    assert.deepEqual(answers(NaN, [1]), [false]);
   });
 });
