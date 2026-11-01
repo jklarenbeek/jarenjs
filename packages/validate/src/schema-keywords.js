@@ -154,11 +154,54 @@ export function dialectUriKey(uri) {
  * @returns {unknown} the held schema, or undefined
  */
 export function heldDialect(uri, get) {
-  for (const key of new Set([dialectUriKey(uri), heldUriKey(uri)])) {
+  for (const key of keptReading(DIALECT_KEYS, uri, dialectKeys)) {
     const held = get(key) ?? (key.endsWith('#') ? get(key.slice(0, -1)) : undefined);
     if (held !== undefined && held !== null) return held;
   }
   return undefined;
+}
+
+/**
+ * The keys {@link heldDialect} looks a `$schema` URI up by, in order, each once.
+ * @param {string} uri
+ * @returns {string[]}
+ */
+function dialectKeys(uri) {
+  return [...new Set([dialectUriKey(uri), heldUriKey(uri)])];
+}
+
+/** How many answers each map {@link keptReading} keeps holds at most. */
+const KEPT_READINGS = 256;
+/** The longest URI whose reading {@link keptReading} keeps: a hostile one cannot grow a map. */
+const KEPT_URI_LENGTH = 512;
+
+/** The {@link dialectKeys} of the `$schema` URIs read lately. @type {Map<string, string[]>} */
+const DIALECT_KEYS = /* @__PURE__ */ new Map();
+
+/** The {@link officialUri} of the URIs read lately. @type {Map<string, string>} */
+const OFFICIAL_URIS = /* @__PURE__ */ new Map();
+
+/**
+ * A pure reading of a URI, its answer kept: every schema object a compile
+ * reads its draft at reads its `$schema` so, and a program names a handful
+ * of dialects. A map holding {@link KEPT_READINGS} answers starts over, and
+ * a URI longer than {@link KEPT_URI_LENGTH} is read anew each time.
+ * @template T
+ * @param {Map<string, T>} kept - The answers kept so far
+ * @param {string} uri
+ * @param {(uri: string) => T} read
+ * @returns {T}
+ */
+function keptReading(kept, uri, read) {
+  let answer = kept.get(uri);
+  if (answer === undefined) {
+    answer = read(uri);
+    if (uri.length <= KEPT_URI_LENGTH) {
+      if (kept.size >= KEPT_READINGS) kept.clear();
+      kept.set(uri, answer);
+    }
+  }
+  return answer;
 }
 
 /**
@@ -170,6 +213,15 @@ export function heldDialect(uri, get) {
  * @returns {string}
  */
 function officialUri(uri) {
+  return keptReading(OFFICIAL_URIS, uri, readOfficialUri);
+}
+
+/**
+ * {@link officialUri}, read anew.
+ * @param {string} uri
+ * @returns {string}
+ */
+function readOfficialUri(uri) {
   const key = caselessUri(uri);
   const rest = /^https?:\/\//.test(key) ? key.slice(key.indexOf(':') + 1) : key;
   return rest.endsWith('#') ? rest.slice(0, -1) : rest;

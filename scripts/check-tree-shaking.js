@@ -682,7 +682,8 @@ if (asyncLiveLeak.length)
 // Raised to 1,125,800 (measured 1125750): a store rule's existence probe locking the row it finds — the lock chosen by whether it compares key columns only, and the dialect's two row-lock spellings (invariants 186, dialect 94, entity 56), add 336.
 // Raised to 1,127,200 (measured 1127121): a database rule's installed programs recognized by the release whose text they hold and reported at open (physical 623, store 191, ddl 150, program-spellings 103), and a probe that locks the row it finds only where that row lets the write pass, a database rule's program and a store rule's alike (invariants 156, invariant-sql 120, row-predicate 14, entity 14), add 1371.
 // Raised to 1,128,300 (measured 1128281): core's cloneJson copying past 256 levels on its own frames and refusing a cycle (object 629), and the validator's reference bound weighing the levels between a reference and the schema enclosing it, with the resource index on its own stack (index 208, references 176, errors 105, schema 67), less minifier renames elsewhere net 25, add 1160.
-if (clientBytes > 1128300)
+// Raised to 1,129,200 (measured 1129169): the validator keeping the pointer parses of one compile, resolving a `$ref`-only item tentatively, and reading a `%` escape only where one is written (traverse 559), its dialect URI readings kept (schema-keywords 225), the compile run with its parses kept (index 71), and the `$data` pass skipped where no schema holds one (dollar-data 33), add 888.
+if (clientBytes > 1129200)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 

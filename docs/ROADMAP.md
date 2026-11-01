@@ -266,6 +266,18 @@ delete it or fix it.
   so `@jarenjs/validate/output` and `@jarenjs/validate/load`, which load no
   validator, load the query compiler under Node. Wanted: those imports from
   `@jarenjs/json/pointer` and `@jarenjs/json/basic`, which hold them.
+- [ ] **Every `$id` document is built twice per compile.** The schema map holds
+  an absolute `$id` under its URI with and without the empty fragment, and
+  `compile` builds an object under both: the second build repeats the
+  document's compile under locations that hold no `#`
+  (`https://x.test/s.json/properties/a`), a measurable share of every compile
+  of a document with an `$id`. Two answers read it: an items `$ref` naming the
+  document's `$id` without a fragment, in a `$defs` member, reports a nested
+  error's `schemaPath` as `https://x.test/s.json/properties/n` where the same
+  item compiled in full reports `https://x.test/s.json#/properties/n`, and a
+  dynamic anchor's location (`…#/$def-anchor/<n>`) numbers the objects built,
+  the second build's among them. Building it once makes the first right and
+  renumbers the second (an upgrade note).
 
 ## @jarenjs/view & @jarenjs/app
 

@@ -11,6 +11,7 @@ import {
 
 import {
   storeSchemaIdsInMap,
+  withParsedPointers,
   restoreSchemaRefsInMap,
   isRefCycleError,
   RefCycleError,
@@ -996,9 +997,11 @@ export class ValidationRoot {
   }
 
   /**
-   * Checks if an object exists at the given path without creating it.
+   * The object built at a path, without building it: `null` when none is
+   * built there yet (one under construction included), and a path not seen
+   * before is marked so.
    * @param {string} path - The URI path to check
-   * @returns {ValidationObject|null|undefined} The existing object, null if marked unresolved, or undefined if not known
+   * @returns {ValidationObject|null} The existing object, or null
    */
   unresolvedObject(path) {
     const objects = this.#objects;
@@ -1048,13 +1051,14 @@ export class ValidationRoot {
    * @param {string} ref - The reference URI to resolve
    * @param {string} path - The current path (for error messages)
    * @param {object} schema - The schema containing the $ref
-   * @param {boolean} [unlessBuilding] - Answer `null` instead of building the
-   *   target when it is one of the objects under construction (a reference
-   *   that leads back to an enclosing schema), so the caller keeps the
-   *   reference to resolve on first use
+   * @param {boolean} [tentative] - Answer `null` where the caller compiles
+   *   the reference itself: when the target is one of the objects under
+   *   construction (a reference that leads back to an enclosing schema, kept
+   *   to resolve on first use), or when a hop names a document the validator
+   *   holds no schema under
    * @returns {ValidationObject|null} The resolved ValidationObject
    */
-  resolveObject(ref, path, schema, unlessBuilding = false) {
+  resolveObject(ref, path, schema, tentative = false) {
     if (!this.#ownReads.has(schema)) this.refuseContested(ref);
     // Fast path - check if already compiled first
     const objects = this.#objects;
@@ -1065,20 +1069,22 @@ export class ValidationRoot {
     const schemas = this.#schemas;
     const traverse = this.#traverse;
     const places = this.#placesFor(schema);
-    const { id, schema: root } = resolveRefSchemaDeep(schemas, path, schema, traverse, undefined, places, this.#options.draftVersion);
+    const resolved = resolveRefSchemaDeep(schemas, path, schema, traverse, undefined, places, this.#options.draftVersion, tentative);
+    if (resolved === undefined) return null;
+    const { id, schema: root } = resolved;
 
     // A target reached by a pointer whose place declares an identifier two
     // registered places declare is built under the reference: the object
     // built under that identifier may be the other place's.
     if (places?.contested.has(id)) {
-      if (unlessBuilding && this.#building.has(ref)) return null;
+      if (tentative && this.#building.has(ref)) return null;
       return ValidationRoot.#createObject(this, ref, root, id);
     }
 
     // Check if final ID is already compiled
     const finalCached = objects.get(id);
     if (finalCached != null) return finalCached;
-    if (unlessBuilding && this.#building.has(id)) return null;
+    if (tentative && this.#building.has(id)) return null;
 
     // Create and cache the validation object
     return ValidationRoot.#createObject(this, id, root);
@@ -2926,6 +2932,17 @@ export class JarenValidator {
    * if (checked.valid) checked.value.name; // checked.value is { name: string } here
    */
   compile(schema, schemas = undefined) {
+    return withParsedPointers(() => this.#compileDocument(schema, schemas));
+  }
+
+  /**
+   * The work of {@link compile}, run with the pointers it parses kept: it
+   * resolves one reference against one base many times over.
+   * @param {JSONSchemaLike | boolean} schema
+   * @param {(JSONSchemaLike | boolean)[]} [schemas]
+   * @returns {any}
+   */
+  #compileDocument(schema, schemas) {
     schema = JarenValidator.#withResolvedRootId(schema, this.#traverse);
     const { origin, map } = JarenValidator.#traverseSchema(schema, schemas, this.#schemas, this.#traverse, this.#places, true);
 

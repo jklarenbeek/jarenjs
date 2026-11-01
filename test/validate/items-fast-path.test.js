@@ -1,5 +1,6 @@
 import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
+import { spawnSync } from 'node:child_process';
 
 import { JarenValidator } from '@jarenjs/validate';
 
@@ -43,4 +44,65 @@ describe('one-keyword item schemas', function () {
       assert.strictEqual(verdict(options, schema, { names: ['a'], list: [{ a: 1 }] }), true);
     });
   }
+});
+
+// A document with an `$id` is also built under its URI without the empty
+// fragment, where the locations below its root hold no `#`: a `$ref`-only
+// item resolved against such a location names a document the validator does
+// not hold. The shortcut then leaves the item to the full compilation, as it
+// did, without building a refusal it would only discard.
+describe('a $ref-only item schema in a document with an $id', function () {
+  const bundle = {
+    $id: 'https://example.test/bundle',
+    type: 'object',
+    properties: {
+      tags: { type: 'array', items: { $ref: '#/$defs/tag' } },
+      owners: { type: 'array', items: { $ref: '#/$defs/owner' } },
+    },
+    $defs: {
+      tag: { type: 'string', pattern: '^[a-z]+$' },
+      owner: { type: 'object', required: ['name'], properties: { name: { $ref: '#/$defs/tag' } } },
+    },
+  };
+
+  it('compiles without constructing an error', function () {
+    const result = spawnSync(process.execPath, ['--input-type=module', '-e', `
+      let constructed = 0;
+      const Base = globalThis.Error;
+      globalThis.Error = class extends Base { constructor(...args) { super(...args); constructed++; } };
+      const { JarenValidator } = await import('@jarenjs/validate');
+      new JarenValidator({ skipErrors: false, collectErrors: true }).compile(${JSON.stringify(bundle)});
+      console.log(constructed);
+    `], { encoding: 'utf8', timeout: 10000, env: { ...process.env, FORCE_COLOR: '0' } });
+    assert.strictEqual(result.status, 0, result.error?.message ?? result.stderr);
+    assert.strictEqual(result.stdout, '0\n');
+  });
+
+  it('answers as the full compilation of the same item schemas', function () {
+    // a second member keeps an item schema off the shortcut; draft-07 reads
+    // nothing beside a `$ref`
+    const full = structuredClone(bundle);
+    full.properties.tags.items.$comment = 'compiled in full';
+    full.properties.owners.items.$comment = 'compiled in full';
+    const instances = [
+      { tags: ['a', 'B', 1], owners: [{ name: 'x' }, {}, { name: 'Y' }] },
+      { tags: ['a'], owners: [{ name: 'b' }] },
+      { tags: 'x' },
+    ];
+    for (const [, options] of MODES) {
+      const viaShortcut = new JarenValidator(options).compile(bundle);
+      const viaFull = new JarenValidator(options).compile(full);
+      for (const data of instances)
+        assert.deepStrictEqual(viaShortcut(data), viaFull(data));
+    }
+    const collected = new JarenValidator({ collectErrors: true, skipErrors: false }).compile(bundle)(instances[0]);
+    assert.deepStrictEqual(collected.errors.map((e) => [e.instancePath, e.keyword, e.schemaPath]), [
+      ['/tags/1', 'pattern', 'https://example.test/bundle#/$defs/tag'],
+      ['/tags/2', 'type', 'https://example.test/bundle#/$defs/tag'],
+      ['/tags', 'items', 'https://example.test/bundle#/properties/tags'],
+      ['/owners/1', 'required', 'https://example.test/bundle#/$defs/owner'],
+      ['/owners/2/name', 'pattern', 'https://example.test/bundle#/$defs/tag'],
+      ['/owners', 'items', 'https://example.test/bundle#/properties/owners'],
+    ]);
+  });
 });

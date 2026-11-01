@@ -956,7 +956,26 @@ Based on the number of validators, different composition strategies are used:
 | 3 | Unrolled | `return v1(data) && v2(data) && v3(data)` |
 | 4+ | Loop | `for (let i = 0; i < n; i++)` |
 
-### 3. String Length Optimization
+### 3. Compile-Time Readings Kept
+
+A compile reads the same text many times over, so it keeps what it read:
+
+- **Pointer parses, per compile.** `JarenValidator#compile` runs inside
+  `withParsedPointers`: every `createJsonPointer` parse of a reference against
+  a base, under one set of anchor options, is made once and handed out as a
+  copy until the compile returns. A refusal is never kept.
+- **Dialect URIs, bounded.** `officialUri` and the keys `heldDialect` looks a
+  `$schema` up by are pure readings of a URI; the readings of the short URIs
+  read lately are kept, a bounded number of them.
+- **No `$data` pass where nothing reads one.** A compilation in which no schema
+  reads an instance location (`ValidationRoot#usesDollarData`) holds no `$data`
+  member, so `compileDollarDataSchema` returns at once.
+- **No discarded refusal in the items shortcut.** The `$ref`-only item
+  shortcut resolves tentatively (`resolveObject(…, tentative)`): a reference
+  naming a document the validator holds no schema under answers `null`, and
+  the item is compiled in full, without building a `JK0009` only to discard it.
+
+### 4. String Length Optimization
 
 ```mermaid
 flowchart TD
@@ -1173,7 +1192,7 @@ Map<string, ValidationObject> {
 | `isReferenceHop` | traverse.js | Whether a schema a reference reached is a pure `$ref` hop that `resolveRefSchemaDeep` flattens away (no asserting sibling); `#precompileRefs` builds such a hop rather than the end held under its pointer |
 | `placeDraft` / `unwalkedReading` | index.js | The draft a reference target compiles under: its place's, or, for a place no walk recorded, the nearest `$schema` (or recorded place) on the way to it |
 | `multipleOfTester` | `@jarenjs/core/math` (decimal.js), through number.js | Whether a value is a whole multiple of a step, decided on the decimals both spell (`shortestDecimal`), exactly at every magnitude; the schema's `multipleOf` and a `$data` step read it, and `@jarenjs/forms`' field check shares it |
-| `createJsonPointer` | traverse.js | Parse URI into components (id, leftUri, fragment), its scheme and host lowered by `caselessUri` |
+| `createJsonPointer` | traverse.js | Parse URI into components (id, leftUri, fragment), its scheme and host lowered (by the URL standard for `http:` and `https:`, by `caselessUri` for every other scheme); a compile parses each reference once per base and option set (`withParsedPointers`) |
 | `caselessUri` / `heldUriKey` | schema-keywords.js | The one spelling of a URI a schema is held and looked up by: scheme and host in lower case (RFC 3986), the rest as written; `heldUriKey` adds the empty fragment (`addSchema`, `getSchema`, `dialectDraft`, `compileAsync`) |
 | `identifierKeyword` | schema-keywords.js | The keyword that identifies a schema object: `$id`, else the draft-04 `id` where its document declares no known draft (the walk, `indexSchemaResources`, the strict profile's index) |
 | `indexSchemaResources` / `resolveSchemaReference` | references.js | The resources of a document as the validator registers them (each embedded `$id` starts one; each with its plain names) and the base each schema object's `$ref` resolves against; one reference resolved inside the resource its URI names. The normalizer, `@jarenjs/emit` and the strict profile resolve through it. Each `$schema` is read by name, or, handed a validator as `dialects` (`heldDialects`), through the meta-schemas it holds (`index.held`), the map its compile reads a dialect through |
@@ -1315,7 +1334,11 @@ document that is (the message then names the step that misses)
 
 **Check**:
 - Are you using a global cache? (Don't)
-- Solution: All state should be per-ValidationRoot or per-JarenValidator
+- Solution: All state should be per-ValidationRoot or per-JarenValidator. A
+  module-level table may only keep the answers of a pure reading of a short
+  string, bounded (`memberPath`'s member tokens, the dialect URI readings in
+  `schema-keywords.js`); the pointer parses `withParsedPointers` keeps live
+  only while one compile runs
 
 ### Debugging Ref Resolution
 

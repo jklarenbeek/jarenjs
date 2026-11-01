@@ -4,7 +4,11 @@ import * as assert from '../assert.node.js';
 import {
   storeSchemaIdsInMap,
   resolveRefSchemaShallow,
+  resolveRefSchemaDeep,
   decodeJsonPointerPath,
+  createJsonPointer,
+  withParsedPointers,
+  TraverseOptions,
 } from '../../packages/validate/src/traverse.js';
 import { encodeJsonPointerPath } from '../../packages/validate/src/origin.js';
 
@@ -85,5 +89,54 @@ describe('Schema Traversal', function () {
       const tildy = resolveRefSchemaShallow(map, 'http://jaren.com/tilde.json#/definitions/~001', null).schema;
       assert.isTrue(tildy === schema.definitions['~01'], 'resolved literal \'~01\' key');
     });
+  });
+});
+
+describe('the pointer parses a compile keeps', function () {
+  const parses = () => [
+    createJsonPointer('#foo', 'https://a.test/s.json', new TraverseOptions(undefined, true, true)),
+    createJsonPointer('#foo', 'https://a.test/s.json'),
+    createJsonPointer('#foo', 'https://a.test/s.json', new TraverseOptions(undefined, true, false, false)),
+    createJsonPointer('#foo', 'https://a.test/t.json'),
+    createJsonPointer('#/$defs/x', 'https://a.test/s.json'),
+  ];
+
+  it('answer every parse as a fresh one, whatever was parsed before', function () {
+    const fresh = parses();
+    assert.deepStrictEqual(fresh.map((pointer) => pointer.id), [
+      '#foo', 'https://a.test/s.json#foo', 'https://a.test/s.json#', 'https://a.test/t.json#foo', 'https://a.test/s.json#/$defs/x',
+    ]);
+    assert.deepStrictEqual(withParsedPointers(() => [...parses(), ...parses()]), [...fresh, ...fresh]);
+    assert.deepStrictEqual(withParsedPointers(() => withParsedPointers(parses)), fresh);
+  });
+
+  it('keep no refusal: each names its own place', function () {
+    const refusal = (location) => {
+      try {
+        createJsonPointer('a b', 'urn:x', undefined, '$ref', location);
+      }
+      catch (error) {
+        return [error.code, error.docPath];
+      }
+    };
+    assert.deepStrictEqual(withParsedPointers(() => [refusal('#/a'), refusal('#/b')]), [['JK0010', '#/a'], ['JK0010', '#/b']]);
+  });
+});
+
+describe('a tentative reference resolution', function () {
+  const held = { $defs: { x: { type: 'string' }, hop: { $ref: 'https://b.test/t.json#/$defs/y' } } };
+  const map = new Map([['https://a.test/s.json#', held]]);
+
+  it('answers undefined where a hop names a document no schema the map holds', function () {
+    assert.strictEqual(resolveRefSchemaShallow(map, '#/$defs/x', 'https://b.test/t.json', undefined, undefined, true), undefined);
+    assert.throws(() => resolveRefSchemaShallow(map, '#/$defs/x', 'https://b.test/t.json'), { code: 'JK0009' });
+    const chain = { $ref: 'https://a.test/s.json#/$defs/hop' };
+    assert.strictEqual(resolveRefSchemaDeep(map, 'https://a.test/s.json', chain, undefined, undefined, undefined, null, true), undefined);
+    assert.throws(() => resolveRefSchemaDeep(map, 'https://a.test/s.json', chain), { code: 'JK0009' });
+  });
+
+  it('resolves a reference to a held document as it always does', function () {
+    assert.deepStrictEqual(resolveRefSchemaShallow(map, '#/$defs/x', 'https://a.test/s.json', undefined, undefined, true),
+      { id: 'https://a.test/s.json#/$defs/x', schema: { type: 'string' } });
   });
 });

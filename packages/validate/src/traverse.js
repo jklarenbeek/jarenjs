@@ -45,7 +45,7 @@ function decodeJsonPointerKey(key) {
   // `~` must pass through instead of throwing like the strict parser does.
   // The percent-decode is this site's own: these keys arrive from a URI
   // fragment, which the plain reference-token decode knows nothing about.
-  return decodeJSONPointerSegment(decodeURIComponent(key));
+  return decodeJSONPointerSegment(key.includes('%') ? decodeURIComponent(key) : key);
 }
 
 /**
@@ -101,6 +101,34 @@ class JsonPointer {
 }
 
 /**
+ * The parses {@link createJsonPointer} made while {@link withParsedPointers}
+ * runs, by the anchor flags of the options read, then the base, then the
+ * reference: a compile resolves one reference against one base many times
+ * over (the walks, the compiler, each hop of a chain), and a parse reads
+ * nothing else. `null` outside such a run.
+ * @type {Map<string, Map<string, JsonPointer>>[]|null}
+ */
+let parsedPointers = null;
+
+/**
+ * Run `fn`, keeping every parse {@link createJsonPointer} makes until it
+ * returns; a run nested in another keeps the outer one's.
+ * @template T
+ * @param {() => T} fn
+ * @returns {T}
+ */
+export function withParsedPointers(fn) {
+  const outer = parsedPointers;
+  parsedPointers ??= [new Map(), new Map(), new Map(), new Map()];
+  try {
+    return fn();
+  }
+  finally {
+    parsedPointers = outer;
+  }
+}
+
+/**
  * Resolve a reference or an identifier against a base and split the result
  * into the parts the resolver keys schemas by.
  * @param {string|undefined} refUri - The reference or identifier as written
@@ -112,8 +140,19 @@ class JsonPointer {
  * @throws {SchemaCompileError} `JK0010` when the text, or the base, is not a valid URI
  */
 export function createJsonPointer(refUri, baseUri, opts = new JsonPointerOptions(), keyword = undefined, location = undefined) {
+  const byBase = parsedPointers === null || typeof refUri !== 'string' || typeof baseUri !== 'string' ? undefined
+    : parsedPointers[(opts.anchorsAllowed == true ? 2 : 0) + (opts.anchorsGlobal == true ? 1 : 0)];
+  let byRef;
+  if (byBase !== undefined) {
+    byRef = byBase.get(baseUri);
+    if (byRef === undefined) byBase.set(baseUri, byRef = new Map());
+    const known = byRef.get(refUri);
+    if (known !== undefined) return new JsonPointer(known.id, known.search, known.leftUri, known.fragment);
+  }
   try {
-    return parseJsonPointer(refUri, baseUri, opts);
+    const pointer = parseJsonPointer(refUri, baseUri, opts);
+    if (byRef !== undefined) byRef.set(refUri, new JsonPointer(pointer.id, pointer.search, pointer.leftUri, pointer.fragment));
+    return pointer;
   }
   catch (e) {
     // `URL` refuses what is no URI with a `TypeError`; nothing else here throws one.
@@ -193,7 +232,8 @@ function parseJsonPointer(refUri, baseUri, opts) {
 
   // the URL standard lowers the scheme, and the host of a web scheme; every
   // other host is lowered here, so each URI is held and looked up by one spelling
-  const [uri, fragment] = atFragment(caselessUri(url.href));
+  const href = url.href;
+  const [uri, fragment] = atFragment(href.startsWith('https:') || href.startsWith('http:') ? href : caselessUri(href));
   const [leftUri, search] = uri.split('?');
 
   if (!isStringWhiteSpace(fragment)) {
@@ -201,7 +241,7 @@ function parseJsonPointer(refUri, baseUri, opts) {
     // decodes to `/…` is one (`#%2F$defs%2Fx` is `#/$defs/x`), and its
     // `%2F`s separate tokens as its `/`s do; every other escape is decoded
     // once, with the token that holds it.
-    const pointer = fragment.replace(/%2f/gi, '/');
+    const pointer = fragment.includes('%') ? fragment.replace(/%2f/gi, '/') : fragment;
     if (pointer.startsWith('/'))
       return new JsonPointer(`${leftUri}#${pointer}`, search, `${leftUri}#`, pointer);
     // or a plain name (an `$anchor`, a `$dynamicAnchor`, a draft-07 `$id:
@@ -524,9 +564,10 @@ export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPoi
     const keepsBase = hasId && reading !== null && reading < 2019;
     let target;
     const reference = hasSchemaReference(obj, '$ref') ? schemaReference(obj, '$ref') : undefined;
+    const referenceAt = reference === undefined ? undefined : encodeJsonPointerPath(path, '$ref');
     if (reference !== undefined) {
       try {
-        target = createJsonPointer(reference, keepsBase ? base : baseUri, opts, '$ref', encodeJsonPointerPath(path, '$ref'));
+        target = createJsonPointer(reference, keepsBase ? base : baseUri, opts, '$ref', referenceAt);
       }
       catch (e) {
         fault(e);
@@ -545,12 +586,12 @@ export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPoi
       else places?.lateTargets.delete(ref);
       // The latest walk to name a target decides whether a refusal to
       // resolve it says why the `$id` was not its base.
-      if (keepsBase && createJsonPointer(reference, baseUri, opts, '$ref', encodeJsonPointerPath(path, '$ref')).id !== ref) places?.keptRefs.add(ref);
+      if (keepsBase && createJsonPointer(reference, baseUri, opts, '$ref', referenceAt).id !== ref) places?.keptRefs.add(ref);
       else places?.keptRefs.delete(ref);
       if (!schemas.has(ref))
         schemas.set(ref, null);
-      if (sites !== undefined && !sites.has(ref)) sites.set(ref, encodeJsonPointerPath(path, '$ref'));
-      if (onReference !== undefined) onReference(target, encodeJsonPointerPath(path, '$ref'), keepsBase && draft === null);
+      if (sites !== undefined && !sites.has(ref)) sites.set(ref, referenceAt);
+      if (onReference !== undefined) onReference(target, referenceAt, keepsBase && draft === null);
 
       // Don't continue here - we need to process other schemas in the same
       // parent object (like definitions) even if this one has a $ref.
@@ -776,16 +817,20 @@ export function locatedRefusal(error, place) {
  * @param {JsonPointerOptions} [opts]
  * @param {SchemaPlaces} [places] - What the walks read: an identifier two
  *   registered places declare is refused
- * @returns {{id: string, schema: any}}
+ * @param {boolean} [tentative] - Answer `undefined` instead of refusing
+ *   when no schema the map holds has the reference's document URI
+ * @returns {{id: string, schema: any}|undefined}
  * @throws {SchemaCompileError} `JK0009` when no schema the map holds has
  *   that URI, or its pointer misses; `JK0012` when the identifier it is read
  *   through names two registered places
  */
-export function resolveRefSchemaShallow(schemas, refUri, baseUri, opts = new JsonPointerOptions(), places = undefined) {
+export function resolveRefSchemaShallow(schemas, refUri, baseUri, opts = new JsonPointerOptions(), places = undefined, tentative = false) {
   const { id: base, leftUri, fragment } = createJsonPointer(refUri, baseUri, opts);
   const id = base;
-  if (!schemas.has(leftUri))
+  if (!schemas.has(leftUri)) {
+    if (tentative) return undefined;
     throw unresolvedReference(id);
+  }
   refuseContested(places, leftUri);
 
   // get the document from cache
@@ -1017,10 +1062,13 @@ export function isReferenceHop(item, opts) {
  *   `$ref` resolves against when its `$id` does not set it
  * @param {number|null} [reading] - The draft the compile reads a place that
  *   declares none under, `null` outside a compile
- * @returns {{id: string, schema: any}}
+ * @param {boolean} [tentative] - Answer `undefined` instead of refusing
+ *   when a hop names a document the map holds no schema under
+ *   ({@link resolveRefSchemaShallow})
+ * @returns {{id: string, schema: any}|undefined}
  * @throws {RefCycleError} when the chain comes back to an id it visited
  */
-export function resolveRefSchemaDeep(schemas, baseUri, refschema, opts = new TraverseOptions(), clean = undefined, places = undefined, reading = null) {
+export function resolveRefSchemaDeep(schemas, baseUri, refschema, opts = new TraverseOptions(), clean = undefined, places = undefined, reading = null, tentative = false) {
   if (!isObjectClass(refschema))
     return { id: baseUri, schema: refschema };
 
@@ -1055,7 +1103,9 @@ export function resolveRefSchemaDeep(schemas, baseUri, refschema, opts = new Tra
       if (item !== refschema && !isReferenceHop(item, opts))
         return { id: base, schema: item };
       const ref = schemaReference(item, '$ref');
-      const { id, schema } = resolveRefSchemaShallow(schemas, ref, base, opts, places);
+      const hop = resolveRefSchemaShallow(schemas, ref, base, opts, places, tentative);
+      if (hop === undefined) return undefined;
+      const { id, schema } = hop;
 
       // A hop back to an id already visited is a loop of pure references: no
       // schema on it reads the instance, so no answer is reachable.

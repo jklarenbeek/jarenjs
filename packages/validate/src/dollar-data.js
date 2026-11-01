@@ -152,6 +152,9 @@ const DOLLAR_ONLY_COMPILERS = {
  * @returns {function|undefined} The compiled validator function or undefined
  */
 export function compileDollarDataSchema(schemaObj, jsonSchema) {
+  // A compilation no schema of which holds a `$data` member holds no
+  // reference to compile here.
+  if (!schemaObj.root.usesDollarData) return undefined;
   const validators = [];
 
   for (const keyword of DOLLAR_KEYWORD_ORDER) {
