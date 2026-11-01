@@ -10,6 +10,7 @@ import * as assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 import { compileJsonQuery } from '@jarenjs/json';
+import { translateFormulaBody } from '@jarenjs/json/formula/migrate';
 import { compileNumberLocale, nl } from '@jarenjs/locales';
 
 const DOC = readFileSync(new URL('../../packages/json/docs/FORMULA-FORMAT.md', import.meta.url), 'utf8');
@@ -107,5 +108,21 @@ describe('FORMULA-FORMAT\'s JavaScript equivalents', () => {
       for (const x of SIGNED) if (q({ x }) !== intl.format(x)) differ++;
       assert.strictEqual(differ, 0, picture);
     }
+  });
+
+  it("new Date(x).toLocaleDateString('nl-NL') in UTC: the clock moved to UTC by $date-add, written with the Dutch picture", ICU, () => {
+    const t = { $if: [{ '$is-date': '$.x' }, { $concat: ['$.x', 'T00:00:00Z'] }, '$.x'] };
+    const q = compileJsonQuery({ $let: { t }, $return: { '$date-format': [{ '$date-add': ['$t', { $sub: [0, { $offset: '$t' }] }, 'minute'] }, 'd-M-y'] } });
+    // every day of a leap year, alone and at the minutes either side of a UTC midnight in zones east and west of it
+    const days = Array.from({ length: 366 }, (_, i) => new Date(Date.UTC(2028, 0, 1 + i)).toISOString().slice(0, 10));
+    const texts = days.flatMap((day) => [day, `${day}T23:59:59.9999Z`, `${day}T00:30:00+01:00`, `${day}T23:30:00-05:00`]);
+    const intl = new Intl.DateTimeFormat('nl-NL', { timeZone: 'UTC' });
+    // the translation the row stands for writes what it writes
+    const translation = translateFormulaBody("return new Date(row.x).toLocaleDateString('nl-NL');",
+      { locales: { 'nl-NL': { decimalFormat: 'nl', grouping: '.', decimal: ',', dates: { yMd: 'd-M-y' } } } });
+    const translated = compileJsonQuery(translation.expression);
+    const differ = texts.filter((x) => q({ x }) !== intl.format(new Date(x)) || translated({ x }) !== q({ x }));
+    assert.deepStrictEqual(differ, []);
+    assert.strictEqual(texts.length, 1464);
   });
 });

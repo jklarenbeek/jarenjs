@@ -972,13 +972,13 @@ validated command/receipt transaction with current-authority and snapshot checks
   runs on physical devices, and a manual accessibility pass. Qualified on this
   host: automated synthetic Node/Bun and browser results, which do not prove
   those outcomes.
-- [ ] **Saved formulas that format Dutch dates or parse grams do not
-  translate.** `translateFormulaBody` refuses `toLocaleDateString('nl-NL')`
-  and `new Intl.DateTimeFormat('nl-NL').format(...)`, and has no rule for a
-  grams parse (`parseFloat` of `"1,5 kg"`); both translate only through a host
-  helper mapped onto `$date-format` or `$quantity`, and FORMULA-FORMAT
-  documents no route for dates. Wanted: a date-formatting translation with
-  the locale's picture, and a grams rule.
+- [ ] **A translated saved-formula date cannot be written in a named time
+  zone.** `translateFormulaBody` writes a `toLocaleDateString` or
+  `Intl.DateTimeFormat` date in UTC or a declared fixed offset and names the
+  `time-zone` difference where the original read the host's zone, so a date
+  near midnight in a zone with daylight saving (`Europe/Amsterdam`) differs
+  from the original on some rows. Wanted: a zone provider in the formula
+  compiler's options and a date operator that writes in a named zone.
 
 ## Provider execution and durable domain workflows (cross-package)
 

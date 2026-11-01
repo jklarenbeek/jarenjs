@@ -237,6 +237,9 @@ translated subset is named with its position rather than stopping at the first:
   regular expression's `test`;
 - `toFixed` and `toLocaleString`, and `new Intl.NumberFormat(…).format`, for a
   language the host describes;
+- `new Date(text).toLocaleDateString(…)` and
+  `new Intl.DateTimeFormat(…).format(new Date(text))`, for a language whose date
+  pictures the host declares;
 - arrow callbacks of `map`, `filter`, `find`, `some`, `every` and `sort` (of a
   copy, `[...list].sort(…)`, or of a `map` or `filter` result), and `join`,
   `includes`, `length` and `concat` on an array;
@@ -268,7 +271,7 @@ reads and calls:
 | `skip` | `'SKIP'` | the skip sentinel: returning it, or `undefined`, skips the row, and so does `x ?? SKIP`, `x \|\| SKIP` or `x && SKIP` on that side; the sentinel anywhere else (kept in a name, in an array) is the reason `skip-value` |
 | `explain` | `'because'` | `explain(value, text)` returns an explanation, its text `String(text ?? '')` |
 | `explanationMember` | none | a returned object literal with this one member is an explanation, its value the text |
-| `locales` | none | the languages number formatting may name: `{decimalFormat, grouping, decimal, currencies, nan, minimumGroupingDigits}`, the decimal format registered under `decimalFormat`, each currency's picture, and the fewest digits the leftmost group of a grouped number holds (default 1; `compileNumberLocale(pack).minimumGroupingDigits` of `@jarenjs/locales`, 2 for Spanish, which writes 1234 but 12.345): a value whose rounded integer part has fewer digits than a group and that many is written without grouping separators |
+| `locales` | none | the languages number and date formatting may name: `{decimalFormat, grouping, decimal, currencies, nan, minimumGroupingDigits, dates, timeZone}`, the decimal format registered under `decimalFormat`, each currency's picture, and the fewest digits the leftmost group of a grouped number holds (default 1; `compileNumberLocale(pack).minimumGroupingDigits` of `@jarenjs/locales`, 2 for Spanish, which writes 1234 but 12.345): a value whose rounded integer part has fewer digits than a group and that many is written without grouping separators; `dates`, the picture of each set of date fields, and `timeZone`, the zone dates are written in (below) |
 
 Using the skip sentinel or an explanation makes the formula an outcome-mode one.
 `options.formula`, when given, is the `FormulaOptions` each translation must
@@ -314,7 +317,8 @@ present is named where it matters:
 | `identity` | objects compared by identity in JavaScript, by value in the query: a fresh array or object, two elements of arrays, a value the translation cannot trace to one read (two different reads of the row are never one object, and compare exactly) |
 | `prototype-key` | a constant table indexed by a key JavaScript finds on `Object.prototype` (`constructor`), or an array read at an index of unknown type, where JavaScript also reads a key the array has (`length`, `map`) |
 | `clock` | `Date.now()` is `$context.now`: the host evaluates with `context.now` (epoch milliseconds) |
-| `date-parse` | `new Date(text)` also reads dates that are not RFC 3339, implementation-defined |
+| `date-parse` | `new Date(text)` also reads dates that are not RFC 3339 (implementation-defined) and null (as 1970-01-01), and reads undefined, a leap second (`23:59:60`) and a text it cannot read as an invalid date (`getTime()` is NaN, `toLocaleDateString` writes `Invalid Date`, `Intl.DateTimeFormat` throws): the query refuses them, reads nothing for undefined and reads the leap second; `getTime()` cuts a fraction finer than a millisecond, which the query's `$epoch` rounds to the nearest |
+| `time-zone` | a date written without a `timeZone` option: JavaScript writes it in the host's own time zone, the query in the zone declared for the language (UTC by default); near midnight they write different days |
 | `regex-subset` | a regular expression rewritten to an I-Regexp that cannot say the same (`\b`) |
 | `regex-coercion` | a regular expression's test of a value that may be undefined: JavaScript tests the text `"undefined"`, the query tests nothing |
 | `case-fold` | a case-insensitive test: JavaScript folds case by its own table (the dotted and dotless i, the final sigma, the Kelvin sign), the query lower-cases the text |
@@ -359,6 +363,75 @@ is translated for the languages `options.translate.locales` describes:
 `maximumFractionDigits`, written with `$format-number` (QUERY-FORMAT §8.7); a
 text's `toLocaleString` is the text, a boolean's its name.
 
+Date formatting is translated for a language whose `translate.locales` entry
+declares `dates`: `new Date(text).toLocaleDateString(tag, options)` and
+`new Intl.DateTimeFormat(tag, options).format(new Date(text))`, written with
+`$date-format` (QUERY-FORMAT §8.13). `dates` maps the date fields the options
+name to the picture ICU writes for them. The fields are a CLDR skeleton, in the
+order year, month, weekday, day: `y` or `yy` for a `numeric` or `2-digit` year;
+`M`, `MM`, `MMM` or `MMMM` for a `numeric`, `2-digit`, `short` or `long` month;
+`EEE` or `EEEE` for a `short` or `long` weekday; `d` or `dd` for a `numeric` or
+`2-digit` day. A `dateStyle` (`short`, `medium`, `long`, `full`) is its own key,
+and options that name no field write `yMd`, as JavaScript does. For Dutch,
+`{yMd: 'd-M-y', yMMMMd: 'd MMMM y'}`: `y`, not `yyyy`, since ICU writes the year
+999 as `999`. A month or weekday name is written with the formula's `dateNames`
+(`compileDateLocale(pack).names` of `@jarenjs/locales`, whose Dutch names are
+ICU's); a translation that needs them does not compile without them, the reason
+`compile` under `options.formula`. `timeZone` is the zone the dates are written
+in: `UTC`, the default, or a fixed offset (`+01:00`), in any spelling JavaScript
+reads as one (`Etc/UTC`, `+0100`). A zone with a name of its own
+(`Europe/Amsterdam`) is refused, as a malformed declaration is, with a
+`TypeError`: a formula has no time-zone database to know its offset on a given
+day.
+
+The original wrote its date in a zone too, and without a `timeZone` option that
+zone is the host's own, which no formula can read: `2026-10-31T23:30:00Z` is
+31 October in UTC and 1 November in Amsterdam, and a date alone (`2026-10-31`,
+midnight UTC as JavaScript reads it) is the day before anywhere west of UTC.
+Such a translation writes the date in the declared zone and names the
+difference `time-zone` at the call: it is never exact. Where a `timeZone` option names the
+declared zone, in any spelling JavaScript reads as the same offset, it is
+exact; another zone is the reason `locale`. The text is read as `$date-add`
+reads it (a date alone as midnight UTC, a date-time at its own offset, a
+fraction of a second cut, never rounded into the next second), moved to the
+declared zone's clock and written with the picture. A date the move takes past
+9999 or before 0000 refuses the row, and so does a date in the year 0000 where
+the picture writes a year: JavaScript writes that year, the year 1 before the
+era, as 1, without the era. An option no picture writes (`era`, a time field,
+`timeZoneName`, a `narrow` name, a `dateStyle` beside a field) and date fields
+without a declared picture are the reason `locale`, naming them, and so are a
+language without `dates`, naming the pictures to declare, and a language tag
+that is no literal. *Upgrade: such a body used to be untranslatable with the
+reasons `method` and `new`, whatever the host declared. With the language's
+date pictures it translates, naming `date-parse` and, unless it states the
+declared zone, `time-zone`; without them it reports the reason `locale` where it
+reported `method` and `new`.*
+
+A weight in grams is not what `parseFloat` answers. `parseFloat` reads the
+longest decimal prefix after white space (`parseFloat('1,5 kg')` is 1, neither
+1.5 nor 1500) and answers `NaN`, which no JSON value holds, for a text without
+one; no operator reads such a prefix (`$number` reads a whole RFC 8259 number,
+`$quantity` a measured quantity in a unit), so `parseFloat` stays the reason
+`helper`. A host's own weight parse is a helper mapped onto `$quantity`, with
+the unit it answers in and the language's decimal format, and the difference
+`helper` the mapping names:
+
+```js
+import { translateFormulaBody } from '@jarenjs/json/formula/migrate';
+import { compileFormula, formulaDocument } from '@jarenjs/json/formula';
+import { compileNumberLocale, nl } from '@jarenjs/locales';
+
+const grams = { native: { params: ['text'], expression: { $quantity: ['$text', 'g', 'nl'] } }, returns: 'number',
+  differences: [{ kind: 'helper', note: 'reads a Dutch weight as grams: 1,5 kg is 1500' }] };
+const t = translateFormulaBody('return helpers.grams(item.weight);', { argument: 'item', helpers: { grams } });
+t.differences.map((d) => d.kind); // ['helper']
+const formula = compileFormula(formulaDocument({ $formula: '1', id: 'weight', revision: '1', expression: t.expression }),
+  { decimalFormats: { nl: compileNumberLocale(nl).decimalFormat } });
+formula.evaluate({ weight: '1,5 kg' }); // {kind:'value', value:1500}
+formula.evaluate({ weight: '250 g' }); // {kind:'value', value:250}
+formula.evaluate({ weight: 'onbekend' }); // {kind:'empty', values:[]}
+```
+
 Every reason names what stops the translation, with a message:
 
 | Reason | What it names |
@@ -387,8 +460,8 @@ Every reason names what stops the translation, with a message:
 | `explanation` | the explaining helper outside a returned value |
 | `skip-value` | the skip sentinel used as a value |
 | `math` | a `Math` function outside the subset |
-| `date` | `new Date()` without exactly one argument |
-| `new` | a `new` other than `new Date(text).getTime()` and `new Intl.NumberFormat(…).format(n)` |
+| `date` | `new Date()` without exactly one argument, or a date written from a value that is not text |
+| `new` | a `new` other than `new Date(text).getTime()`, `new Intl.NumberFormat(…).format(n)`, `new Date(text).toLocaleDateString(…)` and `new Intl.DateTimeFormat(…).format(new Date(text))` |
 | `method` | a method outside the subset |
 | `length`, `includes`, `concat`, `index` | `.length`, `.includes()`, `.concat()` or a literal index (`x[0]`) of a value that could be text or an array |
 | `split` | `.split()` other than its first part by a literal text |
@@ -397,7 +470,7 @@ Every reason names what stops the translation, with a message:
 | `regex` | a pattern outside the rewrite: a flag other than `g` and `i`, lookaround, a lazy quantifier, a back reference, a legacy octal escape, a capital in a case-insensitive pattern, a replaced pattern that can match the empty text, `test()` of a `g` pattern kept in a name, or a regular expression property such as `.source` or `.flags` |
 | `callback` | a callback other than an arrow of the element (and its index) |
 | `toFixed` | `.toFixed()` of anything but a literal number of digits from 0 to 20 |
-| `locale` | number formatting or case mapping in a language the translation does not describe, whose case rules are its own, or whose tag JavaScript refuses |
+| `locale` | number formatting or case mapping in a language the translation does not describe, whose case rules are its own, or whose tag JavaScript refuses; date formatting without a literal language tag, in a language without date pictures, or with an option, date fields or a time zone no declared picture writes |
 | `destructuring` | a destructuring with a default, a nested or array pattern, or a rest |
 | `typeof` | `typeof` |
 | `operator` | another operator (`**`, `in`, `instanceof`, a bitwise one, unary `+`), or a `+` adding a value that may be text or a number, which JavaScript adds or concatenates by the value |
@@ -428,6 +501,7 @@ against the JavaScript it replaces:
 | `x.toLocaleString('nl-NL')` | `{"$format-number": [x, "#.##0,###", "nl"]}` |
 | `x.toLocaleString('nl-NL', {maximumFractionDigits: 1})` | `{"$format-number": [x, "#.##0,#", "nl"]}` |
 | `x.toLocaleString('nl-NL', {style: 'currency', currency: 'EUR'})` | `{"$format-number": [x, "€ #.##0,00;€ -#.##0,00", "nl"]}`, the space a no-break space, and `€ NaN` for NaN as ICU writes it |
+| `new Date(x).toLocaleDateString('nl-NL')`, `{yMd: 'd-M-y'}` declared, in UTC | `{"$date-format": [{"$date-add": [t, {"$sub": [0, {"$offset": t}]}, "minute"]}, "d-M-y"]}`, `t` the text with `T00:00:00Z` added to a date alone; a date in the year 0000 refuses the row |
 
 The two rounding spellings are not interchangeable. `Math.round(x * 100) / 100`
 rounds the product, which binary multiplication has already rounded, so
@@ -451,6 +525,11 @@ refused. The three Dutch number formats agree with `Intl.NumberFormat` on ICU 78
 over the half-cent values, and every shipped language's decimal format, described
 with its minimum grouping digits, agrees with it over the values 1000 to 99999 and
 each rounding boundary, for every decimal option set the translation takes.
+The Dutch date pictures agree with `Intl.DateTimeFormat` on ICU 78.3, in UTC
+and at fixed offsets, for every set of date fields and style a test names, over
+dates at the zone edges: late evenings, the nights Amsterdam changes its clock,
+texts with offsets of their own, a fraction finer than a millisecond and the
+year 999.
 
 ### Parity, records and review
 

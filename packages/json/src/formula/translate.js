@@ -44,6 +44,22 @@ const NOT_ASTRAL = '[^\u{10000}-\u{10FFFF}]';
 const ONE_UNIT_ATOM = /^(?:\.|\\[SDW]|\[\^(?:\\.|[^\]\\])*\])(\+)?$/;
 /** The methods whose result is a new array: sorting it in place changes nothing the body reads again. */
 const FRESH_ARRAY_METHODS = new Set(['map', 'filter', 'concat', 'slice', 'flatMap']);
+/**
+ * Each date field's option values a `$date-format` picture can write, as the
+ * letters of a CLDR skeleton, in the skeleton's order: year, month, weekday,
+ * day. A narrow name (`J` for January) has no picture token.
+ * @type {Record<string, Record<string, string>>}
+ */
+const DATE_FIELDS = {
+  year: { numeric: 'y', '2-digit': 'yy' },
+  month: { numeric: 'M', '2-digit': 'MM', short: 'MMM', long: 'MMMM' },
+  weekday: { short: 'EEE', long: 'EEEE' },
+  day: { numeric: 'd', '2-digit': 'dd' },
+};
+/** A skeleton the date fields spell, in that order. */
+const DATE_SKELETON = /^(?=.)(?:yy?)?(?:M{1,4})?(?:E{3,4})?(?:dd?)?$/;
+/** The values of the `dateStyle` option. */
+const DATE_STYLES = ['full', 'long', 'medium', 'short'];
 
 /** @param {Set<string>} a @param {Set<string>} b */
 const union = (a, b) => new Set([...a, ...b]);
@@ -535,9 +551,9 @@ function translateBody(source, opts) {
     return v.q;
   }
 
-  /** A `new` other than the two translated forms (in `call`). @param {any} node @returns {Value} */
+  /** A `new` other than the translated forms (in `call`). @param {any} node @returns {Value} */
   function newExpression(node) {
-    reason('new', node, 'a new expression other than new Date(text).getTime() or new Intl.NumberFormat(…).format(n)');
+    reason('new', node, 'a new expression other than new Date(text).getTime(), new Intl.NumberFormat(…).format(n), new Date(text).toLocaleDateString(…) and new Intl.DateTimeFormat(…).format(new Date(text))');
     return EMPTY();
   }
 
@@ -889,22 +905,32 @@ function translateBody(source, opts) {
           return value('$context.now', 'number');
         }
       }
-      if (object.type === 'New' && object.callee.type === 'Member' && !object.callee.computed
-        && object.callee.object.type === 'Identifier' && object.callee.object.name === 'Intl' && object.callee.property === 'NumberFormat'
-        && callee.property === 'format') {
+      if (newIntl(object, 'NumberFormat') && callee.property === 'format') {
         if (node.args.length !== 1) { reason('arguments', node, 'Intl.NumberFormat().format takes one value'); return EMPTY(); }
         return localeFormat(node, tx(node.args[0], env), object.args, env);
       }
-      if (object.type === 'New' && object.callee.type === 'Identifier' && object.callee.name === 'Date' && callee.property === 'getTime') {
+      if (newIntl(object, 'DateTimeFormat') && callee.property === 'format') {
+        if (node.args.length !== 1 || !newDate(node.args[0])) { reason('arguments', node, 'Intl.DateTimeFormat().format of anything but one new Date(text)'); return EMPTY(); }
+        return dateFormat(node, node.args[0], object.args, env);
+      }
+      if (newDate(object) && callee.property === 'getTime') {
         if (object.args.length !== 1) { reason('date', object, 'new Date() without exactly one argument'); return EMPTY(); }
         differ('date-parse', object, 'JavaScript also reads dates that are not RFC 3339 (implementation-defined); the query refuses them');
         return value({ $epoch: tx(object.args[0], env).q }, 'number');
       }
+      if (newDate(object) && callee.property === 'toLocaleDateString') return dateFormat(node, object, node.args, env);
       return method(node, callee, env);
     }
     reason('call', node, 'a call of something other than a helper, Math, Date.now or a method');
     return EMPTY();
   }
+
+  /** Whether a node is `new Intl.<name>(…)`. @param {any} node @param {string} name */
+  const newIntl = (node, name) => node.type === 'New' && node.callee.type === 'Member' && !node.callee.computed
+    && node.callee.object.type === 'Identifier' && node.callee.object.name === 'Intl' && node.callee.property === name;
+
+  /** Whether a node is `new Date(…)`. @param {any} node */
+  const newDate = (node) => node.type === 'New' && node.callee.type === 'Identifier' && node.callee.name === 'Date';
 
   /** A helper: the skip and explanation names, or one the host mapped. @param {any} node @param {string} name @param {Env} env @returns {Value} */
   function functionCall(node, name, env) {
@@ -1331,15 +1357,8 @@ function translateBody(source, opts) {
     // a described language is one the host names, never a name Object.prototype has
     const locale = Object.hasOwn(opts.locales, tagNode.value) ? opts.locales[tagNode.value] : undefined;
     if (!locale) { reason('locale', tagNode, `the language '${tagNode.value}' is not one this translation describes`); return EMPTY(); }
-    /** @type {Record<string, any>} */
-    const o = Object.create(null);
-    if (optionsNode) {
-      if (optionsNode.type !== 'Object') { reason('locale', optionsNode, 'formatting options that are not an object literal'); return EMPTY(); }
-      for (const p of optionsNode.properties) {
-        if (p.type !== 'Property' || p.computed || p.value.type !== 'Literal') { reason('locale', p, 'a formatting option that is not a literal'); return EMPTY(); }
-        o[p.key] = p.value.value;
-      }
-    }
+    const o = literalOptions(optionsNode);
+    if (o === null) return EMPTY();
     for (const key of Object.keys(o)) {
       if (!['style', 'currency', 'minimumFractionDigits', 'maximumFractionDigits'].includes(key)) {
         reason('locale', optionsNode, `the formatting option '${key}'`);
@@ -1396,6 +1415,110 @@ function translateBody(source, opts) {
     const fraction = at < 0 ? 0 : (/** @type {string[]} */ (positive.slice(at + 1).match(/^[#\p{Nd}]*/u)))[0].length;
     const boundary = Number(`${'9'.repeat(size + minimum - 1)}.${'9'.repeat(fraction)}5`);
     return { $if: [{ $ge: [{ $abs: x }, boundary] }, write(picture), write(picture.replace(separator, ''))] };
+  }
+
+  /**
+   * The literal options of a formatting call, or null after naming options
+   * that are not an object literal of literals.
+   * @param {any} optionsNode @returns {Record<string, any> | null}
+   */
+  function literalOptions(optionsNode) {
+    /** @type {Record<string, any>} */
+    const o = Object.create(null);
+    if (!optionsNode) return o;
+    if (optionsNode.type !== 'Object') { reason('locale', optionsNode, 'formatting options that are not an object literal'); return null; }
+    for (const p of optionsNode.properties) {
+      if (p.type !== 'Property' || p.computed || p.value.type !== 'Literal') { reason('locale', p, 'a formatting option that is not a literal'); return null; }
+      o[p.key] = p.value.value;
+    }
+    return o;
+  }
+
+  //#endregion
+
+  //#region dates as text
+
+  /**
+   * `new Date(text).toLocaleDateString(tag, options)` and `new
+   * Intl.DateTimeFormat(tag, options).format(new Date(text))`, for a language
+   * whose date pictures the host declared: the text's instant (a date alone is
+   * midnight UTC, as JavaScript reads it) moved to the wall clock of the zone
+   * the host declared (UTC by default) and written with the picture of the date
+   * fields the options name. Without a `timeZone` option JavaScript writes the
+   * host's own zone, which a formula cannot read: the difference `time-zone`.
+   * A call without a literal language tag, or in a language without date
+   * pictures, is the reason `locale`, as number formatting names one.
+   * @param {any} node @param {any} dateNode - the `new Date(text)` @param {any[]} args @param {Env} env @returns {Value}
+   */
+  function dateFormat(node, dateNode, args, env) {
+    const [tagNode, optionsNode] = args;
+    if (!tagNode || tagNode.type !== 'Literal' || typeof tagNode.value !== 'string') {
+      reason('locale', node, 'date formatting without a literal language tag');
+      return EMPTY();
+    }
+    const tag = tagNode.value;
+    // a described language is one the host names, never a name Object.prototype has
+    const locale = Object.hasOwn(opts.locales, tag) ? opts.locales[tag] : undefined;
+    if (locale?.dates === undefined) {
+      reason('locale', tagNode, `the language '${tag}' has no date pictures this translation describes (translate.locales['${tag}'].dates)`);
+      return EMPTY();
+    }
+    if (args.length > 2) { reason('arguments', node, 'date formatting of more than a language and its options'); return EMPTY(); }
+    if (dateNode.args.length !== 1) { reason('date', dateNode, 'new Date() without exactly one argument'); return EMPTY(); }
+    const o = literalOptions(optionsNode);
+    if (o === null) return EMPTY();
+    const fields = dateFields(o, optionsNode);
+    if (fields === null) return EMPTY();
+    const picture = Object.hasOwn(locale.dates, fields) ? locale.dates[fields] : undefined;
+    if (picture === undefined) { reason('locale', optionsNode ?? tagNode, `the date fields '${fields}', which have no picture this translation describes for '${tag}'`); return EMPTY(); }
+    const zone = locale.timeZone ?? 'UTC';
+    const offset = fixedOffset(zone);
+    if (o.timeZone === undefined)
+      differ('time-zone', node, `JavaScript writes the date in the host's own time zone, the query in ${zone}, the zone declared for '${tag}': near midnight they write different days`);
+    else if (fixedOffset(o.timeZone) !== offset) {
+      reason('locale', optionsNode, `the time zone '${o.timeZone}', where this translation writes the dates of '${tag}' in ${zone}`);
+      return EMPTY();
+    }
+    const text = tx(dateNode.args[0], env);
+    if (certainType(text) !== 'string' && certainType(text) !== 'unknown') {
+      reason('date', dateNode.args[0], 'new Date() of a value that is not text: the translation reads an RFC 3339 text');
+      return EMPTY();
+    }
+    differ('date-parse', dateNode, "JavaScript also reads dates that are not RFC 3339 (implementation-defined) and null (as 1970-01-01), and writes 'Invalid Date' (Intl.DateTimeFormat throws) for undefined, a leap second or a text it cannot read; the query refuses them, writes nothing for undefined and reads the leap second");
+    const write = (/** @type {any} */ z) => ({ '$date-format': [z, str(picture)] });
+    return value(once(text, (d) => once(value({ $if: [{ '$is-date': d }, { $concat: [d, 'T00:00:00Z'] }, d] }, 'string'), (t) => {
+      // $date-add moves the clock and keeps the text's own offset: the picture writes no offset
+      const moved = { '$date-add': [t, { $sub: [offset, { $offset: t }] }, 'minute'] };
+      if (!/y/.test(unquoted(picture))) return write(moved);
+      // JavaScript writes the year 0000 as the year 1 of the era before it, where the picture would write 0
+      return once(value(moved, 'string'), (z) => ({ $if: [{ $eq: [{ $year: z }, 0] },
+        { $number: 'a date in the year 0000, which JavaScript writes as the year 1 of the era before' }, write(z)] }));
+    })), 'string');
+  }
+
+  /**
+   * The date fields literal options name, as the key of their picture: a
+   * CLDR skeleton (`yMd`, also what JavaScript writes when the options name no
+   * field; `yMMMMd`) or a `dateStyle`; null after naming an option, or a value,
+   * that no picture writes.
+   * @param {Record<string, any>} o @param {any} at @returns {string | null}
+   */
+  function dateFields(o, at) {
+    for (const key of Object.keys(o)) {
+      if (key !== 'timeZone' && key !== 'dateStyle' && !Object.hasOwn(DATE_FIELDS, key)) { reason('locale', at, `the formatting option '${key}'`); return null; }
+    }
+    let skeleton = '';
+    for (const [field, letters] of Object.entries(DATE_FIELDS)) {
+      if (o[field] === undefined) continue;
+      if (typeof o[field] !== 'string' || !Object.hasOwn(letters, o[field])) { reason('locale', at, `the ${field} '${o[field]}', which no picture writes`); return null; }
+      skeleton += letters[o[field]];
+    }
+    if (o.dateStyle === undefined) return skeleton || 'yMd';
+    if (skeleton !== '' || !DATE_STYLES.includes(o.dateStyle)) {
+      reason('locale', at, skeleton !== '' ? 'a dateStyle beside a date field, which JavaScript refuses' : `the date style '${o.dateStyle}'`);
+      return null;
+    }
+    return o.dateStyle;
   }
 
   //#endregion
@@ -1969,7 +2092,13 @@ function readOptions(options) {
   for (const [tag, l] of Object.entries(locales)) {
     if (!l || typeof l.decimalFormat !== 'string' || typeof l.grouping !== 'string' || typeof l.decimal !== 'string'
       || (l.minimumGroupingDigits !== undefined && !(Number.isSafeInteger(l.minimumGroupingDigits) && l.minimumGroupingDigits >= 1)))
-      throw new TypeError(`locale '${tag}' must be { decimalFormat, grouping, decimal, currencies?, nan?, minimumGroupingDigits? }`);
+      throw new TypeError(`locale '${tag}' must be { decimalFormat, grouping, decimal, currencies?, nan?, minimumGroupingDigits?, dates?, timeZone? }`);
+    const dates = l.dates;
+    if (dates !== undefined && (dates === null || typeof dates !== 'object' || Array.isArray(dates) || Object.entries(dates).some(([key, picture]) =>
+      !(DATE_SKELETON.test(key) || DATE_STYLES.includes(key)) || typeof picture !== 'string' || picture === '' || /X/.test(unquoted(picture)))))
+      throw new TypeError(`locale '${tag}' dates must map date fields (a skeleton in the order year, month, weekday, day: yMd, yMMMMd) or a dateStyle to a $date-format picture that writes no offset`);
+    if (l.timeZone !== undefined && fixedOffset(l.timeZone) === null)
+      throw new TypeError(`locale '${tag}' timeZone must be UTC or a fixed offset (+01:00): a formula has no time-zone database to write a date in another zone`);
   }
   return {
     argument: /** @type {string} */ (name(options.argument, 'argument', 'row')),
@@ -2077,6 +2206,26 @@ function escapeRegExp(text, inClass = false) {
 }
 
 /**
+ * The offset of a time zone, in minutes east of UTC, as JavaScript reads its
+ * name (`UTC`, `Etc/UTC` and `GMT` alike, `+01:00` or `+0100`): null for a
+ * zone JavaScript refuses or one with a name of its own (`Europe/Amsterdam`),
+ * whose offset a formula, which has no time-zone database, cannot know.
+ * @param {unknown} zone @returns {number | null}
+ */
+function fixedOffset(zone) {
+  if (typeof zone !== 'string') return null;
+  let id;
+  try { id = new Intl.DateTimeFormat('en', { timeZone: zone }).resolvedOptions().timeZone; }
+  catch { return null; }
+  if (id === 'UTC') return 0;
+  const m = /^([+-])(\d\d):(\d\d)$/.exec(id);
+  return m ? (m[1] === '-' ? -1 : 1) * (Number(m[2]) * 60 + Number(m[3])) : null;
+}
+
+/** A date picture without its quoted literals (`'de' d`, `''`), which hold no field. @param {string} picture */
+const unquoted = (picture) => picture.replace(/'[^']*'?/g, '');
+
+/**
  * Trim a text as JavaScript's `trim`, `trimStart` and `trimEnd` do (its white
  * space and line terminators): the QUERY-FORMAT §8.7 composition.
  * @param {any} q @param {string} which
@@ -2097,9 +2246,11 @@ function trim(q, which) {
  * @property {string | null} [explain] - the explanation helper's name (default `because`)
  * @property {string | null} [explanationMember] - a returned object literal whose one member has
  *   this name is an explanation, its value the text (default none)
- * @property {Record<string, { decimalFormat: string, grouping: string, decimal: string, currencies?: Record<string, string>, nan?: string, minimumGroupingDigits?: number }>} [locales]
- *   the languages number formatting may name, each with the decimal format registered for it, its currency pictures,
- *   and the fewest digits the leftmost group of a grouped number holds (default 1; Spanish 2: 1234, but 12.345)
+ * @property {Record<string, { decimalFormat: string, grouping: string, decimal: string, currencies?: Record<string, string>, nan?: string, minimumGroupingDigits?: number, dates?: Record<string, string>, timeZone?: string }>} [locales]
+ *   the languages number and date formatting may name, each with the decimal format registered for it, its currency pictures,
+ *   the fewest digits the leftmost group of a grouped number holds (default 1; Spanish 2: 1234, but 12.345),
+ *   the `$date-format` picture of each set of date fields it writes (keyed by their CLDR skeleton, `yMd`, or a
+ *   `dateStyle`), and the zone its dates are written in (`UTC`, the default, or a fixed offset such as `+01:00`)
  */
 /**
  * @typedef {Object} HelperMapping
