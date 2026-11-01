@@ -89,7 +89,14 @@ describe('a baseline receipt adopts history', () => {
     const { dbPath, cleanup } = installation(true);
     try {
       await migrate({ driver: nodeDriver(), path: dbPath }, [baseline], { baseline: MODEL, model: MODEL, shadow: false });
-      const schema = () => new DatabaseSync(dbPath).prepare('SELECT type, name, sql FROM sqlite_schema ORDER BY name').all();
+      // closed before the next step: a handle left to the collector holds the file at cleanup (EPERM on Windows)
+      const schema = () => {
+        const db = new DatabaseSync(dbPath);
+        try {
+          return db.prepare('SELECT type, name, sql FROM sqlite_schema ORDER BY name').all();
+        }
+        finally { db.close(); }
+      };
       const before = schema();
       for (let run = 0; run < 2; run++) {
         const store = await openStore(MODEL, { driver: nodeDriver(), path: dbPath, adopt: true });

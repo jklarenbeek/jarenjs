@@ -27,9 +27,12 @@ const run = (host, file, spec, point) => {
   const input = `${file}.json`; writeFileSync(input, JSON.stringify(spec));
   return spawnSync(host, [child, file, input, point], { encoding: 'utf8', timeout: 15000 });
 };
+const bunVersion = spawnSync('bun', ['--version'], { encoding: 'utf8' });
+const bunMissing = bunVersion.error !== undefined || bunVersion.status !== 0;
 
 for (const host of [process.execPath, 'bun']) {
-  it(`${host === 'bun' ? 'Bun' : 'Node'} preserves committed WAL across rebuild/drop/commit and backup publication kills`, async () => {
+  it(`${host === 'bun' ? 'Bun' : 'Node'} preserves committed WAL across rebuild/drop/commit and backup publication kills`,
+    { skip: host === 'bun' && bunMissing ? 'no bun binary on PATH' : false }, async () => {
     for (const point of ['rebuild', 'drop', 'commit', 'copy', 'publish-before', 'publish-after']) {
       const dir = mkdtempSync(join(tmpdir(), 'jaren-preserve-'));
       const file = join(dir, 'source.sqlite');

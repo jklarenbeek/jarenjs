@@ -26,7 +26,11 @@ await store.transaction(async (tx) => {
   const notes = tx.collection('notes');
   for (let i = 0; i < ROWS; i++) await notes.put({ id: `n${i}`, body: 'x'.repeat(4000) });
 });
-const report = { runtime: typeof Bun === 'undefined' ? 'node' : 'bun', compiled: import.meta.url.startsWith('file:///$bunfs/') };
+// Bun says whether it runs a compiled executable: the URL of a compiled
+// module names a virtual root that differs by platform (file:///$bunfs/root/
+// on POSIX, file:///B:/%7EBUN/root/ on Windows)
+const report = { runtime: typeof Bun === 'undefined' ? 'node' : 'bun',
+  compiled: globalThis.Bun?.isStandaloneExecutable === true };
 
 {
   // a copy to completion; a timer ticks every millisecond meanwhile, and a

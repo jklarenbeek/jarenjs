@@ -1,11 +1,12 @@
 //@ts-check
 import { it } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, readdirSync, mkdirSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, readdirSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { symlinkOrSkip } from './helpers.js';
 
 const repositoryRoot = fileURLToPath(new URL('../..', import.meta.url));
 const bunVersion = spawnSync('bun', ['--version'], { encoding: 'utf8' });
@@ -240,7 +241,7 @@ it('a snapshot of a source another connection has locked fails busy and leaves n
   finally { locker.close(); source.close(); rmSync(directory, { recursive: true, force: true }); }
 });
 
-it('a snapshot never writes over the database it copies or one of its side files', async () => {
+it('a snapshot never writes over the database it copies or one of its side files', async (t) => {
   const directory = mkdtempSync(join(tmpdir(), 'jaren-snapshot-'));
   const { runtime, driver } = await host();
   const path = join(directory, 'app.db');
@@ -248,9 +249,9 @@ it('a snapshot never writes over the database it copies or one of its side files
   const source = await driver.open(path);
   // a database whose own name is another path's journal
   const odd = await driver.open(join(directory, 'odd.db-journal'));
-  // the directory under another name
-  symlinkSync(directory, join(directory, 'alias'));
   try {
+    // the directory under another name
+    if (!symlinkOrSkip(t, directory, join(directory, 'alias'))) return;
     source.exec('CREATE TABLE t(a);INSERT INTO t VALUES(1)');
     odd.exec('CREATE TABLE precious(v);INSERT INTO precious VALUES(1)');
     for (const target of [path, `${path}-journal`, `${path}-wal`, `${path}-shm`, join(directory, 'alias', 'app.db-journal')])

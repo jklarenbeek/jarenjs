@@ -13,7 +13,10 @@ export interface NodeWorkerOptions {
   /** The worker endpoint module to start, as a `file:` (or `data:`) URL:
    * by default the one beside the driver; a bundled or compiled application
    * names its own copy of `@jarenjs/db/worker-endpoint` (on Windows,
-   * `pathToFileURL(path)`). Any other value is a `TypeError`. A worker that
+   * `pathToFileURL(path)`). Any other value is a `TypeError` when the driver
+   * is made, and so is a `file:` URL this platform's `fileURLToPath` cannot
+   * turn into a path (a host on POSIX, a drive-less path on Windows, an
+   * encoded slash), which no worker could start. A worker that
    * stops before it is ready fails the open with `JD0003` naming this URL,
    * not retryable. */
   endpoint?: URL | string;

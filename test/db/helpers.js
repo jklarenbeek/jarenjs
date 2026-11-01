@@ -192,6 +192,28 @@ export function tempDbPath() {
 }
 
 /**
+ * Make `link` a symbolic link to `target`, or skip the running test where
+ * this host may not make one: Windows refuses a symbolic link (`EPERM`) to a
+ * process without the privilege, and a junction, which needs none, cannot
+ * link a file. Any other failure throws.
+ * @param {{ skip: (message?: string) => void }} t - the running test's context
+ * @param {string} target
+ * @param {string} link
+ * @returns {boolean} whether the link exists: `false` once the test is skipped
+ */
+export function symlinkOrSkip(t, target, link) {
+  try {
+    fs.symlinkSync(target, link);
+    return true;
+  }
+  catch (error) {
+    if (/** @type {NodeJS.ErrnoException} */ (error).code !== 'EPERM') throw error;
+    t.skip('this host does not let an unprivileged user create a symbolic link');
+    return false;
+  }
+}
+
+/**
  * The key a unique index adds on SQLite after the typed generated column of
  * the top-level member `member`: `''` for a value of the column's own kind,
  * a value of another kind as its text (a number as its double, a string

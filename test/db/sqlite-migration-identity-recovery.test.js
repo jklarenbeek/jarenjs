@@ -29,6 +29,8 @@ const hosts = [
   ['Node', process.versions.bun ? 'node' : process.execPath],
   ['Bun', process.versions.bun ? process.execPath : 'bun'],
 ];
+const bunVersion = spawnSync('bun', ['--version'], { encoding: 'utf8' });
+const bunMissing = bunVersion.error !== undefined || bunVersion.status !== 0;
 const options = { baseline: MODEL, model: MODEL, shadow: false };
 
 /** The independent row oracle releases each temporary native statement. */
@@ -57,7 +59,8 @@ function seedLegacy(connection) {
 
 for (const [host, executable] of hosts) {
   for (const point of ['normal', 'side', 'adopt-header', 'adopt-receipt', 'copy', 'publish-before', 'publish-after']) {
-    it(`${host}: ${point} interruption preserves migration rows and exact authority`, async () => {
+    it(`${host}: ${point} interruption preserves migration rows and exact authority`,
+      { skip: executable === 'bun' && bunMissing ? 'no bun binary on PATH' : false }, async () => {
       const dir = mkdtempSync(join(tmpdir(), 'jaren-identity-recovery-'));
       const file = join(dir, 'source.sqlite');
       const adoption = point.startsWith('adopt');

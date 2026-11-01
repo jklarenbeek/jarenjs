@@ -11,21 +11,34 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { Worker } from 'node:worker_threads';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { openStore } from '@jarenjs/db';
 import { nodeWorkerDriver } from '@jarenjs/db/node-worker';
 import { nodeWorkerPoolDriver } from '@jarenjs/db/node-pool';
 import { nodeProcessDriver } from '@jarenjs/db/node-process';
 import { tempDbPath } from './helpers.js';
 
-const MISSING = new URL('file:///nonexistent/jaren/worker-endpoint.js');
+// a path on every platform (on Windows, on the working directory's drive), with no file behind it
+const MISSING = pathToFileURL('/nonexistent/jaren/worker-endpoint.js');
 const MODEL = { $model: '0.1', collections: { notes: { key: '/id', schema: { type: 'object' } } } };
-const unstarted = (/** @type {any} */ error) => error.code === 'JD0003' && error.retryable === false
-  && error.endpoint === MISSING.href && error.message.includes(MISSING.href);
+const unstartedAt = (/** @type {URL} */ url) => (/** @type {any} */ error) => error.code === 'JD0003'
+  && error.retryable === false && error.endpoint === url.href && error.message.includes(url.href);
+const unstarted = unstartedAt(MISSING);
+/** The refusal of a `file:` URL this platform cannot turn into a path, quoting the platform's reason. */
+const unconvertible = (/** @type {string} */ href, /** @type {string} */ code, /** @type {RegExp} */ reason) =>
+  (/** @type {any} */ error) => error instanceof TypeError && error.cause?.code === code && reason.test(error.message)
+    && error.message.startsWith(`endpoint ${href} is a file: URL this platform cannot turn into a path (`)
+    && error.message.endsWith('so no worker could start it: name the module with pathToFileURL(path)');
 
 describe('the worker endpoint', () => {
   it('a missing endpoint fails the open by name, not as a generation to retry', { timeout: 30000 }, async () => {
     await assert.rejects(nodeWorkerDriver({ endpoint: MISSING }).open(':memory:'), unstarted);
     await assert.rejects(nodeWorkerDriver({ endpoint: MISSING.href }).open(':memory:'), unstarted);
+    // other spellings of a path: an encoded space, and a localhost authority, which the URL parser drops
+    for (const endpoint of [new URL(`${MISSING.href.slice(0, -'.js'.length)}%20copy.js`),
+      new URL(MISSING.href.replace('file:///', 'file://localhost/'))]) {
+      await assert.rejects(nodeWorkerDriver({ endpoint }).open(':memory:'), unstartedAt(endpoint));
+    }
     const { dbPath, cleanup } = tempDbPath();
     try {
       await assert.rejects(openStore(MODEL, { driver: nodeWorkerPoolDriver({ readers: 1, endpoint: MISSING }), path: dbPath }),
@@ -33,6 +46,51 @@ describe('the worker endpoint', () => {
       await assert.rejects(openStore(MODEL, { driver: nodeWorkerDriver({ endpoint: MISSING }), path: dbPath }), unstarted);
     }
     finally { cleanup(); }
+  });
+
+  it('refuses a host or an encoded slash in a file: URL when the driver is made, naming why', { timeout: 30000 }, async () => {
+    const slash = 'file:///tmp/a%2Fb.js';
+    for (const endpoint of [slash, new URL(slash)]) {
+      for (const make of [nodeWorkerDriver, nodeWorkerPoolDriver]) {
+        assert.throws(() => make({ endpoint }), unconvertible(slash, 'ERR_INVALID_FILE_URL_PATH', /\(File URL path must not include encoded /));
+      }
+    }
+    // a host names a UNC path on Windows, which a worker starts; on POSIX it names none
+    const host = 'file://example.com/worker-endpoint.js';
+    const named = unconvertible(host, 'ERR_INVALID_FILE_URL_HOST', /\(File URL host must be "localhost" or empty on /);
+    for (const make of [nodeWorkerDriver, nodeWorkerPoolDriver]) {
+      if (process.platform === 'win32') assert.doesNotThrow(() => make({ endpoint: host }));
+      else assert.throws(() => make({ endpoint: host }), named);
+    }
+    // the pool's worker member names the endpoint too: refused when the pool opens its first worker
+    if (process.platform !== 'win32') {
+      await assert.rejects(nodeWorkerPoolDriver({ readers: 1, worker: { endpoint: host } }).open(':memory:'), named);
+    }
+  });
+
+  it('refuses a file: URL exactly where this platform cannot turn it into a path, as a worker start would', () => {
+    // the predicate is the platform's own fileURLToPath: a host is a UNC path on
+    // Windows and no path on POSIX, a drive-less path is none on Windows, and an
+    // encoded slash (on Windows an encoded backslash too) is none anywhere
+    for (const text of ['file://example.com/w.js', 'file://server/share/w.js', 'file:///tmp/a%2Fb.js', 'file:///tmp/a%5Cb.js',
+      'file:///nonexistent/w.js', 'file:///C:/app/w.js', 'file://localhost/tmp/w.js', 'file:///tmp/a%20b.js']) {
+      const url = new URL(text);
+      /** @type {any} */
+      let reason = null;
+      try {
+        fileURLToPath(url);
+      }
+      catch (error) {
+        reason = error;
+      }
+      for (const make of [() => nodeWorkerDriver({ endpoint: url }), () => nodeWorkerPoolDriver({ endpoint: text })]) {
+        if (reason === null) assert.doesNotThrow(make, text);
+        else {
+          assert.throws(make, (/** @type {any} */ error) => error instanceof TypeError && error.cause?.code === reason.code
+            && error.message.includes(`endpoint ${url.href} `) && error.message.includes(`(${reason.message})`), text);
+        }
+      }
+    }
   });
 
   it('serves from the URL the endpoint option names', { timeout: 30000 }, async () => {

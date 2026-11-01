@@ -12,7 +12,7 @@
 
 import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
-import { mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -20,6 +20,7 @@ import { openStore, STORE_SOURCE } from '@jarenjs/db';
 import { nodeDriver } from '@jarenjs/db/node';
 import { nodeWorkerDriver } from '@jarenjs/db/node-worker';
 import { nodeProcessDriver } from '@jarenjs/db/node-process';
+import { symlinkOrSkip } from './helpers.js';
 
 const MODEL = {
   $model: '0.1',
@@ -41,6 +42,20 @@ const MODEL = {
 /** @param {any} view - a store, or a store view a transaction received */
 function sourcesOf(view) {
   return [view.collection('users')[STORE_SOURCE], view.entity('Row')[STORE_SOURCE]];
+}
+
+/**
+ * Open a store into `opened`, which the test's `finally` closes: every store
+ * a test opened is closed whichever later open refuses, since a worker or a
+ * child process host left open keeps the test process alive.
+ * @param {any[]} opened
+ * @param {any} driver
+ * @param {string} [path]
+ */
+async function openInto(opened, driver, path) {
+  const store = await openStore(MODEL, path === undefined ? { driver } : { driver, path });
+  opened.push(store);
+  return store;
 }
 
 describe('a store view carries its own source', () => {
@@ -67,15 +82,17 @@ describe('a store view carries its own source', () => {
 });
 
 describe('a store view names the database it reads', () => {
-  it('two stores over one file are one source, through a symbolic link too; two files are two', async () => {
+  it('two stores over one file are one source, through a symbolic link too; two files are two', async (t) => {
     const dir = mkdtempSync(join(tmpdir(), 'jaren-store-source-'));
     const path = join(dir, 'one.sqlite');
-    const first = await openStore(MODEL, { driver: nodeDriver(), path });
-    const second = await openStore(MODEL, { driver: nodeDriver(), path });
-    symlinkSync(path, join(dir, 'link.sqlite'));
-    const linked = await openStore(MODEL, { driver: nodeDriver(), path: join(dir, 'link.sqlite') });
-    const other = await openStore(MODEL, { driver: nodeDriver(), path: join(dir, 'two.sqlite') });
+    /** @type {any[]} */
+    const opened = [];
     try {
+      const first = await openInto(opened, nodeDriver(), path);
+      const second = await openInto(opened, nodeDriver(), path);
+      if (!symlinkOrSkip(t, path, join(dir, 'link.sqlite'))) return;
+      const linked = await openInto(opened, nodeDriver(), join(dir, 'link.sqlite'));
+      const other = await openInto(opened, nodeDriver(), join(dir, 'two.sqlite'));
       const [users, row] = sourcesOf(first);
       assert.strictEqual(users.store, `sqlite:${realpathSync(path)}`);
       assert.strictEqual(row.store, users.store);
@@ -84,27 +101,31 @@ describe('a store view names the database it reads', () => {
       assert.strictEqual(sourcesOf(other)[0].store, `sqlite:${realpathSync(join(dir, 'two.sqlite'))}`);
     }
     finally {
-      for (const store of [first, second, linked, other]) await store.close();
+      for (const store of opened) await store.close();
       rmSync(dir, { recursive: true, force: true });
     }
   });
 
   it('a shared-cache in-memory database is named by its name and VFS, where this process holds it', async () => {
     const path = 'file:store-source-shared?mode=memory&cache=shared';
-    const first = await openStore(MODEL, { driver: nodeDriver(), path });
-    // the engine's own reading of the URI: parameters in any order, the path percent-decoded
-    const reordered = await openStore(MODEL, { driver: nodeDriver(), path: 'file:store-source-%73hared?cache=shared&mode=memory' });
-    const worker = await openStore(MODEL, { driver: nodeWorkerDriver(), path });
-    // a child process holds a database of its own under the same name
-    const child = await openStore(MODEL, { driver: nodeProcessDriver(), path });
-    const named = await openStore(MODEL, { driver: nodeDriver(), path: 'file::memory:?cache=shared' });
-    const unix = await openStore(MODEL, { driver: nodeDriver(), path: `${path}&vfs=unix` });
-    const other = await openStore(MODEL, { driver: nodeDriver(), path: 'file:store-source-other?mode=memory&cache=shared' });
-    const unshared = await openStore(MODEL, { driver: nodeDriver(), path: 'file:store-source-shared?mode=memory' });
-    // an empty or `localhost` authority names the same database: the path is the name
-    const rooted = await openStore(MODEL, { driver: nodeDriver(), path: 'file:///store-source-root?mode=memory&cache=shared' });
-    const local = await openStore(MODEL, { driver: nodeDriver(), path: 'file://localhost/store-source-root?mode=memory&cache=shared' });
+    // this platform's own VFS: SQLite has no `unix` on Windows, and no `win32` elsewhere
+    const vfs = process.platform === 'win32' ? 'win32' : 'unix';
+    /** @type {any[]} */
+    const opened = [];
     try {
+      const first = await openInto(opened, nodeDriver(), path);
+      // the engine's own reading of the URI: parameters in any order, the path percent-decoded
+      const reordered = await openInto(opened, nodeDriver(), 'file:store-source-%73hared?cache=shared&mode=memory');
+      const worker = await openInto(opened, nodeWorkerDriver(), path);
+      // a child process holds a database of its own under the same name
+      const child = await openInto(opened, nodeProcessDriver(), path);
+      const named = await openInto(opened, nodeDriver(), 'file::memory:?cache=shared');
+      const withVfs = await openInto(opened, nodeDriver(), `${path}&vfs=${vfs}`);
+      const other = await openInto(opened, nodeDriver(), 'file:store-source-other?mode=memory&cache=shared');
+      const unshared = await openInto(opened, nodeDriver(), 'file:store-source-shared?mode=memory');
+      // an empty or `localhost` authority names the same database: the path is the name
+      const rooted = await openInto(opened, nodeDriver(), 'file:///store-source-root?mode=memory&cache=shared');
+      const local = await openInto(opened, nodeDriver(), 'file://localhost/store-source-root?mode=memory&cache=shared');
       await first.collection('users').insert({ id: 'u1' });
       const [users, row] = sourcesOf(first);
       assert.strictEqual(users.store, 'sqlite-memory:[null,"store-source-shared"]');
@@ -117,7 +138,7 @@ describe('a store view names the database it reads', () => {
       assert.strictEqual(typeof sourcesOf(child)[0].store, 'symbol');
       assert.strictEqual(sourcesOf(named)[0].store, 'sqlite-memory:[null,":memory:"]');
       // the VFS is part of the name, so a spelling naming one stays a source of its own
-      assert.strictEqual(sourcesOf(unix)[0].store, 'sqlite-memory:["unix","store-source-shared"]');
+      assert.strictEqual(sourcesOf(withVfs)[0].store, `sqlite-memory:["${vfs}","store-source-shared"]`);
       assert.strictEqual(sourcesOf(other)[0].store, 'sqlite-memory:[null,"store-source-other"]');
       assert.strictEqual(await unshared.collection('users').get('u1'), undefined);
       assert.strictEqual(typeof sourcesOf(unshared)[0].store, 'symbol');
@@ -127,22 +148,23 @@ describe('a store view names the database it reads', () => {
       assert.strictEqual(sourcesOf(local)[0].store, sourcesOf(rooted)[0].store);
     }
     finally {
-      for (const store of [first, reordered, worker, child, named, unix, other, unshared, rooted, local]) await store.close();
+      for (const store of opened) await store.close();
     }
   });
 
   it('a private in-memory database has no name a second store could share: a token of the store\'s own', async () => {
-    const first = await openStore(MODEL, { driver: nodeDriver() });
-    const second = await openStore(MODEL, { driver: nodeDriver() });
+    /** @type {any[]} */
+    const opened = [];
     try {
+      const first = await openInto(opened, nodeDriver());
+      const second = await openInto(opened, nodeDriver());
       const [users, row] = sourcesOf(first);
       assert.strictEqual(typeof users.store, 'symbol');
       assert.strictEqual(row.store, users.store);
       assert.notStrictEqual(sourcesOf(second)[0].store, users.store);
     }
     finally {
-      await first.close();
-      await second.close();
+      for (const store of opened) await store.close();
     }
   });
 });

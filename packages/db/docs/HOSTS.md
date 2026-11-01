@@ -377,6 +377,21 @@ retry that could never succeed.) A start that outlives `startupTimeoutMs` stays 
 retryable `JD2090`, now naming the endpoint and the deadline: that start may only
 have been slow.
 
+Which endpoint refuses where: a value that is no `file:` or `data:` URL (a
+relative path; a Windows path, which parses as a URL of scheme `c:`; an `https:`
+URL) is a `TypeError` when the driver is made, and so is a `file:` URL the
+running platform's own `fileURLToPath` cannot turn into a path, quoting its
+reason: a worker starts its module from that path, so it could never start this
+one. On POSIX that is a URL with a host (`file://example.com/w.js`) or an encoded
+slash (`file:///tmp/a%2Fb.js`); on Windows a path without a drive or an encoded
+slash or backslash, while `file://server/share/w.js` is the UNC path
+`\\server\share\w.js` and is kept. (Such an endpoint used to pass the driver and
+fail the open with the platform's uncoded `TypeError`,
+`ERR_INVALID_FILE_URL_HOST` or `ERR_INVALID_FILE_URL_PATH`.) The pool's `worker`
+member names an endpoint too, refused the same way when the pool opens its first
+worker. An endpoint that is a path but whose worker never starts is `JD0003` at
+the open; a start that outlives its deadline is `JD2090`.
+
 The Bun binding's backup worker needs no such entrypoint: its module travels
 inside the driver as a `data:` URL and imports only builtins
 ([existing-file adoption and backup](#existing-file-adoption-and-backup)).

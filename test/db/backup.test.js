@@ -25,7 +25,7 @@ import { fromBunModule } from '@jarenjs/db/bun';
 import { wasmDriver } from '@jarenjs/db/wasm';
 import { temporaryPathFor } from '../../packages/db/src/backup.js';
 
-import { BunShapedDatabase, declaringWasmHandle, tempDbPath } from './helpers.js';
+import { BunShapedDatabase, declaringWasmHandle, symlinkOrSkip, tempDbPath } from './helpers.js';
 import { assertCrash } from './fixtures/abrupt-exit.js';
 
 const MODEL = {
@@ -576,13 +576,16 @@ describe('the temporary path', () => {
 });
 
 describe('what a backup refuses', () => {
-  it('a target that is the store\'s own database or one of its side files, by any spelling, on both bindings', async () => {
+  it('a target that is the store\'s own database or one of its side files, by any spelling, on both bindings', async (t) => {
     for (const driver of [nodeDriver(), bunDouble()]) {
       const source = tempDbPath();
       const own = source.dbPath;
       // the store's directory under another name
       const alias = path.join(path.dirname(own), 'alias');
-      fs.symlinkSync(path.dirname(own), alias);
+      if (!symlinkOrSkip(t, path.dirname(own), alias)) {
+        source.cleanup();
+        return;
+      }
       // a rollback journal: the side files do not exist between transactions
       const store = await openStore(MODEL, { driver, path: own, journalMode: 'delete' });
       try {

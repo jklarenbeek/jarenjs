@@ -9,7 +9,9 @@ import { WORKER_ENDPOINT_MARK, WORKER_OPTIONS, refuseUnknownDriverOptions, worke
  * The worker endpoint a driver starts: by default the module beside this
  * one; a bundled or compiled application names its own copy of
  * `@jarenjs/db/worker-endpoint` (HOSTS.md, "Bundled and compiled
- * executables"). A URL, or the text of an absolute one.
+ * executables"). A URL, or the text of an absolute one: a `data:` URL, or
+ * a `file:` URL this platform's `fileURLToPath` turns into a path. Any
+ * other value is a `TypeError`.
  * @param {URL | string | undefined} endpoint
  * @returns {URL}
  */
@@ -22,6 +24,21 @@ export function workerEndpoint(endpoint) {
   if (url === undefined || (url.protocol !== 'file:' && url.protocol !== 'data:')) {
     throw new TypeError("endpoint must be a file: (or data:) URL, such as new URL('./worker-endpoint.js', "
       + 'import.meta.url) or pathToFileURL(path)');
+  }
+  // a worker starts a file: module from the path this platform's
+  // fileURLToPath makes of it, so a URL it cannot convert (a host on POSIX,
+  // where on Windows it is a UNC path; a drive-less path on Windows; an
+  // encoded slash) could never start: refused here, by that same function
+  const toPath = url.protocol === 'file:' ? globalThis.process?.getBuiltinModule?.('node:url')?.fileURLToPath : undefined;
+  if (toPath !== undefined) {
+    try {
+      toPath(url);
+    }
+    catch (cause) {
+      throw new TypeError(`endpoint ${url.href} is a file: URL this platform cannot turn into a path `
+        + `(${/** @type {Error} */ (cause).message}), so no worker could start it: name the module with pathToFileURL(path)`,
+      { cause });
+    }
   }
   return url;
 }

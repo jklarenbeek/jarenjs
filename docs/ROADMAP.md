@@ -907,13 +907,6 @@ what each does is its own documentation's job
   fire), where a worker host interleaves them; the documents state per-pull
   admission but not this. Wanted: the documents saying so, and an optional
   yield every N pulls.
-- [ ] **A worker endpoint URL Node cannot turn into a path is refused
-  uncoded.** `nodeWorkerDriver({ endpoint })` and `nodeWorkerPoolDriver({
-  endpoint })` check only the URL's protocol, so an open over
-  `file://example.com/w.js` (a host) or `file:///tmp/a%2Fb.js` (an encoded
-  slash) rejects with Node's `TypeError` (`ERR_INVALID_FILE_URL_HOST`,
-  `ERR_INVALID_FILE_URL_PATH`), where an endpoint whose worker never starts
-  is refused `JD0003` (HOSTS.md).
 - [ ] **A database rule cannot probe another table by a non-unique column.**
   `$exists-row` must match the target's key member or every column of a
   unique index (`JD0005` otherwise, MODEL-FORMAT §13.2), so a rule such as "a
@@ -1148,8 +1141,10 @@ machine — the opt-in workflow or a local one — and its result recorded here.
   connection (`test/db/list-membership.test.js`,
   `test/linq/list-membership.test.js`); the migrations (`migrate-host-step`,
   `migrate-foreign-keys` with a raw second connection writing an orphan, atomic
-  runs, adopted history, and the planner goldens on LF checkouts); and every
-  test and README example that removes a temp directory after `close()`
+  runs, adopted history, and the planner goldens on LF checkouts); the
+  shared-cache store `test/db/store-source.test.js` opens under SQLite's
+  `win32` VFS; and every test and README example that removes a temp directory
+  after `close()`
   (`EBUSY`/`EPERM` when a worker's handle outlives it).
 - [ ] **Worker and pool hosts.** Waits on a Windows run of the worker and
   pool tests: `test/db/relational-store.test.js` and `quirks-relational.test.js`
@@ -1158,8 +1153,10 @@ machine — the opt-in workflow or a local one — and its result recorded here.
   its README runner, `connection-loss` and `quirks-transactions` (100 ms holds
   near the limit); and `pool-parallel-reads` (a held read given back on close
   within 2,500 ms). A worker `endpoint` is a URL — on Windows
-  `pathToFileURL(path)`, never a `C:\` path. Compiled executables are qualified
-  on Linux only.
+  `pathToFileURL(path)`, never a `C:\` path; `test/db/worker-endpoint.test.js`
+  expects a `file:` URL with a host (a UNC path there) to construct and a
+  drive-less one to be refused when the driver is made, as Windows' own
+  `fileURLToPath` answers. Compiled executables are qualified on Linux only.
 - [ ] **Sockets.** Waits on a Windows run of the loopback tests, where
   Winsock's smaller buffers and its resets differ from Linux:
   `test/contract/node-framework.test.js` (Fastify's slow reader, whose bound
@@ -1170,13 +1167,17 @@ machine — the opt-in workflow or a local one — and its result recorded here.
 - [ ] **Processes and runtimes.** Waits on a Windows run with `bun.exe` on
   the path: the cross-process ledger test (`test/linq/db-ledger.test.js`)
   spawns `node --input-type=module -e` or `bun -e`, and
-  `test/db/numeric-keys.test.js` and `migrate-foreign-keys` spawn `bun` when it
-  is present.
+  `test/db/numeric-keys.test.js`, `migrate-foreign-keys`, `relational-recovery`
+  and `sqlite-migration-identity-recovery` spawn `bun` when it is present, and
+  `backup-worker-bun` reads `Bun.isStandaloneExecutable` inside the executable
+  it compiles.
 - [ ] **Links, paths and line endings.** Waits on a Windows run of the path
   and line-ending tests: `buildImportMap` compares real paths and reports URLs
   and duplicates with `/`, and `test/emit/importmap.test.js` builds its fixture
   behind a junction (no privilege needed), a short `8.3` temp path being the
-  case to watch; the task documents (`test/linq/app-tasks.test.js`,
+  case to watch; the symbolic-link cases of `test/db/backup.test.js`,
+  `snapshot-database.test.js` and `store-source.test.js` skip on `EPERM` and
+  run where the privilege is held; the task documents (`test/linq/app-tasks.test.js`,
   `test/app/tasks.test.js`) and the formula corpus split their text on LF,
   which `.gitattributes` keeps, and the translator counts CRLF as one line
   break.
@@ -1191,17 +1192,3 @@ machine — the opt-in workflow or a local one — and its result recorded here.
   end-to-end test uses real keyboard input, where OS-level IME and focus
   behaviour shows. The ICU cross-check of number formatting skips unless the
   runtime's ICU is the one it was measured against.
-- [ ] **Two db recovery tests spawn `bun` without a skip.**
-  `test/db/relational-recovery.test.js` and
-  `test/db/sqlite-migration-identity-recovery.test.js` run a Bun leg
-  unconditionally, so on a host without `bun` they fail eight assertions
-  (`spawnSync bun ENOENT`), where every other test/db file skips with "no bun
-  binary on PATH".
-- [ ] **Several db tests leave handles open or need symbolic links.**
-  `adopted-history.test.js` opens `new DatabaseSync(dbPath)` twice and never
-  closes it, so its cleanup meets `EPERM` on Windows; `store-source.test.js`
-  opens five stores before its `try`, so a refused `vfs=unix` open leaves them
-  unclosed and the process does not exit; `backup.test.js`,
-  `snapshot-database.test.js` and `store-source.test.js` create symbolic links
-  with no skip on `EPERM` (a junction cannot link a file); and the compiled
-  backup fixture detects Bun's compiled mode by its POSIX root only.
