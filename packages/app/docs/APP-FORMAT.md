@@ -305,15 +305,24 @@ changes nothing. An array element keeps its slot because removing it
 would renumber the elements after it. `'empty'` is for a host whose code
 reads the member as text or as a nullable number; a member cleared under
 it stays present, so the schema refuses it only through a keyword such
-as `minLength` or `type`.
+as `minLength` or `type`. A number control is cleared when it hands over
+the empty text (an empty `<input type=number>`), `null`, `false`, `NaN`
+or no value at all; a number a host hands over is written as itself, `0`
+and `-0` included.
 
-The options are checked when the actions are made: options that are not
-an object, a member outside the documented set (every `createFormView`
-option is accepted, so one object can serve both), and a `cleared` other
-than `'remove'` or `'empty'` throw a `TypeError` naming them. Upgrade
-note: since v0.94.0 a cleared text or number control removes its member,
-where it used to write `''` or `null`; `cleared: 'empty'` restores those
-writes.
+The options are checked when the actions are made, and `createFormView`
+checks its own the same way: options that are not an object and a
+member outside the documented set (each factory accepts the other's
+members, so one object can serve both) throw a `TypeError` naming them,
+and the actions also refuse a `cleared` other than `'remove'` or
+`'empty'` (the view never reads `cleared`). Upgrade note: since v0.94.0 a
+cleared text or number control removes its member, where it used to
+write `''` or `null`; `cleared: 'empty'` restores those writes. A host
+that hands over the number `0` used to clear a number control (the
+member removed, or `null` under `'empty'`), where it now writes `0`; and
+`createFormView` ignored a misspelt option, read a string, a number, an
+array or a function as no options and crashed on `null`, where it now
+refuses each.
 
 ## 4. Event bindings
 

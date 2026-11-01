@@ -4,8 +4,9 @@
  * Preemptive per-field validation.
  *
  * These checks run synchronously on every keystroke, powered directly by
- * @jarenjs/core primitives (grapheme-aware string length, deep equality),
- * the format testers, the validator's own `pattern` reading
+ * @jarenjs/core primitives (grapheme-aware string length, deep equality,
+ * the reading of the exclusive bounds the validator shares), the format
+ * testers, the validator's own `pattern` reading
  * (`createSchemaPatternTester`) and its own `multipleOf` test
  * (`multipleOfTester`). They give the user immediate feedback per
  * field BEFORE the complete compiled schema validation runs - which
@@ -19,6 +20,7 @@
  * re-render in another locale from `msgid` + `params`.
  */
 
+import { getInclusiveExclusiveBounds } from '@jarenjs/core';
 import {
   getStringLength,
 } from '@jarenjs/core/string';
@@ -79,6 +81,38 @@ const multipleOfCache = createBoundedCache(500);
 function getMultipleOfTester(multipleOf) {
   const step = typeof multipleOf === 'number' || typeof multipleOf === 'string' ? getNumbishType(multipleOf) : undefined;
   return step ? multipleOfCache.getOrCreate(step, multipleOfTester) : null;
+}
+
+/**
+ * A bound as the field check compares a number with it: as the schema
+ * writes it, which JavaScript compares by value (a number string as its
+ * number), except that a bigint bounds no number, as to the validator
+ * (and as a bigint `multipleOf` step).
+ * @param {unknown} bound
+ * @returns {any}
+ */
+const numberBound = (bound) => (typeof bound === 'bigint' ? undefined : bound);
+
+/**
+ * A bound as the field check compares a bigint the field takes with it:
+ * as the schema writes it.
+ * @param {unknown} bound
+ * @returns {any}
+ */
+const asWritten = (bound) => bound;
+
+/**
+ * Whether a field's declared `type` takes a bigint, as the validator's
+ * does: of the type names only its extended `bigint` takes one (`number`
+ * and `integer` refuse every bigint). A `type` that is neither a name nor
+ * a list of names (none declared: a number field by its bounds) is not
+ * checked here.
+ * @param {unknown} type - The field schema's `type`
+ * @returns {boolean}
+ */
+function typeTakesBigInt(type) {
+  if (typeof type === 'string') return type === 'bigint';
+  return !Array.isArray(type) || type.includes('bigint');
 }
 
 /**
@@ -176,9 +210,13 @@ export function validateField(field, value, catalog = undefined) {
 
     case 'number':
     case 'integer': {
-      // only a number (or a bigint) is a number, as to the validator: a
-      // string, an array or a date that merely converts to one is not
-      const num = typeof value === 'number' ? value : typeof value === 'bigint' ? Number(value) : NaN;
+      // only a number is a number, as to the validator: a string, an array
+      // or a date that merely converts to one is not, and neither is a
+      // bigint where the field's `type` names no `bigint`. A field whose
+      // `type` names `bigint`, or that declares none, reads a bigint as
+      // the number it converts to.
+      const num = typeof value === 'number' ? value
+        : typeof value === 'bigint' && typeTakesBigInt(/** @type {{ type?: unknown }} */ (field.schema).type) ? Number(value) : NaN;
       if (Number.isNaN(num)) {
         pushError(errors, catalog, 'type', { type: 'number' });
         return errors;
@@ -186,17 +224,25 @@ export function validateField(field, value, catalog = undefined) {
       if (field.kind === 'integer' && !Number.isInteger(num)) {
         pushError(errors, catalog, 'type', { type: 'integer' });
       }
-      if (c.minimum !== undefined && num < c.minimum) {
-        pushError(errors, catalog, 'minimum', { limit: c.minimum });
+      // the bounds as the validator reads them, under every draft: a
+      // number `exclusiveMinimum` is a bound of its own beside `minimum`,
+      // and the draft-04 boolean makes `minimum` exclusive (`true`) or
+      // leaves it inclusive (`false`); `exclusiveMaximum` alike. An error
+      // names the bound as written.
+      const read = typeof value === 'bigint' ? asWritten : numberBound;
+      const [minimum, exclusiveMinimum] = getInclusiveExclusiveBounds(read, c.minimum, c.exclusiveMinimum);
+      const [maximum, exclusiveMaximum] = getInclusiveExclusiveBounds(read, c.maximum, c.exclusiveMaximum);
+      if (minimum !== undefined && num < minimum) {
+        pushError(errors, catalog, 'minimum', { limit: minimum });
       }
-      if (c.maximum !== undefined && num > c.maximum) {
-        pushError(errors, catalog, 'maximum', { limit: c.maximum });
+      if (maximum !== undefined && num > maximum) {
+        pushError(errors, catalog, 'maximum', { limit: maximum });
       }
-      if (c.exclusiveMinimum !== undefined && num <= c.exclusiveMinimum) {
-        pushError(errors, catalog, 'exclusiveMinimum', { limit: c.exclusiveMinimum });
+      if (exclusiveMinimum !== undefined && num <= exclusiveMinimum) {
+        pushError(errors, catalog, 'exclusiveMinimum', { limit: exclusiveMinimum });
       }
-      if (c.exclusiveMaximum !== undefined && num >= c.exclusiveMaximum) {
-        pushError(errors, catalog, 'exclusiveMaximum', { limit: c.exclusiveMaximum });
+      if (exclusiveMaximum !== undefined && num >= exclusiveMaximum) {
+        pushError(errors, catalog, 'exclusiveMaximum', { limit: exclusiveMaximum });
       }
       if (c.multipleOf !== undefined) {
         const isMultipleOf = getMultipleOfTester(c.multipleOf);

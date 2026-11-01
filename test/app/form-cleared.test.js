@@ -74,7 +74,8 @@ describe('createFormActions — what a cleared control writes', function () {
       const input = shape.actions?.input ?? 'form/input';
       const number = shape.actions?.number ?? 'form/number';
       assert.deepEqual(expected[input].patch[1].op, { $if: [{ $or: ['$event.value', '$payload.element'] }, 'test', 'remove'] });
-      assert.deepEqual(expected[number].$return.patch[1].op, { $if: [{ $or: ['$event.value', '$payload.element'] }, 'test', 'remove'] });
+      // a number control is cleared when it read no number: `0` is one
+      assert.deepEqual(expected[number].$return.patch[1].op, { $if: [{ $or: [{ '$is-number': '$v' }, '$payload.element'] }, 'test', 'remove'] });
       expected[input].patch.splice(1);
       expected[number].$return.patch.splice(1);
       assert.deepEqual(createFormActions({ ...shape, cleared: 'empty' }), expected, JSON.stringify(shape));

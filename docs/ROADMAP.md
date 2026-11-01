@@ -218,22 +218,27 @@ delete it or fix it.
   100,000-deep array throws an uncoded `RangeError` on the default stack,
   where the direct shapes (`{ items: { $ref: '#' } }`, `{ properties: { a: {
   $ref: '#' } } }`) answer `JK2001`.
-- [ ] **A form field reads a boolean `exclusiveMinimum` or `exclusiveMaximum`
-  as a number.** Under `{ type: 'number', maximum: 5, exclusiveMaximum: true }`
-  `validateAllFields` reports `exclusiveMaximum` (limit `true`) for `4`, and
-  under `exclusiveMaximum: false` it refuses `0` and `5`, where the validator
-  reads the draft-04 boolean as making `maximum` exclusive or not and takes all
-  three; under `{ minimum: 5, exclusiveMinimum: true }` it takes `5`, which
-  the validator refuses. `@jarenjs/forms`' field check compares the value with
-  the keyword's own value; reading the bounds as the validator does refuses
-  values it took (a minor).
-- [ ] **A form field takes a bigint where the validator's `type` refuses one.**
-  `validateAllFields(buildFormModel({ type: 'object', properties: { n: { type:
-  'number' } } }), { n: 21n })` reports no error, where `new JarenValidator()
-  .compile({ type: 'number' })(21n)` is false (`'integer'` alike), though the
-  package README says a bigint is a number "as to the validator"; the bounds
-  and `multipleOf` then read it through `Number`, which rounds past 2^53.
-  Which of the two is right is the open decision (refusing is a minor).
+- [ ] **A form field reads a bigint as a number where the validator's bigint
+  keywords judge it.** A field whose `type` names `bigint`, or that declares
+  none (a number field by its bounds), reads a bigint as the number it
+  converts to, where the validator judges a bigint by its bigint bounds and
+  `multipleOf` alone: `{ minimum: 5 }` refuses `1n`, `{ maximum: 5 }` `21n`
+  and `{ multipleOf: 2 }` `3n`, which the validator takes (`{ type: 'bigint',
+  minimum: 5 }` refuses `1n` alike); `{ multipleOf: 2n }` takes `3n` and
+  `{ maximum: 2n ** 60n }` takes `2n ** 60n + 1n` (compared after rounding),
+  which the validator refuses; and a `type` held as a `Set` is not read
+  (`{ type: new Set(['number']), minimum: 0 }` takes `21n`). Judging a bigint
+  by the bigint keywords alone, exactly, refuses values the field took (a
+  minor).
+- [ ] **A form field without a `type` refuses a value that is not a number.**
+  `{ minimum: 5 }` (no `type`) builds a number field, and `validateAllFields`
+  reports `type` for `'abc'` and `[1]`, where the validator, with no `type`,
+  judges only numbers by `minimum` and takes both.
+- [ ] **A form field with an exclusive bound alone checks nothing.**
+  `buildFormModel` infers a number field from `minimum`, `maximum` or
+  `multipleOf` but not from `exclusiveMinimum` or `exclusiveMaximum`, so
+  `{ exclusiveMinimum: 5 }` builds an `unknown` field (a `json` control) and
+  layer 1 takes `5`, which the validator refuses.
 - [ ] **A `$ref` target below a keyword no draft defines reads the compile's
   vocabularies.** Under a held dialect without the validation vocabulary,
   with `urn:doc` holding `{ $schema: dialect, components: { schemas: { p: {
@@ -286,16 +291,6 @@ establish registry publication or downstream acceptance.
   corpus in Chromium, Firefox and WebKit, with synthetic composition events,
   Firefox's automation input sequence, and synthetic composition during
   collection scroll and focused-row removal.
-- [ ] **A number a host hands over as `0` reads as a cleared control.**
-  `form/number` tests `$event.value` for truth, so a host that dispatches the
-  number `0` (not the text `'0'` an `<input type=number>` hands over, which
-  writes 0) removes the member under the default and writes `null` under
-  `cleared: 'empty'`; `false` and `null` read the same way. Wanted: a number
-  written as itself, `0` included.
-- [ ] **`createFormView` accepts an unknown option without checking it.** A
-  misspelt member is dropped in silence: `createFormView({ clasPrefix: 'acme'
-  })` renders `class="jaren-form"`. Wanted: the options checked as
-  `createFormActions` checks them, accepting every `FormViewOptions` member.
 
 ## @jarenjs/md
 

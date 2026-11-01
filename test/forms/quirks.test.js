@@ -256,11 +256,11 @@ describe('forms — a number is a number', () => {
   const number = buildFormModel({ type: 'number' });
   const types = (value) => validateField(number, value).map((error) => `${error.keyword}:${error.params.type}`);
 
-  it('layer 1 refuses what the validator refuses: a string, an array, a date', () => {
-    for (const value of ['', '  ', '5', [], [7], new Date(0), {}, true]) {
-      assert.deepStrictEqual(types(value), ['type:number'], JSON.stringify(value) ?? String(value));
+  it('layer 1 refuses what the validator refuses: a string, an array, a date, a bigint', () => {
+    for (const value of ['', '  ', '5', [], [7], new Date(0), {}, true, 10n]) {
+      assert.deepStrictEqual(types(value), ['type:number'], typeof value === 'bigint' ? `${value}n` : JSON.stringify(value) ?? String(value));
     }
-    for (const value of [0, -1.5, 1e21, 10n]) assert.deepStrictEqual(types(value), [], String(value));
+    for (const value of [0, -1.5, 1e21]) assert.deepStrictEqual(types(value), [], String(value));
   });
 
   it('blank and non-finite text stays text, so it is reported rather than becoming 0 or Infinity', () => {

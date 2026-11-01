@@ -114,34 +114,43 @@ export function formEventFields() {
 
 /**
  * Every {@link FormViewOptions} member: one options object may serve
- * both factories, so the actions accept the view's members and ignore
- * them.
+ * both factories, so each accepts the other's members and ignores them.
  */
 const FORM_OPTIONS = ['root', 'classPrefix', 'actions', 'addLabel', 'removeLabel', 'requiredMarker', 'labels', 'dataPointer', 'cleared'];
 
 /**
- * Refuse options the actions would misread: a value that is not an
+ * Refuse options either factory would misread: a value that is not an
  * object (`null` crashed, and a string, an array or a function read as
- * no options, so a data pointer passed bare wrote under `/data`), a
- * member outside {@link FormViewOptions} (naming the nearest one: a
- * misspelt `cleared` left every cleared control removing its member
- * without a word), and a `cleared` that is neither `'remove'` nor
- * `'empty'`. Any other object is read as before, a class instance's and
- * an inherited member included, and a member that is `undefined` or
- * `null` is absent, as the actions read every member.
+ * no options, so a data pointer or a root passed bare was dropped) and a
+ * member outside {@link FormViewOptions}, naming the nearest one (a
+ * misspelt `cleared` left every cleared control removing its member,
+ * and a misspelt `classPrefix` rendered the default classes, without a
+ * word). Any other object is read as before, a class instance's and an
+ * inherited member included, and a member that is `undefined` or `null`
+ * is absent, as both factories read every member.
+ * @param {string} factory - the factory's name, which a refusal leads with
+ * @param {unknown} options
+ * @returns {Record<string, any>} the options
+ */
+function checkFormOptions(factory, options) {
+  if (options === null || typeof options !== 'object' || Array.isArray(options)) {
+    throw new TypeError(`${factory}: options must be an object, got ${describeOption(options)}`);
+  }
+  const members = /** @type {Record<string, any>} */ (options);
+  refuseUnknownMembers(members, FORM_OPTIONS, (key, hint) => new TypeError(`${factory}: unknown option '${key}'${hint}`));
+  return members;
+}
+
+/**
+ * Refuse options the actions would misread: those {@link checkFormOptions}
+ * refuses, and a `cleared` that is neither `'remove'` nor `'empty'`.
  * @param {unknown} options
  * @returns {'remove' | 'empty'} the cleared mode
  */
 function checkFormActionOptions(options) {
-  const refuse = (/** @type {string} */ reason) => new TypeError(`createFormActions: ${reason}`);
-  if (options === null || typeof options !== 'object' || Array.isArray(options)) {
-    throw refuse(`options must be an object, got ${describeOption(options)}`);
-  }
-  const members = /** @type {Record<string, any>} */ (options);
-  refuseUnknownMembers(members, FORM_OPTIONS, (key, hint) => refuse(`unknown option '${key}'${hint}`));
-  const cleared = members.cleared ?? 'remove';
+  const cleared = checkFormOptions('createFormActions', options).cleared ?? 'remove';
   if (cleared !== 'remove' && cleared !== 'empty') {
-    throw refuse(`options.cleared must be 'remove' or 'empty', got ${describeOption(cleared)}`);
+    throw new TypeError(`createFormActions: options.cleared must be 'remove' or 'empty', got ${describeOption(cleared)}`);
   }
   return cleared;
 }
@@ -151,10 +160,18 @@ function checkFormActionOptions(options) {
  * `buildFormViewModel` tree. Concatenate it into an app's view
  * stylesheet and `{"$apply": "<root>"}` the form node from a page rule.
  *
+ * Every {@link FormViewOptions} member is accepted, so one options object
+ * can serve both factories; `cleared` and `dataPointer` are the actions'
+ * and are not read here, so `createFormActions` is the one to check
+ * `cleared`.
+ *
  * @param {FormViewOptions} [options]
  * @returns {any[]} A JSLT rule array (plain JSON).
+ * @throws {TypeError} when `options` is not an object or names a member
+ *   outside {@link FormViewOptions}.
  */
 export function createFormView(options = {}) {
+  checkFormOptions('createFormView', options);
   const root = options.root ?? '$.form';
   const cls = options.classPrefix ?? 'jaren-form';
   const act = { ...DEFAULT_ACTIONS, ...options.actions };
@@ -364,7 +381,10 @@ export function createFormView(options = {}) {
  * the same in both modes: a cleared array element keeps its slot (`''`
  * or `null`), a checkbox writes `false`, and the select and the `json`
  * editor write what {@link formEventFields} decodes (`null` for empty
- * text).
+ * text). A number control is cleared by the empty string (what an empty
+ * `<input type=number>` hands over), `null`, `false`, `NaN` or no value;
+ * a number a host hands over is written as itself, `0` and `-0`
+ * included.
  *
  * Every {@link FormViewOptions} member is accepted, so one options object
  * can serve both factories.
@@ -394,21 +414,21 @@ export function createFormActions(options = {}) {
   // refuses to remove a member that is already absent. An array element
   // cannot be absent without renumbering the ones after it, so a cleared
   // element keeps its slot: `''` from a text control, `null` from a number
-  // control. The empty string is false (QUERY-FORMAT §2.2), so "cleared,
-  // and not an element" is one `$or`: the actions ship inside app
-  // documents and share links, so they stay small. Under
-  // `cleared: 'empty'` the write stands alone and leaves `''` from a text
-  // control and `null` from a number control, for a host that reads the
-  // member as text or as a nullable number.
-  const settle = { $if: [{ $or: ['$event.value', '$payload.element'] }, 'test', 'remove'] };
-  /** A text or number control's write of `value`, then the op that settles it when a cleared control removes its member.
-   * @param {string} value */
-  const writeControl = (value) => (cleared === 'remove'
-    ? [{ op: writeOp, path: target, value }, { op: settle, path: target, value }]
+  // control. A text control is cleared when it hands over the empty
+  // string, which is false (QUERY-FORMAT §2.2), and a number control when
+  // it read no number, so "cleared, and not an element" is one `$or`: the
+  // actions ship inside app documents and share links, so they stay
+  // small. Under `cleared: 'empty'` the write stands alone and leaves `''`
+  // from a text control and `null` from a number control, for a host that
+  // reads the member as text or as a nullable number.
+  /** A text or number control's write of `value`, then, when a cleared control removes its member, the op that settles it: a `test` while `kept` holds or the target is an element, else `remove`.
+   * @param {string} value @param {any} kept */
+  const writeControl = (value, kept) => (cleared === 'remove'
+    ? [{ op: writeOp, path: target, value }, { op: { $if: [{ $or: [kept, '$payload.element'] }, 'test', 'remove'] }, path: target, value }]
     : [{ op: writeOp, path: target, value }]);
   return {
     [act.input]: {
-      patch: writeControl('$event.value'),
+      patch: writeControl('$event.value', '$event.value'),
     },
     [act.check]: {
       patch: [{ op: writeOp, path: target, value: '$event.checked' }],
@@ -422,10 +442,14 @@ export function createFormActions(options = {}) {
       // sign is applied again; what is still not a number (`.`, `5.`) is
       // refused by `$number`. Anything else (a number a host hands over,
       // `-`, an exponent with no mantissa such as `e5`) is read by `$number`
-      // as it always was.
+      // as it always was. A number a host hands over is read as itself,
+      // `0` included: a value is read when it is true or equals `0` (`-0`
+      // equals `0`, `NaN` equals nothing), so only the empty string,
+      // `null`, `false`, `NaN` and no value at all leave the control
+      // cleared (`$v` is `null`).
       $let: {
         v: {
-          $if: ['$event.value',
+          $if: [{ $or: ['$event.value', { $eq: ['$event.value', 0] }] },
             { $if: [{ $and: [{ '$is-string': '$event.value' }, { $match: ['$event.value', '-?[0-9.].*'] }] },
               {
                 $let: {
@@ -441,7 +465,7 @@ export function createFormActions(options = {}) {
         },
       },
       $return: {
-        patch: writeControl('$v'),
+        patch: writeControl('$v', { '$is-number': '$v' }),
       },
     },
     // the two JSON-carrying controls (typed select, json editor) share
