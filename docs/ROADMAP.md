@@ -903,22 +903,31 @@ what each does is its own documentation's job
   second, and `page(id, null)` throws an uncoded `TypeError`, where the run
   store's other calls refuse a malformed option by name. Wanted: the bag
   closed, as `finish`'s is.
-- [ ] **A probe on PostgreSQL holds no lock on the row it found.** A
-  database rule's `$exists-row`, and a store rule's, which runs the same
-  SQL, reads the target under read committed without a row lock, so another
-  transaction may delete or change the one row a probe found — by the key,
-  a unique index or another index — and commit while the probing write is
-  open, whether that write ran before the probe read the row or after; both
-  commit, and the probing row stands without the row its rule required.
-  SQLite's writer lock admits no such interleaving. Wanted: the probe locks
-  the row it finds, as a foreign key does — `FOR KEY SHARE` by the key or a
-  unique index, `FOR SHARE` by another index, whose matched column an update
-  may change under `FOR NO KEY UPDATE` — in the trigger and the store's probe
-  alike (one row suffices: `EXISTS` stops at the first matching row that
-  survives its lock, which no other transaction can then delete, or under
-  `FOR SHARE` change, before the probing one ends); that changes the text of
-  every installed PostgreSQL program, so it needs a reviewed migration of
-  installed programs (MODEL-FORMAT §13.4).
+- [ ] **A database rule's probe on PostgreSQL holds no lock on the row it
+  found.** A database rule's `$exists-row` reads the target under read
+  committed without a row lock, so another transaction may delete or change
+  the one row a probe found — by the key, a unique index or another index —
+  and commit while the probing write is open, whether that write ran before
+  the probe read the row or after; both commit, and the probing row stands
+  without the row its rule required. SQLite's writer lock admits no such
+  interleaving, and a store rule's probe locks the row it finds
+  (MODEL-FORMAT §13.2). Wanted: the trigger's probe locks it as the store's
+  does — `FOR KEY SHARE` when every matched member is a key column (the key,
+  or a column of a unique index over plain column terms without a
+  condition), `FOR SHARE` otherwise, since an update that changes only
+  another column takes `FOR NO KEY UPDATE`, which `FOR KEY SHARE` admits;
+  that changes the text of every installed PostgreSQL program that probes,
+  so it needs a reviewed migration of installed programs (MODEL-FORMAT
+  §13.4).
+- [ ] **A ruled update reads its row `FOR UPDATE`, which a probe's
+  `FOR KEY SHARE` holds up.** The store's update of a row a store rule
+  judges reads it `FOR UPDATE` (MODEL-FORMAT §13.3), so it waits for every
+  open transaction whose probe found that row by key columns, and two
+  transactions that each probe a row and then update it through a ruled
+  update deadlock (one fails `JD2005`), where `FOR NO KEY UPDATE` — the lock
+  the `UPDATE` itself takes when it changes no key column — would let both
+  through, as PostgreSQL's foreign keys do. Wanted: that read locks
+  `FOR NO KEY UPDATE` when the update assigns no key column.
 - [ ] **A count or a reversal over an entity window stays the engine's under
   strict execution.** `take(n).count()`, `skip(n).count()` and
   `select(f).take(n).count()` emit `{ $count: { $subsequence: ... } }`, and

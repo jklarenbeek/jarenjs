@@ -2,7 +2,8 @@
 /** Persistence rules compile through the existing query evaluator. SQL lowering
  * accepts a bounded scalar subset and reports its writer population explicitly.
  * A `$exists-row` probe reads another table by its key or by an index its open
- * verifies: the store answers it with the same SQL the database's trigger runs. */
+ * verifies: the store answers it with the SQL the database's trigger runs, and
+ * locks the row it finds where writers do not serialize. */
 import { compileJsonQuery } from '@jarenjs/json/query';
 import { isJsonObject } from '@jarenjs/core/object';
 import { chain } from './driver.js';
@@ -292,6 +293,10 @@ function refuseStoreOwnedRule(entity, rule, storageOf, fail) {
   }
 }
 
+/** Whether an index reads the rows it holds by their members alone: over
+ * plain column terms, without a condition. @param {ProbeIndex} index */
+const plainIndex = (index) => !index.partial && !index.members.includes(null);
+
 /**
  * The members a probe compares with `=`, so that it is an indexed read: the
  * target's key when the match covers it, else every column of an index of
@@ -313,8 +318,7 @@ export function probeKeys(keys, indexes, matched, entity, refuse) {
   const missing = keys.find((key) => !matched.includes(key));
   if (missing === undefined) return keys;
   const covered = indexes.filter((index) => index.members.every((member) => member === null || matched.includes(member)));
-  const plain = (/** @type {ProbeIndex} */ index) => !index.partial && !index.members.includes(null);
-  const keyed = covered.find((index) => index.unique && plain(index)) ?? covered.find(plain);
+  const keyed = covered.find((index) => index.unique && plainIndex(index)) ?? covered.find(plainIndex);
   if (keyed !== undefined) return /** @type {string[]} */ (keyed.members);
   const named = covered.find((index) => index.unique || index.members.some((member) => member !== null));
   if (named !== undefined) {
@@ -326,6 +330,25 @@ export function probeKeys(keys, indexes, matched, entity, refuse) {
   return refuse(`$exists-row on '${entity}' must match its key member '${missing}', or every column of an index its open verifies `
     + `(one over plain column terms, without a condition): declare one over ${matched.map((member) => `'${member}'`).join(', ')}`
     + `${matched.length > 1 ? ', or over some of them' : ''}`);
+}
+
+/**
+ * Whether a probe compares key columns only — the target's key, and the
+ * columns of its unique indexes over plain column terms without a condition,
+ * which PostgreSQL counts as key columns — so that the store's probe locks
+ * the row it finds `FOR KEY SHARE`: a delete, and an update that changes a
+ * key column, each take `FOR UPDATE`, which waits for it. An update that
+ * changes only other columns takes `FOR NO KEY UPDATE`, which `FOR KEY SHARE`
+ * admits, so a probe that compares any other column — whatever keys it —
+ * locks `FOR SHARE`, which waits for every update.
+ * @param {string[]} keys - the target's key members
+ * @param {ProbeIndex[]} indexes - the target's indexes its open verifies
+ * @param {string[]} matched - the members the probe matches
+ * @returns {boolean}
+ */
+function keyColumnsOnly(keys, indexes, matched) {
+  const unique = indexes.filter((index) => index.unique && plainIndex(index));
+  return matched.every((member) => keys.includes(member) || unique.some((index) => index.members.includes(member)));
 }
 
 /**
@@ -449,7 +472,8 @@ export function resolveInvariants(entities, codecOf, storageOf) {
           }
           if (!column || !RULE_CODECS.includes(column.codec)) refuse(`$exists-row member '${member}' needs a scalar column codec`);
         }
-        const keys = probeKeys(target.keys, indexesOf(target, entities, storageOf), Object.keys(probe.match), probe.entity, refuse);
+        const indexes = indexesOf(target, entities, storageOf);
+        const keys = probeKeys(target.keys, indexes, Object.keys(probe.match), probe.entity, refuse);
         for (const [member, value] of Object.entries(probe.match)) {
           const column = /** @type {any} */ (columns.find((c) => c.name === member));
           // a member the probe is keyed by compares with `=`, which SQL NULL never meets, so a column
@@ -499,6 +523,8 @@ export function resolveInvariants(entities, codecOf, storageOf) {
         }
         probe.target = target.physical ?? { table: target.name, columns };
         probe.keys = keys;
+        // the row lock the store's probe takes where writers do not serialize (§13.2)
+        probe.keyShare = keyColumnsOnly(target.keys, indexes, Object.keys(probe.match));
       }
     }
     if (increments.size > 0) for (const [index, rule] of entity.invariants.entries()) {
@@ -575,11 +601,14 @@ export function checkInvariants(rules, op, before, after, context = {}) {
  * The one existence probe: a row of the target whose keyed members — its key,
  * or the columns of the index that keys the probe — equal their values
  * (`=`, an indexed read) and whose other members match null-safely, so a
- * `null` literal means IS NULL. `value` renders one match value.
+ * `null` literal means IS NULL. `value` renders one match value; `lock` is a
+ * row-lock suffix the read takes on the row it finds (the store's probe
+ * passes one, a database rule's program none).
  * @param {any} probe a resolved probe @param {any} dialect
- * @param {(expression: any, column: any) => string} value @returns {string}
+ * @param {(expression: any, column: any) => string} value @param {string} [lock]
+ * @returns {string}
  */
-export function existsRowSql(probe, dialect, value) {
+export function existsRowSql(probe, dialect, value, lock = '') {
   const q = dialect.quoteIdentifier;
   const alias = q('_jaren_row');
   const conditions = Object.entries(probe.match).map(([member, expression]) => {
@@ -591,5 +620,5 @@ export function existsRowSql(probe, dialect, value) {
     const different = dialect.physicalDifferent?.(column.codec, left, right) ?? `${left} IS NOT ${right} COLLATE BINARY`;
     return `NOT (${different})`;
   });
-  return `EXISTS (SELECT 1 FROM ${dialect.tableName(probe.target.table, probe.target.schema ?? dialect.schema)} AS ${alias} WHERE ${conditions.join(' AND ')})`;
+  return `EXISTS (SELECT 1 FROM ${dialect.tableName(probe.target.table, probe.target.schema ?? dialect.schema)} AS ${alias} WHERE ${conditions.join(' AND ')}${lock})`;
 }

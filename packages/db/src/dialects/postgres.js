@@ -759,6 +759,9 @@ export function postgresDialect(options = undefined) {
     rowLockSuffix: ' FOR UPDATE',
     // a row only a non-key column of which changes, as SET NULL locks it
     rowNoKeyLockSuffix: ' FOR NO KEY UPDATE',
+    // the row a store rule's probe found, by key columns only or by any other
+    rowKeyShareLockSuffix: ' FOR KEY SHARE',
+    rowShareLockSuffix: ' FOR SHARE',
     replication: postgresReplication,
     // Ordinary writes still check after each statement. Logical replay alone
     // defers validation so canonical envelope order need not follow FK order.

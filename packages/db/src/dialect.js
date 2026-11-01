@@ -198,6 +198,8 @@ export const MEMBER_WHEN = Symbol('dialect.memberWhen');
  *   replication?: any,
  *   rowLockSuffix?: string,
  *   rowNoKeyLockSuffix?: string,
+ *   rowKeyShareLockSuffix?: string,
+ *   rowShareLockSuffix?: string,
  *   owner?: { kind: 'lease', table: string, create: string, ensure: string, read: string,
  *     take: string, renew: string, release: string }
  *     | { kind: 'session', acquire: string, release: string },
@@ -861,6 +863,14 @@ export function createDialect(spec) {
      * UPDATE itself takes): a writer that only references the row keeps its
      * key-share lock and is not waited for. Empty where writers serialize. */
     rowNoKeyLockSuffix: spec.rowNoKeyLockSuffix ?? '',
+    /** What a read inside a write appends to hold a row it only reads
+     * against a delete or a change of a key column (PostgreSQL's
+     * ` FOR KEY SHARE`, the lock a foreign key's check takes). Empty where
+     * writers serialize. */
+    rowKeyShareLockSuffix: spec.rowKeyShareLockSuffix ?? '',
+    /** What such a read appends to hold the row against every update too
+     * (PostgreSQL's ` FOR SHARE`). Empty where writers serialize. */
+    rowShareLockSuffix: spec.rowShareLockSuffix ?? '',
     // how a store becomes the single owner of its database, or absent
     owner: spec.owner,
     comparableForeignKeyAction: spec.comparableForeignKeyAction ?? ((action) => action),

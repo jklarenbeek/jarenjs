@@ -3718,7 +3718,9 @@ the store's, on both engines.
 - A probe locks no row: on PostgreSQL another transaction may delete the row
   a probe found, by the key as by an index, and commit while the probing
   write is open, and both commit
-  ([MODEL-FORMAT §13.2](MODEL-FORMAT.md#132-existence-probes)).
+  ([MODEL-FORMAT §13.2](MODEL-FORMAT.md#132-existence-probes)); a store
+  rule's probe locks the row it finds since
+  [§68](#68-a-store-rules-probe-on-postgresql-locks-the-row-it-finds).
 
 **Downgrade.** A store whose model both releases accept opens, reads,
 queries, introspects and plans in the previous release as in this one. The
@@ -3728,6 +3730,38 @@ whose table holds such a rule's program under a model without the rule
 (`JD0002`, the table's program departs from the model). Drop such a rule
 through a planned migration (`planModelMigration`) before the previous
 release opens the store.
+
+## 68. A store rule's probe on PostgreSQL locks the row it finds
+
+A store rule's `$exists-row` read the target on PostgreSQL without a row
+lock, so another transaction could delete the row a probe found, or change
+it so that it no longer matched, and commit while the probing write was
+open, whether it ran before the probe or after it: both committed, and the
+probing row stood without the row its rule required. The probe now locks the
+row it finds until the write's transaction ends
+([MODEL-FORMAT §13.2](MODEL-FORMAT.md#132-existence-probes)): `FOR KEY SHARE`
+when every member it matches is a key column — the target's key, or a column
+of a unique index over plain column terms without a condition — and
+`FOR SHARE` otherwise. Such a delete or change now waits for the probing
+write; one that came first makes the probe wait for it, and once it commits
+the probing write is refused by the rule.
+
+- A delete of a row a probe found, and an update that changes a key column
+  of it, wait until the probing transaction ends; under `FOR SHARE` so does
+  every update of it, so a row many probing writes find takes its updates
+  only between their transactions
+  ([MODEL-FORMAT §13.3](MODEL-FORMAT.md#133-store-enforcement)).
+- Two transactions that each probe a row and then update it can deadlock —
+  under `FOR SHARE`, or under either lock when the update is a ruled one,
+  which reads the row `FOR UPDATE` — where both went through before: one
+  fails with `JD2005` (`busy`, retryable) and the other commits.
+- The lock needs the `UPDATE` privilege on at least one column of the
+  probed table: a role that may only read it, whose probing writes went
+  through before, now fails them with `JD2083` (`readonly`); a grant of
+  `UPDATE` on one column of the table admits them again.
+- SQLite, whose writer lock admits no such interleaving, and every database
+  rule are unchanged: a database rule's probe still locks no row, and every
+  installed program keeps its text, so every store opens as before.
 
 ## Measured costs
 

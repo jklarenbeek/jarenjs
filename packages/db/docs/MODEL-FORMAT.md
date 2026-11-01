@@ -5084,17 +5084,35 @@ a member of the rule's own record is present. A probe composes with `$not`,
 ] }
 ```
 
-Store enforcement answers a probe with the same SQL the database's trigger runs,
-its values bound, inside the write's transaction.
+Store enforcement answers a probe with the SQL the database's trigger runs,
+its values bound, inside the write's transaction, and on PostgreSQL with a
+lock on the row it finds.
 
-A probe locks nothing: it judges the rows its statement reads. SQLite runs
-each write under the database's one writer lock, so no other write commits
-between a probe and the commit of the write it judged. On PostgreSQL another
-transaction may delete or change the row a probe found — by the key or by an
-index alike — and commit while the probing transaction is open, whether that
-write ran before the probe read the row (read committed reads the version
-committed when the statement began) or after it; both commit. A foreign key
-(§9.4) holds the row it references against that.
+SQLite runs each write under the database's one writer lock, so no other
+write commits between a probe and the commit of the write it judged, and a
+probe there locks nothing. On PostgreSQL a store rule's probe locks the row
+it finds until the write's transaction ends, as a foreign key's check does:
+`FOR KEY SHARE` when every member it matches is a key column — the target's
+key, or a column of a unique index over plain column terms without a
+condition — and `FOR SHARE` when any other is matched, whatever keys the
+probe. A delete, and an update that changes a key column, take `FOR UPDATE`,
+which waits for either lock; an update that changes only other columns takes
+`FOR NO KEY UPDATE`, which `FOR KEY SHARE` admits and `FOR SHARE` waits for,
+so a probe that matches such a column holds the row against that update too.
+One row suffices: `EXISTS` stops at the first matching row that survives its
+lock, and no other transaction can then delete it, or change it so that it
+stops matching, before the probing one ends; a write that deleted or changed
+it first and is still open makes the probe wait for its end and read the row
+as that write left it, so a committed delete or change refuses the probing
+write. A probe that finds no row locks nothing, so a row another transaction
+inserts while the probing write is open may commit beside it: a negated
+probe ("the parent is gone") is not held. A database rule's probe locks
+nothing either: another transaction may delete or change the row it found —
+by the key or by an index alike — and commit while the probing write is
+open, whether that write ran before the probe read the row (read committed
+reads the version committed when the statement began) or after it; both
+commit. A foreign key (§9.4) holds the row it references against that. What
+the store's lock costs is §13.3's.
 
 ### 13.3 Store enforcement
 
@@ -5136,6 +5154,25 @@ insert as on every update after it; a save that changes only a document's member
 table, not its row, and runs its update rules after the save's other
 statements. A document entity's `update()` rewrites the whole document on
 every call, so its update rules are checked on every call.
+
+On PostgreSQL a store rule's probe holds the row it finds until the write's
+transaction ends (§13.2), and that is its cost. A delete of the row, or an
+update that changes a key column of it, waits for every open transaction
+that probed it; under `FOR SHARE` — a probe that matches a column that is no
+key column, whatever index keys it — so does every other update of it,
+which `FOR KEY SHARE` lets through. A row that many
+probing writes find, under `FOR SHARE`, takes its updates only between their
+transactions: each update waits for the probing transactions open on it, so
+the longer they stay open the fewer updates the row takes. The store's own
+update or delete of a row a store rule judges reads it `FOR UPDATE` (above),
+which waits for either lock. A wait may end in a lock timeout, where the
+session sets one, or in a deadlock — two transactions that each probe a row
+and then update it, under `FOR SHARE`, or under either lock when the update
+is such a ruled one — which fails one of them with `JD2005` (`busy`,
+retryable) while the other commits. The lock needs the `UPDATE` privilege on
+at least one column of the target: a role that may only read the target
+fails the probing write with `JD2083` (`readonly`). SQLite's probe takes no
+lock.
 
 ### 13.4 Database enforcement
 
