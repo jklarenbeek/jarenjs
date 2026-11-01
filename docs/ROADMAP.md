@@ -598,7 +598,7 @@ what each does is its own documentation's job
   refused until their complete writer population has an executable oracle.
 - [ ] **Broader database invariant lowering.** Rules lower to verified triggers
   on SQLite and PostgreSQL alike ([MODEL-FORMAT §13](../packages/db/docs/MODEL-FORMAT.md#13-persistence-invariants)),
-  over comparisons, membership, existence probes keyed by a verified unique
+  over comparisons, membership, existence probes keyed by a verified key or
   index and integer `$add`/`$sub`/`$neg` inside the safe-integer domain.
   Still outside: `$mul`, `$div`, `$idiv`, `$mod` and arithmetic over a
   `number` operand (the engine's double rounding and division are not SQL's);
@@ -908,12 +908,22 @@ what each does is its own documentation's job
   second, and `page(id, null)` throws an uncoded `TypeError`, where the run
   store's other calls refuse a malformed option by name. Wanted: the bag
   closed, as `finish`'s is.
-- [ ] **A database rule cannot probe another table by a non-unique column.**
-  `$exists-row` must match the target's key member or every column of a
-  unique index (`JD0005` otherwise, MODEL-FORMAT §13.2), so a rule such as "a
-  row of this kind exists for this customer", keyed by a non-unique indexed
-  column, is refused on both engines. Wanted: a probe by any indexed column
-  set, lowered to an `EXISTS` over that index.
+- [ ] **A probe on PostgreSQL holds no lock on the row it found.** A
+  database rule's `$exists-row`, and a store rule's, which runs the same
+  SQL, reads the target under read committed without a row lock, so another
+  transaction may delete or change the one row a probe found — by the key,
+  a unique index or another index — and commit while the probing write is
+  open, whether that write ran before the probe read the row or after; both
+  commit, and the probing row stands without the row its rule required.
+  SQLite's writer lock admits no such interleaving. Wanted: the probe locks
+  the row it finds, as a foreign key does — `FOR KEY SHARE` by the key or a
+  unique index, `FOR SHARE` by another index, whose matched column an update
+  may change under `FOR NO KEY UPDATE` — in the trigger and the store's probe
+  alike (one row suffices: `EXISTS` stops at the first matching row that
+  survives its lock, which no other transaction can then delete, or under
+  `FOR SHARE` change, before the probing one ends); that changes the text of
+  every installed PostgreSQL program, so it needs a reviewed migration of
+  installed programs (MODEL-FORMAT §13.4).
 - [ ] **A count or a reversal over an entity window stays the engine's under
   strict execution.** `take(n).count()`, `skip(n).count()` and
   `select(f).take(n).count()` emit `{ $count: { $subsequence: ... } }`, and

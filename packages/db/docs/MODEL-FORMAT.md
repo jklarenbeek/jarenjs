@@ -2921,8 +2921,9 @@ that names the same list — and PostgreSQL the same index. A second
 active or pending shift of one employee-day is refused; a cancelled
 shift and one without a status are not. §13's invariants could not say
 this: a rule reaches another row only through `$exists-row` (§13.2),
-keyed by that row's primary key, and a check in application code
-inside the writing transaction lets a concurrent writer slip past it.
+which reads another table and never the rule's own, and a check in
+application code inside the writing transaction lets a concurrent writer
+slip past it.
 
 - An entity index is a closed object: `name`, `path`, `unique` and
   `where`; any other member is `JD0005` at the member. `derive`,
@@ -4972,11 +4973,11 @@ operator outside the bounded subset, a column codec it cannot compare,
 | `effects` | database effects of an update: `[{ "increment": "<member>" }]` (§13.5) |
 
 A rule judges the row it fires on, and reads another row only through
-`$exists-row`, by that row's key (§13.2). That no two rows share a value
-under a condition — one active shift per employee and day — is not a
-rule but an entity's partial unique index (§9.2): both engines enforce it
-for every writer, introspection derives it back, and the migration
-planner diffs it.
+`$exists-row`, by that row's key or an index its open verifies (§13.2).
+That no two rows share a value under a condition — one active shift per
+employee and day — is not a rule but an entity's partial unique index
+(§9.2): both engines enforce it for every writer, introspection derives it
+back, and the migration planner diffs it.
 
 ### 13.1 Updates: changed, assigned, columns
 
@@ -5022,16 +5023,28 @@ value is `$.old.member`, `$.new.member` (a member of any name written
 `$.new['<member>']`, §9.2) or a scalar literal; a text literal
 that starts with `$` is written `$$`, as in any query (`"$$draft"` is the text
 `$draft`). `match` covers the target's whole primary key, or every column of
-one unique index of the target that its open verifies — a `physical.indexes`
-entry (§12), or a store-owned layout's unique member or entity index (§9.2) —
-over plain column terms and without a condition, so a probe is one indexed
-read: a partial unique index, or one with an expression term, proves no row
-unique by the matched members alone and never keys a probe (`JD0005`, naming
-the index). The keyed members compare with `=`, as the target column
-compares — under its declared collation on SQLite, which is what the index
-the probe is keyed by proves unique — and a `null` literal against one
-refuses at planning (a key holds no null, and a unique index admits any
-number of them, so such a probe would match nothing); the other members
+one index of the target that its open verifies, unique or not — a
+`physical.indexes` entry (§12), or a store-owned layout's unique or indexed
+member, the column a foreign key puts on it where a property declares that
+column (§9.4), or its entity index (§9.2) —
+over plain column terms and without a condition, so a probe is an indexed
+read: by the key or a unique index it reads one row at most, by another
+index the rows that index holds for the keyed values, until one matches the
+other members. The key keys a probe whose match covers it; otherwise the
+first unique index the match covers does — a `physical.indexes` entry in
+declared order, or a store-owned layout's unique member, then its unique
+entity index, then the column of a one-to-one foreign key — and failing
+that the first other index it covers, in the same order (an indexed member
+or a foreign key's column before an entity index). A partial index holds no
+entry for the rows its condition leaves out, and an expression term is no
+member's value, so neither reads the matched rows by the members alone:
+neither keys a probe (`JD0005`, naming the index), and a match that no index
+covers is refused naming the members an index must cover. The keyed members
+compare with `=`, as the target column compares — under its declared
+collation on SQLite, which is what a unique index the probe is keyed by
+proves unique — and a `null` literal against one refuses at planning (a key
+holds no null, and an index admits any number of them, so such a probe would
+match nothing); the other members
 compare null-safely, so a `null` literal matches SQL NULL, and text by code
 point whatever the column's collation. The target is another table — the physical layout of
 another entity, or the layout the store owns for one (§9), whose key columns
@@ -5073,6 +5086,15 @@ a member of the rule's own record is present. A probe composes with `$not`,
 
 Store enforcement answers a probe with the same SQL the database's trigger runs,
 its values bound, inside the write's transaction.
+
+A probe locks nothing: it judges the rows its statement reads. SQLite runs
+each write under the database's one writer lock, so no other write commits
+between a probe and the commit of the write it judged. On PostgreSQL another
+transaction may delete or change the row a probe found — by the key or by an
+index alike — and commit while the probing transaction is open, whether that
+write ran before the probe read the row (read committed reads the version
+committed when the statement began) or after it; both commit. A foreign key
+(§9.4) holds the row it references against that.
 
 ### 13.3 Store enforcement
 
@@ -5255,10 +5277,10 @@ rule's own table (PostgreSQL runs row triggers at statement end and SQLite per
 row, so a multi-row statement's other rows differ between them); an arbitrary
 trigger program (a `TableTrigger` stays SQLite SQL, which PostgreSQL does not
 run); an aggregate over other rows (no bounded expression reads them —
-`$exists-row` reads one row by a verified key); and SQLite's change test,
-which compares each column under its declared collation (below): comparing by
-code point would change the text of every installed update program, so it
-waits for a reviewed migration of installed programs.
+`$exists-row` finds one row through a verified key or index); and SQLite's
+change test, which compares each column under its declared collation (below):
+comparing by code point would change the text of every installed update
+program, so it waits for a reviewed migration of installed programs.
 
 The exception: `$eq` and `$ne` between two `null` columns of different JSON
 types (a `text` and an `integer` column, say) compare by type alone, so where

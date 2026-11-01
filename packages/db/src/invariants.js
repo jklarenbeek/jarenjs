@@ -1,8 +1,8 @@
 //@ts-check
 /** Persistence rules compile through the existing query evaluator. SQL lowering
  * accepts a bounded scalar subset and reports its writer population explicitly.
- * A `$exists-row` probe reads one row of another table by its key: the store
- * answers it with the same SQL the database's trigger runs. */
+ * A `$exists-row` probe reads another table by its key or by an index its open
+ * verifies: the store answers it with the same SQL the database's trigger runs. */
 import { compileJsonQuery } from '@jarenjs/json/query';
 import { isJsonObject } from '@jarenjs/core/object';
 import { chain } from './driver.js';
@@ -67,34 +67,68 @@ export function sameTable(a, b) {
     && (a.schema === undefined || b.schema === undefined || foldIdentifier(a.schema) === foldIdentifier(b.schema));
 }
 
+/** An index of a probe's target as `probeKeys` reads it: each plain column
+ * term as the member it maps, any other term `null`.
+ * @typedef {{ name: string, members: (string | null)[], partial: boolean, unique: boolean }} ProbeIndex */
+
+/**
+ * The indexes of a probe's target that its open verifies, in the order
+ * `probeKeys` reads them: a physical layout's declared indexes, unique ones
+ * first, or what a layout the store owns plans — one index per column, over
+ * a unique or indexed member or a foreign key's column (unique when either
+ * asks), and the entity indexes. Its unique members lead, then its unique
+ * entity indexes, then its indexed members in member order, then the
+ * foreign-key columns no member indexes, then the other entity indexes (a
+ * foreign key makes its column's index unique where every relation it serves
+ * is one-to-one): a probe that a unique member or a unique entity index keys
+ * keeps the keys its installed program was planned with, whatever else the
+ * layout indexes.
+ * @param {any[] | null} declared - a physical layout's `declaredIndexes`; `null` for a layout the store owns
+ * @param {{ column: string, unique: boolean }[]} [singles] - the store-owned layout's unique and indexed members, in member order
+ * @param {Map<string, boolean>} [foreignKeys] - its foreign-key columns, each unique when every relation it serves is one-to-one
+ * @param {ProbeIndex[]} [entityIndexes] - its entity indexes, an expression key `null`
+ * @returns {ProbeIndex[]}
+ */
+function probeIndexes(declared, singles = [], foreignKeys = new Map(), entityIndexes = []) {
+  if (declared !== null) return [...declared.filter((index) => index.unique), ...declared.filter((index) => !index.unique)];
+  // one index per column, as the layout's DDL plans it
+  const columns = new Map(singles.map((single) => [single.column, single.unique]));
+  for (const [column, unique] of foreignKeys) columns.set(column, (columns.get(column) ?? false) || unique);
+  // a unique member's index leads the list, once
+  for (const single of singles) if (single.unique) columns.delete(single.column);
+  const one = (/** @type {string} */ column, /** @type {boolean} */ unique) => ({ name: column, members: [column], partial: false, unique });
+  return [...singles.filter((single) => single.unique).map((single) => one(single.column, true)),
+    ...entityIndexes.filter((index) => index.unique),
+    ...[...columns].map(([column, unique]) => one(column, unique)),
+    ...entityIndexes.filter((index) => !index.unique)];
+}
+
 /**
  * A probe's target as the planner reads it from the mapping, for the probe's
  * SQL and `probeKeys` (the model check resolved the same from the normalized
  * entities, so a plan recomputes rather than remembers): a physical layout's
- * table, columns and declared unique indexes, or a store-owned layout's
- * table, its column-mapped scalars and foreign-key columns — each by the
- * member's name, with the codec its storage holds — and its unique members
- * and entity indexes.
+ * table, columns and declared indexes, or a store-owned layout's table, its
+ * column-mapped scalars and foreign-key columns — each by the member's name,
+ * with the codec its storage holds — and the indexes it plans.
  * @param {any} entity - `explainMapping(model).entities[E]`
- * @returns {{ table: string, schema?: string, columns: any[], keys: string[],
- *   uniques: { name: string, members: (string | null)[], partial: boolean }[] }}
+ * @returns {{ table: string, schema?: string, columns: any[], keys: string[], indexes: ProbeIndex[] }}
  */
 export function probeTarget(entity) {
   if (entity.document === false) {
     return { table: entity.table, ...(entity.schema === undefined ? {} : { schema: entity.schema }), columns: entity.columns, keys: entity.keys,
-      uniques: (entity.declaredIndexes ?? []).filter((/** @type {any} */ index) => index.unique) };
+      indexes: probeIndexes(entity.declaredIndexes ?? []) };
   }
   const codec = (/** @type {string} */ storage) => STORE_OWNED_CODECS[/** @type {keyof typeof STORE_OWNED_CODECS} */ (storage)];
   return { table: entity.table, keys: entity.keys,
     columns: [...entity.columns.filter((/** @type {any} */ column) => column.source === 'document')
       .map((/** @type {any} */ column) => ({ name: column.name, physical: column.name, codec: codec(column.storage) })),
     ...entity.foreignKeys.map((/** @type {any} */ fk) => ({ name: fk.column, physical: fk.column, codec: codec(fk.referencesType) }))],
-    uniques: [...entity.indexes.filter((/** @type {any} */ index) => index.unique)
-      .map((/** @type {any} */ index) => ({ name: index.property, members: [index.property], partial: false })),
-    ...(entity.entityIndexes ?? []).filter((/** @type {any} */ index) => index.unique)
+    indexes: probeIndexes(null,
+      entity.indexes.map((/** @type {any} */ index) => ({ column: index.property, unique: index.unique })),
+      new Map(entity.foreignKeys.map((/** @type {any} */ fk) => [fk.column, fk.unique])),
       // an expression key is no member's value: `null`, as a physical layout's expression term
-      .map((/** @type {any} */ index) => ({ name: index.name, members: index.expression === undefined ? index.columns : [null],
-        partial: index.where !== undefined }))] };
+      (entity.entityIndexes ?? []).map((/** @type {any} */ index) => ({ name: index.name,
+        members: index.expression === undefined ? index.columns : [null], partial: index.where !== undefined, unique: index.unique }))) };
 }
 
 /** Replace each `$exists-row` with a read of its answer, collecting the probes.
@@ -259,48 +293,65 @@ function refuseStoreOwnedRule(entity, rule, storageOf, fail) {
 }
 
 /**
- * The members a probe compares with `=`, which is what proves it reads at most
- * one row: the target's key when the match covers it, else every column of a
- * unique index of the target that its open verifies — one over plain column
- * terms, without a condition. A partial unique index, or one with an
- * expression term, proves nothing by the matched members alone and never keys
- * a probe; the refusal names it.
+ * The members a probe compares with `=`, so that it is an indexed read: the
+ * target's key when the match covers it, else every column of an index of
+ * the target that its open verifies and the match covers — a unique one
+ * first, which reads at most one row, then any other, which reads the rows it
+ * holds for those values until one matches the rest of the match. An index
+ * keys a probe over plain column terms, without a condition: a partial index
+ * holds no entry for some rows and an expression term is no member's value,
+ * so neither reads the matched rows by the members alone; the refusal names
+ * a unique one whatever its terms, and another one that keys a matched member,
+ * so a match no index covers is told what one must cover.
  * @param {string[]} keys - the target's key members
- * @param {{ name: string, members: (string | null)[], partial: boolean }[]} uniques - the target's unique indexes,
- *   each plain column term as the member it maps and any other term `null`
+ * @param {ProbeIndex[]} indexes - the target's indexes in `probeIndexes` order
  * @param {string[]} matched - the members the probe matches @param {string} entity - the target's name
  * @param {(reason: string) => never} refuse
  * @returns {string[]}
  */
-export function probeKeys(keys, uniques, matched, entity, refuse) {
+export function probeKeys(keys, indexes, matched, entity, refuse) {
   const missing = keys.find((key) => !matched.includes(key));
   if (missing === undefined) return keys;
-  const covered = uniques.filter((index) => index.members.every((member) => member === null || matched.includes(member)));
-  const keyed = covered.find((index) => !index.partial && !index.members.includes(null));
+  const covered = indexes.filter((index) => index.members.every((member) => member === null || matched.includes(member)));
+  const plain = (/** @type {ProbeIndex} */ index) => !index.partial && !index.members.includes(null);
+  const keyed = covered.find((index) => index.unique && plain(index)) ?? covered.find(plain);
   if (keyed !== undefined) return /** @type {string[]} */ (keyed.members);
-  if (covered.length > 0) {
-    const index = covered[0];
-    refuse(`$exists-row on '${entity}' is keyed by the unique index '${index.name}', which ${index.partial
-      ? 'declares a condition: a partial unique index never keys a probe'
+  const named = covered.find((index) => index.unique || index.members.some((member) => member !== null));
+  if (named !== undefined) {
+    const kind = named.unique ? 'unique index' : 'index';
+    refuse(`$exists-row on '${entity}' is keyed by the ${kind} '${named.name}', which ${named.partial
+      ? `declares a condition: a partial ${kind} never keys a probe`
       : 'has an expression term (or a column the layout does not map): a probe is keyed by plain column terms'}`);
   }
-  return refuse(`$exists-row on '${entity}' must match its key member '${missing}', or every column of a unique index its open verifies `
-    + '(one over plain column terms, without a condition)');
+  return refuse(`$exists-row on '${entity}' must match its key member '${missing}', or every column of an index its open verifies `
+    + `(one over plain column terms, without a condition): declare one over ${matched.map((member) => `'${member}'`).join(', ')}`
+    + `${matched.length > 1 ? ', or over some of them' : ''}`);
 }
 
 /**
- * The unique indexes of a probe's target, for `probeKeys`: a physical
- * layout's declared ones, or a store-owned layout's unique members and
- * entity indexes, each verified by the open as the key is.
- * @param {any} entity - normalized @returns {{ name: string, members: (string | null)[], partial: boolean }[]}
+ * The indexes of a probe's target, for `probeKeys`, as `probeTarget` reads
+ * them from the mapping: a physical layout's declared ones, or what a layout
+ * the store owns plans over its unique and indexed members, the foreign-key
+ * columns the model's relations put on it and its entity indexes, each
+ * verified by the open as the key is.
+ * @param {any} entity - normalized @param {Map<string, any>} entities - every normalized entity
+ * @param {(property: any) => string} storageOf
+ * @returns {ProbeIndex[]}
  */
-function uniqueIndexesOf(entity) {
-  if (entity.physical !== null) return entity.physical.declaredIndexes.filter((/** @type {any} */ index) => index.unique);
-  return [...[...entity.properties.values()].filter((property) => property.unique && !property.key)
-    .map((property) => ({ name: property.name, members: [property.name], partial: false })),
-  ...entity.indexes.filter((/** @type {any} */ index) => index.unique)
-    .map((/** @type {any} */ index) => ({ name: index.name, members: index.expression === undefined ? index.paths : [null],
-      partial: index.where !== undefined }))];
+function indexesOf(entity, entities, storageOf) {
+  if (entity.physical !== null) return probeIndexes(entity.physical.declaredIndexes);
+  /** @type {Map<string, boolean>} */
+  const foreignKeys = new Map();
+  for (const other of entities.values()) for (const { relation } of other.relations) {
+    if (relation.kind === 'manyToMany' || relation.fkEntity !== entity.name) continue;
+    foreignKeys.set(relation.via, (foreignKeys.get(relation.via) ?? true) && relation.kind === 'oneToOne');
+  }
+  return probeIndexes(null,
+    [...entity.properties.values()].filter((property) => (property.unique || property.index) && !['relation', 'document'].includes(storageOf(property)))
+      .map((property) => ({ column: property.name, unique: property.unique === true })),
+    foreignKeys,
+    entity.indexes.map((/** @type {any} */ index) => ({ name: index.name, members: index.expression === undefined ? index.paths : [null],
+      partial: index.where !== undefined, unique: index.unique === true })));
 }
 
 /**
@@ -320,8 +371,8 @@ function storeOwnedColumns(entity, storageOf) {
  * Resolve what a rule names in other members and entities, once the whole
  * model is known: `columns` and increments name physical columns of their own
  * entity, a probe's target is another table — a physical layout, or the
- * layout the store owns — its match keyed by the target's key or a verified
- * unique index, and each match value is a member the rule's own entity has,
+ * layout the store owns — its match keyed by the target's key or an index
+ * its open verifies, and each match value is a member the rule's own entity has,
  * of the target column's codec, or a literal that codec holds; a database
  * rule on a store-owned layout reads members its table has a column for.
  * Both enforcements read the result.
@@ -398,7 +449,7 @@ export function resolveInvariants(entities, codecOf, storageOf) {
           }
           if (!column || !RULE_CODECS.includes(column.codec)) refuse(`$exists-row member '${member}' needs a scalar column codec`);
         }
-        const keys = probeKeys(target.keys, uniqueIndexesOf(target), Object.keys(probe.match), probe.entity, refuse);
+        const keys = probeKeys(target.keys, indexesOf(target, entities, storageOf), Object.keys(probe.match), probe.entity, refuse);
         for (const [member, value] of Object.entries(probe.match)) {
           const column = /** @type {any} */ (columns.find((c) => c.name === member));
           // a member the probe is keyed by compares with `=`, which SQL NULL never meets, so a column
@@ -410,9 +461,9 @@ export function resolveInvariants(entities, codecOf, storageOf) {
             refuse(`$exists-row member '${member}' needs a scalar column codec`);
           if (column.null === 'absent' && ruleLiteral(value) === null)
             refuse(`'${member}' reads SQL NULL as an absent member, so it never holds null: a probe matches it with a value`);
-          // a keyed member compares with `=`, which no null meets: a key holds none, a unique index admits any number
+          // a keyed member compares with `=`, which no null meets: a key holds none, an index admits any number
           if (keys.includes(member) && ruleLiteral(value) === null)
-            refuse(`$exists-row member '${member}' is one the probe is keyed by, which matches a value, never null: a key holds no null and a unique index admits any number of them`);
+            refuse(`$exists-row member '${member}' is one the probe is keyed by, which matches a value, never null: a key holds no null and an index admits any number of them`);
           const escaped = typeof value === 'string' && value.startsWith('$') && !value.startsWith('$$');
           const path = escaped ? recordPath(value) : null;
           if (escaped && path === null) refuse(`$exists-row value '${value}' must read $.old.<member> or $.new.<member> (any name also $.new['<member>']); a text that starts with $ is written $$`);
@@ -522,7 +573,7 @@ export function checkInvariants(rules, op, before, after, context = {}) {
 
 /**
  * The one existence probe: a row of the target whose keyed members — its key,
- * or the columns of the unique index that keys the probe — equal their values
+ * or the columns of the index that keys the probe — equal their values
  * (`=`, an indexed read) and whose other members match null-safely, so a
  * `null` literal means IS NULL. `value` renders one match value.
  * @param {any} probe a resolved probe @param {any} dialect

@@ -568,7 +568,7 @@ export async function familyLifecycle(engine, { enforcement, upgraded }) {
 export const FAMILY_REFUSALS = [
   ['a probe whose match misses the key', (m) => { m.entities.Line.invariants[2].assert = { '$exists-row': { entity: 'Doc', match: { status: 'draft' } } }; }],
   ['a probe of its own table', (m) => { m.entities.Line.invariants[2].assert = { '$exists-row': { entity: 'Line', match: { id: '$.new.doc' } } }; }],
-  ['a probe of a layout the store owns by a member no unique index covers', (m) => {
+  ['a probe of a layout the store owns by a member no index covers', (m) => {
     m.entities.Note = { schema: { type: 'object', properties: { id: { type: 'integer', 'x-entity': { key: true } }, ref: { type: 'integer' } } } };
     m.entities.Line.invariants[2].assert = { '$exists-row': { entity: 'Note', match: { ref: '$.new.doc' } } };
   }],
@@ -582,7 +582,6 @@ export const FAMILY_REFUSALS = [
   ['a probe keyed by an index with an expression term', (m) => {
     m.entities.Doc.physical.indexes[0].terms = [{ by: { $sql: 'collate', value: { $sql: 'column', name: 'code' }, collation: 'NOCASE' } }];
   }],
-  ['a probe keyed by an index that is not unique', (m) => { m.entities.Doc.physical.indexes[0].unique = false; }],
   ['arithmetic over a number column', (m) => {
     m.entities.Line.schema.properties.share = { type: 'number' };
     m.entities.Line.physical.columns.share = column('share', 'number');

@@ -3695,6 +3695,40 @@ release created under such a condition is `JD0002` at open.
 **Downgrade.** Nothing a store writes changed: the previous release opens,
 reads, queries and plans every store this one opens, as before.
 
+## 67. A database rule probes another table by any index its open verifies
+
+An `$exists-row` whose `match` covered neither the target's key nor every
+column of a unique index was refused `JD0005` ("must match its key member …,
+or every column of a unique index its open verifies"). It now plans when the
+match covers every column of any index the target's open verifies — a
+`physical.indexes` entry declared without `unique`, an indexed member, the
+column a foreign key puts on a layout the store owns where a property declares
+it, or an entity index — over plain column terms and without a condition
+([MODEL-FORMAT §13.2](MODEL-FORMAT.md#132-existence-probes)). The trigger,
+and the store's own probe, read the target through that index, so a rule
+such as "this customer has a document" refuses a raw write as it refuses
+the store's, on both engines.
+
+- A match the key or a unique index covers is keyed as before, and every
+  model the previous release accepted plans the same programs, byte for
+  byte.
+- A partial index and an index with an expression term stay `JD0005`,
+  naming the index; a match that no index covers stays `JD0005` and now
+  names the members an index must cover.
+- A probe locks no row: on PostgreSQL another transaction may delete the row
+  a probe found, by the key as by an index, and commit while the probing
+  write is open, and both commit
+  ([MODEL-FORMAT §13.2](MODEL-FORMAT.md#132-existence-probes)).
+
+**Downgrade.** A store whose model both releases accept opens, reads,
+queries, introspects and plans in the previous release as in this one. The
+previous release refuses a model whose probe only an index that is not
+unique keys (`JD0005`, at planning and at open), and a layout the store owns
+whose table holds such a rule's program under a model without the rule
+(`JD0002`, the table's program departs from the model). Drop such a rule
+through a planned migration (`planModelMigration`) before the previous
+release opens the store.
+
 ## Measured costs
 
 Exact identity stores complete canonical documents and model endpoints, so

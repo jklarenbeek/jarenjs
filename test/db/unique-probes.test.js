@@ -60,9 +60,11 @@ const refusedEverywhere = (model, expected) => {
 };
 
 describe('a probe keyed by a unique index', () => {
-  it('is refused until the target declares a unique index over the matched members, naming what keys a probe', () => {
-    refusedEverywhere(codedModel('database', null), { code: 'JD0005', message: /must match its key member 'id'.*unique index/s });
-    refusedEverywhere(codedModel('database', [{ ...ORDERS_CODE, unique: false }]), { code: 'JD0005', message: /must match its key member 'id'/ });
+  it('is refused until the target declares an index over the matched members, naming what keys a probe', () => {
+    refusedEverywhere(codedModel('database', null), { code: 'JD0005', message: /must match its key member 'id', or every column of an index its open verifies.*declare one over 'code'/s });
+    // an index that is not unique keys the probe too, as the unique one does
+    for (const indexes of [[ORDERS_CODE], [{ ...ORDERS_CODE, unique: false }]]) for (const [, dialect] of DIALECTS)
+      assert.match(planInvariants(codedModel('database', indexes), { dialect })[0].sql, /WHERE "_jaren_row"\."code" = NEW\."sku"\)/);
     for (const [, dialect] of DIALECTS) assert.equal(planInvariants(codedModel('database'), { dialect }).length, dialect === sqliteDialect ? 2 : 4);
     assert.doesNotThrow(() => normalizeEntities(codedModel('store')));
     // a composite unique index keys a probe that matches every one of its columns, in any order, beside other members
@@ -152,14 +154,13 @@ describe('a probe keyed by a unique index', () => {
         });
       }
 
-      it('reads a layout the store owns by its key, a unique member or a unique entity index, each verified at open', async () => {
+      it('reads a layout the store owns by its key, a unique member or an entity index, each verified at open', async () => {
         for (const [match, refused] of /** @type {const} */ ([
           [{ tag: '$.new.doc' }, /unique index 'by_tag'.*condition.*never keys a probe/s],
-          [{ kind: '$.new.doc' }, /must match its key member 'id'/],
           [{ ref: null }, /'ref' reads SQL NULL as an absent member/],
           [{ at: '$.new.doc' }, /'at' holds an epoch/],
         ])) refusedEverywhere(hybridTarget(match), { code: 'JD0005', docPath: '/entities/Line/invariants/0/assert', message: refused });
-        for (const [member, dropped] of /** @type {const} */ ([['id', null], ['code', 'Doc_code'], ['ref', 'Doc_by_ref']])) {
+        for (const [member, dropped] of /** @type {const} */ ([['id', null], ['code', 'Doc_code'], ['ref', 'Doc_by_ref'], ['kind', 'Doc_by_kind']])) {
           const model = hybridTarget({ [member]: '$.new.doc' });
           const fixture = await engine().fixture(HYBRID_TABLES);
           try {
@@ -169,7 +170,7 @@ describe('a probe keyed by a unique index', () => {
             const store = await openStore(model, options);
             try {
               await store.entity('Doc').create({ id: 'd1', code: 'c1', ref: 'r1', kind: 'x' });
-              const value = { id: 'd1', code: 'c1', ref: 'r1' }[member];
+              const value = { id: 'd1', code: 'c1', ref: 'r1', kind: 'x' }[member];
               assert.deepEqual(await createVerdicts(store.entity('Line'), [{ id: 1, doc: value }, { id: 2, doc: 'nope' }]), ['ok', 'JD2096/constraint']);
               await assert.rejects(fixture.exec("INSERT INTO lines(id, doc) VALUES (3, 'nope')"), /jaren invariant:parent/);
             }
