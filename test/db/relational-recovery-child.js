@@ -11,7 +11,9 @@ if (point === 'seed') {
   const db = await driver.open(file);
   db.exec('PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0');
   for (const sql of spec.seed) db.exec(sql);
-  process.exit(0);
+  // the committed rows stay in the WAL only without exit cleanup: a host may
+  // checkpoint an open database on a graceful exit
+  crashAt('seed');
 }
 // Migration statements and the driver's own COMMIT share the native seam.
 const intercept = (db, execute) => new Proxy(db, {

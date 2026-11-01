@@ -38,7 +38,7 @@ for (const host of [process.execPath, 'bun']) {
       const file = join(dir, 'source.sqlite');
       try {
         const seeded = run(host, file, { seed }, 'seed');
-        assert.equal(seeded.status, 0, seeded.stderr);
+        assertCrash(seeded, 'seed');
         assert.ok(existsSync(`${file}-wal`));
         const db = await nodeDriver().open(file);
         const source = await schemaShapeOf(db);
