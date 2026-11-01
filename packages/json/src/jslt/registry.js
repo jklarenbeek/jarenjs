@@ -131,10 +131,11 @@ function validatePack(pack) {
  * @property {() => string[]} names - every registered operator/function name (for docs, AI, errors)
  * @property {() => Array<{ name: string, version: string | null }>} packs - the registered packs, in
  *   order (`version` null for a pack that declares none)
- * @property {(names: readonly string[]) => { extensions: Record<string, any>, functions: Record<string, Function> }} forPacks
+ * @property {(names: readonly string[]) => { extensions: Record<string, any>, functions: NonNullable<import('../query/index.js').JsonQueryOptions['functions']> }} forPacks
  *   the `{ extensions, functions }` of the named packs only — what a saved formula that lists those packs may use
- * @property {() => { extensions: Record<string, any>, functions: Record<string, Function> }} toOptions
- *   the raw `{ extensions, functions }` for a manual compile call
+ * @property {() => { extensions: Record<string, any>, functions: NonNullable<import('../query/index.js').JsonQueryOptions['functions']> }} toOptions
+ *   the raw `{ extensions, functions }` for a manual compile call; `functions` is typed as the
+ *   `$call` registry `compileJsonQuery` takes, so the pair spreads into its options as it is
  * @property {() => Record<string, any>} forSql - the SQL-pushable subset, as `{ name -> meta }`
  * @property {() => Record<string, any>} describe - the full registration metadata
  * @property {(stylesheet: any, opts?: any) => Function} compile - compile a JSLT stylesheet bound to this registry
@@ -149,7 +150,7 @@ function validatePack(pack) {
  * collides with the core vocabulary, or with an already-registered name,
  * throws a `TypeError` at `.use()` time — a host programming error, never
  * a `JQ` document error.
- * @param {{ extensions: Record<string, any>, functions: Record<string, Function>,
+ * @param {{ extensions: Record<string, any>, functions: NonNullable<import('../query/index.js').JsonQueryOptions['functions']>,
  *   meta: Record<string, any>, packs: Array<{ name: string, version: string | null }> }} [state]
  * @returns {Readonly<JsltRegistry>}
  */

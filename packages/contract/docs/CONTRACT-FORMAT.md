@@ -1672,6 +1672,13 @@ the platform:
   say. A seed that throws answers a plain 500 before the dispatcher sees
   the request, and a seed that is not a function is a `TypeError` at
   construction.
+  `http.IncomingMessage` and `http.ServerResponse` fit the declared
+  `NodeRequestLike` and `NodeResponseLike` as they are, so
+  `http.createServer(toNodeHandler(dispatcher))` type-checks in a strict
+  TypeScript consumer. *Upgrade: `NodeResponseLike.writeHead` declared its
+  header lists `readonly string[]`, which `http.ServerResponse` did not fit;
+  it declares `string[]` now, so calling a `NodeResponseLike`'s `writeHead`
+  with read-only lists no longer type-checks.*
 - **`nodeRequest` and `writeNodeResponse`** (`@jarenjs/contract/node`) are
   `toNodeHandler`'s two halves, packaged for a framework route that runs
   its own lifecycle and dispatches itself:

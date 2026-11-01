@@ -41,7 +41,8 @@
     "typed-outcomes.ts",
     "check-compile.ts",
     "validate-narrow.ts",
-    "strict-profile.ts"
+    "strict-profile.ts",
+    "registry-options.ts"
   ],
   "include": [
     "linq-*.ts"

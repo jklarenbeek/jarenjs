@@ -61,7 +61,7 @@
     "test:website": "node --no-warnings=ExperimentalWarning --test \"test/website/**/*.test.js\"",
     "test:charts": "node --no-warnings=ExperimentalWarning --test \"test/charts/**/*.test.js\"",
     "test:locales": "node --no-warnings=ExperimentalWarning --test \"test/locales/**/*.test.js\"",
-    "test:types": "tsc --noEmit -p test/consumer/tsconfig.json",
+    "test:types": "tsc --noEmit -p test/consumer/tsconfig.json && tsc --noEmit -p test/consumer/tsconfig.node.json",
     "test:tree-shaking": "node ./scripts/check-tree-shaking.js",
     "test:documents": "node ./scripts/check-documents.js",
     "test:design": "node ./scripts/check-site-design.js",

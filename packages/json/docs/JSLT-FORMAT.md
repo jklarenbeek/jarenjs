@@ -644,6 +644,14 @@ with the core vocabulary, a name already registered, or a second pack
 under a registered pack name throws a `TypeError` at `.use()` — a host
 programming error, never a `JQ` document error.
 
+`forPacks` and `toOptions` declare their `functions` as the type
+`compileJsonQuery`'s `functions` option takes, so the pair spreads into a
+strict TypeScript compile call as it is. *Upgrade: they declared
+`Record<string, Function>`, which that option refused; a hand-written
+provider typed that way, or such a record handed to `createJsltRegistry`,
+no longer type-checks where a registry is expected: give its functions
+call signatures.*
+
 A **pack** is plain data — `{ name, version?, entries }` — wrapping pure
 functions, free of the operator internals. `version` is a string the pack
 bumps when an entry's meaning changes; a saved formula lists the packs it

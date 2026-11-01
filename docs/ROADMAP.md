@@ -55,6 +55,19 @@ delete it or fix it.
   reference reuse would answer it from stale matches. Even with the pre-pass
   pruned, a copy-on-write view loop stays O(n) per frame: its `$apply`
   dispatch and memo lookups run per item.
+- [ ] **JSLT compile options and transform, declared for strict consumers** —
+  `compileJsltStylesheet` and `transformJson` declare their options without
+  `extensions` and `functions`, though the dispatch reads both: a strict
+  TypeScript consumer's `compileJsltStylesheet(sheet, registry.toOptions())`
+  and `transformJson(sheet, data, {}, registry.toOptions())` fail TS2559 (no
+  properties in common). `compileJsltStylesheet`'s declaration also drops
+  `pathFunctions` (TS2353 on `{ pathFunctions }`; `transformJson`'s keeps it).
+  The transform is declared `Function`, and so is the registry's `compile`, so
+  the documented `transform.externals` and `transform.doc` are TS2339 and the
+  transform fits no typed callable (TS2322). Fix in the declarations only (a
+  patch): one options type naming every option the compile reads, and one
+  transform type, `((data, externals?) => any) & { externals, doc }`, that
+  both functions and the registry's `compile` return.
 
 ## @jarenjs/json — XQuery front-end & QT3
 

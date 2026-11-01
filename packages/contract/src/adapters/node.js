@@ -67,9 +67,11 @@ const LINGER_MS = 1000;
  * streaming (SSE) response: `write`'s `false` is waited out on `drain`
  * (settled on `close`/`error` too, with the listeners removed), and a
  * response already ended or destroyed refuses the write instead of
- * emitting `write after end`.
+ * emitting `write after end`. `writeHead` gets a fresh header table whose
+ * list values are the response's own arrays: it reads them and never
+ * writes them, as `http.ServerResponse` does.
  * @typedef {Object} NodeResponseLike
- * @property {(status: number, headers?: Record<string, string | readonly string[]>) => unknown} writeHead
+ * @property {(status: number, headers?: Record<string, string | string[]>) => unknown} writeHead
  * @property {(body?: string | Uint8Array, callback?: () => void) => unknown} end
  * @property {(event: string, listener: (...args: any[]) => void) => unknown} on
  * @property {(event: string, listener: (...args: any[]) => void) => unknown} [once]
@@ -318,9 +320,9 @@ function headersOf(req) {
  */
 function send(res, response, close, done) {
   // a list value stays a list: `writeHead` emits one field line per
-  // item, which is how `set-cookie` repeats
-  /** @type {Record<string, string | readonly string[]>} */
-  const headers = { ...response.headers };
+  // item, which is how `set-cookie` repeats; the lists are the response's
+  // own arrays, handed over uncopied because `writeHead` only reads them
+  const headers = /** @type {Record<string, string | string[]>} */ ({ ...response.headers });
   if (typeof response.stream === 'function') {
     // an SSE response: headers out immediately, then the pump writes
     // events until the stream ends (the pump ends the response itself),
