@@ -414,7 +414,7 @@ an editable data pane.
 ### Directives — a number a machine derives and a human reads
 
 ```markdown
-Jaren is <!--fact:jsonpath.ctsRatio-->8.8<!--/fact-->x faster across the CTS queries.
+The shelf holds <!--fact:example.books-->42<!--/fact--> books.
 ```
 
 Every markdown renderer on earth drops HTML comments, so GitHub, an editor

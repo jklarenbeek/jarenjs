@@ -199,14 +199,15 @@ test('on a phone the drill-down swaps the pane and backs out', async ({ page }) 
   await noOverflow(page, 'the mobile drill-down · dark');
 });
 
-test('the JSON Schema engine validates on the stage (verdict note + deep errors table)', async ({ page }) => {
+test('the JSON Schema engine validates on the stage (errors table on screen, verdict the next tab)', async ({ page }) => {
   await page.goto('/#/play');
   await page.locator('.jplay-ex', { hasText: 'Invalid data' }).click();
   await expect(page.locator('.jplay-engine')).toHaveText('JSON Schema');
-  await expect(page.locator('.jplay-note')).toContainText('error'); // the verdict
-  // the localized errors are a deep table behind the Explain toggle
-  await page.locator('.jplay-deep-toggle').click();
+  // a failing run leads with its errors, on screen: no Explain needed
   await expect(page.locator('.jplay-table')).toBeVisible();
+  await expect(page.locator('.jplay-table td').first()).toHaveAttribute('dir', 'auto');
+  await page.locator('.jplay-tabs .seg-btn', { hasText: 'Verdict' }).click();
+  await expect(page.locator('.jplay-note')).toContainText('error'); // the verdict
   // the Messages (locale) option is offered
   await expect(page.locator('.jplay-options select')).toBeVisible();
 });

@@ -114,8 +114,8 @@ describe('@jarenjs/play — the example library', () => {
     assert.match(ok.panels[0].text, /^✓ valid/);
     const bad = runExample('validate', ex.source, invalid.data, { validate: runner, config: ex.config });
     assert.strictEqual(bad.ok, true);
-    assert.match(bad.panels[0].text, /^✗ 1 error/);
-    assert.deepStrictEqual(bad.panels[1].rows, [['/billing', "must have required property 'city'"]]);
+    assert.match(bad.panels[1].text, /^✗ 1 error/);
+    assert.deepStrictEqual(bad.panels[0].rows, [['/billing', "must have required property 'city'"]]);
     // the same schema with the pane emptied cannot resolve its reference
     const without = runExample('validate', { ...ex.source, schemas: '' }, valid.data, { validate: runner, config: ex.config });
     assert.strictEqual(without.ok, false);

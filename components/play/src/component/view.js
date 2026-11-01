@@ -316,10 +316,13 @@ const cardBody = ['div', { class: 'jplay-card' },
 const activeCard = { match: `${PLAY_BASE}.result.activePanel.items[*]`, mode: PLAY_MODE, body: cardBody };
 const deepCard = { match: `${PLAY_BASE}.result.deepPanel.items[*]`, mode: PLAY_MODE, body: cardBody };
 
-/** A table header cell / body row / body cell — again at both slots. */
+/** A table header cell / body row / body cell — again at both slots. A body
+ * cell takes the direction of its own text (`dir="auto"`): a localized
+ * message or a CSV field may be Arabic, and read in a left-to-right cell an
+ * embedded Latin token lands on the wrong side of it. */
 const columnBody = ['th', {}, '$.label'];
 const rowBody = ['tr', {}, [{ $apply: '$.cells[*]' }]];
-const cellBody = ['td', {}, '$.text'];
+const cellBody = ['td', { dir: 'auto' }, '$.text'];
 const tableColumn = { match: `${PLAY_BASE}.result.activePanel.columns[*]`, mode: PLAY_MODE, body: columnBody };
 const tableRow = { match: `${PLAY_BASE}.result.activePanel.rows[*]`, mode: PLAY_MODE, body: rowBody };
 const tableCell = { match: `${PLAY_BASE}.result.activePanel.rows[*].cells[*]`, mode: PLAY_MODE, body: cellBody };

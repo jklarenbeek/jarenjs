@@ -283,10 +283,11 @@ export function createFormView(options = {}) {
         remove,
       ],
     },
-    // one error line per message
+    // one error line per message, read in its own direction (an Arabic
+    // message with a Latin member name)
     {
       match: `${root}..errors[*]`,
-      body: ['p', { class: `${cls}-error`, role: 'alert' }, '$'],
+      body: ['p', { class: `${cls}-error`, role: 'alert', dir: 'auto' }, '$'],
     },
     // select: options are precomputed by the view model, and carry the
     // JSON text of their typed value so the round trip survives the DOM

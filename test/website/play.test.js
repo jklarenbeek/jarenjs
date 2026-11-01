@@ -207,9 +207,9 @@ describe('website — the Play playground (#/play)', () => {
     fire(byText(playRoot(container), 'button', 'Invalid data (see the errors)'), 'click', {});
     const s2 = app.getState().play;
     assert.strictEqual(s2.result.ok, true, 'invalid DATA is still a successful run');
-    assert.ok(s2.result.panels.length >= 2, 'a verdict note + an errors table');
-    assert.strictEqual(s2.result.panels[1].kind, 'table', 'the errors render as a table');
-    assert.ok(s2.result.panels[1].rows.length >= 1, 'at least one error row');
+    assert.ok(s2.result.panels.length >= 2, 'an errors table + a verdict note');
+    assert.strictEqual(s2.result.panels[0].kind, 'table', 'the errors render as a table, first, on screen');
+    assert.ok(s2.result.panels[0].rows.length >= 1, 'at least one error row');
   });
 
   it('the validate data pane toggles to a two-way generated form: an edit mirrors to the data and re-validates', () => {
@@ -578,5 +578,58 @@ describe('a session can leave the page, and come back', () => {
     app.dispatch('play/share');
     assert.match(app.getState().play.shared, /too large for a share link/);
     assert.match(app.getState().play.shared, /use Download instead/);
+  });
+});
+
+describe('website — Play speaks the language the Messages select names', () => {
+  /** Every node under `node` that `pred` accepts, in document order. */
+  const findAll = (node, pred) => [...(pred(node) ? [node] : []), ...(node.childNodes ?? []).flatMap((c) => findAll(c, pred))];
+  /** The text a node shows. */
+  const textOf = (node) => (node.nodeValue != null ? node.nodeValue : (node.childNodes ?? []).map(textOf).join(''));
+  /** The validate engine's Messages select (the one offering Deutsch). */
+  const messages = (c) => find(playRoot(c), (n) => n.tagName === 'select'
+    && (n.childNodes ?? []).some((o) => o.getAttribute?.('value') === 'de'));
+  /** Load the invalid-data example and pick a message language. */
+  function invalidIn(locale) {
+    const site = mountSite();
+    fire(byText(playRoot(site.container), 'button', 'Invalid data (see the errors)'), 'click', {});
+    fire(messages(site.container), 'change', { target: { value: locale } });
+    assert.strictEqual(site.app.getState().play.config.locale, locale, 'the select chose the language');
+    return site;
+  }
+
+  it('a failing run lists its errors on screen, translated, without opening Explain', () => {
+    const { app, container } = invalidIn('de');
+    assert.strictEqual(app.getState().play.deep, false, 'the drill-down is closed');
+    const cells = findAll(playRoot(container), (n) => n.tagName === 'td').map(textOf);
+    assert.ok(cells.includes('darf nicht weniger als 2 Zeichen enthalten'), `the German message is on screen: ${cells.join(' | ')}`);
+    assert.ok(cells.includes('muss >= 13 sein'));
+    assert.ok(!cells.some((t) => t.startsWith('must ')), 'no English message is left on screen');
+  });
+
+  it('the generated form\'s field alerts speak the chosen language', () => {
+    const { container } = invalidIn('de');
+    fire(byText(playRoot(container), 'button', 'Form'), 'click', {});
+    const alerts = findAll(playRoot(container), (n) => n.getAttribute?.('role') === 'alert').map(textOf);
+    assert.ok(alerts.includes('Muss mindestens 2 Zeichen enthalten (derzeit 1)'), `the German alert: ${alerts.join(' | ')}`);
+    assert.ok(alerts.includes('Muss mindestens 13 sein'));
+    assert.ok(!alerts.some((t) => t.startsWith('Must ')), 'no English alert is left');
+  });
+
+  it('a message cell takes its own direction, so an Arabic message reads right to left', () => {
+    const { container } = invalidIn('ar');
+    const cells = findAll(playRoot(container), (n) => n.tagName === 'td');
+    const arabic = cells.find((n) => textOf(n) === 'يجب ألا يقل عدد الأحرف عن 2');
+    assert.ok(arabic, `the Arabic message is on screen: ${cells.map(textOf).join(' | ')}`);
+    assert.strictEqual(arabic.getAttribute('dir'), 'auto');
+    assert.ok(cells.every((n) => n.getAttribute('dir') === 'auto'), 'every cell reads its own direction');
+  });
+  it('a form alert takes its own direction too', () => {
+    const { container } = invalidIn('ar');
+    fire(byText(playRoot(container), 'button', 'Form'), 'click', {});
+    const alerts = findAll(playRoot(container), (n) => n.getAttribute?.('role') === 'alert');
+    assert.ok(alerts.length >= 2, `the form shows its alerts: ${alerts.map(textOf).join(' | ')}`);
+    assert.ok(alerts.some((n) => /[\u0600-\u06ff]/.test(textOf(n))), 'an Arabic alert');
+    assert.ok(alerts.every((n) => n.getAttribute('dir') === 'auto'), 'every alert reads its own direction');
   });
 });

@@ -223,7 +223,8 @@ export function viewModel(state) {
     // the form tree is built here (it needs @jarenjs/forms, a host dep) from
     // the schema source + the structured buffer, and mounted at `dataForm`
     if (state.play.engine === 'validate' && state.play.dataView === 'form') {
-      ui.play.dataForm = formViewFor(state.play.source?.schema ?? '', state.play.dataValue, referencedSchemas(state.play.source?.schemas));
+      ui.play.dataForm = formViewFor(state.play.source?.schema ?? '', state.play.dataValue, referencedSchemas(state.play.source?.schemas),
+        state.play.config?.locale);
     }
   }
   if (page === 'flow') ui.flow = flowPageViewModel(state.flow);

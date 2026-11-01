@@ -278,6 +278,14 @@ delete it or fix it.
   dynamic anchor's location (`…#/$def-anchor/<n>`) numbers the objects built,
   the second build's among them. Building it once makes the first right and
   renumbers the second (an upgrade note).
+- [ ] **One app document takes seconds to validate against the app
+  meta-schema.** The studio's `form` seed template (2,379 bytes of JSON)
+  takes about 12 s per `validateAppDocument` on Node, where the `dashboard`
+  template takes 220 ms and `minisite` 60 ms. A CPU profile puts the time in
+  building collected errors (`addNormalError`) under nested `oneOf` and
+  `anyOf` branches; test/website/studio.test.js spends about 400 s of every
+  release gate in it. Wanted: a valid document of that size validated in
+  milliseconds, every answer unchanged.
 
 ## @jarenjs/view & @jarenjs/app
 
@@ -328,6 +336,12 @@ establish registry publication or downstream acceptance.
   of nested emphasis and strong. Wanted: those spellings derived, so that
   every tree the reader makes reads back and the search can go; such content
   costs the derivation and then the search.
+- [ ] **A `slugPrefix` of `''` mints footnote ids bare, so a heading can share
+  one.** The footnote prefix follows `slugPrefix` whenever one is given, so a
+  render with `slugPrefix: ''` (the site's policy for its own documents) gives
+  footnote 1 the ids `fn-1` / `fnref-1`, the id a heading `# fn 1` also mints:
+  two elements carry one id and an in-page link lands on the first. The
+  component layer's comment says footnote ids are unaffected by the policy.
 
 ## @jarenjs/mermaid
 
@@ -370,6 +384,12 @@ establish registry publication or downstream acceptance.
   truncated gantt name stays truncated in its tooltip. The text is
   English-only. A class diagram's `link` and `callback` statements (which also
   carry a tooltip) are not modelled.
+- [ ] **A Mermaid pie's `showData` is read and printed back but never drawn.**
+  `pie showData` parses (`showData: true`) and `toMermaid` writes it back,
+  but the charts adapter's `mermaidPieRenderer` never reads it: the legend
+  shows each slice's percentage (`Parsing (20.0%)`) where Mermaid shows its
+  value (`Parsing [20]`), so a pie whose values do not sum to 100 shows none
+  of the values the directive asks for.
 
 ## @jarenjs/play
 

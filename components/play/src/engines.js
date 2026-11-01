@@ -106,10 +106,15 @@ const deepCards = (id, label, items) => ({ id, label, kind: 'cards', depth: 'dee
 const deepCode = (id, label, text) => ({ id, label, kind: 'code', depth: 'deep', text });
 
 /** A table cell → a display string. Primitives (incl. BigInt, from typed CSV)
- * stringify directly; objects/arrays become compact JSON. Never throws. */
+ * stringify directly; an object whose JSON is a string (a typed date) shows
+ * that string; other objects/arrays become compact JSON. Never throws. */
 const cell = (v) => {
   if (v == null) return '';
-  if (typeof v === 'object') { try { return JSON.stringify(v); } catch { return String(v); } }
+  if (typeof v === 'object') {
+    // a typed date reads as its own text, the text the CSV round-trip writes:
+    // JSON's quotes around it would show it as the untyped string it is not
+    try { const json = JSON.stringify(v); return json.startsWith('"') ? JSON.parse(json) : json; } catch { return String(v); }
+  }
   return String(v);
 };
 
@@ -741,14 +746,15 @@ export const ENGINE_LIST = [
       const errs = report.errors ?? [];
       const summary = (report.valid ? '✓ valid' : `✗ ${errs.length} error${errs.length === 1 ? '' : 's'}`)
         + ` · ${report.draft} · compiled ${formatMs(report.compileMs)} · validated ${formatMs(report.validateMs)}`;
-      const panels = [{ id: 'verdict', label: 'Verdict', kind: 'note', tone: report.valid ? 'ok' : 'warn', text: summary }];
-      if (errs.length) {
-        panels.push({
-          id: 'errors', label: `Errors (${errs.length})`, kind: 'table', depth: 'deep',
-          columns: ['path', 'message'],
-          rows: errs.map((e) => [e.instancePath === '' ? '(root)' : e.instancePath, e.message]),
-        });
-      }
+      const verdict = { id: 'verdict', label: 'Verdict', kind: 'note', tone: report.valid ? 'ok' : 'warn', text: summary };
+      // the messages ARE the answer of a failing run, in the language the
+      // Messages select names: they lead, on screen, and the verdict line is
+      // the next tab — behind the drill-down, a language switch showed nothing
+      const panels = errs.length === 0 ? [verdict] : [{
+        id: 'errors', label: `Errors (${errs.length})`, kind: 'table',
+        columns: ['path', 'message'],
+        rows: errs.map((e) => [e.instancePath === '' ? '(root)' : e.instancePath, e.message]),
+      }, verdict];
       return okPanels(panels, report.compileMs ?? null, report.validateMs ?? null);
     },
   },

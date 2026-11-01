@@ -162,7 +162,14 @@ hidden until the learner opens the **depth toggle** ("Explain ▸"), which
 reveals them as their own tab row beside the answer on desktop and as a
 full-pane swap (with a ← back) on a phone. **CSV** is the richest example:
 a `note` summary is the calm answer; the parsed `table`, the dialect and
-repairs tables and the round-trip `code` ride behind the toggle. The
+repairs tables and the round-trip `code` ride behind the toggle. A failing
+**validate** run leads with its errors `table`, on screen, and the verdict
+`note` follows it: the messages are that run's answer, in the language the
+Messages option names. Every table body cell carries `dir="auto"`, so a
+right-to-left message or CSV field reads in its own direction, and a typed
+CSV date shows its own text. *Upgrade: the errors table used to be a `deep`
+panel after the verdict, so a visitor saw only the verdict until the depth
+toggle opened, and a typed date cell showed JSON's quotes around it.* The
 playground owns this small render vocabulary (code block, spliced vnode,
 table, callout, stat cards, coded error line), so it never depends on a
 host's node helpers.

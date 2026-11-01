@@ -391,14 +391,17 @@ sku = 738594937
 3,Alan,"a field that spans
 two lines"
 ` } },
+  // every damage sits where its repair is the only reading: a quote opened
+  // mid-document and never closed would legitimately span the next line
+  // break (RFC 4180) and take the next record into its field, so the
+  // never-closed one is the last record, the only place CSV1001 applies
   { id: 'csv-repair', label: 'Damaged → self-healing', engine: 'csv', config: { repair: 'repair', headers: 'true', delimiter: 'auto', typed: 'off' }, datasets: [],
     source: { text: `id,name,note
-1,Ada,"never closed
-2,Grace,"ok"trailing text
-3,Alan,"he said "hi" today"
-4,Edsger
-5,Barbara,extra,column
-` } },
+1,Ada,"ok"trailing text
+2,Grace,"he said "hi" today"
+3,Alan
+4,Edsger,extra,column
+5,Barbara,"never closed` } },
   { id: 'csv-dialect', label: 'European dialect (sniffed)', engine: 'csv', config: { repair: 'strict', headers: 'auto', delimiter: 'auto', typed: 'on' }, datasets: [],
     source: { text: `stad;inwoners;opgericht
 Amsterdam;921402;1275-10-27
@@ -480,7 +483,7 @@ the transform has not run — so a document that is ALSO read raw uses the
 comment spelling instead:
 
 - shipped <!--mdx:$.date-->a while ago<!--/mdx-->
-- <!--mdx:$.packages-->some<!--/mdx--> packages, one version
+- one version across <!--mdx:$.packages-->some<!--/mdx--> packages
 
 Same expression, same compiler, same cache. The markers survive the pass,
 so the value can be re-derived; every other renderer drops them and shows
@@ -550,10 +553,13 @@ first-reference order. An uncited definition renders nothing at all.
 
 [^why]: Cite it twice[^why] and it grows a second back-reference.
 ` } },
+  // the baked figure is the engine count, read from the engine list as the
+  // library loads: a measured figure typed here would go stale while the
+  // example says the line reads as correct, static text
   { id: 'md-directives', label: 'Directives: a number a machine derives', engine: 'markdown', datasets: [],
     source: { source: `# Comment-carried data
 
-Jaren is <!--fact:jsonpath.ctsRatio-->23.1<!--/fact-->x faster on the CTS mean.
+This playground runs <!--fact:play.engines-->${ENGINE_LIST.length}<!--/fact--> engines.
 
 Every markdown renderer on earth drops HTML comments, so that line reads as
 plain, correct, static text — here, on GitHub and on npm. A directive-aware
@@ -791,8 +797,8 @@ is a fixed point.
     source: { document: j({ $contract: '0.1', id: 'broken', operations: {
       'catalog.load': { kind: 'read',
         input: { type: 'object', properties: { since: { type: 'string' } } },
-        // no output member: JC00xx at compile, never at request time —
-        // the error names /operations/catalog.load with its code
+        // no output member: JC0006 at compile, never at request time —
+        // the error names /operations/catalog.load/output with its code
         http: { method: 'GET', path: '/api/catalog' } },
     } }) },
     datasets: [{ label: 'nothing to dispatch', data: { call: '' } }] },

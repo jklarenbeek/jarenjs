@@ -186,16 +186,20 @@ export function runValidation(schemaText, data, schemas = []) {
 /**
  * The generated form's render tree for the current schema + data. The
  * referenced documents are the ones the run registered, so the form reads
- * the same compile and shows the fields a `$ref` by `$id` brings in.
+ * the same compile and shows the fields a `$ref` by `$id` brings in. The
+ * field alerts speak `locale`, the language the errors table speaks: each
+ * pack carries the forms' `form/*` messages beside the validator's.
  * @param {string} schemaText
  * @param {any} data
  * @param {any[]} [schemas]
+ * @param {string} [locale] - a {@link LOCALES} code; English when no pack has it
  */
-export function formViewFor(schemaText, data, schemas = []) {
+export function formViewFor(schemaText, data, schemas = [], locale = 'en') {
   const entry = compiled(schemaText, schemas);
   if (entry.formModel === null) return null;
+  const catalog = CATALOGS[locale];
   try {
-    return buildFormViewModel(entry.formModel, data, { validateFields: true });
+    return buildFormViewModel(entry.formModel, data, catalog === undefined ? { validateFields: true } : { validateFields: true, catalog });
   }
   catch {
     return null;

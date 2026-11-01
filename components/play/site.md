@@ -37,9 +37,10 @@ the documents the main schema references, so a `$ref` by `$id` resolves. Its dat
 schema-generated form — the standard `@jarenjs/forms` stylesheet, validating per
 keystroke against the very schema in the pane beside it, with the fields of any
 referenced schema the main one pulls in by `$ref`. And the result card's
-locale switcher re-renders the validator's errors in any of the shipped language
-packs without re-validating anything: the errors carry msgids and params, and the
-text is produced at report time.
+locale switcher re-renders the validator's errors — listed on screen whenever a
+run has any, each cell in its own text direction — and the form's field alerts in
+any of the shipped language packs without re-validating anything: the errors carry
+msgids and params, and the text is produced at report time.
 
 **Try it.** [Open Play](#/play), pick an engine from the rail and edit either
 pane — the run is live, and the URL carries the engine so a link lands where you

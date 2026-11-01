@@ -143,8 +143,14 @@ function isDirectoryPath(path) {
   return last !== last.toUpperCase();
 }
 
-/** The rewritten anchor for a repo-relative href, or null to keep it. */
-function rewriteAnchor(props, base) {
+/**
+ * The rewritten anchor for a repo-relative href, or null to keep it.
+ * @param {any} props
+ * @param {string|null} base - the raw URL to resolve against; null rewrites fragments only
+ * @param {Set<string>|null} ids - every id the article holds, when a fragment
+ *   should land on the prefixed id the article minted for it; null keeps it as written
+ */
+function rewriteAnchor(props, base, ids) {
   const href = props.href;
   if (typeof href !== 'string' || href === '')
     return null;
@@ -167,10 +173,17 @@ function rewriteAnchor(props, base) {
     // not a known page, so the reader is thrown out of the document they
     // were reading and onto the home page. The fragment is handled here
     // instead — scroll to the heading, leave the route alone.
+    // A page that renders text it did not author prefixes the ids it mints
+    // (`user-content-`, GitHub's own answer), while the author wrote the
+    // link for the bare slug: `#the-notes` names `user-content-the-notes`
+    // when only that one exists, which is how GitHub resolves it too.
+    const id = href.slice(1);
+    const prefixed = UNTRUSTED.slugPrefix + id;
+    const target = ids !== null && !ids.has(id) && ids.has(prefixed) ? prefixed : id;
     return {
       ...props,
       on: {
-        click: { action: 'readme/anchor', with: { id: href.slice(1) }, preventDefault: true },
+        click: { action: 'readme/anchor', with: { id: target }, preventDefault: true },
       },
     };
   }
@@ -254,8 +267,13 @@ function rewriteImage(props, base) {
   }
 }
 
-/** Walk a vnode, rebuilding only the paths that actually change. */
-function rewriteNode(node, base) {
+/**
+ * Walk a vnode, rebuilding only the paths that actually change.
+ * @param {any} node
+ * @param {string|null} base - see {@link rewriteAnchor}
+ * @param {Set<string>|null} ids - see {@link rewriteAnchor}
+ */
+function rewriteNode(node, base, ids) {
   if (!Array.isArray(node))
     return node;
   // a FRAGMENT — an array of vnodes with no tag — walks from index 0;
@@ -264,7 +282,7 @@ function rewriteNode(node, base) {
   if (typeof node[0] !== 'string') {
     let out = node;
     for (let i = 0; i < node.length; i++) {
-      const child = rewriteNode(node[i], base);
+      const child = rewriteNode(node[i], base, ids);
       if (child !== node[i]) {
         if (out === node)
           out = node.slice();
@@ -277,14 +295,14 @@ function rewriteNode(node, base) {
     && !Array.isArray(node[1]) ? node[1] : null;
   let out = node;
   if (props !== null && (node[0] === 'a' || node[0] === 'img')) {
-    const rewritten = node[0] === 'a' ? rewriteAnchor(props, base) : rewriteImage(props, base);
+    const rewritten = node[0] === 'a' ? rewriteAnchor(props, base, ids) : rewriteImage(props, base);
     if (rewritten !== null) {
       out = node.slice();
       out[1] = rewritten;
     }
   }
   for (let i = props !== null ? 2 : 1; i < node.length; i++) {
-    const child = rewriteNode(node[i], base);
+    const child = rewriteNode(node[i], base, ids);
     if (child !== node[i]) {
       if (out === node)
         out = node.slice();
@@ -313,7 +331,7 @@ export function rewriteReadmeLinks(article, base) {
   const cached = rewriteCache.get(article);
   if (cached !== undefined && cached.base === base)
     return cached.article;
-  const rewritten = rewriteNode(article, base);
+  const rewritten = rewriteNode(article, base, null);
   rewriteCache.set(article, { base, article: rewritten });
   return rewritten;
 }
@@ -336,6 +354,11 @@ export function rewriteReadmeLinks(article, base) {
  * rewrite the dialog does, minus the repo-relative resolution those
  * surfaces have no base for.
  *
+ * Text a surface did not author renders with a slug prefix (`UNTRUSTED`),
+ * so a heading's id is `user-content-the-notes` while its author linked
+ * `#the-notes`: a fragment the article holds no id for lands on the
+ * prefixed id when the article holds that one, as GitHub resolves it.
+ *
  * @param {any} article - `md.view(source)` output
  * @returns {any}
  */
@@ -343,9 +366,28 @@ export function mdArticle(article) {
   if (article === null) return article;
   const cached = fragmentCache.get(article);
   if (cached !== undefined) return cached;
-  const rewritten = rewriteNode(article, null);
+  const rewritten = rewriteNode(article, null, collectIds(article, new Set()));
   fragmentCache.set(article, rewritten);
   return rewritten;
+}
+
+/**
+ * Every id the elements of a vnode carry: the places its in-page links can land.
+ * @param {any} node
+ * @param {Set<string>} ids - collects them
+ * @returns {Set<string>}
+ */
+function collectIds(node, ids) {
+  if (!Array.isArray(node))
+    return ids;
+  const tagged = typeof node[0] === 'string';
+  const props = tagged && node.length > 1 && node[1] !== null && typeof node[1] === 'object'
+    && !Array.isArray(node[1]) ? node[1] : null;
+  if (props !== null && typeof props.id === 'string')
+    ids.add(props.id);
+  for (let i = !tagged ? 0 : props !== null ? 2 : 1; i < node.length; i++)
+    collectIds(node[i], ids);
+  return ids;
 }
 
 /** @type {WeakMap<object, any>} the same per-article memo, for the

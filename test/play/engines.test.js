@@ -191,10 +191,11 @@ describe('@jarenjs/play — the engines run', () => {
         errors: [{ instancePath: '', keyword: 'required', message: 'must have property name' }] }),
     });
     assert.strictEqual(bad.ok, true, 'invalid DATA is still a successful RUN, with error panels');
-    assert.deepStrictEqual(bad.panels.map((p) => p.kind), ['note', 'table']);
-    assert.strictEqual(bad.panels[0].tone, 'warn');
-    assert.deepStrictEqual(bad.panels[1].columns, ['path', 'message']);
-    assert.match(bad.panels[1].rows[0][0], /root/, 'an empty instancePath renders as (root)');
+    // the errors lead, on screen rather than behind the drill-down; the verdict is the next tab
+    assert.deepStrictEqual(bad.panels.map((p) => [p.kind, p.depth ?? 'screen']), [['table', 'screen'], ['note', 'screen']]);
+    assert.strictEqual(bad.panels[1].tone, 'warn');
+    assert.deepStrictEqual(bad.panels[0].columns, ['path', 'message']);
+    assert.match(bad.panels[0].rows[0][0], /root/, 'an empty instancePath renders as (root)');
   });
 
   it('validate locates a schema error where the host says it is', () => {
