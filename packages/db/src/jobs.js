@@ -46,7 +46,7 @@ import { chain, attempt, iterateStatementOnce } from './driver.js';
 import { DbCompileError, DbRuntimeError, wrapDriverError } from './errors.js';
 import { createCursor, rowClassOf, PAGE_LIMIT_DEFAULT } from './cursor.js';
 import { refuseCancelled } from './cancellation.js';
-import { readOptions, readOptionsOrNull } from './options.js';
+import { readOptions, readOptionsOrNull, readYieldEvery } from './options.js';
 import { jobStatements } from './dialects/jobs.js';
 /** What `enqueue` reads from its options (§2). */
 const ENQUEUE_OPTIONS = ['id', 'runAt', 'maxAttempts'];
@@ -54,7 +54,7 @@ const ENQUEUE_OPTIONS = ['id', 'runAt', 'maxAttempts'];
 const CLAIM_OPTIONS = ['kinds', 'owner', 'leaseMs'];
 const RENEW_OPTIONS = ['leaseMs'];
 /** What the administration calls read (§10): filters and bounds, then the call's own controls. */
-const PAGE_OPTIONS = ['state', 'kind', 'after', 'limit', 'signal', 'deadline'];
+const PAGE_OPTIONS = ['state', 'kind', 'after', 'limit', 'signal', 'deadline', 'yieldEvery'];
 const CANCEL_OPTIONS = ['lease', 'signal', 'deadline'];
 const REQUEUE_OPTIONS = ['signal', 'deadline'];
 const RESET_OPTIONS = ['expectedGeneration', 'signal', 'deadline'];
@@ -666,12 +666,15 @@ export function createJobEngine(options) {
    * `after` continues past an id; `limit` bounds the items. The cursor
    * is the store's own — cancellation at row boundaries (`JD2072` /
    * `JD2075`), the driver's streaming class, every driver failure
-   * classified — and the store admits it per pull.
+   * classified — and the store admits it per pull, giving the event loop
+   * a turn between pulls by `yieldEvery`.
    * @param {{ state?: string, kind?: string, after?: string, limit?: number,
-   *   signal?: AbortSignal, deadline?: number }} [pageOptions]
+   *   signal?: AbortSignal, deadline?: number, yieldEvery?: { rows?: number, ms?: number } }} [pageOptions]
    */
   const page = (pageOptions = undefined) => {
     readOptionsOrNull(pageOptions, PAGE_OPTIONS, 'jobs.page');
+    // the store's root admission paces the cursor by it (MODEL-FORMAT §5.1)
+    readYieldEvery(pageOptions, 'jobs.page');
     const state = pageOptions?.state;
     if (state !== undefined && !JOB_STATES.includes(state)) {
       throw new TypeError(`page: state is one of ${JOB_STATES.map((s) => `'${s}'`).join(', ')}, got ${

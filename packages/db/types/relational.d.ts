@@ -1,5 +1,5 @@
 /** Structural authoring with explicit native dialect semantics. */
-import type { Dialect, QueryCursor, SyncQueryCursor, PhysicalMigrationDocument, PostgresPhysicalMigrationTarget } from './index.js';
+import type { Dialect, QueryCursor, SyncQueryCursor, PhysicalMigrationDocument, PostgresPhysicalMigrationTarget, YieldEvery } from './index.js';
 export type SqlValue = string | number | bigint | boolean | Uint8Array | null;
 export type SqlInput = SqlValue | SqlExpression;
 export type SqlOperator = '=' | '<>' | '<' | '<=' | '>' | '>=' | 'IS' | 'IS NOT'
@@ -50,6 +50,11 @@ export type SqlMutation = { readonly table: string; readonly returning?: SqlProj
   | ({ readonly op: 'insert'; readonly conflict?: SqlConflict; readonly ignore?: boolean } & (
     { readonly values: Readonly<Record<string, SqlInput>> } | { readonly source: SqlSelect; readonly columns: readonly string[] })));
 export interface RelationalOptions { readonly externals?: Readonly<Record<string, SqlValue>>; readonly signal?: AbortSignal }
+/** `store.relational.iterate`'s options: a call's, and the root cursor's
+ * turn for the event loop (MODEL-FORMAT §5.1). A transaction view's
+ * `iterate`, the synchronous twin and the bare engine refuse
+ * `yieldEvery` (`JD0013`). */
+export interface RelationalCursorOptions extends RelationalOptions { readonly yieldEvery?: YieldEvery }
 export interface RelationalPlan { readonly sql: string; readonly params: readonly SqlValue[]; readonly access: 'read' | 'write' }
 /** `lastInsertRowid` is present only after an insert that inserted a row of
  * a rowid table on SQLite: never after an insert that inserted nothing, an
@@ -90,7 +95,7 @@ export interface StoreRelational {
   plan(document: SqlSelect | SqlMutation, options?: RelationalOptions): RelationalPlan;
   all<T = Record<string, unknown>>(document: SqlSelect, options?: RelationalOptions): Promise<T[]>;
   get<T = Record<string, unknown>>(document: SqlSelect, options?: RelationalOptions): Promise<T | undefined>;
-  iterate<T = Record<string, unknown>>(document: SqlSelect, options?: RelationalOptions): QueryCursor<T>;
+  iterate<T = Record<string, unknown>>(document: SqlSelect, options?: RelationalCursorOptions): QueryCursor<T>;
   execute(document: SqlMutation, options?: RelationalOptions): Promise<RelationalMutationResult>;
 }
 /** The synchronous twin of {@link StoreRelational} (`store.sync.relational`,

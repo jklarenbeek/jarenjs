@@ -675,7 +675,8 @@ if (asyncLiveLeak.length)
 // Raised to 1,121,000 (measured 1120990): an open's one catalog read for every physical layout, verified under a read and written under the bracket only to create or before a refusal (store 581, introspect 533) add 1114.
 // Raised to 1,122,300 (measured 1122279): the relational builder's n-ary AND/OR and its coded refusal of a third operand elsewhere, the escaped LIKE and the portable contains (relational 1281, sqlite-relational 8) add 1289.
 // Raised to 1,123,000 (measured 1122646): the worker's settlement retried while the store's gate is held, and a renewal that hands its lease over inside its gated call (jobs 507), less the normalizer the model's reference reading no longer brings (normalize 134), minifier renames elsewhere net 59, add 432.
-if (clientBytes > 1123000)
+// Raised to 1,124,600 (measured 1124594): a root cursor's turn for the event loop — the option's validation and by-name refusal (options 888), the paced admission and the one serializer (cursor 446), the cursor option sets and the synchronous twin's refusal (query 326), the root call sites and the transaction view's refusal (store 183), iterate's read by policy (relational 179) and the job page's member (jobs 90) — less minifier renames elsewhere net 164, add 1948.
+if (clientBytes > 1124600)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 

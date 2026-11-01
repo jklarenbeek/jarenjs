@@ -66,12 +66,16 @@ export function isAbortSignal(signal) {
     && typeof signal.addEventListener === 'function' && typeof signal.removeEventListener === 'function';
 }
 
+/** The one shape of a malformed control's refusal (`JD0013`), naming the call and the option.
+ * @param {string} owner @returns {(name: string, rule: string) => DbCompileError} */
+const controlRefusal = (owner) => (name, rule) => new DbCompileError('JD0013', `${owner} option '${name}' ${rule}`);
+
 /** Validate controls before a signal enters admission or a deadline is compared.
  * This reads values only; each operation owns its closed set of names.
  * @param {any} options @param {string} owner @returns {void} */
 export function readControls(options, owner) {
   if (options === undefined) return;
-  const refuse = (name, rule) => new DbCompileError('JD0013', `${owner} option '${name}' ${rule}`);
+  const refuse = controlRefusal(owner);
   const signal = options?.signal;
   if (signal !== undefined && !isAbortSignal(signal)) throw refuse('signal', 'must be an AbortSignal');
   if (options?.deadline !== undefined && (typeof options.deadline !== 'number' || !Number.isFinite(options.deadline)))
@@ -80,4 +84,40 @@ export function readControls(options, owner) {
     throw refuse('strictStreaming', 'must be true or false');
   if (options?.externals !== undefined && !isPlainOptions(options.externals))
     throw refuse('externals', 'must be a plain object of named values');
+}
+
+/** The members `yieldEvery` reads. */
+const YIELD_EVERY_MEMBERS = Object.freeze(['rows', 'ms']);
+
+/** Validate a root cursor's `yieldEvery` (MODEL-FORMAT §5.1) before the
+ * cursor exists: an object naming `rows` (a whole number of items from 1),
+ * `ms` (a positive number of milliseconds) or both, refused as every other
+ * cursor control is (`JD0013`). Called only by a call whose closed set
+ * holds the member, so a call that does not read it keeps refusing it by
+ * name.
+ * @param {any} options @param {string} owner @returns {void} */
+export function readYieldEvery(options, owner) {
+  const every = options?.yieldEvery;
+  if (every === undefined) return;
+  const refuse = controlRefusal(owner);
+  if (!isPlainOptions(every)) throw refuse('yieldEvery', 'must be an object naming rows, ms or both');
+  refuseUnknownMembers(every, YIELD_EVERY_MEMBERS, (key, hint) => refuse(`yieldEvery.${key}`, `is not one it reads${hint}`));
+  const { rows, ms } = every;
+  if (rows === undefined && ms === undefined) throw refuse('yieldEvery', 'must name rows, ms or both');
+  if (rows !== undefined && (!Number.isSafeInteger(rows) || rows < 1))
+    throw refuse('yieldEvery.rows', 'must be a whole number of items from 1');
+  if (ms !== undefined && (typeof ms !== 'number' || !Number.isFinite(ms) || ms <= 0))
+    throw refuse('yieldEvery.ms', 'must be a positive finite number of milliseconds');
+}
+
+/** Refuse `yieldEvery` where no turn can be given (`JD0013`): only a root
+ * cursor of the asynchronous store reads it. A synchronous cursor answers
+ * values, and a transaction's cursor runs inside a scope that holds the
+ * connection until it settles.
+ * @param {any} options @param {string} owner @returns {void} */
+export function refuseYieldEvery(options, owner) {
+  if (options?.yieldEvery === undefined) return;
+  throw new DbCompileError('JD0013', `${owner} option 'yieldEvery' is read by a root cursor of the asynchronous `
+    + "store only: a synchronous cursor answers values, and a transaction's cursor runs inside a scope that "
+    + 'holds the connection until it settles');
 }

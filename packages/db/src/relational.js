@@ -6,7 +6,7 @@ import { sqliteDialect } from './dialects/sqlite.js';
 import { sqliteRelationalVocabulary } from './dialects/sqlite-relational.js';
 import { chain, attempt, abortReason } from './driver.js';
 import { createCursor, createSyncCursor, admitCursor, rowClassOf } from './cursor.js';
-import { readOptions, readControls } from './options.js';
+import { readOptions, readControls, readYieldEvery, refuseYieldEvery } from './options.js';
 import { isJsonObject } from '@jarenjs/core/object';
 
 /** @typedef {{ sql: string, params: any[], access: 'read'|'write' }} RelationalPlan */
@@ -354,6 +354,9 @@ export function planRelational(document, options) {
  *   statement ran (tracked entities it may have changed)
  * @property {boolean} [lift] - answer `all`/`get`/`execute` refusals as
  *   rejections, as every asynchronous Store member does
+ * @property {boolean} [readsYieldEvery] - the Store's root: `iterate` reads
+ *   `yieldEvery` and hands it to `cursor` on the spec (MODEL-FORMAT §5.1);
+ *   every other policy refuses it (`JD0013`)
  * @property {(scope: any, sql: string, metadata?: any) => any} [prepare] -
  *   how a reusable statement is prepared: the Store shares one bounded cache
  *   across its engines; by default every call prepares its own
@@ -362,6 +365,12 @@ export function planRelational(document, options) {
 /** A driver failure met by a relational operation, classified — never raw. */
 const classified = (error) => wrapDriverError(error, { docPath: '/relational' });
 
+/** What a relational call reads from its options: a closed set (`JD0013`). */
+const CALL_OPTIONS = Object.freeze(['externals', 'signal']);
+/** What `iterate` reads: a call's, and the `yieldEvery` the Store's root
+ * paces its cursor by — refused by every other policy, by name. */
+const CURSOR_OPTIONS = Object.freeze([...CALL_OPTIONS, 'yieldEvery']);
+
 /**
  * The one relational engine: every relational surface — a bare
  * connection's and the Store's — is this engine over an admission policy.
@@ -369,14 +378,14 @@ const classified = (error) => wrapDriverError(error, { docPath: '/relational' })
  */
 export function relationalEngine(policy) {
   const { dialect } = policy;
-  const planFor = (document, options) => {
-    readOptions(options, ['externals', 'signal'], 'relational');
+  const planFor = (document, options, members = CALL_OPTIONS) => {
+    readOptions(options, members, 'relational');
     readControls(options, 'relational');
     return planRelational(document, { externals: options?.externals, dialect });
   };
-  const readPlan = (document, options) => {
+  const readPlan = (document, options, members = CALL_OPTIONS) => {
     policy.available();
-    const plan = planFor(document, options);
+    const plan = planFor(document, options, members);
     if (plan.access !== 'read') fail('a read method requires a select document');
     return plan;
   };
@@ -404,12 +413,15 @@ export function relationalEngine(policy) {
     options?.signal);
   };
   return Object.freeze({
-    plan: planFor,
+    plan: (document, options = undefined) => planFor(document, options),
     all: (document, options = undefined) => answer(() => selected('all', document, options)),
     get: (document, options = undefined) => answer(() => selected('get', document, options)),
     iterate(document, options = undefined) {
-      const plan = readPlan(document, options);
-      return policy.cursor({ ...rowClassOf(policy.connection), signal: options?.signal, wrap: classified,
+      const plan = readPlan(document, options, CURSOR_OPTIONS);
+      if (policy.readsYieldEvery === true) readYieldEvery(options, 'relational');
+      else refuseYieldEvery(options, 'relational');
+      return policy.cursor({ ...rowClassOf(policy.connection), signal: options?.signal, yieldEvery: options?.yieldEvery,
+        wrap: classified,
         open: (scope) => chain(scope.prepare(plan.sql, { readOnly: true, ephemeral: true }), (statement) => statement.iterate(plan.params)),
         items: (row) => [row],
       });

@@ -1110,8 +1110,10 @@ server configuration determine deployment costs.
   is admitted **per pull**: construction holds nothing, each `next()` and
   `return()` borrows the gate for one item's work and releases before it
   settles, so a paused consumer blocks no transaction and no pull ever
-  reads another transaction's uncommitted row; `store.live()` registers
-  under the same gate through its initial query.
+  reads another transaction's uncommitted row. On an in-thread driver
+  its pulls settle in microtasks, so `yieldEvery: { rows, ms }` gives
+  timers and I/O a turn between them. `store.live()` registers under
+  the same gate through its initial query.
 - **Named savepoints** (MODEL-FORMAT §5.2): `tx.savepoints.create /
   rollbackTo / release` give a live transaction checkpoint-and-continue
   without a sentinel exception — the target stays active after a

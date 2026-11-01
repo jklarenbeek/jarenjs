@@ -601,13 +601,15 @@ without raw SQL. Each is a mechanism with a coded failure surface and
 an honest second run; none of them decides WHEN — a retention horizon,
 a cancellation policy, a retry policy are the host's.
 
-- **`page({ state, kind, after, limit, signal, deadline })`** — a
+- **`page({ state, kind, after, limit, signal, deadline, yieldEvery })`** — a
   keyset cursor over the queue by job id (the id to continue past in
   `after`, at most `limit` items, default 100), filtered by a closed
   state and a kind; each item is the record `get` answers. It is the
   store's own cursor: admitted per pull under the store gate, cancelled
   at row boundaries (`JD2072` / `JD2075`), classified by the driver's
-  streaming capability, every driver failure classified.
+  streaming capability, every driver failure classified, and given a
+  turn of the event loop between pulls by `yieldEvery` as every root
+  cursor is (MODEL-FORMAT §5.1).
 - **`cancel(id, { lease })`** — two cases, both fenced. A QUEUED job
   (pending or failed) is settled as `cancelled` in one write; the
   enqueue-time identity authorises. A CLAIMED job needs the CURRENT

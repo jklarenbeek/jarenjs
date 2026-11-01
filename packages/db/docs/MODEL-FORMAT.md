@@ -1597,10 +1597,27 @@ What that costs, stated plainly:
   outcome. So a consumer paused between pulls blocks no transaction, and
   a pull made while one is open waits for its commit and observes
   committed state only — never a row a stranger's transaction later rolls
-  back. Every cursor iterates a statement of its own, so two cursors over
-  one document never invalidate each other. A pull abandoned while queued
-  is `JD2064`; an aborted cursor is `JD2072` at its row boundary; a
-  passed deadline is `JD2075`; a settled cursor answers `{ done: true }`
+  back. On a synchronous (in-thread) driver a pull also settles in
+  microtasks — its statement steps run inside it — so a consumer that only
+  awaits the cursor lets no timer, I/O callback or immediate run until the
+  cursor ends, however many rows it reads; a worker, process or pool host
+  and PostgreSQL turn the event loop at every pull, which awaits the other
+  side. **`yieldEvery: { rows, ms }`**, off by default and read by these
+  cursors, `store.relational.iterate()` (§5.3) and `jobs.page()`, gives the
+  loop one macrotask before the next pull once `rows` items were delivered,
+  or `ms` milliseconds passed on the monotonic clock, since the last turn —
+  whichever comes first. The turn comes before the pull is admitted, so the
+  gate is free while it runs and a call a timer makes then is served
+  between two pulls; a `return()` made while a pull waits for its turn
+  waits for that pull, as it waits for one in flight, and an abort resets
+  the statement at once and that pull is `JD2072`. On an asynchronous host
+  the option is accepted and changes nothing. `rows` is a whole number from
+  1 and `ms` a positive number, at least one of them named (`JD0013`
+  otherwise); a transaction view's cursor and the synchronous twin's do not
+  read it (`JD0013`). Every cursor iterates a statement of its own, so two
+  cursors over one document never invalidate each other. A pull abandoned
+  while queued is `JD2064`; an aborted cursor is `JD2072` at its row
+  boundary; a passed deadline is `JD2075`; a settled cursor answers `{ done: true }`
   whatever the clock or the gate say. A transaction view's cursors are
   pinned to their exact scope instead (`JD2070`), as above, and belong to
   it: a cursor the body left open is closed when the body settles, before
@@ -1727,7 +1744,7 @@ every other store operation is admitted:
 
 | Surface | Reads | Cursor | Writes |
 |---|---|---|---|
-| `store.relational` | under the store gate, prepared read-only, so a pool reader serves a read no transaction pins | admitted per pull, as the root collection cursor is; a PostgreSQL native cursor holds the session until it is released | one top-level transaction of its own, `mode: 'immediate'` |
+| `store.relational` | under the store gate, prepared read-only, so a pool reader serves a read no transaction pins | admitted per pull, as the root collection cursor is, and paced by `yieldEvery` (§5.1); a PostgreSQL native cursor holds the session until it is released | one top-level transaction of its own, `mode: 'immediate'` |
 | `store.sync.relational` | under the synchronous gate | per pull | a top-level immediate transaction |
 | `tx.relational`, `tx.sync.relational` | as the exact scope | pinned to the scope | a savepoint of the transaction |
 
@@ -2398,21 +2415,23 @@ graph caps are hard maxima an include's own declaration cannot exceed:
 refuses any one item — a document, an entity row, a loaded root graph —
 larger than that many serialised bytes (`JD2076`).
 
-**The call options are a closed set.** A collection's `execute` and
-`query` read `externals`, `strict`, `pushdown`, `profile`, `signal`,
-`deadline` and `strictStreaming`; any other member is `JD0013` naming
-the nearest one, as on `all()` and `page()`, so a misspelt `profile`
-never runs unbounded. `strictStreaming: true` on `execute` is `JD0013`
-too: a whole answer has no stream to hold to. An entity's `load` reads
-`signal`, `deadline` and `profile`, and its specification is closed as
-well (§10.4). The same holds for every other read call: a collection's
-`explain` and an entity query's `execute` read the set above, an entity
-cursor and an entity `explain` read it and the `tracking` its set reads,
-and `loadCursor` reads `signal`, `deadline`, `profile` and `tracking`.
-Each of these calls also refuses a malformed value of a control it reads
-(`JD0013`): a `signal` that is not an `AbortSignal`, a `deadline` that is
-not a finite number, a `strictStreaming` that is not a boolean, and
-`externals` that are not a plain object. A `page` reads `limit`, `after`,
+**The call options are a closed set.** A collection's `execute` reads
+`externals`, `strict`, `pushdown`, `profile`, `signal`, `deadline` and
+`strictStreaming`, and its `query` those and `yieldEvery` (§5.1); any
+other member is `JD0013` naming the nearest one, as on `all()` and
+`page()`, so a misspelt `profile` never runs unbounded. `strictStreaming:
+true` on `execute` is `JD0013` too: a whole answer has no stream to hold
+to. An entity's `load` reads `signal`, `deadline` and `profile`, and its
+specification is closed as well (§10.4). The same holds for every other
+read call: an entity query's `execute` reads the `execute` set, a
+collection's `explain` the `query` set (it explains either call), an
+entity cursor and an entity `explain` read that and the `tracking` its set
+reads, and `loadCursor` reads `signal`, `deadline`, `profile`, `tracking`
+and `yieldEvery`. Each of these calls also refuses a malformed value of a
+control it reads (`JD0013`): a `signal` that is not an `AbortSignal`, a
+`deadline` that is not a finite number, a `strictStreaming` that is not a
+boolean, `externals` that are not a plain object, and a `yieldEvery` that
+names neither a whole number of `rows` from 1 nor a positive `ms`. A `page` reads `limit`, `after`,
 `maxBytes`, `consistency`, `lookahead`, `signal`, `deadline`, `profile` and
 its set's `tracking` (§10.5); it is a graph load, one native statement that
 binds no externals and has no residual, so a cursor's `externals`,

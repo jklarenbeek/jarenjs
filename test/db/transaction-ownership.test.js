@@ -1049,7 +1049,7 @@ describe('root cursors borrow admission per pull (MODEL-FORMAT §5.1)', () => {
     // root cursor surface routes through one of the two adapters — the
     // classified reads through the one that picks the mode, the job page
     // and a tracked cursor through the gate
-    assert.strictEqual((store.match(/admit(?:Root|Read)Cursor\)?\((?!cursor, signal, what\))/g) ?? []).length, 5,
+    assert.strictEqual((store.match(/admit(?:Root|Read)Cursor\)?\((?!cursor, signal, what(?:, yieldEvery)?\))/g) ?? []).length, 5,
       'the five root cursor surfaces route through an adapter');
     assert.ok(!/query is deliberately NOT gated/.test(store), 'the ungated exception is gone');
     for (const name of ['admitCursor', 'shareCursor']) {

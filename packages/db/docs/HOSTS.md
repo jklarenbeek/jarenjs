@@ -683,6 +683,15 @@ entity set. Cursors implement `Symbol.iterator`, `next`, `return` and
 error and Store close release the row source exactly once. A scope cannot outlive
 its transaction, and root cursors acquire admission per pull.
 
+Admission per pull is not a turn of the event loop. A loop over these cursors runs
+to its end without one, and so does a loop that awaits a root cursor of the
+asynchronous Store on the in-thread host: each pull settles in microtasks, so no
+timer or I/O callback runs until the cursor ends, where the worker, process and
+pool hosts interleave them at every pull. `yieldEvery: { rows, ms }` on an
+asynchronous root cursor gives the loop one macrotask between pulls (MODEL-FORMAT
+§5.1); it is accepted and changes nothing on the other hosts, and the synchronous
+cursors here, which cannot yield, refuse it (`JD0013`).
+
 Include text is byte-checked before decoding. JSON parsing's construction traversal
 records serialized UTF-8 sizes bottom-up; nested bounds read those sizes before
 attaching reconstructed children. There is no second full nested stringify.

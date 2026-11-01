@@ -202,15 +202,33 @@ export interface ExecuteOptions {
    * k-nearest cut, a native group, a chain's window, an external the
    * database cannot bind — is the refusal `JD0037` naming the barrier,
    * raised before any statement runs; the plan is declined, never run
-   * with its memory behaviour quietly changed. On `execute()` it is a
-   * `TypeError`: a whole answer has no stream to hold to. */
+   * with its memory behaviour quietly changed. On `execute()` it is
+   * `JD0013`: a whole answer has no stream to hold to. */
   strictStreaming?: boolean;
+}
+
+/** When a root cursor gives the event loop a turn (MODEL-FORMAT §5.1):
+ * after every `rows` items delivered and/or every `ms` milliseconds, on
+ * the monotonic clock, whichever comes first. At least one is named;
+ * `rows` is a whole number from 1, `ms` a positive finite number. */
+export interface YieldEvery {
+  rows?: number;
+  ms?: number;
 }
 
 /** What a cursor takes: `execute`'s options, `signal` honoured at every
  * row boundary — an aborted cursor releases its statement and every
  * later pull is `JD2072`. */
-export interface CursorOptions extends ExecuteOptions {}
+export interface CursorOptions extends ExecuteOptions {
+  /** On an in-thread (synchronous) driver a root cursor's pulls settle in
+   * microtasks, so no timer or I/O callback runs until it ends; with this
+   * the cursor awaits one macrotask before its next pull, outside the
+   * store gate. Off by default. On an asynchronous host (a worker, a
+   * process, a pool, PostgreSQL) it is accepted and changes nothing. A
+   * transaction view's cursor does not read it (`JD0013`), nor does
+   * `execute()`; a malformed value is `JD0013`. */
+  yieldEvery?: YieldEvery;
+}
 
 /** One precondition of a collection write (MODEL-FORMAT §5): the stored
  * document holds `value` at the JSON Pointer `path`, compared with the
@@ -801,9 +819,9 @@ export interface SyncEntitySet<T = unknown, I = unknown> {
   update(key: EntityKeyArg, changes: Partial<T>): Readonly<T>;
   delete(key: EntityKeyArg): boolean;
   load(spec?: LoadSpec, options?: Pick<ExecuteOptions, 'profile' | 'signal' | 'deadline'>): ReadonlyArray<Readonly<T>>;
-  loadCursor(spec?: LoadSpec, options?: EntityCursorOptions): SyncQueryCursor<Readonly<T>>;
+  loadCursor(spec?: LoadSpec, options?: Omit<EntityCursorOptions, 'yieldEvery'>): SyncQueryCursor<Readonly<T>>;
   page(spec?: LoadSpec, options?: PageOptions): Page<Readonly<T>>;
-  cursor<R = T>(document: unknown, options?: EntityCursorOptions): SyncQueryCursor<R>;
+  cursor<R = T>(document: unknown, options?: Omit<EntityCursorOptions, 'yieldEvery'>): SyncQueryCursor<R>;
   explainLoad(spec?: LoadSpec, options?: Pick<ExecuteOptions, 'profile'>): LoadExplanation;
   add(doc: I): Readonly<T>;
   put(next: T): Readonly<T>;
@@ -2535,6 +2553,8 @@ export interface JobPageOptions {
   /** Row-boundary cancellation, as every cursor (`JD2072` / `JD2075`). */
   signal?: AbortSignal;
   deadline?: number;
+  /** A turn for the event loop between pulls, as every root cursor's. */
+  yieldEvery?: YieldEvery;
 }
 
 /**

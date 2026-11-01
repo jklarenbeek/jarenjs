@@ -153,7 +153,9 @@ when handling large results.
 `store.relational` is this engine admitted by the store
 ([MODEL-FORMAT §5.3](MODEL-FORMAT.md#53-relational-statements-through-the-store)):
 root reads take the store gate, prepared read-only so a pool reader can serve
-them; a root cursor is admitted per pull, so other calls run between pulls; a
+them; a root cursor is admitted per pull, so other calls run between pulls —
+on an in-thread driver only those already waiting, since its pulls settle in
+microtasks, unless `yieldEvery` gives timers and I/O a turn; a
 root write runs in a top-level `immediate` transaction of its own. The same
 engine on a transaction view, `tx.relational`, runs as that exact scope, and
 its writes are savepoints of the transaction. `store.sync.relational` and

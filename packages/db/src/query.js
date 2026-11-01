@@ -49,7 +49,7 @@ import { parseJSONPointer } from '@jarenjs/json/pointer';
 
 import { DbCompileError, DbRuntimeError, wrapDriverError, refuseRoundedInteger } from './errors.js';
 import { chain, attempt, createStatementOwner, useStatementOnce } from './driver.js';
-import { readOptions, readControls, isPlainOptions, refuseUnknownMembers } from './options.js';
+import { readOptions, readControls, readYieldEvery, refuseYieldEvery, isPlainOptions, refuseUnknownMembers } from './options.js';
 import {
   planQuery, planEntityQuery, entityShape, keyHoldingColumns, planEntityPredicate, entityPathRef, bindsLoneSurrogate, LONE_SURROGATE_REFUSAL,
   isRootScanSource, isEntityRootSource, BIND_REASONS, PLANNER_REASONS, admitsMixedTypes,
@@ -463,15 +463,20 @@ const bounded = (fn, wrap) => (...args) => attempt(() => fn(...args), wrap);
  * is not answered with its prefix. */
 const DOCUMENT_CALL_OPTIONS = Object.freeze(['externals', 'strictStreaming', 'strict', 'profile', 'pushdown',
   'signal', 'deadline']);
+/** A collection cursor's options: a document call's, and the `yieldEvery`
+ * the store's root admission paces it by (MODEL-FORMAT §5.1). A
+ * collection's `explain` takes them too: it explains either call. */
+const CURSOR_CALL_OPTIONS = Object.freeze([...DOCUMENT_CALL_OPTIONS, 'yieldEvery']);
 /** An entity cursor's options: a collection cursor's, and the `tracking`
  * its set reads off the same bag. An entity `explain` takes either call's. */
-const ENTITY_CURSOR_OPTIONS = Object.freeze([...DOCUMENT_CALL_OPTIONS, 'tracking']);
+const ENTITY_CURSOR_OPTIONS = Object.freeze([...CURSOR_CALL_OPTIONS, 'tracking']);
 /** A graph load's options. */
 const LOAD_CALL_OPTIONS = Object.freeze(['signal', 'deadline', 'profile']);
 /** What the explanation of a graph load reads: the profile it explains under. */
 const EXPLAIN_LOAD_OPTIONS = Object.freeze(['profile']);
-/** A graph cursor's options: a load's, and its set's `tracking`. */
-const LOAD_CURSOR_OPTIONS = Object.freeze([...LOAD_CALL_OPTIONS, 'tracking']);
+/** A graph cursor's options: a load's, its set's `tracking`, and the root
+ * admission's `yieldEvery`. */
+const LOAD_CURSOR_OPTIONS = Object.freeze([...LOAD_CALL_OPTIONS, 'tracking', 'yieldEvery']);
 
 /**
  * One read call's options, before anything runs: a closed member set,
@@ -482,6 +487,7 @@ const LOAD_CURSOR_OPTIONS = Object.freeze([...LOAD_CALL_OPTIONS, 'tracking']);
 function readCallOptions(options, members, spelling) {
   readOptions(options, members, spelling);
   readControls(options, spelling);
+  if (members.includes('yieldEvery')) readYieldEvery(options, spelling);
 }
 
 /** `strictStreaming: true` on a call that answers whole: there is no
@@ -2715,7 +2721,7 @@ export function createQueryEngine(context) {
    */
   const query = (document, options = undefined, cursorFactory = createCursor, repair = '') => {
     const spelling = `collection('${collection.name}').query`;
-    readCallOptions(options, DOCUMENT_CALL_OPTIONS, spelling);
+    readCallOptions(options, CURSOR_CALL_OPTIONS, spelling);
     refuseNonDocument(document, spelling);
     requireCallable(options, state.now);
     const { externals, strict, profile, pushdown } = callState(options);
@@ -2836,7 +2842,7 @@ export function createQueryEngine(context) {
   const explain = (document, options = undefined) => {
     // the options of the call it explains, an execute's or a cursor's
     const spelling = `collection('${collection.name}').explain`;
-    readCallOptions(options, DOCUMENT_CALL_OPTIONS, spelling);
+    readCallOptions(options, CURSOR_CALL_OPTIONS, spelling);
     refuseNonDocument(document, spelling);
     const { externals, strict, profile, profileSource, pushdown } = callState(options);
     const entry = entryFor(document, strict, profile, pushdown);
@@ -3777,6 +3783,7 @@ export function createEntityQueryEngine(context) {
    */
   const query = (document, options = undefined, register = undefined, cursorFactory = createCursor) => {
     readCallOptions(options, ENTITY_CURSOR_OPTIONS, 'entity cursor()');
+    if (cursorFactory === createSyncCursor) refuseYieldEvery(options, 'entity cursor()');
     refuseNonDocument(document, 'entity cursor()');
     requireCallable(options, state.now);
     const { externals, strict, pushdown, profile } = callState(options);
@@ -4923,6 +4930,7 @@ export function createLoadEngine(context, entityName) {
      */
     loadCursor(spec, options = undefined, register = undefined, cursorFactory = createCursor) {
       readCallOptions(options, LOAD_CURSOR_OPTIONS, `entity('${entityName}').loadCursor`);
+      if (cursorFactory === createSyncCursor) refuseYieldEvery(options, `entity('${entityName}').loadCursor`);
       requireCallable(options, state.now);
       const { entry, params } = bindLoad(spec, false, profileOf(options));
       return openCursor(entry, params, options?.signal, register, options?.deadline, cursorFactory);

@@ -32,7 +32,7 @@ import { utf8ByteLength } from '@jarenjs/core/string';
 import { DbCompileError, DbRuntimeError, wrapDriverError, isDriverError, classifyDriverError } from './errors.js';
 import { chain, toPromise, isThenable, attempt, abortReason, createStatementOwner, useStatementOnce, releaseStatement } from './driver.js';
 import { createSessionRouter } from './sessions.js';
-import { isPlainOptions, refuseUnknownMembers, refuseUnknownModelMembers, readOptions, readControls } from './options.js';
+import { isPlainOptions, refuseUnknownMembers, refuseUnknownModelMembers, readOptions, readControls, refuseYieldEvery } from './options.js';
 import { canonicalKeyText, namesNoNumber, noNumberKeyReason, numericKeyValue } from './key-text.js';
 import { planCollection, planEntity, planJoinTable, refuseNameCollisions, verifyShape, compileIndexPath, canonicalOf, creationOrder } from './ddl.js';
 import { translatePatch } from './patch-sql.js';
@@ -2956,9 +2956,13 @@ export function openStore(model, options) {
         return { cursor: entered, gate: recording };
       };
       const admitCursorOn = (/** @type {any} */ gate) => (/** @type {any} */ cursor, /** @type {AbortSignal | undefined} */ signal,
-        /** @type {string} */ what) => {
+        /** @type {string} */ what, /** @type {any} */ yieldEvery = undefined) => {
         const admitted = severalSessions ? holdingSession(cursor, gate) : { cursor, gate };
-        return admitCursor(admitted.cursor, admitted.gate, signal, what, cursorOwnership);
+        // only a synchronous connection settles a pull in microtasks; an
+        // asynchronous host already turns the event loop at every pull, so
+        // there `yieldEvery` is accepted and changes nothing
+        return admitCursor(admitted.cursor, admitted.gate, signal, what, cursorOwnership,
+          connection.synchronous === true ? yieldEvery : undefined);
       };
       const admitRootCursor = admitCursorOn(gated);
       /** A tracked root cursor: its pulls register in the store's own unit of work. */
@@ -2998,10 +3002,11 @@ export function openStore(model, options) {
       /** The cursors holding a parallel read right now; close gives them back. */
       const sharedCursors = new Set();
       /** A classified root cursor: one parallel read across its pulls, or
-       * the gate per pull. */
-      const admitReadCursor = (cursor, signal, what) => (options.reads === 'parallel'
+       * the gate per pull. A pool's readers are asynchronous, so a parallel
+       * read has no turn to give: `yieldEvery` changes nothing there. */
+      const admitReadCursor = (cursor, signal, what, yieldEvery = undefined) => (options.reads === 'parallel'
         ? shareCursor(cursor, share, signal, what, sharedCursors, () => ownerGuard(false), ownerAdmitted)
-        : admitRootCursor(cursor, signal, what));
+        : admitRootCursor(cursor, signal, what, yieldEvery));
 
       /** The synchronous surface's gate. It cannot wait — waiting hands
        * a Promise back under a value's type — so a contended call is a
@@ -4421,7 +4426,8 @@ export function openStore(model, options) {
             available: () => {},
             read: (run, signal) => gatedRead(() => run(connection), 'a root relational read', signal),
             cursor: (spec) => admitReadCursor(createCursor({ ...spec, open: () => spec.open(connection) }),
-              spec.signal, 'a root relational cursor pull'),
+              spec.signal, 'a root relational cursor pull', spec.yieldEvery),
+            readsYieldEvery: true,
             // a write the store's own unit of work hears of (`afterWrite`)
             write: (run, signal) => {
               const via = severalSessions ? opened.pinned : opened;
@@ -4479,7 +4485,7 @@ export function openStore(model, options) {
                   ...gatedMembers(gatedMembers(inner, ['insert', 'put', 'patch', 'delete', 'live']),
                     ['get', 'all', 'explain'], ['execute'], gatedRead),
                   query: (document, queryOptions) => admitReadCursor(inner.query(document, queryOptions),
-                    queryOptions?.signal, 'a root collection cursor pull'),
+                    queryOptions?.signal, 'a root collection cursor pull', queryOptions?.yieldEvery),
                 });
                 gatedCollections.set(name, handle);
               }
@@ -4507,9 +4513,11 @@ export function openStore(model, options) {
                   page: (spec, pageOptions) => lift(() => (pageOptions?.tracking === true ? gatedWork : gatedRead)(
                     () => inner.page(spec, pageOptions), undefined, signalOf('page', [spec, pageOptions])))(),
                   cursor: (document, queryOptions) => (queryOptions?.tracking === true ? admitWorkCursor : admitReadCursor)(
-                    inner.cursor(document, queryOptions), queryOptions?.signal, 'a root entity cursor pull'),
+                    inner.cursor(document, queryOptions), queryOptions?.signal, 'a root entity cursor pull',
+                    queryOptions?.yieldEvery),
                   loadCursor: (spec, cursorOptions) => (cursorOptions?.tracking === true ? admitWorkCursor : admitReadCursor)(
-                    inner.loadCursor(spec, cursorOptions), cursorOptions?.signal, 'a root graph cursor pull'),
+                    inner.loadCursor(spec, cursorOptions), cursorOptions?.signal, 'a root graph cursor pull',
+                    cursorOptions?.yieldEvery),
                   asNoTracking: () => untracked,
                 });
                 gatedEntities.set(name, handle);
@@ -4662,7 +4670,7 @@ export function openStore(model, options) {
               // settlement calls take the gate, so waiting inside it
               // would wait for itself
               page: (pageOptions) => admitRootCursor(jobsEngine.page(pageOptions),
-                pageOptions?.signal, 'a root job page pull'),
+                pageOptions?.signal, 'a root job page pull', pageOptions?.yieldEvery),
               cancel: lift((id, cancelOptions) => chain(
                 gated(() => jobsEngine.cancel(id, cancelOptions), 'a root job cancellation'),
                 (outcome) => chain(jobsEngine.settledLocally(id), () => outcome))),
@@ -4922,8 +4930,10 @@ export function openStore(model, options) {
             const out = scopedMembers(identity, inner,
               ['get', 'insert', 'put', 'patch', 'delete', 'all', 'explain', 'live'],
               ['execute', 'stats']);
-            out.query = (/** @type {any} */ document, /** @type {any} */ queryOptions) =>
-              scopedCursor(identity, () => inner.query(document, queryOptions));
+            out.query = (/** @type {any} */ document, /** @type {any} */ queryOptions) => scopedCursor(identity, () => {
+              refuseYieldEvery(queryOptions, `collection('${name}').query`);
+              return inner.query(document, queryOptions);
+            });
             return Object.freeze(out);
           };
 
@@ -4939,10 +4949,14 @@ export function openStore(model, options) {
               ...scopedMembers(identity, inner,
                 ['create', 'get', 'update', 'mutate', 'delete', 'load', 'page', 'explain'],
                 ['execute', 'add', 'put', 'remove', 'discard', 'link', 'unlink']),
-              cursor: (/** @type {any} */ document, /** @type {any} */ queryOptions) =>
-                scopedCursor(identity, () => inner.cursor(document, queryOptions)),
-              loadCursor: (/** @type {any} */ spec, /** @type {any} */ cursorOptions) =>
-                scopedCursor(identity, () => inner.loadCursor(spec, cursorOptions)),
+              cursor: (/** @type {any} */ document, /** @type {any} */ queryOptions) => scopedCursor(identity, () => {
+                refuseYieldEvery(queryOptions, 'entity cursor()');
+                return inner.cursor(document, queryOptions);
+              }),
+              loadCursor: (/** @type {any} */ spec, /** @type {any} */ cursorOptions) => scopedCursor(identity, () => {
+                refuseYieldEvery(cursorOptions, `entity('${name}').loadCursor`);
+                return inner.loadCursor(spec, cursorOptions);
+              }),
               asNoTracking: () => untracked,
             });
           };

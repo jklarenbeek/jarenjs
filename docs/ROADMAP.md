@@ -900,13 +900,6 @@ what each does is its own documentation's job
   second, and `page(id, null)` throws an uncoded `TypeError`, where the run
   store's other calls refuse a malformed option by name. Wanted: the bag
   closed, as `finish`'s is.
-- [ ] **An in-thread root cursor holds the event loop until it ends.** On
-  in-thread SQLite a root cursor's pulls (`store.relational.iterate`, an
-  entity root cursor) settle in microtasks, so no timer or I/O callback runs
-  until the cursor is drained (a 100,000-row read lets no 1 ms interval
-  fire), where a worker host interleaves them; the documents state per-pull
-  admission but not this. Wanted: the documents saying so, and an optional
-  yield every N pulls.
 - [ ] **A database rule cannot probe another table by a non-unique column.**
   `$exists-row` must match the target's key member or every column of a
   unique index (`JD0005` otherwise, MODEL-FORMAT §13.2), so a rule such as "a

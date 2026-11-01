@@ -28,6 +28,19 @@
 import { DbRuntimeError } from './errors.js';
 import { chain, isThenable } from './driver.js';
 
+/** One step at a time, in call order: each step starts once every earlier
+ * one settled, whatever its outcome — the asynchronous cursor's pulls, a
+ * parallel read's pulls and releases, a paced root cursor's.
+ * @returns {(step: () => any) => Promise<any>} */
+function serializer() {
+  let tail = Promise.resolve();
+  return (step) => {
+    const result = tail.then(step);
+    tail = result.then(() => undefined, () => undefined);
+    return result;
+  };
+}
+
 /** Preserve a failure, but acknowledge source cleanup before rejecting it.
  * @param {() => any} call @param {() => any} release @param {(error:any)=>any} [wrap]
  */
@@ -130,7 +143,6 @@ function itemCursor(spec, synchronous) {
   let sourceReleased = false;
   let done = false;
   let opened = false;
-  let tail = synchronous ? undefined : Promise.resolve();
   const settle = () => {
     if (done) return;
     done = true;
@@ -223,11 +235,8 @@ function itemCursor(spec, synchronous) {
   const guarded = () => settling(pull, release, spec.wrap);
   if (signal?.aborted) settle();
   else signal?.addEventListener('abort', onAbort, { once: true });
-  const next = synchronous ? guarded : () => {
-    const result = tail.then(guarded);
-    tail = result.then(() => undefined, () => undefined);
-    return result;
-  };
+  const serial = synchronous ? undefined : serializer();
+  const next = synchronous ? guarded : () => /** @type {any} */ (serial)(guarded);
   const finish = () => chain(release(), end);
   const cursor = {
     streaming,
@@ -277,6 +286,12 @@ function itemCursor(spec, synchronous) {
  * identity are the inner cursor's own. A native backend requiring a transaction
  * across fetches supplies `ownership`: that cursor instead holds the gate from
  * first pull until bounded cleanup. Its owner set is drained on Store close.
+ *
+ * On a synchronous connection every pull settles in microtasks, so a
+ * consumer that only awaits the cursor lets no timer, I/O callback or
+ * immediate run until the cursor ends. `yieldEvery` — handed in by the
+ * store only for such a connection — gives the event loop one macrotask
+ * before a pull, outside the gate (see `paced`).
  * @param {any} cursor - the engine's `QueryCursor`
  * @param {(fn: () => any, what?: string, signal?: AbortSignal) => any} admit
  *   - the store gate: runs `fn` holding the connection, value-or-promise
@@ -284,9 +299,12 @@ function itemCursor(spec, synchronous) {
  *   abort abandons a queued pull
  * @param {string} what - what is waiting, for the gate's timeout message
  * @param {{ holdMs: number, owners: Set<any>, max: number }} [ownership] - native transaction lifetime
+ * @param {{ rows?: number, ms?: number }} [yieldEvery] - when the event loop
+ *   gets a turn between two pulls; never with `ownership`, which only an
+ *   asynchronous backend supplies
  * @returns {any} the admitted `QueryCursor`
  */
-export function admitCursor(cursor, admit, signal, what, ownership) {
+export function admitCursor(cursor, admit, signal, what, ownership, yieldEvery) {
   if (ownership !== undefined && cursor.streaming === 'row')
     return holdCursor(cursor, admit, signal, what, ownership);
   /**
@@ -312,15 +330,68 @@ export function admitCursor(cursor, admit, signal, what, ownership) {
     // than leaving the statement open
     return admitted.catch(() => cursor.return());
   };
+  const pull = through('next', what, true);
+  const release = through('return', `${what} (release)`, false);
+  const steps = yieldEvery === undefined ? { next: pull, return: release } : paced(pull, release, yieldEvery);
   /** @type {any} */
   const admitted = {
     streaming: cursor.streaming,
     barrier: cursor.barrier,
-    next: through('next', what, true),
-    return: through('return', `${what} (release)`, false),
+    next: steps.next,
+    return: steps.return,
     [Symbol.asyncIterator]: () => admitted,
   };
   return Object.freeze(admitted);
+}
+
+/** One macrotask: `setImmediate` where the host has it (Node, Bun: the
+ * check phase of the loop turn, after timers and I/O), a zero timeout
+ * elsewhere (a browser, where the wasm driver runs in-thread).
+ * @returns {Promise<void>} */
+const macrotask = () => new Promise((resolve) => {
+  if (typeof globalThis.setImmediate === 'function') globalThis.setImmediate(resolve);
+  else setTimeout(resolve, 0);
+});
+
+/**
+ * Pace an admitted root cursor's pulls (`yieldEvery`, MODEL-FORMAT §5.1):
+ * once `rows` items were delivered, or `ms` milliseconds passed on the
+ * monotonic clock — a duration, so not the store's epoch clock — since
+ * the last turn or the first pull, the next pull first awaits one
+ * macrotask. The turn comes BEFORE the pull is admitted, so the gate is
+ * free while timers and I/O run, and a store call one of them makes is
+ * served between two pulls. Pulls and releases keep their call order, so
+ * a turn changes nothing a release or an abort does: a `return()` made
+ * while a pull awaits its turn waits for that pull, as the gate makes it
+ * wait for a pull in flight, and an abort resets the source at once
+ * through the inner cursor's own listener, the waiting pull then
+ * refusing `JD2072`.
+ * @param {() => Promise<any>} pull - the admitted `next`
+ * @param {() => Promise<any>} release - the admitted `return`
+ * @param {{ rows?: number, ms?: number }} every
+ * @returns {{ next: () => Promise<any>, return: () => Promise<any> }}
+ */
+function paced(pull, release, every) {
+  const { rows, ms } = every;
+  let delivered = 0;
+  let since = -1;
+  const serial = serializer();
+  /** @param {any} step */
+  const counted = (step) => {
+    if (step.done !== true) delivered++;
+    return step;
+  };
+  const next = () => {
+    if (ms !== undefined && since < 0) since = performance.now();
+    const due = (rows !== undefined && delivered >= rows) || (ms !== undefined && performance.now() - since >= ms);
+    if (!due) return pull().then(counted);
+    return macrotask().then(() => {
+      delivered = 0;
+      if (ms !== undefined) since = performance.now();
+      return pull().then(counted);
+    });
+  };
+  return { next: () => serial(next), return: () => serial(release) };
 }
 
 /**
@@ -374,13 +445,7 @@ export function shareCursor(cursor, share, signal, what, owners, guard = () => {
   /** Set when the store closed under the cursor: every later pull refuses with it. @type {any} */
   let closedBy = null;
   // one pull or release at a time, in call order
-  let tail = Promise.resolve();
-  /** @param {() => Promise<any>} step */
-  const serial = (step) => {
-    const result = tail.then(step);
-    tail = result.then(() => undefined, () => undefined);
-    return result;
-  };
+  const serial = serializer();
   /** Take a read and hold it until `giveBack`: resolves once it has begun. */
   const take = () => new Promise((resolve, reject) => {
     /** @type {any} */
