@@ -975,6 +975,6 @@ every capturing pen already pays for.
 
 Two figures worth reading beside it: `./migration` (<!--fact:bundle.migration-->35,969<!--/fact--> bytes)
 carries this pen's `body()` and pays for it, which is why the two prices
-sit so close; and `./flow` (<!--fact:bundle.flow-->28,886<!--/fact--> bytes) is within 60 bytes of this one
+sit so close; and `./flow` (<!--fact:bundle.flow-->30,179<!--/fact--> bytes) is within 60 bytes of this one
 despite writing two formats, because it shares the same capture and adds
 almost nothing but member checks and their messages.
