@@ -242,9 +242,9 @@ of each scenario is in bold.
 <!--fact:contracts.adapter.table-->
 | Scenario | @jarenjs/validate | zod 4 | zod 3 | zod/mini | ajv |
 | --- | --- | --- | --- | --- | --- |
-| command — uuid, enum, date-time; no defaults | 5.05 µs | 4.4 µs | 8.99 µs | 3.85 µs | **2.19 µs** |
-| config — defaults and numeric coercion | 3.31 µs | 2.33 µs | 5.62 µs | 2.83 µs | **1.88 µs** |
-| collection — 50 nested records | 18 µs | **12.8 µs** | 23.9 µs | 21.1 µs | 20.6 µs |
+| command — uuid, enum, date-time; no defaults | 5.11 µs | 4.61 µs | 9.18 µs | 3.82 µs | **2.23 µs** |
+| config — defaults and numeric coercion | 3.48 µs | 2.42 µs | 5.82 µs | 2.93 µs | **1.9 µs** |
+| collection — 50 nested records | 18 µs | **12.9 µs** | 24.6 µs | 20.6 µs | 21.3 µs |
 <!--/fact-->
 
 The table is regenerated from each release's own measurement, so read it row
