@@ -816,8 +816,8 @@ shared factory rather than inheriting.
 | `contentValidation` | auto by draft | Whether `contentEncoding`/`contentMediaType` assert |
 | `propertyDependencies` | **`false`** | Whether the proposed `propertyDependencies` keyword asserts or is an unknown keyword |
 | `relativePointerDialect` | **`'handrews-01'`** | Which Relative JSON Pointer grammar `data`, `$data` and the `relative-json-pointer` format speak; `'bhutton-00'` also accepts index manipulation (`0+1`, `1-1/name`, `0-1#`) |
-| `maxReferenceDepth` | **`256`** | How many schema references one validation may nest before it throws `JK2001`; fixed by default so every host answers alike, raising it lets the host's call stack decide again |
-| `maxSchemaDepth` | **`128`** | How many levels deep one compile may nest subschemas before it throws `JK0017`; fixed by default so every host answers alike, raising it lets the host's call stack decide again |
+| `maxReferenceDepth` | **`256`** | How many levels of schema the references one validation enters may nest before it throws `JK2001`, each weighing the levels between it and the schema it enters back into; fixed by default so every host answers alike, raising it lets the host's call stack decide again; `compileNormalizer` takes it too |
+| `maxSchemaDepth` | **`128`** | How many levels deep one compile may nest subschemas before it throws `JK0017`; fixed by default so every host answers alike, raising it lets the host's call stack decide again; `compileNormalizer` takes it too |
 
 ### The return shape is `collectErrors`
 
@@ -1149,9 +1149,13 @@ registered first (`'s'` `true`, `1` `false` here, whichever place was meant); gi
 the places another name, or reach it by a pointer
 (`https://d.test/r.json#/$defs/b`).*
 
-One validation nests at most 256 schema references (a `$ref` resolved on first use, a
-`$dynamicRef` or a `$recursiveRef`); one more throws a `SchemaRuntimeError` whose `code`
-is `JK2001`, naming the reference, before the host's call stack can overflow. The
+One validation nests the schema references it enters (a `$ref` resolved on first use, a
+`$dynamicRef` or a `$recursiveRef`) at most 256 levels deep; one more throws a
+`SchemaRuntimeError` whose `code` is `JK2001`, naming the reference, before the host's call
+stack can overflow. A reference back into a schema that encloses it nests the levels between
+them on every entry, so it weighs them: `{ "items": { "$ref": "#" } }` admits an array 256
+levels deep, and `{ "items": { "items": … 99 levels … { "$ref": "#" } } }` one 299 levels
+deep, where its bound sat at 25,600 levels, past the host's stack. The
 `maxReferenceDepth` option moves the bound (`new JarenValidator({ maxReferenceDepth: 2000 })`,
 which also bounds `validateSchema`); a value that is not a positive safe integer is refused
 `JK0002` when a schema compiles. The default is fixed so the answer is the same on every
@@ -1163,7 +1167,12 @@ rather than failing, because a `false` under `not` would read as success. *Upgra
 an instance overflowed the call stack with an uncoded `RangeError`, and an instance
 nested between the bound and the host's stack limit used to validate, and validates again
 with `maxReferenceDepth` raised; the default is fixed so the answer is the same on every
-host.*
+host. A reference K levels below its target counted one, so the bound admitted 256 × K
+levels (and a loop through two definitions twice the levels of a direct one): an instance
+past 256 levels against such a schema, which answered where the host's stack held it and
+overflowed it with an uncoded `RangeError` beyond, is refused `JK2001`, and validates again
+with `maxReferenceDepth` raised. A reference one level below its target weighs one, so the
+direct shapes refuse at the depth and with the message they did.*
 
 One compile nests subschemas at most 128 levels deep, whatever keyword holds each level
 (`properties`, `items`, `allOf`, `not`, a reference compiled in place); one level more
@@ -1752,18 +1761,22 @@ const shaped = normalize(input);   // a NEW value; `input` is untouched
 const result = validate(shaped);
 ```
 
-Every option is **off by default** — each one changes what your data means,
+Every normalization is **off by default** — each one changes what your data means,
 so each is a decision you make rather than one you inherit.
 `compileNormalizer(schema)` with no options is the identity. The option set
 is closed, and each refusal is a `TypeError` that says what is wrong: a
 member other than `useDefaults`, `removeAdditional`, `coerceTypes`,
-`trimStrings`, `coerceJsonText` and `dialects` names the nearest one (`coerceType` — did you mean
+`trimStrings`, `coerceJsonText`, `dialects`, `maxSchemaDepth` and `maxReferenceDepth` names the nearest one (`coerceType` — did you mean
 `coerceTypes`?), a value of the wrong type names the member and what it takes
 (`coerceTypes: 'yes'`, a member set to `null`, a `removeAdditional` other
 than `true`, `false` or `'all'`, a `dialects` that is no `JarenValidator`), and options that are not a plain object —
 `null` among them — are refused as such. A misspelt or mistyped switch used
 to compile a normalizer with that switch off, in silence, and `null` options
 used to throw a raw `TypeError` (`Cannot read properties of null`).
+`maxSchemaDepth` and `maxReferenceDepth` are the validator's bounds, with its
+defaults (128 and 256), and are refused as the validator refuses them: a value
+that is not a positive safe integer is a `SchemaCompileError` `JK0002` when the
+normalizer compiles, and `null` or absent means the default.
 `dialects: validator` reads each `$schema` through the meta-schemas that
 validator holds, as its compile does; without it a custom dialect reads as
 draft-07 (see *How a `$schema` is read* under *Vocabularies and cross-draft references*).
@@ -1846,6 +1859,43 @@ fills one level more than the first: the default's copy stays as filled, a
 supplied object gets the default. The validator's checks of a default read the
 copy as it is filled. *Upgrade: every call that filled such a default threw an
 uncoded `RangeError`.*
+
+The normalizer holds the validator's bounds, with its codes and its options. A subschema
+it compiles more than `maxSchemaDepth` (default 128) levels below the document's root or
+a reference's target is refused when it compiles (`SchemaCompileError` `JK0017`, naming
+the first subschema past the bound), while a deep subschema it never compiles (under
+`$defs`, or under a keyword it does not walk) is not. A call nests the references that
+close a loop at most `maxReferenceDepth` (default 256) levels deep, each weighing the
+levels of schema it nests per turn, as the validator weighs them: one level more throws
+a `SchemaRuntimeError` whose `code` is `JK2001` (`normalization nests more than 256
+schema references at …`), so `{ properties: { a: { $ref: '#' } } }` normalizes an
+instance 256 levels deep and refuses one 257 levels deep, and with `maxReferenceDepth:
+512` one 512 levels deep. The defaults are fixed so the answer is the same on every
+host; raising them lets the host's call stack decide again: the compile and a call still
+take the host's stack per level, so past the default a deep enough schema or instance
+can overflow it again, at a depth that differs from host to host. The checks of a
+default run under the same bounds. A loop every call runs into
+before it reads anything below the value — references and `allOf` branches coming back
+to an object they started from, such as `{ allOf: [{ $ref: '#' }] }` — is refused when
+it compiles (`JK0001`), naming the places on the loop as the validator names them. The
+normalizer applies every `allOf` branch to every value, so it also refuses such a loop
+where the validator reads another keyword first and compiles (`{ type: 'string', allOf:
+[{ $ref: '#' }] }`); a loop it reaches only through a member or an item is refused
+(`JK2001`) by the calls that reach it. A `default` is copied at any depth; one whose
+copy runs through more than 256 levels of references is filled as written and refused
+by the calls that fill it. The validator builds a reference's target when a validation
+first reaches it, and refuses a target past its depth bound then; the normalizer builds
+every target when it compiles, so it refuses such a document when it compiles. *Upgrade:
+a schema nested past the host's stack threw an uncoded `RangeError` while the normalizer
+compiled it, and so did a call nesting references past the stack, every call of a loop
+that never reads below the value, and a filled default nested past the stack; a schema
+nested 129 levels up to the host's limit used to compile, an instance nested 257 levels
+up to it to normalize, and a default copied through as many references to fill, and
+each is now refused, and answers again with `maxSchemaDepth` or `maxReferenceDepth`
+raised (`compileNormalizer(schema, { maxReferenceDepth: 2000 })`), as the validator's do.
+A default deeper than 256 levels of references was filled where the validator, checking
+it at its default bound, could not answer; with the bound raised its check reads it, so
+one the validator refuses at its place is no longer filled.*
 
 Tuple tail normalization starts after the declared prefix, including prefix
 positions that need no changes. `prefixItems` is read where the validator

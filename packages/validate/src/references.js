@@ -122,20 +122,36 @@ export function indexSchemaResources(root, options = {}) {
 function placeSchemas(index, start, startBase, startDraft, startDeclared, startResource, propertyDependencies) {
   const { places, resources, held, named } = index;
   const seen = new Set();
-  /**
-   * @param {any} node @param {string} base @param {number|null} parentDraft
-   * @param {number|null} parentDeclared
-   * @param {{ node: object|boolean, names: Map<string, object> }|undefined} resource
-   * @param {boolean} isRoot
-   * @param {string|undefined} at - Its JSON Pointer in the resource holding it, as a URI fragment spells it
-   * @param {string|undefined} parentDialect - The `$schema` governing the place above it
-   */
-  const walk = (node, base, parentDraft, parentDeclared, resource, isRoot, at, parentDialect) => {
-    if (!isJsonContainer(node) || seen.has(node) || places.has(node)) return;
+  // The walk keeps its own stack, so a document nested past the host's call
+  // stack is placed at any depth. A task is one visit: the node, the base,
+  // draft, declared draft and resource of the place above it, whether it is
+  // a resource's root, its JSON Pointer in the resource holding it (as a URI
+  // fragment spells it) and the `$schema` governing the place above it. A
+  // node's subschemas are pushed last first, so they are placed in the
+  // order a recursive walk places them.
+  /** @type {[any, string, number|null, number|null, { node: object|boolean, names: Map<string, object> }|undefined, boolean, string|undefined, string|undefined][]} */
+  const tasks = [[start, startBase, startDraft, startDeclared, startResource, startResource !== undefined,
+    startResource === undefined ? undefined : '', undefined]];
+  /** @param {number} from - The first task pushed for the node just visited */
+  const visitInOrder = (from) => {
+    for (let i = from, j = tasks.length - 1; i < j; i++, j--) {
+      const first = tasks[i];
+      tasks[i] = tasks[j];
+      tasks[j] = first;
+    }
+  };
+  while (tasks.length > 0) {
+    const [node, base, parentDraft, parentDeclared, above, isRoot, pointer, parentDialect] = /** @type {any} */ (tasks.pop());
+    // the resource receiving its names, and its pointer in that resource
+    let resource = above;
+    let at = pointer;
+    if (!isJsonContainer(node) || seen.has(node) || places.has(node)) continue;
     seen.add(node);
+    const from = tasks.length;
     if (Array.isArray(node)) {
-      for (let i = 0; i < node.length; i++) walk(node[i], base, parentDraft, parentDeclared, resource, false, at === undefined ? at : `${at}/${i}`, parentDialect);
-      return;
+      for (let i = 0; i < node.length; i++) tasks.push([node[i], base, parentDraft, parentDeclared, resource, false, at === undefined ? at : `${at}/${i}`, parentDialect]);
+      visitInOrder(from);
+      continue;
     }
     const dialect = typeof node.$schema === 'string' ? node.$schema : parentDialect;
     // The draft a document declares is inherited by everything below it.
@@ -173,22 +189,21 @@ function placeSchemas(index, start, startBase, startDraft, startDeclared, startR
       return member === undefined ? path : inner === undefined ? encodeJsonPointerPath(path, member) : encodeJsonPointerPath(encodeJsonPointerPath(path, member), inner);
     };
     for (const key of Object.keys(node)) {
-      if (TRAVERSE_SCHEMA_OBJECTS.includes(key)) walk(node[key], own, draft, declared, resource, false, pointerOf(key), dialect);
+      if (TRAVERSE_SCHEMA_OBJECTS.includes(key)) tasks.push([node[key], own, draft, declared, resource, false, pointerOf(key), dialect]);
       else if (TRAVERSE_SCHEMA_MAPS.includes(key) && isJsonObject(node[key])) {
-        for (const member of Object.keys(node[key])) walk(node[key][member], own, draft, declared, resource, false, pointerOf(key, [member]), dialect);
+        for (const member of Object.keys(node[key])) tasks.push([node[key][member], own, draft, declared, resource, false, pointerOf(key, [member]), dialect]);
       }
       else if (TRAVERSE_SCHEMA_MAP_MAPS.includes(key) && admitsPropertyDependencies(propertyDependencies, draft)
         && isJsonObject(node[key])) {
         for (const member of Object.keys(node[key])) {
           const inner = node[key][member];
           if (!isJsonObject(inner)) continue;
-          for (const name of Object.keys(inner)) walk(inner[name], own, draft, declared, resource, false, pointerOf(key, [member, name]), dialect);
+          for (const name of Object.keys(inner)) tasks.push([inner[name], own, draft, declared, resource, false, pointerOf(key, [member, name]), dialect]);
         }
       }
     }
-  };
-  // a subtree a pointer reached outside the schema positions has no pointer of its own here
-  walk(start, startBase, startDraft, startDeclared, startResource, startResource !== undefined, startResource === undefined ? undefined : '', undefined);
+    visitInOrder(from);
+  }
 }
 
 /**

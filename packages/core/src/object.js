@@ -1052,10 +1052,11 @@ function semanticLeaf(value, path) {
   }
 }
 
-// What the walk throws on meeting a container already open above it. Its
-// trail is message text, not a pointer, so `semanticKey` builds the
-// refusal and locates the member that closes the cycle itself.
-const SEMANTIC_CYCLE = Object.freeze({ cycle: true });
+// What the walks of `semanticKey` and `cloneJson` throw on meeting a
+// container already open above them. The walk holds no pointer to it (the
+// key's trail is message text), so the caller builds the refusal and
+// locates the member that closes the cycle itself, from the root.
+const CYCLE_MET = Object.freeze({ cycle: true });
 
 // The containers `semanticKey` may still write plainly; past them every
 // container is written by `semanticShared`, which remembers its text in
@@ -1080,7 +1081,7 @@ const RECURSIVE_SEMANTIC_DEPTH = 256;
  * @returns {string[] | null}
  */
 function openSemantic(object, path, open, ordered) {
-  if (open.has(object)) throw SEMANTIC_CYCLE;
+  if (open.has(object)) throw CYCLE_MET;
   const proto = Object.getPrototypeOf(object);
   // a symbol-keyed member is data the serialization cannot show, so two
   // values differing only there would share an identity
@@ -1384,7 +1385,7 @@ export function semanticKey(value, options = undefined) {
   }
   if (isPastLongestString(error))
     throw textTooLong('a cache identity');
-  if (error !== SEMANTIC_CYCLE)
+  if (error !== CYCLE_MET)
     throw error;
   // searched in the walk's own member order, so the member named is the
   // one the walk met
@@ -1527,27 +1528,102 @@ export function shallowCloneJson(value) {
 
 /**
  * Deep-copy a JSON value. Scalars are returned as-is; containers are
- * rebuilt so no part of the result is shared with the input.
+ * rebuilt so no part of the result is shared with the input. A value
+ * nested past the host's call stack is copied at any depth (past 256
+ * levels the copy keeps its own stack). A cycle has no copy: it is refused
+ * as a `CodedError` named `JsonCycleError` with code `JO2002`, whose
+ * `docPath` is the member that closes it, the first the copy's own member
+ * order meets (`a circular reference cannot be copied at /self`).
  * @template T
  * @param {T} value - The JSON value to copy
  * @returns {T} A deep copy sharing no container with the input
+ * @throws {CodedError} `JO2002` on a cycle
  */
 export function cloneJson(value) {
+  try {
+    return cloneAt(value, 0);
+  }
+  catch (error) {
+    if (error !== CYCLE_MET)
+      throw error;
+  }
+  // searched in the copy's own member order, so the member named is the
+  // one the copy met
+  throw new CodedError('JsonCycleError', 'JO2002', 'a circular reference cannot be copied',
+    locateCycleIn(value, Object.keys, Infinity));
+}
+
+// The nesting `cloneJson` copies on the host's call stack, the path every
+// ordinary document takes; a value nested deeper is copied by `cloneDeep`,
+// which keeps its own stack.
+const RECURSIVE_CLONE_DEPTH = 256;
+
+/**
+ * `cloneJson` for a value `depth` containers down from the root. A cycle
+ * nests without end, so it reaches `RECURSIVE_CLONE_DEPTH` and is met by
+ * `cloneDeep` (`CYCLE_MET`).
+ * @param {any} value @param {number} depth @returns {any}
+ */
+function cloneAt(value, depth) {
   if (!isJsonContainer(value))
     return value;
+  if (depth >= RECURSIVE_CLONE_DEPTH)
+    return cloneDeep(value);
   if (Array.isArray(value)) {
     const len = value.length;
     const out = new Array(len);
     for (let i = 0; i < len; i++)
-      out[i] = cloneJson(value[i]);
+      out[i] = cloneAt(value[i], depth + 1);
     return out;
   }
   const out = {};
   for (const key in value) {
     if (Object.hasOwn(value, key))
-      setObjectMember(out, key, cloneJson(value[key]));
+      setObjectMember(out, key, cloneAt(value[key], depth + 1));
   }
   return out;
+}
+
+/**
+ * `cloneAt` for a container `RECURSIVE_CLONE_DEPTH` levels down, on a
+ * stack of its own so the nesting it reaches is not the host's: the same
+ * copy, members in the same order, every container it is copying
+ * remembered as open, so a cycle is met as one (`CYCLE_MET`). A cycle
+ * closing above this point is met on its next turn below it.
+ * @param {object} value @returns {object}
+ */
+function cloneDeep(value) {
+  /** @type {Set<object>} */
+  const open = new Set();
+  /** @type {{ source: any, out: any, keys: string[] | null, at: number }[]} */
+  const frames = [];
+  /** @param {any} source @returns {any} the copy, members still to fill */
+  const enter = (source) => {
+    if (open.has(source))
+      throw CYCLE_MET;
+    open.add(source);
+    const keys = Array.isArray(source) ? null : Object.keys(source);
+    const out = keys === null ? new Array(source.length) : {};
+    frames.push({ source, out, keys, at: 0 });
+    return out;
+  };
+  const copy = enter(value);
+  while (frames.length > 0) {
+    const frame = frames[frames.length - 1];
+    const { source, out, keys } = frame;
+    const size = keys === null ? source.length : keys.length;
+    if (frame.at === size) {
+      frames.pop();
+      open.delete(source);
+      continue;
+    }
+    const at = frame.at++;
+    const member = source[keys === null ? at : keys[at]];
+    const copied = isJsonContainer(member) ? enter(member) : member;
+    if (keys === null) out[at] = copied;
+    else setObjectMember(out, keys[at], copied);
+  }
+  return copy;
 }
 
 /**

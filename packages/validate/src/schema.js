@@ -162,7 +162,7 @@ function compileRecursiveRef(schemaObj, jsonSchema) {
   // If it does, we need to use the dynamic scope; otherwise, treat like normal $ref
   const useDynamicScope = isObjectClass(initialTargetSchema) && initialTargetSchema.$recursiveAnchor === true;
 
-  return boundReference(schemaObj.path, schemaObj.options.maxReferenceDepth, function validateRecursiveRef(data, dataPath, dataRoot) {
+  return boundReference(schemaObj.path, schemaObj.options.maxReferenceDepth, root.referenceWeight(initialTargetUri, initialTargetSchema), function validateRecursiveRef(data, dataPath, dataRoot) {
     if (useDynamicScope) {
       // The initial target has $recursiveAnchor: true
       // Look up the dynamic scope for the outermost $recursiveAnchor
@@ -218,7 +218,7 @@ function compileDynamicAnchorRef(schemaObj, jsonSchema) {
   // resolves is refused (`JK0009`) by the call that reaches it, never
   // answered: under `not` a `false` would read as success.
   if (anchorName?.startsWith('/')) {
-    return boundReference(schemaObj.path, schemaObj.options.maxReferenceDepth, function validateDynamicRefPointer(data, dataPath, dataRoot) {
+    return boundReference(schemaObj.path, schemaObj.options.maxReferenceDepth, root.referenceWeight(initialTargetUri), function validateDynamicRefPointer(data, dataPath, dataRoot) {
       return root.resolveObject(initialTargetUri, baseUri, holder).validate(data, dataPath, dataRoot);
     });
   }
@@ -234,7 +234,7 @@ function compileDynamicAnchorRef(schemaObj, jsonSchema) {
   // (both spelled as the URI spells the fragment: `#a b` is `#a%20b`)
   const hasDynamicAnchor = isObjectClass(initialTargetSchema) && getDynamicAnchorName(initialTargetSchema) === anchorName;
 
-  return boundReference(schemaObj.path, schemaObj.options.maxReferenceDepth, function validateDynamicRef(data, dataPath, dataRoot) {
+  return boundReference(schemaObj.path, schemaObj.options.maxReferenceDepth, root.referenceWeight(initialTargetUri, initialTargetSchema), function validateDynamicRef(data, dataPath, dataRoot) {
     if (hasDynamicAnchor) {
       // The initial target has matching $dynamicAnchor
       // Look up the dynamic scope for the outermost $dynamicAnchor with this name

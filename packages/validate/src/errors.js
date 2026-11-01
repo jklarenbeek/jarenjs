@@ -38,11 +38,12 @@
  * keyword, its error as the `cause`. A schema `deriveStrictProfile`
  * (`@jarenjs/validate/strict-profile`) cannot make strict is refused where
  * the derivation reads the place (`JK0101`–`JK0108`). When a validator
- * runs: a validation that nests more schema references than
- * `maxReferenceDepth` (default {@link REFERENCE_DEPTH_CEILING}) is refused
- * where the bound is crossed (`JK2001`), before the host's call stack can
- * overflow. Every refusal is thrown, never folded into a `false` answer:
- * under `not` a folded failure would read as success.
+ * runs: a validation that nests schema references deeper than
+ * `maxReferenceDepth` (default {@link REFERENCE_DEPTH_CEILING}) levels is
+ * refused where the bound is crossed (`JK2001`), before the host's call
+ * stack can overflow; the normalizer of `@jarenjs/validate/normalize` holds
+ * the same bound. Every refusal is thrown, never folded into a `false`
+ * answer: under `not` a folded failure would read as success.
  */
 
 import { CodedError } from '@jarenjs/core/errors';
@@ -84,9 +85,11 @@ export const VALIDATE_CODES = Object.freeze({
 });
 
 /**
- * The default deepest nesting of schema references one validation enters
- * (the `maxReferenceDepth` option): a `$ref` resolved on first use, a
- * `$dynamicRef` or a `$recursiveRef`. Every recursion through a schema
+ * The default deepest nesting, in levels of schema, of the references one
+ * validation enters (the `maxReferenceDepth` option): a `$ref` resolved on
+ * first use, a `$dynamicRef` or a `$recursiveRef`, each spanning the
+ * levels between it and the schema it enters where that schema encloses
+ * it, else one ({@link boundReference}). Every recursion through a schema
  * passes one of them, so the bound holds both a deeply nested instance and
  * a reference loop that does not descend into it. Fixed by default, so a
  * refusal is the same on every host.
@@ -171,11 +174,13 @@ export function assertDepthOption(name, value) {
  * differs from host to host, with an uncoded `RangeError`.
  * @param {number} ceiling - The compilation's `maxSchemaDepth`
  * @param {string} location - The subschema past the bound, as `docPath`
+ * @param {string} [work] - What the compiled schema does: `validates`, or
+ *   `normalizes` for the normalizer, which holds the same option
  * @returns {SchemaCompileError} `JK0017`
  */
-export function schemaTooDeep(ceiling, location) {
+export function schemaTooDeep(ceiling, location, work = 'validates') {
   return new SchemaCompileError('JK0017', `the schema nests subschemas more than ${ceiling} levels deep, `
-    + 'deeper than a small host call stack compiles and validates; raise maxSchemaDepth to compile it', location);
+    + `deeper than a small host call stack compiles and ${work}; raise maxSchemaDepth to compile it`, location);
 }
 
 /**
@@ -229,35 +234,50 @@ export function describeKind(value) {
   return typeof value === 'string' ? `'${value}'` : typeof value;
 }
 
+// The levels of schema the references entered on the call stack span, and
+// how many references they are.
 let referenceDepth = 0;
+let referenceCount = 0;
 
 /**
  * Wrap the validator a schema reference calls so that entering it counts
- * toward the reference depth bound: one nested reference past `ceiling`
- * throws `JK2001` instead of descending, and the count is restored however
- * the call ends. The count is shared by every validator (it measures the
- * one call stack); each reference compares it with its own compilation's
+ * toward the reference depth bound: the reference adds the levels of
+ * schema it spans (`weight`), a reference that would carry the count past
+ * `ceiling` throws `JK2001` instead of descending, and the count is
+ * restored however the call ends. A reference that sits K levels below the
+ * schema it enters nests K levels per entry, so it weighs K: the bound
+ * holds the levels between the references, not only their number. The
+ * count is shared by every validator and normalizer (it measures the one
+ * call stack); each reference compares it with its own compilation's
  * ceiling.
  * @template {(data: any, dataPath: any, dataRoot: any, dataKey?: any) => any} F
  * @param {string} location - The schema location of the reference, named
  *   by the refusal
  * @param {number} ceiling - The compilation's `maxReferenceDepth`
+ * @param {number} weight - The levels of schema the reference spans: how
+ *   far below its target it sits where its target encloses it, else 1
  * @param {F} validate - What the reference calls
+ * @param {string} [subject] - What nests the references, as the refusal
+ *   names it
  * @returns {F}
  */
-export function boundReference(location, ceiling, validate) {
+export function boundReference(location, ceiling, weight, validate, subject = 'validation') {
   return /** @type {F} */ (function validateBoundReference(data, dataPath, dataRoot, dataKey) {
-    if (referenceDepth >= ceiling) {
-      throw new SchemaRuntimeError('JK2001',
-        `validation nests more than ${ceiling} schema references at ${location} `
+    if (referenceDepth + weight > ceiling) {
+      // every reference on the way spanning one level, the levels are the references
+      throw new SchemaRuntimeError('JK2001', `${subject} nests ${referenceDepth === referenceCount && weight === 1
+        ? `more than ${ceiling} schema references`
+        : `schema references more than ${ceiling} levels deep`} at ${location} `
         + '(an instance nested this deep, or a loop of references that never reads it)');
     }
-    referenceDepth++;
+    referenceDepth += weight;
+    referenceCount++;
     try {
       return validate(data, dataPath, dataRoot, dataKey);
     }
     finally {
-      referenceDepth--;
+      referenceDepth -= weight;
+      referenceCount--;
     }
   });
 }

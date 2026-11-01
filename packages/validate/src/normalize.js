@@ -50,8 +50,12 @@ import { createSchemaPatternTester } from './string.js';
 import { DEFAULT_ORIGIN, encodeJsonPointerPath } from './origin.js';
 import { admitsDynamicReference } from './dynamic-ref.js';
 import { heldDialects } from './validator-state.js';
-import { unimplementedVocabulary } from './errors.js';
+import {
+  REFERENCE_DEPTH_CEILING, SCHEMA_DEPTH_CEILING, SchemaRuntimeError, assertDepthOption, boundReference, schemaTooDeep,
+  unimplementedVocabulary,
+} from './errors.js';
 import { JarenValidator } from './index.js';
+import { RefCycleError } from './traverse.js';
 import { indexSchemaResources, readsRefAlone, resolveSchemaReference, schemaPlace } from './references.js';
 
 // The validator's reading of a `pattern` string, for a consumer that checks
@@ -109,6 +113,15 @@ const hasOwn = Object.hasOwn;
  *   dialects the schema's `$schema` URIs may name ({@link heldDialects}), each place read with the
  *   vocabularies its dialect declares ({@link withoutUnreadVocabularies}). Without it a `$schema`
  *   is read by its name alone: a custom dialect reads as draft-07
+ * @property {number} [maxSchemaDepth=128] - The deepest nesting of subschemas the compile builds
+ *   before it throws `JK0017`, counted as the validator's `maxSchemaDepth` counts it (a positive
+ *   safe integer, else `JK0002` when the normalizer compiles). Fixed by default so the answer is the
+ *   same on every host; raising it lets the host's call stack decide again.
+ * @property {number} [maxReferenceDepth=256] - The deepest nesting, in levels of schema, of the
+ *   references closing a loop that one call enters (a filled default's copy included) before it
+ *   throws `JK2001`, weighed as the validator's `maxReferenceDepth` weighs them (a positive safe
+ *   integer, else `JK0002` when the normalizer compiles). Fixed by default so the answer is the
+ *   same on every host; raising it lets the host's call stack decide again.
  */
 
 /**
@@ -188,15 +201,18 @@ export function withoutUnreadVocabularies(document, options = {}, who = 'without
   };
   /** @type {Map<unknown, unknown>[]} The node each object reads as, under the validation vocabulary off and on */
   const read = [new Map(), new Map()];
+  // The reading is a walk of generators, each yielding the reading of a
+  // subschema to `runReading` and resuming with its answer, so a document
+  // nested past the host's call stack is read at any depth.
   /**
    * @param {unknown} value @param {boolean} validation - Whether the place's dialect keeps the vocabulary on
-   * @param {string} at @returns {unknown}
+   * @param {string} at @returns {Generator<Generator<any, unknown, unknown>, unknown, any>}
    */
-  const readSchemas = (value, validation, at) => {
+  function* readSchemas(value, validation, at) {
     if (Array.isArray(value)) {
       let out = value;
       for (let i = 0; i < value.length; i++) {
-        const item = readSchemas(value[i], validation, `${at}/${i}`);
+        const item = isJsonContainer(value[i]) ? yield readSchemas(value[i], validation, `${at}/${i}`) : value[i];
         if (item !== value[i]) (out === value ? (out = value.slice()) : out)[i] = item;
       }
       return out;
@@ -214,13 +230,13 @@ export function withoutUnreadVocabularies(document, options = {}, who = 'without
       const member = value[key];
       let next = member;
       if (!validation && VALIDATION_KEYWORDS.includes(key)) next = undefined;
-      else if (TRAVERSE_SCHEMA_OBJECTS.includes(key)) next = readSchemas(member, validation, encodeJsonPointerPath(at, key));
+      else if (TRAVERSE_SCHEMA_OBJECTS.includes(key)) next = isJsonContainer(member) ? yield readSchemas(member, validation, encodeJsonPointerPath(at, key)) : member;
       else if ((TRAVERSE_SCHEMA_MAPS.includes(key) || TRAVERSE_SCHEMA_MAP_MAPS.includes(key)) && isJsonObject(member)) {
         const deep = TRAVERSE_SCHEMA_MAP_MAPS.includes(key);
         for (const name of Object.keys(member)) {
-          const inner = deep && isJsonObject(member[name])
+          const inner = !isJsonContainer(member[name]) ? member[name] : yield (deep && isJsonObject(member[name])
             ? readMap(member[name], validation, encodeJsonPointerPath(at, key, name))
-            : readSchemas(member[name], validation, encodeJsonPointerPath(at, key, name));
+            : readSchemas(member[name], validation, encodeJsonPointerPath(at, key, name)));
           if (inner === member[name]) continue;
           if (next === member) next = { ...member };
           setObjectMember(/** @type {Record<string, unknown>} */ (next), name, inner);
@@ -239,19 +255,46 @@ export function withoutUnreadVocabularies(document, options = {}, who = 'without
     const result = out ?? value;
     memo.set(value, result);
     return result;
-  };
-  /** @param {Record<string, unknown>} map @param {boolean} validation @param {string} at */
-  const readMap = (map, validation, at) => {
+  }
+  /**
+   * @param {Record<string, unknown>} map @param {boolean} validation @param {string} at
+   * @returns {Generator<Generator<any, unknown, unknown>, unknown, any>}
+   */
+  function* readMap(map, validation, at) {
     let out = map;
     for (const name of Object.keys(map)) {
-      const inner = readSchemas(map[name], validation, encodeJsonPointerPath(at, name));
+      const inner = isJsonContainer(map[name]) ? yield readSchemas(map[name], validation, encodeJsonPointerPath(at, name)) : map[name];
       if (inner === map[name]) continue;
       if (out === map) out = { ...map };
       setObjectMember(out, name, inner);
     }
     return out;
-  };
-  return /** @type {object} */ (readSchemas(document, true, '#'));
+  }
+  return /** @type {object} */ (runReading(readSchemas(document, true, '#')));
+}
+
+/**
+ * Run a walk of generators on a stack of its own: each yields the
+ * generator of a part to read first and resumes with what that part
+ * answers, so the depth of the walk is not the host's call stack.
+ * @param {Generator<Generator<any, unknown, unknown>, unknown, any>} walk
+ * @returns {unknown} What the outermost generator answers
+ */
+function runReading(walk) {
+  const stack = [walk];
+  /** @type {unknown} */
+  let answer;
+  for (;;) {
+    const step = stack[stack.length - 1].next(answer);
+    if (!step.done) {
+      stack.push(step.value);
+      answer = undefined;
+      continue;
+    }
+    stack.pop();
+    answer = step.value;
+    if (stack.length === 0) return answer;
+  }
 }
 
 /**
@@ -828,7 +871,8 @@ function checksOf(ctx) {
     if (!groups.has(group)) groups.set(group, []);
     /** @type {[object, unknown][]} */ (groups.get(group)).push([schema, alone ? cloneJson(schema) : { $ref: `${place.base}${place.pointer}` }]);
   }
-  const validator = new JarenValidator();
+  // the compile's bounds, so a check reads as deep a value as the normalizer does
+  const validator = new JarenValidator({ maxReferenceDepth: ctx.options.maxReferenceDepth, maxSchemaDepth: ctx.options.maxSchemaDepth });
   holdDialects(validator, ctx.resources.named, ctx.resources.held);
   let n = 0;
   for (const [group, members] of groups) {
@@ -1021,10 +1065,10 @@ function settleFill(fill, ctx) {
     value = fill.filled = filledValue(fill, ctx);
   }
   catch (error) {
-    // a copy nested past what the host's stack copies or normalizes is
-    // filled as written, and runs out of stack again when a call fills it,
-    // as it did before it was checked
-    if (!(error instanceof RangeError)) throw error;
+    // a copy the reference depth bound refuses to normalize (`JK2001`), or
+    // one past what the host's stack holds, is filled as written, and is
+    // refused again when a call fills it, as it was before it was checked
+    if (!(error instanceof RangeError) && !(error instanceof SchemaRuntimeError && error.code === 'JK2001')) throw error;
     return fill.fill = 'always';
   }
   /** @type {'never'|'check'|'always'} */
@@ -1135,7 +1179,7 @@ function buildObjectStep(node, ctx) {
     for (let i = 0; i < keys.length; i++) {
       const key = keys[i];
       const sub = properties[key];
-      const step = compileNode(sub, below(ctx, memberPlace, key));
+      const step = compileNode(sub, below(ctx, memberPlace, key), FROM_BELOW);
       propertySteps.set(key, step);
       if (step !== null) hasStep = true;
       // Keep the property's step with its default. Matching pattern steps
@@ -1153,7 +1197,7 @@ function buildObjectStep(node, ctx) {
     const sources = Object.getOwnPropertyNames(patternProperties);
     for (let i = 0; i < sources.length; i++) {
       const matches = createSchemaPatternTester(sources[i]);
-      const step = compileNode(patternProperties[sources[i]], below(ctx, membersPlace, node, sources[i]));
+      const step = compileNode(patternProperties[sources[i]], below(ctx, membersPlace, node, sources[i]), FROM_BELOW);
       patternSteps.push(matches, step);
       if (step !== null) hasStep = true;
     }
@@ -1161,7 +1205,7 @@ function buildObjectStep(node, ctx) {
 
   const additionalStep = additional === undefined || typeof additional === 'boolean'
     ? null
-    : compileNode(additional, below(ctx, membersPlace, node, undefined));
+    : compileNode(additional, below(ctx, membersPlace, node, undefined), FROM_BELOW);
 
   // `true` strips only where the schema says the members are forbidden;
   // 'all' additionally strips members a declared shape simply does not
@@ -1292,7 +1336,7 @@ function buildArrayStep(node, ctx) {
     prefixSteps = new Array(prefixSource.length);
     let used = false;
     for (let i = 0; i < prefixSource.length; i++) {
-      prefixSteps[i] = compileNode(prefixSource[i], below(ctx, itemPlace, i, false));
+      prefixSteps[i] = compileNode(prefixSource[i], below(ctx, itemPlace, i, false), FROM_BELOW);
       if (prefixSteps[i] !== null) used = true;
     }
     if (!used) prefixSteps = null;
@@ -1300,7 +1344,7 @@ function buildArrayStep(node, ctx) {
 
   const restStep = restSource === undefined || typeof restSource === 'boolean'
     ? null
-    : compileNode(restSource, below(ctx, itemPlace, prefixLength, true));
+    : compileNode(restSource, below(ctx, itemPlace, prefixLength, true), FROM_BELOW);
 
   if (prefixSteps === null && restStep === null) return null;
 
@@ -1424,12 +1468,15 @@ function buildScalarStep(node, ctx, refAlone) {
  * cannot change anything. Recursive schemas are handled by publishing a
  * deferring placeholder into the memo before the node is built, so a `$ref`
  * back to an ancestor resolves to a function that is complete by the time it
- * is called.
+ * is called ({@link enterAgain}). The nesting is bounded as the validator's
+ * compile bounds it: an object past `maxSchemaDepth` levels is refused
+ * (`JK0017`, {@link openFrame}).
  * @param {object|boolean} node - The schema node
  * @param {object} ctx - The compile context
+ * @param {number} from - How the node is reached ({@link FROM_ROOT} and the others)
  * @returns {Function|null} The step, or null
  */
-function compileNode(node, ctx) {
+function compileNode(node, ctx, from) {
   if (!isJsonObject(node)) return null;
   // A schema that declares `$schema` is read per that draft, and the
   // subschemas below it inherit it, as the validator reads them. The
@@ -1447,14 +1494,12 @@ function compileNode(node, ctx) {
   const memoKey = `${ctx.allowStrip}${ctx.declaredDraft}${ctx.defaultPlace?.id ?? ''}`;
   let memo = ctx.memos.get(memoKey);
   if (memo === undefined) ctx.memos.set(memoKey, memo = new Map());
+  // the node's step, or while it is being built its frame: reaching it then closes a loop
   const cached = memo.get(node);
-  if (cached !== undefined) return cached;
+  if (cached !== undefined) return cached === null || typeof cached === 'function' ? cached : enterAgain(cached, ctx, from);
 
-  let built = null;
-  const deferred = function normalizeDeferred(value) {
-    return built === null ? value : built(value);
-  };
-  memo.set(node, deferred);
+  const frame = openFrame(node, ctx, from);
+  memo.set(node, frame);
 
   const steps = [];
 
@@ -1479,7 +1524,7 @@ function compileNode(node, ctx) {
     // validation still resolves it through the full ref machinery.
     if (target !== undefined && target !== node) {
       const declaredDraft = isJsonObject(target) ? schemaPlace(ctx.resources, target).draft : ctx.declaredDraft;
-      const step = compileNode(target, declaredDraft === ctx.declaredDraft ? ctx : { ...ctx, declaredDraft });
+      const step = compileNode(target, declaredDraft === ctx.declaredDraft ? ctx : { ...ctx, declaredDraft }, FROM_REF);
       if (step !== null) steps.push(step);
     }
   }
@@ -1494,7 +1539,7 @@ function compileNode(node, ctx) {
     if (Array.isArray(node.allOf)) {
       const branchCtx = ctx.allowStrip ? { ...ctx, allowStrip: false } : ctx;
       for (let i = 0; i < node.allOf.length; i++) {
-        const step = compileNode(node.allOf[i], branchCtx);
+        const step = compileNode(node.allOf[i], branchCtx, FROM_ALLOF);
         if (step !== null) steps.push(step);
       }
     }
@@ -1509,11 +1554,113 @@ function compileNode(node, ctx) {
   const scalarStep = buildScalarStep(node, ctx, refAlone);
   if (scalarStep !== null) steps.push(scalarStep);
 
-  built = composeSteps(steps);
+  const built = frame.built = composeSteps(steps);
   memo.set(node, built);
-  // Callers that resolved this node while it was being built hold `deferred`;
-  // everyone else gets the direct function.
-  return built === null ? null : deferred;
+  ctx.compiling.pop();
+  // Callers that resolved this node while it was being built hold its
+  // deferring step; everyone else gets the direct function.
+  return built === null ? null : frame.deferred;
+}
+
+// How `compileNode` reaches a schema object: as the document's root, as a
+// `$ref` target or an `allOf` branch (both apply to the value the object
+// holding them applies to), or as the subschema of a member or an item
+// (which applies to a value below it).
+const FROM_ROOT = 0;
+const FROM_REF = 1;
+const FROM_ALLOF = 2;
+const FROM_BELOW = 3;
+
+/**
+ * The frame of a schema object `compileNode` starts building, pushed on the
+ * compile's stack of frames, with the step that defers to the one built.
+ * Its nesting is counted as the validator counts the objects it builds, a
+ * reference's target starting again from the top as a target the validator
+ * resolves on first use does; one past the compile's `maxSchemaDepth` is
+ * refused (`JK0017`). Kept out of `compileNode`, whose frame every level of a
+ * schema (and every link of a chain of references) holds on the host's
+ * stack.
+ * @param {object} node @param {any} ctx @param {number} from
+ * @returns {CompileFrame}
+ */
+function openFrame(node, ctx, from) {
+  const frames = ctx.compiling;
+  const above = frames[frames.length - 1];
+  const depth = from === FROM_ROOT || from === FROM_REF ? 0 : above.depth + 1;
+  const ceiling = ctx.options.maxSchemaDepth;
+  if (depth >= ceiling) throw schemaTooDeep(ceiling, locationOf(node, ctx), 'normalizes');
+  /** @type {CompileFrame} */
+  const frame = { node, deferred: /** @type {any} */ (null), built: null, at: frames.length, depth,
+    below: (above?.below ?? 0) + (from === FROM_BELOW ? 1 : 0) };
+  frame.deferred = function normalizeDeferred(value) {
+    return frame.built === null ? value : frame.built(value);
+  };
+  frames.push(frame);
+  return frame;
+}
+
+/**
+ * @typedef {object} CompileFrame A schema object being compiled ({@link compileNode})
+ * @property {object} node - The object
+ * @property {Function} deferred - Its step, which runs the one built (complete by the time it is called)
+ * @property {Function|null} built - The step built, null until then and where it does nothing
+ * @property {number} at - Its place on the stack of frames
+ * @property {number} depth - Its nesting as the validator's compile counts it: from the root or a reference's target
+ * @property {number} below - How many members or items lie on the way to it from the root
+ */
+
+/**
+ * A reach of a schema object still being compiled above it: a loop. A loop
+ * every call runs into before it reads anything below the value (each
+ * object from the root to the reach applied to the value itself, through
+ * `$ref` and `allOf`) runs the same object on the same value without end,
+ * so the compile refuses it as the validator refuses it (`JK0001`). Any
+ * other loop is entered through the validator's reference depth bound
+ * (`JK2001`), weighing the levels it nests on each turn: the objects
+ * between the one it reaches and the one reaching it, an object that only
+ * forwards to its `$ref` target nesting none of its own.
+ * @param {CompileFrame} reached - The frame of the object reached
+ * @param {any} ctx @param {number} from
+ * @returns {Function}
+ */
+function enterAgain(reached, ctx, from) {
+  const frames = ctx.compiling;
+  const holder = frames[frames.length - 1];
+  if (from !== FROM_BELOW && holder.below === 0) throw new RefCycleError(loopLocations(frames, reached.at, ctx));
+  let weight = 1;
+  for (let i = reached.at + 1; i < frames.length - 1; i++) {
+    const node = frames[i].node;
+    if (typeof node.$ref !== 'string' || Object.keys(node).length !== 1) weight++;
+  }
+  return boundReference(locationOf(holder.node, ctx), ctx.options.maxReferenceDepth, weight, reached.deferred, 'normalization');
+}
+
+/**
+ * The places on a loop every call runs into, as the validator names them:
+ * from the first object on the way from the root that the loop passes
+ * again, round to it.
+ * @param {CompileFrame[]} frames @param {number} at - The frame of the object reached again
+ * @param {any} ctx
+ * @returns {string[]}
+ */
+function loopLocations(frames, at, ctx) {
+  const nodes = frames.map((frame) => frame.node);
+  nodes.push(nodes[at]);
+  const loop = new Set(nodes.slice(at));
+  const first = nodes.findIndex((node) => loop.has(node));
+  const end = nodes.indexOf(nodes[first], first + 1);
+  return nodes.slice(first, end + 1).map((node) => locationOf(node, ctx));
+}
+
+/**
+ * The URI of a schema object of the document, as the validator names the
+ * place: the base of the resource holding it and its JSON Pointer there.
+ * @param {object} node @param {any} ctx
+ * @returns {string}
+ */
+function locationOf(node, ctx) {
+  const place = schemaPlace(ctx.resources, node);
+  return place.pointer === undefined ? place.base : `${place.base}${place.pointer}`;
 }
 
 /**
@@ -1526,6 +1673,11 @@ function compileNode(node, ctx) {
  */
 function normalizerContext(schema, options) {
   admitNormalizeOptions(options);
+  // the validator's bounds, read and refused as its compile reads and refuses them
+  const maxReferenceDepth = options.maxReferenceDepth ?? REFERENCE_DEPTH_CEILING;
+  const maxSchemaDepth = options.maxSchemaDepth ?? SCHEMA_DEPTH_CEILING;
+  assertDepthOption('maxReferenceDepth', maxReferenceDepth);
+  assertDepthOption('maxSchemaDepth', maxSchemaDepth);
   // the document as read under its dialects: without the validation
   // keywords where the dialect governing a place leaves them out
   schema = withoutUnreadVocabularies(schema, { dialects: options.dialects });
@@ -1537,6 +1689,8 @@ function normalizerContext(schema, options) {
     coerceTypes: options.coerceTypes,
     trimStrings: options.trimStrings,
     coerceJsonText: options.coerceJsonText,
+    maxReferenceDepth,
+    maxSchemaDepth,
   };
   const ctx = {
     options: resolved,
@@ -1546,8 +1700,10 @@ function normalizerContext(schema, options) {
     resources: indexSchemaResources(schema, { dialects: options.dialects }),
     /** @type {number|null} The draft the schema being compiled declares, or null when none does */
     declaredDraft: null,
-    /** @type {Map<string, Map<object, Function|null>>} The compiled steps per stripping mode, draft and place */
+    /** @type {Map<string, Map<object, Function|CompileFrame|null>>} The compiled steps per stripping mode, draft and place (the frame of one being compiled) */
     memos: new Map(),
+    /** @type {CompileFrame[]} The objects being compiled, outermost first ({@link compileNode}) */
+    compiling: [],
     allowStrip: true,
     /** @type {DefaultPlace|undefined} The place being compiled, where defaults are filled */
     defaultPlace: undefined,
@@ -1598,19 +1754,20 @@ function normalizerContext(schema, options) {
  * document as read under its dialects ({@link withoutUnreadVocabularies}),
  * which is the document itself unless `dialects` drops a validation keyword.
  * @param {object|boolean} schema - The schema a normalizer is compiled from
- * @param {NormalizeOptions} [options] - Its options (`useDefaults` and `dialects` decide)
+ * @param {NormalizeOptions} [options] - Its options (`useDefaults`, `dialects` and the two depth bounds decide)
  * @returns {Map<object, Set<string>>} The member names, by the schema object whose `properties` declares them
  * @throws {TypeError|SchemaCompileError} As {@link compileNormalizer} does
  */
 export function unfilledDefaults(schema, options = {}) {
   const ctx = normalizerContext(schema, options);
-  compileNode(ctx.document, ctx);
+  compileNode(ctx.document, ctx, FROM_ROOT);
   settleFills(ctx);
   return ctx.unfilled;
 }
 
 /** The members of `NormalizeOptions`; any other is refused. */
-const NORMALIZE_OPTIONS = Object.freeze(['useDefaults', 'removeAdditional', 'coerceTypes', 'trimStrings', 'coerceJsonText', 'dialects']);
+const NORMALIZE_OPTIONS = Object.freeze(['useDefaults', 'removeAdditional', 'coerceTypes', 'trimStrings', 'coerceJsonText', 'dialects',
+  'maxSchemaDepth', 'maxReferenceDepth']);
 
 /**
  * Refuse a malformed options object before anything compiles: every
@@ -1697,7 +1854,15 @@ function admitNormalizeOptions(options) {
  *   misspelt switch would otherwise compile a normalizer that does nothing
  *   (`dialects` that is no `JarenValidator` included)
  * @throws {SchemaCompileError} `JK0016` where a dialect `dialects` holds requires a
- *   vocabulary this package does not implement, as the validator refuses it
+ *   vocabulary this package does not implement, as the validator refuses it;
+ *   `JK0002` for a `maxSchemaDepth` or `maxReferenceDepth` that is not a
+ *   positive safe integer; `JK0017` for a subschema it compiles nested past
+ *   `maxSchemaDepth` (default 128) from the root or a reference's target;
+ *   `JK0001` for a loop of `$ref`s and `allOf` branches every call runs into
+ *   before reading anything below the value. The returned normalizer throws
+ *   `SchemaRuntimeError` `JK2001` for a call that nests the references closing
+ *   a loop past `maxReferenceDepth` (default 256 levels, each reference
+ *   weighing the levels it nests per turn)
  * @example
  * const normalize = compileNormalizer({
  *   type: 'object',
@@ -1716,7 +1881,7 @@ export function compileNormalizer(schema, options = {}) {
   const ctx = normalizerContext(schema, options);
   const resolved = ctx.options;
   schema = ctx.document;
-  const compiled = compileNode(schema, ctx);
+  const compiled = compileNode(schema, ctx, FROM_ROOT);
   settleFills(ctx);
   const step = compiled !== null && ctx.fills.reentered ? recordingCopies(ctx.fills, compiled) : compiled;
 

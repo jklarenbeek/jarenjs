@@ -349,6 +349,9 @@ const normalizeOptions: NormalizeOptions = {
   removeAdditional: 'all',
   coerceTypes: true,
   trimStrings: true,
+  // the validator's bounds, raised for deep data as on the validator
+  maxSchemaDepth: 256,
+  maxReferenceDepth: 512,
 };
 
 type ContractInput = { name: string; port?: number };

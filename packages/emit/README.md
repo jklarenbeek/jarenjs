@@ -176,7 +176,9 @@ normalizer takes; it now emits one.
 normalization on for every node. The per-node route the programmatic API offers
 as a predicate has a command-line spelling: `--config <file>` names a JSON
 object of `compileNormalizer` options (`useDefaults`, `coerceTypes`,
-`trimStrings`, `coerceJsonText`, `removeAdditional`), where a switch is `true`, `false`, or the
+`trimStrings`, `coerceJsonText`, `removeAdditional`, and the bounds
+`maxSchemaDepth` and `maxReferenceDepth`, each a positive integer that raises
+the normalizer's bound of that name), where a switch is `true`, `false`, or the
 name of a schema annotation that turns it on for the nodes carrying
 `<annotation>: true`:
 

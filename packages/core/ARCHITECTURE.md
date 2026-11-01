@@ -1149,14 +1149,19 @@ into the coded refusal, and `isPastLongestString` tells it from another
 `RangeError` (a call stack exhausted) by the message the host gives a string
 past its longest, read once from the host.
 
-`equalsDeep` and `deepFreeze` hold no bound: they answer at any depth.
+`equalsDeep`, `deepFreeze` and `cloneJson` hold no bound: they answer at any depth.
 `equalsDeep` compares the first 256 levels on the host's stack, as
 `equalsJson` does, and a pair nested deeper on a stack of its own, depth
 first in the same member order; it remembers the pairs open on the way down,
 so a pair met again inside its own compare (two values holding cycles) is
 taken as equal and the answer rests on the members that differ.
 `deepFreeze` keeps one frame per open object and freezes members before the
-object holding them, as the recursive walk did.
+object holding them, as the recursive walk did. `cloneJson` copies the first
+256 levels on the host's stack and a container nested deeper on a stack of its
+own, members in the same order, remembering the containers open on the way
+down: a cycle nests without end, so it reaches that stack and is met there as
+a container still open, and `cloneJson` refuses it with `JO2002` at the member
+`locateCycle`'s walk names in the copy's own member order, at any depth.
 
 Each of those walks has two forms with one answer. The plain form reaches a
 shared subtree each time it is referenced; it counts the containers it opens

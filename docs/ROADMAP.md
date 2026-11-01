@@ -197,27 +197,26 @@ delete it or fix it.
   `dependentRequired` at the present member (`/a`) in collected errors and
   `basic`, at the object in `list`. One rule changes collected `instancePath`
   (an upgrade note).
-- [ ] **The normalizer still recurses per level of schema and of instance.**
-  `compileNormalizer` over a schema nested 20,000 levels throws an uncoded
-  `RangeError` while it compiles (its placement walk and its compile recurse
-  per level, where the validator refuses past `maxSchemaDepth` with
-  `JK0017`), and normalizing an instance nested a few thousand levels against
-  a recursive schema (`{ properties: { a: { $ref: '#' } } }`, any option)
-  throws `RangeError` on every call: the normalizer holds no reference bound
-  like the validator's `JK2001`. A `default` nested past the host stack is
-  copied by the recursive `cloneJson` and throws alike.
-- [ ] **The normalizer loops on an in-place reference cycle.**
-  `compileNormalizer({ allOf: [{ $ref: '#' }] })` compiles, and every call
-  throws an uncoded `RangeError`: the branch runs the root on the same value
-  without end, where the validator refuses the schema `JK0001` when it
-  compiles.
-- [ ] **Validation's reference bound counts hops, not the levels between
-  them.** A deep instance validated against a recursive schema whose `$ref`
-  sits K levels below its target nests 256 × K levels before `JK2001` can
-  fire: with K = 100 (`{ items: … 99 levels … { $ref: '#' } }`) a
-  100,000-deep array throws an uncoded `RangeError` on the default stack,
-  where the direct shapes (`{ items: { $ref: '#' } }`, `{ properties: { a: {
-  $ref: '#' } } }`) answer `JK2001`.
+- [ ] **The normalizer compiles a chain of references recursively per link.**
+  `compileNormalizer` builds each `$ref` target where it meets it, so a schema
+  whose references chain one target to the next (`$defs` `d0` … `dN`, each `{
+  properties: { x: { $ref: '#/$defs/d<i+1>' } } }`, the root `{ $ref:
+  '#/$defs/d0' }`) holds the host's stack per link: with 20,000 links it
+  throws an uncoded `RangeError` while it compiles on a default stack (with
+  3,000 in a fresh process), where the validator compiles the schema (it
+  resolves a reference on first use) and refuses a validation nesting them
+  past its reference bound (`JK2001`).
+- [ ] **A loop of references closed through a schema already built counts one
+  per turn.** The reference bound weighs a reference by the levels between it
+  and its target only where the target encloses it (is still being compiled);
+  a loop whose closing reference calls a target the compile already built —
+  two definitions referencing each other through members, `{ $ref:
+  '#/$defs/a', $defs: { a: <10 levels of properties.x> { $ref: '#/$defs/b' },
+  b: <10 levels> { $ref: '#/$defs/a' } } }`, or through `items` deeper than
+  the compile builds the second inside the first — counts one per turn
+  whatever the levels between, so a 100,000-deep instance throws an uncoded
+  `RangeError` on the default stack. The normalizer counts such a loop by its
+  levels.
 - [ ] **A form field reads a bigint as a number where the validator's bigint
   keywords judge it.** A field whose `type` names `bigint`, or that declares
   none (a number field by its bounds), reads a bigint as the number it
@@ -406,12 +405,6 @@ costs a descriptor plus examples and no UI code at all.
   at a location another conjunct or the node itself also constrains (it would
   need the two intersected; a variant added beside the node's own `type`
   among them) stay R15 too.
-- [ ] **A command's input nested past the host stack is refused uncoded.** A
-  contract command and a subscription copy their input through `cloneJson`
-  (`@jarenjs/core/object`) before freezing it (`deepFreeze(cloneJson(input))`),
-  and `cloneJson` recurses per level: an input nested 100,000 levels, or a
-  cyclic one, throws an uncoded `RangeError` there, though `deepFreeze` walks
-  any depth.
 - [ ] **An external `$ref` fragment is percent-decoded twice at compile.**
   `{ $ref: 'https://x.example/lib.json#/$defs/a%2520b' }` into a registered
   schema whose `$defs` holds `a%20b` is refused `JC0007` ("its fragment does

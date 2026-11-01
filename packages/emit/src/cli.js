@@ -46,8 +46,10 @@ ConfigInput is what a caller may hand in.
 --config names a JSON object holding compileNormalizer options: useDefaults,
 coerceTypes, trimStrings, coerceJsonText (each true, false, or the name of a
 schema annotation that switches it on per node, so "coerceTypes": "x-coerce"
-coerces exactly the nodes carrying "x-coerce": true) and removeAdditional
-(true, false or "all"). With coerceJsonText on, the accepted variant of an
+coerces exactly the nodes carrying "x-coerce": true), removeAdditional
+(true, false or "all"), and maxSchemaDepth and maxReferenceDepth, which raise
+the normalizer's bounds as its options of those names do (each a positive
+integer). With coerceJsonText on, the accepted variant of an
 object or array node the normalizer decodes JSON text into also takes a
 string. It is the route for the per-node choice the two flags cannot make. A
 --defaults/--coerce flag and the config's setting for the same option refuse
@@ -142,7 +144,11 @@ function importmapCommand(argv) {
 const CONFIG_SWITCHES = Object.freeze(['useDefaults', 'coerceTypes', 'trimStrings', 'coerceJsonText']);
 
 /** The members of `--config`: the `compileNormalizer` options, by name. */
-const CONFIG_OPTIONS = Object.freeze(['useDefaults', 'removeAdditional', 'coerceTypes', 'trimStrings', 'coerceJsonText']);
+const CONFIG_OPTIONS = Object.freeze(['useDefaults', 'removeAdditional', 'coerceTypes', 'trimStrings', 'coerceJsonText',
+  'maxSchemaDepth', 'maxReferenceDepth']);
+
+/** The `--config` members that are bounds: each a positive safe integer, or `null` for the default, as `compileNormalizer` reads it. */
+const CONFIG_BOUNDS = Object.freeze(['maxSchemaDepth', 'maxReferenceDepth']);
 
 /**
  * Read the `--config` file into `compileNormalizer` options. A string naming
@@ -181,6 +187,12 @@ function readConfig(file) {
   if (strip !== undefined) {
     if (typeof strip !== 'boolean' && strip !== 'all') throw refuse("'removeAdditional' must be true, false or 'all'");
     options.removeAdditional = strip;
+  }
+  for (const name of CONFIG_BOUNDS) {
+    const bound = config[name];
+    if (bound === undefined || bound === null) continue;
+    if (!Number.isSafeInteger(bound) || bound < 1) throw refuse(`'${name}' must be a positive safe integer`);
+    options[name] = bound;
   }
   return { options, routes };
 }

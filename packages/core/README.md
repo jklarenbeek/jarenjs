@@ -81,6 +81,16 @@ and `a = [a, 1]` does not equal `b = [b, 2]`. Every other answer is unchanged.
 uncoded `RangeError`, and so did the `uniqueItems`, `const` and `enum` checks of
 `@jarenjs/validate` over such an instance.*
 
+`cloneJson` (`@jarenjs/core/object`) copies a deep value on its own stack too,
+with no bound: a value nested past the host stack is copied at any depth, and a
+container reached twice is copied once per reach, as before. A cycle has no
+copy: it is refused as a `CodedError` named `JsonCycleError` with code `JO2002`
+whose `docPath` is the member that closes it, the first the copy's own member
+order meets (`a circular reference cannot be copied at /self`). Every other copy
+is unchanged. *Upgrade: such a value, or a cyclic one, threw an uncoded
+`RangeError`, and so did the `@jarenjs/validate` normalizer filling a default
+nested that deep.*
+
 `locateCycle(value)` (`@jarenjs/core/object`) answers that pointer for any
 value: the first member, walking arrays by index and object members in sorted
 order (the order `stableStringify` and `canonicalizeJson` write them, so the

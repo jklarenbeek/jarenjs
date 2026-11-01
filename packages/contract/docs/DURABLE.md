@@ -11,6 +11,7 @@ exactly-once delivery is not claimed.
 | Same command identity/hash on HTTP, local or job | Original validated outcome | Business effect replays without another mutation |
 | Different payload/hash version | Identity mismatch | Refused before mutation |
 | Current actor unauthorized | No historic disclosure | Refused before receipt read |
+| Input (of a command or a run page) nested past 1000 levels, or cyclic | Refused by its canonical copy: `JsonCanonicalizeError` `JO2001`, or `JO2002` at the member closing the cycle | Refused before authorization |
 | Output/error/receipt/commit failure | Entire local transaction rolls back | No business receipt exists |
 | Declared committed failure | Validated observation and stable references | Historic failure replays |
 | Lease/HTTP TTL expires | Business receipt remains | Receipt wins before work admission |

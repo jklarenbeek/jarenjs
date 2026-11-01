@@ -188,6 +188,17 @@ describe('jaren-emit --config — the per-node route', () => {
     assert.doesNotMatch(off.text ?? '', /SchemaInput/);
   });
 
+  it('raises the normalizer bounds a deep schema needs, as compileNormalizer\'s options of those names do', () => {
+    let deep = { type: 'object', properties: { leaf: { type: 'string', default: 'x' } } };
+    for (let i = 1; i < 200; i++) deep = { type: 'object', properties: { a: deep } };
+    const refused = run({ useDefaults: true }, [], deep);
+    assert.strictEqual(refused.status, 2, refused.stderr);
+    assert.match(refused.stderr, /JK0017/);
+    const raised = run({ useDefaults: true, maxSchemaDepth: 256, maxReferenceDepth: null }, [], deep);
+    assert.strictEqual(raised.status, 0, raised.stderr);
+    assert.match(raised.text ?? '', /export interface Schema/);
+  });
+
   it('is described in the help text', () => {
     const result = spawnSync(process.execPath, [CLI, '--help'], { encoding: 'utf8' });
     assert.strictEqual(result.status, 0);
@@ -204,12 +215,15 @@ describe('jaren-emit --config — refusals', () => {
     ['a scalar', '"x-coerce"', /must be a JSON object of normalization options/],
     ['null', 'null', /must be a JSON object of normalization options/],
     ['a misspelt option', { coerceType: true }, /unknown option 'coerceType' — did you mean 'coerceTypes'\?/],
-    ['a far unknown option', { zzzzzzzzzz: true }, /unknown option 'zzzzzzzzzz'; the options are useDefaults, removeAdditional, coerceTypes, trimStrings, coerceJsonText\n/],
+    ['a far unknown option', { zzzzzzzzzz: true }, /unknown option 'zzzzzzzzzz'; the options are useDefaults, removeAdditional, coerceTypes, trimStrings, coerceJsonText, maxSchemaDepth, maxReferenceDepth\n/],
     ['a number switch', { coerceTypes: 1 }, /'coerceTypes' must be true, false or the name of a schema annotation/],
     ['an empty annotation', { useDefaults: '' }, /'useDefaults' must be true, false or the name of a schema annotation/],
     ['a null switch', { trimStrings: null }, /'trimStrings' must be true, false or the name of a schema annotation/],
     ['an object switch', { coerceTypes: { 'x-coerce': true } }, /'coerceTypes' must be true, false or the name of a schema annotation/],
     ['a string removeAdditional', { removeAdditional: 'x-strip' }, /'removeAdditional' must be true, false or 'all'/],
+    ['a zero maxSchemaDepth', { maxSchemaDepth: 0 }, /'maxSchemaDepth' must be a positive safe integer/],
+    ['a fractional maxReferenceDepth', { maxReferenceDepth: 1.5 }, /'maxReferenceDepth' must be a positive safe integer/],
+    ['a string maxSchemaDepth', { maxSchemaDepth: '256' }, /'maxSchemaDepth' must be a positive safe integer/],
   ];
   for (const [label, config, message] of bad) {
     it(`refuses ${label} with exit 2 and writes nothing`, () => {

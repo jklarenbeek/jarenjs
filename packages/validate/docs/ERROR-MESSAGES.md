@@ -301,8 +301,8 @@ query's own grammar; a `JK` code over it would send every reader to `cause`.
 
 | Code | Class | Meaning |
 |---|---|---|
-| `JK0001` | `SchemaCompileError` | A loop of references and in-place applicators never reads the instance: refused by `compile()` |
-| `JK0002` | `SchemaCompileError` | The `maxReferenceDepth` or `maxSchemaDepth` option is not a positive safe integer: refused when a schema compiles |
+| `JK0001` | `SchemaCompileError` | A loop of references and in-place applicators never reads the instance: refused by `compile()`, and by `compileNormalizer` where every normalizer call runs into one |
+| `JK0002` | `SchemaCompileError` | The `maxReferenceDepth` or `maxSchemaDepth` option is not a positive safe integer: refused when a schema compiles, and by `compileNormalizer` |
 | `JK0003` | `SchemaCompileError` | The `outputFormat` option is not a format of `@jarenjs/validate/output`: refused when a schema compiles |
 | `JK0004` | `SchemaCompileError` | `compileAsync`'s `loadSchema` threw or rejected for a document a schema references |
 | `JK0005` | `SchemaCompileError` | `compileAsync`'s `loadSchema` returned something that is not a schema (an object or a boolean) |
@@ -317,7 +317,7 @@ query's own grammar; a `JK` code over it would send every reader to `cause`.
 | `JK0014` | `SchemaCompileError` | A `pattern`, or a `patternProperties` member name, is no regular expression: refused where the place compiles, naming the keyword, the shape it takes, the value and the `SyntaxError`'s message, located at the keyword or the member, the `SyntaxError` as the `cause` |
 | `JK0015` | `SchemaCompileError` | Under `unknownFormats: 'error'`, a `format` that asserts names no registered format — an unregistered name, or a value that is no name (`format: 5`): refused where the place compiles, naming the format, the registration that would serve it and the opt-out, located at the keyword |
 | `JK0016` | `SchemaCompileError` | A schema of a dialect whose meta-schema requires (`$vocabulary`, `true`) a vocabulary the validator does not implement: refused where a place under that dialect compiles, naming the meta-schema and the vocabulary, located at the `$schema` naming it; `compileNormalizer`, `deriveStrictProfile` and `@jarenjs/emit` handed the dialects as `dialects` refuse it alike |
-| `JK0017` | `SchemaCompileError` | A schema nests subschemas deeper than `maxSchemaDepth` (default 128): refused where the bound is crossed, located at the first subschema past it, when a schema compiles or by the first call that reaches a reference resolved on first use |
+| `JK0017` | `SchemaCompileError` | A schema nests subschemas deeper than `maxSchemaDepth` (default 128): refused where the bound is crossed, located at the first subschema past it, when a schema compiles or by the first call that reaches a reference resolved on first use; `compileNormalizer` holds its own `maxSchemaDepth` when it compiles |
 | `JK0101` | `SchemaCompileError` | Retired, no longer raised: `deriveStrictProfile` (`@jarenjs/validate/strict-profile`) carries a schema that accepts any value — `true`, `{}`, a node with no type, a free-form object, a tuple — as JSON text |
 | `JK0102` | `SchemaCompileError` | `deriveStrictProfile`: an object whose member names are open and that no entries array carries — a map beside declared `properties`, a map that may also be an array, a schema-valued `unevaluatedProperties` |
 | `JK0103` | `SchemaCompileError` | `deriveStrictProfile`: a keyword that applies members, items or branches beside its node and that no distribution makes exact — `if`/`then`/`else`, `dependentSchemas` or a draft-07 `dependencies` schema beside an object type, a branch beside an object type that is more than members (a `$ref`, a nested union, an `enum`), a branch giving a member a second schema that is not an `enum` or `const`, an untyped `allOf` of more than one branch, a `$ref` or `anyOf` beside structural siblings |
@@ -326,7 +326,7 @@ query's own grammar; a `JK` code over it would send every reader to `cause`.
 | `JK0106` | `SchemaCompileError` | `deriveStrictProfile`: a member that `required`, or a `dependentRequired` (draft-07 `dependencies` list) firing on a declared member, requires is not declared under `properties` (or is declared `false`), so a closed object could never hold it |
 | `JK0107` | `SchemaCompileError` | `deriveStrictProfile` or `relaxSchema` was given an argument it does not take |
 | `JK0108` | `SchemaCompileError` | `deriveStrictProfile`: a schema that accepts no value (`false` or a `$ref` to it, an `anyOf` branch `false`, `items: false`, an object whose own `additionalProperties: false` refuses a member a branch requires) has no strict form |
-| `JK2001` | `SchemaRuntimeError` | Validation nests schema references deeper than `maxReferenceDepth` (default 256): refused where the bound is crossed |
+| `JK2001` | `SchemaRuntimeError` | Validation nests schema references deeper than `maxReferenceDepth` (default 256) levels: refused where the bound is crossed; a normalizer call holds its own `maxReferenceDepth` alike |
 | `JK2002` | `SchemaRuntimeError` | A strict profile's `fromProfile`: a member carried as JSON text is a string that is not JSON text: refused naming its `dataPath` in the answer |
 | `JK2003` | `SchemaRuntimeError` | A strict profile's `fromProfile`: a map carried as `{ key, value }` entries names one key twice: refused naming the second entry's `dataPath` |
 
@@ -368,16 +368,47 @@ A loop that only some instances reach still compiles, and answers every
 instance that does not reach it: `{ "anyOf": [{ "type": "string" }, { "$ref": "#" }] }`
 accepts `"a"`, and is refused `JK2001` on `1`.
 
-**`JK2001` — the reference depth bound.** One validation enters at most
-`maxReferenceDepth` (default 256) nested schema references: a `$ref` resolved
-on first use, a `$dynamicRef` or a `$recursiveRef`. Every recursion through a schema passes one, so the bound
-holds an instance nested deeper than the schema can follow (an array 257
-levels deep against `{ "items": { "$ref": "#" } }`) and a loop that never
-descends into the instance alike, before the host's call stack can overflow.
-The default is fixed, so the refusal is the same on every host; a schema that
-descends several levels per reference admits a deeper instance, and one that
-validates a meta-schema reference per level admits a shallower one. The
-message names the reference where the bound was crossed.
+A normalizer (`compileNormalizer`) refuses, when it compiles, a loop of `$ref`s
+and `allOf` branches its every call runs into before it reads anything below the
+value, naming the places on the loop as above. It applies every `allOf` branch
+to every value, so it refuses `{ "type": "string", "allOf": [{ "$ref": "#" }] }`,
+which the validator compiles because `type` reads the instance first; it never
+runs `anyOf`, `oneOf`, `not` or `if`, so a loop through them is none of its own.
+A loop it reaches only through a member or an item is refused `JK2001` by the
+calls that reach it.
+
+**`JK2001` — the reference depth bound.** One validation nests the schema
+references it enters — a `$ref` resolved on first use, a `$dynamicRef` or a
+`$recursiveRef` — at most `maxReferenceDepth` (default 256) levels deep. Every
+recursion through a schema passes one, so the bound holds an instance nested
+deeper than the schema can follow (an array 257 levels deep against `{ "items":
+{ "$ref": "#" } }`) and a loop that never descends into the instance alike,
+before the host's call stack can overflow. A reference back into a schema that
+encloses it weighs the levels between them, which it nests on every entry (a
+dynamic reference, the levels below its initial target): `{ "items": { "items":
+{ "$ref": "#" } } }` admits an array 257 levels deep, not 513, and a reference
+100 levels below its target an instance 299 levels deep. Any other reference
+weighs one. The default is fixed, so the refusal is the same on every host; a
+schema that validates a meta-schema reference per level admits a shallower
+instance. The message names the reference where the bound was crossed, and
+the references while each weighs one:
+
+```text
+JK2001: validation nests more than 256 schema references at http://depth.test/items#/items (an instance nested this deep, or a loop of references that never reads it)
+JK2001: validation nests schema references more than 256 levels deep at http://depth.test/k2#/items/items (an instance nested this deep, or a loop of references that never reads it)
+```
+
+A normalizer (`compileNormalizer`) holds the same bound, its own
+`maxReferenceDepth` (default 256), refusing a call with `normalization nests
+…`; a default it fills is copied under it too. It compiles every reference in
+place, so each loop it runs is closed by a reference back into an object it
+is still compiling, weighing the levels of the loop as above: it refuses
+where the validator does for a reference back into an enclosing schema, up to
+one turn deeper for a loop entered through a reference (which the validator
+counts too), and sooner for a loop the validator closes through a target it
+has already built (two definitions referencing each other through
+`properties`), which the validator counts one per turn, whatever the levels
+between.
 
 **`JK0002` — the option.** `new JarenValidator({ maxReferenceDepth: 2000 })`
 raises the bound for every schema that validator compiles, `validateSchema`
@@ -386,7 +417,9 @@ back. Raising it hands the decision back to the host: past the default, a
 deep enough instance can overflow the call stack again, at a depth that
 differs from host to host. Anything but a positive safe integer is refused
 `JK0002` when a schema compiles; `null` or absent means the default. The
-same holds for `maxSchemaDepth` (`JK0017`, below).
+same holds for `maxSchemaDepth` (`JK0017`, below). `compileNormalizer` takes
+both options, with the same defaults and the same refusals when it compiles
+(`compileNormalizer(schema, { maxReferenceDepth: 2000 })`).
 
 **`JK0017` — the schema depth bound.** One compile builds subschemas at
 most `maxSchemaDepth` (default 128) levels deep: each level, whatever
@@ -409,6 +442,17 @@ reaches it, so that call is the one refused. Data nested inside a schema
 subschema and is walked at any depth. `new JarenValidator({ maxSchemaDepth:
 1000 })` raises the bound; past the default, a deep enough schema can
 exhaust the host's stack again.
+
+A normalizer (`compileNormalizer`) holds its own `maxSchemaDepth` (default
+128), counting the subschemas it compiles from the document's root or from a
+reference's target as the validator counts them (an item of a lone `type`,
+which the validator's default mode checks inline without building a level,
+counts one) and refusing with `… deeper than a small host call stack compiles
+and normalizes; raise maxSchemaDepth to compile it at …`. It compiles every
+reference's target when it compiles, so it refuses there a target the
+validator refuses when a validation first reaches it. `compileNormalizer(schema,
+{ maxSchemaDepth: 1000 })` raises the bound; past the default, a deep enough
+schema can exhaust the host's stack again.
 
 **`JK0003` — the output format.** The `outputFormat` option takes one of
 the formats `@jarenjs/validate/output` exports (`flagOutput`,

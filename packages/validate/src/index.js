@@ -269,7 +269,7 @@ export class ValidationOptions {
    * @param {'error'|'ignore'} [unknownFormats='ignore'] - What to do when an ASSERTING `format` names no registered compiler (an unregistered name, or a value that is no name): 'ignore' (the default, and what the specification requires) accepts it as an annotation; 'error' refuses the schema at COMPILE time (`JK0015`, located at the keyword). Never affects instance validation, and never applies where format is annotation-only anyway.
    * @param {boolean} [propertyDependencies=false] - Whether the `propertyDependencies` proposal keyword asserts. Off, it is an unknown keyword like any other; on, it applies in documents of draft 2020-12 (and the draft-next dialect) and in documents that declare no draft.
    * @param {'handrews-01'|'bhutton-00'} [relativePointerDialect='handrews-01'] - Which Relative JSON Pointer grammar the `data` and `$data` keywords and the `relative-json-pointer` format speak: `'handrews-01'` is draft-handrews-relative-json-pointer-01 (what the format suite asserts); `'bhutton-00'` is draft-bhutton-relative-json-pointer-00, which also accepts index manipulation (`0+1`, `1-1/name`, `0-1#`). Any other value is a TypeError when a schema compiles.
-   * @param {number} [maxReferenceDepth=256] - The deepest nesting of schema references one validation enters before it throws `JK2001` (a positive safe integer, else `JK0002` when a schema compiles). Fixed by default so the answer is the same on every host; raising it lets the host's call stack decide again.
+   * @param {number} [maxReferenceDepth=256] - The deepest nesting, in levels of schema, of the references one validation enters before it throws `JK2001`, a reference back into a schema enclosing it weighing the levels between them (a positive safe integer, else `JK0002` when a schema compiles). Fixed by default so the answer is the same on every host; raising it lets the host's call stack decide again.
    * @param {OutputFormat<any>} [outputFormat] - A JSON Schema standard output format from `@jarenjs/validate/output`, returned by a compiled validator instead of a boolean or `{ valid, errors }`; unset, the return shape is `collectErrors`'. Any other value is refused `JK0003` when a schema compiles.
    * @param {number} [maxSchemaDepth=128] - The deepest nesting of subschemas one compile builds before it throws `JK0017` (a positive safe integer, else `JK0002` when a schema compiles). Fixed by default so the answer is the same on every host; raising it lets the host's call stack decide again.
    */
@@ -311,7 +311,7 @@ export class ValidationOptions {
     this.propertyDependencies = propertyDependencies;
     /** @type {'handrews-01'|'bhutton-00'} The Relative JSON Pointer grammar of `data`, `$data` and the `relative-json-pointer` format */
     this.relativePointerDialect = relativePointerDialect;
-    /** @type {number} The deepest nesting of schema references one validation enters */
+    /** @type {number} The deepest nesting, in levels of schema, of the references one validation enters */
     this.maxReferenceDepth = maxReferenceDepth;
     /** @type {OutputFormat<any>|undefined} The standard output format a compiled validator returns, or undefined for the `collectErrors` shapes */
     this.outputFormat = outputFormat;
@@ -518,7 +518,7 @@ export class ValidationRoot {
     const ceiling = self.#options.maxSchemaDepth ?? SCHEMA_DEPTH_CEILING;
     if (building.size >= ceiling)
       throw schemaTooDeep(ceiling, path);
-    building.add(path);
+    building.set(path, schema);
     let obj;
     try {
       obj = new ValidationObject(self, path, schema, baseUri,
@@ -545,8 +545,8 @@ export class ValidationRoot {
   #loopFree = new Set();
   /** @type {Map|null} Map of paths to ValidationObjects */
   #objects = null;
-  /** @type {Set<string>} Paths whose ValidationObject is being constructed */
-  #building = new Set();
+  /** @type {Map<string, unknown>} Paths whose ValidationObject is being constructed, in the order they nest, with their schemas */
+  #building = new Map();
   /** @type {WeakMap<object, string>} The schema objects whose `$ref` a place declaring a contested identifier reads against itself, with that identifier */
   #ownReads = new WeakMap();
   /** @type {Array} Array of validation errors */
@@ -1007,6 +1007,30 @@ export class ValidationRoot {
 
     objects.set(path, null);
     return null;
+  }
+
+  /**
+   * The levels of schema a reference compiled now spans each time a
+   * validation enters it ({@link boundReference}): where its target is one
+   * of the objects under construction, a schema enclosing the reference,
+   * the objects nested below that target down to the one holding the
+   * reference; else 1. A dynamic reference weighs the levels below its
+   * initial target, which every target its dynamic scope picks instead
+   * reaches the reference through. An internal collaborator of the
+   * compiler; not part of the package's API.
+   * @param {string} target - The reference, resolved
+   * @param {unknown} [schema] - The schema it names, for a name no path spells (`#anchor`)
+   * @returns {number}
+   */
+  referenceWeight(target, schema = undefined) {
+    const building = this.#building;
+    if (schema === undefined && !building.has(target)) return 1;
+    let below = building.size;
+    for (const [path, built] of building) {
+      below--;
+      if (path === target || (schema !== undefined && built === schema)) return Math.max(below, 1);
+    }
+    return 1;
   }
 
   /**
@@ -1608,8 +1632,9 @@ export class ValidationObject {
 
     // Every loop through schemas passes a reference resolved on first use, so
     // the reference depth bound holds a deep instance and a loop that never
-    // descends into it alike.
-    return wrapUnevaluated(self, schema, boundReference(path, root.options.maxReferenceDepth, function resolveSchemaCompiler(data, dataPath, dataRoot) {
+    // descends into it alike; one back into an enclosing schema nests the
+    // levels between them on each entry, and weighs them.
+    return wrapUnevaluated(self, schema, boundReference(path, root.options.maxReferenceDepth, root.referenceWeight(ref), function resolveSchemaCompiler(data, dataPath, dataRoot) {
       if (resolvedState === null) {
         let obj;
         try {
@@ -2085,7 +2110,7 @@ export class ValidatorOptions {
  * @property {'error'|'ignore'} [unknownFormats] - What an ASSERTING `format` with no registered compiler (an unregistered name, or a value that is no name) does: 'ignore' (default, per spec) accepts it as an annotation, 'error' refuses the schema at compile time (`JK0015`)
  * @property {boolean} [propertyDependencies] - Assert the `propertyDependencies` proposal keyword (default false: it is an unknown keyword); applies in draft 2020-12 (and draft-next) documents and in documents that declare no draft
  * @property {'handrews-01'|'bhutton-00'} [relativePointerDialect] - The Relative JSON Pointer grammar of `data`, `$data` and the `relative-json-pointer` format: `'handrews-01'` (default) or `'bhutton-00'`, which also accepts index manipulation (`0+1`, `1-1/name`, `0-1#`)
- * @property {number} [maxReferenceDepth] - The deepest nesting of schema references one validation enters before it throws `JK2001` (default 256, the same on every host; a larger value lets the host's call stack decide again). Also bounds `validateSchema`. Not a positive safe integer: `JK0002` when a schema compiles
+ * @property {number} [maxReferenceDepth] - The deepest nesting, in levels of schema, of the references one validation enters before it throws `JK2001`, a reference back into a schema enclosing it weighing the levels between them (default 256, the same on every host; a larger value lets the host's call stack decide again). Also bounds `validateSchema`. Not a positive safe integer: `JK0002` when a schema compiles
  * @property {TOutput} [outputFormat] - Return a JSON Schema standard output instead of a boolean or `{ valid, errors }`: a format from `@jarenjs/validate/output`; it takes precedence over `collectErrors`. Another value (a format's name as a string included): `JK0003` when a schema compiles
  * @property {number} [maxSchemaDepth] - The deepest nesting of subschemas one compile builds before it throws `JK0017` (default 128, the same on every host; a larger value lets the host's call stack decide again). Not a positive safe integer: `JK0002` when a schema compiles
  */
@@ -2868,8 +2893,9 @@ export class JarenValidator {
    * @param {JSONSchemaLike | boolean} schema - The schema to compile
    * @param {(JSONSchemaLike | boolean)[]} [schemas] - Additional schemas to reference during compilation
    * @returns {TOutput extends OutputFormat<infer R> ? (data: unknown) => R : TCollect extends true ? CompiledCollector<T> : CompiledPredicate<T>} A validation function;
-   *   it throws `SchemaRuntimeError` `JK2001` for an instance that nests more than 256 schema
-   *   references (a deep instance, or one that reaches a loop that never reads it), and
+   *   it throws `SchemaRuntimeError` `JK2001` for an instance that nests schema references
+   *   more than 256 levels deep (a deep instance, or one that reaches a loop that never reads
+   *   it), and
    *   `SchemaCompileError` `JK0008`/`JK0009` when it first reaches a reference resolved on
    *   first use that resolves to no schema
    * @throws {SchemaCompileError} `JK0001` when a loop of references never reads the instance;
