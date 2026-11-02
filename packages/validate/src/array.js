@@ -27,6 +27,7 @@ import {
   hasSchemaReference,
   schemaReference,
   ARRAY_CHILD_KEYWORDS,
+  otherKind,
 } from './tools.js';
 
 import { readPrefixItems, readsSince } from './schema-keywords.js';
@@ -431,8 +432,10 @@ export function compileArrayPrimitives(schemaObj, jsonSchema) {
 
 // `alone`: no other array keyword group compiles beside the element walk,
 // which then tests the array class itself, a call per validation fewer
-// than a guarding wrapper.
-function compileArrayChildren(schemaObj, jsonSchema, alone) {
+// than a guarding wrapper. `typed`: a leading `type: 'array'` the walk may
+// test with that class test (compileArraySchema); the homogeneous items
+// walk does, and sets `typed.taken`.
+function compileArrayChildren(schemaObj, jsonSchema, alone, typed) {
   // Check for prefixItems (draft 2020-12+) first, then items.
   const prefixItems = readPrefixItems(schemaObj, jsonSchema);
   const items = jsonSchema.items;
@@ -533,8 +536,32 @@ function compileArrayChildren(schemaObj, jsonSchema, alone) {
       };
     }
 
+    // A homogeneous items walk tests a leading `type: 'array'` too.
+    const typeError = typed !== null && count === 0 ? typed.error : null;
+    if (typeError !== null) typed.taken = true;
+
+    // Items of one pure test (a type-only schema, one asserting nothing)
+    // where a fault records nothing, no annotation is kept and no item
+    // location is built: each element is tested by code (isPurePosition),
+    // every one read, as the walk below reads them.
+    const restCode = count === 0 && !track && !extendPaths && root.options.skipErrors
+      ? PURE_POSITIONS.indexOf(rest)
+      : -1;
+    if (restCode >= 0) {
+      return function validatePureItems(data, dataPath) {
+        if (alone && !isArrayClass(data)) return otherKind(typeError, data, dataPath);
+        const len = data.length;
+        let invalid = 0;
+        for (let i = 0; i < len; ++i) {
+          if (!isPurePosition(restCode, data[i])) invalid++;
+        }
+        return invalid === 0
+          || addError(invalid, dataPath);
+      };
+    }
+
     return function validateArrayItemsOnly(data, dataPath, dataRoot) {
-      if (alone && !isArrayClass(data)) return true;
+      if (alone && !isArrayClass(data)) return otherKind(typeError, data, dataPath);
       const len = data.length;
       const arr = data;
 
@@ -610,7 +637,18 @@ function compileArrayChildren(schemaObj, jsonSchema, alone) {
   };
 }
 
-export function compileArraySchema(schemaObj, jsonSchema) {
+/**
+ * The validator of a schema's array keywords, or undefined when it holds
+ * none that asserts anything.
+ * @param {import('./index.js').ValidationObject} schemaObj
+ * @param {object} jsonSchema
+ * @param {{ error: (data: unknown, dataPath: string) => boolean, taken: boolean } | null} [typed] -
+ *   A leading `type: 'array'` no other keyword group precedes, in the
+ *   first-failure mode: a lone homogeneous items walk then tests it too,
+ *   failing through `typed.error`, and sets `typed.taken`
+ * @returns {Function | undefined}
+ */
+export function compileArraySchema(schemaObj, jsonSchema, typed = null) {
   if (isOfSchemaType(jsonSchema, 'set'))
     return undefined;
 
@@ -619,7 +657,7 @@ export function compileArraySchema(schemaObj, jsonSchema) {
   const compiledContainsBoolean = compileArrayContainsBoolean(schemaObj, jsonSchema);
   const alone = !compiledPrimitives && !compiledContainsBoolean
     && (!compiledItemsBoolean || compiledItemsBoolean === trueThat);
-  const compiledArrayChildren = compileArrayChildren(schemaObj, jsonSchema, alone);
+  const compiledArrayChildren = compileArrayChildren(schemaObj, jsonSchema, alone, alone ? typed : null);
 
   if ((compiledPrimitives
     || compiledItemsBoolean

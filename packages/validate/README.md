@@ -1223,6 +1223,15 @@ is data wherever it appears, so a `$defs` entry of that name is usable and a
 missing `$ref` target beside a `constructor` property is refused at compile
 time like any other.
 
+The default validator asserts `required` beside a `properties` that names no
+member, as the collecting one does. *Upgrade: in the default mode
+`{ "properties": {}, "required": ["a"] }` accepted `{}`.* In the default mode
+a tuple of boolean and single-type positions reads no element past its
+positions and none after its first failing one. *Upgrade: every element was
+read, so an element there that is a throwing getter made the validation
+throw; it answers now (`{ "prefixItems": [{ "type": "boolean" }] }` accepts
+`[true, <a throwing getter>]`).*
+
 **A keyword value of the wrong shape is refused at compile.** Each keyword the
 validator reads takes the shape its draft's meta-schema gives it — a type name
 or a non-empty list of them, an array for `enum`, member names for `required`,

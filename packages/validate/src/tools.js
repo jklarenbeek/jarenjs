@@ -233,6 +233,73 @@ export function isSchemaType(code, data) {
   }
 }
 
+/**
+ * What an object or array keyword group answers for a value its instance
+ * test (isObjectType, isArrayClass) refused: true, the group does not apply;
+ * or, when the group also tests a leading `type` naming its kind, the type's
+ * answer, which an absent value passes and any other fails through
+ * `typeError`.
+ * @param {((data: unknown, dataPath: string) => boolean) | null} typeError - The leading type's fault, or null
+ * @param {unknown} data
+ * @param {string} dataPath
+ * @returns {boolean}
+ */
+export function otherKind(typeError, data, dataPath) {
+  return typeError === null || data === undefined || typeError(data, dataPath);
+}
+
+// The tests of the type-only schemas, one per type name and shared by every
+// schema naming it, so a walk tells them apart by identity; where a fault
+// records nothing, the test is the schema's whole validator. An absent value
+// passes, as the `type` keyword reads it everywhere but in an item test.
+/** @param {unknown} data @returns {boolean} */
+export function isTypeOnlyString(data) {
+  return data === undefined || typeof data === 'string';
+}
+/** @param {unknown} data @returns {boolean} */
+export function isTypeOnlyNumber(data) {
+  return data === undefined || (typeof data === 'number' && !isNaN(data));
+}
+/** @param {unknown} data @returns {boolean} */
+export function isTypeOnlyInteger(data) {
+  return data === undefined || Number.isInteger(data);
+}
+/** @param {unknown} data @returns {boolean} */
+export function isTypeOnlyBoolean(data) {
+  return data === undefined || typeof data === 'boolean';
+}
+/** @param {unknown} data @returns {boolean} */
+export function isTypeOnlyArray(data) {
+  return data === undefined || Array.isArray(data);
+}
+/** @param {unknown} data @returns {boolean} */
+export function isTypeOnlyObject(data) {
+  return data === undefined || (typeof data === 'object' && data !== null && !Array.isArray(data));
+}
+/** @param {unknown} data @returns {boolean} */
+export function isTypeOnlyNull(data) {
+  return data === undefined || data === null;
+}
+
+/**
+ * The shared test of a type-only schema naming `type` (see isTypeOnlyString),
+ * or undefined for any other value.
+ * @param {unknown} type - The `type` keyword value
+ * @returns {((data: unknown) => boolean) | undefined}
+ */
+export function typeOnlyTest(type) {
+  switch (type) {
+    case 'string': return isTypeOnlyString;
+    case 'number': return isTypeOnlyNumber;
+    case 'integer': return isTypeOnlyInteger;
+    case 'boolean': return isTypeOnlyBoolean;
+    case 'array': return isTypeOnlyArray;
+    case 'object': return isTypeOnlyObject;
+    case 'null': return isTypeOnlyNull;
+    default: return undefined;
+  }
+}
+
 export function createIsSchemaTypeHandler(type, isStrict = false) {
   switch (type) {
     case 'null': return isNullValue;

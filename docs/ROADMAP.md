@@ -303,23 +303,31 @@ delete it or fix it.
   compared pairwise, with no `Set` and no list of its containers), and
   `equalsDeep` alone over their container pairs 0.94–1.19×. Wanted: the same
   answers, non-JSON values included, at Ajv's speed.
-- [ ] **A typical object schema validates at a fifth of Ajv's speed.**
-  Compiled alone and called warm (best of five rounds of two million calls on
-  one pinned core), `{ type: 'object', properties: { query: { type: 'string'
-  }, limit: { type: 'integer' }, exact: { type: 'boolean' } }, required:
-  ['query'], additionalProperties: false }` takes about 86 ns per valid call
-  where Ajv takes 18, the same without `required` and
-  `additionalProperties` 66 ns to 12, and `{ type: 'array', items: { type:
-  'string' } }` over three strings 37 ns to 11; in the validator benchmark
-  the 'required' rows take about 2× Ajv's time and the 'properties' rows
-  1.3×. Part of it is how a closure reads a member: a declared name probed
+- [ ] **A typical object schema validates at a third to a sixth of Ajv's
+  speed.** Compiled alone and called warm (best of five rounds of two
+  million calls on one pinned core), `{ type: 'object', properties: {
+  query: { type: 'string' }, limit: { type: 'integer' }, exact: { type:
+  'boolean' } }, required: ['query'], additionalProperties: false }` takes
+  about 57 ns per valid call where Ajv takes 18, the same without
+  `additionalProperties` about 69 ns to 12 and without `required` too
+  about 56 ns to 12, and `{ type: 'array', items: { type: 'string' } }`
+  over three strings 17 ns to 11. A leading `type`, a type-only member or
+  item and `additionalProperties` no longer cost a closure of their own;
+  what is left is how a closure reads a member: a declared name probed
   with `Object.hasOwn` and read by a varying key costs about 13 ns where
   Ajv's generated code reads it by a fixed name in under 2 ns, and the
-  validator generates no code by design. The rest is per keyword: a leading
-  `type` costs one more call and a repeated type test (`validateTypedDouble`
-  in packages/validate/src/schema.js, about 10 ns), and one `required` name
-  about 17 ns. Wanted: those per-keyword costs gone, every answer unchanged,
-  non-JSON values included.
+  validator generates no code by design. A `required` name is one more
+  such probe, and a name `properties` also declares is probed twice:
+  skipping the second probe reads a member that a getter deleted during
+  validation as absent, which the two modes answer differently today
+  (`{ properties: { a: { type: 'string' }, b: false }, required: ['b'] }`
+  on `{ get a() { delete this.b; return 'x'; }, b: 1 }`: true when
+  validation stops at the first failure, false when errors are collected).
+  `additionalProperties` lists the instance's keys (`Object.keys`), and a
+  member such as `{ type: 'string', minLength: 1 }` still tests its type
+  twice (the combining closure, then the string keywords' own test,
+  packages/validate/src/string.js). Wanted: those costs gone, every answer
+  unchanged, non-JSON values included.
 - [ ] **A type-only item schema answers an `undefined` element by the mode.**
   When validation stops at the first failure, `{ prefixItems: [{ type:
   'boolean' }] }` (and `items: { type: 'boolean' }`) refuses `[undefined]`
@@ -348,6 +356,28 @@ delete it or fix it.
   repeated where `uniqueItems: true` reads them as unique. Wanted: one
   symmetric relation that tells these values apart, which `const`, `enum`
   and both `uniqueItems` forms then answer by.
+- [ ] **`required` reads three kinds of non-JSON member by the keywords
+  beside it.** An Array subclass instance: `{ properties: { a: {} },
+  required: ['a'] }` refuses it when validation stops at the first failure
+  and accepts it when errors are collected, and `{ required: ['a'] }`
+  accepts it (the `required` closures in packages/validate/src/object.js
+  and schema.js pass any `Array.isArray` value; the properties walk asserts
+  `required` after `isObjectType`, which reads such an instance as an
+  object). `{ constructor: Array }`: the first accepts it (no object
+  keyword applies to it), the second refuses it. A non-enumerable own
+  member: `{ required: ['a'] }` accepts `Object.defineProperty({}, 'a', {
+  value: 1 })` and `{ required: ['a'], maxProperties: 5 }` refuses it (the
+  closures that also count the members, and `dependentRequired`, look a
+  name up in `Object.keys`, the others with `Object.hasOwn`). Wanted: one
+  reading of each, whatever sits beside `required`, in both modes.
+- [ ] **An item schema of `required` alone counts an inherited member
+  when validation stops at the first failure.** `{ items: { required:
+  ['a'] } }` accepts `[Object.create({ a: 1 })]` in the first-failure mode
+  and refuses it when errors are collected, as `{ required: ['a'] }`
+  refuses `Object.create({ a: 1 })`: the item shortcut in
+  packages/validate/src/array.js (`compileItemValidator`) tests a name
+  `Object.prototype` does not carry with `in`. Wanted: the own-member
+  reading in both modes.
 
 ## @jarenjs/view & @jarenjs/app
 

@@ -73,6 +73,22 @@ describe('Schema Object Type', function () {
       }), 'missing email address');
     });
 
+    it('asserts required beside a properties that names no member, in both modes', function () {
+      for (const options of [{}, { skipErrors: false, collectErrors: true }]) {
+        for (const schema of [{ properties: {}, required: ['a'] }, { type: 'object', properties: {}, required: ['a'] }]) {
+          const validate = new JarenValidator(options).compile(schema);
+          const verdict = (data) => {
+            const result = validate(data);
+            return typeof result === 'object' ? result.valid : result;
+          };
+          const label = `${JSON.stringify(schema)} ${JSON.stringify(options)}`;
+          assert.isFalse(verdict({}), label);
+          assert.isFalse(verdict({ b: 1 }), label);
+          assert.isTrue(verdict({ a: 1 }), label);
+        }
+      }
+    });
+
     it('should not trigger with an map as type', function () {
       const validate = compiler.compile({ type: 'map' });
       assert.isFalse(validate({}), 'does not validate an object');

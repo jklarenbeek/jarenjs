@@ -975,15 +975,29 @@ Every closure a schema passes through is shared by every schema of its kind,
 so each one between the entry and the check that answers is a call that sees
 every schema's children. In the first-failure mode, a single `type` name
 first among the groups is tested by the combining closure itself (two and
-three groups); a lone `items`/`prefixItems` walk, and a lone bound or
-`multipleOf`, test their own instance type instead of sitting inside a
-guarding wrapper; the element walk calls a tuple position directly; a tuple
-whose every position compiles to a constant answer or a type-only test (a
-boolean schema, one asserting nothing, a lone single-name `type`), with a
-boolean or absent keyword past them and no annotation kept, is tested by code
-(`isPurePosition`) with no call per element, and reads no element past its
-positions; and a reference resolved on first use counts toward the depth
-bound in its own closure, calling its target directly once it is known.
+three groups), or, when it names `object` or `array` and the group of that
+kind comes next, by that group's own instance test, which is the type's
+predicate (`isObjectType`, `isArrayClass`): the object group, and a lone
+homogeneous `items` walk, report the type fault themselves; a lone
+`items`/`prefixItems` walk, and a lone bound or `multipleOf`, test their own
+instance type instead of sitting inside a guarding wrapper; the element walk
+calls a tuple position directly; a tuple whose every position compiles to a
+constant answer or a type-only test (a boolean schema, one asserting
+nothing, a lone single-name `type`), with a boolean or absent keyword past
+them and no annotation kept, is tested by code (`isPurePosition`) with no
+call per element, and reads no element past its positions; homogeneous
+`items` of one such test, where no annotation is kept and no item location
+is read, are tested by the same code, every element read;
+a type-only schema compiles to one test per type name that every such
+schema shares (`typeOnlyTest`), so a member walk tells it, and a schema
+asserting nothing, apart by identity and tests the member by code
+(`isPureMember`); `properties` with `required`, alone or with
+`additionalProperties` and nothing else where no annotation is kept and no
+member location is read, is one closure (`compilePropertiesWalk`): with
+`additionalProperties` it walks the instance's keys in their order, as the
+general walk does, matching a key at the schema's next position without its
+map; and a reference resolved on first use counts toward the depth bound in
+its own closure, calling its target directly once it is known.
 
 ### 3. Compile-Time Readings Kept
 

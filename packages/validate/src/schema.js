@@ -26,6 +26,7 @@ import {
   createIsSchemaTypeHandler,
   schemaTypeCode,
   isSchemaType,
+  typeOnlyTest,
   hasSchemaReference,
   schemaReference,
   hasRefSiblings,
@@ -492,42 +493,17 @@ export function compileSchemaObject(schemaObj, jsonSchema) {
 
   // Fast path: type-only schema (most common case: {"type": "string"})
   if (vocabValidation && keyCount === 1 && jsonSchema.type !== undefined) {
-    const type = jsonSchema.type;
-    // Only handle single type strings here (not arrays of types)
-    if (typeof type === 'string') {
-      const addError = schemaObj.createErrorHandler(type, 'type');
-
-      switch (type) {
-        case 'string':
-          return function validateTypeStringOnly(data, dataPath) {
-            return data === undefined || typeof data === 'string' || addError(data, dataPath);
-          };
-        case 'number':
-          return function validateTypeNumberOnly(data, dataPath) {
-            return data === undefined || (typeof data === 'number' && !isNaN(data)) || addError(data, dataPath);
-          };
-        case 'integer':
-          return function validateTypeIntegerOnly(data, dataPath) {
-            return data === undefined || Number.isInteger(data) || addError(data, dataPath);
-          };
-        case 'boolean':
-          return function validateTypeBooleanOnly(data, dataPath) {
-            return data === undefined || typeof data === 'boolean' || addError(data, dataPath);
-          };
-        case 'array':
-          return function validateTypeArrayOnly(data, dataPath) {
-            return data === undefined || Array.isArray(data) || addError(data, dataPath);
-          };
-        case 'object':
-          return function validateTypeObjectOnly(data, dataPath) {
-            return data === undefined || (typeof data === 'object' && data !== null && !Array.isArray(data))
-              || addError(data, dataPath);
-          };
-        case 'null':
-          return function validateTypeNullOnly(data, dataPath) {
-            return data === undefined || data === null || addError(data, dataPath);
-          };
-      }
+    // A single type name (not a list of them) has a test every schema naming
+    // it shares, which a member walk tells apart by identity; where a fault
+    // records nothing, that test is the whole validator.
+    const test = typeOnlyTest(jsonSchema.type);
+    if (test !== undefined) {
+      if (schemaObj.options.skipErrors)
+        return test;
+      const addError = schemaObj.createErrorHandler(jsonSchema.type, 'type');
+      return function validateTypeOnly(data, dataPath) {
+        return test(data) || addError(data, dataPath);
+      };
     }
   }
 
@@ -616,7 +592,8 @@ export function compileSchemaObject(schemaObj, jsonSchema) {
 
   const validators = [];
   // A single type name first among the groups, while the first failure
-  // decides, is tested by the combining closure itself (below).
+  // decides, is tested by the combining closure itself (below), or by the
+  // array or object group right after it.
   let typeCode = -1;
   let typeError = null;
   if (vocabValidation) {
@@ -643,8 +620,16 @@ export function compileSchemaObject(schemaObj, jsonSchema) {
   addFunctionToArray(validators, compileFormatBasic(schemaObj, jsonSchema));
   addFunctionToArray(validators, compileContentSchema(schemaObj, jsonSchema));
 
-  addFunctionToArray(validators, compileArraySchema(schemaObj, jsonSchema));
-  addFunctionToArray(validators, compileObjectSchema(schemaObj, jsonSchema));
+  // A leading `type: 'array'` or `type: 'object'` that no group precedes may
+  // be tested by the group of that kind: its own instance test is the type's
+  // predicate (isArrayClass, isObjectType), so it reports the type fault
+  // through `typed.error` and marks the type taken, a call and a repeated
+  // test fewer than the combining closure.
+  const typed = typeCode >= 0 ? { error: typeError, taken: false } : null;
+  addFunctionToArray(validators, compileArraySchema(schemaObj, jsonSchema,
+    validators.length === 0 && jsonSchema.type === 'array' ? typed : null));
+  addFunctionToArray(validators, compileObjectSchema(schemaObj, jsonSchema,
+    validators.length === 0 && jsonSchema.type === 'object' ? typed : null));
 
   addFunctionToArray(validators, compileCombineSchema(schemaObj, jsonSchema));
   addFunctionToArray(validators, compileConditionSchema(schemaObj, jsonSchema));
@@ -662,7 +647,7 @@ export function compileSchemaObject(schemaObj, jsonSchema) {
     ? (validator) => validator
     : (validator) => wrapUnevaluated(schemaObj, jsonSchema, validator);
 
-  if (typeCode >= 0) {
+  if (typed !== null && !typed.taken) {
     const code = typeCode;
     const addError = typeError;
     if (validators.length === 0)

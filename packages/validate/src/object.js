@@ -1,8 +1,7 @@
 //@ts-check
 
 import {
-  // isObjectClass, // to specific
-  isObjectType, // slowerc
+  isObjectType,
   isArrayClass,
   getObjectType,
 } from '@jarenjs/core';
@@ -27,6 +26,14 @@ import {
   memberPath,
   extendsChildLocations,
   OBJECT_CHILD_KEYWORDS,
+  otherKind,
+  isTypeOnlyString,
+  isTypeOnlyNumber,
+  isTypeOnlyInteger,
+  isTypeOnlyBoolean,
+  isTypeOnlyArray,
+  isTypeOnlyObject,
+  isTypeOnlyNull,
 } from './tools.js';
 
 import {
@@ -690,70 +697,131 @@ export function compileObjectChildren(schemaObj, jsonSchema) {
 }
 
 
-export function compileObjectSchema(schemaObj, jsonSchema) {
-  if (isOfSchemaType(jsonSchema, 'map'))
-    return undefined;
+/**
+ * The validator of a schema's object keywords, or undefined when it holds
+ * none that asserts anything.
+ * @param {import('./index.js').ValidationObject} schemaObj
+ * @param {object} jsonSchema
+ * @param {{ error: (data: unknown, dataPath: string) => boolean, taken: boolean } | null} [typed] -
+ *   A leading `type: 'object'` no other keyword group precedes, in the
+ *   first-failure mode: the validator then tests it too, failing through
+ *   `typed.error`, and sets `typed.taken`
+ * @returns {Function | undefined}
+ */
+export function compileObjectSchema(schemaObj, jsonSchema, typed = null) {
+  const validate = compileObjectGroup(schemaObj, jsonSchema, typed === null ? null : typed.error);
+  if (typed !== null && validate !== undefined)
+    typed.taken = true;
+  return validate;
+}
 
-  // Fast path: properties(+required)-only schema in skipErrors mode.
-  // Iterate the (fixed) schema keys with direct property access instead of
-  // allocating Object.keys(data) and doing a map lookup per data key;
-  // required membership is a per-key Object.hasOwn probe.
-  if (schemaObj.options.skipErrors
-    && jsonSchema.patternProperties == null
-    && jsonSchema.additionalProperties == null
-    && jsonSchema.propertyNames == null
-    && jsonSchema.dependencies == null
-    && jsonSchema.dependentSchemas == null
-    && jsonSchema.dependentRequired == null
-    && jsonSchema.minProperties == null
-    && jsonSchema.maxProperties == null
-    && (jsonSchema.required == null || isArrayClass(jsonSchema.required))
-    && getObjectType(jsonSchema.properties) != null) {
-    const propsMap = buildPropertyValidators(schemaObj, jsonSchema);
-    if (propsMap == null)
-      return undefined;
+// The member tests a member walk calls no closure for, in the order
+// isPureMember switches on them: a schema asserting nothing, then the
+// shared type-only tests (typeOnlyTest in tools.js).
+const PURE_MEMBERS = [trueThat, isTypeOnlyString, isTypeOnlyNumber, isTypeOnlyInteger,
+  isTypeOnlyBoolean, isTypeOnlyArray, isTypeOnlyObject, isTypeOnlyNull];
 
-    // required belongs to the validation vocabulary; assert nothing when
-    // the metaschema disables it.
-    const requiredKeys = schemaObj.options.vocabValidation !== false
-      ? getArrayClassMinItems(jsonSchema.required, 1) || null
+/**
+ * The answer of the member test at `code` (a PURE_MEMBERS index), called by
+ * name: a walk testing a member through it calls no closure.
+ * @param {number} code
+ * @param {unknown} data
+ * @returns {boolean}
+ */
+function isPureMember(code, data) {
+  switch (code) {
+    case 0: return trueThat(data);
+    case 1: return isTypeOnlyString(data);
+    case 2: return isTypeOnlyNumber(data);
+    case 3: return isTypeOnlyInteger(data);
+    case 4: return isTypeOnlyBoolean(data);
+    case 5: return isTypeOnlyArray(data);
+    case 6: return isTypeOnlyObject(data);
+    default: return isTypeOnlyNull(data);
+  }
+}
+
+/**
+ * The fast path's member walks, in skipErrors mode: `properties` (whose
+ * validators `propsMap` holds) with `required`, alone or with
+ * `additionalProperties` (`closed`). A member whose schema is type-only or
+ * asserts nothing is tested by code (isPureMember), any other by its
+ * validator.
+ * @param {import('./index.js').ValidationObject} schemaObj
+ * @param {object} jsonSchema
+ * @param {Map<string, Function>} propsMap
+ * @param {boolean} closed
+ * @param {((data: unknown, dataPath: string) => boolean) | null} typeError - A leading type's fault (compileObjectSchema)
+ * @returns {Function}
+ */
+function compilePropertiesWalk(schemaObj, jsonSchema, propsMap, closed, typeError) {
+  // required belongs to the validation vocabulary; assert nothing when
+  // the metaschema disables it.
+  const requiredKeys = schemaObj.options.vocabValidation !== false
+    ? getArrayClassMinItems(jsonSchema.required, 1) || null
+    : null;
+  const requiredCount = requiredKeys === null ? 0 : requiredKeys.length;
+
+  const propKeys = Array.from(propsMap.keys());
+  const propValidators = Array.from(propsMap.values());
+  const propCount = propKeys.length;
+  const codes = propValidators.map((validator) => PURE_MEMBERS.indexOf(validator));
+
+  if (closed) {
+    const additional = getBoolOrObjectClass(jsonSchema.additionalProperties);
+    const additionalFalse = additional === false;
+    const additionalValidator = (additional != null && additional !== false && additional !== true)
+      ? schemaObj.createValidator(additional, 'additionalProperties')
       : null;
-    const requiredCount = requiredKeys === null ? 0 : requiredKeys.length;
+    const additionalCode = additionalValidator === null ? -1 : PURE_MEMBERS.indexOf(additionalValidator);
+    const propIndex = new Map(propKeys.map((key, i) => [key, i]));
 
-    const propKeys = Array.from(propsMap.keys());
-    const propValidators = Array.from(propsMap.values());
-    const propCount = propKeys.length;
-
-    const root = schemaObj.root;
-    const track = root.usesUnevaluated;
-
-    // In skipErrors mode a member's location is read only by a location reader
-    // at or below the member's schema; skip the per-property string concat
-    // otherwise.
-    const extendPaths = extendsChildLocations(schemaObj, jsonSchema, OBJECT_CHILD_KEYWORDS);
-    if (extendPaths || track) {
-      return function validateObjectPropertiesOnlyTracked(data, dataPath, dataRoot) {
-        if (!isObjectType(data)) return true;
+    // The general path's walk: the instance's own keys in their order, so a
+    // member additionalProperties refuses answers before any member after
+    // it is read. A key at the schema's next position is matched without
+    // the map.
+    return function validateObjectClosedProperties(data, dataPath, dataRoot) {
+      if (!isObjectType(data)) return otherKind(typeError, data, dataPath);
+      const dataKeys = Object.keys(data);
+      // as the required keyword's own guard does, an array isObjectType
+      // admits (a subclass instance, an own `constructor` member) passes
+      if (requiredCount > 0 && !Array.isArray(data)) {
         for (let i = 0; i < requiredCount; ++i) {
           if (!Object.hasOwn(data, requiredKeys[i]))
             return false;
         }
-        for (let i = 0; i < propCount; ++i) {
-          const key = propKeys[i];
-          // Object.hasOwn: avoid picking up inherited members like toString
-          if (Object.hasOwn(data, key)) {
-            const childPath = extendPaths ? memberPath(dataPath, key) : dataPath;
-            if (propValidators[i](data[key], childPath, dataRoot, key) === false)
-              return false;
-            if (track) root.evalLog.add(data, key);
-          }
+      }
+      let next = 0;
+      for (let i = 0; i < dataKeys.length; ++i) {
+        const key = dataKeys[i];
+        const at = key === propKeys[next] ? next : propIndex.get(key);
+        if (at !== undefined) {
+          next = at + 1;
+          const code = codes[at];
+          if (code >= 0 ? !isPureMember(code, data[key]) : propValidators[at](data[key], dataPath, dataRoot, key) === false)
+            return false;
         }
-        return true;
-      };
-    }
+        else if (additionalFalse)
+          return false;
+        else if (additionalValidator !== null && (additionalCode >= 0
+          ? !isPureMember(additionalCode, data[key])
+          : additionalValidator(data[key], dataPath, dataRoot, key) === false))
+          return false;
+      }
+      return true;
+    };
+  }
 
-    return function validateObjectPropertiesOnly(data, dataPath, dataRoot) {
-      if (!isObjectType(data)) return true;
+  const root = schemaObj.root;
+  const track = root.usesUnevaluated;
+
+  // In skipErrors mode a member's location is read only by a location reader
+  // at or below the member's schema; skip the per-property string concat
+  // otherwise.
+  const extendPaths = extendsChildLocations(schemaObj, jsonSchema, OBJECT_CHILD_KEYWORDS);
+  if (extendPaths || track) {
+    return function validateObjectPropertiesOnlyTracked(data, dataPath, dataRoot) {
+      if (!isObjectType(data)) return otherKind(typeError, data, dataPath);
       for (let i = 0; i < requiredCount; ++i) {
         if (!Object.hasOwn(data, requiredKeys[i]))
           return false;
@@ -761,12 +829,64 @@ export function compileObjectSchema(schemaObj, jsonSchema) {
       for (let i = 0; i < propCount; ++i) {
         const key = propKeys[i];
         // Object.hasOwn: avoid picking up inherited members like toString
-        if (Object.hasOwn(data, key)
-          && propValidators[i](data[key], dataPath, dataRoot, key) === false)
-          return false;
+        if (Object.hasOwn(data, key)) {
+          const childPath = extendPaths ? memberPath(dataPath, key) : dataPath;
+          if (propValidators[i](data[key], childPath, dataRoot, key) === false)
+            return false;
+          if (track) root.evalLog.add(data, key);
+        }
       }
       return true;
     };
+  }
+
+  return function validateObjectPropertiesOnly(data, dataPath, dataRoot) {
+    if (!isObjectType(data)) return otherKind(typeError, data, dataPath);
+    for (let i = 0; i < requiredCount; ++i) {
+      if (!Object.hasOwn(data, requiredKeys[i]))
+        return false;
+    }
+    for (let i = 0; i < propCount; ++i) {
+      const key = propKeys[i];
+      // Object.hasOwn: avoid picking up inherited members like toString
+      if (Object.hasOwn(data, key)) {
+        const code = codes[i];
+        if (code >= 0 ? !isPureMember(code, data[key]) : propValidators[i](data[key], dataPath, dataRoot, key) === false)
+          return false;
+      }
+    }
+    return true;
+  };
+}
+
+function compileObjectGroup(schemaObj, jsonSchema, typeError) {
+  if (isOfSchemaType(jsonSchema, 'map'))
+    return undefined;
+
+  // Fast path: properties(+required) in skipErrors mode, alone or with
+  // additionalProperties. Alone, the walk iterates the (fixed) schema keys
+  // with direct property access instead of allocating Object.keys(data) and
+  // doing a map lookup per data key; required membership is a per-key
+  // Object.hasOwn probe. With additionalProperties, where no annotation is
+  // kept and no member location is read, it walks the instance's keys as
+  // the general path does, with fewer calls.
+  const closed = jsonSchema.additionalProperties != null;
+  if (schemaObj.options.skipErrors
+    && jsonSchema.patternProperties == null
+    && jsonSchema.propertyNames == null
+    && jsonSchema.dependencies == null
+    && jsonSchema.dependentSchemas == null
+    && jsonSchema.dependentRequired == null
+    && jsonSchema.minProperties == null
+    && jsonSchema.maxProperties == null
+    && (jsonSchema.required == null || isArrayClass(jsonSchema.required))
+    && getObjectType(jsonSchema.properties) != null
+    && (!closed || (!schemaObj.root.usesUnevaluated
+      && !extendsChildLocations(schemaObj, jsonSchema, OBJECT_CHILD_KEYWORDS)))) {
+    const propsMap = buildPropertyValidators(schemaObj, jsonSchema);
+    // A `properties` naming no member leaves `required` to the general path.
+    if (propsMap != null)
+      return compilePropertiesWalk(schemaObj, jsonSchema, propsMap, closed, typeError);
   }
 
   const objectPrimitives = compileObjectPrimitives(schemaObj, jsonSchema);
@@ -787,7 +907,7 @@ export function compileObjectSchema(schemaObj, jsonSchema) {
       if (isObjectType(data)) {
         return validatePrimitives(data, dataPath, dataRoot, undefined);
       }
-      return true;
+      return otherKind(typeError, data, dataPath);
     };
   }
 
@@ -798,7 +918,7 @@ export function compileObjectSchema(schemaObj, jsonSchema) {
         return validatePrimitives(data, dataPath, dataRoot, dataKeys)
           && validateChildren(data, dataPath, dataRoot, dataKeys);
       }
-      return true;
+      return otherKind(typeError, data, dataPath);
     };
   }
 
@@ -813,7 +933,7 @@ export function compileObjectSchema(schemaObj, jsonSchema) {
       const primitives = validatePrimitives(data, dataPath, dataRoot, dataKeys);
       return validateChildren(data, dataPath, dataRoot, dataKeys) && primitives;
     }
-    return true;
+    return otherKind(typeError, data, dataPath);
   };
 }
 //#endregion

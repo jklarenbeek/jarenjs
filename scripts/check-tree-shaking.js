@@ -687,7 +687,8 @@ if (asyncLiveLeak.length)
 // Raised to 1,132,300 (measured 1132234): the validator building a document with an `$id` once and naming that object under its URI without the empty fragment (index 226), and the type message's article read from the type's first letter (messages 5), add 231.
 // Raised to 1,132,700 (measured 1132630): multipleOf's exact route read on a value's printed digits with the step's factors of 2 and 5 counted once (decimal 358), and the regex format's literal reading split out so a string not written as a literal compiles once (string 38), add 396.
 // Raised to 1,133,600 (measured 1133509): a tuple of boolean and type-only positions tested by code with no call per element (array 643), and uniqueItems comparing an array of up to 8 items pairwise with no Set, its deep compare skipping the leaf tests for two objects (object 236), add 879.
-if (clientBytes > 1133600)
+// Raised to 1,135,200 (measured 1135134): a leading object or array type tested by its keyword group, type-only members and items tested by code, and properties beside additionalProperties walked in one closure (object 1,092, tools 644, array 265, schema -392, minifier shifts elsewhere 16), add 1625.
+if (clientBytes > 1135200)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 

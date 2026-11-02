@@ -547,10 +547,11 @@ Ref chains (`A -> B -> C`) are flattened at load time by `restoreSchemaRefsInMap
 
 Common schema shapes compile to specialized inline validators instead of composed closure chains:
 
-- Type-only schemas (`{ "type": "string" }`) compile to a single `typeof` check.
-- A tuple whose positions all compile to a constant answer or a type-only test (a boolean schema, one asserting nothing, a lone single-name `type`), with a boolean or absent keyword past them, is tested in the first-failure mode, when no annotation is kept, by one switch over those tests instead of a closure call per element, and no element past its positions is read.
+- Type-only schemas (`{ "type": "string" }`) compile to a single `typeof` check; in the first-failure mode, to one such test per type name that every schema naming it shares, which a member walk runs by a switch instead of a closure call.
+- A tuple whose positions all compile to a constant answer or a type-only test (a boolean schema, one asserting nothing, a lone single-name `type`), with a boolean or absent keyword past them, is tested in the first-failure mode, when no annotation is kept, by one switch over those tests instead of a closure call per element, and no element past its positions is read; homogeneous `items` of one such test take the same switch where no item location is read, every element read.
 - Single-constraint number, string, array and object schemas call their one validator directly, without pass-through stubs.
-- Properties-only object schemas iterate the (fixed) schema keys with `Object.hasOwn` instead of allocating `Object.keys(data)` and doing a map lookup per data key.
+- A leading `type: 'object'`, or a `type: 'array'` beside a lone homogeneous `items`, is tested by that walk's own instance test (the same predicate), one call and one test fewer.
+- Properties-only object schemas iterate the (fixed) schema keys with `Object.hasOwn` instead of allocating `Object.keys(data)` and doing a map lookup per data key; with `additionalProperties` (and nothing else but `required`) one closure walks the instance's keys in their order, matching a key at the schema's next position without the map.
 - The default object-children loop is a fused per-key pass over `properties`/`patternProperties`/`additionalProperties`/dependencies that bails on the first failure without per-key result objects.
 
 ### 5. Skip Error Creation
@@ -592,7 +593,8 @@ Format validators try a cheap common-case check before a comprehensive one, e.g.
 
 Internally, `skipErrors: false` accumulates raw `InternalValidationError`
 records in `ValidationRoot.#errors`. Those records are an implementation
-detail: they carry the offending object, the expected value and a timestamp,
+detail: they carry the offending object, the keyword, the expected value and
+the value found,
 keyed for cheap allocation on the failure path rather than for reading.
 
 `collectErrors: true` is the public surface. It implies `skipErrors: false`
