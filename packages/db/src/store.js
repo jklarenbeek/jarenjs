@@ -750,6 +750,10 @@ function bracketed(connection, begin, fn, failed) {
 
 /** What an open's shape work run outside the write lock raises at the first table it must create. */
 const MUST_CREATE = new Error('the open must create a table');
+/** What a collection's point reads and its read-modify-write read tell
+ * the driver they prepare, shared by every collection: a driver reads it. */
+const READ_ONLY_STATEMENT = Object.freeze({ readOnly: true });
+const BUFFERED_STATEMENT = Object.freeze({ buffered: true });
 
 /**
  * Run an open's shape work, `verify(creates)`, holding no write lock where
@@ -1122,14 +1126,32 @@ function collectionCore(connection, collection, plan, validate, queryState, stor
   };
   /** @type {Map<string, any>} */
   const statements = new Map();
+  /**
+   * A collection statement, prepared on its first use under `name`.
+   * @param {string} name
+   * @param {string | (() => string)} sql - its text, or what builds it: a
+   *   statement prepared once never reads its text again, so a write or a
+   *   point read builds none
+   * @param {any} [metadata]
+   */
   const prepared = (name, sql, metadata = undefined) => {
     let statement = statements.get(name);
     if (statement === undefined) {
-      statement = connection.prepare(sql, metadata);
+      statement = connection.prepare(typeof sql === 'function' ? sql() : sql, metadata);
       statements.set(name, statement);
     }
     return statement;
   };
+  const insertSql = () => dialect.dml.insert(shape);
+  const insertAllocatedSql = () => dialect.dml.insertAllocated(shape);
+  const upsertSql = () => dialect.dml.upsert(shape);
+  const getSql = () => dialect.dml.get(shape);
+  const getForUpdateSql = () => dialect.dml.getForUpdate(shape);
+  const keySpellingsSql = () => dialect.dml.keySpellings(shape);
+  const rekeySql = () => dialect.dml.rekey(shape);
+  const deleteSql = () => dialect.dml.del(shape);
+  const patchFallbackSql = () =>
+    dialect.dml.updateDoc(shape, dialect.jsonEncode(dialect.parameterRef(1, 'doc')), 2);
   const stats = { patchTranslated: 0, patchFallback: 0 };
   const engine = createQueryEngine({
     connection, state: queryState, collection, physicalPlan: plan,
@@ -1234,7 +1256,7 @@ function collectionCore(connection, collection, plan, validate, queryState, stor
    * rounded can name another number.
    */
   const spellingsOf = (/** @type {number} */ key) =>
-    chain(prepared('keySpellings', dialect.dml.keySpellings(shape), { readOnly: true }), (statement) =>
+    chain(prepared('keySpellings', keySpellingsSql, READ_ONLY_STATEMENT), (statement) =>
       chain(statement.all([canonicalKeyText(key), key]), (/** @type {any[]} */ rows) =>
         rows.filter((row) => row.key === canonicalKeyText(key)
           || keyMemberOf(JSON.parse(row.doc), collection.keySegments) === key)));
@@ -1265,7 +1287,7 @@ function collectionCore(connection, collection, plan, validate, queryState, stor
           { docPath: collection.docPath, collection: collection.name, key });
       }
       if (spellings.length === 0 || spellings[0] === canonical) return null;
-      return runWrite('rekey', dialect.dml.rekey(shape), [canonical, spellings[0]], key, false);
+      return runWrite('rekey', rekeySql, [canonical, spellings[0]], key, false);
     });
   };
   /** A write addressed by `key`: converged first, atomically with it,
@@ -1318,7 +1340,7 @@ function collectionCore(connection, collection, plan, validate, queryState, stor
     chain(spelledTwice(key) ? converge(/** @type {number} */ (key)) : null, () =>
       chain(attempt(() => chain(
         // buffered: a point read under the write, never a server cursor
-        prepared('getForUpdate', dialect.dml.getForUpdate(shape), { buffered: true }), (statement) =>
+        prepared('getForUpdate', getForUpdateSql, BUFFERED_STATEMENT), (statement) =>
           chain(statement.get([whereKey(key)]), (row) => (row === undefined ? undefined : JSON.parse(row.doc)))),
       (error) => wrapDriverError(error, { docPath: collection.docPath, collection: collection.name, key })), fn)),
   'immediate');
@@ -1339,7 +1361,7 @@ function collectionCore(connection, collection, plan, validate, queryState, stor
   // decoding in the same transaction so an unrepresentable allocated
   // key refuses without committing a document the caller cannot address.
   const insertAllocated = (doc) => connection.transaction(() => chain(
-    runWrite('insertAllocated', dialect.dml.insertAllocated(shape),
+    runWrite('insertAllocated', insertAllocatedSql,
       [JSON.stringify(doc), ...derivedFor(doc)], undefined, true),
     (row) => row.key));
 
@@ -1370,7 +1392,7 @@ function collectionCore(connection, collection, plan, validate, queryState, stor
           const row = rows.find((/** @type {any} */ r) => r.key === canonicalKeyText(key)) ?? rows[0];
           return row === undefined ? undefined : JSON.parse(row.doc);
         })
-        : chain(prepared('get', dialect.dml.get(shape), { readOnly: true }), (statement) =>
+        : chain(prepared('get', getSql, READ_ONLY_STATEMENT), (statement) =>
           chain(statement.get([whereKey(key)]),
             (row) => (row === undefined ? undefined : JSON.parse(row.doc))))),
       (error) => wrapDriverError(error, { docPath: collection.docPath, collection: collection.name, key }));
@@ -1381,7 +1403,7 @@ function collectionCore(connection, collection, plan, validate, queryState, stor
       const key = resolveWriteKey(doc, undefined);
       if (key === null) return insertAllocated(doc);
       return keyedWrite(key, () => chain(
-        chain(prepared('insert', dialect.dml.insert(shape)), (statement) =>
+        chain(prepared('insert', insertSql), (statement) =>
           insertAttempt(connection, () => statement.run([bindKey(key), JSON.stringify(doc), ...derivedFor(doc)]),
             () => writeErrorDetails(plan, collection.name, collection.docPath, key),
             () => ({ tableSql: dialect.quoteIdentifier(plan.table), columns: [dialect.quoteIdentifier(plan.keyColumn)],
@@ -1398,7 +1420,7 @@ function collectionCore(connection, collection, plan, validate, queryState, stor
         return insertAllocated(doc);
       }
       const upsert = () => chain(
-        runWrite('upsert', dialect.dml.upsert(shape),
+        runWrite('upsert', upsertSql,
           [bindKey(key), JSON.stringify(doc), ...derivedFor(doc)], key, false),
         () => key);
       // a plain put is one statement; one with a precondition reads what
@@ -1445,8 +1467,7 @@ function collectionCore(connection, collection, plan, validate, queryState, stor
         if (translated === null) {
           stats.patchFallback++;
           return chain(
-            runWrite('patchFallback',
-              dialect.dml.updateDoc(shape, dialect.jsonEncode(dialect.parameterRef(1, 'doc')), 2),
+            runWrite('patchFallback', patchFallbackSql,
               [JSON.stringify(next), ...derivedFor(next), whereKey(key)], key, false),
             () => next);
         }
@@ -1464,7 +1485,7 @@ function collectionCore(connection, collection, plan, validate, queryState, stor
       requireKey(key, collection.name, collection.docPath);
       const expected = readWriteOptions(collection.name, options, 'delete', true);
       const remove = () => chain(
-        runWrite('delete', dialect.dml.del(shape), [whereKey(key)], key, false),
+        runWrite('delete', deleteSql, [whereKey(key)], key, false),
         (result) => Number(result?.changes ?? 0) > 0);
       return expected === null ? keyedWrite(key, remove)
         : atomically(key, (current) => {
