@@ -293,7 +293,8 @@ function validate(data, benchUi) {
   const overall = data.summary?.overall;
   if (overall !== undefined) {
     out.push(cards([
-      { title: 'Success-only totals', value: `${Math.round(overall.jarenSuccessTime)} ms vs ${Math.round(overall.ajvSuccessTime)} ms`, note: 'Jaren vs Ajv, tests both can run' },
+      { title: 'Success-only totals', value: `${Math.round(overall.jarenSuccessTime)} ms vs ${Math.round(overall.ajvSuccessTime)} ms`,
+        note: `Jaren vs Ajv, tests both can run${data.metadata?.runs > 1 ? `; each test the median of ${data.metadata.runs} runs` : ''}` },
       { title: 'Jaren wins', value: `${overall.successOnly?.jarenWins ?? '—'} tests`, note: `Ajv wins ${overall.successOnly?.ajvWins ?? '—'}` },
       // both columns are derived: a literal for Jaren's side stops being
       // true the moment a test regresses

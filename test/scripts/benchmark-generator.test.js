@@ -23,7 +23,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 
-import { buildHeadlines, carryHeadlines, mergeToml, parseArgs, SUITE_ORDER } from '../../benchmark/website-data.js';
+import { buildHeadlines, carryHeadlines, medianReport, mergeToml, parseArgs, SUITE_ORDER } from '../../benchmark/website-data.js';
 import { geoMeanRatio, ratioSummary } from '../../benchmark/derive.js';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
@@ -223,5 +223,43 @@ describe('the published meta.json describes its measurements honestly', () => {
     const passed = Object.values(stats).reduce((n, s) => n + s.passed, 0);
     const total = Object.values(stats).reduce((n, s) => n + s.passed + s.failed + s.errors, 0);
     assert.strictEqual(row.conformance, `${passed} / ${total}`);
+  });
+});
+
+describe('the validator rows are the median of several runs', () => {
+  /** A profiler report of one draft7 run, one timed row per [description, Jaren time, Ajv time]. */
+  const report = (rows, failures = {}) => ({
+    metadata: { drafts: ['draft7'], iterations: 10 },
+    results: rows.map(([description, jarenTime, ajvTime]) => ({
+      suite: '/type.json', draft: 'draft7', description, assertions: 2, testCount: 2,
+      isSuccessTest: true, jarenFailures: failures[description] ?? 0, ajvFailures: 0,
+      jarenTime, ajvTime, jarenTotal: jarenTime * 10, ajvTotal: ajvTime * 10,
+      ratio: jarenTime / ajvTime, diff: jarenTime - ajvTime, diffPercent: ((jarenTime - ajvTime) / ajvTime) * 100,
+    })),
+    errors: [],
+    skipped: [],
+  });
+
+  it('times each row by its median Jaren and Ajv runs and counts the wins from them', () => {
+    // a: Jaren loses the second run alone; b: Ajv wins two of three
+    const merged = medianReport([
+      report([['a', 1, 3], ['b', 4, 2]]),
+      report([['b', 4, 5], ['a', 5, 1]]),
+      report([['a', 2, 4], ['b', 4, 3]]),
+    ], 10);
+    const rows = Object.fromEntries(merged.results.map((r) => [r.description, r]));
+    assert.deepStrictEqual([rows.a.jarenTime, rows.a.ajvTime, rows.a.ratio], [2, 3, 2 / 3]);
+    assert.deepStrictEqual([rows.b.jarenTime, rows.b.ajvTime, rows.b.ratio], [4, 3, 4 / 3]);
+    const overall = merged.summary.overall;
+    assert.deepStrictEqual([overall.successOnly.jarenWins, overall.successOnly.ajvWins], [1, 1]);
+    assert.deepStrictEqual([overall.jarenSuccessTime, overall.ajvSuccessTime], [60, 60]);
+  });
+
+  it('refuses runs that disagree on a verdict', () => {
+    assert.throws(() => medianReport([
+      report([['a', 1, 3]]),
+      report([['a', 1, 3]], { a: 1 }),
+      report([['a', 1, 3]]),
+    ], 10), /disagree on a verdict/);
   });
 });

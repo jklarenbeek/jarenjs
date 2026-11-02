@@ -57,6 +57,7 @@ import { fileURLToPath } from 'url';
 import { Float64, geoMean } from '@jarenjs/core/math';
 
 import { geoMeanRatio } from './derive.js';
+import { buildProfileReport } from './profiler.js';
 import { assertSiteOutput, assertSuiteOutput } from '../scripts/lib/site-contract.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -126,19 +127,25 @@ function parseArgs(argv) {
   return options;
 }
 
-function runTool(args, { capture = false } = {}) {
-  console.log(`\n$ node ${args.join(' ')}`);
-  const result = spawnSync(process.execPath, args, {
-    cwd: ROOT,
-    encoding: 'utf8',
-    stdio: capture ? ['ignore', 'pipe', 'inherit'] : 'inherit',
-    maxBuffer: 64 * 1024 * 1024,
-  });
+function runTool(args, { capture = false, cpus = null } = {}) {
+  console.log(`\n$ ${cpus === null ? '' : `taskset -c ${cpus} `}node ${args.join(' ')}`);
+  const result = cpus === null
+    ? spawnSync(process.execPath, args, spawnOptions(capture))
+    : spawnSync('taskset', ['-c', cpus, process.execPath, ...args], spawnOptions(capture));
   if (result.status !== 0)
     throw new Error(`'node ${args.join(' ')}' exited with status ${result.status}`);
   if (capture)
     process.stdout.write(result.stdout);
   return result.stdout;
+}
+
+function spawnOptions(capture) {
+  return {
+    cwd: ROOT,
+    encoding: 'utf8',
+    stdio: capture ? ['ignore', 'pipe', 'inherit'] : 'inherit',
+    maxBuffer: 64 * 1024 * 1024,
+  };
 }
 
 function readJson(filepath) {
@@ -205,15 +212,88 @@ function sig4(n) {
 
 //#region suites
 
+// The validator rows are the median of three profiler processes, each pinned
+// to the same CPUs where the host can pin them: one process's rows move with
+// its compiler and garbage-collection schedule, and the count of rows each
+// engine wins swung by about 20 between single runs.
+const VALIDATE_RUNS = 3;
+
+/** The CPUs a validator run is pinned to (the last four), or null where this host cannot pin. */
+function validateCpus() {
+  const count = os.availableParallelism();
+  if (process.platform !== 'linux' || count < 8)
+    return null;
+  if (spawnSync('taskset', ['--version'], { stdio: 'ignore' }).status !== 0)
+    return null;
+  return `${count - 4}-${count - 1}`;
+}
+
+/** The middle measurement, or the mean of the middle two. */
+function median(values) {
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = sorted.length >> 1;
+  return sorted.length % 2 === 1 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
+const rowKey = (row) => JSON.stringify([row.suite, row.draft, row.description]);
+
+/** The verdicts of a profiler report, which every run of one checkout repeats. */
+const verdictsOf = (report) => JSON.stringify(
+  [...report.results, ...report.errors, ...(report.skipped ?? [])]
+    .map((row) => [rowKey(row), row.isSuccessTest, row.jarenFailures, row.ajvFailures,
+      row.timingSkipped ?? false, row.error ?? null, row.jarenError ?? null, row.ajvError ?? null])
+    .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)));
+
+/**
+ * One profiler report from several runs of it: each timed row's times are
+ * the median of its runs, its ratio and difference follow from those, and
+ * the summary is rebuilt from the rows by the profiler's own report. The
+ * runs must agree on every verdict.
+ */
+function medianReport(reports, iterations) {
+  const [first] = reports;
+  const verdicts = verdictsOf(first);
+  if (reports.some((report) => verdictsOf(report) !== verdicts))
+    throw new Error('The validator runs disagree on a verdict; a median of their timings would mix different tests.');
+  const runsOf = new Map(first.results.map((row) => [rowKey(row), []]));
+  for (const report of reports) {
+    for (const row of report.results)
+      runsOf.get(rowKey(row)).push(row);
+  }
+  const results = [...runsOf.values()].map((runs) => {
+    const jarenTime = median(runs.map((row) => row.jarenTime));
+    const ajvTime = median(runs.map((row) => row.ajvTime));
+    const diff = jarenTime - ajvTime;
+    return {
+      ...runs[0],
+      jarenTime,
+      jarenTotal: median(runs.map((row) => row.jarenTotal)),
+      ajvTime,
+      ajvTotal: median(runs.map((row) => row.ajvTotal)),
+      ratio: ajvTime > 0 ? jarenTime / ajvTime : 0,
+      diff,
+      diffPercent: ajvTime > 0 ? (diff / ajvTime) * 100 : 0,
+    };
+  });
+  return buildProfileReport([...results, ...first.errors, ...(first.skipped ?? [])],
+    { iterations, drafts: first.metadata.drafts });
+}
+
 function generateValidate(tmp, options) {
-  const file = path.join(tmp, 'validate.json');
-  runTool([
-    'benchmark/profiler.js', '--profile-all',
-    '--draft', 'draft7,draft2019-09,draft2020-12',
-    '--iterations', String(options.iterations),
-    '--output', 'json', '--filepath', file,
-  ]);
-  const raw = readJson(file);
+  const cpus = validateCpus();
+  const runs = options.quick ? 1 : VALIDATE_RUNS;
+  const reports = [];
+  for (let run = 1; run <= runs; run++) {
+    const file = path.join(tmp, `validate-${run}.json`);
+    runTool([
+      'benchmark/profiler.js', '--profile-all',
+      '--draft', 'draft7,draft2019-09,draft2020-12',
+      '--iterations', String(options.iterations),
+      '--output', 'json', '--filepath', file,
+    ], { cpus });
+    reports.push(readJson(file));
+  }
+  const raw = medianReport(reports, options.iterations);
   // Slim the per-test rows: keep what the drill-down displays, round the
   // timings (17-digit doubles double the payload), drop derivable fields.
   // NOTE the ratio convention flip: profiler.js emits jarenTime/ajvTime
@@ -234,7 +314,7 @@ function generateValidate(tmp, options) {
     jarenFailures: r.jarenFailures,
     ajvFailures: r.ajvFailures,
   }));
-  return { metadata: raw.metadata, summary: raw.summary, results, errors: raw.errors };
+  return { metadata: { ...raw.metadata, runs, cpus }, summary: raw.summary, results, errors: raw.errors };
 }
 
 function generateJsonPath(tmp, options) {
@@ -1770,7 +1850,7 @@ async function main() {
 // file runs the generator.
 export {
   parseArgs, buildHeadlines, carryHeadlines, mergeToml, fileProvenance,
-  serializeMeta, serializeSuite, SUITE_ORDER,
+  serializeMeta, serializeSuite, SUITE_ORDER, medianReport,
 };
 
 if (process.argv[1] !== undefined

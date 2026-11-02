@@ -2838,6 +2838,17 @@
             },
             "drafts": {
               "type": "array"
+            },
+            "runs": {
+              "description": "How many profiler processes each row's times are the median of.",
+              "type": "number"
+            },
+            "cpus": {
+              "description": "The CPUs each of those processes was pinned to, or null where the host could not pin them.",
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           "additionalProperties": false
