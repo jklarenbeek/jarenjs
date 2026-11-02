@@ -69,27 +69,62 @@ const compileUniqueItems = (schemaObj, jsonSchema) =>
 
 //#region Tuple
 
+// The position tests that read the element alone and record nothing, in
+// the order isPurePosition switches on them: the constant answers (a boolean
+// schema, or one asserting nothing) and the type-only tests of the
+// first-failure mode.
+const PURE_POSITIONS = [trueThat, falseThat, validateString, validateNumber, validateInteger,
+  validateBoolean, validateArray, validateObject, validateNull];
+
+/**
+ * The answer of the position test at `code` (a PURE_POSITIONS index),
+ * called by name: a walk testing a tuple through it calls no closure per
+ * element.
+ * @param {number} code
+ * @param {unknown} data
+ * @returns {boolean}
+ */
+function isPurePosition(code, data) {
+  switch (code) {
+    case 0: return trueThat(data);
+    case 1: return falseThat(data);
+    case 2: return validateString(data);
+    case 3: return validateNumber(data);
+    case 4: return validateInteger(data);
+    case 5: return validateBoolean(data);
+    case 6: return validateArray(data);
+    case 7: return validateObject(data);
+    default: return validateNull(data);
+  }
+}
+
 // An empty tuple has no positions: every element lies past it, so the
 // additional keyword applies to all of them. An empty prefixItems never gets
 // here (readPrefixItems reads it as absent, and items then applies to all).
 // A tuple is a validator per position and the one every element past them
 // answers by (a constant where the additional keyword is a boolean); the
 // element walks call them directly, a call per element fewer than a
-// dispatching wrapper.
+// dispatching wrapper. `codes` holds each position's PURE_POSITIONS index
+// when every position is one of those tests, else it is null.
 function compileTupleInternal(schemaObj, jsonSchema, itemsKey, additionalKey) {
   const tuple = jsonSchema[itemsKey];
 
   // Pre-compile all validators upfront
   const positions = new Array(tuple.length);
+  /** @type {number[] | null} */
+  let codes = new Array(tuple.length);
   for (let i = 0; i < tuple.length; i++) {
     positions[i] = compileItemValidator(schemaObj, tuple[i], itemsKey, i);
+    const code = PURE_POSITIONS.indexOf(positions[i]);
+    if (code < 0) codes = null;
+    else if (codes !== null) codes[i] = code;
   }
 
   const additional = getBoolOrObjectClass(jsonSchema[additionalKey], true);
   const rest = typeof additional === 'boolean'
     ? (additional ? trueThat : falseThat)
     : schemaObj.createValidator(additional, additionalKey);
-  return { positions, rest };
+  return { positions, rest, codes };
 }
 
 function compilePrefixItems(schemaObj, jsonSchema) {
@@ -288,6 +323,30 @@ function compileItemValidator(schemaObj, itemSchema, key, index) {
   return schemaObj.createValidator(itemSchema, key, index);
 }
 
+// The tests of the type-only item schemas, one per type name, shared by
+// every schema naming it (a tuple tells them apart by identity).
+function validateString(data) {
+  return typeof data === 'string';
+}
+function validateNumber(data) {
+  return typeof data === 'number' && !isNaN(data);
+}
+function validateInteger(data) {
+  return typeof data === 'number' && Number.isInteger(data);
+}
+function validateBoolean(data) {
+  return typeof data === 'boolean';
+}
+function validateArray(data) {
+  return Array.isArray(data);
+}
+function validateObject(data) {
+  return typeof data === 'object' && data !== null && !Array.isArray(data);
+}
+function validateNull(data) {
+  return data === null;
+}
+
 /**
  * Compile a validator for simple type-only schemas
  * @param {unknown} type - The `type` keyword value
@@ -295,34 +354,13 @@ function compileItemValidator(schemaObj, itemSchema, key, index) {
  */
 function compileTypeOnlyValidator(type) {
   switch (type) {
-    case 'string':
-      return function validateString(data) {
-        return typeof data === 'string';
-      };
-    case 'number':
-      return function validateNumber(data) {
-        return typeof data === 'number' && !isNaN(data);
-      };
-    case 'integer':
-      return function validateInteger(data) {
-        return typeof data === 'number' && Number.isInteger(data);
-      };
-    case 'boolean':
-      return function validateBoolean(data) {
-        return typeof data === 'boolean';
-      };
-    case 'array':
-      return function validateArray(data) {
-        return Array.isArray(data);
-      };
-    case 'object':
-      return function validateObject(data) {
-        return typeof data === 'object' && data !== null && !Array.isArray(data);
-      };
-    case 'null':
-      return function validateNull(data) {
-        return data === null;
-      };
+    case 'string': return validateString;
+    case 'number': return validateNumber;
+    case 'integer': return validateInteger;
+    case 'boolean': return validateBoolean;
+    case 'array': return validateArray;
+    case 'object': return validateObject;
+    case 'null': return validateNull;
     default:
       // not a single type name (a union array, an unknown word): the
       // caller compiles the full schema instead
@@ -427,14 +465,16 @@ function compileArrayChildren(schemaObj, jsonSchema, alone) {
   // validator, every other one by `rest`.
   let positions = [];
   let rest = null;
+  /** @type {number[] | null} */
+  let codes = null;
   let itemsTrue = false;
 
   if (prefixItems != null) {
     // Draft 2020-12+ style prefixItems
-    ({ positions, rest } = compilePrefixItems(schemaObj, jsonSchema));
+    ({ positions, rest, codes } = compilePrefixItems(schemaObj, jsonSchema));
   } else if (isTuple) {
     // Draft 7 style tuple items
-    ({ positions, rest } = compileTupleItems(schemaObj, jsonSchema));
+    ({ positions, rest, codes } = compileTupleItems(schemaObj, jsonSchema));
   } else if (items !== undefined) {
     // Single schema for all items
     const itemsSchema = getObjectType(items);
@@ -473,6 +513,25 @@ function compileArrayChildren(schemaObj, jsonSchema, alone) {
     }
 
     const addError = schemaObj.createErrorHandler(0, 'items');
+
+    // A tuple of pure positions with a constant past them, where a fault
+    // records nothing and no annotation is kept: the positions are tested
+    // by code, and the elements past them by their count alone. An array
+    // whose constructor is Array answers the class test by a read of its
+    // own, which meets only arrays; any other value by isArrayClass.
+    if (codes !== null && !track && root.options.skipErrors && (rest === trueThat || rest === falseThat)) {
+      const closed = rest === falseThat;
+      return function validatePureTuple(data) {
+        if (alone && !((Array.isArray(data) && data.constructor === Array) || isArrayClass(data))) return true;
+        const len = data.length;
+        if (closed && len > count) return false;
+        const end = count < len ? count : len;
+        for (let i = 0; i < end; ++i) {
+          if (!isPurePosition(codes[i], data[i])) return false;
+        }
+        return true;
+      };
+    }
 
     return function validateArrayItemsOnly(data, dataPath, dataRoot) {
       if (alone && !isArrayClass(data)) return true;

@@ -977,9 +977,13 @@ every schema's children. In the first-failure mode, a single `type` name
 first among the groups is tested by the combining closure itself (two and
 three groups); a lone `items`/`prefixItems` walk, and a lone bound or
 `multipleOf`, test their own instance type instead of sitting inside a
-guarding wrapper; the element walk calls a tuple position directly; and a
-reference resolved on first use counts toward the depth bound in its own
-closure, calling its target directly once it is known.
+guarding wrapper; the element walk calls a tuple position directly; a tuple
+whose every position compiles to a constant answer or a type-only test (a
+boolean schema, one asserting nothing, a lone single-name `type`), with a
+boolean or absent keyword past them and no annotation kept, is tested by code
+(`isPurePosition`) with no call per element, and reads no element past its
+positions; and a reference resolved on first use counts toward the depth
+bound in its own closure, calling its target directly once it is known.
 
 ### 3. Compile-Time Readings Kept
 

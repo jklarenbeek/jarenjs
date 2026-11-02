@@ -286,21 +286,68 @@ delete it or fix it.
   millions, where the studio shows 20. Wanted: a decision between collapsing
   repeated errors and bounding what a failing applicator keeps; either
   changes the collected list (an upgrade note).
-- [ ] **A tuple validates at under a third of Ajv's speed.** The validator
-  benchmark's 'uniqueItems=false with an array of items' rows (a two-position
-  `prefixItems`/`items` tuple of `type: boolean`, where `uniqueItems: false`
-  runs no comparison) take 3.3–3.4× Ajv's time in every draft, and the '…and
-  additionalItems=false' rows 2.0×: the cost is the tuple path
-  (`compileTupleInternal` in packages/validate/src/array.js). Wanted: a
-  tuple's positions tested at Ajv's speed, every answer unchanged.
-- [ ] **`uniqueItems` compares items at about two-thirds of Ajv's speed.**
-  The 'uniqueItems validation' rows take 1.27–1.39× Ajv's time, and core's
-  `isUniqueDeepArray` alone runs 1.4–1.6× Ajv's pairwise `fast-deep-equal`
-  over those arrays: `equalsDeepAt` runs its leaf type checks on every member
-  before the container check and reads both prototypes per container pair,
-  and the array walk allocates a `Set` past 8 scalars and a list of complex
-  items on every call. Wanted: the same answers, non-JSON values included,
-  at Ajv's speed.
+- [ ] **A two-position tuple validates at half to three-fifths of Ajv's
+  speed.** The validator benchmark's 'uniqueItems=false with an array of
+  items' rows (a two-position `prefixItems`/`items` tuple of `type: boolean`;
+  `uniqueItems: false` compiles to nothing) take 1.6–2.0× Ajv's time and the
+  '…and additionalItems=false' rows 1.3–1.4× (medians of eight pinned runs).
+  Such a tuple is tested by code with no call per element (`isPurePosition`
+  in packages/validate/src/array.js); what is left is the call into the
+  walk's closure and its array-class test per validation, where Ajv's
+  generated function tests both positions inline. Wanted: such a tuple at
+  Ajv's speed, every answer unchanged.
+- [ ] **`uniqueItems` compares items at about nine-tenths of Ajv's speed.**
+  The 'uniqueItems validation' rows take 1.08–1.16× Ajv's time (medians of
+  eight pinned runs); core's `isUniqueDeepArray` over those arrays runs about
+  1.1× Ajv's pairwise `fast-deep-equal` (an array of up to 8 items is
+  compared pairwise, with no `Set` and no list of its containers), and
+  `equalsDeep` alone over their container pairs 0.94–1.19×. Wanted: the same
+  answers, non-JSON values included, at Ajv's speed.
+- [ ] **A typical object schema validates at a fifth of Ajv's speed.**
+  Compiled alone and called warm (best of five rounds of two million calls on
+  one pinned core), `{ type: 'object', properties: { query: { type: 'string'
+  }, limit: { type: 'integer' }, exact: { type: 'boolean' } }, required:
+  ['query'], additionalProperties: false }` takes about 86 ns per valid call
+  where Ajv takes 18, the same without `required` and
+  `additionalProperties` 66 ns to 12, and `{ type: 'array', items: { type:
+  'string' } }` over three strings 37 ns to 11; in the validator benchmark
+  the 'required' rows take about 2× Ajv's time and the 'properties' rows
+  1.3×. Part of it is how a closure reads a member: a declared name probed
+  with `Object.hasOwn` and read by a varying key costs about 13 ns where
+  Ajv's generated code reads it by a fixed name in under 2 ns, and the
+  validator generates no code by design. The rest is per keyword: a leading
+  `type` costs one more call and a repeated type test (`validateTypedDouble`
+  in packages/validate/src/schema.js, about 10 ns), and one `required` name
+  about 17 ns. Wanted: those per-keyword costs gone, every answer unchanged,
+  non-JSON values included.
+- [ ] **A type-only item schema answers an `undefined` element by the mode.**
+  When validation stops at the first failure, `{ prefixItems: [{ type:
+  'boolean' }] }` (and `items: { type: 'boolean' }`) refuses `[undefined]`
+  and an array with a hole there; collecting errors, or with another keyword
+  beside `type`, it accepts them, as the `type` keyword accepts an absent
+  value everywhere else (the type-only item tests in
+  packages/validate/src/array.js against `validateType*Only` in schema.js).
+  Wanted: one answer in both modes; either choice changes the other mode's.
+- [ ] **A lone `type` and a `type` beside another keyword read three non-JSON
+  values differently.** `{ type: 'number' }` refuses `NaN` and `{ type:
+  'number', maxLength: 1e9 }` accepts it; `{ type: 'object' }` refuses an
+  Array subclass instance and accepts `{ constructor: Array }`, and with
+  another keyword the other way round; `{ type: 'array' }` the reverse of
+  `object` (the type-only fast path in schema.js tests `typeof` and
+  `Array.isArray`, `isSchemaType` in tools.js `isNumberType`, `isObjectType`
+  and `isArrayClass`). Wanted: one reading of each value, whatever sits
+  beside `type`.
+- [ ] **`equalsDeep` takes values whose state is not in their members as
+  equal.** Two distinct symbols compare equal, so do `new Number(1)` and `new
+  Number(2)`, and two `Boolean` wrappers; `new String('ab')` equals `'ab'`
+  but `'ab'` does not equal `new String('ab')`; an object whose prototype is
+  `Function.prototype` equals any function, not the other way round. `const`
+  and `enum` answer by it, and the `$data` form of `uniqueItems`
+  (packages/validate/src/dollar-data.js), which compares every pair by it,
+  reads `[new String('a'), 'a']` and `[Symbol('a'), Symbol('b')]` as
+  repeated where `uniqueItems: true` reads them as unique. Wanted: one
+  symmetric relation that tells these values apart, which `const`, `enum`
+  and both `uniqueItems` forms then answer by.
 
 ## @jarenjs/view & @jarenjs/app
 

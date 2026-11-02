@@ -51,16 +51,19 @@ export function equalsDeep(target, source) {
  */
 function equalsDeepAt(target, source, depth) {
   if (target === source) return true;
-  if (target == null) return false;
-  if (source == null) return false;
-  if (isBooleanType(target)) return false;
-  if (isBooleanType(source)) return false;
+  // two objects pass every leaf test: only another pair is read by them
+  if (typeof target !== 'object' || typeof source !== 'object' || target === null || source === null) {
+    if (target == null) return false;
+    if (source == null) return false;
+    if (isBooleanType(target)) return false;
+    if (isBooleanType(source)) return false;
 
-  if (isFn(target))
-    return isFn(source) && target.toString() === source.toString();
+    if (isFn(target))
+      return isFn(source) && target.toString() === source.toString();
 
-  if (isScalarType(target))
-    return false;
+    if (isScalarType(target))
+      return false;
+  }
 
   if (depth > RECURSIVE_COMPARE_DEPTH)
     return equalsDeepWalk(target, source);
@@ -734,36 +737,50 @@ export function compareJsonScalarLt(a, b, orEqual = false) {
 }
 
 /**
- * Check if all items in an array are unique using deep equality
+ * Check if all items in an array are unique using deep equality.
+ *
+ * The primitives are compared first, by `===` (`NaN` unlike itself, `-0`
+ * like `0`), and never equal an object or a function; then each pair of
+ * those by `equalsDeep`, the earlier item first. Up to 8 items are
+ * compared pairwise; past 8 the primitives are deduplicated through a Set.
  * @param {any[]} arr - The array to check
  * @returns {boolean} True if all items are unique
  */
 export function isUniqueDeepArray(arr) {
   if (!Array.isArray(arr) || arr.length < 2) return true;
 
-  // Small all-scalar arrays: pairwise === beats allocating a Set.
-  if (arr.length <= 8) {
-    let allScalar = true;
-    for (let i = 0; i < arr.length; i++) {
+  // Small arrays: pairwise beats allocating a Set and a list of the
+  // containers, in the order the walk below compares them.
+  const length = arr.length;
+  if (length <= 8) {
+    let containers = 0;
+    for (let i = 0; i < length; i++) {
       const item = arr[i];
       if ((typeof item === 'object' && item !== null) || typeof item === 'function') {
-        allScalar = false;
-        break;
+        containers++;
+        continue;
+      }
+      for (let j = i + 1; j < length; j++) {
+        if (item === arr[j]) return false;
       }
     }
-    if (allScalar) {
-      for (let i = 0; i < arr.length; i++) {
-        for (let j = i + 1; j < arr.length; j++) {
-          if (arr[i] === arr[j]) return false;
-        }
+    if (containers < 2) return true;
+    for (let i = 0; i < length; i++) {
+      const item = arr[i];
+      if ((typeof item !== 'object' || item === null) && typeof item !== 'function') continue;
+      for (let j = i + 1; j < length; j++) {
+        const other = arr[j];
+        if (((typeof other === 'object' && other !== null) || typeof other === 'function')
+          && equalsDeep(item, other))
+          return false;
       }
-      return true;
     }
+    return true;
   }
 
-  // Primitives are compared with === by equalsDeep and can never deep-equal
-  // an object, so they dedupe in O(n) through a Set (SameValueZero); only
-  // objects, arrays and functions need the pairwise deep comparison.
+  // A primitive is compared with the other primitives only, so they dedupe
+  // in O(n) through a Set (SameValueZero); only objects, arrays and
+  // functions need the pairwise deep comparison.
   let seen = null;
   let complex = null;
   for (let i = 0; i < arr.length; i++) {

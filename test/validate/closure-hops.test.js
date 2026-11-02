@@ -7,9 +7,12 @@ import { JarenValidator } from '@jarenjs/validate';
 // each closure between the entry and the check that answers is a call that
 // sees every schema's children. The element walk of a lone `items` or
 // `prefixItems`, a tuple position, and a reference resolved on first use run
-// without a closure of their own around them; these tests count the frames
-// between the entry and a format check, and pin that each shortcut answers as
-// the composition it replaces.
+// without a closure of their own around them, and a tuple whose positions
+// compile to constant answers or type-only tests is tested by code with no
+// call per element; these tests count the frames between the entry and a
+// format check, pin that each shortcut answers as the composition it
+// replaces, and that the tuple tested by code reads no element past its
+// positions.
 
 /**
  * Frames between `entry` and the format check, in the first-failure mode, on
@@ -111,5 +114,51 @@ describe('the shortcuts answer as the compositions they replace', function () {
           `${JSON.stringify(schema)} ${show(value)}`);
       }
     }
+  });
+
+  it('a tuple of boolean and single-type positions answers as when errors are collected', function () {
+    const draft7 = 'http://json-schema.org/draft-07/schema#';
+    const schemas = [{ prefixItems: [{ type: 'boolean' }, { type: 'boolean' }] },
+      { prefixItems: [{ type: 'integer' }, { type: 'string' }], items: false }, { prefixItems: [true, false] },
+      { prefixItems: [{}, { type: 'null' }], items: true }, { prefixItems: [{ type: 'number' }], uniqueItems: true },
+      { items: [{ type: 'number' }, { type: 'object' }, { type: 'array' }], additionalItems: false, $schema: draft7 },
+      { items: [], additionalItems: false, $schema: draft7 }, { items: [{ type: 'string' }], additionalItems: {}, $schema: draft7 },
+      { prefixItems: [{ type: 'string' }], items: { type: 'integer' } }, { prefixItems: [{ type: 'string' }, { minimum: 1 }], items: false }];
+    const arrays = [[], [true], [true, false], [false, true, 'x', 'x'], [1, 'a'], [1.5, 'a', null], [NaN], [null, null],
+      [1.5, {}, []], [2, [], {}], [2, {}, [], 'past'], [{}, {}], ['a', 1], [true, true],
+      { constructor: Array, length: 1, 0: 'x' }, ArraySubclass.from([1, 'x']), ...VALUES];
+    for (const schema of schemas) {
+      for (const value of arrays) {
+        assert.strictEqual(verdict(schema, value), verdict(schema, value, { skipErrors: false, collectErrors: true }),
+          `${JSON.stringify(schema)} ${show(value)}`);
+      }
+    }
+  });
+});
+
+describe('a tuple of boolean and single-type positions', function () {
+  // An array whose element reads are counted.
+  const counted = (values) => {
+    const reads = { count: 0 };
+    const data = [];
+    values.forEach((value, i) => Object.defineProperty(data, i, {
+      get() { reads.count++; return value; },
+      enumerable: true,
+    }));
+    return { data, reads };
+  };
+
+  it('reads its positions only, and no element when it is closed and the array is longer', function () {
+    const open = new JarenValidator().compile({ prefixItems: [{ type: 'boolean' }, { type: 'boolean' }] });
+    const closed = new JarenValidator().compile({ prefixItems: [{ type: 'boolean' }, true], items: false });
+    const longer = counted([true, false, 'x', 'y', 'z']);
+    assert.strictEqual(open(longer.data), true);
+    assert.strictEqual(longer.reads.count, 2);
+    const shorter = counted([true]);
+    assert.strictEqual(open(shorter.data), true);
+    assert.strictEqual(shorter.reads.count, 1);
+    const past = counted([true, false, 'x']);
+    assert.strictEqual(closed(past.data), false);
+    assert.strictEqual(past.reads.count, 0);
   });
 });

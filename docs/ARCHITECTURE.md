@@ -548,6 +548,7 @@ Ref chains (`A -> B -> C`) are flattened at load time by `restoreSchemaRefsInMap
 Common schema shapes compile to specialized inline validators instead of composed closure chains:
 
 - Type-only schemas (`{ "type": "string" }`) compile to a single `typeof` check.
+- A tuple whose positions all compile to a constant answer or a type-only test (a boolean schema, one asserting nothing, a lone single-name `type`), with a boolean or absent keyword past them, is tested in the first-failure mode, when no annotation is kept, by one switch over those tests instead of a closure call per element, and no element past its positions is read.
 - Single-constraint number, string, array and object schemas call their one validator directly, without pass-through stubs.
 - Properties-only object schemas iterate the (fixed) schema keys with `Object.hasOwn` instead of allocating `Object.keys(data)` and doing a map lookup per data key.
 - The default object-children loop is a fused per-key pass over `properties`/`patternProperties`/`additionalProperties`/dependencies that bails on the first failure without per-key result objects.
