@@ -150,13 +150,11 @@ describe('a run visits the groups in a named order', () => {
     assert.deepEqual(list, ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'], 'the listed order is left as it was');
   });
 
-  it('records the order and the settled heap a run measured with', () => {
-    const report = buildProfileReport(rows(), { ...options, order: 'reverse', heapSettled: true });
+  it('records the order a run measured with', () => {
+    const report = buildProfileReport(rows(), { ...options, order: 'reverse' });
     assert.equal(report.metadata.order, 'reverse');
-    assert.equal(report.metadata.heapSettled, true);
     const plain = buildProfileReport(rows(), options);
     assert.equal('order' in plain.metadata, false);
-    assert.equal('heapSettled' in plain.metadata, false);
   });
 });
 

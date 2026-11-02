@@ -277,16 +277,13 @@ function profileTest(test, iterations, draft, remotes, successOnly = false, suit
     }
   }
 
-  // Settle the heap before the timed rounds (where the process exposes a
-  // collection, `--expose-gc`): the garbage earlier rows and this warm-up
-  // left is not collected inside a timed round of this row.
-  globalThis.gc?.();
-
   // Profile both engines in interleaved rounds, alternating which runs
   // first, and keep each engine's fastest round: one garbage collection or
   // deoptimization landing in a single timed block once inflated a published
   // row by ~65x, a different row on every run. The totals stay "per
-  // iteration x iterations".
+  // iteration x iterations". No collection is forced between rows: one
+  // before each row's timed rounds (or before its warm-up) slowed both
+  // engines' median row about twofold, and a tenth of the rows fivefold.
   /** @param {any} engine @param {any} validator */
   const timeRound = (engine, validator) => {
     const start = performance.now();
@@ -740,7 +737,6 @@ export function buildProfileReport(results, options) {
       successTests: successResults.length,
       drafts: options.drafts,
       ...(options.order === undefined ? {} : { order: options.order }),
-      ...(options.heapSettled === undefined ? {} : { heapSettled: options.heapSettled }),
     },
     summary: {
       overall: {
@@ -834,7 +830,6 @@ async function profileDraft(draft, options, availableDrafts) {
 async function main() {
   const options = parseProfilerArgs();
   options.visit = visitOrder(options.order);
-  options.heapSettled = typeof globalThis.gc === 'function';
   const availableDrafts = await discoverAvailableDrafts();
 
   // Validate draft options

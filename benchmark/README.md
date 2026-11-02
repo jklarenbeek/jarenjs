@@ -125,22 +125,25 @@ results are written to `benchmark/results/results.html`.
 **How a row is timed.** Both engines compile the group's schema and run its
 tests 2,000 times untimed, then run `--iterations` passes over them in three
 interleaved rounds (alternating which engine runs first), and each engine's row
-is its fastest round. Run with `--expose-gc`, the profiler collects the heap
-after the warm-up and before the timed rounds, so garbage earlier rows left is
-not collected inside a later row's round. Ajv compiles a schema into generated code that V8 optimizes
-only after many calls; the earlier method (100 warmup passes, one timed block
-per engine) timed it before that and flattered Jaren, and a single garbage
-collection inside the one block inflated a random row by up to ~65×. Rows of a
+is its fastest round. The profiler forces no garbage collection between rows:
+forcing one before each row's timed rounds was measured to slow both engines'
+median row about twofold, and a tenth of the rows fivefold or more, and forcing
+it before the warm-up instead still slowed the median row 1.8 to 2 times, so
+those rows timed the collection's aftermath, not the engines. Ajv compiles a
+schema into generated code that V8 optimizes only after many calls; the
+earlier method (100 warmup passes, one timed block per engine) timed it before
+that and flattered Jaren, and a single garbage collection inside the one block
+inflated a random row by up to ~65×. Rows of a
 few nanoseconds are mostly adaptor overhead for both engines, so the suite
 total and the geometric mean are the robust comparisons, not the count of
 rows each engine wins.
 
 **How the website's rows are measured.** `benchmark/website-data.js` runs
 the profiler three times, each in a fresh process pinned with `taskset` to
-the host's last four CPUs (unpinned where the host cannot pin), with
-`--expose-gc`, and each visiting the groups in its own order: as listed,
-reversed, and shuffled from seed 1. It publishes each row's median Jaren
-time and median Ajv time; the summary is rebuilt from those rows. A single
+the host's last four CPUs (unpinned where the host cannot pin), each
+visiting the groups in its own order: as listed, reversed, and shuffled
+from seed 1. It publishes each row's median Jaren time and median Ajv
+time; the summary is rebuilt from those rows. A single
 process's rows move with its compiler and garbage-collection schedule:
 about one row in ten does not keep its winner over three runs, and the
 count of rows each engine wins moved by about 20 between single runs. A
@@ -148,8 +151,8 @@ run visits in one order, so what earlier rows leave behind (garbage, the
 shared closures' state) reaches the same later rows in every run of that
 order, and a change elsewhere in the code moves it to other rows; three
 orders put each row at three places, and the median keeps the middle one.
-`metadata.runs`, `metadata.cpus`, `metadata.orders` and
-`metadata.heapSettled` record the method; `--quick` measures one run.
+`metadata.runs`, `metadata.cpus` and `metadata.orders` record the method;
+`--quick` measures one run.
 
 **How the pass/fail columns are counted.** Each engine is scored over the
 tests *it* ran: a test where the other engine could not compile the schema

@@ -2856,10 +2856,6 @@
               "items": {
                 "type": "string"
               }
-            },
-            "heapSettled": {
-              "description": "Whether every process collected the heap before each row's timed rounds.",
-              "type": "boolean"
             }
           },
           "additionalProperties": false
