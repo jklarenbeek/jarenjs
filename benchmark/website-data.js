@@ -213,10 +213,13 @@ function sig4(n) {
 //#region suites
 
 // The validator rows are the median of three profiler processes, each pinned
-// to the same CPUs where the host can pin them: one process's rows move with
-// its compiler and garbage-collection schedule, and the count of rows each
-// engine wins swung by about 20 between single runs.
-const VALIDATE_RUNS = 3;
+// to the same CPUs where the host can pin them, each settling the heap before
+// every row and visiting the groups in an order of its own: one process's rows
+// move with its compiler and garbage-collection schedule, and a run visits in
+// one order, so what earlier rows leave behind reaches the same later rows in
+// every run of that order. The count of rows each engine wins swung by about
+// 20 between single runs.
+const VALIDATE_ORDERS = ['file', 'reverse', 'shuffle:1'];
 
 /** The CPUs a validator run is pinned to (the last four), or null where this host cannot pin. */
 function validateCpus() {
@@ -281,18 +284,18 @@ function medianReport(reports, iterations) {
 
 function generateValidate(tmp, options) {
   const cpus = validateCpus();
-  const runs = options.quick ? 1 : VALIDATE_RUNS;
-  const reports = [];
-  for (let run = 1; run <= runs; run++) {
-    const file = path.join(tmp, `validate-${run}.json`);
+  const orders = options.quick ? VALIDATE_ORDERS.slice(0, 1) : VALIDATE_ORDERS;
+  const reports = orders.map((order, index) => {
+    const file = path.join(tmp, `validate-${index + 1}.json`);
     runTool([
-      'benchmark/profiler.js', '--profile-all',
+      '--expose-gc', 'benchmark/profiler.js', '--profile-all',
       '--draft', 'draft7,draft2019-09,draft2020-12',
       '--iterations', String(options.iterations),
+      '--order', order,
       '--output', 'json', '--filepath', file,
     ], { cpus });
-    reports.push(readJson(file));
-  }
+    return readJson(file);
+  });
   const raw = medianReport(reports, options.iterations);
   // Slim the per-test rows: keep what the drill-down displays, round the
   // timings (17-digit doubles double the payload), drop derivable fields.
@@ -314,7 +317,11 @@ function generateValidate(tmp, options) {
     jarenFailures: r.jarenFailures,
     ajvFailures: r.ajvFailures,
   }));
-  return { metadata: { ...raw.metadata, runs, cpus }, summary: raw.summary, results, errors: raw.errors };
+  const heapSettled = reports.every((report) => report.metadata.heapSettled === true);
+  return {
+    metadata: { ...raw.metadata, runs: orders.length, cpus, orders, heapSettled },
+    summary: raw.summary, results, errors: raw.errors,
+  };
 }
 
 function generateJsonPath(tmp, options) {

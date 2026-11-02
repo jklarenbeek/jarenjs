@@ -2849,6 +2849,17 @@
                 "string",
                 "null"
               ]
+            },
+            "orders": {
+              "description": "The order each process visited the test groups in: file, reverse or shuffle:<seed>.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "heapSettled": {
+              "description": "Whether every process collected the heap before each row's timed rounds.",
+              "type": "boolean"
             }
           },
           "additionalProperties": false

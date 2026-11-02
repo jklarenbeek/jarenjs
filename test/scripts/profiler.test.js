@@ -5,7 +5,7 @@ import { mkdtempSync, readFileSync, existsSync, rmSync, mkdirSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseProfilerArgs, buildProfileReport, printConsoleTable, exportCsv } from '../../benchmark/profiler.js';
+import { parseProfilerArgs, buildProfileReport, printConsoleTable, exportCsv, visitOrder } from '../../benchmark/profiler.js';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const options = { drafts: ['draft7'], iterations: 1 };
@@ -132,6 +132,34 @@ describe('profiler conformance stays independent of timing filters', () => {
   });
 });
 
+describe('a run visits the groups in a named order', () => {
+  it('reads the order, as listed by default', () => {
+    assert.equal(parseProfilerArgs(['--profile-all']).order, 'file');
+    assert.equal(parseProfilerArgs(['--profile-all', '--order', 'shuffle:7']).order, 'shuffle:7');
+    assert.throws(() => parseProfilerArgs(['--profile-all', '--order', 'shuffle']), /--order must be file, reverse or shuffle:<seed>/);
+  });
+
+  it('visits as listed, reversed, or shuffled the same way for the same seed', () => {
+    const list = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
+    assert.deepEqual(visitOrder('file')(list), list);
+    assert.deepEqual(visitOrder('reverse')(list), ['h', 'g', 'f', 'e', 'd', 'c', 'b', 'a']);
+    const shuffled = visitOrder('shuffle:7')(list);
+    assert.deepEqual(visitOrder('shuffle:7')(list), shuffled, 'the same seed visits in the same order');
+    assert.notDeepEqual(shuffled, list);
+    assert.deepEqual([...shuffled].sort(), list, 'every group is visited once');
+    assert.deepEqual(list, ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'], 'the listed order is left as it was');
+  });
+
+  it('records the order and the settled heap a run measured with', () => {
+    const report = buildProfileReport(rows(), { ...options, order: 'reverse', heapSettled: true });
+    assert.equal(report.metadata.order, 'reverse');
+    assert.equal(report.metadata.heapSettled, true);
+    const plain = buildProfileReport(rows(), options);
+    assert.equal('order' in plain.metadata, false);
+    assert.equal('heapSettled' in plain.metadata, false);
+  });
+});
+
 describe('profiler arguments refuse unmeasured artifacts', () => {
   it('retains short and long options and defaults', () => {
     const long = parseProfilerArgs(['/type.json', '--profile', '--iterations', '3', '--output', 'json', '--draft', 'draft7', '--filepath', 'report.json', '--top', '2', '--verbose', '--success-only']);
@@ -153,6 +181,7 @@ describe('profiler arguments refuse unmeasured artifacts', () => {
       [...target, '--filepath'], [...target, '--filepath', ''],
       [...target, '--draft'], [...target, '--draft', ',,'],
       [...target, '--unknown'], [...target, '-z'],
+      [...target, '--order', 'sideways'], [...target, '--order'],
       ['--profile', '--iterations', '1'],
     ];
     for (const [index, args] of invalid.entries()) {

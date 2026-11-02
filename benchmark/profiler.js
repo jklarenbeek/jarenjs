@@ -22,6 +22,7 @@ import * as jaren from './adaptors/jaren.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'node:url';
+import { mulberry32, shuffle } from '@jarenjs/core/random';
 
 const DEFAULT_TEST_DRAFT = 'draft7';
 const DEFAULT_ITERATIONS = 1000;
@@ -149,7 +150,7 @@ export function parseProfilerArgs(args = process.argv.slice(2)) {
   const options = {
     targetFile: null, profile: false, profileAll: false,
     iterations: DEFAULT_ITERATIONS, output: 'console', verbose: false,
-    topN: null, drafts: [DEFAULT_TEST_DRAFT], successOnly: false, filepath: null,
+    topN: null, drafts: [DEFAULT_TEST_DRAFT], successOnly: false, filepath: null, order: 'file',
   };
   const value = (index, flag) => {
     const next = args[index];
@@ -176,6 +177,10 @@ export function parseProfilerArgs(args = process.argv.slice(2)) {
     }
     else if (arg === '--success-only') options.successOnly = true;
     else if (arg === '--filepath' || arg === '-f') options.filepath = value(++i, '--filepath');
+    else if (arg === '--order') {
+      options.order = value(++i, '--order');
+      if (!/^(file|reverse|shuffle:\d+)$/.test(options.order)) throw new Error('--order must be file, reverse or shuffle:<seed>');
+    }
     else if (arg.startsWith('-')) throw new Error(`Unknown option: ${arg}`);
     else {
       if (options.targetFile !== null) throw new Error('Only one test file may be profiled');
@@ -185,6 +190,22 @@ export function parseProfilerArgs(args = process.argv.slice(2)) {
   if (!['console', 'csv', 'json'].includes(options.output)) throw new Error('--output must be console, csv or json');
   if (options.profile && !options.profileAll && !options.targetFile) throw new Error('--profile requires a test file');
   return options;
+}
+
+/**
+ * The order a run visits drafts, files and test groups in: as listed,
+ * reversed, or shuffled from one seeded stream, so the same seed visits in
+ * the same order on every host. A run visits in one order, so whatever its
+ * earlier rows leave behind (garbage, the shared closures' state) reaches
+ * the same later rows on every run of that order.
+ * @param {string} order - 'file', 'reverse' or 'shuffle:<seed>'
+ * @returns {<T>(list: T[]) => T[]} a fresh list in visiting order
+ */
+export function visitOrder(order) {
+  if (order === 'file') return (list) => [...list];
+  if (order === 'reverse') return (list) => [...list].reverse();
+  const random = mulberry32(Number(order.slice('shuffle:'.length)));
+  return (list) => shuffle(random, [...list]);
 }
 
 /**
@@ -256,6 +277,11 @@ function profileTest(test, iterations, draft, remotes, successOnly = false, suit
     }
   }
 
+  // Settle the heap before the timed rounds (where the process exposes a
+  // collection, `--expose-gc`): the garbage earlier rows and this warm-up
+  // left is not collected inside a timed round of this row.
+  globalThis.gc?.();
+
   // Profile both engines in interleaved rounds, alternating which runs
   // first, and keep each engine's fastest round: one garbage collection or
   // deoptimization landing in a single timed block once inflated a published
@@ -315,10 +341,10 @@ function profileTest(test, iterations, draft, remotes, successOnly = false, suit
  * @param {boolean} successOnly - If true, time only tests both engines pass; retain every verdict
  * @returns {Array} Array of profiling results
  */
-function profileSuite(fileKey, tests, iterations, draft, remotes, successOnly = false) {
+function profileSuite(fileKey, tests, iterations, draft, remotes, successOnly = false, visit = (list) => list) {
   const results = [];
 
-  for (const test of tests) {
+  for (const test of visit(tests)) {
     try {
       const profile = profileTest(test, iterations, draft, remotes, successOnly, fileKey);
       if (profile) {
@@ -713,6 +739,8 @@ export function buildProfileReport(results, options) {
       validTests: validResults.length,
       successTests: successResults.length,
       drafts: options.drafts,
+      ...(options.order === undefined ? {} : { order: options.order }),
+      ...(options.heapSettled === undefined ? {} : { heapSettled: options.heapSettled }),
     },
     summary: {
       overall: {
@@ -767,14 +795,14 @@ async function profileDraft(draft, options, availableDrafts) {
   if (options.profileAll) {
     console.log(`\nProfiling ${draft} with ${options.iterations} iterations each...`);
 
-    const suiteKeys = Object.keys(allTests).sort();
+    const suiteKeys = options.visit(Object.keys(allTests).sort());
     let completedSuites = 0;
 
     for (const fileKey of suiteKeys) {
       if (options.verbose) {
         console.log(`Profiling ${fileKey}...`);
       }
-      const suiteResults = profileSuite(fileKey, allTests[fileKey], options.iterations, schemaDraft, remotes, options.successOnly);
+      const suiteResults = profileSuite(fileKey, allTests[fileKey], options.iterations, schemaDraft, remotes, options.successOnly, options.visit);
       results.push(...suiteResults);
       completedSuites++;
 
@@ -794,7 +822,7 @@ async function profileDraft(draft, options, availableDrafts) {
     }
 
     console.log(`Profiling ${fileKey} with ${options.iterations} iterations (${draft})...\n`);
-    results = profileSuite(fileKey, allTests[fileKey], options.iterations, schemaDraft, remotes, options.successOnly);
+    results = profileSuite(fileKey, allTests[fileKey], options.iterations, schemaDraft, remotes, options.successOnly, options.visit);
   }
 
   return results.map(result => ({ ...result, requestedDraft: draft }));
@@ -805,6 +833,8 @@ async function profileDraft(draft, options, availableDrafts) {
  */
 async function main() {
   const options = parseProfilerArgs();
+  options.visit = visitOrder(options.order);
+  options.heapSettled = typeof globalThis.gc === 'function';
   const availableDrafts = await discoverAvailableDrafts();
 
   // Validate draft options
@@ -840,6 +870,7 @@ async function main() {
     console.log('                         Default: benchmark/results/profile-{timestamp}.{ext}');
     console.log('  --top N                Show only top N slowest tests');
     console.log('  --success-only         Time only tests both engines pass; retain all verdicts');
+    console.log('  --order ORDER          Visit drafts, files and groups as listed (file), reversed (reverse) or shuffled (shuffle:<seed>)');
     console.log('  --verbose, -v          Verbose output');
     process.exit(1);
   }
@@ -847,7 +878,7 @@ async function main() {
   // Profile all specified drafts
   const allResults = [];
 
-  for (const draft of options.drafts) {
+  for (const draft of options.visit(options.drafts)) {
     const draftResults = await profileDraft(draft, options, availableDrafts);
 
     // For console output, print immediately per draft
