@@ -165,7 +165,7 @@
         "source": "lexical",
         "metric": "startupMs",
         "limit": 15000,
-        "value": 385.672852,
+        "value": 382.740667,
         "status": "pass"
       },
       "combined": [
@@ -200,7 +200,7 @@
         "source": "lexical",
         "metric": "coldIndexMs",
         "limit": 15000,
-        "value": 168.60671200000002,
+        "value": 176.95423,
         "status": "pass"
       },
       "combined": [
@@ -235,7 +235,7 @@
         "source": "lexical",
         "metric": "warmIndexMs",
         "limit": 15000,
-        "value": 185.44109099999997,
+        "value": 170.363828,
         "status": "pass"
       },
       "combined": [
@@ -270,7 +270,7 @@
         "source": "lexical",
         "metric": "queryMs",
         "limit": 100,
-        "value": 8.602959999999996,
+        "value": 8.839117999999985,
         "status": "pass"
       },
       "combined": [
@@ -375,7 +375,7 @@
         "source": "lexical",
         "metric": "browserGzipBytes",
         "limit": 65536,
-        "value": 5767,
+        "value": 5988,
         "status": "pass"
       },
       "combined": [
@@ -1145,7 +1145,7 @@
         "source": "lexical",
         "metric": "startupMs",
         "limit": 45000,
-        "value": 2639.938289,
+        "value": 2962.752367,
         "status": "pass"
       },
       "combined": [
@@ -1180,7 +1180,7 @@
         "source": "lexical",
         "metric": "coldIndexMs",
         "limit": 45000,
-        "value": 1050.609348,
+        "value": 1111.1797969999998,
         "status": "pass"
       },
       "combined": [
@@ -1215,7 +1215,7 @@
         "source": "lexical",
         "metric": "warmIndexMs",
         "limit": 45000,
-        "value": 1370.6722040000002,
+        "value": 1612.5076880000001,
         "status": "pass"
       },
       "combined": [
@@ -1250,7 +1250,7 @@
         "source": "lexical",
         "metric": "queryMs",
         "limit": 250,
-        "value": 73.46960399999989,
+        "value": 76.81104000000005,
         "status": "pass"
       },
       "combined": [
@@ -1355,7 +1355,7 @@
         "source": "lexical",
         "metric": "browserGzipBytes",
         "limit": 65536,
-        "value": 5767,
+        "value": 5988,
         "status": "pass"
       },
       "combined": [
@@ -2012,7 +2012,7 @@
     "benchmark/adoption-resources-result.json": "709f738ba377c69fb7f7e2f4db34e605df0e390a637ee31024553436d08a68f4",
     "benchmark/relational-result.json": "0da4b08f0aa8cbec3c9571f003239b30335199e1bbfa9370654dff3a890aaf92",
     "benchmark/collection-result.json": "1891b3e1c846d32184ee5e413a15cb8d265e8f90f327105a873b3d55891ce6bf",
-    "benchmark/lexical-result.json": "b7c4dd95674c894c3b2b926ee672dcb68b4e2313046d494a2cae2c95c09a2c7e",
+    "benchmark/lexical-result.json": "dbdf8eb7080b65fb2d0634717c2cdd394ec268fc8cbb5b88bcf59b5c3379df91",
     "benchmark/formula-result.json": "f1c94e526dec6bc5055e888b361776bafe7e1a739cee0b988ea6f77c723b4b94",
     "benchmark/providers-result.json": "2164e5cc37d15a70bf0ba268feec0b29a4fed392ed706d81ebe649cd002fddf7",
     "benchmark/adoption-hosts-result.json": "10508dacbd6fb44520597eebdfe718b73d8d67ba7c05eb34acc5d5874ea337f7",
