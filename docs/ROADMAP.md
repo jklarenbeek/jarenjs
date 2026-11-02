@@ -286,21 +286,21 @@ delete it or fix it.
   millions, where the studio shows 20. Wanted: a decision between collapsing
   repeated errors and bounding what a failing applicator keeps; either
   changes the collected list (an upgrade note).
-- [ ] **An invalid `regex` format value is compiled twice.** Core's
-  `isStringRegExp` tries `new RegExp(value, 'u')` and, when that throws,
-  `createRegExp(value)`, which builds the same `new RegExp(value, 'u')`
-  again unless the value is written as a `/source/flags` literal: an invalid
-  pattern costs two thrown constructions where Ajv's format costs one, and
-  the `optional/format/regex` rows of the validator benchmark take about
-  2.1× Ajv's time in every draft. Wanted: the second construction tried for
-  a literal only.
-- [ ] **`multipleOf` decides a huge whole number with a power-of-ten
-  BigInt.** A whole value past 10^15 steps of a decimal step that does not
-  divide every whole number (1e308 against `0.123456789`) reaches core's
-  `isDecimalMultiple`, which takes the remainder of 10^317 by the step's
-  digits: the 'float division = inf' rows take 16–18× Ajv's time in every
-  draft. Wanted: the same exact answer without the power of ten (only the
-  step's factors of 2 and 5 depend on the exponent).
+- [ ] **A tuple validates at under a third of Ajv's speed.** The validator
+  benchmark's 'uniqueItems=false with an array of items' rows (a two-position
+  `prefixItems`/`items` tuple of `type: boolean`, where `uniqueItems: false`
+  runs no comparison) take 3.3–3.4× Ajv's time in every draft, and the '…and
+  additionalItems=false' rows 2.0×: the cost is the tuple path
+  (`compileTupleInternal` in packages/validate/src/array.js). Wanted: a
+  tuple's positions tested at Ajv's speed, every answer unchanged.
+- [ ] **`uniqueItems` compares items at about two-thirds of Ajv's speed.**
+  The 'uniqueItems validation' rows take 1.27–1.39× Ajv's time, and core's
+  `isUniqueDeepArray` alone runs 1.4–1.6× Ajv's pairwise `fast-deep-equal`
+  over those arrays: `equalsDeepAt` runs its leaf type checks on every member
+  before the container check and reads both prototypes per container pair,
+  and the array walk allocates a `Set` past 8 scalars and a list of complex
+  items on every call. Wanted: the same answers, non-JSON values included,
+  at Ajv's speed.
 
 ## @jarenjs/view & @jarenjs/app
 

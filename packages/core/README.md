@@ -217,7 +217,7 @@ const matches = createRegExpTester('/^x/gi');
 matches('X'); matches('X');          // true both times; global/sticky state is isolated
 ```
 
-`createRegExp` reads `/source/flags` as a literal only when a closing slash is followed by flag letters, so `'/users/[0-9]+'` is a pattern that starts with a slash (it used to throw), and a `v`-mode literal keeps `v` instead of gaining `u`. `isStringRegExp` reads a string as a Unicode-mode pattern source first, the reading JSON Schema gives `pattern` and the `regex` format, so `'/a/gg'` is a regular expression (the text `/a/gg`); only a string that is no valid source falls back to the literal (`'/[\\p{L}--[a-z]]/v'`), as the validator's `pattern` does. *Upgrade: it read the literal first, so `'/a/gg'` (flags the engine refuses) was not a regular expression.* `getStringLength(str, true)` counts a CR LF pair as one grapheme in ASCII text too.
+`createRegExp` reads `/source/flags` as a literal only when a closing slash is followed by flag letters, so `'/users/[0-9]+'` is a pattern that starts with a slash (it used to throw), and a `v`-mode literal keeps `v` instead of gaining `u`. `isStringRegExp` reads a string as a Unicode-mode pattern source first, the reading JSON Schema gives `pattern` and the `regex` format, so `'/a/gg'` is a regular expression (the text `/a/gg`); only a string that is no valid source falls back to the literal (`'/[\\p{L}--[a-z]]/v'`), as the validator's `pattern` does, and a string not written as a literal is compiled once, valid or not. *Upgrade: it read the literal first, so `'/a/gg'` (flags the engine refuses) was not a regular expression.* `getStringLength(str, true)` counts a CR LF pair as one grapheme in ASCII text too.
 
 ## Text validation
 

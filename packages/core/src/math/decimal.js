@@ -59,12 +59,14 @@ export function exactDecimal(x) {
 }
 
 /**
- * The shortest decimal that reads back as `|x|` — the digits of
- * `String(x)`, which ECMAScript defines as the shortest round trip.
+ * The digits `String(|x|)` prints, its point and exponent removed, and the
+ * scale that places them, `|x| = digits × 10^-scale`: leading and trailing
+ * zeros as printed, and a negative scale where the exponent passes the
+ * digits (`1e+308` is `'1'` at scale -308).
  * @param {number} x - a finite number
- * @returns {Decimal}
+ * @returns {{ digits: string, scale: number }}
  */
-export function shortestDecimal(x) {
+function printedDecimal(x) {
   const text = String(Math.abs(x));
   const e = text.indexOf('e');
   const mantissa = e < 0 ? text : text.slice(0, e);
@@ -72,7 +74,18 @@ export function shortestDecimal(x) {
   const dot = mantissa.indexOf('.');
   const digits = dot < 0 ? mantissa : mantissa.slice(0, dot) + mantissa.slice(dot + 1);
   const fraction = dot < 0 ? 0 : mantissa.length - dot - 1;
-  return normalize(digits, fraction - exponent);
+  return { digits, scale: fraction - exponent };
+}
+
+/**
+ * The shortest decimal that reads back as `|x|` — the digits of
+ * `String(x)`, which ECMAScript defines as the shortest round trip.
+ * @param {number} x - a finite number
+ * @returns {Decimal}
+ */
+export function shortestDecimal(x) {
+  const { digits, scale } = printedDecimal(x);
+  return normalize(digits, scale);
 }
 
 /**
@@ -92,10 +105,16 @@ function normalize(digits, scale) {
   return trim({ digits: out, scale });
 }
 
-/** Drop trailing fraction zeros: `1500 × 10^-3` is `15 × 10^-1`. @param {Decimal} d @returns {Decimal} */
-function trim(d) {
+/**
+ * Drop trailing zeros while the scale stays above `floor`: `1500 × 10^-3`
+ * is `15 × 10^-1`. The default floor drops fraction zeros only; a lower
+ * one folds whole zeros into a negative scale too (`1500` is `15 × 10^2`).
+ * @param {Decimal} d @param {number} [floor]
+ * @returns {Decimal}
+ */
+function trim(d, floor = 0) {
   let { digits, scale } = d;
-  while (scale > 0 && digits.length > 1 && digits.charCodeAt(digits.length - 1) === 0x30) {
+  while (scale > floor && digits.length > 1 && digits.charCodeAt(digits.length - 1) === 0x30) {
     digits = digits.slice(0, -1);
     scale--;
   }
@@ -209,6 +228,8 @@ export function multipleOfTester(step) {
   // every whole number is a multiple where `unit` divides `10^scale` (1, 0.5, 1e-8)
   const wholeNumbers = 10n ** BigInt(scale) % BigInt(digits) === 0n;
   const wholeStep = scale === 0 && unit <= Number.MAX_SAFE_INTEGER;
+  /** @type {ExactStep | undefined} built for the first value the fast paths leave */
+  let exact;
   return function isMultipleOf(value) {
     if (!Number.isFinite(value)) return false;
     const x = Math.abs(value);
@@ -228,23 +249,52 @@ export function multipleOfTester(step) {
       if (wholeNumbers) return true;
       if (wholeStep && x <= Number.MAX_SAFE_INTEGER) return x % unit === 0;
     }
-    return isDecimalMultiple(x, digits, scale);
+    return isDecimalMultiple(x, exact ??= exactStep(digits, scale));
   };
 }
 
 /**
+ * A step `unit × 10^-scale` as the exact route reads it: `unit` without
+ * trailing zeros, `twosAndFives` the larger of the powers of 2 and 5 that
+ * divide it, and `power` ten raised to that.
+ * @typedef {{ unit: bigint, scale: number, twosAndFives: number, power: bigint }} ExactStep
+ */
+
+/**
+ * The step `digits × 10^-scale` read once for the exact route: its trailing
+ * zeros folded into the scale, and its factors of 2 and 5 counted.
+ * @param {string} digits @param {number} scale
+ * @returns {ExactStep}
+ */
+function exactStep(digits, scale) {
+  const stripped = trim({ digits, scale }, -Infinity);
+  const unit = BigInt(stripped.digits);
+  let twos = 0;
+  let fives = 0;
+  for (let rest = unit; rest % 2n === 0n; rest /= 2n) twos++;
+  for (let rest = unit; rest % 5n === 0n; rest /= 5n) fives++;
+  const twosAndFives = Math.max(twos, fives);
+  return { unit, scale: stripped.scale, twosAndFives, power: 10n ** BigInt(twosAndFives) };
+}
+
+/**
  * Whether the decimal a finite non-negative number spells is a whole
- * multiple of `digits × 10^-scale`: both scaled to one power of ten as
- * integers, the remainder taken exactly.
+ * multiple of a step, decided exactly on the digits the number prints: the
+ * quotient is `digits × 10^shift / unit`. The unit's factors 2 and 5 all
+ * divide `10^twosAndFives`, so a larger shift is read at that power and
+ * only the unit's factors prime to ten decide; a negative shift past every
+ * printed digit leaves a fraction of anything but zero. No power of ten
+ * follows the number's own exponent: `1e308` against `0.123456789` is the
+ * remainder of 1 by 123456789.
  * @param {number} x
- * @param {string} digits
- * @param {number} scale
+ * @param {ExactStep} step
  * @returns {boolean}
  */
-function isDecimalMultiple(x, digits, scale) {
-  const value = shortestDecimal(x);
-  const shift = value.scale - scale;
-  return shift >= 0
-    ? BigInt(value.digits) % (BigInt(digits) * 10n ** BigInt(shift)) === 0n
-    : BigInt(value.digits) * 10n ** BigInt(-shift) % BigInt(digits) === 0n;
+function isDecimalMultiple(x, step) {
+  const { digits, scale } = printedDecimal(x);
+  const value = BigInt(digits);
+  const shift = step.scale - scale;
+  if (shift >= step.twosAndFives) return value * step.power % step.unit === 0n;
+  if (shift >= 0) return value * 10n ** BigInt(shift) % step.unit === 0n;
+  return -shift < digits.length ? value % (step.unit * 10n ** BigInt(-shift)) === 0n : value === 0n;
 }

@@ -53,7 +53,8 @@ export function isRegExpType(data) {
  * `/source/flags` is a source like any other (`'/a/gg'` is valid: it
  * matches the text `/a/gg`); only a string that is no valid source falls
  * back to the literal {@link createRegExp} reads (a `v`-mode literal), as
- * the validator's `pattern` does.
+ * the validator's `pattern` does. A string not written as a literal is
+ * compiled once: it has no second reading to try.
  * @param {string | RegExp | null | undefined } data
  * @returns {boolean}
  */
@@ -66,13 +67,11 @@ export function isStringRegExp(data) {
     new RegExp(data, 'u');
     return true;
   }
-  // eslint-disable-next-line no-unused-vars
-  catch (e) {
+  catch {
     try {
-      return createRegExp(data) != null;
+      return literalRegExp(data) !== undefined;
     }
-    // eslint-disable-next-line no-unused-vars
-    catch (literalError) {
+    catch {
       return false;
     }
   }
@@ -82,6 +81,30 @@ export function isStringRegExp(data) {
 const REGEXP_FLAGS = /^[dgimsuvy]*$/;
 
 /**
+ * The RegExp a string written as a `/source/flags` literal compiles to, in
+ * Unicode mode unless its flags choose one (`u` or `v`): a string that
+ * opens with a slash and ends in a closing slash plus flag letters.
+ * Any other string, a leading slash included, is no literal.
+ * @param {string} pattern
+ * @returns {RegExp | undefined} The literal's RegExp, or `undefined` when
+ *   the string is not written as a literal
+ * @throws {SyntaxError} When the literal's source or flags do not compile
+ */
+function literalRegExp(pattern) {
+  if (pattern[0] !== '/')
+    return undefined;
+  const e = pattern.lastIndexOf('/');
+  // `/source/flags` only when a closing slash is followed by flag
+  // letters alone: `/users/[0-9]+` is a pattern that starts with a slash
+  const g = pattern.substring(e + 1);
+  if (e === 0 || !REGEXP_FLAGS.test(g))
+    return undefined;
+  const r = pattern.substring(1, e);
+  // Unicode mode unless the literal already chose one (`u` or `v`)
+  return g.includes('u') || g.includes('v') ? new RegExp(r, g) : new RegExp(r, g + 'u');
+}
+
+/**
  * Compile a pattern string into a Unicode-mode RegExp. A string that opens
  * with a slash and ends in a closing slash plus flag letters
  * (`/source/flags`) is read as a literal; any other string, a leading
@@ -89,6 +112,9 @@ const REGEXP_FLAGS = /^[dgimsuvy]*$/;
  * and `undefined` answer `undefined`.
  * @param {string | RegExp | null | undefined } pattern
  * @returns {RegExp | undefined}
+ * @throws {SyntaxError} When the string does not compile: a literal as its
+ *   source and flags, any other string as a pattern
+ * @throws {Error} When the pattern is neither a string nor a RegExp
  */
 export function createRegExp(pattern) {
   if (pattern == null)
@@ -97,21 +123,8 @@ export function createRegExp(pattern) {
   if (isRegExpType(pattern))
     return pattern;
 
-  if (isStringType(pattern)) {
-    if (pattern[0] === '/') {
-      const e = pattern.lastIndexOf('/');
-      // `/source/flags` only when a closing slash is followed by flag
-      // letters alone: `/users/[0-9]+` is a pattern that starts with a slash
-      const g = pattern.substring(e + 1);
-      if (e > 0 && REGEXP_FLAGS.test(g)) {
-        const r = pattern.substring(1, e);
-        // Unicode mode unless the literal already chose one (`u` or `v`)
-        return g.includes('u') || g.includes('v') ? new RegExp(r, g) : new RegExp(r, g + 'u');
-      }
-    }
-    return new RegExp(pattern, 'u');
-  }
-  // TODO: should we return false instead?
+  if (isStringType(pattern))
+    return literalRegExp(pattern) ?? new RegExp(pattern, 'u');
   throw new Error(`Unknown Regular Expression Pattern Type: ${pattern}`);
 }
 

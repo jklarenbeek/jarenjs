@@ -121,6 +121,69 @@ describe('#multipleOfTester (multipleOf on the decimals both numbers spell)', fu
     assert.deepEqual(answers(1e-23, [0.5, 1e-22, 1.5e-23]), [true, true, false]);
   });
 
+  it('pins the answers at the edges of every magnitude', () => {
+    const values = [5e-324, 2.2250738585072014e-308, 1e-300, 0.1, 0.3, 1.5, 2 ** 53, 2 ** 53 + 2, 2 ** 54,
+      3e300, 1e308, 1.7976931348623157e308, -1e308, -0];
+    // each step's answers over `values`, 1 for a multiple
+    const rows = [
+      [0.5, '00000111111111'], [0.25, '00000111111111'], [0.2, '00000011111111'], [0.125, '00000111111111'],
+      [2.5e-7, '00011111111111'], [1e-8, '00011111111111'], [0.123456789, '00000000000001'], [3, '00000000010001'],
+      [7, '00000000000001'], [1e10 + 1, '00000000000001'], [0.1, '00011111111111'], [0.3, '00001100010001'],
+      [1.1e-15, '00000000000001'], [5e-324, '10111111111111'],
+    ];
+    for (const [step, row] of rows)
+      assert.equal(values.map(multipleOfTester(step)).map(Number).join(''), row, `multipleOf ${step}`);
+  });
+
+  it('reads the factors 2 and 5 of a step against the power of ten between the two scales', () => {
+    // 4 is 2^2 and 0.075 is 3 × 5^2 × 10^-3: a whole value needs ten squared at most
+    assert.deepEqual(answers(4, [1e308, 9007199254740996, 9007199254740994]), [true, true, false]);
+    assert.deepEqual(answers(0.075, [3e300, 1e300, 7.5e300]), [true, false, true]);
+    // 0.0625 is 5^4 × 10^-4: a value with one or two fraction digits needs less than ten to the fourth
+    assert.deepEqual(answers(0.0625, [100000000000000.5, 100000000000000.1, 100000000000000.25]), [true, false, true]);
+    // the zeros of 1e22, 1000 and 1e300 fold into their scale: a value of fewer places is none
+    assert.deepEqual(answers(1e22, [3e22, 1.5e22, 1e21, 123456789012345680000]), [true, false, false, false]);
+    assert.deepEqual(answers(1000, [123456789012345680000, 18014398509481984]), [true, false]);
+    assert.deepEqual(answers(1e300, [1e308, 3e300, 1.5e300]), [true, true, false]);
+    // under a step finer than 1e-22, a value whose places pass every digit of the step's is none
+    assert.deepEqual(answers(3e-30, [5e-324, 6e-30, 1e-300, 0]), [false, true, false, true]);
+  });
+
+  it('builds no power of ten from a value\'s own exponent', () => {
+    /**
+     * The answer, the longest digit string and the largest exponent handed to
+     * BigInt while the tester reads one value.
+     * @param {(value: number) => boolean} isMultipleOf @param {number} value
+     */
+    const read = (isMultipleOf, value) => {
+      const Real = globalThis.BigInt;
+      let longest = 0;
+      let highest = 0;
+      globalThis.BigInt = (v) => {
+        if (typeof v === 'string') longest = Math.max(longest, v.length);
+        else highest = Math.max(highest, Number(v));
+        return Real(v);
+      };
+      try {
+        return { answer: isMultipleOf(value), longest, highest };
+      }
+      finally {
+        globalThis.BigInt = Real;
+      }
+    };
+    // [value, step, the larger of the powers of 2 and 5 in the step's digits, answer]
+    const cases = [[1e308, 0.123456789, 0, false], [1.7976931348623157e308, 7, 0, false], [1e308, 4, 2, true],
+      [3e300, 0.075, 2, true], [1e308, 1e300, 0, true], [5e-324, 3e-30, 0, false]];
+    for (const [value, step, twosAndFives, answer] of cases) {
+      const isMultipleOf = multipleOfTester(step);
+      const { answer: got, longest, highest } = read(isMultipleOf, value);
+      assert.equal(got, answer, `${value} against ${step}`);
+      // at most the 17 digits a double prints, and ten raised no higher than the step's factors need
+      assert.ok(longest <= 17, `${value} against ${step}: a BigInt of ${longest} digits`);
+      assert.ok(highest <= twosAndFives, `${value} against ${step}: ten raised to ${highest}`);
+    }
+  });
+
   it('takes no value that is not finite, and reads a step that is not finite, or zero, by its quotient', () => {
     assert.deepEqual(answers(2, [Infinity, -Infinity, NaN]), [false, false, false]);
     assert.deepEqual(answers(Infinity, [5, -1e308, Infinity]), [true, true, false]);

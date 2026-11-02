@@ -81,7 +81,12 @@ of `0.1` and `0.30000000000000004` is none, `20000001` is none of
 the float quotient drifts. A step's multiples are those of its magnitude
 (`-0.1` reads as `0.1`). A value that is not finite is no multiple; under
 a step that is not finite, or zero, a value is one where the quotient is
-whole (every finite value of an infinite step, nothing of zero).
+whole (every finite value of an infinite step, nothing of zero). A value
+the float arithmetic cannot settle, such as a whole value past 10^15
+steps of a step that does not divide every whole number, is decided on the
+digits it prints, with ten raised no further than the step's own factors
+of 2 and 5 need and never to the value's exponent: `1e308` against
+`0.123456789` is the remainder of 1 by 123456789, not of 10^317.
 `@jarenjs/validate` decides `multipleOf` with it, for a written step and a
 `$data` one, and `@jarenjs/forms` checks a field with it, so the two
 answer alike.

@@ -41,6 +41,12 @@ describe('createRegExp — slash-led patterns', () => {
     assert.strictEqual(pattern.test('a'), false);
   });
 
+  it('reads a lone slash followed by flag letters as a pattern', () => {
+    // the only slash opens the string: no closing slash, so no literal
+    assert.deepEqual([createRegExp('/gi')?.source, createRegExp('/gi')?.flags], ['\\/gi', 'u']);
+    assert.deepEqual([createRegExp('/')?.source, createRegExp('/')?.flags], ['\\/', 'u']);
+  });
+
   it('still refuses flags the engine refuses', () => {
     assert.throws(() => createRegExp('/a/gg'), SyntaxError);
   });
@@ -68,5 +74,55 @@ describe('isStringRegExp — a string is a pattern source', () => {
   it('leaves createRegExp reading /source/flags as a literal', () => {
     assert.strictEqual(createRegExp('/a/i')?.test('A'), true);
     assert.throws(() => createRegExp('/a/gg'), SyntaxError);
+  });
+});
+
+describe('isStringRegExp — a second reading only for a literal', () => {
+  /**
+   * The answer and the number of RegExps constructed for it.
+   * @param {() => boolean} read
+   * @returns {[boolean, number]}
+   */
+  const counted = (read) => {
+    const Real = globalThis.RegExp;
+    let built = 0;
+    globalThis.RegExp = new Proxy(Real, {
+      construct(target, args) {
+        built++;
+        return Reflect.construct(target, args);
+      },
+    });
+    try {
+      return [read(), built];
+    }
+    finally {
+      globalThis.RegExp = Real;
+    }
+  };
+
+  it('compiles a string not written as a literal once, valid or not', () => {
+    assert.deepEqual(counted(() => isStringRegExp('^(abc]')), [false, 1]);
+    assert.deepEqual(counted(() => isStringRegExp('[\\q{abc}]')), [false, 1]);
+    assert.deepEqual(counted(() => isStringRegExp('/(')), [false, 1]);
+    assert.deepEqual(counted(() => isStringRegExp('/(/x')), [false, 1]);
+    assert.deepEqual(counted(() => isStringRegExp('([abc])+\\s+$')), [true, 1]);
+  });
+
+  it('compiles a literal that is no valid source a second time, as the literal', () => {
+    // `\q{…}` compiles under the `v` flag only: the source throws, the literal compiles
+    assert.deepEqual(counted(() => isStringRegExp('/[\\q{abc}]/v')), [true, 2]);
+    assert.deepEqual(counted(() => isStringRegExp('/(/')), [false, 2]);
+  });
+
+  it('answers the regex format group of the JSON Schema test suite', () => {
+    // optional/format/regex.json, 'validation of regular expressions': the
+    // format asks only of a string, so the six values that are none are
+    // valid unread; the two strings are this function's answers
+    const group = [[12, true], [13.7, true], [{}, true], [[], true], [false, true], [null, true],
+      ['([abc])+\\s+$', true], ['^(abc]', false]];
+    assert.deepEqual(group.map(([data]) => typeof data !== 'string' || isStringRegExp(data)),
+      group.map(([, valid]) => valid));
+    assert.deepEqual(group.map(([data]) => isStringRegExp(/** @type {any} */ (data))),
+      [false, false, false, false, false, false, true, false]);
   });
 });

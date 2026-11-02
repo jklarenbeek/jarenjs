@@ -685,7 +685,8 @@ if (asyncLiveLeak.length)
 // Raised to 1,129,200 (measured 1129169): the validator keeping the pointer parses of one compile, resolving a `$ref`-only item tentatively, and reading a `%` escape only where one is written (traverse 559), its dialect URI readings kept (schema-keywords 225), the compile run with its parses kept (index 71), and the `$data` pass skipped where no schema holds one (dollar-data 33), add 888.
 // Raised to 1,132,100 (measured 1132003): the validator's resolved reference called directly and counting its own depth, and a collecting validation answering a member a reference met before while `oneOf`/`anyOf` branches are tried, with no clock read per fault (index 803, combine 149, errors 91), a lone `type` name, bound or `multipleOf` tested in one closure (number 788, schema 599, tools 394) and a tuple's positions called directly (array 5), with minifier renames elsewhere net 5, add 2834.
 // Raised to 1,132,300 (measured 1132234): the validator building a document with an `$id` once and naming that object under its URI without the empty fragment (index 226), and the type message's article read from the type's first letter (messages 5), add 231.
-if (clientBytes > 1132300)
+// Raised to 1,132,700 (measured 1132630): multipleOf's exact route read on a value's printed digits with the step's factors of 2 and 5 counted once (decimal 358), and the regex format's literal reading split out so a string not written as a literal compiles once (string 38), add 396.
+if (clientBytes > 1132700)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 
