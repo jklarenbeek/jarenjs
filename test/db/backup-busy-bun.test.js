@@ -11,6 +11,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { childReport } from '../lib/child-report.js';
 
 describe('a Bun backup under another connection\'s lock', () => {
   it('waits the lock out while the calling thread runs, and copies every row', (t) => {
@@ -19,7 +20,7 @@ describe('a Bun backup under another connection\'s lock', () => {
     const fixture = fileURLToPath(new URL('./fixtures/backup-busy-bun.mjs', import.meta.url));
     const run = spawnSync('bun', ['run', fixture], { encoding: 'utf8', timeout: 60000,
       cwd: fileURLToPath(new URL('../..', import.meta.url)) });
-    const report = JSON.parse(run.stdout.trim().split('\n').at(-1) ?? 'null');
+    const report = childReport(run);
     assert.equal(report?.runtime, 'bun', run.stderr);
     assert.equal(run.status, 0, run.stderr);
     // the timer ran while the copy waited, and the copy then completed

@@ -264,6 +264,10 @@ node benchmark/coverage.js '/required.json' --functions
 
 Unknown options, missing values, extra targets, and options belonging only to the
 other mode fail before coverage files are touched or a child is launched.
+The audit needs PostgreSQL: without `JAREN_PG_URL` the suite's PostgreSQL
+cases skip and the PostgreSQL paths would read as dead code, so it refuses
+with exit 2, before coverage files are touched or a child is launched.
+`npm run postgres:up` publishes an endpoint.
 
 The dead-code audit reports **fully dead files**, **untouched functions** in
 otherwise-used files, and the total function hit count. An empty report or

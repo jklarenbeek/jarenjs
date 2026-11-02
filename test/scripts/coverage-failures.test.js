@@ -53,11 +53,18 @@ process.argv = [process.execPath, 'benchmark/coverage.js',
 await import('./benchmark/coverage.js');
 `;
 
-/** @param {{ deadCode?: boolean, writesReport: boolean, status: number | null, launchError?: boolean, padding?: number, args?: string[], inspectArgs?: boolean }} options */
+/**
+ * The audit refuses to run without a PostgreSQL server, so every case names
+ * one (the mocked child never connects); `pg` replaces it, `null` unsets it.
+ * @param {{ deadCode?: boolean, writesReport: boolean, status: number | null, launchError?: boolean, padding?: number, args?: string[], inspectArgs?: boolean, pg?: string | null }} options
+ */
 function invoke(options) {
+  /** @type {Record<string, string | undefined>} */
+  const env = { ...process.env, FORCE_COLOR: '0', JAREN_PG_URL: options.pg ?? 'postgres://audit.invalid/never-connected' };
+  if (options.pg === null) delete env.JAREN_PG_URL;
   const result = spawnSync(process.execPath,
     ['--input-type=module', '--eval', HARNESS, JSON.stringify(options)],
-    { cwd: ROOT, encoding: 'utf8', timeout: 30_000, maxBuffer: 4 * 1024 * 1024 });
+    { cwd: ROOT, encoding: 'utf8', timeout: 30_000, maxBuffer: 4 * 1024 * 1024, env });
   assert.ifError(result.error);
   return result;
 }
@@ -118,6 +125,27 @@ describe('coverage CLI failure reporting', () => {
       assert.match(result.stdout, /Functions (?:executed|hit): 1\/1/);
       assert.doesNotMatch(result.stdout, /DIAGNOSTIC_MARKER|OLD_REPORT_MARKER/);
     }
+  });
+});
+
+describe('the audit\'s requirements', () => {
+  const REFUSAL = 'The dead-code audit needs PostgreSQL, or every PostgreSQL path reads as dead code: '
+    + 'run `npm run postgres:up`, then set JAREN_PG_URL to the endpoint it publishes '
+    + '(postgres://jaren:jaren@127.0.0.1:55432/jaren by default).\n';
+
+  it('refuses without JAREN_PG_URL, in one line and exit 2, before touching a report or launching the suite', () => {
+    for (const pg of [null, '']) {
+      const result = invoke({ deadCode: true, writesReport: true, status: 0, inspectArgs: true, pg });
+      assert.equal(result.status, 2, JSON.stringify(pg));
+      assert.equal(result.stderr, REFUSAL);
+      assert.equal(result.stdout, '');
+    }
+  });
+
+  it('runs the profiler without one: only the audit reads the PostgreSQL paths', () => {
+    const result = invoke({ writesReport: true, status: 0, inspectArgs: true, pg: null });
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /CHILD_ARGS_MARKER/);
   });
 });
 

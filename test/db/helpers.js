@@ -5,10 +5,12 @@
  * an all-asynchronous injected wasm handle (so every driver method is
  * exercised returning promises), an injected handle whose capability
  * DECLARATION the caller picks (so a declaration-selected branch runs
- * under Node), a driver that records the statements it executes, and a
- * temp-file helper for the file-backed reopen scenarios.
+ * under Node), a driver that records the statements it executes, a
+ * temp-file helper for the file-backed reopen scenarios, and a queue poll
+ * that fails on a stall rather than on a slow host.
  */
 
+import * as assert from 'node:assert';
 import { DatabaseSync } from 'node:sqlite';
 import { chain, rtreeDdl, openStore } from '@jarenjs/db';
 import { adaptNodeDatabase, nodeDriver } from '@jarenjs/db/node';
@@ -179,6 +181,32 @@ export function removeTempDirectory(dir, remove = fs.rmSync,
       if (retries === 10 || !removalRetryCodes.has(error?.code)) throw error;
       wait((retries + 1) * 100);
     }
+  }
+}
+
+/**
+ * Poll a queue until `total` jobs are done. The test fails when the queue
+ * stops progressing, not when a loaded host is slow: the window restarts
+ * whenever another job completes, so only `windowMs` without a completion
+ * reads as a stall.
+ * @param {() => Promise<{ done: number }>} counts - the queue's counts
+ * @param {number} total - the jobs the queue must complete
+ * @param {string} what - the failure message's prefix
+ * @param {number} [windowMs] - how long the queue may go without a completion
+ * @returns {Promise<{ done: number }>} the final counts
+ */
+export async function untilJobsDone(counts, total, what, windowMs = 20_000) {
+  let done = -1;
+  let deadline = 0;
+  for (;;) {
+    const now = await counts();
+    if (now.done === total) return now;
+    if (now.done > done) {
+      done = now.done;
+      deadline = Date.now() + windowMs;
+    }
+    assert.ok(Date.now() < deadline, `${what}: stalled at ${JSON.stringify(now)}`);
+    await new Promise((resolve) => setTimeout(resolve, 20));
   }
 }
 

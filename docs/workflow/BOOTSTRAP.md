@@ -29,8 +29,9 @@ Function`, ESM everywhere, JSDoc on exports, match surrounding style.
    aborts (lint, test, benchmark:coverage, docs:check and test:documents
    concurrently; then one website:build, test:design, and the browser
    matrix over that build), each by exit code, spelled out in
-   `CONVENTIONS.md` §2 — including when the matrix must be full and when
-   `-- --browser=smoke` is the accepted gate. Add `npm run test:packed` and
+   `CONVENTIONS.md` §2 — including when the matrix must be full, when
+   `-- --browser=smoke` is the accepted gate, and the PostgreSQL server
+   (`JAREN_PG_URL`) the dead-code audit refuses to run without. Add `npm run test:packed` and
    `npm run test:tree-shaking` when exports moved, and any further gate
    your work order's checklist names.
 5. Write the session record (`templates/session-record.md`) after the

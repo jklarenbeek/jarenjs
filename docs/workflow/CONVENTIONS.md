@@ -68,7 +68,11 @@ Concurrent first phase:
 2. `npm test` — all packages, with no expected-value/fixture edits unless the work
    deliberately changed behavior and says so;
 3. `npm run benchmark:coverage` — every dead-code finding resolved (removed,
-   covered, or a justified, ideally excluded, keep);
+   covered, or a justified, ideally excluded, keep). It needs a PostgreSQL
+   server: without `JAREN_PG_URL` the suite's PostgreSQL cases skip and the
+   PostgreSQL paths would read as dead code, so it refuses (exit 2) before
+   running anything, and the gate with it — `npm run postgres:up` publishes
+   an endpoint;
 4. `npm run docs:check` — every derived span in every committed document still
    agrees with its source: measured figures with the committed measurements, the
    `@jarenjs/linq` binder's combined tables with the pen documents beside it,

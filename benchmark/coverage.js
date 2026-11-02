@@ -20,6 +20,11 @@
  *   --dead-code        Audit untouched shipped functions across the full test suite
  *   --json             Print audit data as JSON
  *   --no-fail          Report dead code without failing; failed tests still fail
+ *
+ * The audit needs PostgreSQL: JAREN_PG_URL names the server the suite's
+ * PostgreSQL cases run against (`npm run postgres:up` publishes one). Without
+ * it those cases skip, the PostgreSQL paths read as dead code, and the audit
+ * refuses (exit 2) before running anything.
  * 
  * Examples:
  *   # Show files with >0% coverage after profiling required.json
@@ -75,6 +80,8 @@ Audit options:
   --dead-code        Audit the whole test suite for untouched source functions
   --json             Print audit data as JSON after the run banner
   --no-fail          Report dead code without failing; a failed suite still fails
+  The audit needs JAREN_PG_URL: the URL of a PostgreSQL server for the suite's
+  PostgreSQL cases (\`npm run postgres:up\` publishes one); without it, it refuses.
 
 Examples:
   node benchmark/coverage.js '/required.json' --threshold 25
@@ -141,6 +148,15 @@ try {
 catch (error) {
   console.error(error.message);
   process.exit(1);
+}
+
+// Without a PostgreSQL server the suite skips every PostgreSQL case and the
+// PostgreSQL paths would read as dead code: refuse before touching anything.
+if (deadCode && !process.env.JAREN_PG_URL) {
+  console.error('The dead-code audit needs PostgreSQL, or every PostgreSQL path reads as dead code: '
+    + 'run `npm run postgres:up`, then set JAREN_PG_URL to the endpoint it publishes '
+    + '(postgres://jaren:jaren@127.0.0.1:55432/jaren by default).');
+  process.exit(2);
 }
 
 // Pipes are asynchronous: drain a failed suite's full diagnosis before exit.

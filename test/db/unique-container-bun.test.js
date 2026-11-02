@@ -15,6 +15,7 @@ import { openStore } from '@jarenjs/db';
 import { nodeDriver } from '@jarenjs/db/node';
 
 import { tempDbPath } from './helpers.js';
+import { childReport } from '../lib/child-report.js';
 
 describe('a container key in a file two runtimes write', () => {
   it('refuses a reordered duplicate Bun writes, and Bun writes the key node:sqlite writes', async (t) => {
@@ -34,7 +35,7 @@ describe('a container key in a file two runtimes write', () => {
       const fixture = fileURLToPath(new URL('./fixtures/unique-container-bun.mjs', import.meta.url));
       const run = spawnSync('bun', ['run', fixture, dbPath], { encoding: 'utf8', timeout: 60000,
         cwd: fileURLToPath(new URL('../..', import.meta.url)) });
-      const report = JSON.parse(run.stdout.trim().split('\n').at(-1) ?? 'null');
+      const report = childReport(run);
       assert.equal(report?.runtime, 'bun', run.stderr);
       assert.equal(run.status, 0, run.stderr);
       // a name another writer escaped is the name: `{"\u0079":2,"x":1}` is the stored `{"x":1,"y":2}`

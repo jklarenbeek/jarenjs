@@ -14,7 +14,7 @@ import * as assert from 'node:assert';
 
 import { openStore } from '@jarenjs/db';
 import { nodeDriver } from '@jarenjs/db/node';
-import { tempDbPath } from './helpers.js';
+import { tempDbPath, untilJobsDone } from './helpers.js';
 
 const MODEL = {
   $model: '0.1',
@@ -74,14 +74,9 @@ describe('exactly-once execution under contention', () => {
       for (let i = 0; i < JOBS; i++) {
         await producer.jobs.enqueue('work', { id: `job-${i}` }, { id: `job-${i}` });
       }
-      const deadline = Date.now() + 20_000;
-      for (;;) {
-        const counts = await producer.jobs.counts();
-        if (counts.done === JOBS) break;
-        assert.ok(Date.now() < deadline,
-          `round ${round}: stalled at ${JSON.stringify(counts)}`);
-        await new Promise((resolve) => setTimeout(resolve, 20));
-      }
+      // a loaded host may take longer than the window over the whole round;
+      // the round fails only when no job completes for the window
+      await untilJobsDone(() => producer.jobs.counts(), JOBS, `round ${round}`);
 
       assert.strictEqual(executed.size, JOBS,
         `round ${round}: every job ran`);

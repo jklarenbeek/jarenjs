@@ -25,6 +25,7 @@ import { compileJsonQuery } from '@jarenjs/json/query';
 import { FAMILY_WORLDS, FAMILY_MATRIX_WORLDS, NULL_WORLDS, FLAVOR_WORLDS, ORDER_WORLDS, onWorldHosts, checkWorld } from './oracle/join-worlds.js';
 import { liveOracle } from './oracle/replication.js';
 import { onBothEngines, onBothEnginesPhysical } from './query-core-engines.js';
+import { childReport } from '../lib/child-report.js';
 
 const KEY = { 'x-entity': { key: true } };
 
@@ -342,7 +343,7 @@ function underBun(t, groups) {
   if (which.status !== 0) return t.skip('no bun binary on PATH');
   const fixture = fileURLToPath(new URL('./fixtures/join-worlds-bun.mjs', import.meta.url));
   const run = spawnSync('bun', ['run', fixture, ...groups], { encoding: 'utf8', cwd: fileURLToPath(new URL('../..', import.meta.url)) });
-  const report = JSON.parse(run.stdout.trim().split('\n').at(-1) ?? 'null');
+  const report = childReport(run);
   assert.equal(report?.runtime, 'bun', run.stderr);
   assert.deepEqual(report.failures, []);
   assert.equal(run.status, 0);

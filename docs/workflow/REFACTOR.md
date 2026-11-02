@@ -162,7 +162,9 @@ at 0% — and lists two kinds of stale/dead-code candidate:
 - **FULLY DEAD FILES** — no test executes any function in the file.
 - **DEAD FUNCTIONS** — individual functions with zero hits inside otherwise-used files.
 
-It exits non-zero when findings exist, so it can gate a health check. **For each finding, decide
+It needs a PostgreSQL server (`JAREN_PG_URL`; `npm run postgres:up` publishes one): without it the
+suite's PostgreSQL cases skip, so the audit refuses (exit 2) before running rather than report the
+PostgreSQL paths as dead code. It exits non-zero when findings exist, so it can gate a health check. **For each finding, decide
 and act — never leave it unresolved:**
 
 - **Remove it** if it is genuinely unreachable or obsolete (and remove anything that existed only
@@ -245,7 +247,8 @@ logical parent.
       re-imported; the most general accurate name chosen and propagated to all dependents.
 - [ ] Zero-dep and the one-way dependency arrow preserved; the two-layer component rule holds;
       **no circular dependencies**; export maps/barrels/`files`/`sideEffects` updated.
-- [ ] `npm run benchmark:coverage` (dead-code audit in the gate's concurrent phase) run on a green suite;
+- [ ] `npm run benchmark:coverage` (dead-code audit in the gate's concurrent phase) run on a green suite
+      with `JAREN_PG_URL` set;
       every FULLY DEAD FILE and DEAD FUNCTION finding resolved — removed, or covered by a new
       test — with any deliberate "keep" (a true entry point) justified and, ideally, excluded
       from the audit.

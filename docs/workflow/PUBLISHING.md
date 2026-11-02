@@ -144,6 +144,15 @@ pass), so a green CI does not imply them — but `release:check` does run the
 dead-code audit, which is the point of running it before publishing rather
 than trusting the CI badge.
 
+**The dead-code audit needs PostgreSQL.** The suite's PostgreSQL cases run
+only against the server `JAREN_PG_URL` names; without one they skip and the
+PostgreSQL dialect's paths would read as dead code, so `npm run
+benchmark:coverage` refuses with exit 2 before its suite runs, naming the
+requirement. `npm run postgres:up` publishes a disposable endpoint; set
+`JAREN_PG_URL` to it before starting `release:check`, whose audit step comes
+after the packaging steps. A run without one used to go through the whole
+suite and then report those paths as dead functions.
+
 **The lockfile is written by one npm.** The root `packageManager` field
 names it (npm 11.12.1). An older npm rewrites `package-lock.json` without
 other platforms' native packages (npm/cli#7961, fixed in npm 11.3) — a

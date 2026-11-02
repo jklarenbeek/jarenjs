@@ -292,6 +292,7 @@ describe('jaren-contract — module documents (the shared @jarenjs/json/node loa
       assert.strictEqual(described.status, 0, described.stderr);
       assert.strictEqual(JSON.parse(described.stdout).operations.length, 5, file);
       const pub = run(['public', '--contract', file], modules);
+      assert.strictEqual(pub.status, 0, pub.stderr);
       assert.strictEqual(JSON.parse(pub.stdout).$contract, '0.1');
     }
     const pen = run(['types', '--contract', 'pen.mjs', '--out', 'pen.d.ts'], modules);

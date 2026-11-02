@@ -18,6 +18,7 @@ import { nodeDriver } from '@jarenjs/db/node';
 
 import { IDENTITY_WORLDS, onWorldHosts, checkWorld, openSqliteWorld } from './oracle/join-worlds.js';
 import { liveOracle } from './oracle/replication.js';
+import { childReport } from '../lib/child-report.js';
 
 const world = (/** @type {string} */ name) => {
   const found = IDENTITY_WORLDS.find((entry) => entry.name === name);
@@ -40,7 +41,7 @@ describe('a table with a member named like the row identity', () => {
     if (which.status !== 0) return t.skip('no bun binary on PATH');
     const fixture = fileURLToPath(new URL('./fixtures/join-worlds-bun.mjs', import.meta.url));
     const run = spawnSync('bun', ['run', fixture, 'identity'], { encoding: 'utf8', cwd: fileURLToPath(new URL('../..', import.meta.url)) });
-    const report = JSON.parse(run.stdout.trim().split('\n').at(-1) ?? 'null');
+    const report = childReport(run);
     assert.equal(report?.runtime, 'bun', run.stderr);
     assert.deepEqual(report.failures, []);
     assert.equal(run.status, 0);

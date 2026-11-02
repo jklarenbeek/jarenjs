@@ -6,6 +6,7 @@ import { openStore, createDagJobRunner } from '@jarenjs/db';
 import { compileDag } from '@jarenjs/flow';
 import { postgresDriver } from '@jarenjs/db/postgres';
 import { nodeDriver } from '@jarenjs/db/node';
+import { untilJobsDone } from './helpers.js';
 
 const url = process.env.JAREN_PG_URL;
 const model = { $model: '0.1', collections: { notes: { key: '/id',
@@ -128,7 +129,7 @@ describe('PostgreSQL jobs and transactional outbox', { skip: !url && 'JAREN_PG_U
           } } });
         workers.push(worker); worker.start();
       }
-      await until(async () => (await stores[0].jobs.counts()).done === 200);
+      await untilJobsDone(() => stores[0].jobs.counts(), 200, 'native queue', 15_000);
       assert.equal(seen.size, 200);
       assert.ok([...seen.values()].every((n) => n === 1));
       assert.equal(workers.reduce((sum, worker) => sum + worker.stats().claims, 0), 200);

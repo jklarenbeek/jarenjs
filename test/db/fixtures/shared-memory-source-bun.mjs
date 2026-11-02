@@ -33,8 +33,13 @@ try {
 }
 catch (error) { failures.push(String(error?.stack ?? error)); }
 finally {
-  for (const store of stores) await store.close();
-  rmSync(dir, { recursive: true, force: true });
+  // a cleanup that throws is a failure the report names, never a lost report
+  for (const store of stores) {
+    try { await store.close(); }
+    catch (error) { failures.push(`closing a store: ${String(error?.stack ?? error)}`); }
+  }
+  try { rmSync(dir, { recursive: true, force: true }); }
+  catch (error) { failures.push(`removing ${dir}: ${String(error?.stack ?? error)}`); }
 }
 process.stdout.write(`${JSON.stringify({ runtime: typeof Bun === 'undefined' ? 'node' : 'bun', failures })}\n`);
 process.exit(failures.length === 0 ? 0 : 1);
