@@ -7,9 +7,9 @@
  *   npm run docs:check    # fail on drift, rewriting nothing
  *
  * The registries answer over different sources — committed benchmark
- * measurements and a bundle baseline, the pen documents themselves, and
- * the workspace manifests' `exports` — and stay separate for exactly
- * that reason.
+ * measurements, a bundle baseline and a Node closure baseline, the pen
+ * documents themselves, and the workspace manifests' `exports` — and stay
+ * separate for exactly that reason.
  * The MARKER GRAMMAR is shared, which is what this file is: one
  * namespace, one bake per document, one report. Adding a registry here
  * is how a new kind of derived text arrives; adding a namespace is not.
@@ -37,6 +37,7 @@ import { relationalFacts } from './generate-relational-facts.js';
 import { executionFacts } from './generate-execution-facts.js';
 import { postgresFacts } from './generate-postgres-facts.js';
 import { migrationFacts } from './generate-migration-facts.js';
+import { closureFacts } from './generate-closure-facts.js';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const profileDrift = generateAuthoringProfiles({ check: process.argv.includes('--check') });
@@ -47,6 +48,6 @@ if (profileDrift.length) {
 
 process.exit(main({
   root: ROOT,
-  registries: [measuredFigures, penTables, exportInventory, penCoverage, formsFacts, adoptionFacts, relationalFacts, collectionFacts, lexicalFacts, providerFacts, durableFacts, formulaFacts, siteFacts, executionFacts, postgresFacts, migrationFacts],
+  registries: [measuredFigures, penTables, exportInventory, penCoverage, formsFacts, adoptionFacts, relationalFacts, collectionFacts, lexicalFacts, providerFacts, durableFacts, formulaFacts, siteFacts, executionFacts, postgresFacts, migrationFacts, closureFacts],
   argv: process.argv.slice(2),
 }));

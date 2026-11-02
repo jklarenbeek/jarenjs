@@ -1,8 +1,12 @@
 import { readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { build } from 'esbuild';
 import { gzipSync } from 'node:zlib';
 import { AUTHORED_PEN_PROBES } from './lib/authored-pen-probes.js';
+import { publicWorkspaces } from './generate-export-inventory.js';
+import { CLOSURE_RUNS, measureClosures, serializeClosures, staleClosures } from './lib/node-closure.js';
 
 const result = await build({
   stdin: {
@@ -1166,3 +1170,35 @@ const hostPrimitives = await build({ stdin: { contents:
 if (Object.keys(hostPrimitives.metafile.inputs).some(file => file.endsWith('/process-node.js')))
   throw new Error('Pure core browser imports resolved the optional Node process executor.');
 console.log('Browser host primitives exclude the Node process executor.');
+
+// Node does not tree-shake. A server that imports a subpath loads every
+// module the subpath's static import graph names and holds them for the
+// life of the process, so the bundles above are a bundler's price and not
+// a server's. The server's price is measured here for every importable
+// subpath of every public package — the modules a fresh Node process
+// loads for that one import, by package, and the live heap they hold —
+// and committed beside the bundle baseline, where `npm run docs:derive`
+// bakes it into docs/CONSUMING.md. A module count is a function of the
+// tree, so one that moves fails this check until it is re-measured; a
+// heap differs between processes and hosts, so `--write` takes each as
+// the median of several fresh processes and the check never compares it.
+// Last, because it is the slow part: a process per subpath.
+const CLOSURES = 'benchmark/node-closures.json';
+const closureRoot = fileURLToPath(new URL('../', import.meta.url));
+const closureWorkspaces = publicWorkspaces(closureRoot);
+if (process.argv.includes('--write')) {
+  const closures = measureClosures({ cwd: closureRoot, workspaces: closureWorkspaces, runs: CLOSURE_RUNS });
+  writeFileSync(join(closureRoot, CLOSURES), serializeClosures(closures));
+  console.log(`Node closure baseline WRITTEN to ${CLOSURES} (${Object.keys(closures.subpaths).length} subpaths, `
+    + `${CLOSURE_RUNS} fresh processes each). Run \`npm run docs:derive\` to bake the documents from it.`);
+}
+else {
+  const closures = measureClosures({ cwd: closureRoot, workspaces: closureWorkspaces, runs: 1 });
+  const stale = staleClosures(JSON.parse(readFileSync(join(closureRoot, CLOSURES), 'utf8')), closures);
+  if (stale.length > 0) {
+    throw new Error(`${CLOSURES} is stale:\n${stale.join('\n')}\n`
+      + 'Re-measure with `npm run test:tree-shaking -- --write`, then bake the documents '
+      + 'with `npm run docs:derive`. Every published Node closure derives from this file.');
+  }
+  console.log(`Node closure check passed (${Object.keys(closures.subpaths).length} subpaths load the committed module counts).`);
+}

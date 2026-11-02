@@ -189,6 +189,188 @@ which.
 `play`, `josl`, `flow`, `linq` and `db`
 are independent of that set — leave them out unless you use them.
 
+### What a Node server loads
+
+A bundler drops the modules you never reach; Node does not. Importing a
+subpath in Node loads every module its import statements reach, used or
+not, and holds them for the life of the process, so on a server a
+subpath costs its whole static import graph rather than the tree-shaken
+bundle above (a server bundled with `@jarenjs/*` inside pays the bundle
+price instead; see [Docker and bundling](#docker-and-bundling)). The
+tables below give that cost for every subpath the manifests of
+`contract`, `db`, `linq`, `json`, `validate` and `core` name: the modules
+a fresh Node process loads for that one `import`, split by the package
+that owns each file (a JSON module counts, a `node:` built-in does not),
+and the live heap they hold — the V8 heap after two forced full
+collections, run on the main thread so each has finished when the heap
+is read, less the same process's heap before the import. Each heap is
+the median of <!--fact:closure.runs-->5<!--/fact--> fresh processes, whose runs differed by at
+most <!--fact:closure.spread-->46 KiB<!--/fact--> for any one subpath; native memory a built-in
+allocates for itself (`node:crypto`'s, say) is not in it. A heap depends
+on the runtime and the host — these were measured on one machine,
+with <!--fact:closure.host-->Node v24.22.1 on linux x64<!--/fact--> — while a module count is
+exact: `npm run test:tree-shaking` fails when one differs from the
+tree's. The heaps are re-measured for every release
+(`npm run test:tree-shaking -- --write`), and
+[`benchmark/node-closures.json`](../benchmark/node-closures.json) holds
+the same figures for all <!--fact:closure.subpaths-->271<!--/fact--> importable subpaths of
+every package, each file of a wildcard export (`@jarenjs/core/dates/*`)
+included.
+
+**`@jarenjs/contract`**
+
+<!--fact:closure.contract-->
+| Subpath | Modules | By package | Live heap MiB |
+|---|---:|---|---:|
+| `.` | 140 | core 73, validate 29, json 26, contract 12 | 6.1 |
+| `./app` | 29 | core 11, contract 9, json 9 | 1.4 |
+| `./auth-node` | 11 | core 8, contract 3 | 1.3 |
+| `./client` | 141 | core 75, validate 27, json 26, contract 13 | 5.9 |
+| `./command` | 23 | core 11, json 7, contract 5 | 1.2 |
+| `./continuation-node` | 20 | core 10, json 7, contract 3 | 1.6 |
+| `./diff` | 140 | core 73, validate 29, json 26, contract 12 | 6.4 |
+| `./fetch` | 11 | core 8, contract 3 | 0.7 |
+| `./http` | 46 | contract 17, core 16, json 7, validate 6 | 2.0 |
+| `./ledger` | 11 | core 9, contract 2 | 0.8 |
+| `./local` | 19 | core 10, contract 9 | 1.0 |
+| `./node` | 13 | core 9, contract 4 | 0.7 |
+| `./port` | 27 | contract 15, core 12 | 1.3 |
+| `./project` | 172 | core 83, json 41, validate 29, contract 14, emit 5 | 8.8 |
+| `./provider` | 113 | core 74, json 31, contract 8 | 4.3 |
+| `./stream` | 16 | core 11, contract 5 | 1.0 |
+| `./webmcp` | 1 | contract 1 | 0.1 |
+<!--/fact-->
+
+**`@jarenjs/db`**
+
+<!--fact:closure.db-->
+| Subpath | Modules | By package | Live heap MiB |
+|---|---:|---|---:|
+| `.` | 195 | db 80, core 76, json 33, validate 6 | 11.0 |
+| `./app` | 1 | db 1 | 0.1 |
+| `./async-live` | 136 | core 63, db 46, json 21, validate 6 | 7.5 |
+| `./bun` | 128 | core 62, db 39, json 21, validate 6 | 6.1 |
+| `./entity` | 132 | core 63, db 40, json 23, validate 6 | 7.0 |
+| `./model` | 119 | core 62, db 30, json 21, validate 6 | 5.8 |
+| `./node` | 129 | core 62, db 40, json 21, validate 6 | 6.6 |
+| `./node-pool` | 105 | core 61, db 23, json 21 | 4.7 |
+| `./node-process` | 101 | core 61, json 21, db 19 | 4.7 |
+| `./node-worker` | 101 | core 61, json 21, db 19 | 4.7 |
+| `./postgres` | 119 | core 62, db 36, json 21 | 5.0 |
+| `./query` | 132 | core 62, db 43, json 21, validate 6 | 7.4 |
+| `./relational` | 122 | core 62, db 33, json 21, validate 6 | 5.9 |
+| `./search` | 92 | core 66, json 21, db 5 | 4.1 |
+| `./typed` | 1 | db 1 | 0.1 |
+| `./wasm` | 103 | core 61, db 21, json 21 | 4.7 |
+| `./worker-endpoint` | 133 | core 62, db 44, json 21, validate 6 | 6.7 |
+<!--/fact-->
+
+**`@jarenjs/linq`**
+
+<!--fact:closure.linq-->
+| Subpath | Modules | By package | Live heap MiB |
+|---|---:|---|---:|
+| `.` | 93 | core 61, json 21, linq 11 | 4.3 |
+| `./app` | 24 | linq 16, core 8 | 1.2 |
+| `./authoring` | 15 | core 8, linq 7 | 0.9 |
+| `./charts` | 15 | core 8, linq 7 | 1.0 |
+| `./contract` | 20 | core 10, linq 10 | 1.1 |
+| `./db` | 267 | core 89, db 80, json 36, validate 28, linq 27, formats 7 | 13.5 |
+| `./flow` | 19 | linq 11, core 8 | 1.0 |
+| `./forms` | 21 | linq 13, core 8 | 1.2 |
+| `./formula` | 90 | core 61, json 24, linq 5 | 4.0 |
+| `./jslt` | 17 | linq 9, core 8 | 1.0 |
+| `./jtlt` | 15 | core 8, linq 7 | 0.9 |
+| `./messages` | 16 | core 9, linq 7 | 1.0 |
+| `./migration` | 27 | core 11, linq 9, json 7 | 1.3 |
+| `./model` | 23 | linq 15, core 8 | 1.3 |
+| `./project` | 14 | core 8, linq 6 | 0.9 |
+| `./schema` | 19 | linq 11, core 8 | 1.1 |
+<!--/fact-->
+
+**`@jarenjs/json`**
+
+<!--fact:closure.json-->
+| Subpath | Modules | By package | Live heap MiB |
+|---|---:|---|---:|
+| `.` | 87 | core 61, json 26 | 3.8 |
+| `./basic` | 3 | json 2, core 1 | 0.2 |
+| `./canonical` | 17 | core 10, json 7 | 0.8 |
+| `./formula` | 85 | core 61, json 24 | 3.7 |
+| `./formula/batch` | 86 | core 61, json 25 | 3.7 |
+| `./formula/migrate` | 88 | core 61, json 27 | 4.1 |
+| `./jslt` | 103 | core 72, json 31 | 4.1 |
+| `./jtlt` | 108 | core 72, json 36 | 4.1 |
+| `./node` | 18 | core 10, json 8 | 1.3 |
+| `./patch` | 18 | core 10, json 8 | 0.9 |
+| `./path` | 18 | core 11, json 7 | 0.9 |
+| `./pointer` | 16 | core 10, json 6 | 0.8 |
+| `./query` | 82 | core 61, json 21 | 3.6 |
+| `./rules` | 87 | core 61, json 26 | 3.7 |
+| `./write` | 20 | core 11, json 9 | 1.0 |
+| `./xquery` | 84 | core 61, json 23 | 3.9 |
+<!--/fact-->
+
+**`@jarenjs/validate`**
+
+<!--fact:closure.validate-->
+| Subpath | Modules | By package | Live heap MiB |
+|---|---:|---|---:|
+| `.` | 125 | core 72, validate 27, json 26 | 5.3 |
+| `./load` | 100 | core 63, json 26, validate 11 | 4.4 |
+| `./normalize` | 127 | core 72, validate 29, json 26 | 5.6 |
+| `./output` | 100 | core 63, json 26, validate 11 | 4.4 |
+| `./query` | 125 | core 72, validate 27, json 26 | 5.3 |
+| `./references` | 24 | core 12, json 6, validate 6 | 1.0 |
+| `./strict-profile` | 128 | core 72, validate 30, json 26 | 5.7 |
+<!--/fact-->
+
+**`@jarenjs/core`**
+
+<!--fact:closure.core-->
+| Subpath | Modules | By package | Live heap MiB |
+|---|---:|---|---:|
+| `.` | 5 | core 5 | 0.3 |
+| `./array` | 6 | core 6 | 0.3 |
+| `./async` | 6 | core 6 | 0.3 |
+| `./bigint` | 6 | core 6 | 0.3 |
+| `./cache` | 9 | core 9 | 0.6 |
+| `./check` | 5 | core 5 | 0.3 |
+| `./checksum` | 1 | core 1 | 0.1 |
+| `./chunk` | 1 | core 1 | 0.1 |
+| `./color` | 1 | core 1 | 0.1 |
+| `./convert` | 5 | core 5 | 0.2 |
+| `./dates` | 13 | core 13 | 0.6 |
+| `./errors` | 1 | core 1 | 0.1 |
+| `./finance` | 10 | core 10 | 0.3 |
+| `./float` | 6 | core 6 | 0.3 |
+| `./function` | 5 | core 5 | 0.3 |
+| `./geo` | 22 | core 22 | 0.8 |
+| `./guarded` | 5 | core 5 | 0.3 |
+| `./integer` | 6 | core 6 | 0.3 |
+| `./math` | 12 | core 12 | 0.5 |
+| `./message` | 9 | core 9 | 0.5 |
+| `./model` | 9 | core 9 | 0.5 |
+| `./number` | 1 | core 1 | 0.1 |
+| `./object` | 8 | core 8 | 0.5 |
+| `./process-node` | 1 | core 1 | 0.7 |
+| `./random` | 1 | core 1 | 0.1 |
+| `./range` | 10 | core 10 | 0.6 |
+| `./retry` | 9 | core 9 | 0.5 |
+| `./route` | 10 | core 10 | 0.6 |
+| `./runtime` | 1 | core 1 | 0.1 |
+| `./scan` | 1 | core 1 | 0.1 |
+| `./schedule` | 10 | core 10 | 0.6 |
+| `./schema` | 9 | core 9 | 0.6 |
+| `./search` | 12 | core 12 | 0.6 |
+| `./series` | 18 | core 18 | 0.7 |
+| `./stats` | 2 | core 2 | 0.1 |
+| `./string` | 6 | core 6 | 0.3 |
+| `./text` | 17 | core 17 | 0.6 |
+| `./vector` | 1 | core 1 | 0.1 |
+| `./virtual` | 1 | core 1 | 0.1 |
+<!--/fact-->
+
 ### Wire the packages into your workspace
 
 The packages resolve each other by name (`@jarenjs/validate` imports
