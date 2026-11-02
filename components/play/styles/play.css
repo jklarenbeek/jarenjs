@@ -114,7 +114,7 @@
 .jplay-table { border-collapse: collapse; font-size: 0.8rem; font-family: var(--mono, monospace); }
 .jplay-table th, .jplay-table td {
   border: 1px solid var(--border, #e2e8f0); padding: 2px var(--space-2, 0.5rem);
-  text-align: left; white-space: nowrap;
+  text-align: start; white-space: nowrap;
 }
 .jplay-table th { position: sticky; top: 0; background: var(--surface, #f8fafc); color: var(--fg, #0f172a); }
 
