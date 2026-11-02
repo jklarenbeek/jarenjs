@@ -842,19 +842,19 @@ benchmark-figure gate so no number here is typed by hand:
 
 - **Route match**: the compiled matcher resolves the probe mix —
   static hot paths, variables, the static-beats-variable case, a miss —
-  at <!--fact:contract.match.vs-fmw-->185 ns per lookup vs find-my-way's 208 ns<!--/fact-->;
+  at <!--fact:contract.match.vs-fmw-->184 ns per lookup vs find-my-way's 183 ns<!--/fact-->;
   hono's TrieRouter is <!--fact:contract.match.vs-hono-->1.8x<!--/fact--> behind, and its RegExpRouter refuses this
   route table outright (a static path registered after a param sibling).
 - **Dispatch, in-process**: the whole pipeline (route, decode, validate
   input, handler, validate output,
-  serialize) is <!--fact:contract.dispatch.vs-fastify-->2.4–10.6x<!--/fact-->
+  serialize) is <!--fact:contract.dispatch.vs-fastify-->2.4–10.3x<!--/fact-->
   faster than Fastify driven through its own `inject` — a number that
   includes Fastify's mock-stream harness, which is why the next row
   exists.
 - **The honest loss**: the bare pieces Fastify composes — find-my-way +
   Ajv + fast-json-stringify, called directly with no harness and no
   response validation
-  — are <!--fact:contract.dispatch.losses-->2.5–10.0x<!--/fact--> faster than
+  — are <!--fact:contract.dispatch.losses-->2.6–10.7x<!--/fact--> faster than
   this pipeline. The wide end of that band is the bare `{ok:true}`
   route, where the rival's compiled serializer answers in ~200 ns and
   there is almost no work to amortize the pipeline against; on the
@@ -864,15 +864,15 @@ benchmark-figure gate so no number here is typed by hand:
   server kept its own contract before a byte leaves. Over a real
   loopback socket the two stacks are level: the socket dominates both.
 - **The optimization trigger**: on the heaviest in-process row (the
-  5×4-body PUT), response serialization is <!--fact:contract.serialization.share-->11.6%<!--/fact-->
-  of the request and output validation is <!--fact:contract.validateOutput.share-->27%<!--/fact-->.
+  5×4-body PUT), response serialization is <!--fact:contract.serialization.share-->11.1%<!--/fact-->
+  of the request and output validation is <!--fact:contract.validateOutput.share-->30%<!--/fact-->.
   A schema-driven serializer stays unscheduled while serialization is below
   25%: even making that stage free would move the whole request by only about a
   tenth. The suite republishes both shares on every measured run; for a large
   cached representation, validate on rebuild and serve by revision instead of
   paying validation on every request.
 - **Revision**: computing it
-  costs <!--fact:contract.revision.ms-->2.2 ms<!--/fact--> for the 123-operation
+  costs <!--fact:contract.revision.ms-->2.4 ms<!--/fact--> for the 123-operation
   contract, once per process.
 
 ## What it is not
