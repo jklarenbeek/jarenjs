@@ -5022,14 +5022,27 @@ export function openStore(model, options) {
            * assignment cannot shadow a non-writable inherited property. */
           const override = (/** @type {any} */ value) =>
             ({ value, writable: false, enumerable: true, configurable: false });
-          /** An overriding member built on its first read, and the same
-           * value on every read after it.
-           * @param {() => any} make */
-          const onFirstUse = (make) => {
+          /** Where a transaction view keeps what its lazy members build. */
+          const VIEW_STATE = Symbol('transaction view');
+          /** A lazy member every view shares: its getter reads the view's own
+           * state, so every view of this store keeps one hidden class. A getter
+           * of its own per view made each view a hidden class of its own, which
+           * the old generation kept, with the whole transaction behind it,
+           * until a full collection.
+           * @param {string} name */
+          const sharedLazy = (name) => ({
+            get() { return /** @type {any} */ (this)[VIEW_STATE][name](); }, enumerable: true, configurable: false });
+          const LAZY_VIEW_MEMBERS = Object.freeze({
+            sql: sharedLazy('sql'), relational: sharedLazy('relational'), savepoints: sharedLazy('savepoints') });
+          const LAZY_CHANGES = sharedLazy('changes');
+          const LAZY_JOBS = sharedLazy('jobs');
+          const LAZY_SYNC = sharedLazy('sync');
+          /** A builder that builds once. @param {() => any} make */
+          const once = (make) => {
             let made = false;
             /** @type {any} */
             let value;
-            return { get: () => { if (!made) { value = make(); made = true; } return value; }, enumerable: true, configurable: false };
+            return () => { if (!made) { value = make(); made = true; } return value; };
           };
 
           // The transaction callback's argument, and the ONLY handle that
@@ -5242,8 +5255,6 @@ export function openStore(model, options) {
               attempt: myRoot?.attempt ?? 1,
               // the isolation level this transaction runs at
               isolation: myRoot?.isolation ?? sessionIsolation,
-              get sql() { return sqlOfScope(); },
-              get relational() { return relationalOfScope(); },
               transaction: (/** @type {any} */ fn, /** @type {any} */ transactionOptions) =>
                 lift(() => nested(fn, transactionOptions))(),
               collection: collectionFor,
@@ -5266,13 +5277,6 @@ export function openStore(model, options) {
               // wait for itself (JD0012 at queueTimeout, then a rollback)
               introspect: lift((/** @type {any} */ introspectOptions) => runScoped(identity, () => introspectModel(connection, introspectOptions))),
               dataVersion: lift(() => runScoped(identity, () => readDataVersion())),
-              get savepoints() {
-                return savepointsView ??= Object.freeze({
-                  create: lift(savepointCreate),
-                  rollbackTo: lift(savepointRollbackTo),
-                  release: lift(savepointRelease),
-                });
-              },
               // a transaction view does not own the store lifetime: the
               // member is ABSENT rather than a second way to close the
               // raw connection under its own savepoint
@@ -5287,6 +5291,21 @@ export function openStore(model, options) {
               optimize: undefined,
               backupTo: undefined,
             };
+            /** What this view's lazy members build, read by the getters every view shares. */
+            const state = {
+              sql: sqlOfScope,
+              relational: relationalOfScope,
+              savepoints: () => savepointsView ??= Object.freeze({
+                create: lift(savepointCreate),
+                rollbackTo: lift(savepointRollbackTo),
+                release: lift(savepointRelease),
+              }),
+              changes: undefined,
+              jobs: undefined,
+              sync: undefined,
+            };
+            Object.defineProperty(view, VIEW_STATE, { value: state });
+            Object.defineProperties(view, LAZY_VIEW_MEMBERS);
             /** The members a store has only with entities, capture, jobs or
              * a synchronous driver, appended after the rest in this order.
              * @type {PropertyDescriptorMap} */
@@ -5304,16 +5323,17 @@ export function openStore(model, options) {
             }
             if (capture !== null) {
               members.changesSince = override(lift((/** @type {any} */ after) => runScoped(identity, () => capture.changesSince(after))));
-              if (capture.logged) members.changes = onFirstUse(() => Object.freeze({
+              if (capture.logged) state.changes = once(() => Object.freeze({
                 bounds: lift(() => runScoped(identity, () => capture.bounds())),
                 page: lift((/** @type {any} */ pageOptions) => runScoped(identity, () => capture.page(pageOptions))),
               }));
+              if (capture.logged) members.changes = LAZY_CHANGES;
             }
             if (jobsEngine !== null) {
               // the transactional-outbox spelling: these run as the exact
               // scope, so an enqueue or settlement here co-commits with
               // the domain transaction — and a retained handle is JD2070
-              members.jobs = onFirstUse(() => Object.freeze({
+              state.jobs = once(() => Object.freeze({
                 enqueue: scopedCall(identity, jobsEngine, 'enqueue'),
                 get: scopedCall(identity, jobsEngine, 'get'),
                 counts: lift(() => runScoped(identity, () => jobsEngine.counts())),
@@ -5339,10 +5359,11 @@ export function openStore(model, options) {
                 // never binds to the transaction that constructed it
                 createWorker: jobsEngine.createWorker,
               }));
+              members.jobs = LAZY_JOBS;
             }
             if (connection.synchronous && syncCollectionFor !== undefined) {
               const forSync = /** @type {(name: string) => any} */ (syncCollectionFor);
-              members.sync = onFirstUse(() => {
+              state.sync = once(() => {
                 /** @type {Map<string, any>} */
                 const mySyncCollections = new Map();
                 /** @type {Map<string, any>} */
@@ -5386,6 +5407,7 @@ export function openStore(model, options) {
                 relations: entityEngine === null ? undefined : entityEngine.relations,
                 });
               });
+              members.sync = LAZY_SYNC;
             }
             return Object.freeze(Object.defineProperties(view, members));
           };

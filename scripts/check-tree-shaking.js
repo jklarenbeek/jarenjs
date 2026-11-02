@@ -693,7 +693,8 @@ if (asyncLiveLeak.length)
 // Raised to 1,133,600 (measured 1133509): a tuple of boolean and type-only positions tested by code with no call per element (array 643), and uniqueItems comparing an array of up to 8 items pairwise with no Set, its deep compare skipping the leaf tests for two objects (object 236), add 879.
 // Raised to 1,135,200 (measured 1135134): a leading object or array type tested by its keyword group, type-only members and items tested by code, and properties beside additionalProperties walked in one closure (object 1,092, tools 644, array 265, schema -392, minifier shifts elsewhere 16), add 1625.
 // Raised to 1,135,500 (measured 1135408): a collection statement's SQL built on its first prepare only, with nine builders kept per collection and two shared statement-metadata objects (store 267), and the transaction view built as one frozen literal instead of a descriptor map (store 7), add 274.
-if (clientBytes > 1135500)
+// Raised to 1,135,800 (measured 1135731): every transaction view of a store sharing one hidden class — its lazy members read through getters the store builds once, over a state slot on the view, where a getter of its own per view kept each finished transaction in the old generation until a full collection (store 323), add 323.
+if (clientBytes > 1135800)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 
