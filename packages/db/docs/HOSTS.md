@@ -771,13 +771,13 @@ Measured 2026-10-01, v24.20.0, AMD Ryzen 9 5900HX with Radeon Graphics; 7 sample
 On pool-1-reader, `reads: 'parallel'` runs the Store-level mixed work 1.72× faster than the serialized default and answers 33.26% fewer sequential tiny root gets per second.
 On pool-3-readers, `reads: 'parallel'` runs the Store-level mixed work 2.47× faster than the serialized default and answers 25.63% fewer sequential tiny root gets per second.
 
-| Bun 1.4.2 executable | Rows written | Rows streamed | Long read ms | Event-loop max ms |
+| Bun 1.4.4 executable | Rows written | Rows streamed | Long read ms | Event-loop max ms |
 |---|---:|---:|---:|---:|
-| worker | 20001 | 20001 | 319.34 | 2.40 |
-| pool | 20001 | 20001 | 411.47 | 6.32 |
-| in-thread | 20001 | 20001 | 97.26 | 96.29 |
+| worker | 20001 | 20001 | 415.06 | 3.05 |
+| pool | 20001 | 20001 | 526.84 | 4.32 |
+| in-thread | 20001 | 20001 | 119.10 | 118.76 |
 
-Built with `bun build --compile ./worker-app.js ./worker-endpoint.js --outfile worker-hosts-bun` and run with every source and module path removed; the long read is 5 whole-collection reads of 20001 rows. The worker host held the event loop at most 2.40 ms against the 50 ms bound and took 3.28× as long as the in-thread binding, which held the loop 96.29 ms. The pool host held the event loop at most 6.32 ms against the 50 ms bound and took 4.23× as long as the in-thread binding, which held the loop 96.29 ms. Built without the second entrypoint, the open refused: worker JD0003 (retryable: false), pool JD0003 (retryable: false). The side-effect import of `@jarenjs/db/worker-endpoint`, bundled alone, keeps the endpoint: 513480 bytes with Bun, 579659 with esbuild.
+Built with `bun build --compile ./worker-app.js ./worker-endpoint.js --outfile worker-hosts-bun` and run with every source and module path removed; the long read is 5 whole-collection reads of 20001 rows. The worker host held the event loop at most 3.05 ms against the 50 ms bound and took 3.48× as long as the in-thread binding, which held the loop 118.76 ms. The pool host held the event loop at most 4.32 ms against the 50 ms bound and took 4.42× as long as the in-thread binding, which held the loop 118.76 ms. Built without the second entrypoint, the open refused: worker JD0003 (retryable: false), pool JD0003 (retryable: false). The side-effect import of `@jarenjs/db/worker-endpoint`, bundled alone, keeps the endpoint: 513603 bytes with Bun, 579782 with esbuild.
 
 | Include accounting | Encoded bytes | Time p50 ms | Uncollected heap growth p50 MiB |
 |---|---:|---:|---:|
