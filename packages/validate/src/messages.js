@@ -56,7 +56,7 @@ const requiresDependency = (p) => p.missingProperty !== undefined
 export const messagesEn = {
   type: (p) => p.types
     ? `must be one of the following types: ${p.types.join(', ')}`
-    : `must be ${p.type === 'integer' ? 'an' : 'a'} ${p.type}`,
+    : `must be ${/^[aeiou]/.test(p.type) ? 'an' : 'a'} ${p.type}`,
   required: (p) => p.missingProperty !== undefined
     ? `must have required property '${p.missingProperty}'`
     : 'must have required properties',

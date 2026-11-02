@@ -155,6 +155,9 @@ describe('messagesEn', () => {
     const en = compileMessageCatalog(messagesEn);
     assert.strictEqual(en.type({ type: 'integer' }), 'must be an integer');
     assert.strictEqual(en.type({ type: 'string' }), 'must be a string');
+    // the article follows the type's first sound, as the forms catalog's 'form/type' does
+    assert.strictEqual(en.type({ type: 'object' }), 'must be an object');
+    assert.strictEqual(en.type({ type: 'array' }), 'must be an array');
     assert.strictEqual(en.type({ types: ['string', 'number'] }), 'must be one of the following types: string, number');
     assert.strictEqual(en.required({ missingProperty: 'x' }), "must have required property 'x'");
     assert.strictEqual(en.required({}), 'must have required properties');
