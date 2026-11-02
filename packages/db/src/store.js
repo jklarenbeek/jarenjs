@@ -5230,22 +5230,29 @@ export function openStore(model, options) {
             const syncRelationalOfScope = () => (scopeSyncRelational ??= relationalEngine({ ...relationalPolicy(false),
               cursor: (/** @type {any} */ spec) => admitSyncCursor(createSyncCursor({ ...spec, open: () => spec.open(connection) }),
                 (/** @type {() => any} */ fn) => runScoped(identity, fn, false)) }));
-            const members = {
+            /** @type {any} */
+            let savepointsView;
+            // the members every view has, as one frozen literal over the
+            // store — the same own, enumerable, read-only members in the
+            // same order as their descriptors gave, at about a third of
+            // what `Object.create` with those descriptors cost a transaction
+            const view = {
+              __proto__: store,
               // 1-based: the attempt of a retried transaction this callback runs in
-              attempt: override(myRoot?.attempt ?? 1),
+              attempt: myRoot?.attempt ?? 1,
               // the isolation level this transaction runs at
-              isolation: override(myRoot?.isolation ?? sessionIsolation),
-              sql: onFirstUse(sqlOfScope),
-              relational: onFirstUse(relationalOfScope),
-              transaction: override((/** @type {any} */ fn, /** @type {any} */ transactionOptions) =>
-                lift(() => nested(fn, transactionOptions))()),
-              collection: override(collectionFor),
-              entity: override(entityFor),
+              isolation: myRoot?.isolation ?? sessionIsolation,
+              get sql() { return sqlOfScope(); },
+              get relational() { return relationalOfScope(); },
+              transaction: (/** @type {any} */ fn, /** @type {any} */ transactionOptions) =>
+                lift(() => nested(fn, transactionOptions))(),
+              collection: collectionFor,
+              entity: entityFor,
               // THIS scope's bookkeeping, and only while this scope is
               // the live one: an escaped handle, or an outer one used
               // while an inner transaction is open, is JD2070 like every
               // other stateful member — never a report from a dead scope
-              stats: override(() => {
+              stats: () => {
                 requireScope(identity);
                 return {
                   statementCache: { ...queryState.counters },
@@ -5253,31 +5260,37 @@ export function openStore(model, options) {
                   tracker: myWork.tracker === null ? null : myWork.tracker.counts(),
                   liveQueries: liveRegistry === null ? 0 : liveRegistry.count(),
                 };
-              }),
+              },
               // the transaction's own connection: the root's introspect
               // takes the gate, which from inside the transaction is a
               // wait for itself (JD0012 at queueTimeout, then a rollback)
-              introspect: override(lift((/** @type {any} */ introspectOptions) => runScoped(identity, () => introspectModel(connection, introspectOptions)))),
-              dataVersion: override(lift(() => runScoped(identity, () => readDataVersion()))),
-              savepoints: onFirstUse(() => Object.freeze({
-                create: lift(savepointCreate),
-                rollbackTo: lift(savepointRollbackTo),
-                release: lift(savepointRelease),
-              })),
+              introspect: lift((/** @type {any} */ introspectOptions) => runScoped(identity, () => introspectModel(connection, introspectOptions))),
+              dataVersion: lift(() => runScoped(identity, () => readDataVersion())),
+              get savepoints() {
+                return savepointsView ??= Object.freeze({
+                  create: lift(savepointCreate),
+                  rollbackTo: lift(savepointRollbackTo),
+                  release: lift(savepointRelease),
+                });
+              },
               // a transaction view does not own the store lifetime: the
               // member is ABSENT rather than a second way to close the
               // raw connection under its own savepoint
-              close: override(undefined),
-              replication: override(undefined),
+              close: undefined,
+              replication: undefined,
               // nor does it run maintenance: a checkpoint inside an open
               // transaction is a no-op the engine answers quietly, and
               // the other three are store-level operations — ABSENT here
-              checkpoint: override(undefined),
-              integrityCheck: override(undefined),
-              foreignKeyCheck: override(undefined),
-              optimize: override(undefined),
-              backupTo: override(undefined),
+              checkpoint: undefined,
+              integrityCheck: undefined,
+              foreignKeyCheck: undefined,
+              optimize: undefined,
+              backupTo: undefined,
             };
+            /** The members a store has only with entities, capture, jobs or
+             * a synchronous driver, appended after the rest in this order.
+             * @type {PropertyDescriptorMap} */
+            const members = {};
             if (entities.size > 0) {
               members.saveChanges = override(lift(() => runScoped(identity, () => guard(() => myWork.tracker.saveChanges()))));
             }
@@ -5374,7 +5387,7 @@ export function openStore(model, options) {
                 });
               });
             }
-            return Object.freeze(Object.create(store, members));
+            return Object.freeze(Object.defineProperties(view, members));
           };
 
           if (connection.synchronous) {
