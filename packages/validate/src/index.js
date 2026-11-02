@@ -52,7 +52,7 @@ import { equalsJson, mergeMap } from '@jarenjs/core/object';
 import { isStringWhiteSpace } from '@jarenjs/core/string';
 import { hasRecursiveAnchor, getDynamicAnchorName, collectDynamicAnchors, collectDynamicAnchorsDeep, appliesRefSiblings } from './dynamic-ref.js';
 import { isRecursiveQueryCompileError } from './query-keyword.js';
-import { boundReference, assertDepthOption, assertOutputFormat, schemaTooDeep, unimplementedVocabulary, REFERENCE_DEPTH_CEILING, SCHEMA_DEPTH_CEILING } from './errors.js';
+import { enterReference, leaveReference, referenceDepthNow, assertDepthOption, assertOutputFormat, schemaTooDeep, unimplementedVocabulary, REFERENCE_DEPTH_CEILING, SCHEMA_DEPTH_CEILING } from './errors.js';
 import { TRAVERSE_SCHEMA_OBJECTS, TRAVERSE_SCHEMA_MAPS, TRAVERSE_SCHEMA_MAP_MAPS, detectSchemaDraft, dialectVocabulary, caselessUri, heldUriKey, heldDialect, identifierKeyword, identifierText, dialectDraft } from './schema-keywords.js';
 import { VALIDATOR_STATE } from './validator-state.js';
 import { encodeJsonPointerPath } from './origin.js';
@@ -225,24 +225,10 @@ export const DEFAULT_SCHEMA_DRAFT = 'http://json-schema.org/draft-07/schema#'
 
 export { detectSchemaDraft };
 
-const isBrowser = typeof window !== 'undefined';
-
-const performance = (() => isBrowser
-  // eslint-disable-next-line no-undef
-  ? window.performance
-  : {
-    now: function performanceNow(start) {
-      // @ts-ignore
-      const ps = process;
-      if (!start) return ps.hrtime();
-      const end = ps.hrtime(start);
-      return Math.round((end[0] * 1000) + (end[1] / 1000000));
-    },
-  })();
-
+// One fault as a keyword records it; nothing reads a clock per fault (a
+// collecting walk builds one for every branch it tries).
 class InternalValidationError {
   constructor(obj, key, expected, dataKey, value, rest) {
-    this.timeStamp = performance.now();
     this.object = obj;
     this.key = key;
     this.expected = expected;
@@ -574,6 +560,12 @@ export class ValidationRoot {
   #targetReads = new Map();
   /** @type {boolean} Whether any schema in this compilation contains unevaluatedProperties/unevaluatedItems */
   #usesUnevaluated = false;
+  /** @type {boolean} Whether a collecting walk keeps what a resolved reference answered while branches are tried ({@link ValidationRoot#callReference}) */
+  #keepsReferenceAnswers = false;
+  /** @type {number} The `oneOf`/`anyOf` branch walks open on the call stack */
+  #branchWalks = 0;
+  /** @type {Map<Function, Map<string, {data: unknown, depth: number, valid: boolean, errors: InternalValidationError[]}>>|null} What resolved references answered in this validation, by target and location */
+  #keptAnswers = null;
   /** @type {EvalLog} Log of evaluated properties/items for unevaluated* support */
   #evalLog = new EvalLog();
   /** @type {object|null} The JarenValidator instance this compilation belongs to, or null when constructed standalone */
@@ -757,11 +749,12 @@ export class ValidationRoot {
 
   /**
    * Scans every schema of the compilation once for the features that need
-   * runtime support: location readers (see `#readsLocation`) and
-   * 'unevaluatedProperties'/'unevaluatedItems'.
+   * runtime support: location readers (see `#readsLocation`),
+   * 'unevaluatedProperties'/'unevaluatedItems', and the dynamic scope's
+   * keywords.
    * @param {any} node - The schema node to scan
    * @param {Set<object>} seen - Cycle guard
-   * @param {{dollarData: boolean, unevaluated: boolean, canElide: boolean}} flags - Output flags
+   * @param {{dollarData: boolean, unevaluated: boolean, dynamic: boolean, canElide: boolean}} flags - Output flags
    * @param {boolean} mapMaps - Whether `propertyDependencies` is on
    */
   static #scanSchemaFeatures(node, seen, flags, mapMaps) {
@@ -771,7 +764,9 @@ export class ValidationRoot {
         if (!flags.canElide || ValidationRoot.#unevaluatedForcesTracking(holder, key))
           flags.unevaluated = true;
       }
-      return flags.dollarData && flags.unevaluated;
+      else if (key === '$dynamicRef' || key === '$recursiveRef' || key === '$dynamicAnchor' || key === '$recursiveAnchor')
+        flags.dynamic = true;
+      return flags.dollarData && flags.unevaluated && flags.dynamic;
     }, true, mapMaps);
   }
 
@@ -817,16 +812,26 @@ export class ValidationRoot {
     // Elision of unreachable unevaluated* checks relies on validators
     // short-circuiting at the first failure, so it only holds in
     // skipErrors mode (see #unevaluatedForcesTracking).
-    const flags = { dollarData: false, unevaluated: false, canElide: opts.skipErrors === true };
+    const flags = { dollarData: false, unevaluated: false, dynamic: false, canElide: opts.skipErrors === true };
     const seen = new Set();
     for (const value of schemas.values()) {
       ValidationRoot.#scanSchemaFeatures(value, seen, flags, opts.propertyDependencies === true);
-      if (flags.dollarData && flags.unevaluated) break;
+      if (flags.dollarData && flags.unevaluated && flags.dynamic) break;
     }
     this.#usesDollarData = flags.dollarData;
     // Recording runs every branch of an `anyOf` (each passing branch has
     // annotations to report), which annotation tracking already does.
     this.#usesUnevaluated = flags.unevaluated || this.#recorder !== null;
+    // A collecting walk runs every branch of a `oneOf`, and the branches of
+    // an `anyOf` up to a match, in full: branches that enter one definition
+    // on one member through references enter it again per branch, at every
+    // level below. What such an entry answers depends on the member, its
+    // location and the references open around it alone where no annotation
+    // is tracked, nothing records output units and no dynamic reference
+    // reads the scope; there it is kept for the validation and given again,
+    // errors included.
+    this.#keepsReferenceAnswers = !opts.skipErrors && this.#recorder === null
+      && !this.#usesUnevaluated && !flags.dynamic;
 
     // For the root schema, baseUri is the origin
     this.#firstSchema = ValidationRoot.#createObject(this, origin, schema, origin);
@@ -1225,6 +1230,54 @@ export class ValidationRoot {
   /** @returns {UnitRecorder|null} The output units' recorder, or null (an internal collaborator of the keyword compilers) */
   get recorder() { return this.#recorder; }
 
+  /** @returns {boolean} Whether resolved references keep their answers while branches are tried ({@link ValidationRoot#callReference}) */
+  get keepsReferenceAnswers() { return this.#keepsReferenceAnswers; }
+
+  /**
+   * Open (`1`) or close (`-1`) a `oneOf`/`anyOf` branch walk.
+   * @param {number} step
+   */
+  walkBranches(step) {
+    this.#branchWalks += step;
+  }
+
+  /**
+   * Call what a resolved reference enters. While a branch walk is open in a
+   * compilation that keeps reference answers, an entry on the member it
+   * answered before, at the same location with the same references open,
+   * gives that answer again and records the errors that entry left; any
+   * other call runs the target and keeps what it answered.
+   * @param {Function} validate - The reference's target
+   * @param {unknown} data - The member
+   * @param {string} dataPath - Its location
+   * @param {unknown} dataRoot - The instance
+   * @returns {unknown} What the target answers
+   */
+  callReference(validate, data, dataPath, dataRoot) {
+    if (this.#branchWalks === 0) return validate(data, dataPath, dataRoot);
+    // Whether a reference refuses depends on the levels open, so an entry
+    // made with as many open answers for this one.
+    const depth = referenceDepthNow();
+    let byPath = this.#keptAnswers?.get(validate);
+    const kept = byPath?.get(dataPath);
+    if (kept !== undefined && kept.data === data && kept.depth === depth) {
+      const errors = this.#errors;
+      for (let i = 0; i < kept.errors.length; i++) errors.push(kept.errors[i]);
+      return kept.valid;
+    }
+    const mark = this.#errors.length;
+    const valid = validate(data, dataPath, dataRoot);
+    if (typeof valid === 'boolean') {
+      if (this.#keptAnswers === null) this.#keptAnswers = new Map();
+      if (byPath === undefined) {
+        byPath = new Map();
+        this.#keptAnswers.set(validate, byPath);
+      }
+      byPath.set(dataPath, { data, depth, valid, errors: this.#errors.slice(mark) });
+    }
+    return valid;
+  }
+
   /**
    * A checkpoint in the collected-error list.
    *
@@ -1255,6 +1308,21 @@ export class ValidationRoot {
    * @returns {boolean} True if valid, false otherwise
    */
   validate(data /*:unknown*/) {
+    try {
+      return this.#validateOnce(data);
+    }
+    finally {
+      // The answers kept for this validation hold its instance.
+      this.#keptAnswers = null;
+    }
+  }
+
+  /**
+   * The work of {@link validate}.
+   * @param {unknown} data
+   * @returns {boolean}
+   */
+  #validateOnce(data) {
     // only clear errors array when we need to collect errors
     // When skipErrors=true (default), we don't use the errors array
     if (!this.#options.skipErrors) {
@@ -1362,10 +1430,11 @@ export class ValidationRoot {
    * @param {Function} validator - The validator function
    */
   pushDynamicAnchorValidator(anchorName, validator) {
-    if (!this.#dynamicAnchors.has(anchorName)) {
-      this.#dynamicAnchors.set(anchorName, []);
-    }
-    this.#dynamicAnchors.get(anchorName).push(validator);
+    const stack = this.#dynamicAnchors.get(anchorName);
+    if (stack === undefined)
+      this.#dynamicAnchors.set(anchorName, [validator]);
+    else
+      stack.push(validator);
   }
 
   /**
@@ -1635,12 +1704,15 @@ export class ValidationObject {
 
     // Memoized state of the first resolution - the target never changes.
     let resolvedState = null;
+    // The target itself, once resolved, where the reference enters no
+    // dynamic scope, has no siblings and records nothing.
+    let direct = null;
 
     // Every loop through schemas passes a reference resolved on first use, so
     // the reference depth bound holds a deep instance and a loop that never
     // descends into it alike; one back into an enclosing schema nests the
     // levels between them on each entry, and weighs them.
-    return wrapUnevaluated(self, schema, boundReference(path, root.options.maxReferenceDepth, root.referenceWeight(ref), function resolveSchemaCompiler(data, dataPath, dataRoot) {
+    const resolveAndCall = function resolveReference(data, dataPath, dataRoot) {
       if (resolvedState === null) {
         let obj;
         try {
@@ -1675,6 +1747,9 @@ export class ValidationObject {
           hasRecAnchor: isObjectClass(resolvedSchema) && hasRecursiveAnchor(resolvedSchema),
           dynAnchorName: isObjectClass(resolvedSchema) ? getDynamicAnchorName(resolvedSchema) : null,
         };
+        if (enterAnchors.length === 0 && !resolvedState.hasRecAnchor && !resolvedState.dynAnchorName
+          && !boundSiblingValidator && rootRef.recorder === null)
+          direct = targetValidator;
       }
       const { refValidator, callRef, enterAnchors, hasRecAnchor, dynAnchorName } = resolvedState;
 
@@ -1720,7 +1795,25 @@ export class ValidationObject {
           rootRef.popDynamicAnchorValidator(enterAnchors[i].name);
         }
       }
-    }));
+    };
+
+    // The reference counts toward the depth bound itself (as boundReference
+    // would around it), a call per validation fewer.
+    const ceiling = root.options.maxReferenceDepth;
+    const weight = root.referenceWeight(ref);
+    const keepsAnswers = root.keepsReferenceAnswers;
+    return wrapUnevaluated(self, schema, function resolveSchemaCompiler(data, dataPath, dataRoot) {
+      enterReference(path, ceiling, weight);
+      try {
+        if (direct !== null)
+          return keepsAnswers ? rootRef.callReference(direct, data, dataPath, dataRoot) : direct(data, dataPath, dataRoot);
+        return resolveAndCall(data, dataPath, dataRoot);
+      }
+      finally {
+        leaveReference(weight);
+      }
+    });
+
   }
 
   /** @type {ValidationRoot} The root validation context */
@@ -1799,7 +1892,8 @@ export class ValidationObject {
         const resourceBase = this.#effectiveBaseUri;
         const inner = (data, dataPath, dataRoot, dataKey) => this.#validator(data, dataPath, dataRoot, dataKey);
         this.#resourceValidator = (data, dataPath, dataRoot, dataKey) => {
-          for (const anchor of anchors) {
+          for (let i = 0; i < anchors.length; i++) {
+            const anchor = anchors[i];
             anchor.validator ??= anchor.schema === schema
               ? inner
               : root.getOrCreateValidator(anchor.schema, path, resourceBase);

@@ -1057,3 +1057,14 @@ describe('Schema Array Type', function () {
     })
   });
 });
+
+describe('collected length and uniqueness faults', function () {
+  it('reports a short array and its duplicates together', function () {
+    const validate = new JarenValidator({ skipErrors: false, collectErrors: true })
+      .compile({ minItems: 3, uniqueItems: true });
+    const { valid, errors } = validate([1, 1]);
+    assert.isFalse(valid);
+    assert.deepStrictEqual(errors.map((e) => e.keyword), ['minItems', 'uniqueItems']);
+    assert.deepStrictEqual(validate([1, 2, 3]), { valid: true, errors: [] });
+  });
+});

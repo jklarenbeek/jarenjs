@@ -158,7 +158,51 @@ function compileNumberIntern(schemaObj, jsonSchema) {
   };
 }
 
+// One bound or `multipleOf` alone, while the first failure decides: the
+// number guard and the test in one closure, a call per validation fewer.
+function compileNumberOnly(schemaObj, jsonSchema) {
+  const [max, emax] = getInclusiveExclusiveBounds(getNumbishType, jsonSchema.maximum, jsonSchema.exclusiveMaximum);
+  const [min, emin] = getInclusiveExclusiveBounds(getNumbishType, jsonSchema.minimum, jsonSchema.exclusiveMinimum);
+  const mulOf = getNumbishType(jsonSchema.multipleOf);
+  if ((max != null ? 1 : 0) + (emax != null ? 1 : 0) + (min != null ? 1 : 0)
+    + (emin != null ? 1 : 0) + (mulOf != null ? 1 : 0) !== 1)
+    return undefined;
+  if (max != null) {
+    const addError = schemaObj.createErrorHandler(max, 'maximum');
+    return function validateNumberMaximum(data, dataPath) {
+      return !isNumberType(data) || data <= max || addError(data, dataPath);
+    };
+  }
+  if (emax != null) {
+    const addError = schemaObj.createErrorHandler(emax, 'exclusiveMaximum');
+    return function validateNumberExclusiveMaximum(data, dataPath) {
+      return !isNumberType(data) || data < emax || addError(data, dataPath);
+    };
+  }
+  if (min != null) {
+    const addError = schemaObj.createErrorHandler(min, 'minimum');
+    return function validateNumberMinimum(data, dataPath) {
+      return !isNumberType(data) || data >= min || addError(data, dataPath);
+    };
+  }
+  if (emin != null) {
+    const addError = schemaObj.createErrorHandler(emin, 'exclusiveMinimum');
+    return function validateNumberExclusiveMinimum(data, dataPath) {
+      return !isNumberType(data) || data > emin || addError(data, dataPath);
+    };
+  }
+  const addError = schemaObj.createErrorHandler(mulOf, 'multipleOf');
+  const isMultipleOf = multipleOfTester(mulOf);
+  return function validateNumberMultipleOf(data, dataPath) {
+    return !isNumberType(data) || isMultipleOf(data) || addError(data, dataPath);
+  };
+}
+
 export function compileNumberBasic(schemaObj, jsonSchema) {
+  if (schemaObj.options.skipErrors) {
+    const only = compileNumberOnly(schemaObj, jsonSchema);
+    if (only !== undefined) return only;
+  }
   const intern = compileNumberIntern(schemaObj, jsonSchema);
   if (intern == null) return undefined;
 

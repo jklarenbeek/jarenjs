@@ -263,21 +263,48 @@ let referenceCount = 0;
  */
 export function boundReference(location, ceiling, weight, validate, subject = 'validation') {
   return /** @type {F} */ (function validateBoundReference(data, dataPath, dataRoot, dataKey) {
-    if (referenceDepth + weight > ceiling) {
-      // every reference on the way spanning one level, the levels are the references
-      throw new SchemaRuntimeError('JK2001', `${subject} nests ${referenceDepth === referenceCount && weight === 1
-        ? `more than ${ceiling} schema references`
-        : `schema references more than ${ceiling} levels deep`} at ${location} `
-        + '(an instance nested this deep, or a loop of references that never reads it)');
-    }
-    referenceDepth += weight;
-    referenceCount++;
+    enterReference(location, ceiling, weight, subject);
     try {
       return validate(data, dataPath, dataRoot, dataKey);
     }
     finally {
-      referenceDepth -= weight;
-      referenceCount--;
+      leaveReference(weight);
     }
   });
+}
+
+/**
+ * Count entering a schema reference toward the reference depth bound, as
+ * {@link boundReference} does around what it wraps; the caller restores the
+ * count with {@link leaveReference} however the call ends.
+ * @param {string} location - The schema location of the reference
+ * @param {number} ceiling - The compilation's `maxReferenceDepth`
+ * @param {number} weight - The levels of schema the reference spans
+ * @param {string} [subject] - What nests the references
+ * @throws {SchemaRuntimeError} `JK2001` when the count would pass `ceiling`
+ */
+export function enterReference(location, ceiling, weight, subject = 'validation') {
+  if (referenceDepth + weight > ceiling) {
+    // every reference on the way spanning one level, the levels are the references
+    throw new SchemaRuntimeError('JK2001', `${subject} nests ${referenceDepth === referenceCount && weight === 1
+      ? `more than ${ceiling} schema references`
+      : `schema references more than ${ceiling} levels deep`} at ${location} `
+      + '(an instance nested this deep, or a loop of references that never reads it)');
+  }
+  referenceDepth += weight;
+  referenceCount++;
+}
+
+/**
+ * Restore the count {@link enterReference} raised.
+ * @param {number} weight - The weight it was entered with
+ */
+export function leaveReference(weight) {
+  referenceDepth -= weight;
+  referenceCount--;
+}
+
+/** @returns {number} The levels of schema the references open on the call stack span */
+export function referenceDepthNow() {
+  return referenceDepth;
 }

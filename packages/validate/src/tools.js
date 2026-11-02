@@ -196,6 +196,43 @@ export function hasUnevaluatedItemsCoverage(schema) {
   return isArrayClass(items) && isBoolOrObjectClass(schema.additionalItems);
 }
 
+// The type names in the order isSchemaType switches on them.
+const SCHEMA_TYPE_NAMES = ['null', 'boolean', 'integer', 'bigint', 'number', 'string', 'object', 'array', 'set', 'map', 'tuple', 'regex'];
+
+/**
+ * The position isSchemaType tests a type name by: -1 for a name
+ * createIsSchemaTypeHandler holds no predicate for.
+ * @param {string} type - A type name
+ * @returns {number}
+ */
+export function schemaTypeCode(type) {
+  return SCHEMA_TYPE_NAMES.indexOf(type);
+}
+
+/**
+ * Whether data is of the type at `code` (schemaTypeCode): the predicate
+ * createIsSchemaTypeHandler returns for that name, called by name, so a
+ * closure every typed schema shares calls no function value to test it.
+ * @param {number} code - A schemaTypeCode position
+ * @param {unknown} data - The value tested
+ * @returns {boolean}
+ */
+export function isSchemaType(code, data) {
+  switch (code) {
+    case 0: return isNullValue(data);
+    case 1: return isBooleanType(data);
+    case 2: return isIntegerType(data);
+    case 3: return isBigIntType(data);
+    case 4: return isNumberType(data);
+    case 5: return isStringType(data);
+    case 6: return isObjectType(data);
+    case 8: return isSetClass(data);
+    case 9: return isMapClass(data);
+    case 11: return isRegExpType(data);
+    default: return isArrayClass(data);
+  }
+}
+
 export function createIsSchemaTypeHandler(type, isStrict = false) {
   switch (type) {
     case 'null': return isNullValue;

@@ -24,6 +24,8 @@ import {
   combineIndependent,
   markStep,
   createIsSchemaTypeHandler,
+  schemaTypeCode,
+  isSchemaType,
   hasSchemaReference,
   schemaReference,
   hasRefSiblings,
@@ -371,11 +373,29 @@ function compileTypeArray(schemaObj, jsonSchema) {
   }
 }
 
+/**
+ * The check of one type name: the absent-member guard, the test and the
+ * fault in one closure, a call per validation fewer than the parts.
+ * @param {number} code - The name's schemaTypeCode
+ * @param {Function} addError - The fault
+ * @returns {(data: unknown, dataPath: string) => boolean}
+ */
+function oneTypeCheck(code, addError) {
+  return function validateOneType(data, dataPath) {
+    return data === undefined
+      || (isSchemaType(code, data) ? true : addError(data, dataPath));
+  };
+}
+
 function compileTypeBasic(schemaObj, jsonSchema) {
+  const nullable = getBoolishType(jsonSchema.nullable);
+  // (a name the validator does not know is refused before this compiles)
+  if (nullable !== true && getStringType(jsonSchema.type) != null)
+    return oneTypeCheck(schemaTypeCode(jsonSchema.type), schemaObj.createErrorHandler(jsonSchema.type, 'type'));
+
   const validator = compileTypeSimple(schemaObj, jsonSchema)
     || compileTypeArray(schemaObj, jsonSchema);
 
-  const nullable = getBoolishType(jsonSchema.nullable);
   if (validator == null) {
     if (nullable !== false) return undefined;
 
@@ -595,9 +615,20 @@ export function compileSchemaObject(schemaObj, jsonSchema) {
   }
 
   const validators = [];
+  // A single type name first among the groups, while the first failure
+  // decides, is tested by the combining closure itself (below).
+  let typeCode = -1;
+  let typeError = null;
   if (vocabValidation) {
     addFunctionToArray(validators, compileRequired(schemaObj, jsonSchema));
-    addFunctionToArray(validators, compileTypeBasic(schemaObj, jsonSchema));
+    if (validators.length === 0 && schemaObj.options.skipErrors
+      && getBoolishType(jsonSchema.nullable) !== true && getStringType(jsonSchema.type) != null) {
+      // (a name the validator does not know is refused before this compiles)
+      typeCode = schemaTypeCode(jsonSchema.type);
+      typeError = schemaObj.createErrorHandler(jsonSchema.type, 'type');
+    }
+    else
+      addFunctionToArray(validators, compileTypeBasic(schemaObj, jsonSchema));
     addFunctionToArray(validators, compileEnumBasic(schemaObj, jsonSchema));
 
     // Compile $data-aware validators for keywords with $data references
@@ -630,6 +661,29 @@ export function compileSchemaObject(schemaObj, jsonSchema) {
   const finalize = refWithSiblings
     ? (validator) => validator
     : (validator) => wrapUnevaluated(schemaObj, jsonSchema, validator);
+
+  if (typeCode >= 0) {
+    const code = typeCode;
+    const addError = typeError;
+    if (validators.length === 0)
+      return finalize(oneTypeCheck(code, addError));
+    const second = validators[0];
+    if (validators.length === 1) {
+      return finalize(function validateTypedDouble(data, dataPath, dataRoot) {
+        return (data === undefined || (isSchemaType(code, data) ? true : addError(data, dataPath)))
+          && second(data, dataPath, dataRoot);
+      });
+    }
+    const third = validators[1];
+    if (validators.length === 2) {
+      return finalize(function validateTypedTriple(data, dataPath, dataRoot) {
+        return (data === undefined || (isSchemaType(code, data) ? true : addError(data, dataPath)))
+          && second(data, dataPath, dataRoot)
+          && third(data, dataPath, dataRoot);
+      });
+    }
+    validators.unshift(oneTypeCheck(code, addError));
+  }
 
   // same as empty schema
   if (validators.length === 0)

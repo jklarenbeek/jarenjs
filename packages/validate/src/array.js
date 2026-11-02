@@ -72,39 +72,24 @@ const compileUniqueItems = (schemaObj, jsonSchema) =>
 // An empty tuple has no positions: every element lies past it, so the
 // additional keyword applies to all of them. An empty prefixItems never gets
 // here (readPrefixItems reads it as absent, and items then applies to all).
+// A tuple is a validator per position and the one every element past them
+// answers by (a constant where the additional keyword is a boolean); the
+// element walks call them directly, a call per element fewer than a
+// dispatching wrapper.
 function compileTupleInternal(schemaObj, jsonSchema, itemsKey, additionalKey) {
   const tuple = jsonSchema[itemsKey];
 
   // Pre-compile all validators upfront
-  const validators = new Array(tuple.length);
+  const positions = new Array(tuple.length);
   for (let i = 0; i < tuple.length; i++) {
-    validators[i] = compileItemValidator(schemaObj, tuple[i], itemsKey, i);
+    positions[i] = compileItemValidator(schemaObj, tuple[i], itemsKey, i);
   }
-  const vlength = validators.length;
 
   const additional = getBoolOrObjectClass(jsonSchema[additionalKey], true);
-  if (typeof additional === 'boolean') {
-    if (additional === true) {
-      return function validateTupleBoolTrue(data, dataPath, dataRoot, i) {
-        if (i >= vlength) return true;
-        return validators[i](data, dataPath, dataRoot);
-      };
-    }
-    // additional === false
-    return function validateTupleBoolFalse(data, dataPath, dataRoot, i) {
-      if (i >= vlength) return false;
-      return validators[i](data, dataPath, dataRoot);
-    };
-  }
-
-  // For object additional schema, compile validator once
-  const validateAdditional = schemaObj.createValidator(additional, additionalKey);
-  return function validateTupleSchema(data, dataPath, dataRoot, i) {
-    if (i < vlength) {
-      return validators[i](data, dataPath, dataRoot);
-    }
-    return validateAdditional(data, dataPath, dataRoot);
-  };
+  const rest = typeof additional === 'boolean'
+    ? (additional ? trueThat : falseThat)
+    : schemaObj.createValidator(additional, additionalKey);
+  return { positions, rest };
 }
 
 function compilePrefixItems(schemaObj, jsonSchema) {
@@ -406,7 +391,10 @@ export function compileArrayPrimitives(schemaObj, jsonSchema) {
   };
 }
 
-function compileArrayChildren(schemaObj, jsonSchema) {
+// `alone`: no other array keyword group compiles beside the element walk,
+// which then tests the array class itself, a call per validation fewer
+// than a guarding wrapper.
+function compileArrayChildren(schemaObj, jsonSchema, alone) {
   // Check for prefixItems (draft 2020-12+) first, then items.
   const prefixItems = readPrefixItems(schemaObj, jsonSchema);
   const items = jsonSchema.items;
@@ -435,47 +423,48 @@ function compileArrayChildren(schemaObj, jsonSchema) {
     }
   }
 
-  let validateItem;
+  // An element at a tuple position is validated by that position's
+  // validator, every other one by `rest`.
+  let positions = [];
+  let rest = null;
+  let itemsTrue = false;
 
   if (prefixItems != null) {
     // Draft 2020-12+ style prefixItems
-    validateItem = compilePrefixItems(schemaObj, jsonSchema);
+    ({ positions, rest } = compilePrefixItems(schemaObj, jsonSchema));
   } else if (isTuple) {
     // Draft 7 style tuple items
-    validateItem = compileTupleItems(schemaObj, jsonSchema);
+    ({ positions, rest } = compileTupleItems(schemaObj, jsonSchema));
   } else if (items !== undefined) {
     // Single schema for all items
     const itemsSchema = getObjectType(items);
     if (itemsSchema != null) {
       // Use direct validator compilation for items
-      validateItem = compileItemValidator(schemaObj, itemsSchema, 'items', undefined);
-
-      // Wrap single-item validator with index loop
-      const itemValidator = validateItem;
-      validateItem = function validateSingleItemSchema(data, dataPath, dataRoot, _i) {
-        return itemValidator(data, dataPath, dataRoot);
-      };
+      rest = compileItemValidator(schemaObj, itemsSchema, 'items', undefined);
     } else if (items === true) {
-      validateItem = trueThat;
+      rest = trueThat;
+      itemsTrue = true;
     }
     // items === false is fully handled by compileArrayItemsBoolean: only an
     // empty array can pass, so a per-item validator would never be invoked.
   }
+  const count = positions.length;
 
   const validateContains = compileArrayContains(schemaObj, jsonSchema);
-  if ((validateItem || validateContains) == null)
+  if ((rest || validateContains) == null)
     return undefined;
 
   const validateMinMax = compileContainsMinMax(schemaObj, jsonSchema) || trueThat;
 
   // Fast path: items only, no contains
-  if (validateContains == null && validateItem != null) {
-    // if validateItem is trueThat, just check length
-    if (validateItem === trueThat) {
+  if (validateContains == null && rest != null) {
+    // items: true only needs the evaluation recorded
+    if (itemsTrue) {
       // items: true evaluates every item, which matters when annotations
       // are tracked for unevaluatedItems.
       if (track) {
         return function validateArrayItemsTrue(data, _dataPath, _dataRoot) {
+          if (alone && !isArrayClass(data)) return true;
           root.evalLog.add(data, -1);
           return true;
         };
@@ -484,17 +473,18 @@ function compileArrayChildren(schemaObj, jsonSchema) {
     }
 
     const addError = schemaObj.createErrorHandler(0, 'items');
-    const validator = validateItem;
 
     return function validateArrayItemsOnly(data, dataPath, dataRoot) {
+      if (alone && !isArrayClass(data)) return true;
       const len = data.length;
       const arr = data;
 
       let invalid = 0;
       for (let i = 0; i < len; ++i) {
         const itemPath = extendPaths ? dataPath + '/' + i : dataPath;
-        // Direct validator call, no intermediate wrappers
-        const ok = validator(arr[i], itemPath, dataRoot, i) === true;
+        const ok = (i < count
+          ? positions[i](arr[i], itemPath, dataRoot)
+          : rest(arr[i], itemPath, dataRoot)) === true;
         if (!ok) invalid++;
         if (track && i < evalLimit && (ok || logFailed)) root.evalLog.add(data, i);
       }
@@ -504,10 +494,11 @@ function compileArrayChildren(schemaObj, jsonSchema) {
   }
 
   // Fast path: contains only, no items
-  if (validateItem == null && validateContains != null) {
+  if (rest == null && validateContains != null) {
     const validator = validateContains;
 
     return function validateArrayContainsOnly(data, dataPath, dataRoot) {
+      if (alone && !isArrayClass(data)) return true;
       const len = data.length;
       const arr = data;
       // Each element is a CANDIDATE probe: the array only has to contain a
@@ -527,11 +518,11 @@ function compileArrayChildren(schemaObj, jsonSchema) {
   }
 
   // Combined: both items and contains
-  const itemValidator = validateItem;
   const containsValidator = validateContains;
 
   const stopAtFirstContains = schemaObj.options.skipErrors;
   return function validateArrayChildren(data, dataPath, dataRoot) {
+    if (alone && !isArrayClass(data)) return true;
     const len = data.length;
     const arr = data;
 
@@ -540,8 +531,9 @@ function compileArrayChildren(schemaObj, jsonSchema) {
     for (let i = 0; i < len; ++i) {
       const obj = arr[i];
       const itemPath = extendPaths ? dataPath + '/' + i : dataPath;
-      // Direct validator calls without intermediate wrappers
-      const ok = itemValidator(obj, itemPath, dataRoot, i) === true;
+      const ok = (i < count
+        ? positions[i](obj, itemPath, dataRoot)
+        : rest(obj, itemPath, dataRoot)) === true;
       if (!ok) invalid++;
       if (track && i < evalLimit && (ok || logFailed)) root.evalLog.add(data, i);
       // A contains candidate is a probe: not matching is not a fault.
@@ -566,7 +558,9 @@ export function compileArraySchema(schemaObj, jsonSchema) {
   const compiledPrimitives = compileArrayPrimitives(schemaObj, jsonSchema);
   const compiledItemsBoolean = compileArrayItemsBoolean(schemaObj, jsonSchema);
   const compiledContainsBoolean = compileArrayContainsBoolean(schemaObj, jsonSchema);
-  const compiledArrayChildren = compileArrayChildren(schemaObj, jsonSchema);
+  const alone = !compiledPrimitives && !compiledContainsBoolean
+    && (!compiledItemsBoolean || compiledItemsBoolean === trueThat);
+  const compiledArrayChildren = compileArrayChildren(schemaObj, jsonSchema, alone);
 
   if ((compiledPrimitives
     || compiledItemsBoolean
@@ -586,6 +580,7 @@ export function compileArraySchema(schemaObj, jsonSchema) {
 
   if (parts.length === 1) {
     const single = parts[0];
+    if (alone) return single;
     return function validateArraySchemaSingle(data, dataPath, dataRoot) {
       return isArrayClass(data)
         ? single(data, dataPath, dataRoot)

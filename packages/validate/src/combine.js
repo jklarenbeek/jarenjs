@@ -15,6 +15,21 @@ import {
   getArrayClassMinItems,
 } from './tools.js';
 
+// Where resolved references keep their answers (ValidationRoot#callReference),
+// a branch walk is open while the branches of a `oneOf` or `anyOf` run.
+function walkingBranches(root, validate) {
+  if (!root.keepsReferenceAnswers) return validate;
+  return function validateWalkingBranches(data, dataPath, dataRoot, dataKey) {
+    root.walkBranches(1);
+    try {
+      return validate(data, dataPath, dataRoot, dataKey);
+    }
+    finally {
+      root.walkBranches(-1);
+    }
+  };
+}
+
 function compileAllOf(schemaObj, jsonSchema) {
   const allOf = getArrayClassMinItems(jsonSchema.allOf, 1);
   if (allOf == null) return undefined;
@@ -98,7 +113,7 @@ function compileAnyOf(schemaObj, jsonSchema) {
     };
   }
 
-  return function validateAnyOf(data, dataPath, dataRoot, dataKey) {
+  return walkingBranches(root, function validateAnyOf(data, dataPath, dataRoot, dataKey) {
     if (data !== undefined) {
       // Every branch tried before a match is a SPECULATIVE probe: the document
       // was never required to satisfy it. Its errors are kept only if no
@@ -113,7 +128,7 @@ function compileAnyOf(schemaObj, jsonSchema) {
       return addError(data, dataPath);
     }
     return true;
-  };
+  });
 }
 
 function compileOneOf(schemaObj, jsonSchema) {
@@ -165,7 +180,7 @@ function compileOneOf(schemaObj, jsonSchema) {
     };
   }
 
-  return function validateOneOf(data, dataPath, dataRoot, dataKey) {
+  return walkingBranches(root, function validateOneOf(data, dataPath, dataRoot, dataKey) {
     const errors = root.errorMark();
     let found = false;
     for (let i = 0; i < validators.length; ++i) {
@@ -181,7 +196,7 @@ function compileOneOf(schemaObj, jsonSchema) {
     }
     if (found) root.rollbackErrors(errors);
     return found || addError(data, dataPath);
-  };
+  });
 }
 
 function compileNotOf(schemaObj, jsonSchema) {

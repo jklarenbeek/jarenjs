@@ -278,14 +278,30 @@ delete it or fix it.
   dynamic anchor's location (`…#/$def-anchor/<n>`) numbers the objects built,
   the second build's among them. Building it once makes the first right and
   renumbers the second (an upgrade note).
-- [ ] **One app document takes seconds to validate against the app
-  meta-schema.** The studio's `form` seed template (2,379 bytes of JSON)
-  takes about 12 s per `validateAppDocument` on Node, where the `dashboard`
-  template takes 220 ms and `minisite` 60 ms. A CPU profile puts the time in
-  building collected errors (`addNormalError`) under nested `oneOf` and
-  `anyOf` branches; test/website/studio.test.js spends about 400 s of every
-  release gate in it. Wanted: a valid document of that size validated in
-  milliseconds, every answer unchanged.
+- [ ] **A broken document's collected errors grow with the branches tried to
+  the power of the nesting.** A failing `oneOf` or `anyOf` keeps every
+  branch's errors, and each branch that descends repeats the errors of the
+  members below it: the studio's `form` seed template broken by one plain
+  member in a phrase keeps 2,922 collected errors at the top phrase, 14,132
+  one phrase down and 123,538 three down, and a breakage deeper still keeps
+  millions, where the studio shows 20. Wanted: a decision between collapsing
+  repeated errors and bounding what a failing applicator keeps; either
+  changes the collected list (an upgrade note).
+- [ ] **An invalid `regex` format value is compiled twice.** Core's
+  `isStringRegExp` tries `new RegExp(value, 'u')` and, when that throws,
+  `createRegExp(value)`, which builds the same `new RegExp(value, 'u')`
+  again unless the value is written as a `/source/flags` literal: an invalid
+  pattern costs two thrown constructions where Ajv's format costs one, and
+  the `optional/format/regex` rows of the validator benchmark take about
+  2.1× Ajv's time in every draft. Wanted: the second construction tried for
+  a literal only.
+- [ ] **`multipleOf` decides a huge whole number with a power-of-ten
+  BigInt.** A whole value past 10^15 steps of a decimal step that does not
+  divide every whole number (1e308 against `0.123456789`) reaches core's
+  `isDecimalMultiple`, which takes the remainder of 10^317 by the step's
+  digits: the 'float division = inf' rows take 16–18× Ajv's time in every
+  draft. Wanted: the same exact answer without the power of ten (only the
+  step's factors of 2 and 5 depend on the exponent).
 
 ## @jarenjs/view & @jarenjs/app
 

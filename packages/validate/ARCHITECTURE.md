@@ -760,6 +760,20 @@ A collect-mode validator also carries `narrow`, defined once per compile: it
 calls the validator and returns its `{valid, errors}`, with the instance as
 `value` on the valid branch, so the plain call's answer and cost are unchanged.
 
+A collecting walk runs every branch of a `oneOf`, and the branches of an
+`anyOf` up to a match, in full. Branches that enter the same definition on
+the same member through references would enter it once per branch, at every
+level below: a grammar of operator phrases over operand expressions grew
+with the branches tried to the power of the nesting. While such a branch
+walk is open, a reference resolved on first use that enters its target on a
+member it entered before, at the same location with as many reference
+levels open (whether a reference refuses, `JK2001`, depends on those
+levels), gives that answer again and records the errors that entry left
+(`ValidationRoot#callReference`). The answers are kept for one validation
+and dropped when it returns. A compilation that tracks annotations, records
+output units, or holds any dynamic-scope keyword (`$dynamicRef`,
+`$dynamicAnchor`, `$recursiveRef`, `$recursiveAnchor`) walks in full.
+
 ### Report-Time Messages (messages.js)
 
 Conversion is structured-first, render-late (the normative spec is
@@ -955,6 +969,16 @@ Based on the number of validators, different composition strategies are used:
 | 2 | Unrolled | `return v1(data) && v2(data)` |
 | 3 | Unrolled | `return v1(data) && v2(data) && v3(data)` |
 | 4+ | Loop | `for (let i = 0; i < n; i++)` |
+
+Every closure a schema passes through is shared by every schema of its kind,
+so each one between the entry and the check that answers is a call that sees
+every schema's children. In the first-failure mode, a single `type` name
+first among the groups is tested by the combining closure itself (two and
+three groups); a lone `items`/`prefixItems` walk, and a lone bound or
+`multipleOf`, test their own instance type instead of sitting inside a
+guarding wrapper; the element walk calls a tuple position directly; and a
+reference resolved on first use counts toward the depth bound in its own
+closure, calling its target directly once it is known.
 
 ### 3. Compile-Time Readings Kept
 
