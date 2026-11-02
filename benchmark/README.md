@@ -769,6 +769,13 @@ are Node-only rows; the capability cliff (no UDF hatch, no session
 capture) is stated beside the Bun tables. The losses stay in the
 tables with their reasons.
 
+**How a row is timed.** After two warm-up calls, a row is its fastest of
+five timed rounds; inserts and the cold start are timed once by design. No
+garbage collection is forced before a row: on the same code, the five
+rounds put the median row at 0.81 of what one timed block after a forced
+collection measured, no row slower, for Prisma, Drizzle and Kysely as for
+jaren.
+
 **Run-to-run spread, measured rather than assumed.** Three unchanged
 runs of this suite on one host (Node v24.19.0, Linux x86_64), measured
 for the published figures, put 9 of 78 Node figures beyond the ±10 % this
@@ -804,6 +811,13 @@ same normalized result before a timer starts, and each engine's storage
 adapter is printed beside its rows; the async engines are timed through
 their async APIs, and jaren's async row pays that toll beside its
 `store.sync` row.
+
+**How a row is timed.** After two warm-up calls, a row is its fastest of
+five timed rounds; the insert row is one timed load by design. No garbage
+collection is forced before a row. Measured on the same code, a forced one
+slowed every engine's median row by about a ninth, and lowdb's rows and the
+hand-written loop about twofold. Without the rounds, a single timed block
+let one collection double RxDB's point lookup; the fastest round drops it.
 
 Two tables in it are about `@jarenjs/linq` rather than the store:
 

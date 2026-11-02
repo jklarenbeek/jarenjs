@@ -166,25 +166,22 @@ const CITY_MODEL = {
 const tmp = mkdtempSync(path.join(os.tmpdir(), 'orm-bench-'));
 const fileOf = (name) => path.join(tmp, name);
 
-// every timed row starts on a settled heap: the garbage an earlier section
-// left is collected before the row, not by a collection inside a short row
-// (a few hundred calls can last no longer than one collection)
-const collectGarbage = IS_BUN
-  ? () => globalThis.Bun.gc(true)
-  : await (async () => {
-    const { setFlagsFromString } = await import('node:v8');
-    const { runInNewContext } = await import('node:vm');
-    setFlagsFromString('--expose-gc');
-    return runInNewContext('gc');
-  })();
+// a row is its fastest of ROUNDS timed rounds, so a collection landing in a
+// short row costs only the round it lands in. No collection is forced
+// before a row: measured on the same code, a forced one slowed the median
+// row of every engine
+const ROUNDS = 5;
 
 async function timeAsync(fn, iterations) {
-  collectGarbage();
   await fn();
   await fn();
-  const start = process.hrtime.bigint();
-  for (let i = 0; i < iterations; i++) await fn();
-  return Number(process.hrtime.bigint() - start) / iterations;
+  let fastest = Infinity;
+  for (let round = 0; round < ROUNDS; round++) {
+    const start = process.hrtime.bigint();
+    for (let i = 0; i < iterations; i++) await fn();
+    fastest = Math.min(fastest, Number(process.hrtime.bigint() - start) / iterations);
+  }
+  return fastest;
 }
 async function timeOnceAsync(fn) {
   const start = process.hrtime.bigint();
