@@ -224,6 +224,7 @@ compile()
   ├── #precompileRefs(root, schemaMap, origin)
   │     └── For each ref in schemaMap:
   │           ├── Skip if already compiled
+  │           ├── An $id's URI without the empty fragment: name the object built under "#"
   │           ├── A pointer to a pure $ref hop: build the hop, not the flattened end
   │           └── root.createObject(id, schema, origin)
   │                 └── ValidationObject(root, id, schema, baseUri)
@@ -991,6 +992,11 @@ A compile reads the same text many times over, so it keeps what it read:
 - **Dialect URIs, bounded.** `officialUri` and the keys `heldDialect` looks a
   `$schema` up by are pure readings of a URI; the readings of the short URIs
   read lately are kept, a bounded number of them.
+- **One build per `$id` document.** The schema map holds an `$id`'s URI with
+  and without the empty fragment (`…/s.json#`, `…/s.json`); `#precompileRefs`
+  builds the document under the `#` spelling only and names that object under
+  the other key too (`ValidationRoot#aliasObject`), so a reference spelled
+  either way reaches one object, and the locations below it.
 - **No `$data` pass where nothing reads one.** A compilation in which no schema
   reads an instance location (`ValidationRoot#usesDollarData`) holds no `$data`
   member, so `compileDollarDataSchema` returns at once.

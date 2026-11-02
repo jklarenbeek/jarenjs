@@ -3,6 +3,7 @@ import * as assert from 'node:assert';
 import { spawnSync } from 'node:child_process';
 
 import { JarenValidator } from '@jarenjs/validate';
+import { basicOutput } from '@jarenjs/validate/output';
 
 // The default (first-failure) validator compiles a one-keyword item schema
 // to a bare predicate. That shortcut must give the verdict the full
@@ -46,11 +47,11 @@ describe('one-keyword item schemas', function () {
   }
 });
 
-// A document with an `$id` is also built under its URI without the empty
-// fragment, where the locations below its root hold no `#`: a `$ref`-only
-// item resolved against such a location names a document the validator does
-// not hold. The shortcut then leaves the item to the full compilation, as it
-// did, without building a refusal it would only discard.
+// A document with an `$id` is held under its URI with and without the empty
+// fragment, and built once, under the `#` spelling: a `$ref`-only item that
+// names it either way reaches that object. The shortcut compiles such an
+// item without building a refusal it would only discard, and locates an
+// error below the document below `…#`, as the full compilation does.
 describe('a $ref-only item schema in a document with an $id', function () {
   const bundle = {
     $id: 'https://example.test/bundle',
@@ -103,6 +104,45 @@ describe('a $ref-only item schema in a document with an $id', function () {
       ['/owners/1', 'required', 'https://example.test/bundle#/$defs/owner'],
       ['/owners/2/name', 'pattern', 'https://example.test/bundle#/$defs/tag'],
       ['/owners', 'items', 'https://example.test/bundle#/properties/owners'],
+    ]);
+  });
+
+  it('locates an error below an item naming a held document without the fragment as the full compilation does', function () {
+    // from a `$defs` member: the document's own `$id`, and another document
+    // the validator holds
+    const own = {
+      $id: 'https://example.test/a', type: 'object',
+      properties: { n: { type: 'number' }, list: { $ref: '#/$defs/list' } },
+      $defs: { list: { type: 'array', items: { $ref: 'https://example.test/a' } } },
+    };
+    const held = { $id: 'https://example.test/r', type: 'object', properties: { n: { type: 'number' } } };
+    const user = {
+      $id: 'https://example.test/user', type: 'object',
+      properties: { list: { $ref: '#/$defs/list' } },
+      $defs: { list: { type: 'array', items: { $ref: 'https://example.test/r' } } },
+    };
+    const data = { list: [{ n: 'x' }, 1] };
+    const collecting = () => new JarenValidator({ collectErrors: true, skipErrors: false });
+    const located = (result) => result.errors.map((e) => [e.instancePath, e.keyword, e.schemaPath]);
+    assert.deepStrictEqual(located(collecting().compile(own)(data)), [
+      ['/list/0/n', 'type', 'https://example.test/a#/properties/n'],
+      ['/list/1', 'type', 'https://example.test/a#'],
+      ['/list', 'items', 'https://example.test/a#/$defs/list'],
+    ]);
+    assert.deepStrictEqual(located(collecting().addSchema(held).compile(user)(data)), [
+      ['/list/0/n', 'type', 'https://example.test/r#/properties/n'],
+      ['/list/1', 'type', 'https://example.test/r#'],
+      ['/list', 'items', 'https://example.test/user#/$defs/list'],
+    ]);
+    const full = structuredClone(own);
+    full.$defs.list.items.$comment = 'compiled in full';
+    assert.deepStrictEqual(collecting().compile(own)(data), collecting().compile(full)(data));
+    // recording output units, an item's subschema is a unit of its own: no shortcut
+    const units = (result) => result.errors.map((e) => [e.instanceLocation, e.absoluteKeywordLocation]);
+    assert.deepStrictEqual(units(new JarenValidator({ outputFormat: basicOutput }).compile(own)(data)), [
+      ['/list', 'https://example.test/a#/$defs/list/items'],
+      ['/list/0/n', 'https://example.test/a#/properties/n/type'],
+      ['/list/1', 'https://example.test/a#/type'],
     ]);
   });
 });

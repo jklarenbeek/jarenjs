@@ -266,18 +266,17 @@ delete it or fix it.
   so `@jarenjs/validate/output` and `@jarenjs/validate/load`, which load no
   validator, load the query compiler under Node. Wanted: those imports from
   `@jarenjs/json/pointer` and `@jarenjs/json/basic`, which hold them.
-- [ ] **Every `$id` document is built twice per compile.** The schema map holds
-  an absolute `$id` under its URI with and without the empty fragment, and
-  `compile` builds an object under both: the second build repeats the
-  document's compile under locations that hold no `#`
-  (`https://x.test/s.json/properties/a`), a measurable share of every compile
-  of a document with an `$id`. Two answers read it: an items `$ref` naming the
-  document's `$id` without a fragment, in a `$defs` member, reports a nested
-  error's `schemaPath` as `https://x.test/s.json/properties/n` where the same
-  item compiled in full reports `https://x.test/s.json#/properties/n`, and a
-  dynamic anchor's location (`…#/$def-anchor/<n>`) numbers the objects built,
-  the second build's among them. Building it once makes the first right and
-  renumbers the second (an upgrade note).
+- [ ] **A root `$id` with a plain-name fragment is built three times.** Under
+  draft-07, `{ $id: 'https://x.test/n.json#root', properties: { a: { type:
+  'string' } } }` is built under `…#root`, `…#root#` and `…#`: the alternate
+  spelling of a registered identifier appends `#` to one that already holds a
+  fragment. Two answers read it: `$ref: 'https://x.test/n.json#root#'` (a
+  second `#`, no URI reference) compiles and resolves to that root instead of
+  being refused, its errors located at `https://x.test/n.json#root#/properties/a`,
+  and an error below the root itself is located at
+  `https://x.test/n.json#root/properties/a`, a plain name followed by a
+  pointer. Refusing the doubled `#` refuses an input that answers today (a
+  minor).
 - [ ] **A broken document's collected errors grow with the branches tried to
   the power of the nesting.** A failing `oneOf` or `anyOf` keeps every
   branch's errors, and each branch that descends repeats the errors of the

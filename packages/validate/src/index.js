@@ -1018,6 +1018,22 @@ export class ValidationRoot {
   }
 
   /**
+   * Names the object built at a path under a second key, where no object
+   * is built under that key: a lookup by either key finds the one object.
+   * An internal collaborator of the compiler; not part of the package's API.
+   * @param {string} alias - The second key
+   * @param {string} path - The key the object is built under
+   * @returns {boolean} Whether this call named it under `alias`
+   */
+  aliasObject(alias, path) {
+    const objects = this.#objects;
+    const built = objects.get(path);
+    if (built == null || objects.get(alias) != null) return false;
+    objects.set(alias, built);
+    return true;
+  }
+
+  /**
    * The levels of schema a reference compiled now spans each time a
    * validation enters it ({@link boundReference}): where its target is one
    * of the objects under construction, a schema enclosing the reference,
@@ -2856,6 +2872,11 @@ export class JarenValidator {
     // This includes:
     // 1. JSON pointer paths (e.g., #/definitions/x) - calculate baseUri by finding nearest ancestor $id
     // 2. Canonical $id paths with relative $ids that weren't matched in first pass
+    // An `$id`'s URI is held with and without the empty fragment
+    // (`…/s.json#` and `…/s.json`); the document is built once, under the
+    // `#` spelling, and that object answers for both spellings.
+    /** Spellings without the fragment whose `#` spelling was not built yet when they were reached */
+    const unaliased = [];
     for (const [id, schema] of schemas.entries()) {
       // Skip if already compiled
       if (root.unresolvedObject(id) !== null) continue;
@@ -2871,6 +2892,11 @@ export class JarenValidator {
       const isCanonicalPath = !isJsonPointerPath && id.endsWith('#');
 
       if (!hasId && !isJsonPointerPath) continue;
+
+      if (!id.includes('#') && schemas.get(`${id}#`) === schema) {
+        if (!root.aliasObject(id, `${id}#`)) unaliased.push(id);
+        continue;
+      }
 
       // A pointer to a pure `$ref` hop holds the end of the chain it starts,
       // flattened: built from it here, that end would be read at the hop's
@@ -2976,6 +3002,7 @@ export class JarenValidator {
         // Ref may not be resolvable yet, that's ok
       }
     }
+    for (const id of unaliased) root.aliasObject(id, `${id}#`);
   }
 
   /**

@@ -875,6 +875,20 @@ Each `ValidationError` carries six fields:
 }
 ```
 
+`schemaPath` names a place by the URI of the document holding it and a
+fragment (`https://x.test/s.json#/properties/n`; the document itself
+`https://x.test/s.json#`), whether a reference names that document with the
+empty fragment or without it. *Upgrade: an `items` `$ref` naming a document
+with an `$id`, its own or one the validator holds, without the empty fragment
+(`{ "$ref": "https://x.test/s.json" }` in a `$defs` member) located an error
+below it at `https://x.test/s.json/properties/n` (the document itself at
+`https://x.test/s.json`), where the same item compiled in full located it at
+`https://x.test/s.json#/properties/n`: such a document was built a second time
+under that spelling. It is built once now, so the place of a schema a dynamic
+anchor brings in, `…#/$def-anchor/<n>`, carries another number: `<n>` is a
+running count of the places the compile holds, unique within that compile
+only.*
+
 Two notes for anyone diffing this against another validator's output. The
 data location is `instancePath`, a **JSON Pointer string** — not the dotted
 `dataPath` of Ajv v6, and not an array path. `parseJSONPointerPath` from
