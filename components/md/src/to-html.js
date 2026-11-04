@@ -25,7 +25,9 @@
 import { escapeText, escapeAttribute } from '@jarenjs/view';
 import { sanitizeUrl as defaultSanitizeUrl, encodeUrlAttribute } from '@jarenjs/view/helpers';
 
-import { headingId, permalinkLabel, OPTION_RULES, compileOptionCheck } from './utils.js';
+import {
+  headingId, permalinkLabel, pageBreakLabel, renderLabels, OPTION_RULES, compileOptionCheck,
+} from './utils.js';
 import { textOf } from './ast.js';
 import { buildPluginTables } from './parser.js';
 import {
@@ -59,8 +61,12 @@ import {
  *   heading (default `false`). Requires `headingIds`.
  * @property {string} [footnotesLabel] the accessible name of the
  *   appended footnotes section (default `'Footnotes'`); a localized page
- *   sets it, since it is the one string the emitter writes that a reader
- *   can hear.
+ *   sets it, since it is one of the strings the emitter writes that a
+ *   reader can hear.
+ * @property {import('./utils.js').MdLabels} [labels] the others — a page
+ *   break's, a heading anchor's and a footnote back-reference's
+ *   accessible names — as templates or closures over English defaults
+ *   (`DEFAULT_LABELS`).
  * @property {string} [wrap] wrapping element, written as it appears in
  *   the start tag (`'article class="md"'`). Default `null`: bare
  *   fragment HTML, which is what a consumer concatenating into a
@@ -73,7 +79,8 @@ import {
  *   headingIds: boolean, slugPrefix: string, headingAnchors: boolean,
  *   slugs: Map<string, number>, options: MdHtmlOptions,
  *   footnotes: import('./footnotes.js').Footnotes|null,
- *   footnotePrefix: string, footnotesLabel: string }} HtmlCtx
+ *   footnotePrefix: string, footnotesLabel: string,
+ *   labels: import('./utils.js').RenderLabels }} HtmlCtx
  */
 
 /** {@link MdHtmlOptions}, closed: a misspelt or mistyped member is refused. */
@@ -85,6 +92,7 @@ const checkHtmlOptions = compileOptionCheck('toHtml', {
   slugPrefix: OPTION_RULES.string,
   headingAnchors: OPTION_RULES.boolean,
   footnotesLabel: OPTION_RULES.string,
+  labels: OPTION_RULES.labels,
   wrap: { expects: 'a string or null', test: (value) => value === null || typeof value === 'string' },
 });
 
@@ -201,13 +209,14 @@ const BLOCK_HTML = {
     let out = '<' + tag + attr('id', id) + '>' + inlineChildren(node.children, ctx);
     if (ctx.headingAnchors === true) {
       out += '<a class="md-anchor"' + attr('href', '#' + id)
-        + attr('aria-label', permalinkLabel(textOf(node))) + '>#</a>';
+        + attr('aria-label', permalinkLabel(ctx.labels, textOf(node))) + '>#</a>';
     }
     return out + '</' + tag + '>';
   },
 
   thematicBreak: () => '<hr>',
-  pageBreak: () => '<div class="md-page-break" role="separator" aria-label="Page break"></div>',
+  pageBreak: (node, ctx) => '<div class="md-page-break" role="separator"'
+    + attr('aria-label', pageBreakLabel(ctx.labels)) + '></div>',
 
   blockquote: (node, ctx) => '<blockquote>' + blockChildren(node.children, ctx) + '</blockquote>',
 
@@ -271,7 +280,7 @@ function footnotesHtml(ctx) {
     for (let k = 1; k <= times; k++) {
       back += ' <a class="footnote-backref"'
         + attr('href', '#' + footnoteRefId(prefix, number, k))
-        + attr('aria-label', backrefLabel(number, k))
+        + attr('aria-label', backrefLabel(ctx.labels, number, k))
         + '>' + BACKREF_MARK + (k > 1 ? '<sup>' + k + '</sup>' : '') + '</a>';
     }
     out += '<li' + attr('id', footnoteId(prefix, number)) + '>';
@@ -432,6 +441,7 @@ export function toHtml(docOrAst, options = {}) {
     footnotes: collectFootnotes(ast),
     footnotePrefix: typeof options.slugPrefix === 'string' ? options.slugPrefix : FOOTNOTE_PREFIX,
     footnotesLabel: typeof options.footnotesLabel === 'string' ? options.footnotesLabel : 'Footnotes',
+    labels: renderLabels(options.labels),
   };
   const body = blockChildren(ast, ctx) + footnotesHtml(ctx);
   const wrap = options.wrap;

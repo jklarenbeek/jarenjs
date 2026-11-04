@@ -170,11 +170,12 @@ export function footnoteRefId(prefix, number, occurrence) {
 /**
  * The accessible name of a back-reference: `↩` alone names nothing, and
  * a footnote with several of them needs them told apart.
+ * @param {import('./utils.js').RenderLabels} labels
  * @param {number} number @param {number} occurrence
  * @returns {string}
  */
-export function backrefLabel(number, occurrence) {
+export function backrefLabel(labels, number, occurrence) {
   return occurrence > 1
-    ? 'Back to reference ' + number + ', occurrence ' + occurrence
-    : 'Back to reference ' + number;
+    ? labels.backrefOccurrence({ number, occurrence })
+    : labels.backref({ number });
 }

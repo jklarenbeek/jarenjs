@@ -18,6 +18,7 @@
 
 import { slugify } from '@jarenjs/core/string';
 import { isPlainOptions, nearestName, refuseUnknownMembers } from '@jarenjs/core/object';
+import { compileMessageTemplate } from '@jarenjs/core/message';
 
 export { hashContent, fnv1a, FNV1A_OFFSET_BASIS, slugify } from '@jarenjs/core/string';
 
@@ -63,14 +64,128 @@ export function headingId(text, seen, prefix) {
 }
 
 /**
+ * The accessible names the emitters write, in English. A `labels` option
+ * replaces any of them for readers who do not hear English. Each is a
+ * template in the suite's one message grammar (`{name}` substitutes a
+ * parameter, `{{` is a literal brace) or a closure over the same
+ * parameters: `permalink` gets the heading's `{text}`, `backref` its
+ * footnote's `{number}`, and `backrefOccurrence` that `{number}` and the
+ * `{occurrence}` (2 and up) of a footnote cited more than once. The
+ * footnotes section's own name is the `footnotesLabel` option.
+ */
+export const DEFAULT_LABELS = Object.freeze({
+  pageBreak: 'Page break',
+  permalink: 'Permalink to {text}',
+  permalinkSection: 'Permalink to this section',
+  backref: 'Back to reference {number}',
+  backrefOccurrence: 'Back to reference {number}, occurrence {occurrence}',
+});
+
+/**
+ * One accessible name: a message template, or a closure that renders it.
+ * @typedef {string | ((params: Record<string, unknown>) => string)} MdLabel
+ */
+/**
+ * Accessible names that replace the English {@link DEFAULT_LABELS}; a
+ * member left out keeps its default.
+ * @typedef {object} MdLabels
+ * @property {MdLabel} [pageBreak] a page break's name
+ * @property {MdLabel} [permalink] a heading anchor's name, given the
+ *   heading's `{text}`
+ * @property {MdLabel} [permalinkSection] a heading anchor's name when the
+ *   heading has no text
+ * @property {MdLabel} [backref] a footnote back-reference's name, given
+ *   the footnote's `{number}`
+ * @property {MdLabel} [backrefOccurrence] the name of a footnote's second
+ *   and later back-references, given `{number}` and `{occurrence}`
+ */
+/**
+ * The labels one emission renders with, every member a closure.
+ * @typedef {Readonly<Record<keyof typeof DEFAULT_LABELS, (params: Record<string, unknown>) => string>>} RenderLabels
+ */
+
+const LABEL_NAMES = Object.freeze(Object.keys(DEFAULT_LABELS));
+
+/** @type {RenderLabels} the English labels, compiled once */
+const ENGLISH_LABELS = Object.freeze({
+  pageBreak: compileMessageTemplate(DEFAULT_LABELS.pageBreak),
+  permalink: compileMessageTemplate(DEFAULT_LABELS.permalink),
+  permalinkSection: compileMessageTemplate(DEFAULT_LABELS.permalinkSection),
+  backref: compileMessageTemplate(DEFAULT_LABELS.backref),
+  backrefOccurrence: compileMessageTemplate(DEFAULT_LABELS.backrefOccurrence),
+});
+
+const NO_PARAMS = Object.freeze({});
+
+/**
+ * The labels an emission renders with: the caller's over the English
+ * ones. A template compiles once per emission and then renders once per
+ * heading or back-reference; a closure's answer is read as a string.
+ * @param {MdLabels|undefined} labels an option already checked
+ * @returns {RenderLabels}
+ */
+export function renderLabels(labels) {
+  if (labels === undefined) return ENGLISH_LABELS;
+  /** @type {Record<string, (params: Record<string, unknown>) => string>} */
+  const compiled = { ...ENGLISH_LABELS };
+  for (const name of LABEL_NAMES) {
+    const label = /** @type {any} */ (labels)[name];
+    if (typeof label === 'function') compiled[name] = (params) => String(label(params));
+    else if (typeof label === 'string') compiled[name] = compileMessageTemplate(label);
+  }
+  return /** @type {RenderLabels} */ (compiled);
+}
+
+/** @type {WeakMap<Function, number>} */
+const labelReferences = new WeakMap();
+let nextLabelReference = 0;
+
+/**
+ * A `labels` option as a cache key: members in name order, a template by
+ * its text and a closure by its identity (equal source says nothing about
+ * what a closure renders); `''` when it sets nothing, so it keys like an
+ * absent option.
+ * @param {MdLabels|undefined} labels
+ * @returns {string}
+ */
+export function labelsKey(labels) {
+  if (labels === undefined || labels === null) return '';
+  let key = '';
+  for (const name of Object.keys(labels).sort()) {
+    const label = /** @type {any} */ (labels)[name];
+    if (typeof label === 'function') {
+      let reference = labelReferences.get(label);
+      if (reference === undefined) {
+        reference = ++nextLabelReference;
+        labelReferences.set(label, reference);
+      }
+      key += name + '#' + reference + ';';
+    } else if (label !== undefined) {
+      key += name + '=' + JSON.stringify(label) + ';';
+    }
+  }
+  return key;
+}
+
+/**
  * The accessible name for a heading's permalink affordance — `#` alone
  * names nothing, so the link says which section it points at.
+ * @param {RenderLabels} labels
  * @param {string} text the heading's plain text (`textOf`)
  * @returns {string}
  */
-export function permalinkLabel(text) {
+export function permalinkLabel(labels, text) {
   const trimmed = text.trim();
-  return trimmed === '' ? 'Permalink to this section' : 'Permalink to ' + trimmed;
+  return trimmed === '' ? labels.permalinkSection(NO_PARAMS) : labels.permalink({ text: trimmed });
+}
+
+/**
+ * The accessible name of a page break.
+ * @param {RenderLabels} labels
+ * @returns {string}
+ */
+export function pageBreakLabel(labels) {
+  return labels.pageBreak(NO_PARAMS);
 }
 
 /**
@@ -154,9 +269,11 @@ export function tabsFrom(line, column) {
 /**
  * The rule one member of a closed option set must satisfy: what it
  * `expects`, as a refusal names it, the `test` a present value passes,
- * and — for a closed list of values — the `values` a refusal names the
- * nearest of.
- * @typedef {{ expects: string, test: (value: any) => boolean, values?: readonly string[] }} OptionRule
+ * — for a closed list of values — the `values` a refusal names the
+ * nearest of, and — for an object of labels — the `members` it may name,
+ * each a template string or a closure.
+ * @typedef {{ expects: string, test: (value: any) => boolean, values?: readonly string[],
+ *   members?: readonly string[] }} OptionRule
  */
 
 /** The option kinds the emitters take. */
@@ -171,6 +288,8 @@ export const OPTION_RULES = Object.freeze({
   array: { expects: 'an array', test: (value) => Array.isArray(value) },
   /** @type {OptionRule} */
   object: { expects: 'an object', test: (value) => value !== null && typeof value === 'object' },
+  /** @type {OptionRule} {@link MdLabels}, closed */
+  labels: { expects: 'a plain object of labels', test: isPlainOptions, members: LABEL_NAMES },
   /**
    * @param {...string} values
    * @returns {OptionRule}
@@ -230,6 +349,25 @@ export function compileOptionCheck(surface, rules) {
         throw new TypeError(`md ${surface}: option '${key}' must be ${rule.expects}, got ${describeValue(value)}`
           + (near === undefined ? '' : ` — did you mean '${near}'?`));
       }
+      if (value !== undefined && rule.members !== undefined) checkLabels(surface, key, value, rule.members);
     }
   };
+}
+
+/**
+ * Refuse a labels object's unknown member (naming the nearest one) and a
+ * present member that is neither a template string nor a closure.
+ * @param {string} surface @param {string} key the option's name
+ * @param {any} labels @param {readonly string[]} names
+ */
+function checkLabels(surface, key, labels, names) {
+  refuseUnknownMembers(labels, names,
+    (member, hint) => new TypeError(`md ${surface}: unknown ${key} member '${member}'${hint}`));
+  for (const member of Object.keys(labels)) {
+    const label = labels[member];
+    if (label !== undefined && typeof label !== 'string' && typeof label !== 'function') {
+      throw new TypeError(`md ${surface}: ${key} member '${member}' must be a string or a function, `
+        + `got ${describeValue(label)}`);
+    }
+  }
 }

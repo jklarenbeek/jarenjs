@@ -555,7 +555,8 @@ marker and is not a value directive (§4.8).
 
 `toMarkdown` MUST print the canonical spelling `<!-- pagebreak -->`.
 Both renderers emit a `div` with class `md-page-break`, role `separator`
-and accessible name `Page break`, independently of raw-HTML policy.
+and accessible name `Page break` (the `labels` option's `pageBreak`
+renames it), independently of raw-HTML policy.
 The component stylesheet shows a dashed divider on screen and removes
 the rule/margins while setting `break-after: page` and the legacy
 `page-break-after: always` in print. The following content starts on a

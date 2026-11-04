@@ -25,6 +25,7 @@ import { mdToVnode } from './to-vnode.js';
  * @typedef {MdParseOptions & { retainSource?: boolean,
  *   html?: 'skip'|'text', headingIds?: boolean, slugPrefix?: string,
  *   headingAnchors?: boolean, footnotesLabel?: string,
+ *   labels?: import('./utils.js').MdLabels,
  *   keyed?: boolean }} MdCompileOptions
  */
 /**
@@ -93,6 +94,7 @@ export function compileMarkdown(sourceOrDoc, options = {}) {
           slugPrefix: options.slugPrefix,
           headingAnchors: options.headingAnchors,
           footnotesLabel: options.footnotesLabel,
+          labels: options.labels,
           keyed: options.keyed,
         });
       }

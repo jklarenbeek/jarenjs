@@ -161,8 +161,8 @@ refused with a `TypeError` that names the member and the one it most
 likely meant (`md mdToVnode: unknown option 'slugprefix' — did you mean
 'slugPrefix'?`); so are options that are not a plain object, and a
 `createMdRenderer` member it does not forward (`footnotesLabel`,
-`keyed`, `parseHtml`). A member passed as `undefined` still counts as
-absent.
+`labels`, `keyed`, `parseHtml`). A member passed as `undefined` still
+counts as absent.
 
 Repeated headings are numbered the way GitHub numbers them (`setup`,
 `setup-1`, `setup-2`), and a heading with no slug-worthy text (`## ***`)
@@ -178,6 +178,43 @@ The affordance styles itself from `styles/md.css` and stays quiet until
 its heading is hovered or it takes focus. A page with a sticky header
 sets `--md-scroll-margin` so a scrolled-to heading does not land beneath
 it.
+
+### Accessible names in your readers' language
+
+Four things the emitters write have an accessible name a screen reader
+speaks: the footnotes section, a page break, a heading's permalink and a
+footnote's back-reference. They are English by default. `footnotesLabel`
+renames the section and `labels` the other three, so a page whose
+readers do not hear English names them in its own language:
+
+```js
+import { compileMarkdown, toHtml } from '@jarenjs/md';
+
+const labels = {
+  pageBreak: 'Paginascheiding',
+  permalink: 'Permalink naar {text}',
+  permalinkSection: 'Permalink naar deze sectie',
+  backref: 'Terug naar verwijzing {number}',
+  backrefOccurrence: 'Terug naar verwijzing {number}, keer {occurrence}',
+};
+const { doc } = compileMarkdown('# Opzet\n\nZie de bron.[^1]\n\n[^1]: De bron.\n');
+toHtml(doc, { headingIds: true, headingAnchors: true, footnotesLabel: 'Voetnoten', labels });
+// <h1 id="opzet">Opzet<a class="md-anchor" href="#opzet" aria-label="Permalink naar Opzet">#</a></h1>
+// … <section class="footnotes" aria-label="Voetnoten"> … aria-label="Terug naar verwijzing 1">↩</a> …
+```
+
+Each label is a template in the suite's one message grammar — the one
+`@jarenjs/core/message` compiles for the validator's and the forms'
+catalogs, so an entry of a catalog you already keep fits as it is — or
+a closure over the same parameters: `permalink` gets the heading's
+`{text}`, `permalinkSection` names an anchor whose heading has no text,
+`backref` gets the footnote's `{number}`, and `backrefOccurrence` names
+the second and later back-references of a footnote cited more than
+once, with `{number}` and `{occurrence}`. A label left out keeps its
+English default; `DEFAULT_LABELS` holds them. `mdToVnode`, `toHtml`,
+`compileMarkdown`, `loadMarkdown` and `createMdComponent` (at
+construction, or per `view` policy) take the option, and an unknown
+member is refused naming the one it most likely meant.
 
 ### Footnotes and bare links (GFM)
 
@@ -334,14 +371,16 @@ createApp(appDoc, {
   ```
 
   A policy may name `headingIds`, `slugPrefix`, `headingAnchors`,
-  `footnotesLabel`, `html` and `keyed` — the options that shape the
-  emitted vnode; anything else (`plugins`, `sanitizeUrl` — construction-
+  `footnotesLabel`, `labels`, `html` and `keyed` — the options that shape
+  the emitted vnode; anything else (`plugins`, `sanitizeUrl` — construction-
   time decisions, and `plugins` changes the *parse*) is **refused**, not
   ignored. The projection is memoized per source **and** policy, so
   alternating provenances cannot thrash the cache and each stays
   reference-stable; the parse and the hydratable index are shared, which
   is why this is one component and not two. A call that names no policy
-  renders under the construction-time options, unchanged.
+  renders under the construction-time options, unchanged, and a member a
+  policy passes as `undefined` is absent: the construction-time value
+  answers it, so forwarding an unset `slugPrefix` keeps the component's.
 - `md.effects['md-load']` resolves any URL through the loader (cache,
   abort, streaming) and dispatches the plain `MdDocument` as the
   action payload; `md-parse` does the same for an in-state source

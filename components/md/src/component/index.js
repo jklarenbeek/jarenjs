@@ -28,6 +28,7 @@ import { mdToVnode } from '../to-vnode.js';
 import { loadMarkdown } from '../loader.js';
 import { createHydrator, indexHydratable } from '../hydration.js';
 import { highlightPlugin } from '../plugins/highlight.js';
+import { labelsKey } from '../utils.js';
 
 /**
  * @typedef {import('../ast.js').MdDocument} MdDocument
@@ -63,6 +64,8 @@ import { highlightPlugin } from '../plugins/highlight.js';
  *   and to the anchor href beside it (`''` opts out)
  * @property {boolean} [headingAnchors] emit the copy-a-link anchor
  * @property {string} [footnotesLabel] the footnote section's heading
+ * @property {import('../utils.js').MdLabels} [labels] the other accessible
+ *   names the emitter writes
  * @property {'skip'|'text'} [html] what to do with raw HTML
  * @property {boolean} [keyed] emit patcher keys on block children
  */
@@ -151,9 +154,15 @@ export function createMdComponent(options = {}) {
       slugPrefix: compileOptions.slugPrefix,
       headingAnchors: compileOptions.headingAnchors,
       footnotesLabel: compileOptions.footnotesLabel,
+      labels: compileOptions.labels,
       keyed: compileOptions.keyed,
-      ...policy,
     };
+    // A member passed as `undefined` is absent, as the policy's key says:
+    // the construction-time value answers it, never the emitter's default.
+    for (const name of Object.keys(policy)) {
+      const value = /** @type {any} */ (policy)[name];
+      if (value !== undefined) /** @type {any} */ (renderOptions)[name] = value;
+    }
     /** @type {WeakMap<any, any>} compiled document → its vnode */
     const vnodes = new WeakMap();
     const project = (/** @type {any} */ compiled) => {
@@ -240,7 +249,7 @@ export function createMdComponent(options = {}) {
  * kind of quiet disagreement the per-call policy exists to end.
  */
 const POLICY_OPTIONS = new Set([
-  'headingIds', 'slugPrefix', 'headingAnchors', 'footnotesLabel', 'html', 'keyed',
+  'headingIds', 'slugPrefix', 'headingAnchors', 'footnotesLabel', 'labels', 'html', 'keyed',
 ]);
 
 /**
@@ -260,7 +269,9 @@ function policyKey(policy) {
     }
     const value = /** @type {any} */ (policy)[name];
     if (value === undefined) continue;
-    key += `${name}=${JSON.stringify(value)};`;
+    // A closure label is keyed by identity: JSON would drop it, and two
+    // policies naming different closures would share one vnode.
+    key += `${name}=${name === 'labels' ? labelsKey(value) : JSON.stringify(value)};`;
   }
   return key;
 }

@@ -15,6 +15,7 @@ import { createBoundedCache } from '@jarenjs/core/cache';
 
 import { createIncrementalParser } from './parser.js';
 import { compileMarkdown } from './compiler.js';
+import { labelsKey } from './utils.js';
 
 /**
  * @typedef {import('./ast.js').MdNode} MdNode
@@ -107,6 +108,7 @@ function compileKey(options) {
     options.slugPrefix ?? null,
     options.headingAnchors === true,
     options.footnotesLabel ?? 'Footnotes',
+    labelsKey(options.labels),
     options.keyed !== false,
     referenceKey(options.toml),
     referenceKey(options.sanitizeUrl),

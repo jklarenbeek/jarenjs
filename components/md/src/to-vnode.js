@@ -28,7 +28,7 @@
 import { h, createDomRenderer } from '@jarenjs/view';
 import { sanitizeUrl as defaultSanitizeUrl, encodeUrlAttribute } from '@jarenjs/view/helpers';
 import {
-  hashContent, fnv1a, FNV1A_OFFSET_BASIS, headingId, permalinkLabel,
+  hashContent, fnv1a, FNV1A_OFFSET_BASIS, headingId, permalinkLabel, pageBreakLabel, renderLabels, labelsKey,
   MAX_NESTING, OPTION_RULES, compileOptionCheck,
 } from './utils.js';
 import { parseHtmlFragment, parseHtmlTag } from './html.js';
@@ -76,6 +76,10 @@ import {
  *   Requires `headingIds`; without ids there is nothing to link to.
  * @property {string} [footnotesLabel] the accessible name of the
  *   appended footnotes section (default `'Footnotes'`).
+ * @property {import('./utils.js').MdLabels} [labels] the other accessible
+ *   names the emitter writes — a page break's, a heading anchor's and a
+ *   footnote back-reference's — as templates or closures over English
+ *   defaults (`DEFAULT_LABELS`).
  * @property {boolean} [keyed] give each top-level block a content-hash
  *   `key` (default `true`).
  *
@@ -109,6 +113,7 @@ const checkVnodeOptions = compileOptionCheck('mdToVnode', {
   ...RENDER_RULES,
   parseHtml: OPTION_RULES.function,
   footnotesLabel: OPTION_RULES.string,
+  labels: OPTION_RULES.labels,
   keyed: OPTION_RULES.boolean,
 });
 
@@ -159,6 +164,7 @@ function htmlNodeVnode(node, rctx, blockClass) {
  *   slugs: Map<string, number>,
  *   footnotes: import('./footnotes.js').Footnotes|null,
  *   footnotePrefix: string, footnotesLabel: string,
+ *   labels: import('./utils.js').RenderLabels, labelsKey: string,
  *   hash: (str: string) => string, counts: Map<string, number> }} RenderCtx
  */
 
@@ -376,12 +382,14 @@ const BLOCK_RENDERERS = {
     if (rctx.headingIds !== true) return intoVnode(['h' + node.depth, {}], node.children, rctx);
     const id = headingId(textOf(node), rctx.slugs, rctx.slugPrefix);
     const vnode = intoVnode(['h' + node.depth, { id }], node.children, rctx);
-    if (rctx.headingAnchors === true) vnode.push(headingAnchor(node, id));
+    if (rctx.headingAnchors === true) vnode.push(headingAnchor(node, id, rctx));
     return vnode;
   },
 
   thematicBreak: () => ['hr', {}],
-  pageBreak: () => ['div', { class: 'md-page-break', role: 'separator', 'aria-label': 'Page break' }],
+  pageBreak: (node, rctx) => ['div', {
+    class: 'md-page-break', role: 'separator', 'aria-label': pageBreakLabel(rctx.labels),
+  }],
 
   blockquote: (node, rctx) => ['blockquote', {}, ...blockChildren(node.children, rctx, false)],
 
@@ -447,7 +455,7 @@ function footnotesVnode(rctx) {
       back.push(['a', {
         class: 'footnote-backref',
         href: '#' + footnoteRefId(prefix, number, k),
-        'aria-label': backrefLabel(number, k),
+        'aria-label': backrefLabel(rctx.labels, number, k),
       }, BACKREF_MARK, k > 1 ? ['sup', {}, String(k)] : null]);
     }
     /** @type {any[]} */
@@ -473,13 +481,14 @@ function footnotesVnode(rctx) {
  * it points at.
  * @param {MdNode} node
  * @param {string} id
+ * @param {RenderCtx} rctx
  * @returns {any[]}
  */
-function headingAnchor(node, id) {
+function headingAnchor(node, id, rctx) {
   return ['a', {
     class: 'md-anchor',
     href: '#' + id,
-    'aria-label': permalinkLabel(textOf(node)),
+    'aria-label': permalinkLabel(rctx.labels, textOf(node)),
   }, '#'];
 }
 
@@ -586,6 +595,7 @@ function blockVnode(node, rctx, keyed) {
   if (cached !== undefined && cached.keyed === keyed && cached.html === rctx.html
     && cached.sanitizeUrl === rctx.sanitizeUrl && cached.headingIds === rctx.headingIds
     && cached.slugPrefix === rctx.slugPrefix && cached.headingAnchors === rctx.headingAnchors
+    && cached.labelsKey === rctx.labelsKey
     // Footnote numbering is a property of the WHOLE document, so a block
     // carrying a citation cannot be reused across two documents that
     // number it differently. The collection is memoized per AST array,
@@ -605,7 +615,7 @@ function blockVnode(node, rctx, keyed) {
   memo.set(node, {
     vnode, keyed, html: rctx.html, sanitizeUrl: rctx.sanitizeUrl,
     headingIds: rctx.headingIds, slugPrefix: rctx.slugPrefix,
-    headingAnchors: rctx.headingAnchors, footnotes: rctx.footnotes,
+    headingAnchors: rctx.headingAnchors, labelsKey: rctx.labelsKey, footnotes: rctx.footnotes,
   });
   return vnode;
 }
@@ -727,6 +737,8 @@ export function mdToVnode(docOrCompiled, options = {}) {
     footnotes: collectFootnotes(ast),
     footnotePrefix: typeof options.slugPrefix === 'string' ? options.slugPrefix : FOOTNOTE_PREFIX,
     footnotesLabel: typeof options.footnotesLabel === 'string' ? options.footnotesLabel : 'Footnotes',
+    labels: renderLabels(options.labels),
+    labelsKey: labelsKey(options.labels),
     hash: hashContent,
     counts: new Map(),
   };
@@ -746,8 +758,9 @@ export function mdToVnode(docOrCompiled, options = {}) {
  * `render(docOrCompiled)` function.
  *
  * The options are a closed set, checked when the renderer is created: an
- * unknown member — `mdToVnode`'s `footnotesLabel`, `keyed` and
- * `parseHtml` included, which this renderer does not forward — or one of
+ * unknown member — `mdToVnode`'s `footnotesLabel`, `labels`, `keyed`
+ * and `parseHtml` included, which this renderer does not forward (a
+ * compiled document renders with the labels it was compiled with) — or one of
  * the wrong type is refused with a `TypeError`, and `container` is
  * required.
  *

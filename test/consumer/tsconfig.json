@@ -42,7 +42,8 @@
     "check-compile.ts",
     "validate-narrow.ts",
     "strict-profile.ts",
-    "registry-options.ts"
+    "registry-options.ts",
+    "md-labels.ts"
   ],
   "include": [
     "linq-*.ts"

@@ -73,4 +73,4 @@ export {
   MdFrontmatterError,
 } from './frontmatter.js';
 
-export { hashContent } from './utils.js';
+export { hashContent, DEFAULT_LABELS } from './utils.js';

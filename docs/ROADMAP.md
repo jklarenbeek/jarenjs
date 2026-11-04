@@ -434,6 +434,13 @@ establish registry publication or downstream acceptance.
   footnote 1 the ids `fn-1` / `fnref-1`, the id a heading `# fn 1` also mints:
   two elements carry one id and an in-page link lands on the first. The
   component layer's comment says footnote ids are unaffected by the policy.
+- [ ] **The locale packs carry no accessible names for md.** A
+  `@jarenjs/locales` pack serves the validator's and the forms' messages,
+  but md's `labels` (a page break, a heading permalink, a footnote
+  back-reference) and its `footnotesLabel` have no entry in any pack, so a
+  host that renders Markdown for Dutch readers writes those names itself.
+  Wanted: md entries in each pack, keyed like `DEFAULT_LABELS`, under the
+  packs' key-parity test.
 
 ## @jarenjs/mermaid
 
