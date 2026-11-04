@@ -989,14 +989,6 @@ what each does is its own documentation's job
   [NOT] TRUE` — is not compared, so an index recreated under another such
   condition or key opens as the declared one, where SQLite compares the CREATE
   text (MODEL-FORMAT §12). Wanted: read those forms into the condition form.
-- [ ] **A settling call over its own attempt's row answers as if it had
-  settled it, whatever the row settled as.** The fence's same-generation
-  idempotence ignores the row's state: `complete(lease)` over the attempt's
-  `cancelled` row answers `true` (so a cancellation admitted just before a
-  queued worker completion under `'wait'` is reported `completed`), and
-  `cancel(id, { lease })` over its `done` row answers `false` ("it already
-  was" cancelled). Wanted: same-generation idempotence only for the state the
-  call writes.
 - [ ] **A run store's `page` reads an open option bag.** `page(id, { afer: 2
   })` answers every revision where `{ after: 2 }` answers those after the
   second, and `page(id, null)` throws an uncoded `TypeError`, where the run

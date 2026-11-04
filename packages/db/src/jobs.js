@@ -413,6 +413,11 @@ export function createJobEngine(options) {
     return next();
   };
 
+  /** The states each settling call leaves a job in. */
+  const COMPLETE_WRITES = Object.freeze(['done']);
+  const FAIL_WRITES = Object.freeze(['failed', 'dead']);
+  const CANCEL_WRITES = Object.freeze(['cancelled']);
+
   /**
    * Why a settling call matched no row. A guard that answers zero is not
    * `false` — a caller that cannot tell "already done" from "you are
@@ -420,17 +425,27 @@ export function createJobEngine(options) {
    * the three it was.
    * @param {any} lease
    * @param {string} verb
+   * @param {readonly string[]} [writes] the states `verb` settles a job
+   *   in; absent for a call that settles nothing (a renewal, a check)
    */
-  const refuseSettlement = (lease, verb) => chain(
+  const refuseSettlement = (lease, verb, writes) => chain(
     prepared('fenceRow').get([lease.jobId]),
     (row) => {
       const at = now();
       // THIS attempt already settled it — a §7 handler that completed
       // transactionally, then the worker's own completion behind it.
       // Settling twice from one attempt is idempotent, not a refusal;
-      // the generation says whose settlement the row carries.
+      // the generation says whose settlement the row carries, and the
+      // state whether it was this verb's: a completion over the
+      // attempt's own cancellation did not complete anything.
       if (row !== undefined && row.state !== 'leased'
-        && Number(row.lease_generation) === lease.generation) return null;
+        && Number(row.lease_generation) === lease.generation) {
+        if (writes === undefined || writes.includes(row.state)) return null;
+        return new DbRuntimeError('JD2065',
+          `${verb} refused: job '${lease.jobId}' is already '${row.state}' — this attempt's `
+          + `lease settled it so, and ${verb} does not`,
+          { docPath: '/jobs', collection: JOBS_TABLE, key: lease.jobId });
+      }
       if (row === undefined || row.state !== 'leased') {
         return new DbRuntimeError('JD2065',
           `${verb} refused: job '${lease.jobId}' is ${row === undefined
@@ -529,9 +544,11 @@ export function createJobEngine(options) {
       : leaseOf(row)));
   };
 
-  /** A successful or already landed settlement has the same public answer. */
-  const settled = (out, lease, verb) => Number(out.changes ?? 0) > 0
-    ? true : chain(refuseSettlement(lease, verb), (error) => {
+  /** A successful or already landed settlement has the same public answer.
+   * @param {any} out @param {any} lease @param {string} verb
+   * @param {readonly string[]} writes the states `verb` settles a job in */
+  const settled = (out, lease, verb, writes) => Number(out.changes ?? 0) > 0
+    ? true : chain(refuseSettlement(lease, verb, writes), (error) => {
       if (error !== null) throw error;
       return true;
     });
@@ -553,7 +570,7 @@ export function createJobEngine(options) {
     return chain(
       prepared('complete').run([
         serialized.text, at, lease.jobId, lease.token, at,
-      ]), (out) => settled(out, lease, 'complete()'));
+      ]), (out) => settled(out, lease, 'complete()', COMPLETE_WRITES));
   };
 
   /** Fail a leased job: schedule the retry or dead-letter (§4). */
@@ -579,7 +596,7 @@ export function createJobEngine(options) {
         ? [message, at, lease.jobId, lease.token, at]
         : [message, at + backoffOf(job.attempts, workerDefaults), at,
           lease.jobId, lease.token, at];
-      return chain(statement.run(params), (out) => settled(out, lease, 'fail()'));
+      return chain(statement.run(params), (out) => settled(out, lease, 'fail()', FAIL_WRITES));
     });
   };
 
@@ -761,7 +778,7 @@ export function createJobEngine(options) {
         abortLocal();
         return true;
       }
-      return chain(refuseSettlement(lease, 'cancel()'), (error) => {
+      return chain(refuseSettlement(lease, 'cancel()', CANCEL_WRITES), (error) => {
         if (error !== null) throw error;
         // this attempt already settled it as cancelled: idempotent
         abortLocal();
@@ -1219,7 +1236,9 @@ export function createJobEngine(options) {
         }
         catch (error) {
           if (isLeaseLost(error)) {
-            recordLost(attempt, phase, error);
+            // a cancellation that landed first took the job on purpose
+            if (attempt.cancelled) recordCancelled(attempt);
+            else recordLost(attempt, phase, error);
             return false;
           }
           if (!isContended(error)) throw error;

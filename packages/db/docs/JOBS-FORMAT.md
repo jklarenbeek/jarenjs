@@ -180,7 +180,12 @@ result)` is refused by name and pointed at `job.lease`.
 
 Settling **twice from one attempt** is idempotent, not a refusal — a §7
 handler completes transactionally and the worker's own completion lands
-behind it, and the row's generation says whose settlement it carries.
+behind it, and the row's generation says whose settlement it carries. It
+is idempotent only for the state the call writes: `complete()` over the
+attempt's own `cancelled` row, or `cancel(id, { lease })` over its own
+`done` row, is refused `JD2065` naming the state the lease left, since
+neither did what the call says. A worker whose completion lands behind
+the attempt's own cancellation records the attempt `cancelled`.
 
 ### What exactly-once means here, and what it does not
 

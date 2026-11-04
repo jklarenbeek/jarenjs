@@ -176,6 +176,73 @@ describe('cancel', () => {
   });
 });
 
+describe("a settling call over its own attempt's row", () => {
+  it('is idempotent only where the row is in the state the call writes', async () => {
+    const store = await open();
+    const claim = async (id) => {
+      await store.jobs.enqueue('k', {}, { id });
+      return (await store.jobs.claim({ kinds: ['k'], owner: 'w' })).lease;
+    };
+    // the attempt's own cancellation is no completion, and no failure
+    const cancelled = await claim('c');
+    assert.strictEqual(await store.jobs.cancel('c', { lease: cancelled }), true);
+    await assert.rejects(store.jobs.complete(cancelled, 1),
+      (error) => error.code === 'JD2065' && /already 'cancelled'/.test(error.message));
+    await assert.rejects(store.jobs.fail(cancelled, new Error('x')), (error) => error.code === 'JD2065');
+    assert.strictEqual((await store.jobs.get('c')).state, 'cancelled');
+    // …and its own completion is no cancellation
+    const done = await claim('d');
+    assert.strictEqual(await store.jobs.complete(done, 1), true);
+    await assert.rejects(store.jobs.cancel('d', { lease: done }),
+      (error) => error.code === 'JD2065' && /already 'done'/.test(error.message));
+    assert.strictEqual((await store.jobs.get('d')).state, 'done');
+    // the same call twice from one attempt still answers as it did
+    assert.strictEqual(await store.jobs.complete(done, 1), true);
+    assert.strictEqual(await store.jobs.cancel('c', { lease: cancelled }), false);
+    const failed = await claim('f');
+    assert.strictEqual(await store.jobs.fail(failed, new Error('x')), true);
+    assert.strictEqual(await store.jobs.fail(failed, new Error('x')), true);
+    await store.close();
+  });
+
+  it("reports a worker's attempt that its own cancellation took as cancelled, not completed", async () => {
+    const store = await open();
+    /** @type {any[]} */
+    const outcomes = [];
+    /** @type {any} */
+    let cancelling;
+    /** @type {any} */
+    let held;
+    const worker = store.jobs.createWorker({
+      handlers: {
+        // while a transaction holds the store's gate, the attempt's own
+        // cancellation queues behind it, and the completion behind that
+        k: async (_payload, ctx) => {
+          const opened = Promise.withResolvers();
+          held = store.transaction(async () => {
+            opened.resolve(undefined);
+            await new Promise((resolve) => setTimeout(resolve, 30));
+          });
+          await opened.promise;
+          cancelling = store.jobs.cancel(ctx.job.id, { lease: ctx.lease() });
+          return 'done anyway';
+        },
+      },
+      pollInterval: 1,
+      onOutcome: (event) => outcomes.push(event.outcome),
+    });
+    worker.start();
+    await store.jobs.enqueue('k', {}, { id: 'own' });
+    for (let i = 0; i < 400 && outcomes.length === 0; i++) await new Promise((resolve) => setTimeout(resolve, 5));
+    await worker.stop();
+    await held;
+    assert.strictEqual(await cancelling, true);
+    assert.deepStrictEqual(outcomes, ['cancelled']);
+    assert.strictEqual((await store.jobs.get('own')).state, 'cancelled');
+    await store.close();
+  });
+});
+
 describe('requeue', () => {
   it('a failed job is claimable again with an honest attempt history; dead and cancelled too', async () => {
     const clock = makeClock();
