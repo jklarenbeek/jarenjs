@@ -388,7 +388,7 @@ export function followRef(ref, holder, scope) {
   const base = hash === -1 ? ref : ref.slice(0, hash);
   const external = scope.validator.getSchema(base);
   if (external === null || external === undefined) return undefined;
-  const target = resolveSameDocumentRef(decodeFragment(hash === -1 ? '#' : ref.slice(hash)), external, collectSameDocumentAnchors(external));
+  const target = resolveSameDocumentRef(hash === -1 ? '#' : ref.slice(hash), external, collectSameDocumentAnchors(external));
   if (URL.canParse(base)) {
     const uri = withoutFragment(new URL(base).href);
     holdDocument(scope, uri, external);
@@ -468,21 +468,6 @@ function heldBranch(branch, member, scope) {
 }
 
 /**
- * A URI fragment as a same-document reference: percent-decoded when it
- * decodes, kept verbatim otherwise (the resolver then fails to find it).
- * @param {string} frag
- * @returns {string}
- */
-function decodeFragment(frag) {
-  try {
-    return decodeURIComponent(frag);
-  }
-  catch {
-    return frag;
-  }
-}
-
-/**
  * Follow a `$ref` chain to the schema it names, or `undefined` when a
  * link does not resolve. Bounded so a reference cycle terminates.
  * @param {any} node
@@ -535,8 +520,9 @@ function checkRefs(node, docPath, scope, isRoot) {
       }
       // the validator resolves a pointer fragment into a registered schema
       // lazily (a missing pointer surfaces at validation time), so the
-      // fragment is checked here — unresolved must be a compile refusal
-      if (hash !== -1 && resolveSameDocumentRef(decodeFragment(ref.slice(hash)), external, collectSameDocumentAnchors(external)) === undefined) {
+      // fragment is checked here — unresolved must be a compile refusal;
+      // the resolver percent-decodes it once, as the validator does
+      if (hash !== -1 && resolveSameDocumentRef(ref.slice(hash), external, collectSameDocumentAnchors(external)) === undefined) {
         throw refuse('JC0007',
           `the $ref '${ref}' names a registered schema but its fragment does not resolve inside it`,
           at(docPath, '$ref'));

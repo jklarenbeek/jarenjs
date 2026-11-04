@@ -536,11 +536,6 @@ costs a descriptor plus examples and no UI code at all.
   at a location another conjunct or the node itself also constrains (it would
   need the two intersected; a variant added beside the node's own `type`
   among them) stay R15 too.
-- [ ] **An external `$ref` fragment is percent-decoded twice at compile.**
-  `{ $ref: 'https://x.example/lib.json#/$defs/a%2520b' }` into a registered
-  schema whose `$defs` holds `a%20b` is refused `JC0007` ("its fragment does
-  not resolve"), though the validator resolves it to `a%20b`: the compile
-  decodes the fragment before the shared resolver decodes it again.
 - [ ] **`diffContracts` reads a same-document `$ref` target under 2020-12
   beside its own place's draft.** `readPlaces` gives every such target
   `FROM_2020` because the validator once read the end of a chain of bare

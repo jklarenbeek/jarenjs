@@ -381,3 +381,47 @@ describe('the readers of a compiled contract read a member another document hold
     assert.match(findings[0].message, /at least 31 bytes/);
   });
 });
+
+describe('a fragment into another document is percent-decoded once, as the validator decodes it', () => {
+  /** @param {string} ref */
+  const command = (ref) => ({
+    $contract: '0.1',
+    operations: { 'a.b': { kind: 'command', input: { type: 'object', properties: { m: { $ref: ref } } }, output: true } },
+  });
+  /** @param {any} contract @param {unknown} m */
+  const admits = (contract, m) => {
+    const result = contract.operations['a.b'].input.validate({ m });
+    return result === true || result?.valid === true;
+  };
+
+  it('compiles an escaped percent sign and validates by the member it names', () => {
+    const contract = compileContract(command(`${LIB}#/$defs/a%2520b`),
+      { schemas: [{ $id: LIB, $defs: { 'a%20b': { type: 'string' } } }] });
+    assert.deepStrictEqual([admits(contract, 'x'), admits(contract, 1)], [true, false]);
+  });
+
+  it('tells a member spelled with an escape apart from one spelled with a space', () => {
+    const schemas = [{ $id: LIB, $defs: { 'a%20b': { type: 'string' }, 'a b': { type: 'number' } } }];
+    const escaped = compileContract(command(`${LIB}#/$defs/a%2520b`), { schemas });
+    const spaced = compileContract(command(`${LIB}#/$defs/a%20b`), { schemas });
+    assert.deepStrictEqual([admits(escaped, 'x'), admits(escaped, 1)], [true, false]);
+    assert.deepStrictEqual([admits(spaced, 'x'), admits(spaced, 1)], [false, true]);
+  });
+
+  it('reads an input another document holds under an escaped name as the object it is', () => {
+    const contract = compileContract({
+      $contract: '0.1',
+      operations: { 'a.b': { kind: 'command', input: { $ref: `${LIB}#/$defs/in%2520put` }, output: true } },
+    }, { schemas: [{ $id: LIB, $defs: { 'in%20put': { type: 'object', properties: { m: { type: 'string' } } } } }] });
+    assert.deepStrictEqual([admits(contract, 'x'), admits(contract, 1)], [true, false]);
+  });
+
+  it('still refuses a fragment that names nothing there, a malformed escape included', () => {
+    const schemas = [{ $id: LIB, $defs: { 'a%20b': { type: 'string' } } }];
+    for (const fragment of ['#/$defs/a%20b', '#/$defs/missing', '#/$defs/a%']) {
+      assert.throws(() => compileContract(command(`${LIB}${fragment}`), { schemas }),
+        (/** @type {any} */ error) => error.code === 'JC0007' && /fragment does not resolve/.test(error.message),
+        fragment);
+    }
+  });
+});
