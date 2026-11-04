@@ -370,6 +370,43 @@ export function createFormView(options = {}) {
 }
 
 /**
+ * The value a number control's event carries, as the standard number
+ * action reads it: a JSON-in-JSON expression over `$event.value` that
+ * yields the number the control's text spells, or `null` when the control
+ * is cleared. An app whose own actions write a number control (another
+ * target, another clearing rule) reads it with this expression, so it
+ * accepts exactly the text the standard action does.
+ *
+ * An `<input type=number>` hands over HTML floating-point text (`.5`,
+ * `-.5`, `01`), which is wider than the RFC 8259 numbers `$number` reads.
+ * A string that starts with a digit or a point (after an optional `-`) is
+ * normalised: the sign is split off, the leading zeros are stripped, a `0`
+ * is restored when no digit leads, and the sign is applied again; what is
+ * still not a number (`.`, `5.`) is refused by `$number`. Anything else (a
+ * number a host hands over, `-`, an exponent with no mantissa such as
+ * `e5`) is read by `$number` as it always was. A number a host hands over
+ * is read as itself, `0` included: a value is read when it is true or
+ * equals `0` (`-0` equals `0`, `NaN` equals nothing), so only the empty
+ * string, `null`, `false`, `NaN` and no value at all leave the control
+ * cleared.
+ */
+export const FORM_NUMBER_VALUE = Object.freeze({
+  $if: [{ $or: ['$event.value', { $eq: ['$event.value', 0] }] },
+    { $if: [{ $and: [{ '$is-string': '$event.value' }, { $match: ['$event.value', '-?[0-9.].*'] }] },
+      {
+        $let: {
+          neg: { '$starts-with': ['$event.value', '-'] },
+          z: { $replace: [{ $replace: ['$event.value', '^-', ''] }, '^0+', ''] },
+          abs: { $if: [{ $match: ['$z', '[1-9].*'] }, '$z', { $concat: ['0', '$z'] }] },
+          n: { $number: '$abs' },
+        },
+        $return: { $if: ['$neg', { $neg: '$n' }, '$n'] },
+      },
+      { $number: '$event.value' }] },
+    null],
+});
+
+/**
  * The standard form actions: named query documents that write user
  * input into the form data at `dataPointer + payload.pointer`. RFC 6902
  * `add` is set-or-replace for object members, so untouched (absent)
@@ -435,36 +472,7 @@ export function createFormActions(options = {}) {
       patch: [{ op: writeOp, path: target, value: '$event.checked' }],
     },
     [act.number]: {
-      // An `<input type=number>` hands over HTML floating-point text (`.5`,
-      // `-.5`, `01`), which is wider than the RFC 8259 numbers `$number`
-      // reads. A string that starts with a digit or a point (after an
-      // optional `-`) is normalised: the sign is split off, the leading
-      // zeros are stripped, a `0` is restored when no digit leads, and the
-      // sign is applied again; what is still not a number (`.`, `5.`) is
-      // refused by `$number`. Anything else (a number a host hands over,
-      // `-`, an exponent with no mantissa such as `e5`) is read by `$number`
-      // as it always was. A number a host hands over is read as itself,
-      // `0` included: a value is read when it is true or equals `0` (`-0`
-      // equals `0`, `NaN` equals nothing), so only the empty string,
-      // `null`, `false`, `NaN` and no value at all leave the control
-      // cleared (`$v` is `null`).
-      $let: {
-        v: {
-          $if: [{ $or: ['$event.value', { $eq: ['$event.value', 0] }] },
-            { $if: [{ $and: [{ '$is-string': '$event.value' }, { $match: ['$event.value', '-?[0-9.].*'] }] },
-              {
-                $let: {
-                  neg: { '$starts-with': ['$event.value', '-'] },
-                  z: { $replace: [{ $replace: ['$event.value', '^-', ''] }, '^0+', ''] },
-                  abs: { $if: [{ $match: ['$z', '[1-9].*'] }, '$z', { $concat: ['0', '$z'] }] },
-                  n: { $number: '$abs' },
-                },
-                $return: { $if: ['$neg', { $neg: '$n' }, '$n'] },
-              },
-              { $number: '$event.value' }] },
-            null],
-        },
-      },
+      $let: { v: FORM_NUMBER_VALUE },
       $return: {
         patch: writeControl('$v', { '$is-number': '$v' }),
       },

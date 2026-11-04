@@ -308,7 +308,13 @@ it stays present, so the schema refuses it only through a keyword such
 as `minLength` or `type`. A number control is cleared when it hands over
 the empty text (an empty `<input type=number>`), `null`, `false`, `NaN`
 or no value at all; a number a host hands over is written as itself, `0`
-and `-0` included.
+and `-0` included. The text an `<input type=number>` hands over is HTML
+floating-point text, so `.5`, `-.5` and `01` read 0.5, -0.5 and 1, while
+text that is still no number (`5.`, `.`, `e5`) is refused. That reading is
+exported as `FORM_NUMBER_VALUE`, an expression over `$event.value` that
+yields the number or `null` for a cleared control: an app whose own
+actions write a number control reads it with that expression, so it takes
+exactly the text the standard action takes.
 
 The options are checked when the actions are made, and `createFormView`
 checks its own the same way: options that are not an object and a

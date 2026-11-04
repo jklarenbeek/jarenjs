@@ -500,13 +500,6 @@ costs a descriptor plus examples and no UI code at all.
   UI also need project identity, storage ownership and a migration policy:
   the current documented lifetime is in-memory, reset on committed model or
   seed changes. Reusing the data page's shared database would break isolation.
-- [ ] **The studio flow inspector and the play page refuse number text the
-  standard form actions read.** Their own copies of the form actions
-  (`flow/f-number`, `play/f-number`) read `$event.value` with `$number`
-  directly, so `.5`, `-.5` and `01` from an `<input type=number>` are refused
-  `JA2002` and the field keeps its old value, where `createFormActions`'
-  `form/number` reads 0.5, -0.5 and 1. Wanted: the copies read the text as the
-  standard action does.
 
 ## @jarenjs/contract
 

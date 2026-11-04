@@ -1,4 +1,6 @@
 // @ts-check
+import { FORM_NUMBER_VALUE } from '@jarenjs/app';
+
 /** Shared by the standalone flow page and the isolated project editor. */
 export const FLOW_ACTIONS = {
   'flow/template': { effects: [{ run: 'flow-template', with: { name: '$payload' } }] },
@@ -273,7 +275,8 @@ export const FLOW_ACTIONS = {
   // The inspector writes through the six standard form actions,
   // mirrored from @jarenjs/app's createFormActions with one change:
   // the target prepends the SELECTION's pointer, so one static action
-  // set serves whichever member is selected.
+  // set serves whichever member is selected. A number reads its text
+  // with the standard action's own expression.
   'flow/f-input': { patch: [{
     op: { $if: [{ $or: ['$payload.element', { $eq: ['$payload.pointer', ''] }] }, 'replace', 'add'] },
     path: { $concat: ['/flow/doc', '$.flow.selection.path', '$payload.pointer'] },
@@ -285,7 +288,7 @@ export const FLOW_ACTIONS = {
   'flow/f-number': { patch: [{
     op: { $if: [{ $or: ['$payload.element', { $eq: ['$payload.pointer', ''] }] }, 'replace', 'add'] },
     path: { $concat: ['/flow/doc', '$.flow.selection.path', '$payload.pointer'] },
-    value: { $if: [{ $ne: ['$event.value', ''] }, { $number: '$event.value' }, null] } }] },
+    value: FORM_NUMBER_VALUE }] },
   'flow/f-json': { patch: [{
     op: { $if: [{ $or: ['$payload.element', { $eq: ['$payload.pointer', ''] }] }, 'replace', 'add'] },
     path: { $concat: ['/flow/doc', '$.flow.selection.path', '$payload.pointer'] },

@@ -22,7 +22,7 @@
  */
 
 import {
-  createApp as appCreateApp, createFormView, createFormActions, formEventFields,
+  createApp as appCreateApp, createFormView, createFormActions, formEventFields, FORM_NUMBER_VALUE,
 } from '@jarenjs/app';
 import { buildFormModel, buildFormViewModel } from '@jarenjs/forms';
 
@@ -249,7 +249,7 @@ export const calcActions = {
   },
   'calc/conv-from': { patch: [{ op: 'replace', path: '/calc/conv/from', value: '$event.value' }] },
   'calc/conv-to': { patch: [{ op: 'replace', path: '/calc/conv/to', value: '$event.value' }] },
-  'calc/conv-value': { patch: [{ op: 'replace', path: '/calc/conv/value', value: { $number: '$event.value' } }] },
+  'calc/conv-value': { patch: [{ op: 'replace', path: '/calc/conv/value', value: FORM_NUMBER_VALUE }] },
   'calc/conv-swap': {
     patch: [
       { op: 'replace', path: '/calc/conv/from', value: '$.calc.conv.to' },
