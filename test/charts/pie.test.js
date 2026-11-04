@@ -116,8 +116,17 @@ describe('mermaid delegation', function () {
       textColor: mermaidTheme().tokens.nodeText,
       sliceStroke: '#fff',
       titles: false,
+      legendText: 'value',
     });
     assert.equal(renderToString(chartsVnode), mermaidSvg);
+  });
+
+  it('a mermaid pie lists each value where showData asks for it, and each share where it does not', function () {
+    const pie = (/** @type {string} */ header) => renderToString(renderMermaid(
+      `${header}\n  "Dogs" : 40\n  "Cats" : 25\n  "Birds" : 10`, { renderers: { pie: mermaidPieRenderer } }));
+    const legend = (/** @type {string} */ svg) => [...svg.matchAll(/<text[^>]*>([^<]*)<\/text>/g)].map((match) => match[1]);
+    assert.deepEqual(legend(pie('pie showData')), ['Dogs [40]', 'Cats [25]', 'Birds [10]']);
+    assert.deepEqual(legend(pie('pie')), ['Dogs (53.3%)', 'Cats (33.3%)', 'Birds (13.3%)']);
   });
 });
 

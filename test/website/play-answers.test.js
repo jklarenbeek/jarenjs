@@ -253,7 +253,8 @@ const PINS = {
     assert.strictEqual(Number(bar?.[1]) + Number(bar?.[2]) / 2, lifelines[1], 'the activation sits on Bob');
   },
   'mermaid-state': ({ source: r }) => assert.strictEqual(seen(r), 'start stop Idle Running'),
-  'mermaid-pie': ({ source: r }) => assert.strictEqual(seen(r), 'Time spent Parsing (20.0%) Layout (35.0%) Rendering (45.0%)'),
+  // `pie showData`: the legend lists each value as written, as Mermaid's does
+  'mermaid-pie': ({ source: r }) => assert.strictEqual(seen(r), 'Time spent Parsing [20] Layout [35] Rendering [45]'),
   'mermaid-gantt': ({ source: r }) => {
     const day = (/** @type {number} */ ms) => new Date(ms).toISOString().slice(0, 10);
     const tasks = json(r, 'ast').sections.flatMap((/** @type {any} */ s) => s.tasks).map((/** @type {any} */ t) => [t.name, day(t.start), day(t.end)]);

@@ -268,7 +268,10 @@ the guard (nesting counted), the effect starts at the first `/` after
 it (or the first `/` at all when there is no guard), and a label that
 fits no pattern — an unmatched `[`, or text between `]` and `/` — reads
 whole as the event, which keeps plain labels meaning what they always
-meant. Pie: `{ title, showData, slices:[{ label, value }] }`.
+meant. Pie: `{ title, showData, slices:[{ label, value }] }`; with
+`showData` the injected renderer's legend lists each slice's value as
+written (`Dogs [40]`), as Mermaid's does, and without it each share
+(`Dogs (53.3%)`).
 
 Every line of these types reads as a statement, or is skipped as a
 directive this tree does not model (`direction`, `classDef`, `class`,

@@ -470,12 +470,6 @@ establish registry publication or downstream acceptance.
   truncated gantt name stays truncated in its tooltip. The text is
   English-only. A class diagram's `link` and `callback` statements (which also
   carry a tooltip) are not modelled.
-- [ ] **A Mermaid pie's `showData` is read and printed back but never drawn.**
-  `pie showData` parses (`showData: true`) and `toMermaid` writes it back,
-  but the charts adapter's `mermaidPieRenderer` never reads it: the legend
-  shows each slice's percentage (`Parsing (20.0%)`) where Mermaid shows its
-  value (`Parsing [20]`), so a pie whose values do not sum to 100 shows none
-  of the values the directive asks for.
 
 ## @jarenjs/play
 

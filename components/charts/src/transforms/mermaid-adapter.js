@@ -52,5 +52,7 @@ export function mermaidPieRenderer(ast, theme, hash) {
     // A mermaid diagram's SVG is a byte-stable contract; the per-slice
     // hover text charts adds for its own pies would break it.
     titles: false,
+    // `pie showData` lists each slice's value where the legend names it
+    legendText: ast.showData === true ? 'value' : 'percent',
   });
 }

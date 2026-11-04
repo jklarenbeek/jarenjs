@@ -87,6 +87,10 @@ export function buildPieAST(data, config = {}) {
  * @property {readonly string[]} [palette] slice colors
  * @property {string} [textColor] title/legend text fill
  * @property {string} [sliceStroke] slice separator stroke
+ * @property {'percent'|'value'} [legendText] what a legend entry names
+ *  beside its label: `'percent'` (default) its share, `Dogs (53.3%)`, or
+ *  `'value'` its value as written, `Dogs [40]` — the list Mermaid's
+ *  `showData` draws.
  * @property {boolean} [titles] per-slice hover `<title>` (default true).
  *  `@jarenjs/mermaid` turns it off: a mermaid pie is a *diagram*, and
  *  its emitted SVG is a byte-stable contract that hover text would
@@ -120,6 +124,7 @@ export function renderPieAST(ast, theme, hash, options = {}) {
   const textColor = options.textColor ?? theme.tokens.text;
   const sliceStroke = options.sliceStroke ?? theme.tokens.sliceStroke;
   const titles = options.titles !== false;
+  const legendText = options.legendText ?? 'percent';
   const tooltip = normalizeTooltip(options.tooltip);
   const fs = 14;
   const R = 130;
@@ -154,7 +159,7 @@ export function renderPieAST(ast, theme, hash, options = {}) {
   let legendW = 120;
   const legend = ast.slices.map((s, i) => {
     const y = 40 + i * 24;
-    const label = `${s.label} (${(s.frac * 100).toFixed(1)}%)`;
+    const label = legendText === 'value' ? `${s.label} [${s.value}]` : `${s.label} (${(s.frac * 100).toFixed(1)}%)`;
     legendW = Math.max(legendW, textWidth(label, fs) + 30);
     return group({ class: legendClass }, [
       rect(legendX, y, 14, 14, { fill: palette[i % palette.length] }),
