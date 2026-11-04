@@ -9,7 +9,8 @@
  *
  *  - per-node memo: the same AST node reference emits the same vnode
  *    reference, so unchanged subtrees of a JSLT-transformed document
- *    patch in O(1);
+ *    patch in O(1) — unless a heading in it must take another id because
+ *    a heading before it took its number since;
  *  - content-hash keys: block vnodes are keyed by a hash of their
  *    content, so moved blocks reorder instead of rebuilding.
  *
@@ -28,7 +29,8 @@
 import { h, createDomRenderer } from '@jarenjs/view';
 import { sanitizeUrl as defaultSanitizeUrl, encodeUrlAttribute } from '@jarenjs/view/helpers';
 import {
-  hashContent, fnv1a, FNV1A_OFFSET_BASIS, headingId, permalinkLabel, pageBreakLabel, renderLabels, labelsKey,
+  hashContent, fnv1a, FNV1A_OFFSET_BASIS, headingId, replayHeadingIds, permalinkLabel, pageBreakLabel,
+  renderLabels, labelsKey,
   MAX_NESTING, OPTION_RULES, compileOptionCheck,
 } from './utils.js';
 import { parseHtmlFragment, parseHtmlTag } from './html.js';
@@ -161,7 +163,7 @@ function htmlNodeVnode(node, rctx, blockClass) {
  *   parseHtml: (html: string) => any, stockHtml: boolean,
  *   sanitizeUrl: (url: string) => (string|null),
  *   headingIds: boolean, slugPrefix: string, headingAnchors: boolean,
- *   slugs: Map<string, number>,
+ *   slugs: Map<string, number>, minted: string[],
  *   footnotes: import('./footnotes.js').Footnotes|null,
  *   footnotePrefix: string, footnotesLabel: string,
  *   labels: import('./utils.js').RenderLabels, labelsKey: string,
@@ -380,7 +382,9 @@ const BLOCK_RENDERERS = {
 
   heading: (node, rctx) => {
     if (rctx.headingIds !== true) return intoVnode(['h' + node.depth, {}], node.children, rctx);
-    const id = headingId(textOf(node), rctx.slugs, rctx.slugPrefix);
+    const text = textOf(node);
+    const id = headingId(text, rctx.slugs, rctx.slugPrefix);
+    rctx.minted.push(text, id);
     const vnode = intoVnode(['h' + node.depth, { id }], node.children, rctx);
     if (rctx.headingAnchors === true) vnode.push(headingAnchor(node, id, rctx));
     return vnode;
@@ -579,6 +583,9 @@ function blockChildren(blocks, rctx, keyed) {
   return out;
 }
 
+/** The heading ids a memoized block minted when it minted none. */
+const NO_HEADINGS = Object.freeze(/** @type {string[]} */ ([]));
+
 /**
  * Emit one block node through the per-node memo.
  * @param {MdNode} node
@@ -605,9 +612,15 @@ function blockVnode(node, rctx, keyed) {
     // which is what keeps re-rendering ONE document on the fast path;
     // documents without footnotes compare `null === null` and are
     // untouched by this.
-    && cached.footnotes === rctx.footnotes) {
+    && cached.footnotes === rctx.footnotes
+    // The block's heading ids were numbered against the emission that
+    // rendered it; a heading before it may have taken one since (a
+    // streamed document reuses the nodes it already had).
+    && (cached.minted.length === 0 || replayHeadingIds(cached.minted, rctx.slugs, rctx.slugPrefix))) {
+    for (let i = 0; i < cached.minted.length; i++) rctx.minted.push(cached.minted[i]);
     return cached.vnode;
   }
+  const mark = rctx.minted.length;
   const plugin = rctx.tables.renders.get(node.type);
   let vnode = plugin !== undefined
     ? plugin.render(node, h, rctx)
@@ -620,6 +633,7 @@ function blockVnode(node, rctx, keyed) {
     headingIds: rctx.headingIds, slugPrefix: rctx.slugPrefix,
     headingAnchors: rctx.headingAnchors, labelsKey: rctx.labelsKey,
     footnotePrefix: rctx.footnotePrefix, footnotes: rctx.footnotes,
+    minted: rctx.minted.length === mark ? NO_HEADINGS : rctx.minted.slice(mark),
   });
   return vnode;
 }
@@ -737,6 +751,7 @@ export function mdToVnode(docOrCompiled, options = {}) {
     slugPrefix: typeof options.slugPrefix === 'string' ? options.slugPrefix : '',
     headingAnchors: options.headingIds === true && options.headingAnchors === true,
     slugs: new Map(),
+    minted: [],
     options,
     footnotes: collectFootnotes(ast),
     footnotePrefix: typeof options.slugPrefix === 'string' ? options.slugPrefix : FOOTNOTE_PREFIX,

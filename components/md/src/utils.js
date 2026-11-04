@@ -64,6 +64,38 @@ export function headingId(text, seen, prefix) {
 }
 
 /**
+ * Replay, against this emission's counter, the ids a block rendered by an
+ * earlier emission minted: each heading text through {@link headingId}, in
+ * the order it was minted. When every id comes out as it did, the counter
+ * holds what rendering the block afresh would have left, and the earlier
+ * block can stand; when one differs (a heading before it now takes its
+ * number), the counter is restored and the block must render afresh.
+ * @param {readonly string[]} minted heading text and id, alternating
+ * @param {Map<string, number>} seen the emission's slug counter
+ * @param {string} prefix
+ * @returns {boolean} whether every id replayed unchanged
+ */
+export function replayHeadingIds(minted, seen, prefix) {
+  /** @type {any[]} a key and its earlier value (`undefined`: absent), alternating */
+  const undo = [];
+  for (let i = 0; i < minted.length; i += 2) {
+    const base = slugify(minted[i]) || 'section';
+    undo.push(base, seen.get(base));
+    const id = headingId(minted[i], seen, prefix);
+    // a numbered slug was absent until headingId set it
+    if (id.length - prefix.length !== base.length) undo.push(id.slice(prefix.length), undefined);
+    if (id !== minted[i + 1]) {
+      for (let j = undo.length - 2; j >= 0; j -= 2) {
+        if (undo[j + 1] === undefined) seen.delete(undo[j]);
+        else seen.set(undo[j], undo[j + 1]);
+      }
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
  * The accessible names the emitters write, in English. A `labels` option
  * replaces any of them for readers who do not hear English. Each is a
  * template in the suite's one message grammar (`{name}` substitutes a

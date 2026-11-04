@@ -597,7 +597,10 @@ Measured, not claimed — `npm run benchmark:markdown`, <!--fact:md.measured-->2
 - **The compiled fast path**: `compileMarkdown(...).toVnode()` returns
   the cached projection in <!--fact:md.cachedNs-->39–97<!--/fact--> ns — and because block vnodes carry
   content-hash keys and unchanged AST nodes emit reference-equal
-  vnodes, the view patcher skips unchanged blocks in O(1). A JSLT
+  vnodes, the view patcher skips unchanged blocks in O(1). (A reused
+  heading whose number an earlier heading has since taken renders again,
+  with its new id — a streamed reply that repeats a heading gets
+  `setup` and `setup-1`, as a fresh render would.) A JSLT
   identity transform returns the document by reference; a partial
   transform keeps every unmatched subtree `===`. That pipeline — not
   the one-shot HTML render — is what this package is optimized for.
