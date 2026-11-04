@@ -142,7 +142,6 @@ const ZOD3 = 'zod 3.x under the zod3 alias, the contracts benchmark\'s Zod 3 riv
  */
 export const KNOWN_TOOLING_ADVISORIES = Object.freeze({
   'GHSA-r5fr-rjxr-66jc': { package: 'lodash-es', severity: 'high', reason: MERMAID_PARSER },
-  'GHSA-f23m-r3pf-42rh': { package: 'lodash-es', severity: 'moderate', reason: MERMAID_PARSER },
   'GHSA-xxjr-mmjv-4gpg': { package: 'lodash-es', severity: 'moderate', reason: MERMAID_PARSER },
   'GHSA-q2hr-2g5m-vwhr': { package: 'brace-expansion', severity: 'moderate', reason: BRACE_EXPANSION },
   'GHSA-qhr7-859c-m2p7': { package: 'brace-expansion', severity: 'high', reason: BRACE_EXPANSION },
