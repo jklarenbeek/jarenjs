@@ -131,6 +131,44 @@ describe('website — the Play playground (#/play)', () => {
     assert.strictEqual(app.getState().play.result.ok, false, 'strict TOML rejects the null extension');
   });
 
+  it('switching a chart definition to JOSL converts it, and switching back restores it', () => {
+    const { app, container } = mountSite();
+    fire(byText(playRoot(container), 'button', 'Heatmap (log)'), 'click', {});
+    const original = JSON.parse(app.getState().play.source.source);
+    const select = () => find(playRoot(container), (n) => n.tagName === 'select');
+    fire(select(), 'change', { target: { value: 'josl' } });
+    let s = app.getState().play;
+    assert.strictEqual(s.config.format, 'josl');
+    assert.doesNotMatch(s.source.source.trimStart(), /^\{/, 'the definition is written in JOSL');
+    assert.ok(s.result.ok === true && Array.isArray(viewVnode(s.result)), 'the JOSL definition renders');
+    fire(select(), 'change', { target: { value: 'json' } });
+    s = app.getState().play;
+    assert.deepStrictEqual(JSON.parse(s.source.source), original, 'back in JSON, the same definition');
+    assert.ok(s.result.ok === true);
+  });
+
+  it("switching the kernel loads that kernel's own example", () => {
+    const { app, container } = mountSite();
+    fire(byText(playRoot(container), 'button', 'Amsterdam to Paris, in metres'), 'click', {});
+    fire(find(playRoot(container), (n) => n.tagName === 'select'), 'change', { target: { value: 'compileIRegexp' } });
+    const s = app.getState().play;
+    assert.strictEqual(s.config.kernel, 'compileIRegexp');
+    assert.strictEqual(s.exampleId, 'kernel-iregexp');
+    assert.ok(s.result.ok === true, 'the I-Regexp kernel runs its own arguments');
+  });
+
+  it('switching the patch mode shows the same change in the other form', () => {
+    const { app, container } = mountSite();
+    fire(byText(playRoot(container), 'button', 'Merge (RFC 7396)'), 'click', {});
+    const merged = outText(app.getState().play.result);
+    fire(find(playRoot(container), (n) => n.tagName === 'select'), 'change', { target: { value: 'patch' } });
+    const s = app.getState().play;
+    assert.ok(Array.isArray(JSON.parse(s.source.patch)), 'the pane holds an RFC 6902 patch');
+    assert.ok(s.result.ok === true);
+    assert.strictEqual(outText(s.result).split('\n').slice(0, merged.split('\n').length).join('\n'), merged,
+      'applying it makes the document the merge made');
+  });
+
   it('the contract engine (the one ASYNC run) settles its thenable result onto the stage', async () => {
     const { app, container } = mountSite();
     fire(byText(playRoot(container), 'button', 'A shop contract'), 'click', {});

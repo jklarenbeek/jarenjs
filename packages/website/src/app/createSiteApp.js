@@ -33,7 +33,7 @@ import {
   projectSnapshot, projectHost,
 } from '../boundaries/project.js';
 import {
-  runPlay, loadExample, loadDataset, sessionOf, sessionToLoaded, blankSession,
+  runPlay, loadExample, loadDataset, switchPlayOption, sessionOf, sessionToLoaded, blankSession,
   legacyExperimentToSession, createPlaySplitterWidget, deepLinkExample,
   sessionDocument, sessionFromDocument, sessionFilename,
 } from '../boundaries/play.js';
@@ -357,6 +357,9 @@ export function createSiteApp(env) {
     'play-dataset': (props, dispatch) => {
       const data = loadDataset(app.getState().play.exampleId, props.index);
       if (data !== null) dispatch('play/dataset-set', { index: props.index, data });
+    },
+    'play-option': (props, dispatch) => {
+      dispatch('play/option-set', switchPlayOption(app.getState().play, props.key, props.value));
     },
     // the Play IDE: a play session is a saveable document, kept in
     // the play doc-store and shareable as a `#/play?s=` link

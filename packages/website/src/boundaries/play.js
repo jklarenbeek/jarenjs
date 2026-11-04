@@ -306,6 +306,25 @@ export function deepLinkExample(params) {
   return examples.find((e) => e.engine === params.engine)?.id ?? null;
 }
 
+/**
+ * The play slice a switch of one option pane leaves: the new config, and
+ * the source and data that fit it (`switchOption`). When the switch loads
+ * another example, the session follows it there, and the structured form
+ * buffer — the old data's — goes, as it does when an example is picked.
+ * @param {any} slice @param {string} key @param {string} value
+ */
+export function switchPlayOption(slice, key, value) {
+  const next = playComponent.switchOption(slice.engine, key, value, slice);
+  const followed = next.example !== undefined;
+  return {
+    config: next.config, source: next.source, data: next.data,
+    exampleId: followed ? next.example : slice.exampleId,
+    datasetIndex: followed ? 0 : slice.datasetIndex,
+    dataView: followed ? 'json' : slice.dataView,
+    dataValue: followed ? null : slice.dataValue,
+  };
+}
+
 /** The data of one dataset (by index) of an example, or null. */
 export function loadDataset(exampleId, index) {
   const ex = playComponent.examples.find((e) => e.id === exampleId);

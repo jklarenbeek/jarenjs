@@ -50,6 +50,40 @@ function parseJson(text, pane, label = pane) {
   catch (err) { return { error: `${label}: ${msg(err)}`, pane }; }
 }
 
+/**
+ * A patch pane's text as the same change in another mode: the document the
+ * change makes from the target, written as an RFC 6902 patch, an RFC 7396
+ * merge patch, or itself (the diff mode's pane holds the target), so the
+ * switch shows one change three ways.
+ * @param {Record<string, string>} source @param {Record<string, string>} data
+ * @param {string} from @param {string} to
+ */
+function convertPatch(source, data, from, to) {
+  const target = JSON.parse(data.data);
+  const given = JSON.parse(source.patch);
+  const result = from === 'merge' ? applyMergePatch(target, given)
+    : from === 'diff' ? given
+      : compileJSONPatch(given, { changes: true })(target).doc;
+  const next = to === 'merge' ? createMergePatch(target, result)
+    : to === 'diff' ? result
+      : createJSONPatch(target, result);
+  return { ...source, patch: fmt(next) };
+}
+
+/**
+ * A chart definition in another notation, read and written by the codecs
+ * the host's renderer reads each with.
+ * @param {Record<string, string>} source @param {Record<string, string>} _data
+ * @param {string} from @param {string} to
+ */
+function convertDefinition(source, _data, from, to) {
+  const text = source.source ?? '';
+  const value = from === 'josl' ? parseJosl(text) : parseJsonx(text, { mode: from === 'jsonx' ? 'jsonx' : 'json' });
+  const written = to === 'josl' ? stringifyJosl(value)
+    : stringifyJsonx(value, { mode: to === 'jsonx' ? 'jsonx' : 'json', indent: 2 });
+  return { ...source, source: written };
+}
+
 /** The optional JSON bindings pane shared by every engine accepting externals. */
 function parseExternals(source) {
   return source.externals === undefined || String(source.externals).trim() === ''
@@ -331,6 +365,7 @@ export const ENGINE_LIST = [
         { value: 'merge', label: 'RFC 7396 merge' },
         { value: 'diff', label: 'diff (patch pane = the target)' },
       ],
+      convert: convertPatch,
     }],
     run(source, data, options) {
       const mode = options?.config?.mode ?? 'patch';
@@ -681,6 +716,8 @@ export const ENGINE_LIST = [
     optionPanes: [{
       key: 'kernel', label: 'Kernel', default: KERNELS[0].value,
       choices: KERNELS.map((k) => ({ value: k.value, label: `${k.family} · ${k.value}` })),
+      // each kernel takes its own arguments: a switch loads its example
+      follow: 'example',
     }],
     run(source, data, options) {
       // a value the choice list does not offer is the default kernel
@@ -900,6 +937,7 @@ export const ENGINE_LIST = [
     optionPanes: [{
       key: 'format', label: 'Format', default: 'json',
       choices: [{ value: 'json', label: 'JSON' }, { value: 'jsonx', label: 'JSONX' }, { value: 'josl', label: 'JOSL' }],
+      convert: convertDefinition,
     }],
   }),
 ];

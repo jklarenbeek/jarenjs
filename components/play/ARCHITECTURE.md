@@ -41,7 +41,8 @@ effects. Input bindings carry the native event's serialized `value`.
 | Actions | Payload and responsibility |
 |---|---|
 | `play/example`, `play/dataset` | Example id or dataset index; replace the corresponding source/data presets |
-| `play/source`, `play/data`, `play/option` | `{ key }` plus event value; update one pane or option |
+| `play/source`, `play/data` | `{ key }` plus event value; update one pane |
+| `play/option` | `{ key }` plus event value; apply the session `component.switchOption(engine, key, value, session)` answers — the config, and the source and data that fit it (another example's when it names one) |
 | `play/panel`, `play/deep-pick`, `play/deep` | Panel id or boolean; choose result screens without re-running |
 | `play/mobile-pane`, `play/data-view` | Pane name or `json`/`form`; switch the visible editor/result surface |
 | `play/name`, `play/open` | Event value; rename or open a saved session |

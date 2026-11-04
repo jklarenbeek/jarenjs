@@ -8,7 +8,7 @@
  * `play/*` actions and the debounced live-run are wired at the host.
  */
 
-import { ENGINES, EXAMPLES, engineIds, runExample } from '../index.js';
+import { ENGINES, EXAMPLES, engineIds, runExample, switchOption } from '../index.js';
 import { playViewModel } from './viewmodel.js';
 import { playRules, playModes, PLAY_MODE, PLAY_BASE } from './view.js';
 
@@ -43,11 +43,12 @@ export function createPlayComponent(options = {}) {
     engineIds,
     runExample: (engineId, source, data, perCall = {}) =>
       runExample(engineId, source, data, { ...seams, ...perCall }),
+    switchOption,
     operators: options.operators,
   };
 }
 
 export {
   playViewModel, playRules, playModes, PLAY_MODE, PLAY_BASE,
-  ENGINES, EXAMPLES, engineIds, runExample,
+  ENGINES, EXAMPLES, engineIds, runExample, switchOption,
 };

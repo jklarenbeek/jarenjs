@@ -27,11 +27,19 @@ import { EXAMPLE_LIST } from './examples.js';
 /**
  * @typedef {Object} OptionPane
  * A live select above the editors — a mode an engine runs in (JOSL vs TOML,
- * CSV strict vs repair). Its value lives in the host's `config` slice.
+ * CSV strict vs repair). Its value lives in the host's `config` slice; what
+ * a switch does to the source is {@link switchOption}'s.
  * @property {string} key
  * @property {string} label
  * @property {Array<{ value: string, label: string }>} choices
  * @property {string} default - the value used until the user picks another
+ * @property {(source: Record<string, string>, data: Record<string, string>, from: string, to: string) => Record<string, string> | null} [convert]
+ *   re-express the source for the new value (a chart definition in another
+ *   notation, a patch as the same change in another mode); `null`, or a
+ *   throw, keeps the source as it is
+ * @property {'example'} [follow] - a switch loads the engine's example that
+ *   presets the new value: the value names what the source must hold (a
+ *   kernel's arguments)
  */
 
 /**
@@ -153,6 +161,48 @@ export function engineIds() {
 /** The curated example library (the canonical home for the suite's engine
  * examples). */
 export const EXAMPLES = Object.freeze(/** @type {PlayExample[]} */ (EXAMPLE_LIST));
+
+/**
+ * The session a switch of one option pane leaves: the new `config`, and
+ * the source and data that fit it. A pane that declares `convert`
+ * re-expresses the current source for the new value; one that declares
+ * `follow: 'example'` loads the engine's first example presetting the
+ * value (`example` names it); any other keeps the source and data, so a
+ * stricter dialect shows what it refuses. A conversion that cannot read
+ * the current source keeps it too: the run then shows why.
+ * @param {string} engineId
+ * @param {string} key - the option pane's key
+ * @param {string} value - the newly chosen value
+ * @param {{ source: Record<string, string>, data: Record<string, string>, config?: Record<string, string> }} session
+ * @returns {{ config: Record<string, string>, source: Record<string, string>, data: Record<string, string>, example?: string }}
+ */
+export function switchOption(engineId, key, value, session) {
+  const engine = Object.hasOwn(ENGINES, engineId) ? ENGINES[engineId] : undefined;
+  const pane = engine?.optionPanes?.find((p) => p.key === key);
+  const config = { ...(session.config ?? {}), [key]: value };
+  const kept = { config, source: session.source, data: session.data };
+  if (pane === undefined) return kept;
+  const from = session.config?.[key] ?? pane.default;
+  if (from === value) return kept;
+  if (typeof pane.convert === 'function') {
+    let source = null;
+    try { source = pane.convert(session.source, session.data, from, value); }
+    catch { source = null; }
+    return source === null ? kept : { config, source, data: session.data };
+  }
+  if (pane.follow === 'example') {
+    const example = EXAMPLES.find((e) => e.engine === engineId && (e.config?.[key] ?? pane.default) === value);
+    if (example !== undefined) {
+      return {
+        config: { ...config, ...(example.config ?? {}) },
+        source: { ...example.source },
+        data: { ...(example.datasets[0]?.data ?? {}) },
+        example: example.id,
+      };
+    }
+  }
+  return kept;
+}
 
 /**
  * Fill an engine's option-pane defaults so its runner always sees a

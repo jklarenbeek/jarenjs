@@ -13,10 +13,27 @@ EngineDescriptor = {
   lead?:       string,        // one line describing the engine
   sourcePanes: EnginePane[],  // the engine INPUT (usually one)
   dataPanes:   EnginePane[],  // the JSON it runs against (may be empty)
+  optionPanes?: OptionPane[], // live selects: a mode the engine runs in
   run:         (source, data) => PlayResult | Promise<PlayResult>,
 }
 EnginePane = { key: string, label: string, control?: 'code' | 'text' }
+OptionPane = { key: string, label: string, default: string,
+               choices: { value: string, label: string }[],
+               convert?: (source, data, from, to) => source | null,
+               follow?: 'example' }
 ```
+
+- An option pane says what a switch does to the source, and
+  `switchOption(engineId, key, value, session)` answers the session it
+  leaves (`{ config, source, data, example? }`). `convert` re-expresses the
+  source for the new choice — the Charts engine writes the definition in the
+  chosen notation, the Patch engine writes the same change as an RFC 6902
+  patch, a merge patch or the document it makes — and keeps it when it
+  cannot read it (`null` or a throw), so the run says why. `follow:
+  'example'` loads the engine's example that presets the choice (the
+  kernels engine: each kernel takes its own arguments). A pane with neither
+  keeps the source, so a stricter dialect (TOML, JSON, strict CSV) shows
+  what it refuses in the text its looser one accepts.
 
 - `sourcePanes` are the engine's input(s): a JSONPath `selector`, a JSLT
   `stylesheet`, a JSON `patch`, a query + its `externals`, a markdown

@@ -282,9 +282,20 @@ export const ACTIONS = {
   'play/data': {
     patch: [{ op: 'add', path: { $concat: ['/play/data/', '$payload.key'] }, value: '$event.value' }],
   },
-  // a live mode select (josl dialect, csv strict/repair) → the run loop re-runs
-  'play/option': {
-    patch: [{ op: 'add', path: { $concat: ['/play/config/', '$payload.key'] }, value: '$event.value' }],
+  // a live mode select (josl dialect, csv strict/repair): the engine says
+  // what the switch does to the source (a chart definition converted, a
+  // kernel's own arguments loaded), then the run loop re-runs
+  'play/option': { effects: [{ run: 'play-option', with: { key: '$payload.key', value: '$event.value' } }] },
+  'play/option-set': {
+    patch: [
+      { op: 'replace', path: '/play/config', value: '$payload.config' },
+      { op: 'replace', path: '/play/source', value: '$payload.source' },
+      { op: 'replace', path: '/play/data', value: '$payload.data' },
+      { op: 'replace', path: '/play/exampleId', value: '$payload.exampleId' },
+      { op: 'replace', path: '/play/datasetIndex', value: '$payload.datasetIndex' },
+      { op: 'replace', path: '/play/dataView', value: '$payload.dataView' },
+      { op: 'replace', path: '/play/dataValue', value: '$payload.dataValue' },
+    ],
   },
   'play/dataset': { effects: [{ run: 'play-dataset', with: { index: '$payload' } }] },
   'play/dataset-set': {
