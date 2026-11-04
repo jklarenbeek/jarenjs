@@ -428,12 +428,6 @@ establish registry publication or downstream acceptance.
   of nested emphasis and strong. Wanted: those spellings derived, so that
   every tree the reader makes reads back and the search can go; such content
   costs the derivation and then the search.
-- [ ] **A `slugPrefix` of `''` mints footnote ids bare, so a heading can share
-  one.** The footnote prefix follows `slugPrefix` whenever one is given, so a
-  render with `slugPrefix: ''` (the site's policy for its own documents) gives
-  footnote 1 the ids `fn-1` / `fnref-1`, the id a heading `# fn 1` also mints:
-  two elements carry one id and an in-page link lands on the first. The
-  component layer's comment says footnote ids are unaffected by the policy.
 - [ ] **The locale packs carry no accessible names for md.** A
   `@jarenjs/locales` pack serves the validator's and the forms' messages,
   but md's `labels` (a page break, a heading permalink, a footnote

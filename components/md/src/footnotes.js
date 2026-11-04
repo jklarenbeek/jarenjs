@@ -168,6 +168,31 @@ export function footnoteRefId(prefix, number, occurrence) {
 }
 
 /**
+ * Reserve, in one emission's heading-slug counter, every id the
+ * footnotes will carry that a heading id could also spell — each
+ * footnote's own and each citation's — so a heading `# fn 1` numbers past
+ * footnote 1 (`fn-1-1`) instead of sharing its id, whatever the two
+ * prefixes. An id that does not start with the heading prefix cannot
+ * collide and is skipped.
+ * @param {Footnotes|null} notes
+ * @param {string} prefix the footnote id prefix
+ * @param {string} slugPrefix the heading id prefix
+ * @param {Map<string, number>} seen the emission's slug counter
+ */
+export function reserveFootnoteIds(notes, prefix, slugPrefix, seen) {
+  if (notes === null) return;
+  const reserve = (/** @type {string} */ id) => {
+    if (id.startsWith(slugPrefix)) seen.set(id.slice(slugPrefix.length), 1);
+  };
+  for (const def of notes.defs) {
+    const number = /** @type {number} */ (notes.numbers.get(def.identifier));
+    reserve(footnoteId(prefix, number));
+    const times = notes.counts.get(def.identifier) ?? 1;
+    for (let k = 1; k <= times; k++) reserve(footnoteRefId(prefix, number, k));
+  }
+}
+
+/**
  * The accessible name of a back-reference: `↩` alone names nothing, and
  * a footnote with several of them needs them told apart.
  * @param {import('./utils.js').RenderLabels} labels

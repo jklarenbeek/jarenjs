@@ -31,7 +31,7 @@ import {
 import { textOf } from './ast.js';
 import { buildPluginTables } from './parser.js';
 import {
-  collectFootnotes, footnoteId, footnoteRefId, backrefLabel,
+  collectFootnotes, footnoteId, footnoteRefId, backrefLabel, reserveFootnoteIds,
   FOOTNOTE_PREFIX, BACKREF_MARK,
 } from './footnotes.js';
 
@@ -443,6 +443,7 @@ export function toHtml(docOrAst, options = {}) {
     footnotesLabel: typeof options.footnotesLabel === 'string' ? options.footnotesLabel : 'Footnotes',
     labels: renderLabels(options.labels),
   };
+  if (ctx.headingIds) reserveFootnoteIds(ctx.footnotes, ctx.footnotePrefix, ctx.slugPrefix, ctx.slugs);
   const body = blockChildren(ast, ctx) + footnotesHtml(ctx);
   const wrap = options.wrap;
   if (typeof wrap !== 'string' || wrap === '') return body;

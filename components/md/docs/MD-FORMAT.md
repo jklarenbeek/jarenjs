@@ -374,7 +374,10 @@ MUST get `-1` appended, the third `-2`, and so on, skipping any identifier
 already emitted (including numbered identifiers from another heading).
 Count over the substituted value so `***` twice yields `section` and `section-1`. The
 counter is per emission and MUST NOT be shared with any other numbering
-in the emitter.
+in the emitter. The identifiers the same emission gives its footnotes
+(§4.6) count as already emitted: under an empty prefix a heading `fn 1`
+above footnote 1 receives `fn-1-1`, so no two elements share an
+identifier whatever the two prefixes are.
 
 An emitter MUST offer a prefix (`slugPrefix`) prepended to every emitted
 identifier and to every anchor href it writes, and its default MUST be

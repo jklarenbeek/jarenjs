@@ -36,7 +36,7 @@ import { textOf } from './ast.js';
 import { createHydrator, indexHydratable } from './hydration.js';
 import { buildPluginTables } from './parser.js';
 import {
-  collectFootnotes, footnoteId, footnoteRefId, backrefLabel,
+  collectFootnotes, footnoteId, footnoteRefId, backrefLabel, reserveFootnoteIds,
   FOOTNOTE_PREFIX, BACKREF_MARK,
 } from './footnotes.js';
 
@@ -596,6 +596,9 @@ function blockVnode(node, rctx, keyed) {
     && cached.sanitizeUrl === rctx.sanitizeUrl && cached.headingIds === rctx.headingIds
     && cached.slugPrefix === rctx.slugPrefix && cached.headingAnchors === rctx.headingAnchors
     && cached.labelsKey === rctx.labelsKey
+    // An absent `slugPrefix` and an empty one key headings alike but
+    // footnotes apart (`user-content-fn-1` against `fn-1`).
+    && cached.footnotePrefix === rctx.footnotePrefix
     // Footnote numbering is a property of the WHOLE document, so a block
     // carrying a citation cannot be reused across two documents that
     // number it differently. The collection is memoized per AST array,
@@ -615,7 +618,8 @@ function blockVnode(node, rctx, keyed) {
   memo.set(node, {
     vnode, keyed, html: rctx.html, sanitizeUrl: rctx.sanitizeUrl,
     headingIds: rctx.headingIds, slugPrefix: rctx.slugPrefix,
-    headingAnchors: rctx.headingAnchors, labelsKey: rctx.labelsKey, footnotes: rctx.footnotes,
+    headingAnchors: rctx.headingAnchors, labelsKey: rctx.labelsKey,
+    footnotePrefix: rctx.footnotePrefix, footnotes: rctx.footnotes,
   });
   return vnode;
 }
@@ -742,6 +746,7 @@ export function mdToVnode(docOrCompiled, options = {}) {
     hash: hashContent,
     counts: new Map(),
   };
+  if (rctx.headingIds) reserveFootnoteIds(rctx.footnotes, rctx.footnotePrefix, rctx.slugPrefix, rctx.slugs);
   const children = blockChildren(ast, rctx, options.keyed !== false);
   const notes = footnotesVnode(rctx);
   if (notes !== null) children.push(notes);

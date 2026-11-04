@@ -55,8 +55,9 @@ import { labelsKey } from '../utils.js';
  * The live case is heading ids: repo-authored Markdown is trusted with
  * the ids it mints, and text from anywhere else must not mint bare ids
  * into a page that owns ids of its own — so it renders with a
- * `slugPrefix`. Footnote ids already default to `user-content-`
- * (MD-FORMAT §4.6) and are unaffected.
+ * `slugPrefix`. Footnote ids default to `user-content-` (MD-FORMAT
+ * §4.6) and follow a `slugPrefix` that is given; heading ids number past
+ * them, so the two never share an id.
  *
  * @typedef {object} MdRenderPolicy
  * @property {boolean} [headingIds] mint an `id` on every heading
