@@ -506,4 +506,13 @@ export const tr = {
   'number/nan': 'NaN',
   'number/minimum-grouping-digits': '1',
   //#endregion
+
+  //#region @jarenjs/md (the accessible names its emitters write)
+  'md/footnotes': 'Dipnotlar',
+  'md/page-break': 'Sayfa sonu',
+  'md/permalink': '"{text}" bölümüne kalıcı bağlantı',
+  'md/permalink-section': 'Bu bölüme kalıcı bağlantı',
+  'md/backref': '{number} numaralı atfa geri dön',
+  'md/backref-occurrence': '{number} numaralı atfa geri dön, {occurrence}. kullanım',
+  //#endregion
 };

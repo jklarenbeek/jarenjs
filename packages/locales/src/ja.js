@@ -504,4 +504,13 @@ export const ja = {
   'number/nan': 'NaN',
   'number/minimum-grouping-digits': '1',
   //#endregion
+
+  //#region @jarenjs/md (the accessible names its emitters write)
+  'md/footnotes': '脚注',
+  'md/page-break': '改ページ',
+  'md/permalink': '"{text}" へのパーマリンク',
+  'md/permalink-section': 'このセクションへのパーマリンク',
+  'md/backref': '参照 {number} に戻る',
+  'md/backref-occurrence': '参照 {number} に戻る（{occurrence} 回目）',
+  //#endregion
 };

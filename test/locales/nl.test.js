@@ -24,6 +24,7 @@ import { contractMessagesEn } from '@jarenjs/contract';
 import { compileJsonQuery, queryMessagesEn, renderQueryMessage } from '@jarenjs/json';
 import { compileFormula, formulaMessagesEn } from '@jarenjs/json/formula';
 import { compileMessageTemplate } from '@jarenjs/core/message';
+import { compileMarkdown, toHtml, mdMessagesEn, labelsFromCatalog } from '@jarenjs/md';
 
 const compiled = compileMessageCatalog(nl);
 
@@ -69,6 +70,8 @@ const SAMPLE_PARAMS = {
   ...NUMBER_SAMPLE_PARAMS,
   ...QUERY_SAMPLE_PARAMS,
   ...FORMULA_SAMPLE_PARAMS,
+  ...Object.fromEntries(Object.entries(mdMessagesEn).map(([key, template]) =>
+    [key, Object.fromEntries(compileMessageTemplate(template).parameters.map((name) => [name, `<${name}>`]))])),
   type: { type: 'string' },
   required: { missingProperty: 'name' },
   minimum: { limit: 10, comparison: '>=' },
@@ -202,7 +205,20 @@ describe('@jarenjs/locales nl', () => {
       assert.ok(nlKeys.has(key), `nl is missing formula key '${key}'`);
       assert.deepStrictEqual(placeholders(nl[key]), placeholders(formulaMessagesEn[key]), `nl ${key} placeholders`);
     }
+    for (const key of Object.keys(mdMessagesEn)) {
+      assert.ok(nlKeys.has(key), `nl is missing md key '${key}'`);
+      assert.deepStrictEqual(placeholders(nl[key]), placeholders(mdMessagesEn[key]), `nl ${key} placeholders`);
+    }
     assert.ok(nlKeys.has('x-form/assert'));
+  });
+
+  it('names what md writes in Dutch', () => {
+    const { doc } = compileMarkdown('# Inleiding\n\n## \n\nEen bewering[^1] en nog eens[^1].\n\n<!-- pagebreak -->\n\n[^1]: De bron.\n');
+    const html = toHtml(doc, { headingIds: true, headingAnchors: true, ...labelsFromCatalog(nl) });
+    assert.deepStrictEqual([...html.matchAll(/aria-label="([^"]*)"/g)].map((match) => match[1]), [
+      'Permalink naar &quot;Inleiding&quot;', 'Permalink naar deze sectie', 'Paginascheiding', 'Voetnoten',
+      'Terug naar verwijzing 1', 'Terug naar verwijzing 1, vermelding 2',
+    ]);
   });
 
   it('renders a query error in Dutch, the item it met included', () => {

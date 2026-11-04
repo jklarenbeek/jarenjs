@@ -12,7 +12,9 @@
  * rendering helpers of `./helpers.js` - never a consumer package, so
  * either consumer can serve any pack.
  *
- * Beside the error messages, every pack carries the calendar language
+ * Beside the error messages, every pack carries the accessible names
+ * `@jarenjs/md` writes (`md/*`, turned into md's options by its
+ * `labelsFromCatalog`) and the calendar language
  * `@jarenjs/core/dates` refuses to invent: month, weekday and meridiem
  * names, relative-time phrases and date-format display names.
  * `compileDateLocale` (`./dates`) turns a pack into the frozen record a

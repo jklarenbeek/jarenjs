@@ -4,8 +4,9 @@ Locale packs (message catalogs) for the error messages of
 [`@jarenjs/validate`](../validate/README.md),
 [`@jarenjs/forms`](../forms/README.md),
 [`@jarenjs/contract`](../contract/README.md) and the query engine of
-[`@jarenjs/json`](../json/README.md), and the calendar language
-`@jarenjs/core/dates` refuses to invent.
+[`@jarenjs/json`](../json/README.md), the accessible names
+[`@jarenjs/md`](../../components/md/README.md) writes, and the calendar
+language `@jarenjs/core/dates` refuses to invent.
 
 Jaren validators and form checks never bake prose into the hot path: every
 failure carries a stable message key (`msgid`) plus raw structured
@@ -315,7 +316,8 @@ Rules of the road:
    json's `queryMessagesEn` and every message of its `formulaMessagesEn`
    (`@jarenjs/json/formula`), every `date/*` and `format/name/*` key of
    this package's own `dateMessagesEn`, every `number/*` key of its
-   `numberMessagesEn`, plus `x-form/assert` and the
+   `numberMessagesEn`, every `md/*` name of md's `mdMessagesEn`, plus
+   `x-form/assert` and the
    `JQ2xxx` codes a `$query` assertion reports. The repo enforces
    this with tests (`test/locales/`); missing keys silently fall back to
    English.

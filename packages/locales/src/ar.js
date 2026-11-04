@@ -567,4 +567,13 @@ export const ar = {
   'number/nan': 'ليس\u00a0رقمًا',
   'number/minimum-grouping-digits': '1',
   //#endregion
+
+  //#region @jarenjs/md (the accessible names its emitters write)
+  'md/footnotes': 'الحواشي',
+  'md/page-break': 'فاصل صفحة',
+  'md/permalink': 'رابط دائم إلى القسم "{text}"',
+  'md/permalink-section': 'رابط دائم إلى هذا القسم',
+  'md/backref': 'العودة إلى المرجع {number}',
+  'md/backref-occurrence': 'العودة إلى المرجع {number}، الموضع {occurrence}',
+  //#endregion
 };

@@ -507,4 +507,13 @@ export const ko = {
   'number/nan': 'NaN',
   'number/minimum-grouping-digits': '1',
   //#endregion
+
+  //#region @jarenjs/md (the accessible names its emitters write)
+  'md/footnotes': '각주',
+  'md/page-break': '페이지 나누기',
+  'md/permalink': '"{text}" 섹션의 고유 링크',
+  'md/permalink-section': '이 섹션의 고유 링크',
+  'md/backref': '참조 {number}번으로 돌아가기',
+  'md/backref-occurrence': '참조 {number}번으로 돌아가기 ({occurrence}번째)',
+  //#endregion
 };

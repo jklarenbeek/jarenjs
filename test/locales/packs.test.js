@@ -32,6 +32,7 @@ import { contractMessagesEn } from '@jarenjs/contract';
 import { compileJsonQuery, queryMessagesEn, renderQueryMessage } from '@jarenjs/json';
 import { compileFormula, formulaMessagesEn } from '@jarenjs/json/formula';
 import { compileMessageTemplate } from '@jarenjs/core/message';
+import { compileMarkdown, toHtml, mdMessagesEn, labelsFromCatalog } from '@jarenjs/md';
 
 
 /**
@@ -58,6 +59,16 @@ const QUERY_SAMPLE_PARAMS = Object.fromEntries(Object.entries(queryMessagesEn).m
 const FORMULA_SAMPLE_PARAMS = Object.fromEntries(Object.entries(formulaMessagesEn).map(([key, template]) =>
   [key, Object.fromEntries(compileMessageTemplate(template).parameters.map((name) => [name, `<${name}>`]))]));
 
+/** So are md's accessible names. */
+const MD_SAMPLE_PARAMS = Object.fromEntries(Object.entries(mdMessagesEn).map(([key, template]) =>
+  [key, Object.fromEntries(compileMessageTemplate(template).parameters.map((name) => [name, `<${name}>`]))]));
+
+/** A document that carries every accessible name md writes. */
+const MD_DOCUMENT = compileMarkdown('# Intro\n\n## \n\nA claim[^1] and again[^1].\n\n<!-- pagebreak -->\n\n[^1]: The source.\n').doc;
+
+/** @param {string} html */
+const ariaLabels = (html) => [...html.matchAll(/aria-label="([^"]*)"/g)].map((match) => match[1]);
+
 /**
  * A template that carries no words of its own (only placeholders, operator
  * names and punctuation, or the literal null) is the same in every language.
@@ -73,6 +84,7 @@ const placeholders = (template) => [...compileMessageTemplate(String(template)).
 const SAMPLE_PARAMS = {
   ...DATE_SAMPLE_PARAMS,
   ...NUMBER_SAMPLE_PARAMS,
+  ...MD_SAMPLE_PARAMS,
   ...QUERY_SAMPLE_PARAMS,
   ...FORMULA_SAMPLE_PARAMS,
   type: { type: 'string' },
@@ -469,6 +481,10 @@ describe('@jarenjs/locales fr/es/pt/de/ja', () => {
           assert.ok(keys.has(key), `${code} is missing formula key '${key}'`);
           assert.deepStrictEqual(placeholders(pack[key]), placeholders(formulaMessagesEn[key]), `${code} ${key} placeholders`);
         }
+        for (const key of Object.keys(mdMessagesEn)) {
+          assert.ok(keys.has(key), `${code} is missing md key '${key}'`);
+          assert.deepStrictEqual(placeholders(pack[key]), placeholders(mdMessagesEn[key]), `${code} ${key} placeholders`);
+        }
         assert.ok(keys.has('x-form/assert'));
       });
 
@@ -540,6 +556,19 @@ describe('@jarenjs/locales fr/es/pt/de/ja', () => {
         assert.strictEqual(dates.relative(21, 'month'), expected.dates.future21months);
         assert.strictEqual(dates.relative(-1, 'day', { numeric: 'auto' }), expected.dates.yesterday);
         assert.strictEqual(dates.formatName('date-time'), expected.dates.dateTime);
+      });
+
+      it('names what md writes in its language, every name its own', () => {
+        const options = { headingIds: true, headingAnchors: true };
+        const english = ariaLabels(toHtml(MD_DOCUMENT, options));
+        const names = ariaLabels(toHtml(MD_DOCUMENT, { ...options, ...labelsFromCatalog(pack) }));
+        assert.strictEqual(names.length, english.length);
+        for (let i = 0; i < names.length; i++) {
+          assert.notStrictEqual(names[i], english[i], `${code} copies '${english[i]}' from English`);
+          assert.doesNotMatch(names[i], /\{[a-z]+\}/, `${code} left a placeholder in '${names[i]}'`);
+        }
+        assert.ok(names[0].includes('Intro'), `${code} drops the heading's text: '${names[0]}'`);
+        assert.ok(names.at(-1).includes('2'), `${code} drops the occurrence: '${names.at(-1)}'`);
       });
 
       it('every entry renders without throwing (no-throw sweep)', () => {

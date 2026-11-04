@@ -529,4 +529,13 @@ export const ru = {
   'number/nan': 'не\u00a0число',
   'number/minimum-grouping-digits': '1',
   //#endregion
+
+  //#region @jarenjs/md (the accessible names its emitters write)
+  'md/footnotes': 'Сноски',
+  'md/page-break': 'Разрыв страницы',
+  'md/permalink': 'Постоянная ссылка на раздел "{text}"',
+  'md/permalink-section': 'Постоянная ссылка на этот раздел',
+  'md/backref': 'Вернуться к месту ссылки {number}',
+  'md/backref-occurrence': 'Вернуться к месту ссылки {number}, вхождение {occurrence}',
+  //#endregion
 };

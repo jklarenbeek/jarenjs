@@ -74,3 +74,4 @@ export {
 } from './frontmatter.js';
 
 export { hashContent, DEFAULT_LABELS } from './utils.js';
+export { mdMessagesEn, labelsFromCatalog } from './messages.js';

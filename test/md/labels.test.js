@@ -10,6 +10,7 @@ import * as assert from 'node:assert/strict';
 
 import {
   compileMarkdown, mdToVnode, toHtml, createMdRenderer, loadMarkdown, createMdCache, DEFAULT_LABELS,
+  mdMessagesEn, labelsFromCatalog,
 } from '@jarenjs/md';
 import { createMdComponent } from '@jarenjs/md/component';
 
@@ -150,6 +151,55 @@ describe('md accessible names', () => {
   it('are not forwarded by createMdRenderer, which refuses the option like footnotesLabel', () => {
     assert.throws(() => createMdRenderer(/** @type {any} */ ({ container: {}, labels: DUTCH })),
       /unknown option 'labels'/);
+  });
+});
+
+describe('md message catalog', () => {
+  const doc = compileMarkdown(SOURCE).doc;
+
+  it('spells the English names under the ids a locale pack translates', () => {
+    assert.deepEqual(mdMessagesEn, {
+      'md/footnotes': 'Footnotes',
+      'md/page-break': DEFAULT_LABELS.pageBreak,
+      'md/permalink': DEFAULT_LABELS.permalink,
+      'md/permalink-section': DEFAULT_LABELS.permalinkSection,
+      'md/backref': DEFAULT_LABELS.backref,
+      'md/backref-occurrence': DEFAULT_LABELS.backrefOccurrence,
+    });
+    assert.ok(Object.isFrozen(mdMessagesEn));
+    assert.deepEqual(vnodeLabels(mdToVnode(doc, { ...ANCHORS, ...labelsFromCatalog(mdMessagesEn) })), ENGLISH_NAMES);
+  });
+
+  it('turns a catalog into the options every surface takes, keeping English for an id it lacks', () => {
+    const catalog = {
+      'md/footnotes': 'Voetnoten',
+      'md/page-break': DUTCH.pageBreak,
+      'md/permalink': DUTCH.permalink,
+      'md/permalink-section': DUTCH.permalinkSection,
+      'md/backref': DUTCH.backref,
+      'md/backref-occurrence': DUTCH.backrefOccurrence,
+      'type': 'unrelated',
+    };
+    const dutch = DUTCH_NAMES.map((name) => (name === 'Footnotes' ? 'Voetnoten' : name));
+    assert.deepEqual(vnodeLabels(mdToVnode(doc, { ...ANCHORS, ...labelsFromCatalog(catalog) })), dutch);
+    assert.deepEqual(htmlLabels(toHtml(doc, { ...ANCHORS, ...labelsFromCatalog(catalog) })), dutch);
+    assert.deepEqual(labelsFromCatalog({}), { footnotesLabel: undefined, labels: {} });
+    assert.deepEqual(vnodeLabels(mdToVnode(doc, { ...ANCHORS, ...labelsFromCatalog({ 'md/page-break': 'Pagina' }) })),
+      ENGLISH_NAMES.map((name) => (name === 'Page break' ? 'Pagina' : name)));
+  });
+
+  it('renders a footnotes entry once, as a template or a closure', () => {
+    assert.equal(labelsFromCatalog({ 'md/footnotes': '{{Notes}' }).footnotesLabel, '{Notes}');
+    assert.equal(labelsFromCatalog({ 'md/footnotes': () => 'Noten' }).footnotesLabel, 'Noten');
+    const md = createMdComponent({ ...ANCHORS, plugins: [], ...labelsFromCatalog({ 'md/permalink': (/** @type {any} */ p) => `§ ${p.text}` }) });
+    assert.equal(vnodeLabels(md.view(SOURCE))[0], '§ Title');
+  });
+
+  it('passes an entry of another kind on for the surface to refuse', () => {
+    assert.throws(() => toHtml(doc, { ...labelsFromCatalog({ 'md/page-break': 5 }) }),
+      /labels member 'pageBreak' must be a string or a function, got 5/);
+    assert.throws(() => toHtml(doc, { ...labelsFromCatalog({ 'md/footnotes': 5 }) }),
+      /option 'footnotesLabel' must be a string, got 5/);
   });
 });
 

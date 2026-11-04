@@ -218,6 +218,24 @@ English default; `DEFAULT_LABELS` holds them. `mdToVnode`, `toHtml`,
 construction, or per `view` policy) take the option, and an unknown
 member is refused naming the one it most likely meant.
 
+Every [`@jarenjs/locales`](../../packages/locales/README.md) pack carries
+all of them, so a page in one of its languages need not write its own:
+`labelsFromCatalog` turns a catalog into both options.
+
+```js
+import { compileMarkdown, toHtml, labelsFromCatalog } from '@jarenjs/md';
+import { de } from '@jarenjs/locales';
+
+const { doc } = compileMarkdown('# Einleitung\n\nEine Behauptung.[^1]\n\n[^1]: Die Quelle.\n');
+toHtml(doc, { headingIds: true, headingAnchors: true, ...labelsFromCatalog(de) });
+// … aria-label="Permalink zum Abschnitt &quot;Einleitung&quot;" …
+// … <section class="footnotes" aria-label="Fußnoten"> … aria-label="Zurück zu Verweis 1" …
+```
+
+The ids are md's `mdMessagesEn` (`md/footnotes`, `md/page-break`,
+`md/permalink`, `md/permalink-section`, `md/backref`,
+`md/backref-occurrence`), so a host's own catalog can carry them too.
+
 ### Footnotes and bare links (GFM)
 
 Both extensions are enabled with `gfm` (the default) and disabled with

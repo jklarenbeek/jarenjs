@@ -507,4 +507,13 @@ export const zhTW = {
   'number/nan': '非數值',
   'number/minimum-grouping-digits': '1',
   //#endregion
+
+  //#region @jarenjs/md (the accessible names its emitters write)
+  'md/footnotes': '註腳',
+  'md/page-break': '分頁符號',
+  'md/permalink': '"{text}" 的永久連結',
+  'md/permalink-section': '此章節的永久連結',
+  'md/backref': '返回參照 {number}',
+  'md/backref-occurrence': '返回參照 {number}（第 {occurrence} 次）',
+  //#endregion
 };

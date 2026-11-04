@@ -509,4 +509,13 @@ export const fr = {
   'number/nan': 'NaN',
   'number/minimum-grouping-digits': '1',
   //#endregion
+
+  //#region @jarenjs/md (the accessible names its emitters write)
+  'md/footnotes': 'Notes de bas de page',
+  'md/page-break': 'Saut de page',
+  'md/permalink': 'Lien permanent vers la section "{text}"',
+  'md/permalink-section': 'Lien permanent vers cette section',
+  'md/backref': 'Retour à la référence {number}',
+  'md/backref-occurrence': 'Retour à la référence {number}, occurrence {occurrence}',
+  //#endregion
 };

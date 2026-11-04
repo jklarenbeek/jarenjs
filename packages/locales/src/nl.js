@@ -508,4 +508,13 @@ export const nl = {
   'number/nan': 'NaN',
   'number/minimum-grouping-digits': '1',
   //#endregion
+
+  //#region @jarenjs/md (the accessible names its emitters write)
+  'md/footnotes': 'Voetnoten',
+  'md/page-break': 'Paginascheiding',
+  'md/permalink': 'Permalink naar "{text}"',
+  'md/permalink-section': 'Permalink naar deze sectie',
+  'md/backref': 'Terug naar verwijzing {number}',
+  'md/backref-occurrence': 'Terug naar verwijzing {number}, vermelding {occurrence}',
+  //#endregion
 };
