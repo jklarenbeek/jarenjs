@@ -1033,6 +1033,13 @@ export function createJobEngine(options) {
      * never be revived.
      */
     let session = { cancelled: false };
+    /**
+     * Set while a `stop()` runs, and `start()` refused until it resolves:
+     * the stopping loops test `running`, so a new session started under
+     * them would revive them beside its own loops, and the stop would then
+     * cancel the new session and unregister the worker.
+     */
+    let stopping = false;
     /** In-flight handler count, so `stop()` can report what it left. */
     let inFlight = 0;
 
@@ -1370,6 +1377,7 @@ export function createJobEngine(options) {
        * is keyed by token rather than by owner. */
       leases: () => [...attempts.values()].map((attempt) => attempt.lease),
       start() {
+        if (stopping) throw new TypeError('the worker is stopping: await stop() before starting it again');
         if (running) throw new TypeError('the worker is already started');
         running = true;
         shutdown = new AbortController();
@@ -1408,46 +1416,58 @@ export function createJobEngine(options) {
        */
       async stop(stopOptions) {
         checkStopOptions(stopOptions);
-        running = false;
-        shutdown.abort();
-        onWake();
-        const graceMs = stopOptions?.graceMs
-          ?? workerOptions.stopGraceMs ?? defaults.stopGraceMs;
-        /** @type {any} */
-        let timer;
-        const drained = await Promise.race([
-          Promise.all(loops).then(() => true),
-          new Promise((resolve) => { timer = setTimeout(() => resolve(false), graceMs); }),
-        ]);
-        clearTimeout(timer);
-        if (drained) loops = [];
-        else {
-          session.cancelled = true; // cancel what could not be drained
-          // …and bar it from settling. §6.1's whole point is that a
-          // cancelled loop touches the store the caller is about to
-          // close no further. The abandoned lease then expires and the
-          // job recovers by re-claim (a final attempt dead-letters, §5),
-          // which is exactly what the cancellation means.
-          for (const abandoned of attempts.values()) abandoned.settled = true;
+        stopping = true;
+        try {
+          return await stopSession(stopOptions);
         }
-        // quiescence, on BOTH paths: no renewal timer stays armed (and
-        // none re-arms — armRenewal refuses once `running` is false)…
-        for (const attempt of attempts.values()) {
-          clearTimeout(attempt.timer);
-          attempt.timer = null;
+        finally {
+          stopping = false;
         }
-        // …and whatever control I/O is still in flight — a cancelled
-        // queued claim, a renewal a timer fired before the stop, a
-        // settlement the grace deadline raced — settles before stop()
-        // does. Each is signal-cancelled or bounded by the connection's
-        // own timeouts, so this wait is bounded too; the loop re-checks
-        // because a settling failure may record itself with one more
-        // write.
-        while (controlIo.size > 0) await Promise.allSettled([...controlIo]);
-        wakers.delete(onWake);
-        workers.delete(worker);
-        return { drained: drained === true, inFlight };
       },
+    };
+
+    /** {@link worker}'s `stop()`, held while `stopping` is set.
+     * @param {{ graceMs?: number } | undefined} stopOptions */
+    const stopSession = async (stopOptions) => {
+      running = false;
+      shutdown.abort();
+      onWake();
+      const graceMs = stopOptions?.graceMs
+        ?? workerOptions.stopGraceMs ?? defaults.stopGraceMs;
+      /** @type {any} */
+      let timer;
+      const drained = await Promise.race([
+        Promise.all(loops).then(() => true),
+        new Promise((resolve) => { timer = setTimeout(() => resolve(false), graceMs); }),
+      ]);
+      clearTimeout(timer);
+      if (drained) loops = [];
+      else {
+        session.cancelled = true; // cancel what could not be drained
+        // …and bar it from settling. §6.1's whole point is that a
+        // cancelled loop touches the store the caller is about to
+        // close no further. The abandoned lease then expires and the
+        // job recovers by re-claim (a final attempt dead-letters, §5),
+        // which is exactly what the cancellation means.
+        for (const abandoned of attempts.values()) abandoned.settled = true;
+      }
+      // quiescence, on BOTH paths: no renewal timer stays armed (and
+      // none re-arms — armRenewal refuses once `running` is false)…
+      for (const attempt of attempts.values()) {
+        clearTimeout(attempt.timer);
+        attempt.timer = null;
+      }
+      // …and whatever control I/O is still in flight — a cancelled
+      // queued claim, a renewal a timer fired before the stop, a
+      // settlement the grace deadline raced — settles before stop()
+      // does. Each is signal-cancelled or bounded by the connection's
+      // own timeouts, so this wait is bounded too; the loop re-checks
+      // because a settling failure may record itself with one more
+      // write.
+      while (controlIo.size > 0) await Promise.allSettled([...controlIo]);
+      wakers.delete(onWake);
+      workers.delete(worker);
+      return { drained: drained === true, inFlight };
     };
     wakers.add(onWake);
     workers.add(worker);

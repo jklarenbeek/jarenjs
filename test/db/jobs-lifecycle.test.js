@@ -302,3 +302,34 @@ describe('stop quiesces store I/O before close', () => {
     await store.close();
   });
 });
+
+describe('a restart waits for the stop', () => {
+  it('refuses start() until stop() has resolved, so the stopping loops cannot run beside new ones', async () => {
+    const store = await open();
+    let running = 0;
+    let most = 0;
+    const worker = store.jobs.createWorker({
+      handlers: {
+        tick: async () => {
+          running += 1;
+          most = Math.max(most, running);
+          await new Promise((resolve) => setTimeout(resolve, 2));
+          running -= 1;
+        },
+      },
+      concurrency: 1,
+      pollInterval: 1,
+    });
+    worker.start();
+    for (let i = 0; i < 20; i++) await store.jobs.enqueue('tick', null, { id: `t${i}` });
+    const stopping = worker.stop();
+    assert.throws(() => worker.start(), { name: 'TypeError', message: /stopping/ });
+    assert.deepStrictEqual(await stopping, { drained: true, inFlight: 0 });
+    // once stop() has resolved the worker starts again, and stops again
+    worker.start();
+    await until(() => store.jobs.counts(), (counts) => counts.pending === 0 && counts.leased === 0);
+    assert.deepStrictEqual(await worker.stop(), { drained: true, inFlight: 0 });
+    assert.strictEqual(most, 1, 'concurrency 1 never ran two handlers at once');
+    await store.close();
+  });
+});

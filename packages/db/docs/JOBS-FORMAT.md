@@ -410,7 +410,10 @@ one the caller is closing, and the job it abandons recovers by lease
 expiry (§5). A later `start()` builds fresh loops in a new session (and
 re-registers the worker's wake-on-enqueue hook and its place in
 `stopAll`), so a cancelled loop can never be revived as an extra
-claimer.
+claimer. That `start()` must wait for the `stop()`: one made before it
+resolves throws a `TypeError` (`the worker is stopping`), since the
+stopping loops would otherwise run on beside the new ones and the stop
+would end the new session.
 
 `stop()` carries a second, UNCONDITIONAL obligation beside the
 grace-bounded handler drain, and the two never share one unresolved

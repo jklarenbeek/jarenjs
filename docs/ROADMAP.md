@@ -997,13 +997,6 @@ what each does is its own documentation's job
   `cancel(id, { lease })` over its `done` row answers `false` ("it already
   was" cancelled). Wanted: same-generation idempotence only for the state the
   call writes.
-- [ ] **A worker started again before its `stop()` resolved keeps the old
-  loops running.** The loops test the worker-wide flag, not their session, so
-  `start()` before `stop()` resolves revives them; `stop()` then cancels the
-  new session and unregisters the worker. With `concurrency: 1`, two handlers
-  ran at once, claims continued after `stop()` resolved, and a loop polled the
-  store after `store.close()`. Wanted: `start()` refused until `stop()` has
-  resolved, or loops bound to their own session.
 - [ ] **A run store's `page` reads an open option bag.** `page(id, { afer: 2
   })` answers every revision where `{ after: 2 }` answers those after the
   second, and `page(id, null)` throws an uncoded `TypeError`, where the run
