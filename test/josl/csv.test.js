@@ -349,16 +349,18 @@ describe('csv: header naming', () => {
     // relative, not absolute: eight times the columns cost about eight times
     // as much when linear and about sixty-four times as much for the
     // rescanning namer, on distinct names and on repeated ones; the limit
-    // sits near the geometric mean of the two
+    // sits near the geometric mean of the two. Extending a one-name header
+    // to a wide record grows faster when linear — 12 to 15 times, measured,
+    // as its name map grows — so its limit sits at the mean of 15 and 64
     const distinct = (n) => Array.from({ length: n }, (_, i) => 'c' + i).join(',') + '\n';
     const repeated = (n) => Array(n).fill('a').join(',') + '\n';
-    for (const [make, n, options] of [
-      [distinct, 2500, { headers: true }],
-      [repeated, 190, { headers: true, repair: true }],
-      [(m) => 'a\n' + Array(m).fill('x').join(',') + '\n', 750, { headers: true, repair: true }],
+    for (const [make, n, options, limit] of [
+      [distinct, 2500, { headers: true }, 24],
+      [repeated, 190, { headers: true, repair: true }, 24],
+      [(m) => 'a\n' + Array(m).fill('x').join(',') + '\n', 750, { headers: true, repair: true }, 31],
     ]) {
-      const ratio = growthRatio((text) => parseCsv(text, options), make(n), make(8 * n), { limit: 24 });
-      ok(ratio < 24, `${8 * n} columns cost ${ratio.toFixed(1)} times what ${n} did`);
+      const ratio = growthRatio((text) => parseCsv(text, options), make(n), make(8 * n), { limit });
+      ok(ratio < limit, `${8 * n} columns cost ${ratio.toFixed(1)} times what ${n} did`);
     }
   });
 });
