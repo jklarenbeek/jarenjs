@@ -8,6 +8,8 @@ const zero = Object.freeze({ changes: 0, writes: 0, revisions: 0 });
 const OPTIONS = Object.freeze(['runs', 'events', 'statuses', 'summary', 'canReset', 'maxPage', 'maxBytes']);
 /** What `finish` reads from its options: the final observation's record fields. */
 const FINISH_OPTIONS = Object.freeze(['summary', 'checkpoint']);
+/** What `page` reads from its options: the cursor and the page size. */
+const PAGE_OPTIONS = Object.freeze(['after', 'limit']);
 /**
  * Checkpoints remain the existing workflow's format. Status mapping and public
  * summaries are application policy; events never contain the checkpoint input,
@@ -109,8 +111,11 @@ export function createDbRunStore(client, options) {
      * @param {string} id */
     get: (id) => inside((tx) => requireRun(tx, id)),
     /** Bounded revision cursor. Missing history explicitly requires a fresh summary.
-     * @param {string} id @param {{ after?: number, limit?: number }} [options] */
-    page(id, { after = 0, limit = maxPage } = {}) {
+     * @param {string} id @param {{ after?: number, limit?: number }} [pageOptions] */
+    page(id, pageOptions) {
+      // `null` is no options, as `finish` reads it
+      closedOptions(pageOptions ?? undefined, PAGE_OPTIONS, 'page()');
+      const { after = 0, limit = maxPage } = pageOptions ?? {};
       if (!Number.isSafeInteger(after) || after < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > maxPage) throw new TypeError('run page needs a revision cursor and bounded limit');
       return inside(async (tx) => {
         const record = await requireRun(tx, id);

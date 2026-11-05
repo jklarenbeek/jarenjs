@@ -175,3 +175,22 @@ describe('save takes the checkpoint check finish takes', () => {
     finally { await f.client.close(); }
   });
 });
+
+describe('page reads only the options it takes', () => {
+  it('refuses an unknown option by name, and reads null as no options', async () => {
+    const f = await fixture();
+    try {
+      const { store } = await requested(f);
+      const all = await store.page('run-1');
+      assert.ok(all.events.length >= 2);
+      // a misspelt cursor no longer answers every revision as if it were absent
+      await assert.rejects(async () => store.page('run-1', /** @type {any} */ ({ afer: 1 })),
+        { name: 'TypeError', message: "page() does not take 'afer' — did you mean 'after'?" });
+      await assert.rejects(async () => store.page('run-1', /** @type {any} */ ('1')),
+        { name: 'TypeError', message: 'page() takes a plain options object' });
+      assert.deepEqual(await store.page('run-1', /** @type {any} */ (null)), all);
+      assert.deepEqual((await store.page('run-1', { after: 1 })).events, all.events.slice(1));
+    }
+    finally { await f.client.close(); }
+  });
+});

@@ -1449,6 +1449,8 @@ job fence, mapped status, summary and event in one transaction. The application
 and generation, not inputs or results. `get` is trusted/private;
 `page(id, { after, limit })` exposes bounded public events and current summary.
 Missing event history returns `reset-required` with the current durable cursor.
+Any other option is a `TypeError` naming the nearest, and `null` is no options,
+as `finish` reads its own: a misspelt `afer` used to answer every revision.
 
 A snapshot that is no checkpoint of this run's next generation refuses `JL2009`,
 `null` included (it used to throw an uncoded `TypeError`).

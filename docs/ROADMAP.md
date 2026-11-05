@@ -989,11 +989,6 @@ what each does is its own documentation's job
   [NOT] TRUE` — is not compared, so an index recreated under another such
   condition or key opens as the declared one, where SQLite compares the CREATE
   text (MODEL-FORMAT §12). Wanted: read those forms into the condition form.
-- [ ] **A run store's `page` reads an open option bag.** `page(id, { afer: 2
-  })` answers every revision where `{ after: 2 }` answers those after the
-  second, and `page(id, null)` throws an uncoded `TypeError`, where the run
-  store's other calls refuse a malformed option by name. Wanted: the bag
-  closed, as `finish`'s is.
 - [ ] **A locking probe's refusal under row-level security reads as the
   rule's.** On PostgreSQL a probe that locks the row it finds reads it
   through the table's UPDATE policy as well as its SELECT policy, so for a
