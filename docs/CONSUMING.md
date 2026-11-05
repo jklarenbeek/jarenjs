@@ -169,7 +169,7 @@ the table and stale in the paragraph that cites it:
 | `./jtlt` | <!--fact:bundle.jtlt.kb-->26<!--/fact--> kB | text template capture; no renderer |
 | `./project` | <!--fact:bundle.project.kb-->5<!--/fact--> kB | project files; no Studio engine |
 | `./charts` | <!--fact:bundle.charts.kb-->7<!--/fact--> kB | chart definitions; no chart engine |
-| `./db` | <!--fact:bundle.db.kb-->1136<!--/fact--> kB | the store, the validator and the formats, by construction |
+| `./db` | <!--fact:bundle.db.kb-->1137<!--/fact--> kB | the store, the validator and the formats, by construction |
 
 Read the last row as the honest one: the front door costs what the store
 costs, because it *is* the store. The tree-shaking gate holds both
@@ -205,7 +205,7 @@ and the live heap they hold — the V8 heap after two forced full
 collections, run on the main thread so each has finished when the heap
 is read, less the same process's heap before the import. Each heap is
 the median of <!--fact:closure.runs-->5<!--/fact--> fresh processes, whose runs differed by at
-most <!--fact:closure.spread-->71 KiB<!--/fact--> for any one subpath; native memory a built-in
+most <!--fact:closure.spread-->67 KiB<!--/fact--> for any one subpath; native memory a built-in
 allocates for itself (`node:crypto`'s, say) is not in it. A heap depends
 on the runtime and the host — these were measured on one machine,
 with <!--fact:closure.host-->Node v24.22.1 on linux x64<!--/fact--> — while a module count is
@@ -225,7 +225,7 @@ included.
 | `.` | 140 | core 73, validate 29, json 26, contract 12 | 6.1 |
 | `./app` | 29 | core 11, contract 9, json 9 | 1.4 |
 | `./auth-node` | 11 | core 8, contract 3 | 1.3 |
-| `./client` | 141 | core 75, validate 27, json 26, contract 13 | 5.9 |
+| `./client` | 141 | core 75, validate 27, json 26, contract 13 | 6.0 |
 | `./command` | 23 | core 11, json 7, contract 5 | 1.2 |
 | `./continuation-node` | 20 | core 10, json 7, contract 3 | 1.6 |
 | `./diff` | 140 | core 73, validate 29, json 26, contract 12 | 6.4 |
@@ -235,7 +235,7 @@ included.
 | `./local` | 19 | core 10, contract 9 | 1.0 |
 | `./node` | 13 | core 9, contract 4 | 0.7 |
 | `./port` | 27 | contract 15, core 12 | 1.3 |
-| `./project` | 172 | core 83, json 41, validate 29, contract 14, emit 5 | 8.8 |
+| `./project` | 172 | core 83, json 41, validate 29, contract 14, emit 5 | 8.9 |
 | `./provider` | 113 | core 74, json 31, contract 8 | 4.3 |
 | `./stream` | 16 | core 11, contract 5 | 1.0 |
 | `./webmcp` | 1 | contract 1 | 0.1 |
@@ -252,7 +252,7 @@ included.
 | `./bun` | 128 | core 62, db 39, json 21, validate 6 | 6.1 |
 | `./entity` | 132 | core 63, db 40, json 23, validate 6 | 7.0 |
 | `./model` | 119 | core 62, db 30, json 21, validate 6 | 5.8 |
-| `./node` | 129 | core 62, db 40, json 21, validate 6 | 6.6 |
+| `./node` | 129 | core 62, db 40, json 21, validate 6 | 6.5 |
 | `./node-pool` | 105 | core 61, db 23, json 21 | 4.7 |
 | `./node-process` | 101 | core 61, json 21, db 19 | 4.7 |
 | `./node-worker` | 101 | core 61, json 21, db 19 | 4.7 |
