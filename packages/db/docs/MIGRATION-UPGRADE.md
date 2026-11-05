@@ -3843,8 +3843,8 @@ with the code that produced them.
 
 | Native runtime / SQLite | Apply all links ms | Status loop ms | No-op apply loop ms | Observation loop ms | Measured at |
 |---|---:|---:|---:|---:|---|
-| node 24.22.1 / 3.53.4 | 9.611 | 231.134 | 235.792 | 72.757 | 2026-11-01T18:52:02.112Z |
-| bun 1.4.2 / 3.53.2 | 10.552 | 212.896 | 218.933 | 50.066 | 2026-11-01T18:51:59.038Z |
+| node 24.22.1 / 3.53.4 | 11.815 | 279.293 | 289.509 | 83.909 | 2026-11-05T01:40:48.851Z |
+| bun 1.4.4 / 3.53.4 | 13.999 | 273.726 | 276.422 | 61.881 | 2026-11-05T01:40:45.159Z |
 
 | Native runtime | Current document JSON bytes | Legacy-shaped JSON projection bytes | Side rows / key+value UTF-8 bytes | SQLite page growth bytes |
 |---|---:|---:|---:|---:|
