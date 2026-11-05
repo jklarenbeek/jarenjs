@@ -11,6 +11,7 @@ import {
   hasUnevaluatedItemsCoverage,
   memberPath,
   extendsChildLocations,
+  validateUndefinedElement,
 } from './tools.js';
 import { readsSince } from './schema-keywords.js';
 
@@ -154,7 +155,11 @@ function compileUnevaluatedItems(schemaObj, jsonSchema) {
     let valid = true;
     for (let i = 0; i < data.length; ++i) {
       if (index === null ? log.hasItem(data, i, mark) : index.has(i) || log.hasItem(data, i, end)) continue;
-      if (validator(data[i], extendPaths ? dataPath + '/' + i : dataPath, dataRoot, i) === true)
+      const item = data[i];
+      const itemPath = extendPaths ? dataPath + '/' + i : dataPath;
+      if ((item === undefined
+        ? validateUndefinedElement(validator, itemPath, dataRoot, i)
+        : validator(item, itemPath, dataRoot, i)) === true)
         log.add(data, i);
       else
         valid = addError(i, dataPath) && valid;

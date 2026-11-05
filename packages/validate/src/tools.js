@@ -234,10 +234,44 @@ export function isSchemaType(code, data) {
 }
 
 /**
+ * Whether the `undefined` under validation is an array element. An element
+ * is never absent: an array holds a value at each index below its length,
+ * and `JSON.stringify([undefined])` sends `[null]`. So the keywords that
+ * pass an absent member or an absent root (`type`, `enum`, `allOf`,
+ * `anyOf`, `not`, `$query`) read such an element as the non-JSON value it
+ * is: no `type` names it, no `enum` holds it, and the combinators test
+ * their subschemas against it. Raised only while validateUndefinedElement
+ * validates one such element; validation is synchronous and an `undefined`
+ * instance has no members, so every keyword that call meets reads that
+ * element.
+ */
+export let undefinedElement = false;
+
+/**
+ * The answer of an element validator for an array element holding
+ * `undefined` (a hole reads so too): the validator's own, with
+ * `undefinedElement` raised for the call.
+ * @param {Function} validate - The element's validator
+ * @param {string} dataPath
+ * @param {unknown} dataRoot
+ * @param {number} [index]
+ * @returns {boolean}
+ */
+export function validateUndefinedElement(validate, dataPath, dataRoot, index) {
+  undefinedElement = true;
+  try {
+    return validate(undefined, dataPath, dataRoot, index);
+  } finally {
+    undefinedElement = false;
+  }
+}
+
+/**
  * What an object or array keyword group answers for a value its instance
  * test (isObjectType, isArrayClass) refused: true, the group does not apply;
  * or, when the group also tests a leading `type` naming its kind, the type's
- * answer, which an absent value passes and any other fails through
+ * answer, which an absent value passes (not an array element holding
+ * `undefined`, see undefinedElement) and any other fails through
  * `typeError`.
  * @param {((data: unknown, dataPath: string) => boolean) | null} typeError - The leading type's fault, or null
  * @param {unknown} data
@@ -245,40 +279,41 @@ export function isSchemaType(code, data) {
  * @returns {boolean}
  */
 export function otherKind(typeError, data, dataPath) {
-  return typeError === null || data === undefined || typeError(data, dataPath);
+  return typeError === null || (data === undefined && !undefinedElement) || typeError(data, dataPath);
 }
 
 // The tests of the type-only schemas, one per type name and shared by every
 // schema naming it, so a walk tells them apart by identity; where a fault
 // records nothing, the test is the schema's whole validator. An absent value
-// passes, as the `type` keyword reads it everywhere but in an item test.
+// passes, as the `type` keyword reads it everywhere; an array element
+// holding `undefined` is not absent and fails (see undefinedElement).
 /** @param {unknown} data @returns {boolean} */
 export function isTypeOnlyString(data) {
-  return data === undefined || typeof data === 'string';
+  return data === undefined ? !undefinedElement : typeof data === 'string';
 }
 /** @param {unknown} data @returns {boolean} */
 export function isTypeOnlyNumber(data) {
-  return data === undefined || (typeof data === 'number' && !isNaN(data));
+  return data === undefined ? !undefinedElement : typeof data === 'number' && !isNaN(data);
 }
 /** @param {unknown} data @returns {boolean} */
 export function isTypeOnlyInteger(data) {
-  return data === undefined || Number.isInteger(data);
+  return data === undefined ? !undefinedElement : Number.isInteger(data);
 }
 /** @param {unknown} data @returns {boolean} */
 export function isTypeOnlyBoolean(data) {
-  return data === undefined || typeof data === 'boolean';
+  return data === undefined ? !undefinedElement : typeof data === 'boolean';
 }
 /** @param {unknown} data @returns {boolean} */
 export function isTypeOnlyArray(data) {
-  return data === undefined || Array.isArray(data);
+  return data === undefined ? !undefinedElement : Array.isArray(data);
 }
 /** @param {unknown} data @returns {boolean} */
 export function isTypeOnlyObject(data) {
-  return data === undefined || (typeof data === 'object' && data !== null && !Array.isArray(data));
+  return data === undefined ? !undefinedElement : typeof data === 'object' && data !== null && !Array.isArray(data);
 }
 /** @param {unknown} data @returns {boolean} */
 export function isTypeOnlyNull(data) {
-  return data === undefined || data === null;
+  return data === undefined ? !undefinedElement : data === null;
 }
 
 /**

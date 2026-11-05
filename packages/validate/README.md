@@ -211,6 +211,19 @@ the last position of a longer tuple; alone it constrains no element. *Upgrade:
 `additionalItems` beside an empty `items` array was ignored, so that schema
 accepted every array.*
 
+An array element is never absent: an array holds a value at each index below
+its length, and `JSON.stringify([undefined])` sends `[null]`. So an element
+holding `undefined`, or a hole, is read as the non-JSON value it is, in both
+modes and whatever schema reaches it: no `type` names it, no `enum` or `const`
+holds it, `allOf`, `anyOf`, `oneOf` and `not` test their subschemas against
+it, and a `$query` fails it with `JQ2011`, since the query has no document
+there to read. `{ "items": { "type": "boolean" } }` refuses `[undefined]` as
+it refuses the `[null]` JSON sends there; an absent member and an absent root
+still pass `type`. *Upgrade: only a lone `type` item schema refused such an element, and
+only when validation stopped at the first failure; collecting errors, with
+another keyword beside `type`, or through `$ref`, `allOf`, `anyOf`, `enum`,
+`not` or `unevaluatedItems`, it passed, and `contains` counted it as a match.*
+
 ### 🔑 Keywords for object
 
 - maxProperties / minProperties

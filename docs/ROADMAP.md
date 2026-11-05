@@ -328,14 +328,6 @@ delete it or fix it.
   twice (the combining closure, then the string keywords' own test,
   packages/validate/src/string.js). Wanted: those costs gone, every answer
   unchanged, non-JSON values included.
-- [ ] **A type-only item schema answers an `undefined` element by the mode.**
-  When validation stops at the first failure, `{ prefixItems: [{ type:
-  'boolean' }] }` (and `items: { type: 'boolean' }`) refuses `[undefined]`
-  and an array with a hole there; collecting errors, or with another keyword
-  beside `type`, it accepts them, as the `type` keyword accepts an absent
-  value everywhere else (the type-only item tests in
-  packages/validate/src/array.js against `validateType*Only` in schema.js).
-  Wanted: one answer in both modes; either choice changes the other mode's.
 - [ ] **A lone `type` and a `type` beside another keyword read three non-JSON
   values differently.** `{ type: 'number' }` refuses `NaN` and `{ type:
   'number', maxLength: 1e9 }` accepts it; `{ type: 'object' }` refuses an

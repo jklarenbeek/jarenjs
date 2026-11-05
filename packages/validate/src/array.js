@@ -28,6 +28,7 @@ import {
   schemaReference,
   ARRAY_CHILD_KEYWORDS,
   otherKind,
+  validateUndefinedElement,
 } from './tools.js';
 
 import { readPrefixItems, readsSince } from './schema-keywords.js';
@@ -568,9 +569,14 @@ function compileArrayChildren(schemaObj, jsonSchema, alone, typed) {
       let invalid = 0;
       for (let i = 0; i < len; ++i) {
         const itemPath = extendPaths ? dataPath + '/' + i : dataPath;
-        const ok = (i < count
-          ? positions[i](arr[i], itemPath, dataRoot)
-          : rest(arr[i], itemPath, dataRoot)) === true;
+        const item = arr[i];
+        // An element holding `undefined` is present, not absent
+        // (undefinedElement in tools.js).
+        const ok = (item === undefined
+          ? validateUndefinedElement(i < count ? positions[i] : rest, itemPath, dataRoot)
+          : i < count
+            ? positions[i](item, itemPath, dataRoot)
+            : rest(item, itemPath, dataRoot)) === true;
         if (!ok) invalid++;
         if (track && i < evalLimit && (ok || logFailed)) root.evalLog.add(data, i);
       }
@@ -593,7 +599,10 @@ function compileArrayChildren(schemaObj, jsonSchema, alone, typed) {
       let contains = 0;
       for (let i = 0; i < len; ++i) {
         const itemPath = extendPaths ? dataPath + '/' + i : dataPath;
-        if (validator(arr[i], itemPath, dataRoot) === true) {
+        const item = arr[i];
+        if ((item === undefined
+          ? validateUndefinedElement(validator, itemPath, dataRoot)
+          : validator(item, itemPath, dataRoot)) === true) {
           contains++;
           if (trackContains) root.evalLog.add(data, i);
         }
@@ -617,14 +626,19 @@ function compileArrayChildren(schemaObj, jsonSchema, alone, typed) {
     for (let i = 0; i < len; ++i) {
       const obj = arr[i];
       const itemPath = extendPaths ? dataPath + '/' + i : dataPath;
-      const ok = (i < count
-        ? positions[i](obj, itemPath, dataRoot)
-        : rest(obj, itemPath, dataRoot)) === true;
+      const holdsUndefined = obj === undefined;
+      const ok = (holdsUndefined
+        ? validateUndefinedElement(i < count ? positions[i] : rest, itemPath, dataRoot)
+        : i < count
+          ? positions[i](obj, itemPath, dataRoot)
+          : rest(obj, itemPath, dataRoot)) === true;
       if (!ok) invalid++;
       if (track && i < evalLimit && (ok || logFailed)) root.evalLog.add(data, i);
       // A contains candidate is a probe: not matching is not a fault.
       const containsMark = root.errorMark();
-      if (containsValidator(obj, itemPath, dataRoot) === true) {
+      if ((holdsUndefined
+        ? validateUndefinedElement(containsValidator, itemPath, dataRoot)
+        : containsValidator(obj, itemPath, dataRoot)) === true) {
         contains++;
         if (trackContains) root.evalLog.add(data, i);
       }

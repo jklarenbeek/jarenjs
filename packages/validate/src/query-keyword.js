@@ -28,6 +28,7 @@ import { decodeJSONPointerSegment } from '@jarenjs/json/pointer';
 import { SchemaCompileError } from './errors.js';
 import { createTypeTestCompiler } from './query.js';
 import { compiledLocation, keywordLocation } from './traverse.js';
+import { undefinedElement } from './tools.js';
 import { encodeJsonPointerPath } from './origin.js';
 
 /** The externals a `$query` is bound to per call. */
@@ -142,14 +143,17 @@ export function compileQuerySchema(schemaObj, jsonSchema) {
   const ext = { root: null, path: '' };
 
   return function validateQuerySchema(data, dataPath, dataRoot) {
-    if (data === undefined) return true;
+    if (data === undefined && !undefinedElement) return true;
     ext.root = dataRoot;
     ext.path = dataPath;
     try {
       return query.ebv(data, ext) || addError(data, dataPath);
     }
     catch (e) {
-      if (judgesInstance(e))
+      // An array element holding `undefined` is present (undefinedElement
+      // in tools.js) but is no document the query can read (JQ2011): that
+      // refusal judges the instance too.
+      if (judgesInstance(e) || (data === undefined && e instanceof JsonQueryRuntimeError && e.code === 'JQ2011'))
         return addError(data, dataPath, e.code, e.docPath);
       throw e;
     }

@@ -13,6 +13,7 @@ import {
   combineIndependent,
   getBoolOrObjectClass,
   getArrayClassMinItems,
+  undefinedElement,
 } from './tools.js';
 
 // Where resolved references keep their answers (ValidationRoot#callReference),
@@ -52,7 +53,7 @@ function compileAllOf(schemaObj, jsonSchema) {
 
   const stopAtFirst = schemaObj.options.skipErrors;
   return function validateAllOf(data, dataPath, dataRoot, dataKey) {
-    if (data !== undefined) {
+    if (data !== undefined || undefinedElement) {
       // EVERY allOf branch applies, so every branch's faults are real. Only
       // the boolean answer may stop at the first failing branch.
       let valid = true;
@@ -95,7 +96,7 @@ function compileAnyOf(schemaObj, jsonSchema) {
   const root = schemaObj.root;
   if (root.usesUnevaluated) {
     return function validateAnyOfTracked(data, dataPath, dataRoot, dataKey) {
-      if (data === undefined) return true;
+      if (data === undefined && !undefinedElement) return true;
       const log = root.evalLog;
       const errors = root.errorMark();
       let found = false;
@@ -114,7 +115,7 @@ function compileAnyOf(schemaObj, jsonSchema) {
   }
 
   return walkingBranches(root, function validateAnyOf(data, dataPath, dataRoot, dataKey) {
-    if (data !== undefined) {
+    if (data !== undefined || undefinedElement) {
       // Every branch tried before a match is a SPECULATIVE probe: the document
       // was never required to satisfy it. Its errors are kept only if no
       // branch matched at all, where they are the explanation.
@@ -212,7 +213,7 @@ function compileNotOf(schemaObj, jsonSchema) {
   // a caller trying to render why.
   if (notOf === true)
     return function validateNotOfTrue(data, dataPath) {
-      return data === undefined ? true : addError(data, dataPath);
+      return data === undefined && !undefinedElement ? true : addError(data, dataPath);
     };
 
   const validate = schemaObj.createValidator(notOf, 'not');
@@ -221,7 +222,7 @@ function compileNotOf(schemaObj, jsonSchema) {
   const root = schemaObj.root;
   if (root.usesUnevaluated) {
     return function validateNotOfTracked(data, dataPath, dataRoot, dataKey) {
-      if (data === undefined) return true;
+      if (data === undefined && !undefinedElement) return true;
       const log = root.evalLog;
       const mark = log.mark();
       const errors = root.errorMark();
@@ -237,7 +238,7 @@ function compileNotOf(schemaObj, jsonSchema) {
   }
 
   return function validateNotOf(data, dataPath, dataRoot, dataKey) {
-    if (data === undefined) return true;
+    if (data === undefined && !undefinedElement) return true;
     // The subschema is a probe: its failure is what makes `not` succeed, so
     // its errors are discarded whichever way the probe went.
     const errors = root.errorMark();

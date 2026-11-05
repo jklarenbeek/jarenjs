@@ -10,6 +10,7 @@ import {
 
 import {
   getArrayClassMinItems,
+  undefinedElement,
 } from './tools.js';
 import { isDollarDataRef } from './schema-keywords.js';
 
@@ -57,7 +58,7 @@ function compileEnum(schemaObj, jsonSchema) {
 
   if (hasObjects === false) {
     return function validateEnumSimple(data, dataPath) {
-      return data === undefined
+      return data === undefined && !undefinedElement
         ? true
         : enums.includes(data)
           ? true
@@ -66,7 +67,7 @@ function compileEnum(schemaObj, jsonSchema) {
   }
   else {
     return function validateEnumDeep(data, dataPath) {
-      if (data === undefined) return true;
+      if (data === undefined && !undefinedElement) return true;
       if (data === null || typeof data !== 'object')
         return enums.includes(data)
           ? true

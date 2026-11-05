@@ -27,6 +27,7 @@ import {
   schemaTypeCode,
   isSchemaType,
   typeOnlyTest,
+  undefinedElement,
   hasSchemaReference,
   schemaReference,
   hasRefSiblings,
@@ -375,15 +376,17 @@ function compileTypeArray(schemaObj, jsonSchema) {
 }
 
 /**
- * The check of one type name: the absent-member guard, the test and the
- * fault in one closure, a call per validation fewer than the parts.
+ * The check of one type name: the absent-member guard (which an array
+ * element holding `undefined` does not pass, see undefinedElement in
+ * tools.js), the test and the fault in one closure, a call per validation
+ * fewer than the parts.
  * @param {number} code - The name's schemaTypeCode
  * @param {Function} addError - The fault
  * @returns {(data: unknown, dataPath: string) => boolean}
  */
 function oneTypeCheck(code, addError) {
   return function validateOneType(data, dataPath) {
-    return data === undefined
+    return (data === undefined && !undefinedElement)
       || (isSchemaType(code, data) ? true : addError(data, dataPath));
   };
 }
@@ -411,14 +414,14 @@ function compileTypeBasic(schemaObj, jsonSchema) {
 
   if (nullable === true) {
     return function validateNullableType(data, dataPath) {
-      return data === undefined
+      return (data === undefined && !undefinedElement)
         || data === null
         || validator(data, dataPath);
     };
   }
 
   return function validateType(data, dataPath) {
-    return data === undefined
+    return (data === undefined && !undefinedElement)
       || validator(data, dataPath);
   };
 }
@@ -655,14 +658,14 @@ export function compileSchemaObject(schemaObj, jsonSchema) {
     const second = validators[0];
     if (validators.length === 1) {
       return finalize(function validateTypedDouble(data, dataPath, dataRoot) {
-        return (data === undefined || (isSchemaType(code, data) ? true : addError(data, dataPath)))
+        return ((data === undefined && !undefinedElement) || (isSchemaType(code, data) ? true : addError(data, dataPath)))
           && second(data, dataPath, dataRoot);
       });
     }
     const third = validators[1];
     if (validators.length === 2) {
       return finalize(function validateTypedTriple(data, dataPath, dataRoot) {
-        return (data === undefined || (isSchemaType(code, data) ? true : addError(data, dataPath)))
+        return ((data === undefined && !undefinedElement) || (isSchemaType(code, data) ? true : addError(data, dataPath)))
           && second(data, dataPath, dataRoot)
           && third(data, dataPath, dataRoot);
       });
