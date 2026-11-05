@@ -379,14 +379,6 @@ delete it or fix it.
   closures that also count the members, and `dependentRequired`, look a
   name up in `Object.keys`, the others with `Object.hasOwn`). Wanted: one
   reading of each, whatever sits beside `required`, in both modes.
-- [ ] **An item schema of `required` alone counts an inherited member
-  when validation stops at the first failure.** `{ items: { required:
-  ['a'] } }` accepts `[Object.create({ a: 1 })]` in the first-failure mode
-  and refuses it when errors are collected, as `{ required: ['a'] }`
-  refuses `Object.create({ a: 1 })`: the item shortcut in
-  packages/validate/src/array.js (`compileItemValidator`) tests a name
-  `Object.prototype` does not carry with `in`. Wanted: the own-member
-  reading in both modes.
 
 ## @jarenjs/view & @jarenjs/app
 

@@ -299,22 +299,14 @@ function compileItemValidator(schemaObj, itemSchema, key, index) {
     if (bare && Array.isArray(itemSchema.required) && Object.keys(itemSchema).length === 1
       && itemSchema.required.every((name) => typeof name === 'string')) {
       const required = itemSchema.required;
-      // `in` also answers for the names every object inherits (`toString`);
-      // a list naming one of those takes the own-member probe, any other list
-      // keeps the cheap test.
-      const inherited = required.some((name) => name in Object.prototype);
       const count = required.length;
       return function validateRequiredOnly(data, _dataPath, _dataRoot) {
         // Required properties only apply to objects, not arrays or other types
         if (typeof data !== 'object' || data === null || Array.isArray(data)) return true;
-        if (inherited) {
-          for (let i = 0; i < count; i++) {
-            if (!Object.hasOwn(data, required[i])) return false;
-          }
-          return true;
-        }
+        // An own member, as the full compile reads `required`: an inherited
+        // one is not the item's.
         for (let i = 0; i < count; i++) {
-          if (!(required[i] in data)) return false;
+          if (!Object.hasOwn(data, required[i])) return false;
         }
         return true;
       };

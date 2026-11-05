@@ -1229,9 +1229,12 @@ and a `$data` `required` there asserted nothing; an item schema whose only
 keyword is a `type` word the validator does not know, such as
 `{ "items": { "type": "strin" } }`, used to accept every item and is now
 refused when the schema is compiled, like the same schema in the collecting
-mode.* The one-keyword `required` shortcut treats a member inherited from a
-custom prototype as present, except for the names every object inherits
-(`toString`, `constructor`, ...), which must be own members. A member named `constructor`
+mode.* A one-keyword `required` item schema counts own members only, as
+`required` does everywhere: `{ "items": { "required": ["a"] } }` refuses
+`[Object.create({ a: 1 })]` in both modes. *Upgrade: in the default mode it
+counted a member inherited from a custom prototype as present, and only the
+names every object inherits (`toString`, `constructor`, ...) had to be own
+members.* A member named `constructor`
 is data wherever it appears, so a `$defs` entry of that name is usable and a
 missing `$ref` target beside a `constructor` property is refused at compile
 time like any other.

@@ -37,6 +37,13 @@ describe('one-keyword item schemas', function () {
       assert.strictEqual(verdict(options, { items: { required: ['toString'] } }, [JSON.parse('{"toString":1}')]), true);
       assert.strictEqual(verdict(options, { items: { required: ['a'] } }, [{ a: 1 }, 1, []]), true);
       assert.strictEqual(verdict(options, { items: { required: ['a'] } }, [{ b: 1 }]), false);
+      // a member the item inherits from a prototype of its own is not the
+      // item's, as `{ required: ['a'] }` reads it at the root
+      const inherits = Object.create({ a: 1 });
+      assert.strictEqual(verdict(options, { required: ['a'] }, inherits), false);
+      assert.strictEqual(verdict(options, { items: { required: ['a'] } }, [inherits]), false);
+      assert.strictEqual(verdict(options, { prefixItems: [{ required: ['a', 'b'] }] }, [Object.assign(Object.create({ a: 1 }), { b: 2 })]), false);
+      assert.strictEqual(verdict(options, { items: { required: ['a'] } }, [Object.assign(Object.create(null), { a: 1 })]), true);
     });
 
     it(`required given as a $data reference is honored (${label})`, function () {
