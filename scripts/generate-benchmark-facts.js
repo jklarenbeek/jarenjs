@@ -500,6 +500,30 @@ const FACTS = {
     });
     return ['', `| Scenario | ${t.columns.join(' | ')} |`, `|${' --- |'.repeat(t.columns.length + 1)}`, ...rows, ''].join('\n');
   },
+  // where Jaren stands against each Zod flavor on that same row, scenario
+  // by scenario: a guide that says "faster than every Zod flavor" stops
+  // being true the release one of them wins a scenario, so the sentence is
+  // derived with the table
+  'contracts.adapter.vsZod': () => {
+    const t = data('contracts').tables.find((x) => x.title.startsWith('Normalize + validate'));
+    if (t === undefined) throw new Error('contracts.json carries no adapter table — regenerate it before quoting one');
+    const mine = t.columns.indexOf('@jarenjs/validate');
+    const flavors = t.columns.filter((c) => c.startsWith('zod'));
+    if (mine === -1 || flavors.length === 0) throw new Error('contracts.json adapter table names no @jarenjs/validate or zod column');
+    const scenario = (row) => row.name.split(' — ')[0];
+    const list = (xs) => (xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`);
+    const ahead = [];
+    const split = [];
+    for (const flavor of flavors) {
+      const col = t.columns.indexOf(flavor);
+      const timed = t.rows.filter((r) => Number.isFinite(r.results[mine]) && Number.isFinite(r.results[col]));
+      const lost = timed.filter((r) => !(r.results[mine] < r.results[col]));
+      if (lost.length === 0) ahead.push(flavor);
+      else split.push(`than ${flavor} in ${timed.length - lost.length} of ${timed.length}, while ${flavor} is faster on the ${list(lost.map(scenario))} scenario${lost.length === 1 ? '' : 's'}`);
+    }
+    const lead = ahead.length > 0 ? [`than ${list(ahead)} in every scenario`] : [];
+    return `faster ${[...lead, ...split].join(', and ')}`;
+  },
   'contracts.measured': () => {
     const d = data('contracts');
     if (typeof d.date !== 'string') throw new Error('contracts.json carries no measurement date — regenerate it before quoting its numbers');

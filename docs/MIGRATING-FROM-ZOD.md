@@ -21,8 +21,8 @@ usable as the constraint for an LLM's structured output. The same compiled
 validators run in the browser under a strict Content Security Policy (no
 `eval`, no `new Function`) and on the server, so there is one semantics to
 characterize instead of two. There are no third-party runtime dependencies.
-And on the operation a service actually performs — normalize, validate, map
-errors — Jaren is measurably faster than every Zod flavor (numbers below).
+On the operation a service actually performs — normalize, validate, map
+errors — Jaren is <!--fact:contracts.adapter.vsZod-->faster than zod 3 and zod/mini in every scenario, and than zod 4 in 2 of 3, while zod 4 is faster on the collection scenario<!--/fact--> (numbers below).
 
 **Reasons not to.** If your value is `z.infer` over schema *literals*, Jaren
 does not replace that; a literal is asserted or generated, and only a schema
