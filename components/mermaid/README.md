@@ -266,7 +266,7 @@ error, not a silent English fallback. Task ids and dates stay ASCII data
 either way — an RTL name is text, not syntax.
 
 At scale, parse (which is also schedule resolution), layout and render
-are reported separately in the benchmark: <!--fact:mermaid.ganttScale-->at 10,000 tasks, ~34 ms to parse and resolve, ~5.4 ms to lay out and ~7.1 ms to render<!--/fact-->.
+are reported separately in the benchmark: <!--fact:mermaid.ganttScale-->at 10,000 tasks, ~33 ms to parse and resolve, ~5.6 ms to lay out and ~7.1 ms to render<!--/fact-->.
 
 
 ## Styling, notes and interaction
@@ -460,7 +460,7 @@ renderer, when a host wants one, is charts' and is handed in.
 `npm run test:tree-shaking` measures both.
 
 The headless **parse → layout → SVG string** rows are jaren-only
-(<!--fact:mermaid.svgMs-->~0.38 ms for a 25-node flowchart, ~1.1 ms at 100 nodes<!--/fact-->): mermaid.js
+(<!--fact:mermaid.svgMs-->~0.37 ms for a 25-node flowchart, ~1.1 ms at 100 nodes<!--/fact-->): mermaid.js
 needs a browser DOM (`getBBox`) to render, so there is no fair
 full-render head-to-head — producing a complete standalone SVG in pure
 Node is a capability it lacks.

@@ -383,14 +383,14 @@ Measured (`npm run benchmark:charts`, one appended point):
 <!--fact:charts.sessionTable-->
 | points × series | session tick | wholesale tick | frames incremental |
 |---|---:|---:|---:|
-| 100 × 5 | 5.82 µs | 306 µs | 1100 of 1100 |
-| 1,000 × 5 | 5.5 µs | 1 ms | 1100 of 1100 |
-| 10,000 × 5 | 7.9 µs | 8.41 ms | 1100 of 1100 |
-| 10,000 × 5 *(sampled)* | 2.5 ms | 2.52 ms | 0 of 1100 |
+| 100 × 5 | 6.04 µs | 275 µs | 1100 of 1100 |
+| 1,000 × 5 | 5.76 µs | 1 ms | 1100 of 1100 |
+| 10,000 × 5 | 5.95 µs | 8.21 ms | 1100 of 1100 |
+| 10,000 × 5 *(sampled)* | 2.37 ms | 2.46 ms | 0 of 1100 |
 <!--/fact-->
 
 The session tick is *flat* in n — it
-moves <!--fact:charts.sessionFlatness-->1.4× while the wholesale tick grows 27.4×<!--/fact-->. Supported types: `line` (appends
+moves <!--fact:charts.sessionFlatness-->1.0× while the wholesale tick grows 29.8×<!--/fact-->. Supported types: `line` (appends
 and ring-buffer evictions), `bar` (live counts and sums), `heatmap`
 (live matrix counts and sums) and `candlestick` (keyed kline upserts —
 one candle group re-renders). The website's Binance demo runs on it.
@@ -473,14 +473,14 @@ Measured (`npm run benchmark:charts`, one series):
 <!--fact:charts.samplingTable-->
 | source points | drawn | method | source → AST | source → svg |
 |---:|---:|---|---:|---:|
-| 2,000 | 2,000 | none | 77.1 µs → 71.5 µs | 512 µs → 518 µs |
-| 20,000 | 560 | lttb | 672 µs → 911 µs | 5.94 ms → 1.06 ms |
-| 100,000 | 560 | lttb | 4.08 ms → 5.33 ms | 28.3 ms → 6.61 ms |
+| 2,000 | 2,000 | none | 66.1 µs → 69 µs | 508 µs → 537 µs |
+| 20,000 | 560 | lttb | 635 µs → 905 µs | 5.77 ms → 916 µs |
+| 100,000 | 560 | lttb | 4.04 ms → 4.86 ms | 27.5 ms → 5.42 ms |
 <!--/fact-->
 
 Choosing the points costs about what mapping them costs — the sampler
 reads every reading either way — so the AST column is a small **loss**.
-What it buys is the render — <!--fact:charts.samplingWin-->100,000 points draw as 560 and render 4.3× faster<!--/fact-->. The invariants above are asserted in the benchmark
+What it buys is the render — <!--fact:charts.samplingWin-->100,000 points draw as 560 and render 5.1× faster<!--/fact-->. The invariants above are asserted in the benchmark
 before a single timing is printed.
 
 **Sampling is not retention.** `createStreamAdapter`'s `maxPoints`

@@ -231,7 +231,7 @@ behavior change.
 
 ## Performance
 
-From `npm run benchmark:contracts`, measured on <!--fact:contracts.measured-->2026-11-02 with Node v24.22.1, 20,000 iterations<!--/fact-->
+From `npm run benchmark:contracts`, measured on <!--fact:contracts.measured-->2026-11-05 with Node v24.22.1, 20,000 iterations<!--/fact-->
 (reproduce it yourself rather than trusting the table). The row that matters
 is the third — normalize, validate, and map errors, which is what a request
 handler does. Times are per operation; lower is better, and the fastest engine
@@ -242,9 +242,9 @@ of each scenario is in bold.
 <!--fact:contracts.adapter.table-->
 | Scenario | @jarenjs/validate | zod 4 | zod 3 | zod/mini | ajv |
 | --- | --- | --- | --- | --- | --- |
-| command — uuid, enum, date-time; no defaults | **2.22 µs** | 4.08 µs | 9.92 µs | 4.68 µs | 2.48 µs |
-| config — defaults and numeric coercion | 1.92 µs | 2.89 µs | 5.78 µs | 2.94 µs | **1.9 µs** |
-| collection — 50 nested records | 14.3 µs | **13.2 µs** | 25.3 µs | 20.3 µs | 20.9 µs |
+| command — uuid, enum, date-time; no defaults | **1.97 µs** | 3.83 µs | 8.89 µs | 4.1 µs | 2.18 µs |
+| config — defaults and numeric coercion | 1.69 µs | 2.42 µs | 5.72 µs | 2.66 µs | **1.64 µs** |
+| collection — 50 nested records | 14.3 µs | **12.1 µs** | 25.3 µs | 19.9 µs | 20.4 µs |
 <!--/fact-->
 
 The table is regenerated from each release's own measurement, so read it row

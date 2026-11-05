@@ -689,16 +689,16 @@ direction is *not* claimed, because WKT whitespace, the `M` measure and number
 spelling are normalized on the way through.
 
 Against [`wellknown`](https://www.npmjs.com/package/wellknown), the established
-WKT↔GeoJSON converter (`npm run benchmark:geo`, Node <!--fact:geo.node-->v24.20.0<!--/fact-->):
+WKT↔GeoJSON converter (`npm run benchmark:geo`, Node <!--fact:geo.node-->v24.22.1<!--/fact-->):
 
 <!--fact:geo.wktTable-->
 | scenario | Jaren | rival | ratio |
 |---|---|---|---|
-| wkt parse (POINT) | 425.8 ns | 1.29 µs (wellknown) | **3.0×** |
-| wkt parse (2000-vertex polygon) | 861.70 µs | 2.28 ms (wellknown) | **2.6×** |
-| wkt stringify (2000-vertex polygon) | 166.50 µs | 221.10 µs (wellknown) | **1.3×** |
-| wkt validate (POINT) | 281.4 ns | 1.31 µs (wellknown) | **4.7×** |
-| wkt validate (2000-vertex polygon) | 481.60 µs | 1.92 ms (wellknown) | **4.0×** |
+| wkt parse (POINT) | 433.2 ns | 1.30 µs (wellknown) | **3.0×** |
+| wkt parse (2000-vertex polygon) | 862.90 µs | 1.95 ms (wellknown) | **2.3×** |
+| wkt stringify (2000-vertex polygon) | 170.60 µs | 222.00 µs (wellknown) | **1.3×** |
+| wkt validate (POINT) | 240.9 ns | 1.27 µs (wellknown) | **5.3×** |
+| wkt validate (2000-vertex polygon) | 474.80 µs | 1.85 ms (wellknown) | **3.9×** |
 <!--/fact-->
 
 The last two rows are the ones the sink exists for: `wellknown` has no
@@ -738,7 +738,7 @@ RFC 7946 removed coordinate-reference-system support and mandates WGS 84, so
 there is no SRID table and no reprojection: conformance removes the need rather
 than an omission hiding it.
 
-**Measured against the field** (`npm run benchmark:geo`, Node <!--fact:geo.node-->v24.20.0<!--/fact-->). Every
+**Measured against the field** (`npm run benchmark:geo`, Node <!--fact:geo.node-->v24.22.1<!--/fact-->). Every
 scenario asserts result equivalence before any timing, and the harness refuses
 to print a table if the engines disagree: distance, area, length and bounding
 box come out *bit-identical* to Turf, containment agrees on a 400-point sweep,
@@ -749,21 +749,21 @@ below derive from the committed measurement and are refreshed with it.
 <!--fact:geo.table-->
 | scenario | Jaren | rival | ratio |
 |---|---|---|---|
-| distance (two positions) | 19.3 ns | 108.3 ns (turf) | **5.6×** |
-| distance (vs geolib, ellipsoidal) | 51.8 ns | 615.3 ns (geolib) | **11.9×** |
+| distance (two positions) | 18.3 ns | 109.2 ns (turf) | **6.0×** |
+| distance (vs geolib, ellipsoidal) | 49.6 ns | 612.0 ns (geolib) | **12.3×** |
 | distance (equirectangular screen) | 24.1 ns | — | — |
-| point in polygon (12-vertex) | 83.3 ns | 203.7 ns (turf) | **2.4×** |
-| point in polygon (2000-vertex) | 7.16 µs | 3.70 µs (turf) | 0.5× |
-| polygon area (2000-vertex) | 18.91 µs | 18.49 µs (turf) | 1.0× |
-| line length (500 positions) | 20.54 µs | 62.26 µs (turf) | **3.0×** |
-| bounding box (2000-vertex) | 21.14 µs | 12.79 µs (turf) | 0.6× |
-| centroid (2000-vertex) | 16.66 µs | 21.65 µs (turf) | **1.3×** |
-| index build (100k boxes) | 13.97 ms | 10.71 ms (flatbush) | 0.8× |
-| index probe (100k boxes) | 527.2 ns | 632.8 ns (flatbush) | **1.2×** |
-| linear scan (100k boxes, no index) | 156.60 µs | — | — |
+| point in polygon (12-vertex) | 79.8 ns | 218.8 ns (turf) | **2.7×** |
+| point in polygon (2000-vertex) | 6.85 µs | 3.75 µs (turf) | 0.5× |
+| polygon area (2000-vertex) | 17.30 µs | 18.66 µs (turf) | **1.1×** |
+| line length (500 positions) | 20.26 µs | 61.74 µs (turf) | **3.0×** |
+| bounding box (2000-vertex) | 21.64 µs | 13.04 µs (turf) | 0.6× |
+| centroid (2000-vertex) | 16.59 µs | 21.87 µs (turf) | **1.3×** |
+| index build (100k boxes) | 13.59 ms | 10.49 ms (flatbush) | 0.8× |
+| index probe (100k boxes) | 544.5 ns | 637.8 ns (flatbush) | **1.2×** |
+| linear scan (100k boxes, no index) | 140.90 µs | — | — |
 <!--/fact-->
 
-The losses are kept, and named by the same measurement: on the committed run <!--fact:geo.losses-->four rows lose to a rival: point in polygon (2000-vertex) at 0.5× (turf), polygon area (2000-vertex) at 1.0× (turf), bounding box (2000-vertex) at 0.6× (turf), index build (100k boxes) at 0.8× (flatbush)<!--/fact-->.
+The losses are kept, and named by the same measurement: on the committed run <!--fact:geo.losses-->three rows lose to a rival: point in polygon (2000-vertex) at 0.5× (turf), bounding box (2000-vertex) at 0.6× (turf), index build (100k boxes) at 0.8× (flatbush)<!--/fact-->.
 **Point-in-polygon on a large ring runs at about half Turf's speed**
 (<!--fact:geo.pip2000-->0.5×<!--/fact--> at 2000 vertices) because every edge that could
 matter goes through the exact orientation predicate, where Turf uses naive
