@@ -1412,7 +1412,8 @@ export const planModelMigration = planMigration;
  * @param {any} connection - an open connection to the database, as `migrate` opens one
  * @param {any} model - the model the database holds (its tables open under it)
  * @param {{ id?: string, expressions?: Record<string, any> }} [options] - `id` the
- *   link's name (`upgrade-<hash>` by default); `expressions` the host's declared
+ *   link's name (`upgrade-<hash>` by default, suffixed past the ids the history
+ *   holds); `expressions` the host's declared
  *   index-expression functions
  * @returns {any} value-or-promise of `{ migration, report: { upgraded: string[] } }`:
  *   `upgraded` names each definition the link rebuilds or creates, `<table>.<column>`,
@@ -1460,14 +1461,18 @@ export function planColumnUpgrade(connection, model, options = undefined) {
         upgraded.push(`${table}.${column}`);
         steps.push({ kind: 'ddl', sql, note: `refuse a NaN in the number column '${column}' of '${table}', as a fresh store creates it` });
       }
-      const migration = { $migration: MIGRATION_VERSION, id: options?.id ?? `upgrade-${to.slice(0, 8)}`,
-        from: to, to, identity, steps };
       const created = new Set(steps.map((step) => step.sql));
       const unique = collections.flatMap(({ plan }) => (plan.kindIndexes ?? [])
         .filter((/** @type {any} */ index) => index.unique && created.has(kindIndexSql(dialect, plan.table, index)))
         .map((/** @type {any} */ index) => ({ plan, index })));
-      return chain(refuseDuplicates(connection, unique), () =>
-        chain(refuseStoredNaN(connection, unchecked), () => ({ migration, report: { upgraded } })));
+      // a later release's upgrade of the same model is another link: its
+      // default name is suffixed past the ids the history holds
+      const named = options?.id ?? null;
+      return chain(named !== null ? named : unusedMigrationId(connection, `upgrade-${to.slice(0, 8)}`), (id) => {
+        const migration = { $migration: MIGRATION_VERSION, id, from: to, to, identity, steps };
+        return chain(refuseDuplicates(connection, unique), () =>
+          chain(refuseStoredNaN(connection, unchecked), () => ({ migration, report: { upgraded } })));
+      });
     }))));
 }
 

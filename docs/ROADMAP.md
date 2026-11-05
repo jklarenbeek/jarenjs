@@ -1008,11 +1008,6 @@ what each does is its own documentation's job
   SQLite refuses the link (`JD0023`); `migrationStatus(…, { model })`
   reports `drift: null` over it. Wanted: acceptance and status read every
   store-owned table's programs as the open does.
-- [ ] **`planColumnUpgrade`'s default id repeats.** Its default
-  `upgrade-<model hash>` names a later release's column upgrade of the same
-  model alike, which the history refuses (`JD0013`) unless the host passes
-  `id`. Wanted: suffix it past the history's ids, as `planProgramUpgrade`
-  does.
 - [ ] **A drifted store-owned program has no planned route.** "apply an
   explicit migration" in a store-owned table's refusal has no planner that
   plans one for a program no release planned (`planProgramUpgrade` refuses

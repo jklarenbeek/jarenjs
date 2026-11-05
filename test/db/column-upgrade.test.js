@@ -148,6 +148,21 @@ describe('planColumnUpgrade on SQLite', () => {
     finally { cleanup(); }
   });
 
+  it('names its link past the ids the history holds, as a program upgrade does', async () => {
+    const { dbPath, cleanup } = tempDbPath();
+    try {
+      seed(dbPath);
+      const { migration: first } = await upgradeOf(dbPath);
+      // the history already holds that name: a link a host applied under it
+      await migrate({ driver: nodeDriver(), path: dbPath }, [{ ...first, steps: [] }], { baseline: MODEL, model: MODEL });
+      const { migration: again } = await upgradeOf(dbPath);
+      assert.strictEqual(again.id, `${first.id}-2`);
+      assert.deepStrictEqual((await migrate({ driver: nodeDriver(), path: dbPath }, [{ ...first, steps: [] }, again],
+        { baseline: MODEL, model: MODEL })).applied, [again.id]);
+    }
+    finally { cleanup(); }
+  });
+
   it('takes its link name, and refuses an empty one', async () => {
     const { dbPath, cleanup } = tempDbPath();
     try {

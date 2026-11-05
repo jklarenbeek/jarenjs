@@ -505,8 +505,11 @@ if (upgrade.steps.length > 0)
   await migrate({ driver, path }, [...previousMigrations, upgrade], { baseline, model });
 ```
 
-The link's `id` defaults to `upgrade-<hash of the model>`; planned again after it
-applies, it plans no step. At the command line, `jaren-db plan --model <model>
+The link's `id` defaults to `upgrade-<hash of the model>`, suffixed past the
+ids the history holds (`upgrade-<hash>-2`, …) as a program upgrade's is, so a
+later release's upgrade of the same model is a link of its own and not the
+`JD0013` an existing name meets; planned again after it applies, it plans no
+step. At the command line, `jaren-db plan --model <model>
 --store <db> --upgrade-columns` prints or writes the same link (§11). A migration document a previous release planned
 carries the DDL it planned and keeps creating that release's definitions when it
 applies; planning the link again creates this release's, and the upgrade after
@@ -1495,7 +1498,7 @@ jaren-db documents --migrations <dir> --in <file|-> (--out <file|-> | --in-place
   model the database holds, which `--store` is first compared with as
   `plan --store` compares the from-model, and the link goes from that model
   to itself. It is printed, or written with `--out` (`--id` names it,
-  `upgrade-<hash>` by default), and stderr names each definition it rebuilds;
+  `upgrade-<hash>` by default, suffixed past the history's ids), and stderr names each definition it rebuilds;
   apply it as the next file of `--migrations`. The snapshot is neither read
   nor advanced (`--from`, `--to` and `--snapshot` are refused beside the
   flag), and a database that holds what this release creates plans no step:
