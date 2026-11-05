@@ -1102,9 +1102,23 @@ const METHOD_NAME = Symbol('jaren-linq-method');
  * threw a plain `TypeError`.
  * @type {ProxyHandler<any>}
  */
+/** The members of a method read that call it, written so that none of
+ * them reads the function's own members (the built-in `bind` reads its
+ * `length` and `name`). The method ignores `this`. */
+const CALLING = {
+  /** @param {Function} method */ call: (method) => (/** @type {any} */ _this, /** @type {any[]} */ ...args) => method(...args),
+  /** @param {Function} method */ apply: (method) => (/** @type {any} */ _this, /** @type {any[]} */ args) => method(...(args ?? [])),
+  /** @param {Function} method */ bind: (method) => (/** @type {any} */ _this, /** @type {any[]} */ ...bound) =>
+    (/** @type {any[]} */ ...args) => method(...bound, ...args),
+};
+
 const METHOD_READ = {
   get(target, key, receiver) {
-    if (typeof key === 'symbol' || key in target) return Reflect.get(target, key, receiver);
+    // `call`, `apply` and `bind` still call the method; every other member
+    // of the function is refused too: `x.day.length` is the date-part
+    // method's arity (0), not the length of a member named `day`
+    if (typeof key === 'symbol') return Reflect.get(target, key, receiver);
+    if (Object.hasOwn(CALLING, key)) return CALLING[/** @type {'call'|'apply'|'bind'} */ (key)](target);
     throw new LinqBuildError('JL0108',
       `.${target[METHOD_NAME]} is a method of a captured expression, read here without its call, so `
       + `${SHORTHAND_RE.test(key) ? `.${key}` : `[${JSON.stringify(key)}]`} is read off the function and not `

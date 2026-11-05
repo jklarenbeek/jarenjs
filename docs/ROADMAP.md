@@ -1039,12 +1039,6 @@ what each does is its own documentation's job
   `last()` a `$reverse` over the entity phrase; the planner leaves both to the
   engine, so strict execution refuses them (`JD0010`, 'op') while the residual
   answers.
-- [ ] **A method read's own function members embed silently.** Inside a
-  captured expression, a method read without its call keeps the function's
-  own members, so `select((r) => ({ len: r.day.length }))` emits `{ $const: {
-  len: 0 } }` (the date-part method's `length`) where a member named `day` was
-  meant; `name` and `toString()` alike. Refusing them is a stricter refusal (a
-  minor).
 
 ## Lexical search (cross-package)
 

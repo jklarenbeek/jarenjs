@@ -1719,8 +1719,12 @@ refused with `JL0108`, the message naming the method (`.length`) and its call
 `r.day.eq(p.day)`, the spelling a member named `day` invites, or
 `p.at.within(region)` — is refused at the read with the same two spellings,
 the message naming the member read (`.eq`) too; it used to read `undefined`,
-so the call after it was a raw `TypeError: r.day.eq is not a function`. The
-function's own members (`call`, `apply`, `bind`) read as before.
+so the call after it was a raw `TypeError: r.day.eq is not a function`.
+`call`, `apply` and `bind` still call the method; the function's other own
+members are refused the same way, since they are the function's and not a
+value's — `r.day.length` was the date-part method's arity (`0`), embedded as a
+constant where a member named `day` was meant, and `name` and `toString()`
+alike.
 Off a relation target (`p.author.tags.includes('a')`) the message names
 the spellings it names on a member of the row itself, and both run there:
 `p.author.tags.all().eq('a')` holds when any element equals `'a'`, and

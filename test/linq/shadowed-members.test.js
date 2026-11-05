@@ -102,7 +102,7 @@ describe('the shapes that answered keep their answers', () => {
     assert.deepStrictEqual(from(ROWS).where((/** @type {any} */ r) => r.n.add(1).gt(6)).select((/** @type {any} */ r) => r.n).toArray(), [7]);
   });
 
-  it("a method read's own function members still read as the function's", () => {
+  it('call, apply and bind still call a method read', () => {
     assert.deepStrictEqual(from(ROWS).select((/** @type {any} */ r) => r.n.add.call(null, 1)).toArray(), [6, 8]);
     assert.deepStrictEqual(from(ROWS).select((/** @type {any} */ r) => r.n.add.apply(null, [2])).toArray(), [7, 9]);
     assert.deepStrictEqual(from(ROWS).select((/** @type {any} */ r) => r.n.add.bind(null, 3)()).toArray(), [8, 10]);
@@ -110,6 +110,20 @@ describe('the shapes that answered keep their answers', () => {
       assert.strictEqual(typeof r.day, 'function');
       return r.n;
     }).toDocument();
+  });
+
+  it("a method read's other own members are refused, not embedded as the function's", () => {
+    for (const [key, read] of /** @type {[string, (r: any) => any][]} */ ([
+      ['length', (r) => ({ len: r.day.length })],
+      ['name', (r) => ({ named: r.day.name })],
+      ['toString', (r) => ({ text: r.day.toString() })],
+      ['constructor', (r) => r.count.constructor],
+    ])) {
+      assert.throws(() => from(ROWS).select(read).toDocument(), (error) => error.code === 'JL0108'
+        && error.message.includes(`so .${key} is read off the function and not off a value`), key);
+    }
+    // the member that was meant is get()'s to read
+    assert.deepStrictEqual(from(ROWS).select((/** @type {any} */ r) => r.get('day').length()).toArray(), [10, 10]);
   });
 
   it('embedding a method read is JL0005 and converting it JL0108, as before', () => {
