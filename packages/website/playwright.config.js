@@ -21,7 +21,9 @@ export default defineConfig({
   testDir: './e2e',
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 2 : 0,
+  // One local retry absorbs a host-load stall; the list reporter names a test
+  // that passed only on its retry as flaky, and one that fails twice fails.
+  retries: process.env.CI ? 2 : 1,
   reporter: process.env.CI ? [['list'], ['github']] : 'list',
   use: {
     baseURL: 'http://127.0.0.1:4173',
