@@ -1050,12 +1050,6 @@ what each does is its own documentation's job
   len: 0 } }` (the date-part method's `length`) where a member named `day` was
   meant; `name` and `toString()` alike. Refusing them is a stricter refusal (a
   minor).
-- [ ] **`sql.call` lets an option replace the call's own members.** The
-  relational builder spreads `options` over the node it builds, so an option
-  named `name` or `args` replaces that member: `sql.call('lower', [1], { name:
-  'upper' })` plans `UPPER(?)`, and `{ distinct: true, args: [b] }` counts `b`.
-  Wanted: the options checked, as `sql.like` and `sql.contains` check theirs
-  (a stricter refusal, so a minor).
 
 ## Lexical search (cross-package)
 

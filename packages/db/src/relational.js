@@ -69,8 +69,13 @@ export const sql = Object.freeze({
   not: (value) => node('not', { value }),
   /** @param {any} value @param {any[]|object} values @param {boolean} [negate] */
   in: (value, values, negate = false) => node('in', { value, values, negate }),
-  /** @param {string} name @param {any[]} args @param {{distinct?:boolean}} [options] */
-  call: (name, args, options = {}) => node('call', { name, args, ...options }),
+  /** A function call; its options are checked, so none names `name` or
+   * `args` over the call's own.
+   * @param {string} name @param {any[]} args @param {{distinct?:boolean}} [options] */
+  call: (name, args, options = {}) => {
+    check(options, ['distinct'], 'call options');
+    return node('call', { name, args, ...(options.distinct === undefined ? {} : { distinct: options.distinct }) });
+  },
   /** @param {any} value @param {string} type */
   cast: (value, type) => node('cast', { value, type }),
   /** @param {any} value @param {'BINARY'|'NOCASE'|'RTRIM'|'C'|'POSIX'} collation */

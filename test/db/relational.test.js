@@ -297,4 +297,9 @@ it('a literal substring matches as text: sql.contains, LIKE with an ESCAPE, and 
   assert.throws(() => sql.like(t, 'x', /** @type {any} */ ({ escpae: '!' })), refused("unknown LIKE options member 'escpae'"));
   assert.throws(() => sql.like(t, 'x', /** @type {any} */ ({ negate: 'yes' })), refused('LIKE negate must be boolean'));
   assert.throws(() => sql.contains(t, 'x', /** @type {any} */ ({ nocase: true })), refused("unknown contains options member 'nocase'"));
+  // nor may an option name a member of the call it builds
+  assert.throws(() => call('lower', [t], /** @type {any} */ ({ name: 'upper' })), refused("unknown call options member 'name'"));
+  assert.throws(() => call('count', [t], /** @type {any} */ ({ distinct: true, args: ['x'] })), refused("unknown call options member 'args'"));
+  assert.throws(() => call('count', [t], /** @type {any} */ ([])), refused('call options must be an object'));
+  assert.deepEqual(call('count', [t], { distinct: true }), call('count', [t], { distinct: true }));
 }));

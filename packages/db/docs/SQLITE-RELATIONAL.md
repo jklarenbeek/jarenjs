@@ -98,6 +98,10 @@ is one character other than NUL, and it makes `%`, `_` and itself literal. A
 pattern that ends in its escape matches nothing on SQLite and is the server's
 error on PostgreSQL. To get the position itself, call `instr` on SQLite or
 `strpos` on PostgreSQL: each dialect names the function as its engine does.
+The builders' option bags are closed: `sql.like` reads `escape` and
+`negate`, `sql.contains` `caseInsensitive`, and `sql.call` `distinct`, and
+any other member is refused `JD0038` by name — so an option named like the
+call's own `name` or `args` cannot replace it.
 
 ## Exact writes and bytes
 
