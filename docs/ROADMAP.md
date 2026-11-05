@@ -337,6 +337,23 @@ delete it or fix it.
   `Array.isArray`, `isSchemaType` in tools.js `isNumberType`, `isObjectType`
   and `isArrayClass`). Wanted: one reading of each value, whatever sits
   beside `type`.
+- [ ] **An object member holding `undefined` is present to `required` and
+  passes `type`, and a bare `undefined` passes `type`.** `{ required: ['a']
+  }` accepts `{ a: undefined }` and `{ dependentSchemas: { a: { required:
+  ['b'] } } }` refuses it, as for a member holding any value, while `{
+  type: 'boolean' }` accepts a bare `undefined` and `{ additionalProperties:
+  { type: 'boolean' } }` (the same under `patternProperties` or
+  `unevaluatedProperties`) accepts `{ a: undefined }`, in both modes. Ajv
+  splits the other way: it reads such a member as absent under
+  `properties`, `required` and `dependentSchemas` (refusing the `required`
+  schema above and not applying the `dependentSchemas` one), and tests
+  its value under the other three, refusing them, as it refuses the bare
+  `undefined`. What makes it hard is that JSON sends nothing to compare
+  with: `JSON.stringify({ a: undefined })` sends `{}` and
+  `JSON.stringify(undefined)` no document at all, where an array element
+  holding `undefined` is sent as `null` and so fails `type` (the array
+  section of packages/validate/README.md). Wanted: held for the
+  maintainer's decision; no release changes either reading until then.
 - [ ] **`equalsDeep` takes values whose state is not in their members as
   equal.** Two distinct symbols compare equal, so do `new Number(1)` and `new
   Number(2)`, and two `Boolean` wrappers; `new String('ab')` equals `'ab'`
