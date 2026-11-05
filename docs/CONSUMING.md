@@ -205,7 +205,7 @@ and the live heap they hold — the V8 heap after two forced full
 collections, run on the main thread so each has finished when the heap
 is read, less the same process's heap before the import. Each heap is
 the median of <!--fact:closure.runs-->5<!--/fact--> fresh processes, whose runs differed by at
-most <!--fact:closure.spread-->65 KiB<!--/fact--> for any one subpath; native memory a built-in
+most <!--fact:closure.spread-->45 KiB<!--/fact--> for any one subpath; native memory a built-in
 allocates for itself (`node:crypto`'s, say) is not in it. A heap depends
 on the runtime and the host — these were measured on one machine,
 with <!--fact:closure.host-->Node v24.22.1 on linux x64<!--/fact--> — while a module count is
@@ -306,7 +306,7 @@ included.
 | `./path` | 18 | core 11, json 7 | 0.9 |
 | `./pointer` | 16 | core 10, json 6 | 0.8 |
 | `./query` | 82 | core 61, json 21 | 3.6 |
-| `./rules` | 87 | core 61, json 26 | 3.8 |
+| `./rules` | 87 | core 61, json 26 | 3.7 |
 | `./write` | 20 | core 11, json 9 | 1.0 |
 | `./xquery` | 84 | core 61, json 23 | 3.9 |
 <!--/fact-->
