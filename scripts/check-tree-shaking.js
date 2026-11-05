@@ -160,7 +160,8 @@ if (engineLeak.length > 0)
 // Raised to 45,900 (measured 45829): core's deepFreeze freezing past 256 levels on its own frames, which every pen shares, add 523.
 // Raised to 46,300 (measured 46221): the captured expression's coded refusal of a member read off a method read without its call, which every pen shares (expression 392) add 392.
 // Raised to 47,500 (measured 47448): core's cloneJson copying past 256 levels on its own frames and refusing a cycle at the member that closes it, which every pen shares (object 630, walk 597) add 1227.
-if (schemaBytes > 47500)
+// Raised to 47,600 (measured 47577): a method read's own function members refused as a member read off it is, with call, apply and bind still calling it, which every pen shares (expression 129) add 129.
+if (schemaBytes > 47600)
   throw new Error(`The schema pen bundle grew to ${schemaBytes} bytes.`);
 
 console.log(`Tree-shaking smoke test passed (${schemaBytes} byte schema-pen bundle; no chain module, no engine).`);
@@ -256,7 +257,8 @@ if (chainEdgeLeak.length > 0)
 // Raised to 248,700 (measured 248608): the query engine's position-finding string operators, pattern tokenize, translate and the coded $error operator add 1670.
 // Raised to 249,200 (measured 249134): core's deep equality and freezing past 256 levels on their own frames (object 526) add 526.
 // Raised to 250,900 (measured 250815): a window over a declared root closed as a FLWOR with a one-item projection folded inside it (document 1036, sequence 68), the async cursor's FLWOR over an untouched root (async 185) and the captured expression's coded refusal of a member read off a method read (expression 392) add 1681.
-if (chainBytes > 250900)
+// Raised to 251,100 (measured 251016): a method read's own function members refused as a member read off it is, with call, apply and bind still calling it, which every pen shares (expression 129).
+if (chainBytes > 251100)
   throw new Error(`The chain bundle grew to ${chainBytes} bytes.`);
 
 console.log(`Tree-shaking smoke test passed (${chainBytes} byte chain bundle; no schema-pen module, no client module, no store/validator/formats bytes).`);
@@ -344,7 +346,8 @@ if (modelEngineLeak.length > 0)
 // Raised to 58,100 (measured 58023): core's deepFreeze freezing past 256 levels on its own frames, which every pen shares (object 523) add 523.
 // Raised to 58,500 (measured 58415): the captured expression's coded refusal of a member read off a method read without its call, which every pen shares (expression 392) add 392.
 // Raised to 59,700 (measured 59645): core's cloneJson copying past 256 levels on its own frames and refusing a cycle at the member that closes it, which every pen shares (object 629, walk 597, renames 4) add 1230.
-if (modelBytes > 59700)
+// Raised to 59,800 (measured 59774): a method read's own function members refused as a member read off it is, with call, apply and bind still calling it, which every pen shares (expression 129).
+if (modelBytes > 59800)
   throw new Error(`The model pen bundle grew to ${modelBytes} bytes.`);
 const schemaModelLeak = Object.entries(schemaInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/model/') && info.bytesInOutput > 0);
@@ -406,7 +409,8 @@ if (jsltEngineLeak.length > 0)
 // Raised to 27,900 (measured 27811): the shared capture's reading of an index off a relation as a hop for in() and all() add 647.
 // Raised to 28,400 (measured 28392): core's deepFreeze freezing past 256 levels on its own frames, which every pen shares (object 522) add 522.
 // Raised to 28,800 (measured 28784): the captured expression's coded refusal of a member read off a method read without its call, which every pen shares (expression 392) add 392.
-if (jsltBytes > 28800)
+// Raised to 29,000 (measured 28913): a method read's own function members refused as a member read off it is, with call, apply and bind still calling it, which every pen shares (expression 129).
+if (jsltBytes > 29000)
   throw new Error(`The JSLT pen bundle grew to ${jsltBytes} bytes.`);
 const chainJsltLeak = Object.entries(chainInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/jslt/') && info.bytesInOutput > 0);
@@ -484,7 +488,8 @@ if (migrationEngineLeak.length > 0)
 // Raised to 35,100 (measured 35055): the canonical writer's coded refusal of a text past the host's longest string, with the core check that tells it from a stack overflow, add 373.
 // Raised to 35,600 (measured 35577): core's deepFreeze freezing past 256 levels on its own frames, which every pen shares (object 522) add 522.
 // Raised to 36,000 (measured 35969): the captured expression's coded refusal of a member read off a method read without its call, which every pen shares (expression 392) add 392.
-if (migrationBytes > 36000)
+// Raised to 36,200 (measured 36098): a method read's own function members refused as a member read off it is, with call, apply and bind still calling it, which every pen shares (expression 129).
+if (migrationBytes > 36200)
   throw new Error(`The migration pen bundle grew to ${migrationBytes} bytes.`);
 const chainMigrationLeak = Object.entries(chainInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/migration/') && info.bytesInOutput > 0);
@@ -696,7 +701,8 @@ if (asyncLiveLeak.length)
 // Raised to 1,135,800 (measured 1135731): every transaction view of a store sharing one hidden class — its lazy members read through getters the store builds once, over a state slot on the view, where a getter of its own per view kept each finished transaction in the old generation until a full collection (store 323), add 323.
 // Raised to 1,135,900 (measured 1135848): a job worker's start() refused while its stop() runs — the stopping flag, its refusal message and the stop body moved behind it (jobs 117).
 // Raised to 1,136,300 (measured 1136224): a settling call idempotent over its own attempt's row only in the state it writes — the three verbs' state lists, the refusal naming what the lease left, and a worker recording an attempt its own cancellation took as cancelled (jobs 376).
-if (clientBytes > 1136300)
+// Raised to 1,136,500 (measured 1136432): a method read's own function members refused as a member read off it is, with call, apply and bind still calling it, which every pen shares (expression 129), and sql.call's options checked so none replaces the call's own members (relational 79).
+if (clientBytes > 1136500)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 
@@ -757,7 +763,8 @@ if (contractPenLeak.length > 0)
 // Raised to 59,500 (measured 59402): core's deepFreeze freezing past 256 levels on its own frames, which every pen shares (object 523) add 523.
 // Raised to 59,800 (measured 59794): the captured expression's coded refusal of a member read off a method read without its call, which every pen shares (expression 392) add 392.
 // Raised to 61,100 (measured 61021): core's cloneJson copying past 256 levels on its own frames and refusing a cycle at the member that closes it, which every pen shares (object 630, walk 597) add 1227.
-if (contractPenBytes > 61100)
+// Raised to 61,200 (measured 61150): a method read's own function members refused as a member read off it is, with call, apply and bind still calling it, which every pen shares (expression 129).
+if (contractPenBytes > 61200)
   throw new Error(`The contract pen bundle grew to ${contractPenBytes} bytes.`);
 const chainContractLeak = Object.entries(chainInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/contract/') && info.bytesInOutput > 0);
@@ -827,7 +834,8 @@ if (flowPenLeak.length > 0)
 // Raised to 28,500 (measured 28494): core's deepFreeze freezing past 256 levels on its own frames, which every pen shares (object 522) add 522.
 // Raised to 28,900 (measured 28886): the captured expression's coded refusal of a member read off a method read without its call, which every pen shares (expression 392) add 392.
 // Raised to 30,200 (measured 30179): core's cloneJson copying past 256 levels on its own frames and refusing a cycle at the member that closes it, which every pen shares (object 627, walk 595, string 66, renames 5) add 1293.
-if (flowPenBytes > 30200)
+// Raised to 30,400 (measured 30308): a method read's own function members refused as a member read off it is, with call, apply and bind still calling it, which every pen shares (expression 129).
+if (flowPenBytes > 30400)
   throw new Error(`The flow pen bundle grew to ${flowPenBytes} bytes.`);
 const chainFlowLeak = Object.entries(chainInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/flow/') && info.bytesInOutput > 0);
@@ -893,7 +901,8 @@ if (appPenLeak.length > 0)
 // Raised to 60,900 (measured 60886): core's deepFreeze freezing past 256 levels on its own frames, which every pen shares (object 523) add 523.
 // Raised to 61,300 (measured 61278): the captured expression's coded refusal of a member read off a method read without its call, which every pen shares (expression 392) add 392.
 // Raised to 62,600 (measured 62505): core's cloneJson copying past 256 levels on its own frames and refusing a cycle at the member that closes it, which every pen shares (object 630, walk 597) add 1227.
-if (appPenBytes > 62600)
+// Raised to 62,700 (measured 62634): a method read's own function members refused as a member read off it is, with call, apply and bind still calling it, which every pen shares (expression 129).
+if (appPenBytes > 62700)
   throw new Error(`The app pen bundle grew to ${appPenBytes} bytes.`);
 const chainAppLeak = Object.entries(chainInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/app/') && info.bytesInOutput > 0);
@@ -957,7 +966,8 @@ if (formsPenLeak.length > 0)
 // Raised to 50,100 (measured 50099): core's deepFreeze freezing past 256 levels on its own frames, which every pen shares (object 523) add 523.
 // Raised to 50,500 (measured 50491): the captured expression's coded refusal of a member read off a method read without its call, which every pen shares (expression 392) add 392.
 // Raised to 51,800 (measured 51718): core's cloneJson copying past 256 levels on its own frames and refusing a cycle at the member that closes it, which every pen shares (object 630, walk 597) add 1227.
-if (formsPenBytes > 51800)
+// Raised to 51,900 (measured 51847): a method read's own function members refused as a member read off it is, with call, apply and bind still calling it, which every pen shares (expression 129).
+if (formsPenBytes > 51900)
   throw new Error(`The forms pen bundle grew to ${formsPenBytes} bytes.`);
 const chainFormsLeak = Object.entries(chainInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/forms/') && info.bytesInOutput > 0);
