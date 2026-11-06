@@ -28,6 +28,7 @@ import { writeFileSync } from 'node:fs';
 import { compileDag } from '@jarenjs/flow';
 
 import { formatNs } from './lib/fmt.js';
+import { timeItAsync } from './lib/measure.js';
 
 //#region options
 const args = process.argv.slice(2);
@@ -147,13 +148,6 @@ for (const n of SIZES) {
   console.log(`  hand-written JS     ${formatNs(handAsyncMs * 1e6)}  (${(dagAsyncMs / handAsyncMs).toFixed(1)}× the hand-written cost)`);
 }
 
-/** ms/op for an async fn over `iterations` runs, after two warmups. */
-async function timeItAsync(fn, iterations) {
-  await fn(); await fn();
-  const t0 = process.hrtime.bigint();
-  for (let i = 0; i < iterations; i++) await fn();
-  return Number(process.hrtime.bigint() - t0) / 1e6 / iterations;
-}
 //#endregion
 
 if (OUTPUT === 'json') {

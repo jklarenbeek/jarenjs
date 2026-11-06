@@ -80,7 +80,7 @@ import fastJson from 'fast-json-stringify';
 
 import { ROUTES, PROBES, routesToContract, opId } from '../test/contract/helpers.js';
 import { pad, padLeft, formatNs } from './lib/fmt.js';
-import { measureNsPerOp as measureNs } from './lib/measure.js';
+import { measureNsPerOp as measureNs, measureNsPerOpAsync as measureNsAsync } from './lib/measure.js';
 import { parseSuiteArgs } from './lib/args.js';
 import { writeJsonResults } from './lib/results.js';
 
@@ -576,19 +576,6 @@ async function runDispatchTable(engines, options) {
     rows.push({ name: request.name, results });
   }
   return { title: 'Dispatch, in-process — ns per request (route + validate + handler + serialize)', columns, rows };
-}
-
-/**
- * ns/op for an async operation, awaited each call.
- * @param {() => Promise<any>} fn
- * @param {number} iterations
- * @param {number} warmup
- */
-async function measureNsAsync(fn, iterations, warmup) {
-  for (let i = 0; i < warmup; i++) await fn();
-  const start = process.hrtime.bigint();
-  for (let i = 0; i < iterations; i++) await fn();
-  return Number(process.hrtime.bigint() - start) / iterations;
 }
 
 /**

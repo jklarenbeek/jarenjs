@@ -44,7 +44,7 @@ import { writeFileSync } from 'node:fs';
 import { mermaidPieRenderer } from '@jarenjs/charts/transforms/mermaid-adapter';
 import { parseMermaid, compileMermaid, layoutDiagram, diagramToVnode } from '@jarenjs/mermaid';
 import { CORPUS, PIE_CORPUS, buildScaled, buildGantt } from './fixtures/mermaid.js';
-import { timeIt } from './lib/measure.js';
+import { timeIt, measureNsPerOpAsync } from './lib/measure.js';
 
 const args = process.argv.slice(2);
 const flags = {
@@ -141,10 +141,8 @@ function computeScorecard() {
  * @returns {Promise<number>} ms/op
  */
 async function timeItAsync(fn, iterations) {
-  for (let w = 0; w < 5; w++) await fn(); // warm JIT + grammar init + settle GC
-  const t0 = process.hrtime.bigint();
-  for (let i = 0; i < iterations; ++i) await fn();
-  return Number(process.hrtime.bigint() - t0) / 1e6 / iterations;
+  // five warmups: JIT, the grammar's first init, and the GC settling
+  return (await measureNsPerOpAsync(fn, iterations, 5)) / 1e6;
 }
 
 const SCALES = [

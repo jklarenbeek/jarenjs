@@ -3,7 +3,113 @@
 // callers - every suite tunes its own - so each helper takes them as
 // arguments instead of reading a module constant.
 
+import { appendFileSync } from 'node:fs';
+import { basename } from 'node:path';
+
 import { formatNs } from './fmt.js';
+
+// Rounds. Every helper below splits its iteration count into ROUNDS timed
+// blocks after one warmup, the loop index running on across them, so a row
+// does the same calls as one block would. BENCH_ROUNDS overrides the count
+// (1 is one block of every iteration). BENCH_ROUNDS_LOG names a file each
+// row's per-round ns/op is appended to as one JSON line.
+const DEFAULT_ROUNDS = 1;
+const ROUNDS = roundsFromEnv();
+const ROUNDS_LOG = process.env.BENCH_ROUNDS_LOG || null;
+let rowSeq = 0;
+
+function roundsFromEnv() {
+  const raw = process.env.BENCH_ROUNDS;
+  if (raw === undefined || raw === '')
+    return DEFAULT_ROUNDS;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 1)
+    throw new Error(`BENCH_ROUNDS must be a positive integer, got ${JSON.stringify(raw)}`);
+  return n;
+}
+
+/**
+ * The iteration count of each round: ROUNDS near-equal parts of
+ * `iterations`, never an empty one.
+ * @param {number} iterations
+ * @returns {number[]}
+ */
+function roundSizes(iterations) {
+  const rounds = Math.max(1, Math.min(ROUNDS, iterations));
+  const base = Math.floor(iterations / rounds);
+  const extra = iterations - base * rounds;
+  return Array.from({ length: rounds }, (_, r) => base + (r < extra ? 1 : 0));
+}
+
+/**
+ * A row's figure from its rounds' ns/op: the median round. The fastest
+ * round would drop the collections a row's own garbage causes, which is a
+ * cost the row has; the median keeps them once rounds are long enough to
+ * hold several, and drops a lone pause a round happened to catch.
+ * @param {string | null} label
+ * @param {number[]} perRound
+ * @returns {number}
+ */
+function settle(label, perRound) {
+  if (ROUNDS_LOG !== null) {
+    appendFileSync(ROUNDS_LOG, `${JSON.stringify({
+      suite: basename(process.argv[1] ?? ''), seq: rowSeq, label, rounds: perRound,
+    })}\n`);
+  }
+  rowSeq += 1;
+  const sorted = perRound.toSorted((a, b) => a - b);
+  const mid = sorted.length >> 1;
+  return sorted.length % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+/**
+ * Time `iterations` calls of `fn` in rounds; ns/op of the row. With
+ * `passIndex` each call gets the loop index, which runs on across rounds;
+ * without it `fn` is called with no argument, as the helpers always did.
+ * @param {(i: number) => unknown} fn
+ * @param {number} iterations
+ * @param {string | null} label
+ * @param {boolean} passIndex
+ * @returns {number}
+ */
+function timeRounds(fn, iterations, label, passIndex) {
+  const perRound = [];
+  let first = 0;
+  for (const count of roundSizes(iterations)) {
+    const end = first + count;
+    const start = process.hrtime.bigint();
+    if (passIndex) {
+      for (let i = first; i < end; i++)
+        fn(i);
+    }
+    else {
+      for (let i = first; i < end; i++)
+        fn();
+    }
+    perRound.push(Number(process.hrtime.bigint() - start) / count);
+    first = end;
+  }
+  return settle(label, perRound);
+}
+
+/**
+ * The awaited twin of `timeRounds`: `iterations` awaited calls of `fn`
+ * in rounds; ns/op of the row.
+ * @param {() => unknown} fn
+ * @param {number} iterations
+ * @param {string | null} label
+ * @returns {Promise<number>}
+ */
+async function timeRoundsAsync(fn, iterations, label) {
+  const perRound = [];
+  for (const count of roundSizes(iterations)) {
+    const start = process.hrtime.bigint();
+    for (let i = 0; i < count; i++)
+      await fn();
+    perRound.push(Number(process.hrtime.bigint() - start) / count);
+  }
+  return settle(label, perRound);
+}
 
 /**
  * Nanoseconds per call over `iterations` runs, after `warmup` unmeasured
@@ -16,11 +122,7 @@ import { formatNs } from './fmt.js';
 export function measureNsPerOp(fn, iterations, warmup) {
   for (let i = 0; i < warmup; i++)
     fn();
-  const start = process.hrtime.bigint();
-  for (let i = 0; i < iterations; i++)
-    fn();
-  const end = process.hrtime.bigint();
-  return Number(end - start) / iterations;
+  return timeRounds(fn, iterations, null, false);
 }
 
 /**
@@ -33,10 +135,34 @@ export function measureNsPerOp(fn, iterations, warmup) {
 export function timeIt(fn, iterations) {
   fn();
   fn();
-  const t0 = process.hrtime.bigint();
-  for (let i = 0; i < iterations; ++i)
-    fn();
-  return Number(process.hrtime.bigint() - t0) / 1e6 / iterations;
+  return timeRounds(fn, iterations, null, false) / 1e6;
+}
+
+/**
+ * Nanoseconds per awaited call over `iterations` runs, after `warmup`
+ * unmeasured awaited runs.
+ * @param {() => unknown} fn
+ * @param {number} iterations
+ * @param {number} warmup
+ * @returns {Promise<number>} ns/op
+ */
+export async function measureNsPerOpAsync(fn, iterations, warmup) {
+  for (let i = 0; i < warmup; i++)
+    await fn();
+  return timeRoundsAsync(fn, iterations, null);
+}
+
+/**
+ * Milliseconds per awaited call over `iterations` runs, after two
+ * unmeasured awaited calls.
+ * @param {() => unknown} fn
+ * @param {number} iterations
+ * @returns {Promise<number>} ms/op
+ */
+export async function timeItAsync(fn, iterations) {
+  await fn();
+  await fn();
+  return (await timeRoundsAsync(fn, iterations, null)) / 1e6;
 }
 
 /**
@@ -50,10 +176,7 @@ export function timeIt(fn, iterations) {
 export function makeMeasure(warmup, iterations) {
   return function measure(label, run) {
     for (let i = 0; i < warmup; i++) run(i);
-    const start = process.hrtime.bigint();
-    for (let i = 0; i < iterations; i++) run(i);
-    const ns = Number(process.hrtime.bigint() - start) / iterations;
-    return { label, ns };
+    return { label, ns: timeRounds(run, iterations, label, true) };
   };
 }
 
@@ -93,7 +216,7 @@ const hrnow = () => process.hrtime.bigint();
  * @returns {Promise<{ ns: number, iterations: number }>}
  */
 export async function measureCell(engine, fn, requestedIterations, budgetNs, floorNs, warmupCap) {
-  let start = hrnow();
+  const start = hrnow();
   await Promise.resolve(fn());
   const pilotNs = Math.max(1, Number(hrnow() - start));
 
@@ -107,21 +230,11 @@ export async function measureCell(engine, fn, requestedIterations, budgetNs, flo
   if (engine.isAsync) {
     for (let i = 0; i < warmup; i++)
       await fn();
-    start = hrnow();
-    for (let i = 0; i < iterations; i++)
-      await fn();
+    return { ns: await timeRoundsAsync(fn, iterations, null), iterations };
   }
-  else {
-    for (let i = 0; i < warmup; i++)
-      fn();
-    start = hrnow();
-    for (let i = 0; i < iterations; i++)
-      fn();
-  }
-  return {
-    ns: Number(hrnow() - start) / iterations,
-    iterations,
-  };
+  for (let i = 0; i < warmup; i++)
+    fn();
+  return { ns: timeRounds(fn, iterations, null, false), iterations };
 }
 
 /**
