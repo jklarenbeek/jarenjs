@@ -13,7 +13,8 @@
  *
  *   1. **Compile** — turning a contract into something callable. Paid once at
  *      startup, so it is the least important of the three; it is here because
- *      it is where Jaren is slowest and hiding it would be dishonest.
+ *      every Zod flavor builds faster than Jaren and hiding that would be
+ *      dishonest.
  *   2. **Verdict** — the cheapest "is this valid?" each engine can give for
  *      input that IS valid.
  *   3. **Adapter** — the shape a real service runs: normalize the input,
@@ -70,6 +71,7 @@ import { writeJsonResults } from './lib/results.js';
 
 const z3 = z3mod.z;
 const DEFAULT_ITERATIONS = 50_000;
+const SCHEMA_POOL = 4096;
 const ENGINES = ['jaren', 'zod4', 'zod3', 'zodmini', 'ajv'];
 
 const ENGINE_LABELS = {
@@ -280,9 +282,11 @@ function ajvAdapter(scenario) {
   });
   addFormats(ajvNormalizing);
   return {
-    // Ajv caches compiled validators by schema object identity, so this must
-    // be handed a distinct object each call or it measures a cache hit.
-    compile: (schema) => { ajv.compile(schema); },
+    // Ajv caches compiled validators by schema object identity, so a schema
+    // object it has seen compiles as a cache hit. Each build drops its entry
+    // again (a Map delete, charged to Ajv), so every timed build is a real
+    // one however often the pool below repeats an object.
+    compile: (schema) => { ajv.compile(schema); ajv.removeSchema(schema); },
     build: () => {
       const check = ajv.compile(scenario.schema);
       const shape = ajvNormalizing.compile(scenario.schema);
@@ -401,9 +405,10 @@ function main() {
   const results = {};
 
   for (const scenario of scenarios) {
-    // Distinct schema objects so an engine that caches by identity (Ajv) is
-    // measured compiling, not looking up.
-    const schemaPool = Array.from({ length: 64 }, () => structuredClone(scenario.schema));
+    // Distinct schema objects, as a service compiles each contract once: a
+    // schema object an engine has just walked builds faster from the cache,
+    // so the pool is large enough that a build never meets a recent one.
+    const schemaPool = Array.from({ length: SCHEMA_POOL }, () => structuredClone(scenario.schema));
     const built = {};
     const dropped = {};
     for (const key of options.engines) {
