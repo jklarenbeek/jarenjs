@@ -434,8 +434,8 @@ options)`), never by import.
   load-time exhaustiveness pact means a new language construct breaks
   the build instead of silently becoming a residual.
 - **The store API is asynchronous** even though every shipped
-  driver is synchronous. Measured cost: ~0.17 µs per point read
-  (~6 %) over the `store.sync` twin. Paid for: the browser's OPFS
+  driver is synchronous. Its measured cost is <!--fact:db.asyncCost-->~0.86 µs per point read (~29 %)<!--/fact-->
+  over the `store.sync` twin (`node benchmark/db.js`). Paid for: the browser's OPFS
   story and any future non-embedded driver need no API change, and
   the sync-capable `chain` keeps the internal composition
   allocation-free so the surface pays exactly one promise per call.

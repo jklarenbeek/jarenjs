@@ -503,14 +503,14 @@ intermediate and is plain data, never an opaque handle.
 
 Calendar math goes through day numbers (`daysFromCivil`/`civilFromDays`),
 never through `Date`: the conversions are ~10 integer operations and allocate
-nothing, where an allocate-mutate-read `Date` round trip costs about 165× as
-much for the same answer. For the same reason every `getDateTypeOf*` getter
+nothing, where an allocate-mutate-read `Date` round trip costs far more for
+the same answer. For the same reason every `getDateTypeOf*` getter
 has a `getEpochOf*` twin — the same validity check and the same engine parse,
 returning epoch milliseconds instead of a `Date` — so a consumer comparing
 against precomputed bounds (the `formatMinimum`/`formatMaximum` validators)
 allocates nothing per value. Formatting is the two-stage compiler again — a
-pattern is scanned once into a chain of appenders, which measured ~4.5×
-against re-scanning it per call.
+pattern is scanned once into a chain of appenders, which measured faster
+than re-scanning it per call.
 
 Parsing is the same compiler run backwards. `compileDateParser` scans a
 pattern once into a chain of readers and returns a function from text to the
@@ -770,8 +770,8 @@ matter goes through the exact orientation predicate, where Turf uses naive
 floating-point arithmetic. That is the trade this module exists to make — it
 is the difference between a containment test that is right on near-collinear
 input and one that is merely fast. Cheap straddle/span tests already skip the
-predicate on edges that cannot affect the answer, which took this from 0.2×
-to about 0.5×; the rest is the predicate itself, and making geography
+predicate on edges that cannot affect the answer, which brought this
+to <!--fact:geo.pip2000-->0.5×<!--/fact-->; the rest is the predicate itself, and making geography
 reachable across the suite never traded it away. The bounding box
 of the same ring and the index build against Flatbush sit within a few tenths
 of level (<!--fact:geo.bbox2000-->1.2×<!--/fact--> and <!--fact:geo.indexBuild-->0.8×<!--/fact-->) and move
@@ -781,9 +781,9 @@ rounded to a win.
 Two former losses were closed by profiling before fixing, and both closures
 carry the lesson:
 
-- **Index build** was 2.6× behind Flatbush, and the assumed cause — the leaf
+- **Index build** was well behind Flatbush, and the assumed cause — the leaf
   sort permuting the four-wide bounds rows on every swap — turned out to be
-  wrong: fixing it moved nothing. A phase profile put ~60% of the build in
+  wrong: fixing it moved nothing. A phase profile put most of the build in
   the *Hilbert distance* computation, a 16-step bisection loop with a float
   division per step. The classical loop is now the bit-parallel transform
   (identical values, verified exhaustively at the corners and over 200k
@@ -796,7 +796,7 @@ carry the lesson:
   into *closure variables* writes a boxed heap number per `+=` — two per
   vertex — where `bboxOf`'s comparisons rarely write at all. The accumulators
   are a small `Float64Array` now (raw double stores, no boxing), and the row
-  is level with Turf.
+  is <!--fact:geo.centroidVerdict-->1.8× faster than turf<!--/fact-->.
 
 ```javascript
 import { orient2d, haversineDistance, ringWinding, geohashEncode } from '@jarenjs/core/geo';

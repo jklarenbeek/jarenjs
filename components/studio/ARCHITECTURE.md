@@ -65,8 +65,8 @@ assets from its host; it has no filesystem, fetch or DOM dependency.
   operator packs. Memoized on the file's IDENTITY (a `createWeakCache`
   from `@jarenjs/core/cache`, keyed inside by registry): validating an
   app compiles its view and renders a frame, so re-deriving the view
-  model per render would recompile the whole project — measured at ~110ms
-  for a charts app, ~0.001ms cached. Files are immutable, so identity is
+  model per render would recompile the whole project, where the cached
+  result is a lookup. Files are immutable, so identity is
   a sound key; pass a fresh object to force a re-check.
 - `src/assemble.js` — `assembleArtifacts`, `classifyChange`, `describe`.
 - `src/errors.js` — `StudioError` on `@jarenjs/core`'s coded base;

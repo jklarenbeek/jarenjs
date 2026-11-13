@@ -3056,8 +3056,8 @@ lint rules.
 over the RFC 8785 canonical bytes of the **public projection** (§12.1)
 — computed with the platform's `crypto.subtle`, memoized per compiled
 contract, so `compileContract` stays synchronous and the digest is paid
-at most once per process (measured here: ~4–5 ms for a 123-operation,
-160 KB document). Because it hashes the projection and the projection
+at most once per process (`npm run benchmark:contract` measures it at
+about <!--fact:contract.revision.ms-->2.4 ms<!--/fact--> for a 123-operation, 160 KB document). Because it hashes the projection and the projection
 materializes defaults in a normative member order:
 
 - two compiles of equal documents agree, across processes and platforms;

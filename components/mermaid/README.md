@@ -427,27 +427,29 @@ renderer was injected). Without a renderer a pie renders the placeholder
 
 ## Performance (measured)
 
-Node v22.22.2, 2026-07-19, `npm run benchmark:mermaid` (run it
-yourself). Mermaid has **two** parsers, so there are two honest
+Measured <!--fact:mermaid.measured-->2026-11-13, Node v24.22.1, each figure the median of 3 processes<!--/fact-->,
+`npm run benchmark:mermaid` (run it yourself). Mermaid has **two** parsers, so there are two honest
 head-to-heads:
 
 - **`@mermaid-js/parser`** is the standalone **Langium** parser — it
   covers only the grammars migrated off Jison (pie, gitGraph, …) and
   **cannot parse flowchart or sequence**. The overlapping type is
-  **pie**, where `@jarenjs/mermaid` is comparable (~0.003–0.006 ms/op
-  either way).
+  **pie**, where `@jarenjs/mermaid` parses <!--fact:mermaid.vsLangium-->10.2–12.7× faster<!--/fact-->
+  than `@mermaid-js/parser`.
 - **Flowchart and sequence** are still parsed by Mermaid's original
   in-tree **Jison** grammars inside the full `mermaid` package (not by
   `@mermaid-js/parser`). Against `mermaid.parse()` (DOM-coupled, run
-  under jsdom), `@jarenjs/mermaid` parses the same sources **roughly two
-  orders of magnitude faster**:
+  under jsdom), `@jarenjs/mermaid` parses the same sources
+  **<!--fact:mermaid.vsJison-->488–728× faster<!--/fact-->**:
 
+<!--fact:mermaid.jisonTable-->
 | flowchart/sequence parse (ms/op) | jaren-mermaid | mermaid.parse (Jison) |
 |---|---|---|
-| flowchart ~5 nodes | ~0.04 | ~10 |
-| sequence ~5 nodes | ~0.02 | ~1.4 |
-| flowchart ~25 nodes | ~0.09 | ~7 |
-| sequence ~25 nodes | ~0.05 | ~4 |
+| flowchart ~5 nodes | 0.008 | 5.8 |
+| sequence ~5 nodes | 0.006 | 4.2 |
+| flowchart ~25 nodes | 0.036 | 18 |
+| sequence ~25 nodes | 0.024 | 15 |
+<!--/fact-->
 
 (`mermaid.parse` is async and runs the whole parse front-end — type
 detection + Jison + validation — so it is heavy and noisy; these are

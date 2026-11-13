@@ -410,10 +410,12 @@ pushes the axis past either end rebuilds. A new category rebuilds too — every
 band width and position moves with it — and so does a stacked chart,
 where one value shifts every bar above it in its category.
 
+<!--fact:charts.barTable-->
 | categories | session tick | wholesale tick |
 |---|---|---|
-| 20 | ~5.7 µs | ~33 µs |
-| 200 | ~11 µs | ~137 µs |
+| 20 | 2.27 µs | 17.7 µs |
+| 200 | 6.47 µs | 119 µs |
+<!--/fact-->
 
 A heatmap's stillness test is its ramp: every cell is coloured by where
 its magnitude sits between the matrix minimum and maximum, so a count
@@ -429,8 +431,8 @@ Only the *vnode* work is O(1) in the bar table above — one rect re-emitted ins
 all of them. The stillness test still rescans every category (a count
 that drops can retire the tallest bar, so extremes cannot be extended)
 and the adapter rebuilds its snapshot arrays, so the bar session's tick
-does grow with the category count. It grows about 2× where the
-wholesale render grows about 4×; the line session's flatness is the
+does grow with the category count. It grows <!--fact:charts.barGrowth-->2.9× where the wholesale render grows 6.7×<!--/fact-->;
+the line session's flatness is the
 stronger claim, and this is deliberately the weaker one.
 
 ## Sampling a big line

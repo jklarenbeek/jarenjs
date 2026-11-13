@@ -855,20 +855,20 @@ benchmark-figure gate so no number here is typed by hand:
   Ajv + fast-json-stringify, called directly with no harness and no
   response validation
   — are <!--fact:contract.dispatch.losses-->2.8–9.8x<!--/fact--> faster than
-  this pipeline. The wide end of that band is the bare `{ok:true}`
-  route, where the rival's compiled serializer answers in ~200 ns and
+  this pipeline. The wide end of that band is <!--fact:contract.dispatch.widest-->the bare `{ok:true}` route, where the rival's compiled serializer answers in 232 ns<!--/fact--> and
   there is almost no work to amortize the pipeline against; on the
   request shapes with real bodies and validation the loss sits at the
   narrow end. That is the measured price of a total dispatch (every
   hostile input settles into a coded response) that also proves the
   server kept its own contract before a byte leaves. Over a real
-  loopback socket the two stacks are level: the socket dominates both.
+  loopback socket <!--fact:contract.loopback-->Fastify is 1.10–1.20× faster<!--/fact-->: the socket dominates
+  both.
 - **The optimization trigger**: on the heaviest in-process row (the
   5×4-body PUT), response serialization is <!--fact:contract.serialization.share-->11.1%<!--/fact-->
   of the request and output validation is <!--fact:contract.validateOutput.share-->30%<!--/fact-->.
   A schema-driven serializer stays unscheduled while serialization is below
-  25%: even making that stage free would move the whole request by only about a
-  tenth. The suite republishes both shares on every measured run; for a large
+  25%: even making that stage free would save the whole request only
+  the <!--fact:contract.serialization.share-->11.1%<!--/fact--> it takes. The suite republishes both shares on every measured run; for a large
   cached representation, validate on rebuild and serve by revision instead of
   paying validation on every request.
 - **Revision**: computing it

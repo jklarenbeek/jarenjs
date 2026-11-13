@@ -255,6 +255,10 @@ and a code-generating backend is not planned. The benchmarks page reports a
 geometric mean against the *fastest rival per scenario* rather than quoting
 only the scenarios Jaren wins.
 
+The suite also times the same adapter row in a fresh process, before the
+engine has optimized anyone's code — the calls a short-lived handler makes
+before it is recycled. Read that table as well: <!--fact:contracts.firstCalls.versus-->over the first 1,000 calls Jaren is faster than zod 3 in every scenario, than zod 4 and zod/mini in 2 of 3, while they are faster on the collection scenario, and slower than ajv in every scenario; over the first 10,000 calls it is faster than zod 3 in every scenario, than zod 4 and zod/mini in 2 of 3, while they are faster on the collection scenario, and than ajv in 1 of 3, while ajv is faster on the command and config scenarios<!--/fact-->.
+
 Compilation is paid once per process. On the compile table <!--fact:contracts.compile.versus-->zod 4, zod 3 and zod/mini build a schema faster than Jaren in every scenario, and ajv builds one slower in every scenario<!--/fact-->.
 A schema with defaults costs Jaren more again, because it checks each default
 against the schemas it meets so that normalizing never turns an accepted

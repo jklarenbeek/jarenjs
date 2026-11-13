@@ -72,7 +72,7 @@ distance is the bit-parallel transform): `search()` returns *candidate*
 indexes — box overlap is necessary, never sufficient, so a caller
 confirms each candidate with the exact test. Null entries index as
 never-matching, keeping positions aligned with the caller's array.
-Build and probe are level with Flatbush (`npm run benchmark:geo`; the
+Against Flatbush <!--fact:geo.flatbush-->the build is 1.2× slower than flatbush and the probe level with flatbush<!--/fact--> (`npm run benchmark:geo`; the
 table lives in [ARCHITECTURE](../ARCHITECTURE.md)).
 
 **A box is refused rather than made too small.** `bboxOfPositions` and

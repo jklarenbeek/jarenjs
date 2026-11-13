@@ -534,8 +534,7 @@ expectation is a bare object where every other case is an array, its
 phone number disagrees with its own CSV, and its degree sign is already
 U+FFFD in the source bytes. No parser can satisfy it.)
 
-**udsv is the honest loss: ~1.3× on the plain record stream, ~1.15× on
-quoted, and ~2× when records become header-keyed objects.** It earns it —
+**udsv is the honest loss: <!--fact:csv.udsvLoss-->1.30× on the plain record stream, 1.05× on quoted, 1.40× on the wide table, and 1.42–3.40× when records become header-keyed objects<!--/fact-->.** It earns it —
 udsv compiles a parser per schema with `new Function`, so each record
 object is built with literal keys the engine can inline-cache, where this
 reader assigns computed keys one by one. This package does not use
@@ -553,12 +552,10 @@ scanned by the engine's substring search rather than one character at a
 time. Streaming is structurally a second walk — a chunk may stop
 mid-field, so `feed` runs a side-effect-free cutter before the parser —
 but the cutter cuts by the same substring search wherever no quote lies
-ahead, and on the plain record stream the whole streaming read now costs
-about 1.1× the wholesale path (2.1 ms vs 1.9 ms), level with udsv's
-chunked reader.
+ahead, and on the plain record stream the whole streaming read now
+costs <!--fact:csv.streaming-->about 1.05× the wholesale path (1.9 ms vs 1.8 ms), and 1.09× the time udsv's chunked reader takes<!--/fact-->.
 
-Stringify leads everything that offers one: 3.6 ms against papaparse's
-6.1 ms and d3-dsv's 4.1 ms.
+Stringify <!--fact:csv.stringify-->leads everything that offers one: 3.4 ms against d3-dsv's 4.1 ms and papaparse's 7 ms<!--/fact-->.
 
 ## Generating JOSL with LLMs
 
@@ -613,30 +610,29 @@ rejected. The only skips are eight byte-level UTF-8 encoding cases that
 cannot be expressed once input is already a JS string.
 
 `npm run benchmark:toml` runs the suite plus a parse/stringify profile
-against `smol-toml`, `@iarna/toml` and `toml`. Representative run
-(accept/reject compliance, 694 cases; Node 22):
+against `smol-toml`, `@iarna/toml` and `toml`. Measured <!--fact:toml.measured-->2026-11-13, Node v24.22.1, each figure the median of 3 processes<!--/fact-->
+(accept/reject compliance, <!--fact:toml.cases-->694<!--/fact--> cases; the fastest cell of each column is bold):
 
-| engine | compliance | parse, 1k-record doc | parse, small doc | parse, suite corpus |
+<!--fact:toml.table-->
+| engine | compliance | parse, 1k-record document | parse, small document | parse, suite corpus |
 | --- | --- | --- | --- | --- |
-| **jaren** | **100.0%** | 7.4 ms | **0.014 ms** | 0.91 ms |
-| smol-toml | 96.8% | **5.7 ms** | 0.021 ms | **0.80 ms** |
-| @iarna/toml | 93.4% | 11.4 ms | 0.029 ms | 2.13 ms |
-| toml | 98.6% | 38.4 ms | 0.080 ms | 4.83 ms |
+| **jaren** | **100.0%** | 7.1 ms | 0.014 ms | 0.73 ms |
+| smol-toml | 97.7% | **4 ms** | **0.007 ms** | **0.44 ms** |
+| @iarna/toml | 93.4% | 10 ms | 0.025 ms | 1.7 ms |
+| toml | 98.6% | 30 ms | 0.07 ms | 4 ms |
+<!--/fact-->
 
-jaren is the only engine at 100% and the only one that parses chunk
+jaren is <!--fact:toml.compliance-->the only engine at 100%<!--/fact--> and the only one that parses chunk
 streams. Whole-document parsing walks the source once — the value
 parsers already stop at the newlines TOML forbids a construct from
 crossing, so with the whole text in hand the parser finds each logical
-line's end itself and the cutter's separate pass is not needed. That is
-worth ~1.45× over the two-pass version and puts jaren ahead on small
-documents; on the 90 KB record stream smol-toml still leads, by ~1.3×
-rather than the ~1.9× it led by before. Chunk feeding keeps the cutter,
+line's end itself and the cutter's separate pass is not needed. Against
+smol-toml on whole documents, <!--fact:toml.vsSmol-->smol-toml leads every parse row: 1.8× on the 1k-record document, 2.0× on the small document and 1.7× on the suite corpus<!--/fact-->. Chunk feeding keeps the cutter,
 because only a side-effect-free pre-pass can decide whether a line is
-complete when a chunk may stop mid-token — and it is held to the same
-694 cases, fed one character at a time.
+complete when a chunk may stop mid-token — and it is held to
+the same <!--fact:toml.cases-->694<!--/fact--> cases, fed one character at a time.
 
-Stringify leads: 2.5 ms against smol-toml's 2.7 ms and `@iarna/toml`'s
-6.9 ms on the same document. The writer keeps its error path on a
+Stringify <!--fact:toml.stringify-->leads everything that offers one: 2.2 ms against smol-toml's 2.6 ms and `@iarna/toml`'s 6.8 ms<!--/fact--> on the same document. The writer keeps its error path on a
 mutable stack instead of allocating per key, emits each section header
 from its parent's already-formatted prefix, and copies unescaped string
 runs whole.

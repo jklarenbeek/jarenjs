@@ -95,8 +95,8 @@ table. `renderToString(mdToVnode(doc))` still works — it is simply no
 longer how anyone gets a string.
 
 A string built by folding into an accumulator beat one built from an
-array of chunks joined at the end at every document size measured
-(1.2–2.1× at 2–100 kB), so the emitter concatenates.
+array of chunks joined at the end at every document size measured,
+from 2 to 100 kB, so the emitter concatenates.
 
 Every node type lands in both tables in the same change. A type that one
 emitter knows and the other does not is the exact divergence this

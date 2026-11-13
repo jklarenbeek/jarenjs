@@ -375,6 +375,250 @@ export function changeflowFigures(report) {
     '', 'Selective maintenance avoids repeated full SQL evaluation. Initialization and high-fan-out maintenance can cost more than rerunning; the table includes both. Offset groups remain rerun in both requested modes.',
   ].join('\n') + '\n\n';
 }
+//#region the suite rows the package documents quote
+
+/** A ratio at the precision a reader uses: whole from a hundred up, one
+ * decimal below that, two significant figures under one. */
+const mag = (x) => (x >= 100 ? thousands(Math.round(x)) : x >= 1 ? ratio(x) : Number(x.toPrecision(2)).toString());
+/** A duration that also has a seconds unit, for the rows a rival takes seconds over. */
+const durS = (x) => (x >= 1e9 ? `${Number((x / 1e9).toPrecision(3))} s` : dur(x));
+/** A ratio at two decimals, for the near-level rows where one decimal reads as a tie. */
+const fix2 = (x) => x.toFixed(2);
+/** A suite's engine label without its package version: `fontoxpath@3.34.0` → `3.34.0`. */
+const versionOf = (label) => label.split('@').pop();
+
+/**
+ * A band of `rival / mine` ratios as the words it supports — a win band,
+ * a loss band, or one that straddles level — so a sentence built on it
+ * cannot say "faster" over a row that lost. The caller writes " than".
+ * @param {number[]} xs @param {(x: number) => string} [fmt] @param {string} [unit]
+ */
+function lead(xs, fmt = ratio, unit = '×') {
+  if (xs.length === 0) throw new Error('no comparable rows to state a lead over — regenerate the suite before quoting one');
+  if (Math.min(...xs) >= 1) return `${band(xs, fmt)}${unit} faster`;
+  if (Math.max(...xs) < 1) return `${band(xs.map((x) => 1 / x), fmt)}${unit} slower`;
+  return `between ${fmt(1 / Math.min(...xs))}${unit} slower and ${fmt(Math.max(...xs))}${unit} faster`;
+}
+
+/** One geo row against its rival in words: level within 5 %, otherwise
+ * faster or slower by the measured ratio. @param {string} name */
+function geoVerdict(name) {
+  const row = geoRow(name);
+  const r = row.rival / row.ours;
+  if (r >= 1 / 1.05 && r <= 1.05) return `level with ${row.rivalName}`;
+  return r > 1 ? `${ratio(r)}× faster than ${row.rivalName}` : `${ratio(1 / r)}× slower than ${row.rivalName}`;
+}
+
+/** When a suite was measured and on what Node, and — under the settled
+ * method — how many processes each figure is the median of.
+ * @param {string} suite */
+function measuredOn(suite) {
+  const d = data(suite);
+  const stamp = d.date ?? d.metadata?.timestamp;
+  if (typeof stamp !== 'string' || typeof d.node !== 'string') {
+    throw new Error(`${suite}.json carries no measurement date — regenerate it before quoting its numbers`);
+  }
+  const record = data('meta').measurement?.[suite];
+  const median = record?.method === 'settled' && record.processes > 1
+    ? `, each figure the median of ${record.processes} processes` : '';
+  return `${stamp.slice(0, 10)}, Node ${d.node}${median}`;
+}
+
+/** The query shapes of the JSONPath scale document, in the README's words. */
+const JSONPATH_SHAPES = {
+  '$.items[42].name': 'singular',
+  '$.items[*].id': 'wildcard',
+  '$.items[100:200].id': 'slice',
+  '$.items[?@.price < 10].name': 'filter',
+  '$.items[?match(@.name, "item-1.*")].id': 'regexp filter',
+  '$..value': 'descendant',
+};
+
+/** The JSONPath scale rows against json-p3: shape, both timings, json-p3 over Jaren. */
+function jsonpathScale() {
+  const rows = (data('jsonpath').profile.scaleRows ?? [])
+    .filter((r) => Number.isFinite(r.engines.jaren) && Number.isFinite(r.engines['json-p3']));
+  if (rows.length === 0) throw new Error('jsonpath.json carries no scale rows — regenerate it with --scale before quoting one');
+  return rows.map((r) => ({
+    selector: r.selector,
+    shape: `${JSONPATH_SHAPES[r.selector] ?? 'query'} \`${r.selector}\``,
+    mine: r.engines.jaren,
+    rival: r.engines['json-p3'],
+    ratio: r.engines['json-p3'] / r.engines.jaren,
+  }));
+}
+
+/** One JSON Pointer table, by key. */
+function pointerTable(key) {
+  const t = data('jsonpointer').tables.find((x) => x.key === key);
+  if (t === undefined) throw new Error(`jsonpointer.json carries no '${key}' table — regenerate it before quoting one`);
+  return t;
+}
+/**
+ * The compiled getter against a rival, row by row: the rival's time over
+ * the getter's. With several rival columns each row takes the fastest of
+ * them, the route the rival's own user would take.
+ * @param {string} key @param {string[]} rivals
+ */
+function pointerRatios(key, rivals) {
+  const t = pointerTable(key);
+  const mine = t.columns.indexOf('jaren compiled');
+  const cols = rivals.map((c) => t.columns.indexOf(c));
+  if (mine === -1 || cols.includes(-1)) throw new Error(`jsonpointer.json '${t.title}' lacks a column it is quoted against`);
+  return t.rows.flatMap((r) => {
+    const theirs = cols.map((c) => r.results[c]).filter((v) => Number.isFinite(v) && v > 0);
+    if (!Number.isFinite(r.results[mine]) || theirs.length === 0) return [];
+    return [{ name: r.name, ratio: Math.min(...theirs) / r.results[mine] }];
+  });
+}
+
+/** The books a bookstore document holds, from its label. */
+function booksOf(document) {
+  const books = /\((\d[\d,]*) books/u.exec(document)?.[1];
+  if (books === undefined) throw new Error(`cannot read a book count from '${document}'`);
+  return Number(books.replace(/,/gu, ''));
+}
+
+/**
+ * The query or JSLT suite as a table: the smallest and the largest
+ * document, every scenario as the suite lists it, Jaren's time and each
+ * rival's time with its ratio over Jaren's. A scenario the largest
+ * document did not run is shown at the largest that ran it, and says so.
+ * @param {'jsonquery' | 'jslt'} suite @param {[string, string][]} rivals - [engine key, column label]
+ * @param {string} compileLabel
+ */
+function bookstoreTable(suite, rivals, compileLabel) {
+  const d = data(suite);
+  const timed = (r) => Number.isFinite(r.engines.jaren);
+  const documents = [...new Set(d.rows.map((r) => r.document))].sort((a, b) => booksOf(a) - booksOf(b));
+  const cell = (value, mine) => (Number.isFinite(value) ? `${durS(value)} (${mag(value / mine)}x)` : 'n/a');
+  const line = (name, mine, results) => `| ${name} | ${durS(mine)} | ${rivals.map(([key]) => cell(results[key], mine)).join(' | ')} |`;
+  const blank = ` |${rivals.map(() => ' |').join('')}`;
+  const lines = [`| Scenario | Jaren | ${rivals.map(([, label]) => label).join(' | ')} |`,
+    `|---|---|${rivals.map(() => '---|').join('')}`];
+  for (const document of [documents[0], documents[documents.length - 1]]) {
+    lines.push(`| **${thousands(booksOf(document))}-book bookstore** |${blank}`);
+    for (const scenario of d.scenarios) {
+      let row = d.rows.find((r) => r.scenario === scenario.key && r.document === document);
+      let note = '';
+      if (row === undefined || !timed(row)) {
+        row = d.rows.filter((r) => r.scenario === scenario.key && timed(r))
+          .sort((a, b) => booksOf(b.document) - booksOf(a.document))[0];
+        if (row === undefined) continue;
+        note = ` — measured at ${thousands(booksOf(row.document))} books`;
+      }
+      lines.push(line(`${scenario.title}${note}`, row.engines.jaren, row.engines));
+    }
+  }
+  const c = d.compile?.results;
+  if (c === undefined || !Number.isFinite(c.jaren)) throw new Error(`${suite}.json carries no compile row — regenerate it before quoting one`);
+  lines.push(`| **${compileLabel}** | ${durS(c.jaren)} | ${rivals.map(([key]) => cell(c[key], c.jaren)).join(' | ')} |`);
+  return `\n${lines.join('\n')}\n`;
+}
+
+/** Every timed `rival / jaren` ratio of a bookstore suite a predicate keeps. */
+function bookstoreRatios(suite, rival, keep) {
+  return data(suite).rows
+    .filter((r) => keep(r) && Number.isFinite(r.engines.jaren) && Number.isFinite(r.engines[rival]) && r.engines.jaren > 0)
+    .map((r) => r.engines[rival] / r.engines.jaren);
+}
+
+/** One CSV profile table's rows by name. */
+function csvRows(table) {
+  const rows = data('csv').profile[table];
+  if (!Array.isArray(rows) || rows.length === 0) throw new Error(`csv.json carries no '${table}' profile — regenerate it before quoting one`);
+  return rows;
+}
+/** The CSV rows in the README's words. */
+const CSV_SHAPES = { 'records 10k x 6 (plain)': 'the plain record stream', 'quoted 10k x 3': 'quoted', 'wide 1k x 50': 'the wide table' };
+
+/** The TOML parse rows in the README's words. */
+const TOML_SHAPES = { 'records-1k (~90KB)': 'the 1k-record document', 'spec-example-1 (small doc)': 'the small document', 'valid corpus (each file)': 'the suite corpus' };
+const TOML_ENGINES = ['jaren', 'smol-toml', '@iarna/toml', 'toml'];
+
+/**
+ * "leads …: 2.2 ms against Y's 2.6 ms and Z's 6.8 ms" — the one-row
+ * stringify comparisons of the CSV and TOML profiles, led by whoever is
+ * fastest rather than by us.
+ * @param {Record<string, number | null>} results @param {(name: string) => string} label
+ */
+function stringifyLeader(results, label) {
+  const timed = Object.entries(results).filter(([, v]) => Number.isFinite(v)).sort((a, b) => a[1] - b[1]);
+  if (!timed.some(([name]) => name === 'jaren')) throw new Error('no jaren stringify row — regenerate the suite before quoting one');
+  const [[winner, best], ...rest] = timed;
+  const head = winner === 'jaren' ? `leads everything that offers one: ${ms(best)} ms`
+    : `trails ${label(winner)}: ${label(winner)}'s ${ms(best)} ms`;
+  return `${head} against ${listOf(rest.map(([name, v]) => `${label(name)}'s ${ms(v)} ms`))}`;
+}
+
+/** A row of the view suite, by label. */
+function viewRow(table, label) {
+  const row = byLabel(data('view').tables[table] ?? [], label);
+  if (row === undefined) throw new Error(`view.json's '${table}' table has no '${label}' row — regenerate it before quoting one`);
+  return row.ns;
+}
+
+/** A row of the flow suite's compile table, rival over jaren, at every size. */
+const flowCompileRatios = () => Object.values(data('flow').compile).map((rows) =>
+  byLabel(rows, 'xstate createMachine+Actor').ns / byLabel(rows, 'jaren compileFsm').ns);
+
+/** One contract.json table by the start of its title. */
+function contractTable(prefix) {
+  const t = data('contract').tables.find((x) => x.title.startsWith(prefix));
+  if (t === undefined) throw new Error(`contract.json carries no '${prefix}' table — regenerate it before quoting one`);
+  return t;
+}
+
+/** One of the contracts suite's first-calls tables, by the start of its title. */
+function contractsFirstCalls() {
+  const fc = data('contracts').firstCalls;
+  if (fc === undefined || !Array.isArray(fc.tables) || fc.tables.length === 0) {
+    throw new Error('contracts.json carries no firstCalls tables — regenerate it before quoting one');
+  }
+  return fc;
+}
+
+/**
+ * Where Jaren stands against every rival column of one contracts table:
+ * the rivals it beats in every scenario, those that beat it in every one,
+ * and the split ones with the scenarios they take.
+ * @param {any} t
+ */
+function standingAll(t) {
+  const mine = t.columns.indexOf('@jarenjs/validate');
+  if (mine === -1) throw new Error(`contracts.json '${t.title}' names no @jarenjs/validate column`);
+  const ahead = [];
+  const behind = [];
+  const split = [];
+  for (const rival of t.columns.filter((c, i) => i !== mine)) {
+    const col = t.columns.indexOf(rival);
+    const timed = t.rows.filter((r) => Number.isFinite(r.results[mine]) && Number.isFinite(r.results[col]));
+    if (timed.length === 0) continue;
+    const lost = timed.filter((r) => !(r.results[mine] < r.results[col]));
+    if (lost.length === 0) ahead.push(rival);
+    else if (lost.length === timed.length) behind.push(rival);
+    else split.push({ rival, won: timed.length - lost.length, of: timed.length, lost: lost.map(scenarioOf) });
+  }
+  const parts = [];
+  if (ahead.length > 0) parts.push(`faster than ${listOf(ahead)} in every scenario`);
+  // split rivals that take the same scenarios read as one clause
+  const groups = new Map();
+  for (const s of split) {
+    const key = `${s.won}/${s.of}/${s.lost.join(',')}`;
+    groups.set(key, [...(groups.get(key) ?? []), s]);
+  }
+  for (const group of groups.values()) {
+    const [{ won, of, lost }] = group;
+    const names = group.map((s) => s.rival);
+    parts.push(`${parts.length === 0 ? 'faster ' : ''}than ${listOf(names)} in ${won} of ${of}, while `
+      + `${names.length === 1 ? `${names[0]} is` : 'they are'} faster on the ${listOf(lost)} scenario${lost.length === 1 ? '' : 's'}`);
+  }
+  if (behind.length > 0) parts.push(`slower than ${listOf(behind)} in every scenario`);
+  return parts.length < 2 ? parts.join('') : `${parts.slice(0, -1).join(', ')}, and ${parts[parts.length - 1]}`;
+}
+
+//#endregion
+
 const FACTS = {
   'db.changeflow': () => changeflowFigures(JSON.parse(readFileSync(join(ROOT, 'benchmark/changeflow-results.json'), 'utf8'))),
   'db.hosts': () => {
@@ -1291,6 +1535,306 @@ const FACTS = {
     }
     return thousands(bytes);
   }])),
+
+  // ——— the provenance lines of the suite tables below ———
+  ...Object.fromEntries(['jsonpath', 'jsonpointer', 'jsonquery', 'jslt', 'toml', 'mermaid'].map((suite) =>
+    [`${suite}.measured`, () => measuredOn(suite)])),
+  'jsonpath.rivalVersion': () => {
+    const label = data('jsonpath').engines.find((e) => e.startsWith('json-p3'));
+    if (label === undefined) throw new Error('jsonpath.json names no json-p3 engine — regenerate it before quoting one');
+    return versionOf(label);
+  },
+
+  // ——— @jarenjs/json: the JSONPath scale document, against json-p3 ———
+  // the narrowest and the widest row, named — a band whose ends are not
+  // named reads as if the README's favourite shape were one of them
+  'jsonpath.scaleBand': () => {
+    const rows = jsonpathScale().sort((a, b) => a.ratio - b.ratio);
+    const [lo, hi] = [rows[0], rows[rows.length - 1]];
+    return `${ratio(lo.ratio)}x (${lo.shape}) to ${ratio(hi.ratio)}x (${hi.shape})`;
+  },
+  // the scale rows, the CTS summary the root README quotes, and the
+  // compile row — which json-p3 wins, so the table says so in its ratio
+  'jsonpath.scaleTable': () => {
+    const summary = cts();
+    const c = data('jsonpath').profile.compileRow;
+    const selectors = Number(/(\d+)/u.exec(c?.name ?? '')?.[1]);
+    if (!Number.isFinite(c?.engines?.jaren) || !Number.isFinite(c?.engines?.['json-p3']) || !Number.isFinite(selectors)) {
+      throw new Error('jsonpath.json carries no compile row — regenerate it before quoting one');
+    }
+    return ['', '| Query shape | Jaren | json-p3 over Jaren |', '|---|---|---|',
+      ...jsonpathScale().map((r) => `| ${r.shape} | ${dur(r.mine)} | ${mag(r.ratio)}x |`),
+      `| geometric mean over all ${summary.rows} CTS queries | ${dur(summary.mine)} | ${ratio(summary.ratio)}x |`,
+      `| compile, per query (all ${selectors} valid selectors) | ${dur(c.engines.jaren / selectors)} `
+        + `| ${mag(c.engines['json-p3'] / c.engines.jaren)}x |`,
+      ''].join('\n');
+  },
+  // early exit: the first match against the whole nodelist, same query,
+  // same document
+  'jsonpath.earlyExit': () => {
+    const selector = '$.items[?@.price < 10].name';
+    const first = data('jsonpath').profile.earlyExitRows?.find((r) => r.name === 'first' && r.selector === selector);
+    const whole = jsonpathScale().find((r) => r.selector === selector);
+    if (!Number.isFinite(first?.engines?.jaren) || whole === undefined) {
+      throw new Error(`jsonpath.json carries no first-match and nodelist rows for ${selector} — regenerate it before quoting them`);
+    }
+    return `costs ${dur(first.engines.jaren)} where the whole nodelist costs ${dur(whole.mine)}`;
+  },
+
+  // ——— @jarenjs/json: compiled JSON Pointer against the interpretive
+  // resolver it replaced and against the `jsonpointer` npm package ———
+  'jsonpointer.absolute': () => band(pointerRatios('absolute', ['jaren legacy']).map((r) => r.ratio), ratio),
+  'jsonpointer.relative': () => band(pointerRatios('relative', ['jaren legacy']).map((r) => r.ratio), ratio),
+  'jsonpointer.dataRef': () => band(pointerRatios('dataRef', ['jaren legacy']).map((r) => r.ratio), ratio),
+  'jsonpointer.vsLegacy': () => band(['absolute', 'relative', 'dataRef']
+    .flatMap((key) => pointerRatios(key, ['jaren legacy']).map((r) => r.ratio)), ratio),
+  // the npm package's faster route per row, compiled or interpreted
+  'jsonpointer.vsNpm': () => {
+    const rows = pointerRatios('absolute', ['npm compiled', 'npm interpret']);
+    const lost = rows.filter((r) => !(r.ratio > 1));
+    if (lost.length === 0) {
+      const widest = rows.reduce((a, b) => (b.ratio > a.ratio ? b : a));
+      return `on every scenario both run (${band(rows.map((r) => r.ratio), ratio)}x, the widest on ${widest.name})`;
+    }
+    return `on ${rows.length - lost.length} of ${rows.length} scenarios, while the package is faster on ${listOf(lost.map((r) => r.name))}`;
+  },
+
+  // ——— @jarenjs/json: JSON Patch against clone-and-interpret ———
+  'jsonpatch.vsNaive': () => {
+    const t = data('jsonpatch').tables.find((x) => x.title.startsWith('JSON Patch'));
+    const mine = t?.columns.indexOf('jaren compiled') ?? -1;
+    const naive = t?.columns.indexOf('naive') ?? -1;
+    const ratios = (t?.rows ?? []).filter((r) => Number.isFinite(r.results[mine]) && Number.isFinite(r.results[naive]))
+      .map((r) => r.results[naive] / r.results[mine]);
+    if (mine === -1 || naive === -1 || ratios.length === 0) throw new Error('jsonpatch.json carries no JSON Patch apply rows — regenerate it before quoting one');
+    return band(ratios, mag);
+  },
+
+  // ——— @jarenjs/json: the query matrix against fontoxpath and jsonata.
+  // The join is held apart: there Jaren answers from a hash table while
+  // both rivals run a nested loop, a different algorithm, and folding its
+  // four-digit ratio into the band would make every other row look small
+  'jsonquery.vsFontoxpath': () => lead(bookstoreRatios('jsonquery', 'fontoxpath', (r) => r.scenario !== 'join'), mag, 'x'),
+  'jsonquery.vsJsonata': () => lead(bookstoreRatios('jsonquery', 'jsonata', (r) => r.scenario !== 'join'), mag, 'x'),
+  'jsonquery.join': () => {
+    const sizes = [...new Set(data('jsonquery').rows.filter((r) => r.scenario === 'join' && Number.isFinite(r.engines.jaren))
+      .map((r) => booksOf(r.document)))].sort((a, b) => a - b);
+    const at = (books) => ['fontoxpath', 'jsonata'].flatMap((rival) =>
+      bookstoreRatios('jsonquery', rival, (r) => r.scenario === 'join' && booksOf(r.document) === books));
+    if (sizes.length < 2) throw new Error('jsonquery.json carries fewer than two join rows — regenerate it before quoting them');
+    const [small, large] = [sizes[0], sizes[sizes.length - 1]];
+    return `${band(at(small), mag)}x at ${thousands(small)} books and ${band(at(large), mag)}x at ${thousands(large)} books`;
+  },
+  'jsonquery.joinSmall': () => {
+    const small = Math.min(...data('jsonquery').rows.map((r) => booksOf(r.document)));
+    const atSmall = (r) => booksOf(r.document) === small;
+    const row = data('jsonquery').rows.find((r) => r.scenario === 'join' && atSmall(r));
+    const rivals = ['fontoxpath', 'jsonata'].map((k) => row?.engines?.[k]).filter(Number.isFinite);
+    if (!Number.isFinite(row?.engines?.jaren) || rivals.length === 0) throw new Error('jsonquery.json carries no small join row — regenerate it before quoting one');
+    const join = rivals.map((v) => v / row.engines.jaren);
+    const others = ['fontoxpath', 'jsonata'].flatMap((rival) =>
+      bookstoreRatios('jsonquery', rival, (r) => r.scenario !== 'join' && atSmall(r)));
+    const inside = Math.min(...join) >= Math.min(...others) && Math.max(...join) <= Math.max(...others);
+    return `${dur(row.engines.jaren)} against ${rivals.map(dur).join(' and ')}, ${band(join, mag)}x, `
+      + `${inside ? 'inside' : 'against'} the ${band(others, mag)}x of every other small-document row`;
+  },
+  'jsonquery.joinLarge': () => {
+    const rows = data('jsonquery').rows.filter((r) => r.scenario === 'join' && Number.isFinite(r.engines.jaren));
+    const large = rows.sort((a, b) => booksOf(b.document) - booksOf(a.document))[0];
+    if (large === undefined) throw new Error('jsonquery.json carries no join row — regenerate it before quoting one');
+    return band(['fontoxpath', 'jsonata'].map((k) => large.engines[k] / large.engines.jaren).filter(Number.isFinite), mag);
+  },
+  'jsonquery.table': () => bookstoreTable('jsonquery', [['fontoxpath', `fontoxpath ${versionOf(data('jsonquery').engines[1])}`],
+    ['jsonata', `jsonata ${versionOf(data('jsonquery').engines[2])}`]], 'compile, per query'),
+
+  // ——— @jarenjs/json: JSLT against hand-written JavaScript and JSONata's
+  // transform operator. Identity is the sharing fast path, not a
+  // transformation, so it is quoted alone and kept out of both bands ———
+  'jslt.table': () => bookstoreTable('jslt', [['native', 'native JS'],
+    ['jsonata', `jsonata ${versionOf(data('jslt').engines[2])}`]], 'compile, per stylesheet'),
+  'jslt.identityNs': () => {
+    const rows = data('jslt').rows.filter((r) => r.scenario === 'identity' && Number.isFinite(r.engines.jaren));
+    if (rows.length === 0) throw new Error('jslt.json carries no identity rows — regenerate it before quoting one');
+    return `${band(rows.map((r) => r.engines.jaren), ns)} ns`;
+  },
+  'jslt.vsJsonata': () => lead(bookstoreRatios('jslt', 'jsonata', (r) => r.scenario !== 'identity'), mag, 'x'),
+  'jslt.vsNative': () => lead(bookstoreRatios('jslt', 'native', (r) => r.scenario !== 'identity'), mag, 'x'),
+
+  // ——— @jarenjs/flow: compile against XState, and the dag's price ———
+  'flow.compileVsXstate': () => lead(flowCompileRatios()),
+  'flow.dagTax': () => {
+    const { sync, async } = data('flow').dag ?? {};
+    const ratios = [...(sync ?? []), ...(async ?? [])].map((r) => r.dagMs / r.handMs);
+    if (ratios.length === 0) throw new Error('flow.json carries no dag rows — regenerate it before quoting one');
+    return band(ratios, ratio);
+  },
+
+  // ——— @jarenjs/view: the memo marker, the frame, server rendering ———
+  'view.memoSkip': () => ratio(viewRow('memo', '=== child scan (no memo)') / viewRow('memo', 'memo-equal marker skip')),
+  'view.memoMarker': () => {
+    const scan = viewRow('memo', '=== child scan (no memo)');
+    const skip = viewRow('memo', 'memo-equal marker skip');
+    return `about **${dur(scan)}** to walk the children looking for \`===\` skips versus about **${dur(skip)}** `
+      + `with the marker — **${ratio(scan / skip)}×**`;
+  },
+  'view.memoFrame': () => ratio(viewRow('frame', 'jaren view+patch (no memo)') / viewRow('frame', 'jaren view+patch (memo)')),
+  // which frame is fastest outright is read off the table, whichever it is
+  'view.fastestFrame': () => {
+    const memo = viewRow('frame', 'jaren view+patch (memo)');
+    const hand = viewRow('frame', 'jaren view+patch (hand-written)');
+    return hand <= memo
+      ? `at this table size the hand-written view plus a full diff is still the fastest frame outright, ${ratio(memo / hand)}× ahead of the memoized stylesheet`
+      : `at this table size the memoized stylesheet is the fastest frame outright, ${ratio(hand / memo)}× ahead of the hand-written view plus a full diff`;
+  },
+  'view.ssrBand': () => {
+    const preact = viewRow('ssr', 'preact-render-to-string');
+    const ours = (data('view').tables.ssr ?? []).filter((r) => r.label.startsWith('jaren renderToString'));
+    if (ours.length === 0) throw new Error("view.json's ssr table has no jaren rows — regenerate it before quoting one");
+    return band(ours.map((r) => r.ns / preact), ratio);
+  },
+
+  // ——— @jarenjs/josl: the CSV reader against udsv, streaming, stringify ———
+  'csv.udsvLoss': () => {
+    const part = (r) => {
+      const x = r.results.jaren / r.results.udsv;
+      return x > 1 ? `${fix2(x)}× on ${CSV_SHAPES[r.name] ?? r.name}` : `none on ${CSV_SHAPES[r.name] ?? r.name} (jaren ${fix2(1 / x)}× ahead)`;
+    };
+    const objects = csvRows('objects').map((r) => r.results.jaren / r.results.udsv);
+    return `${csvRows('rows').map(part).join(', ')}, and ${band(objects, fix2)}× when records become header-keyed objects`;
+  },
+  'csv.streaming': () => {
+    const plain = (table) => csvRows(table).find((r) => r.name === 'records 10k x 6 (plain)');
+    const [whole, stream] = [plain('rows'), plain('streaming')];
+    if (whole === undefined || stream === undefined) throw new Error('csv.json carries no plain streaming row — regenerate it before quoting one');
+    const vsUdsv = stream.results.jaren / stream.results.udsv;
+    return `about ${fix2(stream.results.jaren / whole.results.jaren)}× the wholesale path `
+      + `(${ms1(stream.results.jaren)} ms vs ${ms1(whole.results.jaren)} ms), `
+      + (vsUdsv > 1 ? `and ${fix2(vsUdsv)}× the time udsv's chunked reader takes` : `${fix2(1 / vsUdsv)}× faster than udsv's chunked reader`);
+  },
+  'csv.stringify': () => stringifyLeader(data('csv').profile.stringify, (name) => name),
+
+  // ——— @jarenjs/josl: TOML compliance and speed ———
+  'toml.cases': () => String(data('toml').cases.valid + data('toml').cases.invalid),
+  'toml.table': () => {
+    const t = data('toml');
+    const parse = t.profile.parse;
+    const pct = (e) => (100 * t.compliance[e].pass) / t.compliance[e].total;
+    const bestPct = Math.max(...TOML_ENGINES.map(pct));
+    const best = parse.map((r) => Math.min(...TOML_ENGINES.map((e) => r.results[e]).filter(Number.isFinite)));
+    const rows = TOML_ENGINES.map((e) => {
+      const score = `${pct(e).toFixed(1)}%`;
+      const cells = parse.map((r, i) => (r.results[e] === best[i] ? `**${ms(r.results[e])} ms**` : `${ms(r.results[e])} ms`));
+      return `| ${e === 'jaren' ? '**jaren**' : e} | ${pct(e) === bestPct ? `**${score}**` : score} | ${cells.join(' | ')} |`;
+    });
+    return ['', `| engine | compliance | ${parse.map((r) => `parse, ${TOML_SHAPES[r.name]?.replace(/^the /u, '') ?? r.name}`).join(' | ')} |`,
+      `| --- | --- |${parse.map(() => ' --- |').join('')}`, ...rows, ''].join('\n');
+  },
+  'toml.compliance': () => {
+    const t = data('toml');
+    const clean = TOML_ENGINES.filter((e) => t.compliance[e].pass === t.compliance[e].total);
+    if (clean.length === 1 && clean[0] === 'jaren') return 'the only engine at 100%';
+    if (clean.includes('jaren')) return `one of ${clean.length} engines at 100%`;
+    return `at ${t.compliance.jaren.pass} of ${t.compliance.jaren.total}`;
+  },
+  'toml.vsSmol': () => {
+    const rows = data('toml').profile.parse.map((r) => ({ name: TOML_SHAPES[r.name] ?? r.name, x: r.results.jaren / r.results['smol-toml'] }));
+    const theirs = rows.filter((r) => r.x > 1);
+    const ours = rows.filter((r) => r.x <= 1);
+    const list = (xs, flip) => listOf(xs.map((r) => `${ratio(flip ? 1 / r.x : r.x)}× on ${r.name}`));
+    if (ours.length === 0) return `smol-toml leads every parse row: ${list(theirs, false)}`;
+    if (theirs.length === 0) return `jaren leads every parse row: ${list(ours, true)}`;
+    return `smol-toml leads by ${list(theirs, false)}, and jaren by ${list(ours, true)}`;
+  },
+  'toml.stringify': () => stringifyLeader(data('toml').profile.stringify, (name) => (name === '@iarna/toml' ? '`@iarna/toml`' : name)),
+
+  // ——— @jarenjs/charts: the bar session ———
+  'charts.barTable': () => {
+    const rows = data('charts').barScaling ?? [];
+    if (rows.length === 0) throw new Error('charts.json carries no bar scaling rows — regenerate it before quoting one');
+    return ['', '| categories | session tick | wholesale tick |', '|---|---|---|',
+      ...rows.map((r) => `| ${thousands(r.categories)} | ${dur(r.sessionNs)} | ${dur(r.wholesaleNs)} |`), ''].join('\n');
+  },
+  'charts.barGrowth': () => {
+    const rows = data('charts').barScaling ?? [];
+    const [first, last] = [rows[0], rows[rows.length - 1]];
+    if (first === undefined || first === last) throw new Error('charts.json carries fewer than two bar scaling rows — regenerate it before quoting one');
+    return `${ratio(last.sessionNs / first.sessionNs)}× where the wholesale render grows ${ratio(last.wholesaleNs / first.wholesaleNs)}×`;
+  },
+
+  // ——— @jarenjs/mermaid: the two parsers it is measured against ———
+  'mermaid.vsLangium': () => {
+    const rows = data('mermaid').profile.parse ?? [];
+    return lead(rows.map((r) => r.results['@mermaid-js/parser'] / r.results['jaren-mermaid']).filter(Number.isFinite));
+  },
+  'mermaid.vsJison': () => {
+    const rows = data('mermaid').profile.parseJison ?? [];
+    return lead(rows.map((r) => r.results['mermaid (jison)'] / r.results['jaren-mermaid']).filter(Number.isFinite), mag);
+  },
+  'mermaid.jisonTable': () => {
+    const rows = data('mermaid').profile.parseJison ?? [];
+    if (rows.length === 0) throw new Error('mermaid.json carries no Jison rows — regenerate it before quoting one');
+    const two = (x) => Number(x.toPrecision(2)).toString();
+    return ['', '| flowchart/sequence parse (ms/op) | jaren-mermaid | mermaid.parse (Jison) |', '|---|---|---|',
+      ...rows.map((r) => `| ${r.name} | ${two(r.results['jaren-mermaid'])} | ${two(r.results['mermaid (jison)'])} |`), ''].join('\n');
+  },
+
+  // ——— @jarenjs/contract: the widest dispatch row, and the socket ———
+  'contract.dispatch.widest': () => {
+    const t = contractTable('Dispatch, in-process');
+    const mine = t.columns.indexOf('@jarenjs/contract');
+    const rival = t.columns.indexOf('find-my-way + Ajv + fjs');
+    const rows = t.rows.filter((r) => Number.isFinite(r.results[mine]) && Number.isFinite(r.results[rival]));
+    if (mine === -1 || rival === -1 || rows.length === 0) throw new Error('contract.json carries no dispatch rows — regenerate it before quoting one');
+    const widest = rows.reduce((a, b) => (b.results[mine] / b.results[rival] > a.results[mine] / a.results[rival] ? b : a));
+    const name = widest.name.includes('bare route') ? 'the bare `{ok:true}` route' : `the \`${widest.name.split(' — ')[0]}\` row`;
+    return `${name}, where the rival's compiled serializer answers in ${ns(widest.results[rival])} ns`;
+  },
+  'contract.loopback': () => {
+    const t = contractTable('Dispatch, over loopback');
+    const mine = t.columns.indexOf('@jarenjs/contract over node:http');
+    const rival = t.columns.indexOf('fastify');
+    if (mine === -1 || rival === -1) throw new Error('contract.json loopback table names no @jarenjs/contract or fastify column');
+    const ratios = t.rows.map((r) => r.results[rival] / r.results[mine]).filter(Number.isFinite);
+    if (ratios.length === 0) throw new Error('contract.json carries no loopback rows — regenerate it before quoting one');
+    if (Math.max(...ratios) <= 1.05 && Math.min(...ratios) >= 1 / 1.05) return 'the two stacks are level';
+    if (Math.max(...ratios) < 1) return `Fastify is ${band(ratios.map((x) => 1 / x), fix2)}× faster`;
+    if (Math.min(...ratios) > 1) return `the pipeline is ${band(ratios, fix2)}× faster than Fastify`;
+    return `the two stacks trade rows within ${band(ratios, fix2)}×`;
+  },
+
+  // ——— @jarenjs/core/geo: what the index buys, and the centroid row ———
+  'geo.probeVsScan': () => mag(geoRow('linear scan (100k boxes, no index)').ours / geoRow('index probe (100k boxes)').ours),
+  'geo.centroidVerdict': () => geoVerdict('centroid (2000-vertex)'),
+  'geo.flatbush': () => `the build is ${geoVerdict('index build (100k boxes)')} and the probe `
+    + `${geoVerdict('index probe (100k boxes)')}`,
+
+  // ——— @jarenjs/db: what the asynchronous store API costs a point read ———
+  'db.asyncCost': () => {
+    const t = data('db').tables.find((x) => x.title.startsWith('Point lookup by key'));
+    const async = t?.rows.find((r) => r.name === 'jaren (async surface)')?.results[0];
+    const sync = t?.rows.find((r) => r.name === 'jaren (store.sync)')?.results[0];
+    if (!Number.isFinite(async) || !Number.isFinite(sync)) throw new Error('db.json carries no async and sync point lookups — regenerate it before quoting them');
+    const cost = async - sync;
+    return cost > 0 ? `~${us(cost)} µs per point read (~${Math.round((100 * cost) / sync)} %)`
+      : `nothing measurable per point read (the async row is ${us(-cost)} µs faster)`;
+  },
+
+  // ——— the schema pen's model subclass: what it adds to the bundle ———
+  'bundle.model.overSchema.kb': () => String(Math.round((bundleBytes('model') - bundleBytes('schema')) / 1000)),
+
+  // ——— the Zod migration guide: the first calls in a fresh process. The
+  // settled table is a long-run figure; a request handler in a cold
+  // serverless process lives in these, so where Jaren stands there is
+  // read off the same suite rather than assumed from the settled one ———
+  'contracts.firstCalls.versus': () => {
+    const fc = contractsFirstCalls();
+    const calls = (t) => /First ([\d,]+) calls/u.exec(t.title)?.[1] ?? t.title;
+    const stands = fc.tables.map((t) => ({ calls: calls(t), text: standingAll(t) }));
+    if (stands.every((s) => s.text === stands[0].text)) {
+      return `over the first ${listOf(stands.map((s) => s.calls))} calls alike, Jaren is ${stands[0].text}`;
+    }
+    return stands.map((s, i) => `over the first ${s.calls} calls ${i === 0 ? 'Jaren' : 'it'} is ${s.text}`).join('; ');
+  },
 };
 
 /** One named row of the vector suite's flat rows at the largest leg. */
@@ -1423,6 +1967,10 @@ const DOCS = [
   'packages/core/docs/GEO.md',
   'packages/core/docs/SERIES.md',
   'packages/json/ARCHITECTURE.md',
+  'packages/json/README.md',
+  'packages/db/ARCHITECTURE.md',
+  'packages/contract/docs/CONTRACT-FORMAT.md',
+  'packages/website/README.md',
 ];
 
 /** @type {import('./lib/derive.js').Registry} */

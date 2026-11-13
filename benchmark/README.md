@@ -186,7 +186,7 @@ those rows timed the collection's aftermath, not the engines. Ajv compiles a
 schema into generated code that V8 optimizes only after many calls; the
 earlier method (100 warmup passes, one timed block per engine) timed it before
 that and flattered Jaren, and a single garbage collection inside the one block
-inflated a random row by up to ~65×. Rows of a
+inflated a random row many times over. Rows of a
 few nanoseconds are mostly adaptor overhead for both engines, so the suite
 total and the geometric mean are the robust comparisons, not the count of
 rows each engine wins.
@@ -498,7 +498,7 @@ caller's alone, and not cloning would measure a different (and, for a shared
 request body, incorrect) program. And Ajv caches compiled validators by
 schema object identity, so the compile table rotates through a pool of
 distinct schema clones; without that, Ajv's compile row measures a cache
-lookup and reads ~1000x too fast.
+lookup and reads orders of magnitude too fast.
 
 Every engine must accept the well-formed input, reject the invalid one, and
 produce the same normalized value before it is timed; one that disagrees is
@@ -624,7 +624,7 @@ what it fairly compares:
      also async and runs Mermaid's whole parse front-end (type detection
      + Jison + validation), so it is labeled as such, not as a bare-Jison
      microbenchmark. `@jarenjs/mermaid` parses the same flowchart/sequence
-     sources roughly **two orders of magnitude faster**.
+     sources **<!--fact:mermaid.vsJison-->488–728× faster<!--/fact-->**.
 
 3. **Jaren-only capability** — parse→AST and **parse→layout→SVG string**
    (headless, no browser): the full pipeline mermaid.js cannot run

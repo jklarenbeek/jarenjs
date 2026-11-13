@@ -129,7 +129,7 @@ all take the `dialect`; the parsed record gains `shift` (a number, `0` for
 `0+0`) only when the pointer wrote one, and an unknown dialect is a `TypeError`.
 `@jarenjs/validate` passes the choice to `data`, `$data` and the `relative-json-pointer` format through its `relativePointerDialect` option, which defaults to handrews-01.
 
-`compileDataRef(ref)` compiles the union the validator accepts — `''` for the data root, a leading `/` for an absolute pointer, a leading digit for a relative one — deciding the dispatch once at compile time. On a realistic `$data` workload the compiled resolvers are 4–20x faster than the interpretive resolver they replaced, and beat the `jsonpointer` npm package on every scenario (`npm run benchmark:jsonpointer`, 2026-07-17: absolute pointers 12–16x, relative pointers 4–16x, `compileDataRef` dispatch 7–20x).
+`compileDataRef(ref)` compiles the union the validator accepts — `''` for the data root, a leading `/` for an absolute pointer, a leading digit for a relative one — deciding the dispatch once at compile time. On a realistic `$data` workload the compiled resolvers are <!--fact:jsonpointer.vsLegacy-->4.6–19.6<!--/fact-->x faster than the interpretive resolver they replaced, and beat the `jsonpointer` npm package <!--fact:jsonpointer.vsNpm-->on every scenario both run (1.5–14.5x, the widest on escaped keys)<!--/fact--> (`npm run benchmark:jsonpointer`, <!--fact:jsonpointer.measured-->2026-11-13, Node v24.22.1, each figure the median of 3 processes<!--/fact-->: absolute pointers <!--fact:jsonpointer.absolute-->5.1–18.7<!--/fact-->x, relative pointers <!--fact:jsonpointer.relative-->4.6–15.7<!--/fact-->x, `compileDataRef` dispatch <!--fact:jsonpointer.dataRef-->7.7–19.6<!--/fact-->x).
 
 The write-side encode is there too: `encodeJSONPointerSegment(key)` escapes one reference token (`~` → `~0`, `/` → `~1`), `decodeJSONPointerSegment(token)` is its inverse for one token (decoding `~1` before `~0`, so a member named `~1` survives the round trip), and `formatJSONPointer(segments)` is the inverse of `parseJSONPointer`.
 
@@ -164,7 +164,7 @@ applyJSONPatch(doc, patch);
 applyJSONPatch(a, createJSONPatch(a, b)); // deep-equals b
 ```
 
-Because an application only clones the spine it writes through — and clones it once, no matter how many operations touch the same region — the compiled applier beats the usual clone-and-interpret shape by 5–170x depending on document size (`npm run benchmark:jsonpatch`). Two options tune the copy discipline, mirroring JSLT's `share`/`fresh` dispositions: `values: 'fresh'` deep-copies inserted operation values per application (the default `'share'` inserts them by reference, so treat results as immutable), and `mutate: true` patches in place for the last bit of speed at the cost of atomicity.
+Because an application only clones the spine it writes through — and clones it once, no matter how many operations touch the same region — the compiled applier beats the usual clone-and-interpret shape by <!--fact:jsonpatch.vsNaive-->3.5–105<!--/fact-->x depending on document size (`npm run benchmark:jsonpatch`). Two options tune the copy discipline, mirroring JSLT's `share`/`fresh` dispositions: `values: 'fresh'` deep-copies inserted operation values per application (the default `'share'` inserts them by reference, so treat results as immutable), and `mutate: true` patches in place for the last bit of speed at the cost of atomicity.
 
 `createJSONPatch(source, target)` trims each array's deep-equal common prefix and suffix and pairs the rest up index-wise, which is linear and already minimal for in-place edits and head/tail insertions — but turns a mid-array insertion into a run of per-index replaces. `createJSONPatch(source, target, { arrayDiff: 'minimal' })` aligns the changed middle instead, so the insertion is one `add`:
 
@@ -263,7 +263,7 @@ query(other);  // compiled once, reusable on any document
 
 For one-off queries there is `queryJSONPath(source, data)`, which keeps a cache of compiled queries (512 entries, FIFO), and `isValidJSONPathStrict(source)` for a boolean grammar check — this is what the `json-path` format in [`@jarenjs/formats`](../formats) uses.
 
-`first`, `exists` and `iterate` are one lazy walk: they stop at the first node they need instead of building the whole nodelist, so `q.first(doc)` on `$.items[?@.price < 10].name` over 10 000 items costs about 2 µs where `q.values(doc)` costs about 240 µs. Nothing is buffered along the way — a filter evaluates its predicate only until one passes, and a descendant segment abandons the walk mid-subtree.
+`first`, `exists` and `iterate` are one lazy walk: they stop at the first node they need instead of building the whole nodelist, so on the benchmark's 1000-item document the first match of `$.items[?@.price < 10].name` <!--fact:jsonpath.earlyExit-->costs 1.49 µs where the whole nodelist costs 30.1 µs<!--/fact-->. Nothing is buffered along the way — a filter evaluates its predicate only until one passes, and a descendant segment abandons the walk mid-subtree.
 
 A descendant segment descends at most 1000 levels of nesting: a value nested deeper is refused with `JsonQueryRuntimeError` `JQ2009` (`a descendant segment reaches a value nested deeper than 1000 levels`, message id `query/descent-limit` with `params: { limit }`, so `renderQueryMessage` renders it through a `@jarenjs/locales` pack; *upgrade: it carried `query/reason`, which renders the English text in every pack*) in every mode, before the host's call stack can overflow, and the bound is the same on every host. `compileJSONPath(source, { maxDescentDepth })` (and `queryJSONPath`, the JSONPath-addressed writers) moves it, as `limits.descentDepth` does for `compileJsonQuery` and `maxDescentDepth` does for a JSLT stylesheet's match paths and rule-body paths (`compileJsltStylesheet`, `transformJson`); anything but a positive integer is a `TypeError`, like the other options (*upgrade: an integer past `Number.MAX_SAFE_INTEGER` was refused, where every other limit took it*). Raising it lets the host's call stack decide again. In values and nodes mode the walks a filter starts inside a descent count toward the same 1000 levels, so `$..[?$..*]`, which walks the whole document again from every node it visits, is refused once the document nests more than about 500 levels; `first` and `exists` refuse only when a node they need lies past the bound. A value nested more than 1000 levels deep used to be walked until the host's call stack ran out, which escaped as an uncoded `RangeError`; with `maxDescentDepth` raised it is walked again. `canonicalizeJson`, `cloneJson` and `canonicalSha256` take no options, so their 1000-level bound is fixed. A walk over a value that holds a cycle (`c.self = c`) reaches the bound too, and is refused as the cycle it is: `JQ2016` (`a descendant segment reaches a circular reference closed by data member /self`, message id `query/descent-cycle` with `params: { member }`), where `member` is the JSON Pointer of the member that closes the cycle (`locateCycle` of `@jarenjs/core/object`, searched from the walked value), in the input when the input holds the walked value (`$.a..x` over `{ a: { b: c } }` names `/a/b/self`), else in the value the path starts from (an external parameter). The value is searched for a cycle only once the walk has reached the bound, so a walk that stays inside it costs what it did; `first` and `exists` still answer when they need no node past it, a value reachable along two paths is no cycle, and a deep value without one keeps `JQ2009`. A JSLT stylesheet's refusal (`JT2004`) wraps it the same way (*upgrade: a cycle was `JQ2009` with no data location; code that matched `JQ2009` for a cycle matches `JQ2016`*).
 
@@ -317,20 +317,22 @@ The parser is strict about everything the RFC is strict about: leading zeros, `-
 
 ### Conformance and performance
 
-Conformance: **all 703 tests** of the official [JSONPath Compliance Test Suite](https://github.com/jsonpath-standard/jsonpath-compliance-test-suite) pass, including the normalized-path assertions (the suite is a git submodule at `benchmark/jsonpath-suite/`).
+Conformance: **<!--fact:jsonpath.ctsPass-->all 703<!--/fact--> tests** of the official [JSONPath Compliance Test Suite](https://github.com/jsonpath-standard/jsonpath-compliance-test-suite) pass, including the normalized-path assertions (the suite is a git submodule at `benchmark/jsonpath-suite/`).
 
-Measured with `node benchmark/jsonpath.js --profile --scale -i 3000` (2026-07-17, Node v24.14.0, 1000-item synthetic document, vs [json-p3](https://www.npmjs.com/package/json-p3) 2.2.2):
+Measured with `npm run benchmark:jsonpath:profile` (<!--fact:jsonpath.measured-->2026-11-13, Node v24.22.1<!--/fact-->, 1000-item synthetic document, vs [json-p3](https://www.npmjs.com/package/json-p3) <!--fact:jsonpath.rivalVersion-->2.2.2<!--/fact-->). Each ratio is json-p3's time over Jaren's, so one below 1 is a row json-p3 wins:
 
-| Query shape | Jaren | vs json-p3 |
+<!--fact:jsonpath.scaleTable-->
+| Query shape | Jaren | json-p3 over Jaren |
 |---|---|---|
-| singular `$.items[42].name` | 189 ns (~5M queries/s) | 4.9x |
-| wildcard `$.items[*].id` | 31.2 µs | 12.1x |
-| slice `$.items[100:200].id` | 4.4 µs | 9.5x |
-| filter `$.items[?@.price < 10].name` | 38.9 µs | 8.7x |
-| regexp filter `$.items[?match(@.name, "item-1.*")].id` | 38.8 µs | 14.3x |
-| descendant `$..value` | 210.0 µs | 81.8x |
-| mean over all 456 CTS queries | 151 ns | 18.7x |
-| compile | ~2.4 µs per query | — |
+| singular `$.items[42].name` | 44 ns | 16.1x |
+| wildcard `$.items[*].id` | 27.9 µs | 12.5x |
+| slice `$.items[100:200].id` | 2.52 µs | 14.1x |
+| filter `$.items[?@.price < 10].name` | 30.1 µs | 10.8x |
+| regexp filter `$.items[?match(@.name, "item-1.*")].id` | 37 µs | 14.3x |
+| descendant `$..value` | 204 µs | 82.3x |
+| geometric mean over all 456 CTS queries | 89 ns | 8.9x |
+| compile, per query (all 456 valid selectors) | 2.38 µs | 0.44x |
+<!--/fact-->
 
 ## The Jaren JSON Query language
 
@@ -691,31 +693,32 @@ q(null, { doc: data }); // [ 'Sayings of the Century', 'Moby Dick' ]
 
 `npm run benchmark:jsonquery` runs the scenario matrix against [fontoxpath](https://www.npmjs.com/package/fontoxpath) (a real XQuery 3.1 engine in JavaScript — the closest honest comparison) and [jsonata](https://www.npmjs.com/package/jsonata) (the popular practical alternative), asserting result equivalence on every document before timing anything. Each engine runs the same scenario written idiomatically in its own language (`benchmark/adaptors/jsonquery/`).
 
-Measured with `npm run benchmark:jsonquery:profile` (2026-07-27, Node v22.22.2; ratios are that engine's time over Jaren's):
+Measured with `npm run benchmark:jsonquery:profile` (<!--fact:jsonquery.measured-->2026-11-13, Node v24.22.1, each figure the median of 3 processes<!--/fact-->; ratios are that engine's time over Jaren's):
 
-| Scenario | Jaren | fontoxpath 3.34 | jsonata 2.2 |
+<!--fact:jsonquery.table-->
+| Scenario | Jaren | fontoxpath 3.34.0 | jsonata 2.2.1 |
 |---|---|---|---|
 | **4-book bookstore** | | | |
-| singular access `$b.title` | 451 ns (2.2M/s) | 12.0 µs (27x) | 7.3 µs (16x) |
-| filter + project (spec A.2) | 3.6 µs (281k/s) | 60.6 µs (17x) | 26.2 µs (7.4x) |
-| join (spec A.3) | 3.4 µs (291k/s) | 102.0 µs (30x) | 96.6 µs (28x) |
-| group + aggregate (spec A.4) | 4.4 µs (229k/s) | n/a | 52.6 µs (12x) |
-| deep reshape | 2.4 µs (426k/s) | 173.1 µs (74x) | 55.8 µs (24x) |
+| singular access | 77 ns | 4.72 µs (61.2x) | 3.81 µs (49.4x) |
+| filter + project (spec A.2) | 851 ns | 24.8 µs (29.1x) | 18.2 µs (21.3x) |
+| join (spec A.3) | 1.94 µs | 59 µs (30.3x) | 80.3 µs (41.3x) |
+| group + aggregate (spec A.4) | 1.84 µs | n/a | 38.3 µs (20.8x) |
+| deep reshape | 1.7 µs | 68.3 µs (40.1x) | 57.3 µs (33.7x) |
 | **10,000-book bookstore** | | | |
-| singular access | 324 ns (3.1M/s) | 9.0 µs (28x) | 4.6 µs (14x) |
-| filter + project | 1.33 ms | 343.2 ms (259x) | 70.4 ms (53x) |
-| join (measured at 1,000 books) | 331 µs | 1.64 s (4952x) | 1.71 s (5175x) |
-| group + aggregate | 2.47 ms | n/a | 37.9 ms (15x) |
-| deep reshape | 3.51 ms | 452.0 ms (129x) | 117.0 ms (33x) |
-| **compile, µs per query** | 37.4 µs | 562.5 µs (15x) | 118.3 µs (3.2x) |
+| singular access | 89 ns | 4.75 µs (53.2x) | 3.72 µs (41.6x) |
+| filter + project (spec A.2) | 1.41 ms | 315 ms (224x) | 65.9 ms (46.8x) |
+| join (spec A.3) — measured at 1,000 books | 322 µs | 1.47 s (4,560x) | 1.63 s (5,070x) |
+| group + aggregate (spec A.4) | 2.72 ms | n/a | 39.5 ms (14.5x) |
+| deep reshape | 3.71 ms | 385 ms (104x) | 117 ms (31.4x) |
+| **compile, per query** | 29.1 µs | 470 µs (16.1x) | 71.3 µs (2.4x) |
+<!--/fact-->
 
 Honest caveats — what each competitor is optimized for:
 
-- **fontoxpath** is an XML-first XPath/XQuery engine; JSON rides on XDM maps and arrays. The benchmark pre-converts each document to XDM *once, outside the timed loop* (per-call conversion would cost ~12 ms alone at 10k books), and fontoxpath has no public compile-only API, so its compile number is fresh-source evaluation minus cached re-evaluation. It does not implement `group by`. Its engineering effort goes into DOM navigation, buckets and XQuery Update — not JSON throughput.
+- **fontoxpath** is an XML-first XPath/XQuery engine; JSON rides on XDM maps and arrays. The benchmark pre-converts each document to XDM *once, outside the timed loop* (converting on every call would dominate its timings at 10k books), and fontoxpath has no public compile-only API, so its compile number is fresh-source evaluation minus cached re-evaluation. It does not implement `group by`. Its engineering effort goes into DOM navigation, buckets and XQuery Update — not JSON throughput.
 - **jsonata** is a tree-walking interpreter whose `evaluate()` is async since 2.x; its numbers include that promise overhead because its API imposes it. It is optimized for expressiveness and embeddability, not raw speed.
 - **Jaren**'s compile number includes `JSON.parse` of the query text, since the competitors parse text too.
-- The join row is the one place these engines are not doing the same work, and the four-digit ratio says so rather than hiding it. fontoxpath and jsonata run it as a naive O(books × ratings) nested loop; Jaren's planner recognizes the uncorrelated equijoin and answers it from a hash table, which is O(books + ratings). At four books that is worth nothing (3.4 µs against 96–102 µs, the same 28–30x as every other small-document row); at 1,000 books it is the whole difference. Read the 4,952x as "different algorithm", not "faster engine" — and note the rewrite is declined whenever it would be observable (a `$as`, a `$let`, a correlated probe side), in which case Jaren runs the same nested loop they do. The row stays capped at 1,000 books because raising it would grow their cost quadratically and Jaren's linearly, measuring the cap instead of the engines.
-- The 4-book `singular` cell reads slower than the 1,000-book one (451 ns vs 335 ns) run to run. That is JIT/IC noise across the cell sequence, not a real cost curve; pinning it down is a `--cell-order` shuffle on the roadmap.
+- The join row is the one place these engines are not doing the same work, and the four-digit ratio says so rather than hiding it. fontoxpath and jsonata run it as a naive O(books × ratings) nested loop; Jaren's planner recognizes the uncorrelated equijoin and answers it from a hash table, which is O(books + ratings). At four books that is worth nothing (<!--fact:jsonquery.joinSmall-->1.94 µs against 59 µs and 80.3 µs, 30.3–41.3x, inside the 20.8–61.2x of every other small-document row<!--/fact-->); at 1,000 books it is the whole difference. Read the <!--fact:jsonquery.joinLarge-->4,560–5,070<!--/fact-->x as "different algorithm", not "faster engine" — and note the rewrite is declined whenever it would be observable (a `$as`, a `$let`, a correlated probe side), in which case Jaren runs the same nested loop they do. The row stays capped at 1,000 books because raising it would grow their cost quadratically and Jaren's linearly, measuring the cap instead of the engines.
 
 ## JSLT — declarative JSON transformation
 
@@ -800,24 +803,25 @@ The complete stylesheet grammar is published for validators and LLM constrained 
 
 ### JSLT benchmark
 
-`npm run benchmark:jslt` asserts result equivalence before timing Jaren against a hand-written recursive JavaScript transform and JSONata's transform operator. Measured with `npm run benchmark:jslt:profile` (2026-07-17, Node v24.14.0; competitor ratios are competitor time over Jaren):
+`npm run benchmark:jslt` asserts result equivalence before timing Jaren against a hand-written recursive JavaScript transform and JSONata's transform operator. Measured with `npm run benchmark:jslt:profile` (<!--fact:jslt.measured-->2026-11-13, Node v24.22.1, each figure the median of 3 processes<!--/fact-->; competitor ratios are competitor time over Jaren, so one below 1 is a row the competitor wins):
 
-| Scenario | Jaren JSLT | native JS | jsonata 2.2 |
-|---|---:|---:|---:|
+<!--fact:jslt.table-->
+| Scenario | Jaren | native JS | jsonata 2.2.1 |
+|---|---|---|---|
 | **4-book bookstore** | | | |
-| identity (`share`) | 81 ns | 2.04 µs (25.3x) | 14.60 µs (180x) |
-| surgical prices | 9.15 µs | 1.09 µs (0.12x) | 90.13 µs (9.8x) |
-| reshape + modes | 8.70 µs | 431 ns (0.050x) | n/a |
-| fresh schema annotation | 3.50 µs | 911 ns (0.26x) | 136.92 µs (39.1x) |
+| identity (share vs deep copy) | 1 ns | 1.88 µs (1,825x) | 12.6 µs (12,208x) |
+| surgical update ($..price × 1.21) | 3.29 µs | 1.09 µs (0.33x) | 86.5 µs (26.3x) |
+| reshape + two modes | 4.58 µs | 65 ns (0.014x) | n/a |
+| fresh schema annotation | 2.75 µs | 904 ns (0.33x) | 136 µs (49.3x) |
 | **10,000-book bookstore** | | | |
-| identity (`share`) | 24 ns | 3.41 ms (143,482x) | 13.52 ms (569,663x) |
-| surgical prices | 23.17 ms | 2.00 ms (0.086x) | 152.48 ms (6.6x) |
-| reshape + modes | 20.01 ms | 137.36 µs (0.007x) | n/a |
-| fresh schema annotation | 6.40 ms | 1.73 ms (0.27x) | 277.33 ms (43.4x) |
-| **document-independent** | | | |
-| compile, per stylesheet | 33.16 µs | n/a | 70.50 µs (2.1x) |
+| identity (share vs deep copy) | 12 ns | 3.13 ms (259,850x) | 12.6 ms (1,049,044x) |
+| surgical update ($..price × 1.21) | 7 ms | 1.97 ms (0.28x) | 149 ms (21.3x) |
+| reshape + two modes | 9.54 ms | 130 µs (0.014x) | n/a |
+| fresh schema annotation | 5.26 ms | 1.76 ms (0.34x) | 258 ms (49.1x) |
+| **compile, per stylesheet** | 50.6 µs | n/a | n/a |
+<!--/fact-->
 
-The identity row is the sharing fast path: Jaren returns the input reference in O(1), while native and JSONata deep-copy. On actual transformations, hand-written JavaScript is 3.4–143x faster because it is bespoke code with no matcher, rank table, mode, schema, or error machinery—the honest cost of the abstraction. Jaren is 6.6–45x faster than JSONata where the transform operator can express the scenario; reshape+modes is `n/a`, not silently replaced by a different JSONata feature. JSONata 2.x timings include its required promise overhead and transform-copy cost. Scaled prices are rounded to cents because JSONata's copy normalizes long binary decimal tails and these scenarios do not sort. fontoxpath is excluded because it has XPath/XQuery but no XSLT dispatcher; Saxon-JS is excluded as a heavyweight SEF/XSLT toolchain for this benchmark workspace.
+The identity row is the sharing fast path: Jaren returns the input reference in O(1), while native and JSONata deep-copy. On actual transformations Jaren runs <!--fact:jslt.vsNative-->2.9–73.5x slower<!--/fact--> than hand-written JavaScript, because that is bespoke code with no matcher, rank table, mode, schema, or error machinery—the honest cost of the abstraction. Jaren runs <!--fact:jslt.vsJsonata-->21.3–50.2x faster<!--/fact--> than JSONata where the transform operator can express the scenario; reshape+modes is `n/a`, not silently replaced by a different JSONata feature. JSONata 2.x timings include its required promise overhead and transform-copy cost. Scaled prices are rounded to cents because JSONata's copy normalizes long binary decimal tails and these scenarios do not sort. fontoxpath is excluded because it has XPath/XQuery but no XSLT dispatcher; Saxon-JS is excluded as a heavyweight SEF/XSLT toolchain for this benchmark workspace.
 
 ## JTLT — template-driven text output
 

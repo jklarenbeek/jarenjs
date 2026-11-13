@@ -1213,7 +1213,7 @@ them:
   byte of `packages/linq/src/model/`, because the subclasses are built by
   this subpath rather than patched onto the base classes.
 
-The price above the schema pen's <!--fact:bundle.schema-->47,577<!--/fact--> is about 10 kB: the mixin, the
+The price above the schema pen's <!--fact:bundle.schema-->47,577<!--/fact--> is about <!--fact:bundle.model.overSchema.kb-->12<!--/fact--> kB: the mixin, the
 three relation factories, `collection()`/`index()` with their capture,
 `defineModel()` — and the refusal MESSAGES, which are most of what §4
 costs. That is a deliberate trade: naming the rule and the spelling that

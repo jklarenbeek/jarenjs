@@ -24,7 +24,7 @@ engines:
       RFC 6901 with zero-allocation compiled getters, plus relative pointers
       — the $data hot path.
     perf: >-
-      compiled getters, far ahead of the npm package
+      compiled getters, measured against the npm package
   - key: patch
     suite: jsonpatch
     title: JSON Patch

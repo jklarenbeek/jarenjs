@@ -144,11 +144,11 @@ console.log(validate({ count: 42, name: 'test' })); // true
 
 ### Bundle Size Comparison
 
-| Configuration | Approximate Size |
-|--------------|------------------|
-| `@jarenjs/validate` only | ~25 KB |
-| `@jarenjs/validate` + `@jarenjs/formats` | ~35 KB |
-| `@jarenjs/validate` + `@jarenjs/refs` + `@jarenjs/formats` | ~45 KB |
+Each package you add grows the bundle: `@jarenjs/validate` alone is the
+smallest, `@jarenjs/formats` adds its format validators, and
+`@jarenjs/refs` adds the bundled draft meta-schemas on top. The repository does
+not publish a measured size for these three configurations, so measure
+yours with your own bundler and its tree-shaking settings.
 
 ### When to Use Lightweight Mode
 

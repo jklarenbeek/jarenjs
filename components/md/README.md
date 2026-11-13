@@ -561,7 +561,7 @@ active policy ([PLUGINS.md](docs/PLUGINS.md) §5, [MD-FORMAT.md](docs/MD-FORMAT.
 ## Performance contract
 
 Measured, not claimed — `npm run benchmark:markdown`, <!--fact:md.measured-->2026-11-13, Node v24.22.1<!--/fact-->
-(run it yourself; micro-timings vary ±15%):
+(run it yourself; micro-timings vary from run to run):
 
 - **Parse to AST**: <!--fact:md.parseTimes-->~0.11 ms for a typical ~2 kB document, ~0.53 ms for ~10 kB, ~5.5 ms for ~100 kB<!--/fact--> — linear in input.
 - **Hostile input is linear too.** The shapes that make a naive parser

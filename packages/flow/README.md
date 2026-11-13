@@ -244,11 +244,11 @@ the `xstate` benchmark devDependency, and the memory row needs
 built with `@jarenjs/flow` and XState v5 and asserted to agree before
 timing:
 
-- **Transitions** — the pure `step` runs several times faster than an
+- **Transitions** — the pure `step` runs faster than an
   XState actor's `send` (≈<!--fact:flow.fsmBand-->16.8–26.3<!--/fact-->× across 5/50/500-state machines); the
   `createFsmSession` wrapper is on the page too.
-- **Compile** — `compileFsm` beats `createMachine` + `createActor`
-  ≈1.5–2.6×. Not like-for-like: XState builds a scheduling actor, so the
+- **Compile** — `compileFsm` runs <!--fact:flow.compileVsXstate-->1.8–2.3× faster<!--/fact--> than
+  `createMachine` + `createActor`. Not like-for-like: XState builds a scheduling actor, so the
   row is each engine's description→drivable cost.
 - **The wedge** — a conformance fact, not a timing: a jaren-fsm document
   is JSON *including its guards*, so it survives `JSON.stringify` →
@@ -262,7 +262,7 @@ timing:
   benchmark publishes the KiB-per-machine loss beside the wins.
 - **The dag tax** — no npm library executes schema-validated JSON
   dataflow, so the honest rival is the same pipeline hand-written in
-  JavaScript. A `compileDag` run costs ~8–20× the hand-written baseline —
+  JavaScript. A `compileDag` run costs <!--fact:flow.dagTax-->17.5–41.7<!--/fact-->× the hand-written baseline —
   the published price of dataflow as one serializable,
   constrained-decodable JSON value, sitting beside what it buys.
 
