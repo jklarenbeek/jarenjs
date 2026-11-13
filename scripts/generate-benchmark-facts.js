@@ -1682,6 +1682,11 @@ const FACTS = {
   'view.fastestFrame': () => {
     const memo = viewRow('frame', 'jaren view+patch (memo)');
     const hand = viewRow('frame', 'jaren view+patch (hand-written)');
+    // a gap inside how far the suite's own processes disagreed is no order
+    const worst = data('meta').measurement?.view?.processSpread?.worst;
+    const gap = Math.max(memo, hand) / Math.min(memo, hand);
+    if (worst !== undefined && gap <= worst)
+      return `at this table size the hand-written view plus a full diff and the memoized stylesheet are level as the fastest frame: ${ratio(gap)}× apart, inside the ${ratio(worst)}× the suite's processes disagreed by`;
     return hand <= memo
       ? `at this table size the hand-written view plus a full diff is still the fastest frame outright, ${ratio(memo / hand)}× ahead of the memoized stylesheet`
       : `at this table size the memoized stylesheet is the fastest frame outright, ${ratio(hand / memo)}× ahead of the hand-written view plus a full diff`;

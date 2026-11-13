@@ -542,8 +542,9 @@ codegen, anywhere, by house rule: everything here runs under a strict
 Content-Security-Policy, where runtime codegen is unavailable. That is
 the same trade the schema validator and the query engine make, and it is
 a trade rather than an excuse — against every parser that also avoids
-codegen, jaren leads. Header-keyed object rows stay behind a
-code-generating parser: closing the gap needs a closure-compiled way to
+codegen, jaren leads (d3-dsv builds its header-keyed object rows with
+`new Function` too). Header-keyed object rows stay behind
+the code-generating parsers: closing the gap needs a closure-compiled way to
 build each record, and none is known.
 
 The plain-field scanner finds each cell end as the minimum of three
