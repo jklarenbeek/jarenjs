@@ -694,11 +694,11 @@ WKT↔GeoJSON converter (`npm run benchmark:geo`, Node <!--fact:geo.node-->v24.2
 <!--fact:geo.wktTable-->
 | scenario | Jaren | rival | ratio |
 |---|---|---|---|
-| wkt parse (POINT) | 443.0 ns | 1.38 µs (wellknown) | **3.1×** |
-| wkt parse (2000-vertex polygon) | 830.20 µs | 2.17 ms (wellknown) | **2.6×** |
-| wkt stringify (2000-vertex polygon) | 164.10 µs | 237.00 µs (wellknown) | **1.4×** |
-| wkt validate (POINT) | 243.1 ns | 1.29 µs (wellknown) | **5.3×** |
-| wkt validate (2000-vertex polygon) | 482.20 µs | 1.92 ms (wellknown) | **4.0×** |
+| wkt parse (POINT) | 435.4 ns | 1.40 µs (wellknown) | **3.2×** |
+| wkt parse (2000-vertex polygon) | 824.20 µs | 2.05 ms (wellknown) | **2.5×** |
+| wkt stringify (2000-vertex polygon) | 166.30 µs | 236.00 µs (wellknown) | **1.4×** |
+| wkt validate (POINT) | 246.4 ns | 1.30 µs (wellknown) | **5.3×** |
+| wkt validate (2000-vertex polygon) | 477.50 µs | 1.97 ms (wellknown) | **4.1×** |
 <!--/fact-->
 
 The last two rows are the ones the sink exists for: `wellknown` has no
@@ -749,21 +749,21 @@ below derive from the committed measurement and are refreshed with it.
 <!--fact:geo.table-->
 | scenario | Jaren | rival | ratio |
 |---|---|---|---|
-| distance (two positions) | 2.5 ns | 103.5 ns (turf) | **41.2×** |
-| distance (vs geolib, ellipsoidal) | 47.6 ns | 611.9 ns (geolib) | **12.8×** |
+| distance (two positions) | 2.5 ns | 103.8 ns (turf) | **41.3×** |
+| distance (vs geolib, ellipsoidal) | 47.5 ns | 606.6 ns (geolib) | **12.8×** |
 | distance (equirectangular screen) | 19.2 ns | — | — |
-| point in polygon (12-vertex) | 71.5 ns | 58.0 ns (turf) | 0.8× |
-| point in polygon (2000-vertex) | 7.38 µs | 3.80 µs (turf) | 0.5× |
-| polygon area (2000-vertex) | 17.43 µs | 18.36 µs (turf) | **1.1×** |
-| line length (500 positions) | 20.71 µs | 67.12 µs (turf) | **3.2×** |
-| bounding box (2000-vertex) | 15.73 µs | 19.10 µs (turf) | **1.2×** |
-| centroid (2000-vertex) | 11.41 µs | 20.37 µs (turf) | **1.8×** |
-| index build (100k boxes) | 13.44 ms | 11.25 ms (flatbush) | 0.8× |
-| index probe (100k boxes) | 490.5 ns | 493.0 ns (flatbush) | **1.0×** |
-| linear scan (100k boxes, no index) | 154.80 µs | — | — |
+| point in polygon (12-vertex) | 71.8 ns | 57.5 ns (turf) | 0.8× |
+| point in polygon (2000-vertex) | 7.37 µs | 3.79 µs (turf) | 0.5× |
+| polygon area (2000-vertex) | 17.49 µs | 18.36 µs (turf) | **1.0×** |
+| line length (500 positions) | 20.59 µs | 65.60 µs (turf) | **3.2×** |
+| bounding box (2000-vertex) | 15.78 µs | 19.00 µs (turf) | **1.2×** |
+| centroid (2000-vertex) | 12.89 µs | 20.68 µs (turf) | **1.6×** |
+| index build (100k boxes) | 14.07 ms | 11.20 ms (flatbush) | 0.8× |
+| index probe (100k boxes) | 479.0 ns | 432.7 ns (flatbush) | 0.9× |
+| linear scan (100k boxes, no index) | 155.80 µs | — | — |
 <!--/fact-->
 
-The losses are kept, and named by the same measurement: on the committed run <!--fact:geo.losses-->three rows lose to a rival: point in polygon (12-vertex) at 0.8× (turf), point in polygon (2000-vertex) at 0.5× (turf), index build (100k boxes) at 0.8× (flatbush)<!--/fact-->.
+The losses are kept, and named by the same measurement: on the committed run <!--fact:geo.losses-->four rows lose to a rival: point in polygon (12-vertex) at 0.8× (turf), point in polygon (2000-vertex) at 0.5× (turf), index build (100k boxes) at 0.8× (flatbush), index probe (100k boxes) at 0.9× (flatbush)<!--/fact-->.
 **Point-in-polygon on a large ring runs at about half Turf's speed**
 (<!--fact:geo.pip2000-->0.5×<!--/fact--> at 2000 vertices) because every edge that could
 matter goes through the exact orientation predicate, where Turf uses naive
@@ -796,7 +796,7 @@ carry the lesson:
   into *closure variables* writes a boxed heap number per `+=` — two per
   vertex — where `bboxOf`'s comparisons rarely write at all. The accumulators
   are a small `Float64Array` now (raw double stores, no boxing), and the row
-  is <!--fact:geo.centroidVerdict-->1.8× faster than turf<!--/fact-->.
+  is <!--fact:geo.centroidVerdict-->1.6× faster than turf<!--/fact-->.
 
 ```javascript
 import { orient2d, haversineDistance, ringWinding, geohashEncode } from '@jarenjs/core/geo';

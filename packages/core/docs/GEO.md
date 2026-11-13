@@ -25,7 +25,7 @@ in this module rests on this sign; its cost is the deliberate
 point-in-polygon loss on the benchmark page (<!--fact:geo.pip2000-->0.5×<!--/fact--> against
 Turf at 2000 vertices, kept on purpose). Every loss the kernel carries is
 published in [ARCHITECTURE](../ARCHITECTURE.md), derived from the committed
-measurement: <!--fact:geo.losses-->three rows lose to a rival: point in polygon (12-vertex) at 0.8× (turf), point in polygon (2000-vertex) at 0.5× (turf), index build (100k boxes) at 0.8× (flatbush)<!--/fact-->.
+measurement: <!--fact:geo.losses-->four rows lose to a rival: point in polygon (12-vertex) at 0.8× (turf), point in polygon (2000-vertex) at 0.5× (turf), index build (100k boxes) at 0.8× (flatbush), index probe (100k boxes) at 0.9× (flatbush)<!--/fact-->.
 
 ## Distance — `distance.js`
 
@@ -72,7 +72,7 @@ distance is the bit-parallel transform): `search()` returns *candidate*
 indexes — box overlap is necessary, never sufficient, so a caller
 confirms each candidate with the exact test. Null entries index as
 never-matching, keeping positions aligned with the caller's array.
-Against Flatbush <!--fact:geo.flatbush-->the build is 1.2× slower than flatbush and the probe level with flatbush<!--/fact--> (`npm run benchmark:geo`; the
+Against Flatbush <!--fact:geo.flatbush-->the build is 1.3× slower than flatbush and the probe 1.1× slower than flatbush<!--/fact--> (`npm run benchmark:geo`; the
 table lives in [ARCHITECTURE](../ARCHITECTURE.md)).
 
 **A box is refused rather than made too small.** `bboxOfPositions` and
