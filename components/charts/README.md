@@ -383,14 +383,14 @@ Measured (`npm run benchmark:charts`, one appended point):
 <!--fact:charts.sessionTable-->
 | points × series | session tick | wholesale tick | frames incremental |
 |---|---:|---:|---:|
-| 100 × 5 | 6.04 µs | 275 µs | 1100 of 1100 |
-| 1,000 × 5 | 5.76 µs | 1 ms | 1100 of 1100 |
-| 10,000 × 5 | 5.95 µs | 8.21 ms | 1100 of 1100 |
-| 10,000 × 5 *(sampled)* | 2.37 ms | 2.46 ms | 0 of 1100 |
+| 100 × 5 | 3.17 µs | 274 µs | 1100 of 1100 |
+| 1,000 × 5 | 2.42 µs | 1.02 ms | 1100 of 1100 |
+| 10,000 × 5 | 2.32 µs | 8.61 ms | 1100 of 1100 |
+| 10,000 × 5 *(sampled)* | 2.19 ms | 2.3 ms | 0 of 1100 |
 <!--/fact-->
 
 The session tick is *flat* in n — it
-moves <!--fact:charts.sessionFlatness-->1.0× while the wholesale tick grows 29.8×<!--/fact-->. Supported types: `line` (appends
+moves <!--fact:charts.sessionFlatness-->0.7× while the wholesale tick grows 31.4×<!--/fact-->. Supported types: `line` (appends
 and ring-buffer evictions), `bar` (live counts and sums), `heatmap`
 (live matrix counts and sums) and `candlestick` (keyed kline upserts —
 one candle group re-renders). The website's Binance demo runs on it.
@@ -473,9 +473,9 @@ Measured (`npm run benchmark:charts`, one series):
 <!--fact:charts.samplingTable-->
 | source points | drawn | method | source → AST | source → svg |
 |---:|---:|---|---:|---:|
-| 2,000 | 2,000 | none | 66.1 µs → 69 µs | 508 µs → 537 µs |
-| 20,000 | 560 | lttb | 635 µs → 905 µs | 5.77 ms → 916 µs |
-| 100,000 | 560 | lttb | 4.04 ms → 4.86 ms | 27.5 ms → 5.42 ms |
+| 2,000 | 2,000 | none | 55.1 µs → 55.6 µs | 535 µs → 538 µs |
+| 20,000 | 560 | lttb | 703 µs → 734 µs | 5.6 ms → 895 µs |
+| 100,000 | 560 | lttb | 3.78 ms → 4.52 ms | 25.8 ms → 5.04 ms |
 <!--/fact-->
 
 Choosing the points costs about what mapping them costs — the sampler

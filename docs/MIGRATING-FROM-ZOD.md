@@ -231,7 +231,7 @@ behavior change.
 
 ## Performance
 
-From `npm run benchmark:contracts`, measured on <!--fact:contracts.measured-->2026-11-05 with Node v24.22.1, 20,000 iterations<!--/fact-->
+From `npm run benchmark:contracts`, measured on <!--fact:contracts.measured-->2026-11-13 with Node v24.22.1, each engine in a process of its own and each figure the median of 3 processes<!--/fact-->
 (reproduce it yourself rather than trusting the table). The row that matters
 is the third — normalize, validate, and map errors, which is what a request
 handler does. Times are per operation; lower is better, and the fastest engine
@@ -242,20 +242,20 @@ of each scenario is in bold.
 <!--fact:contracts.adapter.table-->
 | Scenario | @jarenjs/validate | zod 4 | zod 3 | zod/mini | ajv |
 | --- | --- | --- | --- | --- | --- |
-| command — uuid, enum, date-time; no defaults | **1.97 µs** | 3.83 µs | 8.89 µs | 4.1 µs | 2.18 µs |
-| config — defaults and numeric coercion | 1.69 µs | 2.42 µs | 5.72 µs | 2.66 µs | **1.64 µs** |
-| collection — 50 nested records | 14.3 µs | **12.1 µs** | 25.3 µs | 19.9 µs | 20.4 µs |
+| command — uuid, enum, date-time; no defaults | **1.2 µs** | 3.36 µs | 7.17 µs | 3.56 µs | 1.91 µs |
+| config — defaults and numeric coercion | **1.34 µs** | 2.37 µs | 5.76 µs | 2.79 µs | 1.68 µs |
+| collection — 50 nested records | 15.3 µs | **10.8 µs** | 24.4 µs | 18 µs | 20.9 µs |
 <!--/fact-->
 
 The table is regenerated from each release's own measurement, so read it row
 by row rather than trusting a summary written once. Ajv generates source with
 `new Function`, while Jaren compiles closures because the no-`eval` rule is
-what makes it CSP-safe; on this row Jaren is <!--fact:contracts.adapter.vsAjv-->faster than ajv in 2 of 3, while ajv is faster on the config scenario<!--/fact-->,
+what makes it CSP-safe; on this row Jaren is <!--fact:contracts.adapter.vsAjv-->faster than ajv in every scenario<!--/fact-->,
 and a code-generating backend is not planned. The benchmarks page reports a
 geometric mean against the *fastest rival per scenario* rather than quoting
 only the scenarios Jaren wins.
 
-Compilation is paid once per process. On the compile table <!--fact:contracts.compile.versus-->zod 4, zod 3, zod/mini and ajv build a schema faster than Jaren in every scenario<!--/fact-->.
+Compilation is paid once per process. On the compile table <!--fact:contracts.compile.versus-->zod 4, zod 3 and zod/mini build a schema faster than Jaren in every scenario, and ajv builds one slower in every scenario<!--/fact-->.
 A schema with defaults costs Jaren more again, because it checks each default
 against the schemas it meets so that normalizing never turns an accepted
 request into a refused one. If you compile thousands of schemas at boot,

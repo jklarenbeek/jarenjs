@@ -560,10 +560,10 @@ active policy ([PLUGINS.md](docs/PLUGINS.md) §5, [MD-FORMAT.md](docs/MD-FORMAT.
 
 ## Performance contract
 
-Measured, not claimed — `npm run benchmark:markdown`, <!--fact:md.measured-->2026-11-05, Node v24.22.1<!--/fact-->
+Measured, not claimed — `npm run benchmark:markdown`, <!--fact:md.measured-->2026-11-13, Node v24.22.1<!--/fact-->
 (run it yourself; micro-timings vary ±15%):
 
-- **Parse to AST**: <!--fact:md.parseTimes-->~0.11 ms for a typical ~2 kB document, ~0.57 ms for ~10 kB, ~5.5 ms for ~100 kB<!--/fact--> — linear in input.
+- **Parse to AST**: <!--fact:md.parseTimes-->~0.11 ms for a typical ~2 kB document, ~0.53 ms for ~10 kB, ~5.5 ms for ~100 kB<!--/fact--> — linear in input.
 - **Hostile input is linear too.** The shapes that make a naive parser
   rescan the rest of the text from every position — unclosed link
   destinations, runs of `www.a_`, unterminated comments and
@@ -591,15 +591,15 @@ Measured, not claimed — `npm run benchmark:markdown`, <!--fact:md.measured-->2
   three `null` entries, where it used to nest them.) A link
   destination nests parentheses at most 32 deep, the limit cmark and
   commonmark.js apply; MD-FORMAT.md §1.4 states the bounds normatively.
-- **Parse + render to HTML** (the cross-engine row, `toHtml`): takes <!--fact:md.vsPeers-->0.9–1.1<!--/fact-->x the time `marked` and `markdown-it` take — <!--fact:md.vsPeersDetail-->faster than both at every size measured except one — `markdown-it` is ahead at ~2 kB (1.0x); `markdown-it` is ahead at ~10 kB (1.1x); `markdown-it` is ahead at ~100 kB (1.1x)<!--/fact--> — and is <!--fact:md.vsMicromark-->9.9–16.6<!--/fact-->x faster than `micromark`, on the same GFM documents.
+- **Parse + render to HTML** (the cross-engine row, `toHtml`): takes <!--fact:md.vsPeers-->0.8–1.0<!--/fact-->x the time `marked` and `markdown-it` take — <!--fact:md.vsPeersDetail-->faster than both at every size measured<!--/fact--> — and is <!--fact:md.vsMicromark-->16.0–19.8<!--/fact-->x faster than `micromark`, on the same GFM documents.
   Through the **vnode** path the same documents cost more — keys,
   memoization and a tree the patcher can reconcile are not free — and
   the benchmark publishes that row beside this one rather than quoting
   only the flattering half.
 - **Where the time goes** (~100 kB, the phase split the benchmark now
-  prints and publishes): <!--fact:md.phaseSplit-->parse 41%, AST→vnode 39%, vnode→HTML 19%<!--/fact-->. The projection, not
+  prints and publishes): <!--fact:md.phaseSplit-->parse 40%, AST→vnode 39%, vnode→HTML 22%<!--/fact-->. The projection, not
   the parse, is the expensive half — and <!--fact:md.keyCost-->41%<!--/fact--> of the projection is
-  computing the content-hash **keys** (<!--fact:md.unkeyedMs-->3.1 ms against 5.2 ms<!--/fact--> without them).
+  computing the content-hash **keys** (<!--fact:md.unkeyedMs-->3.2 ms against 5.3 ms<!--/fact--> without them).
   Keys are what let the patcher reorder blocks instead of rebuilding
   them, so they are worth it for a tree that will be patched — and worth
   nothing to a caller that renders once and throws the tree away. That
@@ -613,7 +613,7 @@ Measured, not claimed — `npm run benchmark:markdown`, <!--fact:md.measured-->2
   output will be patched, and guessing wrong turns O(1) reconciliation
   into a rebuild with no error to show for it.
 - **The compiled fast path**: `compileMarkdown(...).toVnode()` returns
-  the cached projection in <!--fact:md.cachedNs-->21–74<!--/fact--> ns — and because block vnodes carry
+  the cached projection in <!--fact:md.cachedNs-->4–4<!--/fact--> ns — and because block vnodes carry
   content-hash keys and unchanged AST nodes emit reference-equal
   vnodes, the view patcher skips unchanged blocks in O(1). (A reused
   heading whose number an earlier heading has since taken renders again,
