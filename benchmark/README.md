@@ -70,6 +70,14 @@ clock rather than by a call count:
   pending work stays queued until the loop yields; an async engine is
   timed with the awaited helpers.
 
+The collections are counted with `v8.GCProfiler`, which holds native
+memory for every collection it recorded until a major collection frees
+the profiler, and V8 does not schedule one for it. A suite of many
+collecting rows therefore grows by gigabytes of RSS and falls back while
+its heap stays small: jsonpath peaks near 3 GB with a heap under 250 MB.
+It is not a leak (two major collections return it), but a suite needs that
+headroom.
+
 `BENCH_SCALE` multiplies those clock budgets; `BENCH_SCALE=0` times each
 row's iteration floor with no warm-up or retry, to check a suite's wiring
 quickly (`website-data.js --quick` uses it). `BENCH_ROUNDS_LOG=FILE`

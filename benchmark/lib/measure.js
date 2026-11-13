@@ -106,7 +106,11 @@ function* settledPlan(iterations, warmup) {
   let perCall = ns / size;
   size = Math.max(1, Math.round(SETTLED.blockMs * MS / perCall));
   // a row that throws while warming abandons this plan, and the finally
-  // stops the profiler: one left running records every later collection
+  // stops the profiler: one left running records every later collection.
+  // A stopped profiler still holds native memory for what it recorded
+  // until a major collection frees it, which V8 does not schedule for it:
+  // a suite of many collecting rows grows by gigabytes and falls back
+  // (jsonpath peaks near 3 GB of RSS while its heap stays under 250 MB)
   const profiler = new GCProfiler();
   profiler.start();
   let warmNs = 0;
