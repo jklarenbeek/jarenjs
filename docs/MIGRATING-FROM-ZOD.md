@@ -250,17 +250,16 @@ of each scenario is in bold.
 The table is regenerated from each release's own measurement, so read it row
 by row rather than trusting a summary written once. Ajv generates source with
 `new Function`, while Jaren compiles closures because the no-`eval` rule is
-what makes it CSP-safe; that price shows most on small schemas, and a
-code-generating backend is not planned. The benchmarks page reports a
+what makes it CSP-safe; on this row Jaren is <!--fact:contracts.adapter.vsAjv-->faster than ajv in 2 of 3, while ajv is faster on the config scenario<!--/fact-->,
+and a code-generating backend is not planned. The benchmarks page reports a
 geometric mean against the *fastest rival per scenario* rather than quoting
 only the scenarios Jaren wins.
 
-Compilation is paid once per process and is where Jaren is slowest: every
-rival builds a schema faster, and a schema with defaults costs Jaren more
-again, because it checks each default against the schemas it meets so that
-normalizing never turns an accepted request into a refused one. If you compile
-thousands of schemas at boot, measure it; if you compile them once at module
-load, it does not matter.
+Compilation is paid once per process. On the compile table <!--fact:contracts.compile.versus-->zod 4, zod 3, zod/mini and ajv build a schema faster than Jaren in every scenario<!--/fact-->.
+A schema with defaults costs Jaren more again, because it checks each default
+against the schemas it meets so that normalizing never turns an accepted
+request into a refused one. If you compile thousands of schemas at boot,
+measure it; if you compile them once at module load, it does not matter.
 
 ## Staging a migration
 

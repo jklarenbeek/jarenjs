@@ -48,6 +48,31 @@ const DATA = join(ROOT, 'packages/website/public/benchmarks');
 const cache = {};
 const data = (name) => (cache[name] ??= JSON.parse(readFileSync(join(DATA, `${name}.json`), 'utf8')));
 
+/** One of the contracts suite's tables, by the start of its title. */
+function contractsTable(prefix) {
+  const t = data('contracts').tables.find((x) => x.title.startsWith(prefix));
+  if (t === undefined) throw new Error(`contracts.json carries no '${prefix}' table — regenerate it before quoting one`);
+  return t;
+}
+
+/** A contracts row's scenario name, before its description. */
+const scenarioOf = (row) => row.name.split(' — ')[0];
+
+/** `a`, `a and b`, `a, b and c`. */
+const listOf = (xs) => (xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`);
+
+/** Where Jaren stands against one rival column of a contracts table, scenario by scenario. */
+function standing(t, rival) {
+  const mine = t.columns.indexOf('@jarenjs/validate');
+  const col = t.columns.indexOf(rival);
+  if (mine === -1 || col === -1) throw new Error(`contracts.json '${t.title}' names no @jarenjs/validate or ${rival} column`);
+  const timed = t.rows.filter((r) => Number.isFinite(r.results[mine]) && Number.isFinite(r.results[col]));
+  const lost = timed.filter((r) => !(r.results[mine] < r.results[col]));
+  if (lost.length === 0) return `faster than ${rival} in every scenario`;
+  if (lost.length === timed.length) return `slower than ${rival} in every scenario`;
+  return `faster than ${rival} in ${timed.length - lost.length} of ${timed.length}, while ${rival} is faster on the ${listOf(lost.map(scenarioOf))} scenario${lost.length === 1 ? '' : 's'}`;
+}
+
 /**
  * The `@jarenjs/linq` subpath bundle sizes, measured by
  * `scripts/check-tree-shaking.js` and committed as its baseline. It lives
@@ -524,9 +549,43 @@ const FACTS = {
     const lead = ahead.length > 0 ? [`than ${list(ahead)} in every scenario`] : [];
     return `faster ${[...lead, ...split].join(', and ')}`;
   },
+  // where Jaren stands against Ajv on the adapter row: the closures Jaren
+  // compiles instead of generated source are the guide's stated price, so
+  // where that price shows is read off the table, not written once
+  'contracts.adapter.vsAjv': () => {
+    const t = contractsTable('Normalize + validate');
+    return standing(t, 'ajv');
+  },
+  // the compile table, rival by rival: which build a schema faster than
+  // Jaren in every scenario, which slower, and where that splits
+  'contracts.compile.versus': () => {
+    const t = contractsTable('Compile');
+    const mine = t.columns.indexOf('@jarenjs/validate');
+    if (mine === -1) throw new Error('contracts.json compile table names no @jarenjs/validate column');
+    const faster = [];
+    const slower = [];
+    const split = [];
+    for (const rival of t.columns.filter((c, i) => i !== mine)) {
+      const col = t.columns.indexOf(rival);
+      const timed = t.rows.filter((r) => Number.isFinite(r.results[mine]) && Number.isFinite(r.results[col]));
+      const wins = timed.filter((r) => r.results[col] < r.results[mine]);
+      if (timed.length === 0) continue;
+      if (wins.length === timed.length) faster.push(rival);
+      else if (wins.length === 0) slower.push(rival);
+      else split.push(`${rival} builds one faster on the ${listOf(wins.map(scenarioOf))} scenario${wins.length === 1 ? '' : 's'} and slower on the rest`);
+    }
+    const verb = (names) => (names.length === 1 ? 'builds' : 'build');
+    const parts = [];
+    if (faster.length > 0) parts.push(`${listOf(faster)} ${verb(faster)} a schema faster than Jaren in every scenario`);
+    if (slower.length > 0) parts.push(`${listOf(slower)} ${verb(slower)} ${faster.length > 0 ? 'one' : 'a schema'} slower in every scenario`);
+    return [...parts, ...split].join(', and ');
+  },
   'contracts.measured': () => {
     const d = data('contracts');
     if (typeof d.date !== 'string') throw new Error('contracts.json carries no measurement date — regenerate it before quoting its numbers');
+    const record = data('meta').measurement?.contracts;
+    if (record?.method === 'settled')
+      return `${d.date.slice(0, 10)} with Node ${d.node}, each engine in a process of its own and each figure the median of ${record.processes} processes`;
     return `${d.date.slice(0, 10)} with Node ${d.node}, ${thousands(d.iterations)} iterations`;
   },
 
