@@ -19,7 +19,7 @@ describe('JSLT compile profiles cover the selected transformation set', () => {
       execFileSync(process.execPath, ['benchmark/jslt.js', '--profile', '--engines', 'jaren,jsonata',
         '--iterations', '1', '--output', 'json', '--filepath', output,
         ...(filter === null ? [] : ['--filter', filter])],
-      { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 60000 });
+      { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 60000, env: { ...process.env, BENCH_SCALE: '0' } });
       const { compile } = JSON.parse(readFileSync(output, 'utf8'));
       assert.deepEqual(compile?.sources, expected);
       assert.ok(Number.isFinite(compile.results.jaren));

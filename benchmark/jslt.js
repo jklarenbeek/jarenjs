@@ -29,14 +29,11 @@
 import { makeBookstoreDocuments } from './fixtures/bookstore.js';
 import { deepEquals } from './lib/equals.js';
 import { pad, padLeft, formatNs, formatRate } from './lib/fmt.js';
-import { measureCell as measureCellLib } from './lib/measure.js';
+import { measureCell } from './lib/measure.js';
 import { parseSuiteArgs } from './lib/args.js';
 import { writeEngineResults } from './lib/results.js';
 
 const DEFAULT_ITERATIONS = 1000;
-const WARMUP_ITERATIONS = 100;
-const CELL_TIME_BUDGET_NS = 500e6;
-const CELL_TIME_FLOOR_NS = 50e6;
 const SCALE_SIZES = [1000, 10000];
 
 const SCENARIOS = [
@@ -239,11 +236,7 @@ function printEquivalence(engines, rows, failures, options) {
 
 const hrnow = () => process.hrtime.bigint();
 
-const measureCell = (engine, fn, requestedIterations) => measureCellLib(
-  engine, fn, requestedIterations,
-  CELL_TIME_BUDGET_NS, CELL_TIME_FLOOR_NS, WARMUP_ITERATIONS);
-
-async function runProfile(engines, scenarios, documents, options) {
+async function runProfile(engines, scenarios, documents) {
   const rows = [];
   for (const document of documents) {
     const contexts = new Map(
@@ -264,10 +257,7 @@ async function runProfile(engines, scenarios, documents, options) {
         }
         const compiled = impl.compile();
         const context = contexts.get(engine.key);
-        const measured = await measureCell(
-          engine,
-          () => impl.run(compiled, context),
-          options.iterations);
+        const measured = await measureCell(engine, () => impl.run(compiled, context));
         row.engines[engine.key] = measured.ns;
         row.iterations[engine.key] = measured.iterations;
       }
@@ -307,15 +297,13 @@ function runCompileProfile(engines, scenarios, options) {
   return { sources, iterations, results };
 }
 
-function printProfile(engines, rows, compile, options) {
+function printProfile(engines, rows, compile) {
   const nameWidth = 34;
   const jarenWidth = 24;
   const rivalWidth = Math.max(
     32, ...engines.slice(1).map((engine) => engine.name.length + 18));
 
-  console.log(
-    `\nJaren JSLT profile: ${options.iterations} requested iterations per cell`
-    + ' (adaptive on slow/fast cells)\n');
+  console.log('\nJaren JSLT profile: each cell timed by the clock until it settles\n');
 
   let currentDocument = null;
   for (const row of rows) {
@@ -480,9 +468,9 @@ async function main() {
   }
 
   if (options.profile) {
-    const rows = await runProfile(engines, scenarios, documents, options);
+    const rows = await runProfile(engines, scenarios, documents);
     const compile = runCompileProfile(engines, scenarios, options);
-    printProfile(engines, rows, compile, options);
+    printProfile(engines, rows, compile);
     writeResults('profile', engines, { rows, compile }, options);
     return;
   }

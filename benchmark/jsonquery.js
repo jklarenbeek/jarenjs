@@ -33,14 +33,11 @@
 import { makeBookstoreDocuments } from './fixtures/bookstore.js';
 import { deepEquals } from './lib/equals.js';
 import { pad, padLeft, formatNs, formatRate } from './lib/fmt.js';
-import { measureCell as measureCellLib } from './lib/measure.js';
+import { measureCell } from './lib/measure.js';
 import { parseSuiteArgs } from './lib/args.js';
 import { writeEngineResults } from './lib/results.js';
 
 const DEFAULT_ITERATIONS = 1000;
-const WARMUP_ITERATIONS = 100;
-const CELL_TIME_BUDGET_NS = 500e6; // ~0.5 s per (scenario, engine, document) cell
-const CELL_TIME_FLOOR_NS = 50e6; // fast cells run extra iterations up to ~50 ms
 const SCALE_SIZES = [1000, 10000];
 
 //#region scenarios & documents
@@ -180,17 +177,7 @@ function printEquivalence(engines, allRows, failures, options) {
 
 const hrnow = () => process.hrtime.bigint();
 
-/**
- * Time one (engine, scenario, document) cell. A single pilot run sizes the
- * iteration count: slow cells (10k-book documents) are cut down to the
- * cell budget, sub-microsecond cells are scaled up until the measurement
- * window is long enough to be stable.
- */
-const measureCell = (engine, fn, requestedIterations) => measureCellLib(
-  engine, fn, requestedIterations,
-  CELL_TIME_BUDGET_NS, CELL_TIME_FLOOR_NS, WARMUP_ITERATIONS);
-
-async function runProfile(engines, scenarios, documents, options) {
+async function runProfile(engines, scenarios, documents) {
   const rows = [];
   for (const document of documents) {
     const contexts = new Map(engines.map((e) => [e.key, e.prepare(document.data)]));
@@ -209,7 +196,7 @@ async function runProfile(engines, scenarios, documents, options) {
         }
         const compiled = impl.compile();
         const ctx = contexts.get(engine.key);
-        const { ns, iterations } = await measureCell(engine, () => impl.run(compiled, ctx), options.iterations);
+        const { ns, iterations } = await measureCell(engine, () => impl.run(compiled, ctx));
         row.engines[engine.key] = ns;
         row.iterations[engine.key] = iterations;
       }
@@ -246,12 +233,12 @@ function runCompileProfile(engines, options) {
   return { sources, iterations, results };
 }
 
-function printProfile(engines, rows, compile, options) {
+function printProfile(engines, rows, compile) {
   const nameWidth = 26;
   const jarenWidth = 22;
   const rivalWidth = Math.max(26, ...engines.slice(1).map((e) => e.name.length + 12));
 
-  console.log(`\nJaren JSON Query profile: ${options.iterations} iterations per cell (auto-reduced on big documents)\n`);
+  console.log('\nJaren JSON Query profile: each cell timed by the clock until it settles\n');
 
   let currentDoc = null;
   for (const row of rows) {
@@ -363,9 +350,9 @@ async function main() {
   }
 
   if (options.profile) {
-    const rows = await runProfile(engines, scenarios, documents, options);
+    const rows = await runProfile(engines, scenarios, documents);
     const compile = runCompileProfile(engines, options);
-    printProfile(engines, rows, compile, options);
+    printProfile(engines, rows, compile);
     writeResults('profile', engines, { rows, compile }, options);
     return;
   }

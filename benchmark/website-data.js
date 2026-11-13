@@ -47,7 +47,7 @@
  *   node benchmark/website-data.js --iterations N # validator suite iterations
  *   node benchmark/website-data.js --skip qt3,jslt
  *   node benchmark/website-data.js --out DIR      # write somewhere other than the published directory
- *   node benchmark/website-data.js --method block --processes 1  # time the timed suites another way
+ *   node benchmark/website-data.js --processes 1  # one process per timed suite
  */
 
 import { spawnSync } from 'child_process';
@@ -89,7 +89,7 @@ function flagValue(argv, i, flag) {
 }
 
 function parseArgs(argv) {
-  const options = { iterations: 1000, quick: false, skip: new Set(), out: null, method: null, processes: null };
+  const options = { iterations: 1000, quick: false, skip: new Set(), out: null, processes: null };
   for (let i = 2; i < argv.length; i++) {
     switch (argv[i]) {
       case '--iterations': case '-i': {
@@ -103,13 +103,6 @@ function parseArgs(argv) {
       }
       case '--quick': options.quick = true; break;
       case '--out': options.out = path.resolve(flagValue(argv, ++i, '--out')); break;
-      case '--method': {
-        const value = flagValue(argv, ++i, '--method');
-        if (value !== 'settled' && value !== 'block')
-          refuse(`--method is 'settled' or 'block', got '${value}'.`);
-        options.method = value;
-        break;
-      }
       case '--processes': {
         const value = flagValue(argv, ++i, '--processes');
         const count = Number(value);
@@ -128,7 +121,7 @@ function parseArgs(argv) {
         break;
       }
       case '--help': case '-h':
-        console.log('Usage: node benchmark/website-data.js [--quick] [--iterations N] [--skip suite,suite] [--out DIR] [--method settled|block] [--processes N]');
+        console.log('Usage: node benchmark/website-data.js [--quick] [--iterations N] [--skip suite,suite] [--out DIR] [--processes N]');
         console.log('Suites: validate, contracts, contract, jsonpath, jsonquery, jslt, formats, jsonpointer, jsonpatch, toml, jsonx-stream, csv, markdown, mermaid, view, charts, geo, flow, db, spatial, orm, live, vector, series, qt3');
         process.exit(0);
         break;
@@ -234,16 +227,23 @@ function sig4(n) {
 
 //#region timed runs
 
-// A timed suite runs in TIMED_PROCESSES processes under the settled method
+// A timed suite runs in TIMED_PROCESSES processes, timed by the method
 // of benchmark/lib/measure.js: each row is warmed by the clock until it
 // holds steady, timed in rounds long enough to hold the collections its
 // own garbage causes, and reported as its median round. One process's rows
 // still move with its compiler and collector schedule, so each published
 // figure is the median of the processes' figures for it, and how far the
 // processes and each row's rounds agreed is published beside the suite as
-// its `measurement` record in meta.json. A quick run is one process of the
-// one-block method, for wiring only.
+// its `measurement` record in meta.json. A quick run is one process with
+// no clock budgets (BENCH_SCALE=0), for wiring only.
 const TIMED_PROCESSES = 3;
+
+/**
+ * Suites timed in fewer processes. jsonpath's headline is a geometric mean
+ * over 970 rows that three processes put within 1.1% of each other, and
+ * one process of it takes ten minutes.
+ */
+const PROCESSES_OF = { jsonpath: 1 };
 
 /** A row whose median round is more than this times its fastest did not settle (measure.js uses the same bound). */
 const SETTLED_SPREAD = 1.15;
@@ -332,12 +332,11 @@ function numbersOf(value, at = '', out = new Map()) {
 /**
  * How one tool's runs agreed: its rows' own rounds (from the rounds logs)
  * and, between processes, the figures that differ.
- * @param {string} method
  * @param {any[]} outputs
  * @param {any[][]} logs
  */
-function measurementOf(method, outputs, logs) {
-  const settled = logs.flat().filter((row) => row.method === 'settled');
+function measurementOf(outputs, logs) {
+  const settled = logs.flat();
   const spreads = [];
   if (outputs.length > 1) {
     const runs = outputs.map((output) => numbersOf(output));
@@ -349,10 +348,10 @@ function measurementOf(method, outputs, logs) {
     }
   }
   return {
-    method,
+    method: 'settled',
     processes: outputs.length,
     rows: Math.max(0, ...logs.map((log) => log.length)),
-    unsettledRows: method === 'settled' ? settled.filter((row) => !row.settled).length / logs.length : null,
+    unsettledRows: settled.filter((row) => !row.settled).length / logs.length,
     worstRoundSpread: settled.length === 0 ? null : sig4(Math.max(...settled.map((row) => row.spread))),
     figures: spreads.length,
     processSpread: spreads.length === 0 ? null : { median: sig4(median(spreads)), worst: sig4(Math.max(...spreads)) },
@@ -368,7 +367,7 @@ function joinMeasurements(a, b) {
     method: a.method,
     processes: a.processes,
     rows: a.rows + b.rows,
-    unsettledRows: a.unsettledRows === null ? null : a.unsettledRows + b.unsettledRows,
+    unsettledRows: a.unsettledRows + b.unsettledRows,
     worstRoundSpread: a.worstRoundSpread === null || b.worstRoundSpread === null
       ? (a.worstRoundSpread ?? b.worstRoundSpread)
       : Math.max(a.worstRoundSpread, b.worstRoundSpread),
@@ -382,7 +381,8 @@ function joinMeasurements(a, b) {
 }
 
 /**
- * Run a timed tool TIMED_PROCESSES times (once for a quick run), each
+ * Run a timed tool TIMED_PROCESSES times (or its PROCESSES_OF count; once
+ * for a quick run), each
  * writing its JSON to a file of its own, and write their merged output to
  * `file`, where the suite's generator reads it as it would one run's.
  * @param {string} suite - the key its measurement record is published under
@@ -393,19 +393,18 @@ function joinMeasurements(a, b) {
 function runTimedTool(suite, file, options, args) {
   if (!args.includes(file))
     throw new Error(`runTimedTool(${suite}): the arguments do not write to ${file}`);
-  const processes = options.processes ?? (options.quick ? 1 : TIMED_PROCESSES);
-  const method = options.method ?? (options.quick ? 'block' : 'settled');
+  const processes = options.processes ?? (options.quick ? 1 : (PROCESSES_OF[suite] ?? TIMED_PROCESSES));
   const outputs = [];
   const logs = [];
   for (let p = 0; p < processes; p++) {
     const own = `${file}.p${p}`;
     const log = `${file}.p${p}.rounds.jsonl`;
-    runTool(args.map((arg) => (arg === file ? own : arg)), { env: { BENCH_METHOD: method, BENCH_ROUNDS_LOG: log } });
+    runTool(args.map((arg) => (arg === file ? own : arg)), { env: { BENCH_ROUNDS_LOG: log, ...(options.quick ? { BENCH_SCALE: '0' } : {}) } });
     outputs.push(readJson(own));
     logs.push(readRoundsLog(log));
   }
   fs.writeFileSync(file, JSON.stringify(mergeRuns(outputs)));
-  measured[suite] = joinMeasurements(measured[suite], measurementOf(method, outputs, logs));
+  measured[suite] = joinMeasurements(measured[suite], measurementOf(outputs, logs));
   // a run written somewhere other than the published directory keeps each
   // process's own output beside the merged one, to trace a figure they split on
   if (OUT_DIR !== PUBLISHED_DIR) {

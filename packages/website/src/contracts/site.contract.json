@@ -3462,7 +3462,7 @@
       "additionalProperties": false
     },
     "Measurement": {
-      "description": "One timed suite's measurement record. `method` is `settled` (rows warmed and timed by the clock, the median of their rounds) or `block` (one block of a fixed call count, a quick run's). `unsettledRows` counts rows whose median round stayed more than 1.15 times their fastest, per process; `processSpread` is the largest over the smallest of the processes' values, over the figures they differ on.",
+      "description": "One timed suite's measurement record. `method` is `settled`: rows warmed and timed by the clock, each the median of its rounds. `unsettledRows` counts rows whose median round stayed more than 1.15 times their fastest, per process; `processSpread` is the largest over the smallest of the processes' values, over the figures they differ on.",
       "type": "object",
       "required": [
         "method",
@@ -3476,10 +3476,7 @@
       ],
       "properties": {
         "method": {
-          "enum": [
-            "settled",
-            "block"
-          ]
+          "const": "settled"
         },
         "processes": {
           "type": "integer",
@@ -3490,10 +3487,7 @@
           "minimum": 0
         },
         "unsettledRows": {
-          "type": [
-            "number",
-            "null"
-          ],
+          "type": "number",
           "minimum": 0
         },
         "worstRoundSpread": {

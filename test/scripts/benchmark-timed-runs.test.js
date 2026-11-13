@@ -39,15 +39,16 @@ describe('a timed suite\'s measurement record', () => {
   it('counts unsettled rows per process and spreads only over figures the processes differ on', () => {
     const outputs = [{ ns: 100, same: 5, iterations: 7 }, { ns: 110, same: 5, iterations: 9 }, { ns: 125, same: 5, iterations: 8 }];
     const logs = [[settled(1.02), settled(1.3)], [settled(1.05), settled(1.1)], [settled(1.01), settled(1.2)]];
-    assert.deepStrictEqual(measurementOf('settled', outputs, logs), {
+    assert.deepStrictEqual(measurementOf(outputs, logs), {
       method: 'settled', processes: 3, rows: 2, unsettledRows: 2 / 3, worstRoundSpread: 1.3,
       figures: 1, processSpread: { median: 1.25, worst: 1.25 }, figuresOverSpread: 1,
     });
   });
 
-  it('has no round or process spread for one block in one process', () => {
-    assert.deepStrictEqual(measurementOf('block', [{ ns: 1 }], [[{ seq: 0, rounds: [1] }]]), {
-      method: 'block', processes: 1, rows: 1, unsettledRows: null, worstRoundSpread: null,
+  it('has no process spread for one process', () => {
+    const row = { seq: 0, rounds: [1, 1.04], spread: 1.04, settled: true };
+    assert.deepStrictEqual(measurementOf([{ ns: 1 }], [[row]]), {
+      method: 'settled', processes: 1, rows: 1, unsettledRows: 0, worstRoundSpread: 1.04,
       figures: 0, processSpread: null, figuresOverSpread: 0,
     });
   });
@@ -64,8 +65,8 @@ describe('a timed suite\'s measurement record', () => {
 });
 
 describe('the timed-run flags', () => {
-  it('name the method, the process count and the output directory', () => {
-    const options = parseArgs(['node', 'website-data.js', '--method', 'block', '--processes', '2', '--out', '/tmp/x']);
-    assert.deepStrictEqual([options.method, options.processes, options.out], ['block', 2, '/tmp/x']);
+  it('name the process count and the output directory', () => {
+    const options = parseArgs(['node', 'website-data.js', '--processes', '2', '--out', '/tmp/x']);
+    assert.deepStrictEqual([options.processes, options.out], [2, '/tmp/x']);
   });
 });
