@@ -80,7 +80,7 @@ function firstCallsNodes(firstCalls) {
   for (const t of firstCalls.tables ?? []) {
     out.push(table(t.title, ['Case', ...t.columns],
       t.rows.map((r) => ({ cells: [r.name, ...r.results.map(formatNs)] })),
-      'Nanoseconds per call, averaged over the first calls; lower is better. A dash is a cell the suite does not time.'));
+      'Time per call, averaged over the first calls; lower is better. A dash is a cell the suite does not time.'));
   }
   return out;
 }
@@ -96,7 +96,7 @@ function suiteNodes(suite, data, state) {
     case 'contracts': return contractsSuite(data);
     case 'contract': return contractSuite(data);
     case 'formats': return formatsSuite(data);
-    case 'jsonpointer': return genericTables(data, 'All timings are per-operation nanoseconds; lower is better. Column one is Jaren compiled.');
+    case 'jsonpointer': return genericTables(data, 'All timings are per operation; lower is better. Column one is Jaren compiled.');
     case 'jsonpatch': return patch(data);
     case 'toml': return toml(data);
     case 'csv': return csv(data);
@@ -637,7 +637,7 @@ function liveSuite(data) {
     out.push(callout('Omitted rivals', `${meta.omitted.join('; ')}.`));
   }
   out.push(...genericTables(data,
-    'Per-single-write medians in nanoseconds (job throughput in jobs/second); lower is better except throughput. Every row states what it measures and, for the rivals, the trade it makes.'));
+    'Per-single-write medians (job throughput in jobs/second); lower is better except throughput. Every row states what it measures and, for the rivals, the trade it makes.'));
   return out;
 }
 
@@ -651,7 +651,7 @@ function contractsSuite(data) {
   if (data.caveat != null)
     out.push(callout('Read the third table, not the second', data.caveat));
   out.push(...genericTables(data,
-    'Nanoseconds per operation; lower is better. A dash is an engine dropped for that scenario because it disagreed on the verdict or the normalized value, rather than being timed doing less work.'));
+    'Time per operation; lower is better. A dash is an engine dropped for that scenario because it disagreed on the verdict or the normalized value, rather than being timed doing less work.'));
   return out;
 }
 
@@ -668,7 +668,7 @@ function contractSuite(data) {
   if (data.caveat != null)
     out.push(callout('Read the harnesses before the numbers', data.caveat));
   out.push(...genericTables(data,
-    'Per-request/per-lookup nanoseconds; lower is better. A dash is an engine dropped for a row because it disagreed on the probes or the response, rather than being timed doing less work.'));
+    'Time per request or lookup; lower is better. A dash is an engine dropped for a row because it disagreed on the probes or the response, rather than being timed doing less work.'));
   const serialization = data.serialization ?? [];
   if (serialization.length > 0) {
     out.push(table(
@@ -696,7 +696,7 @@ function formatsSuite(data) {
     }]));
   }
   out.push(...genericTables(data,
-    'Nanoseconds for one accepted plus one rejected value; lower is better. A dash is a format that engine does not implement, or one it accepts the invalid value for.'));
+    'Time for one accepted plus one rejected value; lower is better. A dash is a format that engine does not implement, or one it accepts the invalid value for.'));
   return out;
 }
 
@@ -711,7 +711,7 @@ function patch(data) {
       note: 'official json-patch-tests suite',
     }]));
   }
-  out.push(...genericTables(data, 'Per-application nanoseconds; lower is better.'));
+  out.push(...genericTables(data, 'Time per application; lower is better.'));
   return out;
 }
 

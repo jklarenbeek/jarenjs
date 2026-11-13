@@ -239,11 +239,15 @@ function sig4(n) {
 const TIMED_PROCESSES = 3;
 
 /**
- * Suites timed in fewer processes. jsonpath's headline is a geometric mean
- * over 970 rows that three processes put within 1.1% of each other, and
- * one process of it takes ten minutes.
+ * Suites timed in another number of processes. jsonpath runs in one: its
+ * headline is a geometric mean over 970 rows that three processes put
+ * within 1.1% of each other, and one process of it takes ten minutes.
+ * markdown and geo run in five: their processes disagree the most (on
+ * v0.185.0, six figures each past the settled spread, the worst 1.43x and
+ * 2.13x apart); five processes add about two minutes to markdown and
+ * five to geo.
  */
-const PROCESSES_OF = { jsonpath: 1 };
+const PROCESSES_OF = { jsonpath: 1, markdown: 5, geo: 5 };
 
 /** A row whose median round is more than this times its fastest did not settle (measure.js uses the same bound). */
 const SETTLED_SPREAD = 1.15;

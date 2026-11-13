@@ -75,10 +75,12 @@ row's iteration floor with no warm-up or retry, to check a suite's wiring
 quickly (`website-data.js --quick` uses it). `BENCH_ROUNDS_LOG=FILE`
 appends every row's rounds and how it settled to `FILE`.
 
-`website-data.js` runs each timed suite in three processes (jsonpath in
-one: its headline is a geometric mean over 970 rows that three processes
-put within 1.1% of each other, and one process of it takes ten minutes)
-and publishes the median of their figures. How well a run settled is
+`website-data.js` runs each timed suite in three processes and publishes
+the median of their figures. jsonpath runs in one: its headline is a
+geometric mean over 970 rows that three processes put within 1.1% of each
+other, and one process of it takes ten minutes. markdown and geo run in
+five, because their processes disagree the most; that adds about two
+minutes to markdown and five to geo. How well a run settled is
 published beside the suite in `meta.json` as its `measurement` record:
 how many rows did not settle, the worst round spread, and how far the
 processes' figures were apart.
