@@ -257,6 +257,12 @@ const COUNTS = /(^|\/)(iterations|calls)(\/|$)/;
 /** @type {Record<string, any>} the measurement record of each suite timed this run */
 const measured = {};
 
+/** @type {Record<string, any>} each timed suite's first-calls tables, this run's */
+const firstCallsOf = {};
+
+/** Fresh processes each first-calls cell is the median of, over all of a suite's processes. */
+const FIRST_CALLS_PROCESSES = 3;
+
 /** The lines of a rounds log, or none where the tool timed nothing through the shared helpers. */
 function readRoundsLog(file) {
   if (!fs.existsSync(file))
@@ -341,7 +347,10 @@ function measurementOf(outputs, logs) {
   if (outputs.length > 1) {
     const runs = outputs.map((output) => numbersOf(output));
     for (const [at, value] of runs[0]) {
-      if (COUNTS.test(at)) continue;
+      // first calls are a fresh process's own and vary the most; they are
+      // the median of their own processes, and say nothing of how a
+      // settled suite's processes agreed
+      if (COUNTS.test(at) || at.startsWith('/firstCalls/')) continue;
       const values = runs.map((run) => run.get(at));
       if (values.some((v) => typeof v !== 'number' || v <= 0) || values.every((v) => v === value)) continue;
       spreads.push(Math.max(...values) / Math.min(...values));
@@ -381,6 +390,27 @@ function joinMeasurements(a, b) {
 }
 
 /**
+ * A tool's first-calls tables as published: each cell to four significant
+ * figures, and the processes over all of the suite's runs.
+ */
+function publishedFirstCalls(firstCalls, processes) {
+  return {
+    ...firstCalls,
+    processes: firstCalls.processes * processes,
+    tables: firstCalls.tables.map((t) => ({
+      ...t,
+      rows: t.rows.map((row) => ({ ...row, results: row.results.map((ns) => (ns === null ? null : sig4(ns))) })),
+    })),
+  };
+}
+
+/** The first-calls tables of a suite timed by two tools (flow), as one. */
+function joinFirstCalls(a, b) {
+  if (a === undefined) return b;
+  return { ...a, counts: [...new Set([...a.counts, ...b.counts])], tables: [...a.tables, ...b.tables] };
+}
+
+/**
  * Run a timed tool TIMED_PROCESSES times (or its PROCESSES_OF count; once
  * for a quick run), each
  * writing its JSON to a file of its own, and write their merged output to
@@ -399,11 +429,20 @@ function runTimedTool(suite, file, options, args) {
   for (let p = 0; p < processes; p++) {
     const own = `${file}.p${p}`;
     const log = `${file}.p${p}.rounds.jsonl`;
-    runTool(args.map((arg) => (arg === file ? own : arg)), { env: { BENCH_ROUNDS_LOG: log, ...(options.quick ? { BENCH_SCALE: '0' } : {}) } });
+    runTool(args.map((arg) => (arg === file ? own : arg)), {
+      env: {
+        BENCH_ROUNDS_LOG: log,
+        BENCH_FIRST_PROCESSES: String(Math.ceil(FIRST_CALLS_PROCESSES / processes)),
+        ...(options.quick ? { BENCH_SCALE: '0' } : {}),
+      },
+    });
     outputs.push(readJson(own));
     logs.push(readRoundsLog(log));
   }
-  fs.writeFileSync(file, JSON.stringify(mergeRuns(outputs)));
+  const merged = mergeRuns(outputs);
+  fs.writeFileSync(file, JSON.stringify(merged));
+  if (merged?.firstCalls != null)
+    firstCallsOf[suite] = joinFirstCalls(firstCallsOf[suite], publishedFirstCalls(merged.firstCalls, processes));
   measured[suite] = joinMeasurements(measured[suite], measurementOf(outputs, logs));
   // a run written somewhere other than the published directory keeps each
   // process's own output beside the merged one, to trace a figure they split on
@@ -520,6 +559,12 @@ function generateValidate(tmp, options) {
     jarenFailures: r.jarenFailures,
     ajvFailures: r.ajvFailures,
   }));
+  // the first passes before the profiler's untimed ones, in fresh processes
+  // of their own tool: the profiler's three runs are not settled-method rows
+  const firstFile = path.join(tmp, 'validate-first-calls.json');
+  runTool(['benchmark/validate-first-calls.js', '--output', 'json', '--filepath', firstFile],
+    { env: { BENCH_FIRST_PROCESSES: String(FIRST_CALLS_PROCESSES) } });
+  firstCallsOf.validate = publishedFirstCalls(readJson(firstFile).firstCalls, 1);
   return {
     metadata: { ...raw.metadata, runs: orders.length, cpus, orders },
     summary: raw.summary, results, errors: raw.errors,
@@ -1967,8 +2012,10 @@ async function main() {
   const qt3 = options.skip.has('qt3') ? (previousMeta?.qt3 ?? null) : generateQt3();
 
   console.log('\nAssembling website data files...');
-  for (const [name, data] of Object.entries(generated))
-    writeText(`${name}.json`, serializeSuite(name, data));
+  for (const [name, data] of Object.entries(generated)) {
+    const payload = data !== null && firstCallsOf[name] !== undefined ? { ...data, firstCalls: firstCallsOf[name] } : data;
+    writeText(`${name}.json`, serializeSuite(name, payload));
+  }
 
   // meta.json: everything the overview needs without loading the big files.
   const rootPkg = readJson(path.join(ROOT, 'package.json'));

@@ -14,6 +14,7 @@ number in a README performance table names the command that produced it.
 | Tool | Purpose | Use when |
 |------|---------|----------|
 | [`profiler.js`](./profiler.js) | JSON Schema performance vs Ajv over the official test suite | Measuring Jaren vs Ajv speed |
+| [`validate-first-calls.js`](./validate-first-calls.js) | Jaren and Ajv over their first passes of four official test groups, in fresh processes | Seeing what the validators cost before they settle |
 | [`debug.js`](./debug.js) | Test inspection and assertion-level debugging | Investigating specific test failures |
 | [`coverage.js`](./coverage.js) | Merged code-coverage analysis (suite + unit tests) | Finding untested code paths and dead code |
 | [`callgraph.js`](./callgraph.js) | Call-graph generation via the Node.js profiler | Analyzing hot paths and call chains |
@@ -39,8 +40,58 @@ number in a README performance table names the command that produced it.
 
 The tools share one harness library, [`lib/`](./lib/): option parsing
 (`args.js`), timing and table rendering (`measure.js`, `fmt.js`), tracked
-result files (`results.js`), and the JSON-shape equivalence check
-(`equals.js`) used to verify rival engines agree before timing them.
+result files (`results.js`), the first-calls tables (`first-calls.js`), and
+the JSON-shape equivalence check (`equals.js`) used to verify rival engines
+agree before timing them.
+
+## How the timed suites are measured
+
+Every suite above except the validator's profiler and the store suites
+(`db.js`, `spatial.js`, `orm.js`, `live.js`, `vector.js`, `series.js`,
+which run their own loops) times its rows through `lib/measure.js`, by the
+clock rather than by a call count:
+
+- **Warm-up.** A row first runs blocks of about 10 ms for at least 50 ms
+  and until two blocks in a row agree within 5% (at most 2 s), counting
+  the garbage collections its own calls cause.
+- **Rounds.** It is then timed in 7 rounds, each at least 10 ms long and
+  holding at least two of those collections, so a round charges the row
+  for the garbage it makes rather than for whichever pause it happened to
+  catch; a row's figure is its median round.
+- **Retries.** A row whose median round is more than 1.15 times its
+  fastest is timed again with rounds twice as long, at most twice, and is
+  logged as unsettled if it still disagrees.
+- **Floors.** A suite's `--iterations` and warm-up counts stay floors on
+  the calls in a row's rounds and warm-up.
+- **Fresh state.** A row that drives state sized for exactly its calls (a
+  chart session fed one point per call) replays them on a fresh session
+  per round: two untimed sessions, then 21 timed ones.
+- **A row returning a promise is refused.** Timed unawaited, every call's
+  pending work stays queued until the loop yields; an async engine is
+  timed with the awaited helpers.
+
+`BENCH_SCALE` multiplies those clock budgets; `BENCH_SCALE=0` times each
+row's iteration floor with no warm-up or retry, to check a suite's wiring
+quickly (`website-data.js --quick` uses it). `BENCH_ROUNDS_LOG=FILE`
+appends every row's rounds and how it settled to `FILE`.
+
+`website-data.js` runs each timed suite in three processes (jsonpath in
+one: its headline is a geometric mean over 970 rows that three processes
+put within 1.1% of each other, and one process of it takes ten minutes)
+and publishes the median of their figures. How well a run settled is
+published beside the suite in `meta.json` as its `measurement` record:
+how many rows did not settle, the worst round spread, and how far the
+processes' figures were apart.
+
+**First calls.** The settled tables say what an engine costs once it has
+settled, which can take some engines tens of thousands of calls. Each
+timed suite also publishes `firstCalls` tables: its headline operation
+over the first N calls in a fresh process, each cell the median of three
+fresh processes (`lib/first-calls.js`). A cell is a child of the suite
+script (`--first-calls <case>/<engine>`) that builds the operation untimed
+and calls it with no call before the timed ones: no priming, no
+equivalence check. Each table names its call count, which is smaller for
+an operation that takes milliseconds.
 
 ## Test suites (git submodules)
 
@@ -422,7 +473,9 @@ suite runs **Zod 4**, **Zod 3** and **zod/mini** alongside **Ajv** (the
 incumbent JSON Schema engine — excluding it would flatter Jaren).
 
 Three scenarios — a uuid/enum/date-time command, a defaults-and-coercion
-config object, and 50 nested records — each measured three ways:
+config object, and 50 nested records — each measured three ways, each
+engine in a process of its own with its builds timed last, plus its
+first calls (see [How the timed suites are measured](#how-the-timed-suites-are-measured)):
 
 1. **compile** — paid once per process, and the table where Jaren is
    generally slowest. It is reported because hiding it would be dishonest.

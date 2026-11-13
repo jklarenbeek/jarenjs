@@ -39,6 +39,7 @@ import {
 
 import { pad, padLeft, formatNs } from './lib/fmt.js';
 import { measureNsPerOp as measureNs } from './lib/measure.js';
+import { firstCallsCell, measureFirstCalls, runFirstCallsCell } from './lib/first-calls.js';
 
 const DEFAULT_ITERATIONS = 200_000;
 const WARMUP_ITERATIONS = 5_000;
@@ -286,6 +287,40 @@ function printTable(table, iterations) {
 
 //#endregion
 
+//#region first calls — one fresh process per cell, before anything else runs
+
+const FIRST_CALLS = [1_000, 10_000];
+/** The rows: the small-document patch and merge scenarios, each a row of the tables above. */
+const FIRST_CASES = [
+  { key: 'small', name: PATCH_SCENARIOS[0].name, kind: 'patch', scenario: PATCH_SCENARIOS[0] },
+  { key: 'guarded', name: PATCH_SCENARIOS[1].name, kind: 'patch', scenario: PATCH_SCENARIOS[1] },
+  { key: 'merge', name: MERGE_SCENARIOS[0].name, kind: 'merge', scenario: MERGE_SCENARIOS[0] },
+];
+const FIRST_ENGINES = [
+  { key: 'jaren', label: 'jaren compiled' },
+  { key: 'naive', label: 'naive' },
+];
+
+/** One cell's application, the jaren patch compiled untimed. */
+function firstCallsOp(caseKey, engineKey) {
+  const { kind, scenario: { doc, patch } } = FIRST_CASES.find((c) => c.key === caseKey);
+  if (engineKey === 'naive')
+    return { op: kind === 'patch' ? () => naiveApplyPatch(doc, patch) : () => naiveMergePatch(doc, patch) };
+  const compiled = kind === 'patch' ? compileJSONPatch(patch) : compileMergePatch(patch);
+  return { op: () => compiled(doc) };
+}
+
+function firstCallsTables() {
+  return measureFirstCalls(import.meta.url, {
+    operation: 'one patch application (RFC 6902 or RFC 7396)',
+    counts: FIRST_CALLS,
+    cases: FIRST_CASES.map(({ key, name }) => ({ key, name })),
+    engines: FIRST_ENGINES,
+  });
+}
+
+//#endregion
+
 function collectTables(iterations) {
   const patchTable = {
     key: 'patch',
@@ -348,7 +383,12 @@ function measureCompile(iterations) {
   return { jaren: { ns, patches: patches.length, ops } };
 }
 
-function main() {
+async function main() {
+  const cell = firstCallsCell();
+  if (cell !== null) {
+    await runFirstCallsCell(cell, firstCallsOp, FIRST_CALLS);
+    process.exit(0);
+  }
   const args = process.argv.slice(2);
   const options = { iterations: DEFAULT_ITERATIONS, output: 'console', filepath: null };
   const iterIdx = args.indexOf('--iterations');
@@ -377,6 +417,14 @@ function main() {
   console.log(`\ncompile cost: ${formatNs(compile.jaren.ns / compile.jaren.patches)} per patch `
     + `(${compile.jaren.patches} patches, ${compile.jaren.ops} ops in ${formatNs(compile.jaren.ns)})`);
 
+  const firstCalls = firstCallsTables();
+  for (const table of firstCalls.tables) {
+    console.log(`\n${table.title} (ns/op, median of ${firstCalls.processes} processes)\n`);
+    console.log(pad('scenario', 46) + table.columns.map((c) => padLeft(c, 16)).join(''));
+    for (const row of table.rows)
+      console.log(pad(row.name, 46) + row.results.map((ns) => padLeft(formatNs(ns), 16)).join(''));
+  }
+
   if (options.output === 'json' && options.filepath !== null) {
     const content = JSON.stringify({
       mode: 'patch',
@@ -386,10 +434,11 @@ function main() {
       conformance,
       tables,
       compile,
+      firstCalls,
     }, null, 2);
     fs.writeFileSync(options.filepath, content);
     console.log(`Results written to ${options.filepath}`);
   }
 }
 
-main();
+await main();

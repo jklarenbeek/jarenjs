@@ -34,6 +34,7 @@ import { makeBookstoreDocuments } from './fixtures/bookstore.js';
 import { deepEquals } from './lib/equals.js';
 import { pad, padLeft, formatNs, formatRate } from './lib/fmt.js';
 import { measureCell } from './lib/measure.js';
+import { firstCallsCell, measureFirstCalls, runFirstCallsCell } from './lib/first-calls.js';
 import { parseSuiteArgs } from './lib/args.js';
 import { writeEngineResults } from './lib/results.js';
 
@@ -280,6 +281,56 @@ function printProfile(engines, rows, compile) {
 
 //#endregion
 
+//#region first calls — one fresh process per cell, before anything else runs
+
+const FIRST_CALLS = [1_000, 10_000];
+/** The rows: scenarios on the 4-book bookstore, the document the headline rows read. */
+const FIRST_CASES = [
+  { key: 'singular', name: 'singular access, 4 books' },
+  { key: 'filter', name: 'filter + project (A.2), 4 books' },
+  { key: 'group', name: 'group + aggregate (A.4), 4 books' },
+];
+
+/**
+ * One cell's query: the engine's adaptor loaded, the query compiled and the
+ * document prepared untimed. fontoxpath has no compile step apart from its
+ * first evaluation, so its first call includes the parse.
+ */
+async function firstCallsOp(scenarioKey, engineKey) {
+  const { load } = await import(`./adaptors/jsonquery/${engineKey}.js`);
+  const engine = await load();
+  const impl = engine.scenarios[scenarioKey];
+  const compiled = impl.compile();
+  const ctx = engine.prepare(makeBookstoreDocuments(false, SCALE_SIZES)[0].data);
+  return { op: () => impl.run(compiled, ctx), awaited: engine.isAsync };
+}
+
+/**
+ * The first-calls tables over the loaded engines, each cell a fresh child
+ * of this script.
+ */
+function firstCallsTables(engines) {
+  return measureFirstCalls(import.meta.url, {
+    operation: 'one query evaluation',
+    counts: FIRST_CALLS,
+    cases: FIRST_CASES,
+    engines: engines.map((e) => ({ key: e.key, label: e.name })),
+    skip: (scenarioKey, engineKey) => engines.find((e) => e.key === engineKey).scenarios[scenarioKey] == null,
+  });
+}
+
+function printFirstCalls(firstCalls) {
+  for (const table of firstCalls.tables) {
+    console.log(`\n${table.title} — ns/op, median of ${firstCalls.processes} processes\n`);
+    console.log(pad('scenario', 34) + table.columns.map((c) => padLeft(c, 20)).join(''));
+    for (const row of table.rows)
+      console.log(pad(row.name, 34) + row.results.map((ns) => padLeft(ns === null ? 'n/a' : formatNs(ns), 20)).join(''));
+  }
+  console.log();
+}
+
+//#endregion
+
 //#region output files
 
 const writeResults = writeEngineResults;
@@ -320,6 +371,11 @@ Options:
 }
 
 async function main() {
+  const cell = firstCallsCell();
+  if (cell !== null) {
+    await runFirstCallsCell(cell, firstCallsOp, FIRST_CALLS);
+    process.exit(0);
+  }
   const options = parseArgs(process.argv);
   if (options.help) {
     printHelp();
@@ -353,7 +409,9 @@ async function main() {
     const rows = await runProfile(engines, scenarios, documents);
     const compile = runCompileProfile(engines, options);
     printProfile(engines, rows, compile);
-    writeResults('profile', engines, { rows, compile }, options);
+    const firstCalls = firstCallsTables(engines);
+    printFirstCalls(firstCalls);
+    writeResults('profile', engines, { rows, compile, firstCalls }, options);
     return;
   }
 

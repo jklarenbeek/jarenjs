@@ -64,6 +64,29 @@ export function deriveSuite(state, suite) {
   if (data === undefined) {
     return [callout('Loading…', 'Fetching benchmark data.')];
   }
+  const nodes = suiteNodes(suite, data, state);
+  return data.firstCalls == null ? nodes : [...nodes, ...firstCallsNodes(data.firstCalls)];
+}
+
+/**
+ * A suite's first-calls tables, after its own: the same operation's first
+ * calls in a fresh process, where the tables above are the engines once
+ * they have settled. Every timed suite publishes them the same way, so
+ * one derivation renders them all.
+ */
+function firstCallsNodes(firstCalls) {
+  const out = [callout('The first calls, before the engines settle',
+    `The tables above time each engine once it has settled. These time ${firstCalls.operation} over its first calls in a fresh process, each cell the median of ${firstCalls.processes ?? 3} processes: what a service's first requests after a start meet.`)];
+  for (const t of firstCalls.tables ?? []) {
+    out.push(table(t.title, ['Case', ...t.columns],
+      t.rows.map((r) => ({ cells: [r.name, ...r.results.map(formatNs)] })),
+      'Nanoseconds per call, averaged over the first calls; lower is better. A dash is a cell the suite does not time.'));
+  }
+  return out;
+}
+
+/** The suite's own render nodes. */
+function suiteNodes(suite, data, state) {
   switch (suite) {
     case 'overview': return overview(data);
     case 'validate': return validate(data, state.benchUi);

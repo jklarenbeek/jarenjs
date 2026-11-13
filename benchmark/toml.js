@@ -35,6 +35,8 @@ import { join } from 'node:path';
 
 import { parseToml, stringifyToml, parseJosl } from '@jarenjs/josl';
 import { timeIt } from './lib/measure.js';
+import { formatNs } from './lib/fmt.js';
+import { firstCallsCell, measureFirstCalls, runFirstCallsCell } from './lib/first-calls.js';
 import * as smol from 'smol-toml';
 import iarna from '@iarna/toml';
 import toml from 'toml';
@@ -244,8 +246,56 @@ function runProfile() {
 
 //#endregion
 
+//#region first calls — one fresh process per cell, before the compliance run parses anything
+
+const FIRST_CALLS = [1_000, 10_000];
+const FIRST_RECORDS = buildRecords(10);
+const FIRST_CASES = [
+  { key: 'spec', name: 'spec-example-1 (small doc)', text: specExample },
+  { key: 'records10', name: `records-10 (${FIRST_RECORDS.length} chars)`, text: FIRST_RECORDS },
+];
+const FIRST_ENGINES = [
+  { key: 'jaren', label: 'jaren', engine: 'jaren' },
+  { key: 'smol', label: 'smol-toml', engine: 'smol-toml' },
+  { key: 'iarna', label: '@iarna/toml', engine: '@iarna/toml' },
+  { key: 'toml', label: 'toml', engine: 'toml' },
+];
+
+/** One cell's parse; the document is built untimed. */
+function firstCallsOp(caseKey, engineKey) {
+  const corpus = FIRST_CASES.find((c) => c.key === caseKey);
+  const entry = FIRST_ENGINES.find((e) => e.key === engineKey);
+  if (corpus === undefined || entry === undefined)
+    throw new Error(`no first-calls cell ${caseKey}/${engineKey}`);
+  const { parse } = ENGINES.find((e) => e.name === entry.engine);
+  const { text } = corpus;
+  return { op: () => parse(text) };
+}
+
+const cell = firstCallsCell();
+if (cell !== null) {
+  await runFirstCallsCell(cell, firstCallsOp, FIRST_CALLS);
+  process.exit(0);
+}
+
+//#endregion
+
 const { jarenFailed, compliance } = runCompliance();
 const profile = flags.profile ? runProfile() : null;
+const firstCalls = flags.profile
+  ? measureFirstCalls(import.meta.url, {
+    operation: 'one parse of a document',
+    counts: FIRST_CALLS,
+    cases: FIRST_CASES,
+    engines: FIRST_ENGINES,
+  })
+  : null;
+if (firstCalls !== null)
+  for (const t of firstCalls.tables) {
+    console.log(`\n${t.title}`);
+    for (const row of t.rows)
+      console.log(`  ${row.name.padEnd(28)}${row.results.map((ns, i) => `  ${t.columns[i]} ${formatNs(ns)}`).join('')}`);
+  }
 
 if (flags.output === 'json') {
   const data = {
@@ -255,6 +305,7 @@ if (flags.output === 'json') {
     cases: { valid: validCases.length, invalid: invalidCases.length },
     compliance,
     profile: profile === null ? null : { iterations: flags.iterations, ...profile },
+    firstCalls,
   };
   const json = JSON.stringify(data, null, 2);
   if (flags.filepath !== null) {

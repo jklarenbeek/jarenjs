@@ -24,6 +24,7 @@ import { createStreamAdapter } from '@jarenjs/charts/stream-adapter';
 
 import { formatNs as fmt } from './lib/fmt.js';
 import { makeMeasure, printTable as printRows } from './lib/measure.js';
+import { firstCallsCell, measureFirstCalls, runFirstCallsCell } from './lib/first-calls.js';
 
 //#region options
 
@@ -75,6 +76,68 @@ const pieConfig = {
 const measure = makeMeasure(WARMUP, ITERATIONS);
 
 const printTable = (title, rows) => printRows(title, rows, { width: 40, ratios: false });
+
+//#endregion
+
+//#region first calls — one fresh process per cell, before any chart is compiled
+
+const FIRST_CALLS = [100, 1_000];
+const FIRST_POINTS = [100, 1000];
+const FIRST_ENGINES = [
+  { key: 'session', label: 'line session tick (1 append)' },
+  { key: 'wholesale', label: 'line wholesale tick' },
+];
+
+/**
+ * One cell's line tick at `points` × SERIES, the adapter fed untimed. The
+ * session is sized for every append the largest count makes, as the
+ * session rows below are; its first tick builds the chart, so it is the
+ * first timed call rather than untimed setup, and every later call
+ * appends one point and ticks. The wholesale cell compiles and projects
+ * the same data on every call, no session built before it.
+ */
+function firstCallsOp(pointsKey, engineKey) {
+  const points = Number(pointsKey);
+  if (!FIRST_POINTS.includes(points) || (engineKey !== 'session' && engineKey !== 'wholesale'))
+    throw new Error(`no first-calls cell ${pointsKey}/${engineKey}`);
+  const config = {
+    type: 'line', title: 'Live', x: 'time', sampling: false,
+    domain: { y: { min: 0, max: 200 }, x: { window: 1e15, slide: 1e15 } },
+  };
+  const adapter = createStreamAdapter('line', {
+    recordBoundary: 'document', xField: 'x', yField: 'y', seriesField: 's',
+    maxPoints: points + FIRST_CALLS[FIRST_CALLS.length - 1] + 16, changes: true,
+  });
+  let x = 1_721_556_000_000;
+  const feed = (s, y) => {
+    adapter.onEvent({ type: 'pair', path: ['x'], key: 'x', value: x });
+    adapter.onEvent({ type: 'pair', path: ['s'], key: 's', value: s });
+    adapter.onEvent({ type: 'pair', path: ['y'], key: 'y', value: y });
+    adapter.endDocument();
+  };
+  for (let i = 0; i < points; i++) {
+    for (let s = 0; s < SERIES; s++) feed(`s${s}`, 100 + (i % 50));
+    x += 1000;
+  }
+  if (engineKey === 'wholesale')
+    return { op: () => compileChart(config, adapter.getData()).toVnode() };
+  const session = createChartSession(config, adapter);
+  return {
+    op: (i) => {
+      if (i !== 0) {
+        feed('s0', 100 + (i % 50));
+        x += 1000;
+      }
+      return session.tick();
+    },
+  };
+}
+
+const cell = firstCallsCell();
+if (cell !== null) {
+  await runFirstCallsCell(cell, firstCallsOp, FIRST_CALLS);
+  process.exit(0);
+}
 
 //#endregion
 
@@ -331,6 +394,19 @@ for (const r of barResults) {
 
 //#endregion
 
+const firstCalls = measureFirstCalls(import.meta.url, {
+  operation: `one line tick at N×${SERIES} points (a session's first tick builds the chart)`,
+  counts: FIRST_CALLS,
+  cases: FIRST_POINTS.map((n) => ({ key: String(n), name: `${n}×${SERIES} points` })),
+  engines: FIRST_ENGINES,
+  args: ['--series', String(SERIES)],
+});
+for (const t of firstCalls.tables) {
+  console.log(`\n${t.title}`);
+  for (const row of t.rows)
+    console.log(`  ${row.name.padEnd(14)}${row.results.map((ns, i) => `  ${t.columns[i]} ${fmt(ns)}`).join('')}`);
+}
+
 if (OUTPUT === 'json') {
   // The website-data shape (benchmark/website-data.js → charts.json):
   // per-type compile costs, and the session-vs-wholesale scaling rows
@@ -368,6 +444,7 @@ if (OUTPUT === 'json') {
       incremental: r.modes.incremental,
       rebuilt: r.modes.rebuilt,
     })),
+    firstCalls,
   };
   const json = JSON.stringify(data, null, 2);
   if (FILEPATH !== null) {

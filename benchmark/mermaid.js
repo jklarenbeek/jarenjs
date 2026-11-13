@@ -45,6 +45,11 @@ import { mermaidPieRenderer } from '@jarenjs/charts/transforms/mermaid-adapter';
 import { parseMermaid, compileMermaid, layoutDiagram, diagramToVnode } from '@jarenjs/mermaid';
 import { CORPUS, PIE_CORPUS, buildScaled, buildGantt } from './fixtures/mermaid.js';
 import { timeIt, measureNsPerOpAsync } from './lib/measure.js';
+import { firstCallsCell, measureFirstCalls, runFirstCallsCell } from './lib/first-calls.js';
+
+// a first-calls child times its engine's first parses, so nothing below
+// may parse before it: the grammar primes are skipped
+const cell = firstCallsCell();
 
 const args = process.argv.slice(2);
 const flags = {
@@ -92,8 +97,10 @@ try {
   const mermaid = (await import('mermaid')).default;
   mermaid.initialize({ startOnLoad: false });
   // Prime + smoke-test both grammars before trusting the path.
-  await mermaid.parse('flowchart TD\n A-->B');
-  await mermaid.parse('sequenceDiagram\n A->>B: x');
+  if (cell === null) {
+    await mermaid.parse('flowchart TD\n A-->B');
+    await mermaid.parse('sequenceDiagram\n A->>B: x');
+  }
   jisonParse = (text) => mermaid.parse(text);
 }
 catch (e) {
@@ -273,6 +280,48 @@ async function measure(iterations) {
 }
 
 // ------------------------------------------------------------------
+// First calls
+// ------------------------------------------------------------------
+
+/** jison parses take milliseconds, so its first-calls tables count tens. */
+const FIRST_CALLS = [10, 100];
+const FIRST_CASES = [
+  { key: 'pie', name: 'pie 1', rivals: ['langium'] },
+  { key: 'flowchart', name: 'flowchart ~5 nodes', rivals: ['jison'] },
+  { key: 'sequence', name: 'sequence ~5 nodes', rivals: ['jison'] },
+];
+const FIRST_ENGINES = [
+  { key: 'jaren', label: 'jaren-mermaid' },
+  { key: 'langium', label: '@mermaid-js/parser' },
+  { key: 'jison', label: 'mermaid (jison)' },
+];
+
+function firstCallsOp(caseKey, engineKey) {
+  const src = caseKey === 'pie' ? PIE_CORPUS[0] : buildScaled(5)[caseKey];
+  if (engineKey === 'jaren') return { op: () => parseMermaid(src) };
+  if (engineKey === 'langium') return { op: () => mmParse('pie', src), awaited: true };
+  return { op: () => jisonParse(src), awaited: true };
+}
+
+if (cell !== null) {
+  await runFirstCallsCell(cell, firstCallsOp, FIRST_CALLS);
+  process.exit(0);
+}
+
+/** The first-calls tables, each cell a fresh child of this script. */
+function firstCallsTables() {
+  const present = (key) => key === 'jaren' || (key === 'langium' ? mmParse !== null : jisonParse !== null);
+  return measureFirstCalls(import.meta.url, {
+    operation: 'one parse of a diagram',
+    counts: FIRST_CALLS,
+    cases: FIRST_CASES,
+    engines: FIRST_ENGINES,
+    skip: (caseKey, engineKey) => !present(engineKey)
+      || (engineKey !== 'jaren' && !FIRST_CASES.find((c) => c.key === caseKey).rivals.includes(engineKey)),
+  });
+}
+
+// ------------------------------------------------------------------
 // Output
 // ------------------------------------------------------------------
 
@@ -290,6 +339,7 @@ if (flags.output === 'json') {
     examples,
     scorecard,
     profile,
+    firstCalls: firstCallsTables(),
   };
   const json = JSON.stringify(data, null, 2);
   if (flags.filepath !== null) {

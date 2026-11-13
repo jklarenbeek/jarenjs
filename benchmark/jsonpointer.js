@@ -28,6 +28,7 @@ import jsonpointerNpm from 'jsonpointer';
 import { pad, padLeft, formatNs } from './lib/fmt.js';
 import { measureNsPerOp as measureNs } from './lib/measure.js';
 import { writeJsonResults } from './lib/results.js';
+import { firstCallsCell, measureFirstCalls, runFirstCallsCell } from './lib/first-calls.js';
 
 const DEFAULT_ITERATIONS = 1_000_000;
 const WARMUP_ITERATIONS = 10_000;
@@ -194,6 +195,49 @@ const RELATIVE_SCENARIOS = [
 
 //#endregion
 
+//#region first calls — one fresh process per cell, before anything else runs
+
+const FIRST_CALLS = [1_000, 10_000];
+/** The rows: absolute pointers, the table the headline reads (its only one with npm columns). */
+const FIRST_CASES = [
+  { key: 'deep', scenario: 'deep member (6 segments)' },
+  { key: 'index', scenario: 'array index' },
+  { key: 'escaped', scenario: 'escaped keys' },
+];
+const FIRST_ENGINES = [
+  { key: 'jaren', label: 'jaren compiled' },
+  { key: 'npm-compiled', label: 'npm compiled' },
+  { key: 'npm-interpret', label: 'npm interpret' },
+];
+
+/** Where each first call's value goes, so no call is dead code. */
+const firstSink = { value: undefined };
+
+/** One cell's lookup, its pointer compiled untimed. */
+function firstCallsOp(caseKey, engineKey) {
+  const { pointer } = ABSOLUTE_SCENARIOS.find((s) => s.name === FIRST_CASES.find((c) => c.key === caseKey).scenario);
+  if (engineKey === 'jaren') {
+    const compiled = compileJSONPointer(pointer);
+    return { op: () => { firstSink.value = compiled(document); } };
+  }
+  if (engineKey === 'npm-compiled') {
+    const compiled = jsonpointerNpm.compile(pointer);
+    return { op: () => { firstSink.value = compiled.get(document); } };
+  }
+  return { op: () => { firstSink.value = jsonpointerNpm.get(document, pointer); } };
+}
+
+function firstCallsTables() {
+  return measureFirstCalls(import.meta.url, {
+    operation: 'one absolute pointer lookup',
+    counts: FIRST_CALLS,
+    cases: FIRST_CASES.map((c) => ({ key: c.key, name: c.scenario })),
+    engines: FIRST_ENGINES,
+  });
+}
+
+//#endregion
+
 //#region measurement
 
 function printTable(title, columns, rows, iterations) {
@@ -212,7 +256,12 @@ function printTable(title, columns, rows, iterations) {
 
 //#endregion
 
-function main() {
+async function main() {
+  const cell = firstCallsCell();
+  if (cell !== null) {
+    await runFirstCallsCell(cell, firstCallsOp, FIRST_CALLS);
+    process.exit(0);
+  }
   const args = process.argv.slice(2);
   let iterations = DEFAULT_ITERATIONS;
   const options = { output: 'console', filepath: null, iterations: DEFAULT_ITERATIONS };
@@ -312,6 +361,15 @@ function main() {
 
   console.log(`\n(sink: ${sink > 0 ? 'ok' : 'ZERO - results were not consumed!'})\n`);
 
+  const firstCalls = firstCallsTables();
+  for (const table of firstCalls.tables) {
+    console.log(`${table.title} (ns/op, median of ${firstCalls.processes} processes)\n`);
+    console.log(pad('scenario', 30) + table.columns.map((c) => padLeft(c, 16)).join(''));
+    for (const row of table.rows)
+      console.log(pad(row.name, 30) + row.results.map((ns) => padLeft(formatNs(ns), 16)).join(''));
+    console.log();
+  }
+
   writeJsonResults('pointer', { tables: [
     {
       key: 'absolute',
@@ -338,7 +396,7 @@ function main() {
   ], compile: {
     jaren: { ns: compileNs, pointers: allAbsolute.length + allRelative.length },
     npm: { ns: npmCompileNs, pointers: allAbsolute.length - 1 },
-  } }, options);
+  }, firstCalls }, options);
 }
 
-main();
+await main();

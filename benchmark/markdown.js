@@ -41,6 +41,8 @@ import { fileURLToPath } from 'node:url';
 
 import { parseMarkdown, compileMarkdown, mdToVnode, toHtml } from '@jarenjs/md';
 import { timeIt } from './lib/measure.js';
+import { formatNs } from './lib/fmt.js';
+import { firstCallsCell, measureFirstCalls, runFirstCallsCell } from './lib/first-calls.js';
 import { extractExamples, normalizeHtml } from './lib/commonmark.js';
 import { renderToString } from '@jarenjs/view';
 import { marked } from 'marked';
@@ -362,6 +364,55 @@ function runPerformance() {
   }
 }
 
+// ------------------------------------------------------------------
+// First calls — one fresh process per cell, before the scorecards render anything
+// ------------------------------------------------------------------
+
+/** micromark renders the ~2 kB document in milliseconds, so the tables count hundreds. */
+const FIRST_CALLS = [100, 1_000];
+const FIRST_SECTION = buildDocument(1);
+const FIRST_CASES = [
+  { key: 'doc1', name: `1 section (${FIRST_SECTION.length} chars)`, src: FIRST_SECTION },
+  { key: 'doc3', name: PERF_DOCS[0][0], src: PERF_DOCS[0][1] },
+];
+const FIRST_ENGINES = [
+  { key: 'jaren', label: 'jaren-md', engine: 'jaren-md' },
+  { key: 'marked', label: 'marked', engine: 'marked' },
+  { key: 'mdit', label: 'markdown-it', engine: 'markdown-it' },
+  { key: 'micromark', label: 'micromark', engine: 'micromark' },
+];
+
+/**
+ * One cell's parse + render to HTML; the document is built untimed.
+ * @param {string} caseKey
+ * @param {string} engineKey
+ */
+function firstCallsOp(caseKey, engineKey) {
+  const corpus = FIRST_CASES.find((c) => c.key === caseKey);
+  const entry = FIRST_ENGINES.find((e) => e.key === engineKey);
+  const engine = entry === undefined ? undefined : ENGINES.find((e) => e.name === entry.engine);
+  if (corpus === undefined || engine === undefined)
+    throw new Error(`no first-calls cell ${caseKey}/${engineKey}`);
+  const { src } = corpus;
+  return { op: () => engine.renderPerf(src) };
+}
+
+const cell = firstCallsCell();
+if (cell !== null) {
+  await runFirstCallsCell(cell, firstCallsOp, FIRST_CALLS);
+  process.exit(0);
+}
+
+/** The first-calls tables, each cell a fresh child of this script. */
+function firstCallsTables() {
+  return measureFirstCalls(import.meta.url, {
+    operation: 'one parse + render to HTML',
+    counts: FIRST_CALLS,
+    cases: FIRST_CASES,
+    engines: FIRST_ENGINES.filter((e) => ENGINES.some((engine) => engine.name === e.engine)),
+  });
+}
+
 if (flags.output === 'json') {
   // The website-data shape (benchmark/website-data.js → markdown.json):
   // an engine list, the CommonMark scorecard, and the perf profile with
@@ -387,6 +438,7 @@ if (flags.output === 'json') {
       render: perf.render.map((row) => ({ name: row.name, results: row.results })),
       jaren: perf.jaren,
     },
+    firstCalls: firstCallsTables(),
   };
   const json = JSON.stringify(data, null, 2);
   if (flags.filepath !== null) {
@@ -400,5 +452,12 @@ if (flags.output === 'json') {
 else {
   if (!flags.perfOnly) runScorecard();
   if (!flags.perfOnly) runGfmScorecard();
-  if (!flags.scoreOnly) runPerformance();
+  if (!flags.scoreOnly) {
+    runPerformance();
+    for (const t of firstCallsTables().tables) {
+      console.log(`\n${t.title}`);
+      for (const row of t.rows)
+        console.log(`  ${row.name.padEnd(22)}${row.results.map((ns, i) => `  ${t.columns[i]} ${ns === null ? '-' : formatNs(ns)}`).join('')}`);
+    }
+  }
 }

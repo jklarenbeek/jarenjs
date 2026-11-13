@@ -41,6 +41,7 @@ import ajvFormats from 'ajv-formats';
 import { pad, padLeft, formatNs } from './lib/fmt.js';
 import { measureNsPerOp as measureNs } from './lib/measure.js';
 import { writeJsonResults } from './lib/results.js';
+import { firstCallsCell, measureFirstCalls, runFirstCallsCell } from './lib/first-calls.js';
 
 const DEFAULT_ITERATIONS = 200_000;
 const WARMUP_ITERATIONS = 20_000;
@@ -187,6 +188,41 @@ function scoreConformance() {
 
 //#endregion
 
+//#region first calls — one fresh process per cell, before anything else runs
+
+const FIRST_CALLS = [1_000, 10_000];
+/** The rows: formats both engines implement, one of them (email) a settled loss for Jaren. */
+const FIRST_FORMATS = ['date-time', 'email', 'uri'];
+const FIRST_ENGINES = [
+  { key: 'jaren', label: 'jaren', create: createJaren },
+  { key: 'ajv', label: 'ajv-formats', create: createAjv },
+];
+
+/**
+ * One cell's validator, compiled untimed and never called before its
+ * timed calls: the accept/reject check the tables run first is left out.
+ */
+function firstCallsOp(format, engineKey) {
+  const { valid, invalid } = SHARED_SCENARIOS.find((s) => s.format === format);
+  const validate = FIRST_ENGINES.find((e) => e.key === engineKey).create()(format);
+  return { op: () => { validate(valid); validate(invalid); } };
+}
+
+/** The first-calls tables, each cell a fresh child of this script; a cell the tables dropped stays a dash. */
+function firstCallsTables(shared, keep) {
+  const formats = FIRST_FORMATS.filter((format) => keep({ format }));
+  return measureFirstCalls(import.meta.url, {
+    operation: 'validate one accepted and one rejected value (a pair of calls)',
+    counts: FIRST_CALLS,
+    cases: formats.map((format) => ({ key: format, name: format })),
+    engines: FIRST_ENGINES.map(({ key, label }) => ({ key, label })),
+    skip: (format, engineKey) => shared.rows.find((r) => r.name === format)
+      .results[FIRST_ENGINES.findIndex((e) => e.key === engineKey)] === null,
+  });
+}
+
+//#endregion
+
 //#region measurement
 
 function printTable(title, columns, rows, iterations) {
@@ -225,7 +261,12 @@ function measureScenario(scenario, jarenCompile, ajvCompile, iterations) {
   };
 }
 
-function main() {
+async function main() {
+  const cell = firstCallsCell();
+  if (cell !== null) {
+    await runFirstCallsCell(cell, firstCallsOp, FIRST_CALLS);
+    process.exit(0);
+  }
   const args = process.argv.slice(2);
   const options = {
     output: 'console',
@@ -276,6 +317,10 @@ function main() {
 
   console.log('\nEach iteration validates one accepted and one rejected value, so a row is the cost of two calls.');
 
+  const shared = tables.find((t) => t.title === 'Formats both engines implement');
+  const firstCalls = shared === undefined ? null : firstCallsTables(shared, keep);
+  firstCalls?.tables.forEach((table, k) => printTable(table.title, table.columns, table.rows, FIRST_CALLS[k]));
+
   const conformance = scoreConformance();
   if (conformance === null) {
     console.log('Conformance not scored: the JSON-Schema-Test-Suite submodule is not checked out.');
@@ -286,7 +331,7 @@ function main() {
       + (conformance.unregistered.length === 0 ? ''
         : ` (not registered: ${conformance.unregistered.join(', ')})`));
   }
-  writeJsonResults('formats', { conformance, tables }, options);
+  writeJsonResults('formats', { conformance, tables, firstCalls }, options);
 }
 
-main();
+await main();

@@ -608,6 +608,9 @@
           "items": {
             "type": "object"
           }
+        },
+        "firstCalls": {
+          "$ref": "#/$defs/FirstCalls"
         }
       },
       "additionalProperties": false
@@ -689,6 +692,9 @@
             },
             "additionalProperties": false
           }
+        },
+        "firstCalls": {
+          "$ref": "#/$defs/FirstCalls"
         }
       },
       "additionalProperties": false
@@ -742,6 +748,9 @@
             },
             "additionalProperties": false
           }
+        },
+        "firstCalls": {
+          "$ref": "#/$defs/FirstCalls"
         }
       },
       "additionalProperties": false
@@ -822,6 +831,9 @@
             }
           },
           "additionalProperties": false
+        },
+        "firstCalls": {
+          "$ref": "#/$defs/FirstCalls"
         }
       },
       "additionalProperties": false
@@ -965,6 +977,9 @@
           "additionalProperties": {
             "type": "array"
           }
+        },
+        "firstCalls": {
+          "$ref": "#/$defs/FirstCalls"
         }
       },
       "additionalProperties": false
@@ -1043,6 +1058,9 @@
             },
             "additionalProperties": false
           }
+        },
+        "firstCalls": {
+          "$ref": "#/$defs/FirstCalls"
         }
       },
       "additionalProperties": false
@@ -1123,6 +1141,9 @@
             },
             "additionalProperties": false
           }
+        },
+        "firstCalls": {
+          "$ref": "#/$defs/FirstCalls"
         }
       },
       "additionalProperties": false
@@ -1228,6 +1249,9 @@
             },
             "additionalProperties": false
           }
+        },
+        "firstCalls": {
+          "$ref": "#/$defs/FirstCalls"
         }
       },
       "additionalProperties": false
@@ -1315,6 +1339,9 @@
             }
           },
           "additionalProperties": false
+        },
+        "firstCalls": {
+          "$ref": "#/$defs/FirstCalls"
         }
       },
       "additionalProperties": false
@@ -1389,6 +1416,9 @@
             }
           },
           "additionalProperties": false
+        },
+        "firstCalls": {
+          "$ref": "#/$defs/FirstCalls"
         }
       },
       "additionalProperties": false
@@ -1459,6 +1489,9 @@
             }
           },
           "additionalProperties": false
+        },
+        "firstCalls": {
+          "$ref": "#/$defs/FirstCalls"
         }
       },
       "additionalProperties": false
@@ -1563,6 +1596,9 @@
             },
             "additionalProperties": false
           }
+        },
+        "firstCalls": {
+          "$ref": "#/$defs/FirstCalls"
         }
       },
       "additionalProperties": false
@@ -1718,6 +1754,9 @@
             }
           },
           "additionalProperties": false
+        },
+        "firstCalls": {
+          "$ref": "#/$defs/FirstCalls"
         }
       },
       "additionalProperties": false
@@ -1827,6 +1866,9 @@
             }
           },
           "additionalProperties": false
+        },
+        "firstCalls": {
+          "$ref": "#/$defs/FirstCalls"
         }
       },
       "additionalProperties": false
@@ -2788,6 +2830,9 @@
             }
           },
           "additionalProperties": false
+        },
+        "firstCalls": {
+          "$ref": "#/$defs/FirstCalls"
         }
       },
       "additionalProperties": false
@@ -2985,6 +3030,9 @@
             },
             "additionalProperties": false
           }
+        },
+        "firstCalls": {
+          "$ref": "#/$defs/FirstCalls"
         }
       },
       "additionalProperties": false
@@ -3456,6 +3504,84 @@
           "type": "object",
           "additionalProperties": {
             "type": "array"
+          }
+        },
+        "firstCalls": {
+          "$ref": "#/$defs/FirstCalls"
+        }
+      },
+      "additionalProperties": false
+    },
+    "FirstCalls": {
+      "description": "A timed suite's first-calls tables: an operation's first calls in a fresh process, before its engine settles. Each table is one call count; each cell the ns per call averaged over that many first calls, the median of `processes` fresh processes, null where the suite does not time the cell.",
+      "type": "object",
+      "required": [
+        "operation",
+        "counts",
+        "processes",
+        "tables"
+      ],
+      "properties": {
+        "operation": {
+          "type": "string"
+        },
+        "counts": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "processes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "tables": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "title",
+              "columns",
+              "rows"
+            ],
+            "properties": {
+              "title": {
+                "type": "string"
+              },
+              "columns": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "rows": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "name",
+                    "results"
+                  ],
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "type": [
+                          "number",
+                          "null"
+                        ]
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            },
+            "additionalProperties": false
           }
         }
       },

@@ -48,6 +48,8 @@ import {
 } from '@jarenjs/josl';
 
 import { timeIt, chunksOf } from './lib/measure.js';
+import { formatNs } from './lib/fmt.js';
+import { firstCallsCell, measureFirstCalls, runFirstCallsCell } from './lib/first-calls.js';
 
 import Papa from 'papaparse';
 import { parse as csvParseSync } from 'csv-parse/sync';
@@ -449,9 +451,43 @@ function profileStringify() {
 
 //#endregion
 
+//#region first calls — one fresh process per cell, before the acceptance suite parses anything
+
+const FIRST_CALLS = [1_000, 10_000];
+const FIRST_CASES = [
+  { key: 'records100', name: 'records 100 x 6 (plain)', text: buildRecords(100) },
+  { key: 'quoted100', name: 'quoted 100 x 3', text: buildQuoted(100) },
+];
+const FIRST_ENGINES = [
+  { key: 'jaren', label: 'jaren', engine: 'jaren' },
+  { key: 'udsv', label: 'udsv', engine: 'udsv' },
+  { key: 'd3', label: 'd3-dsv', engine: 'd3-dsv' },
+  { key: 'papa', label: 'papaparse', engine: 'papaparse' },
+];
+
+/** One cell's parse to string arrays; the document is built untimed. */
+function firstCallsOp(caseKey, engineKey) {
+  const corpus = FIRST_CASES.find((c) => c.key === caseKey);
+  const entry = FIRST_ENGINES.find((e) => e.key === engineKey);
+  if (corpus === undefined || entry === undefined)
+    throw new Error(`no first-calls cell ${caseKey}/${engineKey}`);
+  const { rows } = ENGINES.find((e) => e.name === entry.engine);
+  const { text } = corpus;
+  return { op: () => rows(text) };
+}
+
+const cell = firstCallsCell();
+if (cell !== null) {
+  await runFirstCallsCell(cell, firstCallsOp, FIRST_CALLS);
+  process.exit(0);
+}
+
+//#endregion
+
 const { scores, jarenFailed } = runSpectrum();
 const healing = runHealing();
 let profile = null;
+let firstCalls = null;
 if (flags.profile) {
   profile = {
     iterations: flags.iterations,
@@ -460,6 +496,17 @@ if (flags.profile) {
     streaming: profileStreaming(),
     stringify: profileStringify(),
   };
+  firstCalls = measureFirstCalls(import.meta.url, {
+    operation: 'one parse to string arrays',
+    counts: FIRST_CALLS,
+    cases: FIRST_CASES,
+    engines: FIRST_ENGINES,
+  });
+  for (const t of firstCalls.tables) {
+    console.log(`\n${t.title}`);
+    for (const row of t.rows)
+      console.log(`  ${row.name.padEnd(26)}${row.results.map((ns, i) => `  ${t.columns[i]} ${formatNs(ns)}`).join('')}`);
+  }
 }
 console.log();
 
@@ -471,6 +518,7 @@ if (flags.output === 'json') {
     spectrum: scores,
     healing,
     profile,
+    firstCalls,
   };
   const json = JSON.stringify(data, null, 2);
   if (flags.filepath !== null) {

@@ -37,6 +37,7 @@ import { compileFsm, createFsmSession } from '@jarenjs/flow';
 import { createMachine, createActor } from 'xstate';
 
 import { makeMeasure, printTable } from './lib/measure.js';
+import { firstCallsCell, measureFirstCalls, runFirstCallsCell } from './lib/first-calls.js';
 
 //#region options
 const args = process.argv.slice(2);
@@ -87,6 +88,39 @@ function xstateMachine(n) {
 
 const measure = makeMeasure(WARMUP, ITERATIONS);
 const scope = { context: { ok: true } };
+
+//#region first calls — one fresh process per cell, before anything else runs
+const FIRST_CALLS = [1_000, 10_000];
+const FIRST_ENGINES = [
+  { key: 'step', label: 'jaren step (pure)' },
+  { key: 'session', label: 'jaren session.send' },
+  { key: 'xstate', label: 'xstate actor.send' },
+];
+
+/** One cell's transition, its machine compiled (and the actor started) untimed. */
+function firstCallsOp(sizeKey, engineKey) {
+  const n = Number(sizeKey);
+  if (engineKey === 'xstate') {
+    const { config, impl } = xstateMachine(n);
+    const actor = createActor(createMachine(config, impl));
+    actor.start();
+    return { op: () => { actor.send({ type: 'GO' }); } };
+  }
+  const fsm = compileFsm(jarenMachine(n));
+  if (engineKey === 'session') {
+    const session = createFsmSession(fsm);
+    return { op: () => { session.send('GO', scope); } };
+  }
+  let state = fsm.initial;
+  return { op: () => { state = fsm.step(state, 'GO', scope).state; } };
+}
+
+const cell = firstCallsCell();
+if (cell !== null) {
+  await runFirstCallsCell(cell, firstCallsOp, FIRST_CALLS);
+  process.exit(0);
+}
+//#endregion
 
 /** Correctness: both engines must agree the cycle turns, before timing. */
 function assertAgrees(n) {
@@ -226,6 +260,16 @@ else {
 }
 //#endregion
 
+const firstCalls = measureFirstCalls(import.meta.url, {
+  operation: 'one transition of an N-state cycle',
+  counts: FIRST_CALLS,
+  cases: SIZES.map((n) => ({ key: String(n), name: `${n}-state machine` })),
+  engines: FIRST_ENGINES,
+});
+for (const t of firstCalls.tables)
+  printTable(t.title.replace(' in a fresh process — one transition of an N-state cycle', ', 50-state machine, fresh process'),
+    FIRST_ENGINES.map((e, i) => ({ label: e.label, ns: t.rows[1].results[i] })));
+
 if (OUTPUT === 'json') {
   const slim = (rows) => rows.map((r) => ({ label: r.label, ns: Number(r.ns.toPrecision(4)) }));
   const data = {
@@ -238,6 +282,7 @@ if (OUTPUT === 'json') {
     transition: Object.fromEntries(SIZES.map((n) => [n, slim(collected.transition[n])])),
     wedge: wedgeResult,
     memory,
+    firstCalls,
   };
   const json = JSON.stringify(data, null, 2);
   if (FILEPATH !== null) { writeFileSync(FILEPATH, json); console.log(`\nwrote ${FILEPATH}`); }

@@ -37,6 +37,7 @@ import { deepEquals } from './lib/equals.js';
 import { pad, padLeft, formatNs } from './lib/fmt.js';
 import { measureNsPerOp as measureNs } from './lib/measure.js';
 import { parseSuiteArgs } from './lib/args.js';
+import { firstCallsCell, measureFirstCalls, runFirstCallsCell } from './lib/first-calls.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CTS_PATH = path.join(__dirname, 'jsonpath-suite', 'cts.json');
@@ -474,6 +475,55 @@ function printProfile(engines, profile, options) {
 
 //#endregion
 
+//#region first calls — one fresh process per cell, before anything else runs
+
+const FIRST_CALLS = [1_000, 10_000];
+/** The rows: CTS cases, the queries the headline rows read, each named exactly. */
+const FIRST_CASES = [
+  { key: 'nested', test: 'basic, name shorthand, object data, nested' },
+  { key: 'descendant', test: 'basic, descendant segment, name shorthand' },
+  { key: 'filter', test: 'filter, equals string, single quotes' },
+];
+
+/** The one CTS case of that name. */
+function ctsCase(tests, name) {
+  const found = tests.filter((t) => t.name === name);
+  if (found.length !== 1)
+    throw new Error(`expected one CTS case named '${name}', found ${found.length}`);
+  return found[0];
+}
+
+/** One cell's query: the engine loaded and the selector compiled untimed. */
+async function firstCallsOp(caseKey, engineKey) {
+  const { tests } = JSON.parse(fs.readFileSync(CTS_PATH, 'utf8'));
+  const test = ctsCase(tests, FIRST_CASES.find((c) => c.key === caseKey).test);
+  const engine = await ENGINE_LOADERS[engineKey]();
+  const compiled = engine.compile(test.selector);
+  return { op: () => engine.query(compiled, test.document) };
+}
+
+/** The first-calls tables over the loaded engines, each cell a fresh child of this script. */
+function firstCallsTables(engines, tests) {
+  return measureFirstCalls(import.meta.url, {
+    operation: 'one query of a CTS document',
+    counts: FIRST_CALLS,
+    cases: FIRST_CASES.map((c) => ({ key: c.key, name: ctsCase(tests, c.test).selector })),
+    engines: engines.map((e) => ({ key: e.key, label: e.name })),
+  });
+}
+
+function printFirstCalls(firstCalls) {
+  for (const table of firstCalls.tables) {
+    console.log(`\n${table.title} — ns/op, median of ${firstCalls.processes} processes\n`);
+    console.log(pad('selector', 28) + table.columns.map((c) => padLeft(c, 18)).join(''));
+    for (const row of table.rows)
+      console.log(pad(row.name, 28) + row.results.map((ns) => padLeft(ns === null ? 'n/a' : formatNs(ns), 18)).join(''));
+  }
+  console.log();
+}
+
+//#endregion
+
 //#region output files
 
 function writeResults(mode, engines, data, options) {
@@ -552,6 +602,11 @@ Options:
 }
 
 async function main() {
+  const cell = firstCallsCell();
+  if (cell !== null) {
+    await runFirstCallsCell(cell, firstCallsOp, FIRST_CALLS);
+    process.exit(0);
+  }
   const options = parseArgs(process.argv);
   if (options.help) {
     printHelp();
@@ -579,7 +634,9 @@ async function main() {
   if (options.profile) {
     const profile = runProfile(engines, tests, options);
     printProfile(engines, profile, options);
-    writeResults('profile', engines, profile, options);
+    const firstCalls = firstCallsTables(engines, cts.tests);
+    printFirstCalls(firstCalls);
+    writeResults('profile', engines, { ...profile, firstCalls }, options);
     return;
   }
 

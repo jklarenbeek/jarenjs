@@ -46,6 +46,8 @@ import preactRender from 'preact-render-to-string';
 
 import { createStubHost } from '../test/view/dom.stub.js';
 import { makeMeasure, printTable as printRows } from './lib/measure.js';
+import { formatNs } from './lib/fmt.js';
+import { firstCallsCell, measureFirstCalls, runFirstCallsCell } from './lib/first-calls.js';
 
 // React is measured in its PRODUCTION build: the development build carries
 // prop validation and warning machinery that inflates every number, and
@@ -165,6 +167,45 @@ function reactView(state) {
 const measure = makeMeasure(WARMUP, ITERATIONS);
 
 const printTable = (title, rows) => printRows(title, rows, { width: 28 });
+
+//#endregion
+
+//#region first calls — one fresh process per cell, before the equivalence gate renders anything
+
+/** A frame at 1000 rows costs most of a millisecond and has settled by its hundredth, so the tables count tens. */
+const FIRST_CALLS = [10, 100];
+const FIRST_SIZES = [100, 1000];
+const FIRST_ENGINES = [
+  { key: 'memo', label: 'jaren view+patch (memo)' },
+  { key: 'plain', label: 'jaren view+patch (no memo)' },
+];
+
+/**
+ * One cell's frame against the stub DOM. Mounting is a frame of the same
+ * view and renderer, so it is the first timed call rather than untimed
+ * setup; every later call updates one COW row and patches.
+ */
+function firstCallsOp(sizeKey, engineKey) {
+  const n = Number(sizeKey);
+  const transform = engineKey === 'memo' ? jarenMemo : engineKey === 'plain' ? jarenPlain : null;
+  if (transform === null || !FIRST_SIZES.includes(n))
+    throw new Error(`no first-calls cell ${sizeKey}/${engineKey}`);
+  const { document, container } = createStubHost();
+  const render = createDomRenderer(container, { document });
+  let state = buildState(n);
+  return {
+    op: (i) => {
+      if (i !== 0) state = updateRow(state, i % n);
+      render(transform(state));
+    },
+  };
+}
+
+const cell = firstCallsCell();
+if (cell !== null) {
+  await runFirstCallsCell(cell, firstCallsOp, FIRST_CALLS);
+  process.exit(0);
+}
 
 //#endregion
 
@@ -316,6 +357,18 @@ const collected = {};
   printTable(`memo marker — reallocated parent over ${ROWS * 10} shared children`, collected.memo);
 }
 
+const firstCalls = measureFirstCalls(import.meta.url, {
+  operation: 'one frame (view + patch, stub DOM; the first call mounts the table)',
+  counts: FIRST_CALLS,
+  cases: FIRST_SIZES.map((n) => ({ key: String(n), name: `${n} rows` })),
+  engines: FIRST_ENGINES,
+});
+for (const t of firstCalls.tables) {
+  console.log(`\n${t.title}`);
+  for (const row of t.rows)
+    console.log(`  ${row.name.padEnd(10)}${row.results.map((ns, i) => `  ${t.columns[i]} ${formatNs(ns)}`).join('')}`);
+}
+
 if (OUTPUT === 'json') {
   // The website-data shape (benchmark/website-data.js → view.json): the
   // four measured tables plus the memo-marker pair, each row a
@@ -334,6 +387,7 @@ if (OUTPUT === 'json') {
       frame: collected.frame,
       memo: collected.memo,
     },
+    firstCalls,
   };
   const json = JSON.stringify(data, null, 2);
   if (FILEPATH !== null) {

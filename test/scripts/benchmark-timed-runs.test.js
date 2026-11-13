@@ -53,6 +53,13 @@ describe('a timed suite\'s measurement record', () => {
     });
   });
 
+  it('leaves first calls out of how the processes agreed', () => {
+    const run = (ns, first) => ({ ns, firstCalls: { tables: [{ rows: [{ name: 'a', results: [first] }] }] } });
+    const row = { seq: 0, rounds: [1], spread: 1, settled: true };
+    const record = measurementOf([run(100, 1000), run(100, 3000), run(100, 2000)], [[row], [row], [row]]);
+    assert.deepStrictEqual([record.figures, record.processSpread, record.figuresOverSpread], [0, null, 0]);
+  });
+
   it('joins the records of a suite timed by two tools', () => {
     const a = { method: 'settled', processes: 3, rows: 4, unsettledRows: 1, worstRoundSpread: 1.2, figures: 2, processSpread: { median: 1.1, worst: 1.3 }, figuresOverSpread: 1 };
     const b = { method: 'settled', processes: 3, rows: 2, unsettledRows: 0, worstRoundSpread: 1.05, figures: 2, processSpread: { median: 1.3, worst: 1.4 }, figuresOverSpread: 1 };

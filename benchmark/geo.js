@@ -58,6 +58,7 @@ import wellknown from 'wellknown';
 
 import { pad, padLeft, formatNs } from './lib/fmt.js';
 import { measureNsPerOp } from './lib/measure.js';
+import { firstCallsCell, measureFirstCalls, runFirstCallsCell } from './lib/first-calls.js';
 
 const DEFAULT_ITERATIONS = 200_000;
 const WARMUP = 5_000;
@@ -328,6 +329,75 @@ function printTable(rows, iterations) {
 
 //#endregion
 
+//#region first calls
+
+const FIRST_CALLS = [1_000, 10_000];
+const FIRST_CASES = [
+  { key: 'distance', name: 'distance (two positions)', rivals: ['turf', 'geolib'] },
+  { key: 'pip12', name: 'point in polygon (12-vertex)', rivals: ['turf'] },
+  { key: 'pip2000', name: 'point in polygon (2000-vertex)', rivals: ['turf'] },
+  { key: 'probe', name: 'index probe (100k boxes)', rivals: ['flatbush'] },
+];
+const FIRST_ENGINES = [
+  { key: 'jaren', label: 'jaren' },
+  { key: 'turf', label: 'turf' },
+  { key: 'geolib', label: 'geolib' },
+  { key: 'flatbush', label: 'flatbush' },
+];
+
+/**
+ * One cell's call, as the timed rows below make it; inputs, and for the
+ * probe both 100k-box indexes' builds, are untimed setup.
+ * @param {string} caseKey
+ * @param {string} engineKey
+ * @returns {{ op: () => unknown }}
+ */
+function firstCallsOp(caseKey, engineKey) {
+  const at = `${caseKey}/${engineKey}`;
+  if (at === 'distance/jaren') return { op: () => haversineDistance(AMS[0], AMS[1], PAR[0], PAR[1]) };
+  if (at === 'distance/turf') {
+    const a = turf.point(AMS);
+    const b = turf.point(PAR);
+    return { op: () => turf.distance(a, b, { units: 'meters' }) };
+  }
+  if (at === 'distance/geolib') {
+    const a = { longitude: AMS[0], latitude: AMS[1] };
+    const b = { longitude: PAR[0], latitude: PAR[1] };
+    return { op: () => getDistance(a, b, 0.01) };
+  }
+  if (caseKey === 'pip12' || caseKey === 'pip2000') {
+    const poly = caseKey === 'pip12' ? SMALL_POLY : BIG_POLY;
+    if (engineKey === 'jaren') return { op: () => containsPosition(poly, 4.9, 52.4) };
+    if (engineKey === 'turf') return { op: () => turf.booleanPointInPolygon(turf.point([4.9, 52.4]), poly) };
+  }
+  if (at === 'probe/jaren') {
+    const index = createBboxIndex(makeBoxes(100_000));
+    return { op: () => index.search(0, 0, 3, 3) };
+  }
+  if (at === 'probe/flatbush') {
+    const boxes = makeBoxes(100_000);
+    const index = new Flatbush(boxes.length);
+    for (const b of boxes) index.add(b[0], b[1], b[2], b[3]);
+    index.finish();
+    return { op: () => index.search(0, 0, 3, 3) };
+  }
+  throw new Error(`no first-calls cell ${at}`);
+}
+
+/** The first-calls tables, each cell a fresh child of this script. */
+function firstCallsTables() {
+  return measureFirstCalls(import.meta.url, {
+    operation: 'one call of the scenario',
+    counts: FIRST_CALLS,
+    cases: FIRST_CASES,
+    engines: FIRST_ENGINES,
+    skip: (caseKey, engineKey) => engineKey !== 'jaren'
+      && !(FIRST_CASES.find((c) => c.key === caseKey)?.rivals.includes(engineKey) ?? false),
+  });
+}
+
+//#endregion
+
 function main() {
   const args = process.argv.slice(2);
   const idx = args.indexOf('--iterations');
@@ -497,13 +567,27 @@ function main() {
 
   printTable(rows, iterations);
 
+  const firstCalls = firstCallsTables();
+  for (const t of firstCalls.tables) {
+    console.log(`\n${t.title}`);
+    for (const row of t.rows)
+      console.log(`  ${pad(row.name, 32)}${row.results.map((ns, i) => (ns === null ? '' : `  ${t.columns[i]} ${formatNs(ns)}`)).join('')}`);
+  }
+
   const out = args.indexOf('--filepath');
   if (out >= 0) {
     fs.writeFileSync(args[out + 1], JSON.stringify({
-      mode: 'geo', node: process.version, iterations, checks, rows,
+      mode: 'geo', node: process.version, iterations, checks, rows, firstCalls,
     }, null, 2));
     console.log(`\nResults written to ${args[out + 1]}`);
   }
 }
 
+// a first-calls child times its engine's first calls, so it runs before
+// the equivalence checks call every engine
+const cell = firstCallsCell();
+if (cell !== null) {
+  await runFirstCallsCell(cell, firstCallsOp, FIRST_CALLS);
+  process.exit(0);
+}
 main();

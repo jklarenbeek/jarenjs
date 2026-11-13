@@ -30,6 +30,7 @@ import { makeBookstoreDocuments } from './fixtures/bookstore.js';
 import { deepEquals } from './lib/equals.js';
 import { pad, padLeft, formatNs, formatRate } from './lib/fmt.js';
 import { measureCell } from './lib/measure.js';
+import { firstCallsCell, measureFirstCalls, runFirstCallsCell } from './lib/first-calls.js';
 import { parseSuiteArgs } from './lib/args.js';
 import { writeEngineResults } from './lib/results.js';
 
@@ -381,6 +382,55 @@ function printProfile(engines, rows, compile) {
 
 //#endregion
 
+//#region first calls — one fresh process per cell, before anything else runs
+
+/** JSONata's settled transforms cost ~100 µs, so the first-calls tables count hundreds. */
+const FIRST_CALLS = [100, 1_000];
+/** The rows: the scenarios JSONata expresses, on the 4-book bookstore. */
+const FIRST_CASES = [
+  { key: 'surgical', name: 'surgical ($..price × 1.21), 4 books' },
+  { key: 'annotate', name: 'fresh schema annotation, 4 books' },
+];
+/** The columns: Jaren and the headline's rival; hand-written JS is a floor, not a rival. */
+const FIRST_ENGINE_KEYS = ['jaren', 'jsonata'];
+
+/** One cell's transform: the adaptor loaded, the stylesheet compiled and the document prepared untimed. */
+async function firstCallsOp(scenarioKey, engineKey) {
+  const { load } = await import(`./adaptors/jslt/${engineKey}.js`);
+  const engine = await load();
+  const impl = engine.scenarios[scenarioKey];
+  const compiled = impl.compile();
+  const context = engine.prepare(makeDocuments(false)[0].data);
+  return { op: () => impl.run(compiled, context), awaited: engine.isAsync };
+}
+
+/** The first-calls tables over the loaded engines, each cell a fresh child of this script. */
+function firstCallsTables(engines) {
+  const columns = engines.filter((engine) => FIRST_ENGINE_KEYS.includes(engine.key));
+  return measureFirstCalls(import.meta.url, {
+    operation: 'one stylesheet transform',
+    counts: FIRST_CALLS,
+    cases: FIRST_CASES,
+    engines: columns.map((engine) => ({ key: engine.key, label: engine.name })),
+    skip: (scenarioKey, engineKey) =>
+      columns.find((engine) => engine.key === engineKey).scenarios[scenarioKey] == null,
+  });
+}
+
+function printFirstCalls(firstCalls) {
+  for (const table of firstCalls.tables) {
+    console.log(`\n${table.title} — ns/op, median of ${firstCalls.processes} processes\n`);
+    console.log(pad('scenario', 40) + table.columns.map((column) => padLeft(column, 20)).join(''));
+    for (const row of table.rows) {
+      console.log(pad(row.name, 40)
+        + row.results.map((ns) => padLeft(ns === null ? 'n/a' : formatNs(ns), 20)).join(''));
+    }
+  }
+  console.log();
+}
+
+//#endregion
+
 //#region output
 
 const writeResults = writeEngineResults;
@@ -435,6 +485,11 @@ Options:
 }
 
 async function main() {
+  const cell = firstCallsCell();
+  if (cell !== null) {
+    await runFirstCallsCell(cell, firstCallsOp, FIRST_CALLS);
+    process.exit(0);
+  }
   const options = parseArgs(process.argv);
   if (options.help) {
     printHelp();
@@ -471,7 +526,9 @@ async function main() {
     const rows = await runProfile(engines, scenarios, documents);
     const compile = runCompileProfile(engines, scenarios, options);
     printProfile(engines, rows, compile);
-    writeResults('profile', engines, { rows, compile }, options);
+    const firstCalls = firstCallsTables(engines);
+    printFirstCalls(firstCalls);
+    writeResults('profile', engines, { rows, compile, firstCalls }, options);
     return;
   }
 

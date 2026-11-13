@@ -86,6 +86,7 @@ import { fileURLToPath } from 'node:url';
 
 import { pad, padLeft, formatNs } from './lib/fmt.js';
 import { measureNsPerOp as measureNs } from './lib/measure.js';
+import { firstCallsCell, measureFirstCalls, runFirstCallsCell } from './lib/first-calls.js';
 import { parseSuiteArgs } from './lib/args.js';
 import { writeJsonResults } from './lib/results.js';
 
@@ -96,10 +97,8 @@ const SELF = fileURLToPath(import.meta.url);
 
 const CAVEAT = 'The verdict table is not apples-to-apples and its ratio flatters Jaren: Jaren answers with a predicate that allocates nothing, while Zod has no predicate mode and builds its normalized output on the way. The adapter table is the comparable one. Compiling a schema with defaults costs Jaren more than one without: it checks each default against every schema the default meets, so normalizing never turns a request its validator accepts into one it refuses. Handed a default its own schema refuses, ajv fills it and then refuses the request, zod 3 refuses the request, and zod 4 and zod/mini return the default unchecked.';
 
-/** The warm-up table's call counts: the first calls a fresh process makes of one contract's adapter. */
-const COLD_CALLS = [1_000, 10_000];
-/** The fresh processes each warm-up cell is the median of: one process's first calls move with its own start. */
-const COLD_PROCESSES = 3;
+/** The first-calls tables' call counts: the first calls a fresh process makes of one contract's adapter. */
+const FIRST_CALLS = [1_000, 10_000];
 const ENGINES = ['jaren', 'zod4', 'zod3', 'zodmini', 'ajv'];
 
 const ENGINE_LABELS = {
@@ -479,56 +478,6 @@ function measureEachAlone(options, scenarios, engines, dir) {
   return { results, dropped };
 }
 
-/**
- * The warm-up table: each engine builds one scenario's contract in a fresh
- * process and times its first adapter calls, as a service's first requests
- * after a start meet them. The other tables time an engine once it has
- * settled, which can take some engines tens of thousands of calls.
- * @returns {Record<string, Record<string, Record<number, number>>>} scenario -> engine -> calls -> ns/op
- */
-function measureColdStarts(scenarios, engines, dropped, dir) {
-  const cold = {};
-  for (const scenario of scenarios) {
-    cold[scenario.key] = {};
-    for (const key of engines) {
-      if (key in dropped[scenario.key]) continue;
-      const starts = [];
-      for (let p = 0; p < COLD_PROCESSES; p++) {
-        const file = join(dir, `${scenario.key}.${key}.cold${p}.json`);
-        child([scenario.key, '--engines', key, '--cold', '--filepath', file]);
-        starts.push(JSON.parse(readFileSync(file, 'utf8')));
-      }
-      cold[scenario.key][key] = Object.fromEntries(COLD_CALLS.map((calls) => [calls, medianOf(starts.map((start) => start[calls]))]));
-    }
-  }
-  return cold;
-}
-
-/** In a fresh process: build one engine's adapter for one scenario and time its first calls. */
-function coldStart(options, scenarios) {
-  const [scenario] = scenarios;
-  const [key] = options.engines;
-  const instance = ADAPTERS[key](scenario).build();
-  const out = {};
-  let done = 0;
-  let ns = 0;
-  for (const calls of COLD_CALLS) {
-    const start = process.hrtime.bigint();
-    for (; done < calls; done++)
-      instance.adapt(scenario.invalid);
-    ns += Number(process.hrtime.bigint() - start);
-    out[calls] = ns / calls;
-  }
-  writeFileSync(options.filepath, JSON.stringify(out));
-}
-
-/** The middle value of an odd count, or the mean of the middle two. */
-function medianOf(values) {
-  const sorted = values.toSorted((a, b) => a - b);
-  const mid = sorted.length >> 1;
-  return sorted.length % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
-}
-
 const filterArgs = (options) => (options.filter === null ? [] : [options.filter]);
 
 function child(args) {
@@ -539,13 +488,25 @@ function child(args) {
     throw new Error(`contracts.js ${args.join(' ')} exited with status ${result.status}`);
 }
 
-function main() {
+/** A first-calls cell: one engine's adapter for one scenario, built in this fresh process. */
+function firstCallsOp(scenarioKey, engineKey) {
+  const scenario = SCENARIOS.find((s) => s.key === scenarioKey);
+  const instance = ADAPTERS[engineKey](scenario).build();
+  return { op: () => instance.adapt(scenario.invalid) };
+}
+
+async function main() {
+  const cell = firstCallsCell();
+  if (cell !== null) {
+    await runFirstCallsCell(cell, firstCallsOp, FIRST_CALLS);
+    return;
+  }
   const options = parseSuiteArgs(process.argv, {
     defaultIterations: DEFAULT_ITERATIONS,
     engines: ENGINES,
-    init: { cold: false, child: false, shared: false },
+    init: { child: false, shared: false },
     extra: (arg, _next, opts) => {
-      if (arg === '--cold' || arg === '--child' || arg === '--shared') {
+      if (arg === '--child' || arg === '--shared') {
         opts[arg.slice(2)] = true;
         return true;
       }
@@ -568,10 +529,6 @@ function main() {
   }
   const engines = options.engines.filter((key) => key in ADAPTERS);
 
-  if (options.cold) {
-    coldStart(options, scenarios);
-    return;
-  }
   if (options.child) {
     writeFileSync(options.filepath, JSON.stringify(measureHere(options, scenarios, engines)));
     return;
@@ -586,17 +543,22 @@ function main() {
   const isolated = engines.length > 1 && !options.shared;
   const dir = mkdtempSync(join(tmpdir(), 'jaren-contracts-'));
   let measured;
-  let cold = null;
   try {
     measured = isolated
       ? measureEachAlone(options, scenarios, engines, dir)
       : measureHere(options, scenarios, engines);
-    if (isolated) cold = measureColdStarts(scenarios, engines, measured.dropped, dir);
   }
   finally {
     rmSync(dir, { recursive: true, force: true });
   }
   const { results, dropped } = measured;
+  const firstCalls = measureFirstCalls(import.meta.url, {
+    operation: 'normalize + validate + map issues, on invalid input',
+    counts: FIRST_CALLS,
+    cases: scenarios.map((s) => ({ key: s.key, name: s.title })),
+    engines: engines.map((key) => ({ key, label: ENGINE_LABELS[key] })),
+    skip: (scenarioKey, engineKey) => engineKey in dropped[scenarioKey],
+  });
 
   for (const scenario of scenarios) {
     console.log(`\n${'='.repeat(72)}\n${scenario.title}\n${'='.repeat(72)}`);
@@ -607,10 +569,10 @@ function main() {
       ['1. compile (once per process)', rows.compile],
       ['2. verdict on valid input (see caveat above)', rows.verdict],
       ['3. normalize + validate + map issues, on INVALID input', rows.adapter],
-      ...(cold === null ? [] : COLD_CALLS.map((calls) => [
-        `4. the first ${calls.toLocaleString('en-US')} adapter calls in a fresh process`,
-        Object.fromEntries(Object.entries(cold[scenario.key]).map(([key, byCalls]) => [key, byCalls[calls]])),
-      ])),
+      ...firstCalls.tables.map((t, k) => [
+        `4. the first ${FIRST_CALLS[k].toLocaleString('en-US')} adapter calls in a fresh process`,
+        Object.fromEntries(engines.map((key, i) => [key, t.rows[scenarios.indexOf(scenario)].results[i]]).filter(([, ns]) => ns !== null)),
+      ]),
     ];
     for (const [title, row] of tables) {
       console.log(`\n${title}`);
@@ -641,25 +603,14 @@ function main() {
         results: engines.map((k) => results[s.key][key][k] ?? null),
       })),
     }));
-    if (cold !== null) {
-      for (const calls of COLD_CALLS) {
-        tables.push({
-          title: `First ${calls.toLocaleString('en-US')} calls in a fresh process — normalize + validate + map issues, on invalid input`,
-          columns: engines.map((k) => ENGINE_LABELS[k]),
-          rows: scenarios.map((s) => ({
-            name: s.title,
-            results: engines.map((k) => cold[s.key][k]?.[calls] ?? null),
-          })),
-        });
-      }
-    }
     writeJsonResults('contracts', {
       node: process.version,
       iterations: options.iterations,
       caveat: CAVEAT,
       tables,
+      firstCalls,
     }, options);
   }
 }
 
-main();
+await main();

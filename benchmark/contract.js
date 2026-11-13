@@ -83,6 +83,7 @@ import { pad, padLeft, formatNs } from './lib/fmt.js';
 import { measureNsPerOp as measureNs, measureNsPerOpAsync as measureNsAsync } from './lib/measure.js';
 import { parseSuiteArgs } from './lib/args.js';
 import { writeJsonResults } from './lib/results.js';
+import { firstCallsCell, measureFirstCalls, runFirstCallsCell } from './lib/first-calls.js';
 
 const DEFAULT_ITERATIONS = 20_000;
 
@@ -610,6 +611,43 @@ async function measureSerialization(engines, table2) {
 
 //#endregion
 
+//#region first calls — one fresh process per cell, before anything else runs
+
+const FIRST_CALLS = [1_000, 10_000];
+/** The rows: table 2's three request shapes. */
+const FIRST_CASES = [
+  { key: 'put', request: REQUESTS[0] },
+  { key: 'search', request: REQUESTS[1] },
+  { key: 'catalog', request: REQUESTS[2] },
+];
+/** The columns: jaren and the headline's rival, the harness-free composition. */
+const FIRST_ENGINES = [
+  { key: 'jaren', label: '@jarenjs/contract' },
+  { key: 'direct', label: 'find-my-way + Ajv + fjs' },
+];
+
+/**
+ * One cell's request: the dispatch engines built untimed, with no request
+ * answered before the timed ones (the agreement check is left out).
+ */
+async function firstCallsOp(caseKey, engineKey) {
+  const { request } = FIRST_CASES.find((c) => c.key === caseKey);
+  const { engines } = await buildDispatchEngines();
+  const run = engines[FIRST_ENGINES.find((e) => e.key === engineKey).label];
+  return { op: () => run(request), awaited: true };
+}
+
+function firstCallsTables() {
+  return measureFirstCalls(import.meta.url, {
+    operation: 'one in-process dispatch (route + validate + handler + serialize)',
+    counts: FIRST_CALLS,
+    cases: FIRST_CASES.map(({ key, request }) => ({ key, name: request.name })),
+    engines: FIRST_ENGINES,
+  });
+}
+
+//#endregion
+
 //#region table 3 — dispatch over loopback
 
 /**
@@ -717,6 +755,11 @@ function printRow(label, value, baseline, isBaseline) {
 }
 
 async function main() {
+  const cell = firstCallsCell();
+  if (cell !== null) {
+    await runFirstCallsCell(cell, firstCallsOp, FIRST_CALLS);
+    process.exit(0);
+  }
   const options = parseSuiteArgs(process.argv, {
     defaultIterations: DEFAULT_ITERATIONS,
     engines: [],
@@ -755,12 +798,25 @@ async function main() {
   }
   if (wants('revision')) tables.push(await runRevisionTable());
 
+  let firstCalls = null;
+  if (wants('dispatch')) {
+    firstCalls = firstCallsTables();
+    for (const table of firstCalls.tables) {
+      console.log(`\n${table.title} (median of ${firstCalls.processes} processes)`);
+      for (const row of table.rows) {
+        console.log(`\n${row.name}`);
+        table.columns.forEach((label, i) => printRow(label, row.results[i], row.results[0], i === 0));
+      }
+    }
+  }
+
   if (options.output === 'json') {
     writeJsonResults('contract', {
       caveat: 'fastify inject is Fastify\'s own request harness (light-my-request builds mock request/response streams per call), so its in-process column is not a pure router+validator figure; the find-my-way + Ajv + fast-json-stringify column is the same pieces with no harness, and the loopback table drives both stacks through real sockets. '
         + (caveats.length > 0 ? caveats.join(' ') : ''),
       tables,
       serialization,
+      ...(firstCalls === null ? {} : { firstCalls }),
     }, options);
   }
 }
