@@ -106,20 +106,15 @@ function assertAgrees(n) {
 /** @type {Record<string, any>} */
 const collected = { compile: {}, transition: {} };
 
+// Every size's transition rows run before any compile row: a compile row
+// leaves its machines' garbage behind, and collecting it inside a
+// transition row charged that row for work it never did.
 for (const n of SIZES) {
   assertAgrees(n);
-  const doc = jarenMachine(n);
   const { config, impl } = xstateMachine(n);
 
-  const compileRows = [
-    measure('jaren compileFsm', () => { compileFsm(doc); }),
-    measure('xstate createMachine+Actor', () => { createActor(createMachine(config, impl)); }),
-  ];
-  collected.compile[n] = compileRows;
-  printTable(`compile — ${n}-state machine`, compileRows);
-
   // transition throughput: each engine cycles through its own states
-  const fsm = compileFsm(doc);
+  const fsm = compileFsm(jarenMachine(n));
   let pureState = fsm.initial;
   const session = createFsmSession(fsm);
   const actor = createActor(createMachine(config, impl));
@@ -131,6 +126,16 @@ for (const n of SIZES) {
   ];
   collected.transition[n] = transitionRows;
   printTable(`transition — ${n}-state machine`, transitionRows);
+}
+for (const n of SIZES) {
+  const doc = jarenMachine(n);
+  const { config, impl } = xstateMachine(n);
+  const compileRows = [
+    measure('jaren compileFsm', () => { compileFsm(doc); }),
+    measure('xstate createMachine+Actor', () => { createActor(createMachine(config, impl)); }),
+  ];
+  collected.compile[n] = compileRows;
+  printTable(`compile — ${n}-state machine`, compileRows);
 }
 //#endregion
 

@@ -111,30 +111,39 @@ function sessionBench(points, sampling) {
     type: 'line', title: 'Live', x: 'time', sampling,
     domain: { y: { min: 0, max: 200 }, x: { window: 1e15, slide: 1e15 } },
   };
-  const adapter = createStreamAdapter('line', {
-    recordBoundary: 'document', xField: 'x', yField: 'y', seriesField: 's',
-    maxPoints: points + ITERATIONS + WARMUP + 16, changes: true,
-  });
-  let x = 1_721_556_000_000;
+  let adapter;
+  let session;
+  let x;
   const feed = (s, y) => {
     adapter.onEvent({ type: 'pair', path: ['x'], key: 'x', value: x });
     adapter.onEvent({ type: 'pair', path: ['s'], key: 's', value: s });
     adapter.onEvent({ type: 'pair', path: ['y'], key: 'y', value: y });
     adapter.endDocument();
   };
-  for (let i = 0; i < points; i++) {
-    for (let s = 0; s < SERIES; s++) feed(`s${s}`, 100 + (i % 50));
-    x += 1000;
-  }
-  const session = createChartSession(config, adapter);
-  session.tick();
   const modes = { unchanged: 0, incremental: 0, rebuilt: 0 };
+  const build = () => {
+    adapter = createStreamAdapter('line', {
+      recordBoundary: 'document', xField: 'x', yField: 'y', seriesField: 's',
+      maxPoints: points + ITERATIONS + WARMUP + 16, changes: true,
+    });
+    x = 1_721_556_000_000;
+    for (let i = 0; i < points; i++) {
+      for (let s = 0; s < SERIES; s++) feed(`s${s}`, 100 + (i % 50));
+      x += 1000;
+    }
+    session = createChartSession(config, adapter);
+    session.tick();
+    modes.unchanged = modes.incremental = modes.rebuilt = 0;
+  };
+  build();
   const label = sampling === false ? '' : ' sampled';
+  // exactly WARMUP + ITERATIONS appends per session, which the point cap
+  // above is sized for; settled rounds each replay them on a fresh session
   const tickRow = measure(`line session tick @ ${points}×${SERIES}${label} (1 append)`, (i) => {
     feed('s0', 100 + (i % 50));
     x += 1000;
     modes[session.tick().mode]++;
-  });
+  }, { fresh: build });
   const wholesaleRow = measure(`line wholesale tick @ ${points}×${SERIES}${label}`,
     () => compileChart(config, adapter.getData()).toVnode());
   return { tickRow, wholesaleRow, modes };
@@ -276,25 +285,33 @@ for (const r of samplingResults) {
  */
 function barSessionBench(categories) {
   const config = { type: 'bar', title: 'Live counts', valLabel: 'events' };
-  const adapter = createStreamAdapter('bar', {
-    recordBoundary: 'document', xField: 'bucket', changes: true,
-  });
+  let adapter;
+  let session;
   const feed = (bucket) => {
     adapter.onEvent({ type: 'pair', path: ['bucket'], key: 'bucket', value: bucket });
     adapter.endDocument();
   };
-  // one leader owns the axis top; the rest are the live tail
-  for (let i = 0; i < 5 * (ITERATIONS + WARMUP); i++) feed('bucket-0');
-  for (let c = 1; c < categories; c++) {
-    for (let i = 0; i < 10; i++) feed(`bucket-${c}`);
-  }
-  const session = createChartSession(config, adapter);
-  session.tick();
   const modes = { unchanged: 0, incremental: 0, rebuilt: 0 };
+  const build = () => {
+    adapter = createStreamAdapter('bar', {
+      recordBoundary: 'document', xField: 'bucket', changes: true,
+    });
+    // one leader owns the axis top; the rest are the live tail
+    for (let i = 0; i < 5 * (ITERATIONS + WARMUP); i++) feed('bucket-0');
+    for (let c = 1; c < categories; c++) {
+      for (let i = 0; i < 10; i++) feed(`bucket-${c}`);
+    }
+    session = createChartSession(config, adapter);
+    session.tick();
+    modes.unchanged = modes.incremental = modes.rebuilt = 0;
+  };
+  build();
+  // exactly WARMUP + ITERATIONS counts per session, which the leader's lead
+  // above is sized for; settled rounds each replay them on a fresh session
   const tickRow = measure(`bar session tick @ ${categories} categories (1 count)`, (i) => {
     feed(`bucket-${1 + (i % Math.max(1, categories - 1))}`);
     modes[session.tick().mode]++;
-  });
+  }, { fresh: build });
   const wholesaleRow = measure(`bar wholesale tick @ ${categories} categories`,
     () => compileChart(config, adapter.getData()).toVnode());
   return { tickRow, wholesaleRow, modes };

@@ -46,6 +46,8 @@
  *   node benchmark/website-data.js --quick        # fast smoke run (low iterations)
  *   node benchmark/website-data.js --iterations N # validator suite iterations
  *   node benchmark/website-data.js --skip qt3,jslt
+ *   node benchmark/website-data.js --out DIR      # write somewhere other than the published directory
+ *   node benchmark/website-data.js --method block --processes 1  # time the timed suites another way
  */
 
 import { spawnSync } from 'child_process';
@@ -62,7 +64,9 @@ import { assertSiteOutput, assertSuiteOutput } from '../scripts/lib/site-contrac
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
-const OUT_DIR = path.join(ROOT, 'packages', 'website', 'public', 'benchmarks');
+const PUBLISHED_DIR = path.join(ROOT, 'packages', 'website', 'public', 'benchmarks');
+/** Where this run writes (and reads the previous run from): the published directory unless `--out` names another. */
+let OUT_DIR = PUBLISHED_DIR;
 
 //#region helpers
 
@@ -85,7 +89,7 @@ function flagValue(argv, i, flag) {
 }
 
 function parseArgs(argv) {
-  const options = { iterations: 1000, quick: false, skip: new Set() };
+  const options = { iterations: 1000, quick: false, skip: new Set(), out: null, method: null, processes: null };
   for (let i = 2; i < argv.length; i++) {
     switch (argv[i]) {
       case '--iterations': case '-i': {
@@ -98,6 +102,22 @@ function parseArgs(argv) {
         break;
       }
       case '--quick': options.quick = true; break;
+      case '--out': options.out = path.resolve(flagValue(argv, ++i, '--out')); break;
+      case '--method': {
+        const value = flagValue(argv, ++i, '--method');
+        if (value !== 'settled' && value !== 'block')
+          refuse(`--method is 'settled' or 'block', got '${value}'.`);
+        options.method = value;
+        break;
+      }
+      case '--processes': {
+        const value = flagValue(argv, ++i, '--processes');
+        const count = Number(value);
+        if (!Number.isInteger(count) || count <= 0)
+          refuse(`--processes needs a positive integer, got '${value}'.`);
+        options.processes = count;
+        break;
+      }
       case '--skip': {
         const value = flagValue(argv, ++i, '--skip');
         for (const name of value.split(',')) {
@@ -108,7 +128,7 @@ function parseArgs(argv) {
         break;
       }
       case '--help': case '-h':
-        console.log('Usage: node benchmark/website-data.js [--quick] [--iterations N] [--skip suite,suite]');
+        console.log('Usage: node benchmark/website-data.js [--quick] [--iterations N] [--skip suite,suite] [--out DIR] [--method settled|block] [--processes N]');
         console.log('Suites: validate, contracts, contract, jsonpath, jsonquery, jslt, formats, jsonpointer, jsonpatch, toml, jsonx-stream, csv, markdown, mermaid, view, charts, geo, flow, db, spatial, orm, live, vector, series, qt3');
         process.exit(0);
         break;
@@ -127,11 +147,12 @@ function parseArgs(argv) {
   return options;
 }
 
-function runTool(args, { capture = false, cpus = null } = {}) {
-  console.log(`\n$ ${cpus === null ? '' : `taskset -c ${cpus} `}node ${args.join(' ')}`);
+function runTool(args, { capture = false, cpus = null, env = undefined } = {}) {
+  const shown = env === undefined ? '' : `${Object.entries(env).map(([k, v]) => `${k}=${v}`).join(' ')} `;
+  console.log(`\n$ ${shown}${cpus === null ? '' : `taskset -c ${cpus} `}node ${args.join(' ')}`);
   const result = cpus === null
-    ? spawnSync(process.execPath, args, spawnOptions(capture))
-    : spawnSync('taskset', ['-c', cpus, process.execPath, ...args], spawnOptions(capture));
+    ? spawnSync(process.execPath, args, spawnOptions(capture, env))
+    : spawnSync('taskset', ['-c', cpus, process.execPath, ...args], spawnOptions(capture, env));
   if (result.status !== 0)
     throw new Error(`'node ${args.join(' ')}' exited with status ${result.status}`);
   if (capture)
@@ -139,9 +160,10 @@ function runTool(args, { capture = false, cpus = null } = {}) {
   return result.stdout;
 }
 
-function spawnOptions(capture) {
+function spawnOptions(capture, env) {
   return {
     cwd: ROOT,
+    env: env === undefined ? process.env : { ...process.env, ...env },
     encoding: 'utf8',
     stdio: capture ? ['ignore', 'pipe', 'inherit'] : 'inherit',
     maxBuffer: 64 * 1024 * 1024,
@@ -206,6 +228,189 @@ function sig4(n) {
   if (typeof n !== 'number' || !Number.isFinite(n) || n === 0)
     return n;
   return Float64.roundToPrecision(n, 4);
+}
+
+//#endregion
+
+//#region timed runs
+
+// A timed suite runs in TIMED_PROCESSES processes under the settled method
+// of benchmark/lib/measure.js: each row is warmed by the clock until it
+// holds steady, timed in rounds long enough to hold the collections its
+// own garbage causes, and reported as its median round. One process's rows
+// still move with its compiler and collector schedule, so each published
+// figure is the median of the processes' figures for it, and how far the
+// processes and each row's rounds agreed is published beside the suite as
+// its `measurement` record in meta.json. A quick run is one process of the
+// one-block method, for wiring only.
+const TIMED_PROCESSES = 3;
+
+/** A row whose median round is more than this times its fastest did not settle (measure.js uses the same bound). */
+const SETTLED_SPREAD = 1.15;
+
+/** Members whose values are a run's own and need not agree between processes. */
+const RUN_OWN = new Set(['date', 'generated']);
+
+/** Numeric members that count work instead of timing it, left out of the spread. */
+const COUNTS = /(^|\/)(iterations|calls)(\/|$)/;
+
+/** @type {Record<string, any>} the measurement record of each suite timed this run */
+const measured = {};
+
+/** The lines of a rounds log, or none where the tool timed nothing through the shared helpers. */
+function readRoundsLog(file) {
+  if (!fs.existsSync(file))
+    return [];
+  return fs.readFileSync(file, 'utf8').split('\n').filter((line) => line !== '').map((line) => JSON.parse(line));
+}
+
+/**
+ * The rows of one array member across runs, put in the first run's order
+ * when they are labelled rows a run sorted by its own timings; null when
+ * they are not rows that can be matched by label.
+ */
+function alignRows(values) {
+  const keyOf = (row) => (row !== null && typeof row === 'object' ? (row.label ?? row.name) : undefined);
+  const order = values[0].map(keyOf);
+  if (order.some((key) => typeof key !== 'string') || new Set(order).size !== order.length)
+    return null;
+  const aligned = values.map((rows) => {
+    const byKey = new Map(rows.map((row) => [keyOf(row), row]));
+    return order.map((key) => byKey.get(key));
+  });
+  return aligned.some((rows) => rows.some((row) => row === undefined)) ? null : aligned;
+}
+
+const sortedByNs = (rows) => rows.every((row, i) => typeof row?.ns === 'number' && (i === 0 || rows[i - 1].ns <= row.ns));
+
+/**
+ * One output from several runs of a tool: every number that differs
+ * between them is their median, and everything else must agree. Rows a
+ * run sorted by its timings are matched by label first and sorted again
+ * by the merged timings.
+ * @param {any[]} outputs
+ * @returns {any}
+ * @throws {Error} naming the first member the runs disagree on.
+ */
+function mergeRuns(outputs) {
+  const merge = (values, at) => {
+    const [first] = values;
+    if (typeof first === 'number' && values.every((v) => typeof v === 'number'))
+      return values.every((v) => v === first) ? first : median(values);
+    if (Array.isArray(first) && values.every((v) => Array.isArray(v) && v.length === first.length)) {
+      const sameOrder = values.every((v) => v.every((row, i) => JSON.stringify(row?.label ?? row?.name) === JSON.stringify(first[i]?.label ?? first[i]?.name)));
+      const rows = sameOrder ? values : alignRows(values);
+      if (rows === null)
+        throw new Error(`${at}: the runs list different rows`);
+      const merged = first.map((_, i) => merge(rows.map((v) => v[i]), `${at}/${i}`));
+      return !sameOrder && values.every(sortedByNs) ? merged.sort((a, b) => a.ns - b.ns) : merged;
+    }
+    if (first !== null && typeof first === 'object' && !Array.isArray(first)) {
+      const keys = Object.keys(first);
+      if (!values.every((v) => v !== null && typeof v === 'object' && JSON.stringify(Object.keys(v)) === JSON.stringify(keys)))
+        throw new Error(`${at}: the runs carry different members`);
+      return Object.fromEntries(keys.map((key) => [key, merge(values.map((v) => v[key]), `${at}/${key}`)]));
+    }
+    if (!values.every((v) => v === first) && !RUN_OWN.has(at.slice(at.lastIndexOf('/') + 1)))
+      throw new Error(`${at}: the runs disagree (${values.map((v) => JSON.stringify(v)).join(' / ')})`);
+    return first;
+  };
+  return merge(outputs, '');
+}
+
+/** Every numeric member of an output with its path, rows keyed by label where they have one. */
+function numbersOf(value, at = '', out = new Map()) {
+  if (typeof value === 'number')
+    out.set(at, value);
+  else if (Array.isArray(value))
+    value.forEach((item, i) => numbersOf(item, `${at}/${item?.label ?? item?.name ?? i}`, out));
+  else if (value !== null && typeof value === 'object')
+    for (const [key, item] of Object.entries(value)) numbersOf(item, `${at}/${key}`, out);
+  return out;
+}
+
+/**
+ * How one tool's runs agreed: its rows' own rounds (from the rounds logs)
+ * and, between processes, the figures that differ.
+ * @param {string} method
+ * @param {any[]} outputs
+ * @param {any[][]} logs
+ */
+function measurementOf(method, outputs, logs) {
+  const settled = logs.flat().filter((row) => row.method === 'settled');
+  const spreads = [];
+  if (outputs.length > 1) {
+    const runs = outputs.map((output) => numbersOf(output));
+    for (const [at, value] of runs[0]) {
+      if (COUNTS.test(at)) continue;
+      const values = runs.map((run) => run.get(at));
+      if (values.some((v) => typeof v !== 'number' || v <= 0) || values.every((v) => v === value)) continue;
+      spreads.push(Math.max(...values) / Math.min(...values));
+    }
+  }
+  return {
+    method,
+    processes: outputs.length,
+    rows: Math.max(0, ...logs.map((log) => log.length)),
+    unsettledRows: method === 'settled' ? settled.filter((row) => !row.settled).length / logs.length : null,
+    worstRoundSpread: settled.length === 0 ? null : sig4(Math.max(...settled.map((row) => row.spread))),
+    figures: spreads.length,
+    processSpread: spreads.length === 0 ? null : { median: sig4(median(spreads)), worst: sig4(Math.max(...spreads)) },
+    figuresOverSpread: spreads.filter((spread) => spread > SETTLED_SPREAD).length,
+  };
+}
+
+/** Two measurement records of one suite (flow runs two tools) as one. */
+function joinMeasurements(a, b) {
+  if (a === undefined) return b;
+  const spreads = [a.processSpread, b.processSpread].filter((s) => s !== null);
+  return {
+    method: a.method,
+    processes: a.processes,
+    rows: a.rows + b.rows,
+    unsettledRows: a.unsettledRows === null ? null : a.unsettledRows + b.unsettledRows,
+    worstRoundSpread: a.worstRoundSpread === null || b.worstRoundSpread === null
+      ? (a.worstRoundSpread ?? b.worstRoundSpread)
+      : Math.max(a.worstRoundSpread, b.worstRoundSpread),
+    figures: a.figures + b.figures,
+    processSpread: spreads.length === 0 ? null : {
+      median: spreads.length === 1 ? spreads[0].median : sig4((a.processSpread.median * a.figures + b.processSpread.median * b.figures) / (a.figures + b.figures)),
+      worst: Math.max(...spreads.map((s) => s.worst)),
+    },
+    figuresOverSpread: a.figuresOverSpread + b.figuresOverSpread,
+  };
+}
+
+/**
+ * Run a timed tool TIMED_PROCESSES times (once for a quick run), each
+ * writing its JSON to a file of its own, and write their merged output to
+ * `file`, where the suite's generator reads it as it would one run's.
+ * @param {string} suite - the key its measurement record is published under
+ * @param {string} file - the `--filepath` value `args` carries
+ * @param {{ quick: boolean }} options
+ * @param {string[]} args
+ */
+function runTimedTool(suite, file, options, args) {
+  if (!args.includes(file))
+    throw new Error(`runTimedTool(${suite}): the arguments do not write to ${file}`);
+  const processes = options.processes ?? (options.quick ? 1 : TIMED_PROCESSES);
+  const method = options.method ?? (options.quick ? 'block' : 'settled');
+  const outputs = [];
+  const logs = [];
+  for (let p = 0; p < processes; p++) {
+    const own = `${file}.p${p}`;
+    const log = `${file}.p${p}.rounds.jsonl`;
+    runTool(args.map((arg) => (arg === file ? own : arg)), { env: { BENCH_METHOD: method, BENCH_ROUNDS_LOG: log } });
+    outputs.push(readJson(own));
+    logs.push(readRoundsLog(log));
+  }
+  fs.writeFileSync(file, JSON.stringify(mergeRuns(outputs)));
+  measured[suite] = joinMeasurements(measured[suite], measurementOf(method, outputs, logs));
+  // a run written somewhere other than the published directory keeps each
+  // process's own output beside the merged one, to trace a figure they split on
+  if (OUT_DIR !== PUBLISHED_DIR) {
+    outputs.forEach((output, p) => fs.writeFileSync(path.join(OUT_DIR, `${path.basename(file, '.json')}.p${p}.json`), JSON.stringify(output)));
+  }
 }
 
 //#endregion
@@ -328,7 +533,7 @@ function generateJsonPath(tmp, options) {
   const compliance = readJson(complianceFile);
 
   const profileFile = path.join(tmp, 'jsonpath-profile.json');
-  runTool([
+  runTimedTool('jsonpath', profileFile, options, [
     'benchmark/jsonpath.js', '--profile', '--scale',
     '--iterations', String(options.quick ? 200 : 2000),
     '--output', 'json', '--filepath', profileFile,
@@ -426,7 +631,7 @@ async function loadScenarioSources(dir, keys) {
 
 async function generateJsonQuery(tmp, options) {
   const file = path.join(tmp, 'jsonquery.json');
-  runTool([
+  runTimedTool('jsonquery', file, options, [
     'benchmark/jsonquery.js', '--profile', '--scale',
     ...(options.quick ? ['--iterations', '100'] : []),
     '--output', 'json', '--filepath', file,
@@ -461,7 +666,7 @@ async function generateJsonQuery(tmp, options) {
 
 async function generateJslt(tmp, options) {
   const file = path.join(tmp, 'jslt.json');
-  runTool([
+  runTimedTool('jslt', file, options, [
     'benchmark/jslt.js', '--profile', '--scale',
     ...(options.quick ? ['--iterations', '100'] : []),
     '--output', 'json', '--filepath', file,
@@ -496,7 +701,7 @@ async function generateJslt(tmp, options) {
 
 function generateFormats(tmp, options) {
   const file = path.join(tmp, 'formats.json');
-  runTool([
+  runTimedTool('formats', file, options, [
     'benchmark/formats.js',
     '--iterations', String(options.quick ? 20_000 : 200_000),
     '--output', 'json', '--filepath', file,
@@ -517,7 +722,7 @@ function generateFormats(tmp, options) {
 
 function generateContracts(tmp, options) {
   const file = path.join(tmp, 'contracts.json');
-  runTool([
+  runTimedTool('contracts', file, options, [
     'benchmark/contracts.js',
     '--iterations', String(options.quick ? 3_000 : 20_000),
     '--output', 'json', '--filepath', file,
@@ -546,7 +751,7 @@ function generateContracts(tmp, options) {
 function generateContract(tmp, options) {
   const file = path.join(tmp, 'contract.json');
   try {
-    runTool([
+    runTimedTool('contract', file, options, [
       'benchmark/contract.js',
       '--iterations', String(options.quick ? 2_000 : 20_000),
       '--output', 'json', '--filepath', file,
@@ -578,7 +783,7 @@ function generateContract(tmp, options) {
 
 function generateJsonPointer(tmp, options) {
   const file = path.join(tmp, 'jsonpointer.json');
-  runTool([
+  runTimedTool('jsonpointer', file, options, [
     'benchmark/jsonpointer.js',
     '--iterations', String(options.quick ? 10_000 : 1_000_000),
     '--output', 'json', '--filepath', file,
@@ -599,7 +804,7 @@ function generateJsonPointer(tmp, options) {
 
 function generateJsonPatch(tmp, options) {
   const file = path.join(tmp, 'jsonpatch.json');
-  runTool([
+  runTimedTool('jsonpatch', file, options, [
     'benchmark/jsonpatch.js',
     '--iterations', String(options.quick ? 5_000 : 200_000),
     '--output', 'json', '--filepath', file,
@@ -620,7 +825,7 @@ function generateJsonPatch(tmp, options) {
 function generateToml(tmp, options) {
   const file = path.join(tmp, 'toml.json');
   try {
-    runTool([
+    runTimedTool('toml', file, options, [
       'benchmark/toml.js', '--profile',
       '--iterations', String(options.quick ? 30 : 150),
       '--output', 'json', '--filepath', file,
@@ -648,7 +853,7 @@ function generateToml(tmp, options) {
 function generateCsv(tmp, options) {
   const file = path.join(tmp, 'csv.json');
   try {
-    runTool([
+    runTimedTool('csv', file, options, [
       'benchmark/csv.js', '--profile',
       '--iterations', String(options.quick ? 10 : 40),
       '--output', 'json', '--filepath', file,
@@ -688,7 +893,7 @@ function generateCsv(tmp, options) {
 function generateJsonxStream(tmp, options) {
   const file = path.join(tmp, 'jsonx-stream.json');
   try {
-    runTool([
+    runTimedTool('jsonx-stream', file, options, [
       'benchmark/jsonx-stream.js',
       '--iterations', String(options.quick ? 100 : 1000),
       '--output', 'json', '--filepath', file,
@@ -706,7 +911,7 @@ function generateJsonxStream(tmp, options) {
 function generateMarkdown(tmp, options) {
   const file = path.join(tmp, 'markdown.json');
   try {
-    runTool([
+    runTimedTool('markdown', file, options, [
       'benchmark/markdown.js', '--profile',
       '--iterations', String(options.quick ? 20 : 100),
       '--output', 'json', '--filepath', file,
@@ -748,7 +953,7 @@ function generateMarkdown(tmp, options) {
 function generateView(tmp, options) {
   const file = path.join(tmp, 'view.json');
   try {
-    runTool([
+    runTimedTool('view', file, options, [
       'benchmark/view.js',
       '--rows', String(options.quick ? 200 : 1000),
       '--iterations', String(options.quick ? 50 : 500),
@@ -777,7 +982,7 @@ function generateView(tmp, options) {
 function generateCharts(tmp, options) {
   const file = path.join(tmp, 'charts.json');
   try {
-    runTool([
+    runTimedTool('charts', file, options, [
       'benchmark/charts.js',
       '--iterations', String(options.quick ? 100 : 1000),
       '--output', 'json', '--filepath', file,
@@ -807,7 +1012,7 @@ function generateCharts(tmp, options) {
 function generateMermaid(tmp, options) {
   const file = path.join(tmp, 'mermaid.json');
   try {
-    runTool([
+    runTimedTool('mermaid', file, options, [
       'benchmark/mermaid.js', '--profile',
       '--iterations', String(options.quick ? 20 : 100),
       '--output', 'json', '--filepath', file,
@@ -857,7 +1062,7 @@ function generateMermaid(tmp, options) {
 function generateGeo(tmp, options) {
   const file = path.join(tmp, 'geo.json');
   try {
-    runTool([
+    runTimedTool('geo', file, options, [
       'benchmark/geo.js',
       '--iterations', String(options.quick ? 5_000 : 100_000),
       '--filepath', file,
@@ -892,12 +1097,12 @@ function generateFlow(tmp, options) {
   const fsmFile = path.join(tmp, 'flow-fsm.json');
   const dagFile = path.join(tmp, 'flow-dag.json');
   try {
-    runTool([
+    runTimedTool('flow', fsmFile, options, [
       '--expose-gc', 'benchmark/flow-fsm.js',
       '--iterations', String(options.quick ? 2_000 : 20_000),
       '--output', 'json', '--filepath', fsmFile,
     ]);
-    runTool([
+    runTimedTool('flow', dagFile, options, [
       'benchmark/flow-dag.js',
       '--output', 'json', '--filepath', dagFile,
     ]);
@@ -1638,6 +1843,8 @@ function generateDb(tmp, options) {
 
 async function main() {
   const options = parseArgs(process.argv);
+  if (options.out !== null)
+    OUT_DIR = options.out;
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'jaren-website-data-'));
   fs.mkdirSync(OUT_DIR, { recursive: true });
 
@@ -1786,6 +1993,9 @@ async function main() {
         ? (previousMeta?.iterations?.validate ?? options.iterations)
         : options.iterations,
     },
+    // how far each timed suite's processes and rounds agreed; a suite
+    // skipped this run keeps the record of the run that measured it
+    measurement: { ...previousMeta?.measurement, ...measured },
     qt3,
     conformance: {
       jsonSchema: generated.validate === undefined
@@ -1856,6 +2066,7 @@ async function main() {
 export {
   parseArgs, buildHeadlines, carryHeadlines, mergeToml, fileProvenance,
   serializeMeta, serializeSuite, SUITE_ORDER, medianReport,
+  mergeRuns, measurementOf, joinMeasurements,
 };
 
 if (process.argv[1] !== undefined

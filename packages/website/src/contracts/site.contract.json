@@ -3460,6 +3460,84 @@
         }
       },
       "additionalProperties": false
+    },
+    "Measurement": {
+      "description": "One timed suite's measurement record. `method` is `settled` (rows warmed and timed by the clock, the median of their rounds) or `block` (one block of a fixed call count, a quick run's). `unsettledRows` counts rows whose median round stayed more than 1.15 times their fastest, per process; `processSpread` is the largest over the smallest of the processes' values, over the figures they differ on.",
+      "type": "object",
+      "required": [
+        "method",
+        "processes",
+        "rows",
+        "unsettledRows",
+        "worstRoundSpread",
+        "figures",
+        "processSpread",
+        "figuresOverSpread"
+      ],
+      "properties": {
+        "method": {
+          "enum": [
+            "settled",
+            "block"
+          ]
+        },
+        "processes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "rows": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unsettledRows": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "worstRoundSpread": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "figures": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "processSpread": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "required": [
+                "median",
+                "worst"
+              ],
+              "properties": {
+                "median": {
+                  "type": "number",
+                  "minimum": 1
+                },
+                "worst": {
+                  "type": "number",
+                  "minimum": 1
+                }
+              },
+              "additionalProperties": false
+            }
+          ]
+        },
+        "figuresOverSpread": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
     }
   },
   "operations": {
@@ -3714,6 +3792,13 @@
             "additionalProperties": {
               "type": "integer",
               "minimum": 1
+            }
+          },
+          "measurement": {
+            "description": "How far each timed suite's measurement agreed with itself, by suite key: its rows' rounds within a process, and its published figures between the processes they are the median of.",
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/$defs/Measurement"
             }
           },
           "qt3": {
