@@ -218,7 +218,9 @@ async function measure(iterations) {
       const src = PIE_CORPUS[i];
       const results = {
         'jaren-mermaid': timeIt(() => parseMermaid(src), iterations),
-        '@mermaid-js/parser': timeIt(() => mmParse('pie', src), Math.max(20, iterations >> 2)),
+        // parse() returns a promise: timed unawaited, every call's result
+        // stays queued until the loop yields, and the heap fills with them
+        '@mermaid-js/parser': await timeItAsync(() => mmParse('pie', src), Math.max(20, iterations >> 2)),
       };
       parse.push({ name: `pie ${i + 1}`, results });
     }
