@@ -1,6 +1,6 @@
 {
-  "generated": "2026-11-13T21:13:28+01:00",
-  "commit": "8902429c0cdea961426e8364044161e244edf9e1",
+  "generated": "2026-11-13T23:58:20+01:00",
+  "commit": "04cabe5ae5c5e8787aa24ca5e5ebe4f1b44f47ee",
   "packages": [
     {
       "name": "@jarenjs/core",
@@ -235,7 +235,7 @@
           "card": {
             "title": "JSON Pointer",
             "blurb": "RFC 6901 with zero-allocation compiled getters, plus relative pointers — the $data hot path.",
-            "perf": "compiled getters, far ahead of the npm package"
+            "perf": "compiled getters, measured against the npm package"
           }
         },
         {
@@ -296,7 +296,7 @@
               "suite": "jsonpointer",
               "title": "JSON Pointer",
               "blurb": "RFC 6901 with zero-allocation compiled getters, plus relative pointers — the $data hot path.",
-              "perf": "compiled getters, far ahead of the npm package"
+              "perf": "compiled getters, measured against the npm package"
             },
             {
               "key": "patch",
@@ -1584,7 +1584,7 @@
         ],
         "meta": {
           "sourceUrl": "packages/json/site.md",
-          "hash": "slpj18",
+          "hash": "1wqe05m",
           "frontmatterLang": "yaml"
         }
       },
