@@ -1630,6 +1630,9 @@ export function verifyShape(connection, plan, collection, docPath, kind = 'colle
           conforming: readsConforming(row),
         }))
         .sort((a, b) => (a.name < b.name ? -1 : 1));
+      // the type each column is held as, as the open read it: a key column may be
+      // the allocation or the storage either declaration of the model leaves it
+      declared.heldTypes = new Map(actual.map((column) => [column.name, column.type]));
       const expected = [...plan.expected.columns]
         .map((c) => ({ ...c, type: comparableType(c.type),
           ...(c.legacyType === undefined ? {} : { legacyType: comparableType(c.legacyType) }) }))

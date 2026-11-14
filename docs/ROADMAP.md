@@ -891,23 +891,25 @@ what each does is its own documentation's job
   Scan`), so an `$orderby` sorts every matching row however few a page or a
   narrow `$where` returns. Wanted: an index whose null placement the order
   reads, or an order whose null placement the index provides.
-- [ ] **On PostgreSQL an entity's key compares exactly with digits another
-  writer spelled.** A literal, a literal list or an external list compared
-  with an entity's `integer` or `number` key column, or a column referencing
-  one (`$eq: ['$it.id', 6]`), and two such columns compared with each other (a
-  key and a reference to it: a join, a hop's correlation, two references in
-  one row), and such a column joined to, or correlated with, a non-key number
-  column (compared with the shortest decimal of that column's double, so its
-  own digits read as the engine reads them), compare the columns exactly, so a
-  row another writer re-keyed `6.00000000000000000001` in a `numeric` key
-  column (an `integer` key the store made without `default: 'auto'`) is
-  dropped where the engine, which reads 6, keeps it. Such a column may instead
-  be the `bigserial`/`bigint` a database-allocated key takes (and a database
-  can hold either), which reads no fractional bound and whose index a
-  `numeric` bound does not serve, and a key join that read both doubles would
-  lose the key's index. Wanted: the interval comparison every other number
-  column makes, and the double read every other pair of number columns makes,
-  for a key column whose type the open has read as `numeric`.
+- [ ] **On PostgreSQL an entity's `numeric` key compares exactly with
+  another column, and orders, includes and pages exactly.** A key the caller
+  writes, and a column referencing one, is a `numeric`, where another writer
+  may re-key a row `6.00000000000000000001`, which the engine reads as 6. A
+  literal, a literal list and an external list compare with it by the interval
+  of decimals that round to the number's double, but two such columns (a
+  join, a hop's correlation, two references in one row) and such a column
+  beside a non-key number column compare the key exactly, so the re-keyed row
+  is dropped where the engine keeps it; an ordering over an `integer` key reads
+  it bare (the re-keyed row orders after the row keyed 6, where the engine
+  ties them and its next term decides), a load's include pairs a reference
+  with a key by `=`, and a page's keyset continuation compares the key bare.
+  Reading the pairs as the doubles answers as the engine, but a join of every
+  row then merges or loops where the exact keys' equality hashed (measured on
+  PostgreSQL 17 only), and beside a non-key number column the doubles'
+  equality must be kept from the planner's hash to keep the key's index.
+  Wanted: a pair comparison the planner estimates as an equality and the
+  key's index serves, measured; the double's order, include and continuation
+  for such a key, measured against the index order they would cost.
 - [ ] **On PostgreSQL a `NaN` another writer stored in a number column of a
   table the store did not create with its CHECK is refused only where a
   statement returns its column.** The store gives every `numeric` column of an

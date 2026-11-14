@@ -419,10 +419,28 @@ with a `NaN` is refused `JD2003` naming the column, by the engine's read and by
 every statement that returns the column, while a statement that compares or
 orders the column without returning it reads PostgreSQL's `NaN` and answers
 where the engine refuses.
-An entity's key, and a column referencing one, keep the exact comparison: such
-a column may be declared as the allocation a database-allocated key takes
-(`bigserial`, `bigint`), which reads no fractional edge and holds no integer in
-a safe integer's interval but the integer itself.
+An entity's key, and a column referencing one (a join table's two among
+them), compared with a number, compare as the open reads the column held. A
+key the caller writes is a `numeric` (an `integer` key without `default:
+'auto'`, a `number` key), where another writer may re-key a row
+`6.00000000000000000001`, which the engine reads as 6: such a column compares
+with a literal, a literal list or an external list (in a query, a hop's filter
+or a load's `where`) as every other number column does, by the interval of
+decimals that round to the number's double, which its index still serves (a
+lookup is a range of two edges over the key's index where it was an
+equality). Compared with another column (a join, a hop's correlation, two
+references in one row, a non-key number column), it still compares exactly as
+above, so a row another writer re-keyed by other digits is dropped there where
+the engine keeps it; an ordering, a load's include and a page's continuation
+read it bare too. A store that upgrades to this release answers a key's
+comparison with a number differently only where another writer spelled a key
+by digits other than the ones the store writes: it now keeps the rows the
+engine keeps. A key the database allocates is a `bigserial`
+(a column referencing it a `bigint`), which reads no fractional edge and holds
+no integer in a safe integer's interval but the integer itself: it keeps the
+exact comparison, and so does a key the model leaves to the caller in a table
+a database created while the model allocated it, which the open reads as
+`bigint`.
 
 A collection member the schema types `number` or `integer` is read typed: its
 generated column, and the `CASE` a statement reads an unindexed one by, hold a

@@ -201,7 +201,8 @@ describe('a column holding a key, PostgreSQL', { skip: skipFor('postgres') }, ()
         'A ORDER BY "r"."kId" ASC NULLS FIRST, "r"."rid" LIMIT 3',
         'K ORDER BY "r"."id" ASC LIMIT 4',
         'K WHERE ("r"."id" > $1) ORDER BY "r"."id" ASC LIMIT 4',
-        'K WHERE ("r"."id" IS NOT NULL AND "r"."id" = $1) ORDER BY "r"."rid"']);
+        // the key the caller writes is a `numeric`, which holds a writer's digits: a literal is its double's interval
+        'K WHERE ("r"."id" IS NOT NULL AND "r"."id" >= $1 AND "r"."id" <= $2) ORDER BY "r"."rid"']);
       const include = seen[3];
       assert.match(include.text, /WHERE "r_as"\."kId" = "r"\."id" ORDER BY "r_as"\."kId" ASC NULLS FIRST, "r_as"\."aid" ASC, "r_as"\."rid"/);
       const client = await pool.connect();

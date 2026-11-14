@@ -248,11 +248,15 @@ function decimalMembership(dialect, param, value, list, seek) {
  * and a safe integer's interval holds no integer but itself; such a column
  * keeps the exact comparison, which the server types from the column, and
  * its index order ({@link entityOrderRead} orders every other one by the
- * double).
+ * double), unless the open read it as held by its storage (`keyDigits`: a
+ * `numeric`, where another writer may have spelled a key by any digits).
+ * Its comparison with a literal or a list is then every other number
+ * column's; its order, and its comparison with another column, stay the
+ * key's.
  * @param {any} dialect @param {any} ref - the column's ref
  * @returns {boolean}
  */
-const decimalColumn = (dialect, ref) => dialect.decimalDigits && ref.codec === undefined && ref.holdsKey !== true
+const decimalColumn = (dialect, ref) => dialect.decimalDigits && ref.codec === undefined && (ref.holdsKey !== true || ref.keyDigits === true)
   && (ref.storage === 'number' || ref.storage === 'integer');
 
 /**
@@ -540,7 +544,7 @@ export function documentMemberOf(dialect, docSql, ref) {
  */
 export function entityOrderRead(dialect, ref, sql) {
   if (ref.flavor === 'entity-column' || ref.flavor === undefined)
-    return decimalColumn(dialect, ref) || (ref.storage === 'number' && ref.codec === undefined && dialect.decimalDigits)
+    return (decimalColumn(dialect, ref) && ref.holdsKey !== true) || (ref.storage === 'number' && ref.codec === undefined && dialect.decimalDigits)
       ? dialect.doubleRead(sql) : sql;
   const member = documentMemberOf(dialect, sql, ref);
   return kindOf(ref) === 'number' ? dialect.doubleRead(member) : member;

@@ -706,7 +706,8 @@ if (asyncLiveLeak.length)
 // Raised to 1,137,300 (measured 1137200): a lone uniqueItems tested in one closure with its array-class test (array 206), a leading type 'string' tested by the string keywords' own test (string 146, schema 111), add 463.
 // Raised to 1,137,800 (measured 1137719): a member held as jsonb on PostgreSQL read with a JSON null as SQL NULL, and the earlier read a table holds accepted at open (ddl 519).
 // Raised to 1,138,900 (measured 1138791): a member PostgreSQL holds as jsonb read back from the indexes beside it as a union that lists a container first (an array where a path read unguarded steps into it by an index), its loss row saying what was derived, and no container kind read beside an index that is not unique (introspect 1072).
-if (clientBytes > 1138900)
+// Raised to 1,139,800 (measured 1139726): a numeric key column marked at open, so a literal, a list and an external list compare with it by the interval of decimals that round to its double (store 736, plan 114, ddl 53, model 38, emit 37), add 935.
+if (clientBytes > 1139800)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 

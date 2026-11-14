@@ -764,10 +764,14 @@ is read as the double the engine holds (`doubleRead`) and found among the
 list's doubles (`inList`'s `double` kind) — the same answer, since a decimal
 lies in a double's interval exactly where it rounds to that double, hashed
 once a row where an interval test would cost one a row and number. An
-entity's key, and a column referencing one, keep the exact comparison: either
-may be declared as the allocation a database-allocated key takes (`bigserial`),
-whose type reads no fractional edge, and an integer column holds no integer in
-a safe integer's interval but the integer itself. An
+entity's key, and a column referencing one, keep the exact comparison where
+the open reads it as the allocation a database-allocated key takes
+(`bigserial`, `bigint`), whose type reads no fractional edge, and an integer
+column holds no integer in a safe integer's interval but the integer itself;
+one the open reads as `numeric` (`keyDigits`, which the store marks on the
+mapping from the types it read or created) holds a writer's digits and compares
+with a literal or a list as every other number column does, but with another
+column, and in an ordering, as a key. An
 infinity, which a store profile predicate binds where a
 query's own runs in the engine, is the interval of decimals at and past the
 midpoint between the largest double and 2^1024 (a tie that rounds to the
@@ -881,7 +885,9 @@ column by the other beside the equality of the doubles (`doubleEqual`: two
 decimals that round to one double lie within 5·10^-16 of either's magnitude,
 plus 10^-323), so either column's index still finds the other's rows. Two key
 columns — a key and a reference to one — compare exactly, through the key's
-index: either may be the `bigint` a database-allocated key takes.
+index: either may be the `bigint` a database-allocated key takes, and one the
+open reads as `numeric` compares so too, a listed loss for a key another
+writer re-keyed by other digits.
 
 **A member's column answers every kind, or its own.** A member the schema
 lets hold more than one type besides `null` (`['string', 'number']`) has, on

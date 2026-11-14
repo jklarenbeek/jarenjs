@@ -61,7 +61,7 @@ import { normalizeEventTime } from './live-time.js';
 import { createJobEngine, JOB_DEFAULTS, checkStopOptions } from './jobs.js';
 import { createOwnerLease, OWNER_LEASE_DEFAULT_MS, OWNER_LEASE_MIN_MS } from './owner.js';
 import { introspectModel, namespaceSchema } from './introspect.js';
-import { collectEntityRoots, entityRoot, intervalBounds } from './plan.js';
+import { collectEntityRoots, entityRoot, intervalBounds, keyHoldingColumns } from './plan.js';
 import {
   DERIVE_KINDS, PHYSICAL_KINDS, PRECISION_MIN, PRECISION_MAX, DIMS_MIN, DIMS_MAX,
   derivedValue, memberAt, storedMemberForm, registerDeriveFunctions,
@@ -667,6 +667,38 @@ function recordKeyConstraint(plan, row) {
 }
 
 /**
+ * Mark on the mapping each key, and each column referencing one, that the
+ * open read as held by the store's own number storage on an engine that
+ * holds a number by the digits a writer spelled (PostgreSQL's `numeric`)
+ * — not as the allocation a database-allocated key takes (`bigint`), which
+ * holds an integer and nothing between two: such a column (`keyDigits`)
+ * compares as every other number column does, against the interval of
+ * decimals that round to a double, and as a double beside another column.
+ * A table the open read no type of (a physical layout's) is left as it is.
+ * @param {any} mapping - `explainMapping(model)`, or null
+ * @param {Map<string, any>} entityPlans - each table's plan, its `heldTypes` read by the open
+ * @param {any} dialect
+ */
+function markKeyDigits(mapping, entityPlans, dialect) {
+  if (mapping === null || !dialect.decimalDigits) return;
+  /** @param {any} plan @param {string} column @param {string} storage */
+  const digits = (plan, column, storage) => (storage === 'integer' || storage === 'number')
+    && plan?.heldTypes?.get(column) === dialect.comparableColumnType(dialect.typeFor(storage, 'generated'));
+  for (const [name, entityMapping] of Object.entries(mapping.entities)) {
+    const plan = entityPlans.get(name);
+    const holding = keyHoldingColumns(entityMapping);
+    for (const column of entityMapping.columns)
+      if (column.codec === undefined && holding.has(column.name) && digits(plan, column.name, column.storage)) column.keyDigits = true;
+    for (const fk of entityMapping.foreignKeys)
+      if (digits(plan, fk.column, fk.referencesType)) fk.keyDigits = true;
+  }
+  for (const [name, join] of Object.entries(mapping.joinTables))
+    for (const side of [join.left, join.right])
+      if (digits(entityPlans.get(name), side.column, mapping.entities[side.entity].columns
+        .find((/** @type {any} */ column) => column.name === side.referencesKey)?.storage)) side.keyDigits = true;
+}
+
+/**
  * The name the catalog gives a physical table's primary-key constraint,
  * from the catalog rows the open already read (PostgreSQL's; none on SQLite).
  * The rows of a partitioned table live in partitions, each carrying a key
@@ -949,6 +981,9 @@ function ensureEntityShape(connection, entityPlans, entities, createsNothing) {
             // the text encoding its rule programs compare by is checked when the store opens
             return chain(runCreate(connection, plan), () => chain(statement.get([name]), (made) => {
               created.push(name);
+              // a table this open created holds each column as the plan declares it
+              plan.heldTypes = new Map(plan.expected.columns.map((/** @type {any} */ column) =>
+                [column.name, dialect.comparableColumnType(column.type)]));
               recordKeyConstraint(plan, made);
               return step(i + 1);
             }));
@@ -3265,6 +3300,7 @@ export function openStore(model, options) {
         chain(needsDeriveFunctions ? registerDeriveFunctions(connection) : null, () =>
         chain(ensureShape(connection, collections, plans, createsNothing), () =>
         chain(ensureEntityShape(connection, entityPlans, entities, createsNothing), () => {
+          markKeyDigits(mapping, entityPlans, dialect);
           // the rule programs the open found as an earlier release planned them
           earlierPrograms = Object.freeze([...entityPlans.values()].flatMap((plan) => {
             const verified = plan.physical ?? plan;
