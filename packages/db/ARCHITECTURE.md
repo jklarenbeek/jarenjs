@@ -261,7 +261,7 @@ stable code, an object and a detail, sorted, once:
 | `unmapped-column` | a generated column whose expression is not a member path this dialect wrote |
 | `unmapped-index` | an index over an expression, a predicate the condition reader does not read back exactly, or a column no member path explains |
 | `unmapped-constraint` | a CHECK that is not a complete scalar enum of a mapped entity column |
-| `unmapped-type` | a column type no schema type maps back from — the member is derived untyped |
+| `unmapped-type` | a column type no schema type maps back from — the member is derived untyped, or, over a PostgreSQL `jsonb` column with indexes beside it for scalar kinds, as `['object', 'array', ...those kinds, 'null']` |
 | `lossy-type` | a column type two schema types are stored as (SQLite `INTEGER`; PostgreSQL `numeric`, `smallint`) — the derived type is a choice |
 | `ambiguous-relation` | a foreign key says which entity it points at; which side declared the edge, whether the other holds many, and under what name, is not in the shape — the relation is declared on the parent (the child, where the key is unique) and reported here |
 
@@ -909,7 +909,11 @@ the union lists, keying it as `jsonb`, so the declared index and they together
 refuse a duplicate of every kind; the open verifies each one's uniqueness,
 condition and keys, accepts a table without them, `planColumnUpgrade` adds them
 (refusing `JD0023` first where the table holds duplicates one would refuse), and
-`introspect()` reads them back as the union's kinds. On SQLite a unique
+`introspect()` reads them back as the union's kinds — over the `jsonb` column of
+a member whose union lists a container first, which records no type, as
+`['object', 'array', ...the scalar kinds read, 'null']`, the union that plans
+that column and those indexes (`holdsEvery`), without `object` where a path read
+unguarded steps into the member by an index. On SQLite a unique
 index keys, after its columns, each member's kind where its column alone would
 key two kinds as one (`dialect.kindKeyTerm`, the planned index's `terms`):
 whether the member is a boolean where the column is untyped, since that column

@@ -1435,7 +1435,12 @@ several types records only how it reads: a member whose union lists `number`
 first comes back as a union of every kind behind `number` (`['number',
 'string', 'boolean', 'object', 'array', 'null']`, which plans the same read),
 any other untyped (`{}`), and either way the union's own types are an
-`unmapped-type` row. A many-to-many edge is declared on the first of its two
+`unmapped-type` row. On PostgreSQL the `jsonb` column of a member whose union
+lists a container first comes back, beside an index over it alone, as
+`['object', 'array', ...the scalar kinds its indexes beside key, 'null']`
+(without `object` where a path read unguarded steps into it by an index), which
+plans the same column and indexes; which container and whether `null` are an
+`unmapped-type` row too. A many-to-many edge is declared on the first of its two
 entities as the other's name pluralised, qualified by the join table's name
 where a column or another edge already has that member. A foreign key comes
 back as the typed property it is, with the edge declared beside it: a

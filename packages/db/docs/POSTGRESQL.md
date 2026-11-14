@@ -115,7 +115,18 @@ where the member stops holding the kind, and creates a unique one also beside
 a unique index it keeps when it gives the member the kind; beside a non-unique
 index it keeps it plans none — a table given the kind so is
 `planColumnUpgrade`'s to complete. `introspect()` reads each back as its kind of
-the member's union, after the column's type. A bulk load writes the extra
+the member's union, after the column's type. The `jsonb` column of a member
+whose union lists a container first records none of its types: beside an index
+over that member alone, `introspect()` reads the scalar kinds of the indexes
+beside it back as `['object', 'array', ...those kinds, 'null']` (`c_by_q$text`
+beside `c_by_q` over `['array', 'string']` reads back as `['object', 'array',
+'string', 'null']`), which plans the same column and indexes, so the model read
+back reopens the table; which container comes first, whether the union lists
+`null`, and the scalar kinds' order leave no trace in the catalog, and its
+`unmapped-type` row says so — but for a path read unguarded through the member
+by an index (`$.q[0]`), which says the container is an array: the union then
+lists no `object`, which would guard that path. Beside a composite such a member is keyed by its
+column, has none, and reads back untyped. A bulk load writes the extra
 indexes; a single write's cost is the round trip it already pays.
 
 A path step `#>` could read off the wrong kind of container is guarded. `#>`

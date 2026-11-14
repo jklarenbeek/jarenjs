@@ -244,4 +244,17 @@ describe('a PostgreSQL store over a member of several kinds', { skip: !PG_URL &&
       await context.pool.query(`SET search_path TO "${context.schema}"; DROP TABLE c`);
     }
   }));
+
+  it('reads no container kind beside an index that is not unique, which the plan never creates, and reports it', () => withPostgres(async (context) => {
+    const model = modelOf({ q: { type: ['string', 'object'] } }, [{ name: 'by_q', path: '$.q' }]);
+    await (await openStore(model, { driver: context.driver() })).close();
+    await context.pool.query(`SET search_path TO "${context.schema}"; CREATE INDEX "c_by_q$object" ON c ((CASE WHEN jsonb_typeof(("doc" #> '{"q"}')) = 'object' THEN ("doc" #> '{"q"}') END))`);
+    const connection = await context.driver().open();
+    try {
+      const { model: read, report } = await introspectModel(connection, { keys: { c: '/id' } });
+      assert.equal(read.collections.c.schema.properties.q.type, 'string');
+      assert.deepEqual(report.filter((/** @type {any} */ row) => row.object.includes('$')).map((/** @type {any} */ row) => `${row.code}:${row.object}`), ['unmapped-index:c.c_by_q$object']);
+    }
+    finally { await connection.close(); }
+  }));
 });

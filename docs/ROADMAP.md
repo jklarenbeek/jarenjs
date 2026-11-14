@@ -558,14 +558,14 @@ what each does is its own documentation's job
   keep the stated limit, or a design that keeps both (an exclusion constraint
   for uniqueness beside a B-tree over a bounded prefix that range and ordering
   seeks read with an exact recheck; a plan change, a minor).
-- [ ] **On PostgreSQL `introspect()` reads the indexes beside a unique index
-  over a container-first union back as no kind.** A member whose union lists a
-  container first (`['object', 'string']`) has a `jsonb` column and, beside a
-  unique index over it, an index per scalar kind (`c_by_q$text`);
-  `introspect()` leaves the member untyped and reports that index
-  `unmapped-index`, so the model it reads back does not reopen the table
-  (`JD0002`). Wanted: read those kinds back into the member's union, as for a
-  scalar-first member.
+- [ ] **`introspect()` reads a collection's conditional index back as no index.**
+  A collection index with `where` (MODEL-FORMAT §2) is read back as
+  `unmapped-index` on both engines, with the indexes beside it and, on SQLite,
+  its container key columns and triggers, so the model read back does not
+  reopen the table (`JD0002`), whatever the member's type; an entity's
+  conditional index is read back where its condition renders exactly.
+  Wanted: the collection condition read back as the entity's is, then the
+  indexes beside it.
 - [ ] **Replication over an entity expression index.** Replication orders an
   envelope's writes by unique columns, never by an expression index's key
   ([MODEL-FORMAT §7A](../packages/db/docs/MODEL-FORMAT.md)): a value the

@@ -389,16 +389,25 @@ function containerKeysHeld(dialect, table, paths, objects) {
  * of the member at one kind. Each member's type gains the kinds read so
  * after its column's, so the model read back plans the same indexes beside
  * it. A declared index that is not unique has them over a single member
- * path its read does not guard alone.
+ * path its read does not guard alone. An untyped member whose column holds
+ * every kind (`holdsEvery`) and that a single-member index keys has them for
+ * the scalar kinds of a union that lists a container first: such a member is
+ * typed `['object', 'array', ...those kinds, 'null']`, which plans the same
+ * column and indexes, since which container comes first and whether the
+ * union lists `null` leave no trace in the catalog — without `object` where
+ * a member path read unguarded steps into it by an index, which a union
+ * listing `object` would guard.
  * @param {any} dialect
  * @param {any} table
- * @param {Map<string, { type: string | string[] | undefined, segments: import('./dialect.js').JsonPathSegment[], open: boolean }>} paths
- *   - the members by their generated columns; a folded type is written back
+ * @param {Map<string, { type: string | string[] | undefined, segments: import('./dialect.js').JsonPathSegment[], open: boolean,
+ *   holdsEvery?: true }>} paths - the members by their generated columns; a folded type is written back
  * @returns {Set<string>} the names of the indexes read so
  */
 function kindIndexesOf(dialect, table, paths) {
   /** @type {Set<string>} */
   const read = new Set();
+  /** The scalar kinds read beside an index over a column that holds every kind. @type {Map<any, Set<string>>} */
+  const containerFirst = new Map();
   if (dialect.readBack?.indexKey === undefined) return read;
   const doc = dialect.quoteIdentifier(DOC_COLUMN);
   for (const index of table.indexes) {
@@ -414,12 +423,16 @@ function kindIndexesOf(dialect, table, paths) {
         const entry = entries[at];
         const term = beside.terms?.[at];
         const pathText = dialect.jsonPathText(entry.segments);
-        if (typeof term !== 'string' || entry.type === undefined || pathText === null) return undefined;
+        // a column that holds every kind has an index beside for a scalar kind of a union that
+        // lists a container first, over that member alone
+        const everyKind = entry.type === undefined && entry.holdsEvery === true && entries.length === 1;
+        if (typeof term !== 'string' || entry.type === undefined && !everyKind || pathText === null) return undefined;
         // the read under the guard the column carries, or the other spelling of a guarded path
         // (a table whose model a link declared the container the other way)
         const spellings = [entry.open ? entry.segments : undefined,
           ...(dialect.queryGuard(doc, entry.segments) === null ? [] : [entry.open ? undefined : entry.segments])];
-        return KIND_TYPES.find(([kind]) => spellings.some((unpinned) => dialect.readBack.indexKey(term,
+        // a container is a kind of a scalar column's member beside a unique index alone
+        return (everyKind || !index.unique ? SCALAR_KIND_TYPES : KIND_TYPES).find(([kind]) => spellings.some((unpinned) => dialect.readBack.indexKey(term,
           dialect.columnRead(doc, { pathText, kind, unpinned }), beside.conforming) === null))?.[0];
       });
       if (kinds.every((/** @type {any} */ kind) => kind !== undefined) && kinds.some((/** @type {any} */ kind) => kind !== null))
@@ -436,11 +449,23 @@ function kindIndexesOf(dialect, table, paths) {
       kinds.forEach((/** @type {any} */ kind, /** @type {number} */ at) => { if (kind !== null) held[at].add(kind); });
     }
     entries.forEach((/** @type {any} */ entry, /** @type {number} */ at) => {
+      if (entry.type === undefined) {
+        if (held[at].size > 0) containerFirst.set(entry, new Set([...(containerFirst.get(entry) ?? []), ...held[at]]));
+        return;
+      }
       for (const [kind, type] of KIND_TYPES) {
         const types = typeof entry.type === 'string' ? [entry.type] : entry.type;
         if (held[at].has(kind) && !types.includes(type) && columnKindFor(types[0]) !== kind) entry.type = [...types, type];
       }
     });
+  }
+  // which container the union lists first, and whether it lists null, leave no trace: it is
+  // typed with both, then the scalar kinds read, then null, which plans the same column and indexes;
+  // a member path that steps into it by an index unguarded says it is no object (`ddl.js` `unpinnedStep`)
+  for (const [entry, kinds] of containerFirst) {
+    const array = [...paths.values()].some((other) => !other.open && 'index' in (other.segments[entry.segments.length] ?? {})
+      && entry.segments.every((segment, at) => JSON.stringify(segment) === JSON.stringify(other.segments[at])));
+    entry.type = [...(array ? [] : ['object']), 'array', ...SCALAR_KIND_TYPES.filter(([kind]) => kinds.has(kind)).map(([, type]) => type), 'null'];
   }
   return read;
 }
@@ -477,6 +502,8 @@ function kindKeyedColumns(dialect, table, index, paths) {
 
 /** The schema type each kind an index beside a declared one seeks reads back as. */
 const KIND_TYPES = /** @type {const} */ ([['text', 'string'], ['number', 'number'], ['boolean', 'boolean'], ['object', 'object'], ['array', 'array']]);
+/** The scalar ones: the kinds an index beside one that is not unique, or one over a column that holds every kind, seeks. */
+const SCALAR_KIND_TYPES = KIND_TYPES.slice(0, 3);
 
 /**
  * Derive one collection. The schema it answers holds exactly the
@@ -498,7 +525,7 @@ function deriveCollection(dialect, table, report, keys, functionNames, objects, 
   const expressions = new Map(table.generated.map((entry) => [entry.name, entry.expression]));
 
   /** @type {Map<string, { path: string, type: string | string[] | undefined,
-   *   segments: import('./dialect.js').JsonPathSegment[], open: boolean }>} */
+   *   segments: import('./dialect.js').JsonPathSegment[], open: boolean, holdsEvery?: true }>} */
   const paths = new Map();
   /** @type {Map<string, any>} column -> the declared index expression */
   const computed = new Map();
@@ -507,6 +534,9 @@ function deriveCollection(dialect, table, report, keys, functionNames, objects, 
   /** The columns whose type two schema types share — reported once the
    * declared intervals are known, since a bound column's type is not a choice. */
   const lossy = [];
+  /** The member columns whose type maps back to no schema type. */
+  const untyped = [];
+  const comparable = dialect.comparableColumnType;
   for (const column of table.columns) {
     if (!column.generated) continue;
     const expression = expressions.get(column.name);
@@ -539,16 +569,23 @@ function deriveCollection(dialect, table, report, keys, functionNames, objects, 
         + 'member\'s numbers as doubles is that of a union that lists `number` first, whose other '
         + `types are not recorded, so the member is typed ${JSON.stringify(NUMBER_FIRST)}`));
     }
-    else if (type === undefined) {
-      report(loss('unmapped-type', `${table.name}.${column.name}`,
-        `the column type '${column.type}' maps back to no schema type, so the member `
-        + 'is left untyped'));
-    }
+    else if (type === undefined) untyped.push(column);
     else lossy.push(column);
-    paths.set(column.name, { path: modelPath(segments), type, segments, open });
+    paths.set(column.name, { path: modelPath(segments), type, segments, open,
+      ...(type === undefined && comparable(column.type) === comparable(dialect.typeFor(undefined, 'generated')) ? { holdsEvery: true } : {}) });
   }
 
   const besides = kindIndexesOf(dialect, table, paths);
+  // a column that holds every kind, typed once the indexes beside it are read
+  for (const column of untyped) {
+    const { type } = /** @type {any} */ (paths.get(column.name));
+    report(loss('unmapped-type', `${table.name}.${column.name}`, type === undefined
+      ? `the column type '${column.type}' maps back to no schema type, so the member is left untyped`
+      : `the column type '${column.type}' maps back to no schema type, and the indexes beside its index key the `
+        + `member's ${JSON.stringify(type.slice(type.indexOf('array') + 1, -1))} as those of a union that lists a container first, `
+        + (type[0] === 'array' ? 'an array, as a path read unguarded through it by an index says, and whether it lists null is not recorded'
+          : 'whose container and whether it lists null are not recorded') + `, so the member is typed ${JSON.stringify(type)}`));
+  }
   const containers = containerKeysHeld(dialect, table, paths, objects);
   for (const trigger of containers.triggers) owned.add(trigger);
   for (const column of table.columns) {
