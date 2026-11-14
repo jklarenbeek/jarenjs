@@ -74,7 +74,7 @@ and there is no fourth:
 Authored prose carries voice, never numbers — the site-document grammar refuses a
 digit in a card's `perf` line outright — and a claim that can be neither derived nor
 pinned is removed rather than left standing. Published losses stay published beside
-the wins: the contract benchmark's honest <!--fact:contract.dispatch.losses-->2.8–9.8x<!--/fact--> band against a harness-free rival,
+the wins: the contract benchmark's honest <!--fact:contract.dispatch.losses-->2.8–10.3x<!--/fact--> band against a harness-free rival,
 the JSONPath README figure that fell from 23.1× to 8.8× under one derivation, and each engine's
 conformance score includes the tests its competitor could not compile.
 

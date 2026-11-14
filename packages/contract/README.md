@@ -849,37 +849,37 @@ benchmark-figure gate so no number here is typed by hand:
 
 - **Route match**: the compiled matcher resolves the probe mix —
   static hot paths, variables, the static-beats-variable case, a miss —
-  at <!--fact:contract.match.vs-fmw-->179 ns per lookup vs find-my-way's 185 ns<!--/fact-->;
-  hono's TrieRouter is <!--fact:contract.match.vs-hono-->1.8x<!--/fact--> behind, and its RegExpRouter refuses this
+  at <!--fact:contract.match.vs-fmw-->179 ns per lookup vs find-my-way's 180 ns<!--/fact-->;
+  hono's TrieRouter is <!--fact:contract.match.vs-hono-->1.9x<!--/fact--> behind, and its RegExpRouter refuses this
   route table outright (a static path registered after a param sibling).
 - **Dispatch, in-process**: the whole pipeline (route, decode, validate
   input, handler, validate output,
-  serialize) is <!--fact:contract.dispatch.vs-fastify-->2.1–10.1x<!--/fact-->
+  serialize) is <!--fact:contract.dispatch.vs-fastify-->2.2–10.5x<!--/fact-->
   faster than Fastify driven through its own `inject` — a number that
   includes Fastify's mock-stream harness, which is why the next row
   exists.
 - **The honest loss**: the bare pieces Fastify composes — find-my-way +
   Ajv + fast-json-stringify, called directly with no harness and no
   response validation
-  — are <!--fact:contract.dispatch.losses-->2.8–9.8x<!--/fact--> faster than
-  this pipeline. The wide end of that band is <!--fact:contract.dispatch.widest-->the bare `{ok:true}` route, where the rival's compiled serializer answers in 232 ns<!--/fact--> and
+  — are <!--fact:contract.dispatch.losses-->2.8–10.3x<!--/fact--> faster than
+  this pipeline. The wide end of that band is <!--fact:contract.dispatch.widest-->the bare `{ok:true}` route, where the rival's compiled serializer answers in 225 ns<!--/fact--> and
   there is almost no work to amortize the pipeline against; on the
   request shapes with real bodies and validation the loss sits at the
   narrow end. That is the measured price of a total dispatch (every
   hostile input settles into a coded response) that also proves the
   server kept its own contract before a byte leaves. Over a real
-  loopback socket <!--fact:contract.loopback-->Fastify is 1.10–1.20× faster<!--/fact-->: the socket dominates
+  loopback socket <!--fact:contract.loopback-->Fastify is 1.09–1.22× faster<!--/fact-->: the socket dominates
   both.
 - **The optimization trigger**: on the heaviest in-process row (the
   5×4-body PUT), response serialization is <!--fact:contract.serialization.share-->11.1%<!--/fact-->
-  of the request and output validation is <!--fact:contract.validateOutput.share-->30%<!--/fact-->.
+  of the request and output validation is <!--fact:contract.validateOutput.share-->29%<!--/fact-->.
   A schema-driven serializer stays unscheduled while serialization is below
   25%: even making that stage free would save the whole request only
   the <!--fact:contract.serialization.share-->11.1%<!--/fact--> it takes. The suite republishes both shares on every measured run; for a large
   cached representation, validate on rebuild and serve by revision instead of
   paying validation on every request.
 - **Revision**: computing it
-  costs <!--fact:contract.revision.ms-->2.4 ms<!--/fact--> for the 123-operation
+  costs <!--fact:contract.revision.ms-->2.5 ms<!--/fact--> for the 123-operation
   contract, once per process.
 
 ## What it is not

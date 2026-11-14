@@ -231,7 +231,7 @@ behavior change.
 
 ## Performance
 
-From `npm run benchmark:contracts`, measured on <!--fact:contracts.measured-->2026-11-13 with Node v24.22.1, each engine in a process of its own and each figure the median of 3 processes<!--/fact-->
+From `npm run benchmark:contracts`, measured on <!--fact:contracts.measured-->2026-11-14 with Node v24.22.1, each engine in a process of its own and each figure the median of 3 processes<!--/fact-->
 (reproduce it yourself rather than trusting the table). The row that matters
 is the third — normalize, validate, and map errors, which is what a request
 handler does. Times are per operation; lower is better, and the fastest engine
@@ -242,9 +242,9 @@ of each scenario is in bold.
 <!--fact:contracts.adapter.table-->
 | Scenario | @jarenjs/validate | zod 4 | zod 3 | zod/mini | ajv |
 | --- | --- | --- | --- | --- | --- |
-| command — uuid, enum, date-time; no defaults | **1.2 µs** | 3.36 µs | 7.17 µs | 3.56 µs | 1.91 µs |
-| config — defaults and numeric coercion | **1.34 µs** | 2.37 µs | 5.76 µs | 2.79 µs | 1.68 µs |
-| collection — 50 nested records | 15.3 µs | **10.8 µs** | 24.4 µs | 18 µs | 20.9 µs |
+| command — uuid, enum, date-time; no defaults | **1.16 µs** | 3.17 µs | 7.22 µs | 3.58 µs | 1.9 µs |
+| config — defaults and numeric coercion | **1.31 µs** | 2.32 µs | 5.84 µs | 2.68 µs | 1.71 µs |
+| collection — 50 nested records | 15.8 µs | **11.1 µs** | 24.6 µs | 17.8 µs | 20.6 µs |
 <!--/fact-->
 
 The table is regenerated from each release's own measurement, so read it row
@@ -257,7 +257,7 @@ only the scenarios Jaren wins.
 
 The suite also times the same adapter row in a fresh process, before the
 engine has optimized anyone's code — the calls a short-lived handler makes
-before it is recycled. Read that table as well: <!--fact:contracts.firstCalls.versus-->over the first 1,000 calls Jaren is faster than zod 3 in every scenario, than zod 4 and zod/mini in 2 of 3, while they are faster on the collection scenario, and slower than ajv in every scenario; over the first 10,000 calls it is faster than zod 3 in every scenario, than zod 4 and zod/mini in 2 of 3, while they are faster on the collection scenario, and than ajv in 1 of 3, while ajv is faster on the command and config scenarios<!--/fact-->.
+before it is recycled. Read that table as well: <!--fact:contracts.firstCalls.versus-->over the first 1,000 calls Jaren is faster than zod 3 in every scenario, than zod 4 and zod/mini in 2 of 3, while they are faster on the collection scenario, and slower than ajv in every scenario; over the first 10,000 calls it is faster than zod 3 and zod/mini in every scenario, than zod 4 in 2 of 3, while zod 4 is faster on the collection scenario, and than ajv in 1 of 3, while ajv is faster on the command and config scenarios<!--/fact-->.
 
 Compilation is paid once per process. On the compile table <!--fact:contracts.compile.versus-->zod 4, zod 3 and zod/mini build a schema faster than Jaren in every scenario, and ajv builds one slower in every scenario<!--/fact-->.
 A schema with defaults costs Jaren more again, because it checks each default
