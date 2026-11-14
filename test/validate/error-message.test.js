@@ -256,6 +256,45 @@ describe("The 'errorMessage' keyword", () => {
       assert.strictEqual(error.params.limit, 5);
       assert.strictEqual(error.msgid, 'minLength');
     });
+
+    it("marks the schema's own text, so localizeErrors writes the author's words", () => {
+      const catalog = compileMessageCatalog({ type: 'moet van het juiste type zijn' });
+      const validate = compileCollecting({
+        type: 'object',
+        properties: {
+          a: { type: 'number', errorMessage: 'Author text' },
+          b: { type: 'number', errorMessage: { $msgid: 'checkout.b', message: 'Fallback text' } },
+          c: { type: 'number' },
+        },
+      }, { messages: false });
+      const errors = validate({ a: 'x', b: 'x', c: 'x' }).errors;
+      assert.deepStrictEqual(errors.map((e) => e.message), ['', '', ''], 'conversion still renders nothing');
+      assert.deepStrictEqual(errors.map((e) => e.toJSON().inlineMessage), [true, 'fallback', undefined]);
+      localizeErrors(errors, catalog);
+      assert.deepStrictEqual(errors.map((e) => e.message), ['Author text', 'Fallback text', 'moet van het juiste type zijn']);
+      // a catalog that carries the fallback's msgid renders it, as with messages on
+      const again = validate({ b: 'x' }).errors;
+      localizeErrors(again, compileMessageCatalog({ 'checkout.b': 'B moet een getal zijn' }));
+      assert.strictEqual(again[0].message, 'B moet een getal zijn');
+    });
+
+    it('a copy made before localizing never had the text, so it speaks its keyword', () => {
+      const validate = compileCollecting({
+        type: 'object',
+        properties: {
+          a: { type: 'number', errorMessage: 'Author text' },
+          b: { type: 'number', errorMessage: { $msgid: 'checkout.b', message: 'Fallback text' } },
+        },
+      }, { messages: false });
+      const copies = JSON.parse(JSON.stringify(validate({ a: 'x', b: 'x' }).errors));
+      localizeErrors(copies, compileMessageCatalog({ type: 'moet van het juiste type zijn' }));
+      assert.deepStrictEqual(copies.map((/** @type {any} */ e) => [e.inlineMessage, e.message]),
+        [[true, 'moet van het juiste type zijn'], ['fallback', 'moet van het juiste type zijn']]);
+      // a catalog carrying the fallback's msgid still renders it on a copy
+      const again = JSON.parse(JSON.stringify(validate({ b: 'x' }).errors));
+      localizeErrors(again, compileMessageCatalog({ 'checkout.b': 'B moet een getal zijn' }));
+      assert.strictEqual(again[0].message, 'B moet een getal zijn');
+    });
   });
 
   describe('compile-time validation', () => {

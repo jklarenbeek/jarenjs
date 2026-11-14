@@ -8,7 +8,9 @@
  */
 
 import { deriveSuite, draftConformanceTable, SUITES } from '../boundaries/bench.js';
-import { formViewFor, formLabelsFor, referencedSchemas } from '../boundaries/validator.js';
+import { formViewFor, formLabelsFor, referencedSchemas, catalogFor } from '../boundaries/validator.js';
+import { SITE_LANGUAGES } from '../boundaries/lang.js';
+import { siteText, sitePackOf } from '../messages.js';
 import { HOME_CONTENT } from '../content/home.js';
 import { HERO_DEMO } from '../content/hero.js';
 import { DOCS_SECTIONS } from '../content/docs.js';
@@ -200,13 +202,26 @@ function heroWith(hero, headline) {
 }
 
 /**
+ * The header's language switch: every language the site offers, named in
+ * its own language, the current one selected, its label in the site's words.
+ * @param {any} state
+ */
+function languageSwitch(state) {
+  const current = state.lang ?? 'en';
+  return {
+    label: siteText(sitePackOf(state))('site/lang/label'),
+    choices: SITE_LANGUAGES.map(({ code, name }) => ({ value: code, label: name, lang: code, selected: code === current })),
+  };
+}
+
+/**
  * @param {any} state
  * @returns {any} the view input document
  */
 export function viewModel(state) {
   const page = state.route.page;
   /** @type {any} */
-  const ui = { nav: deriveNav(page, state.navOpen) };
+  const ui = { nav: deriveNav(page, state.navOpen), lang: languageSwitch(state) };
 
   if (page === 'home') ui.home = homeContent(state);
   if (page === 'benchmarks') ui.bench = benchPage(state);
@@ -218,9 +233,10 @@ export function viewModel(state) {
     ui.projectIde = ideModel(state.ide.name, state.ide.names, state.ide.shared);
   }
   if (page === 'play') {
-    // the panes read the reader's message language, as the run does
-    const play = withPlayLocale(state.play);
-    ui.play = playComponent.viewModel({ play });
+    // the panes read the site language, as the run does
+    const play = withPlayLocale(state.play, state.lang);
+    // a language whose pack is still loading has no catalog yet: English, never ids
+    ui.play = playComponent.viewModel({ play }, { messages: catalogFor(state.lang) });
     // the validate engine's data pane can toggle to a schema-generated form;
     // the form tree is built here (it needs @jarenjs/forms, a host dep) from
     // the schema source + the structured buffer, and mounted at `dataForm`;

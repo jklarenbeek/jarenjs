@@ -82,7 +82,17 @@ arguments (its code) or answers nothing (the kernel's `null`, the
 operator's empty sequence) the card says so instead (`not compared —
 $query refuses with JQ2001`).
 
-Answers that changed (upgrade notes): a host `validate` runner now receives a
+Every word the playground writes is a message id of `playMessagesEn`
+(`play/action/save`, `play/panel/output`, `play/where/root`, …): pass a
+compiled locale catalog as `messages` to `runExample`, to
+`createPlayComponent`, or to `viewModel(state, { messages })`, and the
+chrome, the result panels and the playground's own refusals speak it, with
+English for any id it lacks ([PLAY-FORMAT §5](./docs/PLAY-FORMAT.md#5-host-injected-seams-the-dependency-light-contract)).
+
+Answers that changed (upgrade notes): the JSON Schema engine's `Messages`
+choices are English followed by `@jarenjs/locales`' `LOCALE_NAMES`, in that
+list's order (Português now before Deutsch), and so are its per-language
+examples; the engine's `lead` line renders with `lang="en"`. A host `validate` runner now receives a
 fourth argument, the parsed referenced schemas (`[]` when the pane is empty),
 and must register them before compiling; a runner that ignores it still
 answers as before. `runExample` answers `unknown engine` for

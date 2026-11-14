@@ -14,9 +14,10 @@ import * as assert from 'node:assert';
 import { encodeShare } from '@jarenjs/app';
 import { compileMessageCatalog } from '@jarenjs/validate';
 import { formChromeLabels } from '@jarenjs/forms';
+import { playText } from '@jarenjs/play';
 import * as packs from '@jarenjs/locales';
 import { createSiteApp } from '../../packages/website/src/app/createSiteApp.js';
-import { LOCALES } from '../../packages/website/src/boundaries/validator.js';
+import { LOCALES, catalogFor } from '../../packages/website/src/boundaries/validator.js';
 import { parseHash } from '../../packages/website/src/lib/route.js';
 import { createStubHost, fire } from '../view/dom.stub.js';
 
@@ -53,22 +54,37 @@ const playRoot = (c) => find(c, (n) => n.getAttribute?.('class') === 'jplay');
 /** The validate engine's Messages select. @param {any} c */
 const messages = (c) => find(playRoot(c), (n) => n.tagName === 'select'
   && (n.childNodes ?? []).some((/** @type {any} */ o) => o.getAttribute?.('value') === 'de'));
-/** @param {any} c @param {string} locale */
-const choose = (c, locale) => fire(messages(c), 'change', { target: { value: locale } });
+/**
+ * Pick a language in the Messages select and wait for its pack, which
+ * loads on demand (English renders until it lands).
+ * @param {any} app @param {any} c @param {string} locale
+ */
+async function choose(app, c, locale) {
+  fire(messages(c), 'change', { target: { value: locale } });
+  await packOf(app, locale);
+}
+
+/** Wait until a language's pack has landed on this page. @param {any} app @param {string | null} locale */
+async function packOf(app, locale) {
+  for (let i = 0; i < 200 && locale !== 'en' && locale !== null && app.getState().packs?.[locale] !== true && catalogFor(locale) === undefined; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
 /** The message cells of the errors table (every second cell; the first is the path). @param {any} c */
 const messageCells = (c) => findAll(playRoot(c), (n) => n.tagName === 'td').map(textOf).filter((_, i) => i % 2 === 1);
 /** @param {any} app @param {string} key @param {string} value */
 const source = (app, key, value) => app.dispatch('play/source', { key }, { target: { value } });
 /** @param {any} app @param {string} value */
 const data = (app, value) => app.dispatch('play/data', { key: 'data' }, { target: { value } });
-/** @param {any} c */
-const openForm = (c) => fire(find(playRoot(c), (n) => n.tagName === 'button' && n.childNodes?.[0]?.nodeValue === 'Form'), 'click', {});
+/** The data pane's Form toggle, whatever language it speaks. @param {any} c */
+const openForm = (c) => fire(find(playRoot(c), (n) => n.tagName === 'button'
+  && FORM_WORDS.has(n.childNodes?.[0]?.nodeValue)), 'click', {});
 
 /** A German run of the stock invalid-data example: the reader chose Deutsch. */
-function german(options = {}) {
+async function german(options = {}) {
   const site = mountSite(options);
   site.app.dispatch('play/example', 'validate-invalid');
-  choose(site.container, 'de');
+  await choose(site.app, site.container, 'de');
   return site;
 }
 
@@ -88,42 +104,45 @@ const ENGLISH_SESSION = {
  */
 const PACK = { nl: packs.nl, fr: packs.fr, es: packs.es, pt: packs.pt, de: packs.de, ja: packs.ja, ko: packs.ko, 'zh-tw': packs.zhTW, ru: packs.ru, tr: packs.tr, ar: packs.ar };
 
+/** The Form toggle's word in every language. */
+const FORM_WORDS = new Set(['Form', ...Object.values(PACK).map((pack) => playText(compileMessageCatalog(pack))('play/layout/form'))]);
+
 describe('website — Play keeps the message language the reader chose', () => {
-  it('through another example', () => {
-    const { app, container } = german();
+  it('through another example', async () => {
+    const { app, container } = await german();
     app.dispatch('play/example', 'validate-user');
     data(app, '{"name":"Al"}');
-    assert.strictEqual(app.getState().play.locale, 'de');
+    assert.strictEqual(app.getState().lang, 'de');
     assert.deepStrictEqual(messageCells(container), [GERMAN_REQUIRED]);
     const selected = (messages(container).childNodes ?? []).filter((/** @type {any} */ o) => o.getAttribute?.('selected') != null);
     assert.deepStrictEqual(selected.map((/** @type {any} */ o) => o.getAttribute('value')), ['de'], 'the select shows the language in use');
   });
 
-  it('through another engine and back', () => {
-    const { app, container } = german();
+  it('through another engine and back', async () => {
+    const { app, container } = await german();
     app.dispatch('play/example', 'path-authors');
     app.dispatch('play/example', 'validate-invalid');
     assert.ok(messageCells(container).includes('darf nicht weniger als 2 Zeichen enthalten'), messageCells(container).join(' | '));
   });
 
-  it('through a deep link', () => {
-    const { app, container, go } = german();
+  it('through a deep link', async () => {
+    const { app, container, go } = await german();
     go('#/play?example=validate-user');
     assert.strictEqual(app.getState().play.exampleId, 'validate-user', 'the link loaded its example');
     data(app, '{"name":"Al"}');
     assert.deepStrictEqual(messageCells(container), [GERMAN_REQUIRED]);
   });
 
-  it('through New', () => {
-    const { app, container } = german();
+  it('through New', async () => {
+    const { app, container } = await german();
     app.dispatch('play/new');
     source(app, 'schema', JSON.stringify({ type: 'object', required: ['email'] }));
     data(app, '{}');
     assert.deepStrictEqual(messageCells(container), [GERMAN_REQUIRED]);
   });
 
-  it('through opening a session saved in English', () => {
-    const { app, container } = german();
+  it('through opening a session saved in English', async () => {
+    const { app, container } = await german();
     app.dispatch('play/loaded-session', { ...ENGLISH_SESSION, name: 'english' });
     app.dispatch('play/save');
     app.dispatch('play/example', 'validate-invalid');
@@ -133,43 +152,51 @@ describe('website — Play keeps the message language the reader chose', () => {
   });
 
   it('through an imported file', async () => {
-    const { app, container } = german({ openFile: () => Promise.resolve({ name: 'f.json', text: JSON.stringify(ENGLISH_SESSION) }) });
+    const { app, container } = await german({ openFile: () => Promise.resolve({ name: 'f.json', text: JSON.stringify(ENGLISH_SESSION) }) });
     app.dispatch('play/import');
     await new Promise((resolve) => setTimeout(resolve, 0));
     assert.deepStrictEqual(messageCells(container), [GERMAN_REQUIRED]);
   });
 
-  it('through a share link', () => {
-    const { container, go } = german();
+  it('through a share link', async () => {
+    const { container, go } = await german();
     go(`#/play?s=${encodeShare(ENGLISH_SESSION)}`);
     assert.deepStrictEqual(messageCells(container), [GERMAN_REQUIRED]);
   });
 
-  it('an example made to show a language sets it, and it then stays', () => {
-    const { app, container } = german();
+  it('an example made to show a language shows it for its own run, and never sets the site language', async () => {
+    const { app, container } = await german();
     app.dispatch('play/example', 'validate-locale-fr');
-    assert.strictEqual(app.getState().play.locale, 'fr');
-    app.dispatch('play/example', 'validate-invalid');
+    await packOf(app, 'fr');
+    assert.strictEqual(app.getState().lang, 'de', 'the reader keeps their language');
     assert.ok(messageCells(container).includes('doit être >= 13'), messageCells(container).join(' | '));
+    const selected = (messages(container).childNodes ?? []).filter((/** @type {any} */ o) => o.getAttribute?.('selected') != null);
+    assert.deepStrictEqual(selected.map((/** @type {any} */ o) => o.getAttribute('value')), ['fr'], 'the Messages select shows the example\'s language');
+    app.dispatch('play/example', 'validate-invalid');
+    assert.ok(messageCells(container).includes('muss >= 13 sein'), 'the next example returns to the site language');
   });
 
-  it('a share link opened before any choice shows its own language, which then stays', () => {
+  it("a share link opened before any choice renders in the reader's language, and sets none", async () => {
     const { app, container } = mountSite({ hash: `#/play?s=${encodeShare({ ...ENGLISH_SESSION, config: { locale: 'fr' } })}` });
-    assert.deepStrictEqual(messageCells(container), ["doit contenir la propriété obligatoire 'email'"]);
+    await packOf(app, 'fr');
+    assert.strictEqual(app.getState().lang, null);
+    assert.deepStrictEqual(messageCells(container), ["must have required property 'email'"]);
     app.dispatch('play/example', 'validate-invalid');
-    assert.ok(messageCells(container).includes('doit être >= 13'), messageCells(container).join(' | '));
+    assert.ok(messageCells(container).includes('must be >= 13'), messageCells(container).join(' | '));
   });
 
-  it('a share link carries the language on screen', () => {
+  it('a share link carries no language: it opens in its reader\'s', async () => {
     /** @type {string[]} */
     const shared = [];
-    const { app } = german({ share: (/** @type {string} */ h) => { shared.push(h); return h; } });
-    app.dispatch('play/example', 'validate-user');
+    const { app } = await german({ share: (/** @type {string} */ h) => { shared.push(h); return h; } });
+    assert.strictEqual(app.getState().play.config.locale, 'de', 'the Messages select wrote its config');
     app.dispatch('play/share');
     assert.strictEqual(shared.length, 1, 'Share produced a link');
+    const token = new URLSearchParams(shared[0].split('?')[1]).get('s');
+    const { decodeShare } = await import('@jarenjs/app');
+    assert.strictEqual(/** @type {any} */ (decodeShare(String(token))).config.locale, undefined, 'the session names no language');
     const fresh = mountSite({ hash: shared[0] });
-    fresh.app.dispatch('play/data', { key: 'data' }, { target: { value: '{"name":"Al"}' } });
-    assert.deepStrictEqual(messageCells(fresh.container), [GERMAN_REQUIRED]);
+    assert.ok(messageCells(fresh.container).includes('must be >= 13'), 'an English reader reads English');
   });
 });
 
@@ -177,10 +204,10 @@ describe('website — Play shows the text a schema wrote, in every language', ()
   const inline = JSON.stringify({ type: 'object', properties: { age: { type: 'integer', errorMessage: 'age must be a whole number' } } });
   const fallback = JSON.stringify({ type: 'object', properties: { age: { type: 'integer', errorMessage: { $msgid: 'app.age', message: 'age must be a whole number' } } } });
   for (const locale of LOCALES) {
-    it(`${locale}: an inline errorMessage and a $msgid fallback stay as written`, () => {
+    it(`${locale}: an inline errorMessage and a $msgid fallback stay as written`, async () => {
       const { app, container } = mountSite();
       app.dispatch('play/example', 'validate-invalid');
-      choose(container, locale);
+      await choose(app, container, locale);
       source(app, 'schema', inline);
       data(app, '{"age":"x"}');
       assert.deepStrictEqual(messageCells(container), ['age must be a whole number'], 'inline text');
@@ -199,10 +226,10 @@ describe("website — Play's generated form speaks the chosen language", () => {
     return { names, hints };
   };
   for (const locale of LOCALES) {
-    it(`${locale}: the add and remove buttons and the JSON hint come from the pack`, () => {
+    it(`${locale}: the add and remove buttons and the JSON hint come from the pack`, async () => {
       const { app, container } = mountSite();
       app.dispatch('play/example', 'validate-invalid');
-      choose(container, locale);
+      await choose(app, container, locale);
       source(app, 'schema', schema);
       data(app, '{"tags":["a"]}');
       openForm(container);
@@ -214,8 +241,8 @@ describe("website — Play's generated form speaks the chosen language", () => {
     });
   }
 
-  it('the form keeps the chosen language through another example', () => {
-    const { app, container } = german();
+  it('the form keeps the chosen language through another example', async () => {
+    const { app, container } = await german();
     app.dispatch('play/example', 'validate-user');
     source(app, 'schema', schema);
     data(app, '{"tags":["a"]}');
@@ -229,14 +256,14 @@ describe("website — Play's generated form speaks the chosen language", () => {
     assert.deepStrictEqual(alerts, ['Muss mindestens 2 Zeichen enthalten (derzeit 1)']);
   });
 
-  it('a language switch with the form open renames its chrome', () => {
+  it("a language switch with the form open renames its chrome", async () => {
     const { app, container } = mountSite();
     app.dispatch('play/example', 'validate-invalid');
     source(app, 'schema', schema);
     data(app, '{"tags":["a"]}');
     openForm(container);
     assert.ok(chrome(container).names.has('Add item'));
-    choose(container, 'nl');
+    await choose(app, container, 'nl');
     const nl = formChromeLabels(compileMessageCatalog(packs.nl));
     assert.ok(chrome(container).names.has(nl.addItem), [...chrome(container).names].join(' | '));
     assert.ok(!chrome(container).names.has('Add item'));

@@ -215,6 +215,13 @@ ul { margin: 0.4rem 0; padding-left: 1.3rem; }
   border-radius: var(--radius-sm); width: 2.75rem; height: 2.75rem; cursor: pointer; font-size: 0.95rem;
 }
 .theme-toggle:hover { background: var(--surface); }
+/* the site language switch: the theme toggle's frame, a native select */
+.lang-switch {
+  border: 1px solid var(--border); background: transparent; color: var(--fg);
+  border-radius: var(--radius-sm); height: 2.75rem; padding-inline: var(--space-2);
+  cursor: pointer; font-size: 0.85rem; max-inline-size: 9rem;
+}
+.lang-switch:hover { background: var(--surface); }
 
 /* footer (the page's bottom padding provides the gap above it) */
 .footer { border-top: 1px solid var(--border); }

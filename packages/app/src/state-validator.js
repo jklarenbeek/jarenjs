@@ -32,12 +32,15 @@ const POINTER_CACHE_LIMIT = 1024;
 
 /**
  * The verdict for a value that is not JSON, in the shape a schema
- * validator answers, so `JA2005`'s `detail` reads the same either way.
+ * validator answers, so `JA2005`'s `detail` reads the same either way —
+ * and renders the same way: `app/not-json` is an entry of
+ * `@jarenjs/validate`'s `messagesEn` and of every `@jarenjs/locales`
+ * pack, so `localizeErrors` speaks it in the reader's language.
  * @param {string} pointer
  */
 const notJson = (pointer) => ({
   valid: false,
-  errors: [{ instancePath: pointer, message: 'is not a JSON value' }],
+  errors: [{ instancePath: pointer, keyword: 'json', msgid: 'app/not-json', params: {}, message: 'is not a JSON value' }],
 });
 
 /**

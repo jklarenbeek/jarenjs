@@ -18,6 +18,8 @@ import { parseHash } from './lib/route.js';
 import { createHashRouteSubscription } from '@jarenjs/app/routes';
 import { createMotion, prefersReducedMotion } from './lib/motion.js';
 import { readTheme, writeTheme } from './lib/theme.js';
+import { readLang, writeLang } from './lib/lang.js';
+import { isSiteLanguage, languageDir, warmSitePacks } from './boundaries/lang.js';
 
 const BASE = import.meta.env.BASE_URL;
 /** The build-generated site data, by the name the app asks for it under. */
@@ -54,6 +56,17 @@ const jsonStore = (key) => ({
 const theme = readTheme(() => localStorage, () => matchMedia('(prefers-color-scheme: dark)').matches);
 document.documentElement.classList.toggle('dark', theme === 'dark');
 
+// the site language: a `?lang=` link wins over the stored choice (the
+// route applies it), the stored choice over English
+const storedLang = readLang(() => localStorage);
+const lang = isSiteLanguage(storedLang) ? storedLang : null;
+/** Put a language on the document, so a screen reader and the layout follow it. @param {string} code @param {'ltr' | 'rtl'} dir */
+const putLang = (code, dir) => {
+  document.documentElement.lang = code;
+  document.documentElement.dir = dir;
+};
+if (lang !== null) putLang(lang, languageDir(lang));
+
 // Diagrams render complete; hydration only ADDS pan/zoom to them, so it runs
 // after the DOM settles rather than as part of any frame. `md.hydrate` is
 // idempotent — it skips an element whose content hash it has already wired —
@@ -66,6 +79,13 @@ const app = createSiteApp({
   node: appNode,
   document,
   initialTheme: theme,
+  initialLang: lang,
+  // a link param that applies once (`?lang=`) leaves the address bar
+  replaceHash: (hash) => history.replaceState(history.state, '', `${location.pathname}${location.search}${hash}`),
+  applyLang: (code, dir) => {
+    putLang(code, dir);
+    writeLang(() => localStorage, code);
+  },
   fetchJson: (name) =>
     fetch(`${BASE}benchmarks/${encodeURIComponent(name)}.json`).then((response) => (
       response.ok ? response.json() : Promise.reject(new Error(String(response.status)))
@@ -229,5 +249,10 @@ document.addEventListener('click', (event) => {
 if (import.meta.env.PROD && 'serviceWorker' in navigator) {
   addEventListener('load', () => {
     navigator.serviceWorker.register(`${BASE}sw.js`, { scope: BASE }).catch(() => {});
+    // the service worker caches what it serves: once it controls the page,
+    // fetch every site language pack once, on idle, so each is there offline
+    const warm = () => (window.requestIdleCallback ?? setTimeout)(() => { warmSitePacks().catch(() => {}); });
+    if (navigator.serviceWorker.controller) warm();
+    else navigator.serviceWorker.addEventListener('controllerchange', warm, { once: true });
   });
 }

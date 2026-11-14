@@ -215,12 +215,12 @@ and the bundle is the byte count the tree-shaking probe builds.
 | [FLOW-PEN.md](FLOW-PEN.md) | `./flow` | 1,046 | 16 | 7 | 3 | 30,308 B |
 | [APP-PEN.md](APP-PEN.md) | `./app` | 1,381 | 25 | 8 | 4 | 62,634 B |
 | [FORMS-PEN.md](FORMS-PEN.md) | `./forms` | 947 | 18 | 6 | 3 | 51,847 B |
-| [MESSAGES-PEN.md](MESSAGES-PEN.md) | `./messages` | 105 | 9 | 2 | 1 | 15,179 B |
+| [MESSAGES-PEN.md](MESSAGES-PEN.md) | `./messages` | 105 | 9 | 2 | 1 | 15,197 B |
 | [JTLT-PEN.md](JTLT-PEN.md) | `./jtlt` | 83 | 13 | 1 | 2 | 25,628 B |
 | [PROJECT-PEN.md](PROJECT-PEN.md) | `./project` | 84 | 9 | 1 | 1 | 5,240 B |
 | [CHARTS-PEN.md](CHARTS-PEN.md) | `./charts` | 100 | 21 | 1 | 1 | 7,116 B |
-| [DB-CLIENT.md](DB-CLIENT.md) | `./db` | 1,489 | 54 | 5 | 2 | 1,140,889 B |
-| [FORMULA-PEN.md](FORMULA-PEN.md) | `./formula` | 41 | 2 | — | — | 14,171 B |
+| [DB-CLIENT.md](DB-CLIENT.md) | `./db` | 1,489 | 54 | 5 | 2 | 1,141,081 B |
+| [FORMULA-PEN.md](FORMULA-PEN.md) | `./formula` | 41 | 2 | — | — | 14,252 B |
 | **16 documents** | | **14,136** | **382** | **75** | | |
 <!--/fact-->
 
@@ -274,12 +274,12 @@ it and each document publishes it. The rounded column is what
 | `@jarenjs/linq/flow` | [FLOW-PEN.md](FLOW-PEN.md) | 30,308 B | 30 kB |
 | `@jarenjs/linq/app` | [APP-PEN.md](APP-PEN.md) | 62,634 B | 63 kB |
 | `@jarenjs/linq/forms` | [FORMS-PEN.md](FORMS-PEN.md) | 51,847 B | 52 kB |
-| `@jarenjs/linq/messages` | [MESSAGES-PEN.md](MESSAGES-PEN.md) | 15,179 B | 15 kB |
+| `@jarenjs/linq/messages` | [MESSAGES-PEN.md](MESSAGES-PEN.md) | 15,197 B | 15 kB |
 | `@jarenjs/linq/jtlt` | [JTLT-PEN.md](JTLT-PEN.md) | 25,628 B | 26 kB |
 | `@jarenjs/linq/project` | [PROJECT-PEN.md](PROJECT-PEN.md) | 5,240 B | 5 kB |
 | `@jarenjs/linq/charts` | [CHARTS-PEN.md](CHARTS-PEN.md) | 7,116 B | 7 kB |
-| `@jarenjs/linq/db` | [DB-CLIENT.md](DB-CLIENT.md) | 1,140,889 B | 1141 kB |
-| `@jarenjs/linq/formula` | [FORMULA-PEN.md](FORMULA-PEN.md) | 14,171 B | 14 kB |
+| `@jarenjs/linq/db` | [DB-CLIENT.md](DB-CLIENT.md) | 1,141,081 B | 1141 kB |
+| `@jarenjs/linq/formula` | [FORMULA-PEN.md](FORMULA-PEN.md) | 14,252 B | 14 kB |
 <!--/fact-->
 
 Read these as prices, not as scores. `./db` is the largest by an order of

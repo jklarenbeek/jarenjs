@@ -79,9 +79,9 @@ describe('createJsonStateValidator — what changed, not how large the state is'
     assert.strictEqual(validate({ a: [1, 'x'] }), true, 'the boot context');
     // the detail names where the offending value sits, under the location checked
     assert.deepStrictEqual(validate({ a: new Map() }, { changes: null }),
-      { valid: false, errors: [{ instancePath: '/a', message: 'is not a JSON value' }] });
+      { valid: false, errors: [{ instancePath: '/a', keyword: 'json', msgid: 'app/not-json', params: {}, message: 'is not a JSON value' }] });
     assert.deepStrictEqual(validate({ a: NaN }, { changes: [''] }),
-      { valid: false, errors: [{ instancePath: '/a', message: 'is not a JSON value' }] });
+      { valid: false, errors: [{ instancePath: '/a', keyword: 'json', msgid: 'app/not-json', params: {}, message: 'is not a JSON value' }] });
     assert.strictEqual(validate({ a: {} }, { changes: ['/a/gone'] }), true);
   });
 
@@ -90,7 +90,7 @@ describe('createJsonStateValidator — what changed, not how large the state is'
     const rows = [{ id: 0 }, { id: 1 }, { id: 2 }];
     const state = { rows: [rows[0], new Date(0), rows[1], rows[2]] };
     assert.deepStrictEqual(validate(state, { changes: ['/rows'] }),
-      { valid: false, errors: [{ instancePath: '/rows/1', message: 'is not a JSON value' }] });
+      { valid: false, errors: [{ instancePath: '/rows/1', keyword: 'json', msgid: 'app/not-json', params: {}, message: 'is not a JSON value' }] });
     assert.deepStrictEqual(validate({ a: { 'b/c': [1, { d: undefined }] } }, { changes: null }).errors[0].instancePath,
       '/a/b~1c/1/d', 'every segment encoded');
     const loop = /** @type {any} */ ({ x: { y: {} } });
@@ -114,8 +114,19 @@ describe('createJsonStateValidator — what changed, not how large the state is'
     app.dispatch('bump');
     app.dispatch('stamp', '1970-01-01T00:00:00.000Z');
     assert.deepStrictEqual(reported.map((error) => [error.code, error.detail]),
-      [['JA2005', [{ instancePath: '/at', message: 'is not a JSON value' }]]]);
+      [['JA2005', [{ instancePath: '/at', keyword: 'json', msgid: 'app/not-json', params: {}, message: 'is not a JSON value' }]]]);
     assert.deepStrictEqual(app.getState(), { at: '1970-01-01T00:00:00.000Z', n: 1 });
     app.destroy();
+  });
+});
+
+describe('createJsonStateValidator — the verdict localizes', () => {
+  it("names its message as a validator error does, so a locale pack renders it", async () => {
+    const { localizeErrors, compileMessageCatalog, messagesEn } = await import('@jarenjs/validate');
+    const { nl } = await import('@jarenjs/locales');
+    const verdict = /** @type {any} */ (createJsonStateValidator()({ a: new Map() }, { changes: null }));
+    assert.strictEqual(verdict.errors[0].message, messagesEn['app/not-json'], 'the English is the catalog entry');
+    localizeErrors(verdict.errors, compileMessageCatalog(nl));
+    assert.strictEqual(verdict.errors[0].message, nl['app/not-json']);
   });
 });

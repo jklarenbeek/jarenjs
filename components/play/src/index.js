@@ -16,11 +16,16 @@
 
 import { ENGINE_LIST } from './engines.js';
 import { EXAMPLE_LIST } from './examples.js';
+import { playText } from './messages.js';
+
+export { playMessagesEn, playText } from './messages.js';
 
 /**
  * @typedef {Object} EnginePane
  * @property {string} key - the pane's id (e.g. 'selector', 'data')
- * @property {string} label
+ * @property {string} label - the English label
+ * @property {string} [msgid] - the label's message id ({@link playMessagesEn});
+ *   absent for a name no language translates (XQuery, CSV)
  * @property {'code' | 'text'} [control]
  */
 
@@ -30,8 +35,11 @@ import { EXAMPLE_LIST } from './examples.js';
  * CSV strict vs repair). Its value lives in the host's `config` slice; what
  * a switch does to the source is {@link switchOption}'s.
  * @property {string} key
- * @property {string} label
- * @property {Array<{ value: string, label: string }>} choices
+ * @property {string} label - the English label
+ * @property {string} [msgid] - the label's message id
+ * @property {Array<{ value: string, label: string, msgid?: string }>} choices
+ *   each choice's label, with its message id where the label is words
+ *   (a format name or a language's own name has none)
  * @property {string} default - the value used until the user picks another
  * @property {(source: Record<string, string>, data: Record<string, string>, from: string, to: string) => Record<string, string> | null} [convert]
  *   re-express the source for the new value (a chart definition in another
@@ -101,8 +109,10 @@ import { EXAMPLE_LIST } from './examples.js';
 /**
  * @typedef {Object} EngineDescriptor
  * @property {string} id
- * @property {string} label
- * @property {string} [lead] - one line describing the engine
+ * @property {string} label - the engine's name
+ * @property {string} [msgid] - the name's message id, for a name that is
+ *   a description rather than a proper noun ('Core kernels')
+ * @property {string} [lead] - one line describing the engine, in English
  * @property {EnginePane[]} sourcePanes - the engine INPUT pane(s)
  * @property {EnginePane[]} dataPanes - the JSON it runs against (may be [])
  * @property {OptionPane[]} [optionPanes] - live mode selects (may be absent)
@@ -115,17 +125,28 @@ import { EXAMPLE_LIST } from './examples.js';
 
 /**
  * @typedef {Object} RunOptions
+ * @property {Readonly<Record<string, unknown>>} [messages] - the reader's
+ *   language: a COMPILED catalog (`compileMessageCatalog` over a
+ *   `@jarenjs/locales` pack, say). Every word the playground writes renders
+ *   through it, falling back per id to {@link playMessagesEn}; the same
+ *   catalog words a `$query` error that names its sentence
+ *   (`renderQueryMessage`) and the contract engine's dispatch outcome (the
+ *   local client's `catalog`). Absent, everything is English. A result
+ *   keeps the language it ran in: re-run after the language changes
  * @property {any} [operators] - a host operator registry ({ toOptions() }) for query/jslt/jtlt
  * @property {Record<string, string>} [config] - the current option-pane values
- * @property {Record<string, (source: string, config?: any) => any>} [renderers]
+ * @property {Record<string, (source: string, config?: any, context?: { messages?: Readonly<Record<string, unknown>> }) => any>} [renderers]
  *   host-injected vnode renderers keyed by engine id — the visual engines
  *   (markdown/mermaid/charts) delegate their rendering here (the hybrid seam),
  *   so the package owns the descriptors + examples but stays dependency-light.
  *   A renderer receives the source text plus its second argument — the
  *   option-pane config for the visual engines, the PARSED data document for
- *   `mdx` — and returns the preview vnode, or `{ vnode, deep }` where `deep`
- *   is extra `Panel`s (AST, canonical round-trip) the host derives — shown
- *   only behind the depth toggle
+ *   `mdx` — and a third, `{ messages }`: the run's compiled catalog, for
+ *   the words the host renders (md's accessible names, through
+ *   `labelsFromCatalog`, and the deep panels' labels) — and returns the
+ *   preview vnode, or `{ vnode, deep }` where `deep` is extra `Panel`s (AST,
+ *   canonical round-trip) the host derives — shown only behind the depth
+ *   toggle
  * @property {(schemaText: string, data: any, locale: string, schemas: object[]) => { schemaError: string|null, schemaPane?: string|null, draft: string, compileMs: number|null, validateMs: number|null, valid: boolean|null, errors: any[] }} [validate]
  *   host-injected JSON Schema validator (the same seam) — the `validate`
  *   engine delegates here so @jarenjs/validate + the locale packs stay in the host.
@@ -208,7 +229,7 @@ export function switchOption(engineId, key, value, session) {
  * Fill an engine's option-pane defaults so its runner always sees a
  * complete `config` (the host `config` slice may hold only user overrides).
  * @param {EngineDescriptor} engine
- * @param {{ operators?: any, config?: Record<string, string> }} options
+ * @param {RunOptions} options
  */
 function withConfig(engine, options) {
   const panes = engine.optionPanes ?? [];
@@ -229,15 +250,16 @@ function withConfig(engine, options) {
  * @param {string} engineId
  * @param {Record<string, string>} source
  * @param {Record<string, string>} data
- * @param {RunOptions} [options] - operators (query/jslt), the option-pane
- *   config, and host renderers (markdown/mermaid/charts)
+ * @param {RunOptions} [options] - the compiled message catalog, operators
+ *   (query/jslt), the option-pane config, and host renderers
+ *   (markdown/mermaid/charts)
  * @returns {PlayResult | Promise<PlayResult>}
  */
 export function runExample(engineId, source, data, options = {}) {
   // own members only: an id such as `constructor` names no engine
   const engine = Object.hasOwn(ENGINES, engineId) ? ENGINES[engineId] : undefined;
   if (engine === undefined) {
-    return { ok: false, timing: null, error: { message: `unknown engine: ${engineId}` }, panels: [] };
+    return { ok: false, timing: null, error: { message: playText(options?.messages)('play/error/unknown-engine', { engine: engineId }) }, panels: [] };
   }
   const failed = (/** @type {unknown} */ err) =>
     /** @type {PlayResult} */ ({ ok: false, timing: null, error: { message: String(/** @type {any} */ (err)?.message ?? err) }, panels: [] });

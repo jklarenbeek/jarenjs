@@ -708,7 +708,8 @@ if (asyncLiveLeak.length)
 // Raised to 1,138,900 (measured 1138791): a member PostgreSQL holds as jsonb read back from the indexes beside it as a union that lists a container first (an array where a path read unguarded steps into it by an index), its loss row saying what was derived, and no container kind read beside an index that is not unique (introspect 1072).
 // Raised to 1,139,800 (measured 1139726): a numeric key column marked at open, so a literal, a list and an external list compare with it by the interval of decimals that round to its double (store 736, plan 114, ddl 53, model 38, emit 37), add 935.
 // Raised to 1,140,900 (measured 1140802): a number column's CHECKs read at open as the guards they hold it to, and introspect() naming each number column no CHECK keeps from a NaN with the statement that adds one (introspect 658, check-read 317, physical 81, dialect 20), add 1076.
-if (clientBytes > 1140900)
+// Raised to 1,141,100 (measured 1141081): the text an errorMessage spec wrote kept through localizeErrors, its status on toJSON, and marked under messages: false with its render deferred, plus the app state check's message entry (messages 279).
+if (clientBytes > 1141100)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 

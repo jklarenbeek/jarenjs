@@ -18,6 +18,14 @@ const header =
         { $apply: '$.ui.nav.home' },
         [{ $apply: '$.ui.nav.groups[*]' }],
       ],
+      // the site language: each language named in its own (and marked as
+      // that language), the label in the current one's site words
+      ['select', {
+        class: 'lang-switch',
+        'aria-label': '$.ui.lang.label',
+        title: '$.ui.lang.label',
+        on: { change: 'site/lang-pick' },
+      }, [{ $apply: '$.ui.lang.choices[*]' }]],
       ['button', {
         class: 'theme-toggle',
         type: 'button',
@@ -134,6 +142,10 @@ export const SHELL_RULES = [
   },
   // one link inside a dropdown group (closing the menu is handled globally:
   // route/set on navigation, or Escape / an outside click from main.js)
+  {
+    match: '$.ui.lang.choices[*]',
+    body: ['option', { value: '$.value', lang: '$.lang', selected: '$.selected' }, '$.label'],
+  },
   {
     match: '$.ui.nav.groups[*].items[*]',
     body: ['a', {

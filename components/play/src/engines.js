@@ -12,6 +12,7 @@ import {
   compileJSONPath, compileJSONPointer, compileRelativeJSONPointer, JSONPOINTER_NOTHING,
   compileJSONPatch, applyMergePatch, createJSONPatch, createMergePatch, compileJsonQuery,
 } from '@jarenjs/json';
+import { renderQueryMessage } from '@jarenjs/json/query';
 import { compileJsltStylesheet } from '@jarenjs/json/jslt';
 import { compileJtltStylesheet } from '@jarenjs/json/jtlt';
 import { parseXQuery } from '@jarenjs/json/xquery';
@@ -28,13 +29,59 @@ import { formatMs } from './format.js';
 import { readChain } from './chain.js';
 import { KERNELS } from './kernels.js';
 import { escapePointerToken } from '@jarenjs/core/string';
+import { LOCALE_NAMES } from '@jarenjs/locales/names';
+import { playText, playEnglish } from './messages.js';
 
 const compileTypeTest = createTypeTestCompiler();
 
 const now = () => performance.now();
-const fmt = (v) => (v === undefined ? '(no result)' : JSON.stringify(v, null, 2));
+/** A value as the JSON an output panel shows; `undefined` as the words for no result. */
+const fmt = (v, t) => (v === undefined ? t('play/result/none') : JSON.stringify(v, null, 2));
 const msg = (err) => String(/** @type {any} */ (err)?.message ?? err);
 const code = (err) => /** @type {any} */ (err)?.code;
+
+/**
+ * An engine error's message for the reader. A query error names its
+ * sentence (`messageId` and `params`, rendered by `renderQueryMessage`);
+ * when the host's catalog translates that sentence, the message is the
+ * code, the translated reason and the location in the catalog's words.
+ * Every other error, and every error when there is no catalog or the
+ * catalog lacks the sentence, keeps its own message verbatim.
+ * @param {unknown} err
+ * @param {(id: string, params?: Record<string, unknown>) => string} t
+ * @param {Readonly<Record<string, unknown>> | undefined} messages
+ * @returns {string}
+ */
+function errorText(err, t, messages) {
+  const e = /** @type {any} */ (err);
+  if (messages == null || typeof e?.messageId !== 'string' || e.messageId === 'query/reason'
+    || !Object.hasOwn(messages, e.messageId) || typeof e.code !== 'string') return msg(err);
+  const reason = renderQueryMessage(e, messages);
+  if (typeof e.docPath !== 'string') return `${e.code}: ${reason}`;
+  return `${e.code}: ${reason} ${e.docPath === '' ? t('play/where/root') : t('play/where/path', { path: e.docPath })}`;
+}
+
+/**
+ * The text half of a run's options: `t` renders a playground message
+ * through the host's compiled catalog (`options.messages`, English when
+ * absent) and `say` an engine error (see {@link errorText}).
+ * @param {import('./index.js').RunOptions | undefined} options
+ */
+function speech(options) {
+  const messages = options?.messages;
+  const t = playText(messages);
+  return { t, say: (/** @type {unknown} */ err) => errorText(err, t, messages) };
+}
+
+/** The word a JSON parse failure names its pane by, per pane (the patch
+ * engine's `data` pane is its "target"). */
+const SUBJECTS = Object.freeze({
+  __proto__: null,
+  data: 'play/subject/data', target: 'play/subject/target', patch: 'play/subject/patch',
+  query: 'play/subject/query', externals: 'play/subject/externals', stylesheet: 'play/subject/stylesheet',
+  template: 'play/subject/template', schema: 'play/subject/schema', schemas: 'play/subject/schemas',
+  args: 'play/subject/args', document: 'play/subject/document', call: 'play/subject/call',
+});
 
 /**
  * Parse a pane's JSON text; `{ value }` or `{ error, pane }`. `pane` is the
@@ -45,9 +92,9 @@ const code = (err) => /** @type {any} */ (err)?.code;
  * text, never as a field — so a parse failure locates the PANE and
  * nothing finer.
  */
-function parseJson(text, pane, label = pane) {
+function parseJson(text, pane, t, label = pane) {
   try { return { value: JSON.parse((text ?? 'null') === '' ? 'null' : text) }; }
-  catch (err) { return { error: `${label}: ${msg(err)}`, pane }; }
+  catch (err) { return { error: t('play/error/json', { pane: t(SUBJECTS[label]), message: msg(err) }), pane }; }
 }
 
 /**
@@ -67,7 +114,7 @@ function convertPatch(source, data, from, to) {
   const next = to === 'merge' ? createMergePatch(target, result)
     : to === 'diff' ? result
       : createJSONPatch(target, result);
-  return { ...source, patch: fmt(next) };
+  return { ...source, patch: fmt(next, playEnglish) };
 }
 
 /**
@@ -85,9 +132,9 @@ function convertDefinition(source, _data, from, to) {
 }
 
 /** The optional JSON bindings pane shared by every engine accepting externals. */
-function parseExternals(source) {
+function parseExternals(source, t) {
   return source.externals === undefined || String(source.externals).trim() === ''
-    ? { value: {} } : parseJson(source.externals, 'externals');
+    ? { value: {} } : parseJson(source.externals, 'externals', t);
 }
 
 /**
@@ -98,20 +145,20 @@ function parseExternals(source) {
  * `$ref` can name is silently dead weight, and two documents under one
  * name leave it to the host which one a reference reaches.
  */
-function parseReferencedSchemas(text) {
+function parseReferencedSchemas(text, t) {
   if (text === undefined || String(text).trim() === '') return { value: [] };
-  const parsed = parseJson(text, 'schemas');
+  const parsed = parseJson(text, 'schemas', t);
   if (parsed.error) return parsed;
-  if (!Array.isArray(parsed.value)) return { error: 'schemas: expected a JSON array of schemas, each with an $id', pane: 'schemas' };
+  if (!Array.isArray(parsed.value)) return { error: t('play/error/schemas-array'), pane: 'schemas' };
   const ids = new Set();
   for (let i = 0; i < parsed.value.length; i++) {
     const item = parsed.value[i];
     if (item === null || typeof item !== 'object' || Array.isArray(item) || typeof item.$id !== 'string' || item.$id === '') {
-      return { error: `schemas: item ${i} is not a schema object with an $id`, pane: 'schemas' };
+      return { error: t('play/error/schemas-item', { index: i }), pane: 'schemas' };
     }
     // `X` and `X#` name one document: a trailing empty fragment is no difference
     const name = item.$id.endsWith('#') ? item.$id.slice(0, -1) : item.$id;
-    if (ids.has(name)) return { error: `schemas: item ${i} repeats the $id ${JSON.stringify(item.$id)}`, pane: 'schemas' };
+    if (ids.has(name)) return { error: t('play/error/schemas-repeat', { index: i, id: JSON.stringify(item.$id) }), pane: 'schemas' };
     ids.add(name);
   }
   return { value: parsed.value };
@@ -119,7 +166,7 @@ function parseReferencedSchemas(text) {
 
 /** A single-`code`-panel Result — the shape most engines return. */
 /** @returns {import('./index.js').PlayResult} */
-const ok = (text, compileMs, runMs, deep) => okPanels([{ id: 'out', label: 'Output', kind: 'code', text }, ...(deep ?? [])], compileMs, runMs);
+const ok = (t, text, compileMs, runMs, deep) => okPanels([{ id: 'out', label: t('play/panel/output'), kind: 'code', text }, ...(deep ?? [])], compileMs, runMs);
 
 /**
  * A multi-panel Result — the engine hands over its own screen list.
@@ -154,20 +201,20 @@ const cell = (v) => {
 
 /** A parser event's path (an array of keys and indexes) as the JSON Pointer it
  * names (RFC 6901 — `~` and `/` escaped), the root shown as `(root)`. */
-const pointerCell = (path) => (path ?? []).map((t) => `/${escapePointerToken(String(t))}`).join('') || '(root)';
+const pointerCell = (path, t) => (path ?? []).map((token) => `/${escapePointerToken(String(token))}`).join('') || t('play/cell/root');
 
 /** How many document-order events a drill-down table keeps. */
 const EVENT_CAP = 200;
 
 /** A parsed JSONX scalar JSON writes differently, as the note's phrase — or
  * `null` for one JSON keeps. */
-function jsonLoss(value) {
-  if (typeof value === 'bigint') return 'a bigint — JSON has no spelling for it, so JSON.stringify refuses the document';
-  if (value instanceof RegExp) return 'a regexp — JSON writes {}';
-  if (typeof value === 'number' && !Number.isFinite(value)) return `${stringifyJsonx(value)} — JSON writes null`;
-  const what = value instanceof Date ? 'an instant' : value instanceof LocalDateTime ? 'a local date-time'
-    : value instanceof LocalDate ? 'a local date' : value instanceof LocalTime ? 'a local time' : null;
-  return what === null ? null : `${what} — JSON writes the string ${JSON.stringify(value)}`;
+function jsonLoss(value, t) {
+  if (typeof value === 'bigint') return t('play/loss/bigint');
+  if (value instanceof RegExp) return t('play/loss/regexp');
+  if (typeof value === 'number' && !Number.isFinite(value)) return t('play/loss/number', { value: stringifyJsonx(value) });
+  const what = value instanceof Date ? 'play/loss/instant' : value instanceof LocalDateTime ? 'play/loss/local-date-time'
+    : value instanceof LocalDate ? 'play/loss/local-date' : value instanceof LocalTime ? 'play/loss/local-time' : null;
+  return what === null ? null : t(what, { json: JSON.stringify(value) });
 }
 
 /** The kernel table by option value (a Map, so an inherited name finds nothing). */
@@ -182,18 +229,23 @@ const KERNEL_BY_VALUE = new Map(KERNELS.map((k) => [k.value, k]));
  * @param {unknown} answer - The kernel's answer
  * @param {unknown} queryAnswer - The operator document's answer
  * @param {unknown} refusal - What the operator document threw, if it threw
+ * @param {(id: string, params?: Record<string, unknown>) => string} t - the run's text function
  * @returns {string}
  */
-function sameAnswer(answer, queryAnswer, refusal) {
+function sameAnswer(answer, queryAnswer, refusal, t) {
   const kernelAnswers = answer !== null && answer !== undefined;
-  const kernelSays = `the kernel answers ${answer === undefined ? 'nothing' : fmt(answer)}`;
-  if (refusal !== undefined)
-    return `not compared — $query refuses${code(refusal) === undefined ? '' : ` with ${code(refusal)}`}${kernelAnswers ? '' : ` and ${kernelSays}`}`;
-  if (!kernelAnswers)
-    return `not compared — ${kernelSays}${queryAnswer === undefined ? ' and $query nothing' : ''}`;
-  if (queryAnswer === undefined)
-    return 'not compared — $query answers nothing';
-  return fmt(queryAnswer) === fmt(answer) ? 'yes' : 'no';
+  const kernelSays = answer === undefined ? t('play/kernel/answers-nothing') : t('play/kernel/answers', { answer: fmt(answer, t) });
+  if (refusal !== undefined) {
+    const refuses = code(refusal) === undefined ? t('play/kernel/refuses') : t('play/kernel/refuses-with', { code: code(refusal) });
+    return kernelAnswers ? refuses : t('play/kernel/and', { first: refuses, second: kernelSays });
+  }
+  if (!kernelAnswers) {
+    return t('play/kernel/not-compared', {
+      reason: queryAnswer === undefined ? t('play/kernel/and', { first: kernelSays, second: t('play/kernel/query-nothing') }) : kernelSays,
+    });
+  }
+  if (queryAnswer === undefined) return t('play/kernel/query-answers-nothing');
+  return fmt(queryAnswer, t) === fmt(answer, t) ? t('play/kernel/same') : t('play/kernel/different');
 }
 
 /**
@@ -207,7 +259,7 @@ function sameAnswer(answer, queryAnswer, refusal) {
 function visual(id, label, lead, opts = {}) {
   return {
     id, label, lead,
-    sourcePanes: [{ key: 'source', label: opts.sourceLabel ?? 'Source', control: 'code' }],
+    sourcePanes: [{ key: 'source', label: opts.sourceLabel, ...(opts.sourceMsgid ? { msgid: opts.sourceMsgid } : {}), control: 'code' }],
     dataPanes: [],
     ...(opts.optionPanes ? { optionPanes: opts.optionPanes } : {}),
     run(source, data, options) {
@@ -215,12 +267,15 @@ function visual(id, label, lead, opts = {}) {
       if (typeof render !== 'function') {
         return fail(`the ${label} engine renders in the host — inject options.renderers.${id}`, 'PLAY_NO_RENDERER');
       }
+      const { t, say } = speech(options);
       const t0 = now();
       let view;
-      try { view = render(source.source ?? '', options?.config); }
-      catch (err) { return fail(msg(err), code(err), locate(err, 'source')); }
+      // the third argument hands the renderer the reader's language (md's
+      // accessible names read it through `labelsFromCatalog`)
+      try { view = render(source.source ?? '', options?.config, { messages: options?.messages }); }
+      catch (err) { return fail(say(err), code(err), locate(err, 'source')); }
       const t1 = now();
-      return okPanels(renderedPanels(view), ...renderTiming(view, t1 - t0));
+      return okPanels(renderedPanels(view, t), ...renderTiming(view, t1 - t0));
     },
   };
 }
@@ -243,13 +298,13 @@ function renderTiming(view, totalMs) {
 /** A host-rendered view (a bare vnode, or `{ vnode, deep }`) → the panel
  * list: the preview plus any host-derived deep panels (AST, canonical
  * round-trip), stamped `deep` so they ride behind the depth toggle. */
-function renderedPanels(view) {
+function renderedPanels(view, t) {
   const rich = view !== null && typeof view === 'object' && !Array.isArray(view) && 'vnode' in view;
   const vnode = rich ? view.vnode : view;
   const deep = rich && Array.isArray(view.deep)
     ? view.deep.map((p) => ({ ...p, depth: 'deep' }))
     : [];
-  return [{ id: 'preview', label: 'Preview', kind: 'view', vnode }, ...deep];
+  return [{ id: 'preview', label: t('play/panel/preview'), kind: 'view', vnode }, ...deep];
 }
 /**
  * An error Result. `where` is the location half of the format's error —
@@ -307,79 +362,82 @@ function compileOptions(options) {
 export const ENGINE_LIST = [
   {
     id: 'path', label: 'JSONPath', lead: 'RFC 9535 — select nodes from a document.',
-    sourcePanes: [{ key: 'selector', label: 'Selector', control: 'text' }],
-    dataPanes: [{ key: 'data', label: 'Data' }],
-    run(source, data) {
-      const d = parseJson(data.data, 'data'); if (d.error) return failParse(d);
+    sourcePanes: [{ key: 'selector', label: 'Selector', msgid: 'play/pane/selector', control: 'text' }],
+    dataPanes: [{ key: 'data', label: 'Data', msgid: 'play/pane/data' }],
+    run(source, data, options) {
+      const { t, say } = speech(options);
+      const d = parseJson(data.data, 'data', t); if (d.error) return failParse(d);
       let compiled; const t0 = now();
       try { compiled = compileJSONPath(source.selector ?? ''); }
-      catch (err) { return fail(msg(err), code(err), locate(err, 'selector')); }
+      catch (err) { return fail(say(err), code(err), locate(err, 'selector')); }
       const t1 = now();
       let nodes;
       try { nodes = compiled.nodes(d.value); }
-      catch (err) { return fail(msg(err), code(err), locate(err, 'selector')); }
+      catch (err) { return fail(say(err), code(err), locate(err, 'selector')); }
       const t2 = now();
-      return ok(fmt(nodes.map((n) => n.value)), t1 - t0, t2 - t1, [
-        deepCards('how', 'How it matched', [
-          { title: 'Matches', value: String(nodes.length) },
-          { title: 'Compile', value: formatMs(t1 - t0) },
-          { title: 'Run', value: formatMs(t2 - t1) },
+      return ok(t, fmt(nodes.map((n) => n.value), t), t1 - t0, t2 - t1, [
+        deepCards('how', t('play/panel/how-matched'), [
+          { title: t('play/card/matches'), value: String(nodes.length) },
+          { title: t('play/card/compile'), value: formatMs(t1 - t0) },
+          { title: t('play/card/run'), value: formatMs(t2 - t1) },
         ]),
-        deepCode('paths', 'The normalized paths', fmt(nodes.map((n) => n.path))),
+        deepCode('paths', t('play/panel/paths'), fmt(nodes.map((n) => n.path), t)),
       ]);
     },
   },
   {
     id: 'pointer', label: 'JSON Pointer', lead: 'RFC 6901 absolute and relative pointers — address exactly one value.',
     sourcePanes: [
-      { key: 'pointer', label: 'Pointer', control: 'text' },
+      { key: 'pointer', label: 'Pointer', msgid: 'play/pane/pointer', control: 'text' },
       // a RELATIVE pointer (it starts with a digit: "1/price", "0#") walks
       // from this location; an absolute pointer ignores it
-      { key: 'location', label: 'From location (relative pointers)', control: 'text' },
+      { key: 'location', label: 'From location (relative pointers)', msgid: 'play/pane/location', control: 'text' },
     ],
-    dataPanes: [{ key: 'data', label: 'Data' }],
-    run(source, data) {
-      const d = parseJson(data.data, 'data'); if (d.error) return failParse(d);
+    dataPanes: [{ key: 'data', label: 'Data', msgid: 'play/pane/data' }],
+    run(source, data, options) {
+      const { t, say } = speech(options);
+      const d = parseJson(data.data, 'data', t); if (d.error) return failParse(d);
       const pointer = source.pointer ?? '';
       const relative = /^\d/.test(pointer);
       let getter; const t0 = now();
       try { getter = relative ? compileRelativeJSONPointer(pointer) : compileJSONPointer(pointer); }
-      catch (err) { return fail(msg(err), code(err), locate(err, 'pointer')); }
+      catch (err) { return fail(say(err), code(err), locate(err, 'pointer')); }
       const t1 = now();
       let value;
       try { value = relative ? getter(d.value, source.location ?? '') : getter(d.value); }
-      catch (err) { return fail(msg(err), code(err), locate(err, 'pointer')); }
+      catch (err) { return fail(say(err), code(err), locate(err, 'pointer')); }
       const t2 = now();
-      if (value === JSONPOINTER_NOTHING) return ok('(nothing — the pointer addresses no value)', t1 - t0, t2 - t1);
-      return ok(fmt(value), t1 - t0, t2 - t1);
+      if (value === JSONPOINTER_NOTHING) return ok(t, t('play/result/pointer-nothing'), t1 - t0, t2 - t1);
+      return ok(t, fmt(value, t), t1 - t0, t2 - t1);
     },
   },
   {
     id: 'patch', label: 'JSON Patch', lead: 'RFC 6902 and RFC 7396, copy-on-write and atomic — plus structural diff.',
-    sourcePanes: [{ key: 'patch', label: 'Patch', control: 'code' }],
-    dataPanes: [{ key: 'data', label: 'Target document' }],
+    sourcePanes: [{ key: 'patch', label: 'Patch', msgid: 'play/pane/patch', control: 'code' }],
+    dataPanes: [{ key: 'data', label: 'Target document', msgid: 'play/pane/target' }],
     optionPanes: [{
-      key: 'mode', label: 'Mode', default: 'patch',
+      key: 'mode', label: 'Mode', msgid: 'play/option/mode', default: 'patch',
       choices: [
-        { value: 'patch', label: 'RFC 6902 apply' },
-        { value: 'merge', label: 'RFC 7396 merge' },
-        { value: 'diff', label: 'diff (patch pane = the target)' },
+        { value: 'patch', label: 'RFC 6902 apply', msgid: 'play/choice/patch-apply' },
+        { value: 'merge', label: 'RFC 7396 merge', msgid: 'play/choice/patch-merge' },
+        { value: 'diff', label: 'diff (patch pane = the target)', msgid: 'play/choice/patch-diff' },
       ],
       convert: convertPatch,
     }],
     run(source, data, options) {
+      const { t, say } = speech(options);
       const mode = options?.config?.mode ?? 'patch';
-      const target = parseJson(data.data, 'data', 'target'); if (target.error) return failParse(target);
-      const patch = parseJson(source.patch, 'patch'); if (patch.error) return failParse(patch);
+      const target = parseJson(data.data, 'data', t, 'target'); if (target.error) return failParse(target);
+      const patch = parseJson(source.patch, 'patch', t); if (patch.error) return failParse(patch);
       if (mode === 'merge') {
         // RFC 7396: null members delete; an unchanged document is the INPUT
         let out; const t0 = now();
         try { out = applyMergePatch(target.value, patch.value); }
-        catch (err) { return fail(msg(err), code(err), locate(err, 'patch')); }
+        catch (err) { return fail(say(err), code(err), locate(err, 'patch')); }
         const t1 = now();
-        return ok(fmt(out), null, t1 - t0, [
-          deepCards('how', 'How it merged', [
-            { title: 'Output', value: out === target.value ? '=== input' : 'a new document', note: out === target.value ? 'shared, copy-on-write' : undefined },
+        return ok(t, fmt(out, t), null, t1 - t0, [
+          deepCards('how', t('play/panel/how-merged'), [
+            { title: t('play/card/output'), value: out === target.value ? t('play/card/same-input') : t('play/card/new-document'), note: out === target.value ? t('play/card/shared') : undefined },
           ]),
         ]);
       }
@@ -391,128 +449,132 @@ export const ENGINE_LIST = [
           jsonPatch = createJSONPatch(target.value, patch.value);
           mergePatch = createMergePatch(target.value, patch.value);
         }
-        catch (err) { return fail(msg(err), code(err), locate(err, 'patch')); }
+        catch (err) { return fail(say(err), code(err), locate(err, 'patch')); }
         const t1 = now();
         return okPanels([
-          { id: 'out', label: `JSON Patch (${jsonPatch.length} ops)`, kind: 'code', text: fmt(jsonPatch) },
-          deepCode('merge', 'The merge-patch flavour (RFC 7396)', fmt(mergePatch)),
+          { id: 'out', label: t('play/panel/patch-ops', { count: jsonPatch.length }), kind: 'code', text: fmt(jsonPatch, t) },
+          deepCode('merge', t('play/panel/merge-flavour'), fmt(mergePatch, t)),
         ], null, t1 - t0);
       }
       let apply; const t0 = now();
       try { apply = compileJSONPatch(patch.value, { changes: true }); }
-      catch (err) { return fail(msg(err), code(err), locate(err, 'patch')); }
+      catch (err) { return fail(say(err), code(err), locate(err, 'patch')); }
       const t1 = now();
       let run;
       try { run = apply(target.value); }
-      catch (err) { return fail(msg(err), code(err), locate(err, 'patch')); }
+      catch (err) { return fail(say(err), code(err), locate(err, 'patch')); }
       const t2 = now();
-      return ok(fmt(run.doc), t1 - t0, t2 - t1, [
-        deepCode('changes', 'What changed', fmt(run.changes)),
+      return ok(t, fmt(run.doc, t), t1 - t0, t2 - t1, [
+        deepCode('changes', t('play/panel/changes'), fmt(run.changes, t)),
       ]);
     },
   },
   {
     id: 'query', label: '$query', lead: 'Jaren JSON Query — filter, project and fold (registered operators included).',
-    sourcePanes: [{ key: 'query', label: 'Query', control: 'code' }, { key: 'externals', label: 'Externals', control: 'code' }],
-    dataPanes: [{ key: 'data', label: 'Data' }],
+    sourcePanes: [{ key: 'query', label: 'Query', msgid: 'play/pane/query', control: 'code' }, { key: 'externals', label: 'Externals', msgid: 'play/pane/externals', control: 'code' }],
+    dataPanes: [{ key: 'data', label: 'Data', msgid: 'play/pane/data' }],
     run(source, data, options) {
-      const d = parseJson(data.data, 'data'); if (d.error) return failParse(d);
-      const q = parseJson(source.query, 'query'); if (q.error) return failParse(q);
-      const e = parseExternals(source); if (e.error) return failParse(e);
+      const { t, say } = speech(options);
+      const d = parseJson(data.data, 'data', t); if (d.error) return failParse(d);
+      const q = parseJson(source.query, 'query', t); if (q.error) return failParse(q);
+      const e = parseExternals(source, t); if (e.error) return failParse(e);
       let fn; const t0 = now();
       try { fn = compileJsonQuery(q.value, compileOptions(options)); }
-      catch (err) { return fail(msg(err), code(err), locate(err, 'query')); }
+      catch (err) { return fail(say(err), code(err), locate(err, 'query')); }
       const t1 = now();
       let out;
       try { out = fn(d.value, e.value); }
-      catch (err) { return fail(msg(err), code(err), locate(err, 'query')); }
+      catch (err) { return fail(say(err), code(err), locate(err, 'query')); }
       const t2 = now();
       const items = out === undefined ? 0 : Array.isArray(out) ? out.length : 1;
-      return ok(fmt(out), t1 - t0, t2 - t1, [
-        deepCards('how', 'How it ran', [
-          { title: 'Items', value: String(items) },
-          { title: 'Compile', value: formatMs(t1 - t0) },
-          { title: 'Run', value: formatMs(t2 - t1) },
+      return ok(t, fmt(out, t), t1 - t0, t2 - t1, [
+        deepCards('how', t('play/panel/how-ran'), [
+          { title: t('play/card/items'), value: String(items) },
+          { title: t('play/card/compile'), value: formatMs(t1 - t0) },
+          { title: t('play/card/run'), value: formatMs(t2 - t1) },
         ]),
       ]);
     },
   },
   {
     id: 'jslt', label: 'JSLT', lead: 'JSON stylesheet transform (registered operators included).',
-    sourcePanes: [{ key: 'stylesheet', label: 'Stylesheet', control: 'code' }, { key: 'externals', label: 'Externals', control: 'code' }],
-    dataPanes: [{ key: 'data', label: 'Data' }],
+    sourcePanes: [{ key: 'stylesheet', label: 'Stylesheet', msgid: 'play/pane/stylesheet', control: 'code' }, { key: 'externals', label: 'Externals', msgid: 'play/pane/externals', control: 'code' }],
+    dataPanes: [{ key: 'data', label: 'Data', msgid: 'play/pane/data' }],
     run(source, data, options) {
-      const d = parseJson(data.data, 'data'); if (d.error) return failParse(d);
-      const s = parseJson(source.stylesheet, 'stylesheet'); if (s.error) return failParse(s);
-      const e = parseExternals(source); if (e.error) return failParse(e);
+      const { t, say } = speech(options);
+      const d = parseJson(data.data, 'data', t); if (d.error) return failParse(d);
+      const s = parseJson(source.stylesheet, 'stylesheet', t); if (s.error) return failParse(s);
+      const e = parseExternals(source, t); if (e.error) return failParse(e);
       let compiled; const t0 = now();
       try { compiled = compileJsltStylesheet(s.value, compileOptions(options)); }
-      catch (err) { return fail(msg(err), code(err), locate(err, 'stylesheet')); }
+      catch (err) { return fail(say(err), code(err), locate(err, 'stylesheet')); }
       const t1 = now();
       let out;
       try { out = compiled(d.value, e.value); }
-      catch (err) { return fail(msg(err), code(err), locate(err, 'stylesheet')); }
+      catch (err) { return fail(say(err), code(err), locate(err, 'stylesheet')); }
       const t2 = now();
       // the identity lesson: a rule that changes nothing hands the INPUT back
       // (shared, copy-on-write) — worth teaching, so the deep card says which
-      return ok(fmt(out), t1 - t0, t2 - t1, [
-        deepCards('how', 'How it transformed', [
-          { title: 'Compile', value: formatMs(t1 - t0) },
-          { title: 'Transform', value: formatMs(t2 - t1) },
-          { title: 'Output', value: out === d.value ? '=== input' : 'a new document', note: out === d.value ? 'shared, copy-on-write' : undefined },
+      return ok(t, fmt(out, t), t1 - t0, t2 - t1, [
+        deepCards('how', t('play/panel/how-transformed'), [
+          { title: t('play/card/compile'), value: formatMs(t1 - t0) },
+          { title: t('play/card/transform'), value: formatMs(t2 - t1) },
+          { title: t('play/card/output'), value: out === d.value ? t('play/card/same-input') : t('play/card/new-document'), note: out === d.value ? t('play/card/shared') : undefined },
         ]),
       ]);
     },
   },
   {
     id: 'jtlt', label: 'JTLT', lead: 'JSLT\'s text front-end — render JSON as Markdown, XML or code.',
-    sourcePanes: [{ key: 'template', label: 'Template', control: 'code' }, { key: 'externals', label: 'Externals', control: 'code' }],
-    dataPanes: [{ key: 'data', label: 'Data' }],
+    sourcePanes: [{ key: 'template', label: 'Template', msgid: 'play/pane/template', control: 'code' }, { key: 'externals', label: 'Externals', msgid: 'play/pane/externals', control: 'code' }],
+    dataPanes: [{ key: 'data', label: 'Data', msgid: 'play/pane/data' }],
     run(source, data, options) {
-      const d = parseJson(data.data, 'data'); if (d.error) return failParse(d);
-      const t = parseJson(source.template, 'template'); if (t.error) return failParse(t);
-      const e = parseExternals(source); if (e.error) return failParse(e);
+      const { t, say } = speech(options);
+      const d = parseJson(data.data, 'data', t); if (d.error) return failParse(d);
+      const tpl = parseJson(source.template, 'template', t); if (tpl.error) return failParse(tpl);
+      const e = parseExternals(source, t); if (e.error) return failParse(e);
       let render; const t0 = now();
-      try { render = compileJtltStylesheet(t.value, compileOptions(options)); }
-      catch (err) { return fail(msg(err), code(err), locate(err, 'template')); }
+      try { render = compileJtltStylesheet(tpl.value, compileOptions(options)); }
+      catch (err) { return fail(say(err), code(err), locate(err, 'template')); }
       const t1 = now();
       let out;
       try { out = render(d.value, e.value); }
-      catch (err) { return fail(msg(err), code(err), locate(err, 'template')); }
+      catch (err) { return fail(say(err), code(err), locate(err, 'template')); }
       const t2 = now();
       // JTLT emits TEXT (markdown / xml / source) — show it verbatim, not fmt'd
-      return ok(out === '' ? '(empty)' : out, t1 - t0, t2 - t1, [
+      return ok(t, out === '' ? t('play/result/empty') : out, t1 - t0, t2 - t1, [
         // the machinery: JTLT desugars to a JSLT stylesheet — show it
-        deepCode('compiled', 'The compiled program', fmt(render.stylesheet)),
+        deepCode('compiled', t('play/panel/compiled-program'), fmt(render.stylesheet, t)),
       ]);
     },
   },
   {
     id: 'xquery', label: 'XQuery', lead: 'The XQuery 3.1 text subset — parsed to a query document and run over $doc.',
-    sourcePanes: [{ key: 'text', label: 'XQuery', control: 'code' }, { key: 'externals', label: 'Externals', control: 'code' }],
-    dataPanes: [{ key: 'data', label: 'Data' }],
+    sourcePanes: [{ key: 'text', label: 'XQuery', control: 'code' }, { key: 'externals', label: 'Externals', msgid: 'play/pane/externals', control: 'code' }],
+    dataPanes: [{ key: 'data', label: 'Data', msgid: 'play/pane/data' }],
     run(source, data, options) {
-      const d = parseJson(data.data, 'data'); if (d.error) return failParse(d);
+      const { t, say } = speech(options);
+      const d = parseJson(data.data, 'data', t); if (d.error) return failParse(d);
       let doc, fn; const t0 = now();
-      const e = parseExternals(source); if (e.error) return failParse(e);
+      const e = parseExternals(source, t); if (e.error) return failParse(e);
       // two phases: the text parses (a syntax error locates a position in
       // the XQuery pane), then the GENERATED query document compiles and
       // runs — a location in that document has no pane the learner typed
       try { doc = parseXQuery(source.text ?? ''); }
-      catch (err) { return fail(msg(err), code(err), locate(err, 'text')); }
+      catch (err) { return fail(say(err), code(err), locate(err, 'text')); }
       try { fn = compileJsonQuery(doc, compileOptions(options)); }
-      catch (err) { return fail(msg(err), code(err), locate(err)); }
+      catch (err) { return fail(say(err), code(err), locate(err)); }
       const t1 = now();
       let out;
       try {
         const externals = fn.externals.includes('doc') ? { ...e.value, doc: d.value } : e.value;
         out = fn(d.value, externals);
       }
-      catch (err) { return fail(msg(err), code(err), locate(err)); }
+      catch (err) { return fail(say(err), code(err), locate(err)); }
       const t2 = now();
-      return ok(out === undefined ? '(empty sequence)' : fmt(out), t1 - t0, t2 - t1, [
+      return ok(t, out === undefined ? t('play/result/empty-sequence') : fmt(out, t), t1 - t0, t2 - t1, [
         // the machinery: the XQuery text parses to a runnable query DOCUMENT
-        deepCode('doc', 'The generated query document', fmt(doc)),
+        deepCode('doc', t('play/panel/generated-document'), fmt(doc, t)),
       ]);
     },
   },
@@ -522,43 +584,45 @@ export const ENGINE_LIST = [
     // @jarenjs/linq surface, and both halves are shown — the document a model
     // learns to author, and what it answers over the data
     id: 'linq', label: 'LINQ', lead: 'A fluent @jarenjs/linq chain compiles to the query document a model learns to author — shown beside its answer.',
-    sourcePanes: [{ key: 'chain', label: 'Chain', control: 'code' }],
-    dataPanes: [{ key: 'data', label: 'Data' }],
-    run(source, data) {
-      const d = parseJson(data.data, 'data'); if (d.error) return failParse(d);
+    sourcePanes: [{ key: 'chain', label: 'Chain', msgid: 'play/pane/chain', control: 'code' }],
+    dataPanes: [{ key: 'data', label: 'Data', msgid: 'play/pane/data' }],
+    run(source, data, options) {
+      const { t, say } = speech(options);
+      const d = parseJson(data.data, 'data', t); if (d.error) return failParse(d);
       let seq, document; const t0 = now();
       // the compile phase: the text is read and replayed, and the chain emits
       // its document — a refusal (the reader's, or linq's own JL code) is
       // positioned at the call in the Chain pane
-      try { seq = readChain(source.chain ?? '', d.value, { compileTypeTest }); document = seq.toDocument(); }
-      catch (err) { return fail(msg(err), code(err), locate(err, 'chain')); }
+      try { seq = readChain(source.chain ?? '', d.value, { compileTypeTest, messages: options?.messages }); document = seq.toDocument(); }
+      catch (err) { return fail(say(err), code(err), locate(err, 'chain')); }
       const t1 = now();
       let items;
       // the run phase executes the GENERATED document: a location in it has
       // no pane the learner typed, as with XQuery
       try { items = seq.toArray(); }
-      catch (err) { return fail(msg(err), code(err), locate(err)); }
+      catch (err) { return fail(say(err), code(err), locate(err)); }
       const t2 = now();
       return okPanels([
-        { id: 'out', label: 'Answer — toArray()', kind: 'code', text: fmt(items) },
-        { id: 'document', label: 'Query document — toDocument()', kind: 'code', text: fmt(document) },
-        deepCards('how', 'How it ran', [
-          { title: 'Items', value: String(items.length) },
-          { title: 'Compile', value: formatMs(t1 - t0) },
-          { title: 'Run', value: formatMs(t2 - t1) },
+        { id: 'out', label: t('play/panel/answer'), kind: 'code', text: fmt(items, t) },
+        { id: 'document', label: t('play/panel/query-document'), kind: 'code', text: fmt(document, t) },
+        deepCards('how', t('play/panel/how-ran'), [
+          { title: t('play/card/items'), value: String(items.length) },
+          { title: t('play/card/compile'), value: formatMs(t1 - t0) },
+          { title: t('play/card/run'), value: formatMs(t2 - t1) },
         ]),
       ], t1 - t0, t2 - t1);
     },
   },
   {
     id: 'josl', label: 'JOSL', lead: 'The streaming TOML superset — JavaScript-obvious values, round-trips.',
-    sourcePanes: [{ key: 'text', label: 'Document', control: 'code' }],
+    sourcePanes: [{ key: 'text', label: 'Document', msgid: 'play/pane/document', control: 'code' }],
     dataPanes: [],
     optionPanes: [{
-      key: 'mode', label: 'Dialect', default: 'josl',
-      choices: [{ value: 'josl', label: 'JOSL' }, { value: 'toml', label: 'TOML (strict 1.0)' }],
+      key: 'mode', label: 'Dialect', msgid: 'play/option/dialect', default: 'josl',
+      choices: [{ value: 'josl', label: 'JOSL' }, { value: 'toml', label: 'TOML (strict 1.0)', msgid: 'play/choice/toml-strict' }],
     }],
     run(source, data, options) {
+      const { t, say } = speech(options);
       const mode = options?.config?.mode ?? 'josl';
       /** @type {any[]} */
       const events = [];
@@ -567,17 +631,17 @@ export const ENGINE_LIST = [
       // parser streams document-order events as it reads — capture (capped)
       // for the "how it streamed" drill-down
       try { parsed = parseJosl(source.text ?? '', { mode, onEvent: (e) => { if (events.length < EVENT_CAP) events.push(e); } }); }
-      catch (err) { return fail(msg(err), code(err), locate(err, 'text')); }
+      catch (err) { return fail(say(err), code(err), locate(err, 'text')); }
       const t1 = now();
       const out = stringifyJsonx(parsed, { indent: 2 });
       const t2 = now();
-      return ok(out, t1 - t0, t2 - t1, [
+      return ok(t, out, t1 - t0, t2 - t1, [
         {
-          id: 'events', label: `How it streamed (${events.length}${events.length === EVENT_CAP ? ', capped' : ''})`,
-          kind: 'table', depth: 'deep', columns: ['Type', 'Path', 'Value'],
-          rows: events.map((e) => [e.type, pointerCell(e.path), e.type === 'pair' ? stringifyJsonx(e.value) : '']),
+          id: 'events', label: t(events.length === EVENT_CAP ? 'play/panel/how-streamed-capped' : 'play/panel/how-streamed', { count: events.length }),
+          kind: 'table', depth: 'deep', columns: [t('play/column/type'), t('play/column/path'), t('play/column/value')],
+          rows: events.map((e) => [e.type, pointerCell(e.path, t), e.type === 'pair' ? stringifyJsonx(e.value) : '']),
         },
-        deepCode('roundtrip', 'The canonical round-trip', stringifyJosl(parsed, { mode })),
+        deepCode('roundtrip', t('play/panel/roundtrip'), stringifyJosl(parsed, { mode })),
       ]);
     },
   },
@@ -590,10 +654,11 @@ export const ENGINE_LIST = [
     sourcePanes: [{ key: 'text', label: 'JSONX', control: 'code' }],
     dataPanes: [],
     optionPanes: [{
-      key: 'mode', label: 'Dialect', default: 'jsonx',
-      choices: [{ value: 'jsonx', label: 'JSONX' }, { value: 'json', label: 'JSON (strict)' }],
+      key: 'mode', label: 'Dialect', msgid: 'play/option/dialect', default: 'jsonx',
+      choices: [{ value: 'jsonx', label: 'JSONX' }, { value: 'json', label: 'JSON (strict)', msgid: 'play/choice/json-strict' }],
     }],
     run(source, data, options) {
+      const { t, say } = speech(options);
       const mode = options?.config?.mode === 'json' ? 'json' : 'jsonx';
       /** @type {any[]} */
       const events = [];
@@ -607,12 +672,12 @@ export const ENGINE_LIST = [
           onEvent: (e) => {
             if (events.length < EVENT_CAP) events.push(e);
             if (e.type === 'value' && typeof e.value === 'bigint') bigint = true;
-            const loss = e.type === 'value' ? jsonLoss(e.value) : null;
-            if (loss !== null) losses.push(`${pointerCell(e.path)}: ${loss}`);
+            const loss = e.type === 'value' ? jsonLoss(e.value, t) : null;
+            if (loss !== null) losses.push(`${pointerCell(e.path, t)}: ${loss}`);
           },
         });
       }
-      catch (err) { return fail(msg(err), code(err), locate(err, 'text')); }
+      catch (err) { return fail(say(err), code(err), locate(err, 'text')); }
       const t1 = now();
       let json = null, roundtrip;
       // a document nested past the call stack parses and then cannot be
@@ -621,20 +686,20 @@ export const ENGINE_LIST = [
         if (!bigint) json = JSON.stringify(value, null, 2);
         roundtrip = stringifyJsonx(value, { indent: 2 });
       }
-      catch (err) { return fail(msg(err), code(err), { pane: 'text' }); }
+      catch (err) { return fail(say(err), code(err), { pane: 'text' }); }
       const t2 = now();
       const kept = losses.length === 0
-        ? 'every value has a JSON spelling — this is the data any engine\'s data pane reads'
-        : [`${losses.length} value${losses.length === 1 ? '' : 's'} JSON writes differently:`, ...losses].join('\n');
+        ? t('play/note/all-kept')
+        : [t('play/note/losses', { count: losses.length }), ...losses].join('\n');
       return okPanels([
-        ...(json === null ? [] : [{ id: 'out', label: 'As JSON', kind: /** @type {'code'} */ ('code'), text: json }]),
-        { id: 'kept', label: 'What JSON keeps', kind: 'note', tone: losses.length === 0 ? 'ok' : 'warn', text: kept },
+        ...(json === null ? [] : [{ id: 'out', label: t('play/panel/as-json'), kind: /** @type {'code'} */ ('code'), text: json }]),
+        { id: 'kept', label: t('play/panel/kept'), kind: 'note', tone: losses.length === 0 ? 'ok' : 'warn', text: kept },
         {
-          id: 'events', label: `How it was read (${events.length}${events.length === EVENT_CAP ? ', capped' : ''})`,
-          kind: 'table', depth: 'deep', columns: ['Type', 'Path', 'Value'],
-          rows: events.map((e) => [e.type, pointerCell(e.path), e.type === 'value' ? stringifyJsonx(e.value) : (e.kind ?? '')]),
+          id: 'events', label: t(events.length === EVENT_CAP ? 'play/panel/how-read-capped' : 'play/panel/how-read', { count: events.length }),
+          kind: 'table', depth: 'deep', columns: [t('play/column/type'), t('play/column/path'), t('play/column/value')],
+          rows: events.map((e) => [e.type, pointerCell(e.path, t), e.type === 'value' ? stringifyJsonx(e.value) : (e.kind ?? '')]),
         },
-        deepCode('roundtrip', 'The canonical JSONX round-trip', roundtrip),
+        deepCode('roundtrip', t('play/panel/jsonx-roundtrip'), roundtrip),
       ], t1 - t0, t2 - t1);
     },
   },
@@ -643,12 +708,13 @@ export const ENGINE_LIST = [
     sourcePanes: [{ key: 'text', label: 'CSV', control: 'code' }],
     dataPanes: [],
     optionPanes: [
-      { key: 'repair', label: 'Mode', default: 'strict', choices: [{ value: 'strict', label: 'strict' }, { value: 'repair', label: 'repair' }] },
-      { key: 'headers', label: 'Header row', default: 'true', choices: [{ value: 'true', label: 'yes' }, { value: 'false', label: 'no' }, { value: 'auto', label: 'auto' }] },
-      { key: 'delimiter', label: 'Delimiter', default: 'auto', choices: [{ value: 'auto', label: 'auto' }, { value: ',', label: ',' }, { value: ';', label: ';' }, { value: 'tab', label: 'tab' }, { value: '|', label: '|' }] },
-      { key: 'typed', label: 'Typed values', default: 'off', choices: [{ value: 'off', label: 'off' }, { value: 'on', label: 'on' }] },
+      { key: 'repair', label: 'Mode', msgid: 'play/option/mode', default: 'strict', choices: [{ value: 'strict', label: 'strict', msgid: 'play/choice/strict' }, { value: 'repair', label: 'repair', msgid: 'play/choice/repair' }] },
+      { key: 'headers', label: 'Header row', msgid: 'play/option/header-row', default: 'true', choices: [{ value: 'true', label: 'yes', msgid: 'play/choice/yes' }, { value: 'false', label: 'no', msgid: 'play/choice/no' }, { value: 'auto', label: 'auto', msgid: 'play/choice/auto' }] },
+      { key: 'delimiter', label: 'Delimiter', msgid: 'play/option/delimiter', default: 'auto', choices: [{ value: 'auto', label: 'auto', msgid: 'play/choice/auto' }, { value: ',', label: ',' }, { value: ';', label: ';' }, { value: 'tab', label: 'tab', msgid: 'play/choice/tab' }, { value: '|', label: '|' }] },
+      { key: 'typed', label: 'Typed values', msgid: 'play/option/typed', default: 'off', choices: [{ value: 'off', label: 'off', msgid: 'play/choice/off' }, { value: 'on', label: 'on', msgid: 'play/choice/on' }] },
     ],
     run(source, data, options) {
+      const { t, say } = speech(options);
       const cfg = options?.config ?? {};
       const opts = {
         repair: cfg.repair === 'repair',
@@ -660,7 +726,7 @@ export const ENGINE_LIST = [
       // strict mode THROWS on the first RFC 4180 violation (with a code);
       // repair mode reads anyway and lists every fix — the lesson of the tab
       try { doc = parseCsvDocument(source.text ?? '', opts); }
-      catch (err) { return fail(msg(err), code(err), locate(err, 'text')); }
+      catch (err) { return fail(say(err), code(err), locate(err, 'text')); }
       const t1 = now();
       // one calm SCREEN (the summary note) plus the drill-down: the parsed
       // records, the sniffed dialect, the repairs, and the CSV round-trip
@@ -671,36 +737,43 @@ export const ENGINE_LIST = [
       const width = shown.reduce((w, r) => Math.max(w, Array.isArray(r) ? r.length : fields ? fields.length : 0), 0);
       const columns = fields ?? Array.from({ length: width }, (_, i) => String(i + 1));
       const rows = shown.map((r) => columns.map((c, i) => cell(fields ? r[c] : r[i])));
-      const delim = doc.dialect.delimiter === '\t' ? 'tab' : doc.dialect.delimiter;
-      const plural = (n) => (n === 1 ? '' : 's');
+      // a tab delimiter is named, as its option choice names it
+      const delimName = (d) => (d === '\t' ? t('play/choice/tab') : d);
+      const delim = delimName(doc.dialect.delimiter);
       const summary = [
-        `${delim}-delimited · ${doc.dialect.headers === false ? 'no header row' : 'header row'} · ${total} record${plural(total)}`
-          + (doc.repairs.length ? ` · ${doc.repairs.length} repair${plural(doc.repairs.length)}` : ' · clean')
-          + (total > shown.length ? ` · showing the first ${shown.length}` : ''),
-        ...doc.repairs.map((r) => `line ${r.line}: ${r.code} — ${r.message}`),
+        [
+          t('play/csv/delimited', { delimiter: delim }),
+          t(doc.dialect.headers === false ? 'play/csv/no-header' : 'play/csv/header'),
+          t('play/csv/records', { count: total }),
+          doc.repairs.length ? t('play/csv/repairs', { count: doc.repairs.length }) : t('play/csv/clean'),
+          ...(total > shown.length ? [t('play/csv/showing', { count: shown.length })] : []),
+        ].join(' · '),
+        ...doc.repairs.map((r) => t('play/csv/repair-line', { line: r.line, code: r.code, message: r.message })),
       ].join('\n');
       const roundtrip = stringifyCsv(doc.rows, { fields: fields ?? undefined, header: doc.dialect.headers !== false });
       const sniff = sniffCsvDialect(source.text ?? '');
       const t2 = now();
       return okPanels([
-        { id: 'summary', label: 'Summary', kind: 'note', tone: doc.repairs.length ? 'warn' : 'ok', text: summary },
-        { id: 'rows', label: `Rows (${total})`, kind: 'table', depth: 'deep', columns, rows },
+        { id: 'summary', label: t('play/panel/summary'), kind: 'note', tone: doc.repairs.length ? 'warn' : 'ok', text: summary },
+        { id: 'rows', label: t('play/panel/rows', { count: total }), kind: 'table', depth: 'deep', columns, rows },
         {
-          id: 'dialect', label: 'How it was read', kind: 'table', depth: 'deep',
-          columns: ['Property', 'Value'],
+          id: 'dialect', label: t('play/panel/dialect'), kind: 'table', depth: 'deep',
+          columns: [t('play/column/property'), t('play/column/value')],
           rows: [
-            ['delimiter', delim],
-            ['header row', String(doc.dialect.headers)],
-            ['sniffed', `${sniff.delimiter === '\t' ? 'tab' : sniff.delimiter} · ${sniff.width} columns · confidence ${sniff.confidence.toFixed(2)} · header ${sniff.headers}`],
-            ['records', String(total)],
+            [t('play/csv/delimiter'), delim],
+            [t('play/csv/header'), String(doc.dialect.headers)],
+            [t('play/csv/sniffed'), t('play/csv/sniff', {
+              delimiter: delimName(sniff.delimiter), width: sniff.width, confidence: sniff.confidence.toFixed(2), headers: sniff.headers,
+            })],
+            [t('play/csv/record-count'), String(total)],
           ],
         },
         ...(doc.repairs.length ? [{
-          id: 'repairs', label: `The repairs (${doc.repairs.length})`, kind: /** @type {'table'} */ ('table'), depth: /** @type {'deep'} */ ('deep'),
-          columns: ['Code', 'Line', 'Col', 'What was read'],
+          id: 'repairs', label: t('play/panel/repairs', { count: doc.repairs.length }), kind: /** @type {'table'} */ ('table'), depth: /** @type {'deep'} */ ('deep'),
+          columns: [t('play/column/code'), t('play/column/line'), t('play/column/col'), t('play/column/read')],
           rows: doc.repairs.map((r) => [r.code, String(r.line), String(r.column), r.message]),
         }] : []),
-        { id: 'roundtrip', label: 'CSV round-trip', kind: 'code', depth: 'deep', text: roundtrip },
+        { id: 'roundtrip', label: t('play/panel/csv-roundtrip'), kind: 'code', depth: 'deep', text: roundtrip },
       ], t1 - t0, t2 - t1);
     },
   },
@@ -710,34 +783,35 @@ export const ENGINE_LIST = [
     // is the operator document that runs the same kernel over the same
     // array (read as its data) — with its answer, and whether the two
     // doors answer the same when both answer (`sameAnswer`)
-    id: 'kernels', label: 'Core kernels', lead: 'The @jarenjs/core functions the $query operators run — geo, dates, math, text — called directly.',
-    sourcePanes: [{ key: 'args', label: 'Arguments — a JSON array', control: 'code' }],
+    id: 'kernels', label: 'Core kernels', msgid: 'play/engine/kernels', lead: 'The @jarenjs/core functions the $query operators run — geo, dates, math, text — called directly.',
+    sourcePanes: [{ key: 'args', label: 'Arguments — a JSON array', msgid: 'play/pane/args', control: 'code' }],
     dataPanes: [],
     optionPanes: [{
-      key: 'kernel', label: 'Kernel', default: KERNELS[0].value,
+      key: 'kernel', label: 'Kernel', msgid: 'play/option/kernel', default: KERNELS[0].value,
       choices: KERNELS.map((k) => ({ value: k.value, label: `${k.family} · ${k.value}` })),
       // each kernel takes its own arguments: a switch loads its example
       follow: 'example',
     }],
     run(source, data, options) {
+      const { t, say } = speech(options);
       // a value the choice list does not offer is the default kernel
       const kernel = KERNEL_BY_VALUE.get(options?.config?.kernel ?? '') ?? KERNELS[0];
-      const a = parseJson(source.args, 'args'); if (a.error) return failParse(a);
-      if (!Array.isArray(a.value)) return fail('args: expected a JSON array of the kernel\'s arguments', undefined, { pane: 'args' });
+      const a = parseJson(source.args, 'args', t); if (a.error) return failParse(a);
+      if (!Array.isArray(a.value)) return fail(t('play/error/args-array'), undefined, { pane: 'args' });
       let answer, deep; const t0 = now();
-      try { answer = kernel.call(a.value); deep = kernel.deep?.(a.value) ?? []; }
-      catch (err) { return fail(msg(err), code(err), locate(err, 'args')); }
+      try { answer = kernel.call(a.value, t); deep = kernel.deep?.(a.value, t) ?? []; }
+      catch (err) { return fail(say(err), code(err), locate(err, 'args')); }
       const t1 = now();
       const query = kernel.query(a.value);
       let queryAnswer, refusal;
       try { queryAnswer = compileJsonQuery(query)(a.value); }
       catch (err) { refusal = err; }
       return okPanels([
-        { id: 'out', label: kernel.signature, kind: 'code', text: fmt(answer) },
-        deepCode('query', 'The $query operator that runs it', fmt(query)),
-        deepCards('agree', 'The operator over the same arguments', [
-          { title: '$query answers', value: refusal === undefined ? fmt(queryAnswer) : `refused — ${msg(refusal)}` },
-          { title: 'Same answer', value: sameAnswer(answer, queryAnswer, refusal) },
+        { id: 'out', label: t(kernel.msgid), kind: 'code', text: fmt(answer, t) },
+        deepCode('query', t('play/panel/operator-query'), fmt(query, t)),
+        deepCards('agree', t('play/panel/operator-agree'), [
+          { title: t('play/card/query-answers'), value: refusal === undefined ? fmt(queryAnswer, t) : t('play/card/refused', { message: say(refusal) }) },
+          { title: t('play/card/same-answer'), value: sameAnswer(answer, queryAnswer, refusal, t) },
         ]),
         ...deep,
       ], null, t1 - t0);
@@ -746,24 +820,20 @@ export const ENGINE_LIST = [
   {
     id: 'validate', label: 'JSON Schema', lead: 'Compile a schema and validate data — every error, localized.',
     sourcePanes: [
-      { key: 'schema', label: 'Schema', control: 'code' },
-      { key: 'schemas', label: 'Referenced schemas', control: 'code' },
+      { key: 'schema', label: 'Schema', msgid: 'play/pane/schema', control: 'code' },
+      { key: 'schemas', label: 'Referenced schemas', msgid: 'play/pane/schemas', control: 'code' },
     ],
-    dataPanes: [{ key: 'data', label: 'Data' }],
+    dataPanes: [{ key: 'data', label: 'Data', msgid: 'play/pane/data' }],
     optionPanes: [{
-      key: 'locale', label: 'Messages', default: 'en',
-      // the @jarenjs/locales packs the host mounts; an unmounted code falls
-      // back to English in the host localizer, so the list is safe to declare
-      choices: [
-        { value: 'en', label: 'English' }, { value: 'nl', label: 'Nederlands' },
-        { value: 'fr', label: 'Français' }, { value: 'es', label: 'Español' },
-        { value: 'de', label: 'Deutsch' }, { value: 'pt', label: 'Português' },
-        { value: 'ja', label: '日本語' }, { value: 'ko', label: '한국어' },
-        { value: 'zh-tw', label: '繁體中文' }, { value: 'ru', label: 'Русский' },
-        { value: 'tr', label: 'Türkçe' }, { value: 'ar', label: 'العربية' },
-      ],
+      key: 'locale', label: 'Messages', msgid: 'play/option/messages', default: 'en',
+      // English, then every @jarenjs/locales pack, each named in its own
+      // language: derived from the packs' one list, so a pack added there
+      // is a choice here (and an example, see LOCALE_EXAMPLES); an
+      // unmounted code falls back to English in the host localizer
+      choices: [{ value: 'en', label: 'English' }, ...LOCALE_NAMES.map(({ code: value, name }) => ({ value, label: name }))],
     }],
     run(source, data, options) {
+      const { t, say } = speech(options);
       // the validator + locale packs are heavy and already cached in the
       // host — inject a `validate(schemaText, data, locale, schemas)` runner
       // (the hybrid seam, like the visual engines' renderers); `schemas` are
@@ -773,24 +843,26 @@ export const ENGINE_LIST = [
       if (typeof validate !== 'function') {
         return fail('the JSON Schema engine validates in the host — inject options.validate', 'PLAY_NO_VALIDATOR');
       }
-      const d = parseJson(data.data, 'data'); if (d.error) return failParse(d);
-      const referenced = parseReferencedSchemas(source.schemas); if (referenced.error) return failParse(referenced);
+      const d = parseJson(data.data, 'data', t); if (d.error) return failParse(d);
+      const referenced = parseReferencedSchemas(source.schemas, t); if (referenced.error) return failParse(referenced);
       const locale = options?.config?.locale ?? 'en';
       let report;
       try { report = validate(source.schema ?? '', d.value, locale, referenced.value); }
-      catch (err) { return fail(msg(err), code(err), locate(err)); }
+      catch (err) { return fail(say(err), code(err), locate(err)); }
       if (report.schemaError) return fail(report.schemaError, 'SCHEMA', { pane: typeof report.schemaPane === 'string' ? report.schemaPane : 'schema' });
       const errs = report.errors ?? [];
-      const summary = (report.valid ? '✓ valid' : `✗ ${errs.length} error${errs.length === 1 ? '' : 's'}`)
-        + ` · ${report.draft} · compiled ${formatMs(report.compileMs)} · validated ${formatMs(report.validateMs)}`;
-      const verdict = { id: 'verdict', label: 'Verdict', kind: 'note', tone: report.valid ? 'ok' : 'warn', text: summary };
+      const summary = [
+        report.valid ? t('play/verdict/valid') : t('play/verdict/errors', { count: errs.length }), String(report.draft),
+        t('play/timing/compiled', { ms: formatMs(report.compileMs) }), t('play/timing/validated', { ms: formatMs(report.validateMs) }),
+      ].join(' · ');
+      const verdict = { id: 'verdict', label: t('play/panel/verdict'), kind: 'note', tone: report.valid ? 'ok' : 'warn', text: summary };
       // the messages ARE the answer of a failing run, in the language the
       // Messages select names: they lead, on screen, and the verdict line is
       // the next tab — behind the drill-down, a language switch showed nothing
       const panels = errs.length === 0 ? [verdict] : [{
-        id: 'errors', label: `Errors (${errs.length})`, kind: 'table',
-        columns: ['path', 'message'],
-        rows: errs.map((e) => [e.instancePath === '' ? '(root)' : e.instancePath, e.message]),
+        id: 'errors', label: t('play/panel/errors', { count: errs.length }), kind: 'table',
+        columns: [t('play/column/instance-path'), t('play/column/message')],
+        rows: errs.map((e) => [e.instancePath === '' ? t('play/cell/root') : e.instancePath, e.message]),
       }, verdict];
       return okPanels(panels, report.compileMs ?? null, report.validateMs ?? null);
     },
@@ -802,19 +874,20 @@ export const ENGINE_LIST = [
     // host's mdx renderer (which owns @jarenjs/md/mdx + the query compiler)
     id: 'mdx', label: 'MDX', lead: 'Markdown × data — {$…} interpolation, {#if} and {#each} sections, rendered live.',
     sourcePanes: [{ key: 'source', label: 'Markdown', control: 'code' }],
-    dataPanes: [{ key: 'data', label: 'Data' }],
+    dataPanes: [{ key: 'data', label: 'Data', msgid: 'play/pane/data' }],
     run(source, data, options) {
+      const { t, say } = speech(options);
       const render = options?.renderers?.mdx;
       if (typeof render !== 'function') {
         return fail('the MDX engine renders in the host — inject options.renderers.mdx', 'PLAY_NO_RENDERER');
       }
-      const d = parseJson(data.data, 'data'); if (d.error) return failParse(d);
+      const d = parseJson(data.data, 'data', t); if (d.error) return failParse(d);
       const t0 = now();
       let view;
-      try { view = render(source.source ?? '', d.value); }
-      catch (err) { return fail(msg(err), code(err), locate(err, 'source')); }
+      try { view = render(source.source ?? '', d.value, { messages: options?.messages }); }
+      catch (err) { return fail(say(err), code(err), locate(err, 'source')); }
       const t1 = now();
-      return okPanels(renderedPanels(view), ...renderTiming(view, t1 - t0));
+      return okPanels(renderedPanels(view, t), ...renderTiming(view, t1 - t0));
     },
   },
   {
@@ -822,15 +895,16 @@ export const ENGINE_LIST = [
     // outcome, so run() returns a Promise — runExample and the hosts
     // pass a thenable Result through (PLAY-FORMAT §2)
     id: 'contract', label: 'Contract', lead: 'A $contract document — operations two ends may exchange, compiled, projected and dispatched in-process.',
-    sourcePanes: [{ key: 'document', label: '$contract document', control: 'code' }],
-    dataPanes: [{ key: 'call', label: 'Dispatch — { "op", "input" }' }],
-    async run(source, data) {
-      const d = parseJson(source.document, 'document'); if (d.error) return failParse(d);
+    sourcePanes: [{ key: 'document', label: '$contract document', msgid: 'play/pane/contract', control: 'code' }],
+    dataPanes: [{ key: 'call', label: 'Dispatch — { "op", "input" }', msgid: 'play/pane/call' }],
+    async run(source, data, options) {
+      const { t, say } = speech(options);
+      const d = parseJson(source.document, 'document', t); if (d.error) return failParse(d);
       let contract; const t0 = now();
       // a compile refusal is the engine's lesson: a stable JC00xx code
       // with the JSON Pointer of the member at fault
       try { contract = compileContract(d.value); }
-      catch (err) { return fail(msg(err), code(err), locate(err, 'document')); }
+      catch (err) { return fail(say(err), code(err), locate(err, 'document')); }
       const t1 = now();
       let openapi, types;
       try {
@@ -842,7 +916,7 @@ export const ENGINE_LIST = [
         });
         types = toTypeScript(contract);
       }
-      catch (err) { return fail(msg(err), code(err), locate(err, 'document')); }
+      catch (err) { return fail(say(err), code(err), locate(err, 'document')); }
       // the dispatch pane: an op + input run against trivial echo
       // handlers over the local binding — the whole pipeline with no
       // network. Output validation is DECLARED off (a capability the
@@ -850,36 +924,39 @@ export const ENGINE_LIST = [
       // refuses a bad input with its outcome, which is the lesson.
       /** @type {import('./index.js').Panel} */
       let dispatch = {
-        id: 'dispatch', label: 'Dispatch', kind: 'note', tone: 'info',
-        text: 'Type { "op": "<operation id>", "input": { … } } in the Dispatch pane to run an operation against echo handlers (validateOutput declared \'never\').',
+        id: 'dispatch', label: t('play/panel/dispatch'), kind: 'note', tone: 'info',
+        text: t('play/note/dispatch-hint'),
       };
       if (String(data.call ?? '').trim() !== '') {
-        const call = parseJson(data.call, 'call'); if (call.error) return failParse(call);
+        const call = parseJson(data.call, 'call', t); if (call.error) return failParse(call);
         const op = call.value !== null && typeof call.value === 'object' ? call.value.op : undefined;
         if (typeof op !== 'string') {
-          dispatch = { id: 'dispatch', label: 'Dispatch', kind: 'note', tone: 'warn', text: 'the call must be an object naming an "op" (and optionally an "input")' };
+          dispatch = { id: 'dispatch', label: t('play/panel/dispatch'), kind: 'note', tone: 'warn', text: t('play/note/dispatch-call') };
         }
         else {
           /** @type {Record<string, (input: any) => any>} */
           const handlers = {};
           for (const id of Object.keys(contract.operations)) handlers[id] = (input) => input;
-          const client = openLocalClient(contract, handlers, { validateOutput: 'never' });
+          // the host's catalog words the outcome messages the client writes
+          const client = openLocalClient(contract, handlers, {
+            validateOutput: 'never', ...(options?.messages == null ? {} : { catalog: options.messages }),
+          });
           try {
             const outcome = await client.invoke(op, call.value.input ?? {});
-            dispatch = { id: 'dispatch', label: 'Dispatch (echo)', kind: 'code', text: fmt(outcome) };
+            dispatch = { id: 'dispatch', label: t('play/panel/dispatch-echo'), kind: 'code', text: fmt(outcome, t) };
           }
           catch (err) {
             // a host mistake (JC1005: unknown, opaque or subscribe
             // operation) is the panel's answer, not an engine failure
-            dispatch = { id: 'dispatch', label: 'Dispatch', kind: 'note', tone: 'warn', text: msg(err) };
+            dispatch = { id: 'dispatch', label: t('play/panel/dispatch'), kind: 'note', tone: 'warn', text: say(err) };
           }
           finally { client.close(); }
         }
       }
       const t2 = now();
       return okPanels([
-        { id: 'describe', label: 'describe()', kind: 'code', text: fmt(contract.describe()) },
-        { id: 'openapi', label: 'OpenAPI', kind: 'code', text: fmt(openapi.document) },
+        { id: 'describe', label: 'describe()', kind: 'code', text: fmt(contract.describe(), t) },
+        { id: 'openapi', label: 'OpenAPI', kind: 'code', text: fmt(openapi.document, t) },
         { id: 'types', label: 'TypeScript', kind: 'code', text: types },
         dispatch,
       ], t1 - t0, t2 - t1);
@@ -894,22 +971,23 @@ export const ENGINE_LIST = [
     sourcePanes: [{ key: 'schema', label: 'JSON Schema', control: 'code' }],
     dataPanes: [],
     optionPanes: [
-      { key: 'target', label: 'Target', default: 'typescript', choices: [{ value: 'typescript', label: 'TypeScript' }, { value: 'markdown', label: 'Markdown' }] },
-      { key: 'objects', label: 'Objects', default: 'open', choices: [{ value: 'open', label: 'open' }, { value: 'closed', label: 'closed' }] },
+      { key: 'target', label: 'Target', msgid: 'play/option/target', default: 'typescript', choices: [{ value: 'typescript', label: 'TypeScript' }, { value: 'markdown', label: 'Markdown' }] },
+      { key: 'objects', label: 'Objects', msgid: 'play/option/objects', default: 'open', choices: [{ value: 'open', label: 'open', msgid: 'play/choice/open' }, { value: 'closed', label: 'closed', msgid: 'play/choice/closed' }] },
       {
-        key: 'normalize', label: 'Normalizer', default: 'none',
+        key: 'normalize', label: 'Normalizer', msgid: 'play/option/normalizer', default: 'none',
         choices: [
-          { value: 'none', label: 'none' }, { value: 'defaults', label: 'defaults' },
-          { value: 'coerce', label: 'coercion' }, { value: 'both', label: 'both' },
+          { value: 'none', label: 'none', msgid: 'play/choice/none' }, { value: 'defaults', label: 'defaults', msgid: 'play/choice/defaults' },
+          { value: 'coerce', label: 'coercion', msgid: 'play/choice/coercion' }, { value: 'both', label: 'both', msgid: 'play/choice/both' },
         ],
       },
     ],
     run(source, data, options) {
-      const s = parseJson(source.schema, 'schema'); if (s.error) return failParse(s);
+      const { t, say } = speech(options);
+      const s = parseJson(source.schema, 'schema', t); if (s.error) return failParse(s);
       // a schema is an object or a boolean; the emitter answers any other
       // value with an empty file, which a learner would read as a result
       if (s.value === null || (typeof s.value !== 'object' && typeof s.value !== 'boolean') || Array.isArray(s.value)) {
-        return fail('schema: expected a JSON Schema, an object or a boolean', undefined, { pane: 'schema' });
+        return fail(t('play/error/schema-kind'), undefined, { pane: 'schema' });
       }
       const cfg = options?.config ?? {};
       const normalize = cfg.normalize === 'defaults' ? { useDefaults: true }
@@ -917,15 +995,15 @@ export const ENGINE_LIST = [
           : cfg.normalize === 'both' ? { useDefaults: true, coerceTypes: true } : null;
       let model; const t0 = now();
       try { model = compileEmitModel(s.value, { openObjects: cfg.objects === 'closed' ? 'closed' : 'open', normalize }); }
-      catch (err) { return fail(msg(err), code(err), locate(err, 'schema')); }
+      catch (err) { return fail(say(err), code(err), locate(err, 'schema')); }
       const t1 = now();
       let text;
       try { text = cfg.target === 'markdown' ? renderMarkdown(model) : renderTypeScript(model, { banner: false }); }
-      catch (err) { return fail(msg(err), code(err), locate(err, 'schema')); }
+      catch (err) { return fail(say(err), code(err), locate(err, 'schema')); }
       const t2 = now();
-      return ok(text, t1 - t0, t2 - t1, [
+      return ok(t, text, t1 - t0, t2 - t1, [
         // the machinery: the language-neutral model both renderers read
-        deepCode('model', 'The type model', fmt(model)),
+        deepCode('model', t('play/panel/type-model'), fmt(model, t)),
       ]);
     },
   },
@@ -933,9 +1011,9 @@ export const ENGINE_LIST = [
   visual('markdown', 'Markdown', 'CommonMark + GFM + frontmatter → a JSON AST, rendered live.', { sourceLabel: 'Markdown' }),
   visual('mermaid', 'Mermaid', 'Diagrams-as-code → a geometry-free AST → pure-vnode SVG.', { sourceLabel: 'Mermaid' }),
   visual('charts', 'Charts', 'A JSON / JSONX / JOSL chart definition → schema-validated → pure-vnode SVG.', {
-    sourceLabel: 'Chart definition',
+    sourceLabel: 'Chart definition', sourceMsgid: 'play/pane/chart',
     optionPanes: [{
-      key: 'format', label: 'Format', default: 'json',
+      key: 'format', label: 'Format', msgid: 'play/option/format', default: 'json',
       choices: [{ value: 'json', label: 'JSON' }, { value: 'jsonx', label: 'JSONX' }, { value: 'josl', label: 'JOSL' }],
       convert: convertDefinition,
     }],

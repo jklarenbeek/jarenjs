@@ -113,7 +113,8 @@ export const CATALOGS = deepFreeze({
     "JQ2003": [
       "code",
       "docPath"
-    ]
+    ],
+    "app/not-json": []
   },
   "forms": {
     "form/required": [],

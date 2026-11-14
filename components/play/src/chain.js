@@ -23,6 +23,9 @@
  * only by a name on the closed list.
  */
 import { from } from '@jarenjs/linq';
+import { playText } from './messages.js';
+
+/** @typedef {(id: string, params?: Record<string, unknown>) => string} Text */
 
 /** The chain operators the reader offers: each returns a new `Sequence`.
  * Terminals run the chain, so they are not here — the engine answers with
@@ -57,14 +60,15 @@ const TERMINALS = new Set([
   'last', 'lastOrDefault', 'elementAt', 'elementAtOrDefault', 'count', 'sum', 'average', 'min', 'max', 'any', 'all',
 ]);
 
-/** The JavaScript operators a proxy cannot capture, and the method that spells each. */
+/** The JavaScript operators a proxy cannot capture, and the method that spells each
+ * (a spelling that needs words is a message id). */
 const OPERATORS = {
   __proto__: null,
   '===': '.eq()', '==': '.eq()', '!==': '.ne()', '!=': '.ne()',
   '>=': '.ge()', '<=': '.le()', '>': '.gt()', '<': '.lt()',
   '&&': '.and()', '||': '.or()', '??': '.or()', '!': '.not()',
-  '+': '.add() (or .concat() for text)', '-': '.sub() (or .neg())', '*': '.mul()', '/': '.div()', '%': '.mod()',
-  '?': '.and() and .or()',
+  '+': 'play/chain/spell-add', '-': 'play/chain/spell-sub', '*': '.mul()', '/': '.div()', '%': '.mod()',
+  '?': 'play/chain/spell-conditional',
 };
 const OPERATOR_TOKENS = ['===', '!==', '==', '!=', '>=', '<=', '&&', '||', '??', '>', '<', '!', '+', '-', '*', '/', '%', '?'];
 const PUNCTUATION = ['=>', '(', ')', '{', '}', '[', ']', '.', ',', ':', ';'];
@@ -90,8 +94,8 @@ export class ChainError extends Error {
 
 /** @typedef {{ type: string, value?: any, pos: number }} Token */
 
-/** @param {string} text @returns {Token[]} */
-function tokenize(text) {
+/** @param {string} text @param {Text} t @returns {Token[]} */
+function tokenize(text, t) {
   /** @type {Token[]} */
   const tokens = [];
   let i = 0;
@@ -101,7 +105,7 @@ function tokenize(text) {
     if (text.startsWith('//', i)) { const nl = text.indexOf('\n', i); i = nl < 0 ? text.length : nl; continue; }
     if (text.startsWith('/*', i)) {
       const end = text.indexOf('*/', i + 2);
-      if (end < 0) throw new ChainError('a comment opened here is never closed', i);
+      if (end < 0) throw new ChainError(t('play/chain/comment'), i);
       i = end + 2; continue;
     }
     NAME.lastIndex = i; NUMBER.lastIndex = i;
@@ -109,20 +113,20 @@ function tokenize(text) {
     if (name) { tokens.push({ type: 'name', value: name[0], pos: i }); i += name[0].length; continue; }
     const number = NUMBER.exec(text);
     if (number) { tokens.push({ type: 'literal', value: Number(number[0]), pos: i }); i += number[0].length; continue; }
-    if (c === '"' || c === "'") { const [value, end] = readString(text, i); tokens.push({ type: 'literal', value, pos: i }); i = end; continue; }
-    if (c === '`') throw new ChainError('a template literal is not read — join text with .concat()', i);
+    if (c === '"' || c === "'") { const [value, end] = readString(text, i, t); tokens.push({ type: 'literal', value, pos: i }); i = end; continue; }
+    if (c === '`') throw new ChainError(t('play/chain/template-literal'), i);
     const punct = PUNCTUATION.find((p) => text.startsWith(p, i));
     if (punct) { tokens.push({ type: punct, pos: i }); i += punct.length; continue; }
     const op = OPERATOR_TOKENS.find((p) => text.startsWith(p, i));
     if (op) { tokens.push({ type: 'op', value: op, pos: i }); i += op.length; continue; }
-    throw new ChainError(`unexpected character ${JSON.stringify(c)}`, i);
+    throw new ChainError(t('play/chain/character', { character: JSON.stringify(c) }), i);
   }
   tokens.push({ type: 'end', pos: text.length });
   return tokens;
 }
 
-/** @param {string} text @param {number} start @returns {[string, number]} */
-function readString(text, start) {
+/** @param {string} text @param {number} start @param {Text} t @returns {[string, number]} */
+function readString(text, start, t) {
   const quote = text[start];
   let out = '';
   for (let i = start + 1; i < text.length; i++) {
@@ -132,66 +136,75 @@ function readString(text, start) {
     if (c !== '\\') { out += c; continue; }
     const e = text[++i];
     if (e === 'u' && /^[0-9a-fA-F]{4}$/.test(text.slice(i + 1, i + 5))) { out += String.fromCharCode(parseInt(text.slice(i + 1, i + 5), 16)); i += 4; continue; }
-    if (e === undefined || ESCAPES[e] === undefined) throw new ChainError(`an unknown escape \\${e ?? ''}`, i - 1);
+    if (e === undefined || ESCAPES[e] === undefined) throw new ChainError(t('play/chain/escape', { escape: e ?? '' }), i - 1);
     out += ESCAPES[e];
   }
-  throw new ChainError('a string opened here is never closed', start);
+  throw new ChainError(t('play/chain/string'), start);
 }
 
-/** The operator refusal: what the proxy cannot capture, and its spelling. @param {Token} t */
-function operatorRefusal(t) {
-  return new ChainError(`a callback cannot capture the JavaScript operator ${t.value} — spell it with ${OPERATORS[t.value]}`, t.pos);
+/** The operator refusal: what the proxy cannot capture, and its spelling. @param {Token} token @param {Text} t */
+function operatorRefusal(token, t) {
+  const spelling = OPERATORS[token.value];
+  return new ChainError(t('play/chain/operator', {
+    operator: token.value, spelling: spelling.startsWith('play/') ? t(spelling) : spelling,
+  }), token.pos);
 }
 
 /** A recursive-descent reader over the token list, building a small tree. */
 class Reader {
-  /** @param {Token[]} tokens */
-  constructor(tokens) { this.tokens = tokens; this.i = 0; }
+  /** @param {Token[]} tokens @param {Text} t */
+  constructor(tokens, t) { this.tokens = tokens; this.i = 0; this.t = t; }
   get peek() { return this.tokens[this.i]; }
   /** @param {number} n */
   ahead(n) { return this.tokens[Math.min(this.i + n, this.tokens.length - 1)]; }
-  /** @param {string} type @param {string} what */
-  expect(type, what) {
-    const t = this.peek;
-    if (t.type !== type) throw this.unexpected(what);
+  /**
+   * @param {string} type
+   * @param {string} what - what was expected: a message id, or the
+   *   punctuation itself where no word is needed (`'('`)
+   * @param {Record<string, unknown>} [params] - the id's parameters
+   */
+  expect(type, what, params) {
+    const token = this.peek;
+    if (token.type !== type) throw this.unexpected(what, params);
     this.i++;
-    return t;
+    return token;
   }
-  /** @param {string} what */
-  unexpected(what) {
-    const t = this.peek;
-    if (t.type === 'op') return operatorRefusal(t);
-    const seen = t.type === 'end' ? 'the end of the chain' : t.type === 'name' ? `'${t.value}'`
-      : t.type === 'literal' ? JSON.stringify(t.value) : `'${t.type}'`;
-    return new ChainError(`expected ${what}, found ${seen}`, t.pos);
+  /** @param {string} what - a message id, or punctuation @param {Record<string, unknown>} [params] */
+  unexpected(what, params) {
+    const token = this.peek;
+    if (token.type === 'op') return operatorRefusal(token, this.t);
+    const seen = token.type === 'end' ? this.t('play/chain/end') : token.type === 'name' ? `'${token.value}'`
+      : token.type === 'literal' ? JSON.stringify(token.value) : `'${token.type}'`;
+    const expected = what.startsWith('play/') ? this.t(what, params) : what;
+    return new ChainError(this.t('play/chain/expected', { expected, found: seen }), token.pos);
   }
 
   /** The whole pane: one chain, an optional `;`, nothing after. */
   program() {
     const chain = this.chain();
     if (this.peek.type === ';') this.i++;
-    if (this.peek.type !== 'end') throw this.unexpected('the end of the chain');
+    if (this.peek.type !== 'end') throw this.unexpected('play/chain/end');
     return chain;
   }
 
   /** `from(data)` then `.operator(args)` calls. */
   chain() {
     const start = this.peek;
-    if (start.type !== 'name' || start.value !== 'from') throw new ChainError('a chain starts with from(data) — the Data pane is its source', start.pos);
+    if (start.type !== 'name' || start.value !== 'from') throw new ChainError(this.t('play/chain/start'), start.pos);
     this.i++;
-    this.expect('(', "'(' after from");
+    this.expect('(', 'play/chain/paren-after-from');
     const source = this.peek;
-    if (source.type !== 'name' || source.value !== 'data') throw new ChainError('from() reads the Data pane: write from(data)', source.pos);
+    if (source.type !== 'name' || source.value !== 'data') throw new ChainError(this.t('play/chain/from-data'), source.pos);
     this.i++;
-    this.expect(')', "')' after from(data");
+    this.expect(')', 'play/chain/paren-after-data');
     const calls = [];
     while (this.peek.type === '.') {
       this.i++;
-      const name = this.expect('name', 'a chain operator');
+      const name = this.expect('name', 'play/chain/chain-operator');
       if (!CHAIN.has(name.value)) {
         throw new ChainError(TERMINALS.has(name.value)
-          ? `${name.value}() is a terminal: it runs the chain, and this engine shows the chain's document beside its toArray() answer — end the chain before ${name.value}()`
-          : `${name.value} is not a chain operator here (${CHAIN_METHODS.join(', ')})`, name.pos);
+          ? this.t('play/chain/terminal', { name: name.value })
+          : this.t('play/chain/not-operator', { name: name.value, operators: CHAIN_METHODS.join(', ') }), name.pos);
       }
       calls.push({ name: name.value, pos: name.pos, args: this.args(() => this.chainArgument()) });
     }
@@ -207,7 +220,7 @@ class Reader {
       if (this.peek.type !== ',') break;
       this.i++;
     }
-    this.expect(')', "',' or ')'");
+    this.expect(')', 'play/chain/comma-or-paren');
     return out;
   }
 
@@ -236,11 +249,11 @@ class Reader {
   lambda() {
     /** @type {string[]} */
     const params = [];
-    if (this.peek.type === 'name') params.push(this.expect('name', 'a parameter').value);
+    if (this.peek.type === 'name') params.push(this.expect('name', 'play/chain/parameter').value);
     else {
       this.expect('(', "'('");
       while (this.peek.type === 'name') {
-        params.push(this.expect('name', 'a parameter').value);
+        params.push(this.expect('name', 'play/chain/parameter').value);
         if (this.peek.type !== ',') break;
         this.i++;
       }
@@ -248,7 +261,7 @@ class Reader {
     }
     this.expect('=>', "'=>'");
     if (this.peek.type === '{') {
-      throw new ChainError('a callback body that opens with { is a block in JavaScript, not an object — wrap the object in parentheses: (u) => ({ … })', this.peek.pos);
+      throw new ChainError(this.t('play/chain/block'), this.peek.pos);
     }
     return { type: 'lambda', params, body: this.expression(params) };
   }
@@ -278,8 +291,8 @@ class Reader {
       if (t.value === 'null') return { type: 'literal', value: null, captured: false, pos: t.pos };
       if (scope !== null && scope.includes(t.value)) return { type: 'binding', name: t.value, captured: true, pos: t.pos };
       throw new ChainError(scope === null
-        ? `'${t.value}' is not a value here — a chain operator takes a callback, a literal or from(data)`
-        : `'${t.value}' is not a parameter of this callback (${scope.join(', ') || 'it has none'}) — a callback reads only its own parameters`, t.pos);
+        ? this.t('play/chain/not-value', { name: t.value })
+        : this.t('play/chain/not-parameter', { name: t.value, parameters: scope.join(', ') || this.t('play/chain/no-parameters') }), t.pos);
     }
     if (t.type === '[') {
       this.i++;
@@ -289,7 +302,7 @@ class Reader {
         if (this.peek.type !== ',') break;
         this.i++;
       }
-      this.expect(']', "',' or ']'");
+      this.expect(']', 'play/chain/comma-or-bracket');
       return { type: 'array', items, captured: false, pos: t.pos };
     }
     if (t.type === '{') {
@@ -297,14 +310,14 @@ class Reader {
       const members = [];
       while (this.peek.type !== '}') {
         const key = this.peek;
-        if (key.type !== 'name' && !(key.type === 'literal' && typeof key.value === 'string')) throw this.unexpected('a member name');
+        if (key.type !== 'name' && !(key.type === 'literal' && typeof key.value === 'string')) throw this.unexpected('play/chain/member-name');
         this.i++;
-        this.expect(':', `':' after the member ${JSON.stringify(key.value)}`);
+        this.expect(':', 'play/chain/colon', { name: JSON.stringify(key.value) });
         members.push([String(key.value), this.expression(scope)]);
         if (this.peek.type !== ',') break;
         this.i++;
       }
-      this.expect('}', "',' or '}'");
+      this.expect('}', 'play/chain/comma-or-brace');
       return { type: 'object', members, captured: false, pos: t.pos };
     }
     if (t.type === '(') {
@@ -313,18 +326,18 @@ class Reader {
       this.expect(')', "')'");
       return inner;
     }
-    throw this.unexpected('a value');
+    throw this.unexpected('play/chain/value');
   }
 
   /** `.member`, `.method(args)` @param {any} node @param {string[] | null} scope */
   postfix(node, scope) {
     for (;;) {
       const t = this.peek;
-      if (t.type === '[') throw new ChainError('an index is written .at(i), and an odd member name .get(\'…\')', t.pos);
+      if (t.type === '[') throw new ChainError(this.t('play/chain/index'), t.pos);
       if (t.type !== '.') return node;
-      if (!node.captured) throw new ChainError('a literal has no members here — only a callback\'s parameters are read with "."', t.pos);
+      if (!node.captured) throw new ChainError(this.t('play/chain/literal-members'), t.pos);
       this.i++;
-      const name = this.expect('name', 'a member or method name');
+      const name = this.expect('name', 'play/chain/member-or-method');
       if (this.peek.type === '(') {
         node = { type: 'call', target: node, name: name.value, pos: name.pos, args: this.args(() => this.expression(scope)), captured: true };
       }
@@ -350,48 +363,48 @@ function at(fn, pos) {
   }
 }
 
-/** @param {any} node @param {Map<string, any>} bindings @param {any} source @param {object} options */
-function evaluate(node, bindings, source, options) {
+/** @param {any} node @param {Map<string, any>} bindings @param {any} source @param {object} options @param {Text} t */
+function evaluate(node, bindings, source, options, t) {
   switch (node.type) {
     case 'literal': return node.value;
-    case 'array': return node.items.map((n) => evaluate(n, bindings, source, options));
-    case 'object': return ownObject(node.members.map(([k, n]) => [k, evaluate(n, bindings, source, options)]));
+    case 'array': return node.items.map((n) => evaluate(n, bindings, source, options, t));
+    case 'object': return ownObject(node.members.map(([k, n]) => [k, evaluate(n, bindings, source, options, t)]));
     case 'binding': {
       const value = bindings.get(node.name);
-      if (value === undefined) throw new ChainError(`'${node.name}' receives nothing here — this callback is handed fewer arguments`, node.pos);
+      if (value === undefined) throw new ChainError(t('play/chain/receives-nothing', { name: node.name }), node.pos);
       return value;
     }
     case 'member': {
-      const target = evaluate(node.target, bindings, source, options);
+      const target = evaluate(node.target, bindings, source, options, t);
       // the target is a recording proxy (provenance), so this read is its trap
       const value = at(() => target[node.name], node.pos);
       // a method name read without its call is a function, which JavaScript
       // would hand on as a wrong value; a parameter of that name (`p.min`) is
       // a member of the parameters proxy and reads as one
       if (typeof value === 'function' && (EXPRESSION.has(node.name) || node.name === 'toJSON')) {
-        throw new ChainError(`.${node.name} is a method: call it, .${node.name}(…), or read a member of that name with .get('${node.name}')`, node.pos);
+        throw new ChainError(t('play/chain/method-read', { name: node.name }), node.pos);
       }
       return value;
     }
     case 'call': {
-      const target = evaluate(node.target, bindings, source, options);
-      const args = node.args.map((n) => evaluate(n, bindings, source, options));
+      const target = evaluate(node.target, bindings, source, options, t);
+      const args = node.args.map((n) => evaluate(n, bindings, source, options, t));
       return at(() => {
         // the target is a recording proxy (provenance), so this read is its
         // trap: an expression method, or a member — callable only when it is
         // named like a host method, whose call is the proxy's own refusal
         const fn = target[node.name];
-        if (typeof fn !== 'function') throw new ChainError(`.${node.name}() is not a method of the expression surface`, node.pos);
+        if (typeof fn !== 'function') throw new ChainError(t('play/chain/not-method', { name: node.name }), node.pos);
         return fn(...args);
       }, node.pos);
     }
     case 'lambda':
       return (/** @type {any[]} */ ...received) => evaluate(node.body,
-        new Map(node.params.map((/** @type {string} */ p, /** @type {number} */ i) => [p, received[i]])), source, options);
+        new Map(node.params.map((/** @type {string} */ p, /** @type {number} */ i) => [p, received[i]])), source, options, t);
     case 'chain': {
       let seq = at(() => from(source, options), node.pos);
       for (const call of node.calls) {
-        const args = call.args.map((n) => evaluate(n, bindings, source, options));
+        const args = call.args.map((n) => evaluate(n, bindings, source, options, t));
         seq = at(() => seq[call.name](...args), call.pos);
       }
       return seq;
@@ -405,11 +418,15 @@ function evaluate(node, bindings, source, options) {
  * Read a chain's text and replay it against `@jarenjs/linq` over `source`.
  * @param {string} text - the Chain pane: `from(data).where(…)…`
  * @param {any} source - the parsed Data pane `from(data)` reads
- * @param {object} [options] - `from()`'s options (`compileTypeTest`)
+ * @param {{ messages?: Readonly<Record<string, unknown>>, [option: string]: unknown }} [options] - `from()`'s
+ *   options (`compileTypeTest`), plus `messages`: the compiled catalog the
+ *   reader words its refusals in (English when absent)
  * @returns {import('@jarenjs/linq').Sequence<any>}
  * @throws {ChainError} on text the reader refuses, located at its position
  */
 export function readChain(text, source, options = {}) {
-  const tree = new Reader(tokenize(text)).program();
-  return evaluate(tree, new Map(), source, options);
+  const { messages, ...fromOptions } = options;
+  const t = playText(messages);
+  const tree = new Reader(tokenize(text, t), t).program();
+  return evaluate(tree, new Map(), source, fromOptions, t);
 }

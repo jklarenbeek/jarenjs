@@ -259,7 +259,7 @@ const app = createApp({
 });
 
 app.dispatch('stamp', new Date(0));
-// JA2005 [ { instancePath: '/at', message: 'is not a JSON value' } ] — not applied
+// JA2005 [ { instancePath: '/at', keyword: 'json', msgid: 'app/not-json', params: {}, message: 'is not a JSON value' } ] — not applied
 app.dispatch('stamp', new Date(0).toISOString());
 app.getState();   // { at: '1970-01-01T00:00:00.000Z' }
 ```

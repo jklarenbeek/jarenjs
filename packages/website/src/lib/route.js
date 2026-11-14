@@ -28,3 +28,16 @@ export function parseHash(hash) {
   }
   return { page: PAGES.has(page) ? page : 'home', params };
 }
+
+/**
+ * The hash of a parsed route without one of its params — how a link
+ * param that applies once (`?lang=`) leaves the address bar, so a reload
+ * keeps what the reader chose since.
+ * @param {{ page: string, params: Record<string, string> }} route
+ * @param {string} name - the param to drop
+ * @returns {string}
+ */
+export function hashWithout(route, name) {
+  const query = new URLSearchParams(Object.entries(route.params).filter(([key]) => key !== name)).toString();
+  return `#/${route.page === 'home' ? '' : route.page}${query === '' ? '' : `?${query}`}`;
+}

@@ -244,7 +244,10 @@ shape for each:
   the depth toggle — so the package never imports `@jarenjs/md`, `/mermaid`
   or `/charts`. The renderer's second argument is the option-pane config,
   except `mdx`, which receives the PARSED data document (markdown × data is
-  a two-input engine). A renderer that reports `compileMs`/`runMs` is
+  a two-input engine). Its third argument is `{ messages }`, the run's
+  compiled catalog, so the words a host renders (md's accessible names
+  through `labelsFromCatalog`, its deep panels' labels) can speak the
+  reader's language. A renderer that reports `compileMs`/`runMs` is
   believed; one that does not leaves the package holding a single
   wall-clock number for the whole call, which it attributes to the RUN and
   leaves the compile `null` — it never invents a figure it did not measure.
@@ -256,6 +259,19 @@ shape for each:
   locates the error at that pane instead of `schema`), so the compiled validator and the
   `@jarenjs/locales` packs stay in the host.
 - `operators` — a registry threaded to the `query`/`jslt`/`jtlt` engines.
+- `messages` — the reader's language: a COMPILED catalog
+  (`compileMessageCatalog` over a `@jarenjs/locales` pack, say). Every word
+  the playground writes (pane, option and choice labels, result panels and
+  stat cards, the verdict and timing lines, the location phrases, its own
+  refusals) is an id of `playMessagesEn`, rendered through the catalog and
+  falling back to English per id; the same catalog words a `$query` error
+  that names its sentence (`renderQueryMessage`) and the contract engine's
+  dispatch outcome (the local client's `catalog`). Engine and format names,
+  the engines' `lead` lines (rendered `lang="en"`), the example library and
+  the compilers' own messages stay English. A result keeps the language it
+  ran in, so a host re-runs after the language changes. The component's
+  view model takes the same catalog (`viewModel(state, { messages })`) and
+  exposes the chrome's words as its `t` record.
 
 A missing seam is an honest error Result (`PLAY_NO_RENDERER` /
 `PLAY_NO_VALIDATOR`), never a throw. Read-only result panels are

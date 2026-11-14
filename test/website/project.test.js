@@ -277,7 +277,8 @@ describe('file management (open a template, add / delete / rename)', () => {
   it('add-file appends a fresh file of a kind and activates it', () => {
     const { app, container } = mountSite();
     const before = app.getState().project.files.length;
-    const select = find(container, (n) => n.tagName === 'select');
+    // the add-file select (the header's language switch is a select too)
+    const select = find(container, (n) => n.tagName === 'select' && (n.childNodes ?? []).some((o) => o.getAttribute?.('value') === 'schema'));
     fire(select, 'change', { target: { value: 'schema' } });
     const p = app.getState().project;
     assert.strictEqual(p.files.length, before + 1, 'a file was added');

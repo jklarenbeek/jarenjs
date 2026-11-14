@@ -11,11 +11,16 @@ import * as assert from 'node:assert';
 
 import { EXAMPLES } from '@jarenjs/play';
 import { runPlay } from '../../packages/website/src/boundaries/play.js';
+import { addLocalePack } from '../../packages/website/src/boundaries/validator.js';
+import { loadLocalePack } from '../../packages/website/src/boundaries/lang.js';
+import { LOCALE_NAMES } from '@jarenjs/locales/names';
 import { mermaid } from '../../packages/website/src/boundaries/mermaid.js';
 
 /** Run one example over one dataset with the host's runner. */
 function runOver(ex, dataset) {
-  const slice = { engine: ex.engine, source: { ...ex.source }, data: { ...(dataset?.data ?? {}) }, config: { ...(ex.config ?? {}) } };
+  // an example made to show a language runs in it, as on the site
+  const slice = { engine: ex.engine, source: { ...ex.source }, data: { ...(dataset?.data ?? {}) }, config: { ...(ex.config ?? {}) },
+    exampleLocale: ex.config?.locale ?? null };
   return Promise.resolve(runPlay(slice));
 }
 
@@ -51,6 +56,8 @@ describe('play examples through the site renderers', () => {
   });
 
   it('each locale example localizes the errors the English run reports', async () => {
+    // the packs load on demand on the site; a headless run loads them first
+    for (const { code } of LOCALE_NAMES) addLocalePack(code, /** @type {any} */ (await loadLocalePack(code)));
     const locales = EXAMPLES.filter((e) => e.id.startsWith('validate-locale-'));
     assert.ok(locales.length >= 11, `only ${locales.length} locale examples`);
     for (const ex of locales) {

@@ -48,6 +48,8 @@ export const formulaMessagesEn = Object.freeze({
   'query/formula/computed-unnamed': '{formulaId}: computed references require a named target',
   'query/formula/computed-cycle': '{formulaId}: computed dependency cycle',
   'query/formula/computed-unknown': '{formulaId}: unknown computed target',
+  // JQ2013: a batch cell whose computed input produced no value
+  'query/formula/computed-missing': '{formulaId}: computed dependency has no value',
   'query/formula/targets-invalid': '{formulaId}: invalid target list',
   'query/formula/target-identity': '{formulaId}: unique target identity and boolean enabled required',
   'query/formula/target-schemas': '{formulaId}: target schemas must be an object of id -> {{version, schema}',

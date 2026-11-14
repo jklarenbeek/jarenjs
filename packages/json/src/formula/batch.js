@@ -4,20 +4,51 @@ import { createBoundedCache } from '@jarenjs/core/cache';
 import { setObjectMember, semanticKey } from '@jarenjs/core/object';
 import { canonicalizeJson } from '../canonical.js';
 import { createFormulaCompiler } from './index.js';
+import { JsonQueryCompileError, JsonQueryRuntimeError } from '../query/errors.js';
+import { renderMessageId } from '../message-ref.js';
+import { formulaMessagesEn } from './messages.js';
 import { FormulaError, causeCode, causePath, formulaMessage, snapshot, credit, FORMULA_OPTIONS, checkFormulaOptions } from './shared.js';
+
+/**
+ * The message reference of a formula or query error (`messageId` and
+ * `params`, so a locale pack renders it), copied as plain JSON and only
+ * while its params fit the message bound; any other value names none.
+ * @param {unknown} error @param {number} maxChars
+ * @returns {{ messageId: string, params: Record<string, any> } | null}
+ */
+function messageReference(error, maxChars) {
+  if (!(error instanceof FormulaError || error instanceof JsonQueryCompileError || error instanceof JsonQueryRuntimeError)) return null;
+  const { messageId, params } = /** @type {any} */ (error);
+  if (typeof messageId !== 'string' || messageId.length > 128) return null;
+  const json = JSON.stringify(params ?? {});
+  return json.length > maxChars ? null : { messageId, params: JSON.parse(json) };
+}
 
 /** Copy a bounded diagnostic; arbitrary host rejection values never escape into JSON. */
 function diagnostic(error, targetId, maxChars) {
   let message = 'formula evaluation failed';
   let code = 'JQ2013';
   let docPath = '';
+  let reference = null;
   try {
     if (typeof error?.message === 'string') message = error.message;
     code = causeCode(error, code);
     docPath = causePath(error);
+    reference = messageReference(error, maxChars);
   }
   catch { /* Host exceptions may have hostile accessors. */ }
-  return { targetId, code: code.slice(0, 16), message: message.slice(0, maxChars), docPath: docPath.slice(0, maxChars) };
+  return { targetId, code: code.slice(0, 16), message: message.slice(0, maxChars), docPath: docPath.slice(0, maxChars), ...reference };
+}
+
+/**
+ * The diagnostic of a cell whose computed input produced no value.
+ * @param {string} targetId @param {number} maxChars
+ */
+function computedMissing(targetId, maxChars) {
+  const params = { formulaId: targetId };
+  const message = renderMessageId('query/formula/computed-missing', params, formulaMessagesEn);
+  return { code: 'JQ2013', targetId, message: message.slice(0, maxChars), docPath: '/expression',
+    ...(JSON.stringify(params).length > maxChars ? {} : { messageId: 'query/formula/computed-missing', params }) };
 }
 
 /**
@@ -121,7 +152,7 @@ export function compileFormulaBatch(targets, options = {}) {
           else if (!error) {
             const dependencies = compiled.dependencies;
             if (dependencies.computed.some((id) => !Object.hasOwn(computed, id)))
-              error = { code: 'JQ2013', targetId: target.id, message: 'computed dependency has no value', docPath: '/expression' };
+              error = computedMissing(target.id, maxChars);
             else try {
               const source = dependencies.all || compiled.doc.inputSchema ? row : dependencies.source.map((name) => Object.hasOwn(row, name) ? [name, row[name]] : [name]);
               const inputs = dependencies.computed.map((id) => [id, computed[id]]);

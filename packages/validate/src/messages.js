@@ -117,6 +117,8 @@ export const messagesEn = {
   // back to the '$query' entry above, which renders the same string.
   JQ2001: (p) => `'$query' assertion raised ${p.code} at '${p.docPath}'`,
   JQ2003: (p) => `'$query' assertion raised ${p.code} at '${p.docPath}'`,
+  // @jarenjs/app's state check: a value the state holds that is not JSON
+  'app/not-json': 'is not a JSON value',
 };
 
 /** The compiled built-in English catalog (module-level singleton). */
@@ -185,6 +187,15 @@ export class ValidationError {
 }
 
 /**
+ * The spec render of an error converted under `messages: false` whose
+ * text the schema wrote: conversion rendered nothing, so `localizeErrors`
+ * writes the author's words from it. Keyed by the error itself, so a
+ * copy (which never had the text) carries the status alone.
+ * @type {WeakMap<object, (params: object) => string>}
+ */
+const DEFERRED_INLINE = new WeakMap();
+
+/**
  * Mark an error's message as text the schema wrote: `true` for a
  * MessageSpec without `$msgid` (single-language by definition, never
  * re-rendered by `localizeErrors`), `'fallback'` for a `$msgid` spec's
@@ -243,12 +254,20 @@ export function localizeErrors(errors, catalog) {
     const error = errors[i];
     // @ts-ignore - marker property, non-enumerable
     const inline = error.inlineMessage;
-    if (inline === true) continue;
     const msgid = error.msgid || error.keyword;
     const params = error.params || {};
-    const render = lookupRender(catalog, msgid)
-      ?? lookupRender(EN, msgid)
-      ?? (inline === 'fallback' ? undefined
+    // the schema's own words, kept for an error converted under
+    // `messages: false`; a copy of one never had them
+    const deferred = DEFERRED_INLINE.get(error);
+    // a schema-written error with no text at all (such a copy) speaks
+    // its keyword, as an unmarked one does
+    const textless = error.message === '' && deferred === undefined;
+    if (inline === true && !textless) {
+      if (deferred !== undefined && error.message === '') error.message = deferred(params);
+      continue;
+    }
+    const render = (inline === true ? undefined : lookupRender(catalog, msgid) ?? lookupRender(EN, msgid))
+      ?? (inline === 'fallback' && !textless ? deferred
         : lookupRender(catalog, error.keyword) ?? lookupRender(EN, error.keyword));
     if (render !== undefined) {
       error.message = render(params, error);
@@ -566,6 +585,11 @@ export function convertInternalErrors(internalErrors) {
       } else {
         message = renderErrorMessage({ keyword, msgid, params });
       }
+    } else if (spec !== null && spec.render !== null
+      && (spec.msgid === null || lookupRender(EN, spec.msgid) === undefined)) {
+      // rendering is skipped, but the text is still the schema's: mark
+      // it, and keep the spec's render for localizeErrors to write
+      inline = spec.msgid === null ? true : 'fallback';
     }
 
     const error = new ValidationError({
@@ -577,6 +601,7 @@ export function convertInternalErrors(internalErrors) {
       message,
     });
     if (inline !== false) markInlineMessage(error, inline);
+    if (inline !== false && !renderMessages) DEFERRED_INLINE.set(error, /** @type {(params: object) => string} */ (spec?.render));
     return error;
   });
 }

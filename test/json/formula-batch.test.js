@@ -114,3 +114,38 @@ it('a row that is not JSON is a JQ2013 cell, whatever the canonicalizer\'s code 
     [0, 1, 2].map((diagnostic) => ({ kind: 'error', code: 'JQ2013', diagnostic })).concat([{ kind: 'value', value: 5 }]));
 });
 
+
+it("a diagnostic names its message, so a locale pack renders it in the reader's language", async () => {
+  const { renderQueryMessage } = await import('@jarenjs/json');
+  const { formulaMessagesEn } = await import('@jarenjs/json/formula');
+  const { fr } = await import('@jarenjs/locales');
+  const batch = compileFormulaBatch([target('a', '$.missing'), target('b', { $add: ['$computed.a', 1] }), target('c', { $substring: ['$.price', 1] })]);
+  const { errors } = batch.evaluate([{ id: 1, price: 5 }]);
+  const missing = errors.find((e) => e.targetId === 'b');
+  assert.equal(missing.messageId, 'query/formula/computed-missing');
+  assert.equal(missing.message, renderQueryMessage(missing, formulaMessagesEn));
+  assert.equal(typeof fr['query/formula/computed-missing'], 'string', 'the pack translates it');
+  assert.equal(renderQueryMessage(missing, fr), String(fr['query/formula/computed-missing']).replace('{formulaId}', 'b'));
+  const raised = errors.find((e) => e.targetId === 'c');
+  assert.equal(typeof raised.messageId, 'string');
+  assert.ok(renderQueryMessage(raised, fr).length > 0);
+  assert.notEqual(renderQueryMessage(raised, fr), renderQueryMessage(raised, { ...formulaMessagesEn }));
+  assert.deepEqual(JSON.parse(JSON.stringify(errors)), errors, 'still plain JSON');
+});
+
+it('a diagnostic whose params outgrow the message bound keeps its text and drops the reference', () => {
+  const batch = compileFormulaBatch([target('c', { $substring: ['$.price', 1] })], { maxMessageChars: 8 });
+  const [error] = batch.evaluate([{ id: 1, price: 5 }]).errors;
+  assert.ok(error.message.length <= 8);
+  assert.equal(error.messageId, undefined);
+  assert.equal(error.params, undefined);
+});
+
+it('a failure that is not a formula or query error carries no message reference', () => {
+  // a row that is not JSON fails before any formula runs
+  const batch = compileFormulaBatch([target('a', '$.price')]);
+  const [error] = batch.evaluate([{ id: 1, price: 1n }]).errors;
+  assert.equal(typeof error.message, 'string');
+  assert.equal(error.messageId, undefined);
+  assert.equal(error.params, undefined);
+});

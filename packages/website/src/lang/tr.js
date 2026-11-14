@@ -1,0 +1,23 @@
+//@ts-check
+/**
+ * The website's own words in Turkish (Türkçe): the ids of `siteMessagesEn`
+ * (../messages.js). Loaded on demand, when a reader picks the language;
+ * a published package's words travel in `@jarenjs/locales` instead.
+ */
+
+/** @type {Readonly<Record<string, string>>} */
+export default Object.freeze({
+  'site/lang/label': 'Dil',
+  'site/play/downloaded': 'oturum indirildi',
+  'site/play/download-unavailable': 'indirme burada kullanılamıyor',
+  'site/play/open-unavailable': 'dosya açma burada kullanılamıyor',
+  'site/play/not-a-session': '{name} bir Play oturumu değil',
+  'site/play/not-a-session-unnamed': 'bu dosya bir Play oturumu değil',
+  'site/play/imported': 'içe aktarıldı: {name}',
+  'site/play/imported-unnamed': 'bir oturum içe aktarıldı',
+  'site/play/unreadable': 'bu dosya okunamadı',
+  'site/play/too-large': "paylaşım bağlantısı için çok büyük ({length} > {limit} karakter) — bunun yerine İndir'i kullanın",
+  'site/play/link-ready': 'bağlantı hazır',
+  'site/play/link-copied': 'bağlantı kopyalandı',
+  'site/schema/invalid-json': 'Geçersiz JSON: {reason}',
+});

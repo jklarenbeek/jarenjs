@@ -373,6 +373,18 @@ Rules of the road:
 The named export is the locale tag camel-cased (`zhTW`), the subpath keeps
 the tag itself (`@jarenjs/locales/zh-tw`).
 
+`LOCALE_NAMES` (also its own subpath, `@jarenjs/locales/names`, which loads
+no pack) lists these packs in picker order, each named in its own language,
+with its tag (`code`), its named export (`pack`) and its writing direction
+(`dir`, `'rtl'` for Arabic): the one list a language switch, a playground
+select or an example per language derives from, so a pack added here
+cannot end up without a choice.
+
+```js
+import { LOCALE_NAMES } from '@jarenjs/locales/names';
+LOCALE_NAMES.map(({ code, name }) => [code, name]); // [['nl', 'Nederlands'], ['fr', 'Français'], …]
+```
+
 ## Exports
 
 Every subpath a consumer can import, derived from the manifest by
@@ -386,6 +398,7 @@ Every subpath a consumer can import, derived from the manifest by
 | `@jarenjs/locales/numbers` | JavaScript | declared |
 | `@jarenjs/locales/intl-dates` | JavaScript | declared |
 | `@jarenjs/locales/intl-zones` | JavaScript | declared |
+| `@jarenjs/locales/names` | JavaScript | declared |
 | `@jarenjs/locales/ar` | JavaScript | declared |
 | `@jarenjs/locales/de` | JavaScript | declared |
 | `@jarenjs/locales/es` | JavaScript | declared |

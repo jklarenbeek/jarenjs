@@ -15,7 +15,8 @@ import { operatorRegistry } from './engines.js';
 import { md, mdArticle, UNTRUSTED } from './markdown.js';
 import { mermaid } from './mermaid.js';
 import { chartRenderer } from './charts.js';
-import { runValidation, localizeErrors } from './validator.js';
+import { runValidation, localizeErrors, catalogFor } from './validator.js';
+import { siteText } from '../messages.js';
 import { formatJson, timed } from '../lib/format.js';
 
 /** The component, with the site's math/finance/stats packs mounted. */
@@ -130,21 +131,24 @@ export const PLAY_START = Object.freeze({
   // is the structured buffer the form edits, mirrored back to the data text
   dataView: 'json', // 'json' | 'form'
   dataValue: null,  // the parsed data the form binds to (validate + form only)
-  // the message language the reader chose (the Messages select), kept
-  // across examples, New and opened sessions; null until one is chosen
-  locale: null,
+  // the language an example made to show one runs in, while it is loaded
+  // (never the site language: only the reader sets that)
+  exampleLocale: null,
 });
 
 /**
- * The play slice as the engines and the panes read it: the reader's
- * message language (`slice.locale`) is the locale of every engine that
- * offers the option, whatever the loaded example or session carried.
+ * The play slice as the engines and the panes read it: every engine that
+ * offers a locale speaks the reader's site language (`state.lang`,
+ * English until chosen), whatever an opened session or share carried —
+ * except while an example made to show one language is loaded
+ * (`slice.exampleLocale`), which shows its own for its own run.
  * @param {any} slice - the `state.play` slice
- * @returns {any} the slice, its config carrying the chosen locale
+ * @param {string | null} [lang] - the site language, null until chosen
+ * @returns {any} the slice, its config carrying the locale it runs in
  */
-export function withPlayLocale(slice) {
-  const locale = slice.locale;
-  if (typeof locale !== 'string' || slice.config?.locale === locale) return slice;
+export function withPlayLocale(slice, lang = null) {
+  const locale = slice.exampleLocale ?? lang ?? 'en';
+  if (slice.config?.locale === locale) return slice;
   const engine = Object.hasOwn(playComponent.engines, slice.engine) ? playComponent.engines[slice.engine] : undefined;
   if (!(engine?.optionPanes ?? []).some((/** @type {any} */ pane) => pane.key === 'locale')) return slice;
   return { ...slice, config: { ...(slice.config ?? {}), locale } };
@@ -154,17 +158,18 @@ export function withPlayLocale(slice) {
  * A play SESSION as a saveable/shareable document: the engine, its source and
  * data panes, the option config, and the originating example id. This is what
  * `createDocStore` persists and `encodeShare` turns into a `#/play?s=` link.
+ * The language is the reader's, never the document's: a session carries none
+ * (an opened one renders in its reader's language).
  * @param {any} slice - the `state.play` slice
  */
 export function sessionOf(slice) {
-  // a session carries the language on screen, the chosen one included
-  slice = withPlayLocale(slice);
+  const { locale: _reader, ...config } = slice.config ?? {};
   return {
     engine: slice.engine,
     exampleId: slice.exampleId ?? null,
     source: { ...(slice.source ?? {}) },
     data: { ...(slice.data ?? {}) },
-    config: { ...(slice.config ?? {}) },
+    config,
   };
 }
 
@@ -286,17 +291,34 @@ export function createPlaySplitterWidget() {
 
 /** Host-injected JSON Schema validator for the `validate` engine (the hybrid
  * seam): reuse the site's cached `runValidation`, then localize the errors to
- * the chosen locale — so @jarenjs/validate + the locale packs stay in the host. */
-function validateRunner(schemaText, data, locale, schemas) {
+ * the chosen locale — so @jarenjs/validate + the locale packs stay in the host.
+ * A schema text that is not JSON is refused in the site's words.
+ * @param {string} schemaText @param {any} data @param {string} locale @param {any[]} schemas
+ * @param {Readonly<Record<string, string>> | null} [sitePack] - the site's words in the reader's language
+ */
+function validateRunner(schemaText, data, locale, schemas, sitePack = null) {
   const report = runValidation(schemaText, data, schemas);
-  return { ...report, errors: localizeErrors(report.errors, locale) };
+  const schemaError = report.schemaJsonReason === undefined ? report.schemaError
+    : siteText(sitePack)('site/schema/invalid-json', { reason: report.schemaJsonReason });
+  return { ...report, schemaError, errors: localizeErrors(report.errors, locale) };
 }
 
-/** Run the active engine over the current source + data (operators, option config, visual renderers, the validator). */
-export function runPlay(slice) {
-  slice = withPlayLocale(slice);
-  return playComponent.runExample(slice.engine, slice.source, slice.data,
-    { operators: operatorRegistry, config: slice.config, renderers, validate: validateRunner });
+/**
+ * Run the active engine over the current source + data (operators, option
+ * config, visual renderers, the validator), in the site language: play's
+ * words and every engine's messages through that language's pack.
+ * @param {any} slice - the `state.play` slice
+ * @param {string | null} [lang] - the site language, null for English
+ * @param {Readonly<Record<string, string>> | null} [sitePack] - the site's words in that language
+ */
+export function runPlay(slice, lang = null, sitePack = null) {
+  slice = withPlayLocale(slice, lang);
+  // a language whose pack has not landed yet has no catalog: English, never ids
+  return playComponent.runExample(slice.engine, slice.source, slice.data, {
+    operators: operatorRegistry, config: slice.config, renderers, messages: catalogFor(lang),
+    validate: (/** @type {string} */ schemaText, /** @type {any} */ data, /** @type {string} */ locale, /** @type {any[]} */ schemas) =>
+      validateRunner(schemaText, data, locale, schemas, sitePack),
+  });
 }
 
 /** Load an example's source + first dataset (+ option config) into a slice-ready payload. */
@@ -308,6 +330,8 @@ export function loadExample(exampleId) {
     source: { ...ex.source }, datasetIndex: 0,
     data: { ...(ex.datasets[0]?.data ?? {}) },
     config: { ...(ex.config ?? {}) },
+    // an example made to show one language shows it for its own run
+    exampleLocale: typeof ex.config?.locale === 'string' ? ex.config.locale : null,
   };
 }
 
@@ -343,8 +367,10 @@ export function switchPlayOption(slice, key, value) {
     datasetIndex: followed ? 0 : slice.datasetIndex,
     dataView: followed ? 'json' : slice.dataView,
     dataValue: followed ? null : slice.dataValue,
-    // choosing a message language makes it the reader's, for every later load
-    locale: key === 'locale' ? value : (slice.locale ?? null),
+    // choosing a message language makes it the site's, for every later load
+    lang: key === 'locale' ? value : null,
+    // the reader's choice replaces the example's own language
+    exampleLocale: key === 'locale' ? null : (slice.exampleLocale ?? null),
   };
 }
 

@@ -19,12 +19,24 @@ import { HERO_INPUTS } from '../content/hero.js';
 /**
  * @param {string} [theme]
  * @param {string[]} [ideNames] - saved experiment names from storage
+ * @param {string[]} [playNames] - saved play session names from storage
+ * @param {string | null} [lang] - the stored site language, null when none was chosen
  * @returns {any} a fresh initial state
  */
-export function createInitialState(theme = 'light', ideNames = [], playNames = []) {
+export function createInitialState(theme = 'light', ideNames = [], playNames = [], lang = null) {
   return {
     route: { page: 'home', params: {} },
     theme,
+    // the site language the reader chose (the header switch, Play's
+    // Messages select, a `?lang=` link), null until one is chosen
+    // (English); `siteMessages` is the site's own words in it, once its
+    // pack has loaded ({ code, messages }), null for English
+    lang,
+    siteMessages: null,
+    // the languages whose package words (a `@jarenjs/locales` pack) have
+    // landed on this page (until one has, its words render in English):
+    // each arrival re-renders and re-runs in it
+    packs: {},
     menu: false,      // the mobile navigation drawer
     navOpen: null,    // the open nav dropdown group key ('engines'|'studios'|'learn') or null
     bench: {},        // file name -> parsed benchmark JSON

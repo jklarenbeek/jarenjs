@@ -13,7 +13,11 @@ import * as assert from 'node:assert';
 
 import { createSiteApp } from '../../packages/website/src/app/createSiteApp.js';
 import { parseHash } from '../../packages/website/src/lib/route.js';
+import { catalogFor } from '../../packages/website/src/boundaries/validator.js';
 import { createStubHost, fire, serialize } from '../view/dom.stub.js';
+import { de, ar } from '@jarenjs/locales';
+import { compileMessageCatalog } from '@jarenjs/validate';
+import { playText } from '@jarenjs/play';
 
 /** A headless site over the stub DOM, entered at the Play playground. */
 function mountSite({ hash = '#/play' } = {}) {
@@ -300,13 +304,15 @@ describe('website — the Play playground (#/play)', () => {
       { name: 'Zed', email: 'not-an-email', age: 7 });
   });
 
-  it('the locale option localizes the validation messages', () => {
+  it('the locale option localizes the validation messages', async () => {
     const { app, container } = mountSite();
     fire(byText(playRoot(container), 'button', 'Invalid data (see the errors)'), 'click', {});
     const en = JSON.stringify(app.getState().play.result.panels);
     // the validate engine's one option select is "Messages" (the locale)
     fire(find(playRoot(container), (n) => n.tagName === 'select'), 'change', { target: { value: 'nl' } });
     assert.strictEqual(app.getState().play.config.locale, 'nl', 'the locale config updated');
+    // its pack loads on demand, then the run speaks it
+    for (let i = 0; i < 200 && app.getState().packs?.nl !== true && catalogFor('nl') === undefined; i++) await new Promise((resolve) => setTimeout(resolve, 5));
     const nl = JSON.stringify(app.getState().play.result.panels);
     assert.notStrictEqual(en, nl, 'the localized error messages changed with the locale');
   });
@@ -627,17 +633,18 @@ describe('website — Play speaks the language the Messages select names', () =>
   /** The validate engine's Messages select (the one offering Deutsch). */
   const messages = (c) => find(playRoot(c), (n) => n.tagName === 'select'
     && (n.childNodes ?? []).some((o) => o.getAttribute?.('value') === 'de'));
-  /** Load the invalid-data example and pick a message language. */
-  function invalidIn(locale) {
+  /** Load the invalid-data example and pick a message language; its pack loads on demand. */
+  async function invalidIn(locale) {
     const site = mountSite();
     fire(byText(playRoot(site.container), 'button', 'Invalid data (see the errors)'), 'click', {});
     fire(messages(site.container), 'change', { target: { value: locale } });
     assert.strictEqual(site.app.getState().play.config.locale, locale, 'the select chose the language');
+    for (let i = 0; i < 200 && site.app.getState().packs?.[locale] !== true && catalogFor(locale) === undefined; i++) await new Promise((resolve) => setTimeout(resolve, 5));
     return site;
   }
 
-  it('a failing run lists its errors on screen, translated, without opening Explain', () => {
-    const { app, container } = invalidIn('de');
+  it('a failing run lists its errors on screen, translated, without opening Explain', async () => {
+    const { app, container } = await invalidIn('de');
     assert.strictEqual(app.getState().play.deep, false, 'the drill-down is closed');
     const cells = findAll(playRoot(container), (n) => n.tagName === 'td').map(textOf);
     assert.ok(cells.includes('darf nicht weniger als 2 Zeichen enthalten'), `the German message is on screen: ${cells.join(' | ')}`);
@@ -645,26 +652,27 @@ describe('website — Play speaks the language the Messages select names', () =>
     assert.ok(!cells.some((t) => t.startsWith('must ')), 'no English message is left on screen');
   });
 
-  it('the generated form\'s field alerts speak the chosen language', () => {
-    const { container } = invalidIn('de');
-    fire(byText(playRoot(container), 'button', 'Form'), 'click', {});
+  it('the generated form\'s field alerts speak the chosen language', async () => {
+    const { container } = await invalidIn('de');
+    // the toggle speaks the chosen language too
+    fire(byText(playRoot(container), 'button', playText(compileMessageCatalog(de))('play/layout/form')), 'click', {});
     const alerts = findAll(playRoot(container), (n) => n.getAttribute?.('role') === 'alert').map(textOf);
     assert.ok(alerts.includes('Muss mindestens 2 Zeichen enthalten (derzeit 1)'), `the German alert: ${alerts.join(' | ')}`);
     assert.ok(alerts.includes('Muss mindestens 13 sein'));
     assert.ok(!alerts.some((t) => t.startsWith('Must ')), 'no English alert is left');
   });
 
-  it('a message cell takes its own direction, so an Arabic message reads right to left', () => {
-    const { container } = invalidIn('ar');
+  it('a message cell takes its own direction, so an Arabic message reads right to left', async () => {
+    const { container } = await invalidIn('ar');
     const cells = findAll(playRoot(container), (n) => n.tagName === 'td');
     const arabic = cells.find((n) => textOf(n) === 'يجب ألا يقل عدد الأحرف عن 2');
     assert.ok(arabic, `the Arabic message is on screen: ${cells.map(textOf).join(' | ')}`);
     assert.strictEqual(arabic.getAttribute('dir'), 'auto');
     assert.ok(cells.every((n) => n.getAttribute('dir') === 'auto'), 'every cell reads its own direction');
   });
-  it('a form alert takes its own direction too', () => {
-    const { container } = invalidIn('ar');
-    fire(byText(playRoot(container), 'button', 'Form'), 'click', {});
+  it('a form alert takes its own direction too', async () => {
+    const { container } = await invalidIn('ar');
+    fire(byText(playRoot(container), 'button', playText(compileMessageCatalog(ar))('play/layout/form')), 'click', {});
     const alerts = findAll(playRoot(container), (n) => n.getAttribute?.('role') === 'alert');
     assert.ok(alerts.length >= 2, `the form shows its alerts: ${alerts.map(textOf).join(' | ')}`);
     assert.ok(alerts.some((n) => /[\u0600-\u06ff]/.test(textOf(n))), 'an Arabic alert');

@@ -182,6 +182,13 @@ export const ACTIONS = {
     ],
   },
 
+  // the site language: the header switch, Play's Messages select and a
+  // `?lang=` link write it; the boundary applies it (html lang/dir, the
+  // stored choice, the site pack) and re-runs Play in it
+  'site/lang': { patch: [{ op: 'replace', path: '/lang', value: '$payload' }] },
+  'site/lang-pick': { patch: [{ op: 'replace', path: '/lang', value: '$event.value' }] },
+  'site/lang-loaded': { patch: [{ op: 'replace', path: '/siteMessages', value: '$payload' }] },
+  'site/pack-loaded': { patch: [{ op: 'add', path: { $concat: ['/packs/', '$payload'] }, value: true }] },
   'theme/toggle': {
     patch: [{
       op: 'replace',
@@ -256,9 +263,9 @@ export const ACTIONS = {
       { op: 'replace', path: '/play/datasetIndex', value: '$payload.datasetIndex' },
       { op: 'replace', path: '/play/data', value: '$payload.data' },
       { op: 'replace', path: '/play/config', value: '$payload.config' },
-      // the reader's message language stays; only an example made to show
-      // one language (it names a locale) sets it
-      { op: 'replace', path: '/play/locale', value: { $if: ['$payload.config.locale', '$payload.config.locale', '$.play.locale'] } },
+      // an example made to show one language runs in it while it is
+      // loaded; the site language is the reader's alone
+      { op: 'replace', path: '/play/exampleLocale', value: { $default: ['$payload.exampleLocale', null] } },
       { op: 'replace', path: '/play/result', value: null },
       // an example REPLACES the session's content, so it can no longer be
       // the saved record: unbind, or the next Save would overwrite that
@@ -298,7 +305,9 @@ export const ACTIONS = {
       { op: 'replace', path: '/play/datasetIndex', value: '$payload.datasetIndex' },
       { op: 'replace', path: '/play/dataView', value: '$payload.dataView' },
       { op: 'replace', path: '/play/dataValue', value: '$payload.dataValue' },
-      { op: 'replace', path: '/play/locale', value: '$payload.locale' },
+      // the Messages select writes the site language (null: not this pane)
+      { op: 'replace', path: '/lang', value: { $if: ['$payload.lang', '$payload.lang', '$.lang'] } },
+      { op: 'replace', path: '/play/exampleLocale', value: { $default: ['$payload.exampleLocale', null] } },
     ],
   },
   'play/dataset': { effects: [{ run: 'play-dataset', with: { index: '$payload' } }] },
@@ -364,9 +373,8 @@ export const ACTIONS = {
       // a loaded record binds; a blank or SHARED session does not (a share
       // link is not a local record, so its first Save must ask for a name)
       { op: 'replace', path: '/play/savedName', value: { $default: ['$payload.savedName', null] } },
-      // the reader's message language wins over the one a session carries;
-      // before any choice, the session's language becomes the reader's
-      { op: 'replace', path: '/play/locale', value: { $if: ['$.play.locale', '$.play.locale', { $default: ['$payload.config.locale', null] }] } },
+      // a session renders in its reader's language, whatever it carries
+      { op: 'replace', path: '/play/exampleLocale', value: null },
       { op: 'replace', path: '/play/datasetIndex', value: 0 },
       { op: 'replace', path: '/play/result', value: null },
       { op: 'replace', path: '/play/panel', value: null },

@@ -20,7 +20,7 @@ export default defineConfig(({ mode }) => ({
             '@jarenjs/formats',
             '@jarenjs/refs',
             '@jarenjs/forms',
-            '@jarenjs/locales',
+            '@jarenjs/locales/names',
             '@jarenjs/view',
             '@jarenjs/app',
             '@jarenjs/md',

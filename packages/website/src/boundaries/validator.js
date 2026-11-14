@@ -9,7 +9,7 @@
 import { JarenValidator, localizeErrors as localizeValidationErrors, compileMessageCatalog } from '@jarenjs/validate';
 import { stringFormats, numberFormats, dateTimeFormats, jsonFormats } from '@jarenjs/formats';
 import { buildFormModel, buildFormViewModel, formChromeLabels } from '@jarenjs/forms';
-import { ar, de, es, fr, ja, ko, nl, pt, ru, tr, zhTW } from '@jarenjs/locales';
+import { LOCALE_NAMES } from '@jarenjs/locales/names';
 
 import { now } from '../lib/format.js';
 
@@ -104,13 +104,14 @@ let hot = null;
 function compiled(schemaText, schemas = []) {
   const listKey = JSON.stringify(schemas);
   if (hot !== null && hot.schemaText === schemaText && hot.listKey === listKey) return hot.entry;
-  const entry = { validate: null, formModel: null, schemaError: null, schemaPane: null, compileMs: null, draft: null };
+  const entry = { validate: null, formModel: null, schemaError: null, schemaJsonReason: null, schemaPane: null, compileMs: null, draft: null };
   let schema;
   try {
     schema = JSON.parse(schemaText);
   }
   catch (err) {
-    entry.schemaError = `Invalid JSON: ${/** @type {Error} */ (err).message}`;
+    entry.schemaJsonReason = /** @type {Error} */ (err).message;
+    entry.schemaError = `Invalid JSON: ${entry.schemaJsonReason}`;
   }
   if (entry.schemaError === null) {
     entry.draft = detectDraftName(schema);
@@ -158,6 +159,9 @@ export function runValidation(schemaText, data, schemas = []) {
   if (entry.validate === null) {
     return {
       schemaError: entry.schemaError, schemaPane: entry.schemaPane, draft: entry.draft,
+      // the parser's own words, when the schema text is not JSON: a host
+      // renders the refusal around them in its reader's language
+      ...(entry.schemaJsonReason === null ? {} : { schemaJsonReason: entry.schemaJsonReason }),
       compileMs: null, validateMs: null, valid: null, errors: [],
     };
   }
@@ -199,7 +203,7 @@ export function runValidation(schemaText, data, schemas = []) {
 export function formViewFor(schemaText, data, schemas = [], locale = 'en') {
   const entry = compiled(schemaText, schemas);
   if (entry.formModel === null) return null;
-  const catalog = CATALOGS[locale];
+  const catalog = catalogFor(locale);
   try {
     return buildFormViewModel(entry.formModel, data, catalog === undefined ? { validateFields: true } : { validateFields: true, catalog });
   }
@@ -208,36 +212,44 @@ export function formViewFor(schemaText, data, schemas = [], locale = 'en') {
   }
 }
 
-/** The locale packs the switcher offers, compiled once ('en' is the built-in). */
-const CATALOGS = {
-  nl: compileMessageCatalog(nl),
-  fr: compileMessageCatalog(fr),
-  es: compileMessageCatalog(es),
-  pt: compileMessageCatalog(pt),
-  de: compileMessageCatalog(de),
-  ja: compileMessageCatalog(ja),
-  ko: compileMessageCatalog(ko),
-  'zh-tw': compileMessageCatalog(zhTW),
-  ru: compileMessageCatalog(ru),
-  tr: compileMessageCatalog(tr),
-  ar: compileMessageCatalog(ar),
-};
+/**
+ * The `@jarenjs/locales` packs this page has loaded, compiled once each:
+ * a language's pack arrives only when that language is needed (the site
+ * language, or an example made to show one), so English readers download
+ * none; `boundaries/lang.js` loads it, `addLocalePack` keeps it.
+ * @type {Map<string, Readonly<Record<string, (params: object, error?: object) => string>>>}
+ */
+const CATALOGS = new Map();
 
 /**
- * The switcher's locale codes, in display order: the built-in English
- * first, then every compiled pack in `CATALOGS` order.
- *
- * Derived rather than listed, so a pack added above cannot end up without
- * a button, and a button cannot end up without a pack.
+ * Keep a loaded `@jarenjs/locales` pack, compiled, under its locale code.
+ * @param {string} code @param {Record<string, any>} pack
  */
-export const LOCALES = ['en', ...Object.keys(CATALOGS)];
+export function addLocalePack(code, pack) {
+  if (!CATALOGS.has(code)) CATALOGS.set(code, compileMessageCatalog(pack));
+}
+
+/**
+ * The site's locale codes, in display order: the built-in English first,
+ * then every `@jarenjs/locales` pack in `LOCALE_NAMES` order (derived, so a
+ * pack added there cannot end up without a button).
+ */
+export const LOCALES = ['en', ...LOCALE_NAMES.map(({ code }) => code)];
+
+/**
+ * The compiled pack of a language — validate's, forms', play's and every
+ * other published package's words — once loaded; undefined for English and
+ * for a pack not loaded yet (which renders English).
+ * @param {string | null | undefined} code
+ */
+export const catalogFor = (code) => (typeof code === 'string' ? CATALOGS.get(code) : undefined);
 
 /**
  * Report-time localization: raw errors carry msgid + params; text
  * renders per locale without re-validating.
  */
 export function localizeErrors(errors, locale) {
-  const catalog = CATALOGS[locale];
+  const catalog = catalogFor(locale);
   if (catalog === undefined) return errors;
   // validate's own localizer, over copies (the report is cached per run):
   // it keeps the text a schema wrote, as the error's `inlineMessage` says
@@ -251,5 +263,5 @@ export function localizeErrors(errors, locale) {
  * @returns {{addItem: string, removeItem: string, jsonPlaceholder: string}}
  */
 export function formLabelsFor(locale) {
-  return formChromeLabels(CATALOGS[locale ?? 'en']);
+  return formChromeLabels(catalogFor(locale));
 }

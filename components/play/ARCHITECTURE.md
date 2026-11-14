@@ -20,15 +20,18 @@ with its reducer and run loop in the website's `src/app/` directory.
 | `src/component/view.js` | JSLT rules in mode `play`, rooted at `$.ui.play` |
 | `styles/play.css` | Desktop grid, mobile pane switcher and result/editor styling |
 
-`createPlayComponent({ operators, renderers, validate })` returns `rules`,
-`modes`, `mode`, `viewModel`, `engines`, `examples`, `engineIds` and
-`runExample`. Per-run options override the factory's configured seams.
+`createPlayComponent({ operators, renderers, validate, messages })` returns
+`rules`, `modes`, `mode`, `viewModel`, `engines`, `examples`, `engineIds` and
+`runExample`. Per-run options override the factory's configured seams;
+`messages` (a compiled catalog over `playMessagesEn`'s ids, from
+`src/messages.js`) is also the view model's default language, and
+`viewModel(state, { messages })` takes another per call.
 Visual engines delegate rendering; schema validation delegates to the host.
 The package imports neither a DOM renderer nor browser storage.
 
 ## State and actions supplied by the host
 
-Mount `component.viewModel(state)` at `state`'s derived `ui.play` location,
+Mount `component.viewModel(state, { messages })` at `state`'s derived `ui.play` location,
 merge the component's rules/modes into the app stylesheet, and apply that
 node in mode `play`. Keep editable source text in `state.play.source` and
 data text in `state.play.data`, keyed by each descriptor's pane keys.

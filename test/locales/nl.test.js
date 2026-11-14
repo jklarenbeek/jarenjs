@@ -25,6 +25,7 @@ import { compileJsonQuery, queryMessagesEn, renderQueryMessage } from '@jarenjs/
 import { compileFormula, formulaMessagesEn } from '@jarenjs/json/formula';
 import { compileMessageTemplate } from '@jarenjs/core/message';
 import { compileMarkdown, toHtml, mdMessagesEn, labelsFromCatalog } from '@jarenjs/md';
+import { playMessagesEn } from '@jarenjs/play';
 
 const compiled = compileMessageCatalog(nl);
 
@@ -65,7 +66,14 @@ const wordless = (template) => template === 'null'
 const placeholders = (template) => [...compileMessageTemplate(String(template)).parameters].sort();
 
 /** Representative params per message key, for renders and the sweep. */
+/** Play's words: a template's placeholders, or the `count` a plural closure reads. */
+const PLAY_SAMPLE_PARAMS = Object.fromEntries(Object.entries(playMessagesEn).map(([key, template]) =>
+  [key, typeof template === 'string'
+    ? Object.fromEntries(compileMessageTemplate(template).parameters.map((name) => [name, `<${name}>`]))
+    : { count: 2 }]));
+
 const SAMPLE_PARAMS = {
+  ...PLAY_SAMPLE_PARAMS,
   ...DATE_SAMPLE_PARAMS,
   ...NUMBER_SAMPLE_PARAMS,
   ...QUERY_SAMPLE_PARAMS,
@@ -114,6 +122,7 @@ const SAMPLE_PARAMS = {
   $query: { code: 'JQ2003', docPath: '/a' },
   JQ2001: { code: 'JQ2001', docPath: '/a' },
   JQ2003: { code: 'JQ2003', docPath: '/a' },
+  'app/not-json': {},
   'form/required': {},
   'form/type': { type: 'integer' },
   'form/const': { constValue: 'EUR' },

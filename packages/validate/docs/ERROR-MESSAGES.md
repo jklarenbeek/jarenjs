@@ -51,7 +51,13 @@ keyword.
 With the validator option `messages: false`, conversion skips message
 rendering entirely (`message: ''`; `params` and `msgid` still set) — the
 fast path for applications that render exclusively through
-`localizeErrors` or their own resolver.
+`localizeErrors` or their own resolver. An error whose text an
+`errorMessage` spec wrote is still marked (`inlineMessage`, below), and
+`localizeErrors` on that error writes the author's words: an inline
+spec's text, or a `$msgid` spec's fallback when no catalog carries the
+msgid. A copy made before localizing (its `toJSON`) carries the status
+but never had the text, so `localizeErrors` gives it its keyword's
+sentence, as an unmarked error gets (and a `$msgid` a catalog carries).
 
 ### The handler-contract invariant (internal)
 
@@ -82,6 +88,7 @@ One flat namespace:
 | Producer | Keys | Params carried |
 |---|---|---|
 | validate keywords | the keyword itself: `type`, `required`, `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`, `multipleOf`, `minLength`, `maxLength`, `pattern`, `additionalProperties`, `minProperties`, `maxProperties`, `minItems`, `maxItems`, `uniqueItems`, `contains`, `minContains`, `maxContains`, `items`, `allOf`, `anyOf`, `oneOf`, `not`, `format`, `contentEncoding`, `contentMediaType`, `nullable`, `if`, `then`, `else`, `false schema`, `const`, `enum`, `dependentRequired`, `dependencies`, `unevaluatedProperties`, `unevaluatedItems`, `$query` | `type`/`types`; `missingProperty`; `limit` (+ `comparison` for the numeric bounds); `multipleOf`; `pattern`; `additionalProperty`; `format`; `encoding` (`contentEncoding`, and `contentMediaType` beside `contentEncoding: 'base64'`, whose check decodes the string first); `mediaType`; `allowedValue` (`const`: the value it expected); `allowedValues` (`enum`: the list it allows); `property` + `missingProperty` (`dependentRequired` and the array form of `dependencies`: the present property and the first dependency the object lacks); `unevaluatedProperty` (the member name); `unevaluatedItem` (the index) |
+| app state check | `app/not-json`: a value `createJsonStateValidator` (`@jarenjs/app`) finds in the state that is not JSON, "is not a JSON value" (keyword `json`) | none |
 | `basic` output | `subschema`: the error of a branch unit, "A subschema had errors." (rendered in English: an output format takes no catalog, so the packs' entry is not read yet) | none |
 | query runtime via `$query` | the `JQ2xxx` code of a failure that judges the instance (`JQ2001` to `JQ2005`, `JQ2008`; every other runtime refusal is thrown) | `{ code, docPath }` |
 | forms field checks | `form/` + the emitted keyword: `form/required`, `form/type`, `form/const`, `form/enum`, `form/minLength`, `form/maxLength`, `form/pattern`, `form/format`, `form/minimum`, `form/maximum`, `form/exclusiveMinimum`, `form/exclusiveMaximum`, `form/multipleOf`, `form/minItems`, `form/maxItems`, `form/uniqueItems`, `form/minProperties`, `form/maxProperties` | per branch: `limit`, `len`, `type`, `format`, `enumValues`, `constValue`, `pattern`, `multipleOf` |

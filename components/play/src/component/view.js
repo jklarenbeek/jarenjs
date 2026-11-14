@@ -5,6 +5,8 @@
  * matched by their ABSOLUTE slice path (`$.ui.play`), `$apply` and body
  * references RELATIVE to the matched node. The host mounts the view model
  * at `$.ui.play`. No imperative islands — the whole playground is data.
+ * Every fixed word comes from the view model's `t` record (`$.t.<name>`
+ * in the shell), already in the reader's language.
  */
 
 /** The one mode this view uses. */
@@ -22,6 +24,9 @@ const paneButton = (pane, label) => ['button', {
   on: { click: { action: 'play/mobile-pane', with: pane } },
 }, label];
 
+/** A word of the chrome, from the view model's `t` record. @param {string} name */
+const text = (name) => `$.t.${name}`;
+
 /** The shell (matches the whole slice): bar / rail | editors | split | stage. */
 const shell = {
   match: PLAY_BASE, mode: PLAY_MODE,
@@ -35,45 +40,43 @@ const shell = {
       // background, which put a black hole in the middle of a light toolbar
       ['input', {
         class: 'jplay-name', value: '$.name', spellcheck: 'false',
-        autocapitalize: 'off', autocomplete: 'off', placeholder: 'name this session…',
-        'aria-label': 'session name', on: { input: 'play/name' },
+        autocapitalize: 'off', autocomplete: 'off', placeholder: text('placeholder'),
+        'aria-label': text('sessionName'), on: { input: 'play/name' },
       }],
       ['div', { class: 'jplay-actions' },
-        ['button', { class: 'btn small', type: 'button', on: { click: 'play/new' } }, 'New'],
+        ['button', { class: 'btn small', type: 'button', on: { click: 'play/new' } }, text('new')],
         ['button', {
           class: 'btn small', type: 'button',
-          title: { $if: ['$.savedName',
-            { $concat: ['Overwrite “', '$.savedName', '”'] },
-            'Save this session under the name above'] },
+          title: text('saveTitle'),
           on: { click: 'play/save' },
-        }, 'Save'],
+        }, text('save')],
         ['button', {
           class: 'btn small', type: 'button',
-          title: 'Save the name above as a SEPARATE session, keeping the original',
+          title: text('saveAsTitle'),
           on: { click: 'play/save-as' },
-        }, 'Save As'],
+        }, text('saveAs')],
         // the way out of the browser, and back in: a session too large for
         // a share link still has a file
         ['button', {
           class: 'btn small', type: 'button',
-          title: 'Download this session as a file',
+          title: text('downloadTitle'),
           on: { click: 'play/download' },
-        }, 'Download'],
+        }, text('download')],
         ['button', {
           class: 'btn small', type: 'button',
-          title: 'Open a downloaded session file',
+          title: text('importTitle'),
           on: { click: 'play/import' },
-        }, 'Import'],
-        ['button', { class: 'btn small', type: 'button', on: { click: 'play/share' } }, 'Share'],
+        }, text('import')],
+        ['button', { class: 'btn small', type: 'button', on: { click: 'play/share' } }, text('share')],
         // Delete the current named session (only meaningful once named+saved)
         { $if: ['$.name',
-          ['button', { class: 'btn small', type: 'button', title: 'delete this saved session',
-            on: { click: { action: 'play/delete-session', with: '$.name' } } }, 'Delete'],
+          ['button', { class: 'btn small', type: 'button', title: text('deleteTitle'),
+            on: { click: { action: 'play/delete-session', with: '$.name' } } }, text('delete')],
           ''] },
         // the Load dropdown appears once there is something saved
         { $if: ['$.hasSaved',
-          ['select', { class: 'jplay-load editor line', 'aria-label': 'load a saved session', value: '', on: { change: 'play/open' } },
-            ['option', { value: '' }, 'Load…'],
+          ['select', { class: 'jplay-load editor line', 'aria-label': text('loadLabel'), value: '', on: { change: 'play/open' } },
+            ['option', { value: '' }, text('load')],
             [{ $apply: '$.names[*]' }]],
           ''] },
       ],
@@ -81,8 +84,7 @@ const shell = {
       // button does what, rather than letting Save silently overwrite the
       // session the user opened under a name they have already changed
       { $if: ['$.renamed',
-        ['span', { class: 'jplay-bound muted', role: 'status' },
-          'Save overwrites “', ['text', '$.savedName'], '” · Save As keeps both'],
+        ['span', { class: 'jplay-bound muted', role: 'status' }, text('bound')],
         ''] },
       { $if: ['$.shared', ['span', { class: 'jplay-shared muted', role: 'status' }, '$.shared'], ''] },
     ],
@@ -92,32 +94,33 @@ const shell = {
     // is a grid area, not a `tabpanel`, so these are toggle buttons in a
     // group with `aria-pressed`, not a `tablist` with `aria-selected`
     // (the RESULT strip below is a real tablist and says so) ———
-    ['div', { class: 'jplay-mobilebar seg', role: 'group', 'aria-label': 'pane' },
-      paneButton('examples', 'Examples'),
-      paneButton('editor', 'Editor'),
-      paneButton('result', 'Result'),
+    ['div', { class: 'jplay-mobilebar seg', role: 'group', 'aria-label': text('panes') },
+      paneButton('examples', text('examples')),
+      paneButton('editor', text('editor')),
+      paneButton('result', text('result')),
     ],
     // ——— the example picker (a "file tree" grouped by engine) ———
-    ['nav', { class: 'jplay-rail', 'aria-label': 'examples' }, [{ $apply: '$.rail[*]' }]],
+    ['nav', { class: 'jplay-rail', 'aria-label': text('exampleList') }, [{ $apply: '$.rail[*]' }]],
     // ——— the source + data editors ———
     ['div', { class: 'jplay-editors' },
       ['div', { class: 'jplay-head' },
         ['strong', { class: 'jplay-engine' }, '$.engine.label'],
-        ['span', { class: 'muted jplay-lead' }, '$.engine.lead'],
+        // the lead is English prose by design, and says so
+        ['span', { class: 'muted jplay-lead', lang: 'en' }, '$.engine.lead'],
       ],
       // live mode selects (josl dialect, csv strict/repair) — empty for most
       ['div', { class: 'jplay-options' }, [{ $apply: '$.optionPanes[*]' }]],
       [{ $apply: '$.sourcePanes[*]' }],
       { $if: ['$.hasSwitcher',
-        ['div', { class: 'jplay-datasets seg', role: 'group', 'aria-label': 'dataset' }, [{ $apply: '$.datasets[*]' }]],
+        ['div', { class: 'jplay-datasets seg', role: 'group', 'aria-label': text('datasets') }, [{ $apply: '$.datasets[*]' }]],
         ''] },
       // the validate engine offers a JSON ↔ generated-form toggle on its data
       { $if: ['$.hasForm',
-        ['div', { class: 'jplay-dataview seg', role: 'group', 'aria-label': 'data view' },
+        ['div', { class: 'jplay-dataview seg', role: 'group', 'aria-label': text('dataView') },
           ['button', { type: 'button', class: { $if: [{ $eq: ['$.dataView', 'json'] }, 'seg-btn active', 'seg-btn'] },
             on: { click: { action: 'play/data-view', with: 'json' } } }, 'JSON'],
           ['button', { type: 'button', class: { $if: [{ $eq: ['$.dataView', 'form'] }, 'seg-btn active', 'seg-btn'] },
-            on: { click: { action: 'play/data-view', with: 'form' } } }, 'Form'],
+            on: { click: { action: 'play/data-view', with: 'form' } } }, text('form')],
         ], ''] },
       // form mode → the host-supplied generated form (a two-way seam); else
       // the JSON data editor(s)
@@ -130,14 +133,14 @@ const shell = {
     ['jaren-widget', {
       name: 'play-splitter', class: 'jplay-split',
       role: 'separator', 'aria-orientation': 'vertical',
-      'aria-label': 'Resize the editors and result',
+      'aria-label': text('resize'),
       'aria-valuemin': '10', 'aria-valuemax': '90', 'aria-valuenow': '$.ratioPct',
       tabindex: '0',
       props: { ratio: '$.ratio' },
     }],
     // ——— the run stage ———
     ['div', { class: 'jplay-stage' },
-      ['div', { class: 'jplay-stage-head muted' }, 'Result'],
+      ['div', { class: 'jplay-stage-head muted' }, text('result')],
       { $if: ['$.result.ran',
         { $if: ['$.result.ok',
           ['div', { class: { $if: ['$.result.deepOn', 'jplay-result deep-on', 'jplay-result'] } },
@@ -165,7 +168,7 @@ const shell = {
                 }, '$.result.deepLabel'],
                 { $if: ['$.result.deepOn',
                   ['div', { class: 'jplay-deep-body' },
-                    ['button', { type: 'button', class: 'jplay-deep-back', on: { click: { action: 'play/deep', with: '$.result.deepNext' } } }, '← Back to the result'],
+                    ['button', { type: 'button', class: 'jplay-deep-back', on: { click: { action: 'play/deep', with: '$.result.deepNext' } } }, text('back')],
                     { $if: ['$.result.deepTabbed',
                       ['div', { class: 'jplay-deep-tabs seg', role: 'tablist' }, [{ $apply: '$.result.deepTabs[*]' }]], ''] },
                     { $apply: [`$.result.deepPanel`, PLAY_MODE] },
@@ -181,7 +184,7 @@ const shell = {
             '$.result.error.text',
             { $if: ['$.result.error.paneLabel',
               ['span', { class: 'jplay-error-pane' }, ' — ', '$.result.error.paneLabel'], ''] }]] },
-        ['p', { class: 'muted jplay-hint' }, 'Pick an example, or edit the source or data — it runs live.']] },
+        ['p', { class: 'muted jplay-hint' }, text('hint')]] },
     ],
   ],
 };

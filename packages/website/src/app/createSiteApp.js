@@ -33,7 +33,7 @@ import {
   projectSnapshot, projectHost,
 } from '../boundaries/project.js';
 import {
-  runPlay, loadExample, loadDataset, switchPlayOption, sessionOf, sessionToLoaded, blankSession,
+  runPlay, withPlayLocale, loadExample, loadDataset, switchPlayOption, sessionOf, sessionToLoaded, blankSession,
   legacyExperimentToSession, createPlaySplitterWidget, deepLinkExample,
   sessionDocument, sessionFromDocument, sessionFilename,
 } from '../boundaries/play.js';
@@ -48,6 +48,10 @@ import { createDataRuntime } from '../boundaries/data.js';
 import { openSiteClient, siteContract } from '../boundaries/site.js';
 import { runHeroDispatch } from '../boundaries/hero.js';
 import { rawPath } from '../boundaries/markdown.js';
+import { isSiteLanguage, languageDir, loadSitePack, loadLocalePack } from '../boundaries/lang.js';
+import { addLocalePack, catalogFor } from '../boundaries/validator.js';
+import { siteText, sitePackOf } from '../messages.js';
+import { hashWithout } from '../lib/route.js';
 import { calcEditEffects, createRatesLayer } from '@jarenjs/calc/component';
 
 /**
@@ -72,6 +76,20 @@ import { calcEditEffects, createRatesLayer } from '@jarenjs/calc/component';
  *   loader for the repository documents the dialog renders; omit for
  *   no-network hosts.
  * @property {(theme: string) => void} [applyTheme]
+ * @property {string | null} [initialLang] - the stored site language, null
+ *   (or a code the site does not offer) for English.
+ * @property {(lang: string, dir: 'ltr' | 'rtl') => void} [applyLang] - Put the
+ *   site language on the document (`<html lang dir>`) and remember the
+ *   choice; omit for headless hosts.
+ * @property {(hash: string) => void} [replaceHash] - Replace the address
+ *   bar's hash without a navigation (`history.replaceState`): a link param
+ *   that applies once leaves it; omit for headless hosts.
+ * @property {(code: string) => Promise<Readonly<Record<string, any>> | null>} [loadLocalePack] - Load a
+ *   `@jarenjs/locales` pack; defaults to the site's lazy loaders, replaceable
+ *   to test a pack that arrives late or never.
+ * @property {(code: string) => Promise<Readonly<Record<string, string>> | null>} [loadSitePack] - Load the
+ *   site's own words in a language; defaults to the site's lazy packs
+ *   (`boundaries/lang.js`), replaceable to test a pack that cannot load.
  * @property {(on: boolean) => void} [lockScroll] - Lock the page scroll
  *   behind the README dialog; omit for headless hosts.
  * @property {(id: string) => void} [scrollToAnchor] - Scroll an in-page
@@ -141,6 +159,8 @@ export function createSiteApp(env) {
   // a separate collection key, so play sessions and legacy experiments
   // never collide
   const playStore = createDocStore({ storage, key: 'play' });
+  /** The site's own words in the site language (English until its pack has loaded). */
+  const siteWords = () => siteText(sitePackOf(app.getState()));
 
   /** effect-handler dedupe: each benchmark file is fetched once */
   const requested = new Set();
@@ -386,23 +406,25 @@ export function createSiteApp(env) {
       const slice = app.getState().play;
       const saved = env.download?.(sessionFilename(slice),
         JSON.stringify(sessionDocument(slice), null, 2));
-      dispatch('play/shared', saved === true ? 'session downloaded' : 'download unavailable here');
+      dispatch('play/shared', siteWords()(saved === true ? 'site/play/downloaded' : 'site/play/download-unavailable'));
     },
     'play-import': (props, dispatch) => {
       if (env.openFile === undefined) {
-        dispatch('play/shared', 'opening a file is unavailable here');
+        dispatch('play/shared', siteWords()('site/play/open-unavailable'));
         return;
       }
       Promise.resolve(env.openFile()).then((file) => {
         if (file === null || file === undefined) return; // the picker was dismissed
         const doc = sessionFromDocument(file.text);
         if (doc === null) {
-          dispatch('play/shared', `${file.name ?? 'that file'} is not a play session`);
+          dispatch('play/shared', file.name == null ? siteWords()('site/play/not-a-session-unnamed')
+            : siteWords()('site/play/not-a-session', { name: file.name }));
           return;
         }
         dispatch('play/loaded-session', { ...doc.session, name: doc.name });
-        dispatch('play/shared', `imported ${file.name ?? 'a session'}`);
-      }).catch(() => dispatch('play/shared', 'that file could not be read'));
+        dispatch('play/shared', file.name == null ? siteWords()('site/play/imported-unnamed')
+          : siteWords()('site/play/imported', { name: file.name }));
+      }).catch(() => dispatch('play/shared', siteWords()('site/play/unreadable')));
     },
     'play-open': (props, dispatch) => {
       const session = playStore.load(props.name);
@@ -436,12 +458,11 @@ export function createSiteApp(env) {
       if (token.length > SHARE_TOKEN_LIMIT) {
         // refuse the link, but never leave the session with no way out —
         // Download writes the same session as a file Import can read back
-        dispatch('play/shared',
-          `too large for a share link (${token.length} > ${SHARE_TOKEN_LIMIT} chars) — use Download instead`);
+        dispatch('play/shared', siteWords()('site/play/too-large', { length: token.length, limit: SHARE_TOKEN_LIMIT }));
         return;
       }
       const url = env.share?.(`#/play?s=${token}`);
-      dispatch('play/shared', url === undefined ? 'link ready' : 'link copied');
+      dispatch('play/shared', siteWords()(url === undefined ? 'site/play/link-ready' : 'site/play/link-copied'));
     },
     // a README link to a published page routes in-app after the dialog
     // closes (the action's patch already closed it)
@@ -504,7 +525,8 @@ export function createSiteApp(env) {
 
   app = createApp({
     $app: '0.1',
-    state: createInitialState(env.initialTheme ?? 'light', ideNames(), playStore.names()),
+    state: createInitialState(env.initialTheme ?? 'light', ideNames(), playStore.names(),
+      isSiteLanguage(env.initialLang) ? env.initialLang : null),
     view: STYLESHEET,
     actions: ACTIONS,
     subs: [...SUBS, rates.subEntry],
@@ -563,7 +585,7 @@ export function createSiteApp(env) {
   flowController.attach();
   app.flowEditor = flowController;
   projectController.attach();
-  wireBoundaries(app, env.debounceMs ?? 250, env.navigate, projectController);
+  wireBoundaries(app, env.debounceMs ?? 250, env.navigate, projectController, env);
   app.projectEditor = projectController;
   const webmcp = registerSiteWebMcp(app, { ...env.webmcp, ...(Object.hasOwn(env, 'modelContext') ? { context: env.modelContext } : {}), onError: report });
   const destroy = app.destroy;
@@ -578,8 +600,10 @@ export function createSiteApp(env) {
  * @param {number} debounceMs
  * @param {((hash: string) => void)} [navigate] - set the location hash (for
  *   the retired-page redirect: #/examples → #/play)
+ * @param {any} projectController
+ * @param {SiteEnv} env - the host capabilities (`applyLang`)
  */
-function wireBoundaries(app, debounceMs, navigate, projectController) {
+function wireBoundaries(app, debounceMs, navigate, projectController, env) {
   const runProjectCommit = projectController.commit;
   const runProjectActive = projectController.runActive;
   // the Play playground's live run: the active engine over the current
@@ -592,7 +616,7 @@ function wireBoundaries(app, debounceMs, navigate, projectController) {
   const runPlayLive = () => {
     const state = app.getState();
     if (state.play === undefined) return;
-    const result = runPlay(state.play);
+    const result = runPlay(state.play, state.lang, sitePackOf(state));
     const seq = ++playRunSeq;
     if (result !== null && typeof result === 'object' && typeof (/** @type {any} */ (result).then) === 'function') {
       /** @type {Promise<any>} */ (result).then((settled) => {
@@ -614,10 +638,78 @@ function wireBoundaries(app, debounceMs, navigate, projectController) {
     timers.set(key, setTimeout(run, debounceMs));
   };
 
+  // the site language: on every change, put it on the document, fetch
+  // the site's own words in it and re-run Play in it (its result is text)
+  let langLoadSeq = 0;
+  /** @type {string | null} */
+  let appliedLang = null;
+  const applyLanguage = () => {
+    const lang = app.getState().lang;
+    // a language the site does not offer (a hand-made dispatch) is English
+    if (lang !== null && !isSiteLanguage(lang)) {
+      app.dispatch('site/lang', null);
+      return false;
+    }
+    // a patch that rewrites the same language (every example load) is no switch
+    if (lang === appliedLang) return false;
+    appliedLang = lang;
+    const code = lang ?? 'en';
+    env.applyLang?.(code, languageDir(code));
+    // a status line is rendered text: a switch clears it rather than
+    // leave it in the previous language
+    if (app.getState().play?.shared != null) app.dispatch('play/shared', null);
+    const seq = ++langLoadSeq;
+    (env.loadSitePack ?? loadSitePack)(code).then((messages) => {
+      if (seq === langLoadSeq) app.dispatch('site/lang-loaded', messages === null ? null : { code, messages });
+    }, () => {
+      // a pack that cannot load (offline, never fetched): the site's own
+      // words stay English, everything the packages say still switches
+      if (seq === langLoadSeq) app.dispatch('site/lang-loaded', null);
+    });
+    return true;
+  };
+  if (app.getState().lang !== null) applyLanguage();
+
+  // the package words of every language on screen — the site language and
+  // the one an example made to show — load on demand, once per page; the
+  // state learns each, which re-renders and re-runs in it
+  /** @type {Set<string>} */
+  const requestedPacks = new Set();
+  /** @type {Set<string>} the packs that failed, asked again only when the need changes */
+  const failedPacks = new Set();
+  let wantedKey = '';
+  const requestPacks = () => {
+    const state = app.getState();
+    const wanted = [state.lang, state.play ? withPlayLocale(state.play, state.lang).config?.locale : null];
+    const key = wanted.join('|');
+    if (key !== wantedKey) {
+      wantedKey = key;
+      for (const code of failedPacks) requestedPacks.delete(code);
+      failedPacks.clear();
+    }
+    for (const code of wanted) {
+      if (code == null || code === 'en' || catalogFor(code) !== undefined || !isSiteLanguage(code)
+        || requestedPacks.has(/** @type {string} */ (code))) continue;
+      const lang = /** @type {string} */ (code);
+      requestedPacks.add(lang);
+      (env.loadLocalePack ?? loadLocalePack)(lang).then((pack) => {
+        if (pack === null) return;
+        addLocalePack(lang, pack);
+        app.dispatch('site/pack-loaded', lang);
+      }, () => {
+        // offline and never fetched: that language's words stay English,
+        // and the next change of what is needed asks again
+        failedPacks.add(lang);
+      });
+    }
+  };
+  requestPacks();
+
   app.subscribe((state, changes) => {
     if (changes === null) return;
     let routed = false;
     let play = false;
+    let language = false;
     let playFormEdit = false; // a /play/dataValue* edit (from the generated form)
     let playToggle = false;   // the /play/dataView toggle (json ↔ form)
     for (const path of changes) {
@@ -632,7 +724,15 @@ function wireBoundaries(app, debounceMs, navigate, projectController) {
       else if (path === '/route') {
         routed = true;
       }
+      else if (path === '/lang') {
+        language = true;
+      }
+      else if (path === '/siteMessages' || path.startsWith('/packs')) {
+        play = true; // the words of a run (a schema refusal, an error) follow
+      }
     }
+    if (language && applyLanguage()) play = true;
+    requestPacks();
     if (play) debounced('play', runPlayLive);
     // a generated-form edit (not the toggle, which sets the buffer from the
     // text) serializes the structured buffer back into the data-pane text —
@@ -647,6 +747,14 @@ function wireBoundaries(app, debounceMs, navigate, projectController) {
   /** Everything that must happen because the route just became what it is. */
   function onRouteArrival() {
     const s = app.getState();
+    // a `?lang=` link picks the site language on any page, once: the
+    // param then leaves the address bar, so a reload keeps the reader's
+    // later choice (as an example or a share link applies once)
+    const linked = s.route.params.lang;
+    if (linked !== undefined) {
+      if (isSiteLanguage(linked) && linked !== s.lang) app.dispatch('site/lang', linked);
+      env.replaceHash?.(hashWithout(s.route, 'lang'));
+    }
     // the retired #/examples, #/scratch and #/playground URLs redirect
     // to #/play (an old playground share token translates on the way);
     // the retired #/studio redirects to the Project IDE, its share

@@ -33,6 +33,7 @@ import { compileJsonQuery, queryMessagesEn, renderQueryMessage } from '@jarenjs/
 import { compileFormula, formulaMessagesEn } from '@jarenjs/json/formula';
 import { compileMessageTemplate } from '@jarenjs/core/message';
 import { compileMarkdown, toHtml, mdMessagesEn, labelsFromCatalog } from '@jarenjs/md';
+import { playMessagesEn } from '@jarenjs/play';
 
 
 /**
@@ -58,6 +59,12 @@ const QUERY_SAMPLE_PARAMS = Object.fromEntries(Object.entries(queryMessagesEn).m
 /** The formula msgids are derived the same way. */
 const FORMULA_SAMPLE_PARAMS = Object.fromEntries(Object.entries(formulaMessagesEn).map(([key, template]) =>
   [key, Object.fromEntries(compileMessageTemplate(template).parameters.map((name) => [name, `<${name}>`]))]));
+
+/** And play's words: a template's placeholders, or the `count` a plural closure reads. */
+const PLAY_SAMPLE_PARAMS = Object.fromEntries(Object.entries(playMessagesEn).map(([key, template]) =>
+  [key, typeof template === 'string'
+    ? Object.fromEntries(compileMessageTemplate(template).parameters.map((name) => [name, `<${name}>`]))
+    : { count: 2 }]));
 
 /** So are md's accessible names. */
 const MD_SAMPLE_PARAMS = Object.fromEntries(Object.entries(mdMessagesEn).map(([key, template]) =>
@@ -85,6 +92,7 @@ const SAMPLE_PARAMS = {
   ...DATE_SAMPLE_PARAMS,
   ...NUMBER_SAMPLE_PARAMS,
   ...MD_SAMPLE_PARAMS,
+  ...PLAY_SAMPLE_PARAMS,
   ...QUERY_SAMPLE_PARAMS,
   ...FORMULA_SAMPLE_PARAMS,
   type: { type: 'string' },
@@ -129,6 +137,7 @@ const SAMPLE_PARAMS = {
   $query: { code: 'JQ2003', docPath: '/a' },
   JQ2001: { code: 'JQ2001', docPath: '/a' },
   JQ2003: { code: 'JQ2003', docPath: '/a' },
+  'app/not-json': {},
   'form/required': {},
   'form/type': { type: 'integer' },
   'form/const': { constValue: 'EUR' },
@@ -665,4 +674,38 @@ describe('@jarenjs/locales — a query message names the operators its English n
       assert.ok(!rendered.includes('$replace'), `${code} names no $replace: ${rendered}`);
     }
   });
+});
+
+describe("@jarenjs/locales — the playground's words", () => {
+  const all = { fr, es, pt, de, ja, ko, zhTW, ru, tr, ar, nl };
+  for (const [code, pack] of Object.entries(all)) {
+    it(`${code} carries every play message, with the English placeholders, and renders each`, async () => {
+      const { playMessagesEn, playText } = await import('@jarenjs/play');
+      const t = playText(compileMessageCatalog(pack));
+      for (const [key, english] of Object.entries(playMessagesEn)) {
+        assert.ok(Object.hasOwn(pack, key), `${code} is missing play key '${key}'`);
+        if (typeof english === 'string') {
+          assert.strictEqual(typeof pack[key], 'string', `${code} ${key} is a template, as the English is`);
+          assert.deepStrictEqual(placeholders(pack[key]), placeholders(english), `${code} ${key} placeholders`);
+        }
+        const params = typeof english === 'string'
+          ? Object.fromEntries(placeholders(english).map((name) => [name, `<${name}>`]))
+          : { count: 2 };
+        if (typeof english === 'string') {
+          // the `$` tokens (operators, $id) stay as the English writes them;
+          // a pack may join a word to one with a hyphen ('$query-Operator')
+          const own = (/** @type {unknown} */ text) => (String(text).match(/\$[A-Za-z][\w-]*/g) ?? [])
+            .map((token) => (english.includes(token) ? token : token.replace(/-[^-]*$/, ''))).sort();
+          assert.deepStrictEqual(own(pack[key]), own(english), `${code} ${key} keeps its $ tokens`);
+        }
+        const rendered = t(/** @type {any} */ (key), params);
+        assert.strictEqual(typeof rendered, 'string');
+        assert.ok(rendered.length > 0, `${code} ${key} renders`);
+        if (typeof english !== 'string') {
+          // every count from 3 up is written out; Arabic says one and two in the noun itself
+          for (const count of [0, 3, 5, 11, 21, 101]) assert.match(t(/** @type {any} */ (key), { count }), new RegExp(String(count)), `${code} ${key} names ${count}`);
+        }
+      }
+    });
+  }
 });

@@ -25,8 +25,8 @@ const params = { type: 'integer', types: ['string', 'number'], missingProperty: 
 
 describe('messages pen', () => {
   it('derives every key and parameter from English and gates both generated artifacts', () => {
-    assert.deepEqual(Object.values(english).map((catalog) => Object.keys(catalog).length), [42, 22, 38]);
-    assert.equal(keys.length, 102);
+    assert.deepEqual(Object.values(english).map((catalog) => Object.keys(catalog).length), [43, 22, 38]);
+    assert.equal(keys.length, 103);
     for (const [source, catalog] of Object.entries(english)) assert.deepEqual(p.CATALOGS[source], catalogParameters(catalog));
     const out = messagePenArtifacts();
     assert.equal(readFileSync(new URL('../../packages/linq/src/messages/vocabulary.js', import.meta.url), 'utf8'), out.vocabulary);

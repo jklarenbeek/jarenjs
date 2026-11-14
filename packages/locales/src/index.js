@@ -31,6 +31,7 @@
 export { dateMessagesEn, compileDateLocale, RELATIVE_UNITS } from './dates.js';
 export { numberMessagesEn, compileNumberLocale } from './numbers.js';
 export { createIntlDateLocale } from './intl-dates.js';
+export { LOCALE_NAMES } from './names.js';
 
 export { ar } from './ar.js';
 export { de } from './de.js';

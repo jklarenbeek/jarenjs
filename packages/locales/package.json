@@ -27,6 +27,10 @@
       "types": "./dist/types/intl-zones.d.ts",
       "default": "./src/intl-zones.js"
     },
+    "./names": {
+      "types": "./dist/types/names.d.ts",
+      "default": "./src/names.js"
+    },
     "./ar": {
       "types": "./dist/types/ar.d.ts",
       "default": "./src/ar.js"
