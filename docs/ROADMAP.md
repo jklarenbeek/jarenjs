@@ -498,39 +498,39 @@ costs a descriptor plus examples and no UI code at all.
 
 ## @jarenjs/contract
 
-- [ ] **`diffContracts` reads only the empty-schema shapes it can prove.** A
-  member schema that accepts nothing only through its `pattern` — beside
-  length bounds, or by a lookaround, a back-reference, a word boundary or a
-  modifier group —, through a `multipleOf` whose multiples in an integer range
-  all fall between its integers (`type: 'integer', minimum: 6, maximum: 9,
-  multipleOf: 2.5`), or through a `propertyNames` spelled with another keyword
-  (a `$ref`, a `format`, an `if`) that refuses a required name, is still
-  classed as a constrained member (added to an open input: additive R7),
-  though every request carrying it is refused: deciding it would need the
-  pattern's language computed, the multiples of the step that are
-  integers counted, or the `propertyNames` read in its
-  document.
-- [ ] **`diffContracts` reports an `if` beside both a `then` and an `else`, a
-  `contains` changed under both counts, or a union whose variants overlap as
-  R15 `unknown`,** so a `--fail-on breaking` gate alone passes a required
+- [ ] **`diffContracts` cannot tell whether some member schemas accept
+  nothing.** A string-only member whose `pattern` holds no string only by
+  a lookaround, a back-reference, a word boundary or a modifier group
+  (`^(?=b)a`, `^a\bb`), or only under one way of counting a length
+  (`^.{3}$` beside `maxLength: 2` admits `e\u0301e` counted in grapheme
+  clusters, nothing counted in UTF-16 units), and a required member whose
+  `propertyNames` cannot be asked at its place (a dynamic reference in the
+  document, a contract another copy of the package compiled), answer R15
+  when added to an open input, so a `--fail-on breaking` gate alone
+  passes them; a member that accepts nothing through a shape the
+  procedure does not model at all (`type: 'string', allOf: [{ pattern:
+  '[]' }]`, `type: 'array', items: false, minItems: 1`) still answers
+  additive R7. Deciding the first would need the pattern's language
+  computed with its lookarounds and back-references, the second the
+  validator's own length option read from the compiled contract, the
+  third every conjunct and item schema read against the node's own
+  keywords.
+- [ ] **`diffContracts` reports an `if` changed beside a `then` and an
+  `else` unlike each other, a `contains` changed under both counts, or a
+  union whose change touches a variant that overlaps another as R15
+  `unknown`,** so a `--fail-on breaking` gate alone passes a required
   member dropped there. A value that crosses such an `if` moves from one
-  branch to the other, and a value one overlapping variant drops another may
-  still accept: deciding either would need two schemas compared value by
-  value; with a `minContains` above 0 beside a `maxContains`, the count is not
-  monotone in what matches. An `if` that changed while its branch changed or
-  appeared, one added or dropped beside a branch, an `if` change at a keyword
-  its branch also bounds, a changed `contains` beside a tuple form or beside
-  counts that changed, two `allOf` conjuncts respelled together, and a change
-  at a location another conjunct or the node itself also constrains (it would
-  need the two intersected; a variant added beside the node's own `type`
-  among them) stay R15 too.
-- [ ] **`diffContracts` reads a same-document `$ref` target under 2020-12
-  beside its own place's draft.** `readPlaces` gives every such target
-  `FROM_2020` because the validator once read the end of a chain of bare
-  `$ref`s under no draft; it now reads every reach of a target at its own
-  place, so a keyword the two readings part on at a target below a resource
-  of an older draft (`prefixItems` under a draft-07 `$defs` member) still
-  answers R15 where the validator decides it.
+  branch to the other, and a value one overlapping variant drops another
+  may still accept: deciding either would need two schemas compared value
+  by value; with a `minContains` above 0 beside a `maxContains`, the
+  count is not monotone in what matches. An `if` that changed while its
+  branch changed or appeared, one added or dropped beside a branch, an
+  `if` change at a keyword its branch also bounds, a changed `contains`
+  beside a tuple form or beside counts that changed, a union changed in
+  two variants, two `allOf` conjuncts respelled together, and a change at
+  a location another conjunct or the node itself also constrains (it
+  would need the two intersected; a variant added beside the node's own
+  `type` among them) stay R15 too.
 
 ## @jarenjs/linq & @jarenjs/db — the data pair
 

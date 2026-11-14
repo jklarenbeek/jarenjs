@@ -124,7 +124,7 @@ describe('diffContracts — a member the other side judges by a pattern, an appl
 });
 
 describe('diffContracts — a member schema that accepts nothing forbids the member, as false does', () => {
-  const samples = [null, true, 0, 0.10000001, 0.3, 1, 1.0000005, 1.5, 2, 3, 3.25, -2, '', 'a', 'abc', 'xa', 'a\n', [], [1], {}, { k: 1 }, { k: 'x' }];
+  const samples = [null, true, 0, 0.10000001, 0.3, 1, 1.0000005, 1.5, 2, 3, 3.25, 5, -2, '', 'a', 'aa', 'abc', 'xa', 'a\n', [], [1], {}, { k: 1 }, { k: 'x' }];
   /** Shapes the walk proves accept nothing. @type {[string, any][]} */
   const nothing = [
     ['not of everything', { not: {} }],
@@ -169,6 +169,12 @@ describe('diffContracts — a member schema that accepts nothing forbids the mem
     ['a range starting just past a multiple, ending before the next', { type: 'number', minimum: 1.0000001, maximum: 1.5, multipleOf: 1 }],
     ['a propertyNames refusing the required name', { type: 'object', required: ['k'], propertyNames: { maxLength: 0 } }],
     ['a propertyNames pattern refusing the required name', { type: 'object', required: ['k'], propertyNames: { not: { pattern: '^k' } } }],
+    ['a pattern beside a maxLength shorter than any match', { type: 'string', pattern: '^a{5}$', maxLength: 3 }],
+    ['a pattern spanning the string beside a minLength longer than any match', { type: 'string', pattern: '^a{2}$', minLength: 3 }],
+    ['a pattern the empty string fails beside maxLength 0', { type: 'string', pattern: '^a+$', maxLength: 0 }],
+    ['an integer range holding a multiple only between its integers', { type: 'integer', minimum: 6, maximum: 9, multipleOf: 2.5 }],
+    ['a propertyNames $ref refusing the required name', { type: 'object', required: ['ab'], propertyNames: { $ref: '#/$defs/short' } }],
+    ['a propertyNames if refusing the required name', { type: 'object', required: ['k'], propertyNames: { if: { minLength: 1 }, then: false } }],
   ];
   /** Shapes that look alike but accept something: classed as any constrained member. @type {[string, any][]} */
   const something = [
@@ -199,19 +205,22 @@ describe('diffContracts — a member schema that accepts nothing forbids the mem
     ['an open end just below a multiple', { type: 'number', exclusiveMinimum: 0.25, maximum: 0.35, multipleOf: 0.1 }],
     ['a range starting just before a multiple', { type: 'number', minimum: 0.9999999, maximum: 1.5, multipleOf: 1 }],
     ['a propertyNames admitting the required name', { type: 'object', required: ['k'], propertyNames: { maxLength: 1 } }],
+    ['a pattern whose lookahead agrees with it', { type: 'string', pattern: '^(?=a)a' }],
+    ['a pattern matching what its group captured', { type: 'string', pattern: '^(a)\\1$' }],
+    ['a pattern beside a minLength a longer match meets', { type: 'string', pattern: '^[a-z]+$', minLength: 3 }],
+    ['an integer range holding a whole multiple of a fractional step', { type: 'integer', minimum: 4, maximum: 6, multipleOf: 2.5 }],
+    ['a propertyNames $ref admitting the required name', { type: 'object', required: ['k'], propertyNames: { $ref: '#/$defs/short' } }],
   ];
   /**
    * Shapes that accept nothing in a way the procedure does not read (a
-   * lookaround, a word boundary): still classed as any constrained member.
+   * lookaround, a word boundary), and that no witness string passes.
    * @type {[string, any][]}
    */
   const unread = [
     ['a pattern whose lookahead contradicts it', { type: 'string', pattern: '(?=a)b' }],
     ['a pattern of a word boundary and its negation', { type: 'string', pattern: '\\b\\B' }],
-    ['an integer range holding a multiple only between its integers', { type: 'integer', minimum: 6, maximum: 9, multipleOf: 2.5 }],
-    ['a propertyNames spelled with a keyword not read on a literal', { type: 'object', required: ['k'], propertyNames: { if: { minLength: 1 }, then: false } }],
   ];
-  const $defs = { none: { not: {} } };
+  const $defs = { none: { not: {} }, short: { maxLength: 1 } };
   const open = { type: 'object' };
   /** @param {any} m */
   const adding = (m) => ({ type: 'object', properties: { m } });
@@ -222,20 +231,25 @@ describe('diffContracts — a member schema that accepts nothing forbids the mem
       assert.deepStrictEqual(samples.filter((x) => v(x)), [], name);
     }
     for (const [name, schema] of something) {
-      const v = new JarenValidator().compile(schema);
+      const v = new JarenValidator().compile({ $defs, ...schema });
       assert.ok(samples.some((x) => v(x)), name);
     }
   });
 
-  it('added to an open input it refuses every request carrying the member: breaking R6 (was additive R7)', () => {
+  it('added to an open input it refuses every request carrying the member: breaking R6 (was additive R7); one whose emptiness the walk cannot tell is R15 (was additive R7)', () => {
     for (const [name, m] of nothing) {
       const d = diffContracts(take('input', open, $defs), take('input', adding(m), $defs));
       assert.deepStrictEqual(flat(d, 'input'), [['breaking', 'R6', 'input-narrowed', '/properties/m']], name);
     }
     agrees('input', open, adding({ not: {} }), [{}, { m: 1 }, { m: 'a' }], [['breaking', 'R6', 'input-narrowed', '/properties/m']]);
-    for (const [name, m] of [...something, ...unread]) {
-      const d = diffContracts(take('input', open), take('input', adding(m)));
+    for (const [name, m] of something) {
+      const d = diffContracts(take('input', open, $defs), take('input', adding(m), $defs));
       assert.deepStrictEqual(flat(d, 'input'), [['additive', 'R7', 'input-member-added', '/properties/m']], name);
+    }
+    for (const [name, m] of unread) {
+      const d = diffContracts(take('input', open), take('input', adding(m)));
+      assert.deepStrictEqual(flat(d, 'input'), [['unknown', 'R15', 'schema-unknown', '/properties/m']], name);
+      assert.strictEqual(d.unknown[0].note, 'pattern', name);
     }
   });
 
@@ -302,11 +316,11 @@ describe('diffContracts — not, contains and a union keyed by type and discrimi
     agrees('input', member({ anyOf: [variant({ const: 'a' }), variant({ const: 'b' }), { type: 'null' }] }),
       member({ anyOf: [variant({ enum: ['a', 'b'] }), variant({ const: 'b' }), { type: 'null' }] }), [],
       [['unknown', 'R15', 'schema-unknown', '/properties/x/anyOf']]);
-    // two type sets in a mixed union that overlap (`number` holds every `integer`): the pairing compares the
-    // type sets and finds them meeting, so neither direction is decided
+    // two type sets in a mixed union that overlap (`number` holds every `integer`) pair no variants; the one
+    // that changed is apart from the others on each side, so the union moves by what it moves (was R15)
     agrees('input', member({ anyOf: [variant({ const: 'a' }), { type: 'number' }, { type: 'null' }] }),
-      member({ anyOf: [variant({ const: 'a' }), { type: 'integer' }, { type: 'null' }] }), [],
-      [['unknown', 'R15', 'schema-unknown', '/properties/x/anyOf']]);
+      member({ anyOf: [variant({ const: 'a' }), { type: 'integer' }, { type: 'null' }] }), [{ x: 1 }, { x: 1.5 }, { x: null }],
+      [['breaking', 'R6', 'input-narrowed', '/properties/x/anyOf/1/type']]);
   });
 });
 
@@ -542,15 +556,24 @@ describe('diffContracts — each schema place read under the draft its $schema n
       [['unknown', 'R15', 'schema-unknown', '/properties/x/if/dependentRequired']]);
   });
 
-  it('a definition below a resource declaring draft-07 is read under it from a $ref below the schema, under none at the end of a chain the schema starts: a change there is R15 (was breaking R6 beside additive R7)', () => {
+  it('a $ref target is read under the nearest $schema on the way to it, from a $ref below the schema and at the end of a chain the schema starts (was R15)', () => {
     /** @param {string} type */
     const defs = (type) => ({ lib: { $schema: draft7, $defs: { T: tuple(type) } } });
     const ref = { $ref: '#/$defs/lib/$defs/T' };
-    agreesInDocument('input', member(ref), member(ref), defs('string'), defs('number'), tuples,
-      [['unknown', 'R15', 'schema-unknown', '/properties/x/prefixItems/0/type']]);
-    agreesInDocument('output', ref, ref, defs('string'), defs('number'), [['a'], [1]],
-      [['unknown', 'R15', 'schema-unknown', '/prefixItems/0/type']]);
-    agreesInDocument('input', member(ref), member(ref), defs('string'), defs('string'), tuples, []);
+    // draft-07 reads no prefixItems: nothing the validator reads moved
+    agreesInDocument('input', member(ref), member(ref), defs('string'), defs('number'), tuples, []);
+    agreesInDocument('output', ref, ref, defs('string'), defs('number'), [['a'], [1]], []);
+    const chain = (/** @type {string} */ type) => ({ o: { $ref: '#/$defs/lib/$defs/T' }, ...defs(type) });
+    agreesInDocument('output', { $ref: '#/$defs/o' }, { $ref: '#/$defs/o' }, chain('string'), chain('number'), [['a'], [1]], []);
+    // below an object no draft defines as a keyword, its $schema counts too; without one every keyword reads
+    const below = (/** @type {string | undefined} */ uri, /** @type {string} */ type) => ({ c: { ...(uri === undefined ? {} : { $schema: uri }), schemas: { T: tuple(type) } } });
+    const deep = { $ref: '#/$defs/c/schemas/T' };
+    agreesInDocument('input', member(deep), member(deep), below(draft7, 'string'), below(draft7, 'number'), tuples, []);
+    agreesInDocument('input', member(deep), member(deep), below(undefined, 'string'), below(undefined, 'number'), tuples,
+      [['breaking', 'R6', 'input-narrowed', '/properties/x/prefixItems/0/type'], ['additive', 'R7', 'input-widened', '/properties/x/prefixItems/0/type']]);
+    // an unevaluatedProperties: false a draft-07 target leaves inert closes nothing
+    const closing = (/** @type {Record<string, any>} */ properties) => ({ lib: { $schema: draft7, $defs: { T: { type: 'object', properties, unevaluatedProperties: false } } } });
+    agreesInDocument('output', ref, ref, closing({ n: {} }), closing({ n: {}, m: {} }), [{ m: 1 }], [['additive', 'R9', 'output-member-added', '/properties/m']]);
     // alike as text beside a resource that now declares a draft reading the keyword, it may have moved
     agreesInDocument('input', member(ref), member(ref), defs('string'), { lib: { $schema: draft2020, $defs: { T: tuple('string') } } }, tuples,
       [['unknown', 'R15', 'schema-unknown', '/properties/x/prefixItems']]);
@@ -733,5 +756,213 @@ describe('diffContracts — a pattern no string matches', () => {
     assert.deepStrictEqual(unsound, []);
     // 828 patterns compile in Unicode mode; 389 of them are read as matching nothing
     assert.deepStrictEqual([patterns.length, proven.size], [828, 389]);
+  });
+});
+
+describe('diffContracts — a pattern read beside its length bounds, and a propertyNames read at its place', () => {
+  const open = { type: 'object' };
+  /** @param {any} m */
+  const adding = (m) => ({ type: 'object', properties: { m } });
+  /** @param {any} m @param {any} [$defs] */
+  const added = (m, $defs = {}) => flat(diffContracts(take('input', open, $defs), take('input', adding(m), $defs)), 'input');
+  const additive = [['additive', 'R7', 'input-member-added', '/properties/m']];
+  const breaking = [['breaking', 'R6', 'input-narrowed', '/properties/m']];
+  const unknown = [['unknown', 'R15', 'schema-unknown', '/properties/m']];
+  /** @param {any} schema @param {any} [options] */
+  const accepts = (schema, options) => new JarenValidator(options).compile(schema);
+
+  it('a witness the validator takes keeps a pattern member a constrained one; a length no match can meet empties it (was additive R7)', () => {
+    const uuid = '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$';
+    const email = '^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$';
+    const password = '^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d)(?=.*[!@#$%^&*]).{8,}$';
+    /** Each: a member schema, what adding it answers, and a string the validator takes where it holds one. @type {[any, any[], string | null][]} */
+    const cases = [
+      [{ type: 'string', pattern: uuid, minLength: 36, maxLength: 36 }, additive, '01234567-89ab-cdef-0123-456789abcdef'],
+      [{ type: 'string', pattern: uuid, maxLength: 35 }, breaking, null],
+      [{ type: 'string', pattern: uuid, minLength: 37 }, breaking, null],
+      [{ type: 'string', pattern: email, maxLength: 64 }, additive, 'a@b.c'],
+      [{ type: 'string', pattern: email, maxLength: 1 }, breaking, null],
+      [{ type: 'string', pattern: password, maxLength: 64 }, additive, 'aA0!aA0!'],
+      [{ type: 'string', pattern: '^(\\w+)-\\1$' }, additive, 'ab-ab'],
+      [{ type: 'string', pattern: '^(?<w>\\w)\\k<w>$', minLength: 2 }, additive, 'aa'],
+      [{ type: 'string', pattern: 'b$', minLength: 6 }, additive, 'aaaaab'],
+      [{ type: 'string', pattern: '(?i:a)' }, additive, 'A'],
+      [{ type: 'string', pattern: '^😀+$', minLength: 3 }, additive, '😀😀😀'],
+      [{ type: 'string', pattern: '^$', maxLength: 0 }, additive, ''],
+      [{ type: 'string', pattern: '^.{3}$', maxLength: 0 }, breaking, null],
+    ];
+    for (const [m, expected, witness] of cases) {
+      assert.deepStrictEqual(added(m), expected, m.pattern);
+      if (witness !== null) assert.strictEqual(accepts(m)(witness), true, `${m.pattern} takes ${witness}`);
+    }
+  });
+
+  it('a pattern whose emptiness rests on how the validator counts a length, a lookaround or a back-reference is R15 (was additive R7)', () => {
+    // three code points fit two grapheme clusters, not two UTF-16 units; one astral code point is two units
+    for (const [m, text] of /** @type {[any, string][]} */ ([[{ type: 'string', pattern: '^.{3}$', maxLength: 2 }, 'e\u0301e'], [{ type: 'string', pattern: '^.$', minLength: 2 }, '😀'],
+      [{ type: 'string', pattern: '^\\r\\n$', minLength: 2 }, '\r\n']])) {
+      assert.deepStrictEqual(added(m), unknown, m.pattern);
+      assert.notStrictEqual(accepts(m)(text), accepts(m, { useGrapheme: false })(text), m.pattern);
+    }
+    // a search that spends its budget gives up rather than guess
+    assert.deepStrictEqual(added({ type: 'string', pattern: `^${'(\\w+)'.repeat(10)}$`, minLength: 490 }), unknown);
+    assert.deepStrictEqual(added({ type: 'string', pattern: '^(\\w+)-(\\w+)$', minLength: 480 }), additive);
+    for (const pattern of ['^(?=b)a', '^a\\bb', '(?<=a)b']) {
+      const m = { type: 'string', pattern, maxLength: 5 };
+      assert.deepStrictEqual(added(m), unknown, pattern);
+    }
+    const d = diffContracts(take('input', open), take('input', adding({ type: 'string', pattern: '^(a)\\1$', maxLength: 1 })));
+    assert.strictEqual(d.unknown[0].note, 'pattern');
+    // a bound that is no length (the validator reads a numeric string) leaves only a pattern no string matches decided
+    assert.deepStrictEqual(added({ type: 'string', pattern: '[]', maxLength: '3' }), breaking);
+    assert.deepStrictEqual(added({ type: 'string', pattern: '^a', maxLength: '3' }), unknown);
+    // an empty member read through a required one, a conjunct or every variant is undecided the same way
+    const unsure = { type: 'string', pattern: '^(?=b)a' };
+    assert.deepStrictEqual(added({ type: 'object', required: ['k'], properties: { k: unsure } }), unknown);
+    assert.deepStrictEqual(added({ allOf: [{}, unsure] }), unknown);
+    assert.deepStrictEqual(added({ anyOf: [{ not: {} }, unsure] }), unknown);
+    assert.deepStrictEqual(added({ anyOf: [{ type: 'string' }, unsure] }), additive);
+  });
+
+  it('R15 only where an empty member would be breaking: a member inside an object, a closed input and a removal keep their rows', () => {
+    const unsure = { type: 'string', pattern: '^(?=b)a' };
+    assert.deepStrictEqual(flat(diffContracts(take('input', member(open)), take('input', member(adding(unsure)))), 'input'),
+      [['breaking', 'R6', 'input-narrowed', '/properties/x/properties/m']]);
+    const closed = { type: 'object', properties: { n: {} }, additionalProperties: false };
+    assert.deepStrictEqual(flat(diffContracts(take('input', closed), take('input', { ...closed, properties: { n: {}, m: unsure } })), 'input'),
+      [['additive', 'R7', 'input-member-added', '/properties/m']]);
+    assert.deepStrictEqual(flat(diffContracts(take('input', adding(unsure)), take('input', open)), 'input'),
+      [['neutral', 'R5', 'input-member-removed', '/properties/m']]);
+    // beside the siblings of the $ref an input is spelled as, which may judge the member themselves
+    const spelled = { $ref: '#/$defs/I', additionalProperties: false };
+    assert.deepStrictEqual(flat(diffContracts(take('input', spelled, { I: open }), take('input', spelled, { I: adding(unsure) })), 'input'),
+      [['additive', 'R7', 'input-member-added', '/properties/m']]);
+  });
+
+  it('a propertyNames spelled with $ref, if or format is asked about a required name at its place, by the contract\'s own validator (was additive R7)', () => {
+    const named = (/** @type {any} */ propertyNames, /** @type {string[]} */ required) => ({ type: 'object', required, propertyNames });
+    const $defs = { short: { maxLength: 1 }, hop: { $ref: '#/$defs/start' }, start: { pattern: '^a' } };
+    assert.deepStrictEqual(added(named({ $ref: '#/$defs/short' }, ['ab']), $defs), breaking);
+    assert.deepStrictEqual(added(named({ $ref: '#/$defs/short' }, ['k']), $defs), additive);
+    assert.deepStrictEqual(added(named({ $ref: '#/$defs/hop' }, ['b']), $defs), breaking);
+    assert.deepStrictEqual(added(named({ $ref: '#/$defs/hop' }, ['ab']), $defs), additive);
+    assert.deepStrictEqual(added(named({ if: { minLength: 2 }, then: false }, ['ab'])), breaking);
+    assert.deepStrictEqual(added(named({ if: { minLength: 2 }, then: false }, ['k'])), additive);
+    assert.deepStrictEqual(added(named({ $ref: '#/$defs/short', maxLength: 5 }, ['ab']), $defs), breaking);
+    // a format the contract's validator reads as an annotation refuses no name
+    const email = named({ format: 'email' }, ['not-an-email']);
+    assert.deepStrictEqual(added(email), additive);
+    const contract = compileContract(take('input', adding(email)));
+    assert.strictEqual(contract.operations['a.b'].input.validate({ m: { 'not-an-email': 1 } }).valid, true);
+    // a dynamic reference anywhere in the document may resolve apart from the place: R15
+    const dynamic = { ...$defs, d: { $dynamicRef: '#/$defs/short' } };
+    const d = diffContracts(take('input', open, dynamic), take('input', adding(named({ $ref: '#/$defs/short' }, ['ab'])), dynamic));
+    assert.deepStrictEqual(flat(d, 'input'), unknown);
+    assert.strictEqual(d.unknown[0].note, 'propertyNames');
+  });
+
+  it('a propertyNames another document holds is asked at its place there', () => {
+    const lib = {
+      $id: 'https://x.example/names.json',
+      $defs: { short: { maxLength: 1 }, M: { type: 'object', required: ['ab'], propertyNames: { $ref: '#/$defs/short' } } },
+    };
+    const compiled = (/** @type {any} */ input) => compileContract(take('input', input), { schemas: [lib] });
+    assert.deepStrictEqual(flat(diffContracts(compiled(open), compiled(adding({ $ref: 'https://x.example/names.json#/$defs/M' }))), 'input'), breaking);
+    // a dynamic reference in that document may resolve apart from the place: R15
+    const dynamic = { ...lib, $defs: { ...lib.$defs, d: { $dynamicRef: '#/$defs/short' } } };
+    const held = (/** @type {any} */ input) => compileContract(take('input', input), { schemas: [dynamic] });
+    assert.deepStrictEqual(flat(diffContracts(held(open), held(adding({ $ref: 'https://x.example/names.json#/$defs/M' }))), 'input'),
+      [['unknown', 'R15', 'schema-unknown', '/properties/m']]);
+  });
+
+  it('integer multiples of a fractional step: answered as the validator takes the integers of the range', () => {
+    for (const step of [0.5, 1.5, 2.5, 3, 0.3, 7, 0.25, 1.25]) {
+      for (const [low, high] of [[6, 9], [4, 6], [1, 4], [0, 0], [11, 14], [-1, 1], [13, 14]]) {
+        const m = { type: 'integer', minimum: low, maximum: high, multipleOf: step };
+        const v = accepts(m);
+        const holds = Array.from({ length: high - low + 1 }, (_, k) => low + k).some((n) => v(n));
+        assert.deepStrictEqual(added(m), holds ? additive : breaking, `${step} in ${low}..${high}`);
+      }
+    }
+  });
+});
+
+describe('diffContracts — a conditional alike in its branches on each side, and a union whose one changed variant is apart from the rest', () => {
+  const required = (/** @type {string[]} */ ...names) => ({ required: names });
+  const objects = [{}, { a: 1 }, { b: 1 }, { k: 1 }, { a: 1, k: 1 }, { a: 1, b: 1 }, 1].map((x) => ({ x }));
+
+  it('an if beside a then and an else alike on each side applies that branch to every value, whatever the if (was R15)', () => {
+    agrees('input', member({ if: required('k'), then: {}, else: {} }), member({ if: required('b'), then: required('a'), else: required('a') }), objects,
+      [['breaking', 'R6', 'input-narrowed', '/properties/x/then/required']]);
+    agrees('input', member({ if: required('k'), then: required('a'), else: required('a') }), member({ if: required('b'), then: {}, else: {} }), objects,
+      [['additive', 'R7', 'input-widened', '/properties/x/then/required']]);
+    agrees('output', { if: required('k'), then: {}, else: {} }, { if: required('b'), then: required('a'), else: required('a') }, objects.map(({ x }) => x),
+      [['additive', 'R9', 'output-member-added', '/then/required']]);
+    agrees('input', member({ if: required('k'), then: required('a'), else: required('a') }), member({ if: required('b'), then: required('a'), else: required('a') }), objects, []);
+    // an absent branch accepts everything, as `true` does; without an if the branches apply to nothing
+    agrees('input', member({ if: required('k') }), member({ if: required('b'), then: required('a'), else: required('a') }), objects,
+      [['breaking', 'R6', 'input-narrowed', '/properties/x/then/required']]);
+    agrees('input', member({ then: required('a'), else: required('a') }), member({ if: required('b'), then: required('a'), else: required('a') }), objects,
+      [['breaking', 'R6', 'input-narrowed', '/properties/x/then/required']]);
+    agrees('output', { if: required('b'), then: required('a'), else: required('a') }, { then: required('a'), else: required('a') }, objects.map(({ x }) => x),
+      [['breaking', 'R8', 'output-member-optional', '/then/required']]);
+  });
+
+  it('an if beside branches unlike each other stays R15', () => {
+    agrees('input', member({ if: required('k'), then: required('a'), else: required('b') }), member({ if: required('b'), then: required('a'), else: required('b') }), objects,
+      [['unknown', 'R15', 'schema-unknown', '/properties/x/if']]);
+    agrees('input', member({ if: required('k'), then: required('a'), else: required('a') }), member({ if: required('b'), then: required('a'), else: required('b') }), objects,
+      [['unknown', 'R15', 'schema-unknown', '/properties/x/if'], ['unknown', 'R15', 'schema-unknown', '/properties/x/else']]);
+  });
+
+  it('a union whose one changed, added or removed variant is apart from the rest by type or discriminator moves by that variant (was R15)', () => {
+    const strings = [{ type: 'string' }, { type: 'string', maxLength: 3 }];
+    const samples = [{}, ...['', 'abcd', 1, 1.5, 4, 7, true, null, { a: 1 }, { a: 1, b: 1 }, { t: 'x' }].map((x) => ({ x }))];
+    for (const key of ['anyOf', 'oneOf']) {
+      agrees('input', member({ [key]: [...strings, { type: 'object', required: ['a'] }] }), member({ [key]: [...strings, { type: 'object', required: ['a', 'b'] }] }), samples,
+        [['breaking', 'R6', 'input-narrowed', `/properties/x/${key}/2/required`]]);
+      agrees('output', { [key]: [...strings, { type: 'number', maximum: 3 }] }, { [key]: [...strings, { type: 'number', maximum: 5 }] }, samples.map(({ x }) => x),
+        [['breaking', 'R8', 'output-widened', `/${key}/2/maximum`]]);
+      agrees('input', member({ [key]: [...strings, { type: 'number' }] }), member({ [key]: [...strings, { type: 'integer' }] }), samples,
+        [['breaking', 'R6', 'input-narrowed', `/properties/x/${key}/2/type`]]);
+      agrees('input', member({ [key]: strings }), member({ [key]: [...strings, { type: 'boolean' }] }), samples,
+        [['additive', 'R7', 'input-widened', `/properties/x/${key}/2`]]);
+      agrees('input', member({ [key]: [{ type: 'boolean' }, ...strings] }), member({ [key]: strings }), samples,
+        [['breaking', 'R6', 'input-narrowed', `/properties/x/${key}/0`]]);
+      const tagged = { type: 'object', required: ['t'], properties: { t: { const: 'x' } } };
+      agrees('input', member({ [key]: [{ type: 'object', required: ['t'], properties: { t: { const: 'y' } } }, { type: 'object' }, tagged] }),
+        member({ [key]: [{ type: 'object', required: ['t'], properties: { t: { const: 'y' } } }, { type: 'object' }, { ...tagged, required: ['t', 'b'] }] }), samples,
+        [['unknown', 'R15', 'schema-unknown', `/properties/x/${key}`]]);
+    }
+    // a variant whose discriminator admits no value accepts nothing on both sides: a change inside it moves nothing
+    const none = (/** @type {number} */ n) => ({ type: 'object', required: ['k'], properties: { k: { enum: [] }, v: { maxLength: n } } });
+    const other = { type: 'object', required: ['k'], properties: { k: { const: 'b' } } };
+    agrees('input', member({ anyOf: [none(5), other] }), member({ anyOf: [none(3), other] }), [{ x: { k: 'b', v: 'abcd' } }, { x: { k: 'a', v: 'abcd' } }], []);
+    // a discriminator value set that shrank beside a variant it stays apart from: what it dropped is refused
+    const keyed = (/** @type {string[]} */ k, /** @type {number} */ n) => ({ type: 'object', required: ['k'], properties: { k: { enum: k }, v: { maxLength: n } } });
+    const wide = { anyOf: [keyed(['a', 'c'], 5), other] };
+    const narrow = { anyOf: [keyed(['a'], 3), other] };
+    const tags = [{ k: 'a', v: 'abcd' }, { k: 'c' }, { k: 'b', v: 'abcd' }, { k: 'a' }];
+    agrees('input', member(wide), member(narrow), tags.map((x) => ({ x })),
+      [['breaking', 'R6', 'input-narrowed', '/properties/x/anyOf/0/properties/k/enum'], ['breaking', 'R6', 'input-narrowed', '/properties/x/anyOf/0/properties/v/maxLength']]);
+    agrees('input', member(narrow), member(wide), tags.map((x) => ({ x })),
+      [['additive', 'R7', 'input-widened', '/properties/x/anyOf/0/properties/k/enum'], ['additive', 'R7', 'input-widened', '/properties/x/anyOf/0/properties/v/maxLength']]);
+    agrees('output', wide, narrow, tags,
+      [['additive', 'R9', 'output-narrowed', '/anyOf/0/properties/k/enum'], ['additive', 'R9', 'output-narrowed', '/anyOf/0/properties/v/maxLength']]);
+    agrees('output', narrow, wide, tags,
+      [['breaking', 'R8', 'output-widened', '/anyOf/0/properties/k/enum'], ['breaking', 'R8', 'output-widened', '/anyOf/0/properties/v/maxLength']]);
+    // a type set that grew beside one it stays apart from narrows and widens at once
+    agrees('input', member({ anyOf: [{ type: 'string', maxLength: 5 }, { type: 'integer' }] }), member({ anyOf: [{ type: ['string', 'boolean'], maxLength: 3 }, { type: 'integer' }] }),
+      [{ x: 'abcd' }, { x: true }, { x: 1 }], [['breaking', 'R6', 'input-narrowed', '/properties/x/anyOf/0/maxLength'], ['additive', 'R7', 'input-widened', '/properties/x/anyOf/0/type']]);
+  });
+
+  it('a union whose changed variant meets another, or that changed in two variants, stays R15', () => {
+    const strings = [{ type: 'string' }, { type: 'string', maxLength: 3 }];
+    agrees('input', member({ anyOf: [...strings, { type: 'number' }] }), member({ anyOf: [...strings, { type: 'string', minLength: 5 }] }), [],
+      [['unknown', 'R15', 'schema-unknown', '/properties/x/anyOf']]);
+    agrees('input', member({ anyOf: [{ type: 'string' }, { type: 'string', maxLength: 3 }] }), member({ anyOf: [{ type: 'string' }, { type: 'string', maxLength: 2 }] }), [],
+      [['unknown', 'R15', 'schema-unknown', '/properties/x/anyOf']]);
+    agrees('input', member({ anyOf: [...strings, { type: 'number', maximum: 5 }, { type: 'boolean' }] }), member({ anyOf: [...strings, { type: 'number', maximum: 3 }, { type: 'boolean', const: true }] }), [],
+      [['unknown', 'R15', 'schema-unknown', '/properties/x/anyOf']]);
   });
 });

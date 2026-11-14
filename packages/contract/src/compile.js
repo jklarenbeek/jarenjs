@@ -172,7 +172,7 @@ function at(base, key) {
  * @param {(string | number)[]} tokens
  * @returns {string}
  */
-function fragment(tokens) {
+export function fragment(tokens) {
   let out = '#';
   for (let i = 0; i < tokens.length; i++) {
     out += '/' + encodeURIComponent(encodeJSONPointerSegment(tokens[i]));
@@ -317,6 +317,8 @@ function snapshot(value, docPath, path) {
  *   indexed under the URI the validator holds it by: where each of their
  *   schema objects sits, so a ref written in one reads against its base
  * @property {Map<string, unknown>} documents - each document of `held`, by that URI
+ * @property {string} uri - the URI the validator holds the document under
+ *   (empty until the compile registers it)
  */
 
 /** @typedef {import('@jarenjs/validate/normalize').SchemaResources} SchemaResources */
@@ -1185,7 +1187,7 @@ export function compileContract(doc, options = {}) {
   if (!isJsonObject(doc)) throw refuse('JC0001', 'the contract document must be an object', '');
   const src = deepFreeze(snapshot(doc, '', new Set()));
   /** @type {RefScope} */
-  const scope = { src, anchors: collectSameDocumentAnchors(src), validator, held: undefined, documents: new Map() };
+  const scope = { src, anchors: collectSameDocumentAnchors(src), validator, held: undefined, documents: new Map(), uri: '' };
 
   checkRoot(src, scope);
 
@@ -1282,6 +1284,7 @@ export function compileContract(doc, options = {}) {
   // ——— references: the validator's whole-document probe ———
   const synthetic = `urn:jaren:contract:${++compileSequence}`;
   validator.addSchema({ ...src, $id: synthetic });
+  scope.uri = synthetic;
   try {
     validator.compile({ $ref: `${synthetic}#` });
   }

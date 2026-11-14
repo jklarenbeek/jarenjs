@@ -205,7 +205,7 @@ and the live heap they hold — the V8 heap after two forced full
 collections, run on the main thread so each has finished when the heap
 is read, less the same process's heap before the import. Each heap is
 the median of <!--fact:closure.runs-->5<!--/fact--> fresh processes, whose runs differed by at
-most <!--fact:closure.spread-->52 KiB<!--/fact--> for any one subpath; native memory a built-in
+most <!--fact:closure.spread-->68 KiB<!--/fact--> for any one subpath; native memory a built-in
 allocates for itself (`node:crypto`'s, say) is not in it. A heap depends
 on the runtime and the host — these were measured on one machine,
 with <!--fact:closure.host-->Node v24.22.1 on linux x64<!--/fact--> — while a module count is
@@ -228,7 +228,7 @@ included.
 | `./client` | 141 | core 75, validate 27, json 26, contract 13 | 6.0 |
 | `./command` | 23 | core 11, json 7, contract 5 | 1.2 |
 | `./continuation-node` | 20 | core 10, json 7, contract 3 | 1.6 |
-| `./diff` | 140 | core 73, validate 29, json 26, contract 12 | 6.4 |
+| `./diff` | 141 | core 73, validate 29, json 26, contract 13 | 6.5 |
 | `./fetch` | 11 | core 8, contract 3 | 0.7 |
 | `./http` | 46 | contract 17, core 16, json 7, validate 6 | 2.0 |
 | `./ledger` | 11 | core 9, contract 2 | 0.8 |
@@ -293,7 +293,7 @@ included.
 <!--fact:closure.json-->
 | Subpath | Modules | By package | Live heap MiB |
 |---|---:|---|---:|
-| `.` | 87 | core 61, json 26 | 3.8 |
+| `.` | 87 | core 61, json 26 | 3.9 |
 | `./basic` | 3 | json 2, core 1 | 0.2 |
 | `./canonical` | 17 | core 10, json 7 | 0.8 |
 | `./formula` | 85 | core 61, json 24 | 3.7 |
@@ -306,7 +306,7 @@ included.
 | `./path` | 18 | core 11, json 7 | 0.9 |
 | `./pointer` | 16 | core 10, json 6 | 0.8 |
 | `./query` | 82 | core 61, json 21 | 3.6 |
-| `./rules` | 87 | core 61, json 26 | 3.7 |
+| `./rules` | 87 | core 61, json 26 | 3.8 |
 | `./write` | 20 | core 11, json 9 | 1.0 |
 | `./xquery` | 84 | core 61, json 23 | 3.9 |
 <!--/fact-->

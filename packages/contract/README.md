@@ -764,22 +764,27 @@ const { breaking, additive, neutral, unknown } = diffContracts(v1, v2);
 // every change classified by the CONTRACT-FORMAT §13 rule table (R1–R16),
 // read as variance — an input is the server's to accept, an output the client's —
 // and read the same inside an allOf, a then/else under the same if, an if
-// beside only a then (its direction flipped) or only an else, a
+// beside only a then (its direction flipped) or only an else, a then and an
+// else alike on each side (applied to every value, whatever the if), a
 // dependentSchemas member, a prefixItems entry, a contains (flipped under
 // maxContains with minContains: 0), a not (flipped) and an anyOf/oneOf
 // variant its type, a required const/enum member or the two together tell
 // apart (variants pair by that key, so a reorder moves nothing and a new
-// variant widens), where nothing else the node applies constrains the same
+// variant widens) or whose one change sits in a variant apart from all the
+// others, where nothing else the node applies constrains the same
 // place; a not or a contains added narrows and one dropped widens; an
 // exclusive bound, a multipleOf step and an item, member or contains count
 // read by direction as maximum is (each end of the numbers one bound, a
 // draft-04 boolean exclusiveMaximum among them); every schema is read under
 // the draft its $schema names (before 2020-12 prefixItems, before 2019-09
 // dependentSchemas, dependentRequired, the contains counts and unevaluated*
-// are no keywords);
+// are no keywords), a $ref target under the nearest $schema on the way to it;
 // a member schema that accepts nothing (false, not: {}, an empty enum,
-// bounds that cross or hold no multiple, counts out of order, a pattern no
-// string matches, …) forbids the member:
+// bounds that cross or hold no multiple — no integer one under an integer
+// type —, counts out of order, a pattern no string within its length bounds
+// matches, a propertyNames that refuses a required name, …) forbids the
+// member; a pattern member a witness string the validator takes shows
+// holding a value is a member like any other:
 //   breaking — an operation or error removed, a binding member moved, a new
 //              required input member, a narrowed input, a removed/optional-
 //              ized/WIDENED output (a closed output gaining a member too —
@@ -792,9 +797,11 @@ const { breaking, additive, neutral, unknown } = diffContracts(v1, v2);
 //   neutral  — task mode, retry, cache, policy.revision, policy.stream, doc,
 //              a nullable respelling that accepts the same values (R16), a
 //              media respelling (case, parameters) the wire matches alike
-//   unknown  — what the checker does not model (an if beside both a then
-//              and an else, a union whose variants overlap, a CHANGED
-//              pattern, a multipleOf neither step of which divides the
+//   unknown  — what the checker does not model (an if beside a then and an
+//              else unlike each other, a union whose variants overlap where
+//              its change does, a CHANGED pattern, a member added to an open
+//              input whose pattern neither a witness nor a length settles, a
+//              multipleOf neither step of which divides the
 //              other, an external $ref it cannot read, an error details schema, a
 //              constraint moved into an applicator, a member beside a
 //              catch-all, a place whose draft it cannot tell — or any of
