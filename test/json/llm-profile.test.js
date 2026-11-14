@@ -153,8 +153,10 @@ describe('json — the JSLT authoring profile', function () {
   });
 
   it('opens the body and nothing else', function () {
-    assert.deepStrictEqual(Object.keys(jsltAuthoring.$defs.queryDocument), ['description'],
-      'the open node carries a description and no constraint');
+    assert.deepStrictEqual(jsltAuthoring.$defs.queryDocument.type, ['object', 'array', 'string', 'number', 'boolean', 'null'],
+      'the open node names every JSON kind, so it constrains nothing');
+    assert.deepStrictEqual(Object.keys(jsltAuthoring.$defs.queryDocument).sort(), ['description', 'type'],
+      'the open node carries a description and its kinds, no constraint');
     for (const gone of ['expression', 'flworPhrase', 'binaryOperatorPhrase', 'objectExpression']) {
       assert.ok(!Object.hasOwn(jsltAuthoring.$defs, gone),
         `${gone} is reachable only through the body and left with it`);

@@ -3,11 +3,6 @@
   "$id": "https://jarenjs.dev/schemas/jaren-query/0.1/authoring",
   "title": "Jaren JSON Query format 0.1 (authoring profile)",
   "description": "Authoring profile of the canonical grammar: the document SHAPE only, with objectExpression left open. Constrains decoding on small models, where the full grammar does not decode at all. It is deliberately WEAKER than the canonical schema - a document valid here may be nonsense - so the engine compiler is the gate that makes it safe, and generated documents must be compiled before use.",
-  "allOf": [
-    {
-      "$ref": "#/$defs/queryDocument"
-    }
-  ],
   "$defs": {
     "queryDocument": {
       "description": "A query document is either the version envelope or a bare expression (a bare RFC 9535 JSONPath string is the degenerate query).",
@@ -111,5 +106,6 @@
       "type": "object",
       "description": "A Jaren query expression; validate against the full grammar and compile locally."
     }
-  }
+  },
+  "$ref": "#/$defs/queryDocument"
 }

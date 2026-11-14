@@ -62,15 +62,24 @@ assets from its host; it has no filesystem, fetch or DOM dependency.
   (envelope-gate + normalize), `fileOf`.
 - `src/validate.js` — `validateFile`: per-kind dispatch; the composed app
   meta-schema + a headless render audit; jslt/query compiled with the
-  operator packs. Memoized on the file's IDENTITY (a `createWeakCache`
+  operator packs. When an app/fsm/dag document fails its grammar, its
+  query-bearing members are compiled too, and an unknown operator the
+  compiler names (`JQ0002`, with the nearest known one) replaces the
+  branch errors it caused. Memoized on the file's IDENTITY (a `createWeakCache`
   from `@jarenjs/core/cache`, keyed inside by registry): validating an
   app compiles its view and renders a frame, so re-deriving the view
   model per render would recompile the whole project, where the cached
   result is a lookup. Files are immutable, so identity is
   a sound key; pass a fresh object to force a re-check.
+- `src/render-audit.js` — what an app view renders that its author did
+  not mean, read with the view format's vnode rules over the stylesheet's
+  literal elements and the first frame: an element written as an object
+  (`JS0004`, refused) and text holding another template language's
+  expression (`JS0005`, a warning).
 - `src/assemble.js` — `assembleArtifacts`, `classifyChange`, `describe`.
 - `src/errors.js` — `StudioError` on `@jarenjs/core`'s coded base;
-  `STUDIO_CODES` (JS0001/JS0002/JS0003).
+  `STUDIO_CODES` (JS0001/JS0002/JS0003 thrown; JS0004/JS0005 reported by
+  the render audit).
 - `src/resolve.js` — import assembly, reference routing, rename and write-back.
 - `src/skeletons.js` — the shared creation vocabulary and valid starter files.
 - `src/export.js` — headless archive entry.

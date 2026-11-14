@@ -20,7 +20,7 @@ const corpus = {
   model: [{ $model: '0.1', collections: { notes: { schema: { type: 'object' }, key: '/id' } } }],
   query: [{$sum:'$.prices[*]'}, {$for:{r:'$.records[*]'},$return:'$r.id'}],
   jslt: [[{match:'$',body:{total:{$sum:'$.prices[*]'}}}]],
-  app: [{state:{count:0},view:[{match:'$',body:{tag:'div',children:['hello']}}], actions:{inc:{state:{count:{$add:['$.count',1]}}}}}],
+  app: [{state:{count:0},view:[{match:'$',body:['div',{},'hello']}], actions:{inc:{state:{count:{$add:['$.count',1]}}}}}],
   fsm: [{initial:'idle',states:['idle','done'],transitions:[{from:'idle',to:'done',event:'GO'}]}],
   dag: [{$dag:'0.1',nodes:{input:{kind:'input'},output:{kind:'output'}},edges:[{from:'input',to:'output'}]}],
   statechart: [{$fsm:'0.2',initial:'idle',states:['idle',{id:'done',final:true}],transitions:[{from:'idle',to:'done',after:10}]}],
@@ -58,6 +58,11 @@ describe('generated grammar profiles', () => {
         assert.equal(checkOutcome(check(doc)).valid, true);
         assert.doesNotThrow(() => compilers[entry.grammar](doc));
       }
+    });
+    it(entry.grammar + ' authoring profile admits the canonical corpus (its types never narrow it)', () => {
+      const profile = read(entry.package, entry.grammar, '.authoring');
+      const check = new JarenValidator({ skipErrors: false }).compile(profile);
+      for (const doc of corpus[entry.grammar]) assert.equal(checkOutcome(check(doc)).valid, true, JSON.stringify(doc));
     });
   }
 });

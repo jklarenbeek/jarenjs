@@ -26,7 +26,7 @@ import { JsonQueryCompileError } from './errors.js';
 import { queryCompileError, messageRef, renderQueryMessageId } from './messages.js';
 import { FormatRefusal, readDecimalFormat } from './format-number.js';
 import { normalizeLexical } from './lexical.js';
-import { deepFreeze, isJsonObject, isPlainOptions, refuseUnknownMembers } from '@jarenjs/core/object';
+import { deepFreeze, isJsonObject, isPlainOptions, nearestName, refuseUnknownMembers } from '@jarenjs/core/object';
 // The operator registry: `name -> { params, result, compile }`. Only
 // referenced inside functions (never at module evaluation time), so the
 // import cycle normalize.js <-> operators.js is initialization-safe.
@@ -492,8 +492,10 @@ export const OPERATOR_ALIASES = {
 // JQ0002 for an unknown $-key, with a "did you mean" suggestion. A
 // curated SEMANTIC alias wins first (the cross-language guesses
 // Levenshtein misses); otherwise the nearest vocabulary key within
-// Levenshtein distance 2. Compile-time only; with host extensions the
-// candidate list is built per call.
+// Levenshtein distance 2, and past that `nearestName` over the operators
+// the key extends by a hyphenated word or abbreviates.
+// Compile-time only; with host extensions the candidate list is built
+// per call.
 function failUnknownOperator(key, docPath, ctx) {
   if (hasOwn(OPERATOR_ALIASES, key)) {
     const target = OPERATOR_ALIASES[key];
@@ -521,6 +523,17 @@ function failUnknownOperator(key, docPath, ctx) {
       bestDist = d;
       best = name;
     }
+  }
+  if (best === null) {
+    // past the edit distance, the suite's one nearest-name judgement over
+    // the operators a key extends by a hyphenated word (`$lower-case` ->
+    // `$lower`) or abbreviates (`$string-len` -> `$string-length`), read
+    // without the shared `$`; a bare prefix (`$format`, `$letter`) is not one
+    const bare = key.slice(1);
+    const related = candidates.map((name) => name.slice(1))
+      .filter((name) => bare.startsWith(name + '-') || name.startsWith(bare));
+    const near = nearestName(bare, related);
+    if (near !== undefined) best = '$' + near;
   }
   return best === null ? raise('JQ0002', 'query/unknown-operator', { key }, docPath)
     : raise('JQ0002', 'query/unknown-operator-suggest', { key, suggestion: best }, docPath);

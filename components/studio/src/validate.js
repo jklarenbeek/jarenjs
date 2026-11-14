@@ -20,7 +20,17 @@
  *  - `state` / `data` → any JSON (structural only).
  *
  * Every result is `{ valid, kind, total, errors: [{ code, message,
- * docPath }] }` — the shape the IDE's docked error strip reads.
+ * docPath }], warnings }` — the shape the IDE's docked error strip reads.
+ * `warnings` are findings that do not refuse (same item shape, `JS0005`
+ * today: an app view's text that holds another template language's
+ * expression); they are empty for every other kind.
+ *
+ * A grammar failure that a compiler can explain better yields to it: when
+ * an `app`, `fsm` or `dag` document fails its meta-schema because an
+ * operator is unknown, the report is the compiler's `JQ0002` at the
+ * operator's own place (with its nearest known operator), in place of the
+ * branch errors the unknown key caused there ("must have required property
+ * '$await'" for an action).
  */
 
 import { createWeakCache } from '@jarenjs/core/cache';
@@ -40,6 +50,8 @@ import jsltSchema from '@jarenjs/json/schemas/jaren-jslt.schema.json' with { typ
 import fsmSchema from '@jarenjs/flow/schemas/jaren-fsm.schema.json' with { type: 'json' };
 import dagSchema from '@jarenjs/flow/schemas/jaren-dag.schema.json' with { type: 'json' };
 import modelSchema from '@jarenjs/db/schemas/jaren-model.schema.json' with { type: 'json' };
+
+import { auditRenderedView } from './render-audit.js';
 
 /** Errors kept per report: enough to repair, bounded for the IDE. */
 const MAX_ERRORS = 20;
@@ -65,18 +77,117 @@ const validateModel = new JarenValidator({ skipErrors: false, collectErrors: tru
 /** @param {string} kind */
 const ok = (kind) => ({ valid: true, kind, total: 0, errors: [] });
 
-/** Normalize a JarenValidator failure into the studio error shape. */
-function schemaResult(kind, outcome) {
+/**
+ * Normalize a JarenValidator failure into the studio error shape. A
+ * coded compiler error in `explained` replaces the schema errors at, under
+ * and above (short of the root) its owner: the first two pointer tokens
+ * of its place, an action or a transition, say.
+ * @param {string} kind
+ * @param {any} outcome
+ * @param {Array<{ code: string, message: string, docPath: string }>} [explained]
+ */
+function schemaResult(kind, outcome, explained = []) {
   const valid = typeof outcome === 'object' && outcome !== null ? outcome.valid : outcome === true;
   if (valid) return ok(kind);
-  const raw = (typeof outcome === 'object' && outcome !== null ? outcome.errors : null) ?? [];
-  return {
-    valid: false, kind, total: raw.length,
-    errors: raw.slice(0, MAX_ERRORS).map((e) => ({
-      code: null, message: e.message ?? 'invalid', docPath: e.instancePath ?? '',
-    })),
-  };
+  let raw = (typeof outcome === 'object' && outcome !== null ? outcome.errors : null) ?? [];
+  if (explained.length > 0) {
+    const owners = explained.map((e) => e.docPath.split('/').slice(0, 3).join('/'));
+    const caused = (/** @type {string} */ at) => owners.some((owner) => at === owner || at.startsWith(owner + '/')
+      || (at !== '' && owner.startsWith(at + '/')));
+    raw = raw.filter((e) => !caused(e.instancePath ?? ''));
+  }
+  const errors = [...explained, ...raw.map((e) => ({ code: null, message: e.message ?? 'invalid', docPath: e.instancePath ?? '' }))];
+  return { valid: false, kind, total: errors.length, errors: errors.slice(0, MAX_ERRORS) };
 }
+
+/**
+ * The unknown operator a compile refusal is about, with its place in the
+ * document: the `JQ0002` in the refusal's cause chain, its `docPath`
+ * composed from each wrapper's (a `JT0007` already composes its cause's).
+ * @param {unknown} err
+ * @param {string} base - the pointer of what was compiled
+ * @returns {{ code: string, message: string, docPath: string } | null}
+ */
+function unknownOperatorOf(err, base) {
+  let docPath = base;
+  /** @type {any} */
+  let link = err;
+  /** @type {any} */
+  let outer = null;
+  for (let depth = 0; link !== null && typeof link === 'object' && depth < 8; depth++) {
+    if (outer?.code !== 'JT0007' && typeof link.docPath === 'string') docPath += link.docPath;
+    if (link.code === 'JQ0002') {
+      return { code: 'JQ0002', message: typeof link.reason === 'string' ? link.reason : String(link.message), docPath };
+    }
+    outer = link;
+    link = link.cause;
+  }
+  return null;
+}
+
+/**
+ * Compile the query-bearing members of a document that failed its
+ * grammar, and collect the unknown operators the compilers name.
+ * @param {string} kind
+ * @param {any} doc
+ * @param {Record<string, any>} registryOptions
+ */
+function unknownOperators(kind, doc, registryOptions) {
+  /** @type {Array<{ code: string, message: string, docPath: string }>} */
+  const found = [];
+  const probe = (/** @type {string} */ base, /** @type {() => unknown} */ run) => {
+    try { run(); }
+    catch (err) {
+      const unknown = unknownOperatorOf(err, base);
+      if (unknown !== null) found.push(unknown);
+    }
+  };
+  const options = { compileTypeTest, ...registryOptions };
+  if (doc === null || typeof doc !== 'object' || Array.isArray(doc)) return found;
+  if (kind === 'app') {
+    // the app's own query positions (APP-FORMAT §3), compiled as the app
+    // compiles them; the studio root stays off the app runtime
+    if (doc.view !== undefined) probe('/view', () => compileJsltStylesheet(doc.view, { ...options, memo: false }));
+    if (isPlainNodes(doc.actions)) {
+      for (const [name, action] of Object.entries(doc.actions)) {
+        const at = `/actions/${escapeToken(name)}`;
+        // an awaiting action is read as the app reads one (a member named
+        // `$await`), never as a query: a malformed `$await` is the grammar's
+        if (isPlainNodes(action) && Object.hasOwn(action, '$await')) {
+          if (!isPlainNodes(action.$await)) continue;
+          for (const member of ['start', 'with', 'then', 'catch']) {
+            if (action.$await[member] !== undefined) probe(`${at}/$await/${member}`, () => compileJsonQuery(action.$await[member], options));
+          }
+        }
+        else probe(at, () => compileJsonQuery(action, options));
+      }
+    }
+    if (Array.isArray(doc.subs)) {
+      doc.subs.forEach((sub, i) => {
+        if (!isPlainNodes(sub)) return;
+        for (const member of ['when', 'withQuery', 'key', 'for']) {
+          if (sub[member] !== undefined) probe(`/subs/${i}/${member}`, () => compileJsonQuery(sub[member], options));
+        }
+      });
+    }
+  }
+  else if (kind === 'fsm') probe('', () => compileFsm(doc));
+  else if (kind === 'dag') {
+    const tasks = Object.fromEntries(Object.values(isPlainNodes(doc.nodes) ? doc.nodes : {})
+      .filter((node) => node?.kind === 'task' && typeof node.run === 'string').map((node) => [node.run, () => null]));
+    probe('', () => compileDag(doc, { tasks }));
+  }
+  return found;
+}
+
+/**
+ * @param {unknown} nodes
+ * @returns {nodes is Record<string, any>}
+ */
+const isPlainNodes = (nodes) => nodes !== null && typeof nodes === 'object' && !Array.isArray(nodes);
+
+/** @param {string} token - one JSON Pointer token, escaped */
+const escapeToken = (token) => token.replaceAll('~', '~0').replaceAll('/', '~1');
 
 /** Run a compile and surface its throw as one coded error, or pass. */
 function compileResult(kind, run) {
@@ -96,17 +207,24 @@ function compileResult(kind, run) {
 /**
  * A headless render audit for an `app` document: compile the JSLT view
  * and render its first frame over the state. A view that throws is a
- * broken document even when the meta-schema passed it.
+ * broken document even when the meta-schema passed it, and so is one that
+ * renders an element written as an object (`JS0004`, see
+ * `./render-audit.js`); text holding another template language's
+ * expression is a warning (`JS0005`).
  * @param {any} doc
+ * @returns {{ errors: Array<{ code: string | null, message: string, docPath: string }>,
+ *   warnings: Array<{ code: string, message: string, docPath: string }> }}
  */
 function auditAppView(doc) {
+  let frame;
   try {
-    compileJsltStylesheet(doc.view, { compileTypeTest, memo: false, ...defaultRegistryOptions })(doc.state ?? {});
-    return null;
+    frame = compileJsltStylesheet(doc.view, { compileTypeTest, memo: false, ...defaultRegistryOptions })(doc.state ?? {});
   }
   catch (err) {
-    return `the view failed to render its first frame: ${String(/** @type {any} */ (err)?.message ?? err)}`;
+    return { errors: [{ code: null, message: `the view failed to render its first frame: ${String(/** @type {any} */ (err)?.message ?? err)}`, docPath: '/view' }], warnings: [] };
   }
+  const { refusals, warnings } = auditRenderedView(doc.view, frame);
+  return { errors: refusals, warnings };
 }
 
 /**
@@ -130,18 +248,27 @@ const verdicts = createWeakCache();
  *   operator registry for the `jslt`/`query` kinds (defaults to the
  *   built-in math/finance/stats packs)
  * @returns {{ valid: boolean, kind: string, total: number,
- *   errors: Array<{ code: string | null, message: string, docPath?: string }> }}
+ *   errors: Array<{ code: string | null, message: string, docPath?: string }>,
+ *   warnings: Array<{ code: string, message: string, docPath: string }> }}
  */
 export function validateFile(file, options = {}) {
-  if (file === null || typeof file !== 'object') return validateFileUncached(file, options);
+  if (file === null || typeof file !== 'object') return withWarnings(validateFileUncached(file, options));
   const byRegistry = verdicts.getOrCreate(file, () => new Map());
   const registryKey = options.operators ?? null;
   let verdict = byRegistry.get(registryKey);
   if (verdict === undefined) {
-    verdict = validateFileUncached(file, options);
+    verdict = withWarnings(validateFileUncached(file, options));
     byRegistry.set(registryKey, verdict);
   }
   return verdict;
+}
+
+/**
+ * Every verdict carries `warnings`, empty unless a check found some.
+ * @param {{ valid: boolean, kind: string, total: number, errors: any[], warnings?: any[] }} verdict
+ */
+function withWarnings(verdict) {
+  return verdict.warnings === undefined ? { ...verdict, warnings: [] } : verdict;
 }
 
 /**
@@ -167,24 +294,28 @@ function validateFileUncached(file, options = {}) {
     case 'data':
       return ok(kind); // any JSON value is a valid state/data file
     case 'app': {
-      const structural = schemaResult(kind, validateApp(doc));
-      if (!structural.valid) return structural;
-      const problem = auditAppView(doc);
-      return problem === null
-        ? structural
-        : { valid: false, kind, total: 1, errors: [{ code: null, message: problem, docPath: '/view' }] };
+      const outcome = validateApp(doc);
+      const structural = schemaResult(kind, outcome);
+      if (!structural.valid) return schemaResult(kind, outcome, unknownOperators(kind, doc, registryOptions));
+      const audit = auditAppView(doc);
+      return audit.errors.length === 0
+        ? { ...structural, warnings: audit.warnings }
+        : { valid: false, kind, total: audit.errors.length, errors: audit.errors, warnings: audit.warnings };
     }
     case 'jslt':
       return compileResult(kind, () => compileJsltStylesheet(doc, { compileTypeTest, ...registryOptions }));
     case 'query':
       return compileResult(kind, () => compileJsonQuery(doc, { compileTypeTest, ...registryOptions }));
     case 'fsm': {
-      const structural = schemaResult(kind, validateFsm(doc));
-      return structural.valid ? compileResult(kind, () => compileFsm(doc)) : structural;
+      const outcome = validateFsm(doc);
+      const structural = schemaResult(kind, outcome);
+      return structural.valid ? compileResult(kind, () => compileFsm(doc))
+        : schemaResult(kind, outcome, unknownOperators(kind, doc, registryOptions));
     }
     case 'dag': {
-      const structural = schemaResult(kind, validateDag(doc));
-      if (!structural.valid) return structural;
+      const outcome = validateDag(doc);
+      const structural = schemaResult(kind, outcome);
+      if (!structural.valid) return schemaResult(kind, outcome, unknownOperators(kind, doc, registryOptions));
       // Validate named task nodes without acquiring or running host tasks.
       const tasks = Object.fromEntries(Object.values(doc.nodes ?? {})
         .filter((node) => node.kind === 'task').map((node) => [node.run, () => null]));

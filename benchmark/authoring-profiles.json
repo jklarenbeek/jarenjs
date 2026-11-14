@@ -5,14 +5,14 @@
       "grammar": "model",
       "sourceHash": "5c69c50109c316f270aa619e40de2f531ecd8815ae11fd6afce291270d384383",
       "seamHash": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
-      "profileHash": "6e8d156d4f6223af030cbff1a068cc49cfa6f1fadff5392d885728cfd99f1cef",
+      "profileHash": "f9ae965df4ac630fb7641cdbf8e357959210ec48f4e68054afca7f05f63b3740",
       "open": [],
       "full": {
         "bytes": 16291,
         "branches": 15
       },
       "profile": {
-        "bytes": 16222,
+        "bytes": 16350,
         "branches": 15
       }
     },
@@ -20,7 +20,7 @@
       "grammar": "query",
       "sourceHash": "380bb0edd72206612bc1f28c07eb4a1467f400c74f8566fb52551f0244f4e88f",
       "seamHash": "f0d41be2c687a847bb30b6271a691b76477fbce80460d4aa7388e6a1469ea80e",
-      "profileHash": "72217bd6d84bf3512c2a62df0196ec00dfcc55a73a64e20f9e5ba9877541f035",
+      "profileHash": "a69fa3a682767b6a5d287526566907e6d5fd615d314600a5d56abac22c6a6f8d",
       "open": [
         "objectExpression"
       ],
@@ -29,7 +29,7 @@
         "branches": 49
       },
       "profile": {
-        "bytes": 3564,
+        "bytes": 3552,
         "branches": 10
       }
     },
@@ -37,7 +37,7 @@
       "grammar": "jslt",
       "sourceHash": "cfe6d62d914668514b2112994fa2d4adf7088383e866f536a9979387090e872b",
       "seamHash": "05e477048a83ec7fd8b9c4578a0a33bc108da17e7043c35d73f420cefe1ec6fd",
-      "profileHash": "8fe3692c07e19b6794712e58f894a526c3d6afa7d486801ff7f94207877f4f8a",
+      "profileHash": "2daa4807f70dd9191729479b3cfd17e7df0789082687b561989dc8df9fde30c6",
       "open": [
         "queryDocument"
       ],
@@ -46,7 +46,7 @@
         "branches": 61
       },
       "profile": {
-        "bytes": 3491,
+        "bytes": 3633,
         "branches": 6
       }
     },
@@ -54,7 +54,7 @@
       "grammar": "app",
       "sourceHash": "9555d1935d47eb17105341d8c74efcc48b36e9d1cb5f2af2cb87389d55c3e5a0",
       "seamHash": "3212745ee17fb35df53b9b8046cce2995d4d92d22d2eef34a68676462f3d4e4d",
-      "profileHash": "1da308d6860c7f050ba43d79b82c3e076c5f15dcc23a66196e06b900fa121a15",
+      "profileHash": "a5208d4f80caeb0a147c0f33726018753a1c4ce15f85f82f6fb6c4d0cf030d26",
       "open": [
         "queryDocument",
         "stylesheetDocument"
@@ -64,7 +64,7 @@
         "branches": 112
       },
       "profile": {
-        "bytes": 4559,
+        "bytes": 4660,
         "branches": 2
       }
     },
@@ -72,7 +72,7 @@
       "grammar": "fsm",
       "sourceHash": "88774f9cc250cafdd4b7ad50b132e61fd365719ec4df36afc54ab376e6aa1caa",
       "seamHash": "6082dff6cd338b5716282b69d20f59bff625dd2edb4feb0a6f7345efd2c36e1f",
-      "profileHash": "5e1f8bf951ae8a6d390a232f6e85b0e48ea2ca2311f0b0eec512a3a381391ec8",
+      "profileHash": "72f49e5b7b1b0641635222b33099fe4862dd312dc31ef976282a4703a20d8470",
       "open": [
         "queryDocument"
       ],
@@ -81,7 +81,7 @@
         "branches": 53
       },
       "profile": {
-        "bytes": 3026,
+        "bytes": 3075,
         "branches": 4
       }
     },
@@ -89,7 +89,7 @@
       "grammar": "dag",
       "sourceHash": "10fde5220cfbe12f496c1112e9e0874c30d1cc0b51d9c79fbb05be75a4b9cf9f",
       "seamHash": "3212745ee17fb35df53b9b8046cce2995d4d92d22d2eef34a68676462f3d4e4d",
-      "profileHash": "878742d5ab5e438ba341d2c2681f7c33caf6d013109a01a9a2bc57be3af3d56a",
+      "profileHash": "caf8fcb8fbf941769660309fcd5ee879bf6de7612bbc8e35eae99cd20aafda2f",
       "open": [
         "queryDocument",
         "stylesheetDocument"
@@ -99,7 +99,7 @@
         "branches": 116
       },
       "profile": {
-        "bytes": 5128,
+        "bytes": 5228,
         "branches": 6
       }
     },
@@ -107,7 +107,7 @@
       "grammar": "statechart",
       "sourceHash": "98191f3fe30c85f237a41b83d58e419cc1be6879c66fa18653fb5368bff1e859",
       "seamHash": "6082dff6cd338b5716282b69d20f59bff625dd2edb4feb0a6f7345efd2c36e1f",
-      "profileHash": "cebf65ba626891957ff09067c933f8e124fe5fd73057dacac71608436261fa05",
+      "profileHash": "807fbb29fbe5098184189614511d6c83db13f76da3520498ad85c2293aa39824",
       "open": [
         "queryDocument"
       ],
@@ -116,7 +116,7 @@
         "branches": 51
       },
       "profile": {
-        "bytes": 2634,
+        "bytes": 2875,
         "branches": 2
       }
     },
@@ -124,7 +124,7 @@
       "grammar": "workflow",
       "sourceHash": "5e1ba7aeb294b22ab987677b54beb628d281c4e55ba579dc741dfa23df92ccc0",
       "seamHash": "90746ef8f331b94259a96fa3d6d349640ef37d56ce332da4229b6645c27f0a9d",
-      "profileHash": "3e12c5db1285a96f3115390234fdbe61fa5078a77f309f8be2ae8b53817032bc",
+      "profileHash": "b299d35b8ecf044bb415b87123ecf757f378208d64b41c950df8f05d067ede11",
       "open": [
         "queryDocument",
         "dagDocument"
@@ -134,7 +134,7 @@
         "branches": 125
       },
       "profile": {
-        "bytes": 3685,
+        "bytes": 3794,
         "branches": 9
       }
     }

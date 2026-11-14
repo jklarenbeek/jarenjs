@@ -570,7 +570,7 @@ describe('the suite\'s grammars and authoring profiles', () => {
     'packages/json/schemas/jaren-jslt.authoring.schema.json': [[{ match: '$', body: { total: { $sum: '$.prices[*]' } } }],
       { $jslt: '0.1', rules: [{ match: { schema: { type: 'object' } }, body: '$', mode: 'ids' }] }],
     'packages/json/schemas/geojson.schema.json': [{ type: 'Feature', geometry: { type: 'Point', coordinates: [1, 2] }, properties: { name: 'a', n: [1] } }],
-    'packages/app/schemas/jaren-app.authoring.schema.json': [{ state: { count: 0 }, view: [{ match: '$', body: { tag: 'div', children: ['hello'] } }], actions: { inc: { state: { count: { $add: ['$.count', 1] } } } } }],
+    'packages/app/schemas/jaren-app.authoring.schema.json': [{ state: { count: 0 }, view: [{ match: '$', body: ['div', {}, 'hello'] }], actions: { inc: { state: { count: { $add: ['$.count', 1] } } } } }],
     'packages/flow/schemas/jaren-fsm.authoring.schema.json': [{ initial: 'idle', states: ['idle', 'done'], transitions: [{ from: 'idle', to: 'done', event: 'GO' }] }],
     'packages/flow/schemas/jaren-dag.authoring.schema.json': [{ $dag: '0.1', nodes: { input: { kind: 'input' }, output: { kind: 'output' } }, edges: [{ from: 'input', to: 'output' }] }],
     'packages/flow/schemas/jaren-statechart.authoring.schema.json': [{ $fsm: '0.2', initial: 'idle', states: ['idle', { id: 'done', final: true }], transitions: [{ from: 'idle', to: 'done', after: 10 }] }],

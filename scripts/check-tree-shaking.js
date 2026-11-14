@@ -259,7 +259,8 @@ if (chainEdgeLeak.length > 0)
 // Raised to 250,900 (measured 250815): a window over a declared root closed as a FLWOR with a one-item projection folded inside it (document 1036, sequence 68), the async cursor's FLWOR over an untouched root (async 185) and the captured expression's coded refusal of a member read off a method read (expression 392) add 1681.
 // Raised to 251,100 (measured 251016): a method read's own function members refused as a member read off it is, with call, apply and bind still calling it, which every pen shares (expression 129).
 // Raised to 251,500 (measured 251411): semanticKey's memo of a wholly frozen tree, which the chain carries (object 395) add 395.
-if (chainBytes > 251500)
+// Raised to 251,600 (measured 251544): an unknown operator's hint falling back to the suite's nearest-name rule over the operators the key extends or abbreviates (normalize 133).
+if (chainBytes > 251600)
   throw new Error(`The chain bundle grew to ${chainBytes} bytes.`);
 
 console.log(`Tree-shaking smoke test passed (${chainBytes} byte chain bundle; no schema-pen module, no client module, no store/validator/formats bytes).`);
@@ -711,7 +712,8 @@ if (asyncLiveLeak.length)
 // Raised to 1,140,900 (measured 1140802): a number column's CHECKs read at open as the guards they hold it to, and introspect() naming each number column no CHECK keeps from a NaN with the statement that adds one (introspect 658, check-read 317, physical 81, dialect 20), add 1076.
 // Raised to 1,141,100 (measured 1141081): the text an errorMessage spec wrote kept through localizeErrors, its status on toJSON, and marked under messages: false with its render deferred, plus the app state check's message entry (messages 279).
 // Raised to 1,141,900 (measured 1141836): semanticKey's memo of a wholly frozen tree and utf8ByteLength's refusal of a non-string (object 395, string 360) add 755.
-if (clientBytes > 1141900)
+// Raised to 1,142,000 (measured 1141969): the same unknown-operator hint (normalize 133).
+if (clientBytes > 1142000)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 

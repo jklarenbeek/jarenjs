@@ -869,6 +869,13 @@ Every operator is a **single-`$`-key object** (the phrases of §§4, 6, 7 and
 the two-key quantifier shapes are the only exceptions). The vocabulary is
 **closed**: an object whose single `$`-key is not listed in this section is
 compile error `JQ0002`. Wrong argument shapes and arities are `JQ0003`.
+The `JQ0002` message points at the operator meant where one is plausible
+(informative): a spelling from another language that is lexically far
+from ours names ours (`$first` → `$head`, `$lowercase` → `$lower`), a key
+within two edits of a listed one names it (`$flter` → `$floor`), and past
+that a listed operator that prefixes the key, or that the key prefixes, is
+named (`$lower-case` → `$lower`, `$string-len` → `$string-length`). A key
+none of these reach, such as `$frobnicate`, is reported with no suggestion.
 
 Signature notation: `expr` is any expression; `[a, b]` is a JSON array of
 exactly two expressions; `[e, ...]` is variadic; `?` marks an optional

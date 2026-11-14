@@ -29,12 +29,13 @@ real file).
 Each file declares a `kind`; its `text` is a JSON document validated
 against **that kind's grammar at its own boundary** — never composed into
 one meta-schema. `validateFile(file)` returns `{ valid, kind, total,
-errors: [{ code, message, docPath }] }` — the shape an editor's error
-strip reads.
+errors: [{ code, message, docPath }], warnings }` — the shape an editor's
+error strip reads. `warnings` has the same item shape and never makes a
+file invalid; today only an `app` file can carry one (`JS0005`).
 
 | kind | the file is | validated by |
 |---|---|---|
-| `app` | a `jaren-app` document | the composed app meta-schema (jslt + query by `$ref`) **plus a headless render audit** — a document that validates but throws on its first frame is still broken |
+| `app` | a `jaren-app` document | the composed app meta-schema (jslt + query by `$ref`) **plus a headless render audit** — a document that validates but throws on its first frame is still broken, and so is one whose view renders an element written as an object (`JS0004`, see below) |
 | `jslt` | a JSLT stylesheet | **compiled** by the engine with the operator registry |
 | `query` | a query document | **compiled** by the engine with the operator registry |
 | `state` / `data` | any JSON value (an input) | structural JSON only |
@@ -54,6 +55,39 @@ unknown operator '$flter'`). Composing every file into one gate would make
 that impossible; keeping each file on its own boundary is the honest
 design, not a compromise. A host embeds its own vocabulary with
 `validateFile(file, { operators })`.
+
+**An unknown operator is named, not its consequences.** The `app`, `fsm`
+and `dag` grammars place a query in a branch (an action is an awaiting
+action or a query document), so an operator outside the vocabulary makes
+every branch fail and the grammar reports what each branch missed — `must
+have required property '$await'` for an action using `$lower-case`. When
+such a file fails its grammar, `validateFile` compiles its query-bearing
+members (an app's actions, subscriptions and view; an fsm; a dag) with the
+operator registry, and an unknown operator the compiler names replaces the
+grammar errors at, under and above its owner member: `JQ0002 — at
+/actions/search/state/q: unknown operator '$lower-case' (did you mean
+'$lower'?)`. Grammar errors elsewhere in the file stay.
+
+**What the app render audit reads.** Beyond a first frame that throws,
+the audit reads the view with the view format's own vnode rules
+(VIEW-FORMAT §2: text, skipped values, `[tag, props?, …children]`
+elements, lists), over the stylesheet's literal elements — so a branch
+the first frame does not take, such as the body of a `$for` over an
+empty list, is read too — and over the first frame itself:
+
+- an object carrying `tag` or `type` together with `props`, `attrs` or
+  `children`, where the view renders a vnode child (or as the root), is
+  refused `JS0004` at its place. §2 has no object vnode: both renderers
+  draw any object there as nothing. Objects elsewhere — the state, an
+  element's props, a widget's props, an operator's operands — are data
+  and are not read;
+- an authored text literal in a child position that holds another
+  template language's expression is warned `JS0005`: `${…}`, `{{…}}`,
+  `{%…%}`, a leading `for .` or `if .` (Schibsted JSLT, with or without
+  `[` and parentheses), or a call `name([…])`. It renders as literal
+  text, which can be what the author meant, so the file stays valid. A
+  state string shown through a path is the reader's data and is never
+  warned about.
 
 ## Assembly — files → runnable artifacts
 
@@ -186,6 +220,8 @@ and `describe` report file problems as diagnostics.
 | `JS0001` | the project document is invalid (bad JSON, or fails the envelope schema) |
 | `JS0002` | a file name is duplicated in the project |
 | `JS0003` | an import or execution reference cannot be resolved, or an artifact write conflicts |
+| `JS0004` | reported by `validateFile` for an `app`: the view renders an element written as an object (`{"tag": "li", "props": …}`, `{"type": …, "children": …}`), which renders as nothing; a vnode is an array `["li", {attrs}, …children]` |
+| `JS0005` | a **warning** `validateFile` reports for an `app`: an authored text literal holds another template language's expression (`${…}`, `{{…}}`, `{%…%}`, a leading `for .`/`if .`, a call `name([…])`); it renders as literal text, so the file stays valid |
 
 ## Status
 

@@ -54,7 +54,6 @@ export function generateAuthoringProfiles(options = {}) {
   for (const entry of AUTHORING_PROFILES) {
     const base = `packages/${entry.package}/schemas/jaren-${entry.grammar}`;
     const source = JSON.parse(readFileSync(resolve(root, base + '.schema.json'), 'utf8'));
-    const profile = deriveAuthoringProfile(source, { open: entry.open });
     const refs = new Map();
     const collect = (node) => {
       if (!node || typeof node !== 'object') return;
@@ -69,6 +68,7 @@ export function generateAuthoringProfiles(options = {}) {
       Object.values(node).forEach(collect);
     };
     collect(source);
+    const profile = deriveAuthoringProfile(source, { open: entry.open, references: [...refs.values()] });
     const full = schemaComplexity(source);
     for (const ref of refs.values()) {
       const size = schemaComplexity(ref); full.bytes += size.bytes; full.branches += size.branches;

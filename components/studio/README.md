@@ -78,7 +78,7 @@ const project = parseProject({
 });
 
 describe(project);            // per-file kind / validity / role — the file rail
-validateFile(project.files[1]); // { valid, kind, total, errors: [{ code, message, docPath }] }
+validateFile(project.files[1]); // { valid, kind, total, errors: [{ code, message, docPath }], warnings: [] }
 assembleArtifacts(project);   // the runnable set
 ```
 

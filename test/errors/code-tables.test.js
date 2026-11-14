@@ -30,6 +30,7 @@ import { JSONX_CODES } from '@jarenjs/josl';
 import { CHECK_CODES } from '@jarenjs/core/check';
 import { TEXT_EDIT_CODES } from '@jarenjs/core/text/edits';
 import { CANONICAL_CODES } from '@jarenjs/json/canonical';
+import { STUDIO_CODES } from '@jarenjs/studio';
 
 /**
  * Extract every code with the given prefix from one or more format
@@ -63,6 +64,7 @@ const TABLES = /** @type {[string, Record<string, string>, string, string][]} */
   ['CHECK_CODES', CHECK_CODES, 'packages/core/README.md', 'JG'],
   ['TEXT_EDIT_CODES', TEXT_EDIT_CODES, 'packages/core/docs/HOST-PRIMITIVES.md', 'JE'],
   ['CANONICAL_CODES', CANONICAL_CODES, 'packages/json/README.md', 'JO'],
+  ['STUDIO_CODES', STUDIO_CODES, 'components/studio/docs/PROJECT-FORMAT.md', 'JS'],
 ]);
 
 describe('runtime code tables match the format docs', () => {

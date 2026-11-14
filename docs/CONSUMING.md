@@ -155,7 +155,7 @@ the table and stale in the paragraph that cites it:
 
 | Subpath | Bundle | What rides along |
 |---|---:|---|
-| `.` | <!--fact:bundle.chain.kb-->251<!--/fact--> kB | the query engine — a chain's document has to run somewhere |
+| `.` | <!--fact:bundle.chain.kb-->252<!--/fact--> kB | the query engine — a chain's document has to run somewhere |
 | `./schema` | <!--fact:bundle.schema.kb-->48<!--/fact--> kB | the builders and the recording proxy `check()` captures through |
 | `./model` | <!--fact:bundle.model.kb-->60<!--/fact--> kB | the schema pen it subclasses |
 | `./jslt` | <!--fact:bundle.jslt.kb-->29<!--/fact--> kB | the body capture; of the schema pen, only the builder brand |
@@ -205,7 +205,7 @@ and the live heap they hold — the V8 heap after two forced full
 collections, run on the main thread so each has finished when the heap
 is read, less the same process's heap before the import. Each heap is
 the median of <!--fact:closure.runs-->5<!--/fact--> fresh processes, whose runs differed by at
-most <!--fact:closure.spread-->18 KiB<!--/fact--> for any one subpath; native memory a built-in
+most <!--fact:closure.spread-->10 KiB<!--/fact--> for any one subpath; native memory a built-in
 allocates for itself (`node:crypto`'s, say) is not in it. A heap depends
 on the runtime and the host — these were measured on one machine,
 with <!--fact:closure.host-->Node v24.22.1 on linux x64<!--/fact--> — while a module count is

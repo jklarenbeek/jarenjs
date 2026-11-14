@@ -72,7 +72,15 @@
               "const": "const"
             },
             "value": {
-              "description": "Any JSON value, delivered by reference."
+              "description": "Any JSON value, delivered by reference.",
+              "type": [
+                "object",
+                "array",
+                "string",
+                "number",
+                "boolean",
+                "null"
+              ]
             },
             "checkpoint": {
               "type": "boolean",
@@ -93,11 +101,7 @@
             },
             "query": {
               "description": "The query document.",
-              "allOf": [
-                {
-                  "$ref": "#/$defs/queryDocument"
-                }
-              ]
+              "$ref": "#/$defs/queryDocument"
             },
             "checkpoint": {
               "type": "boolean",
@@ -118,11 +122,7 @@
             },
             "stylesheet": {
               "description": "The stylesheet document (bare rule array or envelope form).",
-              "allOf": [
-                {
-                  "$ref": "#/$defs/stylesheetDocument"
-                }
-              ]
+              "$ref": "#/$defs/stylesheetDocument"
             },
             "checkpoint": {
               "type": "boolean",
@@ -154,11 +154,7 @@
             },
             "with": {
               "description": "Handler props: a query resolved against the node's input scope (null when absent or empty).",
-              "allOf": [
-                {
-                  "$ref": "#/$defs/queryDocument"
-                }
-              ]
+              "$ref": "#/$defs/queryDocument"
             },
             "checkpoint": {
               "type": "boolean",
@@ -190,11 +186,7 @@
         },
         "select": {
           "description": "A query applied to the source value before delivery; an empty result delivers null.",
-          "allOf": [
-            {
-              "$ref": "#/$defs/queryDocument"
-            }
-          ]
+          "$ref": "#/$defs/queryDocument"
         }
       },
       "required": [
@@ -203,9 +195,21 @@
       ]
     },
     "queryDocument": {
+      "type": [
+        "object",
+        "array",
+        "string",
+        "number",
+        "boolean",
+        "null"
+      ],
       "description": "A Jaren query expression; validate against the full grammar and compile locally."
     },
     "stylesheetDocument": {
+      "type": [
+        "object",
+        "array"
+      ],
       "description": "A JSLT stylesheet; validate and compile locally."
     }
   }

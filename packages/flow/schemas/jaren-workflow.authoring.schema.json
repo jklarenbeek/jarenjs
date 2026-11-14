@@ -34,9 +34,18 @@
   "additionalProperties": false,
   "$defs": {
     "queryDocument": {
+      "type": [
+        "object",
+        "array",
+        "string",
+        "number",
+        "boolean",
+        "null"
+      ],
       "description": "A Jaren query expression; validate against the full grammar and compile locally."
     },
     "dagDocument": {
+      "type": "object",
       "description": "A Jaren DAG document; validate and compile with versioned tasks locally."
     },
     "body": {
@@ -228,12 +237,14 @@
                 "on": {
                   "minItems": 1
                 }
-              }
+              },
+              "type": "object"
             },
             {
               "required": [
                 "after"
-              ]
+              ],
+              "type": "object"
             }
           ]
         },

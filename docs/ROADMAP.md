@@ -485,6 +485,14 @@ costs a descriptor plus examples and no UI code at all.
 
 ## @jarenjs/studio
 
+- [ ] **The authoring gate's findings in the IDE, and one render audit.**
+  `validateFile` reports `warnings` (`JS0005`) and refuses an element written
+  as an object (`JS0004`), but the IDE's rail and error strip show `errors`
+  only and `describe` passes no `warnings`. The website's document host keeps
+  a second audit that refuses every bare object, where `validateFile` refuses
+  only the element-shaped one, and the app audit renders with the built-in
+  operator packs, not the host's `operators`. An object in an element's props
+  position (`["ul", {"tag": "li", …}]`) is read as props and not reported.
 - [ ] **Entity models and durable project stores** — collection models now
   run in private workers with explicit query routing, SQL plans, live results
   and seed files. The stage's operation contract addresses collections; an

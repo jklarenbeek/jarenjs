@@ -3,11 +3,6 @@
   "$id": "https://jarenjs.dev/schemas/jaren-jslt/0.1/authoring",
   "title": "Jaren JSLT format 0.1 (authoring profile)",
   "description": "Authoring profile of the canonical grammar: the document SHAPE only, with queryDocument left open. Constrains decoding on small models, where the full grammar does not decode at all. It is deliberately WEAKER than the canonical schema - a document valid here may be nonsense - so the engine compiler is the gate that makes it safe, and generated documents must be compiled before use.",
-  "allOf": [
-    {
-      "$ref": "#/$defs/stylesheetDocument"
-    }
-  ],
   "$defs": {
     "stylesheetDocument": {
       "description": "A JSLT stylesheet is either a bare array of rules or the versioned envelope object.",
@@ -93,12 +88,14 @@
             {
               "required": [
                 "path"
-              ]
+              ],
+              "type": "object"
             },
             {
               "required": [
                 "schema"
-              ]
+              ],
+              "type": "object"
             }
           ],
           "additionalProperties": false
@@ -133,10 +130,27 @@
       "additionalProperties": false
     },
     "queryDocument": {
+      "type": [
+        "object",
+        "array",
+        "string",
+        "number",
+        "boolean",
+        "null"
+      ],
       "description": "A jaren-query expression: a JSONPath string starting with \"$\", a literal, or a one-member operator object such as {\"$sum\": \"$.prices[*]\"} or {\"$sub\": [\"$a\", \"$b\"]}. Any JSON value decodes here; the engine compiler is the authority for whether it is a legal expression."
     },
     "schemaLiteral": {
-      "description": "A JSON Schema literal, taken verbatim - never interpreted as a query expression, so JSON Schema's $-prefixed keywords ($ref, $defs, ...) do not collide with Rule 1. Deliberately unconstrained (a true schema is draft-neutral by definition): embedded schemas are not meta-validated by this artifact; the consumer's type-test compiler is authoritative (JQ0009)."
+      "description": "A JSON Schema literal, taken verbatim - never interpreted as a query expression, so JSON Schema's $-prefixed keywords ($ref, $defs, ...) do not collide with Rule 1. Deliberately unconstrained (a true schema is draft-neutral by definition): embedded schemas are not meta-validated by this artifact; the consumer's type-test compiler is authoritative (JQ0009).",
+      "type": [
+        "object",
+        "array",
+        "string",
+        "number",
+        "boolean",
+        "null"
+      ]
     }
-  }
+  },
+  "$ref": "#/$defs/stylesheetDocument"
 }

@@ -34,12 +34,14 @@
     {
       "required": [
         "collections"
-      ]
+      ],
+      "type": "object"
     },
     {
       "required": [
         "entities"
-      ]
+      ],
+      "type": "object"
     }
   ],
   "$defs": {
@@ -146,11 +148,7 @@
         },
         "expression": {
           "description": "Index a computed value rather than a member: a closed expression over declared members, JSON scalars and functions the host declared deterministic. Mutually exclusive with path and derive (JD0004) — an expression names the members it reads itself.",
-          "allOf": [
-            {
-              "$ref": "#/$defs/expression"
-            }
-          ]
+          "$ref": "#/$defs/expression"
         },
         "unique": {
           "description": "Whether the index enforces uniqueness. Defaults to false.",
@@ -475,7 +473,16 @@
                   ]
                 }
               },
-              "assert": {},
+              "assert": {
+                "type": [
+                  "object",
+                  "array",
+                  "string",
+                  "number",
+                  "boolean",
+                  "null"
+                ]
+              },
               "enforcement": {
                 "enum": [
                   "database",
@@ -599,7 +606,8 @@
               "minLength": 1
             }
           },
-          "additionalProperties": false
+          "additionalProperties": false,
+          "type": "object"
         },
         {
           "required": [
@@ -615,7 +623,8 @@
               ]
             }
           },
-          "additionalProperties": false
+          "additionalProperties": false,
+          "type": "object"
         },
         {
           "required": [
@@ -635,7 +644,8 @@
               }
             }
           },
-          "additionalProperties": false
+          "additionalProperties": false,
+          "type": "object"
         }
       ]
     }
