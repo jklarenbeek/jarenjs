@@ -3816,6 +3816,49 @@ release opens the store again. A store whose database rules probe only under
 an odd number of `$not`s, or not at all, and every SQLite store, is unaffected:
 their programs read as before.
 
+## 70. A unique index over a member PostgreSQL holds as `jsonb` stores two nulls
+
+- On PostgreSQL a member the schema does not type, types `object` or `array`
+  alone, or whose union lists a container first
+  (`q: { type: ['object', 'string', 'null'] }`), has a `jsonb`
+  generated column, which held a JSON `null` as a value: a unique index over it
+  refused a second document with `q: null` (`JD2005`), where SQLite, whose
+  column holds it as SQL `NULL`, stores both, as two documents without `q`
+  are. The column now reads a JSON `null` as SQL `NULL`
+  (`CASE WHEN jsonb_typeof("doc" #> '{"q"}') <> 'null' THEN "doc" #> '{"q"}' END`),
+  so both engines store two nulls under every shape of the index (single,
+  composite, conditional, under a guarded path), and refuse every non-null
+  duplicate as before. Every query over the member answers as before and seeks
+  the indexes it sought: a `null`, a presence or a type test reads the
+  document, as it did.
+- A table an earlier release created keeps its column: it opens, reads, writes
+  and plans exactly as before, and a unique index over the column still refuses
+  a second `null` (`JD2005`), until the link `planColumnUpgrade(connection,
+  model)` plans from the catalog creates the column again (MIGRATION-FORMAT §3):
+  it drops the indexes over the column, the column, and creates them again as a
+  fresh store does; `report.upgraded` names the column (`c.gx_q`), beside a
+  unique index or not. The link stores no document and refuses none: an index
+  that keys fewer values holds every row it held. Adding the column computes
+  it for every stored row under the table's lock, as every column a link adds.
+  A table that holds the column under the other spelling of a guard opens as
+  before too, and the same link creates it again. A plan between two models plans no change for the column.
+  After the link the table's column comes last, so the model `introspect()`
+  reads back lists that member last.
+- A physically mapped table is the host's: this release does not alter it, and
+  `planColumnUpgrade` plans nothing for it.
+- SQLite is unchanged.
+
+**Downgrade.** The previous release refuses a collection table this release
+creates or upgrades with such a column (`JD0002`, `column 'gx_q' computes …`);
+every other table opens as it did. To open such a table with the previous
+release, create the column as it did, in one transaction — drop the indexes
+over it and the column, add it again as the read inside its `CASE`
+(`("doc" #> '{"q"}')`, the guarded read for a guarded path) and create the
+indexes — whether this release created the table or upgraded it. The server
+refuses the unique index (`could not create unique index`) where the table holds
+two documents whose member is `null`: change or remove all but one of them
+first.
+
 ## Measured costs
 
 Exact identity stores complete canonical documents and model endpoints, so

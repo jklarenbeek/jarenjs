@@ -536,15 +536,6 @@ what each does is its own documentation's job
 ([linq](../packages/linq/README.md) ·
 [db](../packages/db/README.md)). What remains open:
 
-- [ ] **On PostgreSQL a unique index over a `jsonb` column keys a JSON
-  `null`.** A member whose union lists a container first (`['object',
-  'string', 'null']`), or that has no type, has a `jsonb` generated column,
-  which holds a JSON `null` as a value: a unique index over it refuses a
-  second document with `q: null` (`JD2005`), where SQLite, whose column holds
-  it as SQL `NULL`, and a member whose column holds a scalar store both, as
-  two missing members are. Wanted: one answer for two nulls on both engines (a
-  column or key that reads a JSON `null` as SQL `NULL`; a table change, a
-  minor).
 - [ ] **A unique index over a document whose member holds a kind its schema
   does not list answers differently on the two engines.** The store does not
   validate a member against its declared types by default: under a unique

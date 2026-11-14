@@ -97,9 +97,10 @@ describe('the PostgreSQL mapping', () => {
       + 'THEN (("doc" #> \'{"age"}\'))::numeric END)) STORED'), create);
     assert.ok(create.includes('"gx_email" text COLLATE "C" GENERATED ALWAYS AS '), create);
     assert.ok(create.includes('THEN "doc" #>> \'{"email"}\' END) COLLATE "C")) STORED'), create);
-    // a path the schema does not type has no honest scalar type
-    assert.ok(create.includes(
-      '"gx_extra" jsonb GENERATED ALWAYS AS (("doc" #> \'{"extra"}\')) STORED'), create);
+    // a path the schema does not type has no honest scalar type; its column
+    // reads a JSON null as SQL NULL, as a missing member is
+    assert.ok(create.includes('"gx_extra" jsonb GENERATED ALWAYS AS '
+      + '((CASE WHEN jsonb_typeof(("doc" #> \'{"extra"}\')) <> \'null\' THEN ("doc" #> \'{"extra"}\') END)) STORED'), create);
   });
 
   it('a text column and a text comparison are byte-ordered, whatever the server locale', () => {

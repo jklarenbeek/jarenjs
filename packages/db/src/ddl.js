@@ -770,10 +770,14 @@ export function planCollection(name, collection, dialect, options = undefined) {
       if (!known) {
         const schemaType = columnSchemaTypeAt(collection.schema, segments, dialect);
         const firstType = schemaTypeAt(collection.schema, segments);
+        const type = dialect.typeFor(schemaType, 'generated');
         const column = unionColumn({
           name: columnName,
-          type: dialect.typeFor(schemaType, 'generated'),
-          kind: columnKindFor(schemaType),
+          type,
+          // on an engine whose columns carry a SQL type, the untyped column holds the member
+          // as JSON, and reads a JSON `null` as SQL NULL, as a missing member is
+          kind: columnKindFor(schemaType) ?? (dialect.capabilities.untypedColumns !== true
+            && type === dialect.typeFor(undefined, 'generated') ? 'json' : undefined),
           pathText,
           canonical,
         }, { schema: collection.schema, segments, schemaType, firstType, dialect,
@@ -785,8 +789,14 @@ export function planCollection(name, collection, dialect, options = undefined) {
         const alternate = unpinned !== undefined ? dialect.columnRead(doc, column)
           : dialect.queryGuard(doc, segments) === null ? undefined
             : dialect.columnRead(doc, { ...column, unpinned: segments });
+        // the reads a table an earlier release created holds such a column in, which keep a JSON
+        // `null` as a value: under the planned guard, and under the other spelling of it
+        const kept = { ...column, kind: undefined };
+        const earlierReads = column.kind !== 'json' ? undefined
+          : [dialect.columnRead(doc, unpinned === undefined ? kept : { ...kept, unpinned }),
+            ...(alternate === undefined ? [] : [dialect.columnRead(doc, unpinned !== undefined ? kept : { ...kept, unpinned: segments })])];
         generated.push({ ...column, ...(unpinned === undefined ? {} : { unpinned }),
-          ...(alternate === undefined ? {} : { alternate }) });
+          ...(alternate === undefined ? {} : { alternate }), ...(earlierReads === undefined ? {} : { earlierReads }) });
         if (column.type === dialect.typeFor('integer', 'generated') && boundsSafeIntegers(schemaNodeAt(collection.schema, segments)))
           safeIntegerColumns.add(columnName);
       }
@@ -1650,6 +1660,14 @@ export function verifyShape(connection, plan, collection, docPath, kind = 'colle
           ? plannedExpression(dialect, plan, have.name) : undefined;
         let difference = planned === undefined ? null
           : readBack.expression(/** @type {string} */ (have.computes), planned, have.conforming);
+        // the read an earlier release created the column with, which keeps a JSON `null` as a
+        // value, opens as it did, and under the planned guard is read as the planned one
+        const reads = earlierReadsOf(plan, have.name);
+        /** @type {boolean[]} */
+        const earlier = [];
+        if (planned !== undefined)
+          for (const read of reads) earlier.push(readBack.expression(/** @type {string} */ (have.computes), read, have.conforming) === null);
+        if (difference !== null && earlier[0] === true) difference = null;
         // a column read under the guard is one a query may read only where the table holds that
         // spelling; one it holds the other way, or whose spelling the catalog does not say, is not
         if (planned === undefined || difference !== null) plan.guardedColumns?.delete(have.name);
@@ -1657,7 +1675,8 @@ export function verifyShape(connection, plan, collection, docPath, kind = 'colle
           // the same path spelled with the guard or without it: a table whose container the model
           // declared the other way, or one an earlier release created, opens as it did
           const alternate = alternateExpression(plan, have.name);
-          if (alternate !== undefined && readBack.expression(/** @type {string} */ (have.computes), alternate, have.conforming) === null)
+          if (alternate !== undefined && readBack.expression(/** @type {string} */ (have.computes), alternate, have.conforming) === null
+            || earlier[1] === true)
             difference = null;
         }
         if (difference !== null) disagree(`column '${have.name}' ${difference}`);
@@ -1935,6 +1954,19 @@ export function acceptsColumn(dialect, held, wanted) {
  */
 function alternateExpression(plan, name) {
   return (plan.generated ?? []).find((/** @type {any} */ candidate) => candidate.name === name)?.alternate;
+}
+
+/**
+ * The expressions a table an earlier release created holds a planned generated
+ * column with, where this release reads the member otherwise: the read of a
+ * member held as JSON that keeps a JSON `null` as a value, under the planned
+ * guard first and then under its other spelling (`alternate`). Each opens as
+ * it is, and the link `planColumnUpgrade` plans creates the column again.
+ * @param {any} plan @param {string} name - the column
+ * @returns {string[]}
+ */
+function earlierReadsOf(plan, name) {
+  return (plan.generated ?? []).find((/** @type {any} */ candidate) => candidate.name === name)?.earlierReads ?? [];
 }
 
 /**

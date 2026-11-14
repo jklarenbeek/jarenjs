@@ -144,10 +144,9 @@ describe('a unique index refuses exactly what the query engine compares equal', 
             await docs.insert(doc(first, '1'));
             const ids = [await docs.execute({ $for: { it: '$[*]' }, $where: { $eq: [at === 'u' ? '$it.u[0]' : '$it.q', second] }, $return: '$it.id' },
               { pushdown: false })].flat();
-            // two nulls never meet, as a NULL key never meets another; PostgreSQL's jsonb column (a
-            // container listed first, or no type) keys a JSON null as a value
-            const jsonbNull = engine === 'postgres' && first === null && (types === undefined || types[0] === 'object');
-            const refused = first === null ? jsonbNull : ids.includes('1');
+            // two nulls never meet, as a NULL key never meets another — PostgreSQL's jsonb column (a
+            // container listed first, or no type) reads a JSON null as SQL NULL too
+            const refused = first === null ? false : ids.includes('1');
             const answer = await docs.insert(doc(second, '2')).then(() => 'stored', (/** @type {any} */ error) => error.code);
             assert.equal(answer, refused ? 'JD2005' : 'stored', `${label}: ${JSON.stringify(first)} then ${JSON.stringify(second)}`);
             // and outside the condition nothing is refused

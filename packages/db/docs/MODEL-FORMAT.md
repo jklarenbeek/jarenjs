@@ -561,7 +561,10 @@ are two), whoever writes the row and however it escapes a name (`{"\u0041": 1}`
 is `{"A": 1}`). On PostgreSQL a unique index beside one over a member whose
 column holds a scalar keys each container kind its union lists as `jsonb`,
 whose equality is that one (`$object`, `$array`), and a column that holds a
-container keys every kind by its value. A member
+container keys every kind by its value but a JSON `null`, which it reads as SQL
+`NULL`, as a missing member, so two documents with `q: null` are both stored on
+both engines (a table an earlier release created keys the `null` until
+`planColumnUpgrade` creates the column again, MIGRATION-UPGRADE §70). A member
 name the dialect's JSON path grammar cannot carry (an embedded `"` or
 a control character, on SQLite) is `JD0004`. A backslash in a name is
 written escaped, so the path names the member literally — never the

@@ -150,7 +150,7 @@ worked around:
 |---|---|---|
 | `integer` and `number` are both `numeric` | `bigint` would reject a document the model accepts — `3.5` in a member the schema types `integer` — inside a generated column's cast, and a storage decision that can refuse a valid document is not one | introspection cannot tell the two apart on the way back |
 | a `boolean` member is `smallint` holding 1 or 0 | the shared forms compare a boolean against those integers (a type test, a projected pair's type name); a `boolean` column would make each an operator-resolution error rather than a row | introspection reads the column back as a number |
-| a path the schema does not type is `jsonb` | there is no honest scalar type for it, and `capabilities.untypedColumns: false` says so | a text or boolean comparison against such a member reads the document rather than the column: the same answer, unindexed; a number comparison ranges over the column, whose `jsonb` order places every number between the other JSON types and orders numbers as `numeric` does, kept to numbers by a `jsonb_typeof` test |
+| a path the schema does not type is `jsonb` | there is no honest scalar type for it, and `capabilities.untypedColumns: false` says so; its column reads a JSON `null` as SQL `NULL`, as an absent member is, so a unique index over it keys neither, as SQLite's | a text or boolean comparison against such a member reads the document rather than the column: the same answer, unindexed; a number comparison ranges over the column, whose `jsonb` order places every number between the other JSON types and orders numbers as `numeric` does, kept to numbers by a `jsonb_typeof` test |
 
 Three engine differences the emitter had to be taught, rather than the
 dialect papering over:
@@ -175,9 +175,9 @@ dialect papering over:
   JSON type, so the dialect declares `typedExtract: true` and a literal
   or list comparison and a string operator read the value alone: its
   presence is the type guard, and `$ne` keeps presence through the
-  member's JSON value. An untyped (`jsonb`) column and a declared
-  expression column are not such a `CASE`, and neither takes the typed
-  form. SQLite's `jsonb_extract` reads whatever the member holds, so its
+  member's JSON value. An untyped (`jsonb`) column, `NULL` for an absent
+  member and a stored JSON `null` alone, and a declared expression column
+  are not such a `CASE`, and neither takes the typed form. SQLite's `jsonb_extract` reads whatever the member holds, so its
   `json_type` guards stay load-bearing there; externals and type tests
   keep the discriminator on both engines.
 - **One spelling for an index and a name.** `#>` takes the element `0`

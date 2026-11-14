@@ -1390,7 +1390,9 @@ export const planModelMigration = planMigration;
  * release created — on SQLite a generated column of an indexed member of
  * several types in one of those types, on PostgreSQL a generated column, an
  * index expression or an interval CHECK over a path the schema leaves a
- * container open on without the guard a query reads it under — the link drops
+ * container open on without the guard a query reads it under, or a generated
+ * column of a member held as `jsonb` that holds a JSON `null` as a value where
+ * this release reads it as SQL NULL — the link drops
  * that definition (and the indexes over its column) and creates it again as
  * this release creates it, through the same steps a model change plans; and a
  * many-to-many join table without the index over its second key column, which
@@ -1443,7 +1445,7 @@ export function planColumnUpgrade(connection, model, options = undefined) {
         const heldPlan = heldPlanOf(dialect, plan, holding);
         const besideKeys = (plan.kindIndexes ?? []).filter((/** @type {any} */ index) => !heldPlan.kindIndexes.some((/** @type {any} */ kept) => kept.name === index.name))
           .map((/** @type {any} */ index) => index.name);
-        upgraded.push(...[...holding.types.keys(), ...holding.columns, ...holding.checks, ...holding.indexes.keys(), ...holding.containers, ...besideKeys]
+        upgraded.push(...[...holding.types.keys(), ...holding.columns.keys(), ...holding.checks, ...holding.indexes.keys(), ...holding.containers, ...besideKeys]
           .map((name) => `${plan.table}.${name}`));
         steps.push(...collectionSteps(collection.name, heldPlan, plan, collection, dialect, mapping).steps);
       }
@@ -1941,9 +1943,11 @@ function missingIndexes(connection, plans, wanted) {
 /**
  * What each collection table holds where it is not what this release creates
  * for the model: a generated column in one of its member's types (`types`, by
- * the type word the table declares it in), and a generated column or an
- * interval CHECK in the other spelling of a path the dialect guards
- * (`columns`, `checks`) — read back through the dialect's exact read-back, so
+ * the type word the table declares it in), a generated column or an
+ * interval CHECK in the other spelling of a path the dialect guards, and a
+ * column that holds its member as JSON in the read an earlier release
+ * created, which keeps a JSON `null` as a value (`columns`, by the text it
+ * holds, and `checks`) — read back through the dialect's exact read-back, so
  * a definition that is neither spelling is left to the open path, which
  * refuses it — and a unique index without some of the kind keys a fresh
  * store creates after its columns (`indexes`, by name the keys it holds, read
@@ -1953,24 +1957,24 @@ function missingIndexes(connection, plans, wanted) {
  * has no entry.
  * @param {any} connection
  * @param {any[]} plans - from `planCollection`, one per collection
- * @returns {any} value-or-promise of `Map<string, { types: Map<string, string>, columns: Set<string>, checks: Set<string>, indexes: Map<string, string[]>, containers: Set<string> }>`
+ * @returns {any} value-or-promise of `Map<string, { types: Map<string, string>, columns: Map<string, string>, checks: Set<string>, indexes: Map<string, string[]>, containers: Set<string> }>`
  */
 function heldDefinitionsOf(connection, plans) {
   const dialect = connection.dialect;
   const readBack = dialect.capabilities.declaredSqlText === true ? undefined : dialect.readBack;
-  /** @type {Map<string, { types: Map<string, string>, columns: Set<string>, checks: Set<string>, indexes: Map<string, string[]>, containers: Set<string> }>} */
+  /** @type {Map<string, { types: Map<string, string>, columns: Map<string, string>, checks: Set<string>, indexes: Map<string, string[]>, containers: Set<string> }>} */
   const held = new Map();
   const next = (/** @type {number} */ i) => {
     if (i >= plans.length) return held;
     const plan = plans[i];
-    const spelled = readBack === undefined ? [] : plan.generated.filter((column) => column.alternate !== undefined);
+    const spelled = readBack === undefined ? [] : plan.generated.filter((column) => column.alternate !== undefined || column.earlierReads !== undefined);
     const checked = readBack === undefined ? [] : (plan.intervals ?? []).filter((interval) => interval.alternate !== undefined);
     const keyed = plan.expected.indexes.some((/** @type {any} */ index) => index.terms !== undefined);
     const containers = plan.containerKeys ?? [];
     if (!plan.generated.some((column) => column.legacyTypes !== undefined) && spelled.length === 0 && checked.length === 0 && !keyed
       && containers.length === 0)
       return next(i + 1);
-    const holding = { types: new Map(), columns: new Set(), checks: new Set(), indexes: new Map(), containers: new Set() };
+    const holding = { types: new Map(), columns: new Map(), checks: new Set(), indexes: new Map(), containers: new Set() };
     const record = () => (!keyed ? recorded()
       : chain(connection.prepare(dialect.introspect.declaredSql(plan.table)), (statement) => chain(statement.all([]), (objects) => {
         // as the plan of the table's own column types keys them (a column held in a type
@@ -1994,8 +1998,13 @@ function heldDefinitionsOf(connection, plans) {
           const row = rows.find((candidate) => String(candidate.name) === column.name);
           if (row === undefined || row.default_value === null || row.default_value === undefined) continue;
           const computes = String(row.default_value);
-          if (readBack.expression(computes, columnExpression(dialect, column), readsConforming(row)) !== null
-            && readBack.expression(computes, column.alternate, readsConforming(row)) === null) holding.columns.add(column.name);
+          if (readBack.expression(computes, columnExpression(dialect, column), readsConforming(row)) === null) continue;
+          // the other spelling of the guard, or a read an earlier release created that keeps a JSON `null`
+          for (const text of [column.alternate, ...(column.earlierReads ?? [])]) {
+            if (text === undefined || readBack.expression(computes, text, readsConforming(row)) !== null) continue;
+            holding.columns.set(column.name, text);
+            break;
+          }
         }
         if (checked.length === 0) return record();
         return chain(connection.prepare(dialect.introspect.checks(plan.table)), (checks) =>
@@ -2024,7 +2033,7 @@ function heldDefinitionsOf(connection, plans) {
  * a container key column the table lacks is not planned, nor its triggers and
  * the indexes over it, which the link then creates.
  * @param {any} dialect
- * @param {any} plan @param {{ types: Map<string, string>, columns: Set<string>, checks: Set<string>, indexes: Map<string, string[]>, containers: Set<string> }} holding
+ * @param {any} plan @param {{ types: Map<string, string>, columns: Map<string, string>, checks: Set<string>, indexes: Map<string, string[]>, containers: Set<string> }} holding
  * @returns {any}
  */
 function heldPlanOf(dialect, plan, holding) {
@@ -2035,7 +2044,7 @@ function heldPlanOf(dialect, plan, holding) {
       const { terms: _keys, ...termless } = index;
       return termless;
     }) },
-    generated: base.generated.map((/** @type {any} */ column) => (holding.columns.has(column.name) ? { ...column, holds: column.alternate } : column)),
+    generated: base.generated.map((/** @type {any} */ column) => (holding.columns.has(column.name) ? { ...column, holds: holding.columns.get(column.name) } : column)),
     intervals: (base.intervals ?? []).map((/** @type {any} */ interval) => (holding.checks.has(interval.constraint) ? { ...interval, holds: interval.alternate } : interval)) };
 }
 

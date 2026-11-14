@@ -330,6 +330,11 @@ function jsonExtract(columnSql, pathText, kind) {
     case 'object':
     case 'array':
       return `(CASE WHEN jsonb_typeof(${at}) = '${kind}' THEN ${at} END)`;
+    // the generated column of a member that holds its value as `jsonb` (one the schema
+    // does not type, or whose union lists a container first): a JSON `null` as SQL NULL,
+    // as a missing member is, so a unique index over it keys neither
+    case 'json':
+      return `(CASE WHEN jsonb_typeof(${at}) <> 'null' THEN ${at} END)`;
     default:
       return at;
   }

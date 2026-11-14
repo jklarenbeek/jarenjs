@@ -92,9 +92,14 @@ refuses it, and a value of one kind never meets a value of another: `1` and
 booleans alone, as the query engine compares it and as SQLite's unique index
 keys it. A member whose union lists a container first, or that has no type,
 has a `jsonb` column that holds every kind; beside another member it is keyed
-by that column. That column keys a JSON `null` as a value, so a unique index
-over it refuses a second `null`, which SQLite (whose column holds it as SQL
-`NULL`) and a member whose column holds a scalar store. A key PostgreSQL's
+by that column. That column, and the `jsonb` column of a member typed `object` or
+`array` alone, reads a JSON `null` as SQL `NULL`
+(`CASE WHEN jsonb_typeof(…) <> 'null' THEN … END`), as a missing member is, so a
+unique index over it stores two documents with `q: null` as SQLite does; a
+query over the member reads its `null` out of the document, as before. A table
+an earlier release created holds the column that keys a JSON `null` as a value:
+it opens and answers as before, refusing a second `null` `JD2005`, until
+`planColumnUpgrade` creates the column again (MIGRATION-FORMAT §3). A key PostgreSQL's
 B-tree cannot hold — an entry past its size limit, a long string or a
 large container under any unique index — is refused `JD2005` with the server's
 message. A non-unique composite or conditional index, and a non-unique one over

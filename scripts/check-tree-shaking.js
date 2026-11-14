@@ -704,7 +704,8 @@ if (asyncLiveLeak.length)
 // Raised to 1,136,500 (measured 1136432): a method read's own function members refused as a member read off it is, with call, apply and bind still calling it, which every pen shares (expression 129), and sql.call's options checked so none replaces the call's own members (relational 79).
 // Raised to 1,136,900 (measured 1136831): an array element holding undefined read as present, so no type, enum or combinator passes it as absent — the walks' flagged call for such an element (tools 118, array 110, unevaluated 45) and the type, $query, allOf/anyOf/not and enum guards reading the flag (query-keyword 53, schema 38, combine 28, enum 10), add 402.
 // Raised to 1,137,300 (measured 1137200): a lone uniqueItems tested in one closure with its array-class test (array 206), a leading type 'string' tested by the string keywords' own test (string 146, schema 111), add 463.
-if (clientBytes > 1137300)
+// Raised to 1,137,800 (measured 1137719): a member held as jsonb on PostgreSQL read with a JSON null as SQL NULL, and the earlier read a table holds accepted at open (ddl 519).
+if (clientBytes > 1137800)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 

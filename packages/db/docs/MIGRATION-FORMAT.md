@@ -415,6 +415,14 @@ that rebuilds exactly the ones that differ:
   such a name over a declared object, or for the document's own `$['0']`,
   holds it unguarded, and `introspect()` reads it back as the index until the
   link rebuilds it;
+- on PostgreSQL, the `jsonb` generated column of an indexed member the schema
+  does not type, types `object` or `array` alone, or whose union lists a
+  container first, held as an earlier
+  release created it: it keys a JSON `null` as a value, so a unique index over
+  it refuses a second document with `q: null`, which a fresh store, reading the
+  `null` as SQL `NULL`, stores (MIGRATION-UPGRADE §70). It becomes the column a
+  fresh store creates, every index over it with it; `report.upgraded` names it
+  `<table>.<column>` (`c.gx_q`), beside a unique index or not;
 - on both engines, a many-to-many join table without the index over its
   second key column (`Label_User_User_key` on `Label_User`), which no earlier
   release created: a filter on that column, and the cascade from its entity,
