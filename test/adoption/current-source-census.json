@@ -14,8 +14,8 @@
         "207:export function readSchema(connection, options = undefined) {",
         "222: * catalog where the dialect reads one, as {@link readSchema} reads them for",
         "225: * `readSchema`'s shape and holds the one table asked for (none where the",
-        "1154:export function introspectModel(connection, options = undefined) {",
-        "1166:  return chain(readSchema(connection, options), (schema) => {"
+        "1191:export function introspectModel(connection, options = undefined) {",
+        "1203:  return chain(readSchema(connection, options), (schema) => {"
       ],
       "disposition": "retained"
     },
