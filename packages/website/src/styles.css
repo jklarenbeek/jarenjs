@@ -222,6 +222,9 @@ ul { margin: 0.4rem 0; padding-left: 1.3rem; }
   cursor: pointer; font-size: 0.85rem; max-inline-size: 9rem;
 }
 .lang-switch:hover { background: var(--surface); }
+/* the header's two buttons keep their 44px frame however long a language's name runs: the switch gives way instead */
+.theme-toggle, .menu-toggle { flex-shrink: 0; }
+.lang-switch { min-inline-size: 0; flex-shrink: 1; }
 
 /* footer (the page's bottom padding provides the gap above it) */
 .footer { border-top: 1px solid var(--border); }
@@ -744,6 +747,8 @@ tr.strong td { font-weight: 700; color: var(--accent); }
 }
 @media (max-width: 760px) {
   .menu-toggle { display: block; }
+  .header-inner { gap: var(--space-3); }
+  .lang-switch { max-inline-size: 7rem; }
   .nav {
     display: none; position: absolute; top: 3.5rem; left: 0; right: 0;
     flex-direction: column; padding: var(--space-3) var(--space-5) var(--space-4); gap: var(--space-1);
