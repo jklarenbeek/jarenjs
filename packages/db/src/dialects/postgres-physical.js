@@ -76,6 +76,13 @@ export function postgresPhysicalDifferent(codec, left, right) {
   return `${cast(left)} IS DISTINCT FROM ${cast(right)}`;
 }
 
+/** Whether a column of a native type can hold `'NaN'`, which no JSON number
+ * is: `numeric` and the two float types (an integer type holds none).
+ * @param {string} type - as the catalog spells it @returns {boolean} */
+export function postgresHoldsNaN(type) {
+  return /^(?:NUMERIC|DOUBLE PRECISION|REAL)\b/.test(String(type).toUpperCase());
+}
+
 /** Attach only verified native storage restrictions to the compiled mapping.
  * @param {any} column @param {any} actual @param {string} kind
  * @param {any} [database] - the catalog's row of the database: its default
@@ -114,6 +121,11 @@ export function qualifyPostgresPhysicalColumn(column, actual, kind, database = u
       && (['C', 'POSIX', 'ucs_basic', 'pg_c_utf8'].includes(collation)
         || (collation === 'default' && database?.localeProvider === 'c' && ['C', 'POSIX'].includes(database.collation)));
   }
+  // a column whose type holds a NaN another writer may store answers as the
+  // engine only where a validated CHECK refuses it (`guards`, read by
+  // `verifyPhysical`): elsewhere a statement that compares or orders it
+  // without returning it reads PostgreSQL's NaN (`introspect()` reports it)
+  column.nanSafe = !postgresHoldsNaN(type) || (column.guards ?? []).includes('not-nan');
   // Native typed projections and predicates are independently qualified. The
   // decoded evaluator remains exact for every codec and reports its residual.
   column.nativeQuery = ['text', 'integer', 'number', 'boolean'].includes(column.codec) && column.null !== 'null';

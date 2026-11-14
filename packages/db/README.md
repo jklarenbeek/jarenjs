@@ -1430,7 +1430,9 @@ it (`key-source` — `options.keys` supplies the pointer), a view cannot
 be declared (`unmapped-view`), a foreign key cannot say which side
 declared the edge (`ambiguous-relation`), a table whose name is no identifier
 (`My Table`, `123x`) is no collection or entity a model can declare
-(`unmapped-table`). On SQLite the untyped column of an indexed member of
+(`unmapped-table`), and on PostgreSQL a number column whose type holds a
+`NaN` no validated CHECK refuses comes back with the statement that guards
+it (`unguarded-number`). On SQLite the untyped column of an indexed member of
 several types records only how it reads: a member whose union lists `number`
 first comes back as a union of every kind behind `number` (`['number',
 'string', 'boolean', 'object', 'array', 'null']`, which plans the same read),

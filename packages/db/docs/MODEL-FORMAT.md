@@ -37,7 +37,10 @@ bounds, which is no loss; a CHECK of another shape or name, or one added
 `NOT VALID`, is `unmapped-constraint`. An entity's number column's
 `CHECK (column <> 'NaN')` on PostgreSQL (§9.3) is the store's own, validated,
 and declares nothing beyond the column's type: no loss, nothing in the derived
-schema.
+schema. A number column of an entity or a join table whose type holds a `NaN`
+(`numeric`, `double precision`, `real`) that no validated CHECK refuses is an
+`unguarded-number` row, with the statement that adds the CHECK as its `sql`
+(§12, POSTGRESQL.md).
 Repeated inspection is read-only; `strict: true` refuses losses with `JD0002`.
 
 The loss rows are the contract for what the model vocabulary cannot say;
@@ -4817,7 +4820,16 @@ raises. A migration reads its baseline and the model of an applied step as
 history, where the rule is not applied, so an application whose history carries
 such a model still plans and applies the migration that retypes the property
 (`planPhysicalMigration`, `migrate`'s `baseline` and step models); the target
-model is held to it. Unsafe narrowing refuses `JD2003`. A byte handle never enters the JSON-facing entity;
+model is held to it. Unsafe narrowing refuses `JD2003`. On PostgreSQL a `number`
+column (`double precision`) or a `decimal` column (`numeric`) can hold a `NaN`
+another writer stores, which no JSON number is. The open reads the guards the
+catalog's validated CHECKs hold each mapped column to — `col <> 'NaN'`, or an
+enum of finite numbers — and refuses no column without one: a row holding a
+`NaN` is refused `JD2003` where a statement returns the column, and read as
+PostgreSQL's `NaN`, above every number and equal to itself, where one compares
+or orders it without returning it, which is the mapping's loss.
+`introspect()` names each such column (`unguarded-number`) with the statement
+that guards it ([POSTGRESQL.md](POSTGRESQL.md)). A byte handle never enters the JSON-facing entity;
 [the native SQLite channel](SQLITE-RELATIONAL.md#exact-writes-and-bytes) preserves
 Uint8Array/Buffer values on the same synchronous connection.
 `null: "null"` maps SQL NULL to present JSON null; `"absent"` omits the property;

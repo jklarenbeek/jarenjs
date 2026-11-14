@@ -910,17 +910,6 @@ what each does is its own documentation's job
   Wanted: a pair comparison the planner estimates as an equality and the
   key's index serves, measured; the double's order, include and continuation
   for such a key, measured against the index order they would cost.
-- [ ] **On PostgreSQL a `NaN` another writer stored in a number column of a
-  table the store did not create with its CHECK is refused only where a
-  statement returns its column.** The store gives every `numeric` column of an
-  entity or join table it creates `CHECK (col <> 'NaN')`, and
-  `planColumnUpgrade` adds it to a table an earlier release created; until
-  that link applies, and in a table a physical mapping adopts (not the store's
-  to alter), a row whose column holds `'NaN'` is refused `JD2003` where a
-  statement returns the column, while one that compares or orders it without
-  returning it reads PostgreSQL's `NaN` (above every number, equal to itself)
-  where the engine refuses. Wanted: a physical mapping's number column
-  qualified or refused at open, or documented as the mapping's loss.
 - [ ] **On PostgreSQL an entity's ordering over a column that may hold NULL
   never reads an index.** A term over a reference or an indexed column is `ASC
   NULLS FIRST` (descending `DESC NULLS LAST`), the engine's empty-first

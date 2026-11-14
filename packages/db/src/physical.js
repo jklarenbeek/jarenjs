@@ -12,7 +12,7 @@ import { sqlitePhysicalColumnType, sqliteTableMigration } from './dialects/sqlit
 import { comparableDeclaredSql } from './schema-sql.js';
 import { foldIdentifier } from './invariants.js';
 import { CURRENT_SPELLING } from './dialects/program-spellings.js';
-import { sqlTokens } from './dialects/check-read.js';
+import { sqlTokens, guardsByColumn } from './dialects/check-read.js';
 import { isKeyword } from './sql.js';
 import { relationalEmitter } from './relational.js';
 
@@ -561,7 +561,9 @@ export function namespacePrograms(connection) {
  * application-owned programs remain physical facts, never inferred drops.
  * What the catalog declares of a column is recorded on the column itself,
  * which every reader of the mapping shares: whether it can hold NULL
- * (`notNull`), and the database's text encoding (`databaseEncoding`)
+ * (`notNull`), the guards its validated CHECKs hold it to (`guards`, the
+ * one reading of `check-read.js` `guardsByColumn`: `not-nan` where one
+ * refuses a `'NaN'`), and the database's text encoding (`databaseEncoding`)
  * where the dialect reads the database's own catalog row.
  * @param {any} connection @param {any} mapping @param {any} schema
  * @param {(table: string) => any} [programs] - the namespace's rule programs read once ({@link namespacePrograms})
@@ -592,6 +594,8 @@ export function verifyPhysical(connection, mapping, schema, programs = undefined
   return chain(verified, (/** @type {any[]} */ held) => chain(read, (table) => {
     // the programs it holds as an earlier release planned them, which the store reports
     mapping.earlierPrograms = held;
+    // a view holds no CHECK: none of its columns is guarded
+    const guards = guardsByColumn(table.checks ?? []);
     if (mapping.kind !== 'view' && JSON.stringify(table.primaryKey) !== JSON.stringify(mapping.keys.map((k) => mapping.columns.find((c) => c.name === k).physical))) fail('ordered primary key disagrees');
     for (const column of mapping.columns) {
       const actual = table.columns.find((c) => c.name === column.physical);
@@ -603,6 +607,7 @@ export function verifyPhysical(connection, mapping, schema, programs = undefined
       // keyset seek) whatever null policy the model declares; a text column's
       // stored bytes decode exactly only from a UTF8 database
       column.notNull = actual.nullable === false;
+      column.guards = Object.freeze([...(guards.get(column.physical) ?? [])].sort());
       if (database !== null) column.databaseEncoding = typeof database.encoding === 'string' ? database.encoding : null;
       // the catalog's own row of the column, where the dialect reads one: the
       // schema its collation lives in, which a name alone does not say

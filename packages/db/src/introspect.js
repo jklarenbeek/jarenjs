@@ -33,7 +33,7 @@ import { readOptionsOrNull } from './options.js';
 import { KEY_COLUMN, DOC_COLUMN, SCALAR_CODECS, indexCondition, canonicalOf, kindIndexName, containerKeysOf, kindIndexSql,
   entityIndexTerm } from './ddl.js';
 import { columnKindFor } from './scalar-types.js';
-import { readPredicate, readIntervalCheck, sqlTokens, SQLITE_PREDICATE } from './dialects/check-read.js';
+import { readPredicate, readIntervalCheck, sqlTokens, SQLITE_PREDICATE, guardsByColumn } from './dialects/check-read.js';
 import { comparableDeclaredSql } from './schema-sql.js';
 import { isKeyword } from './sql.js';
 import { foldIdentifier } from './invariants.js';
@@ -61,6 +61,7 @@ export const INTROSPECT_CODES = Object.freeze({
   'key-source': 'the key column cannot say which document member filled it',
   'document-members': 'the document\'s unindexed members are not in the physical shape',
   'ambiguous-relation': 'a foreign key whose relation cannot be inferred from the shape alone',
+  'unguarded-number': 'a number column whose type holds a NaN no validated CHECK refuses',
 });
 
 /**
@@ -1160,6 +1161,32 @@ function reportLossyType(dialect, table, column, report) {
 }
 
 /**
+ * Report each column of an entity or a join table whose type holds a value
+ * no JSON number is (`dialect.holdsNaN`: PostgreSQL's `numeric` and float
+ * types) and that no validated CHECK guards against it (`guardsByColumn`'s
+ * `not-nan`), with the statement that adds the CHECK a store gives such a
+ * column (`dialect.numberCheck`) — the one `planColumnUpgrade` plans on a
+ * table the store created, the table named in the driver's schema so a host
+ * runs it anywhere: a row another writer stored with a NaN is refused
+ * where a statement returns the column, and read as PostgreSQL's NaN where
+ * one compares or orders it without returning it. Nothing where the
+ * engine's number type holds none (SQLite).
+ * @param {any} dialect @param {any} table
+ * @param {(row: any) => void} report
+ */
+function reportUnguardedNumbers(dialect, table, report) {
+  if (dialect.numberCheck === undefined || dialect.holdsNaN === undefined) return;
+  const guards = guardsByColumn(table.checks ?? []);
+  for (const column of table.columns) {
+    if (column.generated || !dialect.holdsNaN(column.type) || guards.get(column.name)?.has('not-nan')) continue;
+    // `planColumnUpgrade`'s statement, the table named in the driver's schema, where a host runs it
+    const sql = `ALTER TABLE ${dialect.tableName(table.name, dialect.schema)} ADD CHECK (${dialect.numberCheck(dialect.quoteIdentifier(column.name))})`;
+    report({ ...loss('unguarded-number', `${table.name}.${column.name}`, `the column type '${column.type}' holds a NaN `
+      + `no validated CHECK refuses, which a statement that compares or orders the column reads as above every number; ${sql} guards it`), sql });
+  }
+}
+
+/**
  * Whether a table is a many-to-many JOIN table: two foreign-key columns,
  * a composite key over exactly those, no document column of its own.
  * @param {any} dialect
@@ -1227,13 +1254,15 @@ export function introspectModel(connection, options = undefined) {
     /** @type {{ child: string, column: string, fk: any }[]} */
     const edges = [];
     for (const table of schema.tables) {
-      if (joinTables.has(table.name)) continue;
+      if (joinTables.has(table.name)) { reportUnguardedNumbers(dialect, table, add); continue; }
       // a collection and an entity are named by an identifier: a model that
       // declared any other name would be refused whole (JD0005)
       if (!IDENTIFIER.test(table.name)) {
         add(loss('unmapped-table', table.name,
           'the table\'s name is not an identifier (an ASCII letter or underscore, then ASCII letters, digits '
           + 'and underscores), the only kind a model gives a collection or an entity'));
+        // a physical layout may still map it, and its number columns read alike
+        if (!looksLikeCollection(dialect, table)) reportUnguardedNumbers(dialect, table, add);
         continue;
       }
       if (looksLikeCollection(dialect, table)) {
@@ -1249,6 +1278,7 @@ export function introspectModel(connection, options = undefined) {
         continue;
       }
       setObjectMember(entities, table.name, deriveEntity(dialect, table, add, edges, { byName, declarations: options?.expressions }));
+      reportUnguardedNumbers(dialect, table, add);
     }
     declareEdges(dialect, entities, schema.tables, edges, add);
     for (let i = report.length - 1; i >= 0; i--)

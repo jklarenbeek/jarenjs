@@ -42,7 +42,7 @@
  */
 
 import { createDialect, stringLiteral, MEMBER_WHEN } from '../dialect.js';
-import { postgresPhysicalRead, postgresPhysicalCompare, postgresPhysicalValueType, postgresPhysicalDifferent, postgresPhysicalTypeMatches, qualifyPostgresPhysicalColumn } from './postgres-physical.js';
+import { postgresPhysicalRead, postgresPhysicalCompare, postgresPhysicalValueType, postgresPhysicalDifferent, postgresPhysicalTypeMatches, qualifyPostgresPhysicalColumn, postgresHoldsNaN } from './postgres-physical.js';
 import { postgresCatalog } from './postgres-catalog.js';
 import { POSTGRES, postgresInvariantTriggers } from './postgres-invariants.js';
 import { postgresRelational } from './postgres-relational.js';
@@ -1037,6 +1037,8 @@ export function postgresDialect(options = undefined) {
     // `numeric` holds 'NaN', which no JSON number is: it orders above every
     // number and equals itself, where the engine refuses the row (`JD2003`)
     numberCheck: (columnSql) => `${columnSql} <> 'NaN'`,
+    // and so do the float types a physical mapping or another writer's table declares
+    holdsNaN: postgresHoldsNaN,
     readGenerated: (rows) => rows.map((row) => ({
       name: String(row.name), expression: String(row.expression ?? ''),
     })),

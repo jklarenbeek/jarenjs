@@ -276,6 +276,7 @@ export const MEMBER_WHEN = Symbol('dialect.memberWhen');
  *   physicalDifferent?: (codec: string, left: string, right: string) => string,
  *   numberCast?: (sql: string) => string,
  *   numberCheck?: (columnSql: string) => string,
+ *   holdsNaN?: (type: string) => boolean,
  *   numberRead?: (sql: string) => string,
  *   doubleRead?: (sql: string) => string,
  *   doubleEqual?: (left: string, right: string, key?: 'left' | 'right') => string,
@@ -295,7 +296,7 @@ export const MEMBER_WHEN = Symbol('dialect.memberWhen');
  *   qualifyPhysicalColumn?: (column: any, actual: any, kind: string, database?: any, catalogColumn?: any) => void,
  *   invariantTriggers?: (mapping: any, all: any, dialect: any, spelling?: number) => any[],
  *   readChecks?: (rows: any[]) => { name: string, sql?: string, validated?: boolean, conforming?: boolean,
- *     column?: string, values?: any[], notNaN?: boolean }[],
+ *     column?: string, values?: any[], notNaN?: boolean, guard?: string }[],
  *   introspect: { version: () => string, compileOptions: () => string,
  *     pragma: (name: string) => string,
  *     tableExists: () => string, columns: (table: string) => string,
@@ -1101,6 +1102,12 @@ export function createDialect(spec) {
      * a NaN as NULL).
      */
     numberCheck: spec.numberCheck,
+    /**
+     * Whether a column of a native type can hold the value `numberCheck`
+     * refuses (PostgreSQL's `numeric` and float types); `undefined` where no
+     * type holds one.
+     */
+    holdsNaN: spec.holdsNaN,
     /**
      * A JSON number a statement hands BACK to the host, or compares with
      * an integer past 2^53, as the double the engine holds. An engine that

@@ -124,9 +124,17 @@ describe('a number column holds no NaN on PostgreSQL', { skip: !PG_URL && 'JAREN
       await pool.query(`ALTER TABLE "${schema}"."N_T" DROP CONSTRAINT "N_T_N_key_check"`);
       await pool.query(`UPDATE "${schema}"."E" SET "a" = 'NaN' WHERE "id" IN ('b', 'd')`);
       // the earlier table opens, introspects and answers as before: its rows' NaN is refused where it is read
+      const unguarded = (/** @type {any} */ read) => read.report.filter((/** @type {any} */ row) => row.code === 'unguarded-number')
+        .map((/** @type {any} */ row) => [row.object, row.sql]);
+      // every number column a fresh store creates is guarded, the enum's by its enum
+      assert.deepEqual(unguarded(fresh), []);
       const earlier = await openStore(MODEL, { driver: driver() });
+      /** @type {any[]} */
+      let reported;
       try {
-        assert.deepEqual((await earlier.introspect()).model, fresh.model);
+        const read = await earlier.introspect();
+        assert.deepEqual(read.model, fresh.model);
+        reported = unguarded(read);
         await assert.rejects(async () => earlier.execute(rows({ $gt: ['$it.a', 5] })), { code: 'JD2003' });
       }
       finally { await earlier.close(); }
@@ -138,6 +146,9 @@ describe('a number column holds no NaN on PostgreSQL', { skip: !PG_URL && 'JAREN
       assert.deepEqual(migration.steps.map((/** @type {any} */ step) => step.sql), ['ALTER TABLE "E" ADD CHECK ("a" <> \'NaN\')',
         'ALTER TABLE "E" ADD CHECK ("nid" <> \'NaN\')', 'ALTER TABLE "N_T" ADD CHECK ("N_key" <> \'NaN\')']);
       assert.deepEqual(report.upgraded, ['E.a', 'E.nid', 'N_T.N_key']);
+      // introspect() names the same columns with the link's statements, each table named in the driver's schema
+      assert.deepEqual(reported, report.upgraded.map((/** @type {string} */ object, /** @type {number} */ i) =>
+        [object, migration.steps[i].sql.replace(/^ALTER TABLE /, `ALTER TABLE "${schema}".`)]));
       assert.deepEqual((await migrate({ driver: driver() }, [migration], { baseline: MODEL, model: MODEL, shadow: false })).applied, [migration.id]);
       assert.deepEqual(await checksOf(pool, schema), CHECKS);
       assert.deepEqual((await upgradeOf(context)).migration.steps, []);

@@ -3859,6 +3859,27 @@ refuses the unique index (`could not create unique index`) where the table holds
 two documents whose member is `null`: change or remove all but one of them
 first.
 
+## 71. `introspect()` names a PostgreSQL number column no CHECK guards against a NaN
+
+- On PostgreSQL a column of an entity or a join table whose type holds a `NaN`
+  (`numeric`, `double precision`, `real`) and that no validated CHECK guards
+  — `col <> 'NaN'` or an enum of finite numbers — is now an `unguarded-number`
+  row of `introspect()`'s report, `<table>.<column>`, whose `sql` is the
+  statement that adds the CHECK, the table named in the driver's schema: a
+  column of a table an earlier release created (the link `planColumnUpgrade`
+  plans, [§61](#61-a-number-column-refuses-a-nan-on-postgresql)) and a physical
+  mapping's column alike ([POSTGRESQL](POSTGRESQL.md),
+  [MODEL-FORMAT §12](MODEL-FORMAT.md#12-existing-column-layouts)). A caller
+  that branches on report rows meets it; `strict: true` refused every such
+  table already (`document-members`, `ambiguous-relation`). The derived model
+  and the inventory are unchanged, and so is every statement a store runs.
+- A physical mapping's open reads the same guards and refuses no column:
+  its answers are the previous release's.
+- SQLite is unchanged: its `REAL` stores no NaN.
+
+**Downgrade.** The previous release reports no such row and opens, reads and
+plans every table as this one does.
+
 ## Measured costs
 
 Exact identity stores complete canonical documents and model endpoints, so

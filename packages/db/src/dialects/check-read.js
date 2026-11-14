@@ -352,15 +352,23 @@ export function postgresChecks(rows) {
   return rows.map((row) => ({ name: String(row.name), sql: String(row.expression ?? ''),
     ...(row.validated === undefined || row.validated === null ? {} : { validated: Number(row.validated) === 1 }),
     conforming: readsConforming(row),
-    ...notNaNOf(sqlTokens(String(row.expression ?? ''))),
+    ...guardOf(sqlTokens(String(row.expression ?? ''))),
     ...(row.unsafe_collation ? null : enumOf(sqlTokens(String(row.expression ?? '')), postgresCast)) }));
 }
 
-/** The CHECK a store gives a PostgreSQL `numeric` column of an entity or join
- * table (`dialect.numberCheck`), as the catalog deparses it, `(a <> 'NaN'::numeric)`:
- * `{ column, notNaN: true }`, or `null` for any other text.
- * @param {{ kind: string, value: string }[]} tokens @returns {{ column: string, notNaN: true } | null} */
-function notNaNOf(tokens) {
+/** The types whose `'NaN'` a recognised CHECK names, as the catalog deparses
+ * the literal: the store's own `numeric` and the two float types. */
+const NAN_TYPES = /* @__PURE__ */ Object.freeze([['NUMERIC'], ['DOUBLE', 'PRECISION'], ['REAL']]);
+
+/** The guard a CHECK holds one column to, where its text is one this reader
+ * recognises, as the catalog deparses it: `not-nan` for `(a <> 'NaN'::numeric)`
+ * — the CHECK a store gives a PostgreSQL `numeric` column of an entity or join
+ * table (`dialect.numberCheck`), which is also `notNaN: true` — and for the same
+ * CHECK over a float column, `(a <> 'NaN'::double precision)` (or `::real`).
+ * `{ column, guard }`, or `null` for any other text.
+ * @param {{ kind: string, value: string }[]} tokens
+ * @returns {{ column: string, guard: 'not-nan', notNaN?: true } | null} */
+function guardOf(tokens) {
   const cursor = tokenCursor(tokens);
   const take = cursor.take;
   let open = 0;
@@ -369,9 +377,37 @@ function notNaNOf(tokens) {
   if (!column || !['identifier', 'word'].includes(column.kind)) return null;
   if (!(take('<') && take('>'))) return null;
   const nan = tokens[cursor.at++];
-  if (nan?.kind !== 'string' || nan.value !== 'NaN' || !take('::') || !take('NUMERIC')) return null;
+  if (nan?.kind !== 'string' || nan.value !== 'NaN' || !take('::')) return null;
+  const type = NAN_TYPES.find((words) => words.every((word) => take(word)));
+  if (type === undefined) return null;
   while (open > 0 && take(')')) open--;
-  return open === 0 && cursor.at === tokens.length ? { column: column.value, notNaN: true } : null;
+  if (open !== 0 || cursor.at !== tokens.length) return null;
+  return { column: column.value, guard: 'not-nan', ...(type[0] === 'NUMERIC' ? { notNaN: true } : {}) };
+}
+
+/**
+ * The guards the recognised CHECKs of one table hold each column to: the
+ * one reading every reader of a column's guards shares. `not-nan` where a
+ * CHECK refuses a `'NaN'` ({@link guardOf}) or admits a complete enum of
+ * finite numbers alone (`enumOf`), which admits no NaN. A CHECK added `NOT
+ * VALID` holds nothing for the rows already there, and guards nothing.
+ * Whether a table holds the store's OWN CHECK is another question, which
+ * `notNaN` answers.
+ * @param {readonly { column?: string, guard?: string, values?: any[], validated?: boolean }[]} checks - a dialect's `readChecks`
+ * @returns {Map<string, Set<string>>} column -> its guards
+ */
+export function guardsByColumn(checks) {
+  /** @type {Map<string, Set<string>>} */
+  const guards = new Map();
+  for (const check of checks) {
+    if (check.column === undefined || check.validated === false) continue;
+    const guard = check.guard ?? (Array.isArray(check.values) && check.values.length > 0
+      && check.values.every((value) => typeof value === 'number' && Number.isFinite(value)) ? 'not-nan' : undefined);
+    if (guard === undefined) continue;
+    if (!guards.has(check.column)) guards.set(check.column, new Set());
+    guards.get(check.column)?.add(guard);
+  }
+  return guards;
 }
 
 /** Only exact scalar casts emitted by the native catalog are understood. */

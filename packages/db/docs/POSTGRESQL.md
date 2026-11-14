@@ -413,12 +413,27 @@ would read every row of the table. A collection's generated column computes
 from its document, whose `jsonb` holds no `NaN` (a `NaN` numeric becomes the
 JSON string `"NaN"`). A table an earlier release created has no such CHECK: it
 opens and answers as before, `planColumnUpgrade` adds it (refused `JD0023`
-naming the rows while one holds a `NaN`, MIGRATION-FORMAT §3), and until then,
-as in a table the store maps but did not create (a physical mapping), a row read
-with a `NaN` is refused `JD2003` naming the column, by the engine's read and by
-every statement that returns the column, while a statement that compares or
-orders the column without returning it reads PostgreSQL's `NaN` and answers
-where the engine refuses.
+naming the rows while one holds a `NaN`, MIGRATION-FORMAT §3), and until then a
+row read with a `NaN` is refused `JD2003` naming the column, by the engine's read
+and by every statement that returns the column, while a statement that compares
+or orders the column without returning it reads PostgreSQL's `NaN` and answers
+where the engine refuses. A table the store maps but did not create (a physical
+mapping, MODEL-FORMAT §12) is the application's to alter: its open reads which
+mapped columns a validated CHECK guards — `col <> 'NaN'` over `numeric`, `double
+precision` or `real`, or an enum of finite numbers; one added `NOT VALID` guards
+nothing until it is validated — and refuses none, since the mapping answers as
+the engine for every row that holds a number. Over an unguarded `double
+precision` (`number`) or `numeric` (`decimal`) column the answer above is the
+mapping's loss: a native `$where` or `$orderby` over a `number` column, and a
+relational `where` over either, reads another writer's `NaN`. `introspect()`
+reports every unguarded number column of an entity or a join table, an earlier
+release's and another writer's alike, as an `unguarded-number` row whose `sql`
+is the statement that guards it, the table named in the driver's schema
+(`ALTER TABLE "<schema>"."<table>" ADD CHECK ("<column>" <> 'NaN')`, the link
+`planColumnUpgrade` plans on the store's own); once it has run, the next open
+reads the column as guarded and the row is gone. A `kind: "view"` layout holds
+no CHECK, so its number columns stay unguarded and the CHECK belongs on the
+table under it.
 An entity's key, and a column referencing one (a join table's two among
 them), compared with a number, compare as the open reads the column held. A
 key the caller writes is a `numeric` (an `integer` key without `default:
