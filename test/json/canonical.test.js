@@ -8,6 +8,7 @@ import {
   cloneJson,
   JsonCanonicalizeError,
 } from '@jarenjs/json';
+import { sha256Hex } from '@jarenjs/core/string';
 
 describe('canonicalizeJson (RFC 8785 / JCS)', () => {
   it('should sort members by UTF-16 code unit', () => {
@@ -171,6 +172,14 @@ describe('canonicalSha256', () => {
   it('distinguishes values that differ and refuses non-JSON as a rejection', async () => {
     assert.notStrictEqual(await canonicalSha256({ a: 1 }), await canonicalSha256({ a: 2 }));
     await assertRejects(() => canonicalSha256({ a: () => 1 }), JsonCanonicalizeError);
+  });
+
+  it('is sha256Hex of the canonical text, digest for digest', async () => {
+    // pinned from an independent SHA-256 over '{"a":[2,3],"b":1}'
+    assert.strictEqual(await canonicalSha256({ b: 1, a: [2, 3] }),
+      '2aae3bfa906be39530e7d7a4aa90a7e6d4f29c33e3ac80e1c3b05598c5953c04');
+    for (const value of [null, 0, 'h\u00e9llo \ud834\udd1e', [], {}, { z: [1, { y: '\u20ac' }], a: -0.5 }])
+      assert.strictEqual(await canonicalSha256(value), await sha256Hex(canonicalizeJson(value)));
   });
 });
 

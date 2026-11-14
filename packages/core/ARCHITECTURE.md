@@ -187,7 +187,7 @@ flowchart TB
         end
 
         subgraph StringModules["String &amp; Scanning"]
-            StringUtil["string.js<br/>RegExp, grapheme counting, fnv1a"]
+            StringUtil["string.js<br/>RegExp, grapheme counting, fnv1a, sha256Hex"]
             ScanUtil["scan.js<br/>Char-code classes for parsers"]
             MessageUtil["message.js<br/>Message template/catalog compiler"]
             ColorUtil["color.js<br/>Mixing, relative luminance"]
@@ -1178,6 +1178,22 @@ a finished subtree, which held no cycle, and an entry met again deeper is
 refused when its height passes the bound. The written text is joined, not
 copied, so it is held in space linear in the distinct containers until a reader
 flattens it.
+
+`semanticKey` walks the whole value on every call, because a value can change
+between two calls; that walk is a semantic cache's per-lookup cost. The one
+exception is a value that cannot change. Every container the walk opens, in any
+of its three forms, passes `openSemantic`, which also asks whether it is frozen,
+dense and holds only data members; the answer folds into one flag for the call,
+and the first container that fails clears it, so the checks stop there: a value
+whose root is not frozen pays one `Object.isFrozen` and nothing more, and a frozen
+root over an unfrozen child pays the root's member checks besides. When the flag survives the
+walk, the key is stored in a `WeakMap` keyed by the root object — one map per key
+form, so an ordered key never answers for a sorted one — and a later call with
+that object returns it before walking. The memo lives in `semanticKey` rather
+than in `createSemanticCache`, so every caller of the key shares it; what it costs
+is the key text, held as long as the root object lives. A getter met during a
+walk may call `semanticKey` itself, so each call saves the flag it found and
+restores it on the way out.
 
 ```mermaid
 flowchart TB

@@ -1081,6 +1081,35 @@ const CYCLE_MET = Object.freeze({ cycle: true });
 let semanticWritesLeft = PLAIN_WRITE_BUDGET;
 /** @type {Map<object, { text: string, height: number }> | null} */
 let semanticWritten = null;
+// Whether every container the current call has opened so far is frozen,
+// dense and holds only data members; see `semanticKey`'s memo.
+let semanticImmutable = false;
+// The key of a root whose whole tree a walk proved immutable, one map per
+// key form, so a later call returns it without walking again.
+/** @type {WeakMap<object, string>} */
+const sortedKeyOf = new WeakMap();
+/** @type {WeakMap<object, string>} */
+const orderedKeyOf = new WeakMap();
+
+/**
+ * True when a container can never key differently: frozen, so no member
+ * is added, removed or rewritten; every keyed member a data property, so
+ * no getter answers differently on a later read; an array dense, so no
+ * hole reads through a prototype that may change.
+ * @param {object} object
+ * @param {string[]} keys - Its own enumerable string keys
+ * @param {boolean} isArray
+ * @returns {boolean}
+ */
+function holdsImmutableData(object, keys, isArray) {
+  if (!Object.isFrozen(object)) return false;
+  if (isArray && keys.length !== /** @type {any[]} */ (object).length) return false;
+  for (let i = 0; i < keys.length; i++) {
+    // an accessor's descriptor always names `get`, a data member's never does
+    if ('get' in /** @type {PropertyDescriptor} */ (Object.getOwnPropertyDescriptor(object, keys[i]))) return false;
+  }
+  return true;
+}
 
 // The nesting keyed on the host's call stack, the fast path every
 // ordinary value takes; a value nested deeper continues on
@@ -1109,11 +1138,13 @@ function openSemantic(object, path, open, ordered) {
     // a subclass carries behavior the key cannot see
     if (proto !== Array.prototype) throw semanticRefusal('an Array subclass instance', path);
     // an own property beyond the elements would vanish positionally
-    for (const key of Object.keys(object)) {
+    const indices = Object.keys(object);
+    for (const key of indices) {
       const index = Number(key);
       if (!Number.isInteger(index) || index < 0 || index >= object.length || String(index) !== key)
         throw semanticRefusal(`the extra array property ${JSON.stringify(key)}`, path);
     }
+    if (semanticImmutable) semanticImmutable = holdsImmutableData(object, indices, true);
     return null;
   }
   // Date, Map, Set, RegExp and every class instance stringify to `{}`
@@ -1122,7 +1153,9 @@ function openSemantic(object, path, open, ordered) {
     throw semanticRefusal(`a ${object.constructor?.name ?? 'non-plain'} instance`, path);
   // the member names are distinct, so their sequence alone spells the
   // order: an ordered key stays injective with order as part of identity
-  return ordered ? Object.keys(object) : Object.keys(object).sort(compareCodePoints);
+  const keys = ordered ? Object.keys(object) : Object.keys(object).sort(compareCodePoints);
+  if (semanticImmutable) semanticImmutable = holdsImmutableData(object, keys, false);
+  return keys;
 }
 
 /**
@@ -1370,6 +1403,18 @@ function semanticShared(value, path, open, ordered, depth, written) {
  * The identity covers OWN ENUMERABLE string-keyed properties, the same
  * surface JSON reads. Two values differing only in a non-enumerable
  * member are one value to this key, as they are to `JSON.stringify`.
+ *
+ * **A wholly immutable value is walked once.** When the walk finds every
+ * array and object of the tree frozen (`Object.isFrozen`, as
+ * {@link deepFreeze} leaves it), each keyed member a data property and
+ * each array without holes, the key is remembered for that root object,
+ * per key form, and a later call with the same object returns it without
+ * walking: such a tree cannot change, so the key stays exact. A tree with
+ * one unfrozen container, an accessor or a hole anywhere is walked on
+ * every call, and a refused value is refused on every call. The memory is
+ * held weakly, for as long as the root object lives; a fresh wrapper —
+ * a tuple such as `[document, options]` built per call — is a new root
+ * and walks every time.
  * @param {*} value - The value to derive an identity for
  * @param {{ ordered?: boolean }} [options] - `ordered: true` keeps object
  *   members in enumeration order instead of sorting them
@@ -1389,16 +1434,29 @@ export function semanticKey(value, options = undefined) {
       throw new TypeError('semanticKey: options must be a plain { ordered?: boolean }');
     ordered = options.ordered === true;
   }
+  const isContainer = typeof value === 'object' && value !== null;
+  const memo = ordered ? orderedKeyOf : sortedKeyOf;
+  if (isContainer) {
+    const known = memo.get(value);
+    if (known !== undefined) return known;
+  }
   semanticWritesLeft = PLAIN_WRITE_BUDGET;
+  // a getter met by the walk may call `semanticKey` itself; the inner
+  // call's proof is its own, so the outer one's resumes as it stood
+  const outerImmutable = semanticImmutable;
+  semanticImmutable = isContainer;
   let error;
   try {
     const key = semanticToken(value, '', new Set(), ordered, 1);
     semanticWritten = null;
+    if (semanticImmutable) memo.set(value, key);
+    semanticImmutable = outerImmutable;
     return key;
   }
   catch (thrown) {
     error = thrown;
     semanticWritten = null;
+    semanticImmutable = outerImmutable;
   }
   if (isPastLongestString(error))
     throw textTooLong('a cache identity');

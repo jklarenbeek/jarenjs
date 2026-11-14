@@ -133,6 +133,13 @@ export function createBoundedCache(limit, onEvict = undefined) {
  *    retained. Correct and slow beats fast and wrong; callers that want
  *    to *reject* such input should validate before asking the cache.
  *
+ * **A lookup walks the value**, as {@link semanticKey} does, to prove it
+ * keyable — except a value whose whole tree is frozen (as `deepFreeze`
+ * leaves it) and holds only data members: its key is remembered for that
+ * object, so looking the same frozen object up again costs a weak-map
+ * read instead of a walk. Keep and pass the frozen object itself; a
+ * wrapper built per lookup is a new value and is walked.
+ *
  * **Member order.** By default the identity is order-insensitive, as
  * plain JSON data is: two values differing only in object member order
  * share an entry. A cache whose entries depend on member order MUST be

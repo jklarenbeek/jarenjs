@@ -47,7 +47,11 @@ either end of the domain when the quotient rounds just short of a whole number
 (`[0, 0.3]` lost its `0.3`, `[0.1, 0.7]` its `0.7`).
 `getInclusiveExclusiveBounds` answers both bounds when the exclusive one is a value
 (`(t, 10, 20)` is `[10, 20]`; it answered `[undefined, 20]`) and keeps the inclusive one when
-the draft-04 modifier is `false` (it read `false` as a bound).
+the draft-04 modifier is `false` (it read `false` as a bound); `utf8ByteLength`
+(`@jarenjs/core/string`) refuses anything but a string with a `TypeError` naming
+what was given, where a number, a boolean or an object measured 0 bytes and so
+passed a byte bound as empty (a `String` wrapper object is still measured as the
+string it wraps).
 
 `equalsJson` (`@jarenjs/core/object`) compares the two objects JOSL and JSONX
 read text into by what they hold: a `Date` equals a `Date` of the same instant
@@ -114,6 +118,17 @@ the default one — so it costs at most an extra miss. The default is unchanged 
 the option's arrival; a consumer that adopts the ordered form stops serving one
 document's entry to another that differs from it only in member order.
 
+`semanticKey`, and so every `createSemanticCache` lookup, walks the value to prove
+it can be keyed. When that walk finds the whole tree immutable — every array and
+object frozen, as `deepFreeze` leaves it, every keyed member a data property and
+no array with holes — the key is remembered for that root object, per key form,
+and the next call with the same object returns it without walking. A frozen tree
+cannot change, so the key stays exact. A value with one unfrozen container, an
+accessor or a hole anywhere is walked on every call, a refused value is refused
+on every call, and a fresh wrapper built per call (a tuple such as
+`[document, options]`) is a new root that walks each time. The remembered key is
+held weakly, as long as its root object lives.
+
 `semanticKey` holds the same bound and names a cycle the same way: past 10000
 levels it throws `JO2001` (`a value nested deeper than 10000 levels cannot be a
 cache identity`), and a cycle `JO2002` at the member that closes it, the first
@@ -172,7 +187,7 @@ such a value used to escape as an uncoded `RangeError`.*
 | `@jarenjs/core` | type guards and getters (`isStringType`, `isObjectClass`, `getIntegerType`, ...) |
 | `@jarenjs/core/array` | array helpers (`isUniqueArray`, `getUniqueArray`, `includesAll`, ...) |
 | `@jarenjs/core/object` | deep equality (`equalsDeep`, JSON-only `equalsJson`), the `isJsonObject` and deep `isJsonValue` predicates, `__proto__`-safe `setObjectMember`, `deepFreeze`, the `locateCycle` pointer, map/set merging, the collision-free `semanticKey` (order-insensitive, or `{ ordered: true }`) and the `contentKey` fingerprint |
-| `@jarenjs/core/string` | Unicode string helpers (`countCodePoints`, `compareCodePoints`, ...), regex compilation and repeatable `createRegExpTester` predicates, the suite's one content hash (`fnv1a` and the `hashContent` fingerprint over it), `kebabCase` and `escapePointerToken`, the RFC 6901 token escape every JSON Pointer writer shares |
+| `@jarenjs/core/string` | Unicode string helpers (`countCodePoints`, `compareCodePoints`, ...), regex compilation and repeatable `createRegExpTester` predicates, the suite's one content hash (`fnv1a` and the `hashContent` fingerprint over it), `sha256Hex` — the asynchronous lowercase hex SHA-256 of a string's UTF-8 bytes, an `ArrayBufferView`'s exact bytes or an `ArrayBuffer`, on `globalThis.crypto.subtle`, `kebabCase` and `escapePointerToken`, the RFC 6901 token escape every JSON Pointer writer shares |
 | `@jarenjs/core/model` | `withoutModelRenameHints` copies a model without collection/entity rename hints, preserving nested schema annotations and declaration order |
 | `@jarenjs/core/cache` | the bounded LRU with key deletion (`createBoundedCache`), the reference-keyed `createWeakCache`, and `createSemanticCache` — keyed by what a value IS; both bounded caches accept an optional capacity-eviction hook |
 | `@jarenjs/core/random` | the suite's one seeded generator (`mulberry32`, pinned sequence, ToUint32 seed) and the draws built on it: `randomInt` over a half-open range, in-place Fisher–Yates `shuffle`, and `drawDistinct` — `k` distinct indices from one stream |

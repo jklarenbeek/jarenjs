@@ -239,12 +239,23 @@ export function countCharCode(str, code, start = 0, end = str.length) {
  * a copy: one byte below U+0080, two below U+0800, four for a surrogate
  * pair (one code point), three otherwise; a lone surrogate counts three,
  * as its replacement would.
+ *
+ * Anything but a string is refused with a `TypeError` naming what was
+ * given, never measured: a number, a boolean or an object would
+ * otherwise count as 0 bytes, so a non-string reaching a byte bound
+ * would pass it as empty. A `String` wrapper object is measured as the
+ * string it wraps.
  * @param {string} str
  * @param {number} [start] - Inclusive start offset (defaults to 0)
  * @param {number} [end] - Exclusive end offset (defaults to full length)
  * @returns {number} The UTF-8 bytes of `str[start, end)`
+ * @throws {TypeError} When `str` is not a string
  */
-export function utf8ByteLength(str, start = 0, end = str.length) {
+export function utf8ByteLength(str, start = 0, end = undefined) {
+  if (typeof str !== 'string')
+    str = unwrapString(str, 'utf8ByteLength');
+  if (end === undefined)
+    end = str.length;
   let bytes = 0;
   for (let i = start; i < end; i++) {
     const code = str.charCodeAt(i);
@@ -261,6 +272,38 @@ export function utf8ByteLength(str, start = 0, end = str.length) {
     else bytes += 3;
   }
   return bytes;
+}
+
+/**
+ * What a refusal names a value it was given as: `null`, `undefined`,
+ * `an array`, `an object`, or `a <typeof>`.
+ * @param {unknown} value
+ * @returns {string}
+ */
+function kindOfGiven(value) {
+  if (value === null) return 'null';
+  if (Array.isArray(value)) return 'an array';
+  const type = typeof value;
+  if (type === 'undefined') return 'undefined';
+  return type === 'object' ? 'an object' : `a ${type}`;
+}
+
+/**
+ * The string a `String` wrapper object holds, or a `TypeError` naming
+ * what was given in place of a string. The brand check reads the
+ * wrapper's own slot, so it holds across realms and cannot be spoofed by
+ * a `Symbol.toStringTag`.
+ * @param {unknown} value - Anything that is not a primitive string
+ * @param {string} name - The function refusing, for the message
+ * @returns {string}
+ */
+function unwrapString(value, name) {
+  try {
+    return String.prototype.valueOf.call(value);
+  }
+  catch {
+    throw new TypeError(`${name}: expected a string, got ${kindOfGiven(value)}`);
+  }
 }
 
 /**
@@ -442,12 +485,85 @@ export function fnv1a(str, seed = FNV1A_OFFSET_BASIS) {
  * content-hash primitive: equal content produces the same fingerprint
  * (and therefore the same vnode `key`/memo key) everywhere downstream, so
  * do NOT invent a second hash — {@link fnv1a} is the one mixing step.
+ * An identity that must never collide (a recorded digest, a revision two
+ * processes compare) is {@link sha256Hex}'s, not a fingerprint's.
  *
  * @param {string} str
  * @returns {string}
  */
 export function hashContent(str) {
   return fnv1a(str).toString(36);
+}
+
+const HEX_DIGITS = '0123456789abcdef';
+
+/**
+ * The `byteLength` getter that only a real `ArrayBuffer` answers, read on
+ * first use so a bundle without {@link sha256Hex} carries no read of it.
+ * @type {((this: unknown) => number) | undefined}
+ */
+let arrayBufferByteLength;
+
+/**
+ * True for an `ArrayBuffer` from any realm (a `SharedArrayBuffer` is not
+ * one): the brand check of its own `byteLength` getter.
+ * @param {unknown} value
+ * @returns {value is ArrayBuffer}
+ */
+function isArrayBuffer(value) {
+  arrayBufferByteLength ??= /** @type {PropertyDescriptor} */ (
+    Object.getOwnPropertyDescriptor(ArrayBuffer.prototype, 'byteLength')).get;
+  try {
+    /** @type {(this: unknown) => number} */ (arrayBufferByteLength).call(value);
+    return true;
+  }
+  catch {
+    return false;
+  }
+}
+
+/**
+ * The lowercase hex SHA-256 of text or bytes — a content identity that
+ * does not collide, where {@link hashContent} is a fast fingerprint that
+ * can.
+ *
+ * - A **string** is hashed as its UTF-8 bytes, as `TextEncoder` encodes
+ *   them: a lone surrogate encodes as U+FFFD (`EF BF BD`).
+ * - An **`ArrayBufferView`** (a `Uint8Array`, any typed array, a
+ *   `DataView`) is hashed as exactly the bytes it views — from its
+ *   `byteOffset`, `byteLength` long — never its whole buffer.
+ * - An **`ArrayBuffer`** is hashed whole.
+ *
+ * Anything else is refused with a `TypeError` naming what was given;
+ * nothing is coerced, so a number is not hashed as its text. Asynchronous
+ * because it rides the platform's `globalThis.crypto.subtle` (Node ≥ 20,
+ * Bun, browsers, workers), and the refusal surfaces as the rejection.
+ *
+ * @param {string | ArrayBufferView | ArrayBuffer} input - The text or bytes
+ * @returns {Promise<string>} 64 lowercase hex characters
+ * @throws {TypeError} (as the rejection) When `input` is none of the three
+ * @example
+ * await sha256Hex('abc');
+ * // 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad'
+ */
+export async function sha256Hex(input) {
+  /** @type {Uint8Array | ArrayBuffer} */
+  let bytes;
+  if (typeof input === 'string')
+    bytes = new TextEncoder().encode(input);
+  else if (ArrayBuffer.isView(input))
+    bytes = new Uint8Array(input.buffer, input.byteOffset, input.byteLength);
+  else if (isArrayBuffer(input))
+    bytes = input;
+  else
+    throw new TypeError(`sha256Hex: expected a string, an ArrayBuffer or an ArrayBufferView, got ${kindOfGiven(input)}`);
+  const digest = new Uint8Array(await globalThis.crypto.subtle.digest('SHA-256', bytes));
+  let out = '';
+  for (let i = 0; i < digest.length; i++) {
+    const b = digest[i];
+    out += HEX_DIGITS[b >> 4] + HEX_DIGITS[b & 15];
+  }
+  return out;
 }
 
 /**

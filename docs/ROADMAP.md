@@ -1015,6 +1015,21 @@ what each does is its own documentation's job
   engine, so strict execution refuses them (`JD0010`, 'op') while the residual
   answers.
 
+## @jarenjs/core
+
+- [ ] **String helpers that answer for a non-string.** `countCodePoints(5)` and
+  `countCharCode(5, 48)` answer 0, `toCodePoints(5)` answers `[]`, and `fnv1a(5)` equals
+  `fnv1a('')` (so `hashContent({})` is `hashContent('')`), each because a non-string's missing
+  `length` ends the loop at once. `utf8ByteLength` now refuses such input with a named
+  `TypeError`; these siblings should follow once each caller is audited as that one was.
+- [ ] **One SHA-256 in the lexical db source.** `packages/db/src/search.js` hashes its canonical
+  source with its own `crypto.subtle.digest` and hex loop; `sha256Hex` answers the same digest.
+- [ ] **A frozen subtree inside a fresh tuple still walks.** `semanticKey` remembers the key of a
+  wholly frozen root, but a key built per call over it (`[document, dialect, strict]`) is a new
+  root and walks the whole document. Joining a remembered subtree's key inside a walk would make
+  that case cheap too; it needs the depth bound to count the joined subtree's height, as the
+  shared-subtree form does.
+
 ## Lexical search (cross-package)
 
 The [resident lexical contract](../packages/core/docs/SEARCH.md), explicit JSON/LINQ

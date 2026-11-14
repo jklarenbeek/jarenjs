@@ -25,6 +25,7 @@
 import { encodeJSONPointerSegment } from './pointer.js';
 import { DATA_DEPTH_CEILING } from './errors.js';
 import { isPastLongestString } from '@jarenjs/core/object';
+import { sha256Hex } from '@jarenjs/core/string';
 
 const hasOwn = Object.hasOwn;
 
@@ -234,8 +235,6 @@ export function cloneJson(value) {
   return JSON.parse(canonicalizeJson(value));
 }
 
-const HEX = '0123456789abcdef';
-
 /**
  * The lowercase hex SHA-256 over the RFC 8785 canonical UTF-8 bytes of a
  * JSON value — the content identity two independent processes agree on
@@ -245,7 +244,8 @@ const HEX = '0123456789abcdef';
  * `globalThis.crypto.subtle` (Node ≥ 20, Bun, browsers, workers); the
  * canonicalization itself is synchronous and its refusals
  * (`JsonCanonicalizeError`, the nesting bound included) surface as the
- * rejection.
+ * rejection. It is `sha256Hex` (`@jarenjs/core/string`) of the canonical
+ * text; hash bytes or text as they stand with that function directly.
  *
  * @param {any} value - The JSON value to identify
  * @returns {Promise<string>} 64 lowercase hex characters
@@ -253,15 +253,7 @@ const HEX = '0123456789abcdef';
  * await canonicalSha256({ b: 1, a: 2 }) === await canonicalSha256({ a: 2, b: 1 }); // true
  */
 export async function canonicalSha256(value) {
-  const text = canonicalizeJson(value);
-  const digest = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
-  const bytes = new Uint8Array(digest);
-  let out = '';
-  for (let i = 0; i < bytes.length; i++) {
-    const b = bytes[i];
-    out += HEX[b >> 4] + HEX[b & 15];
-  }
-  return out;
+  return sha256Hex(canonicalizeJson(value));
 }
 
 //#endregion
