@@ -12,7 +12,7 @@ import { toMarkdown } from '@jarenjs/md';
 import { createMdx } from '@jarenjs/md/mdx';
 import { compileJsonQuery } from '@jarenjs/json';
 import { operatorRegistry } from './engines.js';
-import { md, mdArticle, UNTRUSTED } from './markdown.js';
+import { md, mdArticle, mdLabels, UNTRUSTED } from './markdown.js';
 import { mermaidFor } from './mermaid.js';
 import { mermaidErrorText } from '@jarenjs/mermaid';
 import { chartRenderer } from './charts.js';
@@ -47,10 +47,10 @@ const mdx = createMdx({ compileQuery: compileJsonQuery });
  */
 
 const renderers = {
-  markdown: (source) => {
+  markdown: (source, _config, ctx) => {
     const compiled = timed(() => md.compile(source).doc);
     const doc = compiled.value;
-    const rendered = timed(() => mdArticle(md.view(source, UNTRUSTED)));
+    const rendered = timed(() => mdArticle(md.view(source, { ...UNTRUSTED, ...mdLabels(ctx?.messages) })));
     return {
       compileMs: compiled.ms,
       runMs: rendered.ms,
@@ -67,10 +67,10 @@ const renderers = {
   // mdx receives the PARSED data document as its second argument: the pass
   // resolves the template against it, then renders through the same
   // memoized md pipeline (the doc-keyed memo carries the transformed doc)
-  mdx: (source, dataValue) => {
+  mdx: (source, dataValue, ctx) => {
     const compiled = timed(() => mdx.transform(md.compile(source).doc, dataValue));
     const doc = compiled.value;
-    const rendered = timed(() => mdArticle(md.view(doc, UNTRUSTED)));
+    const rendered = timed(() => mdArticle(md.view(doc, { ...UNTRUSTED, ...mdLabels(ctx?.messages) })));
     return {
       compileMs: compiled.ms,
       runMs: rendered.ms,

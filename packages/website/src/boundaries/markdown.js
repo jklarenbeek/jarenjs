@@ -24,6 +24,7 @@
 
 import { mermaidPieRenderer } from '@jarenjs/charts/transforms/mermaid-adapter';
 import { createMdComponent } from '@jarenjs/md/component';
+import { labelsFromCatalog } from '@jarenjs/md';
 import { highlightPlugin } from '@jarenjs/md/plugins';
 import { mermaidPlugin } from '@jarenjs/mermaid/plugin';
 
@@ -95,6 +96,29 @@ export const TRUSTED = { slugPrefix: '' };
  * same problem and keeps every id out of the site's namespace; the
  * headings still get ids, so the document's internal links work. */
 export const UNTRUSTED = { slugPrefix: 'user-content-' };
+
+/** The English names md writes itself (no options: its built-in English). */
+const ENGLISH_LABELS = Object.freeze({});
+/** The per-language names, once per catalog. @type {WeakMap<object, any>} */
+const LABELS_BY_CATALOG = new WeakMap();
+
+/**
+ * The accessible names md writes (the footnotes heading, a heading's
+ * permalink, a page break, a back-reference) in the reader's language, as
+ * per-call `md.view` options: spread them beside the provenance. A
+ * compiled `@jarenjs/locales` pack, or undefined for English.
+ * @param {Readonly<Record<string, unknown>> | undefined} catalog
+ * @returns {{ footnotesLabel?: string, labels?: Record<string, any> }}
+ */
+export function mdLabels(catalog) {
+  if (catalog == null) return ENGLISH_LABELS;
+  let labels = LABELS_BY_CATALOG.get(catalog);
+  if (labels === undefined) {
+    labels = labelsFromCatalog(/** @type {any} */ (catalog));
+    LABELS_BY_CATALOG.set(catalog, labels);
+  }
+  return labels;
+}
 //#endregion
 
 //#region README-relative links

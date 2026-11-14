@@ -2,7 +2,8 @@
 /**
  * Docs — a sectioned reference rendered from the DOCS_SECTIONS content
  * document (one section at a time, deep-linkable via ?s=). The example
- * gallery is the #/play playground.
+ * gallery is the #/play playground. The page's own words (`$.w`) follow
+ * the reader's language; the documentation it shows is English.
  */
 
 export const STATIC_RULES = [
@@ -17,14 +18,14 @@ export const STATIC_RULES = [
       // scrolling past the package list.
       ['div', { class: 'docs-side' },
         ['nav', { class: 'docs-nav' },
-          ['h1', {}, 'Docs'],
+          ['h1', {}, '$.w.title'],
           // the wrapper is layout-inert on desktop (display: contents) and
           // becomes the horizontally scrollable section strip on mobile
           ['div', { class: 'docs-sections' }, [{ $apply: '$.sections[*]' }]],
         ],
         ['section', { class: 'docs-packages' },
-          ['h2', { class: 'docs-nav-heading' }, 'Package READMEs'],
-          ['p', { class: 'docs-nav-note' }, 'Read any package’s README, rendered live by @jarenjs/md.'],
+          ['h2', { class: 'docs-nav-heading' }, '$.w.readmes'],
+          ['p', { class: 'docs-nav-note' }, '$.w.readmesNote'],
           // the list is the build's package census: `note` exists only
           // while it is missing, `packages` only once it is here
           ['div', { class: 'docs-readmes' },
@@ -33,7 +34,8 @@ export const STATIC_RULES = [
           ],
         ],
       ],
-      ['article', { class: 'docs-article' },
+      // the article is the package's or the site's English documentation
+      ['article', { class: 'docs-article', lang: 'en', dir: 'ltr' },
         ['h2', {}, '$.section.title'],
         [{ $apply: ['$.section.blocks[*]', 'ui'] }],
       ],
@@ -41,9 +43,11 @@ export const STATIC_RULES = [
   },
   {
     match: '$.ui.docs.sections[*]', mode: 'docs',
+    // a section is named in the English its article is written in
     body: ['a', {
       href: '$.href',
       class: { $if: ['$.active', 'docs-link active', 'docs-link'] },
+      lang: 'en', dir: 'ltr',
     }, '$.title'],
   },
   {
@@ -51,6 +55,8 @@ export const STATIC_RULES = [
     body: ['button', {
       type: 'button',
       class: 'readme-btn',
+      // a package's name and its own English blurb
+      lang: 'en', dir: 'ltr',
       title: '$.blurb',
       on: { click: { action: 'readme/open', with: { title: '$.name', url: '$.url' } } },
     }, '$.name'],

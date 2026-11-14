@@ -69,10 +69,48 @@ describe('website — LTR islands inside a right-to-left page', () => {
     assert.ok(english > 50 && code > 20, `checked ${english} English blocks and ${code} code surfaces`);
   });
 
+  it("the IDE's running app takes its own text's direction under a right-to-left page", async () => {
+    const { document, container } = createStubHost();
+    /** @type {any} */
+    let routeCb = null;
+    const app = createSiteApp({
+      node: container, document, schedule: (f) => f(), debounceMs: 0,
+      fetchJson: () => Promise.reject(new Error('404')),
+      listenHash: (cb) => { routeCb = cb; cb(parseHash('#/project')); },
+      navigate: (h) => routeCb(parseHash(h)),
+      storage: { read: () => null, write: () => {} },
+      onError: () => {},
+    });
+    app.dispatch('site/lang', 'ar');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const stage = findAll(container, (n) => (n.getAttribute?.('class') ?? '').split(' ').includes('js-stage-mount'));
+    assert.strictEqual(stage.length, 1);
+    assert.strictEqual(stage[0].getAttribute('dir'), 'auto');
+  });
+
+  it("a page's paragraphs (callouts, notes) take their own text's direction", async () => {
+    const { document, container } = createStubHost();
+    /** @type {any} */
+    let routeCb = null;
+    createSiteApp({
+      node: container, document, schedule: (f) => f(), debounceMs: 0,
+      fetchJson: () => Promise.reject(new Error('404')),
+      listenHash: (cb) => { routeCb = cb; cb(parseHash('#/benchmarks')); },
+      navigate: (h) => routeCb(parseHash(h)),
+      storage: { read: () => null, write: () => {} },
+      onError: () => {},
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const paragraphs = findAll(container, (n) => n.tagName === 'p' && n.parentNode?.getAttribute?.('class') === 'callout');
+    assert.ok(paragraphs.length > 0, 'a callout is on screen');
+    assert.ok(paragraphs.every((n) => n.getAttribute('dir') === 'auto'));
+  });
+
   it('the stylesheets compute direction ltr for code and English blocks, whatever the page', () => {
     const site = readFileSync(new URL('../../packages/website/src/styles.css', import.meta.url), 'utf8');
     assert.match(site, /code, pre, kbd, samp, textarea, input\.editor, \[dir="ltr"\] \{ direction: ltr; unicode-bidi: isolate; \}/);
     assert.match(site, /\[lang="en"\] \{ direction: ltr; unicode-bidi: isolate; \}/);
+    assert.match(site, /^svg \{ direction: ltr; \}/m, 'a chart or a diagram does not mirror');
     const play = readFileSync(new URL('../../components/play/styles/play.css', import.meta.url), 'utf8');
     assert.match(play, /\.jplay textarea\.editor, \.jplay input\.editor, \.jplay pre, \.jplay code, \.jplay \[lang="en"\] \{ direction: ltr; unicode-bidi: isolate; \}/);
   });

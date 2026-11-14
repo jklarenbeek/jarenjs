@@ -10,6 +10,11 @@
 import { createChartComponent } from '@jarenjs/charts/component';
 import { bboxPolygon, geohashBounds, geometryArea } from '@jarenjs/core/geo';
 import { chart, code, details, callout } from '../lib/nodes.js';
+import { memo1 } from '../lib/format.js';
+import { siteText } from '../messages.js';
+
+/** The site's words in English: what a caller that passes none reads. */
+const ENGLISH = siteText();
 
 /**
  * The 32 first-level geohash cells as GeoJSON, each carrying its true
@@ -292,24 +297,22 @@ function eventSeries() {
   }));
 }
 
-/** @type {any[]|null} built once — configs are constants */
-let demoNodes = null;
-/** @type {any[]|null} */
-let samplingNodes = null;
+/**
+ * The static demo nodes (chart + its definition source, per type), built
+ * once per language: a definition is example content and draws as the
+ * source beside it reads, so only the page's own words move.
+ * @type {(say?: (id: any, params?: Record<string, unknown>) => string) => any[]}
+ */
+export const chartsPageDemos = memo1((say = ENGLISH) => DEMOS.flatMap((demo) => [
+  { kind: 'p', text: demo.blurb },
+  chart(null, charts.view(demo.config)),
+  details(say('site/charts/definition', { type: demo.key }), [
+    code(null, JSON.stringify(demo.config, null, 2)),
+  ]),
+]));
 
-/** The static demo nodes (chart + its definition source, per type). */
-export function chartsPageDemos() {
-  if (demoNodes === null) {
-    demoNodes = DEMOS.flatMap((demo) => [
-      { kind: 'p', text: demo.blurb },
-      chart(null, charts.view(demo.config)),
-      details(`The ${demo.key} definition (JSON — paste it into the playground)`, [
-        code(null, JSON.stringify(demo.config, null, 2)),
-      ]),
-    ]);
-  }
-  return demoNodes;
-}
+/** The event series, built once: twenty thousand points. @type {() => any[]} */
+const eventPoints = memo1(() => eventSeries());
 
 /**
  * The sampling demo: one large event series drawn three ways, with what
@@ -318,50 +321,51 @@ export function chartsPageDemos() {
  * — a page that typed the numbers would be able to disagree with the
  * chart above them.
  */
-export function chartsPageSampling() {
-  if (samplingNodes === null) {
-    const points = eventSeries();
-    const base = {
-      type: 'line', x: 'time', markers: false,
-      xLabel: 'event time', yLabel: 'reading',
-    };
-    const data = { series: [{ name: 'sensor', points }] };
-    const cases = [
-      ['Default — LTTB above 2 000 points', {}],
-      ['`sampling: \'minmax\'` — the envelope, exactly', { sampling: 'minmax' }],
-      ['`sampling: false` — every reading drawn', { sampling: false }],
-    ];
-    samplingNodes = [
-      { kind: 'p', text: 'Twenty thousand readings a second apart, with a five-minute outage '
-        + 'in the middle. The definition says nothing about sampling — a time line above two '
-        + 'thousand points is reduced through the same @jarenjs/core/series kernel a query and '
-        + 'a database call, and the AST says so.' },
-      ...cases.flatMap(([label, extra]) => {
-        const config = { ...base, ...extra, title: 'Sensor readings' };
-        const compiled = charts.compile(config, data);
-        const s = compiled.ast.sampling;
-        return [
-          { kind: 'p', text: label },
-          chart(null, compiled.toVnode()),
-          { kind: 'p', text: s === null
-            ? `ast.sampling: null — all ${points.length.toLocaleString('en-US')} readings drawn.`
-            : `ast.sampling: { method: '${s.method}', target: ${s.target}, sourceCount: `
-              + `${s.sourceCount.toLocaleString('en-US')}, renderedCount: ${s.renderedCount} } — `
-              + 'the outage is still a gap and the line still ends where the data does.' },
-        ];
-      }),
-      callout('Sampling is not retention',
-        'A stream adapter\'s maxPoints decides what EXISTS; sampling decides what is DRAWN, '
-        + 'over whatever exists. Changing one leaves the other alone — the three lines above '
-        + 'are one array of readings, rendered three ways.'),
-    ];
-  }
-  return samplingNodes;
-}
+export const chartsPageSampling = memo1((say = ENGLISH) => {
+  const points = eventPoints();
+  const base = {
+    type: 'line', x: 'time', markers: false,
+    xLabel: say('site/charts/sampling/x'), yLabel: say('site/charts/sampling/y'),
+  };
+  const data = { series: [{ name: 'sensor', points }] };
+  const cases = [
+    [say('site/charts/sampling/default'), {}],
+    [say('site/charts/sampling/minmax'), { sampling: 'minmax' }],
+    [say('site/charts/sampling/false'), { sampling: false }],
+  ];
+  return [
+    { kind: 'p', text: 'Twenty thousand readings a second apart, with a five-minute outage '
+      + 'in the middle. The definition says nothing about sampling — a time line above two '
+      + 'thousand points is reduced through the same @jarenjs/core/series kernel a query and '
+      + 'a database call, and the AST says so.' },
+    ...cases.flatMap(([label, extra]) => {
+      const config = { ...base, ...extra, title: say('site/charts/sampling/title') };
+      const compiled = charts.compile(config, data);
+      const s = compiled.ast.sampling;
+      return [
+        { kind: 'p', text: label },
+        chart(null, compiled.toVnode()),
+        { kind: 'p', text: s === null
+          ? `ast.sampling: null — all ${points.length.toLocaleString('en-US')} readings drawn.`
+          : `ast.sampling: { method: '${s.method}', target: ${s.target}, sourceCount: `
+            + `${s.sourceCount.toLocaleString('en-US')}, renderedCount: ${s.renderedCount} } — `
+            + 'the outage is still a gap and the line still ends where the data does.' },
+      ];
+    }),
+    callout(say('site/charts/sampling/retention'),
+      'A stream adapter\'s maxPoints decides what EXISTS; sampling decides what is DRAWN, '
+      + 'over whatever exists. Changing one leaves the other alone — the three lines above '
+      + 'are one array of readings, rendered three ways.'),
+  ];
+});
 
-/** The streaming pointer under the demos. */
-export function chartsPageStreamingCallout() {
-  return callout('Streaming is the point',
+/**
+ * The streaming pointer under the demos.
+ * @param {(id: any, params?: Record<string, unknown>) => string} [say] - the
+ *   site's words (English by default)
+ */
+export function chartsPageStreamingCallout(say = ENGLISH) {
+  return callout(say('site/charts/streaming'),
     'Every chart re-renders from a stream adapter fed by the incremental JOSL/JSONX readers — records join a chart the moment their fields complete. The live feed below streams real market data through the same path.',
-    '#/play', 'Try the Charts engine in Play');
+    '#/play', say('site/charts/try-play'));
 }

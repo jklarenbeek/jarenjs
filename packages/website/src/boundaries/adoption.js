@@ -11,29 +11,42 @@ import { adoptionModel } from '../examples/adoption-model.js';
 import { adoptionRows } from '../../../../scripts/lib/adoption.js';
 import manifest from '../../../../test/adoption/manifest.json' with { type: 'json' };
 import formulas from '../../../../test/adoption/fixtures/formulas.json' with { type: 'json' };
+import { siteText } from '../messages.js';
 
-/** Persist session-local SQLite pages; a reload reopens the same data and queue. */
+/** The site's words in English: what a caller that passes none reads. */
+const ENGLISH = siteText();
+
+/**
+ * Persist session-local SQLite pages; a reload reopens the same data and queue.
+ * `options.messages` (the reader's compiled catalog) is the language of the
+ * collection's and the rule editor's chrome; `options.say` the site's words
+ * in the reader's language (English by default).
+ * @param {any} host - the element the demo renders into
+ * @param {any} [options] - drivers and hooks for tests, and `say`
+ */
 export function mountAdoptionDemo(host, options = {}) {
   const document = host.ownerDocument, render = createDomRenderer(host, { document });
+  /** @type {(id: any, params?: Record<string, unknown>) => string} */
+  const say = options.say ?? ENGLISH;
   const definition = { ...manifest.consumers[0], rows: 256 };
   const rows = adoptionRows(definition);
   let app, editor, collection, disposed = false, teardown, now = Date.now();
-  render(['section', {}, ['h2', {}, 'Catalog replacement journey'],
-    ['p', {}, 'Search, edit a saved formula, review selected changes and ingest an offline provider snapshot. This synthetic catalog keeps its database in this tab’s session storage.'],
-    ['p', { 'data-journey-qualification': '' }, 'Library and synthetic consumer checks pass. Real providers, downstream cutover, assistive technology and native OS input methods remain pending. ',
+  render(['section', {}, ['h2', {}, say('site/adoption/title')],
+    ['p', { lang: 'en', dir: 'ltr' }, 'Search, edit a saved formula, review selected changes and ingest an offline provider snapshot. This synthetic catalog keeps its database in this tab’s session storage.'],
+    ['p', { 'data-journey-qualification': '', lang: 'en', dir: 'ltr' }, 'Library and synthetic consumer checks pass. Real providers, downstream cutover, assistive technology and native OS input methods remain pending. ',
       ['a', { href: 'https://github.com/jklarenbeek/jarenjs/blob/main/docs/ADOPTION-EVIDENCE.md' }, 'Read the capability and retirement evidence.']],
-    ['label', {}, 'Search catalog ', ['input', { type: 'search', value: 'gren tea', 'aria-label': 'Journey search', 'data-journey-search': '' }]],
-    ['button', { class: 'btn', 'data-journey-action': 'search' }, 'Search'],
+    ['label', {}, `${say('site/adoption/search-label')} `, ['input', { type: 'search', value: 'gren tea', 'aria-label': say('site/adoption/search-aria'), 'data-journey-search': '' }]],
+    ['button', { class: 'btn', 'data-journey-action': 'search' }, say('site/adoption/search')],
     ['div', { 'data-journey-collection': '' }],
     ['div', { 'data-journey-editor': '' }],
     ['div', { class: 'btn-row' },
-      ['button', { class: 'btn', 'data-journey-action': 'save' }, 'Save formula'],
-      ['button', { class: 'btn', 'data-journey-action': 'ingest' }, 'Ingest snapshot'],
-      ['button', { class: 'btn', 'data-journey-action': 'send' }, 'Send and simulate interruption'],
-      ['button', { class: 'btn', 'data-journey-action': 'recover' }, 'Reconcile and recover'],
-      ['button', { class: 'btn', 'data-journey-action': 'restart' }, 'Reopen database']],
-    ['p', { role: 'status', 'data-journey-status': '' }, 'Opening catalog…'],
-    ['p', {}, 'Live trigger capture and native full-text search are unavailable for this adopted file. Search uses an explicit current snapshot. Original formulas that need manual review remain preserved.'],
+      ['button', { class: 'btn', 'data-journey-action': 'save' }, say('site/adoption/save')],
+      ['button', { class: 'btn', 'data-journey-action': 'ingest' }, say('site/adoption/ingest')],
+      ['button', { class: 'btn', 'data-journey-action': 'send' }, say('site/adoption/send')],
+      ['button', { class: 'btn', 'data-journey-action': 'recover' }, say('site/adoption/recover')],
+      ['button', { class: 'btn', 'data-journey-action': 'restart' }, say('site/adoption/restart')]],
+    ['p', { role: 'status', 'data-journey-status': '' }, say('site/adoption/opening')],
+    ['p', { lang: 'en', dir: 'ltr' }, 'Live trigger capture and native full-text search are unavailable for this adopted file. Search uses an explicit current snapshot. Original formulas that need manual review remain preserved.'],
   ]);
   const status = host.querySelector('[data-journey-status]');
   const report = (text) => { if (!disposed) status.textContent = text; };
@@ -42,10 +55,10 @@ export function mountAdoptionDemo(host, options = {}) {
     const found = await app.query(host.querySelector('[data-journey-search]').value);
     if (disposed) { await found.provider.dispose(); return; }
     collection = mountProviderCollection(host.querySelector('[data-journey-collection]'), createCollectionCoordinator(found.provider, { pageRows: 16, maxRows: 64 }), {
-      height: 264, rowSize: 44, columnCount: 4, columnSize: 180, label: 'Journey catalog',
-      renderCell: (row, column) => [row.id, row.title, `Amount: ${row.amount.toFixed(2)}`, `Revision: ${row.revision}`][column],
+      height: 264, rowSize: 44, columnCount: 4, columnSize: 180, label: say('site/adoption/catalog'), messages: options.messages,
+      renderCell: (row, column) => [row.id, row.title, say('site/adoption/amount', { amount: row.amount.toFixed(2) }), say('site/adoption/revision', { revision: row.revision })][column],
     });
-    if (announce) report(`${found.result.total} matches. Original data preserved.`);
+    if (announce) report(say('site/adoption/matches', { count: found.result.total }));
     return found.result.total;
   };
   const ready = (async () => {
@@ -77,7 +90,7 @@ export function mountAdoptionDemo(host, options = {}) {
     app = await open();
     if (disposed) { await app.close(); return; }
     const saved = (await app.client.collections.settings.get('rule')).definition;
-    editor = mountRuleEditor(host.querySelector('[data-journey-editor]'), { text: JSON.stringify(saved, null, 2), pageSize: 10,
+    editor = mountRuleEditor(host.querySelector('[data-journey-editor]'), { text: JSON.stringify(saved, null, 2), pageSize: 10, messages: options.messages,
       schema: adoptionModel(definition).entities.Item.schema, writableFields: ['/amount'],
       preview: (text) => app.preview(text), command: async (request) => {
         const result = await app.command.execute(request); await search(); return result;
@@ -91,22 +104,22 @@ export function mountAdoptionDemo(host, options = {}) {
         if (name === 'search') await search();
         if (name === 'save') {
           const rule = JSON.parse(host.querySelector('[data-rule-draft]').value);
-          const result = await app.saveRule(rule); report(`Saved formula: ${result.writes} writes.`);
+          const result = await app.saveRule(rule); report(say('site/adoption/saved', { writes: result.writes }));
         }
-        if (name === 'ingest') { const result = await app.ingest(); report(`Snapshot ${result.state}: ${result.changes} changes.`); }
+        if (name === 'ingest') { const result = await app.ingest(); report(say('site/adoption/snapshot', { state: result.state, changes: result.changes })); }
         if (name === 'send') {
-          report('Preparing reviewed operation…');
+          report(say('site/adoption/preparing'));
           const changed = (await app.rows()).filter((row) => row.revision > 1);
-          if (changed.length < 2) { report('Commit two reviewed rows before sending.'); return; }
+          if (changed.length < 2) { report(say('site/adoption/commit-two')); return; }
           await app.prepare(changed.slice(0, 2).map((row) => row.id));
           const job = await app.client.store.jobs.claim({ kinds: ['external'], owner: 'browser', leaseMs: 1000 });
-          report('Sending reviewed operation…');
+          report(say('site/adoption/sending'));
           await app.runner.run('original-run', { operationId: 'reviewed-operation' }, { lease: job.lease });
         }
         if (name === 'recover') {
           now += 100000;
           const job = await app.client.store.jobs.claim({ kinds: ['external'], owner: 'recovery', leaseMs: 1000 });
-          if (!job) { report('No interrupted run to recover.'); return; }
+          if (!job) { report(say('site/adoption/nothing-to-recover')); return; }
           let record = await app.effects.get('reviewed-operation');
           record = (await app.effects.recover(record.id, record.revision, job.lease)).record;
           const log = JSON.parse((options.storage ?? sessionStorage).getItem('adoption-remote') ?? '[]');
@@ -116,17 +129,17 @@ export function mountAdoptionDemo(host, options = {}) {
             record = (await app.effects.reconcile(record.id, leg.id, record.revision, job.lease, { id: `readback-${leg.id}`, action: 'confirm', actor: 'reviewer', reason: 'synthetic provider read-back', evidence: { correlation: request.url } })).record;
           }
           const result = await app.runner.run('original-run', { operationId: record.id }, { lease: job.lease });
-          await app.client.store.jobs.complete(job.lease, result.result); report('Recovered run complete. No remote resend.');
+          await app.client.store.jobs.complete(job.lease, result.result); report(say('site/adoption/recovered-no-resend'));
         }
-        if (name === 'restart') { await app.close(); app = await open(); await search(); report('Database reopened. Original data and later writes preserved.'); }
+        if (name === 'restart') { await app.close(); app = await open(); await search(); report(say('site/adoption/reopened')); }
       }
-      catch (error) { report(`Journey refused: ${error.message}`); }
+      catch (error) { report(say('site/adoption/refused', { reason: error.message })); }
     };
     host.addEventListener('click', action);
-    report(job ? job.state === 'done' ? 'Recovered run complete. Original data preserved.' : 'Interrupted send retained. Reconcile before sending again.'
-      : `${total} matches. Original data preserved.`);
+    report(job ? job.state === 'done' ? say('site/adoption/recovered') : say('site/adoption/interrupted')
+      : say('site/adoption/matches', { count: total }));
     return () => host.removeEventListener('click', action);
-  })().catch((error) => { report(`Journey unavailable: ${error.message}`); });
+  })().catch((error) => { report(say('site/adoption/unavailable', { reason: error.message })); });
   return { ready, dispose() {
     if (teardown) return teardown;
     disposed = true; editor?.dispose(); render.destroy();

@@ -71,7 +71,7 @@
 }
 .calc-entry { color: var(--calc-muted); font-size: 15px; word-break: break-all; }
 .calc-result { font-size: 28px; font-weight: 700; }
-.calc-err { color: #dc2626; font-size: 13px; text-align: left; }
+.calc-err { color: #dc2626; font-size: 13px; text-align: start; }
 
 .calc-keypad { display: grid; gap: 6px; }
 .calc-row { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 6px; }
@@ -90,7 +90,7 @@
 
 .calc-mem { display: flex; align-items: center; gap: 8px; }
 /* the readout keeps a breath of air off the host's right edge */
-.calc-memval { color: var(--calc-muted); font-size: 13px; margin-left: auto; padding-right: 4px; }
+.calc-memval { color: var(--calc-muted); font-size: 13px; margin-inline-start: auto; padding-inline-end: 4px; }
 
 .calc-bases { display: grid; gap: 4px; background: var(--calc-panel); border: 1px solid var(--calc-border); border-radius: 10px; padding: 10px; font-family: ui-monospace, monospace; }
 .calc-baserow { display: flex; justify-content: space-between; gap: 12px; }

@@ -5,9 +5,20 @@ import { createLexicalProvider } from '@jarenjs/json/query';
 import { createArrayRangeProvider, createCollectionCoordinator } from '@jarenjs/app';
 import { createDomRenderer } from '@jarenjs/view';
 import { mountProviderCollection } from '@jarenjs/collection/component';
+import { siteText } from '../messages.js';
 
-/** Searchable bounded collection; indexes, source rows and DOM handles remain private. */
-export function mountLexicalDemo(host) {
+/** The site's words in English: what a caller that passes none reads. */
+const ENGLISH = siteText();
+
+/**
+ * Searchable bounded collection; indexes, source rows and DOM handles remain private.
+ * @param {any} host - the element the demo renders into
+ * @param {{ messages?: any, say?: (id: any, params?: Record<string, unknown>) => string }} [options] -
+ *   `messages`: the reader's compiled catalog (the collection's chrome);
+ *   `say`: the site's words in the reader's language (English by default)
+ */
+export function mountLexicalDemo(host, options = {}) {
+  const say = options.say ?? ENGLISH;
   const document = host.ownerDocument, render = createDomRenderer(host, { document });
   const rows = Array.from({ length: 1000 }, (_, i) => ({ id: `item-${String(i).padStart(4, '0')}`,
     title: ['Green tea', 'Café crème', '抹茶 緑茶', 'Grüner Tee'][i % 4], sku: String(i).padStart(8, '0'),
@@ -19,14 +30,14 @@ export function mountLexicalDemo(host) {
   const lexical = createLexicalProvider(index, { row: (id) => byId.get(id) });
   let disposed = false, version = 1, collection = null;
   render(['section', {},
-    ['nav', { class: 'btn-row', 'aria-label': 'Collection examples' }, ['a', { class: 'btn', href: '#/collection' }, 'Array catalog']],
-    ['p', {}, 'Search by name, identifier or tag. Prefixes and small typos are included; every word must match.'],
-    ['label', {}, 'Search catalog ', ['input', { type: 'search', value: 'gren tea', 'aria-label': 'Search catalog', 'data-search-input': 'true' }]],
-    ['label', {}, ' Sort ', ['select', { 'aria-label': 'Search sort', 'data-search-sort': 'true' }, ['option', { value: 'relevance' }, 'Relevance'], ['option', { value: 'sku' }, 'SKU']]],
-    ['label', {}, ['input', { type: 'checkbox', 'aria-label': 'Organic only', 'data-search-organic': 'true' }], ' Organic only'],
-    ['p', { role: 'status', 'data-search-status': 'true' }, 'Loading search…'],
+    ['nav', { class: 'btn-row', 'aria-label': say('site/collection/examples') }, ['a', { class: 'btn', href: '#/collection' }, say('site/collection/array')]],
+    ['p', { lang: 'en', dir: 'ltr' }, 'Search by name, identifier or tag. Prefixes and small typos are included; every word must match.'],
+    ['label', {}, `${say('site/lexical/search')} `, ['input', { type: 'search', value: 'gren tea', 'aria-label': say('site/lexical/search'), 'data-search-input': 'true' }]],
+    ['label', {}, ` ${say('site/lexical/sort')} `, ['select', { 'aria-label': say('site/lexical/sort-label'), 'data-search-sort': 'true' }, ['option', { value: 'relevance' }, say('site/lexical/relevance')], ['option', { value: 'sku' }, say('site/lexical/sku')]]],
+    ['label', {}, ['input', { type: 'checkbox', 'aria-label': say('site/lexical/organic'), 'data-search-organic': 'true' }], ` ${say('site/lexical/organic')}`],
+    ['p', { role: 'status', 'data-search-status': 'true' }, say('site/lexical/loading')],
     ['div', { 'data-search-host': 'true' }],
-    ['p', {}, ['a', { href: '#/docs' }, 'Search contracts and measured compatibility are available in the package documentation.']],
+    ['p', { lang: 'en', dir: 'ltr' }, ['a', { href: '#/docs' }, 'Search contracts and measured compatibility are available in the package documentation.']],
   ]);
   const input = host.querySelector('[data-search-input]'), sort = host.querySelector('[data-search-sort]');
   const organic = host.querySelector('[data-search-organic]'), status = host.querySelector('[data-search-status]');
@@ -37,10 +48,10 @@ export function mountLexicalDemo(host) {
   const provider = createArrayRangeProvider(initial.hits.map((hit) => byId.get(hit.id)), { query: 'catalog-search', snapshot: 'search-1' });
   const coordinator = createCollectionCoordinator(provider, { work: 256 });
   const report = (result) => { status.textContent = result.state === 'complete'
-    ? `${result.total} matches · ${result.facets.category.map((facet) => `${facet.value}: ${facet.count}`).join(' · ')}`
-    : `Search unavailable: ${result.reason}`; };
+    ? say('site/lexical/matches', { count: result.total, facets: result.facets.category.map((facet) => `${facet.value}: ${facet.count}`).join(' · ') })
+    : say('site/lexical/unavailable', { reason: result.reason }); };
   collection = mountProviderCollection(host.querySelector('[data-search-host]'), coordinator,
-    { height: 440, rowSize: 44, columnCount: 3, columnSize: 200, label: 'Search results',
+    { height: 440, rowSize: 44, columnCount: 3, columnSize: 200, label: say('site/lexical/results'), messages: options.messages,
       renderCell: (row, column) => [row.title, row.sku, row.tags][column] });
   report(initial);
   const change = () => {

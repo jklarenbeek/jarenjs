@@ -4,19 +4,28 @@ import { mountRuleEditor } from '@jarenjs/rules/component';
 import { mountCollection } from '@jarenjs/collection/component';
 import { createDomRenderer } from '@jarenjs/view';
 import { openRuleExample, savedRule, ruleRowSchema } from '../examples/reviewed-rules.js';
+import { siteText } from '../messages.js';
+
+/** The site's words in English: what a caller that passes none reads. */
+const ENGLISH = siteText();
 
 /**
  * Driver injection lets the same example run in browser and portable lifecycle tests.
  * `options.messages` (the reader's compiled catalog) is the language of the
- * editor's and the collection's chrome.
+ * editor's and the collection's chrome; `options.say` (the site's words in
+ * the reader's language, English by default) the demo's own headings and
+ * status lines.
+ * @param {any} host - the element the demo renders into
+ * @param {{ driver?: any, messages?: any, say?: (id: any, params?: Record<string, unknown>) => string }} [options]
  */
 export function mountRulesDemo(host, options = {}) {
   const document = host.ownerDocument;
+  const say = options.say ?? ENGLISH;
   const render = createDomRenderer(host, { document });
   let disposed = false, example = null, editor = null, collection = null;
-  render(['section', {}, ['h2', {}, 'Saved formulas and reviewed rules'],
-    ['p', {}, 'Preview is read-only. Commit checks the saved rule, current rows and authority in a transaction. Drafts may be edited freely; changing the saved rule requires a separate application command.'],
-    ['div', { 'data-rules-editor': '' }], ['h3', {}, 'Current inventory'], ['div', { 'data-rules-collection': '' }], ['p', { role: 'status', 'data-rules-host-status': '' }, 'Opening local database…']]);
+  render(['section', {}, ['h2', {}, say('site/collection/rules/title')],
+    ['p', { lang: 'en', dir: 'ltr' }, 'Preview is read-only. Commit checks the saved rule, current rows and authority in a transaction. Drafts may be edited freely; changing the saved rule requires a separate application command.'],
+    ['div', { 'data-rules-editor': '' }], ['h3', {}, say('site/collection/rules/inventory')], ['div', { 'data-rules-collection': '' }], ['p', { role: 'status', 'data-rules-host-status': '' }, say('site/collection/rules/opening')]]);
   const status = host.querySelector('[data-rules-host-status]');
   const ready = (async () => {
     let driver = options.driver;
@@ -29,7 +38,7 @@ export function mountRulesDemo(host, options = {}) {
     let rows = await example.rows();
     collection = mountCollection(host.querySelector('[data-rules-collection]'), { count: rows.length, keyAt: (i) => rows[i]?.id,
       indexOf: (id) => rows.findIndex((row) => row.id === id), getItem: (i) => rows[i], height: 264, rowSize: 44, columnCount: 3, columnSize: 150,
-      label: 'Current inventory', messages: options.messages, renderCell: (row, column) => column === 0 ? row.id : column === 1 ? `Amount: ${row.amount}` : `Revision: ${row.revision}` });
+      label: say('site/collection/rules/inventory'), messages: options.messages, renderCell: (row, column) => column === 0 ? row.id : column === 1 ? say('site/collection/rules/amount', { amount: row.amount }) : say('site/collection/rules/revision', { revision: row.revision }) });
     editor = mountRuleEditor(host.querySelector('[data-rules-editor]'), { text: JSON.stringify(savedRule, null, 2), schema: ruleRowSchema, messages: options.messages,
       pageSize: 10, writableFields: ['/amount'], preview: (text) => example.preview(text), command: async (request) => {
         const result = await example.command.execute(request);
@@ -37,8 +46,8 @@ export function mountRulesDemo(host, options = {}) {
         if (!disposed) collection.update({ count: rows.length });
         return result;
       } });
-    status.textContent = 'Local database ready. Preview writes zero inventory rows.';
-  })().catch((error) => { if (!disposed) status.textContent = `Example unavailable: ${error.message}`; });
+    status.textContent = say('site/collection/rules/ready');
+  })().catch((error) => { if (!disposed) status.textContent = say('site/collection/rules/unavailable', { reason: error.message }); });
   let teardown;
   return { ready,
     dispose() {

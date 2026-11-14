@@ -317,7 +317,7 @@ export function createSiteApp(env) {
     // nothing to scroll and omits the capability
     'scroll-to-anchor': (props) => env.scrollToAnchor?.(String(props.id ?? '')),
     'binance-toggle': (props, dispatch) =>
-      binanceToggle((action, payload) => dispatch(action, payload)),
+      binanceToggle((action, payload) => dispatch(action, payload), siteWords),
     // the IDE store (the Project IDE's Save/Load/Share bar). Two legacy
     // kinds may still be in a user's storage: an engine experiment from the
     // retired playground translates into a play session, and a Studio
@@ -560,7 +560,7 @@ export function createSiteApp(env) {
     onError: report,
     effects,
     widgets: {
-      'collection-demo': createCollectionDemoWidget({ messages: messagesNow }),
+      'collection-demo': createCollectionDemoWidget({ messages: messagesNow, siteWords }),
       // chart / mermaid / markdown / form — usable from any site-level view
       ...DOCUMENT_WIDGETS,
       'flow-doc': flowRuntime.widget,

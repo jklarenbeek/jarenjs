@@ -38,7 +38,7 @@
    the DOM either way — hiding it with `display: none` would take it off
    the keyboard, and it is the keyboard path that needs it most. */
 .md .md-anchor {
-  margin-left: 0.35em;
+  margin-inline-start: 0.35em;
   color: var(--md-muted, #5b6472);
   font-weight: 400;
   text-decoration: none;
@@ -58,14 +58,14 @@
 }
 
 .md p, .md ul, .md ol, .md table { margin: 0.6em 0; }
-.md ul, .md ol { padding-left: 1.5em; }
+.md ul, .md ol { padding-inline-start: 1.5em; }
 .md li > ul, .md li > ol { margin: 0.15em 0; }
 .md li { margin: 0.15em 0; }
 
 .md blockquote {
   margin: 0.8em 0;
   padding: 0.1em 1em;
-  border-left: 3px solid var(--md-rule, #d0d4dc);
+  border-inline-start: 3px solid var(--md-rule, #d0d4dc);
   color: var(--md-muted, #5b6472);
 }
 
@@ -161,7 +161,7 @@
 .md sup > a { text-decoration: none; padding: 0 0.15em; }
 .md sup > a:hover { text-decoration: underline; }
 
-.md input[type='checkbox'] { margin-right: 0.4em; }
+.md input[type='checkbox'] { margin-inline-end: 0.4em; }
 
 /* --- highlight plugin token colors (PLUGINS.md §6.2) --------------- */
 
@@ -187,7 +187,9 @@
   border-radius: 10px;
 }
 .md-mermaid .md-mermaid-src {
+  /* diagram source is code: left to right in any page */
   text-align: left;
+  direction: ltr;
   color: var(--md-muted, #5b6472);
 }
 /* The diagram's own sizing (natural size, scroll rather than shrink) lives in
@@ -207,7 +209,7 @@
 .md-mermaid.mm-interactive:active { cursor: grabbing; }
 .md-mermaid .mm-controls {
   position: absolute;
-  right: 0.5rem;
+  inset-inline-end: 0.5rem;
   bottom: 0.5rem;
   display: flex;
   gap: 0.25rem;

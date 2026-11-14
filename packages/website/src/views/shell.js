@@ -29,14 +29,15 @@ const header =
       ['button', {
         class: 'theme-toggle',
         type: 'button',
-        title: 'Toggle color theme',
+        title: '$.ui.shell.theme',
+        'aria-label': '$.ui.shell.theme',
         on: { click: 'theme/toggle' },
       }, { $if: [{ $eq: ['$.theme', 'dark'] }, '☀', '☾'] }],
       ['button', {
         class: 'menu-toggle',
         type: 'button',
-        title: 'Menu',
-        'aria-label': 'Toggle navigation',
+        title: '$.ui.shell.menu',
+        'aria-label': '$.ui.shell.navToggle',
         'aria-expanded': { $if: ['$.menu', 'true', 'false'] },
         'aria-controls': 'site-nav',
         on: { click: 'menu/toggle' },
@@ -102,8 +103,9 @@ export const SHELL_RULES = [
         { $apply: ['$.ui.bench', 'benchmarks'] },
         { $apply: ['$.ui.chartsPage', 'charts'] },
         { $if: ['$.ui.collection', ['div', { class: 'page container' },
-          ['h1', {}, 'Virtual collections'],
-          ['p', { class: 'page-lead' }, 'Explore a catalog with stable selection, keyboard navigation and bounded page requests.'],
+          ['h1', {}, '$.ui.collection.title'],
+          // English by design: an LTR island in a right-to-left page
+          ['p', { class: 'page-lead', lang: 'en', dir: 'ltr' }, 'Explore a catalog with stable selection, keyboard navigation and bounded page requests.'],
           // keyed by mode AND language: a switch remounts it in the new words
           ['jaren-widget', { name: 'collection-demo', key: '$.ui.collection.key', props: { mode: '$.ui.collection.mode' } }],
         ]] },

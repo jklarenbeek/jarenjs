@@ -21,7 +21,7 @@ import { parseHash } from '../../packages/website/src/lib/route.js';
 import { siteMessagesEn, siteText, sitePackOf } from '../../packages/website/src/messages.js';
 import { SITE_LANGUAGES, isSiteLanguage, languageDir, loadSitePack, loadLocalePack, warmSitePacks } from '../../packages/website/src/boundaries/lang.js';
 import { LOCALES, catalogFor } from '../../packages/website/src/boundaries/validator.js';
-import { readLang, writeLang, LANG_KEY } from '../../packages/website/src/lib/lang.js';
+import { readLang, writeLang, LANG_KEY, searchLanguage } from '../../packages/website/src/lib/lang.js';
 import { createStubHost, fire } from '../view/dom.stub.js';
 
 const SRC = new URL('../../packages/website/src/', import.meta.url).pathname;
@@ -130,6 +130,16 @@ describe('website — the site language packs', () => {
     assert.strictEqual(siteText({ 'site/lang/label': 'Sprache' })('site/play/link-copied'), 'link copied', 'a key the pack lacks');
     assert.strictEqual(sitePackOf({ lang: 'de', siteMessages: { code: 'fr', messages: {} } }), null, 'a pack of another language');
     assert.strictEqual(sitePackOf({}), null);
+  });
+
+  it('a search-part ?lang= is read and leaves the search, every other param kept', () => {
+    assert.deepStrictEqual(searchLanguage('?lang=ar'), { lang: 'ar', search: '' });
+    assert.deepStrictEqual(searchLanguage('?x=1&lang=de&y=2'), { lang: 'de', search: '?x=1&y=2' });
+    assert.deepStrictEqual(searchLanguage(''), { lang: null, search: '' });
+    assert.deepStrictEqual(searchLanguage('?x=1'), { lang: null, search: '?x=1' });
+    assert.deepStrictEqual(searchLanguage('lang=fr'), { lang: 'fr', search: '' });
+    const main = readFileSync(join(SRC, 'main.js'), 'utf8');
+    assert.match(main, /history\.replaceState\(history\.state, '', `\$\{location\.pathname\}\$\{linked\.search\}\$\{location\.hash\}`\)/, 'the boot strips it, the hash kept');
   });
 
   it('the stored choice survives storage a browser refuses', () => {
@@ -269,6 +279,13 @@ describe('website — one language switch for the whole site', () => {
     // the widget is keyed by its mode and the language: a switch is a new key
     assert.strictEqual(at(null), 'rules:en');
     assert.strictEqual(at('de'), 'rules:de');
+    // and the page's heading is the site's word, rendered from the view model
+    const de = await loadSitePack('de');
+    const title = viewModel({ ...createInitialState(), lang: 'de', siteMessages: { code: 'de', messages: de },
+      route: { page: 'collection', params: { mode: 'rules' } } }).ui.collection.title;
+    assert.strictEqual(title, de?.['site/collection/title']);
+    const { STYLESHEET } = await import('../../packages/website/src/views/index.js');
+    assert.match(JSON.stringify(STYLESHEET), /\["h1",\{\},"\$\.ui\.collection\.title"\]/, 'the shell renders it');
   });
 
   it("a diagram that does not parse says so in the reader's language", async () => {
@@ -282,6 +299,40 @@ describe('website — one language switch for the whole site', () => {
     const de = mermaidText(compileMessageCatalog(packs.de));
     assert.ok(words.includes(de('mermaid/error/title')), words.filter((w) => /mermaid|Mermaid/i.test(w)).join(' | '));
     assert.ok(!words.includes('Mermaid parse error'));
+  });
+
+  it("the shell speaks the site's words: the nav, its menus and the header toggles", async () => {
+    const { container } = mountSite();
+    const words = () => [...findAll(container, (n) => n.tagName === 'header').flatMap((h) =>
+      [...findAll(h, (n) => n.nodeValue != null).map(textOf), ...findAll(h, (n) => n.getAttribute?.('title') != null).map((n) => n.getAttribute('title')),
+        ...findAll(h, (n) => n.getAttribute?.('aria-label') != null).map((n) => n.getAttribute('aria-label'))])];
+    for (const english of ['Home', 'Engines', 'Studios', 'Learn', 'Calculator', 'Benchmarks', 'Toggle color theme', 'Toggle navigation']) {
+      assert.ok(words().includes(english), `English first: ${english}`);
+    }
+    fire(languageSwitch(container), 'change', { target: { value: 'de' } });
+    await settle();
+    const de = /** @type {any} */ (await loadSitePack('de'));
+    for (const id of ['site/nav/home', 'site/nav/engines', 'site/nav/studios', 'site/nav/learn', 'site/nav/calculator', 'site/nav/benchmarks', 'site/shell/theme', 'site/shell/nav-toggle', 'site/shell/menu']) {
+      assert.ok(words().includes(de[id]), `${id}: ${de[id]}`);
+    }
+    assert.ok(!words().includes('Toggle color theme'));
+  });
+
+  it("md's own accessible names follow the language in Play's markdown and on the docs page", async () => {
+    const { app, container } = mountSite();
+    app.dispatch('play/example', 'md-anchors');
+    fire(languageSwitch(container), 'change', { target: { value: 'de' } });
+    await packLanded(app, 'de');
+    const labels = () => findAll(container, (n) => n.getAttribute?.('aria-label') != null).map((n) => n.getAttribute('aria-label'));
+    assert.ok(labels().some((l) => l.startsWith('Permalink zum Abschnitt')), labels().filter((l) => /ermalink/.test(l)).join(' | '));
+    assert.ok(!labels().some((l) => l.startsWith('Permalink to')));
+    const { docsSections } = await import('../../packages/website/src/app/viewmodel.js');
+    const { buildSiteContent } = await import('../../scripts/generate-site-data.js');
+    const de = catalogFor('de');
+    const german = JSON.stringify(docsSections(buildSiteContent(), de));
+    assert.match(german, /Permalink zum Abschnitt/);
+    assert.doesNotMatch(german, /Permalink to /);
+    assert.match(JSON.stringify(docsSections(buildSiteContent())), /Permalink to /, 'English without a pack');
   });
 
   it('Arabic writes right to left', () => {

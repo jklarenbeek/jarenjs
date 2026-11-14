@@ -18,7 +18,7 @@ import { parseHash } from './lib/route.js';
 import { createHashRouteSubscription } from '@jarenjs/app/routes';
 import { createMotion, prefersReducedMotion } from './lib/motion.js';
 import { readTheme, writeTheme } from './lib/theme.js';
-import { readLang, writeLang } from './lib/lang.js';
+import { readLang, writeLang, searchLanguage } from './lib/lang.js';
 import { isSiteLanguage, languageDir, warmSitePacks } from './boundaries/lang.js';
 
 const BASE = import.meta.env.BASE_URL;
@@ -57,8 +57,15 @@ const theme = readTheme(() => localStorage, () => matchMedia('(prefers-color-sch
 document.documentElement.classList.toggle('dark', theme === 'dark');
 
 // the site language: a `?lang=` link wins over the stored choice (the
-// route applies it), the stored choice over English
-const storedLang = readLang(() => localStorage);
+// route applies the hash form; the search form is read here), the stored
+// choice over English. A search-part link applies once: it is remembered
+// and leaves the address bar before the app boots, the hash kept.
+const linked = searchLanguage(location.search);
+if (linked.lang !== null) {
+  if (isSiteLanguage(linked.lang)) writeLang(() => localStorage, linked.lang);
+  history.replaceState(history.state, '', `${location.pathname}${linked.search}${location.hash}`);
+}
+const storedLang = isSiteLanguage(linked.lang) ? linked.lang : readLang(() => localStorage);
 const lang = isSiteLanguage(storedLang) ? storedLang : null;
 /** Put a language on the document, so a screen reader and the layout follow it. @param {string} code @param {'ltr' | 'rtl'} dir */
 const putLang = (code, dir) => {

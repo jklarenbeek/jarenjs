@@ -37,3 +37,21 @@ export function writeLang(open, lang) {
     // storage blocked or full: the choice lasts this session
   }
 }
+
+/**
+ * A `?lang=` in the address's search part (before the `#`:
+ * `/jarenjs/?lang=ar#/play`): the language it names and the search part
+ * without it. Such a link applies once, as the hash-route form does: the
+ * page takes the language, remembers it, and the param leaves the bar, so
+ * a reload keeps the reader's later choice.
+ * @param {string} search - `location.search`, with or without its `?`
+ * @returns {{ lang: string | null, search: string }} `lang` null when absent
+ */
+export function searchLanguage(search) {
+  const params = new URLSearchParams(search.replace(/^\?/, ''));
+  const lang = params.get('lang');
+  if (lang === null) return { lang: null, search: search.startsWith('?') || search === '' ? search : `?${search}` };
+  params.delete('lang');
+  const rest = params.toString();
+  return { lang, search: rest === '' ? '' : `?${rest}` };
+}

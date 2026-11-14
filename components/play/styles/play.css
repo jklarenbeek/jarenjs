@@ -36,7 +36,7 @@
 }
 .jplay-actions { display: flex; gap: var(--space-1, 0.25rem); flex-wrap: wrap; align-items: center; }
 .jplay-load { max-width: 9rem; }
-.jplay-shared { margin-left: auto; }
+.jplay-shared { margin-inline-start: auto; }
 /* ——— the editors|result drag splitter (host = the grab bar) ——— */
 .jplay-split {
   grid-area: split; cursor: col-resize; width: 10px; align-self: stretch; touch-action: none;
@@ -57,14 +57,14 @@
   margin-block: var(--space-2, 0.5rem) 2px;
 }
 .jplay-ex {
-  display: block; width: 100%; text-align: left; border: none; background: transparent;
+  display: block; width: 100%; text-align: start; border: none; background: transparent;
   cursor: pointer; padding: 3px var(--space-2, 0.5rem);
-  border-radius: var(--radius-sm, 6px); border-left: 2px solid transparent;
+  border-radius: var(--radius-sm, 6px); border-inline-start: 2px solid transparent;
   color: var(--muted, #64748b); font-size: 0.85rem;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .jplay-ex:hover { color: var(--fg, #0f172a); }
-.jplay-ex.active { color: var(--fg, #0f172a); background: var(--accent-soft, #eff6ff); border-left-color: var(--accent, #2563eb); }
+.jplay-ex.active { color: var(--fg, #0f172a); background: var(--accent-soft, #eff6ff); border-inline-start-color: var(--accent, #2563eb); }
 
 /* ——— the editors ——— */
 .jplay-head { display: flex; align-items: baseline; gap: var(--space-2, 0.5rem); flex-wrap: wrap; }
@@ -107,12 +107,12 @@
 /* a `note` panel — a callout, tone-coloured, repair lines on their own line */
 .jplay-note {
   margin: 0; padding: var(--space-2, 0.5rem) var(--space-3, 0.75rem);
-  border-left: 3px solid var(--border, #e2e8f0); border-radius: var(--radius-sm, 8px);
+  border-inline-start: 3px solid var(--border, #e2e8f0); border-radius: var(--radius-sm, 8px);
   background: var(--surface, #f8fafc); font-size: 0.85rem; white-space: pre-line;
 }
-.jplay-note.ok { border-left-color: var(--ok, #16a34a); background: var(--ok-soft, #f0fdf4); }
-.jplay-note.warn { border-left-color: var(--warn, #d97706); background: var(--warn-soft, #fffbeb); }
-.jplay-note.info { border-left-color: var(--accent, #2563eb); background: var(--accent-soft, #eff6ff); }
+.jplay-note.ok { border-inline-start-color: var(--ok, #16a34a); background: var(--ok-soft, #f0fdf4); }
+.jplay-note.warn { border-inline-start-color: var(--warn, #d97706); background: var(--warn-soft, #fffbeb); }
+.jplay-note.info { border-inline-start-color: var(--accent, #2563eb); background: var(--accent-soft, #eff6ff); }
 /* a `table` panel — a scrollable bordered grid with a sticky header */
 .jplay-table-wrap { overflow-x: auto; }
 .jplay-table { border-collapse: collapse; font-size: 0.8rem; font-family: var(--mono, monospace); }

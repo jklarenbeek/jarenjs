@@ -33,11 +33,11 @@
   flex-wrap: wrap; margin-bottom: var(--space-3, 0.75rem);
 }
 :where(.jaren-flow-editor, .jaren-data-editor, .project-data, .studio-root, .jstudio) .card-head h3 { margin: 0; min-width: 0; flex: 1 1 auto; overflow-wrap: anywhere; }
-:where(.jaren-flow-editor, .jaren-data-editor, .project-data, .studio-root, .jstudio) .card-head > :last-child { margin-left: auto; }
+:where(.jaren-flow-editor, .jaren-data-editor, .project-data, .studio-root, .jstudio) .card-head > :last-child { margin-inline-start: auto; }
 
 :where(.jaren-flow-editor, .jaren-data-editor, .project-data, .studio-root, .jstudio) .callout {
   background: var(--surface, hsl(220 20% 98%)); border: 1px solid var(--border, hsl(220 14% 88%));
-  border-left: 4px solid var(--accent, hsl(221 83% 53%)); border-radius: var(--radius, 10px);
+  border-inline-start: 4px solid var(--accent, hsl(221 83% 53%)); border-radius: var(--radius, 10px);
   padding: var(--space-4, 1rem) var(--space-5, 1.25rem); margin: var(--space-4, 1rem) 0;
 }
 :where(.jaren-flow-editor, .jaren-data-editor, .project-data, .studio-root, .jstudio) .callout.accent { background: var(--accent-soft, hsl(214 95% 93%)); }
@@ -61,7 +61,7 @@
   word-break: normal;
 }
 :where(.jaren-flow-editor, .jaren-data-editor, .project-data, .studio-root, .jstudio) th,
-:where(.jaren-flow-editor, .jaren-data-editor, .project-data, .studio-root, .jstudio) td { text-align: left; padding: var(--space-2, 0.5rem) var(--space-4, 1rem); border-bottom: 1px solid var(--border, hsl(220 14% 88%)); }
+:where(.jaren-flow-editor, .jaren-data-editor, .project-data, .studio-root, .jstudio) td { text-align: start; padding: var(--space-2, 0.5rem) var(--space-4, 1rem); border-bottom: 1px solid var(--border, hsl(220 14% 88%)); }
 :where(.jaren-flow-editor, .jaren-data-editor, .project-data, .studio-root, .jstudio) th { background: var(--surface, hsl(220 20% 98%)); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted, hsl(220 12% 45%)); }
 :where(.jaren-flow-editor, .jaren-data-editor, .project-data, .studio-root, .jstudio) tbody tr:last-child td { border-bottom: none; }
 :where(.jaren-flow-editor, .jaren-data-editor, .project-data, .studio-root, .jstudio) tr.strong td { font-weight: 700; color: var(--accent, hsl(221 83% 53%)); }
@@ -118,7 +118,7 @@
   border: 1px solid var(--border, hsl(220 14% 88%)); border-radius: var(--radius-sm, 8px); background: var(--bg, hsl(0 0% 100%)); color: var(--fg, hsl(224 20% 14%));
   padding: var(--space-2, 0.5rem) var(--space-3, 0.75rem); font-size: 0.9rem; font-family: var(--font, 'Inter', ui-sans-serif, system-ui, sans-serif);
 }
-:where(.jstudio, .jaren-flow-editor, .jaren-data-editor) .jaren-form-field input[type="checkbox"] { margin-left: var(--space-2, 0.5rem); }
+:where(.jstudio, .jaren-flow-editor, .jaren-data-editor) .jaren-form-field input[type="checkbox"] { margin-inline-start: var(--space-2, 0.5rem); }
 :where(.jstudio, .jaren-flow-editor, .jaren-data-editor) .jaren-form-required { color: var(--fail, hsl(0 68% 46%)); }
 :where(.jstudio, .jaren-flow-editor, .jaren-data-editor) .jaren-form-description { color: var(--muted, hsl(220 12% 45%)); font-size: 0.78rem; margin: 0.15rem 0 0; }
 :where(.jstudio, .jaren-flow-editor, .jaren-data-editor) .jaren-form-error { color: var(--fail, hsl(0 68% 46%)); font-size: 0.78rem; margin: 0.2rem 0 0; }

@@ -37,6 +37,12 @@ import { compileChart, createChartSession } from '@jarenjs/charts';
 import { createStreamAdapter } from '@jarenjs/charts/stream-adapter';
 
 import { cards, error, callout, chart, more } from '../lib/nodes.js';
+import { siteText } from '../messages.js';
+
+/** The site's words in English: what a caller that passes none reads. */
+const ENGLISH = siteText();
+/** The words getter of a caller that passes none. */
+const englishWords = () => ENGLISH;
 
 const WS_BASE = 'wss://data-stream.binance.vision';
 const REST_BASE = 'https://data-api.binance.vision';
@@ -51,30 +57,32 @@ const STREAMS = [
  * levels far apart, so each reads its own value axis: on one shared
  * scale the higher one draws as a flat line along the top and the lower
  * one as a flat line along the bottom. */
-const PRICE_CONFIG = {
+const priceConfig = (say) => ({
   type: 'line',
-  title: 'Live price (miniTicker)',
+  title: say('site/charts/live/price-title'),
   x: 'time',
   yLabel: `${SYMBOLS[0]} (USDT)`,
   y2: { series: [SYMBOLS[1]], label: `${SYMBOLS[1]} (USDT)` },
-};
+});
 
 /** The kline chart definition. The step-quantized y domain keeps the
  * scales still while the open candle's prices wiggle inside it, so the
  * incremental session patches one candle group per update instead of
  * recompiling the chart. */
-const KLINE_CONFIG = {
+const klineConfig = (say) => ({
   type: 'candlestick',
-  title: `${KLINE_SYMBOL} — 1m candles`,
+  title: say('site/charts/live/kline-title', { symbol: KLINE_SYMBOL }),
   yLabel: 'USDT',
   domain: { y: 'step' },
-};
+});
 
 /**
  * The socket-free feed core: message text in, chart data out. Testable
  * offline with vendored payloads.
+ * @param {(id: any, params?: Record<string, unknown>) => string} [say] - the
+ *   site's words for the candlestick's title (English by default)
  */
-export function createBinanceFeed() {
+export function createBinanceFeed(say = ENGLISH) {
   // combined-stream envelopes nest the payload under `data`; kline
   // fields nest one deeper under `data.k`
   const price = createStreamAdapter('line', {
@@ -96,7 +104,7 @@ export function createBinanceFeed() {
     maxPoints: 60,
     changes: true,
   });
-  const klineSession = createChartSession(KLINE_CONFIG, klines, { theme: 'host' });
+  const klineSession = createChartSession(klineConfig(say), klines, { theme: 'host' });
   const klineModes = { unchanged: 0, incremental: 0, rebuilt: 0 };
   let messages = 0;
   let drops = 0;
@@ -163,18 +171,33 @@ export function createBinanceFeed() {
   };
 }
 
-/** The render nodes for a feed snapshot + connection status. */
-export function binanceNodes(feed, status, note) {
+/** A connection status, in the page's words. */
+const STATUS = {
+  live: 'site/charts/live/status-live',
+  connecting: 'site/charts/live/status-connecting',
+  reconnecting: 'site/charts/live/status-reconnecting',
+  closed: 'site/charts/live/status-closed',
+};
+
+/**
+ * The render nodes for a feed snapshot + connection status.
+ * @param {any} feed - a `createBinanceFeed()` feed
+ * @param {'live' | 'connecting' | 'reconnecting' | 'closed'} status
+ * @param {string} [note] - the status card's line, in the page's words
+ * @param {(id: any, params?: Record<string, unknown>) => string} [say] - the
+ *   site's words (English by default)
+ */
+export function binanceNodes(feed, status, note, say = ENGLISH) {
   const { messages, drops } = feed.stats();
   const nodes = [
     cards([
-      { title: 'Binance feed', value: status, note: note ?? `${SYMBOLS.join(' + ')} · miniTicker + kline_1m` },
-      { title: 'Messages', value: String(messages), note: `${drops} dropped (malformed)` },
+      { title: say('site/charts/live/feed'), value: say(STATUS[status]), note: note ?? `${SYMBOLS.join(' + ')} · miniTicker + kline_1m` },
+      { title: say('site/charts/live/messages'), value: String(messages), note: say('site/charts/live/dropped', { count: drops }) },
     ]),
   ];
   const priceData = feed.priceData();
   if (priceData.series.length > 0) {
-    nodes.push(chart(null, compileChart(PRICE_CONFIG, priceData, { theme: 'host' }).toVnode(),
+    nodes.push(chart(null, compileChart(priceConfig(say), priceData, { theme: 'host' }).toVnode(),
       'Each point is one WebSocket message, parsed by createJsonxStreamReader in strict-JSON mode. '
       + `${SYMBOLS[0]} reads the left axis and ${SYMBOLS[1]} the right, each scaled to its own range so both moves show.`));
   }
@@ -188,12 +211,16 @@ export function binanceNodes(feed, status, note) {
   return nodes;
 }
 
-/** The opt-in invitation (nothing has connected yet). */
-export function binanceInvitation() {
+/**
+ * The opt-in invitation (nothing has connected yet).
+ * @param {(id: any, params?: Record<string, unknown>) => string} [say] - the
+ *   site's words (English by default)
+ */
+export function binanceInvitation(say = ENGLISH) {
   return [
-    callout('Live market data — opt in',
+    callout(say('site/charts/live/opt-in'),
       'This demo connects your browser to Binance (data-stream.binance.vision) and streams real ticker + kline messages through the strict-JSON streaming reader. Connecting sends your IP address to Binance; some regions block these endpoints — if so, the page stays fully usable.'),
-    more(TOGGLE_ACTION, 'Go live — stream from Binance'),
+    more(TOGGLE_ACTION, say('site/charts/live/go-live')),
   ];
 }
 
@@ -203,7 +230,7 @@ export function binanceInvitation() {
 const TOGGLE_ACTION = 'charts-live/toggle';
 const sink = (dispatch, nodes) => dispatch('charts-live/set', nodes);
 
-/** @type {{ws: any, feed: any, dispatch: any, raf: boolean, closed: boolean, retried: boolean}|null} */
+/** @type {{ws: any, feed: any, dispatch: any, words: () => any, raf: boolean, closed: boolean, retried: boolean}|null} */
 let session = null;
 
 const scheduleFrame = (cb) =>
@@ -214,9 +241,11 @@ export function binanceLiveActive() {
   return session !== null;
 }
 
-function paint(status, note) {
+/** Paint the session's nodes; `noteId` names the status line in the site's words. */
+function paint(status, noteId) {
   if (session === null) return;
-  sink(session.dispatch, binanceNodes(session.feed, status, note));
+  const say = session.words();
+  sink(session.dispatch, binanceNodes(session.feed, status, noteId === undefined ? undefined : say(noteId), say));
 }
 
 function requestPaint() {
@@ -232,18 +261,21 @@ function requestPaint() {
 /**
  * Start/stop from a "Go live" button.
  * @param {(action: string, payload: any) => void} dispatch
+ * @param {() => (id: any, params?: Record<string, unknown>) => string} [words] -
+ *   the site's words in the reader's language, read at every paint (English by default)
  */
-export function binanceToggle(dispatch) {
+export function binanceToggle(dispatch, words = englishWords) {
   if (session !== null) {
-    const feed = session.feed;
+    const { feed } = session;
+    const say = session.words();
     stopBinance();
     sink(dispatch, [
-      ...binanceNodes(feed, 'closed', 'stopped by you'),
-      ...binanceInvitation(),
+      ...binanceNodes(feed, 'closed', say('site/charts/live/stopped'), say),
+      ...binanceInvitation(say),
     ]);
     return;
   }
-  startBinance(dispatch);
+  startBinance(dispatch, words);
 }
 
 /**
@@ -257,10 +289,11 @@ export function binanceToggle(dispatch) {
 export function binancePageSync(isActive) {
   if (session !== null && !isActive) {
     const { feed, dispatch } = session;
+    const say = session.words();
     stopBinance();
     sink(dispatch, [
-      ...binanceNodes(feed, 'closed', 'you left the page'),
-      ...binanceInvitation(),
+      ...binanceNodes(feed, 'closed', say('site/charts/live/left'), say),
+      ...binanceInvitation(say),
     ]);
   }
 }
@@ -278,16 +311,17 @@ export function stopBinance() {
   }
 }
 
-function startBinance(dispatch) {
+function startBinance(dispatch, words) {
   const WS = globalThis.WebSocket;
   if (typeof WS !== 'function') {
+    const say = words();
     sink(dispatch,
-      [error({ message: 'WebSocket is not available in this environment.' }, 'Cannot connect')]);
+      [error({ message: say('site/charts/live/no-websocket') }, say('site/charts/live/cannot-connect'))]);
     return;
   }
-  const feed = createBinanceFeed();
-  session = { ws: null, feed, dispatch, raf: false, closed: false, retried: false };
-  paint('connecting', 'opening the WebSocket…');
+  const feed = createBinanceFeed(words());
+  session = { ws: null, feed, dispatch, words, raf: false, closed: false, retried: false };
+  paint('connecting', 'site/charts/live/opening');
 
   // REST seed so the candlestick starts populated; response BODY text
   // goes through the same strict-JSON reader. Failure is non-fatal.
@@ -311,7 +345,7 @@ function connect(feed) {
   const ws = new (globalThis.WebSocket)(`${WS_BASE}/stream?streams=${STREAMS.join('/')}`);
   session.ws = ws;
   ws.onopen = () => {
-    if (session?.ws === ws) paint('live', 'connected');
+    if (session?.ws === ws) paint('live', 'site/charts/live/connected');
   };
   ws.onmessage = (event) => {
     if (session?.ws !== ws) return;
@@ -323,16 +357,17 @@ function connect(feed) {
     if (session === null || session.ws !== ws || session.closed) return;
     if (!session.retried) {
       session.retried = true;
-      paint('reconnecting', 'the connection closed; retrying once…');
+      paint('reconnecting', 'site/charts/live/retrying');
       connect(feed);
       return;
     }
-    const dispatch = session.dispatch;
+    const { dispatch } = session;
+    const say = session.words();
     stopBinance();
     sink(dispatch, [
-      ...binanceNodes(feed, 'closed', 'connection lost (already retried once)'),
-      callout('Feed closed', 'The Binance connection closed twice — it may be geo-blocked or offline from here. The rest of the page is unaffected; press Go live to try again.'),
-      more(TOGGLE_ACTION, 'Go live — stream from Binance'),
+      ...binanceNodes(feed, 'closed', say('site/charts/live/lost'), say),
+      callout(say('site/charts/live/feed-closed'), 'The Binance connection closed twice — it may be geo-blocked or offline from here. The rest of the page is unaffected; press Go live to try again.'),
+      more(TOGGLE_ACTION, say('site/charts/live/go-live')),
     ]);
   };
 }

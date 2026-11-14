@@ -153,7 +153,9 @@ const shell = {
       ['div', { class: 'js-stage-head' }, '$.w.stage'],
       { $if: ['$.stageError', ['div', { class: 'js-stage-error js-stage-fail', role: 'status' }, '$.stageError'], ''] },
       { $if: [{ $eq: ['$.stage.kind', 'app'] },
-        ['div', { class: 'js-stage-mount' }, ['jaren-widget', { name: { $default: ['$.stage.widget', 'studio-stage'] }, props: '$.stage.mount' }]],
+        // the running app is the author's document, not the site's chrome:
+        // it takes the direction of its own text, whatever the page's
+        ['div', { class: 'js-stage-mount', dir: 'auto' }, ['jaren-widget', { name: { $default: ['$.stage.widget', 'studio-stage'] }, props: '$.stage.mount' }]],
         { $if: [{ $eq: ['$.stage.kind', 'result'] },
           { $if: ['$.stage.ran',
             ['div', { class: 'js-stage-result' }, [{ $apply: ['$.stage.nodes[*]', 'ui'] }]],

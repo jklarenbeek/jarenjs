@@ -34,6 +34,9 @@ delete it or fix it.
 
 ## @jarenjs/json — JSLT
 
+- [ ] **`renderQueryMessage` has no English default for a formula id.** A formula
+  diagnostic's id renders through `queryMessagesEn` only, so English needs
+  `formulaMessagesEn` passed (or the diagnostic's own `message`).
 - [ ] **JSLT matcher: schema-aware pruning and the rest of the single walk** —
   a mode's match paths built from names, indexes and wildcards (child or
   descendant) already run as one walk of the input; three parts remain. Prune
@@ -379,6 +382,10 @@ delete it or fix it.
 
 ## @jarenjs/view & @jarenjs/app
 
+- [ ] **`createFormView`'s own form-chrome defaults are English.** `@jarenjs/app`
+  keeps a hand copy of the add/remove/JSON-hint words because it does not depend on
+  `@jarenjs/forms`, whose `formChromeLabels(catalog)` speaks every pack; a host passes
+  `labels` or `labelsPath` (the website does), and a host that passes neither shows English.
 Reusable host helpers now cover [bounded file tokens and route subscriptions](../packages/app/docs/APP-FORMAT.md),
 the [owned native dialog](../packages/view/docs/VIEW-FORMAT.md), and
 [ordinary-panel drag sources](../components/collection/docs/COLLECTION.md).

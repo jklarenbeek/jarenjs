@@ -3,7 +3,8 @@
  * The package-README dialog — mode 'readme'. A near-fullscreen overlay
  * whose body is the fetched README, parsed and rendered by the
  * @jarenjs/md visual component (`$.article` is that ready-made vnode,
- * spliced in verbatim). Closable by the × button or the backdrop.
+ * spliced in verbatim). Closable by the × button or the backdrop. Its
+ * controls speak the reader's language (`$.w`); the README is English.
  */
 
 export const README_RULES = [
@@ -20,14 +21,14 @@ export const README_RULES = [
             ['button', {
               type: 'button',
               class: 'md-dialog-nav',
-              'aria-label': 'Back',
+              'aria-label': '$.w.back',
               disabled: { $if: ['$.canBack', false, 'disabled'] },
               on: { click: 'readme/back' },
             }, '‹'],
             ['button', {
               type: 'button',
               class: 'md-dialog-nav',
-              'aria-label': 'Forward',
+              'aria-label': '$.w.forward',
               disabled: { $if: ['$.canForward', false, 'disabled'] },
               on: { click: 'readme/forward' },
             }, '›'],
@@ -36,20 +37,20 @@ export const README_RULES = [
           ['button', {
             type: 'button',
             class: 'md-dialog-close',
-            'aria-label': 'Close',
+            'aria-label': '$.w.close',
             on: { click: 'readme/close' },
           }, '✕'],
         ],
         ['div', { class: 'md-dialog-body' },
           { $if: [{ $eq: ['$.status', 'loading'] },
-            ['p', { class: 'md-dialog-status' }, 'Loading README…']] },
+            ['p', { class: 'md-dialog-status' }, '$.w.loading']] },
           { $if: [{ $eq: ['$.status', 'error'] },
             ['div', { class: 'error-card' },
-              ['p', { class: 'error-title' }, 'Could not load the README'],
-              ['p', { class: 'error-message' }, '$.message'],
+              ['p', { class: 'error-title' }, '$.w.error'],
+              ['p', { class: 'error-message', lang: 'en', dir: 'ltr' }, '$.message'],
             ]] },
           // the md component's article vnode (reference-stable per source)
-          { $if: [{ $eq: ['$.status', 'ready'] }, '$.article'] },
+          { $if: [{ $eq: ['$.status', 'ready'] }, ['div', { lang: 'en', dir: 'ltr' }, '$.article']] },
         ],
       ],
     ],

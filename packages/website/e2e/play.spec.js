@@ -233,6 +233,15 @@ test('under Arabic the page reads right to left, and code and English blocks sta
   expect(islands.checked).toBeGreaterThan(20);
 });
 
+test('a ?lang= before the # applies once: the page takes it, the address loses it, a reload keeps it', async ({ page }) => {
+  await page.goto('/?lang=ar#/play');
+  await expect(page.locator('html')).toHaveAttribute('dir', 'rtl');
+  await expect(page.locator('html')).toHaveAttribute('lang', 'ar');
+  expect(await page.evaluate(() => [location.search, location.hash])).toEqual(['', '#/play']);
+  await page.reload();
+  await expect(page.locator('html')).toHaveAttribute('lang', 'ar');
+});
+
 test('the validate data pane toggles to a generated form and edits re-validate', async ({ page }) => {
   await page.goto('/#/play');
   await page.locator('.jplay-ex', { hasText: 'User' }).first().click();
