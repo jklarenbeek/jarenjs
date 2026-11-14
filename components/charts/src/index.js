@@ -43,3 +43,4 @@ export {
 } from './core/sampling.js';
 export { createStreamAdapter } from './core/stream-adapter.js';
 export { createChartSession } from './core/session.js';
+export { chartsMessagesEn, chartsText } from './messages.js';

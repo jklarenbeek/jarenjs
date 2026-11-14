@@ -13,7 +13,9 @@ import { dataViewModel } from './viewmodel.js';
  * @param {{ model: any, query: any, transport: () => ReturnType<typeof import('../../data/transport.js').createTransport>,
  *   seeds?: any[], createRow?: (text: string) => any, migration?: (model: any, collection: string) => { to: any, id: string },
  *   trip?: any, corpus?: () => Promise<any>, executor?: string, operators?: { toOptions: () => any }, lifecycleTarget?: any,
- *   schedule?: (flush: () => void) => void, onError?: (error: Error) => void }} options
+ *   schedule?: (flush: () => void) => void, onError?: (error: Error) => void,
+ *   messages?: any }} options - `messages`: the reader's compiled catalog (or a
+ *   function answering the current one) the editor speaks; English when absent
  */
 export function mountDataEditor(node, options) {
   let app, settleReady, disposed = false, active = true;

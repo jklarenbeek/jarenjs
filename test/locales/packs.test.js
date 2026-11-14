@@ -34,6 +34,13 @@ import { compileFormula, formulaMessagesEn } from '@jarenjs/json/formula';
 import { compileMessageTemplate } from '@jarenjs/core/message';
 import { compileMarkdown, toHtml, mdMessagesEn, labelsFromCatalog } from '@jarenjs/md';
 import { playMessagesEn } from '@jarenjs/play';
+import { studioMessagesEn } from '@jarenjs/studio';
+import { mermaidMessagesEn } from '@jarenjs/mermaid';
+import { calcMessagesEn } from '@jarenjs/calc';
+import { rulesMessagesEn } from '@jarenjs/rules';
+import { collectionMessagesEn } from '@jarenjs/collection';
+import { chartsMessagesEn } from '@jarenjs/charts';
+import { viewMessagesEn } from '@jarenjs/view';
 
 
 /**
@@ -60,11 +67,12 @@ const QUERY_SAMPLE_PARAMS = Object.fromEntries(Object.entries(queryMessagesEn).m
 const FORMULA_SAMPLE_PARAMS = Object.fromEntries(Object.entries(formulaMessagesEn).map(([key, template]) =>
   [key, Object.fromEntries(compileMessageTemplate(template).parameters.map((name) => [name, `<${name}>`]))]));
 
-/** And play's words: a template's placeholders, or the `count` a plural closure reads. */
-const PLAY_SAMPLE_PARAMS = Object.fromEntries(Object.entries(playMessagesEn).map(([key, template]) =>
+/** And the components' words: a template's placeholders, or what a plural closure reads. */
+const PLAY_SAMPLE_PARAMS = Object.fromEntries([playMessagesEn, studioMessagesEn, mermaidMessagesEn, calcMessagesEn,
+  rulesMessagesEn, collectionMessagesEn, chartsMessagesEn, viewMessagesEn].flatMap((catalog) => Object.entries(catalog)).map(([key, template]) =>
   [key, typeof template === 'string'
     ? Object.fromEntries(compileMessageTemplate(template).parameters.map((name) => [name, `<${name}>`]))
-    : { count: 2 }]));
+    : { count: 2, min: 2, name: 'sum', from: '2026-01-01', to: '2026-02-01' }]));
 
 /** So are md's accessible names. */
 const MD_SAMPLE_PARAMS = Object.fromEntries(Object.entries(mdMessagesEn).map(([key, template]) =>
@@ -676,36 +684,53 @@ describe('@jarenjs/locales — a query message names the operators its English n
   });
 });
 
-describe("@jarenjs/locales — the playground's words", () => {
+/** Every published component whose words a pack carries, with its English catalog and renderer. */
+const COMPONENT_CATALOGS = Object.entries({
+  '@jarenjs/play': ['playMessagesEn', 'playText'],
+  '@jarenjs/studio': ['studioMessagesEn', 'studioText'],
+  '@jarenjs/mermaid': ['mermaidMessagesEn', 'mermaidText'],
+  '@jarenjs/calc': ['calcMessagesEn', 'calcText'],
+  '@jarenjs/rules': ['rulesMessagesEn', 'rulesText'],
+  '@jarenjs/collection': ['collectionMessagesEn', 'collectionText'],
+  '@jarenjs/charts': ['chartsMessagesEn', 'chartsText'],
+  '@jarenjs/view': ['viewMessagesEn', 'viewText'],
+});
+
+describe("@jarenjs/locales — the components' words", () => {
   const all = { fr, es, pt, de, ja, ko, zhTW, ru, tr, ar, nl };
+  /** The params a closure entry may read: a count, a bound, a name, a date span. */
+  const CLOSURE_PARAMS = { count: 2, min: 2, name: 'sum', from: '2026-01-01', to: '2026-02-01' };
   for (const [code, pack] of Object.entries(all)) {
-    it(`${code} carries every play message, with the English placeholders, and renders each`, async () => {
-      const { playMessagesEn, playText } = await import('@jarenjs/play');
-      const t = playText(compileMessageCatalog(pack));
-      for (const [key, english] of Object.entries(playMessagesEn)) {
-        assert.ok(Object.hasOwn(pack, key), `${code} is missing play key '${key}'`);
-        if (typeof english === 'string') {
-          assert.strictEqual(typeof pack[key], 'string', `${code} ${key} is a template, as the English is`);
-          assert.deepStrictEqual(placeholders(pack[key]), placeholders(english), `${code} ${key} placeholders`);
+    for (const [specifier, [catalogName, textName]] of COMPONENT_CATALOGS) {
+      it(`${code} carries every ${specifier} message, with the English placeholders, and renders each`, async () => {
+        const component = await import(specifier);
+        const catalog = /** @type {Record<string, any>} */ (component[catalogName]);
+        const t = component[textName](compileMessageCatalog(pack));
+        for (const [key, english] of Object.entries(catalog)) {
+          assert.ok(Object.hasOwn(pack, key), `${code} is missing ${specifier} key '${key}'`);
+          if (typeof english === 'string') {
+            assert.strictEqual(typeof pack[key], 'string', `${code} ${key} is a template, as the English is`);
+            assert.deepStrictEqual(placeholders(pack[key]), placeholders(english), `${code} ${key} placeholders`);
+            // the `$` tokens (operators, $id) stay as the English writes them;
+            // a pack may join a word to one with a hyphen ('$query-Operator')
+            const own = (/** @type {unknown} */ text) => (String(text).match(/\$[A-Za-z][\w-]*/g) ?? [])
+              .map((token) => (english.includes(token) ? token : token.replace(/-[^-]*$/, ''))).sort();
+            assert.deepStrictEqual(own(pack[key]), own(english), `${code} ${key} keeps its $ tokens`);
+          }
+          const params = typeof english === 'string'
+            ? Object.fromEntries(placeholders(english).map((name) => [name, `<${name}>`]))
+            : CLOSURE_PARAMS;
+          const rendered = t(/** @type {any} */ (key), params);
+          assert.strictEqual(typeof rendered, 'string');
+          assert.ok(rendered.length > 0, `${code} ${key} renders`);
+          if (typeof english !== 'string') {
+            // every count from 3 up is written out; Arabic says one and two in the noun itself
+            for (const count of [3, 5, 11, 21, 101]) {
+              assert.match(t(/** @type {any} */ (key), { ...CLOSURE_PARAMS, count, min: count }), new RegExp(String(count)), `${code} ${key} names ${count}`);
+            }
+          }
         }
-        const params = typeof english === 'string'
-          ? Object.fromEntries(placeholders(english).map((name) => [name, `<${name}>`]))
-          : { count: 2 };
-        if (typeof english === 'string') {
-          // the `$` tokens (operators, $id) stay as the English writes them;
-          // a pack may join a word to one with a hyphen ('$query-Operator')
-          const own = (/** @type {unknown} */ text) => (String(text).match(/\$[A-Za-z][\w-]*/g) ?? [])
-            .map((token) => (english.includes(token) ? token : token.replace(/-[^-]*$/, ''))).sort();
-          assert.deepStrictEqual(own(pack[key]), own(english), `${code} ${key} keeps its $ tokens`);
-        }
-        const rendered = t(/** @type {any} */ (key), params);
-        assert.strictEqual(typeof rendered, 'string');
-        assert.ok(rendered.length > 0, `${code} ${key} renders`);
-        if (typeof english !== 'string') {
-          // every count from 3 up is written out; Arabic says one and two in the noun itself
-          for (const count of [0, 3, 5, 11, 21, 101]) assert.match(t(/** @type {any} */ (key), { count }), new RegExp(String(count)), `${code} ${key} names ${count}`);
-        }
-      }
-    });
+      });
+    }
   }
 });

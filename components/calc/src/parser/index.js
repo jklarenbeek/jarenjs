@@ -3,7 +3,8 @@
  * @file `parseExpression(text, opts) → ExprAST`. A char-offset
  * recursive-descent, precedence-climbing parser in the repository idiom
  * (module-const sticky regexes for the number/identifier leaves, a
- * `fail(msg, pos)` that raises `CalcParseError` with 1-based line/column).
+ * `fail(id, params, pos)` that raises `CalcParseError` with 1-based line/column
+ * and the diagnostic's message id).
  * No `eval`, no per-parse `RegExp` allocation.
  *
  * Grammar (low → high precedence), all left-associative except power
@@ -25,6 +26,10 @@
 
 import { num, constant, variable, unary, postfix, binary, call, isConstant, setSite, setExact } from '../ast.js';
 import { CalcParseError, errorAt } from '../errors.js';
+import { calcText } from '../messages.js';
+
+/** The English of every diagnostic, the `message` of the error it raises. */
+const english = calcText();
 
 /** Sticky number matcher: hex / octal / binary / decimal-with-exponent. */
 const RE_NUMBER = /0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[bB][01]+|(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?/y;
@@ -46,9 +51,13 @@ class Parser {
     this.p = 0;
   }
 
-  /** @returns {never} */
-  fail(message, pos = this.p) {
-    throw errorAt(message, this.s, pos);
+  /**
+   * Raise the diagnostic `id` (a `calcMessagesEn` id) at `pos`.
+   * @param {string} id @param {Record<string, unknown>} [params] @param {number} [pos]
+   * @returns {never}
+   */
+  fail(id, params = {}, pos = this.p) {
+    throw errorAt(english(id, params), this.s, pos, id, params);
   }
 
   skipWs() {
@@ -76,10 +85,10 @@ class Parser {
 
   parse() {
     this.skipWs();
-    if (this.p >= this.n) this.fail('empty expression');
+    if (this.p >= this.n) this.fail('calc/parse/empty');
     const node = this.parseBinary(1);
     this.skipWs();
-    if (this.p < this.n) this.fail(`unexpected '${this.s[this.p]}'`);
+    if (this.p < this.n) this.fail('calc/parse/unexpected', { token: this.s[this.p] });
     return node;
   }
 
@@ -134,14 +143,14 @@ class Parser {
 
   parsePrimary() {
     this.skipWs();
-    if (this.p >= this.n) this.fail('unexpected end of input');
+    if (this.p >= this.n) this.fail('calc/parse/end');
     const c = this.s.charCodeAt(this.p);
 
     if (c === 0x28) { // (
       this.p++;
       const inner = this.parseBinary(1);
       this.skipWs();
-      if (this.s.charCodeAt(this.p) !== 0x29) this.fail("expected ')'");
+      if (this.s.charCodeAt(this.p) !== 0x29) this.fail('calc/parse/close');
       this.p++;
       return inner;
     }
@@ -150,7 +159,7 @@ class Parser {
     if ((c >= 0x30 && c <= 0x39) || c === 0x2e) { // digit or '.'
       RE_NUMBER.lastIndex = this.p;
       const m = RE_NUMBER.exec(this.s);
-      if (m === null || m.index !== this.p) this.fail('invalid number');
+      if (m === null || m.index !== this.p) this.fail('calc/parse/number');
       this.p += m[0].length;
       return numericNode(m[0]);
     }
@@ -171,7 +180,7 @@ class Parser {
       return isConstant(name) ? setSite(constant(name), this.s, start) : variable(name);
     }
 
-    this.fail(`unexpected '${this.s[this.p]}'`);
+    this.fail('calc/parse/unexpected', { token: this.s[this.p] });
   }
 
   parseArgs() {
@@ -184,7 +193,7 @@ class Parser {
       const c = this.s.charCodeAt(this.p);
       if (c === 0x2c) { this.p++; continue; } // ,
       if (c === 0x29) { this.p++; break; } // )
-      this.fail("expected ',' or ')'");
+      this.fail('calc/parse/separator');
     }
     return args;
   }

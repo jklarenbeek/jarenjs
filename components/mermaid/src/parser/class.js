@@ -11,7 +11,7 @@
 
 import { collectBraceBody, commentStart } from '../utils.js';
 import { readNodeClick } from './click.js';
-import { fail } from '../errors.js';
+import { failWith } from '../errors.js';
 
 /**
  * Sticky: a relation operator — a `--` or `..` line with an optional end
@@ -173,7 +173,7 @@ export function parseClass(lines, lineOffset = 0) {
     // a relation no form reads is refused, as Mermaid refuses it, where it
     // was dropped without a word
     if (operatorIn(line) !== null) {
-      fail(`'${line}' is no relation: From ["cardinality"] <operator> ["cardinality"] To, one per line, with an optional ': label'`, lineOffset + li + 1);
+      failWith('mermaid/class/relation', { line }, lineOffset + li + 1);
     }
   }
 

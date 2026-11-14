@@ -8,7 +8,7 @@
  */
 
 import { collectBraceBody } from '../utils.js';
-import { fail } from '../errors.js';
+import { failWith } from '../errors.js';
 
 /** An entity name: a run of non-space characters, or a quoted name that may hold spaces. */
 const NAME = '("[^"]*"|\\S+)';
@@ -119,7 +119,7 @@ export function parseEr(lines, lineOffset = 0) {
     const brace = masked.indexOf('{');
     const head = brace === -1 ? line : line.slice(0, brace);
     if (RE_CONNECTOR.test(masked)) {
-      fail(`'${line}' is no relationship: LEFT <cardinality>--<cardinality> RIGHT : label`, lineOffset + li + 1);
+      failWith('mermaid/er/relationship', { line }, lineOffset + li + 1);
     }
 
     if (brace !== -1) {

@@ -203,7 +203,10 @@ export function createSiteApp(env) {
   // boundary, which is coverage-excluded as browser-only). The spatial
   // corpus it runs as the third executor is a site artifact, read
   // through the same contract as every other one
-  const dataRuntime = createDataRuntime({ site });
+  /** The packages' words in the site language (undefined: English), read at
+   * each use so a runtime made once speaks the language the reader picks later. */
+  const messagesNow = () => (app === null ? undefined : catalogFor(app.getState().lang));
+  const dataRuntime = createDataRuntime({ site, messages: messagesNow });
   const dataController = createDataController({ getApp: () => app, runtime: dataRuntime });
 
   // the @jarenjs/calc live-rates layer: the impure half (fetch); the pure
@@ -219,11 +222,11 @@ export function createSiteApp(env) {
 
   // the Flow studio's runtime: nested-machine host widget + effects
   // (template loading, fail-closed text parsing, dag runs with abort)
-  const flowRuntime = createFlowRuntime({ schedule: env.schedule, getFlow: () => app.getState().flow });
+  const flowRuntime = createFlowRuntime({ schedule: env.schedule, getFlow: () => app.getState().flow, messages: messagesNow });
   const flowController = createFlowController({ getApp: () => app, runtime: flowRuntime });
-  const projectData = createProjectDataRuntime({ createWorker: env.projectWorker });
+  const projectData = createProjectDataRuntime({ createWorker: env.projectWorker, messages: messagesNow });
   const projectController = createProjectController({ getApp: () => app, host: projectHost, projectData, projectTemplate,
-    download: env.download, exportProject: env.exportProject, debounceMs: env.debounceMs });
+    download: env.download, exportProject: env.exportProject, debounceMs: env.debounceMs, messages: messagesNow });
 
   const effects = {
     ...flowRuntime.effects,
@@ -359,12 +362,11 @@ export function createSiteApp(env) {
       // hash-length honesty: a long project makes a token browsers and
       // chat clients mangle — say so instead of truncating
       if (token.length > SHARE_TOKEN_LIMIT) {
-        dispatch('ide/shared',
-          `too large for a share link (${token.length} > ${SHARE_TOKEN_LIMIT} chars) — use Download instead`);
+        dispatch('ide/shared', siteWords()('site/play/too-large', { length: token.length, limit: SHARE_TOKEN_LIMIT }));
         return;
       }
       const url = env.share?.(`#/project?s=${token}`);
-      dispatch('ide/shared', url === undefined ? 'link ready' : 'link copied');
+      dispatch('ide/shared', siteWords()(url === undefined ? 'site/play/link-ready' : 'site/play/link-copied'));
     },
     ...projectController.effects,
     // the Play playground: picking an example loads its source + first
@@ -558,15 +560,15 @@ export function createSiteApp(env) {
     onError: report,
     effects,
     widgets: {
-      'collection-demo': createCollectionDemoWidget(),
+      'collection-demo': createCollectionDemoWidget({ messages: messagesNow }),
       // chart / mermaid / markdown / form — usable from any site-level view
       ...DOCUMENT_WIDGETS,
       'flow-doc': flowRuntime.widget,
       // the Project IDE's live stage: boots the active app file, then
       // reboots (revision change) or hot-updates (app.setState) per commit
       'studio-data': projectData.widget,
-      'studio-flow': createProjectFlowWidget({ schedule: env.schedule }),
-      'studio-stage': createProjectStageWidget({ schedule: env.schedule }),
+      'studio-flow': createProjectFlowWidget({ schedule: env.schedule, messages: messagesNow }),
+      'studio-stage': createProjectStageWidget({ schedule: env.schedule, messages: messagesNow }),
       // the drag splitter: drives --js-ratio live, commits on pointer-up
       'studio-splitter': createProjectSplitterWidget(),
       // the Play IDE's editor|result splitter (same widget, --jplay-ratio)
@@ -658,6 +660,7 @@ function wireBoundaries(app, debounceMs, navigate, projectController, env) {
     // a status line is rendered text: a switch clears it rather than
     // leave it in the previous language
     if (app.getState().play?.shared != null) app.dispatch('play/shared', null);
+    if (app.getState().ide?.shared != null) app.dispatch('ide/shared', null);
     const seq = ++langLoadSeq;
     (env.loadSitePack ?? loadSitePack)(code).then((messages) => {
       if (seq === langLoadSeq) app.dispatch('site/lang-loaded', messages === null ? null : { code, messages });

@@ -16,12 +16,15 @@ import { evaluate } from './compile.js';
 import { plot2d } from './plot/plot2d.js';
 import { plot3d } from './plot/plot3d.js';
 import { errorToVnode } from './render/error.js';
+import { CalcParseError } from './errors.js';
+import { calcText } from './messages.js';
 
 export { parseExpression } from './parser/index.js';
 export { toExpression } from './to-expr.js';
 export { compileExpr, evaluate } from './compile.js';
 export { defaultEnv, programmerEnv } from './env.js';
 export { CalcParseError } from './errors.js';
+export { calcMessagesEn, calcText } from './messages.js';
 export {
   num, constant, variable, unary, postfix, binary, call,
   CONSTANTS, isConstant, astEqual, CALC_AST_VERSION,
@@ -42,10 +45,11 @@ export {
 /**
  * Render an expression to a plot vnode, choosing 2D or 3D by whether the
  * expression's free variables include a second axis. Error-safe: a parse
- * failure yields the error vnode, never a throw.
+ * failure yields the error vnode, never a throw — in the reader's language
+ * with `options.messages` (a compiled locale catalog), English without.
  *
  * @param {string} source
- * @param {{ kind?: '2d'|'3d', [k: string]: any }} [options]
+ * @param {{ kind?: '2d'|'3d', messages?: Readonly<Record<string, unknown>> | null, [k: string]: any }} [options]
  * @returns {any} an SVG vnode
  */
 export function calcToVnode(source, options = {}) {
@@ -53,7 +57,9 @@ export function calcToVnode(source, options = {}) {
   if (!ev.ok && ev.error && ev.error.line !== undefined) {
     // a genuine parse error (not just an unbound variable like x/y)
     if (/unexpected|expected|invalid|empty/.test(ev.error.message)) {
-      return errorToVnode(ev.error, options);
+      // the English message classifies; the card speaks the reader's language
+      const shown = options.messages == null ? ev : evaluate(source, {}, { env: options.env, messages: options.messages });
+      return errorToVnode(shown.ok ? ev.error : shown.error, options);
     }
   }
   const kind = options.kind ?? (usesVar(source, 'y') ? '3d' : '2d');
@@ -61,7 +67,9 @@ export function calcToVnode(source, options = {}) {
     return kind === '3d' ? plot3d(source, options) : plot2d(source, options);
   }
   catch (err) {
-    return errorToVnode({ message: String(/** @type {any} */ (err)?.message ?? err) }, options);
+    const e = /** @type {any} */ (err);
+    return errorToVnode({ message: e instanceof CalcParseError && e.msgid !== undefined
+      ? calcText(options.messages)(e.msgid, e.params) : String(e?.message ?? err) }, options);
   }
 }
 

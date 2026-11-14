@@ -19,7 +19,7 @@ import { transformJson } from '@jarenjs/json/jslt';
 import { pickAllowed } from '@jarenjs/core/array';
 import { encodeJSONPointerSegment, decodeJSONPointerSegment } from '@jarenjs/json/pointer';
 import { createApp } from '@jarenjs/app';
-import { buildFormModel, buildFormViewModel } from '@jarenjs/forms';
+import { buildFormModel, buildFormViewModel, formChromeLabels } from '@jarenjs/forms';
 
 
 import workflowToState from '@jarenjs/mermaid/stylesheets/workflow-to-state.jslt.json' with { type: 'json' };
@@ -30,6 +30,7 @@ import flowchartToDag from '@jarenjs/mermaid/stylesheets/flowchart-to-dag.jslt.j
 import { memo1 } from '../shared/memo.js';
 import { errorMessage } from '../shared/nodes.js';
 import { createHostWidget } from '../shared/host-widget.js';
+import { studioTextOf, catalogOf, wordsBy } from '../../messages.js';
 
 /** The phone panes, in switcher order. */
 const FLOW_PANES = ['diagram', 'inspector', 'run'];
@@ -125,7 +126,7 @@ function decorate(vnode, targets, marks) {
         if (status !== undefined) cls += ` mm-run-${status}`;
         nextProps = {
           ...props, class: cls, role: 'button', tabindex: '0',
-          'aria-label': `${target.type} ${target.id ?? target.index}`,
+          'aria-label': selectionLabel(marks.t, target, 'target'),
           on: { click: { action: 'flow/pick', with: target }, keydown: { action: 'flow/key-pick', with: target } },
         };
       }
@@ -142,7 +143,7 @@ function decorate(vnode, targets, marks) {
         }
         nextProps = {
           ...props, class: cls, role: 'button', tabindex: '0',
-          'aria-label': `${target.type} ${target.id ?? target.index}`,
+          'aria-label': selectionLabel(marks.t, target, 'target'),
           on: { click: { action: 'flow/pick', with: target }, keydown: { action: 'flow/key-pick', with: target } },
         };
       }
@@ -161,28 +162,31 @@ function decorate(vnode, targets, marks) {
  * diagram text cannot represent — committing an edit would silently
  * destroy them (APP-INTEGRATION honesty rule, MERMAID-FORMAT §5.1).
  * @param {'fsm'|'dag'} kind @param {any} doc
+ * @param {any} [messages] - the compiled catalog the explanation speaks
+ *   (or a function answering it); English when absent
  * @returns {string|null} the human explanation, or null when editable
  */
-export function textLossReason(kind, doc) {
+export function textLossReason(kind, doc, messages) {
+  const t = studioTextOf(messages);
   if (kind === 'fsm') {
     if (doc.states.some((s) => typeof s !== 'string')) {
-      return 'states carry entry/exit/final members, which diagram text cannot express';
+      return t('studio/flow/loss-states');
     }
-    if (doc.transitions.some((t) => t.guard !== undefined && t.guard !== null && typeof t.guard !== 'string')) {
-      return 'a structured guard would flatten to the […] placeholder';
+    if (doc.transitions.some((tr) => tr.guard !== undefined && tr.guard !== null && typeof tr.guard !== 'string')) {
+      return t('studio/flow/loss-guard');
     }
-    if (doc.transitions.some((t) => Array.isArray(t.effects)
-      && t.effects.some((e) => e.with !== undefined))) {
-      return 'an effect carries props, which the / label drops';
+    if (doc.transitions.some((tr) => Array.isArray(tr.effects)
+      && tr.effects.some((e) => e.with !== undefined))) {
+      return t('studio/flow/loss-effect');
     }
     return null;
   }
   const stubOnly = Object.entries(doc.nodes).every(([id, n]) =>
     (n.kind === 'task' && n.run === id && n.with === undefined)
     || n.kind === 'input' || n.kind === 'output');
-  if (!stubOnly) return 'query, stylesheet and task documents do not fit in diagram text';
+  if (!stubOnly) return t('studio/flow/loss-documents');
   if (doc.edges.some((e) => e.select !== undefined)) {
-    return 'edge selectors do not fit in diagram text';
+    return t('studio/flow/loss-selectors');
   }
   return null;
 }
@@ -191,44 +195,78 @@ export function textLossReason(kind, doc) {
 // Inspector: forms-generated, zero hand-written field rendering
 // ------------------------------------------------------------------
 
-const TRANSITION_MODEL = buildFormModel({
-  type: 'object',
-  properties: {
-    from: { type: 'string', title: 'From state' },
-    event: { type: ['string', 'null'], title: 'Event (empty = any)' },
-    guard: { title: 'Guard (query document)' },
-    to: { type: 'string', title: 'To state' },
-    effects: { title: 'Effects' },
-  },
+/** The inspector's form models, their field titles in one language,
+ * built once per catalog. */
+const inspectorModels = wordsBy((t) => {
+  /** Whole-member JSON editor: string states, object states, dag nodes. */
+  const member = buildFormModel({ title: t('studio/flow/field-member') });
+  return {
+    transition: buildFormModel({
+      type: 'object',
+      properties: {
+        from: { type: 'string', title: t('studio/flow/field-from-state') },
+        event: { type: ['string', 'null'], title: t('studio/flow/field-event') },
+        guard: { title: t('studio/flow/field-guard') },
+        to: { type: 'string', title: t('studio/flow/field-to-state') },
+        effects: { title: t('studio/flow/field-effects') },
+      },
+    }),
+    edge: buildFormModel({
+      type: 'object',
+      properties: {
+        from: { type: 'string', title: t('studio/flow/field-from-node') },
+        to: { type: 'string', title: t('studio/flow/field-to-node') },
+        port: { type: 'string', title: t('studio/flow/field-port') },
+        select: { title: t('studio/flow/field-select') },
+      },
+    }),
+    state: member,
+    node: member,
+  };
 });
-const DAG_EDGE_MODEL = buildFormModel({
-  type: 'object',
-  properties: {
-    from: { type: 'string', title: 'From node' },
-    to: { type: 'string', title: 'To node' },
-    port: { type: 'string', title: 'Port' },
-    select: { title: 'Select (query document)' },
-  },
-});
-/** Whole-member JSON editor: string states, object states, dag nodes. */
-const MEMBER_MODEL = buildFormModel({ title: 'Member (JSON)' });
 
-const MODELS = {
-  transition: TRANSITION_MODEL,
-  edge: DAG_EDGE_MODEL,
-  state: MEMBER_MODEL,
-  node: MEMBER_MODEL,
-};
+// the forms' own chrome (array buttons, the JSON hint, field alerts)
+// speaks the same catalog the titles do
+const inspectorForm = memo1((models, type, value, catalog) =>
+  buildFormViewModel(models[type], value, catalog == null
+    ? { session: { idPrefix: 'flow-insp' } } : { session: { idPrefix: 'flow-insp' }, catalog }));
 
-const inspectorForm = memo1((type, value) =>
-  buildFormViewModel(MODELS[type], value, { session: { idPrefix: 'flow-insp' } }));
+/** The words of the Flow studio's live panes, once per catalog. */
+const liveWords = wordsBy((t) => ({
+  machine: t('studio/flow/machine'), dataflow: t('studio/flow/dataflow'), addState: t('studio/flow/add-state'),
+  addNode: t('studio/flow/add-node'), connect: t('studio/flow/connect'), connectArmed: t('studio/flow/connect-armed'),
+  delete: t('studio/flow/delete'), undo: t('studio/flow/undo'), redo: t('studio/flow/redo'), new: t('studio/flow/new'),
+  tabDiagram: t('studio/flow/tab-diagram'), tabText: t('studio/flow/tab-text'), textHint: t('studio/flow/text-hint'),
+  inspector: t('studio/flow/inspector'), inspectorHint: t('studio/flow/inspector-hint'),
+  run: t('studio/flow/run'), stop: t('studio/flow/stop'), runMachine: t('studio/flow/run-machine'),
+  runMachineHint: t('studio/flow/run-machine-hint'), runInput: t('studio/flow/run-input'),
+  runGraph: t('studio/flow/run-graph'), abort: t('studio/flow/abort'), panes: t('studio/panes'),
+  paneDiagram: t('studio/flow/pane-diagram'), paneInspector: t('studio/flow/pane-inspector'), paneRun: t('studio/flow/pane-run'),
+}));
+
+/** The seed picker's words, once per catalog (a seed card is its own rule). */
+const pickerWords = wordsBy((t) => ({ lead: t('studio/flow/picker-lead'), load: t('studio/flow/load') }));
+
+/**
+ * What the inspector is editing (`selected`), or what a diagram target
+ * picks (`target`), in the reader's words.
+ * @param {(id: string, params?: Record<string, unknown>) => string} t
+ * @param {{ type: string, id?: string, index?: number }} selection
+ * @param {'selected' | 'target'} [as]
+ */
+function selectionLabel(t, selection, as = 'selected') {
+  if (selection.type === 'transition' || selection.type === 'edge') {
+    return t(`studio/flow/${as}-${selection.type}`, { index: selection.index });
+  }
+  return t(`studio/flow/${as}-${selection.type}`, { id: selection.id });
+}
 
 // ------------------------------------------------------------------
 // The page view model (called from app/viewmodel.js)
 // ------------------------------------------------------------------
 
-const picker = memo1((templates) => ({ templates: templates.map(t => ({
-  name: t.name, title: t.title, lead: t.lead,
+const picker = memo1((templates, w) => ({ w, templates: templates.map(t => ({
+  name: t.name, title: t.title, lead: t.lead, w,
   preview: JSON.stringify(t.doc, null, 1).slice(0, 220) + '…',
 })) }));
 const NO_TEMPLATES = [];
@@ -241,26 +279,35 @@ const fsmEvents = memo1((doc) => {
   return names;
 });
 
-const composeDiagram = memo1((kind, doc, selectedPath, armed, activeId, nodeStatus, firedFrom, firedTo) => {
+const composeDiagram = memo1((kind, doc, selectedPath, armed, activeId, nodeStatus, firedFrom, firedTo, t) => {
   const compiled = compiledFor(flowText(kind, doc));
   return decorate(compiled.toVnode(), selectables(kind, doc), {
-    selectedPath, armed, activeId, nodeStatus, firedFrom, firedTo,
+    selectedPath, armed, activeId, nodeStatus, firedFrom, firedTo, t,
   });
 });
 
+/** The inspector form's chrome (array buttons, the JSON hint), read by
+ * the form rules at render time, once per catalog. */
+const formLabels = memo1((catalog) => formChromeLabels(catalog ?? undefined));
+
 /**
  * @param {any} flow - the `state.flow` slice
+ * @param {any[]} [templates] - the seed cards the picker offers
+ * @param {{ messages?: any }} [options] - `messages`: the reader's compiled
+ *   catalog (or a function answering it); English when absent
  * @returns {any} the `$.ui.flow` node
  */
-export function flowPageViewModel(flow, templates = NO_TEMPLATES) {
-  if (flow.doc === null) return { picker: picker(templates) };
+export function flowPageViewModel(flow, templates = NO_TEMPLATES, options = {}) {
+  if (flow.doc === null) return { picker: picker(templates, pickerWords(options.messages)) };
+  const t = studioTextOf(options.messages);
   const kind = flow.kind;
   const run = flow.run;
   const selection = flow.selection;
-  const lossReason = textLossReason(kind, flow.doc);
+  const lossReason = textLossReason(kind, flow.doc, options.messages);
   const value = selection === null ? undefined : memberAt(flow.doc, selection.path);
   return {
     live: {
+      w: liveWords(options.messages),
       kind,
       tab: flow.tab,
       diagram: composeDiagram(kind, flow.doc, selection?.path ?? null, flow.connect,
@@ -268,10 +315,11 @@ export function flowPageViewModel(flow, templates = NO_TEMPLATES) {
         run !== null && kind === 'dag' ? run.nodes : null,
         // the transition just taken: old → new state, only on a real move
         run !== null && kind === 'fsm' && run.prev != null && run.prev !== run.current ? run.prev : null,
-        run !== null && kind === 'fsm' ? run.current : null),
+        run !== null && kind === 'fsm' ? run.current : null, t),
       text: flowText(kind, flow.doc),
       textReadOnly: lossReason !== null,
       textLossReason: lossReason,
+      readOnlyText: lossReason === null ? null : t('studio/flow/read-only', { reason: lossReason }),
       parseError: flow.parseError,
       connectArmed: flow.connect !== null,
       canConnect: selection !== null && (selection.type === 'state' || selection.type === 'node'),
@@ -281,11 +329,11 @@ export function flowPageViewModel(flow, templates = NO_TEMPLATES) {
       isFsm: kind === 'fsm',
       selection: selection === null || value === undefined ? null : {
         ...selection,
-        label: `${selection.type} ${selection.type === 'transition' || selection.type === 'edge'
-          ? '#' + selection.index : selection.id}`,
+        label: selectionLabel(t, selection),
       },
+      formLabels: formLabels(catalogOf(options.messages)),
       inspector: selection === null || value === undefined ? null : {
-        form: inspectorForm(selection.type, value),
+        form: inspectorForm(inspectorModels(options.messages), selection.type, value, catalogOf(options.messages)),
       },
       run: run === null ? null : {
         ...run,
@@ -334,9 +382,12 @@ const message = errorMessage;
  * and the effect registry (template loading, fail-closed text parsing,
  * machine sends, dag runs with abort). One closure ref ties the
  * running instances to their effects.
- * @param {{ schedule?: any, template?: (name: string) => any, tasks?: Record<string, Function>, getFlow?: () => any, mintFromCount?: boolean }} [env]
+ * @param {{ schedule?: any, template?: (name: string) => any, tasks?: Record<string, Function>, getFlow?: () => any, mintFromCount?: boolean,
+ *   messages?: any }} [env] - `messages`: the compiled catalog, or a function
+ *   answering the current one, the run's lines and refusals speak
  */
 export function createFlowRuntime(env = {}) {
+  const words = () => studioTextOf(env.messages);
   const ref = { app: null, controller: null, generation: 0, disposed: false };
 
   const boot = (handle, props) => {
@@ -353,7 +404,7 @@ export function createFlowRuntime(env = {}) {
       }
       const app = createApp({
         state: { fsm: slice, ...(props.context ?? {}) },
-        view: [{ match: '$', body: ['div', { class: 'flow-run-current' }, 'current: ', '$.fsm.current'] }],
+        view: [{ match: '$', body: ['div', { class: 'flow-run-current' }, { $const: `${words()('studio/flow/current')} ` }, '$.fsm.current'] }],
         actions,
       }, {
         node: handle.host,
@@ -412,7 +463,7 @@ export function createFlowRuntime(env = {}) {
         const parsed = parseMermaid(props.text);
         const expected = props.kind === 'fsm' ? 'state' : 'flowchart';
         if (parsed.diagram !== expected) {
-          throw new Error(`expected a ${expected} diagram, got '${parsed.diagram}'`);
+          throw new Error(words()('studio/flow/expected-diagram', { expected, got: parsed.diagram }));
         }
         const doc = props.kind === 'fsm'
           ? transformJson(stateToWorkflow, parsed)
@@ -422,7 +473,7 @@ export function createFlowRuntime(env = {}) {
         // (all-task stubs, no output yet), so the gate is the published
         // schema — compile problems surface at run, where they belong.
         if (props.kind === 'fsm') compileFsm(doc);
-        else if (!validateDagDoc(doc)) throw new Error('the projected dag failed jaren-dag schema validation');
+        else if (!validateDagDoc(doc)) throw new Error(words()('studio/flow/dag-schema'));
         dispatch('flow/parsed', { doc });
       }
       catch (err) {
@@ -443,7 +494,7 @@ export function createFlowRuntime(env = {}) {
       if (typeof props.inputText === 'string' && props.inputText.trim() !== '') {
         try { input = JSON.parse(props.inputText); }
         catch (err) {
-          const error = `the input is not JSON: ${message(err)}`;
+          const error = words()('studio/flow/input-not-json', { reason: message(err) });
           send('flow/dag-fail', { message: error });
           return Promise.resolve({ ok: false, error });
         }
@@ -465,7 +516,7 @@ export function createFlowRuntime(env = {}) {
           send('flow/dag-done', { output }); return { ok: true, output };
         },
         err => {
-          const error = err?.nodeId !== undefined ? `${message(err)} (node '${err.nodeId}')` : message(err);
+          const error = err?.nodeId !== undefined ? words()('studio/flow/node-failed', { message: message(err), node: err.nodeId }) : message(err);
           send('flow/dag-fail', { message: error }); return { ok: false, error };
         },
       );

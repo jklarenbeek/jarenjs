@@ -2,14 +2,15 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://jarenjs.dev/schemas/financial-inputs.schema.json",
   "title": "Time Value of Money",
+  "x-msgid": "calc/financial",
   "type": "object",
   "properties": {
-    "nper": { "type": "number", "title": "N — number of periods", "minimum": 0 },
-    "rate": { "type": "number", "title": "I/Y — interest % per period" },
-    "pv": { "type": "number", "title": "PV — present value" },
-    "pmt": { "type": "number", "title": "PMT — payment" },
-    "fv": { "type": "number", "title": "FV — future value" },
-    "solveFor": { "title": "Solve for", "enum": ["pmt", "pv", "fv", "nper", "rate"] }
+    "nper": { "type": "number", "title": "N — number of periods", "minimum": 0, "x-msgid": "calc/financial/nper" },
+    "rate": { "type": "number", "title": "I/Y — interest % per period", "x-msgid": "calc/financial/rate" },
+    "pv": { "type": "number", "title": "PV — present value", "x-msgid": "calc/financial/pv" },
+    "pmt": { "type": "number", "title": "PMT — payment", "x-msgid": "calc/financial/pmt" },
+    "fv": { "type": "number", "title": "FV — future value", "x-msgid": "calc/financial/fv" },
+    "solveFor": { "title": "Solve for", "x-msgid": "calc/financial/solve-for", "enum": ["pmt", "pv", "fv", "nper", "rate"] }
   },
   "required": ["solveFor"]
 }

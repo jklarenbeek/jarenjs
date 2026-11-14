@@ -210,7 +210,7 @@ function languageSwitch(state) {
   const current = state.lang ?? 'en';
   return {
     label: siteText(sitePackOf(state))('site/lang/label'),
-    choices: SITE_LANGUAGES.map(({ code, name }) => ({ value: code, label: name, lang: code, selected: code === current })),
+    choices: SITE_LANGUAGES.map(({ code, name, dir }) => ({ value: code, label: name, lang: code, dir, selected: code === current })),
   };
 }
 
@@ -226,11 +226,17 @@ export function viewModel(state) {
   if (page === 'home') ui.home = homeContent(state);
   if (page === 'benchmarks') ui.bench = benchPage(state);
   if (page === 'charts') ui.chartsPage = chartsPage(state);
-  if (page === 'collection') ui.collection = { mode: state.route.params.mode ?? 'array' };
+  if (page === 'collection') {
+    const mode = state.route.params.mode ?? 'array';
+    ui.collection = { mode, key: `${mode}:${state.lang ?? 'en'}` };
+  }
   if (page === 'project') {
-    ui.project = { ...projectComponent.viewModel({ project: state.project }), templates: PROJECT_TEMPLATE_CARDS };
+    // the shell speaks the site language: a language whose pack is still
+    // loading has no catalog yet, and renders English
+    ui.project = { ...projectComponent.viewModel({ project: state.project }, { messages: catalogFor(state.lang) }),
+      templates: PROJECT_TEMPLATE_CARDS };
     // the site's save/share bar (the IDE store) renders above the IDE shell
-    ui.projectIde = ideModel(state.ide.name, state.ide.names, state.ide.shared);
+    ui.projectIde = ideModel(state.ide.name, state.ide.names, state.ide.shared, ideWords(sitePackOf(state)));
   }
   if (page === 'play') {
     // the panes read the site language, as the run does
@@ -247,8 +253,8 @@ export function viewModel(state) {
       ui.play.formLabels = formLabelsFor(play.config?.locale);
     }
   }
-  if (page === 'flow') ui.flow = flowPageViewModel(state.flow);
-  if (page === 'data') ui.data = dataViewModel(state);
+  if (page === 'flow') ui.flow = { ...flowPageViewModel(state.flow, catalogFor(state.lang)), title: siteText(sitePackOf(state))('site/flow/title') };
+  if (page === 'data') ui.data = { ...dataViewModel(state, catalogFor(state.lang)), title: siteText(sitePackOf(state))('site/data/title') };
   if (page === 'docs') {
     ui.docs = docsPage(state.route.params.s,
       state.site.data.packages, state.site.status.packages,
@@ -256,7 +262,7 @@ export function viewModel(state) {
       state.site.data.contract, state.site.status.contract,
       state.site.data.content);
   }
-  if (page === 'calculator') ui.calculator = contributeCalcViewModel(state, { theme: 'host' });
+  if (page === 'calculator') ui.calculator = contributeCalcViewModel(state, { theme: 'host', messages: catalogFor(state.lang) });
 
   // The README dialog is a global overlay (any page can open it): it
   // only materializes when open, so the shell's $apply renders nothing
@@ -362,11 +368,24 @@ function benchPage(state) {
 }
 
 /** The Project IDE-bar model (name field, share status, saved chips). */
-const ideModel = memo1((name, names, shared) => ({
+const ideModel = memo1((name, names, shared, w) => ({
   name,
   shared,
-  names: names.map((n) => ({ name: n })),
+  w,
+  // a saved-name chip is its own rule, matched at its own node: it carries its words
+  names: names.map((n) => ({ name: n, w })),
 }));
+
+/** The IDE bar's words in the site language, once per site pack. */
+const ideWords = memo1((pack) => {
+  const t = siteText(pack);
+  return {
+    namePlaceholder: t('site/ide/name-placeholder'), save: t('site/ide/save'), share: t('site/ide/share'),
+    shareTitle: t('site/ide/share-title'), download: t('site/ide/download'), downloadTitle: t('site/ide/download-title'),
+    appJson: t('site/ide/app-json'), appJsonTitle: t('site/ide/app-json-title'), offlineZip: t('site/ide/offline-zip'),
+    loadTitle: t('site/ide/load-title'), deleteTitle: t('site/ide/delete-title'),
+  };
+});
 
 /**
  * The docs page's sections, in reading order: the site's own preamble,

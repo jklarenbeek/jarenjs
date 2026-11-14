@@ -1,5 +1,6 @@
 //@ts-check
 import { createVirtualAxis, virtualIndices } from '@jarenjs/core/virtual';
+import { collectionText } from './messages.js';
 
 /** Stable DOM identity; JSON escaping also supports lone surrogate code units in JSON keys.
  * @param {string} id @param {string} key @param {number} [column] */
@@ -122,7 +123,7 @@ export function createCollection(options) {
           style: { position: 'absolute', [config.direction === 'rtl' ? 'right' : 'left']:
             `${column.pinned ? Math.max(column.start, viewport.left) : column.start}px`,
           width: `${column.size}px`, height: '100%', zIndex: column.pinned ? 1 : 0 } },
-        ['div', { class: 'jc-content' }, row.key == null ? (config.loadingLabel ?? 'Loading…') : config.renderCell(config.getItem(row.index), column.index, row.index)]])];
+        ['div', { class: 'jc-content' }, row.key == null ? (config.loadingLabel ?? collectionText(config.messages)('collection/loading')) : config.renderCell(config.getItem(row.index), column.index, row.index)]])];
       });
       return ['div', { class: 'jc-surface', style: { position: 'relative', height: `${result.rowRange?.extent ?? 0}px`,
         width: `${result.columnRange?.extent ?? 0}px` } }, ...rows];

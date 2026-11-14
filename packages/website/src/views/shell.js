@@ -47,7 +47,8 @@ const header =
 const footer =
   ['footer', { class: 'footer' },
     ['div', { class: 'container footer-inner' },
-      ['p', {}, 'MIT licensed. Built with the Jaren suite itself: this page is a JSLT stylesheet over one JSON state document.'],
+      // English by design: an LTR island in a right-to-left page
+      ['p', { lang: 'en', dir: 'ltr' }, 'MIT licensed. Built with the Jaren suite itself: this page is a JSLT stylesheet over one JSON state document.'],
       // which revision produced this page, from the file the build
       // generated — absent (and rendering nothing) until it arrives
       { $apply: '$.ui.build' },
@@ -103,7 +104,8 @@ export const SHELL_RULES = [
         { $if: ['$.ui.collection', ['div', { class: 'page container' },
           ['h1', {}, 'Virtual collections'],
           ['p', { class: 'page-lead' }, 'Explore a catalog with stable selection, keyboard navigation and bounded page requests.'],
-          ['jaren-widget', { name: 'collection-demo', key: '$.ui.collection.mode', props: { mode: '$.ui.collection.mode' } }],
+          // keyed by mode AND language: a switch remounts it in the new words
+          ['jaren-widget', { name: 'collection-demo', key: '$.ui.collection.key', props: { mode: '$.ui.collection.mode' } }],
         ]] },
         { $apply: ['$.ui.docs', 'docs'] },
       ],
@@ -115,7 +117,7 @@ export const SHELL_RULES = [
   // the footer's build provenance
   {
     match: '$.ui.build',
-    body: ['p', { class: 'footer-build', title: '$.title' }, '$.text'],
+    body: ['p', { class: 'footer-build', lang: 'en', dir: 'ltr', title: '$.title' }, '$.text'],
   },
   // the standalone Home link (before the dropdown groups)
   {
@@ -144,7 +146,7 @@ export const SHELL_RULES = [
   // route/set on navigation, or Escape / an outside click from main.js)
   {
     match: '$.ui.lang.choices[*]',
-    body: ['option', { value: '$.value', lang: '$.lang', selected: '$.selected' }, '$.label'],
+    body: ['option', { value: '$.value', lang: '$.lang', dir: '$.dir', selected: '$.selected' }, '$.label'],
   },
   {
     match: '$.ui.nav.groups[*].items[*]',

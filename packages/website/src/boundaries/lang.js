@@ -91,15 +91,17 @@ export async function loadSitePack(code) {
 }
 
 /**
- * Fetch every pack once — the site's and the packages' — so a service
- * worker that caches what it serves can answer each offline; a pack that
- * fails to load is skipped.
- * @returns {Promise<number>} how many loaded
+ * Fetch the reader's stored language once — its site pack and its package
+ * pack — so a service worker that caches what it serves can answer it
+ * offline. Nothing for English (built in) or no stored choice: a reader
+ * downloads only the language they read. A language picked later, online,
+ * is cached as it loads; one never loaded falls back to English offline.
+ * A pack that fails to load is skipped.
+ * @param {string | null} code - the stored site language
+ * @returns {Promise<string[]>} what loaded, as `site:<code>` / `locale:<code>`
  */
-export async function warmSitePacks() {
-  const loaded = await Promise.allSettled([
-    ...Object.keys(SITE_PACK_LOADERS).map((code) => loadSitePack(code)),
-    ...Object.keys(LOCALE_PACK_LOADERS).map((code) => loadLocalePack(code)),
-  ]);
-  return loaded.filter((outcome) => outcome.status === 'fulfilled').length;
+export async function warmSitePacks(code) {
+  if (code === null || !Object.hasOwn(SITE_PACK_LOADERS, code)) return [];
+  const outcomes = await Promise.allSettled([loadSitePack(code), loadLocalePack(code)]);
+  return [`site:${code}`, `locale:${code}`].filter((_, i) => outcomes[i].status === 'fulfilled');
 }

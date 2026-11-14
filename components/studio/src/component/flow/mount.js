@@ -26,7 +26,7 @@ export function createFlowEditor(node, options) {
   }, {
     node, document: node?.ownerDocument, schedule: options.schedule,
     compileTypeTest: createTypeTestCompiler(), eventFields: formEventFields(),
-    viewModel: state => ({ ui: { flow: flowPageViewModel(state.flow, options.templates) } }),
+    viewModel: state => ({ ui: { flow: flowPageViewModel(state.flow, options.templates, { messages: options.messages }) } }),
     widgets: { 'flow-doc': runtime.widget },
     effects: { ...runtime.effects, ...controller.effects,
       'flow-reset-document': () => app.dispatch('flow/load', { kind: options.kind,
@@ -48,6 +48,8 @@ export function createFlowEditor(node, options) {
  * @param {HTMLElement|null} node
  * @param {{ kind?: 'fsm'|'dag'|null, document?: any, input?: any, templates?: any[],
  *   template?: (name: string) => any, tasks?: Record<string, Function>,
- *   schedule?: (flush: () => void) => void, onError?: (error: Error) => void }} [options]
+ *   schedule?: (flush: () => void) => void, onError?: (error: Error) => void,
+ *   messages?: any }} [options] - `messages`: the reader's compiled catalog (or a
+ *   function answering the current one) the editor speaks; English when absent
  */
 export function mountFlowEditor(node, options = {}) { return createFlowEditor(node, options).editor; }

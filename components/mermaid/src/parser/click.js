@@ -27,12 +27,16 @@
  * hostile line costs time linear in its length.
  */
 
+import { mermaidEnglish } from '../messages.js';
+
 /** @typedef {{ name: string, args: string[] }} ClickCall */
 /**
  * @typedef {object} ClickRead
  * @property {{ ids: string[], href: string | null, call: ClickCall | null } | null} value
  *   the statement, or `null` when the text is not a well-formed one
- * @property {string} error why `value` is `null`
+ * @property {string} error why `value` is `null`, in English
+ * @property {string} [msgid] that reason's `mermaidMessagesEn` id
+ * @property {Record<string, unknown>} [params] its parameters
  */
 
 /**
@@ -78,11 +82,12 @@ function skipWord(text, at) {
 }
 
 /**
- * @param {string} error
+ * @param {string} msgid - the refusal's `mermaidMessagesEn` id
+ * @param {Record<string, unknown>} [params]
  * @returns {ClickRead}
  */
-function refused(error) {
-  return { value: null, error };
+function refused(msgid, params = {}) {
+  return { value: null, error: mermaidEnglish(msgid, params), msgid, params };
 }
 
 /**
@@ -118,7 +123,7 @@ export function readClick(line) {
   const ids = line.slice(idsAt, idsEnd).split(',').filter((id) => id !== '');
   const kindAt = skipSpace(line, idsEnd);
 
-  if (ids.length === 0) return refused('click names no task id');
+  if (ids.length === 0) return refused('mermaid/click/no-id');
 
   /** @type {string | null} */
   let href = null;
@@ -132,10 +137,10 @@ export function readClick(line) {
     const word = line.slice(at, end).toLowerCase();
     const next = skipSpace(line, end);
     if (word === 'href' && href === null) {
-      if (line[next] !== '"') return refused('click href must be followed by a double-quoted URL');
+      if (line[next] !== '"') return refused('mermaid/click/href-unquoted');
       const url = readQuoted(line, next);
-      if (url === null) return refused('click href has no closing quote');
-      if (url.text === '') return refused('click href is empty');
+      if (url === null) return refused('mermaid/click/href-unclosed');
+      if (url.text === '') return refused('mermaid/click/href-empty');
       href = url.text;
       at = url.end;
     }
@@ -146,12 +151,11 @@ export function readClick(line) {
       at = read.end;
     }
     else {
-      return refused(`click statement does not expect '${line.slice(at, end)}'`
-        + ' here: it is click <ids> href "<url>" and/or call <name>(<arguments>)');
+      return refused('mermaid/click/unexpected', { word: line.slice(at, end) });
     }
   }
   if (href === null && call === null) {
-    return refused('click statement needs href "<url>" or call <name>(<arguments>)');
+    return refused('mermaid/click/nothing');
   }
   return { value: { ids, href, call }, error: '' };
 }
@@ -228,15 +232,15 @@ function printCall(call) {
  * @param {string} line
  * @param {number} at
  * @returns {{ call: ClickCall, end: number } | string} the call and the index
- *   after its `)`, or why there is none
+ *   after its `)`, or the `mermaidMessagesEn` id of why there is none
  */
 function readCall(line, at) {
   const open = line.indexOf('(', at);
-  if (open === -1) return "click call needs the function's arguments in parentheses";
+  if (open === -1) return 'mermaid/click/call-no-parens';
   const close = line.indexOf(')', open + 1);
-  if (close === -1) return "click call has no closing ')'";
+  if (close === -1) return 'mermaid/click/call-unclosed';
   const name = line.slice(at, open).trim();
-  if (name === '') return 'click call names no function';
+  if (name === '') return 'mermaid/click/call-no-name';
   return { call: { name, args: splitCallArguments(line.slice(open + 1, close)) }, end: close + 1 };
 }
 

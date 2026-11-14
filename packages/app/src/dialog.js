@@ -9,6 +9,10 @@ import { AppRuntimeError, APP_CODES } from './errors.js';
  *   Absent, the content renders with the registry the dialog itself was
  *   mounted from (the renderer's `context.widgets`). The content renders
  *   under the app's controlled mode too (`context.controlled`).
+ * @property {Readonly<Record<string, unknown>> | (() => Readonly<Record<string, unknown>> | undefined)} [messages] -
+ *   The reader's compiled `@jarenjs/locales` pack (or a function answering
+ *   the current one, read at each mount) for the dialog's own words (its
+ *   Close button); a `closeLabel` prop still wins. Absent: English.
  */
 /**
  * Register as an ordinary jaren-widget. Props carry id/title/open/content,
@@ -26,7 +30,9 @@ export function createDialogWidget(options = {}) {
     mount(host, props, emit, context) {
       check(props);
       const handle = { props, owner: null };
+      const messages = typeof options.messages === 'function' ? options.messages() : options.messages;
       handle.owner = createDialog(host, props, { widgets: options.widgets ?? context?.widgets, onEvent: emit,
+        ...(messages == null ? {} : { messages }),
         ...(context?.controlled === undefined ? {} : { controlled: context.controlled }),
         onClose: (_reason, event) => emit(handle.props.close, event) });
       return handle;

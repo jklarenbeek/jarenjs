@@ -3,6 +3,7 @@
 import { CodedError } from '@jarenjs/core/errors';
 import { createDomRenderer } from '../dom.js';
 import { findByRef } from './focus.js';
+import { viewText } from '../messages.js';
 
 /** Stable view host refusals, using the shared coded-error owner. */
 export const DIALOG_CODES = Object.freeze({
@@ -17,7 +18,8 @@ export const DIALOG_CODES = Object.freeze({
  * @property {import('../vnode.js').VNodeJson} [content]
  * @property {string} [initialFocusRef] - Exact data-ref inside the dialog.
  * @property {string} [fallbackFocusRef] - Exact data-ref in the owner document.
- * @property {string} [closeLabel='Close'] - Visible close button text.
+ * @property {string} [closeLabel] - Visible close button text; it wins over
+ *   the dialog's `messages` (default: the `view/dialog/close` message, `Close`).
  */
 /**
  * @typedef {Object} DialogOptions
@@ -27,6 +29,11 @@ export const DIALOG_CODES = Object.freeze({
  * @property {'focus'} [controlled] - The content renderer's controlled mode
  *   (`createDomRenderer`'s): a control the operator is typing into keeps its
  *   text until it loses focus. A dialog mounted as a widget inherits it.
+ * @property {Readonly<Record<string, unknown>> | null} [messages] - The reader's
+ *   compiled catalog (`compileMessageCatalog` over a locale pack): the close
+ *   button's default text renders through it (`view/dialog/close`), falling
+ *   back to English (`viewMessagesEn`); an
+ *   explicit `closeLabel` still wins.
  * @typedef {{update: (props: DialogProps) => void, dispose: () => void}} DialogOwner
  */
 function refuse(code) { throw new CodedError('ViewHostError', code, DIALOG_CODES[code]); }
@@ -130,7 +137,7 @@ export function createDialog(host, initial, options = {}) {
       props = next;
       dialog.setAttribute('id', props.id); title.setAttribute('id', `${props.id}-title`);
       dialog.setAttribute('aria-labelledby', `${props.id}-title`);
-      title.textContent = props.title; closeButton.textContent = props.closeLabel ?? 'Close';
+      title.textContent = props.title; closeButton.textContent = props.closeLabel ?? viewText(options.messages)('view/dialog/close');
       const wasFocused = dialog.contains(doc.activeElement), opening = props.open && !dialog.open;
       if (opening) { opener = doc.activeElement; dialog.showModal(); }
       // Destroy nested modals before closing their parent. Closed widgets keep

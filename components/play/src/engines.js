@@ -638,7 +638,7 @@ export const ENGINE_LIST = [
       return ok(t, out, t1 - t0, t2 - t1, [
         {
           id: 'events', label: t(events.length === EVENT_CAP ? 'play/panel/how-streamed-capped' : 'play/panel/how-streamed', { count: events.length }),
-          kind: 'table', depth: 'deep', columns: [t('play/column/type'), t('play/column/path'), t('play/column/value')],
+          kind: 'table', depth: 'deep', columns: [t('play/column/type'), t('play/column/path'), t('play/column/value')], columnDirs: ['auto', 'ltr', 'ltr'],
           rows: events.map((e) => [e.type, pointerCell(e.path, t), e.type === 'pair' ? stringifyJsonx(e.value) : '']),
         },
         deepCode('roundtrip', t('play/panel/roundtrip'), stringifyJosl(parsed, { mode })),
@@ -696,7 +696,7 @@ export const ENGINE_LIST = [
         { id: 'kept', label: t('play/panel/kept'), kind: 'note', tone: losses.length === 0 ? 'ok' : 'warn', text: kept },
         {
           id: 'events', label: t(events.length === EVENT_CAP ? 'play/panel/how-read-capped' : 'play/panel/how-read', { count: events.length }),
-          kind: 'table', depth: 'deep', columns: [t('play/column/type'), t('play/column/path'), t('play/column/value')],
+          kind: 'table', depth: 'deep', columns: [t('play/column/type'), t('play/column/path'), t('play/column/value')], columnDirs: ['auto', 'ltr', 'ltr'],
           rows: events.map((e) => [e.type, pointerCell(e.path, t), e.type === 'value' ? stringifyJsonx(e.value) : (e.kind ?? '')]),
         },
         deepCode('roundtrip', t('play/panel/jsonx-roundtrip'), roundtrip),
@@ -758,7 +758,7 @@ export const ENGINE_LIST = [
         { id: 'rows', label: t('play/panel/rows', { count: total }), kind: 'table', depth: 'deep', columns, rows },
         {
           id: 'dialect', label: t('play/panel/dialect'), kind: 'table', depth: 'deep',
-          columns: [t('play/column/property'), t('play/column/value')],
+          columns: [t('play/column/property'), t('play/column/value')], columnDirs: ['ltr', 'ltr'],
           rows: [
             [t('play/csv/delimiter'), delim],
             [t('play/csv/header'), String(doc.dialect.headers)],
@@ -770,7 +770,7 @@ export const ENGINE_LIST = [
         },
         ...(doc.repairs.length ? [{
           id: 'repairs', label: t('play/panel/repairs', { count: doc.repairs.length }), kind: /** @type {'table'} */ ('table'), depth: /** @type {'deep'} */ ('deep'),
-          columns: [t('play/column/code'), t('play/column/line'), t('play/column/col'), t('play/column/read')],
+          columns: [t('play/column/code'), t('play/column/line'), t('play/column/col'), t('play/column/read')], columnDirs: ['ltr', 'ltr', 'ltr', 'auto'],
           rows: doc.repairs.map((r) => [r.code, String(r.line), String(r.column), r.message]),
         }] : []),
         { id: 'roundtrip', label: t('play/panel/csv-roundtrip'), kind: 'code', depth: 'deep', text: roundtrip },
@@ -861,7 +861,7 @@ export const ENGINE_LIST = [
       // the next tab — behind the drill-down, a language switch showed nothing
       const panels = errs.length === 0 ? [verdict] : [{
         id: 'errors', label: t('play/panel/errors', { count: errs.length }), kind: 'table',
-        columns: [t('play/column/instance-path'), t('play/column/message')],
+        columns: [t('play/column/instance-path'), t('play/column/message')], columnDirs: ['ltr', 'auto'],
         rows: errs.map((e) => [e.instancePath === '' ? t('play/cell/root') : e.instancePath, e.message]),
       }, verdict];
       return okPanels(panels, report.compileMs ?? null, report.validateMs ?? null);

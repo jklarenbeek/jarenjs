@@ -7,9 +7,10 @@ import { createTypeTestCompiler } from '@jarenjs/validate/query';
 import { createApp, createFormView, formEventFields } from '@jarenjs/app';
 import { createDomRenderer } from '@jarenjs/view';
 import { compileJsltStylesheet } from '@jarenjs/json/jslt';
-import { buildFormModel, buildFormViewModel } from '@jarenjs/forms';
+import { buildFormModel, buildFormViewModel, formChromeLabels } from '@jarenjs/forms';
 import { compileChart } from '@jarenjs/charts';
 import { errorMessage } from './shared/nodes.js';
+import { studioTextOf } from '../messages.js';
 import appSchema from '@jarenjs/app/schemas/jaren-app.schema.json' with { type: 'json' };
 import querySchema from '@jarenjs/json/schemas/jaren-query.schema.json' with { type: 'json' };
 import jsltSchema from '@jarenjs/json/schemas/jaren-jslt.schema.json' with { type: 'json' };
@@ -93,30 +94,56 @@ const formStylesheet = compileJsltStylesheet({
   ],
 }, { memo: true });
 
+/** The same stylesheet with its chrome (array buttons, the JSON hint) in
+ * one language, compiled once per catalog. */
+const formStylesheets = new WeakMap();
+/** @param {any} catalog - a compiled catalog, or undefined for English */
+function formStylesheetFor(catalog) {
+  if (catalog == null || typeof catalog !== 'object') return formStylesheet;
+  let sheet = formStylesheets.get(catalog);
+  if (sheet === undefined) {
+    sheet = compileJsltStylesheet({
+      $jslt: '0.1',
+      rules: [{ match: '$', body: { $apply: '$.form' } }, ...createFormView({ labels: formChromeLabels(catalog) })],
+    }, { memo: true });
+    formStylesheets.set(catalog, sheet);
+  }
+  return sheet;
+}
+
 /** Form models memoized per schema value identity (state is immutable). */
 const formModels = new WeakMap();
 
-function formVnode(props) {
+/**
+ * The form widget's projection in one language: the fields' alerts and
+ * the generated chrome speak `catalog` (forms' own words), the widget's
+ * refusals the studio's.
+ * @param {any} props @param {any} [catalog] - a compiled catalog, or undefined for English
+ */
+function formVnode(props, catalog) {
+  const t = studioTextOf(catalog);
   try {
     const schema = props?.schema;
     if (schema === null || typeof schema !== 'object') {
-      return ['p', { class: 'error-line' }, 'form: props.schema must be a JSON Schema object'];
+      return ['p', { class: 'error-line' }, t('studio/document/form-no-schema')];
     }
     let model = formModels.get(schema);
     if (model === undefined) {
       model = buildFormModel(schema);
       formModels.set(schema, model);
     }
-    return formStylesheet({
-      form: buildFormViewModel(model, props.data ?? null, { validateFields: true }),
+    return formStylesheetFor(catalog)({
+      form: buildFormViewModel(model, props.data ?? null,
+        catalog == null ? { validateFields: true } : { validateFields: true, catalog }),
     });
   }
   catch (err) {
-    return ['p', { class: 'error-line' }, `form: ${message(err)}`];
+    return ['p', { class: 'error-line' }, t('studio/document/form-failed', { message: message(err) })];
   }
 }
 
-function chartVnode(props) {
+/** @param {any} props @param {any} [catalog] - a compiled catalog, or undefined for English */
+function chartVnode(props, catalog) {
   try {
     // inline definitions carry their own data (the charts engine's
     // static path); theme 'host' keeps light/dark live (docs/DESIGN.md §7)
@@ -124,7 +151,7 @@ function chartVnode(props) {
       compileChart(props.config, props.config, { theme: 'host' }).toVnode()];
   }
   catch (err) {
-    return ['p', { class: 'error-line' }, `chart: ${message(err)}`];
+    return ['p', { class: 'error-line' }, studioTextOf(catalog)('studio/document/chart-failed', { message: message(err) })];
   }
 }
 
@@ -142,6 +169,21 @@ const STUDIO_WIDGETS = {
   markdown: vnodeWidget(markdownVnode),
   mermaid: vnodeWidget(mermaidVnode),
 };
+
+/** The same widgets speaking one catalog, built once per catalog. */
+const widgetsByCatalog = new WeakMap();
+/** @param {any} catalog - a compiled catalog, or undefined for English */
+function widgetsFor(catalog) {
+  if (catalog == null || typeof catalog !== 'object') return STUDIO_WIDGETS;
+  let widgets = widgetsByCatalog.get(catalog);
+  if (widgets === undefined) {
+    widgets = { ...STUDIO_WIDGETS,
+      form: vnodeWidget((props) => formVnode(props, catalog)),
+      chart: vnodeWidget((props) => chartVnode(props, catalog)) };
+    widgetsByCatalog.set(catalog, widgets);
+  }
+  return widgets;
+}
 
 //#endregion
 
@@ -307,7 +349,8 @@ function auditDocumentRender(doc) {
  * render-capability widgets, and the runtime's atomic-boot guarantee.
  * @param {any} doc
  * @param {{ node?: any, document?: any, schedule?: (flush: () => void) => void,
- *   onError?: (err: Error) => void }} env
+ *   onError?: (err: Error) => void, messages?: any }} env - `messages`: the
+ *   compiled catalog the refusal and the form widget speak, English when absent
  * @returns {{ ok: true, app: any } | { ok: false, errors: any[], total: number, message: string }}
  */
 function loadStudioDocument(doc, env = {}) {
@@ -317,7 +360,7 @@ function loadStudioDocument(doc, env = {}) {
       ok: false,
       errors: report.errors,
       total: report.total,
-      message: `the document does not validate against the jaren-app meta-schema (${report.total} error${report.total === 1 ? '' : 's'})`,
+      message: studioTextOf(env.messages)('studio/document/invalid', { count: report.total }),
     };
   }
   try {
@@ -325,7 +368,7 @@ function loadStudioDocument(doc, env = {}) {
       node: env.node,
       document: env.document,
       schedule: env.schedule,
-      widgets: STUDIO_WIDGETS,
+      widgets: widgetsFor(env.messages),
       compileTypeTest,
       // the form widget's typed selects and json editor decode here
       eventFields: { ...formEventFields() },

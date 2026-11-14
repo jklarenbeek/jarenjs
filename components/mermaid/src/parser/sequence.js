@@ -13,7 +13,7 @@
 import {
   seqParticipant, seqMessage, seqNote, seqActivation, seqBlock, sequenceAst,
 } from '../ast.js';
-import { fail } from '../errors.js';
+import { failWith } from '../errors.js';
 import { firstToken } from '../utils.js';
 
 /** A message: `A->>+B: text`. */
@@ -148,7 +148,7 @@ export function parseSequence(lines, lineOffset) {
     if (firstWord === 'else' || firstWord === 'and' || firstWord === 'option') {
       const top = stack[stack.length - 1];
       if (top === undefined || top.block === null) {
-        fail(`'${firstWord}' outside a block`, lineNo);
+        failWith('mermaid/sequence/outside-block', { word: firstWord }, lineNo);
       }
       const branch = { label: line.slice(firstWord.length).trim(), statements: [] };
       top.block.branches.push(branch);
@@ -157,7 +157,7 @@ export function parseSequence(lines, lineOffset) {
     }
     if (line === 'end') {
       const entry = stack.pop();
-      if (entry === undefined) fail("unexpected 'end'", lineNo);
+      if (entry === undefined) failWith('mermaid/sequence/stray-end', {}, lineNo);
       current = entry.parent;
       return;
     }

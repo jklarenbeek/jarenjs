@@ -16,7 +16,7 @@
  * ids on both states and transitions, at arbitrary nesting depth.
  */
 
-import { fail } from '../errors.js';
+import { failWith } from '../errors.js';
 import { commentStart } from '../utils.js';
 
 /**
@@ -252,7 +252,7 @@ export function parseState(lines, lineOffset = 0) {
         ? pieces.flatMap((piece) => /** @type {any[]} */ (piece)) : transitionsOf(line);
       // a transition no form reads is refused, as Mermaid refuses it, where
       // it was dropped without a word
-      if (read === null) fail(`'${line}' is no transition: From --> To, with an optional ': label'`, lineNo);
+      if (read === null) failWith('mermaid/state/transition', { line }, lineNo);
       for (const item of read) {
         if (item.state !== undefined) { ensure(item.state, null); continue; }
         const { from, to } = /** @type {{ from: string, to: string }} */ (item);
@@ -305,7 +305,7 @@ export function parseState(lines, lineOffset = 0) {
     if (RE_NOTE_LINE.test(line)) {
       if (RE_NOTE_BLOCK.test(line)) noteOpenedAt = lineNo;
       else if (!RE_NOTE_ONE_LINE.test(line)) {
-        fail(`'${line}' is no note: note left of|right of <state> with ': text' or a block up to 'end note', or note "text" as <id>`, lineNo);
+        failWith('mermaid/state/note', { line }, lineNo);
       }
       continue;
     }
@@ -313,7 +313,7 @@ export function parseState(lines, lineOffset = 0) {
     if (/^accDescr\s*\{/.test(line)) { inDescription = !line.includes('}'); continue; }
     for (const statement of stateStatements(line)) read(statement, lineNo);
   }
-  if (noteOpenedAt !== null) fail("a note opened here is never closed with 'end note'", noteOpenedAt);
+  if (noteOpenedAt !== null) failWith('mermaid/state/unclosed-note', {}, noteOpenedAt);
 
   return { states: order.map((id) => stateMap.get(id)), transitions };
 }

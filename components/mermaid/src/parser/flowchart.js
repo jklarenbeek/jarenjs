@@ -15,7 +15,7 @@
 import {
   flowNode, flowEdge, flowSubgraph, flowClassDef, flowClass, flowStyle, flowchartAst,
 } from '../ast.js';
-import { fail } from '../errors.js';
+import { failWith } from '../errors.js';
 import { readNodeClick } from './click.js';
 import { countCharCode } from '@jarenjs/core/string';
 
@@ -121,7 +121,7 @@ export function parseFlowchart(lines, lineOffset, direction) {
     // subgraph … end
     if (line === 'end') {
       const group = subgraphStack.pop();
-      if (group === undefined) fail("unexpected 'end' with no open subgraph", lineNo);
+      if (group === undefined) failWith('mermaid/flowchart/stray-end', {}, lineNo);
       // A finished subgraph goes to the list only when it is top-level;
       // nested subgraphs still record membership via their id.
       subgraphs.push(flowSubgraph(group.id, group.label, group.direction, group.nodes));
@@ -318,16 +318,16 @@ function parseChain(stmt, lineNo, ensureNode, edges, classes, edgeIds) {
     const edge = readEdge(s, pos);
     // what follows a node is a link or nothing, as in Mermaid: trailing text
     // is refused, where it was dropped without a word
-    if (edge === null) fail(`expected a link after a node, found '${s.slice(pos)}'`, lineNo);
+    if (edge === null) failWith('mermaid/flowchart/expected-link', { rest: s.slice(pos) }, lineNo);
     pos = edge.pos;
     pos = skipSpace(s, pos);
     const nextGroup = readVertexGroup(s, pos, lineNo, ensureNode, classes);
-    if (nextGroup === null) fail('expected a node after a link', lineNo);
+    if (nextGroup === null) failWith('mermaid/flowchart/expected-node', {}, lineNo);
     pos = nextGroup.pos;
     // `A & B & … --> C & D & …` is a link per pair, so a few kilobytes of
     // source can name millions of edges
     if (edges.length + prevGroup.ids.length * nextGroup.ids.length > MAX_EDGES) {
-      fail(`a flowchart holds at most ${MAX_EDGES} edges`, lineNo);
+      failWith('mermaid/flowchart/too-many-edges', { max: MAX_EDGES }, lineNo);
     }
     for (const from of prevGroup.ids) {
       for (const to of nextGroup.ids) {
@@ -374,7 +374,7 @@ function readVertex(s, pos, lineNo) {
   const opened = matchOpener(s, p);
   if (opened !== null) {
     const closed = scanToCloser(s, opened.contentStart, opened.closers);
-    if (closed === null) fail(`unterminated '${opened.opener}' shape for node '${id}'`, lineNo);
+    if (closed === null) failWith('mermaid/flowchart/unterminated-shape', { opener: opened.opener, id }, lineNo);
     label = stripQuotes(s.slice(opened.contentStart, closed.at).trim());
     shape = closed.shape;
     p = closed.end;

@@ -26,6 +26,8 @@
  *     arrows pan. A pointer-only zoom control is not usable by everyone.
  */
 
+import { mermaidText } from './messages.js';
+
 const MIN_SCALE = 1;
 const MAX_SCALE = 8;
 const ZOOM_STEP = 1.35;
@@ -43,7 +45,9 @@ function readViewBox(svg) {
 /**
  * Attach pan/zoom to one rendered diagram element.
  * @param {any} el the block element wrapping the `<svg>`
- * @param {{ document?: any }} [env] injection seam for tests
+ * @param {{ document?: any, messages?: Readonly<Record<string, unknown>> | null }} [env] injection
+ *   seam for tests, and the reader's compiled catalog for the controls' names
+ *   and the diagram's description (English without one)
  * @returns {(() => void)|undefined} a teardown function, or undefined when
  *   there is nothing to attach to
  */
@@ -54,6 +58,7 @@ export function attachInteractiveDiagram(el, env = {}) {
   if (home === null) return undefined;
 
   const doc = env.document ?? el.ownerDocument ?? globalThis.document;
+  const say = mermaidText(env.messages);
   const view = { ...home };
   let scale = 1;
 
@@ -198,9 +203,9 @@ export function attachInteractiveDiagram(el, env = {}) {
     controls = doc.createElement('div');
     controls.className = 'mm-controls';
     const buttons = [
-      ['+', 'Zoom in', () => { const [x, y] = centre(); zoomAt(ZOOM_STEP, x, y); }],
-      ['−', 'Zoom out', () => { const [x, y] = centre(); zoomAt(1 / ZOOM_STEP, x, y); }],
-      ['↺', 'Reset view', reset],
+      ['+', say('mermaid/interactive/zoom-in'), () => { const [x, y] = centre(); zoomAt(ZOOM_STEP, x, y); }],
+      ['−', say('mermaid/interactive/zoom-out'), () => { const [x, y] = centre(); zoomAt(1 / ZOOM_STEP, x, y); }],
+      ['↺', say('mermaid/interactive/reset'), reset],
     ];
     for (const [glyph, label, action] of buttons) {
       const button = doc.createElement('button');
@@ -216,8 +221,7 @@ export function attachInteractiveDiagram(el, env = {}) {
 
   el.setAttribute('tabindex', '0');
   el.setAttribute('role', 'group');
-  el.setAttribute('aria-label',
-    'Diagram. Use plus and minus to zoom, arrow keys to pan, zero to reset.');
+  el.setAttribute('aria-label', say('mermaid/interactive/diagram'));
   el.classList.add('mm-interactive');
 
   svg.addEventListener('wheel', onWheel, { passive: false });

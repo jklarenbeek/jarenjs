@@ -106,7 +106,7 @@ const shell = {
       ['div', { class: 'jplay-head' },
         ['strong', { class: 'jplay-engine' }, '$.engine.label'],
         // the lead is English prose by design, and says so
-        ['span', { class: 'muted jplay-lead', lang: 'en' }, '$.engine.lead'],
+        ['span', { class: 'muted jplay-lead', lang: 'en', dir: 'ltr' }, '$.engine.lead'],
       ],
       // live mode selects (josl dialect, csv strict/repair) — empty for most
       ['div', { class: 'jplay-options' }, [{ $apply: '$.optionPanes[*]' }]],
@@ -193,7 +193,8 @@ const shell = {
 const railGroup = {
   match: `${PLAY_BASE}.rail[*]`, mode: PLAY_MODE,
   body: ['div', { class: { $if: ['$.active', 'jplay-group active', 'jplay-group'] } },
-    ['div', { class: 'jplay-group-head muted' }, '$.label'],
+    // an engine's name ('$query') or its translated label: its own direction
+    ['div', { class: 'jplay-group-head muted', dir: 'auto' }, '$.label'],
     [{ $apply: '$.examples[*]' }],
   ],
 };
@@ -204,6 +205,9 @@ const railExample = {
   body: ['button', {
     type: 'button',
     class: { $if: ['$.active', 'jplay-ex active', 'jplay-ex'] },
+    // an example's name is example content, English by design: an LTR
+    // island inside a right-to-left page
+    lang: 'en', dir: 'ltr',
     on: { click: { action: 'play/example', with: '$.id' } },
   }, '$.label'],
 };
@@ -223,9 +227,9 @@ const sourcePane = {
   body: ['label', { class: 'jplay-pane' },
     paneLabel,
     { $if: [{ $eq: ['$.control', 'text'] },
-      ['input', { type: 'text', class: 'editor line', spellcheck: 'false', value: '$.value', 'aria-invalid': invalid,
+      ['input', { type: 'text', class: 'editor line', dir: 'ltr', spellcheck: 'false', value: '$.value', 'aria-invalid': invalid,
         on: { input: { action: 'play/source', with: { key: '$.key' } } } }],
-      ['textarea', { class: 'editor', rows: 6, spellcheck: 'false', value: '$.value', 'aria-invalid': invalid,
+      ['textarea', { class: 'editor', dir: 'ltr', rows: 6, spellcheck: 'false', value: '$.value', 'aria-invalid': invalid,
         on: { input: { action: 'play/source', with: { key: '$.key' } } } }]] },
   ],
 };
@@ -235,7 +239,7 @@ const dataPane = {
   match: `${PLAY_BASE}.dataPanes[*]`, mode: PLAY_MODE,
   body: ['label', { class: 'jplay-pane' },
     paneLabel,
-    ['textarea', { class: 'editor', rows: 8, spellcheck: 'false', value: '$.value', 'aria-invalid': invalid,
+    ['textarea', { class: 'editor', dir: 'ltr', rows: 8, spellcheck: 'false', value: '$.value', 'aria-invalid': invalid,
       on: { input: { action: 'play/data', with: { key: '$.key' } } } }],
   ],
 };
@@ -305,7 +309,7 @@ const panelBody = { $if: ['$.isView', ['div', { class: 'jplay-view' }, '$.vnode'
     { $if: ['$.isNote', ['p', { class: '$.noteClass' }, '$.text'],
       { $if: ['$.isCards',
         ['div', { class: 'jplay-cards' }, [{ $apply: '$.items[*]' }]],
-        ['pre', { class: 'code-block' }, ['code', {}, '$.text']]] }] }] }] };
+        ['pre', { class: 'code-block', dir: 'ltr' }, ['code', {}, '$.text']]] }] }] }] };
 
 const activePanel = { match: `${PLAY_BASE}.result.activePanel`, mode: PLAY_MODE, body: panelBody };
 const deepPanel = { match: `${PLAY_BASE}.result.deepPanel`, mode: PLAY_MODE, body: panelBody };
@@ -325,7 +329,7 @@ const deepCard = { match: `${PLAY_BASE}.result.deepPanel.items[*]`, mode: PLAY_M
  * embedded Latin token lands on the wrong side of it. */
 const columnBody = ['th', {}, '$.label'];
 const rowBody = ['tr', {}, [{ $apply: '$.cells[*]' }]];
-const cellBody = ['td', { dir: 'auto' }, '$.text'];
+const cellBody = ['td', { dir: '$.dir' }, '$.text'];
 const tableColumn = { match: `${PLAY_BASE}.result.activePanel.columns[*]`, mode: PLAY_MODE, body: columnBody };
 const tableRow = { match: `${PLAY_BASE}.result.activePanel.rows[*]`, mode: PLAY_MODE, body: rowBody };
 const tableCell = { match: `${PLAY_BASE}.result.activePanel.rows[*].cells[*]`, mode: PLAY_MODE, body: cellBody };

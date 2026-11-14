@@ -1,16 +1,24 @@
 //@ts-check
 /** Draft and review state; all evaluation and domain command services are injected. */
 import { cloneJson, deepFreeze, isJsonValue } from '@jarenjs/core/object';
+import { rulesText } from './messages.js';
+
+export { rulesMessagesEn, rulesText } from './messages.js';
 
 /**
  * Preserve draft text/caret independently of asynchronous preview publications.
- * @param {{text:string,preview:(text:string)=>any,command?:(request:any)=>any,onChange?:(state:any)=>void,maxChanges?:number}} options
+ * The outcome messages it writes into its state (`message`) render through
+ * `options.messages`, a compiled locale catalog, falling back to English
+ * ({@link rulesMessagesEn}) per id.
+ * @param {{text:string,preview:(text:string)=>any,command?:(request:any)=>any,onChange?:(state:any)=>void,maxChanges?:number,
+ *   messages?:Readonly<Record<string, unknown>>|null}} options
  */
 export function createRuleEditor(options) {
   if (typeof options?.text !== 'string' || typeof options.preview !== 'function') throw new TypeError('Rule editor needs a draft and preview service');
   let text = options.text, start = 0, end = 0, plan = null, phase = 'draft', message = '', generation = 0, disposed = false, committing = null;
   const selected = new Set();
   const maxChanges = options.maxChanges ?? 10000;
+  const t = rulesText(options.messages);
   if (!Number.isSafeInteger(maxChanges) || maxChanges < 1) throw new TypeError('Invalid preview change credit');
   const state = () => deepFreeze(cloneJson({ text, selectionStart: start, selectionEnd: end, plan, selected: [...selected], phase, message, reportOnly: typeof options.command !== 'function' }));
   const publish = () => { if (!disposed) options.onChange?.(state()); };
@@ -41,10 +49,10 @@ export function createRuleEditor(options) {
       }
       catch (error) {
         if (!disposed && mine === generation) {
-          let reason = 'Check the rule document.';
+          let reason = t('rules/message/check');
           try { if (typeof error?.message === 'string') reason = error.message.slice(0, 512); }
           catch { /* Host failures may contain inaccessible properties. */ }
-          phase = 'error'; message = `Preview failed: ${reason}`; plan = null; selected.clear();
+          phase = 'error'; message = t('rules/message/preview-failed', { reason }); plan = null; selected.clear();
         }
       }
       publish(); return state();
@@ -64,9 +72,9 @@ export function createRuleEditor(options) {
       const mine = generation; phase = 'committing'; message = ''; publish();
       committing = Promise.resolve().then(() => options.command(request)).then((result) => {
         if (!isJsonValue(result)) throw new TypeError('Command result must be JSON');
-        if (!disposed && mine === generation) { phase = 'review'; message = ['committed', 'replay'].includes(result?.state) ? 'Selected changes committed.' : 'Command refused. Preview current data again.'; }
+        if (!disposed && mine === generation) { phase = 'review'; message = ['committed', 'replay'].includes(result?.state) ? t('rules/message/committed') : t('rules/message/refused'); }
         return result;
-      }).catch(() => { if (!disposed && mine === generation) { phase = 'review'; message = 'Command failed. Preview current data again.'; } return { state: 'error', reason: 'command-failed' }; })
+      }).catch(() => { if (!disposed && mine === generation) { phase = 'review'; message = t('rules/message/failed'); } return { state: 'error', reason: 'command-failed' }; })
         .finally(() => { committing = null; publish(); });
       return committing;
     },

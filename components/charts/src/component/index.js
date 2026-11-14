@@ -31,6 +31,10 @@ const CONFIG_MEMO_LIMIT = 64;
  *  bindings emitted from every value mark, for a floating-tooltip host
  *  (see {@link tooltipView}); absent leaves charts on their native
  *  `<title>` hover only
+ * @property {Readonly<Record<string, unknown>> | null} [messages] the reader's
+ *  compiled catalog (`compileMessageCatalog` over a locale pack) for the words
+ *  a chart adds to its definition, falling back to English per id; the
+ *  component memoizes per definition, so a language change makes a new one
  */
 /**
  * @typedef {object} ChartComponent
@@ -55,7 +59,7 @@ const CONFIG_MEMO_LIMIT = 64;
  * @returns {ChartComponent}
  */
 export function createChartComponent(options = {}) {
-  const compileOptions = { theme: options.theme, tooltip: options.tooltip };
+  const compileOptions = { theme: options.theme, tooltip: options.tooltip, messages: options.messages };
 
   /** Data-identity memo; inner caches key on the config's identity. */
   /** @type {WeakMap<object, import('@jarenjs/core/cache').SemanticCache<any>>} */

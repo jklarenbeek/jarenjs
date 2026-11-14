@@ -14,13 +14,42 @@ import { LAYOUT_DEFAULT } from '../project.js';
 import { describe, assembleArtifacts } from '../assemble.js';
 import { reconcileBuffer } from './host.js';
 import { KIND_BADGE } from './editor.js';
+import { studioTextOf, wordsBy } from '../messages.js';
+
+/** The project's default name, as the engine and the saved document spell it. */
+const UNTITLED = 'Untitled project';
+
+/** The words of the IDE shell, once per catalog. */
+const shellWords = wordsBy((t) => ({
+  panes: t('studio/panes'), paneFiles: t('studio/project/pane-files'), paneEditor: t('studio/project/pane-editor'),
+  paneStage: t('studio/project/pane-stage'), new: t('studio/project/new'), layout: t('studio/project/layout'),
+  layoutSide: t('studio/project/layout-side'), layoutSideTitle: t('studio/project/layout-side-title'),
+  layoutSwap: t('studio/project/layout-swap'), layoutSwapTitle: t('studio/project/layout-swap-title'),
+  layoutStack: t('studio/project/layout-stack'), layoutStackTitle: t('studio/project/layout-stack-title'),
+  autorun: t('studio/project/autorun'), run: t('studio/project/run'), files: t('studio/project/files'),
+  addFile: t('studio/project/add-file'), addFileOption: t('studio/project/add-file-option'),
+  fileName: t('studio/project/file-name'), conflict: t('studio/project/conflict'),
+  conflictTake: t('studio/project/conflict-take'), conflictTakeTitle: t('studio/project/conflict-take-title'),
+  routeInput: t('studio/project/route-input'), routeInputFile: t('studio/project/route-input-file'),
+  routeInputDefault: t('studio/project/route-input-default'), routeModel: t('studio/project/route-model'),
+  routeModelFile: t('studio/project/route-model-file'), routeModelMemory: t('studio/project/route-model-memory'),
+  routeCollection: t('studio/project/route-collection'),
+  routeCollectionPlaceholder: t('studio/project/route-collection-placeholder'),
+  resize: t('studio/project/resize'), stage: t('studio/stage/head'), stageHint: t('studio/stage/hint'),
+  // a rail row is its own rule, matched at its own node: it carries these
+  rail: { errors: t('studio/project/file-errors'), delete: t('studio/project/file-delete'),
+    deleteTitle: t('studio/project/file-delete-title') },
+}));
+
+/** What a kind of file is, in the reader's words (the engine's `role` is English). */
+const roleOf = (t, kind, role) => (Object.hasOwn(KIND_BADGE, kind) ? t(`studio/role/${kind}`) : role);
 
 /** The phone panes, in switcher order. */
 const MOBILE_PANES = ['files', 'editor', 'stage'];
 
 /** The stage the active file drives. */
-function deriveStage(project, activeMeta, results, revision, committed) {
-  if (activeMeta === null) return { kind: 'empty', note: 'Add a file to begin.' };
+function deriveStage(project, activeMeta, results, revision, committed, t) {
+  if (activeMeta === null) return { kind: 'empty', note: t('studio/stage/empty') };
   if (committed?.store) return { kind: 'app', widget: 'studio-data', mount: committed };
   if (committed?.kind === 'app' || ['app', 'fsm', 'dag'].includes(activeMeta.kind)) {
     // A host that runs the app live commits the LAST-GOOD assembled
@@ -32,7 +61,7 @@ function deriveStage(project, activeMeta, results, revision, committed) {
     }
     const artifact = assembleArtifacts(project).artifacts.find((a) => a.name === activeMeta.name);
     if (artifact === undefined || !activeMeta.valid) {
-      return { kind: 'boot-failed', note: `${activeMeta.name} does not boot yet — fix the file (the last good render stays).` };
+      return { kind: 'boot-failed', note: t('studio/stage/boot-failed', { name: activeMeta.name }) };
     }
     // the reference-stable mount is memoized by the host at wiring time;
     // here it is the data: the assembled document + the reboot revision
@@ -48,18 +77,22 @@ function deriveStage(project, activeMeta, results, revision, committed) {
     return { kind: 'result', ran: result !== null, nodes: result?.nodes ?? [] };
   }
   if (activeMeta.kind === 'state' || activeMeta.kind === 'data') {
-    return { kind: 'inert', note: 'An input — edit it as text; it feeds the app, a query or a validation.' };
+    return { kind: 'inert', note: t('studio/stage/input') };
   }
-  return { kind: 'inert', note: `Press Run to open the ${activeMeta.role}.` };
+  return { kind: 'inert', note: t('studio/stage/press-run', { role: roleOf(t, activeMeta.kind, activeMeta.role) }) };
 }
 
 /**
  * Derive the IDE view model from `state.project`.
  * @param {{ project: any }} state - the site state carrying the `project` slice
- * @param {{ operators?: { toOptions: () => any } }} [options]
+ * @param {{ operators?: { toOptions: () => any }, messages?: Parameters<typeof studioTextOf>[0] }} [options] -
+ *   `messages`: the reader's compiled catalog (or a function answering
+ *   it); English when absent
  * @returns {any}
  */
 export function projectViewModel(state, options = {}) {
+  const t = studioTextOf(options.messages);
+  const words = shellWords(options.messages);
   const slice = state.project ?? {};
   const project = {
     project: slice.project ?? '0.1',
@@ -79,6 +112,8 @@ export function projectViewModel(state, options = {}) {
     name: f.name,
     kind: f.kind,
     role: f.role,
+    roleLabel: roleOf(t, f.kind, f.role),
+    w: words.rail,
     badge: KIND_BADGE[f.kind] ?? 'json',
     valid: f.valid,
     active: f.name === activeName,
@@ -115,8 +150,12 @@ export function projectViewModel(state, options = {}) {
     : { text: committedText, dirty: false };
   const reconciled = reconcileBuffer(buffer, committedText);
   const editorValue = reconciled.text;
+  const name = slice.name ?? UNTITLED;
+  const lineCount = editorValue === '' ? 0 : editorValue.split('\n').length;
   return {
-    name: slice.name ?? 'Untitled project',
+    w: words,
+    // the default name is the package's word; a name the reader gave is theirs
+    name: name === UNTITLED ? t('studio/project/untitled') : name,
     // the incoming text a conflicting write carried, or null
     conflict: reconciled.conflict === null ? null : reconciled.conflict.incoming,
     layout: project.layout,
@@ -142,14 +181,16 @@ export function projectViewModel(state, options = {}) {
     activeValid: activeMeta?.valid ?? true,
     activeErrors: activeMeta?.errors ?? [],
     editorValue,
-    lineCount: editorValue === '' ? 0 : editorValue.split('\n').length,
+    lineCount,
+    lineCountText: t('studio/project/line-count', { count: lineCount }),
     rail,
     fileCount: project.files.length,
+    fileCountText: t('studio/project/file-count', { count: project.files.length }),
     problems,
     problemCount: problems.length,
-    stage: deriveStage(project, activeMeta, results, revision, committed),
+    stage: deriveStage(project, activeMeta, results, revision, committed, t),
     stageError: slice.stageError ?? null,
-    saveState: (slice.dirty === true || reconciled.dirty) ? 'Unsaved ●' : 'Saved',
+    saveState: t((slice.dirty === true || reconciled.dirty) ? 'studio/project/unsaved' : 'studio/project/saved'),
     // the phone pane (Files · Editor · Stage). This is host chrome, not a
     // project member: `layout` travels with the saved document, which pane
     // a phone was showing does not.

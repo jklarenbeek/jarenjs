@@ -24,4 +24,6 @@ const DEMO_TASKS = {
 
 
 export const createFlowRuntime = (env = {}) => createRuntime({ template: flowTemplate, tasks: DEMO_TASKS, ...env });
-export const flowPageViewModel = flow => viewModel(flow, FLOW_TEMPLATES);
+/** The Flow page's view model; `messages` is the compiled catalog of the
+ * site language (undefined: English). */
+export const flowPageViewModel = (flow, messages) => viewModel(flow, FLOW_TEMPLATES, { messages });

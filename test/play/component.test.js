@@ -151,7 +151,8 @@ describe('playViewModel', () => {
     assert.strictEqual(open.result.deepPanel.id, 'rows');
     assert.strictEqual(open.result.deepPanel.isTable, true);
     assert.deepStrictEqual(open.result.deepPanel.columns, [{ label: 'a' }, { label: 'b' }]);
-    assert.deepStrictEqual(open.result.deepPanel.rows, [{ cells: [{ text: '1' }, { text: '2' }] }]);
+    // a table without columnDirs: every cell takes its own text's direction
+    assert.deepStrictEqual(open.result.deepPanel.rows, [{ cells: [{ text: '1', dir: 'auto' }, { text: '2', dir: 'auto' }] }]);
     // deepPick selects among several; a stale pick falls back to the first
     const picked = playViewModel(state({ result, deep: true, deepPick: 'roundtrip' }));
     assert.strictEqual(picked.result.deepPanel.id, 'roundtrip');

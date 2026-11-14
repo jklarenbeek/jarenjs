@@ -20,3 +20,10 @@ export { assembleArtifacts, classifyChange, describe } from './assemble.js';
 export { STUDIO_CODES, StudioError } from './errors.js';
 export { resolveProjectFile, projectFileContext, renameProjectFile, writeProjectArtifact } from './resolve.js';
 export { ADDABLE_KINDS, fileSkeleton } from './skeletons.js';
+/**
+ * The studio's English message catalog (`studio/...` ids) and the text
+ * function that renders a compiled locale pack over it, English per id
+ * where the pack is silent. A host passes the compiled catalog as the
+ * `messages` option of the view models, runtimes and widgets.
+ */
+export { studioMessagesEn, studioText } from './messages.js';

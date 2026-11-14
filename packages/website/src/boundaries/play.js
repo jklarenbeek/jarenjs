@@ -13,7 +13,8 @@ import { createMdx } from '@jarenjs/md/mdx';
 import { compileJsonQuery } from '@jarenjs/json';
 import { operatorRegistry } from './engines.js';
 import { md, mdArticle, UNTRUSTED } from './markdown.js';
-import { mermaid } from './mermaid.js';
+import { mermaidFor } from './mermaid.js';
+import { mermaidErrorText } from '@jarenjs/mermaid';
 import { chartRenderer } from './charts.js';
 import { runValidation, localizeErrors, catalogFor } from './validator.js';
 import { siteText } from '../messages.js';
@@ -80,23 +81,26 @@ const renderers = {
       ],
     };
   },
-  mermaid: (source) => {
-    const step = timed(() => mermaid.compile(source));
+  mermaid: (source, _config, ctx) => {
+    // the diagram's own words (its error card, an accessible name) in the
+    // reader's language
+    const component = mermaidFor(ctx?.messages);
+    const step = timed(() => component.compile(source));
     const compiled = step.value;
     const doc = compiled.doc;
-    const rendered = timed(() => mermaid.view(source));
+    const rendered = timed(() => component.view(source));
     return {
       compileMs: step.ms,
       runMs: rendered.ms,
       vnode: rendered.value,
       deep: [
         { id: 'ast', label: 'The geometry-free AST', kind: 'code',
-          text: doc ? formatJson(doc.ast) : String(compiled.parseError?.message ?? 'parse error') },
+          text: doc ? formatJson(doc.ast) : compiled.parseError ? mermaidErrorText(compiled.parseError, ctx?.messages) : 'parse error' },
         { id: 'roundtrip', label: 'Canonical Mermaid', kind: 'code', text: compiled.toText() },
       ],
     };
   },
-  charts: (source, config) => chartRenderer(source, config),
+  charts: (source, config, ctx) => chartRenderer(source, config, ctx),
 };
 
 /** The initial slice: the first example, loaded and ready to run. */

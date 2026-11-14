@@ -33,6 +33,11 @@ export {
   createSafePolicy,
 } from './safe.js';
 
+export {
+  viewMessagesEn,
+  viewText,
+} from './messages.js';
+
 /** @typedef {import('./dom.js').DomRendererOptions} DomRendererOptions */
 /** @typedef {import('./dom.js').WidgetDef} WidgetDef */
 /** @typedef {import('./dom.js').EventBindingHandler} EventBindingHandler */

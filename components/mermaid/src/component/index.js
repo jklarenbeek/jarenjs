@@ -36,6 +36,10 @@ import { compileMermaid, diagramToVnode } from '../index.js';
  *   `dateFormat`/`axisFormat` needs for a month or weekday token (`compileDateLocale(pack).names`)
  * @property {(text: string) => any} [parseFrontmatter] the front-matter parser, in place of the
  *   built-in YAML subset
+ * @property {Readonly<Record<string, unknown>> | null} [messages] the reader's compiled catalog
+ *   (`compileMessageCatalog` over a locale pack): the error card, the words the render adds and a
+ *   parse diagnostic render through it, falling back to English per id; the memo is per source,
+ *   so a language change makes a new component
  * @property {number} [memoLimit] LRU size for the source-string memo (default 32)
  * @property {string | URL} [base] base URL for `mermaid-load`
  * @property {typeof globalThis.fetch} [fetch] fetch implementation for `mermaid-load`
@@ -64,7 +68,7 @@ import { compileMermaid, diagramToVnode } from '../index.js';
 export function createMermaidComponent(options = {}) {
   const compileOptions = { theme: options.theme, renderers: options.renderers,
     dateNames: options.dateNames, parseFrontmatter: options.parseFrontmatter,
-    htmlLabels: options.htmlLabels, safe: options.safe };
+    htmlLabels: options.htmlLabels, safe: options.safe, messages: options.messages };
 
   const { compile, view } = createProjectionMemo({
     memoLimit: options.memoLimit ?? 32,

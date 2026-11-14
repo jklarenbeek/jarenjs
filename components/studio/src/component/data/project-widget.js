@@ -7,6 +7,7 @@ import { semanticKey } from '@jarenjs/core/object';
 import { applyJSONPatch } from '@jarenjs/json/patch';
 import { resolveProjectFile, projectFileContext } from '../../index.js';
 import { dataContract as contract } from '../../data/contract.js';
+import { studioTextOf } from '../../messages.js';
 
 const SCAN = [{ $for: { row: '$[*]' }, $return: '$row' }];
 const unwrap = (outcome) => {
@@ -16,6 +17,12 @@ const unwrap = (outcome) => {
   });
 };
 
+/**
+ * The project's private data stores and the stage widget that shows one.
+ * @param {{ createWorker?: Function, messages?: any }} [options] - `messages`:
+ *   the compiled catalog, or a function answering the current one, the
+ *   widget's chrome and status line speak (English when absent)
+ */
 export function createProjectDataRuntime(options = {}) {
   const workers = new Map();
   const retire = (name) => {
@@ -73,24 +80,25 @@ export function createProjectDataRuntime(options = {}) {
     return { entry, collection, modelName: modelFile.name };
   };
 
+  const say = (id, params) => studioTextOf(options.messages)(id, params);
   const draw = (h) => {
     if (h.dead) return;
+    const t = studioTextOf(options.messages);
     h.render(['section', { class: 'project-data' },
-      ['p', {}, 'Private SQLite store · ', h.modelName ?? '',
-        ' · rows last until the model or seed changes, or the project closes.'],
+      ['p', {}, t('studio/store/lead', { model: h.modelName ?? '' })],
       ['p', { role: 'status', class: 'project-data-status' }, h.status],
-      ['label', {}, 'Insert document (JSON)', ['textarea', {
-        class: 'editor project-data-insert', 'aria-label': 'Insert document (JSON)',
+      ['label', {}, t('studio/store/insert'), ['textarea', {
+        class: 'editor project-data-insert', 'aria-label': t('studio/store/insert'),
         value: h.draft, on: { input: 'draft' }, rows: 4,
       }]],
-      ['button', { class: 'btn', type: 'button', on: { click: 'insert' }, disabled: !h.ready }, 'Insert row'],
-      ['label', {}, 'Delete key (JSON)', ['input', {
-        class: 'editor line', 'aria-label': 'Delete key (JSON)', value: h.deleteDraft, on: { input: 'delete-draft' },
+      ['button', { class: 'btn', type: 'button', on: { click: 'insert' }, disabled: !h.ready }, t('studio/store/insert-row')],
+      ['label', {}, t('studio/store/delete'), ['input', {
+        class: 'editor line', 'aria-label': t('studio/store/delete'), value: h.deleteDraft, on: { input: 'delete-draft' },
       }]],
-      ['button', { class: 'btn', type: 'button', on: { click: 'delete' }, disabled: !h.ready }, 'Delete row'],
-      ['h3', {}, 'Result'], ['pre', { class: 'project-data-result' }, JSON.stringify(h.result, null, 2)],
-      ['h3', {}, 'Live result'], ['pre', { class: 'project-data-live' }, JSON.stringify(h.live, null, 2)],
-      ['details', {}, ['summary', {}, 'Query plan'],
+      ['button', { class: 'btn', type: 'button', on: { click: 'delete' }, disabled: !h.ready }, t('studio/store/delete-row')],
+      ['h3', {}, t('studio/store/result')], ['pre', { class: 'project-data-result' }, JSON.stringify(h.result, null, 2)],
+      ['h3', {}, t('studio/store/live')], ['pre', { class: 'project-data-live' }, JSON.stringify(h.live, null, 2)],
+      ['details', {}, ['summary', {}, t('studio/store/plan')],
         ['pre', { class: 'project-data-plan' }, JSON.stringify(h.plan, null, 2)]],
     ]);
   };
@@ -98,7 +106,7 @@ export function createProjectDataRuntime(options = {}) {
     h.subscription?.stop();
     const generation = ++h.generation;
     const current = () => !h.dead && h.generation === generation;
-    h.props = props; h.ready = false; h.status = 'Opening SQLite…'; draw(h);
+    h.props = props; h.ready = false; h.status = say('studio/store/opening'); draw(h);
     try {
       const project = { files: props.files };
       const file = props.files.find((f) => f.name === props.name);
@@ -112,14 +120,14 @@ export function createProjectDataRuntime(options = {}) {
       const result = await entry.request('data.execute', args);
       const plan = await entry.request('data.explain', args);
       if (!current()) return;
-      h.result = result; h.plan = plan; h.ready = true; h.status = 'Ready'; draw(h);
+      h.result = result; h.plan = plan; h.ready = true; h.status = say('studio/store/ready'); draw(h);
       h.subscription = entry.client.subscribe('data.live', args, {
         onSnapshot: (value) => { if (current()) { h.live = value; draw(h); } },
         onPatch: ({ patch }) => { if (current()) { h.live = applyJSONPatch(h.live, patch); draw(h); } },
         onError: (outcome) => {
-          if (current()) { h.status = `Live query: ${outcome.error.details?.message ?? outcome.error.message}`; draw(h); }
+          if (current()) { h.status = say('studio/store/live-failed', { message: outcome.error.details?.message ?? outcome.error.message }); draw(h); }
         },
-        onEnd: ({ reason }) => { if (current()) { h.status = `Live query ended: ${reason}`; draw(h); } },
+        onEnd: ({ reason }) => { if (current()) { h.status = say('studio/store/live-ended', { reason }); draw(h); } },
       });
     }
     catch (error) { if (current()) { h.status = String(error.message ?? error); draw(h); } }
@@ -139,7 +147,7 @@ export function createProjectDataRuntime(options = {}) {
             collection: h.collection, ...(binding === 'insert' ? { doc: value } : { key: value }),
           });
           if (h.dead || h.generation !== generation) return;
-          h.status = 'Committed'; draw(h);
+          h.status = say('studio/store/committed'); draw(h);
         }
         catch (error) { if (!h.dead && h.generation === generation) { h.status = error.message; draw(h); } }
       } });

@@ -29,12 +29,19 @@ async function source(mode) {
   catch(error) { await client.close(); throw error; }
 }
 
-/** Website integration; lifecycle and interaction remain in the reusable package. */
-export function createCollectionDemoWidget() {
+/**
+ * Website integration; lifecycle and interaction remain in the reusable package.
+ * `options.messages` answers the reader's compiled catalog at mount (the
+ * language of the collections' and the rule editor's chrome); a language
+ * change remounts the widget.
+ * @param {{ messages?: () => (Readonly<Record<string, unknown>> | null | undefined) }} [options]
+ */
+export function createCollectionDemoWidget(options = {}) {
   return {
     mount(host, props) {
+      const messages = options.messages?.();
       if (props.mode === 'lexical') return mountLexicalDemo(host);
-      if (props.mode === 'rules') return mountRulesDemo(host);
+      if (props.mode === 'rules') return mountRulesDemo(host, { messages });
       if (props.mode === 'adoption') return mountAdoptionDemo(host);
       const document = host.ownerDocument;
       let disposed = false, collection = null, close = null;
@@ -59,7 +66,7 @@ export function createCollectionDemoWidget() {
           rowSize: props.mode === 'measured' ? 36 : 44, overscan: props.mode === 'measured' ? 8 : 12,
           columnSize: 160, columnOverscan: 1, measured: props.mode === 'measured',
           measureRow: (_row,index) => index === 0 ? 72 : index === 1 ? 18 : index === 2 ? 54 : index === 100 ? 90 : 36,
-          label:'Catalog grid', renderCell: (row,column) => column === 0 ? row.label : `Field ${column}: ${row.rank}`,
+          label:'Catalog grid', messages, renderCell: (row,column) => column === 0 ? row.label : `Field ${column}: ${row.rank}`,
           onChange: (state) => { status.textContent = `${state.rows} mounted rows · ${state.cells} cells · ${state.state}`; },
         });
         const button = document.createElement('button');button.className='btn';button.textContent='Export selected rows';

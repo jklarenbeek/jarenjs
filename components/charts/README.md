@@ -151,7 +151,11 @@ chart.ast.series.map((s) => s.points.map((p) => p.v.toFixed(2)));
 The right axis has its own domain, nice ticks and label (drawn on the
 right edge, reading top to bottom) and draws no gridlines: the left axis
 owns them. The legend marks each right-axis series `(right axis)`, and so
-does the series' hover text; a tooltip binding's payload carries
+does the series' hover text — the one word a chart adds to its definition,
+the message `charts/series/right-axis` of `chartsMessagesEn`, which a
+compiled locale catalog passed as `messages` (to `compileChart`,
+`createChartSession` or `createChartComponent`) translates, falling back to
+English; a tooltip binding's payload carries
 `axis: 'right'`. The x axis, `log` and a `domain: { y: 'step' }` policy
 apply to both value axes; a pinned `domain.y` (`{ min, max }`) is in the
 left axis's units and pins only the left one. A name in `y2.series` that

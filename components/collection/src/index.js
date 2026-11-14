@@ -3,6 +3,7 @@
 export { createCollection } from './collection.js';
 export { createCollectionInteraction } from './interaction.js';
 export { createDragInteraction } from './drag.js';
+export { collectionMessagesEn, collectionText } from './messages.js';
 /** @typedef {import('./drag.js').DragState} DragState */
 /** @typedef {import('./drag.js').DragSource} DragSource */
 /** @typedef {import('./drag.js').DragTarget} DragTarget */

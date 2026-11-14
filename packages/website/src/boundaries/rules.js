@@ -5,7 +5,11 @@ import { mountCollection } from '@jarenjs/collection/component';
 import { createDomRenderer } from '@jarenjs/view';
 import { openRuleExample, savedRule, ruleRowSchema } from '../examples/reviewed-rules.js';
 
-/** Driver injection lets the same example run in browser and portable lifecycle tests. */
+/**
+ * Driver injection lets the same example run in browser and portable lifecycle tests.
+ * `options.messages` (the reader's compiled catalog) is the language of the
+ * editor's and the collection's chrome.
+ */
 export function mountRulesDemo(host, options = {}) {
   const document = host.ownerDocument;
   const render = createDomRenderer(host, { document });
@@ -25,8 +29,8 @@ export function mountRulesDemo(host, options = {}) {
     let rows = await example.rows();
     collection = mountCollection(host.querySelector('[data-rules-collection]'), { count: rows.length, keyAt: (i) => rows[i]?.id,
       indexOf: (id) => rows.findIndex((row) => row.id === id), getItem: (i) => rows[i], height: 264, rowSize: 44, columnCount: 3, columnSize: 150,
-      label: 'Current inventory', renderCell: (row, column) => column === 0 ? row.id : column === 1 ? `Amount: ${row.amount}` : `Revision: ${row.revision}` });
-    editor = mountRuleEditor(host.querySelector('[data-rules-editor]'), { text: JSON.stringify(savedRule, null, 2), schema: ruleRowSchema,
+      label: 'Current inventory', messages: options.messages, renderCell: (row, column) => column === 0 ? row.id : column === 1 ? `Amount: ${row.amount}` : `Revision: ${row.revision}` });
+    editor = mountRuleEditor(host.querySelector('[data-rules-editor]'), { text: JSON.stringify(savedRule, null, 2), schema: ruleRowSchema, messages: options.messages,
       pageSize: 10, writableFields: ['/amount'], preview: (text) => example.preview(text), command: async (request) => {
         const result = await example.command.execute(request);
         rows = await example.rows();

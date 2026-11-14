@@ -6,9 +6,15 @@
 import { semanticKey } from '@jarenjs/core/object';
 import { renameProjectFile, writeProjectArtifact, resolveProjectFile, fileSkeleton } from '../index.js';
 import { applyPatchThrough } from '../editor-patch.js';
+import { studioTextOf } from '../messages.js';
 
-/** @param {{ getApp: () => any, host: any, projectData?: any, projectTemplate?: Function, download?: Function, exportProject?: Function, debounceMs?: number }} env */
+/**
+ * @param {{ getApp: () => any, host: any, projectData?: any, projectTemplate?: Function, download?: Function, exportProject?: Function, debounceMs?: number,
+ *   messages?: any }} env - `messages`: the compiled catalog, or a function
+ *   answering the current one, the status lines and the run results speak
+ */
 export function createProjectController(env) {
+  const words = () => studioTextOf(env.messages);
   const { projectSnapshot, projectAppFile, commitProject, runProjectFile } = env.host;
   const projectData = env.projectData ?? { dispose() {}, sync() {} };
   let stopped = false, detach = null, timer = null, requestId = 0;
@@ -91,7 +97,7 @@ export function createProjectController(env) {
     if (stopped || !state) return;
     const file = state.files.find(f => f.name === state.active);
     if (file && !file.model && ['query', 'jslt', 'schema', 'contract'].includes(file.kind))
-      app.dispatch('project/result', { name: state.active, result: runProjectFile(state, state.active) });
+      app.dispatch('project/result', { name: state.active, result: runProjectFile(state, state.active, { messages: env.messages }) });
   }
   function attach() {
     if (detach || stopped) return;
@@ -131,7 +137,7 @@ export function createProjectController(env) {
         await Promise.resolve(); finish({ ok: true, requested: true, ...read() }); return;
       }
       try {
-        const result = await runProjectFile(state, props.name, { model: projectData.execute });
+        const result = await runProjectFile(state, props.name, { model: projectData.execute, messages: env.messages });
         if (stopped) return;
         if (result === null) { finish({ ok: false, error: `File '${props.name}' has no result runner in this host.` }); return; }
         if (env.getApp().getState().project.files !== state.files) { finish({ ok: false, stale: true, result: copy(result) }); return; }
@@ -144,25 +150,26 @@ export function createProjectController(env) {
     // the name Studio downloads always carried
     'project-download': (props, dispatch) => {
       const file = projectAppFile(env.getApp().getState().project);
-      if (file === null) { dispatch('ide/shared', 'this project has no app document'); return; }
+      const t = words();
+      if (file === null) { dispatch('ide/shared', t('studio/status/no-app')); return; }
       let doc;
       try { doc = resolveProjectFile(env.getApp().getState().project, file.name).doc; }
-      catch { dispatch('ide/shared', 'the app document is not valid JSON'); return; }
+      catch { dispatch('ide/shared', t('studio/status/app-invalid-json')); return; }
       const saved = env.download?.('jaren-studio-app.json', JSON.stringify(doc, null, 2));
-      dispatch('ide/shared', saved === true ? 'document downloaded' : 'download unavailable here');
+      dispatch('ide/shared', t(saved === true ? 'studio/status/document-downloaded' : 'studio/status/download-unavailable'));
     },
     'project-eject': async (props, dispatch) => {
       try {
-        dispatch('ide/shared', 'Preparing offline project…');
+        dispatch('ide/shared', words()('studio/status/offline-preparing'));
         const saved = await env.exportProject?.(projectSnapshot(env.getApp().getState().project));
-        dispatch('ide/shared', saved ? 'offline project downloaded' : 'offline export unavailable here');
+        dispatch('ide/shared', words()(saved ? 'studio/status/offline-downloaded' : 'studio/status/offline-unavailable'));
       }
       catch (error) { dispatch('ide/shared', error.message); }
     },
     'project-export': (props, dispatch) => {
       const snapshot = projectSnapshot(env.getApp().getState().project);
       const saved = env.download?.('jaren-project.json', JSON.stringify(snapshot, null, 2));
-      dispatch('ide/shared', saved === true ? 'project downloaded' : 'download unavailable here');
+      dispatch('ide/shared', words()(saved === true ? 'studio/status/project-downloaded' : 'studio/status/download-unavailable'));
     },
 
     // the Project IDE: the editor commits the ACTIVE file's text (rewriting
@@ -200,7 +207,7 @@ export function createProjectController(env) {
       // a transform / schema / contract file re-runs; an app file force-restarts
       if (active !== undefined && !fragment && !active.model && (active.kind === 'query' || active.kind === 'jslt' || active.kind === 'schema'
         || active.kind === 'contract')) {
-        dispatch('project/result', { name: state.active, result: runProjectFile(state, state.active) });
+        dispatch('project/result', { name: state.active, result: runProjectFile(state, state.active, { messages: env.messages }) });
         return;
       }
       const mount = commit.mount === null ? null : { ...commit.mount, revision: commit.mount.revision + 1 };

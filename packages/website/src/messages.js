@@ -26,6 +26,19 @@ export const siteMessagesEn = Object.freeze({
   'site/play/link-ready': 'link ready',
   'site/play/link-copied': 'link copied',
   'site/schema/invalid-json': 'Invalid JSON: {reason}',
+  'site/ide/name-placeholder': 'Experiment name…',
+  'site/ide/save': 'Save',
+  'site/ide/share': 'Share',
+  'site/ide/share-title': 'Copy a link that restores this project',
+  'site/ide/download': 'Download',
+  'site/ide/download-title': 'Download every project file as JSON',
+  'site/ide/app-json': 'App JSON',
+  'site/ide/app-json-title': 'Download only the app document as JSON',
+  'site/ide/offline-zip': 'Offline ZIP',
+  'site/ide/load-title': 'Load this experiment',
+  'site/ide/delete-title': 'Delete this experiment',
+  'site/data/title': 'Data',
+  'site/flow/title': 'Flow',
 });
 
 const ENGLISH = compileMessageCatalog(siteMessagesEn);

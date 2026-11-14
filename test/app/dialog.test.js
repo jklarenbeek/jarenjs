@@ -114,6 +114,34 @@ describe('dialog lifecycle and app binding', () => {
     widget.unmount(handle); widget.unmount(handle); assert.equal(host.childNodes.length, 0);
   });
 
+  it("the widget's Close speaks the reader's pack, read at each mount; a closeLabel still wins", async () => {
+    const { compileMessageCatalog } = await import('@jarenjs/core/message');
+    const { nl } = await import('@jarenjs/locales');
+    const { host, walk } = nativeFacade();
+    const props = { id: 'x', title: 'T', open: true, content: ['p', {}, 'body'], close: 'close' };
+    /** @type {any} */
+    let current;
+    const widget = createDialogWidget({ messages: () => current });
+    const closeText = () => {
+      const button = walk(host).find((/** @type {any} */ n) => n.tagName === 'button');
+      return button.textContent ?? (button.childNodes ?? []).map((/** @type {any} */ c) => c.nodeValue).join('');
+    };
+    let handle = widget.mount(host, props, () => {});
+    assert.equal(closeText(), 'Close', 'no pack: English');
+    widget.unmount(handle);
+    current = compileMessageCatalog(nl);
+    handle = widget.mount(host, props, () => {});
+    assert.equal(closeText(), nl['view/dialog/close']);
+    widget.unmount(handle);
+    handle = widget.mount(host, { ...props, closeLabel: 'Klaar' }, () => {});
+    assert.equal(closeText(), 'Klaar');
+    widget.unmount(handle);
+    const fixed = createDialogWidget({ messages: compileMessageCatalog(nl) });
+    handle = fixed.mount(host, props, () => {});
+    assert.equal(closeText(), nl['view/dialog/close'], 'a pack given once');
+    fixed.unmount(handle);
+  });
+
   it('nested widgets render from the registry the dialog was mounted from; an explicit one still wins', () => {
     const { host, doc, walk } = nativeFacade();
     const badge = (/** @type {string} */ mark) => ({ mount: (node) => { node.setAttribute('data-badge', mark); return null; } });

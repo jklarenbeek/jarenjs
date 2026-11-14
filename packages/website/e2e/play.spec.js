@@ -205,11 +205,32 @@ test('the JSON Schema engine validates on the stage (errors table on screen, ver
   await expect(page.locator('.jplay-engine')).toHaveText('JSON Schema');
   // a failing run leads with its errors, on screen: no Explain needed
   await expect(page.locator('.jplay-table')).toBeVisible();
-  await expect(page.locator('.jplay-table td').first()).toHaveAttribute('dir', 'auto');
+  // the instance path is code (left to right); the message takes its own direction
+  await expect(page.locator('.jplay-table td').first()).toHaveAttribute('dir', 'ltr');
+  await expect(page.locator('.jplay-table td').nth(1)).toHaveAttribute('dir', 'auto');
   await page.locator('.jplay-tabs .seg-btn', { hasText: 'Verdict' }).click();
   await expect(page.locator('.jplay-note')).toContainText('error'); // the verdict
   // the Messages (locale) option is offered
   await expect(page.locator('.jplay-options select')).toBeVisible();
+});
+
+test('under Arabic the page reads right to left, and code and English blocks stay left-to-right islands', async ({ page }) => {
+  await page.goto('/#/play?lang=ar');
+  await expect(page.locator('html')).toHaveAttribute('dir', 'rtl');
+  await page.locator('.jplay-ex', { hasText: 'Invalid data' }).click();
+  await expect(page.locator('.jplay-table')).toBeVisible();
+  const islands = await page.evaluate(() => {
+    const wrong = [];
+    let checked = 0;
+    for (const node of document.querySelectorAll('[lang="en"], textarea, pre, code, input.editor, .jplay-table td[dir="ltr"]')) {
+      checked++;
+      if (getComputedStyle(node).direction !== 'ltr') wrong.push(`${node.tagName.toLowerCase()}.${node.className}`);
+    }
+    return { wrong, checked, page: getComputedStyle(document.body).direction };
+  });
+  expect(islands.page).toBe('rtl');
+  expect(islands.wrong).toEqual([]);
+  expect(islands.checked).toBeGreaterThan(20);
 });
 
 test('the validate data pane toggles to a generated form and edits re-validate', async ({ page }) => {

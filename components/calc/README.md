@@ -49,6 +49,17 @@ fallback rates for its exposed configuration and both initialization paths.
 Programmer Equals records the selected base on the tape; grouping spaces stay
 out of the committed expression so it can be used in the next calculation.
 
+The words the calculator shows — the mode tabs, the panels' labels, the
+rates line, the financial form's field labels (by their `x-msgid`), the
+error card and every expression diagnostic in the display — are the
+English catalog `calcMessagesEn`. Pass a compiled locale catalog as
+`messages` to `contributeCalcViewModel(state, { messages })` (or to
+`createCalcComponent`, for its standalone app), to `calcToVnode`, or to
+`evaluate` (whose error `message` is then the reader's),
+and they render through it, falling back to English per id. The keypad's
+symbols and function names, the base and unit names, and the message of an
+error a host function throws are not translated.
+
 ## The numeric kernel lives in `@jarenjs/core`
 
 Reusable primitives were pushed *down* into core, so any package can use

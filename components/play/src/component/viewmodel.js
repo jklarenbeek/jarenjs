@@ -108,7 +108,10 @@ function shapePanel(p) {
   if (kind === 'table') return {
     ...base,
     columns: (p.columns ?? []).map((label) => ({ label: String(label) })),
-    rows: (p.rows ?? []).map((cells) => ({ cells: (cells ?? []).map((text) => ({ text: String(text) })) })),
+    // a column the engine marks as code (a path, a value) reads left to
+    // right in any page; any other cell takes its own text's direction
+    rows: (p.rows ?? []).map((cells) => ({ cells: (cells ?? []).map((text, i) =>
+      ({ text: String(text), dir: p.columnDirs?.[i] === 'ltr' ? 'ltr' : 'auto' })) })),
   };
   if (kind === 'cards') return {
     ...base,

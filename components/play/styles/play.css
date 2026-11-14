@@ -70,6 +70,10 @@
 .jplay-head { display: flex; align-items: baseline; gap: var(--space-2, 0.5rem); flex-wrap: wrap; }
 .jplay-engine { color: var(--fg, #0f172a); }
 .jplay-lead { font-size: 0.8rem; }
+/* code and the English the playground keeps (leads, example names) read
+   left to right inside a right-to-left page */
+.jplay textarea.editor, .jplay input.editor, .jplay pre, .jplay code, .jplay [lang="en"] { direction: ltr; unicode-bidi: isolate; }
+:root[dir="rtl"] .jplay-ex { text-align: right; }
 .jplay-pane { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .jplay-pane-label { font-size: 0.7rem; font-family: var(--mono, monospace); }
 /* the last error's claim on a pane: the location rides on the label, and the

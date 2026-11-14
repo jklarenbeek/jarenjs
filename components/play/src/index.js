@@ -65,6 +65,9 @@ export { playMessagesEn, playText } from './messages.js';
  * @property {any} [vnode] - `view`: a host-rendered vnode, spliced verbatim
  * @property {string[]} [columns] - `table`: the header labels
  * @property {Array<Array<any>>} [rows] - `table`: cells, row-major
+ * @property {Array<'ltr' | 'auto'>} [columnDirs] - `table`: per column, `'ltr'` for one
+ *   that holds code (a path, a value), read left to right in any page; else
+ *   each cell takes its own text's direction
  * @property {'ok' | 'warn' | 'info'} [tone] - `note`: the callout tone
  * @property {Array<{ title: string, value: string, note?: string }>} [items]
  *   `cards`: a row of stat cards (matches, compile/run timings, …)

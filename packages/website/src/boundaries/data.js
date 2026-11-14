@@ -38,4 +38,6 @@ function platformDeps() {
 export const createTransport = (deps = platformDeps()) => transport(deps);
 export const createDataRuntime = (env = {}) => runtime({ ...DATA_EXAMPLE, transport: () => createTransport(),
   corpus: env.site ? () => env.site.request('site.corpus') : undefined, ...env });
-export const dataViewModel = state => viewModel(state, DATA_EXAMPLE);
+/** The Data page's view model; `messages` is the compiled catalog of the
+ * site language (undefined: English). */
+export const dataViewModel = (state, messages) => viewModel(state, messages === undefined ? DATA_EXAMPLE : { ...DATA_EXAMPLE, messages });

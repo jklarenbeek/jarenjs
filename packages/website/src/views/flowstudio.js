@@ -2,13 +2,14 @@
 import { FLOW_RULES as shared } from '@jarenjs/studio/flow';
 export const FLOW_RULES = [
   { ...shared[0], body: ['div', { class: 'page container' },
-      ['h1', {}, 'Flow'],
-      ['p', { class: 'page-lead' },
+      ['h1', {}, '$.title'],
+      // the page's lead and its sources line are prose, English by design
+      ['p', { class: 'page-lead', lang: 'en', dir: 'ltr' },
         'Executable workflows as one JSON document: a jaren-fsm machine or a jaren-dag dataflow, drawn by the mermaid engine, edited by clicking the diagram, a generated inspector or the diagram text — three views of the same value, patched by RFC 6902 and run live by @jarenjs/flow. No eval, no server.'],
     shared[0].body,
   ] },
   { ...shared[1], body: [...shared[1].body,
-      ['p', { class: 'muted' },
+      ['p', { class: 'muted', lang: 'en', dir: 'ltr' },
         'The formats are specified in ',
         ['a', { href: 'https://github.com/jklarenbeek/jarenjs/blob/main/packages/flow/docs/FLOW-FORMAT.md' },
           'FLOW-FORMAT.md'],

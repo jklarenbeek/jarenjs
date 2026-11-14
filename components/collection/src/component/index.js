@@ -3,6 +3,7 @@ import { createDomRenderer } from '@jarenjs/view';
 import { logicalScrollOffset } from '@jarenjs/core/virtual';
 import { createCollection, collectionItemId } from '../collection.js';
 import { createCollectionInteraction } from '../interaction.js';
+import { collectionText } from '../messages.js';
 let nextId = 0;
 
 /**
@@ -51,7 +52,7 @@ export function mountCollection(host, options) {
     if (disposed) return;
     if (frame !== null) { cancelFrame(frame); frame = null; }
     element.setAttribute('role', config.role ?? 'grid');
-    element.setAttribute('aria-label', config.label ?? 'Collection');
+    element.setAttribute('aria-label', config.label ?? collectionText(config.messages)('collection/label'));
     element.setAttribute('aria-multiselectable', 'true');
     element.setAttribute('dir', config.direction ?? 'ltr');
     if (config.role !== 'listbox') {

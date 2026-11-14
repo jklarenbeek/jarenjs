@@ -18,6 +18,7 @@ import { renderSequence } from './sequence.js';
 import { renderGantt } from './gantt.js';
 import { renderStructured, renderPlaceholder, structuredSections } from './misc.js';
 import { errorVnode } from './error.js';
+import { mermaidErrorText } from '../messages.js';
 import { clickTooltips } from './marks.js';
 
 /**
@@ -86,9 +87,14 @@ function labelLayout(config, options) {
  * Flowchart and state labels are HTML inside `foreignObject` when the host
  * passes `htmlLabels: true` (MERMAID-FORMAT §7) and neither the diagram's
  * config turns them off nor `safe` is set.
+ * The words the render adds — the error card's, a placeholder's, the class
+ * and ER titles and relations headings, a Gantt's accessible title and
+ * description — and a parse diagnostic on the card render through
+ * `options.messages`, the reader's compiled catalog (`compileMessageCatalog`
+ * over a locale pack), falling back to English (`mermaidMessagesEn`) per id.
  * @param {import('../ast.js').DiagramDocument | string} docOrSource
  * @param {{ theme?: any, htmlLabels?: boolean, safe?: boolean, renderers?: { pie?: DiagramRenderer },
- *   [k: string]: any }} [options]
+ *   messages?: Readonly<Record<string, unknown>> | null, [k: string]: any }} [options]
  * @returns {any} an SVG vnode
  */
 export function diagramToVnode(docOrSource, options = {}) {
@@ -98,7 +104,7 @@ export function diagramToVnode(docOrSource, options = {}) {
   }
   catch (err) {
     // a parse failure has no document, so only the caller's theme is known
-    return toError(err, typeof docOrSource === 'string' ? docOrSource : '', createTheme(options.theme ?? 'default'));
+    return toError(err, typeof docOrSource === 'string' ? docOrSource : '', createTheme(options.theme ?? 'default'), options.messages);
   }
   try {
     const theme = createTheme(options.theme ?? authoredTheme(doc.config));
@@ -117,21 +123,21 @@ export function diagramToVnode(docOrSource, options = {}) {
       case 'pie': {
         const pie = options.renderers?.pie;
         return typeof pie === 'function' ? pie(doc.ast, theme, hash)
-          : renderPlaceholder('pie', theme, hash, 'parsed — no pie renderer was injected');
+          : renderPlaceholder('pie', theme, hash, 'mermaid/placeholder/pie', options.messages);
       }
       case 'gantt':
-        return renderGantt(layoutGantt(doc.ast, { ...options, config: doc.config }), theme, hash);
+        return renderGantt(layoutGantt(doc.ast, { ...options, config: doc.config }), theme, hash, options.messages);
       case 'class':
       case 'er': {
-        const { title, sections } = structuredSections(doc.diagram, doc.ast);
+        const { title, sections } = structuredSections(doc.diagram, doc.ast, options.messages);
         return renderStructured(title, sections, theme, hash);
       }
       default:
-        return renderPlaceholder(doc.diagram, theme, hash);
+        return renderPlaceholder(doc.diagram, theme, hash, undefined, options.messages);
     }
   }
   catch (err) {
-    return toError(err, '', createTheme(options.theme ?? 'default'));
+    return toError(err, '', createTheme(options.theme ?? 'default'), options.messages);
   }
 }
 
@@ -170,13 +176,14 @@ function authoredTheme(config) {
  * @param {any} err
  * @param {string} source
  * @param {ReturnType<typeof createTheme>} theme
+ * @param {Readonly<Record<string, unknown>> | null | undefined} messages the reader's compiled catalog
  * @returns {any}
  */
-function toError(err, source, theme) {
+function toError(err, source, theme, messages) {
   if (err instanceof MermaidParseError) {
     const lines = source.split(/\r\n?|\n/);
     const sourceLine = err.line > 0 && err.line <= lines.length ? lines[err.line - 1] : '';
-    return errorVnode(err.message, err.line, sourceLine, theme);
+    return errorVnode(mermaidErrorText(err, messages), err.line, sourceLine, theme, messages);
   }
-  return errorVnode(err && err.message ? String(err.message) : String(err), 0, '', theme);
+  return errorVnode(err && err.message ? String(err.message) : String(err), 0, '', theme, messages);
 }

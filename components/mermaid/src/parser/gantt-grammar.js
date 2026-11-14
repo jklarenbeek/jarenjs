@@ -39,6 +39,7 @@
  */
 
 import { isoWeekOfYear, partsFromEpoch, compileDateFormat } from '@jarenjs/core/dates';
+import { mermaidEnglish } from '../messages.js';
 
 /** Mermaid's own default when a diagram declares no `dateFormat`. */
 export const DEFAULT_DATE_FORMAT = 'YYYY-MM-DD';
@@ -58,19 +59,16 @@ const MOMENT_TO_LDML = Object.freeze({
   ZZ: 'XX', Z: 'XXX',
 });
 
-const WEEK_NUMBER_REFUSED = 'a week number names a date only under a week-year rule'
-  + ' (which week is the first, which day starts it); the core kernel derives the ISO week'
-  + ' from a date and reads none back';
-
-/** Documented dayjs tokens this engine will not read, and why. */
+/** Documented dayjs tokens this engine will not read, each by the
+ * `mermaidMessagesEn` id of the refusal that says why. */
 const MOMENT_REFUSED = Object.freeze({
-  SS: 'the fraction tokens are tenths (S) and milliseconds (SSS); there is no hundredths field',
-  Q: 'a quarter names three months, not one, and the core parser keeps no quarter field',
-  Do: 'the ordinal suffix is locale text and this engine ships no ordinal data',
-  DDDD: 'the day of the year is derived from a date, not a field of one',
-  DDD: 'the day of the year is derived from a date, not a field of one',
-  ww: WEEK_NUMBER_REFUSED,
-  w: WEEK_NUMBER_REFUSED,
+  SS: 'mermaid/gantt/date-hundredths',
+  Q: 'mermaid/gantt/date-quarter',
+  Do: 'mermaid/gantt/date-ordinal',
+  DDDD: 'mermaid/gantt/date-day-of-year',
+  DDD: 'mermaid/gantt/date-day-of-year',
+  ww: 'mermaid/gantt/date-week-number',
+  w: 'mermaid/gantt/date-week-number',
 });
 
 /**
@@ -138,13 +136,14 @@ const STRFTIME_COMPUTED = Object.freeze({
   s: (ms) => '' + Math.floor(ms / 1000),
 });
 
-/** Documented strftime specifiers this engine will not write, and why. */
+/** Documented strftime specifiers this engine will not write, each by
+ * the `mermaidMessagesEn` id of the refusal that says why. */
 const STRFTIME_REFUSED = Object.freeze({
-  e: 'a space-padded day is a token the formatter does not have',
-  c: 'it expands to %e, which is unsupported',
-  U: 'd3 counts weeks from the first Sunday; the core week number is ISO, so the two disagree',
-  W: 'd3 counts weeks from the first Monday; the core week number is ISO, so the two disagree',
-  w: 'd3 numbers Sunday 0; the core weekday number is ISO, where 1 is Monday',
+  e: 'mermaid/gantt/axis-space-padded',
+  c: 'mermaid/gantt/axis-locale-date',
+  U: 'mermaid/gantt/axis-sunday-week',
+  W: 'mermaid/gantt/axis-monday-week',
+  w: 'mermaid/gantt/axis-sunday-zero',
 });
 
 /** The LDML tokens that need a `names` provider before they compile. */
@@ -153,12 +152,14 @@ const NEEDS_NAMES = new Set(['MMM', 'MMMM', 'EEE', 'EEEE', 'a']);
 const MAX_MOMENT_TOKEN = 4;
 
 /**
- * @typedef {{ value: any, error: string | null }} Adapted
+ * @typedef {{ value: any, error: string | null, msgid?: string, params?: Record<string, unknown> }} Adapted
+ *   `error` is the refusal in English; `msgid` and `params` name it in
+ *   `mermaidMessagesEn`, for a reader's catalog
  */
 
-/** @param {string} message @returns {Adapted} */
-function bad(message) {
-  return { value: null, error: message };
+/** @param {string} msgid @param {Record<string, unknown>} params @returns {Adapted} */
+function bad(msgid, params) {
+  return { value: null, error: mermaidEnglish(msgid, params), msgid, params };
 }
 
 /** @param {any} value @returns {Adapted} */
@@ -191,7 +192,7 @@ export function momentToLdml(pattern) {
     if (ch === '[') { // dayjs' bracket escape
       const end = pattern.indexOf(']', i + 1);
       if (end < 0)
-        return bad(`unterminated '[' escape in dateFormat '${pattern}'`);
+        return bad('mermaid/gantt/date-escape', { pattern });
       literal += pattern.slice(i + 1, end);
       i = end + 1;
       continue;
@@ -212,12 +213,11 @@ export function momentToLdml(pattern) {
       continue;
     }
     if (MOMENT_REFUSED[matched] !== undefined) {
-      return bad(`dateFormat token '${matched}' is not supported: ${MOMENT_REFUSED[matched]}`);
+      return bad(MOMENT_REFUSED[matched], { token: matched });
     }
     if (MOMENT_EPOCH[matched] !== undefined) {
       if (matched !== pattern) {
-        return bad(`dateFormat token '${matched}' must be the whole dateFormat: dayjs reads`
-          + ' an epoch only as the entire date, and beside other text it reads nothing');
+        return bad('mermaid/gantt/date-epoch', { token: matched });
       }
       return ok(MOMENT_EPOCH[matched]);
     }
@@ -251,12 +251,12 @@ export function strftimeToLdml(pattern) {
     }
     const spec = pattern[i + 1];
     if (spec === undefined)
-      return bad(`axisFormat '${pattern}' ends in a bare '%'`);
+      return bad('mermaid/gantt/axis-bare-percent', { pattern });
     if (STRFTIME_REFUSED[spec] !== undefined)
-      return bad(`axisFormat specifier '%${spec}' is not supported: ${STRFTIME_REFUSED[spec]}`);
+      return bad(STRFTIME_REFUSED[spec], { spec });
     const piece = STRFTIME_TO_LDML[spec] ?? STRFTIME_COMPUTED[spec];
     if (piece === undefined)
-      return bad(`axisFormat specifier '%${spec}' is not a d3-time-format directive`);
+      return bad('mermaid/gantt/axis-unknown', { spec });
     if (literal !== '') out.push(quoted(literal));
     literal = '';
     out.push(piece);
@@ -343,8 +343,7 @@ const TICK_INTERVAL = /^([1-9]\d*)(millisecond|second|minute|hour|day|week|month
 export function parseTickInterval(text) {
   const match = TICK_INTERVAL.exec(text.trim());
   if (match === null) {
-    return bad(`tickInterval '${text}' is not a whole count followed by`
-      + ' millisecond, second, minute, hour, day, week or month');
+    return bad('mermaid/gantt/tick-interval', { text });
   }
   return ok({ amount: Number(match[1]), unit: match[2] });
 }
@@ -386,7 +385,7 @@ export const ISO_WEEKDAYS = Object.freeze({
 export function parseWeekday(text) {
   const day = ISO_WEEKDAYS[text.trim().toLowerCase()];
   if (day === undefined)
-    return bad(`weekday '${text}' is not a day name (monday … sunday)`);
+    return bad('mermaid/gantt/weekday', { text });
   return ok(day);
 }
 
@@ -399,7 +398,7 @@ export function parseWeekday(text) {
 export function parseWeekend(text) {
   const name = text.trim().toLowerCase();
   if (name !== 'friday' && name !== 'saturday')
-    return bad(`weekend '${text}' is neither friday nor saturday`);
+    return bad('mermaid/gantt/weekend', { text });
   return ok(ISO_WEEKDAYS[name]);
 }
 

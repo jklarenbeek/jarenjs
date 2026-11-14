@@ -250,8 +250,9 @@ if (import.meta.env.PROD && 'serviceWorker' in navigator) {
   addEventListener('load', () => {
     navigator.serviceWorker.register(`${BASE}sw.js`, { scope: BASE }).catch(() => {});
     // the service worker caches what it serves: once it controls the page,
-    // fetch every site language pack once, on idle, so each is there offline
-    const warm = () => (window.requestIdleCallback ?? setTimeout)(() => { warmSitePacks().catch(() => {}); });
+    // fetch the stored language's packs once, on idle, so they are there
+    // offline (none for English; a language picked later is cached as it loads)
+    const warm = () => (window.requestIdleCallback ?? setTimeout)(() => { warmSitePacks(lang).catch(() => {}); });
     if (navigator.serviceWorker.controller) warm();
     else navigator.serviceWorker.addEventListener('controllerchange', warm, { once: true });
   });

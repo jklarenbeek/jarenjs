@@ -72,8 +72,12 @@ export function chartTypes() {
  * @param {{type: string, title?: string, [k: string]: any}} config
  * @param {any} [data]
  * @param {{theme?: any, tooltip?: import('./marks.js').ChartTooltipSpec,
- *   ramp?: readonly string[]}} [options] `ramp` is the heatmap's colour ramp
- *   (light to dark); other types ignore it
+ *   ramp?: readonly string[], messages?: Readonly<Record<string, unknown>> | null}} [options]
+ *   `ramp` is the heatmap's colour ramp (light to dark); other types ignore
+ *   it. `messages` is the reader's compiled catalog (`compileMessageCatalog`
+ *   over a locale pack): the words a chart adds to its definition (the
+ *   right-axis mark of a line series) render through it, falling back to
+ *   English (`chartsMessagesEn`) per id
  * @returns {CompiledChart}
  * @throws {TypeError} On an unknown chart type
  */
@@ -86,8 +90,8 @@ export function compileChart(config, data = config, options = {}) {
   const hash = contentKey(config);
   // Only the render half takes options; passing the object through
   // whole would let a `theme` member reach a type's palette options.
-  const renderOptions = options.tooltip === undefined && options.ramp === undefined
-    ? undefined : { tooltip: options.tooltip, ramp: options.ramp };
+  const renderOptions = options.tooltip === undefined && options.ramp === undefined && options.messages == null
+    ? undefined : { tooltip: options.tooltip, ramp: options.ramp, messages: options.messages };
   let vnode;
   let svg;
   return {

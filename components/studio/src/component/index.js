@@ -22,8 +22,14 @@ export function createStudioComponent(options = {}) {
     mode: PROJECT_MODE,
     rules: projectRules,
     modes: projectModes,
-    /** The IDE view model for the `$.project` slice. */
-    viewModel: (state) => projectViewModel(state, { operators }),
+    /**
+     * The IDE view model for the `$.project` slice; `messages` (a compiled
+     * catalog, or a function answering the current one) is the reader's
+     * language, English when absent.
+     * @param {{ project: any }} state
+     * @param {{ messages?: any }} [perCall]
+     */
+    viewModel: (state, perCall = {}) => projectViewModel(state, { operators, messages: perCall.messages }),
     // the two hard-problem policies the stage host / editor consume
     hostPolicy,
     reconcileBuffer,

@@ -265,6 +265,23 @@ parser of the host's own. Without a provider a name token is a compile
 error, not a silent English fallback. Task ids and dates stay ASCII data
 either way — an RTL name is text, not syntax.
 
+**The engine's own words take a catalog.** The words the render adds — the
+error card's title and line label, a placeholder's lines, the class and ER
+titles and relations headings, a Gantt's accessible title and description,
+the interactive viewer's control names — and every parse diagnostic the card
+shows are the English catalog `mermaidMessagesEn`. Pass a compiled locale
+catalog as `messages` (to `renderMermaid`, `compileMermaid`, `mermaidPlugin`
+or `createMermaidComponent`) and they render through it, falling back to English per
+id; a thrown `MermaidParseError` keeps its English `message` and carries
+`msgid` and `params`, which `mermaidErrorText(err, catalog)` renders in the
+reader's language:
+
+```js
+import { compileMessageCatalog } from '@jarenjs/core/message';
+import { nl } from '@jarenjs/locales';
+renderMermaid(source, { messages: compileMessageCatalog(nl) });
+```
+
 At scale, parse (which is also schedule resolution), layout and render
 are reported separately in the benchmark: <!--fact:mermaid.ganttScale-->at 10,000 tasks, ~35 ms to parse and resolve, ~3.5 ms to lay out and ~8.3 ms to render<!--/fact-->.
 
@@ -456,7 +473,7 @@ detection + Jison + validation — so it is heavy and noisy; these are
 representative, not a bare-grammar microbenchmark.)
 
 Rendering through `diagramToVnode` costs a consumer
-**<!--fact:bundle.mermaid-->128,402<!--/fact--> bytes** minified and
+**<!--fact:bundle.mermaid-->135,256<!--/fact--> bytes** minified and
 tree-shaken, and the import graph holds no chart or Markdown module: a pie
 renderer, when a host wants one, is charts' and is handed in.
 `npm run test:tree-shaking` measures both.

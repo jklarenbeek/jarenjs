@@ -25,6 +25,14 @@ fencing. `mountCollectionDrag` and `createDraggableCollectionWidget` in
 portal overlays and bounded auto-scroll over the existing virtualizer. See
 [the drag contract](docs/COLLECTION.md#drag-intent-and-authoritative-commands).
 
+The words the collection shows a reader — the grid's accessible name, the
+placeholder of a row still loading, the drag overlay and the drag
+announcements — are the English catalog `collectionMessagesEn`. Pass a
+compiled locale catalog as `messages` (to `createCollection`,
+`mountCollection` and `mountCollectionDrag`, or later through `update`) and
+they render through it, falling back to English per id; an explicit `label`
+or `loadingLabel` still wins.
+
 ## Public exports
 
 <!--fact:exports.collection-->

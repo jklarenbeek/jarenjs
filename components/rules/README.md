@@ -35,6 +35,14 @@ Repeated commit admission shares one pending command; durable replay belongs to
 the host. Disposal fences preview publication; an accepted domain command stays
 host-owned. CSS uses the host theme tokens with standalone fallbacks.
 
+The words the editor shows — its labels, accessible names, buttons, status
+line, review pages and the outcome `message` it writes into its state — are
+the English catalog `rulesMessagesEn`. Pass a compiled locale catalog as
+`messages` to `createRuleEditor` or `mountRuleEditor` and they render through
+it, falling back to English per id; the field labels come from the schema and
+a preview service's diagnostics are quoted as given. A language change mounts
+the editor again.
+
 Automated desktop/mobile browser checks cover typing, caret preservation,
 selection, preview failure and durable commits. Physical-device and manual
 accessibility qualification remain pending.

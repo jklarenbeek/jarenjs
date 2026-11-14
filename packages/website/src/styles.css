@@ -118,6 +118,13 @@ body {
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
 code, pre, .editor { font-family: var(--mono); font-size: 0.86em; }
+/* LTR islands in a right-to-left page: code (editors, pre, code, the
+   inputs that hold JSON or a path) and every block marked English by design
+   read left to right, isolated, whatever the page's direction */
+code, pre, kbd, samp, textarea, input.editor, [dir="ltr"] { direction: ltr; unicode-bidi: isolate; }
+[lang="en"] { direction: ltr; unicode-bidi: isolate; }
+/* English prose keeps the page's alignment: it only reads left to right */
+:root[dir="rtl"] p[lang="en"], :root[dir="rtl"] span[lang="en"] { text-align: right; }
 h1, h2, h3 { line-height: 1.2; margin: 0 0 var(--space-2); }
 h1 { font-size: 2rem; }
 h2 { font-size: 1.5rem; }

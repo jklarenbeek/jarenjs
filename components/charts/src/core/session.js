@@ -81,7 +81,9 @@ const CELL_PATH = /^\/values\/(\d+)\/(\d+)$/;
  * @param {ChartSessionSource} source
  * @param {{theme?: any, palette?: readonly string[], ramp?: readonly string[], width?: number,
  *   rootClass?: string, keyPrefix?: string,
- *   tooltip?: import('./marks.js').ChartTooltipSpec}} [options]
+ *   tooltip?: import('./marks.js').ChartTooltipSpec, messages?: Readonly<Record<string, unknown>> | null}} [options]
+ *   `messages` is the reader's compiled catalog (`compileMessageCatalog` over
+ *   a locale pack) for the words a chart adds (`chartsMessagesEn`)
  * @returns {ChartSession}
  * @throws {TypeError} On an unsupported chart type
  */
@@ -432,7 +434,7 @@ function createLineSession(config, source, options) {
     for (const si of touched) {
       let parts = render.series[si];
       if (evicted.has(si)) {
-        parts = lineSeriesRender(ast.series[si], si, plot, palette, markers, tooltip);
+        parts = lineSeriesRender(ast.series[si], si, plot, palette, markers, tooltip, options.messages);
       }
       else {
         // the group's props (key, class, any tooltip binding) are

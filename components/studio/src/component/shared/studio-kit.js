@@ -42,13 +42,14 @@ export function errorLine(content) {
  * is a grid area, not a `tabpanel`, so `aria-pressed` states the truth
  * that `aria-selected` would overclaim.
  *
- * @param {{ pane: string, action: string, class: string,
+ * @param {{ pane: string, action: string, class: string, label?: string,
  *   panes: [string, string][] }} options - `pane` is the query
  *   expression holding the live pane id, `panes` the `[id, label]`
- *   pairs in bar order
+ *   pairs in bar order (a label may be a query expression), `label` the
+ *   group's accessible name (`pane` when absent)
  */
 export function paneSwitcher(options) {
-  return ['div', { class: `${options.class} seg`, role: 'group', 'aria-label': 'pane' },
+  return ['div', { class: `${options.class} seg`, role: 'group', 'aria-label': options.label ?? 'pane' },
     ...options.panes.map(([id, label]) => ['button', {
       type: 'button',
       class: { $if: [{ $eq: [options.pane, id] }, 'seg-btn active', 'seg-btn'] },

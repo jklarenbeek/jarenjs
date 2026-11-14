@@ -455,3 +455,55 @@ describe('website — the Studio render audit (auditDocumentRender)', function (
 
 
 });
+
+describe('website — the studios speak the site language', () => {
+  /** A locale pack carrying studio words, and a site pack carrying the site's. */
+  const LOCALE = { 'studio/project/run': 'Uitvoeren', 'studio/project/pane-files': 'Bestanden', 'studio/flow/load': 'Laden',
+    'studio/data/store': 'Opslag' };
+  const SITE = { 'site/ide/save': 'Opslaan', 'site/flow/title': 'Stroom' };
+  /** @param {string} hash */
+  function mountIn(hash) {
+    const { document, container } = createStubHost();
+    /** @type {any} */
+    let routeCb = null;
+    const app = createSiteApp({
+      node: container, document, schedule: (f) => f(), debounceMs: 0,
+      fetchJson: () => Promise.reject(new Error('404')),
+      listenHash: (cb) => { routeCb = cb; cb(parseHash(hash)); },
+      navigate: (h) => routeCb(parseHash(h)),
+      storage: { read: () => null, write: () => {} },
+      initialLang: 'nl', applyLang: () => {},
+      loadSitePack: async () => SITE, loadLocalePack: async () => LOCALE,
+      onError: (err) => { throw err; },
+    });
+    return { app, container };
+  }
+  /** @param {any} node @returns {string} */
+  const textOf = (node) => (node.nodeValue != null ? node.nodeValue : (node.childNodes ?? []).map(textOf).join(''));
+  /** @param {any} node @param {(n: any) => boolean} pred @returns {any[]} */
+  const findAll = (node, pred) => [...(pred(node) ? [node] : []), ...(node.childNodes ?? []).flatMap((/** @type {any} */ c) => findAll(c, pred))];
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  it('the Project IDE shell and its save bar render in the site language once its packs load', async () => {
+    const { app, container } = mountIn('#/project');
+    await settle(); await settle();
+    const buttons = findAll(container, (n) => n.tagName === 'button').map(textOf);
+    for (const word of ['Uitvoeren', 'Bestanden', 'Opslaan']) assert.ok(buttons.includes(word), `${word} in ${buttons.join(' | ')}`);
+    assert.ok(!buttons.includes('Run') && !buttons.includes('Save'), 'the English words are gone');
+    // a word a pack does not carry stays English, never an id
+    assert.ok(buttons.includes('Autorun'));
+    app.destroy?.();
+  });
+
+  it('the Flow page names itself and its seeds\' Load in the site language', async () => {
+    const { container, app } = mountIn('#/flow');
+    await settle(); await settle();
+    assert.ok(findAll(container, (n) => n.tagName === 'h1').map(textOf).includes('Stroom'));
+    const buttons = findAll(container, (n) => n.tagName === 'button').map(textOf);
+    assert.ok(buttons.includes('Laden') && !buttons.includes('Load'), buttons.join(' | '));
+    // the page's lead is prose: an English island in any language
+    const lead = findAll(container, (n) => (n.getAttribute?.('class') ?? '') === 'page-lead' && n.getAttribute('lang') === 'en');
+    assert.ok(lead.length >= 1);
+    app.destroy?.();
+  });
+});

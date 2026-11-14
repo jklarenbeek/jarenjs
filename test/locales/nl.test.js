@@ -26,6 +26,13 @@ import { compileFormula, formulaMessagesEn } from '@jarenjs/json/formula';
 import { compileMessageTemplate } from '@jarenjs/core/message';
 import { compileMarkdown, toHtml, mdMessagesEn, labelsFromCatalog } from '@jarenjs/md';
 import { playMessagesEn } from '@jarenjs/play';
+import { studioMessagesEn } from '@jarenjs/studio';
+import { mermaidMessagesEn } from '@jarenjs/mermaid';
+import { calcMessagesEn } from '@jarenjs/calc';
+import { rulesMessagesEn } from '@jarenjs/rules';
+import { collectionMessagesEn } from '@jarenjs/collection';
+import { chartsMessagesEn } from '@jarenjs/charts';
+import { viewMessagesEn } from '@jarenjs/view';
 
 const compiled = compileMessageCatalog(nl);
 
@@ -66,11 +73,12 @@ const wordless = (template) => template === 'null'
 const placeholders = (template) => [...compileMessageTemplate(String(template)).parameters].sort();
 
 /** Representative params per message key, for renders and the sweep. */
-/** Play's words: a template's placeholders, or the `count` a plural closure reads. */
-const PLAY_SAMPLE_PARAMS = Object.fromEntries(Object.entries(playMessagesEn).map(([key, template]) =>
+/** The components' words: a template's placeholders, or what a plural closure reads. */
+const PLAY_SAMPLE_PARAMS = Object.fromEntries([playMessagesEn, studioMessagesEn, mermaidMessagesEn, calcMessagesEn,
+  rulesMessagesEn, collectionMessagesEn, chartsMessagesEn, viewMessagesEn].flatMap((catalog) => Object.entries(catalog)).map(([key, template]) =>
   [key, typeof template === 'string'
     ? Object.fromEntries(compileMessageTemplate(template).parameters.map((name) => [name, `<${name}>`]))
-    : { count: 2 }]));
+    : { count: 2, min: 2, name: 'sum', from: '2026-01-01', to: '2026-02-01' }]));
 
 const SAMPLE_PARAMS = {
   ...PLAY_SAMPLE_PARAMS,

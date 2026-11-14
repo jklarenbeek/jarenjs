@@ -30,19 +30,19 @@ const paletteBtn = (label, action, opts = {}) =>
 const canvasCard =
   ['div', { key: 'flow-canvas-card', class: 'card pg-card flow-canvas-card' },
     ['div', { class: 'card-head' },
-      ['h3', {}, { $if: ['$.isFsm', 'Machine', 'Dataflow'] }],
+      ['h3', {}, { $if: ['$.isFsm', '$.w.machine', '$.w.dataflow'] }],
       ['div', { class: 'flow-palette' },
         { $if: ['$.isFsm',
-          paletteBtn('Add state', 'flow/add-state'),
-          paletteBtn('Add node', 'flow/add-node')] },
+          paletteBtn('$.w.addState', 'flow/add-state'),
+          paletteBtn('$.w.addNode', 'flow/add-node')] },
         { $if: ['$.connectArmed',
           ['button', { type: 'button', class: 'btn small flow-armed', on: { click: 'flow/connect-cancel' } },
-            'Click a target…'],
-          paletteBtn('Connect', 'flow/connect-arm', { disabledIf: { $not: '$.canConnect' } })] },
-        paletteBtn('Delete', 'flow/delete', { disabledIf: { $not: '$.canDelete' } }),
-        paletteBtn('Undo', 'flow/undo', { disabledIf: { $not: '$.canUndo' } }),
-        paletteBtn('Redo', 'flow/redo', { disabledIf: { $not: '$.canRedo' } }),
-        paletteBtn('New', 'flow/clear'),
+            '$.w.connectArmed'],
+          paletteBtn('$.w.connect', 'flow/connect-arm', { disabledIf: { $not: '$.canConnect' } })] },
+        paletteBtn('$.w.delete', 'flow/delete', { disabledIf: { $not: '$.canDelete' } }),
+        paletteBtn('$.w.undo', 'flow/undo', { disabledIf: { $not: '$.canUndo' } }),
+        paletteBtn('$.w.redo', 'flow/redo', { disabledIf: { $not: '$.canRedo' } }),
+        paletteBtn('$.w.new', 'flow/clear'),
       ],
     ],
     ['div', { class: 'flow-tabs' },
@@ -50,12 +50,12 @@ const canvasCard =
         type: 'button',
         class: { $if: [{ $eq: ['$.tab', 'diagram'] }, 'btn small active', 'btn small'] },
         on: { click: { action: 'flow/tab', with: 'diagram' } },
-      }, 'Diagram'],
+      }, '$.w.tabDiagram'],
       ['button', {
         type: 'button',
         class: { $if: [{ $eq: ['$.tab', 'text'] }, 'btn small active', 'btn small'] },
         on: { click: { action: 'flow/tab', with: 'text' } },
-      }, 'Text'],
+      }, '$.w.tabText'],
     ],
     { $if: [{ $eq: ['$.tab', 'diagram'] },
       ['div', { key: 'flow-canvas', class: 'flow-canvas' }, '$.diagram'],
@@ -69,11 +69,8 @@ const canvasCard =
           on: { change: 'flow/text' },
         }],
         { $if: ['$.textReadOnly',
-          ['p', { class: 'muted' },
-            'Read-only: ', '$.textLossReason',
-            ' — edit through the diagram or the inspector instead.'],
-          ['p', { class: 'muted' },
-            'Edits apply when the field loses focus — the text re-parses, projects back to the document, and a broken edit never replaces it.']] },
+          ['p', { class: 'muted' }, '$.readOnlyText'],
+          ['p', { class: 'muted' }, '$.w.textHint']] },
       ]] },
     { $if: ['$.parseError', ['p', { class: 'error-line' }, '$.parseError']] },
   ];
@@ -81,13 +78,12 @@ const canvasCard =
 const inspectorCard =
   ['div', { key: 'flow-inspector-card', class: 'card pg-card flow-inspector' },
     ['div', { class: 'card-head' },
-      ['h3', {}, 'Inspector'],
+      ['h3', {}, '$.w.inspector'],
       { $if: ['$.selection', ['span', { class: 'muted' }, '$.selection.label']] },
     ],
     { $if: ['$.inspector',
       ['div', { key: 'flow-inspector-form' }, { $apply: '$.inspector.form' }],
-      ['p', { class: 'muted' },
-        'Select a state, node or edge in the diagram to edit it here — every field writes straight into the document.']] },
+      ['p', { class: 'muted' }, '$.w.inspectorHint']] },
   ];
 
 const fsmRun =
@@ -102,7 +98,7 @@ const fsmRun =
                 on: { click: { action: 'flow/send', with: '$e' } },
               }, '$e'] }],
           ],
-          ['button', { type: 'button', class: 'btn small', on: { click: 'flow/stop' } }, 'Stop'],
+          ['button', { type: 'button', class: 'btn small', on: { click: 'flow/stop' } }, '$.w.stop'],
         ],
         ['div', { class: 'flow-run-mount' },
           ['jaren-widget', { name: 'flow-doc', key: 'flow-run-app', props: '$.mount' }]],
@@ -110,15 +106,14 @@ const fsmRun =
           $return: ['li', { class: 'flow-log-line' }, '$l'] }]],
       ],
       ['div', {},
-        ['p', { class: 'muted' },
-          'Boot the machine as a real nested @jarenjs/app: the generated per-event actions drive it, and the diagram highlights the current state.'],
-        ['button', { type: 'button', class: 'btn', on: { click: 'flow/run' } }, 'Run machine'],
+        ['p', { class: 'muted' }, '$.w.runMachineHint'],
+        ['button', { type: 'button', class: 'btn', on: { click: 'flow/run' } }, '$.w.runMachine'],
       ]] },
   ];
 
 const dagRun =
   ['div', { key: 'flow-run-dag' },
-    ['label', { class: 'muted' }, 'Run input (JSON)'],
+    ['label', { class: 'muted' }, '$.w.runInput'],
     // published per keystroke, not on blur: a run streams per-node updates,
     // and each render reasserts this controlled textarea — with a stale
     // value it would overwrite whatever was being typed for the next run
@@ -127,9 +122,9 @@ const dagRun =
       value: '$.dagInput', on: { input: 'flow/dag-input', change: 'flow/dag-input' },
     }],
     ['div', { class: 'flow-run-head' },
-      ['button', { type: 'button', class: 'btn', on: { click: 'flow/dag-run' } }, 'Run graph'],
+      ['button', { type: 'button', class: 'btn', on: { click: 'flow/dag-run' } }, '$.w.runGraph'],
       { $if: ['$.run.running',
-        ['button', { type: 'button', class: 'btn small', on: { click: 'flow/dag-abort' } }, 'Abort']] },
+        ['button', { type: 'button', class: 'btn small', on: { click: 'flow/dag-abort' } }, '$.w.abort']] },
     ],
     { $if: ['$.run',
       ['div', {},
@@ -143,7 +138,7 @@ const dagRun =
 
 const runCard =
   ['div', { key: 'flow-run-card', class: 'card pg-card flow-run' },
-    ['div', { class: 'card-head' }, ['h3', {}, 'Run']],
+    ['div', { class: 'card-head' }, ['h3', {}, '$.w.run']],
     { $if: ['$.isFsm', fsmRun, dagRun] },
   ];
 
@@ -158,8 +153,7 @@ export const FLOW_RULES = [
   {
     match: '$.ui.flow.picker', mode: 'flow',
     body: ['div', { key: 'flow-picker' },
-      ['p', { class: 'page-lead' },
-        'Start from a seed — a complete, runnable document either way.'],
+      ['p', { class: 'page-lead' }, '$.w.lead'],
       ['div', { class: 'example-grid' }, [{ $apply: '$.templates[*]' }]],
     ],
   },
@@ -167,13 +161,14 @@ export const FLOW_RULES = [
     match: '$.ui.flow.picker.templates[*]', mode: 'flow',
     body: ['article', { class: 'card example-card' },
       ['div', { class: 'card-head' },
-        ['h3', {}, '$.title'],
+        ['h3', { lang: 'en', dir: 'ltr' }, '$.title'],
         ['button', {
           type: 'button', class: 'btn small',
           on: { click: { action: 'flow/template', with: '$.name' } },
-        }, 'Load'],
+        }, '$.w.load'],
       ],
-      ['p', { class: 'muted' }, '$.lead'],
+      // a seed's lead is its library's prose, English by design
+      ['p', { class: 'muted', lang: 'en', dir: 'ltr' }, '$.lead'],
       ['pre', { class: 'code-block clamp' }, ['code', {}, '$.preview']],
     ],
   },
@@ -181,8 +176,8 @@ export const FLOW_RULES = [
     match: '$.ui.flow.live', mode: 'flow',
     body: ['div', { key: 'flow-live', class: 'flow-grid', 'data-pane': '$.mobilePane' },
       paneSwitcher({
-        class: 'flow-panebar', pane: '$.mobilePane', action: 'flow/pane',
-        panes: [['diagram', 'Diagram'], ['inspector', 'Inspector'], ['run', 'Run']],
+        class: 'flow-panebar', pane: '$.mobilePane', action: 'flow/pane', label: '$.w.panes',
+        panes: [['diagram', '$.w.paneDiagram'], ['inspector', '$.w.paneInspector'], ['run', '$.w.paneRun']],
       }),
       canvasCard,
       ['div', { key: 'flow-side', class: 'flow-side' }, inspectorCard, runCard],
@@ -190,7 +185,8 @@ export const FLOW_RULES = [
   },
 ];
 
-export const FLOW_FORM_RULES = createFormView({ root: '$.ui.flow.live.inspector.form', actions: {
+// the form's chrome reads the live node's `formLabels`: the reader's language
+export const FLOW_FORM_RULES = createFormView({ root: '$.ui.flow.live.inspector.form', labelsPath: '$.ui.flow.live.formLabels', actions: {
   input: 'flow/f-input', check: 'flow/f-check', number: 'flow/f-number',
   json: 'flow/f-json', add: 'flow/f-add', remove: 'flow/f-remove',
 } }).map(rule => ({ ...rule, mode: 'flow' }));

@@ -54,10 +54,10 @@ const shell = {
   body: ['div', { class: 'jstudio', 'data-mode': '$.layout.mode', 'data-pane': '$.mobilePane' },
     // ——— the phone pane switcher (its own grid row; display:none above
     // the breakpoint, so on a desktop it costs one hidden element) ———
-    ['div', { class: 'js-panebar seg', role: 'group', 'aria-label': 'pane' },
-      paneButton('files', 'Files'),
-      paneButton('editor', 'Editor'),
-      paneButton('stage', 'Stage'),
+    ['div', { class: 'js-panebar seg', role: 'group', 'aria-label': '$.w.panes' },
+      paneButton('files', '$.w.paneFiles'),
+      paneButton('editor', '$.w.paneEditor'),
+      paneButton('stage', '$.w.paneStage'),
     ],
     // ——— pen bar ———
     ['div', { class: 'js-penbar' },
@@ -65,27 +65,27 @@ const shell = {
       ['span', { class: 'js-savestate' }, '$.saveState'],
       // the template gallery — opening one replaces the project (host
       // provides `$.templates`; absent → renders nothing)
-      ['div', { class: 'js-gallery' }, ['span', { class: 'muted' }, 'New'], [{ $apply: '$.templates[*]' }]],
+      ['div', { class: 'js-gallery' }, ['span', { class: 'muted' }, '$.w.new'], [{ $apply: '$.templates[*]' }]],
       ['span', { class: 'js-spacer' }],
-      ['span', { class: 'js-filecount muted' }, ['text', '$.fileCount'], ' files'],
+      ['span', { class: 'js-filecount muted' }, '$.fileCountText'],
       // the layout switcher: the three grid modes, riding `layout.mode` →
       // the `data-mode` attribute the grid switches on (the drag splitter
       // below drives `layout.ratio` within the chosen mode)
-      ['div', { class: 'js-layout seg', role: 'group', 'aria-label': 'layout' },
-        layoutButton('classic', 'Side', 'Editor beside the stage'),
-        layoutButton('right', 'Swap', 'Stage beside the editor'),
-        layoutButton('top', 'Stack', 'Editor over the stage'),
+      ['div', { class: 'js-layout seg', role: 'group', 'aria-label': '$.w.layout' },
+        layoutButton('classic', '$.w.layoutSide', '$.w.layoutSideTitle'),
+        layoutButton('right', '$.w.layoutSwap', '$.w.layoutSwapTitle'),
+        layoutButton('top', '$.w.layoutStack', '$.w.layoutStackTitle'),
       ],
       ['button', { class: 'btn small', type: 'button',
         'aria-pressed': { $if: ['$.layout.autorun', 'true', 'false'] },
         on: { click: 'project/autorun' },
-      }, 'Autorun'],
-      ['button', { class: 'btn small', type: 'button', on: { click: 'project/run' } }, 'Run'],
+      }, '$.w.autorun'],
+      ['button', { class: 'btn small', type: 'button', on: { click: 'project/run' } }, '$.w.run'],
     ],
     // ——— file rail ———
-    ['nav', { class: 'js-rail', 'aria-label': 'files' },
-      ['select', { class: 'js-addfile', 'aria-label': 'add a file', value: '', on: { change: 'project/add-file' } },
-        ['option', { value: '' }, '+ add file…'],
+    ['nav', { class: 'js-rail', 'aria-label': '$.w.files' },
+      ['select', { class: 'js-addfile', 'aria-label': '$.w.addFile', value: '', on: { change: 'project/add-file' } },
+        ['option', { value: '' }, '$.w.addFileOption'],
         ...ADDABLE_KINDS.map((kind) => ['option', { value: kind }, kind]),
       ],
       [{ $apply: '$.rail[*]' }]],
@@ -101,34 +101,34 @@ const shell = {
         // committed value because a rename per keystroke would rename the
         // file once per letter.
         ['input', { class: 'js-editor-name', value: '$.renameDraft', spellcheck: 'false',
-          autocapitalize: 'off', autocomplete: 'off', 'aria-label': 'file name',
+          autocapitalize: 'off', autocomplete: 'off', 'aria-label': '$.w.fileName',
           on: { input: 'project/rename-draft', change: 'project/rename' } }],
         ['span', { class: 'js-editor-kind muted' }, '$.activeKind'],
         ['span', { class: 'js-spacer' }],
-        ['span', { class: 'js-linecount' }, ['text', '$.lineCount'], ' lines'],
+        ['span', { class: 'js-linecount' }, '$.lineCountText'],
       ],
       // a write landed on this file while the buffer was dirty: the human's
       // text stays in the box, the incoming version stays one click away
       { $if: ['$.conflict',
         ['div', { class: 'js-conflict', role: 'status' },
-          ['span', {}, 'This file changed while you were editing — your text is kept.'],
+          ['span', {}, '$.w.conflict'],
           ['button', {
             type: 'button', class: 'js-conflict-take',
-            title: 'Discard your edit and take the version that arrived',
+            title: '$.w.conflictTakeTitle',
             on: { click: 'project/buffer-accept' },
-          }, 'Take theirs'],
+          }, '$.w.conflictTake'],
         ],
         ''] },
       { $if: ['$.routing', ['div', { class: 'js-routing' },
-        { $if: ['$.routing.hasInput', ['label', {}, 'Input ', ['select', { 'aria-label': 'Input file', value: '$.routing.input', on: { change: { action: 'project/route-input' } } },
-          ['option', { value: '' }, 'Default data file'],
+        { $if: ['$.routing.hasInput', ['label', {}, '$.w.routeInput', ' ', ['select', { 'aria-label': '$.w.routeInputFile', value: '$.routing.input', on: { change: { action: 'project/route-input' } } },
+          ['option', { value: '' }, '$.w.routeInputDefault'],
           [{ $for: { name: '$.routing.inputs[*]' }, $return: ['option', { value: '$name' }, '$name'] }]]], ''] },
-        { $if: ['$.routing.canModel', ['label', {}, 'Model ',
-          ['select', { 'aria-label': 'Model file', value: '$.routing.model', on: { change: 'project/route-model' } },
-            ['option', { value: '' }, 'In-memory input'],
+        { $if: ['$.routing.canModel', ['label', {}, '$.w.routeModel', ' ',
+          ['select', { 'aria-label': '$.w.routeModelFile', value: '$.routing.model', on: { change: 'project/route-model' } },
+            ['option', { value: '' }, '$.w.routeModelMemory'],
             [{ $for: { name: '$.routing.models[*]' }, $return: ['option', { value: '$name' }, '$name'] }]]], ''] },
-        { $if: ['$.routing.hasCollection', ['label', {}, 'Collection ', ['input', { 'aria-label': 'Collection', defaultValue: '$.routing.collection',
-          key: '$.active', placeholder: 'Only collection', on: { change: 'project/route-collection' } }]], ''] },
+        { $if: ['$.routing.hasCollection', ['label', {}, '$.w.routeCollection', ' ', ['input', { 'aria-label': '$.w.routeCollection', defaultValue: '$.routing.collection',
+          key: '$.active', placeholder: '$.w.routeCollectionPlaceholder', on: { change: 'project/route-collection' } }]], ''] },
       ], ''] },
       editorTextarea({
         value: '$.editorValue',
@@ -143,21 +143,21 @@ const shell = {
     ['jaren-widget', {
       name: 'studio-splitter', class: 'js-split',
       role: 'separator', 'aria-orientation': { $if: [{ $eq: ['$.layout.mode', 'top'] }, 'horizontal', 'vertical'] },
-      'aria-label': 'Resize the editor and stage',
+      'aria-label': '$.w.resize',
       'aria-valuemin': '10', 'aria-valuemax': '90', 'aria-valuenow': '$.ratioPct',
       tabindex: '0',
       props: { ratio: '$.layout.ratio', mode: '$.layout.mode', axis: { $if: [{ $eq: ['$.layout.mode', 'top'] }, 'y', 'x'] } },
     }],
     // ——— stage ———
     ['div', { class: 'js-stage' },
-      ['div', { class: 'js-stage-head' }, 'Stage'],
+      ['div', { class: 'js-stage-head' }, '$.w.stage'],
       { $if: ['$.stageError', ['div', { class: 'js-stage-error js-stage-fail', role: 'status' }, '$.stageError'], ''] },
       { $if: [{ $eq: ['$.stage.kind', 'app'] },
         ['div', { class: 'js-stage-mount' }, ['jaren-widget', { name: { $default: ['$.stage.widget', 'studio-stage'] }, props: '$.stage.mount' }]],
         { $if: [{ $eq: ['$.stage.kind', 'result'] },
           { $if: ['$.stage.ran',
             ['div', { class: 'js-stage-result' }, [{ $apply: ['$.stage.nodes[*]', 'ui'] }]],
-            ['p', { class: 'muted js-stage-note' }, 'Edit — this file runs live against the data file here.']] },
+            ['p', { class: 'muted js-stage-note' }, '$.w.stageHint']] },
           { $if: [{ $eq: ['$.stage.kind', 'boot-failed'] },
             ['div', { class: 'js-stage-fail card' }, '$.stage.note'],
             ['p', { class: 'muted js-stage-note' }, '$.stage.note']] }] }] },
@@ -172,26 +172,28 @@ const fileRow = {
     ['button', {
       type: 'button',
       class: { $if: ['$.active', 'js-file active', 'js-file'] },
-      title: '$.role',
+      title: '$.roleLabel',
       on: { click: { action: 'project/active', with: '$.name' } },
     },
     ['span', { class: 'js-badge', 'data-badge': '$.badge' }, '$.kind'],
     ['span', { class: 'js-file-name' }, '$.name'],
-    { $if: ['$.valid', '', ['span', { class: 'js-file-warn', title: 'this file has errors' }, '●']] },
+    { $if: ['$.valid', '', ['span', { class: 'js-file-warn', title: '$.w.errors' }, '●']] },
     ],
     ['button', {
-      type: 'button', class: 'js-file-del', title: 'delete this file',
-      'aria-label': 'delete file',
+      type: 'button', class: 'js-file-del', title: '$.w.deleteTitle',
+      'aria-label': '$.w.delete',
       on: { click: { action: 'project/delete', with: '$.name' } },
     }, '×'],
   ],
 };
 
-/** One template-gallery card — opening it replaces the whole project. */
+/** One template-gallery card — opening it replaces the whole project. A
+ * template's name and lead are its library's words, English by design: an
+ * LTR island inside any page. */
 const templateRow = {
   match: `${PROJECT_BASE}.templates[*]`, mode: PROJECT_MODE,
   body: ['button', {
-    type: 'button', class: 'js-template', title: '$.lead',
+    type: 'button', class: 'js-template', title: '$.lead', lang: 'en', dir: 'ltr',
     on: { click: { action: 'project/template', with: '$.id' } },
   }, '$.title'],
 };

@@ -23,6 +23,7 @@
 import { svgRoot, group, rect, path, polygon, textAt, num } from '@jarenjs/view/helpers';
 import { nodeMark, edgeMark } from './marks.js';
 import { compileDateFormat, partsFromEpoch } from '@jarenjs/core/dates';
+import { mermaidText } from '../messages.js';
 
 // the summary line is a date range, and it is the one label on the
 // diagram that is NOT the document's axisFormat: it must stay readable
@@ -33,16 +34,19 @@ const SUMMARY_DATE = compileDateFormat('yyyy-MM-dd');
  * @param {any} scene PositionedDiagram (gantt)
  * @param {{ tokens: Record<string,string>, cssVars: Record<string,string> }} theme
  * @param {string} hash
+ * @param {Readonly<Record<string, unknown>> | null} [messages] the reader's compiled catalog, for the
+ *   accessible title and description
  * @returns {any}
  */
-export function renderGantt(scene, theme, hash) {
+export function renderGantt(scene, theme, hash, messages = null) {
   const t = theme.tokens;
   const fs = scene.fontSize;
   const children = [];
   const plot = scene.plot;
 
-  children.push(['title', {}, titleText(scene)]);
-  children.push(['desc', {}, descText(scene)]);
+  const say = mermaidText(messages);
+  children.push(['title', {}, titleText(scene, say)]);
+  children.push(['desc', {}, descText(scene, say)]);
 
   // Section bands (behind everything).
   for (const section of scene.sections) {
@@ -176,17 +180,16 @@ function diamond(cx, cy, r) {
   ];
 }
 
-/** @param {any} scene @returns {string} */
-function titleText(scene) {
-  return scene.title === null ? 'Gantt chart' : `Gantt chart: ${scene.title}`;
+/** @param {any} scene @param {(id: string, params?: Record<string, unknown>) => string} say @returns {string} */
+function titleText(scene, say) {
+  return scene.title === null ? say('mermaid/gantt/title') : say('mermaid/gantt/title-named', { title: scene.title });
 }
 
-/** @param {any} scene @returns {string} */
-function descText(scene) {
+/** @param {any} scene @param {(id: string, params?: Record<string, unknown>) => string} say @returns {string} */
+function descText(scene, say) {
   const count = scene.rows.length;
-  const tasks = `${count} task${count === 1 ? '' : 's'}`;
-  if (count === 0) return 'An empty schedule.';
+  if (count === 0) return say('mermaid/gantt/empty');
   const from = SUMMARY_DATE(partsFromEpoch(scene.domain.start));
   const to = SUMMARY_DATE(partsFromEpoch(scene.domain.end));
-  return `${tasks} from ${from} to ${to}.`;
+  return say('mermaid/gantt/summary', { count, from, to });
 }

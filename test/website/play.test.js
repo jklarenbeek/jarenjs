@@ -668,7 +668,8 @@ describe('website — Play speaks the language the Messages select names', () =>
     const arabic = cells.find((n) => textOf(n) === 'يجب ألا يقل عدد الأحرف عن 2');
     assert.ok(arabic, `the Arabic message is on screen: ${cells.map(textOf).join(' | ')}`);
     assert.strictEqual(arabic.getAttribute('dir'), 'auto');
-    assert.ok(cells.every((n) => n.getAttribute('dir') === 'auto'), 'every cell reads its own direction');
+    // a message reads its own direction; an instance path is code, left to right
+    assert.deepStrictEqual(cells.map((n) => n.getAttribute('dir')), ['ltr', 'auto', 'ltr', 'auto', 'ltr', 'auto']);
   });
   it('a form alert takes its own direction too', async () => {
     const { container } = await invalidIn('ar');

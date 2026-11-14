@@ -43,7 +43,7 @@
  *    and a reversed or empty span are all errors.
  */
 
-import { fail } from '../errors.js';
+import { failWith, failFrom } from '../errors.js';
 import { compileDateParser, epochOfRFC3339Parts, addToParts, partsFromEpoch } from '@jarenjs/core/dates';
 import {
   DEFAULT_DATE_FORMAT, DEFAULT_AXIS_FORMAT,
@@ -173,7 +173,7 @@ function scan(lines, offset) {
       // a line that does not read as a click and carries a task's `:` is a
       // task row (`Click on href : a3, 2024-01-09, 1d`); one without it is
       // a click that cannot be read
-      if (!hasTaskSeparator(line)) fail(read.error, at);
+      if (!hasTaskSeparator(line)) failFrom(read, at);
     }
     // Task row: `Name : meta`
     if (colon !== -1) {
@@ -227,28 +227,27 @@ function interpret(meta, metaLine, listed, dateNames) {
   let tick = null;
   if (meta.tickInterval !== undefined && meta.tickInterval !== '') {
     const got = parseTickInterval(meta.tickInterval);
-    if (got.error !== null) fail(got.error, metaLine.tickInterval);
+    if (got.error !== null) failFrom(got, metaLine.tickInterval);
     tick = got.value;
   }
 
   let weekStart = 1;
   if (meta.weekday !== undefined && meta.weekday !== '') {
     const got = parseWeekday(meta.weekday);
-    if (got.error !== null) fail(got.error, metaLine.weekday);
+    if (got.error !== null) failFrom(got, metaLine.weekday);
     weekStart = got.value;
   }
 
   let weekendStart = ISO_WEEKDAYS.saturday;
   if (meta.weekend !== undefined && meta.weekend !== '') {
     const got = parseWeekend(meta.weekend);
-    if (got.error !== null) fail(got.error, metaLine.weekend);
+    if (got.error !== null) failFrom(got, metaLine.weekend);
     weekendStart = got.value;
   }
 
   if (meta.inclusiveEndDates !== undefined && meta.inclusiveEndDates !== '') {
     // Mermaid's grammar rejects the line too
-    fail(`inclusiveEndDates takes no argument, and '${meta.inclusiveEndDates}' follows it`,
-      metaLine.inclusiveEndDates ?? 0);
+    failWith('mermaid/gantt/inclusive-end-dates', { value: meta.inclusiveEndDates }, metaLine.inclusiveEndDates ?? 0);
   }
 
   const excludes = readExcludes(listed.excludes, readDate);
@@ -273,7 +272,7 @@ function interpret(meta, metaLine, listed, dateNames) {
  * as it is.
  * @param {string} pattern
  * @param {number} line
- * @param {(p: string) => { value: any, error: string | null }} adapt
+ * @param {(p: string) => import('./gantt-grammar.js').Adapted} adapt
  * @param {string} directive - `'dateFormat'` or `'axisFormat'`
  * @param {any} names
  * @param {boolean} asParser
@@ -281,21 +280,19 @@ function interpret(meta, metaLine, listed, dateNames) {
  */
 function compilePattern(pattern, line, adapt, directive, names, asParser) {
   const adapted = adapt(pattern);
-  if (adapted.error !== null) fail(adapted.error, line);
+  if (adapted.error !== null) failFrom(adapted, line);
   // an epoch dateFormat adapts straight to its reader: no LDML pattern
   if (typeof adapted.value === 'function') return adapted.value;
   const needed = ldmlNeedsNames(adapted.value);
   if (needed !== null && (names === undefined || names === null)) {
-    fail(`${directive} '${pattern}' asks for a locale name, so it needs a`
-      + " 'dateNames' provider (parseMermaid(source, { dateNames }));"
-      + ' this engine ships no month or weekday names of its own', line);
+    failWith('mermaid/gantt/needs-names', { directive, pattern }, line);
   }
   if (!asParser) return null;
   try {
     return compileDateParser(adapted.value, names);
   }
   catch (err) {
-    return fail(`${directive} '${pattern}' cannot be read: ${err.message}`, line);
+    return failWith('mermaid/gantt/unreadable-pattern', { directive, pattern, reason: err.message }, line);
   }
 }
 
@@ -336,8 +333,7 @@ function readExcludes(parts, readDate) {
     }
     const day = dayOfTerm(term, readDate);
     if (Number.isNaN(day)) {
-      fail(`excludes '${term}' is neither 'weekends', a weekday name,`
-        + ' nor a date in this diagram\'s dateFormat', line);
+      failWith('mermaid/gantt/excludes', { term }, line);
     }
     days.add(day);
   }
@@ -431,7 +427,7 @@ function resolve(sections, rules) {
     spec.previous = i === 0 ? null : tasks[i - 1];
     specs.set(task, spec);
     if (byId.has(task.id)) {
-      fail(`task id '${task.id}' is declared twice`, task.line);
+      failWith('mermaid/gantt/duplicate-id', { id: task.id }, task.line);
     }
     byId.set(task.id, task);
   }
@@ -473,14 +469,13 @@ function splitInfo(task) {
     endText = fields[2];
   }
   else {
-    fail(`task '${task.name}' has ${fields.length} fields after its flags;`
-      + ' a task is written as [flags,] [id,] [start,] end', task.line);
+    failWith('mermaid/gantt/too-many-fields', { name: task.name, count: fields.length }, task.line);
   }
   if (id === '') {
-    fail(`task '${task.name}' has an empty id`, task.line);
+    failWith('mermaid/gantt/empty-id', { name: task.name }, task.line);
   }
   if (endText === '') {
-    fail(`task '${task.name}' has no end, duration or 'until'`, task.line);
+    failWith('mermaid/gantt/no-end', { name: task.name }, task.line);
   }
 
   const afterMatch = startText === null ? null : AFTER.exec(startText);
@@ -511,7 +506,7 @@ function resolveTask(task, byId, specs, state, rules) {
   const seen = state.get(task);
   if (seen === 'done') return;
   if (seen === 'open') {
-    fail(`task '${task.id}' depends on itself, directly or through a cycle`, task.line);
+    failWith('mermaid/gantt/cycle', { id: task.id }, task.line);
   }
   state.set(task, 'open');
   const spec = specs.get(task);
@@ -520,7 +515,7 @@ function resolveTask(task, byId, specs, state, rules) {
   const need = (id, keyword) => {
     const other = byId.get(id);
     if (other === undefined)
-      fail(`task '${task.id}' says '${keyword} ${id}', and no task has that id`, task.line);
+      failWith('mermaid/gantt/unknown-reference', { id: task.id, keyword, target: id }, task.line);
     resolveTask(other, byId, specs, state, rules);
     return other;
   };
@@ -534,8 +529,7 @@ function resolveTask(task, byId, specs, state, rules) {
   else if (spec.startText !== null) {
     start = readInstant(spec.startText, rules.readDate);
     if (Number.isNaN(start)) {
-      fail(`task '${task.id}' starts at '${spec.startText}', which is neither`
-        + ` a date in '${rules.published.dateFormat}' nor 'after <id>'`, task.line);
+      failWith('mermaid/gantt/bad-start', { id: task.id, start: spec.startText, dateFormat: rules.published.dateFormat }, task.line);
     }
   }
   else if (spec.previous !== null) {
@@ -543,8 +537,7 @@ function resolveTask(task, byId, specs, state, rules) {
     start = spec.previous.end;
   }
   else {
-    fail(`task '${task.id}' has no start date and no task before it to follow;`
-      + ' Mermaid would start it today, and this engine has no clock', task.line);
+    failWith('mermaid/gantt/no-start', { id: task.id }, task.line);
   }
 
   // --- end
@@ -565,9 +558,7 @@ function resolveTask(task, byId, specs, state, rules) {
     else {
       const duration = parseTaskDuration(spec.endText);
       if (duration.value === null) {
-        fail(`task '${task.id}' ends at '${spec.endText}', which is neither`
-          + ` a date in '${rules.published.dateFormat}', a duration (3d, 1.5w, 2M)`
-          + ", nor 'until <id>'", task.line);
+        failWith('mermaid/gantt/bad-end', { id: task.id, end: spec.endText, dateFormat: rules.published.dateFormat }, task.line);
       }
       end = addDurationTo(start, duration.value, task);
       fromDuration = true;
@@ -578,16 +569,15 @@ function resolveTask(task, byId, specs, state, rules) {
   if (fromDuration) {
     const pushed = pushEndPastExclusions(start, end, rules.excluder);
     if (Number.isNaN(pushed)) {
-      fail(`task '${task.id}' can never finish: 'excludes' removes every day`
-        + ' it would need', task.line);
+      failWith('mermaid/gantt/never-finishes', { id: task.id }, task.line);
     }
     end = pushed;
   }
   if (end < start) {
-    fail(`task '${task.id}' ends before it starts`, task.line);
+    failWith('mermaid/gantt/ends-before-start', { id: task.id }, task.line);
   }
   if (end === start && !task.flags.includes('milestone')) {
-    fail(`task '${task.id}' is empty; only a milestone has no width`, task.line);
+    failWith('mermaid/gantt/empty-task', { id: task.id }, task.line);
   }
 
   task.start = start;
@@ -613,10 +603,10 @@ function addDurationTo(start, duration, task) {
     end = epochOfRFC3339Parts(addToParts(partsFromEpoch(start), duration.amount, duration.unit));
   }
   catch (err) {
-    return fail(`task '${task.id}' has an unusable duration: ${err.message}`, task.line);
+    return failWith('mermaid/gantt/bad-duration', { id: task.id, reason: err.message }, task.line);
   }
   if (Number.isNaN(end))
-    fail(`task '${task.id}' ends past the last instant a date can hold`, task.line);
+    failWith('mermaid/gantt/past-last-instant', { id: task.id }, task.line);
   return end;
 }
 

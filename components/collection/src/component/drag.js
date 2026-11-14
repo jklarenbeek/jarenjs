@@ -1,6 +1,7 @@
 //@ts-check
 import { createDragInteraction } from '../drag.js';
 import { mountCollection } from './index.js';
+import { collectionText } from '../messages.js';
 
 /** @typedef {import('../drag.js').DragTarget} DragTarget */
 /** @typedef {{id:string, mounted:ReturnType<typeof mountCollection>,
@@ -9,6 +10,7 @@ import { mountCollection } from './index.js';
 /** @typedef {import('../drag.js').DragOptions & {
  * locateSource:(key:string)=>DragTarget|null, disabled?:(target:DragTarget)=>boolean,
  * label?:(key:string)=>string, portal?:HTMLElement, maxContainers?:number,
+ * messages?:Readonly<Record<string, unknown>>|null,
  * sourcePanels?:DragSourcePanel[],
  * edgeSize?:number, maxScrollPerFrame?:number,
  * requestFrame?:(fn:FrameRequestCallback)=>number, cancelFrame?:(id:number)=>void
@@ -96,14 +98,20 @@ export function mountCollectionDrag(containers, options) {
         portal.appendChild(overlay);
         if (typeof overlay.showPopover === 'function') { overlay.setAttribute('popover', 'manual'); overlay.showPopover(); }
       }
-      overlay.textContent = `${state.mode === 'copy' ? 'Copy' : 'Move'} ${options.label?.(state.source.key) ?? state.source.key}`;
+      overlay.textContent = collectionText(options.messages)(state.mode === 'copy' ? 'collection/drag/copy' : 'collection/drag/move',
+        { item: options.label?.(state.source.key) ?? state.source.key });
       overlay.style.left = `${state.point.x + 12}px`; overlay.style.top = `${state.point.y + 12}px`;
     }
     if (!['armed', 'dragging', 'validating', 'committing'].includes(state.phase)) cleanGesture();
     if (!watching(state) && frame !== null) { cancelFrame(frame); frame = null; }
-    const message = state.phase === 'dragging' ? `${state.mode === 'copy' ? 'Copying' : 'Moving'} ${state.source.key}${state.target ? ` to ${state.target.key}, ${state.target.column}` : ''}. Enter to drop, Escape to cancel.`
-      : state.phase === 'settled' ? 'Drop accepted.' : state.phase === 'cancelled' ? `Drag cancelled: ${state.reason}.`
-        : state.phase === 'validating' || state.phase === 'committing' ? 'Checking drop.' : '';
+    const t = collectionText(options.messages);
+    const message = state.phase === 'dragging'
+      ? t(state.target
+        ? (state.mode === 'copy' ? 'collection/drag/copying-to' : 'collection/drag/moving-to')
+        : (state.mode === 'copy' ? 'collection/drag/copying' : 'collection/drag/moving'),
+      { source: state.source.key, target: state.target?.key, column: state.target?.column })
+      : state.phase === 'settled' ? t('collection/drag/accepted') : state.phase === 'cancelled' ? t('collection/drag/cancelled', { reason: state.reason })
+        : state.phase === 'validating' || state.phase === 'committing' ? t('collection/drag/checking') : '';
     if (message !== announcement) { announcement = message; status.textContent = message; }
     options.onChange?.(state);
   }

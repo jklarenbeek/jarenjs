@@ -58,9 +58,11 @@ function normalFormat(value) {
  * failure so play lands an honest error Result.
  * @param {string} source
  * @param {{ format?: string }} [config]
+ * @param {{ messages?: Readonly<Record<string, unknown>> | null }} [context] the run's
+ *   compiled catalog (play hands it to every renderer), for the words a chart adds
  * @returns {any} the chart's SVG vnode
  */
-export function chartRenderer(source, config) {
+export function chartRenderer(source, config, context) {
   const format = normalFormat(config?.format);
   // parse + schema-check + compile is the COMPILE phase; turning the
   // geometry-free AST into SVG vnodes is the RUN. Play reports whichever
@@ -72,7 +74,7 @@ export function chartRenderer(source, config) {
   const outcome = validateDefinition(definition);
   const valid = typeof outcome === 'object' && outcome !== null ? outcome.valid : outcome === true;
   if (!valid) throw new Error('not a valid chart definition (schemas/chart-definition.schema.json)');
-  const compiled = compileChart(definition, dataFor(definition, events), { theme: 'host' });
+  const compiled = compileChart(definition, dataFor(definition, events), { theme: 'host', messages: context?.messages });
   const t1 = now();
   const vnode = compiled.toVnode();
   return { vnode, compileMs: t1 - t0, runMs: now() - t1 };

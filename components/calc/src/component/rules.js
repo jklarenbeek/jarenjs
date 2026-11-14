@@ -48,12 +48,12 @@ export const CALCULATOR_RULES = [
       // financial panel — the form comes from @jarenjs/forms
       { $if: ['$.financial', ['div', { class: 'calc-financial' },
         ['div', { class: 'calc-fin-form' }, { $apply: '$.financial.form' }],
-        ['div', { class: 'calc-fin-result' }, ['span', {}, 'Result ('], ['span', {}, '$.financial.solveFor'], ['span', {}, '): '], ['strong', {}, '$.financial.result']],
+        ['div', { class: 'calc-fin-result' }, ['span', {}, '$.financial.resultLabel'], ['strong', {}, '$.financial.result']],
       ]] },
 
       // converter panel — every conversion via @jarenjs/core/convert
       { $if: ['$.converter', ['div', { class: 'calc-converter' },
-        ['label', { class: 'calc-conv-dimlabel' }, 'Dimension ',
+        ['label', { class: 'calc-conv-dimlabel' }, '$.converter.dimensionLabel',
           ['select', { class: 'calc-dim', on: { change: { action: 'calc/conv-dim' } } }, [{ $apply: '$.converter.dimensions[*]' }]],
         ],
         ['div', { class: 'calc-conv-row' },
@@ -64,8 +64,8 @@ export const CALCULATOR_RULES = [
         ],
         ['div', { class: 'calc-conv-result' }, ['strong', {}, '$.converter.result']],
         { $if: ['$.converter.isCurrency', ['div', { class: 'calc-rates' },
-          ['span', {}, 'rates: '], ['span', {}, '$.converter.rates.status'],
-          { $if: ['$.converter.rates.stale', ['span', { class: 'calc-rates-stale' }, ' · static fallback']] },
+          ['span', {}, '$.converter.rates.label'], ['span', {}, '$.converter.rates.statusLabel'],
+          { $if: ['$.converter.rates.stale', ['span', { class: 'calc-rates-stale' }, '$.converter.rates.staleLabel']] },
           ['button', { type: 'button', class: 'calc-rates-refresh', on: { click: { action: 'calc/rates-refresh' } } }, '↻'],
         ]] },
       ]] },

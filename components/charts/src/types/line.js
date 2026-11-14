@@ -66,6 +66,7 @@ import {
 import { CATEGORICAL, seriesColor } from '../core/palette.js';
 import { normalizeTooltip, markProps } from '../core/marks.js';
 import { normalizeSampling, sampleLineSeries } from '../core/sampling.js';
+import { chartsText } from '../messages.js';
 
 /**
  * @typedef {object} LineAST
@@ -390,8 +391,13 @@ export function buildLineASTResolved(input, config, domains) {
   return ast;
 }
 
-/** The hover text and legend name suffix of a series that reads the right axis. */
-const RIGHT_AXIS_MARK = ' (right axis)';
+/**
+ * The hover text and legend name of a series that reads the right axis:
+ * its name, marked (`charts/series/right-axis`, `{name} (right axis)`).
+ * @param {string} name @param {Readonly<Record<string, unknown>> | null | undefined} messages
+ * @returns {string}
+ */
+const rightAxisName = (name, messages) => chartsText(messages)('charts/series/right-axis', { name });
 
 /**
  * @typedef {object} LineSeriesRender
@@ -433,13 +439,14 @@ export function lineSeriesChildren(name, d, dots, color) {
  * @param {readonly string[]} palette
  * @param {boolean} markers
  * @param {import('../core/marks.js').ChartTooltip|null} [tooltip]
+ * @param {Readonly<Record<string, unknown>> | null} [messages] the reader's compiled catalog, for the right-axis mark
  * @returns {LineSeriesRender}
  */
-export function lineSeriesRender(s, si, plot, palette, markers, tooltip = null) {
+export function lineSeriesRender(s, si, plot, palette, markers, tooltip = null, messages = null) {
   const color = seriesColor(si, palette);
   const series = String(s.name ?? '');
   const right = s.axis === 'right';
-  const name = right && series !== '' ? series + RIGHT_AXIS_MARK : series;
+  const name = right && series !== '' ? rightAxisName(series, messages) : series;
   const pixels = s.points.map((p) => p === null ? null : {
     x: coord(plot.x + p.u * plot.w),
     y: coord(plot.y + (1 - p.v) * plot.h),
@@ -471,7 +478,8 @@ export function lineSeriesRender(s, si, plot, palette, markers, tooltip = null) 
  * @param {{tokens: Record<string,string>, cssVars: Record<string,string>}} theme
  * @param {string} hash
  * @param {{rootClass?: string, keyPrefix?: string, palette?: readonly string[], width?: number,
- *   tooltip?: import('../core/marks.js').ChartTooltipSpec}} [options]
+ *   tooltip?: import('../core/marks.js').ChartTooltipSpec, messages?: Readonly<Record<string, unknown>> | null}} [options]
+ *   `messages` is the reader's compiled catalog, for the right-axis mark
  * @returns {{svg: any, plot: {x:number,y:number,w:number,h:number},
  *   chromeLen: number, series: LineSeriesRender[]}}
  */
@@ -481,7 +489,7 @@ export function buildLineRender(ast, theme, hash, options = {}) {
   const frame = cartesianFrame({
     title: ast.title,
     legend: ast.y2 === undefined || ast.legend === null ? ast.legend
-      : ast.legend.map((e) => e.axis === 'right' ? { ...e, name: e.name + RIGHT_AXIS_MARK } : e),
+      : ast.legend.map((e) => e.axis === 'right' ? { ...e, name: rightAxisName(e.name, options.messages) } : e),
     xAxis: ast.x,
     yAxis: ast.y,
     y2Axis: ast.y2,
@@ -495,7 +503,7 @@ export function buildLineRender(ast, theme, hash, options = {}) {
   const children = frame.children;
   const series = [];
   for (let si = 0; si < ast.series.length; si++) {
-    const parts = lineSeriesRender(ast.series[si], si, plot, palette, ast.markers, tooltip);
+    const parts = lineSeriesRender(ast.series[si], si, plot, palette, ast.markers, tooltip, options.messages);
     series.push(parts);
     children.push(parts.group);
   }

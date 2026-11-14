@@ -20,6 +20,7 @@
 import { svgRoot, group, rect, path, textAt, num, textWidth } from '@jarenjs/view/helpers';
 import { readTextLines, textBlock } from '../label-text.js';
 import { nodeMark, edgeMark, withTooltip, clickTooltips } from './marks.js';
+import { mermaidText } from '../messages.js';
 
 /**
  * @typedef {object} PanelSection
@@ -86,17 +87,19 @@ export function renderStructured(title, sections, theme, hash) {
  * @param {string} type
  * @param {any} theme
  * @param {string} hash
- * @param {string} [note] - the second line; a secondary type's by default
+ * @param {string} [noteId] - the second line's message id; a secondary type's by default
+ * @param {Readonly<Record<string, unknown>> | null} [messages] the reader's compiled catalog
  * @returns {any}
  */
-export function renderPlaceholder(type, theme, hash, note = 'parsed — not yet laid out in v1') {
+export function renderPlaceholder(type, theme, hash, noteId = 'mermaid/placeholder/secondary', messages = null) {
+  const say = mermaidText(messages);
   const t = theme.tokens;
   const width = 380;
   const height = 84;
   return svgRoot('mermaid mm-svg', width, height, theme, [
     rect(1, 1, width - 2, height - 2, { rx: 6, fill: t.clusterFill, stroke: t.clusterStroke, 'stroke-width': 1, 'stroke-dasharray': '5 4' }),
-    textAt(width / 2, 36, `${type} diagram`, 15, { 'font-weight': 'bold', 'text-anchor': 'middle', fill: t.nodeText }),
-    textAt(width / 2, 58, note, 12, { 'text-anchor': 'middle', fill: t.nodeText }),
+    textAt(width / 2, 36, say('mermaid/placeholder/type', { type }), 15, { 'font-weight': 'bold', 'text-anchor': 'middle', fill: t.nodeText }),
+    textAt(width / 2, 58, say(noteId), 12, { 'text-anchor': 'middle', fill: t.nodeText }),
   ], 'mmph-' + hash);
 }
 
@@ -104,9 +107,12 @@ export function renderPlaceholder(type, theme, hash, note = 'parsed — not yet 
  * Build the sections for the structured renderers.
  * @param {string} diagram
  * @param {any} ast
+ * @param {Readonly<Record<string, unknown>> | null} [messages] the reader's compiled catalog, for the
+ *   title and the relations box's heading
  * @returns {{ title: string, sections: PanelSection[] }}
  */
-export function structuredSections(diagram, ast) {
+export function structuredSections(diagram, ast, messages = null) {
+  const say = mermaidText(messages);
   if (diagram === 'class') {
     const tips = clickTooltips(ast.clicks);
     /** @type {PanelSection[]} */
@@ -118,13 +124,13 @@ export function structuredSections(diagram, ast) {
     }));
     if (ast.relations.length) {
       sections.push({
-        heading: 'relations',
+        heading: say('mermaid/class/relations'),
         rows: ast.relations.map((r) => `${r.from} ${r.type} ${r.to}${r.label ? ' : ' + r.label : ''}`),
         id: null,
         edges: ast.relations,
       });
     }
-    return { title: 'Class diagram', sections };
+    return { title: say('mermaid/class/title'), sections };
   }
   if (diagram === 'er') {
     /** @type {PanelSection[]} */
@@ -135,13 +141,13 @@ export function structuredSections(diagram, ast) {
     }));
     if (ast.relationships.length) {
       sections.push({
-        heading: 'relationships',
+        heading: say('mermaid/er/relationships'),
         rows: ast.relationships.map((r) => `${r.left} ${r.leftCard}--${r.rightCard} ${r.right} : ${r.label}`),
         id: null,
         edges: ast.relationships.map((r) => ({ from: r.left, to: r.right })),
       });
     }
-    return { title: 'Entity–relationship', sections };
+    return { title: say('mermaid/er/title'), sections };
   }
   // state diagrams left this path for the graph layout, and gantt left
   // it for the real timeline (`layout/gantt.js`); a stray call must fail

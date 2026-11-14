@@ -23,6 +23,10 @@ import { defaultEnv } from './env.js';
 import { CalcParseError, errorAt } from './errors.js';
 import { siteOf, exactOf } from './ast.js';
 import { DECIMAL_INTEGER, fit, toNumber } from './exact.js';
+import { calcText } from './messages.js';
+
+/** The English of every diagnostic, the `message` of the error it raises. */
+const english = calcText();
 
 /** @typedef {import('./exact.js').ExactValue} ExactValue */
 
@@ -64,7 +68,7 @@ function build(node, env) {
     case 'const': {
       const name = node.name;
       const v = env.constants[name];
-      if (v === undefined) throw refuse(node, `unknown constant '${name}'`);
+      if (v === undefined) throw refuse(node, 'calc/compile/constant', { name });
       return () => v;
     }
     case 'var': {
@@ -97,7 +101,7 @@ function build(node, env) {
     case 'call': {
       // own members only: a name inherited from Object.prototype is no function of ours
       const fn = Object.hasOwn(env.funcs, node.name) ? env.funcs[node.name] : undefined;
-      if (fn === undefined) throw refuse(node, `unknown function '${node.name}'`);
+      if (fn === undefined) throw refuse(node, 'calc/compile/function', { name: node.name });
       checkArity(node, env.arity);
       const args = node.args.map((a) => build(a, env));
       return (scope) => fn(args.map((a) => a(scope)), scope);
@@ -129,13 +133,17 @@ function exactScopeValue(v) {
 /**
  * The error for a node the environment cannot compile: positioned where
  * the node was written when the parser recorded it, unpositioned otherwise.
+ * Its message is the English of the diagnostic `id` (a `calcMessagesEn` id).
  * @param {any} node
- * @param {string} message
+ * @param {string} id
+ * @param {Record<string, unknown>} params
  * @returns {CalcParseError}
  */
-function refuse(node, message) {
+function refuse(node, id, params) {
   const site = siteOf(node);
-  return site === undefined ? new CalcParseError(message) : errorAt(message, site.source, site.position);
+  const message = english(id, params);
+  return site === undefined ? new CalcParseError(message, 1, 1, 0, id, params)
+    : errorAt(message, site.source, site.position, id, params);
 }
 
 /**
@@ -151,11 +159,8 @@ function checkArity(node, arity) {
   if (arity === undefined || !Object.hasOwn(arity, name)) return;
   const [min, max] = arity[name];
   if (count >= min && count <= max) return;
-  const noun = (/** @type {number} */ n) => (n === 1 ? 'argument' : 'arguments');
-  const expected = max === Infinity ? `at least ${min} ${noun(min)}`
-    : min === max ? `${min} ${noun(min)}`
-      : `${min} or ${max} arguments`;
-  throw refuse(node, `${name}() expected ${expected}, got ${count}`);
+  throw refuse(node, max === Infinity ? 'calc/compile/arity-at-least'
+    : min === max ? 'calc/compile/arity-exactly' : 'calc/compile/arity-either', { name, count, min, max });
 }
 
 /**
@@ -177,10 +182,12 @@ function checkArity(node, arity) {
 /**
  * Parse + compile + evaluate a source expression, error-safe. A value an
  * exact environment holds as a `bigint` or a `Ratio` is answered as the
- * nearest `Number`, rounded once.
+ * nearest `Number`, rounded once. With `opts.messages` (a compiled locale
+ * catalog) an expression diagnostic's `message` is in the reader's language,
+ * falling back to English (`calcMessagesEn`) per id.
  * @param {string} source
  * @param {any} [scope]
- * @param {{ env?: any }} [opts]
+ * @param {{ env?: any, messages?: Readonly<Record<string, unknown>> | null }} [opts]
  * @returns {EvalOk | EvalErr}
  */
 export function evaluate(source, scope = {}, opts = {}) {
@@ -192,9 +199,10 @@ export function evaluate(source, scope = {}, opts = {}) {
  * Parse + compile + evaluate a source expression, error-safe, answering the
  * value itself: a `bigint` where the environment is exact and the integer is
  * past what a `Number` holds, a `Ratio` where it is an exact fraction.
+ * `opts.messages` localizes a diagnostic as {@link evaluate} does.
  * @param {string} source
  * @param {any} [scope]
- * @param {{ env?: any }} [opts]
+ * @param {{ env?: any, messages?: Readonly<Record<string, unknown>> | null }} [opts]
  * @returns {ExactOk | EvalErr}
  */
 export function evaluateExact(source, scope = {}, opts = {}) {
@@ -209,7 +217,9 @@ export function evaluateExact(source, scope = {}, opts = {}) {
     return {
       ok: false,
       error: {
-        message: e && e.message ? e.message : String(err),
+        message: e instanceof CalcParseError && e.msgid !== undefined && opts.messages != null
+          ? calcText(opts.messages)(e.msgid, e.params)
+          : e && e.message ? e.message : String(err),
         line: e instanceof CalcParseError ? e.line : undefined,
         column: e instanceof CalcParseError ? e.column : undefined,
       },

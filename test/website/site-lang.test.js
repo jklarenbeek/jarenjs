@@ -91,11 +91,20 @@ describe('website — the site language packs', () => {
     });
   }
 
-  it("English is built in: no pack to load, and the warm-up fetches every other one, the site's and the packages'", async () => {
+  it('English is built in: no pack to load; every package loader returns its pack', async () => {
     assert.strictEqual(await loadSitePack('en'), null);
     assert.strictEqual(await loadLocalePack('en'), null);
-    assert.strictEqual(await warmSitePacks(), 2 * LOCALE_NAMES.length);
     for (const { code, pack } of LOCALE_NAMES) assert.strictEqual(await loadLocalePack(code), /** @type {any} */ (packs)[pack], `${code} loads its pack`);
+  });
+
+  it('the offline warm-up fetches only the stored language: nothing for English, both packs of one other', async () => {
+    assert.deepStrictEqual(await warmSitePacks(null), []);
+    assert.deepStrictEqual(await warmSitePacks('en'), []);
+    assert.deepStrictEqual(await warmSitePacks('xx'), []);
+    assert.deepStrictEqual(await warmSitePacks('de'), ['site:de', 'locale:de']);
+    assert.deepStrictEqual(await warmSitePacks('zh-tw'), ['site:zh-tw', 'locale:zh-tw']);
+    const main = readFileSync(join(SRC, 'main.js'), 'utf8');
+    assert.match(main, /warmSitePacks\(lang\)/, 'the boot warms the stored language only');
   });
 
   it('each pack is reached by one literal dynamic import, and nothing else imports a pack', () => {
@@ -236,6 +245,43 @@ describe('website — one language switch for the whole site', () => {
     assert.strictEqual(app.getState().lang, null);
     assert.deepStrictEqual(applied, [], 'the document and the stored choice are untouched');
     assert.strictEqual(app.getState().packs.ko, true, 'its pack loaded for its own run');
+  });
+
+  it("the IDE's share status speaks the site's words", async () => {
+    /** @type {string[]} */
+    const shared = [];
+    const { app, container } = mountSite({ hash: '#/project', share: (/** @type {string} */ h) => { shared.push(h); return h; } });
+    fire(languageSwitch(container), 'change', { target: { value: 'nl' } });
+    await settle();
+    app.dispatch('ide/share');
+    const nl = await loadSitePack('nl');
+    assert.strictEqual(shared.length, 1);
+    assert.strictEqual(app.getState().ide.shared, nl?.['site/play/link-copied']);
+    fire(languageSwitch(container), 'change', { target: { value: 'fr' } });
+    assert.strictEqual(app.getState().ide.shared, null, 'a switch clears it');
+  });
+
+  it('a language switch remounts the collection demo in the new words', async () => {
+    const { viewModel } = await import('../../packages/website/src/app/viewmodel.js');
+    const { createInitialState } = await import('../../packages/website/src/app/state.js');
+    const at = (/** @type {string | null} */ lang) => viewModel({ ...createInitialState(), lang,
+      route: { page: 'collection', params: { mode: 'rules' } } }).ui.collection.key;
+    // the widget is keyed by its mode and the language: a switch is a new key
+    assert.strictEqual(at(null), 'rules:en');
+    assert.strictEqual(at('de'), 'rules:de');
+  });
+
+  it("a diagram that does not parse says so in the reader's language", async () => {
+    const { mermaidText } = await import('@jarenjs/mermaid');
+    const { app, container } = mountSite();
+    app.dispatch('play/example', 'mermaid-er');
+    fire(languageSwitch(container), 'change', { target: { value: 'de' } });
+    await packLanded(app, 'de');
+    app.dispatch('play/source', { key: 'source' }, { target: { value: 'flowchart TD\n  A --> ' } });
+    const words = findAll(container, (n) => n.nodeValue != null).map(textOf);
+    const de = mermaidText(compileMessageCatalog(packs.de));
+    assert.ok(words.includes(de('mermaid/error/title')), words.filter((w) => /mermaid|Mermaid/i.test(w)).join(' | '));
+    assert.ok(!words.includes('Mermaid parse error'));
   });
 
   it('Arabic writes right to left', () => {

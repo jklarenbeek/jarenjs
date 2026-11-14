@@ -3,10 +3,14 @@
 import { createDomRenderer } from '@jarenjs/view';
 import { buildFormModel } from '@jarenjs/forms';
 import { createRuleEditor } from '../index.js';
+import { rulesText } from '../messages.js';
 
 /**
  * Mount a reusable rule editor. Preview rows are a bounded presentation page;
  * selection remains in the editor by stable ID. Schema fields guide JSON authors.
+ * Every word of chrome renders through `options.messages`, a compiled locale
+ * catalog, falling back to English (`rulesMessagesEn`) per id; a language
+ * change mounts the editor again.
  * @param {HTMLElement} host @param {any} options
  */
 export function mountRuleEditor(host, options) {
@@ -16,6 +20,7 @@ export function mountRuleEditor(host, options) {
   if (!Number.isSafeInteger(pageSize) || pageSize < 1 || pageSize > 100) throw new TypeError('Invalid review page size');
   let page = 0, disposed = false, targetIndex = 0;
   const render = createDomRenderer(host, { document });
+  const t = rulesText(options.messages);
   const controller = createRuleEditor({ ...options, onChange: (state) => { refresh(state); options.onChange?.(state); } });
   function refresh(state = controller.state()) {
     if (disposed) return;
@@ -28,25 +33,25 @@ export function mountRuleEditor(host, options) {
     targetIndex = Math.min(targetIndex, Math.max(0, targets.length - 1));
     const editableTarget = targets[targetIndex] && typeof targets[targetIndex] === 'object' && !Array.isArray(targets[targetIndex]);
     const writable = (model.children ?? []).filter((field) => !field.readOnly && (!options.writableFields || options.writableFields.includes(field.pointer)));
-    render(['section', { class: 'jr-editor', 'aria-label': 'Rule editor' },
-      ['div', { class: 'jr-actions' }, ['label', {}, 'Target ', ['select', { 'aria-label': 'Rule target', 'data-rule-target': '', value: String(targetIndex), disabled: !targets.length },
+    render(['section', { class: 'jr-editor', 'aria-label': t('rules/editor') },
+      ['div', { class: 'jr-actions' }, ['label', {}, `${t('rules/target')} `, ['select', { 'aria-label': t('rules/target/name'), 'data-rule-target': '', value: String(targetIndex), disabled: !targets.length },
         ...targets.map((target, index) => ['option', { value: String(index) }, target?.id ?? String(index)])]],
-      ['label', {}, 'Writable field ', ['select', { 'aria-label': 'Writable field', 'data-rule-field': '', value: targets[targetIndex]?.field ?? '', disabled: !editableTarget },
+      ['label', {}, `${t('rules/field')} `, ['select', { 'aria-label': t('rules/field'), 'data-rule-field': '', value: targets[targetIndex]?.field ?? '', disabled: !editableTarget },
         ...writable.map((field) => ['option', { value: field.pointer }, field.label])]],
-      ['label', {}, ['input', { type: 'checkbox', 'aria-label': 'Target enabled', 'data-rule-enabled': '', checked: targets[targetIndex]?.enabled !== false, disabled: !editableTarget }], 'Enabled']],
-      ['label', { class: 'jr-draft-label' }, 'Rule document', ['textarea', { 'data-rule-draft': '', rows: 12, value: state.text, spellcheck: 'false', autocapitalize: 'off', autocomplete: 'off', 'aria-label': 'Rule document' }]],
-      ['details', {}, ['summary', {}, 'Available schema fields'], ['pre', {}, fields.join('\n') || JSON.stringify(options.schema ?? {}, null, 2)]],
-      ['div', { class: 'jr-actions' }, ['button', { type: 'button', 'data-rule-preview': '', disabled: state.phase === 'previewing' }, 'Preview rules'],
-        ['button', { type: 'button', 'data-rule-commit': '', disabled: state.reportOnly || state.phase !== 'review' || !state.selected.length }, `Commit selected (${state.selected.length})`]],
-      ['p', { role: 'status', 'data-rule-status': '' }, state.message || (state.phase === 'previewing' ? 'Evaluating preview…' : `${changes.length} proposed changes · ${state.selected.length} selected`)],
-      ['ul', { 'aria-label': 'Preview diagnostics' }, ...(state.plan?.errors ?? []).map((error) => ['li', {}, `${error.rowId ?? ''} ${error.targetId ?? ''}: ${error.code ?? ''} ${error.message ?? ''} ${error.docPath ?? ''}`]),
-        ...(state.plan?.omittedErrors ? [['li', {}, `${state.plan.omittedErrors} further diagnostics omitted by the configured limit.`]] : [])],
-      ['ul', { class: 'jr-changes', 'aria-label': 'Proposed changes' }, ...changes.slice(page * pageSize, (page + 1) * pageSize).map((change) =>
+      ['label', {}, ['input', { type: 'checkbox', 'aria-label': t('rules/enabled/name'), 'data-rule-enabled': '', checked: targets[targetIndex]?.enabled !== false, disabled: !editableTarget }], t('rules/enabled')]],
+      ['label', { class: 'jr-draft-label' }, t('rules/document'), ['textarea', { 'data-rule-draft': '', rows: 12, value: state.text, spellcheck: 'false', autocapitalize: 'off', autocomplete: 'off', 'aria-label': t('rules/document') }]],
+      ['details', {}, ['summary', {}, t('rules/fields')], ['pre', {}, fields.join('\n') || JSON.stringify(options.schema ?? {}, null, 2)]],
+      ['div', { class: 'jr-actions' }, ['button', { type: 'button', 'data-rule-preview': '', disabled: state.phase === 'previewing' }, t('rules/preview')],
+        ['button', { type: 'button', 'data-rule-commit': '', disabled: state.reportOnly || state.phase !== 'review' || !state.selected.length }, t('rules/commit', { count: state.selected.length })]],
+      ['p', { role: 'status', 'data-rule-status': '' }, state.message || (state.phase === 'previewing' ? t('rules/status/previewing') : t('rules/status/review', { changes: changes.length, selected: state.selected.length }))],
+      ['ul', { 'aria-label': t('rules/diagnostics') }, ...(state.plan?.errors ?? []).map((error) => ['li', {}, `${error.rowId ?? ''} ${error.targetId ?? ''}: ${error.code ?? ''} ${error.message ?? ''} ${error.docPath ?? ''}`]),
+        ...(state.plan?.omittedErrors ? [['li', {}, t('rules/diagnostics/omitted', { count: state.plan.omittedErrors })]] : [])],
+      ['ul', { class: 'jr-changes', 'aria-label': t('rules/changes') }, ...changes.slice(page * pageSize, (page + 1) * pageSize).map((change) =>
         ['li', { key: change.id }, ['label', {}, ['input', { type: 'checkbox', 'data-rule-change': change.id, checked: state.selected.includes(change.id) }],
-          `${change.entityId} ${change.field}: ${change.before.present ? JSON.stringify(change.before.value) : '(absent)'} → ${JSON.stringify(change.proposed)}${change.explanation ? ` · ${change.explanation}` : ''}`]])],
-      ['nav', { class: 'jr-actions', 'aria-label': 'Preview pages' }, ['button', { type: 'button', 'data-rule-previous': '', disabled: page === 0 }, 'Previous'],
-        ['span', {}, `Page ${page + 1} of ${Math.max(1, Math.ceil(changes.length / pageSize))}`],
-        ['button', { type: 'button', 'data-rule-next': '', disabled: (page + 1) * pageSize >= changes.length }, 'Next']]]);
+          `${change.entityId} ${change.field}: ${change.before.present ? JSON.stringify(change.before.value) : t('rules/change/absent')} → ${JSON.stringify(change.proposed)}${change.explanation ? ` · ${change.explanation}` : ''}`]])],
+      ['nav', { class: 'jr-actions', 'aria-label': t('rules/pages') }, ['button', { type: 'button', 'data-rule-previous': '', disabled: page === 0 }, t('rules/page/previous')],
+        ['span', {}, t('rules/page/of', { page: page + 1, pages: Math.max(1, Math.ceil(changes.length / pageSize)) })],
+        ['button', { type: 'button', 'data-rule-next': '', disabled: (page + 1) * pageSize >= changes.length }, t('rules/page/next')]]]);
   }
   function input(event) {
     const target = event.target;

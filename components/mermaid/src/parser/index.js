@@ -21,7 +21,7 @@ import { parseState } from './state.js';
 import { parseEr } from './er.js';
 import { parseGantt } from './gantt.js';
 import { parsePie } from './pie.js';
-import { fail } from '../errors.js';
+import { failWith } from '../errors.js';
 
 /** Keyword → canonical diagram type. */
 const KEYWORDS = {
@@ -70,13 +70,13 @@ export function parseMermaid(source, options = {}) {
   // First non-blank line carries the diagram keyword.
   let start = 0;
   while (start < lines.length && lines[start].trim() === '') start++;
-  if (start >= lines.length) fail('empty diagram', 1);
+  if (start >= lines.length) failWith('mermaid/parse/empty', {}, 1);
 
   const header = lines[start].trim();
   const keyword = firstToken(header);
   const type = KEYWORDS[keyword];
   if (type === undefined) {
-    fail(`unknown diagram type '${keyword}'`, start + 1);
+    failWith('mermaid/parse/unknown-type', { keyword }, start + 1);
   }
 
   let direction = null;

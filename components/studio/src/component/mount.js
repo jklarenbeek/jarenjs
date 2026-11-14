@@ -13,7 +13,9 @@ import { UI_RULES } from './shared/ui.js';
  * @param {HTMLElement | null} node
  * @param {{ project: object, host: any, projectData?: any, projectTemplate?: Function,
  *   templates?: any[], widgets?: Record<string, any>, schedule?: (flush: () => void) => void,
- *   debounceMs?: number, download?: Function, exportProject?: Function, onError?: (error: Error) => void }} options
+ *   debounceMs?: number, download?: Function, exportProject?: Function, onError?: (error: Error) => void,
+ *   messages?: any }} options - `messages`: the reader's compiled catalog (or a
+ *   function answering the current one) every surface of the editor speaks
  */
 export function mountStudioEditor(node, options) {
   let app;
@@ -28,11 +30,11 @@ export function mountStudioEditor(node, options) {
   }, {
     node, document: node?.ownerDocument, schedule: options.schedule, onError: options.onError,
     eventFields: formEventFields(), effects: controller.effects,
-    widgets: { 'studio-flow': createProjectFlowWidget({ schedule: options.schedule }),
+    widgets: { 'studio-flow': createProjectFlowWidget({ schedule: options.schedule, messages: options.messages }),
       ...(options.projectData ? { 'studio-data': options.projectData.widget } : {}),
-      'studio-stage': host.createProjectStageWidget({ schedule: options.schedule }),
+      'studio-stage': host.createProjectStageWidget({ schedule: options.schedule, messages: options.messages }),
       'studio-splitter': host.createProjectSplitterWidget(), ...options.widgets },
-    viewModel: state => ({ ui: { project: { ...component.viewModel(state), templates: options.templates ?? [] } } }),
+    viewModel: state => ({ ui: { project: { ...component.viewModel(state, { messages: options.messages }), templates: options.templates ?? [] } } }),
   });
   controller.attach(); controller.commit(); controller.runActive();
   return {

@@ -30,6 +30,7 @@ export { layoutDiagram, diagramToVnode } from './render/index.js';
 export { createTheme, THEMES, HOST_VARS } from './theme.js';
 export { sanitizeHref } from '@jarenjs/view/helpers';
 export { MermaidParseError } from './errors.js';
+export { mermaidMessagesEn, mermaidText, mermaidErrorText } from './messages.js';
 export { hashContent } from './utils.js';
 export {
   MERMAID_VERSION, diagramDocument, walkSequence,
@@ -40,14 +41,17 @@ export {
  * Convenience: parse → layout → render, error-safe, in one call.
  * @param {string} source
  * @param {{ theme?: any, htmlLabels?: boolean, safe?: boolean, dateNames?: import('@jarenjs/core/dates').DateNames,
- *   parseFrontmatter?: (text: string) => any }} [options] - `dateNames`
+ *   parseFrontmatter?: (text: string) => any, messages?: Readonly<Record<string, unknown>> | null }} [options] - `dateNames`
  *   is the locale-name record a Gantt's `dateFormat`/`axisFormat` needs
  *   for a month or weekday token (`compileDateLocale(pack).names`);
  *   this engine ships none of its own. `htmlLabels: true` draws flowchart
  *   and state labels as HTML in `foreignObject` unless the diagram's config
  *   turns them off (the diagram alone cannot turn them on); `safe: true`
  *   keeps them SVG text whatever either says, for output a host renders
- *   through the `@jarenjs/view` safe policy (which drops `foreignObject`)
+ *   through the `@jarenjs/view` safe policy (which drops `foreignObject`).
+ *   `messages`, the reader's compiled catalog (`compileMessageCatalog` over a
+ *   locale pack), translates the error card, a parse diagnostic and the words
+ *   the render adds, falling back to English (`mermaidMessagesEn`) per id
  * @returns {any} an SVG vnode
  */
 export function renderMermaid(source, options = {}) {

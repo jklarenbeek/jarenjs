@@ -40,8 +40,61 @@ import { converterMode } from '../modes/converter.js';
 import { createRatesLayer, FALLBACK_RATES } from './rates/index.js';
 import { CALCULATOR_RULES } from './rules.js';
 import { FINANCIAL_SCHEMA } from './schema.js';
+import { calcMessagesEn, calcText } from '../messages.js';
 
 const FIN_MODEL = buildFormModel(FINANCIAL_SCHEMA);
+
+/**
+ * The financial form's model per reader catalog: its labels resolve at build time.
+ * @type {WeakMap<object, any>}
+ */
+const FIN_MODELS = new WeakMap();
+
+/**
+ * The financial form's model in the reader's language: the field labels
+ * through `messages` by their `x-msgid` (`<x-msgid>#label`), the English
+ * model without a catalog.
+ * @param {Readonly<Record<string, unknown>> | null | undefined} messages
+ * @returns {any}
+ */
+function financialModel(messages) {
+  if (messages == null) return FIN_MODEL;
+  let model = FIN_MODELS.get(messages);
+  if (model === undefined) {
+    const t = calcText(messages);
+    model = buildFormModel(FINANCIAL_SCHEMA, {
+      t: (/** @type {string} */ msgid, /** @type {any} */ fallback) => (Object.hasOwn(calcMessagesEn, msgid) ? t(msgid) : fallback),
+    });
+    FIN_MODELS.set(messages, model);
+  }
+  return model;
+}
+
+/** The message id of each mode's tab label, by mode id. */
+const MODE_LABELS = Object.freeze({
+  standard: 'calc/mode/standard', scientific: 'calc/mode/scientific', programmer: 'calc/mode/programmer',
+  financial: 'calc/mode/financial', converter: 'calc/mode/converter',
+});
+/** The message id of each converter dimension's name, by dimension id. */
+const DIMENSION_LABELS = Object.freeze({
+  length: 'calc/dimension/length', area: 'calc/dimension/area', volume: 'calc/dimension/volume', mass: 'calc/dimension/mass',
+  temperature: 'calc/dimension/temperature', time: 'calc/dimension/time', speed: 'calc/dimension/speed',
+  pressure: 'calc/dimension/pressure', energy: 'calc/dimension/energy', power: 'calc/dimension/power',
+  data: 'calc/dimension/data', datarate: 'calc/dimension/datarate', frequency: 'calc/dimension/frequency',
+  angle: 'calc/dimension/angle', fuel: 'calc/dimension/fuel', currency: 'calc/dimension/currency',
+});
+/** The message id of each exchange-rates state, by state. */
+const RATES_LABELS = Object.freeze({
+  idle: 'calc/rates/idle', fallback: 'calc/rates/fallback', ok: 'calc/rates/ok', error: 'calc/rates/error',
+});
+/**
+ * A label by its table's message id, or the id itself for one the table
+ * does not name (a dimension or mode a later core adds shows its id).
+ * @param {(id: string, params?: Record<string, unknown>) => string} t
+ * @param {Readonly<Record<string, string>>} table @param {string} key
+ * @returns {string}
+ */
+const labelOf = (t, table, key) => (Object.hasOwn(table, key) ? t(table[key]) : key);
 
 /**
  * Namespaced form action names so the financial panel never collides with
@@ -329,24 +382,31 @@ export const calcEditEffects = {
  * The viewModel derivation for the calculator (`contributeCalcViewModel`).
  * Pure: state in, UI document out, no dispatching.
  * @param {any} state
- * @param {{ theme?: any }} [options] plot theme (name, overrides, or
- *   `'host'` to follow the embedding host's tokens)
+ * @param {{ theme?: any, messages?: Readonly<Record<string, unknown>> | null }} [options] plot theme
+ *   (name, overrides, or `'host'` to follow the embedding host's tokens), and
+ *   the reader's compiled catalog (`compileMessageCatalog` over a locale
+ *   pack): every word of chrome and every expression diagnostic renders
+ *   through it, falling back to English (`calcMessagesEn`) per id
  * @returns {any}
  */
 export function contributeCalcViewModel(state, options = {}) {
   const calc = state.calc;
   if (!calc) return null;
+  const messages = options.messages;
+  const t = calcText(messages);
   const desc = MODE_BY_ID[calc.mode] ?? standardMode;
   const env = envForMode(calc.mode);
   const scope = scopeOf(calc);
 
   // live result of the current entry
   const ans = scopeValue(scope.ans, calc.mode);
-  const live = calc.entry === '' ? { ok: true, value: ans } : evaluateExact(calc.entry, scope, { env });
+  const live = calc.entry === '' ? { ok: true, value: ans } : evaluateExact(calc.entry, scope, { env, messages });
   const display = {
     entry: calc.entry === '' ? '0' : calc.entry,
     result: !live.ok ? '' : calc.mode === 'programmer' ? formatWord(live.value, calc) : desc.format(live.value, calc),
-    error: live.ok ? null : (live.error.message + (live.error.line ? ` (${live.error.line}:${live.error.column})` : '')),
+    error: live.ok ? null : live.error.line
+      ? t('calc/display/error-at', { message: live.error.message, line: live.error.line, column: live.error.column })
+      : live.error.message,
   };
 
   // programmer four-base view
@@ -354,8 +414,8 @@ export function contributeCalcViewModel(state, options = {}) {
   const bases = {
     base: calc.base, wordBits: calc.wordBits, signed: calc.signed,
     baseOptions: BASES.map((b) => ({ id: b, label: b, active: b === calc.base, on: { click: { action: 'calc/base', with: { base: b } } } })),
-    wordOptions: WORD_SIZES.map((w) => ({ id: String(w), label: w + '-bit', active: w === calc.wordBits, on: { click: { action: 'calc/word', with: { bits: w } } } })),
-    signLabel: calc.signed ? 'signed' : 'unsigned',
+    wordOptions: WORD_SIZES.map((w) => ({ id: String(w), label: t('calc/word/bits', { bits: w }), active: w === calc.wordBits, on: { click: { action: 'calc/word', with: { bits: w } } } })),
+    signLabel: t(calc.signed ? 'calc/word/signed' : 'calc/word/unsigned'),
     views: viewsOf(pv, calc.wordBits, calc.signed),
   };
 
@@ -363,10 +423,11 @@ export function contributeCalcViewModel(state, options = {}) {
   let financial = null;
   if (calc.mode === 'financial') {
     let form = null;
-    try { form = buildFormViewModel(FIN_MODEL, calc.fin, { validateFields: true }); }
+    try { form = buildFormViewModel(financialModel(messages), calc.fin, messages == null ? { validateFields: true } : { validateFields: true, catalog: messages }); }
     catch { form = null; }
     const result = solveTvm({ ...calc.fin });
-    financial = { form, solveFor: calc.fin.solveFor, result: financialMode.format(result) };
+    financial = { form, solveFor: calc.fin.solveFor, result: financialMode.format(result),
+      resultLabel: t('calc/financial/result', { solveFor: calc.fin.solveFor }) };
   }
 
   // converter: options + live result, all through core/convert
@@ -377,7 +438,8 @@ export function contributeCalcViewModel(state, options = {}) {
     const result = convertValue(dim, +calc.conv.value, calc.conv.from, calc.conv.to, calc.rates);
     converter = {
       dimension: dim,
-      dimensions: converterDimensions().map((d) => ({ id: d, label: d, selected: d === dim })),
+      dimensions: converterDimensions().map((d) => ({ id: d, label: labelOf(t, DIMENSION_LABELS, d), selected: d === dim })),
+      dimensionLabel: `${t('calc/converter/dimension')} `,
       from: calc.conv.from,
       to: calc.conv.to,
       unitsFrom: units.map((u) => ({ id: u.id, symbol: u.symbol, selected: u.id === calc.conv.from })),
@@ -385,7 +447,9 @@ export function contributeCalcViewModel(state, options = {}) {
       value: calc.conv.value,
       result: converterMode.format(result),
       isCurrency: dim === 'currency',
-      rates: { status: calc.rates.status ?? 'idle', stale: calc.rates.stale === true, at: calc.rates.at ?? 0, count: Object.keys(calc.rates.rates ?? {}).length },
+      rates: { status: calc.rates.status ?? 'idle', stale: calc.rates.stale === true, at: calc.rates.at ?? 0, count: Object.keys(calc.rates.rates ?? {}).length,
+        label: `${t('calc/converter/rates')} `, statusLabel: labelOf(t, RATES_LABELS, calc.rates.status ?? 'idle'),
+        staleLabel: ` · ${t('calc/converter/stale')}` },
     };
   }
 
@@ -395,7 +459,7 @@ export function contributeCalcViewModel(state, options = {}) {
     plot = {
       expr: calc.plot.expr,
       kind: calc.plot.kind,
-      svg: calcToVnode(calc.plot.expr, { kind: calc.plot.kind, theme: options.theme }),
+      svg: calcToVnode(calc.plot.expr, { kind: calc.plot.kind, theme: options.theme, messages }),
       kinds: [
         { id: '2d', label: 'x·y', active: calc.plot.kind === '2d', on: { click: { action: 'calc/plot-kind', with: { kind: '2d' } } } },
         { id: '3d', label: 'x·y·z', active: calc.plot.kind === '3d', on: { click: { action: 'calc/plot-kind', with: { kind: '3d' } } } },
@@ -405,7 +469,7 @@ export function contributeCalcViewModel(state, options = {}) {
 
   return {
     mode: calc.mode,
-    modes: MODES.map((m) => ({ id: m.id, label: m.label, active: m.id === calc.mode, on: { click: { action: 'calc/mode', with: { mode: m.id } } } })),
+    modes: MODES.map((m) => ({ id: m.id, label: Object.hasOwn(MODE_LABELS, m.id) ? t(MODE_LABELS[m.id]) : m.label, active: m.id === calc.mode, on: { click: { action: 'calc/mode', with: { mode: m.id } } } })),
     isStandard: calc.mode === 'standard' || calc.mode === 'scientific',
     isScientific: calc.mode === 'scientific',
     isProgrammer: calc.mode === 'programmer',
@@ -425,7 +489,10 @@ export function contributeCalcViewModel(state, options = {}) {
 
 /**
  * Create the calculator component.
- * @param {import('./rates/index.js').RatesLayerOptions} [options]
+ * @param {import('./rates/index.js').RatesLayerOptions & { messages?: Readonly<Record<string, unknown>> | null }} [options]
+ *   the rates layer's options, and `messages`: the reader's compiled
+ *   catalog, which the standalone app's view model renders through (a host
+ *   that composes `viewModel` itself passes it there)
  * @returns {any}
  */
 export function createCalcComponent(options = {}) {
@@ -473,7 +540,7 @@ export function createCalcComponent(options = {}) {
         eventFields: { ...formEventFields(), ...(appOptions.eventFields ?? {}) },
         effects: { ...calcEditEffects, ...rates.effects, ...(appOptions.effects ?? {}) },
         subs: { ...rates.subs, ...(appOptions.subs ?? {}) },
-        viewModel: (state) => ({ ...state, ui: { calculator: contributeCalcViewModel(state) } }),
+        viewModel: (state) => ({ ...state, ui: { calculator: contributeCalcViewModel(state, { messages: options.messages }) } }),
       });
     },
   };

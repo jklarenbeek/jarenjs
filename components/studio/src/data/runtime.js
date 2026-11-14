@@ -4,6 +4,7 @@ import { equalsJson } from '@jarenjs/core/object';
 import { applyJSONPatch } from '@jarenjs/json/patch';
 import { createTransport } from './transport.js';
 import { bootFailure } from './boot-stages.js';
+import { studioTextOf } from '../messages.js';
 /** The live query the right pane maintains. */
 const LIVE_QUERY = [{ $for: { it: '$[*]' }, $return: '$it' }];
 
@@ -59,9 +60,12 @@ const failedRequest = (dispatch) => (error) => {
 
 /**
  * The runtime: effects plus the exported view model.
- * @param {any} env - explicit seed documents, transport, lifecycle and optional worked examples.
+ * @param {any} env - explicit seed documents, transport, lifecycle and optional worked examples;
+ *   `messages`: the compiled catalog, or a function answering the current one,
+ *   the refusals it writes into the page speak (English when absent).
  */
 export function createDataRuntime(env = {}) {
+  const words = () => studioTextOf(env.messages);
   const EXECUTOR = env.executor ?? 'sqlite';
   const buildTransport = env.transport ?? (() => createTransport(env.transportOptions));
   const DATA_MODEL = structuredClone(env.model), DATA_QUERY = structuredClone(env.query),
@@ -98,7 +102,7 @@ export function createDataRuntime(env = {}) {
       return { ok: true, value: JSON.parse(text) };
     }
     catch (error) {
-      return { ok: false, message: `${what}: invalid JSON — ${/** @type {any} */ (error).message}` };
+      return { ok: false, message: words()('studio/data/invalid-json', { what, reason: /** @type {any} */ (error).message }) };
     }
   };
 
@@ -134,7 +138,7 @@ export function createDataRuntime(env = {}) {
         onError: (/** @type {any} */ outcome) =>
           dispatch('data/error', { message: outcome.error.details?.message ?? outcome.error.message }),
         onEnd: (/** @type {{ reason: string }} */ info) =>
-          dispatch('data/error', { message: `live stream ended (${info.reason})` }),
+          dispatch('data/error', { message: words()('studio/data/live-ended', { reason: info.reason }) }),
       });
   };
 
@@ -143,7 +147,7 @@ export function createDataRuntime(env = {}) {
    * @param {(name: string, payload?: any) => void} dispatch */
   const withStore = (dispatch) => {
     if (transport !== null) return true;
-    dispatch('data/error', { message: 'the store is not booted — retry the boot first' });
+    dispatch('data/error', { message: words()('studio/data/not-booted') });
     return false;
   };
 
@@ -151,7 +155,7 @@ export function createDataRuntime(env = {}) {
   const withOwner = (dispatch) => {
     if (!withStore(dispatch)) return false;
     if (topology === 'owner') return true;
-    dispatch('data/error', { message: 'Only the owning tab can recreate or migrate the store.' });
+    dispatch('data/error', { message: words()('studio/data/owner-only') });
     return false;
   };
 
@@ -286,7 +290,7 @@ export function createDataRuntime(env = {}) {
       if (title === '') return;
       let doc;
       try { doc = env.createRow ? env.createRow(title) : JSON.parse(title); }
-      catch (error) { dispatch('data/error', { message: `document: invalid JSON — ${error.message}` }); return; }
+      catch (error) { dispatch('data/error', { message: words()('studio/data/document-invalid-json', { reason: error.message }) }); return; }
       transport?.request('data.insert', { collection, doc })
         .then(() => refreshRows(dispatch))
         .catch((error) => dispatch('data/error', { message: String(error.message ?? error) }));
@@ -324,7 +328,7 @@ export function createDataRuntime(env = {}) {
     // the only entries not run are the ones the corpus marks.
     'data-oracle': (_props, dispatch) => {
       if (env.corpus === undefined || transport === null) {
-        dispatch('data/oracle', { status: 'error', message: 'the spatial corpus is not available here' });
+        dispatch('data/oracle', { status: 'error', message: words()('studio/data/no-corpus') });
         return;
       }
       dispatch('data/oracle', { status: 'running' });
@@ -383,7 +387,7 @@ export function createDataRuntime(env = {}) {
     // answer so the pushdown is visible next to the result it produced
     'data-trip': (props, dispatch) => {
       if (transport === null) {
-        dispatch('data/trip', { status: 'error', message: 'the store is not ready yet' });
+        dispatch('data/trip', { status: 'error', message: words()('studio/data/not-ready') });
         return;
       }
       let trip;
@@ -399,8 +403,8 @@ export function createDataRuntime(env = {}) {
         dispatch('data/trip', {
           status: 'error',
           rows: trip.rows.length,
-          message: `the stylesheet's output is not GeoJSON by the meta-schema`
-            + (first === undefined ? '' : ` \u2014 ${first.instancePath || '/'}: ${first.message}`),
+          message: first === undefined ? words()('studio/data/not-geojson')
+            : words()('studio/data/not-geojson-at', { path: first.instancePath || '/', message: first.message }),
           errors: trip.errors,
         });
         return;

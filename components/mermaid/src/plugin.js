@@ -29,7 +29,9 @@ import { hashContent } from './utils.js';
  *   [k: string]: any }} [options] - `renderers.pie` draws a pie fence (charts'
  *   `mermaidPieRenderer`); without it a pie renders the placeholder.
  *   `htmlLabels` lets flowchart and state labels be HTML (a fence's own
- *   config cannot); `safe` keeps them SVG text whatever it says
+ *   config cannot); `safe` keeps them SVG text whatever it says;
+ *   `messages`, the reader's compiled catalog, is the language of the words
+ *   the render and the interactive viewer add (`mermaidMessagesEn`)
  * @returns {Readonly<{ name: string, fences: string[], node: string, render: (node: any, h: any, ctx: any) => any }>}
  */
 export function mermaidPlugin(options = {}) {
@@ -61,7 +63,7 @@ export function mermaidPlugin(options = {}) {
         hydrate: async (el) => {
           if (options.interactive === true) {
             const { attachInteractiveDiagram } = await import('./interactive.js');
-            attachInteractiveDiagram(el);
+            attachInteractiveDiagram(el, { messages: options.messages });
           }
           if (options.tooltips === true) {
             const { attachDiagramTooltips } = await import('./tooltips.js');

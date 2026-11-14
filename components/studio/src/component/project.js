@@ -11,6 +11,8 @@ import { toOpenApi } from '@jarenjs/contract/project';
 
 import { errorMessage, cards, error, code } from './shared/nodes.js';
 import { Float64 } from '@jarenjs/core/math';
+import { localizeErrors } from '@jarenjs/validate';
+import { studioTextOf, catalogOf } from '../messages.js';
 const formatMsUnscaled = value => `${Float64.roundToPrecision(value, 3)} ms`;
 
 
@@ -124,30 +126,33 @@ function commitProject(slice) {
  * throws.
  * @param {any} slice - the `state.project` slice
  * @param {string} name - the file to run
- * @param {{ model?: (project: any, name: string) => Promise<any> }} [options]
+ * @param {{ model?: (project: any, name: string) => Promise<any>, messages?: any }} [options] -
+ *   `messages`: the reader's compiled catalog (or a function answering it)
+ *   the result's titles and a schema's errors speak; English when absent
  * @returns {{ nodes: any[] } | Promise<{ nodes: any[] }> | null}
  */
 function runProjectFile(slice, name, options = {}) {
+  const t = studioTextOf(options.messages);
   const project = projectOf(slice);
   const file = project.files.find((f) => f.name === name);
   if (file === undefined) return null;
   if (file.kind === 'model' || file.model !== undefined) {
     if (!options.model) return null;
     return options.model(project, name).then((result) => ({ nodes: [
-      code('Result', JSON.stringify(result.result, null, 2)), code('Query plan', JSON.stringify(result.plan, null, 2)),
-    ] }), (err) => ({ nodes: [error(err, 'Model run')] }));
+      code(t('studio/run/result'), JSON.stringify(result.result, null, 2)), code(t('studio/run/plan'), JSON.stringify(result.plan, null, 2)),
+    ] }), (err) => ({ nodes: [error(err, t('studio/run/model-failed'))] }));
   }
   let input;
   try { ({ input } = projectFileContext(project, file)); }
-  catch (err) { return { nodes: [error(err, 'Project reference')] }; }
+  catch (err) { return { nodes: [error(err, t('studio/run/reference-failed'))] }; }
   const dataText = input ? input.text : 'null';
   if (file.kind === 'fsm' || file.kind === 'dag') {
     try {
       const doc = resolveProjectFile(project, name).doc;
       const data = JSON.parse(dataText);
       if (file.kind === 'dag') return compileDag(doc).run(data).then(
-        (output) => ({ nodes: [code('DAG output', JSON.stringify(output, null, 2) ?? '(empty sequence)')] }),
-        (err) => ({ nodes: [error(err, 'DAG run')] }));
+        (output) => ({ nodes: [code(t('studio/run/dag-output'), JSON.stringify(output, null, 2) ?? t('studio/run/empty-sequence'))] }),
+        (err) => ({ nodes: [error(err, t('studio/run/dag-failed'))] }));
       const machine = compileFsm(doc);
       let state = machine.initial;
       const trace = [];
@@ -156,14 +161,14 @@ function runProjectFile(slice, name, options = {}) {
           { context: data?.context ?? null, payload: typeof event === 'string' ? null : event.payload });
         trace.push(result); state = result.state;
       }
-      return { nodes: [code('Machine run', JSON.stringify({ state, events: state === null ? [] : machine.events(state), trace }, null, 2))] };
+      return { nodes: [code(t('studio/run/machine'), JSON.stringify({ state, events: state === null ? [] : machine.events(state), trace }, null, 2))] };
     }
-    catch (err) { return { nodes: [error(err, 'Flow run')] }; }
+    catch (err) { return { nodes: [error(err, t('studio/run/flow-failed'))] }; }
   }
   if (file.kind === 'query') return { nodes: runQuery({ query: file.text, data: dataText, externals: '' }) };
   if (file.kind === 'jslt') return { nodes: runJslt({ stylesheet: file.text, data: dataText }) };
-  if (file.kind === 'schema') return { nodes: validateNodes(file.text, dataText) };
-  if (file.kind === 'contract') return { nodes: contractNodes(file.text) };
+  if (file.kind === 'schema') return { nodes: validateNodes(file.text, dataText, t, catalogOf(options.messages)) };
+  if (file.kind === 'contract') return { nodes: contractNodes(file.text, t) };
   return null;
 }
 
@@ -174,14 +179,15 @@ function runProjectFile(slice, name, options = {}) {
  * node with its `JC00xx` and docPath (the same diagnosis the file rail
  * shows), never a throw.
  * @param {string} text - the contract file's text
+ * @param {(id: string, params?: Record<string, unknown>) => string} t - the reader's words
  */
-function contractNodes(text) {
+function contractNodes(text, t) {
   let doc;
   try { doc = JSON.parse(text); }
-  catch (err) { return [error({ message: errorMessage(err) }, 'Invalid JSON')]; }
+  catch (err) { return [error({ message: errorMessage(err) }, t('studio/run/invalid-json'))]; }
   let contract;
   try { contract = compileContract(doc); }
-  catch (err) { return [error(/** @type {any} */ (err), 'Contract refusal')]; }
+  catch (err) { return [error(/** @type {any} */ (err), t('studio/run/contract-refusal'))]; }
   const description = contract.describe();
   // lenient: a keyword the OpenAPI dialect cannot carry is dropped and
   // COUNTED (the card says so) instead of refusing the whole pane — the
@@ -195,8 +201,8 @@ function contractNodes(text) {
   });
   return [
     cards([
-      { title: 'Operations', value: String(description.operations.length) },
-      ...(openapi.dropped.length > 0 ? [{ title: 'OpenAPI dropped', value: String(openapi.dropped.length) }] : []),
+      { title: t('studio/run/operations'), value: String(description.operations.length) },
+      ...(openapi.dropped.length > 0 ? [{ title: t('studio/run/openapi-dropped'), value: String(openapi.dropped.length) }] : []),
     ]),
     code('describe()', JSON.stringify(description, null, 2)),
     code('OpenAPI 3.1', JSON.stringify(openapi.document, null, 2)),
@@ -205,25 +211,31 @@ function contractNodes(text) {
 
 /** Validate a data file against a schema file and render the report on
  * the stage: a valid/invalid summary plus each error as its own coded
- * node. */
-function validateNodes(schemaText, dataText) {
+ * node. The errors speak `catalog` (validate's localizer, over copies:
+ * a host's report may be cached), as the schema wrote them otherwise.
+ * @param {string} schemaText @param {string} dataText
+ * @param {(id: string, params?: Record<string, unknown>) => string} t - the reader's words
+ * @param {any} catalog - the compiled catalog, or undefined for English
+ */
+function validateNodes(schemaText, dataText, t, catalog) {
   let data;
   try { data = JSON.parse(dataText); }
-  catch (err) { return [error({ message: `data: ${errorMessage(err)}` }, 'Invalid JSON')]; }
+  catch (err) { return [error({ message: t('studio/run/data-invalid-json', { reason: errorMessage(err) }) }, t('studio/run/invalid-json'))]; }
   const r = runValidation(schemaText, data);
-  if (r.schemaError !== null) return [error({ message: r.schemaError }, 'Schema error')];
+  if (r.schemaError !== null) return [error({ message: r.schemaError }, t('studio/run/schema-error'))];
   const nodes = [cards([
-    { title: r.valid ? 'Valid' : 'Invalid', value: r.valid ? '✓' : `${r.errors.length} error${r.errors.length === 1 ? '' : 's'}` },
-    { title: 'Draft', value: r.draft },
-    { title: 'Compile', value: formatMsUnscaled(r.compileMs) },
-    { title: 'Validate', value: formatMsUnscaled(r.validateMs) },
+    { title: t(r.valid ? 'studio/run/valid' : 'studio/run/invalid'), value: r.valid ? '✓' : t('studio/run/error-count', { count: r.errors.length }) },
+    { title: t('studio/run/draft'), value: r.draft },
+    { title: t('studio/run/compile'), value: formatMsUnscaled(r.compileMs) },
+    { title: t('studio/run/validate'), value: formatMsUnscaled(r.validateMs) },
   ])];
-  for (const e of r.errors) {
+  const errors = catalog == null ? r.errors : localizeErrors(r.errors.map((e) => ({ ...e })), catalog);
+  for (const e of errors) {
     nodes.push(error({
       message: e.message,
       dataPath: e.instancePath === '' ? '(root)' : e.instancePath,
       code: e.keyword !== '' ? e.keyword : undefined,
-    }, 'Validation error'));
+    }, t('studio/run/validation-error')));
   }
   return nodes;
 }
@@ -232,7 +244,9 @@ function validateNodes(schemaText, dataText) {
  * The live stage host widget (`studio-stage`): boot the active app file's
  * assembled document as an isolated nested app, then apply the
  * reboot-vs-hot-update policy on every commit.
- * @param {{ schedule?: (flush: () => void) => void }} [env]
+ * @param {{ schedule?: (flush: () => void) => void, messages?: any }} [env] -
+ *   `messages`: the compiled catalog (or a function answering the current
+ *   one) the booted document's form widget and boot refusal speak
  */
 function createProjectStageWidget(env = {}) {
   // the state's member order counts, as it does for classifyChange: a view
@@ -251,6 +265,7 @@ function createProjectStageWidget(env = {}) {
       node: handle.host,
       document: handle.host.ownerDocument,
       schedule: env.schedule,
+      messages: catalogOf(env.messages),
       onError: (err) => handle.emit({ action: 'project/stage-error', with: errorMessage(err) }),
     });
     handle.app = result.ok ? result.app : null;
