@@ -289,8 +289,8 @@ delete it or fix it.
 - [ ] **A two-position tuple validates at about half of Ajv's speed.** The
   validator benchmark's 'uniqueItems=false with an array of items' rows (a
   two-position `prefixItems`/`items` tuple of `type: boolean`;
-  `uniqueItems: false` compiles to nothing) take about 1.9× Ajv's time and
-  the '…and additionalItems=false' rows 1.5–1.6×, and two runs of the
+  `uniqueItems: false` compiles to nothing) take 1.5–2.0× Ajv's time and
+  the '…and additionalItems=false' rows 1.3–1.7×, and two runs of the
   same code part by up to a third on them. Such a tuple is one closure
   tested by code with no call per element (`isPurePosition` in
   packages/validate/src/array.js). What is left is the call into it: every
