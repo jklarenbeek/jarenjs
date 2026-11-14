@@ -624,3 +624,45 @@ describe('@jarenjs/locales fr/es/pt/de/ja', () => {
       'не должно содержать менее 25 символов');
   });
 });
+
+describe('@jarenjs/locales — a query message names the operators its English names, no other', () => {
+  /** Every `$name` token of a template. @param {unknown} template */
+  const tokens = (template) => String(template).match(/\$[A-Za-z][\w-]*/g) ?? [];
+  /** The operator names the English query and formula messages use. */
+  const known = new Set([...Object.values(queryMessagesEn), ...Object.values(formulaMessagesEn)].flatMap(tokens));
+  /**
+   * The operator a token names: a pack may join a word to it with a hyphen
+   * ('$orderby-Schlüssel'), so the token is cut back on hyphens until it is
+   * a known name. @param {string} token
+   */
+  const operator = (token) => {
+    let name = token;
+    while (!known.has(name) && name.includes('-')) name = name.slice(0, name.lastIndexOf('-'));
+    return name;
+  };
+  /** @param {unknown} template */
+  const operators = (template) => [...new Set(tokens(template).map(operator))].sort();
+  const all = { fr, es, pt, de, ja, ko, zhTW, ru, tr, ar, nl };
+
+  for (const [code, pack] of Object.entries(all)) {
+    it(`${code} names the same operators as each English query and formula message`, () => {
+      for (const catalog of [queryMessagesEn, formulaMessagesEn]) {
+        for (const [key, template] of Object.entries(catalog)) {
+          assert.deepStrictEqual(operators(pack[key]), operators(template), `${code} ${key}`);
+        }
+      }
+    });
+  }
+
+  it('an empty match in $tokenize names no other operator, in any language', () => {
+    let error;
+    try { compileJsonQuery({ $tokenize: ['$.s', 'x*'] })({ s: 'abc' }); }
+    catch (thrown) { error = thrown; }
+    assert.strictEqual(error?.messageId, 'query/replace-empty-match');
+    for (const [code, pack] of Object.entries(all)) {
+      const rendered = renderQueryMessage(error, pack);
+      assert.ok(rendered.includes('x*'), `${code} names the pattern: ${rendered}`);
+      assert.ok(!rendered.includes('$replace'), `${code} names no $replace: ${rendered}`);
+    }
+  });
+});

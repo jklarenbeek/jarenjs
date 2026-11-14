@@ -146,9 +146,12 @@ export function renderFormsMessage(catalog, msgid, params) {
  * names of the array add/remove buttons and the JSON editor's hint.
  *
  * The stylesheet that renders a form is plain JSON built once, so it
- * cannot look anything up at render time — the host resolves these and
- * hands them to `createFormView`. Kept next to the error catalog on
- * purpose: one keyspace, one parity gate across every locale pack.
+ * cannot look a catalog up at render time — the host resolves these and
+ * hands them to `createFormView` (`labels`), or puts them in the view
+ * input document where `createFormView`'s `labelsPath` reads them when
+ * the language can change while the form is open. Kept next to the error
+ * catalog on purpose: one keyspace, one parity gate across every locale
+ * pack.
  * @param {Readonly<Record<string, (params: object, error?: object) => string>>} [catalog] - A compiled catalog, or undefined for English
  * @returns {{addItem: string, removeItem: string, jsonPlaceholder: string}}
  * @example

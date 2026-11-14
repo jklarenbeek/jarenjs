@@ -397,7 +397,7 @@ export const ko = {
   'query/minmax-mixed': "'$min'/'$max' 항목은 모두 숫자이거나 모두 문자열이어야 하지만 받은 값은 {got}입니다",
   'query/sort-mixed': "'$sort' 항목은 모두 숫자이거나 모두 문자열이어야 하지만 받은 값은 {got}입니다",
   'query/regex-invalid': "'{pattern}'은(는) 유효한 I-Regexp 패턴이 아닙니다",
-  'query/replace-empty-match': "'$replace' 패턴 '{pattern}'이(가) 길이가 0인 문자열과 일치합니다",
+  'query/replace-empty-match': "패턴 '{pattern}'이(가) 길이가 0인 문자열과 일치합니다",
   'query/range-bounds': "'$range' 경계는 안전한 정수여야 하지만 받은 값은 {got}입니다",
   'query/range-guard': "'$range'의 항목 {count}개가 리소스 보호 한도인 {limit}개를 초과합니다",
   'query/index-of-item': "'$index-of'에는 단일 검색 항목이 필요하지만 받은 값은 {got}입니다",

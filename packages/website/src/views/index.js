@@ -65,6 +65,8 @@ export const STYLESHEET = {
     // /play/dataValue (mirrored back to the data text, which re-validates)
     ...createFormView({
       root: '$.ui.play.dataForm',
+      // the chrome follows the Messages language while the form is open
+      labelsPath: '$.ui.play.formLabels',
       actions: {
         input: 'play/f-input', check: 'play/f-check', number: 'play/f-number',
         json: 'play/f-json', add: 'play/f-add', remove: 'play/f-remove',

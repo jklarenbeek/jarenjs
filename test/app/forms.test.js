@@ -53,12 +53,15 @@ function mountForm(options = {}) {
   const { document, container } = options.reflecting === true ? createReflectingHost() : createStubHost();
   const rules = compileFormRules(model);
   const appDoc = {
-    state: { data: createInitialData(model) },
+    state: { data: createInitialData(model), chrome: options.chrome ?? null },
     view: [
-      ...createFormView({ labels: options.labels, requiredMarker: options.requiredMarker }),
+      ...createFormView({ labels: options.labels, labelsPath: options.labelsPath, requiredMarker: options.requiredMarker }),
       { match: '$', body: ['main', {}, { $apply: '$.form' }] },
     ],
-    actions: createFormActions({ dataPointer: '/data' }),
+    actions: {
+      ...createFormActions({ dataPointer: '/data' }),
+      'chrome/set': { patch: [{ op: 'replace', path: '/chrome', value: '$payload' }] },
+    },
   };
   const app = createApp(appDoc, {
     node: container,
@@ -71,6 +74,7 @@ function mountForm(options = {}) {
         rules,
         validateFields: options.validateFields === true,
       }),
+      chrome: state.chrome,
     }),
     ...(options.onError === undefined ? {} : { onError: options.onError }),
   });
@@ -328,6 +332,28 @@ describe('the standard forms stylesheet', function () {
     const dutchButton = find(localized.container,
       (n) => n.attributes?.get('class') === 'jaren-form-add');
     assert.strictEqual(dutchButton.attributes.get('aria-label'), 'Regel toevoegen');
+  });
+
+  it('the array buttons and the JSON hint read a labels path at render time', function () {
+    const addOf = (container) => find(container, (n) => n.attributes?.get('class') === 'jaren-form-add').attributes.get('aria-label');
+    const hintOf = (container) => fieldControl(container, '/meta', 'textarea').attributes.get('placeholder');
+    const { app, container } = mountForm({ labelsPath: '$.chrome', chrome: { addItem: 'Regel toevoegen', jsonPlaceholder: 'Voer een JSON-waarde in' } });
+    assert.strictEqual(addOf(container), 'Regel toevoegen');
+    assert.strictEqual(hintOf(container), 'Voer een JSON-waarde in');
+    // the document changes while the form is open: the names follow
+    app.dispatch('chrome/set', { addItem: 'Ajouter un élément' });
+    assert.strictEqual(addOf(container), 'Ajouter un élément');
+    // a member the document lacks falls back to labels, then to English
+    assert.strictEqual(hintOf(container), 'Enter a JSON value');
+    const fallback = mountForm({ labelsPath: '$.chrome', labels: { addItem: 'Toevoegen' } });
+    assert.strictEqual(addOf(fallback.container), 'Toevoegen');
+  });
+
+  it('refuses a labels path that is not a $.-rooted string', function () {
+    for (const bad of ['chrome', 5, '$chrome']) {
+      assert.throws(() => createFormView(/** @type {any} */ ({ labelsPath: bad })),
+        (/** @type {any} */ error) => error instanceof TypeError && /^createFormView: options\.labelsPath must be a JSONPath starting with '\$\.', got /.test(error.message));
+    }
   });
 
   it('x-form visibility reacts per keystroke', function () {

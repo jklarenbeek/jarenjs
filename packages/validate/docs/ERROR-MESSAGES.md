@@ -31,7 +31,18 @@ Collect-mode validation (`collectErrors: true`) returns
 | `msgid` | string | the resolved message key (section 2) |
 | `message` | string | human text — `''` when `messages: false` |
 
-`toJSON()` serializes exactly these six members.
+`toJSON()` serializes these six members, plus `inlineMessage` on an
+error whose message the schema wrote (and only there):
+
+| `inlineMessage` | meaning | `localizeErrors` |
+|---|---|---|
+| `true` | the text of an inline spec (a string, or an object without `$msgid`) | never re-renders it |
+| `'fallback'` | a `$msgid` spec's inline `message`, its msgid in no catalog at conversion | re-renders it only through that msgid |
+
+On the error itself the member is non-enumerable (a spread or
+`Object.keys` does not meet it); `toJSON` carries it so a copy that
+crossed JSON — a worker, a wire, a site that copies fields — localizes
+as the error itself does.
 
 `msgid` resolution: the matched `errorMessage` spec's `$msgid` if any,
 else `params.code` if present (the `$query` runtime codes), else the
@@ -255,8 +266,13 @@ English fallback. Contract details:
 
 - **inline schema-authored text without `$msgid` is single-language by
   definition and is NOT re-rendered** — that is why `$msgid` exists;
-- an error whose `msgid` resolves in no catalog keeps its current message
-  (e.g. a custom `$msgid`'s inline fallback text);
+- a custom `$msgid`'s inline fallback text (`inlineMessage: 'fallback'`)
+  stays until a catalog carries the msgid; once one has rendered it, a
+  later catalog without the msgid keeps that render;
+- any other error whose `msgid` resolves in no catalog falls back to its
+  keyword (section 5 step 4), or keeps its message when no catalog has
+  the keyword either;
+- a plain copy (an error's `toJSON`) reads `inlineMessage` the same way;
 - `renderErrorMessage(error, catalog?)` is the single-error form of the
   same chain (section 5 step 4).
 

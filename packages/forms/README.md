@@ -547,7 +547,11 @@ Unit tests live in `test/forms/` at the repository root. See the repository [REA
 `jsonPlaceholder`, with English fallbacks and translations in every
 locale pack. Pass them to `createFormView({ labels })`; the JSON hint is
 both an empty-editor placeholder and an accessible description. A label
-beginning with `$` remains literal text.
+beginning with `$` remains literal text. When the language can change
+while the form is open, put them in the view input document instead and
+name the place with `createFormView({ labelsPath: '$.formLabels' })`: the
+stylesheet reads them at render time, a member they lack falling back to
+`labels`, then to English.
 
 The add/remove glyphs and required marker are decoration, not message
 keys: customize `addLabel`, `removeLabel` and `requiredMarker` on the

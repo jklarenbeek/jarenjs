@@ -298,3 +298,69 @@ describe("The 'errorMessage' keyword", () => {
     });
   });
 });
+
+describe('localizeErrors and the text a schema wrote', () => {
+  const catalog = compileMessageCatalog({ type: 'moet van het juiste type zijn', $query: 'voldoet niet aan de query' });
+  const fallbackSchema = {
+    type: 'object',
+    properties: { total: { type: 'number', errorMessage: { type: { $msgid: 'checkout.total-invalid', message: 'Total must be a number' } } } },
+  };
+
+  it("keeps a $msgid spec's inline text when no catalog carries its msgid", () => {
+    const result = compileCollecting(fallbackSchema)({ total: 'x' });
+    localizeErrors(result.errors, catalog);
+    assert.strictEqual(result.errors[0].message, 'Total must be a number');
+  });
+
+  it('renders that msgid once a catalog carries it, and the catalog text then stays', () => {
+    const result = compileCollecting(fallbackSchema)({ total: 'x' });
+    localizeErrors(result.errors, compileMessageCatalog({ 'checkout.total-invalid': 'Totaal moet een getal zijn' }));
+    assert.strictEqual(result.errors[0].message, 'Totaal moet een getal zijn');
+    // the inline text is not kept beside it: a second catalog without the key leaves the last render
+    localizeErrors(result.errors, catalog);
+    assert.strictEqual(result.errors[0].message, 'Totaal moet een getal zijn');
+  });
+
+  it('a $msgid spec without inline text still speaks the keyword in the catalog', () => {
+    const result = compileCollecting({ type: 'number', errorMessage: { type: { $msgid: 'checkout.total-invalid' } } })('x');
+    assert.strictEqual(result.errors[0].message, 'must be a number');
+    localizeErrors(result.errors, catalog);
+    assert.strictEqual(result.errors[0].message, 'moet van het juiste type zijn');
+  });
+
+  it('a msgid no catalog carries and no schema wrote still falls back to the keyword', () => {
+    // a query code no English entry names, the way an uncovered JQ code reads
+    const errors = [{ keyword: '$query', instancePath: '', schemaPath: '', params: { code: 'JQ2099' }, msgid: 'JQ2099', message: '' }];
+    localizeErrors(/** @type {any} */ (errors), catalog);
+    assert.strictEqual(errors[0].message, 'voldoet niet aan de query');
+  });
+
+  it('a plain keyword error localizes', () => {
+    const result = compileCollecting({ type: 'number' })('x');
+    localizeErrors(result.errors, catalog);
+    assert.strictEqual(result.errors[0].message, 'moet van het juiste type zijn');
+  });
+
+  it('toJSON names the inline status, and only when the schema wrote the text', () => {
+    const inline = compileCollecting({ type: 'number', errorMessage: 'Author text' })('x').errors[0];
+    const fallback = compileCollecting(fallbackSchema)({ total: 'x' }).errors[0];
+    const plain = compileCollecting({ type: 'number' })('x').errors[0];
+    assert.strictEqual(inline.toJSON().inlineMessage, true);
+    assert.strictEqual(fallback.toJSON().inlineMessage, 'fallback');
+    assert.deepStrictEqual(Object.keys(plain.toJSON()), ['keyword', 'instancePath', 'schemaPath', 'params', 'msgid', 'message']);
+    // the instance keeps the status out of a spread and out of its own keys
+    assert.ok(!Object.keys(inline).includes('inlineMessage'));
+  });
+
+  it('a copy that crossed JSON localizes as the error itself does', () => {
+    const errors = [
+      compileCollecting({ type: 'number', errorMessage: 'Author text' })('x').errors[0],
+      compileCollecting(fallbackSchema)({ total: 'x' }).errors[0],
+      compileCollecting({ type: 'number' })('x').errors[0],
+    ];
+    const copies = JSON.parse(JSON.stringify(errors));
+    localizeErrors(copies, catalog);
+    assert.deepStrictEqual(copies.map((/** @type {any} */ e) => e.message),
+      ['Author text', 'Total must be a number', 'moet van het juiste type zijn']);
+  });
+});

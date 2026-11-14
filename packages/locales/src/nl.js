@@ -398,7 +398,7 @@ export const nl = {
   'query/minmax-mixed': "de items van '$min'/'$max' moeten allemaal getallen of allemaal strings zijn, {got} gekregen",
   'query/sort-mixed': "de items van '$sort' moeten allemaal getallen of allemaal strings zijn, {got} gekregen",
   'query/regex-invalid': "'{pattern}' is geen geldig I-Regexp-patroon",
-  'query/replace-empty-match': "het '$replace'-patroon '{pattern}' komt overeen met de string van lengte nul",
+  'query/replace-empty-match': "het patroon '{pattern}' komt overeen met de string van lengte nul",
   'query/range-bounds': "de grenzen van '$range' moeten veilige gehele getallen zijn, {got} gekregen",
   'query/range-guard': "'$range' met {count} items overschrijdt de resourcelimiet van {limit} items",
   'query/index-of-item': "'$index-of' verwacht één zoekitem, {got} gekregen",

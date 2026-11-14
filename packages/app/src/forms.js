@@ -104,6 +104,12 @@ export function formEventFields() {
  *   names for the symbol buttons and the JSON editor's hint. `@jarenjs/forms`'
  *   `formChromeLabels(catalog)` resolves them from a message catalog;
  *   the English defaults apply when absent.
+ * @property {string} [labelsPath] - JSONPath (`$.`-rooted, like `root`) of
+ *   a `{addItem, removeItem, jsonPlaceholder}` object inside the view input
+ *   document, read at render time: the stylesheet is built once, so a host
+ *   whose language changes while the form is open puts the current
+ *   `formChromeLabels(catalog)` there. A member it lacks falls back to
+ *   `labels`, then to English.
  * @property {string} [dataPointer] - (actions) JSON Pointer to the form
  *   data inside the app state (default `'/data'`).
  * @property {'remove' | 'empty'} [cleared] - (actions) What a cleared
@@ -116,7 +122,7 @@ export function formEventFields() {
  * Every {@link FormViewOptions} member: one options object may serve
  * both factories, so each accepts the other's members and ignores them.
  */
-const FORM_OPTIONS = ['root', 'classPrefix', 'actions', 'addLabel', 'removeLabel', 'requiredMarker', 'labels', 'dataPointer', 'cleared'];
+const FORM_OPTIONS = ['root', 'classPrefix', 'actions', 'addLabel', 'removeLabel', 'requiredMarker', 'labels', 'labelsPath', 'dataPointer', 'cleared'];
 
 /**
  * Refuse options either factory would misread: a value that is not an
@@ -139,6 +145,21 @@ function checkFormOptions(factory, options) {
   const members = /** @type {Record<string, any>} */ (options);
   refuseUnknownMembers(members, FORM_OPTIONS, (key, hint) => new TypeError(`${factory}: unknown option '${key}'${hint}`));
   return members;
+}
+
+/**
+ * The `labelsPath` option: absent, or a `$.`-rooted JSONPath the
+ * stylesheet can read from the document root (`$root`).
+ * @param {unknown} path
+ * @returns {string | null} the path, or null when absent
+ * @throws {TypeError} when the path is not a `$.`-rooted string
+ */
+function checkLabelsPath(path) {
+  if (path === undefined || path === null) return null;
+  if (typeof path !== 'string' || !path.startsWith('$.')) {
+    throw new TypeError(`createFormView: options.labelsPath must be a JSONPath starting with '$.', got ${describeOption(path)}`);
+  }
+  return path;
 }
 
 /**
@@ -176,6 +197,15 @@ export function createFormView(options = {}) {
   const cls = options.classPrefix ?? 'jaren-form';
   const act = { ...DEFAULT_ACTIONS, ...options.actions };
   const labels = { addItem: 'Add item', removeItem: 'Remove item', jsonPlaceholder: 'Enter a JSON value', ...options.labels };
+  const labelsPath = checkLabelsPath(options.labelsPath);
+  /**
+   * One chrome label: the fixed text, or the document's label at render
+   * time with the fixed text as its fallback.
+   * @param {'addItem' | 'removeItem' | 'jsonPlaceholder'} name
+   */
+  const label = (name) => (labelsPath === null
+    ? { $const: labels[name] }
+    : { $default: [`$root${labelsPath.slice(1)}.${name}`, { $const: labels[name] }] });
   /** Match any view-model node under `root` with the given control. */
   const ctl = (control) => `${root}..[?@.control == '${control}']`;
 
@@ -190,8 +220,8 @@ export function createFormView(options = {}) {
       type: 'button',
       class: `${cls}-remove`,
       // the glyph is decoration; the accessible name is the label
-      'aria-label': { $const: labels.removeItem },
-      title: { $const: labels.removeItem },
+      'aria-label': label('removeItem'),
+      title: label('removeItem'),
       disabled: writeDisabled,
       on: { click: { action: act.remove, with: { pointer: '$.pointer' } } },
     }, { $const: options.removeLabel ?? '×' }]] };
@@ -274,8 +304,8 @@ export function createFormView(options = {}) {
           ['button', {
             type: 'button',
             class: `${cls}-add`,
-            'aria-label': { $const: labels.addItem },
-            title: { $const: labels.addItem },
+            'aria-label': label('addItem'),
+            title: label('addItem'),
             disabled: writeDisabled,
             on: { click: { action: act.add, with: { pointer: '$.pointer', value: '$.addValue' } } },
           }, { $const: options.addLabel ?? '+' }]] },
@@ -348,8 +378,8 @@ export function createFormView(options = {}) {
         class: `${cls}-json`,
         rows: 4,
         spellcheck: 'false',
-        placeholder: { $const: labels.jsonPlaceholder },
-        'aria-description': { $const: labels.jsonPlaceholder },
+        placeholder: label('jsonPlaceholder'),
+        'aria-description': label('jsonPlaceholder'),
         'aria-required': { $if: ['$.required', 'true'] },
         readonly: '$.readOnly',
         disabled,

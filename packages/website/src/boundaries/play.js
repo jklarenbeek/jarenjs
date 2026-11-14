@@ -130,7 +130,25 @@ export const PLAY_START = Object.freeze({
   // is the structured buffer the form edits, mirrored back to the data text
   dataView: 'json', // 'json' | 'form'
   dataValue: null,  // the parsed data the form binds to (validate + form only)
+  // the message language the reader chose (the Messages select), kept
+  // across examples, New and opened sessions; null until one is chosen
+  locale: null,
 });
+
+/**
+ * The play slice as the engines and the panes read it: the reader's
+ * message language (`slice.locale`) is the locale of every engine that
+ * offers the option, whatever the loaded example or session carried.
+ * @param {any} slice - the `state.play` slice
+ * @returns {any} the slice, its config carrying the chosen locale
+ */
+export function withPlayLocale(slice) {
+  const locale = slice.locale;
+  if (typeof locale !== 'string' || slice.config?.locale === locale) return slice;
+  const engine = Object.hasOwn(playComponent.engines, slice.engine) ? playComponent.engines[slice.engine] : undefined;
+  if (!(engine?.optionPanes ?? []).some((/** @type {any} */ pane) => pane.key === 'locale')) return slice;
+  return { ...slice, config: { ...(slice.config ?? {}), locale } };
+}
 
 /**
  * A play SESSION as a saveable/shareable document: the engine, its source and
@@ -139,6 +157,8 @@ export const PLAY_START = Object.freeze({
  * @param {any} slice - the `state.play` slice
  */
 export function sessionOf(slice) {
+  // a session carries the language on screen, the chosen one included
+  slice = withPlayLocale(slice);
   return {
     engine: slice.engine,
     exampleId: slice.exampleId ?? null,
@@ -274,6 +294,7 @@ function validateRunner(schemaText, data, locale, schemas) {
 
 /** Run the active engine over the current source + data (operators, option config, visual renderers, the validator). */
 export function runPlay(slice) {
+  slice = withPlayLocale(slice);
   return playComponent.runExample(slice.engine, slice.source, slice.data,
     { operators: operatorRegistry, config: slice.config, renderers, validate: validateRunner });
 }
@@ -322,6 +343,8 @@ export function switchPlayOption(slice, key, value) {
     datasetIndex: followed ? 0 : slice.datasetIndex,
     dataView: followed ? 'json' : slice.dataView,
     dataValue: followed ? null : slice.dataValue,
+    // choosing a message language makes it the reader's, for every later load
+    locale: key === 'locale' ? value : (slice.locale ?? null),
   };
 }
 

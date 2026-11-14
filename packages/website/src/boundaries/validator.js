@@ -6,9 +6,9 @@
  * memo caches keyed by schema text.
  */
 
-import { JarenValidator, renderErrorMessage, compileMessageCatalog } from '@jarenjs/validate';
+import { JarenValidator, localizeErrors as localizeValidationErrors, compileMessageCatalog } from '@jarenjs/validate';
 import { stringFormats, numberFormats, dateTimeFormats, jsonFormats } from '@jarenjs/formats';
-import { buildFormModel, buildFormViewModel } from '@jarenjs/forms';
+import { buildFormModel, buildFormViewModel, formChromeLabels } from '@jarenjs/forms';
 import { ar, de, es, fr, ja, ko, nl, pt, ru, tr, zhTW } from '@jarenjs/locales';
 
 import { now } from '../lib/format.js';
@@ -179,6 +179,8 @@ export function runValidation(schemaText, data, schemas = []) {
       msgid: e.msgid,
       params: e.params,
       message: e.message ?? '',
+      // the text the schema wrote stays as written in every locale
+      ...(e.inlineMessage === undefined ? {} : { inlineMessage: e.inlineMessage }),
     })),
   };
 }
@@ -237,8 +239,17 @@ export const LOCALES = ['en', ...Object.keys(CATALOGS)];
 export function localizeErrors(errors, locale) {
   const catalog = CATALOGS[locale];
   if (catalog === undefined) return errors;
-  return errors.map((error) => {
-    if (error.msgid === undefined) return error;
-    return { ...error, message: renderErrorMessage(error, catalog) };
-  });
+  // validate's own localizer, over copies (the report is cached per run):
+  // it keeps the text a schema wrote, as the error's `inlineMessage` says
+  return localizeValidationErrors(errors.map((error) => ({ ...error })), catalog);
+}
+
+/**
+ * The generated form's chrome (the array buttons' names and the JSON
+ * hint) in `locale`, English when no pack has it.
+ * @param {string} [locale] - a {@link LOCALES} code
+ * @returns {{addItem: string, removeItem: string, jsonPlaceholder: string}}
+ */
+export function formLabelsFor(locale) {
+  return formChromeLabels(CATALOGS[locale ?? 'en']);
 }

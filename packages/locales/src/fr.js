@@ -399,7 +399,7 @@ export const fr = {
   'query/minmax-mixed': "les éléments de '$min'/'$max' doivent être tous des nombres ou tous des chaînes, reçu : {got}",
   'query/sort-mixed': "les éléments de '$sort' doivent être tous des nombres ou tous des chaînes, reçu : {got}",
   'query/regex-invalid': "'{pattern}' n'est pas un motif I-Regexp valide",
-  'query/replace-empty-match': "le motif '{pattern}' de '$replace' correspond à la chaîne de longueur nulle",
+  'query/replace-empty-match': "le motif '{pattern}' correspond à la chaîne de longueur nulle",
   'query/range-bounds': "les bornes de '$range' doivent être des entiers sûrs, reçu : {got}",
   'query/range-guard': "'$range' de {count} éléments dépasse la limite de ressources de {limit} éléments",
   'query/index-of-item': "'$index-of' attend un seul élément à rechercher, reçu : {got}",

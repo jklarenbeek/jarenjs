@@ -397,7 +397,7 @@ export const es = {
   'query/minmax-mixed': "los elementos de '$min'/'$max' deben ser todos números o todos cadenas, se obtuvo {got}",
   'query/sort-mixed': "los elementos de '$sort' deben ser todos números o todos cadenas, se obtuvo {got}",
   'query/regex-invalid': "'{pattern}' no es un patrón I-Regexp válido",
-  'query/replace-empty-match': "el patrón '{pattern}' de '$replace' coincide con la cadena de longitud cero",
+  'query/replace-empty-match': "el patrón '{pattern}' coincide con la cadena de longitud cero",
   'query/range-bounds': "los límites de '$range' deben ser enteros seguros, se obtuvo {got}",
   'query/range-guard': "'$range' de {count} elementos supera la salvaguarda de recursos de {limit} elementos",
   'query/index-of-item': "'$index-of' acepta un único elemento de búsqueda, se obtuvo {got}",

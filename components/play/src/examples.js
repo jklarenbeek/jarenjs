@@ -720,19 +720,19 @@ is a fixed point.
     ] } }) } },
 
   // ——— JSON Schema validation (the validate engine, host-delegated) ———
-  { id: 'validate-user', label: 'User', engine: 'validate', config: { locale: 'en' },
+  { id: 'validate-user', label: 'User', engine: 'validate',
     source: { schema: j({ type: 'object', title: 'User', properties: {
       name: { type: 'string', minLength: 2 }, email: { type: 'string', format: 'email' },
       age: { type: 'integer', minimum: 13 }, newsletter: { type: 'boolean' }, plan: { enum: ['free', 'pro'] },
       tags: { type: 'array', default: [], items: { type: 'string' } },
     }, required: ['name', 'email'] }) },
     datasets: [{ label: 'valid', data: { data: j({ name: 'Ada', email: 'ada@example.com', age: 36, newsletter: true, plan: 'pro', tags: ['compiler'] }) } }] },
-  { id: 'validate-conditional', label: 'Conditional (if/then/else)', engine: 'validate', config: { locale: 'en' },
+  { id: 'validate-conditional', label: 'Conditional (if/then/else)', engine: 'validate',
     source: { schema: j({ $schema: 'https://json-schema.org/draft/2020-12/schema', type: 'object', title: 'Payment',
       properties: { method: { type: 'string', enum: ['card', 'iban'] }, cardNumber: { type: 'string', pattern: '^\\d{16}$' }, iban: { type: 'string', format: 'iban' } },
       required: ['method'], if: { properties: { method: { const: 'card' } }, required: ['method'] }, then: { required: ['cardNumber'] }, else: { required: ['iban'] } }) },
     datasets: [{ label: 'a card payment', data: { data: j({ method: 'card', cardNumber: '4111111111111111' }) } }] },
-  { id: 'validate-query', label: 'Cross-field ($query)', engine: 'validate', config: { locale: 'en' },
+  { id: 'validate-query', label: 'Cross-field ($query)', engine: 'validate',
     source: { schema: j({ type: 'object', title: 'Invoice',
       description: 'The $query keyword embeds a Jaren JSON Query as a cross-field assertion — the class of constraint (sums, ordering) JSON Schema is notoriously bad at.',
       properties: {
@@ -742,12 +742,12 @@ is a fixed point.
       }, required: ['lines', 'total'], $query: { $eq: ['$.total', { $sum: '$.lines[*].amount' }] } }) },
     datasets: [{ label: 'balanced', data: { data: j({ lines: [
       { description: 'Rubber duck', amount: 9.99 }, { description: 'Duck house', amount: 40.01 }], total: 50 }) } }] },
-  { id: 'validate-invalid', label: 'Invalid data (see the errors)', engine: 'validate', config: { locale: 'en' },
+  { id: 'validate-invalid', label: 'Invalid data (see the errors)', engine: 'validate',
     source: { schema: j({ type: 'object', title: 'User', properties: {
       name: { type: 'string', minLength: 2 }, email: { type: 'string', format: 'email' }, age: { type: 'integer', minimum: 13 },
     }, required: ['name', 'email'] }) },
     datasets: [{ label: 'invalid', data: { data: j({ name: 'A', email: 'not-an-email', age: 7 }) } }] },
-  { id: 'validate-ref-by-id', label: 'Reference another schema ($ref by $id)', engine: 'validate', config: { locale: 'en' },
+  { id: 'validate-ref-by-id', label: 'Reference another schema ($ref by $id)', engine: 'validate',
     source: {
       schema: j({ $schema: 'https://json-schema.org/draft/2020-12/schema', type: 'object', title: 'Order',
         properties: { billing: { $ref: 'https://example.com/address.json' }, shipping: { $ref: 'https://example.com/address.json' } },

@@ -36,7 +36,7 @@ describe('createFormView — a checked option set', function () {
     refuses(() => createFormView(/** @type {any} */ ({ root: '$.form', requiredMaker: '!' })),
       /^createFormView: unknown option 'requiredMaker' — did you mean 'requiredMarker'\?$/);
     refuses(() => createFormView(/** @type {any} */ ({ theme: 'dark' })),
-      /^createFormView: unknown option 'theme'; the options are root, classPrefix, actions, addLabel, removeLabel, requiredMarker, labels, dataPointer, cleared$/);
+      /^createFormView: unknown option 'theme'; the options are root, classPrefix, actions, addLabel, removeLabel, requiredMarker, labels, labelsPath, dataPointer, cleared$/);
   });
 
   it('refuses options that are not an object, which read as no options or crashed', function () {

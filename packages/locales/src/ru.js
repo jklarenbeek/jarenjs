@@ -419,7 +419,7 @@ export const ru = {
   'query/minmax-mixed': "элементы '$min'/'$max' должны быть либо все числами, либо все строками, получено: {got}",
   'query/sort-mixed': "элементы '$sort' должны быть либо все числами, либо все строками, получено: {got}",
   'query/regex-invalid': "'{pattern}' не является допустимым шаблоном I-Regexp",
-  'query/replace-empty-match': "шаблон '{pattern}' в '$replace' совпадает со строкой нулевой длины",
+  'query/replace-empty-match': "шаблон '{pattern}' совпадает со строкой нулевой длины",
   'query/range-bounds': "границы '$range' должны быть безопасными целыми числами, получено: {got}",
   'query/range-guard': "число элементов '$range' ({count}) превышает защитный лимит ресурсов ({limit})",
   'query/index-of-item': "'$index-of' принимает один искомый элемент, получено: {got}",

@@ -8,7 +8,7 @@
  */
 
 import { deriveSuite, draftConformanceTable, SUITES } from '../boundaries/bench.js';
-import { formViewFor, referencedSchemas } from '../boundaries/validator.js';
+import { formViewFor, formLabelsFor, referencedSchemas } from '../boundaries/validator.js';
 import { HOME_CONTENT } from '../content/home.js';
 import { HERO_DEMO } from '../content/hero.js';
 import { DOCS_SECTIONS } from '../content/docs.js';
@@ -20,7 +20,7 @@ import { contributeCalcViewModel } from '@jarenjs/calc/component';
 import { flowPageViewModel } from '../boundaries/flowstudio.js';
 import { projectComponent } from '../boundaries/project.js';
 import { PROJECT_TEMPLATE_CARDS } from '../content/projectTemplates.js';
-import { playComponent } from '../boundaries/play.js';
+import { playComponent, withPlayLocale } from '../boundaries/play.js';
 
 import { dataViewModel } from '../boundaries/data.js';
 import { siteContractNodes } from '../boundaries/site.js';
@@ -218,13 +218,17 @@ export function viewModel(state) {
     ui.projectIde = ideModel(state.ide.name, state.ide.names, state.ide.shared);
   }
   if (page === 'play') {
-    ui.play = playComponent.viewModel({ play: state.play });
+    // the panes read the reader's message language, as the run does
+    const play = withPlayLocale(state.play);
+    ui.play = playComponent.viewModel({ play });
     // the validate engine's data pane can toggle to a schema-generated form;
     // the form tree is built here (it needs @jarenjs/forms, a host dep) from
-    // the schema source + the structured buffer, and mounted at `dataForm`
-    if (state.play.engine === 'validate' && state.play.dataView === 'form') {
-      ui.play.dataForm = formViewFor(state.play.source?.schema ?? '', state.play.dataValue, referencedSchemas(state.play.source?.schemas),
-        state.play.config?.locale);
+    // the schema source + the structured buffer, and mounted at `dataForm`;
+    // its chrome speaks the language of its alerts (read at `formLabels`)
+    if (play.engine === 'validate' && play.dataView === 'form') {
+      ui.play.dataForm = formViewFor(play.source?.schema ?? '', play.dataValue, referencedSchemas(play.source?.schemas),
+        play.config?.locale);
+      ui.play.formLabels = formLabelsFor(play.config?.locale);
     }
   }
   if (page === 'flow') ui.flow = flowPageViewModel(state.flow);

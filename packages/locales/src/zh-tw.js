@@ -397,7 +397,7 @@ export const zhTW = {
   'query/minmax-mixed': "'$min'/'$max' 的項目必須全為數字或全為字串，但得到{got}",
   'query/sort-mixed': "'$sort' 的項目必須全為數字或全為字串，但得到{got}",
   'query/regex-invalid': "'{pattern}' 不是有效的 I-Regexp 模式",
-  'query/replace-empty-match': "'$replace' 的模式 '{pattern}' 符合長度為零的字串",
+  'query/replace-empty-match': "模式 '{pattern}' 符合長度為零的字串",
   'query/range-bounds': "'$range' 的邊界必須是安全整數，但得到{got}",
   'query/range-guard': "'$range' 的 {count} 個項目超過 {limit} 個項目的資源防護上限",
   'query/index-of-item': "'$index-of' 需要單一搜尋項目，但得到{got}",

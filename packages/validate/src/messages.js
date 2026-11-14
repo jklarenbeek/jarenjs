@@ -164,11 +164,13 @@ export class ValidationError {
   }
 
   /**
-   * Convert error to a plain object
-   * @returns {object} Plain object representation
+   * Convert error to a plain object. `inlineMessage` is present only on
+   * an error whose message the schema wrote (see {@link localizeErrors}),
+   * so a copy that crosses JSON localizes as the error itself does.
+   * @returns {{keyword: string, instancePath: string, schemaPath: string, params: object, msgid: string, message: string, inlineMessage?: true | 'fallback'}} Plain object representation
    */
   toJSON() {
-    return {
+    const json = {
       keyword: this.keyword,
       instancePath: this.instancePath,
       schemaPath: this.schemaPath,
@@ -176,18 +178,24 @@ export class ValidationError {
       msgid: this.msgid,
       message: this.message,
     };
+    // @ts-ignore - marker property, non-enumerable
+    const inline = this.inlineMessage;
+    return inline === undefined ? json : { ...json, inlineMessage: inline };
   }
 }
 
 /**
- * Mark an error's message as inline schema-authored text (a MessageSpec
- * without `$msgid`): single-language by definition, never re-rendered by
- * `localizeErrors`. Non-enumerable so it stays out of serialization.
+ * Mark an error's message as text the schema wrote: `true` for a
+ * MessageSpec without `$msgid` (single-language by definition, never
+ * re-rendered by `localizeErrors`), `'fallback'` for a `$msgid` spec's
+ * inline `message` (re-rendered only through that msgid). Non-enumerable,
+ * so a spread or `Object.keys` never meets it; `toJSON` carries it.
  * @param {ValidationError} error - The error to mark
+ * @param {true | 'fallback'} status - Which of the two the message is
  */
-function markInlineMessage(error) {
+function markInlineMessage(error, status) {
   Object.defineProperty(error, 'inlineMessage', {
-    value: true,
+    value: status,
     enumerable: false,
     configurable: true,
   });
@@ -219,10 +227,13 @@ export function renderErrorMessage(error, catalog = undefined) {
  * whole post-hoc i18n story:
  * `localizeErrors(validate(data).errors, compileMessageCatalog(nl))`.
  *
- * Inline schema-authored messages (a MessageSpec without `$msgid`) are
- * single-language by definition and are NOT re-rendered - that is why
- * `$msgid` exists. An error whose `msgid` resolves in no catalog keeps
- * its current message (e.g. the spec's inline fallback text).
+ * Inline schema-authored messages (a MessageSpec without `$msgid`,
+ * `inlineMessage: true`) are single-language by definition and are NOT
+ * re-rendered - that is why `$msgid` exists. A `$msgid` spec's inline
+ * text (`inlineMessage: 'fallback'`) is re-rendered only through that
+ * msgid, so it stays while no catalog carries the msgid. Any other error
+ * whose `msgid` resolves in no catalog falls back to its keyword. A plain
+ * copy that kept `inlineMessage` (an error's `toJSON`) reads the same way.
  * @param {ValidationError[]} errors - Errors from a collect-mode validation
  * @param {Readonly<Record<string, (params: object, error?: object) => string>>} catalog - A compiled catalog (see {@link compileMessageCatalog})
  * @returns {ValidationError[]} The same array, messages re-rendered
@@ -231,13 +242,14 @@ export function localizeErrors(errors, catalog) {
   for (let i = 0; i < errors.length; ++i) {
     const error = errors[i];
     // @ts-ignore - marker property, non-enumerable
-    if (error.inlineMessage === true) continue;
+    const inline = error.inlineMessage;
+    if (inline === true) continue;
     const msgid = error.msgid || error.keyword;
     const params = error.params || {};
     const render = lookupRender(catalog, msgid)
       ?? lookupRender(EN, msgid)
-      ?? lookupRender(catalog, error.keyword)
-      ?? lookupRender(EN, error.keyword);
+      ?? (inline === 'fallback' ? undefined
+        : lookupRender(catalog, error.keyword) ?? lookupRender(EN, error.keyword));
     if (render !== undefined) {
       error.message = render(params, error);
     }
@@ -533,6 +545,7 @@ export function convertInternalErrors(internalErrors) {
 
     const renderMessages = root?.options?.messages !== false;
     let message = '';
+    /** @type {false | true | 'fallback'} */
     let inline = false;
     if (renderMessages) {
       if (spec !== null) {
@@ -542,6 +555,7 @@ export function convertInternalErrors(internalErrors) {
             message = render(params);
           } else if (spec.render !== null) {
             message = spec.render(params);
+            inline = 'fallback';
           } else {
             message = renderErrorMessage({ keyword, msgid, params });
           }
@@ -562,7 +576,7 @@ export function convertInternalErrors(internalErrors) {
       msgid,
       message,
     });
-    if (inline) markInlineMessage(error);
+    if (inline !== false) markInlineMessage(error, inline);
     return error;
   });
 }

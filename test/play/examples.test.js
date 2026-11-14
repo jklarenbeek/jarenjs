@@ -134,9 +134,15 @@ describe('@jarenjs/play — the example library', () => {
       assert.ok(diagrams.has(kind), `no mermaid example for ${kind}`);
     }
 
-    const locales = ENGINES.validate.optionPanes[0].choices.map((c) => c.value);
-    const pinned = new Set(EXAMPLES.filter((e) => e.engine === 'validate').map((e) => e.config?.locale));
+    // English is the built-in language; every other offered locale has an
+    // example made to show it, and only those examples name a locale (the
+    // locale an example names becomes the reader's, so a stock example that
+    // named English would take the reader's chosen language away)
+    const locales = ENGINES.validate.optionPanes[0].choices.map((c) => c.value).filter((l) => l !== 'en');
+    const pinning = EXAMPLES.filter((e) => e.config?.locale !== undefined);
+    const pinned = new Set(pinning.map((e) => e.config.locale));
     assert.deepStrictEqual(locales.filter((l) => !pinned.has(l)), [], 'every offered locale has an example that pins it');
+    assert.deepStrictEqual(pinning.map((e) => e.id).filter((id) => !id.startsWith('validate-locale-')), [], 'only the locale examples name a locale');
   });
 
   it('the library shows every choice of the emit engine\'s option panes', () => {

@@ -396,7 +396,7 @@ export const tr = {
   'query/minmax-mixed': "'$min'/'$max' öğelerinin tümü sayı ya da tümü metin olmalıdır, gelen: {got}",
   'query/sort-mixed': "'$sort' öğelerinin tümü sayı ya da tümü metin olmalıdır, gelen: {got}",
   'query/regex-invalid': "'{pattern}' geçerli bir I-Regexp deseni değil",
-  'query/replace-empty-match': "'$replace' için '{pattern}' deseni sıfır uzunluklu metinle eşleşiyor",
+  'query/replace-empty-match': "'{pattern}' deseni sıfır uzunluklu metinle eşleşiyor",
   'query/range-bounds': "'$range' sınırları güvenli tam sayılar olmalıdır, gelen: {got}",
   'query/range-guard': "{count} öğelik '$range', {limit} öğelik kaynak korumasını aşıyor",
   'query/index-of-item': "'$index-of' tek bir arama öğesi alır, gelen: {got}",

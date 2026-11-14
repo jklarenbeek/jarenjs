@@ -457,7 +457,7 @@ export const ar = {
   'query/minmax-mixed': "يجب أن تكون عناصر ⁨'$min'⁩/⁨'$max'⁩ كلها أرقامًا أو كلها نصوصًا، لكن تم الحصول على ⁨{got}⁩",
   'query/sort-mixed': "يجب أن تكون عناصر ⁨'$sort'⁩ كلها أرقامًا أو كلها نصوصًا، لكن تم الحصول على ⁨{got}⁩",
   'query/regex-invalid': "ليس ⁨'{pattern}'⁩ نمط ⁨I-Regexp⁩ صالحًا",
-  'query/replace-empty-match': "يطابق النمط ⁨'{pattern}'⁩ في ⁨'$replace'⁩ النص ذا الطول الصفري",
+  'query/replace-empty-match': "يطابق النمط ⁨'{pattern}'⁩ النص ذا الطول الصفري",
   'query/range-bounds': "يجب أن تكون حدود ⁨'$range'⁩ أعدادًا صحيحة آمنة، لكن تم الحصول على ⁨{got}⁩",
   'query/range-guard': "يتجاوز عدد عناصر ⁨'$range'⁩ ({count}) حد حماية الموارد البالغ {limit}",
   'query/index-of-item': "يأخذ ⁨'$index-of'⁩ عنصر بحث واحدًا، لكن تم الحصول على ⁨{got}⁩",
