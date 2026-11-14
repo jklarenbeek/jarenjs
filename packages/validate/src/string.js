@@ -131,9 +131,23 @@ function compileStringIntern(schemaObj, jsonSchema) {
   };
 }
 
-export function compileStringBasic(schemaObj, jsonSchema) {
+/**
+ * The validator of a schema's string keywords (`minLength`, `maxLength`,
+ * `pattern`), or undefined when it holds none that asserts anything.
+ * @param {import('./index.js').ValidationObject} schemaObj
+ * @param {object} jsonSchema
+ * @param {{ other: (data: unknown, dataPath: string) => boolean, taken: boolean } | null} [typed] -
+ *   A leading `type: 'string'` no other keyword group precedes, in the
+ *   first-failure mode: the validator then tests it too, answering a value
+ *   that is no string through `typed.other`, and sets `typed.taken`
+ * @returns {Function | undefined}
+ */
+export function compileStringBasic(schemaObj, jsonSchema, typed = null) {
   const intern = compileStringIntern(schemaObj, jsonSchema);
   if (intern == null) return undefined;
+  // what a value that is no string answers: true, or the leading type's answer
+  const other = typed === null ? null : typed.other;
+  if (typed !== null) typed.taken = true;
 
   // Fast path for simple maxLength-only schemas (most common case)
   // This inlines the validation to reduce function call overhead
@@ -148,7 +162,7 @@ export function compileStringBasic(schemaObj, jsonSchema) {
       if (max >= 0 && min < 1) {
         const addError = schemaObj.createErrorHandler(max, 'maxLength');
         return function validateStringMaxLength(data, dataPath) {
-          if (!isStringType(data)) return true;
+          if (!isStringType(data)) return other === null || other(data, dataPath);
           return data.length <= max || addError(data.length, dataPath);
         };
       }
@@ -157,7 +171,7 @@ export function compileStringBasic(schemaObj, jsonSchema) {
       if (min > 0 && max < 0) {
         const addError = schemaObj.createErrorHandler(min, 'minLength');
         return function validateStringMinLength(data, dataPath) {
-          if (!isStringType(data)) return true;
+          if (!isStringType(data)) return other === null || other(data, dataPath);
           return data.length >= min || addError(data.length, dataPath);
         };
       }
@@ -167,7 +181,7 @@ export function compileStringBasic(schemaObj, jsonSchema) {
       if (max >= 0 && min < 1) {
         const addError = schemaObj.createErrorHandler(max, 'maxLength');
         return function validateStringMaxLengthGrapheme(data, dataPath) {
-          if (!isStringType(data)) return true;
+          if (!isStringType(data)) return other === null || other(data, dataPath);
           const len = getStringLength(data, true);
           return len <= max || addError(len, dataPath);
         };
@@ -176,7 +190,7 @@ export function compileStringBasic(schemaObj, jsonSchema) {
       if (min > 0 && max < 0) {
         const addError = schemaObj.createErrorHandler(min, 'minLength');
         return function validateStringMinLengthGrapheme(data, dataPath) {
-          if (!isStringType(data)) return true;
+          if (!isStringType(data)) return other === null || other(data, dataPath);
           const len = getStringLength(data, true);
           return len >= min || addError(len, dataPath);
         };
@@ -192,7 +206,7 @@ export function compileStringBasic(schemaObj, jsonSchema) {
     if (matches !== undefined) {
       const addError = schemaObj.createErrorHandler(pattern, 'pattern');
       return function validateStringPatternOnly(data, dataPath) {
-        if (!isStringType(data)) return true;
+        if (!isStringType(data)) return other === null || other(data, dataPath);
         return matches(data) || addError(data, dataPath);
       };
     }
@@ -200,7 +214,7 @@ export function compileStringBasic(schemaObj, jsonSchema) {
 
   // Generic case
   return function validateStringBasic(data, dataPath) {
-    return !isStringType(data)
-      || intern(data, dataPath);
+    if (!isStringType(data)) return other === null || other(data, dataPath);
+    return intern(data, dataPath);
   };
 }

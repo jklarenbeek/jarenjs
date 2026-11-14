@@ -28,6 +28,7 @@ import {
   isSchemaType,
   typeOnlyTest,
   undefinedElement,
+  otherKind,
   hasSchemaReference,
   schemaReference,
   hasRefSiblings,
@@ -618,7 +619,14 @@ export function compileSchemaObject(schemaObj, jsonSchema) {
 
     addFunctionToArray(validators, compileNumberBasic(schemaObj, jsonSchema));
     addFunctionToArray(validators, compileBigIntBasic(schemaObj, jsonSchema));
-    addFunctionToArray(validators, compileStringBasic(schemaObj, jsonSchema));
+    // A leading `type: 'string'` that no group precedes is tested by the
+    // string keywords' own instance test, which is the type's predicate
+    // (isStringType): a value it refuses gets the type's answer.
+    const stringTyped = typeCode >= 0 && validators.length === 0 && jsonSchema.type === 'string'
+      ? { other: (/** @type {unknown} */ data, /** @type {string} */ dataPath) => otherKind(typeError, data, dataPath), taken: false }
+      : null;
+    addFunctionToArray(validators, compileStringBasic(schemaObj, jsonSchema, stringTyped));
+    if (stringTyped !== null && stringTyped.taken) typeCode = -1;
   }
   addFunctionToArray(validators, compileFormatBasic(schemaObj, jsonSchema));
   addFunctionToArray(validators, compileContentSchema(schemaObj, jsonSchema));

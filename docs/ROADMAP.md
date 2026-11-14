@@ -286,48 +286,45 @@ delete it or fix it.
   millions, where the studio shows 20. Wanted: a decision between collapsing
   repeated errors and bounding what a failing applicator keeps; either
   changes the collected list (an upgrade note).
-- [ ] **A two-position tuple validates at half to three-fifths of Ajv's
-  speed.** The validator benchmark's 'uniqueItems=false with an array of
-  items' rows (a two-position `prefixItems`/`items` tuple of `type: boolean`;
-  `uniqueItems: false` compiles to nothing) take 1.6–2.0× Ajv's time and the
-  '…and additionalItems=false' rows 1.3–1.4× (medians of eight pinned runs).
-  Such a tuple is tested by code with no call per element (`isPurePosition`
-  in packages/validate/src/array.js); what is left is the call into the
-  walk's closure and its array-class test per validation, where Ajv's
-  generated function tests both positions inline. Wanted: such a tuple at
-  Ajv's speed, every answer unchanged.
-- [ ] **`uniqueItems` compares items at about nine-tenths of Ajv's speed.**
-  The 'uniqueItems validation' rows take 1.08–1.16× Ajv's time (medians of
-  eight pinned runs); core's `isUniqueDeepArray` over those arrays runs about
-  1.1× Ajv's pairwise `fast-deep-equal` (an array of up to 8 items is
-  compared pairwise, with no `Set` and no list of its containers), and
-  `equalsDeep` alone over their container pairs 0.94–1.19×. Wanted: the same
-  answers, non-JSON values included, at Ajv's speed.
+- [ ] **A two-position tuple validates at about half of Ajv's speed.** The
+  validator benchmark's 'uniqueItems=false with an array of items' rows (a
+  two-position `prefixItems`/`items` tuple of `type: boolean`;
+  `uniqueItems: false` compiles to nothing) take about 1.9× Ajv's time and
+  the '…and additionalItems=false' rows 1.5–1.6×, and two runs of the
+  same code part by up to a third on them. Such a tuple is one closure
+  tested by code with no call per element (`isPurePosition` in
+  packages/validate/src/array.js). What is left is the call into it: every
+  compiled validator enters its schema through one shared function
+  (`validateRoot`, `createValidateFn` in packages/validate/src/index.js),
+  so that call sees every schema's closure, and a schema compiling to
+  nothing still reads 1.1–1.3× Ajv's time; then the array-class test (the
+  `constructor` read that tells an Array subclass apart). Testing the two
+  positions without the loop measured a fifth faster per row in one
+  process but does not stand out of the published rows' spread. Wanted:
+  such a tuple at Ajv's speed, every answer unchanged.
 - [ ] **A typical object schema validates at a third to a sixth of Ajv's
   speed.** Compiled alone and called warm (best of five rounds of two
   million calls on one pinned core), `{ type: 'object', properties: {
   query: { type: 'string' }, limit: { type: 'integer' }, exact: { type:
   'boolean' } }, required: ['query'], additionalProperties: false }` takes
-  about 57 ns per valid call where Ajv takes 18, the same without
+  about 53 ns per valid call where Ajv takes 17, the same without
   `additionalProperties` about 69 ns to 12 and without `required` too
-  about 56 ns to 12, and `{ type: 'array', items: { type: 'string' } }`
-  over three strings 17 ns to 11. A leading `type`, a type-only member or
-  item and `additionalProperties` no longer cost a closure of their own;
-  what is left is how a closure reads a member: a declared name probed
-  with `Object.hasOwn` and read by a varying key costs about 13 ns where
-  Ajv's generated code reads it by a fixed name in under 2 ns, and the
-  validator generates no code by design. A `required` name is one more
-  such probe, and a name `properties` also declares is probed twice:
-  skipping the second probe reads a member that a getter deleted during
-  validation as absent, which the two modes answer differently today
-  (`{ properties: { a: { type: 'string' }, b: false }, required: ['b'] }`
-  on `{ get a() { delete this.b; return 'x'; }, b: 1 }`: true when
-  validation stops at the first failure, false when errors are collected).
-  `additionalProperties` lists the instance's keys (`Object.keys`), and a
-  member such as `{ type: 'string', minLength: 1 }` still tests its type
-  twice (the combining closure, then the string keywords' own test,
-  packages/validate/src/string.js). Wanted: those costs gone, every answer
-  unchanged, non-JSON values included.
+  about 62 ns to 12. A leading `type` (`object`, `array`, `string`), a
+  type-only member or item and `additionalProperties` no longer cost a
+  closure of their own; what is left is how a closure reads a member: a
+  declared name probed with `Object.hasOwn` and read by a varying key
+  costs about 13 ns where Ajv's generated code reads it by a fixed name in
+  under 2 ns, and the validator generates no code by design. A `required`
+  name is one more such probe, and a name `properties` also declares is
+  probed twice: skipping the second probe reads a member that a getter
+  deleted during validation as absent, which the two modes answer
+  differently today (`{ properties: { a: { type: 'string' }, b: false },
+  required: ['b'] }` on `{ get a() { delete this.b; return 'x'; }, b: 1 }`:
+  true when validation stops at the first failure, false when errors are
+  collected). `additionalProperties` lists the instance's keys
+  (`Object.keys`). The validator benchmark's properties, required and
+  additionalProperties rows take 1.3–1.5× Ajv's time together. Wanted:
+  those costs gone, every answer unchanged, non-JSON values included.
 - [ ] **A lone `type` and a `type` beside another keyword read three non-JSON
   values differently.** `{ type: 'number' }` refuses `NaN` and `{ type:
   'number', maxLength: 1e9 }` accepts it; `{ type: 'object' }` refuses an

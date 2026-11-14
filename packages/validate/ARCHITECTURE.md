@@ -975,12 +975,14 @@ Every closure a schema passes through is shared by every schema of its kind,
 so each one between the entry and the check that answers is a call that sees
 every schema's children. In the first-failure mode, a single `type` name
 first among the groups is tested by the combining closure itself (two and
-three groups), or, when it names `object` or `array` and the group of that
-kind comes next, by that group's own instance test, which is the type's
-predicate (`isObjectType`, `isArrayClass`): the object group, and a lone
-homogeneous `items` walk, report the type fault themselves; a lone
-`items`/`prefixItems` walk, and a lone bound or `multipleOf`, test their own
-instance type instead of sitting inside a guarding wrapper; the element walk
+three groups), or, when it names `object`, `string` or `array` and the group
+of that kind comes next, by that group's own instance test, which is the
+type's predicate (`isObjectType`, `isStringType`, `isArrayClass`): the object
+group, the string keywords (`minLength`, `maxLength`, `pattern`) and a lone
+homogeneous `items` walk report the type fault themselves; a lone
+`items`/`prefixItems` walk, a lone bound or `multipleOf`, and a lone
+`uniqueItems` (`validateUniqueItemsAlone`) test their own instance type
+instead of sitting inside a guarding wrapper; the element walk
 calls a tuple position directly; a tuple whose every position compiles to a
 constant answer or a type-only test (a boolean schema, one asserting
 nothing, a lone single-name `type`), with a boolean or absent keyword past

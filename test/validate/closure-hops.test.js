@@ -7,8 +7,9 @@ import { JarenValidator } from '@jarenjs/validate';
 // each closure between the entry and the check that answers is a call that
 // sees every schema's children. The element walk of a lone `items` or
 // `prefixItems`, a tuple position, and a reference resolved on first use run
-// without a closure of their own around them; a leading `type` of `object` or
-// `array` is tested by the member or element walk of that kind, and
+// without a closure of their own around them, as a lone `uniqueItems` does; a
+// leading `type` of `object`, `string` or `array` is tested by the member
+// walk, the string keywords or the element walk of that kind, and
 // `properties` with `additionalProperties` is one walk; a tuple whose
 // positions compile to constant answers or type-only tests, homogeneous
 // items of one such test, and a member whose schema is type-only or asserts
@@ -59,6 +60,40 @@ describe('closures between the entry and the check', function () {
     assert.strictEqual(framesToCheck({ type: 'array', items: { format: 'probe' } }, ['x']), 2);
   });
 
+  it('a leading type of string is tested by the string keywords', function () {
+    // A pattern whose own test records the frames between the entry and it.
+    const framesToPattern = (schema) => {
+      let frames = -1;
+      const pattern = /x/;
+      pattern.test = function probe() {
+        frames = String(new Error().stack).split('\n').slice(2).findIndex((line) => line.includes('entry'));
+        return true;
+      };
+      const validate = new JarenValidator().compile({ ...schema, pattern });
+      (function entry() { validate('x'); })();
+      return frames;
+    };
+    assert.strictEqual(framesToPattern({ type: 'string' }), framesToPattern({}));
+    assert.strictEqual(framesToPattern({ type: 'string', maxLength: 5 }), framesToPattern({ maxLength: 5 }));
+  });
+
+  it('a lone uniqueItems tests the array class itself', function () {
+    // An array whose first element read records the frames between the entry and it.
+    const framesToCompare = (schema) => {
+      let frames = -1;
+      const data = new Proxy([1, 2], {
+        get(target, key) {
+          if (key === '0') frames = String(new Error().stack).split('\n').slice(2).findIndex((line) => line.includes('entry'));
+          return target[key];
+        },
+      });
+      const validate = new JarenValidator().compile(schema);
+      (function entry() { validate(data); })();
+      return frames;
+    };
+    assert.strictEqual(framesToCompare({ uniqueItems: true }), 3);
+  });
+
   it('properties with additionalProperties are walked by one closure', function () {
     assert.strictEqual(framesToCheck({ properties: { a: { format: 'probe' } }, additionalProperties: false }, { a: 'x' }), 2);
     assert.strictEqual(framesToCheck({ type: 'object', properties: { a: { format: 'probe' } }, required: ['a'], additionalProperties: false }, { a: 'x' }), 2);
@@ -104,6 +139,37 @@ describe('the shortcuts answer as the compositions they replace', function () {
             verdict({ properties: { m: { type: [type], ...extra } } }, { m: value }));
         }
       }
+    }
+  });
+
+  it('a leading string type with string keywords answers as the one-name type list', function () {
+    const extras = [{ minLength: 1 }, { maxLength: 1 }, { minLength: 1, maxLength: 2 }, { pattern: '^a' },
+      { maxLength: 2, pattern: 'b' }, { minLength: 2, format: 'date' }, { maxLength: 1, items: { type: 'string' } }];
+    const strings = ['a', 'ab', 'abc', 'b', '\u{1F600}', 'e\u0301', new String('a')];
+    for (const extra of extras) {
+      for (const options of [{}, { useGrapheme: false }]) {
+        const one = (schema) => new JarenValidator(options).compile(schema);
+        const pairs = [[one({ type: 'string', ...extra }), one({ type: ['string'], ...extra })],
+          [one({ properties: { m: { type: 'string', ...extra } } }), one({ properties: { m: { type: ['string'], ...extra } } })],
+          [one({ items: { type: 'string', ...extra } }), one({ items: { type: ['string'], ...extra } })]];
+        for (const value of [...VALUES, ...strings]) {
+          const label = `${JSON.stringify(extra)} ${JSON.stringify(options)} ${show(value)}`;
+          assert.strictEqual(outcome(pairs[0][0], value), outcome(pairs[0][1], value), label);
+          assert.strictEqual(outcome(pairs[1][0], { m: value }), outcome(pairs[1][1], { m: value }), `member ${label}`);
+          assert.strictEqual(outcome(pairs[2][0], [value]), outcome(pairs[2][1], [value]), `element ${label}`);
+        }
+      }
+    }
+  });
+
+  it('a lone uniqueItems answers as uniqueItems beside a bound and as when errors are collected', function () {
+    const arrays = [[1, 1], [1, 2], [{ a: 1 }, { a: 1 }], [{ a: 1 }, { a: 2 }], [[1], [1]], [NaN, NaN], [0, -0],
+      ArraySubclass.from([1, 1]), { constructor: Array, length: 2, 0: 1, 1: 1 }, new Proxy([1, 1], {}),
+      Object.assign([1, 1], { constructor: Object }), Object.assign(new Array(3), { 0: 1, 2: 1 }), [undefined, undefined]];
+    for (const value of [...VALUES, ...arrays]) {
+      const alone = verdict({ uniqueItems: true }, value);
+      assert.strictEqual(alone, verdict({ uniqueItems: true, maxItems: 1e9 }, value), show(value));
+      assert.strictEqual(alone, verdict({ uniqueItems: true }, value, { skipErrors: false, collectErrors: true }), show(value));
     }
   });
 

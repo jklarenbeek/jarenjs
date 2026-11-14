@@ -67,6 +67,20 @@ function createBooleanValidator(schemaObj, jsonSchema, key, validationFn) {
 
 const compileUniqueItems = (schemaObj, jsonSchema) =>
   createBooleanValidator(schemaObj, jsonSchema, 'uniqueItems', isUniqueDeepArray);
+
+// `uniqueItems` as a schema's only array keyword: the array-class test the
+// group's guard makes and the comparison in one closure, where the guard
+// and the comparator were two.
+function compileUniqueItemsAlone(schemaObj, jsonSchema) {
+  const value = getBoolishType(jsonSchema.uniqueItems);
+  if (value !== true) return undefined;
+
+  const addError = schemaObj.createErrorHandler(value, 'uniqueItems');
+
+  return function validateUniqueItemsAlone(data, dataPath) {
+    return !isArrayClass(data) || isUniqueDeepArray(data) || addError(data, dataPath);
+  };
+}
 //#endregion
 
 //#region Tuple
@@ -684,6 +698,9 @@ export function compileArraySchema(schemaObj, jsonSchema, typed = null) {
   if (parts.length === 1) {
     const single = parts[0];
     if (alone) return single;
+    if (single === compiledPrimitives && compileMinItems(schemaObj, jsonSchema) === undefined
+      && compileMaxItems(schemaObj, jsonSchema) === undefined)
+      return compileUniqueItemsAlone(schemaObj, jsonSchema);
     return function validateArraySchemaSingle(data, dataPath, dataRoot) {
       return isArrayClass(data)
         ? single(data, dataPath, dataRoot)
