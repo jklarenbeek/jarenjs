@@ -37,7 +37,7 @@ is the index of those guides, and it is how a reader reaches any of them.
 | Document | Lines | What it writes, and when to open it |
 |---|---:|---|
 | [LINQ-FORMAT.md](LINQ-FORMAT.md) | 972 | this file, the binder and the family's **normative reference**: what a pen is, the rules all of them keep, the shared `JL01xx` table, and the cross-pen views derived from the guides it indexes. **Read it when** you want a rule that is true of every pen, an index of the documents, or one place to look up a method without knowing which pen owns it |
-| [QUERY-PEN.md](QUERY-PEN.md) | 2,215 | the chain, `.` — query documents (`jaren-query`) and the provider seam. **Read it when** you are querying data, or implementing a provider that answers a query document |
+| [QUERY-PEN.md](QUERY-PEN.md) | 2,219 | the chain, `.` — query documents (`jaren-query`) and the provider seam. **Read it when** you are querying data, or implementing a provider that answers a query document |
 | [SCHEMA-PEN.md](SCHEMA-PEN.md) | 1,266 | `./schema` — JSON Schema 2020-12: the structural keywords, the constraints and the annotations, each with a method of its own, plus `$query`, `$defs`/`$ref` recursion and the normalizer's per-field predicates. **Read it when** you are describing the shape of data — for validation, for a form, or as the base of an entity |
 | [MODEL-PEN.md](MODEL-PEN.md) | 1,244 | `./model` — the `x-entity` vocabulary on JSON Schema, and the `$model` 0.1 document `openStore` accepts unchanged. **Read it when** you are declaring a store's entities, their keys and their relations |
 | [JSLT-PEN.md](JSLT-PEN.md) | 980 | `./jslt` — `$jslt` 0.1 stylesheets: the envelope and its rules, whose bodies are captured over the matched value. **Read it when** you are transforming one document into another |
@@ -206,7 +206,7 @@ and the bundle is the byte count the tree-shaking probe builds.
 | Document | Subpath | Lines | Mapping rows | Worked examples | Refusals | Bundle |
 |---|---|---:|---:|---:|---:|---:|
 | [LINQ-FORMAT.md](LINQ-FORMAT.md) | — | 972 | — | — | — | — |
-| [QUERY-PEN.md](QUERY-PEN.md) | `.` | 2,215 | 34 | 8 | 17 | 251,544 B |
+| [QUERY-PEN.md](QUERY-PEN.md) | `.` | 2,219 | 34 | 8 | 17 | 251,544 B |
 | [SCHEMA-PEN.md](SCHEMA-PEN.md) | `./schema` | 1,266 | 82 | 10 | 4 | 47,577 B |
 | [MODEL-PEN.md](MODEL-PEN.md) | `./model` | 1,244 | 31 | 7 | 3 | 59,774 B |
 | [JSLT-PEN.md](JSLT-PEN.md) | `./jslt` | 980 | 17 | 8 | 3 | 28,913 B |
@@ -221,7 +221,7 @@ and the bundle is the byte count the tree-shaking probe builds.
 | [CHARTS-PEN.md](CHARTS-PEN.md) | `./charts` | 100 | 21 | 1 | 1 | 7,116 B |
 | [DB-CLIENT.md](DB-CLIENT.md) | `./db` | 1,489 | 54 | 5 | 2 | 1,143,393 B |
 | [FORMULA-PEN.md](FORMULA-PEN.md) | `./formula` | 41 | 2 | — | — | 14,252 B |
-| **16 documents** | | **14,136** | **382** | **75** | | |
+| **16 documents** | | **14,140** | **382** | **75** | | |
 <!--/fact-->
 
 A pen whose mapping rows are far below its worked examples is a pen
@@ -677,7 +677,7 @@ it says.
 |---|---|---|---|
 | `typedClient(client, contract)` | — (identity) | `TypedClient<C>`: `invoke` over the invokable operations, `subscribe` over the subscribe ones, `url` over all of them | native |
 | `typedHttpClient(client, contract)` | — (identity) | `TypedHttpClient<C>`: `TypedClient<C>` plus `bytes` over `OpaqueOf<C>` — the opaque operations, whose success is a `ByteResponse` (a live stream) rather than the output type; for an `openHttpClient` client only, a local or port client has no `bytes` | native |
-| `typedHandlers(contract, handlers)` | — (identity) | `TypedHandlerTable<C, Host = null, Carrier = 'http'>`: one handler per invokable operation, `(input, ctx) => output \| Failure`. `ctx` is `HandlerContext<Host, Carrier>`: the HTTP context by default, `Host` the host lifecycle's `ctx.host`, and a carrier union a discriminated union to narrow on `ctx.carrier` (CONTRACT-FORMAT §7.7). `ctx.op` is `OperationInfo`, the structural subset of the compiled operation: `id`, `kind`, `doc`, `errors` (`status` per declared code), `policy` and `http`. "Does my operation declare this failure?" is `Object.hasOwn(ctx.op.errors, code)`, with no runtime member added. `ctx.header(name, value)` arms a response header on HTTP and is `null` on port and local. An `onError(error, ctx)` observer takes `ErrorContext<Host>`: the HTTP handler context, a local/port `{ op, trace }` context, or `null` | native; a missing or misspelled operation does not compile, and an HTTP-only member on a port/local context does not either. `op.id` stays `string`, because a table whose handlers demanded a literal id would no longer be the `Handler` a binding accepts |
+| `typedHandlers(contract, handlers)` | — (identity) | `TypedHandlerTable<C, Host = null, Carrier = 'http'>`: one handler per invokable operation, `(input, ctx) => output \| Failure`; a `subscribe` operation's handler answers `SubscriptionSource<output> \| Failure`, the live source its stream reads (`snapshot()` or a settled `result`, `subscribe(emit)`, `close()`, an optional `replay`), and answering the snapshot itself does not compile (the binding answers it `JC2010`). `ctx` is `HandlerContext<Host, Carrier>`: the HTTP context by default, `Host` the host lifecycle's `ctx.host`, and a carrier union a discriminated union to narrow on `ctx.carrier` (CONTRACT-FORMAT §7.7). `ctx.op` is `OperationInfo`, the structural subset of the compiled operation: `id`, `kind`, `doc`, `errors` (`status` per declared code), `policy` and `http`. "Does my operation declare this failure?" is `Object.hasOwn(ctx.op.errors, code)`, with no runtime member added. `ctx.header(name, value)` arms a response header on HTTP and is `null` on port and local. An `onError(error, ctx)` observer takes `ErrorContext<Host>`: the HTTP handler context, a local/port `{ op, trace }` context, or `null` | native; a missing or misspelled operation does not compile, and an HTTP-only member on a port/local context does not either. `op.id` stays `string`, because a table whose handlers demanded a literal id would no longer be the `Handler` a binding accepts |
 | `typedTools(tools, contract)` | — (identity) | `TypedTool<C>[]`: `name` is the id with `.` → `_`, and `execute(args, ctx?)` takes the operation's ACCEPTED input. `ctx` is a `ToolCallContext` (`signal`, `attempt`): aborting the signal cancels the call, and nothing else reaches the operation. `execute` is always a function: an operation without input ignores its argument | native |
 
 **What the pen does not judge**
@@ -896,7 +896,7 @@ it says.
 |---|---|---|
 | `open(model, options)` | a promise of the frozen client — `store`, `capabilities`, `entities`, `collections`, `transaction`, `close`, and `saveChanges`/`live` when the model declares entities | `Client<InferMeta<typeof model>>` for a pen model; `Client<E>` for `open<E>(json, …)`; the wide map for a bare JSON model |
 | `defineReplication(header)` | a logical replication document builder — §2.7 | `ReplicationPen` |
-| `defaultValidator()` | `new JarenValidator({ collectErrors: true })` with `stringFormats` and `dateTimeFormats` registered | `JarenValidator` |
+| `defaultValidator()` | `new JarenValidator({ collectErrors: true })` with `stringFormats` and `dateTimeFormats` registered | `JarenValidator<true>`: a schema it compiles answers `{ valid, errors }`, never a bare boolean |
 | `createDbLedger(client, options?)` | the contract idempotency ledger (`claim`/`commit`/`fail`/`lookup`/`sweep`) over a declared collection of the client's store — §2.6 | `DbLedger`; structurally `@jarenjs/contract`'s `Ledger` |
 | `createDbReceipts(client, options)` | permanent receipts and independent fenced leases; see durable mapped records | structural receipt repository |
 | `createDbEffectStore(client, options)` | reviewed external intent and reconciliation under job fences | structural effect store |
