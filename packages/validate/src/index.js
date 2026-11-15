@@ -47,6 +47,7 @@ import {
   markStep,
 } from './tools.js';
 import { wrapUnevaluated } from './unevaluated.js';
+import { assertLengthUnit } from './string.js';
 import { registerFormatCompiler, registerFormatCompilers } from './format.js';
 import { equalsJson, mergeMap } from '@jarenjs/core/object';
 import { isStringWhiteSpace } from '@jarenjs/core/string';
@@ -134,8 +135,8 @@ export { SchemaCompileError, SchemaRuntimeError, VALIDATE_CODES } from './errors
  * @property {string | string[]} [type] - Expected JSON type(s): 'null', 'boolean', 'object', 'array', 'number', 'string' or 'integer'
  * @property {unknown[] | DollarDataRef} [enum] - Exhaustive list of valid values
  * @property {unknown | DollarDataRef} [const] - Single valid value
- * @property {number | DollarDataRef} [minLength] - Minimum string length (in graphemes by default)
- * @property {number | DollarDataRef} [maxLength] - Maximum string length (in graphemes by default)
+ * @property {number | DollarDataRef} [minLength] - Minimum string length (in graphemes by default; see the `lengthUnit` option)
+ * @property {number | DollarDataRef} [maxLength] - Maximum string length (in graphemes by default; see the `lengthUnit` option)
  * @property {string | DollarDataRef} [pattern] - ECMA-262 regular expression the string must match
  * @property {string} [contentEncoding] - Encoding of a string-embedded document (e.g. 'base64')
  * @property {string} [contentMediaType] - Media type of a string-embedded document
@@ -259,6 +260,7 @@ export class ValidationOptions {
    * @param {number} [maxReferenceDepth=256] - The deepest nesting, in levels of schema, of the references one validation enters before it throws `JK2001`, a reference back into a schema enclosing it weighing the levels between them (a positive safe integer, else `JK0002` when a schema compiles). Fixed by default so the answer is the same on every host; raising it lets the host's call stack decide again.
    * @param {OutputFormat<any>} [outputFormat] - A JSON Schema standard output format from `@jarenjs/validate/output`, returned by a compiled validator instead of a boolean or `{ valid, errors }`; unset, the return shape is `collectErrors`'. Any other value is refused `JK0003` when a schema compiles.
    * @param {number} [maxSchemaDepth=128] - The deepest nesting of subschemas one compile builds before it throws `JK0017` (a positive safe integer, else `JK0002` when a schema compiles). Fixed by default so the answer is the same on every host; raising it lets the host's call stack decide again.
+   * @param {'grapheme'|'codepoint'|'utf16'} [lengthUnit] - What `minLength`/`maxLength` count: grapheme clusters, code points (what JSON Schema, SQLite's `length()` and PostgreSQL's `char_length()` count) or UTF-16 code units. Unset, `useGrapheme` decides (`true`: `'grapheme'`, `false`: `'utf16'`); set, it wins over `useGrapheme`. Any other value is a TypeError when a schema compiles.
    */
   constructor(
     skipErrors = true,
@@ -274,7 +276,8 @@ export class ValidationOptions {
     relativePointerDialect = 'handrews-01',
     maxReferenceDepth = REFERENCE_DEPTH_CEILING,
     outputFormat = undefined,
-    maxSchemaDepth = SCHEMA_DEPTH_CEILING
+    maxSchemaDepth = SCHEMA_DEPTH_CEILING,
+    lengthUnit = undefined
   ) {
     /** @type {boolean} Whether to stop at first error or continue */
     this.skipErrors = skipErrors;
@@ -304,6 +307,8 @@ export class ValidationOptions {
     this.outputFormat = outputFormat;
     /** @type {number} The deepest nesting of subschemas one compile builds */
     this.maxSchemaDepth = maxSchemaDepth;
+    /** @type {'grapheme'|'codepoint'|'utf16'|undefined} What string length counts; undefined leaves `useGrapheme` to decide */
+    this.lengthUnit = lengthUnit;
   }
 }
 
@@ -793,6 +798,7 @@ export class ValidationRoot {
     this.#vocabularies = vocabularies;
 
     assertRelativePointerDialect(opts.relativePointerDialect);
+    assertLengthUnit(opts.lengthUnit);
     assertDepthOption('maxReferenceDepth', opts.maxReferenceDepth);
     assertDepthOption('maxSchemaDepth', opts.maxSchemaDepth);
     assertOutputFormat(opts.outputFormat);
@@ -2136,7 +2142,7 @@ export class ValidatorOptions {
       /** @type {object[]} Initial schemas to register */
       this.schemas = opts.schemas || [];
       // If collectErrors is passed directly, create ValidationOptions with it
-      if (opts.collectErrors != null || opts.skipErrors != null || opts.useGrapheme != null || opts.contentValidation != null || opts.draftVersion != null || opts.formatAssertion != null || opts.messages != null || opts.unknownFormats != null || opts.propertyDependencies != null || opts.relativePointerDialect != null || opts.maxReferenceDepth != null || opts.outputFormat !== undefined || opts.maxSchemaDepth != null) {
+      if (opts.collectErrors != null || opts.skipErrors != null || opts.useGrapheme != null || opts.contentValidation != null || opts.draftVersion != null || opts.formatAssertion != null || opts.messages != null || opts.unknownFormats != null || opts.propertyDependencies != null || opts.relativePointerDialect != null || opts.maxReferenceDepth != null || opts.outputFormat !== undefined || opts.maxSchemaDepth != null || opts.lengthUnit != null) {
         const collectErrors = opts.collectErrors ?? false;
         this.validation = new ValidationOptions(
           // collecting errors implies actually recording them
@@ -2156,7 +2162,8 @@ export class ValidatorOptions {
           opts.relativePointerDialect ?? 'handrews-01',
           opts.maxReferenceDepth ?? REFERENCE_DEPTH_CEILING,
           opts.outputFormat,
-          opts.maxSchemaDepth ?? SCHEMA_DEPTH_CEILING
+          opts.maxSchemaDepth ?? SCHEMA_DEPTH_CEILING,
+          opts.lengthUnit ?? undefined
         );
       } else {
         /** @type {ValidationOptions} Validation behavior options */
@@ -2218,7 +2225,8 @@ export class ValidatorOptions {
  * @property {TraverseOptions} [traverse] - Schema traversal options
  * @property {TCollect} [collectErrors] - Return `{ valid, errors }` instead of a boolean
  * @property {boolean} [skipErrors] - Stop at the first failure (defaults to `!collectErrors`)
- * @property {boolean} [useGrapheme] - Count grapheme clusters for string length
+ * @property {boolean} [useGrapheme] - Count grapheme clusters for string length (default true); false counts UTF-16 code units. An alias of `lengthUnit` (`'grapheme'` / `'utf16'`), which wins when both are given
+ * @property {'grapheme'|'codepoint'|'utf16'} [lengthUnit] - What `minLength`/`maxLength` count: `'grapheme'` (the default) clusters, `'codepoint'` code points (what JSON Schema, SQLite's `length()` and PostgreSQL's `char_length()` count), `'utf16'` code units. Another value: a TypeError when a schema compiles
  * @property {boolean} [contentValidation] - Assert contentEncoding/contentMediaType
  * @property {number} [draftVersion] - The JSON Schema draft version
  * @property {boolean} [formatAssertion] - Assert the format keyword
@@ -3094,7 +3102,8 @@ export class JarenValidator {
       existingValidation.relativePointerDialect ?? 'handrews-01',
       existingValidation.maxReferenceDepth ?? REFERENCE_DEPTH_CEILING,
       existingValidation.outputFormat,
-      existingValidation.maxSchemaDepth ?? SCHEMA_DEPTH_CEILING
+      existingValidation.maxSchemaDepth ?? SCHEMA_DEPTH_CEILING,
+      existingValidation.lengthUnit
     );
     // A recording output format records the errors of every keyword;
     // `flag` is the boolean validator, which stops at the first failure.

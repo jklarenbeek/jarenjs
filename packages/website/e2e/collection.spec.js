@@ -118,3 +118,51 @@ test('near-ceiling scrolling and sampled viewport traversal retain finite resour
     writeFileSync(`${root}/benchmark/collection-browser-${testInfo.project.name}.json`,JSON.stringify({engine:testInfo.project.name,browser:page.context().browser().version(),node:process.version,platform:process.platform,workers:testInfo.config.workers,samples:40,...result},null,2)+'\n');
   }
 });
+
+// A cell holding a button, with the pointer choice and the selection owner set by the host.
+async function setupHostRows(page,{pointerActivation,owned=false,applies=true}={}) {
+  await page.setContent('<main id="host" style="width:640px"></main>');
+  await page.addScriptTag({content:bundle.outputFiles[0].text});
+  await page.evaluate(({pointerActivation,owned,applies})=>{
+    const keys=Array.from({length:50},(_,i)=>`row-${i}`);window.activated=[];window.requests=[];
+    const empty={mode:'keys',keys:[],ranges:[],exclusions:[],query:'',snapshot:''};
+    window.c=window.CollectionTest.mountCollection(document.getElementById('host'),{
+      count:keys.length,keyAt:i=>keys[i],indexOf:key=>keys.indexOf(key),getItem:i=>({id:keys[i]}),
+      renderCell:(row,col)=>col===1?['button',{type:'button','data-open':row.id},'Open']:row.id,
+      columnCount:2,columnSize:200,height:300,onActivate:r=>window.activated.push(r),
+      ...(pointerActivation?{pointerActivation}:{}),
+      ...(owned?{selection:empty,onSelectionChange:next=>{window.requests.push(next);if(applies)window.c.update({selection:next});}}:{})});
+  },{pointerActivation,owned,applies});
+}
+const selectedKeys=(page)=>page.evaluate(()=>['row-1','row-2','row-3'].filter(key=>window.c.interaction.selected(key)));
+
+test('a pointer click toggles by default and activates under pointerActivation, a cell button included',async({page})=>{
+  await setupHostRows(page);
+  await page.locator('[data-key="row-1"] [data-column="0"]').click();
+  await page.locator('[data-open="row-2"]').click();
+  expect(await selectedKeys(page)).toEqual(['row-1','row-2']);
+  expect(await page.evaluate(()=>window.activated.length)).toBe(0);
+  await setupHostRows(page,{pointerActivation:'activate'});
+  await page.locator('[data-key="row-1"] [data-column="0"]').click();
+  await page.locator('[data-open="row-2"]').click();
+  expect(await page.evaluate(()=>window.activated)).toEqual([{state:'activate',key:'row-1',column:0},{state:'activate',key:'row-2',column:1}]);
+  expect(await selectedKeys(page)).toEqual([]);
+  await page.keyboard.press(' ');expect(await selectedKeys(page)).toEqual(['row-2']);
+  await page.keyboard.press('Enter');expect(await page.evaluate(()=>window.activated.length)).toBe(3);
+});
+
+test('a host-owned selection changes only when the host applies the request',async({page})=>{
+  await setupHostRows(page,{owned:true});
+  await page.locator('[data-key="row-1"] [data-column="0"]').click();
+  await page.keyboard.press('Shift+ArrowDown');
+  expect(await selectedKeys(page)).toEqual(['row-1','row-2']);
+  // the rendered cells carry the host's selection as the ARIA keywords
+  await expect(page.locator('[data-key="row-2"] [data-column="0"]')).toHaveAttribute('aria-selected','true');
+  await expect(page.locator('[data-key="row-3"] [data-column="0"]')).toHaveAttribute('aria-selected','false');
+  await setupHostRows(page,{owned:true,applies:false});
+  await page.locator('[data-key="row-1"] [data-column="0"]').click();
+  await page.keyboard.press(' ');
+  expect(await page.evaluate(()=>window.requests.map(r=>r.keys))).toEqual([['row-1'],['row-1']]);
+  expect(await selectedKeys(page)).toEqual([]);
+  await expect(page.locator('[data-key="row-1"] [data-column="0"]')).toHaveAttribute('aria-selected','false');
+});

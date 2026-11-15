@@ -6,15 +6,26 @@ import { createCollectionInteraction } from '../interaction.js';
 import { collectionText } from '../messages.js';
 let nextId = 0;
 
+/** What a pointer click or tap on a row does: `'toggle'` (the default) toggles its selection,
+ * `'activate'` reports it to `onActivate` as Enter does. Keyboard activation is unaffected.
+ * @param {unknown} value */
+function assertPointerActivation(value) {
+  if (value !== undefined && value !== 'toggle' && value !== 'activate') throw new RangeError('Invalid pointerActivation');
+}
+
 /**
  * Mount a collection with injected source access, optional frame and resize ownership.
  * CSS extents above the qualified ceiling refuse before they reach layout.
+ * `pointerActivation` chooses what a click or tap does (`'toggle'` or `'activate'`);
+ * `selection` with `onSelectionChange` makes the selection host-owned
+ * (see `createCollectionInteraction`).
  * @param {HTMLElement} host @param {any} options
  */
 export function mountCollection(host, options) {
   let config = { maxExtent: 8000000, maxMeasurementWork: 64, ...options };
   if (!Number.isSafeInteger(config.maxMeasurementWork) || config.maxMeasurementWork < 1
     || !Number.isFinite(config.maxExtent) || config.maxExtent <= 0) throw new RangeError('Invalid measurement/extent credits');
+  assertPointerActivation(config.pointerActivation);
   const document = host.ownerDocument, window = document.defaultView;
   const requestFrame = config.requestFrame ?? ((fn) => window.requestAnimationFrame(fn));
   const cancelFrame = config.cancelFrame ?? ((id) => window.cancelAnimationFrame(id));
@@ -64,7 +75,8 @@ export function mountCollection(host, options) {
       config.direction === 'rtl' ? 'negative' : 'ltr');
     controller.viewport({ top: element.scrollTop, left, width: element.clientWidth, height: element.clientHeight });
     if (measurePending) { measurePending = false; measureVisible(); }
-    interaction.update({ ...controller.options(), pageRows: Math.max(1, Math.floor(element.clientHeight / controller.options().rowSize)) });
+    // A host-owned selection enters through `update` only: the options kept here may hold one a request has since replaced.
+    interaction.update({ ...controller.options(), selection: undefined, pageRows: Math.max(1, Math.floor(element.clientHeight / controller.options().rowSize)) });
     const focus = interaction.state().focus;
     const pins = [...retainers].map((read) => read());
     const focused = focus && config.keyAt(focus.index) === focus.key;
@@ -143,8 +155,11 @@ export function mountCollection(host, options) {
     if (!row) return;
     const column = event.target.closest?.('.jc-cell');
     const result = interaction.focusIndex(Number(row.getAttribute('data-row')), Number(column?.getAttribute('data-column') ?? 0));
-    if (result.state === 'ready') interaction.toggle(result.key);
-    element.focus(); refresh(); config.onIntent?.(interaction.state().selection);
+    const activate = config.pointerActivation === 'activate';
+    if (result.state === 'ready' && !activate) interaction.toggle(result.key);
+    element.focus(); refresh();
+    if (result.state === 'ready' && activate) config.onActivate?.({ state: 'activate', key: result.key, column: result.column });
+    config.onIntent?.(interaction.state().selection);
   }
   const listeners = { scroll: schedule, keydown, focusin, click,
     compositionstart: () => { composing = true; }, compositionend: () => { composing = false; } };
@@ -187,7 +202,9 @@ export function mountCollection(host, options) {
     update(next) {
       const reset = next.query !== undefined && next.query !== config.query
         || next.snapshot !== undefined && next.snapshot !== config.snapshot;
-      config = { ...config, ...next }; controller.update(next); interaction.update(next);
+      assertPointerActivation(next.pointerActivation);
+      // The interaction first: a host-owned selection it refuses leaves nothing changed.
+      interaction.update(next); config = { ...config, ...next }; controller.update(next);
       if (reset) for (const fn of [...subscribers]) fn({ kind: 'reset' });
       element.scrollTop = controller.position().top; refresh();
     },

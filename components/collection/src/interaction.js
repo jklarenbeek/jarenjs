@@ -2,11 +2,45 @@
 import { isJsonValue } from '@jarenjs/core/object';
 /** Identity-based interaction. Range intent stores endpoint keys in a declared query/snapshot. */
 
-/** @param {any} options */
+/** Whether a selection intent is JSON of the selection shape within the explicit-key budget.
+ * @param {any} intent @param {number} maxSelectedKeys */
+function validSelection(intent, maxSelectedKeys) {
+  return !!intent && isJsonValue(intent) && typeof intent.query === 'string' && typeof intent.snapshot === 'string' && ['keys', 'all'].includes(intent.mode) && Array.isArray(intent.keys) && Array.isArray(intent.exclusions)
+    && Array.isArray(intent.ranges) && intent.keys.length + intent.exclusions.length <= maxSelectedKeys
+    && intent.ranges.length <= 1 && [...intent.keys, ...intent.exclusions].every((key) => typeof key === 'string')
+    && intent.ranges.every((range) => range !== null && typeof range.fromKey === 'string' && typeof range.toKey === 'string');
+}
+
+/**
+ * Keyed focus and selection over an injected key lookup.
+ *
+ * Passing `selection` makes the selection host-owned: it is read from
+ * `selection` at creation and on every `update` that passes a different
+ * object, validated as `restore` validates (a RangeError otherwise), and
+ * every change the interaction would make (Space, a shift range, `toggle`,
+ * `selectAll`, `clear`, `restore`) is instead requested through
+ * `onSelectionChange(next)`; the selection stays the host's until the host
+ * passes the next one. Without `selection` the interaction owns it, and
+ * `onSelectionChange`, when given, observes each change.
+ * @param {any} options
+ */
 export function createCollectionInteraction(options) {
   let config = { columnCount: 1, pageRows: 10, query: '', snapshot: '', maxSelectedKeys: 4096, ...options };
   let focus = null, pending = null, rangeAnchor = null;
   let selection = { mode: 'keys', keys: [], ranges: [], exclusions: [], query: config.query, snapshot: config.snapshot };
+  const controlled = config.selection !== undefined;
+  let hostSelection;
+  function adopt(next, maxSelectedKeys) {
+    if (next === hostSelection) return;
+    if (!validSelection(next, maxSelectedKeys)) throw new RangeError('Invalid selection');
+    hostSelection = next; selection = structuredClone(next);
+  }
+  if (controlled) adopt(config.selection, config.maxSelectedKeys);
+  /** Every selection change passes here: committed when the interaction owns the selection, requested when the host does. */
+  function commit(next) {
+    if (!controlled) selection = next;
+    config.onSelectionChange?.(structuredClone(next));
+  }
   function state() { return structuredClone({ focus, pending, selection }); }
   function focusIndex(index, column = 0) {
     if (!Number.isSafeInteger(index) || !Number.isSafeInteger(column)) return {state:'error',reason:'invalid-index'};
@@ -37,13 +71,13 @@ export function createCollectionInteraction(options) {
       const excluded = selection.exclusions.includes(key);
       const keys = selection.keys.filter((item) => item !== key);
       if (!excluded && keys.length + selection.exclusions.length >= config.maxSelectedKeys) return { state: 'budget-exhausted', reason: 'selection-credits' };
-      selection.keys = keys;
-      selection.exclusions = excluded ? selection.exclusions.filter((item) => item !== key) : [...selection.exclusions, key];
+      commit({ ...selection, keys,
+        exclusions: excluded ? selection.exclusions.filter((item) => item !== key) : [...selection.exclusions, key] });
     }
     else {
       const exists = selection.keys.includes(key);
       if (!exists && selection.keys.length + selection.exclusions.length >= config.maxSelectedKeys) return { state: 'budget-exhausted', reason: 'selection-credits' };
-      selection.keys = exists ? selection.keys.filter((item) => item !== key) : [...selection.keys, key];
+      commit({ ...selection, keys: exists ? selection.keys.filter((item) => item !== key) : [...selection.keys, key] });
     }
     return { state: 'ready' };
   }
@@ -51,13 +85,14 @@ export function createCollectionInteraction(options) {
     state, selected, focusIndex,
     cancelPending() { pending = null; },
     update(next) {
+      if (controlled && next.selection !== undefined) adopt(next.selection, next.maxSelectedKeys ?? config.maxSelectedKeys);
       config = { ...config, ...next };
       if (pending) {
         const intent = pending;
         if (intent.query !== undefined && (intent.query !== config.query || intent.snapshot !== config.snapshot)) { pending = null; return {state:'invalidated'}; }
         const result = focusIndex(intent.index, intent.column);
-        if (result.state === 'ready' && intent.fromKey) selection = {mode:'keys',keys:[],exclusions:[],
-          ranges:[{fromKey:intent.fromKey,toKey:focus.key}],query:config.query,snapshot:config.snapshot};
+        if (result.state === 'ready' && intent.fromKey) commit({mode:'keys',keys:[],exclusions:[],
+          ranges:[{fromKey:intent.fromKey,toKey:focus.key}],query:config.query,snapshot:config.snapshot});
         else if (pending) pending = {...pending,...intent};
         return result;
       }
@@ -69,16 +104,12 @@ export function createCollectionInteraction(options) {
       return { state: 'ready' };
     },
     toggle,
-    selectAll() { selection = { mode: 'all', keys: [], ranges: [], exclusions: [], query: config.query, snapshot: config.snapshot }; },
-    clear() { rangeAnchor = null; selection = { mode: 'keys', keys: [], ranges: [], exclusions: [], query: config.query, snapshot: config.snapshot }; },
+    selectAll() { commit({ mode: 'all', keys: [], ranges: [], exclusions: [], query: config.query, snapshot: config.snapshot }); },
+    clear() { rangeAnchor = null; commit({ mode: 'keys', keys: [], ranges: [], exclusions: [], query: config.query, snapshot: config.snapshot }); },
     restore(intent) {
       // Only JSON intent returns from navigation; loaded resources never travel here.
-      if (!intent || !isJsonValue(intent) || typeof intent.query !== 'string' || typeof intent.snapshot !== 'string' || !['keys', 'all'].includes(intent.mode) || !Array.isArray(intent.keys) || !Array.isArray(intent.exclusions)
-        || !Array.isArray(intent.ranges) || intent.keys.length + intent.exclusions.length > config.maxSelectedKeys
-        || intent.ranges.length > 1 || ![...intent.keys, ...intent.exclusions].every((key) => typeof key === 'string')
-        || intent.ranges.some((range) => range === null || typeof range.fromKey !== 'string' || typeof range.toKey !== 'string'))
-        return { state: 'error', reason: 'invalid-selection' };
-      selection = structuredClone(intent); return { state: 'ready' };
+      if (!validSelection(intent, config.maxSelectedKeys)) return { state: 'error', reason: 'invalid-selection' };
+      commit(structuredClone(intent)); return { state: 'ready' };
     },
     key(event) {
       if (event.editing || event.isComposing || event.altKey || event.metaKey) return { state: 'ignored' };
@@ -102,8 +133,8 @@ export function createCollectionInteraction(options) {
       const result = focusIndex(index, column);
       if (event.shiftKey && typeof old.key === 'string' && result.state === 'ready') {
         rangeAnchor ??= old.key;
-        selection = { mode: 'keys', keys: [], exclusions: [], ranges: [{ fromKey: rangeAnchor, toKey: focus.key }],
-          query: config.query, snapshot: config.snapshot };
+        commit({ mode: 'keys', keys: [], exclusions: [], ranges: [{ fromKey: rangeAnchor, toKey: focus.key }],
+          query: config.query, snapshot: config.snapshot });
       }
       else if (event.shiftKey && result.state === 'loading') {
         rangeAnchor ??= old.key; pending = {...pending,fromKey:rangeAnchor,query:config.query,snapshot:config.snapshot};

@@ -55,7 +55,8 @@ describe('@jarenjs/app — createSplitterWidget', () => {
     doc.dispatch('pointermove', { clientX: 600, clientY: 740 });
     doc.dispatch('pointerup', {});
     assert.strictEqual(emitted.at(-1).with, 0.8);
-    assert.strictEqual(styleSet['--jplay-ratio-first'], '0.8fr');
+    assert.strictEqual(styleSet['--jplay-ratio-first'], '80fr');
+    assert.strictEqual(styleSet['--jplay-ratio-rest'], '20fr');
     host.dispatch('keydown', { key: 'ArrowUp' });
     assert.strictEqual(emitted.at(-1).with, 0.75);
     host.dispatch('keydown', { key: 'ArrowDown' });
@@ -149,6 +150,39 @@ describe('@jarenjs/app — createSplitterWidget', () => {
   });
 });
 
+describe('@jarenjs/app — the splitter writes its fractional tracks in hundredths', () => {
+  // A grid track whose floor holds it at its minimum leaves the other track
+  // the whole remaining space only when that track's factor is at least 1;
+  // factors below 1 (0.8fr / 0.2fr) leave part of it empty.
+  it('writes each share as a factor of 100, rounded to two decimals, the two summing to 100', () => {
+    // 0.07 and 0.55 have no exact hundredfold (7.000000000000001, 55.00000000000001);
+    // 0.12345 sits halfway, where rounding each share alone would sum to 100.01
+    for (const [ratio, first, rest] of [[0.1, '10fr', '90fr'], [0.55, '55fr', '45fr'], [0.07, '7fr', '93fr'],
+      [0.9, '90fr', '10fr'], [0.123456, '12.35fr', '87.65fr'], [0.12345, '12.35fr', '87.65fr']]) {
+      const w = createSplitterWidget({ ...opts, min: 0.01, max: 0.99 });
+      const { host, styleSet } = fakeEnv();
+      w.mount(host, { ratio }, () => {});
+      assert.strictEqual(styleSet['--jplay-ratio'], String(ratio), 'the raw ratio stays unrounded');
+      assert.strictEqual(styleSet['--jplay-ratio-first'], first, String(ratio));
+      assert.strictEqual(styleSet['--jplay-ratio-rest'], rest, String(ratio));
+    }
+  });
+
+  it('keeps every factor at least 1 across the default clamp, arrow steps included', () => {
+    const w = createSplitterWidget(opts);
+    const { host, styleSet } = fakeEnv();
+    const emitted = [];
+    w.mount(host, { ratio: 0.5 }, (e) => emitted.push(e));
+    for (const key of ['Home', 'ArrowRight', 'ArrowRight', 'End', 'ArrowLeft']) {
+      host.dispatch('keydown', { key, shiftKey: key === 'ArrowLeft' });
+      const first = parseFloat(styleSet['--jplay-ratio-first']), rest = parseFloat(styleSet['--jplay-ratio-rest']);
+      assert.ok(first >= 1 && rest >= 1, `${key}: ${first} / ${rest}`);
+      assert.strictEqual(Math.round((first + rest) * 100), 10000, key);
+    }
+    assert.strictEqual(styleSet['--jplay-ratio-first'], '89fr', 'End then a fine step');
+  });
+});
+
 describe('@jarenjs/app — a splitter whose state holds a ratio that is not a number', () => {
   it('opens at the midpoint instead of writing NaN into the layout', () => {
     for (const ratio of ['abc', {}, [1, 2], Infinity, NaN]) {
@@ -157,7 +191,8 @@ describe('@jarenjs/app — a splitter whose state holds a ratio that is not a nu
       w.mount(host, { ratio }, () => {});
       assert.strictEqual(attrs['aria-valuenow'], '50', String(ratio));
       assert.strictEqual(styleSet['--jplay-ratio'], '0.5', String(ratio));
-      assert.strictEqual(styleSet['--jplay-ratio-first'], '0.5fr', String(ratio));
+      assert.strictEqual(styleSet['--jplay-ratio-first'], '50fr', String(ratio));
+      assert.strictEqual(styleSet['--jplay-ratio-rest'], '50fr', String(ratio));
     }
   });
 

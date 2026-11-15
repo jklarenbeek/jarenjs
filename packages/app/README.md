@@ -215,8 +215,24 @@ Two IDE-shaped primitives ship ready to bind, so a two-pane surface (the studio,
 
   Widget props accept `axis: 'x' | 'y'` (default `'x'`) for side-by-side or
   stacked panes. The widget also writes `${cssVar}-first` and
-  `${cssVar}-rest` as fractional grid tracks. Pointer cancellation restores
-  the starting ratio without committing; vertical resizing uses Up/Down.
+  `${cssVar}-rest` as fractional grid tracks, in hundredths that sum to 100
+  (a ratio of 0.8 writes `80fr` and `20fr`, rounded to two decimals). Pointer
+  cancellation restores the starting ratio without committing; vertical
+  resizing uses Up/Down.
+
+  Pane floors work with these tracks: `minmax(240px, var(--x-ratio-first))
+  auto minmax(120px, var(--x-ratio-rest))` keeps each pane at its floor and
+  gives the other pane all the remaining space, whether the handle's track is
+  `auto` or fixed. A grid fills its free space only when the flexible tracks'
+  factors sum to at least 1; once a floor holds one pane, the other pane's
+  factor alone must be at least 1, which hundredths guarantee for every
+  ratio from 0.01 to 0.99 (the default `min`/`max` clamp is 0.1 to 0.9).
+  Upgrade note: the two variables used to hold the ratio itself (`0.8fr` and
+  `0.2fr`), which left part of the grid empty under any floor. A grid that
+  uses only these two variables as its flexible tracks lays out as before
+  without floors; one that mixes them with its own `fr` tracks (`1fr`, or a
+  fallback such as `var(--x-ratio-first, 0.5fr)` beside a set variable) sees
+  different proportions and should write those tracks in hundredths too.
 - **`createDocStore({ storage, key })`** — a keyed `save`/`load`/`remove`/`names`/`all` CRUD over an injected `storage` (`localStorage` in the browser, an in-memory object in tests), so the package never touches `localStorage` itself. A slot that does not hold an object (a number, a string, a list, or a collection of any of those) holds no documents and starts empty; it used to throw at construction or at the first save, or lose every save. Paired with **`encodeShare(snapshot)`** / **`decodeShare(token)`**, a Unicode-safe share-link codec (a corrupt token decodes to `null`, never a throw), it is the new/save/load/delete/share pattern behind the studio and play surfaces. A token is the snapshot's JSON compressed (a dictionary coder, synchronous, no dependency) and written in the base64url alphabet behind a `~1` prefix, so a project of pretty-printed JSON files fits a fraction of the characters it used to; a snapshot the coder cannot shrink is written as the plain base64url token it always was, so a token is never longer than before. `decodeShare` reads both forms, so every link an earlier release wrote still opens; this is a minor release: an earlier release cannot read a `~1` token (it answers `null`), so a link made by this release does not open on an older one, while links an older release made open here; a stream that would expand past 1 MiB, or whose padding bits are not zero, is refused with `null`. Upgrade note: links that carried a large project and were refused for length can now be made, and a host that stored or compared the raw token text sees the new spelling for the same snapshot.
 
 Collection keys and document names such as `__proto__` are ordinary own

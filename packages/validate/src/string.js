@@ -9,6 +9,7 @@ import {
 } from '@jarenjs/core/number';
 
 import {
+  countCodePoints,
   createRegExpTester,
   getStringLength,
 } from '@jarenjs/core/string';
@@ -18,6 +19,44 @@ import {
 } from '@jarenjs/core/function';
 
 import { isDollarDataRef } from './schema-keywords.js';
+
+/**
+ * The unit `minLength` and `maxLength` count in, from a validator's
+ * options: `lengthUnit` when set, else `useGrapheme` read for truth as it
+ * always was (true, the default, is `'grapheme'`; false is `'utf16'`).
+ * @param {{ lengthUnit?: 'grapheme'|'codepoint'|'utf16', useGrapheme?: boolean }} options
+ * @returns {'grapheme'|'codepoint'|'utf16'}
+ */
+export function lengthUnitOf(options) {
+  return options.lengthUnit ?? (options.useGrapheme ? 'grapheme' : 'utf16');
+}
+
+/**
+ * Refuse a `lengthUnit` that names no unit. Without this a misspelling is
+ * silent: every bound would count graphemes, the unit the author opted out of.
+ * @param {unknown} unit - The configured value; `undefined` (or `null`) leaves `useGrapheme` to decide
+ * @throws {TypeError} When `unit` is not `'grapheme'`, `'codepoint'` or `'utf16'`
+ */
+export function assertLengthUnit(unit) {
+  if (unit != null && unit !== 'grapheme' && unit !== 'codepoint' && unit !== 'utf16')
+    throw new TypeError(`lengthUnit must be 'grapheme', 'codepoint' or 'utf16', got ${JSON.stringify(unit)}`);
+}
+
+/**
+ * A string's length in a unit: grapheme clusters, code points (a lone
+ * surrogate counts one, as a database counts the U+FFFD it is stored as) or
+ * UTF-16 code units.
+ * @param {'grapheme'|'codepoint'|'utf16'} unit
+ * @returns {(data: string) => number}
+ */
+export function stringLengthIn(unit) {
+  if (unit === 'codepoint') return countCodePoints;
+  return unit === 'utf16' ? utf16Length : graphemeLength;
+}
+/** @param {string} data */
+function utf16Length(data) { return data.length; }
+/** @param {string} data */
+function graphemeLength(data) { return getStringLength(data, true); }
 
 /**
  * Compile a JSON Schema regular expression (`pattern`, a
@@ -107,7 +146,25 @@ function compileStringIntern(schemaObj, jsonSchema) {
   const isMinLength = minLength || trueThat;
   const isMaxLength = maxLength || trueThat;
   const isMatch = pattern || trueThat;
-  const useGrapheme = schemaObj.options.useGrapheme;
+  const unit = lengthUnitOf(schemaObj.options);
+  const useGrapheme = unit === 'grapheme';
+
+  if (unit === 'codepoint') {
+    if (schemaObj.options.skipErrors) {
+      return function validateStringInternCodePoints(data, dataPath) {
+        const len = countCodePoints(data);
+        return isMinLength(len, dataPath)
+          && isMaxLength(len, dataPath)
+          && isMatch(data, dataPath);
+      };
+    }
+    return function validateStringInternAllCodePoints(data, dataPath) {
+      const len = countCodePoints(data);
+      let valid = isMinLength(len, dataPath);
+      valid = isMaxLength(len, dataPath) && valid;
+      return isMatch(data, dataPath) && valid;
+    };
+  }
 
   if (schemaObj.options.skipErrors) {
     return function validateStringIntern(data, dataPath) {
@@ -154,10 +211,29 @@ export function compileStringBasic(schemaObj, jsonSchema, typed = null) {
   const max = getIntishType(jsonSchema.maxLength) ?? -1;
   const min = getIntishType(jsonSchema.minLength) || 0;
   const hasPattern = jsonSchema.pattern != null;
-  const useGrapheme = schemaObj.options.useGrapheme;
+  const unit = lengthUnitOf(schemaObj.options);
+  const useGrapheme = unit === 'grapheme';
 
   if (!hasPattern) {
-    if (!useGrapheme) {
+    if (unit === 'codepoint') {
+      if (max >= 0 && min < 1) {
+        const addError = schemaObj.createErrorHandler(max, 'maxLength');
+        return function validateStringMaxLengthCodePoints(data, dataPath) {
+          if (!isStringType(data)) return other === null || other(data, dataPath);
+          const len = countCodePoints(data);
+          return len <= max || addError(len, dataPath);
+        };
+      }
+
+      if (min > 0 && max < 0) {
+        const addError = schemaObj.createErrorHandler(min, 'minLength');
+        return function validateStringMinLengthCodePoints(data, dataPath) {
+          if (!isStringType(data)) return other === null || other(data, dataPath);
+          const len = countCodePoints(data);
+          return len >= min || addError(len, dataPath);
+        };
+      }
+    } else if (!useGrapheme) {
       // Simple maxLength-only without grapheme counting
       if (max >= 0 && min < 1) {
         const addError = schemaObj.createErrorHandler(max, 'maxLength');

@@ -224,13 +224,21 @@ export function writingSpelling(props, a, b) {
  * The attribute an enumerated prop writes, and its value: `undefined` when
  * the prop is not an enumerated attribute, `{ name, value: null }` to omit
  * it, otherwise the keyword (or the value's own string).
+ *
+ * An `aria-*` state given a boolean is enumerated too: ARIA reads an empty
+ * value as "not set", so `true`/`false` write the keywords `"true"`/`"false"`
+ * instead of an HTML boolean attribute's presence and absence. Any other
+ * value of an `aria-*` attribute is written as it always was.
  * @param {string} name - the prop name
  * @param {any} value - the prop value
  * @returns {{ name: string, value: string | null } | undefined}
  */
 export function enumeratedAttribute(name, value) {
   const entry = ENUMERATED_ATTRIBUTES[name];
-  if (entry === undefined) return undefined;
+  if (entry === undefined) {
+    if (typeof value === 'boolean' && name.startsWith('aria-')) return { name, value: value ? 'true' : 'false' };
+    return undefined;
+  }
   if (value == null) return { name: entry.attribute, value: null };
   if (value === true || value === 'true') return { name: entry.attribute, value: entry.yes };
   if (value === false || value === 'false') return { name: entry.attribute, value: entry.no };

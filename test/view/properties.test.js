@@ -41,6 +41,40 @@ const ENUMERATED = {
 };
 const SPELLINGS = [true, false, 'true', 'false', null];
 
+describe('ARIA states — a boolean is written as the keyword it means', () => {
+  // ARIA reads an empty or absent state as "not set", never as true or
+  // false: `aria-selected=""` on a selected cell is announced as unselected.
+  const NAMES = ['aria-selected', 'aria-expanded', 'aria-pressed', 'aria-hidden', 'aria-checked', 'aria-busy'];
+  for (const safe of [false, true]) {
+    it(`true and false write "true" and "false", strings and numbers stay as written, null omits${safe ? ' (safe)' : ''}`, () => {
+      for (const name of NAMES) {
+        for (const [value, expected] of [[true, 'true'], [false, 'false'], ['true', 'true'], ['false', 'false'],
+          ['mixed', 'mixed'], [2, '2'], [null, null], [undefined, null]]) {
+          const vnode = ['div', { [name]: value }];
+          const want = expected === null ? [] : [[name, expected]];
+          const h = host(safe);
+          h.render(vnode);
+          assert.deepStrictEqual(attributesOf(h.node()), want, `DOM ${name} ${JSON.stringify(value)}`);
+          assert.deepStrictEqual(ssrAttributes(renderToString(vnode, { safe })), want, `SSR ${name} ${JSON.stringify(value)}`);
+        }
+      }
+    });
+  }
+
+  it('a patch between true, false and null rewrites or removes the attribute', () => {
+    const h = host();
+    const states = [[true, 'true'], [false, 'false'], [null, null], [true, 'true'], [undefined, null], [false, 'false']];
+    for (const [value, expected] of states) {
+      h.render(['div', { 'aria-selected': value }]);
+      assert.strictEqual(h.node().getAttribute('aria-selected'), expected, JSON.stringify(value));
+    }
+  });
+
+  it('a boolean on an attribute that is no ARIA state keeps its HTML boolean form', () => {
+    assert.strictEqual(renderToString(['input', { disabled: true, 'data-on': true, 'data-off': false }]), '<input disabled data-on>');
+  });
+});
+
 describe('enumerated attributes — one spelling in both renderers', () => {
   for (const [name, [yes, no]] of Object.entries(ENUMERATED)) {
     for (const safe of [false, true]) {

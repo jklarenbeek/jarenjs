@@ -181,7 +181,7 @@ import * as formats from '@jarenjs/formats';
 
 export const jaren = new JarenValidator({
   collectErrors: true,      // { valid, errors } instead of a boolean
-  useGrapheme: false,       // UTF-16 code units, like Zod's .min()/.max()
+  lengthUnit: 'codepoint',  // code points, like Zod 4.6's .min()/.max()
   formatAssertion: true,    // assert format even under draft 2020-12
   contentValidation: true,  // assert contentEncoding/contentMediaType
 })
@@ -216,10 +216,12 @@ silently rewrites the other 185. Mark the fields in the schema (`x-trim`, or
 any annotation you like) and pass a predicate; it is evaluated at compile
 time, so it costs nothing per request.
 
-**`useGrapheme: false` is not optional if you want parity.** Jaren counts
-grapheme clusters by default, so a string of emoji that failed `maxLength`
-under Zod will pass under Jaren unless you set it. Put a characterization
-test on that specific boundary.
+**`lengthUnit` is not optional if you want parity.** Jaren counts grapheme
+clusters by default; Zod 4.6 counts code points (`lengthUnit: 'codepoint'`);
+a release that counts UTF-16 code units takes `lengthUnit: 'utf16'` (the older
+`useGrapheme: false`). Without it, a string of emoji or combining marks
+that failed `maxLength` under Zod will pass under Jaren. Put a
+characterization test on that specific boundary.
 
 Two more differences worth a test each. Zod strips unknown keys by *default*
 (`removeAdditional: 'all'` is the equivalent; plain `true` only strips where

@@ -19,7 +19,6 @@ import {
 import {
   isRegExpType,
   isStringWhiteSpace,
-  getStringLength,
 } from '@jarenjs/core/string';
 
 import {
@@ -41,7 +40,7 @@ import {
   ARRAY_CONSTRAINTS, OBJECT_CONSTRAINTS,
 } from '@jarenjs/core/schema';
 
-import { createSchemaPatternTester } from './string.js';
+import { createSchemaPatternTester, lengthUnitOf, stringLengthIn } from './string.js';
 import { multipleOfTester } from './number.js';
 
 //#region Object
@@ -434,13 +433,13 @@ export function createDataRefCompilers() {
    * @param {string} keyword
    * @param {(data: any) => boolean} accepts - Instance types the keyword constrains
    * @param {(constraint: any) => boolean} expects - Resolved constraint types that assert
-   * @param {(data: any, constraint: any, useGrapheme: boolean) => boolean} isValid
+   * @param {(data: any, constraint: any, lengthOf: (data: string) => number) => boolean} isValid
    */
   const constraint = (keyword, accepts, expects, isValid) =>
     (schemaObj, ref) => {
       const addError = schemaObj.createErrorHandler(ref, keyword);
       const resolveRef = compileDataRef(ref, dataRefOptions(schemaObj));
-      const useGrapheme = schemaObj.options.useGrapheme;
+      const lengthOf = stringLengthIn(lengthUnitOf(schemaObj.options));
 
       return function validateDataRefConstraint(data, dataPath, dataRoot) {
         if (!accepts(data)) return true;
@@ -448,7 +447,7 @@ export function createDataRefCompilers() {
         const value = resolveRef(dataRoot, dataPath);
         if (value === JSONPOINTER_NOTHING || !expects(value)) return true;
 
-        return isValid(data, value, useGrapheme) || addError(data, dataPath, value);
+        return isValid(data, value, lengthOf) || addError(data, dataPath, value);
       };
     };
 
@@ -510,9 +509,9 @@ export function createDataRefCompilers() {
       (data, max) => data < max),
     multipleOf: constraint('multipleOf', isNumberType, isNumberType, lastStepMultipleOf()),
     minLength: constraint('minLength', isJsonString, isNumberType,
-      (data, min, useGrapheme) => getStringLength(data, useGrapheme) >= min),
+      (data, min, lengthOf) => lengthOf(data) >= min),
     maxLength: constraint('maxLength', isJsonString, isNumberType,
-      (data, max, useGrapheme) => getStringLength(data, useGrapheme) <= max),
+      (data, max, lengthOf) => lengthOf(data) <= max),
     pattern: constraint('pattern', isJsonString, isStringType,
       (data, pattern) => createSchemaPatternTester(pattern)(data)),
     minItems: constraint('minItems', Array.isArray, isNumberType,

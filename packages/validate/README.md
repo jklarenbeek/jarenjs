@@ -368,8 +368,8 @@ Jaren supports the `data-ref` proposal from json-everything through the `data` k
 The refs compile once at schema compile time through the compiled pointer engine of [`@jarenjs/json`](../json) and resolve allocation-free per validation.
 
 Dynamic `const` and `enum` use the same structural object/array equality as
-their static forms. Dynamic string bounds honor the compiler's `useGrapheme`
-option as well.
+their static forms. Dynamic string bounds count in the compiler's
+`lengthUnit` (or `useGrapheme`) as well.
 
 #### Relative pointer dialect
 
@@ -815,7 +815,7 @@ true false
 
 ## Compatibility settings
 
-Eight options decide answers that differ between validators, between JSON
+These options decide answers that differ between validators, between JSON
 Schema drafts, or between Jaren and the library you are migrating from. Each
 one is a deliberate default, and each one is worth setting explicitly in a
 shared factory rather than inheriting.
@@ -824,7 +824,8 @@ shared factory rather than inheriting.
 |---|---|---|
 | `collectErrors` | `false` | Whether the compiled validator returns a boolean or `{ valid, errors }` |
 | `skipErrors` | `!collectErrors` | Whether validation stops at the first failure |
-| `useGrapheme` | **`true`** | Whether `minLength`/`maxLength` count grapheme clusters or UTF-16 code units |
+| `lengthUnit` | **`'grapheme'`** | What `minLength`/`maxLength` count: `'grapheme'` clusters, `'codepoint'` code points (what JSON Schema, SQLite and PostgreSQL count) or `'utf16'` code units; see [below](#string-lengths-count-graphemes-by-default) |
+| `useGrapheme` | **`true`** | The older spelling of `lengthUnit`: `true` is `'grapheme'`, `false` is `'utf16'`; `lengthUnit` wins when both are given |
 | `formatAssertion` | auto by draft | Whether `format` asserts or only annotates |
 | `contentValidation` | auto by draft | Whether `contentEncoding`/`contentMediaType` assert |
 | `propertyDependencies` | **`false`** | Whether the proposed `propertyDependencies` keyword asserts or is an unknown keyword |
@@ -1313,32 +1314,53 @@ Zod-style path.
 
 ### String lengths count graphemes by default
 
-`useGrapheme` defaults to **`true`**, so `minLength`/`maxLength` count
-user-perceived characters. Setting it to `false` makes this package count
-UTF-16 code units instead:
+`lengthUnit` decides what `minLength`/`maxLength` count, and it defaults to
+**`'grapheme'`**: user-perceived characters, the unit a person typing into a
+form counts. `'codepoint'` counts Unicode code points and `'utf16'` counts
+UTF-16 code units (JavaScript's `str.length`). The older boolean
+`useGrapheme` still works as an alias: `true` is `'grapheme'`, `false` is
+`'utf16'`; when both are given, `lengthUnit` wins. Any other value is a
+`TypeError` when a schema compiles.
 
 ```javascript
-const family = '👨‍👩‍👧‍👦';   // 1 grapheme cluster, 11 UTF-16 code units
+const family = '\u{1F468}\u200D\u{1F469}\u200D\u{1F467}'; // 1 cluster, 5 code points, 8 code units
+const schema = { type: 'string', maxLength: 4 };
 
-new JarenValidator().compile({ type: 'string', maxLength: 2 })(family);
-// => true   (1 grapheme)
-
-new JarenValidator({ useGrapheme: false })
-  .compile({ type: 'string', maxLength: 2 })(family);
-// => false  (11 code units)
+new JarenValidator().compile(schema)(family);                            // => true   (1 grapheme)
+new JarenValidator({ lengthUnit: 'codepoint' }).compile(schema)(family); // => false  (5 code points)
+new JarenValidator({ lengthUnit: 'utf16' }).compile(schema)(family);     // => false  (8 code units)
 ```
 
-**If you are migrating from a validator that counts code units, set
-`useGrapheme: false`,** or strings containing emoji, combining marks, flags
-or astral-plane characters will silently change validity at the boundaries.
-Grapheme mode is not expensive — ASCII takes a `str.length` fast path (a CR LF
-pair counted as the one cluster it is) and most Unicode takes a code-point
-count; only cluster-forming strings reach `Intl.Segmenter` — so the default is
-about correctness, not speed, and switching to it later is a product decision
-rather than a performance one. Upgrade note: CR LF counts as one grapheme in
-the default mode, so a browser textarea value with line breaks is one
-character shorter per break than it was read before (`'a\r\nb'` has length 3,
-not 4, against `maxLength: 3`); `useGrapheme: false` still counts both code units.
+**Matching a database or another validator.** JSON Schema defines a
+string's length as its number of characters in the sense of RFC 8259, that
+is code points; SQLite's `length()` and PostgreSQL's `char_length()` (and a
+`varchar(n)` bound) count code points too. A host whose `maxLength`
+mirrors a column's bound or a `CHECK (length(x) <= n)` should set
+`lengthUnit: 'codepoint'`, or a string of combining marks or an emoji
+sequence passes the validator and is refused by the database (or the other
+way round for flags and emoji under `'utf16'`); pass that validator to the
+client as `validator`. A lone surrogate counts one code point, as both
+databases count the U+FFFD they store it as.
+
+**If you are migrating from another validator, choose the unit it counts:**
+`'codepoint'` for a spec-faithful validator (Ajv by default; Zod 4.6's
+`.min()`/`.max()`), `'utf16'` for one that counts code units (Ajv with
+`unicode: false`). Otherwise strings containing emoji, combining
+marks, flags or astral-plane characters silently change validity at the
+boundaries.
+
+The default stays `'grapheme'` although the specification and the databases
+count code points: it is the length a reader sees, it is the existing
+default, and changing it would silently change which
+strings every existing schema accepts. Grapheme mode is not expensive —
+ASCII takes a `str.length` fast path (a CR LF pair counted as the one
+cluster it is) and most Unicode takes a code-point count; only
+cluster-forming strings reach `Intl.Segmenter` — so the choice is about
+which answer is right for the data, not speed. Upgrade note: CR LF counts as
+one grapheme in the default mode, so a browser textarea value with line
+breaks is one character shorter per break than it was read before
+(`'a\r\nb'` has length 3, not 4, against `maxLength: 3`); `'codepoint'` and
+`'utf16'` count both characters.
 
 ### `format` and content assertion follow the draft
 
@@ -1457,8 +1479,10 @@ overrides *before* a bundled group if you want them to win.
 
 ### Recipe: migrating from Zod
 
-Zod counts UTF-16 code units, always reports every issue, and always
-asserts formats. This factory reproduces those three answers:
+Zod 4.6 counts code points in `.min()`/`.max()` (for a release that counts
+UTF-16 code units, take `lengthUnit: 'utf16'`; check yours on an emoji at the
+boundary), always reports every issue, and always asserts formats. This
+factory reproduces those three answers:
 
 ```javascript
 import { JarenValidator } from '@jarenjs/validate';
@@ -1466,7 +1490,7 @@ import * as formats from '@jarenjs/formats';
 
 export const jaren = new JarenValidator({
   collectErrors: true,     // { valid, errors } instead of a boolean
-  useGrapheme: false,      // UTF-16 code units, like Zod's .min()/.max()
+  lengthUnit: 'codepoint', // code points, like Zod 4.6's .min()/.max()
   formatAssertion: true,   // assert format even under draft 2020-12
   contentValidation: true, // assert contentEncoding/contentMediaType
 })

@@ -9,7 +9,9 @@
  * parameterizes the grid/rail selectors, the CSS variable and the commit
  * action. Widget props `{ ratio, axis: 'x' | 'y' }` select the live direction;
  * the axis defaults to x. The ratio's `-first`/`-rest` CSS variables carry
- * fractional tracks for stacked grids after their fixed toolbar and gaps.
+ * fractional tracks for stacked grids after their fixed toolbar and gaps,
+ * written in hundredths (`80fr` / `20fr` for 0.8) so a pane floor never
+ * leaves part of the grid empty.
  */
 
 /**
@@ -51,8 +53,11 @@ export function createSplitterWidget(opts) {
       const gridOf = () => (typeof host.closest === 'function' ? host.closest(gridSel) : null);
       const applyRatio = (r) => {
         gridOf()?.style?.setProperty?.(cssVar, String(r));
-        gridOf()?.style?.setProperty?.(cssVar + '-first', `${r}fr`);
-        gridOf()?.style?.setProperty?.(cssVar + '-rest', `${1 - r}fr`);
+        // Factors in hundredths: a pane held at its floor leaves the other pane
+        // all the remaining space only while that pane's factor is at least 1.
+        const first = Math.round(r * 10000);
+        gridOf()?.style?.setProperty?.(cssVar + '-first', `${first / 100}fr`);
+        gridOf()?.style?.setProperty?.(cssVar + '-rest', `${(10000 - first) / 100}fr`);
         host.setAttribute?.('aria-valuenow', String(Math.round(r * 100)));
         host.setAttribute?.('aria-orientation', handle.axis === 'y' ? 'horizontal' : 'vertical');
       };

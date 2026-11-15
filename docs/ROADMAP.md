@@ -103,6 +103,10 @@ delete it or fix it.
 
 ## @jarenjs/validate
 
+- [ ] **The form validator and the normalizer count string length in graphemes whatever the validator's unit.**
+  @jarenjs/forms validate.js calls `getStringLength(value, true)`; compileNormalizer's internal validator is built
+  without `useGrapheme`/`lengthUnit`. A host that sets `lengthUnit: 'codepoint'` gets a form, and a normalizer branch
+  choice, that count graphemes. Needs an option threaded through both.
 - [ ] **A compile refusal names an embedded resource's place two ways.** The
   walks name a place by its pointer into the document
   (`#/%24defs/n/properties/a/%24id`), while a `$query`, `$recursiveRef` or
@@ -400,6 +404,11 @@ establish registry publication or downstream acceptance.
 
 - [ ] **Segmented logical scrolling past the CSS extent ceiling.** The [reusable collection](../components/collection/docs/COLLECTION.md) and [injected provider coordinator](../packages/app/docs/COLLECTION-PROVIDER.md) cover fixed/measured axes, keyed interaction and bounded page caches up to the conservative CSS extent ceiling; a source longer than that needs segmented logical scrolling. Complete sequential database snapshots and index seeks behind the provider also need an independently qualified source contract.
 
+- [ ] **Collection table semantics beyond activation and selection.** A host serving a record table still lacks per-column
+  sizes (`columnSize` is one estimate; an array is refused `Invalid size`), a `columnheader` row with its own ARIA row index, one
+  fill column, and a content-height mode (the widget owns a fixed-height scroller, default 440px). Waits on the owner's choice:
+  grow table semantics in the collection, or keep small bounded tables as semantic `<table>`s; for height, a non-virtual mode
+  bounded by `maxRows` or virtualization against the page scroller. Pointer activation and host-owned selection shipped.
 - [ ] **Collection qualification on real devices, assistive technology and downstream.** Waits on a physical touch device, a screen reader and native OS input methods driving the collection, and on a downstream consumer's acceptance; the retained virtualizer oracle stays until that acceptance permits its retirement. Qualified on this host: the collection matrix in Chromium, Firefox and WebKit with synthetic input, and installed synthetic consumers, which alone do not authorize an external cutover.
 
 - [ ] **Real-browser accessibility audit.** Waits on a screen-reader session
@@ -537,7 +546,7 @@ costs a descriptor plus examples and no UI code at all.
   '[]' }]`, `type: 'array', items: false, minItems: 1`) still answers
   additive R7. Deciding the first would need the pattern's language
   computed with its lookarounds and back-references, the second the
-  validator's own length option read from the compiled contract, the
+  validator's own `lengthUnit` read from the compiled contract, the
   third every conjunct and item schema read against the node's own
   keywords.
 - [ ] **`diffContracts` reports an `if` changed beside a `then` and an

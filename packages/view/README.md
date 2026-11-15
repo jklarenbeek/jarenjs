@@ -66,7 +66,9 @@ attributes. An enumerated attribute — `spellcheck`, `draggable`,
 `translate`, `autocorrect`, `contenteditable`, `writingsuggestions` — is
 written with its own keyword: `spellcheck: false` and `spellcheck: 'false'`
 both turn spell-checking off, where the boolean DOM property reads the
-string `'false'` as on. `null`, `false` or a removed prop on a property that
+string `'false'` as on. An `aria-*` state given a boolean is written the
+same way, as `"true"` or `"false"` (an empty ARIA value reads as not set).
+`null`, `false` or a removed prop on a property that
 is not boolean removes its attribute, so a removed `size` throws nothing and
 a removed `href` leaves no link. `true` on a property that is not boolean
 writes the empty attribute and a string on a number-typed property writes the

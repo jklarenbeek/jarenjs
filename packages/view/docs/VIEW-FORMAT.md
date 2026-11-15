@@ -190,6 +190,16 @@ reference implementation keeps them in one **property table**
   | `translate` | `yes` / `no` | §3.2.6.3 |
   | `draggable` | `true` / `false` | §6.11.7 |
 
+- **ARIA states.** An `aria-*` attribute given a JSON `true` or `false` is
+  written as the keyword `"true"` or `"false"`: WAI-ARIA reads an empty
+  value as "not set", so the HTML boolean form (`aria-selected=""`, or no
+  attribute for `false`) said a selected cell was not selected. A string
+  or number is written as its string and `null` omits the attribute, as
+  before. Upgrade note: `false` now writes `="false"` where it used to
+  remove the attribute, and `true` writes `="true"` where it wrote `=""`;
+  a host that matches on the attribute's presence reads every such state
+  as set.
+
 - **Removal from a non-boolean property.** `null`, `false` or a removed
   prop on a property that is not boolean removes the attribute it
   reflects — never `node[name] = ''`, which throws for an input's

@@ -77,8 +77,19 @@ normal caret behavior.
 retaining existing focus. The DOM exposes `aria-activedescendant` only after the
 referenced element exists. Loading exposes `aria-busy`; source refusal clears
 pending realization. `removedKeys` tells interaction to resolve a removal fallback.
-`onRealize`, `onActivate`, `returnFocus`, `onIntent` and `onChange` are host hooks;
-only bounded observations and JSON intent need enter app state.
+`onRealize`, `onActivate`, `returnFocus`, `onIntent`, `onSelectionChange` and
+`onChange` are host hooks; only bounded observations and JSON intent need enter
+app state.
+
+`pointerActivation` chooses what a click or tap on a row does, apart from the
+keyboard: `'toggle'` (the default) focuses the row and toggles its selection;
+`'activate'` focuses it and calls `onActivate` with the payload Enter gives
+(`{ state: 'activate', key, column }`), leaving the selection alone. Space still
+toggles and Enter still activates under both. A click on an editing target
+(input, textarea, select, contenteditable) does neither; a click on a button
+in a cell is a click on its row, so a host whose cell buttons act on their own
+either stops the event's propagation or chooses `'activate'`. Any other value
+is a `RangeError` at mount or update.
 
 Selection contains stable `keys`, or query/snapshot-scoped `mode:'all'` with
 `exclusions`, or one range with stable `fromKey`/`toKey` endpoints and optional
@@ -86,7 +97,24 @@ exclusions. Toggling a range member excludes or restores it in both the UI and
 complete output. Clearing selection resets its shift anchor. Shift ranges
 survive asynchronous endpoint realization. `maxSelectedKeys` (4096) bounds explicit
 keys/exclusions. `state`, `selected`, `toggle`, `selectAll`, `clear`, `restore`,
-`cancelPending` and `update` expose the model. Range membership for rendered rows
+`cancelPending` and `update` expose the model.
+
+Passing `selection` (to `createCollectionInteraction`, `mountCollection` or the
+widget) at creation makes the selection host-owned for the collection's life;
+one passed only to a later `update` of an owned selection is ignored, as it
+always was. The collection shows exactly the
+selection the host passed, validated as `restore` validates it (JSON of the
+selection shape, string `query`/`snapshot`, at most one range, within
+`maxSelectedKeys`; otherwise a `RangeError` before anything changes). Every
+change it would make itself — a toggling click, Space, a Shift range
+(including one whose endpoint realizes later), `toggle`, `selectAll`, `clear`
+and `restore` — is instead requested through `onSelectionChange(next)`, and the
+selection stays the host's until the host passes the next one through
+`update({ selection })` (from inside `onSelectionChange` too). The selection is
+re-read when `update` brings a different object, so a host replaces it rather
+than editing it in place; the component re-reads it from `update` alone, never
+from the options it keeps. Without `selection` the collection owns it as before,
+and `onSelectionChange`, when given, observes each change. Range membership for rendered rows
 uses the host's current key lookup; exports resolve endpoints over the full ordered
 snapshot. Key selection survives eviction and query changes; scoped all/range
 selection cannot be exported against another identity. Authoritative writes must

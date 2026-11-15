@@ -169,7 +169,7 @@ the table and stale in the paragraph that cites it:
 | `./jtlt` | <!--fact:bundle.jtlt.kb-->26<!--/fact--> kB | text template capture; no renderer |
 | `./project` | <!--fact:bundle.project.kb-->5<!--/fact--> kB | project files; no Studio engine |
 | `./charts` | <!--fact:bundle.charts.kb-->7<!--/fact--> kB | chart definitions; no chart engine |
-| `./db` | <!--fact:bundle.db.kb-->1143<!--/fact--> kB | the store, the validator and the formats, by construction |
+| `./db` | <!--fact:bundle.db.kb-->1145<!--/fact--> kB | the store, the validator and the formats, by construction |
 
 Read the last row as the honest one: the front door costs what the store
 costs, because it *is* the store. The tree-shaking gate holds both
@@ -205,7 +205,7 @@ and the live heap they hold — the V8 heap after two forced full
 collections, run on the main thread so each has finished when the heap
 is read, less the same process's heap before the import. Each heap is
 the median of <!--fact:closure.runs-->5<!--/fact--> fresh processes, whose runs differed by at
-most <!--fact:closure.spread-->18 KiB<!--/fact--> for any one subpath; native memory a built-in
+most <!--fact:closure.spread-->31 KiB<!--/fact--> for any one subpath; native memory a built-in
 allocates for itself (`node:crypto`'s, say) is not in it. A heap depends
 on the runtime and the host — these were measured on one machine,
 with <!--fact:closure.host-->Node v24.22.1 on linux x64<!--/fact--> — while a module count is
@@ -250,15 +250,15 @@ included.
 | `./app` | 1 | db 1 | 0.1 |
 | `./async-live` | 136 | core 63, db 46, json 21, validate 6 | 7.5 |
 | `./bun` | 128 | core 62, db 39, json 21, validate 6 | 6.2 |
-| `./entity` | 132 | core 63, db 40, json 23, validate 6 | 7.1 |
-| `./model` | 119 | core 62, db 30, json 21, validate 6 | 5.8 |
+| `./entity` | 132 | core 63, db 40, json 23, validate 6 | 7.0 |
+| `./model` | 119 | core 62, db 30, json 21, validate 6 | 5.9 |
 | `./node` | 129 | core 62, db 40, json 21, validate 6 | 6.6 |
 | `./node-pool` | 105 | core 61, db 23, json 21 | 4.8 |
 | `./node-process` | 101 | core 61, json 21, db 19 | 4.7 |
 | `./node-worker` | 101 | core 61, json 21, db 19 | 4.7 |
 | `./postgres` | 119 | core 62, db 36, json 21 | 5.1 |
-| `./query` | 132 | core 62, db 43, json 21, validate 6 | 7.4 |
-| `./relational` | 122 | core 62, db 33, json 21, validate 6 | 5.9 |
+| `./query` | 132 | core 62, db 43, json 21, validate 6 | 7.5 |
+| `./relational` | 122 | core 62, db 33, json 21, validate 6 | 6.0 |
 | `./schedules` | 43 | core 28, db 9, json 6 | 1.9 |
 | `./search` | 92 | core 66, json 21, db 5 | 4.1 |
 | `./typed` | 1 | db 1 | 0.1 |
@@ -297,7 +297,7 @@ included.
 | `.` | 87 | core 61, json 26 | 3.9 |
 | `./basic` | 3 | json 2, core 1 | 0.2 |
 | `./canonical` | 17 | core 10, json 7 | 0.9 |
-| `./formula` | 85 | core 61, json 24 | 3.7 |
+| `./formula` | 85 | core 61, json 24 | 3.8 |
 | `./formula/batch` | 86 | core 61, json 25 | 3.8 |
 | `./formula/migrate` | 88 | core 61, json 27 | 4.1 |
 | `./jslt` | 103 | core 72, json 31 | 4.1 |

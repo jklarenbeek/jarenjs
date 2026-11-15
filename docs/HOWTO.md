@@ -232,15 +232,24 @@ console.log(validate2('👨‍👩‍👧‍👦')); // false - counts as many c
 console.log(validate2('abc')); // false - 3 code units
 ```
 
+`lengthUnit` names the unit outright and takes a third one, code points:
+`'grapheme'` (the default), `'codepoint'` or `'utf16'`. `useGrapheme` is its
+older boolean spelling (`true` is `'grapheme'`, `false` is `'utf16'`), and
+`lengthUnit` wins when both are given.
+
 **Recommendation**:
-- Use `useGrapheme: true` (default) if your data may contain emojis or complex Unicode; ASCII and most Unicode strings still take a cheap fast path
-- Use `useGrapheme: false` if you want lengths counted in UTF-16 code units
+- Keep the default `'grapheme'` if the bound is what a person reads or types; ASCII and most Unicode strings still take a cheap fast path
+- Use `lengthUnit: 'codepoint'` if the bound mirrors a database column or a `CHECK` on `length()`: SQLite's `length()` and PostgreSQL's `char_length()` count code points
+- Use `lengthUnit: 'utf16'` (or `useGrapheme: false`) if you want lengths counted in UTF-16 code units
 
 ⚠️ **Migrating from another validator?** The JSON Schema specification counts
-UTF-16 code units, and so do Ajv, Zod and Yup. Jaren's grapheme default is a
-deliberate correctness choice, but it means a string of emoji that failed
-`maxLength` before will now pass. Set `useGrapheme: false` to preserve the old
-answers, and treat the switch to graphemes as its own reviewed change.
+code points (characters in the sense of RFC 8259), and so do Ajv by default
+and Zod 4.6; Ajv with `unicode: false` counts UTF-16 code units.
+Jaren's grapheme default is a deliberate choice, but it means a string of
+emoji or combining marks that failed `maxLength` before will now pass. Set
+the `lengthUnit` your previous validator counted to preserve its answers,
+and treat the switch to graphemes as its own reviewed change. See
+[String lengths count graphemes by default](../packages/validate/README.md#string-lengths-count-graphemes-by-default).
 
 ---
 
@@ -949,7 +958,8 @@ new JarenValidator(options?: ValidationOptions)
 |--------|------|---------|-------------|
 | `collectErrors` | boolean | false | Return `{ valid, errors }` instead of a boolean |
 | `skipErrors` | boolean | `!collectErrors` | Stop at the first failure instead of recording every error |
-| `useGrapheme` | boolean | true | Count grapheme clusters (not UTF-16 code units) for `minLength`/`maxLength` |
+| `lengthUnit` | `'grapheme'`\|`'codepoint'`\|`'utf16'` | `'grapheme'` | What `minLength`/`maxLength` count; wins over `useGrapheme` |
+| `useGrapheme` | boolean | true | The older spelling of `lengthUnit`: `true` is `'grapheme'`, `false` is `'utf16'` |
 | `formatAssertion` | boolean\|null | null (per draft) | Assert `format`; auto-asserts below draft 2020-12 |
 | `contentValidation` | boolean\|null | null (per draft) | Assert `contentEncoding`/`contentMediaType`; auto-asserts below 2019-09 |
 | `messages` | boolean | true | Render English `message` text on collected errors |

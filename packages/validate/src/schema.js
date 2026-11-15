@@ -35,6 +35,7 @@ import {
 } from './tools.js';
 
 import {
+  countCodePoints,
   getStringLength,
 } from '@jarenjs/core/string';
 
@@ -43,7 +44,7 @@ import { compileFormatBasic } from './format.js';
 import { compileEnumBasic } from './enum.js';
 import { compileNumberBasic } from './number.js';
 import { compileBigIntBasic } from './bigint.js';
-import { compileStringBasic } from './string.js';
+import { compileStringBasic, lengthUnitOf } from './string.js';
 import { compileContentSchema } from './content.js';
 import { compileObjectSchema } from './object.js';
 import { compileArraySchema } from './array.js';
@@ -552,9 +553,16 @@ export function compileSchemaObject(schemaObj, jsonSchema) {
     const min = jsonSchema.minLength;
     if (typeof min === 'number' && min > 0 && Number.isFinite(min)) {
       const addError = schemaObj.createErrorHandler(min, 'minLength');
-      const useGrapheme = schemaObj.options.useGrapheme;
+      const unit = lengthUnitOf(schemaObj.options);
+      const useGrapheme = unit === 'grapheme';
 
-      if (!useGrapheme) {
+      if (unit === 'codepoint') {
+        return function validateMinLengthOnlyCodePoints(data, dataPath) {
+          if (typeof data !== 'string') return true;
+          const len = countCodePoints(data);
+          return len >= min || addError(len, dataPath);
+        };
+      } else if (!useGrapheme) {
         // Simple byte counting
         return function validateMinLengthOnly(data, dataPath) {
           if (typeof data !== 'string') return true;
@@ -576,9 +584,16 @@ export function compileSchemaObject(schemaObj, jsonSchema) {
     const max = jsonSchema.maxLength;
     if (typeof max === 'number' && max >= 0 && Number.isFinite(max)) {
       const addError = schemaObj.createErrorHandler(max, 'maxLength');
-      const useGrapheme = schemaObj.options.useGrapheme;
+      const unit = lengthUnitOf(schemaObj.options);
+      const useGrapheme = unit === 'grapheme';
 
-      if (!useGrapheme) {
+      if (unit === 'codepoint') {
+        return function validateMaxLengthOnlyCodePoints(data, dataPath) {
+          if (typeof data !== 'string') return true;
+          const len = countCodePoints(data);
+          return len <= max || addError(len, dataPath);
+        };
+      } else if (!useGrapheme) {
         return function validateMaxLengthOnly(data, dataPath) {
           if (typeof data !== 'string') return true;
           return data.length <= max || addError(data.length, dataPath);
