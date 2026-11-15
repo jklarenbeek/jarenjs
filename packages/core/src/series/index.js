@@ -18,7 +18,8 @@
 //                     binary bounds a sorted array is read through
 //   interval.js       half-open `[start, end)` set algebra: contains,
 //                     overlap, intersect, merge, subtract, gaps,
-//                     coverage and fixed-width slot enumeration
+//                     coverage, fixed-width slot enumeration, how
+//                     many intervals cover each span, and short gaps
 //   interval-index.js build once, query many — the point and range
 //                     questions, without asking every span
 //   zone.js           the injected wall clock: UTC and fixed offsets
@@ -67,8 +68,12 @@ export {
   gapsWithin,
   coverageOf,
   findSlots,
+  concurrencyOf,
+  shortGaps,
   MERGE_MEMBERS,
   SLOTS_MEMBERS,
+  CONCURRENCY_MEMBERS,
+  SHORT_GAPS_MEMBERS,
 } from './interval.js';
 
 export { createIntervalIndex } from './interval-index.js';

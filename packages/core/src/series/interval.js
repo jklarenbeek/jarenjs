@@ -382,4 +382,123 @@ export function findSlots(availability, spec) {
   return out;
 }
 
+/**
+ * `concurrencyOf`'s closed specification: the staffing minimum each span
+ * is read against.
+ */
+export const CONCURRENCY_MEMBERS = /* @__PURE__ */ Object.freeze(['atLeast']);
+
+/**
+ * How many of `intervals` cover each part of `window`: the window cut
+ * into ascending spans `{ start, end, count }` that tile it exactly,
+ * a span with no interval included as `count: 0`, and touching spans of
+ * one count joined.
+ *
+ * Every interval counts, duplicates included: two people on the same
+ * shift are two. An interval ending where another starts hands over
+ * rather than overlapping, so the boundary instant is counted once.
+ * With `atLeast`, each span also carries `meets: count >= atLeast`; the
+ * spans that fall short are kept rather than filtered out, because a
+ * staffing minimum asks where it is NOT met.
+ *
+ * @param {Interval[]} intervals - in any order
+ * @param {Interval} window - the span to count over
+ * @param {Object} [options]
+ * @param {number} [options.atLeast] - a whole number of intervals
+ * @returns {{ start: number, end: number, count: number, meets?: boolean }[]} new records
+ * @throws {TypeError} for an empty, reversed or non-finite interval or
+ *   window, or an `atLeast` that is not a non-negative whole number
+ * @example
+ * concurrencyOf([{ start: 0, end: 10 }, { start: 5, end: 20 }], { start: 0, end: 30 }, { atLeast: 1 });
+ * // [{ start: 0, end: 5, count: 1, meets: true }, { start: 5, end: 10, count: 2, meets: true },
+ * //  { start: 10, end: 20, count: 1, meets: true }, { start: 20, end: 30, count: 0, meets: false }]
+ */
+export function concurrencyOf(intervals, window, options = {}) {
+  requireSpecMembers(options, CONCURRENCY_MEMBERS, 'concurrencyOf',
+    'a concurrency spec is an object with an \'atLeast\'');
+  const atLeast = options.atLeast;
+  if (atLeast !== undefined && !(Number.isSafeInteger(atLeast) && atLeast >= 0))
+    throw new TypeError('concurrencyOf: atLeast is a whole number of intervals, zero or more');
+  const bounds = requireInterval(window, 'the window');
+  if (!Array.isArray(intervals))
+    throw new TypeError('concurrencyOf: the intervals are an array');
+  /** @type {number[]} */
+  const starts = [];
+  /** @type {number[]} */
+  const ends = [];
+  for (let i = 0; i < intervals.length; i++) {
+    const { start, end } = requireInterval(intervals[i], `interval ${i}`);
+    if (start < bounds.end && end > bounds.start) {
+      starts.push(start > bounds.start ? start : bounds.start);
+      ends.push(end < bounds.end ? end : bounds.end);
+    }
+  }
+  starts.sort((a, b) => a - b);
+  ends.sort((a, b) => a - b);
+  /** @type {{ start: number, end: number, count: number, meets?: boolean }[]} */
+  const out = [];
+  let count = 0;
+  let at = bounds.start;
+  let i = 0;
+  let j = 0;
+  while (at < bounds.end) {
+    // an end and a start on one instant hand over: the end goes first
+    while (j < ends.length && ends[j] <= at) {
+      count--;
+      j++;
+    }
+    while (i < starts.length && starts[i] <= at) {
+      count++;
+      i++;
+    }
+    const next = Math.min(i < starts.length ? starts[i] : bounds.end, j < ends.length ? ends[j] : bounds.end);
+    const last = out.length === 0 ? null : out[out.length - 1];
+    if (last !== null && last.count === count)
+      last.end = next;
+    else out.push(atLeast === undefined ? { start: at, end: next, count } : { start: at, end: next, count, meets: count >= atLeast });
+    at = next;
+  }
+  return out;
+}
+
+/**
+ * `shortGaps`' closed specification: the shortest gap that is not
+ * reported.
+ */
+export const SHORT_GAPS_MEMBERS = /* @__PURE__ */ Object.freeze(['under']);
+
+/**
+ * The gaps between `intervals` that are shorter than `under`: a rest
+ * rule's question, "where is the break between two shifts too short".
+ *
+ * The intervals are merged first, so overlapping and touching intervals
+ * are one continuous span and leave no gap between them; a back-to-back
+ * pair is a question for the length of the merged span, not a gap of
+ * zero. Only the gaps between intervals are read: before the first and
+ * after the last there is no other interval to rest between.
+ *
+ * @param {Interval[]} intervals - in any order
+ * @param {Object} spec
+ * @param {number | string} spec.under - milliseconds or a fixed ISO 8601
+ *   duration; a gap exactly this long is long enough
+ * @returns {Interval[]} new `{ start, end }` records, ascending
+ * @throws {TypeError} for an empty, reversed or non-finite interval, or
+ *   an `under` that is not a positive fixed width
+ * @example
+ * shortGaps([{ start: 0, end: 10 }, { start: 15, end: 20 }, { start: 40, end: 50 }], { under: 10 });
+ * // [{ start: 10, end: 15 }]
+ */
+export function shortGaps(intervals, spec) {
+  requireSpecMembers(spec, SHORT_GAPS_MEMBERS, 'shortGaps', 'a short-gap spec is an object with an \'under\'');
+  const under = requireWidth(spec.under, 'under');
+  const merged = mergeIntervals(intervals);
+  /** @type {Interval[]} */
+  const out = [];
+  for (let i = 1; i < merged.length; i++) {
+    if (merged[i].start - merged[i - 1].end < under)
+      out.push({ start: merged[i - 1].end, end: merged[i].start });
+  }
+  return out;
+}
+
 //#endregion

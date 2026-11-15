@@ -130,6 +130,56 @@ if (calendarLeak.length > 0)
   throw new Error(`@jarenjs/core/calendar pulled zone data or a series module into the bundle: ${calendarLeak.map(([file]) => file).join(', ')}`);
 console.log(`Tree-shaking smoke test passed (${calendarResult.outputFiles[0].contents.length} byte calendar bundle carries no locale, Intl provider or series module).`);
 
+// Availability is the calendar's one door into the series kernel: it
+// evaluates layers with the interval algebra and searches slots with
+// `findSlots`. It still carries no zone data, and of the kernel only
+// the interval algebra and what it reads (normalization, selectors).
+const availabilityResult = await build({
+  stdin: {
+    contents: "import { evaluateAvailability, availabilityOf, freeBusy, findAvailableSlots, AVAILABILITY_LIMITS } from '@jarenjs/core/calendar';"
+      + ' export { evaluateAvailability, availabilityOf, freeBusy, findAvailableSlots, AVAILABILITY_LIMITS };',
+    resolveDir: process.cwd(),
+    sourcefile: 'availability-consumer.js',
+  },
+  bundle: true,
+  format: 'esm',
+  metafile: true,
+  minify: true,
+  platform: 'neutral',
+  treeShaking: true,
+  write: false,
+});
+const availabilityLeak = Object.entries(Object.values(availabilityResult.metafile.outputs)[0].inputs)
+  .filter(([file, info]) => info.bytesInOutput > 0 && (/packages\/locales\//.test(file)
+    || (/packages\/core\/src\/series\//.test(file) && !/packages\/core\/src\/series\/(interval|normalize|selector)\.js$/.test(file))));
+if (availabilityLeak.length > 0)
+  throw new Error(`calendar availability pulled zone data or a series module past the interval algebra into the bundle: ${availabilityLeak.map(([file]) => file).join(', ')}`);
+console.log(`Tree-shaking smoke test passed (${availabilityResult.outputFiles[0].contents.length} byte availability bundle carries no locale and no series module past the interval algebra).`);
+
+// The series kernel stays recurrence-free: importing every export of
+// `@jarenjs/core/series`, the interval helpers included, carries no
+// calendar module and no zone data.
+const seriesNames = Object.keys(await import('@jarenjs/core/series')).join(', ');
+const seriesResult = await build({
+  stdin: {
+    contents: `import { ${seriesNames} } from '@jarenjs/core/series'; export { ${seriesNames} };`,
+    resolveDir: process.cwd(),
+    sourcefile: 'series-consumer.js',
+  },
+  bundle: true,
+  format: 'esm',
+  metafile: true,
+  minify: true,
+  platform: 'neutral',
+  treeShaking: true,
+  write: false,
+});
+const seriesLeak = Object.entries(Object.values(seriesResult.metafile.outputs)[0].inputs)
+  .filter(([file, info]) => /packages\/locales\/|packages\/core\/src\/calendar\//.test(file) && info.bytesInOutput > 0);
+if (seriesLeak.length > 0)
+  throw new Error(`@jarenjs/core/series pulled a calendar module or zone data into the bundle: ${seriesLeak.map(([file]) => file).join(', ')}`);
+console.log(`Tree-shaking smoke test passed (${seriesResult.outputFiles[0].contents.length} byte series bundle carries no calendar module and no zone data).`);
+
 // Every `@jarenjs/linq` subpath's measured size, collected as the probes
 // run and checked against docs/CONSUMING.md's table at the end: a price
 // this repository publishes is a price this gate measured, so it can go

@@ -575,6 +575,182 @@ const week = expandSeries(hours, { horizon: [dateValue('2026-03-02'), dateValue(
 // three occurrences; Saturday's ends { kind: 'floating', date: '2026-03-08', time: '00:00:00' }
 ```
 
+## Availability
+
+Availability is a stack of prioritized **layers** evaluated over a
+half-open horizon. A layer can be opening hours, a holiday closure, a
+busy event or an absence. The answer cuts the horizon into spans that
+are `available`, `busy` (with a busy type) or `unknown` (with a reason),
+and each span names the layers that decided it.
+
+**Unknown is never free.** Nothing is available unless a layer says so.
+Time no layer claims is unknown, and so is time a layer could only place
+with data it was not given.
+
+```js
+import {
+  evaluateAvailability, availabilityOf, freeBusy, findAvailableSlots,
+  weeklyPattern, dateValue, dateRangeValue, utcValue,
+} from '@jarenjs/core/calendar';
+import { createIntlZoneProvider } from '@jarenjs/locales/intl-zones';
+
+const provider = createIntlZoneProvider({ revision: '2026e' });
+const staff = evaluateAvailability([
+  { id: 'hours', priority: 5, mode: 'available', source: 'contract', revision: '12',
+    series: weeklyPattern({ days: { mon: [['09:00', '17:00']], tue: [['09:00', '17:00']] } }) },
+  { id: 'leave', priority: 1, mode: 'busy', busyType: 'busy-unavailable', source: 'leave',
+    spans: [dateRangeValue('2026-03-03', '2026-03-03')] },
+], {
+  horizon: [utcValue('2026-03-02T00:00:00Z'), utcValue('2026-03-09T00:00:00Z')],
+  zone: 'Europe/Amsterdam', zoneSource: 'location', provider, policy: 'rfc5545',
+});
+// Monday 08:00Z-16:00Z available (hours); Tuesday in Amsterdam
+// (02T23:00Z-03T23:00Z) busy (leave); the rest unknown, reason 'default'
+
+availabilityOf(staff, { start: utcValue('2026-03-02T09:00:00Z'), end: utcValue('2026-03-02T12:00:00Z') }).state;
+// 'available'
+```
+
+### `evaluateAvailability(layers, { horizon, zone?, zoneSource?, provider?, policy?, limits?, default? })`
+
+A layer is `{ id, priority, mode, busyType?, series | spans, bounds?, source, revision? }`:
+
+| Member | Reads |
+|---|---|
+| `id` | a non-empty name, unique in the stack |
+| `priority` | RFC 7953's PRIORITY, 0-9: 1 is the highest, 9 the lowest numbered, and 0 (undefined) is below them all |
+| `mode` | `'available'` or `'busy'`: what the layer's spans are |
+| `busyType` | a busy layer's kind of busy: `'busy'` (the default), `'busy-unavailable'` or `'busy-tentative'` |
+| `series` | a series `defineSeries` returned, or the list `weeklyPattern` returns |
+| `spans` | explicit spans: `{ start?, end? }` (an end left out or `null` is open), a date value or a date-range value |
+| `bounds` | `[start?, end?)` clipping the layer, either end open; on an available layer it also claims the whole period (below) |
+| `source` | the caller's provenance token, carried in `layers` and never read |
+| `revision` | the caller's revision of the layer's data, echoed on every span the layer decides |
+
+A bound or span end is epoch milliseconds or a temporal value. A date
+reads as its first instant, and a floating or date value needs the zone.
+
+**Precedence.** At each instant the claims of the highest rank decide.
+Among equal ranks busy beats unknown, which beats available, so a tie
+never opens time. Of several busy layers at one rank, the strongest
+type is shown (`busy-unavailable`, then `busy`, then `busy-tentative`),
+and every one is named.
+
+**What a layer claims.** `bounds` decides it:
+
+| Layer | Claims |
+|---|---|
+| without `bounds` | only its spans. The time between them falls through to the layers below, or the default |
+| `available`, with `bounds` | its whole bounded period, as an RFC 7953 VAVAILABILITY does: its spans are available, and the rest of the period is busy (`busy-unavailable`) at its rank, sourced to it |
+| `busy`, with `bounds` | only its spans, as busy. Its gaps inside the bounds claim nothing and fall through |
+
+So "available Monday to Friday 09:00-17:00 during this contract" with the
+contract's dates as `bounds` means not available at other times in that
+period, even over a lower layer that says otherwise; a higher layer
+still wins. Leave `bounds` out to let the gaps fall through. `bounds: []`
+(both ends open) claims the whole horizon. Nested bounded layers of
+different ranks each decide inside their own period.
+
+**What makes time unknown.** Each source keeps its own `reason`:
+
+| Reason | When |
+|---|---|
+| `default` | no layer claims the time. `default: 'busy'` makes it busy (`busy-unavailable`) instead; there is no `'available'` default |
+| `no-zone` | a floating or date layer was evaluated without a zone. Its spans name no instant, so every instant within a day of their wall clock is unknown (no offset reaches a day). A floating or date bound without a zone leaves the same day-wide fringe, where a bounded available layer is unknown whether or not a span covers it |
+| `incomplete` | a series expansion stopped at a limit. Only a prefix the expansion proves complete is kept; from there, less a day for a wall-clock series, to the end of the layer's reach is unknown |
+
+When two layers of one rank leave a span unknown for different reasons,
+`no-zone` is named.
+
+**Binding and expansion.**
+
+- Open bounds are clipped to the horizon before any interval operation.
+- A floating or date layer binds through `bindFloating` to `zone` under
+  `policy`, recording `zoneSource` (`'unrecorded'` when not said). A
+  span that a gap turns backwards, such as 02:50-03:10 on Amsterdam's
+  spring day under `rfc5545`, covers nothing and is not refused.
+- A floating or date series is expanded a day past each end of the
+  horizon, then bound occurrence by occurrence.
+- A utc or zoned series expands from its own instants (a zoned one
+  through `provider`).
+- `limits` are the `RecurrenceLimits` of every expansion, one budget per
+  layer.
+
+**The answer:**
+
+| Member | Holds |
+|---|---|
+| `horizon` | `{ start, end }` in epoch milliseconds |
+| `spans` | ascending `{ start, end, state, busyType?, sources: [{ id, revision? }], reason? }`, tiling the horizon, with no two neighbours alike |
+| `complete` | `true` when no layer's expansion stopped |
+| `provider` | the provider's `{ name, revision }`, or `null` without one |
+| `binding` | `{ zone, source }`, or `null` without a zone |
+| `default` | `'unknown'` or `'busy'` |
+| `layers` | per layer: `{ id, revision?, source, status, limit?, counts }`, where `counts` are its expansions' (a re-proved prefix included) |
+| `counts` | `{ layers, spans, available, busy, unknown, emitted, work, providerCalls }` |
+
+`source`, `revision`, `provider` and `complete` are what a cache needs
+to tell whether a stored answer still holds. The answer is plain JSON:
+the readers below also take one that went through `JSON.parse`.
+
+### `availabilityOf(result, interval)`
+
+This asks whether all of `{ start, end }` (epoch milliseconds or utc
+values) is available. One unknown or busy instant makes it not:
+
+- `state` is `'available'` only when every instant is. It is `'busy'`
+  when any instant is busy, and `'unknown'` otherwise. Time outside the
+  evaluated horizon is unknown with `reason: 'outside-horizon'`.
+- `reasons` lists every span of the interval that is not available,
+  clipped to it.
+- `sources` names the layers that decided the answer: the available
+  ones when it is available, and those behind `reasons` otherwise.
+
+### `freeBusy(result, { reveal? })`
+
+This projects an answer to RFC 5545 free/busy periods:
+
+| State | FBTYPE |
+|---|---|
+| available | `free` |
+| busy | its busy type |
+| unknown | `busy-unavailable`, counted in `unknownCount` (runs of unknown time) |
+
+- No layer id, source, revision or reason is included, and neighbours of
+  one type are joined, so the seam between two layers is not shown.
+- `reveal: 'none'` shows every period that is not free as `busy`.
+- Periods fall on whole seconds. A second two periods share goes to the
+  busier one, so rounding never shows time freer than it is.
+
+The answer `{ start, end, periods, unknownCount }` feeds the VFREEBUSY
+writer of `@jarenjs/josl/ical` directly:
+
+```js
+import { stringifyIcal } from '@jarenjs/josl/ical';
+
+const { unknownCount, ...period } = freeBusy(staff);
+stringifyIcal({ prodId: '-//Example//Rota//EN', components: [{ type: 'freebusy', uid: 'staff-fb', ...period }] });
+```
+
+### `findAvailableSlots(result, { duration, step?, alignment?, limits? })`
+
+This is `findSlots` over the **available** spans only, so a slot never
+overlaps unknown or busy time:
+
+- Touching available spans are one window, so a slot may cross midnight
+  or the seam between two layers.
+- Each window is walked from its first start in `step` increments. The
+  default step is `duration` (back to back), or `alignment` when one is
+  given.
+- With `alignment`, every start is a multiple of it counted from the
+  epoch (UTC), and `step` must be a multiple of it.
+- Widths are milliseconds or fixed ISO 8601 durations (`'PT30M'`).
+- A search that would pass `limits.maxSlots` (`AVAILABILITY_LIMITS`:
+  10000) stops there and is `incomplete` with `limit: 'maxSlots'`.
+
+The answer is `{ status, slots, counts: { emitted }, limit? }`. Choosing
+among the candidates is a solver's job, not this function's.
+
 ## Codes
 
 Every refusal is a `CalendarError` (a `CodedError` from
@@ -620,7 +796,8 @@ finite instant, is the runtime's own `TypeError`.
 - **Series.** RANGE=THISANDFUTURE is kept but not expanded (`JY0021`).
   An RDATE or EXDATE of a zoned series names the series' zone, never
   another zone or a utc value.
-- **Availability.** Availability layers are not in this layer.
+- **Availability.** VAVAILABILITY is not read or written; a layer is
+  the caller's own JSON. Availability is evaluated, never stored.
 - **Storage.** No temporal value is stored by a database here; a caller
   stores the JSON forms above.
 - **Zone data.** It is never bundled. The provider is the caller's, and

@@ -205,7 +205,7 @@ and the live heap they hold — the V8 heap after two forced full
 collections, run on the main thread so each has finished when the heap
 is read, less the same process's heap before the import. Each heap is
 the median of <!--fact:closure.runs-->5<!--/fact--> fresh processes, whose runs differed by at
-most <!--fact:closure.spread-->10 KiB<!--/fact--> for any one subpath; native memory a built-in
+most <!--fact:closure.spread-->37 KiB<!--/fact--> for any one subpath; native memory a built-in
 allocates for itself (`node:crypto`'s, say) is not in it. A heap depends
 on the runtime and the host — these were measured on one machine,
 with <!--fact:closure.host-->Node v24.22.1 on linux x64<!--/fact--> — while a module count is
@@ -222,7 +222,7 @@ included.
 <!--fact:closure.contract-->
 | Subpath | Modules | By package | Live heap MiB |
 |---|---:|---|---:|
-| `.` | 140 | core 73, validate 29, json 26, contract 12 | 6.1 |
+| `.` | 140 | core 73, validate 29, json 26, contract 12 | 6.2 |
 | `./app` | 29 | core 11, contract 9, json 9 | 1.4 |
 | `./auth-node` | 11 | core 8, contract 3 | 1.3 |
 | `./client` | 141 | core 75, validate 27, json 26, contract 13 | 6.0 |
@@ -256,13 +256,13 @@ included.
 | `./node-pool` | 105 | core 61, db 23, json 21 | 4.8 |
 | `./node-process` | 101 | core 61, json 21, db 19 | 4.7 |
 | `./node-worker` | 101 | core 61, json 21, db 19 | 4.7 |
-| `./postgres` | 119 | core 62, db 36, json 21 | 5.0 |
+| `./postgres` | 119 | core 62, db 36, json 21 | 5.1 |
 | `./query` | 132 | core 62, db 43, json 21, validate 6 | 7.4 |
 | `./relational` | 122 | core 62, db 33, json 21, validate 6 | 5.9 |
 | `./search` | 92 | core 66, json 21, db 5 | 4.1 |
 | `./typed` | 1 | db 1 | 0.1 |
-| `./wasm` | 103 | core 61, db 21, json 21 | 4.7 |
-| `./worker-endpoint` | 133 | core 62, db 44, json 21, validate 6 | 6.7 |
+| `./wasm` | 103 | core 61, db 21, json 21 | 4.8 |
+| `./worker-endpoint` | 133 | core 62, db 44, json 21, validate 6 | 6.8 |
 <!--/fact-->
 
 **`@jarenjs/linq`**
@@ -296,11 +296,11 @@ included.
 | `.` | 87 | core 61, json 26 | 3.9 |
 | `./basic` | 3 | json 2, core 1 | 0.2 |
 | `./canonical` | 17 | core 10, json 7 | 0.9 |
-| `./formula` | 85 | core 61, json 24 | 3.7 |
+| `./formula` | 85 | core 61, json 24 | 3.8 |
 | `./formula/batch` | 86 | core 61, json 25 | 3.8 |
 | `./formula/migrate` | 88 | core 61, json 27 | 4.1 |
 | `./jslt` | 103 | core 72, json 31 | 4.1 |
-| `./jtlt` | 108 | core 72, json 36 | 4.1 |
+| `./jtlt` | 108 | core 72, json 36 | 4.2 |
 | `./node` | 18 | core 10, json 8 | 1.3 |
 | `./patch` | 18 | core 10, json 8 | 1.0 |
 | `./path` | 18 | core 11, json 7 | 1.0 |
@@ -335,7 +335,7 @@ included.
 | `./async` | 6 | core 6 | 0.3 |
 | `./bigint` | 6 | core 6 | 0.3 |
 | `./cache` | 9 | core 9 | 0.6 |
-| `./calendar` | 12 | core 12 | 0.6 |
+| `./calendar` | 23 | core 23 | 0.9 |
 | `./check` | 5 | core 5 | 0.3 |
 | `./checksum` | 1 | core 1 | 0.1 |
 | `./chunk` | 1 | core 1 | 0.1 |

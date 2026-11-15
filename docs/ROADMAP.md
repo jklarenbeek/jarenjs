@@ -1045,15 +1045,19 @@ what each does is its own documentation's job
   fraction to the next second and the read-back compares whole seconds. `@jarenjs/core/calendar`
   refuses a fraction past the millisecond instead; the seam's `toEpoch` should either do the same
   or compare the rounded instant.
-- [ ] **`@jarenjs/core/calendar` enumerates DAILY and WEEKLY recurrence only, and has no
-  availability yet.** Temporal values, zone binding, civil-day splitting, DAILY/WEEKLY
-  recurrence, series (RDATE, EXDATE, moved and cancelled overrides) and weekly patterns
-  ship, expanded under explicit limits. A grammatically valid MONTHLY, YEARLY or sub-daily
-  rule is refused by name (`JY0020`), an override with RANGE=THISANDFUTURE is kept but not
-  expanded (`JY0021`), and a zoned series' RDATE or EXDATE must name the series' own zone.
-  Availability layers are not in it, and no store has a temporal column kind: a caller
-  stores the JSON forms (`@jarenjs/core/schemas/calendar/temporal.schema.json`,
+- [ ] **`@jarenjs/core/calendar` enumerates DAILY and WEEKLY recurrence only.** Temporal values,
+  zone binding, civil-day splitting, DAILY/WEEKLY recurrence, series (RDATE, EXDATE, moved and
+  cancelled overrides), weekly patterns and availability layers (evaluated into available, busy
+  and unknown spans, with whole-interval checks, free/busy and slot search) ship, expanded under
+  explicit limits. A grammatically valid MONTHLY, YEARLY or sub-daily rule is refused by name
+  (`JY0020`), an override with RANGE=THISANDFUTURE is kept but not expanded (`JY0021`), and a
+  zoned series' RDATE or EXDATE must name the series' own zone. No store has a temporal column
+  kind: a caller stores the JSON forms (`@jarenjs/core/schemas/calendar/temporal.schema.json`,
   `…/rrule.schema.json`) and binds floating occurrences with `bindFloating`.
+- [ ] **`findSlots` takes a fractional width that `findAvailableSlots` refuses.**
+  `findSlots([{ start: 0, end: 10 }], { duration: 0.5 })` answers twenty slots, while
+  `@jarenjs/core/calendar`'s `findAvailableSlots` (and every calendar width) refuses a width that
+  is not whole milliseconds. One of them should move.
 - [ ] **`@jarenjs/josl/ical` writes iCalendar in UTC zone mode only, and does not read it.**
   Events, recurring series and free/busy spans are written by kind; under `zones: 'utc'` a
   zoned time is written as the UTC instant `toUtc` answers, and a zoned recurring series as

@@ -23,9 +23,9 @@ import assert from 'node:assert';
 
 import {
   resampleSeries, rollingSeries, asOfJoin, downsampleSeries,
-  findSlots, mergeIntervals,
+  findSlots, mergeIntervals, concurrencyOf, shortGaps,
   RESAMPLE_MEMBERS, ROLLING_MEMBERS, ASOF_MEMBERS, DOWNSAMPLE_MEMBERS,
-  SLOTS_MEMBERS, MERGE_MEMBERS, CLOCK_MEMBERS,
+  SLOTS_MEMBERS, MERGE_MEMBERS, CLOCK_MEMBERS, CONCURRENCY_MEMBERS, SHORT_GAPS_MEMBERS,
 } from '@jarenjs/core/series';
 
 const ROWS = [{ at: 0, value: 1 }, { at: 1000, value: 2 }];
@@ -45,6 +45,10 @@ const KERNELS = [
     run: (spec) => findSlots(SPANS, { duration: 5, ...spec }) },
   { name: 'mergeIntervals', members: MERGE_MEMBERS,
     run: (spec) => mergeIntervals(SPANS, { ...spec }) },
+  { name: 'concurrencyOf', members: CONCURRENCY_MEMBERS,
+    run: (spec) => concurrencyOf(SPANS, { start: 0, end: 20 }, { ...spec }) },
+  { name: 'shortGaps', members: SHORT_GAPS_MEMBERS,
+    run: (spec) => shortGaps(SPANS, { under: 5, ...spec }) },
 ];
 
 describe('a kernel specification is closed', () => {

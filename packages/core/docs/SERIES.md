@@ -79,6 +79,8 @@ it was written.
 | `gapsWithin(list, window?)` | the uncovered spans |
 | `coverageOf(list, window?)` | milliseconds covered, an instant counted once |
 | `findSlots(availability, spec)` | where a fixed-width span fits |
+| `concurrencyOf(list, window, {atLeast}?)` | how many intervals cover each part of the window |
+| `shortGaps(list, {under})` | the gaps between intervals shorter than a threshold |
 
 Merging is the one place "touching does not overlap" is not the answer
 a caller wants, which is why `mergeIntervals` **joins touching spans by
@@ -104,6 +106,40 @@ to back), keeping every span that still ends inside. `duration` and
 thirty days. It is enumeration, not scheduling: choosing among the
 answers, weighing preferences and assigning people is a solver's job,
 deliberately not this one.
+
+`concurrencyOf(intervals, window, { atLeast? })` is the staffing
+question. It cuts the window into ascending `{ start, end, count }`
+spans that tile it, including spans where `count` is 0, and joins
+touching spans of one count. Every interval counts, duplicates
+included, so two people on one shift are two. An interval that ends
+where another starts hands over: the boundary instant is counted once.
+With `atLeast`, each span also carries `meets: count >= atLeast`. The
+spans that fall short are kept rather than filtered out, because a
+minimum asks where it is *not* met.
+
+`shortGaps(intervals, { under })` is the rest-rule question: the gaps
+between intervals shorter than `under` (milliseconds or a fixed ISO 8601
+duration). A gap exactly `under` long is long enough. The intervals are
+merged first, so overlapping and **touching** intervals are one
+continuous span and leave no gap: a back-to-back pair is a question for
+the length of the merged span (`mergeIntervals`), not a gap of zero.
+Before the first interval and after the last there is nothing to rest
+between, so neither edge is a gap.
+
+```js
+import { concurrencyOf, shortGaps } from '@jarenjs/core/series';
+
+concurrencyOf([{ start: 0, end: 10 }, { start: 5, end: 20 }], { start: 0, end: 30 }, { atLeast: 2 });
+// [{ start: 0, end: 5, count: 1, meets: false }, { start: 5, end: 10, count: 2, meets: true },
+//  { start: 10, end: 20, count: 1, meets: false }, { start: 20, end: 30, count: 0, meets: false }]
+shortGaps([{ start: '2026-03-02T06:00:00Z', end: '2026-03-02T14:00:00Z' },
+           { start: '2026-03-02T22:00:00Z', end: '2026-03-03T06:00:00Z' }], { under: 'PT11H' });
+// [{ start: Date.parse('2026-03-02T14:00:00Z'), end: Date.parse('2026-03-02T22:00:00Z') }]
+```
+
+Both are pure interval helpers. They know no recurrence and no zone:
+the intervals are whatever the caller expanded and bound, for example
+with `@jarenjs/core/calendar`.
 
 Merge, subtract, gaps and slots return bare `{ start, end }` records. A
 span welded out of three source rows belongs to none of them, and

@@ -522,6 +522,16 @@ export function expandSeries(series, options) {
   }));
 }
 
+/**
+ * The kind of a series {@link defineSeries} returned - `'date'`,
+ * `'floating'`, `'utc'` or `'zoned'` - or `undefined` for anything else.
+ * @param {unknown} series
+ * @returns {'date' | 'floating' | 'utc' | 'zoned' | undefined}
+ */
+export function seriesKindOf(series) {
+  return series !== null && typeof series === 'object' ? SERIES.get(series)?.kind : undefined;
+}
+
 const DAY_KEYS = Object.freeze(['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']);
 
 /**
