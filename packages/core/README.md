@@ -208,6 +208,7 @@ such a value used to escape as an uncoded `RangeError`.*
 | `@jarenjs/core/geo` | the spatial kernel over GeoJSON: robust orientation, great-circle measurement, rings, bounding boxes, geohash, GeoJSON/WKT validity, a packed-Hilbert box index, Web Mercator and Douglas-Peucker simplification |
 | `@jarenjs/core/vector` | the vector kernel over plain arrays: dot, cosine and Euclidean similarity (higher-is-better; a malformed pair scores 0), l2 normalization, the packed little-endian Float32 form and the one shape guard (`isVector`) |
 | `@jarenjs/core/series` | the temporal kernel over plain records: instant/sample/interval normalization with a stable sort, half-open `[start, end)` set algebra (overlap, merge, subtract, gaps, coverage, slot enumeration), a static interval index, and the series operations built on them — fixed and calendar buckets with five fill policies, time-width rolling aggregates, as-of joins and gap-aware downsampling, on an injected zone seam |
+| `@jarenjs/core/calendar` | local-time resolution over the injected zone seam: `classifyLocal` (exists, gap or fold, with every candidate instant), `resolveLocal` under a named `rfc5545`/`later`/`reject` policy with no default, `isZone`/`assertZone`, `todayIn` over the runtime clock, and the `CalendarError` code table |
 | `@jarenjs/core/text` | text validators: emails, hostnames, IPs, URIs/IRIs, UUIDs, punycode, ... |
 | `@jarenjs/core/math` | int32/float64 math and 2D/3D vector classes; the linear `remap` and unit-interval `clamp01` |
 | `@jarenjs/core/finance` | zero-dependency finance/trading formulas: TVM, cash flow, amortization, interest, depreciation, bonds, technical indicators, returns/risk |
@@ -356,7 +357,11 @@ Seven decisions carry the module:
 - **Time zones are injected, never bundled.** UTC and fixed offsets work with no setup; a named zone takes the caller's own `provider`, because a bundled tzdb is megabytes that go stale on a government's timetable. A local time that never happened, or happened twice, is a refusal unless `disambiguation` says `earlier` or `later`. A sampler never bridges a gap, never moves an end, and refuses a target too small to hold both rather than drawing a prettier line.
 - **A specification is closed.** Every kernel that takes one publishes the members it admits, and anything else is a refusal naming the near miss — because `minPeriod` for `minPeriods` quietly ignored is a window with no minimum and a plausible number to show for it, and `timezone` for `zone` is precisely the silent fall back to UTC the injected clock exists to prevent. The query language reads the same lists, minus the `provider`, which is a pair of functions and therefore not something a document can carry.
 
-The kernel is measured against one-pass loops written for one question and against the query vocabulary a consumer had instead, and both ratios are published: it costs about twice a hand-written loop and answers about a hundred times faster than the generic route. Named time zones' data, recurrence grammars and scheduling solvers are deliberately outside it. The full module reference is [docs/SERIES.md](./docs/SERIES.md).
+The kernel is measured against one-pass loops written for one question and against the query vocabulary a consumer had instead, and both ratios are published: it costs about twice a hand-written loop and answers about a hundred times faster than the generic route. Named time zones' data and scheduling solvers are deliberately outside it; calendar resolution lives in `calendar`, and this kernel stays recurrence-free. The full module reference is [docs/SERIES.md](./docs/SERIES.md).
+
+## Calendar resolution
+
+`@jarenjs/core/calendar` classifies a local time in a named zone as existing, in a gap (it never happened) or in a fold (it happened twice), with every instant it names. It then resolves it under a policy the caller must name (`rfc5545`, `later` or `reject`; there is no default). Every resolution records which zone data decided it. It also offers `isZone`/`assertZone` and `todayIn` over the injected runtime clock. Zone data comes from an injected provider (`@jarenjs/locales/intl-zones` over host ICU), never from this package, and refusals are `CalendarError` with `JY` codes. The full module reference is [docs/CALENDAR.md](./docs/CALENDAR.md).
 
 ## Messages
 
@@ -449,6 +454,7 @@ Every subpath a consumer can import, derived from the manifest by
 | `@jarenjs/core/series/rolling` | JavaScript | declared |
 | `@jarenjs/core/series/selector` | JavaScript | declared |
 | `@jarenjs/core/series/zone` | JavaScript | declared |
+| `@jarenjs/core/calendar` | JavaScript | declared |
 | `@jarenjs/core/stats` | JavaScript | declared |
 | `@jarenjs/core/string` | JavaScript | declared |
 | `@jarenjs/core/text` | JavaScript | declared |
@@ -507,7 +513,7 @@ Every subpath a consumer can import, derived from the manifest by
 
 ## Development
 
-Unit tests live in `test/core/` at the repository root (`npm run test:core`). This package's internals are described in its own [ARCHITECTURE](./ARCHITECTURE.md) document, with per-module references under [docs/](./docs/) (`MATH`, `CONVERT`, `FINANCE`, `DATES`, `GEO`); see the repository [README](../../README.md) and [ARCHITECTURE](../../docs/ARCHITECTURE.md) for the monorepo picture, and the [ROADMAP](../../docs/ROADMAP.md) for planned work.
+Unit tests live in `test/core/` at the repository root (`npm run test:core`). This package's internals are described in its own [ARCHITECTURE](./ARCHITECTURE.md) document, with per-module references under [docs/](./docs/) (`MATH`, `CONVERT`, `FINANCE`, `DATES`, `GEO`, `SERIES`, `CALENDAR`); see the repository [README](../../README.md) and [ARCHITECTURE](../../docs/ARCHITECTURE.md) for the monorepo picture, and the [ROADMAP](../../docs/ROADMAP.md) for planned work.
 
 See [virtual geometry](docs/VIRTUAL.md) for opt-in constant-work fixed ranges and bounded sparse measured axes.
 

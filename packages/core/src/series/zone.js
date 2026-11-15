@@ -45,6 +45,24 @@ import { epochOfRFC3339Parts } from '../dates/rfc3339.js';
  *   toEpoch - the instant a wall clock names, in epoch milliseconds;
  *   non-finite (or a throw) when the local time is ambiguous or does not
  *   exist and `disambiguation` does not resolve it
+ * @property {(parts: any, zone: string) => ZoneCandidates} [candidates]
+ *   - optional: every instant a wall clock names, without choosing one,
+ *   so a caller can tell a gap from a fold (`@jarenjs/core/calendar`
+ *   classifies with it; this kernel never calls it)
+ * @property {{ name: string, revision: string }} [identity] - optional:
+ *   which zone data answers, so a stored instant can name its source
+ */
+
+/**
+ * What a provider's `candidates(parts, zone)` answers: the instants that
+ * carry the wall clock, ascending, each with the offset in force there.
+ * One entry is a time that exists; two are a fold (the hour that happened
+ * twice); none is a gap (the hour that never happened), and then
+ * `offsets` holds the offsets in force before and after the change. A
+ * fold carries `offsets` too.
+ * @typedef {Object} ZoneCandidates
+ * @property {ReadonlyArray<{ instant: number, offsetMinutes: number }>} candidates
+ * @property {{ before: number, after: number }} [offsets]
  */
 
 /**

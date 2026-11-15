@@ -27,7 +27,7 @@
  */
 
 import { createBoundedCache } from '@jarenjs/core/cache';
-import { daysFromCivil } from '@jarenjs/core/dates/civil';
+import { daysFromCivil, partsFromEpoch } from '@jarenjs/core/dates/civil';
 import { epochOfRFC3339Parts } from '@jarenjs/core/dates/rfc3339';
 
 /**
@@ -165,6 +165,44 @@ function sameWall(read, wanted) {
 }
 
 /**
+ * Every instant that might carry a wall clock in one zone, and those of
+ * them that read back as asked. The guess reads the wall clock as UTC;
+ * it is corrected by the offset in force there and again by the offset
+ * in force at the corrected instant, and the offsets in force a day
+ * either side are added so both sides of any change are represented.
+ * `toEpoch` and `candidates` both decide from this one probe, so the
+ * answers they give cannot drift apart.
+ * @param {Intl.DateTimeFormat} format
+ * @param {any} parts
+ * @returns {{ guess: number, probed: number[], verified: number[] } | null}
+ *   `null` for a wall clock the platform cannot hold, or one so near
+ *   its edge that a probe a day away would fall off it
+ */
+function probe(format, parts) {
+  const wanted = wantedWall(parts);
+  const guess = epochOfRFC3339Parts({ ...wanted, offset: 0 });
+  if (!Number.isFinite(guess) || Math.abs(guess) + DAY > RANGE)
+    return null;
+  const offsetAt = (at) => readParts(format, at).offset;
+
+  /** @type {number[]} */
+  const probed = [];
+  const consider = (offset) => {
+    const at = guess - offset * MINUTE;
+    if (!probed.includes(at))
+      probed.push(at);
+  };
+  const first = offsetAt(guess);
+  consider(first);
+  consider(offsetAt(guess - first * MINUTE));
+  consider(offsetAt(guess - DAY));
+  consider(offsetAt(guess + DAY));
+
+  const verified = probed.filter((at) => sameWall(readParts(format, at), wanted));
+  return { guess, probed, verified };
+}
+
+/**
  * Build a zone provider from the host's ICU time-zone data.
  *
  * `toParts(epoch, zone)` is a formatted read. `toEpoch(parts, zone,
@@ -184,14 +222,30 @@ function sameWall(read, wanted) {
  * either case with `NaN`, which `@jarenjs/core/series` turns into a
  * refusal naming the local time.
  *
+ * `candidates(parts, zone)` answers the same probe without choosing:
+ * `{ candidates }`, the instants that read back as asked in ascending
+ * order, each with the offset in force there - one when the time
+ * exists, two for a fold - and, for a gap, no candidate and
+ * `offsets: { before, after }`, the offsets in force either side of the
+ * change, so a caller can name its own policy (`@jarenjs/core/calendar`
+ * classifies and resolves with it). A fold carries its `offsets` too.
+ * Parts that are not a real civil date and time of day are a `TypeError`,
+ * never a gap.
+ *
+ * `identity` is `{ name: 'intl', revision }`: the revision is the one
+ * the caller passed (the tzdata version its hosts run, say) or
+ * `'unrecorded'` - the provider never reads or invents one.
+ *
  * An unknown zone name is a refusal naming it, never a quiet UTC, and
  * no call reads the host's own zone.
  *
- * @param {{ zones?: number }} [options] - `zones`: how many zones'
- *   formatters stay resident (default `ZONE_CACHE_LIMIT`)
- * @returns {import('@jarenjs/core/series').ZoneProvider}
+ * @param {{ zones?: number, revision?: string }} [options] - `zones`: how
+ *   many zones' formatters stay resident (default `ZONE_CACHE_LIMIT`);
+ *   `revision`: the zone data's version, recorded in `identity`
+ * @returns {Required<import('@jarenjs/core/series').ZoneProvider>} - the seam's two
+ *   optional members, `candidates` and `identity`, always present
  * @example
- * const provider = createIntlZoneProvider();
+ * const provider = createIntlZoneProvider({ revision: 'tzdata of the host' });
  * resolveClock({ zone: 'Europe/Amsterdam', provider, disambiguation: 'later' });
  * compileBuckets('P1M', { zone: 'Australia/Adelaide', provider });
  */
@@ -199,6 +253,9 @@ export function createIntlZoneProvider(options = undefined) {
   const limit = options?.zones ?? ZONE_CACHE_LIMIT;
   if (typeof limit !== 'number' || !Number.isInteger(limit) || limit <= 0)
     throw new TypeError('zones is a positive whole number of resident zone formatters');
+  const revision = options?.revision ?? 'unrecorded';
+  if (typeof revision !== 'string' || revision === '')
+    throw new TypeError('revision is a non-empty string naming the zone data\'s version');
   /** @type {import('@jarenjs/core/cache').BoundedCache<string, Intl.DateTimeFormat>} */
   const formatters = createBoundedCache(limit);
 
@@ -235,37 +292,62 @@ export function createIntlZoneProvider(options = undefined) {
     }
     if (parts === null || typeof parts !== 'object')
       throw new TypeError('a wall clock is a parts record');
-    const wanted = wantedWall(parts);
-    const guess = epochOfRFC3339Parts({ ...wanted, offset: 0 });
-    // a wall clock the platform cannot hold, or one so near its edge
-    // that a probe a day away would fall off it, names no instant
-    if (!Number.isFinite(guess) || Math.abs(guess) + DAY > RANGE)
+    const found = probe(format, parts);
+    if (found === null)
       return NaN;
-    const offsetAt = (at) => readParts(format, at).offset;
-
-    /** @type {number[]} */
-    const candidates = [];
-    const consider = (offset) => {
-      const at = guess - offset * MINUTE;
-      if (!candidates.includes(at))
-        candidates.push(at);
-    };
-    const first = offsetAt(guess);
-    consider(first);
-    consider(offsetAt(guess - first * MINUTE));
-    consider(offsetAt(guess - DAY));
-    consider(offsetAt(guess + DAY));
-
-    const verified = candidates.filter((at) => sameWall(readParts(format, at), wanted));
+    const { probed, verified } = found;
     if (verified.length === 1)
       return verified[0];
     if (disambiguation === 'reject')
       return NaN;
-    const choices = verified.length > 1 ? verified : candidates;
+    const choices = verified.length > 1 ? verified : probed;
     if (choices.length < 2)
       return NaN;
     return disambiguation === 'earlier' ? Math.min(...choices) : Math.max(...choices);
   }
 
-  return Object.freeze({ toParts, toEpoch });
+  /**
+   * @param {any} parts
+   * @param {string} zone
+   * @returns {import('@jarenjs/core/series').ZoneCandidates}
+   */
+  function candidates(parts, zone) {
+    const format = formatterFor(zone);
+    if (parts === null || typeof parts !== 'object')
+      throw new TypeError('a wall clock is a parts record');
+    const found = probe(format, parts);
+    if (found === null)
+      throw new TypeError('the wall clock names no instant this platform can hold');
+    const { guess, probed, verified } = found;
+    // a wall clock that is not one (the thirtieth of February, hour 25, a
+    // fraction that rounds into the next second) reads back as another,
+    // exactly as a gap does; it is refused here rather than answered as one
+    if (!sameWall(partsFromEpoch(guess), wantedWall(parts)))
+      throw new TypeError('the parts are not a civil date and time of day this provider can place');
+    const entry = (at) => Object.freeze({ instant: at, offsetMinutes: (guess - at) / MINUTE });
+    const sorted = (list) => Object.freeze([...list].sort((a, b) => a - b).map(entry));
+    if (verified.length === 1)
+      return Object.freeze({ candidates: sorted(verified) });
+    if (verified.length > 1) {
+      const fold = sorted(verified);
+      return Object.freeze({
+        candidates: fold,
+        offsets: Object.freeze({ before: fold[0].offsetMinutes, after: fold[fold.length - 1].offsetMinutes }),
+      });
+    }
+    // a real wall clock no probe reads back is a gap, and the probes
+    // bracket it: the later reading uses the offset before the change, as
+    // `toEpoch`'s `later` does, and the earlier one the offset after it
+    return Object.freeze({
+      candidates: sorted([]),
+      offsets: Object.freeze({
+        before: (guess - Math.max(...probed)) / MINUTE,
+        after: (guess - Math.min(...probed)) / MINUTE,
+      }),
+    });
+  }
+
+  const identity = Object.freeze({ name: 'intl', revision });
+
+  return Object.freeze({ toParts, toEpoch, candidates, identity });
 }

@@ -372,7 +372,8 @@ And the seam has a price that this corpus cannot charge it. <!--fact:series.zone
 ## Not here
 
 Named time zones are injected, never bundled — the provider over host
-ICU lives opt-in in `@jarenjs/locales`, not here; recurrence grammars
-(RRULE, iCalendar) and any kind of scheduling solver are somebody else's
-layer. This module supplies the algebra those are built from, and
+ICU lives opt-in in `@jarenjs/locales`, not here. Recurrence and calendar
+resolution live in [`@jarenjs/core/calendar`](CALENDAR.md); this kernel
+stays recurrence-free, and any kind of scheduling solver is somebody
+else's layer. This module supplies the algebra those are built from, and
 nothing that needs a clock, a locale or a zone database to be correct.

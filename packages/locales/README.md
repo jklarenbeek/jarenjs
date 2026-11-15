@@ -183,6 +183,17 @@ kernel turns into a refusal naming the local time. Offsets are derived
 from the wall clock rather than parsed from a `GMT+02:00` string, so a
 historical `-00:44:30` is exact.
 
+The provider also answers the seam's two optional members, which
+`@jarenjs/core/calendar` reads to classify a local time before any
+policy picks an instant. `candidates(parts, zone)` is the same probe
+without the choice: `{ candidates }`, one `{ instant, offsetMinutes }`
+for a time that exists or two ascending for a fold, and for a gap no
+candidate plus `offsets: { before, after }`. `identity` is
+`{ name: 'intl', revision }`, where `revision` is whatever
+`options.revision` named (the tzdata version the hosts run, say) or
+`'unrecorded'`; the provider never reads or invents one. See
+[CALENDAR.md](../core/docs/CALENDAR.md).
+
 Like `createIntlDateLocale`, it is opt-in for the reason the header of
 that module gives: ICU output moves between Node versions and between a
 browser and a server. Here that means the *tzdata* — a zone whose rules

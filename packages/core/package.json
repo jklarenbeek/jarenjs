@@ -144,6 +144,10 @@
       "types": "./dist/types/series/*.d.ts",
       "default": "./src/series/*.js"
     },
+    "./calendar": {
+      "types": "./dist/types/calendar/index.d.ts",
+      "default": "./src/calendar/index.js"
+    },
     "./stats": {
       "types": "./dist/types/stats.d.ts",
       "default": "./src/stats.js"

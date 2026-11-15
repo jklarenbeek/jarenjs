@@ -1038,6 +1038,17 @@ what each does is its own documentation's job
 
 ## @jarenjs/core
 
+- [ ] **A named-zone clock refuses a time that exists when its fraction rounds up.** With the
+  Intl provider, `toEpoch({ 2026-07-01 09:00:05.9996 }, 'Europe/Amsterdam', 'reject')` is `NaN`
+  and `resolveClock({ zone, provider }).epochOf` calls it "ambiguous or does not exist", while
+  the fixed-offset clock answers the same parts (rounded to `…06.000`): the probe rounds the
+  fraction to the next second and the read-back compares whole seconds. `@jarenjs/core/calendar`
+  refuses a fraction past the millisecond instead; the seam's `toEpoch` should either do the same
+  or compare the rounded instant.
+- [ ] **`@jarenjs/core/calendar` resolves local times only.** Temporal value kinds (date,
+  floating, utc, zoned), binding a floating value to a zone with provenance, `24:00` as an end
+  bound, recurrence and availability are not in it yet; until then a caller stores RFC 3339
+  strings or epoch milliseconds and resolves each local time with `resolveLocal`.
 - [ ] **String helpers that answer for a non-string.** `countCodePoints(5)` and
   `countCharCode(5, 48)` answer 0, `toCodePoints(5)` answers `[]`, and `fnv1a(5)` equals
   `fnv1a('')` (so `hashContent({})` is `hashContent('')`), each because a non-string's missing

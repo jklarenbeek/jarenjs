@@ -82,6 +82,12 @@ export { resolveClock, CLOCK_MEMBERS } from './zone.js';
  * @typedef {import('./zone.js').ZoneProvider} ZoneProvider
  */
 
+/**
+ * What a provider's optional `candidates(parts, zone)` answers: every
+ * instant a wall clock names, and for a gap the offsets either side.
+ * @typedef {import('./zone.js').ZoneCandidates} ZoneCandidates
+ */
+
 export { compileBuckets, resampleSeries, RESAMPLE_MEMBERS } from './bucket.js';
 
 export { rollingSeries, ROLLING_MEMBERS } from './rolling.js';

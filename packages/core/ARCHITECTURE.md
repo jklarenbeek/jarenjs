@@ -872,7 +872,8 @@ copied into flat typed arrays at build time, so a query reads no source object
 and a row mutated afterwards cannot change what the index answers.
 
 Buckets, resampling, rolling windows and as-of joins are the layer above this
-one; named zones, recurrence grammars and scheduling solvers are outside it.
+one; named zones and scheduling solvers are outside it. Recurrence and calendar
+resolution live in `core/calendar`; this kernel stays recurrence-free.
 `findSlots` enumerates where a fixed-width span fits — choosing among the
 answers is a solver's job, deliberately not this kernel's.
 
@@ -885,6 +886,19 @@ mergeIntervals(shifts, { adjacent: false });    // two — a handover is two shi
 findSlots(shifts, { duration: 'PT30M' }).length; // 16
 createIntervalIndex(shifts).at(4 * 3600_000);   // the second shift only: [start, end)
 ```
+
+### 5d2. Calendar Module (`calendar/`)
+
+The layer above the zone seam (`resolve.js`, `zones.js`, `errors.js`). A local
+time in a named zone is classified first, as existing, in a gap or in a fold,
+with every instant it names, through the provider's optional
+`candidates(parts, zone)` member. A policy the caller names (`rfc5545`, `later`
+or `reject`, with no default) then picks one. Every resolution records the
+provider's `identity`. Parts are validated before the provider is asked, because
+an impossible date reads back like a gap. The module imports only `dates/civil.js`,
+`runtime.js` and `errors.js`: no series module, no zone data and no `Intl`.
+Refusals are `CalendarError` with the `JY` codes; see
+[docs/CALENDAR.md](docs/CALENDAR.md).
 
 ### 5e. Runtime record (`runtime.js`)
 

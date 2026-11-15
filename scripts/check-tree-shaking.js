@@ -99,6 +99,31 @@ if (packLeak.length > 0)
 
 console.log('Tree-shaking smoke test passed (compileDateLocale carries neither Intl provider and no locale pack).');
 
+// `@jarenjs/core/calendar` resolves a local time through an injected
+// provider: importing it must carry no zone data of its own, so no
+// locale pack, no opt-in Intl provider, and no series module (the zone
+// seam's types are JSDoc only).
+const calendarResult = await build({
+  stdin: {
+    contents: "import { resolveLocal, classifyLocal, isZone, assertZone, todayIn } from '@jarenjs/core/calendar';"
+      + ' export { resolveLocal, classifyLocal, isZone, assertZone, todayIn };',
+    resolveDir: process.cwd(),
+    sourcefile: 'calendar-consumer.js',
+  },
+  bundle: true,
+  format: 'esm',
+  metafile: true,
+  minify: true,
+  platform: 'neutral',
+  treeShaking: true,
+  write: false,
+});
+const calendarLeak = Object.entries(Object.values(calendarResult.metafile.outputs)[0].inputs)
+  .filter(([file, info]) => /packages\/locales\/|packages\/core\/src\/series\//.test(file) && info.bytesInOutput > 0);
+if (calendarLeak.length > 0)
+  throw new Error(`@jarenjs/core/calendar pulled zone data or a series module into the bundle: ${calendarLeak.map(([file]) => file).join(', ')}`);
+console.log(`Tree-shaking smoke test passed (${calendarResult.outputFiles[0].contents.length} byte calendar bundle carries no locale, Intl provider or series module).`);
+
 // Every `@jarenjs/linq` subpath's measured size, collected as the probes
 // run and checked against docs/CONSUMING.md's table at the end: a price
 // this repository publishes is a price this gate measured, so it can go
