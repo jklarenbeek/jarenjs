@@ -1,16 +1,16 @@
 //@ts-check
 
 /**
- * RFC 5545 §3.8.5.3, vendored (fixtures/rfc5545-recurrence): every DAILY
- * and WEEKLY example expands to the RFC's own list in America/New_York
- * (local time and offset alike), and every example of another frequency
- * compiles to the typed refusal that names it.
+ * RFC 5545 §3.8.5.3, vendored (fixtures/rfc5545-recurrence): every DAILY,
+ * WEEKLY, MONTHLY and YEARLY example expands to the RFC's own list in
+ * America/New_York (local time and offset alike), and every sub-daily
+ * example compiles to the typed refusal that names its frequency.
  */
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
 
-import { compileRecurrence, expandRecurrence, formatRRule } from '@jarenjs/core/calendar';
+import { compileRecurrence, defineSeries, expandRecurrence, expandSeries, formatRRule } from '@jarenjs/core/calendar';
 import { createIntlZoneProvider } from '@jarenjs/locales/intl-zones';
 import fixture from './fixtures/rfc5545-recurrence/examples.json' with { type: 'json' };
 
@@ -31,18 +31,23 @@ describe('RFC 5545 §3.8.5.3 examples', () => {
   const enumerated = rows.filter((row) => row.expected !== undefined);
   const refused = rows.filter((row) => row.expected === undefined);
 
-  it('the fixture holds the whole section: 42 rules, 15 of them DAILY or WEEKLY', () => {
+  it('the fixture holds the whole section: 42 rules, 38 of them DAILY, WEEKLY, MONTHLY or YEARLY', () => {
     assert.strictEqual(rows.length, 42);
-    assert.strictEqual(enumerated.length, 15);
+    assert.strictEqual(enumerated.length, 38);
+    assert.strictEqual(enumerated.filter((row) => /^FREQ=(MONTHLY|YEARLY);/.test(row.rrule)).length, 23);
     for (const row of rows)
-      assert.strictEqual(/^FREQ=(DAILY|WEEKLY);/.test(row.rrule), row.expected !== undefined, row.rrule);
+      assert.strictEqual(/^FREQ=(DAILY|WEEKLY|MONTHLY|YEARLY);/.test(row.rrule), row.expected !== undefined, row.rrule);
   });
 
   for (const row of enumerated) {
     it(`${row.title} — ${row.rrule}`, () => {
       const compiled = compileRecurrence({ dtstart: dtstartOf(row.dtstart), rrule: row.rrule });
       assert.strictEqual(formatRRule(compileRecurrence({ dtstart: dtstartOf(row.dtstart), rrule: formatRRule(compiled) })), formatRRule(compiled));
-      const got = expandRecurrence(compiled, { horizon: [Date.parse(row.horizon[0]), Date.parse(row.horizon[1])], provider });
+      const horizon = [Date.parse(row.horizon[0]), Date.parse(row.horizon[1])];
+      // the Friday-13th example removes its own DTSTART with an EXDATE
+      const got = row.exdate === undefined ? expandRecurrence(compiled, { horizon, provider })
+        : expandSeries(defineSeries({ uid: 'rfc', base: compiled, exdates: [dtstartOf(row.exdate.replace(/^EXDATE/, 'DTSTART'))] }),
+          { horizon, provider });
       assert.strictEqual(got.status, 'complete');
       const local = got.occurrences.map((o) => `${/** @type {any} */ (o.start).date}T${/** @type {any} */ (o.start).time.slice(0, 5)}`);
       assert.deepStrictEqual(local, row.expected.map((/** @type {string} */ text) => text.slice(0, 16)));

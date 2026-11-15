@@ -7,11 +7,15 @@ each is its own row. For each row:
 - `title`, `dtstart`, `rrule`, `result` and `exdate` are copied from the RFC
   text. `result` is the RFC's own list, with its line breaks folded into
   spaces.
-- The DAILY and WEEKLY rows also carry `expected`. This is the RFC's `result`
-  written out one occurrence per entry as a local time with the offset the
-  RFC names (EDT `-04:00`, EST `-05:00`). They also carry a `horizon` in UTC
-  that ends the open-ended ("forever", "...") examples where the RFC's list
-  stops.
+- The DAILY, WEEKLY, MONTHLY and YEARLY rows also carry `expected`. This is
+  the RFC's `result` written out one occurrence per entry as a local time
+  with the offset the RFC names (EDT `-04:00`, EST `-05:00`). They also carry
+  a `horizon` in UTC that ends the open-ended ("forever", "...") examples
+  where the RFC's list stops. The MONTHLY and YEARLY lists were parsed
+  mechanically from each row's `result` text: its `(YEAR ... EDT|EST)`
+  groups, month names, day lists and ranges, at the DTSTART's 09:00.
+- The HOURLY and MINUTELY rows carry no `expected`: those frequencies are
+  refused by name.
 - `errata` notes a verified erratum that touches a row.
 
 Source: [RFC 5545](https://www.rfc-editor.org/rfc/rfc5545), "Internet
@@ -26,9 +30,17 @@ Errata consulted (https://www.rfc-editor.org/errata/rfc5545):
 - 4271 (verified) replaces the section 3.3.10 sentence that dropped
   nonexistent local times. Such times are read as section 3.3.5 reads an
   explicit time; the expansion's `rfc5545` policy does this.
+- 1913 and 3779 (verified) correct the section 3.3.10 sentence on a YEARLY
+  rule's ordinal BYDAY: it counts within the month when BYMONTH is present
+  and within the year when it is not (the "Every 20th Monday of the year"
+  row).
+- 3747 (verified, editorial) redraws the section 3.3.10 expand/limit table;
+  its cells are unchanged.
 - 3883 (verified) corrects the UNTIL of the HOURLY "every 3 hours" example.
   That row is refused here for its frequency either way.
-- 5872, 5920 and 6212 (rejected) leave their examples as printed.
+- 5872, 5920 and 6212 (rejected) leave their examples as printed. The
+  "Every Friday the 13th" row keeps its EXDATE of its own DTSTART, so its
+  list starts in 1998.
 
 ## Licence
 
@@ -65,5 +77,5 @@ below, as section 4.e of the Trust Legal Provisions requires:
 > ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 > POSSIBILITY OF SUCH DAMAGE.
 
-To refresh: re-fetch the text, check the hash, and re-select the rows by
-`FREQ`.
+To refresh: re-fetch the text, check the hash, re-select the rows by
+`FREQ`, and re-parse the MONTHLY and YEARLY `result` lines.

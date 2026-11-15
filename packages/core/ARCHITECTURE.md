@@ -909,7 +909,11 @@ and asks the provider's `toParts` only where midnight lies inside a change.
 checks the whole grammar for every frequency. `recurrence.js` compiles a rule into a
 plan of numbers held in a `WeakMap` (the public compiled object stays plain JSON).
 It walks that plan period by period on wall clocks read as if UTC, charging every
-step to one budget. It jumps to the horizon only when COUNT is absent, and resolves
+step to one budget. A period is a day, a WKST week, a month, or a year (with BYWEEKNO
+the run of weeks the year numbers). A MONTHLY or YEARLY period examines each of its
+days once against every BY part the rule has, so one loop serves the expanding and
+limiting parts of RFC 5545's table, and an impossible date is never generated, so it
+is never clamped. It jumps to the horizon only when COUNT is absent, and resolves
 only the wall clocks a zoned horizon needs. `series.js` layers RDATEs, EXDATEs and
 overrides over that walk. It asks the rule about one wall clock (a point walk)
 instead of enumerating the series to learn whether a moved-in slot exists. Nothing

@@ -1051,17 +1051,26 @@ what each does is its own documentation's job
   fraction to the next second and the read-back compares whole seconds. `@jarenjs/core/calendar`
   refuses a fraction past the millisecond instead; the seam's `toEpoch` should either do the same
   or compare the rounded instant.
-- [ ] **`@jarenjs/core/calendar` enumerates DAILY and WEEKLY recurrence only.** Temporal values,
-  zone binding, civil-day splitting, DAILY/WEEKLY recurrence, series (RDATE, EXDATE, moved and
+- [ ] **`@jarenjs/core/calendar` enumerates DAILY, WEEKLY, MONTHLY and YEARLY recurrence, not
+  sub-daily.** Temporal values, zone binding, civil-day splitting, DAILY, WEEKLY, MONTHLY and
+  YEARLY recurrence (every BY part RFC 5545 allows for each, BYSETPOS, BYWEEKNO under WKST,
+  negative indexes, invalid dates skipped and never clamped), series (RDATE, EXDATE, moved and
   cancelled overrides), weekly patterns and availability layers (evaluated into available, busy
   and unknown spans, with whole-interval checks, free/busy and slot search) ship, expanded under
-  explicit limits. A grammatically valid MONTHLY, YEARLY or sub-daily rule is refused by name
+  explicit limits. A grammatically valid SECONDLY, MINUTELY or HOURLY rule is refused by name
   (`JY0020`), an override with RANGE=THISANDFUTURE is kept but not expanded (`JY0021`), and a
   zoned series' RDATE or EXDATE must name the series' own zone. No store has a temporal column
   kind: a caller stores the JSON forms (`@jarenjs/core/schemas/calendar/temporal.schema.json`,
   `…/rrule.schema.json`) and binds floating occurrences with `bindFloating`.
   Recurring job schedules (`@jarenjs/db/schedules`, JOBS-FORMAT §11) take the same frequencies and refuse
   the others with the same code at schedule time.
+- [ ] **`@jarenjs/josl/ical` writes some MONTHLY and YEARLY series in a longer form than they need.**
+  Its writer asks whether the rule makes its own start by starting the rule INTERVAL days
+  earlier. For MONTHLY and YEARLY that moves the day DTSTART supplies, so a start the rule does
+  make is also written as an RDATE, and COUNT as the UNTIL of the last occurrence. Five RFC 5545
+  §3.8.5.3 examples are written this way (`FREQ=YEARLY;COUNT=10;BYMONTH=6,7` becomes
+  `UNTIL=20010710T090000` plus an RDATE). The set read back is the same. The probe should start
+  the rule one month or year earlier, by month index.
 - [ ] **`findSlots` takes a fractional width that `findAvailableSlots` refuses.**
   `findSlots([{ start: 0, end: 10 }], { duration: 0.5 })` answers twenty slots, while
   `@jarenjs/core/calendar`'s `findAvailableSlots` (and every calendar width) refuses a width that

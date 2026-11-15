@@ -30,7 +30,7 @@ export const CALENDAR_CODES = /* @__PURE__ */ Object.freeze({
   JY0017: 'a recurrence rule part is given twice',
   JY0018: 'a recurrence rule part does not go with the frequency, the start or another part',
   JY0019: 'the recurrence end (UNTIL) is not of the kind the start requires',
-  JY0020: 'the frequency is valid RRULE but is not enumerated in this release; only DAILY and WEEKLY are',
+  JY0020: 'the frequency is valid RRULE but is not enumerated in this release; only DAILY, WEEKLY, MONTHLY and YEARLY are',
   JY0021: 'an override that ranges over this and future occurrences is kept as data but refused for expansion',
 });
 

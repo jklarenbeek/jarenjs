@@ -2,9 +2,10 @@
 
 /**
  * Recurring events written and read back by the test's own reader: every
- * DAILY and WEEKLY example of RFC 5545 §3.8.5.3 (zoned, expanded under
- * `zones: 'utc'`, against the RFC's own instants; floating, written with
- * its rule and re-expanded by an independent oracle), series with extra
+ * example of RFC 5545 §3.8.5.3 the calendar enumerates (zoned, expanded
+ * under `zones: 'utc'`, against the RFC's own instants), each also
+ * floating (written with its rule and re-expanded by an independent
+ * oracle; the DAILY and WEEKLY ones also in their canonical form), series with extra
  * dates, excluded dates and overrides in each kind, the weekly-pattern
  * series, a weekly 09:00 series across both 2026 offset changes, and
  * every refusal that stands where a wrong calendar would.
@@ -155,10 +156,12 @@ function dtstartOf(line) {
   return { zone: form[1], date: `${form[2]}-${form[3]}-${form[4]}`, time: `${form[5]}:${form[6]}:${form[7]}` };
 }
 
-describe('ical series: RFC 5545 §3.8.5.3, every DAILY and WEEKLY example', () => {
-  const rows = /** @type {any[]} */ (fixture.examples).filter((row) => row.expected !== undefined);
+describe('ical series: RFC 5545 §3.8.5.3, every enumerated example', () => {
+  // the Friday-13th example removes its own DTSTART with an EXDATE, which these series do not carry
+  const rows = /** @type {any[]} */ (fixture.examples).filter((row) => row.expected !== undefined && row.exdate === undefined);
+  const daily = rows.filter((row) => /^FREQ=(DAILY|WEEKLY);/.test(row.rrule));
 
-  it('the fixture holds the 15 DAILY and WEEKLY rows', () => assert.strictEqual(rows.length, 15));
+  it('the fixture holds 37 such rows, 15 of them DAILY and WEEKLY', () => assert.deepStrictEqual([rows.length, daily.length], [37, 15]));
 
   for (const row of rows) {
     it(`zoned, expanded under zones: utc - ${row.rrule}`, () => {
@@ -173,7 +176,9 @@ describe('ical series: RFC 5545 §3.8.5.3, every DAILY and WEEKLY example', () =
       // the RFC's own list is the oracle: local time and offset alike
       assert.deepStrictEqual(instants.map((t) => t.at), row.expected.map((/** @type {string} */ t) => Date.parse(t)));
     });
+  }
 
+  for (const row of daily) {
     it(`floating, written with its rule - ${row.rrule}`, () => {
       const start = dtstartOf(row.dtstart);
       const rule = row.rrule.replace(/(UNTIL=\d{8}T\d{6})Z/, '$1');
@@ -182,6 +187,16 @@ describe('ical series: RFC 5545 §3.8.5.3, every DAILY and WEEKLY example', () =
       const [vevent] = calendar.children;
       assert.strictEqual(prop(vevent, 'RRULE')?.value, formatRRule(compileRecurrence(series.base)));
       assert.strictEqual(props(vevent, 'RDATE').length, 0, 'a start the rule makes is written once');
+      const walls = occurrencesOf(calendar, 'rfc', Date.parse(row.horizon[1])).map((o) => new Date(o.start).toISOString().slice(0, 16));
+      assert.deepStrictEqual(walls, row.expected.map((/** @type {string} */ t) => t.slice(0, 16)));
+    });
+  }
+
+  for (const row of rows.filter((candidate) => !daily.includes(candidate))) {
+    it(`floating, written and read back as the RFC's set - ${row.rrule}`, () => {
+      const start = dtstartOf(row.dtstart);
+      const rule = row.rrule.replace(/(UNTIL=\d{8}T\d{6})Z/, '$1');
+      const { calendar } = write([{ uid: 'rfc', base: { dtstart: floating(start.date, start.time), rrule: rule } }]);
       const walls = occurrencesOf(calendar, 'rfc', Date.parse(row.horizon[1])).map((o) => new Date(o.start).toISOString().slice(0, 16));
       assert.deepStrictEqual(walls, row.expected.map((/** @type {string} */ t) => t.slice(0, 16)));
     });
@@ -455,9 +470,9 @@ describe('ical series: refused where a calendar would be wrong', () => {
   });
 
   it('what the calendar layer refuses of a series, with its error as the cause', () => {
-    const monthly = refuses(() => write([{ uid: 's', base: { dtstart: floating('2026-03-02', '09:00'), rrule: 'FREQ=MONTHLY;COUNT=3' } }]),
+    const hourly = refuses(() => write([{ uid: 's', base: { dtstart: floating('2026-03-02', '09:00'), rrule: 'FREQ=HOURLY;COUNT=3' } }]),
       'ICAL3005', '/components/0/series');
-    assert.strictEqual(monthly.cause.code, 'JY0020');
+    assert.strictEqual(hourly.cause.code, 'JY0020');
     refuses(() => write([{ uid: 's' }]), 'ICAL3005');
     const backwards = refuses(() => write([{ uid: 's', base: { dtstart: zoned('2026-03-02', '09:00'), rrule: 'FREQ=DAILY' } }],
       { zones: 'utc', provider, horizon: [1, 0] }), 'ICAL3005', '/components/0/series');

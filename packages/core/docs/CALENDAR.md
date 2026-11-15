@@ -317,9 +317,9 @@ compiled once and expanded inside a half-open horizon `[start, end)`,
 under a budget that every step of the walk is charged to. The answer is
 either complete, or incomplete with the limit that stopped it and exact
 counts. This release reads and checks the whole RRULE grammar for every
-frequency, and enumerates DAILY and WEEKLY rules. A valid SECONDLY,
-MINUTELY, HOURLY, MONTHLY or YEARLY rule is refused by name (`JY0020`).
-It never compiles into a rule that quietly returns no occurrences.
+frequency, and enumerates DAILY, WEEKLY, MONTHLY and YEARLY rules. A valid
+SECONDLY, MINUTELY or HOURLY rule is refused by name (`JY0020`). It never
+compiles into a rule that quietly returns no occurrences.
 
 ```js
 import { compileRecurrence, expandRecurrence, floatingValue, dateValue } from '@jarenjs/core/calendar';
@@ -453,8 +453,9 @@ fall.
 from DTSTART, so a horizon after the tenth occurrence of `COUNT=10` is
 complete and empty. A zoned rule's UTC UNTIL is compared as an instant.
 
-**The walk.** It runs one period at a time: a day for DAILY, and for
-WEEKLY a week that starts on WKST. BYSETPOS picks from each period's
+**The walk.** It runs one period at a time: a day for DAILY, a week
+that starts on WKST for WEEKLY, a month for MONTHLY and a year for
+YEARLY (see below). BYSETPOS picks from each period's
 set before DTSTART is applied, so WKST changes what
 `FREQ=WEEKLY;INTERVAL=2;BYDAY=TU,SU` makes. Without COUNT every period
 answers the same whatever came before it, so the walk jumps straight to
@@ -464,6 +465,39 @@ DTSTART and charges every step. A day the month does not have, such as
 An occurrence whose end passes 9999-12-31, the last day a value can
 name, has no spelling. The walk stops there with `status: 'incomplete'`
 and `limit: 'calendar-end'`, so a short list never reads as complete.
+
+**MONTHLY and YEARLY.** A period is a month or a year. With BYWEEKNO it
+is the run of weeks the year numbers, from its week 1 to the next year's
+week 1, so a week 1 that starts in December belongs to the next year.
+Every day of the period is examined. It is a candidate when it passes
+every BY part the rule has, the parts RFC 5545 §3.3.10 calls expanding
+and limiting alike:
+
+- BYMONTH, BYMONTHDAY and BYYEARDAY name the day's own month, its day of
+  the month and its day of the year. A negative value counts from the
+  end: `BYMONTHDAY=-1` is the last day of each month.
+- BYWEEKNO numbers the year's weeks. Week 1 is the first week, starting
+  on WKST, with at least four days of the year, and -1 is the last. A
+  year has a week 53 only when its weeks reach it.
+- BYDAY is a list, and each value selects: `MO` is every Monday and `1MO`
+  the first. The ordinal counts within the month, for MONTHLY and for
+  YEARLY with BYMONTH, and within the year for YEARLY without BYMONTH
+  (RFC 5545 errata 1913 and 3779). Beside BYMONTHDAY or BYYEARDAY it
+  limits them: `FREQ=MONTHLY;BYDAY=FR;BYMONTHDAY=13` is every Friday the
+  13th.
+- What the rule leaves out comes from DTSTART. MONTHLY with no BYMONTHDAY
+  or BYDAY keeps DTSTART's day of the month. YEARLY with no BYYEARDAY,
+  BYMONTHDAY or BYDAY keeps DTSTART's weekday under BYWEEKNO, and
+  otherwise its day of the month and, with no BYMONTH, its month.
+- A date the period does not have is skipped, never clamped or moved.
+  `FREQ=MONTHLY` from 31 January makes 31 March next, and `FREQ=YEARLY`
+  from 29 February makes only leap years.
+- INTERVAL counts months or years from DTSTART's own month or calendar
+  year.
+
+Every day of a period is charged, so a rule that never matches, such as
+`FREQ=YEARLY;BYMONTH=2;BYMONTHDAY=30`, costs one step per day walked and
+ends under its limits.
 
 A zoned answer is in order of instant, not of wall clock. A time a gap
 moved forward can start after a later wall clock does: in Amsterdam on
@@ -486,7 +520,7 @@ limit left out takes `RECURRENCE_LIMITS`.
 | Limit | Default | Counts |
 |---|---|---|
 | `maxOccurrences` | 10000 | occurrences returned |
-| `maxWork` | 1000000 | candidate steps: 1 for DTSTART, 1 per day examined, 1 per start time generated on a day that passes |
+| `maxWork` | 1000000 | candidate steps: 1 for DTSTART, 1 per day examined (every day of a MONTHLY or YEARLY period), 1 per start time generated on a day that passes |
 | `maxProviderCalls` | 100000 | calls to the provider's `candidates` and `toParts` |
 | `maxHorizonDays` | 36600 | days of horizon walked; a longer horizon is cut there |
 
@@ -500,7 +534,8 @@ after `n`, so it is the same engine. It is complete when it found `n`
 or the rule ended. Otherwise it is incomplete with the limit that
 stopped it, or `maxHorizonDays` when the horizon ran out first. A rule
 that never matches therefore ends in a limit, not a hang:
-`FREQ=DAILY;BYMONTH=2;BYMONTHDAY=30` under `{ maxWork: 10000 }` stops
+`FREQ=DAILY;BYMONTH=2;BYMONTHDAY=30` or
+`FREQ=YEARLY;BYMONTH=2;BYMONTHDAY=30` under `{ maxWork: 10000 }` stops
 with `limit: 'maxWork'` and `work: 10000`.
 
 ## Series
@@ -786,13 +821,13 @@ finite instant, is the runtime's own `TypeError`.
 | `JY0017` | a recurrence rule part is given twice |
 | `JY0018` | a recurrence rule part does not go with the frequency, the start or another part |
 | `JY0019` | the recurrence end (UNTIL) is not of the kind the start requires |
-| `JY0020` | the frequency is valid RRULE but is not enumerated in this release; only DAILY and WEEKLY are |
+| `JY0020` | the frequency is valid RRULE but is not enumerated in this release; only DAILY, WEEKLY, MONTHLY and YEARLY are |
 | `JY0021` | an override that ranges over this and future occurrences is kept as data but refused for expansion |
 
 ## Not here
 
-- **Frequencies.** MONTHLY, YEARLY and the sub-daily frequencies are
-  read and checked but not enumerated (`JY0020`).
+- **Frequencies.** The sub-daily frequencies (SECONDLY, MINUTELY and
+  HOURLY) are read and checked but not enumerated (`JY0020`).
 - **Series.** RANGE=THISANDFUTURE is kept but not expanded (`JY0021`).
   An RDATE or EXDATE of a zoned series names the series' zone, never
   another zone or a utc value.

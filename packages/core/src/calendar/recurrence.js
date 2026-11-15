@@ -3,11 +3,19 @@
 //#region Recurrence: compile once, expand inside a horizon
 // A rule compiles once into a plan of numbers; an expansion walks that
 // plan period by period (a day for DAILY, a WKST-aligned week for
-// WEEKLY) inside an explicit half-open horizon, charging every step to
-// a budget. The walk runs on wall clocks read as if UTC (`wall` below:
+// WEEKLY, a month for MONTHLY, a year for YEARLY: with BYWEEKNO the run
+// of weeks the year numbers, from its week 1 to the next year's) inside
+// an explicit half-open horizon, charging every step to a budget. The walk runs on wall clocks read as if UTC (`wall` below:
 // epoch milliseconds of the civil date and time, no zone); a zoned rule
 // resolves only the wall clocks its horizon needs, through the injected
 // provider, under the rule's policy.
+//
+// A MONTHLY or YEARLY period's candidates are the days of the period
+// that pass every BY part the rule has (RFC 5545 §3.3.10: the expanding
+// parts of its table pick days, the limiting ones drop them, and in both
+// cases a day is kept when it passes them all), with the parts it leaves
+// out taken from DTSTART. Each day of the period is examined and charged
+// once, so a rule that never matches (February 30) ends under its limits.
 //
 // COUNT and UNTIL keep their meaning for the whole rule. Without COUNT
 // every period yields the same occurrences whichever period came before
@@ -17,7 +25,7 @@
 // counts as the first occurrence"), whether or not the rule's parts
 // would generate it.
 
-import { civilFromDays, daysInMonth, isoWeekdayFromDays } from '../dates/civil.js';
+import { civilFromDays, daysFromCivil, daysInMonth, isLeapYear, isoWeekdayFromDays } from '../dates/civil.js';
 import { CalendarError } from './errors.js';
 import { admitValue, formatDate, LAST_DAY, utcValue } from './model.js';
 import { admitPolicy, admitProvider, identityOf, resolveLocal } from './resolve.js';
@@ -30,7 +38,7 @@ const MINUTE = 60000;
 /** Wider than any zone offset either way: a wall-clock window this much wider holds every instant window. */
 const MARGIN = 3 * DAY;
 /** The frequencies this release enumerates. */
-const ENUMERATED = Object.freeze(['DAILY', 'WEEKLY']);
+const ENUMERATED = Object.freeze(['DAILY', 'WEEKLY', 'MONTHLY', 'YEARLY']);
 
 /**
  * The limits an expansion stops at when the caller names none. Each one
@@ -64,7 +72,7 @@ export const RECURRENCE_LIMITS = /* @__PURE__ */ Object.freeze({
  * The limits of one expansion; any left out take {@link RECURRENCE_LIMITS}.
  * @typedef {Object} RecurrenceLimits
  * @property {number} [maxOccurrences] - occurrences returned
- * @property {number} [maxWork] - candidate steps: one per day examined, one per start time generated on a day that passes
+ * @property {number} [maxWork] - candidate steps: one per day examined (every day of a MONTHLY or YEARLY period), one per start time generated on a day that passes
  * @property {number} [maxProviderCalls] - calls to the provider's `candidates` and `toParts`
  * @property {number} [maxHorizonDays] - days of horizon walked
  */
@@ -105,7 +113,7 @@ export const RECURRENCE_LIMITS = /* @__PURE__ */ Object.freeze({
  * @typedef {Object} Plan
  * @property {RecurrenceKind} kind
  * @property {string} [zone]
- * @property {'DAILY' | 'WEEKLY'} freq
+ * @property {'DAILY' | 'WEEKLY' | 'MONTHLY' | 'YEARLY'} freq
  * @property {number} interval
  * @property {number | undefined} count
  * @property {number} untilWall - the last start wall a walk may reach (exact, or for a zoned rule its instant plus MARGIN)
@@ -114,10 +122,17 @@ export const RECURRENCE_LIMITS = /* @__PURE__ */ Object.freeze({
  * @property {number} startDay
  * @property {number} weekStart - the first day of DTSTART's WKST-aligned week
  * @property {readonly number[]} weekOffsets - WEEKLY: the days of each week, from its first day
+ * @property {number} startYear - YEARLY's period 0: DTSTART's calendar year, or with BYWEEKNO the year that numbers DTSTART's week
+ * @property {number} startMonth - DTSTART's month as year * 12 + month - 1: MONTHLY's period 0
+ * @property {number} wkst - the week's first day, 0 = Monday
  * @property {readonly number[]} times - milliseconds into the day of each start time a passing day yields
  * @property {boolean[] | null} byMonth
- * @property {readonly number[] | null} byMonthDay
+ * @property {readonly number[] | null} byMonthDay - for MONTHLY and YEARLY with DTSTART's day when the rule names no day
  * @property {boolean[] | null} byWeekday - DAILY: weekdays kept, ISO order from 0
+ * @property {readonly number[] | null} byWeekNo - YEARLY
+ * @property {readonly number[] | null} byYearDay - YEARLY
+ * @property {readonly (readonly [number, number])[] | null} byDay - MONTHLY and YEARLY: [weekday from 0 = Monday, ordinal or 0]
+ * @property {boolean} ordinalInYear - YEARLY without BYMONTH: an ordinal BYDAY counts within the year, not the month
  * @property {readonly number[] | null} setpos
  * @property {{ days: number, ms: number }} length - nominal days, then exact milliseconds
  * @property {any} [dtend] - a zoned rule's admitted DTEND, whose exact length needs the provider
@@ -187,9 +202,9 @@ export function wallOf(admitted) {
 /**
  * Compile a recurrence: a start, its length, and an RFC 5545 rule. The
  * whole grammar is checked for every frequency first; a valid rule whose
- * frequency this release does not enumerate (SECONDLY, MINUTELY, HOURLY,
- * MONTHLY, YEARLY) is then refused with `JY0020`, never compiled into
- * one that returns no occurrences.
+ * frequency this release does not enumerate (SECONDLY, MINUTELY, HOURLY)
+ * is then refused with `JY0020`, never compiled into one that returns no
+ * occurrences. DAILY, WEEKLY, MONTHLY and YEARLY are enumerated.
  *
  * - `dtstart` is a date, floating, utc or zoned value on a whole second.
  * - The length is `duration` (RFC 5545: nominal weeks and days, exact
@@ -253,7 +268,7 @@ export function compileRecurrence(definition) {
   }
   if (!ENUMERATED.includes(rule.FREQ)) {
     throw new CalendarError('JY0020', `FREQ=${rule.FREQ} is valid RRULE but is not enumerated in this release; `
-      + 'only DAILY and WEEKLY are', 'rrule.FREQ');
+      + 'only DAILY, WEEKLY, MONTHLY and YEARLY are', 'rrule.FREQ');
   }
   if (duration !== undefined && dtend !== undefined)
     throw new CalendarError('JY0014', 'a recurrence takes duration or dtend, not both', '/duration');
@@ -317,12 +332,42 @@ function planOf(kind, start, startWall, rule, length, policy, dtend) {
   }
   const wkst = WEEKDAYS.indexOf(rule.WKST ?? 'MO');
   const startWeekday = isoWeekdayFromDays(startDay) - 1;
-  const weekdays = (rule.BYDAY ?? [WEEKDAYS[startWeekday]]).map((name) => WEEKDAYS.indexOf(name));
+  const calendar = rule.FREQ === 'MONTHLY' || rule.FREQ === 'YEARLY';
+  const weekdays = calendar ? [] : (rule.BYDAY ?? [WEEKDAYS[startWeekday]]).map((name) => WEEKDAYS.indexOf(name));
+  const civil = civilFromDays(startDay);
+  let months = rule.BYMONTH;
+  let byMonthDay = rule.BYMONTHDAY ?? null;
+  /** @type {(readonly [number, number])[] | null} */
+  let byDay = null;
+  if (calendar) {
+    byDay = rule.BYDAY === undefined ? null
+      : rule.BYDAY.map((item) => /** @type {const} */ ([WEEKDAYS.indexOf(item.slice(-2)), item.length > 2 ? Number(item.slice(0, -2)) : 0]));
+    // a rule that names no day takes it from DTSTART (RFC 5545 §3.3.10):
+    // its weekday in each numbered week, or its day of the month (and,
+    // for YEARLY without BYMONTH, its month)
+    if (rule.BYMONTHDAY === undefined && rule.BYDAY === undefined && rule.BYYEARDAY === undefined) {
+      if (rule.BYWEEKNO !== undefined)
+        byDay = [[startWeekday, 0]];
+      else {
+        byMonthDay = [civil.day];
+        if (rule.FREQ === 'YEARLY' && months === undefined)
+          months = [civil.month];
+      }
+    }
+  }
+  // with BYWEEKNO a year is the run of weeks it numbers, and DTSTART's is
+  // the one its week belongs to (29 December can be in next year's week 1)
+  let startYear = civil.year;
+  if (rule.FREQ === 'YEARLY' && rule.BYWEEKNO !== undefined) {
+    startYear = civil.year + 1;
+    while (weekOne(startYear, wkst) > startDay)
+      startYear--;
+  }
   /** @type {boolean[] | null} */
   let byMonth = null;
-  if (rule.BYMONTH !== undefined) {
+  if (months !== undefined) {
     byMonth = new Array(13).fill(false);
-    for (const month of rule.BYMONTH)
+    for (const month of months)
       byMonth[month] = true;
   }
   /** @type {boolean[] | null} */
@@ -346,7 +391,7 @@ function planOf(kind, start, startWall, rule, length, policy, dtend) {
   return {
     kind,
     zone: start.value.zone,
-    freq: /** @type {'DAILY' | 'WEEKLY'} */ (rule.FREQ),
+    freq: /** @type {'DAILY' | 'WEEKLY' | 'MONTHLY' | 'YEARLY'} */ (rule.FREQ),
     interval: rule.INTERVAL ?? 1,
     count: rule.COUNT,
     untilWall,
@@ -355,10 +400,17 @@ function planOf(kind, start, startWall, rule, length, policy, dtend) {
     startDay,
     weekStart: startDay - ((startWeekday - wkst + 7) % 7),
     weekOffsets: Object.freeze([...new Set(weekdays.map((weekday) => (weekday - wkst + 7) % 7))].sort((a, b) => a - b)),
+    startYear,
+    startMonth: civil.year * 12 + civil.month - 1,
+    wkst,
     times: Object.freeze(times),
     byMonth,
-    byMonthDay: rule.BYMONTHDAY ?? null,
+    byMonthDay,
     byWeekday,
+    byWeekNo: rule.BYWEEKNO ?? null,
+    byYearDay: rule.BYYEARDAY ?? null,
+    byDay,
+    ordinalInYear: rule.FREQ === 'YEARLY' && rule.BYMONTH === undefined,
     setpos: rule.BYSETPOS ?? null,
     length,
     dtend,
@@ -440,6 +492,14 @@ export function reserveCall(budget) {
 }
 
 /**
+ * Whether `n` (from 1, or from -1 at the end) names position `position` of `length`.
+ * @param {number} n
+ * @param {number} position
+ * @param {number} length
+ */
+const names = (n, position, length) => (n > 0 ? n : length + n + 1) === position;
+
+/**
  * Whether a day passes the rule's limiting parts.
  * @param {Plan} plan
  * @param {number} day
@@ -452,11 +512,101 @@ function passes(plan, day) {
       return false;
     if (plan.byMonthDay !== null) {
       const last = daysInMonth(civil.year, civil.month);
-      if (!plan.byMonthDay.some((n) => (n > 0 ? n : last + n + 1) === civil.day))
+      if (!plan.byMonthDay.some((n) => names(n, civil.day, last)))
         return false;
     }
   }
   return plan.byWeekday === null || plan.byWeekday[isoWeekdayFromDays(day) - 1];
+}
+
+/**
+ * The first day of week 1 of a year: the week starting on `wkst` that
+ * holds at least four days of the year (RFC 5545 §3.3.10).
+ * @param {number} year
+ * @param {number} wkst - 0 = Monday
+ * @returns {number}
+ */
+function weekOne(year, wkst) {
+  const jan1 = daysFromCivil(year, 1, 1);
+  const back = (isoWeekdayFromDays(jan1) - 1 - wkst + 7) % 7;
+  return back > 3 ? jan1 - back + 7 : jan1 - back;
+}
+
+/**
+ * The days `[first, end)` of a MONTHLY or YEARLY period, counted in
+ * INTERVALs from DTSTART's month or year.
+ * @param {Plan} plan
+ * @param {number} period
+ * @returns {[number, number]}
+ */
+function periodDays(plan, period) {
+  if (plan.freq === 'MONTHLY') {
+    const index = plan.startMonth + period * plan.interval;
+    const year = Math.floor(index / 12);
+    const month = index - year * 12 + 1;
+    const first = daysFromCivil(year, month, 1);
+    return [first, first + daysInMonth(year, month)];
+  }
+  const year = plan.startYear + period * plan.interval;
+  if (plan.byWeekNo !== null)
+    return [weekOne(year, plan.wkst), weekOne(year + 1, plan.wkst)];
+  return [daysFromCivil(year, 1, 1), daysFromCivil(year + 1, 1, 1)];
+}
+
+/**
+ * The first MONTHLY or YEARLY period whose days can reach `day`: the one
+ * holding its month or year, or the one before when a numbered year's
+ * weeks may start in the previous December.
+ * @param {Plan} plan
+ * @param {number} day
+ * @returns {number}
+ */
+function periodBefore(plan, day) {
+  const civil = civilFromDays(day);
+  const offset = plan.freq === 'MONTHLY' ? civil.year * 12 + civil.month - 1 - plan.startMonth
+    : civil.year - plan.startYear - (plan.byWeekNo !== null ? 1 : 0);
+  return Math.max(0, Math.floor(offset / plan.interval));
+}
+
+/**
+ * Whether a day of a MONTHLY or YEARLY period `[first, end)` passes every
+ * BY part the rule has. BYWEEKNO counts the period's weeks; BYYEARDAY the
+ * day's own year; BYDAY's ordinal counts that weekday within the month,
+ * or within the year for YEARLY without BYMONTH.
+ * @param {Plan} plan
+ * @param {number} day
+ * @param {number} first
+ * @param {number} end
+ * @returns {boolean}
+ */
+function passesPeriod(plan, day, first, end) {
+  const civil = civilFromDays(day);
+  if (plan.byMonth !== null && !plan.byMonth[civil.month])
+    return false;
+  if (plan.byWeekNo !== null) {
+    const week = Math.floor((day - first) / 7) + 1;
+    const weeks = (end - first) / 7;
+    if (!plan.byWeekNo.some((n) => names(n, week, weeks)))
+      return false;
+  }
+  let yearDay = 0;
+  let yearLength = 0;
+  if (plan.byYearDay !== null || plan.ordinalInYear) {
+    yearDay = day - daysFromCivil(civil.year, 1, 1) + 1;
+    yearLength = isLeapYear(civil.year) ? 366 : 365;
+    if (plan.byYearDay !== null && !plan.byYearDay.some((n) => names(n, yearDay, yearLength)))
+      return false;
+  }
+  const monthLength = daysInMonth(civil.year, civil.month);
+  if (plan.byMonthDay !== null && !plan.byMonthDay.some((n) => names(n, civil.day, monthLength)))
+    return false;
+  if (plan.byDay === null)
+    return true;
+  const weekday = isoWeekdayFromDays(day) - 1;
+  const position = plan.ordinalInYear ? yearDay : civil.day;
+  const length = plan.ordinalInYear ? yearLength : monthLength;
+  return plan.byDay.some(([wanted, n]) => wanted === weekday
+    && (n === 0 || (n > 0 ? Math.floor((position - 1) / 7) + 1 : -Math.floor((length - position) / 7) - 1) === n));
 }
 
 /**
@@ -505,24 +655,30 @@ export function walk(plan, low, high, budget, visit) {
   if (plan.count !== undefined && count >= plan.count)
     return 'ended';
   const weekly = plan.freq === 'WEEKLY';
+  const calendar = plan.freq === 'MONTHLY' || plan.freq === 'YEARLY';
   const first = weekly ? plan.weekStart : plan.startDay;
   const step = (weekly ? 7 : 1) * plan.interval;
-  let period = plan.count === undefined ? Math.max(0, Math.floor((Math.floor(low / DAY) - first) / step)) : 0;
+  let period = 0;
+  if (plan.count === undefined)
+    period = calendar ? periodBefore(plan, Math.floor(low / DAY)) : Math.max(0, Math.floor((Math.floor(low / DAY) - first) / step));
   /** @type {number[]} */
   const candidates = [];
   for (;; period++) {
-    const periodDay = first + period * step;
+    let periodDay = first + period * step;
+    let periodEnd = 0;
+    if (calendar)
+      [periodDay, periodEnd] = periodDays(plan, period);
     if (periodDay * DAY > lastWall)
       return 'ended';
     if (periodDay * DAY > high)
       return 'window';
     candidates.length = 0;
-    const days = weekly ? plan.weekOffsets.length : 1;
+    const days = calendar ? periodEnd - periodDay : weekly ? plan.weekOffsets.length : 1;
     for (let i = 0; i < days; i++) {
-      const day = weekly ? periodDay + plan.weekOffsets[i] : periodDay;
+      const day = weekly ? periodDay + plan.weekOffsets[i] : periodDay + i;
       if (!charge(budget, 1))
         return 'stopped';
-      if (!passes(plan, day))
+      if (!(calendar ? passesPeriod(plan, day, periodDay, periodEnd) : passes(plan, day)))
         continue;
       if (!charge(budget, plan.times.length))
         return 'stopped';

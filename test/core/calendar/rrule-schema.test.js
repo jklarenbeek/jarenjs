@@ -105,7 +105,7 @@ describe('rrule.schema.json validates exactly the rules the grammar reads', () =
     const gaps = [
       [{ FREQ: 'DAILY', UNTIL: { kind: 'date', date: '2026-12-24' } }, floatingValue('2026-01-05', '09:00'), 'JY0019'],
       [{ FREQ: 'DAILY', BYHOUR: [9] }, dateValue('2026-01-05'), 'JY0018'],
-      [{ FREQ: 'MONTHLY', BYDAY: ['1FR'] }, floatingValue('2026-01-05', '09:00'), 'JY0020'],
+      [{ FREQ: 'HOURLY', BYMINUTE: [0] }, floatingValue('2026-01-05', '09:00'), 'JY0020'],
     ];
     for (const [rule, dtstart, code] of gaps) {
       assert.ok(valid(rule), JSON.stringify(rule));

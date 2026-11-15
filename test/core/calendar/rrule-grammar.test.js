@@ -51,11 +51,11 @@ describe('positive cases for every part, in every frequency the grammar has', ()
     ['FREQ=DAILY;BYMONTH=12,1;BYMONTHDAY=-1,1,31,+15', 'FREQ=DAILY;BYMONTHDAY=-1,1,15,31;BYMONTH=1,12'],
     ['FREQ=DAILY;BYDAY=MO,TU;BYSETPOS=-1,1', 'FREQ=DAILY;BYDAY=MO,TU;BYSETPOS=-1,1'],
     ['FREQ=WEEKLY;BYMONTH=6;BYSETPOS=366,-366', 'FREQ=WEEKLY;BYMONTH=6;BYSETPOS=-366,366'],
-    ['FREQ=MONTHLY;BYDAY=1FR,-1SU,+2MO,01TU', null],
-    ['FREQ=MONTHLY;BYMONTHDAY=-31,31', null],
-    ['FREQ=YEARLY;BYYEARDAY=1,-366,366;BYWEEKNO=-53,53,1;BYMONTH=1', null],
-    ['FREQ=YEARLY;BYDAY=20MO,-53SU', null],
-    ['FREQ=YEARLY;BYWEEKNO=20;BYDAY=MO;WKST=SU', null],
+    ['FREQ=MONTHLY;BYDAY=1FR,-1SU,+2MO,01TU', 'FREQ=MONTHLY;BYDAY=2MO,1TU,1FR,-1SU'],
+    ['FREQ=MONTHLY;BYMONTHDAY=-31,31', 'FREQ=MONTHLY;BYMONTHDAY=-31,31'],
+    ['FREQ=YEARLY;BYYEARDAY=1,-366,366;BYWEEKNO=-53,53,1;BYMONTH=1', 'FREQ=YEARLY;BYYEARDAY=-366,1,366;BYWEEKNO=-53,1,53;BYMONTH=1'],
+    ['FREQ=YEARLY;BYDAY=20MO,-53SU', 'FREQ=YEARLY;BYDAY=20MO,-53SU'],
+    ['FREQ=YEARLY;BYWEEKNO=20;BYDAY=MO;WKST=SU', 'FREQ=YEARLY;BYDAY=MO;BYWEEKNO=20;WKST=SU'],
     ['FREQ=HOURLY;BYYEARDAY=100;BYMONTHDAY=-2', null],
     ['FREQ=MINUTELY;INTERVAL=90;BYDAY=MO', null],
     ['FREQ=SECONDLY;BYSECOND=59', null],
@@ -252,7 +252,7 @@ describe('start-dependent rules', () => {
 });
 
 describe('a valid rule of a frequency not enumerated here is a typed refusal, never an empty answer', () => {
-  for (const freq of ['SECONDLY', 'MINUTELY', 'HOURLY', 'MONTHLY', 'YEARLY']) {
+  for (const freq of ['SECONDLY', 'MINUTELY', 'HOURLY']) {
     it(`FREQ=${freq} names its frequency and "this release"`, () => {
       assert.throws(() => compile(`FREQ=${freq};COUNT=3`), (/** @type {any} */ error) => {
         assert.strictEqual(error.code, 'JY0020');
@@ -262,6 +262,11 @@ describe('a valid rule of a frequency not enumerated here is a typed refusal, ne
       });
     });
   }
+  it('MONTHLY and YEARLY compile, and the refusal names the frequencies that are enumerated', () => {
+    for (const freq of ['MONTHLY', 'YEARLY'])
+      assert.strictEqual(compile(`FREQ=${freq};COUNT=3`).rrule.FREQ, freq);
+    assert.throws(() => compile('FREQ=HOURLY'), (/** @type {any} */ error) => /; only DAILY, WEEKLY, MONTHLY and YEARLY are$/.test(error.reason));
+  });
   it('the code table carries every recurrence code', () => {
     for (const code of ['JY0015', 'JY0016', 'JY0017', 'JY0018', 'JY0019', 'JY0020', 'JY0021'])
       assert.ok(Object.hasOwn(CALENDAR_CODES, code), code);

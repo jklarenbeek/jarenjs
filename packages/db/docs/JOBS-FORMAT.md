@@ -565,7 +565,7 @@ await store.jobs.enqueue('sync-report', { input: { day: '2026-08-05' } });
   idempotent outbox relay and durable receipts; they share no atomic transaction.
 - No priority classes in 0.1 (`run_at` ordering only), no cron
   expressions (recurring schedules are RFC 5545 rules from
-  `@jarenjs/core/calendar`, §11, DAILY and WEEKLY today), no timer of
+  `@jarenjs/core/calendar`, §11, DAILY, WEEKLY, MONTHLY and YEARLY today), no timer of
   the queue's own that fires them (a host calls `tick()`), no
   workflow-level compensation or sagas, no cross-process
   push — wake-on-write is same-process; everything else polls. A
@@ -701,7 +701,7 @@ await store.jobs.tick(); // on the host's own cadence
   - `series` is a compiled recurrence (`compileRecurrence`) or a series
     (`defineSeries`), as values or as their JSON. A rule the calendar
     refuses refuses here with the calendar's code: a valid frequency it
-    does not enumerate (MONTHLY, YEARLY) is `JY0020`, at schedule time and
+    does not enumerate (SECONDLY, MINUTELY, HOURLY) is `JY0020`, at schedule time and
     never at a fire.
   - A date or floating series is bound in `zone`, checked against the
     provider now (an unknown zone is `JY0001`; a zone with no provider is

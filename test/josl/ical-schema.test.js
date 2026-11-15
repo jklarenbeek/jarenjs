@@ -97,7 +97,7 @@ const REFUSED_BY_WRITER_ONLY = [
   ['an end of another kind', calendar([event({ start: floating('2026-03-02', '09:00'), end: { kind: 'date', date: '2026-03-03' } })])],
   ['a fraction of a second', calendar([event({ start: floating('2026-03-02', '09:00:00.5') })])],
   ['a lone surrogate in text', calendar([event({ start: { kind: 'date', date: '2026-03-02' }, summary: 'x\uD800' })])],
-  ['a frequency the calendar layer does not enumerate', calendar([{ type: 'event', series: { uid: 's', base: { dtstart: floating('2026-03-02', '09:00'), rrule: 'FREQ=MONTHLY' } } }])],
+  ['a frequency the calendar layer does not enumerate', calendar([{ type: 'event', series: { uid: 's', base: { dtstart: floating('2026-03-02', '09:00'), rrule: 'FREQ=HOURLY' } } }])],
   ['an override of a slot the series never makes', calendar([{ type: 'event', series: { uid: 's', base: { dtstart: floating('2026-03-02', '09:00'), rrule: 'FREQ=WEEKLY' },
     overrides: [{ recurrenceId: '2026-03-03T09:00:00', status: 'cancelled' }] } }])],
   ['a period of dates as an extra date', calendar([{ type: 'event', series: { uid: 's', rdates: [{ kind: 'date', date: '2026-03-01' }, { start: { kind: 'date', date: '2026-03-02' }, end: { kind: 'date', date: '2026-03-04' } }] } }])],

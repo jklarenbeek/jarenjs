@@ -171,9 +171,9 @@ What is refused rather than written wrong:
   differs from the first's (`ICAL3017`): an RDATE period runs between
   date-times.
 
-The recurrence rules the calendar layer enumerates are DAILY and WEEKLY;
-a series of another frequency is refused there (`ICAL3005`, its
-`JY0020` the cause).
+The recurrence rules the calendar layer enumerates are DAILY, WEEKLY,
+MONTHLY and YEARLY; a series of a sub-daily frequency is refused there
+(`ICAL3005`, its `JY0020` the cause).
 
 ## Free/busy
 
@@ -248,7 +248,7 @@ of the calendar layer is wrapped as `ICAL3005` with the `CalendarError` as
 | METHOD | `PUBLISH` only |
 | VEVENT: UID, DTSTAMP, DTSTART, DTEND, DURATION | supported |
 | VEVENT: SUMMARY, DESCRIPTION, LOCATION, STATUS, SEQUENCE | supported |
-| VEVENT: RRULE | DAILY and WEEKLY, for date, floating and utc series |
+| VEVENT: RRULE | DAILY, WEEKLY, MONTHLY and YEARLY, for date, floating and utc series |
 | VEVENT: RDATE (DATE, DATE-TIME, PERIOD), EXDATE, RECURRENCE-ID | supported (no RANGE) |
 | VFREEBUSY: UID, DTSTAMP, DTSTART, DTEND, FREEBUSY with FBTYPE | supported |
 | TZID, VTIMEZONE | not written: `zones: 'utc'` converts |

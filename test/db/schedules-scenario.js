@@ -55,6 +55,12 @@ export function scenarioSchedules() {
       rrule: 'FREQ=DAILY;BYHOUR=2,3;BYMINUTE=30;COUNT=6' }), missed: 'skip' },
     // no zone: unresolved, never fires
     { id: 'floating', kind: 'digest', series: daily, missed: 'skip' },
+    // the last Sunday of the month at 09:00, as stored JSON: both transition days, and one inside the days without ticks
+    { id: 'monthly', kind: 'report', series: { kind: 'recurrence', dtstart: { kind: 'floating', date: '2026-01-25', time: '09:00' },
+      rrule: { FREQ: 'MONTHLY', BYDAY: ['-1SU'] }, policy: 'rfc5545' }, zone: ZONE, missed: 'skip' },
+    // the transition days themselves, as dates, each year
+    { id: 'yearly', kind: 'close', series: { kind: 'recurrence', dtstart: { kind: 'date', date: '2026-03-29' },
+      rrule: 'FREQ=YEARLY;BYMONTH=3,10;BYDAY=-1SU', policy: 'rfc5545' }, zone: ZONE, missed: 'skip' },
   ];
 }
 
@@ -72,10 +78,8 @@ export function scenarioRefusals() {
   return [
     ['unknown zone', { id: 'r1', kind: 'k', series: compileRecurrence({ dtstart: floatingValue('2026-03-01', '09:00'), rrule: 'FREQ=DAILY' }),
       zone: 'Mars/Olympus_Mons', missed: 'skip' }],
-    ['monthly', { id: 'r2', kind: 'k', series: { kind: 'recurrence', dtstart: { kind: 'floating', date: '2026-03-01', time: '09:00' },
-      rrule: { FREQ: 'MONTHLY' }, policy: 'rfc5545' }, zone: ZONE, missed: 'skip' }],
-    ['yearly', { id: 'r3', kind: 'k', series: { kind: 'recurrence', dtstart: { kind: 'date', date: '2026-03-01' },
-      rrule: 'FREQ=YEARLY', policy: 'rfc5545' }, zone: ZONE, missed: 'skip' }],
+    ['hourly', { id: 'r2', kind: 'k', series: { kind: 'recurrence', dtstart: { kind: 'floating', date: '2026-03-01', time: '09:00' },
+      rrule: { FREQ: 'HOURLY' }, policy: 'rfc5545' }, zone: ZONE, missed: 'skip' }],
     ['zone beside a zoned rule', { id: 'r4', kind: 'k', series: compileRecurrence({
       dtstart: zonedValue('2026-03-01', '07:15', ZONE), rrule: 'FREQ=DAILY' }), zone: ZONE, missed: 'skip' }],
     ['unknown member', { id: 'r5', kind: 'k', series: compileRecurrence({ dtstart: floatingValue('2026-03-01', '09:00'), rrule: 'FREQ=DAILY' }),
@@ -138,7 +142,7 @@ export async function runScenario(stores, clock) {
  * @param {typeof import('node:assert/strict')} assert
  */
 export function assertScenario(t, provider, assert) {
-  assert.deepEqual(t.refusals, [['unknown zone', 'JY0001'], ['monthly', 'JY0020'], ['yearly', 'JY0020'],
+  assert.deepEqual(t.refusals, [['unknown zone', 'JY0001'], ['hourly', 'JY0020'],
     ['zone beside a zoned rule', 'JD0013'], ['unknown member', 'JD0013']]);
   const fired = t.ticks.flatMap((tick) => tick.fired);
   assert.equal(new Set(fired).size, fired.length, 'no occurrence fires twice');
@@ -165,17 +169,34 @@ export function assertScenario(t, provider, assert) {
   assert.ok(fired.includes('series@2026-10-26T09:00:00'));
   // a date series fires at the first instant of its day
   assert.equal(runAt.get('dates@2026-03-27'), Date.UTC(2026, 2, 26, 23));
+  // the last Sunday of the month: 09:00 local on both transition days; skip fires September's of the six due on 17 October
+  assert.deepEqual(fired.filter((id) => id.startsWith('monthly@')).map((id) => [id, runAt.get(id)]), [
+    ['monthly@2026-03-29T09:00:00', Date.UTC(2026, 2, 29, 7)],
+    ['monthly@2026-09-27T09:00:00', Date.UTC(2026, 8, 27, 7)],
+    ['monthly@2026-10-25T09:00:00', Date.UTC(2026, 9, 25, 8)],
+  ]);
+  // a yearly date series: the first instant of each transition day, before and after it
+  assert.deepEqual(fired.filter((id) => id.startsWith('yearly@')).map((id) => [id, runAt.get(id)]), [
+    ['yearly@2026-03-29', Date.UTC(2026, 2, 28, 23)],
+    ['yearly@2026-10-25', Date.UTC(2026, 9, 24, 22)],
+  ]);
   // three days without ticks across the autumn transition: skip fires the current one,
   // once the latest missed one beside it, catchUp 2 the latest two
   const back = t.ticks.find((tick) => tick.at === Date.UTC(2026, 9, 25, 13));
   assert.deepEqual(back.fired, ['utc@2026-10-23T05:00:00Z', 'utc@2026-10-25T05:00:00Z',
     'zoned-catchup@2026-10-23T07:15:00', 'zoned-catchup@2026-10-24T07:15:00', 'zoned-catchup@2026-10-25T07:15:00',
-    'daily-once@2026-10-24T09:00:00', 'daily-once@2026-10-25T09:00:00', 'daily-skip@2026-10-25T09:00:00']);
+    'daily-once@2026-10-24T09:00:00', 'daily-once@2026-10-25T09:00:00', 'daily-skip@2026-10-25T09:00:00',
+    'yearly@2026-10-25', 'monthly@2026-10-25T09:00:00']);
   assert.equal(back.skipped, 3);
   const byId = new Map(t.schedules.map((record) => [record.id, record]));
   assert.deepEqual(t.schedules.map((record) => [record.id, record.state]), [
     ['daily-once', 'active'], ['daily-skip', 'active'], ['dates', 'ended'], ['floating', 'unresolved'], ['gap', 'ended'],
-    ['series', 'active'], ['stalls', 'stalled'], ['utc', 'active'], ['weekly', 'active'], ['zoned-catchup', 'active']]);
+    ['monthly', 'active'], ['series', 'active'], ['stalls', 'stalled'], ['utc', 'active'], ['weekly', 'active'], ['yearly', 'active'],
+    ['zoned-catchup', 'active']]);
+  assert.deepEqual([byId.get('monthly').nextRunAt, byId.get('monthly').nextRecurrenceId, byId.get('monthly').counts],
+    [Date.UTC(2026, 10, 29, 8), '2026-11-29T09:00:00', { fired: 3, skipped: 5 }]);
+  assert.deepEqual([byId.get('yearly').nextRunAt, byId.get('yearly').nextRecurrenceId, byId.get('yearly').counts],
+    [Date.UTC(2027, 2, 27, 23), '2027-03-28', { fired: 2, skipped: 0 }]);
   // the backlog's search ran out of its budget: stalled with its counts, never dropped
   assert.deepEqual(byId.get('stalls').stall, { limit: 'maxWork', counts: { emitted: 0, work: 30, providerCalls: 0 } });
   assert.deepEqual(byId.get('stalls').counts, { fired: 5, skipped: 0 });
