@@ -19,6 +19,12 @@ Two layers, the suite's convention:
   `createPlayComponent()` factory (like `@jarenjs/calc`): a JSLT view
   (example rail, source editors, a dataset switcher, the run stage) the
   host composes.
+- **the host kit** (`@jarenjs/play/host`) — what an embedding host
+  composes around the component instead of writing it: the JSON Schema
+  runner for the `validate` seam, the language catalogs loaded through the
+  host's own `import()`s, the play slice and its reader-language rules, the
+  session file and the generated form's actions
+  ([Hosting play](#hosting-play)).
 
 Play is a **student tool**: it opens calm — one clean result per run — and
 drills deeper on demand. An engine's rich explainers (match cards, the
@@ -107,6 +113,110 @@ precision, an invalid I-Regexp), where it read `no`; an I-Regexp pattern
 `null` or an array is no I-Regexp (`null`), as a number already was, where
 it failed with a property-read `TypeError`.
 
+## Hosting play
+
+The website's `#/play` is a host built from `@jarenjs/play/host`; another
+host composes the same pieces. Each is a pure function over JSON, with no
+DOM, storage or bundler in it:
+
+```js
+import { createPlayComponent } from '@jarenjs/play/component';
+import {
+  createPlayCatalogs, createPackRequester, createPlayValidator, playDataForm,
+  PLAY_START, loadExample, withPlayLocale, runPlay, switchPlayOption, sessionOf,
+  playFormActions, PLAY_FORM_VIEW,
+} from '@jarenjs/play/host';
+import { stringFormats, numberFormats, dateTimeFormats, jsonFormats } from '@jarenjs/formats';
+import { buildFormModel, buildFormViewModel, formChromeLabels } from '@jarenjs/forms';
+import { FORM_NUMBER_VALUE, createFormView } from '@jarenjs/app';
+
+// 1. The languages: the host's own loader, one literal import() per pack,
+//    so a bundler splits one chunk per language and English loads none.
+const LOADERS = { de: () => import('@jarenjs/locales/de').then((m) => m.de) };
+const catalogs = createPlayCatalogs();
+const packs = createPackRequester({
+  catalogs,
+  load: async (code) => (Object.hasOwn(LOADERS, code) ? LOADERS[code]() : null),
+  onLoaded: (code) => console.log(`loaded ${code}`), // re-render and re-run here
+});
+
+// 2. The validator seam, and the component that runs through it.
+const validator = createPlayValidator({
+  catalogs,
+  formats: [stringFormats, numberFormats, dateTimeFormats, jsonFormats],
+  forms: { buildFormModel, buildFormViewModel, formChromeLabels },
+});
+const play = createPlayComponent({ validate: validator.validate });
+
+// 3. A slice, run in the reader's language.
+let lang = 'de';
+let slice = { ...PLAY_START, ...loadExample('validate-invalid') };
+await packs.request([lang]);                             // loaded de
+const result = await runPlay(play, slice, { lang, catalogs });
+result.ok;                                               // true
+result.panels.map((p) => p.id);                          // ['errors', 'verdict']
+
+/** @type {import('@jarenjs/play/host').PlayValidationReport} */
+const report = validator.validate(slice.source.schema, JSON.parse(slice.data.data), lang, []);
+report.valid;                                            // false
+report.errors[0].message;                                // 'darf nicht weniger als 2 Zeichen enthalten'
+
+// 4. The generated form, mounted beside the component's view model, in the
+//    language the slice runs in; its view rules read it there.
+const form = playDataForm(validator, withPlayLocale({ ...slice, dataView: 'form', dataValue: {} }, lang));
+form.formLabels.addItem;                                 // 'Element hinzufügen'
+const ui = { play: { ...play.viewModel({ play: slice }, { messages: catalogs.catalogFor(lang) }), ...form } };
+const formRules = createFormView(PLAY_FORM_VIEW).map((rule) => ({ ...rule, mode: play.mode }));
+const actions = playFormActions({ numberValue: FORM_NUMBER_VALUE }); // merged into the app's actions
+Object.keys(actions).length;                             // 6
+
+// 5. The reader picks a language on the Messages pane: it becomes theirs.
+const picked = switchPlayOption(slice, 'locale', 'fr');
+slice = { ...slice, ...picked };
+lang = picked.lang ?? lang;                              // 'fr'
+sessionOf(slice).config;                                 // {} (a session carries no language)
+```
+
+How to read it:
+
+- **Languages.** `createPlayCatalogs()` keeps each loaded `@jarenjs/locales`
+  pack compiled. `createPackRequester` asks the host's `load` for each
+  language not yet loaded, once, and asks a failed one again only when the
+  set of languages needed changes. The kit names no pack, so the host's
+  bundler decides the chunks.
+- **Validation.** `createPlayValidator` is the `validate` seam of
+  [PLAY-FORMAT §5](./docs/PLAY-FORMAT.md#5-host-injected-seams-the-dependency-light-contract).
+  It registers the referenced schemas before compiling, locates a broken one
+  at the `schemas` pane, and keeps the parser's words (`schemaJsonReason`) for
+  a host to word an unreadable schema in its reader's language. It localizes
+  over copies and keeps the text a schema wrote (`inlineMessage`). It keeps
+  the last compile hot, so `run`, `formView` and `formLabels` share it. The
+  format sets and the form functions are the host's to hand in, so a host
+  that renders no form imports no forms code.
+- **The reader's language.** Only the reader sets it: `switchPlayOption` on
+  the `locale` pane answers `lang`, and the host makes that its language.
+  `withPlayLocale` (inside `runPlay`) runs every engine with a locale option
+  in it. An example made to show one language (`loadExample` answers its
+  `exampleLocale`) shows it for its own run. A session never carries a
+  language (`sessionOf`), and a host that opens one clears `exampleLocale`.
+- **Input guards.** `sessionToLoaded` and `sessionFromDocument` read a share
+  token or file as safe defaults. `blankSession` and `withPlayLocale` look an
+  engine up only by its own name, never by one every object inherits.
+- **The generated form.** `playDataForm` answers `{ dataForm, formLabels }`
+  for the validate engine's form pane, in the language the slice runs in (an
+  example made to show one keeps it). `PLAY_FORM_VIEW` is the
+  `createFormView` options that read them at `ui.play` and write through
+  `playFormActions`.
+- **Number text.** `playFormActions` writes a number control through the
+  number expression the host hands in. Pass `@jarenjs/app`'s
+  `FORM_NUMBER_VALUE`, so `.5`, `-.5` and `01` read as the standard form
+  actions read them.
+
+The example's other imports are the host's own:
+`npm install @jarenjs/formats @jarenjs/forms @jarenjs/app` beside
+`@jarenjs/play`. A host that renders no generated form needs only
+`@jarenjs/play`.
+
 ## Exports
 
 Every subpath a consumer can import, derived from the manifest by
@@ -117,6 +227,7 @@ Every subpath a consumer can import, derived from the manifest by
 |---|---|---|
 | `@jarenjs/play` | JavaScript | declared |
 | `@jarenjs/play/component` | JavaScript | declared |
+| `@jarenjs/play/host` | JavaScript | declared |
 | `@jarenjs/play/styles/play.css` | asset | — |
 | `@jarenjs/play/package.json` | metadata | — |
 <!--/fact-->

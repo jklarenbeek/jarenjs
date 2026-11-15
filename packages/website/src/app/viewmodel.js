@@ -8,7 +8,7 @@
  */
 
 import { deriveSuite, draftConformanceTable, SUITES } from '../boundaries/bench.js';
-import { formViewFor, formLabelsFor, referencedSchemas, catalogFor } from '../boundaries/validator.js';
+import { dataFormFor, catalogFor } from '../boundaries/validator.js';
 import { SITE_LANGUAGES } from '../boundaries/lang.js';
 import { siteText, sitePackOf } from '../messages.js';
 import { HOME_CONTENT } from '../content/home.js';
@@ -265,10 +265,10 @@ export function viewModel(state) {
     // the form tree is built here (it needs @jarenjs/forms, a host dep) from
     // the schema source + the structured buffer, and mounted at `dataForm`;
     // its chrome speaks the language of its alerts (read at `formLabels`)
-    if (play.engine === 'validate' && play.dataView === 'form') {
-      ui.play.dataForm = formViewFor(play.source?.schema ?? '', play.dataValue, referencedSchemas(play.source?.schemas),
-        play.config?.locale);
-      ui.play.formLabels = formLabelsFor(play.config?.locale);
+    const form = dataFormFor(play);
+    if (form !== null) {
+      ui.play.dataForm = form.dataForm;
+      ui.play.formLabels = form.formLabels;
     }
   }
   if (page === 'flow') ui.flow = { ...flowPageViewModel(state.flow, catalogFor(state.lang)), title: siteText(sitePackOf(state))('site/flow/title') };

@@ -1,10 +1,12 @@
 # @jarenjs/play architecture
 
-The package supplies the engine registry, example library and a JSLT
-component. The embedding app owns state, actions, scheduling and browser
-capabilities. The executable host is
+The package supplies the engine registry, example library, a JSLT
+component and a host kit. The embedding app owns state, actions, scheduling
+and browser capabilities. The executable host is
 [`packages/website/src/boundaries/play.js`](../../packages/website/src/boundaries/play.js),
-with its reducer and run loop in the website's `src/app/` directory.
+with its reducer and run loop in the website's `src/app/` directory; it
+takes its validator, language catalogs, slice rules and session file from
+`@jarenjs/play/host`, the same kit another host composes.
 
 ## Package boundaries
 
@@ -18,6 +20,10 @@ with its reducer and run loop in the website's `src/app/` directory.
 | `src/component/index.js` | `createPlayComponent`, including default operator, renderer and validator seams |
 | `src/component/viewmodel.js` | Pure derivation from `state.play` into rail, editor and result nodes |
 | `src/component/view.js` | JSLT rules in mode `play`, rooted at `$.ui.play` |
+| `src/host/catalogs.js` | `PLAY_LOCALES`, compiled catalogs, the pack requester over a host-supplied loader, `localizePlayErrors` |
+| `src/host/validator.js` | `createPlayValidator`: the `validate` seam with referenced schemas, the generated form and its chrome; `playDataForm`, `referencedSchemas`, `detectDraftName` |
+| `src/host/session.js` | `PLAY_START`, the reader-language rules (`withPlayLocale`, `switchPlayOption`, `loadExample`), `runPlay`, the session file |
+| `src/host/forms.js` | `playFormActions`: the generated form's actions over `/play/dataValue`; `PLAY_FORM_VIEW`, the `createFormView` options that read `ui.play` |
 | `styles/play.css` | Desktop grid, mobile pane switcher and result/editor styling |
 
 `createPlayComponent({ operators, renderers, validate, messages })` returns
@@ -27,7 +33,11 @@ with its reducer and run loop in the website's `src/app/` directory.
 `src/messages.js`) is also the view model's default language, and
 `viewModel(state, { messages })` takes another per call.
 Visual engines delegate rendering; schema validation delegates to the host.
-The package imports neither a DOM renderer nor browser storage.
+The package imports neither a DOM renderer nor browser storage. No subpath imports
+a locale pack, a format set or forms code: `/host` adds the JSON Schema
+runner over `@jarenjs/validate`, which the root already depends on, and
+takes the format sets, the form functions and every pack from the host (the
+packs through the host's own loader).
 
 ## State and actions supplied by the host
 
@@ -54,8 +64,14 @@ effects. Input bindings carry the native event's serialized `value`.
 
 The host also keeps presentation state (`panel`, `deep`, `deepPick`,
 `mobilePane`, `ratio`, `dataView`) and session state (`name`, `savedName`,
-`names`, `shared`). The generated validation form is a host integration;
-the package only exposes the place to render it. Register the shared app
+`names`, `shared`); `@jarenjs/play/host`'s `PLAY_START` is that slice at
+rest. The reader's language is the host's (`lang`), set only by the reader:
+`play/option` on the `locale` pane writes the `lang` that `switchPlayOption`
+answers; `play/example` keeps the example's `exampleLocale` for its own run;
+opening a session clears it. The generated validation form is a host
+integration (`playDataForm` mounts it at `ui.play.dataForm` and
+`ui.play.formLabels`, `PLAY_FORM_VIEW` renders it, `playFormActions` are the
+`play/f-*` actions); the component only exposes the place to render it. Register the shared app
 splitter widget for the component's separator and commit its ratio into
 the play slice.
 

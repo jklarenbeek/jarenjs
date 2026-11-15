@@ -478,6 +478,13 @@ establish registry publication or downstream acceptance.
 
 ## @jarenjs/play
 
+- [ ] **The play slice's reducers are still each host's** — `@jarenjs/play/host`
+  exports the slice (`PLAY_START`), its reader-language rules and the
+  generated form's actions, but `play/loaded`, `play/option-set` and
+  `play/loaded-session` (which write `exampleLocale` and the reader's
+  language) are action documents each host writes from ARCHITECTURE's
+  table. A kit builder for them would take the host's language pointer
+  (the site's `/lang`) as an argument.
 The engine playground behind `#/play`: pick an engine and an example, edit the
 source or the data, it runs live. Membership is a rule rather than a list — an
 engine belongs here iff it is a **pure function of `(source, data)`**:

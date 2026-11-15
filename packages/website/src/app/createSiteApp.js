@@ -50,6 +50,7 @@ import { runHeroDispatch } from '../boundaries/hero.js';
 import { rawPath } from '../boundaries/markdown.js';
 import { isSiteLanguage, languageDir, loadSitePack, loadLocalePack } from '../boundaries/lang.js';
 import { addLocalePack, catalogFor } from '../boundaries/validator.js';
+import { createPackRequester } from '@jarenjs/play/host';
 import { siteText, sitePackOf } from '../messages.js';
 import { hashWithout } from '../lib/route.js';
 import { calcEditEffects, createRatesLayer } from '@jarenjs/calc/component';
@@ -676,35 +677,16 @@ function wireBoundaries(app, debounceMs, navigate, projectController, env) {
   // the package words of every language on screen — the site language and
   // the one an example made to show — load on demand, once per page; the
   // state learns each, which re-renders and re-runs in it
-  /** @type {Set<string>} */
-  const requestedPacks = new Set();
-  /** @type {Set<string>} the packs that failed, asked again only when the need changes */
-  const failedPacks = new Set();
-  let wantedKey = '';
+  const packs = createPackRequester({
+    catalogs: { add: addLocalePack, catalogFor },
+    load: (code) => (env.loadLocalePack ?? loadLocalePack)(code),
+    // offline and never fetched: that language's words stay English, and
+    // the next change of what is needed asks again
+    onLoaded: (code) => app.dispatch('site/pack-loaded', code),
+  });
   const requestPacks = () => {
     const state = app.getState();
-    const wanted = [state.lang, state.play ? withPlayLocale(state.play, state.lang).config?.locale : null];
-    const key = wanted.join('|');
-    if (key !== wantedKey) {
-      wantedKey = key;
-      for (const code of failedPacks) requestedPacks.delete(code);
-      failedPacks.clear();
-    }
-    for (const code of wanted) {
-      if (code == null || code === 'en' || catalogFor(code) !== undefined || !isSiteLanguage(code)
-        || requestedPacks.has(/** @type {string} */ (code))) continue;
-      const lang = /** @type {string} */ (code);
-      requestedPacks.add(lang);
-      (env.loadLocalePack ?? loadLocalePack)(lang).then((pack) => {
-        if (pack === null) return;
-        addLocalePack(lang, pack);
-        app.dispatch('site/pack-loaded', lang);
-      }, () => {
-        // offline and never fetched: that language's words stay English,
-        // and the next change of what is needed asks again
-        failedPacks.add(lang);
-      });
-    }
+    void packs.request([state.lang, state.play ? withPlayLocale(state.play, state.lang).config?.locale : null]);
   };
   requestPacks();
 

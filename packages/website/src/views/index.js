@@ -16,6 +16,7 @@ import { CHARTSPAGE_RULES } from './chartspage.js';
 import { PROJECT_IDE_RULES } from './ide.js';
 import { projectRules, projectModes } from '@jarenjs/studio/component';
 import { playRules, playModes } from '@jarenjs/play/component';
+import { PLAY_FORM_VIEW } from '@jarenjs/play/host';
 import { FLOW_RULES } from './flowstudio.js';
 
 import { DATA_RULES } from './data.js';
@@ -63,14 +64,7 @@ export const STYLESHEET = {
     // the Play validate engine's generated form (PLAY_05b): the same stylesheet
     // in the `play` mode, writing through play-scoped form actions into
     // /play/dataValue (mirrored back to the data text, which re-validates)
-    ...createFormView({
-      root: '$.ui.play.dataForm',
-      // the chrome follows the Messages language while the form is open
-      labelsPath: '$.ui.play.formLabels',
-      actions: {
-        input: 'play/f-input', check: 'play/f-check', number: 'play/f-number',
-        json: 'play/f-json', add: 'play/f-add', remove: 'play/f-remove',
-      },
-    }).map((rule) => ({ ...rule, mode: 'play' })),
+    // (the chrome follows the Messages language while the form is open)
+    ...createFormView(PLAY_FORM_VIEW).map((rule) => ({ ...rule, mode: 'play' })),
   ],
 };

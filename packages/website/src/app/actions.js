@@ -8,6 +8,7 @@
  */
 
 import { FORM_NUMBER_VALUE } from '@jarenjs/app';
+import { playFormActions } from '@jarenjs/play/host';
 import { DATA_ACTIONS } from '@jarenjs/studio/data';
 import { PROJECT_ACTIONS } from '@jarenjs/studio/component';
 
@@ -397,17 +398,8 @@ export const ACTIONS = {
   ] },
   'play/data-mirror': { patch: [{ op: 'add', path: '/play/data/data', value: '$payload' }] },
   // the six standard form actions, writing into `/play/dataValue` under
-  // play-scoped names. Unlike @jarenjs/app's createFormActions they treat
-  // the root pointer ('') as a `replace` (the buffer always exists) and
-  // never remove a cleared member: a cleared text control keeps `''`, so
-  // clearing a root-level control cannot leave the buffer undefined for
-  // the mirror that serializes it
-  'play/f-input': { patch: [{ op: { $if: [{ $or: ['$payload.element', { $eq: ['$payload.pointer', ''] }] }, 'replace', 'add'] }, path: { $concat: ['/play/dataValue', '$payload.pointer'] }, value: '$event.value' }] },
-  'play/f-check': { patch: [{ op: { $if: [{ $or: ['$payload.element', { $eq: ['$payload.pointer', ''] }] }, 'replace', 'add'] }, path: { $concat: ['/play/dataValue', '$payload.pointer'] }, value: '$event.checked' }] },
-  'play/f-number': { patch: [{ op: { $if: [{ $or: ['$payload.element', { $eq: ['$payload.pointer', ''] }] }, 'replace', 'add'] }, path: { $concat: ['/play/dataValue', '$payload.pointer'] }, value: FORM_NUMBER_VALUE }] },
-  'play/f-json': { patch: [{ op: { $if: [{ $or: ['$payload.element', { $eq: ['$payload.pointer', ''] }] }, 'replace', 'add'] }, path: { $concat: ['/play/dataValue', '$payload.pointer'] }, value: '$event.formJsonValue' }] },
-  'play/f-add': { patch: [{ op: 'add', path: { $concat: ['/play/dataValue', '$payload.pointer', '/-'] }, value: '$payload.value' }] },
-  'play/f-remove': { patch: [{ op: 'remove', path: { $concat: ['/play/dataValue', '$payload.pointer'] } }] },
+  // play-scoped names, number text read by the standard number rule
+  ...playFormActions({ numberValue: FORM_NUMBER_VALUE }),
 
   ...DATA_ACTIONS,
 

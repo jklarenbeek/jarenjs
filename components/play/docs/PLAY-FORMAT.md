@@ -257,7 +257,8 @@ shape for each:
   draft, compileMs, validateMs, schemaError }` (errors already localized; a
   fault found in a referenced document adds `schemaPane: 'schemas'`, which
   locates the error at that pane instead of `schema`), so the compiled validator and the
-  `@jarenjs/locales` packs stay in the host.
+  `@jarenjs/locales` packs stay in the host. `@jarenjs/play/host`'s
+  `createPlayValidator(...).validate` is such a runner.
 - `operators` — a registry threaded to the `query`/`jslt`/`jtlt` engines.
 - `messages` — the reader's language: a COMPILED catalog
   (`compileMessageCatalog` over a `@jarenjs/locales` pack, say). Every word

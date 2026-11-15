@@ -205,7 +205,7 @@ and the live heap they hold — the V8 heap after two forced full
 collections, run on the main thread so each has finished when the heap
 is read, less the same process's heap before the import. Each heap is
 the median of <!--fact:closure.runs-->5<!--/fact--> fresh processes, whose runs differed by at
-most <!--fact:closure.spread-->10 KiB<!--/fact--> for any one subpath; native memory a built-in
+most <!--fact:closure.spread-->18 KiB<!--/fact--> for any one subpath; native memory a built-in
 allocates for itself (`node:crypto`'s, say) is not in it. A heap depends
 on the runtime and the host — these were measured on one machine,
 with <!--fact:closure.host-->Node v24.22.1 on linux x64<!--/fact--> — while a module count is
@@ -213,7 +213,7 @@ exact: `npm run test:tree-shaking` fails when one differs from the
 tree's. The heaps are re-measured for every release
 (`npm run test:tree-shaking -- --write`), and
 [`benchmark/node-closures.json`](../benchmark/node-closures.json) holds
-the same figures for all <!--fact:closure.subpaths-->275<!--/fact--> importable subpaths of
+the same figures for all <!--fact:closure.subpaths-->276<!--/fact--> importable subpaths of
 every package, each file of a wildcard export (`@jarenjs/core/dates/*`)
 included.
 
@@ -257,7 +257,7 @@ included.
 | `./node-process` | 101 | core 61, json 21, db 19 | 4.7 |
 | `./node-worker` | 101 | core 61, json 21, db 19 | 4.7 |
 | `./postgres` | 119 | core 62, db 36, json 21 | 5.1 |
-| `./query` | 132 | core 62, db 43, json 21, validate 6 | 7.5 |
+| `./query` | 132 | core 62, db 43, json 21, validate 6 | 7.4 |
 | `./relational` | 122 | core 62, db 33, json 21, validate 6 | 5.9 |
 | `./schedules` | 43 | core 28, db 9, json 6 | 1.9 |
 | `./search` | 92 | core 66, json 21, db 5 | 4.1 |
@@ -297,7 +297,7 @@ included.
 | `.` | 87 | core 61, json 26 | 3.9 |
 | `./basic` | 3 | json 2, core 1 | 0.2 |
 | `./canonical` | 17 | core 10, json 7 | 0.9 |
-| `./formula` | 85 | core 61, json 24 | 3.7 |
+| `./formula` | 85 | core 61, json 24 | 3.8 |
 | `./formula/batch` | 86 | core 61, json 25 | 3.8 |
 | `./formula/migrate` | 88 | core 61, json 27 | 4.1 |
 | `./jslt` | 103 | core 72, json 31 | 4.1 |
