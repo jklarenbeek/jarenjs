@@ -162,6 +162,30 @@ function icalTable(stream) {
   });
 }
 
+/**
+ * The iCalendar reader: `parseIcal` and `createIcalReader`. The provider
+ * resolves a TZID that names an IANA zone; `strict` turns every report
+ * entry into a refusal; the limits are octet and count bounds.
+ */
+export const ICAL_READ = /* @__PURE__ */ icalReadTable(false);
+
+/** `iterateIcal`: the reader, plus cancellation. */
+export const ICAL_ITERATE = /* @__PURE__ */ icalReadTable(true);
+
+/**
+ * The iCalendar readers' tables, built only where they are imported.
+ * @param {boolean} iterate - with the pull reader's signal
+ * @returns {OptionTable}
+ */
+function icalReadTable(iterate) {
+  return table({
+    provider: rule((v) => v === null || typeof v === 'object', 'a zone provider'),
+    strict: BOOLEAN,
+    ...limits(['maxOctets', 'maxComponents', 'maxLineOctets', 'maxParameters', 'maxDepth', 'maxProperties', 'maxReported']),
+    ...(iterate ? { signal: SIGNAL } : {}),
+  });
+}
+
 /** `toGbnf`: the grammar's dialect. */
 export const GBNF = table({ mode: oneOf('josl', 'toml') });
 

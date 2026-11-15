@@ -76,6 +76,7 @@ const OPTION_OF = Object.freeze({
   JOSL2001: 'maxTotalBytes', JOSL2002: 'maxRecordBytes', JOSL2003: 'maxTokenBytes', JOSL2004: 'maxDepth', JOSL2005: 'maxRetainedValues',
   JSONX2001: 'maxTotalBytes', JSONX2002: 'maxTokenBytes', JSONX2003: 'maxDepth', JSONX2004: 'maxRetainedValues',
   ICAL2001: 'maxOctets', ICAL2002: 'maxComponents', ICAL2003: 'maxRdates',
+  ICAL2004: 'maxLineOctets', ICAL2005: 'maxParameters', ICAL2006: 'maxDepth', ICAL2007: 'maxProperties',
 });
 
 /**

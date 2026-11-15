@@ -383,7 +383,7 @@ describe('ical: limits are checked before a component is emitted', () => {
   const octets = new TextEncoder().encode(whole).length;
 
   it('the tables are frozen and name their options', () => {
-    assert.deepStrictEqual(Object.keys(ICAL_LIMIT_CODES), ['ICAL2001', 'ICAL2002', 'ICAL2003']);
+    assert.deepStrictEqual(Object.keys(ICAL_LIMIT_CODES), ['ICAL2001', 'ICAL2002', 'ICAL2003', 'ICAL2004', 'ICAL2005', 'ICAL2006', 'ICAL2007']);
     assert.ok(Object.isFrozen(ICAL_LIMIT_CODES) && Object.isFrozen(ICAL_CODES));
   });
 

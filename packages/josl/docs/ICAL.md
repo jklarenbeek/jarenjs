@@ -1,12 +1,14 @@
 # `@jarenjs/josl/ical`
 
-An iCalendar (RFC 5545) writer over the values of
+An iCalendar (RFC 5545) writer and reader over the values of
 [`@jarenjs/core/calendar`](../../core/docs/CALENDAR.md): single events,
 recurring events (a series with its rule, extra dates, excluded dates and
 overrides) and free/busy spans. Every time is written by its kind, and a
 zoned time is written only under a zone mode the caller names. Nothing
 outside the documented subset is written raw: an unknown member, property
-or component is refused with a code.
+or component is refused with a code. The reader reads the same subset
+back, canonical mode: what lies outside it is reported, never silently
+interpreted ([Reading](#reading)).
 
 ```js
 import { stringifyIcal } from '@jarenjs/josl/ical';
@@ -197,6 +199,7 @@ date, floating or zoned span is refused (`ICAL3017`).
 
 ## Limits
 
+The writer's limits; the reader's are under [Reader limits](#reader-limits).
 Each limit defaults to `Infinity`, takes a positive integer, and is
 checked before the component that would cross it is emitted. A crossing
 is a `JoslLimitError` with the limit's code; the calendar is never
@@ -211,16 +214,171 @@ returned truncated.
 An expansion also runs under the calendar layer's limits (`limits`, the
 `RECURRENCE_LIMITS` defaults when absent).
 
+## Reading
+
+```js
+import { parseIcal } from '@jarenjs/josl/ical';
+import { createIntlZoneProvider } from '@jarenjs/locales/intl-zones';
+
+const text = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Example//Staff rota//EN',
+  'BEGIN:VEVENT', 'UID:early-shift', 'DTSTART;TZID=Europe/Amsterdam:20260302T070000', 'DURATION:PT8H',
+  'BEGIN:VALARM', 'ACTION:DISPLAY', 'TRIGGER:-PT15M', 'END:VALARM',
+  'END:VEVENT', 'END:VCALENDAR', ''].join('\r\n');
+const { calendar, report } = parseIcal(text, { provider: createIntlZoneProvider({ revision: '2026e' }) });
+calendar.components[0].start; // { kind: 'zoned', date: '2026-03-02', time: '07:00:00', zone: 'Europe/Amsterdam' }
+report.unsupported[0].path;   // '/VCALENDAR/VEVENT[0]/VALARM[0]' (code ICAL1013)
+```
+
+- `parseIcal(text, options)` reads a whole calendar, as a string or as
+  UTF-8 octets, and returns `{ calendar: { prodId, method?, components },
+  report }`.
+- `createIcalReader(options)` reads it from chunks: `feed(chunk)` returns
+  the components the chunk completed, `end()` returns `{ calendar,
+  report }` with the components still held.
+- `iterateIcal(chunks, options)` pulls an async (or plain) iterable of
+  chunks and yields `{ type: 'component', component }` per component, then
+  `{ type: 'end', calendar: { prodId, method? }, report }`; `signal`
+  aborts between chunks, and a consumer that stops early closes the
+  source once.
+
+All three run one engine. A single event or a free/busy component is
+handed over as soon as its END is read. A recurring event's overrides may
+come anywhere in the file, so a series and its overrides are held until
+the input ends and then handed over in the order their series began. The
+reader takes no clock: a component without a DTSTAMP has none.
+
+### The syntax layer
+
+Content lines are read as octets. A line is unfolded at CRLF plus one
+space or tab before it is decoded, so a fold an exporter placed inside a
+UTF-8 sequence reads whole; each unfolded line must then be UTF-8
+(`ICAL1001`). A chunk may end anywhere, inside a UTF-8 sequence, a CRLF,
+a fold or an escape, without changing what is read. A bare line feed is
+read as CRLF and reported (`ICAL1010`), as the CSV reader reads `\n` and
+`\r\n` alike; a carriage return no line feed follows is refused
+(`ICAL1004`). A byte order mark at the start and empty lines are skipped.
+Names are read case-insensitively; parameter values may be quoted, and a
+quoted value may hold `:`, `;` and `,` (RFC 6868 caret escapes are not
+decoded). Every diagnosis carries the physical `line` the content starts
+on and its path, such as `/VCALENDAR/VEVENT[2]/DTSTART` (components are
+counted per name inside their parent, from 0).
+
+### Times by kind
+
+| Written | Read as |
+|---|---|
+| `DTSTART:20260302T080000Z` | `utc` |
+| `DTSTART;VALUE=DATE:20260302` | `date` |
+| `DTSTART:20260302T090000` | `floating` |
+| `DTSTART;TZID=Europe/Amsterdam:20260302T090000` | `zoned`, when the TZID is an IANA name the provider knows; a single event gets `policy: 'rfc5545'` |
+| `DTSTART;VALUE=DATE` with `DTEND;VALUE=DATE` | `date-range` |
+
+A TZID that is not an IANA name (a Windows zone name, a prefixed name, an
+offset), that the provider does not know, or that arrives with no
+provider withholds its component (`ICAL1019`): a zone is never guessed. A
+VTIMEZONE is reported and not compiled in this release (`ICAL1014`); a
+TZID that names an IANA zone resolves through the provider, whatever the
+VTIMEZONE of that name says. A DTEND at its DTSTART is read as no end,
+which a time without one has.
+
+### Series
+
+A VEVENT with an RRULE or an RDATE is a recurring event; its `series` is
+a value `defineSeries` returned. The rule is compiled by
+`compileRecurrence`, so DAILY, WEEKLY, MONTHLY and YEARLY are read, and a
+sub-daily rule withholds its event with the calendar layer's `JY0020` as
+the cause. RDATE (DATE, DATE-TIME, PERIOD) and EXDATE are read as extra
+and excluded dates; an RDATE of DTSTART says nothing DTSTART does not,
+and is left out. Without a rule, DTSTART and every RDATE are the
+occurrences, each as long as the event. A VEVENT with the series' UID and
+a RECURRENCE-ID is an override: STATUS:CANCELLED makes it a cancelled
+slot, any other a moved one. An override with no DTEND or DURATION lasts
+what such an event lasts (nothing for a time, a day for a date), so its
+end is written out where that differs from the slot's length. An
+override's SUMMARY, DESCRIPTION, LOCATION, STATUS, SEQUENCE or DTSTAMP
+that differs from its series' is reported (`ICAL1016`); the series' value
+is kept. RANGE=THISANDFUTURE is kept as data and reported (`ICAL1015`);
+expanding it is refused (`JY0021`).
+
+### The report
+
+Everything outside the subset is an entry of `report.unsupported`, in the
+order read: `{ code, name, path, line, reason }`, with `withheld: true`
+when its whole component is left out of the model and `cause` (the
+calendar layer's code, reason and path) when that layer refused.
+`report.counts` counts the entries by code; past `maxReported` entries are
+counted, not listed (`report.omitted`).
+
+- Left out, the rest read: a property (`ICAL1011`: X- properties,
+  ATTENDEE, ORGANIZER, CATEGORIES, METHOD other than PUBLISH, ...), a
+  parameter (`ICAL1012`: LANGUAGE, ALTREP, X- parameters, ...), a
+  component with everything inside it (`ICAL1013`: VTODO, VJOURNAL,
+  VALARM, VAVAILABILITY, X- components), a VTIMEZONE (`ICAL1014`).
+- Withheld: a component that lacks or repeats a property (`ICAL1017`), a
+  value not of its property's form or kind (`ICAL1018`), an unresolved
+  TZID (`ICAL1019`), a refusal of the calendar layer (`ICAL1020`), an
+  override no series claims or a second series of one UID (`ICAL1021`),
+  and what would change when the event occurs that this release does not
+  read (`ICAL1022`: EXRULE, EXDATE with no rule, a zoned length placed
+  only by the zone's offsets).
+
+`strict: true` refuses at the first entry, with the entry's code. Text the
+reader cannot follow is refused in either mode (`ICAL1001`-`ICAL1009`).
+
+### Reader limits
+
+Each limit defaults to `Infinity`, takes a positive integer, and is
+checked as the octets that cross it arrive: a crossing is a
+`JoslLimitError` with the limit's code and the line, and nothing past it
+is read.
+
+| Option | Code | Counts |
+|---|---|---|
+| `maxOctets` | `ICAL2001` | octets of input |
+| `maxComponents` | `ICAL2002` | components, every BEGIN inside the calendar |
+| `maxLineOctets` | `ICAL2004` | octets of one unfolded content line |
+| `maxParameters` | `ICAL2005` | parameters of one content line |
+| `maxDepth` | `ICAL2006` | nesting of components, the calendar counted as 1 |
+| `maxProperties` | `ICAL2007` | properties of one component |
+
+`maxReported` bounds the entries the report lists. A series is held
+until the end, so `maxComponents` and `maxProperties` bound what the
+reader holds.
+
 ## Codes
 
-`IcalError` is a coded error: `code`, `reason`, and `docPath`, a JSON
-pointer into the calendar (`/components/2/summary`); `stringifyIcal` and
-`createIcalWriter` give the same pointer for the same component. A refusal
-of the calendar layer is wrapped as `ICAL3005` with the `CalendarError` as
-`cause`.
+`IcalError` is a coded error: `code`, `reason`, and `docPath`. The
+writer's `docPath` is a JSON pointer into the calendar
+(`/components/2/summary`); `stringifyIcal` and `createIcalWriter` give the
+same pointer for the same component, and a refusal of the calendar layer
+is wrapped as `ICAL3005` with the `CalendarError` as `cause`. The reader's
+`docPath` is the path in the text (`/VCALENDAR/VEVENT[2]/DTSTART`), with
+the physical `line`.
 
 | Code | Meaning |
 |---|---|
+| `ICAL1001` | the input is not UTF-8, or a string holds a lone surrogate |
+| `ICAL1002` | a content line is not NAME *(;PARAM) : VALUE, or BEGIN or END names no component |
+| `ICAL1003` | a parameter is not NAME=VALUE *(,VALUE), or a quoted value is not closed where it ends |
+| `ICAL1004` | a control character other than a tab, or a carriage return no line feed follows |
+| `ICAL1005` | an END names a component other than the one open |
+| `ICAL1006` | the input ends inside a component |
+| `ICAL1007` | content outside the calendar: before BEGIN:VCALENDAR, after its END, or a calendar inside a calendar |
+| `ICAL1008` | the calendar is not iCalendar 2.0 in the Gregorian scale: VERSION or PRODID missing, repeated or other |
+| `ICAL1009` | the reader has ended or stopped, and takes no more input |
+| `ICAL1010` | reported: a bare line feed, read as CRLF |
+| `ICAL1011` | reported: a property outside the subset, left out |
+| `ICAL1012` | reported: a parameter outside the subset, its property read without it |
+| `ICAL1013` | reported: a component outside the subset, left out with everything inside it |
+| `ICAL1014` | reported: a VTIMEZONE, not compiled in this release |
+| `ICAL1015` | reported: an override over this and future occurrences, kept as data |
+| `ICAL1016` | reported: an override's property differs from its series', whose value is kept |
+| `ICAL1017` | withheld: a component lacks a property it requires, repeats one, or holds two that exclude each other |
+| `ICAL1018` | withheld: a value is not of the form or kind its property takes here |
+| `ICAL1019` | withheld: a TZID that names no IANA zone the provider knows, or no provider |
+| `ICAL1020` | withheld: the calendar layer refused a value, rule or series (cause attached) |
+| `ICAL1021` | withheld: an override with no series of its UID, or a second series of one UID |
+| `ICAL1022` | withheld: what changes when the event occurs and this release does not read (EXRULE, EXDATE with no rule, a zoned length) |
 | `ICAL3001` | the calendar or a component is not an object of the documented model, or lacks a member it requires |
 | `ICAL3002` | a member or component type outside the documented subset; it is refused, never written raw |
 | `ICAL3003` | a member holds a value of a form it does not take |
@@ -242,16 +400,20 @@ of the calendar layer is wrapped as `ICAL3005` with the `CalendarError` as
 
 ## Capability matrix
 
-| Component or property | Written |
-|---|---|
-| VCALENDAR: VERSION, PRODID | supported |
-| METHOD | `PUBLISH` only |
-| VEVENT: UID, DTSTAMP, DTSTART, DTEND, DURATION | supported |
-| VEVENT: SUMMARY, DESCRIPTION, LOCATION, STATUS, SEQUENCE | supported |
-| VEVENT: RRULE | DAILY, WEEKLY, MONTHLY and YEARLY, for date, floating and utc series |
-| VEVENT: RDATE (DATE, DATE-TIME, PERIOD), EXDATE, RECURRENCE-ID | supported (no RANGE) |
-| VFREEBUSY: UID, DTSTAMP, DTSTART, DTEND, FREEBUSY with FBTYPE | supported |
-| TZID, VTIMEZONE | not written: `zones: 'utc'` converts |
-| VAVAILABILITY, AVAILABLE | not in this release |
-| VTODO, VJOURNAL, VALARM, ATTENDEE, ORGANIZER, X- properties | refused |
-| Reading iCalendar | not in this release |
+| Component or property | Written | Read |
+|---|---|---|
+| VCALENDAR: VERSION, PRODID | supported | supported (VERSION 2.0) |
+| CALSCALE | not written | GREGORIAN; any other refused (`ICAL1008`) |
+| METHOD | `PUBLISH` only | `PUBLISH`; any other reported (`ICAL1011`) |
+| VEVENT: UID, DTSTAMP, DTSTART, DTEND, DURATION | supported | supported |
+| VEVENT: SUMMARY, DESCRIPTION, LOCATION, STATUS, SEQUENCE | supported | supported |
+| VEVENT: RRULE | DAILY, WEEKLY, MONTHLY and YEARLY, for date, floating and utc series | DAILY, WEEKLY, MONTHLY and YEARLY, every kind; sub-daily withheld (`ICAL1020`, `JY0020`) |
+| VEVENT: RDATE (DATE, DATE-TIME, PERIOD), EXDATE, RECURRENCE-ID | supported (no RANGE) | supported; RANGE=THISANDFUTURE kept and reported (`ICAL1015`) |
+| VEVENT: EXRULE | not written | withheld (`ICAL1022`) |
+| VFREEBUSY: UID, DTSTAMP, DTSTART, DTEND, FREEBUSY with FBTYPE | supported | supported |
+| TZID | not written: `zones: 'utc'` converts | an IANA name the provider knows; any other withheld (`ICAL1019`) |
+| VTIMEZONE | not written | preserved (later): reported, not compiled (`ICAL1014`) |
+| VAVAILABILITY, AVAILABLE | not in this release | reported (`ICAL1013`) |
+| VTODO, VJOURNAL, VALARM, X- components | refused | reported (`ICAL1013`) |
+| ATTENDEE, ORGANIZER, X- and other properties | refused | reported (`ICAL1011`) |
+| LANGUAGE, ALTREP, X- and other parameters | not written | reported (`ICAL1012`) |

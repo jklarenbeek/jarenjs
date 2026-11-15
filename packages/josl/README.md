@@ -407,7 +407,7 @@ What each subpath carries:
 | `@jarenjs/josl/jsonx-stream` | `createJsonxStreamReader`, `parseJsonxStream` |
 | `@jarenjs/josl/csv` | `parseCsv`, `parseCsvDocument`, `stringifyCsv`, `sniffCsvDialect` |
 | `@jarenjs/josl/csv-stream` | `createCsvStreamReader`, `parseCsvStream`, `iterateCsvStream`, `createCsvStreamWriter` |
-| `@jarenjs/josl/ical` | `stringifyIcal`, `createIcalWriter`, `IcalError`, `ICAL_CODES` (an iCalendar writer; see [docs/ICAL.md](docs/ICAL.md)) |
+| `@jarenjs/josl/ical` | `stringifyIcal`, `createIcalWriter`, `parseIcal`, `createIcalReader`, `iterateIcal`, `IcalError`, `ICAL_CODES` (an iCalendar writer and reader; see [docs/ICAL.md](docs/ICAL.md)) |
 | `@jarenjs/josl/values` | `LocalDate`, `LocalTime`, `LocalDateTime` |
 | `@jarenjs/josl/schemas/*` | schema artifacts (`jaren-josl-data.schema.json`, `jaren-josl-ical.schema.json`) |
 
@@ -584,9 +584,31 @@ const text = stringifyIcal({
 text.split('\r\n')[6]; // 'DTSTART;VALUE=DATE:20261225'
 ```
 
+`parseIcal` reads iCalendar back into the same model, canonical mode: a
+TZID resolves only when it names an IANA zone the injected provider
+knows, a rule goes through the calendar layer (all four frequencies; a
+sub-daily one is refused by name), and everything outside the subset -
+VTODO, VALARM, X- properties, a VTIMEZONE, which is not compiled - is
+listed in `report.unsupported` with its path and line, never silently
+interpreted. `createIcalReader` and `iterateIcal` read the same way from
+chunks; a chunk may end anywhere.
+
+```js
+import { parseIcal } from '@jarenjs/josl/ical';
+import { createIntlZoneProvider } from '@jarenjs/locales/intl-zones';
+
+const { calendar, report } = parseIcal([
+  'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Example//Rota//EN',
+  'BEGIN:VEVENT', 'UID:standup', 'DTSTART;TZID=Europe/Amsterdam:20260302T090000',
+  'DURATION:PT15M', 'RRULE:FREQ=WEEKLY;BYDAY=MO;COUNT=4', 'X-COLOR:teal',
+  'END:VEVENT', 'END:VCALENDAR', ''].join('\r\n'), { provider: createIntlZoneProvider() });
+calendar.components[0].series.base.dtstart.zone; // 'Europe/Amsterdam'
+report.unsupported[0].path; // '/VCALENDAR/VEVENT[0]/X-COLOR'
+```
+
 The model, the zone mode, the limits, the codes and the capability matrix
-are in [docs/ICAL.md](docs/ICAL.md). The writer is reached only through its
-subpath, so the root import does not load the calendar layer.
+are in [docs/ICAL.md](docs/ICAL.md). The writer and reader are reached only
+through their subpath, so the root import does not load the calendar layer.
 
 ## Generating JOSL with LLMs
 

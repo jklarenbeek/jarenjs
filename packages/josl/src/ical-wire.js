@@ -14,14 +14,43 @@
 import { CodedError } from '@jarenjs/core/errors';
 
 /**
- * The refusals of the iCalendar writer, one code each. `ICAL1xxx` is
- * left to a reader and `ICAL2xxx` to the size limits
- * (`ICAL_LIMIT_CODES`); the writer's own refusals are `ICAL3xxx`.
- * @type {Readonly<Record<'ICAL3001' | 'ICAL3002' | 'ICAL3003' | 'ICAL3004' | 'ICAL3005' | 'ICAL3006'
+ * The diagnoses of the iCalendar reader and the refusals of the writer,
+ * one code each. The reader's are `ICAL1xxx`: `ICAL1001`-`ICAL1009`
+ * stop the read (the text is not an iCalendar object it can follow),
+ * `ICAL1010`-`ICAL1022` are entries of its report (thrown instead under
+ * `strict`). `ICAL2xxx` are the size limits (`ICAL_LIMIT_CODES`); the
+ * writer's own refusals are `ICAL3xxx`.
+ * @type {Readonly<Record<'ICAL1001' | 'ICAL1002' | 'ICAL1003' | 'ICAL1004' | 'ICAL1005' | 'ICAL1006'
+ *   | 'ICAL1007' | 'ICAL1008' | 'ICAL1009' | 'ICAL1010' | 'ICAL1011' | 'ICAL1012' | 'ICAL1013'
+ *   | 'ICAL1014' | 'ICAL1015' | 'ICAL1016' | 'ICAL1017' | 'ICAL1018' | 'ICAL1019' | 'ICAL1020'
+ *   | 'ICAL1021' | 'ICAL1022'
+ *   | 'ICAL3001' | 'ICAL3002' | 'ICAL3003' | 'ICAL3004' | 'ICAL3005' | 'ICAL3006'
  *   | 'ICAL3007' | 'ICAL3008' | 'ICAL3009' | 'ICAL3010' | 'ICAL3011' | 'ICAL3012' | 'ICAL3013'
  *   | 'ICAL3014' | 'ICAL3015' | 'ICAL3016' | 'ICAL3017' | 'ICAL3018', string>>}
  */
 export const ICAL_CODES = /* @__PURE__ */ Object.freeze({
+  ICAL1001: 'the input is not UTF-8, or a string holds a lone surrogate',
+  ICAL1002: 'a content line is not NAME *(;PARAM) : VALUE, or BEGIN or END names no component',
+  ICAL1003: 'a parameter is not NAME=VALUE *(,VALUE), or a quoted value is not closed where it ends',
+  ICAL1004: 'a line holds a control character other than a tab, or a carriage return no line feed follows',
+  ICAL1005: 'an END names a component other than the one open',
+  ICAL1006: 'the input ends inside a component',
+  ICAL1007: 'content outside the calendar: before BEGIN:VCALENDAR, after its END, or a calendar inside a calendar',
+  ICAL1008: 'the calendar is not iCalendar 2.0 in the Gregorian scale: VERSION or PRODID missing, repeated or other',
+  ICAL1009: 'the reader has ended or stopped, and takes no more input',
+  ICAL1010: 'a line ends in a bare line feed; it is read as CRLF',
+  ICAL1011: 'a property outside the subset; it is left out of the model',
+  ICAL1012: 'a parameter outside the subset; its property is read without it',
+  ICAL1013: 'a component outside the subset; it is left out of the model with everything inside it',
+  ICAL1014: 'a VTIMEZONE; it is not compiled in this release, and a TZID that names an IANA zone resolves through the provider',
+  ICAL1015: 'an override over this and future occurrences; it is kept as data and its expansion refused',
+  ICAL1016: 'an override\'s property differs from its series\'; the series\' value is kept',
+  ICAL1017: 'a component lacks a property it requires, repeats one, or holds two that exclude each other; it is withheld',
+  ICAL1018: 'a value is not of the form or kind its property takes here; its component is withheld',
+  ICAL1019: 'a TZID that names no IANA zone the provider knows, or no provider; its component is withheld, never guessed',
+  ICAL1020: 'the calendar layer refused a value, rule or series; its CalendarError is the cause and the component is withheld',
+  ICAL1021: 'an override with no series of its UID, or a second series of one UID; it is withheld',
+  ICAL1022: 'what changes when the event occurs and this release does not read (EXRULE, EXDATE with no rule, a zoned length); its component is withheld',
   ICAL3001: 'the calendar or a component is not an object of the documented model, or lacks a member it requires',
   ICAL3002: 'a member or component type outside the documented subset; it is refused, never written raw',
   ICAL3003: 'a member holds a value of a form it does not take',
@@ -43,9 +72,12 @@ export const ICAL_CODES = /* @__PURE__ */ Object.freeze({
 });
 
 /**
- * The refusal of the iCalendar writer: a {@link CodedError} whose `code`
- * is one of {@link ICAL_CODES} and whose `docPath` is a JSON pointer into
- * the calendar model (`/components/2/summary`, `/options/zones`).
+ * The refusal of the iCalendar writer or reader: a {@link CodedError}
+ * whose `code` is one of {@link ICAL_CODES}. The writer's `docPath` is a
+ * JSON pointer into the calendar model (`/components/2/summary`,
+ * `/options/zones`); the reader's is the path of the content in the
+ * text (`/VCALENDAR/VEVENT[2]/DTSTART`), with its 1-based physical
+ * `line`.
  */
 export class IcalError extends CodedError {
   /**
@@ -53,22 +85,34 @@ export class IcalError extends CodedError {
    * @param {string} reason - the bare reason; `message` is composed per the coded contract
    * @param {string} [docPath] - the member at fault
    * @param {unknown} [cause] - the calendar layer's refusal, when it refused
+   * @param {number} [line] - the reader's: the physical line the content starts on
    */
-  constructor(code, reason, docPath = undefined, cause = undefined) {
+  constructor(code, reason, docPath = undefined, cause = undefined, line = undefined) {
     super('IcalError', code, reason, docPath, cause !== undefined ? { cause } : undefined);
+    if (line !== undefined) {
+      // the reason stays bare; the message names the line
+      this.line = line;
+      this.message = `${this.message} (line ${line})`;
+    }
   }
 }
 
 /**
- * The writer's size limits, by option name. Each is checked before the
+ * The size limits, by option name. The writer checks each before the
  * component that would cross it is emitted, so a refusal never leaves a
- * calendar that looks whole.
- * @type {Readonly<Record<'ICAL2001' | 'ICAL2002' | 'ICAL2003', string>>}
+ * calendar that looks whole; the reader checks each as the octets that
+ * cross it arrive (`maxOctets`, `maxComponents` and the reader's own
+ * `ICAL2004`-`ICAL2007`).
+ * @type {Readonly<Record<'ICAL2001' | 'ICAL2002' | 'ICAL2003' | 'ICAL2004' | 'ICAL2005' | 'ICAL2006' | 'ICAL2007', string>>}
  */
 export const ICAL_LIMIT_CODES = /* @__PURE__ */ Object.freeze({
   ICAL2001: 'the calendar exceeds maxOctets',
   ICAL2002: 'the calendar has more than maxComponents components',
   ICAL2003: 'the calendar has more than maxRdates extra dates',
+  ICAL2004: 'an unfolded content line exceeds maxLineOctets',
+  ICAL2005: 'a content line has more than maxParameters parameters',
+  ICAL2006: 'components nest deeper than maxDepth',
+  ICAL2007: 'a component has more than maxProperties properties',
 });
 
 //#endregion

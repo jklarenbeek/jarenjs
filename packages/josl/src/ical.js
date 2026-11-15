@@ -1,7 +1,7 @@
 //@ts-check
 
 /**
- * `@jarenjs/josl/ical` - an iCalendar (RFC 5545) writer over the
+ * `@jarenjs/josl/ical` - an iCalendar (RFC 5545) writer and reader over the
  * `@jarenjs/core/calendar` model: events (single, or a recurring series
  * with its extra dates, excluded dates and overrides) and free/busy
  * spans, written by kind - utc as `...Z`, date as `VALUE=DATE`, floating
@@ -10,7 +10,10 @@
  * escaped; a member outside the documented subset is refused, never
  * written raw. `stringifyIcal` returns the whole calendar and
  * `createIcalWriter` writes it one component at a time; both run one
- * emitter. See docs/ICAL.md.
+ * emitter. `parseIcal`, `createIcalReader` and `iterateIcal` read
+ * iCalendar back into the same model through one engine, canonical
+ * mode: what is outside the subset is reported, never silently
+ * interpreted. See docs/ICAL.md.
  * @module
  */
 
@@ -261,3 +264,4 @@ export function stringifyIcal(calendar, options = undefined) {
 }
 
 export { ICAL_CODES, ICAL_LIMIT_CODES, IcalError, JoslLimitError };
+export { parseIcal, createIcalReader, iterateIcal, IcalReader } from './ical-read.js';
