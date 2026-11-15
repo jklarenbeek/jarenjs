@@ -444,6 +444,9 @@
     ["you found me", "data"],
     ["{\n  \"title\": \"kitchen sink\",\n  \"count\": 1_000_000,\n  \"match\": /^ok$/i,\n  \"at\": 2026-07-18T12:00:00Z,\n  \"day\": 2026-07-18,\n  \"ratio\": nan,\n  \"tags\": [\"a\", \"b\"]\n}", "data"]
   ],
+  "components/play/src/host/validator.js": [
+    ["Invalid JSON: ", "English-by-design-paragraph"]
+  ],
   "components/studio/src/component/data/actions.js": [
     ["$event.value", "not-prose"]
   ],
@@ -2390,9 +2393,6 @@
     ["public projection · RFC 8785 · SHA-256", "English-by-design-paragraph"],
     ["status codes", "English-by-design-paragraph"],
     ["the alarm that catches a drifted artifact", "English-by-design-paragraph"]
-  ],
-  "packages/website/src/boundaries/validator.js": [
-    ["Invalid JSON: ", "English-by-design-paragraph"]
   ],
   "packages/website/src/boundaries/webmcp.js": [
     ["Apply a JSON Patch and validate the complete result at the observed revision.", "English-by-design-paragraph"],
