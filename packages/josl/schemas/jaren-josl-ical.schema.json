@@ -1,0 +1,628 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jarenjs.dev/schemas/jaren-josl-ical/0.1",
+  "title": "iCalendar writer model (@jarenjs/josl/ical)",
+  "description": "The calendar stringifyIcal writes: a product id, an optional method and a list of components - single events, recurring events (a series: a rule, extra dates, excluded dates and overrides) and free/busy spans. Times are the temporal values of @jarenjs/core/calendar (register the temporal and rrule schemas first). Not expressible here, and refused by the writer only: a zoned value with no zones mode, provider or policy (ICAL3008-ICAL3010), a zoned recurring series with no horizon (ICAL3011), an end not after its start or of another kind (ICAL3007), a fraction of a second (ICAL3006), a lone surrogate in text (ICAL3004), and what the calendar layer refuses of a series (ICAL3005, ICAL3015-ICAL3017).",
+  "type": "object",
+  "required": [
+    "prodId",
+    "components"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "prodId": {
+      "$ref": "#/$defs/text"
+    },
+    "method": {
+      "const": "publish"
+    },
+    "components": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/component"
+      }
+    }
+  },
+  "$defs": {
+    "text": {
+      "description": "TEXT: any characters but a control character other than a tab or a line break.",
+      "type": "string",
+      "pattern": "^[^\\u0000-\\u0008\\u000B\\u000C\\u000E-\\u001F\\u007F]*$"
+    },
+    "uid": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/text"
+        }
+      ],
+      "minLength": 1
+    },
+    "instant": {
+      "description": "An instant: whole epoch milliseconds or a utc value.",
+      "oneOf": [
+        {
+          "type": "integer",
+          "minimum": -62167219200000,
+          "maximum": 253402300799000
+        },
+        {
+          "$ref": "https://jarenjs.dev/schemas/jaren-core/calendar/temporal/0.1#/$defs/utc"
+        }
+      ]
+    },
+    "duration": {
+      "description": "An RFC 5545 duration: weeks, or days and then hours, minutes and seconds; never negative.",
+      "type": "string",
+      "pattern": "^\\+?P(?:\\d+W|(?=\\d|T\\d)(?:\\d+D)?(?:T(?=\\d)(?:\\d+H)?(?:\\d+M)?(?:\\d+S)?)?)$"
+    },
+    "component": {
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "enum": [
+            "event",
+            "freebusy"
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "event"
+              }
+            },
+            "required": [
+              "series"
+            ]
+          },
+          "then": {
+            "$ref": "#/$defs/recurringEvent"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "event"
+              }
+            },
+            "not": {
+              "required": [
+                "series"
+              ]
+            }
+          },
+          "then": {
+            "$ref": "#/$defs/event"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "freebusy"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/$defs/freebusy"
+          }
+        }
+      ]
+    },
+    "event": {
+      "description": "A single event. end is exclusive; a date-range start is its own end.",
+      "type": "object",
+      "required": [
+        "type",
+        "uid",
+        "start"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "event"
+        },
+        "uid": {
+          "$ref": "#/$defs/uid"
+        },
+        "start": {
+          "$ref": "https://jarenjs.dev/schemas/jaren-core/calendar/temporal/0.1"
+        },
+        "end": {
+          "$ref": "https://jarenjs.dev/schemas/jaren-core/calendar/temporal/0.1#/$defs/end"
+        },
+        "duration": {
+          "$ref": "#/$defs/duration"
+        },
+        "policy": {
+          "enum": [
+            "rfc5545",
+            "later",
+            "reject"
+          ]
+        },
+        "dtstamp": {
+          "$ref": "#/$defs/instant"
+        },
+        "summary": {
+          "$ref": "#/$defs/text"
+        },
+        "description": {
+          "$ref": "#/$defs/text"
+        },
+        "location": {
+          "$ref": "#/$defs/text"
+        },
+        "status": {
+          "enum": [
+            "tentative",
+            "confirmed",
+            "cancelled"
+          ]
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "not": {
+        "required": [
+          "end",
+          "duration"
+        ]
+      }
+    },
+    "recurringEvent": {
+      "description": "A recurring event: its uid, sequence and times are the series'.",
+      "type": "object",
+      "required": [
+        "type",
+        "series"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "event"
+        },
+        "series": {
+          "$ref": "#/$defs/series"
+        },
+        "dtstamp": {
+          "$ref": "#/$defs/instant"
+        },
+        "summary": {
+          "$ref": "#/$defs/text"
+        },
+        "description": {
+          "$ref": "#/$defs/text"
+        },
+        "location": {
+          "$ref": "#/$defs/text"
+        },
+        "status": {
+          "enum": [
+            "tentative",
+            "confirmed",
+            "cancelled"
+          ]
+        }
+      }
+    },
+    "series": {
+      "description": "A series definition, as defineSeries takes it with its base as compileRecurrence takes it; a JSON copy of a defined series (with its kind members) reads the same.",
+      "type": "object",
+      "required": [
+        "uid"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "series"
+        },
+        "uid": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "revision": {
+          "type": "string",
+          "minLength": 1
+        },
+        "base": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/recurrence"
+            }
+          ]
+        },
+        "rdates": {
+          "type": "array",
+          "items": {
+            "oneOf": [
+              {
+                "description": "A series value: date, floating, utc or zoned (never a date range).",
+                "allOf": [
+                  {
+                    "$ref": "https://jarenjs.dev/schemas/jaren-core/calendar/temporal/0.1"
+                  },
+                  {
+                    "properties": {
+                      "kind": {
+                        "enum": [
+                          "date",
+                          "floating",
+                          "utc",
+                          "zoned"
+                        ]
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "$ref": "#/$defs/period"
+              }
+            ]
+          }
+        },
+        "exdates": {
+          "type": "array",
+          "items": {
+            "description": "A series value: date, floating, utc or zoned (never a date range).",
+            "allOf": [
+              {
+                "$ref": "https://jarenjs.dev/schemas/jaren-core/calendar/temporal/0.1"
+              },
+              {
+                "properties": {
+                  "kind": {
+                    "enum": [
+                      "date",
+                      "floating",
+                      "utc",
+                      "zoned"
+                    ]
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "overrides": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/override"
+          }
+        }
+      },
+      "anyOf": [
+        {
+          "required": [
+            "base"
+          ],
+          "properties": {
+            "base": {
+              "type": "object"
+            }
+          }
+        },
+        {
+          "required": [
+            "rdates"
+          ],
+          "properties": {
+            "rdates": {
+              "minItems": 1
+            }
+          }
+        }
+      ]
+    },
+    "recurrence": {
+      "type": "object",
+      "required": [
+        "dtstart",
+        "rrule"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "recurrence"
+        },
+        "dtstart": {
+          "description": "A series value: date, floating, utc or zoned (never a date range).",
+          "allOf": [
+            {
+              "$ref": "https://jarenjs.dev/schemas/jaren-core/calendar/temporal/0.1"
+            },
+            {
+              "properties": {
+                "kind": {
+                  "enum": [
+                    "date",
+                    "floating",
+                    "utc",
+                    "zoned"
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        "duration": {
+          "$ref": "#/$defs/duration"
+        },
+        "dtend": {
+          "allOf": [
+            {
+              "$ref": "https://jarenjs.dev/schemas/jaren-core/calendar/temporal/0.1#/$defs/end"
+            },
+            {
+              "properties": {
+                "kind": {
+                  "enum": [
+                    "date",
+                    "floating",
+                    "utc",
+                    "zoned"
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        "rrule": {
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "$ref": "https://jarenjs.dev/schemas/jaren-core/calendar/rrule/0.1"
+            }
+          ]
+        },
+        "wkst": {
+          "enum": [
+            "MO",
+            "TU",
+            "WE",
+            "TH",
+            "FR",
+            "SA",
+            "SU"
+          ]
+        },
+        "policy": {
+          "enum": [
+            "rfc5545",
+            "later",
+            "reject"
+          ]
+        }
+      },
+      "not": {
+        "required": [
+          "duration",
+          "dtend"
+        ]
+      }
+    },
+    "period": {
+      "type": "object",
+      "required": [
+        "start",
+        "end"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "start": {
+          "description": "A series value: date, floating, utc or zoned (never a date range).",
+          "allOf": [
+            {
+              "$ref": "https://jarenjs.dev/schemas/jaren-core/calendar/temporal/0.1"
+            },
+            {
+              "properties": {
+                "kind": {
+                  "enum": [
+                    "date",
+                    "floating",
+                    "utc",
+                    "zoned"
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        "end": {
+          "allOf": [
+            {
+              "$ref": "https://jarenjs.dev/schemas/jaren-core/calendar/temporal/0.1#/$defs/end"
+            },
+            {
+              "properties": {
+                "kind": {
+                  "enum": [
+                    "date",
+                    "floating",
+                    "utc",
+                    "zoned"
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "override": {
+      "type": "object",
+      "required": [
+        "recurrenceId",
+        "status"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "recurrenceId": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}(?:T\\d{2}:\\d{2}:\\d{2}Z?)?$"
+        },
+        "status": {
+          "enum": [
+            "moved",
+            "cancelled"
+          ]
+        },
+        "start": {
+          "description": "A series value: date, floating, utc or zoned (never a date range).",
+          "allOf": [
+            {
+              "$ref": "https://jarenjs.dev/schemas/jaren-core/calendar/temporal/0.1"
+            },
+            {
+              "properties": {
+                "kind": {
+                  "enum": [
+                    "date",
+                    "floating",
+                    "utc",
+                    "zoned"
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        "end": {
+          "allOf": [
+            {
+              "$ref": "https://jarenjs.dev/schemas/jaren-core/calendar/temporal/0.1#/$defs/end"
+            },
+            {
+              "properties": {
+                "kind": {
+                  "enum": [
+                    "date",
+                    "floating",
+                    "utc",
+                    "zoned"
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        "payload": true
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "moved"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "start"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "cancelled"
+              }
+            }
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "start"
+                  ]
+                },
+                {
+                  "required": [
+                    "end"
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "freebusy": {
+      "description": "Free/busy spans of instants; each period's fbtype defaults to busy.",
+      "type": "object",
+      "required": [
+        "type",
+        "uid",
+        "periods"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "freebusy"
+        },
+        "uid": {
+          "$ref": "#/$defs/uid"
+        },
+        "dtstamp": {
+          "$ref": "#/$defs/instant"
+        },
+        "start": {
+          "$ref": "#/$defs/instant"
+        },
+        "end": {
+          "$ref": "#/$defs/instant"
+        },
+        "periods": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "start",
+              "end"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "start": {
+                "$ref": "#/$defs/instant"
+              },
+              "end": {
+                "$ref": "#/$defs/instant"
+              },
+              "fbtype": {
+                "enum": [
+                  "busy",
+                  "free",
+                  "busy-unavailable",
+                  "busy-tentative"
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

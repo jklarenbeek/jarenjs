@@ -75,6 +75,7 @@ const OPTION_OF = Object.freeze({
   CSV2001: 'maxTotalBytes', CSV2002: 'maxRecordBytes', CSV2003: 'maxFieldBytes', CSV2004: 'maxColumns',
   JOSL2001: 'maxTotalBytes', JOSL2002: 'maxRecordBytes', JOSL2003: 'maxTokenBytes', JOSL2004: 'maxDepth', JOSL2005: 'maxRetainedValues',
   JSONX2001: 'maxTotalBytes', JSONX2002: 'maxTokenBytes', JSONX2003: 'maxDepth', JSONX2004: 'maxRetainedValues',
+  ICAL2001: 'maxOctets', ICAL2002: 'maxComponents', ICAL2003: 'maxRdates',
 });
 
 /**
@@ -83,7 +84,7 @@ const OPTION_OF = Object.freeze({
  */
 export class JoslLimitError extends Error {
   /**
-   * @param {string} code - The stable `CSV2xxx` / `JOSL2xxx` / `JSONX2xxx` code
+   * @param {string} code - The stable `CSV2xxx` / `JOSL2xxx` / `JSONX2xxx` / `ICAL2xxx` code
    * @param {string} message - What was crossed
    * @param {number} limit - The limit the option set
    * @param {number} [line] - 1-based physical line where the crossing was met, when known

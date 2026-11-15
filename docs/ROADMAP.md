@@ -1054,6 +1054,12 @@ what each does is its own documentation's job
   Availability layers are not in it, and no store has a temporal column kind: a caller
   stores the JSON forms (`@jarenjs/core/schemas/calendar/temporal.schema.json`,
   `…/rrule.schema.json`) and binds floating occurrences with `bindFloating`.
+- [ ] **`@jarenjs/josl/ical` writes iCalendar in UTC zone mode only, and does not read it.**
+  Events, recurring series and free/busy spans are written by kind; under `zones: 'utc'` a
+  zoned time is written as the UTC instant `toUtc` answers, and a zoned recurring series as
+  its occurrences over a caller's horizon (refused without one, `ICAL3011`), never as a UTC
+  start with a rule. Not in it: a TZID reference mode and VTIMEZONE, VAVAILABILITY, the
+  scheduling methods, and a reader.
 - [ ] **The RFC 3339 epoch readers disagree past the millisecond.**
   `getEpochOfDateTimeRFC3339('2026-03-29T01:30:00.9999Z')` truncates to `…00.999Z` (it reads
   through `Date.parse`), while `epochOfRFC3339Parts(parseRFC3339Parts(…))` rounds the same string

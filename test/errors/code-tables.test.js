@@ -27,6 +27,7 @@ import { DB_CODES } from '@jarenjs/db';
 import { CONTRACT_CODES } from '@jarenjs/contract';
 import { VALIDATE_CODES } from '@jarenjs/validate';
 import { JSONX_CODES } from '@jarenjs/josl';
+import { ICAL_CODES } from '@jarenjs/josl/ical';
 import { CHECK_CODES } from '@jarenjs/core/check';
 import { TEXT_EDIT_CODES } from '@jarenjs/core/text/edits';
 import { CALENDAR_CODES } from '@jarenjs/core/calendar';
@@ -62,6 +63,7 @@ const TABLES = /** @type {[string, Record<string, string>, string, string][]} */
   ['CONTRACT_CODES', CONTRACT_CODES, 'packages/contract/docs/CONTRACT-FORMAT.md', 'JC'],
   ['VALIDATE_CODES', VALIDATE_CODES, 'packages/validate/docs/ERROR-MESSAGES.md', 'JK'],
   ['JSONX_CODES', JSONX_CODES, 'packages/josl/FORMAT.md', 'JSONX'],
+  ['ICAL_CODES', ICAL_CODES, 'packages/josl/docs/ICAL.md', 'ICAL'],
   ['CHECK_CODES', CHECK_CODES, 'packages/core/README.md', 'JG'],
   ['TEXT_EDIT_CODES', TEXT_EDIT_CODES, 'packages/core/docs/HOST-PRIMITIVES.md', 'JE'],
   ['CALENDAR_CODES', CALENDAR_CODES, 'packages/core/docs/CALENDAR.md', 'JY'],

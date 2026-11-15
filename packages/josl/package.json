@@ -44,6 +44,7 @@
     "dist/types/",
     "src/",
     "schemas/",
+    "docs/",
     "FORMAT.md"
   ],
   "exports": {
@@ -90,6 +91,10 @@
     "./csv-stream": {
       "types": "./dist/types/csv-stream.d.ts",
       "default": "./src/csv-stream.js"
+    },
+    "./ical": {
+      "types": "./dist/types/ical.d.ts",
+      "default": "./src/ical.js"
     },
     "./values": {
       "types": "./dist/types/values.d.ts",

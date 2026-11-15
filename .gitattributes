@@ -13,3 +13,6 @@ test/adoption/trusted-bodies.js -text whitespace=blank-at-eol,blank-at-eof,space
 # Denote all files that are truly binary and should not be modified.
 *.png binary
 *.jpg binary
+
+# iCalendar goldens are compared byte for byte, CRLF line endings included.
+test/josl/fixtures/ical/*.ics -text

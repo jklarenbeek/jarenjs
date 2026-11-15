@@ -213,7 +213,7 @@ exact: `npm run test:tree-shaking` fails when one differs from the
 tree's. The heaps are re-measured for every release
 (`npm run test:tree-shaking -- --write`), and
 [`benchmark/node-closures.json`](../benchmark/node-closures.json) holds
-the same figures for all <!--fact:closure.subpaths-->273<!--/fact--> importable subpaths of
+the same figures for all <!--fact:closure.subpaths-->274<!--/fact--> importable subpaths of
 every package, each file of a wildcard export (`@jarenjs/core/dates/*`)
 included.
 
@@ -253,7 +253,7 @@ included.
 | `./entity` | 132 | core 63, db 40, json 23, validate 6 | 7.0 |
 | `./model` | 119 | core 62, db 30, json 21, validate 6 | 5.8 |
 | `./node` | 129 | core 62, db 40, json 21, validate 6 | 6.6 |
-| `./node-pool` | 105 | core 61, db 23, json 21 | 4.7 |
+| `./node-pool` | 105 | core 61, db 23, json 21 | 4.8 |
 | `./node-process` | 101 | core 61, json 21, db 19 | 4.7 |
 | `./node-worker` | 101 | core 61, json 21, db 19 | 4.7 |
 | `./postgres` | 119 | core 62, db 36, json 21 | 5.0 |

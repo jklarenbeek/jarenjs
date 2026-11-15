@@ -386,8 +386,10 @@ Every subpath a consumer can import, derived from the manifest by
 | `@jarenjs/josl/jsonx-stream` | JavaScript | declared |
 | `@jarenjs/josl/csv` | JavaScript | declared |
 | `@jarenjs/josl/csv-stream` | JavaScript | declared |
+| `@jarenjs/josl/ical` | JavaScript | declared |
 | `@jarenjs/josl/values` | JavaScript | declared |
 | `@jarenjs/josl/schemas/jaren-josl-data.schema.json` | schema | — |
+| `@jarenjs/josl/schemas/jaren-josl-ical.schema.json` | schema | — |
 | `@jarenjs/josl/package.json` | metadata | — |
 <!--/fact-->
 
@@ -405,8 +407,9 @@ What each subpath carries:
 | `@jarenjs/josl/jsonx-stream` | `createJsonxStreamReader`, `parseJsonxStream` |
 | `@jarenjs/josl/csv` | `parseCsv`, `parseCsvDocument`, `stringifyCsv`, `sniffCsvDialect` |
 | `@jarenjs/josl/csv-stream` | `createCsvStreamReader`, `parseCsvStream`, `iterateCsvStream`, `createCsvStreamWriter` |
+| `@jarenjs/josl/ical` | `stringifyIcal`, `createIcalWriter`, `IcalError`, `ICAL_CODES` (an iCalendar writer; see [docs/ICAL.md](docs/ICAL.md)) |
 | `@jarenjs/josl/values` | `LocalDate`, `LocalTime`, `LocalDateTime` |
-| `@jarenjs/josl/schemas/*` | schema artifacts (`jaren-josl-data.schema.json`) |
+| `@jarenjs/josl/schemas/*` | schema artifacts (`jaren-josl-data.schema.json`, `jaren-josl-ical.schema.json`) |
 
 ## CSV
 
@@ -557,6 +560,33 @@ ahead, and on the plain record stream the whole streaming read now
 costs <!--fact:csv.streaming-->about 1.05× the wholesale path (1.9 ms vs 1.8 ms), and 1.09× the time udsv's chunked reader takes<!--/fact-->.
 
 Stringify <!--fact:csv.stringify-->leads everything that offers one: 3.4 ms against d3-dsv's 4.1 ms and papaparse's 7 ms<!--/fact-->.
+
+## iCalendar
+
+`@jarenjs/josl/ical` writes RFC 5545 iCalendar from the values of
+`@jarenjs/core/calendar`: single events, recurring events (a rule, extra
+dates, excluded dates and overrides) and free/busy spans. Each time is
+written by its kind; a zoned time is converted to UTC under
+`zones: 'utc'`, and a zoned recurring series is expanded over a horizon
+rather than written as a UTC start with a rule that would drift across
+an offset change. Lines fold at 75 octets without splitting a code
+point, TEXT is escaped, and anything outside the documented subset is
+refused by code, never written raw.
+
+```js
+import { stringifyIcal } from '@jarenjs/josl/ical';
+
+const text = stringifyIcal({
+  prodId: '-//Example//Shop hours//EN',
+  components: [{ type: 'event', uid: 'closed-christmas', dtstamp: 0,
+    start: { kind: 'date', date: '2026-12-25' }, summary: 'Closed' }],
+});
+text.split('\r\n')[6]; // 'DTSTART;VALUE=DATE:20261225'
+```
+
+The model, the zone mode, the limits, the codes and the capability matrix
+are in [docs/ICAL.md](docs/ICAL.md). The writer is reached only through its
+subpath, so the root import does not load the calendar layer.
 
 ## Generating JOSL with LLMs
 

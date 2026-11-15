@@ -135,6 +135,33 @@ export const JOSL_STREAM_WRITE = table({ ...JOSL_WRITE, onChunk: CALLBACK, buffe
 /** `stringifyJoslStream`: the writer, plus cancellation. */
 export const JOSL_PULL_WRITE = table({ ...JOSL_WRITE, signal: SIGNAL });
 
+/**
+ * The iCalendar writer: `stringifyIcal`. The provider and runtime are
+ * read by the calendar layer; the horizon bounds the expansion of zoned
+ * recurring series, whose `limits` it takes as they are.
+ */
+export const ICAL_WRITE = /* @__PURE__ */ icalTable(false);
+
+/** `createIcalWriter`: the writer, plus the calendar's head and a chunk sink. */
+export const ICAL_STREAM_WRITE = /* @__PURE__ */ icalTable(true);
+
+/**
+ * The iCalendar writers' tables, built only where they are imported.
+ * @param {boolean} stream - with the incremental writer's head and sink
+ * @returns {OptionTable}
+ */
+function icalTable(stream) {
+  return table({
+    zones: oneOf('utc'),
+    provider: rule((v) => v === null || typeof v === 'object', 'a zone provider'),
+    runtime: READ_DOWNSTREAM,
+    horizon: rule((v) => v === null || (Array.isArray(v) && v.length === 2), 'a [start, end) pair'),
+    limits: rule((v) => v === null || (typeof v === 'object' && !Array.isArray(v)), 'an object of recurrence limits'),
+    ...limits(['maxOctets', 'maxComponents', 'maxRdates']),
+    ...(stream ? { prodId: READ_DOWNSTREAM, method: READ_DOWNSTREAM, onChunk: CALLBACK } : {}),
+  });
+}
+
 /** `toGbnf`: the grammar's dialect. */
 export const GBNF = table({ mode: oneOf('josl', 'toml') });
 
