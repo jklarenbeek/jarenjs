@@ -80,8 +80,10 @@ export { MIGRATION_VERSION, isPerDocumentAssertion, ASSERTION_BOUNDS_DEFAULT };
  * Every keyword they share — including every property they share — must
  * be canonically equal; a changed subschema, a removed property
  * declaration (which a closed object would then refuse as an
- * additional one) and a widened `additionalProperties` are all left to
- * the operator. Anything not understood answers `false`.
+ * additional one), a widened `additionalProperties` and any other
+ * keyword only one of them carries (a constraint or an annotation that
+ * appeared or disappeared) are all left to the operator. Anything not
+ * understood answers `false`.
  * @param {any} from
  * @param {any} to
  * @returns {boolean}
@@ -117,6 +119,10 @@ function isWidening(from, to) {
       }
       continue;
     }
+    // a keyword on one side only — a constraint or an annotation that
+    // appeared or disappeared — is a change this check does not prove
+    // harmless, and an absent value has no canonical form to compare
+    if (!Object.hasOwn(from, keyword) || !Object.hasOwn(to, keyword)) return false;
     if (canonicalizeJson(from[keyword]) !== canonicalizeJson(to[keyword])) return false;
   }
   return true;

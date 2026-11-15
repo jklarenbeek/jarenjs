@@ -57,19 +57,44 @@ const strictUtf8 = new TextDecoder('utf-8', { fatal: true });
 /**
  * Read an opaque operation's request body whole, as bytes or strictly
  * decoded text — every shape `ctx.body` takes: a string, bytes, the
- * counting source of a streamed upload, or `null` (an empty body).
+ * counting source of a streamed upload, or `null` (an empty body). A text
+ * read answers a string, a bytes read (the default) a `Uint8Array`, and an
+ * `as` known only at run time either.
  *
  * The limit stays the binding's: a streamed body is pulled through its
  * counting source, whose `BodyLimitError` is rethrown, so the binding
  * still answers 413 `JC2003`. Text is decoded fatally with the BOM
  * stripped, and invalid bytes throw `BodyEncodingError`, which the binding
  * answers 400 `JC2016`. An aborted `signal` rejects with its reason.
+ * @overload
  * @param {string | Uint8Array | AsyncIterable<Uint8Array> | null | undefined} body - `ctx.body`
- * @param {{ as?: 'bytes' | 'text', signal?: AbortSignal | null }} [options]
- * @returns {Promise<Uint8Array | string>}
+ * @param {{ as: 'text', signal?: AbortSignal | null }} options
+ * @returns {Promise<string>}
  * @example
  * // an opaque text/plain PUT
  * const text = await readBody(ctx.body, { as: 'text', signal: ctx.signal });
+ */
+/**
+ * Read an opaque operation's request body whole as bytes, the default
+ * (see the text read above for the limit, abort and body shapes).
+ * @overload
+ * @param {string | Uint8Array | AsyncIterable<Uint8Array> | null | undefined} body - `ctx.body`
+ * @param {{ as?: 'bytes', signal?: AbortSignal | null }} [options]
+ * @returns {Promise<Uint8Array>}
+ */
+/**
+ * Read an opaque operation's request body whole, as bytes or text by an
+ * `as` known only at run time (see the text read above).
+ * @overload
+ * @param {string | Uint8Array | AsyncIterable<Uint8Array> | null | undefined} body - `ctx.body`
+ * @param {{ as?: 'bytes' | 'text', signal?: AbortSignal | null }} [options]
+ * @returns {Promise<Uint8Array | string>}
+ */
+/**
+ * The three overloads' one implementation.
+ * @param {string | Uint8Array | AsyncIterable<Uint8Array> | null | undefined} body - `ctx.body`
+ * @param {{ as?: 'bytes' | 'text', signal?: AbortSignal | null }} [options]
+ * @returns {Promise<Uint8Array | string>}
  */
 export async function readBody(body, options = {}) {
   admitOptions(options, ['as', 'signal'], (reason) => new TypeError(`readBody: ${reason}`));

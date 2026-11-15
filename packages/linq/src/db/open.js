@@ -44,8 +44,9 @@ function ownByDefault(transactionOptions) {
 
 /**
  * The validator the client compiles entity and collection schemas with
- * when none is given: every issue collected, formats asserting.
- * @returns {JarenValidator}
+ * when none is given: every issue collected, formats asserting. A schema
+ * it compiles answers `{ valid, errors }`, never a bare boolean.
+ * @returns {JarenValidator<true>}
  */
 export function defaultValidator() {
   return new JarenValidator({ collectErrors: true })

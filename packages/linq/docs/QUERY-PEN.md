@@ -1811,7 +1811,11 @@ that destructures its scope.
 **An ordering key cannot test for `null`.** A key is a number, a string
 or the empty sequence, never a boolean: `orderBy((v) => v.due.eq(null))`
 is `JQ2005` at run time, and so was the `$key: false` the refused spelling
-used to write. `orderBy((v) => v.due)` already sorts an ABSENT `due`
+used to write. The typed chain refuses such a key when it compiles: a key
+callback answering a boolean, an object, an array or `null` is
+`OrderableKey<R> = never` (a member of unknown type stays admitted). A
+graph's and an include's `orderBy` order on the load path, where SQL puts
+`false` before `true`, and admit a boolean. `orderBy((v) => v.due)` already sorts an ABSENT `due`
 first (`{ empty: 'greatest' }` sorts it last), but a `null` `due` is
 `JQ2005` as a key too, and no spelling without a boolean key orders
 `null` items first today.

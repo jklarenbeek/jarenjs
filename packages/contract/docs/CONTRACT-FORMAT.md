@@ -474,8 +474,10 @@ const server = serveHttp(contract, {
 **Reading the body.** `readBody(ctx.body, { as, signal })` from
 `@jarenjs/contract/http` reads an opaque upload whole, whatever shape
 `ctx.body` has: a string, bytes, the counting source of a streamed
-upload, or `null` for none. `as` is `'bytes'` (the default) or `'text'`;
-the options are a plain or null-prototype record with only `as` and `signal`.
+upload, or `null` for none. `as` is `'bytes'` (the default) or `'text'`,
+and the declaration follows it: a text read is a `Promise<string>`, a
+bytes read a `Promise<Uint8Array>`, and an `as` known only at run time
+either; the options are a plain or null-prototype record with only `as` and `signal`.
 An invalid bag or signal rejects with `TypeError` before any body is pulled;
 `signal` is an `AbortSignal`, `null`, or absent.
 - Text is decoded strictly, as the JSON path decodes it: fatal, with

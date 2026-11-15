@@ -425,6 +425,17 @@ type Element<V> = V extends readonly (infer E)[] ? E : V;
 /** Any expression-ish callback result the runtime accepts. */
 type ExprResult = ExprBase<unknown> | object | string | number | boolean | null;
 
+/** What a chain's ordering key may answer: what the engine orders — a
+ * number or a string (a date-time is one), as a value or an expression,
+ * or an expression whose type is unknown (a JSON model's member, `get`).
+ * A boolean, an object, an array or `null` is `JQ2005` at run time on
+ * every provider, so such a key is `never` and does not compile. A
+ * graph's and an include's `orderBy` order on the load path, which
+ * admits a boolean (false before true), and keep their own types. */
+export type OrderableKey<R> =
+  R extends ExprBase<infer V> ? (unknown extends V ? R : [V] extends [string | number] ? R : never)
+  : R extends string | number ? R : never;
+
 export interface OrderOptions {
   /** `$empty` — where empty keys sort: `'least'` (default) or `'greatest'`. */
   empty?: 'least' | 'greatest';
@@ -553,10 +564,10 @@ export class Sequence<T = unknown, P = {}> {
   select<R extends ExprResult>(projection: (it: Expr<T>, p: ParamsExpr<P>) => R): Sequence<Unwrap<R>, P>;
   selectMany<R extends ExprResult>(selector: (it: Expr<T>, p: ParamsExpr<P>) => R): Sequence<Element<Unwrap<R>>, P>;
 
-  orderBy(key: (it: Expr<T>, p: ParamsExpr<P>) => ExprResult, options?: OrderOptions): Sequence<T, P>;
-  orderByDescending(key: (it: Expr<T>, p: ParamsExpr<P>) => ExprResult, options?: OrderOptions): Sequence<T, P>;
-  thenBy(key: (it: Expr<T>, p: ParamsExpr<P>) => ExprResult, options?: OrderOptions): Sequence<T, P>;
-  thenByDescending(key: (it: Expr<T>, p: ParamsExpr<P>) => ExprResult, options?: OrderOptions): Sequence<T, P>;
+  orderBy<R extends ExprResult>(key: (it: Expr<T>, p: ParamsExpr<P>) => R & OrderableKey<R>, options?: OrderOptions): Sequence<T, P>;
+  orderByDescending<R extends ExprResult>(key: (it: Expr<T>, p: ParamsExpr<P>) => R & OrderableKey<R>, options?: OrderOptions): Sequence<T, P>;
+  thenBy<R extends ExprResult>(key: (it: Expr<T>, p: ParamsExpr<P>) => R & OrderableKey<R>, options?: OrderOptions): Sequence<T, P>;
+  thenByDescending<R extends ExprResult>(key: (it: Expr<T>, p: ParamsExpr<P>) => R & OrderableKey<R>, options?: OrderOptions): Sequence<T, P>;
 
   groupBy<R extends ExprResult>(key: (it: Expr<T>, p: ParamsExpr<P>) => R):
     Sequence<{ key: Unwrap<R> | null, items: T[] }, P>;
@@ -724,10 +735,10 @@ export class AsyncSequence<T = unknown, P = {}> {
   where(predicate: (it: Expr<T>, p: ParamsExpr<P>) => BoolExpr | boolean): AsyncSequence<T, P>;
   select<R extends ExprResult>(projection: (it: Expr<T>, p: ParamsExpr<P>) => R): AsyncSequence<Unwrap<R>, P>;
   selectMany<R extends ExprResult>(selector: (it: Expr<T>, p: ParamsExpr<P>) => R): AsyncSequence<Element<Unwrap<R>>, P>;
-  orderBy(key: (it: Expr<T>, p: ParamsExpr<P>) => ExprResult, options?: OrderOptions): AsyncSequence<T, P>;
-  orderByDescending(key: (it: Expr<T>, p: ParamsExpr<P>) => ExprResult, options?: OrderOptions): AsyncSequence<T, P>;
-  thenBy(key: (it: Expr<T>, p: ParamsExpr<P>) => ExprResult, options?: OrderOptions): AsyncSequence<T, P>;
-  thenByDescending(key: (it: Expr<T>, p: ParamsExpr<P>) => ExprResult, options?: OrderOptions): AsyncSequence<T, P>;
+  orderBy<R extends ExprResult>(key: (it: Expr<T>, p: ParamsExpr<P>) => R & OrderableKey<R>, options?: OrderOptions): AsyncSequence<T, P>;
+  orderByDescending<R extends ExprResult>(key: (it: Expr<T>, p: ParamsExpr<P>) => R & OrderableKey<R>, options?: OrderOptions): AsyncSequence<T, P>;
+  thenBy<R extends ExprResult>(key: (it: Expr<T>, p: ParamsExpr<P>) => R & OrderableKey<R>, options?: OrderOptions): AsyncSequence<T, P>;
+  thenByDescending<R extends ExprResult>(key: (it: Expr<T>, p: ParamsExpr<P>) => R & OrderableKey<R>, options?: OrderOptions): AsyncSequence<T, P>;
   groupBy<R extends ExprResult>(key: (it: Expr<T>, p: ParamsExpr<P>) => R):
     AsyncSequence<{ key: Unwrap<R> | null, items: T[] }, P>;
   aggregate<A>(seed: A, step: (acc: Expr<A>, it: Expr<T>, p: ParamsExpr<P>) => ExprResult): AsyncSequence<A, P>;

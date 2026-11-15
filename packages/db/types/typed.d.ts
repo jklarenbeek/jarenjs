@@ -17,7 +17,7 @@ import type {
   StoreStats, Collection, ExecuteOptions, SequenceResult, ValueOrPromise,
   Dialect, ChangeRecord, LiveOptions, LiveQuery, JobsApi, SyncStore,
   EntityScope, RelationEntry, RelationTable, EntityCursorOptions, QueryCursor,
-  LoadContinuation, PageOptions, Page, ChangesReader, Replication, TransactionStore, TransactionScopeOptions,
+  LoadContinuation, LoadSpec, PageOptions, Page, ChangesReader, Replication, TransactionStore, TransactionScopeOptions,
 } from '@jarenjs/db';
 
 /** The self-referential constraint an interface can satisfy: generated
@@ -62,7 +62,11 @@ export interface TypedLoadSpecBase {
   maxDepth?: number;
 }
 
-export type TypedLoadSpec<E extends MetaMap<E>, M extends EntityMeta> =
+/** One load's clauses, typed by the metadata. A wide map (a JSON
+ * model's, keyed by every string) declares no entity, key or relation
+ * the types could check, so its clauses are `LoadSpec`'s own — what the
+ * runtime reads, and what keeps a typed store assignable to `Store`. */
+export type TypedLoadSpec<E extends MetaMap<E>, M extends EntityMeta> = string extends keyof E ? LoadSpec :
   TypedLoadSpecBase & {
     /** The keyset cursor: a page's structural continuation, or the
      * single-column form over the key. */

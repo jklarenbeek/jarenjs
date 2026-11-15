@@ -739,6 +739,17 @@ const saveHandler: Handler = (input, ctx: RequestContext) => {
 };
 const textBody: Promise<string | Uint8Array> = readBody('x', { as: 'text', signal: new AbortController().signal });
 const bytesBody: Promise<string | Uint8Array> = readBody(new Uint8Array(1));
+// a text read answers text and a bytes read (the default) bytes; an `as`
+// known only at run time answers either
+export async function readBodyAnswers(body: Uint8Array, as: 'bytes' | 'text'): Promise<void> {
+  const text: string = await readBody(body, { as: 'text' });
+  const bytes: Uint8Array = await readBody(body);
+  const spelled: Uint8Array = await readBody(body, { as: 'bytes', signal: null });
+  const either: string | Uint8Array = await readBody(body, { as });
+  // @ts-expect-error — a bytes read is not text
+  const notText: string = await readBody(body, {});
+  void [text, bytes, spelled, either, notText];
+}
 const encodingError: Error = new BodyEncodingError(new TypeError('bad'));
 void [textBody, bytesBody, encodingError.name, BodyLimitError];
 const backoff: contract.ContractFailureValue = contract.ContractFailure('conflict', {}, null, { retryable: true, retryAfterMs: 1500 });

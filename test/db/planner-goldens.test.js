@@ -18,6 +18,7 @@ import * as fs from 'node:fs';
 import { createHash } from 'node:crypto';
 
 import { planModelMigration, planPhysicalMigration, planTableMigration, sqliteDialect, readSchema, migrationChecksum } from '@jarenjs/db';
+import { postgresDialect } from '@jarenjs/db/postgres';
 import { nodeDriver } from '@jarenjs/db/node';
 import { canonicalizeJson } from '@jarenjs/json/canonical';
 import { checkMigrationStructure } from '../../packages/db/src/document-steps.js';
@@ -69,6 +70,26 @@ const CORPUS = {
   'physical': () => null,
 };
 
+/**
+ * Pairs first planned in the 0.2 format, so no historical artifact stands
+ * behind them: a constraint and an annotation keyword that appear or
+ * disappear, on both dialects.
+ */
+const KEYWORDS = { constraint: ['minProperties', 1], annotation: ['description', 'a document'] };
+const PRESENCE_DIALECTS = { sqlite: sqliteDialect, postgres: postgresDialect() };
+/** @type {Record<string, () => any>} */
+const PRESENCE_CORPUS = {};
+for (const [dialectName, dialect] of Object.entries(PRESENCE_DIALECTS)) {
+  for (const [kind, [keyword, value]] of Object.entries(KEYWORDS)) {
+    const without = models({ docs: collection(docs({ name: { type: 'string' } })) });
+    const withKeyword = models({ docs: collection({ ...docs({ name: { type: 'string' } }), [keyword]: value }) });
+    PRESENCE_CORPUS[`keyword-${kind}-added-${dialectName}`] = () =>
+      planModelMigration(without, withKeyword, { dialect, id: `${kind}-added` });
+    PRESENCE_CORPUS[`keyword-${kind}-removed-${dialectName}`] = () =>
+      planModelMigration(withKeyword, without, { dialect, id: `${kind}-removed` });
+  }
+}
+
 /** The physical pair plans over a seeded file, through the driver the store uses. */
 async function physicalPlan() {
   const connection = await nodeDriver().open(':memory:', {});
@@ -119,6 +140,27 @@ describe('planner goldens: an unchanged pair of models plans to the committed do
         `the planner's output for the unchanged pair '${name}' changed. If the change is deliberate, regenerate the goldens `
         + '(JAREN_WRITE_PLANNER_GOLDENS=1 node --test test/db/planner-goldens.test.js) and name the pair in the release notes '
         + '— a host that re-plans at load compares migrationChecksum and meets it as this release\'s planner change (MIGRATION-FORMAT §5)');
+      assert.equal(migrationChecksum(actual.migration), migrationChecksum(golden.migration));
+    });
+  }
+});
+
+describe('planner goldens: a keyword present on one side only plans to the committed document', () => {
+  for (const [name, plan] of Object.entries(PRESENCE_CORPUS)) {
+    it(name, () => {
+      const actual = JSON.parse(canonicalizeJson(plan()));
+      assert.equal(actual.migration.$migration, '0.2');
+      assert.deepEqual(actual.report.drafts, ['docs']);
+      assert.deepEqual(actual.report.widened, []);
+      const file = new URL(`${name}.json`, DIR);
+      if (WRITE) {
+        fs.mkdirSync(DIR, { recursive: true });
+        fs.writeFileSync(file, `${JSON.stringify(actual, null, 2)}\n`);
+        return;
+      }
+      assert.ok(fs.existsSync(file), `no golden for '${name}' — generate it: JAREN_WRITE_PLANNER_GOLDENS=1 node --test test/db/planner-goldens.test.js`);
+      const golden = JSON.parse(fs.readFileSync(file, 'utf8'));
+      assert.deepEqual(actual, golden, `the planner's output for the unchanged pair '${name}' changed (MIGRATION-FORMAT §5)`);
       assert.equal(migrationChecksum(actual.migration), migrationChecksum(golden.migration));
     });
   }

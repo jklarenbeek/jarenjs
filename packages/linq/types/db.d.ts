@@ -33,14 +33,17 @@ export interface OpenOptions extends OpenStoreOptions {
   /** Wired as the store's `compileSchema`; `defaultValidator()` when
    * absent; `null` opens the store unvalidated (`capabilities.validated
    * === false`, the store's declared downgrade). An explicit
-   * `compileSchema` wins over all three. */
-  validator?: JarenValidator | null;
+   * `compileSchema` wins over all three. Any configuration: the store
+   * reads a compiled check's boolean or its result's `valid`. */
+  validator?: JarenValidator<boolean, any> | null;
 }
 
 /** `new JarenValidator({ collectErrors: true })` with the string and
  * date-time formats registered — the configuration the Zod-migration
- * recipe reproduces, so `s.string().email()` asserts out of the box. */
-export function defaultValidator(): JarenValidator;
+ * recipe reproduces, so `s.string().email()` asserts out of the box. It
+ * collects errors, so a schema it compiles answers `{ valid, errors }`,
+ * never a bare boolean: the type says so (`JarenValidator<true>`). */
+export function defaultValidator(): JarenValidator<true>;
 
 /** The entity metadata a model implies: a pen model's `InferMeta<>`; a
  * JSON literal is never inferred (the wide map). */

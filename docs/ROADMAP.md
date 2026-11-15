@@ -517,6 +517,12 @@ costs a descriptor plus examples and no UI code at all.
 
 ## @jarenjs/contract
 
+- [ ] **The TypeScript projection's `Handlers` types a subscribe handler as its snapshot.**
+  `@jarenjs/contract/project`'s `toTypeScript` writes `Handlers` as `Operations[K]['output'] | Failure`
+  for every operation, so a generated table's subscribe handler is typed as the snapshot the binding
+  refuses (`JC2010`); the pen's `TypedHandlerTable` answers `SubscriptionSource<output>`. Changing the
+  projection changes generated text pinned byte-identically
+  (`test/consumer/linq-contract-generated.ts`), a planner-like output change of its own.
 - [ ] **`diffContracts` cannot tell whether some member schemas accept
   nothing.** A string-only member whose `pattern` holds no string only by
   a lookaround, a back-reference, a word boundary or a modifier group

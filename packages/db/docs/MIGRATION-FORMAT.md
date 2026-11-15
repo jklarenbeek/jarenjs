@@ -321,7 +321,10 @@ explicit `id` (`jaren-db plan --id`).
   that member with some other shape. Such a plan carries NO `jslt`
   step at all — the `ADD COLUMN` is the whole of it — so it applies
   unattended instead of waiting for a person to delete a placeholder.
-  Anything the rule does not understand is not a widening, and drafts.
+  Anything the rule does not understand is not a widening, and drafts:
+  a keyword only one of the two schemas carries — a constraint such as
+  `minProperties` or an annotation such as `description` that appeared
+  or disappeared — is such a change, on both dialects.
   An author who wants a transform anyway — to FILL a new member for
   the rows that predate it, rather than leave it absent — writes the
   step: `{ "kind": "jslt", "collection": "<name>", "stylesheet": [ … ] }`.
@@ -793,7 +796,8 @@ and its `MigrationPlanReport`. Every release that changes the planner's
 output for an unchanged pair says so in its release notes, and
 `test/db/planner-goldens.test.js` — a corpus of pairs (additive,
 widening, a narrowing with and without its transform, a rename, an
-index, an entity rebuild, a physical plan) compared with committed
+index, an entity rebuild, a physical plan, and a constraint and an
+annotation keyword added and removed on each dialect) compared with committed
 documents — makes such a change impossible to ship unnoticed.
 
 ## 6. Running and batching

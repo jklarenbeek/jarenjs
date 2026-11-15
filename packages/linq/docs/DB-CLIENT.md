@@ -135,7 +135,7 @@ back, the durable ledger over what it opened, and replication document authoring
 |---|---|---|
 | `open(model, options)` | a promise of the frozen client — `store`, `capabilities`, `entities`, `collections`, `transaction`, `close`, and `saveChanges`/`live` when the model declares entities | `Client<InferMeta<typeof model>>` for a pen model; `Client<E>` for `open<E>(json, …)`; the wide map for a bare JSON model |
 | `defineReplication(header)` | a logical replication document builder — §2.7 | `ReplicationPen` |
-| `defaultValidator()` | `new JarenValidator({ collectErrors: true })` with `stringFormats` and `dateTimeFormats` registered | `JarenValidator` |
+| `defaultValidator()` | `new JarenValidator({ collectErrors: true })` with `stringFormats` and `dateTimeFormats` registered | `JarenValidator<true>`: a schema it compiles answers `{ valid, errors }`, never a bare boolean |
 | `createDbLedger(client, options?)` | the contract idempotency ledger (`claim`/`commit`/`fail`/`lookup`/`sweep`) over a declared collection of the client's store — §2.6 | `DbLedger`; structurally `@jarenjs/contract`'s `Ledger` |
 | `createDbReceipts(client, options)` | permanent receipts and independent fenced leases; see durable mapped records | structural receipt repository |
 | `createDbEffectStore(client, options)` | reviewed external intent and reconciliation under job fences | structural effect store |

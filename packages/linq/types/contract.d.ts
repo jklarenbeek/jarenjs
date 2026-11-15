@@ -436,18 +436,68 @@ export interface TypedHttpClient<C> extends TypedClient<C> {
   ): Promise<Outcome<ByteResponse>>;
 }
 
+/** One page of missed patches a resuming consumer replays (§17.1):
+ * the patches after the consumer's seq, where the next page starts, the
+ * log's two watermarks, whether more remain, and the total refusal
+ * `resetRequired`, under which `items` is empty. */
+export interface ReplayPage {
+  items: { patch: unknown[]; seq: number }[];
+  next?: number;
+  earliestAvailable: number | null;
+  highWatermark: number;
+  hasMore: boolean;
+  resetRequired: boolean;
+}
+
+/** A snapshot as the stream binding reads it: never written, so a
+ * read-only value (a live query's `result`, a frozen document) is one. */
+export type SnapshotOf<T> =
+  T extends readonly (infer E)[] ? readonly SnapshotOf<E>[]
+    : T extends object ? { readonly [K in keyof T]: SnapshotOf<T[K]> }
+      : T;
+
+/** What a `subscribe` operation's handler answers (§17.1): the live
+ * source the stream binding reads — its current snapshot, as
+ * `snapshot()` or a settled `result`, validated against the operation's
+ * `output` (`T`, read-only: the binding never writes it); `subscribe(emit)`
+ * answering the `stop` of the patch feed; `close()`; and, for
+ * `resume: 'replay'`, `replay(after, options)` one page at a time. `stop`,
+ * `close` and `replay` may answer promises. A client's live query
+ * (`handle.live()`) is one as it stands. A handler that answers anything
+ * else is `JC2010`. */
+export type SubscriptionSource<T> = (
+  | { snapshot(): SnapshotOf<T>; result?: SnapshotOf<T> }
+  | { result: SnapshotOf<T>; snapshot?: () => SnapshotOf<T> }
+) & {
+  snapshotWithCursor?: (options: { signal: AbortSignal }) =>
+    { value: SnapshotOf<T>; seq: number } | Promise<{ value: SnapshotOf<T>; seq: number }>;
+  subscribe(emit: (emission: any) => void): () => unknown;
+  close(): unknown;
+  replay?: (after: number, options: { limit: number; maxBytes: number; signal: AbortSignal }) =>
+    ReplayPage | null | undefined | Promise<ReplayPage | null | undefined>;
+  mode?: unknown;
+};
+
+/** What one operation's handler answers: a `subscribe` operation's
+ * {@link SubscriptionSource} over its output, any other operation's
+ * output — either, or a declared `Failure`, as a value or a promise. */
+type HandlerAnswer<Op> =
+  (Op extends { kind: 'subscribe'; output: infer O } ? SubscriptionSource<O>
+    : Op extends { output: infer O } ? O : never) extends infer A
+    ? A | Failure | Promise<A | Failure>
+    : never;
+
 /** The handler table of a server binding, one handler per invokable
  * operation. `Host` is what the host lifecycle's `acquire` hands the
  * handler as `ctx.host`; `Carrier` selects the context — `'http'` by
  * default, a union for a table several bindings share (narrow on
- * `ctx.carrier` before an HTTP-only member). */
+ * `ctx.carrier` before an HTTP-only member). A `subscribe` operation's
+ * handler answers the live source its stream reads, not the snapshot. */
 export type TypedHandlerTable<C, Host = null, Carrier extends CarrierName = 'http'> = {
   [K in keyof InvokableOf<C>]: (
     input: InvokableOf<C>[K] extends { input: infer I } ? I : never,
     ctx: HandlerContext<Host, Carrier>,
-  ) => (InvokableOf<C>[K] extends { output: infer O } ? O : never)
-  | Failure
-  | Promise<(InvokableOf<C>[K] extends { output: infer O } ? O : never) | Failure>;
+  ) => HandlerAnswer<InvokableOf<C>[K]>;
 };
 
 /** An operation id as `contractTools` names it: `.` → `_`. */

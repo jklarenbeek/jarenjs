@@ -1136,7 +1136,10 @@ export interface TransactionSyncStore extends SyncStore {
  * is current, refuses `JD2070` before touching tracker state or the
  * database. There is deliberately no `close` — a transaction view does
  * not own the store lifetime; the root store remains the only owner of
- * the connection.
+ * the connection. It is therefore not a `Store`: code that runs inside
+ * a transaction takes a `TransactionStore`, and a boundary that both a
+ * root store and a transaction's view pass through takes a
+ * `Pick<Store, …>` of the members it reads, which both satisfy.
  */
 export interface TransactionStore extends Omit<Store,
   'close' | 'transaction' | 'sync' | 'checkpoint' | 'integrityCheck' | 'foreignKeyCheck' | 'optimize' | 'backupTo'

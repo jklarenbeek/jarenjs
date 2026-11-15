@@ -1128,7 +1128,11 @@ server configuration determine deployment costs.
   model into entity interfaces, input variants and an `EntityMetaMap`;
   `typedStore` (from `@jarenjs/db/typed`) types every read, checks
   every write, and widens `load` results by their include
-  specification.
+  specification. A typed store is assignable to `Store`, a JSON model's
+  (which declares no entity the types could check) included; a
+  transaction's `tx.store` is a `TransactionStore`, which owns no store
+  lifetime, so a boundary both pass through takes a `Pick<Store, …>` of
+  the members it reads.
 - **Membership** (§11.7): `link(own, member, target)` and `unlink` attach
   and detach one many-to-many membership at a time through the unit of
   work — written against the join table as it stands at save time, so a
