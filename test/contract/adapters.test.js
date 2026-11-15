@@ -18,7 +18,7 @@ import { EventEmitter, once } from 'node:events';
 
 import { compileContract } from '@jarenjs/contract';
 import { serveHttp } from '@jarenjs/contract/http';
-import { toNodeHandler } from '@jarenjs/contract/node';
+import { toNodeHandler, nodeRequest, writeNodeResponse } from '@jarenjs/contract/node';
 import { toFetchHandler } from '@jarenjs/contract/fetch';
 import { createMemoryLedger } from '@jarenjs/contract/ledger';
 import { openHttpClient } from '@jarenjs/contract/client';
@@ -266,6 +266,209 @@ describe('adapters — the body limit', () => {
     await closed;
     short.close();
     await once(short, 'close');
+  });
+
+  // an upload whose declared content-length is over the limit is never read;
+  // left unfinished, it holds the connection as a started upload does, so its
+  // 413 takes the same close: `connection: close`, then the linger, and the
+  // server's close completes. Through the handler and through the framework pair.
+  for (const [label, handlerOf] of /** @type {[string, () => http.RequestListener][]} */ ([
+    ['toNodeHandler', () => toNodeHandler(dispatcher, { lingerMs: 25 })],
+    ['nodeRequest + writeNodeResponse', () => async (req, res) => {
+      const incoming = nodeRequest(dispatcher, req, res);
+      writeNodeResponse(res, await dispatcher.dispatch(incoming), { from: incoming, lingerMs: 25 });
+    }],
+  ])) {
+    it(`413 by a declared content-length on an unfinished upload closes the connection (${label})`, async () => {
+      const host = http.createServer(handlerOf());
+      host.listen(0, '127.0.0.1');
+      await once(host, 'listening');
+      const port = /** @type {import('node:net').AddressInfo} */ (host.address()).port;
+      const agent = new http.Agent({ keepAlive: true });
+      const req = http.request(`http://127.0.0.1:${port}/product.remove`, {
+        method: 'POST', agent, headers: { 'content-type': 'application/json', 'content-length': '8192' },
+      });
+      req.on('error', () => {
+        // the unsent tail of the upload dying with the socket is expected
+      });
+      let closing;
+      try {
+        const answered = new Promise((resolve) => req.on('response', resolve));
+        const socketClosed = new Promise((resolve) => req.on('close', resolve));
+        req.write('{'); // over the 4 KiB limit by declaration, and never finished
+        const res = /** @type {http.IncomingMessage} */ (await answered);
+        assert.strictEqual(res.statusCode, 413);
+        assert.strictEqual(res.headers.connection, 'close');
+        let text = '';
+        for await (const c of res) text += c;
+        assert.strictEqual(JSON.parse(text).code, 'JC2003');
+        await socketClosed;
+        let closed = false;
+        closing = new Promise((resolve) => host.close(() => { closed = true; resolve(undefined); }));
+        // the server's close completes on its own: no connection is left open
+        await Promise.race([closing, new Promise((resolve) => setTimeout(resolve, 2000).unref())]);
+        assert.strictEqual(closed, true, 'server.close() completes once the 413 closed the connection');
+      }
+      finally {
+        req.destroy();
+        agent.destroy();
+        host.closeAllConnections();
+        await (closing ?? new Promise((resolve) => host.close(resolve)));
+      }
+    });
+  }
+
+  // an upload left unread and unfinished holds the connection whatever the
+  // answer: an operation whose input takes nothing from the body, and a route
+  // no operation matches, close as the declared-oversize 413 does. An
+  // operation that reads its body waits for it: its handler never runs on a
+  // part of one
+  describe('an unfinished upload the answer leaves unread', () => {
+    /** @type {{ op: string, input: any }[]} */
+    const calls = [];
+    const probe = compileContract({ $contract: '0.1', id: 'unread-upload', operations: {
+      'probe.none': { kind: 'command', input: { type: 'object', properties: {} }, output: { type: 'object', properties: {} },
+        policy: { audience: 'server', limits: { maxBodyBytes: 1024 } }, http: { method: 'POST', path: '/none' } },
+      'probe.some': { kind: 'command', input: { type: 'object', properties: { a: { type: 'string' } } }, output: { type: 'object', properties: {} },
+        policy: { audience: 'server', limits: { maxBodyBytes: 1024 } }, http: { method: 'POST', path: '/some' } },
+    } });
+    const probing = serveHttp(probe, {
+      'probe.none': (input) => { calls.push({ op: 'none', input }); return {}; },
+      'probe.some': (input) => { calls.push({ op: 'some', input }); return {}; },
+    });
+    after(() => probing.close());
+
+    /** A server over the probe contract, a keep-alive request declaring
+     * `length` bytes, and its teardown. @param {string} path @param {number} length */
+    const open = async (path, length) => {
+      const host = http.createServer(toNodeHandler(probing, { lingerMs: 25 }));
+      host.listen(0, '127.0.0.1');
+      await once(host, 'listening');
+      const port = /** @type {import('node:net').AddressInfo} */ (host.address()).port;
+      const agent = new http.Agent({ keepAlive: true });
+      const req = http.request(`http://127.0.0.1:${port}${path}`, {
+        method: 'POST', agent, headers: { 'content-type': 'application/json', 'content-length': String(length) },
+      });
+      req.on('error', () => {
+        // the unsent tail of the upload dying with the socket is expected
+      });
+      const answered = new Promise((resolve) => req.on('response', resolve));
+      const socketClosed = new Promise((resolve) => req.on('close', resolve));
+      /** @type {Promise<unknown> | undefined} */
+      let closing;
+      const closeServer = async () => {
+        let closed = false;
+        closing = new Promise((resolve) => host.close(() => { closed = true; resolve(undefined); }));
+        await Promise.race([closing, new Promise((resolve) => setTimeout(resolve, 2000).unref())]);
+        return closed;
+      };
+      const teardown = async () => {
+        req.destroy();
+        agent.destroy();
+        host.closeAllConnections();
+        await (closing ?? new Promise((resolve) => host.close(resolve)));
+      };
+      return { req, answered, socketClosed, closeServer, teardown };
+    };
+    /** @param {http.IncomingMessage} res */
+    const textOf = async (res) => {
+      let text = '';
+      for await (const c of res) text += c;
+      return text;
+    };
+
+    for (const [label, path, status] of /** @type {[string, string, number][]} */ ([
+      ['an operation whose input takes nothing from the body answers its declared input and closes', '/none', 200],
+      ['a route no operation matches answers 404 and closes', '/nowhere', 404],
+    ])) {
+      it(label, async () => {
+        calls.length = 0;
+        const run = await open(path, 100);
+        try {
+          run.req.write('{'); // 1 of the 100 declared bytes, and never finished
+          const res = /** @type {http.IncomingMessage} */ (await run.answered);
+          assert.strictEqual(res.statusCode, status);
+          assert.strictEqual(res.headers.connection, 'close');
+          await textOf(res);
+          await run.socketClosed;
+          assert.strictEqual(await run.closeServer(), true, 'server.close() completes once the answer closed the connection');
+          // a finished body of any bytes gives the same input: the operation reads none of it
+          assert.deepStrictEqual(calls, status === 200 ? [{ op: 'none', input: {} }] : []);
+        }
+        finally { await run.teardown(); }
+      });
+    }
+
+    it('an operation that reads its body waits for all of it: no handler call on a part, then the whole input', async () => {
+      calls.length = 0;
+      const body = '{"a":"whole"}';
+      const run = await open('/some', body.length);
+      try {
+        run.req.write(body.slice(0, 5));
+        const early = await Promise.race([run.answered.then(() => 'answered'), new Promise((resolve) => setTimeout(() => resolve('waiting'), 300))]);
+        assert.strictEqual(early, 'waiting');
+        assert.deepStrictEqual(calls, []);
+        run.req.end(body.slice(5));
+        const res = /** @type {http.IncomingMessage} */ (await run.answered);
+        assert.strictEqual(res.statusCode, 200);
+        assert.strictEqual(res.headers.connection, 'keep-alive');
+        await textOf(res);
+        assert.deepStrictEqual(calls, [{ op: 'some', input: { a: 'whole' } }]);
+      }
+      finally { await run.teardown(); }
+    });
+
+    it('through the fetch adapter, a body that never arrives whole is JC2005 with no handler call', async () => {
+      calls.length = 0;
+      const handler = toFetchHandler(probing);
+      const broken = () => new ReadableStream({ start(c) {
+        c.enqueue(new TextEncoder().encode('{"a":'));
+        c.error(new Error('the client went away'));
+      } });
+      const res = await handler(new Request('http://127.0.0.1/some', { method: 'POST', body: broken(),
+        headers: { 'content-type': 'application/json', 'content-length': '100' }, ...{ duplex: 'half' } }));
+      assert.strictEqual(res.status, 400);
+      assert.strictEqual((await res.json()).code, 'JC2005');
+      assert.deepStrictEqual(calls, []);
+    });
+  });
+
+  it('413 by a declared content-length on an upload that already arrived whole keeps the connection', async () => {
+    // the answer waits until the whole message is in, so nothing of the
+    // upload is left to hold the connection: it stays open for the next request
+    const host = http.createServer(async (req, res) => {
+      const incoming = nodeRequest(dispatcher, req, res);
+      for (let turn = 0; req.complete !== true && turn < 1000; turn++) await new Promise((resolve) => setImmediate(resolve));
+      writeNodeResponse(res, await dispatcher.dispatch(incoming), { from: incoming, lingerMs: 25 });
+    });
+    host.listen(0, '127.0.0.1');
+    await once(host, 'listening');
+    const port = /** @type {import('node:net').AddressInfo} */ (host.address()).port;
+    const agent = new http.Agent({ keepAlive: true, maxSockets: 1 });
+    const post = (/** @type {string} */ body) => new Promise((resolve, reject) => {
+      const req = http.request(`http://127.0.0.1:${port}/product.remove`, {
+        method: 'POST', agent, headers: { 'content-type': 'application/json', 'content-length': String(body.length) },
+      }, (res) => {
+        let text = '';
+        res.on('data', (c) => { text += c; });
+        res.on('end', () => resolve({ status: res.statusCode, connection: res.headers.connection, socket: req.socket, text }));
+      });
+      req.on('error', reject);
+      req.end(body);
+    });
+    try {
+      const big = /** @type {any} */ (await post(JSON.stringify({ id: 1, pad: 'x'.repeat(5000) })));
+      assert.strictEqual(big.status, 413);
+      assert.strictEqual(big.connection, 'keep-alive');
+      const next = /** @type {any} */ (await post('{"id":7}'));
+      assert.strictEqual(next.status, 204);
+      assert.strictEqual(next.socket, big.socket, 'the next request reuses the connection');
+    }
+    finally {
+      agent.destroy();
+      host.closeAllConnections();
+      await new Promise((resolve) => host.close(resolve));
+    }
   });
 
   it('a lingerMs past 2^31 - 1 lingers as long as a timer can, where a longer delay would destroy the socket at 1 ms', async () => {

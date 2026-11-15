@@ -12,6 +12,7 @@ import { nodeWorkerDriver } from '@jarenjs/db/node-worker';
 const MODEL = { $model: '0.1', collections: { users: { schema: { type: 'object', properties: { id: { type: 'string' } } }, key: '/id' } } };
 const PATH = 'file:shared-memory-source?mode=memory&cache=shared';
 const dir = realpathSync(mkdtempSync(join(tmpdir(), 'jaren-shared-memory-bun-')));
+const home = process.cwd();
 process.chdir(dir);
 const failures = [];
 const stores = [];
@@ -38,6 +39,11 @@ finally {
     try { await store.close(); }
     catch (error) { failures.push(`closing a store: ${String(error?.stack ?? error)}`); }
   }
+  // a process cannot remove its own working directory on Windows (EBUSY):
+  // leave it before removing it, and name a failure to leave it
+  try { process.chdir(home); }
+  catch (error) { failures.push(`leaving ${dir}: ${String(error?.stack ?? error)}`); }
+  if (process.cwd() === dir) failures.push(`removing ${dir}: it is still the working directory`);
   try { rmSync(dir, { recursive: true, force: true }); }
   catch (error) { failures.push(`removing ${dir}: ${String(error?.stack ?? error)}`); }
 }

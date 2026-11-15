@@ -553,6 +553,13 @@ costs a descriptor plus examples and no UI code at all.
 
 ## @jarenjs/linq & @jarenjs/db — the data pair
 
+- [ ] **A bare collection root's first item, element or existence reads every document.** Over a
+  collection handle (no root of its own), `any()`, `first()`, `elementAt(n)` and
+  `take(n).toArray()` push `{ $exists: '$[*]' }` and `[{ $subsequence: ['$[*]', n, k] }]`.
+  The planner answers them `set`: one `SELECT` of every document, then the window or the test
+  in JS. Explain reports this honestly, so the cost is unbounded but nothing is hidden. Wanted:
+  the `'$[*]'` operand of a top-level `$exists` or `$subsequence` planned as the `$for` scan it
+  abbreviates, as `'$[*]'` alone and `{ $count: '$[*]' }` are.
 - [ ] **A job worker does not tick recurring schedules.** `store.jobs.tick()` fires due schedules only
   when a host calls it on its own timer; a worker's poll does not. Wanted: a worker option that ticks
   before it claims, leaving an idle poll's statements unchanged when no store schedules.
@@ -873,7 +880,9 @@ what each does is its own documentation's job
   chain is refused `JL0005` though it would answer right. The server's
   `system_identifier` is not a fix (a standby or a restored copy carries it);
   a file needs an identity every driver reports alike ([DB-CLIENT
-  §6](../packages/linq/docs/DB-CLIENT.md)).
+  §6](../packages/linq/docs/DB-CLIENT.md)). The native Node and Bun drivers
+  already pin a file's device and inode at open for shadow isolation, and refuse
+  (`JD0021`) a path that no longer names it.
 - [ ] **A PostgreSQL statement at the term bound can still compile for
   seconds.** One statement carries at most 128 predicate terms
   ([POSTGRESQL](../packages/db/docs/POSTGRESQL.md)); a leaf is one term, an
@@ -1318,7 +1327,9 @@ machine — the opt-in workflow or a local one — and its result recorded here.
   runs, adopted history, and the planner goldens on LF checkouts); the
   shared-cache store `test/db/store-source.test.js` opens under SQLite's
   `win32` VFS; and every test and README example that removes a temp directory
-  after `close()`
+  after `close()` (`test/db/fixtures/shared-memory-source-bun.mjs` now leaves its
+  working directory before removing it and names a failure to; it waits on the
+  Windows run to confirm)
   (`EBUSY`/`EPERM` when a worker's handle outlives it).
 - [ ] **Worker and pool hosts.** Waits on a Windows run of the worker and
   pool tests: `test/db/relational-store.test.js` and `quirks-relational.test.js`
@@ -1336,7 +1347,9 @@ machine — the opt-in workflow or a local one — and its result recorded here.
   `test/contract/node-framework.test.js` (Fastify's slow reader, whose bound
   reads `writableHighWaterMark`, and the chunked-upload 413s that rely on the
   linger keeping an RST from eating the answer); `server-surface-quirks.test.js`
-  and `binding-quirks.test.js` on `127.0.0.1`; and `test/contract/cli.test.js`,
+  and `binding-quirks.test.js` on `127.0.0.1`; the declared-length 413 cases in
+  `test/contract/adapters.test.js` (an unfinished upload closed through the linger,
+  a whole one kept alive); and `test/contract/cli.test.js`,
   which spawns `node` in a temp directory and removes it.
 - [ ] **Processes and runtimes.** Waits on a Windows run with `bun.exe` on
   the path: the cross-process ledger test (`test/linq/db-ledger.test.js`)

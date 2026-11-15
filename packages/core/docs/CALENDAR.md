@@ -50,9 +50,15 @@ most a millisecond fraction. Absent time members are `0`. Anything else
 is refused (`JY0007`) **before** the provider is asked: the thirtieth of
 February reads back as another wall clock exactly as a gap does, and a
 policy must never "resolve" it. `24:00`, a leap second and a fraction
-past the millisecond are refused, never rolled over or rounded. Any
-other member — an `offset` a provider's `toParts` reported, say — is
-not read; the zone decides the offset.
+past the millisecond are refused, never rolled over or rounded. A
+member that misspells one the record lacks, and is no longer than it, is
+refused too (`JY0007`, naming the spelling it meant, by the suite's
+nearest-name rule): `{ hour: 2, minute: 30 }` would otherwise read as
+midnight. So is a `millisecond` or `milliseconds` member: milliseconds
+are the fraction of `seconds`. Any other member — an `offset` a
+provider's `toParts` reported, say, or a name that extends a documented
+one (`hour12`, `hoursWorked`, `dayOfWeek`) — is not read; the zone
+decides the offset.
 
 ## `classifyLocal(parts, zone, provider)`
 

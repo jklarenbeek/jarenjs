@@ -18,11 +18,13 @@
  * upload (bounded by a grace timer) before it is destroyed, so the
  * close is a FIN the peer can read the 413 through, not an RST that
  * discards it. A declared `content-length` above the limit is never
- * read at all; an unmatched request's body is never read (the
- * dispatcher answers 404/405 without it and the platform discards the
- * rest). A streamed response body is written chunk by chunk behind the
- * socket's `drain`. Repeated
- * header lines reach the dispatcher as arrays (`headersDistinct`), which
+ * read at all; an unmatched request's body, and one an operation's input
+ * takes nothing from, is never read either (the dispatcher answers without
+ * it). An upload never read that has not arrived whole by the answer takes
+ * the same close and linger, so it cannot hold the connection; one that did
+ * arrive whole the platform discards, keeping it alive. A streamed
+ * response body is written chunk by chunk behind the socket's `drain`.
+ * Repeated header lines reach the dispatcher as arrays (`headersDistinct`), which
  * is how a repeated scalar header member becomes `JC2015`. `ctx.signal`
  * aborts when the client goes away before the response finished. A
  * streaming (SSE) response writes each event only after the previous
@@ -51,6 +53,9 @@ import { createAwaitedSink } from '@jarenjs/core/async';
  * @property {() => unknown} [resume]
  * @property {(error?: Error) => unknown} [destroy]
  * @property {boolean} [readableEnded]
+ * @property {boolean} [complete] - the whole message arrived (Node's
+ *   `IncomingMessage#complete`); an upload not known to be complete is
+ *   treated as unfinished
  * @property {boolean} [destroyed]
  */
 
@@ -371,7 +376,6 @@ function send(res, response, close, done) {
 
 /** The Node request each `nodeRequest` result came from. */
 const origins = new WeakMap();
-
 /**
  * @param {unknown} dispatcher
  * @param {string} who
@@ -443,7 +447,9 @@ export function nodeRequest(dispatcher, req, res) {
  * - a status without content sends none.
  *
  * With `from` (what `nodeRequest` built), an upload that was pulled and
- * left unread closes the connection. The socket then lingers, draining the
+ * left unread closes the connection, as does one never read (over its
+ * declared limit, unmatched, or not part of the input) unless it already
+ * arrived whole. The socket then lingers, draining the
  * rest, before it is destroyed, so the peer can read the answer through
  * the close. An answer Node refuses to write never escapes as a throw:
  * before the head is out a plain 500 replaces it, after it the socket goes.
@@ -459,9 +465,26 @@ export function writeNodeResponse(res, response, options = {}) {
     throw new TypeError('writeNodeResponse: options.from must be a request returned by nodeRequest');
   }
   const source = options.from === undefined ? null : options.from.body;
-  const close = source !== null && source.state.started && !source.state.ended;
   const req = options.from === undefined ? undefined : origins.get(options.from);
+  // an upload left unfinished holds the connection: a pulled one that
+  // stopped short of its end, or one never read (a declared-oversize body,
+  // an operation whose input takes nothing from it, a route no operation
+  // matches) that has not arrived whole
+  const close = source !== null && source.state.started ? !source.state.ended
+    : options.from !== undefined && declaresUpload(options.from.headers) && req?.complete !== true;
   write(res, response, close, close && req !== undefined ? () => lingerThenDestroy(req, lingerMs) : undefined);
+}
+
+/**
+ * Whether a request's headers announce body bytes: a chunked upload, or a
+ * `content-length` above zero.
+ * @param {Record<string, string | string[] | undefined>} headers
+ * @returns {boolean}
+ */
+function declaresUpload(headers) {
+  if (headers['transfer-encoding'] !== undefined) return true;
+  const declared = Number(headers['content-length']);
+  return Number.isFinite(declared) && declared > 0;
 }
 
 /**

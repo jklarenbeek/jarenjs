@@ -795,7 +795,8 @@ if (asyncLiveLeak.length)
 // Raised to 1,141,900 (measured 1141836): semanticKey's memo of a wholly frozen tree and utf8ByteLength's refusal of a non-string (object 395, string 360) add 755.
 // Raised to 1,142,000 (measured 1141969): the same unknown-operator hint (normalize 133).
 // Raised to 1,143,300 (measured 1143252): recurring job schedules' engine seam — the four root calls and their JD0016 refusal (jobs 683), the open option's check and wiring (store 146), the JD0016 message (errors 165), the seam brand (job-schedules 81) and the engine table name (engine-metadata 29), with minifier renames elsewhere net 179 — the calendar itself stays in @jarenjs/db/schedules, add 1283.
-if (clientBytes > 1143300)
+// Raised to 1,143,500 (measured 1143393): a bare collection root's count planned as the native COUNT(*) its explain reports (plan 141).
+if (clientBytes > 1143500)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 

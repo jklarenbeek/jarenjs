@@ -3681,6 +3681,19 @@ function composeWindows(windows) {
  */
 const ROOT_SCAN = Object.freeze({ $for: Object.freeze({ it: '$[*]' }), $return: '$it' });
 
+/**
+ * The count of that bare wildcard — `{ $count: '$[*]' }`, what a linq
+ * chain's `count()` emits over a collection — is the count of the scan it
+ * abbreviates: every document is one item of `'$[*]'`, so the `$for`
+ * phrase's `COUNT(*)` answers it, where the path barrier would fetch every
+ * document to count them in JS.
+ */
+const ROOT_COUNT = Object.freeze({ $count: ROOT_SCAN });
+
+/** Whether a document is exactly `{ $count: '$[*]' }`. @param {any} document @returns {boolean} */
+const isRootCount = (document) => document !== null && typeof document === 'object' && !Array.isArray(document)
+  && document.$count === '$[*]' && Object.keys(document).length === 1;
+
 /** The planner's complete result shape, including fresh empty collections.
  * Field order follows the published plan result; default arrays belong to this call.
  * @param {any} analysis @param {any} [plan]
@@ -3695,6 +3708,7 @@ function collectionResult(analysis, plan = null, mode = 'set', reasons = [],
 
 function planCollectionCore(document, shape, options = undefined) {
   if (document === '$[*]') document = ROOT_SCAN;
+  else if (isRootCount(document)) document = ROOT_COUNT;
   const analysis = analyzeQuery(document, analyzeOptionsFor(shape?.operators));
   if (rootReads(analysis.root) < 2) return planCollectionPhrase(document, analysis, shape, options);
   // A second read of the root sees what the engine is handed as the

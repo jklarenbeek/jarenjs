@@ -483,7 +483,10 @@ already exceeds it; and a `signal` that aborts when the peer goes away.
 - an SSE stream goes out event by event, so a slow reader parks the source
   until the stream's bounded queue gives up;
 - an upload left unread, which `from` reveals, gets `connection: close`
-  and a linger, so the peer reads the answer through the close.
+  and a linger, so the peer reads the answer through the close; so does
+  an upload never read (over its declared `content-length`, on a route
+  no operation matches, or not part of the operation's input), unless it
+  had already arrived whole.
 
 The `request` member is the host's own value. It reaches `identify` as
 `meta.request`, and the handler never sees it directly, so the principal

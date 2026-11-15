@@ -257,7 +257,9 @@ export const DB_CODES = Object.freeze({
  *    baseline, adjacent endpoint or attested model boundary
  *  - `JD0021` — a draft transform was not filled in, or a document no
  *    longer validates after the migration (a narrowing without an
- *    adequate transform), or a PostgreSQL writer lacks READ COMMITTED
+ *    adequate transform), or a PostgreSQL writer lacks READ COMMITTED,
+ *    or a SQLite database's path no longer names the file its connection
+ *    opened (replaced or removed), so shadow isolation cannot identify it
  *  - `JD0022` — the migration list disagrees with the applied history
  *    (an edited file, a missing file, a reordered sequence)
  *  - `JD0023` — a step failed: an assertion returned rows, DDL was

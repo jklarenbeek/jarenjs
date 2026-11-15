@@ -30,11 +30,11 @@
  * pages dropped.
  */
 
-import { lazyOpen, openConnection } from '../driver.js';
+import { chain, lazyOpen, openConnection } from '../driver.js';
 import { sqliteDialect } from '../dialects/sqlite.js';
 import { PRAGMAS, PRAGMA_NAMES } from '../pragmas.js';
 import { copyBunDatabase, mainFileOf, publishSqliteFile, removeSqliteFile } from './snapshot.js';
-import { nativeDatabaseIdentity } from './file-identity.js';
+import { nativeDatabaseIdentity, pinDatabaseIdentity } from './file-identity.js';
 import { decodeIntegers, decodeRunResult } from './sqlite-integers.js';
 export { snapshotDatabase } from './snapshot.js';
 
@@ -218,8 +218,8 @@ export function bunDriver() {
      * @param {{ timeout?: number, readOnly?: boolean, queueTimeout?: number }} [options]
      * @returns {Promise<any>}
      */
-    open: (path, options) => lazyOpen('bun:sqlite',
+    open: (path, options) => chain(lazyOpen('bun:sqlite',
       "the Bun SQLite binding ('bun:sqlite') is unavailable on this runtime",
-      fromBunModule, [path, options]),
+      fromBunModule, [path, options]), pinDatabaseIdentity),
   });
 }

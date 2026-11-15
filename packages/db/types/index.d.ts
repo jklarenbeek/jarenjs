@@ -1505,7 +1505,8 @@ export interface Driver {
   readonly supportsSharedReads?: boolean | ((path: string, options?: { readOnly?: boolean }) => boolean | undefined);
   /** Optional storage identity for shadow isolation. Equal non-null values
    * identify the same database; private memory databases return null. Native
-   * SQLite bindings use filesystem device/inode identity. */
+   * SQLite bindings use filesystem device/inode identity, pinned at open: a
+   * path that no longer names the pinned file is refused (`JD0021`). */
   databaseIdentity?(connection: unknown): string | null | Promise<string | null>;
   /** Open a connection (value-or-promise) at `path` (`':memory:'` for
    * none) with the driver's own options. */

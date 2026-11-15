@@ -3,7 +3,7 @@
 import { it } from 'node:test';
 import assert from 'node:assert/strict';
 import { migrationIdentity } from './migration-fixture.js';
-import { symlinkSync, linkSync, readFileSync } from 'node:fs';
+import { symlinkSync, linkSync, readFileSync, renameSync, unlinkSync } from 'node:fs';
 import { basename, dirname, join, relative } from 'node:path';
 import { migrate, readSchema, shapeHash } from '@jarenjs/db';
 import { tempDbPath } from './helpers.js';
@@ -121,6 +121,79 @@ it('both native driver identity hooks agree on the same neutral connection', asy
     const { bunDriver } = await import('@jarenjs/db/bun');
     assert.equal(await nodeDriver().databaseIdentity(db), await bunDriver().databaseIdentity(db));
     assert.match(await driver.databaseIdentity(db), /^\d+:\d+$/);
+  }
+  finally { db.close(); cleanup(); }
+});
+
+// A path replaced after the open names another file than the connection
+// reads. The identity was the path's current file, so a shadow over the
+// moved original passed as independent and replay would have written into
+// the live database. The identity pinned at open is kept, and a path that no
+// longer names that file is refused. Windows refuses to rename or remove an
+// open database file, so it cannot produce the case.
+const renames = { skip: process.platform === 'win32' && 'Windows refuses to rename an open database file' };
+
+/** The primary at `path`, then its file moved aside and a replacement put at `path`.
+ * @param {boolean} [identified] - whether its identity is asked before the replacement */
+async function replacedPrimary(identified = true) {
+  const { dbPath: path, cleanup } = tempDbPath();
+  const dir = dirname(path), moved = join(dir, 'moved.sqlite'), other = join(dir, 'replacement.sqlite');
+  const db = await driver.open(path);
+  seed(db);
+  const pinned = identified ? await driver.databaseIdentity(db) : undefined;
+  const replacement = await driver.open(other);
+  replacement.exec('CREATE TABLE item(n INTEGER);INSERT INTO item VALUES(41)');
+  const replacedBy = await driver.databaseIdentity(replacement);
+  await replacement.close();
+  renameSync(path, moved);
+  renameSync(other, path);
+  return { db, path, moved, pinned, replacedBy, cleanup };
+}
+
+it('the identity of an open database is the file it read at open, while its path still names that file', renames, async () => {
+  const { dbPath: path, cleanup } = tempDbPath();
+  const db = await driver.open(path);
+  try {
+    const first = await driver.databaseIdentity(db);
+    assert.match(first, /^\d+:\d+$/);
+    assert.equal(await driver.databaseIdentity(db), first);
+    assert.equal(await driver.databaseIdentity(db), first, 'every call answers the pinned file');
+  }
+  finally { db.close(); cleanup(); }
+});
+
+it('a path replaced after the open is refused, never identified as the replacement', renames, async () => {
+  const { db, pinned, replacedBy, cleanup } = await replacedPrimary();
+  try {
+    assert.notEqual(pinned, replacedBy);
+    await assert.rejects(async () => driver.databaseIdentity(db), (error) => /** @type {any} */ (error).code === 'JD0021'
+      && /replaced/.test(/** @type {any} */ (error).message));
+    unchanged(db);
+  }
+  finally { db.close(); cleanup(); }
+});
+
+it('a path removed after the open is refused with the same code', renames, async () => {
+  const { dbPath: path, cleanup } = tempDbPath();
+  const db = await driver.open(path);
+  try {
+    seed(db);
+    await driver.databaseIdentity(db);
+    unlinkSync(path);
+    await assert.rejects(async () => driver.databaseIdentity(db), { code: 'JD0021' });
+  }
+  finally { db.close(); cleanup(); }
+});
+
+it('a shadow over the moved original of a replaced primary is refused before replay writes it', renames, async () => {
+  // nothing asks the primary's identity before its path is replaced: the pin is the open's
+  const { db, moved, cleanup } = await replacedPrimary(false);
+  let fixtures = 0;
+  try {
+    await assert.rejects(async () => migrate({ connection: db }, [migration], { baseline, dryRun: true,
+      shadowPath: moved, shadowDriver: driver, shadowFixture: () => { fixtures++; } }), { code: 'JD0021', message: /replaced/ });
+    unchanged(db);
+    assert.equal(fixtures, 0);
   }
   finally { db.close(); cleanup(); }
 });

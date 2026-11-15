@@ -1659,7 +1659,12 @@ the platform:
   the request is destroyed, so the close is a FIN the client can read
   the 413 through rather than an RST that discards it (winsock drops
   buffered receive data on RST); a declared `content-length` above the
-  limit is never read; an unmatched request's body is never read. Bytes
+  limit is never read, nor is an unmatched request's body or one the
+  operation's input takes nothing from, and an upload never read that
+  has not arrived whole by the answer takes the same `connection: close`
+  and linger, so a keep-alive client cannot hold the connection (or
+  `server.close()`) open. An operation that reads its body runs its
+  handler only on the whole of it. Bytes
   reach the dispatcher as received (its strict UTF-8 decode decides
   `JC2005`); repeated header lines arrive as arrays (`headersDistinct`);
   `ctx.signal` aborts when the client goes away before the response

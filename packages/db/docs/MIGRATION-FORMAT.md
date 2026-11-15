@@ -620,7 +620,15 @@ shadow closes after success, initialization failure or replay failure.
 Before shadow registration, fixture callbacks or replay, Node and Bun compare
 the opened files by device and inode, rejecting relative-path, dot-path, symlink
 and hardlink aliases of the primary, including borrowed primary connections.
-Separate private `:memory:` connections are allowed. An injected SQLite driver's
+Separate private `:memory:` connections are allowed. The identity is the file a
+connection opened: the driver pins its device and inode at `open()` (a
+connection it did not open, at its first identity call), and each comparison
+re-reads the connection's filename and refuses with `JD0021` when that path no
+longer names the pinned file (replaced or removed since), rather than compare
+the file now at the path, which the connection does not read. The precondition
+is an unchanged path while a database opens: `node:sqlite` and `bun:sqlite`
+expose no file descriptor to identify, so a path replaced between the native
+open and the pin's stat is pinned as the replacement, on every platform alike. An injected SQLite driver's
 optional `databaseIdentity(connection)` hook can provide the same guarantee;
 without it, the runner compares SQLite's canonical main filenames. Such a custom
 driver owns alias detection beyond that filename comparison. An opener returning

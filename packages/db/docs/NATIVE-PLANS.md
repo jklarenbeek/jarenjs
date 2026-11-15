@@ -186,7 +186,10 @@ or a connected join, with no ordering of its own; any other shape stays in the e
 (`entity.distinct`), and on PostgreSQL it lowers over one adopted table with no document
 column (`bind.entityGrouping` otherwise).
 
-A count over an object or array constructor of member paths, literals and
+A count of the bare root wildcard, `{ "$count": "$[*]" }` (what a chain's
+`count()` over a collection handle sends), is the count of the scan it
+abbreviates: one `COUNT(*)` that reads no row, the statement its explain
+reports. A count over an object or array constructor of member paths, literals and
 operators that cannot raise is one `COUNT(*)` that reads no row: `$default` over
 member paths and literals, `$upper`, `$lower` and `$string-length` over a member
 the schema types exactly `string` (reached by no negative index; an adopted

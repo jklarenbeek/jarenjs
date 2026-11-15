@@ -11,6 +11,7 @@
 // because an implicit choice is exactly what goes wrong unnoticed.
 
 import { daysFromCivil, daysInMonth } from '../dates/civil.js';
+import { nearestName } from '../object.js';
 import { CalendarError } from './errors.js';
 
 /**
@@ -86,6 +87,35 @@ const DAY = 86400000;
 export const wholeIn = (value, low, high) => Number.isInteger(value)
   && /** @type {number} */ (value) >= low && /** @type {number} */ (value) <= high;
 
+/** The members a local time is read from (CALENDAR.md "Parts"). */
+const PART_MEMBERS = ['year', 'month', 'day', 'hours', 'minutes', 'seconds'];
+
+/**
+ * Refuse an own member that misspells a member the record lacks: an absent
+ * time member is `0`, so `{ hour: 2, minute: 30 }` would read as midnight.
+ * A near name (the suite's nearest-name rule) is refused only when it is no
+ * longer than the member it corrects to and that member is absent: a name
+ * that extends one (`hoursWorked`, `hour12`, `dayOfWeek`) is another member,
+ * not read, as an `offset` is not. A millisecond count, which is never read,
+ * names the fraction of `seconds` that carries it.
+ * @param {object} parts
+ */
+function refuseMisspeltMembers(parts) {
+  for (const key of Object.keys(parts)) {
+    if (PART_MEMBERS.includes(key)) continue;
+    const lower = key.toLowerCase();
+    if (lower === 'millisecond' || lower === 'milliseconds') {
+      throw new CalendarError('JY0007',
+        `'${key}' is not a member of a local time: milliseconds are the fraction of 'seconds'`, `/parts/${key}`);
+    }
+    const meant = nearestName(key, PART_MEMBERS);
+    if (meant !== undefined && key.length <= meant.length && !Object.hasOwn(parts, meant)) {
+      throw new CalendarError('JY0007',
+        `'${key}' is not a member of a local time: did you mean '${meant}'?`, `/parts/${key}`);
+    }
+  }
+}
+
 /**
  * Refuse anything that is not a real civil date and time of day. An
  * impossible date (the thirtieth of February, hour 25) reads back as a
@@ -97,6 +127,7 @@ export const wholeIn = (value, low, high) => Number.isInteger(value)
 function admitParts(parts) {
   if (parts === null || typeof parts !== 'object' || Array.isArray(parts))
     throw new CalendarError('JY0007', 'a local time is a parts record { year, month, day, hours, minutes, seconds }', '/parts');
+  refuseMisspeltMembers(parts);
   const { year, month, day } = parts;
   const hours = parts.hours ?? 0;
   const minutes = parts.minutes ?? 0;

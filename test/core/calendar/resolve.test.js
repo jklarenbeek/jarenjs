@@ -247,6 +247,59 @@ describe('parts that are not a civil date and time are refused before the provid
   });
 });
 
+describe('a misspelt member of a local time', () => {
+  const counting = () => {
+    let calls = 0;
+    return {
+      provider: { ...provider, candidates: (/** @type {any} */ p, /** @type {string} */ z) => { calls++; return provider.candidates(p, z); } },
+      calls: () => calls,
+    };
+  };
+  // a misspelling of an optional time member read as its absence: 02:30
+  // answered as midnight. Refused before the provider is asked, naming the
+  // member and the spelling it meant
+  for (const [parts, member, meant] of /** @type {[any, string, string][]} */ ([
+    [{ year: 2026, month: 3, day: 29, hour: 2, minute: 30 }, 'hour', 'hours'],
+    [{ year: 2026, month: 3, day: 29, hours: 2, minute: 30 }, 'minute', 'minutes'],
+    [{ year: 2026, month: 3, day: 29, hours: 2, minutes: 30, second: 15 }, 'second', 'seconds'],
+    [{ year: 2026, month: 3, day: 29, Hours: 2 }, 'Hours', 'hours'],
+    [{ year: 2026, month: 3, day: 29, minuts: 30 }, 'minuts', 'minutes'],
+    [{ year: 2026, month: 3, day: 29, hours: 2, seconds: 5, milliseconds: 250 }, 'milliseconds', 'seconds'],
+    [{ year: 2026, month: 3, day: 29, millisecond: 250 }, 'millisecond', 'seconds'],
+    [{ year: 2026, month: 3, day: 29, hours: 2, secnds: 15 }, 'secnds', 'seconds'],
+  ])) {
+    it(`${member} is JY0007 at /parts/${member}, naming ${meant}`, () => {
+      const probe = counting();
+      const check = (/** @type {any} */ error) => refusal('JY0007')(error) && error.docPath === `/parts/${member}`
+        && error.message.includes(`'${member}'`) && error.message.includes(`'${meant}'`);
+      assert.throws(() => classifyLocal(parts, 'Europe/Amsterdam', probe.provider), check);
+      assert.throws(() => resolveLocal(parts, 'Europe/Amsterdam', { provider: probe.provider, policy: 'later' }), check);
+      assert.strictEqual(probe.calls(), 0);
+    });
+  }
+
+  // every shape that answered right still answers, and answers the same
+  for (const [label, parts, expected] of /** @type {[string, any, string][]} */ ([
+    ['the documented members', { year: 2026, month: 7, day: 1, hours: 9, minutes: 30, seconds: 15.5 }, '2026-07-01T07:30:15.500Z'],
+    ['absent time members', { year: 2026, month: 7, day: 1 }, '2026-06-30T22:00:00.000Z'],
+    ['a provider\'s toParts output, with its offset', provider.toParts(Date.UTC(2026, 6, 1, 7, 30), 'Europe/Amsterdam'), '2026-07-01T07:30:00.000Z'],
+    ['an unrelated member beside the documented ones', { year: 2026, month: 7, day: 1, hours: 9, label: 'standup' }, '2026-07-01T07:00:00.000Z'],
+    ['a near name whose documented member is present', { year: 2026, month: 7, day: 1, hours: 9, dayOfWeek: 3, monthCode: 'M07' }, '2026-07-01T07:00:00.000Z'],
+    ['a member named like none of them', { year: 2026, month: 7, day: 1, hours: 9, offsetMinutes: 120, hourCycle: 'h23' }, '2026-07-01T07:00:00.000Z'],
+    // a name that extends a documented one is another member, with its own meaning
+    ['a name extending a time member', { year: 2026, month: 7, day: 1, hoursWorked: 8, minutesOffset: 120, hour12: false, secondsFraction: 1 }, '2026-06-30T22:00:00.000Z'],
+    ['a near name beside the member it would correct to', { year: 2026, month: 7, day: 1, hours: 9, hour: 9 }, '2026-07-01T07:00:00.000Z'],
+    ['a name extending a date member beside it', { year: 2026, month: 7, day: 1, hours: 9, years: 3, days: 2 }, '2026-07-01T07:00:00.000Z'],
+    ['a null-prototype record', Object.assign(Object.create(null), { year: 2026, month: 7, day: 1, hours: 9 }), '2026-07-01T07:00:00.000Z'],
+    ['a frozen record', Object.freeze({ year: 2026, month: 7, day: 1, hours: 9 }), '2026-07-01T07:00:00.000Z'],
+  ])) {
+    it(`${label} still answers`, () => {
+      assert.strictEqual(classifyLocal(parts, 'Europe/Amsterdam', provider).kind, 'exists');
+      assert.strictEqual(iso(resolveLocal(parts, 'Europe/Amsterdam', { provider, policy: 'reject' }).instant), expected);
+    });
+  }
+});
+
 describe('the provider seam', () => {
   const parts = { year: 2026, month: 3, day: 29, hours: 2, minutes: 30 };
 

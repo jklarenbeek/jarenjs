@@ -6,10 +6,10 @@
  * without `node:sqlite` the open fails with the coded `JD0003`.
  */
 
-import { lazyOpen, openConnection } from '../driver.js';
+import { chain, lazyOpen, openConnection } from '../driver.js';
 import { sqliteDialect } from '../dialects/sqlite.js';
 import { PRAGMA_NAMES } from '../pragmas.js';
-import { nativeDatabaseIdentity } from './file-identity.js';
+import { nativeDatabaseIdentity, pinDatabaseIdentity } from './file-identity.js';
 import { mainFileOf, publishSqliteFile, removeSqliteFile } from './snapshot.js';
 import { integerColumns, decodeIntegers, decodeRunResult, decodingIterator } from './sqlite-integers.js';
 
@@ -140,9 +140,9 @@ export function nodeDriver() {
      *   queueTimeout?: number }} [options]
      * @returns {Promise<any>}
      */
-    open: (path, options) => lazyOpen('node:sqlite',
+    open: (path, options) => chain(lazyOpen('node:sqlite',
       "the Node SQLite binding ('node:sqlite') is unavailable on this runtime",
-      fromNodeModule, [path, options]),
+      fromNodeModule, [path, options]), pinDatabaseIdentity),
   });
 }
 
