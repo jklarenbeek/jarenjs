@@ -142,7 +142,7 @@ export function admitZoneName(zone) {
  * @param {any} provider
  * @returns {{ readonly name: string, readonly revision: string }}
  */
-function identityOf(provider) {
+export function identityOf(provider) {
   const identity = provider.identity;
   if (identity === undefined)
     return UNRECORDED;
@@ -243,6 +243,20 @@ function freezeList(list) {
 }
 
 /**
+ * Refuse a missing policy and one that is not named in
+ * {@link RESOLUTION_POLICIES}: resolution has no default.
+ * @param {unknown} policy
+ * @returns {'rfc5545' | 'later' | 'reject'}
+ */
+export function admitPolicy(policy) {
+  if (policy === undefined || policy === null)
+    throw new CalendarError('JY0006', `a policy is required: one of ${RESOLUTION_POLICIES.join(', ')}`, '/policy');
+  if (typeof policy !== 'string' || !RESOLUTION_POLICIES.includes(policy))
+    throw new CalendarError('JY0005', `the policy is one of ${RESOLUTION_POLICIES.join(', ')}, not ${String(policy)}`, '/policy');
+  return /** @type {'rfc5545' | 'later' | 'reject'} */ (policy);
+}
+
+/**
  * Whether a local time exists in a zone, falls in a gap (it never
  * happened) or in a fold (it happened twice), with every instant it
  * names.
@@ -292,11 +306,7 @@ export function classifyLocal(parts, zone, provider) {
  * //   zone: 'Europe/Amsterdam', offsetMinutes: 120, provider: { name: 'intl', revision: '2026e' } } }
  */
 export function resolveLocal(parts, zone, options) {
-  const policy = options?.policy;
-  if (policy === undefined || policy === null)
-    throw new CalendarError('JY0006', `a policy is required: one of ${RESOLUTION_POLICIES.join(', ')}`, '/policy');
-  if (typeof policy !== 'string' || !RESOLUTION_POLICIES.includes(policy))
-    throw new CalendarError('JY0005', `the policy is one of ${RESOLUTION_POLICIES.join(', ')}, not ${String(policy)}`, '/policy');
+  const policy = admitPolicy(options?.policy);
   const wall = admitParts(parts);
   const name = admitZoneName(zone);
   const provider = admitProvider(options.provider, 'candidates');

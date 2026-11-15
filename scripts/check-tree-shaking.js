@@ -105,8 +105,10 @@ console.log('Tree-shaking smoke test passed (compileDateLocale carries neither I
 // seam's types are JSDoc only).
 const calendarResult = await build({
   stdin: {
-    contents: "import { resolveLocal, classifyLocal, isZone, assertZone, todayIn } from '@jarenjs/core/calendar';"
-      + ' export { resolveLocal, classifyLocal, isZone, assertZone, todayIn };',
+    contents: "import { resolveLocal, classifyLocal, isZone, assertZone, todayIn, dateValue, floatingValue, utcValue,"
+      + " zonedValue, dateRangeValue, parseTemporal, bindFloating, toUtc, shiftCivil, splitByCivilDay } from '@jarenjs/core/calendar';"
+      + ' export { resolveLocal, classifyLocal, isZone, assertZone, todayIn, dateValue, floatingValue, utcValue,'
+      + ' zonedValue, dateRangeValue, parseTemporal, bindFloating, toUtc, shiftCivil, splitByCivilDay };',
     resolveDir: process.cwd(),
     sourcefile: 'calendar-consumer.js',
   },

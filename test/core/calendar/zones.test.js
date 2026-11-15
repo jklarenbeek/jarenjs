@@ -102,7 +102,7 @@ describe('todayIn', () => {
 
   it('never reads the platform clock or the host zone directly', () => {
     const dir = new URL('../../../packages/core/src/calendar/', import.meta.url);
-    for (const file of ['index.js', 'resolve.js', 'zones.js', 'errors.js']) {
+    for (const file of ['index.js', 'resolve.js', 'zones.js', 'errors.js', 'model.js', 'bind.js']) {
       const source = readFileSync(new URL(file, dir), 'utf8');
       for (const forbidden of ['Date.now', 'new Date(', 'resolvedOptions', 'getTimezoneOffset', 'Intl.', 'process.env'])
         assert.ok(!source.includes(forbidden), `${file} mentions ${forbidden}`);

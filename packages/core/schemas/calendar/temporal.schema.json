@@ -1,0 +1,491 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jarenjs.dev/schemas/jaren-core/calendar/temporal/0.1",
+  "title": "Temporal value (@jarenjs/core/calendar)",
+  "description": "The JSON form of the five temporal value kinds: date, floating, utc, zoned and date-range. The root reads a value standing alone or at a start, where 24:00 is refused; #/$defs/end reads an end bound, where a floating or zoned time may be 24:00, the end of its day. Each refusal the constructors make is its own definition here, named after its code: dateForm, timeForm, clockRange, instantForm, instantClockRange and the member shapes (JY0013), calendarDate and instantDate (JY0012), offsetOnWallTime (JY0011), subMillisecond (JY0010), leapSecond (JY0009), endOfDayAtStart and instantEndOfDay (JY0008), zoneName (JY0001). Not expressible here, and refused by the constructors only: a zone the provider does not know (JY0001) and a date range that does not end after it starts (JY0013).",
+  "$ref": "#/$defs/start",
+  "$defs": {
+    "start": {
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "date",
+            "floating",
+            "utc",
+            "zoned",
+            "date-range"
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "date"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "$ref": "#/$defs/date"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "floating"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "$ref": "#/$defs/floating"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "utc"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "$ref": "#/$defs/utc"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "zoned"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "$ref": "#/$defs/zoned"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "date-range"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "$ref": "#/$defs/dateRange"
+          }
+        }
+      ],
+      "description": "A value standing alone or at a start."
+    },
+    "end": {
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "date",
+            "floating",
+            "utc",
+            "zoned",
+            "date-range"
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "date"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "$ref": "#/$defs/date"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "floating"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "$ref": "#/$defs/floatingEnd"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "utc"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "$ref": "#/$defs/utc"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "zoned"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "$ref": "#/$defs/zonedEnd"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "date-range"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "$ref": "#/$defs/dateRange"
+          }
+        }
+      ],
+      "description": "A value at an end bound: a floating or zoned time may be 24:00."
+    },
+    "date": {
+      "description": "A civil day with no time and no zone.",
+      "type": "object",
+      "required": [
+        "kind",
+        "date"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "date"
+        },
+        "date": {
+          "$ref": "#/$defs/civilDate"
+        }
+      }
+    },
+    "floating": {
+      "description": "A wall clock with no zone.",
+      "type": "object",
+      "required": [
+        "kind",
+        "date",
+        "time"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "floating"
+        },
+        "date": {
+          "$ref": "#/$defs/civilDate"
+        },
+        "time": {
+          "$ref": "#/$defs/startTime"
+        }
+      }
+    },
+    "floatingEnd": {
+      "description": "A wall clock with no zone, at an end bound.",
+      "type": "object",
+      "required": [
+        "kind",
+        "date",
+        "time"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "floating"
+        },
+        "date": {
+          "$ref": "#/$defs/civilDate"
+        },
+        "time": {
+          "$ref": "#/$defs/endTime"
+        }
+      }
+    },
+    "utc": {
+      "description": "One instant, spelled with Z.",
+      "type": "object",
+      "required": [
+        "kind",
+        "instant"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "utc"
+        },
+        "instant": {
+          "$ref": "#/$defs/utcInstant"
+        }
+      }
+    },
+    "zoned": {
+      "description": "A wall clock in a named zone.",
+      "type": "object",
+      "required": [
+        "kind",
+        "date",
+        "time",
+        "zone"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "zoned"
+        },
+        "date": {
+          "$ref": "#/$defs/civilDate"
+        },
+        "time": {
+          "$ref": "#/$defs/startTime"
+        },
+        "zone": {
+          "$ref": "#/$defs/zoneName"
+        }
+      }
+    },
+    "zonedEnd": {
+      "description": "A wall clock in a named zone, at an end bound.",
+      "type": "object",
+      "required": [
+        "kind",
+        "date",
+        "time",
+        "zone"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "zoned"
+        },
+        "date": {
+          "$ref": "#/$defs/civilDate"
+        },
+        "time": {
+          "$ref": "#/$defs/endTime"
+        },
+        "zone": {
+          "$ref": "#/$defs/zoneName"
+        }
+      }
+    },
+    "dateRange": {
+      "description": "Civil days from start up to but not including end.",
+      "type": "object",
+      "required": [
+        "kind",
+        "start",
+        "end"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "date-range"
+        },
+        "start": {
+          "$ref": "#/$defs/civilDate"
+        },
+        "end": {
+          "$ref": "#/$defs/civilDate"
+        }
+      }
+    },
+    "civilDate": {
+      "type": "string",
+      "allOf": [
+        {
+          "$ref": "#/$defs/dateForm"
+        },
+        {
+          "$ref": "#/$defs/calendarDate"
+        }
+      ]
+    },
+    "dateForm": {
+      "description": "JY0013: spelled YYYY-MM-DD.",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+    },
+    "calendarDate": {
+      "description": "JY0012: a day the calendar has, 0000-01-01 to 9999-12-31.",
+      "pattern": "^(\\d{4}-((0[13578]|1[02])-(0[1-9]|[12]\\d|3[01])|(0[469]|11)-(0[1-9]|[12]\\d|30)|02-(0[1-9]|1\\d|2[0-8]))|(\\d\\d(0[48]|[2468][048]|[13579][26])|([02468][048]|[13579][26])00)-02-29)$"
+    },
+    "startTime": {
+      "type": "string",
+      "allOf": [
+        {
+          "$ref": "#/$defs/timeForm"
+        },
+        {
+          "$ref": "#/$defs/offsetOnWallTime"
+        },
+        {
+          "$ref": "#/$defs/subMillisecond"
+        },
+        {
+          "$ref": "#/$defs/leapSecond"
+        },
+        {
+          "$ref": "#/$defs/clockRange"
+        },
+        {
+          "$ref": "#/$defs/endOfDayAtStart"
+        }
+      ]
+    },
+    "endTime": {
+      "type": "string",
+      "allOf": [
+        {
+          "$ref": "#/$defs/timeForm"
+        },
+        {
+          "$ref": "#/$defs/offsetOnWallTime"
+        },
+        {
+          "$ref": "#/$defs/subMillisecond"
+        },
+        {
+          "$ref": "#/$defs/leapSecond"
+        },
+        {
+          "$ref": "#/$defs/clockRange"
+        }
+      ]
+    },
+    "timeForm": {
+      "description": "JY0013: spelled HH:MM[:SS[.fff]].",
+      "pattern": "^\\d{2}:\\d{2}(:\\d{2}(\\.\\d+)?)?(Z|z|[+-]\\d{2}:\\d{2})?$"
+    },
+    "offsetOnWallTime": {
+      "description": "JY0011: a wall-clock time carries no offset or Z.",
+      "not": {
+        "type": "string",
+        "pattern": "(Z|z|[+-]\\d{2}:\\d{2})$"
+      }
+    },
+    "subMillisecond": {
+      "description": "JY0010: no fraction past the millisecond.",
+      "not": {
+        "type": "string",
+        "pattern": "\\.\\d{4}"
+      }
+    },
+    "leapSecond": {
+      "description": "JY0009: no seconds value of 60.",
+      "not": {
+        "type": "string",
+        "pattern": "(^|T)\\d{2}:\\d{2}:60"
+      }
+    },
+    "clockRange": {
+      "description": "JY0013: a time of day from 00:00 to 23:59:59.999, or exactly 24:00.",
+      "pattern": "^(([01]\\d|2[0-3]):[0-5]\\d(:([0-5]\\d|60)(\\.\\d+)?)?|24:00(:00(\\.0+)?)?)(Z|z|[+-]\\d{2}:\\d{2})?$"
+    },
+    "endOfDayAtStart": {
+      "description": "JY0008: 24:00 names the end of a day and is admitted only on an end bound.",
+      "not": {
+        "type": "string",
+        "pattern": "^24:00(:00(\\.0{1,3})?)?$"
+      }
+    },
+    "utcInstant": {
+      "type": "string",
+      "allOf": [
+        {
+          "$ref": "#/$defs/instantForm"
+        },
+        {
+          "$ref": "#/$defs/instantDate"
+        },
+        {
+          "$ref": "#/$defs/subMillisecond"
+        },
+        {
+          "$ref": "#/$defs/leapSecond"
+        },
+        {
+          "$ref": "#/$defs/instantClockRange"
+        },
+        {
+          "$ref": "#/$defs/instantEndOfDay"
+        }
+      ]
+    },
+    "instantForm": {
+      "description": "JY0013: spelled YYYY-MM-DDTHH:MM:SS[.fff]Z, with Z.",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$"
+    },
+    "instantDate": {
+      "description": "JY0012: the instant's day is one the calendar has.",
+      "pattern": "^(\\d{4}-((0[13578]|1[02])-(0[1-9]|[12]\\d|3[01])|(0[469]|11)-(0[1-9]|[12]\\d|30)|02-(0[1-9]|1\\d|2[0-8]))|(\\d\\d(0[48]|[2468][048]|[13579][26])|([02468][048]|[13579][26])00)-02-29)T"
+    },
+    "instantClockRange": {
+      "description": "JY0013: a time of day from 00:00:00 to 23:59:59.999.",
+      "pattern": "T(([01]\\d|2[0-3]):[0-5]\\d:([0-5]\\d|60)(\\.\\d+)?|24:00:00(\\.0+)?)Z$"
+    },
+    "instantEndOfDay": {
+      "description": "JY0008: a utc instant is spelled as the next day's 00:00, never 24:00.",
+      "not": {
+        "type": "string",
+        "pattern": "T24:00:00(\\.0{1,3})?Z$"
+      }
+    },
+    "zoneName": {
+      "description": "JY0001: a zone is a non-empty name.",
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

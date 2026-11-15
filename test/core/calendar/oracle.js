@@ -111,3 +111,91 @@ export function partsOf(wall) {
     hours: d.getUTCHours(), minutes: d.getUTCMinutes(), seconds: d.getUTCSeconds(),
   };
 }
+
+const DAY = 86400000;
+
+/**
+ * The instant a policy picks for a wall clock, read from the table:
+ * `null` where `reject` refuses (a gap or a fold).
+ * @param {{ initial: number, changes: Change[] }} table
+ * @param {number} wall
+ * @param {'rfc5545' | 'later' | 'reject'} policy
+ * @returns {{ instant: number, kind: string } | null}
+ */
+export function oracleResolve(table, wall, policy) {
+  const found = oracleClassify(table, wall);
+  if (found.kind === 'exists')
+    return { instant: found.candidates[0].instant, kind: found.kind };
+  if (policy === 'reject')
+    return null;
+  if (found.kind === 'gap')
+    return { instant: wall - /** @type {any} */ (found.offsets).before * MINUTE, kind: found.kind };
+  return { instant: found.candidates[policy === 'later' ? 1 : 0].instant, kind: found.kind };
+}
+
+/**
+ * Where a civil day starts, by definition rather than by the code's
+ * route: every instant at which the table's wall clock crosses up to the
+ * day's midnight (it read earlier one millisecond before and reads
+ * midnight or later at it). One crossing is the answer; two (a fold that
+ * returns the clock to the day before) leave the choice to the policy,
+ * and `reject` gives `null`.
+ * @param {{ initial: number, changes: Change[] }} table
+ * @param {number} days - the civil day number
+ * @param {'rfc5545' | 'later' | 'reject'} policy
+ * @returns {number | null}
+ */
+export function oracleDayStart(table, days, policy) {
+  const wall = days * DAY;
+  const local = (/** @type {number} */ x) => x + offsetAt(table, x) * MINUTE;
+  const crossings = new Set();
+  const offsets = new Set([table.initial, ...table.changes.flatMap((c) => [c.before, c.after])]);
+  for (const offset of offsets) {
+    const x = wall - offset * MINUTE;
+    if (offsetAt(table, x) === offset && local(x - 1) < wall)
+      crossings.add(x);
+  }
+  for (const { at } of table.changes) {
+    if (local(at - 1) < wall && local(at) >= wall)
+      crossings.add(at);
+  }
+  const sorted = [...crossings].sort((a, b) => a - b);
+  if (sorted.length === 1)
+    return sorted[0];
+  if (sorted.length !== 2)
+    throw new Error(`the oracle found ${sorted.length} starts for day ${days}`);
+  if (policy === 'reject')
+    return null;
+  return sorted[policy === 'later' ? 1 : 0];
+}
+
+/**
+ * A zone provider answering from a table by arithmetic alone, for zones
+ * the host's data need not have (a gap or fold placed across midnight).
+ * @param {string} name - the one zone it knows
+ * @param {{ initial: number, changes: Change[] }} table
+ */
+export function tableProvider(name, table) {
+  const known = (/** @type {string} */ zone) => {
+    if (zone !== name)
+      throw new RangeError(`unknown zone ${zone}`);
+  };
+  return {
+    toParts(/** @type {number} */ epoch, /** @type {string} */ zone) {
+      known(zone);
+      const offset = offsetAt(table, epoch);
+      return { ...partsOf(epoch + offset * MINUTE), offset };
+    },
+    toEpoch() {
+      throw new Error('not used');
+    },
+    candidates(/** @type {any} */ parts, /** @type {string} */ zone) {
+      known(zone);
+      const wall = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hours ?? 0, parts.minutes ?? 0, 0)
+        + Math.round((parts.seconds ?? 0) * 1000);
+      const found = oracleClassify(table, wall);
+      return found.offsets ? { candidates: found.candidates, offsets: found.offsets } : { candidates: found.candidates };
+    },
+    identity: Object.freeze({ name: 'table', revision: 'synthetic' }),
+  };
+}

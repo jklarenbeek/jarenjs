@@ -1045,10 +1045,15 @@ what each does is its own documentation's job
   fraction to the next second and the read-back compares whole seconds. `@jarenjs/core/calendar`
   refuses a fraction past the millisecond instead; the seam's `toEpoch` should either do the same
   or compare the rounded instant.
-- [ ] **`@jarenjs/core/calendar` resolves local times only.** Temporal value kinds (date,
-  floating, utc, zoned), binding a floating value to a zone with provenance, `24:00` as an end
-  bound, recurrence and availability are not in it yet; until then a caller stores RFC 3339
-  strings or epoch milliseconds and resolves each local time with `resolveLocal`.
+- [ ] **`@jarenjs/core/calendar` has no recurrence or availability yet.** Temporal values,
+  zone binding with provenance and civil-day splitting ship; recurrence and availability are
+  not in it, and no store has a temporal column kind: a caller stores the temporal JSON forms
+  (`@jarenjs/core/schemas/calendar/temporal.schema.json`) and binds them with `bindFloating`.
+- [ ] **The RFC 3339 epoch readers disagree past the millisecond.**
+  `getEpochOfDateTimeRFC3339('2026-03-29T01:30:00.9999Z')` truncates to `…00.999Z` (it reads
+  through `Date.parse`), while `epochOfRFC3339Parts(parseRFC3339Parts(…))` rounds the same string
+  to `…01.000Z`. `@jarenjs/core/calendar`'s `utcValue` refuses a fourth fraction digit instead;
+  the readers should agree on one of refusing or rounding.
 - [ ] **String helpers that answer for a non-string.** `countCodePoints(5)` and
   `countCharCode(5, 48)` answer 0, `toCodePoints(5)` answers `[]`, and `fnv1a(5)` equals
   `fnv1a('')` (so `hashContent({})` is `hashContent('')`), each because a non-string's missing

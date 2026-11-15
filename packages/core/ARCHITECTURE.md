@@ -889,7 +889,8 @@ createIntervalIndex(shifts).at(4 * 3600_000);   // the second shift only: [start
 
 ### 5d2. Calendar Module (`calendar/`)
 
-The layer above the zone seam (`resolve.js`, `zones.js`, `errors.js`). A local
+The layer above the zone seam (`resolve.js`, `zones.js`, `model.js`, `bind.js`,
+`errors.js`). A local
 time in a named zone is classified first, as existing, in a gap or in a fold,
 with every instant it names, through the provider's optional
 `candidates(parts, zone)` member. A policy the caller names (`rfc5545`, `later`
@@ -897,6 +898,13 @@ or `reject`, with no default) then picks one. Every resolution records the
 provider's `identity`. Parts are validated before the provider is asked, because
 an impossible date reads back like a gap. The module imports only `dates/civil.js`,
 `runtime.js` and `errors.js`: no series module, no zone data and no `Intl`.
+`model.js` holds the five temporal value kinds as frozen JSON. Every value is
+read through one `admitValue`, and the schema twin
+(`schemas/calendar/temporal.schema.json`) mirrors its refusals, one definition
+per code. `bind.js` binds a zone-less value, converts by kind, shifts by civil
+days and splits at civil-day boundaries. It finds a day's first instant from
+that day's midnight through `classifyLocal`, never as midnight plus 24 hours,
+and asks the provider's `toParts` only where midnight lies inside a change.
 Refusals are `CalendarError` with the `JY` codes; see
 [docs/CALENDAR.md](docs/CALENDAR.md).
 

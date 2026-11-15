@@ -10,6 +10,7 @@
     "src/",
     "dist/types/",
     "docs/",
+    "schemas/",
     "ARCHITECTURE.md"
   ],
   "description": "Jaren Core Functions",
@@ -148,6 +149,7 @@
       "types": "./dist/types/calendar/index.d.ts",
       "default": "./src/calendar/index.js"
     },
+    "./schemas/*": "./schemas/*",
     "./stats": {
       "types": "./dist/types/stats.d.ts",
       "default": "./src/stats.js"
