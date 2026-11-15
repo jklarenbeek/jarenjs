@@ -309,7 +309,7 @@ describe('ical: options', () => {
     assert.throws(() => stringifyIcal({ prodId: 'p', components: [] }, /** @type {any} */ ({ zone: 'utc' })),
       { name: 'TypeError', message: "stringifyIcal: unknown option 'zone' — did you mean 'zones'?" });
     assert.throws(() => stringifyIcal({ prodId: 'p', components: [] }, /** @type {any} */ ({ zones: 'reference' })),
-      { name: 'TypeError', message: "options.zones must be 'utc'" });
+      { name: 'TypeError', message: "options.zones must be 'utc' or 'embed'" });
     assert.throws(() => stringifyIcal({ prodId: 'p', components: [] }, /** @type {any} */ ({ horizon: [0] })),
       { name: 'TypeError', message: 'options.horizon must be a [start, end) pair' });
     assert.throws(() => stringifyIcal({ prodId: 'p', components: [] }, /** @type {any} */ ({ limits: [] })),

@@ -12,7 +12,9 @@
  * extra dates, excluded dates and overrides, and weekly patterns; and
  * prioritized availability layers evaluated into available, busy and
  * unknown spans (unknown is never free), with whole-interval checks, a
- * free/busy projection and slot search over the available time. It
+ * free/busy projection and slot search over the available time; and zone
+ * definitions (a VTIMEZONE as neutral JSON) compiled into a bounded zone
+ * provider, or written from one. It
  * carries no zone data; every zone question goes to an injected provider
  * (`@jarenjs/locales/intl-zones` is the opt-in one over host ICU).
  * See docs/CALENDAR.md.
@@ -29,6 +31,7 @@ export { compileRecurrence, expandRecurrence, nextOccurrences, RECURRENCE_LIMITS
 export { defineSeries, expandSeries, weeklyPattern } from './series.js';
 export { evaluateAvailability, availabilityOf, findAvailableSlots, AVAILABILITY_LIMITS } from './availability.js';
 export { freeBusy } from './freebusy.js';
+export { compileVtimezone, vtimezoneFor, VTIMEZONE_LIMITS } from './vtimezone.js';
 
 /** @typedef {import('./resolve.js').LocalParts} LocalParts */
 /** @typedef {import('./resolve.js').LocalCandidate} LocalCandidate */
@@ -65,3 +68,7 @@ export { freeBusy } from './freebusy.js';
 /** @typedef {import('./availability.js').AvailabilitySpanState} AvailabilitySpanState */
 /** @typedef {import('./availability.js').AvailabilityResult} AvailabilityResult */
 /** @typedef {import('./freebusy.js').FreeBusyPeriod} FreeBusyPeriod */
+/** @typedef {import('./vtimezone.js').VtimezoneDefinition} VtimezoneDefinition */
+/** @typedef {import('./vtimezone.js').VtimezoneObservance} VtimezoneObservance */
+/** @typedef {import('./vtimezone.js').CompiledZone} CompiledZone */
+/** @typedef {import('./vtimezone.js').ZoneTransition} ZoneTransition */

@@ -5,21 +5,25 @@
  * `@jarenjs/core/calendar` model: events (single, or a recurring series
  * with its extra dates, excluded dates and overrides) and free/busy
  * spans, written by kind - utc as `...Z`, date as `VALUE=DATE`, floating
- * with no zone, zoned converted to UTC under `zones: 'utc'`. Lines end
+ * with no zone, zoned converted to UTC under `zones: 'utc'` or written
+ * with a TZID and its zone's VTIMEZONE under `zones: 'embed'`. Lines end
  * in CRLF and fold at 75 octets without splitting a code point; TEXT is
  * escaped; a member outside the documented subset is refused, never
  * written raw. `stringifyIcal` returns the whole calendar and
  * `createIcalWriter` writes it one component at a time; both run one
  * emitter. `parseIcal`, `createIcalReader` and `iterateIcal` read
  * iCalendar back into the same model through one engine, canonical
- * mode: what is outside the subset is reported, never silently
- * interpreted. See docs/ICAL.md.
+ * mode: a VTIMEZONE is compiled into the zone provider its TZID
+ * resolves through, and what is outside the subset is reported, never
+ * silently interpreted. See docs/ICAL.md.
  * @module
  */
 
+import { CalendarError, vtimezoneFor } from '@jarenjs/core/calendar';
 import { resolveRuntime } from '@jarenjs/core/runtime';
 import { utf8ByteLength } from '@jarenjs/core/string';
-import { renderComponent } from './ical-map.js';
+import { horizonSpan, renderComponent } from './ical-map.js';
+import { renderVtimezone } from './ical-vtimezone.js';
 import { ICAL_CODES, ICAL_LIMIT_CODES, IcalError, escapeText, foldLine } from './ical-wire.js';
 import { JoslLimitError, limitOption } from './limits.js';
 import { ICAL_STREAM_WRITE, ICAL_WRITE, admitOptions } from './options.js';
@@ -28,20 +32,27 @@ const CALENDAR_KEYS = Object.freeze(['prodId', 'method', 'components']);
 const METHODS = Object.freeze({ publish: 'PUBLISH' });
 const TAIL = 'END:VCALENDAR\r\n';
 const LAST_INSTANT = 253402300799000;
+/** How much wider than the horizon a written VTIMEZONE reaches each way: two days. */
+const MARGIN = 2 * 86400000;
 
 /**
  * The options both writers take.
  * @typedef {Object} IcalWriterOptions
- * @property {'utc'} [zones] - how zoned values are written; `'utc'`
- *   converts each to its UTC instant (the only mode in this release).
- *   Required as soon as a zoned value is written.
+ * @property {'utc' | 'embed'} [zones] - how zoned values are written;
+ *   `'utc'` converts each to its UTC instant; `'embed'` writes its wall
+ *   clock with a TZID and, before the first component that uses a zone,
+ *   that zone's VTIMEZONE over `horizon` (RDATE onsets, TZUNTIL at its
+ *   end), so a zoned recurring series keeps its RRULE. Required as soon
+ *   as a zoned value is written.
  * @property {import('@jarenjs/core/series').ZoneProvider | null} [provider] - the zone
  *   provider zoned values resolve through; defaults to `runtime.zoneProvider`
  * @property {Partial<import('@jarenjs/core/runtime').Runtime>} [runtime] - its
  *   `now()` is the DTSTAMP of a component that gives none
  * @property {[unknown, unknown]} [horizon] - the half-open span `[start, end)`
  *   (utc values or epoch milliseconds) a zoned recurring series is
- *   expanded over; without it such a series is refused
+ *   expanded over under `'utc'`, and every VTIMEZONE covers under
+ *   `'embed'`; without it such a series (and under `'embed'` any zoned
+ *   value) is refused
  * @property {import('@jarenjs/core/calendar').RecurrenceLimits} [limits] - the
  *   expansion's limits (the calendar layer's defaults when absent)
  * @property {number} [maxOctets] - the calendar's size in octets, line breaks included
@@ -94,6 +105,8 @@ export class IcalWriter {
   #components = 0;
   #rdates = 0;
   #index = 0;
+  /** @type {Set<string>} */
+  #zones = new Set();
   #limits;
   /** @type {import('./ical-map.js').MapContext} */
   #context;
@@ -117,6 +130,7 @@ export class IcalWriter {
       provider: admitted.provider ?? runtime.zoneProvider ?? null,
       horizon: admitted.horizon ?? undefined,
       limits: admitted.limits ?? undefined,
+      used: new Set(),
       now: () => {
         if (now === undefined) {
           const at = runtime.now();
@@ -149,6 +163,28 @@ export class IcalWriter {
       this.#chunks.push(text);
   }
 
+  /**
+   * The VTIMEZONE of a zone over the horizon, from the provider: two
+   * days wider on each side, since a compiled definition places a wall
+   * clock only a day clear of its ends, so every time inside the horizon
+   * reads back.
+   * @param {string} zone
+   * @param {string} path
+   * @returns {string[]}
+   */
+  #vtimezone(zone, path) {
+    const { provider } = this.#context;
+    const [low, high] = horizonSpan(this.#context);
+    try {
+      return renderVtimezone(vtimezoneFor(zone, { provider, horizon: [low - MARGIN, high + MARGIN] }));
+    }
+    catch (error) {
+      if (error instanceof CalendarError)
+        throw new IcalError('ICAL3005', `the calendar layer refused the VTIMEZONE of '${zone}': ${error.message}`, path, error);
+      throw error;
+    }
+  }
+
   /** Refuse a call on a writer that has ended or refused. */
   #open() {
     if (this.#state !== 'open')
@@ -166,12 +202,18 @@ export class IcalWriter {
   write(component) {
     this.#open();
     try {
-      const rendered = renderComponent(component, this.#context, `/components/${this.#index}`);
+      const path = `/components/${this.#index}`;
+      this.#context.used.clear();
+      const rendered = renderComponent(component, this.#context, path);
+      const zones = [...this.#context.used].filter((zone) => !this.#zones.has(zone));
+      const definitions = zones.map((zone) => this.#vtimezone(zone, path));
       if (this.#components + rendered.components > this.#limits.maxComponents)
         throw new JoslLimitError('ICAL2002', ICAL_LIMIT_CODES.ICAL2002, this.#limits.maxComponents);
       if (this.#rdates + rendered.rdates > this.#limits.maxRdates)
         throw new JoslLimitError('ICAL2003', ICAL_LIMIT_CODES.ICAL2003, this.#limits.maxRdates);
-      this.#emit(rendered.lines.map(foldLine).join(''), TAIL.length);
+      this.#emit([...definitions.flat(), ...rendered.lines].map(foldLine).join(''), TAIL.length);
+      for (const zone of zones)
+        this.#zones.add(zone);
       this.#components += rendered.components;
       this.#rdates += rendered.rdates;
       this.#index++;

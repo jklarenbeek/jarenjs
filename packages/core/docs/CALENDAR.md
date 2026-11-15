@@ -792,6 +792,123 @@ overlaps unknown or busy time:
 The answer is `{ status, slots, counts: { emitted }, limit? }`. Choosing
 among the candidates is a solver's job, not this function's.
 
+## Zone definitions (VTIMEZONE)
+
+An iCalendar file can carry its own zones: a VTIMEZONE of STANDARD and
+DAYLIGHT observances (RFC 5545 §3.6.5). This layer reads and writes
+them as neutral JSON, with no iCalendar syntax; `@jarenjs/josl/ical`
+maps the text onto it.
+
+```js
+import { compileVtimezone, vtimezoneFor, resolveLocal, VTIMEZONE_LIMITS } from '@jarenjs/core/calendar';
+
+const amsterdam = compileVtimezone({
+  tzid: 'Europe/Amsterdam',
+  observances: [
+    { type: 'daylight', start: '1981-03-29T02:00:00', offsetFrom: '+01:00', offsetTo: '+02:00', rrule: 'FREQ=YEARLY;BYMONTH=3;BYDAY=-1SU' },
+    { type: 'standard', start: '1996-10-27T03:00:00', offsetFrom: '+02:00', offsetTo: '+01:00', rrule: 'FREQ=YEARLY;BYMONTH=10;BYDAY=-1SU' },
+  ],
+}, { horizon: [Date.UTC(2000, 0, 1), Date.UTC(2041, 0, 1)] });
+
+resolveLocal({ year: 2026, month: 3, day: 29, hours: 2, minutes: 30 }, 'Europe/Amsterdam',
+  { provider: amsterdam, policy: 'rfc5545' }).resolution.kind; // 'gap'
+amsterdam.identity; // { name: 'Europe/Amsterdam', revision: <a hash of the definition> }
+```
+
+### The definition
+
+`{ tzid, observances, until? }`. Each observance is `{ type: 'standard' |
+'daylight', start, offsetFrom, offsetTo, rrule?, rdates?, name? }`:
+
+- `start` (DTSTART) is the first onset. It is a wall clock
+  `YYYY-MM-DDTHH:MM:SS` in `offsetFrom`, the offset the change is made
+  from.
+- `offsetFrom` and `offsetTo` are `+HH:MM` or `+HH:MM:SS`. `-00:00` is
+  refused, as RFC 5545 refuses `-0000`.
+- `rrule` adds onsets through the recurrence engine. Its UNTIL is UTC, as
+  RFC 5545 requires, and is moved onto the onset's wall clock before the
+  rule is compiled; a wall-clock UNTIL is read as it is.
+- `rdates` are more onsets: wall clocks in `offsetFrom`, or UTC instants
+  ending in `Z`.
+- `until` (TZUNTIL, RFC 7808) is the UTC instant where the definition
+  stops being valid.
+- `type` and `name` (TZNAME) change no instant.
+
+### `compileVtimezone(definition, { horizon, limits? })`
+
+Every onset sets `offsetTo` from its instant on. `offsetFrom` only
+places the onset: RFC 5545's own examples keep a STANDARD rule firing
+after daylight time ends.
+
+The answer is a provider for the definition's TZID alone, with
+`toParts`, `toEpoch` and `candidates` shaped exactly as the Intl
+provider shapes them. Its `identity` is `{ name: tzid, revision }`,
+and the revision is a hash of the definition. It also carries what it
+was compiled over:
+
+- `horizon: { start, end }` in epoch milliseconds;
+- `status` (`complete` or `incomplete`), and `limit` when a limit
+  stopped it;
+- `counts: { observances, transitions, work }`;
+- `transitions: [{ at, before, after }]`;
+- `initial`, the offset at the horizon's start.
+
+It answers only inside its horizon, which may be narrower than the one
+asked for:
+
+- The horizon starts at the earliest onset at the latest. Before it the
+  definition says nothing (the RFC's DTSTART-only example is valid only
+  from its earliest onset).
+- It ends at `until` and wherever a limit stopped the walk.
+- Outside it every member refuses with `JY0024`, never a guess. A wall
+  clock within a day of either end is outside too, since its instants
+  could lie past the end. The calendar layer passes `JY0024` through
+  as it is, and `isZone` still knows the name.
+
+An observance whose DTSTART lies long before the horizon (exporters
+write 1601) is looked back from the horizon's start, in widening
+windows, until its last onset before it is found. It is never walked
+from its DTSTART.
+
+Refusals:
+
+- `JY0022`: a definition of the wrong form. When an observance's RRULE is
+  what the recurrence layer refused, its refusal is the cause.
+- `JY0023`: one that contradicts itself, through two onsets at one
+  instant with different offsets, or changes whose wall-clock spans
+  overlap. Such a definition would place one wall clock three times.
+- `JY0025`: more observances than `maxObservances`.
+
+`maxTransitions` (onsets kept) and `maxWork` (the recurrence engine's
+work over every rule) do not refuse. They end the horizon at the last
+onset found, with `status: 'incomplete'`.
+
+### `vtimezoneFor(zone, { provider, horizon, limits? })`
+
+The definition a provider answers for one zone over a horizon. It scans
+`toParts` one day apart and bisects to the second inside each day the
+offset moved. The changes it finds are written as RDATE onsets, never as
+an invented RRULE:
+
+- The horizon's start is an onset of its own: a STANDARD observance from
+  and to the offset in force there.
+- Each later change joins the observance of its two offsets. One whose
+  offset rises is DAYLIGHT; the seam has no DST flag.
+- `until` is the horizon's end.
+
+Two changes less than a day apart that restore the offset would not be
+seen; those of the IANA database are months apart. `compileVtimezone`
+of the answer gives back the provider's `candidates` and `toEpoch` on
+every wall clock of the horizon. The tests prove this on every change
+of New York, Amsterdam, Lord Howe, Apia and UTC from 2000 to 2040.
+
+Refusals: `JY0001` for a zone the provider does not know, `JY0004` for a
+provider without `toParts` or one that answers no offset, and `JY0025`
+past `maxProviderCalls`.
+
+`VTIMEZONE_LIMITS` holds the defaults: `maxObservances`,
+`maxTransitions`, `maxWork` and `maxProviderCalls`.
+
 ## Codes
 
 Every refusal is a `CalendarError` (a `CodedError` from
@@ -829,6 +946,10 @@ finite instant, is the runtime's own `TypeError`.
 | `JY0019` | the recurrence end (UNTIL) is not of the kind the start requires |
 | `JY0020` | the frequency is valid RRULE but is not enumerated in this release; only DAILY, WEEKLY, MONTHLY and YEARLY are |
 | `JY0021` | an override that ranges over this and future occurrences is kept as data but refused for expansion |
+| `JY0022` | a zone definition (VTIMEZONE) is not of the form this layer compiles: no TZID or observance, or a member spelled wrong |
+| `JY0023` | a zone definition contradicts itself: two onsets at one instant with different offsets, or changes whose wall-clock spans overlap |
+| `JY0024` | the instant or wall clock lies outside the horizon a compiled zone definition covers; it is never guessed |
+| `JY0025` | a zone definition crosses a limit (observances, or provider calls while writing one) |
 
 ## Not here
 
@@ -841,6 +962,9 @@ finite instant, is the runtime's own `TypeError`.
   the caller's own JSON. Availability is evaluated, never stored.
 - **Storage.** No temporal value is stored by a database here; a caller
   stores the JSON forms above.
+- **Zone definitions.** A written definition holds RDATE onsets only;
+  an RRULE is never inferred from a provider's changes, even where one
+  would be equivalent.
 - **Zone data.** It is never bundled. The provider is the caller's, and
   an instant is only as right as the tzdata the host runs, which is why
   every resolution names its provider's revision.

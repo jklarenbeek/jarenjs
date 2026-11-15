@@ -152,7 +152,7 @@ export const ICAL_STREAM_WRITE = /* @__PURE__ */ icalTable(true);
  */
 function icalTable(stream) {
   return table({
-    zones: oneOf('utc'),
+    zones: oneOf('utc', 'embed'),
     provider: rule((v) => v === null || typeof v === 'object', 'a zone provider'),
     runtime: READ_DOWNSTREAM,
     horizon: rule((v) => v === null || (Array.isArray(v) && v.length === 2), 'a [start, end) pair'),
@@ -164,8 +164,10 @@ function icalTable(stream) {
 
 /**
  * The iCalendar reader: `parseIcal` and `createIcalReader`. The provider
- * resolves a TZID that names an IANA zone; `strict` turns every report
- * entry into a refusal; the limits are octet and count bounds.
+ * resolves a TZID that names an IANA zone; `vtimezone` chooses between
+ * the file's definitions and the provider, `zoneHorizon` and `zoneLimits`
+ * bound their compilation; `strict` turns every report entry into a
+ * refusal; the limits are octet and count bounds.
  */
 export const ICAL_READ = /* @__PURE__ */ icalReadTable(false);
 
@@ -180,6 +182,9 @@ export const ICAL_ITERATE = /* @__PURE__ */ icalReadTable(true);
 function icalReadTable(iterate) {
   return table({
     provider: rule((v) => v === null || typeof v === 'object', 'a zone provider'),
+    vtimezone: oneOf('embedded', 'provider'),
+    zoneHorizon: rule((v) => v === null || (Array.isArray(v) && v.length === 2), 'a [start, end) pair'),
+    zoneLimits: rule((v) => v === null || (typeof v === 'object' && !Array.isArray(v)), 'an object of zone limits'),
     strict: BOOLEAN,
     ...limits(['maxOctets', 'maxComponents', 'maxLineOctets', 'maxParameters', 'maxDepth', 'maxProperties', 'maxReported']),
     ...(iterate ? { signal: SIGNAL } : {}),

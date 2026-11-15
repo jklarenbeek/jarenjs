@@ -103,7 +103,7 @@ type Instant = number /* epoch ms */ | { kind: 'utc', instant: string };
 | `utc` | `DTSTART:20260302T080000Z` |
 | `date` | `DTSTART;VALUE=DATE:20260302` |
 | `floating` | `DTSTART:20260302T090000` (no TZID: RFC 5545 floating time) |
-| `zoned` | under `zones: 'utc'`, the UTC instant the value resolves to |
+| `zoned` | under `zones: 'utc'`, the UTC instant the value resolves to; under `zones: 'embed'`, `DTSTART;TZID=Europe/Amsterdam:20260302T090000` and a VTIMEZONE |
 | `date-range` | `DTSTART;VALUE=DATE` and `DTEND;VALUE=DATE` (exclusive) |
 
 iCalendar counts whole seconds: a time with a fraction of a second is
@@ -111,7 +111,7 @@ refused (`ICAL3006`), never truncated.
 
 ### `zones: 'utc'`
 
-The only zone mode in this release. A zoned value is converted to its UTC
+A zoned value is converted to its UTC
 instant through the provider - the same instant `toUtc` answers - and
 written with `Z`; no TZID and no VTIMEZONE are written. That conversion is
 the documented meaning of the mode, so the output records nothing more.
@@ -135,6 +135,59 @@ day's length does across an offset change), and each moved slot a VEVENT
 with the RECURRENCE-ID of its original instant. Without a horizon the
 series is refused (`ICAL3011`). The written calendar holds the horizon's
 occurrences only.
+
+### `zones: 'embed'`
+
+A zoned value is written as its wall clock with `TZID=` (quoted where the
+name holds `;`, `:` or `,`). Before the first component that uses a zone,
+the writer adds that zone's VTIMEZONE, once per writer. The VTIMEZONE is
+`vtimezoneFor(zone, { provider, horizon })` of the calendar layer, over
+the writer's `horizon` widened by two days each way. A compiled
+definition places a wall clock only a day clear of its ends, so the
+widening lets a time at either edge of the horizon read back:
+
+- the widened horizon's start is an onset of its own;
+- every change of offset the provider makes inside it is an RDATE onset
+  of a STANDARD or DAYLIGHT observance;
+- `TZUNTIL` (RFC 7808) is at the widened end, so a reader never
+  stretches the definition past what the provider said.
+
+No RRULE is inferred for a zone. A VTIMEZONE counts toward `maxOctets`
+but not toward `maxComponents` or `maxRdates`.
+
+```js
+import { compileRecurrence, defineSeries, utcValue, zonedValue } from '@jarenjs/core/calendar';
+
+const text = stringifyIcal({ prodId: '-//Example//Rota//EN', components: [{ type: 'event', series: defineSeries({
+  uid: 'standup', base: compileRecurrence({ dtstart: zonedValue('2026-03-02', '09:00:00', 'America/New_York'),
+    duration: 'PT15M', rrule: 'FREQ=WEEKLY;BYDAY=MO' }) }) }] },
+{ zones: 'embed', provider, horizon: [utcValue('2026-01-01T00:00:00Z'), utcValue('2028-01-01T00:00:00Z')] });
+// BEGIN:VTIMEZONE … TZID:America/New_York … TZUNTIL:20280103T000000Z … END:VTIMEZONE
+// DTSTART;TZID=America/New_York:20260302T090000 / DURATION:PT15M / RRULE:FREQ=WEEKLY;BYDAY=MO
+```
+
+- **A zoned recurring series keeps its rule** under the RFC's policy
+  (`rfc5545`). It is written as DTSTART;TZID and RRULE, with every
+  RDATE, EXDATE and RECURRENCE-ID in the same zone, so each occurrence
+  is the zone's wall clock. A COUNT the rule needs rewritten becomes a
+  UTC UNTIL, as RFC 5545 §3.3.10 asks of a zoned start. A series under
+  `later` or `reject` is written by its occurrences, as under `'utc'`.
+- **A single event's zoned time** is its wall clock where the event's
+  policy picks the instant RFC 5545's rule picks. In a fold under
+  `later` it picks another instant, so it is written as that UTC
+  instant. A zoned start with a duration keeps its DURATION.
+- Without a horizon, any zoned value is refused (`ICAL3019`). A zoned
+  time outside the horizon is refused too (`ICAL3020`): its VTIMEZONE
+  says nothing there.
+- An occurrence of a rule that runs past the horizon resolves past
+  TZUNTIL. The reader of this module then asks its provider for an IANA
+  name and refuses any other name. Choose a horizon that covers the
+  series' life.
+
+Read back with `parseIcal(text, { provider })`, the calendar's series
+expand through `zones.provider` to the original provider's occurrences
+and instants over the horizon. The tests prove this for New York,
+Amsterdam, Lord Howe, Apia and UTC.
 
 ## Series
 
@@ -270,16 +323,81 @@ counted per name inside their parent, from 0).
 | `DTSTART:20260302T080000Z` | `utc` |
 | `DTSTART;VALUE=DATE:20260302` | `date` |
 | `DTSTART:20260302T090000` | `floating` |
-| `DTSTART;TZID=Europe/Amsterdam:20260302T090000` | `zoned`, when the TZID is an IANA name the provider knows; a single event gets `policy: 'rfc5545'` |
+| `DTSTART;TZID=Europe/Amsterdam:20260302T090000` | `zoned`, when a VTIMEZONE read before it defines the TZID or it is an IANA name the provider knows; a single event gets `policy: 'rfc5545'` |
 | `DTSTART;VALUE=DATE` with `DTEND;VALUE=DATE` | `date-range` |
 
-A TZID that is not an IANA name (a Windows zone name, a prefixed name, an
-offset), that the provider does not know, or that arrives with no
-provider withholds its component (`ICAL1019`): a zone is never guessed. A
-VTIMEZONE is reported and not compiled in this release (`ICAL1014`); a
-TZID that names an IANA zone resolves through the provider, whatever the
-VTIMEZONE of that name says. A DTEND at its DTSTART is read as no end,
-which a time without one has.
+A TZID withholds its component (`ICAL1019`) when no VTIMEZONE read
+before it defines it and it is not an IANA name the provider knows
+(a Windows zone name, a prefixed name, an offset), or when it arrives
+with no provider. A zone is never guessed. A DTEND at its DTSTART is
+read as no end, which a time without one has.
+
+### VTIMEZONE
+
+A VTIMEZONE is compiled into a zone provider as soon as it is read. Its
+STANDARD and DAYLIGHT observances (DTSTART, TZOFFSETFROM, TZOFFSETTO,
+RRULE, RDATE) are mapped onto the calendar layer's zone definition and
+compiled by `compileVtimezone` (see `@jarenjs/core` docs/CALENDAR.md).
+
+- The compilation runs over `zoneHorizon` (default 1900-01-01 to
+  2100-01-01) under `zoneLimits`.
+- TZUNTIL ends it early. LAST-MODIFIED, TZURL, TZNAME and COMMENT are
+  read without changing an instant.
+- Other properties, parameters and components inside it are reported, as
+  everywhere else.
+
+`vtimezone` chooses which definition a TZID the file defines resolves
+through:
+
+- `'embedded'`, the default, is RFC 5545's rule: the file's definition is
+  authoritative for the file, and a name only the file knows (a Windows
+  zone name) resolves.
+- `'provider'` uses the caller's zone data. A stale exporter cannot then
+  move an instant, but the file is read otherwise than it says, and a
+  name only the file defines is withheld as before.
+
+Either way, a definition of an IANA name is compared with the caller's
+provider over the span the file's values use it. The comparison samples
+a week apart and both sides of every change the definition makes, and
+runs on to the horizon's end for a recurring series. Where they differ
+it is reported (`ICAL1023`, naming the first instant and both offsets,
+and the source used), never silently picked.
+
+The result carries `zones` beside `calendar` and `report`, as do
+`reader.end()` and `iterateIcal`'s end item:
+
+- `zones.provider` is what the calendar's zoned values resolve through:
+  each compiled definition for its TZID (under `'embedded'`), the
+  caller's provider for every other name. Pass it to `expandSeries`,
+  `toUtc` or `evaluateAvailability`.
+- `zones.compiled` holds every compiled definition by TZID.
+- `zones.undeclared` lists the TZIDs used that no VTIMEZONE defines.
+  RFC 5545 asks for one; such a TZID resolves through the provider and
+  is not refused, under `strict` too.
+
+`reader.provider` is the same provider, live while the input is fed.
+
+Before its earliest onset, past TZUNTIL or past the horizon, a
+definition says nothing. A value the file names there is reported
+(`ICAL1024`). The provider answers it when it knows the IANA name;
+otherwise resolving it refuses (`JY0024`). The RFC's §4 meeting example
+is such a case: its VTIMEZONE starts in October 1998, and its event is
+in March.
+
+A VTIMEZONE is reported and its TZID resolves as an undefined one does
+(`ICAL1014`) when:
+
+- it cannot be read or compiled (no TZID or observance, a misspelt
+  offset, two onsets at one instant with different offsets: the
+  calendar layer's refusal is the cause);
+- it is a second one of a TZID (the first is kept).
+
+A limit that stops a compilation is reported too (`ICAL1014`), and the
+definition answers only as far as it got.
+
+A VTIMEZONE must come before the components that use it, as exporters
+write it: a TZID that only a later VTIMEZONE defines, and that the
+provider does not know, is withheld.
 
 ### Series
 
@@ -313,7 +431,9 @@ counted, not listed (`report.omitted`).
   ATTENDEE, ORGANIZER, CATEGORIES, METHOD other than PUBLISH, ...), a
   parameter (`ICAL1012`: LANGUAGE, ALTREP, X- parameters, ...), a
   component with everything inside it (`ICAL1013`: VTODO, VJOURNAL,
-  VALARM, VAVAILABILITY, X- components), a VTIMEZONE (`ICAL1014`).
+  VALARM, VAVAILABILITY, X- components), a VTIMEZONE that cannot be
+  compiled (`ICAL1014`), a definition that disagrees with the provider
+  (`ICAL1023`) or does not reach a value (`ICAL1024`).
 - Withheld: a component that lacks or repeats a property (`ICAL1017`), a
   value not of its property's form or kind (`ICAL1018`), an unresolved
   TZID (`ICAL1019`), a refusal of the calendar layer (`ICAL1020`), an
@@ -370,7 +490,7 @@ the physical `line`.
 | `ICAL1011` | reported: a property outside the subset, left out |
 | `ICAL1012` | reported: a parameter outside the subset, its property read without it |
 | `ICAL1013` | reported: a component outside the subset, left out with everything inside it |
-| `ICAL1014` | reported: a VTIMEZONE, not compiled in this release |
+| `ICAL1014` | reported: a VTIMEZONE that cannot be compiled, a second one of a TZID, or one a limit stopped |
 | `ICAL1015` | reported: an override over this and future occurrences, kept as data |
 | `ICAL1016` | reported: an override's property differs from its series', whose value is kept |
 | `ICAL1017` | withheld: a component lacks a property it requires, repeats one, or holds two that exclude each other |
@@ -379,6 +499,8 @@ the physical `line`.
 | `ICAL1020` | withheld: the calendar layer refused a value, rule or series (cause attached) |
 | `ICAL1021` | withheld: an override with no series of its UID, or a second series of one UID |
 | `ICAL1022` | withheld: what changes when the event occurs and this release does not read (EXRULE, EXDATE with no rule, a zoned length) |
+| `ICAL1023` | reported: a VTIMEZONE of an IANA name and the provider give other offsets over the span the file uses it |
+| `ICAL1024` | reported: a value lies outside what the VTIMEZONE of its TZID covers |
 | `ICAL3001` | the calendar or a component is not an object of the documented model, or lacks a member it requires |
 | `ICAL3002` | a member or component type outside the documented subset; it is refused, never written raw |
 | `ICAL3003` | a member holds a value of a form it does not take |
@@ -397,6 +519,8 @@ the physical `line`.
 | `ICAL3016` | an override over this and future occurrences is not written in this mode |
 | `ICAL3017` | a value iCalendar cannot spell here |
 | `ICAL3018` | the writer has ended or refused, and takes no more components |
+| `ICAL3019` | `zones: 'embed'` and no horizon for a zone's VTIMEZONE |
+| `ICAL3020` | a zoned time outside the horizon its VTIMEZONE covers |
 
 ## Capability matrix
 
@@ -407,12 +531,12 @@ the physical `line`.
 | METHOD | `PUBLISH` only | `PUBLISH`; any other reported (`ICAL1011`) |
 | VEVENT: UID, DTSTAMP, DTSTART, DTEND, DURATION | supported | supported |
 | VEVENT: SUMMARY, DESCRIPTION, LOCATION, STATUS, SEQUENCE | supported | supported |
-| VEVENT: RRULE | DAILY, WEEKLY, MONTHLY and YEARLY, for date, floating and utc series | DAILY, WEEKLY, MONTHLY and YEARLY, every kind; sub-daily withheld (`ICAL1020`, `JY0020`) |
+| VEVENT: RRULE | DAILY, WEEKLY, MONTHLY and YEARLY, for date, floating and utc series, and zoned ones under `zones: 'embed'` | DAILY, WEEKLY, MONTHLY and YEARLY, every kind; sub-daily withheld (`ICAL1020`, `JY0020`) |
 | VEVENT: RDATE (DATE, DATE-TIME, PERIOD), EXDATE, RECURRENCE-ID | supported (no RANGE) | supported; RANGE=THISANDFUTURE kept and reported (`ICAL1015`) |
 | VEVENT: EXRULE | not written | withheld (`ICAL1022`) |
 | VFREEBUSY: UID, DTSTAMP, DTSTART, DTEND, FREEBUSY with FBTYPE | supported | supported |
-| TZID | not written: `zones: 'utc'` converts | an IANA name the provider knows; any other withheld (`ICAL1019`) |
-| VTIMEZONE | not written | preserved (later): reported, not compiled (`ICAL1014`) |
+| TZID | `zones: 'embed'` (`zones: 'utc'` converts) | a TZID a VTIMEZONE defines, or an IANA name the provider knows; any other withheld (`ICAL1019`) |
+| VTIMEZONE | `zones: 'embed'`: RDATE onsets over the horizon (two days wider), TZUNTIL | compiled (`vtimezone: 'embedded'` by default); a disagreement with the provider reported (`ICAL1023`) |
 | VAVAILABILITY, AVAILABLE | not in this release | reported (`ICAL1013`) |
 | VTODO, VJOURNAL, VALARM, X- components | refused | reported (`ICAL1013`) |
 | ATTENDEE, ORGANIZER, X- and other properties | refused | reported (`ICAL1011`) |

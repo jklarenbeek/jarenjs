@@ -121,6 +121,8 @@ export function wallAt(provider, zone, instant) {
     parts = provider.toParts(instant, zone);
   }
   catch (error) {
+    if (error instanceof CalendarError)
+      throw error;
     if (!providerKnows(provider, zone))
       throw new CalendarError('JY0001', `the provider does not know the zone '${zone}'`, '/zone', error);
     throw new CalendarError('JY0004', `the provider's toParts(instant, '${zone}') threw`, '/provider', error);

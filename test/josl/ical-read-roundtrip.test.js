@@ -234,13 +234,17 @@ describe('ical reader: the vendored RFC and exporter files', () => {
   const readFile = (/** @type {string} */ name) => parseIcal(fs.readFileSync(`${DIR}${name}`), { provider });
   const entries = (/** @type {any} */ report) => report.unsupported.map((/** @type {any} */ e) => `${e.code} ${e.name}`);
 
-  it('RFC 5545 §4 meeting: the zoned event read in America/New_York, its VTIMEZONE and scheduling reported', () => {
-    const { calendar, report } = readFile('rfc5545-section4-meeting.ics');
+  it('RFC 5545 §4 meeting: the zoned event read in America/New_York; its VTIMEZONE starts after it, so the provider answers, reported', () => {
+    const { calendar, report, zones } = readFile('rfc5545-section4-meeting.ics');
     assert.deepStrictEqual(calendar.components, [{ type: 'event', uid: 'guid-1.example.com', dtstamp: at('1998-03-09T23:10:00Z'),
       start: { kind: 'zoned', date: '1998-03-12', time: '08:30:00', zone: 'America/New_York' },
       end: { kind: 'zoned', date: '1998-03-12', time: '09:30:00', zone: 'America/New_York' }, policy: 'rfc5545',
       summary: 'XYZ Project Review', description: 'Project XYZ Review Meeting', location: '1CP Conference Room 4350' }]);
-    assert.deepStrictEqual(entries(report), ['ICAL1014 VTIMEZONE', 'ICAL1011 ORGANIZER', 'ICAL1011 ATTENDEE', 'ICAL1011 CATEGORIES', 'ICAL1011 CLASS', 'ICAL1011 CREATED']);
+    assert.deepStrictEqual(entries(report), ['ICAL1011 ORGANIZER', 'ICAL1011 ATTENDEE', 'ICAL1011 CATEGORIES', 'ICAL1011 CLASS', 'ICAL1011 CREATED',
+      'ICAL1024 VTIMEZONE']);
+    // the VTIMEZONE's earliest onset is 1998-10-25; the event of March 1998 is EST, as the provider says
+    assert.strictEqual(zones.compiled['America/New_York'].horizon.start, at('1998-10-25T06:00:00Z'));
+    assert.strictEqual(toUtc(calendar.components[0].start, { provider: zones.provider, policy: 'rfc5545' }).instant, at('1998-03-12T13:30:00Z'));
   });
 
   it('RFC 5545 §4 interop and to-do: METHOD:xyz, the folded TEXT, the VTODO and its VALARM', () => {
@@ -253,17 +257,19 @@ describe('ical reader: the vendored RFC and exporter files', () => {
     assert.deepStrictEqual([todo.calendar.components, entries(todo.report)], [[], ['ICAL1013 VTODO']]);
   });
 
-  it('a groupware export: a Windows zone name is withheld, never guessed; text folded inside a code point reads whole', () => {
-    const { calendar, report } = readFile('exporter-groupware.ics');
-    assert.deepStrictEqual(calendar.components.map((c) => c.uid), ['040000008200E00074C5B7101A82E009']);
-    assert.match(calendar.components[0].description, /café-zaal kan \(één uur\)\.$/);
-    const withheld = report.unsupported.filter((e) => e.withheld);
-    assert.deepStrictEqual(withheld.map((e) => [e.code, e.path]), [['ICAL1019', '/VCALENDAR/VEVENT[0]/DTSTART']]);
-    assert.deepStrictEqual(report.counts, { ICAL1011: 8, ICAL1012: 2, ICAL1013: 1, ICAL1014: 1, ICAL1019: 1 });
+  it('a groupware export: a Windows zone name resolves through its VTIMEZONE; text folded inside a code point reads whole', () => {
+    const { calendar, report, zones } = readFile('exporter-groupware.ics');
+    assert.deepStrictEqual(calendar.components.map((c) => c.uid), ['040000008200E00074C5B7101A82E008', '040000008200E00074C5B7101A82E009']);
+    assert.match(calendar.components[1].description, /café-zaal kan \(één uur\)\.$/);
+    assert.deepStrictEqual(calendar.components[0].start, { kind: 'zoned', date: '2026-03-02', time: '09:00:00', zone: 'W. Europe Standard Time' });
+    // the file's definition (+01:00 in March before the last Sunday) places it; the provider has no such name
+    assert.strictEqual(toUtc(calendar.components[0].start, { provider: zones.provider, policy: 'rfc5545' }).instant, at('2026-03-02T08:00:00Z'));
+    assert.deepStrictEqual(report.unsupported.filter((e) => e.withheld), []);
+    assert.deepStrictEqual(report.counts, { ICAL1011: 8, ICAL1012: 5, ICAL1013: 1 });
   });
 
   it('a web calendar feed: the zoned series with its excluded, moved and cancelled slots, in its zone', () => {
-    const { calendar, report } = readFile('exporter-webcal.ics');
+    const { calendar, report, zones } = readFile('exporter-webcal.ics');
     assert.strictEqual(calendar.method, 'publish');
     const [holiday, standup] = calendar.components;
     assert.deepStrictEqual(holiday.start, { kind: 'date-range', start: '2026-04-27', end: '2026-04-28' });
@@ -272,7 +278,12 @@ describe('ical reader: the vendored RFC and exporter files', () => {
       .map((o) => new Date(/** @type {number} */ (o.instants?.start)).toISOString().slice(0, 16));
     assert.deepStrictEqual(starts, ['2026-03-02T08:00', '2026-03-09T08:00', '2026-03-17T09:00', '2026-03-30T07:00', '2026-04-13T07:00',
       '2026-04-20T07:00', '2026-04-27T07:00']);
-    assert.deepStrictEqual(report.counts, { ICAL1011: 8, ICAL1013: 1, ICAL1014: 1, ICAL1016: 2 });
+    // its own definition of Europe/Amsterdam answers as the provider does
+    const own = expandSeries(standup.series, { horizon: [at('2026-03-01T00:00:00Z'), at('2026-05-01T00:00:00Z')], provider: zones.provider }).occurrences
+      .map((o) => new Date(/** @type {number} */ (o.instants?.start)).toISOString().slice(0, 16));
+    assert.deepStrictEqual(own, starts);
+    // X-LIC-LOCATION inside the VTIMEZONE is reported now that the VTIMEZONE is read
+    assert.deepStrictEqual(report.counts, { ICAL1011: 9, ICAL1013: 1, ICAL1016: 2 });
   });
 
   it('a desktop export: a monthly zoned series, quoted parameters, a floating event, and what is outside', () => {
@@ -283,7 +294,7 @@ describe('ical reader: the vendored RFC and exporter files', () => {
     const starts = expandSeries(board.series, { horizon: [at('2026-01-01T00:00:00Z'), at('2027-01-01T00:00:00Z')], provider }).occurrences
       .map((o) => new Date(/** @type {number} */ (o.instants?.start)).toISOString().slice(0, 16));
     assert.deepStrictEqual(starts, ['2026-03-10T22:30', '2026-04-14T22:30', '2026-05-12T22:30', '2026-06-09T22:30', '2026-07-14T22:30', '2026-08-11T22:30']);
-    assert.deepStrictEqual(entries(report), ['ICAL1014 VTIMEZONE', 'ICAL1013 VALARM', 'ICAL1011 CREATED', 'ICAL1011 TRANSP',
+    assert.deepStrictEqual(entries(report), ['ICAL1013 VALARM', 'ICAL1011 CREATED', 'ICAL1011 TRANSP',
       'ICAL1011 X-APPLE-TRAVEL-ADVISORY-BEHAVIOR', 'ICAL1011 X-APPLE-STRUCTURED-LOCATION', 'ICAL1013 VTODO']);
   });
 });

@@ -566,10 +566,12 @@ Stringify <!--fact:csv.stringify-->leads everything that offers one: 3.4 ms agai
 `@jarenjs/josl/ical` writes RFC 5545 iCalendar from the values of
 `@jarenjs/core/calendar`: single events, recurring events (a rule, extra
 dates, excluded dates and overrides) and free/busy spans. Each time is
-written by its kind; a zoned time is converted to UTC under
-`zones: 'utc'`, and a zoned recurring series is expanded over a horizon
-rather than written as a UTC start with a rule that would drift across
-an offset change. Lines fold at 75 octets without splitting a code
+written by its kind. Under `zones: 'utc'` a zoned time is converted to
+UTC, and a zoned recurring series is expanded over a horizon rather than
+written as a UTC start with a rule that would drift across an offset
+change. Under `zones: 'embed'` it is its wall clock with a TZID, and a
+VTIMEZONE of the zone over the horizon is written before it, so a zoned
+series keeps its rule. Lines fold at 75 octets without splitting a code
 point, TEXT is escaped, and anything outside the documented subset is
 refused by code, never written raw.
 
@@ -584,13 +586,17 @@ const text = stringifyIcal({
 text.split('\r\n')[6]; // 'DTSTART;VALUE=DATE:20261225'
 ```
 
-`parseIcal` reads iCalendar back into the same model, canonical mode: a
-TZID resolves only when it names an IANA zone the injected provider
-knows, a rule goes through the calendar layer (all four frequencies; a
-sub-daily one is refused by name), and everything outside the subset -
-VTODO, VALARM, X- properties, a VTIMEZONE, which is not compiled - is
-listed in `report.unsupported` with its path and line, never silently
-interpreted. `createIcalReader` and `iterateIcal` read the same way from
+`parseIcal` reads iCalendar back into the same model, canonical mode:
+
+- A VTIMEZONE in the file is compiled and, as RFC 5545 asks, defines its
+  TZID; its disagreement with the injected provider is reported. Any
+  other TZID resolves only when it names an IANA zone the provider knows,
+  and `zones.provider` resolves them all.
+- A rule goes through the calendar layer (all four frequencies; a
+  sub-daily one is refused by name).
+- Everything outside the subset (VTODO, VALARM, X- properties) is listed
+  in `report.unsupported` with its path and line, never silently
+  interpreted. `createIcalReader` and `iterateIcal` read the same way from
 chunks; a chunk may end anywhere.
 
 ```js

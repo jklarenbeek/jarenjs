@@ -420,10 +420,10 @@ describe('the host zone is never read', () => {
 });
 
 describe('the code table', () => {
-  it('allocates twenty-one codes, each thrown by this layer', () => {
+  it('allocates twenty-five codes, each thrown by this layer', () => {
     assert.deepStrictEqual(Object.keys(CALENDAR_CODES), ['JY0001', 'JY0002', 'JY0003', 'JY0004', 'JY0005', 'JY0006', 'JY0007',
       'JY0008', 'JY0009', 'JY0010', 'JY0011', 'JY0012', 'JY0013', 'JY0014',
-      'JY0015', 'JY0016', 'JY0017', 'JY0018', 'JY0019', 'JY0020', 'JY0021']);
+      'JY0015', 'JY0016', 'JY0017', 'JY0018', 'JY0019', 'JY0020', 'JY0021', 'JY0022', 'JY0023', 'JY0024', 'JY0025']);
     const error = new CalendarError('JY0002', 'a reason', '/parts');
     assert.strictEqual(error.name, 'CalendarError');
     assert.strictEqual(error.message, 'JY0002: a reason at /parts');

@@ -1106,16 +1106,18 @@ what each does is its own documentation's job
   `findSlots([{ start: 0, end: 10 }], { duration: 0.5 })` answers twenty slots, while
   `@jarenjs/core/calendar`'s `findAvailableSlots` (and every calendar width) refuses a width that
   is not whole milliseconds. One of them should move.
-- [ ] **`@jarenjs/josl/ical` writes iCalendar in UTC zone mode only and reads it in canonical
-  mode only.** Events, recurring series and free/busy spans are written by kind; under
-  `zones: 'utc'` a zoned time is written as the UTC instant `toUtc` answers, and a zoned
-  recurring series as its occurrences over a caller's horizon (refused without one,
-  `ICAL3011`), never as a UTC start with a rule. `parseIcal`, `createIcalReader` and
-  `iterateIcal` read the same subset back; a TZID resolves only when it names an IANA zone the
-  provider knows, and everything else is reported in `report.unsupported`, never interpreted.
-  Not in it: a TZID reference mode, VTIMEZONE (written or compiled on read; a VTIMEZONE of an
-  IANA name does not override the provider's data), VAVAILABILITY, the scheduling methods,
-  loss-aware (lossless) reading and editing, and RANGE=THISANDFUTURE expansion.
+- [ ] **`@jarenjs/josl/ical` reads iCalendar in canonical mode only.** Events, recurring series and
+  free/busy spans are written by kind; under `zones: 'utc'` a zoned time is written as the UTC instant
+  `toUtc` answers, and a zoned recurring series as its occurrences over a caller's horizon (refused
+  without one, `ICAL3011`); under `zones: 'embed'` a zoned time keeps its wall clock and TZID, each
+  zone used is written as a VTIMEZONE of RDATE onsets over the horizon ending in TZUNTIL, and a zoned
+  series under the RFC's policy keeps its RRULE. `parseIcal`, `createIcalReader` and `iterateIcal`
+  read the same subset back; a VTIMEZONE is compiled into a zone provider (`compileVtimezone` in
+  `@jarenjs/core/calendar`) and defines its TZID by default (`vtimezone: 'embedded'`), a disagreement
+  with the caller's provider is reported (`ICAL1023`), and everything else outside the subset is
+  reported in `report.unsupported`, never interpreted. Not in it: a VTIMEZONE written by RRULE,
+  VAVAILABILITY, the scheduling methods, loss-aware (lossless) reading and editing, and
+  RANGE=THISANDFUTURE expansion.
 - [ ] **The RFC 3339 epoch readers disagree past the millisecond.**
   `getEpochOfDateTimeRFC3339('2026-03-29T01:30:00.9999Z')` truncates to `…00.999Z` (it reads
   through `Date.parse`), while `epochOfRFC3339Parts(parseRFC3339Parts(…))` rounds the same string

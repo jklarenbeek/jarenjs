@@ -17,16 +17,16 @@ import { CodedError } from '@jarenjs/core/errors';
  * The diagnoses of the iCalendar reader and the refusals of the writer,
  * one code each. The reader's are `ICAL1xxx`: `ICAL1001`-`ICAL1009`
  * stop the read (the text is not an iCalendar object it can follow),
- * `ICAL1010`-`ICAL1022` are entries of its report (thrown instead under
+ * `ICAL1010`-`ICAL1024` are entries of its report (thrown instead under
  * `strict`). `ICAL2xxx` are the size limits (`ICAL_LIMIT_CODES`); the
  * writer's own refusals are `ICAL3xxx`.
  * @type {Readonly<Record<'ICAL1001' | 'ICAL1002' | 'ICAL1003' | 'ICAL1004' | 'ICAL1005' | 'ICAL1006'
  *   | 'ICAL1007' | 'ICAL1008' | 'ICAL1009' | 'ICAL1010' | 'ICAL1011' | 'ICAL1012' | 'ICAL1013'
  *   | 'ICAL1014' | 'ICAL1015' | 'ICAL1016' | 'ICAL1017' | 'ICAL1018' | 'ICAL1019' | 'ICAL1020'
- *   | 'ICAL1021' | 'ICAL1022'
+ *   | 'ICAL1021' | 'ICAL1022' | 'ICAL1023' | 'ICAL1024'
  *   | 'ICAL3001' | 'ICAL3002' | 'ICAL3003' | 'ICAL3004' | 'ICAL3005' | 'ICAL3006'
  *   | 'ICAL3007' | 'ICAL3008' | 'ICAL3009' | 'ICAL3010' | 'ICAL3011' | 'ICAL3012' | 'ICAL3013'
- *   | 'ICAL3014' | 'ICAL3015' | 'ICAL3016' | 'ICAL3017' | 'ICAL3018', string>>}
+ *   | 'ICAL3014' | 'ICAL3015' | 'ICAL3016' | 'ICAL3017' | 'ICAL3018' | 'ICAL3019' | 'ICAL3020', string>>}
  */
 export const ICAL_CODES = /* @__PURE__ */ Object.freeze({
   ICAL1001: 'the input is not UTF-8, or a string holds a lone surrogate',
@@ -42,7 +42,7 @@ export const ICAL_CODES = /* @__PURE__ */ Object.freeze({
   ICAL1011: 'a property outside the subset; it is left out of the model',
   ICAL1012: 'a parameter outside the subset; its property is read without it',
   ICAL1013: 'a component outside the subset; it is left out of the model with everything inside it',
-  ICAL1014: 'a VTIMEZONE; it is not compiled in this release, and a TZID that names an IANA zone resolves through the provider',
+  ICAL1014: 'a VTIMEZONE that cannot be compiled, a second one of a TZID, or one a limit stopped; a TZID it would define resolves as one no VTIMEZONE defines',
   ICAL1015: 'an override over this and future occurrences; it is kept as data and its expansion refused',
   ICAL1016: 'an override\'s property differs from its series\'; the series\' value is kept',
   ICAL1017: 'a component lacks a property it requires, repeats one, or holds two that exclude each other; it is withheld',
@@ -51,6 +51,8 @@ export const ICAL_CODES = /* @__PURE__ */ Object.freeze({
   ICAL1020: 'the calendar layer refused a value, rule or series; its CalendarError is the cause and the component is withheld',
   ICAL1021: 'an override with no series of its UID, or a second series of one UID; it is withheld',
   ICAL1022: 'what changes when the event occurs and this release does not read (EXRULE, EXDATE with no rule, a zoned length); its component is withheld',
+  ICAL1023: 'a VTIMEZONE of an IANA name and the provider give other offsets over the span the file uses it; the source vtimezone chose is used',
+  ICAL1024: 'a value lies outside what the VTIMEZONE of its TZID covers; the provider answers there for an IANA name it knows, and it is refused when resolved otherwise',
   ICAL3001: 'the calendar or a component is not an object of the documented model, or lacks a member it requires',
   ICAL3002: 'a member or component type outside the documented subset; it is refused, never written raw',
   ICAL3003: 'a member holds a value of a form it does not take',
@@ -69,6 +71,8 @@ export const ICAL_CODES = /* @__PURE__ */ Object.freeze({
   ICAL3016: 'an override over this and future occurrences is not written in this mode',
   ICAL3017: 'a value iCalendar cannot spell here: a period of dates as an extra date, or a free/busy span that is not an instant',
   ICAL3018: 'the writer has ended or refused, and takes no more components',
+  ICAL3019: "zones: 'embed' and no horizon for the VTIMEZONE of a zone",
+  ICAL3020: "a zoned time outside the horizon its VTIMEZONE covers under zones: 'embed'",
 });
 
 /**

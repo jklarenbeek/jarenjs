@@ -8,7 +8,8 @@ import { CodedError } from '../errors.js';
  * happened twice, and both from a zone name nobody knows.
  * @type {Readonly<Record<'JY0001'|'JY0002'|'JY0003'|'JY0004'|'JY0005'|'JY0006'|'JY0007'
  *   |'JY0008'|'JY0009'|'JY0010'|'JY0011'|'JY0012'|'JY0013'|'JY0014'
- *   |'JY0015'|'JY0016'|'JY0017'|'JY0018'|'JY0019'|'JY0020'|'JY0021', string>>}
+ *   |'JY0015'|'JY0016'|'JY0017'|'JY0018'|'JY0019'|'JY0020'|'JY0021'|'JY0022'|'JY0023'|'JY0024'
+ *   |'JY0025', string>>}
  */
 export const CALENDAR_CODES = /* @__PURE__ */ Object.freeze({
   JY0001: 'the zone is not a non-empty name the provider knows',
@@ -32,6 +33,10 @@ export const CALENDAR_CODES = /* @__PURE__ */ Object.freeze({
   JY0019: 'the recurrence end (UNTIL) is not of the kind the start requires',
   JY0020: 'the frequency is valid RRULE but is not enumerated in this release; only DAILY, WEEKLY, MONTHLY and YEARLY are',
   JY0021: 'an override that ranges over this and future occurrences is kept as data but refused for expansion',
+  JY0022: 'a zone definition (VTIMEZONE) is not of the form this layer compiles: no TZID or observance, or a member spelled wrong',
+  JY0023: 'a zone definition contradicts itself: two onsets at one instant with different offsets, or changes whose wall-clock spans overlap',
+  JY0024: 'the instant or wall clock lies outside the horizon a compiled zone definition covers; it is never guessed',
+  JY0025: 'a zone definition crosses a limit (observances, or provider calls while writing one)',
 });
 
 /**

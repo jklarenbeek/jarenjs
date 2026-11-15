@@ -5,8 +5,12 @@
 // values) mapped to unfolded content lines, one component at a time.
 // Times are written by kind: utc as `...Z`, date as `VALUE=DATE`,
 // floating as the local form with no TZID, and zoned - under
-// `zones: 'utc'`, the only zone mode - as the UTC instant the calendar
-// layer resolves it to, under the event's or the series' policy.
+// `zones: 'utc'` - as the UTC instant the calendar layer resolves it to,
+// under the event's or the series' policy. Under `zones: 'embed'` a zoned
+// time is its wall clock with a TZID, and the writer adds a VTIMEZONE of
+// that zone over its horizon before the component that first uses it;
+// a recurring series under the RFC's policy keeps its rule (DTSTART;TZID
+// and RRULE), so every occurrence is the zone's wall clock.
 //
 // A zoned recurring series is never written as a UTC start with a rule:
 // the rule's meaning is the zone's wall clock, and a UTC start would move
@@ -19,6 +23,7 @@
 import {
   CalendarError, compileRecurrence, defineSeries, expandRecurrence, expandSeries, formatRRule, nextOccurrences, parseTemporal, shiftCivil, toUtc,
 } from '@jarenjs/core/calendar';
+import { tzidParam } from './ical-vtimezone.js';
 import {
   IcalError, daysOf, escapeText, formatDate, formatDuration, formatFloating, formatUtc, instantOf, readDuration, wallOf,
 } from './ical-wire.js';
@@ -45,9 +50,12 @@ const POLICIES = Object.freeze(['rfc5545', 'later', 'reject']);
 /**
  * What a component's mapping reads from the writer.
  * @typedef {Object} MapContext
- * @property {'utc' | undefined} zones
+ * @property {'utc' | 'embed' | undefined} zones
  * @property {any} provider - the zone provider, or null
- * @property {[unknown, unknown] | undefined} horizon - bounds the expansion of zoned recurring series
+ * @property {[unknown, unknown] | undefined} horizon - bounds the expansion of zoned recurring series,
+ *   and under `zones: 'embed'` the span each VTIMEZONE covers
+ * @property {[number, number] | undefined} [span] - the horizon in epoch milliseconds, once read
+ * @property {Set<string>} used - the zones the component being mapped writes by TZID
  * @property {object | undefined} limits - the expansion's limits
  * @property {() => number} now - the DTSTAMP instant, whole seconds
  */
@@ -102,11 +110,44 @@ function viaCalendar(call, path) {
  * @param {string} path
  */
 function zonedProvider(context, path) {
-  if (context.zones !== 'utc')
-    throw new IcalError('ICAL3008', "a zoned value is written only under a zones mode; pass zones: 'utc'", path);
+  if (context.zones !== 'utc' && context.zones !== 'embed')
+    throw new IcalError('ICAL3008', "a zoned value is written only under a zones mode; pass zones: 'utc' or 'embed'", path);
   if (context.provider === null)
     throw new IcalError('ICAL3009', 'a zoned value needs a zone provider (options.provider or runtime.zoneProvider)', path);
+  if (context.zones === 'embed' && context.horizon === undefined)
+    throw new IcalError('ICAL3019', "zones: 'embed' writes each zone's VTIMEZONE over a horizon, and none was given", path);
   return context.provider;
+}
+
+/**
+ * The horizon in epoch milliseconds.
+ * @param {MapContext} context
+ * @returns {[number, number]}
+ */
+export function horizonSpan(context) {
+  if (context.span === undefined) {
+    const [start, end] = /** @type {[unknown, unknown]} */ (context.horizon);
+    context.span = [readInstant(start, '/options/horizon/0'), readInstant(end, '/options/horizon/1')];
+  }
+  return context.span;
+}
+
+/**
+ * A zoned time written as its wall clock and TZID, inside the horizon
+ * its VTIMEZONE covers.
+ * @param {string} zone
+ * @param {number} wall
+ * @param {number} instant
+ * @param {MapContext} context
+ * @param {string} path
+ * @returns {Written}
+ */
+function zonedWritten(zone, wall, instant, context, path) {
+  const [low, high] = horizonSpan(context);
+  if (instant < low || instant >= high)
+    throw new IcalError('ICAL3020', `the zoned time ${formatUtc(instant)} lies outside the horizon its VTIMEZONE covers`, path);
+  context.used.add(zone);
+  return { kind: 'instant', text: formatFloating(wall), param: `;TZID=${tzidParam(zone, path)}`, at: instant };
 }
 
 //#region times
@@ -154,11 +195,18 @@ function writeTime(value, bound, context, policy, path) {
   if (value.kind === 'utc')
     return written('instant', instantOf(value.instant, path));
   if (value.kind === 'zoned') {
-    wallOf(value.date, value.time, path);
+    const wall = wallOf(value.date, value.time, path);
     const provider = zonedProvider(context, path);
     if (policy === undefined)
       throw new IcalError('ICAL3010', 'a zoned time of an event resolves under its policy: rfc5545, later or reject', path);
-    return written('instant', viaCalendar(() => toUtc(value, { provider, policy: /** @type {any} */ (policy), bound }), path).instant);
+    const instant = viaCalendar(() => toUtc(value, { provider, policy: /** @type {any} */ (policy), bound }), path).instant;
+    if (context.zones !== 'embed')
+      return written('instant', instant);
+    // a reader resolves a wall clock and TZID under RFC 5545's rule; where
+    // the event's own policy picks another instant (a gap or fold under
+    // later), the wall clock alone would read back wrong, so it is the instant
+    const rfc = policy === 'rfc5545' ? instant : viaCalendar(() => toUtc(value, { provider, policy: 'rfc5545', bound }), path).instant;
+    return rfc === instant ? zonedWritten(value.zone, wall, instant, context, path) : written('instant', instant);
   }
   throw new IcalError('ICAL3007', 'a date range is an event\'s whole start; it is no end', path);
 }
@@ -290,7 +338,7 @@ function spanLines(component, context, path) {
     const length = readDuration(duration, `${path}/duration`);
     if (start.kind === 'date' && length.ms !== 0)
       throw new IcalError('ICAL3003', 'an event that starts on a date lasts whole days or weeks', `${path}/duration`);
-    if (value.kind === 'zoned' && length.days !== 0) {
+    if (value.kind === 'zoned' && length.days !== 0 && !start.param.startsWith(';TZID=')) {
       // nominal days are the zone's: the end is the same wall clock days
       // later, resolved there, then the exact time - written as an instant
       const moved = viaCalendar(() => shiftCivil(value, { days: length.days }, { provider: context.provider, policy }), `${path}/duration`);
@@ -409,9 +457,95 @@ function renderSeries(component, context, path) {
   }
   const head = [uidLine(series.uid, `${path}/series/uid`), dtstamp(component, context, path)];
   const shared = eventProperties(component, series.sequence, path);
+  if (kind === 'zoned' && context.zones === 'embed' && series.base !== null && series.base.policy === 'rfc5545')
+    return renderZonedRule(series, head, shared, context, path);
   if (kind === 'zoned' || series.base === null)
     return renderExpanded(series, kind, zoned, head, shared, context, path);
   return renderRule(series, kind, head, shared, context, path);
+}
+
+/**
+ * How a zoned series is written by its floating twin under
+ * `zones: 'embed'`.
+ * @typedef {Object} Embed
+ * @property {any} base - the series' own compiled rule, whose UNTIL is UTC
+ * @property {(value: Written) => Written} written - a twin's wall clock with the zone's TZID, checked against the horizon
+ * @property {(start: any, path: string) => any} until - the UTC UNTIL of a twin's last start
+ */
+
+/**
+ * A zoned series with a rule under the RFC's policy, written as it is
+ * defined: the series' floating twin (every value its wall clock) is
+ * written as a floating series is, each time with the zone's TZID, and
+ * its RRULE's UNTIL in UTC (RFC 5545 §3.3.10).
+ * @param {any} series
+ * @param {string[]} head
+ * @param {string[]} shared
+ * @param {MapContext} context
+ * @param {string} path
+ * @returns {Rendered}
+ */
+function renderZonedRule(series, head, shared, context, path) {
+  const { provider } = context;
+  const zone = series.base.dtstart.zone;
+  /** @param {string} date @param {string} time */
+  const instantAt = (date, time) => viaCalendar(() => toUtc(/** @type {any} */ ({ kind: 'zoned', date, time, zone }),
+    { provider, policy: 'rfc5545' }), `${path}/series`).instant;
+  const twin = floatingTwin(series, zone, provider, path);
+  return renderRule(twin, 'floating', head, shared, context, path, {
+    base: series.base,
+    written: (value) => {
+      // the twin places its values by wall clock, and keeps doing so
+      const iso = new Date(value.at).toISOString();
+      return { ...zonedWritten(zone, value.at, instantAt(iso.slice(0, 10), iso.slice(11, 19)), context, `${path}/series`), at: value.at };
+    },
+    until: (start) => ({ kind: 'utc', instant: `${new Date(instantAt(start.date, start.time)).toISOString().slice(0, 19)}Z` }),
+  });
+}
+
+/**
+ * The floating twin of a zoned series: the same definition with every
+ * value its wall clock, and UNTIL the wall clock at its instant.
+ * @param {any} series
+ * @param {string} zone
+ * @param {any} provider
+ * @param {string} path
+ * @returns {any}
+ */
+function floatingTwin(series, zone, provider, path) {
+  // the calendar layer holds every value of a zoned series in its zone
+  /** @param {any} value */
+  const wall = (value) => (value === undefined ? undefined : { kind: 'floating', date: value.date, time: value.time });
+  const { base } = series;
+  /** @type {Record<string, any>} */
+  const rrule = { ...base.rrule };
+  if (rrule.UNTIL !== undefined) {
+    const parts = viaCalendar(() => provider.toParts(Date.parse(rrule.UNTIL.instant), zone), `${path}/series/base/rrule`);
+    const two = (/** @type {number} */ n) => String(n).padStart(2, '0');
+    rrule.UNTIL = { kind: 'floating', date: `${String(parts.year).padStart(4, '0')}-${two(parts.month)}-${two(parts.day)}`,
+      time: `${two(parts.hours)}:${two(parts.minutes)}:${two(Math.floor(parts.seconds))}` };
+  }
+  /** @type {Record<string, any>} */
+  const twinBase = { dtstart: wall(base.dtstart), rrule };
+  if (base.duration !== undefined)
+    twinBase.duration = base.duration;
+  if (base.dtend !== undefined)
+    twinBase.dtend = wall(base.dtend);
+  const definition = {
+    uid: series.uid,
+    ...(series.sequence !== undefined ? { sequence: series.sequence } : {}),
+    base: twinBase,
+    rdates: series.rdates.map((/** @type {any} */ entry) => (entry.kind === undefined
+      ? { start: wall(entry.start), end: wall(entry.end) }
+      : wall(entry))),
+    exdates: series.exdates.map(wall),
+    overrides: series.overrides.map((/** @type {any} */ override) => {
+      const { start, end, ...rest } = override;
+      return { ...rest, ...(start !== undefined ? { start: wall(start) } : {}),
+        ...(end !== undefined ? { end: wall(end) } : {}) };
+    }),
+  };
+  return seriesOf(definition, `${path}/series`);
 }
 
 /**
@@ -559,12 +693,15 @@ function movedEvent(head, shared, slot, start, endLine) {
  * @param {string[]} shared
  * @param {MapContext} context
  * @param {string} path
+ * @param {Embed | null} [embed] - a zoned series written by its floating twin: each wall clock gets the TZID
  * @returns {Rendered}
  */
-function renderRule(series, kind, head, shared, context, path) {
+function renderRule(series, kind, head, shared, context, path, embed = null) {
   const { base } = series;
   const form = kind === 'utc' ? 'instant' : kind;
-  const at = written(form, placeOf(base.dtstart));
+  /** @param {Written} value @returns {Written} */
+  const tz = (value) => (embed === null ? value : embed.written(value));
+  const at = tz(written(form, placeOf(base.dtstart)));
   // the overrides' slots must be the series', which an expansion at the start reports
   expandWhole(series, nearHorizon(kind, at.at), context, null, path);
   /** @type {{ days: number, ms: number } | undefined} */
@@ -575,11 +712,11 @@ function renderRule(series, kind, head, shared, context, path) {
     lines.push(`DURATION:${formatDuration(length)}`);
   }
   else if (base.dtend !== undefined) {
-    const to = written(form, placeOf(base.dtend));
+    const to = tz(written(form, placeOf(base.dtend)));
     length = kind === 'date' ? { days: (to.at - at.at) / DAY, ms: 0 } : { days: 0, ms: to.at - at.at };
     lines.push(`DTEND${to.param}:${to.text}`);
   }
-  const rule = ruleLines(base, kind, at, context, path);
+  const rule = ruleLines(base, kind, at, context, path, embed);
   lines.push(...rule);
   // one RDATE per slot, the first given winning as it does in the series
   /** @type {Map<string, { days: number, ms: number }>} */
@@ -590,7 +727,7 @@ function renderRule(series, kind, head, shared, context, path) {
   let rdates = rule.length - 1;
   for (const [i, entry] of series.rdates.entries()) {
     const period = entry.kind === undefined;
-    const from = written(form, placeOf(period ? entry.start : entry));
+    const from = tz(written(form, placeOf(period ? entry.start : entry)));
     const id = slotIdOf(from.at, kind);
     if (seen.has(id))
       continue;
@@ -602,7 +739,7 @@ function renderRule(series, kind, head, shared, context, path) {
     }
     if (kind === 'date')
       throw new IcalError('ICAL3017', 'a period of dates is no RDATE; an RDATE period runs between two date-times', `${path}/series/rdates/${i}`);
-    const to = written(form, placeOf(entry.end));
+    const to = tz(written(form, placeOf(entry.end)));
     periods.set(id, { days: 0, ms: to.at - from.at });
     // a period on a slot the rule makes too would be a duplicate instance
     // whose length a reader may take from either: it is written as that
@@ -610,13 +747,13 @@ function renderRule(series, kind, head, shared, context, path) {
     if (ruleMakes(base, kind, from.at, context, path))
       onRule.set(id, { from, to });
     else {
-      lines.push(`RDATE;VALUE=PERIOD:${from.text}/${to.text}`);
+      lines.push(`RDATE;VALUE=PERIOD${from.param}:${from.text}/${to.text}`);
       rdates++;
     }
   }
   const excluded = new Set();
   for (const entry of series.exdates) {
-    const value = written(form, placeOf(entry));
+    const value = tz(written(form, placeOf(entry)));
     excluded.add(slotIdOf(value.at, kind));
     lines.push(`EXDATE${value.param}:${value.text}`);
   }
@@ -624,15 +761,15 @@ function renderRule(series, kind, head, shared, context, path) {
   const overridden = new Set();
   for (const override of series.overrides) {
     overridden.add(override.recurrenceId);
-    const slot = slotOf(override.recurrenceId, kind, { policy: base.policy, provider: null }, `${path}/series/overrides`);
+    const slot = tz(slotOf(override.recurrenceId, kind, { policy: base.policy, provider: null }, `${path}/series/overrides`));
     if (override.status === 'cancelled') {
       lines.push(`EXDATE${slot.param}:${slot.text}`);
       continue;
     }
-    const start = written(form, placeOf(override.start));
+    const start = tz(written(form, placeOf(override.start)));
     let endLine;
     if (override.end !== undefined) {
-      const end = written(form, placeOf(override.end));
+      const end = tz(written(form, placeOf(override.end)));
       endLine = `DTEND${end.param}:${end.text}`;
     }
     else {
@@ -644,7 +781,7 @@ function renderRule(series, kind, head, shared, context, path) {
   }
   for (const [id, { from, to }] of onRule) {
     if (!overridden.has(id) && !excluded.has(id))
-      moved.push(movedEvent(head, shared, from, from, `DTEND:${to.text}`));
+      moved.push(movedEvent(head, shared, from, from, `DTEND${to.param}:${to.text}`));
   }
   return {
     lines: ['BEGIN:VEVENT', ...lines, ...shared, 'END:VEVENT', ...moved.flat()],
@@ -716,9 +853,10 @@ function ruleMakes(compiled, kind, at, context, path) {
  * @param {Written} at
  * @param {MapContext} context
  * @param {string} path
+ * @param {Embed | null} embed - a zoned series' rule and UNTIL, which are UTC
  * @returns {string[]}
  */
-function ruleLines(base, kind, at, context, path) {
+function ruleLines(base, kind, at, context, path, embed) {
   const { COUNT, UNTIL, ...open } = base.rrule;
   const interval = open.INTERVAL ?? 1;
   const step = (open.FREQ === 'WEEKLY' ? 7 : 1) * interval * DAY;
@@ -729,7 +867,7 @@ function ruleLines(base, kind, at, context, path) {
   const synced = ruleMakes(viaCalendar(() => compileRecurrence({ dtstart: valueAt(kind, probe - step), rrule: open, policy: base.policy }),
     `${path}/series`), kind, probe, context, path);
   if (synced)
-    return [`RRULE:${formatRRule(base)}`];
+    return [`RRULE:${formatRRule(embed === null ? base : embed.base)}`];
   let until = UNTIL;
   if (COUNT !== undefined) {
     /** @type {any} */
@@ -741,6 +879,8 @@ function ruleLines(base, kind, at, context, path) {
     }
     until = next.occurrences[COUNT - 1].start;
   }
+  if (embed !== null && until !== undefined)
+    until = COUNT !== undefined ? embed.until(/** @type {any} */ (until), path) : embed.base.rrule.UNTIL;
   return [`RRULE:${formatRRule(until === undefined ? open : { ...open, UNTIL: until })}`, `RDATE${at.param}:${at.text}`];
 }
 

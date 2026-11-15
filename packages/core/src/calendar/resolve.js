@@ -187,7 +187,9 @@ export function identityOf(provider) {
 
 /**
  * Whether a provider knows a zone, asked through `toParts` at one
- * instant: an unknown name throws there.
+ * instant: an unknown name throws there. A provider whose data does not
+ * reach that instant (`JY0024`, a compiled VTIMEZONE's horizon) knows
+ * the zone all the same.
  * @param {any} provider
  * @param {string} zone
  * @returns {boolean}
@@ -197,8 +199,8 @@ export function providerKnows(provider, zone) {
     provider.toParts(0, zone);
     return true;
   }
-  catch {
-    return false;
+  catch (error) {
+    return error instanceof CalendarError && error.code === 'JY0024';
   }
 }
 
@@ -232,6 +234,10 @@ function classify(provider, wall, zone) {
     answer = provider.candidates(wall, zone);
   }
   catch (error) {
+    // a provider that refuses in this layer's own terms (a compiled
+    // VTIMEZONE asked outside its horizon) is passed through as it is
+    if (error instanceof CalendarError)
+      throw error;
     if (!providerKnows(provider, zone))
       throw new CalendarError('JY0001', `the provider does not know the zone '${zone}'`, '/zone', error);
     throw new CalendarError('JY0004', `the provider's candidates(parts, '${zone}') threw`, '/provider', error);

@@ -16,3 +16,4 @@ test/adoption/trusted-bodies.js -text whitespace=blank-at-eol,blank-at-eof,space
 
 # iCalendar goldens are compared byte for byte, CRLF line endings included.
 test/josl/fixtures/ical/*.ics -text
+test/josl/fixtures/ical-vtimezone/*.ics -text

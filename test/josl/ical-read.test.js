@@ -166,14 +166,19 @@ describe('ical reader: a TZID is a zone the provider knows, or it is reported', 
     assert.match(report.unsupported[0].reason, /no(ne was given| provider)/);
   });
 
-  it('reports a VTIMEZONE as not compiled, and resolves its IANA TZID through the provider', () => {
-    const { components, report } = read(cal([
+  it('compiles a VTIMEZONE, and resolves its TZID through the file\'s definition', () => {
+    const { calendar: { components }, report, zones } = parseIcal(cal([
       'BEGIN:VTIMEZONE', 'TZID:Europe/Amsterdam', 'BEGIN:STANDARD', 'DTSTART:19701025T030000', 'TZOFFSETFROM:+0200', 'TZOFFSETTO:+0100',
       'RRULE:FREQ=YEARLY;BYMONTH=10;BYDAY=-1SU', 'END:STANDARD', 'END:VTIMEZONE',
       ...vevent(['UID:z', 'DTSTART;TZID=Europe/Amsterdam:20260302T090000']),
-    ]));
-    assert.deepStrictEqual(report.unsupported.map((e) => [e.code, e.name, e.path, e.line]), [['ICAL1014', 'VTIMEZONE', '/VCALENDAR/VTIMEZONE[0]', 4]]);
+    ]), { provider });
+    // the definition and the provider agree on the day the file uses
+    assert.deepStrictEqual(report.unsupported, []);
     assert.strictEqual(components[0].start.zone, 'Europe/Amsterdam');
+    assert.deepStrictEqual(Object.keys(zones.compiled), ['Europe/Amsterdam']);
+    // the file's definition has no DAYLIGHT: in July it says +01:00, and it is what answers
+    assert.strictEqual(zones.provider.toParts(Date.UTC(2026, 6, 1, 12), 'Europe/Amsterdam').offset, 60);
+    assert.strictEqual(provider.toParts(Date.UTC(2026, 6, 1, 12), 'Europe/Amsterdam').offset, 120);
   });
 });
 
@@ -395,7 +400,7 @@ describe('ical reader: the report of what is outside the subset', () => {
   });
 
   it('every reader code is in the code table', () => {
-    for (let i = 1; i <= 22; i++)
+    for (let i = 1; i <= 24; i++)
       assert.ok(Object.hasOwn(ICAL_CODES, `ICAL${1000 + i}`), String(i));
   });
 });
@@ -430,7 +435,10 @@ describe('ical reader: three entries, one engine', () => {
     const whole = parseIcal(text, { provider });
     const end = items.pop();
     assert.deepStrictEqual(items.map((item) => item.type === 'component' && item.component), whole.calendar.components);
-    assert.deepStrictEqual(end, { type: 'end', calendar: { prodId: '-//Test//EN', method: 'publish' }, report: whole.report });
+    const { zones, ...rest } = /** @type {any} */ (end);
+    assert.deepStrictEqual(rest, { type: 'end', calendar: { prodId: '-//Test//EN', method: 'publish' }, report: whole.report });
+    assert.deepStrictEqual([zones.compiled, zones.undeclared], [whole.zones.compiled, whole.zones.undeclared]);
+    assert.strictEqual(zones.provider.identity, provider.identity);
   });
 
   it('iterateIcal reads a synchronous iterable of octets, and closes a source it stops early', async () => {

@@ -76,6 +76,8 @@ export function todayIn(zone, options = undefined) {
     parts = provider.toParts(now, name);
   }
   catch (error) {
+    if (error instanceof CalendarError)
+      throw error;
     if (!providerKnows(provider, name))
       throw new CalendarError('JY0001', `the provider does not know the zone '${name}'`, '/zone', error);
     throw new CalendarError('JY0004', `the provider's toParts(now, '${name}') threw`, '/provider', error);

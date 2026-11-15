@@ -7,8 +7,13 @@
 //
 // - A property, parameter or component outside the subset is left out
 //   of the model and listed in `report.unsupported` with its code, name,
-//   path and line (`ICAL1011`-`ICAL1013`). A VTIMEZONE is listed too: its
-//   compilation is a later release (`ICAL1014`).
+//   path and line (`ICAL1011`-`ICAL1013`).
+// - A VTIMEZONE is compiled into a zone provider over the zone horizon
+//   (ical-vtimezone.js). Under `vtimezone: 'embedded'`, the default and
+//   RFC 5545's rule, a TZID the file defines resolves through that
+//   definition; one it cannot compile is reported (`ICAL1014`), and one
+//   that disagrees with the caller's provider for an IANA name is
+//   reported (`ICAL1023`) whichever source is used.
 // - A component whose times or occurrences cannot be read exactly is
 //   WITHHELD whole and listed (`ICAL1017`-`ICAL1022`): a missing or
 //   repeated property, a malformed value, a TZID that names no IANA zone
@@ -31,6 +36,7 @@
 import { CalendarError, compileRecurrence, dateValue, defineSeries, floatingValue, isZone, parseTemporal, utcValue, zonedValue }
   from '@jarenjs/core/calendar';
 import { IcalMachine } from './ical-machine.js';
+import { IANA_FORM, ZONE_HORIZON, ZoneTable } from './ical-vtimezone.js';
 import { IcalError, daysOf, readDuration, wallOf } from './ical-wire.js';
 import { limitOption } from './limits.js';
 import { ICAL_ITERATE, ICAL_READ, admitOptions } from './options.js';
@@ -39,7 +45,6 @@ import { abortedError, closeIterator } from './pull.js';
 const DAY = 86400000;
 const DATE_FORM = /^(\d{4})(\d{2})(\d{2})$/;
 const DATE_TIME_FORM = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})(Z?)$/;
-const IANA_FORM = /^[A-Za-z][A-Za-z0-9_+-]*(?:\/[A-Za-z0-9_+-]+)*$/;
 const STATUS = Object.freeze({ TENTATIVE: 'tentative', CONFIRMED: 'confirmed', CANCELLED: 'cancelled' });
 const FBTYPE = Object.freeze({ BUSY: 'busy', FREE: 'free', 'BUSY-UNAVAILABLE': 'busy-unavailable', 'BUSY-TENTATIVE': 'busy-tentative' });
 const TEXT_PROPERTIES = /** @type {const} */ ([['SUMMARY', 'summary'], ['DESCRIPTION', 'description'], ['LOCATION', 'location']]);
@@ -88,7 +93,17 @@ const WITHHOLDING = Object.freeze(['ICAL1017', 'ICAL1018', 'ICAL1019', 'ICAL1020
  * The reader's options.
  * @typedef {Object} IcalReaderOptions
  * @property {import('@jarenjs/core/series').ZoneProvider | null} [provider] - resolves a TZID
- *   that names an IANA zone; without it every TZID is reported unresolved
+ *   that names an IANA zone and that no VTIMEZONE of the file defines (every TZID under
+ *   `vtimezone: 'provider'`); without it such a TZID is reported unresolved
+ * @property {'embedded' | 'provider'} [vtimezone] - which definition a TZID the file defines
+ *   resolves through: `'embedded'` (the default, RFC 5545's: the file's VTIMEZONE is
+ *   authoritative for the file) or `'provider'` (the caller's zone data, which a stale
+ *   exporter cannot override, at the cost of reading the file other than it says)
+ * @property {[unknown, unknown]} [zoneHorizon] - the `[start, end)` (utc values or epoch
+ *   milliseconds) a VTIMEZONE is compiled over; outside it its instants are refused, never
+ *   guessed (default 1900-01-01 to 2100-01-01)
+ * @property {Partial<typeof import('@jarenjs/core/calendar').VTIMEZONE_LIMITS>} [zoneLimits] - the
+ *   compilation's limits (the calendar layer's defaults when absent)
  * @property {boolean} [strict] - refuse at the first report entry, with its code
  * @property {number} [maxOctets] - octets of input
  * @property {number} [maxComponents] - components, every BEGIN inside the calendar counted
@@ -97,6 +112,18 @@ const WITHHOLDING = Object.freeze(['ICAL1017', 'ICAL1018', 'ICAL1019', 'ICAL1020
  * @property {number} [maxDepth] - nesting of components, the calendar counted as 1
  * @property {number} [maxProperties] - properties of one component
  * @property {number} [maxReported] - report entries listed; past it they are counted only
+ */
+
+/**
+ * The zones of a read.
+ * @typedef {Object} IcalZones
+ * @property {Required<import('@jarenjs/core/series').ZoneProvider>} provider - what the read's zoned values
+ *   resolve through: the file's compiled VTIMEZONEs for the TZIDs they define (under
+ *   `vtimezone: 'embedded'`), the caller's provider for every other name
+ * @property {Record<string, import('@jarenjs/core/calendar').CompiledZone>} compiled - every VTIMEZONE
+ *   compiled, by TZID, whichever source `vtimezone` chose
+ * @property {string[]} undeclared - TZIDs the read's values use that no VTIMEZONE of the file
+ *   defines (RFC 5545 asks for one); they resolve through the caller's provider
  */
 
 //#region report
@@ -194,6 +221,7 @@ function viaCalendar(call, code, what, at) {
  * @property {any} provider
  * @property {Report} report
  * @property {Map<string, boolean>} zones - TZIDs already asked of the provider
+ * @property {ZoneTable} zoneTable - the file's compiled VTIMEZONEs and the TZIDs its values use
  */
 
 /**
@@ -258,8 +286,10 @@ function textOf(prop) {
  * @returns {string}
  */
 function zoneOf(tzid, prop, context) {
+  if (context.zoneTable.embedded(tzid))
+    return tzid;
   if (!IANA_FORM.test(tzid))
-    withhold('ICAL1019', `the TZID '${tzid}' of ${prop.name} is no IANA zone name; it is not guessed`, prop);
+    withhold('ICAL1019', `the TZID '${tzid}' of ${prop.name} is no IANA zone name, and no VTIMEZONE read before it defines it; it is not guessed`, prop);
   if (context.provider === null)
     withhold('ICAL1019', `the TZID '${tzid}' of ${prop.name} resolves through a zone provider, and none was given`, prop);
   let known = context.zones.get(tzid);
@@ -303,7 +333,9 @@ function timeOf(text, type, tzid, prop, context) {
   if (tzid === undefined)
     return viaCalendar(() => floatingValue(date, time), 'ICAL1018', `${prop.name} '${text}'`, prop);
   const zone = zoneOf(tzid, prop, context);
-  return viaCalendar(() => zonedValue(date, time, zone), 'ICAL1018', `${prop.name} '${text}'`, prop);
+  const value = viaCalendar(() => zonedValue(date, time, zone), 'ICAL1018', `${prop.name} '${text}'`, prop);
+  context.zoneTable.use(zone, wallOf(date, time, prop.path));
+  return value;
 }
 
 /**
@@ -626,6 +658,8 @@ function readEvent(node, context) {
   }
   if (rrule !== undefined) {
     paramsOf(rrule, ['RECUR'], context);
+    if (span.start.kind === 'zoned')
+      context.zoneTable.use(span.start.zone, wallOf(span.start.date, span.start.time, rrule.path), true);
     return { type: 'master', master: { uid, dtstamp, span, text, rrule: rrule.value, rdates, exdates, node } };
   }
   if (rdates.length !== 0)
@@ -849,7 +883,9 @@ export class IcalReader {
   constructor(options = undefined, owner = 'createIcalReader', table = ICAL_READ) {
     const admitted = admitOptions(options, table, owner);
     this.#report = new Report(admitted.strict === true, limitOption(admitted, 'maxReported'));
-    this.#context = { provider: admitted.provider ?? null, report: this.#report, zones: new Map() };
+    const provider = admitted.provider ?? null;
+    const zoneTable = new ZoneTable(admitted.vtimezone ?? 'embedded', admitted.zoneHorizon ?? ZONE_HORIZON, admitted.zoneLimits ?? undefined, provider);
+    this.#context = { provider, report: this.#report, zones: new Map(), zoneTable };
     const limits = {
       maxOctets: limitOption(admitted, 'maxOctets'),
       maxComponents: limitOption(admitted, 'maxComponents'),
@@ -867,6 +903,17 @@ export class IcalReader {
   }
 
   /**
+   * The zone provider the read's zoned values resolve through, live
+   * while the input is fed: the file's compiled VTIMEZONEs for the
+   * TZIDs they define (under `vtimezone: 'embedded'`), the caller's
+   * provider for every other name.
+   * @returns {Required<import('@jarenjs/core/series').ZoneProvider>}
+   */
+  get provider() {
+    return /** @type {any} */ (this.#context.zoneTable.provider);
+  }
+
+  /**
    * Feed a chunk: octets or text, ending anywhere.
    * @param {string | Uint8Array} chunk
    * @returns {Record<string, any>[]} the components it completed, in order
@@ -880,9 +927,9 @@ export class IcalReader {
 
   /**
    * End the input.
-   * @returns {{ calendar: { prodId: string, method?: 'publish', components: Record<string, any>[] }, report: IcalReport }}
-   *   the calendar's head and the components still held (every series),
-   *   and the report of the whole read
+   * @returns {{ calendar: { prodId: string, method?: 'publish', components: Record<string, any>[] }, report: IcalReport,
+   *   zones: IcalZones }} the calendar's head and the components still held (every series), the report of the
+   *   whole read, and its zones
    * @throws {IcalError} for an unclosed component, a calendar that is not iCalendar 2.0, and under `strict` for any report entry
    */
   end() {
@@ -909,9 +956,11 @@ export class IcalReader {
     }
     this.#masters.clear();
     this.#overrides.clear();
+    this.#context.zoneTable.compare(this.#report);
     return {
       calendar: { prodId, ...(method !== undefined ? { method: /** @type {'publish'} */ (method) } : {}), components: this.#ready.splice(0, this.#ready.length) },
       report: this.#report.json(),
+      zones: this.#context.zoneTable.summary(),
     };
   }
 
@@ -995,10 +1044,8 @@ export class IcalReader {
       }
       else if (node.name === 'VFREEBUSY')
         this.#ready.push(readFreebusy(node, this.#context));
-      else if (node.name === 'VTIMEZONE') {
-        this.#report.add('ICAL1014', node.name, node.path, node.line,
-          'VTIMEZONE is not compiled in this release; a TZID that names an IANA zone resolves through the provider, any other is reported');
-      }
+      else if (node.name === 'VTIMEZONE')
+        this.#context.zoneTable.define(node, this.#report);
       else {
         this.#report.add('ICAL1013', node.name, node.path, node.line,
           `${node.name} is outside the subset; it is left out with everything inside it`);
@@ -1020,9 +1067,9 @@ export class IcalReader {
  * listed in `report.unsupported`, never silently interpreted.
  * @param {string | Uint8Array} text - the calendar, as text or UTF-8 octets
  * @param {IcalReaderOptions} [options]
- * @returns {{ calendar: { prodId: string, method?: 'publish', components: Record<string, any>[] }, report: IcalReport }}
- *   single events and free/busy components in the order read, then every
- *   series in the order it began
+ * @returns {{ calendar: { prodId: string, method?: 'publish', components: Record<string, any>[] }, report: IcalReport,
+ *   zones: IcalZones }} single events and free/busy components in the order read, then every
+ *   series in the order it began; `zones.provider` is what their zoned values resolve through
  * @throws {IcalError} for text the reader cannot follow (`ICAL1001`-`ICAL1009`), and under `strict` for any report entry
  * @throws {import('./limits.js').JoslLimitError} for a limit the input crosses
  * @throws {TypeError} for an unknown or mistyped option
@@ -1035,9 +1082,9 @@ export class IcalReader {
 export function parseIcal(text, options = undefined) {
   const reader = new IcalReader(options, 'parseIcal');
   const first = reader.feed(text);
-  const { calendar, report } = reader.end();
+  const { calendar, report, zones } = reader.end();
   calendar.components = [...first, ...calendar.components];
-  return { calendar, report };
+  return { calendar, report, zones };
 }
 
 /**
@@ -1062,12 +1109,13 @@ export function createIcalReader(options = undefined) {
  * Read an async iterable of chunks (a fetch body, a file stream) into
  * components, as they complete. Yields `{ type: 'component', component }`
  * per component and, last, `{ type: 'end', calendar: { prodId, method? },
- * report }`. `options.signal` aborts between chunks; an abort, a consumer
+ * report, zones }`; `reader.provider` is not reachable here, so a consumer
+ * that resolves as it goes reads `zones.provider` at the end. `options.signal` aborts between chunks; an abort, a consumer
  * that stops early or a throw closes the source exactly once.
  * @param {AsyncIterable<string | Uint8Array> | Iterable<string | Uint8Array>} chunks
  * @param {IcalReaderOptions & { signal?: AbortSignal | null }} [options]
  * @returns {AsyncGenerator<{ type: 'component', component: Record<string, any> }
- *   | { type: 'end', calendar: { prodId: string, method?: 'publish' }, report: IcalReport }>}
+ *   | { type: 'end', calendar: { prodId: string, method?: 'publish' }, report: IcalReport, zones: IcalZones }>}
  * @example
  * for await (const item of iterateIcal(response.body))
  *   if (item.type === 'component') await save(item.component);
@@ -1094,10 +1142,10 @@ export async function* iterateIcal(chunks, options = undefined) {
     if (!finished)
       await closeIterator(iterator);
   }
-  const { calendar: { components, ...head }, report } = reader.end();
+  const { calendar: { components, ...head }, report, zones } = reader.end();
   for (const component of components)
     yield { type: /** @type {const} */ ('component'), component };
-  yield { type: /** @type {const} */ ('end'), calendar: head, report };
+  yield { type: /** @type {const} */ ('end'), calendar: head, report, zones };
 }
 
 //#endregion
