@@ -1030,6 +1030,12 @@ what each does is its own documentation's job
   engine, so strict execution refuses them (`JD0010`, 'op') while the residual
   answers.
 
+## @jarenjs/locales
+
+- [ ] **The uncataloged-text guard trusts a catalog's English.** A literal equal to an
+  existing English catalog value passes `test/locales/uncataloged.test.js`; a
+  rendered-surface test is the only catch for a copy typed back into a view.
+
 ## @jarenjs/core
 
 - [ ] **String helpers that answer for a non-string.** `countCodePoints(5)` and

@@ -29,6 +29,7 @@
  * reader looks at it.
  */
 
+import { siteText } from '../messages.js';
 import { compileContract } from '@jarenjs/contract';
 import { openLocalClient } from '@jarenjs/contract/local';
 import { toOpenApi, toTypeScript } from '@jarenjs/contract/project';
@@ -198,10 +199,10 @@ const CANNOT_CARRY = [
  * page does — and a host without SubtleCrypto never gets it at all.
  * @param {string | undefined} status
  */
-const pending = (status) => (status === 'error'
-  ? callout('Revision unavailable',
+const pending = (status, say) => (status === 'error'
+  ? callout(say('site/contract/revision-unavailable'),
     'This browser could not hash the contract\'s public projection, so the site cannot show its revision.')
-  : callout('Computing the revision…',
+  : callout(say('site/contract/revision-pending'),
     'The digest runs over the canonical bytes of the document\'s public projection.'));
 
 /**
@@ -214,7 +215,7 @@ const pending = (status) => (status === 'error'
  * @param {string | undefined} status - The status of that computation.
  * @returns {any[]} render nodes for the docs section.
  */
-export function siteContractNodes(info, status) {
+export function siteContractNodes(info, status, say = siteText()) {
   const description = siteContract.describe();
   const { openapi, types } = siteProjections();
   const kinds = [...new Set(description.operations.map((/** @type {any} */ o) => o.kind))];
@@ -232,33 +233,34 @@ export function siteContractNodes(info, status) {
   });
   return [
     p('That is the layer as a library. This page is also a consumer of it: every read of the site\'s own data — the package census in the rail beside you, the build provenance in the footer, the benchmark overview and each suite file, and the repository documents the README dialog renders — goes through one $contract document compiled in your browser. What follows is not a transcription of it; it is that document, described by itself while you read.'),
-    ...(info === undefined ? [pending(status)] : [
+    ...(info === undefined ? [pending(status, say)] : [
       cards([
         {
-          title: 'Operations',
+          title: say('site/contract/operations'),
           value: String(description.operations.length),
           note: kinds.length === 1 ? `every one a ${kinds[0]}` : kinds.join(' / '),
         },
-        { title: 'Binding', value: info.capabilities.name, note: 'in-process — there is no server to call' },
+        { title: say('site/contract/binding'), value: info.capabilities.name, note: 'in-process — there is no server to call' },
         {
-          title: 'Output validation',
+          title: say('site/contract/output-validation'),
           value: info.capabilities.validatedOutput ? 'on' : 'off',
           note: 'the alarm that catches a drifted artifact',
         },
       ]),
       code('revision()', info.revision, 'public projection · RFC 8785 · SHA-256'),
     ]),
-    table('The operations, from describe()',
-      ['operation', 'kind', 'canonical binding', 'input members', 'declared errors'],
+    table(say('site/contract/operations-table'),
+      [say('site/contract/col/operation'), say('site/contract/col/kind'), say('site/contract/col/binding'),
+        say('site/contract/col/input-members'), say('site/contract/col/errors')],
       rows,
       'The binding column is the REST shape the compiler resolved for each operation. Nothing on this site ever calls it: the same compiled document is served in-process, which is why the site can run on a contract while being a directory of static files.'),
-    details('The OpenAPI 3.1 projection of this document', [
+    details(say('site/contract/openapi'), [
       ...(openapi.dropped.length === 0 ? [] : [p(`The OpenAPI dialect cannot carry every JSON Schema keyword this document uses: ${openapi.dropped.length} were dropped from the projection below. The contract, not the projection, is what the site validates against.`)]),
       code(null, JSON.stringify(openapi.document, null, 2)),
     ]),
-    details('The TypeScript declarations of this document', [code(null, types)]),
+    details(say('site/contract/typescript'), [code(null, types)]),
     ...(info === undefined ? [] : [
-      callout('Honestly reduced, not quietly degraded',
+      callout(say('site/contract/reduced'),
         `A binding publishes what it can carry, and this one carries less than HTTP: ${
           CANNOT_CARRY.filter(([slot]) => info.capabilities[slot] === false).map(([, word]) => word).join(', ')
         }. Those slots are read off the running client rather than written down here, and the capability table above shows the same binding beside http and port. Every operation is a read, nothing is stored, and no request leaves the page.`),

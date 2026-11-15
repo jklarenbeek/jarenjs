@@ -276,6 +276,63 @@ in every language. Some separators are not the space they look like:
 French groups with U+202F (narrow no-break space) and Russian with U+00A0,
 and Russian and Arabic write the not-a-number word with U+00A0 inside it.
 
+## What is translated, and what stays English
+
+The rule is "everything you click is in your language, everything you
+read is English":
+
+- **Translated** — every word a person acts on or is told by the
+  interface: the validator's, the forms', the contract's wire and the
+  query engine's messages (this package's original scope), and the chrome
+  of every published tool and component — Play, the Studio and its
+  Project IDE, Data Studio and Flow Studio, mermaid, charts, rules,
+  collection, the calculator, the view dialog — plus md's accessible names
+  and the calendar and number language. The website's own words (its
+  language switch, nav, header toggles, page headings, labels, filters,
+  table headers, status lines) are the site's catalog, in the site's own
+  packs.
+- **English by design**, each for its reason:
+  - *coded developer errors and their code tables* (`JKxxxx`, `JQxxxx`,
+    `JCxxxx`, …): a developer reads them, searches them and quotes them in
+    an issue; the code is the stable part, the sentence its English gloss;
+  - *logs and the CLI*: an operator's tools, copied into issues and scripts;
+  - *contract lint, the OpenAPI and Markdown projections, and emit's
+    generated prose*: developer documents, generated to be committed;
+  - *HS256 refusal reasons*: host-log only — an authentication failure must
+    not explain itself to the caller;
+  - *the formula translator's refusals*: they speak to the author or the
+    model writing a formula, as compiler diagnostics do;
+  - *strict-profile descriptions*: schema content, part of the document;
+  - *every paragraph*: markdown pages, READMEs, each package's `site.md`
+    card, the home page prose and its hero, template descriptions, and the
+    generated benchmark and adoption sentences. On the website these
+    blocks carry `lang="en" dir="ltr"`, so a screen reader pronounces them
+    as English and they read left to right inside an Arabic page;
+  - *data*: example and preset content, demo rows, benchmark files and
+    chart definitions derived from them.
+
+### Adding a string
+
+A new human-language string gets a key in the catalog of whoever owns it:
+
+- a string a **published package or component** writes goes in that
+  package's English catalog (`messagesEn`, `formsMessagesEn`,
+  `playMessagesEn`, `studioMessagesEn`, `mermaidMessagesEn`, …), and its
+  translations go in **all 11 packs** of this package — consumers outside
+  the website need them too;
+- a string **only the website** writes goes in its `siteMessagesEn` and
+  the site's 11 packs (`packages/website/src/lang/<code>.js`), loaded per
+  language on demand.
+
+The repository holds itself to this: `test/locales/uncataloged.test.js`
+scans the rendering modules for text with words, and a string that is in
+no catalog and not in its reasoned allowlist
+(`test/locales/uncataloged-allowlist.json`: not-prose, developer-facing,
+English-by-design-paragraph, data, proper-noun) fails it with its file,
+line and the fix. The parity tests (`test/locales/packs.test.js`, the
+site's `site-lang.test.js`) fail until every pack carries the new key with
+the English placeholders.
+
 ## Authoring a pack
 
 A catalog is a plain flat object; each entry is either a **template

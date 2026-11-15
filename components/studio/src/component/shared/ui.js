@@ -28,7 +28,7 @@ export const UI_RULES = [
     match: "$..[?@.kind == 'p']", mode: 'ui',
     // a paragraph takes the direction of its own text: English prose reads
     // left to right inside a right-to-left page, a translated one right to left
-    body: ['p', { class: 'doc-p', dir: 'auto' }, '$.text'],
+    body: ['p', { class: 'doc-p', lang: '$.lang', dir: { $if: ['$.lang', 'ltr', 'auto'] } }, '$.text'],
   },
   {
     match: "$..[?@.kind == 'cards']", mode: 'ui',
@@ -39,7 +39,7 @@ export const UI_RULES = [
     body: ['div', { class: 'stat-card' },
       ['p', { class: 'stat-title' }, '$.title'],
       ['p', { class: 'stat-value' }, '$.value'],
-      { $if: ['$.note', ['p', { class: 'stat-note', dir: 'auto' }, '$.note']] },
+      { $if: ['$.note', ['p', { class: 'stat-note', lang: '$.noteLang', dir: { $if: ['$.noteLang', 'ltr', 'auto'] } }, '$.note']] },
     ],
   },
   {
@@ -52,7 +52,7 @@ export const UI_RULES = [
           ['tbody', {}, [{ $apply: '$.rows[*]' }]],
         ],
       ],
-      { $if: ['$.note', ['p', { class: 'table-note', dir: 'auto' }, '$.note']] },
+      { $if: ['$.note', ['p', { class: 'table-note', lang: '$.noteLang', dir: { $if: ['$.noteLang', 'ltr', 'auto'] } }, '$.note']] },
     ],
   },
   {
@@ -71,7 +71,7 @@ export const UI_RULES = [
     match: "$..[?@.kind == 'callout']", mode: 'ui',
     body: ['div', { class: 'callout' },
       ['h3', {}, '$.title'],
-      ['p', { dir: 'auto' }, '$.text'],
+      ['p', { lang: '$.lang', dir: { $if: ['$.lang', 'ltr', 'auto'] } }, '$.text'],
       { $if: ['$.href', ['a', { href: '$.href', class: 'btn' }, '$.link']] },
     ],
   },
@@ -108,7 +108,7 @@ export const UI_RULES = [
     body: ['div', { class: 'chart-card' },
       { $if: ['$.title', ['h3', {}, '$.title']] },
       '$.vnode',
-      { $if: ['$.note', ['p', { class: 'table-note', dir: 'auto' }, '$.note']] },
+      { $if: ['$.note', ['p', { class: 'table-note', lang: '$.noteLang', dir: { $if: ['$.noteLang', 'ltr', 'auto'] } }, '$.note']] },
     ],
   },
   {

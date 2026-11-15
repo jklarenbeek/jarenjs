@@ -56,6 +56,36 @@ export const siteMessagesEn = Object.freeze({
   'site/shell/theme': 'Toggle color theme',
   'site/shell/menu': 'Menu',
   'site/shell/nav-toggle': 'Toggle navigation',
+  // the home page's clickables (its prose stays English by design)
+  'site/home/open-play': 'Open Play',
+  'site/home/see-benchmarks': 'See the benchmarks',
+  'site/home/open-studio': 'Open the Studio',
+  'site/home/break-it': 'Break it',
+  'site/home/dispatch-input': 'dispatch input',
+  'site/home/engines-unavailable': 'Engine list unavailable',
+  // Play's deep panels the site's renderers name
+  'site/play/panel/document-json': 'The document, as JSON',
+  'site/play/panel/canonical-markdown': 'Canonical Markdown',
+  'site/play/panel/frontmatter': 'The frontmatter',
+  'site/play/panel/resolved-markdown': 'The resolved Markdown',
+  'site/play/panel/mermaid-ast': 'The geometry-free AST',
+  'site/play/panel/canonical-mermaid': 'Canonical Mermaid',
+  // the docs page: the measured block and the site's own data plane
+  'site/conformance/unavailable': 'Measured results unavailable',
+  'site/contract/operations': 'Operations',
+  'site/contract/binding': 'Binding',
+  'site/contract/output-validation': 'Output validation',
+  'site/contract/operations-table': 'The operations, from describe()',
+  'site/contract/col/operation': 'operation',
+  'site/contract/col/kind': 'kind',
+  'site/contract/col/binding': 'canonical binding',
+  'site/contract/col/input-members': 'input members',
+  'site/contract/col/errors': 'declared errors',
+  'site/contract/openapi': 'The OpenAPI 3.1 projection of this document',
+  'site/contract/typescript': 'The TypeScript declarations of this document',
+  'site/contract/reduced': 'Honestly reduced, not quietly degraded',
+  'site/contract/revision-unavailable': 'Revision unavailable',
+  'site/contract/revision-pending': 'Computing the revision…',
   // the benchmarks, charts, collection, docs and README pages: their labels
   'site/bench/ratio-faster': '{ratio}× faster',
   'site/bench/ratio-slower': '{ratio}× slower',
@@ -433,8 +463,32 @@ const ENGLISH = compileMessageCatalog(siteMessagesEn);
  */
 export function siteText(pack = null) {
   const compiled = pack === null ? ENGLISH : compileMessageCatalog(pack);
-  return (id, params = {}) => (Object.hasOwn(compiled, id) ? compiled[id] : ENGLISH[id])(params);
+  return (id, params = {}) => said((Object.hasOwn(compiled, id) ? compiled[id] : ENGLISH[id])(params));
 }
+
+/**
+ * The texts the site's catalog has rendered recently: a paragraph the site
+ * writes is English by design unless its catalog said it (a translated
+ * status, a loading line). Bounded: it forgets everything past a few
+ * thousand texts, and a text said again is remembered again.
+ * @type {Set<string>}
+ */
+const SAID = new Set();
+const SAID_LIMIT = 4096;
+/** @param {string} text */
+const said = (text) => {
+  if (SAID.size >= SAID_LIMIT) SAID.clear();
+  SAID.add(text);
+  return text;
+};
+
+/**
+ * Whether the site's catalog rendered `text` (in any language): such a text
+ * speaks the reader's language; any other paragraph the site writes is
+ * English by design.
+ * @param {unknown} text
+ */
+export const saidBySite = (text) => typeof text === 'string' && SAID.has(text);
 
 /**
  * The site pack of the current site language, once it has loaded; null

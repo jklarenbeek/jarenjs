@@ -103,7 +103,36 @@ describe('website — LTR islands inside a right-to-left page', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     const paragraphs = findAll(container, (n) => n.tagName === 'p' && n.parentNode?.getAttribute?.('class') === 'callout');
     assert.ok(paragraphs.length > 0, 'a callout is on screen');
-    assert.ok(paragraphs.every((n) => n.getAttribute('dir') === 'auto'));
+    assert.ok(paragraphs.every((n) => n.getAttribute('dir') === 'auto' || (n.getAttribute('dir') === 'ltr' && n.getAttribute('lang') === 'en')));
+  });
+
+  it('a paragraph the site writes is marked English unless its catalog said it', async () => {
+    /** @param {string} hash @param {any} fetchJson */
+    const mount = (hash, fetchJson) => {
+      const { document, container } = createStubHost();
+      /** @type {any} */
+      let routeCb = null;
+      createSiteApp({
+        node: container, document, schedule: (f) => f(), debounceMs: 0, fetchJson,
+        listenHash: (cb) => { routeCb = cb; cb(parseHash(hash)); },
+        navigate: (h) => routeCb(parseHash(h)),
+        storage: { read: () => null, write: () => {} },
+        onError: () => {},
+      });
+      return container;
+    };
+    const calloutText = (/** @type {any} */ c) => findAll(c, (n) => n.tagName === 'p' && n.parentNode?.getAttribute?.('class') === 'callout');
+    // a file that failed: its explanation is English prose, written by the site
+    const failed = mount('#/benchmarks', () => Promise.reject(new Error('404')));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const english = calloutText(failed);
+    assert.ok(english.length > 0);
+    assert.ok(english.every((n) => n.getAttribute('lang') === 'en' && n.getAttribute('dir') === 'ltr'));
+    // a file still loading: its line is the catalog's, in the reader's language
+    const loading = mount('#/benchmarks', () => new Promise(() => {}));
+    const said = calloutText(loading);
+    assert.ok(said.length > 0);
+    assert.ok(said.every((n) => n.getAttribute('lang') === null && n.getAttribute('dir') === 'auto'));
   });
 
   it('the stylesheets compute direction ltr for code and English blocks, whatever the page', () => {

@@ -103,10 +103,22 @@ const engineCards = memo1((content) => (content?.packages ?? [])
  * @param {any} state
  * @returns {any}
  */
-const homeContent = (state) => withDispatch(
+const homeContent = (state, say) => withDispatch(
   composeHome(engineCards(state.site.data.cards),
-    state.bench?.meta?.headlines, state.site.status.cards),
+    state.bench?.meta?.headlines, state.site.status.cards, say),
   heroDemo(state.hero));
+
+/** The home page with its words (the hero's dispatch carries them too, so
+ * its rule reads them from its own node), kept by reference while neither
+ * changes: a rule that read the document root would re-render on every
+ * unrelated change. */
+const homeUi = memo1((home, w) => ({ ...home, w, dispatch: home.dispatch == null ? home.dispatch : { ...home.dispatch, w } }));
+
+/** The home page's clickable words (its prose stays English by design). @param {any} say */
+const homeWords = memo1((say) => ({
+  openPlay: say('site/home/open-play'), seeBenchmarks: say('site/home/see-benchmarks'),
+  openStudio: say('site/home/open-studio'), breakIt: say('site/home/break-it'), dispatchInput: say('site/home/dispatch-input'),
+}));
 
 /** Both halves are memoized, so the merge is too — and the JSLT memo
  * keeps firing for the grid subtree while the hero re-dispatches. */
@@ -155,12 +167,12 @@ function statusLine(status, run) {
   return `${run.binding} binding · output validation ${run.validatedOutput ? 'on' : 'off'}`;
 }
 
-const composeHome = memo1((engines, headlines, status) => {
+const composeHome = memo1((engines, headlines, status, say) => {
   // the grid is fetched, so the page renders before it exists: say what
   // it is waiting for, exactly as the docs rail does with its census —
   // an empty grid under "One stack, 0 engines" would be a lie told for
   // one frame
-  if (engines.length === 0) return { ...HOME_CONTENT, enginesNote: gridNote(status) };
+  if (engines.length === 0) return { ...HOME_CONTENT, enginesNote: gridNote(status, say) };
   const byKey = new Map(Array.isArray(headlines) ? headlines.map((h) => [h.key, h]) : []);
   return {
     ...HOME_CONTENT,
@@ -178,8 +190,8 @@ const composeHome = memo1((engines, headlines, status) => {
 });
 
 /** What the grid says while it has no cards to show — or none to come. */
-const gridNote = (status) => (status === 'error'
-  ? callout('Engine list unavailable',
+const gridNote = (status, say) => (status === 'error'
+  ? callout(say('site/home/engines-unavailable'),
     'The site content could not be loaded. The build collects it from the site document each workspace commits.')
   : callout('Loading…', 'Fetching the engines, as each package describes its own.'));
 
@@ -225,7 +237,7 @@ export function viewModel(state) {
   const say = wordsOf(sitePackOf(state));
   const ui = { nav: deriveNav(page, state.navOpen, say), lang: languageSwitch(state), shell: shellWords(say) };
 
-  if (page === 'home') ui.home = homeContent(state);
+  if (page === 'home') ui.home = homeUi(homeContent(state, say), homeWords(say));
   if (page === 'benchmarks') ui.bench = benchPage(state);
   if (page === 'charts') ui.chartsPage = chartsPage(state);
   if (page === 'collection') {
@@ -484,8 +496,8 @@ const docsPage = memo1((param, census, status, validateRun, validateStatus,
       // repository measured or the site itself runs on; `flatMap`
       // because such a block can expand into a whole subsection
       blocks: section.blocks.flatMap((b) => {
-        if (b.kind === 'measured') return measuredBlock(validateRun, validateStatus);
-        if (b.kind === 'site-contract') return siteContractNodes(contractInfo, contractStatus);
+        if (b.kind === 'measured') return measuredBlock(validateRun, validateStatus, say);
+        if (b.kind === 'site-contract') return siteContractNodes(contractInfo, contractStatus, say);
         return b;
       }),
     },
@@ -510,10 +522,10 @@ const docsWords = memo1((say) => ({
  * @param {any} run - The generated validate suite, or undefined.
  * @param {string | undefined} status
  */
-function measuredBlock(run, status) {
+function measuredBlock(run, status, say) {
   if (run === undefined) {
     return status === 'error'
-      ? callout('Measured results unavailable',
+      ? callout(say('site/conformance/unavailable'),
         'The JSON Schema benchmark data could not be loaded. Generate it with: npm run benchmark:generate')
       : callout('Loading…', 'Fetching the measured official-suite results.');
   }

@@ -46,7 +46,12 @@ const mdx = createMdx({ compileQuery: compileJsonQuery });
  * prints one.
  */
 
-const renderers = {
+/**
+ * The renderers in one language: their deep panels' names are the site's
+ * words, the rest of what they draw is the engines'.
+ * @param {(id: any, params?: Record<string, unknown>) => string} say
+ */
+const renderersWith = (say) => ({
   markdown: (source, _config, ctx) => {
     const compiled = timed(() => md.compile(source).doc);
     const doc = compiled.value;
@@ -56,10 +61,10 @@ const renderers = {
       runMs: rendered.ms,
       vnode: rendered.value,
       deep: [
-        { id: 'ast', label: 'The document, as JSON', kind: 'code', text: formatJson(doc.ast) },
-        { id: 'roundtrip', label: 'Canonical Markdown', kind: 'code', text: toMarkdown(doc) },
+        { id: 'ast', label: say('site/play/panel/document-json'), kind: 'code', text: formatJson(doc.ast) },
+        { id: 'roundtrip', label: say('site/play/panel/canonical-markdown'), kind: 'code', text: toMarkdown(doc) },
         ...(doc.frontmatter !== null
-          ? [{ id: 'frontmatter', label: 'The frontmatter', kind: 'code', text: formatJson(doc.frontmatter) }]
+          ? [{ id: 'frontmatter', label: say('site/play/panel/frontmatter'), kind: 'code', text: formatJson(doc.frontmatter) }]
           : []),
       ],
     };
@@ -76,8 +81,8 @@ const renderers = {
       runMs: rendered.ms,
       vnode: rendered.value,
       deep: [
-        { id: 'rendered', label: 'The resolved Markdown', kind: 'code', text: toMarkdown(doc) },
-        { id: 'ast', label: 'The document, as JSON', kind: 'code', text: formatJson(doc.ast) },
+        { id: 'rendered', label: say('site/play/panel/resolved-markdown'), kind: 'code', text: toMarkdown(doc) },
+        { id: 'ast', label: say('site/play/panel/document-json'), kind: 'code', text: formatJson(doc.ast) },
       ],
     };
   },
@@ -94,13 +99,25 @@ const renderers = {
       runMs: rendered.ms,
       vnode: rendered.value,
       deep: [
-        { id: 'ast', label: 'The geometry-free AST', kind: 'code',
+        { id: 'ast', label: say('site/play/panel/mermaid-ast'), kind: 'code',
           text: doc ? formatJson(doc.ast) : compiled.parseError ? mermaidErrorText(compiled.parseError, ctx?.messages) : 'parse error' },
-        { id: 'roundtrip', label: 'Canonical Mermaid', kind: 'code', text: compiled.toText() },
+        { id: 'roundtrip', label: say('site/play/panel/canonical-mermaid'), kind: 'code', text: compiled.toText() },
       ],
     };
   },
   charts: (source, config, ctx) => chartRenderer(source, config, ctx),
+});
+
+/** English, and once per site pack. @type {Map<object | null, ReturnType<typeof renderersWith>>} */
+const RENDERERS_BY_PACK = new Map();
+/** @param {Readonly<Record<string, string>> | null} sitePack */
+const renderersFor = (sitePack) => {
+  let made = RENDERERS_BY_PACK.get(sitePack);
+  if (made === undefined) {
+    made = renderersWith(siteText(sitePack));
+    RENDERERS_BY_PACK.set(sitePack, made);
+  }
+  return made;
 };
 
 /** The initial slice: the first example, loaded and ready to run. */
@@ -319,7 +336,7 @@ export function runPlay(slice, lang = null, sitePack = null) {
   slice = withPlayLocale(slice, lang);
   // a language whose pack has not landed yet has no catalog: English, never ids
   return playComponent.runExample(slice.engine, slice.source, slice.data, {
-    operators: operatorRegistry, config: slice.config, renderers, messages: catalogFor(lang),
+    operators: operatorRegistry, config: slice.config, renderers: renderersFor(sitePack), messages: catalogFor(lang),
     validate: (/** @type {string} */ schemaText, /** @type {any} */ data, /** @type {string} */ locale, /** @type {any[]} */ schemas) =>
       validateRunner(schemaText, data, locale, schemas, sitePack),
   });

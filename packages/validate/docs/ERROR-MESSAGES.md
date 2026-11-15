@@ -306,7 +306,13 @@ changing the catalog contract.
 
 A schema the validator cannot decide is not answered `true` or `false`: it
 is refused with a thrown error carrying a stable `code` (the suite's coded
-error contract, `@jarenjs/core/errors`). A refusal is never folded into a
+error contract, `@jarenjs/core/errors`). A coded refusal is developer-facing and English by
+design: the code is the stable, searchable part and the sentence its
+English gloss, so it is not rendered through a catalog. A validation
+failure — the `message` of an error record, which a person filling a form
+or reading a report meets — is, through `localizeErrors` and the
+`@jarenjs/locales` packs (see that package's README, "What is translated,
+and what stays English"). A refusal is never folded into a
 failed validation, because a `false` under `not` would read as success.
 `VALIDATE_CODES` is the runtime table of the codes below. One refusal
 carries another package's code: a `$query` document that does not compile

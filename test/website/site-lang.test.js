@@ -335,6 +335,29 @@ describe('website — one language switch for the whole site', () => {
     assert.match(JSON.stringify(docsSections(buildSiteContent())), /Permalink to /, 'English without a pack');
   });
 
+  it("Play's deep panels and the home page's buttons speak the site's words", async () => {
+    const { app, container } = mountSite();
+    app.dispatch('play/example', 'md-anchors');
+    fire(languageSwitch(container), 'change', { target: { value: 'fr' } });
+    await packLanded(app, 'fr');
+    await settle();
+    const fr = /** @type {any} */ (await loadSitePack('fr'));
+    const labels = app.getState().play.result.panels.map((/** @type {any} */ p) => p.label);
+    assert.ok(labels.includes(fr['site/play/panel/document-json']), labels.join(' | '));
+    assert.ok(labels.includes(fr['site/play/panel/canonical-markdown']));
+    const { viewModel } = await import('../../packages/website/src/app/viewmodel.js');
+    const { createInitialState } = await import('../../packages/website/src/app/state.js');
+    const home = viewModel({ ...createInitialState(), lang: 'fr', siteMessages: { code: 'fr', messages: fr } }).ui.home;
+    assert.deepStrictEqual([home.w.openPlay, home.w.openStudio, home.dispatch.w.breakIt],
+      [fr['site/home/open-play'], fr['site/home/open-studio'], fr['site/home/break-it']]);
+    // and the home page renders them
+    const front = mountSite({ hash: '#/' });
+    fire(languageSwitch(front.container), 'change', { target: { value: 'fr' } });
+    await settle();
+    const buttons = findAll(front.container, (n) => n.tagName === 'a' && (n.getAttribute?.('class') ?? '').startsWith('btn')).map(textOf);
+    assert.ok(buttons.includes(fr['site/home/open-play']) && buttons.includes(fr['site/home/open-studio']), buttons.join(' | '));
+  });
+
   it('Arabic writes right to left', () => {
     const { container, applied } = mountSite();
     fire(languageSwitch(container), 'change', { target: { value: 'ar' } });

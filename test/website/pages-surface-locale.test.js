@@ -420,7 +420,8 @@ describe('website — the benchmarks, charts, collection and docs pages speak th
     for (const block of ['p.page-lead', 'article.docs-article', 'p.error-message', 'p.doc-p']) {
       assert.ok(marked.has(block), `${block} is marked English`);
     }
-    const unmarked = prose.filter((n) => n.getAttribute('dir') !== 'ltr').map((n) => `${n.tagName}.${n.getAttribute('class') ?? ''}`);
+    // a node the renderer later reused for a translated line no longer says English: judge the ones that still do
+    const unmarked = prose.filter((n) => n.getAttribute('lang') === 'en' && n.getAttribute('dir') !== 'ltr').map((n) => `${n.tagName}.${n.getAttribute('class') ?? ''}`);
     assert.deepStrictEqual([...new Set(unmarked)], []);
   });
 
