@@ -1,7 +1,7 @@
 {
   "name": "@jarenjs/db",
   "private": false,
-  "version": "0.202.0",
+  "version": "0.203.0",
   "type": "module",
   "main": "./src/index.js",
   "types": "./types/index.d.ts",
@@ -123,9 +123,9 @@
     "prepack": "npm run build:types"
   },
   "dependencies": {
-    "@jarenjs/core": "0.202.0",
-    "@jarenjs/json": "0.202.0",
-    "@jarenjs/validate": "0.202.0"
+    "@jarenjs/core": "0.203.0",
+    "@jarenjs/json": "0.203.0",
+    "@jarenjs/validate": "0.203.0"
   },
   "bin": {
     "jaren-db": "./src/cli.js"
