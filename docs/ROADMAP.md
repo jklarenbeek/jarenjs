@@ -1045,10 +1045,15 @@ what each does is its own documentation's job
   fraction to the next second and the read-back compares whole seconds. `@jarenjs/core/calendar`
   refuses a fraction past the millisecond instead; the seam's `toEpoch` should either do the same
   or compare the rounded instant.
-- [ ] **`@jarenjs/core/calendar` has no recurrence or availability yet.** Temporal values,
-  zone binding with provenance and civil-day splitting ship; recurrence and availability are
-  not in it, and no store has a temporal column kind: a caller stores the temporal JSON forms
-  (`@jarenjs/core/schemas/calendar/temporal.schema.json`) and binds them with `bindFloating`.
+- [ ] **`@jarenjs/core/calendar` enumerates DAILY and WEEKLY recurrence only, and has no
+  availability yet.** Temporal values, zone binding, civil-day splitting, DAILY/WEEKLY
+  recurrence, series (RDATE, EXDATE, moved and cancelled overrides) and weekly patterns
+  ship, expanded under explicit limits. A grammatically valid MONTHLY, YEARLY or sub-daily
+  rule is refused by name (`JY0020`), an override with RANGE=THISANDFUTURE is kept but not
+  expanded (`JY0021`), and a zoned series' RDATE or EXDATE must name the series' own zone.
+  Availability layers are not in it, and no store has a temporal column kind: a caller
+  stores the JSON forms (`@jarenjs/core/schemas/calendar/temporal.schema.json`,
+  `…/rrule.schema.json`) and binds floating occurrences with `bindFloating`.
 - [ ] **The RFC 3339 epoch readers disagree past the millisecond.**
   `getEpochOfDateTimeRFC3339('2026-03-29T01:30:00.9999Z')` truncates to `…00.999Z` (it reads
   through `Date.parse`), while `epochOfRFC3339Parts(parseRFC3339Parts(…))` rounds the same string

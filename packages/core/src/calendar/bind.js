@@ -115,7 +115,7 @@ function admitResolver(options) {
  * @param {number} instant
  * @returns {number}
  */
-function wallAt(provider, zone, instant) {
+export function wallAt(provider, zone, instant) {
   let parts;
   try {
     parts = provider.toParts(instant, zone);

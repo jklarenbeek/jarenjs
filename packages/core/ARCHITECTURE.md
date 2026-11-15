@@ -890,7 +890,7 @@ createIntervalIndex(shifts).at(4 * 3600_000);   // the second shift only: [start
 ### 5d2. Calendar Module (`calendar/`)
 
 The layer above the zone seam (`resolve.js`, `zones.js`, `model.js`, `bind.js`,
-`errors.js`). A local
+`rrule.js`, `recurrence.js`, `series.js`, `errors.js`). A local
 time in a named zone is classified first, as existing, in a gap or in a fold,
 with every instant it names, through the provider's optional
 `candidates(parts, zone)` member. A policy the caller names (`rfc5545`, `later`
@@ -905,6 +905,15 @@ per code. `bind.js` binds a zone-less value, converts by kind, shifts by civil
 days and splits at civil-day boundaries. It finds a day's first instant from
 that day's midnight through `classifyLocal`, never as midnight plus 24 hours,
 and asks the provider's `toParts` only where midnight lies inside a change.
+`rrule.js` reads RRULE text or its JSON form into one canonical frozen rule and
+checks the whole grammar for every frequency. `recurrence.js` compiles a rule into a
+plan of numbers held in a `WeakMap` (the public compiled object stays plain JSON).
+It walks that plan period by period on wall clocks read as if UTC, charging every
+step to one budget. It jumps to the horizon only when COUNT is absent, and resolves
+only the wall clocks a zoned horizon needs. `series.js` layers RDATEs, EXDATEs and
+overrides over that walk. It asks the rule about one wall clock (a point walk)
+instead of enumerating the series to learn whether a moved-in slot exists. Nothing
+here imports `series/`: the interval kernel stays recurrence-free.
 Refusals are `CalendarError` with the `JY` codes; see
 [docs/CALENDAR.md](docs/CALENDAR.md).
 

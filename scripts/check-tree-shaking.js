@@ -100,15 +100,19 @@ if (packLeak.length > 0)
 console.log('Tree-shaking smoke test passed (compileDateLocale carries neither Intl provider and no locale pack).');
 
 // `@jarenjs/core/calendar` resolves a local time through an injected
-// provider: importing it must carry no zone data of its own, so no
-// locale pack, no opt-in Intl provider, and no series module (the zone
-// seam's types are JSDoc only).
+// provider: importing it - recurrence and series expansion included -
+// must carry no zone data of its own, so no locale pack, no opt-in Intl
+// provider, and no series module (the zone seam's types are JSDoc only).
 const calendarResult = await build({
   stdin: {
     contents: "import { resolveLocal, classifyLocal, isZone, assertZone, todayIn, dateValue, floatingValue, utcValue,"
-      + " zonedValue, dateRangeValue, parseTemporal, bindFloating, toUtc, shiftCivil, splitByCivilDay } from '@jarenjs/core/calendar';"
+      + ' zonedValue, dateRangeValue, parseTemporal, bindFloating, toUtc, shiftCivil, splitByCivilDay,'
+      + ' compileRecurrence, expandRecurrence, nextOccurrences, formatRRule, RECURRENCE_LIMITS,'
+      + " defineSeries, expandSeries, weeklyPattern } from '@jarenjs/core/calendar';"
       + ' export { resolveLocal, classifyLocal, isZone, assertZone, todayIn, dateValue, floatingValue, utcValue,'
-      + ' zonedValue, dateRangeValue, parseTemporal, bindFloating, toUtc, shiftCivil, splitByCivilDay };',
+      + ' zonedValue, dateRangeValue, parseTemporal, bindFloating, toUtc, shiftCivil, splitByCivilDay,'
+      + ' compileRecurrence, expandRecurrence, nextOccurrences, formatRRule, RECURRENCE_LIMITS,'
+      + ' defineSeries, expandSeries, weeklyPattern };',
     resolveDir: process.cwd(),
     sourcefile: 'calendar-consumer.js',
   },

@@ -7,7 +7,8 @@ import { CodedError } from '../errors.js';
  * a caller can tell a local time that never happened from one that
  * happened twice, and both from a zone name nobody knows.
  * @type {Readonly<Record<'JY0001'|'JY0002'|'JY0003'|'JY0004'|'JY0005'|'JY0006'|'JY0007'
- *   |'JY0008'|'JY0009'|'JY0010'|'JY0011'|'JY0012'|'JY0013'|'JY0014', string>>}
+ *   |'JY0008'|'JY0009'|'JY0010'|'JY0011'|'JY0012'|'JY0013'|'JY0014'
+ *   |'JY0015'|'JY0016'|'JY0017'|'JY0018'|'JY0019'|'JY0020'|'JY0021', string>>}
  */
 export const CALENDAR_CODES = /* @__PURE__ */ Object.freeze({
   JY0001: 'the zone is not a non-empty name the provider knows',
@@ -24,13 +25,22 @@ export const CALENDAR_CODES = /* @__PURE__ */ Object.freeze({
   JY0012: 'the date is not a civil date from 0000-01-01 to 9999-12-31',
   JY0013: 'the value is not a temporal value of a form and kind this call takes',
   JY0014: 'an option is not of the form this call takes',
+  JY0015: 'the recurrence rule is not RRULE text or its JSON form: an unknown or empty part, no FREQ, or a value spelled wrong',
+  JY0016: 'a recurrence rule part holds a value outside its range or with a sign it does not take',
+  JY0017: 'a recurrence rule part is given twice',
+  JY0018: 'a recurrence rule part does not go with the frequency, the start or another part',
+  JY0019: 'the recurrence end (UNTIL) is not of the kind the start requires',
+  JY0020: 'the frequency is valid RRULE but is not enumerated in this release; only DAILY and WEEKLY are',
+  JY0021: 'an override that ranges over this and future occurrences is kept as data but refused for expansion',
 });
 
 /**
  * The refusal every `@jarenjs/core/calendar` operation throws: a
  * {@link CodedError} whose `code` is one of {@link CALENDAR_CODES} and
  * whose `docPath` names the argument at fault (`/parts`, `/zone`,
- * `/provider`, `/policy`, `/value/time`, `/options/days`).
+ * `/provider`, `/policy`, `/value/time`, `/options/days`); a fault inside
+ * a recurrence rule names the rule part and the list index
+ * (`rrule.BYMONTHDAY[2]`).
  */
 export class CalendarError extends CodedError {
   /**

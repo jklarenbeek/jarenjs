@@ -310,6 +310,271 @@ here (`JY0001`), because an interval of instants has no zone-less form.
   `2011-12-31T10:00:00Z` splits into 2011-12-29 (24 hours) and
   2011-12-31 (24 hours). There is no 2011-12-30.
 
+## Recurrence
+
+A recurrence is a start, a length and an RFC 5545 rule (RRULE). It is
+compiled once and expanded inside a half-open horizon `[start, end)`,
+under a budget that every step of the walk is charged to. The answer is
+either complete, or incomplete with the limit that stopped it and exact
+counts. This release reads and checks the whole RRULE grammar for every
+frequency, and enumerates DAILY and WEEKLY rules. A valid SECONDLY,
+MINUTELY, HOURLY, MONTHLY or YEARLY rule is refused by name (`JY0020`).
+It never compiles into a rule that quietly returns no occurrences.
+
+```js
+import { compileRecurrence, expandRecurrence, floatingValue, dateValue } from '@jarenjs/core/calendar';
+
+const standup = compileRecurrence({
+  dtstart: floatingValue('2026-01-05', '09:00'),
+  duration: 'PT15M',
+  rrule: 'FREQ=WEEKLY;BYDAY=MO,WE,FR;COUNT=12',
+});
+const { status, occurrences, counts } = expandRecurrence(standup, {
+  horizon: [dateValue('2026-01-01'), dateValue('2026-02-01')],
+});
+// status 'complete'; 12 occurrences, the first
+// { recurrenceId: '2026-01-05T09:00:00',
+//   start: { kind: 'floating', date: '2026-01-05', time: '09:00:00' },
+//   end: { kind: 'floating', date: '2026-01-05', time: '09:15:00' } }
+```
+
+### `compileRecurrence({ dtstart, duration | dtend, rrule, wkst?, policy? })`
+
+- **`dtstart`** is a date, floating, utc or zoned value on a whole
+  second. RRULE counts in seconds, so a fraction is refused (`JY0013`).
+  DTSTART is always the first occurrence: RFC 5545 §3.3.10 says it
+  "always counts as the first occurrence", whether or not the rule's
+  parts would make it.
+- **The length** is one of two forms, not both:
+  - `duration`: an RFC 5545 duration (`P1W`, `P2D`, `PT1H30M`,
+    `P1DT2H`). Its weeks and days are nominal and its hours, minutes and
+    seconds are exact, so a zoned `P1D` lasts 23 hours across
+    spring-forward and `PT24H` lasts 24.
+  - `dtend`: a value of the start's kind. Its distance from `dtstart` is
+    exact.
+
+  With neither, a date lasts one day and a time lasts none. A date
+  start takes whole days or weeks only.
+- **`rrule`** is RRULE text (`'FREQ=WEEKLY;BYDAY=MO'`, with or without
+  `RRULE:`, in any case and part order) or its JSON form. The JSON form
+  uses the part names as keys: `{ FREQ: 'WEEKLY', BYDAY: ['MO'] }`, with
+  numbers as numbers, BYDAY entries as `'MO'`, `'1MO'` or `'-1FR'`, and
+  UNTIL as a temporal value. The compiled rule's `rrule` is its
+  canonical JSON:
+  - lists are sorted, without repeats;
+  - `INTERVAL=1` and `WKST=MO`, the defaults, are left out.
+
+  `formatRRule(rule)` writes the same rule as canonical text, with FREQ
+  first. It takes text, JSON or a compiled recurrence. The schema twin is
+  `@jarenjs/core/schemas/calendar/rrule.schema.json`, and its UNTIL
+  refers to the temporal schema.
+- **`wkst`** sets WKST when the rule does not. If both give it and they
+  differ, the call is refused (`JY0017`).
+- **`policy`** resolves a zoned rule's local times. It defaults to
+  `rfc5545`, the RFC's own rule: RFC 5545 erratum 4271 reads a generated
+  time that does not exist as §3.3.5 reads an explicit one. The same
+  policy resolves the DTSTART occurrence and, in a series, its RDATEs and
+  moved starts.
+
+**The grammar is checked in full, for every frequency.** The checks run
+in a fixed order, so one rule always names the same fault:
+
+1. Each part's spelling, range and sign, part by part in canonical
+   order.
+2. The parts that do not go together.
+3. The parts that do not go with the start.
+4. The frequency.
+
+Every refusal carries the part and list index as its `docPath`, so the
+third BYMONTHDAY value is `rrule.BYMONTHDAY[2]` in text and JSON alike.
+
+| Rule | Code |
+|---|---|
+| an unknown, empty or misspelled part; no FREQ | `JY0015` |
+| BYSECOND 0-59 (60, a leap second, is `JY0009`); BYMINUTE 0-59; BYHOUR 0-23; BYMONTH 1-12, all unsigned | `JY0016` |
+| BYMONTHDAY ±1-31, BYYEARDAY ±1-366, BYWEEKNO ±1-53, BYSETPOS ±1-366, a BYDAY ordinal ±1-53; never 0 | `JY0016` |
+| INTERVAL and COUNT are positive whole numbers | `JY0016` |
+| a part given twice | `JY0017` |
+| COUNT with UNTIL | `JY0018` |
+| BYWEEKNO with any FREQ but YEARLY | `JY0018` |
+| BYYEARDAY with DAILY, WEEKLY or MONTHLY | `JY0018` |
+| BYMONTHDAY with WEEKLY | `JY0018` |
+| an ordinal BYDAY (`1MO`) with any FREQ but MONTHLY or YEARLY, or with BYWEEKNO | `JY0018` |
+| BYSETPOS without another BY part | `JY0018` |
+| BYHOUR, BYMINUTE or BYSECOND with a date start | `JY0018` |
+| UNTIL of the wrong kind: date for a date start, floating for a floating start, utc for a utc or zoned start | `JY0019` |
+| a valid rule whose FREQ this release does not enumerate | `JY0020` |
+
+### `expandRecurrence(compiled, { horizon, limits?, provider? })`
+
+The answer is
+`{ status: 'complete' | 'incomplete', occurrences, counts: { emitted, work, providerCalls }, limit? }`.
+Each occurrence is `{ recurrenceId, start, end }`, with `start` and
+`end` (exclusive) of the rule's kind:
+
+- **`recurrenceId`** is the start the rule generated, before any zone
+  resolution, in one spelling per kind: `2026-01-05`,
+  `2026-01-05T09:00:00`, or `2026-01-05T09:00:00Z` for a utc rule. It
+  is the same under every policy and provider revision, and a series
+  keys its EXDATEs and overrides by it.
+- **A utc rule's occurrence** adds `instants: { start, end }` in epoch
+  milliseconds.
+- **A zoned rule's occurrence** adds `instants`, the `resolution` of
+  its start (as `resolveLocal` answers it) and the provider's identity. Its `start` is the wall clock
+  the instant reads. So a 02:30 rule on 2026-03-29 in Amsterdam keeps
+  `recurrenceId: '2026-03-29T02:30:00'` and starts at `03:30:00`
+  (`2026-03-29T01:30:00.000Z`) under `rfc5545` and `later`. Under
+  `reject` it refuses the expansion with `JY0002`. On 2026-10-25 the
+  same rule starts at `00:30Z` under `rfc5545` and at `01:30Z` under
+  `later`.
+
+**The horizon.** It is of the rule's kind:
+
+| Rule | Horizon bounds |
+|---|---|
+| date | date values |
+| floating | floating or date values |
+| utc or zoned | utc values or epoch milliseconds |
+
+An occurrence that started before the horizon and is still going at its
+start is included. One that ends exactly at the start is not. An empty
+occurrence at the start is included, and the end is exclusive.
+
+**Kinds.** A floating or date rule expands without a zone and stays
+floating: one rule serves places in different zones. Binding an
+occurrence to a zone is the caller's step, with `bindFloating`. A zoned
+rule needs `provider` (with `candidates` and `toParts`). Under `reject`,
+a generated time refuses only when the answer would hold it; a gap or
+fold outside the horizon does not. A rule given with `dtend` resolves its
+DTSTART and DTEND to measure its length, and those refuse wherever they
+fall.
+
+**COUNT and UNTIL keep their meaning for the whole rule.** COUNT counts
+from DTSTART, so a horizon after the tenth occurrence of `COUNT=10` is
+complete and empty. A zoned rule's UTC UNTIL is compared as an instant.
+
+**The walk.** It runs one period at a time: a day for DAILY, and for
+WEEKLY a week that starts on WKST. BYSETPOS picks from each period's
+set before DTSTART is applied, so WKST changes what
+`FREQ=WEEKLY;INTERVAL=2;BYDAY=TU,SU` makes. Without COUNT every period
+answers the same whatever came before it, so the walk jumps straight to
+the first period that can reach the horizon. With COUNT it walks from
+DTSTART and charges every step. A day the month does not have, such as
+`BYMONTHDAY=30` in February, is skipped and not counted, never clamped.
+An occurrence whose end passes 9999-12-31, the last day a value can
+name, has no spelling. The walk stops there with `status: 'incomplete'`
+and `limit: 'calendar-end'`, so a short list never reads as complete.
+
+A zoned answer is in order of instant, not of wall clock. A time a gap
+moved forward can start after a later wall clock does: in Amsterdam on
+2026-03-29, 02:40 moves to 01:40Z while 03:10 starts at 01:10Z. The walk
+never stops on such a time. Once it has enough occurrences it stops at
+once, unless it has resolved such a time: then it walks three more days
+of wall clocks before ordering, and a limit reached there leaves the
+answer incomplete. Two generated times that resolve to one instant
+are kept as two occurrences with their own ids, such as 02:30 moved onto
+a generated 03:30.
+
+**Options.** Every call here refuses a member it does not read
+(`JY0014`, at the member's path), so `policy` or `zone` on an expansion,
+or a limit outside `limits`, is an error rather than ignored.
+
+**The limits.** Every limit stops the walk with `status: 'incomplete'`,
+the occurrences found before it in order, and its name in `limit`. Any
+limit left out takes `RECURRENCE_LIMITS`.
+
+| Limit | Default | Counts |
+|---|---|---|
+| `maxOccurrences` | 10000 | occurrences returned |
+| `maxWork` | 1000000 | candidate steps: 1 for DTSTART, 1 per day examined, 1 per start time generated on a day that passes |
+| `maxProviderCalls` | 100000 | calls to the provider's `candidates` and `toParts` |
+| `maxHorizonDays` | 36600 | days of horizon walked; a longer horizon is cut there |
+
+`limit` can also be `'calendar-end'`, which is not a limit the caller
+sets: an occurrence's end passes 9999-12-31.
+
+### `nextOccurrences(compiled, from, n, { limits?, provider? })`
+
+This is `expandRecurrence` over `maxHorizonDays` from `from`, stopped
+after `n`, so it is the same engine. It is complete when it found `n`
+or the rule ended. Otherwise it is incomplete with the limit that
+stopped it, or `maxHorizonDays` when the horizon ran out first. A rule
+that never matches therefore ends in a limit, not a hang:
+`FREQ=DAILY;BYMONTH=2;BYMONTHDAY=30` under `{ maxWork: 10000 }` stops
+with `limit: 'maxWork'` and `work: 10000`.
+
+## Series
+
+`defineSeries({ uid, sequence?, revision?, base, rdates?, exdates?, overrides? })`
+reads one recurring series and freezes it:
+
+- **`base`** is a compiled recurrence, or `null`.
+- **`rdates`** are values of the base's kind, or periods
+  `{ start, end }`.
+- **`exdates`** are values of the base's kind.
+- **`overrides`** are
+  `{ recurrenceId, status: 'moved' | 'cancelled', start?, end?, payload?, range? }`,
+  one per recurrenceId. A moved override names its new `start`, and its
+  `end` or the slot's own length. `payload` is carried on the moved
+  occurrence and never read.
+
+All values share one kind, and a zoned series one zone.
+
+`expandSeries(series, { horizon, limits?, provider? })` reads its
+options as `expandRecurrence` does. It also takes a list of series of
+one kind, under one shared budget, and adds `orphans: { count, ids }` to
+the answer. The occurrences are in order of start, each with the
+series' `uid`, its `seriesRevision` when it has one, and `moved: true`
+and `payload` when an override moved it.
+
+**Precedence, in order:**
+
+1. Union the base occurrences and RDATEs, deduplicated by `recurrenceId`. When both produce one, the RDATE's explicit duration wins.
+2. Remove EXDATEs.
+3. Apply overrides by `recurrenceId`. A cancelled occurrence disappears. A moved one keeps its `recurrenceId` but gets the new start and end, and is reported with `moved: true`.
+
+**Overrides and the horizon.** An override is looked up by its slot.
+The engine does not walk the whole series to find it. A slot outside the
+horizon that was moved into it appears, and the rule is asked about
+that one wall clock to confirm it makes the slot. A slot inside the
+horizon that was moved out disappears.
+
+**Orphans.** An override whose slot the series never makes, or whose
+slot an EXDATE removed, is listed in `orphans`. It is never applied and
+never dropped silently.
+
+**Refusals and budget.** An override with
+`range: 'THISANDFUTURE'` is kept by `defineSeries` and refused by
+`expandSeries` (`JY0021`). Every RDATE costs one step of `maxWork`. An
+incomplete series answer holds only the series that finished before the
+limit. A slot whose end passes 9999-12-31 is left out, and the answer is
+`incomplete` with `limit: 'calendar-end'`; the other slots stay.
+
+## `weeklyPattern({ days, wkst? })`
+
+`weeklyPattern` turns weekly hours into floating series, one
+`FREQ=WEEKLY;BYDAY=…` series per distinct `[from, to)` slot, each named
+`weekly:<from>-<to>`. It serves seven booleans, seven-slot opening hours
+and per-weekday rules alike. A day (`mon` … `sun`) is one of:
+
+- `true`: the whole day;
+- `false` or absent: none of it;
+- a list of `[from, to]` times, where `to` may be `24:00`, the end of the
+  day.
+
+Expand the list with `expandSeries` over floating or date bounds, then
+bind each occurrence with `bindFloating`.
+
+```js
+import { weeklyPattern, expandSeries, dateValue } from '@jarenjs/core/calendar';
+
+const hours = weeklyPattern({
+  days: { mon: [['09:00', '17:30']], tue: [['09:00', '17:30']], sat: [['10:00', '24:00']], sun: false },
+});
+const week = expandSeries(hours, { horizon: [dateValue('2026-03-02'), dateValue('2026-03-09')] });
+// three occurrences; Saturday's ends { kind: 'floating', date: '2026-03-08', time: '00:00:00' }
+```
+
 ## Codes
 
 Every refusal is a `CalendarError` (a `CodedError` from
@@ -318,7 +583,9 @@ Every refusal is a `CalendarError` (a `CodedError` from
 `/provider`, `/policy`, `/time`, `/value/date`, `/options/source`).
 The parts `resolveLocal` reads keep their one code, `JY0007`, for every
 fault; the codes from `JY0008` on name the faults of a temporal value's
-text. A refusal that wraps a provider's own throw
+text, and the codes from `JY0015` on the faults of a recurrence rule and
+a series, whose `docPath` names the rule part and list index
+(`rrule.BYMONTHDAY[2]`). A refusal that wraps a provider's own throw
 carries it as `cause`. A malformed `runtime`, or a clock that answers no
 finite instant, is the runtime's own `TypeError`.
 
@@ -338,12 +605,24 @@ finite instant, is the runtime's own `TypeError`.
 | `JY0012` | the date is not a civil date from 0000-01-01 to 9999-12-31 |
 | `JY0013` | the value is not a temporal value of a form and kind this call takes |
 | `JY0014` | an option is not of the form this call takes |
+| `JY0015` | the recurrence rule is not RRULE text or its JSON form: an unknown or empty part, no FREQ, or a value spelled wrong |
+| `JY0016` | a recurrence rule part holds a value outside its range or with a sign it does not take |
+| `JY0017` | a recurrence rule part is given twice |
+| `JY0018` | a recurrence rule part does not go with the frequency, the start or another part |
+| `JY0019` | the recurrence end (UNTIL) is not of the kind the start requires |
+| `JY0020` | the frequency is valid RRULE but is not enumerated in this release; only DAILY and WEEKLY are |
+| `JY0021` | an override that ranges over this and future occurrences is kept as data but refused for expansion |
 
 ## Not here
 
-Recurrence and availability build on this layer and are not in it
-yet, and no temporal value is stored by a database here: a caller stores
-the JSON forms above. Zone data is
-never bundled: the provider is the caller's, and an instant is only as
-right as the tzdata the host runs, which is why every resolution names
-its provider's revision.
+- **Frequencies.** MONTHLY, YEARLY and the sub-daily frequencies are
+  read and checked but not enumerated (`JY0020`).
+- **Series.** RANGE=THISANDFUTURE is kept but not expanded (`JY0021`).
+  An RDATE or EXDATE of a zoned series names the series' zone, never
+  another zone or a utc value.
+- **Availability.** Availability layers are not in this layer.
+- **Storage.** No temporal value is stored by a database here; a caller
+  stores the JSON forms above.
+- **Zone data.** It is never bundled. The provider is the caller's, and
+  an instant is only as right as the tzdata the host runs, which is why
+  every resolution names its provider's revision.
