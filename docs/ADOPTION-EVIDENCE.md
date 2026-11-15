@@ -112,10 +112,10 @@ npm run docs:derive
 
 | Host | Consumer | Rows | Journey ms | Search startup ms | Heap MiB | Peak RSS MiB | Second writes |
 |---|---|---:|---:|---:|---:|---:|---:|
-| node | catalog | 10000 | 760.24 | 318.48 | 73.72 | 274.95 | 0 |
-| node | archive-stock | 75000 | 3984.38 | 2520.91 | 468.50 | 691.11 | 0 |
-| bun | catalog | 10000 | 568.52 | 239.62 | 62.30 | 254.38 | 0 |
-| bun | archive-stock | 75000 | 3066.10 | 1974.80 | 327.12 | 904.64 | 0 |
+| node | catalog | 10000 | 776.19 | 324.96 | 87.14 | 274.83 | 0 |
+| node | archive-stock | 75000 | 4110.61 | 2650.08 | 597.79 | 812.30 | 0 |
+| bun | catalog | 10000 | 645.07 | 292.42 | 62.83 | 243.05 | 0 |
+| bun | archive-stock | 75000 | 2972.86 | 1897.86 | 327.22 | 908.93 | 0 |
 
 Retained reference adapters: 105 lines; adopted application policy: 196 lines. Third-party search/virtualization mechanisms in the application: 2 → 0.
 
@@ -208,10 +208,10 @@ at least one, never which resource remains.
 
 | Host | Consumer | Rows | Boundaries | Peak live MiB | Peak after | Live after teardown MiB | Listed after teardown, less baseline | Loop drained | Remaining handles |
 |---|---|---:|---:|---:|---|---:|---|---|---:|
-| node v24.22.1 | catalog | 10000 | 35 | 59.06 | runner.run | 30.81 | none | yes | 0 |
-| node v24.22.1 | archive-stock | 75000 | 26 | 266.13 | query | 50.16 | none | yes | 0 |
-| bun 1.4.4 | catalog | 10000 | 35 | 51.09 | runner.run | 16.12 | none | yes | 0 |
-| bun 1.4.4 | archive-stock | 75000 | 26 | 289.24 | query | 35.60 | none | yes | 0 |
+| node v24.22.1 | catalog | 10000 | 35 | 59.20 | runner.run | 30.95 | none | yes | 0 |
+| node v24.22.1 | archive-stock | 75000 | 26 | 266.23 | query | 50.28 | none | yes | 0 |
+| bun 1.4.4 | catalog | 10000 | 35 | 51.18 | runner.run | 16.20 | none | yes | 0 |
+| bun 1.4.4 | archive-stock | 75000 | 26 | 289.28 | query | 35.69 | none | yes | 0 |
 
 node/catalog: 0 measured budget losses. node/archive-stock: 0 measured budget losses. bun/catalog: 0 measured budget losses. bun/archive-stock: 0 measured budget losses.
 
@@ -334,7 +334,7 @@ matching combined measurements.
 | catalog | relational.statements | 9 | 9 (pass) | relational: 9 (pass) | pending | pending |
 | catalog | relational.queryMs | 100 | 0.09 (pass) | relational: 0.49 (pass) | pending | pending |
 | catalog | relational.recoveryMs | 5000 | 34.73 (pass) | relational: 43.50 (pass) | pending | pending |
-| catalog | search.startupMs | 15000 | 372.60 (pass) | lexical: 437.70 (pass) | 318.48 (pass) | 239.62 (pass) |
+| catalog | search.startupMs | 15000 | 372.60 (pass) | lexical: 437.70 (pass) | 324.96 (pass) | 292.42 (pass) |
 | catalog | search.coldIndexMs | 15000 | 169.51 (pass) | lexical: 200.89 (pass) | pending | pending |
 | catalog | search.warmIndexMs | 15000 | 65.05 (pass) | lexical: 200.37 (pass) | pending | pending |
 | catalog | search.queryMs | 100 | 14.11 (pass) | lexical: 9.84 (pass) | pending | pending |
@@ -354,15 +354,15 @@ matching combined measurements.
 | catalog | providers.bytes | 262144 | 269 (pass) | providers: 66426 (pass) | pending | pending |
 | catalog | providers.attempts | 3 | pending | providers: pending | pending | pending |
 | catalog | providers.unresolvedResends | 0 | pending | providers: pending | 0 (pass) | 0 (pass) |
-| catalog | resources.sampledHeapBytes | 268435456 | 154179328 (pass) | —: pending | 77299064 (pass) | 65328657 (pass) |
-| catalog | resources.peakRssBytes | 536870912 | 315109376 (pass) | —: pending | 288301056 (pass) | 266731520 (pass) |
-| catalog | resources.peakHeapBytes | 268435456 | pending | —: pending | 61926920 (pass) | 53576361 (pass) |
-| catalog | resources.teardownMs | 1000 | 0.07 (pass) | —: pending | 0.24 (pass) | 0.18 (pass) |
+| catalog | resources.sampledHeapBytes | 268435456 | 154179328 (pass) | —: pending | 91369408 (pass) | 65885941 (pass) |
+| catalog | resources.peakRssBytes | 536870912 | 315109376 (pass) | —: pending | 288182272 (pass) | 254861312 (pass) |
+| catalog | resources.peakHeapBytes | 268435456 | pending | —: pending | 62072704 (pass) | 53667650 (pass) |
+| catalog | resources.teardownMs | 1000 | 0.07 (pass) | —: pending | 0.30 (pass) | 0.24 (pass) |
 | catalog | resources.remainingHandles | 0 | pending | —: pending | 0 (pass) | 0 (pass) |
 | archive-stock | relational.statements | 9 | 9 (pass) | relational: 9 (pass) | pending | pending |
 | archive-stock | relational.queryMs | 250 | 0.16 (pass) | relational: 0.60 (pass) | pending | pending |
 | archive-stock | relational.recoveryMs | 5000 | 49.20 (pass) | relational: 76.04 (pass) | pending | pending |
-| archive-stock | search.startupMs | 45000 | 2096.09 (pass) | lexical: 2895.12 (pass) | 2520.91 (pass) | 1974.80 (pass) |
+| archive-stock | search.startupMs | 45000 | 2096.09 (pass) | lexical: 2895.12 (pass) | 2650.08 (pass) | 1897.86 (pass) |
 | archive-stock | search.coldIndexMs | 45000 | 970.36 (pass) | lexical: 1080.75 (pass) | pending | pending |
 | archive-stock | search.warmIndexMs | 45000 | 479.46 (pass) | lexical: 1581.04 (pass) | pending | pending |
 | archive-stock | search.queryMs | 250 | 88.96 (pass) | lexical: 72.64 (pass) | pending | pending |
@@ -382,10 +382,10 @@ matching combined measurements.
 | archive-stock | providers.bytes | 524288 | 269 (pass) | providers: 135886 (pass) | pending | pending |
 | archive-stock | providers.attempts | 3 | pending | providers: pending | pending | pending |
 | archive-stock | providers.unresolvedResends | 0 | pending | providers: pending | 0 (pass) | 0 (pass) |
-| archive-stock | resources.sampledHeapBytes | 805306368 | 1020055816 (fail) | —: pending | 491261520 (pass) | 343007512 (pass) |
-| archive-stock | resources.peakRssBytes | 1073741824 | 1209151488 (fail) | —: pending | 724680704 (pass) | 948588544 (pass) |
-| archive-stock | resources.peakHeapBytes | 805306368 | pending | —: pending | 279057136 (pass) | 303290594 (pass) |
-| archive-stock | resources.teardownMs | 2000 | 0.10 (pass) | —: pending | 0.31 (pass) | 0.29 (pass) |
+| archive-stock | resources.sampledHeapBytes | 805306368 | 1020055816 (fail) | —: pending | 626831328 (pass) | 343116854 (pass) |
+| archive-stock | resources.peakRssBytes | 1073741824 | 1209151488 (fail) | —: pending | 851755008 (pass) | 953085952 (pass) |
+| archive-stock | resources.peakHeapBytes | 805306368 | pending | —: pending | 279163704 (pass) | 303330157 (pass) |
+| archive-stock | resources.teardownMs | 2000 | 0.10 (pass) | —: pending | 0.31 (pass) | 0.24 (pass) |
 | archive-stock | resources.remainingHandles | 0 | pending | —: pending | 0 (pass) | 0 (pass) |
 
 <!--/fact-->

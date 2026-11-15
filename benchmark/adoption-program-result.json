@@ -173,14 +173,14 @@
           "host": "node",
           "metric": "startupMs",
           "limit": 15000,
-          "value": 318.47727799999996,
+          "value": 324.9577709999999,
           "status": "pass"
         },
         {
           "host": "bun",
           "metric": "startupMs",
           "limit": 15000,
-          "value": 239.61595,
+          "value": 292.421599,
           "status": "pass"
         }
       ]
@@ -873,14 +873,14 @@
           "host": "node",
           "metric": "sampledHeapBytes",
           "limit": 268435456,
-          "value": 77299064,
+          "value": 91369408,
           "status": "pass"
         },
         {
           "host": "bun",
           "metric": "sampledHeapBytes",
           "limit": 268435456,
-          "value": 65328657,
+          "value": 65885941,
           "status": "pass"
         }
       ]
@@ -908,14 +908,14 @@
           "host": "node",
           "metric": "peakRssBytes",
           "limit": 536870912,
-          "value": 288301056,
+          "value": 288182272,
           "status": "pass"
         },
         {
           "host": "bun",
           "metric": "peakRssBytes",
           "limit": 536870912,
-          "value": 266731520,
+          "value": 254861312,
           "status": "pass"
         }
       ]
@@ -943,14 +943,14 @@
           "host": "node",
           "metric": "peakHeapBytes",
           "limit": 268435456,
-          "value": 61926920,
+          "value": 62072704,
           "status": "pass"
         },
         {
           "host": "bun",
           "metric": "peakHeapBytes",
           "limit": 268435456,
-          "value": 53576361,
+          "value": 53667650,
           "status": "pass"
         }
       ]
@@ -978,14 +978,14 @@
           "host": "node",
           "metric": "teardownMs",
           "limit": 1000,
-          "value": 0.24367199999983313,
+          "value": 0.2973110000000361,
           "status": "pass"
         },
         {
           "host": "bun",
           "metric": "teardownMs",
           "limit": 1000,
-          "value": 0.1825619999999617,
+          "value": 0.23508300000003146,
           "status": "pass"
         }
       ]
@@ -1153,14 +1153,14 @@
           "host": "node",
           "metric": "startupMs",
           "limit": 45000,
-          "value": 2520.9082829999998,
+          "value": 2650.081424,
           "status": "pass"
         },
         {
           "host": "bun",
           "metric": "startupMs",
           "limit": 45000,
-          "value": 1974.800381,
+          "value": 1897.863173,
           "status": "pass"
         }
       ]
@@ -1853,14 +1853,14 @@
           "host": "node",
           "metric": "sampledHeapBytes",
           "limit": 805306368,
-          "value": 491261520,
+          "value": 626831328,
           "status": "pass"
         },
         {
           "host": "bun",
           "metric": "sampledHeapBytes",
           "limit": 805306368,
-          "value": 343007512,
+          "value": 343116854,
           "status": "pass"
         }
       ]
@@ -1888,14 +1888,14 @@
           "host": "node",
           "metric": "peakRssBytes",
           "limit": 1073741824,
-          "value": 724680704,
+          "value": 851755008,
           "status": "pass"
         },
         {
           "host": "bun",
           "metric": "peakRssBytes",
           "limit": 1073741824,
-          "value": 948588544,
+          "value": 953085952,
           "status": "pass"
         }
       ]
@@ -1923,14 +1923,14 @@
           "host": "node",
           "metric": "peakHeapBytes",
           "limit": 805306368,
-          "value": 279057136,
+          "value": 279163704,
           "status": "pass"
         },
         {
           "host": "bun",
           "metric": "peakHeapBytes",
           "limit": 805306368,
-          "value": 303290594,
+          "value": 303330157,
           "status": "pass"
         }
       ]
@@ -1958,14 +1958,14 @@
           "host": "node",
           "metric": "teardownMs",
           "limit": 2000,
-          "value": 0.30750499999976455,
+          "value": 0.31288499999936903,
           "status": "pass"
         },
         {
           "host": "bun",
           "metric": "teardownMs",
           "limit": 2000,
-          "value": 0.2895570000000589,
+          "value": 0.24136799999996583,
           "status": "pass"
         }
       ]
@@ -2008,14 +2008,14 @@
   ],
   "sourceHashes": {
     "benchmark/adoption-result.json": "dc51288d0e955ee9ccd029816ff984c2b1e39d3f8fda126b868252eab0d4c08b",
-    "benchmark/adoption-journey-result.json": "230bc80551e53bd5ee7e4f9c07bf02dd32582ec361eee2b90400a32b2bf57bf3",
-    "benchmark/adoption-resources-result.json": "e6687508231643fa5c4df7721bc2a29e1ae3a3327d8cb6afb9db4e395ce7a722",
+    "benchmark/adoption-journey-result.json": "5085fcc2485a0a66385cbbe844d39129b42b700eb286877c14b0b354b83450c7",
+    "benchmark/adoption-resources-result.json": "9964f98bde4c502ce840a0f4cbc9866fcbb870e6e526b62a1e5ac2ba0eb3c2c5",
     "benchmark/relational-result.json": "0da4b08f0aa8cbec3c9571f003239b30335199e1bbfa9370654dff3a890aaf92",
     "benchmark/collection-result.json": "1891b3e1c846d32184ee5e413a15cb8d265e8f90f327105a873b3d55891ce6bf",
     "benchmark/lexical-result.json": "441b73d0ca6f77f21456aacdb56328cd138b2b6b402a94face86c20b56d82e6a",
     "benchmark/formula-result.json": "f1c94e526dec6bc5055e888b361776bafe7e1a739cee0b988ea6f77c723b4b94",
     "benchmark/providers-result.json": "2164e5cc37d15a70bf0ba268feec0b29a4fed392ed706d81ebe649cd002fddf7",
-    "benchmark/adoption-hosts-result.json": "b8841d472750eb4171e245d224a9aba0bcbcc49c7506f6b1c078be4f667d78f3",
+    "benchmark/adoption-hosts-result.json": "c748c29f5c3ae95c1dfc712d8a5fc2083c4689b5b6a9c38901491d4c2467f30f",
     "benchmark/durable-result.json": "f158c3968f5696035353335c93c2f8a5d112c485f6ee7028232618ce93ebc45f",
     "benchmark/adoption-program.js": "5314492ff9005c584f728c2d920d04d6e5603a54b9b5fee09f390983f57d4af9",
     "scripts/lib/adoption-program.js": "5ece5170bff2b409b2bce8e641470ba578c358b9a829b637532690dda0a88d2f"

@@ -1005,31 +1005,31 @@ alone; writing accepted evidence requires both engines. The committed
 
 <!--fact:postgres.portability-->
 
-Measured 2026-11-14T09:15:39.621Z: 500 documents, Node 24.22.1, SQLite 3.53.4, PostgreSQL 17.11 (Debian 17.11-1.pgdg12+2), pg 8.23.0. Durability settings: fsync=on, synchronous_commit=on, full_page_writes=on.
+Measured 2026-11-15T10:43:47.772Z: 500 documents, Node 24.22.1, SQLite 3.53.4, PostgreSQL 17.11 (Debian 17.11-1.pgdg12+2), pg 8.23.0. Durability settings: fsync=on, synchronous_commit=on, full_page_writes=on.
 
 | Operation | SQLite ms | PostgreSQL ms | PG / SQLite | Client query calls per PG operation | Iterations |
 |---|---:|---:|---:|---:|---:|
-| open | 25.551 | 22.564 | 0.9× | 25 | 1 |
-| insert | 0.015 | 0.612 | 41.5× | 1 | 500 |
-| get | 0.017 | 0.693 | 40.0× | 5 | 50 |
-| indexed | 0.702 | 3.194 | 4.6× | 13 | 20 |
-| scanned | 0.763 | 2.737 | 3.6× | 13 | 20 |
-| range | 0.535 | 2.717 | 5.1× | 13 | 20 |
-| transaction | 0.136 | 1.106 | 8.1× | 3 | 20 |
-| migration (one index) | 20.704 | 159.735 | 7.7× | not separately counted | 1 |
+| open | 25.866 | 24.429 | 0.9× | 25 | 1 |
+| insert | 0.014 | 0.699 | 50.3× | 1 | 500 |
+| get | 0.018 | 0.708 | 40.2× | 5 | 50 |
+| indexed | 0.743 | 3.080 | 4.1× | 13 | 20 |
+| scanned | 0.630 | 2.906 | 4.6× | 13 | 20 |
+| range | 0.533 | 2.973 | 5.6× | 13 | 20 |
+| transaction | 0.134 | 1.033 | 7.7× | 3 | 20 |
+| migration (one index) | 20.037 | 162.263 | 8.1× | not separately counted | 1 |
 
-Sequential insert throughput: SQLite 67835, PostgreSQL 1633 documents/second.
+Sequential insert throughput: SQLite 71894, PostgreSQL 1430 documents/second.
 
 | First-row probe | SQLite | PostgreSQL |
 |---|---:|---:|
-| First row ms | 1.033 | 0.996 |
-| First row plus cleanup ms | 1.135 | 1.344 |
+| First row ms | 1.320 | 1.398 |
+| First row plus cleanup ms | 1.436 | 1.828 |
 | Returned rows | 1 | 1 |
 | Fetched native rows / normalized bytes | not instrumented | 64 / 5661 |
 | Session peak native frame rows / bytes | not instrumented | 64 / 5813 |
 | Client query calls including cleanup | no network | 5 |
-| Sampled RSS before / after MiB | 96.00 / 111.59 | 113.21 / 122.82 |
-| Sampled heap before / after MiB | 29.44 / 27.04 | 33.94 / 29.50 |
+| Sampled RSS before / after MiB | 96.09 / 111.79 | 113.41 / 120.98 |
+| Sampled heap before / after MiB | 29.86 / 27.69 | 34.62 / 30.19 |
 
 After close: driver active=0, queued=0; native cursors=0, prepared statements=0; host pool total=1, idle=1, waiting=0.
 
@@ -1903,6 +1903,7 @@ Every subpath a consumer can import, derived from the manifest by
 | Import | Kind | Declarations |
 |---|---|---|
 | `@jarenjs/db/async-live` | JavaScript | declared |
+| `@jarenjs/db/schedules` | JavaScript | declared |
 | `@jarenjs/db/node-process` | JavaScript | declared |
 | `@jarenjs/db/search` | JavaScript | declared |
 | `@jarenjs/db` | JavaScript | declared |
