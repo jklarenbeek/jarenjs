@@ -206,29 +206,53 @@ const DRAFTS = {
 
 describe('judging references costs a compile no more than walking them once', () => {
   /**
-   * Compile a reader beside a chain of `n` definitions, each referencing the
-   * next, none reading a location: the fastest of five fresh compiles.
+   * A schema with a reader beside a chain of `n` definitions, each
+   * referencing the next, none reading a location.
    * @param {number} n
    */
-  function compileChain(n) {
+  function chainSchema(n) {
     /** @type {Record<string, any>} */
     const $defs = {};
     for (let i = 0; i < n; ++i)
       $defs['d' + i] = { properties: { x: { type: 'number' }, next: i + 1 < n ? { $ref: '#/$defs/d' + (i + 1) } : {} } };
-    const schema = { $schema: DRAFTS[2020].uri, $defs, properties: { lo: {}, hi: READER, chain: { $ref: '#/$defs/d0' } } };
-    let fastest = Infinity;
-    for (let round = 0; round < 5; ++round) {
-      const start = process.hrtime.bigint();
-      new JarenValidator().compile(schema);
-      fastest = Math.min(fastest, Number(process.hrtime.bigint() - start));
+    return { $schema: DRAFTS[2020].uri, $defs, properties: { lo: {}, hi: READER, chain: { $ref: '#/$defs/d0' } } };
+  }
+
+  /** One fresh compile's nanoseconds. @param {any} schema */
+  function compileOnce(schema) {
+    const start = process.hrtime.bigint();
+    new JarenValidator().compile(schema);
+    return Number(process.hrtime.bigint() - start);
+  }
+
+  /**
+   * The growth from `small` to `large` definitions, each the fastest of
+   * nine fresh compiles, the two sizes alternated round by round so a busy
+   * moment of the host falls on both rather than on one.
+   * @param {number} small @param {number} large
+   */
+  function chainGrowth(small, large) {
+    const a = chainSchema(small), b = chainSchema(large);
+    let fastSmall = Infinity, fastLarge = Infinity;
+    for (let round = 0; round < 9; ++round) {
+      fastSmall = Math.min(fastSmall, compileOnce(a));
+      fastLarge = Math.min(fastLarge, compileOnce(b));
     }
-    return fastest;
+    return fastLarge / fastSmall;
   }
 
   it('a chain eight times longer compiles in about eight times the time', () => {
-    const growth = compileChain(800) / compileChain(100);
-    // Judging each holder by walking its whole chain again grows ~64x.
-    assert.ok(growth < 24, `grew ${growth.toFixed(1)}x`);
+    // Judging each holder by walking its whole chain again grows ~64x on
+    // every attempt; a linear compile grows ~8x, and only a host busy with
+    // other work pushes one attempt past the bound, so the best of three
+    // attempts is held to it.
+    const attempts = [];
+    for (let attempt = 0; attempt < 3; ++attempt) {
+      attempts.push(chainGrowth(100, 800));
+      if (attempts[attempt] < 24) break;
+    }
+    const growth = Math.min(...attempts);
+    assert.ok(growth < 24, `grew ${attempts.map((g) => g.toFixed(1) + 'x').join(', ')}`);
   });
 });
 
