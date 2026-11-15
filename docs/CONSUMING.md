@@ -250,7 +250,7 @@ included.
 | `./app` | 1 | db 1 | 0.1 |
 | `./async-live` | 136 | core 63, db 46, json 21, validate 6 | 7.5 |
 | `./bun` | 128 | core 62, db 39, json 21, validate 6 | 6.2 |
-| `./entity` | 132 | core 63, db 40, json 23, validate 6 | 7.0 |
+| `./entity` | 132 | core 63, db 40, json 23, validate 6 | 7.1 |
 | `./model` | 119 | core 62, db 30, json 21, validate 6 | 5.9 |
 | `./node` | 129 | core 62, db 40, json 21, validate 6 | 6.6 |
 | `./node-pool` | 105 | core 61, db 23, json 21 | 4.8 |
@@ -297,7 +297,7 @@ included.
 | `.` | 87 | core 61, json 26 | 3.9 |
 | `./basic` | 3 | json 2, core 1 | 0.2 |
 | `./canonical` | 17 | core 10, json 7 | 0.9 |
-| `./formula` | 85 | core 61, json 24 | 3.8 |
+| `./formula` | 85 | core 61, json 24 | 3.7 |
 | `./formula/batch` | 86 | core 61, json 25 | 3.8 |
 | `./formula/migrate` | 88 | core 61, json 27 | 4.1 |
 | `./jslt` | 103 | core 72, json 31 | 4.1 |
