@@ -1960,6 +1960,7 @@ undefined`, as on every coded error.*
 | `JD0013` | an option passed to a store operation is not one it reads, or is malformed |
 | `JD0014` | a transaction guarantee was requested where it cannot act |
 | `JD0015` | owner was asked of an adopted store whose database has no owner table |
+| `JD0016` | recurring job schedules were used without `jobs.schedules` from `@jarenjs/db/schedules`, or a tick met a schedule in a zone without the runtime's zone provider |
 | `JD0030` | an unknown x-entity member was declared |
 | `JD0031` | relation declarations contradict each other, or two many-to-many declarations that are not inverses name one join table (§9.4) |
 | `JD0032` | the include specification is invalid |
@@ -3186,8 +3187,9 @@ edge is `JD0031` (children share their parent).
   configurable in this version). The name of a collection, an entity or a
   join table is never one of the engine's own tables (`_jaren_migrations`,
   `_jaren_migration_identity`, `_jaren_changes`, `_jaren_changes_state`,
-  `_jaren_jobs`, `_jaren_job_checkpoints`, `_jaren_owner` and the replication
-  tables), compared with ASCII case folded: `JD0004`.
+  `_jaren_jobs`, `_jaren_job_checkpoints`, `_jaren_job_schedules`,
+  `_jaren_owner` and the replication tables), compared with ASCII case
+  folded: `JD0004`.
 
 `onDelete` is REQUIRED wherever a foreign-key column is created —
 `"cascade"`, `"restrict"` or `"setNull"` — never defaulted silently.

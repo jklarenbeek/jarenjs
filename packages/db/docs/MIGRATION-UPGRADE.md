@@ -3880,6 +3880,41 @@ first.
 **Downgrade.** The previous release reports no such row and opens, reads and
 plans every table as this one does.
 
+## 72. Recurring job schedules
+
+- `store.jobs.schedule()`, `unschedule()`, `schedules()` and `tick()` fire a
+  recurrence from `@jarenjs/core/calendar` as ordinary jobs
+  `${scheduleId}@${recurrenceId}` through the idempotent enqueue
+  ([JOBS-FORMAT §11](JOBS-FORMAT.md#11-recurring-schedules)). They need
+  `jobs: { schedules: jobSchedules() }` from the new `@jarenjs/db/schedules`
+  subpath (`JD0016` otherwise), so a store that never schedules carries no
+  calendar; every other queue call answers as before.
+- The first `schedule()` creates `_jaren_job_schedules` and its index
+  `_jaren_job_schedules_due` (on PostgreSQL under the jobs advisory lock); an
+  open creates nothing new, so a queue that never schedules keeps exactly the
+  tables it had, and `adopt: true` on a queue the previous release created
+  verifies what it verified before. `introspect()` treats the table as the
+  engine's, as it treats `_jaren_jobs`.
+- A model that names a collection, an entity or a join table
+  `_jaren_job_schedules` is now `JD0004` ("the name of the engine's own
+  table"), as every engine table's name is.
+
+**Downgrade.** The previous release opens, reads, queries, introspects, plans
+and migrates every store this one opens exactly as before, and runs its queue,
+as long as the store never wrote a schedule: such a store has no new table. A
+store that did has `_jaren_job_schedules`, which the previous release does not
+know as the engine's. Its rows, jobs and queue answer as before, but:
+- its `introspect()` derives the table as an entity, a plan from that derived
+  model to the store's own model drops it (`DROP TABLE "_jaren_job_schedules"`,
+  marked destructive), and opening the derived model refuses `JD0002`, on both
+  engines;
+- on SQLite its `migrate()` refuses `JD0023` (`unexpected
+  index:_jaren_job_schedules_due`) and changes nothing, and `plan --store`
+  refuses the store as not the from-model; on PostgreSQL both run as before.
+
+Before going back, unschedule what you need to keep elsewhere and drop the
+table and its index; the jobs schedules fired stay ordinary jobs.
+
 ## Measured costs
 
 Exact identity stores complete canonical documents and model endpoints, so

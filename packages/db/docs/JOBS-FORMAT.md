@@ -11,7 +11,8 @@ A single-database job queue: enqueue, lease, execute, retry with
 backoff, dead-letter, and recover after a crash — the persistence,
 polling, locking, retries and recovery an adopter otherwise builds as
 infrastructure. It is enabled per store and lives in two internal
-tables beside the model's own:
+tables beside the model's own (a third once the store writes a
+recurring schedule, §11):
 
 ```js
 const store = await openStore(model, { driver: nodeDriver(), jobs: true });
@@ -562,9 +563,11 @@ await store.jobs.enqueue('sync-report', { input: { day: '2026-08-05' } });
   writes and `tx.jobs.enqueue` co-commit on the same Store transaction. Separate
   databases, including PostgreSQL business rows and a SQLite queue, require an
   idempotent outbox relay and durable receipts; they share no atomic transaction.
-- No priority classes in 0.1 (`run_at` ordering only), no cron or
-  recurring schedules (re-enqueue from a completed handler if
-  needed), no workflow-level compensation or sagas, no cross-process
+- No priority classes in 0.1 (`run_at` ordering only), no cron
+  expressions (recurring schedules are RFC 5545 rules from
+  `@jarenjs/core/calendar`, §11, DAILY and WEEKLY today), no timer of
+  the queue's own that fires them (a host calls `tick()`), no
+  workflow-level compensation or sagas, no cross-process
   push — wake-on-write is same-process; everything else polls. A
   per-job cancellation exists (§10) and aborts a handler's signal in the
   process that holds the attempt; across processes the lease is still
@@ -586,6 +589,10 @@ The fence adds five, all in the package's single runtime table
 | `JD2067` | the lease expired before the call |
 | `JD2068` | a settling call used the pre-fence `(id, owner)` spelling instead of the lease |
 | `JD2069` | a resumed run disagrees with its exact workflow, input or declared task identities, or saved values lack a provable identity (§7) |
+
+Recurring schedules (§11) add `JD0016`: a schedule call on a store
+opened without `jobs.schedules`, or a tick that met a schedule in a zone
+in a process without a zone provider.
 
 Otherwise: API misuse (a malformed handler map, a
 non-string kind, a worker started twice) is a `TypeError` at the
@@ -663,6 +670,100 @@ a cancellation policy, a retry policy are the host's.
 only by `cancel()`; `counts()` reports it. A transaction view's `jobs`
 (the outbox, §3) carries none of the four: an administration call is a
 root call.
+
+## 11. Recurring schedules
+
+A schedule fires a recurrence from `@jarenjs/core/calendar` as ordinary
+jobs. The calendar is a subpath of its own, so a store that never
+schedules carries none of it: enable schedules with `jobSchedules()`,
+and give the runtime record the zone provider every zone question goes
+to.
+
+```js
+import { jobSchedules } from '@jarenjs/db/schedules';
+import { compileRecurrence, floatingValue } from '@jarenjs/core/calendar';
+import { createRuntime } from '@jarenjs/core/runtime';
+import { createIntlZoneProvider } from '@jarenjs/locales/intl-zones';
+
+const runtime = createRuntime({ zoneProvider: createIntlZoneProvider({ revision: 'host ICU' }) });
+const store = await openStore(model, { driver: nodeDriver(), runtime, jobs: { schedules: jobSchedules() } });
+await store.jobs.schedule({
+  id: 'weekly-report', kind: 'report', payload: { to: 'team' },
+  series: compileRecurrence({ dtstart: floatingValue('2026-03-02', '09:00'), rrule: 'FREQ=WEEKLY;BYDAY=MO' }),
+  zone: 'Europe/Amsterdam', zoneSource: 'explicit', missed: 'skip',
+});
+await store.jobs.tick(); // on the host's own cadence
+```
+
+- **`schedule({ id, kind, payload?, series, zone?, zoneSource?, policy?, missed, limits? })`**
+  validates and computes the definition before anything is stored, and
+  answers the stored record:
+  - `series` is a compiled recurrence (`compileRecurrence`) or a series
+    (`defineSeries`), as values or as their JSON. A rule the calendar
+    refuses refuses here with the calendar's code: a valid frequency it
+    does not enumerate (MONTHLY, YEARLY) is `JY0020`, at schedule time and
+    never at a fire.
+  - A date or floating series is bound in `zone`, checked against the
+    provider now (an unknown zone is `JY0001`; a zone with no provider is
+    `JY0004`). Without a zone the schedule is `unresolved` and never
+    fires: no zone is ever assumed. A utc or zoned series takes no `zone`.
+  - `policy` is how a gap or fold binds a date or floating occurrence
+    (`'rfc5545'`, `'later'`, `'reject'`); for a utc or zoned series it is
+    the rule's own, and any other is refused. It defaults to the rule's.
+  - `missed` is `'skip'`, `'once'` or `{ catchUp: n }` (below); `limits`
+    are the calendar's expansion limits for each search.
+  - Any other member, or a malformed one, is `JD0013`.
+  - Writing an existing id replaces its definition and keeps its history:
+    the next occurrence is the first after its last fired one, or from its
+    creation when none fired, so a replacement never fires an occurrence
+    twice.
+- **`tick({ limit })`** fires the due schedules, earliest first, at most
+  `limit` (default 100), in one transaction, and answers
+  `{ fired, skipped, advanced, more }`:
+  - each occurrence that fires is enqueued as job
+    `${scheduleId}@${recurrenceId}` with `runAt` the occurrence's
+    instant, through the idempotent enqueue (§2), so a second tick, a
+    second process or a replaced definition cannot fire it twice;
+  - the schedule advances to its next occurrence in the same transaction,
+    guarded by the instant it was due at. On PostgreSQL the due rows are
+    read `FOR UPDATE SKIP LOCKED`, as a claim reads jobs; SQLite's single
+    writer serializes ticks. The answers are the same;
+  - an occurrence is **missed** when a later one was due too by the time
+    a tick saw it, after downtime or a tick that came late. The latest due
+    occurrences (every one at the latest instant) always fire; `'skip'`
+    fires no missed one, `'once'` the latest missed one, `{ catchUp: n }`
+    the latest n. The rest are counted as skipped;
+  - a tick in a process whose runtime has no zone provider refuses
+    `JD0016` when it meets a schedule in a zone, and leaves every schedule
+    as it was: the fault is the process's, not the schedule's.
+- **`schedules()`** answers every schedule by id; **`unschedule(id)`**
+  removes one (`false` when there was none); the jobs it fired stay.
+
+Each record carries `state`:
+
+| state | meaning |
+|---|---|
+| `active` | `nextRunAt` and `nextRecurrenceId` name the next occurrence |
+| `unresolved` | a date or floating series with no zone: never fires |
+| `stalled` | a search a limit stopped (`stall: { limit, counts: { emitted, work, providerCalls } }`), or an occurrence its policy refused to bind (`stall: { code, message, recurrenceId }`); the occurrences before it fired. Never dropped: write the schedule again to resume |
+| `ended` | the series has no occurrence left within its horizon |
+
+and `counts: { fired, skipped }`, `lastRunAt`, `lastRecurrenceId`, and
+`providerRevision` (the zone provider's revision the instants were
+computed under).
+
+All zone, recurrence and missed-occurrence arithmetic runs in
+JavaScript through the runtime's provider and clock; SQL stores and
+compares only epoch milliseconds (the queue's number type: NUMERIC on
+PostgreSQL), canonical text (`COLLATE "C"` on PostgreSQL) and JSON held as
+text. No statement reads the database's clock or zone data, so SQLite and
+PostgreSQL answer every schedule identically. The rows live in
+`_jaren_job_schedules`, which the first `schedule()` creates (on
+PostgreSQL under the jobs advisory lock); a store that never schedules
+keeps exactly the queue tables it had, and an adopted store (`adopt:
+true`) without the table refuses `schedule()` `JD0002`. Every schedule
+call is root-only, like administration: a transaction view's `jobs` has
+none, and without `jobs.schedules` each refuses `JD0016`.
 
 ## Business receipt and external-effect composition
 

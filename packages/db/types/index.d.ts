@@ -987,7 +987,7 @@ export interface Store {
    * transaction's fate. The transactional-outbox spelling is the
    * `tx.jobs` a transaction callback receives, which runs as the exact
    * scope and co-commits with the domain transaction. */
-  readonly jobs?: JobsApi & JobsAdminApi;
+  readonly jobs?: JobsApi & JobsAdminApi & JobSchedulesApi;
   /** Present exactly when the driver is synchronous — never stubs. */
   readonly sync?: SyncStore;
 }
@@ -2636,6 +2636,80 @@ export interface JobsAdminApi {
     Promise<{ removed: number }>;
 }
 
+/** What `jobs.schedule()` reads (JOBS-FORMAT §11). */
+export interface JobScheduleDefinition {
+  /** The schedule's identity; each fired job's id is `${id}@${recurrenceId}`. */
+  id: string;
+  /** The handler name every fired job carries. */
+  kind: string;
+  /** JSON; every fired job carries it. */
+  payload?: unknown;
+  /** A compiled recurrence (`compileRecurrence`) or a series (`defineSeries`)
+   * from `@jarenjs/core/calendar`, or either one's JSON. A frequency the
+   * calendar does not enumerate refuses with its code (`JY0020`). */
+  series: unknown;
+  /** The zone a date or floating series is bound in. Without one such a
+   * schedule is `unresolved` and never fires: no zone is assumed. A utc or
+   * zoned series takes none. */
+  zone?: string | null;
+  /** Where the zone came from (`'location'`, `'tenant'`, `'explicit'`, …). */
+  zoneSource?: string;
+  /** How a gap or fold resolves: a date or floating series' binding policy;
+   * for a utc or zoned series it must be the rule's own. Default: the rule's. */
+  policy?: 'rfc5545' | 'later' | 'reject';
+  /** Occurrences a later one superseded before a tick saw them:
+   * fire none, the latest one, or the latest n. */
+  missed: 'skip' | 'once' | { catchUp: number };
+  /** The calendar's expansion limits for each search; a search a limit stops
+   * leaves the schedule `stalled`. */
+  limits?: { maxOccurrences?: number; maxWork?: number; maxProviderCalls?: number; maxHorizonDays?: number } | null;
+}
+
+/** A stored schedule, as `schedule()` and `schedules()` answer it. */
+export interface JobScheduleRecord {
+  readonly id: string;
+  readonly kind: string;
+  readonly payload: unknown;
+  readonly series: unknown;
+  readonly zone: string | null;
+  readonly zoneSource: string | null;
+  readonly policy: 'rfc5545' | 'later' | 'reject';
+  readonly missed: 'skip' | 'once' | { catchUp: number };
+  readonly limits: Record<string, number> | null;
+  /** `active` waits for `nextRunAt`; `unresolved` has no zone; `stalled` was
+   * stopped by a limit or its data (see `stall`); `ended` has no occurrence left. */
+  readonly state: 'active' | 'unresolved' | 'stalled' | 'ended';
+  readonly nextRunAt: number | null;
+  readonly nextRecurrenceId: string | null;
+  readonly lastRunAt: number | null;
+  readonly lastRecurrenceId: string | null;
+  /** The zone provider's revision the instants were computed under. */
+  readonly providerRevision: string | null;
+  readonly counts: { readonly fired: number; readonly skipped: number };
+  readonly stall: null
+    | { readonly limit: string; readonly counts: { readonly emitted: number; readonly work: number; readonly providerCalls: number } }
+    | { readonly code: string; readonly message: string; readonly recurrenceId?: string };
+  readonly createdAt: number;
+  readonly updatedAt: number;
+}
+
+/**
+ * Recurring schedules over the queue (JOBS-FORMAT §11) — root-only.
+ * `schedule()` and `tick()` need `jobs: { schedules: jobSchedules() }` from
+ * `@jarenjs/db/schedules` (`JD0016` otherwise).
+ */
+export interface JobSchedulesApi {
+  /** Validate, compute and store a schedule; an existing id is replaced and keeps its history. */
+  schedule(definition: JobScheduleDefinition): Promise<JobScheduleRecord>;
+  /** Remove a schedule; the jobs it fired stay. `false` when there was none. */
+  unschedule(id: string): Promise<boolean>;
+  /** Every schedule, by id. */
+  schedules(): Promise<readonly JobScheduleRecord[]>;
+  /** Fire the due schedules, earliest first, at most `limit` (default 100) in one transaction. */
+  tick(options?: { limit?: number }): Promise<{ readonly fired: readonly string[]; readonly skipped: number;
+    readonly advanced: number; readonly more: boolean }>;
+}
+
 export interface JobsOptions {
   maxAttempts?: number;
   leaseMs?: number;
@@ -2646,6 +2720,8 @@ export interface JobsOptions {
   /** Injectable clock and randomness — every test injects both. */
   now?: () => number;
   random?: () => number;
+  /** Recurring schedules: what `jobSchedules()` from `@jarenjs/db/schedules` answers. */
+  schedules?: import('./schedules.js').JobSchedules;
 }
 
 export declare function createDagJobRunner(store: Store, options: {
@@ -2682,6 +2758,7 @@ export declare function createJobEngine(options: {
   defaults?: JobsOptions; runtime?: Partial<Runtime> }): unknown;
 export declare const JOBS_TABLE: string;
 export declare const JOB_CHECKPOINTS_TABLE: string;
+export declare const JOB_SCHEDULES_TABLE: string;
 export declare const JOB_DEFAULTS: Readonly<{
   maxAttempts: number; leaseMs: number; pollInterval: number;
   backoffBase: number; backoffCap: number; stopGraceMs: number }>;

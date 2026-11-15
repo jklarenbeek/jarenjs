@@ -556,7 +556,7 @@ such schemas wait for each other there — a wait, never a wrong answer:
 | `1246907983` | capture | the transaction | by a captured write, before the journal allocates its high-water |
 | `1246907984` | writer | the transaction | by `mode: 'immediate'`, before the body runs |
 | `1246907985` | owner | the store's session | by `openStore(model, { owner })`, until `close()` or the session ends |
-| `1246907990` | jobs | the transaction | by the job queue's catalog initialization |
+| `1246907990` | jobs | the transaction | by the job queue's catalog initialization, and by the first schedule's table creation ([JOBS-FORMAT §11](JOBS-FORMAT.md#11-recurring-schedules)) |
 
 Two classes never contend, and two schemas never contend for the writer or
 the owner lock. An immediate

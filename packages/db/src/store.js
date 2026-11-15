@@ -59,6 +59,7 @@ import { ASYNC_LIVE_DEFAULTS } from './live-options.js';
 import { classifyEntityLive } from './live-join.js';
 import { normalizeEventTime } from './live-time.js';
 import { createJobEngine, JOB_DEFAULTS, checkStopOptions } from './jobs.js';
+import { isJobSchedules } from './job-schedules.js';
 import { createOwnerLease, OWNER_LEASE_DEFAULT_MS, OWNER_LEASE_MIN_MS } from './owner.js';
 import { introspectModel, namespaceSchema } from './introspect.js';
 import { collectEntityRoots, entityRoot, intervalBounds, keyHoldingColumns } from './plan.js';
@@ -1811,8 +1812,10 @@ function refuseMalformedOpenOptions(options) {
     }
   }
   if (isPlainOptions(options.jobs)) {
-    nested('jobs', [...Object.keys(JOB_DEFAULTS), 'now', 'random']);
+    nested('jobs', [...Object.keys(JOB_DEFAULTS), 'now', 'random', 'schedules']);
     positive('jobs', Object.keys(JOB_DEFAULTS), ['pollInterval', 'backoffBase', 'backoffCap', 'stopGraceMs']);
+    if (options.jobs.schedules !== undefined && !isJobSchedules(options.jobs.schedules))
+      throw refuse('jobs', "member 'schedules' is what jobSchedules() from '@jarenjs/db/schedules' answers");
     for (const member of ['now', 'random']) {
       if (options.jobs[member] !== undefined && typeof options.jobs[member] !== 'function')
         throw refuse('jobs', `member '${member}' is a function`);
@@ -3530,6 +3533,7 @@ export function openStore(model, options) {
             gate: (fn, what, signal) => gated(fn, what, signal),
             now: typeof options.jobs === 'object' ? options.jobs.now : undefined,
             random: typeof options.jobs === 'object' ? options.jobs.random : undefined,
+            schedules: typeof options.jobs === 'object' ? options.jobs.schedules : undefined,
             defaults: typeof options.jobs === 'object' ? options.jobs : undefined,
             runtime,
           });
@@ -4743,6 +4747,12 @@ export function openStore(model, options) {
               requeue: rootJobCall('requeue', 'a root job requeue'),
               reset: rootJobCall('reset', 'a root job reset'),
               sweep: rootJobCall('sweep', 'a root job sweep'),
+              // recurring schedules (JOBS-FORMAT §11): root calls, like
+              // administration; a tick fires through the idempotent enqueue
+              schedule: rootJobCall('schedule', 'a root job schedule'),
+              unschedule: rootJobCall('unschedule', 'a root job unschedule'),
+              schedules: rootJobCall('schedules', 'a root schedule read'),
+              tick: rootJobCall('tick', 'a root schedule tick'),
             }),
             /**
              * Close the store. Job workers are asked to stop and given a

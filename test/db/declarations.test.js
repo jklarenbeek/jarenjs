@@ -21,6 +21,7 @@ const SUBPATHS = [
   ['@jarenjs/db/wasm', 'packages/db/types/wasm.d.ts'],
   ['@jarenjs/db/typed', 'packages/db/types/typed.d.ts'],
   ['@jarenjs/db/app', 'packages/db/types/app.d.ts'],
+  ['@jarenjs/db/schedules', 'packages/db/types/schedules.d.ts'],
 ];
 
 describe('the declarations equal the runtime', () => {

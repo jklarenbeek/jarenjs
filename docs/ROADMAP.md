@@ -546,6 +546,12 @@ costs a descriptor plus examples and no UI code at all.
 
 ## @jarenjs/linq & @jarenjs/db — the data pair
 
+- [ ] **A job worker does not tick recurring schedules.** `store.jobs.tick()` fires due schedules only
+  when a host calls it on its own timer; a worker's poll does not. Wanted: a worker option that ticks
+  before it claims, leaving an idle poll's statements unchanged when no store schedules.
+- [ ] **A late occurrence under `missed: 'skip'` fires however late it is.** An occurrence counts as
+  missed only when a later one was also due, so a lone overdue occurrence still fires after a long
+  downtime. Wanted: an optional deadline past which even the latest due occurrence is skipped.
 The fluent front door and the SQLite document store shipped as a pair;
 what each does is its own documentation's job
 ([linq](../packages/linq/README.md) ·
@@ -1054,6 +1060,8 @@ what each does is its own documentation's job
   zoned series' RDATE or EXDATE must name the series' own zone. No store has a temporal column
   kind: a caller stores the JSON forms (`@jarenjs/core/schemas/calendar/temporal.schema.json`,
   `…/rrule.schema.json`) and binds floating occurrences with `bindFloating`.
+  Recurring job schedules (`@jarenjs/db/schedules`, JOBS-FORMAT §11) take the same frequencies and refuse
+  the others with the same code at schedule time.
 - [ ] **`findSlots` takes a fractional width that `findAvailableSlots` refuses.**
   `findSlots([{ start: 0, end: 10 }], { duration: 0.5 })` answers twenty slots, while
   `@jarenjs/core/calendar`'s `findAvailableSlots` (and every calendar width) refuses a width that

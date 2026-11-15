@@ -42,6 +42,7 @@ export const DB_CODES = Object.freeze({
   JD0013: 'an option passed to a store operation is not one it reads, or is malformed',
   JD0014: 'a transaction guarantee was requested where it cannot act',
   JD0015: 'owner was asked of an adopted store whose database has no owner table',
+  JD0016: 'recurring job schedules were used without jobs.schedules from @jarenjs/db/schedules, or a tick met a schedule in a zone without the runtime\'s zone provider',
   JD0030: 'an unknown x-entity member was declared',
   JD0031: 'relation declarations contradict each other, or two many-to-many declarations that are not inverses name one join table',
   JD0032: 'the include specification is invalid',
@@ -194,6 +195,12 @@ export const DB_CODES = Object.freeze({
  *  - `JD0015` — `owner` on an adopted SQLite store whose database has no
  *    owner table: adoption creates nothing, so the operator creates it
  *    once with the statement the reason names
+ *  - `JD0016` — `jobs.schedule()` or `jobs.tick()` on a store opened
+ *    without `jobs: { schedules: jobSchedules() }` (the calendar is the
+ *    `@jarenjs/db/schedules` subpath, so a store that never schedules
+ *    carries none), or a tick that met a schedule in a zone in a process
+ *    whose runtime has no zone provider: the tick refuses and leaves
+ *    every schedule as it was, because the fault is the process's
  *  - `JD0010` — `strict: true` and part of the query would have run
  *    outside the database; the reason names the forcing construct
  *  - `JD0011` — the active profile refused the document before any

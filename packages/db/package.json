@@ -14,6 +14,10 @@
       "types": "./types/async-live.d.ts",
       "default": "./src/async-live.js"
     },
+    "./schedules": {
+      "types": "./types/schedules.d.ts",
+      "default": "./src/schedules.js"
+    },
     "./node-process": {
       "types": "./types/node-process.d.ts",
       "default": "./src/drivers/node-process.js"

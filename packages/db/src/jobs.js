@@ -1,6 +1,6 @@
 //@ts-check
-import { JOBS_TABLE, JOB_CHECKPOINTS_TABLE } from './engine-metadata.js';
-export { JOBS_TABLE, JOB_CHECKPOINTS_TABLE };
+import { JOBS_TABLE, JOB_CHECKPOINTS_TABLE, JOB_SCHEDULES_TABLE } from './engine-metadata.js';
+export { JOBS_TABLE, JOB_CHECKPOINTS_TABLE, JOB_SCHEDULES_TABLE };
 /**
  * @file The durable job queue (JOBS-FORMAT): enqueue, the
  * single-statement guarded claim (§3 — one statement is one
@@ -218,13 +218,16 @@ function isLease(value) {
  *   random?: () => number, adopt?: boolean,
  *   gate?: (fn: () => any, what?: string, signal?: AbortSignal) => any,
  *   bracket?: (fn: () => any) => any,
+ *   schedules?: any,
  *   defaults?: Partial<typeof JOB_DEFAULTS>,
  *   runtime?: Partial<import('@jarenjs/core/runtime').Runtime> }} options
  *   `runtime` is the host's runtime record: its `now` and `random` apply
  *   where the explicit `now` and `random` options are absent, and its
  *   `uuid` mints every job id, lease token and default worker owner.
  *   `bracket` runs the first-open DDL (the store's immediate transaction
- *   on a writable store); bare when absent.
+ *   on a writable store); bare when absent. `schedules` is what
+ *   `jobSchedules()` from `@jarenjs/db/schedules` answers: the calendar
+ *   recurring schedules compute with (§11).
  */
 export function createJobEngine(options) {
   const { connection } = options;
@@ -884,6 +887,24 @@ export function createJobEngine(options) {
     return connection.transaction(() => next(0));
   };
 
+  // ---- recurring schedules (§11) ----
+  // The calendar half is `@jarenjs/db/schedules`: a store opened without it
+  // carries no calendar, and every schedule call refuses by name.
+  const scheduling = options.schedules?.attach({
+    connection, prepared, now, bracket, wake: wakeAll, storedJson,
+    adopt: options.adopt === true, maxAttempts: defaults.maxAttempts,
+    // the zone provider is the runtime's: never a host default
+    provider: runtime.zoneProvider ?? null,
+  }) ?? null;
+  /** @param {'schedule' | 'unschedule' | 'schedules' | 'tick'} what */
+  const scheduleCall = (what) => (/** @type {any[]} */ ...args) => {
+    if (scheduling === null) {
+      throw new DbCompileError('JD0016', `jobs.${what} needs recurring schedules enabled: open the store with `
+        + "jobs: { schedules: jobSchedules() } from '@jarenjs/db/schedules'", `/jobs/${what}`);
+    }
+    return scheduling[what](...args);
+  };
+
   /** A settling refusal, as opposed to a storage failure: the three
    * the fence raises mean this attempt no longer holds the job, and no
    * amount of retrying will change that. */
@@ -1511,6 +1532,10 @@ export function createJobEngine(options) {
     requeue,
     reset,
     sweep,
+    schedule: scheduleCall('schedule'),
+    unschedule: scheduleCall('unschedule'),
+    schedules: scheduleCall('schedules'),
+    tick: scheduleCall('tick'),
     /** Stop every worker, bounded. Resolves to the per-worker outcome so
      * `close()` can report a handler it could not wait out rather than
      * hanging on it. */

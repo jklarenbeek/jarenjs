@@ -95,7 +95,7 @@ export {
 export { classifyLiveQuery, createLiveRegistry, diffRows, LIVE_DEFAULTS } from './live.js';
 export { createSortedWindow, compareCodepoint } from './window.js';
 export {
-  createJobEngine, JOBS_TABLE, JOB_CHECKPOINTS_TABLE, JOB_DEFAULTS,
+  createJobEngine, JOBS_TABLE, JOB_CHECKPOINTS_TABLE, JOB_SCHEDULES_TABLE, JOB_DEFAULTS,
   describeValue, serializeResult,
 } from './jobs.js';
 export { createDagJobRunner, RUN_IDENTITY_NODE } from './dag-job.js';
