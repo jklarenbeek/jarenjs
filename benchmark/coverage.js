@@ -463,7 +463,12 @@ function runDeadCodeAudit(opts) {
     '--exclude', 'packages/website/src/offline-runtime.js',
     '--temp-directory', opts.tempDir,
     '--clean',
-    process.execPath, '--no-warnings=ExperimentalWarning', '--test', 'test/**/*.test.js',
+    process.execPath, '--no-warnings=ExperimentalWarning', '--test',
+    // site:gate runs this beside the plain suite and bounds both to one
+    // concurrency (scripts/site-gate.js header); unset, node's default holds
+    ...(/^[1-9]\d*$/.test(process.env.SITE_GATE_TEST_CONCURRENCY ?? '')
+      ? [`--test-concurrency=${process.env.SITE_GATE_TEST_CONCURRENCY}`] : []),
+    'test/**/*.test.js',
   ];
 
   console.log('='.repeat(80));

@@ -10,6 +10,22 @@
  *   3. then runs `test:design` (it reads the built `dist/`),
  *   4. then runs the Playwright matrix against that same build.
  *
+ * The test suite and the dead-code audit (`benchmark:coverage`, the same
+ * suite under c8) each run EVERY test file. Left at node's default — one
+ * file per core — the two together asked for twice the host's cores: on 16
+ * cores the one-minute load reached 35–60 (a single suite alone drives
+ * about 2 per file slot: the files spawn processes, workers and database
+ * connections) and timing, heap and lease tests that pass alone failed the
+ * gate. So the gate bounds BOTH to the same explicit `--test-concurrency`:
+ * a quarter of the cores, at least 2, never above node's own default
+ * (cores − 1) — 4 on 16 cores, measured at load 14 for the same phase-1
+ * wall time. `SITE_GATE_TEST_CONCURRENCY=<n>` overrides it (a positive
+ * integer; anything else is refused before any stage starts). The `test`
+ * stage runs the package's own `test` script with node directly, the bound
+ * spliced in after its `--test` (npm cannot place a flag before the
+ * script's glob); the audit reads the same variable. A plain `npm test`
+ * outside the gate keeps node's default.
+ *
  * Output is buffered per stage and printed whole when the stage settles, so
  * nothing interleaves and a record can still quote every stage's counts.
  * The first failure aborts the run (remaining children are killed) and the
@@ -39,6 +55,8 @@
  */
 
 import { spawn } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { availableParallelism } from 'node:os';
 import process from 'node:process';
 import { npmCliPath } from './lib/portable.js';
 
@@ -58,6 +76,19 @@ for (const arg of argv) {
   }
   else playwrightArgs.push(arg);
 }
+
+const cores = availableParallelism();
+const override = process.env.SITE_GATE_TEST_CONCURRENCY;
+if (override !== undefined && !/^[1-9]\d*$/.test(override)) {
+  console.error(`site-gate: SITE_GATE_TEST_CONCURRENCY must be a positive integer (got ${JSON.stringify(override)})`);
+  process.exit(2);
+}
+/** files each whole-suite stage runs at once (see the header) */
+const testConcurrency = override !== undefined
+  ? Number(override)
+  : Math.max(1, Math.min(cores - 1, Math.max(2, Math.floor(cores / 4))));
+// the audit's own `node --test` run reads it from here
+process.env.SITE_GATE_TEST_CONCURRENCY = String(testConcurrency);
 
 /** @type {Map<string, import('node:child_process').ChildProcess>} */
 const running = new Map();
@@ -123,6 +154,37 @@ function stage(label, args) {
   return commandStage(label, windows ? 'npm.cmd' : 'npm', args, windows);
 }
 
+/**
+ * The package's `test` script as a node argv with the bound spliced in
+ * after `--test`, or the reason it cannot be bounded. The script is read
+ * from the manifest npm names (`npm_package_json`), else this package's.
+ * @returns {{ args: string[] } | { reason: string }}
+ */
+function boundedTestArgs() {
+  const manifest = process.env.npm_package_json
+    ?? new URL('../package.json', import.meta.url);
+  const script = JSON.parse(readFileSync(manifest, 'utf8')).scripts?.test;
+  const tokens = typeof script === 'string'
+    ? [...script.matchAll(/"([^"]*)"|(\S+)/g)].map((match) => match[1] ?? match[2])
+    : [];
+  const at = tokens.indexOf('--test');
+  if (tokens[0] !== 'node' || at < 0 || tokens.some((token) => token.startsWith('--test-concurrency'))) {
+    return { reason: `site-gate: cannot bound the test script ${JSON.stringify(script)} — `
+      + 'expected `node … --test …` without its own --test-concurrency' };
+  }
+  return { args: [...tokens.slice(1, at + 1), `--test-concurrency=${testConcurrency}`, ...tokens.slice(at + 1)] };
+}
+
+/**
+ * The `test` stage: the package's own suite, bounded.
+ * @returns {Promise<{ label: string, code: number, output: string, seconds: string }>}
+ */
+function testStage() {
+  const bounded = boundedTestArgs();
+  if ('reason' in bounded) return Promise.resolve({ label: 'test', code: 1, output: `${bounded.reason}\n`, seconds: '0.0' });
+  return commandStage('test', process.execPath, bounded.args);
+}
+
 /** @param {{ label: string, code: number, output: string, seconds: string }} result */
 function report(result) {
   const mark = result.code === 0 ? '✔' : '✘';
@@ -138,20 +200,23 @@ function abortRemaining() {
 // ---- phase 1: the independent stages, concurrently --------------------
 const PARALLEL = [
   ['lint', ['run', 'lint']],
-  ['test', ['test']],
+  ['test', null],
   ['benchmark:coverage', ['run', 'benchmark:coverage']],
   ['docs:check', ['run', 'docs:check']],
   ['test:documents', ['run', 'test:documents']],
 ];
 
-console.log(`site:gate — ${PARALLEL.length} concurrent stages, then build → design → browser (${browser})`);
+console.log(`site:gate — ${PARALLEL.length} concurrent stages (both test suites at --test-concurrency=${testConcurrency}), `
+  + `then build → design → browser (${browser})`);
 
+const phase1Started = Date.now();
 const settled = await Promise.all(PARALLEL.map(([label, args]) => {
-  const promise = stage(String(label), /** @type {string[]} */ (args));
+  const promise = args === null ? testStage() : stage(String(label), /** @type {string[]} */ (args));
   promise.then((result) => { if (result.code !== 0) abortRemaining(); });
   return promise;
 }));
 for (const result of settled) report(result);
+console.log(`\nphase 1 settled in ${((Date.now() - phase1Started) / 1000).toFixed(1)}s`);
 if (failed) {
   console.error('\nsite:gate FAILED in the concurrent stages (any killed stage reports its partial output above)');
   process.exit(1);
