@@ -1,0 +1,233 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jarenjs.dev/schemas/jaren-core/assign/problem/0.1",
+  "title": "Assignment problem (@jarenjs/core/assign)",
+  "description": "The JSON form of an assignment problem: resources, timed tasks with demand slots, named fact tables, assignments with optional locks and a baseline, each revisioned. attributes and fact rows are host data the engine copies and never reads. Each refusal admitProblem makes is a definition here named after it: problem, resource, task, demand, interval, fact, assignment, baseline and attributes (JN0001), id (JN0002), revision (JN0004), intervalOrder (JN0005), count (JN0006). Not expressible here, and refused by admitProblem only: an id given twice (JN0003), an assignment naming a task, slot or resource the problem does not hold (JN0007), a repeated assignment or a slot filled past its count (JN0008), a non-JSON or too-deep value inside attributes or rows (JN0009), and an interval whose start is not before its end (JN0005).",
+  "$ref": "#/$defs/problem",
+  "$defs": {
+    "problem": {
+      "type": "object",
+      "required": [
+        "revision",
+        "resources",
+        "tasks"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "revision": {
+          "$ref": "#/$defs/revision"
+        },
+        "resources": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/resource"
+          }
+        },
+        "tasks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/task"
+          }
+        },
+        "facts": {
+          "type": "object",
+          "propertyNames": {
+            "minLength": 1
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/fact"
+          }
+        },
+        "assignments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/assignment"
+          }
+        },
+        "baseline": {
+          "$ref": "#/$defs/baseline"
+        },
+        "attributes": {
+          "$ref": "#/$defs/attributes"
+        }
+      }
+    },
+    "resource": {
+      "type": "object",
+      "required": [
+        "id",
+        "revision"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "revision": {
+          "$ref": "#/$defs/revision"
+        },
+        "attributes": {
+          "$ref": "#/$defs/attributes"
+        }
+      }
+    },
+    "task": {
+      "type": "object",
+      "required": [
+        "id",
+        "revision",
+        "interval",
+        "demands"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "revision": {
+          "$ref": "#/$defs/revision"
+        },
+        "interval": {
+          "$ref": "#/$defs/interval"
+        },
+        "demands": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/demand"
+          }
+        },
+        "attributes": {
+          "$ref": "#/$defs/attributes"
+        }
+      }
+    },
+    "demand": {
+      "type": "object",
+      "required": [
+        "slot",
+        "count"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "slot": {
+          "$ref": "#/$defs/id"
+        },
+        "count": {
+          "$ref": "#/$defs/count"
+        },
+        "attributes": {
+          "$ref": "#/$defs/attributes"
+        }
+      }
+    },
+    "interval": {
+      "description": "Half-open [start, end) in integer time units (epoch milliseconds by convention); start must be before end, which admitProblem checks.",
+      "type": "object",
+      "required": [
+        "start",
+        "end"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "start": {
+          "$ref": "#/$defs/intervalOrder"
+        },
+        "end": {
+          "$ref": "#/$defs/intervalOrder"
+        }
+      }
+    },
+    "intervalOrder": {
+      "type": "integer",
+      "minimum": -9007199254740991,
+      "maximum": 9007199254740991
+    },
+    "fact": {
+      "type": "object",
+      "required": [
+        "revision",
+        "rows"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "revision": {
+          "$ref": "#/$defs/revision"
+        },
+        "rows": {
+          "type": "array"
+        }
+      }
+    },
+    "assignment": {
+      "type": "object",
+      "required": [
+        "task",
+        "slot",
+        "resource"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "task": {
+          "$ref": "#/$defs/id"
+        },
+        "slot": {
+          "$ref": "#/$defs/id"
+        },
+        "resource": {
+          "$ref": "#/$defs/id"
+        },
+        "lock": {
+          "enum": [
+            "hard",
+            "soft"
+          ]
+        }
+      }
+    },
+    "baseline": {
+      "type": "object",
+      "required": [
+        "revision",
+        "assignments"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "revision": {
+          "$ref": "#/$defs/revision"
+        },
+        "assignments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/assignment"
+          }
+        }
+      }
+    },
+    "attributes": {
+      "description": "Host data: any JSON object, never read by the engine.",
+      "type": "object"
+    },
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "revision": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      ]
+    },
+    "count": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    }
+  }
+}

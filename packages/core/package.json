@@ -149,6 +149,10 @@
       "types": "./dist/types/calendar/index.d.ts",
       "default": "./src/calendar/index.js"
     },
+    "./assign": {
+      "types": "./dist/types/assign/index.d.ts",
+      "default": "./src/assign/index.js"
+    },
     "./schemas/*": "./schemas/*",
     "./stats": {
       "types": "./dist/types/stats.d.ts",

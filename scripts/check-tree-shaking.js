@@ -180,6 +180,30 @@ if (seriesLeak.length > 0)
   throw new Error(`@jarenjs/core/series pulled a calendar module or zone data into the bundle: ${seriesLeak.map(([file]) => file).join(', ')}`);
 console.log(`Tree-shaking smoke test passed (${seriesResult.outputFiles[0].contents.length} byte series bundle carries no calendar module and no zone data).`);
 
+// The assignment engine is pure JSON in and out: importing every export
+// of `@jarenjs/core/assign` carries no calendar, series or zone data and
+// nothing from a storage package.
+const assignNames = Object.keys(await import('@jarenjs/core/assign')).join(', ');
+const assignResult = await build({
+  stdin: {
+    contents: `import { ${assignNames} } from '@jarenjs/core/assign'; export { ${assignNames} };`,
+    resolveDir: process.cwd(),
+    sourcefile: 'assign-consumer.js',
+  },
+  bundle: true,
+  format: 'esm',
+  metafile: true,
+  minify: true,
+  platform: 'neutral',
+  treeShaking: true,
+  write: false,
+});
+const assignLeak = Object.entries(Object.values(assignResult.metafile.outputs)[0].inputs)
+  .filter(([file, info]) => /packages\/locales\/|packages\/db\/|packages\/core\/src\/(calendar|series|dates)\//.test(file) && info.bytesInOutput > 0);
+if (assignLeak.length > 0)
+  throw new Error(`@jarenjs/core/assign pulled a calendar, series, date, locale or storage module into the bundle: ${assignLeak.map(([file]) => file).join(', ')}`);
+console.log(`Tree-shaking smoke test passed (${assignResult.outputFiles[0].contents.length} byte assign bundle carries no calendar, series, date, locale or storage module).`);
+
 // Every `@jarenjs/linq` subpath's measured size, collected as the probes
 // run and checked against docs/CONSUMING.md's table at the end: a price
 // this repository publishes is a price this gate measured, so it can go

@@ -1075,6 +1075,16 @@ what each does is its own documentation's job
 
 ## @jarenjs/core
 
+- [ ] **Assignment engine — beyond full scoring.** `@jarenjs/core/assign` admits a problem, registers host
+  rules and scores an assignment list exactly. Still open: a civil-day scope (a rule over one resource on one
+  local day, through an injected zone provider, with the provider's identity in provenance); incremental and
+  what-if evaluation proven equal to full scoring; seeded, budgeted search and repair with locks and churn,
+  and an honest status (`optimal`/`infeasible` only with proof, `limit` when the budget ran out); a published
+  benchmark of scoring and search. `SERIES.md`, `ARCHITECTURE.md` and `CALENDAR.md`'s "a solver's job" lines
+  then point to it.
+- [ ] **Two spellings of an incomplete result.** The calendar layer answers `status: 'incomplete'` with
+  `limit`; the assignment engine answers `complete: false` with `stoppedAt: { limit, rule, unit }`. One
+  shape across the core layers would let a host handle every bounded answer alike.
 - [ ] **A named-zone clock refuses a time that exists when its fraction rounds up.** With the
   Intl provider, `toEpoch({ 2026-07-01 09:00:05.9996 }, 'Europe/Amsterdam', 'reject')` is `NaN`
   and `resolveClock({ zone, provider }).epochOf` calls it "ambiguous or does not exist", while

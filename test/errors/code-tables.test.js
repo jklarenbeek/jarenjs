@@ -31,6 +31,7 @@ import { ICAL_CODES } from '@jarenjs/josl/ical';
 import { CHECK_CODES } from '@jarenjs/core/check';
 import { TEXT_EDIT_CODES } from '@jarenjs/core/text/edits';
 import { CALENDAR_CODES } from '@jarenjs/core/calendar';
+import { ASSIGN_CODES } from '@jarenjs/core/assign';
 import { CANONICAL_CODES } from '@jarenjs/json/canonical';
 import { STUDIO_CODES } from '@jarenjs/studio';
 
@@ -67,6 +68,7 @@ const TABLES = /** @type {[string, Record<string, string>, string, string][]} */
   ['CHECK_CODES', CHECK_CODES, 'packages/core/README.md', 'JG'],
   ['TEXT_EDIT_CODES', TEXT_EDIT_CODES, 'packages/core/docs/HOST-PRIMITIVES.md', 'JE'],
   ['CALENDAR_CODES', CALENDAR_CODES, 'packages/core/docs/CALENDAR.md', 'JY'],
+  ['ASSIGN_CODES', ASSIGN_CODES, 'packages/core/docs/ASSIGN.md', 'JN'],
   ['CANONICAL_CODES', CANONICAL_CODES, 'packages/json/README.md', 'JO'],
   ['STUDIO_CODES', STUDIO_CODES, 'components/studio/docs/PROJECT-FORMAT.md', 'JS'],
 ]);

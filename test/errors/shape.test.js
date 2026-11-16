@@ -35,6 +35,7 @@ import { LinqBuildError, LinqRuntimeError } from '@jarenjs/linq';
 import { DbCompileError, DbRuntimeError } from '@jarenjs/db';
 import { ContractCompileError, ContractRuntimeError, ContractHostError } from '@jarenjs/contract';
 import { CalendarError } from '@jarenjs/core/calendar';
+import { AssignError } from '@jarenjs/core/assign';
 import { IcalError } from '@jarenjs/josl/ical';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -77,6 +78,7 @@ function instances() {
     ['ContractRuntimeError', new ContractRuntimeError(CODE, REASON, { msgid: 'contract/golden', cause: CAUSE })],
     ['ContractHostError', new ContractHostError(CODE, REASON)],
     ['CalendarError', new CalendarError(CODE, REASON, DOC_PATH, CAUSE)],
+    ['AssignError', new AssignError(CODE, REASON, DOC_PATH, CAUSE)],
     ['IcalError', new IcalError(CODE, REASON, DOC_PATH, CAUSE)],
   ];
 }
@@ -116,8 +118,8 @@ describe('coded error shapes (T1 golden)', () => {
   const golden = JSON.parse(fs.readFileSync(GOLDEN_PATH, 'utf8'));
 
   it('covers every coded class exactly once', () => {
-    assert.strictEqual(actual.length, 22);
-    assert.strictEqual(new Set(actual.map((s) => s.class)).size, 22);
+    assert.strictEqual(actual.length, 23);
+    assert.strictEqual(new Set(actual.map((s) => s.class)).size, 23);
   });
 
   for (const shape of actual) {
