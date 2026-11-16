@@ -5,7 +5,8 @@
 - an assignment problem as plain, revisioned JSON with a schema twin;
 - a rule contract through which the host supplies every constraint;
 - exact, explained scoring;
-- an evaluator that, after an edit or for a hypothetical one, re-evaluates only what the edit touches and answers the bytes full scoring answers.
+- an evaluator that, after an edit or for a hypothetical one, re-evaluates only what the edit touches and answers the bytes full scoring answers;
+- `solve`, which proposes assignments for a problem's open places, re-validates the proposal, and says how much its status proves.
 
 It knows nothing about rest periods, skills, opening hours or fairness. Those are rules the host writes against the contract, and **the engine ships none**.
 
@@ -13,14 +14,14 @@ It knows nothing about rest periods, skills, opening hours or fairness. Those ar
 
 ```js
 import {
-  admitProblem, registerRules, scoreAssignment, compareScores, explain, createEvaluator,
-  ASSIGN_LIMITS, ASSIGN_CODES, AssignError,
+  admitProblem, registerRules, scoreAssignment, compareScores, explain, createEvaluator, solve,
+  ASSIGN_LIMITS, SOLVE_LIMITS, ASSIGN_CODES, AssignError,
 } from '@jarenjs/core/assign';
 ```
 
 Pure JSON goes in and out. The engine reads no clock, no locale and no storage, and no zone but the ones a task names, through the provider the host injects (§7). Scoring the same inputs gives the same bytes in every host time zone, for every key order of the inputs, and for every order of their resources, tasks, demands and assignments. Fact rows and arrays inside `attributes` are host data and keep the host's order.
 
-A rule over one resource on one civil day of a zone (`resource-day`) gets its days through the separate subpath `@jarenjs/core/assign/days` and a zone provider the host injects (§7). An edit or a hypothetical one is answered by an evaluator (§8). Not here: search. Scoring answers how good a given assignment list is; it does not look for a better one.
+A rule over one resource on one civil day of a zone (`resource-day`) gets its days through the separate subpath `@jarenjs/core/assign/days` and a zone provider the host injects (§7). An edit or a hypothetical one is answered by an evaluator (§8). Scoring answers how good a given assignment list is; `solve` looks for a better one (§9).
 
 ## 1. The problem
 
@@ -188,7 +189,7 @@ A match is `{ magnitude, messageId, subjects?, intervals?, params? }`:
 - `subjects` is `{ resources?, tasks? }`, ids the problem holds;
 - `intervals` are `{ start, end }` like a task's.
 
-An unknown is `{ reason, fact?, subjects? }`. An answer of any other form is refused by name (`JN0017`), and so is a promise. What a rule throws is refused as `JN0016`, with the throw as `cause`.
+An unknown is `{ reason, fact?, subjects? }`. It says the rule could not decide whether more matches exist, and it never takes back a match the rule reported beside it: so a hard match beside a hard unknown is still `infeasible-by-validation` (§3), and a search reads an unknown as something that can only lower a score (§9). An answer of any other form is refused by name (`JN0017`), and so is a promise. What a rule throws is refused as `JN0016`, with the throw as `cause`.
 
 ## 3. Scoring
 
@@ -712,7 +713,159 @@ The scope is the declaration, and the view checks it. Suppose one of a rule's un
 | `fullFallbacks` | answers in which a rule was evaluated over every unit because it read outside its row |
 | `fullScorings` | answers in which every rule was evaluated over every unit |
 
-## 9. Codes
+## 9. Search
+
+`solve(problem, ruleSet, { strategy, seed?, budgets?, rank?, signal?, limits?, days? })` proposes assignments for a problem's open places. It scores with the rules the host gave it, through an evaluator (§8), and re-validates what it proposes with a fresh full scoring.
+
+**The space.** An open place is room left in a demand slot past the assignments the problem already holds. Those assignments stay as they are: a solve fills, it does not repair. A *candidate* is the problem's assignments plus, for each slot, a set of resources not already in it no larger than its room. A place may stay open, because the model never requires a slot to be filled: a rule that wants it filled says so. The model has no eligibility either. Every resource is a candidate for every place, and the rules judge it.
+
+The answer is frozen JSON:
+
+```text
+{ status, best, added, score, bound?, cancelled?, counts, provenance }
+```
+
+- `best` is the whole proposed list (the problem's assignments and the added ones, sorted as scoring sorts them), and `added` the assignments the solve adds.
+- `score` is `scoreAssignment(problem, ruleSet, best, { limits, days })`, made again after the search. The search's own scoring of `best` must be the same bytes; when it is not, a rule read state past its view, and the solve is refused (`JN0026`).
+- `bound`, when present, is a score no candidate of the space can beat.
+- `counts` is `{ nodes, moves, ranked, undecided, space }`, defined under the strategies below.
+- `provenance` is the scoring provenance of the problem as given (§3), with the strategy as `algorithm`, and `budgets`, `limits`, `rank` (whether a hook ordered the candidates) and `seed` (null for none).
+
+A proposal never commits itself. Nothing is written, and the host rechecks revisions and authority before it applies `added`.
+
+```js
+import { registerRules, solve } from '@jarenjs/core/assign';
+
+const problem = {
+  revision: 'week-12',
+  resources: [{ id: 'ari', revision: 1 }, { id: 'nina', revision: 1 }, { id: 'sam', revision: 1 }],
+  tasks: [
+    { id: 'mon-early', revision: 1, interval: { start: 0, end: 480 }, demands: [{ slot: 'crew', count: 2 }] },
+    { id: 'mon-late', revision: 1, interval: { start: 450, end: 900 }, demands: [{ slot: 'crew', count: 1 }] },
+  ],
+  // kept by every candidate: a solve fills, it does not repair
+  assignments: [{ task: 'mon-early', slot: 'crew', resource: 'nina' }],
+};
+// one resource's overlapping tasks
+const noOverlap = {
+  id: 'no-overlap', version: 1, level: 'hard', scope: 'resource', measure: 'ms',
+  evaluate(view, unit) {
+    const intervals = view.assignmentsOf(unit.id).map((a) => view.task(a.task).interval);
+    const matches = [];
+    for (let i = 1; i < intervals.length; i++) {
+      const overlap = intervals[i - 1].end - intervals[i].start;
+      if (overlap > 0) matches.push({ magnitude: overlap, messageId: 'overlap', subjects: { resources: [unit.id] } });
+    }
+    return { matches };
+  },
+};
+// each place a task leaves open: the model allows it, this rule does not like it
+const covered = {
+  id: 'covered', version: 1, level: 'service', scope: 'task',
+  evaluate(view, unit) {
+    const want = view.task(unit.id).demands.reduce((sum, demand) => sum + demand.count, 0);
+    const open = want - view.assignmentsFor(unit.id).length;
+    return open > 0 ? { matches: [{ magnitude: open, messageId: 'open', subjects: { tasks: [unit.id] } }] } : {};
+  },
+};
+const rules = registerRules([noOverlap, covered]);
+const proved = solve(problem, rules, { strategy: 'exhaustive' });
+const built = solve(problem, rules, { strategy: 'construct', budgets: { maxMoves: 4 } });
+const places = (list) => list.map((a) => `${a.task} ${a.resource}`);
+
+export const proposals = {
+  exhaustive: { status: proved.status, added: places(proved.added), service: proved.score.score.service, bound: proved.bound.service, counts: proved.counts },
+  construct: { status: built.status, added: places(built.added), service: built.score.score.service, counts: built.counts },
+};
+```
+
+```json
+{
+  "exhaustive": {
+    "status": "optimal",
+    "added": [
+      "mon-early ari",
+      "mon-late sam"
+    ],
+    "service": 0,
+    "bound": 0,
+    "counts": {
+      "nodes": 12,
+      "moves": 21,
+      "ranked": 0,
+      "undecided": 0,
+      "space": 12
+    }
+  },
+  "construct": {
+    "status": "limit",
+    "added": [
+      "mon-early ari"
+    ],
+    "service": -1,
+    "counts": {
+      "nodes": 2,
+      "moves": 4,
+      "ranked": 0,
+      "undecided": 0,
+      "space": null
+    }
+  }
+}
+```
+
+The budget of 4 moves stops `construct` while it previews the second place, so it answers `limit` with the one place it filled.
+
+### Status
+
+| Status | When |
+|---|---|
+| `optimal` | `exhaustive` scored every candidate, and the best feasible one is no worse than any candidate could be, whatever its unknowns would decide |
+| `infeasible` | `exhaustive` scored every candidate, and every one has a hard match |
+| `feasible` | the best candidate is fully validated feasible (verdict `feasible`), and nothing more is proved |
+| `limit` | a budget ran out, or the signal aborted (`cancelled: true`); `best` is the best candidate held, and there is no bound |
+| `unknown` | no candidate is validated feasible and nothing is proved: a hard rule could not decide, a scoring stopped at a limit, or (for `construct`) the proposal has a hard match |
+
+`optimal` and `infeasible` come only from a complete `exhaustive` search. A cancelled or budget-exhausted search is `limit`, never `infeasible`.
+
+**How the proof reads unknowns.** An unknown only hides matches: a rule that could decide might lower a score, never raise it. So a candidate scores at best what its scoring answers, and at worst that score with every level from the first level an unknown is reported at unbounded below. `optimal` needs the best feasible candidate's worst score to be no less than every other candidate's best score, apart from candidates with a hard match. A candidate of verdict `unknown` that could beat it, or a scoring that stopped at a limit, blocks the proof. The answer is then `feasible` if a validated feasible candidate exists, else `unknown`, and `counts.undecided` says how many candidates were undecided. The bound is the best score any candidate answered, given only when every scoring was complete.
+
+### `exhaustive`
+
+`exhaustive` visits every candidate once, each reached by one evaluator edit from its parent, so each is scored with the evaluator's exact answer. The order is fixed: slots in task and slot order, each slot's resources in id order, and a set before the sets that extend it. The best candidate is the first of:
+
+1. the best class: verdict `feasible`, then `unknown`, then `infeasible-by-validation` (an incomplete scoring is never best);
+2. then the best score;
+3. then the best worst score;
+4. then the first one visited.
+
+It takes no `seed` and no `rank`, and refuses both (`JN0015`).
+
+It runs only within `SOLVE_LIMITS.maxSpace` candidates. Past that it is refused before anything is scored (`JN0024`), and it is never switched to another strategy. It prunes nothing. Rules are host code, so no bound on what a rule answers holds for every rule. `counts.space` is the size of the space, `nodes` the candidates scored (the problem as given is the first), and `moves` the evaluator edits.
+
+### `construct`
+
+`construct` makes one greedy pass over the open places: tasks in id order, each task's slots in slot order, a slot's room one place at a time. Each place is decided once. The choices are leaving it open and each resource not yet in its slot, each previewed with `whatIf`. A resource is admissible only if its scoring is complete, its verdict class is no worse than leaving the place open, and it adds no hard match. The choice is the admissible candidate with:
+
+1. the lowest `rank` (every rank is 0 without a hook);
+2. then the best class;
+3. then the best score.
+
+Leaving the place open wins a tie. A tie between resources goes to the first in id order, or, with a `seed` (a whole number from 0 to 4294967295), to a draw of `mulberry32(seed)` among them. A place left open ends its slot's filling.
+
+`construct` answers `feasible` or `unknown` from the re-validated score, never `optimal` or `infeasible`. `counts.nodes` counts places decided, `moves` the previews and edits, `ranked` the hook's answers, and `undecided` the previews of verdict `unknown` or past a limit. `space` is null.
+
+**The rank hook.** `rank(candidate, state)` orders the admissible candidates; a lower integer goes first. It answers a safe integer or a bigint, and anything else, or a throw, is refused (`JN0025`, the throw as `cause`). `candidate` is `{ task, slot, resource, result }`, with `resource: null` for leaving the place open and `result` the scoring the choice would have. `state` is `{ problem, assignments, added }`: the admitted problem, the current list, and what this pass added, in the order it added it. Both are frozen. A rank orders candidates and never waives a hard rule. A greedy that depends on its own path, such as "least time already assigned in this pass first", is a rank over `state.added` in the problem's integer units.
+
+### Budgets and the signal
+
+`budgets` is `{ maxNodes?, maxMoves? }`, each a whole number from 1. They count work and never time it, so the same budget stops at the same place on every host. The search stops before a node or a move the budget does not cover.
+
+`signal` is an `AbortSignal`, read before each node and each move. A solve is synchronous, so it sees an abort raised before the call, or by host code it calls (a rule or the rank hook). Either way the answer is `limit` with `cancelled: true`.
+
+`SOLVE_LIMITS` is `{ maxSpace: 100000 }`.
+
+## 10. Codes
 
 Every refusal is an `AssignError`, a coded error whose `docPath` is a JSON Pointer:
 
@@ -744,3 +897,6 @@ Every refusal is an `AssignError`, a coded error whose `docPath` is a JSON Point
 | `JN0021` | civil days were asked for without the seam that answers them: a resource-day rule scored without options.days from civilDays, a days value civilDays did not build, or a day read by a rule whose scope is not resource-day |
 | `JN0022` | a task's interval could not be split into civil days in its zone: the provider does not know the zone, failed, a day starts twice under the reject policy, or the task spans more than 36600 civil days; the calendar's refusal is the cause |
 | `JN0023` | an edit is not one an evaluator takes: an unknown op or member, an unassign, move or swap naming an assignment the list does not hold, a revise naming nothing to change, or any edit to a closed evaluator |
+| `JN0024` | an exhaustive solve was asked for a space holding more candidates than SOLVE_LIMITS.maxSpace; it is refused before anything is scored, never answered by another strategy |
+| `JN0025` | a rank hook threw or answered other than a safe integer or a bigint; what it threw is the cause |
+| `JN0026` | a fresh scoring of a solve's best list differs from the search's scoring of it: a rule read state past its view, so the search's answers cannot be trusted |

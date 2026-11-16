@@ -408,7 +408,7 @@ describe('explain', () => {
 
 describe('the engine source', () => {
   const dir = new URL('../../../packages/core/src/assign/', import.meta.url);
-  const files = fs.readdirSync(dir).filter((name) => name.endsWith('.js'));
+  const files = fs.readdirSync(dir, { recursive: true }).map(String).filter((name) => name.endsWith('.js')).sort();
 
   it('reads no clock, no randomness, no locale and rounds nothing', () => {
     for (const file of files) {
@@ -418,20 +418,23 @@ describe('the engine source', () => {
     }
   });
 
-  it('imports only its own modules and the core errors, object and string helpers; only the day seam imports the calendar', () => {
+  it('imports only its own modules and the core errors, object and string helpers; only the day seam imports the calendar, and only search the seeded generator', () => {
     const calendar = ['../calendar/bind.js', '../calendar/model.js', '../calendar/resolve.js'];
+    assert.ok(files.includes('search/solve.js') && files.includes('index.js'));
     for (const file of files) {
       const text = fs.readFileSync(new URL(file, dir), 'utf8');
+      const search = file.startsWith('search/');
       for (const [, specifier] of text.matchAll(/^\s*(?:import|export)\s[^;]*?from\s+['"]([^'"]+)['"]/gm)) {
-        assert.ok(/^\.\/[a-z-]+\.js$/.test(specifier) || ['../errors.js', '../object.js', '../string.js'].includes(specifier)
-          || (file === 'days.js' && calendar.includes(specifier)), `${file} imports ${specifier}`);
-        assert.ok(file === 'days.js' || specifier !== './days.js', `${file} imports the day seam`);
+        const own = search ? /^\.\.?\/[a-z-]+\.js$/.test(specifier) : /^\.\/(search\/)?[a-z-]+\.js$/.test(specifier);
+        const core = (search ? ['../../errors.js', '../../object.js', '../../string.js', '../../random.js'] : ['../errors.js', '../object.js', '../string.js']).includes(specifier);
+        assert.ok(own || core || (file === 'days.js' && calendar.includes(specifier)), `${file} imports ${specifier}`);
+        assert.ok(file === 'days.js' || !/(^|\/)days\.js$/.test(specifier), `${file} imports the day seam`);
       }
     }
   });
 
   it('exports the mechanism and no rule', () => {
-    assert.deepStrictEqual(Object.keys(assign).sort(), ['ASSIGN_CODES', 'ASSIGN_LIMITS', 'AssignError', 'admitProblem', 'compareScores', 'createEvaluator', 'explain', 'registerRules', 'scoreAssignment']);
+    assert.deepStrictEqual(Object.keys(assign).sort(), ['ASSIGN_CODES', 'ASSIGN_LIMITS', 'AssignError', 'SOLVE_LIMITS', 'admitProblem', 'compareScores', 'createEvaluator', 'explain', 'registerRules', 'scoreAssignment', 'solve']);
   });
 });
 

@@ -12,8 +12,10 @@
  * a scoring past its limits is incomplete and claims no total; and an
  * evaluator that, after an edit or for a hypothetical one, re-evaluates
  * only the units the edit touches and answers the bytes full scoring
- * answers. Pure JSON
- * in and out, no clock, no storage. A `resource-day` rule's civil days
+ * answers; and `solve`, which proposes assignments for the open places
+ * by exhaustive enumeration (within a declared size) or a greedy fill,
+ * re-validates the proposal and says how much its status proves. Pure
+ * JSON in and out, no clock, no storage. A `resource-day` rule's civil days
  * come through `@jarenjs/core/assign/days`, so this entry carries no
  * calendar. See docs/ASSIGN.md.
  * @module
@@ -25,6 +27,7 @@ export { registerRules } from './rules.js';
 export { scoreAssignment, compareScores, ASSIGN_LIMITS } from './score.js';
 export { explain } from './explain.js';
 export { createEvaluator } from './incremental.js';
+export { solve, SOLVE_LIMITS } from './search/solve.js';
 
 /** @typedef {import('./model.js').AssignProblem} AssignProblem */
 /** @typedef {import('./model.js').AssignResource} AssignResource */
@@ -61,3 +64,11 @@ export { createEvaluator } from './incremental.js';
 /** @typedef {import('./incremental.js').AssignEdit} AssignEdit */
 /** @typedef {import('./incremental.js').EvaluatorCounts} EvaluatorCounts */
 /** @typedef {import('./explain.js').ExplainGroup} ExplainGroup */
+/** @typedef {import('./search/solve.js').SolveOptions} SolveOptions */
+/** @typedef {import('./search/solve.js').SolveBudgets} SolveBudgets */
+/** @typedef {import('./search/solve.js').SolveResult} SolveResult */
+/** @typedef {import('./search/solve.js').SolveCounts} SolveCounts */
+/** @typedef {import('./search/solve.js').SolveProvenance} SolveProvenance */
+/** @typedef {import('./search/construct.js').RankHook} RankHook */
+/** @typedef {import('./search/construct.js').RankCandidate} RankCandidate */
+/** @typedef {import('./search/construct.js').RankState} RankState */

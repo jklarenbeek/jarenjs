@@ -4,8 +4,9 @@
  * A seeded generator of its own (a 32-bit LCG; no engine or core module)
  * writes problems of at most 4 resources and 5 tasks, each with one or
  * two slots, sized so every assignment list can be enumerated, and
- * `enumerate` yields every such list: per slot, every subset of the
- * resources no larger than its count.
+ * `enumerate` yields every such list: the problem's own assignments
+ * and, per slot, every subset of the resources not already in it no
+ * larger than the room left.
  */
 
 /** @param {number} seed */
@@ -25,7 +26,18 @@ function choose(n, k) {
 }
 
 /**
- * The number of assignment lists of a problem.
+ * The resources already in one slot: the problem's own assignments,
+ * which every list of the problem keeps.
+ * @param {any} problem @param {string} task @param {string} slot
+ * @returns {string[]}
+ */
+function heldIn(problem, task, slot) {
+  return (problem.assignments ?? []).filter((/** @type {any} */ a) => a.task === task && a.slot === slot).map((/** @type {any} */ a) => a.resource);
+}
+
+/**
+ * The number of assignment lists of a problem: per slot, the sets of
+ * the resources not already in it no larger than the room it has left.
  * @param {any} problem
  * @returns {number}
  */
@@ -33,8 +45,10 @@ export function spaceOf(problem) {
   let space = 1;
   for (const task of problem.tasks)
     for (const demand of task.demands) {
+      const held = heldIn(problem, task.id, demand.slot);
+      const free = problem.resources.length - held.length;
       let ways = 0;
-      for (let k = 0; k <= Math.min(demand.count, problem.resources.length); k++) ways += choose(problem.resources.length, k);
+      for (let k = 0; k <= Math.min(demand.count - held.length, free); k++) ways += choose(free, k);
       space *= ways;
     }
   return space;
@@ -105,26 +119,34 @@ export function tinyInstance(seed) {
 }
 
 /**
- * Every assignment list of a problem: per slot, every subset of the
- * resources of at most its count.
+ * Every assignment list of a problem: the problem's own assignments
+ * and, per slot, every subset of the resources not already in it of at
+ * most the room it has left.
  * @param {any} problem
  * @returns {Generator<{ task: string, slot: string, resource: string }[]>}
  */
 export function* enumerate(problem) {
   const slots = [];
-  for (const task of problem.tasks) for (const demand of task.demands) slots.push({ task: task.id, slot: demand.slot, count: demand.count });
-  const ids = problem.resources.map((/** @type {any} */ resource) => resource.id);
-  /** @type {string[][]} */
-  const subsets = [];
-  for (let mask = 0; mask < (1 << ids.length); mask++) subsets.push(ids.filter((/** @type {string} */ _, /** @type {number} */ i) => (mask & (1 << i)) !== 0));
+  for (const task of problem.tasks)
+    for (const demand of task.demands) {
+      const held = heldIn(problem, task.id, demand.slot);
+      const free = problem.resources.map((/** @type {any} */ resource) => resource.id).filter((/** @type {string} */ id) => !held.includes(id));
+      /** @type {string[][]} */
+      const subsets = [];
+      for (let mask = 0; mask < (1 << free.length); mask++) {
+        const subset = free.filter((/** @type {string} */ _, /** @type {number} */ i) => (mask & (1 << i)) !== 0);
+        if (subset.length <= demand.count - held.length) subsets.push(subset);
+      }
+      slots.push({ task: task.id, slot: demand.slot, subsets });
+    }
+  const fixed = (problem.assignments ?? []).map((/** @type {any} */ a) => ({ task: a.task, slot: a.slot, resource: a.resource }));
   /** @param {number} at @param {{ task: string, slot: string, resource: string }[]} chosen @returns {Generator<any>} */
   function* walk(at, chosen) {
     if (at === slots.length) {
-      yield chosen.slice();
+      yield [...fixed, ...chosen];
       return;
     }
-    for (const subset of subsets) {
-      if (subset.length > slots[at].count) continue;
+    for (const subset of slots[at].subsets) {
       for (const resource of subset) chosen.push({ task: slots[at].task, slot: slots[at].slot, resource });
       yield* walk(at + 1, chosen);
       chosen.length -= subset.length;

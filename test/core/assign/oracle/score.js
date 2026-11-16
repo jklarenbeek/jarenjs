@@ -30,7 +30,8 @@
  *   penalty; with no preferences table, one unknown `missing-fact`.
  */
 
-const LEVEL = /** @type {Record<string, 'hard' | 'service' | 'soft'>} */ ({
+/** Each reference rule's level, as the oracle reads it. */
+export const LEVEL = /** @type {Record<string, 'hard' | 'service' | 'soft'>} */ ({
   'no-overlap': 'hard', 'availability-required': 'hard', 'attribute-match': 'hard',
   'min-gap-between': 'service', 'coverage-min': 'service',
   'max-sum-in-window': 'soft', 'spread-fairness': 'soft', 'avoid-preference': 'soft',
