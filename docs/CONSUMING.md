@@ -257,8 +257,8 @@ included.
 | `./node-process` | 101 | core 61, json 21, db 19 | 4.7 |
 | `./node-worker` | 101 | core 61, json 21, db 19 | 4.7 |
 | `./postgres` | 119 | core 62, db 36, json 21 | 5.1 |
-| `./query` | 132 | core 62, db 43, json 21, validate 6 | 7.4 |
-| `./relational` | 122 | core 62, db 33, json 21, validate 6 | 5.9 |
+| `./query` | 132 | core 62, db 43, json 21, validate 6 | 7.5 |
+| `./relational` | 122 | core 62, db 33, json 21, validate 6 | 6.0 |
 | `./schedules` | 44 | core 29, db 9, json 6 | 1.9 |
 | `./search` | 92 | core 66, json 21, db 5 | 4.1 |
 | `./typed` | 1 | db 1 | 0.1 |
@@ -297,7 +297,7 @@ included.
 | `.` | 87 | core 61, json 26 | 3.9 |
 | `./basic` | 3 | json 2, core 1 | 0.2 |
 | `./canonical` | 17 | core 10, json 7 | 0.9 |
-| `./formula` | 85 | core 61, json 24 | 3.8 |
+| `./formula` | 85 | core 61, json 24 | 3.7 |
 | `./formula/batch` | 86 | core 61, json 25 | 3.8 |
 | `./formula/migrate` | 88 | core 61, json 27 | 4.1 |
 | `./jslt` | 103 | core 72, json 31 | 4.1 |
